@@ -104,15 +104,26 @@ export function ProjectTriggers() {
     setTriggers((prev) => prev.filter((t) => t.id !== triggerId));
   }, []);
 
+  /**
+   * A run bumps `lastTriggeredAt`/`triggerCount` server-side before responding,
+   * and the card renders those, so the list has to re-read them. Without this
+   * the row still says "Last: 3 days ago" after a successful run.
+   */
+  const handleRan = useCallback(() => {
+    void loadTriggers();
+  }, [loadTriggers]);
+
   const {
     runNow: handleRunNow,
     togglePause: handleTogglePause,
     remove: removeTrigger,
     pendingAction,
+    announcement,
   } = useTriggerActions({
     projectId,
     applyStatus,
     onSettled: handleSettled,
+    onRan: handleRan,
     onDeleted: handleDeleted,
   });
 
@@ -184,6 +195,11 @@ export function ProjectTriggers() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
+      {/* Pause/resume succeeds silently on screen; this is how it reaches AT. */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </p>
+
       {/* Header */}
       <div className="flex items-center justify-between gap-3 flex-wrap mb-6">
         <div>

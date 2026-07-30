@@ -9,7 +9,7 @@
  *
  * Each test below is written to FAIL against the pre-fix implementation.
  */
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -176,6 +176,29 @@ describe('ProjectTriggers — resume/pause feedback', () => {
     expect(screen.getByLabelText('Status: Active')).toBeInTheDocument();
   });
 
+  it('announces the change to assistive tech even though no toast is shown', async () => {
+    // Dropping the success toast removed the app's only live region for this
+    // action. A status dot's aria-label is static and aria-busy is not
+    // reliably announced, so without an explicit live region a VoiceOver user
+    // would be worse off after this fix than before it.
+    const pending = deferred<typeof PAUSED_TRIGGER>();
+    vi.mocked(updateTrigger).mockReturnValue(pending.promise as never);
+
+    const user = userEvent.setup();
+    const { container } = renderPage();
+    await screen.findByText('Nightly Tests');
+
+    const liveRegion = container.querySelector('[aria-live="polite"].sr-only');
+    expect(liveRegion).toBeTruthy();
+    expect(liveRegion).toHaveTextContent('');
+
+    await user.click(toggleButton());
+    expect(liveRegion).toHaveTextContent('Resuming "Nightly Tests"');
+
+    pending.resolve({ ...PAUSED_TRIGGER, status: 'active' as const });
+    await waitFor(() => expect(liveRegion).toHaveTextContent('"Nightly Tests" resumed'));
+  });
+
   it('shows the action the press performs, not the current state', async () => {
     renderPage();
     await screen.findByText('Nightly Tests');
@@ -193,21 +216,44 @@ describe('ProjectTriggers — re-entrancy guard', () => {
     const pending = deferred<{ executionId: string; taskId: string }>();
     vi.mocked(runTrigger).mockReturnValue(pending.promise as never);
 
-    const user = userEvent.setup();
     renderPage();
     await screen.findByText('Nightly Tests');
 
     const runBtn = screen.getByRole('button', { name: 'Run trigger now' });
-    await user.click(runBtn);
 
-    // Each of these used to spawn a real agent task.
-    await user.click(runBtn, { pointerEventsCheck: 0 });
-    await user.click(runBtn, { pointerEventsCheck: 0 });
+    // Three rapid presses used to spawn three real agent tasks. This asserts
+    // the end-to-end guarantee only; it does NOT isolate the ref-based guard,
+    // because RTL wraps fireEvent in act(), so React re-renders and applies
+    // `disabled` between clicks and the handler is never re-entered. The guard
+    // itself is covered discriminatingly in tests/unit/hooks/use-trigger-actions.test.tsx,
+    // which calls the actions twice inside one tick.
+    fireEvent.click(runBtn);
+    fireEvent.click(runBtn);
+    fireEvent.click(runBtn);
 
     expect(runTrigger).toHaveBeenCalledTimes(1);
 
     pending.resolve({ executionId: 'exec-1', taskId: 'task-1' });
     await waitFor(() => expect(runBtn).toBeEnabled());
+  });
+
+  it('re-reads the list after a run so "Last triggered" is not stale', async () => {
+    // The server bumps lastTriggeredAt/triggerCount before responding, and the
+    // card renders them. Without a refresh the row still reads "Last: 3 days
+    // ago" after a successful run — the same "nothing happened" symptom.
+    vi.mocked(runTrigger).mockResolvedValue({
+      executionId: 'exec-1',
+      taskId: 'task-1',
+    } as never);
+
+    const user = userEvent.setup();
+    renderPage();
+    await screen.findByText('Nightly Tests');
+    expect(listTriggers).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('button', { name: 'Run trigger now' }));
+
+    await waitFor(() => expect(listTriggers).toHaveBeenCalledTimes(2));
   });
 
   it('locks sibling actions on the same trigger while one is in flight', async () => {

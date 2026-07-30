@@ -43,6 +43,16 @@ export interface TriggerActions {
   remove: (trigger: TriggerResponse) => void;
   /** The action currently in flight for this trigger, if any. */
   pendingAction: (triggerId: string) => TriggerActionKind | null;
+  /**
+   * Text for the caller's `sr-only` + `aria-live="polite"` region.
+   *
+   * Pause/resume succeeds silently on screen, so without this the change would
+   * be announced to nobody: a status dot's `aria-label` is a static attribute
+   * on a non-live element, and neither it nor `aria-busy` is reliably
+   * announced. Toasts are the app's only live region, so dropping the success
+   * toast would otherwise leave screen reader users worse off than before.
+   */
+  announcement: string;
 }
 
 /**
@@ -74,6 +84,7 @@ export function useTriggerActions({
 }: UseTriggerActionsOptions): TriggerActions {
   const toast = useToast();
   const [pending, setPending] = useState<Record<string, TriggerActionKind>>({});
+  const [announcement, setAnnouncement] = useState('');
 
   // Mirrors `pending` for synchronous reads. Two taps inside the same tick both
   // observe the pre-update state variable, so the guard has to read a ref.
@@ -97,17 +108,21 @@ export function useTriggerActions({
     (trigger: TriggerResponse) => {
       if (!begin(trigger.id, 'run')) return;
       void (async () => {
+        let ran = false;
         try {
           await runTrigger(projectId, trigger.id);
           toast.success(`"${trigger.name}" triggered`);
-          // The run has been accepted and the execution row now exists, so a
-          // refresh here reads back the new execution rather than the stale list.
-          onRan?.(trigger.id);
+          ran = true;
         } catch (err) {
           toast.error(errorMessage(err, `Failed to run "${trigger.name}"`));
         } finally {
           end(trigger.id);
         }
+        // Consumer callbacks run OUTSIDE the try: a throwing callback must not
+        // be caught here and reported to the user as a failed mutation.
+        // The run has been accepted and the execution row now exists, so the
+        // caller re-reads it rather than the stale pre-run list.
+        if (ran) onRan?.(trigger.id);
       })();
     },
     [projectId, toast, onRan, begin, end]
@@ -121,14 +136,18 @@ export function useTriggerActions({
 
       // Optimistic: flip before the request so the tap has an immediate effect.
       applyStatus(trigger.id, nextStatus);
+      setAnnouncement(`${nextStatus === 'active' ? 'Resuming' : 'Pausing'} "${trigger.name}"`);
 
       void (async () => {
+        let settled: TriggerResponse | null = null;
         try {
           const data: UpdateTriggerRequest = { status: nextStatus };
-          const updated = await updateTrigger(projectId, trigger.id, data);
-          onSettled?.(updated);
+          settled = await updateTrigger(projectId, trigger.id, data);
+          setAnnouncement(`"${trigger.name}" ${nextStatus === 'active' ? 'resumed' : 'paused'}`);
         } catch (err) {
           applyStatus(trigger.id, previousStatus); // roll back
+          // The error toast is itself a live region, so it announces the failure.
+          setAnnouncement('');
           toast.error(
             errorMessage(
               err,
@@ -138,6 +157,7 @@ export function useTriggerActions({
         } finally {
           end(trigger.id);
         }
+        if (settled) onSettled?.(settled);
       })();
     },
     [projectId, toast, applyStatus, onSettled, begin, end]
@@ -147,15 +167,17 @@ export function useTriggerActions({
     (trigger: TriggerResponse) => {
       if (!begin(trigger.id, 'delete')) return;
       void (async () => {
+        let deleted = false;
         try {
           await deleteTrigger(projectId, trigger.id);
           toast.success(`"${trigger.name}" deleted`);
-          onDeleted?.(trigger.id);
+          deleted = true;
         } catch (err) {
           toast.error(errorMessage(err, `Failed to delete "${trigger.name}"`));
         } finally {
           end(trigger.id);
         }
+        if (deleted) onDeleted?.(trigger.id);
       })();
     },
     [projectId, toast, onDeleted, begin, end]
@@ -166,5 +188,5 @@ export function useTriggerActions({
     [pending]
   );
 
-  return { runNow, togglePause, remove, pendingAction };
+  return { runNow, togglePause, remove, pendingAction, announcement };
 }

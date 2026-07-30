@@ -1061,8 +1061,18 @@ test.describe('Trigger action feedback', () => {
     }));
     await page.mouse.up();
 
-    // scale(0.97) serialises as a matrix; brightness is the reduced-motion-safe cue.
-    expect(pressed.transform).toContain('matrix');
+    // The brightness cue is unconditional — that is the point of putting it
+    // outside the reduced-motion gate, so assert it either way.
     expect(pressed.filter).toContain('brightness');
+
+    // The scale only exists under prefers-reduced-motion: no-preference, so
+    // gate the assertion on the same query rather than on the runner's default.
+    const motionAllowed = await page.evaluate(
+      () => window.matchMedia('(prefers-reduced-motion: no-preference)').matches
+    );
+    if (motionAllowed) {
+      // scale(0.97) serialises as a matrix.
+      expect(pressed.transform).toContain('matrix');
+    }
   });
 });

@@ -124,7 +124,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
             ref={menuBtnRef}
             onClick={() => setMenuOpen(!menuOpen)}
             onBlur={() => setTimeout(() => setMenuOpen(false), 200)}
-            className={`sam-pressable p-1.5 rounded-sm text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none ${FOCUS_RING}`}
+            className={`sam-pressable transition-all duration-100 ease-out p-1.5 rounded-sm text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none ${FOCUS_RING}`}
             aria-label="Trigger actions"
             aria-expanded={menuOpen}
           >
@@ -150,7 +150,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
                     setMenuOpen(false);
                     onEdit(trigger);
                   }}
-                  className="sam-pressable w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
+                  className="sam-pressable transition-all duration-100 ease-out w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
                 >
                   Edit
                 </button>
@@ -159,7 +159,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
                     setMenuOpen(false);
                     onRunNow(trigger);
                   }}
-                  className="sam-pressable w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
+                  className="sam-pressable transition-all duration-100 ease-out w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
                   disabled={trigger.status === 'disabled' || anyPending}
                 >
                   {runPending ? 'Running…' : 'Run Now'}
@@ -169,7 +169,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
                     setMenuOpen(false);
                     onTogglePause(trigger);
                   }}
-                  className="sam-pressable w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
+                  className="sam-pressable transition-all duration-100 ease-out w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
                   disabled={anyPending}
                 >
                   {isPaused ? 'Resume' : 'Pause'}
@@ -179,7 +179,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
                     setMenuOpen(false);
                     onViewHistory(trigger);
                   }}
-                  className="sam-pressable w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
+                  className="sam-pressable transition-all duration-100 ease-out w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
                 >
                   View History
                 </button>
@@ -192,7 +192,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
                         onDelete(trigger);
                       }}
                       disabled={anyPending}
-                      className="sam-pressable w-full text-left px-3 py-2 text-sm text-danger hover:bg-surface-hover cursor-pointer bg-transparent border-none flex items-center gap-2"
+                      className="sam-pressable transition-all duration-100 ease-out w-full text-left px-3 py-2 text-sm text-danger hover:bg-surface-hover cursor-pointer bg-transparent border-none flex items-center gap-2"
                     >
                       <Trash2 size={14} aria-hidden="true" />
                       Delete
@@ -253,7 +253,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
           onClick={() => onRunNow(trigger)}
           disabled={trigger.status === 'disabled' || anyPending}
           loading={runPending}
-          className={`gap-1.5 hover:bg-surface-hover ${FOCUS_RING}`}
+          className={`hover:bg-surface-hover ${FOCUS_RING}`}
           aria-label="Run trigger now"
         >
           {!runPending && <Play size={12} aria-hidden="true" />}
@@ -265,7 +265,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
           onClick={() => onTogglePause(trigger)}
           disabled={anyPending}
           loading={togglePending}
-          className={`gap-1.5 hover:bg-surface-hover ${FOCUS_RING}`}
+          className={`hover:bg-surface-hover ${FOCUS_RING}`}
           aria-label={isPaused ? 'Resume trigger' : 'Pause trigger'}
         >
           {/* Icon reflects the action the press performs, not the current state.
@@ -282,7 +282,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
           variant="ghost"
           size="xs"
           onClick={() => onViewHistory(trigger)}
-          className={`gap-1.5 text-fg-muted hover:text-fg-primary hover:bg-surface-hover ml-auto ${FOCUS_RING}`}
+          className={`text-fg-muted hover:text-fg-primary hover:bg-surface-hover ml-auto ${FOCUS_RING}`}
         >
           View History
         </Button>

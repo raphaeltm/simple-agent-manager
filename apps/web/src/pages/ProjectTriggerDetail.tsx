@@ -140,9 +140,16 @@ export function ProjectTriggerDetail() {
     setTrigger((prev) => (prev ? { ...prev, status } : prev));
   }, []);
 
-  const handleSettled = useCallback((updated: TriggerResponse) => {
-    setTrigger(updated);
-  }, []);
+  const handleSettled = useCallback(
+    (updated: TriggerResponse) => {
+      // The detail route carries no `key`, so a triggerId change reuses this
+      // instance; without this guard a settle for the previous trigger would
+      // replace the one now on screen.
+      if (updated.id !== triggerId) return;
+      setTrigger(updated);
+    },
+    [triggerId]
+  );
 
   const handleDeleted = useCallback(() => {
     navigate(`/projects/${projectId}/triggers`);
@@ -152,7 +159,7 @@ export function ProjectTriggerDetail() {
     loadExecutions(null).catch(() => undefined);
   }, [loadExecutions]);
 
-  const { runNow, togglePause, remove, pendingAction } = useTriggerActions({
+  const { runNow, togglePause, remove, pendingAction, announcement } = useTriggerActions({
     projectId,
     applyStatus,
     onSettled: handleSettled,
@@ -240,10 +247,15 @@ export function ProjectTriggerDetail() {
 
   return (
     <div className="max-w-3xl mx-auto px-4 py-6">
+      {/* Pause/resume succeeds silently on screen; this is how it reaches AT. */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </p>
+
       {/* Back link */}
       <button
         onClick={() => navigate(`/projects/${projectId}/triggers`)}
-        className={`sam-pressable inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg-primary mb-4 bg-transparent border-none cursor-pointer p-0 ${FOCUS_RING}`}
+        className={`sam-pressable transition-all duration-100 ease-out inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg-primary mb-4 bg-transparent border-none cursor-pointer p-0 ${FOCUS_RING}`}
       >
         <ArrowLeft size={14} aria-hidden="true" />
         Back to triggers
@@ -285,7 +297,7 @@ export function ProjectTriggerDetail() {
             onClick={handleRunNow}
             disabled={trigger.status === 'disabled' || anyPending}
             loading={runPending}
-            className={`gap-1.5 hover:bg-surface-hover ${FOCUS_RING}`}
+            className={`hover:bg-surface-hover ${FOCUS_RING}`}
             aria-label="Run now"
           >
             {!runPending && <Play size={14} aria-hidden="true" />}
@@ -297,7 +309,7 @@ export function ProjectTriggerDetail() {
             onClick={handleTogglePause}
             disabled={anyPending}
             loading={togglePending}
-            className={`gap-1.5 hover:bg-surface-hover ${FOCUS_RING}`}
+            className={`hover:bg-surface-hover ${FOCUS_RING}`}
             aria-label={isPaused ? 'Resume' : 'Pause'}
           >
             {/* Icon reflects the action the press performs, not the current state. */}
@@ -313,7 +325,8 @@ export function ProjectTriggerDetail() {
             variant="ghost"
             size="sm"
             onClick={() => setFormOpen(true)}
-            className={`gap-1.5 hover:bg-surface-hover ${FOCUS_RING}`}
+            disabled={anyPending}
+            className={`hover:bg-surface-hover ${FOCUS_RING}`}
             aria-label="Edit trigger"
           >
             <Pencil size={14} aria-hidden="true" />
@@ -325,7 +338,7 @@ export function ProjectTriggerDetail() {
             onClick={() => setConfirmDelete(true)}
             disabled={anyPending}
             loading={deletePending}
-            className={`gap-1.5 border-danger/30 text-danger hover:bg-danger/10 ${FOCUS_RING}`}
+            className={`border-danger/30 text-danger hover:bg-danger/10 ${FOCUS_RING}`}
             aria-label="Delete trigger"
           >
             {!deletePending && <Trash2 size={14} aria-hidden="true" />}

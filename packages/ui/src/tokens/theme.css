@@ -538,12 +538,16 @@
    The brightness shift is deliberately OUTSIDE the reduced-motion gate so the
    press still registers when motion is suppressed; only the scale is gated.
    Tap highlight is suppressed because the browser default paints a grey box
-   over the top of (and out of sync with) this affordance. */
+   over the top of (and out of sync with) this affordance.
+
+   Deliberately sets NO transition. This file is unlayered while Tailwind
+   utilities sit in @layer utilities, so anything declared here beats them
+   regardless of source order — a `transition` shorthand here would silently
+   reset `transition-all` on every consumer (the shared Button included) and
+   snap all of its colour/opacity easing. Consumers bring their own transition;
+   `transition-property: all` already covers transform and filter. */
 .sam-pressable {
   -webkit-tap-highlight-color: transparent;
-  transition:
-    transform 100ms ease-out,
-    filter 100ms ease-out;
 }
 
 .sam-pressable:not(:disabled):not([aria-disabled='true']):active {
