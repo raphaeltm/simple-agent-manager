@@ -39,6 +39,6 @@
 
 ## Validation log
 
-- 2026-07-30: `.env.example` contains no `PLATFORM_FEEDBACK_PROJECT_ID` or `REPORT_ISSUE_*` entries; no duplicate cleanup needed.
+- 2026-07-30: Root `.env.example` contains no `PLATFORM_FEEDBACK_PROJECT_ID` or `REPORT_ISSUE_*` entries. Follow-up review found `apps/api/.env.example` still duplicated `PLATFORM_FEEDBACK_PROJECT_ID`; removed the stale triage-block duplicate and kept the canonical Report Issue / Platform Feedback entry.
 - 2026-07-30: `pnpm --filter @simple-agent-manager/api test -- tests/unit/report-issue.test.ts tests/unit/routes/report-issue.test.ts` passed (23 tests). Existing Report Issue service tests preserve trust-boundary/PAT redaction behavior.
 - 2026-07-30: `pnpm vitest run scripts/quality/sync-wrangler-config.test.ts scripts/quality/deploy-reusable-workflow.test.ts` passed (33 tests).
