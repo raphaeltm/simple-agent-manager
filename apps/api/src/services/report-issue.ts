@@ -10,9 +10,41 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import { sanitizeUserInput } from '../routes/mcp/_helpers';
+
+type FeedbackProject = { id: string; userId: string };
+
+function getConfiguredFeedbackProjectId(env: Env): string | undefined {
+  const projectId = env.PLATFORM_FEEDBACK_PROJECT_ID?.trim();
+  return projectId || undefined;
+}
+
+export async function getConfiguredFeedbackProject(env: Env): Promise<FeedbackProject | undefined> {
+  const feedbackProjectId = getConfiguredFeedbackProjectId(env);
+  if (!feedbackProjectId) return undefined;
+
+  const db = drizzle(env.DATABASE, { schema });
+  const project = await db
+    .select({ id: schema.projects.id, userId: schema.projects.userId })
+    .from(schema.projects)
+    .where(eq(schema.projects.id, feedbackProjectId))
+    .get();
+
+  return project;
+}
+
+export async function isReportEnabled(env: Env): Promise<boolean> {
+  return Boolean(await getConfiguredFeedbackProject(env));
+}
+
+function logMissingFeedbackProject(projectId: string): void {
+  log.error('report_issue.feedback_project_missing', {
+    configuredProjectIdLength: projectId.length,
+  });
+}
 
 function parsePositiveInt(val: string | undefined, fallback: number): number {
   if (!val) return fallback;
@@ -29,7 +61,7 @@ function parsePositiveInt(val: string | undefined, fallback: number): number {
 async function validateRefs(
   db: ReturnType<typeof drizzle>,
   userId: string,
-  refs: ReportIssueRefs,
+  refs: ReportIssueRefs
 ): Promise<{ authorized: ReportIssueRefs; authorizedKeys: string[] }> {
   const authorized: ReportIssueRefs = {};
   const authorizedKeys: string[] = [];
@@ -44,8 +76,8 @@ async function validateRefs(
         and(
           eq(schema.projectMembers.projectId, schema.projects.id),
           eq(schema.projectMembers.userId, userId),
-          eq(schema.projectMembers.status, 'active'),
-        ),
+          eq(schema.projectMembers.status, 'active')
+        )
       )
       .where(eq(schema.tasks.id, refs.taskId))
       .get();
@@ -62,8 +94,8 @@ async function validateRefs(
       .where(
         and(
           eq(schema.workspaces.chatSessionId, refs.sessionId),
-          eq(schema.workspaces.userId, userId),
-        ),
+          eq(schema.workspaces.userId, userId)
+        )
       )
       .get();
     if (ws) {
@@ -96,8 +128,8 @@ async function validateRefs(
       .where(
         and(
           eq(schema.debugDiagnoses.id, refs.diagnosisId),
-          eq(schema.debugDiagnoses.createdBy, userId),
-        ),
+          eq(schema.debugDiagnoses.createdBy, userId)
+        )
       )
       .get();
     if (diagnosis) {
@@ -128,7 +160,7 @@ function redactSecrets(text: string): string {
 function buildIdeaContent(
   description: string,
   authorized: ReportIssueRefs,
-  authorizedKeys: string[],
+  authorizedKeys: string[]
 ): string {
   const sections: string[] = [];
 
@@ -164,31 +196,27 @@ export async function submitReport(
   title: string,
   description: string,
   consentToAttachRefs: boolean,
-  refs?: ReportIssueRefs,
+  refs?: ReportIssueRefs
 ): Promise<ReportIssueResponse> {
-  const feedbackProjectId = env.PLATFORM_FEEDBACK_PROJECT_ID;
+  const feedbackProjectId = getConfiguredFeedbackProjectId(env);
   if (!feedbackProjectId) {
     throw errors.notFound('Report issue feature is not configured');
   }
 
   const db = drizzle(env.DATABASE, { schema });
-
-  const project = await db
-    .select({ id: schema.projects.id, userId: schema.projects.userId })
-    .from(schema.projects)
-    .where(eq(schema.projects.id, feedbackProjectId))
-    .get();
+  const project = await getConfiguredFeedbackProject(env);
   if (!project) {
-    throw errors.internal('Feedback project not found — check PLATFORM_FEEDBACK_PROJECT_ID');
+    logMissingFeedbackProject(feedbackProjectId);
+    throw errors.internal('Report issue feature is temporarily unavailable');
   }
 
   const titleMaxLen = parsePositiveInt(
     env.REPORT_ISSUE_TITLE_MAX_LENGTH,
-    DEFAULT_REPORT_ISSUE_TITLE_MAX_LENGTH,
+    DEFAULT_REPORT_ISSUE_TITLE_MAX_LENGTH
   );
   const descMaxLen = parsePositiveInt(
     env.REPORT_ISSUE_DESCRIPTION_MAX_LENGTH,
-    DEFAULT_REPORT_ISSUE_DESCRIPTION_MAX_LENGTH,
+    DEFAULT_REPORT_ISSUE_DESCRIPTION_MAX_LENGTH
   );
 
   const sanitizedTitle = redactSecrets(sanitizeUserInput(title.trim())).slice(0, titleMaxLen);
@@ -209,7 +237,7 @@ export async function submitReport(
 
   const contentMaxLen = parsePositiveInt(
     env.REPORT_ISSUE_CONTENT_MAX_LENGTH,
-    DEFAULT_REPORT_ISSUE_CONTENT_MAX_LENGTH,
+    DEFAULT_REPORT_ISSUE_CONTENT_MAX_LENGTH
   );
 
   await db.insert(schema.tasks).values({
@@ -232,12 +260,9 @@ export async function submitReport(
     status: 'draft',
     refsAttached: authorizedKeys.length > 0,
     attachedRefKeys: authorizedKeys,
-    message: authorizedKeys.length > 0
-      ? `Report submitted with ${authorizedKeys.length} technical reference(s) attached.`
-      : 'Report submitted without technical references.',
+    message:
+      authorizedKeys.length > 0
+        ? `Report submitted with ${authorizedKeys.length} technical reference(s) attached.`
+        : 'Report submitted without technical references.',
   };
-}
-
-export function isReportEnabled(env: Env): boolean {
-  return !!env.PLATFORM_FEEDBACK_PROJECT_ID;
 }

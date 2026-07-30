@@ -36,12 +36,25 @@ vi.mock('../../src/db/schema', () => ({
   projects: { id: 'projects.id', userId: 'projects.userId' },
   projectMembers: { projectId: 'pm.projectId', userId: 'pm.userId', status: 'pm.status' },
   nodes: { id: 'nodes.id', userId: 'nodes.userId' },
-  workspaces: { id: 'workspaces.id', chatSessionId: 'workspaces.chatSessionId', userId: 'workspaces.userId' },
+  workspaces: {
+    id: 'workspaces.id',
+    chatSessionId: 'workspaces.chatSessionId',
+    userId: 'workspaces.userId',
+  },
   debugDiagnoses: { id: 'debugDiagnoses.id', createdBy: 'debugDiagnoses.createdBy' },
 }));
 
 vi.mock('../../src/lib/ulid', () => ({
   ulid: () => 'test-idea-id-123',
+}));
+
+vi.mock('../../src/lib/logger', () => ({
+  log: {
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  },
 }));
 
 vi.mock('../../src/routes/mcp/_helpers', () => ({
@@ -58,16 +71,34 @@ function makeEnv(overrides: Record<string, string | undefined> = {}): any {
 }
 
 describe('isReportEnabled', () => {
-  it('returns true when PLATFORM_FEEDBACK_PROJECT_ID is set', () => {
-    expect(isReportEnabled(makeEnv())).toBe(true);
+  beforeEach(() => {
+    vi.clearAllMocks();
   });
 
-  it('returns false when PLATFORM_FEEDBACK_PROJECT_ID is unset', () => {
-    expect(isReportEnabled(makeEnv({ PLATFORM_FEEDBACK_PROJECT_ID: undefined }))).toBe(false);
+  it('returns false when PLATFORM_FEEDBACK_PROJECT_ID is unset', async () => {
+    await expect(
+      isReportEnabled(makeEnv({ PLATFORM_FEEDBACK_PROJECT_ID: undefined }))
+    ).resolves.toBe(false);
+    expect(mockGet).not.toHaveBeenCalled();
   });
 
-  it('returns false when PLATFORM_FEEDBACK_PROJECT_ID is empty', () => {
-    expect(isReportEnabled(makeEnv({ PLATFORM_FEEDBACK_PROJECT_ID: '' }))).toBe(false);
+  it('returns false when PLATFORM_FEEDBACK_PROJECT_ID is empty', async () => {
+    await expect(isReportEnabled(makeEnv({ PLATFORM_FEEDBACK_PROJECT_ID: '' }))).resolves.toBe(
+      false
+    );
+    expect(mockGet).not.toHaveBeenCalled();
+  });
+
+  it('returns false when PLATFORM_FEEDBACK_PROJECT_ID points at a missing project', async () => {
+    mockGet.mockResolvedValueOnce(undefined);
+
+    await expect(isReportEnabled(makeEnv())).resolves.toBe(false);
+  });
+
+  it('returns true when PLATFORM_FEEDBACK_PROJECT_ID points at an existing project', async () => {
+    mockGet.mockResolvedValueOnce({ id: 'feedback-project-1', userId: 'owner-1' });
+
+    await expect(isReportEnabled(makeEnv())).resolves.toBe(true);
   });
 });
 
@@ -83,16 +114,19 @@ describe('submitReport', () => {
         'user-1',
         'Title',
         'Description',
-        false,
-      ),
+        false
+      )
     ).rejects.toThrow('Report issue feature is not configured');
   });
 
-  it('throws when feedback project not found', async () => {
+  it('returns a safe error and does not create an Idea when feedback project is missing', async () => {
     mockGet.mockResolvedValueOnce(undefined);
-    await expect(
-      submitReport(makeEnv(), 'user-1', 'Title', 'Description', false),
-    ).rejects.toThrow('Feedback project not found');
+
+    await expect(submitReport(makeEnv(), 'user-1', 'Title', 'Description', false)).rejects.toThrow(
+      'Report issue feature is temporarily unavailable'
+    );
+
+    expect(mockInsert).not.toHaveBeenCalled();
   });
 
   it('creates a draft idea without refs when consent is false', async () => {
@@ -104,7 +138,7 @@ describe('submitReport', () => {
       'Bug in session',
       'Something broke',
       false,
-      { sessionId: 'session-1' },
+      { sessionId: 'session-1' }
     );
 
     expect(result.ideaId).toBe('test-idea-id-123');
@@ -125,7 +159,7 @@ describe('submitReport', () => {
       'Bug report',
       'Something is wrong',
       true,
-      { taskId: 'task-1' },
+      { taskId: 'task-1' }
     );
 
     expect(result.refsAttached).toBe(true);
@@ -144,7 +178,7 @@ describe('submitReport', () => {
       'Bug report',
       'Description',
       true,
-      { taskId: 'victim-task-1' },
+      { taskId: 'victim-task-1' }
     );
 
     expect(result.refsAttached).toBe(false);
@@ -179,7 +213,7 @@ describe('submitReport', () => {
       'user-1',
       'Error with api_key: sk-abc123def456789xyz',
       'My password is: secret123 and token=ghp_abcdefghijklmnop',
-      false,
+      false
     );
 
     expect(result.ideaId).toBe('test-idea-id-123');
@@ -207,7 +241,7 @@ describe('submitReport', () => {
       'user-1',
       'This is a long title that should be truncated',
       'This is a long description that should be truncated too',
-      false,
+      false
     );
 
     expect(result.ideaId).toBe('test-idea-id-123');
@@ -216,14 +250,9 @@ describe('submitReport', () => {
   it('attaches errorId without ownership check (opaque client ref)', async () => {
     mockGet.mockResolvedValueOnce({ id: 'feedback-project-1', userId: 'owner-1' });
 
-    const result = await submitReport(
-      makeEnv(),
-      'user-1',
-      'Error report',
-      'Got an error',
-      true,
-      { errorId: 'err-123' },
-    );
+    const result = await submitReport(makeEnv(), 'user-1', 'Error report', 'Got an error', true, {
+      errorId: 'err-123',
+    });
 
     expect(result.refsAttached).toBe(true);
     expect(result.attachedRefKeys).toContain('errorId');
@@ -240,7 +269,7 @@ describe('submitReport', () => {
       'Diagnosis report',
       'Found something',
       true,
-      { diagnosisId: 'diag-456' },
+      { diagnosisId: 'diag-456' }
     );
 
     expect(result.refsAttached).toBe(true);
@@ -258,7 +287,7 @@ describe('submitReport', () => {
       'Stolen diagnosis',
       'Trying to reference another user diagnosis',
       true,
-      { diagnosisId: 'victim-diag-789' },
+      { diagnosisId: 'victim-diag-789' }
     );
 
     expect(result.refsAttached).toBe(false);

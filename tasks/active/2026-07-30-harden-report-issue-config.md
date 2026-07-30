@@ -16,19 +16,19 @@
 
 ## Implementation Checklist
 
-- [ ] Add a small service helper to resolve the configured feedback project from D1.
-- [ ] Make config route asynchronous and return `{ enabled: false }` when the env var is absent, blank, or points at a missing project.
-- [ ] Keep `POST /api/report-issue` fail-closed:
-  - [ ] Missing env still returns not configured.
-  - [ ] Missing/invalid configured project returns a safe regular-user error.
-  - [ ] Server-side logs include enough context for maintainers without exposing secrets in API responses.
-  - [ ] No Idea is inserted for invalid config.
-- [ ] Preserve `ReportIssueConfig` shape.
-- [ ] Extend unit tests:
-  - [ ] no env -> disabled
-  - [ ] invalid env/project missing -> disabled
-  - [ ] valid env/project present -> enabled
-  - [ ] invalid env POST does not create an Idea and returns a safe error
+- [x] Add a small service helper to resolve the configured feedback project from D1.
+- [x] Make config route asynchronous and return `{ enabled: false }` when the env var is absent, blank, or points at a missing project.
+- [x] Keep `POST /api/report-issue` fail-closed:
+  - [x] Missing env still returns not configured.
+  - [x] Missing/invalid configured project returns a safe regular-user error.
+  - [x] Server-side logs include enough context for maintainers without exposing secrets in API responses.
+  - [x] No Idea is inserted for invalid config.
+- [x] Preserve `ReportIssueConfig` shape.
+- [x] Extend unit tests:
+  - [x] no env -> disabled
+  - [x] invalid env/project missing -> disabled
+  - [x] valid env/project present -> enabled
+  - [x] invalid env POST does not create an Idea and returns a safe error
 
 ## Acceptance Criteria
 
