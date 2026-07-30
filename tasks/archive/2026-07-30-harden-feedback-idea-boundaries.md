@@ -1,5 +1,9 @@
 # Harden feedback Idea instruction boundaries
 
+## Closure Note
+
+PR #1702 merged to main at `403c1bd0f89dfffc395f4ba4acdf9bdb84771ef9` before the final validation/review/PR checklist items in this task record were checked. The remaining hotfix issues found after that merge are tracked and addressed by `tasks/active/2026-07-30-feedback-idea-metadata-hotfix.md`; this record is archived so merged work does not remain active with stale unchecked gates.
+
 ## Problem
 
 Report Issue and platform feedback triage create draft Ideas in the maintainer feedback project from externally sourced data. Draft status and project permissions gate execution, but a maintainer can later promote/run an Idea and the agent can retrieve its full content through MCP `get_idea`. The current report Idea text labels the content as untrusted but leaves the user description as ordinary Markdown, so malicious text can read like task instructions.
