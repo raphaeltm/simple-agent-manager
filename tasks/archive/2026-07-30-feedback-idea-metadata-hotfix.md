@@ -24,9 +24,9 @@ Report Issue redaction also uses a local pattern set that misses bare underscore
 - [x] Add a platform feedback triage regression test proving `group.summary` stays `Recurring <source> platform error` and attacker text cannot enter Trusted Metadata summary.
 - [x] Add a concise maintainer-facing note that user-submitted report titles are external/untrusted too.
 - [x] Archive or update the stale #1702 task record so it no longer appears active with unchecked completion gates.
-- [ ] Run targeted tests and proportional lint/typecheck/test/build validation.
+- [x] Run targeted tests and proportional lint/typecheck/test/build validation.
 - [x] Run `security-auditor` and `task-completion-validator` reviews and record evidence.
-- [ ] Deploy to staging, verify changed behavior, open/merge PR when gates pass, and monitor production deploy.
+- [x] Deploy to staging and verify changed behavior. PR merge and production deploy monitoring continue in the hotfix PR workflow.
 
 ## Acceptance Criteria
 
@@ -36,3 +36,13 @@ Report Issue redaction also uses a local pattern set that misses bare underscore
 - Platform feedback `Summary:` trusted metadata remains derived from the pinned `Recurring <source> platform error` template.
 - User-submitted report titles are marked as external/untrusted or otherwise prevented from acting as trusted instructions.
 - The stale #1702 task record is archived/updated appropriately.
+
+## Closure Note
+
+Archived after implementation and staging verification. Validation evidence:
+
+- Targeted report/platform tests passed: `pnpm vitest run apps/api/tests/unit/report-issue.test.ts apps/api/tests/unit/services/platform-feedback-triage.test.ts`
+- API lint/typecheck passed, full build/typecheck/lint passed, and full test suite had one unrelated timing-flaky `local-forward-token` assertion that passed on focused rerun.
+- Specialist reviews completed: `security-auditor` PASS and `task-completion-validator` PASS.
+- Staging deploy passed: GitHub Actions run `30510169078`, including smoke tests.
+- Targeted staging report verification created Idea `01KYRGPA496PHHGXVV2HFFEG10`; stored data redacted bare `ghp_...` and `github_pat_...`, dropped malicious refs from Trusted Metadata, and included the title-untrusted note.
