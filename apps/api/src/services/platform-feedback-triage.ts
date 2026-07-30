@@ -10,6 +10,7 @@ import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
 import { runDebugDiagnosis, SCHEDULED_TRIAGE_DEBUG_FEATURE_KEY } from './debug-agent';
 import { redactSensitiveData } from './observability';
+import { formatUntrustedIdeaContent } from './untrusted-idea-content';
 
 export type FeedbackTriageTrigger = 'cron' | 'manual';
 export interface FeedbackTriageResult {
@@ -105,13 +106,25 @@ function ideaDescription(group: FeedbackErrorGroup, diagnosisId: string): string
   const refs = group.evidence
     .map((item) => `- ${item.errorId} at ${new Date(item.timestamp).toISOString()}`)
     .join('\n');
-  return (
-    `Automated platform feedback triage (untrusted source; allowlisted metadata only).\n\n` +
-    `Signature ref: ${group.signature.slice(0, 16)}\nSource: ${group.source}\n` +
-    `Window: ${new Date(group.firstSeenAt).toISOString()} – ${new Date(group.lastSeenAt).toISOString()}\n` +
-    `Matching errors in latest window: ${group.count}\n\nSummary: ${group.summary}\n` +
-    `Persisted diagnosis ref: ${diagnosisId}\n\nBounded evidence references:\n${refs}`
-  );
+
+  return formatUntrustedIdeaContent({
+    trustedSummary:
+      'Triage this automated platform feedback report. Raw observability messages were normalized/redacted before grouping; only allowlisted bounded metadata is stored below.',
+    trustedDetails: [
+      `Signature ref: ${group.signature.slice(0, 16)}`,
+      `Persisted diagnosis ref: ${diagnosisId}`,
+      `Summary: ${group.summary}`,
+    ],
+    evidenceLabel: 'Platform Feedback Metadata and Evidence Refs',
+    evidence: [
+      `Source: ${group.source}`,
+      `Window: ${new Date(group.firstSeenAt).toISOString()} – ${new Date(group.lastSeenAt).toISOString()}`,
+      `Matching errors in latest window: ${group.count}`,
+      '',
+      'Bounded evidence references:',
+      refs || '- none',
+    ].join('\n'),
+  });
 }
 export async function runPlatformFeedbackTriage(
   env: Env,
