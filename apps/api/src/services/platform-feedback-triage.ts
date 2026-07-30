@@ -2,6 +2,7 @@ import {
   DEFAULT_PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS,
   DEFAULT_PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT,
   DEFAULT_PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT,
+  DEFAULT_PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH,
   DEFAULT_PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT,
   DEFAULT_PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES,
   DEFAULT_PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES,
@@ -49,7 +50,7 @@ function positive(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? '', 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
-function sanitizeFailureReason(cause: unknown): string {
+function sanitizeFailureReason(cause: unknown, maxLength: number): string {
   const raw = cause instanceof Error ? cause.message : String(cause);
   const redacted = String(redactSensitiveData(raw || 'unknown triage failure'))
     .replace(/https?:\/\/\S+/g, '[url]')
@@ -59,7 +60,7 @@ function sanitizeFailureReason(cause: unknown): string {
     .replace(/\b01[a-z0-9]{24}\b/gi, '[id]')
     .replace(/\s+/g, ' ')
     .trim();
-  return (redacted || 'unknown triage failure').slice(0, 240);
+  return (redacted || 'unknown triage failure').slice(0, maxLength);
 }
 function normalizeMessage(message: string): string {
   return String(redactSensitiveData(message))
@@ -213,6 +214,10 @@ export async function runPlatformFeedbackTriage(
     env.PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES,
     DEFAULT_PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES
   );
+  const failureReasonMaxLength = positive(
+    env.PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH,
+    DEFAULT_PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH
+  );
   const query = await env.OBSERVABILITY_DATABASE.prepare(
     'SELECT id, source, message, timestamp FROM platform_errors WHERE level = ? AND timestamp BETWEEN ? AND ? ORDER BY timestamp DESC LIMIT ?'
   )
@@ -365,7 +370,7 @@ export async function runPlatformFeedbackTriage(
         throw new Error('Platform feedback triage claim commit was inconsistent');
       }
     } catch (cause) {
-      const reason = sanitizeFailureReason(cause);
+      const reason = sanitizeFailureReason(cause, failureReasonMaxLength);
       const marked = await recordGroupFailure(
         env,
         group.signature,

@@ -28,7 +28,7 @@ Platform feedback triage currently treats each sweep as a mostly linear unit of 
 - [x] Add/adjust unit tests for per-group failure isolation, stale claim recovery/failure marking across two sweeps, and sanitized cron/manual diagnostics.
 - [x] Run focused platform feedback triage tests.
 - [x] Run API lint/typecheck and proportional repo validation.
-- [ ] Run Cloudflare/D1 and security review checks before finalizing.
+- [x] Run Cloudflare/D1 and security review checks before finalizing.
 
 ## Acceptance Criteria
 

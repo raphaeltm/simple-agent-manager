@@ -175,6 +175,19 @@ The service-account JWT bearer flow always uses `https://oauth2.googleapis.com/t
 
 The `/admin/errors` view remains superadmin-only and may show local user IDs, IP addresses, and user-agent strings. Before any tool result enters model context, SAM recursively removes those fields plus credential-shaped values such as API tokens, JWTs, authorization headers, private keys, and long secret-like strings. Cloudflare credentials stay server-side and are never included in model messages or saved diagnosis text.
 
+### Platform Feedback Triage
+
+| Variable                                             | Default | Description                                                           |
+| ---------------------------------------------------- | ------- | --------------------------------------------------------------------- |
+| `PLATFORM_FEEDBACK_PROJECT_ID`                       | unset   | Project that receives automated platform feedback draft Ideas         |
+| `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES`            | `60`    | Lookback window for grouping recent platform errors                   |
+| `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`               | `100`   | Maximum platform error rows scanned per triage sweep                  |
+| `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT`               | `5`     | Maximum grouped feedback candidates processed per triage sweep        |
+| `PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT`            | `10`    | Maximum bounded error references retained per grouped feedback record |
+| `PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS`              | `600000` | Claim lease duration before a later sweep can reclaim the group       |
+| `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`              | `3`     | Maximum failed attempts before a group is rejected from auto-triage   |
+| `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH` | `240`   | Maximum characters stored or returned for sanitized failure reasons   |
+
 ## Agent Model Catalog
 
 SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated model-catalog API, backed by Models.dev and cached in KV. If the upstream catalog or cache is unavailable, SAM falls back to the static catalog shipped with the app.
