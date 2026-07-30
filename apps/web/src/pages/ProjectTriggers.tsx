@@ -1,9 +1,9 @@
 import type {
   TriggerResponse,
-  UpdateTriggerRequest,
+  TriggerStatus,
   WebhookCredential,
 } from '@simple-agent-manager/shared';
-import { Spinner } from '@simple-agent-manager/ui';
+import { Button, Spinner } from '@simple-agent-manager/ui';
 import { Clock, Plus } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
@@ -11,8 +11,8 @@ import { useNavigate, useSearchParams } from 'react-router';
 import { TriggerCard } from '../components/triggers/TriggerCard';
 import { TriggerForm } from '../components/triggers/TriggerForm';
 import { WebhookCredentialDialog } from '../components/triggers/WebhookCredentialDialog';
-import { useToast } from '../hooks/useToast';
-import { deleteTrigger, listTriggers, runTrigger, updateTrigger } from '../lib/api';
+import { useTriggerActions } from '../hooks/useTriggerActions';
+import { listTriggers } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
 // ---------------------------------------------------------------------------
@@ -29,7 +29,6 @@ const FOCUS_RING =
 export function ProjectTriggers() {
   const { projectId } = useProjectContext();
   const navigate = useNavigate();
-  const toast = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
 
   const [triggers, setTriggers] = useState<TriggerResponse[]>([]);
@@ -91,33 +90,31 @@ export function ProjectTriggers() {
     void loadTriggers();
   }, [loadTriggers]);
 
-  const handleRunNow = useCallback(
-    async (trigger: TriggerResponse) => {
-      try {
-        await runTrigger(projectId, trigger.id);
-        toast.success(`"${trigger.name}" triggered`);
-        void loadTriggers();
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Failed to run trigger');
-      }
-    },
-    [projectId, toast, loadTriggers]
-  );
+  /** Patches one row's status in place — used for optimistic flips and rollbacks. */
+  const applyStatus = useCallback((triggerId: string, status: TriggerStatus) => {
+    setTriggers((prev) => prev.map((t) => (t.id === triggerId ? { ...t, status } : t)));
+  }, []);
 
-  const handleTogglePause = useCallback(
-    async (trigger: TriggerResponse) => {
-      const newStatus = trigger.status === 'paused' ? 'active' : 'paused';
-      try {
-        const data: UpdateTriggerRequest = { status: newStatus };
-        await updateTrigger(projectId, trigger.id, data);
-        toast.success(`"${trigger.name}" ${newStatus === 'active' ? 'resumed' : 'paused'}`);
-        void loadTriggers();
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Failed to update trigger');
-      }
-    },
-    [projectId, toast, loadTriggers]
-  );
+  /** Reconciles a row against the authoritative trigger the server returned. */
+  const handleSettled = useCallback((updated: TriggerResponse) => {
+    setTriggers((prev) => prev.map((t) => (t.id === updated.id ? updated : t)));
+  }, []);
+
+  const handleDeleted = useCallback((triggerId: string) => {
+    setTriggers((prev) => prev.filter((t) => t.id !== triggerId));
+  }, []);
+
+  const {
+    runNow: handleRunNow,
+    togglePause: handleTogglePause,
+    remove: removeTrigger,
+    pendingAction,
+  } = useTriggerActions({
+    projectId,
+    applyStatus,
+    onSettled: handleSettled,
+    onDeleted: handleDeleted,
+  });
 
   const handleEdit = useCallback(
     (trigger: TriggerResponse) => {
@@ -150,18 +147,11 @@ export function ProjectTriggers() {
     [loadTriggers]
   );
 
-  const handleConfirmDelete = useCallback(async () => {
+  const handleConfirmDelete = useCallback(() => {
     if (!confirmDeleteTarget) return;
-    const name = confirmDeleteTarget.name;
+    removeTrigger(confirmDeleteTarget);
     setConfirmDeleteTarget(null);
-    try {
-      await deleteTrigger(projectId, confirmDeleteTarget.id);
-      toast.success(`"${name}" deleted`);
-      void loadTriggers();
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete trigger');
-    }
-  }, [confirmDeleteTarget, projectId, toast, loadTriggers]);
+  }, [confirmDeleteTarget, removeTrigger]);
 
   // Loading
   if (loading) {
@@ -177,15 +167,17 @@ export function ProjectTriggers() {
     return (
       <div className="text-center py-16">
         <p className="text-danger mb-4">{error}</p>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => {
             setLoading(true);
             void loadTriggers();
           }}
-          className={`px-4 py-2 text-sm font-medium text-accent bg-transparent border border-border-default rounded-md cursor-pointer ${FOCUS_RING}`}
+          className={`text-accent ${FOCUS_RING}`}
         >
           Retry
-        </button>
+        </Button>
       </div>
     );
   }
@@ -200,13 +192,14 @@ export function ProjectTriggers() {
             Run tasks from schedules, GitHub events, or authenticated webhooks
           </p>
         </div>
-        <button
+        <Button
+          size="sm"
           onClick={handleNewTrigger}
-          className={`inline-flex items-center gap-2 whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium bg-accent text-fg-on-accent rounded-md hover:bg-accent/90 cursor-pointer border-none ${FOCUS_RING}`}
+          className={`shrink-0 hover:bg-accent/90 ${FOCUS_RING}`}
         >
           <Plus size={16} aria-hidden="true" />
           New Trigger
-        </button>
+        </Button>
       </div>
 
       {/* Trigger list or empty state */}
@@ -223,6 +216,7 @@ export function ProjectTriggers() {
               onTogglePause={handleTogglePause}
               onViewHistory={handleViewHistory}
               onDelete={handleDeleteRequest}
+              pendingAction={pendingAction(trigger.id)}
             />
           ))}
         </div>
@@ -264,18 +258,22 @@ export function ProjectTriggers() {
               execution history. This action cannot be undone.
             </p>
             <div className="flex justify-end gap-3">
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setConfirmDeleteTarget(null)}
-                className={`px-4 py-2 text-sm font-medium text-fg-muted hover:text-fg-primary bg-transparent border border-border-default rounded-md cursor-pointer ${FOCUS_RING}`}
+                className={`text-fg-muted hover:text-fg-primary ${FOCUS_RING}`}
               >
                 Cancel
-              </button>
-              <button
-                onClick={() => void handleConfirmDelete()}
-                className={`px-4 py-2 text-sm font-medium text-fg-on-accent bg-danger hover:bg-danger/90 border-none rounded-md cursor-pointer ${FOCUS_RING}`}
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
+                onClick={handleConfirmDelete}
+                className={`hover:bg-danger/90 ${FOCUS_RING}`}
               >
                 Delete
-              </button>
+              </Button>
             </div>
           </div>
         </>
@@ -296,13 +294,14 @@ function EmptyState({ onCreateTrigger }: { onCreateTrigger: () => void }) {
       <p className="sam-type-secondary text-fg-muted mt-2 mb-4 max-w-sm mx-auto">
         Create a trigger to run tasks from a schedule, a GitHub event, or an authenticated webhook.
       </p>
-      <button
+      <Button
+        size="sm"
         onClick={onCreateTrigger}
-        className={`inline-flex items-center gap-2 whitespace-nowrap shrink-0 px-4 py-2 text-sm font-medium bg-accent text-fg-on-accent rounded-md hover:bg-accent/90 cursor-pointer border-none ${FOCUS_RING}`}
+        className={`shrink-0 hover:bg-accent/90 ${FOCUS_RING}`}
       >
         <Plus size={16} aria-hidden="true" />
         Create your first trigger
-      </button>
+      </Button>
     </div>
   );
 }

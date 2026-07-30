@@ -1,5 +1,5 @@
 import type { TriggerResponse } from '@simple-agent-manager/shared';
-import { Card } from '@simple-agent-manager/ui';
+import { Button, Card } from '@simple-agent-manager/ui';
 import {
   AlertCircle,
   Calendar,
@@ -14,6 +14,7 @@ import {
 import { type FC, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import type { TriggerActionKind } from '../../hooks/useTriggerActions';
 import { timeAgo } from '../../lib/time-utils';
 import { TriggerCredentialWarning } from './TriggerCredentialWarning';
 
@@ -66,6 +67,8 @@ interface TriggerCardProps {
   onTogglePause: (trigger: TriggerResponse) => void;
   onViewHistory: (trigger: TriggerResponse) => void;
   onDelete?: (trigger: TriggerResponse) => void;
+  /** The mutation currently in flight for this trigger, if any. */
+  pendingAction?: TriggerActionKind | null;
 }
 
 export const TriggerCard: FC<TriggerCardProps> = ({
@@ -75,6 +78,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
   onTogglePause,
   onViewHistory,
   onDelete,
+  pendingAction = null,
 }) => {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuBtnRef = useRef<HTMLButtonElement>(null);
@@ -83,6 +87,13 @@ export const TriggerCard: FC<TriggerCardProps> = ({
     label: 'Disabled',
   };
   const disabledClass = trigger.status === 'disabled' ? 'opacity-60' : '';
+
+  const isPaused = trigger.status === 'paused';
+  const runPending = pendingAction === 'run';
+  const togglePending = pendingAction === 'toggle';
+  // Any in-flight mutation locks the row's other actions, so a resume and a
+  // delete can't race each other on the same trigger.
+  const anyPending = pendingAction !== null;
 
   return (
     <Card
@@ -113,7 +124,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
             ref={menuBtnRef}
             onClick={() => setMenuOpen(!menuOpen)}
             onBlur={() => setTimeout(() => setMenuOpen(false), 200)}
-            className={`p-1.5 rounded-sm text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none ${FOCUS_RING}`}
+            className={`sam-pressable p-1.5 rounded-sm text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none ${FOCUS_RING}`}
             aria-label="Trigger actions"
             aria-expanded={menuOpen}
           >
@@ -139,7 +150,7 @@ export const TriggerCard: FC<TriggerCardProps> = ({
                     setMenuOpen(false);
                     onEdit(trigger);
                   }}
-                  className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
+                  className="sam-pressable w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
                 >
                   Edit
                 </button>
@@ -148,26 +159,27 @@ export const TriggerCard: FC<TriggerCardProps> = ({
                     setMenuOpen(false);
                     onRunNow(trigger);
                   }}
-                  className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
-                  disabled={trigger.status === 'disabled'}
+                  className="sam-pressable w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
+                  disabled={trigger.status === 'disabled' || anyPending}
                 >
-                  Run Now
+                  {runPending ? 'Running…' : 'Run Now'}
                 </button>
                 <button
                   onClick={() => {
                     setMenuOpen(false);
                     onTogglePause(trigger);
                   }}
-                  className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
+                  className="sam-pressable w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
+                  disabled={anyPending}
                 >
-                  {trigger.status === 'paused' ? 'Resume' : 'Pause'}
+                  {isPaused ? 'Resume' : 'Pause'}
                 </button>
                 <button
                   onClick={() => {
                     setMenuOpen(false);
                     onViewHistory(trigger);
                   }}
-                  className="w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
+                  className="sam-pressable w-full text-left px-3 py-2 text-sm text-fg-primary hover:bg-surface-hover cursor-pointer bg-transparent border-none"
                 >
                   View History
                 </button>
@@ -179,7 +191,8 @@ export const TriggerCard: FC<TriggerCardProps> = ({
                         setMenuOpen(false);
                         onDelete(trigger);
                       }}
-                      className="w-full text-left px-3 py-2 text-sm text-danger hover:bg-surface-hover cursor-pointer bg-transparent border-none flex items-center gap-2"
+                      disabled={anyPending}
+                      className="sam-pressable w-full text-left px-3 py-2 text-sm text-danger hover:bg-surface-hover cursor-pointer bg-transparent border-none flex items-center gap-2"
                     >
                       <Trash2 size={14} aria-hidden="true" />
                       Delete
@@ -234,29 +247,45 @@ export const TriggerCard: FC<TriggerCardProps> = ({
 
       {/* Quick actions row */}
       <div className="flex items-center gap-2 flex-wrap mt-3 pt-3 border-t border-border-default">
-        <button
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={() => onRunNow(trigger)}
-          disabled={trigger.status === 'disabled'}
-          className={`inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${FOCUS_RING}`}
+          disabled={trigger.status === 'disabled' || anyPending}
+          loading={runPending}
+          className={`gap-1.5 hover:bg-surface-hover ${FOCUS_RING}`}
           aria-label="Run trigger now"
         >
-          <Play size={12} aria-hidden="true" />
-          Run Now
-        </button>
-        <button
+          {!runPending && <Play size={12} aria-hidden="true" />}
+          {runPending ? 'Running…' : 'Run Now'}
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={() => onTogglePause(trigger)}
-          className={`inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer ${FOCUS_RING}`}
-          aria-label={trigger.status === 'paused' ? 'Resume trigger' : 'Pause trigger'}
+          disabled={anyPending}
+          loading={togglePending}
+          className={`gap-1.5 hover:bg-surface-hover ${FOCUS_RING}`}
+          aria-label={isPaused ? 'Resume trigger' : 'Pause trigger'}
         >
-          <Pause size={12} aria-hidden="true" />
-          {trigger.status === 'paused' ? 'Resume' : 'Pause'}
-        </button>
-        <button
+          {/* Icon reflects the action the press performs, not the current state.
+              This previously always rendered Pause, even next to "Resume". */}
+          {!togglePending &&
+            (isPaused ? (
+              <Play size={12} aria-hidden="true" />
+            ) : (
+              <Pause size={12} aria-hidden="true" />
+            ))}
+          {isPaused ? 'Resume' : 'Pause'}
+        </Button>
+        <Button
+          variant="ghost"
+          size="xs"
           onClick={() => onViewHistory(trigger)}
-          className={`inline-flex items-center gap-1.5 whitespace-nowrap px-3 py-1.5 text-xs font-medium rounded-md bg-transparent border border-border-default text-fg-muted hover:text-fg-primary hover:bg-surface-hover cursor-pointer ml-auto ${FOCUS_RING}`}
+          className={`gap-1.5 text-fg-muted hover:text-fg-primary hover:bg-surface-hover ml-auto ${FOCUS_RING}`}
         >
           View History
-        </button>
+        </Button>
       </div>
     </Card>
   );

@@ -948,3 +948,121 @@ test.describe('Trigger Form — Desktop', () => {
     await verifyWebhookCreation(page, 'trigger-webhook-credential-desktop');
   });
 });
+
+// ---------------------------------------------------------------------------
+// Action feedback (press affordance + optimistic status)
+//
+// These need a real browser: the press affordance is a CSS `:active` rule, and
+// jsdom has no cascade or layout, so the unit tests in
+// tests/unit/pages/project-triggers-feedback.test.tsx cannot prove it applies.
+// ---------------------------------------------------------------------------
+
+/** Injects a slow PATCH so the in-flight window is observable. */
+async function stubSlowStatusPatch(page: Page, opts: { fails?: boolean } = {}) {
+  // Registered after setupApiMocks so it takes precedence for this path.
+  await page.route('**/api/projects/*/triggers/trig-3', async (route: Route) => {
+    if (route.request().method() !== 'PATCH') return route.fallback();
+    await new Promise((resolve) => setTimeout(resolve, TRIGGER_PATCH_LATENCY_MS));
+    if (opts.fails) {
+      return jsonResponse(route, 500, {
+        error: 'INTERNAL_ERROR',
+        message: 'Upstream scheduler unavailable',
+      });
+    }
+    return jsonResponse(route, 200, {
+      ...NORMAL_TRIGGERS[2],
+      status: 'active',
+    });
+  });
+}
+
+/** Long enough to sample the in-flight window without slowing the suite. */
+const TRIGGER_PATCH_LATENCY_MS = 900;
+
+const statusDotLabel = (page: Page) =>
+  page.locator('[aria-label^="Status: Paused"], [aria-label^="Status: Active"]').last();
+
+/** Matches across the optimistic flip, when the accessible name changes. */
+const pauseToggle = (page: Page) =>
+  page.getByRole('button', { name: /^(Resume|Pause) trigger$/ }).last();
+
+test.describe('Trigger action feedback', () => {
+  test('resuming flips status and shows a spinner before the request returns', async ({
+    page,
+  }) => {
+    await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
+    await stubSlowStatusPatch(page);
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=Nightly Tests');
+
+    const toggle = pauseToggle(page);
+    await expect(toggle).toHaveText(/Resume/);
+    await expect(statusDotLabel(page)).toHaveAttribute('aria-label', 'Status: Paused');
+
+    await toggle.click();
+
+    // Still in flight: the press must already be visible.
+    await expect(statusDotLabel(page)).toHaveAttribute('aria-label', 'Status: Active');
+    await expect(toggle).toHaveText(/Pause/);
+    await expect(toggle).toBeDisabled();
+    await expect(toggle).toHaveAttribute('aria-busy', 'true');
+    await expect(toggle.locator('[data-slot="spinner"]')).toHaveCount(1);
+
+    await screenshot(page, 'trigger-resume-inflight');
+    await assertNoOverflow(page);
+
+    await expect(toggle).toBeEnabled({ timeout: 5000 });
+  });
+
+  test('a failed resume rolls back and reports the error', async ({ page }) => {
+    await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
+    await stubSlowStatusPatch(page, { fails: true });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=Nightly Tests');
+
+    const toggle = pauseToggle(page);
+    await toggle.click();
+    await expect(statusDotLabel(page)).toHaveAttribute('aria-label', 'Status: Active');
+
+    // Rolls back to the pre-press state and surfaces why.
+    await expect(statusDotLabel(page)).toHaveAttribute('aria-label', 'Status: Paused', {
+      timeout: 5000,
+    });
+    await expect(toggle).toHaveText(/Resume/);
+    await expect(page.getByTestId('toast-error')).toContainText(
+      'Upstream scheduler unavailable'
+    );
+
+    await screenshot(page, 'trigger-resume-rollback');
+    await assertNoOverflow(page);
+  });
+
+  test('buttons have a press affordance while held down', async ({ page }) => {
+    await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=Nightly Tests');
+
+    const toggle = pauseToggle(page);
+    expect(await toggle.evaluate((el) => getComputedStyle(el).transform)).toBe('none');
+
+    // boundingBox() is viewport-relative: on mobile this card sits below the
+    // fold, and pressing at an off-screen point would hit nothing.
+    await toggle.scrollIntoViewIfNeeded();
+    const box = await toggle.boundingBox();
+    expect(box).not.toBeNull();
+    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
+    await page.mouse.down();
+    // Let the pointer event dispatch and the 100ms transform transition settle.
+    await page.waitForTimeout(200);
+
+    const pressed = await toggle.evaluate((el) => ({
+      transform: getComputedStyle(el).transform,
+      filter: getComputedStyle(el).filter,
+    }));
+    await page.mouse.up();
+
+    // scale(0.97) serialises as a matrix; brightness is the reduced-motion-safe cue.
+    expect(pressed.transform).toContain('matrix');
+    expect(pressed.filter).toContain('brightness');
+  });
+});

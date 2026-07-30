@@ -530,6 +530,26 @@
   background-color: var(--sam-color-bg-inset);
 }
 
+/* Press Affordance
+   The pointer-down state for buttons and other tappable controls. Hover is not
+   a substitute: touch devices have no hover, so without this a tap produces no
+   feedback at all until the network round trip completes.
+
+   The brightness shift is deliberately OUTSIDE the reduced-motion gate so the
+   press still registers when motion is suppressed; only the scale is gated.
+   Tap highlight is suppressed because the browser default paints a grey box
+   over the top of (and out of sync with) this affordance. */
+.sam-pressable {
+  -webkit-tap-highlight-color: transparent;
+  transition:
+    transform 100ms ease-out,
+    filter 100ms ease-out;
+}
+
+.sam-pressable:not(:disabled):not([aria-disabled='true']):active {
+  filter: brightness(0.9);
+}
+
 @keyframes sam-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
@@ -633,6 +653,10 @@
   .sam-glass-card-motion:active {
     transform: translateZ(0) scale(0.99);
     will-change: transform;
+  }
+
+  .sam-pressable:not(:disabled):not([aria-disabled='true']):active {
+    transform: scale(0.97);
   }
 
   .sam-message-entry {

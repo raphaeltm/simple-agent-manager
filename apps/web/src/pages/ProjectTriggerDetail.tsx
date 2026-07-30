@@ -1,9 +1,9 @@
 import type {
   TriggerExecutionResponse,
   TriggerResponse,
-  UpdateTriggerRequest,
+  TriggerStatus,
 } from '@simple-agent-manager/shared';
-import { Spinner } from '@simple-agent-manager/ui';
+import { Button, Spinner } from '@simple-agent-manager/ui';
 import {
   ArrowLeft,
   Calendar,
@@ -23,14 +23,8 @@ import { TriggerConfiguration } from '../components/triggers/TriggerConfiguratio
 import { TriggerCredentialWarning } from '../components/triggers/TriggerCredentialWarning';
 import { TriggerForm } from '../components/triggers/TriggerForm';
 import { WebhookTriggerPanel } from '../components/triggers/WebhookTriggerPanel';
-import { useToast } from '../hooks/useToast';
-import {
-  deleteTrigger,
-  getTrigger,
-  listTriggerExecutions,
-  runTrigger,
-  updateTrigger,
-} from '../lib/api';
+import { useTriggerActions } from '../hooks/useTriggerActions';
+import { getTrigger, listTriggerExecutions } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
 // ---------------------------------------------------------------------------
@@ -82,7 +76,6 @@ export function ProjectTriggerDetail() {
   const { projectId } = useProjectContext();
   const { triggerId } = useParams<{ triggerId: string }>();
   const navigate = useNavigate();
-  const toast = useToast();
 
   const [trigger, setTrigger] = useState<TriggerResponse | null>(null);
   const [executions, setExecutions] = useState<TriggerExecutionResponse[]>([]);
@@ -142,44 +135,47 @@ export function ProjectTriggerDetail() {
     loadExecutions(null).catch(() => undefined);
   }, [loadTrigger, loadExecutions]);
 
-  const handleRunNow = useCallback(async () => {
-    if (!triggerId) return;
-    try {
-      await runTrigger(projectId, triggerId);
-      toast.success('Trigger fired');
-      loadTrigger().catch(() => undefined);
-      loadExecutions(null).catch(() => undefined);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to run trigger');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
-  }, [projectId, triggerId, loadTrigger, loadExecutions]);
+  /** Patches the loaded trigger's status — used for optimistic flips and rollbacks. */
+  const applyStatus = useCallback((_triggerId: string, status: TriggerStatus) => {
+    setTrigger((prev) => (prev ? { ...prev, status } : prev));
+  }, []);
 
-  const handleTogglePause = useCallback(async () => {
-    if (!trigger || !triggerId) return;
-    const newStatus = trigger.status === 'paused' ? 'active' : 'paused';
-    try {
-      const data: UpdateTriggerRequest = { status: newStatus };
-      await updateTrigger(projectId, triggerId, data);
-      toast.success(newStatus === 'active' ? 'Trigger resumed' : 'Trigger paused');
-      loadTrigger().catch(() => undefined);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to update trigger');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
-  }, [trigger, projectId, triggerId, loadTrigger]);
+  const handleSettled = useCallback((updated: TriggerResponse) => {
+    setTrigger(updated);
+  }, []);
 
-  const handleDelete = useCallback(async () => {
-    if (!triggerId) return;
-    try {
-      await deleteTrigger(projectId, triggerId);
-      toast.success('Trigger deleted');
-      navigate(`/projects/${projectId}/triggers`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to delete trigger');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
-  }, [projectId, triggerId, navigate]);
+  const handleDeleted = useCallback(() => {
+    navigate(`/projects/${projectId}/triggers`);
+  }, [navigate, projectId]);
+
+  const handleRan = useCallback(() => {
+    loadExecutions(null).catch(() => undefined);
+  }, [loadExecutions]);
+
+  const { runNow, togglePause, remove, pendingAction } = useTriggerActions({
+    projectId,
+    applyStatus,
+    onSettled: handleSettled,
+    onRan: handleRan,
+    onDeleted: handleDeleted,
+  });
+
+  const handleRunNow = useCallback(() => {
+    if (!trigger) return;
+    runNow(trigger);
+  }, [trigger, runNow]);
+
+  const handleTogglePause = useCallback(() => {
+    if (!trigger) return;
+    togglePause(trigger);
+  }, [trigger, togglePause]);
+
+  const handleDelete = useCallback(() => {
+    if (!trigger) return;
+    remove(trigger);
+  }, [trigger, remove]);
+
+  const currentPendingAction = trigger ? pendingAction(trigger.id) : null;
 
   // Compute success rate from loaded executions
   const successRate = useMemo(() => {
@@ -207,12 +203,14 @@ export function ProjectTriggerDetail() {
     return (
       <div className="text-center py-16">
         <p className="text-danger mb-4">{error ?? 'Trigger not found'}</p>
-        <button
+        <Button
+          variant="ghost"
+          size="sm"
           onClick={() => navigate(`/projects/${projectId}/triggers`)}
-          className={`px-4 py-2 text-sm font-medium text-accent bg-transparent border border-border-default rounded-md cursor-pointer ${FOCUS_RING}`}
+          className={`text-accent ${FOCUS_RING}`}
         >
           Back to triggers
-        </button>
+        </Button>
       </div>
     );
   }
@@ -221,6 +219,14 @@ export function ProjectTriggerDetail() {
     color: 'var(--sam-color-fg-muted)',
     label: 'Disabled',
   };
+
+  const isPaused = trigger.status === 'paused';
+  const runPending = currentPendingAction === 'run';
+  const togglePending = currentPendingAction === 'toggle';
+  const deletePending = currentPendingAction === 'delete';
+  // Any in-flight mutation locks the other header actions so they can't race.
+  const anyPending = currentPendingAction !== null;
+
   const handleLoadMore = () => {
     loadExecutions(nextExecutionCursor).catch(() => undefined);
   };
@@ -237,7 +243,7 @@ export function ProjectTriggerDetail() {
       {/* Back link */}
       <button
         onClick={() => navigate(`/projects/${projectId}/triggers`)}
-        className={`inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg-primary mb-4 bg-transparent border-none cursor-pointer p-0 ${FOCUS_RING}`}
+        className={`sam-pressable inline-flex items-center gap-1.5 text-sm text-fg-muted hover:text-fg-primary mb-4 bg-transparent border-none cursor-pointer p-0 ${FOCUS_RING}`}
       >
         <ArrowLeft size={14} aria-hidden="true" />
         Back to triggers
@@ -273,41 +279,58 @@ export function ProjectTriggerDetail() {
 
         {/* Actions */}
         <div className="flex items-center gap-2 shrink-0">
-          <button
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={handleRunNow}
-            disabled={trigger.status === 'disabled'}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed ${FOCUS_RING}`}
+            disabled={trigger.status === 'disabled' || anyPending}
+            loading={runPending}
+            className={`gap-1.5 hover:bg-surface-hover ${FOCUS_RING}`}
             aria-label="Run now"
           >
-            <Play size={14} aria-hidden="true" />
-            <span className="hidden sm:inline">Run Now</span>
-          </button>
-          <button
+            {!runPending && <Play size={14} aria-hidden="true" />}
+            <span className="hidden sm:inline">{runPending ? 'Running…' : 'Run Now'}</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={handleTogglePause}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer ${FOCUS_RING}`}
-            aria-label={trigger.status === 'paused' ? 'Resume' : 'Pause'}
+            disabled={anyPending}
+            loading={togglePending}
+            className={`gap-1.5 hover:bg-surface-hover ${FOCUS_RING}`}
+            aria-label={isPaused ? 'Resume' : 'Pause'}
           >
-            <Pause size={14} aria-hidden="true" />
-            <span className="hidden sm:inline">
-              {trigger.status === 'paused' ? 'Resume' : 'Pause'}
-            </span>
-          </button>
-          <button
+            {/* Icon reflects the action the press performs, not the current state. */}
+            {!togglePending &&
+              (isPaused ? (
+                <Play size={14} aria-hidden="true" />
+              ) : (
+                <Pause size={14} aria-hidden="true" />
+              ))}
+            <span className="hidden sm:inline">{isPaused ? 'Resume' : 'Pause'}</span>
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setFormOpen(true)}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md bg-transparent border border-border-default text-fg-primary hover:bg-surface-hover cursor-pointer ${FOCUS_RING}`}
+            className={`gap-1.5 hover:bg-surface-hover ${FOCUS_RING}`}
             aria-label="Edit trigger"
           >
             <Pencil size={14} aria-hidden="true" />
             <span className="hidden sm:inline">Edit</span>
-          </button>
-          <button
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
             onClick={() => setConfirmDelete(true)}
-            className={`inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md bg-transparent border border-danger/30 text-danger hover:bg-danger/10 cursor-pointer ${FOCUS_RING}`}
+            disabled={anyPending}
+            loading={deletePending}
+            className={`gap-1.5 border-danger/30 text-danger hover:bg-danger/10 ${FOCUS_RING}`}
             aria-label="Delete trigger"
           >
-            <Trash2 size={14} aria-hidden="true" />
+            {!deletePending && <Trash2 size={14} aria-hidden="true" />}
             <span className="hidden sm:inline">Delete</span>
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -441,21 +464,25 @@ export function ProjectTriggerDetail() {
               history. This action cannot be undone.
             </p>
             <div className="flex justify-end gap-3">
-              <button
+              <Button
+                variant="ghost"
+                size="sm"
                 onClick={() => setConfirmDelete(false)}
-                className={`px-4 py-2 text-sm font-medium text-fg-muted hover:text-fg-primary bg-transparent border border-border-default rounded-md cursor-pointer ${FOCUS_RING}`}
+                className={`text-fg-muted hover:text-fg-primary ${FOCUS_RING}`}
               >
                 Cancel
-              </button>
-              <button
+              </Button>
+              <Button
+                variant="danger"
+                size="sm"
                 onClick={() => {
                   setConfirmDelete(false);
-                  void handleDelete();
+                  handleDelete();
                 }}
-                className={`px-4 py-2 text-sm font-medium text-fg-on-accent bg-danger hover:bg-danger/90 border-none rounded-md cursor-pointer ${FOCUS_RING}`}
+                className={`hover:bg-danger/90 ${FOCUS_RING}`}
               >
                 Delete
-              </button>
+              </Button>
             </div>
           </div>
         </>

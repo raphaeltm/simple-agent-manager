@@ -1,12 +1,20 @@
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
 
+import { Spinner } from './Spinner';
+
 type ButtonVariant = 'primary' | 'secondary' | 'danger' | 'ghost';
-type ButtonSize = 'sm' | 'md' | 'lg';
+/** `xs` is the compact tier for dense in-card action rows. */
+type ButtonSize = 'xs' | 'sm' | 'md' | 'lg';
 
 export interface ButtonProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> {
   children: ReactNode;
   variant?: ButtonVariant;
   size?: ButtonSize;
+  /**
+   * Marks an in-flight async action. Disables the button, sets `aria-busy`, and
+   * swaps any leading icon for a spinner so the press has visible consequences
+   * before the network round trip returns.
+   */
   loading?: boolean;
 }
 
@@ -18,9 +26,17 @@ const variantClasses: Record<ButtonVariant, string> = {
 };
 
 const sizeClasses: Record<ButtonSize, string> = {
+  xs: 'min-h-7 px-2.5 text-xs',
   sm: 'min-h-9 px-3 text-sm',
   md: 'min-h-11 px-4 text-[0.95rem]',
   lg: 'min-h-14 px-5 text-base',
+};
+
+const spinnerSize: Record<ButtonSize, 'sm' | 'md'> = {
+  xs: 'sm',
+  sm: 'sm',
+  md: 'sm',
+  lg: 'md',
 };
 
 export function Button({
@@ -40,9 +56,14 @@ export function Button({
       {...props}
       disabled={isDisabled}
       aria-busy={loading || undefined}
-      className={`inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-semibold transition-all duration-150 ease-in-out ${isDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
+      className={`sam-pressable inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-md font-semibold transition-all duration-150 ease-in-out ${isDisabled ? 'cursor-not-allowed opacity-60' : 'cursor-pointer'} ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
       style={style}
     >
+      {/* Decorative: `aria-busy` above already conveys the state, and a labelled
+          spinner would be folded into this button's accessible name. */}
+      {loading && (
+        <Spinner size={spinnerSize[size]} tone="current" decorative className="shrink-0" />
+      )}
       {children}
     </button>
   );

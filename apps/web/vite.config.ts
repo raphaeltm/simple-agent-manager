@@ -1,8 +1,9 @@
-import { defineConfig, type Plugin, transformWithEsbuild } from 'vite';
-import react from '@vitejs/plugin-react';
-import tailwindcss from '@tailwindcss/vite';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+
+import tailwindcss from '@tailwindcss/vite';
+import react from '@vitejs/plugin-react';
+import { defineConfig, type Plugin, transformWithEsbuild } from 'vite';
 
 /**
  * Vite plugin that compiles src/sw.ts → dist/sw.js during build.

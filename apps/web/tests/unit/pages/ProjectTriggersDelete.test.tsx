@@ -190,8 +190,11 @@ describe('ProjectTriggers — Delete flow', () => {
     // Success toast
     expect(mocks.toast.success).toHaveBeenCalledWith('"Daily Backup" deleted');
 
-    // Triggers are refreshed
-    expect(mocks.listTriggers).toHaveBeenCalledTimes(2); // initial + refresh
+    // The deleted row leaves the list. This is now an in-place state update
+    // rather than a refetch, so the rest of the list never unmounts.
+    await waitFor(() => {
+      expect(screen.queryByText('Daily Backup')).not.toBeInTheDocument();
+    });
   });
 
   it('shows error toast when deletion fails', async () => {
@@ -209,20 +212,40 @@ describe('ProjectTriggers — Delete flow', () => {
     });
   });
 
-  it('refreshes via loadTriggers (not page reload) after deletion', async () => {
-    const user = userEvent.setup();
-    renderPage();
-
-    await openDeleteMenu(user);
-
-    const confirmBtn = screen.getByRole('button', { name: 'Delete' });
-    await user.click(confirmBtn);
-
-    await waitFor(() => {
-      expect(mocks.deleteTrigger).toHaveBeenCalled();
+  it('updates via React state, never a page reload, after deletion', async () => {
+    const reloadSpy = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { ...originalLocation, reload: reloadSpy },
     });
 
-    // listTriggers called again (initial load + refresh after delete)
-    expect(mocks.listTriggers).toHaveBeenCalledTimes(2);
+    try {
+      const user = userEvent.setup();
+      renderPage();
+
+      await openDeleteMenu(user);
+
+      const confirmBtn = screen.getByRole('button', { name: 'Delete' });
+      await user.click(confirmBtn);
+
+      await waitFor(() => {
+        expect(mocks.deleteTrigger).toHaveBeenCalled();
+      });
+
+      // The row is dropped from local state (see .claude/rules/16 "Optimistic
+      // update"), so the surviving rows stay mounted and no refetch is needed.
+      await waitFor(() => {
+        expect(screen.queryByText('Daily Backup')).not.toBeInTheDocument();
+      });
+      expect(screen.getByText('Weekly Report')).toBeInTheDocument();
+      expect(mocks.listTriggers).toHaveBeenCalledTimes(1); // initial load only
+      expect(reloadSpy).not.toHaveBeenCalled();
+    } finally {
+      Object.defineProperty(window, 'location', {
+        configurable: true,
+        value: originalLocation,
+      });
+    }
   });
 });
