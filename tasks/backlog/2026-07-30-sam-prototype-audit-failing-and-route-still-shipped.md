@@ -53,26 +53,58 @@ Decision needed from Raphaël: is `/sam` still a live prototype worth keeping, h
 it graduated into a real product surface (in which case it needs a non-prototype
 name, real data, and its audit fixed), or should it be deleted?
 
-## 3. Related: the sweep masks these failures
+## 3. Scale: 74 of 782 visual-audit tests fail on `main`
 
-Worth investigating alongside. In the full-project sweep these same tests land in
-the "did not run" bucket and the run exits **0**:
+A full single-project sweep on the unmodified branch point gives, via the **JSON**
+reporter (authoritative):
 
 ```
-npx playwright test --project="iPhone SE (375x667)" --reporter=line
-→ 29 skipped, 12 did not run, 666 passed   (exit 0)
+expected: 667   unexpected: 74   skipped: 41   total: 782
 ```
 
-but `--list` collects **782** tests for that project, so 782 − (666+29+12) = 75
-are unaccounted for, and tests that fail in isolation are reported as
-skipped/did-not-run in aggregate. That is a false-green risk: the sweep can go
-green while specs are actually broken. `playwright.config.ts` sets no
-`maxFailures` and no `globalTimeout`, and no spec uses `describe.serial`,
-`test.only`, or `test.fixme`, so the cause is not obvious.
+All 74 were confirmed pre-existing by running the same specs in a clean worktree
+at `387ab7c58` and getting **identical per-file failure counts**:
 
-Note several `staging-*.spec.ts` files in that bucket talk to LIVE staging
-(`app.sammy.party`) and throw if `SAM_PLAYWRIGHT_PRIMARY_USER` is unset — those
-arguably should not be part of a default local sweep at all.
+| Count | Spec | Verified pre-existing |
+|------:|------|-----------------------|
+| 17 | `knowledge-ui-audit` | identical on baseline |
+| 15 | `chat-file-viewer-audit` | identical on baseline |
+|  8 | `ai-usage-audit` | identical on baseline |
+|  8 | `sam-prototype-audit` | identical on baseline |
+|  4 | `deployment-settings-audit` | identical on baseline |
+|  4 | `recent-chats-dropdown-audit` | identical on baseline |
+|  4 | `report-issue-audit` | identical on baseline |
+|  2 | `portal-overlay-audit` | identical on baseline |
+|  2 | `settings-infomaniak-credential-audit` | identical on baseline |
+|  1 each | `nested-session-sidebar`, `scaling-settings`, `settings-hetzner-validation`, `trial-chat-gate`, `trial-ui` | identical on baseline |
+|  5 | `staging-*` (library-search 2, ai-proxy, codex-connect, file-preview-v2) | load LIVE staging, so local code is not involved |
+
+CI does not block on any of this by design — `ci.yml`'s `playwright-visual` job is
+`continue-on-error: true` and its own comments call the audits "informational".
+So this is a known, accepted state rather than a new break. The question for
+triage is whether 74 permanently-red audits are still earning their keep, or
+should be fixed/deleted so the suite means something again.
+
+## 4. Trap: a piped line-reporter summary hides the failure count
+
+This cost real time and produced two incorrect "0 failures" reports during the
+investigation. Three separate hazards, all avoidable:
+
+1. **The summary block omits the failed count when captured from a non-TTY.**
+   The captured tail reads `29 skipped / 12 did not run / 667 passed` with no
+   failed line, because the line reporter emits `[1A[2K` cursor-up/erase
+   sequences that corrupt the captured text. The failures *are* in the body
+   (175 markers, 17 numbered blocks) — just not in the summary.
+2. **`grep` silently matches nothing** on that output unless given `-a`; it
+   treats the ANSI-laden stream as binary. `grep -c "Error:"` returns nothing
+   rather than a count, which reads like "no errors".
+3. **Piping loses Playwright's exit code.** `playwright test ... | grep ...`
+   yields grep's status. Playwright exited **1**; the pipeline reported 0.
+
+Recommended practice for agents verifying UI changes: use
+`PLAYWRIGHT_JSON_OUTPUT_NAME=… --reporter=json` and count statuses from the JSON,
+or at minimum `grep -a` and check `${PIPESTATUS[0]}`. Never conclude "0 failures"
+from a piped line-reporter tail.
 
 ## Acceptance Criteria
 
@@ -81,6 +113,8 @@ arguably should not be part of a default local sweep at all.
 - [ ] If deleted: route removed from `App.tsx`, page deleted, spec deleted
 - [ ] Prototype-route pre-merge check catches routes that do not use the
       `/prototype/` prefix (rule 37's checklist is prefix-specific today)
-- [ ] Explain the 782-vs-707 sweep accounting gap; a spec that fails in isolation
-      must not be reported as skipped/did-not-run with exit 0
+- [ ] Decide whether 74 permanently-red visual audits should be fixed or deleted
+      (they are `continue-on-error` in CI today, so they signal nothing)
 - [ ] Decide whether live-staging specs belong in the default local sweep
+- [ ] Consider switching the default reporter, or documenting the JSON-reporter
+      recipe, so a piped summary cannot read as green (see section 4)
