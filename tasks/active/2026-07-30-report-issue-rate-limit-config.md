@@ -17,14 +17,14 @@
 
 ## Implementation checklist
 
-- [ ] Add a Report Issue POST default rate-limit key to `DEFAULT_RATE_LIMITS` and `Env`.
-- [ ] Add a small Report Issue POST middleware wrapper using the existing KV rate-limit helper.
-- [ ] Apply the middleware to `POST /api/report-issue` with a user-scoped key prefix.
-- [ ] Add focused API route tests proving allowed requests receive project-standard rate-limit headers and exhausted requests return project-standard `429` shape/status without creating an Idea.
-- [ ] Forward `REPORT_ISSUE_TITLE_MAX_LENGTH`, `REPORT_ISSUE_DESCRIPTION_MAX_LENGTH`, and `REPORT_ISSUE_CONTENT_MAX_LENGTH` through deploy workflow env and sync-wrangler config.
-- [ ] Update deployment plumbing tests for the Report Issue max-length envs.
-- [ ] Verify `.env.example` still has no duplicate `PLATFORM_FEEDBACK_PROJECT_ID`; do not edit it unless a duplicate exists.
-- [ ] Preserve trusted metadata/PAT redaction behavior covered by existing Report Issue tests.
+- [x] Add a Report Issue POST default rate-limit key to `DEFAULT_RATE_LIMITS` and `Env`.
+- [x] Add a small Report Issue POST middleware wrapper using the existing KV rate-limit helper.
+- [x] Apply the middleware to `POST /api/report-issue` with a user-scoped key prefix.
+- [x] Add focused API route tests proving allowed requests receive project-standard rate-limit headers and exhausted requests return project-standard `429` shape/status without creating an Idea.
+- [x] Forward `REPORT_ISSUE_TITLE_MAX_LENGTH`, `REPORT_ISSUE_DESCRIPTION_MAX_LENGTH`, and `REPORT_ISSUE_CONTENT_MAX_LENGTH` through deploy workflow env and sync-wrangler config.
+- [x] Update deployment plumbing tests for the Report Issue max-length envs.
+- [x] Verify `.env.example` still has no duplicate `PLATFORM_FEEDBACK_PROJECT_ID`; do not edit it unless a duplicate exists.
+- [x] Preserve trusted metadata/PAT redaction behavior covered by existing Report Issue tests.
 - [ ] Run focused Report Issue tests, API lint/typecheck, and proportional repository validation.
 - [ ] Run env-validator, security-auditor, and task-completion-validator.
 
@@ -36,3 +36,9 @@
 - `.env.example` is not churned when the previous duplicate is already absent.
 - PR remains scoped to Report Issue abuse protection and directly related config consistency; no platform feedback triage resilience/usability work is included.
 - Existing trust-boundary/PAT redaction behavior remains intact.
+
+## Validation log
+
+- 2026-07-30: `.env.example` contains no `PLATFORM_FEEDBACK_PROJECT_ID` or `REPORT_ISSUE_*` entries; no duplicate cleanup needed.
+- 2026-07-30: `pnpm --filter @simple-agent-manager/api test -- tests/unit/report-issue.test.ts tests/unit/routes/report-issue.test.ts` passed (23 tests). Existing Report Issue service tests preserve trust-boundary/PAT redaction behavior.
+- 2026-07-30: `pnpm vitest run scripts/quality/sync-wrangler-config.test.ts scripts/quality/deploy-reusable-workflow.test.ts` passed (33 tests).

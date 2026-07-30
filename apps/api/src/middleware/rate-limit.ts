@@ -37,6 +37,10 @@ export const DEFAULT_RATE_LIMITS = {
   CLIENT_ERRORS: 200,
   IDENTITY_TOKEN: 60,
   ANALYTICS_INGEST: 60,
+  // Authenticated Report Issue submissions create draft Ideas in the
+  // maintainer feedback project. Keep normal user retries possible while
+  // bounding abuse of the externally reachable POST endpoint.
+  REPORT_ISSUE_POST: 20,
   // Tighter limit for anonymous trial creation: each call spawns a DO,
   // fires ~4 GitHub API calls, and consumes a monthly trial slot.
   TRIAL_CREATE: 10,
@@ -268,5 +272,16 @@ export function rateLimitTrialCreate(env: Env): MiddlewareHandler<{ Bindings: En
     limit: getRateLimit(env, 'TRIAL_CREATE'),
     keyPrefix: 'trial-create',
     useIp: true,
+  });
+}
+
+/**
+ * Rate limit middleware for Report Issue submissions.
+ * Default: 20 submissions per hour per authenticated user.
+ */
+export function rateLimitReportIssuePost(env: Env): MiddlewareHandler<{ Bindings: Env }> {
+  return rateLimit({
+    limit: getRateLimit(env, 'REPORT_ISSUE_POST'),
+    keyPrefix: 'report-issue-post',
   });
 }

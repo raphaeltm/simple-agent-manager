@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import { rateLimitReportIssuePost } from '../middleware/rate-limit';
 import { jsonValidator } from '../schemas';
 import { ReportIssueSchema } from '../schemas/report';
 import { isReportEnabled, submitReport } from '../services/report-issue';
@@ -16,6 +17,7 @@ reportIssueRoutes.post(
   '/',
   requireAuth(),
   requireApproved(),
+  async (c, next) => rateLimitReportIssuePost(c.env)(c, next),
   jsonValidator(ReportIssueSchema),
   async (c) => {
     const userId = getUserId(c);

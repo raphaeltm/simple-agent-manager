@@ -126,6 +126,14 @@ describe('deploy reusable workflow', () => {
       'PLATFORM_FEEDBACK_PROJECT_ID: ${{ vars.PLATFORM_FEEDBACK_PROJECT_ID }}'
     );
     for (const name of [
+      'REPORT_ISSUE_TITLE_MAX_LENGTH',
+      'REPORT_ISSUE_DESCRIPTION_MAX_LENGTH',
+      'REPORT_ISSUE_CONTENT_MAX_LENGTH',
+      'RATE_LIMIT_REPORT_ISSUE_POST',
+    ]) {
+      expect(sync).toContain(name + ': ${{ vars.' + name + ' }}');
+    }
+    for (const name of [
       'PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES',
       'PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT',
       'PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT',
