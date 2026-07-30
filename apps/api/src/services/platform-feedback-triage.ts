@@ -3,10 +3,12 @@ import {
   DEFAULT_PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT,
   DEFAULT_PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT,
   DEFAULT_PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT,
+  DEFAULT_PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES,
   DEFAULT_PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES,
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { runDebugDiagnosis, SCHEDULED_TRIAGE_DEBUG_FEATURE_KEY } from './debug-agent';
 import { redactSensitiveData } from './observability';
@@ -20,6 +22,8 @@ export interface FeedbackTriageResult {
   ideasCreated: number;
   ideasUpdated: number;
   groupsSkipped: number;
+  groupsFailed: number;
+  failureReasons: string[];
 }
 interface ErrorRow {
   id: string;
@@ -44,6 +48,18 @@ interface TriageDeps {
 function positive(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? '', 10);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+function sanitizeFailureReason(cause: unknown): string {
+  const raw = cause instanceof Error ? cause.message : String(cause);
+  const redacted = String(redactSensitiveData(raw || 'unknown triage failure'))
+    .replace(/https?:\/\/\S+/g, '[url]')
+    .replace(/\b[a-z0-9.!#$%&*+/=?^_`{|}~-]+@[a-z0-9.-]+\.[a-z]{2,}\b/gi, '[email]')
+    .replace(/\b(?:\d{1,3}\.){3}\d{1,3}\b/g, '[ip]')
+    .replace(/\b[0-9a-f]{8}-[0-9a-f-]{27,}\b/gi, '[id]')
+    .replace(/\b01[a-z0-9]{24}\b/gi, '[id]')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return (redacted || 'unknown triage failure').slice(0, 240);
 }
 function normalizeMessage(message: string): string {
   return String(redactSensitiveData(message))
@@ -126,6 +142,30 @@ function ideaDescription(group: FeedbackErrorGroup, diagnosisId: string): string
     ].join('\n'),
   });
 }
+async function recordGroupFailure(
+  env: Env,
+  signature: string,
+  claimToken: string,
+  now: number,
+  maxFailures: number,
+  reason: string
+): Promise<{ rejected: boolean }> {
+  const existing = await env.DATABASE.prepare(
+    'SELECT failure_count FROM platform_feedback_triages WHERE signature = ? AND claim_token = ?'
+  )
+    .bind(signature, claimToken)
+    .first<{ failure_count: number }>();
+  const nextFailures = (existing?.failure_count ?? 0) + 1;
+  const rejectedAt = nextFailures >= maxFailures ? now : null;
+  await env.DATABASE.prepare(
+    `UPDATE platform_feedback_triages SET failure_count = failure_count + 1, last_failure_reason = ?,
+    last_failed_at = ?, rejected_at = COALESCE(rejected_at, ?), claim_token = NULL, claim_expires_at = NULL,
+    updated_at = CURRENT_TIMESTAMP WHERE signature = ? AND claim_token = ?`
+  )
+    .bind(reason, now, rejectedAt, signature, claimToken)
+    .run();
+  return { rejected: rejectedAt !== null };
+}
 export async function runPlatformFeedbackTriage(
   env: Env,
   trigger: FeedbackTriageTrigger,
@@ -139,6 +179,8 @@ export async function runPlatformFeedbackTriage(
     ideasCreated: 0,
     ideasUpdated: 0,
     groupsSkipped: 0,
+    groupsFailed: 0,
+    failureReasons: [],
   };
   if (!projectId) return base;
   const project = await env.DATABASE.prepare('SELECT id, user_id FROM projects WHERE id = ?')
@@ -166,6 +208,10 @@ export async function runPlatformFeedbackTriage(
   const claimTtl = positive(
     env.PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS,
     DEFAULT_PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS
+  );
+  const maxFailures = positive(
+    env.PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES,
+    DEFAULT_PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES
   );
   const query = await env.OBSERVABILITY_DATABASE.prepare(
     'SELECT id, source, message, timestamp FROM platform_errors WHERE level = ? AND timestamp BETWEEN ? AND ? ORDER BY timestamp DESC LIMIT ?'
@@ -203,11 +249,15 @@ export async function runPlatformFeedbackTriage(
       .bind(group.firstSeenAt, group.lastSeenAt, group.count, refs, group.signature)
       .run();
     const existing = await env.DATABASE.prepare(
-      `SELECT t.idea_id, t.diagnosis_id FROM platform_feedback_triages t
+      `SELECT t.idea_id, t.diagnosis_id, t.rejected_at FROM platform_feedback_triages t
       WHERE t.signature = ?`
     )
       .bind(group.signature)
-      .first<{ idea_id: string | null; diagnosis_id: string | null }>();
+      .first<{ idea_id: string | null; diagnosis_id: string | null; rejected_at: number | null }>();
+    if (existing?.rejected_at) {
+      result.groupsSkipped += 1;
+      continue;
+    }
     if (existing?.idea_id) {
       const update = await env.DATABASE.prepare(
         `UPDATE tasks SET description = ?, updated_at = ?
@@ -230,10 +280,28 @@ export async function runPlatformFeedbackTriage(
     }
     const claimToken = ulid();
     const claim = await env.DATABASE.prepare(
-      `UPDATE platform_feedback_triages SET claim_token = ?, claim_expires_at = ?
-      WHERE signature = ? AND idea_id IS NULL AND (claim_expires_at IS NULL OR claim_expires_at < ?)`
+      `UPDATE platform_feedback_triages SET
+        failure_count = CASE WHEN claim_expires_at IS NOT NULL AND claim_expires_at < ? THEN failure_count + 1 ELSE failure_count END,
+        last_failure_reason = CASE WHEN claim_expires_at IS NOT NULL AND claim_expires_at < ? THEN ? ELSE last_failure_reason END,
+        last_failed_at = CASE WHEN claim_expires_at IS NOT NULL AND claim_expires_at < ? THEN ? ELSE last_failed_at END,
+        claim_token = ?,
+        claim_expires_at = ?,
+        updated_at = CURRENT_TIMESTAMP
+      WHERE signature = ? AND idea_id IS NULL AND rejected_at IS NULL AND failure_count < ?
+        AND (claim_expires_at IS NULL OR claim_expires_at < ?)`
     )
-      .bind(claimToken, now + claimTtl, group.signature, now)
+      .bind(
+        now,
+        now,
+        'stale claim reclaimed after lease expiry',
+        now,
+        now,
+        claimToken,
+        now + claimTtl,
+        group.signature,
+        maxFailures,
+        now
+      )
       .run();
     if ((claim.meta.changes ?? 0) !== 1) {
       result.groupsSkipped += 1;
@@ -242,7 +310,16 @@ export async function runPlatformFeedbackTriage(
     try {
       const representative = group.evidence[0];
       if (!representative) {
-        result.groupsSkipped += 1;
+        await recordGroupFailure(
+          env,
+          group.signature,
+          claimToken,
+          now,
+          maxFailures,
+          'group had no representative evidence'
+        );
+        result.groupsFailed += 1;
+        result.failureReasons.push('group had no representative evidence');
         continue;
       }
       const diagnosis = await diagnose(
@@ -274,7 +351,8 @@ export async function runPlatformFeedbackTriage(
         ),
         env.DATABASE.prepare(
           `UPDATE platform_feedback_triages SET diagnosis_id = ?, idea_id = ?, claim_token = NULL,
-          claim_expires_at = NULL, updated_at = CURRENT_TIMESTAMP WHERE signature = ? AND claim_token = ?`
+          claim_expires_at = NULL,
+          updated_at = CURRENT_TIMESTAMP WHERE signature = ? AND claim_token = ?`
         ).bind(diagnosis.id, ideaId, group.signature, claimToken),
       ]);
       const insertChanges = committed[0]?.meta.changes ?? 0;
@@ -287,12 +365,23 @@ export async function runPlatformFeedbackTriage(
         throw new Error('Platform feedback triage claim commit was inconsistent');
       }
     } catch (cause) {
-      await env.DATABASE.prepare(
-        'UPDATE platform_feedback_triages SET claim_token = NULL, claim_expires_at = NULL WHERE signature = ? AND claim_token = ?'
-      )
-        .bind(group.signature, claimToken)
-        .run();
-      throw cause;
+      const reason = sanitizeFailureReason(cause);
+      const marked = await recordGroupFailure(
+        env,
+        group.signature,
+        claimToken,
+        now,
+        maxFailures,
+        reason
+      );
+      result.groupsFailed += 1;
+      result.failureReasons.push(reason);
+      log.warn('platform-feedback-triage.group-failed', {
+        trigger,
+        signature: group.signature.slice(0, 16),
+        reason,
+        rejected: marked.rejected,
+      });
     }
   }
   return result;

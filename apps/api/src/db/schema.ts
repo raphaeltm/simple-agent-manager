@@ -2342,6 +2342,10 @@ export const platformFeedbackTriages = sqliteTable(
     ideaId: text('idea_id').references(() => tasks.id, { onDelete: 'set null' }),
     claimToken: text('claim_token'),
     claimExpiresAt: integer('claim_expires_at'),
+    failureCount: integer('failure_count').notNull().default(0),
+    lastFailureReason: text('last_failure_reason'),
+    lastFailedAt: integer('last_failed_at'),
+    rejectedAt: integer('rejected_at'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -2352,6 +2356,7 @@ export const platformFeedbackTriages = sqliteTable(
   (table) => ({
     ideaIdx: index('idx_platform_feedback_triages_idea').on(table.ideaId),
     lastSeenIdx: index('idx_platform_feedback_triages_last_seen').on(table.lastSeenAt),
+    rejectedIdx: index('idx_platform_feedback_triages_rejected').on(table.rejectedAt),
   })
 );
 

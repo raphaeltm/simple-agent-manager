@@ -17,6 +17,8 @@ describe('scheduled platform feedback triage wiring', () => {
       ideasCreated: 1,
       ideasUpdated: 0,
       groupsSkipped: 0,
+      groupsFailed: 0,
+      failureReasons: [],
     });
 
     const result = await runHourlyPlatformMaintenance(env, { monthlyCost, feedbackTriage });
@@ -30,15 +32,34 @@ describe('scheduled platform feedback triage wiring', () => {
   it('matches only the hourly cron and registers its work with waitUntil', async () => {
     const env = {} as Env;
     const pending: Promise<unknown>[] = [];
-    const monthlyCost = vi.fn().mockResolvedValue({ enabled: true, usersUpdated: 0, totalEntries: 0, errors: 0 });
+    const monthlyCost = vi
+      .fn()
+      .mockResolvedValue({ enabled: true, usersUpdated: 0, totalEntries: 0, errors: 0 });
     const feedbackTriage = vi.fn().mockResolvedValue({
-      enabled: true, trigger: 'cron', groupsFound: 0, ideasCreated: 0, ideasUpdated: 0, groupsSkipped: 0,
+      enabled: true,
+      trigger: 'cron',
+      groupsFound: 0,
+      ideasCreated: 0,
+      ideasUpdated: 0,
+      groupsSkipped: 0,
+      groupsFailed: 0,
+      failureReasons: [],
     });
     const waitUntil = (promise: Promise<unknown>) => pending.push(promise);
 
-    expect(scheduleHourlyPlatformMaintenance('*/5 * * * *', env, waitUntil, { monthlyCost, feedbackTriage })).toBe(false);
+    expect(
+      scheduleHourlyPlatformMaintenance('*/5 * * * *', env, waitUntil, {
+        monthlyCost,
+        feedbackTriage,
+      })
+    ).toBe(false);
     expect(pending).toHaveLength(0);
-    expect(scheduleHourlyPlatformMaintenance('30 * * * *', env, waitUntil, { monthlyCost, feedbackTriage })).toBe(true);
+    expect(
+      scheduleHourlyPlatformMaintenance('30 * * * *', env, waitUntil, {
+        monthlyCost,
+        feedbackTriage,
+      })
+    ).toBe(true);
     expect(pending).toHaveLength(1);
     await Promise.all(pending);
     expect(feedbackTriage).toHaveBeenCalledWith(env, 'cron');

@@ -104,6 +104,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT?: string;
   PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT?: string;
   PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS?: string;
+  PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES?: string;
   JWT_PRIVATE_KEY: string;
   JWT_PUBLIC_KEY: string;
   ENCRYPTION_KEY: string;

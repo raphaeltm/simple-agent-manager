@@ -19,15 +19,15 @@ Platform feedback triage currently treats each sweep as a mostly linear unit of 
 
 ## Implementation Checklist
 
-- [ ] Add bounded triage failure/retry fields to `platform_feedback_triages` with an append-only D1 migration and matching Drizzle schema.
-- [ ] Add sanitized, bounded failure reason handling for per-group diagnosis/commit failures.
-- [ ] Change the sweep loop so one failing group increments structured failure accounting and later groups still run.
-- [ ] Make stale/zombie claim recovery deterministic across sweeps by reclaiming expired claims and recording retry/failure state.
-- [ ] Ensure manual trigger responses and cron logs expose enough sanitized aggregate failure detail for operators.
-- [ ] Preserve untrusted evidence fencing, source allowlisting, and redaction behavior in generated Ideas.
-- [ ] Add/adjust unit tests for per-group failure isolation, stale claim recovery/failure marking across two sweeps, and sanitized cron/manual diagnostics.
-- [ ] Run focused platform feedback triage tests.
-- [ ] Run API lint/typecheck and proportional repo validation.
+- [x] Add bounded triage failure/retry fields to `platform_feedback_triages` with an append-only D1 migration and matching Drizzle schema.
+- [x] Add sanitized, bounded failure reason handling for per-group diagnosis/commit failures.
+- [x] Change the sweep loop so one failing group increments structured failure accounting and later groups still run.
+- [x] Make stale/zombie claim recovery deterministic across sweeps by reclaiming expired claims and recording retry/failure state.
+- [x] Ensure manual trigger responses and cron logs expose enough sanitized aggregate failure detail for operators.
+- [x] Preserve untrusted evidence fencing, source allowlisting, and redaction behavior in generated Ideas.
+- [x] Add/adjust unit tests for per-group failure isolation, stale claim recovery/failure marking across two sweeps, and sanitized cron/manual diagnostics.
+- [x] Run focused platform feedback triage tests.
+- [x] Run API lint/typecheck and proportional repo validation.
 - [ ] Run Cloudflare/D1 and security review checks before finalizing.
 
 ## Acceptance Criteria

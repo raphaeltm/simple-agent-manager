@@ -8,10 +8,12 @@ const mockGetUserId = vi.fn().mockReturnValue('user-superadmin');
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: any, next: any) => next()),
   requireApproved: () => vi.fn((_c: any, next: any) => next()),
-  requireSuperadmin: () => vi.fn((c: any, next: any) => {
-    if (c.req.header('x-test-role') === 'non-superadmin') return c.json({ error: 'FORBIDDEN' }, 403);
-    return next();
-  }),
+  requireSuperadmin: () =>
+    vi.fn((c: any, next: any) => {
+      if (c.req.header('x-test-role') === 'non-superadmin')
+        return c.json({ error: 'FORBIDDEN' }, 403);
+      return next();
+    }),
   getUserId: (...args: unknown[]) => mockGetUserId(...args),
 }));
 
@@ -48,7 +50,6 @@ const mockRunPlatformFeedbackTriage = vi.fn();
 vi.mock('../../../src/services/platform-feedback-triage', () => ({
   runPlatformFeedbackTriage: (...args: unknown[]) => mockRunPlatformFeedbackTriage(...args),
 }));
-
 
 // Mock observability service
 const mockQueryErrors = vi.fn();
@@ -191,11 +192,7 @@ describe('Admin Observability Routes', () => {
     it('should pass cursor param to queryErrors', async () => {
       mockQueryErrors.mockResolvedValue({ errors: [], cursor: null, hasMore: false, total: 0 });
 
-      await app.request(
-        '/api/admin/observability/errors?cursor=abc123',
-        {},
-        createEnv()
-      );
+      await app.request('/api/admin/observability/errors?cursor=abc123', {}, createEnv());
 
       expect(mockQueryErrors).toHaveBeenCalledWith(
         expect.anything(),
@@ -256,11 +253,7 @@ describe('Admin Observability Routes', () => {
     });
 
     it('should return 400 for invalid limit', async () => {
-      const res = await app.request(
-        '/api/admin/observability/errors?limit=999',
-        {},
-        createEnv()
-      );
+      const res = await app.request('/api/admin/observability/errors?limit=999', {}, createEnv());
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -268,11 +261,7 @@ describe('Admin Observability Routes', () => {
     });
 
     it('should return 400 for non-numeric limit', async () => {
-      const res = await app.request(
-        '/api/admin/observability/errors?limit=abc',
-        {},
-        createEnv()
-      );
+      const res = await app.request('/api/admin/observability/errors?limit=abc', {}, createEnv());
 
       expect(res.status).toBe(400);
     });
@@ -369,7 +358,11 @@ describe('Admin Observability Routes', () => {
         range: '24h',
         interval: '1h',
         buckets: [
-          { timestamp: '2026-02-14T00:00:00.000Z', total: 5, bySource: { client: 2, 'vm-agent': 1, api: 2 } },
+          {
+            timestamp: '2026-02-14T00:00:00.000Z',
+            total: 5,
+            bySource: { client: 2, 'vm-agent': 1, api: 2 },
+          },
         ],
       };
       mockGetErrorTrends.mockResolvedValue(mockTrends);
@@ -391,11 +384,7 @@ describe('Admin Observability Routes', () => {
     });
 
     it('should return 400 for invalid range', async () => {
-      const res = await app.request(
-        '/api/admin/observability/trends?range=2w',
-        {},
-        createEnv()
-      );
+      const res = await app.request('/api/admin/observability/trends?range=2w', {}, createEnv());
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -428,20 +417,33 @@ describe('Admin Observability Routes', () => {
     };
 
     function postLogs(body: unknown, envOverrides: Partial<Env> = {}) {
-      return app.request('/api/admin/observability/logs/query', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      }, createEnv({
-        CF_API_TOKEN: 'test-token',
-        CF_ACCOUNT_ID: 'test-account',
-        ...envOverrides,
-      }));
+      return app.request(
+        '/api/admin/observability/logs/query',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        },
+        createEnv({
+          CF_API_TOKEN: 'test-token',
+          CF_ACCOUNT_ID: 'test-account',
+          ...envOverrides,
+        })
+      );
     }
 
     it('should return 200 with log results from queryCloudflareLogs', async () => {
       const mockResult = {
-        logs: [{ timestamp: '2026-02-14T12:00:00Z', level: 'info', event: 'http.request', message: 'GET /health', details: {}, invocationId: 'inv-1' }],
+        logs: [
+          {
+            timestamp: '2026-02-14T12:00:00Z',
+            level: 'info',
+            event: 'http.request',
+            message: 'GET /health',
+            details: {},
+            invocationId: 'inv-1',
+          },
+        ],
         cursor: null,
         hasMore: false,
       };
@@ -466,15 +468,17 @@ describe('Admin Observability Routes', () => {
         cursor: 'page-2',
       });
 
-      expect(mockQueryCloudflareLogs).toHaveBeenCalledWith(expect.objectContaining({
-        cfApiToken: 'test-token',
-        cfAccountId: 'test-account',
-        timeRange: { start: '2026-02-14T00:00:00Z', end: '2026-02-14T12:00:00Z' },
-        levels: ['error', 'warn'],
-        search: 'timeout',
-        limit: 50,
-        cursor: 'page-2',
-      }));
+      expect(mockQueryCloudflareLogs).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cfApiToken: 'test-token',
+          cfAccountId: 'test-account',
+          timeRange: { start: '2026-02-14T00:00:00Z', end: '2026-02-14T12:00:00Z' },
+          levels: ['error', 'warn'],
+          search: 'timeout',
+          limit: 50,
+          cursor: 'page-2',
+        })
+      );
     });
 
     it('should return 400 when CF credentials are not configured', async () => {
@@ -542,7 +546,11 @@ describe('Admin Observability Routes', () => {
     it('should return 429 when rate limited', async () => {
       // Mock the rate limit middleware to throw a rate limit error
       mockRateLimitMiddleware.mockImplementationOnce(() => {
-        const err = new Error('Too many requests. Please try again later.') as Error & { statusCode: number; error: string; retryAfter: number };
+        const err = new Error('Too many requests. Please try again later.') as Error & {
+          statusCode: number;
+          error: string;
+          retryAfter: number;
+        };
         err.statusCode = 429;
         err.error = 'RATE_LIMIT_EXCEEDED';
         err.retryAfter = 30;
@@ -582,9 +590,16 @@ describe('Admin Observability Routes', () => {
       const mockIdFromName = vi.fn().mockReturnValue('do-id');
       const mockGet = vi.fn().mockReturnValue(mockDoStub);
 
-      const res = await app.request('/api/admin/observability/logs/stream', {}, createEnv({
-        ADMIN_LOGS: { idFromName: mockIdFromName, get: mockGet } as unknown as DurableObjectNamespace,
-      }));
+      const res = await app.request(
+        '/api/admin/observability/logs/stream',
+        {},
+        createEnv({
+          ADMIN_LOGS: {
+            idFromName: mockIdFromName,
+            get: mockGet,
+          } as unknown as DurableObjectNamespace,
+        })
+      );
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -601,11 +616,18 @@ describe('Admin Observability Routes', () => {
       const mockIdFromName = vi.fn().mockReturnValue('do-id');
       const mockGet = vi.fn().mockReturnValue(mockDoStub);
 
-      await app.request('/api/admin/observability/logs/stream', {
-        headers: { Upgrade: 'websocket' },
-      }, createEnv({
-        ADMIN_LOGS: { idFromName: mockIdFromName, get: mockGet } as unknown as DurableObjectNamespace,
-      }));
+      await app.request(
+        '/api/admin/observability/logs/stream',
+        {
+          headers: { Upgrade: 'websocket' },
+        },
+        createEnv({
+          ADMIN_LOGS: {
+            idFromName: mockIdFromName,
+            get: mockGet,
+          } as unknown as DurableObjectNamespace,
+        })
+      );
 
       expect(mockIdFromName).toHaveBeenCalledWith('admin-logs');
       expect(mockGet).toHaveBeenCalledWith('do-id');
@@ -627,26 +649,35 @@ describe('Admin Observability Routes', () => {
       const mockIdFromName = vi.fn().mockReturnValue('do-id');
       const mockGet = vi.fn().mockReturnValue(mockDoStub);
 
-      const logs = [{
-        type: 'log',
-        entry: {
-          timestamp: '2026-02-14T12:00:00Z',
-          level: 'info',
-          event: 'test',
-          message: 'test log',
-          details: {},
-          scriptName: 'test-worker',
+      const logs = [
+        {
+          type: 'log',
+          entry: {
+            timestamp: '2026-02-14T12:00:00Z',
+            level: 'info',
+            event: 'test',
+            message: 'test log',
+            details: {},
+            scriptName: 'test-worker',
+          },
         },
-      }];
+      ];
 
       // Use synthetic hostname to simulate service binding call
-      const res = await app.request('https://internal/api/admin/observability/logs/ingest', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ logs }),
-      }, createEnv({
-        ADMIN_LOGS: { idFromName: mockIdFromName, get: mockGet } as unknown as DurableObjectNamespace,
-      }));
+      const res = await app.request(
+        'https://internal/api/admin/observability/logs/ingest',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ logs }),
+        },
+        createEnv({
+          ADMIN_LOGS: {
+            idFromName: mockIdFromName,
+            get: mockGet,
+          } as unknown as DurableObjectNamespace,
+        })
+      );
 
       expect(res.status).toBe(200);
       expect(mockIdFromName).toHaveBeenCalledWith('admin-logs');
@@ -661,59 +692,126 @@ describe('Admin Observability Routes', () => {
   describe('deployment diagnosis routes', () => {
     it('runs an error-targeted diagnosis as the authenticated superadmin', async () => {
       const diagnosis = {
-        id: 'diag-1', errorId: 'err-1', startTime: '2026-07-29T10:00:00Z',
-        endTime: '2026-07-29T10:30:00Z', diagnosis: 'Actionable result',
-        model: '@cf/zai-org/glm-5.2', ideaId: null, createdBy: 'user-superadmin',
+        id: 'diag-1',
+        errorId: 'err-1',
+        startTime: '2026-07-29T10:00:00Z',
+        endTime: '2026-07-29T10:30:00Z',
+        diagnosis: 'Actionable result',
+        model: '@cf/zai-org/glm-5.2',
+        ideaId: null,
+        createdBy: 'user-superadmin',
         createdAt: '2026-07-29T10:31:00Z',
-        usage: { turns: 2, inputTokens: 100, outputTokens: 20, totalTokens: 120, dailyTokensUsed: 120, dailyTokenLimit: 120000 },
+        usage: {
+          turns: 2,
+          inputTokens: 100,
+          outputTokens: 20,
+          totalTokens: 120,
+          dailyTokensUsed: 120,
+          dailyTokenLimit: 120000,
+        },
       };
       mockRunDebugDiagnosis.mockResolvedValue(diagnosis);
-      const response = await app.request('/api/admin/observability/diagnoses', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ errorId: 'err-1' }),
-      }, createEnv());
+      const response = await app.request(
+        '/api/admin/observability/diagnoses',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ errorId: 'err-1' }),
+        },
+        createEnv()
+      );
       expect(response.status).toBe(201);
       expect(await response.json()).toEqual({ diagnosis });
-      expect(mockRunDebugDiagnosis).toHaveBeenCalledWith(expect.any(Object), 'user-superadmin', { errorId: 'err-1' });
+      expect(mockRunDebugDiagnosis).toHaveBeenCalledWith(expect.any(Object), 'user-superadmin', {
+        errorId: 'err-1',
+      });
     });
 
     it('returns 429 when the deployment feature budget is exhausted', async () => {
-      mockRunDebugDiagnosis.mockRejectedValue(new Error('Daily deployment debugging budget exhausted'));
-      const response = await app.request('/api/admin/observability/diagnoses', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ errorId: 'err-1' }),
-      }, createEnv());
+      mockRunDebugDiagnosis.mockRejectedValue(
+        new Error('Daily deployment debugging budget exhausted')
+      );
+      const response = await app.request(
+        '/api/admin/observability/diagnoses',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ errorId: 'err-1' }),
+        },
+        createEnv()
+      );
       expect(response.status).toBe(429);
       expect(await response.json()).toMatchObject({ error: 'DEBUG_BUDGET_EXHAUSTED' });
     });
 
     it('saves a persisted diagnosis as a draft Idea', async () => {
       mockSaveDebugDiagnosisAsIdea.mockResolvedValue({ ideaId: 'idea-1' });
-      const response = await app.request('/api/admin/observability/diagnoses/diag-1/idea', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ projectId: 'project-1' }),
-      }, createEnv());
+      const response = await app.request(
+        '/api/admin/observability/diagnoses/diag-1/idea',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: 'project-1' }),
+        },
+        createEnv()
+      );
       expect(response.status).toBe(201);
       expect(await response.json()).toEqual({ ideaId: 'idea-1' });
     });
     it('uses the shared manual feedback-triage core from the admin router', async () => {
-      const result = { enabled: true, trigger: 'manual', groupsFound: 1,
-        ideasCreated: 1, ideasUpdated: 0, groupsSkipped: 0 };
+      const result = {
+        enabled: true,
+        trigger: 'manual',
+        groupsFound: 1,
+        ideasCreated: 1,
+        ideasUpdated: 0,
+        groupsSkipped: 0,
+        groupsFailed: 1,
+        failureReasons: ['provider rejected [email] token [REDACTED_API_KEY]'],
+      };
       mockRunPlatformFeedbackTriage.mockResolvedValue(result);
       const env = createEnv({ PLATFORM_FEEDBACK_PROJECT_ID: 'project-1' });
-      const response = await app.request('/api/admin/observability/feedback-triage', { method: 'POST' }, env);
+      const response = await app.request(
+        '/api/admin/observability/feedback-triage',
+        { method: 'POST' },
+        env
+      );
       expect(response.status).toBe(200);
       expect(await response.json()).toEqual({ result });
       expect(mockRunPlatformFeedbackTriage).toHaveBeenCalledWith(env, 'manual');
     });
+    it('returns sanitized failure accounting from manual feedback triage', async () => {
+      const result = {
+        enabled: true,
+        trigger: 'manual',
+        groupsFound: 2,
+        ideasCreated: 1,
+        ideasUpdated: 0,
+        groupsSkipped: 0,
+        groupsFailed: 1,
+        failureReasons: ['diagnosis failed for [email] using [REDACTED_API_KEY]'],
+      };
+      mockRunPlatformFeedbackTriage.mockResolvedValue(result);
+      const response = await app.request(
+        '/api/admin/observability/feedback-triage',
+        { method: 'POST' },
+        createEnv()
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({ result });
+    });
 
     it('rejects a non-superadmin before invoking manual triage', async () => {
-      const response = await app.request('/api/admin/observability/feedback-triage', {
-        method: 'POST', headers: { 'x-test-role': 'non-superadmin' },
-      }, createEnv({ PLATFORM_FEEDBACK_PROJECT_ID: 'project-1' }));
+      const response = await app.request(
+        '/api/admin/observability/feedback-triage',
+        {
+          method: 'POST',
+          headers: { 'x-test-role': 'non-superadmin' },
+        },
+        createEnv({ PLATFORM_FEEDBACK_PROJECT_ID: 'project-1' })
+      );
       expect(response.status).toBe(403);
       expect(mockRunPlatformFeedbackTriage).not.toHaveBeenCalled();
     });
   });
-
 });

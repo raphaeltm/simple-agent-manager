@@ -11,10 +11,7 @@ export interface HourlyMaintenanceDeps {
 }
 
 /** Runs independent hourly jobs without allowing one failure to suppress the other. */
-export async function runHourlyPlatformMaintenance(
-  env: Env,
-  deps: HourlyMaintenanceDeps = {}
-) {
+export async function runHourlyPlatformMaintenance(env: Env, deps: HourlyMaintenanceDeps = {}) {
   const [monthlyCost, feedbackTriage] = await Promise.allSettled([
     (deps.monthlyCost ?? runMonthlyCostAggregation)(env),
     (deps.feedbackTriage ?? runPlatformFeedbackTriage)(env, 'cron'),
@@ -50,6 +47,8 @@ export function scheduleHourlyPlatformMaintenance(
         feedbackTriageIdeasCreated: feedbackTriage?.ideasCreated ?? 0,
         feedbackTriageIdeasUpdated: feedbackTriage?.ideasUpdated ?? 0,
         feedbackTriageGroupsSkipped: feedbackTriage?.groupsSkipped ?? 0,
+        feedbackTriageGroupsFailed: feedbackTriage?.groupsFailed ?? 0,
+        feedbackTriageFailureReasons: feedbackTriage?.failureReasons ?? [],
         monthlyCostUsersUpdated: result?.usersUpdated ?? 0,
         monthlyCostTotalEntries: result?.totalEntries ?? 0,
         monthlyCostErrors: result?.errors ?? 0,
