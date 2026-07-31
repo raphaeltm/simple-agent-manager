@@ -3,12 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
-    paths-ignore:
-      - 'apps/www/**'
   pull_request:
     branches: [main]
-    paths-ignore:
-      - 'apps/www/**'
 
 permissions:
   contents: read
