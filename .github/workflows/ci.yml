@@ -349,6 +349,9 @@ jobs:
       - name: Source-contract test detection
         run: pnpm quality:source-contract-tests
 
+      - name: Tracked artifact guard
+        run: pnpm quality:tracked-artifacts
+
   durable-object-workers:
     name: Durable Object Workers
     if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'

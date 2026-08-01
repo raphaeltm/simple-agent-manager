@@ -17,12 +17,12 @@
 
 ## Implementation Checklist
 
-- [ ] Search code, scripts, workflows, docs, and task history for references to the exact stale path `packages/vm-agent/vm-agent`.
-- [ ] Remove only `packages/vm-agent/vm-agent` from tracked source control.
-- [ ] Add an ignore rule for `/packages/vm-agent/vm-agent` without ignoring valid source or `packages/vm-agent/bin/` artifacts unexpectedly.
-- [ ] Add or update a deterministic quality check/test that fails if `packages/vm-agent/vm-agent` is tracked or present as a repository artifact.
-- [ ] Wire the guard into existing quality/CI scripts if it is not already covered.
-- [ ] Run focused tests for the guard and relevant VM-agent/deployment quality checks.
+- [x] Search code, scripts, workflows, docs, and task history for references to the exact stale path `packages/vm-agent/vm-agent`.
+- [x] Remove only `packages/vm-agent/vm-agent` from tracked source control.
+- [x] Add an ignore rule for `/packages/vm-agent/vm-agent` without ignoring valid source or `packages/vm-agent/bin/` artifacts unexpectedly.
+- [x] Add or update a deterministic quality check/test that fails if `packages/vm-agent/vm-agent` is tracked or present as a repository artifact.
+- [x] Wire the guard into existing quality/CI scripts if it is not already covered.
+- [x] Run focused tests for the guard and relevant VM-agent/deployment quality checks.
 - [ ] Run repository quality checks required for the PR and confirm GitHub CI is green.
 - [ ] Create a PR that explicitly states no runtime behavior change and cites deployment-artifact evidence; do not merge it.
 
