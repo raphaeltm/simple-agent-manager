@@ -22,7 +22,7 @@ Completed review-only subtasks can contain actionable ranked findings in their f
 - [x] Covered the SAM session/agent `get_task_details` contract in implementation; route-level regression covers the persisted detail behavior through ProjectData.
 - [x] Update shared TypeScript task detail types if needed.
 - [x] Run focused API tests and relevant typecheck.
-- [ ] Run local review for test quality and API compatibility; address findings.
+- [x] Run local review for test quality and API compatibility; address findings.
 - [ ] Create PR from `sam/execute-task-using-skill-6r8n2s` and wait for CI; do not merge.
 
 ## Acceptance criteria
@@ -33,3 +33,12 @@ Completed review-only subtasks can contain actionable ranked findings in their f
 - Tests fail on the previous generic-summary-only behavior and pass with the fix.
 - Relevant API tests/typecheck and CI are green.
 - PR is created and left unmerged.
+
+## Validation evidence
+
+- `pnpm --filter @simple-agent-manager/api test -- --run tests/unit/routes/mcp.test.ts` passed: 226 tests.
+- `pnpm --filter @simple-agent-manager/api typecheck` passed.
+- `pnpm --filter @simple-agent-manager/shared typecheck && pnpm --filter @simple-agent-manager/api lint && pnpm --filter @simple-agent-manager/api test -- --run tests/unit/routes/mcp.test.ts tests/unit/durable-objects/sam-tools-phase-a.test.ts` passed.
+- `pnpm typecheck && pnpm test && pnpm build` passed.
+- Local subagent test-quality review: PASS.
+- Local subagent API compatibility review: PASS.
