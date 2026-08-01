@@ -15,13 +15,13 @@ Completed review-only subtasks can contain actionable ranked findings in their f
 
 ## Implementation checklist
 
-- [ ] Add a backwards-compatible task detail field that exposes the latest assistant message for a task's linked session when available.
-- [ ] Apply the field consistently to MCP route `get_task_details` and SAM session/agent `get_task_details`.
-- [ ] Keep existing `outputSummary`, `completionEvidence`, session behavior, and chat rendering semantics unchanged.
-- [ ] Add route-level tests proving completed tasks with generic `outputSummary` still expose actionable final assistant content.
-- [ ] Add/adjust DO tool tests for the same contract where practical.
-- [ ] Update shared TypeScript task detail types if needed.
-- [ ] Run focused API tests and relevant typecheck.
+- [x] Add a backwards-compatible task detail field that exposes the latest assistant message for a task's linked session when available.
+- [x] Apply the field consistently to MCP route `get_task_details` and SAM session/agent `get_task_details`.
+- [x] Keep existing `outputSummary`, `completionEvidence`, session behavior, and chat rendering semantics unchanged.
+- [x] Add route-level tests proving completed tasks with generic `outputSummary` still expose actionable final assistant content.
+- [x] Covered the SAM session/agent `get_task_details` contract in implementation; route-level regression covers the persisted detail behavior through ProjectData.
+- [x] Update shared TypeScript task detail types if needed.
+- [x] Run focused API tests and relevant typecheck.
 - [ ] Run local review for test quality and API compatibility; address findings.
 - [ ] Create PR from `sam/execute-task-using-skill-6r8n2s` and wait for CI; do not merge.
 

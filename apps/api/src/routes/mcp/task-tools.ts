@@ -49,6 +49,53 @@ type TaskSearchRow = {
 const TASK_DETAIL_RECENT_ASSISTANT_MESSAGE_LIMIT = 5;
 const TASK_DETAIL_MESSAGE_SNIPPET_LENGTH = 2000;
 
+type FinalAssistantMessage = {
+  id: string;
+  content: string;
+  createdAt: number | string;
+};
+
+async function getLatestAssistantMessageForTask(
+  env: Env,
+  projectId: string,
+  sessionId: string | null
+): Promise<FinalAssistantMessage | null> {
+  if (!sessionId) return null;
+
+  try {
+    const { messages } = await projectDataService.getMessages(
+      env,
+      projectId,
+      sessionId,
+      1,
+      null,
+      ['assistant'],
+      false,
+      'desc'
+    );
+    const message = messages[0];
+    if (!message || typeof message.content !== 'string' || !message.content.trim()) {
+      return null;
+    }
+
+    return {
+      id: typeof message.id === 'string' ? message.id : '',
+      content: message.content,
+      createdAt:
+        typeof message.createdAt === 'number' || typeof message.createdAt === 'string'
+          ? message.createdAt
+          : '',
+    };
+  } catch (err) {
+    log.warn('mcp.get_task_details.final_assistant_message_failed', {
+      projectId,
+      sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
 function truncateSnippet(value: string | null, maxLength: number): string | null {
   if (!value) return null;
   return value.slice(0, maxLength) + (value.length > maxLength ? '...' : '');
@@ -655,6 +702,12 @@ export async function handleGetTaskDetails(
     task.chatSessionId
   );
 
+  const finalAssistantMessage = await getLatestAssistantMessageForTask(
+    env,
+    tokenData.projectId,
+    task.chatSessionId
+  );
+
   const taskResult = {
     id: task.id,
     title: task.title,
@@ -665,6 +718,7 @@ export async function handleGetTaskDetails(
     outputPrUrl: task.outputPrUrl,
     outputSummary: task.outputSummary,
     completionEvidence: parseCompletionEvidenceJson(task.completionEvidence ?? null),
+    finalAssistantMessage,
     errorMessage: task.errorMessage,
     // Instant (cf-container) dispatches create the chat session asynchronously;
     // dispatch_task points callers here to obtain the sessionId after launch.

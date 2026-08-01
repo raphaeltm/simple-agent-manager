@@ -8,7 +8,59 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
+import type { Env } from '../../../env';
+import { createModuleLogger } from '../../../lib/logger';
+import * as projectDataService from '../../../services/project-data';
 import type { AnthropicToolDef, ToolContext } from '../types';
+
+const log = createModuleLogger('sam_session.get_task_details');
+
+type FinalAssistantMessage = {
+  id: string;
+  content: string;
+  createdAt: number | string;
+};
+
+async function getLatestAssistantMessageForTask(
+  env: Env,
+  projectId: string,
+  sessionId: string | null
+): Promise<FinalAssistantMessage | null> {
+  if (!sessionId) return null;
+
+  try {
+    const { messages } = await projectDataService.getMessages(
+      env,
+      projectId,
+      sessionId,
+      1,
+      null,
+      ['assistant'],
+      false,
+      'desc'
+    );
+    const message = messages[0];
+    if (!message || typeof message.content !== 'string' || !message.content.trim()) {
+      return null;
+    }
+
+    return {
+      id: typeof message.id === 'string' ? message.id : '',
+      content: message.content,
+      createdAt:
+        typeof message.createdAt === 'number' || typeof message.createdAt === 'string'
+          ? message.createdAt
+          : '',
+    };
+  } catch (err) {
+    log.warn('sam_session.get_task_details.final_assistant_message_failed', {
+      projectId,
+      sessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
 
 export const getTaskDetailsDef: AnthropicToolDef = {
   name: 'get_task_details',
@@ -35,7 +87,8 @@ export async function getTaskDetails(
     return { error: 'taskId is required.' };
   }
 
-  const db = drizzle(ctx.env.DATABASE as D1Database, { schema });
+  const env = ctx.env as unknown as Env;
+  const db = drizzle(env.DATABASE as D1Database, { schema });
 
   // Join tasks with projects to verify the user owns the project
   const rows = await db
@@ -55,6 +108,7 @@ export async function getTaskDetails(
       updatedAt: schema.tasks.updatedAt,
       startedAt: schema.tasks.startedAt,
       completedAt: schema.tasks.completedAt,
+      chatSessionId: schema.tasks.chatSessionId,
       projectId: schema.tasks.projectId,
       projectName: schema.projects.name,
     })
@@ -68,6 +122,12 @@ export async function getTaskDetails(
     return { error: 'Task not found or not owned by you.' };
   }
 
+  const finalAssistantMessage = await getLatestAssistantMessageForTask(
+    env,
+    task.projectId,
+    task.chatSessionId
+  );
+
   return {
     id: task.id,
     title: task.title,
@@ -79,6 +139,7 @@ export async function getTaskDetails(
     outputPrUrl: task.outputPrUrl,
     outputSummary: task.outputSummary,
     completionEvidence: parseCompletionEvidenceJson(task.completionEvidence ?? null),
+    finalAssistantMessage,
     errorMessage: task.errorMessage,
     projectId: task.projectId,
     projectName: task.projectName,
