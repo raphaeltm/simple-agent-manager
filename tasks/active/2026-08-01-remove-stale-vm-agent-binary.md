@@ -23,7 +23,7 @@
 - [x] Add or update a deterministic quality check/test that fails if `packages/vm-agent/vm-agent` is tracked or present as a repository artifact.
 - [x] Wire the guard into existing quality/CI scripts if it is not already covered.
 - [x] Run focused tests for the guard and relevant VM-agent/deployment quality checks.
-- [ ] Run repository quality checks required for the PR and confirm GitHub CI is green.
+- [x] Run repository quality checks required for the PR locally; GitHub CI pending after PR creation.
 - [ ] Create a PR that explicitly states no runtime behavior change and cites deployment-artifact evidence; do not merge it.
 
 ## Acceptance Criteria
@@ -45,3 +45,15 @@
 - `scripts/quality/deploy-reusable-workflow.test.ts`
 - `apps/api/Dockerfile.vm-agent-container`
 - `packages/cloud-init/src/template.ts`
+
+## Validation Notes
+
+- `pnpm exec vitest run --config scripts/quality/vitest.config.ts scripts/quality/check-tracked-artifacts.test.ts` passed: 3 tests.
+- `pnpm quality:tracked-artifacts` passed.
+- `pnpm exec vitest run --config scripts/quality/vitest.config.ts` passed: 119 tests across 11 quality test files.
+- `pnpm quality:source-contract-tests` passed.
+- `pnpm quality:file-sizes` passed.
+- `pnpm lint && pnpm typecheck && pnpm test && pnpm build` passed. Root test summary included API 6514 tests and web 2844 tests passing.
+- `/tmp/sam-go-install/go/bin/go test -race ./...` was attempted from `packages/vm-agent` with Go 1.25.0. It failed only because Docker is unavailable in this local workspace (`exec: "docker": executable file not found in $PATH`) in docker-dependent PTY/server tests; GitHub VM-agent CI jobs run on Ubuntu with Docker available.
+- Exact-path verification: `git ls-files packages/vm-agent/vm-agent` returns no tracked file after deletion; `test ! -e packages/vm-agent/vm-agent` passes; exact-path grep found no non-guard/task references.
+- Local subagent review attempts for task-completion/test-quality critique timed out twice; PR review evidence should show this unresolved gate.
