@@ -2,7 +2,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
-import { getFinalAssistantOutputForTask, handleGetTaskDetails } from '../../../src/routes/mcp/task-tools';
+import { getFinalAssistantOutputForTask } from '../../../src/routes/mcp/task-final-assistant-output';
+import { handleGetTaskDetails } from '../../../src/routes/mcp/task-tools';
 
 const getMessagesSpy = vi.fn();
 let taskRows: TaskDetailRow[] = [];

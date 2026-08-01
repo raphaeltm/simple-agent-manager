@@ -9,8 +9,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
-import { groupTokensIntoMessages } from '../../../routes/mcp/session-tools';
-import * as projectDataService from '../../../services/project-data';
+import { getFinalAssistantOutputForTask } from '../../../routes/mcp/task-final-assistant-output';
 import type { AnthropicToolDef, ToolContext } from '../types';
 
 export const getTaskDetailsDef: AnthropicToolDef = {
@@ -29,39 +28,6 @@ export const getTaskDetailsDef: AnthropicToolDef = {
     required: ['taskId'],
   },
 };
-
-async function getFinalAssistantOutputForTask(
-  ctx: ToolContext,
-  task: { projectId: string; chatSessionId: string | null; status: string }
-): Promise<string | null> {
-  if (task.status !== 'completed' || !task.chatSessionId) {
-    return null;
-  }
-
-  const { messages } = await projectDataService.getMessages(
-    ctx.env as unknown as Env,
-    task.projectId,
-    task.chatSessionId,
-    20,
-    null,
-    ['user', 'assistant'],
-    false,
-    'desc'
-  );
-
-  const tokens = messages
-    .map((m: Record<string, unknown>) => ({
-      id: m.id as string,
-      role: m.role as string,
-      content: m.content as string,
-      createdAt: m.createdAt as number,
-    }))
-    .reverse();
-  const grouped = groupTokensIntoMessages(tokens);
-  const latestAssistant = [...grouped].reverse().find((m) => m.role === 'assistant');
-  const content = latestAssistant?.content.trim();
-  return content || null;
-}
 
 export async function getTaskDetails(
   input: { taskId: string },
@@ -115,7 +81,7 @@ export async function getTaskDetails(
     outputBranch: task.outputBranch,
     outputPrUrl: task.outputPrUrl,
     outputSummary: task.outputSummary,
-    finalAssistantOutput: await getFinalAssistantOutputForTask(ctx, {
+    finalAssistantOutput: await getFinalAssistantOutputForTask(ctx.env as unknown as Env, {
       projectId: task.projectId,
       chatSessionId: task.chatSessionId,
       status: task.status,
