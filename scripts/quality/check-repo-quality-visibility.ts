@@ -5,8 +5,7 @@
  * checked-in baseline. The default mode exits 0 so it can run locally or in CI
  * without destabilizing the current build; pass --strict to make drift fail.
  */
-import { execSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 
 type CoverageMetric = 'statements' | 'branches' | 'functions' | 'lines';
@@ -43,6 +42,9 @@ const COVERAGE_METRICS: CoverageMetric[] = ['statements', 'branches', 'functions
 const SOURCE_EXTENSIONS = /\.(ts|tsx|go)$/;
 const TEST_PATTERNS = [/\.test\./, /\.spec\./, /_test\.go$/];
 const EXCLUDED_PATH_PATTERNS = [/\/node_modules\//, /\/dist\//, /\.d\.ts$/, /\.generated\./];
+const PATH_COLLATOR = new Intl.Collator('en');
+const COVERAGE_THRESHOLD_PATTERN =
+  /coverageConfig\([^]*?\{\s*statements:\s*(\d+),\s*branches:\s*(\d+),\s*functions:\s*(\d+),\s*lines:\s*(\d+),\s*\}/m;
 
 export function isTestFile(file: string): boolean {
   return TEST_PATTERNS.some((pattern) => pattern.test(file));
@@ -54,9 +56,7 @@ export function countLines(content: string): number {
 }
 
 export function parseCoverageThresholds(source: string): CoverageThresholds | null {
-  const match = source.match(
-    /coverageConfig\([^]*?\{\s*statements:\s*(\d+),\s*branches:\s*(\d+),\s*functions:\s*(\d+),\s*lines:\s*(\d+),\s*\}/m
-  );
+  const match = COVERAGE_THRESHOLD_PATTERN.exec(source);
   if (!match) return null;
   return {
     statements: Number(match[1]),
@@ -73,7 +73,7 @@ export function compareCoverageThresholds(
   const files = new Set([...Object.keys(baseline), ...Object.keys(current)]);
   const drift: CoverageDrift[] = [];
 
-  for (const file of [...files].sort()) {
+  for (const file of [...files].sort((left, right) => PATH_COLLATOR.compare(left, right))) {
     for (const metric of COVERAGE_METRICS) {
       const baselineValue = baseline[file]?.[metric] ?? null;
       const currentValue = current[file]?.[metric] ?? null;
@@ -111,17 +111,19 @@ function loadBaseline(): Baseline {
 }
 
 function listCandidateFiles(): string[] {
-  return execSync(
-    "find apps packages -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.go' \\)",
-    {
-      cwd: ROOT,
-      encoding: 'utf-8',
-    }
-  )
-    .trim()
-    .split('\n')
+  return ['apps', 'packages']
+    .flatMap((directory) => collectSourceFiles(resolve(ROOT, directory)))
     .filter((file) => file && SOURCE_EXTENSIONS.test(file))
     .filter((file) => !EXCLUDED_PATH_PATTERNS.some((pattern) => pattern.test(`/${file}`)));
+}
+
+function collectSourceFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const entryPath = resolve(directory, entry.name);
+    if (entry.isDirectory()) return collectSourceFiles(entryPath);
+    if (!entry.isFile()) return [];
+    return relative(ROOT, entryPath);
+  });
 }
 
 function scanFileSizes(baseline: Baseline): FileSizeFinding[] {
@@ -131,12 +133,17 @@ function scanFileSizes(baseline: Baseline): FileSizeFinding[] {
       return classifyFileSize(file, countLines(content), baseline.fileSizeBudgets);
     })
     .filter((finding): finding is FileSizeFinding => finding !== null)
-    .sort((a, b) => b.lines - a.lines || a.file.localeCompare(b.file));
+    .sort((left, right) => {
+      const lineDifference = right.lines - left.lines;
+      return lineDifference || PATH_COLLATOR.compare(left.file, right.file);
+    });
 }
 
 function readCurrentCoverageThresholds(baseline: Baseline): Record<string, CoverageThresholds> {
   const current: Record<string, CoverageThresholds> = {};
-  for (const file of Object.keys(baseline.coverageThresholds).sort()) {
+  for (const file of Object.keys(baseline.coverageThresholds).sort((left, right) =>
+    PATH_COLLATOR.compare(left, right)
+  )) {
     const thresholds = parseCoverageThresholds(readFileSync(resolve(ROOT, file), 'utf-8'));
     if (thresholds) current[file] = thresholds;
   }
