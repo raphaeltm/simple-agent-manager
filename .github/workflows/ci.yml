@@ -86,6 +86,9 @@ jobs:
       - name: Validate agent preflight evidence
         run: pnpm quality:preflight
 
+      - name: Validate no stale binary artifacts are tracked
+        run: pnpm quality:no-tracked-stale-binaries
+
   specialist-review-evidence:
     name: Specialist Review Evidence
     if: github.event_name == 'pull_request'
