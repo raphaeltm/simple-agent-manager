@@ -9,58 +9,8 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../../db/schema';
 import type { Env } from '../../../env';
-import { createModuleLogger } from '../../../lib/logger';
-import * as projectDataService from '../../../services/project-data';
+import { getLatestAssistantMessageForTask } from '../../../services/task-final-assistant-message';
 import type { AnthropicToolDef, ToolContext } from '../types';
-
-const log = createModuleLogger('sam_session.get_task_details');
-
-type FinalAssistantMessage = {
-  id: string;
-  content: string;
-  createdAt: number | string;
-};
-
-async function getLatestAssistantMessageForTask(
-  env: Env,
-  projectId: string,
-  sessionId: string | null
-): Promise<FinalAssistantMessage | null> {
-  if (!sessionId) return null;
-
-  try {
-    const { messages } = await projectDataService.getMessages(
-      env,
-      projectId,
-      sessionId,
-      1,
-      null,
-      ['assistant'],
-      false,
-      'desc'
-    );
-    const message = messages[0];
-    if (!message || typeof message.content !== 'string' || !message.content.trim()) {
-      return null;
-    }
-
-    return {
-      id: typeof message.id === 'string' ? message.id : '',
-      content: message.content,
-      createdAt:
-        typeof message.createdAt === 'number' || typeof message.createdAt === 'string'
-          ? message.createdAt
-          : '',
-    };
-  } catch (err) {
-    log.warn('sam_session.get_task_details.final_assistant_message_failed', {
-      projectId,
-      sessionId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
-}
 
 export const getTaskDetailsDef: AnthropicToolDef = {
   name: 'get_task_details',

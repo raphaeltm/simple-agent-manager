@@ -21,6 +21,7 @@ import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
 import * as orchestratorService from '../../services/project-orchestrator';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
+import { getLatestAssistantMessageForTask } from '../../services/task-final-assistant-message';
 import { cleanupTerminalTaskResources } from '../../services/task-terminal-cleanup';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
@@ -48,54 +49,6 @@ type TaskSearchRow = {
 
 const TASK_DETAIL_RECENT_ASSISTANT_MESSAGE_LIMIT = 5;
 const TASK_DETAIL_MESSAGE_SNIPPET_LENGTH = 2000;
-
-type FinalAssistantMessage = {
-  id: string;
-  content: string;
-  createdAt: number | string;
-};
-
-async function getLatestAssistantMessageForTask(
-  env: Env,
-  projectId: string,
-  sessionId: string | null
-): Promise<FinalAssistantMessage | null> {
-  if (!sessionId) return null;
-
-  try {
-    const { messages } = await projectDataService.getMessages(
-      env,
-      projectId,
-      sessionId,
-      1,
-      null,
-      ['assistant'],
-      false,
-      'desc'
-    );
-    const message = messages[0];
-    if (!message || typeof message.content !== 'string' || !message.content.trim()) {
-      return null;
-    }
-
-    return {
-      id: typeof message.id === 'string' ? message.id : '',
-      content: message.content,
-      createdAt:
-        typeof message.createdAt === 'number' || typeof message.createdAt === 'string'
-          ? message.createdAt
-          : '',
-    };
-  } catch (err) {
-    log.warn('mcp.get_task_details.final_assistant_message_failed', {
-      projectId,
-      sessionId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
-}
-
 function truncateSnippet(value: string | null, maxLength: number): string | null {
   if (!value) return null;
   return value.slice(0, maxLength) + (value.length > maxLength ? '...' : '');
