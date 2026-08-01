@@ -51,7 +51,8 @@
     "quality:dependency-governance": "npx vitest run --config scripts/quality/vitest.config.ts scripts/quality/dependency-governance.test.ts",
     "test:infra": "pnpm --filter @simple-agent-manager/infra test",
     "prepare": "husky",
-    "quality:migration-ordering": "tsx scripts/quality/check-migration-ordering.ts"
+    "quality:migration-ordering": "tsx scripts/quality/check-migration-ordering.ts",
+    "quality:repo-visibility": "tsx scripts/quality/check-repo-quality-visibility.ts"
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",

@@ -19,12 +19,12 @@ This task deliberately avoids refactoring large files or raising failing thresho
 
 ## Implementation checklist
 
-- [ ] Add a checked-in repo-quality baseline for current coverage thresholds and visibility budgets.
-- [ ] Add a report-only script that scans oversized source/test files and coverage threshold drift.
-- [ ] Add unit tests for parsing/report behavior and non-breaking defaults.
-- [ ] Add a package script so the guard can be run locally and optionally from CI.
-- [ ] Wire CI as report-only if safe.
-- [ ] Run relevant local validation.
+- [x] Add a checked-in repo-quality baseline for current coverage thresholds and visibility budgets.
+- [x] Add a report-only script that scans oversized source/test files and coverage threshold drift.
+- [x] Add unit tests for parsing/report behavior and non-breaking defaults.
+- [x] Add a package script so the guard can be run locally and optionally from CI.
+- [x] Wire CI as report-only if safe.
+- [x] Run relevant local validation.
 - [ ] Run local task/test/repo-quality critique.
 
 ## Acceptance criteria
@@ -35,4 +35,3 @@ This task deliberately avoids refactoring large files or raising failing thresho
 - Oversized file visibility covers source and test files without refactoring large files.
 - CI integration, if added, is non-breaking/report-only.
 - PR is opened and not merged.
-
