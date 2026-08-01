@@ -33,6 +33,7 @@ import {
   jsonRpcSuccess,
   type McpTokenData,
 } from './_helpers';
+import { groupTokensIntoMessages } from './session-tools';
 
 type TaskSearchRow = {
   id: string;
@@ -63,6 +64,47 @@ function toTaskSearchResult(task: TaskSearchRow, snippetLength: number) {
     outputSummary: truncateSnippet(task.outputSummary, snippetLength),
     updatedAt: task.updatedAt,
   };
+}
+
+export async function getFinalAssistantOutputForTask(
+  env: Env,
+  task: { projectId: string; chatSessionId: string | null; status: string }
+): Promise<string | null> {
+  if (task.status !== 'completed' || !task.chatSessionId) {
+    return null;
+  }
+
+  try {
+    const { messages } = await projectDataService.getMessages(
+      env,
+      task.projectId,
+      task.chatSessionId,
+      20,
+      null,
+      ['user', 'assistant'],
+      false,
+      'desc'
+    );
+
+    const tokens = messages
+      .map((m: Record<string, unknown>) => ({
+        id: m.id as string,
+        role: m.role as string,
+        content: m.content as string,
+        createdAt: m.createdAt as number,
+      }))
+      .reverse();
+    const grouped = groupTokensIntoMessages(tokens);
+    const latestAssistant = [...grouped].reverse().find((m) => m.role === 'assistant');
+    const content = latestAssistant?.content.trim();
+    return content || null;
+  } catch (err) {
+    log.warn('mcp.get_task_details.final_assistant_output_failed', {
+      sessionId: task.chatSessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
 }
 
 export async function handleUpdateTaskStatus(
@@ -578,6 +620,7 @@ export async function handleGetTaskDetails(
       outputSummary: schema.tasks.outputSummary,
       completionEvidence: schema.tasks.completionEvidence,
       errorMessage: schema.tasks.errorMessage,
+      projectId: schema.tasks.projectId,
       chatSessionId: schema.tasks.chatSessionId,
       createdAt: schema.tasks.createdAt,
       updatedAt: schema.tasks.updatedAt,
@@ -602,6 +645,11 @@ export async function handleGetTaskDetails(
     outputBranch: task.outputBranch,
     outputPrUrl: task.outputPrUrl,
     outputSummary: task.outputSummary,
+    finalAssistantOutput: await getFinalAssistantOutputForTask(env, {
+      projectId: task.projectId,
+      chatSessionId: task.chatSessionId,
+      status: task.status,
+    }),
     completionEvidence: parseCompletionEvidenceJson(task.completionEvidence ?? null),
     errorMessage: task.errorMessage,
     // Instant (cf-container) dispatches create the chat session asynchronously;
