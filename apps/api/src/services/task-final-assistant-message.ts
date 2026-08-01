@@ -1,8 +1,6 @@
 import type { Env } from '../env';
-import { createModuleLogger } from '../lib/logger';
+import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
-
-const log = createModuleLogger('task_final_assistant_message');
 
 export interface TaskFinalAssistantMessage {
   id: string;
