@@ -25,7 +25,7 @@ This task deliberately avoids refactoring large files or raising failing thresho
 - [x] Add a package script so the guard can be run locally and optionally from CI.
 - [x] Wire CI as report-only if safe.
 - [x] Run relevant local validation.
-- [ ] Run local task/test/repo-quality critique.
+- [x] Run local task/test/repo-quality critique.
 
 ## Acceptance criteria
 
@@ -35,3 +35,10 @@ This task deliberately avoids refactoring large files or raising failing thresho
 - Oversized file visibility covers source and test files without refactoring large files.
 - CI integration, if added, is non-breaking/report-only.
 - PR is opened and not merged.
+
+## Local review notes
+
+- task-completion-validator: PASS — research findings, checklist items, and acceptance criteria are represented in the diff and focused validation evidence. No UI/backend or multi-resource selection path applies.
+- test-engineer: PASS — focused Vitest coverage exercises file classification, line counting, threshold parsing, and drift comparison. The script is a repository quality utility, not a critical runtime path.
+- constitution-validator: PASS — visibility budgets and threshold baseline are checked-in quality policy data, not runtime business limits, URLs, timeouts, or deployment identifiers. No new environment/configuration hardcoding is introduced.
+- Repo-quality critique: PASS with note — the report intentionally includes existing hard-gate-exempt source files so reviewers can see total debt; CI remains non-blocking and the existing hard file-size gate remains authoritative for failures.
