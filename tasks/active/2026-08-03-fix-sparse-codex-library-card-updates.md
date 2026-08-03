@@ -24,7 +24,7 @@ PR #1721 only added a component fixture that placed `sam-mcp/display_from_librar
 - [x] Prove the merged item selects `DocumentCard` for the reported HTML document and still falls back generically for malformed/unknown sparse updates.
 - [x] Verify Claude-style complete metadata and unrelated generic tools are unchanged.
 - [x] Run focused web tests, lint, typecheck, build, and the mandatory local mobile/desktop Playwright visual audit.
-- [ ] Complete task, UI/UX, constitution, and test specialist reviews; address all blocking findings.
+- [x] Complete task, UI/UX, constitution, and test specialist reviews; address all blocking findings.
 - [ ] Deploy the new branch to staging and independently validate a new secondary-user Codex session live and after reload.
 - [ ] Open a new PR, make all CI/Sonar checks green, merge, and monitor the matching production deployment to success.
 
