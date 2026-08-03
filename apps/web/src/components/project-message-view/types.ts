@@ -320,6 +320,11 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
           return acc;
         }
         const existing = acc[existingIdx] as ToolCallItem;
+        // Codex result updates may omit title/toolName and keep the document
+        // payload only in message content. Recover it with the initial row's
+        // preserved tool identity after correlating the sparse rows by call ID.
+        const mergedRawOutput = rawOutput
+          ?? legacyDocumentRawOutput(existing.toolName, msg.content);
         // Update with latest status, explicit title, content, and locations.
         // Status-only tool_call_update rows often omit title/kind; do not let
         // the generic fallback title erase the richer initial tool_call title.
@@ -332,7 +337,7 @@ export function chatMessagesToConversationItems(msgs: ChatMessageResponse[]): Co
         // result update carries rawOutput; the initial carries rawInput).
         if (toolName) existing.toolName = toolName;
         if (rawInput !== undefined) existing.rawInput = rawInput;
-        if (rawOutput !== undefined) existing.rawOutput = rawOutput;
+        if (mergedRawOutput !== undefined) existing.rawOutput = mergedRawOutput;
         applyToolContentPointer(existing, contentPointer);
       } else {
         const idx = acc.length;

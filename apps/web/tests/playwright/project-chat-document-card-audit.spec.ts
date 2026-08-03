@@ -168,11 +168,42 @@ const CODEX_MESSAGES = [
     createdAt: Date.now() - 50_000,
     sequence: 1,
   },
-  // Slash title, no toolName/rawOutput — recovered from title + content JSON.
-  codexReconstructMsg({
-    id: 'codex-html',
+  // Exact real staging sequence from cf-container Codex: the initial call has
+  // dotted name metadata + nested arguments, while the completed result row
+  // repeats only the call ID/status and stores the document JSON in content.
+  {
+    id: 'codex-html-start',
+    sessionId: SESSION_ID,
+    role: 'tool',
+    content: '(tool call)',
+    toolMetadata: {
+      toolCallId: 'codex-html-sparse',
+      title: 'mcp.sam-mcp.display_from_library',
+      toolName: 'mcp.sam-mcp.display_from_library',
+      kind: 'execute',
+      status: 'in_progress',
+      rawInput: {
+        arguments: { fileId: 'codex-html', caption: 'Basic SAM architecture visualization render test.' },
+        server: 'sam-mcp',
+        tool: 'display_from_library',
+      },
+    },
+    createdAt: Date.now() - 48_000,
     sequence: 2,
-    title: 'sam-mcp/display_from_library',
+  },
+  {
+    id: 'codex-html-progress',
+    sessionId: SESSION_ID,
+    role: 'tool',
+    content: '(tool update)',
+    toolMetadata: { toolCallId: 'codex-html-sparse', status: 'in_progress' },
+    createdAt: Date.now() - 47_000,
+    sequence: 3,
+  },
+  {
+    id: 'codex-html-done',
+    sessionId: SESSION_ID,
+    role: 'tool',
     content: JSON.stringify({
       fileId: 'codex-html',
       filename: 'sam-architecture-basic.html',
@@ -180,18 +211,21 @@ const CODEX_MESSAGES = [
       sizeBytes: 15357,
       caption: 'Basic SAM architecture visualization render test.',
     }),
-  }),
+    toolMetadata: { toolCallId: 'codex-html-sparse', status: 'completed' },
+    createdAt: Date.now() - 46_000,
+    sequence: 4,
+  },
   // fileId present but no mimeType → icon-only document card (no inline preview).
   codexReconstructMsg({
     id: 'codex-nomime',
-    sequence: 3,
+    sequence: 5,
     title: 'sam-mcp/display_from_library',
     content: JSON.stringify({ fileId: 'codex-nomime', filename: 'notes-no-mimetype.txt', sizeBytes: 42 }),
   }),
   // Unusable content → generic fallback, never a broken empty document card.
   codexReconstructMsg({
     id: 'codex-bad',
-    sequence: 4,
+    sequence: 6,
     title: 'sam-mcp/display_from_library',
     content: 'the file could not be rendered',
   }),

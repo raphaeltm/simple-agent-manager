@@ -925,6 +925,97 @@ describe('chatMessagesToConversationItems', () => {
     expect(matchToolCard(tool)).toBe(DocumentCard);
   });
 
+  it('recovers a DocumentCard from the exact sparse Codex staging result sequence', () => {
+    // Staging session d56fd81a-4c0f-49a0-8feb-d662439461a8 emitted:
+    // 1. a dotted-name initial call with MCP arguments nested in rawInput,
+    // 2. a title-less in-progress update, and
+    // 3. a title-less completed update whose document payload exists only in content.
+    // The completed row must inherit the initial tool identity during merge so
+    // its stored JSON can become rawOutput for typed-card selection.
+    const toolCallId = 'call_moHavJdFljpB8I4YHEDgc5Ac';
+    const items = chatMessagesToConversationItems([
+      toolMsg({
+        id: 'codex-staging-start',
+        content: '(tool call)',
+        toolMetadata: {
+          toolCallId,
+          title: 'mcp.sam-mcp.display_from_library',
+          toolName: 'mcp.sam-mcp.display_from_library',
+          kind: 'execute',
+          status: 'in_progress',
+          rawInput: {
+            arguments: {
+              caption: 'Staging Codex HTML card reproduction',
+              fileId: '01KZ4259HS1C47CXXKH7NENHST',
+            },
+            server: 'sam-mcp',
+            tool: 'display_from_library',
+          },
+        },
+      }),
+      toolMsg({
+        id: 'codex-staging-progress',
+        content: '(tool update)',
+        toolMetadata: { toolCallId, status: 'in_progress' },
+      }),
+      toolMsg({
+        id: 'codex-staging-done',
+        content: JSON.stringify({
+          fileId: '01KZ4259HS1C47CXXKH7NENHST',
+          filename: 'codex-library-card-repro-2026-08-03.html',
+          mimeType: 'text/html; charset=utf-8',
+          sizeBytes: 270,
+          caption: 'Staging Codex HTML card reproduction',
+        }),
+        toolMetadata: { toolCallId, status: 'completed' },
+      }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    const tool = items[0] as ToolCallItem;
+    expect(tool).toMatchObject({
+      title: 'mcp.sam-mcp.display_from_library',
+      toolName: 'mcp.sam-mcp.display_from_library',
+      status: 'completed',
+      messageId: 'codex-staging-done',
+    });
+    const raw = tool.rawOutput as Array<{ type: string; text: string }> | undefined;
+    expect(raw?.[0]?.text).toContain('codex-library-card-repro-2026-08-03.html');
+    expect(matchToolCard(tool)).toBe(DocumentCard);
+  });
+
+  it('keeps a malformed sparse Codex document result on the generic card', () => {
+    const toolCallId = 'call-codex-malformed-sparse';
+    const items = chatMessagesToConversationItems([
+      toolMsg({
+        id: 'codex-malformed-start',
+        content: '(tool call)',
+        toolMetadata: {
+          toolCallId,
+          title: 'mcp.sam-mcp.display_from_library',
+          toolName: 'mcp.sam-mcp.display_from_library',
+          kind: 'execute',
+          status: 'in_progress',
+          rawInput: {
+            arguments: { fileId: 'file-not-authoritative-until-result' },
+            server: 'sam-mcp',
+            tool: 'display_from_library',
+          },
+        },
+      }),
+      toolMsg({
+        id: 'codex-malformed-done',
+        content: 'display failed without a structured document payload',
+        toolMetadata: { toolCallId, status: 'completed' },
+      }),
+    ]);
+
+    expect(items).toHaveLength(1);
+    const tool = items[0] as ToolCallItem;
+    expect(tool.rawOutput).toBeUndefined();
+    expect(matchToolCard(tool)).toBeNull();
+  });
+
   it('recovers the card when the VM agent stored an empty-string toolName', () => {
     // Pre-fix nodes emit ToolName:"" (omitted) for slash tools; a resurrected
     // row could carry an explicit empty string. The `&& meta.toolName` guard must
