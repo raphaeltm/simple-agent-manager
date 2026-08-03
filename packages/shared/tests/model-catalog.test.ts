@@ -52,7 +52,9 @@ describe('model-catalog', () => {
       expect(groups.length).toBeGreaterThanOrEqual(1);
       const allModels = groups.flatMap((g) => g.models);
       expect(allModels.some((m) => m.id === 'gemini-2.5-pro')).toBe(true);
+      expect(allModels.some((m) => m.id === 'gemini-3.6-flash')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.5-flash')).toBe(true);
+      expect(allModels.some((m) => m.id === 'gemini-3.5-flash-lite')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.1-pro-preview')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.1-flash-lite')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.1-pro')).toBe(false);

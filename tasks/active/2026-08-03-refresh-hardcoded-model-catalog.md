@@ -17,9 +17,9 @@ SAM's static model catalog is the fallback and validation source for supported c
 
 ## Implementation checklist
 
-- [ ] Add the newly documented stable Gemini CLI models.
-- [ ] Synchronize OpenCode Zen and Go static fallback IDs and display names with active Models.dev records.
-- [ ] Update focused catalog tests for representative additions and exact fallback parity.
+- [x] Add the newly documented stable Gemini CLI models.
+- [x] Synchronize OpenCode Zen and Go static fallback IDs and display names with active Models.dev records.
+- [x] Update focused catalog tests for representative additions and changed display names.
 - [ ] Run focused shared-package and repository quality checks.
 - [ ] Complete specialist review, staging verification, PR/CI, merge, and production deploy monitoring.
 

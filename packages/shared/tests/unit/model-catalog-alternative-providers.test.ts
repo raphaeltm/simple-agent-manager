@@ -11,11 +11,15 @@ const EXPECTED_OPENCODE_MODELS = [
   'opencode/gemini-3.6-flash',
   'opencode/gpt-5.6-sol',
   'opencode/laguna-s-2.1-free',
+  'opencode/kimi-k3',
   'opencode/minimax-m3',
+  'opencode/qwen3.7-plus',
   'opencode-go/glm-5.2',
   'opencode-go/grok-4.5',
+  'opencode-go/gpt-5.6-luna',
   'opencode-go/hy3',
   'opencode-go/kimi-k3',
+  'opencode-go/qwen3.8-max',
 ] as const;
 
 const EXPECTED_GROUP_LABELS = ['OpenCode Zen', 'OpenCode Go'] as const;
@@ -33,6 +37,22 @@ describe('OpenCode model catalog entries', () => {
         expect(isKnownModel(agentType, modelId), `${agentType} should know ${modelId}`).toBe(true);
       }
     }
+  });
+
+  it('keeps changed Models.dev display names in sync', () => {
+    const namesById = new Map(
+      getModelsForAgent('opencode').map((model) => [model.id, model.name])
+    );
+
+    expect(namesById.get('opencode/deepseek-v4-flash')).toBe('DeepSeek V4 Flash 0731');
+    expect(namesById.get('opencode/deepseek-v4-flash-free')).toBe(
+      'DeepSeek V4 Flash Free (New)'
+    );
+    expect(namesById.get('opencode-go/deepseek-v4-flash')).toBe(
+      'DeepSeek V4 Flash (New)'
+    );
+    expect(namesById.get('opencode-go/gpt-5.6-luna')).toBe('GPT-5.6 Luna (2x usage)');
+    expect(namesById.get('opencode-go/kimi-k3')).toBe('Kimi K3');
   });
 
   it('keeps OpenCode groups discoverable by provider label', () => {

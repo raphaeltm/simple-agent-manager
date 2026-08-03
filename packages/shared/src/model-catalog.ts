@@ -165,8 +165,8 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode/claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
     { id: 'opencode/claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
     { id: 'opencode/claude-sonnet-5', name: 'Claude Sonnet 5' },
-    { id: 'opencode/deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
-    { id: 'opencode/deepseek-v4-flash-free', name: 'DeepSeek V4 Flash Free' },
+    { id: 'opencode/deepseek-v4-flash', name: 'DeepSeek V4 Flash 0731' },
+    { id: 'opencode/deepseek-v4-flash-free', name: 'DeepSeek V4 Flash Free (New)' },
     { id: 'opencode/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
     { id: 'opencode/gemini-3-flash', name: 'Gemini 3 Flash' },
     { id: 'opencode/gemini-3.1-pro', name: 'Gemini 3.1 Pro Preview' },
@@ -201,6 +201,7 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode/kimi-k2.5', name: 'Kimi K2.5' },
     { id: 'opencode/kimi-k2.6', name: 'Kimi K2.6' },
     { id: 'opencode/kimi-k2.7-code', name: 'Kimi K2.7 Code' },
+    { id: 'opencode/kimi-k3', name: 'Kimi K3' },
     { id: 'opencode/laguna-s-2.1-free', name: 'Laguna S 2.1 Free' },
     { id: 'opencode/ling-3.0-flash-free', name: 'Ling-3.0-flash Free' },
     { id: 'opencode/mimo-v2.5-free', name: 'MiMo V2.5 Free' },
@@ -211,17 +212,19 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode/north-mini-code-free', name: 'North Mini Code Free' },
     { id: 'opencode/qwen3.5-plus', name: 'Qwen3.5 Plus' },
     { id: 'opencode/qwen3.6-plus', name: 'Qwen3.6 Plus' },
+    { id: 'opencode/qwen3.7-plus', name: 'Qwen3.7 Plus' },
   ]),
   modelGroup('OpenCode Go', [
-    { id: 'opencode-go/deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+    { id: 'opencode-go/deepseek-v4-flash', name: 'DeepSeek V4 Flash (New)' },
     { id: 'opencode-go/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
     { id: 'opencode-go/glm-5.1', name: 'GLM-5.1' },
     { id: 'opencode-go/glm-5.2', name: 'GLM-5.2' },
+    { id: 'opencode-go/gpt-5.6-luna', name: 'GPT-5.6 Luna (2x usage)' },
     { id: 'opencode-go/grok-4.5', name: 'Grok 4.5' },
     { id: 'opencode-go/hy3', name: 'Hy3' },
     { id: 'opencode-go/kimi-k2.6', name: 'Kimi K2.6' },
     { id: 'opencode-go/kimi-k2.7-code', name: 'Kimi K2.7 Code' },
-    { id: 'opencode-go/kimi-k3', name: 'Kimi K3 (2x usage)' },
+    { id: 'opencode-go/kimi-k3', name: 'Kimi K3' },
     { id: 'opencode-go/mimo-v2.5', name: 'MiMo V2.5' },
     { id: 'opencode-go/mimo-v2.5-pro', name: 'MiMo V2.5 Pro' },
     { id: 'opencode-go/minimax-m2.7', name: 'MiniMax-M2.7' },
@@ -229,6 +232,7 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode-go/qwen3.6-plus', name: 'Qwen3.6 Plus' },
     { id: 'opencode-go/qwen3.7-max', name: 'Qwen3.7 Max' },
     { id: 'opencode-go/qwen3.7-plus', name: 'Qwen3.7 Plus' },
+    { id: 'opencode-go/qwen3.8-max', name: 'Qwen3.8 Max' },
   ]),
 ];
 
@@ -273,7 +277,9 @@ const MISTRAL_MODELS: ModelGroup[] = [
 
 const GEMINI_MODELS: ModelGroup[] = [
   modelGroupFromTuples('Gemini 3 (Latest)', [
+    ['gemini-3.6-flash', 'Gemini 3.6 Flash'],
     ['gemini-3.5-flash', 'Gemini 3.5 Flash'],
+    ['gemini-3.5-flash-lite', 'Gemini 3.5 Flash-Lite'],
     ['gemini-3.1-pro-preview', 'Gemini 3.1 Pro Preview'],
     ['gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite'],
   ]),
