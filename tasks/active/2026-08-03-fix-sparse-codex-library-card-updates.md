@@ -15,6 +15,8 @@ PR #1721 only added a component fixture that placed `sam-mcp/display_from_librar
 - `apps/web/src/components/project-message-view/types.ts:chatMessagesToConversationItems` correctly merges sparse rows by `toolCallId` and preserves the initial `toolName`, but it tries `legacyDocumentRawOutput()` before that merge using only the current row's `toolName`. A sparse result row therefore cannot recover its JSON using the already-known tool name from the initial row.
 - The prior production session's persisted searchable tool output contains the complete HTML document payload, so the result data was stored; typed-card reconstruction is the remaining gap.
 - Independent Staging Validator task `01KZ41AFVYDEPMKFF5GYK6F0S2` is separately auditing the same staging session for the required second-party evidence.
+- Staging deployment `30827687692` succeeded for exact branch SHA `86db6259edae4426e73e4a7175655e253fd564dc`, including deployment health checks and 12/12 smoke tests.
+- A new real secondary-user Codex/cf-container session (`cede0dc5-8e9d-488f-bc2c-99b0242ddbee`, task `01KZ44VYFNQYZE936E3HWDJKY4`) emitted the same three sparse rows under `call_AmLSh1yMGnbrfDR16nwJazru`. The deployed UI rendered exactly one rich HTML card live and after full reload in full and compact history, with no generic duplicate, horizontal overflow, console errors, or genuine network failures on desktop and mobile.
 
 ## Implementation checklist
 
@@ -25,7 +27,7 @@ PR #1721 only added a component fixture that placed `sam-mcp/display_from_librar
 - [x] Verify Claude-style complete metadata and unrelated generic tools are unchanged.
 - [x] Run focused web tests, lint, typecheck, build, and the mandatory local mobile/desktop Playwright visual audit.
 - [x] Complete task, UI/UX, constitution, and test specialist reviews; address all blocking findings.
-- [ ] Deploy the new branch to staging and independently validate a new secondary-user Codex session live and after reload.
+- [x] Deploy the new branch to staging and independently validate a new secondary-user Codex session live and after reload.
 - [ ] Open a new PR, make all CI/Sonar checks green, merge, and monitor the matching production deployment to success.
 
 ## Acceptance criteria
