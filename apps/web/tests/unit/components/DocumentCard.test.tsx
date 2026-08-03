@@ -261,6 +261,34 @@ describe('DocumentCard', () => {
     expect(fetchSpy).not.toHaveBeenCalled();
   });
 
+  it('renders the reported Codex display_from_library HTML document as a rich card', () => {
+    const fetchSpy = vi.fn();
+    vi.stubGlobal('fetch', fetchSpy);
+
+    render(<DocumentCard projectId="proj-1" item={toolItem({
+      title: 'sam-mcp/display_from_library',
+      toolName: undefined,
+      rawInput: {
+        fileId: '01KYVMVKXAV7217F48HMK43MRX',
+        caption: 'Interactive one-document map of the SAM debug/feedback loop.',
+      },
+      rawOutput: rawOutput({
+        fileId: '01KYVMVKXAV7217F48HMK43MRX',
+        filename: 'sam-feedback-loop-map.html',
+        mimeType: 'text/html; charset=utf-8',
+        sizeBytes: 15357,
+      }),
+    })} />);
+
+    expect(screen.getByRole('button', { name: /Open sam-feedback-loop-map\.html/ })).toBeTruthy();
+    expect(screen.getByText('sam-feedback-loop-map.html')).toBeTruthy();
+    expect(screen.getByText('Interactive · tap to open')).toBeTruthy();
+    expect(screen.getByText('Interactive one-document map of the SAM debug/feedback loop.')).toBeTruthy();
+    expect(document.querySelector('iframe')).toBeNull();
+    expect(document.querySelector('pre')).toBeNull();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
   it('renders a tombstone card for FILE_NOT_FOUND', () => {
     render(<DocumentCard projectId="proj-1" item={toolItem({
       toolName: 'mcp__sam-mcp__display_from_library',
