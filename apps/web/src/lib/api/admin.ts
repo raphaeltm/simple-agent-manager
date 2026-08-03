@@ -157,6 +157,12 @@ export async function fetchAdminDebugProjects(): Promise<DebugProjectOptionsResp
   return request<DebugProjectOptionsResponse>('/api/admin/observability/debug/projects');
 }
 
+export async function retryAdminDebugDiagnosisRun(runId: string): Promise<RunDebugDiagnosisResponse> {
+  return request<RunDebugDiagnosisResponse>(`/api/admin/observability/diagnosis-runs/${runId}/retry`, {
+    method: 'POST',
+  });
+}
+
 export async function saveAdminDebugDiagnosisAsIdea(
   diagnosisId: string,
   body: { projectId: string; title?: string }

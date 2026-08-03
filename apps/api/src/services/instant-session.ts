@@ -73,6 +73,24 @@ export interface LaunchInstantSessionResult {
   };
 }
 
+export interface AcceptedInstantSession {
+  taskId: string;
+  runtime: AgentProfileRuntime;
+  nodeId: string;
+  workspaceId: string;
+  projectId: string;
+  chatSessionId: string;
+  agentType: string;
+  containerId: string;
+  workspaceUrl: string;
+  branch: string;
+  workspaceName: string;
+  workspaceDir: string;
+  nodeCallbackToken: string;
+  startedAt: number;
+  gitSource: Awaited<ReturnType<typeof resolveWorkspaceGitSource>>;
+}
+
 function normalizeWorkspaceName(value: string): string {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-');
 }
@@ -162,12 +180,19 @@ export async function launchInstantSession(
   env: Env,
   input: LaunchInstantSessionInput
 ): Promise<LaunchInstantSessionResult> {
+  const accepted = await acceptInstantSession(db, env, input);
+  return continueInstantSessionLaunch(db, env, input, accepted);
+}
+
+export async function acceptInstantSession(
+  db: Db,
+  env: Env,
+  input: LaunchInstantSessionInput
+): Promise<AcceptedInstantSession> {
   requireVmAgentContainer(env);
 
-  const config = getVmAgentContainerConfig(env);
   const startedAt = Date.now();
   const branch = input.branch?.trim() || input.project.defaultBranch || 'main';
-  const taskMode = input.taskMode ?? 'conversation';
   const workspaceName = getWorkspaceName(input);
   const gitSource = await resolveWorkspaceGitSource(db, input.project);
 
@@ -185,11 +210,12 @@ export async function launchInstantSession(
     runtime: 'cf-container',
   });
 
+  const nodeId = node.id;
   const workspaceId = ulid();
   const now = new Date().toISOString();
   await db.insert(schema.workspaces).values({
     id: workspaceId,
-    nodeId: node.id,
+    nodeId,
     projectId: input.project.id,
     userId: input.userId,
     installationId: input.project.installationId ?? undefined,
@@ -217,7 +243,7 @@ export async function launchInstantSession(
   );
   await db
     .update(schema.tasks)
-    .set({ chatSessionId, workspaceId, autoProvisionedNodeId: node.id, updatedAt: now })
+    .set({ chatSessionId, workspaceId, autoProvisionedNodeId: nodeId, updatedAt: now })
     .where(eq(schema.tasks.id, input.taskId));
   if (input.contextSummary) {
     await projectDataService.persistMessage(
@@ -244,19 +270,62 @@ export async function launchInstantSession(
 
   const containerId = node.id.toLowerCase();
   const nodeCallbackToken = await signNodeCallbackToken(node.id, env);
+  const workspaceDir = containerWorkspaceDir(env, input.project.repository);
+
+  return {
+    taskId: input.taskId,
+    runtime: 'cf-container',
+    nodeId,
+    workspaceId,
+    projectId: input.project.id,
+    chatSessionId,
+    agentType: input.agentType,
+    containerId,
+    workspaceUrl: `https://ws-${workspaceId.toLowerCase()}.${env.BASE_DOMAIN}`,
+    branch,
+    workspaceName,
+    workspaceDir,
+    nodeCallbackToken,
+    startedAt,
+    gitSource,
+  };
+}
+
+export async function continueInstantSessionLaunch(
+  db: Db,
+  env: Env,
+  input: LaunchInstantSessionInput,
+  accepted: AcceptedInstantSession
+): Promise<LaunchInstantSessionResult> {
+  requireVmAgentContainer(env);
+
+  const config = getVmAgentContainerConfig(env);
+  const taskMode = input.taskMode ?? 'conversation';
+  const {
+    nodeId,
+    workspaceId,
+    chatSessionId,
+    containerId,
+    branch,
+    workspaceName,
+    workspaceDir,
+    nodeCallbackToken,
+    gitSource,
+    startedAt,
+  } = accepted;
   const vmAgentPort = config.vmAgentPort;
   const controlPlaneUrl = `https://api.${env.BASE_DOMAIN}`;
-  const phaseDetail = { nodeId: node.id, workspaceId, containerId };
-  const workspaceDir = containerWorkspaceDir(env, input.project.repository);
+  const phaseDetail = { nodeId, workspaceId, containerId };
+  const node = { id: nodeId };
 
   try {
     const launchStart = Date.now();
     await runContainerPhase('launch', phaseDetail, () =>
       launchVmAgentContainer(
         env,
-        node.id,
+        nodeId,
         {
-          nodeId: node.id,
+          nodeId,
           workspaceId,
           projectId: input.project.id,
           chatSessionId,
@@ -275,7 +344,7 @@ export async function launchInstantSession(
 
     const agentReadyStart = Date.now();
     await runContainerPhase('wait_for_ready', phaseDetail, () =>
-      waitForNodeAgentReady(node.id, env)
+      waitForNodeAgentReady(nodeId, env)
     );
     const agentReadyDurationMs = Date.now() - agentReadyStart;
 
@@ -283,7 +352,7 @@ export async function launchInstantSession(
     const workspaceCallbackToken = await signCallbackToken(workspaceId, env);
     await runContainerPhase('create_workspace', phaseDetail, () =>
       createWorkspaceOnNode(
-        node.id,
+        nodeId,
         env,
         input.userId,
         {
@@ -308,7 +377,7 @@ export async function launchInstantSession(
     const acpSessionCreateStart = Date.now();
     const phaseDurations = new Map<string, number>();
     const bootstrapResult = await startSamAwareAgentSession(db, env, {
-      nodeId: node.id,
+      nodeId,
       workspaceId,
       projectId: input.project.id,
       userId: input.userId,
@@ -363,7 +432,7 @@ export async function launchInstantSession(
         status: 'in_progress',
         executionStep: 'agent_running',
         workspaceId,
-        autoProvisionedNodeId: node.id,
+        autoProvisionedNodeId: nodeId,
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.tasks.id, input.taskId));
@@ -385,7 +454,7 @@ export async function launchInstantSession(
 
     return {
       taskId: input.taskId,
-      nodeId: node.id,
+      nodeId,
       workspaceId,
       projectId: input.project.id,
       chatSessionId,
@@ -395,7 +464,7 @@ export async function launchInstantSession(
       containerId,
       processId: containerId,
       runtime: 'cf-container',
-      workspaceUrl: `https://ws-${workspaceId.toLowerCase()}.${env.BASE_DOMAIN}`,
+      workspaceUrl: accepted.workspaceUrl,
       timings,
     };
   } catch (err) {
@@ -408,7 +477,7 @@ export async function launchInstantSession(
         executionStep: 'launch_failed',
         errorMessage: message,
         workspaceId,
-        autoProvisionedNodeId: node.id,
+        autoProvisionedNodeId: nodeId,
         updatedAt: failedAt,
       })
       .where(eq(schema.tasks.id, input.taskId))
@@ -452,13 +521,13 @@ export async function launchInstantSession(
       .where(eq(schema.nodes.id, node.id))
       .catch((updateErr) => {
         log.warn('instant_session.node_error_update_failed', {
-          nodeId: node.id,
+          nodeId,
           error: errorMessage(updateErr),
         });
       });
     await destroyVmAgentContainer(env, containerId).catch((destroyErr) => {
       log.error('instant_session.container_destroy_after_failure_failed', {
-        nodeId: node.id,
+        nodeId,
         workspaceId,
         containerId,
         error: errorMessage(destroyErr),

@@ -38,11 +38,15 @@ vi.mock('../../../src/middleware/error', () => {
   };
 });
 
-const mockRunDebugDiagnosis = vi.fn();
+const mockCreateDebugDiagnosisRun = vi.fn();
+const mockExecuteDebugDiagnosisRun = vi.fn();
+const mockRetryDebugDiagnosisRun = vi.fn();
 const mockListDebugDiagnoses = vi.fn();
 const mockSaveDebugDiagnosisAsIdea = vi.fn();
 vi.mock('../../../src/services/debug-agent', () => ({
-  runDebugDiagnosis: (...args: unknown[]) => mockRunDebugDiagnosis(...args),
+  createDebugDiagnosisRun: (...args: unknown[]) => mockCreateDebugDiagnosisRun(...args),
+  executeDebugDiagnosisRun: (...args: unknown[]) => mockExecuteDebugDiagnosisRun(...args),
+  retryDebugDiagnosisRun: (...args: unknown[]) => mockRetryDebugDiagnosisRun(...args),
   listDebugDiagnoses: (...args: unknown[]) => mockListDebugDiagnoses(...args),
   saveDebugDiagnosisAsIdea: (...args: unknown[]) => mockSaveDebugDiagnosisAsIdea(...args),
 }));
@@ -710,7 +714,7 @@ describe('Admin Observability Routes', () => {
           dailyTokenLimit: 120000,
         },
       };
-      mockRunDebugDiagnosis.mockResolvedValue(diagnosis);
+      mockCreateDebugDiagnosisRun.mockResolvedValue(diagnosis);
       const response = await app.request(
         '/api/admin/observability/diagnoses',
         {
@@ -720,15 +724,16 @@ describe('Admin Observability Routes', () => {
         },
         createEnv()
       );
-      expect(response.status).toBe(201);
-      expect(await response.json()).toEqual({ diagnosis });
-      expect(mockRunDebugDiagnosis).toHaveBeenCalledWith(expect.any(Object), 'user-superadmin', {
+      console.log('DEBUG_RESPONSE', await response.clone().json());
+    expect(response.status).toBe(202);
+      expect(await response.json()).toEqual({ run: diagnosis });
+      expect(mockCreateDebugDiagnosisRun).toHaveBeenCalledWith(expect.any(Object), 'user-superadmin', {
         errorId: 'err-1',
       });
     });
 
     it('returns 429 when the deployment feature budget is exhausted', async () => {
-      mockRunDebugDiagnosis.mockRejectedValue(
+      mockCreateDebugDiagnosisRun.mockRejectedValue(
         new Error('Daily deployment debugging budget exhausted')
       );
       const response = await app.request(

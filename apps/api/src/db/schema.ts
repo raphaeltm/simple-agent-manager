@@ -2328,6 +2328,42 @@ export const debugDiagnoses = sqliteTable(
     windowIdx: index('idx_debug_diagnoses_window').on(table.startTime, table.endTime),
   })
 );
+export const debugDiagnosisRuns = sqliteTable(
+  'debug_diagnosis_runs',
+  {
+    id: text('id').primaryKey(),
+    status: text('status', { enum: ['queued', 'running', 'succeeded', 'failed'] }).notNull(),
+    errorId: text('error_id'),
+    startTime: text('start_time').notNull(),
+    endTime: text('end_time').notNull(),
+    diagnosisId: text('diagnosis_id').references(() => debugDiagnoses.id, { onDelete: 'set null' }),
+    retryOfRunId: text('retry_of_run_id'),
+    model: text('model'),
+    turns: integer('turns').notNull().default(0),
+    inputTokens: integer('input_tokens').notNull().default(0),
+    outputTokens: integer('output_tokens').notNull().default(0),
+    dailyTokensUsed: integer('daily_tokens_used').notNull().default(0),
+    dailyTokenLimit: integer('daily_token_limit').notNull().default(0),
+    errorMessage: text('error_message'),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    startedAt: text('started_at'),
+    completedAt: text('completed_at'),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    statusCreatedIdx: index('idx_debug_diagnosis_runs_status_created').on(table.status, table.createdAt),
+    errorCreatedIdx: index('idx_debug_diagnosis_runs_error_created').on(table.errorId, table.createdAt),
+    windowIdx: index('idx_debug_diagnosis_runs_window').on(table.startTime, table.endTime),
+  })
+);
+
 export const platformFeedbackTriages = sqliteTable(
   'platform_feedback_triages',
   {

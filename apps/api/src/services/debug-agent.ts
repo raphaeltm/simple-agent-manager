@@ -1,6 +1,7 @@
 import {
   type DebugAgentUsage,
   type DebugDiagnosis,
+  type DebugDiagnosisRun,
   DEFAULT_DEBUG_AGENT_DAILY_TOKEN_LIMIT,
   DEFAULT_DEBUG_AGENT_MAX_TURNS,
   DEFAULT_DEBUG_AGENT_MAX_WINDOW_HOURS,
@@ -12,7 +13,7 @@ import {
   DEFAULT_DEBUG_AGENT_TOOL_RESULT_LIMIT,
   PLATFORM_AI_MODELS,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -390,6 +391,108 @@ function toDiagnosis(row: typeof schema.debugDiagnoses.$inferSelect): DebugDiagn
   return { ...row, usage };
 }
 
+function toDiagnosisRun(
+  row: typeof schema.debugDiagnosisRuns.$inferSelect,
+  diagnosis?: DebugDiagnosis | null
+): DebugDiagnosisRun {
+  const usage: DebugAgentUsage = {
+    turns: row.turns,
+    inputTokens: row.inputTokens,
+    outputTokens: row.outputTokens,
+    totalTokens: row.inputTokens + row.outputTokens,
+    dailyTokensUsed: row.dailyTokensUsed,
+    dailyTokenLimit: row.dailyTokenLimit,
+  };
+  return { ...row, usage, diagnosis };
+}
+
+
+export async function createDebugDiagnosisRun(
+  env: Env,
+  createdBy: string,
+  input: { errorId?: string; startTime?: string; endTime?: string },
+  retryOfRunId?: string | null
+): Promise<DebugDiagnosisRun> {
+  const config = resolveDebugAgentConfig(env);
+  const window = await resolveWindow(env, input, config);
+  const db = drizzle(env.DATABASE, { schema });
+  const id = ulid();
+  const now = new Date().toISOString();
+  await db.insert(schema.debugDiagnosisRuns).values({
+    id,
+    status: 'queued',
+    errorId: window.errorId,
+    startTime: new Date(window.startMs).toISOString(),
+    endTime: new Date(window.endMs).toISOString(),
+    retryOfRunId: retryOfRunId ?? null,
+    createdBy,
+    createdAt: now,
+    updatedAt: now,
+  });
+  const row = await db.select().from(schema.debugDiagnosisRuns).where(eq(schema.debugDiagnosisRuns.id, id)).get();
+  if (!row) throw new Error('Failed to persist debugging diagnosis run');
+  return toDiagnosisRun(row, null);
+}
+
+export async function executeDebugDiagnosisRun(env: Env, runId: string): Promise<void> {
+  const db = drizzle(env.DATABASE, { schema });
+  const row = await db.select().from(schema.debugDiagnosisRuns).where(eq(schema.debugDiagnosisRuns.id, runId)).get();
+  if (!row || row.status === 'succeeded' || row.status === 'running') return;
+
+  const startedAt = new Date().toISOString();
+  await db
+    .update(schema.debugDiagnosisRuns)
+    .set({ status: 'running', startedAt, updatedAt: startedAt, errorMessage: null })
+    .where(eq(schema.debugDiagnosisRuns.id, runId));
+
+  try {
+    const diagnosis = await runDebugDiagnosis(
+      env,
+      row.createdBy,
+      row.errorId ? { errorId: row.errorId } : { startTime: row.startTime, endTime: row.endTime }
+    );
+    const completedAt = new Date().toISOString();
+    await db
+      .update(schema.debugDiagnosisRuns)
+      .set({
+        status: 'succeeded',
+        diagnosisId: diagnosis.id,
+        model: diagnosis.model,
+        turns: diagnosis.usage.turns,
+        inputTokens: diagnosis.usage.inputTokens,
+        outputTokens: diagnosis.usage.outputTokens,
+        dailyTokensUsed: diagnosis.usage.dailyTokensUsed,
+        dailyTokenLimit: diagnosis.usage.dailyTokenLimit,
+        completedAt,
+        updatedAt: completedAt,
+      })
+      .where(eq(schema.debugDiagnosisRuns.id, runId));
+  } catch (err) {
+    const completedAt = new Date().toISOString();
+    await db
+      .update(schema.debugDiagnosisRuns)
+      .set({
+        status: 'failed',
+        errorMessage: err instanceof Error ? err.message : String(err),
+        completedAt,
+        updatedAt: completedAt,
+      })
+      .where(eq(schema.debugDiagnosisRuns.id, runId));
+  }
+}
+
+export async function retryDebugDiagnosisRun(env: Env, runId: string, createdBy: string): Promise<DebugDiagnosisRun> {
+  const db = drizzle(env.DATABASE, { schema });
+  const row = await db.select().from(schema.debugDiagnosisRuns).where(eq(schema.debugDiagnosisRuns.id, runId)).get();
+  if (!row) throw new Error('Diagnosis run not found');
+  return createDebugDiagnosisRun(
+    env,
+    createdBy,
+    row.errorId ? { errorId: row.errorId } : { startTime: row.startTime, endTime: row.endTime },
+    row.id
+  );
+}
+
 export async function runDebugDiagnosis(
   env: Env,
   createdBy: string,
@@ -506,9 +609,9 @@ export async function runDebugDiagnosis(
 export async function listDebugDiagnoses(
   env: Env,
   filter: { errorId?: string; startTime?: string; endTime?: string }
-): Promise<DebugDiagnosis[]> {
+): Promise<{ diagnoses: DebugDiagnosis[]; runs: DebugDiagnosisRun[] }> {
   const db = drizzle(env.DATABASE, { schema });
-  const conditions = filter.errorId
+  const diagnosisConditions = filter.errorId
     ? eq(schema.debugDiagnoses.errorId, filter.errorId)
     : filter.startTime && filter.endTime
       ? and(
@@ -516,13 +619,43 @@ export async function listDebugDiagnoses(
           eq(schema.debugDiagnoses.endTime, filter.endTime)
         )
       : undefined;
-  const rows = await db
+  const runConditions = filter.errorId
+    ? eq(schema.debugDiagnosisRuns.errorId, filter.errorId)
+    : filter.startTime && filter.endTime
+      ? and(
+          eq(schema.debugDiagnosisRuns.startTime, filter.startTime),
+          eq(schema.debugDiagnosisRuns.endTime, filter.endTime)
+        )
+      : undefined;
+  const diagnosisRows = await db
     .select()
     .from(schema.debugDiagnoses)
-    .where(conditions)
+    .where(diagnosisConditions)
     .orderBy(desc(schema.debugDiagnoses.createdAt))
     .limit(20);
-  return rows.map(toDiagnosis);
+  const diagnoses = diagnosisRows.map(toDiagnosis);
+  const diagnosisById = new Map(diagnoses.map((diagnosis) => [diagnosis.id, diagnosis]));
+  const runRows = await db
+    .select()
+    .from(schema.debugDiagnosisRuns)
+    .where(runConditions)
+    .orderBy(desc(schema.debugDiagnosisRuns.createdAt))
+    .limit(50);
+  const missingDiagnosisIds = runRows
+    .map((run) => run.diagnosisId)
+    .filter((id): id is string => typeof id === 'string')
+    .filter((id) => !diagnosisById.has(id));
+  if (missingDiagnosisIds.length > 0) {
+    const linked = await db
+      .select()
+      .from(schema.debugDiagnoses)
+      .where(or(...missingDiagnosisIds.map((id) => eq(schema.debugDiagnoses.id, id))));
+    for (const diagnosis of linked.map(toDiagnosis)) diagnosisById.set(diagnosis.id, diagnosis);
+  }
+  return {
+    diagnoses,
+    runs: runRows.map((run) => toDiagnosisRun(run, run.diagnosisId ? diagnosisById.get(run.diagnosisId) ?? null : null)),
+  };
 }
 
 export async function saveDebugDiagnosisAsIdea(

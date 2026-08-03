@@ -14,7 +14,7 @@ import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import { jsonValidator, StartChatSessionSchema } from '../schemas';
-import { launchInstantSession } from '../services/instant-session';
+import { acceptInstantSession, continueInstantSessionLaunch } from '../services/instant-session';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
 import { resolveSkillProfile } from '../services/skills';
 import { truncateTitle } from '../services/task-title';
@@ -34,6 +34,18 @@ type ParentLineage = {
   credentialAttributionSource: string | null;
 };
 const chatStartRoutes = new Hono<{ Bindings: Env }>();
+
+function scheduleBackground(
+  c: { executionCtx: { waitUntil(promise: Promise<unknown>): void } },
+  promise: Promise<unknown> | undefined
+): void {
+  if (!promise || typeof promise.catch !== 'function') return;
+  try {
+    c.executionCtx.waitUntil(promise);
+  } catch {
+    promise.catch(() => undefined);
+  }
+}
 
 function appendSystemPrompt(
   message: string,
@@ -197,24 +209,25 @@ chatStartRoutes.post(
       createdAt: now,
     });
 
-    let result: Awaited<ReturnType<typeof launchInstantSession>>;
+    let accepted: Awaited<ReturnType<typeof acceptInstantSession>>;
+    const launchInput = {
+      taskId,
+      project,
+      userId,
+      initialPrompt,
+      displayMessage: message,
+      contextSummary: body.contextSummary ?? null,
+      agentType,
+      agentProfileId: resolvedProfile?.profileId ?? null,
+      skillId: resolvedProfile?.skillId ?? null,
+      overrides: {
+        model: resolvedProfile?.model ?? null,
+        effort: resolvedProfile?.effort ?? null,
+        permissionMode: resolvedProfile?.permissionMode ?? null,
+      },
+    };
     try {
-      result = await launchInstantSession(db, c.env, {
-        taskId,
-        project,
-        userId,
-        initialPrompt,
-        displayMessage: message,
-        contextSummary: body.contextSummary ?? null,
-        agentType,
-        agentProfileId: resolvedProfile?.profileId ?? null,
-        skillId: resolvedProfile?.skillId ?? null,
-        overrides: {
-          model: resolvedProfile?.model ?? null,
-          effort: resolvedProfile?.effort ?? null,
-          permissionMode: resolvedProfile?.permissionMode ?? null,
-        },
-      });
+      accepted = await acceptInstantSession(db, c.env, launchInput);
     } catch (err) {
       const failedAt = new Date().toISOString();
       const errorMessage = err instanceof Error ? err.message : String(err);
@@ -239,36 +252,20 @@ chatStartRoutes.post(
       });
       throw err;
     }
-    await db
-      .update(schema.tasks)
-      .set({ chatSessionId: result.chatSessionId, updatedAt: new Date().toISOString() })
-      .where(eq(schema.tasks.id, taskId));
 
-    if (resolvedProfile?.profileId || resolvedProfile?.skillId) {
-      await db
-        .update(schema.agentSessions)
-        .set({
-          agentProfileId: resolvedProfile.profileId ?? null,
-          skillId: resolvedProfile.skillId ?? null,
-          updatedAt: new Date().toISOString(),
-        })
-        .where(eq(schema.agentSessions.id, result.agentSessionId));
-    }
+    scheduleBackground(c, continueInstantSessionLaunch(db, c.env, launchInput, accepted));
 
     return c.json(
       {
-        status: 'running',
+        status: 'starting',
         runtime,
-        taskId: result.taskId,
-        sessionId: result.chatSessionId,
-        workspaceId: result.workspaceId,
-        nodeId: result.nodeId,
-        agentSessionId: result.agentSessionId,
-        acpSessionId: result.acpSessionId,
-        workspaceUrl: result.workspaceUrl,
-        timings: result.timings,
+        taskId: accepted.taskId,
+        sessionId: accepted.chatSessionId,
+        workspaceId: accepted.workspaceId,
+        nodeId: accepted.nodeId,
+        workspaceUrl: accepted.workspaceUrl,
       },
-      201
+      202
     );
   }
 );

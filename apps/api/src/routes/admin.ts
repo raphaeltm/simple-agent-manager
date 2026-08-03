@@ -25,8 +25,10 @@ import {
   UpdateSignupApprovalConfigSchema,
 } from '../schemas';
 import {
+  createDebugDiagnosisRun,
+  executeDebugDiagnosisRun,
   listDebugDiagnoses,
-  runDebugDiagnosis,
+  retryDebugDiagnosisRun,
   saveDebugDiagnosisAsIdea,
 } from '../services/debug-agent';
 import { getRuntimeLimits } from '../services/limits';
@@ -42,6 +44,18 @@ import { runPlatformFeedbackTriage } from '../services/platform-feedback-triage'
 import { getSignupApprovalConfig, setSignupApprovalConfig } from '../services/signup-approval';
 
 const adminRoutes = new Hono<{ Bindings: Env }>();
+
+function scheduleBackground(
+  c: { executionCtx: { waitUntil(promise: Promise<unknown>): void } },
+  promise: Promise<unknown> | undefined
+): void {
+  if (!promise || typeof promise.catch !== 'function') return;
+  try {
+    c.executionCtx.waitUntil(promise);
+  } catch {
+    promise.catch(() => undefined);
+  }
+}
 
 // All admin routes require auth + approval + superadmin
 adminRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
@@ -444,12 +458,12 @@ adminRoutes.get('/observability/debug/projects', async (c) => {
 });
 
 adminRoutes.get('/observability/diagnoses', async (c) => {
-  const diagnoses = await listDebugDiagnoses(c.env, {
+  const result = await listDebugDiagnoses(c.env, {
     errorId: c.req.query('errorId'),
     startTime: c.req.query('startTime'),
     endTime: c.req.query('endTime'),
   });
-  return c.json({ diagnoses });
+  return c.json(result);
 });
 
 adminRoutes.post('/observability/diagnoses', jsonValidator(RunDebugDiagnosisSchema), async (c) => {
@@ -458,8 +472,9 @@ adminRoutes.post('/observability/diagnoses', jsonValidator(RunDebugDiagnosisSche
     throw errors.badRequest('Provide either errorId or a startTime/endTime window');
   }
   try {
-    const diagnosis = await runDebugDiagnosis(c.env, getUserId(c), body);
-    return c.json({ diagnosis }, 201);
+    const run = await createDebugDiagnosisRun(c.env, getUserId(c), body);
+    scheduleBackground(c, executeDebugDiagnosisRun(c.env, run.id));
+    return c.json({ run }, 202);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Diagnosis failed';
     if (message.includes('budget') || message.includes('token ceiling')) {
@@ -468,6 +483,12 @@ adminRoutes.post('/observability/diagnoses', jsonValidator(RunDebugDiagnosisSche
     if (message.includes('not found') || message.includes('window')) throw errors.badRequest(message);
     throw err;
   }
+});
+
+adminRoutes.post('/observability/diagnosis-runs/:runId/retry', async (c) => {
+  const run = await retryDebugDiagnosisRun(c.env, c.req.param('runId'), getUserId(c));
+  scheduleBackground(c, executeDebugDiagnosisRun(c.env, run.id));
+  return c.json({ run }, 202);
 });
 
 adminRoutes.post('/observability/diagnoses/:diagnosisId/idea', jsonValidator(SaveDebugDiagnosisIdeaSchema), async (c) => {

@@ -15,7 +15,8 @@ const mocks = vi.hoisted(() => ({
     requireRepositoryUserAccess: vi.fn(),
   },
   instant: {
-    launchInstantSession: vi.fn(),
+    acceptInstantSession: vi.fn(),
+    continueInstantSessionLaunch: vi.fn(),
   },
   mention: {
     enrichMessageWithMentions: vi.fn(),
@@ -111,15 +112,13 @@ describe('chatStartRoutes', () => {
     mocks.mention.enrichMessageWithMentions.mockResolvedValue({
       enrichedMessage: 'enriched hello',
     });
-    mocks.instant.launchInstantSession.mockResolvedValue({
+    mocks.instant.continueInstantSessionLaunch.mockResolvedValue(undefined);
+    mocks.instant.acceptInstantSession.mockResolvedValue({
       taskId: 'task-1',
       chatSessionId: 'chat-session-1',
       workspaceId: 'workspace-1',
       nodeId: 'node-1',
-      agentSessionId: 'agent-session-1',
-      acpSessionId: 'agent-session-1',
       workspaceUrl: 'https://ws-workspace-1.example.com',
-      timings: { setupDurationMs: 1 },
     });
   });
 
@@ -135,7 +134,7 @@ describe('chatStartRoutes', () => {
       makeEnv()
     );
 
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(202);
     const body = await res.json<{
       taskId: string;
       sessionId: string;
@@ -145,7 +144,7 @@ describe('chatStartRoutes', () => {
     expect(body.sessionId).toBe('chat-session-1');
     expect(body.runtime.runtime).toBe('cf-container');
     expect(mocks.repoAccess.requireRepositoryUserAccess).toHaveBeenCalledOnce();
-    expect(mocks.instant.launchInstantSession).toHaveBeenCalledWith(
+    expect(mocks.instant.acceptInstantSession).toHaveBeenCalledWith(
       db,
       expect.anything(),
       expect.objectContaining({
@@ -155,12 +154,11 @@ describe('chatStartRoutes', () => {
         agentType: 'claude-code',
       })
     );
-    expect(db.update).toHaveBeenCalledTimes(2);
-    expect(db.update.mock.results[1]?.value.set).toHaveBeenCalledWith(
-      expect.objectContaining({
-        agentProfileId: 'profile-1',
-        skillId: null,
-      })
+    expect(mocks.instant.continueInstantSessionLaunch).toHaveBeenCalledWith(
+      db,
+      expect.anything(),
+      expect.objectContaining({ taskId: expect.any(String) }),
+      expect.objectContaining({ chatSessionId: 'chat-session-1' })
     );
   });
 
@@ -203,7 +201,7 @@ describe('chatStartRoutes', () => {
       makeEnv()
     );
 
-    expect(res.status).toBe(201);
+    expect(res.status).toBe(202);
     expect(parentDb.insert.mock.results[0]?.value.values).toHaveBeenCalledWith(
       expect.objectContaining({
         parentTaskId: 'parent-task',
@@ -211,7 +209,7 @@ describe('chatStartRoutes', () => {
         credentialAttributionSource: 'platform',
       })
     );
-    expect(mocks.instant.launchInstantSession).toHaveBeenCalledWith(
+    expect(mocks.instant.acceptInstantSession).toHaveBeenCalledWith(
       parentDb,
       expect.anything(),
       expect.objectContaining({
@@ -239,6 +237,6 @@ describe('chatStartRoutes', () => {
     );
 
     expect(res.status).toBe(409);
-    expect(mocks.instant.launchInstantSession).not.toHaveBeenCalled();
+    expect(mocks.instant.acceptInstantSession).not.toHaveBeenCalled();
   });
 });

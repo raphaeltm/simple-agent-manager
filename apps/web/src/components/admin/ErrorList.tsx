@@ -1,9 +1,9 @@
-import type { DebugDiagnosis, PlatformError } from '@simple-agent-manager/shared';
+import type { DebugDiagnosis, DebugDiagnosisRun, PlatformError } from '@simple-agent-manager/shared';
 import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
 import { type FC, useEffect, useState } from 'react';
 
 import { useAdminErrors } from '../../hooks/useAdminErrors';
-import { fetchAdminDebugDiagnoses, runAdminDebugDiagnosis } from '../../lib/api';
+import { fetchAdminDebugDiagnoses, retryAdminDebugDiagnosisRun, runAdminDebugDiagnosis } from '../../lib/api';
 import { DebugDiagnosisPanel } from './DebugDiagnosisPanel';
 import { ObservabilityFilters } from './ObservabilityFilters';
 import { ObservabilityLogEntry } from './ObservabilityLogEntry';
@@ -13,6 +13,7 @@ export const ErrorList: FC = () => {
   const [diagnosing, setDiagnosing] = useState(false);
   const [diagnosisError, setDiagnosisError] = useState<string | null>(null);
   const [savedDiagnoses, setSavedDiagnoses] = useState<DebugDiagnosis[]>([]);
+  const [diagnosisRuns, setDiagnosisRuns] = useState<DebugDiagnosisRun[]>([]);
   const {
     errors, loading, error, hasMore, total, filter, setSource, setLevel,
     setSearch, setTimeRange, loadMore, refresh,
@@ -20,7 +21,10 @@ export const ErrorList: FC = () => {
 
   useEffect(() => {
     fetchAdminDebugDiagnoses({})
-      .then(({ diagnoses }) => setSavedDiagnoses(diagnoses))
+      .then(({ diagnoses, runs }) => {
+        setSavedDiagnoses(diagnoses);
+        setDiagnosisRuns(runs ?? []);
+      })
       .catch(() => { /* A history failure must not hide current errors. */ });
   }, []);
 
@@ -29,9 +33,16 @@ export const ErrorList: FC = () => {
     setDiagnosis(null);
     setDiagnosisError(null);
     try {
-      const result = (await runAdminDebugDiagnosis(body)).diagnosis;
-      setDiagnosis(result);
-      setSavedDiagnoses((current) => [result, ...current.filter((item) => item.id !== result.id)]);
+      const response = await runAdminDebugDiagnosis(body);
+      const run = response.run;
+      const completedDiagnosis = response.diagnosis;
+      if (run) {
+        setDiagnosisRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
+        if (run.diagnosis) setDiagnosis(run.diagnosis);
+      } else if (completedDiagnosis) {
+        setDiagnosis(completedDiagnosis);
+        setSavedDiagnoses((current) => [completedDiagnosis, ...current.filter((item) => item.id !== completedDiagnosis.id)]);
+      }
     } catch (cause) {
       setDiagnosisError(cause instanceof Error ? cause.message : 'Diagnosis failed');
     } finally {
@@ -49,6 +60,25 @@ export const ErrorList: FC = () => {
   const diagnosisWindowLabel = filter.timeRange === '7d' || filter.timeRange === '30d'
     ? 'Diagnose latest 24h'
     : 'Diagnose window';
+  const retryRun = async (runId: string) => {
+    setDiagnosisError(null);
+    try {
+      const result = (await retryAdminDebugDiagnosisRun(runId)).run;
+      if (result) setDiagnosisRuns((current) => [result, ...current]);
+    } catch (cause) {
+      setDiagnosisError(cause instanceof Error ? cause.message : 'Retry failed');
+    }
+  };
+
+  const openRun = (run: DebugDiagnosisRun) => {
+    if (run.diagnosis) {
+      setDiagnosis(run.diagnosis);
+      return;
+    }
+    if (run.status === 'failed') {
+      setDiagnosisError(run.errorMessage ?? 'Diagnosis failed');
+    }
+  };
 
   return (
     <div>
@@ -58,6 +88,26 @@ export const ErrorList: FC = () => {
         error={diagnosisError}
         onClose={() => { setDiagnosis(null); setDiagnosisError(null); }}
       />
+      {diagnosisRuns.length > 0 && (
+        <Card className="mb-4">
+          <div className="border-b border-border-default px-4 py-3 text-sm font-medium text-fg-primary">Recent diagnosis runs</div>
+          <div className="divide-y divide-border-default">
+            {diagnosisRuns.slice(0, 8).map((run) => (
+              <div key={run.id} className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 text-sm">
+                <button className="min-w-0 text-left text-fg-primary hover:underline" onClick={() => openRun(run)}>
+                  <span className="font-medium">{run.status}</span>
+                  <span className="ml-2 text-fg-muted">{run.errorId ? `Error ${run.errorId}` : `${run.startTime} → ${run.endTime}`}</span>
+                </button>
+                <div className="flex items-center gap-2">
+                  {(run.status === 'queued' || run.status === 'running') && <span className="text-xs text-fg-muted">Recoverable after refresh</span>}
+                  {run.status === 'failed' && <Button size="sm" variant="secondary" onClick={() => { void retryRun(run.id); }}>Retry</Button>}
+                  {run.diagnosis && <Button size="sm" variant="ghost" onClick={() => openRun(run)}>Open</Button>}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Card>
+      )}
       {error && (
         <div className="p-3 mb-4 rounded-sm bg-danger-tint text-danger-fg text-sm flex justify-between items-center">
           <span>{error}</span>

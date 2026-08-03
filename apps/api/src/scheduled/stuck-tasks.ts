@@ -37,6 +37,8 @@ import {
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 
+const DEFAULT_INSTANT_START_STALE_TIMEOUT_MS = 10 * 60 * 1000;
+
 import * as schema from '../db/schema';
 import type { TaskRunner } from '../durable-objects/task-runner';
 import { classifyVmAgentContainerLiveness } from '../durable-objects/vm-agent-container-lifecycle';
@@ -653,6 +655,10 @@ export async function getTaskReconciliationDiagnostics(
     env.TASK_STUCK_DELEGATED_TIMEOUT_MS,
     DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS
   );
+  const instantStartStaleTimeoutMs = parseMs(
+    env.INSTANT_START_STALE_TIMEOUT_MS,
+    DEFAULT_INSTANT_START_STALE_TIMEOUT_MS
+  );
   const maxExecutionMs = parseMs(env.TASK_RUN_MAX_EXECUTION_MS, DEFAULT_TASK_RUN_MAX_EXECUTION_MS);
   const maxCandidates = parseMs(
     env.STUCK_TASK_MAX_CANDIDATES_PER_SWEEP,
@@ -662,7 +668,9 @@ export async function getTaskReconciliationDiagnostics(
   let timeForCheck = elapsedMs;
   let halfThreshold = mismatchGraceMs;
   if (task.status === 'queued') {
-    halfThreshold = queuedTimeoutMs / 2;
+    halfThreshold = task.execution_step === 'instant_persistence'
+      ? instantStartStaleTimeoutMs / 2
+      : queuedTimeoutMs / 2;
   } else if (task.status === 'delegated') {
     halfThreshold = delegatedTimeoutMs / 2;
   } else if (task.status === 'in_progress') {
@@ -832,6 +840,10 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     env.TASK_STUCK_DELEGATED_TIMEOUT_MS,
     DEFAULT_TASK_STUCK_DELEGATED_TIMEOUT_MS
   );
+  const instantStartStaleTimeoutMs = parseMs(
+    env.INSTANT_START_STALE_TIMEOUT_MS,
+    DEFAULT_INSTANT_START_STALE_TIMEOUT_MS
+  );
   const maxExecutionMs = parseMs(env.TASK_RUN_MAX_EXECUTION_MS, DEFAULT_TASK_RUN_MAX_EXECUTION_MS);
   const hardTimeoutMs = parseMs(env.TASK_RUN_HARD_TIMEOUT_MS, DEFAULT_TASK_RUN_HARD_TIMEOUT_MS);
   const absoluteCeilingMs = parseMs(
@@ -935,7 +947,10 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     if (!isStuck) {
       switch (task.status) {
         case 'queued':
-          if (elapsedMs > queuedTimeoutMs) {
+          if (task.execution_step === 'instant_persistence' && elapsedMs > instantStartStaleTimeoutMs) {
+            isStuck = true;
+            reason = `Instant session start accepted but still queued for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(instantStartStaleTimeoutMs / 1000)}s).${stepInfo} Background container launch may not have completed.`;
+          } else if (elapsedMs > queuedTimeoutMs) {
             isStuck = true;
             reason = `Task stuck in 'queued' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(queuedTimeoutMs / 1000)}s).${stepInfo} Node provisioning may have failed silently.`;
           }

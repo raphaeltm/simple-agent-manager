@@ -593,6 +593,8 @@ export type {
   DebugAgentUsage,
   DebugDiagnosis,
   DebugDiagnosisListResponse,
+  DebugDiagnosisRun,
+  DebugDiagnosisRunStatus,
   DebugProjectOption,
   DebugProjectOptionsResponse,
   RunDebugDiagnosisRequest,

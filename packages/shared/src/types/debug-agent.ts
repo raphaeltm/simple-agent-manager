@@ -30,12 +30,35 @@ export interface RunDebugDiagnosisRequest {
   endTime?: string;
 }
 
+export type DebugDiagnosisRunStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+
+export interface DebugDiagnosisRun {
+  id: string;
+  status: DebugDiagnosisRunStatus;
+  errorId: string | null;
+  startTime: string;
+  endTime: string;
+  diagnosisId: string | null;
+  retryOfRunId: string | null;
+  model: string | null;
+  usage: DebugAgentUsage;
+  errorMessage: string | null;
+  createdBy: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+  diagnosis?: DebugDiagnosis | null;
+}
+
 export interface RunDebugDiagnosisResponse {
-  diagnosis: DebugDiagnosis;
+  run?: DebugDiagnosisRun;
+  diagnosis?: DebugDiagnosis;
 }
 
 export interface DebugDiagnosisListResponse {
   diagnoses: DebugDiagnosis[];
+  runs: DebugDiagnosisRun[];
 }
 
 export interface SaveDebugDiagnosisIdeaRequest {

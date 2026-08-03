@@ -72,6 +72,7 @@ export {
   queryAdminLogs,
   removeAdminUserQuota,
   resetAIProxyConfig,
+  retryAdminDebugDiagnosisRun,
   runAdminDebugDiagnosis,
   saveAdminDebugDiagnosisAsIdea,
   updateAdminDefaultQuota,
