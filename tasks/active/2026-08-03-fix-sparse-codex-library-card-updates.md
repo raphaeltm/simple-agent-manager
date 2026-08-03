@@ -10,14 +10,15 @@ PR #1721 only added a component fixture that placed `sam-mcp/display_from_librar
 
 - PR #1520 made tool-name normalization delimiter-agnostic in the VM agent and web, but its real staging Codex call was explicitly waived because the staging OAuth credential was expired.
 - PR #1524 preserved bounded card output in compact history only when the individual result row already identifies a document-card tool; its staging run was explicitly skipped.
-- The maintained Codex ACP wrapper emits sparse result updates: the initial row can carry the visible slash-form title, while the completed update can carry the JSON result without repeating `title` or `toolName`.
+- A real secondary-user staging run reproduced the failure in cf-container Codex session `d56fd81a-4c0f-49a0-8feb-d662439461a8`: the web rendered the generic `mcp.sam-mcp.display_from_library` tool card (297 B) and no rich HTML card.
+- The maintained Codex ACP wrapper emits three sparse rows. The initial row carries dotted `title`/`toolName` (`mcp.sam-mcp.display_from_library`) and nests arguments under `rawInput.arguments`; the intermediate update carries only `toolCallId` plus `in_progress`; the completed update carries only `toolCallId` plus `completed`, with the complete document JSON in message `content` and no `title`, `toolName`, or `rawOutput`.
 - `apps/web/src/components/project-message-view/types.ts:chatMessagesToConversationItems` correctly merges sparse rows by `toolCallId` and preserves the initial `toolName`, but it tries `legacyDocumentRawOutput()` before that merge using only the current row's `toolName`. A sparse result row therefore cannot recover its JSON using the already-known tool name from the initial row.
 - The prior production session's persisted searchable tool output contains the complete HTML document payload, so the result data was stored; typed-card reconstruction is the remaining gap.
-- An independent Staging Validator task (`01KZ41AFVYDEPMKFF5GYK6F0S2`) is reproducing the exact flow and will return compact/non-compact message metadata before the implementation is finalized.
+- Independent Staging Validator task `01KZ41AFVYDEPMKFF5GYK6F0S2` is separately auditing the same staging session for the required second-party evidence.
 
 ## Implementation checklist
 
-- [ ] Capture the exact live Codex staging call/update metadata and retain it as the regression fixture shape.
+- [x] Capture the exact live Codex staging call/update metadata and retain it as the regression fixture shape.
 - [ ] Add a failing persisted-message conversion test where the initial slash-title row identifies `display_from_library` and a later same-`toolCallId` update contains the document JSON without repeating title/tool name.
 - [ ] Recover bounded legacy document output during call/update merge using the existing item's preserved tool identity.
 - [ ] Prove the merged item selects `DocumentCard` for the reported HTML document and still falls back generically for malformed/unknown sparse updates.
