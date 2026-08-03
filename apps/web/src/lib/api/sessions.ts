@@ -305,7 +305,7 @@ export interface StartInstantChatSessionRequest {
 }
 
 export interface StartInstantChatSessionResponse {
-  status: 'running';
+  status: 'starting' | 'running';
   taskId: string;
   runtime: {
     runtime: AgentProfileRuntime;
@@ -314,10 +314,10 @@ export interface StartInstantChatSessionResponse {
   sessionId: string;
   workspaceId: string;
   nodeId: string;
-  agentSessionId: string;
-  acpSessionId: string;
+  agentSessionId?: string;
+  acpSessionId?: string;
   workspaceUrl: string;
-  timings: {
+  timings?: {
     totalDurationMs: number;
     preContainerDurationMs: number;
     containerLaunchDurationMs: number;

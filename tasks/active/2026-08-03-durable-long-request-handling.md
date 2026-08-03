@@ -47,7 +47,7 @@ Goal: persist user intent quickly, return durable IDs/status quickly, continue l
 - [x] Add web tests for `/admin/errors` running/recent diagnosis history, failure/retry, completed diagnosis display, and save-as-Idea behavior.
 - [x] Add API/DO tests proving Instant first-message start returns after durable acceptance and launch continues in server-owned context; include ambiguous/interrupted start coverage so accepted tasks do not stay queued forever.
 - [x] Add web tests proving new chat submission navigates/recovers queued/starting state without depending on the original POST remaining open.
-- [ ] Run migration/schema validation, typecheck, focused tests, full quality gates, local specialist reviews, staging verification, PR CI, merge, and production deploy monitoring per `/do`. Local gates completed; staging/PR CI/merge/prod monitoring remain before archive.
+- [ ] Run migration/schema validation, typecheck, focused tests, full quality gates, local specialist reviews, staging verification, PR CI, merge, and production deploy monitoring per `/do`. Local and staging gates completed; PR CI/merge/prod monitoring remain before archive.
 
 ## Acceptance criteria
 
@@ -55,9 +55,10 @@ Goal: persist user intent quickly, return durable IDs/status quickly, continue l
 - [x] Starting a new Instant/cf-container chat returns quickly after durable acceptance; closing the browser/phone after acceptance does not lose the user message or session/task identity; returning shows queued/starting/running/failed state.
 - [x] No known path leaves accepted Instant starts stuck indefinitely in queued/creating with no diagnosis.
 - [x] Existing task-mode submission and existing diagnosis save-as-Idea behavior remain compatible.
-- [ ] One PR covers both fixes and includes combined test/verification evidence. PR creation/CI evidence remains before archive.
+- [x] One PR covers both fixes and includes combined test/verification evidence. Draft PR #1722 covers both tracks with combined validation evidence.
 
 ## Implementation notes
 
 - Follow-up prompt durability was evaluated and deferred to `tasks/backlog/2026-08-03-durable-follow-up-prompt-delivery.md` because it requires a separate durable prompt-delivery state machine for existing sessions.
 - Local verification completed: focused typechecks/tests, full `pnpm test`, full `pnpm build`, and D1/DO migration safety/order gates.
+- Staging verification completed on 2026-08-03: deploy workflow 30797392483 passed; admin diagnosis quick-accepted and recovered run `01KZ3CNRZZQ8AHJB2CNWGSNFBT`; Instant cf-container start quick-accepted in 6.5s with task `01KZ3CNFTECCEA3NMFBAWMP6TA`, session `be166489-2f3e-44b6-b227-0c03d84570eb`, and direct task recovery showed persisted workspace `01KZ3CNG93WS8J4Q285EXKDBCZ`.
