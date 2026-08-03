@@ -20,8 +20,8 @@ SAM's static model catalog is the fallback and validation source for supported c
 - [x] Add the newly documented stable Gemini CLI models.
 - [x] Synchronize OpenCode Zen and Go static fallback IDs and display names with active Models.dev records.
 - [x] Update focused catalog tests for representative additions and changed display names.
-- [ ] Run focused shared-package and repository quality checks.
-- [ ] Complete specialist review, staging verification, PR/CI, merge, and production deploy monitoring.
+- [x] Run focused shared-package and repository quality checks.
+- [ ] Complete staging verification, PR/CI, merge, and production deploy monitoring.
 
 ## Acceptance criteria
 
@@ -40,3 +40,11 @@ SAM's static model catalog is the fallback and validation source for supported c
 - https://ai.google.dev/gemini-api/docs/deprecations
 - https://docs.mistral.ai/models
 - https://models.dev/api.json
+
+## Validation evidence
+
+- Focused shared catalog tests: 2 files, 22 tests passed.
+- Repository gates: lint, typecheck, full test suite, and build passed. An initial unrelated infra DNS import hook timeout passed in isolation and on the aggregate rerun.
+- Task completion validator: PASS; checks A-F found no implementation or coverage gaps.
+- Constitution validator: PASS; no Principle XI configuration violations introduced.
+- Test engineer: PASS; new IDs and changed display names have focused regression coverage; vertical-slice testing is not applicable to this pure shared-data change.
