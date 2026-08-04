@@ -67,7 +67,7 @@ When an agent finishes its work:
 
 ## Where the work lands
 
-Every task gets its own **output branch** — a `sam/`-prefixed name derived from your description. The workspace is now checked out on that branch from the moment it's created: SAM clones your project's default branch as the base, then creates and checks out the output branch before the agent starts. Run `git branch --show-current` inside a task workspace and you'll see `sam/…`, not `main`.
+Every task gets its own **output branch** — a prefixed name derived from your description, `sam/` by default (self-hosters can change the prefix with `BRANCH_NAME_PREFIX`). The workspace is now checked out on that branch from the moment it's created: SAM clones your project's default branch as the base, then creates and checks out the output branch before the agent starts. Run `git branch --show-current` inside a task workspace and you'll see the task branch, not `main`.
 
 That means an agent that never thinks about branching still produces a reviewable branch and a PR, instead of committing on top of your default branch.
 
@@ -84,7 +84,7 @@ The work is still committed locally in the workspace — nothing is destroyed �
 Two limits worth knowing:
 
 - **The guard only covers SAM's own auto-commit push.** An agent that runs `git push` itself through the shell is not intercepted. If your default branch triggers deploys, protect it with a branch protection rule too — this guard is a safety net, not a substitute.
-- **If SAM cannot determine the default branch**, the guard is skipped and a warning is logged, so a metadata gap never blocks a legitimate push.
+- **The guard protects whichever branch SAM believes is the base.** It uses the project's default branch when the workspace knows it, and falls back to the workspace's checkout branch when it doesn't. It is skipped entirely only when SAM has no branch metadata at all. So for a manually created workspace whose default branch was never recorded, a push can be refused while `HEAD` is on the branch the workspace was created with — even though that isn't really your default branch. Switch to a different branch and re-push, or push by hand from the workspace.
 
 ## AI Title Generation
 

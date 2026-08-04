@@ -20,6 +20,8 @@ The **Report** action lives in the session header's expanded detail panel, so op
 
 ![The Report an Issue dialog in SAM: a Title field, a Description field, and a checked "Attach technical references to help diagnose this issue" checkbox listing a Chat session, Task, and Node identifier.](/images/docs/report-issue-dialog.png)
 
+_Shown with the consent box ticked so the identifier list is visible. It is unchecked by default._
+
 ### From a crash screen
 
 If the UI itself crashes, the error screen offers a **Report this issue** link. Use this when a page went blank or threw an error rather than the agent misbehaving.
@@ -34,13 +36,13 @@ SAM never attaches technical context silently. The dialog shows an unchecked box
 
 Tick it and SAM lists the exact identifiers it would send, so you can see them before you submit:
 
-| Reference        | Where it comes from                      |
-| ---------------- | ---------------------------------------- |
-| **Chat session** | The session you're reporting from        |
-| **Task**         | The task backing that session            |
-| **Node**         | The machine the workspace was running on |
-| **Error**        | The crash-screen error                   |
-| **Diagnosis**    | A superadmin deployment diagnosis        |
+| Reference        | Where it comes from                      | Checked against your access? |
+| ---------------- | ---------------------------------------- | ---------------------------- |
+| **Chat session** | The session you're reporting from        | Yes — must be your workspace |
+| **Task**         | The task backing that session            | Yes — must be your project   |
+| **Node**         | The machine the workspace was running on | Yes — must be your node      |
+| **Diagnosis**    | A superadmin deployment diagnosis        | Yes — must be yours          |
+| **Error**        | The crash-screen error text              | No — see below               |
 
 These are **identifiers only** — SAM does not ship your code, your transcript, or your environment. They let a maintainer look up the right records rather than guess from a description.
 
@@ -48,14 +50,14 @@ Leave the box unchecked and only your title and description are submitted. The r
 
 Two things happen server-side regardless of what you tick:
 
-- **You can only attach your own things.** Every reference is re-checked against your access before it's stored. Anything you don't have access to is dropped rather than attached — so a stale or copied identifier can never pull another tenant's records into your report. The confirmation screen lists what was actually attached, which may be fewer references than the dialog offered.
+- **Ownership is re-checked.** Session, task, node, and diagnosis references are verified against your access before they're stored, and silently dropped if you don't have it — a stale or copied identifier can't pull someone else's records into your report. The **error** reference is different: it carries the crash text your own browser produced, not a pointer to a stored record, so it is format-checked and stored as-is rather than looked up. The confirmation screen lists what was actually attached, which may be fewer references than the dialog offered.
 - **Your text is scrubbed.** Best-effort redaction strips credential-shaped strings (API keys, tokens, `sk-`/`ghp_`-style prefixes, PEM private key blocks) and email addresses before anything is stored. Treat it as a safety net, not a licence — don't paste secrets into the box.
 
 ## After you submit
 
 You get a confirmation with a **report ID**, a status of `draft`, and the list of references that were actually attached. The report becomes a **draft [Idea](/docs/guides/idea-execution/)** in the platform's feedback project, where a maintainer picks it up.
 
-Reports are rate-limited to **20 per hour** per account (`RATE_LIMIT_REPORT_ISSUE_POST`). Exceeding that returns a `429` — wait rather than retrying immediately.
+Reports are rate-limited to **20 per hour** per account (`RATE_LIMIT_REPORT_ISSUE_POST`). Exceeding that returns a `429`. The window is a fixed clock hour rather than a rolling sixty minutes, so the allowance resets at the top of the next hour — which may be in five minutes or fifty-five.
 
 Length limits: title **200** characters, description **5,000** characters. The dialog enforces both as you type, so you'll notice the cap rather than lose text on submit.
 
@@ -82,10 +84,14 @@ The same project also receives [automated error triage](#for-operators-automated
 | Variable                              | Default | Description                                                             |
 | ------------------------------------- | ------- | ----------------------------------------------------------------------- |
 | `PLATFORM_FEEDBACK_PROJECT_ID`        | unset   | Project that receives reports and triage Ideas. Unset ⇒ feature hidden. |
-| `REPORT_ISSUE_TITLE_MAX_LENGTH`       | `200`   | Max report title length                                                 |
-| `REPORT_ISSUE_DESCRIPTION_MAX_LENGTH` | `5000`  | Max report description length                                           |
+| `REPORT_ISSUE_TITLE_MAX_LENGTH`       | `200`   | Truncation ceiling for the stored title — see below                     |
+| `REPORT_ISSUE_DESCRIPTION_MAX_LENGTH` | `5000`  | Truncation ceiling for the stored description — see below               |
 | `REPORT_ISSUE_CONTENT_MAX_LENGTH`     | `65536` | Max stored Idea body, including attached references                     |
-| `RATE_LIMIT_REPORT_ISSUE_POST`        | `20`    | Report submissions allowed per hour, per user                           |
+| `RATE_LIMIT_REPORT_ISSUE_POST`        | `20`    | Report submissions allowed per clock hour, per user                     |
+
+:::caution
+The two length variables can only **lower** the stored length — they cannot raise the limit users hit. The request schema and the dialog both enforce the built-in 200 / 5,000 caps, so `REPORT_ISSUE_DESCRIPTION_MAX_LENGTH=20000` still rejects a 5,001-character description with a `400`. Set them below the defaults to truncate more aggressively; setting them above has no effect.
+:::
 
 ### How a report is stored
 

@@ -163,6 +163,15 @@ Agent conversations and task sessions stay active until they complete, fail, or 
 
 SAM also collapses platform-injected setup messages in the chat timeline. Those messages contain project instructions, task context, and policy that the agent received before it started. They remain available for debugging, but they no longer dominate the visible conversation.
 
+### Sleeping and Recovery
+
+Chats running on the [Instant runtime](/docs/guides/instant-sessions/) can show two extra states:
+
+- **Sleeping** — the session went idle and was parked rather than destroyed. Send a message to wake it; the first message takes a little longer while it restores.
+- **Recovery** — SAM is rebuilding the session's runtime and restoring its saved state. Wait for it to finish instead of resending.
+
+You may also see a banner telling you a message was saved but its delivery was interrupted. **That one needs a decision from you** — SAM will not replay the message automatically, because replaying a prompt that already half-ran duplicates commits and pull requests. See [what to do when a session is interrupted](/docs/guides/instant-sessions/#what-to-do-when-a-session-is-interrupted).
+
 ## Starting a New Chat
 
 When you open a new chat, SAM offers a few repo-aware **starter prompts** (for example, "What's in this repo?" or "Run the tests and fix any failures") so you can get moving without a blank page. Pick one or type your own.
