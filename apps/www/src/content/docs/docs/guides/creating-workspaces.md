@@ -17,9 +17,18 @@ Provisioning takes a couple of minutes the first time, or seconds when SAM reuse
 
 See [Idea Execution](/docs/guides/idea-execution/) for the full chat-to-pull-request workflow.
 
+## Two kinds of workspace: Instant and VM
+
+A workspace runs either as an **Instant** container on Cloudflare's network or as a **VM** on a cloud provider. SAM chooses for you based on whether you've connected a cloud account:
+
+- **No cloud credential connected** → Instant. Starts in seconds, needs no cloud account, but has no `.devcontainer` build, no Docker, and no automatic port exposure.
+- **Cloud credential connected** → a VM with your full environment.
+
+Everything below — providers, VM sizes, the terminal, stop/restart/delete — describes the **VM** path. If your sessions are starting in seconds and the agent can't run your build tooling, you're on Instant; see [Instant Sessions](/docs/guides/instant-sessions/) for its behavior, limits, and how to pin a runtime explicitly.
+
 ## Where your workspaces run: Bring Your Own Cloud
 
-SAM runs each workspace on a real cloud VM. On the **hosted platform**, compute is usually provided for you, so you can start working without connecting anything. On a **self-hosted instance**, or when you want VMs billed directly to your own account, SAM follows a **Bring Your Own Cloud (BYOC)** model: you connect a cloud provider once, and every VM runs on your account.
+VM workspaces run on a real cloud VM. On the **hosted platform**, compute is usually provided for you, so you can start working without connecting anything. On a **self-hosted instance**, or when you want VMs billed directly to your own account, SAM follows a **Bring Your Own Cloud (BYOC)** model: you connect a cloud provider once, and every VM runs on your account.
 
 SAM supports seven providers:
 
@@ -41,7 +50,7 @@ SAM supports seven providers:
 
 ![The cloud provider picker in SAM's Connections settings: a selectable card for each supported provider — Hetzner, Scaleway, Google Cloud, Vultr, Infomaniak Public Cloud, DigitalOcean, and UpCloud — each with a short description, above the credential form for the selected provider.](/images/docs/cloud-provider-connect.png)
 
-Once a provider is connected, SAM uses it automatically when it provisions workspaces. You can connect more than one and set a default provider (and region) per project in project settings. For per-provider VM sizes, regions, and example pricing, see the [Self-Hosting guide](/docs/guides/self-hosting/#user-vm-costs).
+Once a provider is connected, SAM uses it automatically when it provisions workspaces — and, because a connected credential also switches new sessions from Instant to VM, this is the step that gives your agents your full environment. You can connect more than one and set a default provider (and region) per project in project settings. For per-provider VM sizes, regions, and example pricing, see the [Self-Hosting guide](/docs/guides/self-hosting/#user-vm-costs).
 
 :::note
 Cloud provider credentials are stored encrypted per user — never as environment variables or shared secrets. In a [shared project](/docs/guides/collaboration/), a member can attach a project-level cloud credential so shared work doesn't run on someone's personal account.
