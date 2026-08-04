@@ -167,7 +167,7 @@ SAM also collapses platform-injected setup messages in the chat timeline. Those 
 
 Chats running on the [Instant runtime](/docs/guides/instant-sessions/) have two extra states:
 
-- **Parked for inactivity.** The session went idle and was put to sleep rather than destroyed. Send a message to wake it; that first message takes a little longer while it restores. Note that a sleeping session's badge currently reads **Unknown** — sometimes alongside **Unhealthy** — rather than "Sleeping". That's cosmetic; the session still wakes.
+- **Parked for inactivity.** The session went idle and was put to sleep rather than destroyed. Send a message to wake it; that first message takes a little longer while it restores.
 - **Recovery.** SAM is rebuilding the session's runtime and restoring its saved state. Wait for it to finish instead of resending.
 
 You may also see a banner telling you a message was saved but its delivery was interrupted. **That one needs a decision from you** — SAM will not replay the message automatically, because replaying a prompt that already half-ran duplicates commits and pull requests. See [what to do when a session is interrupted](/docs/guides/instant-sessions/#what-to-do-when-a-session-is-interrupted).

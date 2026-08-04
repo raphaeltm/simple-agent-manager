@@ -263,7 +263,7 @@ Start an [Instant](/docs/guides/instant-sessions/) chat session. Returns **`202`
 
 Because the launch is asynchronous, the response does **not** carry `agentSessionId`, `acpSessionId`, or launch `timings` — poll the session or connect to its stream for live state.
 
-This endpoint is Instant-only. If the resolved agent profile selects the VM runtime it returns `409` (`Selected profile resolves to VM runtime; use task submission instead.`) — use `POST /api/projects/:id/tasks/submit` for VM work.
+This endpoint is Instant-only. It returns `409` (`Selected profile resolves to VM runtime; use task submission instead.`) whenever the runtime resolves to VM — because the profile pins `vm`, because the caller has their own or a project cloud credential, or because `CF_CONTAINER_ENABLED` is not `true` for the deployment. Use `POST /api/projects/:id/tasks/submit` for VM work.
 
 ## Issue Reports
 

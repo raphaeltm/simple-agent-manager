@@ -59,14 +59,20 @@ Note that the **Full** workspace profile does not override this: workspace profi
 
 **SAM does not commit or push an Instant chat's work for you.** No branch is created, nothing is auto-committed when the agent finishes, and no pull request is opened. The workspace sits on your project's default branch and anything the agent changed stays in that container.
 
-What decides this is **task mode**, not the runtime — and selecting the Instant runtime on a profile sets its task mode to `conversation`, which is the mode with no git lifecycle:
+Two independent things decide this, and it's worth knowing which is which:
 
-| Task mode          | Typical source                                | Branch                        | Auto-commit and push |
-| ------------------ | --------------------------------------------- | ----------------------------- | -------------------- |
-| **`conversation`** | An Instant profile — chats you start yourself | Your default branch           | No                   |
-| **`task`**         | A submitted task, or `dispatch_task`          | Its own `sam/…` output branch | Yes, then a PR       |
+| How you started it                                    | Branch                        | Auto-commit and push |
+| ----------------------------------------------------- | ----------------------------- | -------------------- |
+| An **Instant** chat                                   | None — your default branch    | No                   |
+| A submitted task or `dispatch_task`, in **task** mode | Its own `sam/…` output branch | Yes, then a PR       |
+| The same, in **conversation** mode                    | Its own `sam/…` output branch | No                   |
 
-So if you want an Instant chat's work to survive, **ask the agent to commit and push it to a branch**, or hand the work to a task instead. Don't assume a PR is coming. See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands) for task-mode behavior.
+- **The branch depends on the runtime.** Only the Instant path skips branch creation. Anything submitted as a task gets an output branch, whichever mode it runs in.
+- **The push depends on task mode.** Conversation mode has no git lifecycle at all. Selecting the Instant runtime on a profile sets conversation mode, and so does choosing the **Lightweight** workspace profile — so a Lightweight submitted task gets a branch with nothing pushed to it.
+
+So if you want an Instant chat's work to survive, **ask the agent to commit and push it to a branch**, or run the work as a task in task mode. Don't assume a PR is coming.
+
+See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands) for the task-mode behavior.
 
 ## Sleep and wake
 

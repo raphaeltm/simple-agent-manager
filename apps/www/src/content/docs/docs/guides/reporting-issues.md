@@ -18,7 +18,7 @@ The **Report** action lives in the session header's expanded detail panel, so op
 1. In the chat, click the chevron at the right of the session header (**Show session details**).
 2. In the action row that appears, click **Report** (the flag icon).
 
-While the agent is still working, that row also has **Files**, **Git**, and **Workspace**; those disappear once the agent finishes. **Report** and **Timeline** stay put — so you can still report a session that already ended or failed, which is usually when you want to.
+That row also has **Files**, **Git**, and **Workspace** while the session is live; those disappear once it stops or fails. **Report** and **Timeline** stay put — so you can still report a session that already ended, which is usually when you want to.
 
 ![The Report an Issue dialog in SAM: a Title field, a Description field, and a checked "Attach technical references to help diagnose this issue" checkbox listing a Chat session, Task, and Node identifier.](/images/docs/report-issue-dialog.png)
 
@@ -44,7 +44,7 @@ Tick it and SAM lists the exact identifiers it would send, so you can see them b
 | **Task**         | The task backing that session            | Yes — must be your project   |
 | **Node**         | The machine the workspace was running on | Yes — must be your node      |
 | **Diagnosis**    | A superadmin deployment diagnosis        | Yes — must be yours          |
-| **Error**        | A short token from the crash screen      | No — see below               |
+| **Error**        | The crash screen's error text            | No — see below               |
 
 These are **identifiers only** — SAM does not ship your code, your transcript, or your environment. They let a maintainer look up the right records rather than guess from a description.
 
@@ -115,7 +115,7 @@ Beyond user-submitted reports, SAM files its **own** reports. Once an hour it gr
 
 Grouping is by a redacted content signature, so a recurring error updates its existing Idea instead of filing a new one every hour. A group that fails triage repeatedly is rejected rather than retried forever.
 
-There is no UI button for triage yet. To confirm your setup without waiting for the next hourly run, a superadmin can `POST /api/admin/observability/feedback-triage` to sweep immediately.
+There is no UI button for triage yet. A superadmin can `POST /api/admin/observability/feedback-triage` to sweep immediately rather than waiting for the next hourly run. Note that a manual sweep still only looks back over `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES` (60 minutes by default), so it will not surface older errors — to test a fresh configuration, trigger it while a recent error is still inside that window.
 
 | Variable                                             | Default  | Description                                          |
 | ---------------------------------------------------- | -------- | ---------------------------------------------------- |
@@ -146,7 +146,7 @@ When a diagnosis is worth keeping, **Save as draft Idea** files it into a projec
 
 `/admin/errors` is superadmin-only and its raw rows can contain local user IDs, IP addresses, and user-agent strings. Before any tool result reaches the model, SAM recursively strips those fields plus credential-shaped values — API tokens, JWTs, authorization headers, private keys, and long secret-like strings. Cloudflare credentials stay server-side and never enter model messages or saved diagnosis text.
 
-The same redaction now runs on the **Worker log query** behind `/admin/logs`, so a superadmin browsing logs directly will see `[REDACTED]` where those fields used to appear. That is expected, not a bug.
+The same redactor now also runs on the **Worker log query** behind `/admin/logs`, over each entry's `details` object. So a superadmin browsing logs directly will see `[REDACTED]` in place of values — including `user_id`, `ip_address`, and `user_agent`, which are correlation fields rather than secrets. That is expected, not a bug. It does not cover an entry's `message` text, so treat log messages as unredacted.
 
 ### Diagnosis limits
 
