@@ -195,7 +195,7 @@ async function setupChat(
 }
 
 test.describe('File Preview v2 staging', () => {
-  test('opens real uploaded HTML from a DocumentCard in an inert sandbox and pinch-zooms image preview', async ({
+  test('opens real uploaded HTML from a DocumentCard in an isolated auto-run preview and pinch-zooms image preview', async ({
     page,
   }) => {
     test.setTimeout(60_000);

@@ -42,13 +42,16 @@ export function InteractiveHtmlPreview({ file }: Props) {
   const run = useCallback(async () => {
     if (mintingRef.current) return;
     mintingRef.current = true;
+    // Clear `stopped` BEFORE awaiting, not after. Every path into run() (mount, Reset, Run again)
+    // is starting a preview, so leaving it set would keep "Preview stopped." and the "Run again"
+    // button on screen for the whole mint round-trip, then snap to the iframe with no feedback.
+    setStopped(false);
     setLoading(true);
     setError(null);
     try {
       const result = await mintInteractivePreviewUrl(projectId, fileId);
       setPreviewUrl(result.url);
       setFrameKey((value) => value + 1);
-      setStopped(false);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : 'Could not start interactive preview');
     } finally {
@@ -59,8 +62,13 @@ export function InteractiveHtmlPreview({ file }: Props) {
 
   // Auto-run on open. Depends on the identifying primitives — never on the `file` object, whose
   // identity changes on every render at the DocumentCard call site and would cause a mint loop.
+  //
+  // Dropping the previous URL here (and only here) is what keeps a swapped-in artifact from
+  // rendering the PREVIOUS artifact's content under the new artifact's title while its mint is in
+  // flight. This effect fires only on mount and on a genuine projectId/fileId change; Reset and
+  // Run again call run() directly, so they keep the current frame mounted while re-minting.
   useEffect(() => {
-    setStopped(false);
+    setPreviewUrl(null);
     void run();
   }, [run]);
 
@@ -93,10 +101,12 @@ export function InteractiveHtmlPreview({ file }: Props) {
     <section className="flex min-h-0 flex-1 flex-col">
       {/* Single compact chrome row. Labels collapse to icons below `sm` so the warning and the
           controls share one line — every pixel spent here is taken from the artifact. */}
-      <div className="flex shrink-0 items-center justify-between gap-2 bg-warning-subtle px-3 py-1.5">
+      <div className="flex shrink-0 items-center justify-between gap-2 bg-warning-surface px-3 py-1.5">
         <p className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-warning-fg">
-          <AlertTriangle size={14} className="shrink-0" />
-          <span className="truncate">Agent-generated — network disabled</span>
+          <AlertTriangle size={14} className="shrink-0" aria-hidden="true" />
+          {/* The negation leads so that right-truncation at narrow widths can never invert the
+              meaning: "…no netw" still reads as negated, whereas "network …" reads as enabled. */}
+          <span className="truncate">Agent-generated · no network</span>
         </p>
         <div className="flex shrink-0 gap-1">
           {stopped ? (
@@ -106,7 +116,7 @@ export function InteractiveHtmlPreview({ file }: Props) {
               aria-label="Run again"
               className={`${CONTROL_CLASS} ${FOCUS_RING}`}
             >
-              <Play size={12} />
+              <Play size={12} aria-hidden="true" />
               <span className="hidden sm:inline">Run again</span>
             </button>
           ) : (
@@ -116,7 +126,7 @@ export function InteractiveHtmlPreview({ file }: Props) {
               aria-label="Stop"
               className={`${CONTROL_CLASS} ${FOCUS_RING}`}
             >
-              <Square size={12} />
+              <Square size={12} aria-hidden="true" />
               <span className="hidden sm:inline">Stop</span>
             </button>
           )}
@@ -126,7 +136,7 @@ export function InteractiveHtmlPreview({ file }: Props) {
             aria-label="Reset"
             className={`${CONTROL_CLASS} ${FOCUS_RING}`}
           >
-            <RotateCcw size={12} />
+            <RotateCcw size={12} aria-hidden="true" />
             <span className="hidden sm:inline">Reset</span>
           </button>
           <button
@@ -135,7 +145,7 @@ export function InteractiveHtmlPreview({ file }: Props) {
             aria-label="Open in new tab"
             className={`${CONTROL_CLASS} ${FOCUS_RING}`}
           >
-            <ExternalLink size={12} />
+            <ExternalLink size={12} aria-hidden="true" />
             <span className="hidden sm:inline">Open in new tab</span>
           </button>
         </div>
@@ -147,7 +157,7 @@ export function InteractiveHtmlPreview({ file }: Props) {
             {error}
           </p>
           <button type="button" onClick={reload} className={`mt-2 ${CONTROL_CLASS} ${FOCUS_RING}`}>
-            <RotateCcw size={12} /> Try again
+            <RotateCcw size={12} aria-hidden="true" /> Try again
           </button>
         </div>
       )}

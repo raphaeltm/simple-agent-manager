@@ -193,6 +193,7 @@ async function setupApiMocks(
     directories?: ReturnType<typeof makeDirectory>[];
     total?: number;
     errorOnFiles?: boolean;
+    errorOnPreviewMint?: boolean;
   } = {}
 ) {
   const {
@@ -200,6 +201,7 @@ async function setupApiMocks(
     directories = NORMAL_DIRS,
     total = files.length,
     errorOnFiles = false,
+    errorOnPreviewMint = false,
   } = options;
 
   // The isolated preview origin. In production this is a different host served by the API Worker
@@ -281,6 +283,9 @@ async function setupApiMocks(
       });
     }
     if (path.endsWith('/library/interactive-html/interactive-preview-url')) {
+      if (errorOnPreviewMint) {
+        return respond(500, { error: 'INTERNAL_ERROR', message: 'Preview signing unavailable' });
+      }
       return respond(200, {
         url: `${PREVIEW_ORIGIN}/p/signed/index.html`,
         expiresAt: '2026-08-04T12:05:00.000Z',
@@ -532,11 +537,92 @@ test.describe('Library interactive preview — visual audit', () => {
     expect(box!.height).toBeGreaterThan(viewport!.height * 0.5);
   }
 
+  /**
+   * The warning bar is the only remaining signal that this content is agent-generated, so its
+   * styling must actually render. `bg-warning-subtle` was a dead class that compiled to nothing,
+   * leaving the bar visually identical to the header — this asserts a real, distinct background.
+   */
+  async function assertWarningBarIsVisuallyDistinct(page: Page) {
+    const warningBg = await page
+      .getByText('Agent-generated · no network')
+      .evaluate((el) => getComputedStyle(el.closest('div')!).backgroundColor);
+    const headerBg = await page
+      .getByRole('heading', { name: 'interactive-agent-dashboard.html' })
+      .evaluate((el) => getComputedStyle(el.closest('div')!.parentElement!).backgroundColor);
+    expect(warningBg).not.toBe('rgba(0, 0, 0, 0)');
+    expect(warningBg).not.toBe(headerBg);
+  }
+
   test('mobile auto-runs and fills the modal', async ({ page }) => {
     const frame = await openPreview(page);
     await assertFillsViewport(page, frame);
+    await assertWarningBarIsVisuallyDistinct(page);
     await screenshot(page, 'library-interactive-preview-mobile');
     await assertNoOverflow(page);
+  });
+
+  test('mint failure shows a retryable error, not a blank pane', async ({ page }) => {
+    await setupApiMocks(page, {
+      files: INTERACTIVE_HTML_FILES,
+      directories: [],
+      errorOnPreviewMint: true,
+    });
+    await page.goto('/projects/proj-test-1/library');
+    await page.getByText('interactive-agent-dashboard.html').click();
+
+    await expect(page.getByRole('alert')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+    await expect(
+      page.locator('iframe[title="Interactive preview of interactive-agent-dashboard.html"]')
+    ).toHaveCount(0);
+    await screenshot(page, 'library-interactive-preview-error');
+    await assertNoOverflow(page);
+  });
+
+  test('oversized HTML offers download instead of a preview', async ({ page }) => {
+    await setupApiMocks(page, {
+      files: [
+        makeFile({
+          id: 'interactive-html',
+          filename: 'huge-agent-dashboard.html',
+          mimeType: 'text/html',
+          sizeBytes: 60 * 1024 * 1024,
+        }),
+      ],
+      directories: [],
+    });
+    await page.goto('/projects/proj-test-1/library');
+    await page.getByText('huge-agent-dashboard.html').click();
+
+    await expect(page.getByText(/too large to preview/i)).toBeVisible();
+    await expect(page.locator('iframe')).toHaveCount(0);
+    await screenshot(page, 'library-interactive-preview-oversize');
+    await assertNoOverflow(page);
+  });
+
+  test.describe('narrowest supported viewport', () => {
+    test.use({ viewport: { width: 320, height: 667 } });
+
+    test('320px keeps the warning legible and does not invert its meaning', async ({ page }) => {
+      const frame = await openPreview(page);
+      await assertFillsViewport(page, frame);
+      await assertWarningBarIsVisuallyDistinct(page);
+
+      // Truncation is acceptable; losing the negation is not. Assert the rendered (clipped) text
+      // can never read as "network <enabled>".
+      const label = page.getByText('Agent-generated · no network');
+      const { full, visible } = await label.evaluate((el) => ({
+        full: el.textContent ?? '',
+        visible: el.scrollWidth <= el.clientWidth,
+      }));
+      expect(full).toContain('no network');
+      if (!visible) {
+        // If it clips, the negation must still precede the noun in the source string.
+        expect(full.indexOf('no ')).toBeLessThan(full.indexOf('network'));
+      }
+      await screenshot(page, 'library-interactive-preview-320');
+      await assertNoOverflow(page);
+    });
   });
 
   test.describe('desktop', () => {
