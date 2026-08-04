@@ -256,3 +256,19 @@ JSON Web Key Set for JWT verification by VM Agents.
 Download the VM Agent binary. Query params: `os` (linux), `arch` (amd64, arm64).
 
 Used by cloud-init during VM (BYOC) provisioning. The Cloudflare Container instant-session runtime does **not** call this endpoint — its vm-agent binary is baked into the container image at deploy time.
+
+## Issue Reports
+
+See [Reporting Issues](/docs/guides/reporting-issues/) for the user-facing flow and the operator configuration these endpoints depend on.
+
+### `GET /api/report-issue/config`
+
+Report whether in-app issue reporting is available on this deployment. Returns `{ "enabled": false }` when `PLATFORM_FEEDBACK_PROJECT_ID` is unset or does not name an existing project — the UI hides both entry points in that case.
+
+### `POST /api/report-issue`
+
+Submit an issue report. Returns `201` with the created draft Idea's `ideaId`, its `status`, and `attachedRefKeys` listing the technical references that were actually stored.
+
+Body fields: `title`, `description`, `consentToAttachRefs`, and an optional `refs` object (`sessionId`, `taskId`, `nodeId`, `errorId`, `diagnosisId`). References are only stored when `consentToAttachRefs` is true, and each is re-checked against the caller's access first — unauthorized references are dropped silently rather than rejecting the request, so `attachedRefKeys` may be shorter than what was sent.
+
+Rate-limited to 20 submissions per clock hour per user (`RATE_LIMIT_REPORT_ISSUE_POST`); exceeding it returns `429`.
