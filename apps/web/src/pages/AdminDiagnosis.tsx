@@ -1,4 +1,5 @@
 import { Button, Card, Spinner } from '@simple-agent-manager/ui';
+import { DEFAULT_DEBUG_DIAGNOSIS_POLL_INTERVAL_MS } from '@simple-agent-manager/shared';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router';
 
@@ -21,7 +22,7 @@ export function AdminDiagnosis() {
     queryKey: ['admin-diagnosis', runId],
     queryFn: () => fetchAdminDebugDiagnosisRun(runId),
     enabled: Boolean(runId),
-    refetchInterval: ({ state }) => ACTIVE.has(state.data?.run.status ?? '') ? 2_000 : false,
+    refetchInterval: ({ state }) => ACTIVE.has(state.data?.run.status ?? '') ? DEFAULT_DEBUG_DIAGNOSIS_POLL_INTERVAL_MS : false,
     retry: 3,
   });
   const run = query.data?.run;
