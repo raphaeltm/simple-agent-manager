@@ -134,13 +134,15 @@ Deployments created before the per-node CSR model may have running nodes that st
 
 ## Interactive HTML Preview Isolation
 
-Interactive previews are an explicit, no-network execution tier for single-file HTML library artifacts:
+Interactive previews are a no-network execution tier for single-file HTML library artifacts:
 
 1. The authenticated app requests a short-lived URL only after project access and file scope are checked (`apps/api/src/routes/library.ts`).
 2. The API signs the project, file, file version, and expiry into a path prefix with a deployment-owned HMAC key (`apps/api/src/services/interactive-preview.ts`).
 3. `preview.BASE_DOMAIN` is dispatched before session middleware. It never reads session cookies (`apps/api/src/index.ts`, `apps/api/src/routes/interactive-preview-host.ts`).
 4. Every response CSP includes `sandbox allow-scripts`, giving scripts an opaque origin even when opened directly, and denies connections, workers, objects, base URLs, and forms.
-5. The app adds an `allow-scripts`-only iframe sandbox after explicit confirmation. Same-origin, forms, popups, downloads, and top navigation are never granted.
+5. The app renders an `allow-scripts`-only iframe sandbox. Same-origin, forms, popups, downloads, and top navigation are never granted.
+
+The preview starts as soon as a user opens the artifact (`apps/web/src/components/library/InteractiveHtmlPreview.tsx`). Opening the file is itself the deliberate user action — scripts still never execute passively while scrolling a chat timeline, because the document card only mounts the preview once clicked (`apps/web/src/components/project-message-view/tool-cards/DocumentCard.tsx`). The isolation above, not a confirmation prompt, is what contains the artifact: it runs on a separate origin with an opaque origin, no cookies or storage in scope, and no network egress, so there is no credential or exfiltration path to consent to.
 
 The dedicated origin contains iframe-policy regressions; the CSP sandbox header protects direct-open links. Preview is deliberately absent from credentialed CORS and BetterAuth trusted origins, and responses never set cookies.
 

@@ -139,44 +139,44 @@ remote `<script>` and remote `<img>` refused, `data:` images and inline CSS stil
 
 ## Implementation checklist
 
-- [ ] 1. Rewrite `InteractiveHtmlPreview.tsx` to auto-mint on mount — remove the `confirming` state,
+- [x] 1. Rewrite `InteractiveHtmlPreview.tsx` to auto-mint on mount — remove the `confirming` state,
       the "Run interactive preview" button, and the "Run agent-generated JavaScript?" alertdialog.
-- [ ] 1a. Key the auto-run effect on the primitives `[file.projectId, file.id]` — never on the `file`
+- [x] 1a. Key the auto-run effect on the primitives `[file.projectId, file.id]` — never on the `file`
       object — and guard against concurrent/duplicate mints, so `DocumentCard`'s inline-literal
       `file` prop cannot cause a re-mint loop. Add a behavioral regression test that re-renders the
       parent several times and asserts the mint endpoint was called exactly once.
-- [ ] 2. Add explicit minting / error states: spinner while minting (only when there is no URL yet,
+- [x] 2. Add explicit minting / error states: spinner while minting (only when there is no URL yet,
       per rule 48), and an inline error with a retry affordance when minting fails — never a blank
       modal.
-- [ ] 3. Add `htmlViewMode: 'preview' | 'source'` state to `FilePreviewModal`, defaulting to
+- [x] 3. Add `htmlViewMode: 'preview' | 'source'` state to `FilePreviewModal`, defaulting to
       `'preview'`, with a header toggle mirroring the existing markdown Rendered/Source control
       (`FilePreviewModal.tsx:193-224`) so HTML and markdown behave consistently and the extra
       in-content toolbar row disappears.
-- [ ] 4. Render the interactive preview for `htmlViewMode === 'preview'` and a syntax-highlighted
+- [x] 4. Render the interactive preview for `htmlViewMode === 'preview'` and a syntax-highlighted
       source pane for `'source'`; remove `<HtmlViewer>` from the HTML branch.
-- [ ] 5. Extract the duplicated preview-text fetch into a shared hook and use it for both the
+- [x] 5. Extract the duplicated preview-text fetch into a shared hook and use it for both the
       markdown branch and the HTML Source view. Fetch HTML source **lazily** (only when Source is
       selected) so opening an HTML file makes one request (the mint), not two.
-- [ ] 6. Fix the flex chain so the preview claims full height on mobile and desktop: give the content
+- [x] 6. Fix the flex chain so the preview claims full height on mobile and desktop: give the content
       wrapper a real flex context **for the HTML branch only** and replace `min-h-[20rem]` with
       `flex-1`. No magic pixel heights. Preserve the existing `env(safe-area-inset-*)` padding, and
       leave the image/PDF/markdown branches on their current block/`overflow-auto` formatting context
       so they do not regress.
-- [ ] 7. Delete `HtmlViewer.tsx` and its now-orphaned unit test if `FilePreviewModal` was its only
+- [x] 7. Delete `HtmlViewer.tsx` and its now-orphaned unit test if `FilePreviewModal` was its only
       consumer (re-verify with a fresh grep at implementation time); otherwise leave it and only stop
       using it here.
-- [ ] 8. Preserve a graceful oversize path: HTML files above `FILE_PREVIEW_LOAD_MAX_BYTES` show a
+- [x] 8. Preserve a graceful oversize path: HTML files above `FILE_PREVIEW_LOAD_MAX_BYTES` show a
       clear "too large to preview — download instead" state rather than an empty pane.
-- [ ] 9. Make Reset re-mint the signed URL instead of reloading a possibly-expired one.
-- [ ] 10. Decide deliberately on the Stop control and state the decision in the PR. **Decision:**
+- [x] 9. Make Reset re-mint the signed URL instead of reloading a possibly-expired one.
+- [x] 10. Decide deliberately on the Stop control and state the decision in the PR. **Decision:**
       keep it as a kill switch that unmounts the iframe and offers "Run again" — it costs no
       mandatory click and remains a real remedy for a CPU-spinning artifact.
-- [ ] 10a. Disambiguate Stop from auto-run so the effect cannot immediately restart a preview the
+- [x] 10a. Disambiguate Stop from auto-run so the effect cannot immediately restart a preview the
       user just stopped (rule 06 interaction-effect analysis). Add a behavioral test: click Stop,
       assert the iframe stays unmounted and no further mint occurs.
-- [ ] 11. Keep the "Agent-generated interactive preview — network disabled" warning visible (compact
+- [x] 11. Keep the "Agent-generated interactive preview — network disabled" warning visible (compact
       is fine) along with Reset and Open in new tab. Open in new tab must keep minting a fresh URL.
-- [ ] 12. Update unit tests. Give `makeFile` a `projectId` (`FilePreviewModal.test.tsx:30-39`) so the
+- [x] 12. Update unit tests. Give `makeFile` a `projectId` (`FilePreviewModal.test.tsx:30-39`) so the
       mint URL is well-formed. Rewrite `FilePreviewModal.test.tsx:79-98` (asserts the inert branch
       and that HTML never fetches — both invert under auto-run). Rewrite the three HTML tests in
       `library/file-preview-modal-markdown.test.tsx:266-409`: `:285-322` (srcdoc/`sandbox=''`
@@ -188,22 +188,22 @@ remote `<script>` and remote `<img>` refused, `data:` images and inline CSS stil
       test that the inert sanitized render is absent, and the expired-Reset re-mint test. Per rule 35
       do NOT replace the `HtmlViewer` mock with an `InteractiveHtmlPreview` mock — mock the
       `fetch`/mint boundary and render the real component.
-- [ ] 13. Update `file-preview-modal-audit.spec.ts` with `/interactive-preview-url` + preview-host
+- [x] 13. Update `file-preview-modal-audit.spec.ts` with `/interactive-preview-url` + preview-host
       mocks, and assert (a) the interactive iframe rendered with `sandbox="allow-scripts"` **without
       any click**, and (b) the measured `iframe.boundingBox().height` is a large fraction of the
       modal content height — a screenshot alone will not catch a `flex-1` regression. Keep
       `assertNoOverflow`. Run at 375x667 and 1280x800. Prove the height assertion FAILS on pre-fix
       code before trusting it (rule 17).
-- [ ] 13a. Fix the unreachable `interactive-html` mock handlers in `library-ui-audit.spec.ts:270-290`
+- [x] 13a. Fix the unreachable `interactive-html` mock handlers in `library-ui-audit.spec.ts:270-290`
       (hoist above the `:263` guard / unconditional `:272` return), then rewrite
       `describe('Library interactive preview — visual audit')` (`:483-507`) which currently clicks
       through the deleted confirmation dialog.
-- [ ] 13b. Update `staging-file-preview-v2.spec.ts`: delete the inert-render assertions (`:239-248`)
+- [x] 13b. Update `staging-file-preview-v2.spec.ts`: delete the inert-render assertions (`:239-248`)
       and the confirmation click-through (`:256-258`); **keep** the still-valid isolation probes
       (`:250-255`, `:265-292`) and the direct-open CSP/no-Set-Cookie checks (`:294-303`).
-- [ ] 14. Update `apps/www/src/content/docs/docs/architecture/security.md` if it states that
+- [x] 14. Update `apps/www/src/content/docs/docs/architecture/security.md` if it states that
       interactive previews require an explicit click, so docs match reality (rule 01).
-- [ ] 15. Archive the stale `tasks/active/2026-08-04-interactive-html-artifact-preview.md` (its
+- [x] 15. Archive the stale `tasks/active/2026-08-04-interactive-html-artifact-preview.md` (its
       final checklist item is unchecked but the PR merged and the production deploy succeeded —
       verified: Deploy Production run 30942587309, commit b00dac03c) and update SAM idea
       `01KZ6A5AX8YB1ZXXRT53VNE5ZD` to record the auto-run reversal so future agents do not implement
