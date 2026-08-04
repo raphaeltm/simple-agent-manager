@@ -200,9 +200,10 @@ export class DiagnosisRunner extends DurableObject<Env> {
 
   private async checkpointAndSchedule(state: RunnerState, delay = 0): Promise<void> {
     const now = new Date().toISOString();
+    const config = resolveDebugAgentConfig(this.env);
     await this.env.DATABASE.prepare(
-      'UPDATE debug_diagnosis_runs SET current_step=?,heartbeat_at=?,turns=?,input_tokens=?,output_tokens=?,daily_tokens_used=?,attempt=?,updated_at=? WHERE id=? AND status IN (\'queued\',\'running\')'
-    ).bind(state.currentStep, now, state.turns, state.inputTokens, state.outputTokens, state.dailyTokensUsed, state.attempt, now, state.runId).run();
+      'UPDATE debug_diagnosis_runs SET current_step=?,heartbeat_at=?,turns=?,input_tokens=?,output_tokens=?,daily_tokens_used=?,daily_token_limit=?,attempt=?,updated_at=? WHERE id=? AND status IN (\'queued\',\'running\')'
+    ).bind(state.currentStep, now, state.turns, state.inputTokens, state.outputTokens, state.dailyTokensUsed, config.dailyTokenLimit, state.attempt, now, state.runId).run();
     await this.ctx.storage.put('state', state);
     await this.ctx.storage.setAlarm(Date.now() + delay);
   }
