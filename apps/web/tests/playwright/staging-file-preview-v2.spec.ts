@@ -23,6 +23,8 @@ const HTML_FIXTURE = `<!doctype html>
     <button id="run">Run isolation probes</button>
     <form id="probe-form" action="https://example.com/form" method="post"><button type="submit">Submit</button></form>
     <a id="top-nav" href="https://example.com/top" target="_top">Navigate top</a>
+    <a id="popup" href="https://example.com/popup" target="_blank">Open popup</a>
+    <a id="download" href="data:text/plain,preview" download="preview.txt">Download</a>
     <pre id="result">not run</pre>
     <script>
       async function probe() {
@@ -268,6 +270,20 @@ test.describe('File Preview v2 staging', () => {
     await expect(interactiveFrame.locator('#result')).toContainText('"websocket":"blocked"');
     await expect(interactiveFrame.locator('#result')).toContainText('"beacon":"attempted"');
     await expect.poll(() => blockedNetworkRequests).toEqual([]);
+
+    let popupCount = 0;
+    let downloadCount = 0;
+    page.on('popup', () => {
+      popupCount += 1;
+    });
+    page.on('download', () => {
+      downloadCount += 1;
+    });
+    await interactiveFrame.locator('#popup').click();
+    await interactiveFrame.locator('#download').click();
+    await page.waitForTimeout(250);
+    expect(popupCount).toBe(0);
+    expect(downloadCount).toBe(0);
 
     const appUrl = page.url();
     await interactiveFrame.getByRole('button', { name: 'Submit' }).click();
