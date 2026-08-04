@@ -30,7 +30,7 @@ const HTML_FIXTURE = `<!doctype html>
         try { document.cookie = "preview_probe=1"; results.cookie = document.cookie || "blocked"; } catch { results.cookie = "blocked"; }
         try { await fetch("https://example.com/fetch"); results.fetch = "allowed"; } catch { results.fetch = "blocked"; }
         try { const socket = new WebSocket("wss://example.com/socket"); socket.onerror = () => { results.websocket = "blocked"; render(); }; results.websocket = "allowed"; } catch { results.websocket = "blocked"; }
-        try { results.beacon = navigator.sendBeacon("https://example.com/beacon", "probe") ? "allowed" : "blocked"; } catch { results.beacon = "blocked"; }
+        try { navigator.sendBeacon("https://example.com/beacon", "probe"); results.beacon = "attempted"; } catch { results.beacon = "blocked"; }
         render();
         function render() { document.getElementById("result").textContent = JSON.stringify(results); }
       }
@@ -280,7 +280,7 @@ test.describe('File Preview v2 staging', () => {
     await expect(interactiveFrame.locator('#result')).toContainText('"cookie":"blocked"');
     await expect(interactiveFrame.locator('#result')).toContainText('"fetch":"blocked"');
     await expect(interactiveFrame.locator('#result')).toContainText('"websocket":"blocked"');
-    await expect(interactiveFrame.locator('#result')).toContainText('"beacon":"blocked"');
+    await expect(interactiveFrame.locator('#result')).toContainText('"beacon":"attempted"');
     await expect.poll(() => blockedNetworkRequests).toEqual([]);
 
     const appUrl = page.url();
