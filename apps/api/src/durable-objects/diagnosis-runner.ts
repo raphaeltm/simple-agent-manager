@@ -204,7 +204,17 @@ export class DiagnosisRunner extends DurableObject<Env> {
   }
 
   private async event(state: RunnerState, stepKey: string, type: string, status: string, source: string | null, args: string | null, evidence: string | null, duration: number, code: string | null = null, message: string | null = null): Promise<void> {
-    state.sequence++;
+    const existing = await this.env.DATABASE.prepare(
+      'SELECT sequence FROM debug_diagnosis_run_events WHERE run_id=? AND step_key=?'
+    ).bind(state.runId, stepKey).first<{ sequence: number }>();
+    if (existing) {
+      state.sequence = Math.max(state.sequence, existing.sequence);
+      return;
+    }
+    const latest = await this.env.DATABASE.prepare(
+      'SELECT COALESCE(MAX(sequence),0) AS sequence FROM debug_diagnosis_run_events WHERE run_id=?'
+    ).bind(state.runId).first<{ sequence: number }>();
+    state.sequence = (latest?.sequence ?? 0) + 1;
     await this.env.DATABASE.prepare(
       'INSERT OR IGNORE INTO debug_diagnosis_run_events (id,run_id,sequence,step_key,event_type,status,source_name,arguments_preview,evidence_preview,duration_ms,retry_attempt,error_code,error_message,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
     ).bind(ulid(), state.runId, state.sequence, stepKey, type, status, source, args, evidence, duration, state.attempt, code, message, new Date().toISOString()).run();
