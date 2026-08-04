@@ -372,7 +372,6 @@ test('docs: report an issue dialog with consent expanded', async ({ page }) => {
 const RECOVERY_PROJECT_ID = 'proj-1';
 const RECOVERY_SESSION_ID = '01K9CHAT5EFJ8TW0N6RQZD3M2X';
 const RECOVERY_WORKSPACE_ID = 'ws-1';
-const RECOVERY_AGENT_SESSION_ID = 'acp-1';
 
 const RUNTIME_REQUEST_INTERRUPTED_MESSAGE =
   'Your message is saved, but delivery was interrupted and its execution outcome is unknown. ' +
