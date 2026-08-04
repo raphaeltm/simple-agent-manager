@@ -54,7 +54,9 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
   const label = TOOL_LABELS[tool] ?? 'Document';
 
   const canPreview = Boolean(projectId && fileId);
-  const previewUrl = canPreview ? getLibraryFilePreviewUrl(projectId as string, fileId as string) : undefined;
+  const previewUrl = canPreview
+    ? getLibraryFilePreviewUrl(projectId as string, fileId as string)
+    : undefined;
 
   // Pass the filename so an octet-stream/empty stored type still resolves to its
   // real previewable type from the extension (agent-uploaded markdown, etc.).
@@ -64,7 +66,8 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
   const withinInlineCap = sizeBytes === undefined || sizeBytes <= FILE_PREVIEW_INLINE_MAX_BYTES;
 
   const showImageTier = state === 'ready' && canPreview && isImage && withinInlineCap && !imgFailed;
-  const showMarkdownTier = state === 'ready' && canPreview && isMarkdown && withinInlineCap && !mdDeleted;
+  const showMarkdownTier =
+    state === 'ready' && canPreview && isMarkdown && withinInlineCap && !mdDeleted;
 
   // Fetch markdown source for the clamped inline preview. Only visible/near-
   // visible cards mount (the chat list is virtualized), so this is effectively
@@ -132,7 +135,7 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
     );
   }
 
-  const clickable = canPreview && (state === 'ready');
+  const clickable = canPreview && state === 'ready';
 
   const Header = (
     <div className="flex items-center gap-2.5 min-w-0">
@@ -182,19 +185,17 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
           {/* Fade-out to signal truncation */}
           <div
             className="pointer-events-none absolute inset-x-0 bottom-0 h-8"
-            style={{ background: 'linear-gradient(to bottom, transparent, var(--sam-glass-bg-surface))' }}
+            style={{
+              background: 'linear-gradient(to bottom, transparent, var(--sam-glass-bg-surface))',
+            }}
             aria-hidden="true"
           />
         </div>
       )}
 
-      {caption && (
-        <div className="text-xs text-fg-secondary break-words">{caption}</div>
-      )}
+      {caption && <div className="text-xs text-fg-secondary break-words">{caption}</div>}
 
-      {isHtml && (
-        <div className="text-xs text-fg-muted">Interactive · tap to open</div>
-      )}
+      {isHtml && <div className="text-xs text-fg-muted">Interactive · tap to open</div>}
     </div>
   );
 
@@ -219,13 +220,17 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
 
       {modalOpen && canPreview && previewUrl && (
         <FilePreviewModal
-          // The modal reads filename/mimeType/sizeBytes; the card metadata is
+          // The modal reads the project/file scope plus display metadata; the card data is
           // sufficient for its render (it fetches content from previewUrl).
-          file={{
-            filename: fileName ?? 'Document',
-            mimeType: mimeType ?? 'application/octet-stream',
-            sizeBytes: sizeBytes ?? 0,
-          } as unknown as FileWithTags}
+          file={
+            {
+              id: fileId as string,
+              projectId: projectId as string,
+              filename: fileName ?? 'Document',
+              mimeType: mimeType ?? 'application/octet-stream',
+              sizeBytes: sizeBytes ?? 0,
+            } as unknown as FileWithTags
+          }
           previewUrl={previewUrl}
           onClose={() => setModalOpen(false)}
           onDownload={() => downloadLibraryFile(projectId as string, fileId as string)}
