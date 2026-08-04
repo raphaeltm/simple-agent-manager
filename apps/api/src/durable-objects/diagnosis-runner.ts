@@ -48,6 +48,17 @@ function classification(error: unknown): { transient: boolean; code: string } {
   return { transient: false, code: 'PERMANENT_EXECUTION' };
 }
 
+function resultCount(result: string): number | null {
+  try {
+    const value = JSON.parse(result) as Record<string, unknown>;
+    if (typeof value.total === 'number') return value.total;
+    const arrays = Object.values(value).filter(Array.isArray);
+    return arrays.length ? arrays.reduce((count, items) => count + items.length, 0) : null;
+  } catch {
+    return null;
+  }
+}
+
 export class DiagnosisRunner extends DurableObject<Env> {
   async start(runId: string): Promise<void> {
     const existing = await this.ctx.storage.get<RunnerState>('state');
@@ -187,11 +198,15 @@ export class DiagnosisRunner extends DurableObject<Env> {
     state.completedStepKeys.push(stepKey);
     state.inFlightStepKey = null;
     const parsed = (() => { try { return JSON.parse(result) as { error?: string; cause?: string }; } catch { return {}; } })();
-    await this.event(state, stepKey, 'evidence', parsed.error ? 'failed' : 'succeeded', call.function.name, String(redactSensitiveData(call.function.arguments)).slice(0, 300), String(redactSensitiveData(result)).slice(0, 1000), Date.now() - started, parsed.error ? 'EVIDENCE_SOURCE_UNAVAILABLE' : null, parsed.error ? safeMessage(parsed.cause ?? parsed.error) : null);
+    await this.event(state, stepKey, 'evidence', parsed.error ? 'failed' : 'succeeded', call.function.name, String(redactSensitiveData(call.function.arguments)).slice(0, 300), String(redactSensitiveData(result)).slice(0, 1000), Date.now() - started, parsed.error ? 'EVIDENCE_SOURCE_UNAVAILABLE' : null, parsed.error ? safeMessage(parsed.cause ?? parsed.error) : null, resultCount(result));
     await this.checkpointAndSchedule(state);
   }
 
   private async checkpointAndSchedule(state: RunnerState, delay = 0): Promise<void> {
+    const now = new Date().toISOString();
+    await this.env.DATABASE.prepare(
+      'UPDATE debug_diagnosis_runs SET current_step=?,heartbeat_at=?,turns=?,input_tokens=?,output_tokens=?,daily_tokens_used=?,attempt=?,updated_at=? WHERE id=? AND status IN (\'queued\',\'running\')'
+    ).bind(state.currentStep, now, state.turns, state.inputTokens, state.outputTokens, state.dailyTokensUsed, state.attempt, now, state.runId).run();
     await this.ctx.storage.put('state', state);
     await this.ctx.storage.setAlarm(Date.now() + delay);
   }
@@ -203,7 +218,7 @@ export class DiagnosisRunner extends DurableObject<Env> {
     ).bind(now, step, now, now, EXECUTOR_VERSION, state.attempt, state.runId).run();
   }
 
-  private async event(state: RunnerState, stepKey: string, type: string, status: string, source: string | null, args: string | null, evidence: string | null, duration: number, code: string | null = null, message: string | null = null): Promise<void> {
+  private async event(state: RunnerState, stepKey: string, type: string, status: string, source: string | null, args: string | null, evidence: string | null, duration: number, code: string | null = null, message: string | null = null, count: number | null = null): Promise<void> {
     const existing = await this.env.DATABASE.prepare(
       'SELECT sequence FROM debug_diagnosis_run_events WHERE run_id=? AND step_key=?'
     ).bind(state.runId, stepKey).first<{ sequence: number }>();
@@ -216,8 +231,8 @@ export class DiagnosisRunner extends DurableObject<Env> {
     ).bind(state.runId).first<{ sequence: number }>();
     state.sequence = (latest?.sequence ?? 0) + 1;
     await this.env.DATABASE.prepare(
-      'INSERT OR IGNORE INTO debug_diagnosis_run_events (id,run_id,sequence,step_key,event_type,status,source_name,arguments_preview,evidence_preview,duration_ms,retry_attempt,error_code,error_message,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
-    ).bind(ulid(), state.runId, state.sequence, stepKey, type, status, source, args, evidence, duration, state.attempt, code, message, new Date().toISOString()).run();
+      'INSERT OR IGNORE INTO debug_diagnosis_run_events (id,run_id,sequence,step_key,event_type,status,source_name,arguments_preview,evidence_preview,result_count,duration_ms,retry_attempt,error_code,error_message,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
+    ).bind(ulid(), state.runId, state.sequence, stepKey, type, status, source, args, evidence, count, duration, state.attempt, code, message, new Date().toISOString()).run();
   }
 
   private async handleFailure(state: RunnerState, stepKey: string, started: number, error: unknown): Promise<void> {
