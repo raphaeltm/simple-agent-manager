@@ -8,6 +8,11 @@ is exactly the kind of rot a build does not catch. Run this after `astro build`:
     cd apps/www && pnpm build && python3 scripts/check-doc-links.py
 
 Exits non-zero and prints every broken link.
+
+Scope: root-relative `/docs/...` hrefs in the rendered HTML, which is how every
+internal doc link in this repo is written. Relative (`../foo`) and external links
+are not checked, so a clean run means "no broken absolute internal doc link",
+not "no broken link anywhere".
 """
 
 from __future__ import annotations
