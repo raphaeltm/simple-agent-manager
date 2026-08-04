@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 
 import { useScrollLock } from '../../hooks/useScrollLock';
 import {
+  FILE_PREVIEW_LOAD_MAX_BYTES,
   formatFileSize,
   isHtmlMime,
   isMarkdownMime,
@@ -331,7 +332,9 @@ export function FilePreviewModal({ file, previewUrl, onClose, onDownload }: File
             {isHtml && (
               <div className="flex min-h-0 flex-1 flex-col">
                 <HtmlViewer previewUrl={previewUrl} fileName={file.filename} />
-                <InteractiveHtmlPreview file={file} />
+                {file.sizeBytes <= FILE_PREVIEW_LOAD_MAX_BYTES && (
+                  <InteractiveHtmlPreview file={file} />
+                )}
               </div>
             )}
           </div>

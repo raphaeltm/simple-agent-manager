@@ -93,7 +93,7 @@ export async function verifyPreviewPath(
     !fileId ||
     !version ||
     !Number.isSafeInteger(expiresAt) ||
-    expiresAt < nowSeconds
+    expiresAt <= nowSeconds
   )
     return null;
   const prefix = `/p/${encodedProjectId}/${encodedFileId}/${encodedVersion}/${expiresAt}`;

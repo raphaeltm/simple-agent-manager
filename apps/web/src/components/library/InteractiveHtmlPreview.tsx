@@ -1,7 +1,8 @@
 import { AlertTriangle, ExternalLink, Play, RotateCcw, Square } from 'lucide-react';
 import { useState } from 'react';
+
 import { mintInteractivePreviewUrl } from '../../lib/api/library';
-import { FOCUS_RING, type FileWithTags } from './types';
+import { type FileWithTags, FOCUS_RING } from './types';
 
 interface Props {
   file: FileWithTags;

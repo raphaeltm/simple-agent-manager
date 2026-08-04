@@ -23,7 +23,7 @@ describe('interactive preview signed paths', () => {
 
   it('rejects expired, tampered, and scope-mismatched paths', async () => {
     const path = await mintPreviewPath(SCOPE, SECRET);
-    await expect(verifyPreviewPath(path, SECRET, SCOPE.expiresAt + 1)).resolves.toBeNull();
+    await expect(verifyPreviewPath(path, SECRET, SCOPE.expiresAt)).resolves.toBeNull();
     await expect(
       verifyPreviewPath(path.replace('index.html', 'other.html'), SECRET, 1)
     ).resolves.toBeNull();
