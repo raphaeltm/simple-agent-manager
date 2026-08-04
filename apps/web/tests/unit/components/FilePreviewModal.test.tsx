@@ -15,11 +15,6 @@ vi.mock('../../../src/components/MarkdownRenderer', () => ({
     <pre data-testid="md-source">{content}</pre>
   ),
 }));
-vi.mock('../../../src/components/shared-file-viewer/HtmlViewer', () => ({
-  HtmlViewer: ({ fileName }: { fileName: string }) => (
-    <div data-testid="html-viewer">{fileName}</div>
-  ),
-}));
 vi.mock('../../../src/components/shared-file-viewer/ImageViewer', () => ({
   ImageViewer: ({ fileName }: { fileName: string }) => (
     <div data-testid="image-viewer">{fileName}</div>
@@ -30,6 +25,8 @@ vi.mock('../../../src/hooks/useScrollLock', () => ({ useScrollLock: () => undefi
 function makeFile(overrides: Partial<FileWithTags>): FileWithTags {
   return {
     id: 'f-1',
+    // Real projectId: the HTML branch mints a signed preview URL scoped to it.
+    projectId: 'proj-1',
     filename: 'file',
     mimeType: 'application/octet-stream',
     sizeBytes: 48,
@@ -73,11 +70,22 @@ describe('FilePreviewModal — octet-stream extension recovery', () => {
     );
     // Not routed to any other viewer.
     expect(screen.queryByTestId('image-viewer')).toBeNull();
-    expect(screen.queryByTestId('html-viewer')).toBeNull();
+    expect(screen.queryByTitle(/Interactive preview/)).toBeNull();
   });
 
-  it('routes an octet-stream .html file to the sandboxed HtmlViewer (no unsafe path)', () => {
-    const fetchSpy = vi.fn();
+  it('routes an octet-stream .html file to the auto-running interactive preview', async () => {
+    // Agent uploads frequently arrive as application/octet-stream; the extension must still
+    // resolve to HTML and reach the isolated interactive preview.
+    const fetchSpy = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          url: 'https://preview.test/p/signed/index.html',
+          expiresAt: '2026-08-04T12:05:00.000Z',
+          version: '2026-04-14T00:00:00Z',
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      ),
+    );
     vi.stubGlobal('fetch', fetchSpy);
 
     render(
@@ -89,12 +97,16 @@ describe('FilePreviewModal — octet-stream extension recovery', () => {
       />,
     );
 
-    // HTML always goes through HtmlViewer (DOMPurify + sandboxed iframe); the
-    // modal itself never fetches HTML directly. No markdown/image branch.
-    expect(screen.getByTestId('html-viewer')).toBeTruthy();
+    // Runs on open, in the cross-origin sandboxed frame — no click and no inert copy.
+    const frame = await screen.findByTitle('Interactive preview of page.html');
+    expect(frame.getAttribute('sandbox')).toBe('allow-scripts');
     expect(screen.queryByTestId('rendered-markdown')).toBeNull();
     expect(screen.queryByTestId('image-viewer')).toBeNull();
-    expect(fetchSpy).not.toHaveBeenCalled();
+    // The only request is the signed-URL mint — the modal never fetches HTML to render inertly.
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    expect(String(fetchSpy.mock.calls[0]?.[0])).toContain(
+      '/api/projects/proj-1/library/f-1/interactive-preview-url',
+    );
   });
 
   it('does not render an image branch for an octet-stream file with a .svg name (SVG stays non-previewable)', () => {
@@ -114,7 +126,7 @@ describe('FilePreviewModal — octet-stream extension recovery', () => {
     // image set — the modal must NOT render the ImageViewer (or any other branch).
     expect(screen.queryByTestId('image-viewer')).toBeNull();
     expect(screen.queryByTestId('rendered-markdown')).toBeNull();
-    expect(screen.queryByTestId('html-viewer')).toBeNull();
+    expect(screen.queryByTitle(/Interactive preview/)).toBeNull();
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(screen.getByText('icon.svg')).toBeTruthy();
   });
@@ -135,7 +147,7 @@ describe('FilePreviewModal — octet-stream extension recovery', () => {
     // No branch renders; nothing is fetched. The header (filename) still shows.
     expect(screen.queryByTestId('rendered-markdown')).toBeNull();
     expect(screen.queryByTestId('image-viewer')).toBeNull();
-    expect(screen.queryByTestId('html-viewer')).toBeNull();
+    expect(screen.queryByTitle(/Interactive preview/)).toBeNull();
     expect(fetchSpy).not.toHaveBeenCalled();
     expect(screen.getByText('blob.bin')).toBeTruthy();
   });
