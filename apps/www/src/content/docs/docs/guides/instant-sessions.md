@@ -43,18 +43,17 @@ The practical trade: an Instant session needs **no cloud provider credential**, 
 | Automatic port detection/exposure | No                                                 | Yes                                 |
 | Survives a runtime restart        | Yes — via snapshot restore, see below              | Yes — the node stays up             |
 
-Instant is the right default for conversation, planning, code reading, and focused edits. Reach for a VM when the agent has to build your stack, run your test suite, start services, or use Docker.
+Instant is the right choice for conversation, planning, code reading, and focused edits. Reach for a VM when the agent has to build your stack, run your test suite, start services, or use Docker.
 
 ### "command not found" — you're probably on Instant
 
 An Instant container is a slim Node image plus the agent CLIs. It does **not** carry your project's toolchain, and it doesn't build your `.devcontainer` to get one. So an agent asked to run your build or test suite can fail with `command not found` for anything that isn't in the row above — no system `python3`, no compilers or `build-essential`, no Go, Rust, Java, or Ruby, and no `docker`. (A Python 3.12 runtime and `uv` are present for SAM's own agent tooling, but Python is not on `PATH` and nothing is preinstalled for your project.)
 
-SAM does not silently fall back to a VM when this happens — the agent just hits the error. Two ways out:
+SAM does not silently fall back to a VM when this happens — the agent just hits the error. The fix is to run the work on a VM instead: pick an [agent profile](/docs/guides/agents/#agent-profiles) whose runtime is **not** Instant, which submits the work as a task on a VM workspace with your `.devcontainer` built. That needs cloud compute — your own credential, the project's, or the platform's. See [Bring Your Own Cloud](/docs/guides/creating-workspaces/#where-your-workspaces-run-bring-your-own-cloud).
 
-- **Connect a cloud provider** under **Settings → Connections**. New sessions then run as VM workspaces with your `.devcontainer` built. See [Bring Your Own Cloud](/docs/guides/creating-workspaces/#where-your-workspaces-run-bring-your-own-cloud).
-- **Pin the runtime to `vm`** on an [agent profile](/docs/guides/agents/#agent-profiles) and select that profile for work that needs a real environment, leaving everything else on Instant.
+Keep an Instant profile around for quick conversational work and switch profiles when you need a real environment.
 
-Note that the **Full** workspace profile does not override this: workspace profile and runtime are separate choices, and choosing Full on a session that resolves to Instant still gets you a lightweight container.
+Note that the **Full** workspace profile does not override this: workspace profile and runtime are separate choices, and choosing Full on an Instant profile still gets you a lightweight container.
 
 ## What happens to your work
 
