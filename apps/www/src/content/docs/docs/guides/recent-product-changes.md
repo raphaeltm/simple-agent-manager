@@ -46,8 +46,6 @@ What you actually see:
 - A message that says your prompt **was saved but its outcome is unknown** — SAM deliberately does not replay it, because replaying a half-executed prompt duplicates commits and PRs. Read the transcript first, then decide whether to resend.
 - A terminal **stopped** state, which closes the composer instead of offering retries against a runtime that can never come back.
 
-Sessions also sleep after an hour of inactivity rather than ten minutes, and a long agent turn holds the session open while it works.
-
 Starting an Instant chat is now durable too: SAM accepts the session first and finishes the launch in the background, so closing the tab partway through no longer leaves a chat stuck in a queued state.
 
 ## Agent work lands on its own branch
