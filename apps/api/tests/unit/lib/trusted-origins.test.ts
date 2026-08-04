@@ -1,5 +1,3 @@
-import { readFileSync } from 'node:fs';
-
 import { describe, expect, it } from 'vitest';
 
 import type { Env } from '../../../src/env';
@@ -34,12 +32,5 @@ describe('trusted API origin derivation', () => {
     expect(() => getTrustedApiOrigin({ BASE_DOMAIN: 'bad host' } as Env)).toThrow(
       'BASE_DOMAIN must be a valid host'
     );
-  });
-
-  it('does not add the isolated preview host to BetterAuth trustedOrigins', () => {
-    const authSource = readFileSync(new URL('../../../src/auth.ts', import.meta.url), 'utf8');
-    const trustedOriginsBlock = authSource.match(/trustedOrigins:\s*\[([\s\S]*?)\],/)?.[1];
-    expect(trustedOriginsBlock).toBeDefined();
-    expect(trustedOriginsBlock).not.toContain('preview');
   });
 });

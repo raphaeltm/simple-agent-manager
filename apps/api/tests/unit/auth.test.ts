@@ -15,6 +15,7 @@ type BeforeCreateHook = (user: AuthTestUser) => Promise<{ data: AuthTestUser }>;
 type SessionAfterHook = (session: { userId?: string | null }) => Promise<void>;
 
 interface BetterAuthOptions {
+  trustedOrigins?: string[];
   account?: { encryptOAuthTokens?: boolean };
   socialProviders?: Record<string, unknown>;
   databaseHooks?: {
@@ -50,7 +51,10 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 
 vi.mock('../../src/services/platform-config', () => ({
-  getGitHubOAuthConfig: async (env: { GITHUB_CLIENT_ID?: string; GITHUB_CLIENT_SECRET?: string }) =>
+  getGitHubOAuthConfig: async (env: {
+    GITHUB_CLIENT_ID?: string;
+    GITHUB_CLIENT_SECRET?: string;
+  }) =>
     env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
       ? { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET }
       : null,
@@ -165,6 +169,17 @@ describe('BetterAuth configuration', () => {
 
     expect(capturedOptions).toBeDefined();
     expect(capturedOptions?.account?.encryptOAuthTokens).toBe(true);
+  });
+
+  it('keeps the isolated preview origin outside BetterAuth trustedOrigins', async () => {
+    const { createAuth } = await import('../../src/auth');
+
+    await createAuth(fakeEnv() as never);
+
+    expect(capturedOptions?.trustedOrigins).toEqual([
+      'https://app.example.com',
+      'https://api.example.com',
+    ]);
   });
 
   it('omits social providers when no OAuth config is available', async () => {
