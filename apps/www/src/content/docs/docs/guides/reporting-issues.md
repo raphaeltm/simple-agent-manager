@@ -29,13 +29,13 @@ SAM never attaches technical context silently. The dialog shows an unchecked box
 
 Tick it and SAM lists the exact identifiers it would send, so you can see them before you submit:
 
-| Reference        | Where it comes from                    |
-| ---------------- | -------------------------------------- |
-| **Chat session** | The session you're reporting from      |
-| **Task**         | The task backing that session          |
+| Reference        | Where it comes from                      |
+| ---------------- | ---------------------------------------- |
+| **Chat session** | The session you're reporting from        |
+| **Task**         | The task backing that session            |
 | **Node**         | The machine the workspace was running on |
-| **Error**        | The crash-screen error                 |
-| **Diagnosis**    | A superadmin deployment diagnosis      |
+| **Error**        | The crash-screen error                   |
+| **Diagnosis**    | A superadmin deployment diagnosis        |
 
 These are **identifiers only** — SAM does not ship your code, your transcript, or your environment. They let a maintainer look up the right records rather than guess from a description.
 
@@ -74,23 +74,23 @@ The same project also receives [automated error triage](#for-operators-automated
 
 ### Report limits
 
-| Variable                              | Default | Description                                                                |
-| ------------------------------------- | ------- | -------------------------------------------------------------------------- |
-| `PLATFORM_FEEDBACK_PROJECT_ID`        | unset   | Project that receives reports and triage Ideas. Unset ⇒ feature hidden.    |
-| `REPORT_ISSUE_TITLE_MAX_LENGTH`       | `200`   | Max report title length                                                    |
-| `REPORT_ISSUE_DESCRIPTION_MAX_LENGTH` | `5000`  | Max report description length                                              |
-| `REPORT_ISSUE_CONTENT_MAX_LENGTH`     | `65536` | Max stored Idea body, including attached references                        |
-| `RATE_LIMIT_REPORT_ISSUE_POST`        | `20`    | Report submissions allowed per hour, per user                              |
+| Variable                              | Default | Description                                                             |
+| ------------------------------------- | ------- | ----------------------------------------------------------------------- |
+| `PLATFORM_FEEDBACK_PROJECT_ID`        | unset   | Project that receives reports and triage Ideas. Unset ⇒ feature hidden. |
+| `REPORT_ISSUE_TITLE_MAX_LENGTH`       | `200`   | Max report title length                                                 |
+| `REPORT_ISSUE_DESCRIPTION_MAX_LENGTH` | `5000`  | Max report description length                                           |
+| `REPORT_ISSUE_CONTENT_MAX_LENGTH`     | `65536` | Max stored Idea body, including attached references                     |
+| `RATE_LIMIT_REPORT_ISSUE_POST`        | `20`    | Report submissions allowed per hour, per user                           |
 
 ### How a report is stored
 
 Every report Idea is written in a three-part structure that keeps maintainer instructions separate from user-supplied text:
 
-| Section                                   | Contents                                                                              |
-| ----------------------------------------- | ------------------------------------------------------------------------------------- |
-| `## Maintainer Instructions`              | SAM's own triage instructions, plus an explicit security boundary statement            |
-| `## Trusted Metadata`                     | The identifiers the reporter consented to attach, one per line                         |
-| `## Untrusted Evidence: User Report Description` | The reporter's own words, redacted and wrapped in a Markdown code fence          |
+| Section                                          | Contents                                                                    |
+| ------------------------------------------------ | --------------------------------------------------------------------------- |
+| `## Maintainer Instructions`                     | SAM's own triage instructions, plus an explicit security boundary statement |
+| `## Trusted Metadata`                            | The identifiers the reporter consented to attach, one per line              |
+| `## Untrusted Evidence: User Report Description` | The reporter's own words, redacted and wrapped in a Markdown code fence     |
 
 That fence matters when you point an agent at the resulting Idea. The reporter's description is external input, and treating it as instructions would be a prompt-injection channel straight into a maintainer's agent. The format tells the agent explicitly which parts are yours and which are the reporter's. SAM's default "execute idea" prompt template carries the same warning; if you override it with `VITE_EXECUTE_IDEA_PROMPT_TEMPLATE`, keep that instruction.
 
@@ -131,17 +131,17 @@ When a diagnosis is worth keeping, **Save as draft Idea** files it into a projec
 
 ### Diagnosis limits
 
-| Variable                          | Default               | Description                                    |
-| --------------------------------- | --------------------- | ---------------------------------------------- |
-| `DEBUG_AGENT_MODEL`               | `@cf/zai-org/glm-5.2` | Workers AI model used for diagnosis            |
-| `DEBUG_AGENT_MAX_TURNS`           | `6`                   | Max model/tool turns per diagnosis             |
-| `DEBUG_AGENT_RUN_TOKEN_LIMIT`     | `24000`               | Combined token ceiling per diagnosis           |
-| `DEBUG_AGENT_MODEL_OUTPUT_TOKENS` | `4096`                | Max output tokens per model turn               |
+| Variable                          | Default               | Description                                     |
+| --------------------------------- | --------------------- | ----------------------------------------------- |
+| `DEBUG_AGENT_MODEL`               | `@cf/zai-org/glm-5.2` | Workers AI model used for diagnosis             |
+| `DEBUG_AGENT_MAX_TURNS`           | `6`                   | Max model/tool turns per diagnosis              |
+| `DEBUG_AGENT_RUN_TOKEN_LIMIT`     | `24000`               | Combined token ceiling per diagnosis            |
+| `DEBUG_AGENT_MODEL_OUTPUT_TOKENS` | `4096`                | Max output tokens per model turn                |
 | `DEBUG_AGENT_DAILY_TOKEN_LIMIT`   | `120000`              | Deployment-wide daily budget (shared w/ triage) |
-| `DEBUG_AGENT_TOOL_RESULT_LIMIT`   | `50`                  | Max rows returned by a diagnosis tool          |
-| `DEBUG_AGENT_TOOL_RESULT_BYTES`   | `32768`               | Max serialized bytes per model-visible result  |
-| `DEBUG_AGENT_MAX_WINDOW_HOURS`    | `24`                  | Max selectable diagnosis window                |
-| `DEBUG_AGENT_TIMEOUT_MS`          | `120000`              | Timeout per diagnosis model request            |
+| `DEBUG_AGENT_TOOL_RESULT_LIMIT`   | `50`                  | Max rows returned by a diagnosis tool           |
+| `DEBUG_AGENT_TOOL_RESULT_BYTES`   | `32768`               | Max serialized bytes per model-visible result   |
+| `DEBUG_AGENT_MAX_WINDOW_HOURS`    | `24`                  | Max selectable diagnosis window                 |
+| `DEBUG_AGENT_TIMEOUT_MS`          | `120000`              | Timeout per diagnosis model request             |
 
 Exhausting the daily budget returns `429 DEBUG_BUDGET_EXHAUSTED` until the next day.
 

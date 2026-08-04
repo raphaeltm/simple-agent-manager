@@ -82,6 +82,11 @@ durably, document cards keep working after the workspace is gone — a card whos
 file was later deleted degrades to a "no longer in the library" note rather than
 breaking.
 
+Cards render the same way regardless of which agent produced them. Some agents
+send a follow-up tool update that omits the document details, which used to
+collapse the card into a bare tool row; SAM now recovers the details from the
+original tool call, so a document an agent shares always renders as a card.
+
 ## Voice Input
 
 Click the microphone button to speak your message instead of typing. SAM transcribes your audio using OpenAI Whisper (via Cloudflare Workers AI).

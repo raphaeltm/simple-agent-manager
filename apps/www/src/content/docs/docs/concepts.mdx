@@ -18,6 +18,19 @@ Each workspace has:
 
 Workspaces are **ephemeral** — they exist for a session of work and are cleaned up when done, so always push anything you want to keep.
 
+### Runtimes: Instant vs VM
+
+A workspace runs in one of two places:
+
+| Runtime     | Where it runs                       | Trade-off                                                                      |
+| ----------- | ----------------------------------- | ------------------------------------------------------------------------------ |
+| **Instant** | A container on Cloudflare's network | Starts in seconds, no cloud account needed — but no devcontainer and no Docker |
+| **VM**      | A cloud VM on your provider account | Your full environment, at the cost of a minute or two of provisioning          |
+
+SAM picks for you: **connect a cloud provider credential and new work runs on your VMs; connect nothing and it runs Instant.** An [agent profile](#agent-profiles) can pin a runtime explicitly if you want to override that.
+
+Instant sessions sleep when idle and are restored from a snapshot when they wake or when their container is reclaimed. See [Instant Sessions](/docs/guides/instant-sessions/).
+
 ### Workspace Profiles
 
 When you start a chat you can choose a workspace profile:
@@ -92,10 +105,12 @@ You can also execute a saved idea from its detail page with the **Execute** butt
 When you submit work from the chat:
 
 1. SAM generates a concise title from your message
-2. A descriptive branch name is created (`sam/...`)
-3. SAM selects or provisions a workspace (reusing a warm one when available)
+2. A descriptive output branch is created (`sam/...`) from your default branch
+3. SAM selects or provisions a workspace, **already checked out on that branch**, reusing a warm one when available
 4. Your chosen agent runs autonomously with your description
 5. When done, the agent commits, pushes, and opens a pull request
+
+SAM refuses to auto-push a completed task while the workspace is still on the project's default branch, so agent work reaches a reviewable branch rather than `main`. See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands).
 
 ### Linking Ideas to Conversations
 

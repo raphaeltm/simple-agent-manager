@@ -177,16 +177,31 @@ The `/admin/errors` view remains superadmin-only and may show local user IDs, IP
 
 ### Platform Feedback Triage
 
-| Variable                                             | Default | Description                                                           |
-| ---------------------------------------------------- | ------- | --------------------------------------------------------------------- |
-| `PLATFORM_FEEDBACK_PROJECT_ID`                       | unset   | Project that receives automated platform feedback draft Ideas         |
-| `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES`            | `60`    | Lookback window for grouping recent platform errors                   |
-| `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`               | `100`   | Maximum platform error rows scanned per triage sweep                  |
-| `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT`               | `5`     | Maximum grouped feedback candidates processed per triage sweep        |
-| `PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT`            | `10`    | Maximum bounded error references retained per grouped feedback record |
+| Variable                                             | Default  | Description                                                           |
+| ---------------------------------------------------- | -------- | --------------------------------------------------------------------- |
+| `PLATFORM_FEEDBACK_PROJECT_ID`                       | unset    | Project that receives automated platform feedback draft Ideas         |
+| `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES`            | `60`     | Lookback window for grouping recent platform errors                   |
+| `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`               | `100`    | Maximum platform error rows scanned per triage sweep                  |
+| `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT`               | `5`      | Maximum grouped feedback candidates processed per triage sweep        |
+| `PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT`            | `10`     | Maximum bounded error references retained per grouped feedback record |
 | `PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS`              | `600000` | Claim lease duration before a later sweep can reclaim the group       |
-| `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`              | `3`     | Maximum failed attempts before a group is rejected from auto-triage   |
-| `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH` | `240`   | Maximum characters stored or returned for sanitized failure reasons   |
+| `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`              | `3`      | Maximum failed attempts before a group is rejected from auto-triage   |
+| `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH` | `240`    | Maximum characters stored or returned for sanitized failure reasons   |
+
+Automated triage shares `DEBUG_AGENT_DAILY_TOKEN_LIMIT` with superadmin-initiated diagnosis.
+
+### Report an Issue
+
+The in-app **Report an Issue** flow files user-submitted reports as draft Ideas in `PLATFORM_FEEDBACK_PROJECT_ID` (above). The feature is **hidden entirely** — both UI entry points disappear and `GET /api/report-issue/config` returns `enabled: false` — when that variable is unset or points at a project that does not exist in this deployment's database.
+
+| Variable                              | Default | Description                                                       |
+| ------------------------------------- | ------- | ----------------------------------------------------------------- |
+| `REPORT_ISSUE_TITLE_MAX_LENGTH`       | `200`   | Maximum report title length                                       |
+| `REPORT_ISSUE_DESCRIPTION_MAX_LENGTH` | `5000`  | Maximum report description length                                 |
+| `REPORT_ISSUE_CONTENT_MAX_LENGTH`     | `65536` | Maximum stored Idea body, including attached technical references |
+| `RATE_LIMIT_REPORT_ISSUE_POST`        | `20`    | Report submissions allowed per hour, per authenticated user       |
+
+See [Reporting Issues](/docs/guides/reporting-issues/) for the user-facing flow and the untrusted-evidence Idea format.
 
 ## Agent Model Catalog
 
@@ -344,6 +359,7 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 | `TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS`         | `1800000` (30 min)                     | In-flight prompt observation threshold before a non-interrupting reconciliation event                                                                                                                                                                     |
 | `TASK_RECONCILIATION_PROMPT_HARD_STALL_MS`         | `7200000` (2 hr)                       | In-flight prompt hard-stall threshold before SAM requests prompt cancellation                                                                                                                                                                             |
 | `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS`           | `10000` (10 sec)                       | Minimum delay before the next reconciliation alarm can fire                                                                                                                                                                                               |
+| `INSTANT_START_STALE_TIMEOUT_MS`                   | `600000` (10 min)                      | How long an Instant session may sit at the `instant_persistence` step before the recovery sweep treats its start as stuck. Instant starts are accepted then completed in the background, so this bounds a launch that never finishes.                     |
 
 > **Liveness-gated recovery.** Stuck-task recovery for `in_progress` tasks (including task-mode work paused at the `awaiting_followup` execution step) is gated on **task-scoped** liveness — a live workspace, a healthy node with a recent heartbeat, **and** an active task-scoped ACP session. A shared-node heartbeat alone is never sufficient. Consequently, `TASK_RUN_HARD_TIMEOUT_MS` and `TASK_RUN_MAX_EXECUTION_MS` bound the point at which a task with **no** proven live runtime is failed; a task with a demonstrably live runtime is preserved past those thresholds, but remains bounded by `TASK_RUN_ABSOLUTE_CEILING_MS` (24 hours by default) as a runaway-cost backstop. When liveness cannot be determined (probe timeout or error), the task is left untouched (fail-safe) until it reaches that absolute ceiling.
 

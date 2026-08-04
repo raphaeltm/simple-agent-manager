@@ -294,14 +294,19 @@ async function setupReportIssueMocks(page: Page) {
     if (path === '/api/workspaces/ws-1') return respond(200, REPORT_WORKSPACE);
     if (path.startsWith('/api/workspaces/ws-1/ports')) return respond(200, { ports: [] });
     if (path === `/api/nodes/${REPORT_WORKSPACE.nodeId}`) {
-      return respond(200, { id: REPORT_WORKSPACE.nodeId, status: 'running', healthStatus: 'healthy' });
+      return respond(200, {
+        id: REPORT_WORKSPACE.nodeId,
+        status: 'running',
+        healthStatus: 'healthy',
+      });
     }
 
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (projectMatch) {
       const subPath = projectMatch[2] || '';
       if (subPath === '/sessions') return respond(200, { sessions: [REPORT_SESSION], total: 1 });
-      if (subPath.match(/\/sessions\/[^/]+\/messages/)) return respond(200, { messages: [], hasMore: false });
+      if (subPath.match(/\/sessions\/[^/]+\/messages/))
+        return respond(200, { messages: [], hasMore: false });
       if (subPath.match(/\/sessions\/[^/]+$/)) {
         return respond(200, { session: REPORT_SESSION, messages: [], hasMore: false });
       }
@@ -309,7 +314,8 @@ async function setupReportIssueMocks(page: Page) {
       if (subPath === '/cached-commands') return respond(200, { items: [] });
       return respond(200, REPORT_PROJECT);
     }
-    if (path === '/api/projects') return respond(200, { projects: [REPORT_PROJECT], nextCursor: null });
+    if (path === '/api/projects')
+      return respond(200, { projects: [REPORT_PROJECT], nextCursor: null });
     return respond(200, {});
   });
 }
@@ -330,7 +336,9 @@ test('docs: report an issue dialog with consent expanded', async ({ page }) => {
   const dialog = page.getByRole('dialog', { name: 'Report an issue' });
   await expect(dialog).toBeVisible();
 
-  await page.getByPlaceholder('Brief summary of the issue').fill('Agent stopped responding mid-task');
+  await page
+    .getByPlaceholder('Brief summary of the issue')
+    .fill('Agent stopped responding mid-task');
   await page
     .getByPlaceholder(/What happened/)
     .fill(

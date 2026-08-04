@@ -21,12 +21,12 @@ The **Ideas** board holds work you've drafted but not started yet. Once an idea 
 
 Before you send, you can optionally choose:
 
-| Option                | Description                                                | Default                  |
-| --------------------- | ---------------------------------------------------------- | ------------------------ |
-| **Agent profile**     | Which agent, model, and settings run                       | Project default profile  |
-| **Skill**             | A profile-override layer for the run                       | None                     |
-| **Workspace profile** | `full` or `lightweight` environment                        | `full`                   |
-| **VM size**           | small, medium, or large                                    | Project default          |
+| Option                | Description                                                         | Default                  |
+| --------------------- | ------------------------------------------------------------------- | ------------------------ |
+| **Agent profile**     | Which agent, model, and settings run                                | Project default profile  |
+| **Skill**             | A profile-override layer for the run                                | None                     |
+| **Workspace profile** | `full` or `lightweight` environment                                 | `full`                   |
+| **VM size**           | small, medium, or large                                             | Project default          |
 | **Provider**          | Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP | Project default provider |
 
 ## Idea Lifecycle
@@ -59,11 +59,32 @@ While an idea is executing, SAM tracks detailed progress:
 
 When an agent finishes its work:
 
-1. The agent commits and pushes changes to the branch
+1. The agent commits and pushes changes to the task's output branch
 2. A pull request is created automatically
 3. A notification is sent
 4. The workspace is stopped
 5. If the node was auto-provisioned and has no other active workspaces, it enters the **warm pool** for potential reuse
+
+## Where the work lands
+
+Every task gets its own **output branch** — a `sam/`-prefixed name derived from your description. The workspace is now checked out on that branch from the moment it's created: SAM clones your project's default branch as the base, then creates and checks out the output branch before the agent starts. Run `git branch --show-current` inside a task workspace and you'll see `sam/…`, not `main`.
+
+That means an agent that never thinks about branching still produces a reviewable branch and a PR, instead of committing on top of your default branch.
+
+If you pass an explicit `branch` when starting work (via the API or `dispatch_task`), that branch is used instead — the meaning is "continue the work already on this branch."
+
+### The default branch is protected
+
+When a task completes, SAM auto-commits whatever the agent left behind and pushes it. That push is **refused** if `HEAD` is still on the project's default branch:
+
+> `auto-commit push blocked: HEAD is still on the project default branch "main"; the agent should have checked out the task output branch before completing. Changes are committed locally (sha …) but were not pushed to protect the default branch`
+
+The work is still committed locally in the workspace — nothing is destroyed — but it does not reach your default branch. If you see this, the agent checked out the default branch itself partway through. Re-run the work, or recover the commit from the workspace before it's cleaned up.
+
+Two limits worth knowing:
+
+- **The guard only covers SAM's own auto-commit push.** An agent that runs `git push` itself through the shell is not intercepted. If your default branch triggers deploys, protect it with a branch protection rule too — this guard is a safety net, not a substitute.
+- **If SAM cannot determine the default branch**, the guard is skipped and a warning is logged, so a metadata gap never blocks a legitimate push.
 
 ## AI Title Generation
 

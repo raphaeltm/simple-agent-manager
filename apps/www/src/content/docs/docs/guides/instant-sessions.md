@@ -5,10 +5,10 @@ description: How SAM's container-backed Instant sessions start, sleep, wake, and
 
 SAM can run an agent in one of two places:
 
-| Runtime                          | What it is                                                             | Typical start time     |
-| -------------------------------- | ---------------------------------------------------------------------- | ---------------------- |
-| **Instant** (Cloudflare Container) | A container that runs on Cloudflare's network. No cloud account needed. | Seconds                |
-| **VM workspace**                 | A full cloud VM on your own provider account, with your `.devcontainer`. | A minute or two        |
+| Runtime                            | What it is                                                               | Typical start time |
+| ---------------------------------- | ------------------------------------------------------------------------ | ------------------ |
+| **Instant** (Cloudflare Container) | A container that runs on Cloudflare's network. No cloud account needed.  | Seconds            |
+| **VM workspace**                   | A full cloud VM on your own provider account, with your `.devcontainer`. | A minute or two    |
 
 This page covers the **Instant** runtime: when SAM chooses it, what it can and can't do, and — most importantly — what you see and what you should do when an Instant session sleeps, wakes, or is interrupted.
 
@@ -33,17 +33,17 @@ Agents can also request a runtime when they dispatch follow-up work — see the 
 
 ## What you give up, and what you gain
 
-|                                | Instant                                       | VM workspace                          |
-| ------------------------------ | --------------------------------------------- | ------------------------------------- |
-| Cloud credential required      | No                                            | Yes (or platform-provided)            |
-| Start time                     | Seconds                                       | Minutes                               |
-| Repository clone               | Yes — partial clone by default                | Yes                                   |
-| SAM MCP tools                  | Yes                                           | Yes                                   |
-| Your `.devcontainer`           | Not built — always a lightweight environment  | Built with the `full` profile         |
-| Toolchain                      | `git`, `gh`, `curl`, `jq`, Node + agent CLIs  | Whatever your devcontainer installs   |
-| Docker inside the workspace    | No                                            | Yes                                   |
-| Automatic port detection/exposure | No                                         | Yes                                   |
-| Survives a runtime restart     | Yes — via snapshot restore, see below         | Yes — the node stays up               |
+|                                   | Instant                                      | VM workspace                        |
+| --------------------------------- | -------------------------------------------- | ----------------------------------- |
+| Cloud credential required         | No                                           | Yes (or platform-provided)          |
+| Start time                        | Seconds                                      | Minutes                             |
+| Repository clone                  | Yes — partial clone by default               | Yes                                 |
+| SAM MCP tools                     | Yes                                          | Yes                                 |
+| Your `.devcontainer`              | Not built — always a lightweight environment | Built with the `full` profile       |
+| Toolchain                         | `git`, `gh`, `curl`, `jq`, Node + agent CLIs | Whatever your devcontainer installs |
+| Docker inside the workspace       | No                                           | Yes                                 |
+| Automatic port detection/exposure | No                                           | Yes                                 |
+| Survives a runtime restart        | Yes — via snapshot restore, see below        | Yes — the node stays up             |
 
 Instant is the right default for conversation, planning, code reading, and focused edits. Reach for a VM when the agent has to build your stack, run your test suite, start services, or use Docker — an Instant session cannot do any of those, and the agent will simply fail at that step rather than fall back to a VM.
 
@@ -77,10 +77,10 @@ Snapshots are size-bounded. A single very large file or an oversized total is sk
 
 Instant sessions add two statuses you'll see on sessions, workspaces, and nodes:
 
-| Status         | Meaning                                                                  |
-| -------------- | ------------------------------------------------------------------------ |
-| **Sleeping**   | Idle and parked. Send a message to wake it.                              |
-| **Recovering** | SAM is rebuilding the runtime and restoring the snapshot. Wait it out.   |
+| Status         | Meaning                                                                |
+| -------------- | ---------------------------------------------------------------------- |
+| **Sleeping**   | Idle and parked. Send a message to wake it.                            |
+| **Recovering** | SAM is rebuilding the runtime and restoring the snapshot. Wait it out. |
 
 When an Instant session is interrupted, SAM tells you which of four situations you're in. The distinction matters, because it decides whether you should resend your message.
 
@@ -116,14 +116,14 @@ Launching an Instant session takes several steps: allocate the runtime, start th
 
 ## Limits worth knowing
 
-| Behavior                            | Default        | Setting                                    |
-| ----------------------------------- | -------------- | ------------------------------------------ |
-| Idle before sleeping                | 1 hour         | `CF_CONTAINER_SLEEP_AFTER`                 |
-| Max wake + restore time             | 2 minutes      | `CF_CONTAINER_WAKE_TIMEOUT_MS`             |
-| Snapshot restore attempts before failing | 2         | `CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`       |
-| Max active-work keepalive lease     | 2 hours        | `CF_CONTAINER_ACTIVE_WORK_MAX_MS`          |
-| Start budget (includes repo clone)  | 2 minutes      | `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` |
-| Repository clone filter             | `blob:none`    | `CF_CONTAINER_CLONE_FILTER`                |
+| Behavior                                 | Default     | Setting                                    |
+| ---------------------------------------- | ----------- | ------------------------------------------ |
+| Idle before sleeping                     | 1 hour      | `CF_CONTAINER_SLEEP_AFTER`                 |
+| Max wake + restore time                  | 2 minutes   | `CF_CONTAINER_WAKE_TIMEOUT_MS`             |
+| Snapshot restore attempts before failing | 2           | `CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`       |
+| Max active-work keepalive lease          | 2 hours     | `CF_CONTAINER_ACTIVE_WORK_MAX_MS`          |
+| Start budget (includes repo clone)       | 2 minutes   | `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` |
+| Repository clone filter                  | `blob:none` | `CF_CONTAINER_CLONE_FILTER`                |
 
 Instant sessions clone with `--filter=blob:none` by default so start time tracks the size of your working tree rather than the size of your repository's entire history. Self-hosters can set `CF_CONTAINER_CLONE_FILTER=off` to force full clones.
 
