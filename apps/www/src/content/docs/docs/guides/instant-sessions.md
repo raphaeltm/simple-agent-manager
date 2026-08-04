@@ -122,10 +122,10 @@ The chat itself is the reliable signal. Find what you're seeing in this table, t
 
 Anything else — including a message that delivery "could not be confirmed" — means SAM couldn't classify the failure. Treat it like the interrupted case: check before you resend.
 
-Don't read too much into the status badges while this is happening. A sleeping Instant session shows **Unknown** rather than a "Sleeping" label, and a sleeping _node_ also shows **Unhealthy** next to it. Both are cosmetic — sending a message still wakes the session.
+Don't read too much into the status badges on the **Nodes** and **Workspaces** pages while this is happening. A sleeping Instant session shows **Unknown** there rather than a "Sleeping" label, and a sleeping node also shows **Unhealthy** beside it. Both are cosmetic — sending a message still wakes the session.
 
 :::note
-The **Recovery** badge and the chat header's **Recovery container** label are shared with an unrelated VM failure mode: a `.devcontainer` build that failed and fell back to a plain container. The header's tooltip describes that case ("check Boot Logs for the devcontainer error"), so on an Instant session it is misleading — there is no devcontainer and nothing in Boot Logs to find. Go by the chat banner instead.
+The **Recovery** badge and the chat header's **Recovery container** label are shared with an unrelated VM failure mode: a `.devcontainer` build that failed and fell back to a plain container. The header's tooltip describes that case ("check Boot Logs for the devcontainer error output"), so on an Instant session it is misleading — there is no devcontainer and nothing in Boot Logs to find. Go by the chat banner instead.
 :::
 
 ### Recovery is in progress
