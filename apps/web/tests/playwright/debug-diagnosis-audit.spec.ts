@@ -87,6 +87,9 @@ async function setup(page: Page, diagnosisStatus = 200) {
       return diagnosisStatus === 200 ? respond(202, { run: RUNNING_RUN }) : respond(diagnosisStatus, { error: 'BUDGET_EXHAUSTED', message: 'Daily deployment debugging budget exhausted' });
     }
     if (path === '/api/admin/observability/diagnosis-runs/run-succeeded-1') return respond(200, { run: SUCCEEDED_RUN, events: [{ id: 'event-1', runId: 'run-succeeded-1', sequence: 1, stepKey: 'tool:1:errors', eventType: 'evidence', status: 'succeeded', sourceName: 'get_recent_errors', argumentsPreview: 'bounded window', evidencePreview: '<script>alert(1)</script> is inert redacted evidence', resultCount: 3, durationMs: 42, retryAttempt: 0, errorCode: null, errorMessage: null, createdAt: '2026-07-29T10:16:10.000Z' }], nextCursor: 1 });
+    if (path === '/api/admin/observability/diagnosis-runs/run-running-1') return respond(200, { run: RUNNING_RUN, events: [], nextCursor: null });
+    if (path === '/api/admin/observability/diagnosis-runs/run-running-1/cancel') return respond(202, { accepted: true });
+    if (path === '/api/admin/observability/diagnosis-runs/run-failed-1') return respond(200, { run: FAILED_RUN, events: [{ id: 'event-failed', runId: 'run-failed-1', sequence: 1, stepKey: 'terminal:failed', eventType: 'failed', status: 'failed', sourceName: 'query_cloudflare_logs', argumentsPreview: null, evidencePreview: null, resultCount: null, durationMs: 1200, retryAttempt: 3, errorCode: 'TRANSIENT_UPSTREAM', errorMessage: 'model timeout after durable acceptance', createdAt: '2026-07-29T10:18:30.000Z' }], nextCursor: 1 });
     if (path === '/api/admin/observability/diagnosis-runs/run-failed-1/retry') return respond(202, { run: RUNNING_RUN });
     if (path === '/api/admin/observability/debug/projects') return respond(200, { projects: [
       { id: 'project-1', name: 'A project with a deliberately long deployment name' },
@@ -121,6 +124,25 @@ test.describe('Deployment diagnosis visual audit', () => {
     await page.getByRole('button', { name: 'Diagnose', exact: true }).click();
     await expect(page.getByText('Daily deployment debugging budget exhausted')).toBeVisible();
     await screenshot(page, `debug-diagnosis-budget-error-${name}`);
+    await assertNoOverflow(page);
+  });
+
+  test('shows recoverable active and cancellation states without overflow', async ({ page }) => {
+    await setup(page);
+    await page.goto('/admin/diagnoses/run-running-1');
+    await expect(page.getByText('model:2')).toBeVisible();
+    await expect(page.getByText('Accepted. Waiting for the durable executor’s first checkpoint.')).toBeVisible();
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await assertNoOverflow(page);
+  });
+
+  test('shows sanitized terminal failure and retry navigation', async ({ page }) => {
+    await setup(page);
+    await page.goto('/admin/diagnoses/run-failed-1');
+    await expect(page.getByText('Run failed safely')).toBeVisible();
+    await expect(page.getByText('model timeout after durable acceptance').first()).toBeVisible();
+    await page.getByRole('button', { name: 'Retry' }).click();
+    await expect(page).toHaveURL(/\/admin\/diagnoses\/run-running-1$/);
     await assertNoOverflow(page);
   });
 });
