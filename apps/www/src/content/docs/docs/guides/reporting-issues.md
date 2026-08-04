@@ -43,8 +43,9 @@ Tick it and SAM lists the exact identifiers it would send, so you can see them b
 | **Chat session** | The session you're reporting from        | Yes — must be your workspace |
 | **Task**         | The task backing that session            | Yes — must be your project   |
 | **Node**         | The machine the workspace was running on | Yes — must be your node      |
-| **Diagnosis**    | A superadmin deployment diagnosis        | Yes — must be yours          |
 | **Error**        | The crash screen's error text            | No — see below               |
+
+Reporting from a chat session offers the first three; the crash screen offers the error reference. (The API also accepts a **Diagnosis** reference for a superadmin deployment diagnosis, but no screen currently supplies one.)
 
 These are **identifiers only** — SAM does not ship your code, your transcript, or your environment. They let a maintainer look up the right records rather than guess from a description.
 
