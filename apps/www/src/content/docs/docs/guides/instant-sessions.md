@@ -18,7 +18,7 @@ For the VM path, see [Creating Workspaces](/docs/guides/creating-workspaces/).
 
 You're on Instant when the **agent profile** (or skill) you picked has its runtime set to **Instant container**. That's the rule — it is an opt-in setting, not something SAM infers from your account.
 
-Set it under a project's **Profiles** page: create or edit a profile and choose **Instant container** as the runtime. Any chat you start with that profile selected runs Instant. Everything else runs as a task on a cloud VM.
+Set it under a project's **Profiles** page: create or edit a profile and choose **Instant container** as the runtime. Any chat you start with that profile selected runs Instant. Everything else runs as a task on a cloud VM. (One exception: if the deployment has containers switched off entirely, an Instant profile can't override that — see [For self-hosters](#for-self-hosters).)
 
 Choosing Instant on a profile also fixes some of its other settings, because they don't apply: the workspace profile becomes lightweight, VM size and devcontainer options are disabled, and the task mode becomes `conversation` — which is what determines whether SAM commits and pushes the agent's work for you. See [What happens to your work](#what-happens-to-your-work).
 
@@ -63,11 +63,11 @@ Two independent things decide this, and it's worth knowing which is which:
 
 | How you started it                                    | Branch                        | Auto-commit and push |
 | ----------------------------------------------------- | ----------------------------- | -------------------- |
-| An **Instant** chat                                   | None — your default branch    | No                   |
+| A chat you start in the composer                      | None — your default branch    | No                   |
 | A submitted task or `dispatch_task`, in **task** mode | Its own `sam/…` output branch | Yes, then a PR       |
 | The same, in **conversation** mode                    | Its own `sam/…` output branch | No                   |
 
-- **The branch depends on the runtime.** Only the Instant path skips branch creation. Anything submitted as a task gets an output branch, whichever mode it runs in.
+- **The branch depends on how the work was started.** Only a chat you start in the composer skips branch creation. Anything submitted as a task — or dispatched with `dispatch_task`, on either runtime — gets an output branch, whichever mode it runs in.
 - **The push depends on task mode.** Conversation mode has no git lifecycle at all. Selecting the Instant runtime on a profile sets conversation mode, and so does choosing the **Lightweight** workspace profile — so a Lightweight submitted task gets a branch with nothing pushed to it.
 
 So if you want an Instant chat's work to survive, **ask the agent to commit and push it to a branch**, or run the work as a task in task mode. Don't assume a PR is coming.
