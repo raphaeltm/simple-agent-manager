@@ -380,7 +380,7 @@ export function FilePreviewModal({ file, previewUrl, onClose, onDownload }: File
                     </div>
                   )}
                   {htmlSourceError && htmlSource === null && (
-                    <p className="text-sm text-fg-muted">
+                    <p role="alert" className="text-sm text-fg-muted">
                       Unable to load the HTML source. Try downloading the file instead.
                     </p>
                   )}
