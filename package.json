@@ -59,7 +59,7 @@
   },
   "devDependencies": {
     "@commitlint/cli": "21.0.2",
-    "@commitlint/config-conventional": "20.5.3",
+    "@commitlint/config-conventional": "21.2.0",
     "@types/iarna__toml": "2.0.5",
     "@types/node": "catalog:",
     "eslint-plugin-jsx-a11y": "6.10.2",
