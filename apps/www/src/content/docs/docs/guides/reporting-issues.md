@@ -11,7 +11,12 @@ There are two ways in.
 
 ### From a chat session
 
-Open the session header's action row and click **Report** (the flag icon). Use this when an agent did something wrong — got stuck, produced bad output, lost its work, failed to start.
+Use this when an agent did something wrong — got stuck, produced bad output, lost its work, failed to start.
+
+The **Report** action lives in the session header's expanded detail panel, so open that first:
+
+1. In the chat, click the chevron at the right of the session header (**Show session details**).
+2. In the action row that appears — alongside **Files**, **Git**, **Workspace**, and **Timeline** — click **Report** (the flag icon).
 
 ![The Report an Issue dialog in SAM: a Title field, a Description field, and a checked "Attach technical references to help diagnose this issue" checkbox listing a Chat session, Task, and Node identifier.](/images/docs/report-issue-dialog.png)
 

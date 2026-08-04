@@ -11,11 +11,11 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 | Change                                | What users notice                                                                                                                                                         | Where to use it                   |
 | ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| **Report an issue in-app**            | A **Report** button in the chat session header, and a **Report this issue** link on the crash screen. You choose whether to attach technical context.                     | Chat session header; crash screen |
+| **Report an issue in-app**            | A **Report** button in the expanded chat session header, and a **Report this issue** link on the crash screen. You choose whether to attach technical context.            | Chat session header; crash screen |
 | **Instant sessions survive restarts** | A sleeping or reclaimed Instant session is woken and restored from a snapshot instead of being lost. New **Sleeping** and **Recovering** states explain what's happening. | Project chat                      |
 | **Starting a chat is durable**        | Closing the tab while a chat is starting no longer strands it — the launch finishes server-side.                                                                          | Project chat                      |
 | **Work lands on its own branch**      | Task workspaces start checked out on the task's `sam/…` output branch, and SAM refuses to auto-push to your default branch.                                               | Any task or chat-started work     |
-| **Codex has its tools on Instant**    | Codex sessions on Instant sessions now get SAM's MCP tools instead of silently starting without them.                                                                     | Any Codex profile                 |
+| **Codex has its tools on Instant**    | Codex sessions on the Instant runtime now get SAM's MCP tools instead of silently starting without them.                                                                  | Any Codex profile                 |
 | **Library cards always render**       | A document an agent shares renders as a rich card no matter which agent sent it.                                                                                          | Project chat timeline             |
 
 ### For self-hosters & admins
@@ -29,7 +29,7 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ## Report an issue without leaving SAM
 
-When an agent misbehaves or a page crashes, you can file a report from where you are. Open the chat session header's action row and click **Report**, or use **Report this issue** on the crash screen.
+When an agent misbehaves or a page crashes, you can file a report from where you are. Expand the chat session header (the chevron on the right) and click **Report**, or use **Report this issue** on the crash screen.
 
 SAM never attaches technical context silently. A consent checkbox lists the exact identifiers it would send — chat session, task, node, error, diagnosis — so you can see them before submitting. Leave it unchecked and only your words are sent. Server-side, references you don't have access to are dropped, and credential-shaped strings and email addresses are redacted from your text.
 
@@ -58,9 +58,9 @@ SAM also **refuses to auto-push a completed task while the workspace is still on
 
 See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands).
 
-## Codex gets its tools on Instant sessions
+## Codex gets its tools on the Instant runtime
 
-Codex sessions running on Instant sessions never received SAM's MCP configuration, so they started with no SAM tools at all and couldn't call `get_instructions`, `dispatch_task`, or anything else. They now get it on every runtime. A Codex session that cannot be given a valid MCP token now fails to start with an explicit error instead of quietly launching a tool-less agent.
+Codex sessions running on the Instant runtime never received SAM's MCP configuration, so they started with no SAM tools at all and couldn't call `get_instructions`, `dispatch_task`, or anything else. They now get it on every runtime. A Codex session that cannot be given a valid MCP token now fails to start with an explicit error instead of quietly launching a tool-less agent.
 
 ## Superadmins can ask an agent to diagnose errors
 
