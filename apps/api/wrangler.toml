@@ -147,6 +147,10 @@ class_name = "AdminLogs"
 name = "TASK_RUNNER"
 class_name = "TaskRunner"
 
+[[durable_objects.bindings]]
+name = "DIAGNOSIS_RUNNER"
+class_name = "DiagnosisRunner"
+
 # Durable Object for per-user notification storage and real-time delivery
 [[durable_objects.bindings]]
 name = "NOTIFICATION"
@@ -312,6 +316,10 @@ new_sqlite_classes = ["CredentialSetupSession"]  # Per-session guided Codex logi
 [[migrations]]
 tag = "v19"
 new_sqlite_classes = ["SetupSessionPool"]  # Singleton concurrency gate for guided credential-setup sandbox sessions
+
+[[migrations]]
+tag = "v20"
+new_sqlite_classes = ["DiagnosisRunner"]
 
 # Analytics Engine for usage tracking (Phase 1 — server-side analytics)
 [[analytics_engine_datasets]]

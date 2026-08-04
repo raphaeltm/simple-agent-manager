@@ -2,6 +2,8 @@ import type {
   AdminUsersResponse,
   CreatePlatformCredentialRequest,
   DebugDiagnosisListResponse,
+  DebugDiagnosisRunDetailResponse,
+  DebugDiagnosisRunEventsResponse,
   DebugProjectOptionsResponse,
   ErrorListResponse,
   ErrorTrendResponse,
@@ -155,6 +157,18 @@ export async function fetchAdminDebugDiagnoses(
 
 export async function fetchAdminDebugProjects(): Promise<DebugProjectOptionsResponse> {
   return request<DebugProjectOptionsResponse>('/api/admin/observability/debug/projects');
+}
+
+export async function fetchAdminDebugDiagnosisRun(runId: string, cursor = 0): Promise<DebugDiagnosisRunDetailResponse> {
+  return request<DebugDiagnosisRunDetailResponse>('/api/admin/observability/diagnosis-runs/' + encodeURIComponent(runId) + '?cursor=' + cursor);
+}
+
+export async function fetchAdminDebugDiagnosisRunEvents(runId: string, cursor = 0): Promise<DebugDiagnosisRunEventsResponse> {
+  return request<DebugDiagnosisRunEventsResponse>('/api/admin/observability/diagnosis-runs/' + encodeURIComponent(runId) + '/events?cursor=' + cursor);
+}
+
+export async function cancelAdminDebugDiagnosisRun(runId: string): Promise<{ accepted: boolean }> {
+  return request('/api/admin/observability/diagnosis-runs/' + encodeURIComponent(runId) + '/cancel', { method: 'POST' });
 }
 
 export async function retryAdminDebugDiagnosisRun(runId: string): Promise<RunDebugDiagnosisResponse> {

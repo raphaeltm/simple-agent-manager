@@ -39,16 +39,24 @@ vi.mock('../../../src/middleware/error', () => {
 });
 
 const mockCreateDebugDiagnosisRun = vi.fn();
-const mockExecuteDebugDiagnosisRun = vi.fn();
+const mockGetDebugDiagnosisRun = vi.fn();
+const mockStartDiagnosisRunner = vi.fn();
+const mockCancelDiagnosisRunner = vi.fn();
+const mockListDiagnosisEvents = vi.fn();
 const mockRetryDebugDiagnosisRun = vi.fn();
 const mockListDebugDiagnoses = vi.fn();
 const mockSaveDebugDiagnosisAsIdea = vi.fn();
 vi.mock('../../../src/services/debug-agent', () => ({
   createDebugDiagnosisRun: (...args: unknown[]) => mockCreateDebugDiagnosisRun(...args),
-  executeDebugDiagnosisRun: (...args: unknown[]) => mockExecuteDebugDiagnosisRun(...args),
+  getDebugDiagnosisRun: (...args: unknown[]) => mockGetDebugDiagnosisRun(...args),
   retryDebugDiagnosisRun: (...args: unknown[]) => mockRetryDebugDiagnosisRun(...args),
   listDebugDiagnoses: (...args: unknown[]) => mockListDebugDiagnoses(...args),
   saveDebugDiagnosisAsIdea: (...args: unknown[]) => mockSaveDebugDiagnosisAsIdea(...args),
+}));
+vi.mock('../../../src/services/diagnosis-runner', () => ({
+  startDiagnosisRunner: (...args: unknown[]) => mockStartDiagnosisRunner(...args),
+  cancelDiagnosisRunner: (...args: unknown[]) => mockCancelDiagnosisRunner(...args),
+  listDiagnosisEvents: (...args: unknown[]) => mockListDiagnosisEvents(...args),
 }));
 const mockRunPlatformFeedbackTriage = vi.fn();
 vi.mock('../../../src/services/platform-feedback-triage', () => ({
@@ -725,7 +733,7 @@ describe('Admin Observability Routes', () => {
         createEnv()
       );
       console.log('DEBUG_RESPONSE', await response.clone().json());
-    expect(response.status).toBe(202);
+      expect(response.status).toBe(202);
       expect(await response.json()).toEqual({ run: diagnosis });
       expect(mockCreateDebugDiagnosisRun).toHaveBeenCalledWith(expect.any(Object), 'user-superadmin', {
         errorId: 'err-1',

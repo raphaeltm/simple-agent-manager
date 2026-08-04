@@ -53,6 +53,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   NODE_LIFECYCLE: DurableObjectNamespace;
   ADMIN_LOGS: DurableObjectNamespace;
   TASK_RUNNER: DurableObjectNamespace;
+  DIAGNOSIS_RUNNER: DurableObjectNamespace;
   NOTIFICATION: DurableObjectNamespace;
   CODEX_REFRESH_LOCK: DurableObjectNamespace;
   GITHUB_USER_ACCESS_TOKEN_LOCK: DurableObjectNamespace;
@@ -101,6 +102,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   DEBUG_AGENT_TOOL_RESULT_BYTES?: string;
   DEBUG_AGENT_MAX_WINDOW_HOURS?: string;
   DEBUG_AGENT_TIMEOUT_MS?: string;
+  DEBUG_AGENT_HARD_DEADLINE_MS?: string;
+  DEBUG_AGENT_STALE_HEARTBEAT_MS?: string;
+  DEBUG_AGENT_RETRY_BASE_DELAY_MS?: string;
+  DEBUG_AGENT_RETRY_MAX_DELAY_MS?: string;
+  DEBUG_AGENT_STEP_MAX_RETRIES?: string;
   PLATFORM_FEEDBACK_PROJECT_ID?: string;
   PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES?: string;
   PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT?: string;

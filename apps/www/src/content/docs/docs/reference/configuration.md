@@ -195,6 +195,11 @@ Task workspaces are checked out on the generated output branch, and SAM refuses 
 | `DEBUG_AGENT_TOOL_RESULT_BYTES`   | `32768`               | Maximum serialized bytes per model-visible tool result |
 | `DEBUG_AGENT_MAX_WINDOW_HOURS`    | `24`                  | Maximum selectable diagnosis window                    |
 | `DEBUG_AGENT_TIMEOUT_MS`          | `120000`              | Timeout for each diagnosis model request               |
+| `DEBUG_AGENT_HARD_DEADLINE_MS`    | `900000`              | Hard deadline for an active diagnosis                  |
+| `DEBUG_AGENT_STALE_HEARTBEAT_MS`  | `120000`              | Orphan reconciler heartbeat threshold                  |
+| `DEBUG_AGENT_RETRY_BASE_DELAY_MS` | `2000`                | Initial transient step retry delay                     |
+| `DEBUG_AGENT_RETRY_MAX_DELAY_MS`  | `60000`               | Maximum transient step retry delay                     |
+| `DEBUG_AGENT_STEP_MAX_RETRIES`    | `3`                   | Maximum classified transient retries per step          |
 
 The `/admin/errors` view remains superadmin-only and may show local user IDs, IP addresses, and user-agent strings. Before any tool result enters model context, SAM recursively removes those fields plus credential-shaped values such as API tokens, JWTs, authorization headers, private keys, and long secret-like strings. Cloudflare credentials stay server-side and are never included in model messages or saved diagnosis text.
 
