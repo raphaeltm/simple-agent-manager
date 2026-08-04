@@ -12,6 +12,7 @@
  * Covered surfaces:
  *   1. Guided subscription sign-in modal (Claude Code) — /settings/agents
  *   2. Cloud provider connect picker (all seven providers) — /settings/connections
+ *   3. Report an Issue dialog with consent expanded — project chat session header
  */
 import { mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -207,4 +208,145 @@ test('docs: cloud provider connect picker', async ({ page }) => {
 
   const card = page.locator('.glass-surface').filter({ hasText: 'UpCloud' }).first();
   await docsShot(page, 'cloud-provider-connect', card);
+});
+
+// ---------------------------------------------------------------------------
+// 3. Report an Issue dialog (consent expanded, showing attachable refs)
+// ---------------------------------------------------------------------------
+
+const REPORT_PROJECT = {
+  id: 'proj-1',
+  name: 'acme/checkout-service',
+  repository: 'acme/checkout-service',
+  defaultBranch: 'main',
+  userId: MOCK_USER.user.id,
+  githubInstallationId: 'inst-1',
+  defaultVmSize: null,
+  defaultAgentType: null,
+  defaultProvider: null,
+  workspaceIdleTimeoutMs: null,
+  nodeIdleTimeoutMs: null,
+  createdAt: '2026-07-01T00:00:00Z',
+  updatedAt: '2026-07-01T00:00:00Z',
+};
+
+const REPORT_WORKSPACE = {
+  id: 'ws-1',
+  nodeId: '01K9NODE7QM3D0PXR4TVYB2K5A',
+  projectId: 'proj-1',
+  name: 'ws-checkout-1',
+  displayName: 'Checkout workspace',
+  repository: 'acme/checkout-service',
+  branch: 'sam/fix-checkout-retry',
+  status: 'running',
+  vmSize: 'medium',
+  vmLocation: 'fsn1',
+  workspaceProfile: 'full',
+  vmIp: '10.0.0.1',
+  url: 'https://ws-ws-1.example.com',
+  lastActivityAt: '2026-07-01T00:10:00Z',
+  errorMessage: null,
+  createdAt: '2026-07-01T00:00:00Z',
+  updatedAt: '2026-07-01T00:10:00Z',
+};
+
+const REPORT_SESSION = {
+  id: '01K9CHAT5EFJ8TW0N6RQZD3M2X',
+  workspaceId: 'ws-1',
+  taskId: '01K9TASKB2YH7VC1KG8XPMR40D',
+  topic: 'Fix the checkout retry loop',
+  status: 'active',
+  messageCount: 12,
+  startedAt: Date.parse('2026-07-01T00:02:00Z'),
+  endedAt: null,
+  createdAt: Date.parse('2026-07-01T00:00:00Z'),
+  lastMessageAt: Date.parse('2026-07-01T00:10:00Z'),
+  isIdle: false,
+  isTerminated: false,
+  agentSessionId: 'acp-1',
+  agentType: 'claude-code',
+  task: {
+    id: '01K9TASKB2YH7VC1KG8XPMR40D',
+    status: 'in_progress',
+    executionStep: 'agent_session',
+    errorMessage: null,
+    outputBranch: 'sam/fix-checkout-retry',
+    outputPrUrl: null,
+    outputSummary: null,
+    finalizedAt: null,
+    taskMode: 'task',
+    agentProfileHint: 'default',
+  },
+};
+
+async function setupReportIssueMocks(page: Page) {
+  await page.route('**/api/**', async (route: Route) => {
+    const path = new URL(route.request().url()).pathname;
+    const respond = (status: number, body: unknown) =>
+      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+
+    if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
+    if (path === '/api/report-issue/config') return respond(200, { enabled: true });
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/credentials')) return respond(200, []);
+    if (path === '/api/agents') return respond(200, { agents: [] });
+    if (path === '/api/workspaces/ws-1') return respond(200, REPORT_WORKSPACE);
+    if (path.startsWith('/api/workspaces/ws-1/ports')) return respond(200, { ports: [] });
+    if (path === `/api/nodes/${REPORT_WORKSPACE.nodeId}`) {
+      return respond(200, { id: REPORT_WORKSPACE.nodeId, status: 'running', healthStatus: 'healthy' });
+    }
+
+    const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
+    if (projectMatch) {
+      const subPath = projectMatch[2] || '';
+      if (subPath === '/sessions') return respond(200, { sessions: [REPORT_SESSION], total: 1 });
+      if (subPath.match(/\/sessions\/[^/]+\/messages/)) return respond(200, { messages: [], hasMore: false });
+      if (subPath.match(/\/sessions\/[^/]+$/)) {
+        return respond(200, { session: REPORT_SESSION, messages: [], hasMore: false });
+      }
+      if (subPath === '/agent-profiles') return respond(200, { items: [] });
+      if (subPath === '/cached-commands') return respond(200, { items: [] });
+      return respond(200, REPORT_PROJECT);
+    }
+    if (path === '/api/projects') return respond(200, { projects: [REPORT_PROJECT], nextCursor: null });
+    return respond(200, {});
+  });
+}
+
+test('docs: report an issue dialog with consent expanded', async ({ page }) => {
+  await dismissOnboarding(page);
+  await seedTheme(page, 'dark');
+  await setupReportIssueMocks(page);
+
+  await page.goto(`/projects/proj-1/chat/${REPORT_SESSION.id}`);
+
+  // The Report action lives in the expanded session-header action row.
+  const expand = page.locator('button[aria-label="Show session details"]').first();
+  await expand.waitFor({ state: 'visible', timeout: 20000 });
+  await expand.click();
+  await page.getByRole('button', { name: 'Report' }).click();
+
+  const dialog = page.getByRole('dialog', { name: 'Report an issue' });
+  await expect(dialog).toBeVisible();
+
+  await page.getByPlaceholder('Brief summary of the issue').fill('Agent stopped responding mid-task');
+  await page
+    .getByPlaceholder(/What happened/)
+    .fill(
+      'The agent was editing the retry handler, then went quiet for 20 minutes with no output. ' +
+        'I expected it to either finish or report an error.'
+    );
+
+  // Consent is off by default; check it so the docs image shows exactly which
+  // identifiers SAM offers to attach.
+  await page.getByRole('checkbox').check();
+  await expect(page.getByText(REPORT_SESSION.id)).toBeVisible();
+
+  await page.addStyleTag({
+    content:
+      '.glass-backdrop-dim{background:#0a0e0c !important;opacity:1 !important;backdrop-filter:none !important;-webkit-backdrop-filter:none !important;}',
+  });
+
+  await docsShot(page, 'report-issue-dialog', dialog.locator('.glass-panel-container'));
 });
