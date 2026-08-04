@@ -257,6 +257,14 @@ Download the VM Agent binary. Query params: `os` (linux), `arch` (amd64, arm64).
 
 Used by cloud-init during VM (BYOC) provisioning. The Cloudflare Container instant-session runtime does **not** call this endpoint — its vm-agent binary is baked into the container image at deploy time.
 
+### `POST /api/projects/:projectId/sessions/start`
+
+Start an [Instant](/docs/guides/instant-sessions/) chat session. Returns **`202`** with `{ status: 'starting', runtime, taskId, sessionId, workspaceId, nodeId, workspaceUrl }` as soon as the records exist; the container launch, repository clone, agent start, and first prompt continue in the background, so a client disconnect no longer strands the session.
+
+Because the launch is asynchronous, the response does **not** carry `agentSessionId`, `acpSessionId`, or launch `timings` — poll the session or connect to its stream for live state.
+
+This endpoint is Instant-only. If the resolved agent profile selects the VM runtime it returns `409` (`Selected profile resolves to VM runtime; use task submission instead.`) — use `POST /api/projects/:id/tasks/submit` for VM work.
+
 ## Issue Reports
 
 See [Reporting Issues](/docs/guides/reporting-issues/) for the user-facing flow and the operator configuration these endpoints depend on.
@@ -272,3 +280,7 @@ Submit an issue report. Returns `201` with the created draft Idea's `ideaId`, it
 Body fields: `title`, `description`, `consentToAttachRefs`, and an optional `refs` object (`sessionId`, `taskId`, `nodeId`, `errorId`, `diagnosisId`). References are only stored when `consentToAttachRefs` is true, and each is re-checked against the caller's access first — unauthorized references are dropped silently rather than rejecting the request, so `attachedRefKeys` may be shorter than what was sent.
 
 Rate-limited to 20 submissions per clock hour per user (`RATE_LIMIT_REPORT_ISSUE_POST`); exceeding it returns `429`.
+
+### `POST /api/admin/observability/feedback-triage`
+
+Superadmin only. Runs a platform-error triage sweep immediately instead of waiting for the hourly cron. There is no UI for this yet, so it is the only way to verify a freshly configured `PLATFORM_FEEDBACK_PROJECT_ID` without waiting up to an hour.

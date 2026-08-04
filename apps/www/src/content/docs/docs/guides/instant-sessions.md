@@ -66,6 +66,19 @@ SAM does not silently fall back to a VM when this happens — the agent just hit
 
 Note that the **Full** workspace profile does not override this: workspace profile and runtime are separate choices, and choosing Full on a session that resolves to Instant still gets you a lightweight container.
 
+## What happens to your work
+
+A chat you start from the composer is **conversation-mode** work: SAM does not create a branch for it, does not auto-commit when the agent finishes, and does not open a pull request. The workspace sits on your project's default branch, and anything the agent changes stays in that container until you or the agent pushes it.
+
+That's a deliberate split, not an Instant limitation:
+
+| How you started it                   | Branch                        | Auto-commit &amp; push on completion |
+| ------------------------------------ | ----------------------------- | ------------------------------------ |
+| A chat in the composer (Instant)     | Your default branch           | No                                   |
+| A submitted task, or `dispatch_task` | Its own `sam/…` output branch | Yes, then a pull request             |
+
+So if you want an Instant chat's work to survive, **ask the agent to commit and push it to a branch**, or hand the work to a task instead. Don't assume a PR is coming. See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands) for the task-mode behavior.
+
 ## Sleep and wake
 
 An Instant session **sleeps** after a period of inactivity (`CF_CONTAINER_SLEEP_AFTER`, one hour by default) instead of being destroyed. The idle clock only counts genuine inactivity: while an agent turn is running, SAM keeps pushing the sleep deadline back so a long piece of work is never cut off mid-flight (bounded by `CF_CONTAINER_ACTIVE_WORK_MAX_MS`, two hours by default).
@@ -137,7 +150,7 @@ SAM deliberately does **not** replay it for you. Replaying a prompt that already
 So, once restore finishes:
 
 1. Read the transcript and any partial output from before the interruption.
-2. Check the task's [output branch](/docs/guides/idea-execution/#where-the-work-lands) — the `sam/…` branch the agent commits to — for work it may already have pushed. The project **Files** tab shows the diff without opening a workspace.
+2. If this session came from a submitted task, check its [output branch](/docs/guides/idea-execution/#where-the-work-lands) for work already pushed — the project **Files** tab shows the diff without opening a workspace. For a chat you started in the composer there is no branch to check; the transcript is your only record.
 3. Resend only if the work clearly didn't happen.
 
 Your text stays in the composer, so resending is one click if that's the call. **Dismiss** clears the banner without sending anything.
@@ -148,7 +161,7 @@ The container came back but the snapshot could not be applied. **Your transcript
 
 Treat this like a fresh workspace:
 
-1. Check the [output branch](/docs/guides/idea-execution/#where-the-work-lands) for work that was already pushed.
+1. If this came from a submitted task, check its [output branch](/docs/guides/idea-execution/#where-the-work-lands) for work already pushed. A composer chat has no branch, so assume the in-container work is gone.
 2. Re-state what still needs doing in the same chat — the agent still has the transcript.
 
 If restore fails repeatedly (`CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`, twice by default), SAM gives up: it marks the session and its task **failed** rather than leaving you watching a spinner. At that point the session is closed like a stopped one — start a new chat, or [fork](/docs/guides/chat-features/#conversation-forking) this one to keep its context.

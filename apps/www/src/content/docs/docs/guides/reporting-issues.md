@@ -115,6 +115,8 @@ Beyond user-submitted reports, SAM files its **own** reports. Once an hour it gr
 
 Grouping is by a redacted content signature, so a recurring error updates its existing Idea instead of filing a new one every hour. A group that fails triage repeatedly is rejected rather than retried forever.
 
+There is no UI button for triage yet. To confirm your setup without waiting for the next hourly run, a superadmin can `POST /api/admin/observability/feedback-triage` to sweep immediately.
+
 | Variable                                             | Default  | Description                                          |
 | ---------------------------------------------------- | -------- | ---------------------------------------------------- |
 | `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES`            | `60`     | Lookback window for grouping recent errors           |
@@ -143,6 +145,8 @@ When a diagnosis is worth keeping, **Save as draft Idea** files it into a projec
 ### What the agent is not allowed to see
 
 `/admin/errors` is superadmin-only and its raw rows can contain local user IDs, IP addresses, and user-agent strings. Before any tool result reaches the model, SAM recursively strips those fields plus credential-shaped values — API tokens, JWTs, authorization headers, private keys, and long secret-like strings. Cloudflare credentials stay server-side and never enter model messages or saved diagnosis text.
+
+The same redaction now runs on the **Worker log query** behind `/admin/logs`, so a superadmin browsing logs directly will see `[REDACTED]` where those fields used to appear. That is expected, not a bug.
 
 ### Diagnosis limits
 

@@ -67,7 +67,7 @@ When an agent finishes its work:
 
 ## Where the work lands
 
-Every task gets its own **output branch** — a prefixed name derived from your description, `sam/` by default (self-hosters can change the prefix with `BRANCH_NAME_PREFIX`). The workspace is now checked out on that branch from the moment it's created: SAM clones your project's default branch as the base, then creates and checks out the output branch before the agent starts. Run `git branch --show-current` inside a task workspace and you'll see the task branch, not `main`.
+Every **submitted task** gets its own **output branch** — a prefixed name derived from your description, `sam/` by default (self-hosters can change the prefix with `BRANCH_NAME_PREFIX`). This covers work you submit as a task and work an agent creates with `dispatch_task`, on either runtime. A chat you start from the composer is conversation-mode work and does **not** get a branch — see [What happens to your work](/docs/guides/instant-sessions/#what-happens-to-your-work). The workspace is now checked out on that branch from the moment it's created: SAM clones your project's default branch as the base, then creates and checks out the output branch before the agent starts. Run `git branch --show-current` inside a task workspace and you'll see the task branch, not `main`.
 
 That means an agent that never thinks about branching still produces a reviewable branch and a PR, instead of committing on top of your default branch.
 
