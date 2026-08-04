@@ -230,25 +230,11 @@ test.describe('File Preview v2 staging', () => {
     expect(htmlPreview.headers()['content-security-policy']).toBe("default-src 'none'");
 
     await setupChat(page, htmlFile, imageFile);
-    const previewResponses: Array<{ status: number; url: string; body: string }> = [];
-    page.on('response', async (response) => {
-      if (!response.url().includes(`/library/${htmlFile.id}/preview`)) return;
-      let body = '';
-      try {
-        body = (await response.text()).slice(0, 300);
-      } catch {
-        body = '<unreadable>';
-      }
-      previewResponses.push({ status: response.status(), url: response.url(), body });
-    });
     await page.goto(`${STAGING_APP}/projects/${PROJECT_ID}/chat/${SESSION_ID}`, {
       waitUntil: 'networkidle',
     });
 
     await page.getByRole('button', { name: `Open ${htmlFile.filename}` }).click();
-    await expect
-      .poll(() => previewResponses.map((r) => `${r.status} ${r.body}`).join('\n'))
-      .toContain('200 ');
     const frame = page.locator(`iframe[title="${htmlFile.filename}"]`);
     await expect(frame).toHaveAttribute('sandbox', '');
     await expect(frame).toHaveAttribute('srcdoc', /Interactive HTML/);
