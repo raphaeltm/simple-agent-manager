@@ -12,10 +12,18 @@ describe('CORS origin callback', () => {
     });
 
     it('allows only legitimate first-party app, API, and docs origins', () => {
-      expect(corsOriginCallback('https://app.example.com', baseDomain)).toBe('https://app.example.com');
-      expect(corsOriginCallback('https://api.example.com', baseDomain)).toBe('https://api.example.com');
-      expect(corsOriginCallback('https://docs.example.com', baseDomain)).toBe('https://docs.example.com');
-      expect(corsOriginCallback('https://www.example.com', baseDomain)).toBe('https://www.example.com');
+      expect(corsOriginCallback('https://app.example.com', baseDomain)).toBe(
+        'https://app.example.com'
+      );
+      expect(corsOriginCallback('https://api.example.com', baseDomain)).toBe(
+        'https://api.example.com'
+      );
+      expect(corsOriginCallback('https://docs.example.com', baseDomain)).toBe(
+        'https://docs.example.com'
+      );
+      expect(corsOriginCallback('https://www.example.com', baseDomain)).toBe(
+        'https://www.example.com'
+      );
     });
   });
 
@@ -79,12 +87,20 @@ describe('CORS origin callback', () => {
 
   describe('development mode (localhost baseDomain)', () => {
     it('allows localhost origins when baseDomain contains localhost', () => {
-      expect(corsOriginCallback('http://localhost:5173', 'localhost')).toBe('http://localhost:5173');
-      expect(corsOriginCallback('http://127.0.0.1:3000', 'localhost')).toBe('http://127.0.0.1:3000');
+      expect(corsOriginCallback('http://localhost:5173', 'localhost')).toBe(
+        'http://localhost:5173'
+      );
+      expect(corsOriginCallback('http://127.0.0.1:3000', 'localhost')).toBe(
+        'http://127.0.0.1:3000'
+      );
     });
 
     it('allows baseDomain origins in dev mode', () => {
       expect(corsOriginCallback('http://localhost', 'localhost')).toBe('http://localhost');
     });
+  });
+
+  it('never allows the isolated preview origin to make credentialed API requests', () => {
+    expect(corsOriginCallback('https://preview.example.com', 'example.com')).toBeNull();
   });
 });

@@ -89,24 +89,62 @@ const NORMAL_DIRS = [
 ];
 
 const NORMAL_FILES = [
-  makeFile({ id: 'f1', filename: 'README.md', mimeType: 'text/markdown', sizeBytes: 2048, tags: ['docs', 'important'] }),
-  makeFile({ id: 'f2', filename: 'logo.png', mimeType: 'image/png', sizeBytes: 45000, tags: ['branding'] }),
+  makeFile({
+    id: 'f1',
+    filename: 'README.md',
+    mimeType: 'text/markdown',
+    sizeBytes: 2048,
+    tags: ['docs', 'important'],
+  }),
+  makeFile({
+    id: 'f2',
+    filename: 'logo.png',
+    mimeType: 'image/png',
+    sizeBytes: 45000,
+    tags: ['branding'],
+  }),
   makeFile({ id: 'f3', filename: 'config.json', mimeType: 'application/json', sizeBytes: 512 }),
-  makeFile({ id: 'f4', filename: 'notes.txt', sizeBytes: 150, uploadSource: 'agent', tags: ['ai-generated'] }),
+  makeFile({
+    id: 'f4',
+    filename: 'notes.txt',
+    sizeBytes: 150,
+    uploadSource: 'agent',
+    tags: ['ai-generated'],
+  }),
 ];
 
 const LONG_TEXT_DIRS = [
-  makeDirectory({ name: 'this-is-a-very-long-directory-name-that-should-be-truncated-properly', path: '/long-dir-1', fileCount: 42 }),
-  makeDirectory({ name: 'another-extremely-long-folder-name-for-testing-overflow', path: '/long-dir-2', fileCount: 7 }),
+  makeDirectory({
+    name: 'this-is-a-very-long-directory-name-that-should-be-truncated-properly',
+    path: '/long-dir-1',
+    fileCount: 42,
+  }),
+  makeDirectory({
+    name: 'another-extremely-long-folder-name-for-testing-overflow',
+    path: '/long-dir-2',
+    fileCount: 7,
+  }),
 ];
 
 const LONG_TEXT_FILES = [
-  makeFile({ id: 'lt1', filename: 'this-is-a-very-long-filename-that-should-truncate-without-causing-horizontal-overflow.md', mimeType: 'text/markdown', sizeBytes: 99999, tags: ['tag-one', 'tag-two', 'really-long-tag-name', 'another-tag'] }),
-  makeFile({ id: 'lt2', filename: 'another-extremely-long-filename-for-testing-text-overflow.json', mimeType: 'application/json', sizeBytes: 512 }),
+  makeFile({
+    id: 'lt1',
+    filename:
+      'this-is-a-very-long-filename-that-should-truncate-without-causing-horizontal-overflow.md',
+    mimeType: 'text/markdown',
+    sizeBytes: 99999,
+    tags: ['tag-one', 'tag-two', 'really-long-tag-name', 'another-tag'],
+  }),
+  makeFile({
+    id: 'lt2',
+    filename: 'another-extremely-long-filename-for-testing-text-overflow.json',
+    mimeType: 'application/json',
+    sizeBytes: 512,
+  }),
 ];
 
 const MANY_DIRS = Array.from({ length: 8 }, (_, i) =>
-  makeDirectory({ name: `folder-${i + 1}`, path: `/folder-${i + 1}`, fileCount: i * 3 + 1 }),
+  makeDirectory({ name: `folder-${i + 1}`, path: `/folder-${i + 1}`, fileCount: i * 3 + 1 })
 );
 
 const MANY_FILES = Array.from({ length: 25 }, (_, i) =>
@@ -116,12 +154,10 @@ const MANY_FILES = Array.from({ length: 25 }, (_, i) =>
     sizeBytes: (i + 1) * 100,
     uploadSource: i % 3 === 0 ? 'agent' : 'user',
     tags: i % 4 === 0 ? ['auto'] : [],
-  }),
+  })
 );
 
-const DIRECTORY_NAV_DIRS = [
-  makeDirectory({ name: 'Nebula', path: '/Nebula/', fileCount: 1 }),
-];
+const DIRECTORY_NAV_DIRS = [makeDirectory({ name: 'Nebula', path: '/Nebula/', fileCount: 1 })];
 
 const DIRECTORY_NAV_FILES = [
   makeFile({
@@ -131,6 +167,15 @@ const DIRECTORY_NAV_FILES = [
     sizeBytes: 18132,
     directory: '/Nebula/',
     tags: ['strategy'],
+  }),
+];
+
+const INTERACTIVE_HTML_FILES = [
+  makeFile({
+    id: 'interactive-html',
+    filename: 'interactive-agent-dashboard.html',
+    mimeType: 'text/html',
+    sizeBytes: 2048,
   }),
 ];
 
@@ -145,7 +190,7 @@ async function setupApiMocks(
     directories?: ReturnType<typeof makeDirectory>[];
     total?: number;
     errorOnFiles?: boolean;
-  } = {},
+  } = {}
 ) {
   const {
     files = NORMAL_FILES,
@@ -203,7 +248,8 @@ async function setupApiMocks(
     // Library directories
     if (path.includes('/library/directories')) {
       const parentDirectory = url.searchParams.get('parentDirectory') ?? '/';
-      const parentDepth = parentDirectory === '/' ? 0 : parentDirectory.split('/').filter(Boolean).length;
+      const parentDepth =
+        parentDirectory === '/' ? 0 : parentDirectory.split('/').filter(Boolean).length;
       const scopedDirectories = directories.filter((directory) => {
         const segments = directory.path.split('/').filter(Boolean);
         if (segments.length !== parentDepth + 1) return false;
@@ -224,6 +270,20 @@ async function setupApiMocks(
       const scopedFiles = files.filter((file) => {
         if (directory) {
           return recursive ? file.directory.startsWith(directory) : file.directory === directory;
+          if (path.endsWith('/library/interactive-html/preview')) {
+            return route.fulfill({
+              status: 200,
+              contentType: 'text/plain',
+              body: '<!doctype html><button>Interactive content</button><script>window.ran=true</script>',
+            });
+          }
+          if (path.endsWith('/library/interactive-html/interactive-preview-url')) {
+            return respond(200, {
+              url: 'https://preview.example.com/p/signed/index.html',
+              expiresAt: '2026-08-04T12:05:00.000Z',
+              version: '2026-04-01T10:00:00Z',
+            });
+          }
         }
         if (!recursive && !search) return file.directory === '/';
         return true;
@@ -263,7 +323,7 @@ async function screenshot(page: Page, name: string) {
 
 async function assertNoOverflow(page: Page) {
   const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth,
+    () => document.documentElement.scrollWidth > window.innerWidth
   );
   expect(overflow).toBe(false);
 }
@@ -298,7 +358,11 @@ test.describe('Library — Mobile', () => {
   });
 
   test('many items', async ({ page }) => {
-    await setupApiMocks(page, { files: MANY_FILES, directories: MANY_DIRS, total: MANY_FILES.length });
+    await setupApiMocks(page, {
+      files: MANY_FILES,
+      directories: MANY_DIRS,
+      total: MANY_FILES.length,
+    });
     await page.goto('/projects/proj-test-1/library');
     await page.waitForSelector('h1:has-text("Library")');
     await screenshot(page, 'library-many-items-mobile');
@@ -384,7 +448,11 @@ test.describe('Library — Desktop', () => {
   });
 
   test('many items with directories', async ({ page }) => {
-    await setupApiMocks(page, { files: MANY_FILES, directories: MANY_DIRS, total: MANY_FILES.length });
+    await setupApiMocks(page, {
+      files: MANY_FILES,
+      directories: MANY_DIRS,
+      total: MANY_FILES.length,
+    });
     await page.goto('/projects/proj-test-1/library');
     await page.waitForSelector('h1:has-text("Library")');
     await screenshot(page, 'library-many-items-desktop');
@@ -409,5 +477,31 @@ test.describe('Library — Desktop', () => {
     await page.waitForTimeout(100);
     await screenshot(page, 'library-search-typing-desktop');
     await assertNoOverflow(page);
+  });
+});
+
+test.describe('Library interactive preview — visual audit', () => {
+  async function openConfirmation(page: Page) {
+    await setupApiMocks(page, { files: INTERACTIVE_HTML_FILES, directories: [] });
+    await page.goto('/projects/proj-test-1/library');
+    await page.getByText('interactive-agent-dashboard.html').click();
+    await page.getByRole('button', { name: 'Run interactive preview' }).click();
+    await expect(page.getByRole('alertdialog')).toContainText('Do not enter passwords');
+  }
+
+  test('mobile confirmation', async ({ page }) => {
+    await openConfirmation(page);
+    await screenshot(page, 'library-interactive-preview-confirmation-mobile');
+    await assertNoOverflow(page);
+  });
+
+  test.describe('desktop', () => {
+    test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
+
+    test('desktop confirmation', async ({ page }) => {
+      await openConfirmation(page);
+      await screenshot(page, 'library-interactive-preview-confirmation-desktop');
+      await assertNoOverflow(page);
+    });
   });
 });

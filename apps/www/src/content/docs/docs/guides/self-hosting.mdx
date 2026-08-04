@@ -157,14 +157,18 @@ In your fork: Settings → Environments → New environment → name it `product
 
 **Environment variables:**
 
-| Variable               | Description                                                                                             | Example       |
-| ---------------------- | ------------------------------------------------------------------------------------------------------- | ------------- |
-| `BASE_DOMAIN`          | Your domain                                                                                             | `example.com` |
-| `RESOURCE_PREFIX`      | Domain-derived Cloudflare resource prefix                                                               | `sa379a6`     |
-| `CF_CONTAINER_ENABLED` | Optional instant-session runtime toggle. Generated deploys set `true`; set `false` to force VM runtime. | `false`       |
+| Variable                  | Description                                                                                             | Example                   |
+| ------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------- |
+| `BASE_DOMAIN`             | Your domain                                                                                             | `example.com`             |
+| `PREVIEW_BASE_DOMAIN`     | Optional full preview hostname override; defaults to `preview.BASE_DOMAIN`                              | `usercontent.example.com` |
+| `PREVIEW_URL_TTL_SECONDS` | Optional lifetime for signed interactive-preview URLs                                                   | `300`                     |
+| `RESOURCE_PREFIX`         | Domain-derived Cloudflare resource prefix                                                               | `sa379a6`                 |
+| `CF_CONTAINER_ENABLED`    | Optional instant-session runtime toggle. Generated deploys set `true`; set `false` to force VM runtime. | `false`                   |
 
 The guided setup generates `RESOURCE_PREFIX` from `BASE_DOMAIN` as `s` plus the
 first six hex characters of the domain's SHA-256 hash. Use that generated value
+Deploys automatically create `preview.BASE_DOMAIN`, its Worker route, and a persistent Pulumi-managed signing key. No manual GitHub secret is required. Keep the default hostname single-level so Cloudflare Universal SSL covers it. An override is for operators who have separately arranged DNS/TLS for that full hostname.
+
 instead of choosing a generic prefix.
 
 Leaving `CF_CONTAINER_ENABLED` at the `true` the deploy workflow injects lets users start work

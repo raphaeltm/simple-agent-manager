@@ -14,6 +14,7 @@ import { r2Bucket, r2BucketLifecycle, r2BucketName } from './resources/storage';
 import {
   apiDnsRecord,
   appDnsRecord,
+  previewDnsRecord,
   wildcardDnsRecord,
   vmRouteExclusion,
   dnsRecordIds,
@@ -34,6 +35,7 @@ export {
   pagesCustomDomain,
   apiDnsRecord,
   appDnsRecord,
+  previewDnsRecord,
   wildcardDnsRecord,
   vmRouteExclusion,
 };
@@ -58,6 +60,7 @@ export {
   encryptionKey,
   jwtPrivateKey,
   jwtPublicKey,
+  previewSigningKey,
   trialClaimTokenSecret,
 } from './resources/secrets';
 

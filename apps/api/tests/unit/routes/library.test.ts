@@ -22,7 +22,15 @@ const mockValidateDirectory = vi.hoisted(() => vi.fn((dir: string) => dir));
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
   requireApproved: () => vi.fn((_c: unknown, next: () => Promise<void>) => next()),
-  getAuth: () => ({ user: { id: 'test-user-id', email: 'test@example.com', name: 'Test', role: 'user', status: 'active' } }),
+  getAuth: () => ({
+    user: {
+      id: 'test-user-id',
+      email: 'test@example.com',
+      name: 'Test',
+      role: 'user',
+      status: 'active',
+    },
+  }),
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
   requireProjectAccess: vi.fn().mockResolvedValue({
@@ -120,7 +128,7 @@ describe('library routes', () => {
       );
 
       expect(res.status).toBe(201);
-      const json = await res.json() as Record<string, unknown>;
+      const json = (await res.json()) as Record<string, unknown>;
       expect(json['id']).toBe('file-123');
     });
 
@@ -153,7 +161,10 @@ describe('library routes', () => {
 
       const { app, env } = makeApp(makeEnv());
       const formData = new FormData();
-      formData.append('file', new File(['updated content'], 'updated.pdf', { type: 'application/pdf' }));
+      formData.append(
+        'file',
+        new File(['updated content'], 'updated.pdf', { type: 'application/pdf' })
+      );
 
       const res = await app.fetch(
         new Request(`${BASE_URL}/projects/test-project-id/library/file-123/replace`, {
@@ -164,7 +175,7 @@ describe('library routes', () => {
       );
 
       expect(res.status).toBe(200);
-      const json = await res.json() as Record<string, unknown>;
+      const json = (await res.json()) as Record<string, unknown>;
       expect(json['filename']).toBe('updated.pdf');
     });
 
@@ -194,13 +205,10 @@ describe('library routes', () => {
       });
 
       const { app, env } = makeApp(makeEnv());
-      const res = await app.fetch(
-        new Request(`${BASE_URL}/projects/test-project-id/library`),
-        env
-      );
+      const res = await app.fetch(new Request(`${BASE_URL}/projects/test-project-id/library`), env);
 
       expect(res.status).toBe(200);
-      const json = await res.json() as Record<string, unknown>;
+      const json = (await res.json()) as Record<string, unknown>;
       expect(json['files']).toEqual([]);
       expect(json['total']).toBe(0);
     });
@@ -210,7 +218,9 @@ describe('library routes', () => {
 
       const { app, env } = makeApp(makeEnv());
       const res = await app.fetch(
-        new Request(`${BASE_URL}/projects/test-project-id/library?tags=design,api&mimeType=image/&limit=10`),
+        new Request(
+          `${BASE_URL}/projects/test-project-id/library?tags=design,api&mimeType=image/&limit=10`
+        ),
         env
       );
 
@@ -243,7 +253,7 @@ describe('library routes', () => {
       );
 
       expect(res.status).toBe(200);
-      const json = await res.json() as Record<string, unknown>;
+      const json = (await res.json()) as Record<string, unknown>;
       expect((json['file'] as Record<string, unknown>)['id']).toBe('file-123');
     });
   });
@@ -266,8 +276,69 @@ describe('library routes', () => {
       expect(res.status).toBe(200);
       expect(res.headers.get('Content-Type')).toBe('application/pdf');
       expect(res.headers.get('Content-Disposition')).toContain('report.pdf');
-      expect(res.headers.get('Content-Length')).toBe(String(new TextEncoder().encode('file content').length));
+      expect(res.headers.get('Content-Length')).toBe(
+        String(new TextEncoder().encode('file content').length)
+      );
       expect(res.headers.get('Cache-Control')).toBe('private, no-store');
+    });
+  });
+
+  describe('POST /:fileId/interactive-preview-url', () => {
+    it('mints a short-lived URL scoped to an accessible HTML file version', async () => {
+      mockGetFile.mockResolvedValue({
+        file: {
+          id: 'file-123',
+          projectId: 'test-project-id',
+          filename: 'demo.html',
+          mimeType: 'text/html',
+          sizeBytes: 100,
+          updatedAt: '2026-08-04T12:00:00.000Z',
+        },
+        tags: [],
+      });
+      const { app, env } = makeApp(
+        makeEnv({
+          BASE_DOMAIN: 'example.com',
+          PREVIEW_SIGNING_KEY: 'test-preview-secret',
+          PREVIEW_URL_TTL_SECONDS: '60',
+        })
+      );
+      const response = await app.fetch(
+        new Request(
+          `${BASE_URL}/projects/test-project-id/library/file-123/interactive-preview-url`,
+          { method: 'POST' }
+        ),
+        env
+      );
+      expect(response.status).toBe(200);
+      const result = await response.json<{ url: string; version: string }>();
+      expect(result.url).toMatch(/^https:\/\/preview\.example\.com\/p\/.+\/index\.html$/);
+      expect(result.version).toBe('2026-08-04T12:00:00.000Z');
+    });
+
+    it('rejects minting before file lookup when project access is denied', async () => {
+      const { requireProjectAccess } = await import('../../../src/middleware/project-auth');
+      vi.mocked(requireProjectAccess).mockRejectedValueOnce(
+        Object.assign(new Error('Project access required'), {
+          statusCode: 403,
+          error: 'FORBIDDEN',
+          message: 'Project access required',
+        })
+      );
+      const { app, env } = makeApp(
+        makeEnv({
+          BASE_DOMAIN: 'example.com',
+          PREVIEW_SIGNING_KEY: 'test-preview-secret',
+        })
+      );
+      const response = await app.fetch(
+        new Request(`${BASE_URL}/projects/other-project/library/file-123/interactive-preview-url`, {
+          method: 'POST',
+        }),
+        env
+      );
+      expect(response.status).toBe(403);
+      expect(mockGetFile).not.toHaveBeenCalled();
     });
   });
 
@@ -326,14 +397,24 @@ describe('library routes', () => {
     });
 
     it('serves HTML previews as inert plain text with strict CSP', async () => {
-      const content = new TextEncoder().encode('<script>document.body.textContent = document.cookie</script>');
+      const content = new TextEncoder().encode(
+        '<script>document.body.textContent = document.cookie</script>'
+      );
       mockGetFile.mockResolvedValue({
-        file: { filename: 'interactive.html', mimeType: 'text/html', sizeBytes: content.byteLength },
+        file: {
+          filename: 'interactive.html',
+          mimeType: 'text/html',
+          sizeBytes: content.byteLength,
+        },
         tags: [],
       });
       mockDownloadFile.mockResolvedValue({
         data: content.buffer,
-        file: { filename: 'interactive.html', mimeType: 'text/html', sizeBytes: content.byteLength },
+        file: {
+          filename: 'interactive.html',
+          mimeType: 'text/html',
+          sizeBytes: content.byteLength,
+        },
         metadata: {},
       });
 
@@ -406,12 +487,20 @@ describe('library routes', () => {
     it('serves octet-stream files with a .md name as text/markdown (agent-upload bug)', async () => {
       const content = new TextEncoder().encode('# Recovered\n\nThis previews from the filename.');
       mockGetFile.mockResolvedValue({
-        file: { filename: 'plan.md', mimeType: 'application/octet-stream', sizeBytes: content.byteLength },
+        file: {
+          filename: 'plan.md',
+          mimeType: 'application/octet-stream',
+          sizeBytes: content.byteLength,
+        },
         tags: [],
       });
       mockDownloadFile.mockResolvedValue({
         data: content.buffer,
-        file: { filename: 'plan.md', mimeType: 'application/octet-stream', sizeBytes: content.byteLength },
+        file: {
+          filename: 'plan.md',
+          mimeType: 'application/octet-stream',
+          sizeBytes: content.byteLength,
+        },
         metadata: {},
       });
 
@@ -453,14 +542,24 @@ describe('library routes', () => {
     });
 
     it('still sandboxes octet-stream files with an .html name (no security regression)', async () => {
-      const content = new TextEncoder().encode('<script>document.body.textContent = document.cookie</script>');
+      const content = new TextEncoder().encode(
+        '<script>document.body.textContent = document.cookie</script>'
+      );
       mockGetFile.mockResolvedValue({
-        file: { filename: 'agent-report.html', mimeType: 'application/octet-stream', sizeBytes: content.byteLength },
+        file: {
+          filename: 'agent-report.html',
+          mimeType: 'application/octet-stream',
+          sizeBytes: content.byteLength,
+        },
         tags: [],
       });
       mockDownloadFile.mockResolvedValue({
         data: content.buffer,
-        file: { filename: 'agent-report.html', mimeType: 'application/octet-stream', sizeBytes: content.byteLength },
+        file: {
+          filename: 'agent-report.html',
+          mimeType: 'application/octet-stream',
+          sizeBytes: content.byteLength,
+        },
         metadata: {},
       });
 
@@ -536,7 +635,9 @@ describe('library routes', () => {
 
   describe('missing encryption key', () => {
     it('returns 500 when no encryption key is configured', async () => {
-      const { app, env } = makeApp(makeEnv({ ENCRYPTION_KEY: undefined } as unknown as Partial<Env>));
+      const { app, env } = makeApp(
+        makeEnv({ ENCRYPTION_KEY: undefined } as unknown as Partial<Env>)
+      );
       const formData = new FormData();
       formData.append('file', new File(['data'], 'test.txt', { type: 'text/plain' }));
       mockGetUploadMaxBytes.mockReturnValue(50 * 1024 * 1024);
@@ -566,7 +667,7 @@ describe('library routes', () => {
       );
 
       expect(res.status).toBe(200);
-      const json = await res.json() as Record<string, unknown>;
+      const json = (await res.json()) as Record<string, unknown>;
       expect(json['success']).toBe(true);
     });
   });
@@ -590,7 +691,7 @@ describe('library routes', () => {
       );
 
       expect(res.status).toBe(200);
-      const json = await res.json() as Record<string, unknown>;
+      const json = (await res.json()) as Record<string, unknown>;
       expect((json['tags'] as unknown[]).length).toBe(2);
     });
 
@@ -623,7 +724,7 @@ describe('library routes', () => {
       );
 
       expect(res.status).toBe(200);
-      const json = await res.json() as Record<string, unknown>;
+      const json = (await res.json()) as Record<string, unknown>;
       expect(json['directories']).toHaveLength(2);
     });
 
@@ -632,7 +733,9 @@ describe('library routes', () => {
 
       const { app, env } = makeApp(makeEnv());
       const res = await app.fetch(
-        new Request(`${BASE_URL}/projects/test-project-id/library/directories?parentDirectory=/docs/`),
+        new Request(
+          `${BASE_URL}/projects/test-project-id/library/directories?parentDirectory=/docs/`
+        ),
         env
       );
 
@@ -651,10 +754,7 @@ describe('library routes', () => {
       mockListDirectories.mockResolvedValue([]);
 
       const { app, env } = makeApp(makeEnv());
-      await app.fetch(
-        new Request(`${BASE_URL}/projects/test-project-id/library/directories`),
-        env
-      );
+      await app.fetch(new Request(`${BASE_URL}/projects/test-project-id/library/directories`), env);
 
       expect(mockValidateDirectory).toHaveBeenCalledWith('/', env);
     });
@@ -679,7 +779,7 @@ describe('library routes', () => {
       );
 
       expect(res.status).toBe(200);
-      const json = await res.json() as Record<string, unknown>;
+      const json = (await res.json()) as Record<string, unknown>;
       expect(json['directory']).toBe('/docs/');
     });
 

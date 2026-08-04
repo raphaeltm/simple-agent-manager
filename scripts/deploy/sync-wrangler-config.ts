@@ -302,6 +302,10 @@ type StaticBindings = ReturnType<typeof extractStaticBindings>;
 function getApiWorkerRoutes(baseDomain: string): NonNullable<WranglerEnvConfig['routes']> {
   return [
     {
+      pattern: `preview.${baseDomain}/*`,
+      zone_name: baseDomain,
+    },
+    {
       pattern: `api.${baseDomain}/*`,
       zone_name: baseDomain,
     },
@@ -334,6 +338,11 @@ function getApiWorkerVars(
     CF_CONTAINER_ENABLED: 'true',
     ...(topLevel.vars || {}),
     BASE_DOMAIN: outputs.stackSummary.baseDomain,
+    PREVIEW_BASE_DOMAIN:
+      process.env.PREVIEW_BASE_DOMAIN || `preview.${outputs.stackSummary.baseDomain}`,
+    ...(process.env.PREVIEW_URL_TTL_SECONDS
+      ? { PREVIEW_URL_TTL_SECONDS: process.env.PREVIEW_URL_TTL_SECONDS }
+      : {}),
     VERSION: DEPLOYMENT_CONFIG.version,
     PAGES_PROJECT_NAME: outputs.pagesName,
     R2_BUCKET_NAME: outputs.r2Name,

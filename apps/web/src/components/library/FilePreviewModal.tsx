@@ -14,6 +14,7 @@ import {
 import { RenderedMarkdown, SyntaxHighlightedCode } from '../MarkdownRenderer';
 import { HtmlViewer } from '../shared-file-viewer/HtmlViewer';
 import { ImageViewer } from '../shared-file-viewer/ImageViewer';
+import { InteractiveHtmlPreview } from './InteractiveHtmlPreview';
 import { type FileWithTags, FOCUS_RING } from './types';
 
 export interface FilePreviewModalProps {
@@ -35,12 +36,7 @@ const MD_FETCH_TIMEOUT_MS = import.meta.env.VITE_MD_FETCH_TIMEOUT_MS
   ? parseInt(import.meta.env.VITE_MD_FETCH_TIMEOUT_MS, 10)
   : DEFAULT_MD_FETCH_TIMEOUT_MS;
 
-export function FilePreviewModal({
-  file,
-  previewUrl,
-  onClose,
-  onDownload,
-}: FilePreviewModalProps) {
+export function FilePreviewModal({ file, previewUrl, onClose, onDownload }: FilePreviewModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const [pdfLoading, setPdfLoading] = useState(true);
   const [pdfError, setPdfError] = useState(false);
@@ -106,35 +102,32 @@ export function FilePreviewModal({
   useScrollLock(true);
 
   // Focus trap: cycle Tab between focusable elements within the dialog
-  const handleTabTrap = useCallback(
-    (e: KeyboardEvent) => {
-      if (e.key !== 'Tab') return;
-      const dialog = dialogRef.current;
-      if (!dialog) return;
+  const handleTabTrap = useCallback((e: KeyboardEvent) => {
+    if (e.key !== 'Tab') return;
+    const dialog = dialogRef.current;
+    if (!dialog) return;
 
-      const focusable = dialog.querySelectorAll<HTMLElement>(
-        'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
-      );
-      if (focusable.length === 0) return;
+    const focusable = dialog.querySelectorAll<HTMLElement>(
+      'button, [href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+    );
+    if (focusable.length === 0) return;
 
-      const first = focusable[0] as HTMLElement | undefined;
-      const last = focusable[focusable.length - 1] as HTMLElement | undefined;
-      if (!first || !last) return;
+    const first = focusable[0] as HTMLElement | undefined;
+    const last = focusable[focusable.length - 1] as HTMLElement | undefined;
+    if (!first || !last) return;
 
-      if (e.shiftKey) {
-        if (document.activeElement === first || document.activeElement === dialog) {
-          e.preventDefault();
-          last.focus();
-        }
-      } else {
-        if (document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
+    if (e.shiftKey) {
+      if (document.activeElement === first || document.activeElement === dialog) {
+        e.preventDefault();
+        last.focus();
       }
-    },
-    [],
-  );
+    } else {
+      if (document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    }
+  }, []);
 
   useEffect(() => {
     document.addEventListener('keydown', handleTabTrap);
@@ -192,9 +185,7 @@ export function FilePreviewModal({
               >
                 {file.filename}
               </h3>
-              <span className="text-xs text-fg-muted">
-                {formatFileSize(file.sizeBytes)}
-              </span>
+              <span className="text-xs text-fg-muted">{formatFileSize(file.sizeBytes)}</span>
             </div>
 
             {/* Markdown rendered/source toggle */}
@@ -260,11 +251,7 @@ export function FilePreviewModal({
             }}
           >
             {isImage && (
-              <ImageViewer
-                src={previewUrl}
-                fileName={file.filename}
-                fileSize={file.sizeBytes}
-              />
+              <ImageViewer src={previewUrl} fileName={file.filename} fileSize={file.sizeBytes} />
             )}
 
             {isPdf && (
@@ -328,25 +315,29 @@ export function FilePreviewModal({
                     </button>
                   </div>
                 )}
-                {mdContent !== null && !mdLoading && !mdError && (
-                  mdViewMode === 'rendered' ? (
+                {mdContent !== null &&
+                  !mdLoading &&
+                  !mdError &&
+                  (mdViewMode === 'rendered' ? (
                     <RenderedMarkdown content={mdContent} />
                   ) : (
                     <div className="overflow-auto bg-surface-inset p-4">
                       <SyntaxHighlightedCode content={mdContent} language="markdown" />
                     </div>
-                  )
-                )}
+                  ))}
               </>
             )}
 
             {isHtml && (
-              <HtmlViewer previewUrl={previewUrl} fileName={file.filename} />
+              <div className="flex min-h-0 flex-1 flex-col">
+                <HtmlViewer previewUrl={previewUrl} fileName={file.filename} />
+                <InteractiveHtmlPreview file={file} />
+              </div>
             )}
           </div>
         </div>
       </div>
     </div>,
-    document.body,
+    document.body
   );
 }

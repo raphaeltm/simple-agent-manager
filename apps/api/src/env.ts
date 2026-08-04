@@ -75,6 +75,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SANDBOX?: DurableObjectNamespace<Sandbox>;
   // Environment variables
   BASE_DOMAIN: string;
+  PREVIEW_BASE_DOMAIN?: string;
+  PREVIEW_URL_TTL_SECONDS?: string;
+  PREVIEW_SIGNING_KEY?: string;
   VERSION: string;
   // Secrets
   GITHUB_CLIENT_ID?: string;

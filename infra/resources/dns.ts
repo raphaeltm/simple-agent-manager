@@ -16,6 +16,16 @@ export const apiDnsRecord = new cloudflare.Record(`${prefix}-dns-api`, {
   comment: `${prefix.toUpperCase()} API - managed by Pulumi`,
 });
 
+export const previewDnsRecord = new cloudflare.Record(`${prefix}-dns-preview`, {
+  zoneId,
+  name: 'preview',
+  type: 'CNAME',
+  content: apiWorkerHostname,
+  proxied: true,
+  ttl: 1,
+  comment: `${prefix.toUpperCase()} isolated HTML previews - managed by Pulumi`,
+});
+
 // App subdomain (app.example.com -> Pages)
 // IMPORTANT: Use the actual subdomain from the Pages project, not the computed name.
 // Cloudflare Pages subdomains are globally unique — if "sa379a6-web-prod" is taken by another
@@ -65,11 +75,13 @@ export const vmRouteExclusion = new cloudflare.WorkersRoute(`${prefix}-route-vm-
 export const dnsRecordIds = {
   api: apiDnsRecord.id,
   app: appDnsRecord.id,
+  preview: previewDnsRecord.id,
   wildcard: wildcardDnsRecord.id,
 };
 
 export const dnsHostnames = {
   api: pulumi.interpolate`api.${baseDomain}`,
   app: pulumi.interpolate`app.${baseDomain}`,
+  preview: pulumi.interpolate`preview.${baseDomain}`,
   vmBackend: pulumi.interpolate`*.vm.${baseDomain}`,
 };

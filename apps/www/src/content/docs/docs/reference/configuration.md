@@ -43,14 +43,17 @@ These are Cloudflare Worker secrets, set during deployment. Pulumi auto-generate
 
 Set as `[vars]` in `wrangler.toml` or as environment variables:
 
-| Variable                          | Default   | Description                                                                                                                |
-| --------------------------------- | --------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `BASE_DOMAIN`                     | —         | Root domain for the deployment (e.g., `example.com`)                                                                       |
-| `VERSION`                         | —         | Deployment version string                                                                                                  |
-| `SETUP_TOKEN`                     | —         | Plaintext first-run setup token generated during deploy and readable in the Cloudflare dashboard while setup is incomplete |
-| `SETUP_FORCE`                     | _(unset)_ | Set to `true` to reopen `/setup` for lockout recovery                                                                      |
-| `SETUP_RATE_LIMIT_MAX_ATTEMPTS`   | `10`      | Max setup-token attempts per identifier/window                                                                             |
-| `SETUP_RATE_LIMIT_WINDOW_SECONDS` | `900`     | Setup-token attempt window in seconds                                                                                      |
+| Variable                          | Default               | Description                                                                                                                |
+| --------------------------------- | --------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| `BASE_DOMAIN`                     | —                     | Root domain for the deployment (e.g., `example.com`)                                                                       |
+| `PREVIEW_BASE_DOMAIN`             | `preview.BASE_DOMAIN` | Full isolated hostname used for interactive HTML previews                                                                  |
+| `PREVIEW_URL_TTL_SECONDS`         | `300`                 | Lifetime of project/file/version-scoped interactive preview URLs in seconds                                                |
+| `PREVIEW_SIGNING_KEY`             | generated             | Deployment-owned HMAC key generated and persisted by Pulumi; not a manual prerequisite                                     |
+| `VERSION`                         | —                     | Deployment version string                                                                                                  |
+| `SETUP_TOKEN`                     | —                     | Plaintext first-run setup token generated during deploy and readable in the Cloudflare dashboard while setup is incomplete |
+| `SETUP_FORCE`                     | _(unset)_             | Set to `true` to reopen `/setup` for lockout recovery                                                                      |
+| `SETUP_RATE_LIMIT_MAX_ATTEMPTS`   | `10`                  | Max setup-token attempts per identifier/window                                                                             |
+| `SETUP_RATE_LIMIT_WINDOW_SECONDS` | `900`                 | Setup-token attempt window in seconds                                                                                      |
 
 ## GitHub Environment Variables
 

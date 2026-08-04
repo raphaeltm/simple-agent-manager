@@ -114,6 +114,7 @@ export const DEPLOYMENT_CONFIG = {
   dns: {
     api: 'api',
     app: 'app',
+    preview: 'preview',
     wildcard: '*',
   },
 

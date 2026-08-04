@@ -7,7 +7,7 @@
  * in Miniflare adds complexity without proportional value.
  */
 import { env, SELF } from 'cloudflare:test';
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 describe('Worker smoke tests (workerd runtime)', () => {
   describe('health check', () => {
@@ -38,11 +38,30 @@ describe('Worker smoke tests (workerd runtime)', () => {
     });
   });
 
+  describe('isolated interactive preview host', () => {
+    it('fails closed with sandbox headers and no cookie for malformed links', async () => {
+      const response = await SELF.fetch('https://preview.test.example.com/p/not-valid');
+      expect(response.status).toBe(403);
+      expect(response.headers.get('content-security-policy')).toContain('sandbox allow-scripts');
+      expect(response.headers.get('content-security-policy')).toContain("connect-src 'none'");
+      expect(response.headers.get('x-content-type-options')).toBe('nosniff');
+      expect(response.headers.get('referrer-policy')).toBe('no-referrer');
+      expect(response.headers.get('cache-control')).toBe('private, no-store');
+      expect(response.headers.get('set-cookie')).toBeNull();
+      expect(await response.text()).toContain('Preview link expired');
+    });
+
+    it('never sets cookies on unsupported methods either', async () => {
+      const response = await SELF.fetch('https://preview.test.example.com/', { method: 'POST' });
+      expect(response.status).toBe(403);
+      expect(response.headers.get('content-security-policy')).toContain('sandbox allow-scripts');
+      expect(response.headers.get('set-cookie')).toBeNull();
+    });
+  });
+
   describe('404 handler', () => {
     it('returns NOT_FOUND for unknown routes', async () => {
-      const response = await SELF.fetch(
-        'https://api.test.example.com/api/nonexistent'
-      );
+      const response = await SELF.fetch('https://api.test.example.com/api/nonexistent');
       expect(response.status).toBe(404);
 
       const body = await response.json<{ error: string; message: string }>();
@@ -129,37 +148,31 @@ describe('Worker smoke tests (workerd runtime)', () => {
 
   describe('authenticated routes require auth', () => {
     it('returns 401 for /api/projects without auth', async () => {
-      const response = await SELF.fetch(
-        'https://api.test.example.com/api/projects'
-      );
+      const response = await SELF.fetch('https://api.test.example.com/api/projects');
       expect(response.status).toBe(401);
     });
 
     it('returns 401 for /api/workspaces without auth', async () => {
-      const response = await SELF.fetch(
-        'https://api.test.example.com/api/workspaces'
-      );
+      const response = await SELF.fetch('https://api.test.example.com/api/workspaces');
       expect(response.status).toBe(401);
     });
 
     it('returns 401 for /api/nodes without auth', async () => {
-      const response = await SELF.fetch(
-        'https://api.test.example.com/api/nodes'
-      );
+      const response = await SELF.fetch('https://api.test.example.com/api/nodes');
       expect(response.status).toBe(401);
     });
   });
 
   describe('Anthropic proxy route', () => {
     it('returns 401 for /ai/anthropic/v1/messages without x-api-key', async () => {
-      const response = await SELF.fetch(
-        'https://api.test.example.com/ai/anthropic/v1/messages',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ model: 'claude-sonnet-5', messages: [{ role: 'user', content: 'hi' }] }),
-        },
-      );
+      const response = await SELF.fetch('https://api.test.example.com/ai/anthropic/v1/messages', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'claude-sonnet-5',
+          messages: [{ role: 'user', content: 'hi' }],
+        }),
+      });
       expect(response.status).toBe(401);
       const body = await response.json<{ type: string; error: { type: string } }>();
       expect(body.type).toBe('error');
@@ -170,10 +183,9 @@ describe('Worker smoke tests (workerd runtime)', () => {
       // The test env has AI_PROXY_ENABLED unset (not 'false'), so route is enabled by default.
       // We test the kill switch via a direct route that checks the config.
       // This test just confirms the route is mounted and reachable.
-      const response = await SELF.fetch(
-        'https://api.test.example.com/ai/anthropic/v1/messages',
-        { method: 'POST' },
-      );
+      const response = await SELF.fetch('https://api.test.example.com/ai/anthropic/v1/messages', {
+        method: 'POST',
+      });
       // Without Content-Type header or body, still reaches our handler (not 404)
       expect(response.status).not.toBe(404);
     });
@@ -185,7 +197,7 @@ describe('Worker smoke tests (workerd runtime)', () => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ model: 'claude-sonnet-5', messages: [] }),
-        },
+        }
       );
       expect(response.status).toBe(401);
     });

@@ -48,12 +48,12 @@ Admin-managed integration secrets stored encrypted in D1:
 
 User-provided secrets stored encrypted in D1:
 
-| Credential                      | Purpose                                                                                               | Encryption                     |
-| ------------------------------- | ----------------------------------------------------------------------------------------------------- | ------------------------------ |
+| Credential                      | Purpose                                                                                                        | Encryption                     |
+| ------------------------------- | -------------------------------------------------------------------------------------------------------------- | ------------------------------ |
 | Cloud provider credentials      | VM provisioning (Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, GCP WIF or service-account JSON) | AES-256-GCM, per-credential IV |
-| Agent API keys                  | Claude, OpenAI, Gemini, and other agent access                                                        | AES-256-GCM, per-credential IV |
-| Agent OAuth tokens              | Claude Pro/Max, Codex subscriptions                                                                   | AES-256-GCM, per-credential IV |
-| Composable credentials (`cc_*`) | Reusable credential + configuration attachments layered per project/profile                           | AES-256-GCM, per-credential IV |
+| Agent API keys                  | Claude, OpenAI, Gemini, and other agent access                                                                 | AES-256-GCM, per-credential IV |
+| Agent OAuth tokens              | Claude Pro/Max, Codex subscriptions                                                                            | AES-256-GCM, per-credential IV |
+| Composable credentials (`cc_*`) | Reusable credential + configuration attachments layered per project/profile                                    | AES-256-GCM, per-credential IV |
 
 Cloud provider credentials are stored with a `credentialType` of `cloud-provider`. GCP can use recommended keyless WIF or an OAuth-free service-account JSON key for VM provisioning. User credentials are **never** stored as environment variables or Worker secrets.
 
@@ -131,6 +131,18 @@ The certificate hostnames remain wildcard-scoped (`*.BASE_DOMAIN`, `*.vm.BASE_DO
 ### Legacy Origin CA Rotation
 
 Deployments created before the per-node CSR model may have running nodes that still hold a broadly distributed wildcard `ORIGIN_CA_KEY`. Rotate that legacy material by draining or deleting old nodes, deploying the per-node certificate model, revoking the old wildcard Origin CA certificate in Cloudflare SSL/TLS → Origin Server, and removing any manually configured `ORIGIN_CA_CERT`/`ORIGIN_CA_KEY` Worker secrets. New nodes do not require those Worker secrets.
+
+## Interactive HTML Preview Isolation
+
+Interactive previews are an explicit, no-network execution tier for single-file HTML library artifacts:
+
+1. The authenticated app requests a short-lived URL only after project access and file scope are checked (`apps/api/src/routes/library.ts`).
+2. The API signs the project, file, file version, and expiry into a path prefix with a deployment-owned HMAC key (`apps/api/src/services/interactive-preview.ts`).
+3. `preview.BASE_DOMAIN` is dispatched before session middleware. It never reads session cookies (`apps/api/src/index.ts`, `apps/api/src/routes/interactive-preview-host.ts`).
+4. Every response CSP includes `sandbox allow-scripts`, giving scripts an opaque origin even when opened directly, and denies connections, workers, objects, base URLs, and forms.
+5. The app adds an `allow-scripts`-only iframe sandbox after explicit confirmation. Same-origin, forms, popups, downloads, and top navigation are never granted.
+
+The dedicated origin contains iframe-policy regressions; the CSP sandbox header protects direct-open links. Preview is deliberately absent from credentialed CORS and BetterAuth trusted origins, and responses never set cookies.
 
 ## Security Best Practices
 

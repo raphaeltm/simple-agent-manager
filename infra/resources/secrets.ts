@@ -79,6 +79,12 @@ const deploySigningPrivateKeyResource = new random.RandomId(
   { protect: true }
 );
 
+const previewSigningKeyResource = new random.RandomId(
+  'preview-signing-key',
+  { byteLength: 32 },
+  { protect: true }
+);
+
 const deploySigningPrivateKeySeed = pulumi.secret(deploySigningPrivateKeyResource.b64Std);
 
 // Export as secret outputs (Pulumi redacts secrets in logs and state output)
@@ -87,3 +93,4 @@ export const jwtPrivateKey = pulumi.secret(jwtKeyResource.privateKeyPemPkcs8);
 export const jwtPublicKey = pulumi.secret(jwtKeyResource.publicKeyPem);
 export const trialClaimTokenSecret = pulumi.secret(trialClaimTokenResource.b64Std);
 export const deploySigningPrivateKey = deploySigningPrivateKeySeed;
+export const previewSigningKey = pulumi.secret(previewSigningKeyResource.b64Std);

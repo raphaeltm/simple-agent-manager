@@ -65,9 +65,9 @@ describe('FilePreviewModal — Markdown', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(MARKDOWN_CONTENT, { status: 200 }),
-    );
+    fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(new Response(MARKDOWN_CONTENT, { status: 200 }));
   });
 
   afterEach(() => {
@@ -83,7 +83,7 @@ describe('FilePreviewModal — Markdown', () => {
         previewUrl="https://api.example.com/preview"
         onClose={vi.fn()}
         onDownload={vi.fn()}
-      />,
+      />
     );
 
     // Wait for content to load
@@ -92,9 +92,12 @@ describe('FilePreviewModal — Markdown', () => {
     });
 
     // Should fetch with credentials and abort signal
-    expect(fetchSpy).toHaveBeenCalledWith('https://api.example.com/preview', expect.objectContaining({
-      credentials: 'include',
-    }));
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://api.example.com/preview',
+      expect.objectContaining({
+        credentials: 'include',
+      })
+    );
 
     // Rendered markdown should display the heading
     expect(screen.getByText('Hello World')).toBeInTheDocument();
@@ -115,7 +118,7 @@ describe('FilePreviewModal — Markdown', () => {
         previewUrl="https://api.example.com/preview"
         onClose={vi.fn()}
         onDownload={vi.fn()}
-      />,
+      />
     );
 
     await waitFor(() => {
@@ -141,7 +144,7 @@ describe('FilePreviewModal — Markdown', () => {
         previewUrl="https://api.example.com/preview"
         onClose={vi.fn()}
         onDownload={vi.fn()}
-      />,
+      />
     );
 
     await waitFor(() => {
@@ -174,7 +177,7 @@ describe('FilePreviewModal — Markdown', () => {
         previewUrl="https://api.example.com/preview"
         onClose={vi.fn()}
         onDownload={vi.fn()}
-      />,
+      />
     );
 
     await waitFor(() => {
@@ -190,7 +193,7 @@ describe('FilePreviewModal — Markdown', () => {
         previewUrl="https://example.com/preview"
         onClose={vi.fn()}
         onDownload={vi.fn()}
-      />,
+      />
     );
 
     expect(screen.queryByRole('button', { name: 'Rendered view' })).not.toBeInTheDocument();
@@ -207,7 +210,7 @@ describe('FilePreviewModal — Markdown', () => {
         previewUrl="https://api.example.com/preview"
         onClose={onClose}
         onDownload={vi.fn()}
-      />,
+      />
     );
 
     await user.keyboard('{Escape}');
@@ -215,14 +218,18 @@ describe('FilePreviewModal — Markdown', () => {
   });
 
   it('renders ImageViewer for image files (regression)', () => {
-    const file = makeMarkdownFile({ mimeType: 'image/png', filename: 'photo.png', sizeBytes: 1024 });
+    const file = makeMarkdownFile({
+      mimeType: 'image/png',
+      filename: 'photo.png',
+      sizeBytes: 1024,
+    });
     render(
       <FilePreviewModal
         file={file}
         previewUrl="https://example.com/preview/photo.png"
         onClose={vi.fn()}
         onDownload={vi.fn()}
-      />,
+      />
     );
 
     // ImageViewer renders an img element (portaled to document.body)
@@ -233,14 +240,18 @@ describe('FilePreviewModal — Markdown', () => {
   });
 
   it('renders PDF iframe for PDF files (regression)', () => {
-    const file = makeMarkdownFile({ mimeType: 'application/pdf', filename: 'doc.pdf', sizeBytes: 2048 });
+    const file = makeMarkdownFile({
+      mimeType: 'application/pdf',
+      filename: 'doc.pdf',
+      sizeBytes: 2048,
+    });
     render(
       <FilePreviewModal
         file={file}
         previewUrl="https://example.com/preview/doc.pdf"
         onClose={vi.fn()}
         onDownload={vi.fn()}
-      />,
+      />
     );
 
     // PDF renders an iframe (portaled to document.body)
@@ -256,9 +267,14 @@ describe('FilePreviewModal — HTML', () => {
   let fetchSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
-    fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(HTML_CONTENT, { status: 200, headers: { 'Content-Type': 'text/plain; charset=utf-8' } }),
-    );
+    fetchSpy = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValue(
+        new Response(HTML_CONTENT, {
+          status: 200,
+          headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        })
+      );
   });
 
   afterEach(() => {
@@ -278,16 +294,19 @@ describe('FilePreviewModal — HTML', () => {
         previewUrl="https://api.example.com/preview/interactive"
         onClose={vi.fn()}
         onDownload={vi.fn()}
-      />,
+      />
     );
 
     await waitFor(() => {
       expect(document.querySelector('iframe')).toBeTruthy();
     });
     const iframe = document.querySelector('iframe')!;
-    expect(fetchSpy).toHaveBeenCalledWith('https://api.example.com/preview/interactive', expect.objectContaining({
-      credentials: 'include',
-    }));
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'https://api.example.com/preview/interactive',
+      expect.objectContaining({
+        credentials: 'include',
+      })
+    );
     expect(iframe).toHaveAttribute('sandbox', '');
     expect(iframe).toHaveAttribute('referrerpolicy', 'no-referrer');
     await waitFor(() => {
@@ -315,7 +334,7 @@ describe('FilePreviewModal — HTML', () => {
         previewUrl="https://api.example.com/preview/interactive"
         onClose={vi.fn()}
         onDownload={vi.fn()}
-      />,
+      />
     );
 
     await waitFor(() => {
@@ -332,5 +351,59 @@ describe('FilePreviewModal — HTML', () => {
     await waitFor(() => {
       expect(document.querySelector('iframe')).toBeTruthy();
     });
+  });
+
+  it('runs scripts only after explicit confirmation in an allow-scripts-only iframe', async () => {
+    const user = userEvent.setup();
+    fetchSpy
+      .mockResolvedValueOnce(new Response(HTML_CONTENT, { status: 200 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            url: 'https://preview.example.com/p/signed/index.html',
+            expiresAt: '2026-08-04T12:05:00.000Z',
+            version: '2026-04-14T00:00:00Z',
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+      );
+    const file = makeMarkdownFile({
+      mimeType: 'text/html',
+      filename: 'interactive.html',
+      sizeBytes: HTML_CONTENT.length,
+    });
+    render(
+      <FilePreviewModal
+        file={file}
+        previewUrl="https://api.example.com/preview/interactive"
+        onClose={vi.fn()}
+        onDownload={vi.fn()}
+      />
+    );
+
+    expect(screen.getByRole('button', { name: 'Run interactive preview' })).toBeInTheDocument();
+    expect(screen.queryByTitle('Interactive preview of interactive.html')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Run interactive preview' }));
+    expect(screen.getByRole('alertdialog')).toHaveTextContent('Do not enter passwords');
+    await user.click(screen.getByRole('button', { name: 'Run preview' }));
+
+    const interactiveFrame = await screen.findByTitle('Interactive preview of interactive.html');
+    expect(interactiveFrame).toHaveAttribute('sandbox', 'allow-scripts');
+    expect(interactiveFrame.getAttribute('sandbox')).not.toContain('allow-same-origin');
+    expect(interactiveFrame.getAttribute('sandbox')).not.toContain('allow-forms');
+    expect(interactiveFrame).toHaveAttribute(
+      'src',
+      'https://preview.example.com/p/signed/index.html'
+    );
+    expect(
+      screen.getByText('Agent-generated interactive preview — network disabled')
+    ).toBeInTheDocument();
+    expect(fetchSpy).toHaveBeenLastCalledWith(
+      expect.stringContaining('/api/projects/proj-1/library/file-1/interactive-preview-url'),
+      expect.objectContaining({ method: 'POST' })
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Stop' }));
+    expect(screen.queryByTitle('Interactive preview of interactive.html')).not.toBeInTheDocument();
   });
 });

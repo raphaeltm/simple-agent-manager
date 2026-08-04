@@ -5,7 +5,11 @@
  * Mounted at /api/projects/:projectId/library
  */
 
-import type { ListFilesRequest, MoveFileRequest, UpdateTagsRequest } from '@simple-agent-manager/shared';
+import type {
+  ListFilesRequest,
+  MoveFileRequest,
+  UpdateTagsRequest,
+} from '@simple-agent-manager/shared';
 import { LIBRARY_DEFAULTS, resolveEffectiveMimeType } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -31,6 +35,11 @@ import {
   validateFilename,
 } from '../services/file-library';
 import { getMaxSearchLength } from '../services/file-library-config';
+import {
+  getPreviewHostname,
+  getPreviewUrlTtlSeconds,
+  mintPreviewPath,
+} from '../services/interactive-preview';
 
 const libraryRoutes = new Hono<{ Bindings: Env }>();
 
@@ -40,7 +49,9 @@ const libraryRoutes = new Hono<{ Bindings: Env }>();
 
 function validateSearchLength(search: string | undefined, env: Env): void {
   if (search && search.length > getMaxSearchLength(env)) {
-    throw errors.badRequest(`Search query exceeds maximum length of ${getMaxSearchLength(env)} characters`);
+    throw errors.badRequest(
+      `Search query exceeds maximum length of ${getMaxSearchLength(env)} characters`
+    );
   }
 }
 
@@ -96,7 +107,12 @@ libraryRoutes.post('/upload', requireAuth(), requireApproved(), async (c) => {
   const mimeType = (formData['mimeType'] as string) || file.type || 'application/octet-stream';
   const description = formData['description'] as string | undefined;
   const tagsRaw = formData['tags'] as string | undefined;
-  const tags = tagsRaw ? tagsRaw.split(',').map((t) => t.trim()).filter(Boolean) : undefined;
+  const tags = tagsRaw
+    ? tagsRaw
+        .split(',')
+        .map((t) => t.trim())
+        .filter(Boolean)
+    : undefined;
   const uploadSource = (formData['uploadSource'] as string) || 'user';
   const uploadSessionId = formData['uploadSessionId'] as string | undefined;
   const uploadTaskId = formData['uploadTaskId'] as string | undefined;
@@ -106,8 +122,15 @@ libraryRoutes.post('/upload', requireAuth(), requireApproved(), async (c) => {
   const encryptionKey = getEncryptionKey(c.env);
 
   const result = await uploadFile(
-    db, c.env.R2, encryptionKey, c.env, projectId, userId,
-    filename, mimeType, data,
+    db,
+    c.env.R2,
+    encryptionKey,
+    c.env,
+    projectId,
+    userId,
+    filename,
+    mimeType,
+    data,
     {
       description,
       tags,
@@ -156,8 +179,16 @@ libraryRoutes.put('/:fileId/replace', requireAuth(), requireApproved(), async (c
   const encryptionKey = getEncryptionKey(c.env);
 
   const result = await replaceFile(
-    db, c.env.R2, encryptionKey, c.env, projectId, fileId, userId,
-    filename, mimeType, data,
+    db,
+    c.env.R2,
+    encryptionKey,
+    c.env,
+    projectId,
+    fileId,
+    userId,
+    filename,
+    mimeType,
+    data,
     { description }
   );
 
@@ -179,7 +210,12 @@ libraryRoutes.get('/', requireAuth(), requireApproved(), async (c) => {
   const query = c.req.query();
   validateSearchLength(query['search'] || undefined, c.env);
   const filters: ListFilesRequest = {
-    tags: query['tags'] ? query['tags'].split(',').map((t) => t.trim()).filter(Boolean) : undefined,
+    tags: query['tags']
+      ? query['tags']
+          .split(',')
+          .map((t) => t.trim())
+          .filter(Boolean)
+      : undefined,
     mimeType: query['mimeType'] || undefined,
     uploadSource: query['uploadSource'] as ListFilesRequest['uploadSource'],
     status: query['status'] as ListFilesRequest['status'],
@@ -262,7 +298,13 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
   const safeFilename = file.filename.replace(/[^\x20-\x7E]|["\\;]/g, '_');
 
   // Force safe Content-Type for MIME types that can execute scripts in browsers
-  const DANGEROUS_MIMES = ['text/html', 'application/javascript', 'application/xhtml+xml', 'image/svg+xml', 'text/xml'];
+  const DANGEROUS_MIMES = [
+    'text/html',
+    'application/javascript',
+    'application/xhtml+xml',
+    'image/svg+xml',
+    'text/xml',
+  ];
   const contentType = DANGEROUS_MIMES.includes(file.mimeType.toLowerCase())
     ? 'application/octet-stream'
     : file.mimeType;
@@ -278,6 +320,45 @@ libraryRoutes.get('/:fileId/download', requireAuth(), requireApproved(), async (
     },
   });
 });
+
+libraryRoutes.post(
+  '/:fileId/interactive-preview-url',
+  requireAuth(),
+  requireApproved(),
+  async (c) => {
+    const auth = getAuth(c);
+    const userId = auth.user.id;
+    const projectId = requireParam(c.req.param('projectId'), 'projectId');
+    const fileId = requireParam(c.req.param('fileId'), 'fileId');
+    const db = drizzle(c.env.DATABASE, { schema });
+    await requireProjectAccess(db, projectId, userId);
+
+    const { file } = await getFile(db, projectId, fileId);
+    if (resolveEffectiveMimeType(file.mimeType, file.filename) !== 'text/html') {
+      throw errors.badRequest('Only HTML files support interactive preview');
+    }
+    const previewMaxBytes = parseInt(
+      c.env.FILE_PREVIEW_MAX_BYTES ?? String(LIBRARY_DEFAULTS.FILE_PREVIEW_MAX_BYTES),
+      10
+    );
+    if (file.sizeBytes > previewMaxBytes) {
+      throw errors.badRequest('File is too large for interactive preview');
+    }
+    if (!c.env.PREVIEW_SIGNING_KEY) {
+      throw errors.internal('Interactive preview signing is not configured');
+    }
+    const expiresAt = Math.floor(Date.now() / 1000) + getPreviewUrlTtlSeconds(c.env);
+    const path = await mintPreviewPath(
+      { projectId, fileId, version: file.updatedAt, expiresAt },
+      c.env.PREVIEW_SIGNING_KEY
+    );
+    return c.json({
+      url: `https://${getPreviewHostname(c.env)}${path}`,
+      expiresAt: new Date(expiresAt * 1000).toISOString(),
+      version: file.updatedAt,
+    });
+  }
+);
 
 // ---------------------------------------------------------------------------
 // GET /:fileId/preview — decrypt + serve inline for previewable types
@@ -321,7 +402,7 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
   // Enforce size limit before decrypting (reuse the configurable load-max from file-utils)
   const previewMaxBytes = parseInt(
     c.env.FILE_PREVIEW_MAX_BYTES ?? String(LIBRARY_DEFAULTS.FILE_PREVIEW_MAX_BYTES),
-    10,
+    10
   );
   if (file.sizeBytes > previewMaxBytes) {
     throw errors.badRequest('File is too large for inline preview');
@@ -339,14 +420,14 @@ libraryRoutes.get('/:fileId/preview', requireAuth(), requireApproved(), async (c
 
   const safeFilename = file.filename.replace(/[^\x20-\x7E]|["\\;]/g, '_');
 
-  const responseContentType = effectiveMime === 'text/html'
-    ? 'text/plain; charset=utf-8'
-    : effectiveMime;
-  const csp = effectiveMime === 'application/pdf'
-    ? "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'self'"
-    : effectiveMime === 'text/html'
-      ? "default-src 'none'"
-      : "default-src 'none'; style-src 'unsafe-inline'";
+  const responseContentType =
+    effectiveMime === 'text/html' ? 'text/plain; charset=utf-8' : effectiveMime;
+  const csp =
+    effectiveMime === 'application/pdf'
+      ? "default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; object-src 'self'"
+      : effectiveMime === 'text/html'
+        ? "default-src 'none'"
+        : "default-src 'none'; style-src 'unsafe-inline'";
 
   return new Response(data, {
     status: 200,

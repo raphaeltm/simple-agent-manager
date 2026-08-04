@@ -90,6 +90,10 @@ import { gitlabRoutes } from './routes/gitlab';
 import { googleAuthRoutes } from './routes/google-auth';
 import { knowledgeRoutes } from './routes/knowledge';
 import { libraryRoutes } from './routes/library';
+import {
+  handleInteractivePreviewRequest,
+  isInteractivePreviewRequest,
+} from './routes/interactive-preview-host';
 import { mailboxRoutes } from './routes/mailbox';
 import { mcpRoutes } from './routes/mcp';
 import { missionRoutes } from './routes/missions';
@@ -138,7 +142,10 @@ import { runComputeUsageCleanup } from './scheduled/compute-usage-cleanup';
 import { runCronTriggerSweep } from './scheduled/cron-triggers';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
 import { runObservabilityPurge } from './scheduled/observability-purge';
-import { isHourlyPlatformMaintenanceCron, scheduleHourlyPlatformMaintenance } from './scheduled/platform-feedback-hourly';
+import {
+  isHourlyPlatformMaintenanceCron,
+  scheduleHourlyPlatformMaintenance,
+} from './scheduled/platform-feedback-hourly';
 import { runSessionTaskReconciliation } from './scheduled/session-task-reconciliation';
 import { runSetupSessionSweep } from './scheduled/setup-session-sweep';
 import { recoverStuckTasks } from './scheduled/stuck-tasks';
@@ -178,6 +185,15 @@ app.onError((err, c) => {
     },
     500
   );
+});
+
+// Signed preview-host requests bypass session auth, credentialed CORS, Pages,
+// and workspace cookie handling.
+app.use('*', async (c, next) => {
+  if (isInteractivePreviewRequest(c.req.raw, c.env)) {
+    return handleInteractivePreviewRequest(c.req.raw, c.env);
+  }
+  await next();
 });
 
 // Proxy non-API subdomains to their respective Cloudflare Pages deployments.

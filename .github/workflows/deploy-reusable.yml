@@ -303,6 +303,8 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_ZONE_ID: ${{ secrets.CF_ZONE_ID }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
+          PREVIEW_BASE_DOMAIN: ${{ vars.PREVIEW_BASE_DOMAIN }}
+          PREVIEW_URL_TTL_SECONDS: ${{ vars.PREVIEW_URL_TTL_SECONDS }}
           RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
 
       - name: Pulumi Preview
