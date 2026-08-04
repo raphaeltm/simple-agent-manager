@@ -91,26 +91,52 @@ export function InteractiveHtmlPreview({ file }: Props) {
 
   return (
     <section className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 bg-warning-subtle px-3 py-2">
-        <p className="flex min-w-0 items-center gap-2 text-xs font-medium text-warning-fg">
-          <AlertTriangle size={15} className="shrink-0" />
-          Agent-generated — network disabled
+      {/* Single compact chrome row. Labels collapse to icons below `sm` so the warning and the
+          controls share one line — every pixel spent here is taken from the artifact. */}
+      <div className="flex shrink-0 items-center justify-between gap-2 bg-warning-subtle px-3 py-1.5">
+        <p className="flex min-w-0 items-center gap-1.5 text-xs font-medium text-warning-fg">
+          <AlertTriangle size={14} className="shrink-0" />
+          <span className="truncate">Agent-generated — network disabled</span>
         </p>
-        <div className="flex flex-wrap gap-1.5">
+        <div className="flex shrink-0 gap-1">
           {stopped ? (
-            <button type="button" onClick={reload} className={`${CONTROL_CLASS} ${FOCUS_RING}`}>
-              <Play size={12} /> Run again
+            <button
+              type="button"
+              onClick={reload}
+              aria-label="Run again"
+              className={`${CONTROL_CLASS} ${FOCUS_RING}`}
+            >
+              <Play size={12} />
+              <span className="hidden sm:inline">Run again</span>
             </button>
           ) : (
-            <button type="button" onClick={stop} className={`${CONTROL_CLASS} ${FOCUS_RING}`}>
-              <Square size={12} /> Stop
+            <button
+              type="button"
+              onClick={stop}
+              aria-label="Stop"
+              className={`${CONTROL_CLASS} ${FOCUS_RING}`}
+            >
+              <Square size={12} />
+              <span className="hidden sm:inline">Stop</span>
             </button>
           )}
-          <button type="button" onClick={reload} className={`${CONTROL_CLASS} ${FOCUS_RING}`}>
-            <RotateCcw size={12} /> Reset
+          <button
+            type="button"
+            onClick={reload}
+            aria-label="Reset"
+            className={`${CONTROL_CLASS} ${FOCUS_RING}`}
+          >
+            <RotateCcw size={12} />
+            <span className="hidden sm:inline">Reset</span>
           </button>
-          <button type="button" onClick={openInNewTab} className={`${CONTROL_CLASS} ${FOCUS_RING}`}>
-            <ExternalLink size={12} /> Open in new tab
+          <button
+            type="button"
+            onClick={openInNewTab}
+            aria-label="Open in new tab"
+            className={`${CONTROL_CLASS} ${FOCUS_RING}`}
+          >
+            <ExternalLink size={12} />
+            <span className="hidden sm:inline">Open in new tab</span>
           </button>
         </div>
       </div>
