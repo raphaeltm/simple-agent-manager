@@ -72,10 +72,10 @@ A chat you start from the composer is **conversation-mode** work: SAM does not c
 
 That's a deliberate split, not an Instant limitation:
 
-| How you started it                   | Branch                        | Auto-commit &amp; push on completion |
-| ------------------------------------ | ----------------------------- | ------------------------------------ |
-| A chat in the composer (Instant)     | Your default branch           | No                                   |
-| A submitted task, or `dispatch_task` | Its own `sam/…` output branch | Yes, then a pull request             |
+| How you started it                   | Branch                        | Auto-commit and push on completion |
+| ------------------------------------ | ----------------------------- | ---------------------------------- |
+| A chat in the composer (Instant)     | Your default branch           | No                                 |
+| A submitted task, or `dispatch_task` | Its own `sam/…` output branch | Yes, then a pull request           |
 
 So if you want an Instant chat's work to survive, **ask the agent to commit and push it to a branch**, or hand the work to a task instead. Don't assume a PR is coming. See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands) for the task-mode behavior.
 
