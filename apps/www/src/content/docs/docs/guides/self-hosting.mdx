@@ -157,17 +157,17 @@ In your fork: Settings → Environments → New environment → name it `product
 
 **Environment variables:**
 
-| Variable               | Description                                                                                   | Example       |
-| ---------------------- | --------------------------------------------------------------------------------------------- | ------------- |
-| `BASE_DOMAIN`          | Your domain                                                                                   | `example.com` |
-| `RESOURCE_PREFIX`      | Domain-derived Cloudflare resource prefix                                                     | `sa379a6`     |
-| `CF_CONTAINER_ENABLED` | Optional instant-session runtime toggle. Defaults to `true`; set `false` to force VM runtime. | `false`       |
+| Variable               | Description                                                                                             | Example       |
+| ---------------------- | ------------------------------------------------------------------------------------------------------- | ------------- |
+| `BASE_DOMAIN`          | Your domain                                                                                             | `example.com` |
+| `RESOURCE_PREFIX`      | Domain-derived Cloudflare resource prefix                                                               | `sa379a6`     |
+| `CF_CONTAINER_ENABLED` | Optional instant-session runtime toggle. Generated deploys set `true`; set `false` to force VM runtime. | `false`       |
 
 The guided setup generates `RESOURCE_PREFIX` from `BASE_DOMAIN` as `s` plus the
 first six hex characters of the domain's SHA-256 hash. Use that generated value
 instead of choosing a generic prefix.
 
-Leaving `CF_CONTAINER_ENABLED` at its `true` default lets users start work
+Leaving `CF_CONTAINER_ENABLED` at the `true` the deploy workflow injects lets users start work
 without their own cloud credential, on [Instant sessions](/docs/guides/instant-sessions/).
 Setting it to `false` means every session provisions a cloud VM, so **each user
 must connect their own cloud provider credential before they can do anything**.

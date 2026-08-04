@@ -9,14 +9,14 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ### For everyone
 
-| Change                                | What users notice                                                                                                                                                         | Where to use it                   |
-| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| **Report an issue in-app**            | A **Report** button in the expanded chat session header, and a **Report this issue** link on the crash screen. You choose whether to attach technical context.            | Chat session header; crash screen |
-| **Instant sessions survive restarts** | A sleeping or reclaimed Instant session is woken and restored from a snapshot instead of being lost. New **Sleeping** and **Recovering** states explain what's happening. | Project chat                      |
-| **Starting a chat is durable**        | Closing the tab while a chat is starting no longer strands it — the launch finishes server-side.                                                                          | Project chat                      |
-| **Work lands on its own branch**      | Task workspaces start checked out on the task's `sam/…` output branch, and SAM refuses to auto-push to your default branch.                                               | Any task or chat-started work     |
-| **Codex has its tools on Instant**    | Codex sessions on the Instant runtime now get SAM's MCP tools instead of silently starting without them.                                                                  | Any Codex profile                 |
-| **Library cards always render**       | A document an agent shares renders as a rich card no matter which agent sent it.                                                                                          | Project chat timeline             |
+| Change                                | What users notice                                                                                                                                                             | Where to use it                   |
+| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| **Report an issue in-app**            | A **Report** button in the expanded chat session header, and a **Report this issue** link on the crash screen. You choose whether to attach technical context.                | Chat session header; crash screen |
+| **Instant sessions survive restarts** | A sleeping or reclaimed Instant session is woken and restored from a snapshot instead of being lost. SAM tells you in the chat whether it is waking, restoring, or unable to. | Project chat                      |
+| **Starting a chat is durable**        | Closing the tab while a chat is starting no longer strands it — the launch finishes server-side.                                                                              | Project chat                      |
+| **Work lands on its own branch**      | Task workspaces start checked out on the task's `sam/…` output branch, and SAM refuses to auto-push to your default branch.                                                   | Any task or chat-started work     |
+| **Codex has its tools on Instant**    | Codex sessions on the Instant runtime now get SAM's MCP tools instead of silently starting without them.                                                                      | Any Codex profile                 |
+| **Library cards always render**       | A document an agent shares renders as a rich card no matter which agent sent it.                                                                                              | Project chat timeline             |
 
 ### For self-hosters & admins
 
@@ -41,8 +41,7 @@ Reports become draft Ideas in a project the deployment nominates. If you don't s
 
 What you actually see:
 
-- **Sleeping** — idle and parked. Send a message to wake it.
-- **Recovering** — SAM is rebuilding the session. Wait rather than resending.
+- A spinner reading **"Waking and restoring Instant session…"** — a wake or restore is under way. Wait rather than resending.
 - A message that says your prompt **was saved but its outcome is unknown** — SAM deliberately does not replay it, because replaying a half-executed prompt duplicates commits and PRs. Read the transcript first, then decide whether to resend.
 - A terminal **stopped** state, which closes the composer instead of offering retries against a runtime that can never come back.
 

@@ -16,22 +16,27 @@ For the VM path, see [Creating Workspaces](/docs/guides/creating-workspaces/).
 
 ## When SAM uses an Instant session
 
-You don't normally pick a runtime by hand. SAM decides in this order (`decideWorkspaceRuntime()` in `apps/api/src/services/workspace-runtime.ts`):
+**Starting a chat** is the path where SAM chooses for you. It decides in this order (`decideWorkspaceRuntime()` in `apps/api/src/services/workspace-runtime.ts`):
 
 1. **Containers not enabled for the deployment** (`CF_CONTAINER_ENABLED` is anything other than `true`) → always a VM.
 2. **The agent profile sets a runtime explicitly** → that runtime wins.
 3. **You have your own cloud provider credential**, or one attached to the project → a VM, because you brought compute.
 4. **Otherwise** → Instant.
 
-The practical rule of thumb:
+The practical rule of thumb, for chats:
 
-> **Connect a cloud provider and your work runs on your VMs. Connect nothing and it runs Instant.**
+> **Connect a cloud provider and your chats run on your VMs. Connect nothing and they run Instant.**
 
-That means connecting your first Hetzner or Scaleway credential silently changes where new sessions run. If you want Instant sessions even after connecting a cloud account, set the runtime explicitly on an [agent profile](/docs/guides/agents/#agent-profiles) and pick that profile when you start a chat.
+So connecting your first Hetzner or Scaleway credential silently changes where new chats run. If you want Instant sessions even after connecting a cloud account, set the runtime explicitly on an [agent profile](/docs/guides/agents/#agent-profiles) and pick that profile.
 
 Only a credential **you** own or one attached to the project switches you to VMs. A deployment-level _platform_ credential — what the hosted platform uses to provide compute — does **not**, so on the hosted platform you get Instant sessions by default even though VMs are available to you.
 
-Agents can also request a runtime when they dispatch follow-up work — see the `runtime` argument on `dispatch_task` in [Idea Execution](/docs/guides/idea-execution/#agent-to-agent-dispatch).
+### Everything else is VM-first
+
+The rule above governs chat start. Two other paths behave differently:
+
+- **Submitted tasks always use a VM.** Task submission does not consult the runtime decision at all, so it needs cloud compute — your credential, the project's, or the platform's. On a self-hosted deployment with no platform credential, submitting a task without a cloud credential fails with `Cloud provider credentials required` rather than falling back to Instant.
+- **`dispatch_task` uses Instant only when asked.** An agent dispatching follow-up work gets a VM unless the runtime is pinned to `cf-container` — explicitly on the call, or on the profile it dispatches with. Zero-config dispatch does **not** route to Instant. See the `runtime` argument in [Idea Execution](/docs/guides/idea-execution/#agent-to-agent-dispatch).
 
 ## What you give up, and what you gain
 
@@ -51,7 +56,7 @@ Instant is the right default for conversation, planning, code reading, and focus
 
 ### "command not found" — you're probably on Instant
 
-An Instant container is a slim Node image plus the agent CLIs. It does **not** carry your project's toolchain, and it doesn't build your `.devcontainer` to get one. So an agent asked to run your build or test suite can fail with `command not found` for anything that isn't in the row above — no system `python3`, no compilers or `build-essential`, no Go, Rust, Java, or Ruby, and no `docker`. (`uv` is present, so an agent can fetch a Python toolchain on demand, but nothing is preinstalled for your project.)
+An Instant container is a slim Node image plus the agent CLIs. It does **not** carry your project's toolchain, and it doesn't build your `.devcontainer` to get one. So an agent asked to run your build or test suite can fail with `command not found` for anything that isn't in the row above — no system `python3`, no compilers or `build-essential`, no Go, Rust, Java, or Ruby, and no `docker`. (A Python 3.12 runtime and `uv` are present for SAM's own agent tooling, but Python is not on `PATH` and nothing is preinstalled for your project.)
 
 SAM does not silently fall back to a VM when this happens — the agent just hits the error. Two ways out:
 
@@ -81,28 +86,38 @@ A snapshot captures:
 
 A snapshot deliberately **excludes**:
 
-- **Credential files** — `.ssh`, `.aws`, `.netrc`, `.npmrc`, `.config/gh`, `.claude/.credentials.json`, and `.codex/auth.json` are never uploaded. Snapshots live in object storage, so plaintext secrets must never enter them. Credentials are re-provisioned fresh from the control plane on restore, so nothing is lost by excluding them (`homeExcludePrefixes` in `packages/vm-agent/internal/server/session_snapshot_archive.go`).
+- **Credential files** — `.ssh`, `.aws`, `.netrc`, `.npmrc`, `.config/gh`, `.claude/.credentials.json`, and `.codex/auth.json` are never uploaded. Snapshots live in object storage, so plaintext secrets must never enter them. Credentials are re-provisioned fresh from the control plane on restore, so nothing is lost by excluding them (`homeExcludePrefixes` and `homeExcludeFiles` in `packages/vm-agent/internal/server/session_snapshot_archive.go`).
 - **Re-fetchable caches and tool installs** — `.cache`, `.npm`, `.cargo`, `.rustup`, `.local`, `.docker`, and `node_modules`. Note that `.local` is where `pip install --user`, `pipx`, and many CLI installers put binaries, so **a tool the agent installed mid-session will not survive a wake**. If the agent needs a tool, expect it to reinstall after a restore — or use a VM workspace, where your `.devcontainer` installs it once.
+- **Files git ignores.** Work-in-progress capture is driven by git, so anything in `.gitignore` — a local `.env`, a virtualenv, build output — is not captured. Restoring gives you back tracked and untracked-but-not-ignored files only.
 
-Snapshots are size-bounded. A single very large file or an oversized total is skipped rather than allowed to blow the budget, which is another reason to treat a workspace as ephemeral and push anything you want to keep.
+:::caution
+Three limits are worth planning around, because SAM does not currently surface any of them in the UI:
+
+- **Snapshots expire after 7 days** (`SESSION_SNAPSHOT_TTL_DAYS`). Coming back to a two-week-old sleeping chat gets you the degraded path, not your work.
+- **Size is capped** at 100 MB combined, with any single file over 50 MB skipped (`SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`, `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`). Skipped content is recorded server-side but you are not told about it.
+- **A repository mid-merge is skipped entirely.** If a merge, rebase, cherry-pick, or revert is in progress when the runtime goes away, none of the repository work in progress is captured.
+
+Push anything you care about. A snapshot is a convenience for resuming a conversation, not a backup.
+:::
 
 ## What to do when a session is interrupted
 
-Two statuses appear on Instant sessions, workspaces, and nodes:
+The chat itself is the reliable signal. Find what you're seeing in this table, then read the matching section — the distinction decides whether you should resend your message.
 
-| Status       | Meaning                                                                |
-| ------------ | ---------------------------------------------------------------------- |
-| **Sleeping** | Idle and parked. Send a message to wake it.                            |
-| **Recovery** | SAM is rebuilding the runtime and restoring the snapshot. Wait it out. |
+| You see                                                                               | What happened                            | Do this                                                    |
+| ------------------------------------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------- |
+| A spinner reading **"Waking and restoring Instant session…"** with an elapsed counter | A wake or a recovery is in progress      | Wait                                                       |
+| **"delivery was interrupted … outcome is unknown"**                                   | Your prompt may or may not have executed | [Check, then decide](#your-prompt-may-or-may-not-have-run) |
+| **"could not restore its last safe checkpoint"**                                      | In-container work in progress is gone    | [Re-state the work](#the-checkpoint-could-not-be-restored) |
+| The composer is gone and the session reads **"This session has ended."**              | Terminal — nothing to recover            | [Start a new chat](#the-session-is-permanently-stopped)    |
 
-Beyond that, SAM shows one of four banners. Find yours in this table, then read the matching section — the distinction decides whether you should resend your message.
+Anything else — including a message that delivery "could not be confirmed" — means SAM couldn't classify the failure. Treat it like the interrupted case: check before you resend.
 
-| You see                                                      | What happened                            | Do this                                                    |
-| ------------------------------------------------------------ | ---------------------------------------- | ---------------------------------------------------------- |
-| A spinner reading **"Waking and restoring Instant session"** | Normal wake or recovery is in progress   | Wait                                                       |
-| **"delivery was interrupted … outcome is unknown"**          | Your prompt may or may not have executed | [Check, then decide](#your-prompt-may-or-may-not-have-run) |
-| **"could not restore its last safe checkpoint"**             | In-container work in progress is gone    | [Re-state the work](#the-checkpoint-could-not-be-restored) |
-| **"was stopped and cannot be resumed"**                      | Terminal — nothing to recover            | [Start a new chat](#the-session-is-permanently-stopped)    |
+A workspace or node may also show a **Recovery** badge while SAM rebuilds the runtime. Don't read too much into the badges here: an idle Instant session that has gone to sleep currently shows **Unknown** rather than a "Sleeping" label, and may show **Unhealthy** alongside it. That's cosmetic — sending a message still wakes it.
+
+:::note
+**Recovery** means something different on a VM workspace. There it indicates your `.devcontainer` build failed and SAM fell back to a plain recovery container to keep the chat usable — waiting will not fix it. The chat header labels that case **Recovery container**; open the workspace and check Boot Logs for the build error.
+:::
 
 ### Recovery is in progress
 
@@ -139,7 +154,7 @@ If restore fails repeatedly (`CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`, twice by defa
 
 ### The session is permanently stopped
 
-Terminal. The session was stopped explicitly and there is nothing to recover. The composer disappears and the session shows as ended — deliberately, so you aren't invited to retry against a runtime that can never come back.
+Terminal. The session was stopped explicitly and there is nothing to recover. You get no error banner at all: the composer disappears and the session reads **"This session has ended."** That's deliberate — a retry button against a runtime that can never come back would only invite futile retries.
 
 Start a new chat. [Fork](/docs/guides/chat-features/#conversation-forking) from the stopped one to carry its context across rather than re-explaining from scratch.
 
@@ -161,8 +176,13 @@ Launching an Instant session takes several steps: allocate the runtime, start th
 | Snapshot restore attempts before the session fails | 2           | `CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`       |
 | Start budget (includes repo clone)                 | 2 minutes   | `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` |
 | Repository clone filter                            | `blob:none` | `CF_CONTAINER_CLONE_FILTER`                |
+| Snapshot retention                                 | 7 days      | `SESSION_SNAPSHOT_TTL_DAYS`                |
+| Snapshot size cap (combined)                       | 100 MB      | `SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`      |
+| Largest single file captured                       | 50 MB       | `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`   |
 
 Instant sessions clone with `--filter=blob:none` by default so start time tracks the size of your working tree rather than the size of your repository's entire history. Self-hosters can set `CF_CONTAINER_CLONE_FILTER=off` to force full clones.
+
+Concurrency is also capped per deployment by the container binding's `max_instances` in `apps/api/wrangler.toml` — worth raising before rolling Instant out to a team. In exchange, Instant sessions consume **no cloud VM quota** and need no cloud credential, which is the main reason to adopt them.
 
 See the [Configuration Reference](/docs/reference/configuration/) for the full list.
 
@@ -170,7 +190,7 @@ See the [Configuration Reference](/docs/reference/configuration/) for the full l
 
 Instant sessions require **Cloudflare Containers**, which requires a Workers Paid plan.
 
-The runtime is enabled only when `CF_CONTAINER_ENABLED` is exactly `true` — it is **off when the variable is unset**. The deploy workflow injects `true` for you, so a deployment made through it has Instant sessions on by default; a Worker started some other way (a local `wrangler dev`, a hand-rolled config) does not, and every session falls back to a VM.
+The runtime is enabled only when `CF_CONTAINER_ENABLED` is exactly `true` (or the legacy `SANDBOX_ENABLED`) — it is **off when neither is set**. The deploy workflow injects `true` for you, so a deployment made through it has Instant sessions on by default; a Worker started some other way (a local `wrangler dev`, a hand-rolled config) does not, and every session falls back to a VM.
 
 Set it to `false` in your GitHub Environment before deploying if your account cannot use Containers. With Containers off, every session provisions a cloud VM, so **each user must connect their own cloud provider credential before they can start any work**.
 

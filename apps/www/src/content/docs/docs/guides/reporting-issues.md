@@ -16,7 +16,9 @@ Use this when an agent did something wrong — got stuck, produced bad output, l
 The **Report** action lives in the session header's expanded detail panel, so open that first:
 
 1. In the chat, click the chevron at the right of the session header (**Show session details**).
-2. In the action row that appears — alongside **Files**, **Git**, **Workspace**, and **Timeline** — click **Report** (the flag icon).
+2. In the action row that appears, click **Report** (the flag icon).
+
+On a running session it sits alongside **Files**, **Git**, **Workspace**, and **Timeline**. Those disappear once a session ends, but **Report** does not — so you can still report a session that already failed, which is usually when you want to.
 
 ![The Report an Issue dialog in SAM: a Title field, a Description field, and a checked "Attach technical references to help diagnose this issue" checkbox listing a Chat session, Task, and Node identifier.](/images/docs/report-issue-dialog.png)
 
@@ -44,14 +46,14 @@ Tick it and SAM lists the exact identifiers it would send, so you can see them b
 | **Diagnosis**    | A superadmin deployment diagnosis        | Yes — must be yours          |
 | **Error**        | The crash-screen error text              | No — see below               |
 
-These are **identifiers only** — SAM does not ship your code, your transcript, or your environment. They let a maintainer look up the right records rather than guess from a description.
+Four of these are **identifiers only** — they let a maintainer look up the right records rather than guess from a description. The fifth, **Error**, is different: it carries up to 100 characters of the actual error text your browser produced. SAM does not ship your code, your transcript, or your environment either way.
 
 Leave the box unchecked and only your title and description are submitted. The report still gets filed.
 
 Two things happen server-side regardless of what you tick:
 
-- **Ownership is re-checked.** Session, task, node, and diagnosis references are verified against your access before they're stored, and silently dropped if you don't have it — a stale or copied identifier can't pull someone else's records into your report. The **error** reference is different: it carries the crash text your own browser produced, not a pointer to a stored record, so it is format-checked and stored as-is rather than looked up. The confirmation screen lists what was actually attached, which may be fewer references than the dialog offered.
-- **Your text is scrubbed.** Best-effort redaction strips credential-shaped strings (API keys, tokens, `sk-`/`ghp_`-style prefixes, PEM private key blocks) and email addresses before anything is stored. Treat it as a safety net, not a licence — don't paste secrets into the box.
+- **Ownership is re-checked.** Session, task, node, and diagnosis references are verified against your access before they're stored, and silently dropped if you don't have it — a stale or copied identifier can't pull someone else's records into your report. The **error** reference is not looked up, because it isn't a pointer to a stored record; it's text from your own browser. The confirmation screen lists what was actually attached, which may be fewer references than the dialog offered.
+- **Everything is scrubbed** — your title, your description, and each attached reference. Best-effort redaction strips credential-shaped strings (API keys, tokens, `sk-`/`ghp_`-style prefixes, PEM private key blocks) and email addresses before anything is stored, so a secret that leaked into an error message doesn't ride along. Treat it as a safety net, not a licence — don't paste secrets into the box.
 
 ## After you submit
 
@@ -121,7 +123,7 @@ Grouping is by a redacted content signature, so a recurring error updates its ex
 | `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`              | `3`      | Failed attempts before a group is rejected           |
 | `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH` | `240`    | Max characters stored for a sanitized failure reason |
 
-Triage consumes the same daily token budget as manual diagnosis (`DEBUG_AGENT_DAILY_TOKEN_LIMIT`), so an unusually noisy hour can exhaust the budget that superadmins would otherwise spend on hands-on diagnosis. Raise the limit or lower `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT` if that becomes a problem.
+Automated triage and superadmin-initiated diagnosis have **separate** daily token budgets. They read the same `DEBUG_AGENT_DAILY_TOKEN_LIMIT` value but count against independent per-feature counters, so a noisy hour of triage can never eat the allowance a superadmin wants for hands-on diagnosis. Budget accordingly: with triage enabled, worst-case daily spend on diagnosis is **twice** `DEBUG_AGENT_DAILY_TOKEN_LIMIT`. To cap triage specifically, lower `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT` or `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`.
 
 ## For superadmins: diagnosing errors with an agent
 
@@ -142,17 +144,17 @@ When a diagnosis is worth keeping, **Save as draft Idea** files it into a projec
 
 ### Diagnosis limits
 
-| Variable                          | Default               | Description                                     |
-| --------------------------------- | --------------------- | ----------------------------------------------- |
-| `DEBUG_AGENT_MODEL`               | `@cf/zai-org/glm-5.2` | Workers AI model used for diagnosis             |
-| `DEBUG_AGENT_MAX_TURNS`           | `6`                   | Max model/tool turns per diagnosis              |
-| `DEBUG_AGENT_RUN_TOKEN_LIMIT`     | `24000`               | Combined token ceiling per diagnosis            |
-| `DEBUG_AGENT_MODEL_OUTPUT_TOKENS` | `4096`                | Max output tokens per model turn                |
-| `DEBUG_AGENT_DAILY_TOKEN_LIMIT`   | `120000`              | Deployment-wide daily budget (shared w/ triage) |
-| `DEBUG_AGENT_TOOL_RESULT_LIMIT`   | `50`                  | Max rows returned by a diagnosis tool           |
-| `DEBUG_AGENT_TOOL_RESULT_BYTES`   | `32768`               | Max serialized bytes per model-visible result   |
-| `DEBUG_AGENT_MAX_WINDOW_HOURS`    | `24`                  | Max selectable diagnosis window                 |
-| `DEBUG_AGENT_TIMEOUT_MS`          | `120000`              | Timeout per diagnosis model request             |
+| Variable                          | Default               | Description                                                                                      |
+| --------------------------------- | --------------------- | ------------------------------------------------------------------------------------------------ |
+| `DEBUG_AGENT_MODEL`               | `@cf/zai-org/glm-5.2` | Workers AI model used for diagnosis                                                              |
+| `DEBUG_AGENT_MAX_TURNS`           | `6`                   | Max model/tool turns per diagnosis                                                               |
+| `DEBUG_AGENT_RUN_TOKEN_LIMIT`     | `24000`               | Combined token ceiling per diagnosis                                                             |
+| `DEBUG_AGENT_MODEL_OUTPUT_TOKENS` | `4096`                | Max output tokens per model turn                                                                 |
+| `DEBUG_AGENT_DAILY_TOKEN_LIMIT`   | `120000`              | Daily budget, counted **per feature** — manual diagnosis and automated triage each get this much |
+| `DEBUG_AGENT_TOOL_RESULT_LIMIT`   | `50`                  | Max rows returned by a diagnosis tool                                                            |
+| `DEBUG_AGENT_TOOL_RESULT_BYTES`   | `32768`               | Max serialized bytes per model-visible result                                                    |
+| `DEBUG_AGENT_MAX_WINDOW_HOURS`    | `24`                  | Max selectable diagnosis window                                                                  |
+| `DEBUG_AGENT_TIMEOUT_MS`          | `120000`              | Timeout per diagnosis model request                                                              |
 
 Exhausting the daily budget returns `429 DEBUG_BUDGET_EXHAUSTED` until the next day.
 

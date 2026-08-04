@@ -27,7 +27,7 @@ A workspace runs in one of two places:
 | **Instant** | A container on Cloudflare's network | Starts in seconds, no cloud account needed — but no devcontainer and no Docker |
 | **VM**      | A cloud VM on your provider account | Your full environment, at the cost of a minute or two of provisioning          |
 
-SAM picks for you: **connect a cloud provider credential and new work runs on your VMs; connect nothing and it runs Instant.** An [agent profile](#agent-profiles) can pin a runtime explicitly if you want to override that.
+When you **start a chat**, SAM picks for you: **connect a cloud provider credential and new chats run on your VMs; connect nothing and they run Instant.** An [agent profile](#agent-profiles) can pin a runtime explicitly. Submitted tasks always use a VM.
 
 Instant sessions sleep when idle and are restored from a snapshot when they wake or when their container is reclaimed. See [Instant Sessions](/docs/guides/instant-sessions/).
 

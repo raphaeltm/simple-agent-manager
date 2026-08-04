@@ -10,7 +10,8 @@
     "build:docs-mermaid": "pnpm exec esbuild src/scripts/docs-mermaid.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=public/scripts/docs-mermaid.js",
     "build:tracker": "npx tsx scripts/build-tracker.ts",
     "build": "pnpm build:assets && astro build",
-    "preview": "astro preview"
+    "preview": "astro preview",
+    "check:links": "python3 scripts/check-doc-links.py"
   },
   "dependencies": {
     "@astrojs/sitemap": "3.7.3",

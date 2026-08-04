@@ -198,4 +198,6 @@ Running agents have access to project-aware MCP tools:
 
 `get_task_details` keeps `outputSummary` and `completionEvidence` as the canonical persisted completion fields. When a task has a linked chat session, it can also include a bounded `recentAssistantMessages` array with up to five recent assistant messages, each capped to 2,000 characters, so orchestrators can recover useful final output when the persisted summary is sparse. If session diagnostics are unavailable, task details still return and `recentAssistantMessages` is empty.
 
-These tools are available on **both** runtimes. Codex sessions running on [Instant](/docs/guides/instant-sessions/) previously started without SAM's MCP configuration and silently had no tools; they now receive it on every runtime. If a Codex session cannot be given a valid MCP token it fails to start with an explicit error rather than launching a tool-less agent — so an agent that reports "I don't have that tool" is a real problem worth [reporting](/docs/guides/reporting-issues/), not expected behavior on Instant.
+Claude Code and Codex get these tools on both the VM and [Instant](/docs/guides/instant-sessions/) runtimes. If a Codex session is handed an MCP server without a usable token, it fails to start with an explicit error rather than launching a tool-less agent.
+
+An agent that reports it has no SAM tools is worth [reporting](/docs/guides/reporting-issues/) — it is not expected behavior on either runtime.
