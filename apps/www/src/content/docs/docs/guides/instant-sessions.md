@@ -14,29 +14,30 @@ This page covers the **Instant** runtime: when SAM chooses it, what it can and c
 
 For the VM path, see [Creating Workspaces](/docs/guides/creating-workspaces/).
 
-## When SAM uses an Instant session
+## Am I on an Instant session?
 
-**Starting a chat** is the path where SAM chooses for you. It decides in this order (`decideWorkspaceRuntime()` in `apps/api/src/services/workspace-runtime.ts`):
-
-1. **Containers not enabled for the deployment** (`CF_CONTAINER_ENABLED` is anything other than `true`) → always a VM.
-2. **The agent profile sets a runtime explicitly** → that runtime wins.
-3. **You have your own cloud provider credential**, or one attached to the project → a VM, because you brought compute.
-4. **Otherwise** → Instant.
-
-The practical rule of thumb, for chats:
+Almost certainly yes, if you **started a chat** and have **not connected your own cloud provider credential**. That's the whole rule:
 
 > **Connect a cloud provider and your chats run on your VMs. Connect nothing and they run Instant.**
 
-So connecting your first Hetzner or Scaleway credential silently changes where new chats run. If you want Instant sessions even after connecting a cloud account, set the runtime explicitly on an [agent profile](/docs/guides/agents/#agent-profiles) and pick that profile.
+Two things surprise people here:
 
-Only a credential **you** own or one attached to the project switches you to VMs. A deployment-level _platform_ credential — what the hosted platform uses to provide compute — does **not**, so on the hosted platform you get Instant sessions by default even though VMs are available to you.
+- **Connecting your first Hetzner or Scaleway credential silently moves new chats to VMs.** Nothing announces it. To keep using Instant afterwards, pin the runtime on an [agent profile](/docs/guides/agents/#agent-profiles) and pick that profile.
+- **The hosted platform's own credential doesn't count.** Only a credential _you_ own, or one attached to the project, switches you to VMs — so on the hosted platform you get Instant by default even though VMs are available to you.
 
-### Everything else is VM-first
+Everything else in SAM is VM-first. **Submitted tasks always use a VM**, and `dispatch_task` uses Instant only when an agent explicitly asks for it — via the call's `runtime` argument or the profile it dispatches with. Submitting a task with no cloud credential anywhere (yours, the project's, or the platform's) fails with `Cloud provider credentials required` rather than falling back to Instant.
 
-The rule above governs chat start. Two other paths behave differently:
+<details>
+<summary>The exact decision order, for chat start</summary>
 
-- **Submitted tasks always use a VM.** Task submission does not consult the runtime decision at all, so it needs cloud compute — your credential, the project's, or the platform's. On a self-hosted deployment with no platform credential, submitting a task without a cloud credential fails with `Cloud provider credentials required` rather than falling back to Instant.
-- **`dispatch_task` uses Instant only when asked.** An agent dispatching follow-up work gets a VM unless the runtime is pinned to `cf-container` — explicitly on the call, or on the profile it dispatches with. Zero-config dispatch does **not** route to Instant. See the `runtime` argument in [Idea Execution](/docs/guides/idea-execution/#agent-to-agent-dispatch).
+From `decideWorkspaceRuntime()` in `apps/api/src/services/workspace-runtime.ts`:
+
+1. **Containers not enabled for the deployment** (`CF_CONTAINER_ENABLED` is anything other than `true`) → always a VM.
+2. **The agent profile sets a runtime explicitly** → that runtime wins.
+3. **You have your own cloud provider credential**, or one attached to the project → a VM.
+4. **Otherwise** → Instant.
+
+</details>
 
 ## What you give up, and what you gain
 
