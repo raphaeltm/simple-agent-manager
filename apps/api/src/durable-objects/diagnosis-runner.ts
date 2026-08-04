@@ -14,6 +14,11 @@ import {
   SYSTEM_PROMPT,
   type ToolCall,
 } from '../services/debug-agent';
+import {
+  classifyDiagnosisFailure,
+  diagnosisRetryDelay,
+  safeDiagnosisMessage,
+} from '../services/diagnosis-runner-policy';
 import { redactSensitiveData } from '../services/observability';
 
 const EXECUTOR_VERSION = 'diagnosis-runner-v1';
@@ -36,16 +41,7 @@ interface RunnerState {
 }
 
 function safeMessage(error: unknown): string {
-  const raw = error instanceof Error ? error.message : String(error);
-  return String(redactSensitiveData(raw)).slice(0, 500);
-}
-
-function classification(error: unknown): { transient: boolean; code: string } {
-  const message = safeMessage(error).toLowerCase();
-  if (/429|5\d\d|timeout|timed out|abort|temporar|unavailable|network/.test(message)) {
-    return { transient: true, code: 'TRANSIENT_UPSTREAM' };
-  }
-  return { transient: false, code: 'PERMANENT_EXECUTION' };
+  return safeDiagnosisMessage(error);
 }
 
 function resultCount(result: string): number | null {
@@ -237,12 +233,12 @@ export class DiagnosisRunner extends DurableObject<Env> {
 
   private async handleFailure(state: RunnerState, stepKey: string, started: number, error: unknown): Promise<void> {
     const config = resolveDebugAgentConfig(this.env);
-    const kind = classification(error);
+    const kind = classifyDiagnosisFailure(error);
     const message = safeMessage(error);
     if (kind.transient && state.attempt < config.stepMaxRetries) {
       state.inFlightStepKey = null;
       state.attempt++;
-      const delay = Math.min(config.retryMaxDelayMs, config.retryBaseDelayMs * 2 ** (state.attempt - 1));
+      const delay = diagnosisRetryDelay(state.attempt, config.retryBaseDelayMs, config.retryMaxDelayMs);
       await this.event(state, `${stepKey}:retry:${state.attempt}`, 'retry', 'retrying', null, null, null, Date.now() - started, kind.code, message);
       await this.checkpointAndSchedule(state, delay);
       return;
