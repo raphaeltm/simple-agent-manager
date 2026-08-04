@@ -57,16 +57,16 @@ Note that the **Full** workspace profile does not override this: workspace profi
 
 ## What happens to your work
 
-A chat you start from the composer is **conversation-mode** work: SAM does not create a branch for it, does not auto-commit when the agent finishes, and does not open a pull request. The workspace sits on your project's default branch, and anything the agent changes stays in that container until you or the agent pushes it.
+**SAM does not commit or push an Instant chat's work for you.** No branch is created, nothing is auto-committed when the agent finishes, and no pull request is opened. The workspace sits on your project's default branch and anything the agent changed stays in that container.
 
-That's a deliberate split, not an Instant limitation:
+What decides this is **task mode**, not the runtime — and selecting the Instant runtime on a profile sets its task mode to `conversation`, which is the mode with no git lifecycle:
 
-| How you started it                   | Branch                        | Auto-commit and push on completion |
-| ------------------------------------ | ----------------------------- | ---------------------------------- |
-| A chat in the composer (Instant)     | Your default branch           | No                                 |
-| A submitted task, or `dispatch_task` | Its own `sam/…` output branch | Yes, then a pull request           |
+| Task mode          | Typical source                                | Branch                        | Auto-commit and push |
+| ------------------ | --------------------------------------------- | ----------------------------- | -------------------- |
+| **`conversation`** | An Instant profile — chats you start yourself | Your default branch           | No                   |
+| **`task`**         | A submitted task, or `dispatch_task`          | Its own `sam/…` output branch | Yes, then a PR       |
 
-So if you want an Instant chat's work to survive, **ask the agent to commit and push it to a branch**, or hand the work to a task instead. Don't assume a PR is coming. See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands) for the task-mode behavior.
+So if you want an Instant chat's work to survive, **ask the agent to commit and push it to a branch**, or hand the work to a task instead. Don't assume a PR is coming. See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands) for task-mode behavior.
 
 ## Sleep and wake
 
