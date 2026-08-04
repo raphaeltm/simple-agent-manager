@@ -477,14 +477,16 @@ adminRoutes.post('/observability/diagnoses', jsonValidator(RunDebugDiagnosisSche
 adminRoutes.get('/observability/diagnosis-runs/:runId', async (c) => {
   const run = await getDebugDiagnosisRun(c.env, c.req.param('runId'));
   if (!run) throw errors.notFound('Diagnosis run not found');
-  const eventResult = await listDiagnosisEvents(c.env, run.id, Number(c.req.query('cursor') ?? 0));
+  const cursor = Number(c.req.query('cursor') ?? 0);
+  const eventResult = await listDiagnosisEvents(c.env, run.id, Number.isFinite(cursor) && cursor >= 0 ? cursor : 0);
   return c.json({ run, ...eventResult });
 });
 
 adminRoutes.get('/observability/diagnosis-runs/:runId/events', async (c) => {
   const run = await getDebugDiagnosisRun(c.env, c.req.param('runId'));
   if (!run) throw errors.notFound('Diagnosis run not found');
-  return c.json(await listDiagnosisEvents(c.env, run.id, Number(c.req.query('cursor') ?? 0)));
+  const cursor = Number(c.req.query('cursor') ?? 0);
+  return c.json(await listDiagnosisEvents(c.env, run.id, Number.isFinite(cursor) && cursor >= 0 ? cursor : 0));
 });
 
 adminRoutes.post('/observability/diagnosis-runs/:runId/cancel', async (c) => {

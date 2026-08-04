@@ -17,7 +17,7 @@ export async function startDiagnosisRunner(env: Env, runId: string): Promise<voi
 }
 
 export async function cancelDiagnosisRunner(env: Env, runId: string): Promise<void> {
-  await stub(env, runId).cancel();
+  await stub(env, runId).cancel(runId);
 }
 
 export async function listDiagnosisEvents(env: Env, runId: string, cursor = 0, limit = 100) {

@@ -340,10 +340,12 @@ export async function executeTool(
     } else {
       result = { error: 'Unknown read-only debugging tool' };
     }
-  } catch {
+  } catch (cause) {
+    const sanitizedCause = redactSensitiveData(cause instanceof Error ? cause.message : String(cause));
     result = {
       error: 'Read-only evidence source unavailable',
       tool: call.function.name,
+      cause: String(sanitizedCause).slice(0, 300),
     };
   }
   return boundedResult(result, config.toolResultBytes);
@@ -505,6 +507,14 @@ export async function retryDebugDiagnosisRun(env: Env, runId: string, createdBy:
   const db = drizzle(env.DATABASE, { schema });
   const row = await db.select().from(schema.debugDiagnosisRuns).where(eq(schema.debugDiagnosisRuns.id, runId)).get();
   if (!row) throw new Error('Diagnosis run not found');
+  if (!['failed', 'cancelled'].includes(row.status)) throw new Error('Only failed or cancelled diagnosis runs can be retried');
+  const existing = await env.DATABASE.prepare(
+    "SELECT id FROM debug_diagnosis_runs WHERE retry_of_run_id=? AND created_by=? AND status IN ('queued','running','succeeded') ORDER BY created_at DESC LIMIT 1"
+  ).bind(runId, createdBy).first<{ id: string }>();
+  if (existing) {
+    const existingRow = await db.select().from(schema.debugDiagnosisRuns).where(eq(schema.debugDiagnosisRuns.id, existing.id)).get();
+    if (existingRow) return toDiagnosisRun(existingRow, null);
+  }
   return createDebugDiagnosisRun(
     env,
     createdBy,

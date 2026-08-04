@@ -2,6 +2,7 @@ import { DurableObject } from 'cloudflare:workers';
 
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
+import { consumeFeatureTokenBudget, releaseFeatureTokenBudget } from '../services/ai-token-budget';
 import {
   type ChatMessage,
   complete,
@@ -31,6 +32,7 @@ interface RunnerState {
   sequence: number;
   attempt: number;
   completedStepKeys: string[];
+  inFlightStepKey: string | null;
 }
 
 function safeMessage(error: unknown): string {
@@ -75,6 +77,7 @@ export class DiagnosisRunner extends DurableObject<Env> {
       sequence: 0,
       attempt: 0,
       completedStepKeys: [],
+      inFlightStepKey: null,
     };
     await this.ctx.storage.transaction(async tx => {
       await tx.put('state', state);
@@ -89,11 +92,11 @@ export class DiagnosisRunner extends DurableObject<Env> {
     return true;
   }
 
-  async cancel(): Promise<void> {
+  async cancel(runId: string): Promise<void> {
     const now = new Date().toISOString();
     await this.env.DATABASE.prepare(
       "UPDATE debug_diagnosis_runs SET cancel_requested_at = COALESCE(cancel_requested_at, ?), updated_at = ? WHERE id = ? AND status IN ('queued','running')"
-    ).bind(now, now, (await this.ctx.storage.get<RunnerState>('state'))?.runId ?? '').run();
+    ).bind(now, now, runId).run();
     await this.ctx.storage.setAlarm(Date.now());
   }
 
@@ -114,8 +117,15 @@ export class DiagnosisRunner extends DurableObject<Env> {
       await this.ctx.storage.setAlarm(Date.now());
       return;
     }
+    if (state.inFlightStepKey === stepKey) {
+      await this.finish(state, 'failed', 'Executor restarted while an external step outcome was ambiguous; retry this run safely', 'AMBIGUOUS_STEP_OUTCOME');
+      return;
+    }
     const started = Date.now();
     await this.heartbeat(state, stepKey);
+    state.inFlightStepKey = stepKey;
+    await this.ctx.storage.put('state', state);
+    await this.event(state, `${stepKey}:started`, state.currentStep === 'model' ? 'model_turn' : 'evidence', 'running', state.currentStep === 'tool' ? state.pendingTools[0]?.function.name ?? null : null, null, null, 0);
     try {
       if (state.currentStep === 'model') await this.runModelStep(state, stepKey, started);
       else await this.runToolStep(state, stepKey, started);
@@ -130,19 +140,32 @@ export class DiagnosisRunner extends DurableObject<Env> {
     const estimate = estimatedTokens(state.messages);
     const remaining = config.runTokenLimit - state.inputTokens - state.outputTokens;
     if (remaining <= estimate) throw new Error('Per-run debugging token ceiling reached');
-    const completion = await complete(this.env, config, INTERACTIVE_DEBUG_FEATURE_KEY, state.messages, Math.min(config.modelOutputTokens, remaining - estimate));
+    const reservation = await consumeFeatureTokenBudget(this.env.KV, INTERACTIVE_DEBUG_FEATURE_KEY, remaining, config.dailyTokenLimit, this.env);
+    if (!reservation.allowed) throw new Error('Daily deployment debugging budget exhausted');
+    let completion;
+    try {
+      completion = await complete(this.env, config, INTERACTIVE_DEBUG_FEATURE_KEY, state.messages, Math.min(config.modelOutputTokens, remaining - estimate));
+    } catch (error) {
+      await releaseFeatureTokenBudget(this.env.KV, INTERACTIVE_DEBUG_FEATURE_KEY, remaining, config.dailyTokenLimit, this.env);
+      throw error;
+    }
     const message = completion.choices?.[0]?.message;
     if (!message) throw new Error('Debugging model returned no message');
     state.turns++;
-    state.inputTokens += completion.usage?.prompt_tokens ?? estimate;
-    state.outputTokens += completion.usage?.completion_tokens ?? 0;
+    const usedOutput = completion.usage?.completion_tokens ?? 0;
+    const usedInput = completion.usage?.prompt_tokens ?? estimate;
+    state.inputTokens += usedInput;
+    state.outputTokens += usedOutput;
+    const released = await releaseFeatureTokenBudget(this.env.KV, INTERACTIVE_DEBUG_FEATURE_KEY, Math.max(0, remaining - usedInput - usedOutput), config.dailyTokenLimit, this.env);
+    state.dailyTokensUsed = released.usedTokens;
     const tools = message.tool_calls ?? [];
     state.messages.push({ role: 'assistant', content: message.content ?? null, tool_calls: tools });
     state.pendingTools = tools;
     state.currentStep = tools.length ? 'tool' : 'model';
     state.attempt = 0;
     state.completedStepKeys.push(stepKey);
-    await this.event(state, stepKey, 'model_turn', 'succeeded', null, null, message.content?.slice(0, 500) ?? null, Date.now() - started);
+    state.inFlightStepKey = null;
+    await this.event(state, stepKey, 'model_turn', 'succeeded', null, null, null, Date.now() - started);
     if (!tools.length) {
       const diagnosis = String(redactSensitiveData(message.content?.trim() ?? ''));
       if (!diagnosis) throw new Error('Debugging model returned an empty diagnosis');
@@ -162,7 +185,9 @@ export class DiagnosisRunner extends DurableObject<Env> {
     state.currentStep = state.pendingTools.length ? 'tool' : 'model';
     state.attempt = 0;
     state.completedStepKeys.push(stepKey);
-    await this.event(state, stepKey, 'evidence', 'succeeded', call.function.name, String(redactSensitiveData(call.function.arguments)).slice(0, 300), result.slice(0, 1000), Date.now() - started);
+    state.inFlightStepKey = null;
+    const parsed = (() => { try { return JSON.parse(result) as { error?: string; cause?: string }; } catch { return {}; } })();
+    await this.event(state, stepKey, 'evidence', parsed.error ? 'failed' : 'succeeded', call.function.name, String(redactSensitiveData(call.function.arguments)).slice(0, 300), String(redactSensitiveData(result)).slice(0, 1000), Date.now() - started, parsed.error ? 'EVIDENCE_SOURCE_UNAVAILABLE' : null, parsed.error ? safeMessage(parsed.cause ?? parsed.error) : null);
     await this.checkpointAndSchedule(state);
   }
 
@@ -174,8 +199,8 @@ export class DiagnosisRunner extends DurableObject<Env> {
   private async heartbeat(state: RunnerState, step: string): Promise<void> {
     const now = new Date().toISOString();
     await this.env.DATABASE.prepare(
-      "UPDATE debug_diagnosis_runs SET status='running', started_at=COALESCE(started_at, ?), current_step=?, heartbeat_at=?, updated_at=?, executor_version=? WHERE id=? AND status IN ('queued','running')"
-    ).bind(now, step, now, now, EXECUTOR_VERSION, state.runId).run();
+      "UPDATE debug_diagnosis_runs SET status='running', started_at=COALESCE(started_at, ?), current_step=?, heartbeat_at=?, updated_at=?, executor_version=?, attempt=? WHERE id=? AND status IN ('queued','running')"
+    ).bind(now, step, now, now, EXECUTOR_VERSION, state.attempt, state.runId).run();
   }
 
   private async event(state: RunnerState, stepKey: string, type: string, status: string, source: string | null, args: string | null, evidence: string | null, duration: number, code: string | null = null, message: string | null = null): Promise<void> {
@@ -190,6 +215,7 @@ export class DiagnosisRunner extends DurableObject<Env> {
     const kind = classification(error);
     const message = safeMessage(error);
     if (kind.transient && state.attempt < config.stepMaxRetries) {
+      state.inFlightStepKey = null;
       state.attempt++;
       const delay = Math.min(config.retryMaxDelayMs, config.retryBaseDelayMs * 2 ** (state.attempt - 1));
       await this.event(state, `${stepKey}:retry:${state.attempt}`, 'retry', 'retrying', null, null, null, Date.now() - started, kind.code, message);

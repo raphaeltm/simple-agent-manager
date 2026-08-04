@@ -32,7 +32,7 @@ describe('DiagnosisRunner durable execution contract', () => {
   it('checkpoints idempotency, heartbeat, events, cancellation, deadlines, and classified retry before rescheduling', () => {
     expect(runner).toContain('completedStepKeys.includes(stepKey)');
     expect(runner).toContain('cancel_requested_at');
-    expect(runner).toContain('Date.now() >= Date.parse(run.deadline_at)');
+    expect(runner).toContain('run.deadline_at ? Date.parse(run.deadline_at)');
     expect(runner).toContain('classification(error)');
     expect(runner).toContain('await this.ctx.storage.put');
     expect(runner).toContain('await this.ctx.storage.setAlarm');
