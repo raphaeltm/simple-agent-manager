@@ -19,16 +19,16 @@ Admin diagnostics need a durable execution owner, inspectable safe events, recov
 
 ## Implementation Checklist
 
-- [ ] Add D1 run/event fields, indexes, migration, shared safe event/detail/cursor contracts, configurable runner limits, and the `DIAGNOSIS_RUNNER` binding/migration/export.
-- [ ] Implement one `DiagnosisRunner` DO per run with transactional initial alarm, one model turn or tool call per alarm, idempotent step keys, D1 checkpoints/events before the next alarm, token accounting, classified bounded retry/backoff, hard deadline, cancellation, and sanitized failures.
-- [ ] Replace route `waitUntil` ownership with an idempotent DO start/ensure-started handshake and preserve retry lineage with new run IDs.
-- [ ] Add a scheduled reconciler that re-kicks queued/stale-running runs and terminalizes anything past its deadline.
-- [ ] Add strictly superadmin-authorized detail, event cursor, retry, and cancel APIs.
-- [ ] Add `/admin/diagnoses/:runId`, recoverable polling, current step/timeline/systems/result/failure/actions, launch/retry navigation, and linked recent runs on `/admin/errors`.
-- [ ] Add deterministic fake model/tool and fault-injection tests for browser closure, restarts, duplicate start/alarm, retry classes, deadline reconciliation, cancellation, redaction/XSS, authorization, and cursor behavior.
-- [ ] Add mobile/desktop Playwright behavior and visual audits with normal, long, empty, many-event, active, completed, and failure states.
-- [ ] Add operational metrics/logging and document the durable runner/event integration point where appropriate.
-- [ ] Complete quality suite, mandatory task-completion validation, and all requested specialist reviews; reconcile every critical/high finding.
+- [x] Add D1 run/event fields, indexes, migration, shared safe event/detail/cursor contracts, configurable runner limits, and the `DIAGNOSIS_RUNNER` binding/migration/export.
+- [x] Implement one `DiagnosisRunner` DO per run with transactional initial alarm, one model turn or tool call per alarm, idempotent step keys, D1 checkpoints/events before the next alarm, token accounting, classified bounded retry/backoff, hard deadline, cancellation, and sanitized failures.
+- [x] Replace route `waitUntil` ownership with an idempotent DO start/ensure-started handshake and preserve retry lineage with new run IDs.
+- [x] Add a scheduled reconciler that re-kicks queued/stale-running runs and terminalizes anything past its deadline.
+- [x] Add strictly superadmin-authorized detail, event cursor, retry, and cancel APIs.
+- [x] Add `/admin/diagnoses/:runId`, recoverable polling, current step/timeline/systems/result/failure/actions, launch/retry navigation, and linked recent runs on `/admin/errors`.
+- [x] Add deterministic fake model/tool and fault-injection tests for browser closure, restarts, duplicate start/alarm, retry classes, deadline reconciliation, cancellation, redaction/XSS, authorization, and cursor behavior.
+- [x] Add mobile/desktop Playwright behavior and visual audits with normal, long, empty, many-event, active, completed, and failure states.
+- [x] Add operational metrics/logging and document the durable runner/event integration point where appropriate.
+- [x] Complete quality suite, mandatory task-completion validation, and all requested specialist reviews; reconcile every critical/high finding.
 - [ ] Deploy and verify on staging, create PR, achieve green CI, merge, monitor production deployment, and run a bounded production smoke proving a completed diagnosis with populated events.
 
 ## Acceptance Criteria
