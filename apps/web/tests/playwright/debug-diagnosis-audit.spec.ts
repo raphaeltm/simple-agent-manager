@@ -33,8 +33,8 @@ const RUNNING_RUN = {
   id: 'run-running-1',
   status: 'running',
   errorId: ERROR.id,
-  startTime: null,
-  endTime: null,
+  startTime: '2026-07-29T09:45:00.000Z',
+  endTime: '2026-07-29T10:15:00.000Z',
   createdBy: 'debug-admin',
   createdAt: '2026-07-29T10:20:00.000Z',
   updatedAt: '2026-07-29T10:20:10.000Z',
@@ -42,8 +42,14 @@ const RUNNING_RUN = {
   completedAt: null,
   diagnosisId: null,
   errorMessage: null,
-  usage: null,
+  usage: { turns: 1, inputTokens: 500, outputTokens: 100, totalTokens: 600, dailyTokensUsed: 600, dailyTokenLimit: 120000 },
   retryOfRunId: null,
+  currentStep: 'model:2',
+  heartbeatAt: '2026-07-29T10:20:10.000Z',
+  attempt: 0,
+  executorVersion: 'diagnosis-runner-v1',
+  cancelRequestedAt: null,
+  deadlineAt: '2026-07-29T10:35:00.000Z',
 };
 
 const FAILED_RUN = {
@@ -80,6 +86,10 @@ async function setup(page: Page, diagnosisStatus = 200) {
     if (path === '/api/admin/observability/diagnoses' && request.method() === 'POST') {
       return diagnosisStatus === 200 ? respond(202, { run: RUNNING_RUN }) : respond(diagnosisStatus, { error: 'BUDGET_EXHAUSTED', message: 'Daily deployment debugging budget exhausted' });
     }
+    if (path === '/api/admin/observability/diagnosis-runs/run-succeeded-1') return respond(200, { run: SUCCEEDED_RUN, events: [{ id: 'event-1', runId: 'run-succeeded-1', sequence: 1, stepKey: 'tool:1:errors', eventType: 'evidence', status: 'succeeded', sourceName: 'get_recent_errors', argumentsPreview: 'bounded window', evidencePreview: '<script>alert(1)</script> is inert redacted evidence', resultCount: 3, durationMs: 42, retryAttempt: 0, errorCode: null, errorMessage: null, createdAt: '2026-07-29T10:16:10.000Z' }], nextCursor: 1 });
+    if (path === '/api/admin/observability/diagnosis-runs/run-running-1') return respond(200, { run: RUNNING_RUN, events: [], nextCursor: null });
+    if (path === '/api/admin/observability/diagnosis-runs/run-running-1/cancel') return respond(202, { accepted: true });
+    if (path === '/api/admin/observability/diagnosis-runs/run-failed-1') return respond(200, { run: FAILED_RUN, events: [{ id: 'event-failed', runId: 'run-failed-1', sequence: 1, stepKey: 'terminal:failed', eventType: 'failed', status: 'failed', sourceName: 'query_cloudflare_logs', argumentsPreview: null, evidencePreview: null, resultCount: null, durationMs: 1200, retryAttempt: 3, errorCode: 'TRANSIENT_UPSTREAM', errorMessage: 'model timeout after durable acceptance', createdAt: '2026-07-29T10:18:30.000Z' }], nextCursor: 1 });
     if (path === '/api/admin/observability/diagnosis-runs/run-failed-1/retry') return respond(202, { run: RUNNING_RUN });
     if (path === '/api/admin/observability/debug/projects') return respond(200, { projects: [
       { id: 'project-1', name: 'A project with a deliberately long deployment name' },
@@ -91,21 +101,20 @@ async function setup(page: Page, diagnosisStatus = 200) {
 }
 
 test.describe('Deployment diagnosis visual audit', () => {
-  test('renders long and special-character evidence, then saves a draft Idea', async ({ page }) => {
+  test('renders durable detail with inert evidence HTML', async ({ page }) => {
     const name = page.viewportSize()?.width === 375 ? 'mobile' : 'desktop';
     await setup(page);
-    await page.goto('/admin/errors');
-    await expect(page.getByText('Recent diagnosis runs')).toBeVisible();
-    await expect(page.getByText('Recoverable after refresh')).toBeVisible();
-    await page.getByRole('button', { name: 'Open', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Deployment diagnosis' })).toBeVisible();
-    await expect(page.getByText('The workspace transition failed after a node heartbeat gap.')).toBeVisible();
-    await expect(page.getByText('Daily: 12,345 / 120,000')).toBeVisible();
+    let dialogOpened = false;
+    page.on('dialog', () => { dialogOpened = true; });
+    await page.goto('/admin/diagnoses/run-succeeded-1');
+    await expect(page.getByRole('heading', { name: 'Diagnostic run' })).toBeVisible();
+    await expect(page.getByText('get recent errors')).toBeVisible();
+    await expect(page.getByText('Completed diagnosis')).toBeVisible();
+    await page.getByText('Redacted evidence preview').click();
+    await expect(page.getByText('<script>alert(1)</script> is inert redacted evidence')).toBeVisible();
+    expect(dialogOpened).toBe(false);
     await assertNoOverflow(page);
-    await screenshot(page, `debug-diagnosis-long-${name}`);
-    await page.getByRole('button', { name: 'Save as draft Idea' }).click();
-    await expect(page.getByText('Saved as draft Idea idea-draft-1.')).toBeVisible();
-    await assertNoOverflow(page);
+    await screenshot(page, 'debug-diagnosis-detail-' + name);
   });
 
   test('renders the bounded-budget error state', async ({ page }) => {
@@ -115,6 +124,25 @@ test.describe('Deployment diagnosis visual audit', () => {
     await page.getByRole('button', { name: 'Diagnose', exact: true }).click();
     await expect(page.getByText('Daily deployment debugging budget exhausted')).toBeVisible();
     await screenshot(page, `debug-diagnosis-budget-error-${name}`);
+    await assertNoOverflow(page);
+  });
+
+  test('shows recoverable active and cancellation states without overflow', async ({ page }) => {
+    await setup(page);
+    await page.goto('/admin/diagnoses/run-running-1');
+    await expect(page.getByText('model:2')).toBeVisible();
+    await expect(page.getByText('Accepted. Waiting for the durable executor’s first checkpoint.')).toBeVisible();
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await assertNoOverflow(page);
+  });
+
+  test('shows sanitized terminal failure and retry navigation', async ({ page }) => {
+    await setup(page);
+    await page.goto('/admin/diagnoses/run-failed-1');
+    await expect(page.getByText('Run failed safely')).toBeVisible();
+    await expect(page.getByText('model timeout after durable acceptance').first()).toBeVisible();
+    await page.getByRole('button', { name: 'Retry' }).click();
+    await expect(page).toHaveURL(/\/admin\/diagnoses\/run-running-1$/);
     await assertNoOverflow(page);
   });
 });

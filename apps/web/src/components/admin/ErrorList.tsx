@@ -1,6 +1,7 @@
 import type { DebugDiagnosis, DebugDiagnosisRun, PlatformError } from '@simple-agent-manager/shared';
 import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
 import { type FC, useEffect, useState } from 'react';
+import { useNavigate } from 'react-router';
 
 import { useAdminErrors } from '../../hooks/useAdminErrors';
 import { fetchAdminDebugDiagnoses, retryAdminDebugDiagnosisRun, runAdminDebugDiagnosis } from '../../lib/api';
@@ -9,6 +10,7 @@ import { ObservabilityFilters } from './ObservabilityFilters';
 import { ObservabilityLogEntry } from './ObservabilityLogEntry';
 
 export const ErrorList: FC = () => {
+  const navigate = useNavigate();
   const [diagnosis, setDiagnosis] = useState<DebugDiagnosis | null>(null);
   const [diagnosing, setDiagnosing] = useState(false);
   const [diagnosisError, setDiagnosisError] = useState<string | null>(null);
@@ -38,7 +40,7 @@ export const ErrorList: FC = () => {
       const completedDiagnosis = response.diagnosis;
       if (run) {
         setDiagnosisRuns((current) => [run, ...current.filter((item) => item.id !== run.id)]);
-        if (run.diagnosis) setDiagnosis(run.diagnosis);
+        navigate('/admin/diagnoses/' + run.id);
       } else if (completedDiagnosis) {
         setDiagnosis(completedDiagnosis);
         setSavedDiagnoses((current) => [completedDiagnosis, ...current.filter((item) => item.id !== completedDiagnosis.id)]);
@@ -64,21 +66,13 @@ export const ErrorList: FC = () => {
     setDiagnosisError(null);
     try {
       const result = (await retryAdminDebugDiagnosisRun(runId)).run;
-      if (result) setDiagnosisRuns((current) => [result, ...current]);
+      if (result) navigate('/admin/diagnoses/' + result.id);
     } catch (cause) {
       setDiagnosisError(cause instanceof Error ? cause.message : 'Retry failed');
     }
   };
 
-  const openRun = (run: DebugDiagnosisRun) => {
-    if (run.diagnosis) {
-      setDiagnosis(run.diagnosis);
-      return;
-    }
-    if (run.status === 'failed') {
-      setDiagnosisError(run.errorMessage ?? 'Diagnosis failed');
-    }
-  };
+  const openRun = (run: DebugDiagnosisRun) => navigate('/admin/diagnoses/' + run.id);
 
   return (
     <div>
@@ -99,7 +93,7 @@ export const ErrorList: FC = () => {
                   <span className="ml-2 text-fg-muted">{run.errorId ? `Error ${run.errorId}` : `${run.startTime} → ${run.endTime}`}</span>
                 </button>
                 <div className="flex items-center gap-2">
-                  {(run.status === 'queued' || run.status === 'running') && <span className="text-xs text-fg-muted">Recoverable after refresh</span>}
+                  {(run.status === 'queued' || run.status === 'running') && <span className="text-xs text-fg-muted">Durable execution active</span>}
                   {run.status === 'failed' && <Button size="sm" variant="secondary" onClick={() => { void retryRun(run.id); }}>Retry</Button>}
                   {run.diagnosis && <Button size="sm" variant="ghost" onClick={() => openRun(run)}>Open</Button>}
                 </div>

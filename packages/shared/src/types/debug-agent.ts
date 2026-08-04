@@ -30,7 +30,13 @@ export interface RunDebugDiagnosisRequest {
   endTime?: string;
 }
 
-export type DebugDiagnosisRunStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+export type DebugDiagnosisRunStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'cancelled';
+
+export interface DebugDiagnosisRunEvent {
+  id: string; runId: string; sequence: number; stepKey: string; eventType: string; status: string;
+  sourceName: string | null; argumentsPreview: string | null; evidencePreview: string | null; resultCount: number | null;
+  durationMs: number | null; retryAttempt: number; errorCode: string | null; errorMessage: string | null; createdAt: string;
+}
 
 export interface DebugDiagnosisRun {
   id: string;
@@ -43,6 +49,12 @@ export interface DebugDiagnosisRun {
   model: string | null;
   usage: DebugAgentUsage;
   errorMessage: string | null;
+  currentStep: string | null;
+  heartbeatAt: string | null;
+  attempt: number;
+  executorVersion: string;
+  cancelRequestedAt: string | null;
+  deadlineAt: string;
   createdBy: string;
   startedAt: string | null;
   completedAt: string | null;
@@ -50,6 +62,9 @@ export interface DebugDiagnosisRun {
   updatedAt: string;
   diagnosis?: DebugDiagnosis | null;
 }
+
+export interface DebugDiagnosisRunDetailResponse { run: DebugDiagnosisRun; events: DebugDiagnosisRunEvent[]; nextCursor: number | null; }
+export interface DebugDiagnosisRunEventsResponse { events: DebugDiagnosisRunEvent[]; nextCursor: number | null; }
 
 export interface RunDebugDiagnosisResponse {
   run?: DebugDiagnosisRun;

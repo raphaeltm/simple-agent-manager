@@ -37,12 +37,15 @@ export type {
 } from './admin';
 export {
   approveOrSuspendUser,
+  cancelAdminDebugDiagnosisRun,
   changeUserRole,
   createPlatformCredential,
   deletePlatformCredential,
   fetchAdminComputeUsage,
   fetchAdminCosts,
   fetchAdminDebugDiagnoses,
+  fetchAdminDebugDiagnosisRun,
+  fetchAdminDebugDiagnosisRunEvents,
   fetchAdminDebugProjects,
   fetchAdminDefaultQuota,
   fetchAdminErrors,

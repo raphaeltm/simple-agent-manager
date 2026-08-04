@@ -1,5 +1,6 @@
 import type { PlatformError } from '@simple-agent-manager/shared';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { ErrorList } from '../../../../src/components/admin/ErrorList';
@@ -67,6 +68,10 @@ function defaultHookReturn(overrides: Record<string, unknown> = {}) {
   };
 }
 
+function renderErrorList() {
+  return render(<MemoryRouter><ErrorList /></MemoryRouter>);
+}
+
 describe('ErrorList', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -75,13 +80,13 @@ describe('ErrorList', () => {
 
   it('should show loading spinner when loading with no errors', () => {
     mockUseAdminErrors.mockReturnValue(defaultHookReturn({ loading: true }));
-    render(<ErrorList />);
+    renderErrorList();
     expect(screen.getByTestId('spinner-lg')).toBeInTheDocument();
   });
 
   it('should show empty state when no errors match filters', () => {
     mockUseAdminErrors.mockReturnValue(defaultHookReturn());
-    render(<ErrorList />);
+    renderErrorList();
     expect(screen.getByText(/No errors match/)).toBeInTheDocument();
   });
 
@@ -91,7 +96,7 @@ describe('ErrorList', () => {
       createMockEntry({ message: 'Error B' }),
     ];
     mockUseAdminErrors.mockReturnValue(defaultHookReturn({ errors, total: 2 }));
-    render(<ErrorList />);
+    renderErrorList();
 
     expect(screen.getByText('Error A')).toBeInTheDocument();
     expect(screen.getByText('Error B')).toBeInTheDocument();
@@ -100,7 +105,7 @@ describe('ErrorList', () => {
   it('should show summary count', () => {
     const errors = [createMockEntry()];
     mockUseAdminErrors.mockReturnValue(defaultHookReturn({ errors, total: 5 }));
-    render(<ErrorList />);
+    renderErrorList();
 
     expect(screen.getByText(/Showing 1 of 5 errors/)).toBeInTheDocument();
   });
@@ -108,7 +113,7 @@ describe('ErrorList', () => {
   it('should show Load More button when hasMore is true', () => {
     const errors = [createMockEntry()];
     mockUseAdminErrors.mockReturnValue(defaultHookReturn({ errors, total: 10, hasMore: true }));
-    render(<ErrorList />);
+    renderErrorList();
 
     expect(screen.getByText('Load More')).toBeInTheDocument();
   });
@@ -116,7 +121,7 @@ describe('ErrorList', () => {
   it('should not show Load More button when hasMore is false', () => {
     const errors = [createMockEntry()];
     mockUseAdminErrors.mockReturnValue(defaultHookReturn({ errors, total: 1, hasMore: false }));
-    render(<ErrorList />);
+    renderErrorList();
 
     expect(screen.queryByText('Load More')).not.toBeInTheDocument();
   });
@@ -124,7 +129,7 @@ describe('ErrorList', () => {
   it('should show error banner with retry button', () => {
     const refresh = vi.fn();
     mockUseAdminErrors.mockReturnValue(defaultHookReturn({ error: 'Network error', refresh }));
-    render(<ErrorList />);
+    renderErrorList();
 
     expect(screen.getByText('Network error')).toBeInTheDocument();
     expect(screen.getByText('Retry')).toBeInTheDocument();
@@ -132,7 +137,7 @@ describe('ErrorList', () => {
 
   it('should show filter controls', () => {
     mockUseAdminErrors.mockReturnValue(defaultHookReturn());
-    render(<ErrorList />);
+    renderErrorList();
 
     // Filter dropdowns should be present (rendered by ObservabilityFilters)
     expect(screen.getByLabelText('Filter by source')).toBeInTheDocument();
@@ -153,7 +158,7 @@ describe('ErrorList', () => {
       },
     });
     mockUseAdminErrors.mockReturnValue(defaultHookReturn({ errors: [entry], total: 1 }));
-    render(<ErrorList />);
+    renderErrorList();
     fireEvent.click(screen.getByRole('button', { name: 'Diagnose' }));
     await waitFor(() => expect(mockRunAdminDebugDiagnosis).toHaveBeenCalledWith({ errorId: 'err-target' }));
     expect(await screen.findByText(/Heartbeat stopped/)).toBeInTheDocument();
@@ -172,13 +177,13 @@ describe('ErrorList', () => {
       }],
     });
     mockUseAdminErrors.mockReturnValue(defaultHookReturn());
-    render(<ErrorList />);
+    renderErrorList();
     fireEvent.click(await screen.findByRole('button', { name: 'Saved diagnoses (1)' }));
     expect(screen.getByText('Persisted diagnosis evidence')).toBeInTheDocument();
   });
   it('should show refresh button', () => {
     mockUseAdminErrors.mockReturnValue(defaultHookReturn());
-    render(<ErrorList />);
+    renderErrorList();
 
     // "Refresh" button in the summary bar
     expect(screen.getByText('Refresh')).toBeInTheDocument();

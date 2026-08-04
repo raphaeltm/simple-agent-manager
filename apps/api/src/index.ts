@@ -4,6 +4,7 @@ export { AiTokenBudgetCounter } from './durable-objects/ai-token-budget-counter'
 // Sandbox SDK DO class — retained for experimental toolbox/diagnostics use only.
 export { CodexRefreshLock } from './durable-objects/codex-refresh-lock';
 export { CredentialSetupSession } from './durable-objects/credential-setup-session';
+export { DiagnosisRunner } from './durable-objects/diagnosis-runner';
 export { GitHubUserAccessTokenLock } from './durable-objects/github-user-access-token-lock';
 export { GitLabUserAccessTokenLock } from './durable-objects/gitlab-user-access-token-lock';
 export { NodeLifecycle } from './durable-objects/node-lifecycle';
@@ -153,6 +154,7 @@ import { runTrialExpireSweep } from './scheduled/trial-expire';
 import { runTrialRolloverAudit } from './scheduled/trial-rollover';
 import { runTrialWaitlistCleanup } from './scheduled/trial-waitlist-cleanup';
 import { runTriggerExecutionCleanup } from './scheduled/trigger-execution-cleanup';
+import { reconcileDiagnosisRuns } from './services/diagnosis-runner';
 import { GcpApiError, sanitizeGcpError } from './services/gcp-errors';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
 import { recordNodeRoutingMetric } from './services/telemetry';
@@ -933,6 +935,7 @@ export default {
 
     // 5-minute operational sweep
     // Recover stuck tasks first so unrelated cleanup failures cannot suppress lifecycle repair.
+    const diagnosisRecovery = await reconcileDiagnosisRuns(env);
     const stuckTasks = await recoverStuckTasks(env);
 
     // Check for stuck provisioning workspaces
@@ -973,6 +976,8 @@ export default {
     log.info('cron.completed', {
       cron: controller.cron,
       type: 'sweep',
+      diagnosisRunsRestarted: diagnosisRecovery.restarted,
+      diagnosisRunsTerminalized: diagnosisRecovery.terminalized,
       provisioningTimedOut: timedOut,
       workspacesMigrated: migrated,
       staleNodesDestroyed: nodeCleanup.staleDestroyed,

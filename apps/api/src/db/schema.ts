@@ -2332,12 +2332,18 @@ export const debugDiagnosisRuns = sqliteTable(
   'debug_diagnosis_runs',
   {
     id: text('id').primaryKey(),
-    status: text('status', { enum: ['queued', 'running', 'succeeded', 'failed'] }).notNull(),
+    status: text('status', { enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'] }).notNull(),
     errorId: text('error_id'),
     startTime: text('start_time').notNull(),
     endTime: text('end_time').notNull(),
     diagnosisId: text('diagnosis_id').references(() => debugDiagnoses.id, { onDelete: 'set null' }),
     retryOfRunId: text('retry_of_run_id'),
+    currentStep: text('current_step'),
+    heartbeatAt: text('heartbeat_at'),
+    attempt: integer('attempt').notNull().default(0),
+    executorVersion: text('executor_version').notNull().default('diagnosis-runner-v1'),
+    cancelRequestedAt: text('cancel_requested_at'),
+    deadlineAt: text('deadline_at').notNull(),
     model: text('model'),
     turns: integer('turns').notNull().default(0),
     inputTokens: integer('input_tokens').notNull().default(0),
@@ -2361,6 +2367,31 @@ export const debugDiagnosisRuns = sqliteTable(
     statusCreatedIdx: index('idx_debug_diagnosis_runs_status_created').on(table.status, table.createdAt),
     errorCreatedIdx: index('idx_debug_diagnosis_runs_error_created').on(table.errorId, table.createdAt),
     windowIdx: index('idx_debug_diagnosis_runs_window').on(table.startTime, table.endTime),
+  })
+);
+
+export const debugDiagnosisRunEvents = sqliteTable(
+  'debug_diagnosis_run_events',
+  {
+    id: text('id').primaryKey(),
+    runId: text('run_id').notNull().references(() => debugDiagnosisRuns.id, { onDelete: 'cascade' }),
+    sequence: integer('sequence').notNull(),
+    stepKey: text('step_key').notNull(),
+    eventType: text('event_type').notNull(),
+    status: text('status').notNull(),
+    sourceName: text('source_name'),
+    argumentsPreview: text('arguments_preview'),
+    evidencePreview: text('evidence_preview'),
+    resultCount: integer('result_count'),
+    durationMs: integer('duration_ms'),
+    retryAttempt: integer('retry_attempt').notNull().default(0),
+    errorCode: text('error_code'),
+    errorMessage: text('error_message'),
+    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    runSequenceIdx: index('idx_debug_diagnosis_events_run_sequence').on(table.runId, table.sequence),
+    runStepUnique: uniqueIndex('idx_debug_diagnosis_events_run_step').on(table.runId, table.stepKey),
   })
 );
 

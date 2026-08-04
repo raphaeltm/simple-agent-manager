@@ -162,6 +162,11 @@ The same redactor now also runs on the **Worker log query** behind `/admin/logs`
 | `DEBUG_AGENT_TOOL_RESULT_BYTES`   | `32768`               | Max serialized bytes per model-visible result                                                    |
 | `DEBUG_AGENT_MAX_WINDOW_HOURS`    | `24`                  | Max selectable diagnosis window                                                                  |
 | `DEBUG_AGENT_TIMEOUT_MS`          | `120000`              | Timeout per diagnosis model request                                                              |
+| `DEBUG_AGENT_HARD_DEADLINE_MS`    | `900000`              | Hard deadline after which an active diagnosis is terminalized                                    |
+| `DEBUG_AGENT_STALE_HEARTBEAT_MS`  | `120000`              | Stale heartbeat threshold used by the orphan reconciler                                          |
+| `DEBUG_AGENT_RETRY_BASE_DELAY_MS` | `2000`                | Initial classified transient retry delay                                                         |
+| `DEBUG_AGENT_RETRY_MAX_DELAY_MS`  | `60000`               | Maximum classified transient retry delay                                                         |
+| `DEBUG_AGENT_STEP_MAX_RETRIES`    | `3`                   | Maximum transient retries for one checkpointed step                                              |
 
 Exhausting the daily budget does not block the request up front — the run is accepted, then fails with **"Daily deployment debugging budget exhausted"** and appears in **Recent diagnosis runs** as `failed`. Its **Retry** button will keep failing until the next day.
 

@@ -26,11 +26,12 @@ import {
 } from '../schemas';
 import {
   createDebugDiagnosisRun,
-  executeDebugDiagnosisRun,
+  getDebugDiagnosisRun,
   listDebugDiagnoses,
   retryDebugDiagnosisRun,
   saveDebugDiagnosisAsIdea,
 } from '../services/debug-agent';
+import { cancelDiagnosisRunner, listDiagnosisEvents, startDiagnosisRunner } from '../services/diagnosis-runner';
 import { getRuntimeLimits } from '../services/limits';
 import {
   CfApiError,
@@ -44,18 +45,6 @@ import { runPlatformFeedbackTriage } from '../services/platform-feedback-triage'
 import { getSignupApprovalConfig, setSignupApprovalConfig } from '../services/signup-approval';
 
 const adminRoutes = new Hono<{ Bindings: Env }>();
-
-function scheduleBackground(
-  c: { executionCtx: { waitUntil(promise: Promise<unknown>): void } },
-  promise: Promise<unknown> | undefined
-): void {
-  if (!promise || typeof promise.catch !== 'function') return;
-  try {
-    c.executionCtx.waitUntil(promise);
-  } catch {
-    promise.catch(() => undefined);
-  }
-}
 
 // All admin routes require auth + approval + superadmin
 adminRoutes.use('/*', requireAuth(), requireApproved(), requireSuperadmin());
@@ -473,7 +462,7 @@ adminRoutes.post('/observability/diagnoses', jsonValidator(RunDebugDiagnosisSche
   }
   try {
     const run = await createDebugDiagnosisRun(c.env, getUserId(c), body);
-    scheduleBackground(c, executeDebugDiagnosisRun(c.env, run.id));
+    await startDiagnosisRunner(c.env, run.id);
     return c.json({ run }, 202);
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Diagnosis failed';
@@ -485,9 +474,31 @@ adminRoutes.post('/observability/diagnoses', jsonValidator(RunDebugDiagnosisSche
   }
 });
 
+adminRoutes.get('/observability/diagnosis-runs/:runId', async (c) => {
+  const run = await getDebugDiagnosisRun(c.env, c.req.param('runId'));
+  if (!run) throw errors.notFound('Diagnosis run not found');
+  const cursor = Number(c.req.query('cursor') ?? 0);
+  const eventResult = await listDiagnosisEvents(c.env, run.id, Number.isFinite(cursor) && cursor >= 0 ? cursor : 0);
+  return c.json({ run, ...eventResult });
+});
+
+adminRoutes.get('/observability/diagnosis-runs/:runId/events', async (c) => {
+  const run = await getDebugDiagnosisRun(c.env, c.req.param('runId'));
+  if (!run) throw errors.notFound('Diagnosis run not found');
+  const cursor = Number(c.req.query('cursor') ?? 0);
+  return c.json(await listDiagnosisEvents(c.env, run.id, Number.isFinite(cursor) && cursor >= 0 ? cursor : 0));
+});
+
+adminRoutes.post('/observability/diagnosis-runs/:runId/cancel', async (c) => {
+  const run = await getDebugDiagnosisRun(c.env, c.req.param('runId'));
+  if (!run) throw errors.notFound('Diagnosis run not found');
+  await cancelDiagnosisRunner(c.env, run.id);
+  return c.json({ accepted: true }, 202);
+});
+
 adminRoutes.post('/observability/diagnosis-runs/:runId/retry', async (c) => {
   const run = await retryDebugDiagnosisRun(c.env, c.req.param('runId'), getUserId(c));
-  scheduleBackground(c, executeDebugDiagnosisRun(c.env, run.id));
+  await startDiagnosisRunner(c.env, run.id);
   return c.json({ run }, 202);
 });
 
