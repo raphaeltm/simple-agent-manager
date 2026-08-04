@@ -95,7 +95,7 @@ A snapshot deliberately **excludes**:
 Three limits are worth planning around, because SAM does not currently surface any of them in the UI:
 
 - **Snapshots expire after 7 days** (`SESSION_SNAPSHOT_TTL_DAYS`). Coming back to a two-week-old sleeping chat gets you the degraded path, not your work.
-- **Size is capped** at 100 MB combined, with any single file over 50 MB skipped (`SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`, `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`). Skipped content is recorded server-side but you are not told about it.
+- **Size is capped** at 100 MB, with any single file over 50 MB skipped (`SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`, `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`). The repository bundle is captured first and takes what it needs; your home directory gets whatever budget is left, so a large working tree can crowd out the agent's own state. Skipped content is recorded server-side but you are not told about it.
 - **A repository mid-merge is skipped entirely.** If a merge, rebase, cherry-pick, or revert is in progress when the runtime goes away, none of the repository work in progress is captured.
 
 Push anything you care about. A snapshot is a convenience for resuming a conversation, not a backup.
@@ -105,19 +105,19 @@ Push anything you care about. A snapshot is a convenience for resuming a convers
 
 The chat itself is the reliable signal. Find what you're seeing in this table, then read the matching section — the distinction decides whether you should resend your message.
 
-| You see                                                                               | What happened                            | Do this                                                    |
-| ------------------------------------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------- |
-| A spinner reading **"Waking and restoring Instant session…"** with an elapsed counter | A wake or a recovery is in progress      | Wait                                                       |
-| **"delivery was interrupted … outcome is unknown"**                                   | Your prompt may or may not have executed | [Check, then decide](#your-prompt-may-or-may-not-have-run) |
-| **"could not restore its last safe checkpoint"**                                      | In-container work in progress is gone    | [Re-state the work](#the-checkpoint-could-not-be-restored) |
-| The composer is gone and the session reads **"This session has ended."**              | Terminal — nothing to recover            | [Start a new chat](#the-session-is-permanently-stopped)    |
+| You see                                                                                 | What happened                            | Do this                                                    |
+| --------------------------------------------------------------------------------------- | ---------------------------------------- | ---------------------------------------------------------- |
+| A spinner reading **"Waking and restoring Instant session..."** with an elapsed counter | A wake or a recovery is in progress      | Wait                                                       |
+| **"delivery was interrupted … outcome is unknown"**                                     | Your prompt may or may not have executed | [Check, then decide](#your-prompt-may-or-may-not-have-run) |
+| **"could not restore its last safe checkpoint"**                                        | In-container work in progress is gone    | [Re-state the work](#the-checkpoint-could-not-be-restored) |
+| The composer is gone and the session reads **"This session has ended."**                | Terminal — nothing to recover            | [Start a new chat](#the-session-is-permanently-stopped)    |
 
 Anything else — including a message that delivery "could not be confirmed" — means SAM couldn't classify the failure. Treat it like the interrupted case: check before you resend.
 
-A workspace or node may also show a **Recovery** badge while SAM rebuilds the runtime. Don't read too much into the badges here: an idle Instant session that has gone to sleep currently shows **Unknown** rather than a "Sleeping" label, and may show **Unhealthy** alongside it. That's cosmetic — sending a message still wakes it.
+Don't read too much into the status badges while this is happening. A sleeping Instant session shows **Unknown** rather than a "Sleeping" label, and a sleeping _node_ also shows **Unhealthy** next to it. Both are cosmetic — sending a message still wakes the session.
 
 :::note
-**Recovery** means something different on a VM workspace. There it indicates your `.devcontainer` build failed and SAM fell back to a plain recovery container to keep the chat usable — waiting will not fix it. The chat header labels that case **Recovery container**; open the workspace and check Boot Logs for the build error.
+The **Recovery** badge and the chat header's **Recovery container** label are shared with an unrelated VM failure mode: a `.devcontainer` build that failed and fell back to a plain container. The header's tooltip describes that case ("check Boot Logs for the devcontainer error"), so on an Instant session it is misleading — there is no devcontainer and nothing in Boot Logs to find. Go by the chat banner instead.
 :::
 
 ### Recovery is in progress
@@ -165,7 +165,7 @@ If a session is stuck in a state this page doesn't describe, or recovery repeate
 
 ## Starting a chat is durable
 
-Launching an Instant session takes several steps: allocate the runtime, start the container, clone the repository, start the agent, deliver your first prompt. SAM **accepts** the session first and finishes the launch in the background, so closing the tab or losing your connection partway through no longer strands the chat in a queued state. Come back to the session list and the session will either be running or have a visible failure — not stuck.
+Launching an Instant session takes several steps. SAM does the bookkeeping up front — the node, workspace, and chat session records, and your first message — then **accepts** the request and finishes the slow parts in the background: starting the container, cloning the repository, starting the agent, and delivering your prompt, so closing the tab or losing your connection partway through no longer strands the chat in a queued state. Come back to the session list and the session will either be running or have a visible failure — not stuck.
 
 ## Limits worth knowing
 

@@ -9,21 +9,21 @@ import { Card, CardGrid, LinkCard } from '@astrojs/starlight/components';
 
 ## Why SAM?
 
-AI coding agents need real development environments — not sandboxes. SAM gives each agent an isolated environment with a full Linux toolchain, Docker, and git, and puts it behind a simple chat. You describe the outcome you want; SAM handles the servers, the setup, and the pull request.
+AI coding agents need real development environments. SAM gives each agent an isolated environment behind a simple chat — a container that starts in seconds for conversation and focused edits, or a full cloud VM with your `.devcontainer`, Docker, and toolchain when the agent has to build and test your stack. You describe the outcome you want; SAM handles the servers, the setup, and the pull request.
 
 <CardGrid>
   <Card title="Bring Your Own Cloud" icon="cloud">
-    Connect a Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP credential and VMs run on
-    your own infrastructure, billed to your account. On the hosted platform, compute can be provided
-    for you. Your cloud credentials are never stored as environment variables.
+    Connect a Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, or GCP credential and VMs
+    run on your own infrastructure, billed to your account. On the hosted platform, compute can be
+    provided for you. Your cloud credentials are never stored as environment variables.
   </Card>
   <Card title="Serverless Control Plane" icon="rocket">
     The API runs on Cloudflare Workers — zero infrastructure to manage. D1 for storage, KV for
     sessions, R2 for binaries, Durable Objects for real-time chat.
   </Card>
   <Card title="Ephemeral by Design" icon="refresh">
-    Workspaces spin up in minutes and tear down when you're done. Warm node pooling reuses idle VMs
-    for fast follow-up work.
+    Container sessions start in seconds and VM workspaces in minutes, and both tear down when you're
+    done. Warm node pooling reuses idle VMs for fast follow-up work.
   </Card>
   <Card title="Self-Hostable" icon="setting">
     Fork the repo, configure a GitHub Environment, then run Deploy Production. Pulumi + GitHub

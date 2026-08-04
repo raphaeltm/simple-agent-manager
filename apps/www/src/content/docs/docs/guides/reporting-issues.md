@@ -18,7 +18,7 @@ The **Report** action lives in the session header's expanded detail panel, so op
 1. In the chat, click the chevron at the right of the session header (**Show session details**).
 2. In the action row that appears, click **Report** (the flag icon).
 
-On a running session it sits alongside **Files**, **Git**, **Workspace**, and **Timeline**. Those disappear once a session ends, but **Report** does not — so you can still report a session that already failed, which is usually when you want to.
+While the agent is still working, that row also has **Files**, **Git**, and **Workspace**; those disappear once the agent finishes. **Report** and **Timeline** stay put — so you can still report a session that already ended or failed, which is usually when you want to.
 
 ![The Report an Issue dialog in SAM: a Title field, a Description field, and a checked "Attach technical references to help diagnose this issue" checkbox listing a Chat session, Task, and Node identifier.](/images/docs/report-issue-dialog.png)
 
@@ -44,15 +44,17 @@ Tick it and SAM lists the exact identifiers it would send, so you can see them b
 | **Task**         | The task backing that session            | Yes — must be your project   |
 | **Node**         | The machine the workspace was running on | Yes — must be your node      |
 | **Diagnosis**    | A superadmin deployment diagnosis        | Yes — must be yours          |
-| **Error**        | The crash-screen error text              | No — see below               |
+| **Error**        | A short token from the crash screen      | No — see below               |
 
-Four of these are **identifiers only** — they let a maintainer look up the right records rather than guess from a description. The fifth, **Error**, is different: it carries up to 100 characters of the actual error text your browser produced. SAM does not ship your code, your transcript, or your environment either way.
+These are **identifiers only** — SAM does not ship your code, your transcript, or your environment. They let a maintainer look up the right records rather than guess from a description.
+
+The **Error** reference is the odd one out. It is taken from the crash text your browser produced, but the server only accepts identifier-shaped values — letters, digits, and `.` `_` `:` `-`, with no spaces. Most real error messages contain spaces or punctuation, so in practice this reference is usually dropped rather than attached. Describe the error in your own words; don't count on it coming along.
 
 Leave the box unchecked and only your title and description are submitted. The report still gets filed.
 
 Two things happen server-side regardless of what you tick:
 
-- **Ownership is re-checked.** Session, task, node, and diagnosis references are verified against your access before they're stored, and silently dropped if you don't have it — a stale or copied identifier can't pull someone else's records into your report. The **error** reference is not looked up, because it isn't a pointer to a stored record; it's text from your own browser. The confirmation screen lists what was actually attached, which may be fewer references than the dialog offered.
+- **Ownership is re-checked.** Session, task, node, and diagnosis references are verified against your access before they're stored, and silently dropped if you don't have it — a stale or copied identifier can't pull someone else's records into your report. The **error** reference is not looked up, because it isn't a pointer to a stored record. The confirmation screen lists what was actually attached, which may be fewer references than the dialog offered — and lists none at all if everything was dropped.
 - **Everything is scrubbed** — your title, your description, and each attached reference. Best-effort redaction strips credential-shaped strings (API keys, tokens, `sk-`/`ghp_`-style prefixes, PEM private key blocks) and email addresses before anything is stored, so a secret that leaked into an error message doesn't ride along. Treat it as a safety net, not a licence — don't paste secrets into the box.
 
 ## After you submit
@@ -156,6 +158,6 @@ When a diagnosis is worth keeping, **Save as draft Idea** files it into a projec
 | `DEBUG_AGENT_MAX_WINDOW_HOURS`    | `24`                  | Max selectable diagnosis window                                                                  |
 | `DEBUG_AGENT_TIMEOUT_MS`          | `120000`              | Timeout per diagnosis model request                                                              |
 
-Exhausting the daily budget returns `429 DEBUG_BUDGET_EXHAUSTED` until the next day.
+Exhausting the daily budget does not block the request up front — the run is accepted, then fails with **"Daily deployment debugging budget exhausted"** and appears in **Recent diagnosis runs** as `failed`. Its **Retry** button will keep failing until the next day.
 
 See the [Configuration Reference](/docs/reference/configuration/) for the complete variable list.

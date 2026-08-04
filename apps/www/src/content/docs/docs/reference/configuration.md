@@ -187,7 +187,7 @@ Task workspaces are checked out on the generated output branch, and SAM refuses 
 | `DEBUG_AGENT_MAX_TURNS`           | `6`                   | Maximum model/tool turns per diagnosis                 |
 | `DEBUG_AGENT_RUN_TOKEN_LIMIT`     | `24000`               | Combined token ceiling per diagnosis                   |
 | `DEBUG_AGENT_MODEL_OUTPUT_TOKENS` | `4096`                | Maximum output tokens requested per model turn         |
-| `DEBUG_AGENT_DAILY_TOKEN_LIMIT`   | `120000`              | Deployment-wide daily diagnosis token budget           |
+| `DEBUG_AGENT_DAILY_TOKEN_LIMIT`   | `120000`              | Daily diagnosis token budget, counted **per feature**  |
 | `DEBUG_AGENT_TOOL_RESULT_LIMIT`   | `50`                  | Maximum rows returned by a diagnosis tool              |
 | `DEBUG_AGENT_TOOL_RESULT_BYTES`   | `32768`               | Maximum serialized bytes per model-visible tool result |
 | `DEBUG_AGENT_MAX_WINDOW_HOURS`    | `24`                  | Maximum selectable diagnosis window                    |
@@ -197,18 +197,18 @@ The `/admin/errors` view remains superadmin-only and may show local user IDs, IP
 
 ### Platform Feedback Triage
 
-| Variable                                             | Default  | Description                                                           |
-| ---------------------------------------------------- | -------- | --------------------------------------------------------------------- |
-| `PLATFORM_FEEDBACK_PROJECT_ID`                       | unset    | Project that receives automated platform feedback draft Ideas         |
-| `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES`            | `60`     | Lookback window for grouping recent platform errors                   |
-| `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`               | `100`    | Maximum platform error rows scanned per triage sweep                  |
-| `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT`               | `5`      | Maximum grouped feedback candidates processed per triage sweep        |
-| `PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT`            | `10`     | Maximum bounded error references retained per grouped feedback record |
-| `PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS`              | `600000` | Claim lease duration before a later sweep can reclaim the group       |
-| `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`              | `3`      | Maximum failed attempts before a group is rejected from auto-triage   |
-| `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH` | `240`    | Maximum characters stored or returned for sanitized failure reasons   |
+| Variable                                             | Default  | Description                                                                                                |
+| ---------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------- |
+| `PLATFORM_FEEDBACK_PROJECT_ID`                       | unset    | Project that receives user issue reports and automated triage draft Ideas; unset ⇒ in-app reporting hidden |
+| `PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES`            | `60`     | Lookback window for grouping recent platform errors                                                        |
+| `PLATFORM_FEEDBACK_TRIAGE_ERROR_LIMIT`               | `100`    | Maximum platform error rows scanned per triage sweep                                                       |
+| `PLATFORM_FEEDBACK_TRIAGE_GROUP_LIMIT`               | `5`      | Maximum grouped feedback candidates processed per triage sweep                                             |
+| `PLATFORM_FEEDBACK_TRIAGE_EVIDENCE_LIMIT`            | `10`     | Maximum bounded error references retained per grouped feedback record                                      |
+| `PLATFORM_FEEDBACK_TRIAGE_CLAIM_TTL_MS`              | `600000` | Claim lease duration before a later sweep can reclaim the group                                            |
+| `PLATFORM_FEEDBACK_TRIAGE_MAX_FAILURES`              | `3`      | Maximum failed attempts before a group is rejected from auto-triage                                        |
+| `PLATFORM_FEEDBACK_TRIAGE_FAILURE_REASON_MAX_LENGTH` | `240`    | Maximum characters stored or returned for sanitized failure reasons                                        |
 
-Automated triage shares `DEBUG_AGENT_DAILY_TOKEN_LIMIT` with superadmin-initiated diagnosis.
+Automated triage and superadmin-initiated diagnosis read the same `DEBUG_AGENT_DAILY_TOKEN_LIMIT` value but count against **independent per-feature counters**, so worst-case daily spend across both is twice this value.
 
 ### Report an Issue
 

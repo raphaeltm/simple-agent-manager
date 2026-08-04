@@ -10,8 +10,8 @@ The main way to use SAM is the **project chat**: you describe what you want done
 Type your description in the project chat input and submit. Submitting a message both **creates** the work and **starts** it in one step — you don't need to pre-create an idea. SAM will:
 
 1. **Generate a title** — short messages are used as-is; longer ones get a concise AI-generated title
-2. **Create a branch** — descriptive branch name with `sam/` prefix
-3. **Provision a workspace** — reuses a warm environment if available, otherwise provisions a new one
+2. **Create an output branch** — a descriptive `sam/`-prefixed name off your default branch
+3. **Provision a workspace** — already checked out on that branch; reuses a warm environment if available
 4. **Start the agent** — runs the agent from your selected profile (Claude Code, Codex, Gemini CLI, Mistral Vibe, OpenCode, or Amp) with your description
 5. **Stream output** — watch the agent work in real time in the chat
 
@@ -91,18 +91,18 @@ Two limits worth knowing:
 SAM automatically generates concise titles for ideas using Workers AI:
 
 - Messages **at or below 100 characters** are used as the title directly (no AI needed)
-- Longer messages are summarized by a Workers AI model (default: `@cf/zai-org/glm-4.7-flash`)
+- Longer messages are summarized by a Workers AI model (default: `@cf/zai-org/glm-5.2`)
 - If AI generation fails or times out, the message is truncated to 100 characters as a fallback
 - Generation uses exponential backoff with up to 2 retries
 
 Configure via environment variables:
 
-| Variable                             | Default                     | Description                                |
-| ------------------------------------ | --------------------------- | ------------------------------------------ |
-| `TASK_TITLE_MODEL`                   | `@cf/zai-org/glm-4.7-flash` | Workers AI model for title generation      |
-| `TASK_TITLE_GENERATION_ENABLED`      | `true`                      | Set `false` to always use truncation       |
-| `TASK_TITLE_TIMEOUT_MS`              | `5000`                      | Per-attempt timeout                        |
-| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | `100`                       | Messages at or below this length bypass AI |
+| Variable                             | Default               | Description                                |
+| ------------------------------------ | --------------------- | ------------------------------------------ |
+| `TASK_TITLE_MODEL`                   | `@cf/zai-org/glm-5.2` | Workers AI model for title generation      |
+| `TASK_TITLE_GENERATION_ENABLED`      | `true`                | Set `false` to always use truncation       |
+| `TASK_TITLE_TIMEOUT_MS`              | `5000`                | Per-attempt timeout                        |
+| `TASK_TITLE_SHORT_MESSAGE_THRESHOLD` | `100`                 | Messages at or below this length bypass AI |
 
 ## Agent-to-Agent Dispatch
 
