@@ -73,42 +73,66 @@ A snapshot deliberately **excludes**:
 
 Snapshots are size-bounded. A single very large file or an oversized total is skipped rather than allowed to blow the budget, which is another reason to treat a workspace as ephemeral and push anything you want to keep.
 
-## Reading the recovery states
+## What to do when a session is interrupted
 
-Instant sessions add two statuses you'll see on sessions, workspaces, and nodes:
+Two statuses appear on Instant sessions, workspaces, and nodes:
 
 | Status         | Meaning                                                                |
 | -------------- | ---------------------------------------------------------------------- |
 | **Sleeping**   | Idle and parked. Send a message to wake it.                            |
 | **Recovering** | SAM is rebuilding the runtime and restoring the snapshot. Wait it out. |
 
-When an Instant session is interrupted, SAM tells you which of four situations you're in. The distinction matters, because it decides whether you should resend your message.
+Beyond that, SAM shows one of four banners. Find yours in this table, then read the matching section — the distinction decides whether you should resend your message.
 
-### "Instant session interrupted; restoring the last safe checkpoint."
+| You see                                                      | What happened                            | Do this                                                    |
+| ------------------------------------------------------------ | ---------------------------------------- | ---------------------------------------------------------- |
+| A spinner reading **"Waking and restoring Instant session"** | Normal wake or recovery is in progress   | Wait                                                       |
+| **"delivery was interrupted … outcome is unknown"**          | Your prompt may or may not have executed | [Check, then decide](#your-prompt-may-or-may-not-have-run) |
+| **"could not restore its last safe checkpoint"**             | In-container work in progress is gone    | [Re-state the work](#the-checkpoint-could-not-be-restored) |
+| **"was stopped and cannot be resumed"**                      | Terminal — nothing to recover            | [Start a new chat](#the-session-is-permanently-stopped)    |
 
-SAM is rebuilding the session from its snapshot. **Do nothing.** When restore finishes the session continues normally.
+### Recovery is in progress
 
-### "Your message is saved, but delivery was interrupted and its execution outcome is unknown."
+A spinner banner with an elapsed-time counter means SAM is rebuilding the session from its snapshot. **Do nothing.** When restore finishes the session continues normally.
 
-This is the one that needs your judgment. Your message was persisted, but SAM cannot tell whether the agent had already started acting on it when the runtime went away.
+### Your prompt may or may not have run
 
-SAM deliberately does **not** replay it for you. Replaying a prompt that already half-ran is how you get duplicated commits, duplicated PRs, or a second round of destructive edits.
+This is the one that needs your judgment.
+
+![A red banner in the SAM chat reading "Your message is saved, but delivery was interrupted and its execution outcome is unknown. It was not replayed automatically. After restore finishes, check the transcript and partial output before deciding whether to send it again." with a Dismiss button.](/images/docs/instant-recovery-interrupted.png)
+
+Your message was persisted, but SAM cannot tell whether the agent had already started acting on it when the runtime went away.
+
+SAM deliberately does **not** replay it for you. Replaying a prompt that already half-ran is how you get duplicated commits, duplicated pull requests, or a second round of destructive edits.
 
 So, once restore finishes:
 
 1. Read the transcript and any partial output from before the interruption.
-2. Decide whether the work actually happened.
-3. Resend only if it didn't.
+2. Check the task's output branch for commits the agent may already have pushed.
+3. Resend only if the work clearly didn't happen.
 
-### "The Instant session could not restore its last safe checkpoint."
+Your text stays in the composer, so resending is one click if that's the call. **Dismiss** clears the banner without sending anything.
 
-The container came back but the snapshot could not be applied. **Your transcript and any partial output are still there** — that history lives in SAM, not in the container. What's gone is the in-container work in progress. Treat this like a fresh workspace: re-state what you need, and check the branch for anything that was already pushed.
+### The checkpoint could not be restored
+
+The container came back but the snapshot could not be applied. **Your transcript and any partial output are still there** — that history lives in SAM, not in the container. What's gone is the in-container work in progress: uncommitted edits, the git index, anything the agent hadn't pushed.
+
+Treat this like a fresh workspace:
+
+1. Check the output branch for work that was already pushed.
+2. Re-state what still needs doing in the same chat — the agent has the transcript.
 
 If restore fails repeatedly (`CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`, twice by default), SAM stops retrying and marks the session and its task as failed rather than leaving you watching a spinner forever.
 
-### "This Instant session was stopped and cannot be resumed."
+### The session is permanently stopped
 
-Terminal. The session was stopped explicitly and there is nothing to recover. The composer closes and the session shows as ended. Start a new chat — you can [fork](/docs/guides/chat-features/#conversation-forking) from the old one to carry the context across.
+Terminal. The session was stopped explicitly and there is nothing to recover. The composer disappears and the session shows as ended — deliberately, so you aren't invited to retry against a runtime that can never come back.
+
+Start a new chat. [Fork](/docs/guides/chat-features/#conversation-forking) from the stopped one to carry its context across rather than re-explaining from scratch.
+
+### None of these fit
+
+If a session is stuck in a state this page doesn't describe, or recovery repeatedly fails on work you need, [report it](/docs/guides/reporting-issues/) from the session header — the report can attach the session, task, and node identifiers a maintainer needs.
 
 ## Starting a chat is durable
 

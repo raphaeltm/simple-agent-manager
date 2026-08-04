@@ -358,3 +358,135 @@ test('docs: report an issue dialog with consent expanded', async ({ page }) => {
 
   await docsShot(page, 'report-issue-dialog', dialog.locator('.glass-panel-container'));
 });
+
+// ---------------------------------------------------------------------------
+// 4. Instant runtime interrupted-delivery banner
+//
+// The banner a user has to act on: their message was saved, but SAM cannot tell
+// whether the agent already executed it. The message text below is the real
+// server default (RUNTIME_REQUEST_INTERRUPTED_MESSAGE in
+// apps/api/src/durable-objects/vm-agent-container-recovery.ts) so the docs image
+// matches what a user actually sees.
+// ---------------------------------------------------------------------------
+
+const RECOVERY_PROJECT_ID = 'proj-1';
+const RECOVERY_SESSION_ID = '01K9CHAT5EFJ8TW0N6RQZD3M2X';
+const RECOVERY_WORKSPACE_ID = 'ws-1';
+const RECOVERY_AGENT_SESSION_ID = 'acp-1';
+
+const RUNTIME_REQUEST_INTERRUPTED_MESSAGE =
+  'Your message is saved, but delivery was interrupted and its execution outcome is unknown. ' +
+  'It was not replayed automatically. After restore finishes, check the transcript and partial ' +
+  'output before deciding whether to send it again.';
+
+const RECOVERY_MESSAGES = [
+  {
+    id: 'msg-1',
+    sessionId: RECOVERY_SESSION_ID,
+    role: 'user',
+    content: 'Add a retry with backoff to the checkout webhook handler.',
+    toolMetadata: null,
+    createdAt: Date.parse('2026-07-01T00:02:00Z'),
+    sequence: 1,
+  },
+  {
+    id: 'msg-2',
+    sessionId: RECOVERY_SESSION_ID,
+    role: 'assistant',
+    content:
+      'I added an exponential backoff wrapper around the webhook dispatch and updated the tests. ' +
+      'Running the suite now.',
+    toolMetadata: null,
+    createdAt: Date.parse('2026-07-01T00:04:00Z'),
+    sequence: 2,
+  },
+];
+
+async function setupRecoveryMocks(page: Page) {
+  await page.route('**/api/**', async (route: Route) => {
+    const path = new URL(route.request().url()).pathname;
+    const respond = (status: number, body: unknown) =>
+      route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
+
+    if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
+    if (path === '/api/report-issue/config') return respond(200, { enabled: false });
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/credentials')) return respond(200, []);
+    if (path === '/api/agents') return respond(200, { agents: [] });
+    if (path === '/api/terminal/token') return respond(200, { token: 'docs-token' });
+    if (path === `/api/workspaces/${RECOVERY_WORKSPACE_ID}`) {
+      return respond(200, { ...REPORT_WORKSPACE, status: 'running' });
+    }
+    if (path.startsWith(`/api/workspaces/${RECOVERY_WORKSPACE_ID}/ports`))
+      return respond(200, { ports: [] });
+    if (path === `/api/nodes/${REPORT_WORKSPACE.nodeId}`) {
+      return respond(200, {
+        id: REPORT_WORKSPACE.nodeId,
+        status: 'running',
+        healthStatus: 'healthy',
+      });
+    }
+
+    // The follow-up prompt is rejected with the interrupted-delivery code.
+    if (path === `/api/projects/${RECOVERY_PROJECT_ID}/sessions/${RECOVERY_SESSION_ID}/prompt`) {
+      return respond(409, {
+        error: 'RUNTIME_REQUEST_INTERRUPTED',
+        message: RUNTIME_REQUEST_INTERRUPTED_MESSAGE,
+      });
+    }
+
+    const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
+    if (projectMatch) {
+      const subPath = projectMatch[2] || '';
+      if (subPath === '/sessions') {
+        return respond(200, { sessions: [REPORT_SESSION], total: 1, hasMore: false });
+      }
+      if (subPath.match(/\/sessions\/[^/]+\/messages/)) {
+        return respond(200, { messages: RECOVERY_MESSAGES, hasMore: false });
+      }
+      if (subPath.match(/\/sessions\/[^/]+$/)) {
+        return respond(200, {
+          session: REPORT_SESSION,
+          messages: RECOVERY_MESSAGES,
+          hasMore: false,
+          state: {
+            activity: 'idle',
+            activityAt: Date.parse('2026-07-01T00:04:00Z'),
+            statusError: null,
+            currentPlan: [],
+            planUpdatedAt: null,
+            promptStartedAt: null,
+            agentType: 'claude-code',
+            lastStopReason: null,
+          },
+        });
+      }
+      if (subPath === '/agent-profiles') return respond(200, { items: [] });
+      if (subPath === '/cached-commands') return respond(200, { items: [] });
+      if (subPath === '/tasks') return respond(200, { tasks: [], total: 0 });
+      return respond(200, REPORT_PROJECT);
+    }
+    if (path === '/api/projects')
+      return respond(200, { projects: [REPORT_PROJECT], nextCursor: null });
+    return respond(200, {});
+  });
+}
+
+test('docs: instant runtime interrupted-delivery banner', async ({ page }) => {
+  await dismissOnboarding(page);
+  await seedTheme(page, 'dark');
+  await setupRecoveryMocks(page);
+
+  await page.goto(`/projects/${RECOVERY_PROJECT_ID}/chat/${RECOVERY_SESSION_ID}`);
+  await expect(page.getByRole('log', { name: 'Conversation' })).toBeVisible({ timeout: 20000 });
+
+  const composer = page.getByPlaceholder(/send a message/i);
+  await composer.fill('Did the tests pass?');
+  await page.getByRole('button', { name: /^send$/i }).click();
+
+  const banner = page.getByRole('alert').filter({ hasText: 'delivery was interrupted' });
+  await expect(banner).toBeVisible();
+
+  await docsShot(page, 'instant-recovery-interrupted', banner);
+});
