@@ -16,28 +16,18 @@ For the VM path, see [Creating Workspaces](/docs/guides/creating-workspaces/).
 
 ## Am I on an Instant session?
 
-Almost certainly yes, if you **started a chat** and have **not connected your own cloud provider credential**. That's the whole rule:
+You're on Instant when the **agent profile** (or skill) you picked has its runtime set to **Instant container**. That's the rule — it is an opt-in setting, not something SAM infers from your account.
 
-> **Connect a cloud provider and your chats run on your VMs. Connect nothing and they run Instant.**
+Set it under a project's **Profiles** page: create or edit a profile and choose **Instant container** as the runtime. Any chat you start with that profile selected runs Instant. Everything else runs as a task on a cloud VM.
 
-Two things surprise people here:
+Choosing Instant on a profile also fixes some of its other settings, because they don't apply: the workspace profile becomes lightweight, and VM size and devcontainer options are disabled.
 
-- **Connecting your first Hetzner or Scaleway credential silently moves new chats to VMs.** Nothing announces it. To keep using Instant afterwards, pin the runtime on an [agent profile](/docs/guides/agents/#agent-profiles) and pick that profile.
-- **The hosted platform's own credential doesn't count.** Only a credential _you_ own, or one attached to the project, switches you to VMs — so on the hosted platform you get Instant by default even though VMs are available to you.
+Two paths are never Instant unless explicitly told to be:
 
-Everything else in SAM is VM-first. **Submitted tasks always use a VM**, and `dispatch_task` uses Instant only when an agent explicitly asks for it — via the call's `runtime` argument or the profile it dispatches with. Submitting a task with no cloud credential anywhere (yours, the project's, or the platform's) fails with `Cloud provider credentials required` rather than falling back to Instant.
+- **Submitted tasks always use a VM.** Attaching a file or executing a saved idea also forces task submission, even with an Instant profile selected — those paths need a VM workspace.
+- **`dispatch_task` uses Instant only when asked**, via the call's `runtime` argument or the profile it dispatches with.
 
-<details>
-<summary>The exact decision order, for chat start</summary>
-
-From `decideWorkspaceRuntime()` in `apps/api/src/services/workspace-runtime.ts`:
-
-1. **Containers not enabled for the deployment** (`CF_CONTAINER_ENABLED` is anything other than `true`) → always a VM.
-2. **The agent profile sets a runtime explicitly** → that runtime wins.
-3. **You have your own cloud provider credential**, or one attached to the project → a VM.
-4. **Otherwise** → Instant.
-
-</details>
+The practical trade: an Instant session needs **no cloud provider credential**, which makes it the way to work on a fresh account or a self-hosted deployment where users haven't connected a cloud account. A task, by contrast, fails with `Cloud provider credentials required` if there's no credential available — yours, the project's, or the platform's.
 
 ## What you give up, and what you gain
 

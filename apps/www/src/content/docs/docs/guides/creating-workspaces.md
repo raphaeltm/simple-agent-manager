@@ -19,10 +19,10 @@ See [Idea Execution](/docs/guides/idea-execution/) for the full chat-to-pull-req
 
 ## Two kinds of workspace: Instant and VM
 
-A workspace runs either as an **Instant** container on Cloudflare's network or as a **VM** on a cloud provider. When you start a chat, SAM chooses based on whether you've connected a cloud account:
+A workspace runs either as an **Instant** container on Cloudflare's network or as a **VM** on a cloud provider. Which one you get is an [agent profile](/docs/guides/agents/#agent-profiles) setting:
 
-- **No cloud credential connected** → Instant. Starts in seconds, needs no cloud account, but has no `.devcontainer` build, no Docker, and no automatic port exposure.
-- **Cloud credential connected** → a VM with your full environment.
+- **A profile whose runtime is "Instant container"** → Instant. Starts in seconds and needs no cloud account, but has no `.devcontainer` build, no Docker, and no automatic port exposure.
+- **Anything else** → a task on a VM, with your full environment.
 
 Submitted tasks always use a VM, so a project that mainly runs tasks needs cloud compute regardless.
 
@@ -52,7 +52,7 @@ SAM supports seven providers:
 
 ![The cloud provider picker in SAM's Connections settings: a selectable card for each supported provider — Hetzner, Scaleway, Google Cloud, Vultr, Infomaniak Public Cloud, DigitalOcean, and UpCloud — each with a short description, above the credential form for the selected provider.](/images/docs/cloud-provider-connect.png)
 
-Once a provider is connected, SAM uses it automatically when it provisions workspaces — and, because a connected credential also switches new sessions from Instant to VM, this is the step that gives your agents your full environment. You can connect more than one and set a default provider (and region) per project in project settings. For per-provider VM sizes, regions, and example pricing, see the [Self-Hosting guide](/docs/guides/self-hosting/#user-vm-costs).
+Once a provider is connected, SAM uses it automatically when it provisions workspaces. You can connect more than one and set a default provider (and region) per project in project settings. For per-provider VM sizes, regions, and example pricing, see the [Self-Hosting guide](/docs/guides/self-hosting/#user-vm-costs).
 
 :::note
 Cloud provider credentials are stored encrypted per user — never as environment variables or shared secrets. In a [shared project](/docs/guides/collaboration/), a member can attach a project-level cloud credential so shared work doesn't run on someone's personal account.
