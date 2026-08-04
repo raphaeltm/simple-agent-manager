@@ -88,12 +88,12 @@ import { gcpRoutes } from './routes/gcp';
 import { githubRoutes } from './routes/github';
 import { gitlabRoutes } from './routes/gitlab';
 import { googleAuthRoutes } from './routes/google-auth';
-import { knowledgeRoutes } from './routes/knowledge';
-import { libraryRoutes } from './routes/library';
 import {
   handleInteractivePreviewRequest,
   isInteractivePreviewRequest,
 } from './routes/interactive-preview-host';
+import { knowledgeRoutes } from './routes/knowledge';
+import { libraryRoutes } from './routes/library';
 import { mailboxRoutes } from './routes/mailbox';
 import { mcpRoutes } from './routes/mcp';
 import { missionRoutes } from './routes/missions';

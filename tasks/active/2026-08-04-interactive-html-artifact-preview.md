@@ -4,12 +4,12 @@ See SAM idea `01KZ6A5AX8YB1ZXXRT53VNE5ZD` for the authoritative Phase 2 implemen
 
 ## Checklist
 
-- [ ] Generated preview hostname, DNS, routes, vars, and signing secret support upgrades and clean installs.
-- [ ] Signed path-prefix minting is project/file/version/expiry scoped and uses constant-time HMAC validation.
-- [ ] Preview host dispatch runs before session auth and applies strict CSP/security headers to all responses without cookies.
-- [ ] Explicit project-chat HTML action confirms risk, runs an `allow-scripts`-only iframe, warns, stops/resets, and never autoruns.
+- [x] Generated preview hostname, DNS, routes, vars, and signing secret support upgrades and clean installs.
+- [x] Signed path-prefix minting is project/file/version/expiry scoped and uses constant-time HMAC validation.
+- [x] Preview host dispatch runs before session auth and applies strict CSP/security headers to all responses without cookies.
+- [x] Explicit project-chat HTML action confirms risk, runs an `allow-scripts`-only iframe, warns, stops/resets, and never autoruns.
 - [ ] Miniflare, unit, UI, browser isolation, mobile/desktop visual, and CORS/trusted-origin invariant tests pass.
-- [ ] Security architecture, self-hosting, and configuration reference docs are updated.
+- [x] Security architecture, self-hosting, and configuration reference docs are updated.
 - [ ] Specialist reviews, staging verification, CI, merge, and production deployment complete.
 
 ## Acceptance criteria
