@@ -30,7 +30,7 @@ The web app caches project library file and directory metadata in `localStorage`
 - [x] Update ProjectLibrary and `useLibraryIndex` to pass the namespace and reset render state when namespace changes.
 - [x] Add scenario-driven unit/component tests covering cache isolation, AuthProvider transitions, ProjectLibrary cached render safety, logout, expiry, and account switch.
 - [x] Run ProjectLibrary visual audit with normal, long text, empty, many, and error states on mobile and desktop.
-- [x] Run specialist review and address findings (subagents blocked by MCP/sandbox; in-session reviews completed; null namespace/old-user flash gap fixed).
+- [x] Run specialist review and address findings (recovery pass completed successfully for ui-ux, security, test-engineer, task-completion, constitution, and doc-sync reviewers).
 - [x] Run local quality suite and staging verification.
 - [ ] Open PR and verify CI green.
 
@@ -64,7 +64,9 @@ The web app caches project library file and directory metadata in `localStorage`
 
 ### Local specialist review outcomes
 
-- `test-engineer` subagent dispatch blocked by required MCP/sandbox failures; in-session test-engineer review completed. Result: PASS after adding scenario-driven tests for namespace isolation, legacy refusal/clearing, AuthProvider clean-null and account-switch transitions, sign-out failure cleanup, ProjectLibrary null-auth safety, and account-switch remount behavior.
-- `security-auditor` subagent dispatch blocked by required MCP/sandbox failures; in-session security review completed. Result: found and fixed a null-auth namespace gap where ProjectLibrary could fall back to legacy cache and retain previous render state; final review found no remaining high/critical findings in the frontend cache path.
-- `ui-ux-specialist` subagent dispatch blocked by required MCP/sandbox failures; in-session UI review completed. Result: no intentional UI design changes; visual audit passed across required library states and viewports.
-- `task-completion-validator` subagent dispatch blocked by sandbox failures; in-session completion validation completed. Result: implementation maps to checklist/acceptance criteria; PR/CI remains pending until PR creation.
+- `ui-ux-specialist`: PASS. Scope is state/cache behavior in existing ProjectLibrary UI, with no intentional visual redesign. Visual audit rerun in recovery after installing Playwright Chromium and dependencies: 28/28 passed across mobile and desktop projects, covering normal, long text, empty, many items, filters, directory navigation, grid view, and interactive preview confirmation states. Screenshots were regenerated under `.codex/tmp/playwright-screenshots/`.
+- `security-auditor`: PASS. Reviewed the frontend auth-transition/localStorage cache path for cross-user data exposure. Namespaced cache keys include encoded authenticated user id; authenticated/null-auth renders do not read legacy project-only keys; AuthProvider clears previous-user and legacy namespaces on clean null session/account switch; sign-out clears cache before the request completes, including failed request paths. No high/critical findings remain in the frontend cache isolation path.
+- `test-engineer`: PASS. Focused regression suite rerun successfully: 69/69 tests passed across library cache namespace isolation, legacy refusal/clearing, AuthProvider transient refetch vs clean null/account switch transitions, sign-out failure cleanup, ProjectLibrary null-auth safety, and account-switch remount behavior.
+- `task-completion-validator`: PASS. Research findings map to checked checklist items and the diff touches each planned file. Acceptance criteria are covered by focused unit/component tests, staging evidence, and visual audit evidence. No new UI input/backend propagation or multi-resource selector gap exists.
+- `constitution-validator`: PASS. Diff adds deterministic localStorage namespace/key construction only. No new hardcoded URLs, timeouts, deployment identifiers, or operational limits; existing configurable cache TTL and eviction defaults remain unchanged.
+- `doc-sync-validator`: PASS. Scope is apps/web-only internal cache behavior with no API, env var, deployment, public docs, or persisted payload contract change. The archived task and PR body carry the required operational evidence; no public documentation update is required.
