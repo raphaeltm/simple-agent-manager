@@ -8,6 +8,7 @@ import {
 
 const CACHE_PREFIX = 'sam-library:';
 const USER_NAMESPACE_PREFIX = 'user:';
+export const UNAUTHENTICATED_LIBRARY_CACHE_NAMESPACE = `${USER_NAMESPACE_PREFIX}unauthenticated`;
 
 export type LibraryCacheNamespace = string | null | undefined;
 

@@ -34,6 +34,7 @@ import {
   getCachedFiles,
   setCachedDirectories,
   setCachedFiles,
+  UNAUTHENTICATED_LIBRARY_CACHE_NAMESPACE,
 } from '../lib/library-cache';
 import { searchIndex } from '../lib/library-search';
 import { useProjectContext } from './ProjectContext';
@@ -72,8 +73,13 @@ function applyAdvancedFilters(
 }
 
 export function ProjectLibrary() {
-  const { projectId } = useProjectContext();
   const { user } = useAuth();
+  const cacheNamespace = buildLibraryCacheNamespace(user?.id) ?? UNAUTHENTICATED_LIBRARY_CACHE_NAMESPACE;
+  return <ProjectLibraryContent key={cacheNamespace} cacheNamespace={cacheNamespace} />;
+}
+
+function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
+  const { projectId } = useProjectContext();
   const isMobile = useIsMobile();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -93,11 +99,10 @@ export function ProjectLibrary() {
     isSweeping,
     sweepError,
     invalidate,
-  } = useLibraryIndex(projectId, buildLibraryCacheNamespace(user?.id));
+  } = useLibraryIndex(projectId, cacheNamespace);
   const isOverCap = indexStatus === 'overCap';
 
   // Directory cache for instant render of folder cards
-  const cacheNamespace = buildLibraryCacheNamespace(user?.id);
   const initialCachedDirs = getCachedDirectories(projectId, '/', cacheNamespace) ?? [];
   const [directories, setDirectories] = useState<DirectoryEntry[]>(initialCachedDirs);
   const [dirRefreshToken, setDirRefreshToken] = useState(0);

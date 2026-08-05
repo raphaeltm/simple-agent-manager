@@ -15,7 +15,9 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 // single mock.
 // ---------------------------------------------------------------------------
 
-const mocks = vi.hoisted(() => ({
+const { mocks, authState } = vi.hoisted(() => ({
+  authState: { userId: 'user-1' as string | null },
+  mocks: {
   listLibraryFiles: vi.fn(),
   listLibraryDirectories: vi.fn(),
   uploadLibraryFile: vi.fn(),
@@ -24,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   getLibraryFilePreviewUrl: vi.fn(() => 'https://example.com/preview'),
   updateFileTags: vi.fn(),
   moveLibraryFile: vi.fn(),
+  },
 }));
 
 vi.mock('../../../src/lib/api/library', async (importOriginal) => ({
@@ -53,7 +56,7 @@ vi.mock('../../../src/hooks/useIsMobile', () => ({
 
 vi.mock('../../../src/components/AuthProvider', () => ({
   useAuth: () => ({
-    user: { id: 'user-1', email: 'owner@example.com', name: 'Owner' },
+    user: authState.userId ? { id: authState.userId, email: `${authState.userId}@example.com`, name: 'Owner' } : null,
     isAuthenticated: true,
     isLoading: false,
     isSuperadmin: false,
@@ -66,6 +69,7 @@ vi.mock('../../../src/components/AuthProvider', () => ({
 // global-index helpers used by the sweep hook in addition to the per-directory
 // helpers used by the page.
 const cacheMocks = vi.hoisted(() => ({
+  UNAUTHENTICATED_LIBRARY_CACHE_NAMESPACE: 'user:unauthenticated',
   buildLibraryCacheNamespace: vi.fn((userId: string | null | undefined) => userId ? `user:${encodeURIComponent(userId)}` : null),
   getCachedFiles: vi.fn().mockReturnValue(null),
   setCachedFiles: vi.fn(),
@@ -133,12 +137,57 @@ describe('ProjectLibrary (client-side index)', () => {
     cacheMocks.getCachedDirectories.mockReturnValue(null);
     cacheMocks.getCachedIndex.mockReturnValue(null);
     cacheMocks.setCachedIndex.mockReturnValue(true);
+    authState.userId = 'user-1';
     mocks.listLibraryDirectories.mockResolvedValue({ directories: [] });
   });
 
   // --- Basic rendering ------------------------------------------------------
 
 
+
+
+
+  it('does not hydrate legacy cache when auth is temporarily null', async () => {
+    authState.userId = null;
+    cacheMocks.getCachedIndex.mockImplementation((_projectId: string, namespace?: string | null) => {
+      if (namespace === undefined || namespace === null) {
+        return { files: [makeFile({ id: 'legacy', filename: 'previous-user.txt' })], count: 1, sweptAt: Date.now() };
+      }
+      return null;
+    });
+    mocks.listLibraryFiles.mockResolvedValue(page([]));
+
+    renderLibrary();
+
+    await waitFor(() => expect(cacheMocks.getCachedIndex).toHaveBeenCalledWith('proj-test', 'user:unauthenticated'));
+    expect(screen.queryByText('previous-user.txt')).not.toBeInTheDocument();
+  });
+
+  it('remounts on account switch so previous-user cached rows do not flash', async () => {
+    cacheMocks.getCachedIndex.mockImplementation((_projectId: string, namespace?: string | null) => {
+      if (namespace === 'user:user-1') {
+        return { files: [makeFile({ id: 'a', filename: 'user-a-private.txt' })], count: 1, sweptAt: Date.now() };
+      }
+      if (namespace === 'user:user-2') {
+        return { files: [makeFile({ id: 'b', filename: 'user-b-private.txt' })], count: 1, sweptAt: Date.now() };
+      }
+      return null;
+    });
+    mocks.listLibraryFiles.mockReturnValue(new Promise(() => undefined));
+
+    const { rerender } = renderLibrary();
+    expect(await screen.findByText('user-a-private.txt')).toBeInTheDocument();
+
+    authState.userId = 'user-2';
+    rerender(
+      <MemoryRouter initialEntries={['/projects/proj-test/library']}>
+        <ProjectLibrary />
+      </MemoryRouter>,
+    );
+
+    expect(await screen.findByText('user-b-private.txt')).toBeInTheDocument();
+    expect(screen.queryByText('user-a-private.txt')).not.toBeInTheDocument();
+  });
 
   it('reads and writes ProjectLibrary cache through the authenticated user namespace', async () => {
     mocks.listLibraryFiles.mockResolvedValue(page([makeFile({ id: 'f1', filename: 'safe.txt' })]));
