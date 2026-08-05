@@ -608,6 +608,9 @@ crudRoutes.post('/:taskId/delegate', requireAuth(), requireApproved(), jsonValid
   }
 
   const workspace = await requireOwnedWorkspace(db, workspaceId, userId);
+  if (workspace.projectId !== projectId) {
+    throw errors.notFound('Workspace');
+  }
   if (workspace.status !== 'running') {
     throw errors.badRequest('Workspace must be running to accept delegated tasks');
   }

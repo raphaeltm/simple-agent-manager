@@ -38,7 +38,7 @@ describe('shared project task authorization lookup consistency', () => {
     expect(block).toContain("task.status !== 'completed'");
     expect(block).toContain("task.status !== 'failed'");
     expect(block).toContain("task.status !== 'cancelled'");
-    expect(block).toContain('cleanupTaskRun(task.id, c.env)');
+    expect(block).toContain('cleanupTaskRun(task.id, c.env, undefined, userId)');
   });
 
   it('delegate uses project-authorized task lookup but requires a caller-owned running workspace', () => {
@@ -65,4 +65,3 @@ describe('shared project task authorization lookup consistency', () => {
     expect(block).toContain('cleanupWorkspaceForDeletion');
   });
 });
-

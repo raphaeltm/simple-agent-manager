@@ -48,7 +48,8 @@ function getCleanupDelayMs(env: Env): number {
 export async function cleanupTaskRun(
   taskId: string,
   env: Env,
-  warmTimeoutOverrideMs?: number | null
+  warmTimeoutOverrideMs?: number | null,
+  requiredUserId?: string
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   const cleanupDelay = getCleanupDelayMs(env);
@@ -68,15 +69,22 @@ export async function cleanupTaskRun(
     return;
   }
 
+  const workspaceConditions = [eq(schema.workspaces.id, task.workspaceId)];
+  if (requiredUserId) {
+    workspaceConditions.push(eq(schema.workspaces.userId, requiredUserId));
+  }
+
   const [workspace] = await db
     .select()
     .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, task.workspaceId))
+    .where(and(...workspaceConditions))
     .limit(1);
 
   if (!workspace || !workspace.nodeId) {
     return;
   }
+
+  const cleanupUserId = requiredUserId ?? task.userId;
 
   log.info('task_run.cleanup.started', { taskId, workspaceId: task.workspaceId, nodeId: workspace.nodeId });
 
@@ -86,11 +94,11 @@ export async function cleanupTaskRun(
       runtime: schema.nodes.runtime,
     })
     .from(schema.nodes)
-    .where(and(eq(schema.nodes.id, workspace.nodeId), eq(schema.nodes.userId, task.userId)))
+    .where(and(eq(schema.nodes.id, workspace.nodeId), eq(schema.nodes.userId, cleanupUserId)))
     .limit(1);
 
   if (node?.runtime === 'cf-container') {
-    await stopNodeResources(workspace.nodeId, task.userId, env);
+    await stopNodeResources(workspace.nodeId, cleanupUserId, env);
     log.info('task_run.cleanup.cf_container_destroyed', {
       taskId,
       workspaceId: workspace.id,
@@ -102,7 +110,7 @@ export async function cleanupTaskRun(
   // Stop the workspace (idempotent: only if still running/recovery)
   if (workspace.status === 'running' || workspace.status === 'recovery') {
     try {
-      await stopWorkspaceOnNode(workspace.nodeId, workspace.id, env, task.userId);
+      await stopWorkspaceOnNode(workspace.nodeId, workspace.id, env, cleanupUserId);
     } catch (err) {
       log.error('task_run.cleanup.workspace_stop_failed', {
         taskId,
@@ -130,7 +138,7 @@ export async function cleanupTaskRun(
       const doId = env.NODE_LIFECYCLE.idFromName(workspace.nodeId);
       const stub = env.NODE_LIFECYCLE.get(doId);
       await (stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle)
-        .scheduleWorkspaceDeletion(workspace.id, task.userId);
+        .scheduleWorkspaceDeletion(workspace.id, cleanupUserId);
     } catch (e) {
       log.warn('task_run.cleanup.schedule_deletion_failed', {
         taskId,
@@ -145,7 +153,7 @@ export async function cleanupTaskRun(
     await cleanupAutoProvisionedNode(
       db,
       task.autoProvisionedNodeId,
-      task.userId,
+      cleanupUserId,
       workspace.id,
       env,
       warmTimeoutOverrideMs

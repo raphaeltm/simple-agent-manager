@@ -323,7 +323,7 @@ runRoutes.post('/:taskId/run/cleanup', requireAuth(), requireApproved(), async (
     throw errors.badRequest('projectId and taskId are required');
   }
 
-  // Cleanup is project-authorized; cleanupTaskRun preserves task-linked workspace/node ownership invariants.
+  // Cleanup is project-authorized, while resource mutation remains caller-scoped.
   await requireProjectCapability(db, projectId, userId, 'task:write');
   const task = await requireProjectTaskById(db, projectId, taskId);
 
@@ -338,7 +338,7 @@ runRoutes.post('/:taskId/run/cleanup', requireAuth(), requireApproved(), async (
     );
   }
 
-  c.executionCtx.waitUntil(cleanupTaskRun(task.id, c.env));
+  c.executionCtx.waitUntil(cleanupTaskRun(task.id, c.env, undefined, userId));
 
   return c.json({ success: true, message: 'Cleanup initiated' });
 });

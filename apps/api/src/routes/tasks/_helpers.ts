@@ -35,7 +35,7 @@ export async function requireOwnedTaskById(
     .limit(1);
 
   const task = rows[0];
-  if (!task) {
+  if (!task || task.userId !== userId) {
     throw errors.notFound('Task');
   }
 
@@ -54,7 +54,7 @@ export async function requireProjectTaskById(
     .limit(1);
 
   const task = rows[0];
-  if (!task) {
+  if (!task || task.projectId !== projectId) {
     throw errors.notFound('Task');
   }
 

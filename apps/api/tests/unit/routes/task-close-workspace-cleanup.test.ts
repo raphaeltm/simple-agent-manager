@@ -123,7 +123,17 @@ describe('POST /api/projects/:projectId/tasks/:taskId/close workspace cleanup', 
   });
 
   it('does not clean up a workspace when the task belongs to a different project route', async () => {
-    const db = buildDb([[]]);
+    const victimTask = {
+      id: 'task-close-cross-project',
+      projectId: 'project-victim',
+      userId: 'victim-user',
+      status: 'in_progress',
+      taskMode: 'conversation',
+      workspaceId: 'workspace-victim',
+    };
+    // Deliberately return a cross-project row even though the query predicate should exclude it.
+    // The post-query identity check must still fail closed (defence in depth).
+    const db = buildDb([[victimTask]]);
     vi.mocked(drizzle).mockReturnValue(db as never);
 
     const response = await createApp().fetch(
@@ -136,6 +146,7 @@ describe('POST /api/projects/:projectId/tasks/:taskId/close workspace cleanup', 
 
     expect(response.status).toBe(404);
     expect(mocks.cleanupWorkspaceForDeletion).not.toHaveBeenCalled();
+    expect(db.update).not.toHaveBeenCalled();
   });
 
   it('closes an authorized project task but does not clean up another user workspace', async () => {

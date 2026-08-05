@@ -155,6 +155,28 @@ describe('cleanupTaskRun', () => {
     expect(mocks.stopNodeResources).not.toHaveBeenCalled();
     expect(mocks.markIdle).toHaveBeenCalledWith(env, 'node-vm-1', 'user-vm-1', undefined);
   });
+
+  it('does not mutate another user workspace when cleanup is caller-scoped', async () => {
+    const db = buildDb([
+      [{
+        id: 'task-shared-1',
+        userId: 'task-owner',
+        workspaceId: 'workspace-owner-1',
+        autoProvisionedNodeId: 'node-owner-1',
+      }],
+      [],
+    ]);
+    mocks.drizzle.mockReturnValue(db);
+    const env = { DATABASE: {}, TASK_RUN_CLEANUP_DELAY_MS: '0' } as Env;
+
+    const { cleanupTaskRun } = await import('../../../src/services/task-runner');
+    await cleanupTaskRun('task-shared-1', env, undefined, 'project-member');
+
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(mocks.stopNodeResources).not.toHaveBeenCalled();
+    expect(mocks.markIdle).not.toHaveBeenCalled();
+    expect(db.update).not.toHaveBeenCalled();
+  });
 });
 
 describe('cleanupTerminalTaskResources', () => {
