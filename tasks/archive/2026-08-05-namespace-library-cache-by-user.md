@@ -31,7 +31,8 @@ The web app caches project library file and directory metadata in `localStorage`
 - [x] Add scenario-driven unit/component tests covering cache isolation, AuthProvider transitions, ProjectLibrary cached render safety, logout, expiry, and account switch.
 - [x] Run ProjectLibrary visual audit with normal, long text, empty, many, and error states on mobile and desktop.
 - [x] Run specialist review and address findings (subagents blocked by MCP/sandbox; in-session reviews completed; null namespace/old-user flash gap fixed).
-- [ ] Run local quality suite, staging verification, and PR/CI.
+- [x] Run local quality suite and staging verification.
+- [ ] Open PR and verify CI green.
 
 ## Acceptance criteria
 
@@ -41,3 +42,29 @@ The web app caches project library file and directory metadata in `localStorage`
 - Logout/session expiry/account switch clear unsafe library cache deterministically.
 - Tests fail against the old project-only cache behavior and pass with the fix.
 - PR is open, CI green, and unmerged.
+
+
+## Completion evidence
+
+### Local quality
+
+- Focused regression suite: `pnpm --filter @simple-agent-manager/web test -- tests/unit/lib/library-cache.test.ts tests/unit/lib/auth-signout.test.ts tests/unit/components/auth-provider.test.tsx tests/unit/hooks/useLibraryIndex.test.ts tests/unit/pages/project-library.test.tsx` — 69 tests passed.
+- Full web suite: `pnpm --filter @simple-agent-manager/web lint && pnpm --filter @simple-agent-manager/web typecheck && pnpm --filter @simple-agent-manager/web test && pnpm --filter @simple-agent-manager/web build` — lint passed with pre-existing warnings only, typecheck passed, 2,858 tests passed, build passed with existing bundle/CSS warnings.
+
+### Visual audit
+
+- `PLAYWRIGHT_JSON_OUTPUT_NAME=/tmp/library-ui-audit.json pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/library-ui-audit.spec.ts --project="iPhone SE (375x667)" --project="Desktop (1280x800)" --reporter=json` — 28/28 passed.
+- Screenshots captured under `.codex/tmp/playwright-screenshots/` for normal, long-text, empty, many-items, filters-open, search, directory navigation, grid, and interactive-preview states on mobile/desktop.
+
+### Staging
+
+- Deploy workflow: https://github.com/raphaeltm/simple-agent-manager/actions/runs/30992343962 — deploy, data integrity, health check, and smoke tests passed (`12 passed`).
+- Existing authenticated staging library spec: `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/staging-library-search.spec.ts --project="Desktop (1280x800)" --reporter=line` — 2/2 passed.
+- Focused staging cache-isolation verifier against `https://app.sammy.party`: seeded legacy and foreign-user localStorage library metadata for project `01KJVGMWX26SGQ5DX94GMTJRQN`; verified fake metadata did not render while real library loaded; cleared cookies and verified seeded legacy/foreign/current metadata did not render in null-auth state. Output: `{ legacyBlocked: true, foreignBlocked: true, nullAuthNoMetadata: true }`.
+
+### Local specialist review outcomes
+
+- `test-engineer` subagent dispatch blocked by required MCP/sandbox failures; in-session test-engineer review completed. Result: PASS after adding scenario-driven tests for namespace isolation, legacy refusal/clearing, AuthProvider clean-null and account-switch transitions, sign-out failure cleanup, ProjectLibrary null-auth safety, and account-switch remount behavior.
+- `security-auditor` subagent dispatch blocked by required MCP/sandbox failures; in-session security review completed. Result: found and fixed a null-auth namespace gap where ProjectLibrary could fall back to legacy cache and retain previous render state; final review found no remaining high/critical findings in the frontend cache path.
+- `ui-ux-specialist` subagent dispatch blocked by required MCP/sandbox failures; in-session UI review completed. Result: no intentional UI design changes; visual audit passed across required library states and viewports.
+- `task-completion-validator` subagent dispatch blocked by sandbox failures; in-session completion validation completed. Result: implementation maps to checklist/acceptance criteria; PR/CI remains pending until PR creation.
