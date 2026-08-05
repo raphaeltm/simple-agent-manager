@@ -10,10 +10,11 @@
  *   pnpm tsx scripts/deploy/run-migrations.ts --local
  */
 
-import { execSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import * as TOML from '@iarna/toml';
+import { ExecD1MigrationSafetyRunner, runSafeRemoteMigrations } from './d1-migration-safety.js';
+import type { D1DatabaseTarget } from './d1-migration-safety.js';
 import type { WranglerToml } from './types.js';
 
 const WRANGLER_TOML_PATH = resolve(import.meta.dirname, '../../apps/api/wrangler.toml');
@@ -23,10 +24,7 @@ function loadWranglerToml(): WranglerToml {
   return TOML.parse(content) as WranglerToml;
 }
 
-function getDatabaseNames(
-  config: WranglerToml,
-  environment?: string
-): Array<{ binding: string; name: string }> {
+function getDatabaseNames(config: WranglerToml, environment?: string): D1DatabaseTarget[] {
   const databases =
     environment && config.env?.[environment]?.d1_databases
       ? config.env[environment].d1_databases
@@ -64,17 +62,46 @@ async function main(): Promise<void> {
   console.log(`   Mode: ${isLocal ? 'local' : 'remote'}`);
   console.log(`   Databases: ${databases.map((db) => `${db.binding} (${db.name})`).join(', ')}\n`);
 
+  const unsafeRemote = args.includes('--unsafe-remote-migrations-i-understand-data-loss-risk');
+  const appsApiDir = resolve(import.meta.dirname, '../../apps/api');
+
+  if (!isLocal && !unsafeRemote) {
+    runSafeRemoteMigrations({
+      environment: environment!,
+      databases,
+      runner: new ExecD1MigrationSafetyRunner(),
+      cwd: appsApiDir,
+    });
+    console.log(`\n✅ All migrations applied safely!`);
+    return;
+  }
+
+  if (!isLocal && unsafeRemote) {
+    console.error(
+      '⚠️  UNSAFE remote migration acknowledgement supplied. Backup/count safety gates are bypassed.'
+    );
+  }
+
   for (const db of databases) {
     console.log(`\n📦 Migrating ${db.binding} (${db.name})...\n`);
 
-    const command = `npx wrangler d1 migrations apply ${db.name} ${isLocal ? '--local' : '--remote'}${environment ? ` --env ${environment}` : ''}`;
+    const command = [
+      'exec',
+      'wrangler',
+      'd1',
+      'migrations',
+      'apply',
+      db.name,
+      isLocal ? '--local' : '--remote',
+      ...(environment ? ['--env', environment] : []),
+    ];
 
-    console.log(`Executing: ${command}\n`);
+    console.log(`Executing: pnpm ${command.join(' ')}\n`);
 
     try {
-      execSync(command, {
+      new ExecD1MigrationSafetyRunner().execute('pnpm', command, {
         stdio: 'inherit',
-        cwd: resolve(import.meta.dirname, '../../apps/api'),
+        cwd: appsApiDir,
       });
       console.log(`\n✅ ${db.binding} migrations applied successfully!`);
     } catch (error) {
