@@ -104,7 +104,7 @@ func (s *Server) handleMcpWorkspaceInfo(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), s.config.MCPShortCommandTimeout)
 	defer cancel()
 
 	// Read current git branch
@@ -162,7 +162,7 @@ func (s *Server) handleMcpCredentialStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), s.config.MCPShortCommandTimeout)
 	defer cancel()
 
 	// Get all env vars from container (never return values, only check presence)
@@ -300,7 +300,7 @@ func (s *Server) handleMcpDiffSummary(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), s.config.MCPDiffCommandTimeout)
 	defer cancel()
 
 	resp := McpDiffSummaryResponse{

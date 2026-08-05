@@ -61,27 +61,28 @@ type ApplyProgressEvent struct {
 
 // EngineConfig holds the configuration for the deploy engine.
 type EngineConfig struct {
-	EnvironmentID       string
-	NodeID              string
-	ControlPlaneURL     string
-	CallbackToken       string
-	ComposeCmd          string // e.g., "docker compose"
-	ComposeProjectName  string
-	CaddyfilePath       string
-	CaddyReloadCmd      string
-	CaddyRestartCmd     string
-	ACMEEmail           string // Contact email for the ACME global options block (optional)
-	ACMECA              string // ACME CA directory URL override, e.g. LE staging (optional)
-	CaddyReadyTimeout   time.Duration
-	CaddyReadyInterval  time.Duration
-	HealthTimeout       time.Duration
-	HealthPollInterval  time.Duration
-	HTTPClient          *http.Client
-	ArtifactIdleTimeout time.Duration
-	ApplyProgress       ApplyProgressFunc
-	DockerLogin         DockerLoginFunc // defaults to cache.DockerLogin if nil
-	MountChecker        MountChecker    // defaults to RealMountChecker if nil
-	VolumeMounter       VolumeMounter   // defaults to RealVolumeMounter if nil
+	EnvironmentID           string
+	NodeID                  string
+	ControlPlaneURL         string
+	CallbackToken           string
+	ComposeCmd              string // e.g., "docker compose"
+	ComposeProjectName      string
+	CaddyfilePath           string
+	CaddyReloadCmd          string
+	CaddyRestartCmd         string
+	ACMEEmail               string // Contact email for the ACME global options block (optional)
+	ACMECA                  string // ACME CA directory URL override, e.g. LE staging (optional)
+	CaddyReadyTimeout       time.Duration
+	CaddyReadyInterval      time.Duration
+	HealthTimeout           time.Duration
+	HealthPollInterval      time.Duration
+	HTTPClient              *http.Client
+	ArtifactIdleTimeout     time.Duration
+	PreflightCommandTimeout time.Duration
+	ApplyProgress           ApplyProgressFunc
+	DockerLogin             DockerLoginFunc // defaults to cache.DockerLogin if nil
+	MountChecker            MountChecker    // defaults to RealMountChecker if nil
+	VolumeMounter           VolumeMounter   // defaults to RealVolumeMounter if nil
 }
 
 // NewEngine creates a new deployment engine.
@@ -118,6 +119,9 @@ func NewEngine(disk *DiskState, verifier *Verifier, cfg EngineConfig) *Engine {
 	}
 	if cfg.ArtifactIdleTimeout == 0 {
 		cfg.ArtifactIdleTimeout = config.DefaultDeployArtifactIdleTimeout
+	}
+	if cfg.PreflightCommandTimeout == 0 {
+		cfg.PreflightCommandTimeout = config.DefaultDeployPreflightCommandTimeout
 	}
 	return &Engine{
 		disk:          disk,

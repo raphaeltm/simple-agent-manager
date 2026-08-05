@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/logreader"
 )
 
@@ -86,6 +87,10 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 	// Start ping/pong for keepalive - configurable per constitution principle XI
 	pingInterval := s.config.LogStreamPingInterval
 	pongTimeout := s.config.LogStreamPongTimeout
+	pingWriteTimeout := s.config.LogStreamPingWriteTimeout
+	if pingWriteTimeout <= 0 {
+		pingWriteTimeout = config.DefaultLogStreamPingWriteTimeout
+	}
 
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(pongTimeout))
@@ -113,7 +118,7 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 			case <-ctx.Done():
 				return
 			case <-pingTicker.C:
-				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second)); err != nil {
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(pingWriteTimeout)); err != nil {
 					cancel()
 					return
 				}

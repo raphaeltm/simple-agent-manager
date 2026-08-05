@@ -18,6 +18,14 @@ type credSyncSnapshot struct {
 	agentType     string
 }
 
+func (h *SessionHost) credentialSyncTimeout() time.Duration {
+	timeout := h.config.CredentialSyncTimeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	return timeout
+}
+
 // syncCredentialOnStop reads the auth file from the container (if the agent
 // used file-based injection) and syncs any refreshed tokens back to the
 // control plane. This must be called AFTER the agent process exits but BEFORE
@@ -43,7 +51,7 @@ func (h *SessionHost) syncCredentialOnStop(snap credSyncSnapshot) {
 
 	// Use a short timeout — the container is about to be stopped/removed.
 	// This budget is shared between docker exec and the HTTP callback retry.
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), h.credentialSyncTimeout())
 	defer cancel()
 
 	content, err := readAuthFileFromContainer(ctx, containerID, h.config.ContainerUser, snap.authFilePath)
