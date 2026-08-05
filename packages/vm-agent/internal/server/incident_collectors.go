@@ -18,7 +18,10 @@ func (s *Server) configureIncidentCollectors() {
 	s.errorReporter.SetCollectors(
 		errorreport.CollectorFunc{
 			CollectorName: "agent-version",
-			CollectFunc: func(context.Context, errorreport.IncidentContext) (any, error) {
+			CollectFunc: func(ctx context.Context, _ errorreport.IncidentContext) (any, error) {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				return map[string]any{
 					"version":          sysinfo.Version,
 					"buildDate":        sysinfo.BuildDate,
@@ -29,20 +32,33 @@ func (s *Server) configureIncidentCollectors() {
 		},
 		errorreport.CollectorFunc{
 			CollectorName: "system-resources",
-			CollectFunc: func(context.Context, errorreport.IncidentContext) (any, error) {
+			CollectFunc: func(ctx context.Context, _ errorreport.IncidentContext) (any, error) {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				if s.sysInfoCollector == nil {
 					return nil, fmt.Errorf("system resource collector is unavailable")
 				}
-				return s.sysInfoCollector.CollectQuick()
+				value, err := s.sysInfoCollector.CollectQuick()
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return nil, ctxErr
+				}
+				return value, err
 			},
 		},
 		errorreport.CollectorFunc{
 			CollectorName: "structured-events",
-			CollectFunc: func(_ context.Context, incident errorreport.IncidentContext) (any, error) {
+			CollectFunc: func(ctx context.Context, incident errorreport.IncidentContext) (any, error) {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				if s.eventStore == nil {
 					return nil, fmt.Errorf("structured event store is unavailable")
 				}
 				limit := s.config.ErrorReportEventLimit
+				if limit < 1 {
+					return nil, fmt.Errorf("error report event limit must be positive")
+				}
 				var events []eventSafePreview
 				if incident.WorkspaceID != "" {
 					stored, err := s.eventStore.ListWorkspace(incident.WorkspaceID, limit)
@@ -67,12 +83,18 @@ func (s *Server) configureIncidentCollectors() {
 						})
 					}
 				}
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				return map[string]any{"events": events, "limit": limit}, nil
 			},
 		},
 		errorreport.CollectorFunc{
 			CollectorName: "workspace-lifecycle",
-			CollectFunc: func(context.Context, errorreport.IncidentContext) (any, error) {
+			CollectFunc: func(ctx context.Context, _ errorreport.IncidentContext) (any, error) {
+				if err := ctx.Err(); err != nil {
+					return nil, err
+				}
 				s.workspaceMu.RLock()
 				defer s.workspaceMu.RUnlock()
 				workspaceIDs := make([]string, 0, len(s.workspaces))
@@ -81,6 +103,9 @@ func (s *Server) configureIncidentCollectors() {
 				}
 				sort.Strings(workspaceIDs)
 				limit := s.config.ErrorReportEventLimit
+				if limit < 1 {
+					return nil, fmt.Errorf("error report event limit must be positive")
+				}
 				if len(workspaceIDs) > limit {
 					workspaceIDs = workspaceIDs[:limit]
 				}

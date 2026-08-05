@@ -119,7 +119,9 @@ export async function finishDiagnosisRunTransition(
       .prepare(
         `UPDATE debug_diagnosis_runs
          SET status='failed',run_status=?,error_message=?,current_step=?,heartbeat_at=?,completed_at=?,updated_at=?
-         WHERE id=? AND run_status IN ('queued','running')`
+         WHERE id=? AND run_status IN ('queued','running')
+           AND ((?='cancelled' AND cancel_requested_at IS NOT NULL)
+             OR (?='failed' AND cancel_requested_at IS NULL))`
       )
       .bind(
         input.status,
@@ -128,7 +130,9 @@ export async function finishDiagnosisRunTransition(
         input.now,
         input.now,
         input.now,
-        input.runId
+        input.runId,
+        input.status,
+        input.status
       ),
     db
       .prepare(

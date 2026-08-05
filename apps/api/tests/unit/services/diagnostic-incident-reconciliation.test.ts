@@ -8,7 +8,11 @@ import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 interface Head {
   size: number;
-  customMetadata?: Record<string, string>;
+  checksums?: { sha256: ArrayBuffer };
+}
+
+function checksumBytes(hex: string): ArrayBuffer {
+  return Uint8Array.from(Buffer.from(hex, 'hex')).buffer;
 }
 
 class ReconciliationR2 {
@@ -120,7 +124,7 @@ describe('diagnostic incident reconciliation', () => {
     });
     r2.heads.set('repair', {
       size: 5,
-      customMetadata: { checksumSha256: 'a'.repeat(64) },
+      checksums: { sha256: checksumBytes('a'.repeat(64)) },
     });
 
     const result = await reconcileDiagnosticIncidents(env);
@@ -191,5 +195,69 @@ describe('diagnostic incident reconciliation', () => {
       observability.prepare('SELECT message FROM platform_errors WHERE id = ?').get(repairId)
     ).toEqual({ message: 'original exact failure' });
     expect(r2.heads.size).toBe(0);
+  });
+
+  it('never promotes same-size content whose native R2 checksum differs', async () => {
+    const id = '01KZ8V0GMXQ4ZCSERPRT2X2K71';
+    insertIncident({
+      id,
+      status: 'pending',
+      artifactStatus: 'pending',
+      objectKey: 'corrupt-after-put',
+    });
+    r2.heads.set('corrupt-after-put', {
+      size: 5,
+      checksums: { sha256: checksumBytes('b'.repeat(64)) },
+    });
+    const result = await reconcileDiagnosticIncidents(env);
+    expect(result).toMatchObject({ repaired: 0, failed: 1 });
+    expect(main.prepare('SELECT status FROM diagnostic_incidents WHERE id = ?').get(id)).toEqual({
+      status: 'failed',
+    });
+    expect(r2.heads.has('corrupt-after-put')).toBe(false);
+  });
+
+  it('rotates available-object checks and advances the dual-D1 sweep across batches', async () => {
+    const ids = Array.from({ length: 6 }, (_, index) => `01KZ8V0GMXQ4ZCSERPRT2X2K7${index + 2}`);
+    for (const [index, id] of ids.entries()) {
+      const objectKey = `available-${index}`;
+      insertIncident({
+        id,
+        status: 'available',
+        artifactStatus: 'available',
+        objectKey,
+      });
+      if (index < ids.length - 1) {
+        r2.heads.set(objectKey, {
+          size: 5,
+          checksums: { sha256: checksumBytes('a'.repeat(64)) },
+        });
+      }
+      observability
+        .prepare(
+          `INSERT INTO platform_errors
+           (id, source, level, message, node_id, workspace_id, timestamp, created_at)
+           VALUES (?, 'vm-agent', 'error', 'exact failure', 'node-1', NULL, ?, ?)`
+        )
+        .run(id, index + 1, index + 1);
+    }
+
+    const first = await reconcileDiagnosticIncidents(env);
+    expect(first.failed).toBe(0);
+    expect(first.incidentMetadataRepaired).toBe(0);
+    const second = await reconcileDiagnosticIncidents(env);
+    expect(second.failed).toBe(1);
+
+    main.prepare('DELETE FROM diagnostic_artifacts').run();
+    main.prepare('DELETE FROM diagnostic_incidents').run();
+    main.prepare('DELETE FROM diagnostic_reconciliation_state').run();
+    const metadataFirst = await reconcileDiagnosticIncidents(env);
+    const metadataSecond = await reconcileDiagnosticIncidents(env);
+    expect(metadataFirst.incidentMetadataRepaired + metadataSecond.incidentMetadataRepaired).toBe(
+      ids.length
+    );
+    expect(main.prepare('SELECT COUNT(*) AS count FROM diagnostic_incidents').get()).toEqual({
+      count: ids.length,
+    });
   });
 });

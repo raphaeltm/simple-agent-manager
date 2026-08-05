@@ -175,4 +175,33 @@ describe('diagnosis terminal compare-and-set transitions', () => {
       sqlite.prepare('SELECT run_status,diagnosis_id FROM debug_diagnosis_runs').get()
     ).toEqual({ run_status: 'running', diagnosis_id: null });
   });
+
+  it('preserves an already-requested cancellation against a late failure', async () => {
+    sqlite.exec(
+      "UPDATE debug_diagnosis_runs SET cancel_requested_at='2026-08-05T12:00:30.000Z' WHERE id='transition-run'"
+    );
+    expect(
+      await finishDiagnosisRunTransition(db, {
+        runId: 'transition-run',
+        eventId: 'late-failure',
+        status: 'failed',
+        message: 'provider failed after cancellation',
+        code: 'MODEL_FAILED',
+        now: '2026-08-05T12:01:00.000Z',
+      })
+    ).toBe(false);
+    expect(
+      await finishDiagnosisRunTransition(db, {
+        runId: 'transition-run',
+        eventId: 'cancel-winner',
+        status: 'cancelled',
+        message: 'Diagnosis cancelled by an administrator',
+        code: 'CANCELLED',
+        now: '2026-08-05T12:01:01.000Z',
+      })
+    ).toBe(true);
+    expect(sqlite.prepare('SELECT run_status FROM debug_diagnosis_runs').get()).toEqual({
+      run_status: 'cancelled',
+    });
+  });
 });

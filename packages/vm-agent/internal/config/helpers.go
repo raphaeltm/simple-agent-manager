@@ -228,6 +228,15 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.ErrorReportEventLimit != 0 &&
+		(c.ErrorReportEventLimit < 1 || c.ErrorReportEventLimit > MaxErrorReportEventLimit) {
+		errs = append(errs, fmt.Errorf(
+			"ERROR_REPORT_EVENT_LIMIT must be 1-%d, got %d",
+			MaxErrorReportEventLimit,
+			c.ErrorReportEventLimit,
+		))
+	}
+
 	if c.JWTIssuer != "" {
 		if err := auth.ValidateIssuerURL(c.JWTIssuer); err != nil {
 			errs = append(errs, fmt.Errorf("JWT_ISSUER: %w", err))

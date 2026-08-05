@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -62,9 +61,21 @@ type outboxRow struct {
 func openOutbox(path string) (*sql.DB, error) {
 	dsn := ":memory:"
 	if path != "" {
-		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
-			return nil, fmt.Errorf("create outbox directory: %w", err)
+		absPath, err := filepath.Abs(path)
+		if err != nil {
+			return nil, fmt.Errorf("resolve outbox path: %w", err)
 		}
+		directory, err := openPrivateSpoolRoot(filepath.Dir(absPath))
+		if err != nil {
+			return nil, fmt.Errorf("secure outbox directory: %w", err)
+		}
+		_ = directory.Close()
+		if info, statErr := os.Lstat(absPath); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
+			return nil, fmt.Errorf("outbox database path must not be a symlink")
+		} else if statErr != nil && !os.IsNotExist(statErr) {
+			return nil, fmt.Errorf("inspect outbox path: %w", statErr)
+		}
+		path = absPath
 		dsn = fmt.Sprintf("file:%s?cache=shared&mode=rwc&_journal_mode=WAL", path)
 	}
 	db, err := sql.Open("sqlite", dsn)
@@ -87,12 +98,31 @@ func openOutbox(path string) (*sql.DB, error) {
 		return nil, fmt.Errorf("migrate outbox: %w", err)
 	}
 	if path != "" {
-		if err := os.Chmod(path, 0o600); err != nil {
+		if err := restrictOutboxFiles(path); err != nil {
 			db.Close()
 			return nil, fmt.Errorf("restrict outbox permissions: %w", err)
 		}
 	}
 	return db, nil
+}
+
+func restrictOutboxFiles(path string) error {
+	for _, candidate := range []string{path, path + "-wal", path + "-shm"} {
+		info, err := os.Lstat(candidate)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return err
+		}
+		if info.Mode()&os.ModeSymlink != 0 || !info.Mode().IsRegular() {
+			return fmt.Errorf("outbox file is not a regular file: %s", candidate)
+		}
+		if err := os.Chmod(candidate, 0o600); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (r *Reporter) insertEntry(entry ErrorEntry, contextJSON string) error {
@@ -301,6 +331,19 @@ func (r *Reporter) markSnapshotFailed(incidentID string, snapshotErr error) {
 	}
 }
 
+func (r *Reporter) markArtifactUnavailable(row outboxRow, artifactErr error) error {
+	_, err := r.db.Exec(`UPDATE error_report_outbox SET artifact_state = 'failed',
+		spool_path = '', checksum = '', size_bytes = 0, attempts = 0,
+		last_error = ?, next_attempt_at = ?,
+		manifest_json = '{"version":1,"collectors":[],"unavailable":true}',
+		preview_json = '{}' WHERE id = ? AND artifact_ack = 0`,
+		boundedError(artifactErr), time.Now().UTC().Format(time.RFC3339Nano), row.id)
+	if err == nil && r.isPrivateSpoolPath(row.spoolPath) && r.spoolRoot != nil {
+		_ = r.spoolRoot.Remove(filepath.Base(row.spoolPath))
+	}
+	return err
+}
+
 func (r *Reporter) terminalizeExpired() error {
 	_, err := r.db.Exec(`UPDATE error_report_outbox SET report_ack = 1, artifact_ack = 1,
 		artifact_state = CASE WHEN artifact_required = 1 THEN 'failed' ELSE artifact_state END,
@@ -334,8 +377,8 @@ func (r *Reporter) deleteAcknowledged() error {
 		return err
 	}
 	for _, path := range paths {
-		if r.isPrivateSpoolPath(path) {
-			_ = os.Remove(path)
+		if r.isPrivateSpoolPath(path) && r.spoolRoot != nil {
+			_ = r.spoolRoot.Remove(filepath.Base(path))
 		}
 	}
 	return nil
@@ -362,7 +405,7 @@ func (r *Reporter) isPrivateSpoolPath(path string) bool {
 	if r.config.SpoolDir == "" || path == "" {
 		return false
 	}
-	cleanDir := filepath.Clean(r.config.SpoolDir) + string(os.PathSeparator)
+	cleanDir := filepath.Clean(r.config.SpoolDir)
 	cleanPath := filepath.Clean(path)
-	return strings.HasPrefix(cleanPath, cleanDir)
+	return filepath.Dir(cleanPath) == cleanDir && filepath.Base(cleanPath) != "."
 }

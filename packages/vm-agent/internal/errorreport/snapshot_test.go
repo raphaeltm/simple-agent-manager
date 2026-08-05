@@ -16,6 +16,15 @@ import (
 
 const evidenceCanary = "SAM_CANARY_TOKEN=ghp_supersecretvalue123456"
 
+var credentialCanaries = []string{
+	"AKIAIOSFODNN7EXAMPLE",
+	strings.Join([]string{"xoxb", "123456789012", "abcdefghijklmnop"}, "-"),
+	"npm_abcdefghijklmnopqrstuvwxyz123456",
+	"sk_" + "live_abcdefghijklmnopqrstuvwx",
+	"AIzaSyA1234567890abcdefghijklmnop",
+	"https://operator:password@example.test/private",
+}
+
 func readArchive(t *testing.T, path string) map[string][]byte {
 	t.Helper()
 	file, err := os.Open(path)
@@ -64,7 +73,13 @@ func TestSnapshotRecursivelyRedactsCanariesAndBoundsValues(t *testing.T) {
 					"long":    strings.Repeat("x", 256),
 					"deeper":  map[string]any{"value": map[string]any{"tooDeep": true}},
 				},
-				"many": []any{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+				"many":             []any{1, 2, 3, 4, 5, 6, 7, 8, 9, 10},
+				"environmentValue": credentialCanaries[0],
+				"processCommand":   credentialCanaries[1],
+				"prompt":           credentialCanaries[2],
+				"repositoryContent": []any{
+					credentialCanaries[3], credentialCanaries[4], credentialCanaries[5],
+				},
 			}, nil
 		},
 	})
@@ -89,6 +104,11 @@ func TestSnapshotRecursivelyRedactsCanariesAndBoundsValues(t *testing.T) {
 	}
 	if strings.Contains(combined, evidenceCanary) || !strings.Contains(combined, "[REDACTED]") {
 		t.Fatalf("unexpected sanitized evidence: %s", combined)
+	}
+	for _, canary := range credentialCanaries {
+		if strings.Contains(combined, canary) {
+			t.Fatalf("credential canary leaked: %s", canary)
+		}
 	}
 	var manifest SnapshotManifest
 	if err := json.Unmarshal([]byte(manifestJSON), &manifest); err != nil {
@@ -203,6 +223,56 @@ func TestStartupCleanupDoesNotFollowSymlinks(t *testing.T) {
 	}
 }
 
+func TestStartupRejectsSymlinkedSpoolRoot(t *testing.T) {
+	dir := t.TempDir()
+	target := filepath.Join(dir, "external")
+	if err := os.MkdirAll(target, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	protected := filepath.Join(target, "protected.tar.gz")
+	if err := os.WriteFile(protected, []byte(evidenceCanary), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	spool := filepath.Join(dir, "spool-link")
+	if err := os.Symlink(target, spool); err != nil {
+		t.Fatal(err)
+	}
+	cfg := testConfig(t)
+	cfg.DBPath = filepath.Join(dir, "outbox", "errors.db")
+	cfg.SpoolDir = spool
+	reporter := New("http://localhost", "node-1", "", cfg)
+	defer reporter.Shutdown()
+	if reporter.InitError() == nil || !strings.Contains(reporter.InitError().Error(), "symlink") {
+		t.Fatalf("expected symlink-root rejection, got %v", reporter.InitError())
+	}
+	if data, err := os.ReadFile(protected); err != nil || string(data) != evidenceCanary {
+		t.Fatalf("symlink target was modified: data=%q err=%v", data, err)
+	}
+}
+
+func TestCollectorTimeoutBoundsBacklogAndShutdown(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.CollectorTimeout = 40 * time.Millisecond
+	reporter := New("http://localhost", "node-1", "", cfg)
+	blocked := make(chan struct{})
+	reporter.SetCollectors(CollectorFunc{
+		CollectorName: "ignores-cancellation",
+		CollectFunc: func(context.Context, IncidentContext) (any, error) {
+			<-blocked
+			return map[string]any{"late": true}, nil
+		},
+	})
+	for index := 0; index < 20; index++ {
+		reporter.Report(ErrorEntry{Level: "error", Message: "failure", Source: "test"})
+	}
+	started := time.Now()
+	reporter.Shutdown()
+	if elapsed := time.Since(started); elapsed > 500*time.Millisecond {
+		t.Fatalf("shutdown exceeded bounded collector window: %s", elapsed)
+	}
+	close(blocked)
+}
+
 func TestSnapshotEnforcesArtifactAndSpoolQuotas(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.ArtifactMaxBytes = 32
@@ -214,13 +284,32 @@ func TestSnapshotEnforcesArtifactAndSpoolQuotas(t *testing.T) {
 	}
 
 	cfg2 := testConfig(t)
-	cfg2.SpoolMaxBytes = 1
+	cfg2.SpoolMaxBytes = 1024
 	reporter2 := New("http://localhost", "node-1", "", cfg2)
 	defer reporter2.Shutdown()
-	if err := os.WriteFile(filepath.Join(cfg2.SpoolDir, "occupied.tar.gz"), []byte("xx"), 0o600); err != nil {
+	if err := os.WriteFile(
+		filepath.Join(cfg2.SpoolDir, "occupied.tar.gz"),
+		make([]byte, cfg2.SpoolMaxBytes-16),
+		0o600,
+	); err != nil {
 		t.Fatal(err)
 	}
-	if _, _, _, _, _, err := reporter2.buildSnapshot(entry); err == nil || !strings.Contains(err.Error(), "spool quota") {
-		t.Fatalf("expected spool quota error, got %v", err)
+	if _, _, _, _, _, err := reporter2.buildSnapshot(entry); err == nil || !strings.Contains(err.Error(), "artifact exceeds") {
+		t.Fatalf("expected remaining-spool quota error, got %v", err)
+	}
+	entries, err := os.ReadDir(cfg2.SpoolDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var total int64
+	for _, item := range entries {
+		info, statErr := item.Info()
+		if statErr != nil {
+			t.Fatal(statErr)
+		}
+		total += info.Size()
+	}
+	if total > cfg2.SpoolMaxBytes {
+		t.Fatalf("spool quota exceeded: %d > %d", total, cfg2.SpoolMaxBytes)
 	}
 }

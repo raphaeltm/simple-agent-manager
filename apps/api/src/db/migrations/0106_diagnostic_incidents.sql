@@ -52,3 +52,10 @@ CREATE INDEX idx_diagnostic_artifacts_node_status
   ON diagnostic_artifacts(node_id, status, created_at);
 CREATE INDEX idx_diagnostic_artifacts_expiry
   ON diagnostic_artifacts(status, expires_at);
+
+CREATE TABLE diagnostic_reconciliation_state (
+  job_key TEXT PRIMARY KEY NOT NULL,
+  cursor_created_at INTEGER,
+  cursor_id TEXT,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);

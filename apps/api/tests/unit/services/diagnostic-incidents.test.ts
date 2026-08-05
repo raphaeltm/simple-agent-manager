@@ -8,6 +8,7 @@ import type { Env } from '../../../src/env';
 import {
   ensurePendingIncidents,
   getDiagnosticIncidentByErrorId,
+  getDiagnosticIncidentsByErrorIds,
   registerDiagnosticArtifact,
   uploadDiagnosticArtifact,
 } from '../../../src/services/diagnostic-incidents';
@@ -21,13 +22,21 @@ const NODE_ID = 'node-1';
 class MemoryR2 {
   readonly objects = new Map<string, Uint8Array>();
   readonly put = vi.fn(
-    async (key: string, value: ReadableStream<Uint8Array> | ArrayBuffer | Uint8Array) => {
+    async (
+      key: string,
+      value: ReadableStream<Uint8Array> | ArrayBuffer | Uint8Array,
+      options?: R2PutOptions
+    ) => {
       const bytes =
         value instanceof ReadableStream
           ? new Uint8Array(await new Response(value).arrayBuffer())
           : value instanceof ArrayBuffer
             ? new Uint8Array(value)
             : value;
+      const actual = sha256(bytes);
+      if (typeof options?.sha256 === 'string' && options.sha256 !== actual) {
+        throw new Error('R2 SHA-256 mismatch');
+      }
       this.objects.set(key, bytes);
       return {} as R2Object;
     }
@@ -156,7 +165,31 @@ describe('diagnostic incident storage boundary', () => {
     ).rejects.toMatchObject({ statusCode: 409 });
   });
 
-  it('deletes checksum-mismatched content and keeps the upload retryable', async () => {
+  it('downgrades a still-pending registration when the VM loses its local artifact', async () => {
+    const bytes = new TextEncoder().encode('safe');
+    await seedIncident();
+    await registerDiagnosticArtifact(env, NODE_ID, INCIDENT_ID, registration(bytes));
+    await expect(
+      registerDiagnosticArtifact(env, NODE_ID, INCIDENT_ID, {
+        ...registration(bytes),
+        sizeBytes: 0,
+        checksumSha256: '',
+        manifest: { version: 1, incidentId: INCIDENT_ID, unavailable: true },
+        preview: {},
+        status: 'failed',
+      })
+    ).resolves.toEqual({ artifactId: ARTIFACT_ID, status: 'failed' });
+    expect(
+      sqlite
+        .prepare('SELECT status, checksum_sha256, expected_bytes FROM diagnostic_artifacts')
+        .get()
+    ).toEqual({ status: 'failed', checksum_sha256: null, expected_bytes: 0 });
+    expect(sqlite.prepare('SELECT status FROM diagnostic_incidents').get()).toEqual({
+      status: 'failed',
+    });
+  });
+
+  it('lets R2 atomically reject checksum-mismatched content and keeps the upload retryable', async () => {
     const registered = new TextEncoder().encode('expected');
     const corrupted = new TextEncoder().encode('corrupt!');
     await seedIncident();
@@ -178,13 +211,62 @@ describe('diagnostic incident storage boundary', () => {
           body: corrupted,
         })
       )
-    ).rejects.toMatchObject({ statusCode: 400 });
+    ).rejects.toThrow('R2 SHA-256 mismatch');
     expect(r2.objects.size).toBe(0);
     expect(
       sqlite
         .prepare('SELECT status, upload_attempts, failure_reason FROM diagnostic_artifacts')
         .get()
-    ).toEqual({ status: 'pending', upload_attempts: 1, failure_reason: 'Checksum mismatch' });
+    ).toEqual({ status: 'pending', upload_attempts: 1, failure_reason: 'Upload failed' });
+  });
+
+  it('rejects actual bytes beyond the registered length even with a forged header', async () => {
+    const registered = new TextEncoder().encode('safe');
+    const oversized = new TextEncoder().encode('safe-extra');
+    await seedIncident();
+    await registerDiagnosticArtifact(env, NODE_ID, INCIDENT_ID, registration(registered));
+
+    await expect(
+      uploadDiagnosticArtifact(
+        env,
+        NODE_ID,
+        INCIDENT_ID,
+        ARTIFACT_ID,
+        new Request('https://api.example.test/content', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/gzip',
+            'Content-Length': String(registered.byteLength),
+            'X-Content-SHA256': sha256(registered),
+          },
+          body: oversized,
+        })
+      )
+    ).rejects.toMatchObject({ statusCode: 400 });
+    expect(r2.objects.size).toBe(0);
+  });
+
+  it('redacts credential-shaped manifest and preview values again at ingestion', async () => {
+    const bytes = new TextEncoder().encode('safe');
+    const slackCanary = ['xoxb', '123456789012', 'abcdefghijklmnop'].join('-');
+    await seedIncident();
+    await registerDiagnosticArtifact(env, NODE_ID, INCIDENT_ID, {
+      ...registration(bytes),
+      manifest: {
+        ...registration(bytes).manifest,
+        neutral: 'AKIAIOSFODNN7EXAMPLE',
+      },
+      preview: {
+        slack: slackCanary,
+        url: 'https://operator:secret@example.test/path',
+      },
+    });
+    const incident = await getDiagnosticIncidentByErrorId(env, ERROR_ID);
+    const serialized = JSON.stringify(incident);
+    expect(serialized).not.toContain('AKIAIOSFODNN7EXAMPLE');
+    expect(serialized).not.toContain(slackCanary);
+    expect(serialized).not.toContain('operator:secret');
+    expect(serialized).toContain('[REDACTED]');
   });
 
   it('enforces registration, artifact-byte, and per-node quotas', async () => {
@@ -232,5 +314,48 @@ describe('diagnostic incident storage boundary', () => {
         }
       )
     ).rejects.toMatchObject({ statusCode: 409 });
+  });
+
+  it('atomically admits only one concurrent registration at the per-node boundary', async () => {
+    const bytes = new TextEncoder().encode('safe');
+    const secondIncident = '01KZ8V0GMXQ4ZCSERPRT2X2K6N';
+    await seedIncident();
+    await ensurePendingIncidents(env, [
+      {
+        incidentId: secondIncident,
+        platformErrorId: secondIncident,
+        nodeId: NODE_ID,
+        workspaceId: null,
+      },
+    ]);
+    const limited = { ...env, VM_INCIDENT_MAX_ARTIFACTS_PER_NODE: '1' } as Env;
+    const outcomes = await Promise.allSettled([
+      registerDiagnosticArtifact(limited, NODE_ID, INCIDENT_ID, registration(bytes)),
+      registerDiagnosticArtifact(limited, NODE_ID, secondIncident, {
+        ...registration(bytes),
+        artifactId: `${secondIncident}-safe`,
+        manifest: { ...registration(bytes).manifest, incidentId: secondIncident },
+      }),
+    ]);
+    expect(outcomes.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    expect(outcomes.filter((result) => result.status === 'rejected')).toHaveLength(1);
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM diagnostic_artifacts').get()).toEqual({
+      count: 1,
+    });
+  });
+
+  it('decorates a full 200-error page without exceeding D1 bind limits', async () => {
+    const insert = sqlite.prepare(
+      `INSERT INTO diagnostic_incidents
+       (id, platform_error_id, node_id, status, expires_at, delete_after)
+       VALUES (?, ?, ?, 'pending', '2099-01-01', '2099-02-01')`
+    );
+    const ids = Array.from({ length: 200 }, (_, index) => `incident-${index}`);
+    sqlite.transaction(() => {
+      for (const id of ids) insert.run(id, id, NODE_ID);
+    })();
+    const incidents = await getDiagnosticIncidentsByErrorIds(env, ids);
+    expect(incidents.size).toBe(200);
+    expect(incidents.get('incident-199')).toMatchObject({ platformErrorId: 'incident-199' });
   });
 });

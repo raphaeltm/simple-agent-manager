@@ -56,4 +56,20 @@ describe('strict observability persistence', () => {
       message: 'first failure',
     });
   });
+
+  it('rejects an oversized strict batch instead of silently acknowledging a prefix', async () => {
+    const inputs = ['Q', 'R'].map((suffix) => ({
+      id: `01KZ8V0GMXQ4ZCSERPRT2X2K6${suffix}`,
+      source: 'vm-agent' as const,
+      level: 'error' as const,
+      message: `failure-${suffix}`,
+      nodeId: 'node-1',
+    }));
+    await expect(
+      persistErrorBatchStrict(d1, inputs, { OBSERVABILITY_ERROR_BATCH_SIZE: '1' } as never)
+    ).rejects.toThrow('exceeds configured limit of 1');
+    expect(sqlite.prepare('SELECT COUNT(*) AS count FROM platform_errors').get()).toEqual({
+      count: 0,
+    });
+  });
 });

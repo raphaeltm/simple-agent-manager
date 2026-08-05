@@ -9,6 +9,7 @@ export const DEFAULT_PAGES_PRODUCTION_BRANCH = 'main';
 export const DEFAULT_SESSION_SNAPSHOT_TTL_DAYS = 7;
 export const DEFAULT_DIAGNOSTIC_INCIDENT_PREFIX = 'diagnostic-incidents';
 export const DEFAULT_DIAGNOSTIC_INCIDENT_TTL_DAYS = 7;
+export const MAX_DIAGNOSTIC_INCIDENT_TTL_DAYS = 30;
 
 export interface ConfigReader {
   get(key: string): string | undefined;
@@ -56,7 +57,8 @@ export function parseInfraConfig(config: ConfigReader, currentStack: string): In
     diagnosticIncidentTtlDays: parsePositiveInteger(
       optionalNonEmptyConfig(config, 'diagnosticIncidentTtlDays'),
       DEFAULT_DIAGNOSTIC_INCIDENT_TTL_DAYS,
-      'diagnosticIncidentTtlDays'
+      'diagnosticIncidentTtlDays',
+      MAX_DIAGNOSTIC_INCIDENT_TTL_DAYS
     ),
   };
 }
@@ -111,11 +113,19 @@ function optionalNonEmptyConfig(config: ConfigReader, key: string): string | und
   return value;
 }
 
-function parsePositiveInteger(value: string | undefined, fallback: number, key: string): number {
+function parsePositiveInteger(
+  value: string | undefined,
+  fallback: number,
+  key: string,
+  maximum?: number
+): number {
   if (value === undefined) return fallback;
   const parsed = Number(value);
   if (!Number.isSafeInteger(parsed) || parsed <= 0) {
     throw new Error('Pulumi config "' + key + '" must be a positive integer');
+  }
+  if (maximum !== undefined && parsed > maximum) {
+    throw new Error(`Pulumi config "${key}" must be at most ${maximum}`);
   }
   return parsed;
 }

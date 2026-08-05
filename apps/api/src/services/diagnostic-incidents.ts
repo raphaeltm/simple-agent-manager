@@ -8,11 +8,13 @@ import type {
 import type { Env } from '../env';
 import { errors } from '../middleware/error';
 import { type IncidentConfig, resolveDiagnosticIncidentConfig } from './diagnostic-incident-config';
+import { redactSensitiveData } from './observability';
 
 const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const SAFE_ARTIFACT_KIND = 'safe-vm-incident-v1';
 const SAFE_CONTENT_TYPE = 'application/gzip';
+const D1_MAX_BOUND_PARAMETERS = 100;
 const textEncoder = new TextEncoder();
 
 function assertULID(value: string, label: string): void {
@@ -51,22 +53,8 @@ export async function ensurePendingIncidents(
   ).toISOString();
   for (const input of inputs) {
     assertULID(input.incidentId, 'incidentId');
-    const existing = await env.DATABASE.prepare(
-      'SELECT node_id, platform_error_id FROM diagnostic_incidents WHERE id = ?'
-    )
-      .bind(input.incidentId)
-      .first<{ node_id: string; platform_error_id: string }>();
-    if (existing) {
-      if (
-        existing.node_id !== input.nodeId ||
-        existing.platform_error_id !== input.platformErrorId
-      ) {
-        throw errors.conflict('Incident ID is already bound to another error or node');
-      }
-      continue;
-    }
     await env.DATABASE.prepare(
-      `INSERT INTO diagnostic_incidents
+      `INSERT OR IGNORE INTO diagnostic_incidents
        (id, platform_error_id, node_id, workspace_id, status, expires_at, delete_after)
        VALUES (?, ?, ?, ?, 'pending', ?, ?)`
     )
@@ -79,6 +67,18 @@ export async function ensurePendingIncidents(
         deleteAfter
       )
       .run();
+    const authoritative = await env.DATABASE.prepare(
+      'SELECT node_id, platform_error_id FROM diagnostic_incidents WHERE id = ?'
+    )
+      .bind(input.incidentId)
+      .first<{ node_id: string; platform_error_id: string }>();
+    if (
+      !authoritative ||
+      authoritative.node_id !== input.nodeId ||
+      authoritative.platform_error_id !== input.platformErrorId
+    ) {
+      throw errors.conflict('Incident ID is already bound to another error or node');
+    }
   }
 }
 
@@ -153,6 +153,11 @@ export async function registerDiagnosticArtifact(
 ): Promise<{ artifactId: string; status: DiagnosticIncidentStatus }> {
   const config = resolveDiagnosticIncidentConfig(env);
   validateRegistration(config, incidentId, input);
+  const safeInput = {
+    ...input,
+    manifest: redactSensitiveData(input.manifest),
+    preview: redactSensitiveData(input.preview),
+  };
   const incident = await env.DATABASE.prepare(
     'SELECT node_id, expires_at FROM diagnostic_incidents WHERE id = ?'
   )
@@ -162,17 +167,58 @@ export async function registerDiagnosticArtifact(
   if (incident.node_id !== nodeId) throw errors.forbidden('Incident belongs to another node');
 
   const existing = await env.DATABASE.prepare(
-    `SELECT id, node_id, kind, content_type, checksum_sha256, expected_bytes, status
+    `SELECT id, node_id, kind, content_type, checksum_sha256, expected_bytes, status, object_key
      FROM diagnostic_artifacts WHERE id = ?`
   )
     .bind(input.artifactId)
     .first<
       Pick<
         ArtifactRow,
-        'id' | 'node_id' | 'kind' | 'content_type' | 'checksum_sha256' | 'expected_bytes' | 'status'
+        | 'id'
+        | 'node_id'
+        | 'kind'
+        | 'content_type'
+        | 'checksum_sha256'
+        | 'expected_bytes'
+        | 'status'
+        | 'object_key'
       >
     >();
   if (existing) {
+    if (
+      input.status === 'failed' &&
+      existing.status === 'pending' &&
+      existing.node_id === nodeId &&
+      existing.kind === input.kind &&
+      existing.content_type === input.contentType
+    ) {
+      await env.DATABASE.batch([
+        env.DATABASE.prepare(
+          `UPDATE diagnostic_artifacts SET status = 'failed', checksum_sha256 = NULL,
+           expected_bytes = 0, actual_bytes = NULL, failure_reason = 'VM evidence collection failed',
+           manifest_json = ?, preview_json = ?, updated_at = CURRENT_TIMESTAMP
+           WHERE id = ? AND node_id = ? AND status = 'pending'`
+        ).bind(
+          JSON.stringify(safeInput.manifest),
+          JSON.stringify(safeInput.preview),
+          existing.id,
+          nodeId
+        ),
+        env.DATABASE.prepare(
+          `UPDATE diagnostic_incidents SET status = 'failed', total_bytes = 0,
+           failure_reason = 'VM evidence collection failed', manifest_json = ?, preview_json = ?,
+           updated_at = CURRENT_TIMESTAMP
+           WHERE id = ? AND node_id = ? AND status = 'pending'`
+        ).bind(
+          JSON.stringify(safeInput.manifest),
+          JSON.stringify(safeInput.preview),
+          incidentId,
+          nodeId
+        ),
+      ]);
+      await env.R2.delete(existing.object_key).catch(() => undefined);
+      return { artifactId: existing.id, status: 'failed' };
+    }
     if (
       existing.node_id !== nodeId ||
       existing.kind !== input.kind ||
@@ -185,45 +231,45 @@ export async function registerDiagnosticArtifact(
     return { artifactId: existing.id, status: existing.status };
   }
 
-  const quota = await env.DATABASE.prepare(
-    `SELECT COUNT(*) AS count, COALESCE(SUM(expected_bytes), 0) AS bytes
-     FROM diagnostic_artifacts
-     WHERE node_id = ? AND status IN ('pending', 'available') AND expires_at > ?`
-  )
-    .bind(nodeId, new Date().toISOString())
-    .first<{ count: number; bytes: number }>();
-  const expectedBytes = input.status === 'ready' ? input.sizeBytes : 0;
-  if (
-    (quota?.count ?? 0) >= config.maxArtifactsPerNode ||
-    (quota?.bytes ?? 0) + expectedBytes > config.maxBytesPerNode
-  ) {
-    throw errors.conflict('Diagnostic artifact quota exceeded');
-  }
+  const expectedBytes = safeInput.status === 'ready' ? safeInput.sizeBytes : 0;
 
-  const artifactStatus: DiagnosticIncidentStatus = input.status === 'failed' ? 'failed' : 'pending';
-  const objectKey = deterministicObjectKey(config, nodeId, incidentId, input.artifactId);
-  const manifestJson = JSON.stringify(input.manifest);
-  const previewJson = JSON.stringify(input.preview);
-  await env.DATABASE.batch([
+  const artifactStatus: DiagnosticIncidentStatus =
+    safeInput.status === 'failed' ? 'failed' : 'pending';
+  const objectKey = deterministicObjectKey(config, nodeId, incidentId, safeInput.artifactId);
+  const manifestJson = JSON.stringify(safeInput.manifest);
+  const previewJson = JSON.stringify(safeInput.preview);
+  const quotaNow = new Date().toISOString();
+  const results = await env.DATABASE.batch([
     env.DATABASE.prepare(
-      `INSERT INTO diagnostic_artifacts
+      `INSERT OR IGNORE INTO diagnostic_artifacts
        (id, incident_id, node_id, kind, status, object_key, content_type,
         checksum_sha256, expected_bytes, manifest_json, preview_json, failure_reason, expires_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+       WHERE (SELECT COUNT(*) FROM diagnostic_artifacts
+              WHERE node_id = ? AND status IN ('pending', 'available') AND expires_at > ?) < ?
+         AND (SELECT COALESCE(SUM(expected_bytes), 0) FROM diagnostic_artifacts
+              WHERE node_id = ? AND status IN ('pending', 'available') AND expires_at > ?) + ? <= ?`
     ).bind(
-      input.artifactId,
+      safeInput.artifactId,
       incidentId,
       nodeId,
-      input.kind,
+      safeInput.kind,
       artifactStatus,
       objectKey,
-      input.contentType,
-      input.status === 'ready' ? input.checksumSha256 : null,
+      safeInput.contentType,
+      safeInput.status === 'ready' ? safeInput.checksumSha256 : null,
       expectedBytes,
       manifestJson,
       previewJson,
-      input.status === 'failed' ? 'VM evidence collection failed' : null,
-      incident.expires_at
+      safeInput.status === 'failed' ? 'VM evidence collection failed' : null,
+      incident.expires_at,
+      nodeId,
+      quotaNow,
+      config.maxArtifactsPerNode,
+      nodeId,
+      quotaNow,
+      expectedBytes,
+      config.maxBytesPerNode
     ),
     env.DATABASE.prepare(
       `UPDATE diagnostic_incidents SET status = ?, artifact_count = 1,
@@ -233,21 +279,71 @@ export async function registerDiagnosticArtifact(
       artifactStatus,
       manifestJson,
       previewJson,
-      input.status === 'failed' ? 'VM evidence collection failed' : null,
+      safeInput.status === 'failed' ? 'VM evidence collection failed' : null,
       incidentId,
       nodeId
     ),
   ]);
-  return { artifactId: input.artifactId, status: artifactStatus };
+  if (Number(results[0]?.meta?.changes ?? 0) === 0) {
+    const concurrent = await env.DATABASE.prepare(
+      `SELECT id, node_id, kind, content_type, checksum_sha256, expected_bytes, status
+       FROM diagnostic_artifacts WHERE id = ?`
+    )
+      .bind(safeInput.artifactId)
+      .first<
+        Pick<
+          ArtifactRow,
+          | 'id'
+          | 'node_id'
+          | 'kind'
+          | 'content_type'
+          | 'checksum_sha256'
+          | 'expected_bytes'
+          | 'status'
+        >
+      >();
+    if (
+      concurrent?.node_id === nodeId &&
+      concurrent.kind === safeInput.kind &&
+      concurrent.content_type === safeInput.contentType &&
+      concurrent.checksum_sha256 ===
+        (safeInput.status === 'ready' ? safeInput.checksumSha256 : null) &&
+      concurrent.expected_bytes === expectedBytes
+    ) {
+      return { artifactId: concurrent.id, status: concurrent.status };
+    }
+    throw errors.conflict('Diagnostic artifact quota exceeded');
+  }
+  return { artifactId: safeInput.artifactId, status: artifactStatus };
 }
 
-function bytesToHex(bytes: ArrayBuffer): string {
-  return [...new Uint8Array(bytes)].map((value) => value.toString(16).padStart(2, '0')).join('');
-}
-
-async function sha256Stream(body: ReadableStream<Uint8Array>): Promise<string> {
-  const bytes = await new Response(body).arrayBuffer();
-  return bytesToHex(await crypto.subtle.digest('SHA-256', bytes));
+function exactLengthStream(
+  body: ReadableStream<Uint8Array>,
+  expectedBytes: number
+): { readable: ReadableStream<Uint8Array>; completion: Promise<void> } {
+  if (typeof FixedLengthStream !== 'undefined') {
+    const fixed = new FixedLengthStream(expectedBytes);
+    return {
+      readable: fixed.readable,
+      completion: body.pipeTo(fixed.writable),
+    };
+  }
+  let actualBytes = 0;
+  const transform = new TransformStream<Uint8Array, Uint8Array>({
+    transform(chunk, controller) {
+      actualBytes += chunk.byteLength;
+      if (actualBytes > expectedBytes) {
+        throw errors.badRequest('Artifact body exceeds registered size');
+      }
+      controller.enqueue(chunk);
+    },
+    flush() {
+      if (actualBytes !== expectedBytes) {
+        throw errors.badRequest('Artifact body does not match registered size');
+      }
+    },
+  });
+  return { readable: transform.readable, completion: body.pipeTo(transform.writable) };
 }
 
 export async function uploadDiagnosticArtifact(
@@ -295,17 +391,16 @@ export async function uploadDiagnosticArtifact(
   }
   if (!request.body) throw errors.badRequest('Artifact body is required');
 
-  const [uploadBody, digestBody] = request.body.tee();
-  let actualChecksum: string;
   try {
-    const [, digest] = await Promise.all([
-      env.R2.put(row.object_key, uploadBody, {
+    const bounded = exactLengthStream(request.body, row.expected_bytes);
+    await Promise.all([
+      env.R2.put(row.object_key, bounded.readable, {
         httpMetadata: { contentType: row.content_type },
-        customMetadata: { incidentId, nodeId, checksumSha256: row.checksum_sha256 ?? '' },
+        customMetadata: { incidentId, nodeId },
+        sha256: row.checksum_sha256 ?? undefined,
       }),
-      sha256Stream(digestBody),
+      bounded.completion,
     ]);
-    actualChecksum = digest;
   } catch (cause) {
     await env.R2.delete(row.object_key).catch(() => undefined);
     await env.DATABASE.prepare(
@@ -316,18 +411,8 @@ export async function uploadDiagnosticArtifact(
       .run();
     throw cause;
   }
-  if (actualChecksum !== row.checksum_sha256) {
-    await env.R2.delete(row.object_key);
-    await env.DATABASE.prepare(
-      `UPDATE diagnostic_artifacts SET upload_attempts = upload_attempts + 1,
-       failure_reason = 'Checksum mismatch', updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-    )
-      .bind(artifactId)
-      .run();
-    throw errors.badRequest('Artifact checksum mismatch');
-  }
 
-  await env.DATABASE.batch([
+  const results = await env.DATABASE.batch([
     env.DATABASE.prepare(
       `UPDATE diagnostic_artifacts SET status = 'available', actual_bytes = expected_bytes,
        upload_attempts = upload_attempts + 1, failure_reason = NULL, updated_at = CURRENT_TIMESTAMP
@@ -335,9 +420,22 @@ export async function uploadDiagnosticArtifact(
     ).bind(artifactId, nodeId),
     env.DATABASE.prepare(
       `UPDATE diagnostic_incidents SET status = 'available', total_bytes = ?,
-       failure_reason = NULL, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND node_id = ?`
-    ).bind(row.expected_bytes, incidentId, nodeId),
+       failure_reason = NULL, updated_at = CURRENT_TIMESTAMP
+       WHERE id = ? AND node_id = ?
+         AND EXISTS (SELECT 1 FROM diagnostic_artifacts
+                     WHERE id = ? AND incident_id = ? AND status = 'available')`
+    ).bind(row.expected_bytes, incidentId, nodeId, artifactId, incidentId),
   ]);
+  if (Number(results[0]?.meta?.changes ?? 0) === 0) {
+    const winner = await env.DATABASE.prepare(
+      'SELECT status FROM diagnostic_artifacts WHERE id = ? AND node_id = ?'
+    )
+      .bind(artifactId, nodeId)
+      .first<{ status: DiagnosticIncidentStatus }>();
+    if (winner?.status === 'available') return;
+    await env.R2.delete(row.object_key).catch(() => undefined);
+    throw errors.conflict('Artifact state changed while content was uploading');
+  }
 }
 
 function parseJson<T>(value: string | null): T | null {
@@ -384,34 +482,41 @@ export async function getDiagnosticIncidentsByErrorIds(
 ): Promise<Map<string, DiagnosticIncidentSummary>> {
   const ids = [...new Set(errorIds)].slice(0, 200);
   if (ids.length === 0) return new Map();
-  const placeholders = ids.map(() => '?').join(',');
-  const incidents = await env.DATABASE.prepare(
-    `SELECT id, platform_error_id, node_id, workspace_id, status, artifact_count,
-     total_bytes, manifest_json, preview_json, failure_reason, expires_at, created_at, updated_at
-     FROM diagnostic_incidents WHERE platform_error_id IN (${placeholders})`
-  )
-    .bind(...ids)
-    .all<IncidentRow>();
-  const incidentIds = incidents.results.map((row) => row.id);
-  const artifacts = incidentIds.length
-    ? await env.DATABASE.prepare(
-        `SELECT id, incident_id, node_id, kind, status, object_key, content_type,
+  const incidentRows: IncidentRow[] = [];
+  for (let offset = 0; offset < ids.length; offset += D1_MAX_BOUND_PARAMETERS) {
+    const chunk = ids.slice(offset, offset + D1_MAX_BOUND_PARAMETERS);
+    const incidents = await env.DATABASE.prepare(
+      `SELECT id, platform_error_id, node_id, workspace_id, status, artifact_count,
+       total_bytes, manifest_json, preview_json, failure_reason, expires_at, created_at, updated_at
+       FROM diagnostic_incidents WHERE platform_error_id IN (${chunk.map(() => '?').join(',')})`
+    )
+      .bind(...chunk)
+      .all<IncidentRow>();
+    incidentRows.push(...incidents.results);
+  }
+  const incidentIds = incidentRows.map((row) => row.id);
+  const artifactRows: ArtifactRow[] = [];
+  for (let offset = 0; offset < incidentIds.length; offset += D1_MAX_BOUND_PARAMETERS) {
+    const chunk = incidentIds.slice(offset, offset + D1_MAX_BOUND_PARAMETERS);
+    const artifacts = await env.DATABASE.prepare(
+      `SELECT id, incident_id, node_id, kind, status, object_key, content_type,
          checksum_sha256, expected_bytes, actual_bytes, manifest_json, preview_json,
          failure_reason, created_at, updated_at
-         FROM diagnostic_artifacts WHERE incident_id IN (${incidentIds.map(() => '?').join(',')})
+         FROM diagnostic_artifacts WHERE incident_id IN (${chunk.map(() => '?').join(',')})
          ORDER BY created_at ASC`
-      )
-        .bind(...incidentIds)
-        .all<ArtifactRow>()
-    : { results: [] as ArtifactRow[] };
+    )
+      .bind(...chunk)
+      .all<ArtifactRow>();
+    artifactRows.push(...artifacts.results);
+  }
   const byIncident = new Map<string, DiagnosticArtifactSummary[]>();
-  for (const artifact of artifacts.results) {
+  for (const artifact of artifactRows) {
     const current = byIncident.get(artifact.incident_id) ?? [];
     current.push(artifactSummary(artifact));
     byIncident.set(artifact.incident_id, current);
   }
   return new Map(
-    incidents.results.map((row) => [
+    incidentRows.map((row) => [
       row.platform_error_id,
       {
         id: row.id,

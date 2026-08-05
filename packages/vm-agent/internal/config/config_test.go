@@ -188,6 +188,16 @@ func TestLoadDurableErrorReportGuardrails(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsUnsafeErrorReportEventLimits(t *testing.T) {
+	for _, limit := range []int{-1, MaxErrorReportEventLimit + 1} {
+		cfg := validConfig()
+		cfg.ErrorReportEventLimit = limit
+		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "ERROR_REPORT_EVENT_LIMIT") {
+			t.Fatalf("limit=%d error=%v", limit, err)
+		}
+	}
+}
+
 func TestAdditionalFeaturesDefault(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("WORKSPACE_ID", "ws-123")

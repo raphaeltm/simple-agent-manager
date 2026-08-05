@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync"
@@ -48,19 +49,23 @@ type Reporter struct {
 	authToken   string
 	lifecycleMu sync.Mutex
 	flushMu     sync.Mutex
-	collectMu   sync.Mutex
 
 	collectorsMu sync.RWMutex
 	collectors   []Collector
-	snapshotWG   sync.WaitGroup
+	collectorSem chan struct{}
+	spoolRoot    *os.Root
 
-	wakeC        chan struct{}
-	stopC        chan struct{}
-	doneC        chan struct{}
-	startOnce    sync.Once
-	shutdownOnce sync.Once
-	started      atomic.Bool
-	closed       atomic.Bool
+	wakeC          chan struct{}
+	stopC          chan struct{}
+	doneC          chan struct{}
+	snapshotWakeC  chan struct{}
+	snapshotStopC  chan struct{}
+	snapshotDoneC  chan struct{}
+	startOnce      sync.Once
+	shutdownOnce   sync.Once
+	started        atomic.Bool
+	snapshotActive atomic.Bool
+	closed         atomic.Bool
 }
 
 // New creates a reporter. InitError reports a disk/configuration failure.
@@ -68,22 +73,39 @@ func New(apiBaseURL, nodeID, authToken string, cfg Config) *Reporter {
 	cfg = cfg.withDefaults()
 	db, err := openOutbox(cfg.DBPath)
 	r := &Reporter{
-		apiBaseURL: strings.TrimRight(apiBaseURL, "/"),
-		nodeID:     nodeID,
-		authToken:  authToken,
-		config:     cfg,
-		client:     config.NewControlPlaneClient(cfg.HTTPTimeout),
-		db:         db,
-		initErr:    err,
-		wakeC:      make(chan struct{}, 1),
-		stopC:      make(chan struct{}),
-		doneC:      make(chan struct{}),
+		apiBaseURL:    strings.TrimRight(apiBaseURL, "/"),
+		nodeID:        nodeID,
+		authToken:     authToken,
+		config:        cfg,
+		client:        config.NewControlPlaneClient(cfg.HTTPTimeout),
+		db:            db,
+		initErr:       err,
+		wakeC:         make(chan struct{}, 1),
+		stopC:         make(chan struct{}),
+		doneC:         make(chan struct{}),
+		snapshotWakeC: make(chan struct{}, 1),
+		snapshotStopC: make(chan struct{}),
+		snapshotDoneC: make(chan struct{}),
+		collectorSem:  make(chan struct{}, 1),
 	}
 	r.SetCollectors()
-	if err == nil {
+	if err == nil && cfg.SpoolDir != "" {
+		r.spoolRoot, err = openPrivateSpoolRoot(cfg.SpoolDir)
+		if err != nil {
+			r.initErr = fmt.Errorf("open private spool: %w", err)
+		} else {
+			r.config.SpoolDir = r.spoolRoot.Name()
+		}
+	}
+	if r.initErr == nil {
 		if cleanupErr := r.cleanupSpool(); cleanupErr != nil {
 			r.initErr = fmt.Errorf("cleanup private spool: %w", cleanupErr)
 		}
+	}
+	if r.initErr == nil {
+		r.snapshotActive.Store(true)
+		go r.snapshotLoop()
+		r.signalSnapshot()
 	}
 	return r
 }
@@ -109,12 +131,16 @@ func (r *Reporter) SetToken(token string) {
 
 // Start launches snapshot recovery and the serialized delivery loop once.
 func (r *Reporter) Start() {
-	if r == nil || r.initErr != nil || r.closed.Load() {
+	if r == nil || r.initErr != nil {
+		return
+	}
+	r.lifecycleMu.Lock()
+	defer r.lifecycleMu.Unlock()
+	if r.closed.Load() {
 		return
 	}
 	r.startOnce.Do(func() {
 		r.started.Store(true)
-		r.recoverPendingSnapshots()
 		go r.flushLoop()
 		r.signalFlush()
 	})
@@ -128,16 +154,28 @@ func (r *Reporter) Shutdown() {
 	r.shutdownOnce.Do(func() {
 		r.lifecycleMu.Lock()
 		r.closed.Store(true)
-		r.lifecycleMu.Unlock()
-		r.snapshotWG.Wait()
-		if r.started.Load() {
+		started := r.started.Load()
+		snapshotActive := r.snapshotActive.Load()
+		if snapshotActive {
+			close(r.snapshotStopC)
+		}
+		if started {
 			close(r.stopC)
+		}
+		r.lifecycleMu.Unlock()
+		if snapshotActive {
+			<-r.snapshotDoneC
+		}
+		if started {
 			<-r.doneC
 		} else if r.db != nil {
 			r.flush()
 		}
 		if r.db != nil {
 			_ = r.db.Close()
+		}
+		if r.spoolRoot != nil {
+			_ = r.spoolRoot.Close()
 		}
 	})
 }
@@ -176,15 +214,13 @@ func (r *Reporter) Report(entry ErrorEntry) string {
 		entry.Context = nil
 	}
 
-	r.flushMu.Lock()
 	err = r.insertEntry(entry, string(contextJSON))
-	r.flushMu.Unlock()
 	if err != nil {
 		slog.Warn("errorreport: durable enqueue failed", "incidentId", entry.IncidentID, "error", boundedError(err))
 		return entry.IncidentID
 	}
 	if entry.Level == "error" {
-		r.startSnapshot(outboxRow{entry: entry, contextJSON: string(contextJSON), artifactRequired: true})
+		r.signalSnapshot()
 	}
 	r.signalFlush()
 	return entry.IncidentID
@@ -346,6 +382,26 @@ func (r *Reporter) deliverArtifact(row outboxRow) error {
 	if token == "" {
 		return fmt.Errorf("callback token is not available")
 	}
+	var file *os.File
+	if row.artifactState == "ready" {
+		var err error
+		file, err = r.openReadyArtifact(row)
+		if err != nil {
+			if markErr := r.markArtifactUnavailable(row, err); markErr != nil {
+				return markErr
+			}
+			row.artifactState = "failed"
+			row.spoolPath = ""
+			row.manifestJSON = `{"version":1,"collectors":[],"unavailable":true}`
+			row.previewJSON = `{}`
+			row.checksum = ""
+			row.sizeBytes = 0
+		}
+	}
+	if file != nil {
+		defer file.Close()
+	}
+
 	artifactID := row.entry.IncidentID + "-safe"
 	registration, err := json.Marshal(map[string]any{
 		"artifactId":     artifactID,
@@ -369,29 +425,6 @@ func (r *Reporter) deliverArtifact(row outboxRow) error {
 	if row.artifactState == "failed" {
 		return r.markArtifactAcknowledged(row)
 	}
-
-	if !r.isPrivateSpoolPath(row.spoolPath) {
-		return r.handleArtifactFailure(row, http.StatusBadRequest, "", fmt.Errorf("artifact path is outside the private spool"))
-	}
-	pathInfo, err := os.Lstat(row.spoolPath)
-	if err != nil || !pathInfo.Mode().IsRegular() {
-		if err == nil {
-			err = fmt.Errorf("spooled artifact is not a regular file")
-		}
-		return r.handleArtifactFailure(row, http.StatusBadRequest, "", err)
-	}
-	file, err := os.Open(row.spoolPath)
-	if err != nil {
-		return r.handleArtifactFailure(row, 0, "", err)
-	}
-	defer file.Close()
-	info, err := file.Stat()
-	if err != nil || !info.Mode().IsRegular() || info.Size() != row.sizeBytes {
-		if err == nil {
-			err = fmt.Errorf("spooled artifact changed before upload")
-		}
-		return r.handleArtifactFailure(row, http.StatusBadRequest, "", err)
-	}
 	status, response, requestErr = r.doRequest(context.Background(), http.MethodPut,
 		base+"/"+url.PathEscape(artifactID)+"/content", token, "application/gzip",
 		file, row.sizeBytes, row.checksum)
@@ -399,6 +432,33 @@ func (r *Reporter) deliverArtifact(row outboxRow) error {
 		return r.handleArtifactFailure(row, status, response, requestErr)
 	}
 	return r.markArtifactAcknowledged(row)
+}
+
+func (r *Reporter) openReadyArtifact(row outboxRow) (*os.File, error) {
+	if r.spoolRoot == nil || !r.isPrivateSpoolPath(row.spoolPath) {
+		return nil, fmt.Errorf("artifact path is outside the private spool")
+	}
+	name := filepath.Base(row.spoolPath)
+	pathInfo, err := r.spoolRoot.Lstat(name)
+	if err != nil || !pathInfo.Mode().IsRegular() {
+		if err == nil {
+			err = fmt.Errorf("spooled artifact is not a regular file")
+		}
+		return nil, err
+	}
+	file, err := r.spoolRoot.Open(name)
+	if err != nil {
+		return nil, err
+	}
+	info, err := file.Stat()
+	if err != nil || !info.Mode().IsRegular() || info.Size() != row.sizeBytes {
+		_ = file.Close()
+		if err == nil {
+			err = fmt.Errorf("spooled artifact changed before upload")
+		}
+		return nil, err
+	}
+	return file, nil
 }
 
 func successOrConflict(status int) bool {

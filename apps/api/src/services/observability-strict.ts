@@ -23,11 +23,14 @@ export async function persistErrorBatchStrict(
   inputs: PersistErrorInput[],
   env?: Env
 ): Promise<void> {
-  const batch = inputs.slice(0, maxBatchSize(env));
-  if (batch.some((input) => !input.id)) {
+  const limit = maxBatchSize(env);
+  if (inputs.length > limit) {
+    throw new Error(`Strict observability batch exceeds configured limit of ${limit}`);
+  }
+  if (inputs.some((input) => !input.id)) {
     throw new Error('Strict observability persistence requires caller-supplied IDs');
   }
-  const statements = batch.map((input) => {
+  const statements = inputs.map((input) => {
     const source = VALID_SOURCES.has(input.source) ? input.source : 'api';
     const level = input.level && VALID_LEVELS.has(input.level) ? input.level : 'error';
     return db
@@ -53,7 +56,7 @@ export async function persistErrorBatchStrict(
       );
   });
   if (statements.length > 0) await db.batch(statements);
-  for (const input of batch) {
+  for (const input of inputs) {
     const row = await db
       .prepare(
         'SELECT source, level, message, node_id, workspace_id FROM platform_errors WHERE id = ?'

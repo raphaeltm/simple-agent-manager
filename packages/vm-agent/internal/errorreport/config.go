@@ -78,6 +78,9 @@ func (c Config) withDefaults() Config {
 	if c.SpoolMaxBytes <= 0 {
 		c.SpoolMaxBytes = DefaultSpoolMaxBytes
 	}
+	if c.ArtifactMaxBytes > c.SpoolMaxBytes {
+		c.ArtifactMaxBytes = c.SpoolMaxBytes
+	}
 	if c.Retention <= 0 {
 		c.Retention = DefaultRetention
 	}

@@ -17,4 +17,5 @@ const (
 	DefaultErrorReportMaxValueItems    = 256
 	DefaultErrorReportMaxStringBytes   = 4096
 	DefaultErrorReportEventLimit       = 100
+	MaxErrorReportEventLimit           = 1000
 )

@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -27,11 +28,57 @@ var (
 		regexp.MustCompile(`(?i)bearer\s+[a-z0-9._~+/=-]{8,}`),
 		regexp.MustCompile(`(?i)(?:github_pat_|gh[pousr]_)[a-z0-9_]{8,}`),
 		regexp.MustCompile(`(?i)sk-[a-z0-9_-]{8,}`),
+		regexp.MustCompile(`\b(?:AKIA|ASIA)[A-Z0-9]{16}\b`),
+		regexp.MustCompile(`\bxox[baprs]-[A-Za-z0-9-]{10,}\b`),
+		regexp.MustCompile(`\bnpm_[A-Za-z0-9]{20,}\b`),
+		regexp.MustCompile(`\b(?:sk|rk|pk)_(?:live|test)_[A-Za-z0-9]{16,}\b`),
+		regexp.MustCompile(`\bAIza[0-9A-Za-z_-]{20,}\b`),
+		regexp.MustCompile(`\bya29\.[0-9A-Za-z_-]{20,}\b`),
 		regexp.MustCompile(`-----BEGIN [A-Z ]*PRIVATE KEY-----`),
 		regexp.MustCompile(`[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}`),
 		regexp.MustCompile(`(?i)(?:token|secret|password|api[_-]?key|credential)\s*[=:]\s*\S+`),
+		regexp.MustCompile(`(?i)https?://[^\s/:@]+:[^\s/@]+@`),
+		regexp.MustCompile(`(?i)[?&](?:access_token|api[_-]?key|token|secret)=[^&#\s]+`),
 	}
 )
+
+func openPrivateSpoolRoot(path string) (*os.Root, error) {
+	absPath, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	for current := absPath; ; current = filepath.Dir(current) {
+		info, statErr := os.Lstat(current)
+		if statErr == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				return nil, fmt.Errorf("private spool path contains a symlink: %s", current)
+			}
+			if current == absPath && !info.IsDir() {
+				return nil, fmt.Errorf("private spool path is not a directory")
+			}
+		} else if !os.IsNotExist(statErr) {
+			return nil, statErr
+		}
+		parent := filepath.Dir(current)
+		if parent == current {
+			break
+		}
+	}
+	if err := os.MkdirAll(absPath, 0o700); err != nil {
+		return nil, err
+	}
+	info, err := os.Lstat(absPath)
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return nil, fmt.Errorf("private spool root must be a real directory")
+	}
+	if err := os.Chmod(absPath, 0o700); err != nil {
+		return nil, err
+	}
+	return os.OpenRoot(absPath)
+}
 
 // IncidentContext is the non-sensitive context available to allowlisted collectors.
 type IncidentContext struct {
@@ -118,31 +165,43 @@ func (r *Reporter) SetCollectors(collectors ...Collector) {
 	}
 }
 
-func (r *Reporter) recoverPendingSnapshots() {
-	rows, err := r.readPendingSnapshots()
-	if err != nil {
+func (r *Reporter) signalSnapshot() {
+	if r == nil || !r.snapshotActive.Load() || r.closed.Load() {
 		return
 	}
-	for _, row := range rows {
-		r.startSnapshot(row)
+	select {
+	case r.snapshotWakeC <- struct{}{}:
+	default:
 	}
 }
 
-func (r *Reporter) startSnapshot(row outboxRow) {
-	r.snapshotWG.Add(1)
-	go func() {
-		defer r.snapshotWG.Done()
-		r.collectSnapshot(row)
-	}()
+func (r *Reporter) snapshotLoop() {
+	defer close(r.snapshotDoneC)
+	for {
+		select {
+		case <-r.snapshotStopC:
+			return
+		case <-r.snapshotWakeC:
+			rows, err := r.readPendingSnapshots()
+			if err != nil {
+				continue
+			}
+			for _, row := range rows {
+				select {
+				case <-r.snapshotStopC:
+					return
+				default:
+					r.collectSnapshot(row)
+				}
+			}
+		}
+	}
 }
 
 func (r *Reporter) collectSnapshot(row outboxRow) {
 	if r == nil || r.db == nil {
 		return
 	}
-	r.collectMu.Lock()
-	defer r.collectMu.Unlock()
-
 	var state string
 	if err := r.db.QueryRow(`SELECT artifact_state FROM error_report_outbox WHERE incident_id = ?`,
 		row.entry.IncidentID).Scan(&state); err != nil || state != "pending" {
@@ -155,29 +214,55 @@ func (r *Reporter) collectSnapshot(row outboxRow) {
 		return
 	}
 	if err := r.markSnapshotReady(row.entry.IncidentID, path, manifest, preview, checksum, size); err != nil {
-		_ = os.Remove(path)
+		if r.isPrivateSpoolPath(path) && r.spoolRoot != nil {
+			_ = r.spoolRoot.Remove(filepath.Base(path))
+		}
 		return
 	}
 	r.signalFlush()
 }
 
+type collectorResult struct {
+	value any
+	err   error
+}
+
+func (r *Reporter) collectWithContext(
+	ctx context.Context,
+	collector Collector,
+	incident IncidentContext,
+) (any, error) {
+	select {
+	case r.collectorSem <- struct{}{}:
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	resultC := make(chan collectorResult, 1)
+	go func() {
+		defer func() { <-r.collectorSem }()
+		value, err := collector.Collect(ctx, incident)
+		resultC <- collectorResult{value: value, err: err}
+	}()
+	select {
+	case result := <-resultC:
+		return result.value, result.err
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
 func (r *Reporter) buildSnapshot(entry ErrorEntry) (string, string, string, string, int64, error) {
-	if r.config.SpoolDir == "" {
+	if r.config.SpoolDir == "" || r.spoolRoot == nil {
 		return "", "", "", "", 0, fmt.Errorf("private evidence spool is not configured")
 	}
-	if err := os.MkdirAll(r.config.SpoolDir, 0o700); err != nil {
-		return "", "", "", "", 0, fmt.Errorf("create evidence spool: %w", err)
-	}
-	if err := os.Chmod(r.config.SpoolDir, 0o700); err != nil {
-		return "", "", "", "", 0, fmt.Errorf("restrict evidence spool: %w", err)
-	}
-	used, err := spoolBytes(r.config.SpoolDir)
+	used, err := spoolBytes(r.spoolRoot)
 	if err != nil {
 		return "", "", "", "", 0, err
 	}
 	if used >= r.config.SpoolMaxBytes {
 		return "", "", "", "", 0, fmt.Errorf("evidence spool quota reached")
 	}
+	archiveLimit := min(r.config.ArtifactMaxBytes, r.config.SpoolMaxBytes-used)
 
 	incident := IncidentContext{
 		IncidentID:  entry.IncidentID,
@@ -207,7 +292,7 @@ func (r *Reporter) buildSnapshot(entry ErrorEntry) (string, string, string, stri
 	for index, collector := range collectors {
 		name := safeCollectorName(collector.Name(), index)
 		outcome := CollectorOutcome{Name: name, Status: "available"}
-		value, collectErr := collector.Collect(ctx, incident)
+		value, collectErr := r.collectWithContext(ctx, collector, incident)
 		if collectErr != nil {
 			outcome.Status = "failed"
 			outcome.Error = "collector failed"
@@ -251,7 +336,7 @@ func (r *Reporter) buildSnapshot(entry ErrorEntry) (string, string, string, stri
 	}
 	documents = append(documents, snapshotDocument{name: "manifest.json", data: manifestData})
 
-	path, size, checksum, err := r.writeArchive(entry.IncidentID, documents)
+	path, size, checksum, err := r.writeArchive(entry.IncidentID, documents, archiveLimit)
 	if err != nil {
 		return "", "", "", "", 0, err
 	}
@@ -373,23 +458,23 @@ func (w *limitWriter) Write(data []byte) (int, error) {
 	return n, err
 }
 
-func (r *Reporter) writeArchive(incidentID string, documents []snapshotDocument) (string, int64, string, error) {
-	temp, err := os.CreateTemp(r.config.SpoolDir, ".incident-*.tmp")
+func (r *Reporter) writeArchive(incidentID string, documents []snapshotDocument, maxBytes int64) (string, int64, string, error) {
+	tempName := ".incident-" + r.id.next(time.Now()) + ".tmp"
+	temp, err := r.spoolRoot.OpenFile(tempName, os.O_RDWR|os.O_CREATE|os.O_EXCL, 0o600)
 	if err != nil {
 		return "", 0, "", err
 	}
-	tempPath := temp.Name()
 	removeTemp := true
 	defer func() {
 		_ = temp.Close()
 		if removeTemp {
-			_ = os.Remove(tempPath)
+			_ = r.spoolRoot.Remove(tempName)
 		}
 	}()
 	if err := temp.Chmod(0o600); err != nil {
 		return "", 0, "", err
 	}
-	limited := &limitWriter{w: temp, max: r.config.ArtifactMaxBytes}
+	limited := &limitWriter{w: temp, max: maxBytes}
 	archive := gzip.NewWriter(limited)
 	archive.Header.ModTime = time.Unix(0, 0).UTC()
 	tarWriter := tar.NewWriter(archive)
@@ -417,35 +502,37 @@ func (r *Reporter) writeArchive(incidentID string, documents []snapshotDocument)
 	if err := temp.Close(); err != nil {
 		return "", 0, "", err
 	}
-	finalPath := filepath.Join(r.config.SpoolDir, incidentID+".tar.gz")
-	if err := os.Rename(tempPath, finalPath); err != nil {
+	finalName := incidentID + ".tar.gz"
+	if err := r.spoolRoot.Rename(tempName, finalName); err != nil {
 		return "", 0, "", err
 	}
 	removeTemp = false
-	checksum, size, err := hashFile(finalPath)
+	finalPath := filepath.Join(r.config.SpoolDir, finalName)
+	file, err := r.spoolRoot.Open(finalName)
 	if err != nil {
-		_ = os.Remove(finalPath)
+		_ = r.spoolRoot.Remove(finalName)
+		return "", 0, "", err
+	}
+	checksum, size, err := hashReader(file)
+	_ = file.Close()
+	if err != nil {
+		_ = r.spoolRoot.Remove(finalName)
 		return "", 0, "", err
 	}
 	return finalPath, size, checksum, nil
 }
 
-func hashFile(path string) (string, int64, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", 0, err
-	}
-	defer file.Close()
+func hashReader(reader io.Reader) (string, int64, error) {
 	hash := sha256.New()
-	size, err := io.Copy(hash, file)
+	size, err := io.Copy(hash, reader)
 	if err != nil {
 		return "", 0, err
 	}
 	return hex.EncodeToString(hash.Sum(nil)), size, nil
 }
 
-func spoolBytes(dir string) (int64, error) {
-	entries, err := os.ReadDir(dir)
+func spoolBytes(root *os.Root) (int64, error) {
+	entries, err := fs.ReadDir(root.FS(), ".")
 	if err != nil {
 		return 0, err
 	}
@@ -463,20 +550,14 @@ func spoolBytes(dir string) (int64, error) {
 }
 
 func (r *Reporter) cleanupSpool() error {
-	if r.config.SpoolDir == "" {
+	if r.config.SpoolDir == "" || r.spoolRoot == nil {
 		return nil
-	}
-	if err := os.MkdirAll(r.config.SpoolDir, 0o700); err != nil {
-		return err
-	}
-	if err := os.Chmod(r.config.SpoolDir, 0o700); err != nil {
-		return err
 	}
 	referenced, err := r.referencedSpoolPaths()
 	if err != nil {
 		return err
 	}
-	entries, err := os.ReadDir(r.config.SpoolDir)
+	entries, err := fs.ReadDir(r.spoolRoot.FS(), ".")
 	if err != nil {
 		return err
 	}
@@ -486,7 +567,7 @@ func (r *Reporter) cleanupSpool() error {
 			continue
 		}
 		if _, ok := referenced[path]; !ok {
-			_ = os.Remove(path)
+			_ = r.spoolRoot.Remove(entry.Name())
 		}
 	}
 	return nil

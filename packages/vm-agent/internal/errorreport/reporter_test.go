@@ -10,7 +10,10 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -103,6 +106,37 @@ func TestReportAssignsMonotonicULIDsAndPreservesCallerID(t *testing.T) {
 	}
 	if third != explicit {
 		t.Fatalf("expected caller incident ID %q, got %q", explicit, third)
+	}
+}
+
+func TestMonotonicULIDSurvivesClockRegressionAndConcurrency(t *testing.T) {
+	var generator monotonicULID
+	forward := generator.next(time.UnixMilli(2000))
+	regressed := generator.next(time.UnixMilli(1000))
+	if regressed <= forward {
+		t.Fatalf("clock regression broke monotonic order: %q then %q", forward, regressed)
+	}
+	const count = 100
+	ids := make(chan string, count)
+	var workers sync.WaitGroup
+	for index := 0; index < count; index++ {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			ids <- generator.next(time.UnixMilli(1500))
+		}()
+	}
+	workers.Wait()
+	close(ids)
+	ordered := make([]string, 0, count)
+	for id := range ids {
+		ordered = append(ordered, id)
+	}
+	sort.Strings(ordered)
+	for index := 1; index < len(ordered); index++ {
+		if ordered[index] <= ordered[index-1] {
+			t.Fatalf("ULIDs were not unique and ordered: %q then %q", ordered[index-1], ordered[index])
+		}
 	}
 }
 
@@ -289,6 +323,101 @@ func TestShutdownFlushesRemainingAndIsIdempotent(t *testing.T) {
 	reporter.Shutdown()
 	if received != 1 {
 		t.Fatalf("expected final flush, received %d", received)
+	}
+}
+
+func TestConcurrentStartShutdownAndReportIsRaceSafe(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	for iteration := 0; iteration < 25; iteration++ {
+		reporter := New(server.URL, "node-race", "token", testConfig(t))
+		var workers sync.WaitGroup
+		workers.Add(3)
+		go func() { defer workers.Done(); reporter.Start() }()
+		go func() { defer workers.Done(); reporter.ReportInfo("race", "test", "", nil) }()
+		go func() { defer workers.Done(); reporter.Shutdown() }()
+		workers.Wait()
+		reporter.Shutdown()
+		reporter.Start()
+		if reporter.Report(ErrorEntry{Level: "info", Message: "closed", Source: "test"}) != "" {
+			t.Fatal("closed reporter accepted a new durable row")
+		}
+	}
+}
+
+func TestMissingReadyArtifactRegistersFailedBeforeAnyUpload(t *testing.T) {
+	var registration map[string]any
+	var putCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch request.Method {
+		case http.MethodPost:
+			_ = json.NewDecoder(request.Body).Decode(&registration)
+			w.WriteHeader(http.StatusCreated)
+		case http.MethodPut:
+			putCount++
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	reporter := New(server.URL, "node-1", "token", testConfig(t))
+	defer reporter.Shutdown()
+	entry := ErrorEntry{
+		IncidentID: "01JTESTMISSINGREADY00000000", Level: "error", Message: "failure",
+		Source: "test", Timestamp: time.Now().UTC().Format(time.RFC3339Nano),
+	}
+	if err := reporter.insertEntry(entry, "{}"); err != nil {
+		t.Fatal(err)
+	}
+	if err := reporter.markSnapshotReady(
+		entry.IncidentID,
+		filepath.Join(reporter.config.SpoolDir, entry.IncidentID+".tar.gz"),
+		`{"version":1}`,
+		`{}`,
+		strings.Repeat("a", 64),
+		10,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := reporter.db.Exec(
+		"UPDATE error_report_outbox SET report_ack = 1 WHERE incident_id = ?",
+		entry.IncidentID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	if err := reporter.flushArtifacts(); err != nil {
+		t.Fatal(err)
+	}
+	if registration["status"] != "failed" || putCount != 0 {
+		t.Fatalf("registration=%#v putCount=%d", registration, putCount)
+	}
+	var state string
+	if err := reporter.db.QueryRow(
+		"SELECT artifact_state FROM error_report_outbox WHERE incident_id = ?",
+		entry.IncidentID,
+	).Scan(&state); err != nil || state != "failed" {
+		t.Fatalf("artifact state=%q err=%v", state, err)
+	}
+}
+
+func TestOutboxAndWALFilesArePrivate(t *testing.T) {
+	cfg := testConfig(t)
+	reporter := New("http://localhost", "node-1", "token", cfg)
+	defer reporter.Shutdown()
+	if info, err := os.Stat(filepath.Dir(cfg.DBPath)); err != nil || info.Mode().Perm() != 0o700 {
+		t.Fatalf("outbox directory mode=%v err=%v", info.Mode().Perm(), err)
+	}
+	for _, path := range []string{cfg.DBPath, cfg.DBPath + "-wal", cfg.DBPath + "-shm"} {
+		info, err := os.Stat(path)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil || info.Mode().Perm() != 0o600 {
+			t.Fatalf("outbox file %s mode=%v err=%v", path, info.Mode().Perm(), err)
+		}
 	}
 }
 

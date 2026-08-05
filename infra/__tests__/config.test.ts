@@ -91,6 +91,7 @@ describe('infra config parsing', () => {
     ['diagnosticIncidentPrefix', 'unsafe//prefix', 'must be a safe private R2 prefix'],
     ['diagnosticIncidentTtlDays', '0', 'must be a positive integer'],
     ['diagnosticIncidentTtlDays', '1.5', 'must be a positive integer'],
+    ['diagnosticIncidentTtlDays', '31', 'must be at most 30'],
   ])('fails fast for invalid %s config', (key, value, expectedMessage) => {
     const beforeResourceCount = getRegisteredResources().length;
 
