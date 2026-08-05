@@ -23,6 +23,6 @@
   "devDependencies": {
     "esbuild": "0.28.1",
     "typescript": "catalog:",
-    "@playwright/test": "1.59.1"
+    "@playwright/test": "1.62.1"
   }
 }
