@@ -14,17 +14,6 @@ import (
 	"time"
 )
 
-const evidenceCanary = "SAM_CANARY_TOKEN=ghp_supersecretvalue123456"
-
-var credentialCanaries = []string{
-	"AKIAIOSFODNN7EXAMPLE",
-	strings.Join([]string{"xoxb", "123456789012", "abcdefghijklmnop"}, "-"),
-	"npm_abcdefghijklmnopqrstuvwxyz123456",
-	"sk_" + "live_abcdefghijklmnopqrstuvwx",
-	"AIzaSyA1234567890abcdefghijklmnop",
-	"https://operator:password@example.test/private",
-}
-
 func readArchive(t *testing.T, path string) map[string][]byte {
 	t.Helper()
 	file, err := os.Open(path)

@@ -41,6 +41,15 @@ export default defineConfig({
       },
     },
     {
+      name: 'Tablet (768x1024)',
+      use: {
+        ...sharedUse,
+        viewport: { width: 768, height: 1024 },
+        isMobile: false,
+        hasTouch: false,
+      },
+    },
+    {
       name: 'Desktop (1280x800)',
       use: {
         ...sharedUse,
@@ -52,7 +61,8 @@ export default defineConfig({
   ],
   webServer: useLocalWebServer
     ? {
-        command: 'VITE_API_URL=http://localhost:4173 npx vite build && npx vite preview --port 4173',
+        command:
+          'VITE_API_URL=http://localhost:4173 npx vite build && npx vite preview --port 4173',
         port: 4173,
         reuseExistingServer: true,
         timeout: process.env.CI ? 180000 : 60000,

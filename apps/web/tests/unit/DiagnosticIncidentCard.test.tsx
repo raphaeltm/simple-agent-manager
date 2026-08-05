@@ -2,6 +2,7 @@ import type { DiagnosticIncidentSummary } from '@simple-agent-manager/shared';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import canaryFixture from '../../../../tests/fixtures/diagnostic-secret-canaries.json';
 import { DiagnosticIncidentCard } from '../../src/components/admin/DiagnosticIncidentCard';
 
 const download = vi.fn();
@@ -101,6 +102,22 @@ describe('DiagnosticIncidentCard', () => {
     expect(screen.getByText(/<img src=x onerror=alert\(1\)>/)).toBeInTheDocument();
     expect(container.querySelector('img')).toBeNull();
     expect(screen.getByText(/separate live node debug package/i)).toBeInTheDocument();
+  });
+
+  it('renders the sanitized incident contract without any shared secret canary', () => {
+    const safeIncident = incident();
+    safeIncident.preview = Object.fromEntries(
+      canaryFixture.map(({ name }) => [name, '[REDACTED]'])
+    );
+    const { container } = render(
+      <DiagnosticIncidentCard errorId="error-1" incident={safeIncident} />
+    );
+
+    const rendered = container.textContent ?? '';
+    for (const { fragments } of canaryFixture) {
+      expect(rendered).not.toContain(fragments.join(''));
+    }
+    expect(rendered).toContain('[REDACTED]');
   });
 
   it('suppresses duplicate downloads and announces success', async () => {

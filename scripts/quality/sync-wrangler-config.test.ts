@@ -286,6 +286,21 @@ describe('sync wrangler config', () => {
     );
   });
 
+  it('passes Worker ingestion and VM reporter bounds into generated deployments', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('MAX_VM_AGENT_ERROR_BODY_BYTES', '24576');
+    vi.stubEnv('MAX_VM_AGENT_ERROR_BATCH_SIZE', '7');
+    vi.stubEnv('ERROR_REPORT_FLUSH_INTERVAL', '45s');
+    vi.stubEnv('ERROR_REPORT_EVENT_LIMIT', '75');
+
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
+      MAX_VM_AGENT_ERROR_BODY_BYTES: '24576',
+      MAX_VM_AGENT_ERROR_BATCH_SIZE: '7',
+      ERROR_REPORT_FLUSH_INTERVAL: '45s',
+      ERROR_REPORT_EVENT_LIMIT: '75',
+    });
+  });
+
   it('omits Artifacts binding and disables runtime flag when Artifacts is not enabled', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 

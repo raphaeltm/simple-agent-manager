@@ -92,6 +92,7 @@ const mockPersistErrorBatchStrict = vi.fn().mockResolvedValue(undefined);
 vi.mock('../../../src/services/observability', () => ({
   persistErrorBatch: (...args: unknown[]) => mockPersistErrorBatch(...args),
   persistError: vi.fn().mockResolvedValue(undefined),
+  redactSensitiveData: (value: unknown) => value,
 }));
 vi.mock('../../../src/services/observability-strict', () => ({
   persistErrorBatchStrict: (...args: unknown[]) => mockPersistErrorBatchStrict(...args),

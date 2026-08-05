@@ -194,14 +194,21 @@ func TestStartFlushesStructuredRowsAndIncludesAuth(t *testing.T) {
 }
 
 func TestErrorDeliveryRegistersAndUploadsOnlyRedactedAutomaticEvidence(t *testing.T) {
-	const canary = "sk-ant-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 	var mu sync.Mutex
-	var structuredBody, registrationBody, uploadedArchive []byte
+	var structuredBody, registrationBody, uploadedArchive, capturedRequestLog []byte
 	var uploadedChecksum, authorization string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
 		body, _ := io.ReadAll(request.Body)
 		mu.Lock()
 		defer mu.Unlock()
+		capturedRequestLog = append(capturedRequestLog, []byte(fmt.Sprintf(
+			"%s %s content-type=%s checksum=%s body=%s\n",
+			request.Method,
+			request.URL.Path,
+			request.Header.Get("Content-Type"),
+			request.Header.Get("X-Content-SHA256"),
+			body,
+		))...)
 		authorization = request.Header.Get("Authorization")
 		switch {
 		case request.Method == http.MethodPost && request.URL.Path == "/api/nodes/node-safe/errors":
@@ -229,17 +236,17 @@ func TestErrorDeliveryRegistersAndUploadsOnlyRedactedAutomaticEvidence(t *testin
 			return map[string]any{
 				"status": "degraded",
 				"nested": map[string]any{
-					"authorization": "Bearer " + canary,
-					"detail":        canary,
+					"authorization": strings.Join(credentialCanaries, " "),
+					"details":       credentialCanaries,
 				},
 			}, nil
 		},
 	})
 	reporter.Start()
 	incidentID := reporter.Report(ErrorEntry{
-		Level: "error", Message: "provider failed " + canary, Source: "session-host",
+		Level: "error", Message: "provider failed " + strings.Join(credentialCanaries, " "), Source: "session-host",
 		WorkspaceID: "workspace-1",
-		Context:     map[string]interface{}{"token": canary, "phase": "start"},
+		Context:     map[string]interface{}{"token": credentialCanaries, "phase": "start"},
 	})
 	waitFor(t, func() bool { return reporter.pendingCount() == 0 })
 	reporter.Shutdown()
@@ -254,19 +261,28 @@ func TestErrorDeliveryRegistersAndUploadsOnlyRedactedAutomaticEvidence(t *testin
 			len(structuredBody), len(registrationBody), len(uploadedArchive))
 	}
 	for name, value := range map[string][]byte{
-		"structured report": structuredBody,
-		"registration":      registrationBody,
-		"expanded archive":  expandArchive(t, uploadedArchive),
+		"structured report":    structuredBody,
+		"registration":         registrationBody,
+		"expanded archive":     expandArchive(t, uploadedArchive),
+		"captured request log": capturedRequestLog,
 	} {
-		if bytes.Contains(value, []byte(canary)) {
-			t.Fatalf("%s contained the canary secret", name)
+		for _, canary := range credentialCanaries {
+			if bytes.Contains(value, []byte(canary)) {
+				t.Fatalf("%s contained canary secret %q", name, canary)
+			}
 		}
 	}
 	if !bytes.Contains(structuredBody, []byte(incidentID)) ||
 		!bytes.Contains(registrationBody, []byte(incidentID)) {
 		t.Fatal("stable incident ID was not preserved across delivery stages")
 	}
-	if !bytes.Contains(registrationBody, []byte(`"redactions":2`)) {
+	var registration struct {
+		Manifest SnapshotManifest `json:"manifest"`
+	}
+	if err := json.Unmarshal(registrationBody, &registration); err != nil {
+		t.Fatal(err)
+	}
+	if registration.Manifest.Redactions < len(credentialCanaries) {
 		t.Fatalf("registration omitted redaction accounting: %s", registrationBody)
 	}
 	if len(uploadedChecksum) != 64 {

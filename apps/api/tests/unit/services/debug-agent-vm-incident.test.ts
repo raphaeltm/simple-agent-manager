@@ -8,6 +8,10 @@ import {
   resolveDebugAgentConfig,
   type ToolCall,
 } from '../../../src/services/debug-agent';
+import {
+  diagnosticSecretCanaries,
+  expectDiagnosticCanariesAbsent,
+} from '../../helpers/diagnostic-secret-canaries';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const INCIDENT_ID = '01KZ8V0GMXQ4ZCSERPRT2X2K6T';
@@ -24,7 +28,6 @@ describe('get_vm_incident diagnosis tool', () => {
   it('returns only bounded redacted summary data without R2 coordinates or raw bytes', async () => {
     const sqlite = new Database(':memory:');
     sqlite.exec(migrationSql);
-    const canary = 'sk-ant-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     sqlite
       .prepare(
         `INSERT INTO diagnostic_incidents
@@ -49,7 +52,10 @@ describe('get_vm_incident diagnosis tool', () => {
         }),
         JSON.stringify({
           health: 'degraded',
-          nested: { authorization: `Bearer ${canary}`, detail: canary },
+          nested: {
+            authorization: diagnosticSecretCanaries.join(' '),
+            details: diagnosticSecretCanaries,
+          },
         })
       );
     sqlite
@@ -80,7 +86,7 @@ describe('get_vm_incident diagnosis tool', () => {
     expect(result).toContain('"status":"available"');
     expect(result).toContain('"health":"degraded"');
     expect(result).toContain('[REDACTED]');
-    expect(result).not.toContain(canary);
+    expectDiagnosticCanariesAbsent(result);
     expect(result).not.toContain('private-object');
     expect(result).not.toContain('object_key');
     expect(result).not.toContain('https://');

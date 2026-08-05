@@ -390,6 +390,11 @@ jobs:
       - name: Check Durable Object migration safety
         run: pnpm quality:do-migration-safety
 
+      # Keep this task scoped to the debugging vertical slice. A separate SAM
+      # task owns wiring the complete historical Worker/DO corpus into CI.
+      - name: Test diagnosis and incident Durable Object boundaries
+        run: pnpm --filter @simple-agent-manager/api test:debugging-workers
+
   pulumi-infra:
     name: Pulumi Infrastructure Tests
     if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'

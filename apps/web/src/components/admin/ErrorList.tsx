@@ -121,7 +121,7 @@ export const ErrorList: FC = () => {
         />
         <div className="flex flex-wrap justify-between gap-2 items-center px-4 py-2 border-b border-border-default text-xs text-fg-muted">
           <span>{total > 0 ? `Showing ${errors.length} of ${total} errors` : 'No errors found'}</span>
-          <div className="flex items-center gap-1">
+          <div className="flex min-w-0 flex-wrap items-center justify-end gap-1">
             {savedDiagnoses.length > 0 && (
               <Button size="sm" variant="ghost" onClick={() => setDiagnosis(savedDiagnoses[0] ?? null)}>
                 Saved diagnoses ({savedDiagnoses.length})

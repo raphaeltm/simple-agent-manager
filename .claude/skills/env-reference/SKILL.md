@@ -172,8 +172,8 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `VM_INCIDENT_MAX_BYTES_PER_NODE` — Active expected-byte quota per node (default: 104857600)
 - `VM_INCIDENT_RETENTION_DAYS` — Private object and active metadata retention (default: 7; generated deployments use the Pulumi output)
 - `VM_INCIDENT_METADATA_RETENTION_DAYS` — Expired metadata retention after object deletion (default: 30)
-- `VM_INCIDENT_PENDING_TIMEOUT_MINUTES` — Incomplete upload timeout (default: 30)
-- `VM_INCIDENT_RECONCILE_BATCH_SIZE` — Max rows repaired per scheduled pass (default: 50; minimum: 5)
+- `VM_INCIDENT_PENDING_TIMEOUT_MINUTES` — Incomplete upload timeout and upload-lease duration (default: 30; effective lease minimum: 5 minutes)
+- `VM_INCIDENT_RECONCILE_BATCH_SIZE` — Max rows repaired per scheduled pass (default: 50; range: 5–200)
 
 ### Project File Library
 
@@ -257,6 +257,8 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 - `FILE_FIND_MAX_ENTRIES` — Max entries returned by file index (default: 5000)
 
 ### Error Reporting
+
+Generated deployments validate and pass these values through cloud-init to newly provisioned VM Agent systemd services.
 
 - `ERROR_REPORT_FLUSH_INTERVAL` — Background error flush interval (default: 30s)
 - `ERROR_REPORT_MAX_BATCH_SIZE` — Immediate flush threshold (default: 10)

@@ -13,7 +13,11 @@ import {
   uploadDiagnosticArtifact,
 } from '../services/diagnostic-incidents';
 import { verifyNodeCallbackAuth } from '../services/node-callback-auth';
-import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
+import {
+  persistErrorBatch,
+  type PersistErrorInput,
+  redactSensitiveData,
+} from '../services/observability';
 import { persistErrorBatchStrict } from '../services/observability-strict';
 
 const nodeDiagnosticIncidentRoutes = new Hono<{ Bindings: Env }>();
@@ -102,17 +106,27 @@ nodeDiagnosticIncidentRoutes.post('/:id/errors', async (c) => {
       throw errors.badRequest('incidentId must be a ULID');
     }
     const workspaceId = typeof value.workspaceId === 'string' ? value.workspaceId : null;
+    const safeMessage = truncateString(
+      String(redactSensitiveData(message)),
+      MAX_VM_ERROR_MESSAGE_LENGTH
+    );
+    const safeSource = truncateString(
+      String(redactSensitiveData(source)),
+      MAX_VM_ERROR_SOURCE_LENGTH
+    );
+    const safeStack =
+      typeof value.stack === 'string'
+        ? truncateString(String(redactSensitiveData(value.stack)), MAX_VM_ERROR_STACK_LENGTH)
+        : null;
+    const safeContext = redactSensitiveData(maybeJsonRecord(value.context));
     log[level]('vm_agent_error', {
       level,
-      message: truncateString(message, MAX_VM_ERROR_MESSAGE_LENGTH),
-      source: truncateString(source, MAX_VM_ERROR_SOURCE_LENGTH),
-      stack:
-        typeof value.stack === 'string'
-          ? truncateString(value.stack, MAX_VM_ERROR_STACK_LENGTH)
-          : null,
+      message: safeMessage,
+      source: safeSource,
+      stack: safeStack,
       workspaceId,
       timestamp: typeof value.timestamp === 'string' ? value.timestamp : null,
-      context: maybeJsonRecord(value.context),
+      context: safeContext,
       nodeId,
       incidentId,
     });
@@ -120,9 +134,9 @@ nodeDiagnosticIncidentRoutes.post('/:id/errors', async (c) => {
       id: incidentId ?? undefined,
       source: 'vm-agent',
       level,
-      message,
-      stack: typeof value.stack === 'string' ? value.stack : null,
-      context: maybeJsonRecord(value.context),
+      message: safeMessage,
+      stack: safeStack,
+      context: safeContext,
       nodeId,
       workspaceId,
       timestamp:

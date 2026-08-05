@@ -2051,3 +2051,69 @@ describe('cloud-init supports the digitalocean provider', () => {
     expect(config).toContain('Environment=PROVIDER=digitalocean');
   });
 });
+
+describe('VM error reporter environment', () => {
+  it('renders safe defaults and deploy-time overrides into the VM Agent service', () => {
+    const defaults = generateCloudInit(baseVariables(), { validateSize: false });
+    expect(defaults).toContain('Environment=ERROR_REPORT_FLUSH_INTERVAL=30s');
+    expect(defaults).toContain('Environment=ERROR_REPORT_MAX_BATCH_BYTES=32768');
+    expect(defaults).toContain(
+      'Environment=ERROR_REPORT_DB_PATH=/var/lib/vm-agent/error-reports.db'
+    );
+    expect(defaults).toContain('Environment=ERROR_REPORT_EVENT_LIMIT=100');
+
+    const overridden = generateCloudInit(
+      baseVariables({
+        errorReportFlushInterval: '45s',
+        errorReportMaxBatchBytes: '16384',
+        errorReportDbPath: '/var/lib/vm-agent/custom-errors.db',
+        errorReportEventLimit: '75',
+      }),
+      { validateSize: false }
+    );
+    expect(overridden).toContain('Environment=ERROR_REPORT_FLUSH_INTERVAL=45s');
+    expect(overridden).toContain('Environment=ERROR_REPORT_MAX_BATCH_BYTES=16384');
+    expect(overridden).toContain(
+      'Environment=ERROR_REPORT_DB_PATH=/var/lib/vm-agent/custom-errors.db'
+    );
+    expect(overridden).toContain('Environment=ERROR_REPORT_EVENT_LIMIT=75');
+  });
+
+  it('rejects unsafe duration, numeric, and path overrides', () => {
+    expect(() =>
+      validateCloudInitVariables(
+        baseVariables({
+          errorReportFlushInterval: '30s; reboot',
+        })
+      )
+    ).toThrow('errorReportFlushInterval');
+    expect(() =>
+      validateCloudInitVariables(
+        baseVariables({
+          errorReportMaxBatchBytes: '-1',
+        })
+      )
+    ).toThrow('errorReportMaxBatchBytes');
+    expect(() =>
+      validateCloudInitVariables(
+        baseVariables({
+          errorReportDbPath: '/tmp/errors;reboot',
+        })
+      )
+    ).toThrow('errorReportDbPath');
+    expect(() =>
+      validateCloudInitVariables(
+        baseVariables({
+          errorReportSpoolDir: '/var/lib/vm-agent/../../root',
+        })
+      )
+    ).toThrow('errorReportSpoolDir');
+    expect(() =>
+      validateCloudInitVariables(
+        baseVariables({
+          errorReportSpoolDir: '/var/lib//vm-agent/incidents',
+        })
+      )
+    ).toThrow('errorReportSpoolDir');
+  });
+});

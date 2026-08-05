@@ -15,7 +15,11 @@ func (s *Server) configureIncidentCollectors() {
 	if s == nil || s.errorReporter == nil {
 		return
 	}
-	s.errorReporter.SetCollectors(
+	s.errorReporter.SetCollectors(s.incidentCollectors()...)
+}
+
+func (s *Server) incidentCollectors() []errorreport.Collector {
+	return []errorreport.Collector{
 		errorreport.CollectorFunc{
 			CollectorName: "agent-version",
 			CollectFunc: func(ctx context.Context, _ errorreport.IncidentContext) (any, error) {
@@ -123,7 +127,7 @@ func (s *Server) configureIncidentCollectors() {
 				return map[string]any{"workspaces": workspaces, "limit": limit}, nil
 			},
 		},
-	)
+	}
 }
 
 type eventSafePreview struct {

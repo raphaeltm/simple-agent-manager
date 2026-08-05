@@ -148,8 +148,76 @@ const SUCCEEDED_RUN = {
   incident: INCIDENT,
 };
 
-async function setup(page: Page, diagnosisStatus = 200) {
+type PaginationMode = 'complete' | 'repeated';
+
+function diagnosisEvent(sequence: number) {
+  const vmIncident = sequence === 2;
+  return {
+    id: `event-${sequence}`,
+    runId: 'run-succeeded-1',
+    sequence,
+    stepKey: vmIncident ? 'tool:2:vm' : `tool:${sequence}:errors`,
+    eventType: 'evidence',
+    status: 'succeeded',
+    sourceName: vmIncident ? 'get_vm_incident' : 'get_recent_errors',
+    argumentsPreview: vmIncident ? 'incident err-debug-1' : 'bounded window',
+    evidencePreview:
+      sequence === 1
+        ? '<script>alert(1)</script> is inert redacted evidence'
+        : vmIncident
+          ? 'second paginated evidence checkpoint'
+          : `bounded evidence checkpoint ${sequence}`,
+    resultCount: vmIncident ? 1 : 3,
+    durationMs: vmIncident ? 18 : 42,
+    retryAttempt: 0,
+    errorCode: null,
+    errorMessage: null,
+    createdAt: new Date(Date.UTC(2026, 6, 29, 10, 16, sequence % 60)).toISOString(),
+  };
+}
+
+function viewportLabel(page: Page): string {
+  return String(page.viewportSize()?.width ?? 'unknown');
+}
+
+async function assertAdminViewportIsStable(page: Page) {
+  const viewport = page.viewportSize();
+  const main = page.locator('.sam-main-content');
+  const metrics = await main.evaluate((element) => {
+    const container = element.getBoundingClientRect();
+    const offenders = [...element.querySelectorAll<HTMLElement>('*')]
+      .map((candidate) => ({ candidate, rect: candidate.getBoundingClientRect() }))
+      .filter(({ rect }) => rect.right > container.right + 1)
+      .slice(0, 8)
+      .map(({ candidate, rect }) => ({
+        className: candidate.className,
+        right: Math.round(rect.right),
+        tagName: candidate.tagName,
+        text: candidate.textContent?.trim().slice(0, 80),
+        width: Math.round(rect.width),
+      }));
+    return {
+      clientWidth: element.clientWidth,
+      offenders,
+      scrollLeft: element.scrollLeft,
+      scrollWidth: element.scrollWidth,
+    };
+  });
+  expect(metrics.scrollLeft).toBe(0);
+  expect(metrics.scrollWidth, JSON.stringify(metrics.offenders)).toBeLessThanOrEqual(
+    metrics.clientWidth
+  );
+
+  const diagnose = page.getByRole('button', { name: 'Diagnose', exact: true });
+  const box = await diagnose.boundingBox();
+  expect(box).not.toBeNull();
+  expect(box!.x).toBeGreaterThanOrEqual(0);
+  expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
+}
+
+async function setup(page: Page, diagnosisStatus = 200, pagination: PaginationMode = 'complete') {
   let runningStatus: 'running' | 'cancelled' = 'running';
+  let paginatedRequestCount = 0;
   await page.route('**/api/**', async (route: Route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -194,53 +262,29 @@ async function setup(page: Page, diagnosisStatus = 200) {
     if (path === '/api/admin/observability/diagnosis-runs/run-succeeded-1')
       return respond(200, {
         run: SUCCEEDED_RUN,
-        events: [
-          {
-            id: 'event-1',
-            runId: 'run-succeeded-1',
-            sequence: 1,
-            stepKey: 'tool:1:errors',
-            eventType: 'evidence',
-            status: 'succeeded',
-            sourceName: 'get_recent_errors',
-            argumentsPreview: 'bounded window',
-            evidencePreview: '<script>alert(1)</script> is inert redacted evidence',
-            resultCount: 3,
-            durationMs: 42,
-            retryAttempt: 0,
-            errorCode: null,
-            errorMessage: null,
-            createdAt: '2026-07-29T10:16:10.000Z',
-          },
-        ],
-        nextCursor: 1,
+        events: Array.from({ length: 100 }, (_, index) => diagnosisEvent(index + 1)),
+        nextCursor: 100,
       });
     if (
       path === '/api/admin/observability/diagnosis-runs/run-succeeded-1/events' &&
-      url.searchParams.get('cursor') === '1'
-    )
+      url.searchParams.get('cursor') === '100'
+    ) {
+      paginatedRequestCount++;
       return respond(200, {
-        events: [
-          {
-            id: 'event-2',
-            runId: 'run-succeeded-1',
-            sequence: 2,
-            stepKey: 'tool:2:vm',
-            eventType: 'evidence',
-            status: 'succeeded',
-            sourceName: 'get_vm_incident',
-            argumentsPreview: 'incident err-debug-1',
-            evidencePreview: 'second paginated evidence checkpoint',
-            resultCount: 1,
-            durationMs: 18,
-            retryAttempt: 0,
-            errorCode: null,
-            errorMessage: null,
-            createdAt: '2026-07-29T10:16:12.000Z',
-          },
-        ],
+        events: Array.from({ length: 100 }, (_, index) => diagnosisEvent(index + 101)),
+        nextCursor: pagination === 'repeated' ? 100 : 200,
+      });
+    }
+    if (
+      path === '/api/admin/observability/diagnosis-runs/run-succeeded-1/events' &&
+      url.searchParams.get('cursor') === '200'
+    ) {
+      paginatedRequestCount++;
+      return respond(200, {
+        events: Array.from({ length: 5 }, (_, index) => diagnosisEvent(index + 201)),
         nextCursor: null,
       });
+    }
     if (path === '/api/admin/observability/diagnosis-runs/run-running-1')
       return respond(200, {
         run: { ...RUNNING_RUN, status: runningStatus },
@@ -297,11 +341,12 @@ async function setup(page: Page, diagnosisStatus = 200) {
       return respond(200, { ideaId: 'idea-draft-1' });
     return respond(200, {});
   });
+  return { paginatedRequestCount: () => paginatedRequestCount };
 }
 
 test.describe('Deployment diagnosis visual audit', () => {
   test('renders durable detail with inert evidence HTML', async ({ page }) => {
-    const name = page.viewportSize()?.width === 375 ? 'mobile' : 'desktop';
+    const name = viewportLabel(page);
     await setup(page);
     let dialogOpened = false;
     page.on('dialog', () => {
@@ -311,6 +356,9 @@ test.describe('Deployment diagnosis visual audit', () => {
     await expect(page.getByRole('heading', { name: 'Diagnostic run' })).toBeVisible();
     await expect(page.getByText('get recent errors')).toBeVisible();
     await expect(page.getByText('get vm incident')).toBeVisible();
+    await expect(
+      page.getByRole('list', { name: 'Diagnosis event timeline' }).locator(':scope > li')
+    ).toHaveCount(205);
     await expect(page.getByText('Completed diagnosis')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Automatic VM evidence' })).toBeVisible();
     await expect(page.getByText('structured-events')).toBeVisible();
@@ -325,15 +373,32 @@ test.describe('Deployment diagnosis visual audit', () => {
     ).toBeVisible();
     expect(dialogOpened).toBe(false);
     await assertNoOverflow(page);
+    await page.reload();
+    await expect(
+      page.getByRole('list', { name: 'Diagnosis event timeline' }).locator(':scope > li')
+    ).toHaveCount(205);
     await screenshot(page, 'debug-diagnosis-detail-' + name);
   });
 
+  test('fails safely when event pagination repeats a cursor', async ({ page }) => {
+    const requests = await setup(page, 200, 'repeated');
+    await page.goto('/admin/diagnoses/run-succeeded-1');
+    await expect(page.getByRole('heading', { name: 'Diagnosis unavailable' })).toBeVisible();
+    await expect(
+      page.getByText('Diagnosis event pagination did not make bounded forward progress')
+    ).toBeVisible();
+    expect(requests.paginatedRequestCount()).toBe(1);
+    await assertNoOverflow(page);
+  });
+
   test('renders the bounded-budget error state', async ({ page }) => {
-    const name = page.viewportSize()?.width === 375 ? 'mobile' : 'desktop';
+    const name = viewportLabel(page);
     await setup(page, 429);
     await page.goto('/admin/errors');
+    await assertAdminViewportIsStable(page);
     await page.getByRole('button', { name: 'Diagnose', exact: true }).click();
     await expect(page.getByText('Daily deployment debugging budget exhausted')).toBeVisible();
+    await assertAdminViewportIsStable(page);
     await screenshot(page, `debug-diagnosis-budget-error-${name}`);
     await assertNoOverflow(page);
   });

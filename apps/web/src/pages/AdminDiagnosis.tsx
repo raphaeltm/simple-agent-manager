@@ -32,7 +32,11 @@ export function AdminDiagnosis() {
       ACTIVE.has(state.data?.run.status ?? '') || state.data?.run.incident?.status === 'pending'
         ? DEFAULT_DEBUG_DIAGNOSIS_POLL_INTERVAL_MS
         : false,
-    retry: 3,
+    retry: (failureCount, error) =>
+      !(
+        error instanceof Error &&
+        error.message.startsWith('Diagnosis event pagination did not make bounded forward progress')
+      ) && failureCount < 3,
   });
   const run = query.data?.run;
   const events = query.data?.events ?? [];
@@ -208,7 +212,7 @@ export function AdminDiagnosis() {
               Accepted. Waiting for the durable executor’s first checkpoint.
             </p>
           ) : (
-            <ol className="divide-y divide-border-default">
+            <ol aria-label="Diagnosis event timeline" className="divide-y divide-border-default">
               {events.map((event) => (
                 <li key={event.id} className="p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">

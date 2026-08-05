@@ -2,6 +2,10 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import {
+  diagnosticSecretCanaries,
+  expectDiagnosticCanariesAbsent,
+} from '../../helpers/diagnostic-secret-canaries';
 
 // Mock auth middleware
 const mockGetUserId = vi.fn().mockReturnValue('user-superadmin');
@@ -233,7 +237,33 @@ describe('Admin Observability Routes', () => {
       expect(mockGetDiagnosticArtifactForDownload).not.toHaveBeenCalled();
     });
 
+    it('returns the sanitized incident contract without any shared canary in the admin response', async () => {
+      mockGetDiagnosticIncidentByErrorId.mockResolvedValue({
+        id: 'incident-safe',
+        platformErrorId: 'err-1',
+        status: 'available',
+        preview: {
+          health: 'degraded',
+          values: diagnosticSecretCanaries.map(() => '[REDACTED]'),
+        },
+        artifacts: [],
+      });
+
+      const res = await app.request(
+        '/api/admin/observability/errors/err-1/incident',
+        {},
+        createEnv()
+      );
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain('[REDACTED]');
+      expectDiagnosticCanariesAbsent(body);
+    });
+
     it('streams an available artifact through the private no-store admin proxy', async () => {
+      const safeArchive = JSON.stringify({
+        values: diagnosticSecretCanaries.map(() => '[REDACTED]'),
+      });
       mockGetDiagnosticArtifactForDownload.mockResolvedValue({
         row: {
           id: 'art-1',
@@ -244,7 +274,7 @@ describe('Admin Observability Routes', () => {
         object: {
           body: new ReadableStream({
             start(controller) {
-              controller.enqueue(new TextEncoder().encode('safe'));
+              controller.enqueue(new TextEncoder().encode(safeArchive));
               controller.close();
             },
           }),
@@ -260,7 +290,9 @@ describe('Admin Observability Routes', () => {
       expect(res.headers.get('content-type')).toBe('application/gzip');
       expect(res.headers.get('content-disposition')).toBe('attachment; filename="art-1.tar.gz"');
       expect(res.headers.get('x-content-type-options')).toBe('nosniff');
-      expect(await res.text()).toBe('safe');
+      const body = await res.text();
+      expect(body).toBe(safeArchive);
+      expectDiagnosticCanariesAbsent(body);
       expect(mockGetDiagnosticArtifactForDownload).toHaveBeenCalledWith(
         expect.anything(),
         'err-1',
