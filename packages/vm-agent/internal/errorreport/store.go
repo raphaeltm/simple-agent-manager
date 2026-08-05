@@ -65,11 +65,9 @@ func openOutbox(path string) (*sql.DB, error) {
 		if err != nil {
 			return nil, fmt.Errorf("resolve outbox path: %w", err)
 		}
-		directory, err := openPrivateSpoolRoot(filepath.Dir(absPath))
-		if err != nil {
+		if err := prepareOutboxParent(absPath); err != nil {
 			return nil, fmt.Errorf("secure outbox directory: %w", err)
 		}
-		_ = directory.Close()
 		if info, statErr := os.Lstat(absPath); statErr == nil && info.Mode()&os.ModeSymlink != 0 {
 			return nil, fmt.Errorf("outbox database path must not be a symlink")
 		} else if statErr != nil && !os.IsNotExist(statErr) {
@@ -104,6 +102,38 @@ func openOutbox(path string) (*sql.DB, error) {
 		}
 	}
 	return db, nil
+}
+
+func prepareOutboxParent(path string) error {
+	parent := filepath.Dir(path)
+	for current := parent; ; current = filepath.Dir(current) {
+		info, err := os.Lstat(current)
+		if err == nil {
+			if info.Mode()&os.ModeSymlink != 0 {
+				return fmt.Errorf("outbox path contains a symlink: %s", current)
+			}
+			if current == parent && !info.IsDir() {
+				return fmt.Errorf("outbox parent is not a directory")
+			}
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		next := filepath.Dir(current)
+		if next == current {
+			break
+		}
+	}
+	if err := os.MkdirAll(parent, 0o700); err != nil {
+		return err
+	}
+	info, err := os.Lstat(parent)
+	if err != nil {
+		return err
+	}
+	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
+		return fmt.Errorf("outbox parent must be a real directory")
+	}
+	return nil
 }
 
 func restrictOutboxFiles(path string) error {

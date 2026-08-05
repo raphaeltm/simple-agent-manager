@@ -111,6 +111,23 @@ interface ArtifactRow {
   updated_at: string;
 }
 
+function nativeChecksumHex(value: ArrayBuffer | undefined): string | null {
+  if (!value) return null;
+  return [...new Uint8Array(value)].map((part) => part.toString(16).padStart(2, '0')).join('');
+}
+
+function storedObjectMatches(
+  expectedBytes: number,
+  expectedChecksum: string | null,
+  object: R2Object | null
+): boolean {
+  return (
+    object !== null &&
+    object.size === expectedBytes &&
+    nativeChecksumHex(object.checksums?.sha256) === expectedChecksum
+  );
+}
+
 function validateRegistration(
   config: IncidentConfig,
   incidentId: string,
@@ -192,7 +209,27 @@ export async function registerDiagnosticArtifact(
       existing.kind === input.kind &&
       existing.content_type === input.contentType
     ) {
-      await env.DATABASE.batch([
+      const recovered = await env.R2.head(existing.object_key);
+      if (storedObjectMatches(existing.expected_bytes, existing.checksum_sha256, recovered)) {
+        const recoveredResults = await env.DATABASE.batch([
+          env.DATABASE.prepare(
+            `UPDATE diagnostic_artifacts SET status = 'available', actual_bytes = expected_bytes,
+             failure_reason = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND node_id = ? AND status = 'pending'`
+          ).bind(existing.id, nodeId),
+          env.DATABASE.prepare(
+            `UPDATE diagnostic_incidents SET status = 'available', total_bytes = ?,
+             failure_reason = NULL, updated_at = CURRENT_TIMESTAMP
+             WHERE id = ? AND node_id = ?
+               AND EXISTS (SELECT 1 FROM diagnostic_artifacts
+                           WHERE id = ? AND incident_id = ? AND status = 'available')`
+          ).bind(existing.expected_bytes, incidentId, nodeId, existing.id, incidentId),
+        ]);
+        if (Number(recoveredResults[0]?.meta?.changes ?? 0) > 0) {
+          return { artifactId: existing.id, status: 'available' };
+        }
+      }
+      const downgradeResults = await env.DATABASE.batch([
         env.DATABASE.prepare(
           `UPDATE diagnostic_artifacts SET status = 'failed', checksum_sha256 = NULL,
            expected_bytes = 0, actual_bytes = NULL, failure_reason = 'VM evidence collection failed',
@@ -205,19 +242,35 @@ export async function registerDiagnosticArtifact(
           nodeId
         ),
         env.DATABASE.prepare(
-          `UPDATE diagnostic_incidents SET status = 'failed', total_bytes = 0,
-           failure_reason = 'VM evidence collection failed', manifest_json = ?, preview_json = ?,
-           updated_at = CURRENT_TIMESTAMP
-           WHERE id = ? AND node_id = ? AND status = 'pending'`
+          `UPDATE diagnostic_incidents
+           SET (status, total_bytes, failure_reason, manifest_json, preview_json, updated_at) =
+             (SELECT status, 0, failure_reason, manifest_json, preview_json, CURRENT_TIMESTAMP
+              FROM diagnostic_artifacts
+              WHERE id = ? AND incident_id = ? AND node_id = ? AND status = 'failed')
+           WHERE id = ? AND node_id = ?
+             AND EXISTS (SELECT 1 FROM diagnostic_artifacts
+                         WHERE id = ? AND incident_id = ? AND node_id = ? AND status = 'failed')`
         ).bind(
-          JSON.stringify(safeInput.manifest),
-          JSON.stringify(safeInput.preview),
+          existing.id,
+          incidentId,
+          nodeId,
+          incidentId,
+          nodeId,
+          existing.id,
           incidentId,
           nodeId
         ),
       ]);
-      await env.R2.delete(existing.object_key).catch(() => undefined);
-      return { artifactId: existing.id, status: 'failed' };
+      if (Number(downgradeResults[0]?.meta?.changes ?? 0) > 0) {
+        return { artifactId: existing.id, status: 'failed' };
+      }
+      const winner = await env.DATABASE.prepare(
+        'SELECT status FROM diagnostic_artifacts WHERE id = ? AND node_id = ?'
+      )
+        .bind(existing.id, nodeId)
+        .first<{ status: DiagnosticIncidentStatus }>();
+      if (winner) return { artifactId: existing.id, status: winner.status };
+      throw errors.conflict('Artifact state changed during failed registration');
     }
     if (
       existing.node_id !== nodeId ||
@@ -272,16 +325,35 @@ export async function registerDiagnosticArtifact(
       config.maxBytesPerNode
     ),
     env.DATABASE.prepare(
-      `UPDATE diagnostic_incidents SET status = ?, artifact_count = 1,
-       manifest_json = ?, preview_json = ?, failure_reason = ?, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND node_id = ?`
+      `UPDATE diagnostic_incidents
+       SET (status, artifact_count, manifest_json, preview_json, failure_reason, updated_at) =
+         (SELECT status, 1, manifest_json, preview_json, failure_reason, CURRENT_TIMESTAMP
+          FROM diagnostic_artifacts
+          WHERE id = ? AND incident_id = ? AND node_id = ? AND kind = ?
+            AND content_type = ? AND checksum_sha256 IS ? AND expected_bytes = ?)
+       WHERE id = ? AND node_id = ?
+         AND EXISTS (
+           SELECT 1 FROM diagnostic_artifacts
+           WHERE id = ? AND incident_id = ? AND node_id = ? AND kind = ?
+             AND content_type = ? AND checksum_sha256 IS ? AND expected_bytes = ?
+         )`
     ).bind(
-      artifactStatus,
-      manifestJson,
-      previewJson,
-      safeInput.status === 'failed' ? 'VM evidence collection failed' : null,
+      safeInput.artifactId,
       incidentId,
-      nodeId
+      nodeId,
+      safeInput.kind,
+      safeInput.contentType,
+      safeInput.status === 'ready' ? safeInput.checksumSha256 : null,
+      expectedBytes,
+      incidentId,
+      nodeId,
+      safeInput.artifactId,
+      incidentId,
+      nodeId,
+      safeInput.kind,
+      safeInput.contentType,
+      safeInput.status === 'ready' ? safeInput.checksumSha256 : null,
+      expectedBytes
     ),
   ]);
   if (Number(results[0]?.meta?.changes ?? 0) === 0) {
@@ -402,14 +474,17 @@ export async function uploadDiagnosticArtifact(
       bounded.completion,
     ]);
   } catch (cause) {
-    await env.R2.delete(row.object_key).catch(() => undefined);
-    await env.DATABASE.prepare(
-      `UPDATE diagnostic_artifacts SET upload_attempts = upload_attempts + 1,
-       failure_reason = 'Upload failed', updated_at = CURRENT_TIMESTAMP WHERE id = ?`
-    )
-      .bind(artifactId)
-      .run();
-    throw cause;
+    const recovered = await env.R2.head(row.object_key).catch(() => null);
+    if (!storedObjectMatches(row.expected_bytes, row.checksum_sha256, recovered)) {
+      await env.DATABASE.prepare(
+        `UPDATE diagnostic_artifacts SET upload_attempts = upload_attempts + 1,
+         failure_reason = 'Upload failed', updated_at = CURRENT_TIMESTAMP
+         WHERE id = ? AND status = 'pending'`
+      )
+        .bind(artifactId)
+        .run();
+      throw cause;
+    }
   }
 
   const results = await env.DATABASE.batch([
@@ -433,7 +508,6 @@ export async function uploadDiagnosticArtifact(
       .bind(artifactId, nodeId)
       .first<{ status: DiagnosticIncidentStatus }>();
     if (winner?.status === 'available') return;
-    await env.R2.delete(row.object_key).catch(() => undefined);
     throw errors.conflict('Artifact state changed while content was uploading');
   }
 }

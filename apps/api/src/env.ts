@@ -316,7 +316,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   VM_INCIDENT_RETENTION_DAYS?: string; // Private R2 and active metadata retention (default: 7)
   VM_INCIDENT_METADATA_RETENTION_DAYS?: string; // Expired metadata retention after R2 deletion (default: 30)
   VM_INCIDENT_PENDING_TIMEOUT_MINUTES?: string; // Stale pending upload threshold (default: 30)
-  VM_INCIDENT_RECONCILE_BATCH_SIZE?: string; // Max artifacts/incidents per reconciliation pass (default: 50)
+  VM_INCIDENT_RECONCILE_BATCH_SIZE?: string; // Max artifacts/incidents per reconciliation pass (default: 50, minimum: 5)
   // Observability configuration (spec 023)
   OBSERVABILITY_ERROR_RETENTION_DAYS?: string;
   OBSERVABILITY_ERROR_MAX_ROWS?: string;

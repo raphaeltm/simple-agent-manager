@@ -173,6 +173,12 @@ func TestPendingSnapshotRecoversAfterRestart(t *testing.T) {
 	first.Shutdown()
 
 	second := New("http://localhost", "node-1", "", cfg)
+	second.SetCollectors(CollectorFunc{
+		CollectorName: "configured-before-start",
+		CollectFunc: func(context.Context, IncidentContext) (any, error) {
+			return map[string]any{"configured": true}, nil
+		},
+	})
 	second.Start()
 	defer second.Shutdown()
 	waitFor(t, func() bool {
@@ -182,6 +188,10 @@ func TestPendingSnapshotRecoversAfterRestart(t *testing.T) {
 	})
 	if _, err := os.Stat(filepath.Join(cfg.SpoolDir, entry.IncidentID+".tar.gz")); err != nil {
 		t.Fatalf("restart did not create deterministic archive: %v", err)
+	}
+	files := readArchive(t, filepath.Join(cfg.SpoolDir, entry.IncidentID+".tar.gz"))
+	if _, ok := files["collectors/configured-before-start.json"]; !ok {
+		t.Fatal("restart recovery ran before production collectors were configured")
 	}
 }
 
@@ -262,6 +272,7 @@ func TestCollectorTimeoutBoundsBacklogAndShutdown(t *testing.T) {
 			return map[string]any{"late": true}, nil
 		},
 	})
+	reporter.Start()
 	for index := 0; index < 20; index++ {
 		reporter.Report(ErrorEntry{Level: "error", Message: "failure", Source: "test"})
 	}

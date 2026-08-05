@@ -11,6 +11,7 @@ export const DEFAULT_VM_INCIDENT_RETENTION_DAYS = 7;
 export const DEFAULT_VM_INCIDENT_METADATA_RETENTION_DAYS = 30;
 export const DEFAULT_VM_INCIDENT_PENDING_TIMEOUT_MINUTES = 30;
 export const DEFAULT_VM_INCIDENT_RECONCILE_BATCH_SIZE = 50;
+export const MIN_VM_INCIDENT_RECONCILE_BATCH_SIZE = 5;
 
 export interface IncidentConfig {
   r2Prefix: string;
@@ -87,10 +88,13 @@ export function resolveDiagnosticIncidentConfig(env: Env): IncidentConfig {
       DEFAULT_VM_INCIDENT_PENDING_TIMEOUT_MINUTES,
       24 * 60
     ),
-    reconcileBatchSize: positiveBounded(
-      env.VM_INCIDENT_RECONCILE_BATCH_SIZE,
-      DEFAULT_VM_INCIDENT_RECONCILE_BATCH_SIZE,
-      200
+    reconcileBatchSize: Math.max(
+      MIN_VM_INCIDENT_RECONCILE_BATCH_SIZE,
+      positiveBounded(
+        env.VM_INCIDENT_RECONCILE_BATCH_SIZE,
+        DEFAULT_VM_INCIDENT_RECONCILE_BATCH_SIZE,
+        200
+      )
     ),
   };
 }

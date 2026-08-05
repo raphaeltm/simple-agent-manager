@@ -260,4 +260,52 @@ describe('diagnostic incident reconciliation', () => {
       count: ids.length,
     });
   });
+
+  it('funds every reconciliation phase when configuration is below the five-phase minimum', async () => {
+    env.VM_INCIDENT_RECONCILE_BATCH_SIZE = '1';
+    insertIncident({
+      id: '01KZ8V0GMXQ4ZCSERPRT2X2K80',
+      status: 'pending',
+      artifactStatus: 'pending',
+      objectKey: 'minimum-pending',
+    });
+    insertIncident({
+      id: '01KZ8V0GMXQ4ZCSERPRT2X2K81',
+      status: 'available',
+      artifactStatus: 'available',
+      objectKey: 'minimum-expired',
+      expiresAt: '2020-01-01T00:00:00.000Z',
+    });
+    insertIncident({
+      id: '01KZ8V0GMXQ4ZCSERPRT2X2K82',
+      status: 'expired',
+      artifactStatus: 'expired',
+      objectKey: 'minimum-delete',
+      expiresAt: '2020-01-01T00:00:00.000Z',
+      deleteAfter: '2020-02-01T00:00:00.000Z',
+    });
+    insertIncident({
+      id: '01KZ8V0GMXQ4ZCSERPRT2X2K83',
+      status: 'available',
+      artifactStatus: 'available',
+      objectKey: 'minimum-missing-available',
+      updatedAt: '2026-08-05T12:00:00.000Z',
+    });
+    const repairId = '01KZ8V0GMXQ4ZCSERPRT2X2K84';
+    observability
+      .prepare(
+        `INSERT INTO platform_errors
+         (id, source, level, message, node_id, workspace_id, timestamp, created_at)
+         VALUES (?, 'vm-agent', 'error', 'repair me', 'node-1', NULL, 1, 1)`
+      )
+      .run(repairId);
+
+    const result = await reconcileDiagnosticIncidents(env);
+    expect(result).toMatchObject({
+      failed: 2,
+      expired: 1,
+      deleted: 1,
+      incidentMetadataRepaired: 1,
+    });
+  });
 });

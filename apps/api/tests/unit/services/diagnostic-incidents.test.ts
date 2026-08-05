@@ -44,6 +44,14 @@ class MemoryR2 {
   readonly delete = vi.fn(async (key: string) => {
     this.objects.delete(key);
   });
+  readonly head = vi.fn(async (key: string) => {
+    const bytes = this.objects.get(key);
+    if (!bytes) return null;
+    return {
+      size: bytes.byteLength,
+      checksums: { sha256: Uint8Array.from(Buffer.from(sha256(bytes), 'hex')).buffer },
+    } as R2Object;
+  });
 }
 
 function sha256(value: Uint8Array): string {
@@ -137,7 +145,9 @@ describe('diagnostic incident storage boundary', () => {
     );
 
     expect(r2.put).toHaveBeenCalledTimes(1);
-    const [key] = r2.put.mock.calls[0]!;
+    const call = r2.put.mock.calls[0];
+    if (!call) throw new Error('expected R2 upload');
+    const [key] = call;
     expect(key).toBe(`diagnostic-incidents/${NODE_ID}/${INCIDENT_ID}/${ARTIFACT_ID}.tar.gz`);
     expect(key).not.toContain('http');
     expect(r2.objects.get(key)).toEqual(bytes);
@@ -218,6 +228,40 @@ describe('diagnostic incident storage boundary', () => {
         .prepare('SELECT status, upload_attempts, failure_reason FROM diagnostic_artifacts')
         .get()
     ).toEqual({ status: 'pending', upload_attempts: 1, failure_reason: 'Upload failed' });
+  });
+
+  it('recovers a prior successful object when a retry loses its response', async () => {
+    const bytes = new TextEncoder().encode('safe');
+    await seedIncident();
+    await registerDiagnosticArtifact(env, NODE_ID, INCIDENT_ID, registration(bytes));
+    const key = `diagnostic-incidents/${NODE_ID}/${INCIDENT_ID}/${ARTIFACT_ID}.tar.gz`;
+    r2.objects.set(key, bytes);
+    r2.put.mockRejectedValueOnce(new Error('response connection dropped'));
+
+    await expect(
+      uploadDiagnosticArtifact(
+        env,
+        NODE_ID,
+        INCIDENT_ID,
+        ARTIFACT_ID,
+        new Request('https://api.example.test/content', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/gzip',
+            'Content-Length': String(bytes.byteLength),
+            'X-Content-SHA256': sha256(bytes),
+          },
+          body: bytes,
+        })
+      )
+    ).resolves.toBeUndefined();
+    expect(r2.delete).not.toHaveBeenCalled();
+    expect(sqlite.prepare('SELECT status FROM diagnostic_artifacts').get()).toEqual({
+      status: 'available',
+    });
+    expect(sqlite.prepare('SELECT status FROM diagnostic_incidents').get()).toEqual({
+      status: 'available',
+    });
   });
 
   it('rejects actual bytes beyond the registered length even with a forged header', async () => {
@@ -314,6 +358,19 @@ describe('diagnostic incident storage boundary', () => {
         }
       )
     ).rejects.toMatchObject({ statusCode: 409 });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT status, artifact_count, manifest_json, preview_json
+           FROM diagnostic_incidents WHERE id = ?`
+        )
+        .get(secondIncident)
+    ).toEqual({
+      status: 'pending',
+      artifact_count: 0,
+      manifest_json: null,
+      preview_json: null,
+    });
   });
 
   it('atomically admits only one concurrent registration at the per-node boundary', async () => {
@@ -342,6 +399,33 @@ describe('diagnostic incident storage boundary', () => {
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM diagnostic_artifacts').get()).toEqual({
       count: 1,
     });
+  });
+
+  it('keeps incident evidence aligned with the winner of concurrent idempotent registration', async () => {
+    const bytes = new TextEncoder().encode('safe');
+    await seedIncident();
+    const outcomes = await Promise.all([
+      registerDiagnosticArtifact(env, NODE_ID, INCIDENT_ID, {
+        ...registration(bytes),
+        preview: { producer: 'first' },
+      }),
+      registerDiagnosticArtifact(env, NODE_ID, INCIDENT_ID, {
+        ...registration(bytes),
+        preview: { producer: 'second' },
+      }),
+    ]);
+    expect(outcomes).toEqual([
+      { artifactId: ARTIFACT_ID, status: 'pending' },
+      { artifactId: ARTIFACT_ID, status: 'pending' },
+    ]);
+
+    const artifact = sqlite
+      .prepare('SELECT manifest_json, preview_json FROM diagnostic_artifacts WHERE id = ?')
+      .get(ARTIFACT_ID);
+    const incident = sqlite
+      .prepare('SELECT manifest_json, preview_json FROM diagnostic_incidents WHERE id = ?')
+      .get(INCIDENT_ID);
+    expect(incident).toEqual(artifact);
   });
 
   it('decorates a full 200-error page without exceeding D1 bind limits', async () => {

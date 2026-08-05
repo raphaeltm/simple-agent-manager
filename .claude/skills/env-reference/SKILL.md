@@ -173,7 +173,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `VM_INCIDENT_RETENTION_DAYS` — Private object and active metadata retention (default: 7; generated deployments use the Pulumi output)
 - `VM_INCIDENT_METADATA_RETENTION_DAYS` — Expired metadata retention after object deletion (default: 30)
 - `VM_INCIDENT_PENDING_TIMEOUT_MINUTES` — Incomplete upload timeout (default: 30)
-- `VM_INCIDENT_RECONCILE_BATCH_SIZE` — Max rows repaired per scheduled pass (default: 50)
+- `VM_INCIDENT_RECONCILE_BATCH_SIZE` — Max rows repaired per scheduled pass (default: 50; minimum: 5)
 
 ### Project File Library
 

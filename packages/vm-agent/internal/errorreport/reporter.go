@@ -48,7 +48,6 @@ type Reporter struct {
 	stateMu     sync.RWMutex
 	authToken   string
 	lifecycleMu sync.Mutex
-	flushMu     sync.Mutex
 
 	collectorsMu sync.RWMutex
 	collectors   []Collector
@@ -102,11 +101,6 @@ func New(apiBaseURL, nodeID, authToken string, cfg Config) *Reporter {
 			r.initErr = fmt.Errorf("cleanup private spool: %w", cleanupErr)
 		}
 	}
-	if r.initErr == nil {
-		r.snapshotActive.Store(true)
-		go r.snapshotLoop()
-		r.signalSnapshot()
-	}
 	return r
 }
 
@@ -141,7 +135,10 @@ func (r *Reporter) Start() {
 	}
 	r.startOnce.Do(func() {
 		r.started.Store(true)
+		r.snapshotActive.Store(true)
+		go r.snapshotLoop()
 		go r.flushLoop()
+		r.signalSnapshot()
 		r.signalFlush()
 	})
 }
@@ -293,8 +290,6 @@ func (r *Reporter) flush() {
 	if r == nil || r.db == nil {
 		return
 	}
-	r.flushMu.Lock()
-	defer r.flushMu.Unlock()
 	if err := r.terminalizeExpired(); err != nil {
 		slog.Warn("errorreport: expiry terminalization failed", "error", boundedError(err))
 	}

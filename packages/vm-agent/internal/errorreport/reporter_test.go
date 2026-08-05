@@ -235,21 +235,13 @@ func TestErrorDeliveryRegistersAndUploadsOnlyRedactedAutomaticEvidence(t *testin
 			}, nil
 		},
 	})
+	reporter.Start()
 	incidentID := reporter.Report(ErrorEntry{
 		Level: "error", Message: "provider failed " + canary, Source: "session-host",
 		WorkspaceID: "workspace-1",
 		Context:     map[string]interface{}{"token": canary, "phase": "start"},
 	})
-	waitFor(t, func() bool {
-		var state string
-		return reporter.db.QueryRow(
-			"SELECT artifact_state FROM error_report_outbox WHERE incident_id = ?", incidentID,
-		).Scan(&state) == nil && state == "ready"
-	})
-	reporter.flush()
-	if reporter.pendingCount() != 0 {
-		t.Fatal("row was not deleted after both structured and artifact acknowledgements")
-	}
+	waitFor(t, func() bool { return reporter.pendingCount() == 0 })
 	reporter.Shutdown()
 
 	mu.Lock()
@@ -405,6 +397,7 @@ func TestMissingReadyArtifactRegistersFailedBeforeAnyUpload(t *testing.T) {
 
 func TestOutboxAndWALFilesArePrivate(t *testing.T) {
 	cfg := testConfig(t)
+	cfg.DBPath = filepath.Join(t.TempDir(), "private-outbox", "errors.db")
 	reporter := New("http://localhost", "node-1", "token", cfg)
 	defer reporter.Shutdown()
 	if info, err := os.Stat(filepath.Dir(cfg.DBPath)); err != nil || info.Mode().Perm() != 0o700 {
@@ -418,6 +411,29 @@ func TestOutboxAndWALFilesArePrivate(t *testing.T) {
 		if err != nil || info.Mode().Perm() != 0o600 {
 			t.Fatalf("outbox file %s mode=%v err=%v", path, info.Mode().Perm(), err)
 		}
+	}
+}
+
+func TestCustomOutboxPathDoesNotChangeExistingParentPermissions(t *testing.T) {
+	shared := filepath.Join(t.TempDir(), "shared")
+	if err := os.Mkdir(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(shared, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := testConfig(t)
+	cfg.DBPath = filepath.Join(shared, "errors.db")
+	reporter := New("http://localhost", "node-1", "token", cfg)
+	defer reporter.Shutdown()
+	if err := reporter.InitError(); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Stat(shared); err != nil || info.Mode().Perm() != 0o755 {
+		t.Fatalf("shared parent mode=%v err=%v", info.Mode().Perm(), err)
+	}
+	if info, err := os.Stat(cfg.DBPath); err != nil || info.Mode().Perm() != 0o600 {
+		t.Fatalf("outbox file mode=%v err=%v", info.Mode().Perm(), err)
 	}
 }
 
