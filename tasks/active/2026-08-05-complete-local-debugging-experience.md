@@ -143,60 +143,60 @@ scheduled reconciliation + R2 lifecycle
 - [x] Add migration-chain regression coverage proving `cancelled` persists on a database built from all migrations.
 - [x] Add barrier-controlled DO tests for cancel-vs-completion, deadline-vs-completion, duplicate alarm, and idempotent terminal events.
 - [x] Return event cursors only when another page exists; exhaust all pages in the web client with monotonic cursor protection.
-- [ ] Add accessible pending/success/failure feedback and duplicate-click suppression for cancel, retry, copy, and download actions without page reloads or hidden stale content.
+- [x] Add accessible pending/success/failure feedback and duplicate-click suppression for cancel, retry, copy, and download actions without page reloads or hidden stale content.
 
 ### B. Durable VM error outbox and incident IDs
 
-- [ ] Add a production SQLite WAL outbox for structured error reports, snapshot state, attempts, acknowledgements, manifest metadata, and spool paths.
-- [ ] Assign stable monotonic ULIDs in the VM agent and preserve caller-supplied IDs during retries/restarts.
-- [ ] Bound outbox rows, batch entries, body bytes, attempts/backoff, local spool bytes, artifact bytes, and local retention through named defaults plus environment overrides.
-- [ ] Delete rows only after required structured-report and artifact acknowledgements; retain on transient failures; terminalize bounded permanent/quota failures safely.
-- [ ] Serialize flush/outbox mutation, support token refresh, and make shutdown idempotent and race-free.
-- [ ] Prune expired and unreferenced spool files on startup without following symlinks or leaving the configured private directory.
-- [ ] Preserve nil-safe reporting and keep info/warn reports durable without automatically capturing artifacts.
+- [x] Add a production SQLite WAL outbox for structured error reports, snapshot state, attempts, acknowledgements, manifest metadata, and spool paths.
+- [x] Assign stable monotonic ULIDs in the VM agent and preserve caller-supplied IDs during retries/restarts.
+- [x] Bound outbox rows, batch entries, body bytes, attempts/backoff, local spool bytes, artifact bytes, and local retention through named defaults plus environment overrides.
+- [x] Delete rows only after required structured-report and artifact acknowledgements; retain on transient failures; terminalize bounded permanent/quota failures safely.
+- [x] Serialize flush/outbox mutation, support token refresh, and make shutdown idempotent and race-free.
+- [x] Prune expired and unreferenced spool files on startup without following symlinks or leaving the configured private directory.
+- [x] Preserve nil-safe reporting and keep info/warn reports durable without automatically capturing artifacts.
 
 ### C. Safe automatic VM snapshots
 
-- [ ] Implement allowlisted collector interfaces and safe default collectors for runtime/version health, bounded system resources, bounded structured events, and bounded workspace/container lifecycle status.
-- [ ] Do not read arbitrary logs, env values, repository files, prompts/messages, process command lines, Docker inspect config/env, credentials, tokens, or raw local databases.
-- [ ] Implement deterministic recursive key/value redaction, secret-pattern detection, depth/item/string limits, and cumulative byte accounting.
-- [ ] Emit a versioned manifest with collector outcome, truncation, bytes, and redaction counts.
-- [ ] Build tar+gzip archives entirely under a `0700` private spool with `0600` files, atomic rename, deterministic names, and configured maximum size.
-- [ ] Make collection asynchronous, idempotent, crash-recoverable, and limited to error-level incidents.
-- [ ] Add malicious nested-object, oversized, symlink, partial-write, collector-failure, crash-restart, and realistic canary-secret tests; run `go test -race ./...`.
+- [x] Implement allowlisted collector interfaces and safe default collectors for runtime/version health, bounded system resources, bounded structured events, and bounded workspace/container lifecycle status.
+- [x] Do not read arbitrary logs, env values, repository files, prompts/messages, process command lines, Docker inspect config/env, credentials, tokens, or raw local databases.
+- [x] Implement deterministic recursive key/value redaction, secret-pattern detection, depth/item/string limits, and cumulative byte accounting.
+- [x] Emit a versioned manifest with collector outcome, truncation, bytes, and redaction counts.
+- [x] Build tar+gzip archives entirely under a `0700` private spool with `0600` files, atomic rename, deterministic names, and configured maximum size.
+- [x] Make collection asynchronous, idempotent, crash-recoverable, and limited to error-level incidents.
+- [x] Add malicious nested-object, oversized, symlink, partial-write, collector-failure, crash-restart, and realistic canary-secret tests; run `go test -race ./...`.
 
 ### D. Authenticated incident/artifact APIs and storage
 
-- [ ] Extend the VM error contract with `incidentId` and idempotently persist that ID in observability D1 and primary-D1 incident metadata before acknowledging delivery.
-- [ ] Add primary-D1 `diagnostic_incidents` and `diagnostic_artifacts` tables with statuses, indexes, deterministic uniqueness, safe metadata, expiry, and non-cascading retention choices.
-- [ ] Add node-callback-JWT artifact registration and streaming upload routes on the lifecycle router; validate node/incident identity, scope, content type, content length, checksum, manifest bounds, and quotas.
-- [ ] Use deterministic private R2 keys and checksum verification; never expose public/presigned URLs.
-- [ ] Add strictly superadmin-authenticated summary and proxy-download routes with safe headers and audit logging.
-- [ ] Add bounded scheduled reconciliation for partial dual-D1 writes, stale pending uploads, missing/available R2 drift, quota state, expiry, and metadata cleanup.
-- [ ] Add a Pulumi-managed, configurable prefix lifecycle rule for automatic incident artifacts and tests that preserve the existing session-snapshot rule.
-- [ ] Add route contract/capability tests through the combined router proving node tokens work, workspace/session/missing tokens fail, another node cannot overwrite an incident, and non-superadmins cannot read/download artifacts.
-- [ ] Add streaming, oversize, checksum mismatch, duplicate upload, partial failure, retry, quota, reconciliation, and retention tests using realistic Worker/R2 boundaries.
+- [x] Extend the VM error contract with `incidentId` and idempotently persist that ID in observability D1 and primary-D1 incident metadata before acknowledging delivery.
+- [x] Add primary-D1 `diagnostic_incidents` and `diagnostic_artifacts` tables with statuses, indexes, deterministic uniqueness, safe metadata, expiry, and non-cascading retention choices.
+- [x] Add node-callback-JWT artifact registration and streaming upload routes on the lifecycle router; validate node/incident identity, scope, content type, content length, checksum, manifest bounds, and quotas.
+- [x] Use deterministic private R2 keys and checksum verification; never expose public/presigned URLs.
+- [x] Add strictly superadmin-authenticated summary and proxy-download routes with safe headers and audit logging.
+- [x] Add bounded scheduled reconciliation for partial dual-D1 writes, stale pending uploads, missing/available R2 drift, quota state, expiry, and metadata cleanup.
+- [x] Add a Pulumi-managed, configurable prefix lifecycle rule for automatic incident artifacts and tests that preserve the existing session-snapshot rule.
+- [x] Add route contract/capability tests through the combined router proving node tokens work, workspace/session/missing tokens fail, another node cannot overwrite an incident, and non-superadmins cannot read/download artifacts.
+- [x] Add streaming, oversize, checksum mismatch, duplicate upload, partial failure, retry, quota, reconciliation, and retention tests using realistic Worker/R2 boundaries.
 
 ### E. Diagnosis tools, shared contracts, and admin UI
 
-- [ ] Add shared incident/artifact status, manifest, preview, summary, and API response types.
-- [ ] Add a bounded read-only `get_vm_incident` diagnosis tool correlated by the selected platform error ID; include safe source/action events and never raw bytes/R2 keys/URLs.
-- [ ] Batch-decorate admin error results with incident state without N+1 queries.
-- [ ] Include correlated incident state in diagnosis detail responses and poll while evidence is pending.
-- [ ] Render evidence availability, collector outcomes, truncation/redaction counts, safe previews, explicit unavailable/expired/failed states, and the separate nature of the live broad debug package.
-- [ ] Provide an authenticated download action for the safe automatic artifact with pending/success/error state.
-- [ ] Preserve complete event history during polling/refetch and keep existing content visible.
-- [ ] Add unit/component/Playwright tests for pending, available, failed, expired, missing, long, many-event, malicious-text, retry/cancel, and download states at mobile and desktop sizes with no overflow or XSS.
+- [x] Add shared incident/artifact status, manifest, preview, summary, and API response types.
+- [x] Add a bounded read-only `get_vm_incident` diagnosis tool correlated by the selected platform error ID; include safe source/action events and never raw bytes/R2 keys/URLs.
+- [x] Batch-decorate admin error results with incident state without N+1 queries.
+- [x] Include correlated incident state in diagnosis detail responses and poll while evidence is pending.
+- [x] Render evidence availability, collector outcomes, truncation/redaction counts, safe previews, explicit unavailable/expired/failed states, and the separate nature of the live broad debug package.
+- [x] Provide an authenticated download action for the safe automatic artifact with pending/success/error state.
+- [x] Preserve complete event history during polling/refetch and keep existing content visible.
+- [x] Add unit/component/Playwright tests for pending, available, failed, expired, missing, long, many-event, malicious-text, retry/cancel, and download states at mobile and desktop sizes with no overflow or XSS.
 
 ### F. Configuration, documentation, and process fix
 
-- [ ] Add every new timeout, limit, quota, prefix, and retention value to VM/API env config with named defaults and environment overrides.
-- [ ] Update `.env.example`, env reference, API docs, self-hosting/deployment docs, architecture overview, and debugging/operator guidance.
-- [ ] Document the safe automatic artifact contract and the explicit broad debug-package boundary.
-- [ ] Add the R2 lifecycle setting to Pulumi config/output synchronization and deployment validation.
+- [x] Add every new timeout, limit, quota, prefix, and retention value to VM/API env config with named defaults and environment overrides.
+- [x] Update `.env.example`, env reference, API docs, self-hosting/deployment docs, architecture overview, and debugging/operator guidance.
+- [x] Document the safe automatic artifact contract and the explicit broad debug-package boundary.
+- [x] Add the R2 lifecycle setting to Pulumi config/output synchronization and deployment validation.
 - [x] Update migration-safety guidance to require full migration-chain behavior tests for new persisted enum states and barrier-controlled tests for terminal transitions across awaited work.
 - [x] Add a concise postmortem covering the cancelled CHECK mismatch, terminal race, why existing tests missed both, and the process correction.
-- [ ] Keep touched source files below repository size limits by extracting services/components rather than extending existing oversized files.
+- [x] Keep touched source files below repository size limits by extracting services/components rather than extending existing oversized files.
 
 ### G. Verification, release, and stale artifact reconciliation
 

@@ -306,6 +306,17 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // VM agent error reporting
   MAX_VM_AGENT_ERROR_BODY_BYTES?: string;
   MAX_VM_AGENT_ERROR_BATCH_SIZE?: string;
+  VM_INCIDENT_R2_PREFIX?: string; // Private R2 prefix for safe VM incident artifacts (default: diagnostic-incidents)
+  VM_INCIDENT_ARTIFACT_MAX_BYTES?: string; // Max single compressed artifact bytes (default: 2097152)
+  VM_INCIDENT_REGISTRATION_MAX_BYTES?: string; // Max registration JSON bytes (default: 262144)
+  VM_INCIDENT_MANIFEST_MAX_BYTES?: string; // Max redacted manifest JSON bytes (default: 131072)
+  VM_INCIDENT_PREVIEW_MAX_BYTES?: string; // Max redacted preview JSON bytes (default: 131072)
+  VM_INCIDENT_MAX_ARTIFACTS_PER_NODE?: string; // Active artifact count quota per node (default: 50)
+  VM_INCIDENT_MAX_BYTES_PER_NODE?: string; // Active expected-byte quota per node (default: 104857600)
+  VM_INCIDENT_RETENTION_DAYS?: string; // Private R2 and active metadata retention (default: 7)
+  VM_INCIDENT_METADATA_RETENTION_DAYS?: string; // Expired metadata retention after R2 deletion (default: 30)
+  VM_INCIDENT_PENDING_TIMEOUT_MINUTES?: string; // Stale pending upload threshold (default: 30)
+  VM_INCIDENT_RECONCILE_BATCH_SIZE?: string; // Max artifacts/incidents per reconciliation pass (default: 50)
   // Observability configuration (spec 023)
   OBSERVABILITY_ERROR_RETENTION_DAYS?: string;
   OBSERVABILITY_ERROR_MAX_ROWS?: string;

@@ -149,6 +149,18 @@ When a diagnosis is worth keeping, **Save as draft Idea** files it into a projec
 
 The same redactor now also runs on the **Worker log query** behind `/admin/logs`, over each entry's `details` object. So a superadmin browsing logs directly will see `[REDACTED]` in place of values — including `user_id`, `ip_address`, and `user_agent`, which are correlation fields rather than secrets. That is expected, not a bug. It does not cover an entry's `message` text, so treat log messages as unredacted.
 
+### Automatic VM diagnostic evidence
+
+For VM Agent failures, the error row can include a **Diagnostic evidence** card. The VM Agent assigns one stable incident ID, durably queues the error, and collects a small same-installation snapshot while it retries delivery. The snapshot is deliberately narrower than a debug package:
+
+- allowlisted runtime health, agent version, bounded system resources, structured event metadata, and workspace lifecycle state;
+- recursive credential-shaped value redaction plus depth, item, string, document, archive, spool, and retention limits;
+- no repository files, arbitrary filesystem reads, environment dumps, shell history, raw command output, session transcript, or cross-installation transport.
+
+The redacted preview is stored in D1. Compressed bytes remain in the deployment's private R2 bucket and are streamed only through a superadmin-authenticated download route; SAM never returns the R2 object key or a direct object URL to the browser or diagnosis model. The card shows `pending`, `available`, `failed`, `expired`, or `missing` explicitly, including collector failures and truncation/redaction counts. A pending upload is not presented as complete.
+
+The diagnosis agent gets only the bounded redacted preview through its read-only incident tool. Downloading the private archive is a separate human action. **Collect debug package** remains a separate, explicit, broader live-node action and is never run automatically or exposed to the diagnosis model.
+
 ### Diagnosis limits
 
 | Variable                          | Default               | Description                                                                                      |

@@ -203,6 +203,30 @@ Task workspaces are checked out on the generated output branch, and SAM refuses 
 
 The `/admin/errors` view remains superadmin-only and may show local user IDs, IP addresses, and user-agent strings. Before any tool result enters model context, SAM recursively removes those fields plus credential-shaped values such as API tokens, JWTs, authorization headers, private keys, and long secret-like strings. Cloudflare credentials stay server-side and are never included in model messages or saved diagnosis text.
 
+### Same-installation VM diagnostic evidence
+
+VM failures use a durable local SQLite outbox and a private R2 artifact. Generated deployments set the R2 prefix and object lifecycle from Pulumi; the remaining Worker bounds can be overridden through deployment environment variables.
+
+| Worker variable                       | Default                | Description                                             |
+| ------------------------------------- | ---------------------- | ------------------------------------------------------- |
+| `MAX_VM_AGENT_ERROR_BODY_BYTES`       | `32768`                | Maximum VM error batch body                             |
+| `MAX_VM_AGENT_ERROR_BATCH_SIZE`       | `10`                   | Maximum errors per VM batch                             |
+| `VM_INCIDENT_R2_PREFIX`               | `diagnostic-incidents` | Private object prefix; generated from the Pulumi output |
+| `VM_INCIDENT_ARTIFACT_MAX_BYTES`      | `2097152`              | Maximum compressed artifact size                        |
+| `VM_INCIDENT_REGISTRATION_MAX_BYTES`  | `262144`               | Maximum registration JSON body                          |
+| `VM_INCIDENT_MANIFEST_MAX_BYTES`      | `131072`               | Maximum redacted manifest                               |
+| `VM_INCIDENT_PREVIEW_MAX_BYTES`       | `131072`               | Maximum redacted model/UI preview                       |
+| `VM_INCIDENT_MAX_ARTIFACTS_PER_NODE`  | `50`                   | Active artifact quota per node                          |
+| `VM_INCIDENT_MAX_BYTES_PER_NODE`      | `104857600`            | Active expected-byte quota per node                     |
+| `VM_INCIDENT_RETENTION_DAYS`          | `7`                    | Private object and active metadata retention            |
+| `VM_INCIDENT_METADATA_RETENTION_DAYS` | `30`                   | Expired metadata retention after object deletion        |
+| `VM_INCIDENT_PENDING_TIMEOUT_MINUTES` | `30`                   | Timeout before an incomplete upload is failed           |
+| `VM_INCIDENT_RECONCILE_BATCH_SIZE`    | `50`                   | Maximum artifacts/incidents repaired per scheduled pass |
+
+The VM Agent process accepts the corresponding `ERROR_REPORT_*` overrides for flush interval, batch size/bytes, outbox size and path, HTTP timeout, retry bounds, attempts, spool path/bytes, artifact bytes, retention, collector timeout/count, document bytes, recursive value depth/items, string bytes, and structured event limit. Defaults are listed in `apps/api/.env.example`; the common defaults are a 32 KiB error batch, 1,000-row outbox, 2 MiB artifact, 20 MiB spool, and 24-hour local retention.
+
+Pulumi options `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `diagnosticIncidentTtlDays` (default `7`) configure the private prefix and an independent R2 lifecycle rule. They do not require a separate bucket or manually managed Worker variable.
+
 ### Platform Feedback Triage
 
 | Variable                                             | Default  | Description                                                                                                |

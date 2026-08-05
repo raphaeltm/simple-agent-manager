@@ -2303,6 +2303,88 @@ export const sessionSummaries = sqliteTable(
 export type SessionSummaryRow = typeof sessionSummaries.$inferSelect;
 export type NewSessionSummaryRow = typeof sessionSummaries.$inferInsert;
 
+export const diagnosticIncidents = sqliteTable(
+  'diagnostic_incidents',
+  {
+    id: text('id').primaryKey(),
+    platformErrorId: text('platform_error_id').notNull().unique(),
+    nodeId: text('node_id').notNull(),
+    workspaceId: text('workspace_id'),
+    status: text('status', { enum: ['pending', 'available', 'failed', 'expired'] })
+      .notNull()
+      .default('pending'),
+    artifactCount: integer('artifact_count').notNull().default(0),
+    totalBytes: integer('total_bytes').notNull().default(0),
+    manifestJson: text('manifest_json'),
+    previewJson: text('preview_json'),
+    failureReason: text('failure_reason'),
+    expiresAt: text('expires_at').notNull(),
+    deleteAfter: text('delete_after').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    nodeStatusIdx: index('idx_diagnostic_incidents_node_status').on(
+      table.nodeId,
+      table.status,
+      table.createdAt
+    ),
+    expiryIdx: index('idx_diagnostic_incidents_expiry').on(table.status, table.expiresAt),
+    deleteAfterIdx: index('idx_diagnostic_incidents_delete_after').on(table.deleteAfter),
+  })
+);
+
+export const diagnosticArtifacts = sqliteTable(
+  'diagnostic_artifacts',
+  {
+    id: text('id').primaryKey(),
+    incidentId: text('incident_id')
+      .notNull()
+      .references(() => diagnosticIncidents.id),
+    nodeId: text('node_id').notNull(),
+    kind: text('kind').notNull(),
+    status: text('status', { enum: ['pending', 'available', 'failed', 'expired'] })
+      .notNull()
+      .default('pending'),
+    objectKey: text('object_key').notNull().unique(),
+    contentType: text('content_type').notNull(),
+    checksumSha256: text('checksum_sha256'),
+    expectedBytes: integer('expected_bytes').notNull().default(0),
+    actualBytes: integer('actual_bytes'),
+    manifestJson: text('manifest_json'),
+    previewJson: text('preview_json'),
+    uploadAttempts: integer('upload_attempts').notNull().default(0),
+    failureReason: text('failure_reason'),
+    expiresAt: text('expires_at').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    incidentKindUnique: uniqueIndex('idx_diagnostic_artifacts_incident_kind').on(
+      table.incidentId,
+      table.kind
+    ),
+    incidentStatusIdx: index('idx_diagnostic_artifacts_incident_status').on(
+      table.incidentId,
+      table.status
+    ),
+    nodeStatusIdx: index('idx_diagnostic_artifacts_node_status').on(
+      table.nodeId,
+      table.status,
+      table.createdAt
+    ),
+    expiryIdx: index('idx_diagnostic_artifacts_expiry').on(table.status, table.expiresAt),
+  })
+);
+
 export const debugDiagnoses = sqliteTable(
   'debug_diagnoses',
   {

@@ -30,6 +30,7 @@ import {
   getFeatureTokenBudget,
   releaseFeatureTokenBudget,
 } from './ai-token-budget';
+import { getDiagnosticIncidentByErrorId } from './diagnostic-incidents';
 import {
   getErrorTrends,
   getHealthSummary,
@@ -82,6 +83,15 @@ export interface Completion {
 }
 
 const TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'get_vm_incident',
+      description:
+        'Read bounded, allowlisted, recursively redacted automatic VM incident metadata and safe previews correlated to the selected platform error. Returns no raw artifact bytes, storage keys, URLs, logs, environment values, prompts, messages, repository content, command lines, credentials, or tokens.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
   {
     type: 'function',
     function: {
@@ -321,7 +331,18 @@ export async function executeTool(
 ): Promise<string> {
   let result: unknown;
   try {
-    if (call.function.name === 'get_recent_errors') {
+    if (call.function.name === 'get_vm_incident') {
+      result = window.errorId
+        ? ((await getDiagnosticIncidentByErrorId(env, window.errorId)) ?? {
+            status: 'missing',
+            message: 'No automatic VM incident evidence is associated with the selected error.',
+          })
+        : {
+            status: 'unavailable',
+            message:
+              'Automatic VM incident evidence is available only for a selected platform error.',
+          };
+    } else if (call.function.name === 'get_recent_errors') {
       result = await queryErrors(env.OBSERVABILITY_DATABASE, {
         startTime: window.startMs,
         endTime: window.endMs,
@@ -699,7 +720,9 @@ export async function getDebugDiagnosisRun(
         .where(eq(schema.debugDiagnoses.id, row.diagnosisId))
         .get()
     : null;
-  return toDiagnosisRun(row, diagnosisRow ? toDiagnosis(diagnosisRow) : null);
+  const run = toDiagnosisRun(row, diagnosisRow ? toDiagnosis(diagnosisRow) : null);
+  if (row.errorId) run.incident = await getDiagnosticIncidentByErrorId(env, row.errorId);
+  return run;
 }
 
 export async function saveDebugDiagnosisAsIdea(

@@ -1,6 +1,6 @@
 import type { PlatformError } from '@simple-agent-manager/shared';
-import { fireEvent,render, screen } from '@testing-library/react';
-import { describe, expect,it, vi } from 'vitest';
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
 
 import { ObservabilityLogEntry } from '../../../../src/components/admin/ObservabilityLogEntry';
 
@@ -36,6 +36,34 @@ describe('ObservabilityLogEntry', () => {
   it('should render level badge', () => {
     render(<ObservabilityLogEntry error={createEntry({ level: 'warn' })} />);
     expect(screen.getByText('warn')).toBeInTheDocument();
+  });
+
+  it('renders the batched automatic evidence state', () => {
+    render(
+      <ObservabilityLogEntry
+        error={createEntry({
+          incident: {
+            id: 'incident-1',
+            platformErrorId: 'err-1',
+            nodeId: 'node-1',
+            workspaceId: null,
+            status: 'pending',
+            artifactCount: 0,
+            totalBytes: 0,
+            manifest: null,
+            preview: null,
+            failureReason: null,
+            expiresAt: '2026-08-12T00:00:00.000Z',
+            createdAt: '2026-08-05T00:00:00.000Z',
+            updatedAt: '2026-08-05T00:00:00.000Z',
+            artifacts: [],
+          },
+        })}
+      />
+    );
+    expect(screen.getByLabelText('Automatic VM evidence: pending')).toHaveTextContent(
+      'evidence pending'
+    );
   });
 
   it('should render formatted timestamp', () => {

@@ -124,10 +124,10 @@ SAM uses a hybrid storage model: **D1** for cross-project queries and **Durable 
 
 ### D1 (Cross-Project Queries)
 
-| Binding                  | Purpose                                                |
-| ------------------------ | ------------------------------------------------------ |
-| `DATABASE`               | Users, projects, nodes, workspaces, ideas, credentials |
-| `OBSERVABILITY_DATABASE` | Error storage for admin dashboard                      |
+| Binding                  | Purpose                                                                              |
+| ------------------------ | ------------------------------------------------------------------------------------ |
+| `DATABASE`               | Users, projects, nodes, workspaces, ideas, credentials, diagnostic incident metadata |
+| `OBSERVABILITY_DATABASE` | Error storage for admin dashboard                                                    |
 
 D1 stores platform-level data that needs to be queried across projects (e.g., "show all my ideas" on the dashboard).
 
@@ -159,11 +159,17 @@ Summary data flows back from DOs to D1 via debounced sync (e.g., `last_activity_
 
 ### Other Bindings
 
-| Service        | Binding | Purpose                                                          |
-| -------------- | ------- | ---------------------------------------------------------------- |
-| **KV**         | `KV`    | Auth sessions, bootstrap tokens, boot logs, MCP tokens           |
-| **R2**         | `R2`    | VM Agent binaries, TTS audio cache, Pulumi state                 |
-| **Workers AI** | `AI`    | Idea title generation, transcription, TTS, context summarization |
+| Service        | Binding | Purpose                                                                             |
+| -------------- | ------- | ----------------------------------------------------------------------------------- |
+| **KV**         | `KV`    | Auth sessions, bootstrap tokens, boot logs, MCP tokens                              |
+| **R2**         | `R2`    | VM Agent binaries, private diagnostic artifacts, session snapshots, TTS audio cache |
+| **Workers AI** | `AI`    | Idea title generation, transcription, TTS, context summarization                    |
+
+### VM diagnostic incident flow
+
+VM Agent errors and their automatic evidence remain inside one SAM installation. The agent first persists a stable incident ID and error in its local SQLite outbox, then posts the error batch using the node callback JWT. The Worker creates primary-D1 incident metadata before strictly acknowledging the observability-D1 error row. The VM registers a bounded redacted manifest/preview, streams the gzip archive into a deterministic private R2 key, and retries safely after restarts. A scheduled reconciler repairs partial D1/R2 state, fails stale uploads, expires metadata, and deletes retained objects in bounded batches.
+
+Superadmin error queries batch-join incident summaries without exposing object keys. The UI downloads bytes only through an authenticated Worker proxy, while the diagnosis agent can read only the redacted D1 preview. There is no cross-installation intake or transport in this flow.
 
 ## Agent Configuration Layers
 
@@ -300,4 +306,4 @@ CI runs lint, typecheck, tests, and build on pull requests and on canonical-repo
 | Dynamic DNS per workspace            | Instant subdomain resolution; cleaned up on stop                                                                                                                                        |
 | Alarm-driven execution orchestration | Idempotent steps with exponential backoff; no long-running processes                                                                                                                    |
 | No credentials in cloud-init         | Bootstrap tokens for secure credential injection                                                                                                                                        |
-| Multi-provider abstraction           | Unified VM size/lifecycle API across Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP                                                                                        |
+| Multi-provider abstraction           | Unified VM size/lifecycle API across Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP                                                                               |

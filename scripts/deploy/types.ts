@@ -354,6 +354,8 @@ export interface PulumiOutputs {
   kvName: string;
   r2Name: string;
   sessionSnapshotTtlDays: number;
+  diagnosticIncidentPrefix: string;
+  diagnosticIncidentTtlDays: number;
   dnsIds: {
     api: string;
     app: string;

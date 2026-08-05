@@ -11,6 +11,7 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { ProjectData as ProjectDataDO } from '../durable-objects/project-data';
 import type { Env } from '../env';
+import { log } from '../lib/logger';
 import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { rateLimit } from '../middleware/rate-limit';
@@ -31,7 +32,16 @@ import {
   retryDebugDiagnosisRun,
   saveDebugDiagnosisAsIdea,
 } from '../services/debug-agent';
-import { cancelDiagnosisRunner, listDiagnosisEvents, startDiagnosisRunner } from '../services/diagnosis-runner';
+import {
+  cancelDiagnosisRunner,
+  listDiagnosisEvents,
+  startDiagnosisRunner,
+} from '../services/diagnosis-runner';
+import {
+  getDiagnosticArtifactForDownload,
+  getDiagnosticIncidentByErrorId,
+  getDiagnosticIncidentsByErrorIds,
+} from '../services/diagnostic-incidents';
 import { getRuntimeLimits } from '../services/limits';
 import {
   CfApiError,
@@ -322,9 +332,48 @@ adminRoutes.get('/observability/errors', async (c) => {
     limit,
     cursor: cursor || undefined,
   });
-
-  return c.json(result);
+  const incidents = await getDiagnosticIncidentsByErrorIds(
+    c.env,
+    result.errors.map((error) => error.id)
+  );
+  return c.json({
+    ...result,
+    errors: result.errors.map((error) => ({
+      ...error,
+      incident: incidents.get(error.id) ?? null,
+    })),
+  });
 });
+
+adminRoutes.get('/observability/errors/:errorId/incident', async (c) => {
+  const incident = await getDiagnosticIncidentByErrorId(c.env, c.req.param('errorId'));
+  if (!incident) throw errors.notFound('Diagnostic incident');
+  return c.json({ incident });
+});
+
+adminRoutes.get(
+  '/observability/errors/:errorId/incident/artifacts/:artifactId/download',
+  async (c) => {
+    const errorId = c.req.param('errorId');
+    const artifactId = c.req.param('artifactId');
+    const { row, object } = await getDiagnosticArtifactForDownload(c.env, errorId, artifactId);
+    log.info('diagnostic_incident.admin_download', {
+      errorId,
+      incidentId: row.incident_id,
+      artifactId,
+      requestedBy: getUserId(c),
+      sizeBytes: row.actual_bytes,
+    });
+    const headers = new Headers({
+      'Cache-Control': 'private, no-store',
+      'Content-Disposition': `attachment; filename="${row.id}.tar.gz"`,
+      'Content-Type': row.content_type,
+      'X-Content-Type-Options': 'nosniff',
+    });
+    if (row.actual_bytes !== null) headers.set('Content-Length', String(row.actual_bytes));
+    return new Response(object.body, { headers });
+  }
+);
 
 /**
  * GET /api/admin/observability/health - Platform health summary
@@ -457,7 +506,10 @@ adminRoutes.get('/observability/diagnoses', async (c) => {
 
 adminRoutes.post('/observability/diagnoses', jsonValidator(RunDebugDiagnosisSchema), async (c) => {
   const body = c.req.valid('json');
-  if ((!body.errorId && (!body.startTime || !body.endTime)) || (body.errorId && (body.startTime || body.endTime))) {
+  if (
+    (!body.errorId && (!body.startTime || !body.endTime)) ||
+    (body.errorId && (body.startTime || body.endTime))
+  ) {
     throw errors.badRequest('Provide either errorId or a startTime/endTime window');
   }
   try {
@@ -469,7 +521,8 @@ adminRoutes.post('/observability/diagnoses', jsonValidator(RunDebugDiagnosisSche
     if (message.includes('budget') || message.includes('token ceiling')) {
       return c.json({ error: 'DEBUG_BUDGET_EXHAUSTED', message }, 429);
     }
-    if (message.includes('not found') || message.includes('window')) throw errors.badRequest(message);
+    if (message.includes('not found') || message.includes('window'))
+      throw errors.badRequest(message);
     throw err;
   }
 });
@@ -478,7 +531,11 @@ adminRoutes.get('/observability/diagnosis-runs/:runId', async (c) => {
   const run = await getDebugDiagnosisRun(c.env, c.req.param('runId'));
   if (!run) throw errors.notFound('Diagnosis run not found');
   const cursor = Number(c.req.query('cursor') ?? 0);
-  const eventResult = await listDiagnosisEvents(c.env, run.id, Number.isFinite(cursor) && cursor >= 0 ? cursor : 0);
+  const eventResult = await listDiagnosisEvents(
+    c.env,
+    run.id,
+    Number.isFinite(cursor) && cursor >= 0 ? cursor : 0
+  );
   return c.json({ run, ...eventResult });
 });
 
@@ -486,7 +543,9 @@ adminRoutes.get('/observability/diagnosis-runs/:runId/events', async (c) => {
   const run = await getDebugDiagnosisRun(c.env, c.req.param('runId'));
   if (!run) throw errors.notFound('Diagnosis run not found');
   const cursor = Number(c.req.query('cursor') ?? 0);
-  return c.json(await listDiagnosisEvents(c.env, run.id, Number.isFinite(cursor) && cursor >= 0 ? cursor : 0));
+  return c.json(
+    await listDiagnosisEvents(c.env, run.id, Number.isFinite(cursor) && cursor >= 0 ? cursor : 0)
+  );
 });
 
 adminRoutes.post('/observability/diagnosis-runs/:runId/cancel', async (c) => {
@@ -502,18 +561,22 @@ adminRoutes.post('/observability/diagnosis-runs/:runId/retry', async (c) => {
   return c.json({ run }, 202);
 });
 
-adminRoutes.post('/observability/diagnoses/:diagnosisId/idea', jsonValidator(SaveDebugDiagnosisIdeaSchema), async (c) => {
-  const body = c.req.valid('json');
-  if (!body.projectId?.trim()) throw errors.badRequest('projectId is required');
-  const result = await saveDebugDiagnosisAsIdea(
-    c.env,
-    c.req.param('diagnosisId'),
-    body.projectId,
-    getUserId(c),
-    body.title,
-  );
-  return c.json(result, 201);
-});
+adminRoutes.post(
+  '/observability/diagnoses/:diagnosisId/idea',
+  jsonValidator(SaveDebugDiagnosisIdeaSchema),
+  async (c) => {
+    const body = c.req.valid('json');
+    if (!body.projectId?.trim()) throw errors.badRequest('projectId is required');
+    const result = await saveDebugDiagnosisAsIdea(
+      c.env,
+      c.req.param('diagnosisId'),
+      body.projectId,
+      getUserId(c),
+      body.title
+    );
+    return c.json(result, 201);
+  }
+);
 
 adminRoutes.post('/observability/feedback-triage', async (c) => {
   const result = await runPlatformFeedbackTriage(c.env, 'manual');

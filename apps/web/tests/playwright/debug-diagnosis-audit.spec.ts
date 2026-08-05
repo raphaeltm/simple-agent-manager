@@ -10,9 +10,56 @@ const ADMIN = makeMockUser({
   userId: 'debug-admin',
 });
 
+const ERROR_ID = 'err-debug-1';
+const INCIDENT = {
+  id: '01KZ8V0GMXQ4ZCSERPRT2X2K6M',
+  platformErrorId: ERROR_ID,
+  nodeId: 'node-debug',
+  workspaceId: 'workspace-debug',
+  status: 'available',
+  artifactCount: 1,
+  totalBytes: 2048,
+  manifest: {
+    version: 1,
+    incidentId: '01KZ8V0GMXQ4ZCSERPRT2X2K6M',
+    nodeId: 'node-debug',
+    source: 'session-host',
+    createdAt: '2026-07-29T10:00:00.000Z',
+    collectors: [
+      {
+        name: 'structured-events',
+        status: 'available',
+        bytes: 1024,
+        truncated: true,
+        redactions: 3,
+      },
+    ],
+    totalBytes: 1024,
+    redactions: 3,
+    anyTruncated: true,
+  },
+  preview: { health: 'degraded', malicious: '<script>alert(2)</script> is inert' },
+  failureReason: null,
+  expiresAt: '2026-08-05T10:00:00.000Z',
+  createdAt: '2026-07-29T10:00:00.000Z',
+  updatedAt: '2026-07-29T10:01:00.000Z',
+  artifacts: [
+    {
+      id: 'artifact-safe-1',
+      kind: 'safe-vm-incident-v1',
+      status: 'available',
+      contentType: 'application/gzip',
+      sizeBytes: 2048,
+      checksumSha256: 'a'.repeat(64),
+      createdAt: '2026-07-29T10:00:00.000Z',
+      updatedAt: '2026-07-29T10:01:00.000Z',
+    },
+  ],
+};
+
 const ERROR = {
-  id: 'err-debug-1',
-  source: 'api',
+  id: ERROR_ID,
+  source: 'vm-agent',
   level: 'error',
   message: 'Workspace transition failed for café deployment — <script> is text',
   stack: 'Error: transition failed\n    at reconcile (/worker/src/reconcile.ts:42:7)',
@@ -23,6 +70,7 @@ const ERROR = {
   ipAddress: '203.0.113.9',
   userAgent: 'Audit browser',
   timestamp: '2026-07-29T10:00:00.000Z',
+  incident: INCIDENT,
 };
 
 const DIAGNOSIS = {
@@ -97,6 +145,7 @@ const SUCCEEDED_RUN = {
   completedAt: '2026-07-29T10:16:30.000Z',
   diagnosisId: DIAGNOSIS.id,
   diagnosis: DIAGNOSIS,
+  incident: INCIDENT,
 };
 
 async function setup(page: Page, diagnosisStatus = 200) {
@@ -113,6 +162,19 @@ async function setup(page: Page, diagnosisStatus = 200) {
     if (path.includes('/api/chat-sessions'))
       return respond(200, { sessions: [], nextCursor: null });
     if (path.includes('/api/commands')) return respond(200, { commands: [] });
+    if (
+      path ===
+      `/api/admin/observability/errors/${ERROR_ID}/incident/artifacts/artifact-safe-1/download`
+    )
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/gzip',
+        headers: {
+          'Cache-Control': 'private, no-store',
+          'Content-Disposition': 'attachment; filename="artifact-safe-1.tar.gz"',
+        },
+        body: 'safe archive',
+      });
     if (path === '/api/admin/observability/errors')
       return respond(200, { errors: [ERROR], total: 1, cursor: null, hasMore: false });
     if (path === '/api/admin/observability/diagnoses' && request.method() === 'GET')
@@ -234,6 +296,13 @@ test.describe('Deployment diagnosis visual audit', () => {
     await expect(page.getByText('get recent errors')).toBeVisible();
     await expect(page.getByText('get vm incident')).toBeVisible();
     await expect(page.getByText('Completed diagnosis')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Automatic VM evidence' })).toBeVisible();
+    await expect(page.getByText('structured-events')).toBeVisible();
+    await expect(page.getByText(/3 redactions · truncated/)).toBeVisible();
+    await page.getByText('Safe evidence preview').click();
+    await expect(page.getByText(/<script>alert\(2\)<\/script> is inert/)).toBeVisible();
+    await page.getByRole('button', { name: 'Download safe evidence' }).click();
+    await expect(page.getByRole('status')).toContainText('downloaded');
     await page.getByText('Redacted evidence preview').click();
     await expect(
       page.getByText('<script>alert(1)</script> is inert redacted evidence')

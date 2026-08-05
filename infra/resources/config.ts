@@ -7,6 +7,8 @@ export type R2Location = (typeof SUPPORTED_R2_LOCATIONS)[number];
 
 export const DEFAULT_PAGES_PRODUCTION_BRANCH = 'main';
 export const DEFAULT_SESSION_SNAPSHOT_TTL_DAYS = 7;
+export const DEFAULT_DIAGNOSTIC_INCIDENT_PREFIX = 'diagnostic-incidents';
+export const DEFAULT_DIAGNOSTIC_INCIDENT_TTL_DAYS = 7;
 
 export interface ConfigReader {
   get(key: string): string | undefined;
@@ -22,6 +24,8 @@ export interface InfraConfig {
   r2Location: R2Location;
   pagesProductionBranch: string;
   sessionSnapshotTtlDays: number;
+  diagnosticIncidentPrefix: string;
+  diagnosticIncidentTtlDays: number;
 }
 
 const pulumiConfig = new pulumi.Config();
@@ -43,6 +47,16 @@ export function parseInfraConfig(config: ConfigReader, currentStack: string): In
       optionalNonEmptyConfig(config, 'sessionSnapshotTtlDays'),
       DEFAULT_SESSION_SNAPSHOT_TTL_DAYS,
       'sessionSnapshotTtlDays'
+    ),
+    diagnosticIncidentPrefix: parseR2Prefix(
+      optionalNonEmptyConfig(config, 'diagnosticIncidentPrefix') ??
+        DEFAULT_DIAGNOSTIC_INCIDENT_PREFIX,
+      'diagnosticIncidentPrefix'
+    ),
+    diagnosticIncidentTtlDays: parsePositiveInteger(
+      optionalNonEmptyConfig(config, 'diagnosticIncidentTtlDays'),
+      DEFAULT_DIAGNOSTIC_INCIDENT_TTL_DAYS,
+      'diagnosticIncidentTtlDays'
     ),
   };
 }
@@ -66,6 +80,8 @@ export const prefix = infraConfig.prefix;
 export const r2Location = infraConfig.r2Location;
 export const pagesProductionBranch = infraConfig.pagesProductionBranch;
 export const sessionSnapshotTtlDays = infraConfig.sessionSnapshotTtlDays;
+export const diagnosticIncidentPrefix = infraConfig.diagnosticIncidentPrefix;
+export const diagnosticIncidentTtlDays = infraConfig.diagnosticIncidentTtlDays;
 
 export function derivePrefix(domain: string): string {
   const hash = crypto.createHash('sha256').update(domain).digest('hex');
@@ -102,6 +118,17 @@ function parsePositiveInteger(value: string | undefined, fallback: number, key: 
     throw new Error('Pulumi config "' + key + '" must be a positive integer');
   }
   return parsed;
+}
+
+function parseR2Prefix(value: string, key: string): string {
+  const segments = value.split('/');
+  if (
+    segments.length === 0 ||
+    segments.some((segment) => !segment || segment === '..' || !/^[a-zA-Z0-9._-]+$/.test(segment))
+  ) {
+    throw new Error(`Pulumi config "${key}" must be a safe private R2 prefix`);
+  }
+  return segments.join('/');
 }
 
 function parseR2Location(value: string | undefined): R2Location {

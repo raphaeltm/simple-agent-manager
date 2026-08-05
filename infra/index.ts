@@ -48,7 +48,11 @@ export const observabilityD1DatabaseName = observabilityDatabaseName;
 export const kvId = kvNamespaceId;
 export const kvName = kvNamespaceName;
 export const r2Name = r2BucketName;
-export { sessionSnapshotTtlDays } from './resources/config';
+export {
+  diagnosticIncidentPrefix,
+  diagnosticIncidentTtlDays,
+  sessionSnapshotTtlDays,
+} from './resources/config';
 export const pagesName = pagesProjectName;
 export const dnsIds = dnsRecordIds;
 export const hostnames = dnsHostnames;

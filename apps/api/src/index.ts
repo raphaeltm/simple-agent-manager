@@ -157,6 +157,7 @@ import { runTrialRolloverAudit } from './scheduled/trial-rollover';
 import { runTrialWaitlistCleanup } from './scheduled/trial-waitlist-cleanup';
 import { runTriggerExecutionCleanup } from './scheduled/trigger-execution-cleanup';
 import { reconcileDiagnosisRuns } from './services/diagnosis-runner';
+import { reconcileDiagnosticIncidents } from './services/diagnostic-incident-reconciliation';
 import { GcpApiError, sanitizeGcpError } from './services/gcp-errors';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
 import { recordNodeRoutingMetric } from './services/telemetry';
@@ -948,6 +949,9 @@ export default {
     const diagnosisRecovery = await sweeps.isolate('diagnosis_reconcile', () =>
       reconcileDiagnosisRuns(env)
     );
+    const incidentRecovery = await sweeps.isolate('diagnostic_incident_reconciliation', () =>
+      reconcileDiagnosticIncidents(env)
+    );
     const stuckTasks = await sweeps.isolate('stuck_tasks', () => recoverStuckTasks(env));
 
     // Check for stuck provisioning workspaces
@@ -1016,6 +1020,12 @@ export default {
       failedSweepCount: failedSweeps.length,
       diagnosisRunsRestarted: diagnosisRecovery?.restarted,
       diagnosisRunsTerminalized: diagnosisRecovery?.terminalized,
+      diagnosticIncidentsChecked: incidentRecovery?.checked,
+      diagnosticIncidentsRepaired: incidentRecovery?.repaired,
+      diagnosticIncidentsFailed: incidentRecovery?.failed,
+      diagnosticIncidentsExpired: incidentRecovery?.expired,
+      diagnosticIncidentsDeleted: incidentRecovery?.deleted,
+      diagnosticIncidentMetadataRepaired: incidentRecovery?.incidentMetadataRepaired,
       provisioningTimedOut: timedOut,
       workspacesMigrated: migrated,
       staleNodesDestroyed: nodeCleanup?.staleDestroyed,

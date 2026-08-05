@@ -1,3 +1,5 @@
+import type { DiagnosticIncidentSummary } from './debug-agent';
+
 // =============================================================================
 // Admin Observability (spec 023)
 // =============================================================================
@@ -18,6 +20,7 @@ export interface PlatformError {
   ipAddress: string | null;
   userAgent: string | null;
   timestamp: string; // ISO 8601
+  incident?: DiagnosticIncidentSummary | null;
 }
 
 export interface ErrorListResponse {
@@ -59,7 +62,7 @@ export interface AdminLogEntry {
 export interface LogQueryParams {
   timeRange: {
     start: string; // ISO 8601
-    end: string;   // ISO 8601
+    end: string; // ISO 8601
   };
   levels?: string[];
   search?: string;

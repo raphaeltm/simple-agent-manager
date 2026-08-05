@@ -188,13 +188,15 @@ export function validatePulumiOutputs(outputs: unknown): asserts outputs is Pulu
     { key: 'kvId', label: 'KV Namespace ID' },
     { key: 'r2Name', label: 'R2 Bucket Name' },
     { key: 'sessionSnapshotTtlDays', label: 'Session Snapshot TTL Days' },
+    { key: 'diagnosticIncidentPrefix', label: 'Diagnostic Incident R2 Prefix' },
+    { key: 'diagnosticIncidentTtlDays', label: 'Diagnostic Incident TTL Days' },
     { key: 'cloudflareAccountId', label: 'Cloudflare Account ID' },
     { key: 'pagesName', label: 'Pages Project Name' },
   ];
 
   const missing = required.filter(({ key }) => {
     const value = record[key];
-    if (key === 'sessionSnapshotTtlDays') {
+    if (key === 'sessionSnapshotTtlDays' || key === 'diagnosticIncidentTtlDays') {
       return typeof value !== 'number' || !Number.isSafeInteger(value) || value <= 0;
     }
     return typeof value !== 'string' || value.length === 0;
@@ -418,9 +420,20 @@ function getApiWorkerVars(
     PAGES_PROJECT_NAME: outputs.pagesName,
     R2_BUCKET_NAME: outputs.r2Name,
     SESSION_SNAPSHOT_TTL_DAYS: String(outputs.sessionSnapshotTtlDays),
+    VM_INCIDENT_R2_PREFIX: outputs.diagnosticIncidentPrefix,
+    VM_INCIDENT_RETENTION_DAYS: String(outputs.diagnosticIncidentTtlDays),
     ...getOptionalProcessEnvVars([
       'REQUIRE_APPROVAL',
       'HETZNER_BASE_IMAGE',
+      'VM_INCIDENT_ARTIFACT_MAX_BYTES',
+      'VM_INCIDENT_REGISTRATION_MAX_BYTES',
+      'VM_INCIDENT_MANIFEST_MAX_BYTES',
+      'VM_INCIDENT_PREVIEW_MAX_BYTES',
+      'VM_INCIDENT_MAX_ARTIFACTS_PER_NODE',
+      'VM_INCIDENT_MAX_BYTES_PER_NODE',
+      'VM_INCIDENT_METADATA_RETENTION_DAYS',
+      'VM_INCIDENT_PENDING_TIMEOUT_MINUTES',
+      'VM_INCIDENT_RECONCILE_BATCH_SIZE',
       'PLATFORM_FEEDBACK_PROJECT_ID',
       'REPORT_ISSUE_TITLE_MAX_LENGTH',
       'REPORT_ISSUE_DESCRIPTION_MAX_LENGTH',

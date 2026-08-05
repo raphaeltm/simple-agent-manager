@@ -1,9 +1,10 @@
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { DatabaseSync, type SQLInputValue } from 'node:sqlite';
 
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import migration0103 from '../../../src/db/migrations/0103_debug_diagnosis_runs.sql?raw';
+import migration0104 from '../../../src/db/migrations/0104_durable_debug_diagnosis_runs.sql?raw';
+import migration0105 from '../../../src/db/migrations/0105_debug_diagnosis_canonical_status.sql?raw';
 import {
   completeDiagnosisRunTransition,
   finishDiagnosisRunTransition,
@@ -51,10 +52,6 @@ class SQLiteD1 {
   }
 }
 
-function migration(name: string): string {
-  return readFileSync(join(process.cwd(), 'src/db/migrations', name), 'utf8');
-}
-
 function seedDatabase(): { sqlite: DatabaseSync; db: D1Database } {
   const sqlite = new DatabaseSync(':memory:');
   sqlite.exec(`
@@ -78,9 +75,9 @@ function seedDatabase(): { sqlite: DatabaseSync; db: D1Database } {
     );
     INSERT INTO users (id) VALUES ('transition-user');
   `);
-  sqlite.exec(migration('0103_debug_diagnosis_runs.sql'));
-  sqlite.exec(migration('0104_durable_debug_diagnosis_runs.sql'));
-  sqlite.exec(migration('0105_debug_diagnosis_canonical_status.sql'));
+  sqlite.exec(migration0103);
+  sqlite.exec(migration0104);
+  sqlite.exec(migration0105);
   const now = '2026-08-05T12:00:00.000Z';
   sqlite.exec(`
     INSERT INTO debug_diagnosis_runs

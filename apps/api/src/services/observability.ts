@@ -6,7 +6,7 @@
  * See specs/023-admin-observability/data-model.md for entity definitions.
  */
 
-import type { PlatformErrorLevel,PlatformErrorSource } from '@simple-agent-manager/shared';
+import type { PlatformErrorLevel, PlatformErrorSource } from '@simple-agent-manager/shared';
 import type { SQL } from 'drizzle-orm';
 import { and, count, desc, eq, gte, like, lte, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
@@ -60,6 +60,7 @@ function getConfigNumber(env: Env, key: keyof Env, fallback: number): number {
 // =============================================================================
 
 export interface PersistErrorInput {
+  id?: string;
   source: PlatformErrorSource;
   level?: PlatformErrorLevel;
   message: string;
@@ -77,10 +78,7 @@ export interface PersistErrorInput {
  * Persist a single error to the observability D1 database.
  * Validates/truncates fields. Fails silently on D1 errors (logs to console).
  */
-export async function persistError(
-  db: D1Database,
-  input: PersistErrorInput
-): Promise<void> {
+export async function persistError(db: D1Database, input: PersistErrorInput): Promise<void> {
   try {
     const source = VALID_SOURCES.has(input.source) ? input.source : 'api';
     const level = input.level && VALID_LEVELS.has(input.level) ? input.level : 'error';
@@ -88,7 +86,7 @@ export async function persistError(
     const drizzleDb = drizzle(db, { schema: observabilitySchema });
 
     await drizzleDb.insert(observabilitySchema.platformErrors).values({
-      id: generateId(),
+      id: input.id ?? generateId(),
       source,
       level,
       message: truncate(input.message, MAX_MESSAGE_LENGTH),
@@ -103,7 +101,9 @@ export async function persistError(
     });
   } catch (err) {
     // Fail-silent: never let observability writes impact the caller
-    log.warn('observability.persist_error_failed', { error: err instanceof Error ? err.message : String(err) });
+    log.warn('observability.persist_error_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 }
 
@@ -243,9 +243,7 @@ export async function queryErrors(
 
   // Build next cursor from last row's timestamp
   const lastRow = resultRows[resultRows.length - 1];
-  const nextCursor = hasMore && lastRow
-    ? btoa(String(lastRow.timestamp - 1))
-    : null;
+  const nextCursor = hasMore && lastRow ? btoa(String(lastRow.timestamp - 1)) : null;
 
   return {
     errors: resultRows.map((row) => ({
@@ -294,17 +292,24 @@ export async function getHealthSummary(
 
   const [nodesResult, workspacesResult, tasksResult, errorsResult] = await Promise.all([
     db.select({ count: count() }).from(schema.nodes).where(eq(schema.nodes.status, 'running')),
-    db.select({ count: count() }).from(schema.workspaces).where(eq(schema.workspaces.status, 'running')),
-    db.select({ count: count() }).from(schema.tasks).where(
-      or(
-        eq(schema.tasks.status, 'queued'),
-        eq(schema.tasks.status, 'delegated'),
-        eq(schema.tasks.status, 'in_progress')
-      )
-    ),
-    obsDb.select({ count: count() }).from(observabilitySchema.platformErrors).where(
-      gte(observabilitySchema.platformErrors.timestamp, twentyFourHoursAgo)
-    ),
+    db
+      .select({ count: count() })
+      .from(schema.workspaces)
+      .where(eq(schema.workspaces.status, 'running')),
+    db
+      .select({ count: count() })
+      .from(schema.tasks)
+      .where(
+        or(
+          eq(schema.tasks.status, 'queued'),
+          eq(schema.tasks.status, 'delegated'),
+          eq(schema.tasks.status, 'in_progress')
+        )
+      ),
+    obsDb
+      .select({ count: count() })
+      .from(observabilitySchema.platformErrors)
+      .where(gte(observabilitySchema.platformErrors.timestamp, twentyFourHoursAgo)),
   ]);
 
   return {
@@ -321,16 +326,16 @@ export async function getHealthSummary(
 // =============================================================================
 
 const RANGE_TO_INTERVAL: Record<string, { intervalMs: number; intervalLabel: string }> = {
-  '1h':  { intervalMs: 5 * 60 * 1000, intervalLabel: '5m' },
+  '1h': { intervalMs: 5 * 60 * 1000, intervalLabel: '5m' },
   '24h': { intervalMs: 60 * 60 * 1000, intervalLabel: '1h' },
-  '7d':  { intervalMs: 24 * 60 * 60 * 1000, intervalLabel: '1d' },
+  '7d': { intervalMs: 24 * 60 * 60 * 1000, intervalLabel: '1d' },
   '30d': { intervalMs: 24 * 60 * 60 * 1000, intervalLabel: '1d' },
 };
 
 const RANGE_TO_MS: Record<string, number> = {
-  '1h':  60 * 60 * 1000,
+  '1h': 60 * 60 * 1000,
   '24h': 24 * 60 * 60 * 1000,
-  '7d':  7 * 24 * 60 * 60 * 1000,
+  '7d': 7 * 24 * 60 * 60 * 1000,
   '30d': 30 * 24 * 60 * 60 * 1000,
 };
 
@@ -353,9 +358,10 @@ export async function getErrorTrends(
   interval?: string
 ): Promise<ErrorTrendsResult> {
   const rangeMs = RANGE_TO_MS[range] ?? RANGE_TO_MS['24h']!;
-  const resolvedInterval = (interval && RANGE_TO_INTERVAL[range])
-    ? RANGE_TO_INTERVAL[range]!
-    : (RANGE_TO_INTERVAL[range] ?? RANGE_TO_INTERVAL['24h']!);
+  const resolvedInterval =
+    interval && RANGE_TO_INTERVAL[range]
+      ? RANGE_TO_INTERVAL[range]!
+      : (RANGE_TO_INTERVAL[range] ?? RANGE_TO_INTERVAL['24h']!);
 
   const now = Date.now();
   const startTime = now - rangeMs;
@@ -423,11 +429,12 @@ export interface PurgeResult {
 /**
  * Purge expired errors based on retention days and max row count.
  */
-export async function purgeExpiredErrors(
-  db: D1Database,
-  env: Env
-): Promise<PurgeResult> {
-  const retentionDays = getConfigNumber(env, 'OBSERVABILITY_ERROR_RETENTION_DAYS', DEFAULT_RETENTION_DAYS);
+export async function purgeExpiredErrors(db: D1Database, env: Env): Promise<PurgeResult> {
+  const retentionDays = getConfigNumber(
+    env,
+    'OBSERVABILITY_ERROR_RETENTION_DAYS',
+    DEFAULT_RETENTION_DAYS
+  );
   const maxRows = getConfigNumber(env, 'OBSERVABILITY_ERROR_MAX_ROWS', DEFAULT_MAX_ROWS);
 
   const drizzleDb = drizzle(db, { schema: observabilitySchema });
@@ -436,15 +443,11 @@ export async function purgeExpiredErrors(
   const cutoffTimestamp = Date.now() - retentionDays * 24 * 60 * 60 * 1000;
 
   // 1. Delete by age
-  await drizzleDb
-    .delete(platformErrors)
-    .where(lte(platformErrors.createdAt, cutoffTimestamp));
+  await drizzleDb.delete(platformErrors).where(lte(platformErrors.createdAt, cutoffTimestamp));
 
   // D1 doesn't return row count from delete, so we track separately
   // Count remaining rows
-  const [countResult] = await drizzleDb
-    .select({ count: count() })
-    .from(platformErrors);
+  const [countResult] = await drizzleDb.select({ count: count() }).from(platformErrors);
 
   const currentCount = countResult?.count ?? 0;
   let deletedByCount = 0;
@@ -460,9 +463,7 @@ export async function purgeExpiredErrors(
       .limit(excess);
 
     for (const row of oldestRows) {
-      await drizzleDb
-        .delete(platformErrors)
-        .where(eq(platformErrors.id, row.id));
+      await drizzleDb.delete(platformErrors).where(eq(platformErrors.id, row.id));
     }
 
     deletedByCount = oldestRows.length;
@@ -508,9 +509,19 @@ export interface QueryCloudflarLogsInput {
  * Proxy query to Cloudflare Workers Observability Telemetry API.
  * Transforms request/response and never exposes CF credentials or raw errors.
  */
-export async function queryCloudflareLogs(
-  input: QueryCloudflarLogsInput
-): Promise<{ logs: Array<{ timestamp: string; level: string; event: string; message: string; details: Record<string, unknown>; invocationId?: string }>; cursor: string | null; hasMore: boolean; queryId: string }> {
+export async function queryCloudflareLogs(input: QueryCloudflarLogsInput): Promise<{
+  logs: Array<{
+    timestamp: string;
+    level: string;
+    event: string;
+    message: string;
+    details: Record<string, unknown>;
+    invocationId?: string;
+  }>;
+  cursor: string | null;
+  hasMore: boolean;
+  queryId: string;
+}> {
   const limit = Math.min(input.limit ?? DEFAULT_LOG_QUERY_LIMIT, MAX_LOG_QUERY_LIMIT);
   const queryId = input.queryId || crypto.randomUUID();
 
@@ -576,7 +587,7 @@ export async function queryCloudflareLogs(
     response = await fetch(url, {
       method: 'POST',
       headers: {
-        'Authorization': `Bearer ${input.cfApiToken}`,
+        Authorization: `Bearer ${input.cfApiToken}`,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(body),
@@ -590,20 +601,22 @@ export async function queryCloudflareLogs(
     if (response.status === 403) {
       throw new CfApiError(
         'Cloudflare Observability API returned 403: The CF_API_TOKEN is missing the "Account: Workers Observability (Read)" permission. ' +
-        'Edit the API token in Cloudflare Dashboard to add this permission.'
+          'Edit the API token in Cloudflare Dashboard to add this permission.'
       );
     }
     if (response.status === 401) {
       throw new CfApiError(
         'Cloudflare Observability API returned 401: The CF_API_TOKEN is invalid or expired. ' +
-        'Regenerate the token in Cloudflare Dashboard.'
+          'Regenerate the token in Cloudflare Dashboard.'
       );
     }
     let detail = '';
     try {
       const errBody = await response.text();
       if (errBody) detail = `: ${errBody.slice(0, 200)}`;
-    } catch { /* ignore */ }
+    } catch {
+      /* ignore */
+    }
     throw new CfApiError(`Cloudflare Observability API returned ${response.status}${detail}`);
   }
 
@@ -625,15 +638,24 @@ export async function queryCloudflareLogs(
   const eventsContainer = result?.events;
   if (Array.isArray(eventsContainer)) {
     // Legacy format: result.events is directly an array
-    events = eventsContainer.map((event, index) => expectJsonRecord(event, `cloudflare.observability.result.events[${index}]`));
-  } else if (eventsContainer && typeof eventsContainer === 'object' && !Array.isArray(eventsContainer) && Array.isArray((eventsContainer as { events?: unknown }).events)) {
+    events = eventsContainer.map((event, index) =>
+      expectJsonRecord(event, `cloudflare.observability.result.events[${index}]`)
+    );
+  } else if (
+    eventsContainer &&
+    typeof eventsContainer === 'object' &&
+    !Array.isArray(eventsContainer) &&
+    Array.isArray((eventsContainer as { events?: unknown }).events)
+  ) {
     // New format: result.events.events is the array
     events = (eventsContainer as { events: unknown[] }).events.map((event, index) =>
       expectJsonRecord(event, `cloudflare.observability.result.events.events[${index}]`)
     );
   } else if (result?.data && Array.isArray(result.data)) {
     // Fallback: result.data
-    events = result.data.map((event, index) => expectJsonRecord(event, `cloudflare.observability.result.data[${index}]`));
+    events = result.data.map((event, index) =>
+      expectJsonRecord(event, `cloudflare.observability.result.data[${index}]`)
+    );
   }
 
   // Extract cursor for pagination from the run object
@@ -643,21 +665,32 @@ export async function queryCloudflareLogs(
 
   const logs = events.map((event) => {
     // New format: $metadata contains level, message, type; $workers contains scriptName, event details
-    const metadata = optionalJsonRecord(event.$metadata, 'cloudflare.observability.event.$metadata');
+    const metadata = optionalJsonRecord(
+      event.$metadata,
+      'cloudflare.observability.event.$metadata'
+    );
     const workers = optionalJsonRecord(event.$workers, 'cloudflare.observability.event.$workers');
-    const workerEvent = optionalJsonRecord(workers?.event, 'cloudflare.observability.event.$workers.event');
+    const workerEvent = optionalJsonRecord(
+      workers?.event,
+      'cloudflare.observability.event.$workers.event'
+    );
     // Legacy format fallback
     const legacyEvent = optionalJsonRecord(event.event, 'cloudflare.observability.event.event');
 
     const timestamp = event.timestamp;
-    const timestampStr = typeof timestamp === 'number'
-      ? new Date(timestamp).toISOString()
-      : (timestamp ?? event.eventTimestamp ?? '') as string;
+    const timestampStr =
+      typeof timestamp === 'number'
+        ? new Date(timestamp).toISOString()
+        : ((timestamp ?? event.eventTimestamp ?? '') as string);
 
     return {
       timestamp: timestampStr,
       level: (metadata?.level ?? legacyEvent?.level ?? event.level ?? 'info') as string,
-      event: (metadata?.type ?? workers?.eventType ?? legacyEvent?.type ?? event.type ?? 'unknown') as string,
+      event: (metadata?.type ??
+        workers?.eventType ??
+        legacyEvent?.type ??
+        event.type ??
+        'unknown') as string,
       message: (metadata?.message ?? legacyEvent?.message ?? event.message ?? '') as string,
       details: redactSensitiveData({
         ...(workerEvent ?? legacyEvent ?? {}),
@@ -665,7 +698,10 @@ export async function queryCloudflareLogs(
         requestId: metadata?.requestId ?? workers?.requestId,
         outcome: workers?.outcome,
       }),
-      invocationId: (metadata?.requestId ?? workers?.requestId ?? event.invocationId ?? event.traceId) as string | undefined,
+      invocationId: (metadata?.requestId ??
+        workers?.requestId ??
+        event.invocationId ??
+        event.traceId) as string | undefined,
     };
   });
 
@@ -680,7 +716,8 @@ export async function queryCloudflareLogs(
 /**
  * Remove potentially sensitive fields from CF API response details.
  */
-const SENSITIVE_KEY_PATTERN = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|private[-_]?key|user[-_]?id|ip[-_]?address|user[-_]?agent)$/i;
+const SENSITIVE_KEY_PATTERN =
+  /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|private[-_]?key|user[-_]?id|ip[-_]?address|user[-_]?agent)$/i;
 
 function redactString(value: string): string {
   return redactSecretPatterns(value);

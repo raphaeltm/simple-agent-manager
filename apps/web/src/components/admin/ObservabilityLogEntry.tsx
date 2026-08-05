@@ -7,14 +7,29 @@ interface ObservabilityLogEntryProps {
   onDiagnose?: (error: PlatformError) => void;
 }
 
+const DEFAULT_SOURCE_COLOR = {
+  bg: 'var(--sam-color-warning-tint)',
+  text: 'var(--sam-color-warning-fg)',
+};
+const DEFAULT_LEVEL_COLOR = {
+  bg: 'var(--sam-color-danger-tint)',
+  text: 'var(--sam-color-danger-fg)',
+};
+
 const SOURCE_COLORS: Record<string, { bg: string; text: string }> = {
-  client: { bg: 'var(--sam-color-info-tint)', text: 'var(--sam-admin-chart-series-2, var(--sam-color-info-fg))' },
-  'vm-agent': { bg: 'var(--sam-color-info-tint)', text: 'var(--sam-admin-chart-series-3, var(--sam-color-purple))' },
-  api: { bg: 'var(--sam-color-warning-tint)', text: 'var(--sam-color-warning-fg)' },
+  client: {
+    bg: 'var(--sam-color-info-tint)',
+    text: 'var(--sam-admin-chart-series-2, var(--sam-color-info-fg))',
+  },
+  'vm-agent': {
+    bg: 'var(--sam-color-info-tint)',
+    text: 'var(--sam-admin-chart-series-3, var(--sam-color-purple))',
+  },
+  api: DEFAULT_SOURCE_COLOR,
 };
 
 const LEVEL_COLORS: Record<string, { bg: string; text: string }> = {
-  error: { bg: 'var(--sam-color-danger-tint)', text: 'var(--sam-color-danger-fg)' },
+  error: DEFAULT_LEVEL_COLOR,
   warn: { bg: 'var(--sam-color-warning-tint)', text: 'var(--sam-color-warning-fg)' },
   info: { bg: 'var(--sam-color-info-tint)', text: 'var(--sam-color-info-fg)' },
 };
@@ -30,11 +45,14 @@ function formatTimestamp(iso: string): string {
   });
 }
 
-export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({ error: entry, onDiagnose }) => {
+export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({
+  error: entry,
+  onDiagnose,
+}) => {
   const [expanded, setExpanded] = useState(false);
 
-  const sourceColor = SOURCE_COLORS[entry.source] ?? SOURCE_COLORS.api!;
-  const levelColor = LEVEL_COLORS[entry.level] ?? LEVEL_COLORS.error!;
+  const sourceColor = SOURCE_COLORS[entry.source] ?? DEFAULT_SOURCE_COLOR;
+  const levelColor = LEVEL_COLORS[entry.level] ?? DEFAULT_LEVEL_COLOR;
   const hasDetails = entry.stack || entry.context;
 
   return (
@@ -53,6 +71,14 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({ error: e
         >
           {entry.source}
         </span>
+        {entry.incident && (
+          <span
+            className="inline-flex items-center rounded-full bg-surface-secondary px-2 py-0.5 text-[0.7rem] font-medium text-fg-muted"
+            aria-label={`Automatic VM evidence: ${entry.incident.status}`}
+          >
+            evidence {entry.incident.status}
+          </span>
+        )}
         <span className="text-xs text-fg-muted whitespace-nowrap shrink-0">
           {formatTimestamp(entry.timestamp)}
         </span>
@@ -105,7 +131,10 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({ error: e
       {expanded && hasDetails && (
         <div className="mt-3">
           {entry.stack && (
-            <pre className="p-3 rounded-sm bg-inset text-fg-muted text-xs leading-normal overflow-auto m-0 whitespace-pre-wrap break-all" style={{ maxHeight: 200 }}>
+            <pre
+              className="p-3 rounded-sm bg-inset text-fg-muted text-xs leading-normal overflow-auto m-0 whitespace-pre-wrap break-all"
+              style={{ maxHeight: 200 }}
+            >
               {entry.stack}
             </pre>
           )}

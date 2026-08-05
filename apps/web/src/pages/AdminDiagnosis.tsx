@@ -4,6 +4,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
+import { DiagnosticIncidentCard } from '../components/admin/DiagnosticIncidentCard';
 import {
   cancelAdminDebugDiagnosisRun,
   fetchAdminDebugDiagnosisRun,
@@ -28,7 +29,9 @@ export function AdminDiagnosis() {
     queryFn: () => fetchAdminDebugDiagnosisRun(runId),
     enabled: Boolean(runId),
     refetchInterval: ({ state }) =>
-      ACTIVE.has(state.data?.run.status ?? '') ? DEFAULT_DEBUG_DIAGNOSIS_POLL_INTERVAL_MS : false,
+      ACTIVE.has(state.data?.run.status ?? '') || state.data?.run.incident?.status === 'pending'
+        ? DEFAULT_DEBUG_DIAGNOSIS_POLL_INTERVAL_MS
+        : false,
     retry: 3,
   });
   const run = query.data?.run;
@@ -192,6 +195,8 @@ export function AdminDiagnosis() {
         </div>
       </Card>
 
+      <DiagnosticIncidentCard errorId={run.errorId} incident={run.incident ?? null} />
+
       <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_18rem]">
         <Card className="overflow-hidden">
           <h2 className="border-b border-border-default px-4 py-3 text-sm font-semibold">
@@ -275,7 +280,7 @@ export function AdminDiagnosis() {
           </div>
         </Card>
       )}
-      {query.isFetching && !ACTIVE.has(run.status) && (
+      {query.isFetching && !ACTIVE.has(run.status) && run.incident?.status !== 'pending' && (
         <p className="text-xs text-fg-muted">Refreshing…</p>
       )}
     </div>

@@ -194,6 +194,34 @@ export async function fetchAdminDebugDiagnosisRunEvents(
   );
 }
 
+export async function downloadAdminDiagnosticArtifact(
+  errorId: string,
+  artifactId: string
+): Promise<void> {
+  const response = await fetch(
+    `${API_URL}/api/admin/observability/errors/${encodeURIComponent(
+      errorId
+    )}/incident/artifacts/${encodeURIComponent(artifactId)}/download`,
+    { credentials: 'include' }
+  );
+  if (!response.ok) {
+    throw new Error(`Automatic evidence download failed (HTTP ${response.status})`);
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get('content-disposition');
+  const filename =
+    disposition?.match(/filename="([^"]+)"/)?.[1] ?? `vm-incident-${artifactId}.tar.gz`;
+  const href = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = filename;
+    link.click();
+  } finally {
+    URL.revokeObjectURL(href);
+  }
+}
+
 export async function cancelAdminDebugDiagnosisRun(runId: string): Promise<{ accepted: boolean }> {
   return request(
     '/api/admin/observability/diagnosis-runs/' + encodeURIComponent(runId) + '/cancel',

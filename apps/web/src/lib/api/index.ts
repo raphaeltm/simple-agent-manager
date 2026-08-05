@@ -41,6 +41,7 @@ export {
   changeUserRole,
   createPlatformCredential,
   deletePlatformCredential,
+  downloadAdminDiagnosticArtifact,
   fetchAdminComputeUsage,
   fetchAdminCosts,
   fetchAdminDebugDiagnoses,
