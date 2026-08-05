@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  DEVCONTAINERS_CLI_VERSION: 0.80.2
+
 permissions:
   contents: read
 
@@ -352,6 +355,9 @@ jobs:
       - name: Source-contract test detection
         run: pnpm quality:source-contract-tests
 
+      - name: Dependency governance pinning check
+        run: pnpm quality:dependency-governance
+
   durable-object-workers:
     name: Durable Object Workers
     if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
@@ -467,7 +473,7 @@ jobs:
           cache-dependency-path: packages/vm-agent/go.sum
 
       - name: Install devcontainers CLI
-        run: npm install -g @devcontainers/cli
+        run: npm install -g "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
 
       - name: Prepare devcontainer fixture images
         run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
@@ -492,7 +498,7 @@ jobs:
           cache-dependency-path: packages/vm-agent/go.sum
 
       - name: Install devcontainers CLI
-        run: npm install -g @devcontainers/cli
+        run: npm install -g "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
 
       - name: Prepare devcontainer fixture images
         run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
@@ -515,7 +521,7 @@ jobs:
           node-version: '22'
 
       - name: Install devcontainer CLI
-        run: npm install -g @devcontainers/cli
+        run: npm install -g "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
 
       - name: Prepare devcontainer fixture images
         run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
@@ -726,7 +732,7 @@ jobs:
           node-version: '22'
 
       - name: Install devcontainer CLI
-        run: npm install -g @devcontainers/cli
+        run: npm install -g "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
 
       - name: Prepare devcontainer fixture images
         run: bash scripts/ci/prepare-devcontainer-fixture-images.sh

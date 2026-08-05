@@ -22,6 +22,7 @@ try_run() {
 
 # Defaults are overridable to avoid hardcoding config.
 : "${CLOUDFLARE_OBSERVABILITY_MCP_URL:=https://observability.mcp.cloudflare.com/mcp}"
+: "${SAM_PLAYWRIGHT_MCP_VERSION:=0.0.47}"
 
 echo "=== Ensuring agent config dirs exist ==="
 mkdir -p "${CODEX_HOME:-$HOME/.codex}"
@@ -40,7 +41,7 @@ try_run "Install happy-coder" npm install -g happy-coder
 
 echo "=== Configuring MCP servers ==="
 if ! claude mcp get playwright >/dev/null 2>&1; then
-	try_run "Add Playwright MCP" claude mcp add playwright npx -- @playwright/mcp@latest --browser chromium
+	try_run "Add Playwright MCP" claude mcp add playwright npx -- "@playwright/mcp@${SAM_PLAYWRIGHT_MCP_VERSION}" --browser chromium
 fi
 
 # Install Playwright Chromium for ARM64 compatibility (Chrome not supported on ARM64 Linux)

@@ -3,30 +3,33 @@ name: Devcontainer Cache Experiments
 on:
   push:
     branches:
-      - "sam/cloudflare-devcontainer-cache-experiments-*"
+      - 'sam/cloudflare-devcontainer-cache-experiments-*'
     paths:
-      - ".github/workflows/devcontainer-cache-experiments.yml"
-      - "scripts/experiments/**"
+      - '.github/workflows/devcontainer-cache-experiments.yml'
+      - 'scripts/experiments/**'
   workflow_dispatch:
     inputs:
       run_cloudflare_registry:
-        description: "Run Cloudflare managed registry push/pull experiment"
+        description: 'Run Cloudflare managed registry push/pull experiment'
         required: true
-        default: "true"
+        default: 'true'
         type: choice
-        options: ["true", "false"]
+        options: ['true', 'false']
       run_r2:
-        description: "Run R2 tarball and BuildKit S3 cache experiments"
+        description: 'Run R2 tarball and BuildKit S3 cache experiments'
         required: true
-        default: "true"
+        default: 'true'
         type: choice
-        options: ["true", "false"]
+        options: ['true', 'false']
       run_sam_devcontainer_stress:
-        description: "Build and push the real SAM devcontainer to Cloudflare registry"
+        description: 'Build and push the real SAM devcontainer to Cloudflare registry'
         required: true
-        default: "false"
+        default: 'false'
         type: choice
-        options: ["true", "false"]
+        options: ['true', 'false']
+
+env:
+  DEVCONTAINERS_CLI_VERSION: 0.80.2
 
 permissions:
   contents: read
@@ -217,7 +220,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install devcontainer CLI
-        run: npm install -g @devcontainers/cli
+        run: npm install -g "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
 
       - name: Build SAM devcontainer image
         run: |
