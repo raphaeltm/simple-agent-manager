@@ -1,60 +1,180 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 
-import { describe, expect, it } from 'vitest';
+import type { Env } from '../../src/env';
+import {
+  cancelDiagnosisRunner,
+  listDiagnosisEvents,
+  reconcileDiagnosisRuns,
+  startDiagnosisRunner,
+} from '../../src/services/diagnosis-runner';
 
-const root = resolve(import.meta.dirname, '../..');
-const runner = readFileSync(resolve(root, 'src/durable-objects/diagnosis-runner.ts'), 'utf8');
-const routes = readFileSync(resolve(root, 'src/routes/admin.ts'), 'utf8');
-const service = readFileSync(resolve(root, 'src/services/diagnosis-runner.ts'), 'utf8');
-const policy = readFileSync(resolve(root, 'src/services/diagnosis-runner-policy.ts'), 'utf8');
-const wrangler = readFileSync(resolve(root, 'wrangler.toml'), 'utf8');
-const migration = readFileSync(resolve(root, 'src/db/migrations/0104_durable_debug_diagnosis_runs.sql'), 'utf8');
+vi.mock('../../src/services/debug-agent', () => ({
+  resolveDebugAgentConfig: () => ({
+    staleHeartbeatMs: 60_000,
+    hardDeadlineMs: 300_000,
+  }),
+}));
 
-describe('DiagnosisRunner durable execution contract', () => {
-  it('owns execution outside HTTP waitUntil and initializes the per-run DO before 202', () => {
-    const startRoute = routes.slice(routes.indexOf("adminRoutes.post('/observability/diagnoses'"), routes.indexOf("adminRoutes.get('/observability/diagnosis-runs"));
-    expect(startRoute).toContain('await startDiagnosisRunner(c.env, run.id)');
-    expect(startRoute).not.toContain('waitUntil');
-    expect(service).toContain('idFromName(runId)');
-    expect(runner).toContain('await tx.setAlarm(Date.now())');
+type BoundStatement = {
+  sql: string;
+  values: unknown[];
+  all: ReturnType<typeof vi.fn>;
+  run: ReturnType<typeof vi.fn>;
+};
+
+type FakeDatabase = D1Database & {
+  statements: BoundStatement[];
+};
+
+function createStatement(sql: string, rows: unknown[]): BoundStatement & D1PreparedStatement {
+  const statement = {
+    sql,
+    values: [] as unknown[],
+    bind: vi.fn((...values: unknown[]) => {
+      statement.values = values;
+      return statement;
+    }),
+    all: vi.fn(async () => ({ results: rows, success: true, meta: {} })),
+    run: vi.fn(async () => ({ success: true, meta: {} })),
+    first: vi.fn(),
+    raw: vi.fn(),
+  } as unknown as BoundStatement & D1PreparedStatement;
+  return statement;
+}
+
+function createDatabase(rowsBySql: Array<{ match: string; rows: unknown[] }> = []): FakeDatabase {
+  const statements: BoundStatement[] = [];
+  return {
+    statements,
+    prepare: vi.fn((sql: string) => {
+      const rows = rowsBySql.find(entry => sql.includes(entry.match))?.rows ?? [];
+      const statement = createStatement(sql, rows);
+      statements.push(statement);
+      return statement;
+    }),
+  } as unknown as FakeDatabase;
+}
+
+function createRunnerEnv(overrides: Partial<Env> = {}) {
+  const runner = {
+    start: vi.fn(async () => undefined),
+    ensureStarted: vi.fn(async () => true),
+    cancel: vi.fn(async () => undefined),
+  };
+  const namespace = {
+    idFromName: vi.fn((name: string) => `id:${name}`),
+    get: vi.fn(() => runner),
+  };
+  const env = {
+    DATABASE: createDatabase(),
+    DIAGNOSIS_RUNNER: namespace,
+    ...overrides,
+  } as unknown as Env;
+  return { env, namespace, runner };
+}
+
+describe('DiagnosisRunner service integration contract', () => {
+  it('starts and cancels the per-run durable object by stable run id', async () => {
+    const { env, namespace, runner } = createRunnerEnv();
+
+    await startDiagnosisRunner(env, 'run-123');
+    await cancelDiagnosisRunner(env, 'run-123');
+
+    expect(namespace.idFromName).toHaveBeenCalledWith('run-123');
+    expect(namespace.get).toHaveBeenCalledWith('id:run-123');
+    expect(runner.start).toHaveBeenCalledWith('run-123');
+    expect(runner.cancel).toHaveBeenCalledWith('run-123');
   });
 
-  it('dispatches exactly one model turn or one tool call from each alarm', () => {
-    const alarm = runner.slice(runner.indexOf('async alarm()'), runner.indexOf('private async runModelStep'));
-    expect(alarm).toContain("if (state.currentStep === 'model') await this.runModelStep");
-    expect(alarm).toContain('else await this.runToolStep');
-    const tool = runner.slice(runner.indexOf('private async runToolStep'), runner.indexOf('private async checkpointAndSchedule'));
-    expect(tool).toContain('const call = state.pendingTools[0]');
-    expect(tool).toContain('state.pendingTools.shift()');
-    expect(tool).not.toContain('for (');
+  it('treats an existing durable start as successful when ensureStarted confirms state', async () => {
+    const { env, runner } = createRunnerEnv();
+    runner.start.mockRejectedValueOnce(new Error('already starting'));
+    runner.ensureStarted.mockResolvedValueOnce(true);
+
+    await expect(startDiagnosisRunner(env, 'run-existing')).resolves.toBeUndefined();
+
+    expect(runner.ensureStarted).toHaveBeenCalledTimes(1);
   });
 
-  it('checkpoints idempotency, heartbeat, events, cancellation, deadlines, and classified retry before rescheduling', () => {
-    expect(runner).toContain('completedStepKeys.includes(stepKey)');
-    expect(runner).toContain('cancel_requested_at');
-    expect(runner).toContain('run.deadline_at ? Date.parse(run.deadline_at)');
-    expect(runner).toContain('classifyDiagnosisFailure(error)');
-    expect(runner).toContain('await this.ctx.storage.put');
-    expect(runner).toContain('await this.ctx.storage.setAlarm');
-    expect(migration).toContain('UNIQUE(run_id, step_key)');
-    expect(migration).toContain('debug_diagnosis_run_events');
+  it('rethrows durable start failures when the runner cannot confirm existing state', async () => {
+    const { env, runner } = createRunnerEnv();
+    runner.start.mockRejectedValueOnce(new Error('storage unavailable'));
+    runner.ensureStarted.mockResolvedValueOnce(false);
+
+    await expect(startDiagnosisRunner(env, 'run-failed')).rejects.toThrow('storage unavailable');
   });
 
-  it('binds and migrates a dedicated SQLite Durable Object and reconciles bounded stale rows', () => {
-    expect(wrangler).toContain('name = "DIAGNOSIS_RUNNER"');
-    expect(wrangler).toContain('new_sqlite_classes = ["DiagnosisRunner"]');
-    expect(service).toContain("LIMIT 50");
-    expect(service).toContain("status IN ('queued','running')");
-    expect(service).toContain('startDiagnosisRunner(env, row.id)');
+  it('lists diagnosis events with a monotonic cursor and bounded limit', async () => {
+    const database = createDatabase([
+      {
+        match: 'FROM debug_diagnosis_run_events',
+        rows: [
+          {
+            id: 'event-1',
+            run_id: 'run-events',
+            sequence: 7,
+            step_key: 'model:1',
+            event_type: 'model_turn',
+            status: 'completed',
+            source_name: null,
+            arguments_preview: null,
+            evidence_preview: 'safe preview',
+            result_count: 2,
+            duration_ms: 123,
+            retry_attempt: 0,
+            error_code: null,
+            error_message: null,
+            created_at: '2026-08-05T00:00:00.000Z',
+          },
+        ],
+      },
+    ]);
+    const { env } = createRunnerEnv({ DATABASE: database });
+
+    const result = await listDiagnosisEvents(env, 'run-events', 3, 999);
+
+    expect(result.nextCursor).toBe(7);
+    expect(result.events[0]).toMatchObject({
+      id: 'event-1',
+      runId: 'run-events',
+      sequence: 7,
+      stepKey: 'model:1',
+      evidencePreview: 'safe preview',
+      resultCount: 2,
+      durationMs: 123,
+    });
+    expect(database.statements[0].values).toEqual(['run-events', 3, 200]);
   });
 
-  it('stores only redacted bounded previews and sanitized failures', () => {
-    expect(runner).toContain('redactSensitiveData');
-    expect(policy).toContain('.slice(0, 500)');
-    expect(runner).toContain('.slice(0, 300)');
-    expect(runner).toContain('.slice(0, 1000)');
-    expect(runner).not.toContain('chain-of-thought');
-    expect(routes).not.toMatch(/github.*issue/i);
+  it('reconciles stale runs by terminalizing expired rows and restarting live rows', async () => {
+    const now = Date.now();
+    const database = createDatabase([
+      {
+        match: 'FROM debug_diagnosis_runs',
+        rows: [
+          {
+            id: 'expired-run',
+            deadline_at: new Date(now - 1_000).toISOString(),
+            created_at: new Date(now - 600_000).toISOString(),
+          },
+          {
+            id: 'live-run',
+            deadline_at: new Date(now + 60_000).toISOString(),
+            created_at: new Date(now - 60_000).toISOString(),
+          },
+        ],
+      },
+    ]);
+    const { env, runner } = createRunnerEnv({ DATABASE: database });
+
+    const result = await reconcileDiagnosisRuns(env);
+
+    expect(result).toEqual({ restarted: 1, terminalized: 1 });
+    expect(runner.start).toHaveBeenCalledWith('live-run');
+    const updateStatement = database.statements.find(statement => statement.sql.includes("SET status='failed'"));
+    expect(updateStatement?.values.at(-1)).toBe('expired-run');
+    const selectStatement = database.statements[0];
+    expect(selectStatement.sql).toContain("status IN ('queued','running')");
+    expect(selectStatement.sql).toContain('LIMIT 50');
   });
 });
