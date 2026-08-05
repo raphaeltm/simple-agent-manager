@@ -48,7 +48,7 @@ function npmGlobalInstallSpecs(files: string[], packageName: string): string[] {
   const specs: string[] = [];
   const escapedPackageName = packageName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const installPattern = new RegExp(
-    `npm\\s+install\\s+-g\\s+["']?(${escapedPackageName}(?:@[^\\s"']+)?)`,
+    `npm\\s+install(?:\\s+-{1,2}[^\\s"\']+)*\\s+["\']?(${escapedPackageName}(?:@[^\\s"\']+)?)`,
     'g'
   );
 
@@ -95,6 +95,9 @@ describe('dependency governance', () => {
     ).toBe(true);
 
     const workflowContents = workflowFiles.map(read).join('\n');
+    expect(workflowContents).toMatch(
+      /npm install -g --ignore-scripts "@devcontainers\/cli@\$\{DEVCONTAINERS_CLI_VERSION\}"/
+    );
     expect(workflowContents).toMatch(/DEVCONTAINERS_CLI_VERSION:\s+\d+\.\d+\.\d+/);
   });
 
@@ -107,15 +110,17 @@ describe('dependency governance', () => {
     expect(postCreate).toMatch(/@playwright\/mcp@\$\{SAM_PLAYWRIGHT_MCP_VERSION\}/);
 
     expect(deployStaging).toMatch(/PLAYWRIGHT_VERSION:\s+\d+\.\d+\.\d+/);
-    expect(deployStaging).toMatch(/@playwright\/test@\$\{PLAYWRIGHT_VERSION\}/);
+    expect(deployStaging).toMatch(
+      /npm install --ignore-scripts "@playwright\/test@\$\{PLAYWRIGHT_VERSION\}"/
+    );
   });
 
   it('prevents Docker base-image drift with digest pins and updater coverage', () => {
     const dockerfiles = ['apps/api/Dockerfile.sandbox', 'apps/api/Dockerfile.vm-agent-container'];
     const refs = dockerFromRefs(dockerfiles);
 
-    expect(refs.length).toBe(dockerfiles.length);
-    expect(refs.every((ref) => /:[^@]+@sha256:[a-f0-9]{64}$/.test(ref))).toBe(true);
+    expect(refs).toHaveLength(dockerfiles.length);
+    expect(refs.every((ref) => /@sha256:[a-f0-9]{64}$/.test(ref))).toBe(true);
     expect(extractDependabotDirectories('docker')).toContain('/apps/api');
   });
 });

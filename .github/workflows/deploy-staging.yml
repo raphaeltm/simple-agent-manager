@@ -53,7 +53,7 @@ jobs:
         run: |
           mkdir -p /tmp/pw && cd /tmp/pw
           npm init -y > /dev/null 2>&1
-          npm install "@playwright/test@${PLAYWRIGHT_VERSION}"
+          npm install --ignore-scripts "@playwright/test@${PLAYWRIGHT_VERSION}"
           npx playwright install chromium
           mkdir -p $GITHUB_WORKSPACE/node_modules/.bin
           ln -sf /tmp/pw/node_modules/@playwright $GITHUB_WORKSPACE/node_modules/@playwright

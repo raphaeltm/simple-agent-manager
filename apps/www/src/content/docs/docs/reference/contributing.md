@@ -86,7 +86,7 @@ The CLI package lives in `packages/cli/` and should be held to the same quality 
 CI and development bootstrap dependencies are pinned so tool or image drift is reviewed through pull requests:
 
 1. Let Dependabot open routine npm, GitHub Actions, devcontainer, Docker, and Go module updates when possible.
-2. For Docker base images, keep the readable tag and update the digest together, for example `image:tag@sha256:...`. Verify the digest with registry metadata before changing it.
+2. For Docker base images, use digest-pinned references, for example `image@sha256:...`. Record the reviewed tag or source version in nearby comments when it matters, and verify the digest with registry metadata before changing it.
 3. For workflow or bootstrap tools installed outside the project lockfile, update the version variable in the workflow or script instead of switching back to `latest`.
 4. Run `pnpm quality:dependency-governance` after any dependency-governance change.
 5. Preserve existing platforms and commands unless the PR is explicitly scoped to a behavior change.

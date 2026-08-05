@@ -9,7 +9,7 @@ R5 findings 1–4 identified CI and development dependency drift in tool downloa
 - `.devcontainer/post-create.sh` registers Playwright MCP through `@playwright/mcp@latest`, which allows unreviewed runtime drift during devcontainer setup.
 - `.github/workflows/ci.yml` and `.github/workflows/devcontainer-cache-experiments.yml` install `@devcontainers/cli` without a version, so CI can change behavior without a repository review.
 - `.github/workflows/deploy-staging.yml` installs `@playwright/test` without a version, and Playwright browser installation should continue using the reviewed package/runtime version already pinned in the repo.
-- `apps/api/Dockerfile.sandbox` and `apps/api/Dockerfile.vm-agent-container` use tag-only base images. Tags preserve readability but need digest pins or automated update coverage to prevent unreviewed drift.
+- `apps/api/Dockerfile.sandbox` and `apps/api/Dockerfile.vm-agent-container` use tag-only base images. Tags preserve readability, but SonarCloud requires digest-only Dockerfile references; nearby comments and Dependabot Docker coverage preserve the reviewed update path.
 - `.github/dependabot.yml` covers only `packages/vm-agent/go.mod`; `packages/cli/go.mod` and `packages/harness/go.mod` are currently omitted.
 - Existing quality tests live under `scripts/quality/*.test.ts` and run through `pnpm quality:specialist-review:test`.
 
@@ -17,7 +17,7 @@ R5 findings 1–4 identified CI and development dependency drift in tool downloa
 
 - [x] Pin Playwright MCP and staging Playwright package installs to reviewed versions.
 - [x] Pin devcontainers CLI installs in CI/development workflows to a reviewed version.
-- [x] Pin Docker base images to digest-qualified references while preserving the current tags for readability and automated updater compatibility.
+- [x] Pin Docker base images to digest-only references with automated updater coverage.
 - [x] Add Dependabot coverage for every Go module in the repository.
 - [x] Add behavior/validation tests that parse dependency-governance surfaces and prove pinning/update coverage.
 - [x] Document the safe dependency update procedure for contributors.

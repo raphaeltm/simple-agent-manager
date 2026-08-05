@@ -220,7 +220,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install devcontainer CLI
-        run: npm install -g "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
+        run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
 
       - name: Build SAM devcontainer image
         run: |

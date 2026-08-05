@@ -473,7 +473,7 @@ jobs:
           cache-dependency-path: packages/vm-agent/go.sum
 
       - name: Install devcontainers CLI
-        run: npm install -g "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
+        run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
 
       - name: Prepare devcontainer fixture images
         run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
@@ -498,7 +498,7 @@ jobs:
           cache-dependency-path: packages/vm-agent/go.sum
 
       - name: Install devcontainers CLI
-        run: npm install -g "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
+        run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
 
       - name: Prepare devcontainer fixture images
         run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
@@ -521,7 +521,7 @@ jobs:
           node-version: '22'
 
       - name: Install devcontainer CLI
-        run: npm install -g "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
+        run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
 
       - name: Prepare devcontainer fixture images
         run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
@@ -732,7 +732,7 @@ jobs:
           node-version: '22'
 
       - name: Install devcontainer CLI
-        run: npm install -g "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
+        run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
 
       - name: Prepare devcontainer fixture images
         run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
