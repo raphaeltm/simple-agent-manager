@@ -1,5 +1,5 @@
-import { Button, Card, Spinner } from '@simple-agent-manager/ui';
 import { DEFAULT_DEBUG_DIAGNOSIS_POLL_INTERVAL_MS } from '@simple-agent-manager/shared';
+import { Button, Card, Spinner } from '@simple-agent-manager/ui';
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate, useParams } from 'react-router';
 
