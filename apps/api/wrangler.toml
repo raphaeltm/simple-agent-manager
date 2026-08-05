@@ -368,6 +368,7 @@ crons = ["*/5 * * * *", "30 * * * *", "0 3 * * *", "0 4 * * *", "0 5 1 * *"]
 # - GITHUB_WEBHOOK_SECRET (optional — overrides ENCRYPTION_KEY for GitHub webhook HMAC)
 # - DEPLOY_SIGNING_PRIVATE_KEY (Ed25519 signing key for deployment apply payloads)
 # - DEPLOY_SIGNING_PUBLIC_KEY (Ed25519 verification key for deployment apply payloads)
+# - PREVIEW_SIGNING_KEY (HMAC signing key for interactive preview URLs)
 # - DEVCONTAINER_CACHE_CLOUDFLARE_API_TOKEN (optional — narrower token for managed devcontainer registry credentials)
 # - DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID (optional — account override for managed devcontainer registry credentials)
 # - GOOGLE_CLIENT_ID (optional — Google Cloud Console OAuth client ID for infra/GCP OIDC integration)
