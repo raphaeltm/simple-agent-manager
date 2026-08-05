@@ -25,11 +25,12 @@
 - [x] Add tests proving tool execution still receives raw params and output behavior remains unchanged.
 - [x] Add or update log-output tests proving canaries are absent from JSON serialization.
 - [x] Run `gofmt` and focused Go tests for `packages/harness`.
-- [x] Run required local reviews: `test-engineer`, `security-auditor`, `go-specialist`, and `task-completion-validator`; address findings.
+- [x] Run required local reviews: `test-engineer`, `security-auditor`, `go-specialist`, `task-completion-validator`, `constitution-validator`, and `doc-sync-validator`; address findings.
 
 ## Acceptance Criteria
 
 - Bash command text and write/edit file content are not present in transcript events or transcript JSON.
+- Unsupported/custom/cyclic parameter values are summarized with opaque non-reversible metadata and never via user-controlled `String`/`GoString`/formatting methods.
 - Transcript `tool_call` events retain `id`, `name`, and a `params` field, with safe per-parameter metadata including byte length and SHA-256 hash for redacted string values.
 - Tool execution behavior is unchanged: registered tools receive original raw params and produce the same tool result content as before.
 - Realistic canary secrets do not appear in transcript JSON/log outputs.
@@ -49,23 +50,25 @@
 
 ## Validation Evidence
 
+- `go test ./transcript` passed in `packages/harness` after replacing the unsafe marshal-failure fallback.
 - `go test ./...` passed in `packages/harness`.
 - `go vet ./...` passed in `packages/harness`.
 - `go test -race ./...` passed in `packages/harness`.
-- `go test -cover ./...` passed in `packages/harness` with transcript package coverage at 97.1% and agent package coverage at 86.8%.
+- `git diff --check` passed.
+- Regression tests cover unsupported custom values, nested array/map values, cyclic maps, deterministic summaries, non-invocation of `String`/`GoString`, and absence of canary secrets from summary/transcript JSON.
 - Staging verification: not run. This is a Go-only `packages/harness` transcript serialization change with no deployed API/UI/infrastructure behavior.
 
 ## Specialist Review Evidence
 
 | Reviewer | Status | Outcome |
 |---|---|---|
-| go-specialist | PASS | Retry local subagent returned PASS: no Go correctness, race, mutation, or compatibility findings. Redaction occurs only at the transcript logging boundary, `registry.Dispatch(ctx, call)` still receives original params, summaries are deterministic and non-reversible, and tests cover real tool execution plus leakage regression. |
-| security-auditor | PASS | Retry local subagent returned PASS: credential exposure risk is addressed. Raw tool parameters are no longer persisted; summaries retain compatibility-oriented metadata without copying secret-bearing values. Dispatch semantics remain unchanged, and tests cover real tool execution plus transcript absence of realistic canaries. Tool-result redaction scope limitation is acceptable for this PR. |
-| test-engineer | PASS | Retry local subagent returned PASS: coverage is realistic and targeted, exercising the actual harness loop and real tool side effects while asserting persisted transcript redaction and safe metadata retention. Non-blocking residual suggestions: add nested/array param and malformed/unknown payload regressions later if supported. |
-| task-completion-validator | FAILED/TIMED OUT | Initial and retry local subagents did not return after bounded waits and were closed. Manual validation found no gap: research maps to checklist, checked items map to diff, acceptance criteria map to automated tests, UI/backend and multi-resource checks are N/A. PR must keep `needs-human-review` unless a successful validator review is obtained or a human approves. |
-| constitution-validator | FAILED/TIMED OUT | Retry local subagent did not return after bounded waits and was closed. Manual Principle XI review found no blocker: schema version `1` is an additive protocol version, canaries are test-only fake secrets, and no configurable URL/timeout/limit/env/deployment identifier was added. PR must keep `needs-human-review` unless a successful validator review is obtained or a human approves. |
-| doc-sync-validator | FAILED/TIMED OUT | Retry local subagent did not return after bounded waits and was closed. Manual doc-sync review found no public API/UI/env/deployment documentation update required for this internal Go harness serialization/test change; the task archive records scope and staging N/A. PR must keep `needs-human-review` unless a successful validator review is obtained or a human approves. |
+| go-specialist | PASS | Scoped Go review passed: `summarizeToolParamValue` preserves normal string/JSON behavior, replaces marshal-failure fallback with deterministic opaque metadata, uses idiomatic `errors.As` and `reflect.TypeOf`, and `go test`/`go vet`/`go test -race` pass. |
+| security-auditor | PASS | Security review passed: unsupported/custom/cyclic values no longer call user-controlled formatting or copy raw content before hashing; canary-bearing `String`/`GoString` methods are not invoked; transcript JSON remains canary-free. |
+| test-engineer | PASS | Test review passed: regressions cover realistic unsupported custom values, nested arrays/maps, cyclic maps, deterministic behavior, normal string/JSON summaries, and transcript JSON canary absence. |
+| task-completion-validator | PASS | Completion validation passed against the SAM task description and actual diff: requested unsafe fallback fix is implemented; acceptance criteria map to automated tests; UI/backend and multi-resource checks are N/A. |
+| constitution-validator | PASS | Principle XI review passed: no deployment/business URLs, timeouts, limits, env vars, or configurable identifiers added; new failure strings are fixed schema markers and canaries are test-only. |
+| doc-sync-validator | PASS | Doc sync review passed: no public API/UI/env/deployment contract changed; archive and PR evidence were updated for the new fallback hardening. |
 
 ## PR / Merge Constraint
 
-Open a targeted PR and do not merge it. Because three required local reviewer subagents still timed out/failed in the repair run, keep the PR labeled `needs-human-review` under `.claude/rules/25-review-merge-gate.md`.
+PR #1739 is updated on existing branch `sam/redact-harness-tool-parameters-09wycj`. Local reviews passed, `needs-human-review` was removed, and CI was rerun. Do not merge; leave the PR open/unmerged per explicit instruction.
