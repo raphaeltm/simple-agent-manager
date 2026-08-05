@@ -3571,7 +3571,7 @@ describe('MCP Routes', () => {
       });
       const statefulD1 = createStatefulTaskD1(task);
       mockEnv.DATABASE = statefulD1 as unknown;
-      mockDoStub.getMessages.mockResolvedValueOnce({
+      mockDoStub.getMessages.mockResolvedValue({
         messages: [
           {
             id: 'msg-final',
@@ -3606,6 +3606,14 @@ describe('MCP Routes', () => {
       expect(mockDoStub.getMessages).toHaveBeenCalledWith(
         task.chat_session_id,
         1,
+        null,
+        ['assistant'],
+        false,
+        'desc'
+      );
+      expect(mockDoStub.getMessages).toHaveBeenCalledWith(
+        task.chat_session_id,
+        5,
         null,
         ['assistant'],
         false,
