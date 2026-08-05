@@ -25,7 +25,7 @@
 - [x] Add tests proving tool execution still receives raw params and output behavior remains unchanged.
 - [x] Add or update log-output tests proving canaries are absent from JSON serialization.
 - [x] Run `gofmt` and focused Go tests for `packages/harness`.
-- [ ] Run required local reviews: `test-engineer`, `security-auditor`, `go-specialist`, and `task-completion-validator`; address findings.
+- [x] Run required local reviews: `test-engineer`, `security-auditor`, `go-specialist`, and `task-completion-validator`; address findings.
 
 ## Acceptance Criteria
 
@@ -45,3 +45,25 @@
 - `packages/harness/tools/edit_file.go`
 - `tasks/archive/2026-06-06-harden-harness-tool-boundaries.md`
 - `tasks/archive/2026-06-25-bash-process-group-cleanup.md`
+
+
+## Validation Evidence
+
+- `go test ./...` passed in `packages/harness`.
+- `go vet ./...` passed in `packages/harness`.
+- `go test -race ./...` passed in `packages/harness`.
+- `go test -cover ./...` passed in `packages/harness` with transcript package coverage at 97.1% and agent package coverage at 86.8%.
+- Staging verification: not run. This is a Go-only `packages/harness` transcript serialization change with no deployed API/UI/infrastructure behavior.
+
+## Specialist Review Evidence
+
+| Reviewer | Status | Outcome |
+|---|---|---|
+| test-engineer | FAILED/TIMED OUT | Local subagent did not return after extended waits and was closed. Manual checklist review passed: capability-level test executes `write_file`, `edit_file`, and `bash` with realistic canary params, proves raw side effects occurred, then proves transcript JSON excludes canaries and includes redacted metadata. PR must carry `needs-human-review`. |
+| security-auditor | FAILED/TIMED OUT | First local subagent blocked on cancelled SAM bootstrap; replacement did not return and was closed. Manual security review passed: raw tool params are summarized before transcript persistence; tool execution receives original params; tool-result redaction intentionally unchanged to keep R4 finding 3 scope. PR must carry `needs-human-review`. |
+| go-specialist | FAILED/TIMED OUT | Local subagent did not return after extended waits and was closed. Manual Go review passed: helper is deterministic, has no I/O/resource ownership, uses SHA-256 over raw bytes without retaining values, and does not mutate `call.Params`. PR must carry `needs-human-review`. |
+| task-completion-validator | FAILED/TIMED OUT | Local subagent did not return after extended waits and was closed. Manual validation passed: findings map to checklist items, checked items map to diff, and acceptance criteria map to automated tests. PR must carry `needs-human-review`. |
+
+## PR / Merge Constraint
+
+Open a targeted PR and do not merge it. Because required local reviewer subagents timed out/failed, label the PR `needs-human-review` under `.claude/rules/25-review-merge-gate.md`.
