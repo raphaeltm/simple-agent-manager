@@ -66,5 +66,7 @@ describe('deployment workflow hardening', () => {
 
     expect(contents).toContain('--env <environment> is required for remote migrations');
     expect(contents).toContain('Use either --local or --env <environment>, not both');
+    expect(contents).toContain('runSafeRemoteMigrations');
+    expect(contents).toContain('--unsafe-remote-migrations-i-understand-data-loss-risk');
   });
 });
