@@ -35,7 +35,7 @@
 - Tool execution behavior is unchanged: registered tools receive original raw params and produce the same tool result content as before.
 - Realistic canary secrets do not appear in transcript JSON/log outputs.
 - `go test ./...` passes in `packages/harness`.
-- PR is opened against `main`, CI evidence is recorded, and the PR remains open/unmerged per explicit instruction.
+- Existing PR is updated against `main`, CI evidence is recorded, and the PR is merged after explicit authorization.
 
 ## References
 
@@ -56,7 +56,7 @@
 - `go test -race ./...` passed in `packages/harness`.
 - `git diff --check` passed.
 - Regression tests cover unsupported custom values, nested array/map values, cyclic maps, deterministic summaries, non-invocation of `String`/`GoString`, and absence of canary secrets from summary/transcript JSON.
-- Staging verification: not run. This is a Go-only `packages/harness` transcript serialization change with no deployed API/UI/infrastructure behavior.
+- Staging verification: intentionally skipped by Raphaël’s explicit instruction because this is an experimental, Go-only `packages/harness` change; staging was not deployed to or mutated.
 
 ## Specialist Review Evidence
 
@@ -71,4 +71,4 @@
 
 ## PR / Merge Constraint
 
-PR #1739 is updated on existing branch `sam/redact-harness-tool-parameters-09wycj`. Local reviews passed, `needs-human-review` was removed, and CI was rerun. Do not merge; leave the PR open/unmerged per explicit instruction.
+PR #1739 is updated on existing branch `sam/redact-harness-tool-parameters-09wycj`. The earlier do-not-merge constraint was explicitly lifted for the authorized backlog cleanup; merge after current local reviews, required Go/race tests, and CI pass.
