@@ -640,6 +640,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   RATE_LIMIT_ANALYTICS_INGEST?: string; // Rate limit per IP per hour (default: 500)
   MAX_ANALYTICS_INGEST_BATCH_SIZE?: string; // Max events per batch (default: 25)
   MAX_ANALYTICS_INGEST_BODY_BYTES?: string; // Max request body bytes (default: 65536)
+  MAX_ANALYTICS_DURATION_MS?: string; // Max duration value accepted for page-duration events (default: 3600000)
   // Analytics forwarding (Phase 4 — external event export)
   ANALYTICS_FORWARD_ENABLED?: string; // "true" to enable forwarding (default: "false")
   ANALYTICS_FORWARD_EVENTS?: string; // Comma-separated event names to forward (default: key conversions)
