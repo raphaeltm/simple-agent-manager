@@ -302,8 +302,8 @@ test.describe('Deployment diagnosis visual audit', () => {
     await page.getByText('Safe evidence preview').click();
     await expect(page.getByText(/<script>alert\(2\)<\/script> is inert/)).toBeVisible();
     await page.getByRole('button', { name: 'Download safe evidence' }).click();
-    await expect(page.getByRole('status')).toContainText('downloaded');
-    await page.getByText('Redacted evidence preview').click();
+    await expect(page.getByRole('status').filter({ hasText: 'downloaded' })).toBeVisible();
+    await page.getByText('Redacted evidence preview').first().click();
     await expect(
       page.getByText('<script>alert(1)</script> is inert redacted evidence')
     ).toBeVisible();
@@ -330,7 +330,9 @@ test.describe('Deployment diagnosis visual audit', () => {
       page.getByText('Accepted. Waiting for the durable executor’s first checkpoint.')
     ).toBeVisible();
     await page.getByRole('button', { name: 'Cancel' }).click();
-    await expect(page.getByRole('status')).toContainText('Cancellation requested');
+    await expect(
+      page.getByRole('status').filter({ hasText: 'Cancellation requested' })
+    ).toBeVisible();
     await expect(page.getByRole('button', { name: 'Cancellation requested' })).toBeDisabled();
     await assertNoOverflow(page);
   });
