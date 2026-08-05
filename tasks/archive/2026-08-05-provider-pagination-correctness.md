@@ -40,7 +40,7 @@ The fix must stay narrowly scoped to `packages/providers`, preserve all public P
 - [x] Add tests covering two-page GCP zonal listing, two-page aggregated lookup and delete-by-numeric-ID, preserved filters, empty pages, repeated/malformed tokens, max-page guard, and error propagation.
 - [x] Run focused provider tests, package lint/typecheck/build, and required repository quality gates.
 - [x] Run local specialist subagents/review skills with original finding and diff: test-engineer, task-completion-validator, and relevant domain/security reviewers.
-- [ ] Open one targeted PR on `sam/fix-provider-listlookup-pagination-xcw5py` and leave it open/unmerged.
+- [x] Open one targeted PR on sam/fix-provider-listlookup-pagination-xcw5py and leave it open/unmerged.
 
 ## Acceptance criteria
 
@@ -52,3 +52,16 @@ The fix must stay narrowly scoped to `packages/providers`, preserve all public P
 - Existing single-page behavior, filters, labels, locations, returned data formats, public interfaces, defaults, and compatibility are preserved.
 - Tests prove the required two-page, empty-page, filter-preservation, guard, malformed/repeated token, and error propagation scenarios.
 - Specialist review evidence, tests, staging decision/evidence, CI status, PR URL, head SHA, and open/unmerged state are recorded.
+
+## Completion evidence
+
+- PR: https://github.com/raphaeltm/simple-agent-manager/pull/1744
+- Head SHA: 915bd5dcc35adb3aea0a3e136fb19a2bf12e8f1a before evidence/archive commit; follow-up archive commit intentionally records final evidence only.
+- Branch: sam/fix-provider-listlookup-pagination-xcw5py
+- Local focused tests: pnpm --filter @simple-agent-manager/providers test -- tests/unit/hetzner-lifecycle.test.ts tests/unit/volume-operations.test.ts tests/unit/gcp.test.ts passed, 3 files / 83 tests.
+- Provider package gates: pnpm --filter @simple-agent-manager/providers lint, typecheck, test, build passed; provider tests passed, 30 files / 533 tests.
+- Full local gates: pnpm lint, pnpm typecheck, pnpm test, pnpm build passed. First full test run had a transient unrelated web unhandled timer error; rerun of pnpm --filter @simple-agent-manager/web test passed, then build passed.
+- Staging: Deploy Staging run 30997582250 passed, including Cloudflare deploy, D1 backup/migration/data-integrity checks, API/web deploy, binary uploads, Health Check, and smoke-tests.
+- PR CI: initial run passed build, lint, typecheck, test, code quality, specialist evidence, UI compliance, durable object workers, Pulumi infra tests, deploy script validation, VM agent smoke, benchmarks, and SonarCloud; preflight required a fresh event after PR body evidence correction.
+- Review evidence: test-engineer PASS; provider-domain-reviewer PASS; security-auditor PASS; constitution-validator PASS; task-completion-validator technical findings addressed, procedural PR/staging evidence added here.
+- State: PR 1744 is draft/open and intentionally unmerged.
