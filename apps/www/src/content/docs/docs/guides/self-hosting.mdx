@@ -225,7 +225,7 @@ See [Configuration → Analytics](/docs/reference/configuration/#analytics) for 
 
 ## Step 7: Deploy
 
-Go to Actions → Deploy Production → Run workflow. Choose the `main` branch. No commit is needed after the environment is configured.
+Go to Actions → Deploy Production → Run workflow. Choose the `main` branch and enter the exact 40-character commit SHA currently at your fork's `main` tip as `target_commit_sha`. No additional commit is needed after the environment is configured.
 
 The workflow:
 
@@ -270,7 +270,7 @@ To deploy an update:
 
 1. Sync your fork's `main` branch with upstream.
 2. Open **Actions → Deploy Production → Run workflow** in your fork.
-3. Choose the `main` branch and leave `dry_run` disabled.
+3. Choose the `main` branch, paste the exact 40-character SHA from that synced commit into `target_commit_sha`, and leave `dry_run` disabled.
 4. Wait for the workflow to finish, then re-run the health check above.
 
 Use the same manual workflow when you rotate deployment secrets, change GitHub Environment variables, or want to re-apply Pulumi-managed infrastructure.

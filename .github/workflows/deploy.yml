@@ -8,6 +8,14 @@ on:
     types: [completed]
   workflow_dispatch:
     inputs:
+      target_commit_sha:
+        description: 'Exact 40-character commit SHA to deploy'
+        required: true
+        type: string
+      emergency_override_reason:
+        description: 'Audited emergency reason to deploy without verified CI on the exact SHA'
+        required: false
+        type: string
       skip_agent:
         description: 'Skip VM Agent build and upload'
         required: false
@@ -21,6 +29,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 # Only one production deployment at a time, queue subsequent ones
 concurrency:
@@ -28,19 +37,53 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate-manual-dispatch:
+    name: Validate manual production target
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_sha: ${{ steps.gate.outputs.deploy_sha }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Validate exact SHA and CI gate
+        id: gate
+        run: pnpm tsx scripts/deploy/validate-production-dispatch.ts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TARGET_COMMIT_SHA: ${{ inputs.target_commit_sha }}
+          EMERGENCY_OVERRIDE_REASON: ${{ inputs.emergency_override_reason }}
+
   # Gate only on the GitHub Actions CI workflow result. SonarCloud is a
   # separate GitHub App check and must not suppress production deploys.
   deploy:
+    needs: [validate-manual-dispatch]
     if: >-
-      github.event_name == 'workflow_dispatch' ||
+      always() &&
       (
-        github.event_name == 'workflow_run' &&
-        github.event.workflow_run.conclusion == 'success' &&
-        github.event.workflow_run.head_branch == 'main'
+        (
+          github.event_name == 'workflow_dispatch' &&
+          needs.validate-manual-dispatch.result == 'success'
+        ) ||
+        (
+          github.event_name == 'workflow_run' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.head_branch == 'main'
+        )
       )
     uses: ./.github/workflows/deploy-reusable.yml
     with:
       environment: production
+      target_commit_sha: ${{ github.event_name == 'workflow_dispatch' && needs.validate-manual-dispatch.outputs.deploy_sha || github.event.workflow_run.head_sha }}
       skip_agent: ${{ inputs.skip_agent || false }}
       dry_run: ${{ inputs.dry_run || false }}
     secrets: inherit

@@ -287,7 +287,7 @@ graph TD
     P5 -.- P5D["Health check polling"]
 ```
 
-CI runs lint, typecheck, tests, and build on pull requests and on canonical-repository `main` pushes. In the canonical repository, Deploy Production runs after successful `main` CI. In self-host forks, `main` push CI is intentionally skipped, so operators update their instance by manually running **Deploy Production** on the fork's `main` branch.
+CI runs lint, typecheck, tests, and build on pull requests and on canonical-repository `main` pushes. In the canonical repository, Deploy Production runs after successful `main` CI. In self-host forks, `main` push CI is intentionally skipped, so operators update their instance by manually running **Deploy Production** against the exact commit SHA from the fork's synced `main` branch.
 
 ## Key Design Decisions
 
@@ -300,4 +300,4 @@ CI runs lint, typecheck, tests, and build on pull requests and on canonical-repo
 | Dynamic DNS per workspace            | Instant subdomain resolution; cleaned up on stop                                                                                                                                        |
 | Alarm-driven execution orchestration | Idempotent steps with exponential backoff; no long-running processes                                                                                                                    |
 | No credentials in cloud-init         | Bootstrap tokens for secure credential injection                                                                                                                                        |
-| Multi-provider abstraction           | Unified VM size/lifecycle API across Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP                                                                                        |
+| Multi-provider abstraction           | Unified VM size/lifecycle API across Hetzner, Scaleway, Vultr, Infomaniak, DigitalOcean, UpCloud, and GCP                                                                               |
