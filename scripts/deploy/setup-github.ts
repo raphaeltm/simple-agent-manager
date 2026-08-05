@@ -146,8 +146,9 @@ After creating your GitHub App and configuring credentials:
    - GH_APP_SLUG
    - GH_WEBHOOK_SECRET
 
-3. Run Actions → Deploy Production → Run workflow, then verify the setup by
-   signing in with GitHub on your deployed app.
+3. Run Actions → Deploy Production → Run workflow, choose main, enter the exact
+   40-character commit SHA from that branch tip as target_commit_sha, then verify
+   the setup by signing in with GitHub on your deployed app.
 `);
 }
 

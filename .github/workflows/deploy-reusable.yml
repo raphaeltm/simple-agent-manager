@@ -15,6 +15,10 @@ on:
         required: false
         type: boolean
         default: false
+      target_commit_sha:
+        required: false
+        type: string
+        default: ''
 
 env:
   NODE_VERSION: '22'
@@ -117,6 +121,8 @@ jobs:
       # ========================================
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.target_commit_sha || github.sha }}
 
       - name: Setup pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
@@ -320,9 +326,8 @@ jobs:
 
       - name: Pulumi Refresh
         if: ${{ inputs.dry_run != true }}
-        continue-on-error: true
         working-directory: infra
-        run: pulumi refresh --yes
+        run: bash ../scripts/deploy/pulumi-refresh-safe.sh
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
