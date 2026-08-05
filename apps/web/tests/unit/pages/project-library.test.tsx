@@ -51,10 +51,22 @@ vi.mock('../../../src/hooks/useIsMobile', () => ({
   useIsMobile: () => false,
 }));
 
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({
+    user: { id: 'user-1', email: 'owner@example.com', name: 'Owner' },
+    isAuthenticated: true,
+    isLoading: false,
+    isSuperadmin: false,
+    isApproved: true,
+    isRefetching: false,
+  }),
+}));
+
 // Mock library-cache to avoid localStorage in the test env. Must include the
 // global-index helpers used by the sweep hook in addition to the per-directory
 // helpers used by the page.
 const cacheMocks = vi.hoisted(() => ({
+  buildLibraryCacheNamespace: vi.fn((userId: string | null | undefined) => userId ? `user:${encodeURIComponent(userId)}` : null),
   getCachedFiles: vi.fn().mockReturnValue(null),
   setCachedFiles: vi.fn(),
   getCachedDirectories: vi.fn().mockReturnValue(null),
@@ -125,6 +137,24 @@ describe('ProjectLibrary (client-side index)', () => {
   });
 
   // --- Basic rendering ------------------------------------------------------
+
+
+
+  it('reads and writes ProjectLibrary cache through the authenticated user namespace', async () => {
+    mocks.listLibraryFiles.mockResolvedValue(page([makeFile({ id: 'f1', filename: 'safe.txt' })]));
+
+    renderLibrary();
+
+    await waitFor(() => expect(screen.getByText('safe.txt')).toBeInTheDocument());
+    expect(cacheMocks.getCachedIndex).toHaveBeenCalledWith('proj-test', 'user:user-1');
+    expect(cacheMocks.getCachedDirectories).toHaveBeenCalledWith('proj-test', '/', 'user:user-1');
+    expect(cacheMocks.setCachedIndex).toHaveBeenCalledWith(
+      'proj-test',
+      expect.arrayContaining([expect.objectContaining({ id: 'f1' })]),
+      'user:user-1',
+    );
+    expect(cacheMocks.setCachedDirectories).toHaveBeenCalledWith('proj-test', '/', [], 'user:user-1');
+  });
 
   it('renders the swept file list', async () => {
     mocks.listLibraryFiles.mockResolvedValue(

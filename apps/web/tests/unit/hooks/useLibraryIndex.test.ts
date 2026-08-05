@@ -101,7 +101,7 @@ describe('useLibraryIndex', () => {
 
     expect(result.current.files).toEqual([]);
     expect(result.current.fileCount).toBe(9999);
-    expect(cache.clearCachedIndex).toHaveBeenCalledWith('proj-1');
+    expect(cache.clearCachedIndex).toHaveBeenCalledWith('proj-1', undefined);
     expect(cache.setCachedIndex).not.toHaveBeenCalled();
   });
 

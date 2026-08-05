@@ -22,13 +22,13 @@ The web app caches project library file and directory metadata in `localStorage`
 
 ## Implementation checklist
 
-- [ ] Add a deterministic authenticated cache namespace derived from the active user/session.
-- [ ] Update library cache APIs to read/write namespaced keys while keeping cache payload formats unchanged.
-- [ ] Handle legacy project-only cache safely by refusing authenticated hydration from legacy keys and removing unsafe legacy keys on transitions.
-- [ ] Add AuthProvider-level cleanup for null/user and account switch transitions.
-- [ ] Make logout clear namespaced cache deterministically before redirect, regardless of request success.
-- [ ] Update ProjectLibrary and `useLibraryIndex` to pass the namespace and reset render state when namespace changes.
-- [ ] Add scenario-driven unit/component tests covering cache isolation, AuthProvider transitions, ProjectLibrary cached render safety, logout, expiry, and account switch.
+- [x] Add a deterministic authenticated cache namespace derived from the active user/session.
+- [x] Update library cache APIs to read/write namespaced keys while keeping cache payload formats unchanged.
+- [x] Handle legacy project-only cache safely by refusing authenticated hydration from legacy keys and removing unsafe legacy keys on transitions.
+- [x] Add AuthProvider-level cleanup for null/user and account switch transitions.
+- [x] Make logout clear namespaced cache deterministically before redirect, regardless of request success.
+- [x] Update ProjectLibrary and `useLibraryIndex` to pass the namespace and reset render state when namespace changes.
+- [x] Add scenario-driven unit/component tests covering cache isolation, AuthProvider transitions, ProjectLibrary cached render safety, logout, expiry, and account switch.
 - [ ] Run ProjectLibrary visual audit with normal, long text, empty, many, and error states on mobile and desktop.
 - [ ] Run specialist review and address findings.
 - [ ] Run local quality suite, staging verification, and PR/CI.

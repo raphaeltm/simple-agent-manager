@@ -4,12 +4,22 @@ import { beforeEach,describe, expect, it, vi } from 'vitest';
 import { AuthProvider, useAuth } from '../../../src/components/AuthProvider';
 import { GITHUB_REAUTH_REQUIRED_EVENT } from '../../../src/lib/api/client';
 
-const mockUseSession = vi.fn();
-const mockSignOut = vi.fn();
+const { mockUseSession, mockSignOut, mockClearLibraryCache, mockClearLegacyLibraryCache } = vi.hoisted(() => ({
+  mockUseSession: vi.fn(),
+  mockSignOut: vi.fn(),
+  mockClearLibraryCache: vi.fn(),
+  mockClearLegacyLibraryCache: vi.fn(),
+}));
 
 vi.mock('../../../src/lib/auth', () => ({
   signOut: () => mockSignOut(),
   useSession: () => mockUseSession(),
+}));
+
+vi.mock('../../../src/lib/library-cache', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/library-cache')>()),
+  clearLibraryCache: mockClearLibraryCache,
+  clearLegacyLibraryCache: mockClearLegacyLibraryCache,
 }));
 
 function AuthConsumer() {
@@ -190,6 +200,96 @@ describe('AuthProvider', () => {
     );
     expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
     expect(screen.getByTestId('user-name')).toHaveTextContent('Updated User');
+  });
+
+
+
+  it('does not clear the same user namespace during transient refetch errors', () => {
+    mockUseSession.mockReturnValue({
+      data: validSession,
+      isPending: false,
+      error: null,
+      isRefetching: false,
+    });
+    const { rerender } = renderWithAuth();
+    expect(mockClearLegacyLibraryCache).toHaveBeenCalledTimes(1);
+
+    mockUseSession.mockReturnValue({
+      data: null,
+      isPending: false,
+      error: new Error('Network error'),
+      isRefetching: true,
+    });
+    rerender(
+      <AuthProvider>
+        <AuthConsumer />
+      </AuthProvider>,
+    );
+
+    expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
+    expect(mockClearLibraryCache).not.toHaveBeenCalled();
+    expect(mockClearLegacyLibraryCache).toHaveBeenCalledTimes(1);
+  });
+
+  it('clears the previous user namespace and legacy cache on clean null session expiry', () => {
+    mockUseSession.mockReturnValue({
+      data: validSession,
+      isPending: false,
+      error: null,
+      isRefetching: false,
+    });
+    const { rerender } = renderWithAuth();
+    mockClearLibraryCache.mockClear();
+    mockClearLegacyLibraryCache.mockClear();
+
+    mockUseSession.mockReturnValue({
+      data: null,
+      isPending: false,
+      error: null,
+      isRefetching: false,
+    });
+    rerender(
+      <AuthProvider>
+        <AuthConsumer />
+      </AuthProvider>,
+    );
+
+    expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
+    expect(mockClearLibraryCache).toHaveBeenCalledWith('user:u1');
+    expect(mockClearLegacyLibraryCache).toHaveBeenCalledOnce();
+  });
+
+  it('clears the previous user namespace on account switch without clearing the new user cache', () => {
+    mockUseSession.mockReturnValue({
+      data: validSession,
+      isPending: false,
+      error: null,
+      isRefetching: false,
+    });
+    const { rerender } = renderWithAuth();
+    mockClearLibraryCache.mockClear();
+    mockClearLegacyLibraryCache.mockClear();
+
+    mockUseSession.mockReturnValue({
+      data: {
+        ...validSession,
+        user: { ...validSession.user, id: 'u2', email: 'other@test.com', name: 'Other User' },
+      },
+      isPending: false,
+      error: null,
+      isRefetching: false,
+    });
+    rerender(
+      <AuthProvider>
+        <AuthConsumer />
+      </AuthProvider>,
+    );
+
+    expect(screen.getByTestId('user-name')).toHaveTextContent('Other User');
+    expect(mockClearLibraryCache).toHaveBeenCalledTimes(1);
+    expect(mockClearLibraryCache).toHaveBeenCalledWith('user:u1');
+    expect(mockClearLibraryCache).not.toHaveBeenCalledWith('user:u2');
+    expect(mockClearLegacyLibraryCache).toHaveBeenCalledOnce();
   });
 
   it('shows a GitHub reauth prompt and signs out when reconnect is clicked', () => {

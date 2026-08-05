@@ -1,6 +1,6 @@
 import { createAuthClient } from 'better-auth/react';
 
-import { clearLibraryCache } from './library-cache';
+import { clearLegacyLibraryCache, clearLibraryCache } from './library-cache';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
 
@@ -52,10 +52,11 @@ export async function signInWithGitLab() {
  * Clears session and redirects to home.
  */
 export async function signOut() {
+  clearLibraryCache();
+  clearLegacyLibraryCache();
   await authClient.signOut({
     fetchOptions: {
       onSuccess: () => {
-        clearLibraryCache();
         window.location.href = '/';
       },
     },
