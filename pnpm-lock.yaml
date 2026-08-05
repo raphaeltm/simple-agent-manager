@@ -459,6 +459,9 @@ importers:
         specifier: 11.14.0
         version: 11.14.0
     devDependencies:
+      '@playwright/test':
+        specifier: 1.59.1
+        version: 1.59.1
       esbuild:
         specifier: 0.28.1
         version: 0.28.1
