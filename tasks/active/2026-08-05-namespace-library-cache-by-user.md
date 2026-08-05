@@ -29,8 +29,8 @@ The web app caches project library file and directory metadata in `localStorage`
 - [x] Make logout clear namespaced cache deterministically before redirect, regardless of request success.
 - [x] Update ProjectLibrary and `useLibraryIndex` to pass the namespace and reset render state when namespace changes.
 - [x] Add scenario-driven unit/component tests covering cache isolation, AuthProvider transitions, ProjectLibrary cached render safety, logout, expiry, and account switch.
-- [ ] Run ProjectLibrary visual audit with normal, long text, empty, many, and error states on mobile and desktop.
-- [ ] Run specialist review and address findings.
+- [x] Run ProjectLibrary visual audit with normal, long text, empty, many, and error states on mobile and desktop.
+- [x] Run specialist review and address findings (subagents blocked by MCP/sandbox; in-session reviews completed; null namespace/old-user flash gap fixed).
 - [ ] Run local quality suite, staging verification, and PR/CI.
 
 ## Acceptance criteria
