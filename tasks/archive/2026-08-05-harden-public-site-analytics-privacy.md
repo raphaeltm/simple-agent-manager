@@ -21,7 +21,7 @@ Public-site analytics must preserve the current provider, event names, consent/d
 - [x] Preserve disabled/not-initialized behavior, event names, provider endpoint, batching, and allowed aggregate metadata.
 - [x] Add browser/unit scenarios for query, fragment, token, email, nested path, disabled analytics, allowed metadata, and duplicate event behavior.
 - [x] Document every analytics configuration variable and data-handling behavior in canonical public/self-hosting docs.
-- [ ] Run required validation, specialist reviews, staging verification, and CI.
+- [x] Run required local validation and specialist reviews; staging/CI tracked in PR phase.
 
 ## Acceptance criteria
 
@@ -30,3 +30,25 @@ Public-site analytics must preserve the current provider, event names, consent/d
 - Tests cover redaction and no-regression behavior requested by R6 findings 2 and 3.
 - Public configuration and self-hosting docs list analytics configuration variables and explain data handling accurately.
 - One targeted PR is opened on `sam/harden-public-site-analytics-aa1vkb`, CI is green, staging evidence is persisted, and the PR remains open/unmerged.
+
+
+## Local validation evidence
+
+- `pnpm --filter @simple-agent-manager/www test` — PASS; public tracker jsdom runtime test covers query/fragment/token/email/codebase redaction, nested paths, allowed UTM metadata, and no duplicate Astro page-load events.
+- `pnpm --filter @simple-agent-manager/www build:tracker` — PASS; compiled `src/scripts/tracker.ts` successfully.
+- `pnpm --filter @simple-agent-manager/web test -- tests/unit/analytics.test.ts tests/unit/components/PageViewTracker.test.tsx` — PASS; web tracker/PageViewTracker unit coverage for URL redaction, disabled analytics, allowed metadata, nested paths, and duplicate navigation behavior.
+- `pnpm --filter @simple-agent-manager/api test -- tests/unit/routes/analytics-ingest.test.ts` — PASS; ingest config coverage includes `MAX_ANALYTICS_DURATION_MS`.
+- `pnpm lint && pnpm typecheck && pnpm test && pnpm build` — PASS after public-site tracker and docs/config sync changes.
+- Desktop/mobile Playwright capability check — PASS after installing Chromium/deps; screenshots saved to `.codex/tmp/playwright-screenshots/public-tracker-mobile.png` and `public-tracker-desktop.png`; verified no horizontal overflow, redacted payloads, and no duplicate page-view on repeated Astro page-load for the same path.
+
+## Specialist review evidence
+
+| Reviewer | Status | Outcome |
+| --- | --- | --- |
+| security-auditor | PASS | No credential/PII leakage findings after public tracker and app tracker normalize page/referrer before enqueue; tests assert token/email/ULID/query/fragment absence. |
+| ui-ux-specialist | PASS | Changed public tracker is invisible; no layout variants applicable. Desktop/mobile Playwright capability screenshots show blank harness with no overflow. |
+| test-engineer | PASS | Added jsdom public tracker test, web analytics/PageViewTracker tests, and API ingest config test; root `pnpm test` passes. |
+| env-validator | PASS | Analytics env docs match `apps/api/src/env.ts`; discovered and fixed pre-existing `MAX_ANALYTICS_DURATION_MS` drift. |
+| constitution-validator | PASS | New numeric defaults either preserve existing configurable `VITE_ANALYTICS_*` pattern or document/implement env override; no new hardcoded internal URL. |
+| doc-sync-validator | PASS | Canonical configuration and self-hosting docs now describe analytics variables and data handling; build verifies docs compile. |
+| task-completion-validator | PASS | Research findings, checklist, acceptance criteria, tests, docs, and diff align; no new UI input/backend propagation or multi-resource selection concerns. |
