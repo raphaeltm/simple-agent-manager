@@ -1,21 +1,6 @@
 /** @vitest-environment jsdom */
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-
-import { transpileModule } from 'typescript';
+import trackerScript from '../public/scripts/tracker.js?raw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-function buildTrackerScript(): string {
-  const source = readFileSync(resolve(__dirname, '../src/scripts/tracker.ts'), 'utf-8');
-  return transpileModule(source, {
-    compilerOptions: {
-      target: 99,
-      module: 1,
-      removeComments: false,
-      strict: true,
-    },
-  }).outputText;
-}
 
 async function readBeaconEvents(sendBeacon: ReturnType<typeof vi.fn>) {
   const blob = sendBeacon.mock.calls.at(-1)?.[1] as Blob;
@@ -34,7 +19,7 @@ function installTracker(url: string, referrer = '') {
   Object.defineProperty(navigator, 'sendBeacon', { value: sendBeacon, configurable: true });
   vi.spyOn(crypto, 'randomUUID').mockReturnValue('00000000-0000-4000-8000-000000000001');
 
-  window.eval(buildTrackerScript());
+  window.eval(trackerScript);
   return { sendBeacon };
 }
 
