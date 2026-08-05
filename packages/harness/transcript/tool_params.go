@@ -4,7 +4,8 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
+	"errors"
+	"reflect"
 	"sort"
 )
 
@@ -42,7 +43,7 @@ func sortedParamKeys(params map[string]any) []string {
 }
 
 func summarizeToolParamValue(value any) ToolParamSummary {
-	typeName := fmt.Sprintf("%T", value)
+	typeName := toolParamTypeName(value)
 	var encoded []byte
 	if s, ok := value.(string); ok {
 		typeName = "string"
@@ -51,7 +52,7 @@ func summarizeToolParamValue(value any) ToolParamSummary {
 		var err error
 		encoded, err = json.Marshal(value)
 		if err != nil {
-			encoded = []byte(fmt.Sprintf("%v", value))
+			encoded = opaqueUnsupportedToolParamMetadata(typeName, err)
 		}
 	}
 
@@ -62,4 +63,35 @@ func summarizeToolParamValue(value any) ToolParamSummary {
 		ByteLength: len(encoded),
 		SHA256:     hex.EncodeToString(sum[:]),
 	}
+}
+
+func toolParamTypeName(value any) string {
+	if value == nil {
+		return "<nil>"
+	}
+	return reflect.TypeOf(value).String()
+}
+
+func opaqueUnsupportedToolParamMetadata(typeName string, err error) []byte {
+	failure := "json_marshal_failed"
+	var unsupportedType *json.UnsupportedTypeError
+	var unsupportedValue *json.UnsupportedValueError
+	switch {
+	case errors.As(err, &unsupportedType):
+		failure = "json_unsupported_type"
+	case errors.As(err, &unsupportedValue):
+		failure = "json_unsupported_value"
+	}
+
+	encoded, marshalErr := json.Marshal(struct {
+		Type    string `json:"type"`
+		Failure string `json:"failure"`
+	}{
+		Type:    typeName,
+		Failure: failure,
+	})
+	if marshalErr != nil {
+		return []byte("json_marshal_failed")
+	}
+	return encoded
 }
