@@ -408,10 +408,10 @@ describe('GcpProvider', () => {
       await expect(provider.listVMs()).rejects.toThrow(/repeated nextPageToken/);
     });
 
-    it('rejects malformed GCP zonal page tokens', async () => {
+    it.each([2, ''])('rejects malformed GCP zonal page tokens: %j', async (nextPageToken) => {
       globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
         if (url.includes('/zones/us-central1-a/instances')) {
-          return new Response(JSON.stringify({ items: [], nextPageToken: 2 }));
+          return new Response(JSON.stringify({ items: [], nextPageToken }));
         }
         return new Response(JSON.stringify({ error: { message: 'Zone not found' } }), { status: 404 });
       });
@@ -542,10 +542,10 @@ describe('GcpProvider', () => {
       await expect(provider.getVM('numeric-id')).rejects.toThrow(/repeated nextPageToken/);
     });
 
-    it('rejects malformed aggregated page tokens', async () => {
+    it.each([2, ''])('rejects malformed aggregated page tokens: %j', async (nextPageToken) => {
       globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
         if (url.includes('/aggregated/instances')) {
-          return new Response(JSON.stringify({ items: {}, nextPageToken: 2 }));
+          return new Response(JSON.stringify({ items: {}, nextPageToken }));
         }
         return new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 });
       });

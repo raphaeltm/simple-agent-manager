@@ -257,6 +257,9 @@ export function validateGcpInstancesList(
   const root = expectObject(payload, 'gcp', context);
   const items = optionalArray(root, 'items', 'gcp', context);
   const nextPageToken = optionalString(root, 'nextPageToken', 'gcp', context);
+  if (nextPageToken !== undefined && nextPageToken.length === 0) {
+    throw validationError('gcp', `${context}.nextPageToken`, 'expected non-empty string');
+  }
   return {
     ...(items ? { items: items.map((instance, index) => validateGcpInstance(instance, `${context}.items[${index}]`)) } : {}),
     ...(nextPageToken ? { nextPageToken } : {}),
@@ -270,6 +273,9 @@ export function validateGcpAggregatedInstances(
   const root = expectObject(payload, 'gcp', context);
   const items = optionalObject(root, 'items', 'gcp', context);
   const nextPageToken = optionalString(root, 'nextPageToken', 'gcp', context);
+  if (nextPageToken !== undefined && nextPageToken.length === 0) {
+    throw validationError('gcp', `${context}.nextPageToken`, 'expected non-empty string');
+  }
   if (!items) return { ...(nextPageToken ? { nextPageToken } : {}) };
 
   const scopes: Record<string, { instances?: GcpInstancePayload[] }> = {};

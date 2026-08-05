@@ -220,11 +220,11 @@ describe('provider volume operations', () => {
       const mockFetch = vi.fn()
         .mockResolvedValueOnce(new Response(JSON.stringify({
           volumes: [hetznerVolume({ id: 1, name: 'page-1' })],
-          meta: { pagination: { page: 1, next_page: 2 } },
+          meta: { pagination: { page: 1, per_page: 50, previous_page: null, next_page: 2, last_page: 2, total_entries: 2 } },
         }), { status: 200 }))
         .mockResolvedValueOnce(new Response(JSON.stringify({
           volumes: [hetznerVolume({ id: 2, name: 'page-2' })],
-          meta: { pagination: { page: 2, next_page: null } },
+          meta: { pagination: { page: 2, per_page: 50, previous_page: 1, next_page: null, last_page: 2, total_entries: 2 } },
         }), { status: 200 }));
       globalThis.fetch = mockFetch;
 
@@ -246,11 +246,11 @@ describe('provider volume operations', () => {
       globalThis.fetch = vi.fn()
         .mockResolvedValueOnce(new Response(JSON.stringify({
           volumes: [],
-          meta: { pagination: { page: 1, next_page: 2 } },
+          meta: { pagination: { page: 1, per_page: 50, previous_page: null, next_page: 2, last_page: 2, total_entries: 2 } },
         }), { status: 200 }))
         .mockResolvedValueOnce(new Response(JSON.stringify({
           volumes: [hetznerVolume({ id: 3, name: 'later' })],
-          meta: { pagination: { page: 2, next_page: null } },
+          meta: { pagination: { page: 2, per_page: 50, previous_page: 1, next_page: null, last_page: 2, total_entries: 2 } },
         }), { status: 200 }));
 
       const volumes = await provider.listVolumes({ location: 'fsn1' });
@@ -286,7 +286,7 @@ describe('provider volume operations', () => {
       globalThis.fetch = vi.fn()
         .mockResolvedValueOnce(new Response(JSON.stringify({
           volumes: [],
-          meta: { pagination: { page: 1, next_page: 2 } },
+          meta: { pagination: { page: 1, per_page: 50, previous_page: null, next_page: 2, last_page: 2, total_entries: 2 } },
         }), { status: 200 }))
         .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'boom' } }), { status: 500 }));
 
