@@ -15,6 +15,10 @@ import {
   type ToolCall,
 } from '../services/debug-agent';
 import {
+  completeDiagnosisRunTransition,
+  finishDiagnosisRunTransition,
+} from '../services/diagnosis-run-transitions';
+import {
   classifyDiagnosisFailure,
   diagnosisRetryDelay,
   safeDiagnosisMessage,
@@ -64,16 +68,31 @@ export class DiagnosisRunner extends DurableObject<Env> {
     }
     const row = await this.env.DATABASE.prepare(
       'SELECT id, created_by, error_id, start_time, end_time FROM debug_diagnosis_runs WHERE id = ?'
-    ).bind(runId).first<{ id: string; created_by: string; error_id: string | null; start_time: string; end_time: string }>();
+    )
+      .bind(runId)
+      .first<{
+        id: string;
+        created_by: string;
+        error_id: string | null;
+        start_time: string;
+        end_time: string;
+      }>();
     if (!row) throw new Error('Diagnosis run not found');
-    const window = { errorId: row.error_id, startMs: Date.parse(row.start_time), endMs: Date.parse(row.end_time) };
+    const window = {
+      errorId: row.error_id,
+      startMs: Date.parse(row.start_time),
+      endMs: Date.parse(row.end_time),
+    };
     const state: RunnerState = {
       runId,
       createdBy: row.created_by,
       window,
       messages: [
         { role: 'system', content: SYSTEM_PROMPT },
-        { role: 'user', content: `Diagnose ${row.error_id ? `platform error ${row.error_id}` : 'the selected error window'} from ${row.start_time} to ${row.end_time}.` },
+        {
+          role: 'user',
+          content: `Diagnose ${row.error_id ? `platform error ${row.error_id}` : 'the selected error window'} from ${row.start_time} to ${row.end_time}.`,
+        },
       ],
       pendingTools: [],
       currentStep: 'model',
@@ -86,7 +105,7 @@ export class DiagnosisRunner extends DurableObject<Env> {
       completedStepKeys: [],
       inFlightStepKey: null,
     };
-    await this.ctx.storage.transaction(async tx => {
+    await this.ctx.storage.transaction(async (tx) => {
       await tx.put('state', state);
       await tx.setAlarm(Date.now());
     });
@@ -102,8 +121,10 @@ export class DiagnosisRunner extends DurableObject<Env> {
   async cancel(runId: string): Promise<void> {
     const now = new Date().toISOString();
     await this.env.DATABASE.prepare(
-      "UPDATE debug_diagnosis_runs SET cancel_requested_at = COALESCE(cancel_requested_at, ?), updated_at = ? WHERE id = ? AND status IN ('queued','running')"
-    ).bind(now, now, runId).run();
+      "UPDATE debug_diagnosis_runs SET cancel_requested_at = COALESCE(cancel_requested_at, ?), updated_at = ? WHERE id = ? AND run_status IN ('queued','running')"
+    )
+      .bind(now, now, runId)
+      .run();
     await this.ctx.storage.setAlarm(Date.now());
   }
 
@@ -111,28 +132,67 @@ export class DiagnosisRunner extends DurableObject<Env> {
     const state = await this.ctx.storage.get<RunnerState>('state');
     if (!state) return;
     const run = await this.env.DATABASE.prepare(
-      'SELECT status, cancel_requested_at, deadline_at, created_at FROM debug_diagnosis_runs WHERE id = ?'
-    ).bind(state.runId).first<{ status: string; cancel_requested_at: string | null; deadline_at: string | null; created_at: string }>();
+      'SELECT run_status AS status, cancel_requested_at, deadline_at, created_at FROM debug_diagnosis_runs WHERE id = ?'
+    )
+      .bind(state.runId)
+      .first<{
+        status: string;
+        cancel_requested_at: string | null;
+        deadline_at: string | null;
+        created_at: string;
+      }>();
     if (!run || ['succeeded', 'failed', 'cancelled'].includes(run.status)) return;
-    if (run.cancel_requested_at) return this.finish(state, 'cancelled', 'Diagnosis cancelled by an administrator', 'CANCELLED');
-    if (Date.now() >= (run.deadline_at ? Date.parse(run.deadline_at) : Date.parse(run.created_at) + resolveDebugAgentConfig(this.env).hardDeadlineMs)) return this.finish(state, 'failed', 'Diagnosis exceeded its configured hard deadline', 'DEADLINE_EXCEEDED');
+    if (run.cancel_requested_at)
+      return this.finish(
+        state,
+        'cancelled',
+        'Diagnosis cancelled by an administrator',
+        'CANCELLED'
+      );
+    if (
+      Date.now() >=
+      (run.deadline_at
+        ? Date.parse(run.deadline_at)
+        : Date.parse(run.created_at) + resolveDebugAgentConfig(this.env).hardDeadlineMs)
+    )
+      return this.finish(
+        state,
+        'failed',
+        'Diagnosis exceeded its configured hard deadline',
+        'DEADLINE_EXCEEDED'
+      );
 
-    const stepKey = state.currentStep === 'model'
-      ? `model:${state.turns + 1}`
-      : `tool:${state.turns}:${state.pendingTools[0]?.id ?? 'missing'}`;
+    const stepKey =
+      state.currentStep === 'model'
+        ? `model:${state.turns + 1}`
+        : `tool:${state.turns}:${state.pendingTools[0]?.id ?? 'missing'}`;
     if (state.completedStepKeys.includes(stepKey)) {
       await this.ctx.storage.setAlarm(Date.now());
       return;
     }
     if (state.inFlightStepKey === stepKey) {
-      await this.finish(state, 'failed', 'Executor restarted while an external step outcome was ambiguous; retry this run safely', 'AMBIGUOUS_STEP_OUTCOME');
+      await this.finish(
+        state,
+        'failed',
+        'Executor restarted while an external step outcome was ambiguous; retry this run safely',
+        'AMBIGUOUS_STEP_OUTCOME'
+      );
       return;
     }
     const started = Date.now();
     await this.heartbeat(state, stepKey);
     state.inFlightStepKey = stepKey;
     await this.ctx.storage.put('state', state);
-    await this.event(state, `${stepKey}:started`, state.currentStep === 'model' ? 'model_turn' : 'evidence', 'running', state.currentStep === 'tool' ? state.pendingTools[0]?.function.name ?? null : null, null, null, 0);
+    await this.event(
+      state,
+      `${stepKey}:started`,
+      state.currentStep === 'model' ? 'model_turn' : 'evidence',
+      'running',
+      state.currentStep === 'tool' ? (state.pendingTools[0]?.function.name ?? null) : null,
+      null,
+      null,
+      0
+    );
     try {
       if (state.currentStep === 'model') await this.runModelStep(state, stepKey, started);
       else await this.runToolStep(state, stepKey, started);
@@ -143,17 +203,36 @@ export class DiagnosisRunner extends DurableObject<Env> {
 
   private async runModelStep(state: RunnerState, stepKey: string, started: number): Promise<void> {
     const config = resolveDebugAgentConfig(this.env);
-    if (state.turns >= config.maxTurns) throw new Error('Debugging agent reached its turn limit without a diagnosis');
+    if (state.turns >= config.maxTurns)
+      throw new Error('Debugging agent reached its turn limit without a diagnosis');
     const estimate = estimatedTokens(state.messages);
     const remaining = config.runTokenLimit - state.inputTokens - state.outputTokens;
     if (remaining <= estimate) throw new Error('Per-run debugging token ceiling reached');
-    const reservation = await consumeFeatureTokenBudget(this.env.KV, INTERACTIVE_DEBUG_FEATURE_KEY, remaining, config.dailyTokenLimit, this.env);
+    const reservation = await consumeFeatureTokenBudget(
+      this.env.KV,
+      INTERACTIVE_DEBUG_FEATURE_KEY,
+      remaining,
+      config.dailyTokenLimit,
+      this.env
+    );
     if (!reservation.allowed) throw new Error('Daily deployment debugging budget exhausted');
     let completion;
     try {
-      completion = await complete(this.env, config, INTERACTIVE_DEBUG_FEATURE_KEY, state.messages, Math.min(config.modelOutputTokens, remaining - estimate));
+      completion = await complete(
+        this.env,
+        config,
+        INTERACTIVE_DEBUG_FEATURE_KEY,
+        state.messages,
+        Math.min(config.modelOutputTokens, remaining - estimate)
+      );
     } catch (error) {
-      await releaseFeatureTokenBudget(this.env.KV, INTERACTIVE_DEBUG_FEATURE_KEY, remaining, config.dailyTokenLimit, this.env);
+      await releaseFeatureTokenBudget(
+        this.env.KV,
+        INTERACTIVE_DEBUG_FEATURE_KEY,
+        remaining,
+        config.dailyTokenLimit,
+        this.env
+      );
       throw error;
     }
     const message = completion.choices?.[0]?.message;
@@ -163,7 +242,13 @@ export class DiagnosisRunner extends DurableObject<Env> {
     const usedInput = completion.usage?.prompt_tokens ?? estimate;
     state.inputTokens += usedInput;
     state.outputTokens += usedOutput;
-    const released = await releaseFeatureTokenBudget(this.env.KV, INTERACTIVE_DEBUG_FEATURE_KEY, Math.max(0, remaining - usedInput - usedOutput), config.dailyTokenLimit, this.env);
+    const released = await releaseFeatureTokenBudget(
+      this.env.KV,
+      INTERACTIVE_DEBUG_FEATURE_KEY,
+      Math.max(0, remaining - usedInput - usedOutput),
+      config.dailyTokenLimit,
+      this.env
+    );
     state.dailyTokensUsed = released.usedTokens;
     const tools = message.tool_calls ?? [];
     state.messages.push({ role: 'assistant', content: message.content ?? null, tool_calls: tools });
@@ -172,7 +257,16 @@ export class DiagnosisRunner extends DurableObject<Env> {
     state.attempt = 0;
     state.completedStepKeys.push(stepKey);
     state.inFlightStepKey = null;
-    await this.event(state, stepKey, 'model_turn', 'succeeded', null, null, null, Date.now() - started);
+    await this.event(
+      state,
+      stepKey,
+      'model_turn',
+      'succeeded',
+      null,
+      null,
+      null,
+      Date.now() - started
+    );
     if (!tools.length) {
       const diagnosis = String(redactSensitiveData(message.content?.trim() ?? ''));
       if (!diagnosis) throw new Error('Debugging model returned an empty diagnosis');
@@ -193,8 +287,26 @@ export class DiagnosisRunner extends DurableObject<Env> {
     state.attempt = 0;
     state.completedStepKeys.push(stepKey);
     state.inFlightStepKey = null;
-    const parsed = (() => { try { return JSON.parse(result) as { error?: string; cause?: string }; } catch { return {}; } })();
-    await this.event(state, stepKey, 'evidence', parsed.error ? 'failed' : 'succeeded', call.function.name, String(redactSensitiveData(call.function.arguments)).slice(0, 300), String(redactSensitiveData(result)).slice(0, 1000), Date.now() - started, parsed.error ? 'EVIDENCE_SOURCE_UNAVAILABLE' : null, parsed.error ? safeMessage(parsed.cause ?? parsed.error) : null, resultCount(result));
+    const parsed = (() => {
+      try {
+        return JSON.parse(result) as { error?: string; cause?: string };
+      } catch {
+        return {};
+      }
+    })();
+    await this.event(
+      state,
+      stepKey,
+      'evidence',
+      parsed.error ? 'failed' : 'succeeded',
+      call.function.name,
+      String(redactSensitiveData(call.function.arguments)).slice(0, 300),
+      String(redactSensitiveData(result)).slice(0, 1000),
+      Date.now() - started,
+      parsed.error ? 'EVIDENCE_SOURCE_UNAVAILABLE' : null,
+      parsed.error ? safeMessage(parsed.cause ?? parsed.error) : null,
+      resultCount(result)
+    );
     await this.checkpointAndSchedule(state);
   }
 
@@ -202,8 +314,21 @@ export class DiagnosisRunner extends DurableObject<Env> {
     const now = new Date().toISOString();
     const config = resolveDebugAgentConfig(this.env);
     await this.env.DATABASE.prepare(
-      'UPDATE debug_diagnosis_runs SET current_step=?,heartbeat_at=?,turns=?,input_tokens=?,output_tokens=?,daily_tokens_used=?,daily_token_limit=?,attempt=?,updated_at=? WHERE id=? AND status IN (\'queued\',\'running\')'
-    ).bind(state.currentStep, now, state.turns, state.inputTokens, state.outputTokens, state.dailyTokensUsed, config.dailyTokenLimit, state.attempt, now, state.runId).run();
+      "UPDATE debug_diagnosis_runs SET current_step=?,heartbeat_at=?,turns=?,input_tokens=?,output_tokens=?,daily_tokens_used=?,daily_token_limit=?,attempt=?,updated_at=? WHERE id=? AND run_status IN ('queued','running')"
+    )
+      .bind(
+        state.currentStep,
+        now,
+        state.turns,
+        state.inputTokens,
+        state.outputTokens,
+        state.dailyTokensUsed,
+        config.dailyTokenLimit,
+        state.attempt,
+        now,
+        state.runId
+      )
+      .run();
     await this.ctx.storage.put('state', state);
     await this.ctx.storage.setAlarm(Date.now() + delay);
   }
@@ -211,36 +336,94 @@ export class DiagnosisRunner extends DurableObject<Env> {
   private async heartbeat(state: RunnerState, step: string): Promise<void> {
     const now = new Date().toISOString();
     await this.env.DATABASE.prepare(
-      "UPDATE debug_diagnosis_runs SET status='running', started_at=COALESCE(started_at, ?), current_step=?, heartbeat_at=?, updated_at=?, executor_version=?, attempt=? WHERE id=? AND status IN ('queued','running')"
-    ).bind(now, step, now, now, EXECUTOR_VERSION, state.attempt, state.runId).run();
+      "UPDATE debug_diagnosis_runs SET status='running',run_status='running',started_at=COALESCE(started_at, ?),current_step=?,heartbeat_at=?,updated_at=?,executor_version=?,attempt=? WHERE id=? AND run_status IN ('queued','running') AND cancel_requested_at IS NULL"
+    )
+      .bind(now, step, now, now, EXECUTOR_VERSION, state.attempt, state.runId)
+      .run();
   }
 
-  private async event(state: RunnerState, stepKey: string, type: string, status: string, source: string | null, args: string | null, evidence: string | null, duration: number, code: string | null = null, message: string | null = null, count: number | null = null): Promise<void> {
-    const existing = await this.env.DATABASE.prepare(
-      'SELECT sequence FROM debug_diagnosis_run_events WHERE run_id=? AND step_key=?'
-    ).bind(state.runId, stepKey).first<{ sequence: number }>();
-    if (existing) {
-      state.sequence = Math.max(state.sequence, existing.sequence);
-      return;
-    }
-    const latest = await this.env.DATABASE.prepare(
-      'SELECT COALESCE(MAX(sequence),0) AS sequence FROM debug_diagnosis_run_events WHERE run_id=?'
-    ).bind(state.runId).first<{ sequence: number }>();
-    state.sequence = (latest?.sequence ?? 0) + 1;
+  private async event(
+    state: RunnerState,
+    stepKey: string,
+    type: string,
+    status: string,
+    source: string | null,
+    args: string | null,
+    evidence: string | null,
+    duration: number,
+    code: string | null = null,
+    message: string | null = null,
+    count: number | null = null
+  ): Promise<void> {
+    const now = new Date().toISOString();
     await this.env.DATABASE.prepare(
-      'INSERT OR IGNORE INTO debug_diagnosis_run_events (id,run_id,sequence,step_key,event_type,status,source_name,arguments_preview,evidence_preview,result_count,duration_ms,retry_attempt,error_code,error_message,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)'
-    ).bind(ulid(), state.runId, state.sequence, stepKey, type, status, source, args, evidence, count, duration, state.attempt, code, message, new Date().toISOString()).run();
+      `INSERT OR IGNORE INTO debug_diagnosis_run_events
+        (id,run_id,sequence,step_key,event_type,status,source_name,arguments_preview,evidence_preview,result_count,duration_ms,retry_attempt,error_code,error_message,created_at)
+       SELECT ?,?,COALESCE((SELECT MAX(sequence) FROM debug_diagnosis_run_events WHERE run_id=?),0)+1,?,?,?,?,?,?,?,?,?,?,?,?
+       WHERE EXISTS (
+         SELECT 1 FROM debug_diagnosis_runs
+         WHERE id=? AND run_status IN ('queued','running')
+           AND cancel_requested_at IS NULL
+           AND (deadline_at IS NULL OR deadline_at>?)
+       )`
+    )
+      .bind(
+        ulid(),
+        state.runId,
+        state.runId,
+        stepKey,
+        type,
+        status,
+        source,
+        args,
+        evidence,
+        count,
+        duration,
+        state.attempt,
+        code,
+        message,
+        now,
+        state.runId,
+        now
+      )
+      .run();
+    const persisted = await this.env.DATABASE.prepare(
+      'SELECT sequence FROM debug_diagnosis_run_events WHERE run_id=? AND step_key=?'
+    )
+      .bind(state.runId, stepKey)
+      .first<{ sequence: number }>();
+    if (persisted) state.sequence = Math.max(state.sequence, persisted.sequence);
   }
 
-  private async handleFailure(state: RunnerState, stepKey: string, started: number, error: unknown): Promise<void> {
+  private async handleFailure(
+    state: RunnerState,
+    stepKey: string,
+    started: number,
+    error: unknown
+  ): Promise<void> {
     const config = resolveDebugAgentConfig(this.env);
     const kind = classifyDiagnosisFailure(error);
     const message = safeMessage(error);
     if (kind.transient && state.attempt < config.stepMaxRetries) {
       state.inFlightStepKey = null;
       state.attempt++;
-      const delay = diagnosisRetryDelay(state.attempt, config.retryBaseDelayMs, config.retryMaxDelayMs);
-      await this.event(state, `${stepKey}:retry:${state.attempt}`, 'retry', 'retrying', null, null, null, Date.now() - started, kind.code, message);
+      const delay = diagnosisRetryDelay(
+        state.attempt,
+        config.retryBaseDelayMs,
+        config.retryMaxDelayMs
+      );
+      await this.event(
+        state,
+        `${stepKey}:retry:${state.attempt}`,
+        'retry',
+        'retrying',
+        null,
+        null,
+        null,
+        Date.now() - started,
+        kind.code,
+        message
+      );
       await this.checkpointAndSchedule(state, delay);
       return;
     }
@@ -251,22 +434,71 @@ export class DiagnosisRunner extends DurableObject<Env> {
     const id = ulid();
     const now = new Date().toISOString();
     const config = resolveDebugAgentConfig(this.env);
-    await this.env.DATABASE.prepare(
-      'INSERT INTO debug_diagnoses (id,error_id,start_time,end_time,diagnosis,model,turns,input_tokens,output_tokens,daily_tokens_used,daily_token_limit,created_by,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)'
-    ).bind(id, state.window.errorId, new Date(state.window.startMs).toISOString(), new Date(state.window.endMs).toISOString(), diagnosis, model, state.turns, state.inputTokens, state.outputTokens, state.dailyTokensUsed, config.dailyTokenLimit, state.createdBy, now).run();
-    await this.env.DATABASE.prepare(
-      "UPDATE debug_diagnosis_runs SET status='succeeded',diagnosis_id=?,model=?,turns=?,input_tokens=?,output_tokens=?,daily_tokens_used=?,daily_token_limit=?,current_step='completed',heartbeat_at=?,completed_at=?,updated_at=? WHERE id=?"
-    ).bind(id, model, state.turns, state.inputTokens, state.outputTokens, state.dailyTokensUsed, config.dailyTokenLimit, now, now, now, state.runId).run();
-    await this.event(state, 'completed', 'completed', 'succeeded', null, null, null, 0);
+    const completed = await completeDiagnosisRunTransition(this.env.DATABASE, {
+      runId: state.runId,
+      diagnosisId: id,
+      eventId: ulid(),
+      errorId: state.window.errorId,
+      startTime: new Date(state.window.startMs).toISOString(),
+      endTime: new Date(state.window.endMs).toISOString(),
+      diagnosis,
+      model,
+      turns: state.turns,
+      inputTokens: state.inputTokens,
+      outputTokens: state.outputTokens,
+      dailyTokensUsed: state.dailyTokensUsed,
+      dailyTokenLimit: config.dailyTokenLimit,
+      createdBy: state.createdBy,
+      now,
+    });
+    if (!completed) await this.settleBlockedCompletion(state);
     await this.ctx.storage.put('state', state);
   }
 
-  private async finish(state: RunnerState, status: 'failed' | 'cancelled', message: string, code: string): Promise<void> {
+  private async finish(
+    state: RunnerState,
+    status: 'failed' | 'cancelled',
+    message: string,
+    code: string
+  ): Promise<void> {
     const now = new Date().toISOString();
-    await this.event(state, `terminal:${status}`, status, status, null, null, null, 0, code, message);
-    await this.env.DATABASE.prepare(
-      'UPDATE debug_diagnosis_runs SET status=?,error_message=?,current_step=?,heartbeat_at=?,completed_at=?,updated_at=? WHERE id=?'
-    ).bind(status, message, status, now, now, now, state.runId).run();
+    await finishDiagnosisRunTransition(this.env.DATABASE, {
+      runId: state.runId,
+      eventId: ulid(),
+      status,
+      message,
+      code,
+      now,
+    });
     await this.ctx.storage.put('state', state);
+  }
+
+  private async settleBlockedCompletion(state: RunnerState): Promise<void> {
+    const run = await this.env.DATABASE.prepare(
+      'SELECT run_status,cancel_requested_at,deadline_at,created_at FROM debug_diagnosis_runs WHERE id=?'
+    )
+      .bind(state.runId)
+      .first<{
+        run_status: string;
+        cancel_requested_at: string | null;
+        deadline_at: string | null;
+        created_at: string;
+      }>();
+    if (!run || ['succeeded', 'failed', 'cancelled'].includes(run.run_status)) return;
+    if (run.cancel_requested_at) {
+      await this.finish(state, 'cancelled', 'Diagnosis cancelled by an administrator', 'CANCELLED');
+      return;
+    }
+    const deadline = run.deadline_at
+      ? Date.parse(run.deadline_at)
+      : Date.parse(run.created_at) + resolveDebugAgentConfig(this.env).hardDeadlineMs;
+    if (Date.now() >= deadline) {
+      await this.finish(
+        state,
+        'failed',
+        'Diagnosis exceeded its configured hard deadline',
+        'DEADLINE_EXCEEDED'
+      );
+    }
   }
 }

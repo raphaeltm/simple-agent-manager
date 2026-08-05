@@ -1,5 +1,7 @@
 # Complete Local Debugging Experience
 
+**Status:** Active
+
 ## Problem
 
 SAM's local-instance debugging flow is only partially complete.
@@ -133,14 +135,14 @@ scheduled reconciliation + R2 lifecycle
 
 ### A. Repair the durable diagnosis runner
 
-- [ ] Add a migration-safe canonical `run_status` column, backfill it, and index active/deadline queries without dropping or recreating tables.
-- [ ] Update Drizzle/raw SQL to read canonical status and maintain the legacy checked column compatibly.
-- [ ] Make completion, cancellation, failure, deadline, and reconciler transitions compare-and-set operations.
-- [ ] Make diagnosis insertion, terminal run update, and terminal event creation one guarded D1 batch so losing transitions create no orphan result/event.
-- [ ] Prevent post-terminal nonterminal checkpoints/events after an in-flight await resumes.
-- [ ] Add migration-chain regression coverage proving `cancelled` persists on a database built from all migrations.
-- [ ] Add barrier-controlled DO tests for cancel-vs-completion, deadline-vs-completion, duplicate alarm, and idempotent terminal events.
-- [ ] Return event cursors only when another page exists; exhaust all pages in the web client with monotonic cursor protection.
+- [x] Add a migration-safe canonical `run_status` column, backfill it, and index active/deadline queries without dropping or recreating tables.
+- [x] Update Drizzle/raw SQL to read canonical status and maintain the legacy checked column compatibly.
+- [x] Make completion, cancellation, failure, deadline, and reconciler transitions compare-and-set operations.
+- [x] Make diagnosis insertion, terminal run update, and terminal event creation one guarded D1 batch so losing transitions create no orphan result/event.
+- [x] Prevent post-terminal nonterminal checkpoints/events after an in-flight await resumes.
+- [x] Add migration-chain regression coverage proving `cancelled` persists on a database built from all migrations.
+- [x] Add barrier-controlled DO tests for cancel-vs-completion, deadline-vs-completion, duplicate alarm, and idempotent terminal events.
+- [x] Return event cursors only when another page exists; exhaust all pages in the web client with monotonic cursor protection.
 - [ ] Add accessible pending/success/failure feedback and duplicate-click suppression for cancel, retry, copy, and download actions without page reloads or hidden stale content.
 
 ### B. Durable VM error outbox and incident IDs
@@ -192,8 +194,8 @@ scheduled reconciliation + R2 lifecycle
 - [ ] Update `.env.example`, env reference, API docs, self-hosting/deployment docs, architecture overview, and debugging/operator guidance.
 - [ ] Document the safe automatic artifact contract and the explicit broad debug-package boundary.
 - [ ] Add the R2 lifecycle setting to Pulumi config/output synchronization and deployment validation.
-- [ ] Update migration-safety guidance to require full migration-chain behavior tests for new persisted enum states and barrier-controlled tests for terminal transitions across awaited work.
-- [ ] Add a concise postmortem covering the cancelled CHECK mismatch, terminal race, why existing tests missed both, and the process correction.
+- [x] Update migration-safety guidance to require full migration-chain behavior tests for new persisted enum states and barrier-controlled tests for terminal transitions across awaited work.
+- [x] Add a concise postmortem covering the cancelled CHECK mismatch, terminal race, why existing tests missed both, and the process correction.
 - [ ] Keep touched source files below repository size limits by extracting services/components rather than extending existing oversized files.
 
 ### G. Verification, release, and stale artifact reconciliation

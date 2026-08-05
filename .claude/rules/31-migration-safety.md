@@ -44,6 +44,7 @@ SQLite does not support `ALTER COLUMN` to remove a NOT NULL constraint. The stan
 If the table HAS FK children, you have three options:
 
 **Option A: Don't make it nullable.** Use a sentinel value instead.
+
 ```sql
 -- Instead of making installation_id nullable, use a sentinel
 INSERT OR IGNORE INTO github_installations (id, ...) VALUES ('NONE', ...);
@@ -51,6 +52,7 @@ INSERT OR IGNORE INTO github_installations (id, ...) VALUES ('NONE', ...);
 ```
 
 **Option B: Add a new nullable column and deprecate the old one.**
+
 ```sql
 ALTER TABLE projects ADD COLUMN installation_id_v2 TEXT;
 -- Backfill: UPDATE projects SET installation_id_v2 = installation_id;
@@ -97,17 +99,35 @@ PRAGMA foreign_keys = ON;
 2. **If your target table appears as a parent**, do NOT use DROP TABLE. Use ALTER TABLE ADD COLUMN or one of the safe alternatives above.
 3. **If you're unsure**, ask. The cost of asking is zero. The cost of a wrong migration in production is catastrophic and irreversible.
 
+### Persisted Enum and State-Machine Changes
+
+When application code adds a new persisted enum/state value, updating a TypeScript union or
+Drizzle enum is not enough. Before merge, you MUST:
+
+1. Inspect the already-applied `CREATE TABLE` migration for `CHECK` constraints and defaults.
+2. Add an additive migration for the new canonical representation when the existing constraint
+   cannot be changed safely. Never recreate an FK parent just to widen a `CHECK` constraint.
+3. Add a behavioral test that applies the relevant real migration chain, writes every new state,
+   and reads it back through the canonical column.
+4. For a long-running state machine, add a barrier-controlled test where terminal mutation lands
+   while external work is suspended. The late completion must lose through a compare-and-set
+   predicate and must not create orphan result/event rows.
+
+This checklist exists because the durable diagnosis runner added `cancelled` in application types
+without widening the shipped D1 `CHECK`, and used unconditional terminal writes that could overwrite
+cancellation after an awaited model/tool call.
+
 ## The CASCADE Map Changes Over Time
 
 A table that has no children today may have children tomorrow. When adding a new `ON DELETE CASCADE` foreign key, you are also making the parent table more dangerous to recreate in the future. Consider whether `ON DELETE SET NULL` or `ON DELETE RESTRICT` would be more appropriate.
 
 ### Choosing ON DELETE Behavior
 
-| Behavior | When to use | Risk level |
-|----------|------------|------------|
-| `ON DELETE RESTRICT` | Child rows should prevent parent deletion | Safest — forces explicit cleanup |
-| `ON DELETE SET NULL` | Child rows should survive parent deletion with null FK | Safe — no data loss |
-| `ON DELETE CASCADE` | Child rows are meaningless without parent | Dangerous — amplifies any parent table accident |
+| Behavior             | When to use                                            | Risk level                                      |
+| -------------------- | ------------------------------------------------------ | ----------------------------------------------- |
+| `ON DELETE RESTRICT` | Child rows should prevent parent deletion              | Safest — forces explicit cleanup                |
+| `ON DELETE SET NULL` | Child rows should survive parent deletion with null FK | Safe — no data loss                             |
+| `ON DELETE CASCADE`  | Child rows are meaningless without parent              | Dangerous — amplifies any parent table accident |
 
 Prefer `RESTRICT` or `SET NULL` unless the child data is truly worthless without the parent.
 
