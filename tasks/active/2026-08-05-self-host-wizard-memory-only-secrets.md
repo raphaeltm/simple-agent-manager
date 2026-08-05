@@ -39,7 +39,7 @@ Implement R6 finding 1 only for `apps/www`: generated webhook secret and Pulumi 
 - [x] Address reviewer findings.
 - [x] Run relevant local quality suite.
 - [x] Deploy and verify staging.
-- [ ] Open a targeted PR and wait for CI green; do not merge.
+- [x] Open a targeted PR and wait for CI green; do not merge.
 
 ## Acceptance criteria
 
@@ -71,3 +71,8 @@ Implement R6 finding 1 only for `apps/www`: generated webhook secret and Pulumi 
 - `ui-ux-specialist`: PASS. Copy clarified without changing flow/layout; desktop/mobile Playwright screenshots and overflow checks passed.
 - `doc-sync-validator`: PASS. Public self-host page copy updated; no env/API/public docs contract changes required.
 - `task-completion-validator`: PASS. Implementation and test coverage match the task checklist and acceptance criteria; PR/staging/CI remain pending.
+
+## PR evidence
+
+- PR: https://github.com/raphaeltm/simple-agent-manager/pull/1741 — open and explicitly marked DO NOT MERGE.
+- Initial CI passed all code/test/build/review jobs, then Preflight Evidence failed because the PR body was missing the required hidden Agent Preflight block. PR body was corrected and this evidence commit retriggers CI with the corrected body.
