@@ -4,6 +4,8 @@ import {
   destroyAnalytics,
   getInitialReferrer,
   initAnalytics,
+  normalizeAnalyticsPath,
+  normalizeAnalyticsReferrer,
   setUserId,
   track,
   trackClick,
@@ -68,6 +70,23 @@ describe('analytics tracker', () => {
       'sam_analytics_visitor_id',
       expect.any(String)
     );
+  });
+
+
+
+  it('normalizes analytics paths by stripping query strings and fragments', () => {
+    expect(normalizeAnalyticsPath('/docs/guides/agents?token=secret#oauth-code')).toBe('/docs/guides/agents');
+    expect(normalizeAnalyticsPath('https://sam.example.com/setup?code=abc&email=a@example.com#frag')).toBe('/setup');
+  });
+
+  it('redacts tokens, emails, and codebase identifiers from nested paths', () => {
+    expect(normalizeAnalyticsPath('/invite/user@example.com/accept')).toBe('/invite/[redacted]/accept');
+    expect(normalizeAnalyticsPath('/projects/01KZ941C7W5JRFDA9RDZASV8EE/repos/raphaeltm/simple-agent-manager/blob/apps/web/src/lib/analytics.ts')).toBe('/projects/[redacted]/repos/[redacted]/simple-agent-manager/blob/apps/web/src/lib/[redacted]');
+    expect(normalizeAnalyticsPath('/auth/callback/ghp_abcdefghijklmnopqrstuvwxyz1234567890/complete')).toBe('/auth/[redacted]/[redacted]/complete');
+  });
+
+  it('normalizes referrers without search, fragments, credentials, or sensitive segments', () => {
+    expect(normalizeAnalyticsReferrer('https://user:pass@example.com/oauth/callback/user@example.com?code=secret#frag')).toBe('https://example.com/oauth/[redacted]/[redacted]');
   });
 
   it('captures initial referrer', () => {
@@ -145,6 +164,34 @@ describe('analytics tracker', () => {
     expect(body.events[0].utmSource).toBe('twitter');
     expect(body.events[0].utmMedium).toBe('social');
     expect(body.events[0].utmCampaign).toBe('launch');
+  });
+
+
+
+  it('sends normalized page and referrer while preserving allowed metadata', () => {
+    initAnalytics('https://api.example.com/api/t');
+    track('page_view', {
+      page: 'https://app.example.com/projects/01KZ941C7W5JRFDA9RDZASV8EE/settings?token=secret#frag',
+      referrer: 'https://github.com/owner/repo?code=secret#readme',
+      entityId: 'hero-cta',
+      durationMs: 1234,
+    });
+
+    for (let i = 0; i < 9; i++) {
+      track('filler', { page: '/test' });
+    }
+
+    const body = JSON.parse(fetchSpy.mock.calls[0][1].body);
+    expect(body.events[0]).toMatchObject({
+      event: 'page_view',
+      page: '/projects/[redacted]/settings',
+      referrer: 'https://github.com/owner/repo',
+      entityId: 'hero-cta',
+      durationMs: 1234,
+    });
+    expect(JSON.stringify(body)).not.toContain('01KZ941C7W5JRFDA9RDZASV8EE');
+    expect(JSON.stringify(body)).not.toContain('token=secret');
+    expect(JSON.stringify(body)).not.toContain('#frag');
   });
 
   it('does not track before initialization', () => {

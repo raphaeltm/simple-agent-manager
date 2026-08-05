@@ -570,25 +570,49 @@ Applied via cloud-init on each node:
 
 ## Web UI (Build-Time)
 
-| Variable                             | Default            | Description                                                          |
-| ------------------------------------ | ------------------ | -------------------------------------------------------------------- |
-| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES` | `10485760` (10 MB) | Images below this size render inline automatically                   |
-| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`   | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link |
+| Variable                              | Default            | Description                                                          |
+| ------------------------------------- | ------------------ | -------------------------------------------------------------------- |
+| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES`  | `10485760` (10 MB) | Images below this size render inline automatically                   |
+| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`    | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link |
+| `VITE_ANALYTICS_MAX_QUEUE_SIZE`       | `100`              | Max client-side analytics events retained before oldest events drop  |
+| `VITE_ANALYTICS_FLUSH_THRESHOLD`      | `10`               | Client event count that triggers an immediate analytics flush        |
+| `VITE_ANALYTICS_FLUSH_INTERVAL_MS`    | `5000`             | Client analytics background flush interval in milliseconds           |
 
-## Admin Analytics
+## Analytics
 
-| Variable                    | Default | Description                                   |
-| --------------------------- | ------- | --------------------------------------------- |
-| `ANALYTICS_GEO_LIMIT`       | `50`    | Max countries in geographic distribution view |
-| `ANALYTICS_RETENTION_WEEKS` | `12`    | Number of weeks for retention cohort analysis |
+SAM uses first-party analytics ingestion for operational/product aggregates. Browser events are batched to `/api/t`; request analytics are written by API middleware when enabled. Analytics is best-effort and disabled paths preserve normal application behavior.
+
+Client page/referrer fields follow a privacy normalization contract before enqueue: query strings, fragments, protocol, host/userinfo for page values, credentials, emails, UUIDs/ULIDs, long opaque tokens, common secret prefixes, repository/code file identifiers, and values after sensitive route markers are removed or replaced with `[redacted]`. Non-sensitive nested path shape, event names, durations, UTM source/medium/campaign, session ID, visitor/authenticated user ID, and explicit safe entity metadata are preserved for aggregate reporting.
+
+| Variable                                   | Default                                      | Description                                                                    |
+| ------------------------------------------ | -------------------------------------------- | ------------------------------------------------------------------------------ |
+| `ANALYTICS_ENABLED`                        | `true`                                       | Enable API middleware analytics; set `false` to skip request event writes      |
+| `ANALYTICS_SKIP_ROUTES`                    | _(built-in skip list)_                       | Comma-separated extra route prefixes/patterns excluded from middleware writes  |
+| `ANALYTICS_DATASET`                        | _(deployment-generated)_                     | Cloudflare Analytics Engine dataset name                                       |
+| `ANALYTICS_SQL_API_URL`                    | `https://api.cloudflare.com/client/v4/accounts` | Analytics Engine SQL API base URL override                                  |
+| `ANALYTICS_DEFAULT_PERIOD_DAYS`            | `30`                                         | Default admin analytics query lookback in days                                 |
+| `ANALYTICS_TOP_EVENTS_LIMIT`               | `50`                                         | Max rows returned by top-events admin query                                    |
+| `ANALYTICS_GEO_LIMIT`                      | `50`                                         | Max countries in geographic distribution view                                  |
+| `ANALYTICS_RETENTION_WEEKS`                | `12`                                         | Number of weeks for retention cohort analysis                                  |
+| `ANALYTICS_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT` | `20`                                        | Max top pages/referrers/events in website traffic sections                     |
+| `ANALYTICS_INGEST_ENABLED`                 | `true`                                       | Enable browser event ingestion at `/api/t`; `false` returns success without writes |
+| `RATE_LIMIT_ANALYTICS_INGEST`              | `500`                                        | Analytics ingest requests allowed per IP per hour                              |
+| `MAX_ANALYTICS_INGEST_BATCH_SIZE`          | `25`                                         | Max browser events accepted per ingest request                                 |
+| `MAX_ANALYTICS_INGEST_BODY_BYTES`          | `65536`                                      | Max ingest request body size in bytes                                          |
+| `MAX_ANALYTICS_DURATION_MS`                | `3600000`                                    | Max accepted page-duration value; larger values are clamped                    |
 
 ## Analytics Forwarding
+
+External analytics forwarding is off by default. When enabled, SAM forwards only analytics rows already accepted by first-party ingestion/middleware; it does not bypass the client-side URL normalization contract.
 
 | Variable                           | Default                                       | Description                                |
 | ---------------------------------- | --------------------------------------------- | ------------------------------------------ |
 | `ANALYTICS_FORWARD_ENABLED`        | `false`                                       | Enable external analytics event forwarding |
-| `ANALYTICS_FORWARD_EVENTS`         | _(all)_                                       | Comma-separated list of events to forward  |
+| `ANALYTICS_FORWARD_EVENTS`         | key conversion events                         | Comma-separated list of events to forward  |
 | `ANALYTICS_FORWARD_LOOKBACK_HOURS` | `25`                                          | Hours to look back for events              |
+| `ANALYTICS_FORWARD_CURSOR_KEY`     | `analytics-forward-cursor`                    | KV key used to remember forwarded progress |
+| `ANALYTICS_FORWARD_SQL_LIMIT`      | `10000`                                       | Max rows fetched per forwarding run        |
+| `ANALYTICS_SQL_FETCH_TIMEOUT_MS`   | `30000`                                       | Timeout for Analytics Engine SQL fetches   |
 | `SEGMENT_WRITE_KEY`                | _(unset)_                                     | Segment Write Key for event forwarding     |
 | `SEGMENT_API_URL`                  | `https://api.segment.io/v1/batch`             | Segment API endpoint                       |
 | `SEGMENT_MAX_BATCH_SIZE`           | `100`                                         | Max events per Segment batch request       |

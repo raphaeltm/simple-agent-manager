@@ -15,12 +15,12 @@ Public-site analytics must preserve the current provider, event names, consent/d
 
 ## Implementation checklist
 
-- [ ] Add a safe analytics path/referrer normalization contract with conservative defaults.
-- [ ] Ensure `page` never includes query strings, fragments, credentials, emails, repository/codebase identifiers, token-like path segments, or other accidental PII.
-- [ ] Ensure `referrer` keeps only safe origin/path context and strips search/hash/userinfo/sensitive path segments.
-- [ ] Preserve disabled/not-initialized behavior, event names, provider endpoint, batching, and allowed aggregate metadata.
-- [ ] Add browser/unit scenarios for query, fragment, token, email, nested path, disabled analytics, allowed metadata, and duplicate event behavior.
-- [ ] Document every analytics configuration variable and data-handling behavior in canonical public/self-hosting docs.
+- [x] Add a safe analytics path/referrer normalization contract with conservative defaults.
+- [x] Ensure `page` never includes query strings, fragments, credentials, emails, repository/codebase identifiers, token-like path segments, or other accidental PII.
+- [x] Ensure `referrer` keeps only safe origin/path context and strips search/hash/userinfo/sensitive path segments.
+- [x] Preserve disabled/not-initialized behavior, event names, provider endpoint, batching, and allowed aggregate metadata.
+- [x] Add browser/unit scenarios for query, fragment, token, email, nested path, disabled analytics, allowed metadata, and duplicate event behavior.
+- [x] Document every analytics configuration variable and data-handling behavior in canonical public/self-hosting docs.
 - [ ] Run required validation, specialist reviews, staging verification, and CI.
 
 ## Acceptance criteria

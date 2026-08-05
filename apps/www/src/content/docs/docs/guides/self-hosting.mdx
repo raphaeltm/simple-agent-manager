@@ -215,6 +215,14 @@ Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SI
 New VM nodes do not receive a shared Origin CA private key in cloud-init. The cloud-init template generates a node-local RSA key and CSR, then calls the node-scoped callback endpoint `POST /api/nodes/:id/origin-ca-certificate` with its callback JWT. The API Worker signs that CSR through Cloudflare Origin CA using `CF_API_TOKEN` (`packages/cloud-init/src/template.ts`, `apps/api/src/routes/node-lifecycle.ts`, `apps/api/src/services/origin-ca-certificates.ts`).
 :::
 
+:::note[Analytics privacy and configuration]
+SAM's default analytics are first-party and aggregate-oriented. Browser events post to `/api/t` only when `ANALYTICS_INGEST_ENABLED` is not `false`; API request analytics run only when `ANALYTICS_ENABLED` is not `false`. Disabled analytics returns success/no-op behavior so page navigation and product flows continue normally.
+
+Before the browser queues page or referrer metadata, SAM strips query strings, fragments, URL credentials, and sensitive path values. Emails, token-like segments, UUIDs/ULIDs, repository/code file identifiers, and values after sensitive markers such as `token`, `code`, `repo`, `project`, `workspace`, `task`, or `session` are replaced with `[redacted]`. Non-sensitive nested paths, event names, durations, UTM source/medium/campaign, session/visitor IDs, and explicit safe UI entity metadata remain available for aggregate reports.
+
+See [Configuration → Analytics](/docs/reference/configuration/#analytics) for every analytics variable, including client queue settings (`VITE_ANALYTICS_*`), ingest limits, admin analytics limits, and optional forwarding controls. External forwarding (`ANALYTICS_FORWARD_ENABLED`) is off by default and forwards only rows already accepted by the first-party analytics pipeline.
+:::
+
 ## Step 7: Deploy
 
 Go to Actions → Deploy Production → Run workflow. Choose the `main` branch. No commit is needed after the environment is configured.
