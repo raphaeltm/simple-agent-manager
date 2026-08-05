@@ -54,7 +54,7 @@ jobs:
           node-version: '22'
           cache: 'pnpm'
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
       - name: Validate exact SHA and CI gate
         id: gate
         run: pnpm tsx scripts/deploy/validate-production-dispatch.ts
