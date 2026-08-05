@@ -211,15 +211,25 @@ func scanOutboxRow(scanner interface{ Scan(...any) error }) (outboxRow, error) {
 	return row, err
 }
 
-const outboxSelect = `SELECT id, incident_id, level, message, source, stack,
-	workspace_id, timestamp, context_json, artifact_required, artifact_state,
-	spool_path, manifest_json, preview_json, checksum, size_bytes, attempts
-	FROM error_report_outbox`
+const (
+	outboxSelect = `SELECT id, incident_id, level, message, source, stack,
+		workspace_id, timestamp, context_json, artifact_required, artifact_state,
+		spool_path, manifest_json, preview_json, checksum, size_bytes, attempts
+		FROM error_report_outbox`
+	reportCandidatesSelect = outboxSelect + `
+		WHERE report_ack = 0 AND attempts < ? AND next_attempt_at <= ?
+		ORDER BY id ASC LIMIT ?`
+	deliverableArtifactsSelect = outboxSelect + `
+		WHERE report_ack = 1 AND artifact_required = 1 AND artifact_ack = 0
+			AND artifact_state IN ('ready', 'failed') AND attempts < ? AND next_attempt_at <= ?
+		ORDER BY id ASC LIMIT ?`
+	pendingSnapshotsSelect = outboxSelect + `
+		WHERE artifact_required = 1 AND artifact_state = 'pending'
+		ORDER BY id ASC LIMIT ?`
+)
 
 func (r *Reporter) readReportCandidates() ([]outboxRow, error) {
-	rows, err := r.db.Query(outboxSelect+`
-		WHERE report_ack = 0 AND attempts < ? AND next_attempt_at <= ?
-		ORDER BY id ASC LIMIT ?`,
+	rows, err := r.db.Query(reportCandidatesSelect,
 		r.config.MaxAttempts, time.Now().UTC().Format(time.RFC3339Nano), r.config.MaxBatchSize,
 	)
 	if err != nil {
@@ -230,10 +240,7 @@ func (r *Reporter) readReportCandidates() ([]outboxRow, error) {
 }
 
 func (r *Reporter) readDeliverableArtifacts() ([]outboxRow, error) {
-	rows, err := r.db.Query(outboxSelect+`
-		WHERE report_ack = 1 AND artifact_required = 1 AND artifact_ack = 0
-			AND artifact_state IN ('ready', 'failed') AND attempts < ? AND next_attempt_at <= ?
-		ORDER BY id ASC LIMIT ?`,
+	rows, err := r.db.Query(deliverableArtifactsSelect,
 		r.config.MaxAttempts, time.Now().UTC().Format(time.RFC3339Nano), r.config.MaxBatchSize,
 	)
 	if err != nil {
@@ -244,9 +251,7 @@ func (r *Reporter) readDeliverableArtifacts() ([]outboxRow, error) {
 }
 
 func (r *Reporter) readPendingSnapshots() ([]outboxRow, error) {
-	rows, err := r.db.Query(outboxSelect+`
-		WHERE artifact_required = 1 AND artifact_state = 'pending'
-		ORDER BY id ASC LIMIT ?`, r.config.MaxQueueSize)
+	rows, err := r.db.Query(pendingSnapshotsSelect, r.config.MaxQueueSize)
 	if err != nil {
 		return nil, err
 	}

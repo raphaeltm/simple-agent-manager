@@ -390,6 +390,9 @@ jobs:
       - name: Check Durable Object migration safety
         run: pnpm quality:do-migration-safety
 
+      - name: Build API workspace dependencies
+        run: pnpm --filter '@simple-agent-manager/api^...' build
+
       # Keep this task scoped to the debugging vertical slice. A separate SAM
       # task owns wiring the complete historical Worker/DO corpus into CI.
       - name: Test diagnosis and incident Durable Object boundaries
