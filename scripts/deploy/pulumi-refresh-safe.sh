@@ -18,7 +18,7 @@ pulumi refresh --yes >"$tmp_output" 2>&1
 status=$?
 set -e
 
-if [ "$status" -eq 0 ]; then
+if [[ "$status" -eq 0 ]]; then
   cat "$tmp_output" | redact
   exit 0
 fi

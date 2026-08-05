@@ -60,9 +60,9 @@ export function selectSuccessfulCiRun(runs: WorkflowRun[], sha: string): Workflo
 
 function redact(value: string): string {
   return value
-    .replace(/gh[psuor]_[A-Za-z0-9_]{20,}/g, '[REDACTED]')
-    .replace(/github_pat_[A-Za-z0-9_]{20,}/g, '[REDACTED]')
-    .replace(/Bearer\s+[A-Za-z0-9._~+/=-]{12,}/gi, 'Bearer [REDACTED]');
+    .replace(/gh[psuor]_\w{20,}/g, '[REDACTED]')
+    .replace(/github_pat_\w{20,}/g, '[REDACTED]')
+    .replace(/Bearer\s+[\w.~+/=-]{12,}/gi, 'Bearer [REDACTED]');
 }
 
 async function listCiRuns(
@@ -147,17 +147,19 @@ export async function validateProductionDispatch(env: ValidationEnv): Promise<{
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  validateProductionDispatch({
-    githubEventName: process.env.GITHUB_EVENT_NAME,
-    githubRepository: process.env.GITHUB_REPOSITORY,
-    githubToken: process.env.GITHUB_TOKEN,
-    targetCommitSha: process.env.TARGET_COMMIT_SHA,
-    emergencyOverrideReason: process.env.EMERGENCY_OVERRIDE_REASON,
-    githubOutput: process.env.GITHUB_OUTPUT,
-    githubStepSummary: process.env.GITHUB_STEP_SUMMARY,
-  }).catch((error: unknown) => {
+  try {
+    await validateProductionDispatch({
+      githubEventName: process.env.GITHUB_EVENT_NAME,
+      githubRepository: process.env.GITHUB_REPOSITORY,
+      githubToken: process.env.GITHUB_TOKEN,
+      targetCommitSha: process.env.TARGET_COMMIT_SHA,
+      emergencyOverrideReason: process.env.EMERGENCY_OVERRIDE_REASON,
+      githubOutput: process.env.GITHUB_OUTPUT,
+      githubStepSummary: process.env.GITHUB_STEP_SUMMARY,
+    });
+  } catch (error: unknown) {
     const message = redact(error instanceof Error ? error.message : String(error));
     console.error(`::error title=Manual production deployment gate failed::${message}`);
     process.exit(1);
-  });
+  }
 }

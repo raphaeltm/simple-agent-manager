@@ -92,6 +92,9 @@ function requireString(value: unknown, path: string): string {
   return value;
 }
 
+const SENSITIVE_PULUMI_SUMMARY_KEY_PATTERN =
+  /(secret|token|password|passwd|credential|authorization|cookie|api[_-]?key|private[_-]?key|access[_-]?token|refresh[_-]?token)/i;
+
 function assertNoSensitivePulumiSummary(value: unknown, path: string): void {
   if (Array.isArray(value)) {
     value.forEach((item, index) => assertNoSensitivePulumiSummary(item, `${path}[${index}]`));
@@ -103,11 +106,7 @@ function assertNoSensitivePulumiSummary(value: unknown, path: string): void {
   }
 
   for (const [key, child] of Object.entries(value)) {
-    if (
-      /(secret|token|password|passwd|credential|api[_-]?key|private[_-]?key|access[_-]?token|refresh[_-]?token|authorization|cookie)/i.test(
-        key
-      )
-    ) {
+    if (SENSITIVE_PULUMI_SUMMARY_KEY_PATTERN.test(key)) {
       throw new Error(`${path}.${key} is not allowed in Pulumi stackSummary`);
     }
     assertNoSensitivePulumiSummary(child, `${path}.${key}`);
