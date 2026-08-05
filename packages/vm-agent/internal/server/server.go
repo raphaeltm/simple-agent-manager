@@ -353,11 +353,30 @@ func New(cfg *config.Config) (*Server, error) {
 
 	// Create error reporter for sending VM agent errors to CF observability.
 	errorReporter := errorreport.New(cfg.ControlPlaneURL, cfg.NodeID, cfg.CallbackToken, errorreport.Config{
-		FlushInterval: cfg.ErrorReportFlushInterval,
-		MaxBatchSize:  cfg.ErrorReportMaxBatchSize,
-		MaxQueueSize:  cfg.ErrorReportMaxQueueSize,
-		HTTPTimeout:   cfg.ErrorReportHTTPTimeout,
+		FlushInterval:    cfg.ErrorReportFlushInterval,
+		MaxBatchSize:     cfg.ErrorReportMaxBatchSize,
+		MaxBatchBytes:    cfg.ErrorReportMaxBatchBytes,
+		MaxQueueSize:     cfg.ErrorReportMaxQueueSize,
+		HTTPTimeout:      cfg.ErrorReportHTTPTimeout,
+		RetryInitial:     cfg.ErrorReportRetryInitial,
+		RetryMax:         cfg.ErrorReportRetryMax,
+		MaxAttempts:      cfg.ErrorReportMaxAttempts,
+		DBPath:           cfg.ErrorReportDBPath,
+		SpoolDir:         cfg.ErrorReportSpoolDir,
+		ArtifactMaxBytes: cfg.ErrorReportArtifactBytes,
+		SpoolMaxBytes:    cfg.ErrorReportSpoolBytes,
+		Retention:        cfg.ErrorReportRetention,
+		CollectorTimeout: cfg.ErrorReportCollectTimeout,
+		MaxCollectorDocs: cfg.ErrorReportCollectorDocs,
+		MaxDocumentBytes: cfg.ErrorReportDocumentBytes,
+		MaxValueDepth:    cfg.ErrorReportValueDepth,
+		MaxValueItems:    cfg.ErrorReportValueItems,
+		MaxStringBytes:   cfg.ErrorReportStringBytes,
 	})
+	if err := errorReporter.InitError(); err != nil {
+		jwtValidator.Close()
+		return nil, fmt.Errorf("initialize durable error reporter: %w", err)
+	}
 
 	var processLauncher acp.ProcessLauncher
 	if cfg.IsStandaloneMode() {
@@ -559,6 +578,7 @@ func New(cfg *config.Config) (*Server, error) {
 			PTY:                 ptyManager,
 		}
 	}
+	s.configureIncidentCollectors()
 
 	// Setup routes
 	mux := http.NewServeMux()
