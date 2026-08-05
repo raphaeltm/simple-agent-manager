@@ -123,15 +123,7 @@ describe('POST /api/projects/:projectId/tasks/:taskId/close workspace cleanup', 
   });
 
   it('does not clean up a workspace when the task belongs to a different project route', async () => {
-    const task = {
-      id: 'task-close-cross-project',
-      projectId: 'project-real',
-      userId: 'user-close-1',
-      status: 'in_progress',
-      taskMode: 'conversation',
-      workspaceId: 'workspace-real',
-    };
-    const db = buildDb([[task]]);
+    const db = buildDb([[]]);
     vi.mocked(drizzle).mockReturnValue(db as never);
 
     const response = await createApp().fetch(
@@ -144,5 +136,30 @@ describe('POST /api/projects/:projectId/tasks/:taskId/close workspace cleanup', 
 
     expect(response.status).toBe(404);
     expect(mocks.cleanupWorkspaceForDeletion).not.toHaveBeenCalled();
+  });
+
+  it('closes an authorized project task but does not clean up another user workspace', async () => {
+    const task = {
+      id: 'task-close-shared',
+      projectId: 'project-close-1',
+      userId: 'owner-user',
+      status: 'in_progress',
+      taskMode: 'conversation',
+      workspaceId: 'workspace-owner',
+    };
+    const db = buildDb([[task], []]);
+    vi.mocked(drizzle).mockReturnValue(db as never);
+
+    const response = await createApp().fetch(
+      new Request('https://api.test/api/projects/project-close-1/tasks/task-close-shared/close', {
+        method: 'POST',
+      }),
+      { DATABASE: {} } as Env,
+      { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.cleanupWorkspaceForDeletion).not.toHaveBeenCalled();
+    expect(db.update).toHaveBeenCalled();
   });
 });

@@ -27,7 +27,7 @@ import { parsePositiveInt, requireRouteParam } from '../../lib/route-helpers';
 import { ulid } from '../../lib/ulid';
 import { getUserId, requireApproved,requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedTask, requireOwnedWorkspace, requireProjectCapability } from '../../middleware/project-auth';
+import { requireOwnedWorkspace, requireProjectCapability } from '../../middleware/project-auth';
 import {
   CreateTaskDependencySchema,
   CreateTaskSchema,
@@ -58,7 +58,6 @@ import {
   computeBlockedSet,
   getTaskDependencies,
   parseTaskSortOrder,
-  requireOwnedTaskById,
   requireProjectTaskById,
   setTaskStatus,
 } from './_helpers';
@@ -592,7 +591,7 @@ crudRoutes.post('/:taskId/delegate', requireAuth(), requireApproved(), jsonValid
   const body = c.req.valid('json');
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
-  const task = await requireOwnedTask(db, projectId, taskId, userId);
+  const task = await requireProjectTaskById(db, projectId, taskId);
 
   if (task.status !== 'ready') {
     throw errors.conflict('Only ready tasks can be delegated');
@@ -686,11 +685,7 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
   const db = drizzle(c.env.DATABASE, { schema });
 
   await requireProjectCapability(db, projectId, userId, 'task:write');
-  const task = await requireOwnedTaskById(db, taskId, userId);
-
-  if (task.projectId !== projectId) {
-    throw errors.notFound('Task');
-  }
+  const task = await requireProjectTaskById(db, projectId, taskId);
 
   // Only conversation-mode tasks can be closed via this endpoint
   if (task.taskMode !== 'conversation') {

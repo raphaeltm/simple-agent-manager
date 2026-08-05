@@ -23,7 +23,6 @@ const mocks = vi.hoisted(() => ({
   getUserInstallationRepositories: vi.fn(),
   requireProjectAccess: vi.fn(),
   requireProjectCapability: vi.fn(),
-  requireOwnedTask: vi.fn(),
   createNodeRecord: vi.fn(),
   provisionNode: vi.fn(),
   startTaskRunnerDO: vi.fn(),
@@ -52,7 +51,6 @@ vi.mock('../../../src/middleware/auth', () => ({
 vi.mock('../../../src/middleware/project-auth', () => ({
   requireProjectAccess: mocks.requireProjectAccess,
   requireProjectCapability: mocks.requireProjectCapability,
-  requireOwnedTask: mocks.requireOwnedTask,
 }));
 vi.mock('../../../src/services/github-user-access-token', () => ({
   getGitHubUserAccessToken: mocks.getGitHubUserAccessToken,
@@ -177,12 +175,6 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     mocks.getGitHubUserAccessToken.mockResolvedValue('github-user-token');
     mocks.requireProjectAccess.mockResolvedValue(makeProject());
     mocks.requireProjectCapability.mockResolvedValue(makeProject());
-    mocks.requireOwnedTask.mockResolvedValue({
-      id: 'task-1',
-      status: 'ready',
-      title: 'Task One',
-      description: 'do the work',
-    });
     mocks.createNodeRecord.mockResolvedValue({ id: 'node-1' });
     mocks.startTaskRunnerDO.mockResolvedValue(undefined);
 
@@ -396,11 +388,11 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
   // ---------------------------------------------------------------------------
 
   it('task run: returns 403 and does NOT start the Task Runner when access is revoked', async () => {
-    // run.ts pre-gate db sequence: dependencies (.where, no limit) -> credentials
-    // (.limit) -> project load (.limit) -> installation lookup (.limit).
+    // run.ts pre-gate db sequence: task lookup (.limit) -> dependencies (.where, no limit) ->
+    // credentials (.limit) -> installation lookup (.limit). Project comes from requireProjectCapability.
+    limitResponses.push([{ id: 'task-1', projectId: 'proj-1', userId: 'owner-user', status: 'ready', title: 'Task One', description: 'do the work', outputBranch: null, agentProfileHint: null }]);
     whereResponses.push([]); // no task dependencies
-    limitResponses.push([{ id: 'cred-1' }]); // cloud-provider credential present
-    limitResponses.push([makeProject()]); // project load
+    limitResponses.push([{ id: 'cred-1' }]); // caller cloud-provider credential present
     limitResponses.push([INSTALLATION_ROW]); // installation lookup (gate)
     mocks.getUserInstallationRepositories.mockResolvedValue([OTHER_REPO]);
 
@@ -411,9 +403,10 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
   });
 
   it('task run: rejects with 403 when the repository id has drifted, before provisioning', async () => {
+    mocks.requireProjectCapability.mockResolvedValue(makeProject({ githubRepoId: 42 }));
+    limitResponses.push([{ id: 'task-1', projectId: 'proj-1', userId: 'owner-user', status: 'ready', title: 'Task One', description: 'do the work', outputBranch: null, agentProfileHint: null }]);
     whereResponses.push([]);
     limitResponses.push([{ id: 'cred-1' }]);
-    limitResponses.push([makeProject({ githubRepoId: 42 })]);
     limitResponses.push([INSTALLATION_ROW]);
     // User can still see a repo with the bound full name, but a DIFFERENT id.
     mocks.getUserInstallationRepositories.mockResolvedValue([{ ...VISIBLE_REPO, id: 999 }]);
@@ -429,11 +422,11 @@ describe('spawn entry points enforce the user∩app repo-access gate (fail-fast)
     // the installation lookup. The optimistic-lock UPDATE goes through the raw
     // DATABASE.prepare mock (meta.changes === 1). createSession + startTaskRunnerDO
     // are mocked at their boundaries (rule 35) so the request reaches provisioning.
+    limitResponses.push([{ id: 'task-1', projectId: 'proj-1', userId: 'owner-user', status: 'ready', title: 'Task One', description: 'do the work', outputBranch: null, agentProfileHint: null }]);
     whereResponses.push([]); // no task dependencies
-    limitResponses.push([{ id: 'cred-1' }]); // cloud-provider credential present
-    limitResponses.push([makeProject()]); // project load
+    limitResponses.push([{ id: 'cred-1' }]); // caller cloud-provider credential present
     limitResponses.push([INSTALLATION_ROW]); // installation lookup (gate)
-    limitResponses.push([{ githubId: null }]); // user githubId fallback lookup
+    limitResponses.push([{ githubId: null }]); // caller githubId fallback lookup
     mocks.getUserInstallationRepositories.mockResolvedValue([VISIBLE_REPO]);
 
     const res = await post('/api/projects/proj-1/tasks/task-1/run', {});

@@ -22,13 +22,14 @@ import { log } from '../../lib/logger';
 import { ulid } from '../../lib/ulid';
 import { getAuth, requireApproved,requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { requireOwnedTask, requireProjectCapability } from '../../middleware/project-auth';
+import { requireProjectCapability } from '../../middleware/project-auth';
 import { parseOptionalBody, RunTaskSchema } from '../../schemas';
 import * as projectDataService from '../../services/project-data';
 import { isTaskBlocked } from '../../services/task-graph';
 import { cleanupTaskRun } from '../../services/task-runner';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
 import { requireRepositoryUserAccess } from '../projects/_helpers';
+import { requireProjectTaskById } from './_helpers';
 
 const runRoutes = new Hono<{ Bindings: Env }>();
 
@@ -65,8 +66,8 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
   }
 
   // Starting or cleaning up a run uses the caller's credentials and compute context.
-  await requireProjectCapability(db, projectId, userId, 'task:write');
-  const task = await requireOwnedTask(db, projectId, taskId, userId);
+  const project = await requireProjectCapability(db, projectId, userId, 'task:write');
+  const task = await requireProjectTaskById(db, projectId, taskId);
 
   // Check task status
   if (task.status !== 'ready') {
@@ -89,10 +90,7 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
       .select({ id: schema.tasks.id, status: schema.tasks.status })
       .from(schema.tasks)
       .where(
-        and(
-          eq(schema.tasks.projectId, projectId),
-          eq(schema.tasks.userId, userId)
-        )
+        eq(schema.tasks.projectId, projectId)
       );
 
     const statusMap: Record<string, TaskStatus> = {};
@@ -128,22 +126,6 @@ runRoutes.post('/:taskId/run', requireAuth(), requireApproved(), async (c) => {
 
   // vmLocation validated as string by schema
   // workspaceProfile validated by schema (picklist)
-
-  // Load project for repository/installationId
-  const [project] = await db
-    .select()
-    .from(schema.projects)
-    .where(
-      and(
-        eq(schema.projects.id, projectId),
-        eq(schema.projects.userId, userId)
-      )
-    )
-    .limit(1);
-
-  if (!project) {
-    throw errors.notFound('Project');
-  }
 
   // Fail-fast user∩app GitHub repo-access gate. Re-verify the user still has
   // access to the bound repository through the app installation BEFORE the task
@@ -341,9 +323,9 @@ runRoutes.post('/:taskId/run/cleanup', requireAuth(), requireApproved(), async (
     throw errors.badRequest('projectId and taskId are required');
   }
 
-  // Cleanup controls a concrete task runner owned by the caller.
+  // Cleanup is project-authorized; cleanupTaskRun preserves task-linked workspace/node ownership invariants.
   await requireProjectCapability(db, projectId, userId, 'task:write');
-  const task = await requireOwnedTask(db, projectId, taskId, userId);
+  const task = await requireProjectTaskById(db, projectId, taskId);
 
   // Only allow cleanup for terminal states
   if (
