@@ -38,6 +38,8 @@ CREATE TABLE diagnostic_artifacts (
   manifest_json TEXT,
   preview_json TEXT,
   upload_attempts INTEGER NOT NULL DEFAULT 0,
+  upload_lease_id TEXT,
+  upload_lease_expires_at TEXT,
   failure_reason TEXT,
   expires_at TEXT NOT NULL,
   created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,

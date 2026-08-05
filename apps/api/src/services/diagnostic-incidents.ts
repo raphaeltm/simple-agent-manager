@@ -7,6 +7,11 @@ import type {
 
 import type { Env } from '../env';
 import { errors } from '../middleware/error';
+import {
+  acquireArtifactLease,
+  releaseArtifactLease,
+  storedObjectMatches,
+} from './diagnostic-artifact-lease';
 import { type IncidentConfig, resolveDiagnosticIncidentConfig } from './diagnostic-incident-config';
 import { redactSensitiveData } from './observability';
 
@@ -111,23 +116,6 @@ interface ArtifactRow {
   updated_at: string;
 }
 
-function nativeChecksumHex(value: ArrayBuffer | undefined): string | null {
-  if (!value) return null;
-  return [...new Uint8Array(value)].map((part) => part.toString(16).padStart(2, '0')).join('');
-}
-
-function storedObjectMatches(
-  expectedBytes: number,
-  expectedChecksum: string | null,
-  object: R2Object | null
-): boolean {
-  return (
-    object !== null &&
-    object.size === expectedBytes &&
-    nativeChecksumHex(object.checksums?.sha256) === expectedChecksum
-  );
-}
-
 function validateRegistration(
   config: IncidentConfig,
   incidentId: string,
@@ -209,14 +197,33 @@ export async function registerDiagnosticArtifact(
       existing.kind === input.kind &&
       existing.content_type === input.contentType
     ) {
-      const recovered = await env.R2.head(existing.object_key);
+      const lease = await acquireArtifactLease(env, existing.id, nodeId, config);
+      if (!lease) {
+        const winner = await env.DATABASE.prepare(
+          'SELECT status FROM diagnostic_artifacts WHERE id = ? AND node_id = ?'
+        )
+          .bind(existing.id, nodeId)
+          .first<{ status: DiagnosticIncidentStatus }>();
+        if (winner?.status === 'available' || winner?.status === 'failed') {
+          return { artifactId: existing.id, status: winner.status };
+        }
+        throw errors.internal('Artifact upload is already in progress');
+      }
+      let recovered: R2Object | null;
+      try {
+        recovered = await env.R2.head(existing.object_key);
+      } catch (cause) {
+        await releaseArtifactLease(env, existing.id, lease.id, new Date().toISOString());
+        throw cause;
+      }
       if (storedObjectMatches(existing.expected_bytes, existing.checksum_sha256, recovered)) {
         const recoveredResults = await env.DATABASE.batch([
           env.DATABASE.prepare(
             `UPDATE diagnostic_artifacts SET status = 'available', actual_bytes = expected_bytes,
-             failure_reason = NULL, updated_at = CURRENT_TIMESTAMP
-             WHERE id = ? AND node_id = ? AND status = 'pending'`
-          ).bind(existing.id, nodeId),
+             failure_reason = NULL, upload_lease_id = NULL, upload_lease_expires_at = NULL,
+             updated_at = ?
+             WHERE id = ? AND node_id = ? AND status = 'pending' AND upload_lease_id = ?`
+          ).bind(lease.now, existing.id, nodeId, lease.id),
           env.DATABASE.prepare(
             `UPDATE diagnostic_incidents SET status = 'available', total_bytes = ?,
              failure_reason = NULL, updated_at = CURRENT_TIMESTAMP
@@ -228,18 +235,28 @@ export async function registerDiagnosticArtifact(
         if (Number(recoveredResults[0]?.meta?.changes ?? 0) > 0) {
           return { artifactId: existing.id, status: 'available' };
         }
+        const winner = await env.DATABASE.prepare(
+          'SELECT status FROM diagnostic_artifacts WHERE id = ? AND node_id = ?'
+        )
+          .bind(existing.id, nodeId)
+          .first<{ status: DiagnosticIncidentStatus }>();
+        if (winner) return { artifactId: existing.id, status: winner.status };
+        throw errors.internal('Artifact state changed during recovery');
       }
       const downgradeResults = await env.DATABASE.batch([
         env.DATABASE.prepare(
           `UPDATE diagnostic_artifacts SET status = 'failed', checksum_sha256 = NULL,
            expected_bytes = 0, actual_bytes = NULL, failure_reason = 'VM evidence collection failed',
-           manifest_json = ?, preview_json = ?, updated_at = CURRENT_TIMESTAMP
-           WHERE id = ? AND node_id = ? AND status = 'pending'`
+           manifest_json = ?, preview_json = ?, upload_lease_id = NULL,
+           upload_lease_expires_at = NULL, updated_at = ?
+           WHERE id = ? AND node_id = ? AND status = 'pending' AND upload_lease_id = ?`
         ).bind(
           JSON.stringify(safeInput.manifest),
           JSON.stringify(safeInput.preview),
+          lease.now,
           existing.id,
-          nodeId
+          nodeId,
+          lease.id
         ),
         env.DATABASE.prepare(
           `UPDATE diagnostic_incidents
@@ -270,7 +287,7 @@ export async function registerDiagnosticArtifact(
         .bind(existing.id, nodeId)
         .first<{ status: DiagnosticIncidentStatus }>();
       if (winner) return { artifactId: existing.id, status: winner.status };
-      throw errors.conflict('Artifact state changed during failed registration');
+      throw errors.internal('Artifact state changed during failed registration');
     }
     if (
       existing.node_id !== nodeId ||
@@ -462,6 +479,17 @@ export async function uploadDiagnosticArtifact(
     throw errors.badRequest('Checksum header does not match registration');
   }
   if (!request.body) throw errors.badRequest('Artifact body is required');
+  const config = resolveDiagnosticIncidentConfig(env);
+  const lease = await acquireArtifactLease(env, artifactId, nodeId, config);
+  if (!lease) {
+    const winner = await env.DATABASE.prepare(
+      'SELECT status FROM diagnostic_artifacts WHERE id = ? AND node_id = ?'
+    )
+      .bind(artifactId, nodeId)
+      .first<{ status: DiagnosticIncidentStatus }>();
+    if (winner?.status === 'available') return;
+    throw errors.internal('Artifact upload is already in progress');
+  }
 
   try {
     const bounded = exactLengthStream(request.body, row.expected_bytes);
@@ -478,10 +506,11 @@ export async function uploadDiagnosticArtifact(
     if (!storedObjectMatches(row.expected_bytes, row.checksum_sha256, recovered)) {
       await env.DATABASE.prepare(
         `UPDATE diagnostic_artifacts SET upload_attempts = upload_attempts + 1,
-         failure_reason = 'Upload failed', updated_at = CURRENT_TIMESTAMP
-         WHERE id = ? AND status = 'pending'`
+         failure_reason = 'Upload failed', upload_lease_id = NULL,
+         upload_lease_expires_at = NULL, updated_at = ?
+         WHERE id = ? AND status = 'pending' AND upload_lease_id = ?`
       )
-        .bind(artifactId)
+        .bind(new Date().toISOString(), artifactId, lease.id)
         .run();
       throw cause;
     }
@@ -490,9 +519,10 @@ export async function uploadDiagnosticArtifact(
   const results = await env.DATABASE.batch([
     env.DATABASE.prepare(
       `UPDATE diagnostic_artifacts SET status = 'available', actual_bytes = expected_bytes,
-       upload_attempts = upload_attempts + 1, failure_reason = NULL, updated_at = CURRENT_TIMESTAMP
-       WHERE id = ? AND node_id = ? AND status = 'pending'`
-    ).bind(artifactId, nodeId),
+       upload_attempts = upload_attempts + 1, failure_reason = NULL,
+       upload_lease_id = NULL, upload_lease_expires_at = NULL, updated_at = ?
+       WHERE id = ? AND node_id = ? AND status = 'pending' AND upload_lease_id = ?`
+    ).bind(lease.now, artifactId, nodeId, lease.id),
     env.DATABASE.prepare(
       `UPDATE diagnostic_incidents SET status = 'available', total_bytes = ?,
        failure_reason = NULL, updated_at = CURRENT_TIMESTAMP
@@ -508,7 +538,7 @@ export async function uploadDiagnosticArtifact(
       .bind(artifactId, nodeId)
       .first<{ status: DiagnosticIncidentStatus }>();
     if (winner?.status === 'available') return;
-    throw errors.conflict('Artifact state changed while content was uploading');
+    throw errors.internal('Artifact state changed while content was uploading');
   }
 }
 

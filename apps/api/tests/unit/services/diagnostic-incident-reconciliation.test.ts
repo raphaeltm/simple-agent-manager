@@ -214,7 +214,33 @@ describe('diagnostic incident reconciliation', () => {
     expect(main.prepare('SELECT status FROM diagnostic_incidents WHERE id = ?').get(id)).toEqual({
       status: 'failed',
     });
-    expect(r2.heads.has('corrupt-after-put')).toBe(false);
+    expect(r2.heads.has('corrupt-after-put')).toBe(true);
+    expect(r2.delete).not.toHaveBeenCalledWith('corrupt-after-put');
+  });
+
+  it('leaves actively leased pending uploads untouched', async () => {
+    const id = '01KZ8V0GMXQ4ZCSERPRT2X2K72';
+    insertIncident({
+      id,
+      status: 'pending',
+      artifactStatus: 'pending',
+      objectKey: 'actively-uploading',
+    });
+    main
+      .prepare(
+        `UPDATE diagnostic_artifacts SET upload_lease_id = 'uploader',
+         upload_lease_expires_at = '2099-01-01T00:00:00.000Z' WHERE incident_id = ?`
+      )
+      .run(id);
+
+    const result = await reconcileDiagnosticIncidents(env);
+    expect(result).toMatchObject({ checked: 0, repaired: 0, failed: 0 });
+    expect(
+      main.prepare('SELECT status FROM diagnostic_artifacts WHERE incident_id = ?').get(id)
+    ).toEqual({
+      status: 'pending',
+    });
+    expect(r2.head).not.toHaveBeenCalledWith('actively-uploading');
   });
 
   it('rotates available-object checks and advances the dual-D1 sweep across batches', async () => {

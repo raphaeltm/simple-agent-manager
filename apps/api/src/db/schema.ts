@@ -2358,6 +2358,8 @@ export const diagnosticArtifacts = sqliteTable(
     manifestJson: text('manifest_json'),
     previewJson: text('preview_json'),
     uploadAttempts: integer('upload_attempts').notNull().default(0),
+    uploadLeaseId: text('upload_lease_id'),
+    uploadLeaseExpiresAt: text('upload_lease_expires_at'),
     failureReason: text('failure_reason'),
     expiresAt: text('expires_at').notNull(),
     createdAt: text('created_at')

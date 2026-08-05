@@ -199,6 +199,55 @@ describe('diagnostic incident storage boundary', () => {
     });
   });
 
+  it('does not let failed registration or another upload cross an active upload lease', async () => {
+    const bytes = new TextEncoder().encode('safe');
+    await seedIncident();
+    await registerDiagnosticArtifact(env, NODE_ID, INCIDENT_ID, registration(bytes));
+    sqlite
+      .prepare(
+        `UPDATE diagnostic_artifacts SET upload_lease_id = 'active-upload',
+         upload_lease_expires_at = '2099-01-01T00:00:00.000Z' WHERE id = ?`
+      )
+      .run(ARTIFACT_ID);
+
+    await expect(
+      registerDiagnosticArtifact(env, NODE_ID, INCIDENT_ID, {
+        ...registration(bytes),
+        sizeBytes: 0,
+        checksumSha256: '',
+        manifest: { version: 1, incidentId: INCIDENT_ID, unavailable: true },
+        preview: {},
+        status: 'failed',
+      })
+    ).rejects.toMatchObject({ statusCode: 500 });
+    await expect(
+      uploadDiagnosticArtifact(
+        env,
+        NODE_ID,
+        INCIDENT_ID,
+        ARTIFACT_ID,
+        new Request('https://api.example.test/content', {
+          method: 'PUT',
+          headers: {
+            'Content-Type': 'application/gzip',
+            'Content-Length': String(bytes.byteLength),
+            'X-Content-SHA256': sha256(bytes),
+          },
+          body: bytes,
+        })
+      )
+    ).rejects.toMatchObject({ statusCode: 500 });
+    expect(r2.put).not.toHaveBeenCalled();
+    expect(
+      sqlite
+        .prepare('SELECT status, upload_lease_id FROM diagnostic_artifacts WHERE id = ?')
+        .get(ARTIFACT_ID)
+    ).toEqual({ status: 'pending', upload_lease_id: 'active-upload' });
+    expect(sqlite.prepare('SELECT status FROM diagnostic_incidents').get()).toEqual({
+      status: 'pending',
+    });
+  });
+
   it('lets R2 atomically reject checksum-mismatched content and keeps the upload retryable', async () => {
     const registered = new TextEncoder().encode('expected');
     const corrupted = new TextEncoder().encode('corrupt!');
