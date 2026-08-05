@@ -12,6 +12,10 @@ COPY mock-acp-agent.sh /usr/local/bin/mock-acp-agent
 RUN chmod +x /usr/local/bin/mock-acp-agent \
   && ln -s /usr/local/bin/mock-acp-agent /usr/local/bin/claude-agent-acp \
   && ln -s /usr/local/bin/mock-acp-agent /usr/local/bin/codex-acp \
-  && ln -s /usr/local/bin/mock-acp-agent /usr/local/bin/gemini
+  && ln -s /usr/local/bin/mock-acp-agent /usr/local/bin/gemini \
+  && useradd --create-home --shell /bin/bash sam-mock \
+  && chown -R sam-mock:sam-mock /workspace
+
+USER sam-mock
 
 CMD ["bash", "-lc", "sleep infinity"]
