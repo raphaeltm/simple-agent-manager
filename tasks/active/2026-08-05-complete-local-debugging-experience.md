@@ -200,14 +200,22 @@ scheduled reconciliation + R2 lifecycle
 
 ### G. Verification, release, and stale artifact reconciliation
 
-- [ ] Run format, lint, typecheck, migration ordering/safety, API unit/integration/Worker/DO tests, web tests/build, infra tests, Go unit/race/vet, and repository quality gates with zero errors.
-- [ ] Complete task-completion validation plus security, Cloudflare, Go, UI/UX, test, env, docs, constitution, and React reviews; address every critical/high and record all verdicts.
+- [x] Run format, lint, typecheck, migration ordering/safety, API unit/integration/Worker/DO tests, web tests/build, infra tests, Go unit/race/vet, and repository quality gates with zero errors.
+- [x] Complete security, Cloudflare, Go, UI/UX, test, env, docs, constitution, and React reviews; address every critical/high and record all verdicts. Final task-completion validation remains mandatory immediately before archive.
 - [ ] Because VM-agent code changes, delete all existing staging nodes before deployment, deploy the branch, provision a fresh VM through the platform Hetzner credential path, and prove heartbeat plus reachable workspace.
 - [ ] Fault-inject a real VM error and verify: stable correlation ID, restart-safe delivery, safe snapshot creation, private R2 upload, D1 state, admin error evidence, diagnosis tool event/result, complete timeline, download, and canary absence.
 - [ ] Verify cancel during an in-flight diagnosis cannot be overwritten and a run with more than one page of events remains complete after refresh.
 - [ ] Clean staging resources, open the PR, obtain green CI, merge, monitor production deployment, and run bounded production smoke with no synthetic secret material retained afterward.
 - [ ] Close stale superseded PR #1737 without merging, mark the shipped diagnosis idea complete, and reconcile the failed/stale SAM task bookkeeping only after code and production verification establish the final state.
 - [ ] Move this task file and the shipped durable-runner task from active/backlog to archive only after all acceptance criteria and required validation pass.
+
+## Release Evidence and Current Blocker
+
+- Staging workflow `31026725374` deployed commit `5c483e3fd2cb6160022fae20867aff5f1c8db50d` successfully. Configuration validation, Pulumi, migrations `0105`/`0106`, API/tail Workers, web UI, VM-agent/CLI artifacts, health checks, and the authenticated Playwright smoke job all passed.
+- An additional authenticated browser check rendered `/admin/errors` at the correct route with no console errors, no feature API 5xx responses, and no shared-canary matches in rendered text or observed admin payloads.
+- Staging had zero active nodes before deployment. The enabled platform cloud credential is `01KNY6DC06C9QCYQM0389NAGNT` (`Users Staging Hetzner`). A secondary smoke-user provision attempt correctly selected `credential_source='platform'` and `credential_attribution_source='platform'`.
+- Fresh VM provisioning is blocked outside this branch: Hetzner returns HTTP 403 `server limit reached` for both the primary user's Hetzner credential and the enabled platform fallback. Staging observability shows the same capacity failure predating this branch. All failed validation node records were deleted.
+- Per Rules 13, 27, and 33, no PR may merge until a Hetzner server slot is freed or quota is raised, a fresh staging node downloads this deployment's VM-agent binary, and the remaining real incident/R2/diagnosis/cancellation/pagination verification plus cleanup passes.
 
 ## Acceptance Criteria
 
