@@ -19,25 +19,24 @@ function stepBlock(stepName: string): string {
 
 describe('deploy reusable workflow', () => {
   it('runs D1 migrations and integrity checks before serving new API Worker code', () => {
-    const backupIndex = workflow.indexOf('- name: Backup D1 Databases (pre-migration safety net)');
-    const preCountsIndex = workflow.indexOf(
-      '- name: Record pre-migration row counts (data integrity baseline)'
-    );
-    const migrationsIndex = workflow.indexOf('- name: Run Database Migrations');
-    const postIntegrityIndex = workflow.indexOf(
-      '- name: Verify post-migration data integrity (BLOCKS DEPLOY ON DATA LOSS)'
-    );
+    const migrationsIndex = workflow.indexOf('- name: Run Database Migrations With Safety Gates');
     const deployApiIndex = workflow.indexOf('- name: Deploy API Worker');
     const redeployAfterSecretsIndex = workflow.indexOf(
       '- name: Re-deploy API Worker (after secrets)'
     );
 
-    expect(backupIndex).toBeGreaterThan(-1);
-    expect(preCountsIndex).toBeGreaterThan(backupIndex);
-    expect(migrationsIndex).toBeGreaterThan(preCountsIndex);
-    expect(postIntegrityIndex).toBeGreaterThan(migrationsIndex);
-    expect(deployApiIndex).toBeGreaterThan(postIntegrityIndex);
+    expect(migrationsIndex).toBeGreaterThan(-1);
+    expect(deployApiIndex).toBeGreaterThan(migrationsIndex);
     expect(redeployAfterSecretsIndex).toBeGreaterThan(deployApiIndex);
+  });
+
+  it('uses the shared D1 migration safety script for main and observability before deploy', () => {
+    const block = stepBlock('Run Database Migrations With Safety Gates');
+
+    expect(block).toContain('pnpm tsx ../../scripts/deploy/d1-migration-safety.ts');
+    expect(block).toContain('--database=DATABASE:$DB_NAME');
+    expect(block).toContain('--database=OBSERVABILITY_DATABASE:$OBS_DB_NAME');
+    expect(block).toContain('CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}');
   });
 
   it('passes derived deployment identity into every Wrangler config sync phase', () => {
