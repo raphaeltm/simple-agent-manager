@@ -72,6 +72,16 @@ function dockerFromRefs(files: string[]): string[] {
   );
 }
 
+function dockerRefsInTextFiles(files: string[]): string[] {
+  return files.flatMap((file) =>
+    read(file)
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => /^FROM\s+\S+/.test(line))
+      .map((line) => line.replace(/^FROM\s+/, '').split(/\s+/)[0]!)
+  );
+}
+
 describe('dependency governance', () => {
   it('covers every Go module with Dependabot gomod updates', () => {
     const goModDirectories = walk('.', (path) => path.endsWith('/go.mod')).map(
@@ -116,11 +126,23 @@ describe('dependency governance', () => {
   });
 
   it('prevents Docker base-image drift with digest pins and updater coverage', () => {
-    const dockerfiles = ['apps/api/Dockerfile.sandbox', 'apps/api/Dockerfile.vm-agent-container'];
-    const refs = dockerFromRefs(dockerfiles);
+    const dockerfiles = walk('.', (path) => /(^|\/)Dockerfile(\.|$)/.test(path));
+    const workflowFiles = walk(
+      '.github/workflows',
+      (path) => path.endsWith('.yml') || path.endsWith('.yaml')
+    );
+    const refs = [...dockerFromRefs(dockerfiles), ...dockerRefsInTextFiles(workflowFiles)];
 
-    expect(refs).toHaveLength(dockerfiles.length);
+    expect(dockerfiles).toEqual([
+      'apps/api/Dockerfile.sandbox',
+      'apps/api/Dockerfile.vm-agent-container',
+      'scripts/e2e/workspace-mock/Dockerfile',
+    ]);
+    expect(refs.length).toBeGreaterThanOrEqual(dockerfiles.length);
     expect(refs.every((ref) => /@sha256:[a-f0-9]{64}$/.test(ref))).toBe(true);
-    expect(extractDependabotDirectories('docker')).toContain('/apps/api');
+    expect([...extractDependabotDirectories('docker')].sort()).toEqual([
+      '/apps/api',
+      '/scripts/e2e/workspace-mock',
+    ]);
   });
 });

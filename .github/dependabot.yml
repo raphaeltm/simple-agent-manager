@@ -34,3 +34,7 @@ updates:
     directory: '/apps/api'
     schedule:
       interval: weekly
+  - package-ecosystem: 'docker'
+    directory: '/scripts/e2e/workspace-mock'
+    schedule:
+      interval: weekly

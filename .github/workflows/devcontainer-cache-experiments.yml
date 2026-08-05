@@ -66,7 +66,8 @@ jobs:
       - name: Build local test image
         run: |
           cat > Dockerfile.cache-exp <<'DOCKERFILE'
-          FROM alpine:3.20
+          # Reviewed source tag: docker.io/library/alpine:3.20
+          FROM docker.io/library/alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
           RUN dd if=/dev/zero of=/cache-test.bin bs=1M count=64
           CMD ["sh", "-c", "test -f /cache-test.bin && echo ok"]
           DOCKERFILE
@@ -129,7 +130,8 @@ jobs:
         run: |
           mkdir -p /tmp/sam-cache-exp
           cat > /tmp/sam-cache-exp/Dockerfile <<'DOCKERFILE'
-          FROM alpine:3.20
+          # Reviewed source tag: docker.io/library/alpine:3.20
+          FROM docker.io/library/alpine@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
           RUN dd if=/dev/zero of=/r2-cache-test.bin bs=1M count=64
           RUN sha256sum /r2-cache-test.bin > /r2-cache-test.sha256
           CMD ["cat", "/r2-cache-test.sha256"]
