@@ -233,7 +233,7 @@ export async function retryAdminDebugDiagnosisRun(
   runId: string
 ): Promise<RunDebugDiagnosisResponse> {
   return request<RunDebugDiagnosisResponse>(
-    `/api/admin/observability/diagnosis-runs/${runId}/retry`,
+    `/api/admin/observability/diagnosis-runs/${encodeURIComponent(runId)}/retry`,
     {
       method: 'POST',
     }

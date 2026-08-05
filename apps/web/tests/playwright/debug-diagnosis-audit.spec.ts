@@ -149,6 +149,7 @@ const SUCCEEDED_RUN = {
 };
 
 async function setup(page: Page, diagnosisStatus = 200) {
+  let runningStatus: 'running' | 'cancelled' = 'running';
   await page.route('**/api/**', async (route: Route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -241,9 +242,24 @@ async function setup(page: Page, diagnosisStatus = 200) {
         nextCursor: null,
       });
     if (path === '/api/admin/observability/diagnosis-runs/run-running-1')
-      return respond(200, { run: RUNNING_RUN, events: [], nextCursor: null });
-    if (path === '/api/admin/observability/diagnosis-runs/run-running-1/cancel')
+      return respond(200, {
+        run: { ...RUNNING_RUN, status: runningStatus },
+        events: [],
+        nextCursor: null,
+      });
+    if (path === '/api/admin/observability/diagnosis-runs/run-running-1/cancel') {
+      await new Promise((resolve) => setTimeout(resolve, 150));
+      runningStatus = 'cancelled';
       return respond(202, { accepted: true });
+    }
+    if (path === '/api/admin/observability/diagnosis-runs/run-running-1/retry')
+      return respond(202, { run: { ...RUNNING_RUN, id: 'run-running-2' } });
+    if (path === '/api/admin/observability/diagnosis-runs/run-running-2')
+      return respond(200, {
+        run: { ...RUNNING_RUN, id: 'run-running-2' },
+        events: [],
+        nextCursor: null,
+      });
     if (path === '/api/admin/observability/diagnosis-runs/run-failed-1')
       return respond(200, {
         run: FAILED_RUN,
@@ -329,11 +345,15 @@ test.describe('Deployment diagnosis visual audit', () => {
     await expect(
       page.getByText('Accepted. Waiting for the durable executor’s first checkpoint.')
     ).toBeVisible();
-    await page.getByRole('button', { name: 'Cancel' }).click();
+    const cancel = page.getByRole('button', { name: 'Cancel' });
+    await cancel.click();
+    await expect(page.getByRole('button', { name: 'Cancelling…' })).toBeDisabled();
     await expect(
       page.getByRole('status').filter({ hasText: 'Cancellation requested' })
     ).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Cancellation requested' })).toBeDisabled();
+    await page.getByRole('button', { name: 'Retry' }).click();
+    await expect(page).toHaveURL(/\/admin\/diagnoses\/run-running-2$/);
+    await expect(page.getByRole('button', { name: 'Cancel' })).toBeEnabled();
     await assertNoOverflow(page);
   });
 

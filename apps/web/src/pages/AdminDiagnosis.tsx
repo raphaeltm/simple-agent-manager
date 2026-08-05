@@ -23,7 +23,7 @@ export function AdminDiagnosis() {
   const [pendingAction, setPendingAction] = useState<'cancel' | 'retry' | 'copy' | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-  const [cancelAccepted, setCancelAccepted] = useState(false);
+  const [cancelAcceptedRunId, setCancelAcceptedRunId] = useState<string | null>(null);
   const query = useQuery({
     queryKey: ['admin-diagnosis', runId],
     queryFn: () => fetchAdminDebugDiagnosisRun(runId),
@@ -78,7 +78,7 @@ export function AdminDiagnosis() {
     setActionMessage(null);
     try {
       await cancelAdminDebugDiagnosisRun(run.id);
-      setCancelAccepted(true);
+      setCancelAcceptedRunId(run.id);
       setActionMessage(
         'Cancellation requested. The durable runner will stop at the next checkpoint.'
       );
@@ -111,6 +111,7 @@ export function AdminDiagnosis() {
 
   const systems = new Map<string, string>();
   for (const event of events) if (event.sourceName) systems.set(event.sourceName, event.status);
+  const cancelAccepted = cancelAcceptedRunId === run.id;
 
   return (
     <div className="mx-auto max-w-6xl space-y-4 pb-8">
