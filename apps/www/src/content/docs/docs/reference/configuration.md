@@ -248,10 +248,50 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 | Variable                        | Default            | Description                                           |
 | ------------------------------- | ------------------ | ----------------------------------------------------- |
 | `NODE_WARM_TIMEOUT_MS`          | `1800000` (30 min) | Time a node stays warm after idea execution completes |
-| `MAX_AUTO_NODE_LIFETIME_MS`     | `14400000` (4 hr)  | Absolute max lifetime for auto-provisioned nodes      |
+| `MAX_AUTO_NODE_LIFETIME_MS`     | `14400000` (4 hr)  | Max lifetime for an auto-provisioned node holding no active workspaces |
 | `NODE_WARM_GRACE_PERIOD_MS`     | `2100000` (35 min) | Cron sweep grace period (must be > warm timeout)      |
 | `NODE_LIFECYCLE_ALARM_RETRY_MS` | `60000` (1 min)    | Retry delay for DO alarm failures                     |
 | `DEFAULT_TASK_AGENT_TYPE`       | `opencode`         | Default agent for autonomous idea execution           |
+
+## Idle & Orphan Node Reaping
+
+The cleanup sweep measures idleness from a node's last **workspace activity**
+(`COALESCE(MAX(workspaces.updated_at), nodes.created_at)`), never from
+`nodes.updated_at` — heartbeats rewrite `updated_at` on every beat, so it tracks
+liveness rather than idleness.
+
+Reaping only ever applies to nodes with `node_role = 'workspace'` and
+`node_class != 'user-owned'`. Deployment nodes host long-running user applications
+and legitimately hold zero workspaces forever, so they are never reaped by these
+timers; they are released when their last deployment environment is deleted.
+
+| Variable                                   | Default            | Description                                                                                     |
+| ------------------------------------------ | ------------------ | ----------------------------------------------------------------------------------------------- |
+| `NODE_ORPHAN_IDLE_TIMEOUT_MS`              | `2700000` (45 min) | Idle window before a running workspace node with no active workspaces is destroyed. Keep above `NODE_WARM_TIMEOUT_MS` so the warm path reclaims reusable nodes first. |
+| `NODE_ABSOLUTE_MAX_LIFETIME_MS`            | `86400000` (24 hr) | Hard ceiling on auto-provisioned workspace node age. Applies even when a workspace row still reports `running`, provided no workspace has reported activity within the idle window — this is what stops a stuck workspace row from making a node immortal. |
+| `NODE_CLEANUP_SWEEP_LIMIT`                 | `25`               | Max node candidates processed per cleanup phase per cron run.                                    |
+| `WORKSPACE_CLEANUP_SWEEP_LIMIT`            | `50`               | Max workspace candidates processed per cleanup phase per cron run.                               |
+| `NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS` | `5000` (5 s)       | VM-agent request timeout for background sweeps. Deliberately far below the interactive `NODE_AGENT_REQUEST_TIMEOUT_MS` (30 s) so a sweep over unreachable nodes cannot exhaust the Worker's wall-clock budget. |
+
+## Provider-Side Orphan Reconciliation
+
+Reclaims cloud servers that exist at the provider but which no live database row
+claims — for example when a server was created but the control plane failed before
+recording its instance ID.
+
+Because this is the only path that destroys infrastructure on the basis of *absent*
+evidence, it fails closed at every step. It considers only servers carrying the
+current deployment's `env` label, so multiple SAM installations can safely share one
+cloud account. Servers created before that label existed carry no `env` value and are
+permanently out of scope. Any lookup failure aborts the run without destroying
+anything.
+
+| Variable                                 | Default          | Description                                                                                    |
+| ---------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------ |
+| `PROVIDER_ORPHAN_RECONCILIATION_ENABLED` | `true`           | Set to `false` to disable provider-side reconciliation entirely.                                |
+| `PROVIDER_ORPHAN_MIN_AGE_MS`             | `3600000` (1 hr) | Minimum server age before it can be treated as an orphan. Must comfortably exceed provisioning time, since a server's instance ID is recorded only after the provider returns it. |
+| `PROVIDER_ORPHAN_DESTROY_LIMIT`          | `5`              | Max servers destroyed per reconciliation run.                                                   |
+| `PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS`  | `3600000` (1 hr) | Minimum interval between runs. Invoked by the 5-minute cron but self-throttled to this interval via KV. |
 
 ## Project Invites
 
