@@ -89,6 +89,12 @@ describe('infra config parsing', () => {
     ['sessionSnapshotTtlDays', '1.5', 'must be a positive integer'],
     ['diagnosticIncidentPrefix', '../unsafe', 'must be a safe private R2 prefix'],
     ['diagnosticIncidentPrefix', 'unsafe//prefix', 'must be a safe private R2 prefix'],
+    ['diagnosticIncidentPrefix', 'agents', 'must not use a reserved application R2 prefix'],
+    [
+      'diagnosticIncidentPrefix',
+      'session-snapshots/incidents',
+      'must not use a reserved application R2 prefix',
+    ],
     ['diagnosticIncidentTtlDays', '0', 'must be a positive integer'],
     ['diagnosticIncidentTtlDays', '1.5', 'must be a positive integer'],
     ['diagnosticIncidentTtlDays', '31', 'must be at most 30'],
@@ -117,4 +123,16 @@ describe('infra config parsing', () => {
       ).toBe(location);
     }
   });
+
+  it.each(['agents', 'cli', 'compose-image-artifacts', 'session-snapshots', 'temp-uploads'])(
+    'rejects the reserved %s object namespace for diagnostic lifecycle expiry',
+    (reservedPrefix) => {
+      expect(() =>
+        configModule.parseInfraConfig(
+          makeConfig({ diagnosticIncidentPrefix: `${reservedPrefix}/diagnostic-incidents` }),
+          'staging'
+        )
+      ).toThrow(`reserved application R2 prefix: ${reservedPrefix}`);
+    }
+  );
 });

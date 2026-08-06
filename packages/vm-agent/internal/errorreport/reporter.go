@@ -70,7 +70,13 @@ type Reporter struct {
 // New creates a reporter. InitError reports a disk/configuration failure.
 func New(apiBaseURL, nodeID, authToken string, cfg Config) *Reporter {
 	cfg = cfg.withDefaults()
-	db, err := openOutbox(cfg.DBPath)
+	var db *sql.DB
+	var err error
+	if spoolContainsPath(cfg.SpoolDir, cfg.DBPath) {
+		err = fmt.Errorf("private spool directory must not contain the outbox database")
+	} else {
+		db, err = openOutbox(cfg.DBPath)
+	}
 	r := &Reporter{
 		apiBaseURL:    strings.TrimRight(apiBaseURL, "/"),
 		nodeID:        nodeID,
@@ -156,14 +162,12 @@ func (r *Reporter) Shutdown() {
 		if snapshotActive {
 			close(r.snapshotStopC)
 		}
-		if started {
-			close(r.stopC)
-		}
 		r.lifecycleMu.Unlock()
 		if snapshotActive {
 			<-r.snapshotDoneC
 		}
 		if started {
+			close(r.stopC)
 			<-r.doneC
 		} else if r.db != nil {
 			r.flush()
@@ -271,8 +275,17 @@ func (r *Reporter) signalFlush() {
 
 func (r *Reporter) flushLoop() {
 	defer close(r.doneC)
-	ticker := time.NewTicker(r.config.FlushInterval)
-	defer ticker.Stop()
+	timer := time.NewTimer(r.config.FlushInterval)
+	defer timer.Stop()
+	resetTimer := func() {
+		if !timer.Stop() {
+			select {
+			case <-timer.C:
+			default:
+			}
+		}
+		timer.Reset(r.nextFlushDelay())
+	}
 	for {
 		select {
 		case <-r.stopC:
@@ -280,8 +293,10 @@ func (r *Reporter) flushLoop() {
 			return
 		case <-r.wakeC:
 			r.flush()
-		case <-ticker.C:
+			resetTimer()
+		case <-timer.C:
 			r.flush()
+			resetTimer()
 		}
 	}
 }
@@ -414,7 +429,7 @@ func (r *Reporter) deliverArtifact(row outboxRow) error {
 	base := r.apiBaseURL + "/api/nodes/" + url.PathEscape(r.nodeID) + "/diagnostic-incidents/" + url.PathEscape(row.entry.IncidentID) + "/artifacts"
 	status, response, requestErr := r.doRequest(context.Background(), http.MethodPost, base, token,
 		"application/json", bytes.NewReader(registration), int64(len(registration)), "")
-	if requestErr != nil || !successOrConflict(status) {
+	if requestErr != nil || !success(status) {
 		return r.handleArtifactFailure(row, status, response, requestErr)
 	}
 	if row.artifactState == "failed" {
@@ -457,8 +472,10 @@ func (r *Reporter) openReadyArtifact(row outboxRow) (*os.File, error) {
 }
 
 func successOrConflict(status int) bool {
-	return (status >= 200 && status < 300) || status == http.StatusConflict
+	return success(status) || status == http.StatusConflict
 }
+
+func success(status int) bool { return status >= 200 && status < 300 }
 
 func (r *Reporter) handleArtifactFailure(row outboxRow, status int, response string, requestErr error) error {
 	deliveryErr := fmt.Errorf("status=%d response=%s transport=%v", status, response, requestErr)

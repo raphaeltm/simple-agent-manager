@@ -138,6 +138,65 @@ describe('diagnostic incident reconciliation', () => {
     ]);
   });
 
+  it('fails stale pending incidents whose artifact registration never completed', async () => {
+    const id = '01KZ8V0GMXQ4ZCSERPRT2X2K85';
+    main
+      .prepare(
+        `INSERT INTO diagnostic_incidents
+         (id, platform_error_id, node_id, status, artifact_count, total_bytes,
+          expires_at, delete_after, created_at, updated_at)
+         VALUES (?, ?, 'node-1', 'pending', 0, 0,
+                 '2099-01-01T00:00:00.000Z', '2099-02-01T00:00:00.000Z',
+                 '2020-01-01T00:00:00.000Z', '2020-01-01T00:00:00.000Z')`
+      )
+      .run(id, id);
+
+    const result = await reconcileDiagnosticIncidents(env);
+
+    expect(result.failed).toBe(1);
+    expect(
+      main.prepare('SELECT status, failure_reason FROM diagnostic_incidents WHERE id = ?').get(id)
+    ).toEqual({
+      status: 'failed',
+      failure_reason: 'Artifact registration did not complete before the pending deadline',
+    });
+    expect(main.prepare('SELECT COUNT(*) AS count FROM diagnostic_artifacts').get()).toEqual({
+      count: 0,
+    });
+  });
+
+  it('expires and deletes retained incidents even when registration never created an artifact', async () => {
+    const id = '01KZ8V0GMXQ4ZCSERPRT2X2K86';
+    main
+      .prepare(
+        `INSERT INTO diagnostic_incidents
+         (id, platform_error_id, node_id, status, artifact_count, total_bytes, preview_json,
+          expires_at, delete_after, created_at, updated_at)
+         VALUES (?, ?, 'node-1', 'failed', 0, 0, '{"safe":true}',
+                 '2020-01-01T00:00:00.000Z', '2099-02-01T00:00:00.000Z',
+                 '2020-01-01T00:00:00.000Z', '2020-01-01T00:00:00.000Z')`
+      )
+      .run(id, id);
+
+    const expired = await reconcileDiagnosticIncidents(env);
+
+    expect(expired.expired).toBe(1);
+    expect(
+      main.prepare('SELECT status, preview_json FROM diagnostic_incidents WHERE id = ?').get(id)
+    ).toEqual({ status: 'expired', preview_json: null });
+
+    main
+      .prepare(
+        "UPDATE diagnostic_incidents SET delete_after = '2020-02-01T00:00:00.000Z' WHERE id = ?"
+      )
+      .run(id);
+    const deleted = await reconcileDiagnosticIncidents(env);
+    expect(deleted.deleted).toBe(1);
+    expect(
+      main.prepare('SELECT id FROM diagnostic_incidents WHERE id = ?').get(id)
+    ).toBeUndefined();
+  });
+
   it('expires R2 content, deletes aged metadata explicitly, and repairs primary-D1 gaps', async () => {
     const expiredId = '01KZ8V0GMXQ4ZCSERPRT2X2K6Y';
     const deletedId = '01KZ8V0GMXQ4ZCSERPRT2X2K6Z';
@@ -279,15 +338,18 @@ describe('diagnostic incident reconciliation', () => {
     main.prepare('DELETE FROM diagnostic_reconciliation_state').run();
     const metadataFirst = await reconcileDiagnosticIncidents(env);
     const metadataSecond = await reconcileDiagnosticIncidents(env);
-    expect(metadataFirst.incidentMetadataRepaired + metadataSecond.incidentMetadataRepaired).toBe(
-      ids.length
-    );
+    const metadataThird = await reconcileDiagnosticIncidents(env);
+    expect(
+      metadataFirst.incidentMetadataRepaired +
+        metadataSecond.incidentMetadataRepaired +
+        metadataThird.incidentMetadataRepaired
+    ).toBe(ids.length);
     expect(main.prepare('SELECT COUNT(*) AS count FROM diagnostic_incidents').get()).toEqual({
       count: ids.length,
     });
   });
 
-  it('funds every reconciliation phase when configuration is below the five-phase minimum', async () => {
+  it('funds every reconciliation phase when configuration is below the six-phase minimum', async () => {
     env.VM_INCIDENT_RECONCILE_BATCH_SIZE = '1';
     insertIncident({
       id: '01KZ8V0GMXQ4ZCSERPRT2X2K80',

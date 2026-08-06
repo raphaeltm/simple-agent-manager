@@ -225,7 +225,7 @@ VM failures use a durable local SQLite outbox and a private R2 artifact. Generat
 
 The VM Agent process accepts the corresponding `ERROR_REPORT_*` overrides for flush interval, batch size/bytes, outbox size and path, HTTP timeout, retry bounds, attempts, spool path/bytes, artifact bytes, retention, collector timeout/count, document bytes, recursive value depth/items, string bytes, and structured event limit. Generated deployments pass these validated values through cloud-init into the VM Agent systemd service, so overrides apply to newly provisioned nodes. Defaults are listed in `apps/api/.env.example`; the common defaults are a 32 KiB error batch, 1,000-row outbox, 2 MiB artifact, 20 MiB spool, and 24-hour local retention.
 
-Pulumi options `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `diagnosticIncidentTtlDays` (default `7`) configure the private prefix and an independent R2 lifecycle rule. They do not require a separate bucket or manually managed Worker variable.
+Pulumi options `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `diagnosticIncidentTtlDays` (default `7`) configure the private prefix and an independent R2 lifecycle rule. They do not require a separate bucket or manually managed Worker variable. The prefix cannot begin with the application-owned namespaces `agents`, `cli`, `compose-image-artifacts`, `session-snapshots`, or `temp-uploads`, because the lifecycle would otherwise expire unrelated objects.
 
 ### Platform Feedback Triage
 

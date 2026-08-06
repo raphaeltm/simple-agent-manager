@@ -6,7 +6,7 @@ import { ensurePendingIncidents } from './diagnostic-incidents';
 
 const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const INCIDENT_METADATA_SWEEP = 'incident-metadata-observability';
-const RECONCILIATION_PHASE_COUNT = 5;
+const RECONCILIATION_PHASE_COUNT = 6;
 
 interface ReconcileArtifactRow {
   id: string;
@@ -136,6 +136,61 @@ async function reconcilePending(
     }
   }
   return rows.results.length;
+}
+
+async function reconcileIncidentsWithoutArtifacts(
+  env: Env,
+  limit: number,
+  staleBefore: string,
+  now: string,
+  result: DiagnosticIncidentReconciliationResult
+): Promise<number> {
+  const expiring = await env.DATABASE.prepare(
+    `SELECT id FROM diagnostic_incidents
+     WHERE status <> 'expired' AND datetime(expires_at) <= datetime(?)
+       AND NOT EXISTS (SELECT 1 FROM diagnostic_artifacts
+                       WHERE incident_id = diagnostic_incidents.id)
+     ORDER BY expires_at ASC, id ASC LIMIT ?`
+  )
+    .bind(now, limit)
+    .all<{ id: string }>();
+  for (const row of expiring.results) {
+    const update = await env.DATABASE.prepare(
+      `UPDATE diagnostic_incidents SET status = 'expired', total_bytes = 0,
+       preview_json = NULL, failure_reason = NULL, updated_at = ?
+       WHERE id = ? AND status <> 'expired' AND datetime(expires_at) <= datetime(?)
+         AND NOT EXISTS (SELECT 1 FROM diagnostic_artifacts
+                         WHERE incident_id = diagnostic_incidents.id)`
+    )
+      .bind(now, row.id, now)
+      .run();
+    if (Number(update.meta?.changes ?? 0) > 0) result.expired++;
+  }
+  const remaining = Math.max(0, limit - expiring.results.length);
+  if (remaining === 0) return expiring.results.length;
+  const pending = await env.DATABASE.prepare(
+    `SELECT id FROM diagnostic_incidents
+     WHERE status = 'pending' AND artifact_count = 0 AND datetime(updated_at) < datetime(?)
+       AND NOT EXISTS (SELECT 1 FROM diagnostic_artifacts
+                       WHERE incident_id = diagnostic_incidents.id)
+     ORDER BY updated_at ASC, id ASC LIMIT ?`
+  )
+    .bind(staleBefore, remaining)
+    .all<{ id: string }>();
+  const updatedAt = new Date().toISOString();
+  for (const row of pending.results) {
+    const update = await env.DATABASE.prepare(
+      `UPDATE diagnostic_incidents SET status = 'failed',
+       failure_reason = 'Artifact registration did not complete before the pending deadline',
+       updated_at = ? WHERE id = ? AND status = 'pending' AND artifact_count = 0
+         AND NOT EXISTS (SELECT 1 FROM diagnostic_artifacts
+                         WHERE incident_id = diagnostic_incidents.id)`
+    )
+      .bind(updatedAt, row.id)
+      .run();
+    if (Number(update.meta?.changes ?? 0) > 0) result.failed++;
+  }
+  return expiring.results.length + pending.results.length;
 }
 
 async function reconcileAvailable(
@@ -346,17 +401,24 @@ export async function reconcileDiagnosticIncidents(
       now.getTime() - config.pendingTimeoutMinutes * 60_000
     ).toISOString();
     await reconcilePending(env, phaseLimit(config.reconcileBatchSize, 0), staleBefore, result);
-    await expireArtifacts(env, phaseLimit(config.reconcileBatchSize, 1), now.toISOString(), result);
-    await deleteExpiredMetadata(
+    await reconcileIncidentsWithoutArtifacts(
       env,
-      phaseLimit(config.reconcileBatchSize, 2),
+      phaseLimit(config.reconcileBatchSize, 1),
+      staleBefore,
       now.toISOString(),
       result
     );
-    await reconcileIncidentMetadata(env, phaseLimit(config.reconcileBatchSize, 3), result);
+    await expireArtifacts(env, phaseLimit(config.reconcileBatchSize, 2), now.toISOString(), result);
+    await deleteExpiredMetadata(
+      env,
+      phaseLimit(config.reconcileBatchSize, 3),
+      now.toISOString(),
+      result
+    );
+    await reconcileIncidentMetadata(env, phaseLimit(config.reconcileBatchSize, 4), result);
     await reconcileAvailable(
       env,
-      phaseLimit(config.reconcileBatchSize, 4),
+      phaseLimit(config.reconcileBatchSize, 5),
       now.toISOString(),
       result
     );

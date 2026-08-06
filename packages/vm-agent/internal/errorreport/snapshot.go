@@ -74,8 +74,8 @@ func openPrivateSpoolRoot(path string) (*os.Root, error) {
 	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
 		return nil, fmt.Errorf("private spool root must be a real directory")
 	}
-	if err := os.Chmod(absPath, 0o700); err != nil {
-		return nil, err
+	if info.Mode().Perm()&0o077 != 0 {
+		return nil, fmt.Errorf("private spool root must not be accessible by group or others")
 	}
 	return os.OpenRoot(absPath)
 }
@@ -178,6 +178,11 @@ func (r *Reporter) signalSnapshot() {
 func (r *Reporter) snapshotLoop() {
 	defer close(r.snapshotDoneC)
 	for {
+		select {
+		case <-r.snapshotStopC:
+			return
+		default:
+		}
 		select {
 		case <-r.snapshotStopC:
 			return
@@ -562,6 +567,9 @@ func (r *Reporter) cleanupSpool() error {
 		return err
 	}
 	for _, entry := range entries {
+		if !reporterOwnedSpoolName(entry.Name()) {
+			continue
+		}
 		path := filepath.Join(r.config.SpoolDir, entry.Name())
 		if entry.Type()&os.ModeSymlink != 0 || !entry.Type().IsRegular() {
 			continue
@@ -571,4 +579,11 @@ func (r *Reporter) cleanupSpool() error {
 		}
 	}
 	return nil
+}
+
+func reporterOwnedSpoolName(name string) bool {
+	if strings.HasPrefix(name, ".incident-") && strings.HasSuffix(name, ".tmp") {
+		return validIncidentID.MatchString(strings.TrimSuffix(strings.TrimPrefix(name, ".incident-"), ".tmp"))
+	}
+	return strings.HasSuffix(name, ".tar.gz") && validIncidentID.MatchString(strings.TrimSuffix(name, ".tar.gz"))
 }

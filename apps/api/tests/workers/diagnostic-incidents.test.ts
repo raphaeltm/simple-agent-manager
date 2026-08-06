@@ -59,8 +59,17 @@ describe('same-instance automatic VM incident contract', () => {
       },
       body,
     });
+    const sessionCookie = await SELF.fetch(url, {
+      method: 'POST',
+      headers: {
+        Cookie: 'better-auth.session_token=session-auth-is-not-node-callback-auth',
+        'Content-Type': 'application/json',
+      },
+      body,
+    });
     expect(missing.status).toBe(401);
     expect(workspace.status).toBe(403);
+    expect(sessionCookie.status).toBe(401);
   });
 
   it('durably correlates the error, streams private R2 content, and deduplicates retries', async () => {

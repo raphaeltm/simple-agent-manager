@@ -10,6 +10,13 @@ export const DEFAULT_SESSION_SNAPSHOT_TTL_DAYS = 7;
 export const DEFAULT_DIAGNOSTIC_INCIDENT_PREFIX = 'diagnostic-incidents';
 export const DEFAULT_DIAGNOSTIC_INCIDENT_TTL_DAYS = 7;
 export const MAX_DIAGNOSTIC_INCIDENT_TTL_DAYS = 30;
+export const RESERVED_R2_TOP_LEVEL_PREFIXES = new Set([
+  'agents',
+  'cli',
+  'compose-image-artifacts',
+  'session-snapshots',
+  'temp-uploads',
+]);
 
 export interface ConfigReader {
   get(key: string): string | undefined;
@@ -137,6 +144,11 @@ function parseR2Prefix(value: string, key: string): string {
     segments.some((segment) => !segment || segment === '..' || !/^[a-zA-Z0-9._-]+$/.test(segment))
   ) {
     throw new Error(`Pulumi config "${key}" must be a safe private R2 prefix`);
+  }
+  if (RESERVED_R2_TOP_LEVEL_PREFIXES.has(segments[0])) {
+    throw new Error(
+      `Pulumi config "${key}" must not use a reserved application R2 prefix: ${segments[0]}`
+    );
   }
   return segments.join('/');
 }

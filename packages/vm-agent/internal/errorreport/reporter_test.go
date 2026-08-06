@@ -411,6 +411,91 @@ func TestMissingReadyArtifactRegistersFailedBeforeAnyUpload(t *testing.T) {
 	}
 }
 
+func TestArtifactRegistrationConflictIsRetriedWithoutUploading(t *testing.T) {
+	var putCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/errors"):
+			w.WriteHeader(http.StatusNoContent)
+		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/artifacts"):
+			http.Error(w, "Diagnostic artifact quota exceeded", http.StatusConflict)
+		case request.Method == http.MethodPut:
+			putCount++
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	cfg := testConfig(t)
+	reporter := New(server.URL, "node-1", "token", cfg)
+	reporter.Start()
+	defer reporter.Shutdown()
+	incidentID := reporter.Report(ErrorEntry{Level: "error", Message: "quota", Source: "test"})
+	waitFor(t, func() bool {
+		var attempts int
+		_ = reporter.db.QueryRow(
+			"SELECT attempts FROM error_report_outbox WHERE incident_id = ?", incidentID,
+		).Scan(&attempts)
+		return attempts > 0
+	})
+	var artifactAck int
+	if err := reporter.db.QueryRow(
+		"SELECT artifact_ack FROM error_report_outbox WHERE incident_id = ?", incidentID,
+	).Scan(&artifactAck); err != nil {
+		t.Fatal(err)
+	}
+	if artifactAck != 0 || putCount != 0 {
+		t.Fatalf("registration conflict was acknowledged or uploaded: ack=%d puts=%d", artifactAck, putCount)
+	}
+}
+
+func TestShutdownWaitsForActiveSnapshotBeforeFinalUpload(t *testing.T) {
+	var putCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/errors"):
+			w.WriteHeader(http.StatusNoContent)
+		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/artifacts"):
+			w.WriteHeader(http.StatusCreated)
+		case request.Method == http.MethodPut:
+			putCount++
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	reporter := New(server.URL, "node-1", "token", testConfig(t))
+	collectorStarted := make(chan struct{})
+	releaseCollector := make(chan struct{})
+	reporter.SetCollectors(CollectorFunc{
+		CollectorName: "shutdown-race",
+		CollectFunc: func(context.Context, IncidentContext) (any, error) {
+			close(collectorStarted)
+			<-releaseCollector
+			return map[string]any{"safe": true}, nil
+		},
+	})
+	reporter.Start()
+	reporter.Report(ErrorEntry{Level: "error", Message: "final evidence", Source: "test"})
+	<-collectorStarted
+	shutdownDone := make(chan struct{})
+	go func() {
+		reporter.Shutdown()
+		close(shutdownDone)
+	}()
+	close(releaseCollector)
+	select {
+	case <-shutdownDone:
+	case <-time.After(3 * time.Second):
+		t.Fatal("shutdown did not complete")
+	}
+	if putCount != 1 {
+		t.Fatalf("expected final snapshot upload before shutdown, got %d PUTs", putCount)
+	}
+}
+
 func TestOutboxAndWALFilesArePrivate(t *testing.T) {
 	cfg := testConfig(t)
 	cfg.DBPath = filepath.Join(t.TempDir(), "private-outbox", "errors.db")
@@ -496,6 +581,49 @@ func TestTransientFailureSurvivesRestartAndTokenRefresh(t *testing.T) {
 	defer mu.Unlock()
 	if len(authHeaders) != 2 || authHeaders[0] != "Bearer expired-token" || authHeaders[1] != "Bearer fresh-token" {
 		t.Fatalf("unexpected authorization sequence: %#v", authHeaders)
+	}
+}
+
+func TestTransientFailureRetriesAtStoredDeadlineWithoutManualFlush(t *testing.T) {
+	var mu sync.Mutex
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		requests++
+		attempt := requests
+		mu.Unlock()
+		if attempt == 1 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	cfg := testConfig(t)
+	cfg.FlushInterval = time.Hour
+	cfg.RetryInitial = 20 * time.Millisecond
+	cfg.RetryMax = 20 * time.Millisecond
+	reporter := New(server.URL, "node-1", "token", cfg)
+	reporter.Start()
+	defer reporter.Shutdown()
+	reporter.ReportInfo("automatic retry", "test", "", nil)
+	waitFor(t, func() bool { return reporter.pendingCount() == 0 })
+	mu.Lock()
+	defer mu.Unlock()
+	if requests != 2 {
+		t.Fatalf("expected one deadline-driven retry, got %d requests", requests)
+	}
+}
+
+func TestMissingTokenDefersPollingUntilFlushInterval(t *testing.T) {
+	cfg := testConfig(t)
+	cfg.FlushInterval = time.Hour
+	cfg.RetryInitial = time.Millisecond
+	reporter := New("http://localhost", "node-1", "", cfg)
+	defer reporter.Shutdown()
+	reporter.ReportInfo("await token", "test", "", nil)
+	if delay := reporter.nextFlushDelay(); delay != time.Hour {
+		t.Fatalf("missing token scheduled noisy retry after %s", delay)
 	}
 }
 

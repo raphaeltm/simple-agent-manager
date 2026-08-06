@@ -197,12 +197,16 @@ func TestStartupCleanupDoesNotFollowSymlinks(t *testing.T) {
 	if err := os.Symlink(external, filepath.Join(spool, "linked.tar.gz")); err != nil {
 		t.Fatal(err)
 	}
-	orphan := filepath.Join(spool, "orphan.tar.gz")
-	partial := filepath.Join(spool, ".partial.tmp")
+	orphan := filepath.Join(spool, "01J00000000000000000000001.tar.gz")
+	partial := filepath.Join(spool, ".incident-01J00000000000000000000002.tmp")
+	sentinel := filepath.Join(spool, "state.db")
 	if err := os.WriteFile(orphan, []byte("orphan"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(partial, []byte("partial"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(sentinel, []byte("unrelated state"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cfg := testConfig(t)
@@ -216,9 +220,44 @@ func TestStartupCleanupDoesNotFollowSymlinks(t *testing.T) {
 	if _, err := os.Stat(partial); !os.IsNotExist(err) {
 		t.Fatalf("partial archive was not removed: %v", err)
 	}
+	if data, err := os.ReadFile(sentinel); err != nil || string(data) != "unrelated state" {
+		t.Fatalf("unrelated spool sentinel changed: data=%q err=%v", data, err)
+	}
 	data, err := os.ReadFile(external)
 	if err != nil || string(data) != evidenceCanary {
 		t.Fatalf("cleanup followed the symlink: data=%q err=%v", data, err)
+	}
+}
+
+func TestStartupRejectsSpoolContainingOutbox(t *testing.T) {
+	dir := t.TempDir()
+	cfg := testConfig(t)
+	cfg.SpoolDir = dir
+	cfg.DBPath = filepath.Join(dir, "error-reports.db")
+	reporter := New("http://localhost", "node-1", "", cfg)
+	defer reporter.Shutdown()
+	if err := reporter.InitError(); err == nil || !strings.Contains(err.Error(), "must not contain") {
+		t.Fatalf("expected spool/outbox overlap rejection, got %v", err)
+	}
+	if _, err := os.Stat(cfg.DBPath); !os.IsNotExist(err) {
+		t.Fatalf("overlap validation created the outbox before rejecting it: %v", err)
+	}
+}
+
+func TestStartupDoesNotChmodPreexistingSharedSpool(t *testing.T) {
+	spool := filepath.Join(t.TempDir(), "shared")
+	if err := os.Mkdir(spool, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	cfg := testConfig(t)
+	cfg.SpoolDir = spool
+	reporter := New("http://localhost", "node-1", "", cfg)
+	defer reporter.Shutdown()
+	if err := reporter.InitError(); err == nil || !strings.Contains(err.Error(), "group or others") {
+		t.Fatalf("expected unsafe shared spool rejection, got %v", err)
+	}
+	if info, err := os.Stat(spool); err != nil || info.Mode().Perm() != 0o755 {
+		t.Fatalf("shared spool mode=%v err=%v", info.Mode().Perm(), err)
 	}
 }
 

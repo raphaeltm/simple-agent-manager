@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -259,6 +260,39 @@ func (r *Reporter) readPendingSnapshots() ([]outboxRow, error) {
 	return scanRows(rows)
 }
 
+func (r *Reporter) nextFlushDelay() time.Duration {
+	if r == nil || r.db == nil {
+		return DefaultFlushInterval
+	}
+	if r.token() == "" {
+		return r.config.FlushInterval
+	}
+	var deadline sql.NullString
+	err := r.db.QueryRow(
+		`SELECT MIN(next_attempt_at) FROM error_report_outbox
+		 WHERE attempts < ? AND
+		   (report_ack = 0 OR
+		    (report_ack = 1 AND artifact_required = 1 AND artifact_ack = 0
+		     AND artifact_state IN ('ready', 'failed')))`,
+		r.config.MaxAttempts,
+	).Scan(&deadline)
+	if err != nil || !deadline.Valid {
+		return r.config.FlushInterval
+	}
+	next, err := time.Parse(time.RFC3339Nano, deadline.String)
+	if err != nil {
+		return r.config.FlushInterval
+	}
+	delay := time.Until(next)
+	if delay <= 0 {
+		return r.config.RetryInitial
+	}
+	if delay > r.config.FlushInterval {
+		return r.config.FlushInterval
+	}
+	return delay
+}
+
 func scanRows(rows *sql.Rows) ([]outboxRow, error) {
 	result := make([]outboxRow, 0)
 	for rows.Next() {
@@ -443,4 +477,17 @@ func (r *Reporter) isPrivateSpoolPath(path string) bool {
 	cleanDir := filepath.Clean(r.config.SpoolDir)
 	cleanPath := filepath.Clean(path)
 	return filepath.Dir(cleanPath) == cleanDir && filepath.Base(cleanPath) != "."
+}
+
+func spoolContainsPath(spoolDir, path string) bool {
+	if spoolDir == "" || path == "" {
+		return false
+	}
+	absSpool, spoolErr := filepath.Abs(spoolDir)
+	absPath, pathErr := filepath.Abs(path)
+	if spoolErr != nil || pathErr != nil {
+		return true
+	}
+	relative, err := filepath.Rel(absSpool, absPath)
+	return err == nil && relative != ".." && !strings.HasPrefix(relative, ".."+string(filepath.Separator))
 }

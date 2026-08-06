@@ -149,6 +149,13 @@ const SUCCEEDED_RUN = {
 };
 
 type PaginationMode = 'complete' | 'repeated';
+type IncidentFixture = typeof INCIDENT | null;
+
+interface SetupBehavior {
+  incident?: IncidentFixture;
+  retryDelayMs?: number;
+  retryStatus?: number;
+}
 
 function diagnosisEvent(sequence: number) {
   const vmIncident = sequence === 2;
@@ -215,9 +222,17 @@ async function assertAdminViewportIsStable(page: Page) {
   expect(box!.x + box!.width).toBeLessThanOrEqual(viewport!.width);
 }
 
-async function setup(page: Page, diagnosisStatus = 200, pagination: PaginationMode = 'complete') {
+async function setup(
+  page: Page,
+  diagnosisStatus = 200,
+  pagination: PaginationMode = 'complete',
+  behavior: SetupBehavior = {}
+) {
   let runningStatus: 'running' | 'cancelled' = 'running';
   let paginatedRequestCount = 0;
+  const activeIncident = behavior.incident === undefined ? INCIDENT : behavior.incident;
+  const activeError = { ...ERROR, incident: activeIncident };
+  const activeSucceededRun = { ...SUCCEEDED_RUN, incident: activeIncident };
   await page.route('**/api/**', async (route: Route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -245,11 +260,11 @@ async function setup(page: Page, diagnosisStatus = 200, pagination: PaginationMo
         body: 'safe archive',
       });
     if (path === '/api/admin/observability/errors')
-      return respond(200, { errors: [ERROR], total: 1, cursor: null, hasMore: false });
+      return respond(200, { errors: [activeError], total: 1, cursor: null, hasMore: false });
     if (path === '/api/admin/observability/diagnoses' && request.method() === 'GET')
       return respond(200, {
         diagnoses: [DIAGNOSIS],
-        runs: [RUNNING_RUN, FAILED_RUN, SUCCEEDED_RUN],
+        runs: [RUNNING_RUN, FAILED_RUN, activeSucceededRun],
       });
     if (path === '/api/admin/observability/diagnoses' && request.method() === 'POST') {
       return diagnosisStatus === 200
@@ -261,7 +276,7 @@ async function setup(page: Page, diagnosisStatus = 200, pagination: PaginationMo
     }
     if (path === '/api/admin/observability/diagnosis-runs/run-succeeded-1')
       return respond(200, {
-        run: SUCCEEDED_RUN,
+        run: activeSucceededRun,
         events: Array.from({ length: 100 }, (_, index) => diagnosisEvent(index + 1)),
         nextCursor: 100,
       });
@@ -328,8 +343,12 @@ async function setup(page: Page, diagnosisStatus = 200, pagination: PaginationMo
         ],
         nextCursor: null,
       });
-    if (path === '/api/admin/observability/diagnosis-runs/run-failed-1/retry')
-      return respond(202, { run: RUNNING_RUN });
+    if (path === '/api/admin/observability/diagnosis-runs/run-failed-1/retry') {
+      await new Promise((resolve) => setTimeout(resolve, behavior.retryDelayMs ?? 0));
+      return behavior.retryStatus && behavior.retryStatus !== 202
+        ? respond(behavior.retryStatus, { message: 'Retry service unavailable' })
+        : respond(202, { run: RUNNING_RUN });
+    }
     if (path === '/api/admin/observability/debug/projects')
       return respond(200, {
         projects: [
@@ -431,4 +450,101 @@ test.describe('Deployment diagnosis visual audit', () => {
     await expect(page).toHaveURL(/\/admin\/diagnoses\/run-running-1$/);
     await assertNoOverflow(page);
   });
+
+  test('suppresses duplicate copy actions and announces success and failure', async ({ page }) => {
+    await page.addInitScript(() => {
+      const state = window as typeof window & {
+        __copyCalls: number;
+        __copyMode: 'pending' | 'reject';
+        __releaseCopy?: () => void;
+      };
+      state.__copyCalls = 0;
+      state.__copyMode = 'pending';
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: {
+          writeText: () => {
+            state.__copyCalls++;
+            if (state.__copyMode === 'reject') return Promise.reject(new Error('Clipboard denied'));
+            return new Promise<void>((resolve) => {
+              state.__releaseCopy = resolve;
+            });
+          },
+        },
+      });
+    });
+    await setup(page);
+    await page.goto('/admin/diagnoses/run-succeeded-1');
+    const copy = page.getByRole('button', { name: 'Copy', exact: true });
+    await copy.click();
+    await expect(page.getByRole('button', { name: 'Copying…' })).toBeDisabled();
+    await page.getByRole('button', { name: 'Copying…' }).click({ force: true });
+    expect(
+      await page.evaluate(() => (window as typeof window & { __copyCalls: number }).__copyCalls)
+    ).toBe(1);
+    await page.evaluate(() =>
+      (window as typeof window & { __releaseCopy?: () => void }).__releaseCopy?.()
+    );
+    await expect(page.getByRole('status').filter({ hasText: 'Diagnosis copied.' })).toHaveText(
+      'Diagnosis copied.'
+    );
+    await page.evaluate(() => {
+      (window as typeof window & { __copyMode: 'pending' | 'reject' }).__copyMode = 'reject';
+    });
+    await page.getByRole('button', { name: 'Copy', exact: true }).click();
+    await expect(page.getByRole('alert')).toHaveText('Clipboard denied');
+    await expect(page.getByRole('button', { name: 'Copy', exact: true })).toBeEnabled();
+    await assertNoOverflow(page);
+  });
+
+  test('keeps retry disabled while pending and recovers after failure', async ({ page }) => {
+    await setup(page, 200, 'complete', { retryDelayMs: 150, retryStatus: 503 });
+    await page.goto('/admin/diagnoses/run-failed-1');
+    await page.getByRole('button', { name: 'Retry' }).click();
+    await expect(page.getByRole('button', { name: 'Retrying…' })).toBeDisabled();
+    await expect(page.getByRole('alert')).toHaveText('Retry service unavailable');
+    await expect(page.getByRole('button', { name: 'Retry' })).toBeEnabled();
+    await expect(page).toHaveURL(/\/admin\/diagnoses\/run-failed-1$/);
+    await assertNoOverflow(page);
+  });
+
+  for (const state of [
+    {
+      label: 'missing',
+      incident: null,
+      copy: 'No automatic VM evidence',
+    },
+    {
+      label: 'pending',
+      incident: { ...INCIDENT, status: 'pending', artifactCount: 0, artifacts: [] },
+      copy: 'still being collected or uploaded',
+    },
+    {
+      label: 'failed',
+      incident: {
+        ...INCIDENT,
+        status: 'failed',
+        artifactCount: 0,
+        artifacts: [],
+        failureReason: 'Snapshot quota reached',
+      },
+      copy: 'Snapshot quota reached',
+    },
+    {
+      label: 'expired',
+      incident: { ...INCIDENT, status: 'expired', artifactCount: 0, artifacts: [] },
+      copy: 'retention limit',
+    },
+  ] as const) {
+    test(`renders the ${state.label} incident state responsively`, async ({ page }) => {
+      const name = viewportLabel(page);
+      await setup(page, 200, 'complete', { incident: state.incident as IncidentFixture });
+      await page.goto('/admin/diagnoses/run-succeeded-1');
+      await expect(page.getByRole('heading', { name: 'Automatic VM evidence' })).toBeVisible();
+      await expect(page.getByText(new RegExp(state.copy, 'i'))).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Download safe evidence' })).toHaveCount(0);
+      await assertNoOverflow(page);
+      await screenshot(page, `debug-incident-${state.label}-${name}`);
+    });
+  }
 });
