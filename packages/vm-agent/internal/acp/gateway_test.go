@@ -1704,15 +1704,6 @@ func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
 		t.Errorf("config.toml missing SAM MCP bearer env reference: %s", data)
 	}
 	assertCodexStartupTOML(t, data, "https://api.example.com/mcp", "SAM_MCP_TOKEN")
-	if got := countEnvKey(startup.envVars, "CODEX_CONFIG"); got != 1 {
-		t.Fatalf("CODEX_CONFIG count = %d, want 1: %v", got, startup.envVars)
-	}
-	if got := countEnvKey(startup.envVars, "INITIAL_AGENT_MODE"); got != 1 {
-		t.Fatalf("INITIAL_AGENT_MODE count = %d, want 1: %v", got, startup.envVars)
-	}
-	if got := countEnvKey(startup.envVars, "SAM_MCP_TOKEN"); got != 1 {
-		t.Fatalf("SAM_MCP_TOKEN count = %d, want 1: %v", got, startup.envVars)
-	}
 	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
 	assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
 	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "test-standalone-token")
@@ -1767,15 +1758,6 @@ esac
 		t.Fatalf("container config contract changed: %s", content)
 	}
 	assertCodexStartupTOML(t, data, "https://api.example.com/mcp", "SAM_MCP_TOKEN")
-	if got := countEnvKey(startup.envVars, "CODEX_CONFIG"); got != 1 {
-		t.Fatalf("CODEX_CONFIG count = %d, want 1: %v", got, startup.envVars)
-	}
-	if got := countEnvKey(startup.envVars, "INITIAL_AGENT_MODE"); got != 1 {
-		t.Fatalf("INITIAL_AGENT_MODE count = %d, want 1: %v", got, startup.envVars)
-	}
-	if got := countEnvKey(startup.envVars, "SAM_MCP_TOKEN"); got != 1 {
-		t.Fatalf("SAM_MCP_TOKEN count = %d, want 1: %v", got, startup.envVars)
-	}
 	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
 	assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
 	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "container-token")
@@ -1868,12 +1850,6 @@ esac
 			if strings.Count(content, `sandbox_mode = "danger-full-access"`) != 1 ||
 				strings.Count(content, `approval_policy = "never"`) != 1 {
 				t.Fatalf("written config does not contain exactly one managed control pair:\n%s", content)
-			}
-			if got := countEnvKey(startup.envVars, "CODEX_CONFIG"); got != 1 {
-				t.Fatalf("CODEX_CONFIG count = %d, want 1: %v", got, startup.envVars)
-			}
-			if got := countEnvKey(startup.envVars, "INITIAL_AGENT_MODE"); got != 1 {
-				t.Fatalf("INITIAL_AGENT_MODE count = %d, want 1: %v", got, startup.envVars)
 			}
 			assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
 			assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")

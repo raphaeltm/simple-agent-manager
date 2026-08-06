@@ -23,7 +23,7 @@ SAM-managed Codex sessions run inside an existing container security boundary, b
 - [x] Test missing SAM MCP token failure before launch for both runtime discriminators.
 - [x] Extend rule 23 so wrapper-only launch config and runtime discriminators are mandatory contract assertions.
 - [x] Complete quality suite and mandatory specialist reviewer gates.
-- [ ] Delete staging nodes, deploy branch, verify fresh VM subagent and Instant SAM MCP/config, then clean up.
+- [x] Delete staging nodes, deploy branch, verify fresh VM subagent and Instant SAM MCP/config, then clean up.
 - [ ] Open PR, pass CI, merge, and monitor production deployment.
 
 ## Acceptance Criteria
@@ -48,6 +48,10 @@ The May mitigation assumed codex-acp forwarded Codex CLI `-c` arguments, but wra
 ### Timeline
 
 Codex 0.115 moved Linux sandboxing to bwrap. PRs #1153/#1157 added main-process mitigations in May 2026. PR #1675 fixed standalone config writing in July 2026. Fresh VM reproduction on 2026-08-06 proved reviewer/subagent execution still used bwrap. Initial staging run 31087750349 then proved correct TOML plus `CODEX_CONFIG` was insufficient because codex-acp applied its default `agent` mode on every turn; task 01KZB8AWT64HV6C2TZRV9EDZRA reproduced `bwrap`, `RTM_NEWADDR`, and `loopback` on a fresh healthy VM.
+
+### Corrected Staging Verification
+
+All pre-existing staging nodes were deleted before corrected deploy run 31092798696, which deployed commit a7413a7db and passed its smoke suite. Fresh VM task 01KZBA9H65SV3EHWW75VHVWRTJ started with `INITIAL_AGENT_MODE=agent-full-access`; its native local reviewer read `README.md` successfully and the complete main/child transcript contained zero `bwrap`, `bubblewrap`, `RTM_NEWADDR`, `loopback`, or sandbox-startup errors. Fresh Instant task 01KZBA9AZ4KH0X1G5D4K1P2A1M ran Codex 0.144.6 with `SAM_MCP_TOKEN` present (43 characters), successfully called `sam-mcp get_instructions`, and confirmed the active-home managed TOML contains `danger-full-access`, approval `never`, the SAM MCP server, and its bearer-token environment reference. The validation harness removed the test workspaces/nodes afterward.
 
 ### Why It Was Not Caught
 
