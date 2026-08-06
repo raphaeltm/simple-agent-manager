@@ -46,7 +46,7 @@ describe('task completion callback handling source contract', () => {
 
   it('cleanupTaskRun destroys cf-container nodes via runtime resource cleanup', () => {
     expect(taskRunnerFile).toContain("node?.runtime === 'cf-container'");
-    expect(taskRunnerFile).toContain('stopNodeResources(workspace.nodeId, task.userId, env)');
+    expect(taskRunnerFile).toContain('stopNodeResources(workspace.nodeId, cleanupUserId, env)');
   });
 
   it('cleanupTaskRun stops workspace via stopWorkspaceOnNode', () => {
