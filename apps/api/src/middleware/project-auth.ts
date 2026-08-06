@@ -205,32 +205,6 @@ export async function requireOwnedProject(
   return assertOwnership(rows[0], userId, 'Project');
 }
 
-export async function requireOwnedTask(
-  db: AppDb,
-  projectId: string,
-  taskId: string,
-  userId: string
-): Promise<schema.Task> {
-  const rows = await db
-    .select()
-    .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.id, taskId),
-        eq(schema.tasks.projectId, projectId),
-        eq(schema.tasks.userId, userId)
-      )
-    )
-    .limit(1);
-
-  // Task has an additional projectId invariant beyond userId.
-  const task = rows[0];
-  if (!task || task.userId !== userId || task.projectId !== projectId) {
-    throw errors.notFound('Task');
-  }
-  return task;
-}
-
 export async function requireOwnedWorkspace(
   db: AppDb,
   workspaceId: string,

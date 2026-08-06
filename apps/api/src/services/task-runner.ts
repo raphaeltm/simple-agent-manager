@@ -81,6 +81,14 @@ export async function cleanupTaskRun(
     .limit(1);
 
   if (!workspace || !workspace.nodeId) {
+    if (requiredUserId) {
+      log.info('task_run.cleanup.skipped_owner_mismatch', {
+        taskId,
+        workspaceId: task.workspaceId,
+        requiredUserId,
+        action: 'skipped',
+      });
+    }
     return;
   }
 

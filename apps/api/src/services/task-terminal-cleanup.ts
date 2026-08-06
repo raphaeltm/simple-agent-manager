@@ -39,6 +39,10 @@ export async function cleanupTerminalTaskResourcesOrThrow(
   }
 }
 
+// Session-state mutation (stop/fail) is intentionally project-scoped — any
+// authorized project member may mark a shared session terminal. Compute
+// cleanup (cleanupTaskRun) is caller-scoped via options.requiredUserId so
+// only the workspace owner's resources are torn down.
 export async function cleanupTerminalTaskResources(
   env: Env,
   taskId: string,

@@ -12,7 +12,6 @@ import type { AppDb } from '../../../src/middleware/project-auth';
 import {
   createOwnerProjectMembership,
   requireOwnedProject,
-  requireOwnedTask,
   requireOwnedWorkspace,
   requireProjectAccess,
   requireProjectCapability,
@@ -260,56 +259,6 @@ describe('createOwnerProjectMembership', () => {
         invitedBy: 'inviter-user',
         updatedAt: '2026-07-01T00:00:00.000Z',
       },
-    });
-  });
-});
-
-describe('requireOwnedTask', () => {
-  it('returns the task when userId and projectId both match', async () => {
-    const task: schema.Task = {
-      id: 't1',
-      projectId: 'p1',
-      userId: 'u1',
-      status: 'queued',
-    } as unknown as schema.Task;
-
-    const db = makeDb(new Map([[schema.tasks, [task]]]));
-    const result = await requireOwnedTask(db, 'p1', 't1', 'u1');
-    expect(result).toEqual(task);
-  });
-
-  it('throws notFound when the task belongs to another user', async () => {
-    const db = makeDb(new Map([[schema.tasks, []]]));
-    await expect(requireOwnedTask(db, 'p1', 't1', 'u1')).rejects.toMatchObject({
-      statusCode: 404,
-    });
-  });
-
-  it('throws notFound when DB returns a task with mismatched userId', async () => {
-    const foreignTask = {
-      id: 't1',
-      projectId: 'p1',
-      userId: 'u2',
-      status: 'queued',
-    } as unknown as schema.Task;
-
-    const db = makeDb(new Map([[schema.tasks, [foreignTask]]]));
-    await expect(requireOwnedTask(db, 'p1', 't1', 'u1')).rejects.toMatchObject({
-      statusCode: 404,
-    });
-  });
-
-  it('throws notFound when DB returns a task with mismatched projectId', async () => {
-    const foreignTask = {
-      id: 't1',
-      projectId: 'p-other',
-      userId: 'u1',
-      status: 'queued',
-    } as unknown as schema.Task;
-
-    const db = makeDb(new Map([[schema.tasks, [foreignTask]]]));
-    await expect(requireOwnedTask(db, 'p1', 't1', 'u1')).rejects.toMatchObject({
-      statusCode: 404,
     });
   });
 });

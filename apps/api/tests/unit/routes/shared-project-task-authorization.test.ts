@@ -227,6 +227,41 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
   });
 
   // ───────────────────────────────────────────────────────────────────────────
+  // HIGH-2: POST /:taskId/run/cleanup — requiredUserId threading
+  // ───────────────────────────────────────────────────────────────────────────
+  describe('POST /:taskId/run/cleanup threads requiredUserId to cleanupTaskRun', () => {
+    it('passes the caller userId as the 4th argument to cleanupTaskRun', async () => {
+      const task = {
+        id: 'task-cleanup-1',
+        projectId: 'project-A',
+        userId: 'task-creator',
+        status: 'completed',
+        workspaceId: 'ws-creator',
+      };
+      const db = buildDb([[task]]);
+      vi.mocked(drizzle).mockReturnValue(db as never);
+
+      const response = await createRunApp().fetch(
+        new Request('https://api.test/api/projects/project-A/tasks/task-cleanup-1/run/cleanup', {
+          method: 'POST',
+        }),
+        mockEnv,
+        mockCtx,
+      );
+
+      expect(response.status).toBe(200);
+      // waitUntil is called with the cleanupTaskRun promise
+      expect(mockCtx.waitUntil).toHaveBeenCalled();
+      expect(mocks.cleanupTaskRun).toHaveBeenCalledWith(
+        'task-cleanup-1',
+        mockEnv,
+        undefined,
+        'caller-user',
+      );
+    });
+  });
+
+  // ───────────────────────────────────────────────────────────────────────────
   // Finding 2: POST /:taskId/delegate — cross-project workspace IDOR
   // ───────────────────────────────────────────────────────────────────────────
   describe('POST /:taskId/delegate rejects cross-project workspace', () => {

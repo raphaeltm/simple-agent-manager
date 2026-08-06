@@ -176,6 +176,17 @@ describe('cleanupTaskRun', () => {
     expect(mocks.stopNodeResources).not.toHaveBeenCalled();
     expect(mocks.markIdle).not.toHaveBeenCalled();
     expect(db.update).not.toHaveBeenCalled();
+
+    // The skip must be logged for diagnosability (MEDIUM-1)
+    expect(mocks.log.info).toHaveBeenCalledWith(
+      'task_run.cleanup.skipped_owner_mismatch',
+      expect.objectContaining({
+        taskId: 'task-shared-1',
+        workspaceId: 'workspace-owner-1',
+        requiredUserId: 'project-member',
+        action: 'skipped',
+      })
+    );
   });
 
   it('uses requiredUserId (caller) over task.userId for downstream stop/delete calls', async () => {
