@@ -13,13 +13,13 @@ import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import { CreateWorkspaceSchema,jsonValidator, UpdateWorkspacePortsPublicSchema, UpdateWorkspaceSchema } from '../../schemas';
 import { startComputeTracking } from '../../services/compute-usage';
-import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import { signPortAccessToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
 import {
   getWorkspacePortsOnNode,
   waitForNodeAgentReady,
 } from '../../services/node-agent';
+import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import { createNodeRecord, provisionNode } from '../../services/nodes';
 import * as projectDataService from '../../services/project-data';
 import { recordNodeRoutingMetric } from '../../services/telemetry';
