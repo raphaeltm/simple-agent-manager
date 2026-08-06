@@ -32,7 +32,7 @@ Scope is R1 finding 1 only: switch task lookup semantics for the affected task o
       (`requiredUserId` threaded `/status` → `cleanupTerminalTaskResourcesOrThrow` → `cleanupTaskRun`).
 - [x] Replace the non-discriminating cleanup tests with real-SQLite behavioral tests.
 - [x] Add the `project_id` write predicate to `setTaskStatus` (rule 11 defence in depth).
-- [ ] Staging deploy + cross-tenant E2E verification with two real users.
+- [x] Staging deploy + cross-tenant E2E verification with two real users (23/23 checks passed).
 
 ## Acceptance Criteria
 
@@ -116,3 +116,31 @@ Caller-scoped cleanup means B cancelling A's task leaves A's compute running. Th
 the node-cleanup cron, whose candidate queries match terminal tasks
 (`apps/api/src/scheduled/node-cleanup.ts:180` cf-container terminal-task sweep, `:463` orphan
 detection). The alternative — letting B tear down A's compute — is the vulnerability itself.
+
+## Staging Verification Result (2026-08-06)
+
+Deployed `586522868` (run 31088081600, success). Exercised end-to-end with two real users in the
+real shared project `01KJNR9R3TEN3KX1ETE33852R8`: PRIMARY `serverspresentation2025` (owner) and
+SECONDARY `dfv31` (admin, so genuinely holds `task:write`). **23/23 checks passed.**
+
+PRIMARY created a task and actually ran it, provisioning a real VM node + workspace — necessary
+because a task with no workspace makes `cleanupTaskRun` return early, exercising nothing.
+
+- SECONDARY cancelled PRIMARY's task -> 200 (the widening works); task reached `cancelled`
+- PRIMARY's workspace and node both SURVIVED (`running`) — the security guarantee
+- SECONDARY's `/run/cleanup` -> 200, compute still `running`
+- CONTROL: PRIMARY's own `/run/cleanup` stopped the workspace within 10s — proving the survival
+  above is identity-based and not simply broken cleanup
+- Cross-project `/status` and `/run/cleanup` with a real task id -> 404 on both
+- No unexpected browser console errors
+
+Compute state was read from staging D1 directly rather than the API's own view of itself.
+
+**Cleanup:** node deleted immediately (`DELETE /api/nodes/... -> 200`); node and workspace rows are
+gone from D1; staging holds 0 nodes with a Hetzner instance. Pre-test baseline was 0/0.
+
+**Not reachable E2E:** the diverged-owner path (member B runs member A's task) could not be
+exercised on staging because `/run`'s credential gate is caller-scoped and SECONDARY has no
+cloud-provider credential. Covered by discriminating real-SQLite unit tests instead. The gate is a
+real defect that blocks this feature for members without their own cloud credential — filed as
+`tasks/backlog/2026-08-06-run-gate-ignores-platform-cloud-credential.md`.
