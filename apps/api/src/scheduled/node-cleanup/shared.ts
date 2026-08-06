@@ -17,6 +17,7 @@ import {
   DEFAULT_NODE_CLEANUP_SWEEP_LIMIT,
   DEFAULT_NODE_ORPHAN_IDLE_TIMEOUT_MS,
   DEFAULT_NODE_WARM_GRACE_PERIOD_MS,
+  DEFAULT_NODE_WARM_TIMEOUT_MS,
   DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS,
   DEFAULT_WORKSPACE_CLEANUP_SWEEP_LIMIT,
   DEFAULT_WORKSPACE_STOPPED_TTL_MS,
@@ -94,7 +95,52 @@ export interface CleanupConfig {
   agentTimeoutMs: number;
 }
 
+/**
+ * Warn when overrides invert the intended threshold ordering.
+ *
+ * The shipped defaults are monotonic (warm 30m < warm-grace 35m < orphan-idle 45m <
+ * max-lifetime 4h < absolute-ceiling 24h), but nothing stops an operator from
+ * overriding one into a nonsensical relationship. That would not throw — it would
+ * silently make a phase unreachable or trivially satisfiable, reproducing exactly the
+ * "guard that never fires looks identical to a guard with nothing to do" failure this
+ * whole change exists to fix. See `.claude/rules/53-…`.
+ *
+ * Deliberately a warning, not a hard failure: a misordered threshold degrades reaping
+ * precision, and refusing to sweep at all would be strictly worse than sweeping with
+ * odd timings.
+ */
+function warnOnInvertedThresholds(config: CleanupConfig, env: Env): void {
+  const warmTimeoutMs = parseMs(env.NODE_WARM_TIMEOUT_MS, DEFAULT_NODE_WARM_TIMEOUT_MS);
+  const problems: string[] = [];
+
+  if (config.orphanIdleTimeoutMs < warmTimeoutMs) {
+    problems.push(
+      `NODE_ORPHAN_IDLE_TIMEOUT_MS (${config.orphanIdleTimeoutMs}) is below NODE_WARM_TIMEOUT_MS (${warmTimeoutMs}); idle reaping may destroy nodes the warm pool intends to reuse`
+    );
+  }
+  if (config.absoluteMaxLifetimeMs < config.maxLifetimeMs) {
+    problems.push(
+      `NODE_ABSOLUTE_MAX_LIFETIME_MS (${config.absoluteMaxLifetimeMs}) is below MAX_AUTO_NODE_LIFETIME_MS (${config.maxLifetimeMs}); the absolute ceiling is satisfied for every max-lifetime candidate`
+    );
+  }
+  if (config.gracePeriodMs < warmTimeoutMs) {
+    problems.push(
+      `NODE_WARM_GRACE_PERIOD_MS (${config.gracePeriodMs}) is below NODE_WARM_TIMEOUT_MS (${warmTimeoutMs}); warm nodes may be swept before their warm window expires`
+    );
+  }
+
+  if (problems.length > 0) {
+    log.warn('node_cleanup.threshold_ordering_inverted', { problems });
+  }
+}
+
 export function resolveCleanupConfig(env: Env): CleanupConfig {
+  const config = buildCleanupConfig(env);
+  warnOnInvertedThresholds(config, env);
+  return config;
+}
+
+function buildCleanupConfig(env: Env): CleanupConfig {
   return {
     gracePeriodMs: parseMs(env.NODE_WARM_GRACE_PERIOD_MS, DEFAULT_NODE_WARM_GRACE_PERIOD_MS),
     maxLifetimeMs: parseMs(env.MAX_AUTO_NODE_LIFETIME_MS, DEFAULT_MAX_AUTO_NODE_LIFETIME_MS),
