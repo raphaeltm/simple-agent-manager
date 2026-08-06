@@ -12,8 +12,10 @@ vi.mock('better-auth/react', () => ({
 
 // Mock library-cache
 const mockClearLibraryCache = vi.fn();
+const mockClearLegacyLibraryCache = vi.fn();
 vi.mock('../../../src/lib/library-cache', () => ({
   clearLibraryCache: mockClearLibraryCache,
+  clearLegacyLibraryCache: mockClearLegacyLibraryCache,
 }));
 
 describe('signOut', () => {
@@ -35,13 +37,17 @@ describe('signOut', () => {
     vi.restoreAllMocks();
   });
 
-  it('calls clearLibraryCache on successful sign-out', async () => {
+  it('clears namespaced and legacy library cache before sign-out completes', async () => {
     const { signOut } = await import('../../../src/lib/auth');
 
     await signOut();
 
-    expect(mockSignOut).toHaveBeenCalledOnce();
     expect(mockClearLibraryCache).toHaveBeenCalledOnce();
+    expect(mockClearLegacyLibraryCache).toHaveBeenCalledOnce();
+    expect(mockSignOut).toHaveBeenCalledOnce();
+    expect(mockClearLibraryCache.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSignOut.mock.invocationCallOrder[0]!,
+    );
   });
 
   it('redirects to home after clearing cache', async () => {
@@ -50,5 +56,15 @@ describe('signOut', () => {
     await signOut();
 
     expect(window.location.href).toBe('/');
+  });
+
+  it('clears cache even when the sign-out request fails', async () => {
+    mockSignOut.mockRejectedValueOnce(new Error('network'));
+    const { signOut } = await import('../../../src/lib/auth');
+
+    await expect(signOut()).rejects.toThrow('network');
+
+    expect(mockClearLibraryCache).toHaveBeenCalledOnce();
+    expect(mockClearLegacyLibraryCache).toHaveBeenCalledOnce();
   });
 });

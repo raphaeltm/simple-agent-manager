@@ -7,6 +7,10 @@ import {
 } from '@simple-agent-manager/shared';
 
 const CACHE_PREFIX = 'sam-library:';
+const USER_NAMESPACE_PREFIX = 'user:';
+export const UNAUTHENTICATED_LIBRARY_CACHE_NAMESPACE = `${USER_NAMESPACE_PREFIX}unauthenticated`;
+
+export type LibraryCacheNamespace = string | null | undefined;
 
 /** Cache TTL (ms). Overridable via VITE_LIBRARY_CACHE_TTL_MS for self-hosters. */
 const CACHE_TTL_MS = (() => {
@@ -40,12 +44,29 @@ export interface CachedLibraryIndex {
   sweptAt: number;
 }
 
-function buildKey(projectId: string, type: 'files' | 'dirs', params: string): string {
-  return `${CACHE_PREFIX}${projectId}:${type}:${params}`;
+export function buildLibraryCacheNamespace(userId: string | null | undefined): string | null {
+  return userId ? `${USER_NAMESPACE_PREFIX}${encodeURIComponent(userId)}` : null;
 }
 
-function buildIndexKey(projectId: string): string {
-  return `${CACHE_PREFIX}${projectId}:global-index`;
+function buildProjectPrefix(projectId: string, namespace?: LibraryCacheNamespace): string {
+  return namespace ? `${CACHE_PREFIX}${namespace}:${projectId}` : `${CACHE_PREFIX}${projectId}`;
+}
+
+function buildKey(
+  projectId: string,
+  type: 'files' | 'dirs',
+  params: string,
+  namespace?: LibraryCacheNamespace,
+): string {
+  return `${buildProjectPrefix(projectId, namespace)}:${type}:${params}`;
+}
+
+function buildIndexKey(projectId: string, namespace?: LibraryCacheNamespace): string {
+  return `${buildProjectPrefix(projectId, namespace)}:global-index`;
+}
+
+function isLegacyLibraryKey(key: string): boolean {
+  return key.startsWith(CACHE_PREFIX) && !key.startsWith(`${CACHE_PREFIX}${USER_NAMESPACE_PREFIX}`);
 }
 
 /** Best-effort timestamp extraction for LRU eviction across mixed entry shapes. */
@@ -140,8 +161,9 @@ export function getCachedFiles(
   projectId: string,
   directory: string,
   sortBy: string,
+  namespace?: LibraryCacheNamespace,
 ): ListFilesResponse | null {
-  return readCache<ListFilesResponse>(buildKey(projectId, 'files', `${directory}:${sortBy}`));
+  return readCache<ListFilesResponse>(buildKey(projectId, 'files', `${directory}:${sortBy}`, namespace));
 }
 
 export function setCachedFiles(
@@ -149,36 +171,43 @@ export function setCachedFiles(
   directory: string,
   sortBy: string,
   data: ListFilesResponse,
+  namespace?: LibraryCacheNamespace,
 ): void {
-  writeCache(buildKey(projectId, 'files', `${directory}:${sortBy}`), data);
+  writeCache(buildKey(projectId, 'files', `${directory}:${sortBy}`, namespace), data);
 }
 
 export function getCachedDirectories(
   projectId: string,
   parentDirectory: string,
+  namespace?: LibraryCacheNamespace,
 ): DirectoryEntry[] | null {
-  return readCache<DirectoryEntry[]>(buildKey(projectId, 'dirs', parentDirectory));
+  return readCache<DirectoryEntry[]>(buildKey(projectId, 'dirs', parentDirectory, namespace));
 }
 
 export function setCachedDirectories(
   projectId: string,
   parentDirectory: string,
   data: DirectoryEntry[],
+  namespace?: LibraryCacheNamespace,
 ): void {
-  writeCache(buildKey(projectId, 'dirs', parentDirectory), data);
+  writeCache(buildKey(projectId, 'dirs', parentDirectory, namespace), data);
 }
 
 // -----------------------------------------------------------------------------
 // Global client-side index (sub-cap projects) — distinct from per-directory keys
 // -----------------------------------------------------------------------------
 
-export function getCachedIndex(projectId: string): CachedLibraryIndex | null {
+export function getCachedIndex(
+  projectId: string,
+  namespace?: LibraryCacheNamespace,
+): CachedLibraryIndex | null {
   try {
-    const raw = localStorage.getItem(buildIndexKey(projectId));
+    const key = buildIndexKey(projectId, namespace);
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const index = JSON.parse(raw) as CachedLibraryIndex;
     if (Date.now() - index.sweptAt > CACHE_TTL_MS) {
-      localStorage.removeItem(buildIndexKey(projectId));
+      localStorage.removeItem(key);
       return null;
     }
     return index;
@@ -188,28 +217,46 @@ export function getCachedIndex(projectId: string): CachedLibraryIndex | null {
 }
 
 /** Persist the swept index. Returns false if skipped (oversized or quota-bound). */
-export function setCachedIndex(projectId: string, files: CachedIndexFile[]): boolean {
+export function setCachedIndex(
+  projectId: string,
+  files: CachedIndexFile[],
+  namespace?: LibraryCacheNamespace,
+): boolean {
   const index: CachedLibraryIndex = { files, count: files.length, sweptAt: Date.now() };
   try {
-    return safeSetItem(buildIndexKey(projectId), JSON.stringify(index));
+    return safeSetItem(buildIndexKey(projectId, namespace), JSON.stringify(index));
   } catch {
     return false;
   }
 }
 
-export function clearCachedIndex(projectId: string): void {
+export function clearCachedIndex(projectId: string, namespace?: LibraryCacheNamespace): void {
   try {
-    localStorage.removeItem(buildIndexKey(projectId));
+    localStorage.removeItem(buildIndexKey(projectId, namespace));
   } catch {
     // ignore
   }
 }
 
-export function clearLibraryCache(): void {
+export function clearLegacyLibraryCache(): void {
   const keysToRemove: string[] = [];
   for (let i = 0; i < localStorage.length; i++) {
     const key = localStorage.key(i);
-    if (key?.startsWith(CACHE_PREFIX)) {
+    if (key && isLegacyLibraryKey(key)) {
+      keysToRemove.push(key);
+    }
+  }
+  for (const key of keysToRemove) {
+    localStorage.removeItem(key);
+  }
+}
+
+export function clearLibraryCache(namespace?: LibraryCacheNamespace): void {
+  const prefix = namespace ? `${CACHE_PREFIX}${namespace}:` : CACHE_PREFIX;
+  const keysToRemove: string[] = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const key = localStorage.key(i);
+    if (key?.startsWith(prefix)) {
       keysToRemove.push(key);
     }
   }

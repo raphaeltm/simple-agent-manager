@@ -39,7 +39,7 @@ const cfPermissions = [
 
 <Base
   title="Self-Host SAM — Guided Setup"
-  description="A guided, step-by-step walkthrough to deploy your own Simple Agent Manager instance to Cloudflare. Generates your config and secrets right in the browser — nothing is ever sent anywhere."
+  description="A guided, step-by-step walkthrough to deploy your own Simple Agent Manager instance to Cloudflare. Generates your config and secrets in the current browser tab — nothing is ever sent anywhere, and generated secrets are not saved to browser storage."
 >
   <Header />
   <main class="sh" data-repo-url={repoUrl}>
@@ -80,7 +80,8 @@ const cfPermissions = [
           <p class="sh-lead">
             This walkthrough takes you from zero to a fully deployed Simple Agent Manager
             on your own Cloudflare account. We'll generate your config and secrets right here
-            in your browser — <strong>nothing is ever sent anywhere</strong>.
+            in the current browser tab — <strong>nothing is ever sent anywhere</strong>, and generated
+            secrets are not saved to browser storage.
           </p>
           <div class="sh-prereqs">
             <div class="sh-prereq">
@@ -390,7 +391,7 @@ const cfPermissions = [
               <textarea id="sh-private-key" rows="5" placeholder="-----BEGIN RSA PRIVATE KEY-----&#10;…&#10;-----END RSA PRIVATE KEY-----" spellcheck="false" data-secret></textarea>
               <span class="sh-hint">We base64-encode this locally for <code>GH_APP_PRIVATE_KEY</code>.</span>
             </div>
-            <p class="sh-microcopy">The Client Secret and Private Key are never persisted to your browser storage — they live only in this tab until you close it.</p>
+            <p class="sh-microcopy">The generated webhook secret, Client Secret, and Private Key are never persisted to your browser storage — they live only in this tab until you close it.</p>
           </div>
         </article>
 
@@ -399,8 +400,9 @@ const cfPermissions = [
           <span class="sh-eyebrow">Step 5</span>
           <h2 class="sh-h2">Generate a Pulumi passphrase</h2>
           <p class="sh-lead">
-            Pulumi encrypts your stack secrets with this passphrase. Add it to GitHub Actions in the next
-            step and keep a copy in your password manager for future deploys or teardown.
+            Pulumi encrypts your stack secrets with this passphrase. This generated value is only kept in the
+            current tab, so add it to GitHub Actions in the next step and keep a copy in your
+            password manager for future deploys or teardown.
           </p>
           <div class="sh-secret-box">
             <h4>PULUMI_CONFIG_PASSPHRASE</h4>

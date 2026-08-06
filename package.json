@@ -45,20 +45,22 @@
     "quality:source-contract-tests": "tsx scripts/quality/check-source-contract-tests.ts",
     "quality:specialist-review": "tsx scripts/quality/check-specialist-review-evidence.ts",
     "quality:specialist-review:test": "npx vitest run --config scripts/quality/vitest.config.ts",
+    "quality:no-tracked-stale-binaries": "tsx scripts/quality/check-no-tracked-stale-binaries.ts",
     "quality:do-wall-time": "tsx scripts/quality/check-do-wall-time.ts",
     "quality:observability-noise": "tsx scripts/quality/check-observability-noise.ts",
     "quality:dependency-governance": "npx vitest run --config scripts/quality/vitest.config.ts scripts/quality/dependency-governance.test.ts",
     "test:infra": "pnpm --filter @simple-agent-manager/infra test",
     "prepare": "husky",
-    "quality:migration-ordering": "tsx scripts/quality/check-migration-ordering.ts"
+    "quality:migration-ordering": "tsx scripts/quality/check-migration-ordering.ts",
+    "quality:repo-visibility": "tsx scripts/quality/check-repo-quality-visibility.ts"
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",
     "lucide-react": "1.8.0"
   },
   "devDependencies": {
-    "@commitlint/cli": "21.0.2",
-    "@commitlint/config-conventional": "20.5.3",
+    "@commitlint/cli": "21.2.0",
+    "@commitlint/config-conventional": "21.2.0",
     "@types/iarna__toml": "2.0.5",
     "@types/node": "catalog:",
     "eslint-plugin-jsx-a11y": "6.10.2",
