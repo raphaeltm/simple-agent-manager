@@ -72,5 +72,5 @@ Rule 23 now requires exact wrapper-only launch configuration assertions on every
 - `packages/vm-agent/internal/acp/gateway_test.go`
 - `apps/api/Dockerfile.vm-agent-container`
 - `.claude/rules/23-cross-boundary-contract-tests.md`
-- Official Codex manual sections: Subagents; Sandbox and approvals
+- Official Codex documentation: https://developers.openai.com/codex/config-reference and https://developers.openai.com/codex/security
 - PRs #1153, #1157, #1675; PR #1709 recovery evidence; SAM task 01KZAGGBDE77XENJPCGTQ4MBK6
