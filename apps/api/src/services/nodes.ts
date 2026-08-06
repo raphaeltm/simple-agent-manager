@@ -17,6 +17,7 @@ import { ulid } from '../lib/ulid';
 import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
 import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import { signNodeCallbackToken } from './jwt';
+import { buildNodeProviderLabels, resolveEnvironmentLabel } from './node-provider-labels';
 import { persistError } from './observability';
 import { createProviderForUser } from './provider-credentials';
 import { destroyVmAgentContainer } from './vm-agent-container';
@@ -263,11 +264,11 @@ export async function provisionNode(
       location: node.vmLocation,
       userData: cloudInit,
       ...(baseImageOverride ? { image: baseImageOverride } : {}),
-      labels: {
-        node: node.id.toLowerCase(),
-        managed: 'simple-agent-manager',
-        role: isDeploymentNode ? 'deployment' : 'workspace',
-      },
+      labels: buildNodeProviderLabels({
+        nodeId: node.id,
+        isDeploymentNode,
+        environmentLabel: resolveEnvironmentLabel(env),
+      }),
     });
 
     // Scaleway allocates IPs asynchronously after boot — vm.ip will be empty.

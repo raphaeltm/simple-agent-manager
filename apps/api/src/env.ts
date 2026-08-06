@@ -252,6 +252,16 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   NODE_WARM_GRACE_PERIOD_MS?: string;
   ORPHANED_WORKSPACE_GRACE_PERIOD_MS?: string;
   CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT?: string; // Max terminal cf-container nodes to destroy per cron run (default: 25)
+  // Idle / orphan node reaping (cron sweep)
+  NODE_ORPHAN_IDLE_TIMEOUT_MS?: string; // Idle window before a workspace node with no active workspaces is destroyed (default: 2700000 = 45 min)
+  NODE_ABSOLUTE_MAX_LIFETIME_MS?: string; // Absolute age ceiling for auto-provisioned workspace nodes (default: 86400000 = 24 h)
+  NODE_CLEANUP_SWEEP_LIMIT?: string; // Max node candidates per cleanup phase per cron run (default: 25)
+  WORKSPACE_CLEANUP_SWEEP_LIMIT?: string; // Max workspace candidates per cleanup phase per cron run (default: 50)
+  // Provider-side orphan reconciliation
+  PROVIDER_ORPHAN_RECONCILIATION_ENABLED?: string; // Set 'false' to disable the provider-side reconciler (default: enabled)
+  PROVIDER_ORPHAN_MIN_AGE_MS?: string; // Minimum provider server age before it can be treated as an orphan (default: 3600000 = 1 h)
+  PROVIDER_ORPHAN_DESTROY_LIMIT?: string; // Max provider servers destroyed per reconciliation run (default: 5)
+  PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS?: string; // Minimum interval between reconciliation runs (default: 3600000 = 1 h)
   // Workspace idle timeout (global default, overridable per-project)
   WORKSPACE_IDLE_TIMEOUT_MS?: string;
   // Auto-delete stopped workspaces after this TTL (default: 300000 = 5 minutes)
@@ -361,6 +371,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CF_API_TIMEOUT_MS?: string;
   AGENT_CREDENTIAL_VALIDATION_TIMEOUT_MS?: string;
   NODE_AGENT_REQUEST_TIMEOUT_MS?: string;
+  NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS?: string; // VM-agent timeout for background sweeps — must stay well below the interactive value (default: 5000)
   // Project data DO limits
   CACHED_COMMANDS_MAX_PER_AGENT?: string;
   CACHED_COMMANDS_MAX_AGENT_TYPE_LENGTH?: string;
