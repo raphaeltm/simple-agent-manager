@@ -17,7 +17,9 @@ describe('warm node pooling lifecycle integration', () => {
   const taskRunnerFile = readFileSync(resolve(process.cwd(), 'src/services/task-runner.ts'), 'utf8');
   const selectorFile = readFileSync(resolve(process.cwd(), 'src/services/node-selector.ts'), 'utf8');
   const doFile = readFileSync(resolve(process.cwd(), 'src/durable-objects/node-lifecycle.ts'), 'utf8');
-  const cleanupFile = readFileSync(resolve(process.cwd(), 'src/scheduled/node-cleanup.ts'), 'utf8');
+  const cleanupFile = ['index.ts', 'shared.ts', 'node-phases.ts', 'workspace-phases.ts']
+    .map((f) => readFileSync(resolve(process.cwd(), `src/scheduled/node-cleanup/${f}`), 'utf8'))
+    .join('\n');
   const serviceFile = readFileSync(resolve(process.cwd(), 'src/services/node-lifecycle.ts'), 'utf8');
   const constantsFile = readFileSync(resolve(process.cwd(), '../../packages/shared/src/constants/node-pooling.ts'), 'utf8');
 

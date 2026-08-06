@@ -20,6 +20,8 @@ vi.mock('../../src/services/nodes', () => ({
 vi.mock('../../src/services/node-agent', () => ({
   deleteWorkspaceOnNode: vi.fn().mockResolvedValue(undefined),
   stopWorkspaceOnNode: vi.fn().mockResolvedValue(undefined),
+  // Background sweeps must not inherit the interactive VM-agent timeout (rule 47).
+  getNodeAgentBackgroundRequestTimeoutMs: vi.fn().mockReturnValue(5_000),
 }));
 
 // Mock project-data service
@@ -226,7 +228,10 @@ describe('runNodeCleanupSweep', () => {
           id: 'node-warm',
           user_id: 'user-1',
           warm_since: warmSince,
-          running_ws_count: 1,
+          // Counts 'running', 'creating' AND 'recovery' — phase 1 previously counted
+          // only 'running', so a node holding a 'creating' workspace could be
+          // destroyed by this phase while phases 2/3 correctly skipped it.
+          active_ws_count: 1,
         },
       ]);
       responses.set('auto_provisioned_node_id', []);
@@ -324,11 +329,15 @@ describe('runNodeCleanupSweep', () => {
       const result = await runNodeCleanupSweep(env);
 
       expect(result.orphanedWorkspacesFlagged).toBe(1);
+      // The background timeout (rule 47) must be passed explicitly — inheriting the
+      // interactive 30s default is what let an unbounded sweep over unreachable
+      // nodes blow the Worker wall-clock budget and abort the whole cron.
       expect(stopWorkspaceOnNode).toHaveBeenCalledWith(
         'node-recovery-orphan',
         'ws-recovery-orphan',
         env,
         'user-1',
+        { requestTimeoutMs: 5_000 },
       );
     });
   });
@@ -343,7 +352,10 @@ describe('runNodeCleanupSweep', () => {
         lifetimeDestroyed: 0,
         lifetimeSkipped: 0,
         orphanedWorkspacesFlagged: 0,
-        orphanedNodesFlagged: 0,
+        // Replaces the old `orphanedNodesFlagged`: the phase now destroys idle
+        // orphan nodes instead of only writing an observability row.
+        orphanedNodesDestroyed: 0,
+        orphanedNodesSkipped: 0,
         stoppedWorkspacesDeleted: 0,
         cfContainersDestroyed: 0,
         errors: 0,

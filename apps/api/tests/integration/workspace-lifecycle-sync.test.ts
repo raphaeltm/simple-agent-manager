@@ -27,7 +27,9 @@ describe('workspace lifecycle synchronization', () => {
     resolve(process.cwd(), 'src/services/workspace-cleanup.ts'),
     'utf8'
   );
-  const cleanupFile = readFileSync(resolve(process.cwd(), 'src/scheduled/node-cleanup.ts'), 'utf8');
+  const cleanupFile = ['index.ts', 'shared.ts', 'node-phases.ts', 'workspace-phases.ts']
+    .map((f) => readFileSync(resolve(process.cwd(), `src/scheduled/node-cleanup/${f}`), 'utf8'))
+    .join('\n');
   const nodesFile = readFileSync(resolve(process.cwd(), 'src/services/nodes.ts'), 'utf8');
   const doFile = [
     readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/sessions.ts'), 'utf8'),
