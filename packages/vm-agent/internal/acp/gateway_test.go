@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/pelletier/go-toml/v2"
 )
 
 // Tests for OAuth support
@@ -1289,6 +1291,86 @@ func TestMergeManagedCodexMcpConfigReplacesExistingManagedBlock(t *testing.T) {
 	}
 }
 
+func TestMergeManagedCodexMcpConfigReplacesOwnedTopLevelKeysOnly(t *testing.T) {
+	t.Parallel()
+
+	existing := strings.Join([]string{
+		`sandbox_mode = "read-only"`,
+		`approval_policy = "on-request"`,
+		`model = "user-model"`,
+		`unrelated = "preserved"`,
+		``,
+		`[profiles.user]`,
+		`sandbox_mode = "workspace-write"`,
+		`approval_policy = "untrusted"`,
+	}, "\n")
+	managed, _ := generateCodexMcpConfig(nil, nil, "")
+
+	merged := mergeManagedCodexMcpConfig(existing, managed)
+	if got := strings.Count(merged, `sandbox_mode = "danger-full-access"`); got != 1 {
+		t.Fatalf("managed sandbox_mode count = %d, want 1:\n%s", got, merged)
+	}
+	if got := strings.Count(merged, `approval_policy = "never"`); got != 1 {
+		t.Fatalf("managed approval_policy count = %d, want 1:\n%s", got, merged)
+	}
+	if strings.Contains(merged, `sandbox_mode = "read-only"`) || strings.Contains(merged, `approval_policy = "on-request"`) {
+		t.Fatalf("pre-existing owned top-level keys were preserved:\n%s", merged)
+	}
+	for _, want := range []string{
+		`model = "user-model"`,
+		`unrelated = "preserved"`,
+		`[profiles.user]`,
+		`sandbox_mode = "workspace-write"`,
+		`approval_policy = "untrusted"`,
+	} {
+		if !strings.Contains(merged, want) {
+			t.Fatalf("unrelated user key %q was not preserved:\n%s", want, merged)
+		}
+	}
+	if strings.Index(merged, codexManagedMcpStartMarker) > strings.Index(merged, `[profiles.user]`) {
+		t.Fatalf("managed top-level block must precede user tables:\n%s", merged)
+	}
+}
+
+func TestMergeManagedCodexMcpConfigNormalizesQuotedTopLevelKeys(t *testing.T) {
+	t.Parallel()
+
+	existing := strings.Join([]string{
+		`"sandbox_mode" = "read-only"`,
+		`'approval_policy' = "on-request"`,
+		`model = "user-model"`,
+		``,
+		`[profiles.user]`,
+		`"sandbox_mode" = "workspace-write"`,
+		`'approval_policy' = "untrusted"`,
+	}, "\n")
+	managed, _ := generateCodexMcpConfig(nil, nil, "")
+	merged := mergeManagedCodexMcpConfig(existing, managed)
+
+	var parsed struct {
+		SandboxMode    string `toml:"sandbox_mode"`
+		ApprovalPolicy string `toml:"approval_policy"`
+		Model          string `toml:"model"`
+		Profiles       map[string]struct {
+			SandboxMode    string `toml:"sandbox_mode"`
+			ApprovalPolicy string `toml:"approval_policy"`
+		} `toml:"profiles"`
+	}
+	if err := toml.Unmarshal([]byte(merged), &parsed); err != nil {
+		t.Fatalf("merged config is invalid TOML: %v\n%s", err, merged)
+	}
+	if parsed.SandboxMode != "danger-full-access" || parsed.ApprovalPolicy != "never" {
+		t.Fatalf("managed top-level values not canonicalized: %#v\n%s", parsed, merged)
+	}
+	if parsed.Model != "user-model" {
+		t.Fatalf("unmanaged top-level model = %q, want user-model", parsed.Model)
+	}
+	profile := parsed.Profiles["user"]
+	if profile.SandboxMode != "workspace-write" || profile.ApprovalPolicy != "untrusted" {
+		t.Fatalf("table-scoped values changed: %#v\n%s", profile, merged)
+	}
+}
+
 func TestValidateAuthFilePathAcceptsRelativeConfigPath(t *testing.T) {
 	t.Parallel()
 
@@ -1592,9 +1674,10 @@ func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
 		},
 	}
 
-	startup := &agentStartup{
-		containerID: "", // standalone — no container
-	}
+	startup := &agentStartup{containerID: "", envVars: []string{
+		`CODEX_CONFIG={"sandbox_mode":"read-only"}`,
+		"SAM_MCP_TOKEN=stale-standalone-token",
+	}}
 
 	err := h.writeAgentStartupConfig(context.Background(), "openai-codex", nil, startup)
 	if err != nil {
@@ -1618,6 +1701,13 @@ func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
 	}
 	if !strings.Contains(string(data), `bearer_token_env_var = "SAM_MCP_TOKEN"`) {
 		t.Errorf("config.toml missing SAM MCP bearer env reference: %s", data)
+	}
+	assertCodexStartupTOML(t, data, "https://api.example.com/mcp", "SAM_MCP_TOKEN")
+	if got := countEnvKey(startup.envVars, "CODEX_CONFIG"); got != 1 {
+		t.Fatalf("CODEX_CONFIG count = %d, want 1: %v", got, startup.envVars)
+	}
+	if got := countEnvKey(startup.envVars, "SAM_MCP_TOKEN"); got != 1 {
+		t.Fatalf("SAM_MCP_TOKEN count = %d, want 1: %v", got, startup.envVars)
 	}
 	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
 	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "test-standalone-token")
@@ -1650,7 +1740,10 @@ esac
 			ContainerUser: "testuser",
 		},
 	}}
-	startup := &agentStartup{containerID: "container-123"}
+	startup := &agentStartup{containerID: "container-123", envVars: []string{
+		`CODEX_CONFIG={"sandbox_mode":"read-only"}`,
+		"SAM_MCP_TOKEN=stale-container-token",
+	}}
 
 	if err := h.writeAgentStartupConfig(context.Background(), "openai-codex", nil, startup); err != nil {
 		t.Fatalf("container Codex startup config failed: %v", err)
@@ -1667,8 +1760,184 @@ esac
 		!strings.Contains(content, `bearer_token_env_var = "SAM_MCP_TOKEN"`) {
 		t.Fatalf("container config contract changed: %s", content)
 	}
+	assertCodexStartupTOML(t, data, "https://api.example.com/mcp", "SAM_MCP_TOKEN")
+	if got := countEnvKey(startup.envVars, "CODEX_CONFIG"); got != 1 {
+		t.Fatalf("CODEX_CONFIG count = %d, want 1: %v", got, startup.envVars)
+	}
+	if got := countEnvKey(startup.envVars, "SAM_MCP_TOKEN"); got != 1 {
+		t.Fatalf("SAM_MCP_TOKEN count = %d, want 1: %v", got, startup.envVars)
+	}
 	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
 	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "container-token")
+}
+
+func assertCodexStartupTOML(t *testing.T, data []byte, wantURL, wantTokenEnv string) {
+	t.Helper()
+	var config struct {
+		SandboxMode    string `toml:"sandbox_mode"`
+		ApprovalPolicy string `toml:"approval_policy"`
+		MCPServers     map[string]struct {
+			URL               string `toml:"url"`
+			BearerTokenEnvVar string `toml:"bearer_token_env_var"`
+		} `toml:"mcp_servers"`
+	}
+	if err := toml.Unmarshal(data, &config); err != nil {
+		t.Fatalf("parse generated Codex TOML: %v\n%s", err, data)
+	}
+	if config.SandboxMode != "danger-full-access" {
+		t.Fatalf("sandbox_mode = %q, want danger-full-access", config.SandboxMode)
+	}
+	if config.ApprovalPolicy != "never" {
+		t.Fatalf("approval_policy = %q, want never", config.ApprovalPolicy)
+	}
+	server, ok := config.MCPServers["sam-mcp"]
+	if !ok {
+		t.Fatalf("parsed mcp_servers missing sam-mcp: %#v", config.MCPServers)
+	}
+	if server.URL != wantURL {
+		t.Fatalf("sam-mcp URL = %q, want %q", server.URL, wantURL)
+	}
+	if server.BearerTokenEnvVar != wantTokenEnv {
+		t.Fatalf("sam-mcp bearer_token_env_var = %q, want %q", server.BearerTokenEnvVar, wantTokenEnv)
+	}
+}
+
+func TestWriteAgentStartupConfigCodexWithoutOptionalConfigWritesManagedControls(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		containerID string
+	}{
+		{name: "standalone"},
+		{name: "devcontainer", containerID: "container-123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			t.Setenv("HOME", tmpDir)
+			t.Setenv("CODEX_HOME", "")
+			configPath := filepath.Join(tmpDir, "config.toml")
+
+			if tc.containerID != "" {
+				fakeDocker := filepath.Join(tmpDir, "docker")
+				script := `#!/bin/sh
+case " $* " in
+  *" printenv CODEX_HOME "*) exit 1 ;;
+  *" id -un "*) exit 1 ;;
+  *" printenv HOME "*) printf '/home/testuser\n'; exit 0 ;;
+  *" test -f "*) exit 1 ;;
+  *" tee /home/testuser/.codex/config.toml "*) cat > "$FAKE_CODEX_CONFIG"; exit 0 ;;
+  *) exit 0 ;;
+esac
+`
+				if err := os.WriteFile(fakeDocker, []byte(script), 0o700); err != nil {
+					t.Fatalf("write fake docker: %v", err)
+				}
+				t.Setenv("PATH", tmpDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+				t.Setenv("FAKE_CODEX_CONFIG", configPath)
+			} else {
+				configPath = filepath.Join(tmpDir, ".codex", "config.toml")
+			}
+
+			h := &SessionHost{config: SessionHostConfig{GatewayConfig: GatewayConfig{ContainerUser: "testuser"}}}
+			startup := &agentStartup{
+				containerID: tc.containerID,
+				envVars: []string{
+					`USER_SETTING=preserved`,
+					`CODEX_CONFIG={"sandbox_mode":"read-only","approval_policy":"on-request"}`,
+				},
+			}
+
+			if err := h.writeAgentStartupConfig(context.Background(), "openai-codex", nil, startup); err != nil {
+				t.Fatalf("writeAgentStartupConfig failed: %v", err)
+			}
+			data, err := os.ReadFile(configPath)
+			if err != nil {
+				t.Fatalf("read written config: %v", err)
+			}
+			content := string(data)
+			if strings.Count(content, `sandbox_mode = "danger-full-access"`) != 1 ||
+				strings.Count(content, `approval_policy = "never"`) != 1 {
+				t.Fatalf("written config does not contain exactly one managed control pair:\n%s", content)
+			}
+			if got := countEnvKey(startup.envVars, "CODEX_CONFIG"); got != 1 {
+				t.Fatalf("CODEX_CONFIG count = %d, want 1: %v", got, startup.envVars)
+			}
+			assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
+			assertEnvContains(t, startup.envVars, "USER_SETTING", "preserved")
+		})
+	}
+}
+
+func countEnvKey(envVars []string, key string) int {
+	count := 0
+	prefix := key + "="
+	for _, envVar := range envVars {
+		if strings.HasPrefix(envVar, prefix) {
+			count++
+		}
+	}
+	return count
+}
+
+func TestWriteAgentStartupConfigCodexReplacesNumberedMcpTokenEnvVars(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		containerID string
+	}{
+		{name: "standalone"},
+		{name: "devcontainer", containerID: "container-123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			t.Setenv("HOME", tmpDir)
+			t.Setenv("CODEX_HOME", "")
+			if tc.containerID != "" {
+				fakeDocker := filepath.Join(tmpDir, "docker")
+				script := `#!/bin/sh
+case " $* " in
+  *" printenv CODEX_HOME "*) exit 1 ;;
+  *" id -un "*) exit 1 ;;
+  *" printenv HOME "*) printf '/home/testuser\n'; exit 0 ;;
+  *" test -f "*) exit 1 ;;
+  *" tee /home/testuser/.codex/config.toml "*) cat > "$FAKE_CODEX_CONFIG"; exit 0 ;;
+  *) exit 0 ;;
+esac
+`
+				if err := os.WriteFile(fakeDocker, []byte(script), 0o700); err != nil {
+					t.Fatalf("write fake docker: %v", err)
+				}
+				t.Setenv("PATH", tmpDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+				t.Setenv("FAKE_CODEX_CONFIG", filepath.Join(tmpDir, "config.toml"))
+			}
+
+			h := &SessionHost{config: SessionHostConfig{GatewayConfig: GatewayConfig{
+				ContainerUser: "testuser",
+				McpServers: []McpServerEntry{
+					{URL: "https://api.example.com/first", Token: "first-managed-token"},
+					{URL: "https://api.example.com/second", Token: "second-managed-token"},
+				},
+			}}}
+			startup := &agentStartup{containerID: tc.containerID, envVars: []string{
+				"SAM_MCP_TOKEN_0=stale-first-token",
+				"SAM_MCP_TOKEN_1=stale-second-token",
+			}}
+
+			if err := h.writeAgentStartupConfig(context.Background(), "openai-codex", nil, startup); err != nil {
+				t.Fatalf("writeAgentStartupConfig failed: %v", err)
+			}
+			for _, managed := range []struct {
+				key   string
+				value string
+			}{
+				{key: "SAM_MCP_TOKEN_0", value: "first-managed-token"},
+				{key: "SAM_MCP_TOKEN_1", value: "second-managed-token"},
+			} {
+				if got := countEnvKey(startup.envVars, managed.key); got != 1 {
+					t.Fatalf("%s count = %d, want 1: %v", managed.key, got, startup.envVars)
+				}
+				assertEnvContains(t, startup.envVars, managed.key, managed.value)
+			}
+		})
+	}
 }
 
 func TestActivityReportTimeoutPreservesLegacyDefaultAndOverride(t *testing.T) {
@@ -1718,6 +1987,85 @@ func TestWriteAgentStartupConfigCodexMissingMcpTokenFailsClosed(t *testing.T) {
 				t.Fatalf("failed startup must not write local config, stat error: %v", statErr)
 			}
 		})
+	}
+}
+
+func TestStartAgentWithSessionModeCodexMissingMcpTokenDoesNotLaunch(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		containerID string
+	}{
+		{name: "standalone"},
+		{name: "devcontainer", containerID: "container-123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var launchCalls int
+			h := &SessionHost{config: SessionHostConfig{
+				GatewayConfig: GatewayConfig{
+					McpServers: []McpServerEntry{{URL: "https://api.example.com/mcp"}},
+					ContainerResolver: func() (string, error) {
+						return tc.containerID, nil
+					},
+				},
+				StartProcess: func(*agentStartup) (agentProcess, error) {
+					launchCalls++
+					return nil, fmt.Errorf("unexpected launch")
+				},
+			}}
+
+			err := h.startAgentWithSessionMode(context.Background(), "openai-codex", &agentCredential{
+				credential:     "test-openai-key",
+				credentialKind: "api-key",
+			}, nil, "", false)
+			if err == nil || !strings.Contains(err.Error(), "missing its bearer token") {
+				t.Fatalf("error = %v, want missing bearer token diagnostic", err)
+			}
+			if launchCalls != 0 {
+				t.Fatalf("StartProcess calls = %d, want 0", launchCalls)
+			}
+		})
+	}
+}
+
+func TestWriteAgentStartupConfigCodexRejectsInvalidMcpValuesBeforeWrite(t *testing.T) {
+	tests := []struct {
+		name   string
+		server McpServerEntry
+		want   string
+	}{
+		{name: "blank URL", server: McpServerEntry{URL: " \t", Token: "token"}, want: "blank URL"},
+		{name: "URL with carriage return", server: McpServerEntry{URL: "https://example.com/\rmcp", Token: "token"}, want: "URL contains CR/LF"},
+		{name: "URL with newline", server: McpServerEntry{URL: "https://example.com/\nmcp", Token: "token"}, want: "URL contains CR/LF"},
+		{name: "token with carriage return", server: McpServerEntry{URL: "https://example.com/mcp", Token: "tok\ren"}, want: "bearer token contains CR/LF"},
+		{name: "token with newline", server: McpServerEntry{URL: "https://example.com/mcp", Token: "tok\nen"}, want: "bearer token contains CR/LF"},
+	}
+	for _, discriminator := range []struct {
+		name        string
+		containerID string
+	}{
+		{name: "standalone"},
+		{name: "devcontainer", containerID: "container-123"},
+	} {
+		for _, tc := range tests {
+			t.Run(discriminator.name+"/"+tc.name, func(t *testing.T) {
+				tmpDir := t.TempDir()
+				t.Setenv("HOME", tmpDir)
+				t.Setenv("CODEX_HOME", "")
+				h := &SessionHost{config: SessionHostConfig{GatewayConfig: GatewayConfig{McpServers: []McpServerEntry{tc.server}}}}
+				startup := &agentStartup{containerID: discriminator.containerID}
+
+				err := h.writeAgentStartupConfig(context.Background(), "openai-codex", nil, startup)
+				if err == nil || !strings.Contains(err.Error(), tc.want) {
+					t.Fatalf("error = %v, want diagnostic containing %q", err, tc.want)
+				}
+				if len(startup.envVars) != 0 {
+					t.Fatalf("invalid startup injected partial env: %v", startup.envVars)
+				}
+				if _, statErr := os.Stat(filepath.Join(tmpDir, ".codex", "config.toml")); !os.IsNotExist(statErr) {
+					t.Fatalf("invalid startup wrote config before validation: %v", statErr)
+				}
+			})
+		}
 	}
 }
 func TestWriteAgentStartupConfigNonCodexStandaloneIsNoop(t *testing.T) {

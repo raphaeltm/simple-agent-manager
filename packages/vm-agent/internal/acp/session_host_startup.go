@@ -444,8 +444,15 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 		effort = startup.settings.Effort
 	}
 	for i, server := range h.config.McpServers {
-		if strings.TrimSpace(server.Token) == "" {
+		switch {
+		case strings.TrimSpace(server.URL) == "":
+			return fmt.Errorf("cannot start Codex with SAM MCP enabled: mcp server %d has a blank URL", i)
+		case strings.ContainsAny(server.URL, "\r\n"):
+			return fmt.Errorf("cannot start Codex with SAM MCP enabled: mcp server %d URL contains CR/LF characters", i)
+		case strings.TrimSpace(server.Token) == "":
 			return fmt.Errorf("cannot start Codex with SAM MCP enabled: mcp server %d is missing its bearer token (SAM_MCP_TOKEN)", i)
+		case strings.ContainsAny(server.Token, "\r\n"):
+			return fmt.Errorf("cannot start Codex with SAM MCP enabled: mcp server %d bearer token contains CR/LF characters", i)
 		}
 	}
 
@@ -465,6 +472,12 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 	// agent nor a spawned subagent can fall back to bwrap inside SAM managed containers.
 	startup.envVars = removeEnvVar(startup.envVars, "CODEX_CONFIG")
 	startup.envVars = append(startup.envVars, codexACPManagedConfigEnv)
+	for _, envVar := range codexMcpEnvVars {
+		key, _, ok := strings.Cut(envVar, "=")
+		if ok {
+			startup.envVars = removeEnvVar(startup.envVars, key)
+		}
+	}
 	startup.envVars = append(startup.envVars, codexMcpEnvVars...)
 	slog.Info("Wrote Codex config.toml",
 		"mcpServers", len(h.config.McpServers),

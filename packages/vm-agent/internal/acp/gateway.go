@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/pelletier/go-toml/v2"
 )
 
 const localShellPath = "/bin/sh"
@@ -1094,8 +1095,28 @@ func removeManagedCodexMcpBlock(existing string) string {
 }
 
 func mergeManagedCodexMcpConfig(existing, managed string) string {
-	cleaned := strings.TrimRight(removeManagedCodexMcpBlock(existing), "\n")
+	cleaned := removeManagedCodexMcpBlock(existing)
 	managed = strings.TrimSpace(managed)
+	managedTopLevelKeys := codexTopLevelAssignmentKeys(managed)
+	if len(managedTopLevelKeys) > 0 {
+		lines := strings.Split(cleaned, "\n")
+		filtered := lines[:0]
+		atTopLevel := true
+		for _, line := range lines {
+			trimmed := strings.TrimSpace(line)
+			if strings.HasPrefix(trimmed, "[") {
+				atTopLevel = false
+			}
+			if atTopLevel {
+				if key, ok := codexAssignmentKey(trimmed); ok && managedTopLevelKeys[key] {
+					continue
+				}
+			}
+			filtered = append(filtered, line)
+		}
+		cleaned = strings.Join(filtered, "\n")
+	}
+	cleaned = strings.TrimRight(cleaned, "\n")
 
 	switch {
 	case cleaned == "" && managed == "":
@@ -1105,8 +1126,54 @@ func mergeManagedCodexMcpConfig(existing, managed string) string {
 	case managed == "":
 		return cleaned + "\n"
 	default:
-		return cleaned + "\n\n" + managed + "\n"
+		lines := strings.Split(cleaned, "\n")
+		firstTable := len(lines)
+		for i, line := range lines {
+			if strings.HasPrefix(strings.TrimSpace(line), "[") {
+				firstTable = i
+				break
+			}
+		}
+		topLevel := strings.TrimSpace(strings.Join(lines[:firstTable], "\n"))
+		tables := strings.TrimSpace(strings.Join(lines[firstTable:], "\n"))
+		sections := make([]string, 0, 3)
+		if topLevel != "" {
+			sections = append(sections, topLevel)
+		}
+		sections = append(sections, managed)
+		if tables != "" {
+			sections = append(sections, tables)
+		}
+		return strings.Join(sections, "\n\n") + "\n"
 	}
+}
+
+func codexTopLevelAssignmentKeys(config string) map[string]bool {
+	keys := make(map[string]bool)
+	for _, line := range strings.Split(config, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "[") {
+			break
+		}
+		if key, ok := codexAssignmentKey(trimmed); ok {
+			keys[key] = true
+		}
+	}
+	return keys
+}
+
+func codexAssignmentKey(line string) (string, bool) {
+	if line == "" || strings.HasPrefix(line, "#") {
+		return "", false
+	}
+	var assignment map[string]any
+	if err := toml.Unmarshal([]byte(line), &assignment); err != nil || len(assignment) != 1 {
+		return "", false
+	}
+	for key := range assignment {
+		return key, true
+	}
+	return "", false
 }
 
 func codexProxyProviderConfigFromCredential(cred *agentCredential, callbackToken string) *codexProxyProviderConfig {

@@ -402,7 +402,7 @@ func startDockerExecProcess(cfg ProcessConfig) (*AgentProcess, error) {
 
 func startLocalProcess(cfg ProcessConfig) (*AgentProcess, error) {
 	cmd := exec.Command(cfg.AcpCommand, cfg.AcpArgs...)
-	cmd.Env = append(os.Environ(), cfg.EnvVars...)
+	cmd.Env = mergeProcessEnv(os.Environ(), cfg.EnvVars)
 	if cfg.WorkDir != "" {
 		// In standalone (cf-container) mode the vm-agent owns the local
 		// filesystem and there is no devcontainer to create the workspace
@@ -464,6 +464,36 @@ func startLocalProcess(cfg ProcessConfig) (*AgentProcess, error) {
 		stopTimeout:     stopTimeout,
 		waitDone:        make(chan struct{}),
 	}, nil
+}
+
+func mergeProcessEnv(ambient, overrides []string) []string {
+	overrideValues := make(map[string]string, len(overrides))
+	overrideOrder := make([]string, 0, len(overrides))
+	for _, entry := range overrides {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok || key == "" {
+			continue
+		}
+		if _, exists := overrideValues[key]; !exists {
+			overrideOrder = append(overrideOrder, key)
+		}
+		overrideValues[key] = entry
+	}
+
+	merged := make([]string, 0, len(ambient)+len(overrideOrder))
+	for _, entry := range ambient {
+		key, _, ok := strings.Cut(entry, "=")
+		if ok {
+			if _, overridden := overrideValues[key]; overridden {
+				continue
+			}
+		}
+		merged = append(merged, entry)
+	}
+	for _, key := range overrideOrder {
+		merged = append(merged, overrideValues[key])
+	}
+	return merged
 }
 
 // Stdin returns the writer to the agent's stdin (for sending NDJSON).

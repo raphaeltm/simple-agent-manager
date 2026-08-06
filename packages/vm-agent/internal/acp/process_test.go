@@ -3,6 +3,7 @@ package acp
 import (
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -376,5 +377,57 @@ func TestStartLocalProcessCreatesMissingWorkDir(t *testing.T) {
 	}
 	if got := strings.TrimSpace(string(output)); got != workDir {
 		t.Fatalf("process cwd=%q, want %q", got, workDir)
+	}
+}
+
+func TestStartLocalProcessManagedEnvOverridesAmbientExactlyOnce(t *testing.T) {
+	envCommand, err := exec.LookPath("env")
+	if err != nil {
+		t.Fatalf("find env command: %v", err)
+	}
+	t.Setenv("CODEX_CONFIG", "stale-codex-config")
+	t.Setenv("SAM_MCP_TOKEN", "stale-token")
+	t.Setenv("SAM_MCP_TOKEN_0", "stale-numbered-token")
+	t.Setenv("SAM_UNRELATED_AMBIENT", "preserved")
+
+	proc, err := StartLocalProcess(ProcessConfig{
+		AcpCommand: envCommand,
+		EnvVars: []string{
+			"CODEX_CONFIG=managed-codex-config",
+			"SAM_MCP_TOKEN=managed-token",
+			"SAM_MCP_TOKEN_0=managed-numbered-token",
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartLocalProcess returned error: %v", err)
+	}
+	output, err := io.ReadAll(proc.Stdout())
+	if err != nil {
+		t.Fatalf("read child environment: %v", err)
+	}
+	if err := proc.Wait(); err != nil {
+		t.Fatalf("wait for env process: %v", err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(output)), "\n")
+	for key, value := range map[string]string{
+		"CODEX_CONFIG":          "managed-codex-config",
+		"SAM_MCP_TOKEN":         "managed-token",
+		"SAM_MCP_TOKEN_0":       "managed-numbered-token",
+		"SAM_UNRELATED_AMBIENT": "preserved",
+	} {
+		want := key + "=" + value
+		count := 0
+		for _, line := range lines {
+			if strings.HasPrefix(line, key+"=") {
+				count++
+				if line != want {
+					t.Fatalf("child environment contains stale value %q, want %q", line, want)
+				}
+			}
+		}
+		if count != 1 {
+			t.Fatalf("child environment contains %q %d times, want exactly once:\n%s", want, count, output)
+		}
 	}
 }
