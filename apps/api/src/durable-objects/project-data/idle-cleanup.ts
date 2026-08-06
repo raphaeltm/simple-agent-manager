@@ -376,9 +376,10 @@ export async function checkWorkspaceIdleTimeouts(
           continue;
         }
 
-        const transitions = await Promise.all(
-          candidates.tasks.map(({ id }) =>
-            terminalizeIdleTaskInD1(sql, env, {
+        const transitions = [];
+        for (const { id } of candidates.tasks) {
+          transitions.push(
+            await terminalizeIdleTaskInD1(sql, env, {
               sweep: 'workspace_idle_timeout',
               projectId,
               taskId: id,
@@ -387,8 +388,8 @@ export async function checkWorkspaceIdleTimeouts(
               idleDurationMs: now - lastActivity,
               timeoutMs,
             })
-          )
-        );
+          );
+        }
         if (!transitions.every((transition) => transition.outcome === 'failed')) {
           log.info('workspace_idle_runtime_preserved', {
             projectId,
