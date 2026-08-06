@@ -123,7 +123,15 @@ describe('infra config parsing', () => {
     }
   });
 
-  it.each(['agents', 'cli', 'compose-image-artifacts', 'session-snapshots', 'temp-uploads', 'tts'])(
+  it.each([
+    'agents',
+    'cli',
+    'compose-image-artifacts',
+    'library',
+    'session-snapshots',
+    'temp-uploads',
+    'tts',
+  ])(
     'rejects the reserved %s object namespace for diagnostic lifecycle expiry',
     (reservedPrefix) => {
       expect(() =>

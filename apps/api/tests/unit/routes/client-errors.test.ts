@@ -123,6 +123,33 @@ describe('Client Errors Routes', () => {
       spy.mockRestore();
     });
 
+    it('should honor configured field limits in structured client-error logs', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+      await app.request('/api/client-errors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: makeBody([
+          validEntry({
+            message: 'abcdefgh',
+            stack: '12345678',
+            userAgent: 'ABCDEFGH',
+          }),
+        ]),
+      }, createEnv({
+        OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH: '3',
+        OBSERVABILITY_ERROR_STACK_MAX_LENGTH: '4',
+        OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH: '5',
+      }));
+
+      const logged = JSON.parse(spy.mock.calls[0][0] as string);
+      expect(logged.message).toBe('abc...');
+      expect(logged.stack).toBe('1234...');
+      expect(logged.userAgent).toBe('ABCDE...');
+
+      spy.mockRestore();
+    });
+
     it('should return 204 for empty batch', async () => {
       const res = await app.request('/api/client-errors', {
         method: 'POST',

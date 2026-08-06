@@ -2,6 +2,7 @@ import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import migrationSql from '../../../src/db/migrations/0106_diagnostic_incidents.sql?raw';
+import expiryIndexMigrationSql from '../../../src/db/migrations/0107_diagnostic_artifact_expiry_index.sql?raw';
 import type { Env } from '../../../src/env';
 import { reconcileDiagnosticIncidents } from '../../../src/services/diagnostic-incident-reconciliation';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -32,6 +33,7 @@ describe('diagnostic incident reconciliation', () => {
   beforeEach(() => {
     main = new Database(':memory:');
     main.exec(migrationSql);
+    main.exec(expiryIndexMigrationSql);
     observability = new Database(':memory:');
     observability.exec(`
       CREATE TABLE platform_errors (
@@ -48,6 +50,22 @@ describe('diagnostic incident reconciliation', () => {
       VM_INCIDENT_PENDING_TIMEOUT_MINUTES: '1',
       VM_INCIDENT_RECONCILE_BATCH_SIZE: '20',
     } as Env;
+  });
+
+  it('uses the bounded partial expiry index rather than scanning retained history', () => {
+    const plan = main
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT id FROM diagnostic_artifacts
+         WHERE status <> 'expired' AND expires_at <= ?
+         ORDER BY expires_at ASC LIMIT ?`
+      )
+      .all('2026-08-06T20:00:00.000Z', 20) as Array<{ detail: string }>;
+
+    expect(plan.some((step) => step.detail.includes('idx_diagnostic_artifacts_pending_expiry'))).toBe(
+      true
+    );
+    expect(plan.some((step) => step.detail.includes('USE TEMP B-TREE'))).toBe(false);
   });
 
   function insertIncident(params: {

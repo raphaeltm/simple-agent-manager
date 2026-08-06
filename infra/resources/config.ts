@@ -13,6 +13,7 @@ export const RESERVED_R2_TOP_LEVEL_PREFIXES = new Set([
   'agents',
   'cli',
   'compose-image-artifacts',
+  'library',
   'session-snapshots',
   'temp-uploads',
   'tts',

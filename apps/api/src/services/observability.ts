@@ -25,9 +25,9 @@ import { REDACTED, redactSecretPatterns } from './secret-redaction';
 const DEFAULT_RETENTION_DAYS = 30;
 const DEFAULT_MAX_ROWS = 100_000;
 const DEFAULT_BATCH_SIZE = 25;
-const MAX_MESSAGE_LENGTH = 2048;
-const MAX_STACK_LENGTH = 4096;
-const MAX_USER_AGENT_LENGTH = 512;
+const DEFAULT_MAX_MESSAGE_LENGTH = 2048;
+const DEFAULT_MAX_STACK_LENGTH = 4096;
+const DEFAULT_MAX_USER_AGENT_LENGTH = 512;
 const MAX_QUERY_LIMIT = 200;
 const DEFAULT_QUERY_LIMIT = 50;
 
@@ -49,8 +49,8 @@ function generateId(): string {
 function getConfigNumber(env: Env, key: keyof Env, fallback: number): number {
   const val = env[key] as string | undefined;
   if (val) {
-    const n = parseInt(val, 10);
-    if (!isNaN(n)) return n;
+    const n = Number.parseInt(val, 10);
+    if (Number.isSafeInteger(n) && n > 0) return n;
   }
   return fallback;
 }
@@ -78,10 +78,27 @@ export interface PersistErrorInput {
  * Persist a single error to the observability D1 database.
  * Validates/truncates fields. Fails silently on D1 errors (logs to console).
  */
-export async function persistError(db: D1Database, input: PersistErrorInput): Promise<void> {
+export async function persistError(
+  db: D1Database,
+  input: PersistErrorInput,
+  env?: Env
+): Promise<void> {
   try {
     const source = VALID_SOURCES.has(input.source) ? input.source : 'api';
     const level = input.level && VALID_LEVELS.has(input.level) ? input.level : 'error';
+    const messageMaxLength = env
+      ? getConfigNumber(env, 'OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH', DEFAULT_MAX_MESSAGE_LENGTH)
+      : DEFAULT_MAX_MESSAGE_LENGTH;
+    const stackMaxLength = env
+      ? getConfigNumber(env, 'OBSERVABILITY_ERROR_STACK_MAX_LENGTH', DEFAULT_MAX_STACK_LENGTH)
+      : DEFAULT_MAX_STACK_LENGTH;
+    const userAgentMaxLength = env
+      ? getConfigNumber(
+          env,
+          'OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH',
+          DEFAULT_MAX_USER_AGENT_LENGTH
+        )
+      : DEFAULT_MAX_USER_AGENT_LENGTH;
 
     const drizzleDb = drizzle(db, { schema: observabilitySchema });
 
@@ -89,14 +106,14 @@ export async function persistError(db: D1Database, input: PersistErrorInput): Pr
       id: input.id ?? generateId(),
       source,
       level,
-      message: truncate(input.message, MAX_MESSAGE_LENGTH),
-      stack: input.stack ? truncate(input.stack, MAX_STACK_LENGTH) : null,
+      message: truncate(input.message, messageMaxLength),
+      stack: input.stack ? truncate(input.stack, stackMaxLength) : null,
       context: input.context ? JSON.stringify(input.context) : null,
       userId: input.userId ?? null,
       nodeId: input.nodeId ?? null,
       workspaceId: input.workspaceId ?? null,
       ipAddress: input.ipAddress ?? null,
-      userAgent: input.userAgent ? truncate(input.userAgent, MAX_USER_AGENT_LENGTH) : null,
+      userAgent: input.userAgent ? truncate(input.userAgent, userAgentMaxLength) : null,
       timestamp: input.timestamp ?? Date.now(),
     });
   } catch (err) {
@@ -123,7 +140,7 @@ export async function persistErrorBatch(
   const batch = inputs.slice(0, maxBatch);
 
   for (const input of batch) {
-    await persistError(db, input);
+    await persistError(db, input, env);
   }
 }
 

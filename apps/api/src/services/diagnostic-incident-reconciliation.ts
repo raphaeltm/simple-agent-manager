@@ -233,7 +233,7 @@ async function expireArtifacts(
   const rows = await env.DATABASE.prepare(
     `SELECT id, incident_id, node_id, status, object_key, checksum_sha256, expected_bytes
      FROM diagnostic_artifacts
-     WHERE status <> 'expired' AND datetime(expires_at) <= datetime(?)
+     WHERE status <> 'expired' AND expires_at <= ?
      ORDER BY expires_at ASC LIMIT ?`
   )
     .bind(now, limit)

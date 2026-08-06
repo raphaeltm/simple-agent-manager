@@ -274,6 +274,32 @@ describe('observability error ingestion pipeline (behavioral)', () => {
       expect(row.stack.length).toBe(4096 + 3);
     });
 
+    it('honors configured message, stack, and user-agent persistence limits', async () => {
+      await persistError(
+        obsDb,
+        {
+          source: 'api',
+          message: 'm'.repeat(20),
+          stack: 's'.repeat(20),
+          userAgent: 'u'.repeat(20),
+        },
+        {
+          OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH: '7',
+          OBSERVABILITY_ERROR_STACK_MAX_LENGTH: '8',
+          OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH: '9',
+        } as Env
+      );
+
+      const row = sqlite
+        .prepare('SELECT message, stack, user_agent FROM platform_errors LIMIT 1')
+        .get() as { message: string; stack: string; user_agent: string };
+      expect(row).toEqual({
+        message: `${'m'.repeat(7)}...`,
+        stack: `${'s'.repeat(8)}...`,
+        user_agent: `${'u'.repeat(9)}...`,
+      });
+    });
+
     it('persistErrorBatch writes every input', async () => {
       const inputs: PersistErrorInput[] = Array.from({ length: 5 }, (_, i) => ({
         source: 'client',
@@ -296,6 +322,27 @@ describe('observability error ingestion pipeline (behavioral)', () => {
         OBSERVABILITY_ERROR_BATCH_SIZE: '3',
       } as unknown as Env);
       expect(countRows(sqlite)).toBe(3);
+    });
+
+    it('persistErrorBatch forwards configured field limits to each insert', async () => {
+      await persistErrorBatch(
+        obsDb,
+        [{ source: 'client', message: 'abcdefgh', stack: '12345678', userAgent: 'ABCDEFGH' }],
+        {
+          OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH: '3',
+          OBSERVABILITY_ERROR_STACK_MAX_LENGTH: '4',
+          OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH: '5',
+        } as Env
+      );
+
+      const row = sqlite
+        .prepare('SELECT message, stack, user_agent FROM platform_errors LIMIT 1')
+        .get() as { message: string; stack: string; user_agent: string };
+      expect(row).toEqual({
+        message: 'abc...',
+        stack: '1234...',
+        user_agent: 'ABCDE...',
+      });
     });
 
     it('is fail-silent when the database throws', async () => {

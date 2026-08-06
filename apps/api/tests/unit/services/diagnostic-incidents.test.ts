@@ -27,6 +27,7 @@ it.each([
   'agents/private-incidents',
   'cli/private-incidents',
   'compose-image-artifacts/private-incidents',
+  'library/private-incidents',
   'session-snapshots/private-incidents',
   'temp-uploads/private-incidents',
   'tts/private-incidents',
