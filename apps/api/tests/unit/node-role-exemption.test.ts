@@ -11,6 +11,7 @@
  * - toNodeResponse() output (with nodeRole field)
  */
 import { existsSync } from 'node:fs';
+
 import path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 

@@ -20,7 +20,6 @@ import { log } from '../../lib/logger';
 import { deleteWorkspaceOnNode, stopWorkspaceOnNode } from '../../services/node-agent';
 import { persistError } from '../../services/observability';
 import * as projectDataService from '../../services/project-data';
-
 import type { CleanupConfig, CleanupDb, NodeCleanupResult } from './shared';
 
 /**
