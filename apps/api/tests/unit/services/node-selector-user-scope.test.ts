@@ -34,6 +34,7 @@ function createDb() {
       backend_dns_record_id TEXT,
       last_heartbeat_at TEXT,
       agent_ready_at TEXT,
+      agent_version TEXT,
       health_status TEXT NOT NULL DEFAULT 'unhealthy',
       heartbeat_stale_after_seconds INTEGER NOT NULL DEFAULT 180,
       last_metrics TEXT,

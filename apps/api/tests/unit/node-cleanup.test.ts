@@ -358,6 +358,8 @@ describe('runNodeCleanupSweep', () => {
         orphanedNodesSkipped: 0,
         stoppedWorkspacesDeleted: 0,
         cfContainersDestroyed: 0,
+        incompatibleDestroyed: 0,
+        incompatibleSkipped: 0,
         errors: 0,
       });
     });

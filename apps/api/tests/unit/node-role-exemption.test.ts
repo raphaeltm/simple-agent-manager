@@ -255,7 +255,7 @@ describe('task-runner node-steps — node_role filtering', () => {
     );
 
     // The warm node search query must include node_role filter
-    const warmQueryStart = source.indexOf('SELECT id, vm_size, vm_location FROM nodes');
+    const warmQueryStart = source.indexOf('SELECT id, vm_size, vm_location, agent_version FROM nodes');
     const warmQueryEnd = source.indexOf('.bind(state.userId)', warmQueryStart);
     const warmSection = source.slice(warmQueryStart, warmQueryEnd);
     expect(warmSection).toContain("node_role = 'workspace'");
@@ -269,7 +269,7 @@ describe('task-runner node-steps — node_role filtering', () => {
     );
 
     // The fallback "find existing running node" query must include node_role filter
-    const fallbackQueryStart = source.indexOf('SELECT id, vm_size, vm_location, health_status, last_metrics FROM nodes');
+    const fallbackQueryStart = source.indexOf('SELECT id, vm_size, vm_location, health_status, last_metrics, agent_version FROM nodes');
     const fallbackQueryEnd = source.indexOf('.bind(state.userId)', fallbackQueryStart);
     const fallbackSection = source.slice(fallbackQueryStart, fallbackQueryEnd);
     expect(fallbackSection).toContain("node_role = 'workspace'");
