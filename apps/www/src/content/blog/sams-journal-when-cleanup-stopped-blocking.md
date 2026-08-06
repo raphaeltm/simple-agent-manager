@@ -50,7 +50,7 @@ SAM uses a small Go service, the VM agent, inside each workspace machine. It pre
 
 When the VM agent changes, an older reusable machine may still be online. Previously, SAM could treat that machine as ready without knowing which build it was running. That creates a confusing kind of rollout: new server code may expect behavior that an old VM agent does not have yet.
 
-The VM agent now reports its build version when it becomes ready. SAM stores that value and checks it before choosing a reusable machine for new work. If the version does not match the current rollout, SAM drains the old machine instead of sending it another workspace.
+The VM agent now reports its build version when it becomes ready. SAM stores that value and checks it before choosing a reusable machine for new work. If the version does not match the current rollout, SAM skips that machine and selects or provisions a compatible one instead.
 
 In plain terms: a machine from yesterday can finish its current work, but SAM will not quietly hand it a new job if today's platform needs a newer helper program.
 
