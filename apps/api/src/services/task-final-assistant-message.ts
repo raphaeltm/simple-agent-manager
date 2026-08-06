@@ -1,12 +1,10 @@
+import type { TaskFinalAssistantMessage } from '@simple-agent-manager/shared';
+
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
 
-export interface TaskFinalAssistantMessage {
-  id: string;
-  content: string;
-  createdAt: number | string;
-}
+export type { TaskFinalAssistantMessage };
 
 export async function getLatestAssistantMessageForTask(
   env: Env,
@@ -31,9 +29,14 @@ export async function getLatestAssistantMessageForTask(
       return null;
     }
 
+    const CONTENT_CAP = 2000;
+    const content = message.content.length > CONTENT_CAP
+      ? message.content.slice(0, CONTENT_CAP) + '...'
+      : message.content;
+
     return {
       id: typeof message.id === 'string' ? message.id : '',
-      content: message.content,
+      content,
       createdAt:
         typeof message.createdAt === 'number' || typeof message.createdAt === 'string'
           ? message.createdAt

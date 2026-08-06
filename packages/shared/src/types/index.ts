@@ -206,6 +206,7 @@ export type {
   TaskDependency,
   TaskDetailResponse,
   TaskExecutionStep,
+  TaskFinalAssistantMessage,
   TaskMode,
   TaskSortOrder,
   TaskStatus,

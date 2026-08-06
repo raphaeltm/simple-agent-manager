@@ -1128,6 +1128,8 @@ describe('MCP Routes', () => {
         },
         { id: 'msg-old', role: 'assistant', content: 'Earlier analysis', createdAt: 1710000001000 },
       ]);
+      expect(data.recentAssistantMessages[0].content).toBe('Final detailed findings');
+      expect(data.recentAssistantMessages[0].createdAt).toBeGreaterThan(data.recentAssistantMessages[1].createdAt);
     });
 
     it('should still return task details if recent assistant messages cannot be read', async () => {
@@ -1166,6 +1168,43 @@ describe('MCP Routes', () => {
       expect(data.id).toBe('task-session-read-fails');
       expect(data.outputSummary).toBe('Completed');
       expect(data.recentAssistantMessages).toEqual([]);
+    });
+
+    it('should return empty recentAssistantMessages when task has no session', async () => {
+      mockD1Results(mockD1._stmt, [
+        {
+          id: 'task-no-session',
+          title: 'Task without chat',
+          description: 'Manual task',
+          status: 'completed',
+          priority: 1,
+          output_branch: null,
+          output_pr_url: null,
+          output_summary: 'Done',
+          completion_evidence: null,
+          error_message: null,
+          chat_session_id: null,
+          created_at: '2026-03-14T00:00:00Z',
+          updated_at: '2026-03-14T01:00:00Z',
+          started_at: null,
+          completed_at: '2026-03-14T01:00:00Z',
+        },
+      ]);
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_task_details',
+          arguments: { taskId: 'task-no-session' },
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.id).toBe('task-no-session');
+      expect(data.recentAssistantMessages).toEqual([]);
+      expect(mockDoStub.getMessages).not.toHaveBeenCalled();
     });
 
     it('should return error when task not found', async () => {

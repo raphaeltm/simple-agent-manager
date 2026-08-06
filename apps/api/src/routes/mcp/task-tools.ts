@@ -54,14 +54,14 @@ function truncateSnippet(value: string | null, maxLength: number): string | null
   return value.slice(0, maxLength) + (value.length > maxLength ? '...' : '');
 }
 
-type TaskDetailAssistantMessage = {
+export type TaskDetailAssistantMessage = {
   id: string;
   role: 'assistant';
   content: string;
   createdAt: number | string | null;
 };
 
-async function getRecentAssistantMessagesForTaskDetail(
+export async function getRecentAssistantMessagesForTaskDetail(
   env: Env,
   projectId: string,
   sessionId: string | null
