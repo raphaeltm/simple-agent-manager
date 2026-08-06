@@ -2,6 +2,7 @@ package server
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -35,8 +36,11 @@ func mcpTestServer(t *testing.T, controlPlaneURL string) *Server {
 
 	return &Server{
 		config: &config.Config{
-			NodeID:          "node-test-001",
-			ControlPlaneURL: controlPlaneURL,
+			NodeID:                 "node-test-001",
+			ControlPlaneURL:        controlPlaneURL,
+			MCPShortCommandTimeout: config.DefaultMCPShortCommandTimeout,
+			MCPDiffCommandTimeout:  config.DefaultMCPDiffCommandTimeout,
+			MCPBuildPrepareTimeout: config.DefaultMCPBuildPrepareTimeout,
 		},
 		sessionManager:  sm,
 		workspaces:      make(map[string]*WorkspaceRuntime),
@@ -817,5 +821,24 @@ func TestParseShortstat_MalformedInput(t *testing.T) {
 	// Nothing should crash; values remain at zero.
 	if resp.FilesChanged != 0 || resp.Insertions != 0 || resp.Deletions != 0 {
 		t.Errorf("expected all zeros for non-numeric input, got %+v", resp)
+	}
+}
+
+func TestMcpCommandTimeoutsCancelExternalCommands(t *testing.T) {
+	t.Parallel()
+	s := mcpTestServer(t, "https://api.example.com")
+	s.config.Role = config.RoleStandalone
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
+	defer cancel()
+	cmd, err := s.workspaceExecCommand(ctx, "", "", "", "git", "--version")
+	if err != nil {
+		t.Fatalf("workspaceExecCommand returned error: %v", err)
+	}
+	if err := cmd.Run(); err == nil {
+		t.Fatal("expected command to be canceled by context timeout")
+	}
+	if ctx.Err() == nil {
+		t.Fatal("expected context timeout to be observable")
 	}
 }

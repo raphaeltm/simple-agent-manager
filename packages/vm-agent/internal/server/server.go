@@ -281,7 +281,7 @@ func effectivePromptTimeout(cfg *config.Config) time.Duration {
 // New creates a new server instance.
 func New(cfg *config.Config) (*Server, error) {
 	// Create JWT validator with configurable issuer and audience
-	jwtValidator, err := auth.NewJWTValidator(cfg.JWKSEndpoint, cfg.NodeID, cfg.JWTIssuer, cfg.JWTAudience)
+	jwtValidator, err := auth.NewJWTValidatorWithTimeout(cfg.JWKSEndpoint, cfg.NodeID, cfg.JWTIssuer, cfg.JWTAudience, cfg.JWKSFetchTimeout)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create JWT validator: %w", err)
 	}
@@ -391,6 +391,8 @@ func New(cfg *config.Config) (*Server, error) {
 		ActivityRereportInterval:       cfg.ACPActivityRereportInterval,
 		TerminalActivityReportAttempts: cfg.ACPTerminalActivityReportAttempts,
 		TerminalActivityReportBackoff:  cfg.ACPTerminalActivityReportBackoff,
+		ActivityReportTimeout:          cfg.ACPActivityReportTimeout,
+		CredentialSyncTimeout:          cfg.ACPCredentialSyncTimeout,
 		RecoveryWatchdogTimeout:        cfg.ACPRecoveryWatchdog,
 		RestartDecayWindow:             cfg.ACPRestartDecayWindow,
 		SAMEnvFallback:                 cfg.BuildSAMEnvFallback(),

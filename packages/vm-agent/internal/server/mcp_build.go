@@ -250,7 +250,7 @@ func (s *Server) prepareMcpBuildAndPublish(w http.ResponseWriter, r *http.Reques
 		"environmentId", environmentID,
 		"reference", reference)
 
-	ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(r.Context(), s.config.MCPBuildPrepareTimeout)
 	defer cancel()
 
 	// runtime.WorkspaceDir is a host clone captured at workspace boot. The coding

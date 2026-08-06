@@ -145,6 +145,13 @@ type Config struct {
 	BootstrapMaxWait   time.Duration
 	BootstrapTimeout   time.Duration // Overall bootstrap timeout including devcontainer build
 
+	// VM-agent lifecycle/provisioning settings - configurable per constitution principle XI
+	GracefulShutdownTimeout   time.Duration // Max time to wait for HTTP shutdown after SIGTERM (env: GRACEFUL_SHUTDOWN_TIMEOUT, default: 30s)
+	SystemProvisioningTimeout time.Duration // Max time for workspace host provisioning (env: SYSTEM_PROVISIONING_TIMEOUT, default: 15m)
+	CFIPFetchTimeout          time.Duration // Timeout for Cloudflare IP range fetches during firewall setup (env: CF_IP_FETCH_TIMEOUT, default: 10s)
+	BootLogHTTPTimeout        time.Duration // Timeout for boot-log callbacks (env: BOOT_LOG_HTTP_TIMEOUT, default: 10s)
+	JWKSFetchTimeout          time.Duration // Timeout for startup JWKS fetches (env: JWKS_FETCH_TIMEOUT, default: 10s)
+
 	// StandaloneCloneFilter is the resolved git partial-clone filter for
 	// standalone (container) workspace clones. Empty means "full clone".
 	// See DefaultStandaloneCloneFilter and env STANDALONE_CLONE_FILTER.
@@ -213,6 +220,8 @@ type Config struct {
 	ACPActivityRereportInterval       time.Duration // Re-report prompting while a prompt is active (default: 60s, env: ACTIVITY_REREPORT_INTERVAL)
 	ACPTerminalActivityReportAttempts int           // Retry attempts for terminal activity reports (default: 5, env: ACTIVITY_TERMINAL_REPORT_ATTEMPTS)
 	ACPTerminalActivityReportBackoff  time.Duration // Retry backoff for terminal activity reports (default: 1s, env: ACTIVITY_TERMINAL_REPORT_BACKOFF)
+	ACPCredentialSyncTimeout          time.Duration // Timeout for auth-file sync-back during shutdown (default: 10s, env: ACP_CREDENTIAL_SYNC_TIMEOUT)
+	ACPActivityReportTimeout          time.Duration // Timeout for each ACP activity callback attempt (default: 10s, env: ACP_ACTIVITY_REPORT_TIMEOUT)
 
 	// Event log settings - configurable per constitution principle XI
 	MaxNodeEvents      int // Max node-level events retained in memory (default: 500)
@@ -243,11 +252,12 @@ type Config struct {
 
 	// Devcontainer cache settings — opportunistic image caching via container registry.
 	// Configurable per constitution principle XI.
-	DevcontainerCacheEnabled  bool   // Enable devcontainer image caching (env: DEVCONTAINER_CACHE_ENABLED, default: false)
-	DevcontainerCacheRegistry string // Container registry for cache images (env: DEVCONTAINER_CACHE_REGISTRY, default: ghcr.io)
-	DevcontainerCacheUsername string // Optional registry username (env: DEVCONTAINER_CACHE_USERNAME)
-	DevcontainerCachePassword string // Optional registry password/token (env: DEVCONTAINER_CACHE_PASSWORD)
-	DevcontainerCacheRef      string // Optional full cache image ref (env: DEVCONTAINER_CACHE_REF)
+	DevcontainerCacheEnabled     bool          // Enable devcontainer image caching (env: DEVCONTAINER_CACHE_ENABLED, default: false)
+	DevcontainerCacheRegistry    string        // Container registry for cache images (env: DEVCONTAINER_CACHE_REGISTRY, default: ghcr.io)
+	DevcontainerCacheUsername    string        // Optional registry username (env: DEVCONTAINER_CACHE_USERNAME)
+	DevcontainerCachePassword    string        // Optional registry password/token (env: DEVCONTAINER_CACHE_PASSWORD)
+	DevcontainerCacheRef         string        // Optional full cache image ref (env: DEVCONTAINER_CACHE_REF)
+	DevcontainerCachePushTimeout time.Duration // Timeout for best-effort cache image push (env: DEVCONTAINER_CACHE_PUSH_TIMEOUT, default: 10m)
 
 	// Cloud provider — used for provider-specific optimizations (apt mirrors, etc.)
 	Provider string // Cloud provider name (env: PROVIDER, e.g. "hetzner", "scaleway", "gcp")
@@ -288,8 +298,13 @@ type Config struct {
 	FileDownloadTimeout     time.Duration // Timeout for file download operations (default: 60s)
 	FileDownloadMaxBytes    int64         // Max file download size in bytes (default: 50MB)
 
+	// MCP tool command settings - configurable per constitution principle XI
+	MCPShortCommandTimeout time.Duration // Timeout for short MCP workspace probes (default: 10s, env: MCP_SHORT_COMMAND_TIMEOUT)
+	MCPDiffCommandTimeout  time.Duration // Timeout for MCP diff-summary commands (default: 30s, env: MCP_DIFF_COMMAND_TIMEOUT)
+	MCPBuildPrepareTimeout time.Duration // Timeout for MCP build/publish preparation probes (default: 30s, env: MCP_BUILD_PREPARE_TIMEOUT)
+
 	// Callback retry settings - configurable per constitution principle XI
-	WorkspaceReadyCallbackTimeout time.Duration // HTTP timeout for workspace-ready retry callbacks (env: WORKSPACE_READY_CALLBACK_TIMEOUT, default: 10s)
+	WorkspaceReadyCallbackTimeout time.Duration // HTTP timeout for workspace-ready retry callbacks (env: WORKSPACE_READY_CALLBACK_TIMEOUT, default: 30s)
 
 	// Error reporting settings - configurable per constitution principle XI
 	ErrorReportFlushInterval time.Duration // Background flush interval (default: 30s)
@@ -303,9 +318,10 @@ type Config struct {
 	SysInfoCacheTTL       time.Duration // Cache TTL for system info responses (default: 5s)
 
 	// Log reader/stream settings - configurable per constitution principle XI
-	LogReaderTimeout      time.Duration // Timeout for journalctl read commands (default: 30s)
-	LogStreamPingInterval time.Duration // WebSocket ping interval for log stream (default: 30s)
-	LogStreamPongTimeout  time.Duration // WebSocket pong deadline for log stream (default: 90s)
+	LogReaderTimeout          time.Duration // Timeout for journalctl read commands (default: 30s)
+	LogStreamPingInterval     time.Duration // WebSocket ping interval for log stream (default: 30s)
+	LogStreamPongTimeout      time.Duration // WebSocket pong deadline for log stream (default: 90s)
+	LogStreamPingWriteTimeout time.Duration // WebSocket ping write deadline for log stream (default: 10s)
 
 	// TLS settings - configurable per constitution principle XI
 	TLSCertPath string // Path to TLS certificate PEM (env: TLS_CERT_PATH)
@@ -342,6 +358,7 @@ type Config struct {
 	DeployArtifactIdleTimeout           time.Duration // Max no-progress body read interval for artifact downloads (env: DEPLOY_ARTIFACT_IDLE_TIMEOUT)
 	DeployApplyIdleTimeout              time.Duration // Max no-progress interval for detached apply goroutines (env: DEPLOY_APPLY_IDLE_TIMEOUT)
 	DeployBuildPublishTimeout           time.Duration // Max host build/push/release publish duration (env: DEPLOY_BUILD_PUBLISH_TIMEOUT)
+	DeployPreflightCommandTimeout       time.Duration // Max deployment preflight diagnostic command duration (env: DEPLOY_PREFLIGHT_COMMAND_TIMEOUT)
 }
 
 func loadCallbackToken() (string, error) {
@@ -420,6 +437,12 @@ func Load() (*Config, error) {
 		// If larger, the API declares the workspace dead while bootstrap is still running.
 		BootstrapTimeout: getEnvDuration("BOOTSTRAP_TIMEOUT", 30*time.Minute),
 
+		GracefulShutdownTimeout:   getEnvDuration("GRACEFUL_SHUTDOWN_TIMEOUT", DefaultGracefulShutdownTimeout),
+		SystemProvisioningTimeout: getEnvDuration("SYSTEM_PROVISIONING_TIMEOUT", DefaultSystemProvisioningTimeout),
+		CFIPFetchTimeout:          getEnvDuration("CF_IP_FETCH_TIMEOUT", DefaultCFIPFetchTimeout),
+		BootLogHTTPTimeout:        getEnvDuration("BOOT_LOG_HTTP_TIMEOUT", DefaultBootLogHTTPTimeout),
+		JWKSFetchTimeout:          getEnvDuration("JWKS_FETCH_TIMEOUT", DefaultJWKSFetchTimeout),
+
 		StandaloneCloneFilter: ResolveStandaloneCloneFilter(getEnv("STANDALONE_CLONE_FILTER", DefaultStandaloneCloneFilter)),
 
 		SessionTTL:             getEnvDuration("SESSION_TTL", 24*time.Hour),
@@ -483,6 +506,8 @@ func Load() (*Config, error) {
 		ACPActivityRereportInterval:       getEnvDuration("ACTIVITY_REREPORT_INTERVAL", DefaultACPActivityRereportInterval),
 		ACPTerminalActivityReportAttempts: getEnvInt("ACTIVITY_TERMINAL_REPORT_ATTEMPTS", DefaultACPTerminalActivityReportAttempts),
 		ACPTerminalActivityReportBackoff:  getEnvDuration("ACTIVITY_TERMINAL_REPORT_BACKOFF", DefaultACPTerminalActivityReportBackoff),
+		ACPCredentialSyncTimeout:          getEnvDuration("ACP_CREDENTIAL_SYNC_TIMEOUT", DefaultACPCredentialSyncTimeout),
+		ACPActivityReportTimeout:          getEnvDuration("ACP_ACTIVITY_REPORT_TIMEOUT", DefaultACPActivityReportTimeout),
 
 		// Event log settings
 		MaxNodeEvents:      getEnvInt("MAX_NODE_EVENTS", 500),
@@ -511,11 +536,12 @@ func Load() (*Config, error) {
 		DevcontainerBuildTimeout: getEnvDuration("DEVCONTAINER_BUILD_TIMEOUT", 15*time.Minute),
 
 		// Devcontainer cache settings — opportunistic image caching.
-		DevcontainerCacheEnabled:  getEnvBool("DEVCONTAINER_CACHE_ENABLED", false),
-		DevcontainerCacheRegistry: getEnv("DEVCONTAINER_CACHE_REGISTRY", "ghcr.io"),
-		DevcontainerCacheUsername: getEnv("DEVCONTAINER_CACHE_USERNAME", ""),
-		DevcontainerCachePassword: getEnv("DEVCONTAINER_CACHE_PASSWORD", ""),
-		DevcontainerCacheRef:      getEnv("DEVCONTAINER_CACHE_REF", ""),
+		DevcontainerCacheEnabled:     getEnvBool("DEVCONTAINER_CACHE_ENABLED", false),
+		DevcontainerCacheRegistry:    getEnv("DEVCONTAINER_CACHE_REGISTRY", "ghcr.io"),
+		DevcontainerCacheUsername:    getEnv("DEVCONTAINER_CACHE_USERNAME", ""),
+		DevcontainerCachePassword:    getEnv("DEVCONTAINER_CACHE_PASSWORD", ""),
+		DevcontainerCacheRef:         getEnv("DEVCONTAINER_CACHE_REF", ""),
+		DevcontainerCachePushTimeout: getEnvDuration("DEVCONTAINER_CACHE_PUSH_TIMEOUT", DefaultDevcontainerCachePushTimeout),
 
 		// Cloud provider (set via cloud-init)
 		Provider: getEnv("PROVIDER", ""),
@@ -555,8 +581,12 @@ func Load() (*Config, error) {
 		FileDownloadTimeout:     getEnvDuration("FILE_DOWNLOAD_TIMEOUT", 60*time.Second),
 		FileDownloadMaxBytes:    getEnvInt64("FILE_DOWNLOAD_MAX_BYTES", 50*1024*1024), // 50 MB
 
+		MCPShortCommandTimeout: getEnvDuration("MCP_SHORT_COMMAND_TIMEOUT", DefaultMCPShortCommandTimeout),
+		MCPDiffCommandTimeout:  getEnvDuration("MCP_DIFF_COMMAND_TIMEOUT", DefaultMCPDiffCommandTimeout),
+		MCPBuildPrepareTimeout: getEnvDuration("MCP_BUILD_PREPARE_TIMEOUT", DefaultMCPBuildPrepareTimeout),
+
 		// Callback retry settings - configurable per constitution principle XI
-		WorkspaceReadyCallbackTimeout: getEnvDuration("WORKSPACE_READY_CALLBACK_TIMEOUT", 10*time.Second),
+		WorkspaceReadyCallbackTimeout: getEnvDuration("WORKSPACE_READY_CALLBACK_TIMEOUT", DefaultWorkspaceReadyCallbackTimeout),
 
 		// Error reporting settings - configurable per constitution principle XI
 		ErrorReportFlushInterval: getEnvDuration("ERROR_REPORT_FLUSH_INTERVAL", 30*time.Second),
@@ -570,9 +600,10 @@ func Load() (*Config, error) {
 		SysInfoCacheTTL:       getEnvDuration("SYSINFO_CACHE_TTL", 5*time.Second),
 
 		// Log reader/stream settings - configurable per constitution principle XI
-		LogReaderTimeout:      getEnvDuration("LOG_READER_TIMEOUT", 30*time.Second),
-		LogStreamPingInterval: getEnvDuration("LOG_STREAM_PING_INTERVAL", 30*time.Second),
-		LogStreamPongTimeout:  getEnvDuration("LOG_STREAM_PONG_TIMEOUT", 90*time.Second),
+		LogReaderTimeout:          getEnvDuration("LOG_READER_TIMEOUT", 30*time.Second),
+		LogStreamPingInterval:     getEnvDuration("LOG_STREAM_PING_INTERVAL", 30*time.Second),
+		LogStreamPongTimeout:      getEnvDuration("LOG_STREAM_PONG_TIMEOUT", 90*time.Second),
+		LogStreamPingWriteTimeout: getEnvDuration("LOG_STREAM_PING_WRITE_TIMEOUT", DefaultLogStreamPingWriteTimeout),
 
 		// TLS settings - configurable per constitution principle XI
 		TLSCertPath: getEnv("TLS_CERT_PATH", ""),
@@ -606,6 +637,7 @@ func Load() (*Config, error) {
 		DeployArtifactIdleTimeout:           getEnvDuration("DEPLOY_ARTIFACT_IDLE_TIMEOUT", DefaultDeployArtifactIdleTimeout),
 		DeployApplyIdleTimeout:              getEnvDuration("DEPLOY_APPLY_IDLE_TIMEOUT", DefaultDeployApplyIdleTimeout),
 		DeployBuildPublishTimeout:           getEnvDuration("DEPLOY_BUILD_PUBLISH_TIMEOUT", DefaultDeployBuildPublishTimeout),
+		DeployPreflightCommandTimeout:       getEnvDuration("DEPLOY_PREFLIGHT_COMMAND_TIMEOUT", DefaultDeployPreflightCommandTimeout),
 	}
 
 	// Derive TLS enabled state from cert/key paths

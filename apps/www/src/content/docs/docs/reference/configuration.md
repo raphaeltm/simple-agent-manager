@@ -426,6 +426,19 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 | `DEPLOY_COMPOSE_CMD`                          | `docker compose`                       | Docker Compose command used by the deployment engine                  |
 | `DEPLOY_HEALTH_TIMEOUT`                       | `5m`                                   | Deployment health-check timeout used by the VM agent                  |
 | `DEPLOY_RUNTIME_TIMEOUT`                      | `15m`                                  | VM-agent max time for deployment-node host dependency setup           |
+| `GRACEFUL_SHUTDOWN_TIMEOUT`                   | `30s`                                  | VM-agent max time for graceful HTTP server shutdown after SIGTERM     |
+| `SYSTEM_PROVISIONING_TIMEOUT`                 | `15m`                                  | VM-agent max time for workspace host provisioning before bootstrap    |
+| `CF_IP_FETCH_TIMEOUT`                         | `10s`                                  | VM-agent timeout for Cloudflare IP range fetches during provisioning  |
+| `BOOT_LOG_HTTP_TIMEOUT`                       | `10s`                                  | VM-agent timeout for boot-log callbacks to the control plane          |
+| `MCP_SHORT_COMMAND_TIMEOUT`                   | `10s`                                  | VM-agent timeout for short MCP workspace command probes               |
+| `MCP_DIFF_COMMAND_TIMEOUT`                    | `30s`                                  | VM-agent timeout for MCP diff-summary git commands                    |
+| `MCP_BUILD_PREPARE_TIMEOUT`                   | `30s`                                  | VM-agent timeout for MCP build/publish preparation probes             |
+| `JWKS_FETCH_TIMEOUT`                          | `10s`                                  | VM-agent startup JWKS fetch timeout                                   |
+| `ACP_CREDENTIAL_SYNC_TIMEOUT`                 | `10s`                                  | VM-agent ACP auth-file sync-back timeout during shutdown              |
+| `ACP_ACTIVITY_REPORT_TIMEOUT`                 | `10s`                                  | VM-agent timeout for each ACP activity callback attempt               |
+| `DEVCONTAINER_CACHE_PUSH_TIMEOUT`             | `10m`                                  | VM-agent best-effort devcontainer cache image push timeout            |
+| `DEPLOY_PREFLIGHT_COMMAND_TIMEOUT`            | `15s`                                  | VM-agent deployment preflight diagnostic command timeout              |
+| `LOG_STREAM_PING_WRITE_TIMEOUT`               | `10s`                                  | VM-agent log-stream WebSocket ping write deadline                     |
 | `DEPLOY_TEARDOWN_TIMEOUT`                     | `2m`                                   | VM-agent max time for deployment environment teardown (stop/start)    |
 | `DEPLOY_APPLY_IDLE_TIMEOUT`                   | `15m`                                  | VM-agent idle watchdog for deployment apply (no-progress only)        |
 | `DEPLOY_BUILD_PUBLISH_TIMEOUT`                | `20m`                                  | VM-agent max time for host build + push + release publish             |

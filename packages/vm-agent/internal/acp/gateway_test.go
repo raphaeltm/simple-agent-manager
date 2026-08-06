@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // Tests for OAuth support
@@ -1656,6 +1657,20 @@ esac
 		t.Fatalf("container config contract changed: %s", content)
 	}
 	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "container-token")
+}
+
+func TestActivityReportTimeoutPreservesLegacyDefaultAndOverride(t *testing.T) {
+	t.Parallel()
+
+	h := &SessionHost{config: SessionHostConfig{GatewayConfig: GatewayConfig{}}}
+	if got := h.activityReportTimeout(); got != 10*time.Second {
+		t.Fatalf("activityReportTimeout() = %v, want legacy default 10s", got)
+	}
+
+	h.config.ActivityReportTimeout = 17 * time.Second
+	if got := h.activityReportTimeout(); got != 17*time.Second {
+		t.Fatalf("activityReportTimeout() = %v, want configured 17s", got)
+	}
 }
 
 func TestWriteAgentStartupConfigCodexMissingMcpTokenFailsClosed(t *testing.T) {

@@ -41,11 +41,19 @@ type JWTValidator struct {
 
 // NewJWTValidator creates a new JWT validator that fetches keys from the JWKS endpoint.
 func NewJWTValidator(jwksURL, nodeID, issuer, audience string) (*JWTValidator, error) {
+	return NewJWTValidatorWithTimeout(jwksURL, nodeID, issuer, audience, 10*time.Second)
+}
+
+// NewJWTValidatorWithTimeout creates a new JWT validator with an explicit JWKS fetch timeout.
+func NewJWTValidatorWithTimeout(jwksURL, nodeID, issuer, audience string, timeout time.Duration) (*JWTValidator, error) {
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
 	if err := ValidateJWKSURL(jwksURL); err != nil {
 		return nil, err
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	k, err := keyfunc.NewDefaultCtx(ctx, []string{jwksURL})

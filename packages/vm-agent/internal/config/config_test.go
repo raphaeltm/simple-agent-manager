@@ -1,6 +1,8 @@
 package config
 
 import (
+	"bytes"
+	"log/slog"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -233,6 +235,139 @@ func TestBootstrapTimeoutOverride(t *testing.T) {
 	}
 	if cfg.BootstrapTimeout != 20*time.Minute {
 		t.Fatalf("BootstrapTimeout=%v, want %v", cfg.BootstrapTimeout, 20*time.Minute)
+	}
+}
+
+func legacyOperationalTimeoutChecks(cfg *Config) []struct {
+	name      string
+	got, want time.Duration
+} {
+	return []struct {
+		name      string
+		got, want time.Duration
+	}{
+		{"GracefulShutdownTimeout", cfg.GracefulShutdownTimeout, 30 * time.Second},
+		{"SystemProvisioningTimeout", cfg.SystemProvisioningTimeout, 15 * time.Minute},
+		{"CFIPFetchTimeout", cfg.CFIPFetchTimeout, 10 * time.Second},
+		{"BootLogHTTPTimeout", cfg.BootLogHTTPTimeout, 10 * time.Second},
+		{"MCPShortCommandTimeout", cfg.MCPShortCommandTimeout, 10 * time.Second},
+		{"MCPDiffCommandTimeout", cfg.MCPDiffCommandTimeout, 30 * time.Second},
+		{"MCPBuildPrepareTimeout", cfg.MCPBuildPrepareTimeout, 30 * time.Second},
+		{"JWKSFetchTimeout", cfg.JWKSFetchTimeout, 10 * time.Second},
+		{"ACPCredentialSyncTimeout", cfg.ACPCredentialSyncTimeout, 10 * time.Second},
+		{"ACPActivityReportTimeout", cfg.ACPActivityReportTimeout, 10 * time.Second},
+		{"DevcontainerCachePushTimeout", cfg.DevcontainerCachePushTimeout, 10 * time.Minute},
+		{"DeployPreflightCommandTimeout", cfg.DeployPreflightCommandTimeout, 15 * time.Second},
+		{"LogStreamPingWriteTimeout", cfg.LogStreamPingWriteTimeout, 10 * time.Second},
+		{"WorkspaceReadyCallbackTimeout", cfg.WorkspaceReadyCallbackTimeout, 30 * time.Second},
+	}
+}
+
+func TestOperationalTimeoutDefaults(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	checks := legacyOperationalTimeoutChecks(cfg)
+	for _, check := range checks {
+		if check.got != check.want {
+			t.Fatalf("%s=%v, want %v", check.name, check.got, check.want)
+		}
+	}
+}
+
+func TestOperationalTimeoutOverrides(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("GRACEFUL_SHUTDOWN_TIMEOUT", "45s")
+	t.Setenv("SYSTEM_PROVISIONING_TIMEOUT", "17m")
+	t.Setenv("CF_IP_FETCH_TIMEOUT", "11s")
+	t.Setenv("BOOT_LOG_HTTP_TIMEOUT", "12s")
+	t.Setenv("MCP_SHORT_COMMAND_TIMEOUT", "13s")
+	t.Setenv("MCP_DIFF_COMMAND_TIMEOUT", "35s")
+	t.Setenv("MCP_BUILD_PREPARE_TIMEOUT", "40s")
+	t.Setenv("JWKS_FETCH_TIMEOUT", "14s")
+	t.Setenv("ACP_CREDENTIAL_SYNC_TIMEOUT", "16s")
+	t.Setenv("ACP_ACTIVITY_REPORT_TIMEOUT", "17s")
+	t.Setenv("WORKSPACE_READY_CALLBACK_TIMEOUT", "33s")
+	t.Setenv("DEVCONTAINER_CACHE_PUSH_TIMEOUT", "11m")
+	t.Setenv("DEPLOY_PREFLIGHT_COMMAND_TIMEOUT", "18s")
+	t.Setenv("LOG_STREAM_PING_WRITE_TIMEOUT", "19s")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	checks := []struct {
+		name string
+		got  time.Duration
+		want time.Duration
+	}{
+		{"GracefulShutdownTimeout", cfg.GracefulShutdownTimeout, 45 * time.Second},
+		{"SystemProvisioningTimeout", cfg.SystemProvisioningTimeout, 17 * time.Minute},
+		{"CFIPFetchTimeout", cfg.CFIPFetchTimeout, 11 * time.Second},
+		{"BootLogHTTPTimeout", cfg.BootLogHTTPTimeout, 12 * time.Second},
+		{"MCPShortCommandTimeout", cfg.MCPShortCommandTimeout, 13 * time.Second},
+		{"MCPDiffCommandTimeout", cfg.MCPDiffCommandTimeout, 35 * time.Second},
+		{"MCPBuildPrepareTimeout", cfg.MCPBuildPrepareTimeout, 40 * time.Second},
+		{"JWKSFetchTimeout", cfg.JWKSFetchTimeout, 14 * time.Second},
+		{"ACPCredentialSyncTimeout", cfg.ACPCredentialSyncTimeout, 16 * time.Second},
+		{"ACPActivityReportTimeout", cfg.ACPActivityReportTimeout, 17 * time.Second},
+		{"WorkspaceReadyCallbackTimeout", cfg.WorkspaceReadyCallbackTimeout, 33 * time.Second},
+		{"DevcontainerCachePushTimeout", cfg.DevcontainerCachePushTimeout, 11 * time.Minute},
+		{"DeployPreflightCommandTimeout", cfg.DeployPreflightCommandTimeout, 18 * time.Second},
+		{"LogStreamPingWriteTimeout", cfg.LogStreamPingWriteTimeout, 19 * time.Second},
+	}
+	for _, check := range checks {
+		if check.got != check.want {
+			t.Fatalf("%s=%v, want %v", check.name, check.got, check.want)
+		}
+	}
+}
+
+func TestInvalidOperationalTimeoutParseFallsBackAndRedactsValue(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	canary := "sk-test-secret-timeout-canary"
+	envKeys := []string{
+		"GRACEFUL_SHUTDOWN_TIMEOUT", "SYSTEM_PROVISIONING_TIMEOUT", "CF_IP_FETCH_TIMEOUT",
+		"BOOT_LOG_HTTP_TIMEOUT", "MCP_SHORT_COMMAND_TIMEOUT", "MCP_DIFF_COMMAND_TIMEOUT",
+		"MCP_BUILD_PREPARE_TIMEOUT", "JWKS_FETCH_TIMEOUT", "ACP_CREDENTIAL_SYNC_TIMEOUT",
+		"ACP_ACTIVITY_REPORT_TIMEOUT", "DEVCONTAINER_CACHE_PUSH_TIMEOUT",
+		"DEPLOY_PREFLIGHT_COMMAND_TIMEOUT", "LOG_STREAM_PING_WRITE_TIMEOUT",
+		"WORKSPACE_READY_CALLBACK_TIMEOUT",
+	}
+	for _, key := range envKeys {
+		t.Setenv(key, canary)
+	}
+
+	var logs bytes.Buffer
+	previous := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logs, nil)))
+	t.Cleanup(func() { slog.SetDefault(previous) })
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	checks := legacyOperationalTimeoutChecks(cfg)
+	for _, check := range checks {
+		if check.got != check.want {
+			t.Errorf("%s=%v, want fallback %v", check.name, check.got, check.want)
+		}
+	}
+	if strings.Contains(logs.String(), canary) {
+		t.Fatalf("parse warning leaked env value: %s", logs.String())
+	}
+	for _, key := range envKeys {
+		if !strings.Contains(logs.String(), key) {
+			t.Errorf("parse warning omitted env key %s: %s", key, logs.String())
+		}
 	}
 }
 
@@ -615,21 +750,41 @@ func splitFirst(s, sep string) []string {
 // validConfig returns a Config with all required fields set to valid values.
 func validConfig() *Config {
 	return &Config{
-		Port:                       8080,
-		ControlPlaneURL:            "https://api.example.com",
-		NodeID:                     "node-1",
-		SessionMaxCount:            100,
-		DefaultRows:                24,
-		DefaultCols:                80,
-		WSReadBufferSize:           1024,
-		WSWriteBufferSize:          1024,
-		TerminalWSMaxMessageBytes:  DefaultTerminalWSMaxMessageBytes,
-		TerminalWSReadTimeout:      DefaultTerminalWSReadTimeout,
-		TerminalWSPingInterval:     DefaultTerminalWSPingInterval,
-		TerminalWSMessageRate:      DefaultTerminalWSMessageRate,
-		TerminalWSMessageBurst:     DefaultTerminalWSMessageBurst,
-		TerminalSessionIDMaxLength: DefaultTerminalSessionIDMaxLength,
-		GitCredentialTimeout:       DefaultGitCredentialTimeout,
+		Port:                          8080,
+		ControlPlaneURL:               "https://api.example.com",
+		NodeID:                        "node-1",
+		SessionMaxCount:               100,
+		DefaultRows:                   24,
+		DefaultCols:                   80,
+		WSReadBufferSize:              1024,
+		WSWriteBufferSize:             1024,
+		TerminalWSMaxMessageBytes:     DefaultTerminalWSMaxMessageBytes,
+		TerminalWSReadTimeout:         DefaultTerminalWSReadTimeout,
+		TerminalWSPingInterval:        DefaultTerminalWSPingInterval,
+		TerminalWSMessageRate:         DefaultTerminalWSMessageRate,
+		TerminalWSMessageBurst:        DefaultTerminalWSMessageBurst,
+		TerminalSessionIDMaxLength:    DefaultTerminalSessionIDMaxLength,
+		GitCredentialTimeout:          DefaultGitCredentialTimeout,
+		GracefulShutdownTimeout:       DefaultGracefulShutdownTimeout,
+		BootstrapMaxWait:              5 * time.Minute,
+		BootstrapTimeout:              30 * time.Minute,
+		SystemProvisioningTimeout:     DefaultSystemProvisioningTimeout,
+		CFIPFetchTimeout:              DefaultCFIPFetchTimeout,
+		BootLogHTTPTimeout:            DefaultBootLogHTTPTimeout,
+		HTTPReadTimeout:               15 * time.Second,
+		HTTPWriteTimeout:              15 * time.Second,
+		HTTPIdleTimeout:               60 * time.Second,
+		HTTPCallbackTimeout:           30 * time.Second,
+		MCPShortCommandTimeout:        DefaultMCPShortCommandTimeout,
+		MCPDiffCommandTimeout:         DefaultMCPDiffCommandTimeout,
+		MCPBuildPrepareTimeout:        DefaultMCPBuildPrepareTimeout,
+		JWKSFetchTimeout:              DefaultJWKSFetchTimeout,
+		ACPCredentialSyncTimeout:      DefaultACPCredentialSyncTimeout,
+		ACPActivityReportTimeout:      DefaultACPActivityReportTimeout,
+		WorkspaceReadyCallbackTimeout: DefaultWorkspaceReadyCallbackTimeout,
+		DevcontainerCachePushTimeout:  DefaultDevcontainerCachePushTimeout,
+		DeployPreflightCommandTimeout: DefaultDeployPreflightCommandTimeout,
+		LogStreamPingWriteTimeout:     DefaultLogStreamPingWriteTimeout,
 	}
 }
 
@@ -643,6 +798,42 @@ func TestValidateGitCredentialTimeout(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "GIT_CREDENTIAL_TIMEOUT") {
 		t.Fatalf("expected GIT_CREDENTIAL_TIMEOUT error, got: %v", err)
+	}
+}
+
+func TestValidateOperationalTimeouts(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name    string
+		mutate  func(*Config)
+		wantKey string
+	}{
+		{"graceful shutdown", func(cfg *Config) { cfg.GracefulShutdownTimeout = 0 }, "GRACEFUL_SHUTDOWN_TIMEOUT"},
+		{"system provisioning", func(cfg *Config) { cfg.SystemProvisioningTimeout = -time.Second }, "SYSTEM_PROVISIONING_TIMEOUT"},
+		{"cf ip fetch", func(cfg *Config) { cfg.CFIPFetchTimeout = 0 }, "CF_IP_FETCH_TIMEOUT"},
+		{"boot log http", func(cfg *Config) { cfg.BootLogHTTPTimeout = 0 }, "BOOT_LOG_HTTP_TIMEOUT"},
+		{"mcp short", func(cfg *Config) { cfg.MCPShortCommandTimeout = 0 }, "MCP_SHORT_COMMAND_TIMEOUT"},
+		{"mcp diff", func(cfg *Config) { cfg.MCPDiffCommandTimeout = -time.Second }, "MCP_DIFF_COMMAND_TIMEOUT"},
+		{"mcp build prepare", func(cfg *Config) { cfg.MCPBuildPrepareTimeout = 0 }, "MCP_BUILD_PREPARE_TIMEOUT"},
+		{"jwks fetch", func(cfg *Config) { cfg.JWKSFetchTimeout = 0 }, "JWKS_FETCH_TIMEOUT"},
+		{"credential sync", func(cfg *Config) { cfg.ACPCredentialSyncTimeout = 0 }, "ACP_CREDENTIAL_SYNC_TIMEOUT"},
+		{"activity report", func(cfg *Config) { cfg.ACPActivityReportTimeout = 0 }, "ACP_ACTIVITY_REPORT_TIMEOUT"},
+		{"cache push", func(cfg *Config) { cfg.DevcontainerCachePushTimeout = 0 }, "DEVCONTAINER_CACHE_PUSH_TIMEOUT"},
+		{"deploy preflight", func(cfg *Config) { cfg.DeployPreflightCommandTimeout = 0 }, "DEPLOY_PREFLIGHT_COMMAND_TIMEOUT"},
+		{"log stream ping write", func(cfg *Config) { cfg.LogStreamPingWriteTimeout = 0 }, "LOG_STREAM_PING_WRITE_TIMEOUT"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := validConfig()
+			tc.mutate(cfg)
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("expected validation error")
+			}
+			if !strings.Contains(err.Error(), tc.wantKey) {
+				t.Fatalf("expected %s error, got: %v", tc.wantKey, err)
+			}
+		})
 	}
 }
 

@@ -195,7 +195,7 @@ async function setupChat(
 }
 
 test.describe('File Preview v2 staging', () => {
-  test('opens real uploaded HTML from a DocumentCard in an inert sandbox and pinch-zooms image preview', async ({
+  test('opens real uploaded HTML from a DocumentCard in an isolated auto-run preview and pinch-zooms image preview', async ({
     page,
   }) => {
     test.setTimeout(60_000);
@@ -236,33 +236,34 @@ test.describe('File Preview v2 staging', () => {
       waitUntil: 'networkidle',
     });
 
-    await page.getByRole('button', { name: `Open ${htmlFile.filename}` }).click();
-    const frame = page.locator(`iframe[title="${htmlFile.filename}"]`);
-    await expect(frame).toHaveAttribute('sandbox', '');
-    await expect(frame).toHaveAttribute('srcdoc', /Interactive HTML/);
-    await expect(frame).not.toHaveAttribute('srcdoc', /<script/i);
-    await expect(
-      page.frameLocator(`iframe[title="${htmlFile.filename}"]`).locator('#result')
-    ).toHaveText('not run');
-    await screenshot(page, 'staging-file-preview-v2-html');
-    await assertNoOverflow(page);
-
     const blockedNetworkRequests: string[] = [];
     page.on('request', (request) => {
       if (request.url().startsWith('https://example.com/')) {
         blockedNetworkRequests.push(request.url());
       }
     });
-    await page.getByRole('button', { name: 'Run interactive preview' }).click();
-    await expect(page.getByRole('alertdialog')).toContainText('Do not enter passwords');
-    await page.getByRole('button', { name: 'Run preview' }).click();
+
+    // Opening the artifact starts the preview — there is no confirmation gate, and no inert
+    // sanitized copy is rendered alongside it.
+    await page.getByRole('button', { name: `Open ${htmlFile.filename}` }).click();
     const interactiveFrameElement = page.locator(
       `iframe[title="Interactive preview of ${htmlFile.filename}"]`
     );
     const interactiveFrame = page.frameLocator(
       `iframe[title="Interactive preview of ${htmlFile.filename}"]`
     );
+    await expect(interactiveFrameElement).toBeVisible();
     await expect(interactiveFrameElement).toHaveAttribute('sandbox', 'allow-scripts');
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await expect(page.getByRole('dialog').locator('iframe')).toHaveCount(1);
+
+    // The preview must claim the modal height rather than collapsing to its min-height floor.
+    const previewBox = await interactiveFrameElement.boundingBox();
+    const previewViewport = page.viewportSize();
+    expect(previewBox!.height).toBeGreaterThan(previewViewport!.height * 0.5);
+
+    await screenshot(page, 'staging-file-preview-v2-html');
+    await assertNoOverflow(page);
     await interactiveFrame.getByRole('button', { name: 'Run isolation probes' }).click();
     await expect(interactiveFrame.locator('#result')).toContainText('"script":"ran"');
     await expect(interactiveFrame.locator('#result')).toContainText('"cookie":"blocked"');

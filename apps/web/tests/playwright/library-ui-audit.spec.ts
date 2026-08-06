@@ -1,4 +1,7 @@
-import { expect, type Page, type Route, test } from '@playwright/test';
+import { expect, type Locator, type Page, type Route, test } from '@playwright/test';
+
+/** Stand-in for the isolated preview origin (`preview.<domain>` in real deployments). */
+const PREVIEW_ORIGIN = 'https://preview.example.com';
 
 // ---------------------------------------------------------------------------
 // Mock Data
@@ -190,6 +193,7 @@ async function setupApiMocks(
     directories?: ReturnType<typeof makeDirectory>[];
     total?: number;
     errorOnFiles?: boolean;
+    errorOnPreviewMint?: boolean;
   } = {}
 ) {
   const {
@@ -197,7 +201,18 @@ async function setupApiMocks(
     directories = NORMAL_DIRS,
     total = files.length,
     errorOnFiles = false,
+    errorOnPreviewMint = false,
   } = options;
+
+  // The isolated preview origin. In production this is a different host served by the API Worker
+  // with a CSP sandbox header; here it just needs to return a real document so the iframe lays out.
+  await page.route(`${PREVIEW_ORIGIN}/**`, (route: Route) =>
+    route.fulfill({
+      status: 200,
+      contentType: 'text/html; charset=utf-8',
+      body: '<!doctype html><html><body style="margin:0;background:#fff"><h1>Interactive artifact</h1><button id="run">Run</button><script>document.getElementById("run").textContent="ran"</script></body></html>',
+    })
+  );
 
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
@@ -258,6 +273,26 @@ async function setupApiMocks(
       return respond(200, { directories: scopedDirectories });
     }
 
+    // Per-file library routes. These MUST be matched before the collection route below, whose
+    // guard (`!path.includes('/library/')`) excludes them by construction.
+    if (path.endsWith('/library/interactive-html/preview')) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/plain',
+        body: '<!doctype html><button>Interactive content</button><script>window.ran=true</script>',
+      });
+    }
+    if (path.endsWith('/library/interactive-html/interactive-preview-url')) {
+      if (errorOnPreviewMint) {
+        return respond(500, { error: 'INTERNAL_ERROR', message: 'Preview signing unavailable' });
+      }
+      return respond(200, {
+        url: `${PREVIEW_ORIGIN}/p/signed/index.html`,
+        expiresAt: '2026-08-04T12:05:00.000Z',
+        version: '2026-04-01T10:00:00Z',
+      });
+    }
+
     // Library files. Match the API contract closely enough to catch regressions:
     // root-only by default, recursive only when explicitly requested.
     if (path.includes('/library') && !path.includes('/library/')) {
@@ -270,20 +305,6 @@ async function setupApiMocks(
       const scopedFiles = files.filter((file) => {
         if (directory) {
           return recursive ? file.directory.startsWith(directory) : file.directory === directory;
-          if (path.endsWith('/library/interactive-html/preview')) {
-            return route.fulfill({
-              status: 200,
-              contentType: 'text/plain',
-              body: '<!doctype html><button>Interactive content</button><script>window.ran=true</script>',
-            });
-          }
-          if (path.endsWith('/library/interactive-html/interactive-preview-url')) {
-            return respond(200, {
-              url: 'https://preview.example.com/p/signed/index.html',
-              expiresAt: '2026-08-04T12:05:00.000Z',
-              version: '2026-04-01T10:00:00Z',
-            });
-          }
         }
         if (!recursive && !search) return file.directory === '/';
         return true;
@@ -481,26 +502,136 @@ test.describe('Library — Desktop', () => {
 });
 
 test.describe('Library interactive preview — visual audit', () => {
-  async function openConfirmation(page: Page) {
+  /**
+   * Opens the artifact and returns the auto-started preview frame. No click beyond opening the
+   * file: the confirmation gate was removed deliberately.
+   */
+  async function openPreview(page: Page) {
     await setupApiMocks(page, { files: INTERACTIVE_HTML_FILES, directories: [] });
     await page.goto('/projects/proj-test-1/library');
     await page.getByText('interactive-agent-dashboard.html').click();
-    await page.getByRole('button', { name: 'Run interactive preview' }).click();
-    await expect(page.getByRole('alertdialog')).toContainText('Do not enter passwords');
+
+    const frame = page.locator(
+      'iframe[title="Interactive preview of interactive-agent-dashboard.html"]'
+    );
+    await expect(frame).toBeVisible();
+    // Isolation contract unchanged, and no confirmation dialog was shown.
+    await expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await expect(
+      page.getByRole('button', { name: 'Run interactive preview' })
+    ).toHaveCount(0);
+    return frame;
   }
 
-  test('mobile confirmation', async ({ page }) => {
-    await openConfirmation(page);
-    await screenshot(page, 'library-interactive-preview-confirmation-mobile');
+  /**
+   * The preview must claim the modal's remaining height. This is the assertion that catches the
+   * dead flex chain — jsdom has no layout engine, so only a real browser can prove it (rule 17).
+   */
+  async function assertFillsViewport(page: Page, frame: Locator) {
+    const box = await frame.boundingBox();
+    const viewport = page.viewportSize();
+    expect(box).not.toBeNull();
+    expect(viewport).not.toBeNull();
+    // Pre-fix the iframe collapsed to its 320px min-height floor regardless of viewport.
+    expect(box!.height).toBeGreaterThan(viewport!.height * 0.5);
+  }
+
+  /**
+   * The warning bar is the only remaining signal that this content is agent-generated, so its
+   * styling must actually render. `bg-warning-subtle` was a dead class that compiled to nothing,
+   * leaving the bar visually identical to the header — this asserts a real, distinct background.
+   */
+  async function assertWarningBarIsVisuallyDistinct(page: Page) {
+    const warningBg = await page
+      .getByText('Agent-generated · no network')
+      .evaluate((el) => getComputedStyle(el.closest('div')!).backgroundColor);
+    const headerBg = await page
+      .getByRole('heading', { name: 'interactive-agent-dashboard.html' })
+      .evaluate((el) => getComputedStyle(el.closest('div')!.parentElement!).backgroundColor);
+    expect(warningBg).not.toBe('rgba(0, 0, 0, 0)');
+    expect(warningBg).not.toBe(headerBg);
+  }
+
+  test('mobile auto-runs and fills the modal', async ({ page }) => {
+    const frame = await openPreview(page);
+    await assertFillsViewport(page, frame);
+    await assertWarningBarIsVisuallyDistinct(page);
+    await screenshot(page, 'library-interactive-preview-mobile');
     await assertNoOverflow(page);
+  });
+
+  test('mint failure shows a retryable error, not a blank pane', async ({ page }) => {
+    await setupApiMocks(page, {
+      files: INTERACTIVE_HTML_FILES,
+      directories: [],
+      errorOnPreviewMint: true,
+    });
+    await page.goto('/projects/proj-test-1/library');
+    await page.getByText('interactive-agent-dashboard.html').click();
+
+    await expect(page.getByRole('alert')).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+    await expect(
+      page.locator('iframe[title="Interactive preview of interactive-agent-dashboard.html"]')
+    ).toHaveCount(0);
+    await screenshot(page, 'library-interactive-preview-error');
+    await assertNoOverflow(page);
+  });
+
+  test('oversized HTML offers download instead of a preview', async ({ page }) => {
+    await setupApiMocks(page, {
+      files: [
+        makeFile({
+          id: 'interactive-html',
+          filename: 'huge-agent-dashboard.html',
+          mimeType: 'text/html',
+          sizeBytes: 60 * 1024 * 1024,
+        }),
+      ],
+      directories: [],
+    });
+    await page.goto('/projects/proj-test-1/library');
+    await page.getByText('huge-agent-dashboard.html').click();
+
+    await expect(page.getByText(/too large to preview/i)).toBeVisible();
+    await expect(page.locator('iframe')).toHaveCount(0);
+    await screenshot(page, 'library-interactive-preview-oversize');
+    await assertNoOverflow(page);
+  });
+
+  test.describe('narrowest supported viewport', () => {
+    test.use({ viewport: { width: 320, height: 667 } });
+
+    test('320px keeps the warning legible and does not invert its meaning', async ({ page }) => {
+      const frame = await openPreview(page);
+      await assertFillsViewport(page, frame);
+      await assertWarningBarIsVisuallyDistinct(page);
+
+      // Truncation is acceptable; losing the negation is not. Assert the rendered (clipped) text
+      // can never read as "network <enabled>".
+      const label = page.getByText('Agent-generated · no network');
+      const { full, visible } = await label.evaluate((el) => ({
+        full: el.textContent ?? '',
+        visible: el.scrollWidth <= el.clientWidth,
+      }));
+      expect(full).toContain('no network');
+      if (!visible) {
+        // If it clips, the negation must still precede the noun in the source string.
+        expect(full.indexOf('no ')).toBeLessThan(full.indexOf('network'));
+      }
+      await screenshot(page, 'library-interactive-preview-320');
+      await assertNoOverflow(page);
+    });
   });
 
   test.describe('desktop', () => {
     test.use({ viewport: { width: 1280, height: 800 }, isMobile: false, hasTouch: false });
 
-    test('desktop confirmation', async ({ page }) => {
-      await openConfirmation(page);
-      await screenshot(page, 'library-interactive-preview-confirmation-desktop');
+    test('desktop auto-runs and fills the modal', async ({ page }) => {
+      const frame = await openPreview(page);
+      await assertFillsViewport(page, frame);
+      await screenshot(page, 'library-interactive-preview-desktop');
       await assertNoOverflow(page);
     });
   });

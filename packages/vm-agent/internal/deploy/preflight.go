@@ -81,7 +81,7 @@ func (e *Engine) LogPreflight(ctx context.Context) {
 // runPreflightCmd runs a short diagnostic command with a bounded timeout and
 // returns its combined output. Errors are returned for the caller to log.
 func (e *Engine) runPreflightCmd(ctx context.Context, name string, args ...string) (string, error) {
-	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	cctx, cancel := context.WithTimeout(ctx, e.cfg.PreflightCommandTimeout)
 	defer cancel()
 	out, err := exec.CommandContext(cctx, name, args...).CombinedOutput()
 	return string(out), err
