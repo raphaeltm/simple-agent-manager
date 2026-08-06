@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+env:
+  DEVCONTAINERS_CLI_VERSION: 0.80.2
+
 permissions:
   contents: read
 
@@ -85,6 +88,9 @@ jobs:
 
       - name: Validate agent preflight evidence
         run: pnpm quality:preflight
+
+      - name: Validate no stale binary artifacts are tracked
+        run: pnpm quality:no-tracked-stale-binaries
 
   specialist-review-evidence:
     name: Specialist Review Evidence
@@ -307,6 +313,11 @@ jobs:
           npx tsx --check scripts/deploy/sync-wrangler-config.ts
           npx tsx --check scripts/deploy/generate-keys.ts
 
+      # Deploy/quality script behavior — includes the Durable Object migration
+      # compatibility regression suite (clean install vs applied history).
+      - name: Run deploy and quality script tests
+        run: pnpm quality:scripts:test
+
       - name: Validate wrangler binding consistency
         run: pnpm quality:wrangler-bindings
 
@@ -348,9 +359,15 @@ jobs:
 
       - name: Stale artifact check
         run: pnpm quality:stale-artifacts
+      - name: Repo quality visibility report
+        continue-on-error: true
+        run: pnpm quality:repo-visibility
 
       - name: Source-contract test detection
         run: pnpm quality:source-contract-tests
+
+      - name: Dependency governance pinning check
+        run: pnpm quality:dependency-governance
 
   durable-object-workers:
     name: Durable Object Workers
@@ -467,7 +484,7 @@ jobs:
           cache-dependency-path: packages/vm-agent/go.sum
 
       - name: Install devcontainers CLI
-        run: npm install -g @devcontainers/cli
+        run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
 
       - name: Prepare devcontainer fixture images
         run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
@@ -492,7 +509,7 @@ jobs:
           cache-dependency-path: packages/vm-agent/go.sum
 
       - name: Install devcontainers CLI
-        run: npm install -g @devcontainers/cli
+        run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
 
       - name: Prepare devcontainer fixture images
         run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
@@ -515,7 +532,7 @@ jobs:
           node-version: '22'
 
       - name: Install devcontainer CLI
-        run: npm install -g @devcontainers/cli
+        run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
 
       - name: Prepare devcontainer fixture images
         run: bash scripts/ci/prepare-devcontainer-fixture-images.sh
@@ -726,7 +743,7 @@ jobs:
           node-version: '22'
 
       - name: Install devcontainer CLI
-        run: npm install -g @devcontainers/cli
+        run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
 
       - name: Prepare devcontainer fixture images
         run: bash scripts/ci/prepare-devcontainer-fixture-images.sh

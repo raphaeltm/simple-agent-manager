@@ -3,30 +3,33 @@ name: Devcontainer Cache Experiments
 on:
   push:
     branches:
-      - "sam/cloudflare-devcontainer-cache-experiments-*"
+      - 'sam/cloudflare-devcontainer-cache-experiments-*'
     paths:
-      - ".github/workflows/devcontainer-cache-experiments.yml"
-      - "scripts/experiments/**"
+      - '.github/workflows/devcontainer-cache-experiments.yml'
+      - 'scripts/experiments/**'
   workflow_dispatch:
     inputs:
       run_cloudflare_registry:
-        description: "Run Cloudflare managed registry push/pull experiment"
+        description: 'Run Cloudflare managed registry push/pull experiment'
         required: true
-        default: "true"
+        default: 'true'
         type: choice
-        options: ["true", "false"]
+        options: ['true', 'false']
       run_r2:
-        description: "Run R2 tarball and BuildKit S3 cache experiments"
+        description: 'Run R2 tarball and BuildKit S3 cache experiments'
         required: true
-        default: "true"
+        default: 'true'
         type: choice
-        options: ["true", "false"]
+        options: ['true', 'false']
       run_sam_devcontainer_stress:
-        description: "Build and push the real SAM devcontainer to Cloudflare registry"
+        description: 'Build and push the real SAM devcontainer to Cloudflare registry'
         required: true
-        default: "false"
+        default: 'false'
         type: choice
-        options: ["true", "false"]
+        options: ['true', 'false']
+
+env:
+  DEVCONTAINERS_CLI_VERSION: 0.80.2
 
 permissions:
   contents: read
@@ -63,7 +66,8 @@ jobs:
       - name: Build local test image
         run: |
           cat > Dockerfile.cache-exp <<'DOCKERFILE'
-          FROM alpine:3.20
+          # Reviewed source tag: docker.io/library/alpine:3.20
+          FROM docker.io/library/alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
           RUN dd if=/dev/zero of=/cache-test.bin bs=1M count=64
           CMD ["sh", "-c", "test -f /cache-test.bin && echo ok"]
           DOCKERFILE
@@ -126,7 +130,8 @@ jobs:
         run: |
           mkdir -p /tmp/sam-cache-exp
           cat > /tmp/sam-cache-exp/Dockerfile <<'DOCKERFILE'
-          FROM alpine:3.20
+          # Reviewed source tag: docker.io/library/alpine:3.20
+          FROM docker.io/library/alpine:3.20@sha256:d9e853e87e55526f6b2917df91a2115c36dd7c696a35be12163d44e6e2a4b6bc
           RUN dd if=/dev/zero of=/r2-cache-test.bin bs=1M count=64
           RUN sha256sum /r2-cache-test.bin > /r2-cache-test.sha256
           CMD ["cat", "/r2-cache-test.sha256"]
@@ -217,7 +222,7 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Install devcontainer CLI
-        run: npm install -g @devcontainers/cli
+        run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
 
       - name: Build SAM devcontainer image
         run: |

@@ -186,6 +186,10 @@ type GatewayConfig struct {
 	TerminalActivityReportAttempts int
 	// TerminalActivityReportBackoff is the delay between terminal/error retries.
 	TerminalActivityReportBackoff time.Duration
+	// ActivityReportTimeout bounds each activity callback request.
+	ActivityReportTimeout time.Duration
+	// CredentialSyncTimeout bounds auth-file sync-back during shutdown.
+	CredentialSyncTimeout time.Duration
 	// RecoveryWatchdogTimeout bounds crash recovery after a prompt disconnect.
 	// Zero uses DefaultRecoveryWatchdogTimeout.
 	RecoveryWatchdogTimeout time.Duration

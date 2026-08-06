@@ -1076,8 +1076,12 @@ func ensureDevcontainerReady(ctx context.Context, cfg *config.Config, volumeName
 	if cacheRef != "" && !usedFallback && hasConfig {
 		labelKey := cfg.ContainerLabelKey
 		labelValue := cfg.ContainerLabelValue
+		cachePushTimeout := cfg.DevcontainerCachePushTimeout
+		if cachePushTimeout <= 0 {
+			cachePushTimeout = config.DefaultDevcontainerCachePushTimeout
+		}
 		go func() {
-			pushCtx, pushCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			pushCtx, pushCancel := context.WithTimeout(context.Background(), cachePushTimeout)
 			defer pushCancel()
 			if pushErr := cache.PushCacheImage(pushCtx, labelKey, labelValue, cacheRef); pushErr != nil {
 				slog.Warn("Cache image push failed (non-fatal)", "ref", cacheRef, "error", pushErr)
@@ -3099,9 +3103,14 @@ func markWorkspaceReady(ctx context.Context, cfg *config.Config, status, workspa
 
 	endpoint := fmt.Sprintf("%s/api/workspaces/%s/ready", strings.TrimRight(cfg.ControlPlaneURL, "/"), cfg.WorkspaceID)
 
+	requestTimeout := cfg.WorkspaceReadyCallbackTimeout
+	if requestTimeout <= 0 {
+		requestTimeout = 30 * time.Second
+	}
+
 	return callbackretry.Do(ctx, callbackretry.DefaultConfig(), "workspace-ready", func(retryCtx context.Context) error {
 		// Per-request timeout to prevent a single hung request from consuming the entire retry budget
-		requestCtx, cancel := context.WithTimeout(retryCtx, 30*time.Second)
+		requestCtx, cancel := context.WithTimeout(retryCtx, requestTimeout)
 		defer cancel()
 
 		req, err := http.NewRequestWithContext(requestCtx, http.MethodPost, endpoint, bytes.NewReader(body))

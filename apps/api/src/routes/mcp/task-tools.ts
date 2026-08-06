@@ -21,6 +21,7 @@ import * as notificationService from '../../services/notification';
 import * as projectDataService from '../../services/project-data';
 import * as orchestratorService from '../../services/project-orchestrator';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
+import { getLatestAssistantMessageForTask } from '../../services/task-final-assistant-message';
 import { cleanupTerminalTaskResources } from '../../services/task-terminal-cleanup';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
@@ -48,20 +49,19 @@ type TaskSearchRow = {
 
 const TASK_DETAIL_RECENT_ASSISTANT_MESSAGE_LIMIT = 5;
 const TASK_DETAIL_MESSAGE_SNIPPET_LENGTH = 2000;
-
 function truncateSnippet(value: string | null, maxLength: number): string | null {
   if (!value) return null;
   return value.slice(0, maxLength) + (value.length > maxLength ? '...' : '');
 }
 
-type TaskDetailAssistantMessage = {
+export type TaskDetailAssistantMessage = {
   id: string;
   role: 'assistant';
   content: string;
   createdAt: number | string | null;
 };
 
-async function getRecentAssistantMessagesForTaskDetail(
+export async function getRecentAssistantMessagesForTaskDetail(
   env: Env,
   projectId: string,
   sessionId: string | null
@@ -655,6 +655,12 @@ export async function handleGetTaskDetails(
     task.chatSessionId
   );
 
+  const finalAssistantMessage = await getLatestAssistantMessageForTask(
+    env,
+    tokenData.projectId,
+    task.chatSessionId
+  );
+
   const taskResult = {
     id: task.id,
     title: task.title,
@@ -665,6 +671,7 @@ export async function handleGetTaskDetails(
     outputPrUrl: task.outputPrUrl,
     outputSummary: task.outputSummary,
     completionEvidence: parseCompletionEvidenceJson(task.completionEvidence ?? null),
+    finalAssistantMessage,
     errorMessage: task.errorMessage,
     // Instant (cf-container) dispatches create the chat session asynchronously;
     // dispatch_task points callers here to obtain the sessionId after launch.

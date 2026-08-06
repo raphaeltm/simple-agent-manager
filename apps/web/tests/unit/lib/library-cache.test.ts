@@ -3,7 +3,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { CachedIndexFile } from '../../../src/lib/library-cache';
 import {
+  buildLibraryCacheNamespace,
   clearCachedIndex,
+  clearLegacyLibraryCache,
   clearLibraryCache,
   getCachedDirectories,
   getCachedFiles,
@@ -124,6 +126,56 @@ describe('library-cache', () => {
 
     expect(getCachedFiles('proj-1', '/', 'createdAt')).toEqual(data1);
     expect(getCachedFiles('proj-1', '/docs/', 'createdAt')).toEqual(data2);
+  });
+
+
+  it('isolates file, directory, and index cache entries by authenticated user namespace', () => {
+    const userA = buildLibraryCacheNamespace('user:a@example.com');
+    const userB = buildLibraryCacheNamespace('user:b@example.com');
+    const filesA: ListFilesResponse = { files: [{ id: 'a', filename: 'a.txt' }] as ListFilesResponse['files'], cursor: null, total: 1 };
+    const filesB: ListFilesResponse = { files: [{ id: 'b', filename: 'b.txt' }] as ListFilesResponse['files'], cursor: null, total: 1 };
+
+    setCachedFiles('same-project', '/', 'createdAt', filesA, userA);
+    setCachedFiles('same-project', '/', 'createdAt', filesB, userB);
+    setCachedDirectories('same-project', '/', [{ path: '/a/', name: 'a', fileCount: 1 }], userA);
+    setCachedIndex('same-project', [makeIndexFile('a')], userA);
+
+    expect(getCachedFiles('same-project', '/', 'createdAt', userA)).toEqual(filesA);
+    expect(getCachedFiles('same-project', '/', 'createdAt', userB)).toEqual(filesB);
+    expect(getCachedDirectories('same-project', '/', userB)).toBeNull();
+    expect(getCachedIndex('same-project', userB)).toBeNull();
+  });
+
+  it('does not read legacy project-only entries when a user namespace is supplied', () => {
+    const userA = buildLibraryCacheNamespace('user-a');
+    const legacyFiles: ListFilesResponse = { files: [{ id: 'legacy', filename: 'old-user.txt' }] as ListFilesResponse['files'], cursor: null, total: 1 };
+
+    setCachedFiles('proj-1', '/', 'createdAt', legacyFiles);
+    setCachedDirectories('proj-1', '/', [{ path: '/old/', name: 'old', fileCount: 1 }]);
+    setCachedIndex('proj-1', [makeIndexFile('legacy')]);
+
+    expect(getCachedFiles('proj-1', '/', 'createdAt', userA)).toBeNull();
+    expect(getCachedDirectories('proj-1', '/', userA)).toBeNull();
+    expect(getCachedIndex('proj-1', userA)).toBeNull();
+  });
+
+  it('clears only the requested user namespace and can separately purge legacy keys', () => {
+    const userA = buildLibraryCacheNamespace('user-a');
+    const userB = buildLibraryCacheNamespace('user-b');
+
+    setCachedIndex('proj-1', [makeIndexFile('a')], userA);
+    setCachedIndex('proj-1', [makeIndexFile('b')], userB);
+    setCachedIndex('proj-1', [makeIndexFile('legacy')]);
+
+    clearLibraryCache(userA);
+
+    expect(getCachedIndex('proj-1', userA)).toBeNull();
+    expect(getCachedIndex('proj-1', userB)?.files[0]?.id).toBe('b');
+    expect(getCachedIndex('proj-1')?.files[0]?.id).toBe('legacy');
+
+    clearLegacyLibraryCache();
+    expect(getCachedIndex('proj-1')).toBeNull();
+    expect(getCachedIndex('proj-1', userB)?.files[0]?.id).toBe('b');
   });
 
   it('clearLibraryCache removes all sam-library entries', () => {

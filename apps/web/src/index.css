@@ -114,6 +114,32 @@
   }
 }
 
+/* ── Skip-to-content link ── */
+@layer base {
+  .sam-skip-to-content:focus {
+    background-color: var(--sam-color-focus-ring);
+    color: #000;
+  }
+}
+
+/* ── Global focus-visible ring for interactive elements ──
+   Form elements already have custom focus styles above (box-shadow ring).
+   This adds a visible focus indicator for all other interactive elements
+   (buttons, links, tabs, etc.) when navigated to via keyboard. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--sam-color-focus-ring);
+    outline-offset: 2px;
+  }
+
+  /* Form elements keep their existing box-shadow focus style instead */
+  input:focus-visible,
+  textarea:focus-visible,
+  select:focus-visible {
+    outline: none;
+  }
+}
+
 /* ── SAM-specific utility (not replaceable by Tailwind) ── */
 @layer utilities {
   .min-h-screen { min-height: var(--sam-app-height); }

@@ -89,7 +89,7 @@ func runStandaloneMode(cfg *config.Config) {
 		srv.StopAllWorkspacesAndSessions()
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.GracefulShutdownTimeout)
 	defer cancel()
 	if err := srv.Stop(ctx); err != nil {
 		slog.Error("Error during shutdown", "error", err)
@@ -194,7 +194,7 @@ func runDeploymentMode(cfg *config.Config) {
 	}
 
 	// Graceful shutdown of HTTP server only
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.GracefulShutdownTimeout)
 	defer cancel()
 	if err := srv.Stop(ctx); err != nil {
 		slog.Error("Error during shutdown", "error", err)
@@ -204,7 +204,7 @@ func runDeploymentMode(cfg *config.Config) {
 
 // runWorkspaceMode starts the agent in the traditional workspace mode.
 func runWorkspaceMode(cfg *config.Config) {
-	reporter := bootlog.New(cfg.ControlPlaneURL, cfg.NodeID)
+	reporter := bootlog.NewWithHTTPTimeout(cfg.ControlPlaneURL, cfg.NodeID, cfg.BootLogHTTPTimeout)
 
 	// Create server BEFORE bootstrap so /health and /boot-log/ws are available
 	// while the workspace is still being provisioned.
@@ -233,10 +233,10 @@ func runWorkspaceMode(cfg *config.Config) {
 	}()
 
 	// Run system provisioning (firewall, Node.js, devcontainer CLI, etc.)
-	provisionCtx, provisionCancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	provisionCtx, provisionCancel := context.WithTimeout(context.Background(), cfg.SystemProvisioningTimeout)
 	provisionStatus, provisionErr := provision.Run(provisionCtx, provision.Config{
 		VMAgentPort:      fmt.Sprintf("%d", cfg.Port),
-		CFIPFetchTimeout: "10",
+		CFIPFetchTimeout: fmt.Sprintf("%.0f", cfg.CFIPFetchTimeout.Seconds()),
 	}, srv.GetEventStore())
 	provisionCancel()
 
@@ -275,7 +275,7 @@ func runWorkspaceMode(cfg *config.Config) {
 	}
 
 	// Graceful shutdown of local server
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), cfg.GracefulShutdownTimeout)
 	defer cancel()
 
 	if err := srv.Stop(ctx); err != nil {

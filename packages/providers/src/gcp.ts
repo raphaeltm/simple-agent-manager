@@ -35,6 +35,8 @@ import {
 } from './validation';
 
 const COMPUTE_API_BASE = 'https://compute.googleapis.com/compute/v1';
+// 100 pages × 500 items/page ≈ 50,000 resources — well above any realistic fleet
+export const DEFAULT_GCP_MAX_LIST_PAGES = 100;
 
 /**
  * Classify a GCP API error into a normalized ProviderErrorCategory.
@@ -489,13 +491,15 @@ export class GcpProvider implements Provider {
     // Query all configured zones
     for (const zone of this.locations) {
       try {
-        const url = `${this.projectUrl()}/zones/${zone}/instances?filter=${encodeURIComponent(filterStr)}`;
-        const res = await providerFetch('gcp', url, { headers }, this.timeoutMs);
-        const data = validateGcpInstancesList(
-          await parseProviderJson(res, 'gcp', `listVMs.${zone}`),
+        await this.fetchPaginatedGcpInstances(
+          `${this.projectUrl()}/zones/${zone}/instances`,
+          new URLSearchParams({ filter: filterStr }),
+          headers,
           `listVMs.${zone}`,
+          (data) => {
+            results.push(...(data.items || []).map((i) => this.toVMInstance(i)));
+          },
         );
-        results.push(...(data.items || []).map((i) => this.toVMInstance(i)));
       } catch (err) {
         if (this.isToleratedZoneListError(err)) continue;
         throw new ProviderError(
@@ -602,21 +606,25 @@ export class GcpProvider implements Provider {
     // If not found by name, try aggregated list with filter by label
     try {
       const filterStr = `labels.sam-managed=true`;
-      const url = `${COMPUTE_API_BASE}/projects/${this.projectId}/aggregated/instances?filter=${encodeURIComponent(filterStr)}`;
-      const res = await providerFetch('gcp', url, { headers }, this.timeoutMs);
-      const data = validateGcpAggregatedInstances(
-        await parseProviderJson(res, 'gcp', 'findInstanceByIdOrName.aggregated'),
+      let found: GcpInstancePayload | null = null;
+      await this.fetchPaginatedGcpAggregatedInstances(
+        `${COMPUTE_API_BASE}/projects/${this.projectId}/aggregated/instances`,
+        new URLSearchParams({ filter: filterStr }),
+        headers,
         'findInstanceByIdOrName.aggregated',
-      );
-      if (data.items) {
-        for (const scopeData of Object.values(data.items)) {
-          for (const instance of scopeData.instances || []) {
-            if (instance.id === idOrName || instance.name === idOrName) {
-              return instance;
+        (data) => {
+          if (found || !data.items) return;
+          for (const scopeData of Object.values(data.items)) {
+            for (const instance of scopeData.instances || []) {
+              if (instance.id === idOrName || instance.name === idOrName) {
+                found = instance;
+                return true;
+              }
             }
           }
-        }
-      }
+        },
+      );
+      if (found) return found;
     } catch (err) {
       throw new ProviderError(
         'gcp',
@@ -627,6 +635,65 @@ export class GcpProvider implements Provider {
     }
 
     return null;
+  }
+
+
+  private async fetchPaginatedGcpInstances(
+    baseUrl: string,
+    baseParams: URLSearchParams,
+    headers: Record<string, string>,
+    context: string,
+    handlePage: (data: { items?: GcpInstancePayload[]; nextPageToken?: string }) => boolean | void,
+  ): Promise<void> {
+    await this.fetchPaginatedGcpList(baseUrl, baseParams, headers, context, async (payload) => {
+      const data = validateGcpInstancesList(payload, context);
+      const stop = handlePage(data);
+      return { nextPageToken: data.nextPageToken, stop: stop === true };
+    });
+  }
+
+  private async fetchPaginatedGcpAggregatedInstances(
+    baseUrl: string,
+    baseParams: URLSearchParams,
+    headers: Record<string, string>,
+    context: string,
+    handlePage: (data: { items?: Record<string, { instances?: GcpInstancePayload[] }>; nextPageToken?: string }) => boolean | void,
+  ): Promise<void> {
+    await this.fetchPaginatedGcpList(baseUrl, baseParams, headers, context, async (payload) => {
+      const data = validateGcpAggregatedInstances(payload, context);
+      const stop = handlePage(data);
+      return { nextPageToken: data.nextPageToken, stop: stop === true };
+    });
+  }
+
+  private async fetchPaginatedGcpList(
+    baseUrl: string,
+    baseParams: URLSearchParams,
+    headers: Record<string, string>,
+    context: string,
+    handlePage: (payload: unknown) => Promise<{ nextPageToken?: string; stop?: boolean }>,
+  ): Promise<void> {
+    const seenTokens = new Set<string>();
+    let pageToken: string | undefined;
+
+    for (let pageCount = 0; pageCount < DEFAULT_GCP_MAX_LIST_PAGES; pageCount += 1) {
+      const params = new URLSearchParams(baseParams);
+      if (pageToken) params.set('pageToken', pageToken);
+      const res = await providerFetch('gcp', `${baseUrl}?${params.toString()}`, { headers }, this.timeoutMs);
+      const result = await handlePage(await parseProviderJson(res, 'gcp', context));
+      if (result.stop || !result.nextPageToken) return;
+      if (seenTokens.has(result.nextPageToken)) {
+        throw new ProviderError('gcp', undefined, `GCP ${context} pagination repeated nextPageToken`, {
+          category: 'invalid_config',
+        });
+      }
+      seenTokens.add(result.nextPageToken);
+      pageToken = result.nextPageToken;
+    }
+
+    throw new ProviderError('gcp', undefined, `GCP ${context} exceeded ${DEFAULT_GCP_MAX_LIST_PAGES} pages`, {
+      category: 'invalid_config',
+    });
   }
 
   private toVMInstance(instance: GcpInstancePayload): VMInstance {

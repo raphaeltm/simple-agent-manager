@@ -1,7 +1,7 @@
 # Cloudflare Sandbox SDK base image — includes the /container-server/sandbox
 # binary that exposes the HTTP API used by getSandbox()/exec()/readFile()/etc.
-# IMPORTANT: The image tag MUST match the @cloudflare/sandbox npm package version.
-FROM docker.io/cloudflare/sandbox:0.12.1
+# IMPORTANT: The reviewed source tag for this digest is cloudflare/sandbox:0.12.1 and MUST match the @cloudflare/sandbox npm package version.
+FROM docker.io/cloudflare/sandbox:0.12.1@sha256:ea9b35e61c800eddbc4450fad333e5dd26033a06f7d36624388b0711bef9f8c5
 
 COPY scripts/codex-device-auth.mjs /usr/local/bin/sam-codex-device-auth.mjs
 COPY scripts/claude-setup-token.mjs /usr/local/bin/sam-claude-setup-token.mjs

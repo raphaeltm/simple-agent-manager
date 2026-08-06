@@ -43,7 +43,7 @@ function getClientIp(c: { req: { header: (name: string) => string | undefined } 
  * Validate and sanitize a single client-side analytics event.
  * Returns null for malformed events (dropped silently).
  */
-function validateEvent(raw: unknown): {
+function validateEvent(raw: unknown, maxDurationMs: number = DEFAULT_MAX_DURATION_MS): {
   event: string;
   page: string;
   referrer: string;
@@ -76,7 +76,7 @@ function validateEvent(raw: unknown): {
     sessionId: typeof e.sessionId === 'string' ? truncate(e.sessionId, DEFAULT_MAX_SESSION_ID_LENGTH) : '',
     entityId: typeof e.entityId === 'string' ? truncate(e.entityId, DEFAULT_MAX_ENTITY_ID_LENGTH) : '',
     durationMs: typeof e.durationMs === 'number' && isFinite(e.durationMs) && e.durationMs >= 0
-      ? Math.min(e.durationMs, DEFAULT_MAX_DURATION_MS) : 0,
+      ? Math.min(e.durationMs, maxDurationMs) : 0,
     visitorId: typeof e.visitorId === 'string' ? truncate(e.visitorId, DEFAULT_MAX_SESSION_ID_LENGTH) : '',
     host: typeof e.host === 'string' ? truncate(e.host, DEFAULT_MAX_HOST_LENGTH) : '',
   };
@@ -122,6 +122,10 @@ analyticsIngestRoutes.post('/', async (c) => {
   );
   const maxBatchSize = parseInt(
     c.env.MAX_ANALYTICS_INGEST_BATCH_SIZE || String(DEFAULT_MAX_BATCH_SIZE),
+    10
+  );
+  const maxDurationMs = parseInt(
+    c.env.MAX_ANALYTICS_DURATION_MS || String(DEFAULT_MAX_DURATION_MS),
     10
   );
 
@@ -188,7 +192,7 @@ analyticsIngestRoutes.post('/', async (c) => {
   const writeAll = async () => {
     try {
       for (const raw of events) {
-        const validated = validateEvent(raw);
+        const validated = validateEvent(raw, maxDurationMs);
         if (!validated) continue;
 
         // Authenticated: use server-verified userId

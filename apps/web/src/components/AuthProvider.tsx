@@ -4,6 +4,7 @@ import { createContext, type ReactNode, useContext, useEffect, useMemo, useRef, 
 import { setUserId } from '../lib/analytics';
 import { GITHUB_REAUTH_REQUIRED_EVENT } from '../lib/api/client';
 import { signOut, useSession } from '../lib/auth';
+import { buildLibraryCacheNamespace, clearLegacyLibraryCache, clearLibraryCache } from '../lib/library-cache';
 
 interface User {
   id: string;
@@ -45,6 +46,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const { data: session, isPending, error, isRefetching } = useSession();
   const lastGoodSessionRef = useRef<typeof session>(null);
   const [githubReauthMessage, setGitHubReauthMessage] = useState<string | null>(null);
+  const previousCacheNamespaceRef = useRef<string | null | undefined>(undefined);
 
   // Cache every successful session
   if (session?.user) {
@@ -72,6 +74,25 @@ export function AuthProvider({ children }: AuthProviderProps) {
     () => (user ? { ...user, role, status } : null),
     [user, role, status]
   );
+
+  useEffect(() => {
+    if (isPending) return;
+
+    const nextNamespace = buildLibraryCacheNamespace(enrichedUser?.id);
+    const previousNamespace = previousCacheNamespaceRef.current;
+
+    if (previousNamespace === undefined) {
+      previousCacheNamespaceRef.current = nextNamespace;
+      if (nextNamespace) clearLegacyLibraryCache();
+      return;
+    }
+
+    if (previousNamespace !== nextNamespace) {
+      if (previousNamespace) clearLibraryCache(previousNamespace);
+      clearLegacyLibraryCache();
+      previousCacheNamespaceRef.current = nextNamespace;
+    }
+  }, [enrichedUser?.id, isPending]);
 
   // Sync authenticated userId to analytics tracker
   useEffect(() => {

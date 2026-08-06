@@ -65,7 +65,10 @@ function stripPreview(file: FileWithTags): CachedIndexFile {
   return { ...file, extractedTextPreview: null };
 }
 
-export function useLibraryIndex(projectId: string): UseLibraryIndexResult {
+export function useLibraryIndex(
+  projectId: string,
+  cacheNamespace?: string | null,
+): UseLibraryIndexResult {
   const cap = resolveCap();
   const maxSweepPages = resolveMaxSweepPages();
   const [files, setFiles] = useState<FileWithTags[]>([]);
@@ -87,7 +90,7 @@ export function useLibraryIndex(projectId: string): UseLibraryIndexResult {
     const isCurrent = () => !cancelled && gen === genRef.current;
 
     // Hydrate from cache for a flicker-free first paint, then re-sweep.
-    const cached = getCachedIndex(projectId);
+    const cached = getCachedIndex(projectId, cacheNamespace);
     if (cached) {
       setFiles(cached.files);
       setFileCount(cached.count);
@@ -121,7 +124,7 @@ export function useLibraryIndex(projectId: string): UseLibraryIndexResult {
             setFiles([]);
             setFileCount(resp.total);
             setStatus('overCap');
-            clearCachedIndex(projectId);
+            clearCachedIndex(projectId, cacheNamespace);
             return;
           }
 
@@ -142,7 +145,7 @@ export function useLibraryIndex(projectId: string): UseLibraryIndexResult {
         setFiles(accumulated);
         setFileCount(accumulated.length);
         setStatus('ready');
-        setCachedIndex(projectId, accumulated);
+        setCachedIndex(projectId, accumulated, cacheNamespace);
       } catch {
         if (!isCurrent()) return;
         setSweepError(true);
@@ -164,7 +167,7 @@ export function useLibraryIndex(projectId: string): UseLibraryIndexResult {
     // Sweep ONLY on project change or explicit invalidation — never on
     // directory navigation, search, or sort.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId, invalidationToken]);
+  }, [projectId, cacheNamespace, invalidationToken]);
 
   const index = useMemo(() => buildIndex(files), [files]);
 

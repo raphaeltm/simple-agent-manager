@@ -1,5 +1,5 @@
 /* SAM self-host guided setup wizard.
- * Pure client-side. No network calls. Secrets entered here never leave the tab.
+ * Pure client-side. No network calls. Secrets entered or generated here never leave the tab.
  * Source of truth for steps/values: apps/www/src/content/docs/docs/guides/self-hosting.mdx
  */
 (function () {
@@ -63,14 +63,16 @@
       var raw = localStorage.getItem(STORAGE_KEY);
       if (!raw) return;
       var saved = JSON.parse(raw);
+      var hasLegacyPersistedSecrets =
+        Object.prototype.hasOwnProperty.call(saved, 'webhookSecret') ||
+        Object.prototype.hasOwnProperty.call(saved, 'passphrase');
       if (typeof saved.step === 'number') state.step = clampStep(saved.step);
       if (typeof saved.furthest === 'number') state.furthest = clampStep(saved.furthest);
       if (saved.accountType === 'org' || saved.accountType === 'personal') {
         state.accountType = saved.accountType;
       }
-      if (typeof saved.webhookSecret === 'string') state.webhookSecret = saved.webhookSecret;
-      if (typeof saved.passphrase === 'string') state.passphrase = saved.passphrase;
       if (saved.fields && typeof saved.fields === 'object') state.fields = saved.fields;
+      if (hasLegacyPersistedSecrets) saveState();
     } catch (e) {
       /* ignore corrupt state */
     }
@@ -84,8 +86,6 @@
           step: state.step,
           furthest: state.furthest,
           accountType: state.accountType,
-          webhookSecret: state.webhookSecret,
-          passphrase: state.passphrase,
           fields: state.fields,
         })
       );
@@ -298,7 +298,6 @@
     }
     if (!state.webhookSecret) {
       state.webhookSecret = generateWebhookSecret();
-      saveState();
     }
     var appName = getField('sh-app-name') || 'SAM';
     var org = state.accountType === 'org' ? getField('sh-org') : '';
@@ -344,7 +343,6 @@
   function ensurePassphrase() {
     if (!state.passphrase) {
       state.passphrase = generatePassphrase();
-      saveState();
     }
     var el = document.getElementById('sh-passphrase');
     if (el) el.textContent = state.passphrase;
@@ -855,7 +853,6 @@
     if (regen) {
       regen.addEventListener('click', function () {
         state.passphrase = generatePassphrase();
-        saveState();
         ensurePassphrase();
       });
     }
@@ -896,6 +893,17 @@
         );
         var result = document.getElementById('sh-app-result');
         if (result) result.hidden = true;
+        ['sh-webhook-secret', 'sh-passphrase'].forEach(function (id) {
+          var el = document.getElementById(id);
+          if (el) el.textContent = '';
+        });
+        var ghOut = document.getElementById('sh-gh-cli-output');
+        if (ghOut) {
+          ghOut.setAttribute('data-script', '');
+          ghOut.setAttribute('data-revealed', 'false');
+          var code = ghOut.querySelector('code');
+          if (code) code.textContent = '# Fill in the earlier steps to generate the command.';
+        }
         accountRadios.forEach(function (r) {
           r.checked = r.value === 'personal';
         });

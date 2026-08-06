@@ -109,6 +109,12 @@ export interface CompletionEvidence {
   notes?: string;
 }
 
+export interface TaskFinalAssistantMessage {
+  id: string;
+  content: string;
+  createdAt: number | string;
+}
+
 const COMPLETION_EVIDENCE_LIMITS = {
   maxTestsRun: 25,
   maxVerifications: 25,
@@ -378,6 +384,7 @@ export interface Task {
   outputBranch: string | null;
   outputPrUrl: string | null;
   completionEvidence: CompletionEvidence | null;
+  finalAssistantMessage?: TaskFinalAssistantMessage | null;
   finalizedAt: string | null;
   createdAt: string;
   updatedAt: string;

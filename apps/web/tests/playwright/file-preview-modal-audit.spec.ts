@@ -6,6 +6,8 @@ import { assertNoOverflow, screenshot, setupProjectChatMocks } from './audit-hel
 
 const PROJECT_ID = 'proj-preview-v2';
 const SESSION_ID = 'sess-preview-v2';
+/** Stand-in for the isolated preview origin (`preview.<domain>` in real deployments). */
+const PREVIEW_ORIGIN = 'https://preview.example.com';
 
 test.use({ serviceWorkers: 'block' });
 
@@ -205,6 +207,25 @@ async function setupMocks(page: Page) {
     if (path === `/api/projects/${PROJECT_ID}/library/html-file/preview`) {
       return route.fulfill({ status: 200, contentType: 'text/plain; charset=utf-8', body: HTML_BODY });
     }
+    if (path === `/api/projects/${PROJECT_ID}/library/html-file/interactive-preview-url`) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          url: `${PREVIEW_ORIGIN}/p/signed/index.html`,
+          expiresAt: '2026-08-04T12:05:00.000Z',
+          version: '2026-07-04T00:00:00Z',
+        }),
+      });
+    }
+    // The isolated preview origin the auto-run iframe points at.
+    if (route.request().url().startsWith(PREVIEW_ORIGIN)) {
+      return route.fulfill({
+        status: 200,
+        contentType: 'text/html; charset=utf-8',
+        body: HTML_BODY,
+      });
+    }
     return route.fallback();
   });
 
@@ -221,6 +242,19 @@ async function openModalAndCapture(page: Page, fileName: string, screenshotName:
   await expect(page.getByRole('dialog')).toBeVisible();
   await expect(page.getByRole('heading', { name: fileName })).toBeVisible();
   await expect(page.getByText('Failed to load image')).toHaveCount(0);
+  if (fileName.endsWith('.html')) {
+    // Opening the artifact IS the intent signal — the preview must already be running, with the
+    // isolation contract intact and no leftover inert copy above it.
+    const frame = page.locator(`iframe[title="Interactive preview of ${fileName}"]`);
+    await expect(frame).toBeVisible();
+    await expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
+    await expect(page.getByRole('alertdialog')).toHaveCount(0);
+    await expect(page.getByRole('dialog').locator('iframe')).toHaveCount(1);
+    // The dead flex chain pinned this to its 320px min-height floor at every viewport.
+    const box = await frame.boundingBox();
+    const viewport = page.viewportSize();
+    expect(box!.height).toBeGreaterThan(viewport!.height * 0.5);
+  }
   if (fileName.match(/\.(png|jpe?g|gif|webp|svg)$/i)) {
     const previewImage = page.getByRole('dialog').locator(`img[alt="${fileName}"]`);
     await expect

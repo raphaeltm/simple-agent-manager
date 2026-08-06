@@ -267,10 +267,18 @@ func (h *SessionHost) activityReportRetryPolicy(activity string) (int, time.Dura
 	return attempts, backoff
 }
 
+func (h *SessionHost) activityReportTimeout() time.Duration {
+	timeout := h.config.ActivityReportTimeout
+	if timeout <= 0 {
+		timeout = 10 * time.Second
+	}
+	return timeout
+}
+
 // doActivityRequest performs a single HTTP POST attempt to the activity endpoint.
 // Returns the HTTP status code on success, or an error on network/request failure.
 func (h *SessionHost) doActivityRequest(url string, body []byte, callbackToken string) (int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), h.activityReportTimeout())
 	defer cancel()
 
 	// bytes.NewReader is created fresh each call so the body is correctly

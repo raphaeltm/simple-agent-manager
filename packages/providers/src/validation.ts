@@ -112,11 +112,12 @@ export function validateHetznerServerResponse(
 export function validateHetznerServersResponse(
   payload: unknown,
   context: string,
-): { servers: HetznerServerPayload[] } {
+): { servers: HetznerServerPayload[]; nextPage?: number } {
   const root = expectObject(payload, 'hetzner', context);
   const servers = requireArray(root, 'servers', 'hetzner', context);
   return {
     servers: servers.map((server, index) => validateHetznerServer(server, `${context}.servers[${index}]`)),
+    ...readHetznerNextPage(root, context),
   };
 }
 
@@ -136,11 +137,12 @@ export function validateHetznerVolumeResponse(
 export function validateHetznerVolumesResponse(
   payload: unknown,
   context: string,
-): { volumes: HetznerVolumePayload[] } {
+): { volumes: HetznerVolumePayload[]; nextPage?: number } {
   const root = expectObject(payload, 'hetzner', context);
   const volumes = requireArray(root, 'volumes', 'hetzner', context);
   return {
     volumes: volumes.map((volume, index) => validateHetznerVolume(volume, `${context}.volumes[${index}]`)),
+    ...readHetznerNextPage(root, context),
   };
 }
 
@@ -251,22 +253,30 @@ export function validateGcpInstance(payload: unknown, context: string): GcpInsta
 export function validateGcpInstancesList(
   payload: unknown,
   context: string,
-): { items?: GcpInstancePayload[] } {
+): { items?: GcpInstancePayload[]; nextPageToken?: string } {
   const root = expectObject(payload, 'gcp', context);
   const items = optionalArray(root, 'items', 'gcp', context);
-  if (!items) return {};
+  const nextPageToken = optionalString(root, 'nextPageToken', 'gcp', context);
+  if (nextPageToken !== undefined && nextPageToken.length === 0) {
+    throw validationError('gcp', `${context}.nextPageToken`, 'expected non-empty string');
+  }
   return {
-    items: items.map((instance, index) => validateGcpInstance(instance, `${context}.items[${index}]`)),
+    ...(items ? { items: items.map((instance, index) => validateGcpInstance(instance, `${context}.items[${index}]`)) } : {}),
+    ...(nextPageToken ? { nextPageToken } : {}),
   };
 }
 
 export function validateGcpAggregatedInstances(
   payload: unknown,
   context: string,
-): { items?: Record<string, { instances?: GcpInstancePayload[] }> } {
+): { items?: Record<string, { instances?: GcpInstancePayload[] }>; nextPageToken?: string } {
   const root = expectObject(payload, 'gcp', context);
   const items = optionalObject(root, 'items', 'gcp', context);
-  if (!items) return {};
+  const nextPageToken = optionalString(root, 'nextPageToken', 'gcp', context);
+  if (nextPageToken !== undefined && nextPageToken.length === 0) {
+    throw validationError('gcp', `${context}.nextPageToken`, 'expected non-empty string');
+  }
+  if (!items) return { ...(nextPageToken ? { nextPageToken } : {}) };
 
   const scopes: Record<string, { instances?: GcpInstancePayload[] }> = {};
   for (const [scope, scopePayload] of Object.entries(items)) {
@@ -277,7 +287,24 @@ export function validateGcpAggregatedInstances(
       : {};
   }
 
-  return { items: scopes };
+  return {
+    items: scopes,
+    ...(nextPageToken ? { nextPageToken } : {}),
+  };
+}
+
+
+function readHetznerNextPage(root: JsonObject, context: string): { nextPage?: number } {
+  const meta = optionalObject(root, 'meta', 'hetzner', context);
+  if (!meta) return {};
+  const pagination = optionalObject(meta, 'pagination', 'hetzner', `${context}.meta`);
+  if (!pagination) return {};
+  const nextPage = pagination.next_page;
+  if (nextPage === undefined || nextPage === null) return {};
+  if (typeof nextPage !== 'number' || !Number.isInteger(nextPage) || nextPage < 1) {
+    throw validationError('hetzner', `${context}.meta.pagination.next_page`, 'expected positive integer or null');
+  }
+  return { nextPage };
 }
 
 function validateHetznerServer(payload: unknown, context: string): HetznerServerPayload {

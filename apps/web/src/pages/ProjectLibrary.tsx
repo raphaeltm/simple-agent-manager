@@ -5,6 +5,7 @@ import { Folder, FolderOpen, Search, Upload } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
 
+import { useAuth } from '../components/AuthProvider';
 import { CreateDirectoryDialog } from '../components/library/CreateDirectoryDialog';
 import { DirectoryBreadcrumb } from '../components/library/DirectoryBreadcrumb';
 import { FileGridCard } from '../components/library/FileGridCard';
@@ -28,10 +29,12 @@ import {
 } from '../lib/api';
 import { formatFileSize } from '../lib/file-utils';
 import {
+  buildLibraryCacheNamespace,
   getCachedDirectories,
   getCachedFiles,
   setCachedDirectories,
   setCachedFiles,
+  UNAUTHENTICATED_LIBRARY_CACHE_NAMESPACE,
 } from '../lib/library-cache';
 import { searchIndex } from '../lib/library-search';
 import { useProjectContext } from './ProjectContext';
@@ -70,6 +73,12 @@ function applyAdvancedFilters(
 }
 
 export function ProjectLibrary() {
+  const { user } = useAuth();
+  const cacheNamespace = buildLibraryCacheNamespace(user?.id) ?? UNAUTHENTICATED_LIBRARY_CACHE_NAMESPACE;
+  return <ProjectLibraryContent key={cacheNamespace} cacheNamespace={cacheNamespace} />;
+}
+
+function ProjectLibraryContent({ cacheNamespace }: { cacheNamespace: string }) {
   const { projectId } = useProjectContext();
   const isMobile = useIsMobile();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -90,24 +99,13 @@ export function ProjectLibrary() {
     isSweeping,
     sweepError,
     invalidate,
-  } = useLibraryIndex(projectId);
+  } = useLibraryIndex(projectId, cacheNamespace);
   const isOverCap = indexStatus === 'overCap';
 
   // Directory cache for instant render of folder cards
-  const initialCachedDirs = getCachedDirectories(projectId, '/') ?? [];
+  const initialCachedDirs = getCachedDirectories(projectId, '/', cacheNamespace) ?? [];
   const [directories, setDirectories] = useState<DirectoryEntry[]>(initialCachedDirs);
   const [dirRefreshToken, setDirRefreshToken] = useState(0);
-
-  // ---------------------------------------------------------------------------
-  // Legacy server-search state (used ONLY when status === 'overCap')
-  // ---------------------------------------------------------------------------
-  const initialCachedFiles = getCachedFiles(projectId, '/', 'createdAt');
-  const [serverFiles, setServerFiles] = useState<FileWithTags[]>(
-    initialCachedFiles ? initialCachedFiles.files : [],
-  );
-  const [loading, setLoading] = useState(!initialCachedFiles);
-  const [refreshing, setRefreshing] = useState(false);
-  const hasLoadedOnce = useRef(!!initialCachedFiles);
 
   // View state
   const [viewMode, setViewMode] = useState<ViewMode>('list');
@@ -115,6 +113,25 @@ export function ProjectLibrary() {
   const [showFilters, setShowFilters] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
   const [showCreateDir, setShowCreateDir] = useState(false);
+
+  // ---------------------------------------------------------------------------
+  // Legacy server-search state (used ONLY when status === 'overCap')
+  // ---------------------------------------------------------------------------
+  const initialCachedFiles = getCachedFiles(projectId, '/', 'createdAt', cacheNamespace);
+  const [serverFiles, setServerFiles] = useState<FileWithTags[]>(
+    initialCachedFiles ? initialCachedFiles.files : [],
+  );
+  const [loading, setLoading] = useState(!initialCachedFiles);
+  const [refreshing, setRefreshing] = useState(false);
+  const hasLoadedOnce = useRef(!!initialCachedFiles);
+
+  useEffect(() => {
+    setDirectories(getCachedDirectories(projectId, currentDirectory, cacheNamespace) ?? []);
+    const cachedFiles = getCachedFiles(projectId, currentDirectory, sortBy, cacheNamespace);
+    setServerFiles(cachedFiles ? cachedFiles.files : []);
+    setLoading(!cachedFiles);
+    hasLoadedOnce.current = !!cachedFiles;
+  }, [projectId, currentDirectory, sortBy, cacheNamespace]);
 
   // Search — searchInput is LOCAL state; filtering against the index is instant.
   // debouncedSearch drives ONLY (a) URL write-only reflection and (b) the
@@ -237,7 +254,7 @@ export function ProjectLibrary() {
       .then((res) => {
         if (cancelled) return;
         setDirectories(res.directories);
-        setCachedDirectories(projectId, currentDirectory, res.directories);
+        setCachedDirectories(projectId, currentDirectory, res.directories, cacheNamespace);
       })
       .catch((err) => {
         if (!cancelled) console.error('Failed to load directories:', err);
@@ -245,7 +262,7 @@ export function ProjectLibrary() {
     return () => {
       cancelled = true;
     };
-  }, [projectId, currentDirectory, dirRefreshToken]);
+  }, [projectId, currentDirectory, cacheNamespace, dirRefreshToken]);
 
   // ---------------------------------------------------------------------------
   // Legacy server-search load — gated behind the over-cap fallback
@@ -270,7 +287,7 @@ export function ProjectLibrary() {
         setServerFiles(filesResult.files);
         hasLoadedOnce.current = true;
         if (!debouncedSearch && activeTags.length === 0 && sourceFilter === 'all') {
-          setCachedFiles(projectId, currentDirectory, sortBy, filesResult);
+          setCachedFiles(projectId, currentDirectory, sortBy, filesResult, cacheNamespace);
         }
       } catch (err) {
         console.error('Failed to load library files:', err);
@@ -279,7 +296,7 @@ export function ProjectLibrary() {
         setRefreshing(false);
       }
     },
-    [projectId, debouncedSearch, activeTags, sourceFilter, sortBy, currentDirectory, isSearching],
+    [projectId, cacheNamespace, debouncedSearch, activeTags, sourceFilter, sortBy, currentDirectory, isSearching],
   );
 
   useEffect(() => {

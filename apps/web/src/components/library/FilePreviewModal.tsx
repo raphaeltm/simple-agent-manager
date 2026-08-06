@@ -3,6 +3,7 @@ import { AlertTriangle, Code, Download, Eye, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { useFileTextContent } from '../../hooks/useFileTextContent';
 import { useScrollLock } from '../../hooks/useScrollLock';
 import {
   FILE_PREVIEW_LOAD_MAX_BYTES,
@@ -13,7 +14,6 @@ import {
   isPreviewableImageMime,
 } from '../../lib/file-utils';
 import { RenderedMarkdown, SyntaxHighlightedCode } from '../MarkdownRenderer';
-import { HtmlViewer } from '../shared-file-viewer/HtmlViewer';
 import { ImageViewer } from '../shared-file-viewer/ImageViewer';
 import { InteractiveHtmlPreview } from './InteractiveHtmlPreview';
 import { type FileWithTags, FOCUS_RING } from './types';
@@ -31,11 +31,57 @@ const PDF_LOAD_TIMEOUT_MS = import.meta.env.VITE_PDF_LOAD_TIMEOUT_MS
   ? parseInt(import.meta.env.VITE_PDF_LOAD_TIMEOUT_MS, 10)
   : DEFAULT_PDF_LOAD_TIMEOUT_MS;
 
-/** Default timeout for markdown content fetch (ms). */
-const DEFAULT_MD_FETCH_TIMEOUT_MS = 30_000;
-const MD_FETCH_TIMEOUT_MS = import.meta.env.VITE_MD_FETCH_TIMEOUT_MS
-  ? parseInt(import.meta.env.VITE_MD_FETCH_TIMEOUT_MS, 10)
-  : DEFAULT_MD_FETCH_TIMEOUT_MS;
+const TOGGLE_BUTTON_BASE =
+  'flex items-center gap-1.5 px-2.5 py-2 text-xs border-none cursor-pointer';
+const TOGGLE_BUTTON_INACTIVE =
+  'bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)] text-fg-muted hover:text-fg-primary';
+
+/**
+ * Two-way primary/source view switch used by both the markdown and HTML branches so a single
+ * control shape governs every "rendered vs. raw" choice in the modal header.
+ */
+function ViewToggle({
+  primaryLabel,
+  primaryAriaLabel,
+  isPrimary,
+  onPrimary,
+  onSource,
+}: {
+  primaryLabel: string;
+  primaryAriaLabel: string;
+  isPrimary: boolean;
+  onPrimary: () => void;
+  onSource: () => void;
+}) {
+  return (
+    <div className="flex shrink-0 overflow-hidden rounded-lg border border-border-default">
+      <button
+        type="button"
+        onClick={onPrimary}
+        aria-label={primaryAriaLabel}
+        aria-pressed={isPrimary}
+        className={`${TOGGLE_BUTTON_BASE} ${FOCUS_RING} ${
+          isPrimary ? 'bg-accent/10 text-accent' : TOGGLE_BUTTON_INACTIVE
+        }`}
+      >
+        <Eye size={14} />
+        <span className="hidden sm:inline">{primaryLabel}</span>
+      </button>
+      <button
+        type="button"
+        onClick={onSource}
+        aria-label="Source view"
+        aria-pressed={!isPrimary}
+        className={`${TOGGLE_BUTTON_BASE} ${FOCUS_RING} ${
+          !isPrimary ? 'bg-accent/10 text-accent' : TOGGLE_BUTTON_INACTIVE
+        }`}
+      >
+        <Code size={14} />
+        <span className="hidden sm:inline">Source</span>
+      </button>
+    </div>
+  );
+}
 
 export function FilePreviewModal({ file, previewUrl, onClose, onDownload }: FilePreviewModalProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
@@ -48,45 +94,24 @@ export function FilePreviewModal({ file, previewUrl, onClose, onDownload }: File
   const isPdf = isPdfMime(file.mimeType, file.filename);
   const isMarkdown = isMarkdownMime(file.mimeType, file.filename);
   const isHtml = isHtmlMime(file.mimeType, file.filename);
+  // HTML artifacts run interactively; anything above the load ceiling is download-only.
+  const htmlTooLarge = isHtml && file.sizeBytes > FILE_PREVIEW_LOAD_MAX_BYTES;
 
-  // Markdown state
-  const [mdContent, setMdContent] = useState<string | null>(null);
-  const [mdLoading, setMdLoading] = useState(false);
-  const [mdError, setMdError] = useState<string | null>(null);
   const [mdViewMode, setMdViewMode] = useState<'rendered' | 'source'>('rendered');
+  // HTML defaults to the running preview. Source is the alternate view, and is fetched lazily so
+  // opening an artifact costs one request (the signed-URL mint) instead of two.
+  const [htmlViewMode, setHtmlViewMode] = useState<'preview' | 'source'>('preview');
 
-  // Fetch markdown content as text from the preview endpoint
-  useEffect(() => {
-    if (!isMarkdown) return;
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), MD_FETCH_TIMEOUT_MS);
-    setMdLoading(true);
-    setMdError(null);
-
-    fetch(previewUrl, { credentials: 'include', signal: controller.signal })
-      .then((resp) => {
-        if (!resp.ok) throw new Error(`Failed to load file (${resp.status})`);
-        return resp.text();
-      })
-      .then((text) => {
-        if (!controller.signal.aborted) {
-          setMdContent(text);
-          setMdLoading(false);
-        }
-      })
-      .catch((err: Error) => {
-        if (!controller.signal.aborted) {
-          setMdError(err.name === 'AbortError' ? 'Request timed out' : err.message);
-          setMdLoading(false);
-        }
-      })
-      .finally(() => clearTimeout(timer));
-
-    return () => {
-      clearTimeout(timer);
-      controller.abort();
-    };
-  }, [isMarkdown, previewUrl]);
+  const {
+    content: mdContent,
+    loading: mdLoading,
+    error: mdError,
+  } = useFileTextContent(previewUrl, isMarkdown);
+  const {
+    content: htmlSource,
+    loading: htmlSourceLoading,
+    error: htmlSourceError,
+  } = useFileTextContent(previewUrl, isHtml && htmlViewMode === 'source');
 
   // Escape key handler
   useEffect(() => {
@@ -191,36 +216,25 @@ export function FilePreviewModal({ file, previewUrl, onClose, onDownload }: File
 
             {/* Markdown rendered/source toggle */}
             {isMarkdown && mdContent !== null && (
-              <div className="flex shrink-0 overflow-hidden rounded-lg border border-border-default">
-                <button
-                  type="button"
-                  onClick={() => setMdViewMode('rendered')}
-                  aria-label="Rendered view"
-                  aria-pressed={mdViewMode === 'rendered'}
-                  className={`flex items-center gap-1.5 px-2.5 py-2 text-xs border-none cursor-pointer ${FOCUS_RING} ${
-                    mdViewMode === 'rendered'
-                      ? 'bg-accent/10 text-accent'
-                      : 'bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)] text-fg-muted hover:text-fg-primary'
-                  }`}
-                >
-                  <Eye size={14} />
-                  <span className="hidden sm:inline">Rendered</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setMdViewMode('source')}
-                  aria-label="Source view"
-                  aria-pressed={mdViewMode === 'source'}
-                  className={`flex items-center gap-1.5 px-2.5 py-2 text-xs border-none cursor-pointer ${FOCUS_RING} ${
-                    mdViewMode === 'source'
-                      ? 'bg-accent/10 text-accent'
-                      : 'bg-[color-mix(in_srgb,var(--sam-glass-nested-bg)_80%,transparent)] text-fg-muted hover:text-fg-primary'
-                  }`}
-                >
-                  <Code size={14} />
-                  <span className="hidden sm:inline">Source</span>
-                </button>
-              </div>
+              <ViewToggle
+                primaryLabel="Rendered"
+                primaryAriaLabel="Rendered view"
+                isPrimary={mdViewMode === 'rendered'}
+                onPrimary={() => setMdViewMode('rendered')}
+                onSource={() => setMdViewMode('source')}
+              />
+            )}
+
+            {/* HTML preview/source toggle — same control as markdown so the two behave alike and
+                the artifact viewer needs no toolbar row of its own. */}
+            {isHtml && !htmlTooLarge && (
+              <ViewToggle
+                primaryLabel="Preview"
+                primaryAriaLabel="Interactive preview"
+                isPrimary={htmlViewMode === 'preview'}
+                onPrimary={() => setHtmlViewMode('preview')}
+                onSource={() => setHtmlViewMode('source')}
+              />
             )}
 
             <button
@@ -242,9 +256,17 @@ export function FilePreviewModal({ file, previewUrl, onClose, onDownload }: File
             </button>
           </div>
 
-          {/* Content */}
+          {/* Content.
+              The HTML branch needs a real flex context so the preview iframe can claim the full
+              remaining height; the image/PDF/markdown branches depend on this wrapper being a block
+              `overflow-auto` scroller (PDF uses `h-full` under a block parent, markdown scrolls
+              here), so the flex context is applied only for HTML. */}
           <div
-            className="min-h-0 flex-1 overflow-auto"
+            className={
+              isHtml
+                ? 'flex min-h-0 flex-1 flex-col overflow-hidden'
+                : 'min-h-0 flex-1 overflow-auto'
+            }
             style={{
               paddingBottom: 'env(safe-area-inset-bottom)',
               paddingLeft: 'env(safe-area-inset-left)',
@@ -329,14 +351,44 @@ export function FilePreviewModal({ file, previewUrl, onClose, onDownload }: File
               </>
             )}
 
-            {isHtml && (
-              <div className="flex min-h-0 flex-1 flex-col">
-                <HtmlViewer previewUrl={previewUrl} fileName={file.filename} />
-                {file.sizeBytes <= FILE_PREVIEW_LOAD_MAX_BYTES && (
-                  <InteractiveHtmlPreview file={file} />
-                )}
+            {isHtml && htmlTooLarge && (
+              <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
+                <AlertTriangle size={32} className="text-warning" />
+                <p className="text-sm text-fg-muted">
+                  This file is too large to preview. Download it to view the contents.
+                </p>
+                <button
+                  type="button"
+                  onClick={onDownload}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md border border-border-default bg-transparent text-fg-primary cursor-pointer hover:bg-surface-hover ${FOCUS_RING}`}
+                >
+                  <Download size={14} />
+                  Download
+                </button>
               </div>
             )}
+
+            {isHtml &&
+              !htmlTooLarge &&
+              (htmlViewMode === 'preview' ? (
+                <InteractiveHtmlPreview file={file} />
+              ) : (
+                <div className="min-h-0 flex-1 overflow-auto bg-surface-inset p-4">
+                  {htmlSourceLoading && htmlSource === null && (
+                    <div className="flex items-center justify-center py-12">
+                      <Spinner size="md" />
+                    </div>
+                  )}
+                  {htmlSourceError && htmlSource === null && (
+                    <p role="alert" className="text-sm text-fg-muted">
+                      Unable to load the HTML source. Try downloading the file instead.
+                    </p>
+                  )}
+                  {htmlSource !== null && (
+                    <SyntaxHighlightedCode content={htmlSource} language="markup" />
+                  )}
+                </div>
+              ))}
           </div>
         </div>
       </div>

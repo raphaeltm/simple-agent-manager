@@ -6,19 +6,35 @@
 
 version: 2
 updates:
- - package-ecosystem: "devcontainers"
-   directory: "/"
-   schedule:
-     interval: weekly
- - package-ecosystem: "npm"
-   directory: "/"
-   schedule:
-     interval: weekly
- - package-ecosystem: "github-actions"
-   directory: "/"
-   schedule:
-     interval: weekly
- - package-ecosystem: "gomod"
-   directory: "/packages/vm-agent"
-   schedule:
-     interval: weekly
+  - package-ecosystem: 'devcontainers'
+    directory: '/'
+    schedule:
+      interval: weekly
+  - package-ecosystem: 'npm'
+    directory: '/'
+    schedule:
+      interval: weekly
+  - package-ecosystem: 'github-actions'
+    directory: '/'
+    schedule:
+      interval: weekly
+  - package-ecosystem: 'gomod'
+    directory: '/packages/vm-agent'
+    schedule:
+      interval: weekly
+  - package-ecosystem: 'gomod'
+    directory: '/packages/cli'
+    schedule:
+      interval: weekly
+  - package-ecosystem: 'gomod'
+    directory: '/packages/harness'
+    schedule:
+      interval: weekly
+  - package-ecosystem: 'docker'
+    directory: '/apps/api'
+    schedule:
+      interval: weekly
+  - package-ecosystem: 'docker'
+    directory: '/scripts/e2e/workspace-mock'
+    schedule:
+      interval: weekly

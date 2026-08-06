@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/logreader"
 )
 
@@ -86,6 +87,10 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 	// Start ping/pong for keepalive - configurable per constitution principle XI
 	pingInterval := s.config.LogStreamPingInterval
 	pongTimeout := s.config.LogStreamPongTimeout
+	pingWriteTimeout := s.config.LogStreamPingWriteTimeout
+	if pingWriteTimeout <= 0 {
+		pingWriteTimeout = config.DefaultLogStreamPingWriteTimeout
+	}
 
 	conn.SetPongHandler(func(string) error {
 		return conn.SetReadDeadline(time.Now().Add(pongTimeout))
@@ -103,23 +108,8 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 		}
 	}()
 
-	// Ping ticker
-	pingTicker := time.NewTicker(pingInterval)
+	pingTicker := startLogStreamPing(ctx, cancel, conn, pingInterval, pingWriteTimeout)
 	defer pingTicker.Stop()
-
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-pingTicker.C:
-				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(10*time.Second)); err != nil {
-					cancel()
-					return
-				}
-			}
-		}
-	}()
 
 	// Stream with catch-up
 	catchUpCount := 0
@@ -147,6 +137,24 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 	}
 
 	_ = catchUpCount // used for debug logging if needed
+}
+
+func startLogStreamPing(ctx context.Context, cancel context.CancelFunc, conn *websocket.Conn, interval, writeTimeout time.Duration) *time.Ticker {
+	ticker := time.NewTicker(interval)
+	go func() {
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				if err := conn.WriteControl(websocket.PingMessage, nil, time.Now().Add(writeTimeout)); err != nil {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return ticker
 }
 
 // logStreamMessage is a WebSocket message sent to clients.

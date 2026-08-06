@@ -274,6 +274,21 @@ describe('analytics-ingest routes', () => {
     expect(writtenDoubles[0]).toBe(3_600_000); // clamped to 1 hour
   });
 
+
+
+  it('uses MAX_ANALYTICS_DURATION_MS to clamp durationMs', async () => {
+    const { makeRequest } = createApp({ MAX_ANALYTICS_DURATION_MS: '2000' });
+    await makeRequest({
+      body: JSON.stringify({
+        events: [{ event: 'test', durationMs: 5000 }],
+      }),
+    });
+
+    await mockWaitUntil.mock.calls[0][0];
+    const writtenDoubles = mockWriteDataPoint.mock.calls[0][0].doubles;
+    expect(writtenDoubles[0]).toBe(2000);
+  });
+
   it('ignores client-provided visitorId for unauthenticated requests', async () => {
     const { makeRequest } = createApp();
     await makeRequest({

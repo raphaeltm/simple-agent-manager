@@ -58,6 +58,8 @@ export const DEFAULT_CAPACITY_RETRY_BUDGET_MS = 300_000;
 export const HETZNER_VOLUME_MIN_SIZE_GB = 10;
 export const HETZNER_VOLUME_MAX_SIZE_GB = 10_000;
 export const HETZNER_MAX_VOLUMES_PER_SERVER = 16;
+// 100 pages × 25 items/page ≈ 2,500 resources — well above any realistic fleet
+export const DEFAULT_HETZNER_MAX_LIST_PAGES = 100;
 
 const HETZNER_VOLUME_CAPABILITIES: VolumeCapabilities = {
   supported: true,
@@ -422,28 +424,16 @@ export class HetznerProvider implements Provider {
   }
 
   async listVMs(labels?: Record<string, string>): Promise<VMInstance[]> {
-    const labelParts: string[] = [];
-    if (labels) {
-      for (const [key, value] of Object.entries(labels)) {
-        labelParts.push(`${key}=${value}`);
-      }
-    }
+    const labelParts = this.toHetznerLabelSelectorParts(labels);
+    const servers: HetznerServerPayload[] = [];
 
-    const url = labelParts.length > 0
-      ? `${HETZNER_API_URL}/servers?label_selector=${encodeURIComponent(labelParts.join(','))}`
-      : `${HETZNER_API_URL}/servers`;
+    await this.fetchPaginatedHetznerList('servers', new URLSearchParams(), 'listVMs', (data) => {
+      const validated = validateHetznerServersResponse(data, 'listVMs');
+      servers.push(...validated.servers);
+      return validated.nextPage;
+    }, labelParts);
 
-    const response = await providerFetch(this.name, url, {
-      headers: {
-        Authorization: `Bearer ${this.apiToken}`,
-      },
-    });
-
-    const data = validateHetznerServersResponse(
-      await parseProviderJson(response, this.name, 'listVMs'),
-      'listVMs',
-    );
-    return data.servers.map((server) => this.mapServerToVMInstance(server));
+    return servers.map((server) => this.mapServerToVMInstance(server));
   }
 
   async powerOff(id: string): Promise<void> {
@@ -630,29 +620,68 @@ export class HetznerProvider implements Provider {
   }
 
   async listVolumes(config: VolumeListConfig): Promise<VolumeInstance[]> {
-    const labelParts: string[] = [];
-    if (config.labels) {
-      for (const [key, value] of Object.entries(config.labels)) {
-        labelParts.push(`${key}=${value}`);
-      }
-    }
+    const volumes: HetznerVolumePayload[] = [];
 
-    const params = new URLSearchParams({ location: config.location });
-    if (labelParts.length > 0) {
-      params.set('label_selector', labelParts.join(','));
-    }
-
-    const response = await providerFetch(this.name, `${HETZNER_API_URL}/volumes?${params.toString()}`, {
-      headers: {
-        Authorization: `Bearer ${this.apiToken}`,
-      },
-    });
-
-    const data = validateHetznerVolumesResponse(
-      await parseProviderJson(response, this.name, 'listVolumes'),
+    await this.fetchPaginatedHetznerList(
+      'volumes',
+      new URLSearchParams({ location: config.location }),
       'listVolumes',
+      (data) => {
+        const validated = validateHetznerVolumesResponse(data, 'listVolumes');
+        volumes.push(...validated.volumes);
+        return validated.nextPage;
+      },
+      this.toHetznerLabelSelectorParts(config.labels),
     );
-    return data.volumes.map((volume) => this.mapVolumeToInstance(volume));
+
+    return volumes.map((volume) => this.mapVolumeToInstance(volume));
+  }
+
+
+  private toHetznerLabelSelectorParts(labels?: Record<string, string>): string[] {
+    if (!labels) return [];
+    return Object.entries(labels).map(([key, value]) => `${key}=${value}`);
+  }
+
+  private async fetchPaginatedHetznerList(
+    resource: 'servers' | 'volumes',
+    baseParams: URLSearchParams,
+    context: 'listVMs' | 'listVolumes',
+    handlePage: (payload: unknown) => number | undefined,
+    labelParts: string[],
+  ): Promise<void> {
+    const seenPages = new Set<number>();
+    let page = 1;
+
+    for (let pageCount = 0; pageCount < DEFAULT_HETZNER_MAX_LIST_PAGES; pageCount += 1) {
+      if (seenPages.has(page)) {
+        throw new ProviderError(this.name, undefined, `Hetzner ${context} pagination repeated page ${page}`, {
+          category: 'invalid_config',
+        });
+      }
+      seenPages.add(page);
+
+      const params = new URLSearchParams(baseParams);
+      if (labelParts.length > 0) params.set('label_selector', labelParts.join(','));
+      if (page !== 1) params.set('page', String(page));
+      const queryString = params.toString();
+      const url = queryString.length > 0
+        ? `${HETZNER_API_URL}/${resource}?${queryString}`
+        : `${HETZNER_API_URL}/${resource}`;
+      const response = await providerFetch(this.name, url, {
+        headers: {
+          Authorization: `Bearer ${this.apiToken}`,
+        },
+      });
+
+      const nextPage = handlePage(await parseProviderJson(response, this.name, context));
+      if (nextPage === undefined) return;
+      page = nextPage;
+    }
+
+    throw new ProviderError(this.name, undefined, `Hetzner ${context} exceeded ${DEFAULT_HETZNER_MAX_LIST_PAGES} pages`, {
+      category: 'invalid_config',
+    });
   }
 
   private mapServerToVMInstance(server: HetznerServerPayload): VMInstance {

@@ -196,7 +196,7 @@ Running agents have access to project-aware MCP tools:
 | `complete_task`        | Mark current work as done, optionally with structured completion evidence                                            |
 | `request_human_input`  | Ask for user decision (blocks until answered)                                                                        |
 
-`get_task_details` keeps `outputSummary` and `completionEvidence` as the canonical persisted completion fields. When a task has a linked chat session, it can also include a bounded `recentAssistantMessages` array with up to five recent assistant messages, each capped to 2,000 characters, so orchestrators can recover useful final output when the persisted summary is sparse. If session diagnostics are unavailable, task details still return and `recentAssistantMessages` is empty.
+`get_task_details` keeps `outputSummary` and `completionEvidence` as the canonical persisted completion fields. When a task has a linked chat session, it can also include a bounded `recentAssistantMessages` array with up to five recent assistant messages, each capped to 2,000 characters, so orchestrators can recover useful final output when the persisted summary is sparse. The SAM session (Anthropic tool) variant returns a single `finalAssistantMessage` (the latest assistant message, content capped to 2,000 characters) instead of the full array. If session diagnostics are unavailable, task details still return and the diagnostic fields are empty/null.
 
 Claude Code and Codex get these tools on both the VM and [Instant](/docs/guides/instant-sessions/) runtimes. If a Codex session is handed an MCP server without a usable token, it fails to start with an explicit error rather than launching a tool-less agent.
 

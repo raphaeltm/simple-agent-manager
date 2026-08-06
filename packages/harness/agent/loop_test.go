@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -103,6 +104,132 @@ func TestRun_ToolCallThenComplete(t *testing.T) {
 		if types[i] != exp {
 			t.Errorf("event %d: got %s, want %s", i, types[i], exp)
 		}
+	}
+}
+
+func TestRun_RedactsToolParamsFromTranscriptButExecutesRawInputs(t *testing.T) {
+	dir := t.TempDir()
+	oldCanary := "ghp_oldSecretCanary_1234567890abcdef1234567890abcdef"
+	newCanary := "sk-proj-newSecretCanary-abcdefghijklmnopqrstuvwxyz123456"
+	bashCanary := "xoxb-bash-canary-123456789012-abcdefghijklmnopqrstuv"
+	writeCanary := "-----BEGIN PRIVATE KEY-----\nwrite-file-canary-secret-material\n-----END PRIVATE KEY-----"
+	appPath := filepath.Join(dir, "app.env")
+	if err := os.WriteFile(appPath, []byte("TOKEN="+oldCanary+"\n"), 0o644); err != nil {
+		t.Fatalf("seed file: %v", err)
+	}
+
+	provider := llm.NewMockProvider(
+		&llm.Response{ToolCalls: []llm.ToolCall{{
+			ID:     "write-secret",
+			Name:   "write_file",
+			Params: map[string]any{"path": "secrets.pem", "content": writeCanary},
+		}}},
+		&llm.Response{ToolCalls: []llm.ToolCall{{
+			ID:   "edit-secret",
+			Name: "edit_file",
+			Params: map[string]any{
+				"path":       "app.env",
+				"old_string": oldCanary,
+				"new_string": newCanary,
+			},
+		}}},
+		&llm.Response{ToolCalls: []llm.ToolCall{{
+			ID:     "bash-secret",
+			Name:   "bash",
+			Params: map[string]any{"command": "printf '%s' '" + bashCanary + "' > bash-output.txt"},
+		}}},
+		&llm.Response{Content: "done"},
+	)
+
+	registry := tools.NewRegistry()
+	registry.Register(&tools.WriteFile{WorkDir: dir})
+	registry.Register(&tools.EditFile{WorkDir: dir})
+	registry.Register(&tools.Bash{WorkDir: dir})
+	log := transcript.NewLog()
+
+	result, err := Run(context.Background(), provider, registry, log, Config{MaxTurns: 8}, "exercise secret-bearing tools")
+	if err != nil {
+		t.Fatalf("Run() error: %v", err)
+	}
+	if result.StopReason != "complete" {
+		t.Fatalf("stop reason = %q, want complete", result.StopReason)
+	}
+
+	written, err := os.ReadFile(filepath.Join(dir, "secrets.pem"))
+	if err != nil {
+		t.Fatalf("read written file: %v", err)
+	}
+	if string(written) != writeCanary {
+		t.Fatalf("write_file did not receive raw content")
+	}
+	updated, err := os.ReadFile(appPath)
+	if err != nil {
+		t.Fatalf("read edited file: %v", err)
+	}
+	if !strings.Contains(string(updated), newCanary) || strings.Contains(string(updated), oldCanary) {
+		t.Fatalf("edit_file did not receive raw old/new strings; got %q", string(updated))
+	}
+	bashOut, err := os.ReadFile(filepath.Join(dir, "bash-output.txt"))
+	if err != nil {
+		t.Fatalf("read bash output file: %v", err)
+	}
+	if string(bashOut) != bashCanary {
+		t.Fatalf("bash did not execute raw command")
+	}
+
+	jsonBytes, err := log.JSON()
+	if err != nil {
+		t.Fatalf("transcript JSON: %v", err)
+	}
+	jsonText := string(jsonBytes)
+	for _, forbidden := range []string{oldCanary, newCanary, bashCanary, writeCanary, "BEGIN PRIVATE KEY", "Authorization: Bearer"} {
+		if strings.Contains(jsonText, forbidden) {
+			t.Fatalf("transcript JSON leaked %q: %s", forbidden, jsonText)
+		}
+	}
+
+	var events []transcript.Event
+	if err := json.Unmarshal(jsonBytes, &events); err != nil {
+		t.Fatalf("unmarshal transcript JSON: %v", err)
+	}
+	var toolCalls int
+	for _, event := range events {
+		if event.Type != transcript.EventToolCall {
+			continue
+		}
+		toolCalls++
+		data, ok := event.Data.(map[string]any)
+		if !ok {
+			t.Fatalf("tool call data has type %T, want map", event.Data)
+		}
+		if data["id"] == "" || data["name"] == "" {
+			t.Fatalf("tool call missing id/name: %#v", data)
+		}
+		if data["params_redacted"] != true {
+			t.Fatalf("tool call missing params_redacted=true: %#v", data)
+		}
+		if data["params_summary_version"] != float64(transcript.ToolParamsSummaryVersion) {
+			t.Fatalf("tool call summary version = %#v", data["params_summary_version"])
+		}
+		params, ok := data["params"].(map[string]any)
+		if !ok || len(params) == 0 {
+			t.Fatalf("tool call params summary missing: %#v", data["params"])
+		}
+		for key, rawSummary := range params {
+			summary, ok := rawSummary.(map[string]any)
+			if !ok {
+				t.Fatalf("param %s summary has type %T", key, rawSummary)
+			}
+			if summary["redacted"] != true {
+				t.Fatalf("param %s summary not marked redacted: %#v", key, summary)
+			}
+			if summary["byte_length"].(float64) <= 0 || len(summary["sha256"].(string)) != 64 {
+				t.Fatalf("param %s summary lacks useful length/hash metadata: %#v", key, summary)
+			}
+		}
+	}
+	if toolCalls != 3 {
+		t.Fatalf("tool call events = %d, want 3", toolCalls)
 	}
 }
 

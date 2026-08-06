@@ -93,9 +93,11 @@ func Run(ctx context.Context, provider llm.Provider, registry *tools.Registry, l
 				return &Result{TurnsUsed: turn, StopReason: "cancelled"}, err
 			}
 			log.Append(transcript.EventToolCall, turn, map[string]any{
-				"id":     call.ID,
-				"name":   call.Name,
-				"params": call.Params,
+				"id":                     call.ID,
+				"name":                   call.Name,
+				"params":                 transcript.SummarizeToolParams(call.Params),
+				"params_redacted":        true,
+				"params_summary_version": transcript.ToolParamsSummaryVersion,
 			})
 
 			result := registry.Dispatch(ctx, call)

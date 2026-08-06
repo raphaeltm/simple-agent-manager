@@ -99,6 +99,7 @@ type StatefulTaskRow = {
   output_summary: string | null;
   completion_evidence: string | null;
   error_message: string | null;
+  chat_session_id: string | null;
   created_at: string;
   updated_at: string;
   started_at: string | null;
@@ -170,6 +171,7 @@ function createStatefulTaskD1(task: StatefulTaskRow) {
                 task.output_summary,
                 task.completion_evidence,
                 task.error_message,
+                task.chat_session_id,
                 task.created_at,
                 task.updated_at,
                 task.started_at,
@@ -202,6 +204,7 @@ function makeStatefulTaskRow(overrides: Partial<StatefulTaskRow> = {}): Stateful
     output_summary: null,
     completion_evidence: null,
     error_message: null,
+    chat_session_id: 'chat-session-123',
     created_at: '2026-07-04T00:00:00.000Z',
     updated_at: '2026-07-04T00:00:00.000Z',
     started_at: '2026-07-04T00:01:00.000Z',
@@ -1125,6 +1128,8 @@ describe('MCP Routes', () => {
         },
         { id: 'msg-old', role: 'assistant', content: 'Earlier analysis', createdAt: 1710000001000 },
       ]);
+      expect(data.recentAssistantMessages[0].content).toBe('Final detailed findings');
+      expect(data.recentAssistantMessages[0].createdAt).toBeGreaterThan(data.recentAssistantMessages[1].createdAt);
     });
 
     it('should still return task details if recent assistant messages cannot be read', async () => {
@@ -1163,6 +1168,43 @@ describe('MCP Routes', () => {
       expect(data.id).toBe('task-session-read-fails');
       expect(data.outputSummary).toBe('Completed');
       expect(data.recentAssistantMessages).toEqual([]);
+    });
+
+    it('should return empty recentAssistantMessages when task has no session', async () => {
+      mockD1Results(mockD1._stmt, [
+        {
+          id: 'task-no-session',
+          title: 'Task without chat',
+          description: 'Manual task',
+          status: 'completed',
+          priority: 1,
+          output_branch: null,
+          output_pr_url: null,
+          output_summary: 'Done',
+          completion_evidence: null,
+          error_message: null,
+          chat_session_id: null,
+          created_at: '2026-03-14T00:00:00Z',
+          updated_at: '2026-03-14T01:00:00Z',
+          started_at: null,
+          completed_at: '2026-03-14T01:00:00Z',
+        },
+      ]);
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_task_details',
+          arguments: { taskId: 'task-no-session' },
+        })
+      );
+
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      const data = JSON.parse(body.result.content[0].text);
+      expect(data.id).toBe('task-no-session');
+      expect(data.recentAssistantMessages).toEqual([]);
+      expect(mockDoStub.getMessages).not.toHaveBeenCalled();
     });
 
     it('should return error when task not found', async () => {
@@ -3558,6 +3600,64 @@ describe('MCP Routes', () => {
       const details = JSON.parse(detailsBody.result.content[0].text);
       expect(details.completionEvidence).toEqual(evidence);
       expect(details.outputSummary).toBe('Done with proof');
+    });
+
+    it('get_task_details exposes final assistant findings when completion summary is generic', async () => {
+      const task = makeStatefulTaskRow({
+        status: 'completed',
+        output_summary: 'Review complete.',
+        completed_at: '2026-07-04T01:00:00.000Z',
+      });
+      const statefulD1 = createStatefulTaskD1(task);
+      mockEnv.DATABASE = statefulD1 as unknown;
+      mockDoStub.getMessages.mockResolvedValue({
+        messages: [
+          {
+            id: 'msg-final',
+            role: 'assistant',
+            content:
+              'Ranked findings:\n1. HIGH: Preserve completion evidence for review-only subtasks.\n2. MEDIUM: Add regression coverage for generic summaries.',
+            createdAt: 1783123200000,
+          },
+        ],
+        hasMore: false,
+      });
+
+      const detailsRes = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'get_task_details',
+          arguments: { taskId: task.id },
+        })
+      );
+
+      expect(detailsRes.status).toBe(200);
+      const detailsBody = await detailsRes.json();
+      const details = JSON.parse(detailsBody.result.content[0].text);
+      expect(details.outputSummary).toBe('Review complete.');
+      expect(details.completionEvidence).toBeNull();
+      expect(details.finalAssistantMessage).toEqual({
+        id: 'msg-final',
+        content:
+          'Ranked findings:\n1. HIGH: Preserve completion evidence for review-only subtasks.\n2. MEDIUM: Add regression coverage for generic summaries.',
+        createdAt: 1783123200000,
+      });
+      expect(mockDoStub.getMessages).toHaveBeenCalledWith(
+        task.chat_session_id,
+        1,
+        null,
+        ['assistant'],
+        false,
+        'desc'
+      );
+      expect(mockDoStub.getMessages).toHaveBeenCalledWith(
+        task.chat_session_id,
+        5,
+        null,
+        ['assistant'],
+        false,
+        'desc'
+      );
     });
 
     it('complete_task without evidence still completes without writing completion evidence', async () => {

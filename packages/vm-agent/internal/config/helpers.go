@@ -31,7 +31,7 @@ func getEnvInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		i, err := strconv.Atoi(value)
 		if err != nil {
-			slog.Warn("config: could not parse env var", "key", key, "value", value, "default", defaultValue, "error", err)
+			slog.Warn("config: could not parse env var", "key", key, "default", defaultValue)
 			return defaultValue
 		}
 		return i
@@ -44,7 +44,7 @@ func getEnvInt64(key string, defaultValue int64) int64 {
 	if value := os.Getenv(key); value != "" {
 		i, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
-			slog.Warn("config: could not parse env var", "key", key, "value", value, "default", defaultValue, "error", err)
+			slog.Warn("config: could not parse env var", "key", key, "default", defaultValue)
 			return defaultValue
 		}
 		return i
@@ -57,7 +57,7 @@ func getEnvBool(key string, defaultValue bool) bool {
 	if value := os.Getenv(key); value != "" {
 		b, err := strconv.ParseBool(value)
 		if err != nil {
-			slog.Warn("config: could not parse env var", "key", key, "value", value, "default", defaultValue, "error", err)
+			slog.Warn("config: could not parse env var", "key", key, "default", defaultValue)
 			return defaultValue
 		}
 		return b
@@ -70,7 +70,7 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 	if value := os.Getenv(key); value != "" {
 		d, err := time.ParseDuration(value)
 		if err != nil {
-			slog.Warn("config: could not parse env var", "key", key, "value", value, "default", defaultValue, "error", err)
+			slog.Warn("config: could not parse env var", "key", key, "default", defaultValue)
 			return defaultValue
 		}
 		return d
@@ -83,7 +83,7 @@ func getEnvFloat(key string, defaultValue float64) float64 {
 	if value := os.Getenv(key); value != "" {
 		f, err := strconv.ParseFloat(value, 64)
 		if err != nil {
-			slog.Warn("config: could not parse env var", "key", key, "value", value, "default", defaultValue, "error", err)
+			slog.Warn("config: could not parse env var", "key", key, "default", defaultValue)
 			return defaultValue
 		}
 		return f
@@ -241,6 +241,36 @@ func (c *Config) Validate() error {
 		}
 		if _, err := os.Stat(c.TLSKeyPath); err != nil {
 			errs = append(errs, fmt.Errorf("TLS_KEY_PATH %q: %w", c.TLSKeyPath, err))
+		}
+	}
+
+	requiredTimeouts := []struct {
+		key   string
+		value time.Duration
+	}{
+		{"GRACEFUL_SHUTDOWN_TIMEOUT", c.GracefulShutdownTimeout},
+		{"BOOTSTRAP_TIMEOUT", c.BootstrapTimeout},
+		{"BOOTSTRAP_MAX_WAIT", c.BootstrapMaxWait},
+		{"SYSTEM_PROVISIONING_TIMEOUT", c.SystemProvisioningTimeout},
+		{"CF_IP_FETCH_TIMEOUT", c.CFIPFetchTimeout},
+		{"BOOT_LOG_HTTP_TIMEOUT", c.BootLogHTTPTimeout},
+		{"HTTP_READ_TIMEOUT", c.HTTPReadTimeout},
+		{"HTTP_WRITE_TIMEOUT", c.HTTPWriteTimeout},
+		{"HTTP_IDLE_TIMEOUT", c.HTTPIdleTimeout},
+		{"HTTP_CALLBACK_TIMEOUT", c.HTTPCallbackTimeout},
+		{"MCP_SHORT_COMMAND_TIMEOUT", c.MCPShortCommandTimeout},
+		{"MCP_DIFF_COMMAND_TIMEOUT", c.MCPDiffCommandTimeout},
+		{"MCP_BUILD_PREPARE_TIMEOUT", c.MCPBuildPrepareTimeout},
+		{"DEPLOY_PREFLIGHT_COMMAND_TIMEOUT", c.DeployPreflightCommandTimeout},
+		{"LOG_STREAM_PING_WRITE_TIMEOUT", c.LogStreamPingWriteTimeout},
+		{"DEVCONTAINER_CACHE_PUSH_TIMEOUT", c.DevcontainerCachePushTimeout},
+		{"ACP_CREDENTIAL_SYNC_TIMEOUT", c.ACPCredentialSyncTimeout},
+		{"ACP_ACTIVITY_REPORT_TIMEOUT", c.ACPActivityReportTimeout},
+		{"JWKS_FETCH_TIMEOUT", c.JWKSFetchTimeout},
+	}
+	for _, timeout := range requiredTimeouts {
+		if timeout.value <= 0 {
+			errs = append(errs, fmt.Errorf("%s must be > 0, got %s", timeout.key, timeout.value))
 		}
 	}
 

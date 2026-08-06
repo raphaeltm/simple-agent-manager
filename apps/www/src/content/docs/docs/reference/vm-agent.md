@@ -171,6 +171,19 @@ Environment variables set by the cloud-init template:
 | `ACP_PROMPT_RETRY_MAX_BACKOFF` | `2m` | Max exponential backoff for transient provider prompt retries |
 | `ACP_NOTIF_SERIALIZE_TIMEOUT` | `5s` | Timeout for ACP notification serialization |
 | `STANDALONE_CLONE_FILTER` | `blob:none` | Git partial-clone filter for standalone (Cloudflare Container) workspace clones, which run synchronously inside the control plane's create-workspace request (`cloneStandaloneRepository` in `internal/server/standalone_workspace.go`). Set `off` to force full clones. The control plane forwards `CF_CONTAINER_CLONE_FILTER` here. |
+| `GRACEFUL_SHUTDOWN_TIMEOUT` | `30s` | Max time to wait for VM-agent HTTP server shutdown after SIGTERM |
+| `SYSTEM_PROVISIONING_TIMEOUT` | `15m` | Max time for workspace host provisioning before bootstrap |
+| `CF_IP_FETCH_TIMEOUT` | `10s` | Timeout for fetching Cloudflare IP ranges during firewall provisioning |
+| `BOOT_LOG_HTTP_TIMEOUT` | `10s` | Timeout for boot-log callbacks to the control plane |
+| `MCP_SHORT_COMMAND_TIMEOUT` | `10s` | Timeout for short MCP workspace probes such as branch and credential checks |
+| `MCP_DIFF_COMMAND_TIMEOUT` | `30s` | Timeout for MCP diff-summary git commands |
+| `MCP_BUILD_PREPARE_TIMEOUT` | `30s` | Timeout for MCP build/publish preparation probes |
+| `JWKS_FETCH_TIMEOUT` | `10s` | Timeout for VM-agent startup JWKS fetches |
+| `ACP_CREDENTIAL_SYNC_TIMEOUT` | `10s` | Timeout for ACP auth-file sync-back during shutdown |
+| `ACP_ACTIVITY_REPORT_TIMEOUT` | `10s` | Timeout for each ACP activity callback attempt |
+| `DEVCONTAINER_CACHE_PUSH_TIMEOUT` | `10m` | Timeout for best-effort devcontainer cache image pushes |
+| `DEPLOY_PREFLIGHT_COMMAND_TIMEOUT` | `15s` | Timeout for deployment preflight diagnostic commands |
+| `LOG_STREAM_PING_WRITE_TIMEOUT` | `10s` | Write deadline for log-stream WebSocket ping frames |
 
 ### Log Retrieval Settings
 

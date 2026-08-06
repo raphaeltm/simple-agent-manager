@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { HetznerProvider } from '../../src/hetzner';
+import { DEFAULT_HETZNER_MAX_LIST_PAGES, HetznerProvider } from '../../src/hetzner';
 import { ScalewayProvider } from '../../src/scaleway';
 import {
   SAM_VOLUME_FILESYSTEM_FORMAT,
@@ -211,6 +211,130 @@ describe('provider volume operations', () => {
         providerCode: 'server_limit_exceeded',
         category: 'quota_exceeded',
       });
+    });
+
+    it('lists Hetzner volumes across paginated responses and preserves filters', async () => {
+      const provider = new HetznerProvider('token', 'fsn1');
+      const mockFetch = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          volumes: [hetznerVolume({ id: 1, name: 'page-1' })],
+          meta: { pagination: { page: 1, per_page: 50, previous_page: null, next_page: 2, last_page: 2, total_entries: 2 } },
+        }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          volumes: [hetznerVolume({ id: 2, name: 'page-2' })],
+          meta: { pagination: { page: 2, per_page: 50, previous_page: 1, next_page: null, last_page: 2, total_entries: 2 } },
+        }), { status: 200 }));
+      globalThis.fetch = mockFetch;
+
+      const volumes = await provider.listVolumes({ location: 'fsn1', labels: { environment: 'env-123' } });
+
+      expect(volumes.map((volume) => volume.id)).toEqual(['1', '2']);
+      const firstUrl = new URL(fetchCall(mockFetch, 0).url);
+      const secondUrl = new URL(fetchCall(mockFetch, 1).url);
+      expect(firstUrl.searchParams.get('location')).toBe('fsn1');
+      expect(firstUrl.searchParams.get('label_selector')).toBe('environment=env-123');
+      expect(firstUrl.searchParams.get('page')).toBeNull();
+      expect(secondUrl.searchParams.get('location')).toBe('fsn1');
+      expect(secondUrl.searchParams.get('label_selector')).toBe('environment=env-123');
+      expect(secondUrl.searchParams.get('page')).toBe('2');
+    });
+
+    it('continues after an empty Hetzner volume page when next_page is present', async () => {
+      const provider = new HetznerProvider('token', 'fsn1');
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          volumes: [],
+          meta: { pagination: { page: 1, per_page: 50, previous_page: null, next_page: 2, last_page: 2, total_entries: 2 } },
+        }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          volumes: [hetznerVolume({ id: 3, name: 'later' })],
+          meta: { pagination: { page: 2, per_page: 50, previous_page: 1, next_page: null, last_page: 2, total_entries: 2 } },
+        }), { status: 200 }));
+
+      const volumes = await provider.listVolumes({ location: 'fsn1' });
+      expect(volumes.map((volume) => volume.id)).toEqual(['3']);
+    });
+
+    it('collects volumes across three or more Hetzner volume pages', async () => {
+      const provider = new HetznerProvider('token', 'fsn1');
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          volumes: [hetznerVolume({ id: 1, name: 'vol-1' })],
+          meta: { pagination: { page: 1, next_page: 2 } },
+        }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          volumes: [hetznerVolume({ id: 2, name: 'vol-2' })],
+          meta: { pagination: { page: 2, next_page: 3 } },
+        }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          volumes: [hetznerVolume({ id: 3, name: 'vol-3' })],
+          meta: { pagination: { page: 3, next_page: null } },
+        }), { status: 200 }));
+
+      const volumes = await provider.listVolumes({ location: 'fsn1' });
+      expect(volumes.map((v) => v.id)).toEqual(['1', '2', '3']);
+    });
+
+    it('rejects repeated Hetzner volume pages instead of looping', async () => {
+      const provider = new HetznerProvider('token', 'fsn1');
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          volumes: [],
+          meta: { pagination: { page: 1, next_page: 1 } },
+        }), { status: 200 }),
+      );
+
+      await expect(provider.listVolumes({ location: 'fsn1' })).rejects.toThrow(/repeated page 1/);
+    });
+
+    it('rejects malformed Hetzner volume pagination tokens', async () => {
+      const provider = new HetznerProvider('token', 'fsn1');
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          volumes: [],
+          meta: { pagination: { page: 1, next_page: '2' } },
+        }), { status: 200 }),
+      );
+
+      await expect(provider.listVolumes({ location: 'fsn1' })).rejects.toThrow(/next_page/);
+    });
+
+    it.each([0, -1])('rejects next_page %d as malformed for Hetzner volumes', async (nextPage) => {
+      const provider = new HetznerProvider('token', 'fsn1');
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          volumes: [],
+          meta: { pagination: { page: 1, next_page: nextPage } },
+        }), { status: 200 }),
+      );
+
+      await expect(provider.listVolumes({ location: 'fsn1' })).rejects.toThrow(/next_page/);
+    });
+
+    it('propagates later Hetzner volume page errors', async () => {
+      const provider = new HetznerProvider('token', 'fsn1');
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          volumes: [],
+          meta: { pagination: { page: 1, per_page: 50, previous_page: null, next_page: 2, last_page: 2, total_entries: 2 } },
+        }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({ error: { message: 'boom' } }), { status: 500 }));
+
+      await expect(provider.listVolumes({ location: 'fsn1' })).rejects.toMatchObject({ statusCode: 500 });
+    });
+
+    it('fails closed when Hetzner volume pagination exceeds the max-page guard', async () => {
+      const provider = new HetznerProvider('token', 'fsn1');
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        const page = Number(new URL(url).searchParams.get('page') || '1');
+        return new Response(JSON.stringify({
+          volumes: [],
+          meta: { pagination: { page, next_page: page + 1 } },
+        }), { status: 200 });
+      });
+
+      await expect(provider.listVolumes({ location: 'fsn1' })).rejects.toThrow(new RegExp(`exceeded ${DEFAULT_HETZNER_MAX_LIST_PAGES} pages`));
+      expect(fetch).toHaveBeenCalledTimes(DEFAULT_HETZNER_MAX_LIST_PAGES);
     });
   });
 
