@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import migrationSql from '../../../src/db/migrations/0106_diagnostic_incidents.sql?raw';
+import migrationSql from '../../../src/db/migrations/0108_diagnostic_incidents.sql?raw';
 import type { Env } from '../../../src/env';
 import {
   ensurePendingIncidents,

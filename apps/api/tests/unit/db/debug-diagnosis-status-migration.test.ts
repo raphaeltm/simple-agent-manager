@@ -36,9 +36,9 @@ describe('debug diagnosis canonical status migration', () => {
     `);
 
     db.exec(
-      readFileSync(join(migrationsDirectory, '0105_debug_diagnosis_canonical_status.sql'), 'utf8')
+      readFileSync(join(migrationsDirectory, '0107_debug_diagnosis_canonical_status.sql'), 'utf8')
     );
-    db.exec(readFileSync(join(migrationsDirectory, '0106_diagnostic_incidents.sql'), 'utf8'));
+    db.exec(readFileSync(join(migrationsDirectory, '0108_diagnostic_incidents.sql'), 'utf8'));
     db.exec(`
       UPDATE debug_diagnosis_runs
       SET status='failed',run_status='cancelled'

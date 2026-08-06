@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 
 import migration0103 from '../../../src/db/migrations/0103_debug_diagnosis_runs.sql?raw';
 import migration0104 from '../../../src/db/migrations/0104_durable_debug_diagnosis_runs.sql?raw';
-import migration0105 from '../../../src/db/migrations/0105_debug_diagnosis_canonical_status.sql?raw';
+import migration0107 from '../../../src/db/migrations/0107_debug_diagnosis_canonical_status.sql?raw';
 import {
   completeDiagnosisRunTransition,
   finishDiagnosisRunTransition,
@@ -77,7 +77,7 @@ function seedDatabase(): { sqlite: DatabaseSync; db: D1Database } {
   `);
   sqlite.exec(migration0103);
   sqlite.exec(migration0104);
-  sqlite.exec(migration0105);
+  sqlite.exec(migration0107);
   const now = '2026-08-05T12:00:00.000Z';
   sqlite.exec(`
     INSERT INTO debug_diagnosis_runs
