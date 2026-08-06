@@ -22,7 +22,6 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-
 import {
   sweepIdleOrphanNodes,
   sweepMaxLifetimeNodes,
@@ -30,7 +29,7 @@ import {
   sweepStoppedHandoffNodes,
   sweepTerminalCfContainers,
 } from './node-phases';
-import { type NodeCleanupResult, emptyResult, resolveCleanupConfig } from './shared';
+import { emptyResult, type NodeCleanupResult, resolveCleanupConfig } from './shared';
 import { sweepOrphanedWorkspaces, sweepStaleStoppedWorkspaces } from './workspace-phases';
 
 export type { NodeCleanupResult } from './shared';

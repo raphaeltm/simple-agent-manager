@@ -33,23 +33,23 @@
  * is older than the floor, its node-id label is well-formed, and the corresponding D1
  * row is either absent or terminally deleted.
  */
+import { createProvider,type Provider } from '@simple-agent-manager/providers';
 import {
   DEFAULT_PROVIDER_ORPHAN_DESTROY_LIMIT,
   DEFAULT_PROVIDER_ORPHAN_MIN_AGE_MS,
   DEFAULT_PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS,
 } from '@simple-agent-manager/shared';
-import { type Provider, createProvider } from '@simple-agent-manager/providers';
 import { drizzle } from 'drizzle-orm/d1';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import {
+  resolveEnvironmentLabel,
   SAM_ENVIRONMENT_LABEL_KEY,
   SAM_MANAGED_LABEL_KEY,
   SAM_MANAGED_LABEL_VALUE,
   SAM_NODE_LABEL_KEY,
-  resolveEnvironmentLabel,
 } from '../services/node-provider-labels';
 import { persistError } from '../services/observability';
 import { getPlatformCloudCredential } from '../services/platform-credentials';

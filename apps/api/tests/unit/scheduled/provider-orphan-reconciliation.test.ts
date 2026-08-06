@@ -174,7 +174,8 @@ describe('provider orphan reconciliation — fails closed', () => {
   it('skips a server with no environment label', async () => {
     // Servers created before the env label existed. Absence of a label must never
     // authorise a destroy — those servers may belong to another deployment.
-    const { env: _dropped, ...labelsWithoutEnv } = server().labels;
+    const labelsWithoutEnv = { ...server().labels };
+    delete (labelsWithoutEnv as Record<string, unknown>).env;
     listVMs.mockResolvedValue([server({ labels: labelsWithoutEnv })]);
     const result = await runProviderOrphanReconciliation(makeEnv([]));
 

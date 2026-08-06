@@ -17,13 +17,12 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { stopNodeResources } from '../../services/nodes';
 import { persistError } from '../../services/observability';
-
 import {
   type CleanupConfig,
   type CleanupDb,
+  destroyNodeForCleanup,
   LAST_WORKSPACE_ACTIVITY_SQL,
   type NodeCleanupResult,
-  destroyNodeForCleanup,
 } from './shared';
 
 /**
