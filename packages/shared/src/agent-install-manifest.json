@@ -11,7 +11,11 @@
     "method": "npm",
     "package": "@agentclientprotocol/codex-acp",
     "version": "1.1.2",
-    "bin": "codex-acp"
+    "bin": "codex-acp",
+    "npmCompanion": {
+      "package": "@openai/codex",
+      "version": "0.144.6"
+    }
   },
   {
     "agentType": "google-gemini",
@@ -51,7 +55,10 @@
       "typing-inspection==0.4.2",
       "typing-extensions==4.15.0"
     ],
-    "npmCompanion": { "package": "@ampcode/cli", "version": "0.0.1783785389-g0da70d" },
+    "npmCompanion": {
+      "package": "@ampcode/cli",
+      "version": "0.0.1783785389-g0da70d"
+    },
     "postInstallHook": "amp-sdk-patch"
   }
 ]

@@ -234,16 +234,19 @@ func cutString(s, sep string) (string, string, bool) {
 func assertEnvContains(t *testing.T, envVars []string, key, expectedValue string) {
 	t.Helper()
 	prefix := key + "="
+	matches := 0
 	for _, entry := range envVars {
-		if len(entry) > len(prefix) && entry[:len(prefix)] == prefix {
-			got := entry[len(prefix):]
+		if strings.HasPrefix(entry, prefix) {
+			matches++
+			got := strings.TrimPrefix(entry, prefix)
 			if got != expectedValue {
 				t.Errorf("env %s = %q, want %q", key, got, expectedValue)
 			}
-			return
 		}
 	}
-	t.Errorf("env missing key %s", key)
+	if matches != 1 {
+		t.Errorf("env key %s occurred %d times, want exactly once: %v", key, matches, envVars)
+	}
 }
 
 // Tests from main branch for backward compatibility

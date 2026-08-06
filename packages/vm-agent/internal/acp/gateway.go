@@ -889,11 +889,7 @@ type agentCommandInfo struct {
 	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
 
-const (
-	codexACPVersion        = "1.1.2"
-	codexCLIVersion        = "0.144.6"
-	codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@" + codexACPVersion + " @openai/codex@" + codexCLIVersion
-)
+const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@1.1.2 @openai/codex@0.144.6"
 
 // getAgentCommandInfo returns the ACP command, args, env var name, and install command for a given agent type.
 // These match the agent catalog defined in packages/shared/src/agents.ts.

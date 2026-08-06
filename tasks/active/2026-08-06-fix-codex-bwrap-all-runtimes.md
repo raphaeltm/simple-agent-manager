@@ -10,7 +10,7 @@ SAM-managed Codex sessions run inside an existing container security boundary, b
 - Installed `@agentclientprotocol/codex-acp@1.1.2` launches `@openai/codex` app-server and reads wrapper configuration only from `CODEX_CONFIG`; it ignores arbitrary `-c` argv. It passes that JSON object into each app-server session/thread.
 - The wrapper dependency is `@openai/codex@^0.144.0`; a fresh install resolved `0.144.6` on 2026-08-06, while a separately installed global Codex had already drifted to `0.146.1`.
 - PR #1675 already moved Codex startup config ahead of the `containerID == ""` early return, but sandbox-only sessions still generated no managed block and tests did not assert the wrapper-only `CODEX_CONFIG` value.
-- Both VM/devcontainer installs and the cf-container image must pin the same exact Codex CLI version.
+- Both VM/devcontainer installs and the cf-container image must pin the same exact Codex CLI version through the canonical agent install manifest companion-package contract.
 
 ## Implementation Checklist
 
