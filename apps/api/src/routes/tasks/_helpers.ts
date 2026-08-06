@@ -216,10 +216,12 @@ export async function setTaskStatus(
     nextValues.errorMessage = options.errorMessage?.trim() || null;
   }
 
+  // project_id is defence-in-depth (rule 11): callers already resolved `task` through
+  // requireProjectTaskById, but the write predicate must not depend on that alone.
   await db
     .update(schema.tasks)
     .set(nextValues)
-    .where(eq(schema.tasks.id, task.id));
+    .where(and(eq(schema.tasks.id, task.id), eq(schema.tasks.projectId, task.projectId)));
 
   await appendStatusEvent(
     db,
