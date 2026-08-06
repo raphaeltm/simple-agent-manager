@@ -21,7 +21,7 @@ SAM-managed Codex sessions run inside an existing container security boundary, b
 - [x] Add discriminating real-startup-writer tests for VM/devcontainer and standalone/cf-container file plus exact env contracts.
 - [x] Test missing SAM MCP token failure before launch for both runtime discriminators.
 - [x] Extend rule 23 so wrapper-only launch config and runtime discriminators are mandatory contract assertions.
-- [ ] Complete quality suite and mandatory specialist reviewer gates.
+- [x] Complete quality suite and mandatory specialist reviewer gates.
 - [ ] Delete staging nodes, deploy branch, verify fresh VM subagent and Instant SAM MCP/config, then clean up.
 - [ ] Open PR, pass CI, merge, and monitor production deployment.
 
