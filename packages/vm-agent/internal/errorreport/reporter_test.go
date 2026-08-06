@@ -450,6 +450,49 @@ func TestArtifactRegistrationConflictIsRetriedWithoutUploading(t *testing.T) {
 	}
 }
 
+func TestArtifactRegistrationFailureTerminalizesAtMaxAttempts(t *testing.T) {
+	var mu sync.Mutex
+	registrations := 0
+	puts := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		switch {
+		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/errors"):
+			w.WriteHeader(http.StatusNoContent)
+		case request.Method == http.MethodPost && strings.HasSuffix(request.URL.Path, "/artifacts"):
+			mu.Lock()
+			registrations++
+			mu.Unlock()
+			w.WriteHeader(http.StatusServiceUnavailable)
+		case request.Method == http.MethodPut:
+			mu.Lock()
+			puts++
+			mu.Unlock()
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(w, request)
+		}
+	}))
+	defer server.Close()
+	cfg := testConfig(t)
+	cfg.MaxAttempts = 2
+	cfg.FlushInterval = time.Hour
+	cfg.RetryInitial = 10 * time.Millisecond
+	cfg.RetryMax = 10 * time.Millisecond
+	reporter := New(server.URL, "node-1", "token", cfg)
+	reporter.Start()
+	incidentID := reporter.Report(ErrorEntry{Level: "error", Message: "bounded", Source: "test"})
+	waitFor(t, func() bool { return reporter.pendingCount() == 0 })
+	reporter.Shutdown()
+	mu.Lock()
+	defer mu.Unlock()
+	if registrations != 2 || puts != 0 {
+		t.Fatalf("expected two bounded registrations and no upload, got registrations=%d puts=%d", registrations, puts)
+	}
+	if _, err := os.Stat(filepath.Join(cfg.SpoolDir, incidentID+".tar.gz")); !os.IsNotExist(err) {
+		t.Fatalf("terminalized artifact spool was not cleaned up: %v", err)
+	}
+}
+
 func TestShutdownWaitsForActiveSnapshotBeforeFinalUpload(t *testing.T) {
 	var putCount int
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
@@ -613,6 +656,46 @@ func TestTransientFailureRetriesAtStoredDeadlineWithoutManualFlush(t *testing.T)
 	if requests != 2 {
 		t.Fatalf("expected one deadline-driven retry, got %d requests", requests)
 	}
+}
+
+func TestBuildReportBatchSplitsAtByteLimitAndRejectsSingleOversize(t *testing.T) {
+	reporter := New("http://localhost", "node-1", "token", testConfig(t))
+	defer reporter.Shutdown()
+	reporter.ReportInfo("first bounded report", "test", "", nil)
+	reporter.ReportInfo("second bounded report", "test", "", nil)
+	rows, err := reporter.readReportCandidates()
+	if err != nil || len(rows) != 2 {
+		t.Fatalf("read candidates=%d err=%v", len(rows), err)
+	}
+	_, oneBody, err := reporter.buildReportBatch(rows[:1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	reporter.config.MaxBatchBytes = len(oneBody) + 1
+	batch, body, err := reporter.buildReportBatch(rows)
+	if err != nil || len(batch) != 1 || len(body) > reporter.config.MaxBatchBytes {
+		t.Fatalf("batch=%d bytes=%d limit=%d err=%v", len(batch), len(body), reporter.config.MaxBatchBytes, err)
+	}
+	reporter.config.MaxBatchBytes = len(oneBody) - 1
+	if _, _, err := reporter.buildReportBatch(rows[:1]); err == nil || !strings.Contains(err.Error(), "single structured incident") {
+		t.Fatalf("expected single-row byte-limit rejection, got %v", err)
+	}
+}
+
+func TestLocalRetentionTerminalizesAndDeletesExpiredRows(t *testing.T) {
+	reporter := New("http://localhost", "node-1", "token", testConfig(t))
+	incidentID := reporter.Report(ErrorEntry{Level: "error", Message: "expired", Source: "test"})
+	if _, err := reporter.db.Exec(
+		"UPDATE error_report_outbox SET expires_at = ? WHERE incident_id = ?",
+		time.Now().UTC().Add(-time.Minute).Format(time.RFC3339Nano), incidentID,
+	); err != nil {
+		t.Fatal(err)
+	}
+	reporter.flush()
+	if reporter.pendingCount() != 0 {
+		t.Fatal("expired local row survived terminalization cleanup")
+	}
+	reporter.Shutdown()
 }
 
 func TestMissingTokenDefersPollingUntilFlushInterval(t *testing.T) {

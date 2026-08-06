@@ -162,6 +162,23 @@ describe('same-instance automatic VM incident contract', () => {
     expect(otherNode.status).toBe(403);
 
     const uploadUrl = `${registerUrl}/${ARTIFACT_ID}/content`;
+    const unauthenticatedUpload = await SELF.fetch(uploadUrl, { method: 'PUT' });
+    const workspaceUpload = await SELF.fetch(uploadUrl, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${workspaceToken}` },
+    });
+    const sessionUpload = await SELF.fetch(uploadUrl, {
+      method: 'PUT',
+      headers: { Cookie: 'better-auth.session_token=session-auth-is-not-node-callback-auth' },
+    });
+    const wrongNodeUpload = await SELF.fetch(uploadUrl, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${otherNodeToken}` },
+    });
+    expect(unauthenticatedUpload.status).toBe(401);
+    expect(workspaceUpload.status).toBe(403);
+    expect(sessionUpload.status).toBe(401);
+    expect(wrongNodeUpload.status).toBe(401);
     const upload = await SELF.fetch(uploadUrl, {
       method: 'PUT',
       headers: {

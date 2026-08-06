@@ -12,6 +12,13 @@ export const DEFAULT_VM_INCIDENT_METADATA_RETENTION_DAYS = 30;
 export const DEFAULT_VM_INCIDENT_PENDING_TIMEOUT_MINUTES = 30;
 export const DEFAULT_VM_INCIDENT_RECONCILE_BATCH_SIZE = 50;
 export const MIN_VM_INCIDENT_RECONCILE_BATCH_SIZE = 6;
+const RESERVED_R2_TOP_LEVEL_PREFIXES = new Set([
+  'agents',
+  'cli',
+  'compose-image-artifacts',
+  'session-snapshots',
+  'temp-uploads',
+]);
 
 export interface IncidentConfig {
   r2Prefix: string;
@@ -37,7 +44,9 @@ function normalizePrefix(value: string | undefined): string {
     .split('/')
     .map((segment) => segment.trim())
     .filter((segment) => /^[a-zA-Z0-9._-]+$/.test(segment) && segment !== '..');
-  return segments.length > 0 ? segments.join('/') : DEFAULT_VM_INCIDENT_R2_PREFIX;
+  return segments.length > 0 && !RESERVED_R2_TOP_LEVEL_PREFIXES.has(segments[0])
+    ? segments.join('/')
+    : DEFAULT_VM_INCIDENT_R2_PREFIX;
 }
 
 export function resolveDiagnosticIncidentConfig(env: Env): IncidentConfig {

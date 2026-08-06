@@ -6,6 +6,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import migrationSql from '../../../src/db/migrations/0106_diagnostic_incidents.sql?raw';
 import type { Env } from '../../../src/env';
 import {
+  DEFAULT_VM_INCIDENT_R2_PREFIX,
+  resolveDiagnosticIncidentConfig,
+} from '../../../src/services/diagnostic-incident-config';
+import {
   ensurePendingIncidents,
   getDiagnosticIncidentByErrorId,
   getDiagnosticIncidentsByErrorIds,
@@ -18,6 +22,18 @@ const INCIDENT_ID = '01KZ8V0GMXQ4ZCSERPRT2X2K6M';
 const ERROR_ID = INCIDENT_ID;
 const ARTIFACT_ID = `${INCIDENT_ID}-safe`;
 const NODE_ID = 'node-1';
+
+it.each([
+  'agents/private-incidents',
+  'cli/private-incidents',
+  'compose-image-artifacts/private-incidents',
+  'session-snapshots/private-incidents',
+  'temp-uploads/private-incidents',
+])('rejects reserved runtime R2 prefix %s', (prefix) => {
+  expect(resolveDiagnosticIncidentConfig({ VM_INCIDENT_R2_PREFIX: prefix } as Env).r2Prefix).toBe(
+    DEFAULT_VM_INCIDENT_R2_PREFIX
+  );
+});
 
 class MemoryR2 {
   readonly objects = new Map<string, Uint8Array>();
@@ -420,6 +436,28 @@ describe('diagnostic incident storage boundary', () => {
       manifest_json: null,
       preview_json: null,
     });
+
+    const byteQuotaIncident = '01KZ8V0GMXQ4ZCSERPRT2X2K6P';
+    await ensurePendingIncidents(env, [
+      {
+        incidentId: byteQuotaIncident,
+        platformErrorId: byteQuotaIncident,
+        nodeId: NODE_ID,
+        workspaceId: null,
+      },
+    ]);
+    await expect(
+      registerDiagnosticArtifact(
+        { ...env, VM_INCIDENT_MAX_BYTES_PER_NODE: String(bytes.byteLength) } as Env,
+        NODE_ID,
+        byteQuotaIncident,
+        {
+          ...registration(bytes),
+          artifactId: `${byteQuotaIncident}-safe`,
+          manifest: { ...registration(bytes).manifest, incidentId: byteQuotaIncident },
+        }
+      )
+    ).rejects.toMatchObject({ statusCode: 409 });
   });
 
   it('atomically admits only one concurrent registration at the per-node boundary', async () => {

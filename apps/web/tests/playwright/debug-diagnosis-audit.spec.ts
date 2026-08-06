@@ -152,6 +152,8 @@ type PaginationMode = 'complete' | 'repeated';
 type IncidentFixture = typeof INCIDENT | null;
 
 interface SetupBehavior {
+  cancelDelayMs?: number;
+  cancelStatus?: number;
   incident?: IncidentFixture;
   retryDelayMs?: number;
   retryStatus?: number;
@@ -229,6 +231,7 @@ async function setup(
   behavior: SetupBehavior = {}
 ) {
   let runningStatus: 'running' | 'cancelled' = 'running';
+  let cancelRequestCount = 0;
   let paginatedRequestCount = 0;
   const activeIncident = behavior.incident === undefined ? INCIDENT : behavior.incident;
   const activeError = { ...ERROR, incident: activeIncident };
@@ -307,7 +310,11 @@ async function setup(
         nextCursor: null,
       });
     if (path === '/api/admin/observability/diagnosis-runs/run-running-1/cancel') {
-      await new Promise((resolve) => setTimeout(resolve, 150));
+      cancelRequestCount++;
+      await new Promise((resolve) => setTimeout(resolve, behavior.cancelDelayMs ?? 150));
+      if (behavior.cancelStatus && behavior.cancelStatus !== 202) {
+        return respond(behavior.cancelStatus, { message: 'Cancellation service unavailable' });
+      }
       runningStatus = 'cancelled';
       return respond(202, { accepted: true });
     }
@@ -360,7 +367,10 @@ async function setup(
       return respond(200, { ideaId: 'idea-draft-1' });
     return respond(200, {});
   });
-  return { paginatedRequestCount: () => paginatedRequestCount };
+  return {
+    cancelRequestCount: () => cancelRequestCount,
+    paginatedRequestCount: () => paginatedRequestCount,
+  };
 }
 
 test.describe('Deployment diagnosis visual audit', () => {
@@ -505,6 +515,22 @@ test.describe('Deployment diagnosis visual audit', () => {
     await expect(page.getByRole('alert')).toHaveText('Retry service unavailable');
     await expect(page.getByRole('button', { name: 'Retry' })).toBeEnabled();
     await expect(page).toHaveURL(/\/admin\/diagnoses\/run-failed-1$/);
+    await assertNoOverflow(page);
+  });
+
+  test('suppresses duplicate cancellation and recovers after API failure', async ({ page }) => {
+    const requests = await setup(page, 200, 'complete', {
+      cancelDelayMs: 150,
+      cancelStatus: 503,
+    });
+    await page.goto('/admin/diagnoses/run-running-1');
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    const cancelling = page.getByRole('button', { name: 'Cancelling…' });
+    await expect(cancelling).toBeDisabled();
+    await cancelling.click({ force: true });
+    await expect(page.getByRole('alert')).toHaveText('Cancellation service unavailable');
+    expect(requests.cancelRequestCount()).toBe(1);
+    await expect(page.getByRole('button', { name: 'Cancel' })).toBeEnabled();
     await assertNoOverflow(page);
   });
 
