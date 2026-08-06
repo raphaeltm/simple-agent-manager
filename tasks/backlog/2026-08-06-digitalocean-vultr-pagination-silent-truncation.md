@@ -28,3 +28,16 @@ tail entries from `listVMs` / `listVolumes`, which can cause:
       the Hetzner/GCP pattern.
 - [ ] Vultr list helpers throw `ProviderError` on cap exhaustion.
 - [ ] Regression tests assert the throw and verify call count equals the cap.
+
+## Also: Hetzner/GCP max-list-pages not constructor-overridable (Principle XI)
+
+`DEFAULT_HETZNER_MAX_LIST_PAGES` and `DEFAULT_GCP_MAX_LIST_PAGES` are exported
+constants but not wirable through the constructor or env vars, unlike
+DigitalOcean which has `maxListPages` in its config + `DIGITALOCEAN_MAX_LIST_PAGES`
+env var. The `DEFAULT_*` naming implies an override path should exist.
+
+- [ ] Add `maxListPages?: number` to `HetznerProviderRuntimeOptions` and
+      `GcpProviderConfig`, defaulting to the `DEFAULT_*` constants.
+- [ ] Thread through `createProvider()` in `index.ts`.
+- [ ] Add `HETZNER_MAX_LIST_PAGES` / `GCP_MAX_LIST_PAGES` env vars in
+      `env.ts` + `provider-credentials.ts`.
