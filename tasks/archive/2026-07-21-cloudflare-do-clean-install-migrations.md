@@ -36,7 +36,7 @@ SQLite. Clean installations must create every namespace as SQLite-backed.
 
 ### SAM migration history
 
-`apps/api/wrangler.toml` contains 17 ordered create migrations and no
+`apps/api/wrangler.toml` now contains 20 ordered create migrations and no
 rename/delete/transfer migrations on `main`:
 
 | Tag | Class                       | Historical backend |
@@ -58,6 +58,9 @@ rename/delete/transfer migrations on `main`:
 | v15 | `GitHubUserAccessTokenLock` | legacy KV          |
 | v16 | `VmAgentContainer`          | SQLite             |
 | v17 | `GitLabUserAccessTokenLock` | legacy KV          |
+| v18 | `CredentialSetupSession`    | SQLite             |
+| v19 | `SetupSessionPool`          | SQLite             |
+| v20 | `DiagnosisRunner`           | SQLite             |
 
 The temporary feature-branch version of `v9` used `new_classes`, but neither
 that commit nor its follow-up rewrite is an ancestor of `main`; the merged
@@ -98,7 +101,7 @@ of replaying a stale branch's migration list.
 
 ## Design
 
-Keep the checked-in 17-tag history unchanged. During environment generation:
+Keep the checked-in migration history unchanged. During environment generation:
 
 1. Read the target API Worker's latest `migration_tag` from the Cloudflare
    Workers scripts list using the already-required deploy token.
@@ -147,8 +150,8 @@ operator hand-edit instructions.
 ## Acceptance criteria
 
 - [x] A generated config for a confirmed clean target contains no
-      `new_classes` directives and creates all 17 classes with SQLite.
-- [x] A target already at v17 receives the unchanged historical migration list;
+      `new_classes` directives and creates all 20 classes with SQLite.
+- [x] A target already at the latest tag receives the unchanged historical migration list;
       no namespace is recreated, deleted, renamed, converted, or replayed.
 - [x] A partially upgraded target preserves applied entries and converts only
       future legacy creates to SQLite.
