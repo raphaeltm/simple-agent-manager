@@ -16,7 +16,7 @@ describe('isNodeAgentReadyForWorkspaceDispatch', () => {
         // Heartbeat is fresh relative to this task's wait start.
         last_heartbeat_at: '2026-05-21T10:00:05.000Z',
       },
-      waitStartedAt,
+      waitStartedAt
     );
 
     expect(ready).toBe(true);
@@ -32,10 +32,48 @@ describe('isNodeAgentReadyForWorkspaceDispatch', () => {
         agent_ready_at: '2026-05-21T09:50:00.000Z',
         last_heartbeat_at: '2026-05-21T09:58:00.000Z',
       },
-      waitStartedAt,
+      waitStartedAt
     );
 
     expect(ready).toBe(false);
+  });
+
+  it('rejects a stale agent build when a required build is configured', () => {
+    const waitStartedAt = Date.parse('2026-05-21T10:00:00.000Z');
+
+    const ready = isNodeAgentReadyForWorkspaceDispatch(
+      {
+        status: 'running',
+        health_status: 'healthy',
+        agent_ready_at: '2026-05-21T09:58:10.000Z',
+        last_heartbeat_at: '2026-05-21T10:00:05.000Z',
+        agent_version: 'old-sha',
+      },
+      waitStartedAt,
+      30_000,
+      'new-sha'
+    );
+
+    expect(ready).toBe(false);
+  });
+
+  it('accepts matching agent build when a required build is configured', () => {
+    const waitStartedAt = Date.parse('2026-05-21T10:00:00.000Z');
+
+    const ready = isNodeAgentReadyForWorkspaceDispatch(
+      {
+        status: 'running',
+        health_status: 'healthy',
+        agent_ready_at: '2026-05-21T09:58:10.000Z',
+        last_heartbeat_at: '2026-05-21T10:00:05.000Z',
+        agent_version: 'new-sha',
+      },
+      waitStartedAt,
+      30_000,
+      'new-sha'
+    );
+
+    expect(ready).toBe(true);
   });
 
   it('rejects when /ready timestamp is ahead of heartbeat by more than skew budget', () => {
@@ -49,7 +87,7 @@ describe('isNodeAgentReadyForWorkspaceDispatch', () => {
         agent_ready_at: '2026-05-21T10:01:00.000Z',
         last_heartbeat_at: '2026-05-21T10:00:05.000Z',
       },
-      waitStartedAt,
+      waitStartedAt
     );
 
     expect(ready).toBe(false);

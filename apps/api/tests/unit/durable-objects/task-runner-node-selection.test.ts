@@ -7,22 +7,41 @@ import type {
 } from '../../../src/durable-objects/task-runner/types';
 
 type D1ResultMap = {
-  preferredNode?: { id: string; status: string; vm_size: string } | null;
-  warmNodes?: Array<{ id: string; vm_size: string; vm_location: string }>;
-  freshWarmNode?: { status: string; warm_since: string | null } | null;
+  preferredNode?: {
+    id: string;
+    status: string;
+    vm_size: string;
+    agent_version?: string | null;
+  } | null;
+  warmNodes?: Array<{
+    id: string;
+    vm_size: string;
+    vm_location: string;
+    agent_version?: string | null;
+  }>;
+  freshWarmNode?: {
+    status: string;
+    warm_since: string | null;
+    agent_version?: string | null;
+  } | null;
   existingNodes?: Array<{
     id: string;
     vm_size: string;
     vm_location: string;
     health_status: string;
     last_metrics: string | null;
+    agent_version?: string | null;
   }>;
   workspaceCounts?: Array<{ node_id: string; c: number }>;
-  healthByNode?: Record<string, {
-    health_status: string | null;
-    last_heartbeat_at: string | null;
-    agent_ready_at: string | null;
-  }>;
+  healthByNode?: Record<
+    string,
+    {
+      health_status: string | null;
+      last_heartbeat_at: string | null;
+      agent_ready_at: string | null;
+      agent_version?: string | null;
+    }
+  >;
 };
 
 function createStatement(sql: string, results: D1ResultMap) {
@@ -33,13 +52,13 @@ function createStatement(sql: string, results: D1ResultMap) {
       return this;
     },
     first() {
-      if (sql.includes('SELECT id, status, vm_size FROM nodes')) {
+      if (sql.includes('SELECT id, status, vm_size')) {
         return Promise.resolve(results.preferredNode ?? null);
       }
-      if (sql.includes('SELECT status, warm_since FROM nodes')) {
+      if (sql.includes('SELECT status, warm_since')) {
         return Promise.resolve(results.freshWarmNode ?? null);
       }
-      if (sql.includes('SELECT health_status, last_heartbeat_at, agent_ready_at FROM nodes')) {
+      if (sql.includes('SELECT health_status, last_heartbeat_at, agent_ready_at')) {
         return Promise.resolve(results.healthByNode?.[String(bound[0])] ?? null);
       }
       return Promise.resolve(null);
@@ -48,7 +67,7 @@ function createStatement(sql: string, results: D1ResultMap) {
       if (sql.includes('warm_since IS NOT NULL')) {
         return Promise.resolve({ results: results.warmNodes ?? [] });
       }
-      if (sql.includes('SELECT id, vm_size, vm_location, health_status, last_metrics FROM nodes')) {
+      if (sql.includes('SELECT id, vm_size, vm_location, health_status, last_metrics')) {
         return Promise.resolve({ results: results.existingNodes ?? [] });
       }
       if (sql.includes('SELECT node_id, COUNT(*) as c FROM workspaces')) {
@@ -69,6 +88,7 @@ function createContext(results: D1ResultMap): TaskRunnerContext {
       },
       NODE_HEARTBEAT_STALE_SECONDS: '180',
       MAX_WORKSPACES_PER_NODE: '5',
+      VM_AGENT_REQUIRED_VERSION: 'current-sha',
     },
     ctx: {
       storage: {
@@ -148,7 +168,12 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
       config: { ...createState().config, preferredNodeId: 'node-medium', vmSize: 'large' },
     });
     const rc = createContext({
-      preferredNode: { id: 'node-medium', status: 'running', vm_size: 'medium' },
+      preferredNode: {
+        id: 'node-medium',
+        status: 'running',
+        vm_size: 'medium',
+        agent_version: 'current-sha',
+      },
     });
 
     await expect(handleNodeSelection(state, rc)).rejects.toMatchObject({
@@ -162,7 +187,9 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
     const lifecycleGet = vi.fn();
     const state = createState();
     const rc = createContext({
-      warmNodes: [{ id: 'warm-medium', vm_size: 'medium', vm_location: 'fsn1' }],
+      warmNodes: [
+        { id: 'warm-medium', vm_size: 'medium', vm_location: 'fsn1', agent_version: 'current-sha' },
+      ],
       existingNodes: [],
     });
     rc.env.NODE_LIFECYCLE = {
@@ -187,6 +214,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_location: 'fsn1',
           health_status: 'healthy',
           last_metrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1 }),
+          agent_version: 'current-sha',
         },
         {
           id: 'node-large',
@@ -194,6 +222,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           vm_location: 'fsn1',
           health_status: 'healthy',
           last_metrics: JSON.stringify({ cpuLoadAvg1: 20, memoryPercent: 20 }),
+          agent_version: 'current-sha',
         },
       ],
       healthByNode: {
@@ -201,6 +230,7 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
           health_status: 'healthy',
           last_heartbeat_at: new Date().toISOString(),
           agent_ready_at: new Date().toISOString(),
+          agent_version: 'current-sha',
         },
       },
     });
@@ -209,5 +239,63 @@ describe('TaskRunner node selection VM size minimum behavior', () => {
 
     expect(state.stepResults.nodeId).toBe('node-large');
     expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+  });
+
+  it('skips a better-ranked stale node and selects a compatible current node', async () => {
+    const state = createState({ config: { ...createState().config, vmSize: 'large' } });
+    const now = new Date().toISOString();
+    const rc = createContext({
+      existingNodes: [
+        {
+          id: 'node-stale',
+          vm_size: 'large',
+          vm_location: 'fsn1',
+          health_status: 'healthy',
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1 }),
+          agent_version: 'old-sha',
+        },
+        {
+          id: 'node-current',
+          vm_size: 'large',
+          vm_location: 'fsn1',
+          health_status: 'healthy',
+          last_metrics: JSON.stringify({ cpuLoadAvg1: 40, memoryPercent: 40 }),
+          agent_version: 'current-sha',
+        },
+      ],
+      healthByNode: {
+        'node-current': {
+          health_status: 'healthy',
+          last_heartbeat_at: now,
+          agent_ready_at: now,
+          agent_version: 'current-sha',
+        },
+      },
+    });
+
+    await handleNodeSelection(state, rc);
+
+    expect(state.stepResults.nodeId).toBe('node-current');
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+  });
+
+  it('rejects an explicitly preferred stale node', async () => {
+    const state = createState({
+      config: { ...createState().config, preferredNodeId: 'node-stale', vmSize: 'large' },
+    });
+    const rc = createContext({
+      preferredNode: {
+        id: 'node-stale',
+        status: 'running',
+        vm_size: 'large',
+        agent_version: 'old-sha',
+      },
+    });
+
+    await expect(handleNodeSelection(state, rc)).rejects.toMatchObject({
+      message: 'Specified node is running an incompatible VM agent build',
+      permanent: true,
+    });
+    expect(rc.advanceToStep).not.toHaveBeenCalled();
   });
 });

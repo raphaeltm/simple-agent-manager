@@ -356,7 +356,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
           RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
-          VM_AGENT_REQUIRED_VERSION: ${{ github.sha }}
+          VM_AGENT_REQUIRED_VERSION: ${{ inputs.skip_agent == true && '' || github.sha }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
           SETUP_FORCE: ${{ vars.SETUP_FORCE }}
           HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
@@ -645,6 +645,33 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
+      # Publish VM-agent binaries before deploying Worker code that may require
+      # this exact build via VM_AGENT_REQUIRED_VERSION. When skip_agent is true,
+      # the sync step leaves VM_AGENT_REQUIRED_VERSION empty so existing nodes are
+      # not drained for binaries this deployment intentionally did not publish.
+      - name: Build VM Agent
+        if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
+        # Pin VERSION to the deploy commit so R2 binaries report the same
+        # version string as the container-baked binary (prepare-container above).
+        run: |
+          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          make -C packages/vm-agent build-all VERSION="$GITHUB_SHA" BUILD_DATE="$BUILD_DATE"
+
+      - name: Upload VM Agent Binaries
+        if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
+        working-directory: infra
+        run: |
+          R2_BUCKET=$(pulumi stack output r2Name)
+          # Wrangler v4: R2 commands default to local; --remote required for deployed R2.
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-amd64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-amd64 --remote
+          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-arm64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-arm64 --remote
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
       # Deploy API worker after D1 migrations so new code never serves against old schema.
       # On first deploy this still runs before the tail worker because the API service binding is required.
       - name: Deploy API Worker
@@ -694,7 +721,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
           RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
-          VM_AGENT_REQUIRED_VERSION: ${{ github.sha }}
+          VM_AGENT_REQUIRED_VERSION: ${{ inputs.skip_agent == true && '' || github.sha }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
           SETUP_FORCE: ${{ vars.SETUP_FORCE }}
           HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
@@ -845,32 +872,6 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           DEPLOY_ENV: ${{ inputs.environment }}
           ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}
-
-      # ========================================
-      # Phase 4: VM Agent
-      # ========================================
-      - name: Build VM Agent
-        if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
-        # Pin VERSION to the deploy commit so R2 binaries report the same
-        # version string as the container-baked binary (prepare-container above).
-        run: |
-          BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          make -C packages/vm-agent build-all VERSION="$GITHUB_SHA" BUILD_DATE="$BUILD_DATE"
-
-      - name: Upload VM Agent Binaries
-        if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
-        working-directory: infra
-        run: |
-          R2_BUCKET=$(pulumi stack output r2Name)
-          # Wrangler v4: R2 commands default to local; --remote required for deployed R2.
-          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-amd64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-amd64 --remote
-          pnpm --filter @simple-agent-manager/api exec wrangler r2 object put $R2_BUCKET/agents/vm-agent-linux-arm64 --file $GITHUB_WORKSPACE/packages/vm-agent/bin/vm-agent-linux-arm64 --remote
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Build CLI
         if: ${{ inputs.dry_run != true }}

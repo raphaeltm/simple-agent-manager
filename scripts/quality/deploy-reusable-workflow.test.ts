@@ -94,7 +94,11 @@ function runWorkersDevSubdomainStep(httpCode: number): { output: string; status:
 
     return { output, status: 0 };
   } catch (error) {
-    const execError = error as { stdout?: Buffer | string; stderr?: Buffer | string; status?: number };
+    const execError = error as {
+      stdout?: Buffer | string;
+      stderr?: Buffer | string;
+      status?: number;
+    };
     return {
       output: `${execError.stdout?.toString() ?? ''}${execError.stderr?.toString() ?? ''}`,
       status: execError.status ?? 1,
@@ -135,12 +139,18 @@ describe('deploy reusable workflow', () => {
     expect(initialSync).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
     expect(initialSync).toContain('RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}');
     expect(initialSync).toContain(
+      "VM_AGENT_REQUIRED_VERSION: ${{ inputs.skip_agent == true && \'\' || github.sha }}"
+    );
+    expect(initialSync).toContain(
       'ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}'
     );
 
     expect(firstDeployResync).toContain('pnpm tsx scripts/deploy/sync-wrangler-config.ts');
     expect(firstDeployResync).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
     expect(firstDeployResync).toContain('RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}');
+    expect(firstDeployResync).toContain(
+      "VM_AGENT_REQUIRED_VERSION: ${{ inputs.skip_agent == true && \'\' || github.sha }}"
+    );
     expect(firstDeployResync).toContain(
       'ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}'
     );
@@ -158,7 +168,9 @@ describe('deploy reusable workflow', () => {
       expect(firstDeployResync).toContain(mapping);
     }
 
-    for (const envVar of extractOptionalWorkerEnvVars()) {
+    for (const envVar of extractOptionalWorkerEnvVars().filter(
+      (name) => name !== 'VM_AGENT_REQUIRED_VERSION'
+    )) {
       const mapping = `${envVar}: \${{ vars.${envVar} }}`;
       expect(initialSync).toContain(mapping);
       expect(firstDeployResync).toContain(mapping);
@@ -221,6 +233,16 @@ describe('deploy reusable workflow', () => {
     // `make prepare-container` (and the later `build-all`) steps fail at runtime.
     expect(goSetupIndex).toBeGreaterThan(-1);
     expect(goSetupIndex).toBeLessThan(prepareIndex);
+  });
+
+  it('uploads the matching VM agent binaries before the API requires that build', () => {
+    const buildIndex = workflow.indexOf('- name: Build VM Agent');
+    const uploadIndex = workflow.indexOf('- name: Upload VM Agent Binaries');
+    const deployIndex = workflow.indexOf('- name: Deploy API Worker');
+
+    expect(buildIndex).toBeGreaterThan(-1);
+    expect(uploadIndex).toBeGreaterThan(buildIndex);
+    expect(uploadIndex).toBeLessThan(deployIndex);
   });
 
   it('forwards the cf-container clone/create tunables into the wrangler config sync env', () => {

@@ -173,6 +173,7 @@ describe('sync wrangler config', () => {
 
   it('generates Cloudflare container max_instances with unchanged safe defaults', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    vi.stubEnv('VM_AGENT_REQUIRED_VERSION', 'deploy-sha');
 
     const containers = [
       {
@@ -190,6 +191,8 @@ describe('sync wrangler config', () => {
     ];
 
     const envConfig = generateApiWorkerEnv({ containers }, outputs, 'prod', false, false, null);
+
+    expect(envConfig.vars?.VM_AGENT_REQUIRED_VERSION).toBe('deploy-sha');
 
     expect(envConfig.containers).toEqual([
       {
@@ -211,6 +214,7 @@ describe('sync wrangler config', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     vi.stubEnv('SANDBOX_CONTAINER_MAX_INSTANCES', '8');
     vi.stubEnv('VM_AGENT_CONTAINER_MAX_INSTANCES', '5');
+    vi.stubEnv('VM_AGENT_REQUIRED_VERSION', 'deploy-sha');
 
     const containers = [
       {

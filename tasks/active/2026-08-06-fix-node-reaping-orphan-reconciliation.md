@@ -146,6 +146,16 @@ compounding problems, not one.
   Coverage grows as nodes cycle.
 - **Rule 18**: `node-cleanup.ts` is already 646 lines. Split it into a directory in a
   separate commit *before* the feature commits so the diff is reviewable.
+- **Version-aware drain, not destructive replacement.** Official deploys publish VM
+  binaries with the deployment commit as their build identity before the Worker starts
+  requiring that identity. Ready and heartbeat callbacks report it additively; old
+  agents remain protocol-compatible but are ineligible for new dispatch.
+- **Preserve active work.** A stale managed VM with any non-terminal workspace is only
+  drained (excluded from every placement path). The cleanup sweep destroys it after the
+  last workspace becomes terminal.
+- **Cloudflare Instant remains separate.** Its vm-agent is baked into the per-session
+  container image and Instant nodes are not reusable VM-pool candidates. VM drain/reap
+  SQL explicitly requires VM runtime.
 
 ## Implementation Checklist
 
@@ -205,6 +215,22 @@ compounding problems, not one.
       skipped; too-young server → skipped; D1 error → nothing destroyed.
 - [x] Cron isolation regression test (see P0).
 
+### P4 — rollout-compatible VM scheduling and draining
+
+- [x] Add additive `agentVersion` metadata to vm-agent `/ready`, heartbeat, and health
+      responses; persist it on `nodes` while accepting legacy empty `/ready` bodies.
+- [x] Generate `VM_AGENT_REQUIRED_VERSION` from the deployment commit and upload matching
+      R2 binaries before deploying Worker code that requires them; skip-agent deploys do
+      not advance the requirement.
+- [x] Gate preferred, warm, capacity, trial, manual-workspace, direct-health, and fresh
+      provisioning paths before dispatch; keep the legacy selector consistent.
+- [x] Add a bounded managed-VM-only drain phase: preserve stale busy nodes, immediately
+      retire stale idle nodes, and exclude Cloudflare Instant and user-owned nodes.
+- [x] Discriminating tests: stale better-ranked candidate loses to current candidate;
+      stale preferred nodes are rejected; fresh current readiness succeeds; active stale
+      work survives until terminal; current VMs and Instant containers survive.
+- [x] Add durable rollout-compatibility process guidance in `.claude/rules/54-vm-agent-rollout-compatibility.md`.
+
 ## Acceptance Criteria
 
 - A throwing sweep in the 5-minute cron cannot prevent any other sweep from running,
@@ -224,6 +250,12 @@ compounding problems, not one.
 - No hardcoded values: every threshold has a `DEFAULT_*` constant and an env override
   (constitution Principle XI).
 - Documentation updated for all new env vars.
+- Newly started sessions cannot dispatch to a node whose reported vm-agent build differs
+  from the deployment-required build. Missing build metadata is incompatible when the
+  official deployment requirement is configured.
+- Busy incompatible managed VMs receive no new work and are not destroyed; idle/drained
+  incompatible VMs are retired by the bounded cleanup sweep. Cloudflare Instant is not
+  treated as a reusable VM node.
 
 ## Post-Mortem
 
@@ -281,6 +313,8 @@ distinguishable from empty ones, failure names in the completion log, a non-thro
 error handler, and a ban on idleness predicates built over any column a keepalive path
 writes.
 
+**Rollout addendum.** The original fix treated node liveness as sufficient evidence for reuse. PR #1757 changed vm-agent startup behavior but the deploy had no compatibility contract, so healthy legacy processes stayed schedulable indefinitely. The added process fix is `.claude/rules/54-vm-agent-rollout-compatibility.md`: every scheduling-affecting agent change must publish a build identity, gate all reuse paths, order artifacts before the controller requirement, drain busy legacy nodes, and retire them only after work drains.
+
 ## References
 
 - `.claude/rules/47-control-loop-io-budget.md` — tiered timeouts, candidate escape paths,
@@ -291,4 +325,6 @@ writes.
   correcting the attributed cause
 - `.claude/rules/42-no-untracked-degrading-placeholders.md`
 - Project policy: "Hetzner capacity is shared (10 servers): staging runs zero VMs at rest"
+- `.claude/rules/54-vm-agent-rollout-compatibility.md`
 - SAM task `01KZB1EC4ZR612SJJKNWTGDAS3`
+- Production symptom task `01KZBE2843QTMGPQ44ADBX5A6A`

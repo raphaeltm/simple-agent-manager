@@ -439,6 +439,7 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 | ---------------------------------------- | ------------------ | ------------------------------------------------------------- |
 | `NODE_AGENT_READY_TIMEOUT_MS`            | `600000` (10 min)  | Wait for VM agent to report ready                             |
 | `NODE_AGENT_READY_POLL_INTERVAL_MS`      | `5000`             | Poll interval for agent readiness                             |
+| `VM_AGENT_REQUIRED_VERSION`              | _(deploy-generated)_ | Required vm-agent build for reusable VM nodes. Official deploys derive this from the Git commit SHA after publishing matching binaries; leave unset only for local/manual development or skip-agent deploys. |
 | `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` | `1800000` (30 min) | Max wait for workspace-ready callback                         |
 | `PROVISIONING_TIMEOUT_MS`                | `1800000` (30 min) | Cron marks stuck workspaces as error                          |
 | `NODE_HEARTBEAT_STALE_SECONDS`           | `180`              | Seconds without a heartbeat before a node is treated as stale |

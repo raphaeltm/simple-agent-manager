@@ -19,6 +19,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { runNodeCleanupSweep } from '../../../src/scheduled/node-cleanup';
+import { deleteNodeResources } from '../../../src/services/nodes';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const deleteCalls: string[] = [];
@@ -83,18 +84,33 @@ function seedWorkspace(row: {
 
 function makeEnv(): Env {
   const d1 = createSqliteD1(sqlite as Database.Database);
-  return { DATABASE: d1, OBSERVABILITY_DATABASE: d1 } as unknown as Env;
+  return {
+    DATABASE: d1,
+    OBSERVABILITY_DATABASE: d1,
+    NODE_WARM_GRACE_PERIOD_MS: String(35 * MINUTE),
+    MAX_AUTO_NODE_LIFETIME_MS: String(4 * HOUR),
+    NODE_ABSOLUTE_MAX_LIFETIME_MS: String(24 * HOUR),
+    ORPHANED_WORKSPACE_GRACE_PERIOD_MS: String(10 * MINUTE),
+    NODE_ORPHAN_IDLE_TIMEOUT_MS: String(45 * MINUTE),
+    WORKSPACE_STOPPED_TTL_MS: String(6 * HOUR),
+    NODE_CLEANUP_SWEEP_LIMIT: '25',
+    WORKSPACE_CLEANUP_SWEEP_LIMIT: '50',
+    CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT: '25',
+  } as unknown as Env;
 }
 
 beforeEach(() => {
   deleteCalls.length = 0;
+  vi.mocked(deleteNodeResources).mockImplementation(async (nodeId: string) => {
+    deleteCalls.push(nodeId);
+  });
   sqlite = new Database(':memory:');
   sqlite.exec(`
     CREATE TABLE nodes (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL,
       warm_since TEXT, node_role TEXT NOT NULL DEFAULT 'workspace',
       node_class TEXT NOT NULL DEFAULT 'managed', runtime TEXT NOT NULL DEFAULT 'vm',
-      health_status TEXT NOT NULL DEFAULT 'unhealthy',
+      health_status TEXT NOT NULL DEFAULT 'unhealthy', agent_version TEXT,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );
     CREATE TABLE workspaces (
@@ -241,5 +257,49 @@ describe('idle reaping is immune to heartbeat activity', () => {
     // never reported as destroyed on either pass.
     expect(second.orphanedNodesDestroyed).toBe(0);
     expect(first.orphanedNodesDestroyed).toBe(0);
+  });
+});
+
+describe('incompatible vm-agent cleanup', () => {
+  it('destroys an idle managed VM whose agent build does not match the deployment requirement', async () => {
+    seedNode({ id: 'legacy-idle', createdAt: ago(10 * HOUR), updatedAt: ago(1000) });
+    sqlite?.prepare(`UPDATE nodes SET agent_version = 'old-sha' WHERE id = 'legacy-idle'`).run();
+    const env = { ...makeEnv(), VM_AGENT_REQUIRED_VERSION: 'current-sha' } as Env;
+
+    const result = await runNodeCleanupSweep(env);
+
+    expect(deleteCalls).toContain('legacy-idle');
+    expect(result.incompatibleDestroyed).toBe(1);
+  });
+
+  it('preserves a busy incompatible VM so active work can drain naturally', async () => {
+    seedNode({ id: 'legacy-busy', createdAt: ago(10 * HOUR), updatedAt: ago(1000) });
+    sqlite?.prepare(`UPDATE nodes SET agent_version = 'old-sha' WHERE id = 'legacy-busy'`).run();
+    seedWorkspace({
+      id: 'ws-running-legacy',
+      nodeId: 'legacy-busy',
+      status: 'running',
+      updatedAt: ago(1 * MINUTE),
+    });
+    const env = { ...makeEnv(), VM_AGENT_REQUIRED_VERSION: 'current-sha' } as Env;
+
+    const result = await runNodeCleanupSweep(env);
+
+    expect(deleteCalls).not.toContain('legacy-busy');
+    expect(result.incompatibleSkipped).toBe(1);
+  });
+
+  it('does not treat cf-container Instant nodes as reusable VM rollout candidates', async () => {
+    seedNode({ id: 'instant-idle', createdAt: ago(10 * HOUR), updatedAt: ago(1000) });
+    sqlite
+      ?.prepare(
+        `UPDATE nodes SET runtime = 'cf-container', agent_version = 'old-sha' WHERE id = 'instant-idle'`
+      )
+      .run();
+    const env = { ...makeEnv(), VM_AGENT_REQUIRED_VERSION: 'current-sha' } as Env;
+
+    const result = await runNodeCleanupSweep(env);
+
+    expect(result.incompatibleDestroyed).toBe(0);
   });
 });

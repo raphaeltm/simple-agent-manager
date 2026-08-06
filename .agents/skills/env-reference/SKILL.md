@@ -17,6 +17,7 @@ The reference covers:
   - Resource limits (MAX_NODES_PER_USER, MAX_AGENT_SESSIONS_PER_WORKSPACE, etc.)
   - Pagination settings
   - Timeouts (heartbeat, Hetzner API, Cloudflare API, Node Agent)
+  - VM agent rollout requirement (`VM_AGENT_REQUIRED_VERSION`)
   - Audio/Transcription settings
   - Client error reporting settings
   - Generic webhook trigger limits, rate damping, and audit retention

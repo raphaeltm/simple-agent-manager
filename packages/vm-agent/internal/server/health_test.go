@@ -15,6 +15,7 @@ import (
 	"github.com/workspace/vm-agent/internal/deploy"
 	"github.com/workspace/vm-agent/internal/errorreport"
 	"github.com/workspace/vm-agent/internal/persistence"
+	"github.com/workspace/vm-agent/internal/sysinfo"
 )
 
 // newTestErrorReporter creates a minimal error reporter for tests.
@@ -89,6 +90,54 @@ func TestCallbackTokenRefresh(t *testing.T) {
 
 	if heartbeatCount != 2 {
 		t.Fatalf("expected 2 heartbeats, got %d", heartbeatCount)
+	}
+}
+
+func TestNodeReadyAndHeartbeatReportAgentVersion(t *testing.T) {
+	originalVersion := sysinfo.Version
+	sysinfo.Version = "test-build-sha"
+	t.Cleanup(func() { sysinfo.Version = originalVersion })
+
+	seen := map[string]string{}
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		var payload map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode %s payload: %v", r.URL.Path, err)
+		}
+		version, _ := payload["agentVersion"].(string)
+		seen[r.URL.Path] = version
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(heartbeatResponse{
+			Status:          "running",
+			LastHeartbeatAt: time.Now().UTC().Format(time.RFC3339),
+			HealthStatus:    "healthy",
+		})
+	}))
+	defer ts.Close()
+
+	cfg := &config.Config{
+		ControlPlaneURL:   ts.URL,
+		NodeID:            "node-version",
+		CallbackToken:     "callback-token",
+		HeartbeatInterval: time.Minute,
+	}
+	s := &Server{
+		config:        cfg,
+		callbackToken: cfg.CallbackToken,
+		errorReporter: newTestErrorReporter(),
+		done:          make(chan struct{}),
+	}
+
+	s.sendNodeReady()
+	s.sendNodeHeartbeat()
+
+	if got := seen["/api/nodes/node-version/ready"]; got != "test-build-sha" {
+		t.Fatalf("ready agentVersion = %q, want test-build-sha", got)
+	}
+	if got := seen["/api/nodes/node-version/heartbeat"]; got != "test-build-sha" {
+		t.Fatalf("heartbeat agentVersion = %q, want test-build-sha", got)
 	}
 }
 
