@@ -189,7 +189,7 @@ describe('sync wrangler config', () => {
       },
     ];
 
-    const envConfig = generateApiWorkerEnv({ containers }, outputs, 'prod', false, false);
+    const envConfig = generateApiWorkerEnv({ containers }, outputs, 'prod', false, false, null);
 
     expect(envConfig.containers).toEqual([
       {
@@ -233,7 +233,7 @@ describe('sync wrangler config', () => {
       },
     ];
 
-    const envConfig = generateApiWorkerEnv({ containers }, outputs, 'prod', false, false);
+    const envConfig = generateApiWorkerEnv({ containers }, outputs, 'prod', false, false, null);
 
     expect(envConfig.containers).toEqual([
       {
@@ -272,12 +272,12 @@ describe('sync wrangler config', () => {
       ],
     };
 
-    expect(() => generateApiWorkerEnv(topLevel, outputs, 'prod', false, false)).toThrow(
+    expect(() => generateApiWorkerEnv(topLevel, outputs, 'prod', false, false, null)).toThrow(
       'SANDBOX_CONTAINER_MAX_INSTANCES must be greater than or equal to 1'
     );
 
     vi.stubEnv('SANDBOX_CONTAINER_MAX_INSTANCES', '1.5');
-    expect(() => generateApiWorkerEnv(topLevel, outputs, 'prod', false, false)).toThrow(
+    expect(() => generateApiWorkerEnv(topLevel, outputs, 'prod', false, false, null)).toThrow(
       'SANDBOX_CONTAINER_MAX_INSTANCES must be a positive safe integer'
     );
   });
