@@ -4,6 +4,7 @@ import {
   DEFAULT_GCP_APP_ROUTE_PORTS,
   DEFAULT_GCP_APP_ROUTE_SOURCE_RANGES,
   DEFAULT_GCP_FIREWALL_SOURCE_RANGES,
+  DEFAULT_GCP_MAX_LIST_PAGES,
   GcpProvider,
 } from '../../src/gcp';
 import type { VMConfig } from '../../src/types';
@@ -444,7 +445,37 @@ describe('GcpProvider', () => {
         return new Response(JSON.stringify({ error: { message: 'Zone not found' } }), { status: 404 });
       });
 
-      await expect(provider.listVMs()).rejects.toThrow(/exceeded 100 pages/);
+      await expect(provider.listVMs()).rejects.toThrow(new RegExp(`exceeded ${DEFAULT_GCP_MAX_LIST_PAGES} pages`));
+    });
+
+    it('collects VMs across three or more GCP zonal pages', async () => {
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/zones/us-central1-a/instances')) {
+          const parsed = new URL(url);
+          const token = parsed.searchParams.get('pageToken');
+          if (!token) {
+            return new Response(JSON.stringify({
+              items: [gcpInstance({ id: '1', name: 'page-1' })],
+              nextPageToken: 'tok-2',
+            }));
+          }
+          if (token === 'tok-2') {
+            return new Response(JSON.stringify({
+              items: [gcpInstance({ id: '2', name: 'page-2' })],
+              nextPageToken: 'tok-3',
+            }));
+          }
+          if (token === 'tok-3') {
+            return new Response(JSON.stringify({
+              items: [gcpInstance({ id: '3', name: 'page-3' })],
+            }));
+          }
+        }
+        return new Response(JSON.stringify({ error: { message: 'Zone not found' } }), { status: 404 });
+      });
+
+      const vms = await provider.listVMs();
+      expect(vms.map((vm) => vm.name)).toEqual(['page-1', 'page-2', 'page-3']);
     });
 
     it('should fail fast on permission failures', async () => {
@@ -465,7 +496,44 @@ describe('GcpProvider', () => {
   });
 
   describe('findInstanceByIdOrName', () => {
+    it('resolves a numeric-ID match on the first aggregated page without fetching further', async () => {
+      const mockFetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/aggregated/instances')) {
+          return new Response(JSON.stringify({
+            items: { 'zones/us-central1-a': { instances: [gcpInstance({ id: '42', name: 'found-first-page' })] } },
+            nextPageToken: 'should-not-be-followed',
+          }));
+        }
+        return new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 });
+      });
+      globalThis.fetch = mockFetch;
 
+      const result = await provider.getVM('42');
+      expect(result?.name).toBe('found-first-page');
+      const aggregatedCalls = mockFetch.mock.calls.filter(([url]: [string]) => String(url).includes('/aggregated/'));
+      expect(aggregatedCalls).toHaveLength(1);
+    });
+
+    it('stops paginating after a match even when later pages would fail', async () => {
+      let callCount = 0;
+      globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
+        if (url.includes('/aggregated/instances')) {
+          callCount++;
+          if (callCount === 1) {
+            return new Response(JSON.stringify({
+              items: { 'zones/us-central1-a': { instances: [gcpInstance({ id: 'match-id', name: 'found' })] } },
+              nextPageToken: 'page-2-token',
+            }));
+          }
+          return new Response(JSON.stringify({ error: { message: 'Internal Server Error' } }), { status: 500 });
+        }
+        return new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 });
+      });
+
+      const result = await provider.getVM('match-id');
+      expect(result?.name).toBe('found');
+      expect(callCount).toBe(1);
+    });
 
     it('follows aggregated nextPageToken for numeric-ID lookup', async () => {
       globalThis.fetch = vi.fn().mockImplementation(async (url: string) => {
@@ -563,7 +631,7 @@ describe('GcpProvider', () => {
         return new Response(JSON.stringify({ error: { message: 'Not found' } }), { status: 404 });
       });
 
-      await expect(provider.getVM('numeric-id')).rejects.toThrow(/exceeded 100 pages/);
+      await expect(provider.getVM('numeric-id')).rejects.toThrow(new RegExp(`exceeded ${DEFAULT_GCP_MAX_LIST_PAGES} pages`));
     });
 
     it('should surface aggregated-list failures after zonal name misses', async () => {

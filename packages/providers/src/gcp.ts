@@ -35,7 +35,8 @@ import {
 } from './validation';
 
 const COMPUTE_API_BASE = 'https://compute.googleapis.com/compute/v1';
-const GCP_MAX_LIST_PAGES = 100;
+// 100 pages × 500 items/page ≈ 50,000 resources — well above any realistic fleet
+export const DEFAULT_GCP_MAX_LIST_PAGES = 100;
 
 /**
  * Classify a GCP API error into a normalized ProviderErrorCategory.
@@ -617,7 +618,7 @@ export class GcpProvider implements Provider {
             for (const instance of scopeData.instances || []) {
               if (instance.id === idOrName || instance.name === idOrName) {
                 found = instance;
-                return;
+                return true;
               }
             }
           }
@@ -642,12 +643,12 @@ export class GcpProvider implements Provider {
     baseParams: URLSearchParams,
     headers: Record<string, string>,
     context: string,
-    handlePage: (data: { items?: GcpInstancePayload[]; nextPageToken?: string }) => void,
+    handlePage: (data: { items?: GcpInstancePayload[]; nextPageToken?: string }) => boolean | void,
   ): Promise<void> {
     await this.fetchPaginatedGcpList(baseUrl, baseParams, headers, context, async (payload) => {
       const data = validateGcpInstancesList(payload, context);
-      handlePage(data);
-      return data.nextPageToken;
+      const stop = handlePage(data);
+      return { nextPageToken: data.nextPageToken, stop: stop === true };
     });
   }
 
@@ -656,12 +657,12 @@ export class GcpProvider implements Provider {
     baseParams: URLSearchParams,
     headers: Record<string, string>,
     context: string,
-    handlePage: (data: { items?: Record<string, { instances?: GcpInstancePayload[] }>; nextPageToken?: string }) => void,
+    handlePage: (data: { items?: Record<string, { instances?: GcpInstancePayload[] }>; nextPageToken?: string }) => boolean | void,
   ): Promise<void> {
     await this.fetchPaginatedGcpList(baseUrl, baseParams, headers, context, async (payload) => {
       const data = validateGcpAggregatedInstances(payload, context);
-      handlePage(data);
-      return data.nextPageToken;
+      const stop = handlePage(data);
+      return { nextPageToken: data.nextPageToken, stop: stop === true };
     });
   }
 
@@ -670,27 +671,27 @@ export class GcpProvider implements Provider {
     baseParams: URLSearchParams,
     headers: Record<string, string>,
     context: string,
-    handlePage: (payload: unknown) => Promise<string | undefined>,
+    handlePage: (payload: unknown) => Promise<{ nextPageToken?: string; stop?: boolean }>,
   ): Promise<void> {
     const seenTokens = new Set<string>();
     let pageToken: string | undefined;
 
-    for (let pageCount = 0; pageCount < GCP_MAX_LIST_PAGES; pageCount += 1) {
+    for (let pageCount = 0; pageCount < DEFAULT_GCP_MAX_LIST_PAGES; pageCount += 1) {
       const params = new URLSearchParams(baseParams);
       if (pageToken) params.set('pageToken', pageToken);
       const res = await providerFetch('gcp', `${baseUrl}?${params.toString()}`, { headers }, this.timeoutMs);
-      const nextPageToken = await handlePage(await parseProviderJson(res, 'gcp', context));
-      if (!nextPageToken) return;
-      if (seenTokens.has(nextPageToken)) {
+      const result = await handlePage(await parseProviderJson(res, 'gcp', context));
+      if (result.stop || !result.nextPageToken) return;
+      if (seenTokens.has(result.nextPageToken)) {
         throw new ProviderError('gcp', undefined, `GCP ${context} pagination repeated nextPageToken`, {
           category: 'invalid_config',
         });
       }
-      seenTokens.add(nextPageToken);
-      pageToken = nextPageToken;
+      seenTokens.add(result.nextPageToken);
+      pageToken = result.nextPageToken;
     }
 
-    throw new ProviderError('gcp', undefined, `GCP ${context} exceeded ${GCP_MAX_LIST_PAGES} pages`, {
+    throw new ProviderError('gcp', undefined, `GCP ${context} exceeded ${DEFAULT_GCP_MAX_LIST_PAGES} pages`, {
       category: 'invalid_config',
     });
   }

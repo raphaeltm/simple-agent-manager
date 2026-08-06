@@ -1,6 +1,6 @@
 import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { HetznerProvider } from '../../src/hetzner';
+import { DEFAULT_HETZNER_MAX_LIST_PAGES, HetznerProvider } from '../../src/hetzner';
 import { ProviderError } from '../../src/types';
 import { createMockServer } from '../fixtures/hetzner-mocks';
 import { expectDefined, fetchCall, testIpv4 } from './test-helpers';
@@ -153,6 +153,25 @@ describe('HetznerProvider lifecycle', () => {
       expect(result.map((vm) => vm.id)).toEqual(['3']);
     });
 
+    it('collects VMs across three or more Hetzner server pages', async () => {
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          servers: [createMockServer({ id: 1, name: 'page-1' })],
+          meta: { pagination: { page: 1, next_page: 2 } },
+        }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          servers: [createMockServer({ id: 2, name: 'page-2' })],
+          meta: { pagination: { page: 2, next_page: 3 } },
+        }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          servers: [createMockServer({ id: 3, name: 'page-3' })],
+          meta: { pagination: { page: 3, next_page: null } },
+        }), { status: 200 }));
+
+      const result = await provider.listVMs();
+      expect(result.map((vm) => vm.id)).toEqual(['1', '2', '3']);
+    });
+
     it('rejects repeated Hetzner server pages instead of looping', async () => {
       globalThis.fetch = vi.fn().mockResolvedValue(
         new Response(JSON.stringify({
@@ -169,6 +188,17 @@ describe('HetznerProvider lifecycle', () => {
         new Response(JSON.stringify({
           servers: [],
           meta: { pagination: { page: 1, next_page: '2' } },
+        }), { status: 200 }),
+      );
+
+      await expect(provider.listVMs()).rejects.toThrow(/next_page/);
+    });
+
+    it.each([0, -1])('rejects next_page %d as malformed', async (nextPage) => {
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          servers: [],
+          meta: { pagination: { page: 1, next_page: nextPage } },
         }), { status: 200 }),
       );
 
@@ -195,8 +225,8 @@ describe('HetznerProvider lifecycle', () => {
         }), { status: 200 });
       });
 
-      await expect(provider.listVMs()).rejects.toThrow(/exceeded 100 pages/);
-      expect(fetch).toHaveBeenCalledTimes(100);
+      await expect(provider.listVMs()).rejects.toThrow(new RegExp(`exceeded ${DEFAULT_HETZNER_MAX_LIST_PAGES} pages`));
+      expect(fetch).toHaveBeenCalledTimes(DEFAULT_HETZNER_MAX_LIST_PAGES);
     });
 
     it('should return empty array when no VMs match', async () => {

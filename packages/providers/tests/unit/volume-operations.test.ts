@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { HetznerProvider } from '../../src/hetzner';
+import { DEFAULT_HETZNER_MAX_LIST_PAGES, HetznerProvider } from '../../src/hetzner';
 import { ScalewayProvider } from '../../src/scaleway';
 import {
   SAM_VOLUME_FILESYSTEM_FORMAT,
@@ -212,8 +212,6 @@ describe('provider volume operations', () => {
         category: 'quota_exceeded',
       });
     });
-  });
-
 
     it('lists Hetzner volumes across paginated responses and preserves filters', async () => {
       const provider = new HetznerProvider('token', 'fsn1');
@@ -257,6 +255,26 @@ describe('provider volume operations', () => {
       expect(volumes.map((volume) => volume.id)).toEqual(['3']);
     });
 
+    it('collects volumes across three or more Hetzner volume pages', async () => {
+      const provider = new HetznerProvider('token', 'fsn1');
+      globalThis.fetch = vi.fn()
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          volumes: [hetznerVolume({ id: 1, name: 'vol-1' })],
+          meta: { pagination: { page: 1, next_page: 2 } },
+        }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          volumes: [hetznerVolume({ id: 2, name: 'vol-2' })],
+          meta: { pagination: { page: 2, next_page: 3 } },
+        }), { status: 200 }))
+        .mockResolvedValueOnce(new Response(JSON.stringify({
+          volumes: [hetznerVolume({ id: 3, name: 'vol-3' })],
+          meta: { pagination: { page: 3, next_page: null } },
+        }), { status: 200 }));
+
+      const volumes = await provider.listVolumes({ location: 'fsn1' });
+      expect(volumes.map((v) => v.id)).toEqual(['1', '2', '3']);
+    });
+
     it('rejects repeated Hetzner volume pages instead of looping', async () => {
       const provider = new HetznerProvider('token', 'fsn1');
       globalThis.fetch = vi.fn().mockResolvedValue(
@@ -275,6 +293,18 @@ describe('provider volume operations', () => {
         new Response(JSON.stringify({
           volumes: [],
           meta: { pagination: { page: 1, next_page: '2' } },
+        }), { status: 200 }),
+      );
+
+      await expect(provider.listVolumes({ location: 'fsn1' })).rejects.toThrow(/next_page/);
+    });
+
+    it.each([0, -1])('rejects next_page %d as malformed for Hetzner volumes', async (nextPage) => {
+      const provider = new HetznerProvider('token', 'fsn1');
+      globalThis.fetch = vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({
+          volumes: [],
+          meta: { pagination: { page: 1, next_page: nextPage } },
         }), { status: 200 }),
       );
 
@@ -303,9 +333,10 @@ describe('provider volume operations', () => {
         }), { status: 200 });
       });
 
-      await expect(provider.listVolumes({ location: 'fsn1' })).rejects.toThrow(/exceeded 100 pages/);
-      expect(fetch).toHaveBeenCalledTimes(100);
+      await expect(provider.listVolumes({ location: 'fsn1' })).rejects.toThrow(new RegExp(`exceeded ${DEFAULT_HETZNER_MAX_LIST_PAGES} pages`));
+      expect(fetch).toHaveBeenCalledTimes(DEFAULT_HETZNER_MAX_LIST_PAGES);
     });
+  });
 
   describe('ScalewayProvider', () => {
     it('exposes volume constraints, Scaleway gaps, and SAM lifecycle conventions', () => {

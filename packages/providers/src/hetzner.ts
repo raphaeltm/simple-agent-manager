@@ -58,7 +58,8 @@ export const DEFAULT_CAPACITY_RETRY_BUDGET_MS = 300_000;
 export const HETZNER_VOLUME_MIN_SIZE_GB = 10;
 export const HETZNER_VOLUME_MAX_SIZE_GB = 10_000;
 export const HETZNER_MAX_VOLUMES_PER_SERVER = 16;
-const HETZNER_MAX_LIST_PAGES = 100;
+// 100 pages × 25 items/page ≈ 2,500 resources — well above any realistic fleet
+export const DEFAULT_HETZNER_MAX_LIST_PAGES = 100;
 
 const HETZNER_VOLUME_CAPABILITIES: VolumeCapabilities = {
   supported: true,
@@ -652,7 +653,7 @@ export class HetznerProvider implements Provider {
     const seenPages = new Set<number>();
     let page = 1;
 
-    for (let pageCount = 0; pageCount < HETZNER_MAX_LIST_PAGES; pageCount += 1) {
+    for (let pageCount = 0; pageCount < DEFAULT_HETZNER_MAX_LIST_PAGES; pageCount += 1) {
       if (seenPages.has(page)) {
         throw new ProviderError(this.name, undefined, `Hetzner ${context} pagination repeated page ${page}`, {
           category: 'invalid_config',
@@ -678,7 +679,7 @@ export class HetznerProvider implements Provider {
       page = nextPage;
     }
 
-    throw new ProviderError(this.name, undefined, `Hetzner ${context} exceeded ${HETZNER_MAX_LIST_PAGES} pages`, {
+    throw new ProviderError(this.name, undefined, `Hetzner ${context} exceeded ${DEFAULT_HETZNER_MAX_LIST_PAGES} pages`, {
       category: 'invalid_config',
     });
   }
