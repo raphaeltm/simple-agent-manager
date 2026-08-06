@@ -456,12 +456,16 @@ describe('parseIdleCleanupSchedule', () => {
       session_id: 's1',
       workspace_id: 'ws1',
       task_id: 't1',
+      cleanup_at: 1234,
+      created_at: 1000,
       retry_count: 2,
     });
     expect(result).toEqual({
       sessionId: 's1',
       workspaceId: 'ws1',
       taskId: 't1',
+      cleanupAt: 1234,
+      createdAt: 1000,
       retryCount: 2,
     });
   });
@@ -471,6 +475,8 @@ describe('parseIdleCleanupSchedule', () => {
       session_id: 's1',
       workspace_id: 'ws1',
       task_id: null,
+      cleanup_at: 1234,
+      created_at: 1000,
       retry_count: 0,
     });
     expect(result.taskId).toBeNull();
