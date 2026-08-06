@@ -451,6 +451,7 @@ function getApiWorkerVars(
       'CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS',
       'SETUP_SESSION_SWEEP_MAX_CANDIDATES',
       'POOL_LEASE_BUFFER_MS',
+      'VM_AGENT_REQUIRED_VERSION',
     ]),
     // AI Gateway ID matches the resource prefix (created by configure-ai-gateway.sh)
     AI_GATEWAY_ID: DEPLOYMENT_CONFIG.prefix,

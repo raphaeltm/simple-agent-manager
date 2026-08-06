@@ -242,6 +242,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   NODE_HEARTBEAT_STALE_SECONDS?: string;
   NODE_AGENT_READY_TIMEOUT_MS?: string;
   NODE_AGENT_READY_POLL_INTERVAL_MS?: string;
+  VM_AGENT_REQUIRED_VERSION?: string; // Deployment commit SHA required for reusable VM nodes; unset disables rollout gating for local/manual dev
   // Task run configuration (autonomous execution)
   TASK_RUN_NODE_CPU_THRESHOLD_PERCENT?: string;
   TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;

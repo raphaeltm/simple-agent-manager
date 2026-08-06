@@ -299,11 +299,13 @@ export async function handleNodeSelection(
   // trial fleets always auto-provision on platform credentials. We still try
   // reuse first because warm/multi-trial scenarios benefit from it.
   const userId = resolveAnonymousUserId(rc.env);
+  const requiredAgentVersion = rc.env.VM_AGENT_REQUIRED_VERSION || null;
   const existing = await rc.env.DATABASE.prepare(
     `SELECT id FROM nodes
      WHERE user_id = ? AND status = 'running' AND health_status = 'healthy'
+       AND (? IS NULL OR agent_version = ?)
      LIMIT 1`
-  ).bind(userId).first<{ id: string }>();
+  ).bind(userId, requiredAgentVersion, requiredAgentVersion).first<{ id: string }>();
 
   if (existing?.id) {
     if (await verifyNodeAgentHealthy(existing.id, rc as unknown as import('../task-runner/types').TaskRunnerContext)) {
@@ -421,15 +423,23 @@ export async function handleNodeAgentReady(
   }
 
   const node = await rc.env.DATABASE.prepare(
-    `SELECT status, health_status, last_heartbeat_at, agent_ready_at FROM nodes WHERE id = ?`
+    `SELECT status, health_status, last_heartbeat_at, agent_ready_at, agent_version FROM nodes WHERE id = ?`
   ).bind(state.nodeId).first<{
     status: string | null;
     health_status: string | null;
     last_heartbeat_at: string | null;
     agent_ready_at: string | null;
+    agent_version: string | null;
   }>();
 
-  if (isNodeAgentReadyForWorkspaceDispatch(node, state.nodeAgentReadyStartedAt, rc.getHeartbeatSkewMs())) {
+  if (
+    isNodeAgentReadyForWorkspaceDispatch(
+      node,
+      state.nodeAgentReadyStartedAt,
+      rc.getHeartbeatSkewMs(),
+      rc.env.VM_AGENT_REQUIRED_VERSION
+    )
+  ) {
     await rc.advanceToStep(state, 'workspace_creation');
     return;
   }

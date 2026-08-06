@@ -9,6 +9,7 @@ import { and, count, eq, inArray, isNotNull } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import { isNodeAgentVersionCompatible } from './node-agent-compatibility';
 import * as nodeLifecycle from './node-lifecycle';
 
 export interface NodeCandidate {
@@ -31,6 +32,7 @@ export interface NodeSelectorEnv {
   TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;
   MAX_WORKSPACES_PER_NODE?: string;
   NODE_LIFECYCLE?: DurableObjectNamespace;
+  VM_AGENT_REQUIRED_VERSION?: string;
 }
 
 function parseThreshold(value: string | undefined, fallback: number): number {
@@ -146,6 +148,7 @@ export async function selectNodeForTaskRun(
         vmLocation: schema.nodes.vmLocation,
         lastMetrics: schema.nodes.lastMetrics,
         warmSince: schema.nodes.warmSince,
+        agentVersion: schema.nodes.agentVersion,
       })
       .from(schema.nodes)
       .where(
@@ -159,6 +162,9 @@ export async function selectNodeForTaskRun(
 
     // Try each warm node that can satisfy the requested size, preferring exact size/location.
     const sortedWarm = warmNodes
+      .filter((node) =>
+        isNodeAgentVersionCompatible(node.agentVersion, env.VM_AGENT_REQUIRED_VERSION)
+      )
       .filter((node) => canSatisfyVmSize(node.vmSize, preferredSize))
       .sort((a, b) => {
         const aSizeMatch = preferredSize && a.vmSize === preferredSize ? 1 : 0;
@@ -174,12 +180,21 @@ export async function selectNodeForTaskRun(
         // Defense-in-depth: re-check D1 status before DO call to avoid
         // unnecessary DO round-trips for nodes that changed between query and claim.
         const [freshNode] = await db
-          .select({ status: schema.nodes.status, warmSince: schema.nodes.warmSince })
+          .select({
+            status: schema.nodes.status,
+            warmSince: schema.nodes.warmSince,
+            agentVersion: schema.nodes.agentVersion,
+          })
           .from(schema.nodes)
           .where(eq(schema.nodes.id, warmNode.id))
           .limit(1);
 
-        if (!freshNode || freshNode.status !== 'running' || !freshNode.warmSince) {
+        if (
+          !freshNode ||
+          freshNode.status !== 'running' ||
+          !freshNode.warmSince ||
+          !isNodeAgentVersionCompatible(freshNode.agentVersion, env.VM_AGENT_REQUIRED_VERSION)
+        ) {
           continue; // Node state changed since initial query
         }
 
@@ -224,7 +239,13 @@ export async function selectNodeForTaskRun(
   const nodes = await db
     .select()
     .from(schema.nodes)
-    .where(and(eq(schema.nodes.userId, userId), eq(schema.nodes.status, 'running'), eq(schema.nodes.nodeRole, 'workspace')));
+    .where(
+      and(
+        eq(schema.nodes.userId, userId),
+        eq(schema.nodes.status, 'running'),
+        eq(schema.nodes.nodeRole, 'workspace')
+      )
+    );
 
   if (nodes.length === 0) {
     return null;
@@ -235,6 +256,9 @@ export async function selectNodeForTaskRun(
   for (const node of nodes) {
     // Skip unhealthy nodes
     if (node.healthStatus === 'unhealthy') {
+      continue;
+    }
+    if (!isNodeAgentVersionCompatible(node.agentVersion, env.VM_AGENT_REQUIRED_VERSION)) {
       continue;
     }
     if (!canSatisfyVmSize(node.vmSize, preferredSize)) {

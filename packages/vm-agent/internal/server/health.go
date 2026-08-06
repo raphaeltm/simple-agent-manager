@@ -13,6 +13,7 @@ import (
 
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/deploy"
+	"github.com/workspace/vm-agent/internal/sysinfo"
 )
 
 func nowUTC() time.Time {
@@ -81,12 +82,19 @@ func (s *Server) SendNodeReady() {
 
 func (s *Server) sendNodeReady() {
 	url := strings.TrimRight(s.config.ControlPlaneURL, "/") + "/api/nodes/" + s.config.NodeID + "/ready"
-	req, err := http.NewRequest(http.MethodPost, url, nil)
+	body, err := json.Marshal(map[string]string{"agentVersion": sysinfo.Version})
+	if err != nil {
+		slog.Error("Node ready callback payload marshal failed", "error", err)
+		return
+	}
+
+	req, err := http.NewRequest(http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		slog.Error("Node ready callback request create failed", "error", err)
 		return
 	}
 	req.Header.Set("Authorization", "Bearer "+s.getCallbackToken())
+	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := s.controlPlaneHTTPClient(0).Do(req)
 	if err != nil {
@@ -115,8 +123,8 @@ type deploymentPendingRouteConfigResponse struct {
 }
 
 type deploymentHeartbeatResponse struct {
-	Environments       *[]deploymentEnvironmentResponse   `json:"environments,omitempty"`
-	RetireEnvironments []deploymentEnvironmentResponse    `json:"retireEnvironments,omitempty"`
+	Environments        *[]deploymentEnvironmentResponse       `json:"environments,omitempty"`
+	RetireEnvironments  []deploymentEnvironmentResponse        `json:"retireEnvironments,omitempty"`
 	PendingReleases     []deploymentPendingReleaseResponse     `json:"pendingReleases,omitempty"`
 	PendingRouteConfigs []deploymentPendingRouteConfigResponse `json:"pendingRouteConfigs,omitempty"`
 	DeployPubKey        string                                 `json:"deployPubKey,omitempty"`
@@ -141,6 +149,7 @@ func (s *Server) sendNodeHeartbeat() {
 	payload := map[string]interface{}{
 		"activeWorkspaces": s.activeWorkspaceCount(),
 		"nodeId":           s.config.NodeID,
+		"agentVersion":     sysinfo.Version,
 	}
 
 	// In deployment mode, include observed deployment state + disk telemetry per environment.
@@ -394,7 +403,6 @@ func (s *Server) runDetachedDeploymentApply(environmentID string, seq int64, eng
 		}
 	}
 }
-
 
 func (s *Server) runDetachedDeploymentRouteApply(environmentID string, revision int64, engine *deploy.Engine) {
 	jobID := routeConfigJobID(environmentID, revision)

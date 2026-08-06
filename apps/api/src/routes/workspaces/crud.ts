@@ -13,6 +13,7 @@ import { errors } from '../../middleware/error';
 import { requireProjectCapability } from '../../middleware/project-auth';
 import { CreateWorkspaceSchema,jsonValidator, UpdateWorkspacePortsPublicSchema, UpdateWorkspaceSchema } from '../../schemas';
 import { startComputeTracking } from '../../services/compute-usage';
+import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import { signPortAccessToken } from '../../services/jwt';
 import { getRuntimeLimits } from '../../services/limits';
 import {
@@ -249,6 +250,9 @@ crudRoutes.post('/', requireAuth(), requireApproved(), jsonValidator(CreateWorks
     const node = await getOwnedNode(db, nodeId, userId);
     if (node.status === 'stopped' || node.healthStatus === 'unhealthy') {
       throw errors.badRequest('Selected node is not ready for workspace creation');
+    }
+    if (!isNodeAgentVersionCompatible(node.agentVersion, c.env.VM_AGENT_REQUIRED_VERSION)) {
+      throw errors.badRequest('Selected node is running an incompatible VM agent build');
     }
   } else {
     if (userNodeCountVal >= limits.maxNodesPerUser) {

@@ -15,6 +15,7 @@ import {
 } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
+import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import type { NodeLifecycle } from '../node-lifecycle';
 import { parseEnvInt } from './helpers';
 import { isNodeAgentReadyForWorkspaceDispatch } from './readiness';
@@ -38,16 +39,21 @@ export async function handleNodeSelection(
   if (state.config.preferredNodeId) {
     // Validate the preferred node
     const node = await rc.env.DATABASE.prepare(
-      `SELECT id, status, vm_size FROM nodes WHERE id = ? AND user_id = ?`
+      `SELECT id, status, vm_size, agent_version FROM nodes WHERE id = ? AND user_id = ?`
     )
       .bind(state.config.preferredNodeId, state.userId)
-      .first<{ id: string; status: string; vm_size: string }>();
+      .first<{ id: string; status: string; vm_size: string; agent_version: string | null }>();
 
     if (!node || node.status !== 'running') {
       throw Object.assign(new Error('Specified node is not available'), { permanent: true });
     }
     if (!canSatisfyVmSize(node.vm_size, state.config.vmSize)) {
       throw Object.assign(new Error('Specified node is smaller than the requested VM size'), {
+        permanent: true,
+      });
+    }
+    if (!isNodeAgentVersionCompatible(node.agent_version, rc.env.VM_AGENT_REQUIRED_VERSION)) {
+      throw Object.assign(new Error('Specified node is running an incompatible VM agent build'), {
         permanent: true,
       });
     }
@@ -428,17 +434,25 @@ export async function handleNodeAgentReady(
   // POST /api/nodes/:id/ready on startup and POST /api/nodes/:id/heartbeat
   // periodically, which update healthStatus and lastHeartbeatAt in D1.
   const node = await rc.env.DATABASE.prepare(
-    `SELECT health_status, last_heartbeat_at, agent_ready_at, status FROM nodes WHERE id = ?`
+    `SELECT health_status, last_heartbeat_at, agent_ready_at, agent_version, status FROM nodes WHERE id = ?`
   )
     .bind(state.stepResults.nodeId)
     .first<{
       health_status: string | null;
       last_heartbeat_at: string | null;
       agent_ready_at: string | null;
+      agent_version: string | null;
       status: string;
     }>();
 
-  if (isNodeAgentReadyForWorkspaceDispatch(node, state.agentReadyStartedAt!)) {
+  if (
+    isNodeAgentReadyForWorkspaceDispatch(
+      node,
+      state.agentReadyStartedAt!,
+      30_000,
+      rc.env.VM_AGENT_REQUIRED_VERSION
+    )
+  ) {
     log.info('task_runner_do.step.node_agent_ready', {
       taskId: state.taskId,
       nodeId: state.stepResults.nodeId,
@@ -482,20 +496,22 @@ export async function verifyNodeAgentHealthy(
 ): Promise<boolean> {
   try {
     const node = await rc.env.DATABASE.prepare(
-      `SELECT health_status, last_heartbeat_at, agent_ready_at FROM nodes WHERE id = ?`
+      `SELECT health_status, last_heartbeat_at, agent_ready_at, agent_version FROM nodes WHERE id = ?`
     )
       .bind(nodeId)
       .first<{
         health_status: string | null;
         last_heartbeat_at: string | null;
         agent_ready_at: string | null;
+        agent_version: string | null;
       }>();
 
     if (
       !node ||
       node.health_status !== 'healthy' ||
       !node.last_heartbeat_at ||
-      !node.agent_ready_at
+      !node.agent_ready_at ||
+      !isNodeAgentVersionCompatible(node.agent_version, rc.env.VM_AGENT_REQUIRED_VERSION)
     ) {
       return false;
     }
@@ -516,17 +532,20 @@ async function tryClaimWarmNode(
   if (!rc.env.NODE_LIFECYCLE) return null;
 
   const warmNodes = await rc.env.DATABASE.prepare(
-    `SELECT id, vm_size, vm_location FROM nodes
+    `SELECT id, vm_size, vm_location, agent_version FROM nodes
      WHERE user_id = ? AND status = 'running' AND warm_since IS NOT NULL AND node_role = 'workspace'
        AND (runtime IS NULL OR runtime != 'cf-container')`
   )
     .bind(state.userId)
-    .all<{ id: string; vm_size: string; vm_location: string }>();
+    .all<{ id: string; vm_size: string; vm_location: string; agent_version: string | null }>();
 
   if (!warmNodes.results.length) return null;
 
   // Sort nodes that can satisfy the requested size, preferring exact size/location.
   const sorted = warmNodes.results
+    .filter((node) =>
+      isNodeAgentVersionCompatible(node.agent_version, rc.env.VM_AGENT_REQUIRED_VERSION)
+    )
     .filter((node) => canSatisfyVmSize(node.vm_size, state.config.vmSize))
     .sort((a, b) => {
       const aSizeMatch = a.vm_size === state.config.vmSize ? 1 : 0;
@@ -541,12 +560,17 @@ async function tryClaimWarmNode(
     try {
       // Re-check freshness
       const fresh = await rc.env.DATABASE.prepare(
-        `SELECT status, warm_since FROM nodes WHERE id = ? AND status = 'running' AND warm_since IS NOT NULL`
+        `SELECT status, warm_since, agent_version FROM nodes WHERE id = ? AND status = 'running' AND warm_since IS NOT NULL`
       )
         .bind(warmNode.id)
-        .first<{ status: string; warm_since: string | null }>();
+        .first<{ status: string; warm_since: string | null; agent_version: string | null }>();
 
-      if (!fresh) continue;
+      if (
+        !fresh ||
+        !isNodeAgentVersionCompatible(fresh.agent_version, rc.env.VM_AGENT_REQUIRED_VERSION)
+      ) {
+        continue;
+      }
 
       // Try to claim via NodeLifecycle DO
       const doId = rc.env.NODE_LIFECYCLE.idFromName(warmNode.id);
@@ -602,7 +626,7 @@ async function findNodeWithCapacity(
     parseEnvInt(rc.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE);
 
   const nodes = await rc.env.DATABASE.prepare(
-    `SELECT id, vm_size, vm_location, health_status, last_metrics FROM nodes
+    `SELECT id, vm_size, vm_location, health_status, last_metrics, agent_version FROM nodes
      WHERE user_id = ? AND status = 'running' AND health_status != 'unhealthy' AND node_role = 'workspace'
        AND (runtime IS NULL OR runtime != 'cf-container')`
   )
@@ -613,6 +637,7 @@ async function findNodeWithCapacity(
       vm_location: string;
       health_status: string;
       last_metrics: string | null;
+      agent_version: string | null;
     }>();
 
   if (!nodes.results.length) return null;
@@ -640,6 +665,9 @@ async function findNodeWithCapacity(
   const candidates: ScoredNode[] = [];
 
   for (const node of nodes.results) {
+    if (!isNodeAgentVersionCompatible(node.agent_version, rc.env.VM_AGENT_REQUIRED_VERSION)) {
+      continue;
+    }
     if (!canSatisfyVmSize(node.vm_size, state.config.vmSize)) continue;
 
     // Hard workspace count limit — reject node regardless of CPU/memory metrics

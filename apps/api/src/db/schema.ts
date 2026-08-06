@@ -991,6 +991,8 @@ export const nodes = sqliteTable(
     lastHeartbeatAt: text('last_heartbeat_at'),
     /** ISO-8601 timestamp from VM agent /ready after system provisioning completes. */
     agentReadyAt: text('agent_ready_at'),
+    /** Build identity reported by the VM agent. Used to drain incompatible rollout generations. */
+    agentVersion: text('agent_version'),
     healthStatus: text('health_status').notNull().default('unhealthy'),
     heartbeatStaleAfterSeconds: integer('heartbeat_stale_after_seconds').notNull().default(180),
     lastMetrics: text('last_metrics'),

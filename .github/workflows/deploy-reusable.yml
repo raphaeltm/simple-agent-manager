@@ -356,6 +356,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
           RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
+          VM_AGENT_REQUIRED_VERSION: ${{ github.sha }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
           SETUP_FORCE: ${{ vars.SETUP_FORCE }}
           HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
@@ -693,6 +694,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
           RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
+          VM_AGENT_REQUIRED_VERSION: ${{ github.sha }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
           SETUP_FORCE: ${{ vars.SETUP_FORCE }}
           HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}

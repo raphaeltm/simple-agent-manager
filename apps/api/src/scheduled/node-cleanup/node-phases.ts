@@ -347,6 +347,86 @@ export async function sweepStoppedHandoffNodes(
 }
 
 /**
+ * Phase 4 — incompatible managed VM nodes after a vm-agent rollout.
+ *
+ * Busy legacy nodes are drained by exclusion from all placement paths, but are
+ * not destroyed here. Once they hold no active workspace, this bounded phase
+ * retires them. Cloudflare Instant/cf-container and user-owned nodes are
+ * intentionally excluded.
+ */
+export async function sweepIncompatibleVmAgentNodes(
+  db: CleanupDb,
+  env: Env,
+  now: Date,
+  config: CleanupConfig,
+  result: NodeCleanupResult
+): Promise<void> {
+  const requiredVersion = env.VM_AGENT_REQUIRED_VERSION?.trim();
+  if (!requiredVersion) {
+    return;
+  }
+
+  const candidates = await env.DATABASE.prepare(
+    `SELECT n.id, n.user_id, n.status, n.created_at, n.agent_version,
+            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count
+     FROM nodes n
+     LEFT JOIN workspaces w ON w.node_id = n.id
+     WHERE n.status = 'running'
+       AND n.node_role = 'workspace'
+       AND n.node_class != 'user-owned'
+       AND (n.runtime IS NULL OR n.runtime = 'vm')
+       AND (n.agent_version IS NULL OR n.agent_version != ?)
+     GROUP BY n.id, n.user_id, n.status, n.created_at, n.agent_version
+     ORDER BY n.created_at ASC
+     LIMIT ?`
+  )
+    .bind(requiredVersion, config.nodeSweepLimit)
+    .all<{
+      id: string;
+      user_id: string;
+      status: string;
+      created_at: string;
+      agent_version: string | null;
+      active_ws_count: number;
+    }>();
+
+  for (const node of candidates.results) {
+    if (node.active_ws_count > 0) {
+      log.info('node_cleanup.incompatible_vm_agent_skipped_active_workspaces', {
+        nodeId: node.id,
+        userId: node.user_id,
+        agentVersion: node.agent_version,
+        requiredVersion,
+        activeWorkspaces: node.active_ws_count,
+      });
+      result.incompatibleSkipped++;
+      continue;
+    }
+
+    const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
+      logEvent: 'node_cleanup.destroying_incompatible_vm_agent',
+      failureLogEvent: 'node_cleanup.incompatible_vm_agent_destroy_failed',
+      successMessage: 'Destroyed idle node running incompatible VM agent build',
+      failureMessagePrefix: 'Failed to destroy incompatible VM agent node',
+      recoveryType: 'incompatible_vm_agent_cleanup',
+      failureRecoveryType: 'incompatible_vm_agent_cleanup_failure',
+      level: 'warn',
+      context: {
+        createdAt: node.created_at,
+        agentVersion: node.agent_version,
+        requiredVersion,
+      },
+    });
+
+    if (destroyed) {
+      result.incompatibleDestroyed++;
+    } else {
+      result.errors++;
+    }
+  }
+}
+
+/**
  * Phase 5 — idle orphan nodes: running, not warm, holding no active workspaces.
  *
  * This phase previously only WROTE AN OBSERVABILITY ROW and incremented a counter;

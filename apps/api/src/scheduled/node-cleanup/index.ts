@@ -24,6 +24,7 @@ import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import {
   sweepIdleOrphanNodes,
+  sweepIncompatibleVmAgentNodes,
   sweepMaxLifetimeNodes,
   sweepStaleWarmNodes,
   sweepStoppedHandoffNodes,
@@ -56,6 +57,7 @@ export async function runNodeCleanupSweep(env: Env): Promise<NodeCleanupResult> 
     ['max_lifetime', () => sweepMaxLifetimeNodes(db, env, now, config, result)],
     ['stopped_handoff', () => sweepStoppedHandoffNodes(db, env, now, config, result)],
     ['orphaned_workspaces', () => sweepOrphanedWorkspaces(db, env, now, config, result)],
+    ['incompatible_vm_agent', () => sweepIncompatibleVmAgentNodes(db, env, now, config, result)],
     ['idle_orphan_nodes', () => sweepIdleOrphanNodes(db, env, now, config, result)],
     ['stale_stopped_workspaces', () => sweepStaleStoppedWorkspaces(db, env, now, config, result)],
   ];
