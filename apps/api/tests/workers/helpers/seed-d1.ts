@@ -61,9 +61,9 @@ export async function seedProject(
   installationId: string,
   opts?: { name?: string; repository?: string }
 ): Promise<void> {
-  const name = opts?.name ?? 'Test Project';
+  const name = opts?.name ?? `Test Project ${projectId}`;
   const normalizedName = name.toLowerCase().replaceAll(/\s+/g, '-');
-  const repository = opts?.repository ?? 'test-org/test-repo';
+  const repository = opts?.repository ?? `test-org/${projectId}`;
 
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO projects (id, user_id, name, normalized_name, installation_id, repository, created_by, created_at, updated_at)

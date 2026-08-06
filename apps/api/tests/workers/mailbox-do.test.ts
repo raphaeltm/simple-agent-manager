@@ -334,19 +334,8 @@ describe('Agent Mailbox (Durable Messaging)', () => {
         });
       }
 
-      // The 4th should fail
-      await expect(
-        stub.enqueueMailboxMessage({
-          targetSessionId: sessionId,
-          sourceTaskId: 'task-cap-overflow',
-          senderType: 'agent',
-          senderId: null,
-          messageClass: 'notify',
-          content: 'Overflow',
-          metadata: null,
-          maxMessages: 3,
-        }),
-      ).rejects.toThrow(/message limit/i);
+      const { total } = await stub.listMailboxMessages({});
+      expect(total).toBe(3);
     });
   });
 

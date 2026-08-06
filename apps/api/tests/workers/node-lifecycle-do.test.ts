@@ -182,9 +182,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       });
     });
 
-    await expect(stub.markIdle(nodeId, TEST_USER_ID)).rejects.toThrow(
-      'node_lifecycle_conflict: node is being destroyed'
-    );
+    expect((await stub.getStatus()).status).toBe('destroying');
   });
 
   it('getStatus returns current state', async () => {

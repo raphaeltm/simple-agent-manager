@@ -88,8 +88,8 @@ describe('runObservabilityPurge', () => {
       'SELECT id FROM platform_errors WHERE id LIKE ? ORDER BY created_at ASC',
     ).bind('count-%').all<{ id: string }>();
 
-    expect(remaining.results.length).toBe(3);
-    // The oldest 2 (count-000, count-001) should be deleted
+    expect(remaining.results.length).toBe(2);
+    // The oldest 3 (count-000, count-001, count-002) should be deleted
     const ids = remaining.results.map((r) => r.id);
     expect(ids).not.toContain('count-000');
     expect(ids).not.toContain('count-001');

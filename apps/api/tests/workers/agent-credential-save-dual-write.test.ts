@@ -13,7 +13,7 @@ import { env } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { decrypt } from '../../src/services/encryption';
-import { seedUser } from './helpers/seed-d1';
+import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 
 const TEST_PREFIX = `agent-cred-save-${Date.now()}`;
 const ENCRYPTION_KEY = 'SK4ihJazAK3GIWUQcM6nZ1odR6KQHrqRAVSp6HdPxrg=';
@@ -202,12 +202,8 @@ describe('saveAgentCredentialForUser — project-scoped override is isolated fro
 
   beforeAll(async () => {
     await seedUser(userId);
-    await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO projects (id, user_id, name, created_at, updated_at)
-       VALUES (?, ?, ?, datetime('now'), datetime('now'))`
-    )
-      .bind(projectId, userId, 'Dual Write Test Project')
-      .run();
+    await seedInstallation(`${projectId}-install`, userId);
+    await seedProject(projectId, userId, `${projectId}-install`, { name: 'Dual Write Test Project' });
   });
 
   it('creates independent active rows for the user scope and the project scope', async () => {

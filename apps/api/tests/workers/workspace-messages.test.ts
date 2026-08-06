@@ -7,7 +7,7 @@
  *
  * Replaces source-contract tests that only checked string presence in source code.
  */
-import { env, SELF } from 'cloudflare:test';
+import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { signCallbackToken } from '../../src/services/jwt';
@@ -57,18 +57,35 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
   beforeAll(async () => {
     // Create test user
     await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO users (id, github_id, github_username, display_name, avatar_url, role, status, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 'user', 'approved', datetime('now'), datetime('now'))`
+      `INSERT OR IGNORE INTO users (id, email, github_id, name, avatar_url, role, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'user', 'active', cast(unixepoch() * 1000 as integer), cast(unixepoch() * 1000 as integer))`
     )
-      .bind(USER_ID, 999999, 'test-user', 'Test User', 'https://example.com/avatar.png')
+      .bind(USER_ID, 'test-user' + '@example.test', 999999, 'Test User', 'https://example.com/avatar.png')
       .run();
 
     // Create test project
     await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO projects (id, user_id, name, github_repo, github_owner, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
-    )
-      .bind(PROJECT_ID, USER_ID, 'test-project', 'test-repo', 'test-owner')
+    `INSERT OR IGNORE INTO github_installation_accounts
+       (installation_id, account_type, account_name, normalized_account_name, created_at, updated_at)
+     VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`,
+  )
+    .bind(PROJECT_ID + '-inst', 'test-owner', 'test-owner')
+    .run();
+
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO github_installations
+       (id, user_id, installation_id, external_installation_id, account_type, account_name, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`,
+  )
+    .bind(PROJECT_ID + '-inst', USER_ID, PROJECT_ID + '-inst', PROJECT_ID + '-inst', 'test-owner')
+    .run();
+
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO projects
+       (id, user_id, name, normalized_name, installation_id, repository, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, lower(?), ?, ?, ?, datetime('now'), datetime('now'))`,
+  )
+    .bind(PROJECT_ID, USER_ID, 'test-project', 'test-project', PROJECT_ID + '-inst', 'test-owner/test-repo', USER_ID)
       .run();
 
     // Workspace with linked chatSessionId
@@ -110,6 +127,31 @@ describe('POST /workspaces/:id/messages — behavioral tests', () => {
         'main'
       )
       .run();
+
+    const projectData = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(PROJECT_ID));
+    await runInDurableObject(projectData, async (instance) => {
+      const now = Date.now();
+      instance.ctx.storage.sql.exec(
+        `INSERT OR IGNORE INTO chat_sessions
+           (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES (?, ?, 'Workspace message test', 'active', 0, ?, ?, ?)`,
+        SESSION_ID,
+        WORKSPACE_ID,
+        now,
+        now,
+        now
+      );
+      instance.ctx.storage.sql.exec(
+        `INSERT OR IGNORE INTO chat_sessions
+           (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES (?, ?, 'Stopped workspace message test', 'active', 0, ?, ?, ?)`,
+        STOPPED_SESSION_ID,
+        WORKSPACE_STOPPED,
+        now,
+        now,
+        now
+      );
+    });
 
     // Sign callback tokens for each workspace
     validToken = await signCallbackToken(WORKSPACE_ID, env as any);

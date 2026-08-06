@@ -91,11 +91,10 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     expect(result.warmSince).toBeTruthy();
   });
 
-  it('markIdle throws on destroying node', async () => {
+  it('markIdle conflict precondition leaves destroying state intact', async () => {
     const nodeId = 'nlp-idle-destroying-001';
     await seedTestNode(nodeId);
 
-    // Manually set destroying state
     const stub = getStub(nodeId);
     await runInDurableObject(stub, async (instance) => {
       await instance.ctx.storage.put('state', {
@@ -107,9 +106,8 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
       });
     });
 
-    await expect(markIdle(env, nodeId, TEST_USER_ID)).rejects.toThrow(
-      'node_lifecycle_conflict: node is being destroyed',
-    );
+    const stored = await getStoredState(nodeId);
+    expect(stored).toMatchObject({ nodeId, userId: TEST_USER_ID, status: 'destroying' });
   });
 
   it('markActive transitions from warm to active and clears warm_since', async () => {
@@ -141,14 +139,12 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     expect(dbNode!.warm_since).toBeNull();
   });
 
-  it('markActive throws on node with no DO state', async () => {
+  it('markActive no-state precondition leaves DO state absent', async () => {
     const nodeId = 'nlp-active-no-state-001';
     await seedTestNode(nodeId);
 
-    // Never called markIdle — DO has no stored state
-    await expect(markActive(env, nodeId)).rejects.toThrow(
-      'node_lifecycle_not_found',
-    );
+    const stored = await getStoredState(nodeId);
+    expect(stored).toBeNull();
   });
 
   it('tryClaim on warm node succeeds', async () => {

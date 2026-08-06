@@ -368,6 +368,8 @@ jobs:
 
       - name: Dependency governance pinning check
         run: pnpm quality:dependency-governance
+      - name: CI workflow wiring tests
+        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts scripts/quality/ci-worker-suite.test.ts
 
   durable-object-workers:
     name: Durable Object Workers
@@ -389,6 +391,12 @@ jobs:
 
       - name: Check Durable Object migration safety
         run: pnpm quality:do-migration-safety
+
+      - name: Build packages
+        run: pnpm build
+
+      - name: Run Worker and Durable Object suites
+        run: pnpm --filter @simple-agent-manager/api test:workers
 
   pulumi-infra:
     name: Pulumi Infrastructure Tests

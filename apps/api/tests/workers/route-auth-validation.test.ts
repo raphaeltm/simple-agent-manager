@@ -33,7 +33,7 @@
  *
  * - H4: Workspace count filter (excludes 'deleted'/'error') requires user auth.
  */
-import { env, SELF } from 'cloudflare:test';
+import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { signCallbackToken, signNodeCallbackToken } from '../../src/services/jwt';
@@ -52,18 +52,35 @@ let nodeCallbackToken: string;
 beforeAll(async () => {
   // Seed test user
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO users (id, github_id, github_username, display_name, avatar_url, role, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'user', 'approved', datetime('now'), datetime('now'))`,
+    `INSERT OR IGNORE INTO users (id, email, github_id, name, avatar_url, role, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'user', 'active', cast(unixepoch() * 1000 as integer), cast(unixepoch() * 1000 as integer))`,
   )
-    .bind(USER_ID, '888888', 'test-user-auth', 'Auth Test User', 'https://example.com/a.png')
+    .bind(USER_ID, 'test-user-auth' + '@example.test', '888888', 'Auth Test User', 'https://example.com/a.png')
     .run();
 
   // Seed test project
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO projects (id, user_id, name, github_repo, github_owner, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+    `INSERT OR IGNORE INTO github_installation_accounts
+       (installation_id, account_type, account_name, normalized_account_name, created_at, updated_at)
+     VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`,
   )
-    .bind(PROJECT_ID, USER_ID, 'auth-test-project', 'test-repo', 'test-owner')
+    .bind(PROJECT_ID + '-inst', 'test-owner', 'test-owner')
+    .run();
+
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO github_installations
+       (id, user_id, installation_id, external_installation_id, account_type, account_name, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`,
+  )
+    .bind(PROJECT_ID + '-inst', USER_ID, PROJECT_ID + '-inst', PROJECT_ID + '-inst', 'test-owner')
+    .run();
+
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO projects
+       (id, user_id, name, normalized_name, installation_id, repository, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, lower(?), ?, ?, ?, datetime('now'), datetime('now'))`,
+  )
+    .bind(PROJECT_ID, USER_ID, 'auth-test-project', 'auth-test-project', PROJECT_ID + '-inst', 'test-owner/test-repo', USER_ID)
     .run();
 
   // Seed test node (cloud_provider and vm_size are the correct column names)
@@ -94,6 +111,20 @@ beforeAll(async () => {
   // Sign all tokens after seeding is complete (follows workspace-messages.test.ts pattern)
   workspaceCallbackToken = await signCallbackToken(WORKSPACE_ID, env as any);
   nodeCallbackToken = await signNodeCallbackToken(NODE_ID, env as any);
+
+  const projectData = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(PROJECT_ID));
+  await runInDurableObject(projectData, async (instance) => {
+    instance.ctx.storage.sql.exec(
+      `INSERT OR IGNORE INTO chat_sessions
+         (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+       VALUES (?, ?, 'Route auth validation', 'active', 0, ?, ?, ?)`,
+      SESSION_ID,
+      WORKSPACE_ID,
+      Date.now(),
+      Date.now(),
+      Date.now()
+    );
+  });
 });
 
 // =============================================================================

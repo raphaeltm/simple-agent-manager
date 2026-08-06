@@ -1,10 +1,10 @@
 /**
  * Vertical slice tests for node-cleanup scheduled job.
  *
- * Uses real D1 + OBSERVABILITY_DATABASE via Miniflare. External HTTP calls
- * (deleteNodeResources, stopWorkspaceOnNode, deleteWorkspaceOnNode) fail in
- * the test environment since there's no real Hetzner/VM agent — but the job
- * handles errors gracefully. We verify D1 state changes and observability
+ * Uses real D1 + OBSERVABILITY_DATABASE via Miniflare. VM-agent HTTP calls
+ * against fake *.vm.test.example.com nodes are stubbed at the system boundary;
+ * cloud-provider deletion still has no real Hetzner credentials, and the job
+ * handles those errors gracefully. We verify D1 state changes and observability
  * events that happen regardless of HTTP outcomes.
  *
  * Tests focus on:
@@ -14,7 +14,7 @@
  * - Stale warm nodes: error is caught (no Hetzner), counted in result
  */
 import { env } from 'cloudflare:test';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
@@ -30,6 +30,22 @@ import {
 const USER_ID = 'user-nc-test';
 const INSTALL_ID = 'install-nc-test';
 const PROJECT_ID = 'project-nc-test';
+
+const originalFetch = globalThis.fetch;
+
+beforeEach(() => {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+    if (url.includes('.vm.test.example.com')) {
+      return new Response(null, { status: 204 });
+    }
+    return originalFetch(input);
+  }));
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
 
 async function seedBaseData(): Promise<void> {
   await seedUser(USER_ID);

@@ -9,10 +9,28 @@
  *
  * Run: pnpm test:workers
  */
-import { cloudflareTest } from '@cloudflare/vitest-pool-workers';
+import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
+import { resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
 
+const d1Migrations = await readD1Migrations(resolve(__dirname, './src/db/migrations'));
+const observabilityD1Migrations = await readD1Migrations(
+  resolve(__dirname, './src/db/migrations/observability')
+);
+
 export default defineConfig({
+  resolve: {
+    alias: {
+      // Worker tests bind VM_AGENT_CONTAINER to a plain Durable Object double.
+      // Avoid loading the real Containers package during src/index.ts module
+      // evaluation; workerd has no container service in vitest-pool-workers.
+      '@cloudflare/containers': resolve(__dirname, './tests/workers/support/cloudflare-containers-stub.ts'),
+      // src/index.ts also re-exports SandboxDO from @cloudflare/sandbox for the
+      // production SANDBOX binding. The Sandbox SDK extends Containers too, and
+      // these Worker/DO tests do not bind or exercise it.
+      '@cloudflare/sandbox': resolve(__dirname, './tests/workers/support/cloudflare-sandbox-stub.ts'),
+    },
+  },
   plugins: [
     cloudflareTest({
       // Test-only entry: re-exports the real worker (default handler + every DO
@@ -50,6 +68,9 @@ export default defineConfig({
           SAM_SESSION: {
             className: 'SamSession',
             useSQLite: true,
+          },
+          DIAGNOSIS_RUNNER: {
+            className: 'DiagnosisRunner',
           },
           PROJECT_AGENT: {
             className: 'ProjectAgent',
@@ -104,5 +125,18 @@ export default defineConfig({
   test: {
     globals: true,
     include: ['tests/workers/**/*.test.ts'],
+    setupFiles: ['./tests/workers/setup-d1-migrations.ts'],
+    provide: {
+      D1_MIGRATIONS_JSON: JSON.stringify(d1Migrations),
+      OBSERVABILITY_D1_MIGRATIONS_JSON: JSON.stringify(observabilityD1Migrations),
+    },
+    // Recovery sweeps perform real DO + D1 + waitUntil cleanup work; keep this
+    // bounded explicitly instead of relying on Vitest's 5s unit-test default.
+    testTimeout: 20000,
+    hookTimeout: 20000,
+    // The workers pool boots real workerd/Miniflare Durable Object runtimes.
+    // CI must exercise the suite deterministically instead of starting dozens
+    // of runtimes concurrently and losing the pool to worker exits.
+    fileParallelism: false,
   },
 });

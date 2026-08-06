@@ -14,17 +14,34 @@ let workspaceCallbackToken: string;
 
 async function seedBaseRows() {
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO users (id, github_id, github_username, display_name, avatar_url, role, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'user', 'approved', datetime('now'), datetime('now'))`
+    `INSERT OR IGNORE INTO users (id, email, github_id, name, avatar_url, role, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'user', 'active', cast(unixepoch() * 1000 as integer), cast(unixepoch() * 1000 as integer))`
   )
-    .bind(USER_ID, '777001', `${TEST_PREFIX}-user`, 'Deploy CP User', 'https://example.com/a.png')
+    .bind(USER_ID, `${TEST_PREFIX}-user` + '@example.test', '777001', 'Deploy CP User', 'https://example.com/a.png')
     .run();
 
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO projects (id, user_id, name, github_repo, github_owner, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`
+    `INSERT OR IGNORE INTO github_installation_accounts
+       (installation_id, account_type, account_name, normalized_account_name, created_at, updated_at)
+     VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`,
   )
-    .bind(PROJECT_ID, USER_ID, 'deploy-cp-project', 'repo', 'owner')
+    .bind(PROJECT_ID + '-inst', 'owner', 'owner')
+    .run();
+
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO github_installations
+       (id, user_id, installation_id, external_installation_id, account_type, account_name, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`,
+  )
+    .bind(PROJECT_ID + '-inst', USER_ID, PROJECT_ID + '-inst', PROJECT_ID + '-inst', 'owner')
+    .run();
+
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO projects
+       (id, user_id, name, normalized_name, installation_id, repository, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, lower(?), ?, ?, ?, datetime('now'), datetime('now'))`,
+  )
+    .bind(PROJECT_ID, USER_ID, 'deploy-cp-project', 'deploy-cp-project', PROJECT_ID + '-inst', 'owner/repo', USER_ID)
     .run();
 
   for (const nodeId of [NODE_ID, OTHER_NODE_ID]) {
