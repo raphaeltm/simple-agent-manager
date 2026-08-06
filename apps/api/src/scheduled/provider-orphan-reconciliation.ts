@@ -54,8 +54,14 @@ import {
 import { persistError } from '../services/observability';
 import { getPlatformCloudCredential } from '../services/platform-credentials';
 import { buildProviderConfig } from '../services/provider-credentials';
+import { parseMs, parsePositiveInt } from './node-cleanup/shared';
 
 const DEFAULT_LAST_RUN_KV_KEY = 'cleanup:provider-orphan-reconciliation:last-run';
+
+/** Mirrors the sibling interval-gated sweep in compose-image-artifact-cleanup.ts. */
+function lastRunKey(env: Env): string {
+  return env.PROVIDER_ORPHAN_RECONCILE_LAST_RUN_KV_KEY?.trim() || DEFAULT_LAST_RUN_KV_KEY;
+}
 
 /**
  * D1 node statuses that do NOT claim a provider server. Only a row in one of these
@@ -93,20 +99,6 @@ function emptyResult(overrides: Partial<ProviderOrphanResult> = {}): ProviderOrp
   };
 }
 
-function parseMs(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
-  return parsed;
-}
-
-function parsePositiveInt(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
-  return parsed;
-}
-
 function isEnabled(env: Env): boolean {
   return env.PROVIDER_ORPHAN_RECONCILIATION_ENABLED?.trim().toLowerCase() !== 'false';
 }
@@ -134,7 +126,7 @@ export async function runProviderOrphanReconciliation(env: Env): Promise<Provide
     env.PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS,
     DEFAULT_PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS
   );
-  const kvKey = DEFAULT_LAST_RUN_KV_KEY;
+  const kvKey = lastRunKey(env);
 
   let lastRun: string | null;
   try {

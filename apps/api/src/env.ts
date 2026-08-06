@@ -262,6 +262,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROVIDER_ORPHAN_MIN_AGE_MS?: string; // Minimum provider server age before it can be treated as an orphan (default: 3600000 = 1 h)
   PROVIDER_ORPHAN_DESTROY_LIMIT?: string; // Max provider servers destroyed per reconciliation run (default: 5)
   PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS?: string; // Minimum interval between reconciliation runs (default: 3600000 = 1 h)
+  PROVIDER_ORPHAN_RECONCILE_LAST_RUN_KV_KEY?: string; // Override for the interval-gate KV key
   // Workspace idle timeout (global default, overridable per-project)
   WORKSPACE_IDLE_TIMEOUT_MS?: string;
   // Auto-delete stopped workspaces after this TTL (default: 300000 = 5 minutes)
