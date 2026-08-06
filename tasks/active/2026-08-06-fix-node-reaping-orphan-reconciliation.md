@@ -150,60 +150,60 @@ compounding problems, not one.
 ## Implementation Checklist
 
 ### P0 — stop the live outage
-- [ ] Wrap every sweep in the `index.ts` 5-minute cron in per-sweep error isolation so
+- [x] Wrap every sweep in the `index.ts` 5-minute cron in per-sweep error isolation so
       one failure cannot suppress the others; log each failure with structured context
       and surface a per-sweep failure count in `cron.completed`.
-- [ ] Regression test: a throwing sweep must not prevent later sweeps from running.
+- [x] Regression test: a throwing sweep must not prevent later sweeps from running.
 
 ### P0.5 — mandatory file split (rule 18)
-- [ ] Split `apps/api/src/scheduled/node-cleanup.ts` (646 lines) into a directory with a
+- [x] Split `apps/api/src/scheduled/node-cleanup.ts` (646 lines) into a directory with a
       thin `index.ts` barrel, one module per phase. Separate commit, no behavior change.
 
 ### P1 — make reaping actually work (rule 47)
-- [ ] Add `DEFAULT_NODE_ORPHAN_IDLE_TIMEOUT_MS` + `NODE_ORPHAN_IDLE_TIMEOUT_MS` override.
-- [ ] Add `DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS` + `NODE_ABSOLUTE_MAX_LIFETIME_MS`.
-- [ ] Add `DEFAULT_NODE_CLEANUP_SWEEP_LIMIT` + `NODE_CLEANUP_SWEEP_LIMIT`; apply a
+- [x] Add `DEFAULT_NODE_ORPHAN_IDLE_TIMEOUT_MS` + `NODE_ORPHAN_IDLE_TIMEOUT_MS` override.
+- [x] Add `DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS` + `NODE_ABSOLUTE_MAX_LIFETIME_MS`.
+- [x] Add `DEFAULT_NODE_CLEANUP_SWEEP_LIMIT` + `NODE_CLEANUP_SWEEP_LIMIT`; apply a
       `LIMIT` to every previously unbounded candidate query (phases 1–5).
-- [ ] Add a background/control-loop request timeout for VM-agent calls made from sweeps,
+- [x] Add a background/control-loop request timeout for VM-agent calls made from sweeps,
       separate from the interactive `DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS`
       (`DEFAULT_NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS` + env override).
-- [ ] Convert phase 5 from flag-only to an actual reaper, keyed on
+- [x] Convert phase 5 from flag-only to an actual reaper, keyed on
       `lastWorkspaceActivity`, gated on `node_role='workspace'` AND
       `node_class != 'user-owned'`, with `created_at` age guard so freshly provisioned
       nodes awaiting their first workspace are never reaped.
-- [ ] Make max lifetime a true backstop using `lastWorkspaceActivity` rather than
+- [x] Make max lifetime a true backstop using `lastWorkspaceActivity` rather than
       nominal workspace status.
-- [ ] Give every selected candidate an escape path (success / terminal failure /
+- [x] Give every selected candidate an escape path (success / terminal failure /
       expiring marker) so a permanently failing candidate is not retried every sweep.
 
 ### P2 — rule 51 class-guard gaps
-- [ ] Add `node_class != 'user-owned'` to `deployment-environments.ts:650-658`.
-- [ ] Add a `nodes` join + class guard to node-cleanup phases 4 and 6.
+- [x] Add `node_class != 'user-owned'` to `deployment-environments.ts:650-658`.
+- [x] Add a `nodes` join + class guard to node-cleanup phases 4 and 6.
 
 ### P3 — provider-side orphan reconciliation
-- [ ] Add an environment label to created servers in `nodes.ts` so provider-side
+- [x] Add an environment label to created servers in `nodes.ts` so provider-side
       resources are attributable to one deployment.
-- [ ] New bounded sweep: list SAM-labeled servers for the **current environment only**,
+- [x] New bounded sweep: list SAM-labeled servers for the **current environment only**,
       compare against D1, and destroy servers no live D1 row claims — with a minimum
       server age to avoid the `provider_instance_id` creation race.
-- [ ] Fail closed: unlabeled/foreign-env servers are skipped; any D1 or provider error
+- [x] Fail closed: unlabeled/foreign-env servers are skipped; any D1 or provider error
       aborts without destroying anything.
-- [ ] Wire into the cron behind the new per-sweep isolation.
+- [x] Wire into the cron behind the new per-sweep isolation.
 
 ### Tests
-- [ ] Two-sweep zombie regression test (rule 47): a permanently failing candidate is not
+- [x] Two-sweep zombie regression test (rule 47): a permanently failing candidate is not
       re-selected on the second sweep.
-- [ ] Discriminating safety test: a `node_role='deployment'` node with zero workspaces
+- [x] Discriminating safety test: a `node_role='deployment'` node with zero workspaces
       and an active deployment environment is **never** selected by any destroy query.
       Must fail against a reaper that omits the role gate.
-- [ ] Discriminating safety test: `node_class='user-owned'` is never selected by any
+- [x] Discriminating safety test: `node_class='user-owned'` is never selected by any
       destroy/flag query, across repeated sweeps.
-- [ ] Test proving the idle reaper matches a heartbeating idle node (i.e. proving it is
+- [x] Test proving the idle reaper matches a heartbeating idle node (i.e. proving it is
       not defeated by `updated_at` bumping). Must fail against the old predicate.
-- [ ] Provider reconciliation: server in current env with no D1 row → destroyed; server
+- [x] Provider reconciliation: server in current env with no D1 row → destroyed; server
       with a live D1 row → untouched; unlabeled server → skipped; foreign-env server →
       skipped; too-young server → skipped; D1 error → nothing destroyed.
-- [ ] Cron isolation regression test (see P0).
+- [x] Cron isolation regression test (see P0).
 
 ## Acceptance Criteria
 
@@ -224,6 +224,62 @@ compounding problems, not one.
 - No hardcoded values: every threshold has a `DEFAULT_*` constant and an env override
   (constitution Principle XI).
 - Documentation updated for all new env vars.
+
+## Post-Mortem
+
+**What broke.** Production nodes were never reclaimed. The shared 10-server Hetzner
+account filled up and staging deploys began failing with `403 server limit reached`,
+blocking merges. Separately and more seriously, 21 active **user** cron triggers
+silently stopped firing for ~13 hours, along with seven other maintenance sweeps.
+
+**Root cause.** `apps/api/src/index.ts` ran the 5-minute cron as a flat sequence of
+bare `await`s with no error isolation. When `runNodeCleanupSweep` began throwing at
+2026-08-05T20:25Z the handler unwound, silently skipping all eight sweeps after it —
+including `runCronTriggerSweep`. The most likely trigger of the throw is a rule-47
+violation in the sweep itself: phases 1–5 had no `LIMIT`, and phase 4 awaited
+`stopWorkspaceOnNode` on the **interactive** 30s VM-agent timeout, so an unbounded
+candidate set of unreachable nodes exhausted the Worker's wall-clock budget.
+
+Two independent secondary defects meant reaping would have been broken even with the
+cron healthy:
+
+- The only orphan-node detector **flagged but never destroyed**, and its predicate
+  (`nodes.updated_at < now - grace`) was unsatisfiable because heartbeats rewrite
+  `updated_at` — verified in production, where `updated_at` was byte-identical to
+  `last_heartbeat_at` on all nine running nodes. It recorded zero events all-time.
+- The 4h max-lifetime ceiling skipped any node with an active workspace, so a
+  workspace row wedged in `running` made a node immortal. Two nodes survived 1932h
+  and 2135h and were finally cleared by a manual bulk delete.
+
+**Timeline.** Capacity pressure first (403s at 2026-08-05T08:35–10:05Z), cron death at
+20:25Z, discovered 2026-08-06T08:00Z during this investigation — ~13h undetected.
+
+**Why it wasn't caught.** The only symptom was an *absence* of effects. `cron.started`
+still logged, no error was persisted, and nothing alerted on missing downstream work.
+A previous change had already hit this fragility and worked around it by **reordering**
+one sweep rather than isolating them, leaving a comment to that effect — which is
+exactly why stuck-task recovery kept working while everything behind it stayed dead.
+The orphan detector's zero-events-all-time was likewise invisible: a guard that never
+fires looks identical to a guard with nothing to do.
+
+**Class of bug.** A control loop that fails silently, where the symptom is an absence
+rather than an error. Two sub-classes: unisolated sequential steps, and a liveness
+timestamp used as an idleness proxy.
+
+**Near-misses worth recording.** The task described the three long-running production
+nodes as orphans to be reaped. They were `node_role='deployment'` backing **active**
+`deployment_environments` — they run users' applications and hold zero workspaces by
+design. Implementing the request literally would have destroyed three customers' live
+production apps. Separately, `nodes.id` is stored UPPERCASE while the provider label is
+lowercased; a claim lookup without `lower()` would have made every live node look
+unclaimed and deleted the entire fleet. Both are now pinned by discriminating tests
+that were verified to fail when the guard is removed.
+
+**Process fix.** `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`
+— requires per-step isolation in scheduled handlers, failed-step results that are
+distinguishable from empty ones, failure names in the completion log, a non-throwing
+error handler, and a ban on idleness predicates built over any column a keepalive path
+writes.
 
 ## References
 
