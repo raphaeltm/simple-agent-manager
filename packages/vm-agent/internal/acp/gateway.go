@@ -889,7 +889,11 @@ type agentCommandInfo struct {
 	authFilePath  string // relative to home dir, e.g. ".codex/auth.json" (only when injectionMode == "auth-file")
 }
 
-const codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@1.1.2"
+const (
+	codexACPVersion        = "1.1.2"
+	codexCLIVersion        = "0.144.6"
+	codexACPInstallCommand = "npm install -g @agentclientprotocol/codex-acp@" + codexACPVersion + " @openai/codex@" + codexCLIVersion
+)
 
 // getAgentCommandInfo returns the ACP command, args, env var name, and install command for a given agent type.
 // These match the agent catalog defined in packages/shared/src/agents.ts.
@@ -902,19 +906,14 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 		}
 		return agentCommandInfo{"claude-agent-acp", nil, "ANTHROPIC_API_KEY", "npm install -g @agentclientprotocol/claude-agent-acp@0.58.1", true, "", ""}
 	case "openai-codex":
-		// Use -c to override sandbox_mode via codex-acp's config override flag.
-		// This takes the highest priority in the Codex config hierarchy,
-		// overriding both project and user config.toml files. Required because
-		// SAM workspaces run inside containers without CAP_NET_ADMIN, which
-		// causes bubblewrap (bwrap) sandbox to fail with
-		// "RTM_NEWADDR: Operation not permitted".
-		// NOTE: --sandbox is a flag on the `codex` CLI, NOT on `codex-acp`.
-		// codex-acp uses -c key=value for config overrides.
-		codexSandboxArgs := []string{"-c", `sandbox_mode="danger-full-access"`}
+		// Sandbox and approval overrides are injected through CODEX_CONFIG by
+		// writeCodexStartupConfig. codex-acp 1.1.2 does not parse Codex CLI -c
+		// arguments; its supported config channel is CODEX_CONFIG JSON, which it
+		// forwards to every app-server thread (including spawned subagents).
 		if credentialKind == "oauth-token" {
 			return agentCommandInfo{
 				command:       "codex-acp",
-				args:          codexSandboxArgs,
+				args:          nil,
 				envVarName:    "",
 				installCmd:    codexACPInstallCommand,
 				isNpmBased:    true,
@@ -922,7 +921,7 @@ func getAgentCommandInfo(agentType string, credentialKind string) agentCommandIn
 				authFilePath:  ".codex/auth.json",
 			}
 		}
-		return agentCommandInfo{"codex-acp", codexSandboxArgs, "OPENAI_API_KEY", codexACPInstallCommand, true, "", ""}
+		return agentCommandInfo{"codex-acp", nil, "OPENAI_API_KEY", codexACPInstallCommand, true, "", ""}
 	case "google-gemini":
 		return agentCommandInfo{"gemini", []string{"--acp"}, "GEMINI_API_KEY", "npm install -g @google/gemini-cli@0.50.0", true, "", ""}
 	case "mistral-vibe":
@@ -1185,10 +1184,6 @@ func normalizeCodexEffort(effort string) string {
 func generateCodexMcpConfig(mcpServers []McpServerEntry, proxyProvider *codexProxyProviderConfig, effort string) (string, []string) {
 	providerConfig := generateCodexProxyProviderConfig(proxyProvider)
 	codexEffort := normalizeCodexEffort(effort)
-	if len(mcpServers) == 0 && providerConfig == "" && codexEffort == "" {
-		return "", nil
-	}
-
 	validServers := make([]McpServerEntry, 0, len(mcpServers))
 	for i, server := range mcpServers {
 		if strings.ContainsAny(server.URL, "\n\r") || strings.ContainsAny(server.Token, "\n\r") {
@@ -1198,10 +1193,6 @@ func generateCodexMcpConfig(mcpServers []McpServerEntry, proxyProvider *codexPro
 		}
 		validServers = append(validServers, server)
 	}
-	if len(validServers) == 0 && providerConfig == "" && codexEffort == "" {
-		return "", nil
-	}
-
 	var config strings.Builder
 	envVars := make([]string, 0, len(validServers))
 

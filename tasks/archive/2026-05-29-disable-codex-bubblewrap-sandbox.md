@@ -17,7 +17,7 @@ Codex CLI v0.115+ uses bubblewrap during file verification. SAM workspace contai
 - [x] Update Codex config tests to assert the managed block includes `sandbox_mode = "danger-full-access"` and `approval_policy = "never"`.
 - [x] Run `go test ./...` from `packages/vm-agent`.
 - [x] Run required specialist validation for VM-agent Go/config behavior.
-- [ ] Open PR, wait for CI, and merge to `main` without staging deployment per task instruction.
+- [x] Open PR, wait for CI, and merge to `main` without staging deployment per task instruction. Shipped via PRs #1153/#1157; bookkeeping archived 2026-08-06.
 
 ## Acceptance Criteria
 

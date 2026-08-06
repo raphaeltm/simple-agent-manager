@@ -53,10 +53,9 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind:    "oauth-token",
 			wantCommand:       "codex-acp",
 			wantEnvVar:        "",
-			wantInstallCmd:    "npm install -g @agentclientprotocol/codex-acp@1.1.2",
+			wantInstallCmd:    "npm install -g @agentclientprotocol/codex-acp@1.1.2 @openai/codex@0.144.6",
 			wantInjectionMode: "auth-file",
 			wantAuthFilePath:  ".codex/auth.json",
-			wantArgs:          []string{"-c", `sandbox_mode="danger-full-access"`},
 		},
 		{
 			name:           "OpenAI Codex with API key uses env var",
@@ -64,8 +63,7 @@ func TestGetAgentCommandInfo_OAuthToken(t *testing.T) {
 			credentialKind: "api-key",
 			wantCommand:    "codex-acp",
 			wantEnvVar:     "OPENAI_API_KEY",
-			wantInstallCmd: "npm install -g @agentclientprotocol/codex-acp@1.1.2",
-			wantArgs:       []string{"-c", `sandbox_mode="danger-full-access"`},
+			wantInstallCmd: "npm install -g @agentclientprotocol/codex-acp@1.1.2 @openai/codex@0.144.6",
 		},
 		{
 			name:           "Google Gemini always uses API key",
@@ -277,14 +275,14 @@ func TestGetAgentCommandInfoOpenAICodex(t *testing.T) {
 	if info.envVarName != "OPENAI_API_KEY" {
 		t.Fatalf("envVarName=%q, want %q", info.envVarName, "OPENAI_API_KEY")
 	}
-	if info.installCmd != "npm install -g @agentclientprotocol/codex-acp@1.1.2" {
+	if info.installCmd != "npm install -g @agentclientprotocol/codex-acp@1.1.2 @openai/codex@0.144.6" {
 		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
 	}
 	if info.injectionMode != "" {
 		t.Fatalf("injectionMode=%q, want empty for api-key", info.injectionMode)
 	}
-	if len(info.args) != 2 || info.args[0] != "-c" || info.args[1] != `sandbox_mode="danger-full-access"` {
-		t.Fatalf("args=%v, want [-c sandbox_mode=\"danger-full-access\"]", info.args)
+	if info.args != nil {
+		t.Fatalf("args=%v, want nil; codex-acp config belongs in CODEX_CONFIG", info.args)
 	}
 }
 
@@ -304,11 +302,11 @@ func TestGetAgentCommandInfoOpenAICodexOAuth(t *testing.T) {
 	if info.envVarName != "" {
 		t.Fatalf("envVarName=%q, want empty for auth-file injection", info.envVarName)
 	}
-	if info.installCmd != "npm install -g @agentclientprotocol/codex-acp@1.1.2" {
+	if info.installCmd != "npm install -g @agentclientprotocol/codex-acp@1.1.2 @openai/codex@0.144.6" {
 		t.Fatalf("installCmd=%q, unexpected", info.installCmd)
 	}
-	if len(info.args) != 2 || info.args[0] != "-c" || info.args[1] != `sandbox_mode="danger-full-access"` {
-		t.Fatalf("args=%v, want [-c sandbox_mode=\"danger-full-access\"]", info.args)
+	if info.args != nil {
+		t.Fatalf("args=%v, want nil; codex-acp config belongs in CODEX_CONFIG", info.args)
 	}
 }
 
@@ -1055,14 +1053,14 @@ func TestGenerateCodexMcpConfigNoMcpServers(t *testing.T) {
 	t.Parallel()
 
 	config, envVars := generateCodexMcpConfig(nil, nil, "")
-	if config != "" {
-		t.Fatalf("expected empty config, got %q", config)
+	if !strings.Contains(config, `sandbox_mode = "danger-full-access"`) ||
+		!strings.Contains(config, `approval_policy = "never"`) {
+		t.Fatalf("sandbox-only managed config missing required controls: %q", config)
 	}
 	if len(envVars) != 0 {
-		t.Fatalf("expected no env vars, got %v", envVars)
+		t.Fatalf("expected no MCP env vars, got %v", envVars)
 	}
 }
-
 func TestGenerateCodexMcpConfigWithReasoningEffort(t *testing.T) {
 	t.Parallel()
 
@@ -1084,8 +1082,11 @@ func TestGenerateCodexMcpConfigSkipsUnsupportedReasoningEffort(t *testing.T) {
 
 	config, envVars := generateCodexMcpConfig(nil, nil, "max")
 
-	if config != "" {
-		t.Fatalf("expected empty config for unsupported Codex effort, got %q", config)
+	if !strings.Contains(config, `sandbox_mode = "danger-full-access"`) {
+		t.Fatalf("unsupported effort must still produce sandbox config, got %q", config)
+	}
+	if strings.Contains(config, "model_reasoning_effort") {
+		t.Fatalf("unsupported effort leaked into config: %q", config)
 	}
 	if len(envVars) != 0 {
 		t.Fatalf("expected no env vars, got %v", envVars)
@@ -1605,12 +1606,17 @@ func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
 	if !strings.Contains(string(data), "sam-mcp") {
 		t.Error("config.toml missing SAM MCP server entry")
 	}
+	if !strings.Contains(string(data), `sandbox_mode = "danger-full-access"`) ||
+		!strings.Contains(string(data), `approval_policy = "never"`) {
+		t.Fatalf("config.toml missing sandbox controls: %s", data)
+	}
 	if !strings.Contains(string(data), `url = "https://api.example.com/mcp"`) {
 		t.Errorf("config.toml missing exact SAM MCP URL: %s", data)
 	}
 	if !strings.Contains(string(data), `bearer_token_env_var = "SAM_MCP_TOKEN"`) {
 		t.Errorf("config.toml missing SAM MCP bearer env reference: %s", data)
 	}
+	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
 	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "test-standalone-token")
 }
 
@@ -1651,11 +1657,14 @@ esac
 		t.Fatalf("read captured container config: %v", err)
 	}
 	content := string(data)
-	if !strings.Contains(content, `[mcp_servers.sam-mcp]`) ||
+	if !strings.Contains(content, `sandbox_mode = "danger-full-access"`) ||
+		!strings.Contains(content, `approval_policy = "never"`) ||
+		!strings.Contains(content, `[mcp_servers.sam-mcp]`) ||
 		!strings.Contains(content, `url = "https://api.example.com/mcp"`) ||
 		!strings.Contains(content, `bearer_token_env_var = "SAM_MCP_TOKEN"`) {
 		t.Fatalf("container config contract changed: %s", content)
 	}
+	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
 	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "container-token")
 }
 
@@ -1674,32 +1683,40 @@ func TestActivityReportTimeoutPreservesLegacyDefaultAndOverride(t *testing.T) {
 }
 
 func TestWriteAgentStartupConfigCodexMissingMcpTokenFailsClosed(t *testing.T) {
-	tmpDir := t.TempDir()
-	t.Setenv("HOME", tmpDir)
-	t.Setenv("CODEX_HOME", "")
-	h := &SessionHost{config: SessionHostConfig{GatewayConfig: GatewayConfig{
-		McpServers:  []McpServerEntry{{URL: "https://api.example.com/mcp"}},
-		WorkspaceID: "ws-missing-token",
-	}}}
-	startup := &agentStartup{containerID: ""}
+	for _, tc := range []struct {
+		name        string
+		containerID string
+	}{
+		{name: "standalone", containerID: ""},
+		{name: "devcontainer", containerID: "container-123"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tmpDir := t.TempDir()
+			t.Setenv("HOME", tmpDir)
+			t.Setenv("CODEX_HOME", "")
+			h := &SessionHost{config: SessionHostConfig{GatewayConfig: GatewayConfig{
+				McpServers:  []McpServerEntry{{URL: "https://api.example.com/mcp"}},
+				WorkspaceID: "ws-missing-token",
+			}}}
+			startup := &agentStartup{containerID: tc.containerID}
 
-	err := h.writeAgentStartupConfig(context.Background(), "openai-codex", nil, startup)
-	if err == nil {
-		t.Fatal("expected missing SAM MCP token to prevent Codex startup")
-	}
-	if !strings.Contains(err.Error(), "missing its bearer token") || !strings.Contains(err.Error(), "SAM_MCP_TOKEN") {
-		t.Fatalf("expected clear missing-token diagnostic, got: %v", err)
-	}
-	if len(startup.envVars) != 0 {
-		t.Fatalf("failed startup must not inject partial env, got: %v", startup.envVars)
-	}
-	configPath := filepath.Join(tmpDir, ".codex", "config.toml")
-	if _, statErr := os.Stat(configPath); !os.IsNotExist(statErr) {
-		t.Fatalf("failed startup must not write config, stat error: %v", statErr)
+			err := h.writeAgentStartupConfig(context.Background(), "openai-codex", nil, startup)
+			if err == nil {
+				t.Fatal("expected missing SAM MCP token to prevent Codex startup")
+			}
+			if !strings.Contains(err.Error(), "missing its bearer token") || !strings.Contains(err.Error(), "SAM_MCP_TOKEN") {
+				t.Fatalf("expected clear missing-token diagnostic, got: %v", err)
+			}
+			if len(startup.envVars) != 0 {
+				t.Fatalf("failed startup must not inject partial env, got: %v", startup.envVars)
+			}
+			configPath := filepath.Join(tmpDir, ".codex", "config.toml")
+			if _, statErr := os.Stat(configPath); !os.IsNotExist(statErr) {
+				t.Fatalf("failed startup must not write local config, stat error: %v", statErr)
+			}
+		})
 	}
 }
-
-// Verify that non-Codex agents (opencode, vibe) are still skipped when containerID is empty.
 func TestWriteAgentStartupConfigNonCodexStandaloneIsNoop(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
@@ -1825,7 +1842,7 @@ func TestWriteCodexConfigLocallyMergesExistingConfig(t *testing.T) {
 	}
 }
 
-func TestWriteCodexConfigLocallyNoServersReturnsNil(t *testing.T) {
+func TestWriteCodexConfigLocallyNoServersWritesSandboxControls(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("HOME", tmpDir)
 	t.Setenv("CODEX_HOME", "")
@@ -1834,12 +1851,17 @@ func TestWriteCodexConfigLocallyNoServersReturnsNil(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if envVars != nil {
-		t.Fatalf("expected nil envVars for no servers, got %v", envVars)
+	if len(envVars) != 0 {
+		t.Fatalf("expected no MCP env vars, got %v", envVars)
 	}
 
 	configPath := filepath.Join(tmpDir, ".codex", "config.toml")
-	if _, err := os.Stat(configPath); err == nil {
-		t.Error("config file should not be created when there are no MCP servers")
+	data, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("sandbox config file was not created: %v", err)
+	}
+	if !strings.Contains(string(data), `sandbox_mode = "danger-full-access"`) ||
+		!strings.Contains(string(data), `approval_policy = "never"`) {
+		t.Fatalf("sandbox controls missing from local config: %s", data)
 	}
 }

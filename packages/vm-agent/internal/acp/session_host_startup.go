@@ -55,6 +55,8 @@ type agentStartup struct {
 	settings     *agentSettingsPayload
 }
 
+const codexACPManagedConfigEnv = `CODEX_CONFIG={"sandbox_mode":"danger-full-access","approval_policy":"never"}`
+
 func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload) (*agentStartup, error) {
 	var containerID string
 	var err error
@@ -457,6 +459,12 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 	if err != nil {
 		return fmt.Errorf("cannot start Codex: write SAM MCP config.toml: %w", err)
 	}
+	// codex-acp@1.1.2 ignores Codex CLI -c arguments. CODEX_CONFIG is its
+	// supported config channel, and the wrapper passes this object to every
+	// app-server session/thread. Replace any inherited value so neither the main
+	// agent nor a spawned subagent can fall back to bwrap inside SAM managed containers.
+	startup.envVars = removeEnvVar(startup.envVars, "CODEX_CONFIG")
+	startup.envVars = append(startup.envVars, codexACPManagedConfigEnv)
 	startup.envVars = append(startup.envVars, codexMcpEnvVars...)
 	slog.Info("Wrote Codex config.toml",
 		"mcpServers", len(h.config.McpServers),

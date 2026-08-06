@@ -432,13 +432,15 @@ func countingSpawn(t *testing.T, startCount *atomic.Int32) func(*agentStartup) (
 	}
 }
 
-// startRecoveryMonitor wires the container resolver, restart-spawn hook, and a
-// completion channel onto host, then drives monitorProcessExit for oldProc in a
-// goroutine. It returns the buffered completion channel the restart path reports
-// through.
+// startRecoveryMonitor wires a standalone runtime resolver, restart-spawn hook,
+// and completion channel onto host, then drives monitorProcessExit for oldProc in
+// a goroutine. The fake process is local, so an empty container ID models its real
+// startup boundary and lets Codex write managed config into the test HOME.
 func startRecoveryMonitor(t *testing.T, host *SessionHost, oldProc *fakeAgentProcess, agentType string, startProcess func(*agentStartup) (agentProcess, error)) chan string {
 	t.Helper()
-	host.config.ContainerResolver = func() (string, error) { return "container", nil }
+	t.Setenv("HOME", t.TempDir())
+	t.Setenv("CODEX_HOME", "")
+	host.config.ContainerResolver = func() (string, error) { return "", nil }
 	host.config.StartProcess = startProcess
 	completed := make(chan string, 2)
 	host.config.OnPromptComplete = func(stopReason string, _ error) { completed <- stopReason }
