@@ -182,6 +182,11 @@ describe('get_task_details', () => {
       content: 'Final diagnostic output',
       createdAt: 1710000002000,
     });
+    expect(mockGetLatestAssistant).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-session-99',
+    );
   });
 });
 

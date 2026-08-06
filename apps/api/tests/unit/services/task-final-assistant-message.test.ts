@@ -63,6 +63,25 @@ describe('getLatestAssistantMessageForTask', () => {
     });
   });
 
+  it('requests messages with limit=1 and order=desc to get the newest', async () => {
+    mockGetMessages.mockResolvedValue({
+      messages: [{ id: 'msg-newest', role: 'assistant', content: 'Latest output', createdAt: 1710000005000 }],
+      hasMore: false,
+    });
+
+    await getLatestAssistantMessageForTask(mockEnv, 'proj-1', 'session-1');
+    expect(mockGetMessages).toHaveBeenCalledWith(
+      mockEnv,
+      'proj-1',
+      'session-1',
+      1,
+      null,
+      ['assistant'],
+      false,
+      'desc',
+    );
+  });
+
   it('truncates content exceeding 2000 characters', async () => {
     const longContent = 'x'.repeat(2500);
     mockGetMessages.mockResolvedValue({
