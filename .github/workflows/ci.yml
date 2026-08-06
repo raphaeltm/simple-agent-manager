@@ -354,6 +354,9 @@ jobs:
 
       - name: Stale artifact check
         run: pnpm quality:stale-artifacts
+      - name: Repo quality visibility report
+        continue-on-error: true
+        run: pnpm quality:repo-visibility
 
       - name: Source-contract test detection
         run: pnpm quality:source-contract-tests

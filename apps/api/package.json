@@ -20,8 +20,8 @@
     "deploy:staging": "wrangler deploy --env staging"
   },
   "dependencies": {
-    "@aws-sdk/client-s3": "3.1033.0",
-    "@aws-sdk/s3-request-presigner": "3.1033.0",
+    "@aws-sdk/client-s3": "3.1101.0",
+    "@aws-sdk/s3-request-presigner": "3.1101.0",
     "@cloudflare/containers": "0.3.7",
     "@cloudflare/sandbox": "^0.12.1",
     "@hono/node-server": "1.19.9",

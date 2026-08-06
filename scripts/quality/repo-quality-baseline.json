@@ -1,0 +1,34 @@
+{
+  "fileSizeBudgets": {
+    "sourceWarnLines": 500,
+    "sourceOversizedLines": 800,
+    "testWarnLines": 800,
+    "testOversizedLines": 1200
+  },
+  "coverageThresholds": {
+    "apps/api/vitest.config.ts": {
+      "statements": 45,
+      "branches": 40,
+      "functions": 44,
+      "lines": 45
+    },
+    "apps/web/vitest.config.ts": {
+      "statements": 53,
+      "branches": 49,
+      "functions": 46,
+      "lines": 55
+    },
+    "packages/providers/vitest.config.ts": {
+      "statements": 71,
+      "branches": 72,
+      "functions": 78,
+      "lines": 72
+    },
+    "packages/shared/vitest.config.ts": {
+      "statements": 83,
+      "branches": 30,
+      "functions": 60,
+      "lines": 83
+    }
+  }
+}
