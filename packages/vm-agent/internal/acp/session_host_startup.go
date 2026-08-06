@@ -56,6 +56,7 @@ type agentStartup struct {
 }
 
 const codexACPManagedConfigEnv = `CODEX_CONFIG={"sandbox_mode":"danger-full-access","approval_policy":"never"}`
+const codexACPManagedAgentModeEnv = "INITIAL_AGENT_MODE=agent-full-access"
 
 func (h *SessionHost) prepareAgentStartup(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload) (*agentStartup, error) {
 	var containerID string
@@ -466,12 +467,15 @@ func (h *SessionHost) writeCodexStartupConfig(ctx context.Context, cred *agentCr
 	if err != nil {
 		return fmt.Errorf("cannot start Codex: write SAM MCP config.toml: %w", err)
 	}
-	// codex-acp@1.1.2 ignores Codex CLI -c arguments. CODEX_CONFIG is its
-	// supported config channel, and the wrapper passes this object to every
-	// app-server session/thread. Replace any inherited value so neither the main
-	// agent nor a spawned subagent can fall back to bwrap inside SAM managed containers.
+	// codex-acp@1.1.2 ignores Codex CLI -c arguments. CODEX_CONFIG is merged into
+	// each app-server thread, but every turn then applies the ACP agent mode's
+	// approval and sandbox policy on top. Select the wrapper's supported full-access
+	// mode as well so main turns and spawned subagents cannot fall back to bwrap
+	// inside SAM-managed containers.
 	startup.envVars = removeEnvVar(startup.envVars, "CODEX_CONFIG")
+	startup.envVars = removeEnvVar(startup.envVars, "INITIAL_AGENT_MODE")
 	startup.envVars = append(startup.envVars, codexACPManagedConfigEnv)
+	startup.envVars = append(startup.envVars, codexACPManagedAgentModeEnv)
 	for _, envVar := range codexMcpEnvVars {
 		key, _, ok := strings.Cut(envVar, "=")
 		if ok {

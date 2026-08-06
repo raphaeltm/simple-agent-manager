@@ -1676,6 +1676,7 @@ func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
 
 	startup := &agentStartup{containerID: "", envVars: []string{
 		`CODEX_CONFIG={"sandbox_mode":"read-only"}`,
+		"INITIAL_AGENT_MODE=agent",
 		"SAM_MCP_TOKEN=stale-standalone-token",
 	}}
 
@@ -1706,10 +1707,14 @@ func TestWriteAgentStartupConfigCodexStandaloneWritesMcpConfig(t *testing.T) {
 	if got := countEnvKey(startup.envVars, "CODEX_CONFIG"); got != 1 {
 		t.Fatalf("CODEX_CONFIG count = %d, want 1: %v", got, startup.envVars)
 	}
+	if got := countEnvKey(startup.envVars, "INITIAL_AGENT_MODE"); got != 1 {
+		t.Fatalf("INITIAL_AGENT_MODE count = %d, want 1: %v", got, startup.envVars)
+	}
 	if got := countEnvKey(startup.envVars, "SAM_MCP_TOKEN"); got != 1 {
 		t.Fatalf("SAM_MCP_TOKEN count = %d, want 1: %v", got, startup.envVars)
 	}
 	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
+	assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
 	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "test-standalone-token")
 }
 
@@ -1742,6 +1747,7 @@ esac
 	}}
 	startup := &agentStartup{containerID: "container-123", envVars: []string{
 		`CODEX_CONFIG={"sandbox_mode":"read-only"}`,
+		"INITIAL_AGENT_MODE=agent",
 		"SAM_MCP_TOKEN=stale-container-token",
 	}}
 
@@ -1764,10 +1770,14 @@ esac
 	if got := countEnvKey(startup.envVars, "CODEX_CONFIG"); got != 1 {
 		t.Fatalf("CODEX_CONFIG count = %d, want 1: %v", got, startup.envVars)
 	}
+	if got := countEnvKey(startup.envVars, "INITIAL_AGENT_MODE"); got != 1 {
+		t.Fatalf("INITIAL_AGENT_MODE count = %d, want 1: %v", got, startup.envVars)
+	}
 	if got := countEnvKey(startup.envVars, "SAM_MCP_TOKEN"); got != 1 {
 		t.Fatalf("SAM_MCP_TOKEN count = %d, want 1: %v", got, startup.envVars)
 	}
 	assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
+	assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
 	assertEnvContains(t, startup.envVars, "SAM_MCP_TOKEN", "container-token")
 }
 
@@ -1843,6 +1853,7 @@ esac
 				envVars: []string{
 					`USER_SETTING=preserved`,
 					`CODEX_CONFIG={"sandbox_mode":"read-only","approval_policy":"on-request"}`,
+					`INITIAL_AGENT_MODE=agent`,
 				},
 			}
 
@@ -1861,7 +1872,11 @@ esac
 			if got := countEnvKey(startup.envVars, "CODEX_CONFIG"); got != 1 {
 				t.Fatalf("CODEX_CONFIG count = %d, want 1: %v", got, startup.envVars)
 			}
+			if got := countEnvKey(startup.envVars, "INITIAL_AGENT_MODE"); got != 1 {
+				t.Fatalf("INITIAL_AGENT_MODE count = %d, want 1: %v", got, startup.envVars)
+			}
 			assertEnvContains(t, startup.envVars, "CODEX_CONFIG", `{"sandbox_mode":"danger-full-access","approval_policy":"never"}`)
+			assertEnvContains(t, startup.envVars, "INITIAL_AGENT_MODE", "agent-full-access")
 			assertEnvContains(t, startup.envVars, "USER_SETTING", "preserved")
 		})
 	}
