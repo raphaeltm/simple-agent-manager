@@ -313,7 +313,7 @@ function rejectInactiveMessageWorkspace(
       message: `Rejecting messages for inactive workspace ${context.workspaceId}`,
       context: logContext,
       workspaceId: context.workspaceId,
-    })
+    }, c.env)
   );
   throw errors.badRequest(`Workspace is ${status}, not active`);
 }
@@ -338,7 +338,7 @@ function rejectMessageSessionMismatch(
       message: `Message routing mismatch: workspace ${context.workspaceId} linked to session ${expectedSessionId}, but messages target ${context.sessionId}`,
       context: logContext,
       workspaceId: context.workspaceId,
-    })
+    }, c.env)
   );
   throw errors.badRequest(
     `Session mismatch: workspace is linked to session ${expectedSessionId}, ` +
@@ -361,7 +361,7 @@ function rejectWorkspaceWithoutChatSession(c: RuntimeContext, context: MessageRo
       message: `Rejecting messages for workspace ${context.workspaceId}: no chatSessionId linked yet`,
       context: logContext,
       workspaceId: context.workspaceId,
-    })
+    }, c.env)
   );
   throw errors.conflict(
     'Workspace has no linked chat session yet — messages cannot be routed safely'
@@ -424,7 +424,7 @@ function sessionLimitReachedResponse(c: RuntimeContext, context: MessageRouteCon
       message: `Session ${context.sessionId} has reached the message limit`,
       context: { ...context, action: 'rejected_session_message_limit' },
       workspaceId: context.workspaceId,
-    })
+    }, c.env)
   );
   return c.json(
     {
@@ -485,7 +485,7 @@ function partialSessionLimitResponse(
       message: `Session ${context.sessionId} reached the message limit while persisting a batch`,
       context: logContext,
       workspaceId: context.workspaceId,
-    })
+    }, c.env)
   );
   return c.json(
     {

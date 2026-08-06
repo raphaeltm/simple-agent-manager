@@ -207,7 +207,7 @@ async function persistStrictDnsCleanupError(
     },
     nodeId: input.nodeId,
     userId: input.userId,
-  });
+  }, env);
 }
 
 async function deleteStrictNodeDnsRecord(node: NodeRow, userId: string, env: Env): Promise<void> {

@@ -129,7 +129,7 @@ export async function sweepOrphanedWorkspaces(
         userId: ws.user_id,
         nodeId: ws.node_id,
         workspaceId: ws.id,
-      });
+      }, env);
 
       result.orphanedWorkspacesFlagged++;
     } catch (e) {

@@ -387,7 +387,7 @@ export async function provisionNode(
         },
         nodeId: node.id,
         userId: node.userId,
-      });
+      }, env);
     } catch (obsErr) {
       log.error('node_provisioning.observability_persist_failed', serializeError(obsErr));
     }

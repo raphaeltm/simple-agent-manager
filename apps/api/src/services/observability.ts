@@ -55,6 +55,22 @@ function getConfigNumber(env: Env, key: keyof Env, fallback: number): number {
   return fallback;
 }
 
+export type ObservabilityFieldLimitEnv = Pick<
+  Env,
+  | 'OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH'
+  | 'OBSERVABILITY_ERROR_STACK_MAX_LENGTH'
+  | 'OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH'
+>;
+
+function getFieldLimit(
+  env: ObservabilityFieldLimitEnv,
+  key: keyof ObservabilityFieldLimitEnv,
+  fallback: number
+): number {
+  const parsed = Number.parseInt(env[key] ?? '', 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 // =============================================================================
 // Error Persistence (T018)
 // =============================================================================
@@ -81,19 +97,19 @@ export interface PersistErrorInput {
 export async function persistError(
   db: D1Database,
   input: PersistErrorInput,
-  env?: Env
+  env?: ObservabilityFieldLimitEnv
 ): Promise<void> {
   try {
     const source = VALID_SOURCES.has(input.source) ? input.source : 'api';
     const level = input.level && VALID_LEVELS.has(input.level) ? input.level : 'error';
     const messageMaxLength = env
-      ? getConfigNumber(env, 'OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH', DEFAULT_MAX_MESSAGE_LENGTH)
+      ? getFieldLimit(env, 'OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH', DEFAULT_MAX_MESSAGE_LENGTH)
       : DEFAULT_MAX_MESSAGE_LENGTH;
     const stackMaxLength = env
-      ? getConfigNumber(env, 'OBSERVABILITY_ERROR_STACK_MAX_LENGTH', DEFAULT_MAX_STACK_LENGTH)
+      ? getFieldLimit(env, 'OBSERVABILITY_ERROR_STACK_MAX_LENGTH', DEFAULT_MAX_STACK_LENGTH)
       : DEFAULT_MAX_STACK_LENGTH;
     const userAgentMaxLength = env
-      ? getConfigNumber(
+      ? getFieldLimit(
           env,
           'OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH',
           DEFAULT_MAX_USER_AGENT_LENGTH

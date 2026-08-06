@@ -104,7 +104,7 @@ async function recordChatSessionLoadFailure(
       userId: input.userId,
       ipAddress: c.req.header('CF-Connecting-IP') ?? null,
       userAgent: c.req.header('User-Agent') ?? null,
-    });
+    }, c.env);
   }
 
   const body: Record<string, unknown> = {

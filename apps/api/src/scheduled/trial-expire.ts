@@ -710,7 +710,7 @@ async function recordCleanupError(
         ...context,
       },
       userId: anonymousUserId,
-    });
+    }, env);
   } catch (persistErr) {
     log.error('trial_expire.persist_error_failed', {
       originalEvent: eventName,
