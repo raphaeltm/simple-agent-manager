@@ -19,12 +19,12 @@ import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_MAX_MESSAGES_PER_SESSION } from '../../src/durable-objects/project-data/messages';
 import type { Env } from '../../src/env';
+// Import service functions under test
+import * as svc from '../../src/services/project-data';
 import {
   captureProjectDataExpectedError,
   type ProjectDataTestDouble,
 } from './support/expected-error-doubles';
-// Import service functions under test
-import * as svc from '../../src/services/project-data';
 
 // Cast the test env to the service's Env type.
 // The miniflare env provides the same bindings (PROJECT_DATA, etc.)
