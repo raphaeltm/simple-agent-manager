@@ -328,3 +328,13 @@ writes.
 - `.claude/rules/54-vm-agent-rollout-compatibility.md`
 - SAM task `01KZB1EC4ZR612SJJKNWTGDAS3`
 - Production symptom task `01KZBE2843QTMGPQ44ADBX5A6A`
+
+
+## Completion Validation — 2026-08-06 recovery retry
+
+Task-completion validation verdict: PASS.
+
+- Research findings F1–F9 map to checked P0–P3 checklist items and diff coverage in cron isolation, node cleanup split, bounded cleanup, provider labels, provider-side reconciliation, and class/role gates.
+- Rollout addendum maps to checked P4 items and diff coverage in vm-agent callback payloads, node `agent_version` persistence, deploy-derived `VM_AGENT_REQUIRED_VERSION`, reuse/readiness/manual/trial gates, and incompatible-node drain.
+- Specialist validation found one route-level gap during recovery: `/ready` accepted legacy empty bodies but did not parse JSON bodies for `agentVersion`. Fixed in `apps/api/src/routes/node-lifecycle.ts` and pinned by `apps/api/tests/unit/routes/node-lifecycle-byo.test.ts`.
+- Validation commands passed: focused API version/cleanup/route suites (28 tests), deploy workflow/config suites (42 tests), `packages/vm-agent` Go tests, shared/providers builds, API typecheck, and API lint with 0 errors.
