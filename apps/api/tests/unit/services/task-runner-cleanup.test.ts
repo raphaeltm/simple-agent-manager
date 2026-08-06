@@ -177,6 +177,39 @@ describe('cleanupTaskRun', () => {
     expect(mocks.markIdle).not.toHaveBeenCalled();
     expect(db.update).not.toHaveBeenCalled();
   });
+
+  it('uses requiredUserId (caller) over task.userId for downstream stop/delete calls', async () => {
+    const db = buildDb([
+      [{
+        id: 'task-precedence',
+        userId: 'task-creator',
+        workspaceId: 'ws-caller',
+        autoProvisionedNodeId: 'node-caller',
+      }],
+      [{
+        id: 'ws-caller',
+        nodeId: 'node-caller',
+        status: 'running',
+        userId: 'caller-user',
+      }],
+      [{
+        id: 'node-caller',
+        runtime: 'cf-container',
+      }],
+    ]);
+    mocks.drizzle.mockReturnValue(db);
+    const env = { DATABASE: {}, TASK_RUN_CLEANUP_DELAY_MS: '0' } as Env;
+
+    const { cleanupTaskRun } = await import('../../../src/services/task-runner');
+    await cleanupTaskRun('task-precedence', env, undefined, 'caller-user');
+
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-caller', 'caller-user', env);
+    expect(mocks.stopNodeResources).not.toHaveBeenCalledWith(
+      expect.anything(),
+      'task-creator',
+      expect.anything(),
+    );
+  });
 });
 
 describe('cleanupTerminalTaskResources', () => {

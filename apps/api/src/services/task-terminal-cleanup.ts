@@ -12,6 +12,7 @@ export type TerminalTaskCleanupStatus = 'completed' | 'failed' | 'cancelled';
 export interface TerminalTaskCleanupOptions {
   status: TerminalTaskCleanupStatus;
   errorMessage?: string | null;
+  requiredUserId?: string;
   logContext?: Record<string, unknown>;
 }
 
@@ -90,5 +91,5 @@ export async function cleanupTerminalTaskResources(
     }
   }
 
-  await cleanupTaskRun(taskId, env);
+  await cleanupTaskRun(taskId, env, undefined, options.requiredUserId);
 }

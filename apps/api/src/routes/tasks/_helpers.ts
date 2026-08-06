@@ -23,25 +23,6 @@ export function parseTaskSortOrder(value: string | undefined): TaskSortOrder {
   return 'createdAtDesc';
 }
 
-export async function requireOwnedTaskById(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  taskId: string,
-  userId: string
-): Promise<schema.Task> {
-  const rows = await db
-    .select()
-    .from(schema.tasks)
-    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.userId, userId)))
-    .limit(1);
-
-  const task = rows[0];
-  if (!task || task.userId !== userId) {
-    throw errors.notFound('Task');
-  }
-
-  return task;
-}
-
 export async function requireProjectTaskById(
   db: ReturnType<typeof drizzle<typeof schema>>,
   projectId: string,
@@ -55,6 +36,12 @@ export async function requireProjectTaskById(
 
   const task = rows[0];
   if (!task || task.projectId !== projectId) {
+    log.warn('task.project_mismatch_rejected', {
+      taskId,
+      routeProjectId: projectId,
+      taskProjectId: task?.projectId ?? null,
+      action: 'rejected',
+    });
     throw errors.notFound('Task');
   }
 

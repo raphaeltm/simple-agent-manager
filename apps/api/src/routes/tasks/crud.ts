@@ -370,7 +370,7 @@ crudRoutes.patch('/:taskId', requireAuth(), requireApproved(), jsonValidator(Upd
   await db
     .update(schema.tasks)
     .set(nextValues)
-    .where(eq(schema.tasks.id, task.id));
+    .where(and(eq(schema.tasks.id, task.id), eq(schema.tasks.projectId, projectId)));
 
   const rows = await db
     .select()
@@ -456,10 +456,13 @@ crudRoutes.post('/:taskId/status', requireAuth(), requireApproved(), jsonValidat
   );
 
   // On terminal states, stop/fail the chat session and tear down task runtime resources.
+  // requiredUserId scopes resource mutation to the caller so a project member cannot
+  // tear down another member's workspace/node by cancelling their task.
   if (body.toStatus === 'completed' || body.toStatus === 'failed' || body.toStatus === 'cancelled') {
     await cleanupTerminalTaskResourcesOrThrow(c.env, taskId, {
       status: body.toStatus,
       errorMessage: updatedTask.errorMessage,
+      requiredUserId: userId,
       projectId,
       failureLogEvent: 'task.terminal_cleanup_failed',
       logContext: { projectId, source: 'tasks.status' },
@@ -624,7 +627,7 @@ crudRoutes.post('/:taskId/delegate', requireAuth(), requireApproved(), jsonValid
       status: 'delegated',
       updatedAt: now,
     })
-    .where(eq(schema.tasks.id, task.id));
+    .where(and(eq(schema.tasks.id, task.id), eq(schema.tasks.projectId, projectId)));
 
   await appendStatusEvent(db, task.id, task.status as TaskStatus, 'delegated', 'user', userId, 'Delegated to workspace');
 
@@ -705,7 +708,7 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
 
   await db.update(schema.tasks)
     .set({ status: 'completed', completedAt: now, updatedAt: now })
-    .where(eq(schema.tasks.id, taskId));
+    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.projectId, projectId)));
 
   await appendStatusEvent(db, taskId, task.status as TaskStatus, 'completed', 'user', userId, 'Conversation closed by user');
 
