@@ -28,6 +28,12 @@ import {
 } from './vm-agent-container';
 
 const DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS = 30_000;
+// Background control loops (cron sweeps, reconcilers) must NOT inherit the
+// interactive 30s budget above. A healthy node answers a control request in
+// milliseconds; 5s of silence means "down" for cleanup purposes. Without this
+// tier, an unbounded sweep over unreachable nodes burns 30s per candidate and
+// blows the Worker wall-clock budget, aborting the whole cron. See rule 47.
+const DEFAULT_NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS = 5_000;
 const DEFAULT_CF_CONTAINER_WAKE_TIMEOUT_MS = 120_000;
 // cf-container workspace creation clones the repository synchronously inside
 // the request (vm-agent handleStandaloneWorkspaceCreate), so it needs a
@@ -77,6 +83,23 @@ export function getNodeAgentRequestTimeoutMs(env: {
   NODE_AGENT_REQUEST_TIMEOUT_MS?: string;
 }): number {
   return getTimeoutMs(env.NODE_AGENT_REQUEST_TIMEOUT_MS, DEFAULT_NODE_AGENT_REQUEST_TIMEOUT_MS);
+}
+
+/**
+ * Request timeout for VM-agent calls made from background control loops.
+ *
+ * Deliberately far shorter than the interactive timeout — see rule 47. Cleanup
+ * work only needs to know whether the agent responds promptly; a slow or dead
+ * node should be abandoned quickly so the sweep can make progress on the rest of
+ * its candidates rather than stalling the entire cron invocation.
+ */
+export function getNodeAgentBackgroundRequestTimeoutMs(env: {
+  NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS?: string;
+}): number {
+  return getTimeoutMs(
+    env.NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS,
+    DEFAULT_NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS
+  );
 }
 
 export function getCfContainerWakeTimeoutMs(env: {
@@ -339,12 +362,14 @@ export async function stopWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,
   env: Env,
-  userId: string
+  userId: string,
+  options?: { requestTimeoutMs?: number }
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/stop`, {
     method: 'POST',
     userId,
     workspaceId,
+    requestTimeoutMs: options?.requestTimeoutMs,
   });
 }
 
@@ -365,12 +390,14 @@ export async function deleteWorkspaceOnNode(
   nodeId: string,
   workspaceId: string,
   env: Env,
-  userId: string
+  userId: string,
+  options?: { requestTimeoutMs?: number }
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}`, {
     method: 'DELETE',
     userId,
     workspaceId,
+    requestTimeoutMs: options?.requestTimeoutMs,
   });
 }
 

@@ -147,9 +147,11 @@ import {
   isHourlyPlatformMaintenanceCron,
   scheduleHourlyPlatformMaintenance,
 } from './scheduled/platform-feedback-hourly';
+import { runProviderOrphanReconciliation } from './scheduled/provider-orphan-reconciliation';
 import { runSessionTaskReconciliation } from './scheduled/session-task-reconciliation';
 import { runSetupSessionSweep } from './scheduled/setup-session-sweep';
 import { recoverStuckTasks } from './scheduled/stuck-tasks';
+import { createSweepIsolator } from './scheduled/sweep-isolation';
 import { runTrialExpireSweep } from './scheduled/trial-expire';
 import { runTrialRolloverAudit } from './scheduled/trial-rollover';
 import { runTrialWaitlistCleanup } from './scheduled/trial-waitlist-cleanup';
@@ -933,99 +935,145 @@ export default {
       return;
     }
 
-    // 5-minute operational sweep
-    // Recover stuck tasks first so unrelated cleanup failures cannot suppress lifecycle repair.
-    const diagnosisRecovery = await reconcileDiagnosisRuns(env);
-    const stuckTasks = await recoverStuckTasks(env);
+    // 5-minute operational sweep.
+    //
+    // EVERY sweep runs inside `isolate()` so one failing sweep cannot suppress
+    // the others. This is not defensive styling — on 2026-08-05 a throw in
+    // runNodeCleanupSweep silently killed the eight sweeps after it (including
+    // user-facing cron triggers) for ~13 hours. See scheduled/sweep-isolation.ts.
+    // A sweep that throws yields `undefined` here, which the completion log
+    // reports as a missing metric rather than a zero.
+    const sweeps = createSweepIsolator(env);
+
+    const diagnosisRecovery = await sweeps.isolate('diagnosis_reconcile', () =>
+      reconcileDiagnosisRuns(env)
+    );
+    const stuckTasks = await sweeps.isolate('stuck_tasks', () => recoverStuckTasks(env));
 
     // Check for stuck provisioning workspaces
-    const timedOut = await checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE);
+    const timedOut = await sweeps.isolate('provisioning_timeouts', () =>
+      checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE)
+    );
 
     // Migrate orphaned workspaces (those with NULL projectId) to projects
     const db = drizzle(env.DATABASE, { schema });
-    const migrated = await migrateOrphanedWorkspaces(db);
+    const migrated = await sweeps.isolate('orphaned_workspace_migration', () =>
+      migrateOrphanedWorkspaces(db)
+    );
 
     // Clean up stale warm nodes and expired auto-provisioned nodes
-    const nodeCleanup = await runNodeCleanupSweep(env);
+    const nodeCleanup = await sweeps.isolate('node_cleanup', () => runNodeCleanupSweep(env));
+
+    // Reclaim provider-side servers that no live D1 node row claims.
+    const providerOrphans = await sweeps.isolate('provider_orphan_reconciliation', () =>
+      runProviderOrphanReconciliation(env)
+    );
 
     // Purge expired observability errors (retention + row count limits)
-    const observabilityPurge = await runObservabilityPurge(env);
+    const observabilityPurge = await sweeps.isolate('observability_purge', () =>
+      runObservabilityPurge(env)
+    );
 
     // Fire due cron triggers
-    const cronTriggers = await runCronTriggerSweep(env);
+    const cronTriggers = await sweeps.isolate('cron_triggers', () => runCronTriggerSweep(env));
 
     // Recover stale trigger executions and purge old logs
-    const triggerCleanup = await runTriggerExecutionCleanup(env);
+    const triggerCleanup = await sweeps.isolate('trigger_execution_cleanup', () =>
+      runTriggerExecutionCleanup(env)
+    );
     // Repair a bounded page of legacy taskless user-visible chat sessions.
-    const sessionTaskRepair = await runSessionTaskReconciliation(env);
+    const sessionTaskRepair = await sweeps.isolate('session_task_reconciliation', () =>
+      runSessionTaskReconciliation(env)
+    );
 
     // Reclaim expired guided credential-setup sessions (bounded — rule 47).
-    const setupSessionSweep = await runSetupSessionSweep(env, ctx);
+    const setupSessionSweep = await sweeps.isolate('setup_session_sweep', () =>
+      runSetupSessionSweep(env, ctx)
+    );
 
     // Clean up abandoned R2 compose image artifacts. The cleanup module is
     // interval-gated through KV so the 5-minute sweep does not scan R2 every run.
-    const composeArtifactCleanup = await runScheduledComposeImageArtifactCleanup(env);
+    const composeArtifactCleanup = await sweeps.isolate('compose_artifact_cleanup', () =>
+      runScheduledComposeImageArtifactCleanup(env)
+    );
 
     // Close orphaned compute_usage records
-    const computeUsageClosed = await runComputeUsageCleanup(env);
+    const computeUsageClosed = await sweeps.isolate('compute_usage_cleanup', () =>
+      runComputeUsageCleanup(env)
+    );
 
     // Expire stale pending/ready trial rows (cap slot is NOT refunded — it was
     // consumed for the month).
-    const trialExpire = await runTrialExpireSweep(env);
+    const trialExpire = await sweeps.isolate('trial_expire', () => runTrialExpireSweep(env));
+
+    const failedSweeps = sweeps.failedSweeps();
 
     log.info('cron.completed', {
       cron: controller.cron,
       type: 'sweep',
-      diagnosisRunsRestarted: diagnosisRecovery.restarted,
-      diagnosisRunsTerminalized: diagnosisRecovery.terminalized,
+      // Non-empty means at least one sweep threw and was contained. Alert on this.
+      failedSweeps,
+      failedSweepCount: failedSweeps.length,
+      diagnosisRunsRestarted: diagnosisRecovery?.restarted,
+      diagnosisRunsTerminalized: diagnosisRecovery?.terminalized,
       provisioningTimedOut: timedOut,
       workspacesMigrated: migrated,
-      staleNodesDestroyed: nodeCleanup.staleDestroyed,
-      lifetimeNodesDestroyed: nodeCleanup.lifetimeDestroyed,
-      lifetimeNodesSkipped: nodeCleanup.lifetimeSkipped,
-      nodeCleanupErrors: nodeCleanup.errors,
-      orphanedWorkspacesFlagged: nodeCleanup.orphanedWorkspacesFlagged,
-      orphanedNodesFlagged: nodeCleanup.orphanedNodesFlagged,
-      stuckTasksFailedQueued: stuckTasks.failedQueued,
-      stuckTasksFailedDelegated: stuckTasks.failedDelegated,
-      stuckTasksFailedInProgress: stuckTasks.failedInProgress,
-      stuckTasksHeartbeatSkipped: stuckTasks.heartbeatSkipped,
-      stuckTaskErrors: stuckTasks.errors,
-      stuckTaskDoHealthChecked: stuckTasks.doHealthChecked,
-      observabilityPurgedByAge: observabilityPurge.deletedByAge,
-      observabilityPurgedByCount: observabilityPurge.deletedByCount,
-      cronTriggersChecked: cronTriggers.checked,
-      cronTriggersFired: cronTriggers.fired,
-      cronTriggersSkipped: cronTriggers.skipped,
-      cronTriggersFailed: cronTriggers.failed,
-      triggerExecStaleRecovered: triggerCleanup.staleRecovered,
-      triggerExecStaleQueuedRecovered: triggerCleanup.staleQueuedRecovered,
-      triggerExecRetentionPurged: triggerCleanup.retentionPurged,
-      webhookDeliveriesPurged: triggerCleanup.webhookDeliveriesPurged,
-      triggerExecCleanupErrors: triggerCleanup.errors,
-      sessionTaskRepairScanned: sessionTaskRepair.scanned,
-      sessionTaskRepairRepaired: sessionTaskRepair.repaired,
-      sessionTaskRepairReused: sessionTaskRepair.reused,
-      sessionTaskRepairErrors: sessionTaskRepair.errors,
-      sessionTaskRepairResidual: sessionTaskRepair.residual,
-      composeArtifactCleanupSkipped: composeArtifactCleanup.skipped,
-      composeArtifactCleanupSkipReason: composeArtifactCleanup.skipReason,
-      composeArtifactCleanupScanned: composeArtifactCleanup.scannedObjects,
-      composeArtifactCleanupReferencedKeys: composeArtifactCleanup.referencedKeys,
-      composeArtifactCleanupRetainedReferenced: composeArtifactCleanup.retainedReferenced,
-      composeArtifactCleanupRetainedYoung: composeArtifactCleanup.retainedYoung,
-      composeArtifactCleanupDeleted: composeArtifactCleanup.deletedObjects,
-      composeArtifactCleanupDeletedBytes: composeArtifactCleanup.deletedBytes,
-      composeArtifactCleanupErrors: composeArtifactCleanup.errors,
+      staleNodesDestroyed: nodeCleanup?.staleDestroyed,
+      lifetimeNodesDestroyed: nodeCleanup?.lifetimeDestroyed,
+      lifetimeNodesSkipped: nodeCleanup?.lifetimeSkipped,
+      nodeCleanupErrors: nodeCleanup?.errors,
+      orphanedWorkspacesFlagged: nodeCleanup?.orphanedWorkspacesFlagged,
+      orphanedNodesDestroyed: nodeCleanup?.orphanedNodesDestroyed,
+      orphanedNodesSkipped: nodeCleanup?.orphanedNodesSkipped,
+      stoppedWorkspacesDeleted: nodeCleanup?.stoppedWorkspacesDeleted,
+      cfContainersDestroyed: nodeCleanup?.cfContainersDestroyed,
+      providerOrphansScanned: providerOrphans?.scanned,
+      providerOrphansDestroyed: providerOrphans?.destroyed,
+      providerOrphansSkippedUnlabeled: providerOrphans?.skippedUnlabeled,
+      providerOrphansSkippedYoung: providerOrphans?.skippedYoung,
+      providerOrphansSkippedClaimed: providerOrphans?.skippedClaimed,
+      providerOrphanSkipReason: providerOrphans?.skipReason,
+      providerOrphanErrors: providerOrphans?.errors,
+      stuckTasksFailedQueued: stuckTasks?.failedQueued,
+      stuckTasksFailedDelegated: stuckTasks?.failedDelegated,
+      stuckTasksFailedInProgress: stuckTasks?.failedInProgress,
+      stuckTasksHeartbeatSkipped: stuckTasks?.heartbeatSkipped,
+      stuckTaskErrors: stuckTasks?.errors,
+      stuckTaskDoHealthChecked: stuckTasks?.doHealthChecked,
+      observabilityPurgedByAge: observabilityPurge?.deletedByAge,
+      observabilityPurgedByCount: observabilityPurge?.deletedByCount,
+      cronTriggersChecked: cronTriggers?.checked,
+      cronTriggersFired: cronTriggers?.fired,
+      cronTriggersSkipped: cronTriggers?.skipped,
+      cronTriggersFailed: cronTriggers?.failed,
+      triggerExecStaleRecovered: triggerCleanup?.staleRecovered,
+      triggerExecStaleQueuedRecovered: triggerCleanup?.staleQueuedRecovered,
+      triggerExecRetentionPurged: triggerCleanup?.retentionPurged,
+      webhookDeliveriesPurged: triggerCleanup?.webhookDeliveriesPurged,
+      triggerExecCleanupErrors: triggerCleanup?.errors,
+      sessionTaskRepairScanned: sessionTaskRepair?.scanned,
+      sessionTaskRepairRepaired: sessionTaskRepair?.repaired,
+      sessionTaskRepairReused: sessionTaskRepair?.reused,
+      sessionTaskRepairErrors: sessionTaskRepair?.errors,
+      sessionTaskRepairResidual: sessionTaskRepair?.residual,
+      composeArtifactCleanupSkipped: composeArtifactCleanup?.skipped,
+      composeArtifactCleanupSkipReason: composeArtifactCleanup?.skipReason,
+      composeArtifactCleanupScanned: composeArtifactCleanup?.scannedObjects,
+      composeArtifactCleanupReferencedKeys: composeArtifactCleanup?.referencedKeys,
+      composeArtifactCleanupRetainedReferenced: composeArtifactCleanup?.retainedReferenced,
+      composeArtifactCleanupRetainedYoung: composeArtifactCleanup?.retainedYoung,
+      composeArtifactCleanupDeleted: composeArtifactCleanup?.deletedObjects,
+      composeArtifactCleanupDeletedBytes: composeArtifactCleanup?.deletedBytes,
+      composeArtifactCleanupErrors: composeArtifactCleanup?.errors,
       computeUsageOrphansClosed: computeUsageClosed,
-      trialExpired: trialExpire.expired,
-      trialProjectsLinked: trialExpire.projectsLinked,
-      trialWorkspacesDeleted: trialExpire.workspacesDeleted,
-      trialNodesDeleted: trialExpire.nodesDeleted,
-      trialCleanupErrors: trialExpire.cleanupErrors,
-      setupSessionsSwept: setupSessionSweep.toreDown,
-      setupSessionOrphansForced: setupSessionSweep.orphansForced,
-      setupSessionSweepErrors: setupSessionSweep.errors,
+      trialExpired: trialExpire?.expired,
+      trialProjectsLinked: trialExpire?.projectsLinked,
+      trialWorkspacesDeleted: trialExpire?.workspacesDeleted,
+      trialNodesDeleted: trialExpire?.nodesDeleted,
+      trialCleanupErrors: trialExpire?.cleanupErrors,
+      setupSessionsSwept: setupSessionSweep?.toreDown,
+      setupSessionOrphansForced: setupSessionSweep?.orphansForced,
+      setupSessionSweepErrors: setupSessionSweep?.errors,
     });
   },
 };
