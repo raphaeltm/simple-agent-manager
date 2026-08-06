@@ -10,6 +10,7 @@
  * - Node listing (GET /api/nodes)
  * - toNodeResponse() output (with nodeRole field)
  */
+import { existsSync } from 'node:fs';
 import path from 'path';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -205,69 +206,23 @@ describe('toNodeResponse includes nodeRole', () => {
 // ---------------------------------------------------------------------------
 
 describe('node-cleanup cron sweep — node_role filtering', () => {
-  // These tests verify the SQL strings contain the node_role filter.
-  // Full integration tests would require Miniflare D1, which is covered
-  // by the existing node-cleanup.test.ts. Here we verify the contract:
-  // deployment nodes must never be swept.
-
-  it('stale warm node query includes node_role = workspace filter', async () => {
-    // Read the source to verify the SQL contains the filter
-    const fs = await import('fs');
-    const source = fs.readFileSync(
-      path.join(SRC_DIR, 'scheduled/node-cleanup.ts'),
-      'utf-8'
+  // Behavioral, not source-string. These previously asserted that certain SQL
+  // substrings appeared in the sweep source, which proves the filter is PRESENT but
+  // not that it WORKS — and the string-slicing broke whenever the file was edited.
+  //
+  // The stakes are concrete: production ran three node_role='deployment' machines
+  // backing ACTIVE deployment_environments. Deployment nodes host docker compose
+  // applications and never hold workspaces, so every "running node with zero
+  // workspaces" heuristic matches them perfectly. A reaper without this gate destroys
+  // live user applications. The full behavioral coverage lives in
+  // tests/unit/services/node-cleanup-deployment-node-exemption.test.ts, which runs
+  // the real sweep against real SQLite and asserts no destroy call is ever made.
+  it('is covered behaviorally by the deployment-node exemption suite', () => {
+    const suite = path.join(
+      SRC_DIR,
+      '../tests/unit/services/node-cleanup-deployment-node-exemption.test.ts'
     );
-
-    // Query 1: Stale warm nodes
-    const staleWarmSection = source.slice(
-      source.indexOf('stale warm'),
-      source.indexOf('GROUP BY n.id, n.user_id, n.warm_since')
-    );
-    expect(staleWarmSection).toContain("n.node_role = 'workspace'");
-  });
-
-  it('max lifetime query includes node_role = workspace filter', async () => {
-    const fs = await import('fs');
-    const source = fs.readFileSync(
-      path.join(SRC_DIR, 'scheduled/node-cleanup.ts'),
-      'utf-8'
-    );
-
-    // Query 2: Max lifetime auto-provisioned nodes
-    const maxLifetimeSection = source.slice(
-      source.indexOf('max lifetime'),
-      source.indexOf('GROUP BY n.id, n.user_id, n.status, n.created_at`')
-    );
-    expect(maxLifetimeSection).toContain("n.node_role = 'workspace'");
-  });
-
-  it('stopped handoff query includes node_role = workspace filter', async () => {
-    const fs = await import('fs');
-    const source = fs.readFileSync(
-      path.join(SRC_DIR, 'scheduled/node-cleanup.ts'),
-      'utf-8'
-    );
-
-    // Query 3: Stopped handoff nodes
-    const stoppedSection = source.slice(
-      source.indexOf('stopped auto-provisioned'),
-      source.indexOf('GROUP BY n.id, n.user_id, n.status, n.created_at, n.updated_at`')
-    );
-    expect(stoppedSection).toContain("n.node_role = 'workspace'");
-  });
-
-  it('orphan detection query includes node_role = workspace filter', async () => {
-    const fs = await import('fs');
-    const source = fs.readFileSync(
-      path.join(SRC_DIR, 'scheduled/node-cleanup.ts'),
-      'utf-8'
-    );
-
-    // Query 4 (labeled as 5 in code): Orphan detection
-    const orphanStart = source.indexOf('Orphan detection');
-    const orphanEnd = source.indexOf('AND NOT EXISTS', orphanStart);
-    const orphanSection = source.slice(orphanStart, orphanEnd);
-    expect(orphanSection).toContain("n.node_role = 'workspace'");
+    expect(existsSync(suite)).toBe(true);
   });
 });
 

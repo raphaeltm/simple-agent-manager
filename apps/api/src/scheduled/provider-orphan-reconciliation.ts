@@ -38,7 +38,7 @@ import {
   DEFAULT_PROVIDER_ORPHAN_MIN_AGE_MS,
   DEFAULT_PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS,
 } from '@simple-agent-manager/shared';
-import type { Provider } from '@simple-agent-manager/providers';
+import { type Provider, createProvider } from '@simple-agent-manager/providers';
 import { drizzle } from 'drizzle-orm/d1';
 
 import type { Env } from '../env';
@@ -195,7 +195,6 @@ async function reconcile(
       return emptyResult({ skipped: true, skipReason: 'no-platform-credential' });
     }
 
-    const { createProvider } = await import('@simple-agent-manager/providers');
     provider = createProvider(
       buildProviderConfig(platformCredential.provider, platformCredential.decryptedToken, env)
     );

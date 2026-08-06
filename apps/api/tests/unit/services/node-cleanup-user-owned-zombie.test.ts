@@ -35,6 +35,8 @@ vi.mock('../../../src/services/nodes', () => ({
 vi.mock('../../../src/services/node-agent', () => ({
   deleteWorkspaceOnNode: vi.fn().mockResolvedValue(undefined),
   stopWorkspaceOnNode: vi.fn().mockResolvedValue(undefined),
+  // Background sweeps must not inherit the interactive VM-agent timeout (rule 47).
+  getNodeAgentBackgroundRequestTimeoutMs: vi.fn().mockReturnValue(5_000),
 }));
 vi.mock('../../../src/services/project-data', () => ({
   stopSession: vi.fn().mockResolvedValue(undefined),
@@ -117,10 +119,15 @@ beforeEach(() => {
   persistErrorCalls.length = 0;
   sqlite = new Database(':memory:');
   sqlite.exec(`
+    -- health_status is required: the destroy helper writes it alongside status, so a
+    -- table without it makes every destroy's D1 write throw. Asserting only on
+    -- deleteCalls (which the provider mock records BEFORE that write) hides the
+    -- failure, so the result counters would silently read zero.
     CREATE TABLE nodes (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL,
       warm_since TEXT, node_role TEXT NOT NULL DEFAULT 'workspace', node_class TEXT NOT NULL DEFAULT 'managed',
-      runtime TEXT NOT NULL DEFAULT 'vm', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      runtime TEXT NOT NULL DEFAULT 'vm', health_status TEXT NOT NULL DEFAULT 'unhealthy',
+      created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );
     CREATE TABLE workspaces (
       id TEXT PRIMARY KEY, node_id TEXT, user_id TEXT, status TEXT NOT NULL,
@@ -152,8 +159,10 @@ describe('node-cleanup sweep excludes user-owned nodes', () => {
     expect(stopCalls).not.toContain('byo-warm');
   });
 
-  it('orphan detection: flags a managed orphan but never a user-owned node', async () => {
-    // Orphaned = running, no warm_since, stale updated_at, no active workspaces.
+  it('idle orphan: DESTROYS a managed orphan but never a user-owned node', async () => {
+    // Orphaned = running, no warm_since, idle past the threshold, no active workspaces.
+    // This phase used to only write an observability row, so an orphan lived forever;
+    // it now destroys, and `deleteCalls` is the assertion that proves it.
     seedNode({ id: 'managed-orphan', nodeClass: 'managed', status: 'running', warmSince: null });
     seedNode({ id: 'byo-orphan', nodeClass: 'user-owned', status: 'running', warmSince: null });
     const env = makeEnv();
@@ -161,11 +170,16 @@ describe('node-cleanup sweep excludes user-owned nodes', () => {
     const result = await runNodeCleanupSweep(env);
     await runNodeCleanupSweep(env);
 
-    const flaggedNodeIds = persistErrorCalls.map((e) => e.nodeId);
-    expect(flaggedNodeIds).toContain('managed-orphan');
-    expect(flaggedNodeIds).not.toContain('byo-orphan');
-    expect(result.orphanedNodesFlagged).toBe(1);
+    // Control: proves the candidate query IS reached, so the BYO assertion below is
+    // discriminating rather than passing because nothing matched at all.
+    expect(deleteCalls).toContain('managed-orphan');
+    expect(result.orphanedNodesDestroyed).toBe(1);
+
+    // Rule 51: a machine SAM does not own must never be destroyed, flagged, or
+    // mutated — across repeated sweeps.
     expect(deleteCalls).not.toContain('byo-orphan');
+    expect(stopCalls).not.toContain('byo-orphan');
+    expect(persistErrorCalls.map((e) => e.nodeId)).not.toContain('byo-orphan');
   });
 
   it('stopped-handoff: destroys a managed stopped auto-provisioned node but never a user-owned one', async () => {

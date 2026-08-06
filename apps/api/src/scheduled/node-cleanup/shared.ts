@@ -138,6 +138,11 @@ export type CleanupContext = Record<string, string | number | null | undefined>;
  *
  * Falls back to `nodes.created_at` so a freshly provisioned node that has not yet
  * received its first workspace ages from creation rather than looking infinitely idle.
+ *
+ * Counts workspaces in ALL states, including `deleted`. Cleaning a workspace up is
+ * itself recent activity on the node, so the clock legitimately restarts when the
+ * stale-stopped-workspace phase deletes a row. That delays reaping by at most one
+ * phase-6 window and cannot repeat, since a workspace is deleted only once.
  */
 export const LAST_WORKSPACE_ACTIVITY_SQL =
   "COALESCE(MAX(w.updated_at), n.created_at)";
