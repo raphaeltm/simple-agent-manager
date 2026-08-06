@@ -29,6 +29,7 @@ it.each([
   'compose-image-artifacts/private-incidents',
   'session-snapshots/private-incidents',
   'temp-uploads/private-incidents',
+  'tts/private-incidents',
 ])('rejects reserved runtime R2 prefix %s', (prefix) => {
   expect(resolveDiagnosticIncidentConfig({ VM_INCIDENT_R2_PREFIX: prefix } as Env).r2Prefix).toBe(
     DEFAULT_VM_INCIDENT_R2_PREFIX

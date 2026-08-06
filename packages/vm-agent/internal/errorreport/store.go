@@ -59,7 +59,7 @@ type outboxRow struct {
 	attempts         int
 }
 
-func openOutbox(path string) (*sql.DB, error) {
+func openOutbox(path string, busyTimeout time.Duration) (*sql.DB, error) {
 	dsn := ":memory:"
 	if path != "" {
 		absPath, err := filepath.Abs(path)
@@ -84,7 +84,7 @@ func openOutbox(path string) (*sql.DB, error) {
 	db.SetMaxOpenConns(1)
 	for _, pragma := range []string{
 		"PRAGMA journal_mode=WAL",
-		"PRAGMA busy_timeout=5000",
+		fmt.Sprintf("PRAGMA busy_timeout=%d", busyTimeout.Milliseconds()),
 		"PRAGMA synchronous=NORMAL",
 	} {
 		if _, err := db.Exec(pragma); err != nil {

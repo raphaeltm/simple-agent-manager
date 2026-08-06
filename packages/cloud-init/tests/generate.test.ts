@@ -2060,6 +2060,7 @@ describe('VM error reporter environment', () => {
     expect(defaults).toContain(
       'Environment=ERROR_REPORT_DB_PATH=/var/lib/vm-agent/error-reports.db'
     );
+    expect(defaults).toContain('Environment=ERROR_REPORT_DB_BUSY_TIMEOUT=5s');
     expect(defaults).toContain('Environment=ERROR_REPORT_EVENT_LIMIT=100');
 
     const overridden = generateCloudInit(
@@ -2067,6 +2068,7 @@ describe('VM error reporter environment', () => {
         errorReportFlushInterval: '45s',
         errorReportMaxBatchBytes: '16384',
         errorReportDbPath: '/var/lib/vm-agent/custom-errors.db',
+        errorReportDbBusyTimeout: '750ms',
         errorReportEventLimit: '75',
       }),
       { validateSize: false }
@@ -2076,6 +2078,7 @@ describe('VM error reporter environment', () => {
     expect(overridden).toContain(
       'Environment=ERROR_REPORT_DB_PATH=/var/lib/vm-agent/custom-errors.db'
     );
+    expect(overridden).toContain('Environment=ERROR_REPORT_DB_BUSY_TIMEOUT=750ms');
     expect(overridden).toContain('Environment=ERROR_REPORT_EVENT_LIMIT=75');
   });
 
@@ -2094,6 +2097,13 @@ describe('VM error reporter environment', () => {
         })
       )
     ).toThrow('errorReportMaxBatchBytes');
+    expect(() =>
+      validateCloudInitVariables(
+        baseVariables({
+          errorReportDbBusyTimeout: '5s; reboot',
+        })
+      )
+    ).toThrow('errorReportDbBusyTimeout');
     expect(() =>
       validateCloudInitVariables(
         baseVariables({

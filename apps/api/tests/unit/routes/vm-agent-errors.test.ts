@@ -533,6 +533,49 @@ describe('VM Agent Errors Route', () => {
       spy.mockRestore();
     });
 
+    it('uses operator-configured diagnostic field limits', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const obsDb = {} as D1Database;
+
+      await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody([
+            validEntry({
+              message: 'message-too-long',
+              source: 'source-too-long',
+              stack: 'stack-too-long',
+            }),
+          ]),
+        },
+        createEnv({
+          OBSERVABILITY_DATABASE: obsDb,
+          OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH: '4',
+          MAX_VM_AGENT_ERROR_SOURCE_LENGTH: '5',
+          OBSERVABILITY_ERROR_STACK_MAX_LENGTH: '6',
+        })
+      );
+
+      expect(mockPersistErrorBatch).toHaveBeenCalledWith(
+        obsDb,
+        [
+          expect.objectContaining({
+            message: 'mess...',
+            stack: 'stack-...',
+          }),
+        ],
+        expect.anything()
+      );
+      const vmAgentCall = spy.mock.calls
+        .map((call) => JSON.parse(call[0] as string))
+        .find((entry) => entry.event === 'vm_agent_error');
+      expect(vmAgentCall.source).toBe('sourc...');
+
+      spy.mockRestore();
+    });
+
     it('should preserve info level for lifecycle success entries', async () => {
       const spy = vi.spyOn(console, 'log').mockImplementation(() => {});
       const mockObsDb = {} as D1Database;

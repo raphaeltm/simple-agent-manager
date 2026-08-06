@@ -315,6 +315,7 @@ type Config struct {
 	ErrorReportRetryMax       time.Duration // Maximum transient delivery backoff (default: 5m)
 	ErrorReportMaxAttempts    int           // Bounded delivery attempts (default: 20)
 	ErrorReportDBPath         string        // SQLite WAL outbox path
+	ErrorReportDBBusyTimeout  time.Duration // SQLite outbox contention timeout (default: 5s)
 	ErrorReportSpoolDir       string        // Private automatic-evidence spool directory
 	ErrorReportArtifactBytes  int64         // Maximum compressed automatic artifact bytes (default: 2 MiB)
 	ErrorReportSpoolBytes     int64         // Maximum local spool bytes (default: 20 MiB)
@@ -615,6 +616,7 @@ func Load() (*Config, error) {
 		ErrorReportRetryMax:       getEnvDuration("ERROR_REPORT_RETRY_MAX", DefaultErrorReportRetryMax),
 		ErrorReportMaxAttempts:    getEnvInt("ERROR_REPORT_MAX_ATTEMPTS", DefaultErrorReportMaxAttempts),
 		ErrorReportDBPath:         getEnv("ERROR_REPORT_DB_PATH", filepath.Join(persistenceDir, "error-reports.db")),
+		ErrorReportDBBusyTimeout:  getEnvDuration("ERROR_REPORT_DB_BUSY_TIMEOUT", DefaultErrorReportDBBusyTimeout),
 		ErrorReportSpoolDir:       getEnv("ERROR_REPORT_SPOOL_DIR", filepath.Join(persistenceDir, "diagnostic-incidents")),
 		ErrorReportArtifactBytes:  getEnvInt64("ERROR_REPORT_ARTIFACT_MAX_BYTES", DefaultErrorReportArtifactMaxBytes),
 		ErrorReportSpoolBytes:     getEnvInt64("ERROR_REPORT_SPOOL_MAX_BYTES", DefaultErrorReportSpoolMaxBytes),

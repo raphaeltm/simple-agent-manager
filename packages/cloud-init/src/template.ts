@@ -193,6 +193,7 @@ write_files:
       Environment=ERROR_REPORT_RETRY_MAX={{ error_report_retry_max }}
       Environment=ERROR_REPORT_MAX_ATTEMPTS={{ error_report_max_attempts }}
       Environment=ERROR_REPORT_DB_PATH={{ error_report_db_path }}
+      Environment=ERROR_REPORT_DB_BUSY_TIMEOUT={{ error_report_db_busy_timeout }}
       Environment=ERROR_REPORT_SPOOL_DIR={{ error_report_spool_dir }}
       Environment=ERROR_REPORT_ARTIFACT_MAX_BYTES={{ error_report_artifact_max_bytes }}
       Environment=ERROR_REPORT_SPOOL_MAX_BYTES={{ error_report_spool_max_bytes }}

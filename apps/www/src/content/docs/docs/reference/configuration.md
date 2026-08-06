@@ -211,6 +211,10 @@ VM failures use a durable local SQLite outbox and a private R2 artifact. Generat
 | ------------------------------------- | ---------------------- | ------------------------------------------------------------------------------ |
 | `MAX_VM_AGENT_ERROR_BODY_BYTES`       | `32768`                | Maximum VM error batch body                                                    |
 | `MAX_VM_AGENT_ERROR_BATCH_SIZE`       | `10`                   | Maximum errors per VM batch                                                    |
+| `MAX_VM_AGENT_ERROR_SOURCE_LENGTH`    | `256`                  | Maximum redacted VM error source length                                        |
+| `OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH` | `2048`              | Maximum persisted observability error message length                           |
+| `OBSERVABILITY_ERROR_STACK_MAX_LENGTH` | `4096`                | Maximum persisted observability stack length                                   |
+| `OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH` | `512`             | Maximum persisted observability user-agent length                              |
 | `VM_INCIDENT_R2_PREFIX`               | `diagnostic-incidents` | Private object prefix; generated from the Pulumi output                        |
 | `VM_INCIDENT_ARTIFACT_MAX_BYTES`      | `2097152`              | Maximum compressed artifact size                                               |
 | `VM_INCIDENT_REGISTRATION_MAX_BYTES`  | `262144`               | Maximum registration JSON body                                                 |
@@ -220,12 +224,12 @@ VM failures use a durable local SQLite outbox and a private R2 artifact. Generat
 | `VM_INCIDENT_MAX_BYTES_PER_NODE`      | `104857600`            | Active expected-byte quota per node                                            |
 | `VM_INCIDENT_RETENTION_DAYS`          | `7`                    | Private object and active metadata retention                                   |
 | `VM_INCIDENT_METADATA_RETENTION_DAYS` | `30`                   | Expired metadata retention after object deletion                               |
-| `VM_INCIDENT_PENDING_TIMEOUT_MINUTES` | `30`                   | Incomplete-upload timeout and upload-lease duration (lease minimum: 5 minutes) |
-| `VM_INCIDENT_RECONCILE_BATCH_SIZE`    | `50`                   | Maximum artifacts/incidents repaired per scheduled pass (range: 5–200)         |
+| `VM_INCIDENT_PENDING_TIMEOUT_MINUTES` | `30`                   | Incomplete-upload timeout and upload-lease duration                            |
+| `VM_INCIDENT_RECONCILE_BATCH_SIZE`    | `50`                   | Maximum artifacts/incidents repaired per scheduled pass (minimum: 6)           |
 
-The VM Agent process accepts the corresponding `ERROR_REPORT_*` overrides for flush interval, batch size/bytes, outbox size and path, HTTP timeout, retry bounds, attempts, spool path/bytes, artifact bytes, retention, collector timeout/count, document bytes, recursive value depth/items, string bytes, and structured event limit. Generated deployments pass these validated values through cloud-init into the VM Agent systemd service, so overrides apply to newly provisioned nodes. Defaults are listed in `apps/api/.env.example`; the common defaults are a 32 KiB error batch, 1,000-row outbox, 2 MiB artifact, 20 MiB spool, and 24-hour local retention.
+The VM Agent process accepts the corresponding `ERROR_REPORT_*` overrides for flush interval, batch size/bytes, outbox size and path, SQLite busy timeout, HTTP timeout, retry bounds, attempts, spool path/bytes, artifact bytes, retention, collector timeout/count, document bytes, recursive value depth/items, string bytes, and structured event limit. Generated deployments pass these validated values through cloud-init into the VM Agent systemd service, so overrides apply to newly provisioned nodes. Defaults are listed in `apps/api/.env.example`; the common defaults are a 32 KiB error batch, 1,000-row outbox, 2 MiB artifact, 20 MiB spool, and 24-hour local retention.
 
-Pulumi options `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `diagnosticIncidentTtlDays` (default `7`) configure the private prefix and an independent R2 lifecycle rule. They do not require a separate bucket or manually managed Worker variable. The prefix cannot begin with the application-owned namespaces `agents`, `cli`, `compose-image-artifacts`, `session-snapshots`, or `temp-uploads`, because the lifecycle would otherwise expire unrelated objects.
+Pulumi options `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `diagnosticIncidentTtlDays` (default `7`, any positive integer) configure the private prefix and an independent R2 lifecycle rule. They do not require a separate bucket or manually managed Worker variable. The prefix cannot begin with the application-owned namespaces `agents`, `cli`, `compose-image-artifacts`, `session-snapshots`, `temp-uploads`, or `tts`, because the lifecycle would otherwise expire unrelated objects.
 
 ### Platform Feedback Triage
 
@@ -582,6 +586,9 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 | `OBSERVABILITY_ERROR_RETENTION_DAYS` | `30`     | Error log retention              |
 | `OBSERVABILITY_ERROR_MAX_ROWS`       | `100000` | Max stored error rows            |
 | `OBSERVABILITY_ERROR_BATCH_SIZE`     | `25`     | Error ingestion batch size       |
+| `OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH` | `2048` | Maximum persisted message length |
+| `OBSERVABILITY_ERROR_STACK_MAX_LENGTH` | `4096` | Maximum persisted stack length   |
+| `OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH` | `512` | Maximum persisted user-agent length |
 | `OBSERVABILITY_LOG_QUERY_RATE_LIMIT` | `30`     | Log queries per minute per admin |
 
 ## VM TLS

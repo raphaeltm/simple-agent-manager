@@ -75,7 +75,7 @@ func New(apiBaseURL, nodeID, authToken string, cfg Config) *Reporter {
 	if spoolContainsPath(cfg.SpoolDir, cfg.DBPath) {
 		err = fmt.Errorf("private spool directory must not contain the outbox database")
 	} else {
-		db, err = openOutbox(cfg.DBPath)
+		db, err = openOutbox(cfg.DBPath, cfg.DBBusyTimeout)
 	}
 	r := &Reporter{
 		apiBaseURL:    strings.TrimRight(apiBaseURL, "/"),

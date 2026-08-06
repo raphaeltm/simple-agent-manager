@@ -306,6 +306,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // VM agent error reporting
   MAX_VM_AGENT_ERROR_BODY_BYTES?: string;
   MAX_VM_AGENT_ERROR_BATCH_SIZE?: string;
+  MAX_VM_AGENT_ERROR_SOURCE_LENGTH?: string;
+  OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH?: string;
+  OBSERVABILITY_ERROR_STACK_MAX_LENGTH?: string;
+  OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH?: string;
   ERROR_REPORT_FLUSH_INTERVAL?: string;
   ERROR_REPORT_MAX_BATCH_SIZE?: string;
   ERROR_REPORT_MAX_BATCH_BYTES?: string;
@@ -315,6 +319,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   ERROR_REPORT_RETRY_MAX?: string;
   ERROR_REPORT_MAX_ATTEMPTS?: string;
   ERROR_REPORT_DB_PATH?: string;
+  ERROR_REPORT_DB_BUSY_TIMEOUT?: string;
   ERROR_REPORT_SPOOL_DIR?: string;
   ERROR_REPORT_ARTIFACT_MAX_BYTES?: string;
   ERROR_REPORT_SPOOL_MAX_BYTES?: string;
@@ -336,7 +341,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   VM_INCIDENT_RETENTION_DAYS?: string; // Private R2 and active metadata retention (default: 7)
   VM_INCIDENT_METADATA_RETENTION_DAYS?: string; // Expired metadata retention after R2 deletion (default: 30)
   VM_INCIDENT_PENDING_TIMEOUT_MINUTES?: string; // Stale pending upload threshold (default: 30)
-  VM_INCIDENT_RECONCILE_BATCH_SIZE?: string; // Max artifacts/incidents per reconciliation pass (default: 50, minimum: 5)
+  VM_INCIDENT_RECONCILE_BATCH_SIZE?: string; // Max artifacts/incidents per reconciliation pass (default: 50, minimum: 6)
   // Observability configuration (spec 023)
   OBSERVABILITY_ERROR_RETENTION_DAYS?: string;
   OBSERVABILITY_ERROR_MAX_ROWS?: string;

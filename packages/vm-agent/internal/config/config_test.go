@@ -154,6 +154,7 @@ func TestLoadDurableErrorReportGuardrails(t *testing.T) {
 	t.Setenv("ERROR_REPORT_RETRY_INITIAL", "2s")
 	t.Setenv("ERROR_REPORT_RETRY_MAX", "1m")
 	t.Setenv("ERROR_REPORT_MAX_ATTEMPTS", "7")
+	t.Setenv("ERROR_REPORT_DB_BUSY_TIMEOUT", "750ms")
 	t.Setenv("ERROR_REPORT_ARTIFACT_MAX_BYTES", "4567")
 	t.Setenv("ERROR_REPORT_SPOOL_MAX_BYTES", "8901")
 	t.Setenv("ERROR_REPORT_RETENTION", "2h")
@@ -173,7 +174,8 @@ func TestLoadDurableErrorReportGuardrails(t *testing.T) {
 		cfg.ErrorReportMaxBatchSize != 4 || cfg.ErrorReportMaxBatchBytes != 12000 ||
 		cfg.ErrorReportMaxQueueSize != 44 || cfg.ErrorReportHTTPTimeout != 12*time.Second ||
 		cfg.ErrorReportRetryInitial != 2*time.Second || cfg.ErrorReportRetryMax != time.Minute ||
-		cfg.ErrorReportMaxAttempts != 7 || cfg.ErrorReportArtifactBytes != 4567 ||
+		cfg.ErrorReportMaxAttempts != 7 || cfg.ErrorReportDBBusyTimeout != 750*time.Millisecond ||
+		cfg.ErrorReportArtifactBytes != 4567 ||
 		cfg.ErrorReportSpoolBytes != 8901 || cfg.ErrorReportRetention != 2*time.Hour ||
 		cfg.ErrorReportCollectTimeout != 4*time.Second || cfg.ErrorReportCollectorDocs != 5 ||
 		cfg.ErrorReportDocumentBytes != 6000 || cfg.ErrorReportValueDepth != 6 ||
@@ -189,12 +191,10 @@ func TestLoadDurableErrorReportGuardrails(t *testing.T) {
 }
 
 func TestValidateRejectsUnsafeErrorReportEventLimits(t *testing.T) {
-	for _, limit := range []int{-1, MaxErrorReportEventLimit + 1} {
-		cfg := validConfig()
-		cfg.ErrorReportEventLimit = limit
-		if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "ERROR_REPORT_EVENT_LIMIT") {
-			t.Fatalf("limit=%d error=%v", limit, err)
-		}
+	cfg := validConfig()
+	cfg.ErrorReportEventLimit = -1
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "ERROR_REPORT_EVENT_LIMIT") {
+		t.Fatalf("error=%v", err)
 	}
 }
 

@@ -121,6 +121,7 @@ func runDeploymentMode(cfg *config.Config) {
 		RetryMax:         cfg.ErrorReportRetryMax,
 		MaxAttempts:      cfg.ErrorReportMaxAttempts,
 		DBPath:           cfg.ErrorReportDBPath,
+		DBBusyTimeout:    cfg.ErrorReportDBBusyTimeout,
 		SpoolDir:         cfg.ErrorReportSpoolDir,
 		ArtifactMaxBytes: cfg.ErrorReportArtifactBytes,
 		SpoolMaxBytes:    cfg.ErrorReportSpoolBytes,

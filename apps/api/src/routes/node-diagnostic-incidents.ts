@@ -23,9 +23,9 @@ import { persistErrorBatchStrict } from '../services/observability-strict';
 const nodeDiagnosticIncidentRoutes = new Hono<{ Bindings: Env }>();
 const DEFAULT_MAX_VM_ERROR_BODY_BYTES = 32_768;
 const DEFAULT_MAX_VM_ERROR_BATCH_SIZE = 10;
-const MAX_VM_ERROR_MESSAGE_LENGTH = 2048;
-const MAX_VM_ERROR_SOURCE_LENGTH = 256;
-const MAX_VM_ERROR_STACK_LENGTH = 4096;
+const DEFAULT_VM_ERROR_SOURCE_LENGTH = 256;
+const DEFAULT_ERROR_MESSAGE_LENGTH = 2048;
+const DEFAULT_ERROR_STACK_LENGTH = 4096;
 const VALID_VM_ERROR_LEVELS = new Set<string>(['error', 'warn', 'info']);
 const VM_INCIDENT_ID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 
@@ -56,6 +56,18 @@ nodeDiagnosticIncidentRoutes.post('/:id/errors', async (c) => {
   const maxBatchSize = positiveInteger(
     c.env.MAX_VM_AGENT_ERROR_BATCH_SIZE,
     DEFAULT_MAX_VM_ERROR_BATCH_SIZE
+  );
+  const maxMessageLength = positiveInteger(
+    c.env.OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH,
+    DEFAULT_ERROR_MESSAGE_LENGTH
+  );
+  const maxSourceLength = positiveInteger(
+    c.env.MAX_VM_AGENT_ERROR_SOURCE_LENGTH,
+    DEFAULT_VM_ERROR_SOURCE_LENGTH
+  );
+  const maxStackLength = positiveInteger(
+    c.env.OBSERVABILITY_ERROR_STACK_MAX_LENGTH,
+    DEFAULT_ERROR_STACK_LENGTH
   );
   const contentLength = Number.parseInt(c.req.header('Content-Length') || '0', 10);
   if (contentLength > maxBodyBytes) {
@@ -106,17 +118,11 @@ nodeDiagnosticIncidentRoutes.post('/:id/errors', async (c) => {
       throw errors.badRequest('incidentId must be a ULID');
     }
     const workspaceId = typeof value.workspaceId === 'string' ? value.workspaceId : null;
-    const safeMessage = truncateString(
-      String(redactSensitiveData(message)),
-      MAX_VM_ERROR_MESSAGE_LENGTH
-    );
-    const safeSource = truncateString(
-      String(redactSensitiveData(source)),
-      MAX_VM_ERROR_SOURCE_LENGTH
-    );
+    const safeMessage = truncateString(String(redactSensitiveData(message)), maxMessageLength);
+    const safeSource = truncateString(String(redactSensitiveData(source)), maxSourceLength);
     const safeStack =
       typeof value.stack === 'string'
-        ? truncateString(String(redactSensitiveData(value.stack)), MAX_VM_ERROR_STACK_LENGTH)
+        ? truncateString(String(redactSensitiveData(value.stack)), maxStackLength)
         : null;
     const safeContext = redactSensitiveData(maybeJsonRecord(value.context));
     log[level]('vm_agent_error', {

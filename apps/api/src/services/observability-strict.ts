@@ -2,9 +2,9 @@ import type { Env } from '../env';
 import type { PersistErrorInput } from './observability';
 
 const DEFAULT_BATCH_SIZE = 25;
-const MAX_MESSAGE_LENGTH = 2048;
-const MAX_STACK_LENGTH = 4096;
-const MAX_USER_AGENT_LENGTH = 512;
+const DEFAULT_MESSAGE_MAX_LENGTH = 2048;
+const DEFAULT_STACK_MAX_LENGTH = 4096;
+const DEFAULT_USER_AGENT_MAX_LENGTH = 512;
 const VALID_SOURCES = new Set<string>(['client', 'vm-agent', 'api']);
 const VALID_LEVELS = new Set<string>(['error', 'warn', 'info']);
 
@@ -17,6 +17,11 @@ function maxBatchSize(env?: Env): number {
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : DEFAULT_BATCH_SIZE;
 }
 
+function positiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 /** Strict, idempotent persistence for restart-safe VM outboxes. */
 export async function persistErrorBatchStrict(
   db: D1Database,
@@ -24,6 +29,18 @@ export async function persistErrorBatchStrict(
   env?: Env
 ): Promise<void> {
   const limit = maxBatchSize(env);
+  const messageMaxLength = positiveInteger(
+    env?.OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH,
+    DEFAULT_MESSAGE_MAX_LENGTH
+  );
+  const stackMaxLength = positiveInteger(
+    env?.OBSERVABILITY_ERROR_STACK_MAX_LENGTH,
+    DEFAULT_STACK_MAX_LENGTH
+  );
+  const userAgentMaxLength = positiveInteger(
+    env?.OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH,
+    DEFAULT_USER_AGENT_MAX_LENGTH
+  );
   if (inputs.length > limit) {
     throw new Error(`Strict observability batch exceeds configured limit of ${limit}`);
   }
@@ -44,14 +61,14 @@ export async function persistErrorBatchStrict(
         input.id,
         source,
         level,
-        truncate(input.message, MAX_MESSAGE_LENGTH),
-        input.stack ? truncate(input.stack, MAX_STACK_LENGTH) : null,
+        truncate(input.message, messageMaxLength),
+        input.stack ? truncate(input.stack, stackMaxLength) : null,
         input.context ? JSON.stringify(input.context) : null,
         input.userId ?? null,
         input.nodeId ?? null,
         input.workspaceId ?? null,
         input.ipAddress ?? null,
-        input.userAgent ? truncate(input.userAgent, MAX_USER_AGENT_LENGTH) : null,
+        input.userAgent ? truncate(input.userAgent, userAgentMaxLength) : null,
         input.timestamp ?? Date.now()
       );
   });
@@ -74,7 +91,7 @@ export async function persistErrorBatchStrict(
       !row ||
       row.source !== input.source ||
       row.level !== expectedLevel ||
-      row.message !== truncate(input.message, MAX_MESSAGE_LENGTH) ||
+      row.message !== truncate(input.message, messageMaxLength) ||
       row.node_id !== (input.nodeId ?? null) ||
       row.workspace_id !== (input.workspaceId ?? null)
     ) {

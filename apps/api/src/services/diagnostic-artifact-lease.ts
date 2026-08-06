@@ -1,8 +1,6 @@
 import type { Env } from '../env';
 import type { IncidentConfig } from './diagnostic-incident-config';
 
-const MIN_UPLOAD_LEASE_MINUTES = 5;
-
 export interface ArtifactLease {
   id: string;
   now: string;
@@ -20,9 +18,7 @@ export async function acquireArtifactLease(
   const lease: ArtifactLease = {
     id: crypto.randomUUID(),
     now: nowDate.toISOString(),
-    expiresAt: new Date(
-      nowDate.getTime() + Math.max(config.pendingTimeoutMinutes, MIN_UPLOAD_LEASE_MINUTES) * 60_000
-    ).toISOString(),
+    expiresAt: new Date(nowDate.getTime() + config.pendingTimeoutMinutes * 60_000).toISOString(),
   };
   const result = await env.DATABASE.prepare(
     `UPDATE diagnostic_artifacts

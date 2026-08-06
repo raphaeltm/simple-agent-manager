@@ -97,7 +97,6 @@ describe('infra config parsing', () => {
     ],
     ['diagnosticIncidentTtlDays', '0', 'must be a positive integer'],
     ['diagnosticIncidentTtlDays', '1.5', 'must be a positive integer'],
-    ['diagnosticIncidentTtlDays', '31', 'must be at most 30'],
   ])('fails fast for invalid %s config', (key, value, expectedMessage) => {
     const beforeResourceCount = getRegisteredResources().length;
 
@@ -124,7 +123,7 @@ describe('infra config parsing', () => {
     }
   });
 
-  it.each(['agents', 'cli', 'compose-image-artifacts', 'session-snapshots', 'temp-uploads'])(
+  it.each(['agents', 'cli', 'compose-image-artifacts', 'session-snapshots', 'temp-uploads', 'tts'])(
     'rejects the reserved %s object namespace for diagnostic lifecycle expiry',
     (reservedPrefix) => {
       expect(() =>

@@ -7,6 +7,7 @@ const (
 	DefaultErrorReportMaxAttempts      = 20
 	DefaultErrorReportRetryInitial     = time.Second
 	DefaultErrorReportRetryMax         = 5 * time.Minute
+	DefaultErrorReportDBBusyTimeout    = 5 * time.Second
 	DefaultErrorReportArtifactMaxBytes = 2 * 1024 * 1024
 	DefaultErrorReportSpoolMaxBytes    = 20 * 1024 * 1024
 	DefaultErrorReportRetention        = 24 * time.Hour
@@ -17,5 +18,4 @@ const (
 	DefaultErrorReportMaxValueItems    = 256
 	DefaultErrorReportMaxStringBytes   = 4096
 	DefaultErrorReportEventLimit       = 100
-	MaxErrorReportEventLimit           = 1000
 )

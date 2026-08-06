@@ -362,6 +362,7 @@ func New(cfg *config.Config) (*Server, error) {
 		RetryMax:         cfg.ErrorReportRetryMax,
 		MaxAttempts:      cfg.ErrorReportMaxAttempts,
 		DBPath:           cfg.ErrorReportDBPath,
+		DBBusyTimeout:    cfg.ErrorReportDBBusyTimeout,
 		SpoolDir:         cfg.ErrorReportSpoolDir,
 		ArtifactMaxBytes: cfg.ErrorReportArtifactBytes,
 		SpoolMaxBytes:    cfg.ErrorReportSpoolBytes,

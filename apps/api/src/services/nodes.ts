@@ -254,6 +254,7 @@ export async function provisionNode(
       errorReportRetryMax: env.ERROR_REPORT_RETRY_MAX,
       errorReportMaxAttempts: env.ERROR_REPORT_MAX_ATTEMPTS,
       errorReportDbPath: env.ERROR_REPORT_DB_PATH,
+      errorReportDbBusyTimeout: env.ERROR_REPORT_DB_BUSY_TIMEOUT,
       errorReportSpoolDir: env.ERROR_REPORT_SPOOL_DIR,
       errorReportArtifactMaxBytes: env.ERROR_REPORT_ARTIFACT_MAX_BYTES,
       errorReportSpoolMaxBytes: env.ERROR_REPORT_SPOOL_MAX_BYTES,

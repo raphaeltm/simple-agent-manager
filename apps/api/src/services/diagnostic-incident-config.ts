@@ -18,6 +18,7 @@ const RESERVED_R2_TOP_LEVEL_PREFIXES = new Set([
   'compose-image-artifacts',
   'session-snapshots',
   'temp-uploads',
+  'tts',
 ]);
 
 export interface IncidentConfig {
@@ -34,9 +35,9 @@ export interface IncidentConfig {
   reconcileBatchSize: number;
 }
 
-function positiveBounded(value: string | undefined, fallback: number, hardMax: number): number {
+function positiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? '', 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? Math.min(parsed, hardMax) : fallback;
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 function normalizePrefix(value: string | undefined): string {
@@ -44,7 +45,8 @@ function normalizePrefix(value: string | undefined): string {
     .split('/')
     .map((segment) => segment.trim())
     .filter((segment) => /^[a-zA-Z0-9._-]+$/.test(segment) && segment !== '..');
-  return segments.length > 0 && !RESERVED_R2_TOP_LEVEL_PREFIXES.has(segments[0])
+  const topLevel = segments[0];
+  return topLevel && !RESERVED_R2_TOP_LEVEL_PREFIXES.has(topLevel)
     ? segments.join('/')
     : DEFAULT_VM_INCIDENT_R2_PREFIX;
 }
@@ -52,57 +54,47 @@ function normalizePrefix(value: string | undefined): string {
 export function resolveDiagnosticIncidentConfig(env: Env): IncidentConfig {
   return {
     r2Prefix: normalizePrefix(env.VM_INCIDENT_R2_PREFIX),
-    artifactMaxBytes: positiveBounded(
+    artifactMaxBytes: positiveInteger(
       env.VM_INCIDENT_ARTIFACT_MAX_BYTES,
-      DEFAULT_VM_INCIDENT_ARTIFACT_MAX_BYTES,
-      10 * 1024 * 1024
+      DEFAULT_VM_INCIDENT_ARTIFACT_MAX_BYTES
     ),
-    registrationMaxBytes: positiveBounded(
+    registrationMaxBytes: positiveInteger(
       env.VM_INCIDENT_REGISTRATION_MAX_BYTES,
-      DEFAULT_VM_INCIDENT_REGISTRATION_MAX_BYTES,
-      1024 * 1024
+      DEFAULT_VM_INCIDENT_REGISTRATION_MAX_BYTES
     ),
-    manifestMaxBytes: positiveBounded(
+    manifestMaxBytes: positiveInteger(
       env.VM_INCIDENT_MANIFEST_MAX_BYTES,
-      DEFAULT_VM_INCIDENT_MANIFEST_MAX_BYTES,
-      512 * 1024
+      DEFAULT_VM_INCIDENT_MANIFEST_MAX_BYTES
     ),
-    previewMaxBytes: positiveBounded(
+    previewMaxBytes: positiveInteger(
       env.VM_INCIDENT_PREVIEW_MAX_BYTES,
-      DEFAULT_VM_INCIDENT_PREVIEW_MAX_BYTES,
-      512 * 1024
+      DEFAULT_VM_INCIDENT_PREVIEW_MAX_BYTES
     ),
-    maxArtifactsPerNode: positiveBounded(
+    maxArtifactsPerNode: positiveInteger(
       env.VM_INCIDENT_MAX_ARTIFACTS_PER_NODE,
-      DEFAULT_VM_INCIDENT_MAX_ARTIFACTS_PER_NODE,
-      500
+      DEFAULT_VM_INCIDENT_MAX_ARTIFACTS_PER_NODE
     ),
-    maxBytesPerNode: positiveBounded(
+    maxBytesPerNode: positiveInteger(
       env.VM_INCIDENT_MAX_BYTES_PER_NODE,
-      DEFAULT_VM_INCIDENT_MAX_BYTES_PER_NODE,
-      1024 * 1024 * 1024
+      DEFAULT_VM_INCIDENT_MAX_BYTES_PER_NODE
     ),
-    retentionDays: positiveBounded(
+    retentionDays: positiveInteger(
       env.VM_INCIDENT_RETENTION_DAYS,
-      DEFAULT_VM_INCIDENT_RETENTION_DAYS,
-      30
+      DEFAULT_VM_INCIDENT_RETENTION_DAYS
     ),
-    metadataRetentionDays: positiveBounded(
+    metadataRetentionDays: positiveInteger(
       env.VM_INCIDENT_METADATA_RETENTION_DAYS,
-      DEFAULT_VM_INCIDENT_METADATA_RETENTION_DAYS,
-      365
+      DEFAULT_VM_INCIDENT_METADATA_RETENTION_DAYS
     ),
-    pendingTimeoutMinutes: positiveBounded(
+    pendingTimeoutMinutes: positiveInteger(
       env.VM_INCIDENT_PENDING_TIMEOUT_MINUTES,
-      DEFAULT_VM_INCIDENT_PENDING_TIMEOUT_MINUTES,
-      24 * 60
+      DEFAULT_VM_INCIDENT_PENDING_TIMEOUT_MINUTES
     ),
     reconcileBatchSize: Math.max(
       MIN_VM_INCIDENT_RECONCILE_BATCH_SIZE,
-      positiveBounded(
+      positiveInteger(
         env.VM_INCIDENT_RECONCILE_BATCH_SIZE,
-        DEFAULT_VM_INCIDENT_RECONCILE_BATCH_SIZE,
-        200
+        DEFAULT_VM_INCIDENT_RECONCILE_BATCH_SIZE
       )
     ),
   };

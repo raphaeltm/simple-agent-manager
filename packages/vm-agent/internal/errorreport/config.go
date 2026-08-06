@@ -10,6 +10,7 @@ const (
 	DefaultMaxBatchBytes    = 32 * 1024
 	DefaultMaxQueueSize     = 1000
 	DefaultHTTPTimeout      = 10 * time.Second
+	DefaultDBBusyTimeout    = 5 * time.Second
 	DefaultRetryInitial     = time.Second
 	DefaultRetryMax         = 5 * time.Minute
 	DefaultMaxAttempts      = 20
@@ -35,6 +36,7 @@ type Config struct {
 	RetryMax         time.Duration
 	MaxAttempts      int
 	DBPath           string
+	DBBusyTimeout    time.Duration
 	SpoolDir         string
 	ArtifactMaxBytes int64
 	SpoolMaxBytes    int64
@@ -62,6 +64,9 @@ func (c Config) withDefaults() Config {
 	}
 	if c.HTTPTimeout <= 0 {
 		c.HTTPTimeout = DefaultHTTPTimeout
+	}
+	if c.DBBusyTimeout <= 0 {
+		c.DBBusyTimeout = DefaultDBBusyTimeout
 	}
 	if c.RetryInitial <= 0 {
 		c.RetryInitial = DefaultRetryInitial

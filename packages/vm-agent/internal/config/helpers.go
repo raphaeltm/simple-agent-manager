@@ -228,11 +228,9 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	if c.ErrorReportEventLimit != 0 &&
-		(c.ErrorReportEventLimit < 1 || c.ErrorReportEventLimit > MaxErrorReportEventLimit) {
+	if c.ErrorReportEventLimit < 0 {
 		errs = append(errs, fmt.Errorf(
-			"ERROR_REPORT_EVENT_LIMIT must be 1-%d, got %d",
-			MaxErrorReportEventLimit,
+			"ERROR_REPORT_EVENT_LIMIT must be non-negative, got %d",
 			c.ErrorReportEventLimit,
 		))
 	}

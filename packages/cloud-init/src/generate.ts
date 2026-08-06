@@ -241,6 +241,7 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
     ['errorReportHttpTimeout', variables.errorReportHttpTimeout],
     ['errorReportRetryInitial', variables.errorReportRetryInitial],
     ['errorReportRetryMax', variables.errorReportRetryMax],
+    ['errorReportDbBusyTimeout', variables.errorReportDbBusyTimeout],
     ['errorReportRetention', variables.errorReportRetention],
     ['errorReportCollectorTimeout', variables.errorReportCollectorTimeout],
   ] as const) {
@@ -362,6 +363,7 @@ export interface CloudInitVariables {
   errorReportRetryMax?: string;
   errorReportMaxAttempts?: string;
   errorReportDbPath?: string;
+  errorReportDbBusyTimeout?: string;
   errorReportSpoolDir?: string;
   errorReportArtifactMaxBytes?: string;
   errorReportSpoolMaxBytes?: string;
@@ -436,6 +438,7 @@ export function generateCloudInit(
     '{{ error_report_max_attempts }}': variables.errorReportMaxAttempts ?? '20',
     '{{ error_report_db_path }}':
       variables.errorReportDbPath ?? '/var/lib/vm-agent/error-reports.db',
+    '{{ error_report_db_busy_timeout }}': variables.errorReportDbBusyTimeout ?? '5s',
     '{{ error_report_spool_dir }}':
       variables.errorReportSpoolDir ?? '/var/lib/vm-agent/diagnostic-incidents',
     '{{ error_report_artifact_max_bytes }}': variables.errorReportArtifactMaxBytes ?? '2097152',

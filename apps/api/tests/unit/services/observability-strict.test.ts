@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { beforeEach, describe, expect, it } from 'vitest';
 
+import type { Env } from '../../../src/env';
 import { persistErrorBatchStrict } from '../../../src/services/observability-strict';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -71,5 +72,31 @@ describe('strict observability persistence', () => {
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM platform_errors').get()).toEqual({
       count: 0,
     });
+  });
+
+  it('uses operator-configured field limits for persisted diagnostics', async () => {
+    await persistErrorBatchStrict(
+      d1,
+      [
+        {
+          id: '01KZ8V0GMXQ4ZCSERPRT2X2K6S',
+          source: 'vm-agent',
+          level: 'error',
+          message: 'message-too-long',
+          stack: 'stack-too-long',
+          userAgent: 'user-agent-too-long',
+          nodeId: 'node-1',
+        },
+      ],
+      {
+        OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH: '4',
+        OBSERVABILITY_ERROR_STACK_MAX_LENGTH: '5',
+        OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH: '6',
+      } as Env
+    );
+
+    expect(
+      sqlite.prepare('SELECT message, stack, user_agent FROM platform_errors LIMIT 1').get()
+    ).toEqual({ message: 'mess...', stack: 'stack...', user_agent: 'user-a...' });
   });
 });

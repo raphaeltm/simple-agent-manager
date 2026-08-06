@@ -9,13 +9,13 @@ export const DEFAULT_PAGES_PRODUCTION_BRANCH = 'main';
 export const DEFAULT_SESSION_SNAPSHOT_TTL_DAYS = 7;
 export const DEFAULT_DIAGNOSTIC_INCIDENT_PREFIX = 'diagnostic-incidents';
 export const DEFAULT_DIAGNOSTIC_INCIDENT_TTL_DAYS = 7;
-export const MAX_DIAGNOSTIC_INCIDENT_TTL_DAYS = 30;
 export const RESERVED_R2_TOP_LEVEL_PREFIXES = new Set([
   'agents',
   'cli',
   'compose-image-artifacts',
   'session-snapshots',
   'temp-uploads',
+  'tts',
 ]);
 
 export interface ConfigReader {
@@ -64,8 +64,7 @@ export function parseInfraConfig(config: ConfigReader, currentStack: string): In
     diagnosticIncidentTtlDays: parsePositiveInteger(
       optionalNonEmptyConfig(config, 'diagnosticIncidentTtlDays'),
       DEFAULT_DIAGNOSTIC_INCIDENT_TTL_DAYS,
-      'diagnosticIncidentTtlDays',
-      MAX_DIAGNOSTIC_INCIDENT_TTL_DAYS
+      'diagnosticIncidentTtlDays'
     ),
   };
 }

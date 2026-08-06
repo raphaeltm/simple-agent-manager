@@ -163,6 +163,10 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `MAX_CLIENT_ERROR_BODY_BYTES` — Max request body size (default: 65536)
 - `MAX_VM_AGENT_ERROR_BODY_BYTES` — Max VM agent error request body (default: 32768)
 - `MAX_VM_AGENT_ERROR_BATCH_SIZE` — Max VM agent errors per request (default: 10)
+- `MAX_VM_AGENT_ERROR_SOURCE_LENGTH` — Max redacted VM error source length (default: 256)
+- `OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH` — Max persisted observability error message length (default: 2048)
+- `OBSERVABILITY_ERROR_STACK_MAX_LENGTH` — Max persisted observability stack length (default: 4096)
+- `OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH` — Max persisted observability user-agent length (default: 512)
 - `VM_INCIDENT_R2_PREFIX` — Private R2 object-key prefix (default: `diagnostic-incidents`; generated deployments use the Pulumi output)
 - `VM_INCIDENT_ARTIFACT_MAX_BYTES` — Max compressed artifact bytes (default: 2097152)
 - `VM_INCIDENT_REGISTRATION_MAX_BYTES` — Max artifact registration body bytes (default: 262144)
@@ -172,8 +176,8 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `VM_INCIDENT_MAX_BYTES_PER_NODE` — Active expected-byte quota per node (default: 104857600)
 - `VM_INCIDENT_RETENTION_DAYS` — Private object and active metadata retention (default: 7; generated deployments use the Pulumi output)
 - `VM_INCIDENT_METADATA_RETENTION_DAYS` — Expired metadata retention after object deletion (default: 30)
-- `VM_INCIDENT_PENDING_TIMEOUT_MINUTES` — Incomplete upload timeout and upload-lease duration (default: 30; effective lease minimum: 5 minutes)
-- `VM_INCIDENT_RECONCILE_BATCH_SIZE` — Max rows repaired per scheduled pass (default: 50; range: 5–200)
+- `VM_INCIDENT_PENDING_TIMEOUT_MINUTES` — Incomplete upload timeout and upload-lease duration (default: 30)
+- `VM_INCIDENT_RECONCILE_BATCH_SIZE` — Max rows repaired per scheduled pass (default: 50; minimum: 6)
 
 ### Project File Library
 
@@ -268,6 +272,7 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `ERROR_REPORT_RETRY_INITIAL` / `ERROR_REPORT_RETRY_MAX` — Exponential retry bounds (defaults: 1s / 5m)
 - `ERROR_REPORT_MAX_ATTEMPTS` — Retry attempts before a report expires locally (default: 20)
 - `ERROR_REPORT_DB_PATH` — Durable SQLite outbox path (default: next to the VM Agent persistence database)
+- `ERROR_REPORT_DB_BUSY_TIMEOUT` — SQLite outbox contention timeout (default: 5s)
 - `ERROR_REPORT_SPOOL_DIR` — Private evidence spool path (default: `diagnostic-incidents` beside the persistence database)
 - `ERROR_REPORT_ARTIFACT_MAX_BYTES` — Max compressed artifact bytes (default: 2097152)
 - `ERROR_REPORT_SPOOL_MAX_BYTES` — Max local evidence spool bytes (default: 20971520)
