@@ -56,19 +56,24 @@ function createMockDb() {
   return {
     select: vi.fn().mockImplementation((selection?: Record<string, unknown>) => ({
       from: vi.fn().mockImplementation(() => ({
-        where: vi.fn().mockImplementation(() => ({
-          // origin-ca gate: db.select({nodeClass, transport}).from(nodes).where().get()
-          get: vi.fn().mockResolvedValue(
-            selection
-              ? {
-                  nodeClass: (state.node as NodeRow)?.nodeClass,
-                  transport: (state.node as NodeRow)?.transport,
-                }
-              : state.node
-          ),
-          // heartbeat: db.select().from(nodes).where().limit(1)
-          limit: vi.fn().mockResolvedValue([state.node]),
-        })),
+        where: vi.fn().mockImplementation(() => {
+          if (selection && 'userId' in selection) {
+            return Promise.resolve([]);
+          }
+          return {
+            // origin-ca gate: db.select({nodeClass, transport}).from(nodes).where().get()
+            get: vi.fn().mockResolvedValue(
+              selection
+                ? {
+                    nodeClass: (state.node as NodeRow)?.nodeClass,
+                    transport: (state.node as NodeRow)?.transport,
+                  }
+                : state.node
+            ),
+            // heartbeat: db.select().from(nodes).where().limit(1)
+            limit: vi.fn().mockResolvedValue([state.node]),
+          };
+        }),
       })),
     })),
     update: vi.fn().mockImplementation(() => ({
@@ -210,6 +215,23 @@ describe('node-lifecycle BYO gates', () => {
       const res = await appRequest('/api/nodes/node-1/heartbeat', { nodeId: 'node-1' });
       expect(res.status).toBe(200);
       expect((await res.json()).refreshedToken).toBe('REFRESHED-TOKEN');
+    });
+  });
+
+  describe('VM agent build identity persistence', () => {
+    it('stores agentVersion reported by /ready', async () => {
+      const res = await appRequest('/api/nodes/node-1/ready', { agentVersion: 'build-sha-1' });
+      expect(res.status).toBe(200);
+      expect(state.updates).toContainEqual(expect.objectContaining({ agentVersion: 'build-sha-1' }));
+    });
+
+    it('stores agentVersion reported by heartbeat', async () => {
+      const res = await appRequest('/api/nodes/node-1/heartbeat', {
+        nodeId: 'node-1',
+        agentVersion: 'build-sha-2',
+      });
+      expect(res.status).toBe(200);
+      expect(state.updates).toContainEqual(expect.objectContaining({ agentVersion: 'build-sha-2' }));
     });
   });
 
