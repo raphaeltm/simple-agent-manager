@@ -82,6 +82,22 @@ Credential rotation endpoints (OAuth refresh, key rotation) MUST have:
 
 4. **Defence-in-depth absent.** The query-layer filter (`WHERE userId = ?`) is one line of defence; the middleware MUST also check `row.userId === userId` post-query. An ORM bug, a refactor typo, or a stub in a test harness must not be able to return the wrong row without tripping an assertion.
 
+5. **A DB mock whose `.where()` ignores its arguments cannot prove a WHERE-clause guard.** When the
+   protection under test IS a query predicate (`AND user_id = ?`, `AND project_id = ?`), a chainable
+   stub like `where: vi.fn(() => chain)` returning canned rows evaluates nothing — the test passes
+   identically with the predicate deleted. This is the query-layer twin of the source-contract ban:
+   it asserts the code was *written*, not that it *filters*.
+
+   Ownership/scoping guards expressed as SQL predicates MUST be tested against a real SQL engine —
+   use `createSqliteD1` + `createSchemaTables` (`apps/api/tests/helpers/sqlite-d1.ts`), which builds
+   the in-memory schema from the drizzle definitions so it cannot drift. Assert on rows read back
+   from the database, not on mock call arguments.
+
+   **Pair every attack case with an owner-path control.** An attack assertion that says "nothing was
+   torn down" is also satisfied by teardown being broken outright, so the same fixture must prove the
+   legitimate owner DOES get the action. Then verify the pair is discriminating by temporarily
+   deleting the guard: the attack case must fail and the control must still pass.
+
 ## Quick Compliance Check
 
 Before merging any PR that touches credential resolution, rotation, or comparison:
@@ -94,6 +110,8 @@ Before merging any PR that touches credential resolution, rotation, or compariso
 - [ ] Rate limit on rotation endpoints uses an atomic primitive (DO storage, DB lock), not KV
 - [ ] At least one test returns a mismatched-user row from the DB stub and asserts the middleware still throws 404 (defence-in-depth)
 - [ ] No source-contract tests on auth middleware
+- [ ] Guards that are SQL predicates are tested against a real SQL engine, not a `.where()`-ignoring mock
+- [ ] Every attack case has an owner-path control, and the pair was verified discriminating by deleting the guard
 
 ## References
 

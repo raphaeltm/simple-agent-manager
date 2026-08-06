@@ -26,7 +26,13 @@ Scope is R1 finding 1 only: switch task lookup semantics for the affected task o
 - [x] Add positive tests for admin/maintainer acting on owner-created tasks across run, delegate, terminal cleanup, and conversation close.
 - [x] Add negative tests for viewer, nonmember, wrong project, cross-user workspace, and cleanup/close safety.
 - [x] Run relevant API quality checks and local reviewer validations.
-- [ ] Open a tightly scoped PR and do not merge it.
+- [x] Open a tightly scoped PR (#1740). Original dispatch said do-not-merge; Raphaël explicitly
+      authorized the merge on 2026-08-06 after the security fix was implemented and re-verified.
+- [x] Close the cross-tenant compute-teardown vulnerability found by adversarial review
+      (`requiredUserId` threaded `/status` → `cleanupTerminalTaskResourcesOrThrow` → `cleanupTaskRun`).
+- [x] Replace the non-discriminating cleanup tests with real-SQLite behavioral tests.
+- [x] Add the `project_id` write predicate to `setTaskStatus` (rule 11 defence in depth).
+- [ ] Staging deploy + cross-tenant E2E verification with two real users.
 
 ## Acceptance Criteria
 
@@ -38,3 +44,75 @@ Scope is R1 finding 1 only: switch task lookup semantics for the affected task o
 - Run uses the caller's cloud credentials, repo access, identity, and compute context.
 - Public API shape, defaults, response formats, and existing owner behavior remain unchanged.
 
+
+## Post-Mortem
+
+### What broke
+
+Two defects, discovered in two successive adversarial review rounds on PR #1740.
+
+**1. Cross-tenant compute teardown (the security bug).** Widening the task lifecycle routes from
+owner-scoped to project-scoped meant any member with `task:write` could cancel a shared task. The
+terminal-cleanup path was not widened *with a matching narrowing of resource scope*: `cleanupTaskRun`
+matched the workspace by `task.workspaceId` alone. So member B cancelling member A's task tore down
+**A's** workspace and node.
+
+**2. Non-discriminating evidence for the fix (the process bug).** The tests written to prove defect 1
+was fixed used a chainable DB mock whose `.where()` ignored its arguments and returned canned rows.
+The "attacker cannot tear down another user's workspace" test hardcoded an empty workspace result, so
+it passed identically with the `requiredUserId` guard deleted. Two reviewers flagged this
+(security-auditor HIGH-1, test-engineer CRITICAL); the PR was parked at `needs-human-review` with the
+findings documented but unaddressed.
+
+### Root cause
+
+Defect 1: authorization and resource-mutation scope were treated as one decision. Widening *who may
+act on the task* silently widened *whose compute gets destroyed*, because the cleanup helper derived
+its target from the task row rather than from the caller.
+
+Defect 2: the guard under test is a **SQL predicate**, but the test harness mocked the query builder.
+A mock that ignores `.where()` cannot evaluate a predicate, so the test could only ever assert "the
+canned result was empty" — never "the filter excluded the row."
+
+### Class of bug
+
+1. **Authorization widening without a corresponding resource-scope narrowing.** Covered by
+   `.claude/rules/51-server-side-node-class-gates.md` (server decides from values it verified) and
+   rule 11 (project-scoped write requirements).
+2. **A test that cannot fail for the reason it claims to test.** Rule 02 bans source-contract tests
+   (`readFileSync` + `toContain`) and rule 28 bans tautological IDOR tests, but neither covered the
+   query-layer twin: a `.where()`-ignoring DB mock asserting a WHERE-clause ownership guard. Green
+   tests actively concealed that the fix was unproven.
+
+### Why it wasn't caught earlier
+
+The mock-based tests were green and numerous, and the runtime fix *was* correct — so the suite looked
+like adequate evidence. Only an adversarial reviewer specifically asking "would this test fail if the
+guard were removed?" surfaced it. Nothing in CI can detect a tautological assertion.
+
+### Process fix (in this PR)
+
+- `.claude/rules/28-credential-resolution-fallback-tests.md` — new prohibited pattern #5: a DB mock
+  whose `.where()` ignores its arguments cannot prove a WHERE-clause guard. Ownership guards
+  expressed as SQL predicates must be tested against a real SQL engine, every attack case must be
+  paired with an owner-path control, and the pair must be verified discriminating by deleting the
+  guard. Two new items added to that rule's Quick Compliance Check.
+- `apps/api/tests/helpers/sqlite-d1.ts` — `createSchemaTables` / `createAllSchemaTables` build the
+  in-memory test schema from the drizzle schema itself, so real-SQLite tests are cheap to write and
+  the test DB cannot drift from the columns production queries select.
+
+### Verification that the new tests are discriminating
+
+Both guards were temporarily deleted and the suites re-run:
+
+- Removing the `requiredUserId` workspace filter from `cleanupTaskRun` → both ATTACK cases fail
+  (attacker tears down victim's workspace; row flips to `stopped`), all 3 CONTROL cases still pass.
+- Removing the `project_id` predicate from `setTaskStatus`'s UPDATE → the wrong-project write test
+  fails, its matching-project control still passes.
+
+### Design note: cancelled-by-another-member compute is not stranded
+
+Caller-scoped cleanup means B cancelling A's task leaves A's compute running. That is reclaimed by
+the node-cleanup cron, whose candidate queries match terminal tasks
+(`apps/api/src/scheduled/node-cleanup.ts:180` cf-container terminal-task sweep, `:463` orphan
+detection). The alternative — letting B tear down A's compute — is the vulnerability itself.
