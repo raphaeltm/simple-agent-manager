@@ -295,7 +295,8 @@ describe('recoverStuckTasks', () => {
               }),
             }),
           }),
-        })
+        }),
+        env
       );
     });
 

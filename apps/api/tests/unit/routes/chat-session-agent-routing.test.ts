@@ -504,6 +504,7 @@ describe('chatRoutes agent session routing', () => {
           errorMessage: 'Durable Object reset because its code was updated.',
         }),
       }),
+      expect.anything()
     );
   });
 
