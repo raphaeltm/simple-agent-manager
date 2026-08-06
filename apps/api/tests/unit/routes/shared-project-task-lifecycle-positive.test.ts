@@ -32,6 +32,10 @@ const mocks = vi.hoisted(() => ({
   cleanupTaskRun: vi.fn(),
   cleanupTerminalTaskResourcesOrThrow: vi.fn(),
   recordActivityEvent: vi.fn(),
+  startTaskRunnerDO: vi.fn(),
+  requireRepositoryUserAccess: vi.fn(),
+  createSession: vi.fn(),
+  cleanupWorkspaceForDeletion: vi.fn(),
 }));
 
 // The caller is MEMBER: a project member with task:write who did NOT create the task.
@@ -52,9 +56,19 @@ vi.mock('../../../src/services/task-terminal-cleanup', () => ({
 }));
 vi.mock('../../../src/services/project-data', () => ({
   recordActivityEvent: mocks.recordActivityEvent,
-  createSession: vi.fn(),
+  createSession: mocks.createSession,
   stopSession: vi.fn(),
   failSession: vi.fn(),
+}));
+vi.mock('../../../src/services/task-runner-do', () => ({
+  startTaskRunnerDO: mocks.startTaskRunnerDO,
+}));
+vi.mock('../../../src/services/workspace-cleanup', () => ({
+  cleanupWorkspaceForDeletion: (...args: unknown[]) => mocks.cleanupWorkspaceForDeletion(...args),
+}));
+vi.mock('../../../src/routes/projects/_helpers', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/routes/projects/_helpers')>()),
+  requireRepositoryUserAccess: mocks.requireRepositoryUserAccess,
 }));
 
 import { setTaskStatus } from '../../../src/routes/tasks/_helpers';
@@ -109,6 +123,10 @@ beforeEach(() => {
   mocks.cleanupTaskRun.mockResolvedValue(undefined);
   mocks.cleanupTerminalTaskResourcesOrThrow.mockResolvedValue(undefined);
   mocks.recordActivityEvent.mockResolvedValue(undefined);
+  mocks.startTaskRunnerDO.mockResolvedValue(undefined);
+  mocks.requireRepositoryUserAccess.mockResolvedValue(undefined);
+  mocks.createSession.mockResolvedValue('session-1');
+  mocks.cleanupWorkspaceForDeletion.mockResolvedValue(undefined);
 
   sqlite = new Database(':memory:');
   createAllSchemaTables(sqlite, schema);
@@ -118,6 +136,58 @@ beforeEach(() => {
 afterEach(() => sqlite.close());
 
 describe('shared-project task lifecycle — positive paths for a non-creator member', () => {
+  it('POST /:taskId/run: a member can run another member task, under their OWN identity', async () => {
+    // This is the route the PR exists to widen, and the most consequential one — it provisions
+    // real infrastructure. The compute must be attributed to the caller (MEMBER), never the task
+    // creator, because everything downstream (credentials, repo access, node ownership, and the
+    // cleanup identity in cleanupTaskRun) keys off whoever actually ran it.
+    await db()
+      .insert(schema.projects)
+      .values({
+        id: PROJECT,
+        userId: CREATOR,
+        name: 'Shared project',
+        repository: 'org/repo',
+        installationId: 'inst-1',
+        defaultBranch: 'main',
+      } as typeof schema.projects.$inferInsert);
+    // The cloud-provider credential gate is caller-scoped (`credentials.userId = caller`), so the
+    // MEMBER running the task must have their own — the task creator's would not do.
+    await db()
+      .insert(schema.credentials)
+      .values({
+        id: 'cred-member',
+        userId: MEMBER,
+        credentialType: 'cloud-provider',
+        provider: 'hetzner',
+        name: 'member hetzner',
+      } as typeof schema.credentials.$inferInsert);
+    await seedTask({ status: 'ready' });
+
+    const response = await makeApp(runRoutes).fetch(
+      new Request(`https://api.test/api/projects/${PROJECT}/tasks/task-1/run`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      }),
+      env,
+      mockCtx
+    );
+
+    expect(response.status).toBe(202);
+    expect(mocks.startTaskRunnerDO).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ taskId: 'task-1', projectId: PROJECT, userId: MEMBER })
+    );
+    // Repo access is re-verified for the CALLER, not the task creator.
+    expect(mocks.requireRepositoryUserAccess).toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), MEMBER
+    );
+    expect(mocks.startTaskRunnerDO).not.toHaveBeenCalledWith(
+      expect.anything(), expect.objectContaining({ userId: CREATOR })
+    );
+  });
+
   it('POST /:taskId/status: a member can cancel another member task and the row is persisted', async () => {
     await seedTask({ status: 'in_progress' });
 
@@ -193,6 +263,57 @@ describe('shared-project task lifecycle — positive paths for a non-creator mem
 
     expect(response.status).toBe(200);
     expect((await readTask())?.status).toBe('completed');
+  });
+});
+
+describe('POST /:taskId/close — workspace teardown stays caller-scoped (real SQLite)', () => {
+  /** Seed a conversation task whose workspace belongs to `owner`. */
+  async function seedConversationWithWorkspace(owner: string) {
+    await db()
+      .insert(schema.workspaces)
+      .values({
+        id: 'ws-conv',
+        projectId: PROJECT,
+        userId: owner,
+        nodeId: 'node-conv',
+        name: 'conv-ws',
+        repository: 'org/repo',
+        vmSize: 'small',
+        vmLocation: 'nbg1',
+        status: 'running',
+      } as typeof schema.workspaces.$inferInsert);
+    await seedTask({ status: 'in_progress', taskMode: 'conversation', workspaceId: 'ws-conv' });
+  }
+
+  async function close() {
+    return makeApp(crudRoutes).fetch(
+      new Request(`https://api.test/api/projects/${PROJECT}/tasks/task-1/close`, { method: 'POST' }),
+      env,
+      mockCtx
+    );
+  }
+
+  it('ATTACK: closing a task whose workspace belongs to another member tears down nothing', async () => {
+    await seedConversationWithWorkspace(CREATOR); // caller is MEMBER
+
+    const response = await close();
+
+    // The lifecycle transition is project-authorized and still succeeds...
+    expect(response.status).toBe(200);
+    expect((await readTask())?.status).toBe('completed');
+    // ...but the other member's compute must not be touched.
+    expect(mocks.cleanupWorkspaceForDeletion).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: closing a task whose workspace the caller owns DOES tear it down', async () => {
+    await seedConversationWithWorkspace(MEMBER);
+
+    const response = await close();
+
+    expect(response.status).toBe(200);
+    expect(mocks.cleanupWorkspaceForDeletion).toHaveBeenCalledWith(
+      expect.objectContaining({ workspace: expect.objectContaining({ id: 'ws-conv' }), userId: MEMBER })
+    );
   });
 });
 

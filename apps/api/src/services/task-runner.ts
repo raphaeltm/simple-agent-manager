@@ -92,7 +92,15 @@ export async function cleanupTaskRun(
     return;
   }
 
-  const cleanupUserId = requiredUserId ?? task.userId;
+  // Fall back to the WORKSPACE owner, not the task creator. Now that task lifecycle routes are
+  // project-scoped, a member can run or be delegated another member's task, so the workspace/node
+  // belong to the runner while `task.userId` stays the original creator. Internal callers (VM-agent
+  // status callback, TaskRunner DO, stuck-task cron) pass no requiredUserId; using the creator there
+  // makes the node lookup below miss, which silently misclassifies a cf-container as a VM and leaves
+  // the container running while D1 records the workspace as stopped.
+  // When requiredUserId IS supplied, the workspace WHERE clause above already guarantees
+  // workspace.userId === requiredUserId, so this is a no-op for the caller-scoped paths.
+  const cleanupUserId = requiredUserId ?? workspace.userId;
 
   log.info('task_run.cleanup.started', { taskId, workspaceId: task.workspaceId, nodeId: workspace.nodeId });
 

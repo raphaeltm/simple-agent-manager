@@ -405,7 +405,10 @@ crudRoutes.delete('/:taskId', requireAuth(), requireApproved(), async (c) => {
     throw errors.conflict('Cannot delete task while other tasks depend on it');
   }
 
-  await db.delete(schema.tasks).where(eq(schema.tasks.id, task.id));
+  // project_id is defence-in-depth (rule 11), matching the other mutations in this file.
+  await db
+    .delete(schema.tasks)
+    .where(and(eq(schema.tasks.id, task.id), eq(schema.tasks.projectId, projectId)));
 
   return c.json({ success: true });
 });
@@ -729,6 +732,12 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
 
   // Immediately clean up the linked workspace so Archive has the same
   // user-visible lifecycle semantics as Complete & Delete.
+  //
+  // The workspace lookup is deliberately caller-scoped, mirroring cleanupTaskRun's
+  // requiredUserId guard: closing a shared conversation task is project-authorized, but
+  // destroying the workspace it ran on is not — a member must never delete another
+  // member's compute by archiving their conversation. When the caller does not own the
+  // workspace we skip and log, leaving teardown to the node-cleanup sweep.
   if (task.workspaceId) {
     const [workspace] = await db
       .select()
@@ -748,6 +757,14 @@ crudRoutes.post('/:taskId/close', requireAuth(), requireApproved(), async (c) =>
         userId,
         waitUntil: (promise) => c.executionCtx.waitUntil(promise),
         logContext: { taskId, projectId, closePath: 'conversation' },
+      });
+    } else {
+      log.info('task.close.workspace_cleanup_skipped_owner_mismatch', {
+        taskId,
+        projectId,
+        workspaceId: task.workspaceId,
+        requiredUserId: userId,
+        action: 'skipped',
       });
     }
   }

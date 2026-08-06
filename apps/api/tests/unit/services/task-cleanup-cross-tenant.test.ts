@@ -48,6 +48,8 @@ import { cleanupTaskRun } from '../../../src/services/task-runner';
 
 const VICTIM = 'user-victim';
 const ATTACKER = 'user-attacker';
+const CREATOR = 'user-creator';
+const RUNNER = 'user-runner';
 const PROJECT = 'project-shared';
 
 let sqlite: Database.Database;
@@ -90,12 +92,50 @@ async function seedVictimTaskRun(runtime: 'vm' | 'cf-container'): Promise<void> 
   } as typeof schema.tasks.$inferInsert);
 }
 
-async function readWorkspaceStatus(): Promise<string | undefined> {
+/**
+ * Seed the divergent-owner fixture this PR newly makes reachable: CREATOR created the task, but
+ * RUNNER executed it (project-scoped `/run` or `/delegate`), so the workspace and node belong to
+ * RUNNER while `task.userId` still says CREATOR. Before this PR `/run` required task ownership, so
+ * this state was structurally impossible.
+ */
+async function seedDivergentOwnerTaskRun(runtime: 'vm' | 'cf-container'): Promise<void> {
+  const db = drizzle(env.DATABASE, { schema });
+  await db.insert(schema.nodes).values({
+    id: 'node-runner',
+    userId: RUNNER,
+    name: 'runner-node',
+    status: 'running',
+    runtime,
+    warmSince: null,
+  } as typeof schema.nodes.$inferInsert);
+  await db.insert(schema.workspaces).values({
+    id: 'ws-runner',
+    nodeId: 'node-runner',
+    projectId: PROJECT,
+    userId: RUNNER,
+    name: 'runner-ws',
+    repository: 'org/repo',
+    vmSize: 'small',
+    vmLocation: 'nbg1',
+    status: 'running',
+  } as typeof schema.workspaces.$inferInsert);
+  await db.insert(schema.tasks).values({
+    id: 'task-divergent',
+    projectId: PROJECT,
+    userId: CREATOR,
+    workspaceId: 'ws-runner',
+    autoProvisionedNodeId: 'node-runner',
+    title: 'Task created by one member, run by another',
+    status: 'in_progress',
+  } as typeof schema.tasks.$inferInsert);
+}
+
+async function readWorkspaceStatus(workspaceId = 'ws-victim'): Promise<string | undefined> {
   const db = drizzle(env.DATABASE, { schema });
   const [row] = await db
     .select({ status: schema.workspaces.status })
     .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, 'ws-victim'))
+    .where(eq(schema.workspaces.id, workspaceId))
     .limit(1);
   return row?.status;
 }
@@ -188,5 +228,56 @@ describe('cleanupTaskRun — cross-tenant compute teardown (real SQLite)', () =>
       'task_run.cleanup.skipped_owner_mismatch',
       expect.anything()
     );
+  });
+});
+
+/**
+ * Regression for the divergence this PR newly makes reachable. Project-scoped `/run` and `/delegate`
+ * let member B execute member A's task, so `workspace.userId` (B) and `task.userId` (A) legitimately
+ * differ — impossible before this PR, when `/run` required task ownership.
+ *
+ * Internal callers pass no `requiredUserId`, so the fallback identity decides which node row the
+ * runtime lookup finds. Falling back to `task.userId` misses the node entirely, which makes
+ * `node?.runtime === 'cf-container'` read false for a node that IS a container: the code takes the
+ * VM branch, marks the workspace stopped in D1, and leaves the container running and billing.
+ */
+describe('cleanupTaskRun — task creator differs from workspace owner (real SQLite)', () => {
+  it('destroys a cf-container node when the internal caller omits requiredUserId', async () => {
+    await seedDivergentOwnerTaskRun('cf-container');
+
+    // Exactly how routes/tasks/callback.ts (the normal VM-agent completion path) calls it.
+    await cleanupTaskRun('task-divergent', env);
+
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-runner', RUNNER, env);
+    // The cf-container branch returns early — it must NOT fall through to the VM stop path.
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(await readWorkspaceStatus('ws-runner')).toBe('running');
+  });
+
+  it('uses the workspace owner for VM teardown when the internal caller omits requiredUserId', async () => {
+    await seedDivergentOwnerTaskRun('vm');
+
+    await cleanupTaskRun('task-divergent', env);
+
+    expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledWith('node-runner', 'ws-runner', env, RUNNER);
+    expect(mocks.markIdle).toHaveBeenCalledWith(env, 'node-runner', RUNNER, undefined);
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('ws-runner', RUNNER);
+    // The task creator must never be used as the compute identity.
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), expect.anything(), CREATOR
+    );
+    expect(mocks.markIdle).not.toHaveBeenCalledWith(
+      expect.anything(), expect.anything(), CREATOR, expect.anything()
+    );
+  });
+
+  it('still refuses teardown when a third member supplies requiredUserId (guard unaffected)', async () => {
+    await seedDivergentOwnerTaskRun('cf-container');
+
+    await cleanupTaskRun('task-divergent', env, undefined, ATTACKER);
+
+    expect(mocks.stopNodeResources).not.toHaveBeenCalled();
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(await readWorkspaceStatus('ws-runner')).toBe('running');
   });
 });
