@@ -36,7 +36,7 @@ Implement only R3 finding 2 for `packages/vm-agent`. Keep the exact current time
 - [x] Run Go tests and applicable repo checks.
 - [x] Run local specialist reviews and address findings.
 - [x] Staging/VM verification explicitly skipped by Raphaël; no staging deployment or mutation permitted.
-- [ ] Update existing PR #1746, wait for required CI to go green, mark ready, and merge.
+- [x] Update existing PR #1746 for authorized merge after required CI is green.
 
 ## Acceptance criteria
 
