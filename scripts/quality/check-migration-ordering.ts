@@ -20,7 +20,23 @@ const DEFAULT_MIGRATION_DIRS = [
 const LEGACY_ALLOWED_DUPLICATE_PREFIXES = new Map<string, Set<string>>([
   [
     'apps/api/src/db/migrations',
-    new Set(['0002', '0013', '0016', '0024', '0029', '0036', '0037', '0042', '0052', '0069']),
+    // 0105/0106 each contain a draft migration that was already applied to staging
+    // before current-main migrations claimed the same numeric prefixes. Wrangler
+    // tracks exact filenames, so renaming those applied files would replay them.
+    new Set([
+      '0002',
+      '0013',
+      '0016',
+      '0024',
+      '0029',
+      '0036',
+      '0037',
+      '0042',
+      '0052',
+      '0069',
+      '0105',
+      '0106',
+    ]),
   ],
 ]);
 
