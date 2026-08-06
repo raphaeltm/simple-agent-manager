@@ -265,6 +265,7 @@ func (c *Config) Validate() error {
 		{"LOG_STREAM_PING_WRITE_TIMEOUT", c.LogStreamPingWriteTimeout},
 		{"DEVCONTAINER_CACHE_PUSH_TIMEOUT", c.DevcontainerCachePushTimeout},
 		{"ACP_CREDENTIAL_SYNC_TIMEOUT", c.ACPCredentialSyncTimeout},
+		{"ACP_ACTIVITY_REPORT_TIMEOUT", c.ACPActivityReportTimeout},
 		{"JWKS_FETCH_TIMEOUT", c.JWKSFetchTimeout},
 	}
 	for _, timeout := range requiredTimeouts {

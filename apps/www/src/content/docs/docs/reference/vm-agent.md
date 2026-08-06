@@ -180,6 +180,7 @@ Environment variables set by the cloud-init template:
 | `MCP_BUILD_PREPARE_TIMEOUT` | `30s` | Timeout for MCP build/publish preparation probes |
 | `JWKS_FETCH_TIMEOUT` | `10s` | Timeout for VM-agent startup JWKS fetches |
 | `ACP_CREDENTIAL_SYNC_TIMEOUT` | `10s` | Timeout for ACP auth-file sync-back during shutdown |
+| `ACP_ACTIVITY_REPORT_TIMEOUT` | `10s` | Timeout for each ACP activity callback attempt |
 | `DEVCONTAINER_CACHE_PUSH_TIMEOUT` | `10m` | Timeout for best-effort devcontainer cache image pushes |
 | `DEPLOY_PREFLIGHT_COMMAND_TIMEOUT` | `15s` | Timeout for deployment preflight diagnostic commands |
 | `LOG_STREAM_PING_WRITE_TIMEOUT` | `10s` | Write deadline for log-stream WebSocket ping frames |

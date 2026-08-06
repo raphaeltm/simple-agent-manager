@@ -35,6 +35,11 @@ const (
 	// Override via ACP_CREDENTIAL_SYNC_TIMEOUT.
 	DefaultACPCredentialSyncTimeout = 10 * time.Second
 
+	// DefaultACPActivityReportTimeout preserves the per-attempt activity callback
+	// timeout used before it became configurable. Override via
+	// ACP_ACTIVITY_REPORT_TIMEOUT.
+	DefaultACPActivityReportTimeout = 10 * time.Second
+
 	// DefaultDevcontainerCachePushTimeout bounds best-effort devcontainer cache pushes.
 	// Override via DEVCONTAINER_CACHE_PUSH_TIMEOUT.
 	DefaultDevcontainerCachePushTimeout = 10 * time.Minute
@@ -50,4 +55,8 @@ const (
 	// DefaultLogStreamPingWriteTimeout bounds log-stream WebSocket ping writes.
 	// Override via LOG_STREAM_PING_WRITE_TIMEOUT.
 	DefaultLogStreamPingWriteTimeout = 10 * time.Second
+
+	// DefaultWorkspaceReadyCallbackTimeout preserves the workspace-ready retry
+	// request timeout used before it was threaded through Config.
+	DefaultWorkspaceReadyCallbackTimeout = 30 * time.Second
 )

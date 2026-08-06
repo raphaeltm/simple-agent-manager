@@ -252,21 +252,20 @@ func TestOperationalTimeoutDefaults(t *testing.T) {
 		got  time.Duration
 		want time.Duration
 	}{
-		{"GracefulShutdownTimeout", cfg.GracefulShutdownTimeout, DefaultGracefulShutdownTimeout},
-		{"SystemProvisioningTimeout", cfg.SystemProvisioningTimeout, DefaultSystemProvisioningTimeout},
-		{"CFIPFetchTimeout", cfg.CFIPFetchTimeout, DefaultCFIPFetchTimeout},
-		{"BootLogHTTPTimeout", cfg.BootLogHTTPTimeout, DefaultBootLogHTTPTimeout},
-		{"MCPShortCommandTimeout", cfg.MCPShortCommandTimeout, DefaultMCPShortCommandTimeout},
-		{"MCPDiffCommandTimeout", cfg.MCPDiffCommandTimeout, DefaultMCPDiffCommandTimeout},
-		{"MCPBuildPrepareTimeout", cfg.MCPBuildPrepareTimeout, DefaultMCPBuildPrepareTimeout},
-		{"JWKSFetchTimeout", cfg.JWKSFetchTimeout, DefaultJWKSFetchTimeout},
-		{"ACPCredentialSyncTimeout", cfg.ACPCredentialSyncTimeout, DefaultACPCredentialSyncTimeout},
-		{"DevcontainerCachePushTimeout", cfg.DevcontainerCachePushTimeout, DefaultDevcontainerCachePushTimeout},
-		{"DeployPreflightCommandTimeout", cfg.DeployPreflightCommandTimeout, DefaultDeployPreflightCommandTimeout},
-		{"LogStreamPingWriteTimeout", cfg.LogStreamPingWriteTimeout, DefaultLogStreamPingWriteTimeout},
-		{"TerminalWSReadTimeout", cfg.TerminalWSReadTimeout, DefaultTerminalWSReadTimeout},
-		{"TerminalWSPingInterval", cfg.TerminalWSPingInterval, DefaultTerminalWSPingInterval},
-		{"PTYCloseGracePeriod", cfg.PTYCloseGracePeriod, 250 * time.Millisecond},
+		{"GracefulShutdownTimeout", cfg.GracefulShutdownTimeout, 30 * time.Second},
+		{"SystemProvisioningTimeout", cfg.SystemProvisioningTimeout, 15 * time.Minute},
+		{"CFIPFetchTimeout", cfg.CFIPFetchTimeout, 10 * time.Second},
+		{"BootLogHTTPTimeout", cfg.BootLogHTTPTimeout, 10 * time.Second},
+		{"MCPShortCommandTimeout", cfg.MCPShortCommandTimeout, 10 * time.Second},
+		{"MCPDiffCommandTimeout", cfg.MCPDiffCommandTimeout, 30 * time.Second},
+		{"MCPBuildPrepareTimeout", cfg.MCPBuildPrepareTimeout, 30 * time.Second},
+		{"JWKSFetchTimeout", cfg.JWKSFetchTimeout, 10 * time.Second},
+		{"ACPCredentialSyncTimeout", cfg.ACPCredentialSyncTimeout, 10 * time.Second},
+		{"ACPActivityReportTimeout", cfg.ACPActivityReportTimeout, 10 * time.Second},
+		{"DevcontainerCachePushTimeout", cfg.DevcontainerCachePushTimeout, 10 * time.Minute},
+		{"DeployPreflightCommandTimeout", cfg.DeployPreflightCommandTimeout, 15 * time.Second},
+		{"LogStreamPingWriteTimeout", cfg.LogStreamPingWriteTimeout, 10 * time.Second},
+		{"WorkspaceReadyCallbackTimeout", cfg.WorkspaceReadyCallbackTimeout, 30 * time.Second},
 	}
 	for _, check := range checks {
 		if check.got != check.want {
@@ -287,6 +286,8 @@ func TestOperationalTimeoutOverrides(t *testing.T) {
 	t.Setenv("MCP_BUILD_PREPARE_TIMEOUT", "40s")
 	t.Setenv("JWKS_FETCH_TIMEOUT", "14s")
 	t.Setenv("ACP_CREDENTIAL_SYNC_TIMEOUT", "16s")
+	t.Setenv("ACP_ACTIVITY_REPORT_TIMEOUT", "17s")
+	t.Setenv("WORKSPACE_READY_CALLBACK_TIMEOUT", "33s")
 	t.Setenv("DEVCONTAINER_CACHE_PUSH_TIMEOUT", "11m")
 	t.Setenv("DEPLOY_PREFLIGHT_COMMAND_TIMEOUT", "18s")
 	t.Setenv("LOG_STREAM_PING_WRITE_TIMEOUT", "19s")
@@ -310,6 +311,8 @@ func TestOperationalTimeoutOverrides(t *testing.T) {
 		{"MCPBuildPrepareTimeout", cfg.MCPBuildPrepareTimeout, 40 * time.Second},
 		{"JWKSFetchTimeout", cfg.JWKSFetchTimeout, 14 * time.Second},
 		{"ACPCredentialSyncTimeout", cfg.ACPCredentialSyncTimeout, 16 * time.Second},
+		{"ACPActivityReportTimeout", cfg.ACPActivityReportTimeout, 17 * time.Second},
+		{"WorkspaceReadyCallbackTimeout", cfg.WorkspaceReadyCallbackTimeout, 33 * time.Second},
 		{"DevcontainerCachePushTimeout", cfg.DevcontainerCachePushTimeout, 11 * time.Minute},
 		{"DeployPreflightCommandTimeout", cfg.DeployPreflightCommandTimeout, 18 * time.Second},
 		{"LogStreamPingWriteTimeout", cfg.LogStreamPingWriteTimeout, 19 * time.Second},
@@ -325,7 +328,17 @@ func TestInvalidOperationalTimeoutParseFallsBackAndRedactsValue(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("WORKSPACE_ID", "ws-123")
 	canary := "sk-test-secret-timeout-canary"
-	t.Setenv("MCP_SHORT_COMMAND_TIMEOUT", canary)
+	envKeys := []string{
+		"GRACEFUL_SHUTDOWN_TIMEOUT", "SYSTEM_PROVISIONING_TIMEOUT", "CF_IP_FETCH_TIMEOUT",
+		"BOOT_LOG_HTTP_TIMEOUT", "MCP_SHORT_COMMAND_TIMEOUT", "MCP_DIFF_COMMAND_TIMEOUT",
+		"MCP_BUILD_PREPARE_TIMEOUT", "JWKS_FETCH_TIMEOUT", "ACP_CREDENTIAL_SYNC_TIMEOUT",
+		"ACP_ACTIVITY_REPORT_TIMEOUT", "DEVCONTAINER_CACHE_PUSH_TIMEOUT",
+		"DEPLOY_PREFLIGHT_COMMAND_TIMEOUT", "LOG_STREAM_PING_WRITE_TIMEOUT",
+		"WORKSPACE_READY_CALLBACK_TIMEOUT",
+	}
+	for _, key := range envKeys {
+		t.Setenv(key, canary)
+	}
 
 	var logs bytes.Buffer
 	previous := slog.Default()
@@ -336,14 +349,37 @@ func TestInvalidOperationalTimeoutParseFallsBackAndRedactsValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	if cfg.MCPShortCommandTimeout != DefaultMCPShortCommandTimeout {
-		t.Fatalf("MCPShortCommandTimeout=%v, want default %v", cfg.MCPShortCommandTimeout, DefaultMCPShortCommandTimeout)
+	checks := []struct {
+		name      string
+		got, want time.Duration
+	}{
+		{"GracefulShutdownTimeout", cfg.GracefulShutdownTimeout, 30 * time.Second},
+		{"SystemProvisioningTimeout", cfg.SystemProvisioningTimeout, 15 * time.Minute},
+		{"CFIPFetchTimeout", cfg.CFIPFetchTimeout, 10 * time.Second},
+		{"BootLogHTTPTimeout", cfg.BootLogHTTPTimeout, 10 * time.Second},
+		{"MCPShortCommandTimeout", cfg.MCPShortCommandTimeout, 10 * time.Second},
+		{"MCPDiffCommandTimeout", cfg.MCPDiffCommandTimeout, 30 * time.Second},
+		{"MCPBuildPrepareTimeout", cfg.MCPBuildPrepareTimeout, 30 * time.Second},
+		{"JWKSFetchTimeout", cfg.JWKSFetchTimeout, 10 * time.Second},
+		{"ACPCredentialSyncTimeout", cfg.ACPCredentialSyncTimeout, 10 * time.Second},
+		{"ACPActivityReportTimeout", cfg.ACPActivityReportTimeout, 10 * time.Second},
+		{"DevcontainerCachePushTimeout", cfg.DevcontainerCachePushTimeout, 10 * time.Minute},
+		{"DeployPreflightCommandTimeout", cfg.DeployPreflightCommandTimeout, 15 * time.Second},
+		{"LogStreamPingWriteTimeout", cfg.LogStreamPingWriteTimeout, 10 * time.Second},
+		{"WorkspaceReadyCallbackTimeout", cfg.WorkspaceReadyCallbackTimeout, 30 * time.Second},
+	}
+	for _, check := range checks {
+		if check.got != check.want {
+			t.Errorf("%s=%v, want fallback %v", check.name, check.got, check.want)
+		}
 	}
 	if strings.Contains(logs.String(), canary) {
 		t.Fatalf("parse warning leaked env value: %s", logs.String())
 	}
-	if !strings.Contains(logs.String(), "MCP_SHORT_COMMAND_TIMEOUT") {
-		t.Fatalf("parse warning omitted env key: %s", logs.String())
+	for _, key := range envKeys {
+		if !strings.Contains(logs.String(), key) {
+			t.Errorf("parse warning omitted env key %s: %s", key, logs.String())
+		}
 	}
 }
 
@@ -756,6 +792,8 @@ func validConfig() *Config {
 		MCPBuildPrepareTimeout:        DefaultMCPBuildPrepareTimeout,
 		JWKSFetchTimeout:              DefaultJWKSFetchTimeout,
 		ACPCredentialSyncTimeout:      DefaultACPCredentialSyncTimeout,
+		ACPActivityReportTimeout:      DefaultACPActivityReportTimeout,
+		WorkspaceReadyCallbackTimeout: DefaultWorkspaceReadyCallbackTimeout,
 		DevcontainerCachePushTimeout:  DefaultDevcontainerCachePushTimeout,
 		DeployPreflightCommandTimeout: DefaultDeployPreflightCommandTimeout,
 		LogStreamPingWriteTimeout:     DefaultLogStreamPingWriteTimeout,
@@ -791,6 +829,7 @@ func TestValidateOperationalTimeouts(t *testing.T) {
 		{"mcp build prepare", func(cfg *Config) { cfg.MCPBuildPrepareTimeout = 0 }, "MCP_BUILD_PREPARE_TIMEOUT"},
 		{"jwks fetch", func(cfg *Config) { cfg.JWKSFetchTimeout = 0 }, "JWKS_FETCH_TIMEOUT"},
 		{"credential sync", func(cfg *Config) { cfg.ACPCredentialSyncTimeout = 0 }, "ACP_CREDENTIAL_SYNC_TIMEOUT"},
+		{"activity report", func(cfg *Config) { cfg.ACPActivityReportTimeout = 0 }, "ACP_ACTIVITY_REPORT_TIMEOUT"},
 		{"cache push", func(cfg *Config) { cfg.DevcontainerCachePushTimeout = 0 }, "DEVCONTAINER_CACHE_PUSH_TIMEOUT"},
 		{"deploy preflight", func(cfg *Config) { cfg.DeployPreflightCommandTimeout = 0 }, "DEPLOY_PREFLIGHT_COMMAND_TIMEOUT"},
 		{"log stream ping write", func(cfg *Config) { cfg.LogStreamPingWriteTimeout = 0 }, "LOG_STREAM_PING_WRITE_TIMEOUT"},

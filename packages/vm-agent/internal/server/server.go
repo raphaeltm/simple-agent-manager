@@ -391,7 +391,7 @@ func New(cfg *config.Config) (*Server, error) {
 		ActivityRereportInterval:       cfg.ACPActivityRereportInterval,
 		TerminalActivityReportAttempts: cfg.ACPTerminalActivityReportAttempts,
 		TerminalActivityReportBackoff:  cfg.ACPTerminalActivityReportBackoff,
-		ActivityReportTimeout:          cfg.HTTPCallbackTimeout,
+		ActivityReportTimeout:          cfg.ACPActivityReportTimeout,
 		CredentialSyncTimeout:          cfg.ACPCredentialSyncTimeout,
 		RecoveryWatchdogTimeout:        cfg.ACPRecoveryWatchdog,
 		RestartDecayWindow:             cfg.ACPRestartDecayWindow,

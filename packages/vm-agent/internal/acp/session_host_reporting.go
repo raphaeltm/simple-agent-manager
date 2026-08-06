@@ -270,7 +270,7 @@ func (h *SessionHost) activityReportRetryPolicy(activity string) (int, time.Dura
 func (h *SessionHost) activityReportTimeout() time.Duration {
 	timeout := h.config.ActivityReportTimeout
 	if timeout <= 0 {
-		timeout = defaultControlPlaneHTTPTimeout
+		timeout = 10 * time.Second
 	}
 	return timeout
 }

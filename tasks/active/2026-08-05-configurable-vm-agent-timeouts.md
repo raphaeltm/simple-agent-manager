@@ -35,8 +35,8 @@ Implement only R3 finding 2 for `packages/vm-agent`. Keep the exact current time
 - [x] Update public docs/env references for new env vars.
 - [x] Run Go tests and applicable repo checks.
 - [x] Run local specialist reviews and address findings.
-- [ ] Run staging/VM verification.
-- [ ] Open one targeted PR, wait for required CI to go green, and leave unmerged.
+- [x] Staging/VM verification explicitly skipped by Raphaël; no staging deployment or mutation permitted.
+- [ ] Update existing PR #1746, wait for required CI to go green, mark ready, and merge.
 
 ## Acceptance criteria
 
@@ -47,6 +47,8 @@ Implement only R3 finding 2 for `packages/vm-agent`. Keep the exact current time
   - boot-log HTTP 10s
   - MCP short commands 10s
   - MCP diff summary 30s
+  - ACP activity callback attempts 10s
+  - workspace-ready retry requests 30s
   - existing PTY/WebSocket defaults unchanged
 - Positive env overrides take effect.
 - Parse errors fall back without exposing secret values.

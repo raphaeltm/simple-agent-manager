@@ -435,6 +435,7 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 | `MCP_BUILD_PREPARE_TIMEOUT`                   | `30s`                                  | VM-agent timeout for MCP build/publish preparation probes             |
 | `JWKS_FETCH_TIMEOUT`                          | `10s`                                  | VM-agent startup JWKS fetch timeout                                   |
 | `ACP_CREDENTIAL_SYNC_TIMEOUT`                 | `10s`                                  | VM-agent ACP auth-file sync-back timeout during shutdown              |
+| `ACP_ACTIVITY_REPORT_TIMEOUT`                 | `10s`                                  | VM-agent timeout for each ACP activity callback attempt               |
 | `DEVCONTAINER_CACHE_PUSH_TIMEOUT`             | `10m`                                  | VM-agent best-effort devcontainer cache image push timeout            |
 | `DEPLOY_PREFLIGHT_COMMAND_TIMEOUT`            | `15s`                                  | VM-agent deployment preflight diagnostic command timeout              |
 | `LOG_STREAM_PING_WRITE_TIMEOUT`               | `10s`                                  | VM-agent log-stream WebSocket ping write deadline                     |
