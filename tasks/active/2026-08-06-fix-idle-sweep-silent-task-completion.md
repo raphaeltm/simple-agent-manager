@@ -3,7 +3,7 @@
 **Status**: active
 **Created**: 2026-08-06
 **Idea**: `01KZAB5CYEHWAN4ZT8YSG2N9QG`
-**Branch**: `sam/fix-platform-sweep-terminalizes-3q0q3r`
+**Branch**: `sam/fix-platform-idle-cleanup-prarzs`
 
 ## Problem
 
@@ -119,31 +119,31 @@ conversation-mode only and appends a status event. Neither matches.)
 
 ## Implementation Checklist
 
-- [ ] 1. Extract a **pure** shared lifecycle classifier `classifyTaskRuntimeLiveness(signals)` into
+- [x] 1. Extract a **pure** shared lifecycle classifier `classifyTaskRuntimeLiveness(signals)` into
       `apps/api/src/services/task-runtime-liveness.ts` (types + status sets + decision rules). Sleep,
       wake, restore, replacement, probe failure and unknown MUST classify as `conclusive: false`.
-- [ ] 2. Add two adapters over the same classifier: the existing cron-side `getTaskRuntimeLiveness`
+- [x] 2. Add two adapters over the same classifier: the existing cron-side `getTaskRuntimeLiveness`
       (moved, re-exported from `stuck-tasks.ts` so existing imports/tests keep working) and a new
       **DO-local** adapter that reads `acp_sessions` from `this.sql` (no RPC re-entrancy) and
       workspace/node rows from D1.
-- [ ] 3. Replace `completeTaskInD1` with a gated `terminalizeIdleTaskInD1` that: loads the task,
+- [x] 3. Replace `completeTaskInD1` with a gated `terminalizeIdleTaskInD1` that: loads the task,
       enforces reporter/project scoping, consults the shared classifier, and **only** terminalizes
       when `conclusive && !live`. Preserve (skip) on live or inconclusive.
-- [ ] 4. Terminalize as `status='failed'` with a diagnostic `error_message` naming the sweep, the
+- [x] 4. Terminalize as `status='failed'` with a diagnostic `error_message` naming the sweep, the
       idle duration, the configured timeout and the conclusive liveness reason; include
       `project_id = ?` in the write predicate; insert a `task_status_events` row; sync trigger
       execution status to `failed`.
-- [ ] 5. Make Path B reporter-scoped: replace the arbitrary `LIMIT 1` with a deterministic, bounded
+- [x] 5. Make Path B reporter-scoped: replace the arbitrary `LIMIT 1` with a deterministic, bounded
       selection of the active tasks for that workspace, each terminalized through the gated path.
       Gate the destructive `deleteWorkspaceInD1` on the same conclusive-death result.
-- [ ] 6. Add env-configurable bounds with `DEFAULT_*` constants (constitution XI): candidates per
+- [x] 6. Add env-configurable bounds with `DEFAULT_*` constants (constitution XI): candidates per
       sweep and the liveness probe timeout. No hardcoded values.
-- [ ] 7. Update `apps/api/tests/unit/conversation-idle-timeout.test.ts` for the new contract
+- [x] 7. Update `apps/api/tests/unit/conversation-idle-timeout.test.ts` for the new contract
       (its current assertions encode the buggy `completed` behavior).
-- [ ] 8. Tests (see Acceptance Criteria) — reporter-scoped regression tests, liveness-gate tests,
+- [x] 8. Tests (see Acceptance Criteria) — reporter-scoped regression tests, liveness-gate tests,
       two-sweep zombie test, diagnostic-context tests.
-- [ ] 9. Post-mortem + process fix (rule 02 requires both in the same PR).
-- [ ] 10. Doc sync: update any docs describing idle-timeout task completion semantics.
+- [x] 9. Post-mortem + process fix (rule 02 requires both in the same PR).
+- [x] 10. Doc sync: update any docs describing idle-timeout task completion semantics.
 
 ## Acceptance Criteria
 
@@ -163,10 +163,52 @@ conversation-mode only and appends a status event. Neither matches.)
 - [ ] Staging: deploy, exercise a real task, confirm no silent `completed` sweep; delete all staging
       nodes/workspaces immediately after (zero-at-rest, Hetzner 10-server shared limit).
 
-## Follow-ups (out of scope, to file)
+## Post-mortem
 
-- `attention-expiry.ts`, `reconciliation-dead-target.ts` and `project-orchestrator:cancelMission`
-  terminalize without a `task_status_events` row — same forensic blind spot.
+### What broke
+
+ProjectData's two idle-cleanup paths treated the absence of persisted chat or terminal activity as
+proof that a task had succeeded. They wrote `completed` directly, erased `execution_step`, supplied
+no summary or error, emitted no status event, and immediately stopped/deleted workspace state even
+while the runtime owner still reported active work.
+
+### Root cause
+
+PR #1008 (`1704a4b2e`, 2026-05-14) introduced `completeTaskInD1()` for conversation cleanup. The
+implementation conflated a resource-idleness timer with task lifecycle authority and Path B selected
+an arbitrary task by workspace. Later callers armed the same path for task-mode work, but neither
+the original contract nor its tests required a runtime-owner liveness decision.
+
+### Incident timeline
+
+- 2026-05-14: PR #1008 introduced the unsafe direct completion writer.
+- 2026-08-06 00:48–00:49 UTC: a Path B sweep terminalized four active tasks at the two-hour timer.
+- 2026-08-06 02:55 and 03:39 UTC: Path A terminalized two more active tasks at the one-hour timer.
+- The recovery task `01KZB1G2KNKPTRMKMDBX3Q0Q3R` was itself falsely marked complete with null output.
+- This branch recovered the durable research record, reproduced the bug against pre-fix behavior,
+  and replaced both writers with one shared runtime-liveness contract.
+
+### Why existing tests missed it
+
+The old idle-timeout tests asserted the buggy `completed` mutation and workspace deletion. They did
+not cross D1, ProjectData SQLite, and runtime lifecycle boundaries, did not seed a live ACP session,
+and did not assert status-event or trigger-execution parity. Path B's arbitrary `LIMIT 1` was also
+represented by permissive mocks rather than stateful same-workspace rows.
+
+### Bug class and process fix
+
+This was a cross-control-plane lifecycle-authority bug: a stale activity replica overruled the
+runtime owner. `.claude/rules/02-quality-gates.md` now states that inactivity is never successful
+completion evidence, requires explicit success, and requires conclusive-death failure diagnostics,
+system status events, trigger synchronization, and the same gate for workspace deletion. The new
+tests use real in-memory SQLite at both storage boundaries and share the pure classifier exercised by
+cron-side and DO-local adapters.
+
+## Follow-ups (out of scope, filed)
+
+- [`attention-expiry.ts` missing events](../backlog/2026-08-06-attention-expiry-task-status-events.md)
+- [`reconciliation-dead-target.ts` missing events](../backlog/2026-08-06-reconciliation-dead-target-task-status-events.md)
+- [`ProjectOrchestrator.cancelMission()` missing events](../backlog/2026-08-06-project-orchestrator-cancel-status-events.md)
 - Idle-cleanup clock only advances on message persistence; consider advancing it on ACP heartbeat /
   tool activity so the *timer* also reflects real work, not just the terminalization gate.
 - Backfill/relabel the 36 historically mis-terminalized production tasks.

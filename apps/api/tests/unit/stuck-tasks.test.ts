@@ -1359,11 +1359,9 @@ describe('recoverStuckTasks', () => {
   });
 
   describe('runtime-aware resumable gating (V1)', () => {
-    // A VM (non-container) workspace stuck in 'recovery' on a dead node must NOT
-    // be treated as resumable — 'recovery' is a legit VM /ready-callback status,
-    // and pre-PR such rows fell through to the node-heartbeat staleness check.
-    // The resumable short-circuit is gated on node_runtime === 'cf-container'.
-    it('conclusively reconciles a VM recovery workspace on a dead node', async () => {
+    // Recovery is a transient runtime-owner state for both VM and Instant
+    // adapters. A stale D1/node mirror cannot turn it into terminal evidence.
+    it('preserves a VM recovery workspace as inconclusive', async () => {
       const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000).toISOString();
       const responses = new Map<string, { results: unknown[]; changes?: number }>([
         [
@@ -1414,16 +1412,9 @@ describe('recoverStuckTasks', () => {
 
       const result = await recoverStuckTasks(env);
 
-      expect(result.failedInProgress).toBe(1);
-      expect(result.deadRuntimeReconciled).toBe(1);
-      // Reason proves it "fell through to node-heartbeat staleness" (node_not_live),
-      // not a premature workspace_recovery classification.
-      expect(syncTriggerExecutionMock).toHaveBeenCalledWith(
-        env.DATABASE,
-        'task-vm-recovery',
-        'failed',
-        expect.stringContaining('node_not_live')
-      );
+      expect(result.failedInProgress).toBe(0);
+      expect(result.deadRuntimeReconciled).toBe(0);
+      expect(syncTriggerExecutionMock).not.toHaveBeenCalled();
     });
   });
 

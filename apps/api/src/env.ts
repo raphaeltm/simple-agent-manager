@@ -266,6 +266,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PROVIDER_ORPHAN_RECONCILE_LAST_RUN_KV_KEY?: string; // Override for the interval-gate KV key
   // Workspace idle timeout (global default, overridable per-project)
   WORKSPACE_IDLE_TIMEOUT_MS?: string;
+  IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP?: string; // Max reporter-scoped tasks inspected by each ProjectData idle-cleanup pass (default: 5)
   // Auto-delete stopped workspaces after this TTL (default: 300000 = 5 minutes)
   WORKSPACE_STOPPED_TTL_MS?: string;
   // Task agent configuration

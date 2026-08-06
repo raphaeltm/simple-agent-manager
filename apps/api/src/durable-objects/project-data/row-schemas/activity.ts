@@ -11,6 +11,8 @@ const IdleCleanupScheduleSchema = v.object({
   session_id: v.string(),
   workspace_id: v.string(),
   task_id: v.nullable(v.string()),
+  cleanup_at: v.number(),
+  created_at: v.number(),
   retry_count: v.number(),
 });
 
@@ -18,6 +20,8 @@ export function parseIdleCleanupSchedule(row: unknown): {
   sessionId: string;
   workspaceId: string;
   taskId: string | null;
+  cleanupAt: number;
+  createdAt: number;
   retryCount: number;
 } {
   const r = parseRow(IdleCleanupScheduleSchema, row, 'idle_cleanup_schedule');
@@ -25,6 +29,8 @@ export function parseIdleCleanupSchedule(row: unknown): {
     sessionId: r.session_id,
     workspaceId: r.workspace_id,
     taskId: r.task_id,
+    cleanupAt: r.cleanup_at,
+    createdAt: r.created_at,
     retryCount: r.retry_count,
   };
 }

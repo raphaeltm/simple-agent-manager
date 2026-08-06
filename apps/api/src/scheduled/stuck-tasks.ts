@@ -41,13 +41,19 @@ const DEFAULT_INSTANT_START_STALE_TIMEOUT_MS = 10 * 60 * 1000;
 
 import * as schema from '../db/schema';
 import type { TaskRunner } from '../durable-objects/task-runner';
-import { classifyVmAgentContainerLiveness } from '../durable-objects/vm-agent-container-lifecycle';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
 import { cleanupTaskRun } from '../services/task-runner';
+import {
+  classifyTaskRuntimeLiveness,
+  loadRuntimeWorkspaceSnapshot,
+  type RuntimeAcpSessionSnapshot,
+  type TaskRuntimeLiveness,
+  type TaskRuntimeLivenessSignals,
+} from '../services/task-runtime-liveness';
 import { syncTriggerExecutionStatus } from '../services/trigger-execution-sync';
 import { inspectVmAgentContainerLifecycle } from '../services/vm-agent-container';
 import {
@@ -161,14 +167,7 @@ export interface RecoveryDiagnostics {
   } | null;
 }
 
-export interface TaskRuntimeLiveness {
-  live: boolean;
-  conclusive: boolean;
-  reason: string;
-  workspaceStatus: string | null;
-  nodeId: string | null;
-  activeAcpSessionId: string | null;
-}
+export type { TaskRuntimeLiveness } from '../services/task-runtime-liveness';
 
 export type TaskReconciliationDecision =
   | 'not_active'
@@ -199,20 +198,6 @@ export interface TaskReconciliationDiagnostics {
     cursorErrors: number;
   };
 }
-
-// 'running' is always a live-candidate. 'recovery' is a live-candidate ONLY for
-// VM runtimes: the VM /ready callback path transiently marks a workspace
-// 'recovery' while the agent reconnects, and such workspaces must still fall
-// through to the node-heartbeat staleness + ACP-session liveness checks below
-// (pre-PR behavior). For cf-container (Instant) runtimes, 'recovery'/'sleeping'
-// are instead handled by the resumable short-circuit, which defers to the
-// authoritative DO lifecycle probe.
-const LIVE_WORKSPACE_STATUSES = new Set(['running', 'recovery']);
-// Resumable statuses short-circuit to an inconclusive result ONLY for
-// cf-container runtimes. Gating on node_runtime keeps VM 'recovery'/'sleeping'
-// workspaces on a dead node conclusively reconcilable instead of stranding them.
-const RESUMABLE_WORKSPACE_STATUSES = new Set(['sleeping', 'recovery']);
-const ACTIVE_ACP_STATUSES = new Set(['assigned', 'running']);
 
 function stuckTaskScanCursorKey(env: Env): string {
   return env.STUCK_TASK_SCAN_CURSOR_KV_KEY?.trim() || DEFAULT_STUCK_TASK_SCAN_CURSOR_KV_KEY;
@@ -423,128 +408,87 @@ export async function getTaskRuntimeLiveness(
   env: Env,
   task: { project_id: string; workspace_id: string | null }
 ): Promise<TaskRuntimeLiveness> {
-  const dead = (
-    reason: string,
-    workspaceStatus: string | null,
-    nodeId: string | null
-  ): TaskRuntimeLiveness => ({
-    live: false,
-    conclusive: true,
-    reason,
-    workspaceStatus,
-    nodeId,
-    activeAcpSessionId: null,
-  });
-  if (!task.workspace_id) return dead('workspace_missing', null, null);
-
-  const row = await env.DATABASE.prepare(
-    `SELECT w.status AS workspace_status, w.chat_session_id, w.node_id,
-            n.status AS node_status, n.health_status, n.last_heartbeat_at,
-            n.runtime AS node_runtime
-     FROM workspaces w
-     LEFT JOIN nodes n ON n.id = w.node_id
-     WHERE w.id = ?
-     LIMIT 1`
-  )
-    .bind(task.workspace_id)
-    .first<{
-      workspace_status: string;
-      chat_session_id: string | null;
-      node_id: string | null;
-      node_status: string | null;
-      health_status: string | null;
-      last_heartbeat_at: string | null;
-      node_runtime: string | null;
-    }>();
-
-  if (!row) return dead('workspace_missing', null, null);
-  if (row.node_runtime === 'cf-container' && RESUMABLE_WORKSPACE_STATUSES.has(row.workspace_status)) {
-    return {
-      live: false,
-      conclusive: false,
-      reason: `workspace_${row.workspace_status}_resumable`,
-      workspaceStatus: row.workspace_status,
-      nodeId: row.node_id,
-      activeAcpSessionId: null,
-    };
-  }
-  if (!LIVE_WORKSPACE_STATUSES.has(row.workspace_status)) {
-    return dead(`workspace_${row.workspace_status}`, row.workspace_status, row.node_id);
-  }
-  if (!row.chat_session_id || !row.node_id) {
-    return {
-      live: false,
-      conclusive: false,
-      reason: 'workspace_runtime_identity_incomplete',
-      workspaceStatus: row.workspace_status,
-      nodeId: row.node_id,
-      activeAcpSessionId: null,
-    };
-  }
-
   const probeTimeoutMs = parseMs(
     env.TASK_LIVENESS_PROBE_TIMEOUT_MS,
     DEFAULT_TASK_LIVENESS_PROBE_TIMEOUT_MS
   );
-  if (row.node_runtime === 'cf-container') {
+  const staleSeconds =
+    parseInt(env.NODE_HEARTBEAT_STALE_SECONDS || '', 10) || DEFAULT_NODE_HEARTBEAT_STALE_SECONDS;
+  let workspace: Awaited<ReturnType<typeof loadRuntimeWorkspaceSnapshot>> = null;
+  let workspaceProbeOutcome: TaskRuntimeLivenessSignals['workspaceProbeOutcome'] = 'ok';
+  if (task.workspace_id) {
+    try {
+      workspace = await loadRuntimeWorkspaceSnapshot(
+        env.DATABASE,
+        task.project_id,
+        task.workspace_id
+      );
+    } catch (err) {
+      workspaceProbeOutcome = 'error';
+      log.warn('stuck_task.workspace_liveness_query_failed', {
+        workspaceId: task.workspace_id,
+        projectId: task.project_id,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  const baseSignals: TaskRuntimeLivenessSignals = {
+    taskWorkspaceId: task.workspace_id,
+    workspace,
+    workspaceProbeOutcome,
+    nowMs: Date.now(),
+    heartbeatStaleMs: staleSeconds * 1000,
+    acpProbeOutcome: 'not_run',
+    acpSessions: [],
+    containerProbeOutcome: 'not_run',
+    containerLifecycle: null,
+  };
+  const initialClassification = classifyTaskRuntimeLiveness(baseSignals);
+  if (
+    !workspace ||
+    workspace.status !== 'running' ||
+    !workspace.chatSessionId ||
+    !workspace.nodeId ||
+    (workspace.nodeRuntime !== 'cf-container' && initialClassification.conclusive)
+  ) {
+    return initialClassification;
+  }
+
+  if (workspace.nodeRuntime === 'cf-container') {
     const TIMEOUT = Symbol('container_lifecycle_probe_timeout');
     let timer: ReturnType<typeof setTimeout> | undefined;
     try {
       const probe = await Promise.race([
-        inspectVmAgentContainerLifecycle(env, row.node_id),
+        inspectVmAgentContainerLifecycle(env, workspace.nodeId),
         new Promise<typeof TIMEOUT>((resolve) => {
           timer = setTimeout(() => resolve(TIMEOUT), probeTimeoutMs);
         }),
       ]);
       if (probe === TIMEOUT) {
-        return {
-          live: false,
-          conclusive: false,
-          reason: 'cf_container_lifecycle_timeout',
-          workspaceStatus: row.workspace_status,
-          nodeId: row.node_id,
-          activeAcpSessionId: null,
-        };
+        return classifyTaskRuntimeLiveness({
+          ...baseSignals,
+          containerProbeOutcome: 'timeout',
+        });
       }
-      const classification = classifyVmAgentContainerLiveness(probe);
-      return {
-        ...classification,
-        workspaceStatus: row.workspace_status,
-        nodeId: row.node_id,
-        activeAcpSessionId: null,
-      };
+      return classifyTaskRuntimeLiveness({
+        ...baseSignals,
+        containerProbeOutcome: 'ok',
+        containerLifecycle: probe,
+      });
     } catch (err) {
       log.warn('stuck_task.container_lifecycle_probe_failed', {
         workspaceId: task.workspace_id,
-        nodeId: row.node_id,
+        nodeId: workspace.nodeId,
         error: err instanceof Error ? err.message : String(err),
       });
-      return {
-        live: false,
-        conclusive: false,
-        reason: 'cf_container_lifecycle_unknown',
-        workspaceStatus: row.workspace_status,
-        nodeId: row.node_id,
-        activeAcpSessionId: null,
-      };
+      return classifyTaskRuntimeLiveness({
+        ...baseSignals,
+        containerProbeOutcome: 'error',
+      });
     } finally {
       if (timer) clearTimeout(timer);
     }
-  }
-
-  const staleSeconds =
-    parseInt(env.NODE_HEARTBEAT_STALE_SECONDS || '', 10) || DEFAULT_NODE_HEARTBEAT_STALE_SECONDS;
-  const staleMs = staleSeconds * 1000;
-  const nodeHeartbeatAt = row.last_heartbeat_at
-    ? new Date(row.last_heartbeat_at).getTime()
-    : Number.NaN;
-  if (
-    row.node_status !== 'running' ||
-    row.health_status !== 'healthy' ||
-    !Number.isFinite(nodeHeartbeatAt) ||
-    Date.now() - nodeHeartbeatAt > staleMs
-  ) {
-    return dead('node_not_live', row.workspace_status, row.node_id);
   }
 
   try {
@@ -558,7 +502,7 @@ export async function getTaskRuntimeLiveness(
     let timer: ReturnType<typeof setTimeout> | undefined;
     const probe = await Promise.race([
       projectDataService.listAcpSessions(env, task.project_id, {
-        chatSessionId: row.chat_session_id,
+        chatSessionId: workspace?.chatSessionId ?? undefined,
         limit,
       }),
       new Promise<typeof TIMEOUT>((resolve) => {
@@ -571,47 +515,25 @@ export async function getTaskRuntimeLiveness(
         workspaceId: task.workspace_id,
         probeTimeoutMs,
       });
-      return {
-        live: false,
-        conclusive: false,
-        reason: 'task_liveness_timeout',
-        workspaceStatus: row.workspace_status,
-        nodeId: row.node_id,
-        activeAcpSessionId: null,
-      };
+      return classifyTaskRuntimeLiveness({
+        ...baseSignals,
+        acpProbeOutcome: 'timeout',
+      });
     }
-    const { sessions } = probe;
-    const active = sessions.find((session) => {
-      if (!ACTIVE_ACP_STATUSES.has(session.status) || session.workspaceId !== task.workspace_id)
-        return false;
-      const heartbeatAt =
-        session.lastHeartbeatAt ?? session.updatedAt ?? session.startedAt ?? session.createdAt;
-      return Number.isFinite(heartbeatAt) && Date.now() - heartbeatAt <= staleMs;
+    return classifyTaskRuntimeLiveness({
+      ...baseSignals,
+      acpProbeOutcome: 'ok',
+      acpSessions: probe.sessions as RuntimeAcpSessionSnapshot[],
     });
-    if (active) {
-      return {
-        live: true,
-        conclusive: true,
-        reason: 'task_acp_session_live',
-        workspaceStatus: row.workspace_status,
-        nodeId: row.node_id,
-        activeAcpSessionId: active.id,
-      };
-    }
-    return dead('task_acp_session_not_live', row.workspace_status, row.node_id);
   } catch (err) {
     log.warn('stuck_task.liveness_probe_failed', {
       workspaceId: task.workspace_id,
       error: err instanceof Error ? err.message : String(err),
     });
-    return {
-      live: false,
-      conclusive: false,
-      reason: 'task_liveness_unknown',
-      workspaceStatus: row.workspace_status,
-      nodeId: row.node_id,
-      activeAcpSessionId: null,
-    };
+    return classifyTaskRuntimeLiveness({
+      ...baseSignals,
+      acpProbeOutcome: 'error',
+    });
   }
 }
 
@@ -668,9 +590,10 @@ export async function getTaskReconciliationDiagnostics(
   let timeForCheck = elapsedMs;
   let halfThreshold = mismatchGraceMs;
   if (task.status === 'queued') {
-    halfThreshold = task.execution_step === 'instant_persistence'
-      ? instantStartStaleTimeoutMs / 2
-      : queuedTimeoutMs / 2;
+    halfThreshold =
+      task.execution_step === 'instant_persistence'
+        ? instantStartStaleTimeoutMs / 2
+        : queuedTimeoutMs / 2;
   } else if (task.status === 'delegated') {
     halfThreshold = delegatedTimeoutMs / 2;
   } else if (task.status === 'in_progress') {
@@ -947,7 +870,10 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
     if (!isStuck) {
       switch (task.status) {
         case 'queued':
-          if (task.execution_step === 'instant_persistence' && elapsedMs > instantStartStaleTimeoutMs) {
+          if (
+            task.execution_step === 'instant_persistence' &&
+            elapsedMs > instantStartStaleTimeoutMs
+          ) {
             isStuck = true;
             reason = `Instant session start accepted but still queued for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(instantStartStaleTimeoutMs / 1000)}s).${stepInfo} Background container launch may not have completed.`;
           } else if (elapsedMs > queuedTimeoutMs) {

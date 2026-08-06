@@ -97,6 +97,18 @@ export const DEFAULT_WORKSPACE_STOPPED_TTL_MS = 5 * 60 * 1000; // 5 minutes
 // Workspace Idle Timeout (Compute Lifecycle Management)
 // =============================================================================
 
+/** Default session idle timeout in minutes. Override via SESSION_IDLE_TIMEOUT_MINUTES. */
+export const DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES = 15;
+
+/** Default delay before retrying an inconclusive or failed idle-cleanup pass. */
+export const DEFAULT_IDLE_CLEANUP_RETRY_DELAY_MS = 5 * 60 * 1000;
+
+/** Default number of retries after an idle-cleanup operation throws. */
+export const DEFAULT_IDLE_CLEANUP_MAX_RETRIES = 1;
+
+/** Minimum delay before rescheduling a workspace-idle alarm. */
+export const DEFAULT_WORKSPACE_IDLE_MIN_ALARM_DELAY_MS = 60 * 1000;
+
 /** Default workspace idle timeout (ms). Workspaces with no messages AND no terminal activity
  * for this duration are auto-deleted. Override per-project via project settings or via
  * WORKSPACE_IDLE_TIMEOUT_MS env var. */
