@@ -238,19 +238,13 @@ func TestBootstrapTimeoutOverride(t *testing.T) {
 	}
 }
 
-func TestOperationalTimeoutDefaults(t *testing.T) {
-	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
-	t.Setenv("WORKSPACE_ID", "ws-123")
-
-	cfg, err := Load()
-	if err != nil {
-		t.Fatalf("Load returned error: %v", err)
-	}
-
-	checks := []struct {
-		name string
-		got  time.Duration
-		want time.Duration
+func legacyOperationalTimeoutChecks(cfg *Config) []struct {
+	name      string
+	got, want time.Duration
+} {
+	return []struct {
+		name      string
+		got, want time.Duration
 	}{
 		{"GracefulShutdownTimeout", cfg.GracefulShutdownTimeout, 30 * time.Second},
 		{"SystemProvisioningTimeout", cfg.SystemProvisioningTimeout, 15 * time.Minute},
@@ -267,6 +261,18 @@ func TestOperationalTimeoutDefaults(t *testing.T) {
 		{"LogStreamPingWriteTimeout", cfg.LogStreamPingWriteTimeout, 10 * time.Second},
 		{"WorkspaceReadyCallbackTimeout", cfg.WorkspaceReadyCallbackTimeout, 30 * time.Second},
 	}
+}
+
+func TestOperationalTimeoutDefaults(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+
+	checks := legacyOperationalTimeoutChecks(cfg)
 	for _, check := range checks {
 		if check.got != check.want {
 			t.Fatalf("%s=%v, want %v", check.name, check.got, check.want)
@@ -349,25 +355,7 @@ func TestInvalidOperationalTimeoutParseFallsBackAndRedactsValue(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Load returned error: %v", err)
 	}
-	checks := []struct {
-		name      string
-		got, want time.Duration
-	}{
-		{"GracefulShutdownTimeout", cfg.GracefulShutdownTimeout, 30 * time.Second},
-		{"SystemProvisioningTimeout", cfg.SystemProvisioningTimeout, 15 * time.Minute},
-		{"CFIPFetchTimeout", cfg.CFIPFetchTimeout, 10 * time.Second},
-		{"BootLogHTTPTimeout", cfg.BootLogHTTPTimeout, 10 * time.Second},
-		{"MCPShortCommandTimeout", cfg.MCPShortCommandTimeout, 10 * time.Second},
-		{"MCPDiffCommandTimeout", cfg.MCPDiffCommandTimeout, 30 * time.Second},
-		{"MCPBuildPrepareTimeout", cfg.MCPBuildPrepareTimeout, 30 * time.Second},
-		{"JWKSFetchTimeout", cfg.JWKSFetchTimeout, 10 * time.Second},
-		{"ACPCredentialSyncTimeout", cfg.ACPCredentialSyncTimeout, 10 * time.Second},
-		{"ACPActivityReportTimeout", cfg.ACPActivityReportTimeout, 10 * time.Second},
-		{"DevcontainerCachePushTimeout", cfg.DevcontainerCachePushTimeout, 10 * time.Minute},
-		{"DeployPreflightCommandTimeout", cfg.DeployPreflightCommandTimeout, 15 * time.Second},
-		{"LogStreamPingWriteTimeout", cfg.LogStreamPingWriteTimeout, 10 * time.Second},
-		{"WorkspaceReadyCallbackTimeout", cfg.WorkspaceReadyCallbackTimeout, 30 * time.Second},
-	}
+	checks := legacyOperationalTimeoutChecks(cfg)
 	for _, check := range checks {
 		if check.got != check.want {
 			t.Errorf("%s=%v, want fallback %v", check.name, check.got, check.want)
