@@ -7,11 +7,14 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { ProjectData } from '../../src/durable-objects/project-data';
+import {
+  captureProjectDataExpectedError,
+  type ProjectDataTestDouble,
+} from './support/expected-error-doubles';
 
-function getStub(projectId: string): DurableObjectStub<ProjectData> {
+function getStub(projectId: string): DurableObjectStub<ProjectDataTestDouble> {
   const id = env.PROJECT_DATA.idFromName(projectId);
-  return env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectData>;
+  return env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectDataTestDouble>;
 }
 
 describe('ProjectData Durable Object', () => {
@@ -708,8 +711,26 @@ describe('ProjectData Durable Object', () => {
       });
     });
 
-    it('does not persist a batch when the target session is absent', async () => {
+    it('throws for non-existent session', async () => {
       const stub = getStub('project-batch-nosession');
+      const rejection = await captureProjectDataExpectedError(stub, {
+        operation: 'persistMessageBatch',
+        args: [
+          'non-existent-session',
+          [
+            {
+              messageId: crypto.randomUUID(),
+              role: 'user',
+              content: 'Hello',
+              toolMetadata: null,
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        ],
+      });
+
+      expect(rejection).toMatchObject({ threw: true });
+      expect(rejection.message).toMatch(/not found/i);
       expect(await stub.getSession('non-existent-session')).toBeNull();
     });
 
@@ -719,9 +740,27 @@ describe('ProjectData Durable Object', () => {
 
       // Stop the session
       await stub.stopSession(sessionId);
+      const rejection = await captureProjectDataExpectedError(stub, {
+        operation: 'persistMessageBatch',
+        args: [
+          sessionId,
+          [
+            {
+              messageId: crypto.randomUUID(),
+              role: 'user',
+              content: 'Late message',
+              toolMetadata: null,
+              timestamp: new Date().toISOString(),
+            },
+          ],
+        ],
+      });
 
+      expect(rejection).toMatchObject({ threw: true });
+      expect(rejection.message).toMatch(/stopped/i);
       const session = await stub.getSession(sessionId);
       expect(session!.status).toBe('stopped');
+      expect((await stub.getMessages(sessionId)).messages).toHaveLength(0);
     });
 
     it('handles empty batch gracefully', async () => {
@@ -1060,8 +1099,15 @@ describe('ProjectData Durable Object', () => {
       expect(session!.topic).toBe('Original topic');
     });
 
-    it('does not persist a message when the target session is absent', async () => {
+    it('throws on message to non-existent session', async () => {
       const stub = getStub('project-msg-no-session');
+      const rejection = await captureProjectDataExpectedError(stub, {
+        operation: 'persistMessage',
+        args: ['fake-session', 'user', 'hello', null],
+      });
+
+      expect(rejection).toMatchObject({ threw: true });
+      expect(rejection.message).toMatch(/not found/i);
       expect(await stub.getSession('fake-session')).toBeNull();
     });
 
@@ -1990,9 +2036,9 @@ describe('ProjectData Durable Object', () => {
       await stub.ensureProjectId('project-idea-bad-session');
 
       await runInDurableObject(stub, async (instance) => {
-        await expect(instance.linkSessionIdea('nonexistent-session', 'task-x', null)).rejects.toThrow(
-          'Session not found: nonexistent-session'
-        );
+        await expect(
+          instance.linkSessionIdea('nonexistent-session', 'task-x', null)
+        ).rejects.toThrow('Session not found: nonexistent-session');
       });
     });
 

@@ -121,7 +121,9 @@ describe('VultrProvider createVM', () => {
       createInstance: createMockVultrInstance({ id: 'i-1', main_ip: '0.0.0.0', status: 'pending' }),
       getInstance: createMockVultrInstance({ id: 'i-1', main_ip: '203.0.113.5', status: 'active' }),
     });
-    const provider = newProvider(fetchMock);
+    // Keep the budget comfortably above monorepo CI timer jitter so the ready
+    // poll is guaranteed to run before the provider's best-effort deadline.
+    const provider = newProvider(fetchMock, { ipPollTimeoutMs: 500 });
 
     const vm = await provider.createVM({ name: 'node', size: 'small', location: 'fra', userData: 'x' });
     expect(vm.ip).toBe('203.0.113.5');

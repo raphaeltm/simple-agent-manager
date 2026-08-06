@@ -2,8 +2,11 @@
  * Vertical slice tests for the project-data DO proxy service.
  *
  * Exercises the service layer (apps/api/src/services/project-data.ts) which
- * wraps RPC calls to the ProjectData Durable Object. Every call goes through:
+ * wraps RPC calls to the ProjectData Durable Object. Successful calls go through:
  *   service function → getStub(env, projectId) → ensureProjectId() → DO method
+ * Expected rejection cases call the same synchronous core guard through the
+ * bound test-only subclass because pool 0.17 reports rejected DO RPCs as
+ * unhandled errors even when the caller catches them.
  *
  * Uses the real ProjectData DO running in the workerd runtime via
  * @cloudflare/vitest-pool-workers, so these tests verify the full
@@ -16,12 +19,30 @@ import { describe, expect, it } from 'vitest';
 
 import { DEFAULT_MAX_MESSAGES_PER_SESSION } from '../../src/durable-objects/project-data/messages';
 import type { Env } from '../../src/env';
+import {
+  captureProjectDataExpectedError,
+  type ProjectDataTestDouble,
+} from './support/expected-error-doubles';
 // Import service functions under test
 import * as svc from '../../src/services/project-data';
 
 // Cast the test env to the service's Env type.
 // The miniflare env provides the same bindings (PROJECT_DATA, etc.)
 const testEnv = env as unknown as Env;
+
+async function capturePersistMessageBatchError(
+  projectId: string,
+  sessionId: string,
+  messages: Parameters<typeof svc.persistMessageBatch>[3]
+) {
+  const id = env.PROJECT_DATA.idFromName(projectId);
+  const stub = env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectDataTestDouble>;
+  await stub.ensureProjectId(projectId);
+  return captureProjectDataExpectedError(stub, {
+    operation: 'persistMessageBatch',
+    args: [sessionId, messages],
+  });
+}
 
 async function withMessageCap<T>(cap: string, fn: () => Promise<T>): Promise<T> {
   const mutableEnv = testEnv as Env & { MAX_MESSAGES_PER_SESSION?: string };
@@ -189,9 +210,7 @@ describe('project-data service: message persistence', () => {
     const pid = 'svc-persist-msg';
     const sessionId = await svc.createSession(testEnv, pid, null, null);
 
-    const msgId = await svc.persistMessage(
-      testEnv, pid, sessionId, 'user', 'Hello world', null
-    );
+    const msgId = await svc.persistMessage(testEnv, pid, sessionId, 'user', 'Hello world', null);
     expect(msgId).toBeTruthy();
 
     const { messages, hasMore } = await svc.getMessages(testEnv, pid, sessionId);
@@ -225,7 +244,7 @@ describe('project-data service: message persistence', () => {
       'user',
       'Please continue',
       { source: 'parent_agent', kind: 'orchestration_prompt' },
-      messageId,
+      messageId
     );
 
     expect(storedId).toBe(messageId);
@@ -255,13 +274,31 @@ describe('project-data service: message persistence', () => {
 
     // First batch
     await svc.persistMessageBatch(testEnv, pid, sessionId, [
-      { messageId: sharedId, role: 'user', content: 'Original', toolMetadata: null, timestamp: new Date().toISOString() },
+      {
+        messageId: sharedId,
+        role: 'user',
+        content: 'Original',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
     ]);
 
     // Second batch with duplicate + new
     const result = await svc.persistMessageBatch(testEnv, pid, sessionId, [
-      { messageId: sharedId, role: 'user', content: 'Duplicate', toolMetadata: null, timestamp: new Date().toISOString() },
-      { messageId: crypto.randomUUID(), role: 'assistant', content: 'New', toolMetadata: null, timestamp: new Date().toISOString() },
+      {
+        messageId: sharedId,
+        role: 'user',
+        content: 'Duplicate',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
+      {
+        messageId: crypto.randomUUID(),
+        role: 'assistant',
+        content: 'New',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
     ]);
 
     expect(result.persisted).toBe(1);
@@ -284,9 +321,27 @@ describe('project-data service: message persistence', () => {
       const sessionId = await svc.createSession(testEnv, pid, null, null);
 
       const result = await svc.persistMessageBatch(testEnv, pid, sessionId, [
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'one', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'two', toolMetadata: null, timestamp: new Date().toISOString() },
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'three', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'one',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'two',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'three',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
       expect(result.persisted).toBe(2);
@@ -300,16 +355,37 @@ describe('project-data service: message persistence', () => {
     });
   });
 
-  it('does not exceed the configured session message cap', async () => {
+  it('throws SESSION_MESSAGE_LIMIT_EXCEEDED when capacity is already exhausted', async () => {
     await withMessageCap('1', async () => {
       const pid = 'svc-batch-cap-full';
       const sessionId = await svc.createSession(testEnv, pid, null, null);
       await svc.persistMessageBatch(testEnv, pid, sessionId, [
-        { messageId: crypto.randomUUID(), role: 'assistant', content: 'one', toolMetadata: null, timestamp: new Date().toISOString() },
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'one',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
       ]);
 
-      const session = await svc.getSession(testEnv, pid, sessionId);
-      expect(session!.messageCount).toBe(1);
+      const rejection = await capturePersistMessageBatchError(pid, sessionId, [
+        {
+          messageId: crypto.randomUUID(),
+          role: 'assistant',
+          content: 'two',
+          toolMetadata: null,
+          timestamp: new Date().toISOString(),
+        },
+      ]);
+
+      expect(rejection).toMatchObject({
+        threw: true,
+        code: 'SESSION_MESSAGE_LIMIT_EXCEEDED',
+        maxMessages: 1,
+      });
+      expect(rejection.message).toMatch(/message limit/i);
+      expect((await svc.getSession(testEnv, pid, sessionId))!.messageCount).toBe(1);
     });
   });
 
@@ -319,9 +395,30 @@ describe('project-data service: message persistence', () => {
     const ts = new Date().toISOString();
 
     await svc.persistMessageBatch(testEnv, pid, sessionId, [
-      { messageId: crypto.randomUUID(), role: 'assistant', content: 'A', toolMetadata: null, timestamp: ts, sequence: 1 },
-      { messageId: crypto.randomUUID(), role: 'assistant', content: 'B', toolMetadata: null, timestamp: ts, sequence: 2 },
-      { messageId: crypto.randomUUID(), role: 'assistant', content: 'C', toolMetadata: null, timestamp: ts, sequence: 3 },
+      {
+        messageId: crypto.randomUUID(),
+        role: 'assistant',
+        content: 'A',
+        toolMetadata: null,
+        timestamp: ts,
+        sequence: 1,
+      },
+      {
+        messageId: crypto.randomUUID(),
+        role: 'assistant',
+        content: 'B',
+        toolMetadata: null,
+        timestamp: ts,
+        sequence: 2,
+      },
+      {
+        messageId: crypto.randomUUID(),
+        role: 'assistant',
+        content: 'C',
+        toolMetadata: null,
+        timestamp: ts,
+        sequence: 3,
+      },
     ]);
 
     const { messages } = await svc.getMessages(testEnv, pid, sessionId);
@@ -350,18 +447,40 @@ describe('project-data service: message persistence', () => {
     expect(messages[0]!.toolMetadata).toEqual(toolMeta);
   });
 
-  it('does not accept messages for stopped sessions', async () => {
+  it('persistMessageBatch rejects messages to stopped sessions', async () => {
     const pid = 'svc-batch-stopped';
     const sessionId = await svc.createSession(testEnv, pid, null, null);
     await svc.stopSession(testEnv, pid, sessionId);
 
-    const session = await svc.getSession(testEnv, pid, sessionId);
-    expect(session!.status).toBe('stopped');
+    const rejection = await capturePersistMessageBatchError(pid, sessionId, [
+      {
+        messageId: crypto.randomUUID(),
+        role: 'user',
+        content: 'Late',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+
+    expect(rejection).toMatchObject({ threw: true });
+    expect(rejection.message).toMatch(/stopped/i);
+    expect((await svc.getSession(testEnv, pid, sessionId))!.status).toBe('stopped');
   });
 
-  it('does not persist messages for non-existent sessions', async () => {
-    const session = await svc.getSession(testEnv, 'svc-batch-nosession', 'fake-id');
-    expect(session).toBeNull();
+  it('persistMessageBatch throws for non-existent session', async () => {
+    const rejection = await capturePersistMessageBatchError('svc-batch-nosession', 'fake-id', [
+      {
+        messageId: crypto.randomUUID(),
+        role: 'user',
+        content: 'Hi',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
+    ]);
+
+    expect(rejection).toMatchObject({ threw: true });
+    expect(rejection.message).toMatch(/not found/i);
+    expect(await svc.getSession(testEnv, 'svc-batch-nosession', 'fake-id')).toBeNull();
   });
 
   it('persistMessageBatch auto-captures topic from first user message', async () => {
@@ -369,8 +488,20 @@ describe('project-data service: message persistence', () => {
     const sessionId = await svc.createSession(testEnv, pid, null, null);
 
     await svc.persistMessageBatch(testEnv, pid, sessionId, [
-      { messageId: crypto.randomUUID(), role: 'assistant', content: 'Init', toolMetadata: null, timestamp: new Date().toISOString() },
-      { messageId: crypto.randomUUID(), role: 'user', content: 'Deploy to staging', toolMetadata: null, timestamp: new Date().toISOString() },
+      {
+        messageId: crypto.randomUUID(),
+        role: 'assistant',
+        content: 'Init',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
+      {
+        messageId: crypto.randomUUID(),
+        role: 'user',
+        content: 'Deploy to staging',
+        toolMetadata: null,
+        timestamp: new Date().toISOString(),
+      },
     ]);
 
     const session = await svc.getSession(testEnv, pid, sessionId);
@@ -397,7 +528,14 @@ describe('project-data service: message persistence', () => {
     const sessionId = await svc.createSession(testEnv, pid, null, 'Search test');
 
     await svc.persistMessage(testEnv, pid, sessionId, 'user', 'Fix the authentication bug', null);
-    await svc.persistMessage(testEnv, pid, sessionId, 'assistant', 'Looking into authentication', null);
+    await svc.persistMessage(
+      testEnv,
+      pid,
+      sessionId,
+      'assistant',
+      'Looking into authentication',
+      null
+    );
     await svc.persistMessage(testEnv, pid, sessionId, 'user', 'Deploy to production', null);
 
     const results = await svc.searchMessages(testEnv, pid, 'authentication');
@@ -453,7 +591,13 @@ describe('project-data service: idle cleanup scheduling', () => {
     const pid = 'svc-idle-reset';
     const sessionId = await svc.createSession(testEnv, pid, 'ws-reset', 'Reset test');
 
-    const { cleanupAt: original } = await svc.scheduleIdleCleanup(testEnv, pid, sessionId, 'ws-reset', null);
+    const { cleanupAt: original } = await svc.scheduleIdleCleanup(
+      testEnv,
+      pid,
+      sessionId,
+      'ws-reset',
+      null
+    );
 
     // Small delay to ensure different timestamps
     await new Promise((r) => setTimeout(r, 10));
@@ -549,7 +693,13 @@ describe('project-data service: ACP session management', () => {
     const chatSessionId = await svc.createSession(testEnv, pid, null, 'ACP chat');
 
     const acpSession = await svc.createAcpSession(
-      testEnv, pid, chatSessionId, 'Fix the bug', 'claude-code', null, 0
+      testEnv,
+      pid,
+      chatSessionId,
+      'Fix the bug',
+      'claude-code',
+      null,
+      0
     );
 
     expect(acpSession.id).toBeTruthy();
@@ -563,7 +713,13 @@ describe('project-data service: ACP session management', () => {
   it('getAcpSession retrieves a created session', async () => {
     const pid = 'svc-acp-get';
     const chatSessionId = await svc.createSession(testEnv, pid, null, 'ACP get');
-    const created = await svc.createAcpSession(testEnv, pid, chatSessionId, 'Test prompt', 'claude-code');
+    const created = await svc.createAcpSession(
+      testEnv,
+      pid,
+      chatSessionId,
+      'Test prompt',
+      'claude-code'
+    );
 
     const fetched = await svc.getAcpSession(testEnv, pid, created.id);
     expect(fetched).not.toBeNull();
@@ -579,7 +735,13 @@ describe('project-data service: ACP session management', () => {
   it('transitionAcpSession changes status', async () => {
     const pid = 'svc-acp-transition';
     const chatSessionId = await svc.createSession(testEnv, pid, null, 'ACP transition');
-    const acpSession = await svc.createAcpSession(testEnv, pid, chatSessionId, 'Test', 'claude-code');
+    const acpSession = await svc.createAcpSession(
+      testEnv,
+      pid,
+      chatSessionId,
+      'Test',
+      'claude-code'
+    );
 
     // pending → assigned
     const activated = await svc.transitionAcpSession(testEnv, pid, acpSession.id, 'assigned', {
@@ -596,7 +758,13 @@ describe('project-data service: ACP session management', () => {
   it('updateAcpSessionHeartbeat refreshes lastHeartbeatAt', async () => {
     const pid = 'svc-acp-heartbeat';
     const chatSessionId = await svc.createSession(testEnv, pid, null, 'ACP heartbeat');
-    const acpSession = await svc.createAcpSession(testEnv, pid, chatSessionId, 'Test', 'claude-code');
+    const acpSession = await svc.createAcpSession(
+      testEnv,
+      pid,
+      chatSessionId,
+      'Test',
+      'claude-code'
+    );
 
     // Transition to running first (heartbeat requires non-terminal session with nodeId)
     await svc.transitionAcpSession(testEnv, pid, acpSession.id, 'assigned', {
@@ -684,16 +852,22 @@ describe('project-data service: ACP session management', () => {
 
     // Transition both to active on the same node
     await svc.transitionAcpSession(testEnv, pid, acp1.id, 'assigned', {
-      actorType: 'system', workspaceId: 'ws-1', nodeId: 'node-bulk',
+      actorType: 'system',
+      workspaceId: 'ws-1',
+      nodeId: 'node-bulk',
     });
     await svc.transitionAcpSession(testEnv, pid, acp1.id, 'running', {
-      actorType: 'vm-agent', actorId: 'node-bulk',
+      actorType: 'vm-agent',
+      actorId: 'node-bulk',
     });
     await svc.transitionAcpSession(testEnv, pid, acp2.id, 'assigned', {
-      actorType: 'system', workspaceId: 'ws-2', nodeId: 'node-bulk',
+      actorType: 'system',
+      workspaceId: 'ws-2',
+      nodeId: 'node-bulk',
     });
     await svc.transitionAcpSession(testEnv, pid, acp2.id, 'running', {
-      actorType: 'vm-agent', actorId: 'node-bulk',
+      actorType: 'vm-agent',
+      actorId: 'node-bulk',
     });
 
     const updated = await svc.updateNodeHeartbeats(testEnv, pid, 'node-bulk');
@@ -709,7 +883,15 @@ describe('project-data service: activity events', () => {
   it('recordActivityEvent returns an event id', async () => {
     const pid = 'svc-activity-record';
     const eventId = await svc.recordActivityEvent(
-      testEnv, pid, 'workspace.created', 'system', null, 'ws-act', null, null, { vmSize: 'medium' }
+      testEnv,
+      pid,
+      'workspace.created',
+      'system',
+      null,
+      'ws-act',
+      null,
+      null,
+      { vmSize: 'medium' }
     );
     expect(eventId).toBeTruthy();
     expect(typeof eventId).toBe('string');
@@ -721,7 +903,15 @@ describe('project-data service: activity events', () => {
     // Create several events
     for (let i = 0; i < 5; i++) {
       await svc.recordActivityEvent(
-        testEnv, pid, 'task.completed', 'agent', `agent-${i}`, null, null, `task-${i}`, null
+        testEnv,
+        pid,
+        'task.completed',
+        'agent',
+        `agent-${i}`,
+        null,
+        null,
+        `task-${i}`,
+        null
       );
     }
 
@@ -741,9 +931,39 @@ describe('project-data service: activity events', () => {
   it('listActivityEvents filters by event type', async () => {
     const pid = 'svc-activity-filter';
 
-    await svc.recordActivityEvent(testEnv, pid, 'session.started', 'system', null, null, 's1', null, null);
-    await svc.recordActivityEvent(testEnv, pid, 'workspace.created', 'user', 'u1', 'ws-1', null, null, null);
-    await svc.recordActivityEvent(testEnv, pid, 'session.started', 'system', null, null, 's2', null, null);
+    await svc.recordActivityEvent(
+      testEnv,
+      pid,
+      'session.started',
+      'system',
+      null,
+      null,
+      's1',
+      null,
+      null
+    );
+    await svc.recordActivityEvent(
+      testEnv,
+      pid,
+      'workspace.created',
+      'user',
+      'u1',
+      'ws-1',
+      null,
+      null,
+      null
+    );
+    await svc.recordActivityEvent(
+      testEnv,
+      pid,
+      'session.started',
+      'system',
+      null,
+      null,
+      's2',
+      null,
+      null
+    );
 
     const { events } = await svc.listActivityEvents(testEnv, pid, 'session.started');
     expect(events).toHaveLength(2);
@@ -757,7 +977,15 @@ describe('project-data service: activity events', () => {
     const payload = { node: 'node-1', duration: 3600, exitCode: 0 };
 
     await svc.recordActivityEvent(
-      testEnv, pid, 'task.completed', 'agent', 'a1', null, null, 't1', payload
+      testEnv,
+      pid,
+      'task.completed',
+      'agent',
+      'a1',
+      null,
+      null,
+      't1',
+      payload
     );
 
     const { events } = await svc.listActivityEvents(testEnv, pid, 'task.completed');
@@ -768,9 +996,39 @@ describe('project-data service: activity events', () => {
   it('listActivityEvents filters by sessionId', async () => {
     const pid = 'svc-activity-session';
 
-    await svc.recordActivityEvent(testEnv, pid, 'task.started', 'system', null, null, 'sess-1', null, null);
-    await svc.recordActivityEvent(testEnv, pid, 'task.completed', 'system', null, null, 'sess-1', null, null);
-    await svc.recordActivityEvent(testEnv, pid, 'task.started', 'system', null, null, 'sess-2', null, null);
+    await svc.recordActivityEvent(
+      testEnv,
+      pid,
+      'task.started',
+      'system',
+      null,
+      null,
+      'sess-1',
+      null,
+      null
+    );
+    await svc.recordActivityEvent(
+      testEnv,
+      pid,
+      'task.completed',
+      'system',
+      null,
+      null,
+      'sess-1',
+      null,
+      null
+    );
+    await svc.recordActivityEvent(
+      testEnv,
+      pid,
+      'task.started',
+      'system',
+      null,
+      null,
+      'sess-2',
+      null,
+      null
+    );
 
     const { events: sess1 } = await svc.listActivityEvents(testEnv, pid, null, 50, null, 'sess-1');
     expect(sess1).toHaveLength(2);

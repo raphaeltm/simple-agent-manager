@@ -4,11 +4,7 @@
  * Runs inside the workerd runtime via @cloudflare/vitest-pool-workers,
  * exercising real SQLite storage, DO lifecycle, and migrations.
  *
- * BLOCKED: These tests cannot run due to a pre-existing Mastra/workerd
- * incompatibility ("No such module" for @mastra/core/dist/fs/promises).
- * Same issue blocks existing project-data-do.test.ts.
- *
- * DOCUMENTED COVERAGE GAPS (to add when workerd issue is resolved):
+ * DOCUMENTED COVERAGE GAPS:
  * - listAcpSessionsByNode: reconciliation filtering by node + statuses
  * - forkAcpSession: max depth rejection, fork from failed session
  * - updateHeartbeat: silent ignore for terminal sessions
@@ -28,11 +24,11 @@ import type { VmAgentContainerTestDouble } from './support/vm-agent-container-do
 /** Seed the bound VM_AGENT_CONTAINER double's lifecycle status for a node. */
 function seedContainerLifecycle(
   nodeId: string,
-  status: VmAgentContainerLifecycleStatus,
+  status: VmAgentContainerLifecycleStatus
 ): Promise<void> {
   const ns = env.VM_AGENT_CONTAINER!;
   const stub = ns.get(
-    ns.idFromName(nodeId.toLowerCase()),
+    ns.idFromName(nodeId.toLowerCase())
   ) as unknown as DurableObjectStub<VmAgentContainerTestDouble>;
   return stub.__seedLifecycle(status);
 }
@@ -79,6 +75,17 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
 
     it('rejects creation with invalid chat session ID', async () => {
       const stub = getStub('acp-create-invalid');
+
+      await runInDurableObject(stub, async (instance) => {
+        await expect(
+          instance.createAcpSession({
+            chatSessionId: 'nonexistent',
+            initialPrompt: 'test',
+            agentType: null,
+          })
+        ).rejects.toThrow('Chat session nonexistent not found');
+      });
+
       const sessions = await stub.listAcpSessions({ limit: 10 });
       expect(sessions.sessions).toHaveLength(0);
     });
@@ -274,13 +281,13 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
     function staleHeartbeat(
       stub: DurableObjectStub<ProjectData>,
       acpSessionId: string,
-      passes: number,
+      passes: number
     ) {
       return runInDurableObject(stub, async (instance, state) => {
         state.storage.sql.exec(
           `UPDATE acp_sessions SET last_heartbeat_at = ? WHERE id = ?`,
           Date.now() - 10 * 60 * 1000,
-          acpSessionId,
+          acpSessionId
         );
         for (let i = 0; i < passes; i++) await instance.alarm();
         return state.storage.getAlarm();
@@ -340,6 +347,14 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
       const stub = getStub('acp-invalid-pending-running');
       const { acpSession } = await createSessionPair(stub);
 
+      await runInDurableObject(stub, async (instance) => {
+        await expect(
+          instance.transitionAcpSession(acpSession.id, 'running', {
+            actorType: 'vm-agent',
+          })
+        ).rejects.toThrow('Invalid ACP session transition: pending → running');
+      });
+
       expect(acpSession.status).toBe('pending');
       expect((await stub.getAcpSession(acpSession.id))?.status).toBe('pending');
     });
@@ -361,6 +376,14 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
         actorType: 'vm-agent',
       });
 
+      await runInDurableObject(stub, async (instance) => {
+        await expect(
+          instance.transitionAcpSession(acpSession.id, 'running', {
+            actorType: 'vm-agent',
+          })
+        ).rejects.toThrow('Invalid ACP session transition: completed → running');
+      });
+
       expect((await stub.getAcpSession(acpSession.id))?.status).toBe('completed');
     });
 
@@ -376,6 +399,14 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
       await stub.transitionAcpSession(acpSession.id, 'running', {
         actorType: 'vm-agent',
         acpSdkSessionId: 'sdk-back',
+      });
+
+      await runInDurableObject(stub, async (instance) => {
+        await expect(
+          instance.transitionAcpSession(acpSession.id, 'assigned', {
+            actorType: 'system',
+          })
+        ).rejects.toThrow('Invalid ACP session transition: running → assigned');
       });
 
       expect((await stub.getAcpSession(acpSession.id))?.status).toBe('running');
@@ -412,6 +443,12 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
         actorType: 'system',
         workspaceId: 'ws-hb2',
         nodeId: 'node-hb2',
+      });
+
+      await runInDurableObject(stub, async (instance) => {
+        await expect(instance.updateHeartbeat(acpSession.id, 'wrong-node')).rejects.toThrow(
+          'Node mismatch'
+        );
       });
 
       const before = await stub.getAcpSession(acpSession.id);
@@ -464,6 +501,12 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
       await stub.transitionAcpSession(acpSession.id, 'running', {
         actorType: 'vm-agent',
         acpSdkSessionId: 'sdk-fr',
+      });
+
+      await runInDurableObject(stub, async (instance) => {
+        await expect(instance.forkAcpSession(acpSession.id, 'Context')).rejects.toThrow(
+          'Cannot fork session in "running" state'
+        );
       });
 
       const lineage = await stub.getAcpSessionLineage(acpSession.id);
@@ -602,10 +645,7 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
       expect(completed.completedAt).toBeTruthy();
 
       // 6. Fork the completed session
-      const forked = await stub.forkAcpSession(
-        acpSession.id,
-        'Continue from where we left off'
-      );
+      const forked = await stub.forkAcpSession(acpSession.id, 'Continue from where we left off');
       expect(forked.status).toBe('pending');
       expect(forked.parentSessionId).toBe(acpSession.id);
       expect(forked.forkDepth).toBe(1);
