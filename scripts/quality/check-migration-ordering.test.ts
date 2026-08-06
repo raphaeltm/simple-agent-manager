@@ -4,6 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
+import { isAllowedDuplicateSet } from './check-migration-ordering';
+
 const ROOT = join(import.meta.dirname, '../..');
 const SCRIPT = join(ROOT, 'scripts/quality/check-migration-ordering.ts');
 const tempDirs: string[] = [];
@@ -39,6 +41,19 @@ describe('D1 migration ordering check', () => {
     writeFileSync(join(dir, '0100_second.sql'), 'CREATE TABLE second (id TEXT PRIMARY KEY);');
 
     expect(() => runCheck(dir)).toThrow(/Duplicate migration numeric prefix 0100/);
+  });
+
+  it('grandfathers only the exact applied duplicate filename sets', () => {
+    const migrationsDir = join(ROOT, 'apps/api/src/db/migrations');
+    const appliedFiles = [
+      '0105_bootstrap_token_consumes.sql',
+      '0105_debug_diagnosis_canonical_status.sql',
+    ];
+
+    expect(isAllowedDuplicateSet(migrationsDir, '0105', appliedFiles)).toBe(true);
+    expect(isAllowedDuplicateSet(migrationsDir, '0105', [...appliedFiles, '0105_future.sql'])).toBe(
+      false
+    );
   });
 
   it('fails on migration filenames without a sortable numeric prefix', () => {
