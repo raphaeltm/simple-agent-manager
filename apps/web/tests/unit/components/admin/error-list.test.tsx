@@ -57,13 +57,30 @@ function defaultHookReturn(overrides: Record<string, unknown> = {}) {
     error: null,
     hasMore: false,
     total: 0,
-    filter: { source: 'all' as const, level: 'all' as const, search: '', timeRange: '24h' as const },
+    filter: {
+      source: 'all' as const,
+      level: 'all' as const,
+      search: '',
+      timeRange: '24h' as const,
+      nodeId: '',
+      workspaceId: '',
+      taskId: '',
+      sessionId: '',
+      userId: '',
+    },
     setSource: vi.fn(),
     setLevel: vi.fn(),
     setSearch: vi.fn(),
     setTimeRange: vi.fn(),
+    setNodeId: vi.fn(),
+    setWorkspaceId: vi.fn(),
+    setTaskId: vi.fn(),
+    setSessionId: vi.fn(),
+    setUserId: vi.fn(),
     loadMore: vi.fn(),
     refresh: vi.fn(),
+    autoRefresh: false,
+    setAutoRefresh: vi.fn(),
     ...overrides,
   };
 }
@@ -178,8 +195,13 @@ describe('ErrorList', () => {
     });
     mockUseAdminErrors.mockReturnValue(defaultHookReturn());
     renderErrorList();
+    // Click the saved diagnoses button to open the picker
     fireEvent.click(await screen.findByRole('button', { name: 'Saved diagnoses (1)' }));
-    expect(screen.getByText('Persisted diagnosis evidence')).toBeInTheDocument();
+    // Select the diagnosis from the picker dropdown
+    const item = screen.getByText(/Persisted diagnosis evidence/);
+    fireEvent.click(item);
+    // The DebugDiagnosisPanel should now show the diagnosis
+    expect(screen.getByText(/Persisted diagnosis evidence/)).toBeInTheDocument();
   });
   it('should show refresh button', () => {
     mockUseAdminErrors.mockReturnValue(defaultHookReturn());
