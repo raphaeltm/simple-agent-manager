@@ -58,7 +58,7 @@ remained queued at `node_agent_ready`, pointing at the deleted node.
 - [x] Add TaskRunner regressions for both provisioning and agent-ready disappearance.
 - [x] Update `.claude/rules/54-vm-agent-rollout-compatibility.md` so future destructive
       rollout cleanup must protect active provisioning claims and pre-heartbeat grace.
-- [ ] Record local validation, specialist review, CI, and the user-directed staging skip.
+- [x] Record local validation, specialist review, CI, and the user-directed staging skip.
 
 ## Implementation Evidence
 
@@ -69,7 +69,7 @@ remained queued at `node_agent_ready`, pointing at the deleted node.
   provisioning timeout/readiness, node selection, and source-contract suites.
 - API typecheck passes, focused lint reports zero errors, and `git diff --check` passes.
 - `node-steps.ts` was split before the hotfix so every touched source file remains below
-  the mandatory 800-line limit (`node-steps.ts` is 486 lines).
+  the mandatory 800-line limit (`node-steps.ts` is 489 lines).
 - Full repository validation passes: `pnpm lint` (0 errors), `pnpm typecheck` (16/16
   tasks), `pnpm build` (9/9 tasks), and `pnpm test` (20/20 tasks). The full API suite
   passes 6,733/6,733 tests and the full web suite passes 2,885/2,885 tests.
@@ -91,8 +91,9 @@ remained queued at `node_agent_ready`, pointing at the deleted node.
   blockers. Documentation review found and prompted two sync corrections: the orphan
   timeout now documents its pre-heartbeat-grace role, and the public agent-ready default
   now matches the code's 900,000 ms (15 minute) value.
-- Specialist review, GitHub CI, and the explicit staging skip will be recorded before
-  the task is archived.
+- GitHub CI run `31201638162` passed with 17 successful, 7 intentionally skipped,
+  0 failing, and 0 pending checks. The explicit user-directed staging skip is recorded
+  below.
 
 ## Review Evidence
 
@@ -108,15 +109,17 @@ remained queued at `node_agent_ready`, pointing at the deleted node.
 
 Staging deployment and verification are intentionally skipped because the user
 explicitly prohibited staging for this urgent hotfix. No staging mutation was made.
-GitHub CI remains the final validation gate before archival.
+GitHub CI passed before archival.
 
 ## Pull Request and CI
 
 - Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/1764
 - The initial preflight-evidence job captured the PR immediately after creation, before
   its body was populated, and failed only with `Pull request body is empty`. The full PR
-  template is now populated. This task-evidence commit intentionally triggers a fresh
-  synchronize run so preflight evaluates the current body.
+  template was then populated and the replacement synchronize run passed, including
+  Preflight Evidence, the full test suite, and the Durable Object Workers suite.
+- Final pre-archive run `31201638162`: 17 successful, 7 intentionally skipped,
+  0 failing, and 0 pending checks at commit `a179a99ed`.
 - The PR remains draft and must not be merged without explicit authorization.
 
 ## Acceptance Criteria
