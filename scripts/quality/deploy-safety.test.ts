@@ -419,7 +419,7 @@ describe('deployment workflow safety wiring', () => {
     const summary = join(dir, 'summary.md');
     writeFileSync(
       pulumi,
-      '#!/bin/bash\nprintf "%s\\n" "error token=ghp_supersecretsecretsecretsecretsecret passphrase=very secret passphrase" "session_token=quoted secret remainder" "private_key=-----BEGIN PRIVATE KEY-----" "private-key-body-must-not-leak" "-----END PRIVATE KEY-----" "Authorization: Bearer abcdefghijklmnopqrstuvwxyz" >&2\nexit 7\n'
+      '#!/bin/bash\nprintf "%s\\n" "error token=ghp_supersecretsecretsecretsecretsecret passphrase=very secret passphrase" "session_token=quoted secret remainder" "private_key=-----BEGIN PRIVATE KEY-----" "private-key-body-must-not-leak" "-----END PRIVATE KEY-----" "public diagnostic one" "public diagnostic two" "Authorization: Bearer abcdefghijklmnopqrstuvwxyz" >&2\nexit 7\n'
     );
     execFileSync('chmod', ['+x', pulumi]);
 
@@ -433,6 +433,7 @@ describe('deployment workflow safety wiring', () => {
           GITHUB_STEP_SUMMARY: summary,
           PULUMI_REFRESH_MAX_ATTEMPTS: '1',
           PULUMI_REFRESH_RETRY_DELAY_SECONDS: '0',
+          PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES: '4',
         },
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
@@ -449,6 +450,7 @@ describe('deployment workflow safety wiring', () => {
     expect(combined).not.toContain('very secret passphrase');
     expect(combined).not.toContain('quoted secret remainder');
     expect(combined).not.toContain('private-key-body-must-not-leak');
+    expect(combined).not.toContain('END PRIVATE KEY');
     expect(combined).not.toContain('abcdefghijklmnopqrstuvwxyz');
   });
 

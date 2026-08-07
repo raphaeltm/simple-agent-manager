@@ -59,7 +59,7 @@ while (( attempt <= max_attempts )); do
 
   if (( attempt < max_attempts )); then
     echo "::warning title=Pulumi refresh retry::Attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${retry_delay_seconds}s." >&2
-    tail -n "$diagnostic_tail_lines" "$tmp_output" | redact >&2
+    redact <"$tmp_output" | tail -n "$diagnostic_tail_lines" >&2
     sleep "$retry_delay_seconds"
     retry_delay_seconds=$((retry_delay_seconds * 2))
   fi
@@ -81,9 +81,9 @@ done
   echo ""
   echo "### Redacted refresh diagnostics"
   echo '```'
-  tail -n "$diagnostic_tail_lines" "$tmp_output" | redact
+  redact <"$tmp_output" | tail -n "$diagnostic_tail_lines"
   echo '```'
 } >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
 
-tail -n "$diagnostic_tail_lines" "$tmp_output" | redact >&2
+redact <"$tmp_output" | tail -n "$diagnostic_tail_lines" >&2
 exit "$status"
