@@ -302,7 +302,7 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
   const before: D1TableCount[] = [];
   const allowlist = validateCountDecreaseAllowlist(options.allowlist ?? []);
 
-  console.log('Creating D1 time-travel bookmark before migrations...');
+  console.log('Recording D1 time-travel recovery timestamp before migrations...');
   console.log(`Pre-migration timestamp: ${backupTimestamp}`);
 
   try {
@@ -351,7 +351,7 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
   }
 }
 
-function parseAllowlist(json: string | undefined): CountDecreaseAllowlistEntry[] {
+export function parseAllowlist(json: string | undefined): CountDecreaseAllowlistEntry[] {
   if (!json) return [];
   const parsed = JSON.parse(json) as unknown;
   if (!Array.isArray(parsed)) {
