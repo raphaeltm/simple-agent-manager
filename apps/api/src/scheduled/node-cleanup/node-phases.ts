@@ -366,9 +366,18 @@ export async function sweepIncompatibleVmAgentNodes(
     return;
   }
 
+  const unversionedGraceThreshold = new Date(
+    now.getTime() - config.orphanIdleTimeoutMs
+  ).toISOString();
+
   const candidates = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.status, n.created_at, n.agent_version,
-            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count
+            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
+            EXISTS (
+              SELECT 1 FROM tasks active
+              WHERE active.auto_provisioned_node_id = n.id
+                AND active.status IN ('queued', 'delegated', 'in_progress')
+            ) as active_task_claim
      FROM nodes n
      LEFT JOIN workspaces w ON w.node_id = n.id
      WHERE n.status = 'running'
@@ -388,9 +397,37 @@ export async function sweepIncompatibleVmAgentNodes(
       created_at: string;
       agent_version: string | null;
       active_ws_count: number;
+      active_task_claim: number;
     }>();
 
   for (const node of candidates.results) {
+    if (node.active_task_claim > 0) {
+      log.info('node_cleanup.incompatible_vm_agent_skipped_active_task', {
+        nodeId: node.id,
+        userId: node.user_id,
+        agentVersion: node.agent_version,
+        requiredVersion,
+      });
+      result.incompatibleSkipped++;
+      continue;
+    }
+
+    // agent_version is absent during the normal pre-heartbeat boot window. Give
+    // unclaimed/manual provisioning the same configurable idle grace used by the
+    // orphan reaper; active TaskRunner provisioning is protected above regardless
+    // of age until its bounded provisioning/readiness lifecycle terminalizes.
+    if (node.agent_version === null && node.created_at >= unversionedGraceThreshold) {
+      log.info('node_cleanup.incompatible_vm_agent_skipped_pre_heartbeat', {
+        nodeId: node.id,
+        userId: node.user_id,
+        createdAt: node.created_at,
+        requiredVersion,
+        gracePeriodMs: config.orphanIdleTimeoutMs,
+      });
+      result.incompatibleSkipped++;
+      continue;
+    }
+
     if (node.active_ws_count > 0) {
       log.info('node_cleanup.incompatible_vm_agent_skipped_active_workspaces', {
         nodeId: node.id,
@@ -415,6 +452,7 @@ export async function sweepIncompatibleVmAgentNodes(
         createdAt: node.created_at,
         agentVersion: node.agent_version,
         requiredVersion,
+        unversionedGracePeriodMs: config.orphanIdleTimeoutMs,
       },
     });
 

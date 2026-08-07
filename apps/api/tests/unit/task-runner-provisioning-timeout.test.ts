@@ -116,6 +116,26 @@ function makeContext(overrides: Partial<TaskRunnerContext> = {}): TaskRunnerCont
 // ---------------------------------------------------------------------------
 
 describe('handleNodeProvisioning — timeout', () => {
+  it('fails immediately when its claimed node row disappears', async () => {
+    const state = makeState({
+      provisioningStartedAt: Date.now() - 65_000,
+      stepResults: {
+        ...makeState().stepResults,
+        nodeId: 'node-deleted-during-provisioning',
+        autoProvisioned: true,
+      },
+    });
+    const rc = makeContext();
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: expect.stringContaining('node-deleted-during-provisioning'),
+      permanent: true,
+    });
+    expect(state.stepResults.autoProvisioned).toBe(false);
+    expect(rc.ctx.storage.put).toHaveBeenCalledWith('state', state);
+    expect(rc.ctx.storage.setAlarm).not.toHaveBeenCalled();
+  });
+
   it('initializes provisioningStartedAt on first entry', async () => {
     const state = makeState({ stepResults: { ...makeState().stepResults, nodeId: 'node-1' } });
     expect(state.provisioningStartedAt).toBeNull();
@@ -297,6 +317,38 @@ describe('handleNodeProvisioning — timeout', () => {
 // ---------------------------------------------------------------------------
 
 describe('timeout parity — node_agent_ready vs node_provisioning', () => {
+  it('fails immediately when cleanup marks the claimed node deleted during agent readiness', async () => {
+    const state = makeState({
+      currentStep: 'node_agent_ready',
+      agentReadyStartedAt: Date.now() - 65_000,
+      stepResults: {
+        ...makeState().stepResults,
+        nodeId: 'node-deleted-during-readiness',
+        autoProvisioned: true,
+      },
+    });
+    const rc = makeContext();
+    (rc.env.DATABASE.prepare as ReturnType<typeof vi.fn>).mockReturnValue({
+      bind: vi.fn().mockReturnValue({
+        first: vi.fn().mockResolvedValue({
+          health_status: 'stale',
+          last_heartbeat_at: null,
+          agent_ready_at: null,
+          agent_version: null,
+          status: 'deleted',
+        }),
+      }),
+    });
+
+    await expect(handleNodeAgentReady(state, rc)).rejects.toMatchObject({
+      message: expect.stringContaining('node-deleted-during-readiness'),
+      permanent: true,
+    });
+    expect(state.stepResults.autoProvisioned).toBe(false);
+    expect(rc.ctx.storage.put).toHaveBeenCalledWith('state', state);
+    expect(rc.ctx.storage.setAlarm).not.toHaveBeenCalled();
+  });
+
   it('handleNodeAgentReady throws after timeout', async () => {
     const state = makeState({
       currentStep: 'node_agent_ready',

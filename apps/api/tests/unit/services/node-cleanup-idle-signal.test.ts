@@ -261,6 +261,72 @@ describe('idle reaping is immune to heartbeat activity', () => {
 });
 
 describe('incompatible vm-agent cleanup', () => {
+  it('preserves the production-shaped pre-heartbeat node claimed by an active task', async () => {
+    // Production session 696a21e7-84d1-4080-9060-a77302a7ffc9 had this exact
+    // shape: running VM, no workspace yet, agent_version NULL, and a queued task
+    // pointing at the node. The rollout sweep destroyed it after only 65 seconds.
+    seedNode({ id: 'provisioning-claimed', createdAt: ago(65 * 1000), updatedAt: ago(1000) });
+    sqlite
+      ?.prepare(
+        `INSERT INTO tasks (id, workspace_id, status, auto_provisioned_node_id, updated_at)
+         VALUES ('task-provisioning', NULL, 'queued', 'provisioning-claimed', ?)`
+      )
+      .run(ago(65 * 1000));
+    const env = { ...makeEnv(), VM_AGENT_REQUIRED_VERSION: 'current-sha' } as Env;
+
+    const result = await runNodeCleanupSweep(env);
+
+    expect(deleteCalls).not.toContain('provisioning-claimed');
+    expect(result.incompatibleDestroyed).toBe(0);
+    expect(result.incompatibleSkipped).toBe(1);
+  });
+
+  it('preserves a fresh unversioned VM during the configurable pre-heartbeat grace', async () => {
+    seedNode({ id: 'fresh-unversioned', createdAt: ago(2 * MINUTE), updatedAt: ago(1000) });
+    const env = { ...makeEnv(), VM_AGENT_REQUIRED_VERSION: 'current-sha' } as Env;
+
+    const result = await runNodeCleanupSweep(env);
+
+    expect(deleteCalls).not.toContain('fresh-unversioned');
+    expect(result.incompatibleDestroyed).toBe(0);
+  });
+
+  it('preserves an actively claimed unversioned VM even after the boot grace expires', async () => {
+    seedNode({ id: 'old-but-claimed', createdAt: ago(2 * HOUR), updatedAt: ago(1000) });
+    // Recent terminal workspace activity keeps the independent idle-orphan phase
+    // out of this assertion; zero active workspaces still makes the node eligible
+    // for the incompatible-agent phase unless the task-claim gate is present.
+    seedWorkspace({
+      id: 'ws-recently-stopped',
+      nodeId: 'old-but-claimed',
+      status: 'stopped',
+      updatedAt: ago(1 * MINUTE),
+    });
+    sqlite
+      ?.prepare(
+        `INSERT INTO tasks (id, workspace_id, status, auto_provisioned_node_id, updated_at)
+         VALUES ('task-still-provisioning', NULL, 'delegated', 'old-but-claimed', ?)`
+      )
+      .run(ago(2 * HOUR));
+    const env = { ...makeEnv(), VM_AGENT_REQUIRED_VERSION: 'current-sha' } as Env;
+
+    const result = await runNodeCleanupSweep(env);
+
+    expect(deleteCalls).not.toContain('old-but-claimed');
+    expect(result.incompatibleDestroyed).toBe(0);
+    expect(result.incompatibleSkipped).toBe(1);
+  });
+
+  it('eventually retires an old unclaimed VM that never reports an agent version', async () => {
+    seedNode({ id: 'old-unversioned', createdAt: ago(2 * HOUR), updatedAt: ago(1000) });
+    const env = { ...makeEnv(), VM_AGENT_REQUIRED_VERSION: 'current-sha' } as Env;
+
+    const result = await runNodeCleanupSweep(env);
+
+    expect(deleteCalls).toContain('old-unversioned');
+    expect(result.incompatibleDestroyed).toBe(1);
+  });
+
   it('destroys an idle managed VM whose agent build does not match the deployment requirement', async () => {
     seedNode({ id: 'legacy-idle', createdAt: ago(10 * HOUR), updatedAt: ago(1000) });
     sqlite?.prepare(`UPDATE nodes SET agent_version = 'old-sha' WHERE id = 'legacy-idle'`).run();

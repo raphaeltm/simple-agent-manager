@@ -10,13 +10,14 @@ import { canSatisfyVmSize, vmSizeFallbackChain } from '@simple-agent-manager/sha
 
 import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
+import { assertClaimedNodeAvailable } from './claimed-node-availability';
 import { parseEnvInt } from './helpers';
-import { isNodeAgentReadyForWorkspaceDispatch } from './readiness';
 import {
   findNodeWithCapacity,
   tryClaimWarmNode,
   verifyNodeAgentHealthy,
 } from './node-selection';
+import { isNodeAgentReadyForWorkspaceDispatch } from './readiness';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export { verifyNodeAgentHealthy } from './node-selection';
@@ -187,6 +188,8 @@ export async function handleNodeProvisioning(
     )
       .bind(state.stepResults.nodeId)
       .first<{ id: string; status: string; error_message: string | null }>();
+
+    await assertClaimedNodeAvailable(state, rc, node, 'node_provisioning');
 
     if (node?.status === 'running') {
       // Already provisioned — advance
@@ -444,6 +447,8 @@ export async function handleNodeAgentReady(
       agent_version: string | null;
       status: string;
     }>();
+
+  await assertClaimedNodeAvailable(state, rc, node, 'node_agent_ready');
 
   if (
     isNodeAgentReadyForWorkspaceDispatch(

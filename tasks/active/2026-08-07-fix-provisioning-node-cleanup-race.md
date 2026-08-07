@@ -45,20 +45,33 @@ remained queued at `node_agent_ready`, pointing at the deleted node.
 
 ## Implementation Checklist
 
-- [ ] Add a production-shaped SQLite regression proving an active task claim protects a
+- [x] Add a production-shaped SQLite regression proving an active task claim protects a
       running, unversioned VM with zero workspaces.
-- [ ] Add a regression proving a fresh unversioned VM is protected during the
+- [x] Add a regression proving a fresh unversioned VM is protected during the
       configurable boot/idle grace even without a task claim.
-- [ ] Keep old, unclaimed, mismatched VM nodes eligible for cleanup after the guard.
-- [ ] Add active task ownership and fresh-unversioned age guards to the incompatible
+- [x] Keep old, unclaimed, mismatched VM nodes eligible for cleanup after the guard.
+- [x] Add active task ownership and fresh-unversioned age guards to the incompatible
       vm-agent cleanup phase while retaining role, class, runtime, and workspace gates.
-- [ ] Detect missing/deleted claimed nodes in TaskRunner provisioning and agent-ready
+- [x] Detect missing/deleted claimed nodes in TaskRunner provisioning and agent-ready
       steps, preserve diagnostic identity, disable warm-pool cleanup for the already
       gone node, and fail immediately with an actionable error.
-- [ ] Add TaskRunner regressions for both provisioning and agent-ready disappearance.
-- [ ] Update `.claude/rules/54-vm-agent-rollout-compatibility.md` so future destructive
+- [x] Add TaskRunner regressions for both provisioning and agent-ready disappearance.
+- [x] Update `.claude/rules/54-vm-agent-rollout-compatibility.md` so future destructive
       rollout cleanup must protect active provisioning claims and pre-heartbeat grace.
 - [ ] Record local validation, specialist review, CI, and the user-directed staging skip.
+
+## Implementation Evidence
+
+- RED: the new focused regressions failed four times against the pre-fix behavior: the
+  cleanup sweep deleted the production-shaped claimed node and a fresh unversioned node,
+  while both TaskRunner paths continued polling instead of throwing.
+- GREEN: the expanded API regression set passes all 327 tests across cleanup,
+  provisioning timeout/readiness, node selection, and source-contract suites.
+- API typecheck passes, focused lint reports zero errors, and `git diff --check` passes.
+- `node-steps.ts` was split before the hotfix so every touched source file remains below
+  the mandatory 800-line limit (`node-steps.ts` is 486 lines).
+- Full repository validation, specialist review, GitHub CI, and the explicit staging
+  skip will be recorded before the task is archived.
 
 ## Acceptance Criteria
 
