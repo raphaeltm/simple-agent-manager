@@ -13,18 +13,44 @@ redact() {
 tmp_output="$(mktemp)"
 trap 'rm -f "$tmp_output"' EXIT
 
-set +e
-pulumi refresh --yes >"$tmp_output" 2>&1
-status=$?
-set -e
+max_attempts="${PULUMI_REFRESH_MAX_ATTEMPTS:-3}"
+retry_delay_seconds="${PULUMI_REFRESH_RETRY_DELAY_SECONDS:-5}"
 
-if [[ "$status" -eq 0 ]]; then
-  cat "$tmp_output" | redact
-  exit 0
+if ! [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]] || (( max_attempts > 5 )); then
+  echo "::error::PULUMI_REFRESH_MAX_ATTEMPTS must be an integer from 1 through 5" >&2
+  exit 2
 fi
 
+if ! [[ "$retry_delay_seconds" =~ ^[0-9]+$ ]] || (( retry_delay_seconds > 300 )); then
+  echo "::error::PULUMI_REFRESH_RETRY_DELAY_SECONDS must be an integer from 0 through 300" >&2
+  exit 2
+fi
+
+attempt=1
+status=1
+while (( attempt <= max_attempts )); do
+  set +e
+  pulumi refresh --yes >"$tmp_output" 2>&1
+  status=$?
+  set -e
+
+  if [[ "$status" -eq 0 ]]; then
+    redact <"$tmp_output"
+    exit 0
+  fi
+
+  if (( attempt < max_attempts )); then
+    echo "::warning title=Pulumi refresh retry::Attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${retry_delay_seconds}s." >&2
+    tail -80 "$tmp_output" | redact >&2
+    sleep "$retry_delay_seconds"
+    retry_delay_seconds=$((retry_delay_seconds * 2))
+  fi
+
+  attempt=$((attempt + 1))
+done
+
 {
-  echo "::error title=Pulumi refresh failed::Pulumi refresh failed before deployment mutations. Review the redacted diagnostics below, fix state/provider access, then re-run the workflow."
+  echo "::error title=Pulumi refresh failed::Pulumi refresh failed after ${max_attempts} attempt(s) before deployment mutations. Review the redacted diagnostics below, fix state/provider access, then re-run the workflow."
   echo ""
   echo "## Pulumi refresh failed"
   echo ""
