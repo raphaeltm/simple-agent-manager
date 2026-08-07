@@ -39,6 +39,7 @@ vi.mock('@simple-agent-manager/shared', () => ({
     DETECTION_WINDOW_MS: 30000,
     MAX_FORK_DEPTH: 5,
   },
+  DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES: 60,
   DEFAULT_WORKSPACE_PROFILE: 'default',
   PROVIDER_LOCATIONS: {},
 }));

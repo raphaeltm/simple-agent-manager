@@ -9,14 +9,12 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { NodeLifecycle } from '../../src/durable-objects/node-lifecycle';
-import {
-  getStatus,
-  markActive,
-  markIdle,
-  tryClaim,
-} from '../../src/services/node-lifecycle';
+import { getStatus, markActive, markIdle, tryClaim } from '../../src/services/node-lifecycle';
 import { seedNode, seedUser } from './helpers/seed-d1';
+import {
+  captureNodeLifecycleExpectedError,
+  type NodeLifecycleTestDouble,
+} from './support/expected-error-doubles';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -33,9 +31,9 @@ interface StoredNodeLifecycleState {
   warmTimeoutOverrideMs?: number | null;
 }
 
-function getStub(nodeId: string): DurableObjectStub<NodeLifecycle> {
+function getStub(nodeId: string): DurableObjectStub<NodeLifecycleTestDouble> {
   const id = env.NODE_LIFECYCLE.idFromName(nodeId);
-  return env.NODE_LIFECYCLE.get(id) as DurableObjectStub<NodeLifecycle>;
+  return env.NODE_LIFECYCLE.get(id) as DurableObjectStub<NodeLifecycleTestDouble>;
 }
 
 async function seedTestNode(nodeId: string, userId: string = TEST_USER_ID): Promise<void> {
@@ -75,9 +73,9 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     expect(stored?.warmSince).toBeTypeOf('number');
 
     // Verify D1 was updated
-    const dbNode = await env.DATABASE.prepare(
-      'SELECT warm_since FROM nodes WHERE id = ?',
-    ).bind(nodeId).first<{ warm_since: string | null }>();
+    const dbNode = await env.DATABASE.prepare('SELECT warm_since FROM nodes WHERE id = ?')
+      .bind(nodeId)
+      .first<{ warm_since: string | null }>();
     expect(dbNode!.warm_since).toBeTruthy();
   });
 
@@ -95,7 +93,6 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     const nodeId = 'nlp-idle-destroying-001';
     await seedTestNode(nodeId);
 
-    // Manually set destroying state
     const stub = getStub(nodeId);
     await runInDurableObject(stub, async (instance) => {
       await instance.ctx.storage.put('state', {
@@ -107,9 +104,18 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
       });
     });
 
-    await expect(markIdle(env, nodeId, TEST_USER_ID)).rejects.toThrow(
-      'node_lifecycle_conflict: node is being destroyed',
-    );
+    const rejection = await captureNodeLifecycleExpectedError(stub, {
+      operation: 'markIdle',
+      args: [nodeId, TEST_USER_ID],
+    });
+    expect(rejection).toEqual({
+      threw: true,
+      name: 'Error',
+      message: 'node_lifecycle_conflict: node is being destroyed',
+    });
+
+    const stored = await getStoredState(nodeId);
+    expect(stored).toMatchObject({ nodeId, userId: TEST_USER_ID, status: 'destroying' });
   });
 
   it('markActive transitions from warm to active and clears warm_since', async () => {
@@ -135,9 +141,9 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     });
 
     // Verify D1 warm_since is cleared
-    const dbNode = await env.DATABASE.prepare(
-      'SELECT warm_since FROM nodes WHERE id = ?',
-    ).bind(nodeId).first<{ warm_since: string | null }>();
+    const dbNode = await env.DATABASE.prepare('SELECT warm_since FROM nodes WHERE id = ?')
+      .bind(nodeId)
+      .first<{ warm_since: string | null }>();
     expect(dbNode!.warm_since).toBeNull();
   });
 
@@ -145,10 +151,17 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     const nodeId = 'nlp-active-no-state-001';
     await seedTestNode(nodeId);
 
-    // Never called markIdle — DO has no stored state
-    await expect(markActive(env, nodeId)).rejects.toThrow(
-      'node_lifecycle_not_found',
-    );
+    const rejection = await captureNodeLifecycleExpectedError(getStub(nodeId), {
+      operation: 'markActive',
+    });
+    expect(rejection).toEqual({
+      threw: true,
+      name: 'Error',
+      message: 'node_lifecycle_not_found: no state stored',
+    });
+
+    const stored = await getStoredState(nodeId);
+    expect(stored).toBeNull();
   });
 
   it('tryClaim on warm node succeeds', async () => {
@@ -173,9 +186,9 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     });
 
     // D1 warm_since should be cleared
-    const dbNode = await env.DATABASE.prepare(
-      'SELECT warm_since FROM nodes WHERE id = ?',
-    ).bind(nodeId).first<{ warm_since: string | null }>();
+    const dbNode = await env.DATABASE.prepare('SELECT warm_since FROM nodes WHERE id = ?')
+      .bind(nodeId)
+      .first<{ warm_since: string | null }>();
     expect(dbNode!.warm_since).toBeNull();
   });
 

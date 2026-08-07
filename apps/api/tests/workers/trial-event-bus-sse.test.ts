@@ -110,8 +110,8 @@ describe('TrialEventBus → SSE endpoint (capability)', () => {
     //    — tests the immediate-return path of the DO poll loop.
     const knowledgeEvent: TrialEvent = {
       type: 'trial.knowledge',
-      key: 'description',
-      value: 'capability-test description',
+      entity: 'Repository',
+      observation: 'capability-test description',
       at: Date.now(),
     };
     await appendViaBus(trialId, knowledgeEvent);
@@ -125,7 +125,7 @@ describe('TrialEventBus → SSE endpoint (capability)', () => {
       `https://api.test.example.com/api/trial/${trialId}/events`,
       {
         method: 'GET',
-        headers: { cookie, accept: 'text/event-stream' },
+        headers: { cookie, accept: 'text/event-stream', 'CF-Connecting-IP': '203.0.113.10' },
       },
     );
 
@@ -167,7 +167,7 @@ describe('TrialEventBus → SSE endpoint (capability)', () => {
         e.type === 'trial.knowledge',
     );
     expect(knowledgeFrame).toBeDefined();
-    expect(knowledgeFrame?.key).toBe('description');
-    expect(knowledgeFrame?.value).toBe('capability-test description');
+    expect(knowledgeFrame?.entity).toBe('Repository');
+    expect(knowledgeFrame?.observation).toBe('capability-test description');
   });
 });

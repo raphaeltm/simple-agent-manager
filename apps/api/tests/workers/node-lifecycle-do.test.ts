@@ -10,16 +10,19 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { NodeLifecycle } from '../../src/durable-objects/node-lifecycle';
 import { seedNode, seedUser, seedWorkspace } from './helpers/seed-d1';
+import {
+  captureNodeLifecycleExpectedError,
+  type NodeLifecycleTestDouble,
+} from './support/expected-error-doubles';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-function getStub(nodeId: string): DurableObjectStub<NodeLifecycle> {
+function getStub(nodeId: string): DurableObjectStub<NodeLifecycleTestDouble> {
   const id = env.NODE_LIFECYCLE.idFromName(nodeId);
-  return env.NODE_LIFECYCLE.get(id) as DurableObjectStub<NodeLifecycle>;
+  return env.NODE_LIFECYCLE.get(id) as DurableObjectStub<NodeLifecycleTestDouble>;
 }
 
 const TEST_USER_ID = 'user-nl-test-001';
@@ -47,14 +50,14 @@ async function getNodeFromD1(
 }
 
 async function getStoredState(
-  stub: DurableObjectStub<NodeLifecycle>
+  stub: DurableObjectStub<NodeLifecycleTestDouble>
 ): Promise<StoredNodeLifecycleState | null> {
   return await runInDurableObject(stub, async (instance) => {
     return (await instance.ctx.storage.get<StoredNodeLifecycleState>('state')) ?? null;
   });
 }
 
-async function getAlarm(stub: DurableObjectStub<NodeLifecycle>): Promise<number | null> {
+async function getAlarm(stub: DurableObjectStub<NodeLifecycleTestDouble>): Promise<number | null> {
   return await runInDurableObject(stub, async (instance) => {
     return await instance.ctx.storage.getAlarm();
   });
@@ -182,9 +185,17 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
       });
     });
 
-    await expect(stub.markIdle(nodeId, TEST_USER_ID)).rejects.toThrow(
-      'node_lifecycle_conflict: node is being destroyed'
-    );
+    const rejection = await captureNodeLifecycleExpectedError(stub, {
+      operation: 'markIdle',
+      args: [nodeId, TEST_USER_ID],
+    });
+    expect(rejection).toEqual({
+      threw: true,
+      name: 'Error',
+      message: 'node_lifecycle_conflict: node is being destroyed',
+    });
+
+    expect((await stub.getStatus()).status).toBe('destroying');
   });
 
   it('getStatus returns current state', async () => {
@@ -379,7 +390,6 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
         userId: TEST_USER_ID,
         deleteAt: Date.now() - 1_000,
       });
-      await instance.ctx.storage.setAlarm(Date.now() - 1);
     });
 
     await runInDurableObject(stub, async (instance) => {

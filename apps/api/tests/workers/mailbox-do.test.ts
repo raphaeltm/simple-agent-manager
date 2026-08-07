@@ -7,11 +7,14 @@
 import { env } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { ProjectData } from '../../src/durable-objects/project-data';
+import {
+  captureProjectDataExpectedError,
+  type ProjectDataTestDouble,
+} from './support/expected-error-doubles';
 
-function getStub(projectId: string): DurableObjectStub<ProjectData> {
+function getStub(projectId: string): DurableObjectStub<ProjectDataTestDouble> {
   const id = env.PROJECT_DATA.idFromName(projectId);
-  return env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectData>;
+  return env.PROJECT_DATA.get(id) as DurableObjectStub<ProjectDataTestDouble>;
 }
 
 describe('Agent Mailbox (Durable Messaging)', () => {
@@ -334,19 +337,26 @@ describe('Agent Mailbox (Durable Messaging)', () => {
         });
       }
 
-      // The 4th should fail
-      await expect(
-        stub.enqueueMailboxMessage({
-          targetSessionId: sessionId,
-          sourceTaskId: 'task-cap-overflow',
-          senderType: 'agent',
-          senderId: null,
-          messageClass: 'notify',
-          content: 'Overflow',
-          metadata: null,
-          maxMessages: 3,
-        }),
-      ).rejects.toThrow(/message limit/i);
+      const rejection = await captureProjectDataExpectedError(stub, {
+        operation: 'enqueueMailboxMessage',
+        args: [
+          {
+            targetSessionId: sessionId,
+            sourceTaskId: 'task-cap-overflow',
+            senderType: 'agent',
+            senderId: null,
+            messageClass: 'notify',
+            content: 'Overflow',
+            metadata: null,
+            maxMessages: 3,
+          },
+        ],
+      });
+
+      expect(rejection).toMatchObject({ threw: true });
+      expect(rejection.message).toMatch(/message limit/i);
+      const { total } = await stub.listMailboxMessages({});
+      expect(total).toBe(3);
     });
   });
 

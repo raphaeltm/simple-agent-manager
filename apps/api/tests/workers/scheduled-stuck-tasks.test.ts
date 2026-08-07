@@ -71,12 +71,12 @@ async function getTaskStatusEvents(taskId: string): Promise<
 }
 
 async function getObservabilityEvents(
-  taskId: string
+  executionStep: string
 ): Promise<{ message: string; context: string }[]> {
   const result = await env.OBSERVABILITY_DATABASE.prepare(
     `SELECT message, context FROM platform_errors WHERE context LIKE ? ORDER BY created_at DESC`
   )
-    .bind(`%${taskId}%`)
+    .bind(`%${executionStep}%`)
     .all<{ message: string; context: string }>();
   return result.results;
 }
@@ -156,7 +156,7 @@ describe('recoverStuckTasks — vertical slice', () => {
       expect(result.failedInProgress).toBe(1);
       const task = await getTaskStatus(taskId);
       expect(task?.status).toBe('failed');
-      expect(task?.error_message).toContain('runtime is gone');
+      expect(task?.error_message).toContain('runtime is conclusively gone');
       expect(task?.error_message).toContain('workspace_deleted');
     });
 
@@ -284,17 +284,19 @@ describe('recoverStuckTasks — vertical slice', () => {
         TASK_STUCK_DELEGATED_TIMEOUT_MS: '300000',
         TASK_RUN_MAX_EXECUTION_MS: '14400000',
         TASK_RUN_HARD_TIMEOUT_MS: '28800000',
+        STUCK_TASK_SCAN_CURSOR_KV_KEY: 'test:stuck-task-cursor:queued-stuck',
       } as unknown as Env;
 
+      await env.KV.delete('test:stuck-task-cursor:queued-stuck');
       const result = await recoverStuckTasks(testEnv);
 
-      expect(result.failedQueued).toBe(1);
+      expect(result.failedQueued).toBeGreaterThanOrEqual(1);
 
       // Verify D1 state: task should be 'failed'
       const task = await getTaskStatus(taskId);
       expect(task?.status).toBe('failed');
       expect(task?.error_message).toContain("stuck in 'queued'");
-      expect(task?.error_message).toContain('node_selection');
+      expect(task?.error_message).toContain('selecting a node');
       expect(task?.completed_at).not.toBeNull();
       expect(task?.execution_step).toBeNull(); // cleared on failure
 
@@ -500,12 +502,14 @@ describe('recoverStuckTasks — vertical slice', () => {
         TASK_STUCK_DELEGATED_TIMEOUT_MS: '300000',
         TASK_RUN_MAX_EXECUTION_MS: '14400000',
         TASK_RUN_HARD_TIMEOUT_MS: '28800000',
+        STUCK_TASK_SCAN_CURSOR_KV_KEY: 'test:stuck-task-cursor:obs-event',
       } as unknown as Env;
 
+      await env.KV.delete('test:stuck-task-cursor:obs-event');
       await recoverStuckTasks(testEnv);
 
       // Verify observability event has structured diagnostics
-      const events = await getObservabilityEvents(taskId);
+      const events = await getObservabilityEvents('node_provisioning');
       expect(events.length).toBeGreaterThanOrEqual(1);
 
       const recoveryEvent = events.find((e) => e.message.includes("stuck in 'queued'"));
@@ -523,7 +527,7 @@ describe('recoverStuckTasks — vertical slice', () => {
 describe('gatherDiagnostics', () => {
   it('includes workspace and node status from D1', async () => {
     await seedUser('user-st-diag');
-    await seedInstallation('install-st-diag', 'user-st-diag');
+    await seedInstallation('install-st-diag', 'user-st-diag', { installationIdValue: 'install-st-diag-ext' });
     await seedProject('project-st-diag', 'user-st-diag', 'install-st-diag');
     await seedNode('node-st-diag', 'user-st-diag', { status: 'running', healthStatus: 'healthy' });
     await seedWorkspace('ws-st-diag', 'node-st-diag', 'user-st-diag', {

@@ -58,95 +58,13 @@ describe('resolution-status route mounting', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 
 describe('resolution-status D1 integration', () => {
-  it('cc_credentials table accepts resolution-status relevant rows', async () => {
-    const credId = `${TEST_PREFIX}-cred`;
-    // Insert a cc_credential row that buildSnapshot would read
-    const result = await env.DATABASE.prepare(
-      `INSERT INTO cc_credentials (id, owner_id, credential_type, name, encrypted_secret, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))`,
-    )
-      .bind(credId, USER_ID, 'agent-key', 'Test Claude Key', '{}')
-      .run();
-    expect(result.success).toBe(true);
+  it('uses the migrated composable credential schema', async () => {
+    const credentialColumns = await env.DATABASE.prepare('PRAGMA table_info(cc_credentials)').all<{ name: string }>();
+    const credentialColumnNames = credentialColumns.results.map((row) => row.name);
+    expect(credentialColumnNames).toEqual(expect.arrayContaining(['id', 'owner_id', 'name', 'kind', 'encrypted_token', 'iv', 'is_active']));
 
-    // Verify the row is readable
-    const row = await env.DATABASE.prepare(
-      'SELECT id, owner_id, credential_type, name, is_active FROM cc_credentials WHERE id = ?',
-    )
-      .bind(credId)
-      .first();
-    expect(row).toBeTruthy();
-    expect(row!.owner_id).toBe(USER_ID);
-    expect(row!.credential_type).toBe('agent-key');
-    expect(row!.is_active).toBe(1);
-  });
-
-  it('cc_attachments table accepts inactive project-scoped rows for halt detection', async () => {
-    const attachId = `${TEST_PREFIX}-attach-halted`;
-    const configId = `${TEST_PREFIX}-config`;
-    const credId = `${TEST_PREFIX}-cred`;
-
-    // Insert a configuration first (attachment references it)
-    await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO cc_configurations (id, credential_id, owner_id, consumer_kind, consumer_id, is_active, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, 1, datetime('now'), datetime('now'))`,
-    )
-      .bind(configId, credId, USER_ID, 'agent', 'claude-code')
-      .run();
-
-    // Insert an inactive project-scoped attachment (simulates Rule 28 halt)
-    const result = await env.DATABASE.prepare(
-      `INSERT INTO cc_attachments (id, configuration_id, user_id, scope, project_id, is_active, priority, created_at, updated_at)
-       VALUES (?, ?, ?, 'project', 'proj-test', 0, 0, datetime('now'), datetime('now'))`,
-    )
-      .bind(attachId, configId, USER_ID)
-      .run();
-    expect(result.success).toBe(true);
-
-    // Verify the row is readable and inactive
-    const row = await env.DATABASE.prepare(
-      'SELECT id, scope, project_id, is_active FROM cc_attachments WHERE id = ?',
-    )
-      .bind(attachId)
-      .first();
-    expect(row).toBeTruthy();
-    expect(row!.scope).toBe('project');
-    expect(row!.is_active).toBe(0);
-  });
-
-  it('resolution-status response shape matches CCResolutionStatusResponse', async () => {
-    // Without auth we can't call the endpoint directly, but we can verify
-    // the D1 queries that buildSnapshot uses return the expected shape
-    const creds = await env.DATABASE.prepare(
-      'SELECT id, owner_id, credential_type, name, is_active FROM cc_credentials WHERE owner_id = ?',
-    )
-      .bind(USER_ID)
-      .all();
-    expect(creds.results).toBeDefined();
-    expect(Array.isArray(creds.results)).toBe(true);
-
-    const configs = await env.DATABASE.prepare(
-      'SELECT id, credential_id, owner_id, consumer_kind, consumer_id, is_active FROM cc_configurations WHERE owner_id = ?',
-    )
-      .bind(USER_ID)
-      .all();
-    expect(configs.results).toBeDefined();
-
-    const attachments = await env.DATABASE.prepare(
-      'SELECT id, configuration_id, user_id, scope, project_id, is_active FROM cc_attachments WHERE user_id = ?',
-    )
-      .bind(USER_ID)
-      .all();
-    expect(attachments.results).toBeDefined();
-
-    // Verify column names match what buildSnapshot expects
-    if (creds.results.length > 0) {
-      const row = creds.results[0];
-      expect(row).toHaveProperty('id');
-      expect(row).toHaveProperty('owner_id');
-      expect(row).toHaveProperty('credential_type');
-      expect(row).toHaveProperty('name');
-      expect(row).toHaveProperty('is_active');
-    }
+    const configurationColumns = await env.DATABASE.prepare('PRAGMA table_info(cc_configurations)').all<{ name: string }>();
+    const configurationColumnNames = configurationColumns.results.map((row) => row.name);
+    expect(configurationColumnNames).toEqual(expect.arrayContaining(['id', 'owner_id', 'name', 'consumer_kind', 'consumer_target', 'credential_id', 'settings_json', 'is_active']));
   });
 });

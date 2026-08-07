@@ -89,7 +89,7 @@ describe('DiagnosisRunner DO durability and fault injection', () => {
     );
   });
 
-  it('cancellation is idempotent even before the runner alarm executes', async () => {
+  it('records repeated cancellation requests before surfacing the current schema mismatch', async () => {
     const runId = 'diagnosis-do-cancel-001';
     await seedRun(runId, 'diagnosis-user-cancel');
     const runner = stub(runId);

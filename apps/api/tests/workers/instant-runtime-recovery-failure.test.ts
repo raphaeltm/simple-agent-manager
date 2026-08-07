@@ -1,6 +1,7 @@
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
+import type { ProjectData } from '../../src/durable-objects/project-data';
 import {
   persistRuntimeRecoveryFailed,
   RUNTIME_RECOVERY_DEGRADED_MESSAGE,
@@ -53,6 +54,38 @@ describe('Instant runtime terminal reconciliation with Miniflare D1', () => {
       workspaceId,
       autoProvisionedNodeId: nodeId,
       executionStep: 'agent_running',
+    });
+
+    const projectDataStub = env.PROJECT_DATA.get(
+      env.PROJECT_DATA.idFromName(projectId),
+    ) as DurableObjectStub<ProjectData>;
+    await runInDurableObject(projectDataStub, async (_instance, state) => {
+      const now = Date.now();
+      state.storage.sql.exec(
+        `INSERT INTO chat_sessions (id, workspace_id, topic, status, started_at, created_at, updated_at)
+         VALUES (?, ?, ?, 'active', ?, ?, ?)`,
+        chatSessionId,
+        workspaceId,
+        'Runtime recovery failure',
+        now,
+        now,
+        now,
+      );
+      state.storage.sql.exec(
+        `INSERT INTO acp_sessions
+           (id, chat_session_id, workspace_id, node_id, status, agent_type, initial_prompt, last_heartbeat_at, created_at, updated_at, assigned_at, started_at)
+         VALUES (?, ?, ?, ?, 'running', 'codex', ?, ?, ?, ?, ?, ?)`,
+        agentSessionId,
+        chatSessionId,
+        workspaceId,
+        nodeId,
+        'Runtime recovery failure',
+        now,
+        now,
+        now,
+        now,
+        now,
+      );
     });
 
     await persistRuntimeRecoveryFailed(env as unknown as Env, {

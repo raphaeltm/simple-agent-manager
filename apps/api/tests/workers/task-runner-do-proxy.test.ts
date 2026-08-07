@@ -7,8 +7,9 @@
  * Uses Miniflare with real DOs — no vi.mock().
  */
 import { env, runInDurableObject } from 'cloudflare:test';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
+import type { ProjectData } from '../../src/durable-objects/project-data';
 import type { TaskRunner } from '../../src/durable-objects/task-runner';
 import type { TaskRunnerState } from '../../src/durable-objects/task-runner/types';
 import {
@@ -17,6 +18,7 @@ import {
   getTaskRunnerStatus,
   startTaskRunnerDO,
 } from '../../src/services/task-runner-do';
+import { seedInstallation, seedNode, seedProject, seedTask, seedUser } from './helpers/seed-d1';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -70,6 +72,56 @@ function makeStartInput(taskId: string) {
     },
   };
 }
+
+// ---------------------------------------------------------------------------
+// D1 fixtures
+// ---------------------------------------------------------------------------
+
+const TASK_IDS = [
+  'task-start-001',
+  'task-start-defaults-001',
+  'task-start-idempotent-001',
+  'task-advance-running-001',
+  'task-advance-recovery-001',
+  'task-advance-error-001',
+  'task-ensure-alarm-001',
+  'task-status-init-001',
+  'task-redact-mcp-001',
+  'task-deterministic-001',
+];
+
+beforeEach(async () => {
+  await seedUser('user-tr-001', { githubId: 'gh-12345', email: 'test@example.com' });
+  await seedUser('user-tr-002', { githubId: 'gh-67890', email: 'minimal@example.com' });
+  await seedInstallation('inst-001', 'user-tr-001', { installationIdValue: 'inst-001-ext' });
+  await seedInstallation('inst-002', 'user-tr-002', { installationIdValue: 'inst-002-ext' });
+  await seedProject('proj-tr-001', 'user-tr-001', 'inst-001');
+  await seedProject('proj-tr-002', 'user-tr-002', 'inst-002');
+  await seedNode('node-warm-001', 'user-tr-001', { status: 'warm', warmSince: new Date().toISOString() });
+
+  for (const taskId of TASK_IDS) {
+    const projectId = taskId === 'task-start-defaults-001' ? 'proj-tr-002' : 'proj-tr-001';
+    const userId = taskId === 'task-start-defaults-001' ? 'user-tr-002' : 'user-tr-001';
+    await seedTask(taskId, projectId, userId, { status: 'delegated', executionStep: 'node_selection' });
+  }
+
+  const projectDataStub = env.PROJECT_DATA.get(
+    env.PROJECT_DATA.idFromName('proj-tr-001'),
+  ) as DurableObjectStub<ProjectData>;
+  await runInDurableObject(projectDataStub, async (_instance, state) => {
+    const now = Date.now();
+    state.storage.sql.exec(
+      'INSERT OR IGNORE INTO chat_sessions (id, workspace_id, topic, status, started_at, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      'chat-sess-001',
+      'ws-tr-chat-001',
+      'Task runner proxy fixture',
+      'active',
+      now,
+      now,
+      now,
+    );
+  });
+});
 
 // ---------------------------------------------------------------------------
 // Tests

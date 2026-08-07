@@ -7,7 +7,10 @@ import type { VmAgentContainer } from '../vm-agent-container';
 export type Env = {
   DATABASE: D1Database;
   VM_AGENT_CONTAINER?: DurableObjectNamespace<VmAgentContainer>;
+  NODE_HEARTBEAT_STALE_SECONDS?: string;
+  TASK_LIVENESS_MAX_ACP_SESSIONS?: string;
   TASK_LIVENESS_PROBE_TIMEOUT_MS?: string;
+  IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP?: string;
   BASE_DOMAIN?: string;
   DO_SUMMARY_SYNC_DEBOUNCE_MS?: string;
   MAX_SESSIONS_PER_PROJECT?: string;

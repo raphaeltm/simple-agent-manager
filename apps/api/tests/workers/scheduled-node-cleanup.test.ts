@@ -1,10 +1,10 @@
 /**
  * Vertical slice tests for node-cleanup scheduled job.
  *
- * Uses real D1 + OBSERVABILITY_DATABASE via Miniflare. External HTTP calls
- * (deleteNodeResources, stopWorkspaceOnNode, deleteWorkspaceOnNode) fail in
- * the test environment since there's no real Hetzner/VM agent — but the job
- * handles errors gracefully. We verify D1 state changes and observability
+ * Uses real D1 + OBSERVABILITY_DATABASE via Miniflare. VM-agent HTTP calls
+ * against fake *.vm.test.example.com nodes are stubbed at the system boundary;
+ * cloud-provider deletion still has no real Hetzner credentials, and the job
+ * handles those errors gracefully. We verify D1 state changes and observability
  * events that happen regardless of HTTP outcomes.
  *
  * Tests focus on:
@@ -14,7 +14,7 @@
  * - Stale warm nodes: error is caught (no Hetzner), counted in result
  */
 import { env } from 'cloudflare:test';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
@@ -31,13 +31,34 @@ const USER_ID = 'user-nc-test';
 const INSTALL_ID = 'install-nc-test';
 const PROJECT_ID = 'project-nc-test';
 
+const originalFetch = globalThis.fetch;
+
+beforeEach(() => {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url;
+      if (url.includes('.vm.test.example.com')) {
+        return new Response(null, { status: 204 });
+      }
+      return originalFetch(input);
+    })
+  );
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+});
+
 async function seedBaseData(): Promise<void> {
   await seedUser(USER_ID);
   await seedInstallation(INSTALL_ID, USER_ID);
   await seedProject(PROJECT_ID, USER_ID, INSTALL_ID);
 }
 
-async function getNodeStatus(nodeId: string): Promise<{ status: string; warm_since: string | null } | null> {
+async function getNodeStatus(
+  nodeId: string
+): Promise<{ status: string; warm_since: string | null } | null> {
   return env.DATABASE.prepare('SELECT status, warm_since FROM nodes WHERE id = ?')
     .bind(nodeId)
     .first<{ status: string; warm_since: string | null }>();
@@ -49,16 +70,22 @@ async function getWorkspaceStatus(wsId: string): Promise<{ status: string } | nu
     .first<{ status: string }>();
 }
 
-async function getNodeRuntimeStatus(nodeId: string): Promise<{ status: string; runtime: string } | null> {
+async function getNodeRuntimeStatus(
+  nodeId: string
+): Promise<{ status: string; runtime: string } | null> {
   return env.DATABASE.prepare('SELECT status, runtime FROM nodes WHERE id = ?')
     .bind(nodeId)
     .first<{ status: string; runtime: string }>();
 }
 
-async function getObservabilityEvents(recoveryType: string): Promise<{ id: string; message: string }[]> {
+async function getObservabilityEvents(
+  recoveryType: string
+): Promise<{ id: string; message: string }[]> {
   const result = await env.OBSERVABILITY_DATABASE.prepare(
-    `SELECT id, message FROM platform_errors WHERE context LIKE ? ORDER BY created_at DESC`,
-  ).bind(`%${recoveryType}%`).all<{ id: string; message: string }>();
+    `SELECT id, message FROM platform_errors WHERE context LIKE ? ORDER BY created_at DESC`
+  )
+    .bind(`%${recoveryType}%`)
+    .all<{ id: string; message: string }>();
   return result.results;
 }
 
@@ -77,9 +104,9 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         createdAt: oldDate,
         updatedAt: oldDate,
       });
-      await env.DATABASE.prepare(
-        `UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`,
-      ).bind(nodeId).run();
+      await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
+        .bind(nodeId)
+        .run();
       await seedWorkspace(wsId, nodeId, USER_ID, {
         projectId: PROJECT_ID,
         status: 'running',
@@ -218,8 +245,8 @@ describe('runNodeCleanupSweep — vertical slice', () => {
     });
   });
 
-  describe('orphaned node detection (Phase 4)', () => {
-    it('flags orphaned node (running, no workspaces, no warm_since, past grace)', async () => {
+  describe('orphaned node cleanup (Phase 5)', () => {
+    it('destroys an idle orphan node (running, no workspaces, no warm_since)', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-orphan-node';
       const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
@@ -227,23 +254,25 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       await seedNode(nodeId, USER_ID, {
         status: 'running',
         warmSince: null,
+        createdAt: oldDate,
         updatedAt: oldDate,
       });
       // No workspaces on this node
 
       const testEnv = {
         ...env,
-        ORPHANED_WORKSPACE_GRACE_PERIOD_MS: '1000',
+        NODE_ORPHAN_IDLE_TIMEOUT_MS: '1000',
       } as unknown as Env;
 
       const result = await runNodeCleanupSweep(testEnv);
 
-      expect(result.orphanedNodesFlagged).toBe(1);
+      expect(result.orphanedNodesDestroyed).toBe(1);
+      expect(await getNodeStatus(nodeId)).toMatchObject({ status: 'deleted' });
 
       // Verify observability event
-      const events = await getObservabilityEvents('orphaned_node');
+      const events = await getObservabilityEvents('idle_orphan_node_cleanup');
       expect(events.length).toBeGreaterThanOrEqual(1);
-      expect(events[0].message).toContain('Orphaned node detected');
+      expect(events[0].message).toContain('Destroyed idle orphan node');
     });
   });
 
@@ -398,9 +427,12 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         lifetimeDestroyed: expect.any(Number),
         lifetimeSkipped: expect.any(Number),
         orphanedWorkspacesFlagged: expect.any(Number),
-        orphanedNodesFlagged: expect.any(Number),
+        orphanedNodesDestroyed: expect.any(Number),
+        orphanedNodesSkipped: expect.any(Number),
         stoppedWorkspacesDeleted: expect.any(Number),
         cfContainersDestroyed: expect.any(Number),
+        incompatibleDestroyed: expect.any(Number),
+        incompatibleSkipped: expect.any(Number),
         errors: expect.any(Number),
       });
     });

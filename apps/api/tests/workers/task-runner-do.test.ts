@@ -18,7 +18,12 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import type { StartTaskInput, TaskRunner, TaskRunnerState } from '../../src/durable-objects/task-runner';
+import type {
+  StartTaskInput,
+  TaskRunner,
+  TaskRunnerState,
+} from '../../src/durable-objects/task-runner';
+import { encrypt } from '../../src/services/encryption';
 import { seedInstallation, seedProject, seedTask, seedUser } from './helpers/seed-d1';
 
 // ---------------------------------------------------------------------------
@@ -38,6 +43,18 @@ async function seedTestData(): Promise<void> {
   await seedUser(TEST_USER_ID, { githubId: 'gh-tr-test', email: 'tr-test@test.com' });
   await seedInstallation(TEST_INSTALLATION_ID, TEST_USER_ID);
   await seedProject(TEST_PROJECT_ID, TEST_USER_ID, TEST_INSTALLATION_ID);
+
+  const { ciphertext, iv } = await encrypt(
+    'hetzner-token-for-task-runner-tests',
+    env.ENCRYPTION_KEY
+  );
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO credentials
+       (id, user_id, provider, credential_type, credential_kind, is_active, encrypted_token, iv, created_at, updated_at)
+     VALUES ('cred-tr-test-cloud', ?, 'hetzner', 'cloud-provider', 'api-key', 1, ?, ?, datetime('now'), datetime('now'))`
+  )
+    .bind(TEST_USER_ID, ciphertext, iv)
+    .run();
 }
 
 async function seedTestTask(taskId: string): Promise<void> {
@@ -83,17 +100,35 @@ function buildStartInput(taskId: string): StartTaskInput {
   };
 }
 
-async function getTaskFromD1(taskId: string): Promise<{ status: string; execution_step: string | null; error_message: string | null } | null> {
+async function getTaskFromD1(
+  taskId: string
+): Promise<{ status: string; execution_step: string | null; error_message: string | null } | null> {
   return await env.DATABASE.prepare(
-    `SELECT status, execution_step, error_message FROM tasks WHERE id = ?`,
-  ).bind(taskId).first<{ status: string; execution_step: string | null; error_message: string | null }>();
+    `SELECT status, execution_step, error_message FROM tasks WHERE id = ?`
+  )
+    .bind(taskId)
+    .first<{ status: string; execution_step: string | null; error_message: string | null }>();
 }
 
-async function getStatusEvents(taskId: string): Promise<Array<{ from_status: string | null; to_status: string; reason: string | null }>> {
+async function getStatusEvents(
+  taskId: string
+): Promise<Array<{ from_status: string | null; to_status: string; reason: string | null }>> {
   const result = await env.DATABASE.prepare(
-    `SELECT from_status, to_status, reason FROM task_status_events WHERE task_id = ? ORDER BY created_at ASC`,
-  ).bind(taskId).all<{ from_status: string | null; to_status: string; reason: string | null }>();
+    `SELECT from_status, to_status, reason FROM task_status_events WHERE task_id = ? ORDER BY created_at ASC`
+  )
+    .bind(taskId)
+    .all<{ from_status: string | null; to_status: string; reason: string | null }>();
   return result.results;
+}
+
+async function startWithoutAlarm(
+  stub: DurableObjectStub<TaskRunner>,
+  input: StartTaskInput
+): Promise<void> {
+  await runInDurableObject(stub, async (instance) => {
+    await instance.start(input);
+    await instance.ctx.storage.deleteAlarm();
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -109,7 +144,7 @@ describe('TaskRunner DO — state persistence and idempotency', () => {
     const stub = getStub(taskId);
     const input = buildStartInput(taskId);
 
-    await stub.start(input);
+    await startWithoutAlarm(stub, input);
 
     // Read internal state via getStatus
     const status = await stub.getStatus();
@@ -139,12 +174,12 @@ describe('TaskRunner DO — state persistence and idempotency', () => {
     const input = buildStartInput(taskId);
 
     // First call
-    await stub.start(input);
+    await startWithoutAlarm(stub, input);
     const statusAfterFirst = await stub.getStatus();
     const createdAt = statusAfterFirst!.createdAt;
 
     // Second call — should be a no-op
-    await stub.start(input);
+    await startWithoutAlarm(stub, input);
     const statusAfterSecond = await stub.getStatus();
 
     // CreatedAt should not change (state was not re-initialized)
@@ -159,7 +194,7 @@ describe('TaskRunner DO — state persistence and idempotency', () => {
 
     const stub = getStub(taskId);
     const input = buildStartInput(taskId);
-    await stub.start(input);
+    await startWithoutAlarm(stub, input);
 
     // Manually inject a mock mcpToken into DO state
     await runInDurableObject(stub, async (instance) => {
@@ -188,7 +223,7 @@ describe('TaskRunner DO — advanceWorkspaceReady', () => {
     await seedTestTask(taskId);
 
     const stub = getStub(taskId);
-    await stub.start(buildStartInput(taskId));
+    await startWithoutAlarm(stub, buildStartInput(taskId));
 
     // Send workspace ready signal
     await stub.advanceWorkspaceReady('running', null);
@@ -205,7 +240,7 @@ describe('TaskRunner DO — advanceWorkspaceReady', () => {
     await seedTestTask(taskId);
 
     const stub = getStub(taskId);
-    await stub.start(buildStartInput(taskId));
+    await startWithoutAlarm(stub, buildStartInput(taskId));
 
     await stub.advanceWorkspaceReady('error', 'container failed to start');
 
@@ -221,7 +256,7 @@ describe('TaskRunner DO — advanceWorkspaceReady', () => {
     await seedTestTask(taskId);
 
     const stub = getStub(taskId);
-    await stub.start(buildStartInput(taskId));
+    await startWithoutAlarm(stub, buildStartInput(taskId));
 
     // Mark DO as completed
     await runInDurableObject(stub, async (instance) => {
@@ -244,49 +279,38 @@ describe('TaskRunner DO — advanceWorkspaceReady', () => {
 });
 
 describe('TaskRunner DO — failure handling', () => {
-  it('failTask updates D1 task status to failed and records status event', async () => {
+  it('an unknown execution step fails the task and records a status event', async () => {
     await seedTestData();
     const taskId = 'tr-test-fail-001';
     await seedTestTask(taskId);
 
     const stub = getStub(taskId);
-    await stub.start(buildStartInput(taskId));
-
-    // Manually trigger failTask by calling the alarm handler, which will
-    // try node_selection, fail (no nodes in DB for this user), exhaust retries,
-    // and call failTask.
-    //
-    // Set retryCount to max to ensure immediate failure (no backoff).
     await runInDurableObject(stub, async (instance) => {
+      await instance.start(buildStartInput(taskId));
+      await instance.ctx.storage.deleteAlarm();
       const state = await instance.ctx.storage.get<TaskRunnerState>('state');
       if (state) {
-        // Set retry count at maximum so next failure is permanent
-        state.retryCount = 100;
+        state.currentStep = 'unsupported_test_step' as TaskRunnerState['currentStep'];
         await instance.ctx.storage.put('state', state);
       }
-    });
-
-    // Trigger alarm — handleNodeSelection will try to query D1 for nodes
-    // and will fail (no nodes available), which after max retries triggers failTask
-    await runInDurableObject(stub, async (instance) => {
       await instance.alarm();
     });
 
-    // Verify DO is marked completed
     const status = await stub.getStatus();
     expect(status!.completed).toBe(true);
 
-    // Verify D1 task status is 'failed'
     const dbTask = await getTaskFromD1(taskId);
     expect(dbTask!.status).toBe('failed');
-    expect(dbTask!.error_message).toBeTruthy();
+    expect(dbTask!.error_message).toContain('Unknown execution step: unsupported_test_step');
 
-    // Verify a status event was recorded
     const events = await getStatusEvents(taskId);
-    expect(events.length).toBeGreaterThanOrEqual(1);
-    const failEvent = events.find(e => e.to_status === 'failed');
-    expect(failEvent).toBeTruthy();
-    expect(failEvent!.reason).toBeTruthy();
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        from_status: 'delegated',
+        to_status: 'failed',
+        reason: expect.stringContaining('Unknown execution step: unsupported_test_step'),
+      })
+    );
   });
 
   it('alarm is a no-op on completed state', async () => {
@@ -295,7 +319,7 @@ describe('TaskRunner DO — failure handling', () => {
     await seedTestTask(taskId);
 
     const stub = getStub(taskId);
-    await stub.start(buildStartInput(taskId));
+    await startWithoutAlarm(stub, buildStartInput(taskId));
 
     // Mark completed
     await runInDurableObject(stub, async (instance) => {

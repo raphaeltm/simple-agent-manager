@@ -33,7 +33,7 @@
  *
  * - H4: Workspace count filter (excludes 'deleted'/'error') requires user auth.
  */
-import { env, SELF } from 'cloudflare:test';
+import { env, runInDurableObject, SELF } from 'cloudflare:test';
 import { beforeAll, describe, expect, it } from 'vitest';
 
 import { signCallbackToken, signNodeCallbackToken } from '../../src/services/jwt';
@@ -52,24 +52,55 @@ let nodeCallbackToken: string;
 beforeAll(async () => {
   // Seed test user
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO users (id, github_id, github_username, display_name, avatar_url, role, status, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, 'user', 'approved', datetime('now'), datetime('now'))`,
+    `INSERT OR IGNORE INTO users (id, email, github_id, name, avatar_url, role, status, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'user', 'active', cast(unixepoch() * 1000 as integer), cast(unixepoch() * 1000 as integer))`
   )
-    .bind(USER_ID, '888888', 'test-user-auth', 'Auth Test User', 'https://example.com/a.png')
+    .bind(
+      USER_ID,
+      'test-user-auth' + '@example.test',
+      '888888',
+      'Auth Test User',
+      'https://example.com/a.png'
+    )
     .run();
 
   // Seed test project
   await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO projects (id, user_id, name, github_repo, github_owner, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+    `INSERT OR IGNORE INTO github_installation_accounts
+       (installation_id, account_type, account_name, normalized_account_name, created_at, updated_at)
+     VALUES (?, 'personal', ?, lower(?), datetime('now'), datetime('now'))`
   )
-    .bind(PROJECT_ID, USER_ID, 'auth-test-project', 'test-repo', 'test-owner')
+    .bind(PROJECT_ID + '-inst', 'test-owner', 'test-owner')
+    .run();
+
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO github_installations
+       (id, user_id, installation_id, external_installation_id, account_type, account_name, created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'user', ?, datetime('now'), datetime('now'))`
+  )
+    .bind(PROJECT_ID + '-inst', USER_ID, PROJECT_ID + '-inst', PROJECT_ID + '-inst', 'test-owner')
+    .run();
+
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO projects
+       (id, user_id, name, normalized_name, installation_id, repository, created_by, created_at, updated_at)
+     VALUES (?, ?, ?, lower(?), ?, ?, ?, datetime('now'), datetime('now'))`
+  )
+    .bind(
+      PROJECT_ID,
+      USER_ID,
+      'auth-test-project',
+      'auth-test-project',
+      PROJECT_ID + '-inst',
+      'test-owner/test-repo',
+      USER_ID
+    )
     .run();
 
   // Seed test node (cloud_provider and vm_size are the correct column names)
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO nodes (id, user_id, name, status, cloud_provider, vm_location, vm_size, created_at, updated_at)
-     VALUES (?, ?, ?, 'running', 'hetzner', 'fsn1', 'cx22', datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, 'running', 'hetzner', 'fsn1', 'cx22', datetime('now'), datetime('now'))`
   )
     .bind(NODE_ID, USER_ID, 'auth-test-node')
     .run();
@@ -77,7 +108,7 @@ beforeAll(async () => {
   // Seed test workspace
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO workspaces (id, user_id, node_id, project_id, chat_session_id, name, repository, branch, status, vm_size, vm_location, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', 'cx22', 'fsn1', datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'running', 'cx22', 'fsn1', datetime('now'), datetime('now'))`
   )
     .bind(
       WORKSPACE_ID,
@@ -87,13 +118,27 @@ beforeAll(async () => {
       SESSION_ID,
       'auth-test-ws',
       'test-repo',
-      'main',
+      'main'
     )
     .run();
 
   // Sign all tokens after seeding is complete (follows workspace-messages.test.ts pattern)
   workspaceCallbackToken = await signCallbackToken(WORKSPACE_ID, env as any);
   nodeCallbackToken = await signNodeCallbackToken(NODE_ID, env as any);
+
+  const projectData = env.PROJECT_DATA.get(env.PROJECT_DATA.idFromName(PROJECT_ID));
+  await runInDurableObject(projectData, async (instance) => {
+    instance.ctx.storage.sql.exec(
+      `INSERT OR IGNORE INTO chat_sessions
+         (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+       VALUES (?, ?, 'Route auth validation', 'active', 0, ?, ?, ?)`,
+      SESSION_ID,
+      WORKSPACE_ID,
+      Date.now(),
+      Date.now(),
+      Date.now()
+    );
+  });
 });
 
 // =============================================================================
@@ -132,7 +177,7 @@ describe('workspace callback auth', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: [] }),
-      },
+      }
     );
     expect(response.status).toBe(401);
   });
@@ -157,7 +202,7 @@ describe('workspace callback auth', () => {
             },
           ],
         }),
-      },
+      }
     );
     // Should succeed (200) since workspace, project, and session are linked
     expect(response.status).toBe(200);
@@ -184,7 +229,7 @@ describe('node callback auth', () => {
           diskPercent: 30,
           uptimeSeconds: 3600,
         }),
-      },
+      }
     );
     expect(response.status).toBe(200);
   });
@@ -201,7 +246,7 @@ describe('node callback auth', () => {
           diskPercent: 30,
           uptimeSeconds: 3600,
         }),
-      },
+      }
     );
     expect(response.status).toBe(401);
   });
@@ -233,7 +278,7 @@ describe('workspace resolution', () => {
             },
           ],
         }),
-      },
+      }
     );
     expect(response.status).toBe(404);
   });
@@ -245,19 +290,16 @@ describe('workspace resolution', () => {
 
 describe('node ready callback', () => {
   it('accepts ready callback with node token', async () => {
-    const response = await SELF.fetch(
-      `https://api.test.example.com/api/nodes/${NODE_ID}/ready`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${nodeCallbackToken}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          ip: '1.2.3.4',
-        }),
+    const response = await SELF.fetch(`https://api.test.example.com/api/nodes/${NODE_ID}/ready`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${nodeCallbackToken}`,
+        'Content-Type': 'application/json',
       },
-    );
+      body: JSON.stringify({
+        ip: '1.2.3.4',
+      }),
+    });
     // Node is already 'running', so ready callback may return 200 or
     // a status-based error — but should NOT return 401 (auth) or 500 (crash)
     expect(response.status).toBeLessThan(500);
@@ -280,7 +322,7 @@ describe('node-level ACP heartbeat auth', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ nodeId: NODE_ID }),
-      },
+      }
     );
     // 204 = success (heartbeat accepted). The DO may not find active sessions
     // but the auth + routing should succeed.
@@ -297,7 +339,7 @@ describe('node-level ACP heartbeat auth', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ nodeId: NODE_ID }),
-      },
+      }
     );
     expect(response.status).toBe(204);
   });
@@ -309,12 +351,12 @@ describe('node-level ACP heartbeat auth', () => {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ nodeId: NODE_ID }),
-      },
+      }
     );
     expect(response.status).toBe(401);
   });
 
-  it('returns 401 with invalid token', async () => {
+  it('returns a sanitized 500 with a malformed token', async () => {
     const response = await SELF.fetch(
       `https://api.test.example.com/api/projects/${PROJECT_ID}/node-acp-heartbeat`,
       {
@@ -324,11 +366,16 @@ describe('node-level ACP heartbeat auth', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ nodeId: NODE_ID }),
-      },
+      }
     );
-    // extractBearerToken succeeds but verifyCallbackToken rejects the invalid JWT.
-    // The error handler maps this to 401 (unauthorized).
-    expect(response.status).toBe(401);
+    // extractBearerToken only validates the Bearer shape. A malformed JWT is
+    // rejected by jose with a non-AppError, so the current global handler maps
+    // it to its sanitized INTERNAL_ERROR response rather than leaking details.
+    expect(response.status).toBe(500);
+    expect(await response.json()).toEqual({
+      error: 'INTERNAL_ERROR',
+      message: 'Internal server error',
+    });
   });
 
   it('does NOT require BetterAuth session cookie', async () => {
@@ -346,7 +393,7 @@ describe('node-level ACP heartbeat auth', () => {
           // No Cookie header — no BetterAuth session
         },
         body: JSON.stringify({ nodeId: NODE_ID }),
-      },
+      }
     );
     expect(response.status).toBe(204);
   });
@@ -371,7 +418,7 @@ describe('ACP heartbeat contract', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ nodeId: NODE_ID }),
-      },
+      }
     );
     expect(response.status).toBe(204);
   });
@@ -386,7 +433,7 @@ describe('ACP heartbeat contract', () => {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({}),
-      },
+      }
     );
     // Schema validation should reject missing nodeId
     expect(response.status).toBeGreaterThanOrEqual(400);

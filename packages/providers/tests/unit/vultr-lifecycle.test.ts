@@ -121,7 +121,9 @@ describe('VultrProvider createVM', () => {
       createInstance: createMockVultrInstance({ id: 'i-1', main_ip: '0.0.0.0', status: 'pending' }),
       getInstance: createMockVultrInstance({ id: 'i-1', main_ip: '203.0.113.5', status: 'active' }),
     });
-    const provider = newProvider(fetchMock);
+    // Keep the budget comfortably above monorepo CI timer jitter so the ready
+    // poll is guaranteed to run before the provider's best-effort deadline.
+    const provider = newProvider(fetchMock, { ipPollTimeoutMs: 500 });
 
     const vm = await provider.createVM({ name: 'node', size: 'small', location: 'fra', userData: 'x' });
     expect(vm.ip).toBe('203.0.113.5');
@@ -275,7 +277,8 @@ describe('VultrProvider createVM', () => {
       }
       return Promise.resolve(new Response(JSON.stringify({ error: 'nf', status: 404 }), { status: 404 }));
     });
-    const provider = newProvider(fetchMock, { ipPollTimeoutMs: 20, ipPollIntervalMs: 5, logger: { warn, info: vi.fn() } });
+    // Keep the budget comfortably above CI timer jitter so the poll GET failure path is exercised deterministically.
+    const provider = newProvider(fetchMock, { ipPollTimeoutMs: 500, ipPollIntervalMs: 5, logger: { warn, info: vi.fn() } });
 
     const vm = await provider.createVM({ name: 'node', size: 'small', location: 'fra', userData: 'x' });
     expect(vm.ip).toBe('');

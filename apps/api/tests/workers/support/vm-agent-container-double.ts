@@ -67,4 +67,13 @@ export class VmAgentContainerTestDouble extends DurableObject<Env> {
   async __seedLifecycle(status: VmAgentContainerLifecycleStatus): Promise<void> {
     await this.ctx.storage.put(LIFECYCLE_STATUS_KEY, status);
   }
+
+  /**
+   * Production cleanup calls VmAgentContainer.destroyForUser() after a stuck
+   * cf-container task is failed. The workers tests only need the RPC contract
+   * and persisted terminal lifecycle; no real container runtime exists here.
+   */
+  async destroyForUser(_userId: string): Promise<void> {
+    await this.ctx.storage.put(LIFECYCLE_STATUS_KEY, 'stopped');
+  }
 }

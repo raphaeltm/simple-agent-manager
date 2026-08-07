@@ -161,6 +161,13 @@ Agents can search messages using the `search_messages` MCP tool.
 
 Agent conversations and task sessions stay active until they complete, fail, or are explicitly stopped.
 
+An idle timer is a resource-cleanup signal, not evidence that an agent succeeded. Before an idle
+cleanup can stop a workspace or terminalize its task, SAM checks the task's runtime lifecycle. A
+live runtime is preserved. Sleeping, waking, recovering, restoring, timed-out probes, probe errors,
+and unknown runtime state are also preserved because they are inconclusive. Only a conclusively
+dead runtime can be terminalized by the sweep, and that transition is recorded as `failed` with
+diagnostic context rather than `completed`.
+
 SAM also collapses platform-injected setup messages in the chat timeline. Those messages contain project instructions, task context, and policy that the agent received before it started. They remain available for debugging, but they no longer dominate the visible conversation.
 
 ### Sleeping and recovering sessions

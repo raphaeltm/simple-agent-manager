@@ -14,6 +14,7 @@ import { beforeAll, describe, expect, it } from 'vitest';
 
 import * as schema from '../../src/db/schema';
 import { encrypt } from '../../src/services/encryption';
+import { seedInstallation, seedProject } from './helpers/seed-d1';
 
 const TEST_PREFIX = `cc-wire-${Date.now()}`;
 const USER_A = `${TEST_PREFIX}-user-a`;
@@ -38,13 +39,11 @@ beforeAll(async () => {
       .run();
   }
 
-  // Seed a project for Rule 28 tests
-  await env.DATABASE.prepare(
-    `INSERT OR IGNORE INTO projects (id, user_id, name, created_at, updated_at)
-     VALUES (?, ?, ?, datetime('now'), datetime('now'))`
-  )
-    .bind(PROJECT_ID, USER_A, 'Test Project')
-    .run();
+  // Seed a project for Rule 28 tests using the current project schema.
+  await seedInstallation(`${TEST_PREFIX}-install-a`, USER_A, {
+    installationIdValue: `${TEST_PREFIX}-install-a-ext`,
+  });
+  await seedProject(PROJECT_ID, USER_A, `${TEST_PREFIX}-install-a`);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -577,13 +576,11 @@ describe('enabled platform default does not short-circuit user backfill', () => 
         .run();
     }
 
-    // Project owned by USER_E for the Rule-28-via-platformOnly halt test
-    await env.DATABASE.prepare(
-      `INSERT OR IGNORE INTO projects (id, user_id, name, created_at, updated_at)
-       VALUES (?, ?, ?, datetime('now'), datetime('now'))`
-    )
-      .bind(PROJECT_E, USER_E, 'Test Project E')
-      .run();
+    // Project owned by USER_E for the Rule-28-via-platformOnly halt test.
+    await seedInstallation(`${TEST_PREFIX}-install-e`, USER_E, {
+      installationIdValue: `${TEST_PREFIX}-install-e-ext`,
+    });
+    await seedProject(PROJECT_E, USER_E, `${TEST_PREFIX}-install-e`);
 
     // User C owns their OWN claude-code oauth-token, in the LEGACY table only (empty cc_*)
     await seedLegacyCredential({

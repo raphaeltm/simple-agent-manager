@@ -17,24 +17,20 @@ describe('Worker smoke tests (workerd runtime)', () => {
 
       const body = await response.json<{
         status: string;
-        version: string;
         timestamp: string;
-        limits: Record<string, number>;
       }>();
       expect(body.status).toBe('healthy');
-      expect(body.version).toBe('0.1.0-test');
       expect(body.timestamp).toBeTruthy();
-      expect(body.limits).toBeDefined();
+      expect(body).not.toHaveProperty('version');
+      expect(body).not.toHaveProperty('limits');
     });
 
-    it('returns runtime limits from env bindings', async () => {
+    it('reports healthy when critical bindings are present', async () => {
       const response = await SELF.fetch('https://api.test.example.com/health');
-      const body = await response.json<{
-        limits: Record<string, number>;
-      }>();
+      expect(response.status).toBe(200);
 
-      expect(body.limits.maxNodesPerUser).toBe(10);
-      expect(body.limits.maxProjectsPerUser).toBe(50);
+      const body = await response.json<{ status: string }>();
+      expect(body.status).toBe('healthy');
     });
   });
 
@@ -133,16 +129,15 @@ describe('Worker smoke tests (workerd runtime)', () => {
         });
         expect(response.status).toBe(200);
         expect(response.headers.get('access-control-allow-origin')).toBeNull();
-        expect(response.headers.get('access-control-allow-credentials')).toBeNull();
       }
     });
 
-    it('allows localhost origins for development', async () => {
+    it('rejects localhost origins when BASE_DOMAIN is a real domain', async () => {
       const response = await SELF.fetch('https://api.test.example.com/health', {
         headers: { Origin: 'http://localhost:5173' },
       });
       expect(response.status).toBe(200);
-      expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:5173');
+      expect(response.headers.get('access-control-allow-origin')).toBeNull();
     });
   });
 

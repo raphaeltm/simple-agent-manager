@@ -16,4 +16,5 @@
  */
 export * from '../../../src/index';
 export { default } from '../../../src/index';
+export { NodeLifecycleTestDouble, ProjectDataTestDouble } from './expected-error-doubles';
 export { VmAgentContainerTestDouble } from './vm-agent-container-double';

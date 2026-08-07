@@ -5,6 +5,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 env:
   DEVCONTAINERS_CLI_VERSION: 0.80.2
@@ -368,6 +369,8 @@ jobs:
 
       - name: Dependency governance pinning check
         run: pnpm quality:dependency-governance
+      - name: CI workflow wiring tests
+        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts scripts/quality/ci-worker-suite.test.ts
 
   durable-object-workers:
     name: Durable Object Workers
@@ -390,13 +393,11 @@ jobs:
       - name: Check Durable Object migration safety
         run: pnpm quality:do-migration-safety
 
-      - name: Build API workspace dependencies
-        run: pnpm --filter '@simple-agent-manager/api^...' build
+      - name: Build packages
+        run: pnpm build
 
-      # Keep this task scoped to the debugging vertical slice. A separate SAM
-      # task owns wiring the complete historical Worker/DO corpus into CI.
-      - name: Test diagnosis and incident Durable Object boundaries
-        run: pnpm --filter @simple-agent-manager/api test:debugging-workers
+      - name: Run Worker and Durable Object suites
+        run: pnpm --filter @simple-agent-manager/api test:workers
 
   pulumi-infra:
     name: Pulumi Infrastructure Tests
