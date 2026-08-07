@@ -327,6 +327,36 @@ describe('incompatible vm-agent cleanup', () => {
     expect(result.incompatibleDestroyed).toBe(1);
   });
 
+  it('protects an in-progress task claim but does not let a completed task pin a stale VM', async () => {
+    for (const nodeId of ['claimed-in-progress', 'claimed-completed']) {
+      seedNode({ id: nodeId, createdAt: ago(2 * HOUR), updatedAt: ago(1000) });
+      sqlite
+        ?.prepare(`UPDATE nodes SET agent_version = 'old-sha' WHERE id = ?`)
+        .run(nodeId);
+      seedWorkspace({
+        id: `ws-stopped-${nodeId}`,
+        nodeId,
+        status: 'stopped',
+        updatedAt: ago(1 * MINUTE),
+      });
+    }
+    sqlite
+      ?.prepare(
+        `INSERT INTO tasks (id, workspace_id, status, auto_provisioned_node_id, updated_at)
+         VALUES ('task-in-progress', NULL, 'in_progress', 'claimed-in-progress', ?),
+                ('task-completed', NULL, 'completed', 'claimed-completed', ?)`
+      )
+      .run(ago(2 * HOUR), ago(1 * MINUTE));
+    const env = { ...makeEnv(), VM_AGENT_REQUIRED_VERSION: 'current-sha' } as Env;
+
+    const result = await runNodeCleanupSweep(env);
+
+    expect(deleteCalls).not.toContain('claimed-in-progress');
+    expect(deleteCalls).toContain('claimed-completed');
+    expect(result.incompatibleSkipped).toBe(1);
+    expect(result.incompatibleDestroyed).toBe(1);
+  });
+
   it('destroys an idle managed VM whose agent build does not match the deployment requirement', async () => {
     seedNode({ id: 'legacy-idle', createdAt: ago(10 * HOUR), updatedAt: ago(1000) });
     sqlite?.prepare(`UPDATE nodes SET agent_version = 'old-sha' WHERE id = 'legacy-idle'`).run();

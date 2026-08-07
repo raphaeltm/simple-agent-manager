@@ -172,7 +172,17 @@ export async function handleNodeProvisioning(
 
   // If we already created the node (retry scenario, or recovery above), check its status
   if (state.stepResults.nodeId) {
-    // Check timeout before polling
+    const node = await rc.env.DATABASE.prepare(
+      `SELECT id, status, error_message FROM nodes WHERE id = ?`
+    )
+      .bind(state.stepResults.nodeId)
+      .first<{ id: string; status: string; error_message: string | null }>();
+
+    await assertClaimedNodeAvailable(state, rc, node, 'node_provisioning');
+
+    // Availability must win over the generic timeout. Otherwise a late poll for
+    // a deleted node leaves autoProvisioned=true and failure cleanup may try to
+    // return an already-gone resource to the warm pool.
     const timeoutMs = rc.getProvisionTimeoutMs();
     const elapsed = Date.now() - state.provisioningStartedAt;
     if (elapsed > timeoutMs) {
@@ -182,14 +192,6 @@ export async function handleNodeProvisioning(
         { permanent: true }
       );
     }
-
-    const node = await rc.env.DATABASE.prepare(
-      `SELECT id, status, error_message FROM nodes WHERE id = ?`
-    )
-      .bind(state.stepResults.nodeId)
-      .first<{ id: string; status: string; error_message: string | null }>();
-
-    await assertClaimedNodeAvailable(state, rc, node, 'node_provisioning');
 
     if (node?.status === 'running') {
       // Already provisioned — advance
@@ -416,15 +418,6 @@ export async function handleNodeAgentReady(
     await rc.ctx.storage.put('state', state);
   }
 
-  // Check timeout
-  const timeoutMs = rc.getAgentReadyTimeoutMs();
-  const elapsed = Date.now() - state.agentReadyStartedAt;
-  if (elapsed > timeoutMs) {
-    throw Object.assign(new Error(`Node agent not ready within ${timeoutMs}ms`), {
-      permanent: true,
-    });
-  }
-
   // Check agent health via D1 heartbeat records.
   //
   // IMPORTANT: We do NOT fetch the VM agent directly via its vm-{nodeId} hostname.
@@ -449,6 +442,16 @@ export async function handleNodeAgentReady(
     }>();
 
   await assertClaimedNodeAvailable(state, rc, node, 'node_agent_ready');
+
+  // As in provisioning, classify a missing/deleted node before the timeout so
+  // failure cleanup cannot attempt to warm a resource that no longer exists.
+  const timeoutMs = rc.getAgentReadyTimeoutMs();
+  const elapsed = Date.now() - state.agentReadyStartedAt;
+  if (elapsed > timeoutMs) {
+    throw Object.assign(new Error(`Node agent not ready within ${timeoutMs}ms`), {
+      permanent: true,
+    });
+  }
 
   if (
     isNodeAgentReadyForWorkspaceDispatch(

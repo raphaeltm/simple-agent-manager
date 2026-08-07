@@ -27,4 +27,3 @@ failing statement first.
 - A regression test fails against the current statement and passes with the fix.
 - The sweep remains bounded and preserves active/recoverable tasks.
 - Production observability shows successful `stuck_tasks` sweeps after deployment.
-

@@ -116,9 +116,9 @@ function makeContext(overrides: Partial<TaskRunnerContext> = {}): TaskRunnerCont
 // ---------------------------------------------------------------------------
 
 describe('handleNodeProvisioning — timeout', () => {
-  it('fails immediately when its claimed node row disappears', async () => {
+  it('classifies a missing claimed node before the generic provisioning timeout', async () => {
     const state = makeState({
-      provisioningStartedAt: Date.now() - 65_000,
+      provisioningStartedAt: Date.now() - DEFAULT_TASK_RUNNER_PROVISION_TIMEOUT_MS - 1_000,
       stepResults: {
         ...makeState().stepResults,
         nodeId: 'node-deleted-during-provisioning',
@@ -223,6 +223,11 @@ describe('handleNodeProvisioning — timeout', () => {
     });
 
     const rc = makeContext();
+    (rc.env.DATABASE.prepare as ReturnType<typeof vi.fn>).mockReturnValue({
+      bind: vi.fn().mockReturnValue({
+        first: vi.fn().mockResolvedValue({ id: 'node-1', status: 'creating', error_message: null }),
+      }),
+    });
 
     try {
       await handleNodeProvisioning(state, rc);
@@ -317,10 +322,10 @@ describe('handleNodeProvisioning — timeout', () => {
 // ---------------------------------------------------------------------------
 
 describe('timeout parity — node_agent_ready vs node_provisioning', () => {
-  it('fails immediately when cleanup marks the claimed node deleted during agent readiness', async () => {
+  it('classifies a deleted claimed node before the generic agent-ready timeout', async () => {
     const state = makeState({
       currentStep: 'node_agent_ready',
-      agentReadyStartedAt: Date.now() - 65_000,
+      agentReadyStartedAt: Date.now() - 1_000_000,
       stepResults: {
         ...makeState().stepResults,
         nodeId: 'node-deleted-during-readiness',
@@ -357,6 +362,17 @@ describe('timeout parity — node_agent_ready vs node_provisioning', () => {
     });
 
     const rc = makeContext();
+    (rc.env.DATABASE.prepare as ReturnType<typeof vi.fn>).mockReturnValue({
+      bind: vi.fn().mockReturnValue({
+        first: vi.fn().mockResolvedValue({
+          health_status: 'stale',
+          last_heartbeat_at: null,
+          agent_ready_at: null,
+          agent_version: null,
+          status: 'running',
+        }),
+      }),
+    });
 
     await expect(handleNodeAgentReady(state, rc)).rejects.toThrow(/Node agent not ready within/);
   });
@@ -368,6 +384,11 @@ describe('timeout parity — node_agent_ready vs node_provisioning', () => {
     });
 
     const rc = makeContext();
+    (rc.env.DATABASE.prepare as ReturnType<typeof vi.fn>).mockReturnValue({
+      bind: vi.fn().mockReturnValue({
+        first: vi.fn().mockResolvedValue({ id: 'node-1', status: 'creating', error_message: null }),
+      }),
+    });
 
     await expect(handleNodeProvisioning(state, rc)).rejects.toThrow(/Node provisioning timed out/);
   });

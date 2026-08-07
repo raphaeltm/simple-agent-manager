@@ -70,8 +70,25 @@ remained queued at `node_agent_ready`, pointing at the deleted node.
 - API typecheck passes, focused lint reports zero errors, and `git diff --check` passes.
 - `node-steps.ts` was split before the hotfix so every touched source file remains below
   the mandatory 800-line limit (`node-steps.ts` is 486 lines).
-- Full repository validation, specialist review, GitHub CI, and the explicit staging
-  skip will be recorded before the task is archived.
+- Full repository validation passes: `pnpm lint` (0 errors), `pnpm typecheck` (16/16
+  tasks), `pnpm build` (9/9 tasks), and `pnpm test` (20/20 tasks). The full API suite
+  passes 6,733/6,733 tests and the full web suite passes 2,885/2,885 tests.
+- The first full-test attempt was run concurrently with `pnpm build`; their two Astro
+  builds raced on the shared `apps/www/dist/.prerender` directory. The build itself
+  passed and the test command was rerun alone to a clean pass.
+- Completion review identified that the direct TaskRunner handler regressions did not
+  exercise terminal failure cleanup. A Miniflare vertical-slice regression now drives
+  the real TaskRunner alarm from a deleted claimed node through `failTask()`, asserts
+  the D1 task/error/status event, completed DO state, preserved node identity, no alarm,
+  and that the deleted node never transitions into warm reuse (11/11 worker tests pass).
+- Test and Cloudflare review found that the generic timeout ran before the availability
+  check. Both handlers now classify missing/deleted nodes first, with beyond-timeout
+  regressions proving the state machine disables warm reuse even on a late alarm.
+- Status-discrimination coverage proves all three active task states are protected
+  (`queued`, `delegated`, and `in_progress`) while a completed task does not pin a stale
+  VM. The focused cleanup/TaskRunner unit suite passes 32/32 tests.
+- Specialist review, GitHub CI, and the explicit staging skip will be recorded before
+  the task is archived.
 
 ## Acceptance Criteria
 

@@ -24,7 +24,7 @@ import type {
   TaskRunnerState,
 } from '../../src/durable-objects/task-runner';
 import { encrypt } from '../../src/services/encryption';
-import { seedInstallation, seedProject, seedTask, seedUser } from './helpers/seed-d1';
+import { seedInstallation, seedNode, seedProject, seedTask, seedUser } from './helpers/seed-d1';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -279,6 +279,73 @@ describe('TaskRunner DO — advanceWorkspaceReady', () => {
 });
 
 describe('TaskRunner DO — failure handling', () => {
+  it('terminalizes a task whose claimed node was deleted without returning the node to warm reuse', async () => {
+    await seedTestData();
+    const taskId = 'tr-test-claimed-node-deleted-001';
+    const nodeId = 'tr-test-node-deleted-001';
+    await seedNode(nodeId, TEST_USER_ID, {
+      status: 'deleted',
+      healthStatus: 'stale',
+      warmSince: null,
+    });
+    await seedTask(taskId, TEST_PROJECT_ID, TEST_USER_ID, {
+      autoProvisionedNodeId: nodeId,
+      executionStep: 'node_agent_ready',
+    });
+
+    const stub = getStub(taskId);
+    await runInDurableObject(stub, async (instance) => {
+      await instance.start(buildStartInput(taskId));
+      await instance.ctx.storage.deleteAlarm();
+      const state = await instance.ctx.storage.get<TaskRunnerState>('state');
+      if (!state) throw new Error('TaskRunner state was not initialized');
+      state.currentStep = 'node_agent_ready';
+      state.stepResults.nodeId = nodeId;
+      state.stepResults.autoProvisioned = true;
+      state.agentReadyStartedAt = Date.now() - 65_000;
+      await instance.ctx.storage.put('state', state);
+
+      await instance.alarm();
+
+      expect(await instance.ctx.storage.getAlarm()).toBeNull();
+    });
+
+    const status = await stub.getStatus();
+    expect(status).toMatchObject({
+      completed: true,
+      currentStep: 'node_agent_ready',
+      stepResults: {
+        nodeId,
+        autoProvisioned: false,
+      },
+    });
+
+    const dbTask = await getTaskFromD1(taskId);
+    expect(dbTask).toMatchObject({
+      status: 'failed',
+      execution_step: null,
+      error_message: expect.stringContaining(
+        `Provisioned node ${nodeId} disappeared during node_agent_ready`
+      ),
+    });
+    expect(await getStatusEvents(taskId)).toContainEqual(
+      expect.objectContaining({
+        from_status: 'delegated',
+        to_status: 'failed',
+        reason: expect.stringContaining(
+          `Provisioned node ${nodeId} disappeared during node_agent_ready`
+        ),
+      })
+    );
+
+    const node = await env.DATABASE.prepare(
+      `SELECT status, warm_since FROM nodes WHERE id = ?`
+    )
+      .bind(nodeId)
+      .first<{ status: string; warm_since: string | null }>();
+    expect(node).toEqual({ status: 'deleted', warm_since: null });
+  });
+
   it('an unknown execution step fails the task and records a status event', async () => {
     await seedTestData();
     const taskId = 'tr-test-fail-001';
