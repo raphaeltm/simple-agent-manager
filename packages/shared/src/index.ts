@@ -33,3 +33,6 @@ export * from './composable-credentials';
 
 // MIME-type helpers (extension fallback for library preview)
 export * from './mime';
+
+// Failure classification (display-time taxonomy for task/session errors)
+export * from './failure-classification';

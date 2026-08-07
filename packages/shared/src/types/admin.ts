@@ -17,10 +17,30 @@ export interface PlatformError {
   userId: string | null;
   nodeId: string | null;
   workspaceId: string | null;
+  taskId?: string | null;
+  sessionId?: string | null;
   ipAddress: string | null;
   userAgent: string | null;
   timestamp: string; // ISO 8601
   incident?: DiagnosticIncidentSummary | null;
+}
+
+/** Bounded admin node summary for the observability node-health table. */
+export interface AdminNodeSummary {
+  id: string;
+  name: string | null;
+  status: string;
+  healthStatus: string | null;
+  lastHeartbeatAt: string | null; // ISO 8601
+  provider: string | null;
+  nodeClass: string | null;
+  vmAgentBuild: string | null;
+  errorMessage: string | null;
+  createdAt: string; // ISO 8601
+}
+
+export interface AdminNodesResponse {
+  nodes: AdminNodeSummary[];
 }
 
 export interface ErrorListResponse {
