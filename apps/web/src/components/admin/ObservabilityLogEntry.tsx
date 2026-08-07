@@ -50,7 +50,9 @@ function formatTimestamp(iso: string): string {
 }
 
 function buildMarkdownReport(entry: PlatformError): string {
-  const lines: string[] = ['```', `## SAM Error Report`, ''];
+  // Plain markdown document — only stack and context are fenced, so the
+  // report renders correctly when pasted (no nested-fence breakage).
+  const lines: string[] = [`## SAM Error Report`, ''];
   lines.push(`**Timestamp:** ${entry.timestamp}`);
   lines.push(`**Source:** ${entry.source}`);
   lines.push(`**Level:** ${entry.level}`);
@@ -74,7 +76,9 @@ function buildMarkdownReport(entry: PlatformError): string {
   if (entry.stack) {
     lines.push('');
     lines.push('**Stack:**');
+    lines.push('```');
     lines.push(entry.stack);
+    lines.push('```');
   }
 
   if (entry.context) {
@@ -93,7 +97,6 @@ function buildMarkdownReport(entry: PlatformError): string {
     }
   }
 
-  lines.push('```');
   return lines.join('\n');
 }
 

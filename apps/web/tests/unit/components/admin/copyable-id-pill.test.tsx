@@ -40,26 +40,35 @@ describe('CopyableIdPill', () => {
     expect(clipboardWriteText).toHaveBeenCalledWith('user-12345');
   });
 
-  it('renders as link when href is provided', () => {
+  it('renders a separate plain-tap open link when href is provided', () => {
     render(
       <MemoryRouter>
         <CopyableIdPill label="node" value="node-1" href="/nodes/node-1" />
       </MemoryRouter>,
     );
-    const pill = screen.getByTitle(/node: node-1/);
-    expect(pill.tagName).toBe('A');
-    expect(pill).toHaveAttribute('href', '/nodes/node-1');
+    const openLink = screen.getByRole('link', { name: /open node node-1/i });
+    expect(openLink).toHaveAttribute('href', '/nodes/node-1');
+    // The copy affordance stays a distinct button (works on touch, no modifier keys)
+    expect(screen.getByTitle(/node: node-1 — click to copy/).tagName).toBe('BUTTON');
   });
 
-  it('copies value on click even when rendered as link', () => {
+  it('copies value from the pill body even when an open link exists', () => {
     render(
       <MemoryRouter>
         <CopyableIdPill label="node" value="node-1" href="/nodes/node-1" />
       </MemoryRouter>,
     );
-    const pill = screen.getByTitle(/node: node-1/);
-    fireEvent.click(pill);
+    fireEvent.click(screen.getByTitle(/node: node-1 — click to copy/));
     expect(clipboardWriteText).toHaveBeenCalledWith('node-1');
+  });
+
+  it('omits the open link when no href is provided', () => {
+    render(
+      <MemoryRouter>
+        <CopyableIdPill label="user" value="user-9" />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByRole('link')).not.toBeInTheDocument();
   });
 
   it('shows short values without truncation', () => {

@@ -221,31 +221,33 @@ describe('ObservabilityLogEntry', () => {
   });
 
   describe('ID pill links', () => {
-    it('renders node ID as a link to /nodes/:id', () => {
+    it('renders node ID with a plain-tap open link to /nodes/:id', () => {
       renderEntry({ error: createEntry({ nodeId: 'node-123' }) });
-      const pill = screen.getByTitle(/node: node-123/);
-      expect(pill.tagName).toBe('A');
-      expect(pill).toHaveAttribute('href', '/nodes/node-123');
+      const openLink = screen.getByRole('link', { name: /open node node-123/i });
+      expect(openLink).toHaveAttribute('href', '/nodes/node-123');
+      // Copy remains a separate button so both actions work on touch devices
+      const copyPill = screen.getByTitle(/node: node-123/);
+      expect(copyPill.tagName).toBe('BUTTON');
     });
 
-    it('renders workspace ID as a link when projectId is in context', () => {
+    it('renders workspace ID with an open link when projectId is in context', () => {
       renderEntry({
         error: createEntry({
           workspaceId: 'ws-abc',
           context: { projectId: 'proj-1' },
         }),
       });
-      const pill = screen.getByTitle(/ws: ws-abc/);
-      expect(pill.tagName).toBe('A');
-      expect(pill).toHaveAttribute('href', '/projects/proj-1/workspace/ws-abc');
+      const openLink = screen.getByRole('link', { name: /open ws ws-abc/i });
+      expect(openLink).toHaveAttribute('href', '/projects/proj-1/workspace/ws-abc');
     });
 
-    it('renders workspace ID as copy-only button when no projectId', () => {
+    it('renders workspace ID as copy-only pill without open link when no projectId', () => {
       renderEntry({
         error: createEntry({ workspaceId: 'ws-abc' }),
       });
       const pill = screen.getByTitle(/ws: ws-abc/);
       expect(pill.tagName).toBe('BUTTON');
+      expect(screen.queryByRole('link', { name: /open ws/i })).not.toBeInTheDocument();
     });
 
     it('copies ID value on pill click', () => {
@@ -253,6 +255,13 @@ describe('ObservabilityLogEntry', () => {
       const pill = screen.getByTitle(/user: user-test-id/);
       fireEvent.click(pill);
       expect(clipboardWriteText).toHaveBeenCalledWith('user-test-id');
+    });
+
+    it('copy pill click does not navigate when an open link exists', () => {
+      renderEntry({ error: createEntry({ nodeId: 'node-123' }) });
+      const copyPill = screen.getByTitle(/node: node-123/);
+      fireEvent.click(copyPill);
+      expect(clipboardWriteText).toHaveBeenCalledWith('node-123');
     });
   });
 });
