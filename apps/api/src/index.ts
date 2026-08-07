@@ -26,7 +26,6 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import type { ContentfulStatusCode } from 'hono/utils/http-status';
 
 import { createAuth } from './auth';
 import * as schema from './db/schema';
@@ -36,7 +35,7 @@ import { log, serializeError } from './lib/logger';
 import { resolvePagesProxyTarget } from './lib/pages-proxy';
 import { parseWorkspaceSubdomain } from './lib/workspace-subdomain';
 import { analyticsMiddleware } from './middleware/analytics';
-import { AppError } from './middleware/error';
+import { handleAppError } from './middleware/app-error-handler';
 import { accountMapRoutes } from './routes/account-map';
 import { activityRoutes } from './routes/activity';
 import { adminRoutes } from './routes/admin';
@@ -158,7 +157,6 @@ import { runTrialWaitlistCleanup } from './scheduled/trial-waitlist-cleanup';
 import { runTriggerExecutionCleanup } from './scheduled/trigger-execution-cleanup';
 import { reconcileDiagnosisRuns } from './services/diagnosis-runner';
 import { reconcileDiagnosticIncidents } from './services/diagnostic-incident-reconciliation';
-import { GcpApiError, sanitizeGcpError } from './services/gcp-errors';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { checkProvisioningTimeouts } from './services/timeout';
@@ -170,27 +168,7 @@ const app = new Hono<{ Bindings: Env }>();
 // Global error handler — catches errors from all routes including subrouters.
 // Must use app.onError() instead of middleware try/catch because Hono's
 // app.route() subrouter errors don't propagate to parent middleware.
-app.onError((err, c) => {
-  log.error('request_error', serializeError(err));
-
-  if (err instanceof AppError) {
-    return c.json(err.toJSON(), err.statusCode as ContentfulStatusCode);
-  }
-
-  // Defense-in-depth: sanitize GcpApiError if it escapes route-level catch blocks
-  if (err instanceof GcpApiError) {
-    const safe = sanitizeGcpError(err, 'global-handler');
-    return c.json({ error: 'GCP_UPSTREAM_ERROR', message: safe }, 502);
-  }
-
-  return c.json(
-    {
-      error: 'INTERNAL_ERROR',
-      message: 'Internal server error',
-    },
-    500
-  );
-});
+app.onError(handleAppError);
 
 // Signed preview-host requests bypass session auth, credentialed CORS, Pages,
 // and workspace cookie handling.

@@ -289,10 +289,21 @@ adminRoutes.get('/tasks/recent-failures', async (c) => {
 const VALID_ERROR_SOURCES = new Set<string>(['client', 'vm-agent', 'api']);
 const VALID_ERROR_LEVELS = new Set<string>(['error', 'warn', 'info']);
 
+function parseErrorTimestamp(value: string | undefined, label: string): number | undefined {
+  if (!value) return undefined;
+  const numeric = Number(value);
+  const timestamp = Number.isFinite(numeric) ? numeric : Date.parse(value);
+  if (!Number.isSafeInteger(timestamp) || timestamp < 0) {
+    throw errors.badRequest(`${label} must be an epoch millisecond timestamp or ISO 8601 date`);
+  }
+  return timestamp;
+}
+
 /**
  * GET /api/admin/observability/errors - Query platform errors
  *
- * Query params: source, level, search, startTime, endTime, limit, cursor
+ * Query params: source, level, search, startTime, endTime, nodeId, workspaceId,
+ * taskId, sessionId, userId, limit, cursor
  */
 adminRoutes.get('/observability/errors', async (c) => {
   if (!c.env.OBSERVABILITY_DATABASE) {
@@ -306,6 +317,11 @@ adminRoutes.get('/observability/errors', async (c) => {
   const endTime = c.req.query('endTime');
   const limitParam = c.req.query('limit');
   const cursor = c.req.query('cursor');
+  const nodeId = c.req.query('nodeId');
+  const workspaceId = c.req.query('workspaceId');
+  const taskId = c.req.query('taskId');
+  const sessionId = c.req.query('sessionId');
+  const userId = c.req.query('userId');
 
   // Validate source
   if (source && source !== 'all' && !VALID_ERROR_SOURCES.has(source)) {
@@ -327,8 +343,13 @@ adminRoutes.get('/observability/errors', async (c) => {
     source: source && source !== 'all' ? (source as PlatformErrorSource) : undefined,
     level: level && level !== 'all' ? (level as PlatformErrorLevel) : undefined,
     search: search || undefined,
-    startTime: startTime ? new Date(startTime).getTime() : undefined,
-    endTime: endTime ? new Date(endTime).getTime() : undefined,
+    startTime: parseErrorTimestamp(startTime, 'startTime'),
+    endTime: parseErrorTimestamp(endTime, 'endTime'),
+    nodeId: nodeId || undefined,
+    workspaceId: workspaceId || undefined,
+    taskId: taskId || undefined,
+    sessionId: sessionId || undefined,
+    userId: userId || undefined,
     limit,
     cursor: cursor || undefined,
   });

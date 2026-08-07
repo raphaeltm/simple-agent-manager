@@ -52,6 +52,8 @@ const PLATFORM_ERRORS_DDL = `CREATE TABLE platform_errors (
   user_id TEXT,
   node_id TEXT,
   workspace_id TEXT,
+  task_id TEXT,
+  session_id TEXT,
   ip_address TEXT,
   user_agent TEXT,
   timestamp INTEGER NOT NULL,

@@ -15,6 +15,7 @@ describe('strict observability persistence', () => {
       CREATE TABLE platform_errors (
         id TEXT PRIMARY KEY, source TEXT NOT NULL, level TEXT NOT NULL, message TEXT NOT NULL,
         stack TEXT, context TEXT, user_id TEXT, node_id TEXT, workspace_id TEXT,
+        task_id TEXT, session_id TEXT,
         ip_address TEXT, user_agent TEXT, timestamp INTEGER NOT NULL,
         created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
       );
@@ -30,12 +31,18 @@ describe('strict observability persistence', () => {
       message: 'exact failure',
       nodeId: 'node-1',
       workspaceId: 'workspace-1',
+      taskId: 'task-1',
+      sessionId: 'session-1',
       timestamp: 1_786_000_000_000,
     };
     await persistErrorBatchStrict(d1, [input]);
     await persistErrorBatchStrict(d1, [input]);
     expect(sqlite.prepare('SELECT COUNT(*) AS count FROM platform_errors').get()).toEqual({
       count: 1,
+    });
+    expect(sqlite.prepare('SELECT task_id, session_id FROM platform_errors').get()).toEqual({
+      task_id: 'task-1',
+      session_id: 'session-1',
     });
   });
 
@@ -48,6 +55,8 @@ describe('strict observability persistence', () => {
       message: 'first failure',
       nodeId: 'node-1',
       workspaceId: 'workspace-1',
+      taskId: 'task-1',
+      sessionId: 'session-1',
     };
     await persistErrorBatchStrict(d1, [base]);
     await expect(

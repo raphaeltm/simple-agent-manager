@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { failTask, transitionToInProgress } from '../../../src/durable-objects/task-runner/state-machine';
+import {
+  failTask,
+  transitionToInProgress,
+} from '../../../src/durable-objects/task-runner/state-machine';
 import type {
   TaskRunnerContext,
   TaskRunnerState,
@@ -90,7 +93,12 @@ function createD1State() {
     tasks: new Map<string, TaskRow>(),
     workspaces: new Map<string, WorkspaceRow>(),
     statusEvents: [] as TaskStatusEventRow[],
-    errors: [] as Array<{ message: string; context: string }>,
+    errors: [] as Array<{
+      message: string;
+      context: string;
+      taskId: string;
+      sessionId: string | null;
+    }>,
   };
 }
 
@@ -144,10 +152,12 @@ function createD1Database(state: ReturnType<typeof createD1State>) {
             return { success: true, meta: { changes: 1 } };
           }
 
-          if (sql.includes("INSERT INTO errors")) {
+          if (sql.includes('INSERT INTO platform_errors')) {
             state.errors.push({
               message: String(params[1]),
               context: String(params[2]),
+              taskId: String(params[6]),
+              sessionId: params[7] === null ? null : String(params[7]),
             });
             return { success: true, meta: { changes: 1 } };
           }
@@ -341,11 +351,13 @@ describe('transitionToInProgress', () => {
       execution_step: null,
       error_message: 'Task orchestration was superseded before agent handoff completed.',
     });
-    expect(dbState.statusEvents).toContainEqual(expect.objectContaining({
-      task_id: 'task-1',
-      from_status: 'queued',
-      to_status: 'failed',
-    }));
+    expect(dbState.statusEvents).toContainEqual(
+      expect.objectContaining({
+        task_id: 'task-1',
+        from_status: 'queued',
+        to_status: 'failed',
+      })
+    );
     expect(state.completed).toBe(true);
     expect(storageWrites.at(-1)).toMatchObject({ completed: true });
   });
@@ -408,7 +420,9 @@ describe('failTask', () => {
       status: 'delegated',
       execution_step: 'agent_session',
     });
-    const state = makeState();
+    const state = makeState({
+      stepResults: { ...makeState().stepResults, chatSessionId: 'session-1' },
+    });
 
     await failTask(state, 'agent session failed permanently', rc);
 
@@ -428,9 +442,12 @@ describe('failTask', () => {
       expect.anything(),
       'task-1',
       'failed',
-      'agent session failed permanently',
+      'agent session failed permanently'
     );
     expect(storageWrites.at(-1)).toMatchObject({ completed: true });
+    expect(dbState.errors).toContainEqual(
+      expect.objectContaining({ taskId: 'task-1', sessionId: 'session-1' })
+    );
   });
 
   it('revokes MCP token on failure and clears it from DO state', async () => {

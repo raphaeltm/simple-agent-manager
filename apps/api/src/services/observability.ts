@@ -85,6 +85,8 @@ export interface PersistErrorInput {
   userId?: string | null;
   nodeId?: string | null;
   workspaceId?: string | null;
+  taskId?: string | null;
+  sessionId?: string | null;
   ipAddress?: string | null;
   userAgent?: string | null;
   timestamp?: number; // ms epoch; defaults to now
@@ -128,6 +130,8 @@ export async function persistError(
       userId: input.userId ?? null,
       nodeId: input.nodeId ?? null,
       workspaceId: input.workspaceId ?? null,
+      taskId: input.taskId ?? null,
+      sessionId: input.sessionId ?? null,
       ipAddress: input.ipAddress ?? null,
       userAgent: input.userAgent ? truncate(input.userAgent, userAgentMaxLength) : null,
       timestamp: input.timestamp ?? Date.now(),
@@ -170,6 +174,11 @@ export interface QueryErrorsParams {
   search?: string;
   startTime?: number; // ms epoch
   endTime?: number; // ms epoch
+  nodeId?: string;
+  workspaceId?: string;
+  taskId?: string;
+  sessionId?: string;
+  userId?: string;
   limit?: number;
   cursor?: string; // base64 encoded timestamp cursor
 }
@@ -185,6 +194,8 @@ export interface QueryErrorsResult {
     userId: string | null;
     nodeId: string | null;
     workspaceId: string | null;
+    taskId: string | null;
+    sessionId: string | null;
     ipAddress: string | null;
     userAgent: string | null;
     timestamp: string; // ISO 8601
@@ -222,6 +233,12 @@ export async function queryErrors(
   if (params.endTime) {
     conditions.push(lte(platformErrors.timestamp, params.endTime));
   }
+
+  if (params.nodeId) conditions.push(eq(platformErrors.nodeId, params.nodeId));
+  if (params.workspaceId) conditions.push(eq(platformErrors.workspaceId, params.workspaceId));
+  if (params.taskId) conditions.push(eq(platformErrors.taskId, params.taskId));
+  if (params.sessionId) conditions.push(eq(platformErrors.sessionId, params.sessionId));
+  if (params.userId) conditions.push(eq(platformErrors.userId, params.userId));
 
   if (params.search) {
     const searchPattern = `%${params.search}%`;
@@ -289,6 +306,8 @@ export async function queryErrors(
       userId: row.userId,
       nodeId: row.nodeId,
       workspaceId: row.workspaceId,
+      taskId: row.taskId,
+      sessionId: row.sessionId,
       ipAddress: row.ipAddress,
       userAgent: row.userAgent,
       timestamp: new Date(row.timestamp).toISOString(),
