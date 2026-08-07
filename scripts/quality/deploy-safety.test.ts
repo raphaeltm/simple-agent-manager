@@ -157,8 +157,42 @@ describe('deployment workflow safety wiring', () => {
 
     expect(reusable).toContain('run: bash ../scripts/deploy/pulumi-refresh-safe.sh');
     expect(reusable).not.toContain('continue-on-error: true');
+    expect(reusable).toContain(
+      'PULUMI_REFRESH_MAX_ATTEMPTS: ${{ vars.PULUMI_REFRESH_MAX_ATTEMPTS }}'
+    );
+    expect(reusable).toContain(
+      'PULUMI_REFRESH_RETRY_DELAY_SECONDS: ${{ vars.PULUMI_REFRESH_RETRY_DELAY_SECONDS }}'
+    );
     expect(refresh).toContain('Deployment failed closed before \\`pulumi up\\`');
     expect(refresh).toContain('exit "$status"');
+    expect(refresh).toContain('PULUMI_REFRESH_MAX_ATTEMPTS');
+    expect(refresh).toContain('PULUMI_REFRESH_RETRY_DELAY_SECONDS');
+  });
+
+  it('retries bounded Pulumi refresh failures before succeeding', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sam-refresh-retry-'));
+    const pulumi = join(dir, 'pulumi');
+    const attempts = join(dir, 'attempts.txt');
+    writeFileSync(
+      pulumi,
+      '#!/bin/bash\ncount=$(cat "$SAM_ATTEMPTS_FILE" 2>/dev/null || echo 0)\ncount=$((count + 1))\necho "$count" > "$SAM_ATTEMPTS_FILE"\nif [ "$count" -lt 3 ]; then echo "temporary provider failure" >&2; exit 7; fi\necho "refresh succeeded"\n'
+    );
+    execFileSync('chmod', ['+x', pulumi]);
+
+    const output = execFileSync('bash', ['scripts/deploy/pulumi-refresh-safe.sh'], {
+      cwd: new URL('../..', import.meta.url),
+      env: {
+        ...process.env,
+        PATH: `${dir}:${process.env.PATH}`,
+        SAM_ATTEMPTS_FILE: attempts,
+        PULUMI_REFRESH_MAX_ATTEMPTS: '3',
+        PULUMI_REFRESH_RETRY_DELAY_SECONDS: '0',
+      },
+      encoding: 'utf8',
+    });
+
+    expect(readFileSync(attempts, 'utf8').trim()).toBe('3');
+    expect(output).toContain('refresh succeeded');
   });
 
   it('redacts refresh diagnostics before writing logs or step summaries', () => {
@@ -175,7 +209,13 @@ describe('deployment workflow safety wiring', () => {
     try {
       execFileSync('bash', ['scripts/deploy/pulumi-refresh-safe.sh'], {
         cwd: new URL('../..', import.meta.url),
-        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, GITHUB_STEP_SUMMARY: summary },
+        env: {
+          ...process.env,
+          PATH: `${dir}:${process.env.PATH}`,
+          GITHUB_STEP_SUMMARY: summary,
+          PULUMI_REFRESH_MAX_ATTEMPTS: '1',
+          PULUMI_REFRESH_RETRY_DELAY_SECONDS: '0',
+        },
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'pipe'],
       });

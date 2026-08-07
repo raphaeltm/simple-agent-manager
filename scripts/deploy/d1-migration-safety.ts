@@ -127,7 +127,7 @@ export function normalizeDiscoveredTables(rows: Record<string, unknown>[]): stri
     .sort((a, b) => a.localeCompare(b));
 }
 
-export function discoverProtectedTables(
+function discoverDatabaseTableNames(
   runner: D1MigrationSafetyRunner,
   environment: string,
   db: D1DatabaseTarget,
@@ -144,7 +144,21 @@ export function discoverProtectedTables(
       { cwd }
     )
   );
-  const tables = normalizeDiscoveredTables(rows);
+
+  return rows
+    .map((row) => String(row.name ?? ''))
+    .filter((name) => name.length > 0)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+export function discoverProtectedTables(
+  runner: D1MigrationSafetyRunner,
+  environment: string,
+  db: D1DatabaseTarget,
+  cwd = APPS_API_DIR
+): string[] {
+  const allTables = discoverDatabaseTableNames(runner, environment, db, cwd);
+  const tables = normalizeDiscoveredTables(allTables.map((name) => ({ name })));
 
   if (tables.length === 0) {
     throw new MigrationSafetyError(
@@ -249,8 +263,22 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
 
   try {
     for (const db of options.databases) {
-      const tables = discoverProtectedTables(options.runner, options.environment, db, cwd);
-      console.log(`Discovered ${tables.length} protected tables in ${db.binding} (${db.name})`);
+      const allTables = discoverDatabaseTableNames(options.runner, options.environment, db, cwd);
+      const tables = normalizeDiscoveredTables(allTables.map((name) => ({ name })));
+
+      if (tables.length === 0 && allTables.includes('d1_migrations')) {
+        throw new MigrationSafetyError(
+          `No protected tables discovered for initialized ${db.binding} (${db.name}); refusing to treat an upgrade as a clean install`
+        );
+      }
+
+      if (tables.length === 0) {
+        console.log(
+          `Clean install detected for ${db.binding} (${db.name}); initial migrations will create protected tables`
+        );
+      } else {
+        console.log(`Discovered ${tables.length} protected tables in ${db.binding} (${db.name})`);
+      }
       before.push(...countProtectedTables(options.runner, options.environment, db, tables, cwd));
     }
 

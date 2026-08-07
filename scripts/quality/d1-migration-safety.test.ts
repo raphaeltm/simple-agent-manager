@@ -12,7 +12,7 @@ class FakeRunner implements D1MigrationSafetyRunner {
   public readonly commands: string[] = [];
 
   constructor(
-    private readonly tablesByDb: Record<string, string[]>,
+    private readonly tablesByDb: Record<string, string[] | string[][]>,
     private readonly countsByDbAndTable: Record<string, number[]>
   ) {}
 
@@ -22,7 +22,11 @@ class FakeRunner implements D1MigrationSafetyRunner {
     const sql = args.at(-2) ?? '';
 
     if (sql.includes('sqlite_master')) {
-      return [{ results: this.tablesByDb[dbName].map((name) => ({ name })) }];
+      const configured = this.tablesByDb[dbName] as string[] | string[][];
+      const tables = Array.isArray(configured[0])
+        ? ((configured as string[][]).shift() ?? [])
+        : (configured as string[]);
+      return [{ results: tables.map((name) => ({ name })) }];
     }
 
     const countMatch = sql.match(/SELECT COUNT\(\*\) as count FROM "([^"]+)"/);
@@ -79,6 +83,36 @@ describe('D1 migration safety gates', () => {
         runner,
       })
     ).toThrow(/count failure for main:users/);
+  });
+
+  it('allows a clean install, then requires migrations to create protected tables', () => {
+    const runner = new FakeRunner(
+      { main: [[], ['d1_migrations', 'users']] },
+      { 'main:users': [0] }
+    );
+
+    runSafeRemoteMigrations({
+      environment: 'staging',
+      databases: [{ binding: 'DATABASE', name: 'main' }],
+      runner,
+    });
+
+    expect(runner.commands.filter((command) => command.includes('migrations apply'))).toHaveLength(
+      1
+    );
+  });
+
+  it('fails closed when an initialized upgrade database has no protected tables', () => {
+    const runner = new FakeRunner({ main: ['d1_migrations'] }, {});
+
+    expect(() =>
+      runSafeRemoteMigrations({
+        environment: 'production',
+        databases: [{ binding: 'DATABASE', name: 'main' }],
+        runner,
+      })
+    ).toThrow(/refusing to treat an upgrade as a clean install/);
+    expect(runner.commands.some((command) => command.includes('migrations apply'))).toBe(false);
   });
 
   it('allows reviewed explicit row-count decrease allowlist entries', () => {
