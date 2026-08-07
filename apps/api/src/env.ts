@@ -254,7 +254,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   ORPHANED_WORKSPACE_GRACE_PERIOD_MS?: string;
   CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT?: string; // Max terminal cf-container nodes to destroy per cron run (default: 25)
   // Idle / orphan node reaping (cron sweep)
-  NODE_ORPHAN_IDLE_TIMEOUT_MS?: string; // Idle window before a workspace node with no active workspaces is destroyed (default: 2700000 = 45 min)
+  NODE_ORPHAN_IDLE_TIMEOUT_MS?: string; // Idle destroy window and minimum pre-heartbeat grace for unversioned, unclaimed workspace VMs (default: 2700000 = 45 min)
   NODE_ABSOLUTE_MAX_LIFETIME_MS?: string; // Absolute age ceiling for auto-provisioned workspace nodes (default: 86400000 = 24 h)
   NODE_CLEANUP_SWEEP_LIMIT?: string; // Max node candidates per cleanup phase per cron run (default: 25)
   WORKSPACE_CLEANUP_SWEEP_LIMIT?: string; // Max workspace candidates per cleanup phase per cron run (default: 50)

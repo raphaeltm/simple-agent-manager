@@ -87,6 +87,10 @@ remained queued at `node_agent_ready`, pointing at the deleted node.
 - Status-discrimination coverage proves all three active task states are protected
   (`queued`, `delegated`, and `in_progress`) while a completed task does not pin a stale
   VM. The focused cleanup/TaskRunner unit suite passes 32/32 tests.
+- Completion, Cloudflare/D1, test-engineering, and constitution re-reviews pass with no
+  blockers. Documentation review found and prompted two sync corrections: the orphan
+  timeout now documents its pre-heartbeat-grace role, and the public agent-ready default
+  now matches the code's 900,000 ms (15 minute) value.
 - Specialist review, GitHub CI, and the explicit staging skip will be recorded before
   the task is archived.
 
