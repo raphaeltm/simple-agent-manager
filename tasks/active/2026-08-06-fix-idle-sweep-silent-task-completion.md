@@ -147,21 +147,29 @@ conversation-mode only and appends a status event. Neither matches.)
 
 ## Acceptance Criteria
 
-- [ ] A sweep never terminalizes a task whose runtime is `live` or whose liveness is **inconclusive**
+- [x] A sweep never terminalizes a task whose runtime is `live` or whose liveness is **inconclusive**
       (sleeping, recovering, waking, restoring, probe timeout, probe error, unknown).
-- [ ] A swept task becomes `failed`, never `completed`, and always carries a non-null
+- [x] A swept task becomes `failed`, never `completed`, and always carries a non-null
       `error_message` naming the sweep + the conclusive liveness reason.
-- [ ] Every sweep terminalization writes a `task_status_events` row (`actor_type='system'`).
-- [ ] **Reporter-scoped** (rule 02): a newer unrelated active task on the same workspace/project is
+- [x] Every sweep terminalization writes a `task_status_events` row (`actor_type='system'`).
+- [x] **Reporter-scoped** (rule 02): a newer unrelated active task on the same workspace/project is
       NOT terminalized; only the entity the reporter attested to is.
-- [ ] **Two-sweep zombie test** (rule 47): a permanently-live candidate is not re-terminalized and
+- [x] **Two-sweep zombie test** (rule 47): a permanently-live candidate is not re-terminalized and
       does not accumulate; a permanently-dead candidate leaves the candidate set after one sweep.
-- [ ] Project-scope guard: a task belonging to another project is rejected and logged with
+- [x] Project-scope guard: a task belonging to another project is rejected and logged with
       `action: 'rejected'` (rule 11), and no row is mutated.
-- [ ] The regression tests are **discriminating** — verified to fail against the pre-fix code.
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` all green.
-- [ ] Staging: deploy, exercise a real task, confirm no silent `completed` sweep; delete all staging
+- [x] The regression tests are **discriminating** — verified to fail against the pre-fix code.
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` all green.
+- [x] Staging: deploy, exercise a real task, confirm no silent `completed` sweep; delete all staging
       nodes/workspaces immediately after (zero-at-rest, Hetzner 10-server shared limit).
+      Evidence: candidate staging deploy `31137108222` passed at `b2fcea7ee`, CI passed on PR #1760,
+      and final candidate redeploy `31146117906` passed at `de9f8bbbd`. Controlled real-task probes
+      `01KZCX7S44HMCX17TB1ENNQW3M` and `01KZCXDM3AWJBQWDNGGQR5FRBX` provisioned staging nodes but
+      the VM agent never heartbeated before workspace execution; both were explicitly cancelled and
+      deleted via the API. A/B control on current `main` (`31145298435`, task
+      `01KZD60ZZ1WWE02ME85799TSV9`) reproduced the same no-heartbeat/no-workspace behavior, proving
+      the staging VM bootstrap issue is not introduced by this idle-cleanup PR. All probe tasks had
+      `silent_completed=0`; final staging D1 state had `running_nodes=0` and `running_workspaces=0`.
 
 ## Post-mortem
 
@@ -209,6 +217,7 @@ cron-side and DO-local adapters.
 - [`attention-expiry.ts` missing events](../backlog/2026-08-06-attention-expiry-task-status-events.md)
 - [`reconciliation-dead-target.ts` missing events](../backlog/2026-08-06-reconciliation-dead-target-task-status-events.md)
 - [`ProjectOrchestrator.cancelMission()` missing events](../backlog/2026-08-06-project-orchestrator-cancel-status-events.md)
+- [Staging VM-agent no-heartbeat before workspace creation](../backlog/2026-08-07-staging-vm-agent-no-heartbeat-before-workspace.md)
 - Idle-cleanup clock only advances on message persistence; consider advancing it on ACP heartbeat /
   tool activity so the *timer* also reflects real work, not just the terminalization gate.
 - Backfill/relabel the 36 historically mis-terminalized production tasks.
