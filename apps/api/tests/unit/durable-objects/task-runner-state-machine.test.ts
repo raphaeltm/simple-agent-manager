@@ -13,6 +13,7 @@ const {
   cleanupTaskRunMock,
   failSessionMock,
   notifyTaskEventMock,
+  persistErrorMock,
   persistMessageMock,
   revokeMcpTokenMock,
   stopComputeTrackingMock,
@@ -22,6 +23,7 @@ const {
   cleanupTaskRunMock: vi.fn(async () => undefined),
   failSessionMock: vi.fn(async () => undefined),
   notifyTaskEventMock: vi.fn(async () => undefined),
+  persistErrorMock: vi.fn(async () => undefined),
   persistMessageMock: vi.fn(async () => undefined),
   revokeMcpTokenMock: vi.fn(async () => undefined),
   stopComputeTrackingMock: vi.fn(async () => undefined),
@@ -36,6 +38,13 @@ vi.mock('../../../src/lib/ulid', () => ({
 vi.mock('../../../src/services/trigger-execution-sync', () => ({
   syncTriggerExecutionStatus: syncTriggerExecutionStatusMock,
 }));
+
+vi.mock('../../../src/services/observability', async () => {
+  const actual = await vi.importActual<typeof import('../../../src/services/observability')>(
+    '../../../src/services/observability'
+  );
+  return { ...actual, persistError: persistErrorMock };
+});
 
 vi.mock('../../../src/services/project-data', () => ({
   failSession: failSessionMock,
@@ -93,12 +102,6 @@ function createD1State() {
     tasks: new Map<string, TaskRow>(),
     workspaces: new Map<string, WorkspaceRow>(),
     statusEvents: [] as TaskStatusEventRow[],
-    errors: [] as Array<{
-      message: string;
-      context: string;
-      taskId: string;
-      sessionId: string | null;
-    }>,
   };
 }
 
@@ -148,16 +151,6 @@ function createD1Database(state: ReturnType<typeof createD1State>) {
               from_status: isInProgressEvent ? 'delegated' : String(params[2]),
               to_status: isInProgressEvent ? 'in_progress' : 'failed',
               reason: String(isInProgressEvent ? params[2] : params[3]),
-            });
-            return { success: true, meta: { changes: 1 } };
-          }
-
-          if (sql.includes('INSERT INTO platform_errors')) {
-            state.errors.push({
-              message: String(params[1]),
-              context: String(params[2]),
-              taskId: String(params[6]),
-              sessionId: params[7] === null ? null : String(params[7]),
             });
             return { success: true, meta: { changes: 1 } };
           }
@@ -445,9 +438,23 @@ describe('failTask', () => {
       'agent session failed permanently'
     );
     expect(storageWrites.at(-1)).toMatchObject({ completed: true });
-    expect(dbState.errors).toContainEqual(
-      expect.objectContaining({ taskId: 'task-1', sessionId: 'session-1' })
+    expect(persistErrorMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 'task-1', sessionId: 'session-1' }),
+      rc.env
     );
+  });
+
+  it('redacts sensitive failure text before observability persistence', async () => {
+    const { dbState, rc } = createContext();
+    seedTask(dbState);
+    const secret = `sk-ant-${'a'.repeat(32)}`;
+
+    await failTask(makeState(), `provider rejected ${secret}`, rc);
+
+    const persisted = persistErrorMock.mock.calls.at(-1)?.[1];
+    expect(persisted?.message).toContain('[REDACTED]');
+    expect(persisted?.message).not.toContain(secret);
   });
 
   it('revokes MCP token on failure and clears it from DO state', async () => {

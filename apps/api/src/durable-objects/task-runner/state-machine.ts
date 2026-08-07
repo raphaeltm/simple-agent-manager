@@ -5,6 +5,7 @@
  * cleanup on failure, and D1 execution step updates.
  */
 import { log } from '../../lib/logger';
+import { persistError, redactSensitiveData } from '../../services/observability';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -273,37 +274,31 @@ export async function failTask(
     }
   }
 
-  // Write to observability database
-  try {
-    await rc.env.OBSERVABILITY_DATABASE.prepare(
-      `INSERT INTO platform_errors
-       (id, source, level, message, stack, context, user_id, node_id, workspace_id,
-        task_id, session_id, ip_address, user_agent, timestamp)
-       VALUES (?, 'api', 'error', ?, NULL, ?, ?, ?, ?, ?, ?, NULL, NULL, ?)`
-    )
-      .bind(
-        ulid(),
-        `Task ${state.taskId} failed at step ${state.currentStep}: ${errorMessage}`,
-        JSON.stringify({
-          taskId: state.taskId,
-          projectId: state.projectId,
-          step: state.currentStep,
-          retryCount: state.retryCount,
-        }),
-        state.userId,
-        state.stepResults.nodeId,
-        state.stepResults.workspaceId,
-        state.taskId,
-        state.stepResults.chatSessionId,
-        now
-      )
-      .run();
-  } catch (err) {
-    log.error('task_runner_do.observability_write_failed', {
+  // Write bounded, redacted diagnostics without allowing observability to affect task failure.
+  const safeError = redactSensitiveData({
+    message: `Task ${state.taskId} failed at step ${state.currentStep}: ${errorMessage}`,
+    context: {
       taskId: state.taskId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+      projectId: state.projectId,
+      step: state.currentStep,
+      retryCount: state.retryCount,
+    },
+  });
+  await persistError(
+    rc.env.OBSERVABILITY_DATABASE,
+    {
+      source: 'api',
+      level: 'error',
+      message: safeError.message,
+      context: safeError.context,
+      userId: state.userId,
+      nodeId: state.stepResults.nodeId,
+      workspaceId: state.stepResults.workspaceId,
+      taskId: state.taskId,
+      sessionId: state.stepResults.chatSessionId,
+    },
+    rc.env
+  );
 
   // Inject error into chat session and mark it as failed. The UI also
   // cross-references task.status so even if this RPC fails the session will
