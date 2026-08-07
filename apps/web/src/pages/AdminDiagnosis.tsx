@@ -121,8 +121,18 @@ export function AdminDiagnosis() {
     <div className="mx-auto max-w-6xl space-y-4 pb-8">
       <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
         <div className="min-w-0">
-          <Button size="sm" variant="ghost" onClick={() => navigate('/admin/errors')}>
-            ← Errors
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => {
+              if (window.history.length > 1) {
+                navigate(-1);
+              } else {
+                navigate('/admin/diagnoses');
+              }
+            }}
+          >
+            ← Back
           </Button>
           <h1 className="mt-2 text-xl font-semibold text-fg-primary">Diagnostic run</h1>
           <p className="mt-1 break-all font-mono text-xs text-fg-muted">{run.id}</p>

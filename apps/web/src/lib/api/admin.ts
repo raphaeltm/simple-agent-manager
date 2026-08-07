@@ -85,6 +85,11 @@ export interface AdminErrorsFilter {
   endTime?: string;
   limit?: number;
   cursor?: string;
+  nodeId?: string;
+  workspaceId?: string;
+  taskId?: string;
+  sessionId?: string;
+  userId?: string;
 }
 
 export async function fetchAdminErrors(filter?: AdminErrorsFilter): Promise<ErrorListResponse> {
@@ -96,6 +101,11 @@ export async function fetchAdminErrors(filter?: AdminErrorsFilter): Promise<Erro
   if (filter?.endTime) params.set('endTime', filter.endTime);
   if (filter?.limit) params.set('limit', String(filter.limit));
   if (filter?.cursor) params.set('cursor', filter.cursor);
+  if (filter?.nodeId) params.set('nodeId', filter.nodeId);
+  if (filter?.workspaceId) params.set('workspaceId', filter.workspaceId);
+  if (filter?.taskId) params.set('taskId', filter.taskId);
+  if (filter?.sessionId) params.set('sessionId', filter.sessionId);
+  if (filter?.userId) params.set('userId', filter.userId);
 
   const qs = params.toString();
   return request<ErrorListResponse>(`/api/admin/observability/errors${qs ? `?${qs}` : ''}`);
