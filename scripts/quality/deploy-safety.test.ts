@@ -8,6 +8,7 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   normalizeSha,
   selectSuccessfulCiRun,
+  validateAutomaticProductionDispatch,
   validateEmergencyOverrideReason,
   validateProductionDispatch,
 } from '../deploy/validate-production-dispatch.js';
@@ -170,6 +171,9 @@ describe('production deployment safety gate', () => {
     expect(() => validateEmergencyOverrideReason('123456789', 10)).toThrow(
       /at least 10 characters/
     );
+    expect(validateEmergencyOverrideReason('approved outage\n## forged heading')).toBe(
+      'approved outage ## forged heading'
+    );
   });
 
   it('never allows an emergency reason to bypass trusted current-main provenance', async () => {
@@ -217,6 +221,34 @@ describe('production deployment safety gate', () => {
   });
 });
 
+describe('automatic production deployment safety gate', () => {
+  it('re-verifies the triggering SHA is still current main after the deployment queue', async () => {
+    stubGithub(greenSha, []);
+
+    await expect(
+      validateAutomaticProductionDispatch({
+        githubEventName: 'workflow_run',
+        githubRepository: repository,
+        githubToken: 'ghs_fake_token_value_for_test_only',
+        targetCommitSha: greenSha,
+      })
+    ).resolves.toEqual({ sha: greenSha, ciVerified: true, emergencyOverride: false });
+  });
+
+  it('fails closed instead of rolling back when an older main CI finishes late', async () => {
+    stubGithub(greenSha, []);
+
+    await expect(
+      validateAutomaticProductionDispatch({
+        githubEventName: 'workflow_run',
+        githubRepository: repository,
+        githubToken: 'ghs_fake_token_value_for_test_only',
+        targetCommitSha: redSha,
+      })
+    ).rejects.toThrow(/does not match the current trusted main tip.*failed closed/i);
+  });
+});
+
 describe('deployment workflow safety wiring', () => {
   it('manual production deploy validates the exact SHA before calling reusable deploy', () => {
     const deploy = workflow('deploy.yml');
@@ -224,13 +256,14 @@ describe('deployment workflow safety wiring', () => {
     expect(deploy).toContain('target_commit_sha:');
     expect(deploy).toContain('required: true');
     expect(deploy).toContain('Validate exact SHA and CI gate');
+    expect(deploy).toContain("github.ref == 'refs/heads/main'");
     expect(deploy).toContain('scripts/deploy/validate-production-dispatch.ts');
     expect(deploy).toContain(
       'PRODUCTION_DEPLOY_OVERRIDE_REASON_MIN_LENGTH: ${{ vars.PRODUCTION_DEPLOY_OVERRIDE_REASON_MIN_LENGTH }}'
     );
     expect(deploy).toContain("needs.validate-manual-dispatch.result == 'success'");
     expect(deploy).toContain(
-      "target_commit_sha: ${{ github.event_name == 'workflow_dispatch' && needs.validate-manual-dispatch.outputs.deploy_sha || github.event.workflow_run.head_sha }}"
+      "target_commit_sha: ${{ github.event_name == 'workflow_dispatch' && needs.validate-manual-dispatch.outputs.deploy_sha || needs.validate-automatic-dispatch.outputs.deploy_sha }}"
     );
   });
 
@@ -245,6 +278,10 @@ describe('deployment workflow safety wiring', () => {
       'github.event.workflow_run.head_repository.full_name == github.repository'
     );
     expect(deploy).toContain('github.event.workflow_run.head_sha');
+    expect(deploy).toContain('Validate automatic production target');
+    expect(deploy).toContain('ref: refs/heads/main');
+    expect(deploy).toContain('Re-verify current main after deployment queue');
+    expect(deploy).toContain("needs.validate-automatic-dispatch.result == 'success'");
   });
 
   it('checks out the verified deploy SHA in the reusable workflow', () => {
@@ -382,7 +419,7 @@ describe('deployment workflow safety wiring', () => {
     const summary = join(dir, 'summary.md');
     writeFileSync(
       pulumi,
-      '#!/bin/bash\necho "error token=ghp_supersecretsecretsecretsecretsecret passphrase=verysecretpassphrase and Authorization: Bearer abcdefghijklmnopqrstuvwxyz" >&2\nexit 7\n'
+      '#!/bin/bash\nprintf "%s\\n" "error token=ghp_supersecretsecretsecretsecretsecret passphrase=very secret passphrase" "session_token=quoted secret remainder" "private_key=-----BEGIN PRIVATE KEY-----" "private-key-body-must-not-leak" "-----END PRIVATE KEY-----" "Authorization: Bearer abcdefghijklmnopqrstuvwxyz" >&2\nexit 7\n'
     );
     execFileSync('chmod', ['+x', pulumi]);
 
@@ -409,6 +446,9 @@ describe('deployment workflow safety wiring', () => {
     expect(combined).toContain('[REDACTED]');
     expect(combined).not.toContain('ghp_supersecret');
     expect(combined).not.toContain('verysecretpassphrase');
+    expect(combined).not.toContain('very secret passphrase');
+    expect(combined).not.toContain('quoted secret remainder');
+    expect(combined).not.toContain('private-key-body-must-not-leak');
     expect(combined).not.toContain('abcdefghijklmnopqrstuvwxyz');
   });
 

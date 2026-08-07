@@ -287,7 +287,7 @@ graph TD
     P5 -.- P5D["Health check polling"]
 ```
 
-CI runs lint, typecheck, tests, and build on pull requests and on canonical-repository `main` pushes. In the canonical repository, Deploy Production runs after successful `main` CI. In self-host forks, `main` push CI is intentionally skipped, so operators update their instance by manually running **Deploy Production** against the exact commit SHA from the fork's synced `main` branch.
+CI runs lint, typecheck, tests, and build on pull requests and on canonical-repository `main` pushes. In the canonical repository, Deploy Production runs after successful `main` CI and re-verifies that the completed CI SHA is still the current `main` tip after entering the serialized deployment queue. In self-host forks, `main` push CI is intentionally skipped, so operators update their instance by manually running **Deploy Production** against the exact commit SHA from the fork's synced `main` branch. The production GitHub Environment must separately restrict deployments to the selected `main` branch so other refs cannot access its secrets with modified workflow code.
 
 ## Key Design Decisions
 

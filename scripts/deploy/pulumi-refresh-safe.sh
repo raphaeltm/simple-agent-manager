@@ -2,10 +2,22 @@
 set -euo pipefail
 
 redact() {
-  sed -E \
+  awk '
+    /-----BEGIN ([A-Z0-9 ]+ )?PRIVATE KEY-----/ {
+      sub(/-----BEGIN.*/, "[REDACTED PRIVATE KEY BLOCK]")
+      print
+      in_private_key = 1
+      next
+    }
+    in_private_key {
+      if (/-----END ([A-Z0-9 ]+ )?PRIVATE KEY-----/) in_private_key = 0
+      next
+    }
+    { print }
+  ' | sed -E \
     -e 's/(Bearer )[A-Za-z0-9._~+\/=-]{12,}/\1[REDACTED]/gI' \
     -e 's/(Authorization:[[:space:]]*)[^[:space:]]+/\1[REDACTED]/gI' \
-    -e 's/(token|secret|password|passwd|passphrase|api[_-]?key|access[_-]?token|refresh[_-]?token|session[_-]?token|private[_-]?key)(["'\'']?[[:space:]]*[:=][[:space:]]*["'\'']?)[^[:space:]"'\'',}]+/\1\2[REDACTED]/gI' \
+    -e 's/(token|secret|password|passwd|passphrase|api[_-]?key|access[_-]?token|refresh[_-]?token|session[_-]?token|private[_-]?key)(["'\'']?[[:space:]]*[:=][[:space:]]*["'\'']?).*/\1\2[REDACTED]/gI' \
     -e 's/gh[psuor]_[A-Za-z0-9_]{20,}/[REDACTED]/g' \
     -e 's/github_pat_[A-Za-z0-9_]{20,}/[REDACTED]/g'
 }

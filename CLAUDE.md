@@ -76,6 +76,7 @@ Merging to `main` in the canonical repository automatically deploys to productio
 - **CI** (`ci.yml`): lint, typecheck, test, build on pull requests and canonical `main` pushes; fork `main` pushes are intentionally skipped
 - **Deploy Staging** (`deploy-staging.yml`): manual trigger only (`workflow_dispatch`) — agents trigger this explicitly during `/do` Phase 6
 - **Deploy Production** (`deploy.yml`): full Pulumi + Wrangler deployment after successful canonical `main` CI, or manual `workflow_dispatch` for self-host forks that targets an exact commit SHA
+- **Production Environment branch policy**: GitHub's `production` Environment must allow deployments from the selected `main` branch only. This external secret boundary is required because a workflow dispatched from another ref could remove in-repository branch checks.
 - **Teardown** (`teardown.yml`): manual only — destroys all resources
 - **Generated platform secrets**: deployment-owned signing/encryption keys are generated and persisted by Pulumi when practical, then copied to Worker secrets. Do not add manual GitHub Environment prerequisites for values SAM can safely create itself; GitHub secrets for generated keys are override/rotation paths only.
 

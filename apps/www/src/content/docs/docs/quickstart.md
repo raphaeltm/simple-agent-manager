@@ -48,7 +48,7 @@ To deploy your own SAM instance:
 ### Quick Deploy
 
 1. **Fork** the [SAM repository](https://github.com/raphaeltm/simple-agent-manager)
-2. **Create a GitHub Environment** named `production` in your fork's Settings
+2. **Create a GitHub Environment** named `production` in your fork's Settings, then restrict its deployment branches and tags to the selected branch `main` only
 3. **Add the required secrets** — see the [Self-Hosting Guide](/docs/guides/self-hosting/) for the full list
 4. **Run Deploy Production** — in your fork, go to Actions → Deploy Production → Run workflow, choose `main`, and enter the exact 40-character commit SHA at that branch tip
 
