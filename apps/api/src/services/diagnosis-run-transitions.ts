@@ -104,6 +104,15 @@ export async function completeDiagnosisRunTransition(
          )`
       )
       .bind(input.eventId, input.runId, input.runId, input.now, input.runId, input.diagnosisId),
+    db
+      .prepare(
+        `DELETE FROM debug_diagnoses
+         WHERE id=? AND NOT EXISTS (
+           SELECT 1 FROM debug_diagnosis_runs
+           WHERE id=? AND run_status='succeeded' AND diagnosis_id=?
+         )`
+      )
+      .bind(input.diagnosisId, input.runId, input.diagnosisId),
   ]);
 
   return changed(results[1]);

@@ -32,7 +32,10 @@ class SQLiteD1Statement {
 }
 
 class SQLiteD1 {
-  constructor(private readonly sqlite: DatabaseSync) {}
+  constructor(
+    private readonly sqlite: DatabaseSync,
+    private readonly afterStatement?: (index: number) => void
+  ) {}
 
   prepare(sql: string): D1PreparedStatement {
     return new SQLiteD1Statement(this.sqlite, sql) as unknown as D1PreparedStatement;
@@ -42,7 +45,10 @@ class SQLiteD1 {
     this.sqlite.exec('BEGIN IMMEDIATE');
     try {
       const results = [];
-      for (const statement of statements) results.push(await statement.run());
+      for (const [index, statement] of statements.entries()) {
+        results.push(await statement.run());
+        this.afterStatement?.(index);
+      }
       this.sqlite.exec('COMMIT');
       return results;
     } catch (error) {
@@ -162,6 +168,31 @@ describe('diagnosis terminal compare-and-set transitions', () => {
     expect(
       sqlite.prepare('SELECT COUNT(*) AS count FROM debug_diagnosis_run_events').get()
     ).toEqual({ count: 1 });
+  });
+
+  it('removes a diagnosis when cancellation wins between publication and the terminal CAS', async () => {
+    const racingDb = new SQLiteD1(sqlite, (index) => {
+      if (index !== 0) return;
+      sqlite
+        .prepare(
+          `UPDATE debug_diagnosis_runs
+           SET cancel_requested_at=?
+           WHERE id=? AND run_status IN ('queued','running')`
+        )
+        .run('2026-08-05T12:00:30.000Z', 'transition-run');
+    }) as unknown as D1Database;
+
+    expect(await completeDiagnosisRunTransition(racingDb, completion())).toBe(false);
+    expect(
+      sqlite
+        .prepare('SELECT run_status,diagnosis_id,cancel_requested_at FROM debug_diagnosis_runs')
+        .get()
+    ).toEqual({
+      run_status: 'running',
+      diagnosis_id: null,
+      cancel_requested_at: '2026-08-05T12:00:30.000Z',
+    });
+    expect(sqlite.prepare('SELECT id FROM debug_diagnoses').get()).toBeUndefined();
   });
 
   it('rejects a completion whose hard deadline elapsed during external work', async () => {
