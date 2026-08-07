@@ -94,6 +94,22 @@ remained queued at `node_agent_ready`, pointing at the deleted node.
 - Specialist review, GitHub CI, and the explicit staging skip will be recorded before
   the task is archived.
 
+## Review Evidence
+
+| Review | Result | Evidence |
+| --- | --- | --- |
+| Task completion (A–F) | PASS | Alarm-to-D1 vertical slice and exact diff-check verified after findings were addressed. |
+| Cloudflare/D1 | PASS | Query is indexed, parameterized, SQLite-compatible, sweep-bounded, and adds no D1 round trips. |
+| Test engineering | PASS | Beyond-timeout disappearance, all active claim statuses, terminal escape, and Miniflare failure cleanup verified. |
+| Constitution | PASS | No new hardcoded business value; grace and sweep bounds use existing configurable values. |
+| Documentation sync | PASS | Config semantics and the 15-minute runtime default now match implementation. |
+
+## Staging Decision
+
+Staging deployment and verification are intentionally skipped because the user
+explicitly prohibited staging for this urgent hotfix. No staging mutation was made.
+GitHub CI remains the final validation gate before archival.
+
 ## Acceptance Criteria
 
 - An active queued/delegated/in-progress task whose `auto_provisioned_node_id` points to
