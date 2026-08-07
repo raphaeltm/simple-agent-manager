@@ -404,9 +404,10 @@ export async function continueInstantSessionLaunch(
       promptKind: taskMode === 'task' ? 'task' : 'conversation',
       taskContext: { taskId: input.taskId, taskMode },
       overrides: input.overrides,
-      // Task-mode Instant sessions do not yet have the TaskRunner DO execution-timeout
-      // watchdog. Keep this gap tracked by idea 01KXZNPR69JGK7S99KMPFCRZWJ and
-      // tasks/backlog/2026-07-19-instant-launch-stuck-queued-on-disconnect.md plus
+      // The LAUNCH now runs durably in the TaskRunner DO (instant-launch.ts),
+      // but task-mode Instant sessions still lack the TaskRunner execution-
+      // timeout watchdog for the RUNTIME phase after agent_running. Keep that
+      // gap tracked by idea 01KXZNPR69JGK7S99KMPFCRZWJ plus
       // tasks/backlog/2026-07-19-instant-session-capacity-controls.md.
       actor: {
         type: 'system',

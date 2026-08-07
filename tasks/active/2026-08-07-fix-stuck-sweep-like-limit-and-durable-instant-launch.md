@@ -84,69 +84,69 @@ Compounding: bug 1 killed the safety net (sweep `instant_persistence` recovery,
 
 ### Fix 1 — stuck_tasks sweep
 
-- [ ] Replace the 52-byte dedup pattern with two ≤50-byte conditions
+- [x] Replace the 52-byte dedup pattern with two ≤50-byte conditions
       (`context LIKE '%do_task_status_mismatch%' AND context LIKE ?` bound to
       `%<taskId>%`), with a comment citing the D1 50-byte LIKE pattern limit
-- [ ] Wrap the per-candidate evaluation section (status switch + DO-health/mismatch
+- [x] Wrap the per-candidate evaluation section (status switch + DO-health/mismatch
       block) in a per-candidate try/catch: structured log + guarded persistError +
       `result.errors++` + continue to next candidate (rule 53)
-- [ ] Ensure the failure-recording path in that catch cannot itself throw
+- [x] Ensure the failure-recording path in that catch cannot itself throw
       (`.catch()` on persistError)
-- [ ] Sweep recovery fails the chat session for recovered conversation-mode tasks
+- [x] Sweep recovery fails the chat session for recovered conversation-mode tasks
       (add `task_mode`, `chat_session_id` to `STUCK_TASK_CANDIDATE_COLUMNS`; guarded
       `projectDataService.failSession`)
-- [ ] Workers-pool regression test (real D1): seeded `platform_errors` row + candidate
+- [x] Workers-pool regression test (real D1): seeded `platform_errors` row + candidate
       in the mismatch branch → pre-fix query shape throws, fixed sweep completes and
       dedup still works (verify test goes red against the 52-byte pattern once)
-- [ ] Per-candidate isolation regression test: candidate A's evaluation throws →
+- [x] Per-candidate isolation regression test: candidate A's evaluation throws →
       candidate B is still recovered, `result.errors` counts A, cursor advances
-- [ ] Regression test: recovered queued/`instant_persistence` conversation task gets
+- [x] Regression test: recovered queued/`instant_persistence` conversation task gets
       its chat session failed + container cleanup invoked
 
 ### Fix 2 — durable Instant launch via TaskRunner DO
 
-- [ ] Extract `continueInstantSessionLaunch`'s catch-block cleanup into an exported
+- [x] Extract `continueInstantSessionLaunch`'s catch-block cleanup into an exported
       `markInstantLaunchFailed(db, env, ref, message)` (also marks lingering `running`
       agent_sessions rows for the workspace as error); reuse in the existing catch
-- [ ] Extract the success tail (workspace.dispatchedAt + task → in_progress) into
+- [x] Extract the success tail (workspace.dispatchedAt + task → in_progress) into
       `finalizeInstantLaunch(...)`; add optional hooks
       (`beforeAgentBootstrap` / `afterAgentBootstrap(agentSessionId)`) to
       `continueInstantSessionLaunch`
-- [ ] New `task-runner/instant-launch.ts`: `InstantLaunchJob` record
+- [x] New `task-runner/instant-launch.ts`: `InstantLaunchJob` record
       (milestones `pending → bootstrap_started → bootstrap_complete → done|failed`,
       `attempted` flag) + alarm handler: first attempt runs
       `continueInstantSessionLaunch` with milestone hooks; retry-after-interruption
       fails closed via `markInstantLaunchFailed` when milestone < bootstrap_complete,
       finalizes idempotently when ≥ bootstrap_complete; terminal milestones no-op
-- [ ] TaskRunner DO: `startInstantLaunch(input, accepted)` RPC
+- [x] TaskRunner DO: `startInstantLaunch(input, accepted)` RPC
       (transaction put + setAlarm(now), idempotent re-ensure like `start()`); alarm()
       multiplex checks the instant job key before the VM state machine; VM state and
       instant job must never coexist (guard + log)
-- [ ] `chat-start.ts`: replace `scheduleBackground(continueInstantSessionLaunch(...))`
+- [x] `chat-start.ts`: replace `scheduleBackground(continueInstantSessionLaunch(...))`
       with awaited `startInstantLaunch` RPC (accept-phase inline catch unchanged)
-- [ ] `mcp/dispatch-instant.ts`: accept inline (existing `markQueuedTaskFailed` guard
+- [x] `mcp/dispatch-instant.ts`: accept inline (existing `markQueuedTaskFailed` guard
       for accept-phase failures) + `startInstantLaunch` RPC; remove the waitUntil
       continuation; update/remove `launchInstantSession` wrapper per no-dead-code
-- [ ] Cancellation regression test (backlog criterion): job stored + `attempted=true` +
+- [x] Cancellation regression test (backlog criterion): job stored + `attempted=true` +
       milestone `pending` (simulated mid-flight death) → alarm run marks task failed,
       session failed, container destroyed — never stuck queued
-- [ ] Happy-path DO test: `startInstantLaunch` → alarm → launch completes (mocked
+- [x] Happy-path DO test: `startInstantLaunch` → alarm → launch completes (mocked
       container/vm-agent boundary), task in_progress
-- [ ] `bootstrap_complete` interruption test: retry finalizes only (no second agent
+- [x] `bootstrap_complete` interruption test: retry finalizes only (no second agent
       bootstrap call), task in_progress
-- [ ] Update chat-start + dispatch-instant unit tests for the DO wiring
+- [x] Update chat-start + dispatch-instant unit tests for the DO wiring
 
 ### Docs, process fix, hygiene
 
-- [ ] Post-mortem + process fix (rule 02): new rule for the D1-statement-limit class
+- [x] Post-mortem + process fix (rule 02): new rule for the D1-statement-limit class
       (LIKE 50-byte cap; discriminating tests must seed rows so `like()` evaluates);
       extend rule 43 to name request-scoped `waitUntil` as a non-durable context that
       must not own launch/provisioning work
-- [ ] Archive `tasks/backlog/2026-07-19-instant-launch-stuck-queued-on-disconnect.md`
+- [x] Archive `tasks/backlog/2026-07-19-instant-launch-stuck-queued-on-disconnect.md`
       with completion notes (criteria mapping; production stranded-row cleanup verified
       post-deploy)
-- [ ] CLAUDE.md Recent Changes entry
-- [ ] Verify `INSTANT_START_STALE_TIMEOUT_MS` is documented in `apps/api/.env.example`
+- [x] CLAUDE.md Recent Changes entry
+- [x] Verify `INSTANT_START_STALE_TIMEOUT_MS` is documented in `apps/api/.env.example`
       (add if missing)
 
 ## Acceptance Criteria
@@ -154,18 +154,60 @@ Compounding: bug 1 killed the safety net (sweep `instant_persistence` recovery,
 - [ ] Production-shaped mismatch dedup no longer errors; `stuck_tasks` sweep completes
       on staging (observability shows a successful sweep, zero
       `cron_sweep_failure/stuck_tasks` records post-deploy)
-- [ ] One throwing candidate cannot prevent other candidates from being evaluated or
-      recovered, and cannot stop the scan cursor from advancing
-- [ ] An Instant session whose Worker-side continuation dies mid-launch is NEVER left
+- [x] One throwing candidate cannot prevent other candidates from being evaluated or
+      recovered, and cannot stop the scan cursor from advancing (unit regression proven
+      discriminating: red on pre-fix code, green post-fix)
+- [x] An Instant session whose Worker-side continuation dies mid-launch is NEVER left
       `queued` indefinitely: either the DO completes the launch, or the task is failed
       with a diagnosable error, the chat session is failed (UI-visible), and the
-      container is destroyed
-- [ ] Instant launches that exceed the ~30s post-response window now complete (DO alarm
-      context, not request-scoped waitUntil)
+      container is destroyed (DO interruption-classification tests + workers vertical
+      slice)
+- [x] Instant launches that exceed the ~30s post-response window now complete (DO alarm
+      context, not request-scoped waitUntil; source-contract pin: no
+      `executionCtx.waitUntil` in chat-start.ts)
 - [ ] Live staging verification: real Instant session launch works end-to-end
       (agent responds) after the change
 - [ ] Post-production-deploy: stranded tasks `01KZECB26257JD03VFSNW0J5G6` (+ July
       strandings if still queued) are failed by the revived sweep
+
+## Post-Mortem
+
+**What broke (user-visible):** (1) No stuck task anywhere on the platform was
+recovered for 26.5+ hours — including the reporter's EffProp Instant session,
+which sat "working" forever after its launch silently died. (2) Any Instant
+launch whose container-side work exceeded ~30s post-response was silently
+killed: no agent, no error, task queued forever, container billing idle.
+
+**Root causes:** (1) The sweep's mismatch-dedup bound a 52-byte LIKE pattern;
+D1 caps LIKE patterns at exactly 50 bytes, and the check lives inside `like()`
+so it only fires when a row is evaluated — empty-table tests passed while every
+production run crashed. The query sat outside the per-candidate try/catch, so
+one candidate aborted the whole sweep and froze the scan cursor. (2) The
+instant-launch continuation ran under request-scoped `ctx.waitUntil`, which
+Cloudflare cancels ~30s after the response completes without running catch
+blocks — reintroducing the exact pattern the TaskRunner DO was built to
+eliminate (its header says so verbatim).
+
+**Timeline:** LIKE dedup shipped 2026-07-16 (PR #1567), latent until a
+completed-DO/active-task candidate first appeared 2026-08-06T13:35Z → 311
+consecutive sweep failures. The waitUntil gap was documented 2026-07-19
+(`tasks/archive/2026-07-19-instant-launch-stuck-queued-on-disconnect.md`) after
+the clone-timeout incident; the 120s create budget added then was illusory
+beyond ~30s. Both detonated together 2026-08-07 15:09Z (task
+`01KZECB26257JD03VFSNW0J5G6`), diagnosed live the same day.
+
+**Why tests missed it:** the LIKE limit is row-evaluated (empty observability
+tables in every test), and no test simulated launch-context cancellation.
+
+**Class of bug:** (1) engine limits enforced only on evaluated rows — a query
+can be structurally broken yet green against empty fixtures; (2) state-bearing
+background work owned by a cancellable request context (rule 43 class).
+
+**Process fix:** new rule
+`.claude/rules/55-d1-statement-limits-and-request-scoped-waituntil.md`
+(≤50-byte patterns, seeded-row test requirement, waitUntil-is-not-durable);
+rule 43 amended to name `ctx.waitUntil` explicitly. Discriminating regression
+tests verified red against pre-fix code for both bugs.
 
 ## References
 

@@ -17,6 +17,7 @@ import { describe, expect, it } from 'vitest';
 import type { TaskRunner, TaskRunnerState } from '../../src/durable-objects/task-runner';
 import type { Env } from '../../src/env';
 import { gatherDiagnostics, recoverStuckTasks } from '../../src/scheduled/stuck-tasks';
+import * as projectDataService from '../../src/services/project-data';
 import {
   seedInstallation,
   seedNode,
@@ -527,7 +528,9 @@ describe('recoverStuckTasks — vertical slice', () => {
 describe('gatherDiagnostics', () => {
   it('includes workspace and node status from D1', async () => {
     await seedUser('user-st-diag');
-    await seedInstallation('install-st-diag', 'user-st-diag', { installationIdValue: 'install-st-diag-ext' });
+    await seedInstallation('install-st-diag', 'user-st-diag', {
+      installationIdValue: 'install-st-diag-ext',
+    });
     await seedProject('project-st-diag', 'user-st-diag', 'install-st-diag');
     await seedNode('node-st-diag', 'user-st-diag', { status: 'running', healthStatus: 'healthy' });
     await seedWorkspace('ws-st-diag', 'node-st-diag', 'user-st-diag', {
@@ -599,5 +602,139 @@ describe('gatherDiagnostics', () => {
     expect(diagnostics.nodeId).toBe('node-st-auto');
     expect(diagnostics.nodeStatus).toBe('creating');
     expect(diagnostics.nodeHealthStatus).toBe('unknown');
+  });
+});
+
+describe('mismatch dedup under the D1 LIKE pattern-length limit', () => {
+  it('REGRESSION: completes the sweep with platform_errors rows present for like() to evaluate', async () => {
+    await seedBaseData();
+    const taskId = 'task-st-like-limit-regression';
+    const nodeId = 'node-st-like-limit';
+    const workspaceId = 'ws-st-like-limit';
+    const oldDate = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+
+    // SQLite enforces SQLITE_LIMIT_LIKE_PATTERN_LENGTH (50 bytes on D1) inside
+    // like(), which only runs per-row — an EMPTY table let the previous
+    // 52-byte `%do_task_status_mismatch%<taskId>%` pattern pass every test
+    // while crashing every production sweep. Seed a row so the limit applies.
+    await env.OBSERVABILITY_DATABASE.prepare(
+      `INSERT INTO platform_errors (id, source, level, message, context, timestamp, created_at)
+       VALUES (?, 'api', 'info', 'seed row', '{"seed":true}', ?, datetime('now'))`
+    )
+      .bind('seed-row-like-limit', Date.now())
+      .run();
+
+    await seedNode(nodeId, USER_ID, { status: 'deleted', healthStatus: 'stale' });
+    await seedWorkspace(workspaceId, nodeId, USER_ID, {
+      projectId: PROJECT_ID,
+      status: 'deleted',
+    });
+    await seedTask(taskId, PROJECT_ID, USER_ID, {
+      status: 'in_progress',
+      executionStep: 'awaiting_followup',
+      startedAt: oldDate,
+      updatedAt: oldDate,
+      workspaceId,
+      taskMode: 'conversation',
+    });
+
+    const stub = env.TASK_RUNNER.get(
+      env.TASK_RUNNER.idFromName(taskId)
+    ) as DurableObjectStub<TaskRunner>;
+    await runInDurableObject(stub, async (instance) => {
+      // Minimal completed VM state — enough for getStatus() to report
+      // completed=true so the sweep enters the mismatch-dedup branch.
+      await instance.ctx.storage.put('state', {
+        version: 1,
+        taskId,
+        projectId: PROJECT_ID,
+        userId: USER_ID,
+        currentStep: 'running',
+        stepResults: {
+          nodeId,
+          autoProvisioned: false,
+          workspaceId,
+          chatSessionId: null,
+          agentSessionId: null,
+          agentStarted: true,
+          mcpToken: null,
+          provisionedVmSize: null,
+        },
+        config: { taskMode: 'conversation' },
+        retryCount: 0,
+        workspaceReadyReceived: false,
+        workspaceReadyStatus: null,
+        workspaceErrorMessage: null,
+        createdAt: Date.now(),
+        lastStepAt: Date.now(),
+        completed: true,
+      } as unknown as TaskRunnerState);
+    });
+
+    // Pre-fix this threw `LIKE or GLOB pattern too complex` from the dedup
+    // query and aborted the entire sweep.
+    const result = await recoverStuckTasks({
+      ...env,
+      TASK_DO_MISMATCH_GRACE_MS: '60000',
+      TASK_RUN_CLEANUP_DELAY_MS: '0',
+    } as unknown as Env);
+    expect(result.errors).toBe(0);
+
+    const mismatchRows = await env.OBSERVABILITY_DATABASE.prepare(
+      `SELECT context FROM platform_errors WHERE context LIKE '%do_task_status_mismatch%'`
+    ).all<{ context: string }>();
+    expect(mismatchRows.results.some((row) => row.context.includes(taskId))).toBe(true);
+  });
+});
+
+describe('instant conversation recovery vertical slice', () => {
+  it('fails the task AND its chat session when a stuck instant_persistence task is recovered', async () => {
+    await seedBaseData();
+    const taskId = 'task-st-instant-stuck';
+    const nodeId = 'node-st-instant-stuck';
+    const workspaceId = 'ws-st-instant-stuck';
+    const staleDate = new Date(Date.now() - 20 * 60 * 1000).toISOString();
+
+    await seedNode(nodeId, USER_ID, { status: 'running' });
+    await seedWorkspace(workspaceId, nodeId, USER_ID, {
+      projectId: PROJECT_ID,
+      status: 'stopped',
+    });
+    const sessionId = await projectDataService.createSession(
+      env as unknown as Env,
+      PROJECT_ID,
+      workspaceId,
+      'Instant chat',
+      taskId,
+      USER_ID
+    );
+    await seedTask(taskId, PROJECT_ID, USER_ID, {
+      status: 'queued',
+      executionStep: 'instant_persistence',
+      taskMode: 'conversation',
+      updatedAt: staleDate,
+      workspaceId,
+      autoProvisionedNodeId: nodeId,
+      chatSessionId: sessionId,
+    });
+
+    const result = await recoverStuckTasks({
+      ...env,
+      TASK_RUN_CLEANUP_DELAY_MS: '0',
+    } as unknown as Env);
+
+    expect(result.failedQueued).toBe(1);
+    const task = await getTaskStatus(taskId);
+    expect(task?.status).toBe('failed');
+    expect(task?.error_message).toContain('Instant session start accepted but still queued');
+
+    // The UI shows the SESSION — a failed task behind an active-looking
+    // session is exactly the stuck-spinner symptom from the incident.
+    const session = await projectDataService.getSession(
+      env as unknown as Env,
+      PROJECT_ID,
+      sessionId
+    );
+    expect(session?.status).toBe('failed');
   });
 });

@@ -1049,6 +1049,135 @@ describe('recoverStuckTasks', () => {
 
       expect(result.failedDelegated).toBe(1);
     });
+
+    it('fails the linked chat session when recovering a stuck instant conversation', async () => {
+      const now = Date.now();
+      const updatedAt = new Date(now - 11 * 60 * 1000).toISOString();
+
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
+        results: [
+          {
+            id: 'task-instant',
+            project_id: 'proj-1',
+            user_id: 'user-1',
+            status: 'queued',
+            execution_step: 'instant_persistence',
+            updated_at: updatedAt,
+            started_at: null,
+            workspace_id: 'ws-1',
+            auto_provisioned_node_id: 'node-1',
+            chat_session_id: 'chat-1',
+          },
+        ],
+      });
+      responses.set("UPDATE tasks SET status = 'failed'", { results: [], changes: 1 });
+
+      const env = createMockEnv(responses);
+      const result = await recoverStuckTasks(env);
+
+      expect(result.failedQueued).toBe(1);
+      // The UI cross-references the session, not just the task — without this
+      // the recovered instant conversation kept an active-looking session.
+      expect(projectDataMocks.failSession).toHaveBeenCalledWith(
+        env,
+        'proj-1',
+        'chat-1',
+        expect.stringContaining('Instant session start accepted but still queued')
+      );
+      expect(cleanupTaskRun).toHaveBeenCalledWith('task-instant', env);
+    });
+  });
+
+  describe('per-candidate evaluation isolation (rule 53)', () => {
+    function mismatchBranchCandidate(id: string, minutesStale: number) {
+      return {
+        id,
+        project_id: 'proj-1',
+        user_id: 'user-1',
+        status: 'queued',
+        execution_step: 'node_provisioning',
+        updated_at: new Date(Date.now() - minutesStale * 60 * 1000).toISOString(),
+        started_at: null,
+        workspace_id: null,
+        auto_provisioned_node_id: null,
+        chat_session_id: null,
+      };
+    }
+
+    const completedDoStatus = {
+      completed: true,
+      currentStep: 'running',
+      retryCount: 0,
+      lastStepAt: Date.now(),
+    };
+
+    it('REGRESSION: one candidate whose evaluation throws cannot abort the sweep for later candidates', async () => {
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
+        results: [
+          // A: queued past half-threshold but not stuck -> enters the
+          // DO-health defense-in-depth branch, whose mismatch dedup query we
+          // make throw (the production failure was D1's 50-byte LIKE limit).
+          mismatchBranchCandidate('task-poison', 6),
+          // B: genuinely stuck queued -> must still be recovered.
+          mismatchBranchCandidate('task-recoverable', 11),
+        ],
+      });
+      responses.set("UPDATE tasks SET status = 'failed'", { results: [], changes: 1 });
+
+      const env = createMockEnv(responses, {}, completedDoStatus);
+      env.OBSERVABILITY_DATABASE = {
+        prepare: vi.fn((sql: string) => {
+          if (sql.includes('platform_errors')) {
+            throw new Error('D1_ERROR: LIKE or GLOB pattern too complex: SQLITE_ERROR');
+          }
+          return mockPreparedStatement();
+        }),
+      } as unknown as D1Database;
+
+      // Pre-fix this rejected outright (the throw escaped the loop), so no
+      // later candidate was ever evaluated and the scan cursor never advanced.
+      const result = await recoverStuckTasks(env);
+
+      expect(result.errors).toBe(1);
+      expect(result.failedQueued).toBe(1);
+      const failUpdates = (env.DATABASE.prepare as ReturnType<typeof vi.fn>).mock.calls.filter(
+        ([sql]) => typeof sql === 'string' && sql.includes("UPDATE tasks SET status = 'failed'")
+      );
+      expect(failUpdates).toHaveLength(1);
+      // The scan cursor still advances past the poisoned candidate.
+      expect(env.KV.put).toHaveBeenCalled();
+    });
+
+    it('binds only <=50-byte LIKE patterns in the mismatch dedup (D1 pattern-length limit)', async () => {
+      const responses = new Map<string, { results: unknown[]; changes?: number }>();
+      responses.set("status IN ('queued', 'delegated', 'in_progress')", {
+        results: [mismatchBranchCandidate('01KZD5S2N5JGD6XBPWXYR3HQWG', 6)],
+      });
+
+      const env = createMockEnv(responses, {}, completedDoStatus);
+      const bindCalls: unknown[][] = [];
+      env.OBSERVABILITY_DATABASE = {
+        prepare: vi.fn(() => ({
+          bind: vi.fn((...args: unknown[]) => {
+            bindCalls.push(args);
+            return { first: vi.fn().mockResolvedValue(null) };
+          }),
+        })),
+      } as unknown as D1Database;
+
+      await recoverStuckTasks(env);
+
+      expect(bindCalls).toHaveLength(1);
+      const stringPatterns = bindCalls[0].filter((arg): arg is string => typeof arg === 'string');
+      // Pre-fix this was a single 52-byte `%do_task_status_mismatch%<taskId>%`
+      // pattern, over D1's 50-byte SQLITE_LIMIT_LIKE_PATTERN_LENGTH.
+      expect(stringPatterns).toEqual(['%do_task_status_mismatch%', '%01KZD5S2N5JGD6XBPWXYR3HQWG%']);
+      for (const pattern of stringPatterns) {
+        expect(pattern.length).toBeLessThanOrEqual(50);
+      }
+    });
   });
 
   describe('prompt dead-runtime reconciliation', () => {

@@ -6,7 +6,7 @@ Long-running MCP tools must not block on VM work that can exceed normal HTTP, pr
 
 - Start operations return quickly with a durable job id after the VM accepts work.
 - Polling tools return status, current step, recent events, and terminal release/error details.
-- VM job contexts must be independent of the HTTP request context after acceptance.
+- VM job contexts must be independent of the HTTP request context after acceptance. Request-scoped `ctx.waitUntil` is NOT a job-owned context: Cloudflare cancels unsettled waitUntil work ~30s after the response completes (and on client disconnect) WITHOUT running catch blocks. Multi-second state-bearing work belongs in a Durable Object alarm or equivalent (see `.claude/rules/55-d1-statement-limits-and-request-scoped-waituntil.md`; the 2026-08-07 instant-launch incident reintroduced exactly the `waitUntil(executeTaskRun())` pattern the TaskRunner DO was built to eliminate).
 - Progress and terminal state must be persisted before agents are told to treat work as complete.
 - Events must be bounded and redacted. Do not persist or expose signed R2 URLs, callback tokens, registry credentials, Authorization headers, JWTs, env dumps, or secret values.
 - Long-running VM work must not be bounded by undersized fixed wall-clock deadlines when it can make legitimate slow progress. Use transport phase timeouts plus progress/idle watchdogs for streamed uploads/downloads, Docker build/save/load, deployment apply, and similar operations.
