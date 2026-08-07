@@ -60,18 +60,7 @@ export const DEFAULT_D1_MIGRATION_CHURNING_TABLES = [
 ] as const;
 export const DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT = 50;
 
-const ALWAYS_PROTECTED_BUSINESS_TABLES = new Set([
-  'DATABASE.cc_credentials',
-  'DATABASE.credentials',
-  'DATABASE.deployment_secrets',
-  'DATABASE.nodes',
-  'DATABASE.platform_credentials',
-  'DATABASE.project_deployment_credentials',
-  'DATABASE.projects',
-  'DATABASE.tasks',
-  'DATABASE.users',
-  'DATABASE.workspaces',
-]);
+const REVIEWED_CHURNING_TABLES = new Set<string>(DEFAULT_D1_MIGRATION_CHURNING_TABLES);
 
 export class MigrationSafetyError extends Error {}
 
@@ -167,9 +156,9 @@ function validateChurningTableSelectors(selectors: readonly string[]): string[] 
     if (unique.has(selector)) {
       throw new MigrationSafetyError(`Duplicate D1 churning-table selector: ${selector}`);
     }
-    if (ALWAYS_PROTECTED_BUSINESS_TABLES.has(selector)) {
+    if (!REVIEWED_CHURNING_TABLES.has(selector)) {
       throw new MigrationSafetyError(
-        `${selector} is a protected business table and cannot receive a row-count decrease tolerance`
+        `${selector} is not a reviewed churning table and cannot receive a row-count decrease tolerance`
       );
     }
     unique.add(selector);

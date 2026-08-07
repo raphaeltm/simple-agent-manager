@@ -131,7 +131,7 @@ SAM uses a hybrid storage model: **D1** for cross-project queries and **Durable 
 
 D1 stores platform-level data that needs to be queried across projects (e.g., "show all my ideas" on the dashboard).
 
-Before a deploy applies D1 migrations, SAM records per-table counts and a time-travel recovery timestamp. Post-migration comparison runs only for databases whose `d1_migrations` ledger advanced. Business tables use zero decrease tolerance; explicitly configured retention/expiry tables use a configurable percentage limit (50% by default), preserving catastrophic-wipe detection without treating routine telemetry churn as migration damage.
+Before a deploy applies D1 migrations, SAM records per-table counts and a time-travel recovery timestamp. Post-migration comparison runs only for databases whose `d1_migrations` ledger advanced. Business tables use zero decrease tolerance; code-reviewed retention/expiry tables use a configurable percentage limit (50% by default), preserving catastrophic-wipe detection without treating routine telemetry churn as migration damage. Configuration may narrow that reviewed table set but cannot add arbitrary tables to it.
 
 ### Durable Objects (Per-Project Data)
 

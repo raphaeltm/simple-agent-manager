@@ -180,7 +180,10 @@ describe('D1 migration safety gates', () => {
     expect(
       parseChurningTableSelectors(' DATABASE.sessions,OBSERVABILITY_DATABASE.platform_errors ')
     ).toEqual(['DATABASE.sessions', 'OBSERVABILITY_DATABASE.platform_errors']);
-    expect(() => parseChurningTableSelectors('DATABASE.users')).toThrow(/protected business table/);
+    expect(() => parseChurningTableSelectors('DATABASE.users')).toThrow(/not a reviewed churning/);
+    expect(() => parseChurningTableSelectors('DATABASE.accounts')).toThrow(
+      /not a reviewed churning/
+    );
     expect(() => parseChurningTableSelectors('platform_errors')).toThrow(
       /Expected <binding>\.<table>/
     );
@@ -341,6 +344,37 @@ describe('D1 migration safety gates', () => {
       runner.commands.filter(
         (command) => command.includes('COUNT(*)') && command.includes('platform_errors')
       )
+    ).toHaveLength(1);
+  });
+
+  it('compares only the database whose migration ledger advances', () => {
+    const runner = new FakeRunner(
+      {
+        main: ['d1_migrations', 'users'],
+        obs: ['d1_migrations', 'platform_errors'],
+      },
+      {
+        'main:users': [4, 4],
+        'obs:platform_errors': [6306],
+      },
+      { main: 1, obs: 0 }
+    );
+
+    runSafeRemoteMigrations({
+      environment: 'staging',
+      databases: [
+        { binding: 'DATABASE', name: 'main' },
+        { binding: 'OBSERVABILITY_DATABASE', name: 'obs' },
+      ],
+      runner,
+    });
+
+    const applicationCounts = runner.commands.filter((command) =>
+      command.includes('SELECT COUNT(*)')
+    );
+    expect(applicationCounts.filter((command) => command.includes('FROM "users"'))).toHaveLength(2);
+    expect(
+      applicationCounts.filter((command) => command.includes('FROM "platform_errors"'))
     ).toHaveLength(1);
   });
 

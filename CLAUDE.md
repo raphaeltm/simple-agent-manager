@@ -96,13 +96,13 @@ After merging ANY PR to main in this canonical repository, agents MUST monitor t
 
 Production data loss is catastrophic and irreversible. Multiple deterministic gates prevent it:
 
-| Gate                                  | Runs in         | What it catches                                                                                                                                                                   |
-| ------------------------------------- | --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `pnpm quality:migration-safety`       | CI (every PR)   | DROP TABLE on CASCADE parents, DELETE without WHERE, PRAGMA foreign_keys=OFF, UPDATE without WHERE, any DROP TABLE in new migrations                                              |
-| `pnpm quality:do-migration-safety`    | CI (every PR)   | DROP TABLE, DELETE without WHERE, UPDATE without WHERE in Durable Object SQLite migrations (no recovery mechanism)                                                                |
-| Pre-migration D1 recovery bookmark    | Deploy pipeline | Records the D1 time-travel timestamp before every migration run so operators can restore either database                                                                          |
-| Post-migration row count verification | Deploy pipeline | Compares only databases whose D1 migration ledger advanced; business tables have zero decrease tolerance, while explicitly churning tables block above a configurable 50% default |
-| D1 Time Travel Restore                | Manual workflow | Point-in-time recovery for D1 databases (30-day window). See `d1-restore.yml`                                                                                                     |
+| Gate                                  | Runs in         | What it catches                                                                                                                                                                                                               |
+| ------------------------------------- | --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `pnpm quality:migration-safety`       | CI (every PR)   | DROP TABLE on CASCADE parents, DELETE without WHERE, PRAGMA foreign_keys=OFF, UPDATE without WHERE, any DROP TABLE in new migrations                                                                                          |
+| `pnpm quality:do-migration-safety`    | CI (every PR)   | DROP TABLE, DELETE without WHERE, UPDATE without WHERE in Durable Object SQLite migrations (no recovery mechanism)                                                                                                            |
+| Pre-migration D1 recovery bookmark    | Deploy pipeline | Records the D1 time-travel timestamp before every migration run so operators can restore either database                                                                                                                      |
+| Post-migration row count verification | Deploy pipeline | Compares only databases whose D1 migration ledger advanced; business tables have zero decrease tolerance, while code-reviewed churning tables block above a configurable 50% default (configuration may narrow that set only) |
+| D1 Time Travel Restore                | Manual workflow | Point-in-time recovery for D1 databases (30-day window). See `d1-restore.yml`                                                                                                                                                 |
 
 **Migration rules:** See `.claude/rules/31-migration-safety.md`. NEVER use `DROP TABLE` on any table with CASCADE children. Use `ALTER TABLE ADD COLUMN` instead of table recreation.
 
