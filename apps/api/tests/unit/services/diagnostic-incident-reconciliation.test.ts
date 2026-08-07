@@ -91,6 +91,22 @@ describe('diagnostic incident reconciliation', () => {
     expect(plan.some((step) => step.detail.includes('USE TEMP B-TREE'))).toBe(false);
   });
 
+  it('uses the status-order index without sorting the available-object scan', () => {
+    const plan = main
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT id, incident_id, node_id, status, object_key, checksum_sha256, expected_bytes
+         FROM diagnostic_artifacts
+         WHERE status = 'available' ORDER BY datetime(updated_at) ASC, id ASC LIMIT ?`
+      )
+      .all(20) as Array<{ detail: string }>;
+
+    expect(
+      plan.some((step) => step.detail.includes('idx_diagnostic_artifacts_status_updated'))
+    ).toBe(true);
+    expect(plan.some((step) => step.detail.includes('USE TEMP B-TREE'))).toBe(false);
+  });
+
   function insertIncident(params: {
     id: string;
     status: string;

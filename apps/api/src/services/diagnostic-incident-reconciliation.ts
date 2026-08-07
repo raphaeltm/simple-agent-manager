@@ -202,7 +202,7 @@ async function reconcileAvailable(
   const rows = await env.DATABASE.prepare(
     `SELECT id, incident_id, node_id, status, object_key, checksum_sha256, expected_bytes
      FROM diagnostic_artifacts
-     WHERE status = 'available' ORDER BY updated_at ASC, id ASC LIMIT ?`
+     WHERE status = 'available' ORDER BY datetime(updated_at) ASC, id ASC LIMIT ?`
   )
     .bind(limit)
     .all<ReconcileArtifactRow>();
