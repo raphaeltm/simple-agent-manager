@@ -27,6 +27,7 @@ const doSource = [
   readFileSync(resolve(doDir, 'index.ts'), 'utf8'),
   readFileSync(resolve(doDir, 'types.ts'), 'utf8'),
   readFileSync(resolve(doDir, 'node-steps.ts'), 'utf8'),
+  readFileSync(resolve(doDir, 'node-selection.ts'), 'utf8'),
   readFileSync(resolve(doDir, 'workspace-steps.ts'), 'utf8'),
   readFileSync(resolve(doDir, 'agent-session-step.ts'), 'utf8'),
   readFileSync(resolve(doDir, 'state-machine.ts'), 'utf8'),

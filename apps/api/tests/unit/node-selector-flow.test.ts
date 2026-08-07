@@ -409,6 +409,7 @@ const taskRunnerSource = [
   'index.ts',
   'types.ts',
   'node-steps.ts',
+  'node-selection.ts',
   'workspace-steps.ts',
   'agent-session-step.ts',
   'state-machine.ts',

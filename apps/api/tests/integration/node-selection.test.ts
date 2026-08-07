@@ -43,6 +43,7 @@ const taskRunnerSource = [
   'index.ts',
   'types.ts',
   'node-steps.ts',
+  'node-selection.ts',
   'workspace-steps.ts',
   'agent-session-step.ts',
   'state-machine.ts',
@@ -229,7 +230,7 @@ describe('node selection to provisioning flow wiring', () => {
   it('preferred node check validates status is running', () => {
     const section = taskRunnerSource.slice(
       taskRunnerSource.indexOf('export async function handleNodeSelection('),
-      taskRunnerSource.indexOf('tryClaimWarmNode')
+      taskRunnerSource.indexOf('// Try warm pool first')
     );
     expect(section).toContain("node.status !== 'running'");
     expect(section).toContain('permanent: true');
@@ -238,7 +239,7 @@ describe('node selection to provisioning flow wiring', () => {
   it('preferred node check validates ownership (user_id match)', () => {
     const section = taskRunnerSource.slice(
       taskRunnerSource.indexOf('export async function handleNodeSelection('),
-      taskRunnerSource.indexOf('tryClaimWarmNode')
+      taskRunnerSource.indexOf('// Try warm pool first')
     );
     expect(section).toContain('user_id = ?');
     expect(section).toContain('state.userId');
