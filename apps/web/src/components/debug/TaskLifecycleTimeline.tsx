@@ -1,12 +1,11 @@
 import type { TaskStatusEvent } from '@simple-agent-manager/shared';
-import { useEffect, useState } from 'react';
 
-import { listTaskEvents } from '../../lib/api/tasks';
 import { timeAgo } from '../../lib/time-utils';
 
 interface TaskLifecycleTimelineProps {
-  projectId: string;
-  taskId: string;
+  events: TaskStatusEvent[];
+  loading: boolean;
+  error: string | null;
 }
 
 const ACTOR_LABELS: Record<string, string> = {
@@ -29,32 +28,12 @@ const STATUS_COLORS: Record<string, string> = {
   draft: 'var(--sam-color-fg-muted)',
 };
 
-export function TaskLifecycleTimeline({ projectId, taskId }: TaskLifecycleTimelineProps) {
-  const [events, setEvents] = useState<TaskStatusEvent[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    setError(null);
-
-    listTaskEvents(projectId, taskId, 50)
-      .then((res) => {
-        if (!cancelled) setEvents(res.events);
-      })
-      .catch((err) => {
-        if (!cancelled) setError(err instanceof Error ? err.message : 'Failed to load events');
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId, taskId]);
-
+/**
+ * Presentational lifecycle timeline. The parent (FailureCard) owns the
+ * events fetch so the same data feeds both this view and the copyable
+ * debug report.
+ */
+export function TaskLifecycleTimeline({ events, loading, error }: TaskLifecycleTimelineProps) {
   if (loading) {
     return (
       <div className="py-2 text-[11px] text-fg-muted animate-pulse">Loading timeline...</div>

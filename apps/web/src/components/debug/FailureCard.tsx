@@ -1,4 +1,4 @@
-import type { FailureClassification } from '@simple-agent-manager/shared';
+import type { FailureClassification, TaskStatusEvent } from '@simple-agent-manager/shared';
 import { classifyFailure } from '@simple-agent-manager/shared';
 import {
   AlertTriangle,
@@ -9,8 +9,9 @@ import {
   ExternalLink,
   XCircle,
 } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
+import { listTaskEvents } from '../../lib/api/tasks';
 import { useAuth } from '../AuthProvider';
 import { CopyableId } from '../project-message-view/CopyableId';
 import { buildDebugReport } from './debug-report';
@@ -43,7 +44,7 @@ function getClassificationStyle(classification: FailureClassification) {
   if (classification.code === 'cancelled') {
     return {
       border: 'var(--sam-color-fg-muted)',
-      bg: 'rgba(127, 127, 127, 0.06)',
+      bg: 'color-mix(in srgb, var(--sam-color-fg-muted) 6%, transparent)',
       fg: 'var(--sam-color-fg-muted)',
       label: 'var(--sam-color-fg-primary)',
     };
@@ -67,6 +68,35 @@ export function FailureCard({
   const { isSuperadmin } = useAuth();
   const [expanded, setExpanded] = useState(false);
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle');
+  const [events, setEvents] = useState<TaskStatusEvent[]>([]);
+  const [eventsLoading, setEventsLoading] = useState(false);
+  const [eventsError, setEventsError] = useState<string | null>(null);
+  const eventsFetchedRef = useRef(false);
+
+  // Fetch lifecycle events on first expand: the same data feeds the visible
+  // timeline AND the copyable debug report.
+  useEffect(() => {
+    if (!expanded || eventsFetchedRef.current) return;
+    eventsFetchedRef.current = true;
+    let cancelled = false;
+    setEventsLoading(true);
+    setEventsError(null);
+    listTaskEvents(projectId, taskEmbed.id, 50)
+      .then((res) => {
+        if (!cancelled) setEvents(res.events);
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setEventsError(err instanceof Error ? err.message : 'Failed to load events');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setEventsLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [expanded, projectId, taskEmbed.id]);
 
   const classification = useMemo(
     () => classifyFailure(taskEmbed.errorMessage ?? '', taskEmbed.executionStep ?? undefined),
@@ -86,6 +116,7 @@ export function FailureCard({
       executionStep: taskEmbed.executionStep,
       classificationCode: classification.code,
       errorMessage: taskEmbed.errorMessage,
+      events,
     });
     try {
       if (!navigator.clipboard?.writeText) throw new Error('unavailable');
@@ -95,7 +126,7 @@ export function FailureCard({
       setCopyState('failed');
     }
     setTimeout(() => setCopyState('idle'), 2000);
-  }, [taskEmbed, sessionId, workspaceId, nodeId, projectId, classification.code]);
+  }, [taskEmbed, sessionId, workspaceId, nodeId, projectId, classification.code, events]);
 
   const adminErrorsUrl = isSuperadmin
     ? `/admin/errors?${[
@@ -200,7 +231,7 @@ export function FailureCard({
           {/* Lifecycle timeline */}
           <div className="flex flex-col gap-1">
             <span className="text-[10px] font-medium text-fg-muted uppercase">Timeline</span>
-            <TaskLifecycleTimeline projectId={projectId} taskId={taskEmbed.id} />
+            <TaskLifecycleTimeline events={events} loading={eventsLoading} error={eventsError} />
           </div>
 
           {/* IDs */}

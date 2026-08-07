@@ -19,6 +19,16 @@ describe('classifyFailure', () => {
     expect(classifyFailure(message)).toMatchObject({ code, retryable: true });
   });
 
+  // Verbatim production reconciliation-sweep messages — the most common
+  // terminal failure reasons observed in the live databases. Pinned so the
+  // classifier can never regress them back to `unknown`.
+  it.each([
+    'Task runtime is conclusively gone after reconciliation grace (workspace_missing)',
+    'Task runtime is no longer live after 240 minutes. Last liveness result: workspace_missing',
+  ])('classifies real reconciliation-sweep messages as runtime-lost: %s', (message) => {
+    expect(classifyFailure(message).code).toBe('runtime-lost');
+  });
+
   it('uses the optional execution step as classification evidence', () => {
     expect(classifyFailure('Operation failed', 'node provisioning timed out').code).toBe(
       'provisioning'

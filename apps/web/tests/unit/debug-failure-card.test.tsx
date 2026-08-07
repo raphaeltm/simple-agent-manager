@@ -188,8 +188,9 @@ describe('FailureCard', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /Agent crashed/i }));
 
+    // Wait for the lifecycle events to load so the report can include them.
     await waitFor(() => {
-      expect(screen.getByText('Copy debug report')).toBeInTheDocument();
+      expect(screen.getByText('failed')).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByText('Copy debug report'));
@@ -203,6 +204,10 @@ describe('FailureCard', () => {
     expect(report).toContain('sess-1');
     expect(report).toContain('agent-crash');
     expect(report).toContain('Agent process exited');
+    // The loaded lifecycle timeline is part of the copied report.
+    expect(report).toContain('Status Events');
+    expect(report).toContain('in_progress → failed');
+    expect(report).toContain('Agent process exited unexpectedly with code 137');
 
     await waitFor(() => {
       expect(screen.getByText('Copied')).toBeInTheDocument();

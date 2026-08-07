@@ -158,6 +158,9 @@ const FAILURE_RULES: FailureRule[] = [
       /node (became )?(unreachable|unhealthy|stale)/,
       /heartbeat (lost|timed? ?out|stale)/,
       /workspace (was |has been )?(deleted|destroyed|removed)/,
+      // Reconciliation sweep terminal messages (verified verbatim in production)
+      /runtime is (conclusively gone|no longer live)/,
+      /workspace_missing/,
     ],
   },
   {
