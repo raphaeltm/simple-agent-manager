@@ -5,7 +5,7 @@ redact() {
   sed -E \
     -e 's/(Bearer )[A-Za-z0-9._~+\/=-]{12,}/\1[REDACTED]/gI' \
     -e 's/(Authorization:[[:space:]]*)[^[:space:]]+/\1[REDACTED]/gI' \
-    -e 's/(token|secret|password|passwd|api[_-]?key|access[_-]?token|refresh[_-]?token|private[_-]?key)(["'\'']?[[:space:]]*[:=][[:space:]]*["'\'']?)[^[:space:]"'\'',}]+/\1\2[REDACTED]/gI' \
+    -e 's/(token|secret|password|passwd|passphrase|api[_-]?key|access[_-]?token|refresh[_-]?token|session[_-]?token|private[_-]?key)(["'\'']?[[:space:]]*[:=][[:space:]]*["'\'']?)[^[:space:]"'\'',}]+/\1\2[REDACTED]/gI' \
     -e 's/gh[psuor]_[A-Za-z0-9_]{20,}/[REDACTED]/g' \
     -e 's/github_pat_[A-Za-z0-9_]{20,}/[REDACTED]/g'
 }
@@ -15,6 +15,7 @@ trap 'rm -f "$tmp_output"' EXIT
 
 max_attempts="${PULUMI_REFRESH_MAX_ATTEMPTS:-3}"
 retry_delay_seconds="${PULUMI_REFRESH_RETRY_DELAY_SECONDS:-5}"
+diagnostic_tail_lines="${PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES:-80}"
 
 if ! [[ "$max_attempts" =~ ^[1-9][0-9]*$ ]] || (( max_attempts > 5 )); then
   echo "::error::PULUMI_REFRESH_MAX_ATTEMPTS must be an integer from 1 through 5" >&2
@@ -23,6 +24,11 @@ fi
 
 if ! [[ "$retry_delay_seconds" =~ ^[0-9]+$ ]] || (( retry_delay_seconds > 300 )); then
   echo "::error::PULUMI_REFRESH_RETRY_DELAY_SECONDS must be an integer from 0 through 300" >&2
+  exit 2
+fi
+
+if ! [[ "$diagnostic_tail_lines" =~ ^[1-9][0-9]*$ ]] || (( diagnostic_tail_lines > 500 )); then
+  echo "::error::PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES must be an integer from 1 through 500" >&2
   exit 2
 fi
 
@@ -41,7 +47,7 @@ while (( attempt <= max_attempts )); do
 
   if (( attempt < max_attempts )); then
     echo "::warning title=Pulumi refresh retry::Attempt ${attempt}/${max_attempts} failed with exit ${status}; retrying in ${retry_delay_seconds}s." >&2
-    tail -80 "$tmp_output" | redact >&2
+    tail -n "$diagnostic_tail_lines" "$tmp_output" | redact >&2
     sleep "$retry_delay_seconds"
     retry_delay_seconds=$((retry_delay_seconds * 2))
   fi
@@ -63,9 +69,9 @@ done
   echo ""
   echo "### Redacted refresh diagnostics"
   echo '```'
-  tail -80 "$tmp_output" | redact
+  tail -n "$diagnostic_tail_lines" "$tmp_output" | redact
   echo '```'
 } >>"${GITHUB_STEP_SUMMARY:-/dev/null}"
 
-tail -80 "$tmp_output" | redact >&2
+tail -n "$diagnostic_tail_lines" "$tmp_output" | redact >&2
 exit "$status"

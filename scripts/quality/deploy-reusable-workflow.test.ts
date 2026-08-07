@@ -138,7 +138,7 @@ describe('deploy reusable workflow', () => {
     expect(initialSync).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
     expect(initialSync).toContain('RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}');
     expect(initialSync).toContain(
-      "VM_AGENT_REQUIRED_VERSION: ${{ inputs.skip_agent == true && \'\' || github.sha }}"
+      'VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}'
     );
     expect(initialSync).toContain(
       'ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}'
@@ -148,7 +148,7 @@ describe('deploy reusable workflow', () => {
     expect(firstDeployResync).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
     expect(firstDeployResync).toContain('RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}');
     expect(firstDeployResync).toContain(
-      "VM_AGENT_REQUIRED_VERSION: ${{ inputs.skip_agent == true && \'\' || github.sha }}"
+      'VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}'
     );
     expect(firstDeployResync).toContain(
       'ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}'
@@ -223,7 +223,8 @@ describe('deploy reusable workflow', () => {
     const goSetupIndex = workflow.indexOf('- name: Setup Go for Container Runtime');
 
     expect(prepare).toContain('make -C packages/vm-agent prepare-container');
-    expect(prepare).toContain('VERSION="$GITHUB_SHA"');
+    expect(prepare).toContain('VERSION="$DEPLOY_SHA"');
+    expect(prepare).toContain('DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}');
     expect(prepare).toContain('vm-agent-version.json');
     expect(prepare).not.toContain('secrets.');
     expect(prepareIndex).toBeGreaterThan(-1);
@@ -313,7 +314,8 @@ describe('deploy reusable workflow', () => {
     // Both the container-baked binary and the R2-uploaded binaries must report
     // the deploy commit SHA so a running agent can be correlated to its artifact.
     expect(build).toContain('make -C packages/vm-agent build-all');
-    expect(build).toContain('VERSION="$GITHUB_SHA"');
+    expect(build).toContain('VERSION="$DEPLOY_SHA"');
+    expect(build).toContain('DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}');
   });
 
   it('continues deployment when workers.dev subdomain setup succeeds', () => {

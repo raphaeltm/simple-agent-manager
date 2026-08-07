@@ -15,6 +15,39 @@ import { validatePulumiOutputs } from '../deploy/sync-wrangler-config.js';
 
 const greenSha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const redSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
+const repository = 'owner/repo';
+
+function trustedCiRun(sha: string, id = 123) {
+  return {
+    id,
+    name: 'CI',
+    head_sha: sha,
+    head_branch: 'main',
+    head_repository: { full_name: repository },
+    event: 'push',
+    conclusion: 'success',
+    html_url: `https://github.test/runs/${id}`,
+  };
+}
+
+function stubGithub(mainSha: string, workflowRuns: unknown[], isFork = false): void {
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: string | URL | Request) => {
+      const url = String(input);
+      if (url === `https://api.github.com/repos/${repository}`) {
+        return Response.json({ fork: isFork });
+      }
+      if (url.includes('/git/ref/heads/main')) {
+        return Response.json({ object: { sha: mainSha } });
+      }
+      if (url.includes('/actions/workflows/ci.yml/runs')) {
+        return Response.json({ workflow_runs: workflowRuns });
+      }
+      return new Response('unexpected test URL', { status: 500 });
+    })
+  );
+}
 
 function workflow(path: string): string {
   return readFileSync(new URL(`../../.github/workflows/${path}`, import.meta.url), 'utf8');
@@ -26,47 +59,66 @@ function repoFile(path: string): string {
 
 describe('production deployment safety gate', () => {
   it('accepts a green exact SHA', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () =>
-        Response.json({
-          workflow_runs: [
-            {
-              id: 123,
-              name: 'CI',
-              head_sha: greenSha,
-              conclusion: 'success',
-              html_url: 'https://github.test/runs/123',
-            },
-          ],
-        })
-      )
-    );
+    stubGithub(greenSha, [trustedCiRun(greenSha)]);
 
     await expect(
       validateProductionDispatch({
         githubEventName: 'workflow_dispatch',
-        githubRepository: 'owner/repo',
+        githubRepository: repository,
         githubToken: 'ghs_fake_token_value_for_test_only',
         targetCommitSha: greenSha,
       })
     ).resolves.toEqual({ sha: greenSha, ciVerified: true, emergencyOverride: false });
   });
 
-  it('rejects a wrong or unverified SHA before deployment mutation', async () => {
+  it('follows trusted GitHub pagination when locating the successful push CI run', async () => {
+    let actionsPage = 0;
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        Response.json({
-          workflow_runs: [{ id: 456, name: 'CI', head_sha: greenSha, conclusion: 'success' }],
-        })
-      )
+      vi.fn(async (input: string | URL | Request) => {
+        const url = String(input);
+        if (url === `https://api.github.com/repos/${repository}`) {
+          return Response.json({ fork: false });
+        }
+        if (url.includes('/git/ref/heads/main')) {
+          return Response.json({ object: { sha: greenSha } });
+        }
+        if (url.includes('/actions/workflows/ci.yml/runs')) {
+          actionsPage += 1;
+          if (actionsPage === 1) {
+            return Response.json(
+              { workflow_runs: [] },
+              {
+                headers: {
+                  Link: `<https://api.github.com/repos/${repository}/actions/workflows/ci.yml/runs?page=2>; rel="next"`,
+                },
+              }
+            );
+          }
+          return Response.json({ workflow_runs: [trustedCiRun(greenSha)] });
+        }
+        return new Response('unexpected test URL', { status: 500 });
+      })
     );
 
     await expect(
       validateProductionDispatch({
         githubEventName: 'workflow_dispatch',
-        githubRepository: 'owner/repo',
+        githubRepository: repository,
+        githubToken: 'ghs_fake_token_value_for_test_only',
+        targetCommitSha: greenSha,
+      })
+    ).resolves.toEqual({ sha: greenSha, ciVerified: true, emergencyOverride: false });
+    expect(actionsPage).toBe(2);
+  });
+
+  it('rejects a wrong or unverified SHA before deployment mutation', async () => {
+    stubGithub(redSha, [trustedCiRun(greenSha, 456)]);
+
+    await expect(
+      validateProductionDispatch({
+        githubEventName: 'workflow_dispatch',
+        githubRepository: repository,
         githubToken: 'ghs_fake_token_value_for_test_only',
         targetCommitSha: redSha,
       })
@@ -74,10 +126,7 @@ describe('production deployment safety gate', () => {
   });
 
   it('records an audited emergency override for an exact SHA without green CI', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => Response.json({ workflow_runs: [] }))
-    );
+    stubGithub(redSha, []);
     const dir = mkdtempSync(join(tmpdir(), 'sam-deploy-gate-'));
     const summary = join(dir, 'summary.md');
     const output = join(dir, 'output.txt');
@@ -85,7 +134,7 @@ describe('production deployment safety gate', () => {
     await expect(
       validateProductionDispatch({
         githubEventName: 'workflow_dispatch',
-        githubRepository: 'owner/repo',
+        githubRepository: repository,
         githubToken: 'ghs_fake_token_value_for_test_only',
         targetCommitSha: redSha,
         emergencyOverrideReason: 'Emergency operator-approved hotfix during active outage',
@@ -101,23 +150,70 @@ describe('production deployment safety gate', () => {
     expect(readFileSync(output, 'utf8')).toContain(`deploy_sha=${redSha}`);
   });
 
+  it('allows routine self-host fork deploys from the exact current main tip without CI', async () => {
+    stubGithub(greenSha, [], true);
+
+    await expect(
+      validateProductionDispatch({
+        githubEventName: 'workflow_dispatch',
+        githubRepository: repository,
+        githubToken: 'ghs_fake_token_value_for_test_only',
+        targetCommitSha: greenSha,
+      })
+    ).resolves.toEqual({ sha: greenSha, ciVerified: false, emergencyOverride: false });
+  });
+
   it('requires exact 40-character commit SHAs and meaningful override reasons', () => {
     expect(() => normalizeSha('main')).toThrow(/exact 40-character commit SHA/);
     expect(() => normalizeSha(greenSha.slice(0, 12))).toThrow(/exact 40-character commit SHA/);
     expect(() => validateEmergencyOverrideReason('too short')).toThrow(/at least 20 characters/);
+    expect(() => validateEmergencyOverrideReason('123456789', 10)).toThrow(
+      /at least 10 characters/
+    );
+  });
+
+  it('never allows an emergency reason to bypass trusted current-main provenance', async () => {
+    stubGithub(greenSha, []);
+
+    await expect(
+      validateProductionDispatch({
+        githubEventName: 'workflow_dispatch',
+        githubRepository: repository,
+        githubToken: 'ghs_fake_token_value_for_test_only',
+        targetCommitSha: redSha,
+        emergencyOverrideReason: 'Emergency operator-approved non-main deploy',
+      })
+    ).rejects.toThrow(/does not match the current trusted main tip.*cannot bypass/i);
   });
 
   it('selects only successful CI runs for the same SHA', () => {
     expect(
       selectSuccessfulCiRun(
         [
-          { id: 1, name: 'CI', head_sha: redSha, conclusion: 'failure' },
-          { id: 2, name: 'Other', head_sha: redSha, conclusion: 'success' },
-          { id: 3, name: 'CI', head_sha: redSha, conclusion: 'success' },
+          { ...trustedCiRun(redSha, 1), conclusion: 'failure' },
+          { ...trustedCiRun(redSha, 2), name: 'Other' },
+          trustedCiRun(redSha, 3),
         ],
-        redSha
+        redSha,
+        repository
       )?.id
     ).toBe(3);
+  });
+
+  it('rejects green fork pull-request runs even when their head branch is named main', () => {
+    expect(
+      selectSuccessfulCiRun(
+        [
+          {
+            ...trustedCiRun(redSha),
+            event: 'pull_request',
+            head_repository: { full_name: 'attacker/repo' },
+          },
+        ],
+        redSha,
+        repository
+      )
+    ).toBeUndefined();
   });
 });
 
@@ -129,6 +225,9 @@ describe('deployment workflow safety wiring', () => {
     expect(deploy).toContain('required: true');
     expect(deploy).toContain('Validate exact SHA and CI gate');
     expect(deploy).toContain('scripts/deploy/validate-production-dispatch.ts');
+    expect(deploy).toContain(
+      'PRODUCTION_DEPLOY_OVERRIDE_REASON_MIN_LENGTH: ${{ vars.PRODUCTION_DEPLOY_OVERRIDE_REASON_MIN_LENGTH }}'
+    );
     expect(deploy).toContain("needs.validate-manual-dispatch.result == 'success'");
     expect(deploy).toContain(
       "target_commit_sha: ${{ github.event_name == 'workflow_dispatch' && needs.validate-manual-dispatch.outputs.deploy_sha || github.event.workflow_run.head_sha }}"
@@ -140,7 +239,11 @@ describe('deployment workflow safety wiring', () => {
 
     expect(deploy).toContain("github.event_name == 'workflow_run'");
     expect(deploy).toContain("github.event.workflow_run.conclusion == 'success'");
+    expect(deploy).toContain("github.event.workflow_run.event == 'push'");
     expect(deploy).toContain("github.event.workflow_run.head_branch == 'main'");
+    expect(deploy).toContain(
+      'github.event.workflow_run.head_repository.full_name == github.repository'
+    );
     expect(deploy).toContain('github.event.workflow_run.head_sha');
   });
 
@@ -149,6 +252,14 @@ describe('deployment workflow safety wiring', () => {
 
     expect(reusable).toContain('target_commit_sha:');
     expect(reusable).toContain('ref: ${{ inputs.target_commit_sha || github.sha }}');
+    expect(reusable).toContain('- name: Resolve and Verify Deployment SHA');
+    expect(reusable).toContain('ACTUAL_DEPLOY_SHA=$(git rev-parse HEAD)');
+    expect(reusable).toContain('echo "agent_version=" >> "$GITHUB_OUTPUT"');
+    expect(reusable).toContain('echo "agent_version=$ACTUAL_DEPLOY_SHA" >> "$GITHUB_OUTPUT"');
+    expect(reusable).toContain(
+      'VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}'
+    );
+    expect(reusable).toContain('steps.deploy-sha.outputs.value');
   });
 
   it('fails closed when Pulumi refresh fails', () => {
@@ -163,10 +274,14 @@ describe('deployment workflow safety wiring', () => {
     expect(reusable).toContain(
       'PULUMI_REFRESH_RETRY_DELAY_SECONDS: ${{ vars.PULUMI_REFRESH_RETRY_DELAY_SECONDS }}'
     );
+    expect(reusable).toContain(
+      'PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES: ${{ vars.PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES }}'
+    );
     expect(refresh).toContain('Deployment failed closed before \\`pulumi up\\`');
     expect(refresh).toContain('exit "$status"');
     expect(refresh).toContain('PULUMI_REFRESH_MAX_ATTEMPTS');
     expect(refresh).toContain('PULUMI_REFRESH_RETRY_DELAY_SECONDS');
+    expect(refresh).toContain('PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES');
   });
 
   it('retries bounded Pulumi refresh failures before succeeding', () => {
@@ -201,7 +316,7 @@ describe('deployment workflow safety wiring', () => {
     const summary = join(dir, 'summary.md');
     writeFileSync(
       pulumi,
-      '#!/bin/bash\necho "error token=ghp_supersecretsecretsecretsecretsecret and Authorization: Bearer abcdefghijklmnopqrstuvwxyz" >&2\nexit 7\n'
+      '#!/bin/bash\necho "error token=ghp_supersecretsecretsecretsecretsecret passphrase=verysecretpassphrase and Authorization: Bearer abcdefghijklmnopqrstuvwxyz" >&2\nexit 7\n'
     );
     execFileSync('chmod', ['+x', pulumi]);
 
@@ -226,6 +341,7 @@ describe('deployment workflow safety wiring', () => {
     const combined = `${stderr}\n${readFileSync(summary, 'utf8')}`;
     expect(combined).toContain('[REDACTED]');
     expect(combined).not.toContain('ghp_supersecret');
+    expect(combined).not.toContain('verysecretpassphrase');
     expect(combined).not.toContain('abcdefghijklmnopqrstuvwxyz');
   });
 

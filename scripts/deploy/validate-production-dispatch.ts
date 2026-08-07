@@ -2,7 +2,7 @@
 import { appendFileSync } from 'node:fs';
 
 const SHA_PATTERN = /^[0-9a-f]{40}$/i;
-const MIN_OVERRIDE_REASON_LENGTH = 20;
+const DEFAULT_OVERRIDE_REASON_MIN_LENGTH = 20;
 
 export interface ValidationEnv {
   githubEventName?: string;
@@ -10,6 +10,7 @@ export interface ValidationEnv {
   githubToken?: string;
   targetCommitSha?: string;
   emergencyOverrideReason?: string;
+  overrideReasonMinLength?: string;
   githubOutput?: string;
   githubStepSummary?: string;
 }
@@ -18,6 +19,9 @@ export interface WorkflowRun {
   id: number;
   name?: string;
   head_sha?: string;
+  head_branch?: string;
+  event?: string;
+  head_repository?: { full_name?: string };
   conclusion?: string | null;
   html_url?: string;
 }
@@ -36,24 +40,53 @@ export function normalizeSha(value: string | undefined): string {
   return sha.toLowerCase();
 }
 
-export function validateEmergencyOverrideReason(value: string | undefined): string | undefined {
+function parseOverrideReasonMinLength(value: string | undefined): number {
+  if (!value) return DEFAULT_OVERRIDE_REASON_MIN_LENGTH;
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > 500) {
+    throw new Error(
+      'PRODUCTION_DEPLOY_OVERRIDE_REASON_MIN_LENGTH must be an integer from 1 through 500.'
+    );
+  }
+  return parsed;
+}
+
+export function validateEmergencyOverrideReason(
+  value: string | undefined,
+  minLength = DEFAULT_OVERRIDE_REASON_MIN_LENGTH
+): string | undefined {
   const reason = (value ?? '').trim();
   if (!reason) {
     return undefined;
   }
-  if (reason.length < MIN_OVERRIDE_REASON_LENGTH) {
+  if (reason.length < minLength) {
     throw new Error(
-      `emergency_override_reason must be at least ${MIN_OVERRIDE_REASON_LENGTH} characters when provided.`
+      `emergency_override_reason must be at least ${minLength} characters when provided.`
     );
   }
   return reason;
 }
 
-export function selectSuccessfulCiRun(runs: WorkflowRun[], sha: string): WorkflowRun | undefined {
+interface GithubRefResponse {
+  object?: { sha?: string };
+}
+
+interface GithubRepositoryResponse {
+  fork?: boolean;
+}
+
+export function selectSuccessfulCiRun(
+  runs: WorkflowRun[],
+  sha: string,
+  repository: string
+): WorkflowRun | undefined {
   return runs.find(
     (run) =>
       run.head_sha?.toLowerCase() === sha &&
       run.conclusion === 'success' &&
+      run.event === 'push' &&
+      run.head_branch === 'main' &&
+      run.head_repository?.full_name === repository &&
       (run.name === undefined || run.name === 'CI')
   );
 }
@@ -69,8 +102,67 @@ async function listCiRuns(
   env: Required<Pick<ValidationEnv, 'githubRepository' | 'githubToken'>>,
   sha: string
 ) {
-  const url = `https://api.github.com/repos/${env.githubRepository}/actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=20`;
-  const response = await fetch(url, {
+  let url: string | undefined =
+    `https://api.github.com/repos/${env.githubRepository}/actions/workflows/ci.yml/runs?head_sha=${sha}&branch=main&event=push&per_page=100`;
+  const runs: WorkflowRun[] = [];
+
+  while (url) {
+    const response = await fetch(url, {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${env.githubToken}`,
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    });
+
+    if (!response.ok) {
+      throw new Error(`Failed to query CI workflow runs for ${sha}: HTTP ${response.status}`);
+    }
+
+    const body = (await response.json()) as GithubActionsRunsResponse;
+    runs.push(...(body.workflow_runs ?? []));
+
+    const nextLink = response.headers
+      .get('link')
+      ?.split(',')
+      .map((link) => link.trim())
+      .find((link) => link.endsWith('rel="next"'))
+      ?.match(/^<([^>]+)>/)?.[1];
+    if (nextLink && !nextLink.startsWith('https://api.github.com/')) {
+      throw new Error('GitHub CI pagination returned an untrusted next-page URL');
+    }
+    url = nextLink;
+  }
+
+  return runs;
+}
+
+async function getCurrentMainTip(
+  env: Required<Pick<ValidationEnv, 'githubRepository' | 'githubToken'>>
+): Promise<string> {
+  const response = await fetch(
+    `https://api.github.com/repos/${env.githubRepository}/git/ref/heads/main`,
+    {
+      headers: {
+        Accept: 'application/vnd.github+json',
+        Authorization: `Bearer ${env.githubToken}`,
+        'X-GitHub-Api-Version': '2022-11-28',
+      },
+    }
+  );
+
+  if (!response.ok) {
+    throw new Error(`Failed to resolve the trusted main branch tip: HTTP ${response.status}`);
+  }
+
+  const body = (await response.json()) as GithubRefResponse;
+  return normalizeSha(body.object?.sha);
+}
+
+async function getRepositoryMetadata(
+  env: Required<Pick<ValidationEnv, 'githubRepository' | 'githubToken'>>
+): Promise<GithubRepositoryResponse> {
+  const response = await fetch(`https://api.github.com/repos/${env.githubRepository}`, {
     headers: {
       Accept: 'application/vnd.github+json',
       Authorization: `Bearer ${env.githubToken}`,
@@ -79,11 +171,10 @@ async function listCiRuns(
   });
 
   if (!response.ok) {
-    throw new Error(`Failed to query CI workflow runs for ${sha}: HTTP ${response.status}`);
+    throw new Error(`Failed to resolve repository provenance: HTTP ${response.status}`);
   }
 
-  const body = (await response.json()) as GithubActionsRunsResponse;
-  return body.workflow_runs ?? [];
+  return (await response.json()) as GithubRepositoryResponse;
 }
 
 function append(path: string | undefined, content: string): void {
@@ -102,10 +193,47 @@ export async function validateProductionDispatch(env: ValidationEnv): Promise<{
   }
 
   const sha = normalizeSha(env.targetCommitSha);
-  const reason = validateEmergencyOverrideReason(env.emergencyOverrideReason);
+  const reason = validateEmergencyOverrideReason(
+    env.emergencyOverrideReason,
+    parseOverrideReasonMinLength(env.overrideReasonMinLength)
+  );
 
   if (!env.githubRepository || !env.githubToken) {
     throw new Error('GITHUB_REPOSITORY and GITHUB_TOKEN are required to verify CI gates.');
+  }
+
+  let repositoryMetadata: GithubRepositoryResponse;
+  let mainTip: string;
+  try {
+    repositoryMetadata = await getRepositoryMetadata({
+      githubRepository: env.githubRepository,
+      githubToken: env.githubToken,
+    });
+    mainTip = await getCurrentMainTip({
+      githubRepository: env.githubRepository,
+      githubToken: env.githubToken,
+    });
+  } catch (error) {
+    const message = redact(error instanceof Error ? error.message : String(error));
+    throw new Error(
+      `${message}. Unable to prove trusted main provenance; deployment failed closed before production mutation.`
+    );
+  }
+
+  if (sha !== mainTip) {
+    throw new Error(
+      `target_commit_sha ${sha} does not match the current trusted main tip ${mainTip}. Emergency overrides cannot bypass main-branch provenance. Deployment failed closed before production mutation.`
+    );
+  }
+
+  append(env.githubOutput, `deploy_sha=${sha}\n`);
+
+  if (repositoryMetadata.fork === true) {
+    append(
+      env.githubStepSummary,
+      `## Manual production deployment gate\n\n- Target commit: \`${sha}\`\n- Repository provenance: verified current \`main\` tip in a fork\n- CI gate: not required because fork main-push CI is intentionally skipped\n`
+    );
+    return { sha, ciVerified: false, emergencyOverride: false };
   }
 
   let runs: WorkflowRun[];
@@ -119,14 +247,12 @@ export async function validateProductionDispatch(env: ValidationEnv): Promise<{
     throw new Error(`${message}. Deployment failed closed before production mutation.`);
   }
 
-  const successfulRun = selectSuccessfulCiRun(runs, sha);
+  const successfulRun = selectSuccessfulCiRun(runs, sha, env.githubRepository);
   if (!successfulRun && !reason) {
     throw new Error(
       `No successful CI workflow run was found for target_commit_sha ${sha}. Re-run CI for that exact commit or provide an audited emergency_override_reason. Deployment failed closed before production mutation.`
     );
   }
-
-  append(env.githubOutput, `deploy_sha=${sha}\n`);
 
   if (successfulRun) {
     append(
@@ -154,6 +280,7 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       githubToken: process.env.GITHUB_TOKEN,
       targetCommitSha: process.env.TARGET_COMMIT_SHA,
       emergencyOverrideReason: process.env.EMERGENCY_OVERRIDE_REASON,
+      overrideReasonMinLength: process.env.PRODUCTION_DEPLOY_OVERRIDE_REASON_MIN_LENGTH,
       githubOutput: process.env.GITHUB_OUTPUT,
       githubStepSummary: process.env.GITHUB_STEP_SUMMARY,
     });
