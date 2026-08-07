@@ -465,6 +465,11 @@ describe('deployment workflow safety wiring', () => {
       kvId: 'kv-123',
       r2Name: 'r2-prod',
       sessionSnapshotTtlDays: 7,
+      // Required outputs added by #1750; without them validatePulumiOutputs throws
+      // the missing-required-fields error first and never reaches the sensitive-field
+      // assertion this test exists to make.
+      diagnosticIncidentPrefix: 'diagnostic-incidents',
+      diagnosticIncidentTtlDays: 7,
       cloudflareAccountId: 'cf-account',
       pagesName: 'sam-web-prod',
       dnsIds: {},
