@@ -7,10 +7,7 @@ import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 // Mock rate-limit middleware to be a passthrough (tested separately)
 vi.mock('../../../src/middleware/rate-limit', () => ({
-  rateLimit: () =>
-    vi.fn(async (_c: any, next: any) => {
-      await next();
-    }),
+  rateLimit: () => vi.fn(async (_c: any, next: any) => { await next(); }),
   getRateLimit: vi.fn(),
 }));
 
@@ -111,7 +108,11 @@ describe('Bootstrap Routes', () => {
 
       mockKV.get.mockResolvedValue(tokenData);
 
-      const res = await app.request('/api/bootstrap/valid-token-abc', { method: 'POST' }, mockEnv);
+      const res = await app.request(
+        '/api/bootstrap/valid-token-abc',
+        { method: 'POST' },
+        mockEnv
+      );
 
       expect(res.status).toBe(200);
       const body: BootstrapResponse = await res.json();
@@ -135,7 +136,10 @@ describe('Bootstrap Routes', () => {
       const app = new Hono();
       app.route('/api/bootstrap', bootstrapRoutes);
 
-      const { ciphertext, iv } = await encrypt('hetzner-token', mockEnv.ENCRYPTION_KEY);
+      const { ciphertext, iv } = await encrypt(
+        'hetzner-token',
+        mockEnv.ENCRYPTION_KEY
+      );
 
       const tokenData: BootstrapTokenData = {
         workspaceId: 'ws-123',
@@ -180,7 +184,10 @@ describe('Bootstrap Routes', () => {
       const app = new Hono();
       app.route('/api/bootstrap', bootstrapRoutes);
 
-      const { ciphertext, iv } = await encrypt('hetzner-token', mockEnv.ENCRYPTION_KEY);
+      const { ciphertext, iv } = await encrypt(
+        'hetzner-token',
+        mockEnv.ENCRYPTION_KEY
+      );
 
       const tokenData: BootstrapTokenData = {
         workspaceId: 'ws-123',
@@ -196,7 +203,11 @@ describe('Bootstrap Routes', () => {
 
       mockKV.get.mockResolvedValue(tokenData);
 
-      const res = await app.request('/api/bootstrap/no-github-token', { method: 'POST' }, mockEnv);
+      const res = await app.request(
+        '/api/bootstrap/no-github-token',
+        { method: 'POST' },
+        mockEnv
+      );
 
       expect(res.status).toBe(200);
       const body: BootstrapResponse = await res.json();
@@ -263,5 +274,6 @@ describe('Bootstrap Routes', () => {
       expect(body.error).toBe('INVALID_TOKEN');
       expect(mockKV.delete).toHaveBeenCalledWith('bootstrap:malformed-token');
     });
+
   });
 });

@@ -68,9 +68,7 @@ describe('normalizeFileProxyPath', () => {
   });
 
   it('rejects paths with colons', () => {
-    expect(() => normalizeFileProxyPath('C:\\Users\\foo')).toThrow(
-      'path contains invalid characters'
-    );
+    expect(() => normalizeFileProxyPath('C:\\Users\\foo')).toThrow('path contains invalid characters');
   });
 
   it('rejects empty segments (double slashes)', () => {

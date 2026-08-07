@@ -99,26 +99,18 @@ describe('Skill Routes', () => {
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({ items: [{ id: 'skill-1' }] });
-    expect(mocks.requireProjectAccess).toHaveBeenCalledWith(
-      expect.anything(),
-      'project-1',
-      'user-1'
-    );
+    expect(mocks.requireProjectAccess).toHaveBeenCalledWith(expect.anything(), 'project-1', 'user-1');
     expect(mocks.listSkills).toHaveBeenCalledWith(expect.anything(), 'project-1', 'user-1');
   });
 
   it('creates a skill and defaults to task mode through the service payload', async () => {
     mocks.createSkill.mockResolvedValueOnce(makeSkill({ id: 'skill-new', name: 'Release' }));
 
-    const res = await app.request(
-      REQUEST_PATH,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Release', resourceRequirementsJson: '{"cpu":4}' }),
-      },
-      makeEnv()
-    );
+    const res = await app.request(REQUEST_PATH, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Release', resourceRequirementsJson: '{"cpu":4}' }),
+    }, makeEnv());
 
     expect(res.status).toBe(201);
     await expect(res.json()).resolves.toMatchObject({ id: 'skill-new', name: 'Release' });
@@ -145,30 +137,22 @@ describe('Skill Routes', () => {
       })
     );
 
-    const res = await app.request(
-      REQUEST_PATH,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'Release' }),
-      },
-      makeEnv()
-    );
+    const res = await app.request(REQUEST_PATH, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: 'Release' }),
+    }, makeEnv());
 
     expect(res.status).toBe(404);
     expect(mocks.createSkill).not.toHaveBeenCalled();
   });
 
   it('rejects invalid create payloads before calling the service', async () => {
-    const res = await app.request(
-      REQUEST_PATH,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description: 'missing name' }),
-      },
-      makeEnv()
-    );
+    const res = await app.request(REQUEST_PATH, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: 'missing name' }),
+    }, makeEnv());
 
     expect(res.status).toBe(400);
     expect(mocks.createSkill).not.toHaveBeenCalled();
@@ -183,15 +167,11 @@ describe('Skill Routes', () => {
     expect(getRes.status).toBe(200);
     await expect(getRes.json()).resolves.toMatchObject({ id: 'skill-1' });
 
-    const patchRes = await app.request(
-      `${REQUEST_PATH}/skill-1`,
-      {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ description: 'Updated' }),
-      },
-      makeEnv()
-    );
+    const patchRes = await app.request(`${REQUEST_PATH}/skill-1`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ description: 'Updated' }),
+    }, makeEnv());
     expect(patchRes.status).toBe(200);
     expect(mocks.updateSkill).toHaveBeenCalledWith(
       expect.anything(),

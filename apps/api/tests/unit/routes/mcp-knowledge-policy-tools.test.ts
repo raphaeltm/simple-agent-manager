@@ -81,38 +81,28 @@ function jsonRpcRequest(method: string, params?: Record<string, unknown>) {
 }
 
 async function mcpPost(app: Hono, toolName: string, args: Record<string, unknown>) {
-  return app.request(
-    '/mcp',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer valid-token',
-      },
-      body: JSON.stringify(
-        jsonRpcRequest('tools/call', {
-          name: toolName,
-          arguments: args,
-        })
-      ),
+  return app.request('/mcp', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer valid-token',
     },
-    mockEnv
-  );
+    body: JSON.stringify(jsonRpcRequest('tools/call', {
+      name: toolName,
+      arguments: args,
+    })),
+  }, mockEnv);
 }
 
 async function listTools(app: Hono) {
-  return app.request(
-    '/mcp',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: 'Bearer valid-token',
-      },
-      body: JSON.stringify(jsonRpcRequest('tools/list')),
+  return app.request('/mcp', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: 'Bearer valid-token',
     },
-    mockEnv
-  );
+    body: JSON.stringify(jsonRpcRequest('tools/list')),
+  }, mockEnv);
 }
 
 async function expectInvalidParams(res: Response, messagePart?: string) {
@@ -125,10 +115,7 @@ async function expectInvalidParams(res: Response, messagePart?: string) {
   }
 }
 
-function getTool(
-  tools: Array<{ name: string; inputSchema: { properties: Record<string, { enum?: string[] }> } }>,
-  name: string
-) {
+function getTool(tools: Array<{ name: string; inputSchema: { properties: Record<string, { enum?: string[] }> } }>, name: string) {
   const tool = tools.find((candidate) => candidate.name === name);
   expect(tool).toBeDefined();
   return tool;
@@ -141,9 +128,9 @@ describe('MCP knowledge and policy route tools', () => {
     vi.clearAllMocks();
     mockD1 = createMockD1();
     mockEnv.DATABASE = mockD1;
-    mockKV.get.mockImplementation(async (key: string) =>
+    mockKV.get.mockImplementation(async (key: string) => (
       key === 'mcp:valid-token' ? validTokenData : null
-    );
+    ));
 
     vi.mocked(projectDataService.getKnowledgeEntityByName).mockResolvedValue(null);
     vi.mocked(projectDataService.createKnowledgeEntity).mockResolvedValue({
@@ -155,25 +142,13 @@ describe('MCP knowledge and policy route tools', () => {
       createdAt: 1,
       updatedAt: 1,
     });
-    vi.mocked(projectDataService.addKnowledgeObservation).mockResolvedValue({
-      id: 'obs-1',
-      createdAt: 1,
-    });
+    vi.mocked(projectDataService.addKnowledgeObservation).mockResolvedValue({ id: 'obs-1', createdAt: 1 });
     vi.mocked(projectDataService.searchKnowledgeObservations).mockResolvedValue([]);
-    vi.mocked(projectDataService.listKnowledgeEntities).mockResolvedValue({
-      entities: [],
-      total: 0,
-    });
+    vi.mocked(projectDataService.listKnowledgeEntities).mockResolvedValue({ entities: [], total: 0 });
     vi.mocked(projectDataService.getRelevantKnowledge).mockResolvedValue([]);
-    vi.mocked(projectDataService.createKnowledgeRelation).mockResolvedValue({
-      id: 'rel-1',
-      createdAt: 1,
-    });
+    vi.mocked(projectDataService.createKnowledgeRelation).mockResolvedValue({ id: 'rel-1', createdAt: 1 });
     vi.mocked(projectDataService.updateKnowledgeObservation).mockResolvedValue({ id: 'obs-2' });
-    vi.mocked(projectDataService.flagKnowledgeContradiction).mockResolvedValue({
-      newObservationId: 'obs-2',
-      relationId: 'rel-1',
-    });
+    vi.mocked(projectDataService.flagKnowledgeContradiction).mockResolvedValue({ newObservationId: 'obs-2', relationId: 'rel-1' });
     vi.mocked(projectDataService.createPolicy).mockResolvedValue({ id: 'policy-1', now: 1 });
     vi.mocked(projectDataService.listPolicies).mockResolvedValue({ policies: [], total: 0 });
 
@@ -187,62 +162,34 @@ describe('MCP knowledge and policy route tools', () => {
 
     expect(res.status).toBe(200);
     const body = await res.json();
-    const tools = body.result.tools as Array<{
-      name: string;
-      inputSchema: { properties: Record<string, { enum?: string[] }> };
-    }>;
+    const tools = body.result.tools as Array<{ name: string; inputSchema: { properties: Record<string, { enum?: string[] }> } }>;
 
     const addKnowledge = getTool(tools, 'add_knowledge');
-    expect(addKnowledge?.inputSchema.properties.entityType.enum).toEqual([
-      ...KNOWLEDGE_ENTITY_TYPES,
-    ]);
-    expect(addKnowledge?.inputSchema.properties.sourceType.enum).toEqual([
-      ...KNOWLEDGE_SOURCE_TYPES,
-    ]);
-    expect(getTool(tools, 'search_knowledge')?.inputSchema.properties.entityType.enum).toEqual([
-      ...KNOWLEDGE_ENTITY_TYPES,
-    ]);
-    expect(getTool(tools, 'get_project_knowledge')?.inputSchema.properties.entityType.enum).toEqual(
-      [...KNOWLEDGE_ENTITY_TYPES]
-    );
-    expect(getTool(tools, 'relate_knowledge')?.inputSchema.properties.relationType.enum).toEqual([
-      ...KNOWLEDGE_RELATION_TYPES,
-    ]);
-    expect(getTool(tools, 'get_related')?.inputSchema.properties.relationType.enum).toEqual([
-      ...KNOWLEDGE_RELATION_TYPES,
-    ]);
+    expect(addKnowledge?.inputSchema.properties.entityType.enum).toEqual([...KNOWLEDGE_ENTITY_TYPES]);
+    expect(addKnowledge?.inputSchema.properties.sourceType.enum).toEqual([...KNOWLEDGE_SOURCE_TYPES]);
+    expect(getTool(tools, 'search_knowledge')?.inputSchema.properties.entityType.enum).toEqual([...KNOWLEDGE_ENTITY_TYPES]);
+    expect(getTool(tools, 'get_project_knowledge')?.inputSchema.properties.entityType.enum).toEqual([...KNOWLEDGE_ENTITY_TYPES]);
+    expect(getTool(tools, 'relate_knowledge')?.inputSchema.properties.relationType.enum).toEqual([...KNOWLEDGE_RELATION_TYPES]);
+    expect(getTool(tools, 'get_related')?.inputSchema.properties.relationType.enum).toEqual([...KNOWLEDGE_RELATION_TYPES]);
 
     const addPolicy = getTool(tools, 'add_policy');
     expect(addPolicy?.inputSchema.properties.category.enum).toEqual([...POLICY_CATEGORIES]);
     expect(addPolicy?.inputSchema.properties.source.enum).toEqual([...POLICY_SOURCES]);
-    expect(getTool(tools, 'list_policies')?.inputSchema.properties.category.enum).toEqual([
-      ...POLICY_CATEGORIES,
-    ]);
-    expect(getTool(tools, 'update_policy')?.inputSchema.properties.category.enum).toEqual([
-      ...POLICY_CATEGORIES,
-    ]);
+    expect(getTool(tools, 'list_policies')?.inputSchema.properties.category.enum).toEqual([...POLICY_CATEGORIES]);
+    expect(getTool(tools, 'update_policy')?.inputSchema.properties.category.enum).toEqual([...POLICY_CATEGORIES]);
   });
 
   it('returns INVALID_PARAMS for missing required knowledge and policy params', async () => {
-    await expectInvalidParams(
-      await mcpPost(app, 'add_knowledge', {
-        observation: 'Uses explicit validation',
-      }),
-      'entityName is required'
-    );
+    await expectInvalidParams(await mcpPost(app, 'add_knowledge', {
+      observation: 'Uses explicit validation',
+    }), 'entityName is required');
 
-    await expectInvalidParams(
-      await mcpPost(app, 'add_policy', {
-        category: 'rule',
-        content: 'Always validate inputs',
-      }),
-      'title is required'
-    );
+    await expectInvalidParams(await mcpPost(app, 'add_policy', {
+      category: 'rule',
+      content: 'Always validate inputs',
+    }), 'title is required');
 
-    await expectInvalidParams(
-      await mcpPost(app, 'get_knowledge', {}),
-      'Either entityName or entityId is required'
-    );
+    await expectInvalidParams(await mcpPost(app, 'get_knowledge', {}), 'Either entityName or entityId is required');
 
     expect(projectDataService.addKnowledgeObservation).not.toHaveBeenCalled();
     expect(projectDataService.createPolicy).not.toHaveBeenCalled();
@@ -251,63 +198,42 @@ describe('MCP knowledge and policy route tools', () => {
   });
 
   it('rejects invalid enum values instead of defaulting or broadening filters', async () => {
-    await expectInvalidParams(
-      await mcpPost(app, 'add_knowledge', {
-        entityName: 'CodeStyle',
-        observation: 'Use explicit validation',
-        sourceType: 'guess',
-      }),
-      'Invalid sourceType'
-    );
+    await expectInvalidParams(await mcpPost(app, 'add_knowledge', {
+      entityName: 'CodeStyle',
+      observation: 'Use explicit validation',
+      sourceType: 'guess',
+    }), 'Invalid sourceType');
 
-    await expectInvalidParams(
-      await mcpPost(app, 'search_knowledge', {
-        query: 'validation',
-        entityType: 'everything',
-      }),
-      'Invalid entityType'
-    );
+    await expectInvalidParams(await mcpPost(app, 'search_knowledge', {
+      query: 'validation',
+      entityType: 'everything',
+    }), 'Invalid entityType');
 
-    await expectInvalidParams(
-      await mcpPost(app, 'get_project_knowledge', {
-        entityType: 'everything',
-      }),
-      'Invalid entityType'
-    );
+    await expectInvalidParams(await mcpPost(app, 'get_project_knowledge', {
+      entityType: 'everything',
+    }), 'Invalid entityType');
 
-    await expectInvalidParams(
-      await mcpPost(app, 'get_related', {
-        entityName: 'CodeStyle',
-        relationType: 'adjacent',
-      }),
-      'Invalid relationType'
-    );
+    await expectInvalidParams(await mcpPost(app, 'get_related', {
+      entityName: 'CodeStyle',
+      relationType: 'adjacent',
+    }), 'Invalid relationType');
 
-    await expectInvalidParams(
-      await mcpPost(app, 'relate_knowledge', {
-        sourceEntity: 'CodeStyle',
-        targetEntity: 'Tests',
-        relationType: 'adjacent',
-      }),
-      'Invalid relationType'
-    );
+    await expectInvalidParams(await mcpPost(app, 'relate_knowledge', {
+      sourceEntity: 'CodeStyle',
+      targetEntity: 'Tests',
+      relationType: 'adjacent',
+    }), 'Invalid relationType');
 
-    await expectInvalidParams(
-      await mcpPost(app, 'list_policies', {
-        category: 'all',
-      }),
-      'category must be one of'
-    );
+    await expectInvalidParams(await mcpPost(app, 'list_policies', {
+      category: 'all',
+    }), 'category must be one of');
 
-    await expectInvalidParams(
-      await mcpPost(app, 'add_policy', {
-        category: 'rule',
-        title: 'Validate inputs',
-        content: 'Reject malformed source',
-        source: 'guessed',
-      }),
-      'source must be one of'
-    );
+    await expectInvalidParams(await mcpPost(app, 'add_policy', {
+      category: 'rule',
+      title: 'Validate inputs',
+      content: 'Reject malformed source',
+      source: 'guessed',
+    }), 'source must be one of');
 
     expect(projectDataService.searchKnowledgeObservations).not.toHaveBeenCalled();
     expect(projectDataService.listKnowledgeEntities).not.toHaveBeenCalled();
@@ -318,51 +244,36 @@ describe('MCP knowledge and policy route tools', () => {
   });
 
   it('rejects confidence values outside 0..1 instead of clamping', async () => {
-    await expectInvalidParams(
-      await mcpPost(app, 'add_knowledge', {
-        entityName: 'CodeStyle',
-        observation: 'Use explicit validation',
-        confidence: 1.5,
-      }),
-      'confidence must be a number between 0.0 and 1.0'
-    );
+    await expectInvalidParams(await mcpPost(app, 'add_knowledge', {
+      entityName: 'CodeStyle',
+      observation: 'Use explicit validation',
+      confidence: 1.5,
+    }), 'confidence must be a number between 0.0 and 1.0');
 
-    await expectInvalidParams(
-      await mcpPost(app, 'search_knowledge', {
-        query: 'validation',
-        minConfidence: -0.1,
-      }),
-      'minConfidence must be a number between 0.0 and 1.0'
-    );
+    await expectInvalidParams(await mcpPost(app, 'search_knowledge', {
+      query: 'validation',
+      minConfidence: -0.1,
+    }), 'minConfidence must be a number between 0.0 and 1.0');
 
-    await expectInvalidParams(
-      await mcpPost(app, 'update_knowledge', {
-        observationId: 'obs-1',
-        newContent: 'Still true',
-        confidence: -1,
-      }),
-      'confidence must be a number between 0.0 and 1.0'
-    );
+    await expectInvalidParams(await mcpPost(app, 'update_knowledge', {
+      observationId: 'obs-1',
+      newContent: 'Still true',
+      confidence: -1,
+    }), 'confidence must be a number between 0.0 and 1.0');
 
-    await expectInvalidParams(
-      await mcpPost(app, 'add_policy', {
-        category: 'rule',
-        title: 'Validate inputs',
-        content: 'Reject malformed confidence',
-        confidence: 'high',
-      }),
-      'confidence must be a number between 0.0 and 1.0'
-    );
+    await expectInvalidParams(await mcpPost(app, 'add_policy', {
+      category: 'rule',
+      title: 'Validate inputs',
+      content: 'Reject malformed confidence',
+      confidence: 'high',
+    }), 'confidence must be a number between 0.0 and 1.0');
 
-    await expectInvalidParams(
-      await mcpPost(app, 'add_policy', {
-        category: 'rule',
-        title: 'Validate inputs',
-        content: 'Reject out-of-range confidence',
-        confidence: 1.5,
-      }),
-      'confidence must be a number between 0.0 and 1.0'
-    );
+    await expectInvalidParams(await mcpPost(app, 'add_policy', {
+      category: 'rule',
+      title: 'Validate inputs',
+      content: 'Reject out-of-range confidence',
+      confidence: 1.5,
+    }), 'confidence must be a number between 0.0 and 1.0');
 
     expect(projectDataService.addKnowledgeObservation).not.toHaveBeenCalled();
     expect(projectDataService.searchKnowledgeObservations).not.toHaveBeenCalled();
@@ -390,40 +301,28 @@ describe('MCP knowledge and policy route tools', () => {
       'Reject malformed JSON-RPC params',
       'explicit',
       'task-123',
-      0.8
+      0.8,
     );
   });
 
   it('rejects invalid typed filters before querying services', async () => {
-    await expectInvalidParams(
-      await mcpPost(app, 'search_knowledge', {
-        query: 'validation',
-        minConfidence: 'high',
-      }),
-      'minConfidence must be a number'
-    );
+    await expectInvalidParams(await mcpPost(app, 'search_knowledge', {
+      query: 'validation',
+      minConfidence: 'high',
+    }), 'minConfidence must be a number');
 
-    await expectInvalidParams(
-      await mcpPost(app, 'get_relevant_knowledge', {
-        context: 'validation task',
-        limit: 'many',
-      }),
-      'limit must be a number'
-    );
+    await expectInvalidParams(await mcpPost(app, 'get_relevant_knowledge', {
+      context: 'validation task',
+      limit: 'many',
+    }), 'limit must be a number');
 
-    await expectInvalidParams(
-      await mcpPost(app, 'list_policies', {
-        limit: 'many',
-      }),
-      'limit must be a number'
-    );
+    await expectInvalidParams(await mcpPost(app, 'list_policies', {
+      limit: 'many',
+    }), 'limit must be a number');
 
-    await expectInvalidParams(
-      await mcpPost(app, 'update_policy', {
-        policyId: 'policy-1',
-      }),
-      'At least one update field must be provided'
-    );
+    await expectInvalidParams(await mcpPost(app, 'update_policy', {
+      policyId: 'policy-1',
+    }), 'At least one update field must be provided');
 
     expect(projectDataService.searchKnowledgeObservations).not.toHaveBeenCalled();
     expect(projectDataService.getRelevantKnowledge).not.toHaveBeenCalled();
@@ -448,7 +347,7 @@ describe('MCP knowledge and policy route tools', () => {
       'proj-456',
       'CodeStyle',
       'style',
-      null
+      null,
     );
     expect(projectDataService.addKnowledgeObservation).toHaveBeenCalledWith(
       mockEnv,
@@ -457,7 +356,7 @@ describe('MCP knowledge and policy route tools', () => {
       'Uses explicit validation',
       0.9,
       'explicit',
-      'session-1'
+      'session-1',
     );
   });
 
@@ -473,7 +372,7 @@ describe('MCP knowledge and policy route tools', () => {
       'proj-456',
       'Architecture',
       'custom',
-      null
+      null,
     );
     expect(projectDataService.addKnowledgeObservation).toHaveBeenCalledWith(
       expect.anything(),
@@ -482,7 +381,7 @@ describe('MCP knowledge and policy route tools', () => {
       'Prefer provider interfaces',
       0.7,
       'inferred',
-      'session-1'
+      'session-1',
     );
   });
 
@@ -500,7 +399,7 @@ describe('MCP knowledge and policy route tools', () => {
       'validation',
       'context',
       0.5,
-      3
+      3,
     );
 
     await mcpPost(app, 'list_policies', {
@@ -516,26 +415,20 @@ describe('MCP knowledge and policy route tools', () => {
       'rule',
       false,
       2,
-      0
+      0,
     );
   });
 
   it('rejects over-limit knowledge update and contradiction content', async () => {
-    await expectInvalidParams(
-      await mcpPost(app, 'update_knowledge', {
-        observationId: 'obs-1',
-        newContent: 'x'.repeat(101),
-      }),
-      'newContent exceeds maximum length'
-    );
+    await expectInvalidParams(await mcpPost(app, 'update_knowledge', {
+      observationId: 'obs-1',
+      newContent: 'x'.repeat(101),
+    }), 'newContent exceeds maximum length');
 
-    await expectInvalidParams(
-      await mcpPost(app, 'flag_contradiction', {
-        existingObservationId: 'obs-1',
-        newObservation: 'x'.repeat(101),
-      }),
-      'newObservation exceeds maximum length'
-    );
+    await expectInvalidParams(await mcpPost(app, 'flag_contradiction', {
+      existingObservationId: 'obs-1',
+      newObservation: 'x'.repeat(101),
+    }), 'newObservation exceeds maximum length');
 
     expect(projectDataService.updateKnowledgeObservation).not.toHaveBeenCalled();
     expect(projectDataService.flagKnowledgeContradiction).not.toHaveBeenCalled();

@@ -5,7 +5,7 @@
  * and verifies HTTP request/response behavior.
  */
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { cachedCommandRoutes } from '../../../src/routes/cached-commands';
@@ -67,29 +67,25 @@ describe('cached-commands routes', () => {
     it('passes agentType query param to service', async () => {
       await app.request('/api/projects/proj-1/cached-commands?agentType=claude-code', {}, mockEnv);
       expect(mockGetCachedCommands).toHaveBeenCalledWith(
-        expect.anything(),
-        'proj-1',
-        'claude-code'
+        expect.anything(), 'proj-1', 'claude-code',
       );
     });
 
     it('passes undefined when agentType is not provided', async () => {
       await app.request('/api/projects/proj-1/cached-commands', {}, mockEnv);
-      expect(mockGetCachedCommands).toHaveBeenCalledWith(expect.anything(), 'proj-1', undefined);
+      expect(mockGetCachedCommands).toHaveBeenCalledWith(
+        expect.anything(), 'proj-1', undefined,
+      );
     });
   });
 
   describe('POST /', () => {
     function post(body: unknown, env = mockEnv) {
-      return app.request(
-        '/api/projects/proj-1/cached-commands',
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
-        },
-        env
-      );
+      return app.request('/api/projects/proj-1/cached-commands', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }, env);
     }
 
     it('returns 400 when agentType is missing', async () => {
@@ -114,9 +110,10 @@ describe('cached-commands routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json<{ cached: number }>();
       expect(body.cached).toBe(1);
-      expect(mockCacheCommands).toHaveBeenCalledWith(expect.anything(), 'proj-1', 'claude-code', [
-        { name: 'help', description: 'Help' },
-      ]);
+      expect(mockCacheCommands).toHaveBeenCalledWith(
+        expect.anything(), 'proj-1', 'claude-code',
+        [{ name: 'help', description: 'Help' }],
+      );
     });
 
     it('trims whitespace from name and description', async () => {
@@ -124,9 +121,10 @@ describe('cached-commands routes', () => {
         agentType: 'claude-code',
         commands: [{ name: '  compact  ', description: '  Compact context  ' }],
       });
-      expect(mockCacheCommands).toHaveBeenCalledWith(expect.anything(), 'proj-1', 'claude-code', [
-        { name: 'compact', description: 'Compact context' },
-      ]);
+      expect(mockCacheCommands).toHaveBeenCalledWith(
+        expect.anything(), 'proj-1', 'claude-code',
+        [{ name: 'compact', description: 'Compact context' }],
+      );
     });
 
     it('returns cached count on success', async () => {

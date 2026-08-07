@@ -93,11 +93,7 @@ vi.mock('../../../src/services/observability', () => ({
   getErrorTrends: vi.fn(),
   queryCloudflareLogs: vi.fn(),
   getLogQueryRateLimit: () => 30,
-  CfApiError: class extends Error {
-    constructor(m: string) {
-      super(m);
-    }
-  },
+  CfApiError: class extends Error { constructor(m: string) { super(m); } },
 }));
 
 // --- Limits mock ---
@@ -177,7 +173,7 @@ describe('Admin security hardening (route-level)', () => {
         env
       );
 
-      const body = (await res.json()) as any;
+      const body = await res.json() as any;
       expect(res.status).toBe(400);
       expect(body.error).toBe('BAD_REQUEST');
       expect(body.message).toBe('Cannot modify your own account');
@@ -203,7 +199,7 @@ describe('Admin security hardening (route-level)', () => {
       );
 
       // Should NOT be 400 "Cannot modify your own account"
-      const body = (await res.json()) as any;
+      const body = await res.json() as any;
       expect(body.message).not.toBe('Cannot modify your own account');
       // It may be 500 (DB mock incomplete) or 404 (user not found) — that's fine,
       // the security property we're testing is that the self-mod guard passes.
@@ -220,7 +216,7 @@ describe('Admin security hardening (route-level)', () => {
 
       const res = await app.request('/api/admin/health/details', {}, env);
 
-      const body = (await res.json()) as any;
+      const body = await res.json() as any;
       expect(res.status).toBe(200);
       expect(body.status).toBe('healthy');
       expect(body.version).toBe('1.0.0-test');
@@ -242,7 +238,7 @@ describe('Admin security hardening (route-level)', () => {
 
       const res = await app.request('/api/admin/health/details', {}, env);
 
-      const body = (await res.json()) as any;
+      const body = await res.json() as any;
       expect(res.status).toBe(200);
       expect(body.status).toBe('degraded');
       expect(body.missingBindings).toContain('ADMIN_LOGS');
@@ -264,7 +260,11 @@ describe('Admin security hardening (route-level)', () => {
       };
       mockGetTaskReconciliationDiagnostics.mockResolvedValueOnce(diagnostics);
 
-      const res = await app.request('/api/admin/tasks/task-1/reconciliation-diagnostics', {}, env);
+      const res = await app.request(
+        '/api/admin/tasks/task-1/reconciliation-diagnostics',
+        {},
+        env,
+      );
 
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ diagnostics });
@@ -277,7 +277,7 @@ describe('Admin security hardening (route-level)', () => {
       const res = await app.request(
         '/api/admin/tasks/missing/reconciliation-diagnostics',
         {},
-        createEnv()
+        createEnv(),
       );
 
       expect(res.status).toBe(404);

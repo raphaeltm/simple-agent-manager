@@ -50,7 +50,9 @@ vi.mock('../../../src/db/schema', () => ({
   },
 }));
 
-const { createRoutes, probeGithubRepo } = await import('../../../src/routes/trial/create');
+const { createRoutes, probeGithubRepo } = await import(
+  '../../../src/routes/trial/create'
+);
 
 const SECRET = 'test-secret-at-least-32-bytes-long-for-hmac-xx';
 
@@ -63,7 +65,8 @@ function makeEnv(options: {
   cap?: string;
   orchestratorStart?: (input: unknown) => Promise<void>;
 }): Env {
-  const orchestratorStartFn = options.orchestratorStart ?? vi.fn(async () => {});
+  const orchestratorStartFn =
+    options.orchestratorStart ?? vi.fn(async () => {});
   const orchestratorStub = { start: orchestratorStartFn };
   return {
     TRIAL_CLAIM_TOKEN_SECRET: 'secret' in options ? options.secret : SECRET,
@@ -72,7 +75,9 @@ function makeEnv(options: {
     TRIAL_COUNTER: {
       idFromName: vi.fn(() => 'do-id'),
       get: vi.fn(() => ({
-        tryIncrement: options.tryIncrementFn ?? vi.fn(async () => ({ allowed: true, count: 1 })),
+        tryIncrement:
+          options.tryIncrementFn ??
+          vi.fn(async () => ({ allowed: true, count: 1 })),
         decrement: options.decrementFn ?? vi.fn(async () => 0),
       })),
     },
@@ -142,14 +147,12 @@ function makeExecutionCtx(): ExecutionContext & { waitUntilPromises: Promise<unk
 }
 
 function okGithubFetch(overrides: Partial<{ size: number; private: boolean }> = {}) {
-  return vi
-    .fn()
-    .mockResolvedValue(
-      new Response(JSON.stringify({ size: 50, private: false, ...overrides }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      })
-    );
+  return vi.fn().mockResolvedValue(
+    new Response(
+      JSON.stringify({ size: 50, private: false, ...overrides }),
+      { status: 200, headers: { 'content-type': 'application/json' } }
+    )
+  );
 }
 
 describe('probeGithubRepo (unit)', () => {
@@ -164,7 +167,9 @@ describe('probeGithubRepo (unit)', () => {
   });
 
   it('returns repo_not_found on 404', async () => {
-    const fetchFn = vi.fn().mockResolvedValue(new Response('', { status: 404 }));
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(new Response('', { status: 404 }));
     const res = await probeGithubRepo('a', 'b', {
       maxKb: 500,
       timeoutMs: 1000,
@@ -176,7 +181,9 @@ describe('probeGithubRepo (unit)', () => {
   it('returns repo_private for private repos', async () => {
     const fetchFn = vi
       .fn()
-      .mockResolvedValue(new Response(JSON.stringify({ private: true, size: 1 }), { status: 200 }));
+      .mockResolvedValue(
+        new Response(JSON.stringify({ private: true, size: 1 }), { status: 200 })
+      );
     const res = await probeGithubRepo('a', 'b', {
       maxKb: 500,
       timeoutMs: 1000,
@@ -186,11 +193,13 @@ describe('probeGithubRepo (unit)', () => {
   });
 
   it('returns repo_too_large when size exceeds maxKb', async () => {
-    const fetchFn = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({ private: false, size: 1000 }), {
-        status: 200,
-      })
-    );
+    const fetchFn = vi
+      .fn()
+      .mockResolvedValue(
+        new Response(JSON.stringify({ private: false, size: 1000 }), {
+          status: 200,
+        })
+      );
     const res = await probeGithubRepo('a', 'b', {
       maxKb: 500,
       timeoutMs: 1000,
@@ -256,7 +265,10 @@ describe('POST /api/trial/create', () => {
   });
 
   it('returns 404 repo_not_found when GitHub 404s', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('', { status: 404 })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(new Response('', { status: 404 }))
+    );
     const { app, env } = makeApp(makeEnv({}));
     const res = await callCreate(app, env, {
       repoUrl: 'https://github.com/alice/missing',
@@ -269,11 +281,13 @@ describe('POST /api/trial/create', () => {
   it('returns 403 repo_private when probe reports private', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ private: true, size: 1 }), {
-          status: 200,
-        })
-      )
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ private: true, size: 1 }), {
+            status: 200,
+          })
+        )
     );
     const { app, env } = makeApp(makeEnv({}));
     const res = await callCreate(app, env, {
@@ -287,11 +301,13 @@ describe('POST /api/trial/create', () => {
   it('returns 413 repo_too_large when probe reports oversized', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ private: false, size: 9_999_999 }), {
-          status: 200,
-        })
-      )
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ private: false, size: 9_999_999 }), {
+            status: 200,
+          })
+        )
     );
     const { app, env } = makeApp(makeEnv({}));
     const res = await callCreate(app, env, {
@@ -353,11 +369,9 @@ describe('POST /api/trial/create', () => {
 
     // Two Set-Cookie headers should be present (fingerprint + claim).
     // Hono/Workers uses Headers which exposes multiple Set-Cookie via getSetCookie().
-    const setCookie = (
-      res.headers as Headers & {
-        getSetCookie?: () => string[];
-      }
-    ).getSetCookie?.();
+    const setCookie = (res.headers as Headers & {
+      getSetCookie?: () => string[];
+    }).getSetCookie?.();
     expect(setCookie).toBeTruthy();
     expect(setCookie!.length).toBeGreaterThanOrEqual(2);
 
@@ -469,8 +483,9 @@ describe('POST /api/trial/create', () => {
       count: 999_999,
       windowStart: Math.floor(Date.now() / 1000 / 3600) * 3600,
     };
-    (env.KV.get as unknown as ReturnType<typeof vi.fn>).mockImplementation(async (key: string) =>
-      key.startsWith('ratelimit:trial-create:') ? exhaustedWindow : null
+    (env.KV.get as unknown as ReturnType<typeof vi.fn>).mockImplementation(
+      async (key: string) =>
+        key.startsWith('ratelimit:trial-create:') ? exhaustedWindow : null
     );
     const app = new Hono<{ Bindings: Env }>();
     // Mirror the global error handler from apps/api/src/index.ts so AppError
@@ -508,12 +523,19 @@ describe('POST /api/trial/create', () => {
     // Mint a fingerprint cookie whose HMAC was produced with the same SECRET
     // the route uses to verify it. Only validly-signed cookies are trusted —
     // see the "forged cookie" test below.
-    const { signFingerprint } = await import('../../../src/services/trial/cookies');
+    const { signFingerprint } = await import(
+      '../../../src/services/trial/cookies'
+    );
     const existingUuid = '11111111-2222-3333-4444-555555555555';
     const signed = await signFingerprint(existingUuid, SECRET);
     const cookie = `sam_trial_fingerprint=${signed}`;
 
-    const res = await callCreate(app, env, { repoUrl: 'https://github.com/alice/repo' }, cookie);
+    const res = await callCreate(
+      app,
+      env,
+      { repoUrl: 'https://github.com/alice/repo' },
+      cookie
+    );
     expect(res.status).toBe(201);
 
     // The inserted row should carry the reused UUID.
@@ -537,7 +559,12 @@ describe('POST /api/trial/create', () => {
     // Attacker crafts a cookie with the victim's UUID but an invalid HMAC.
     const cookie = `sam_trial_fingerprint=${victimUuid}.invalidSignature`;
 
-    const res = await callCreate(app, env, { repoUrl: 'https://github.com/alice/repo' }, cookie);
+    const res = await callCreate(
+      app,
+      env,
+      { repoUrl: 'https://github.com/alice/repo' },
+      cookie
+    );
     expect(res.status).toBe(201);
 
     // The inserted row MUST NOT reuse the victim's UUID.

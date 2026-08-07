@@ -48,11 +48,9 @@ describe('extractCallbackToken', () => {
 
 describe('buildAnthropicGatewayUrl', () => {
   it('builds AI Gateway URL when gateway ID is set', () => {
-    const env = { AI_GATEWAY_ID: 'my-gw', CF_ACCOUNT_ID: 'acc-123' } as Parameters<
-      typeof buildAnthropicGatewayUrl
-    >[0];
+    const env = { AI_GATEWAY_ID: 'my-gw', CF_ACCOUNT_ID: 'acc-123' } as Parameters<typeof buildAnthropicGatewayUrl>[0];
     expect(buildAnthropicGatewayUrl(env)).toBe(
-      'https://gateway.ai.cloudflare.com/v1/acc-123/my-gw/anthropic/v1/messages'
+      'https://gateway.ai.cloudflare.com/v1/acc-123/my-gw/anthropic/v1/messages',
     );
   });
 
@@ -68,19 +66,15 @@ describe('buildAnthropicGatewayUrl', () => {
 
 describe('buildAnthropicCountTokensUrl', () => {
   it('builds AI Gateway URL for count_tokens', () => {
-    const env = { AI_GATEWAY_ID: 'my-gw', CF_ACCOUNT_ID: 'acc-123' } as Parameters<
-      typeof buildAnthropicCountTokensUrl
-    >[0];
+    const env = { AI_GATEWAY_ID: 'my-gw', CF_ACCOUNT_ID: 'acc-123' } as Parameters<typeof buildAnthropicCountTokensUrl>[0];
     expect(buildAnthropicCountTokensUrl(env)).toBe(
-      'https://gateway.ai.cloudflare.com/v1/acc-123/my-gw/anthropic/v1/messages/count_tokens'
+      'https://gateway.ai.cloudflare.com/v1/acc-123/my-gw/anthropic/v1/messages/count_tokens',
     );
   });
 
   it('falls back to direct Anthropic API', () => {
     const env = { CF_ACCOUNT_ID: 'acc-123' } as Parameters<typeof buildAnthropicCountTokensUrl>[0];
-    expect(buildAnthropicCountTokensUrl(env)).toBe(
-      'https://api.anthropic.com/v1/messages/count_tokens'
-    );
+    expect(buildAnthropicCountTokensUrl(env)).toBe('https://api.anthropic.com/v1/messages/count_tokens');
   });
 });
 
@@ -90,20 +84,18 @@ describe('buildAnthropicCountTokensUrl', () => {
 
 describe('buildAIGatewayMetadata', () => {
   it('includes all fields', () => {
-    const meta = JSON.parse(
-      buildAIGatewayMetadata({
-        userId: 'u1',
-        workspaceId: 'ws1',
-        projectId: 'p1',
-        trialId: 't1',
-        modelId: 'claude-sonnet-5',
-        stream: true,
-        hasTools: true,
-        providerId: 'deepseek-anthropic',
-        providerName: 'DeepSeek Anthropic API',
-        providerDialect: 'anthropic',
-      })
-    );
+    const meta = JSON.parse(buildAIGatewayMetadata({
+      userId: 'u1',
+      workspaceId: 'ws1',
+      projectId: 'p1',
+      trialId: 't1',
+      modelId: 'claude-sonnet-5',
+      stream: true,
+      hasTools: true,
+      providerId: 'deepseek-anthropic',
+      providerName: 'DeepSeek Anthropic API',
+      providerDialect: 'anthropic',
+    }));
     expect(meta).toEqual({
       userId: 'u1',
       workspaceId: 'ws1',
@@ -119,15 +111,13 @@ describe('buildAIGatewayMetadata', () => {
   });
 
   it('omits null projectId and undefined trialId', () => {
-    const meta = JSON.parse(
-      buildAIGatewayMetadata({
-        userId: 'u1',
-        workspaceId: 'ws1',
-        projectId: null,
-        modelId: 'claude-sonnet-5',
-        stream: false,
-      })
-    );
+    const meta = JSON.parse(buildAIGatewayMetadata({
+      userId: 'u1',
+      workspaceId: 'ws1',
+      projectId: null,
+      modelId: 'claude-sonnet-5',
+      stream: false,
+    }));
     expect(meta.projectId).toBeUndefined();
     expect(meta.trialId).toBeUndefined();
   });

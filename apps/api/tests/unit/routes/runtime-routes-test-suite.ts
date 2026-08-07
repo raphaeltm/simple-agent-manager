@@ -101,9 +101,7 @@ export function runRuntimeRouteTests(config: RuntimeRouteTestConfig): void {
       };
 
       mockDB = {
-        select: vi.fn((fields?: Record<string, unknown>) =>
-          makeQueryBuilder(Boolean(fields?.count))
-        ),
+        select: vi.fn((fields?: Record<string, unknown>) => makeQueryBuilder(Boolean(fields?.count))),
         insert: vi.fn().mockReturnThis(),
         values: vi.fn().mockResolvedValue(undefined),
         update: vi.fn().mockReturnThis(),
@@ -152,28 +150,22 @@ export function runRuntimeRouteTests(config: RuntimeRouteTestConfig): void {
       expect(res.status).toBe(200);
       expect(mocks.encrypt).toHaveBeenCalledWith('plain-secret', 'test-key');
       expect(mockDB.insert).toHaveBeenCalled();
-      expect(mockDB.values).toHaveBeenCalledWith(
-        expect.objectContaining({
-          ...expectedInsertEntity,
-          userId: 'user-1',
-          envKey: 'API_TOKEN',
-          storedValue: 'enc-value',
-          valueIv: 'enc-iv',
-          isSecret: true,
-        })
-      );
+      expect(mockDB.values).toHaveBeenCalledWith(expect.objectContaining({
+        ...expectedInsertEntity,
+        userId: 'user-1',
+        envKey: 'API_TOKEN',
+        storedValue: 'enc-value',
+        valueIv: 'enc-iv',
+        isSecret: true,
+      }));
     });
 
     it(`rejects ${entityLabel} runtime access when the ${entityLabel} is outside the project`, async () => {
       limitResponses.push([]);
 
-      const res = await app.request(
-        outsideEntityEnvVarsPath,
-        {
-          method: 'GET',
-        },
-        runtimeBindings
-      );
+      const res = await app.request(outsideEntityEnvVarsPath, {
+        method: 'GET',
+      }, runtimeBindings);
 
       expect(res.status).toBe(404);
     });

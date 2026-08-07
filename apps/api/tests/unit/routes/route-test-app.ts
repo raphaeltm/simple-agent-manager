@@ -2,7 +2,10 @@ import { Hono } from 'hono';
 
 import type { Env } from '../../../src/env';
 
-export const createRouteTestApp = (routePath: string, routes: Hono<{ Bindings: Env }>) => {
+export const createRouteTestApp = (
+  routePath: string,
+  routes: Hono<{ Bindings: Env }>
+) => {
   const app = new Hono<{ Bindings: Env }>();
   app.onError((err, c) => {
     const appError = err as { statusCode?: number; error?: string; message?: string };

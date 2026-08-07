@@ -38,8 +38,9 @@ vi.mock('drizzle-orm/d1', () => ({
   }),
 }));
 
-const { deploymentReleaseEventsCallbackRoute } =
-  await import('../../../src/routes/deployment-release-events-callback');
+const { deploymentReleaseEventsCallbackRoute } = await import(
+  '../../../src/routes/deployment-release-events-callback'
+);
 
 function createTestApp() {
   const app = new Hono<{ Bindings: Env }>();

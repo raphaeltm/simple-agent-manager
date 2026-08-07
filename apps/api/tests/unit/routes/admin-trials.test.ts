@@ -26,7 +26,7 @@ function createApp() {
     if (typeof appError.statusCode === 'number') {
       return c.json(
         { error: appError.error ?? 'ERROR', message: appError.message },
-        appError.statusCode
+        appError.statusCode,
       );
     }
     return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
@@ -61,7 +61,7 @@ describe('admin trial config routes', () => {
     });
 
     const res = await app.request('/api/admin/trials/config', {}, env);
-    const body = (await res.json()) as any;
+    const body = await res.json() as any;
 
     expect(res.status).toBe(200);
     expect(body).toEqual({
@@ -87,9 +87,9 @@ describe('admin trial config routes', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: true }),
       },
-      env
+      env,
     );
-    const body = (await res.json()) as any;
+    const body = await res.json() as any;
 
     expect(res.status).toBe(200);
     expect(body).toMatchObject({
@@ -121,7 +121,7 @@ describe('admin trial config routes', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: false }),
       },
-      env
+      env,
     );
     expect(update.status).toBe(200);
     expect(await update.json()).toMatchObject({ enabled: false });
@@ -143,9 +143,9 @@ describe('admin trial config routes', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled: 'true' }),
       },
-      env
+      env,
     );
-    const body = (await res.json()) as any;
+    const body = await res.json() as any;
 
     expect(res.status).toBe(400);
     expect(body.message).toBe('enabled must be a boolean');

@@ -12,10 +12,7 @@ import {
   normalizeModelId,
   resolveModelId,
 } from '../../../src/routes/ai-proxy';
-import {
-  buildAIGatewayMetadata,
-  buildWorkersAIGatewayUrl,
-} from '../../../src/services/ai-proxy-shared';
+import { buildAIGatewayMetadata, buildWorkersAIGatewayUrl } from '../../../src/services/ai-proxy-shared';
 
 // =============================================================================
 // Model Normalization
@@ -23,21 +20,18 @@ import {
 
 describe('normalizeModelId', () => {
   it('preserves Workers AI models with @cf/ prefix', () => {
-    expect(normalizeModelId('@cf/meta/llama-4-scout-17b-16e-instruct')).toBe(
-      '@cf/meta/llama-4-scout-17b-16e-instruct'
-    );
+    expect(normalizeModelId('@cf/meta/llama-4-scout-17b-16e-instruct'))
+      .toBe('@cf/meta/llama-4-scout-17b-16e-instruct');
   });
 
   it('adds @cf/ prefix to bare Workers AI model IDs', () => {
-    expect(normalizeModelId('meta/llama-4-scout-17b-16e-instruct')).toBe(
-      '@cf/meta/llama-4-scout-17b-16e-instruct'
-    );
+    expect(normalizeModelId('meta/llama-4-scout-17b-16e-instruct'))
+      .toBe('@cf/meta/llama-4-scout-17b-16e-instruct');
   });
 
   it('strips workers-ai/ prefix', () => {
-    expect(normalizeModelId('workers-ai/@cf/qwen/qwen3-30b-a3b-fp8')).toBe(
-      '@cf/qwen/qwen3-30b-a3b-fp8'
-    );
+    expect(normalizeModelId('workers-ai/@cf/qwen/qwen3-30b-a3b-fp8'))
+      .toBe('@cf/qwen/qwen3-30b-a3b-fp8');
   });
 
   it('preserves @hf/ prefix for HuggingFace models', () => {
@@ -65,11 +59,7 @@ describe('model allowlist parsing', () => {
   /** Replicates the getAllowedModels normalization logic using normalizeModelId. */
   function parseAndNormalizeModels(raw: string): Set<string> {
     return new Set(
-      raw
-        .split(',')
-        .map((m) => m.trim())
-        .filter(Boolean)
-        .map((m) => normalizeModelId(m))
+      raw.split(',').map((m) => m.trim()).filter(Boolean).map((m) => normalizeModelId(m)),
     );
   }
 
@@ -92,17 +82,13 @@ describe('model allowlist parsing', () => {
   });
 
   it('preserves Anthropic model IDs without @cf/ prefix', () => {
-    const models = parseAndNormalizeModels(
-      'claude-haiku-4-5-20251001,@cf/meta/llama-4-scout-17b-16e-instruct'
-    );
+    const models = parseAndNormalizeModels('claude-haiku-4-5-20251001,@cf/meta/llama-4-scout-17b-16e-instruct');
     expect(models.has('claude-haiku-4-5-20251001')).toBe(true);
     expect(models.has('@cf/meta/llama-4-scout-17b-16e-instruct')).toBe(true);
   });
 
   it('preserves OpenAI model IDs without @cf/ prefix', () => {
-    const models = parseAndNormalizeModels(
-      'gpt-4.1,gpt-4.1-mini,@cf/meta/llama-4-scout-17b-16e-instruct'
-    );
+    const models = parseAndNormalizeModels('gpt-4.1,gpt-4.1-mini,@cf/meta/llama-4-scout-17b-16e-instruct');
     expect(models.has('gpt-4.1')).toBe(true);
     expect(models.has('gpt-4.1-mini')).toBe(true);
     expect(models.has('@cf/meta/llama-4-scout-17b-16e-instruct')).toBe(true);
@@ -110,7 +96,7 @@ describe('model allowlist parsing', () => {
 
   it('handles mixed provider model lists', () => {
     const models = parseAndNormalizeModels(
-      '@cf/meta/llama-4-scout-17b-16e-instruct,claude-sonnet-4-6,gpt-4.1,@cf/qwen/qwen3-30b-a3b-fp8'
+      '@cf/meta/llama-4-scout-17b-16e-instruct,claude-sonnet-4-6,gpt-4.1,@cf/qwen/qwen3-30b-a3b-fp8',
     );
     expect(models.size).toBe(4);
     expect(models.has('@cf/meta/llama-4-scout-17b-16e-instruct')).toBe(true);
@@ -144,9 +130,7 @@ describe('resolveModelId', () => {
   } as Parameters<typeof resolveModelId>[1];
 
   it('returns default when model is undefined (Workers AI default)', async () => {
-    expect(await resolveModelId(undefined, mockEnvWorkersAI)).toBe(
-      '@cf/meta/llama-4-scout-17b-16e-instruct'
-    );
+    expect(await resolveModelId(undefined, mockEnvWorkersAI)).toBe('@cf/meta/llama-4-scout-17b-16e-instruct');
   });
 
   it('returns default when model is undefined (Anthropic default)', async () => {
@@ -158,37 +142,33 @@ describe('resolveModelId', () => {
   });
 
   it('returns model as-is when @cf/ prefix present', async () => {
-    expect(await resolveModelId('@cf/qwen/qwen3-30b-a3b-fp8', mockEnvWorkersAI)).toBe(
-      '@cf/qwen/qwen3-30b-a3b-fp8'
-    );
+    expect(await resolveModelId('@cf/qwen/qwen3-30b-a3b-fp8', mockEnvWorkersAI))
+      .toBe('@cf/qwen/qwen3-30b-a3b-fp8');
   });
 
   it('strips workers-ai/ prefix', async () => {
-    expect(await resolveModelId('workers-ai/@cf/qwen/qwen3-30b-a3b-fp8', mockEnvWorkersAI)).toBe(
-      '@cf/qwen/qwen3-30b-a3b-fp8'
-    );
+    expect(await resolveModelId('workers-ai/@cf/qwen/qwen3-30b-a3b-fp8', mockEnvWorkersAI))
+      .toBe('@cf/qwen/qwen3-30b-a3b-fp8');
   });
 
   it('adds @cf/ prefix when missing (OpenCode strips it)', async () => {
-    expect(await resolveModelId('meta/llama-4-scout-17b-16e-instruct', mockEnvWorkersAI)).toBe(
-      '@cf/meta/llama-4-scout-17b-16e-instruct'
-    );
+    expect(await resolveModelId('meta/llama-4-scout-17b-16e-instruct', mockEnvWorkersAI))
+      .toBe('@cf/meta/llama-4-scout-17b-16e-instruct');
   });
 
   it('preserves @hf/ prefix for HuggingFace models', async () => {
-    expect(await resolveModelId('@hf/some/model', mockEnvWorkersAI)).toBe('@hf/some/model');
+    expect(await resolveModelId('@hf/some/model', mockEnvWorkersAI))
+      .toBe('@hf/some/model');
   });
 
   it('preserves Anthropic model IDs without adding @cf/ prefix', async () => {
-    expect(await resolveModelId('claude-haiku-4-5-20251001', mockEnvWorkersAI)).toBe(
-      'claude-haiku-4-5-20251001'
-    );
+    expect(await resolveModelId('claude-haiku-4-5-20251001', mockEnvWorkersAI))
+      .toBe('claude-haiku-4-5-20251001');
   });
 
   it('preserves full Anthropic model IDs with date suffix', async () => {
-    expect(await resolveModelId('claude-sonnet-4-5-20250514', mockEnvWorkersAI)).toBe(
-      'claude-sonnet-4-5-20250514'
-    );
+    expect(await resolveModelId('claude-sonnet-4-5-20250514', mockEnvWorkersAI))
+      .toBe('claude-sonnet-4-5-20250514');
   });
 
   it('preserves OpenAI model IDs without adding @cf/ prefix', async () => {
@@ -199,11 +179,7 @@ describe('resolveModelId', () => {
 
   it('reads admin override from KV when no model specified', async () => {
     const kvWithOverride = {
-      get: async () =>
-        JSON.stringify({
-          defaultModel: 'claude-haiku-4-5-20251001',
-          updatedAt: '2026-04-20T00:00:00Z',
-        }),
+      get: async () => JSON.stringify({ defaultModel: 'claude-haiku-4-5-20251001', updatedAt: '2026-04-20T00:00:00Z' }),
     } as unknown as KVNamespace;
 
     const envWithKV = { ...mockEnvWorkersAI, KV: kvWithOverride };
@@ -212,23 +188,16 @@ describe('resolveModelId', () => {
 
   it('explicit model overrides KV admin setting', async () => {
     const kvWithOverride = {
-      get: async () =>
-        JSON.stringify({
-          defaultModel: 'claude-haiku-4-5-20251001',
-          updatedAt: '2026-04-20T00:00:00Z',
-        }),
+      get: async () => JSON.stringify({ defaultModel: 'claude-haiku-4-5-20251001', updatedAt: '2026-04-20T00:00:00Z' }),
     } as unknown as KVNamespace;
 
     const envWithKV = { ...mockEnvWorkersAI, KV: kvWithOverride };
-    expect(await resolveModelId('@cf/qwen/qwen3-30b-a3b-fp8', envWithKV)).toBe(
-      '@cf/qwen/qwen3-30b-a3b-fp8'
-    );
+    expect(await resolveModelId('@cf/qwen/qwen3-30b-a3b-fp8', envWithKV)).toBe('@cf/qwen/qwen3-30b-a3b-fp8');
   });
 
   it('reads OpenAI admin override from KV', async () => {
     const kvWithOverride = {
-      get: async () =>
-        JSON.stringify({ defaultModel: 'gpt-4.1', updatedAt: '2026-04-30T00:00:00Z' }),
+      get: async () => JSON.stringify({ defaultModel: 'gpt-4.1', updatedAt: '2026-04-30T00:00:00Z' }),
     } as unknown as KVNamespace;
 
     const envWithKV = { ...mockEnvWorkersAI, KV: kvWithOverride };
@@ -374,20 +343,19 @@ describe('PLATFORM_AI_MODELS catalog', () => {
   });
 });
 
+
 describe('AI Gateway shared metadata', () => {
   it('includes chat session id when provided', () => {
-    const metadata = JSON.parse(
-      buildAIGatewayMetadata({
-        userId: 'user-1',
-        workspaceId: 'workspace-1',
-        projectId: 'project-1',
-        sessionId: 'session-1',
-        trialId: 'trial-1',
-        modelId: '@cf/test/model',
-        stream: true,
-        hasTools: true,
-      })
-    );
+    const metadata = JSON.parse(buildAIGatewayMetadata({
+      userId: 'user-1',
+      workspaceId: 'workspace-1',
+      projectId: 'project-1',
+      sessionId: 'session-1',
+      trialId: 'trial-1',
+      modelId: '@cf/test/model',
+      stream: true,
+      hasTools: true,
+    }));
 
     expect(metadata).toMatchObject({
       userId: 'user-1',
@@ -402,10 +370,7 @@ describe('AI Gateway shared metadata', () => {
   });
 
   it('builds the shared Workers AI Gateway URL', () => {
-    expect(
-      buildWorkersAIGatewayUrl({ CF_ACCOUNT_ID: 'account-1', AI_GATEWAY_ID: 'gateway-1' } as never)
-    ).toBe(
-      'https://gateway.ai.cloudflare.com/v1/account-1/gateway-1/workers-ai/v1/chat/completions'
-    );
+    expect(buildWorkersAIGatewayUrl({ CF_ACCOUNT_ID: 'account-1', AI_GATEWAY_ID: 'gateway-1' } as never))
+      .toBe('https://gateway.ai.cloudflare.com/v1/account-1/gateway-1/workers-ai/v1/chat/completions');
   });
 });

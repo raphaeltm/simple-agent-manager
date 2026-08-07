@@ -48,14 +48,10 @@ describe('Transcribe Routes', () => {
       const audioBlob = new Blob(['fake-audio-data'], { type: 'audio/webm' });
       formData.append('audio', audioBlob, 'recording.webm');
 
-      const res = await app.request(
-        '/api/transcribe',
-        {
-          method: 'POST',
-          body: formData,
-        },
-        createEnv()
-      );
+      const res = await app.request('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      }, createEnv());
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -72,14 +68,10 @@ describe('Transcribe Routes', () => {
       const audioBlob = new Blob(['fake-audio-data'], { type: 'audio/webm' });
       formData.append('audio', audioBlob, 'recording.webm');
 
-      const res = await app.request(
-        '/api/transcribe',
-        {
-          method: 'POST',
-          body: formData,
-        },
-        createEnv({ WHISPER_MODEL_ID: '@cf/openai/whisper-tiny-en' })
-      );
+      const res = await app.request('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      }, createEnv({ WHISPER_MODEL_ID: '@cf/openai/whisper-tiny-en' }));
 
       expect(res.status).toBe(200);
       expect(mockAI.run).toHaveBeenCalledWith(
@@ -92,14 +84,10 @@ describe('Transcribe Routes', () => {
       const formData = new FormData();
       formData.append('notaudio', 'some-text');
 
-      const res = await app.request(
-        '/api/transcribe',
-        {
-          method: 'POST',
-          body: formData,
-        },
-        createEnv()
-      );
+      const res = await app.request('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      }, createEnv());
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -112,14 +100,10 @@ describe('Transcribe Routes', () => {
       const emptyBlob = new Blob([], { type: 'audio/webm' });
       formData.append('audio', emptyBlob, 'recording.webm');
 
-      const res = await app.request(
-        '/api/transcribe',
-        {
-          method: 'POST',
-          body: formData,
-        },
-        createEnv()
-      );
+      const res = await app.request('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      }, createEnv());
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -133,14 +117,10 @@ describe('Transcribe Routes', () => {
       const largeBlob = new Blob(['x'.repeat(200)], { type: 'audio/webm' });
       formData.append('audio', largeBlob, 'recording.webm');
 
-      const res = await app.request(
-        '/api/transcribe',
-        {
-          method: 'POST',
-          body: formData,
-        },
-        createEnv({ MAX_AUDIO_SIZE_BYTES: '100' })
-      );
+      const res = await app.request('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      }, createEnv({ MAX_AUDIO_SIZE_BYTES: '100' }));
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -155,14 +135,10 @@ describe('Transcribe Routes', () => {
       const audioBlob = new Blob(['fake-audio-data'], { type: 'audio/webm' });
       formData.append('audio', audioBlob, 'recording.webm');
 
-      const res = await app.request(
-        '/api/transcribe',
-        {
-          method: 'POST',
-          body: formData,
-        },
-        createEnv()
-      );
+      const res = await app.request('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      }, createEnv());
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -176,14 +152,10 @@ describe('Transcribe Routes', () => {
       const audioBlob = new Blob(['fake-audio-data'], { type: 'audio/webm' });
       formData.append('audio', audioBlob, 'recording.webm');
 
-      const res = await app.request(
-        '/api/transcribe',
-        {
-          method: 'POST',
-          body: formData,
-        },
-        createEnv()
-      );
+      const res = await app.request('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      }, createEnv());
 
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -197,14 +169,10 @@ describe('Transcribe Routes', () => {
       const audioBlob = new Blob(['fake-audio-data'], { type: 'audio/webm' });
       formData.append('audio', audioBlob, 'recording.webm');
 
-      const res = await app.request(
-        '/api/transcribe',
-        {
-          method: 'POST',
-          body: formData,
-        },
-        createEnv()
-      );
+      const res = await app.request('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      }, createEnv());
 
       expect(res.status).toBe(500);
       const body = await res.json();
@@ -217,14 +185,10 @@ describe('Transcribe Routes', () => {
       formData.append('audio', audioBlob, 'recording.webm');
 
       // No MAX_AUDIO_SIZE_BYTES set — should use default 10MB
-      const res = await app.request(
-        '/api/transcribe',
-        {
-          method: 'POST',
-          body: formData,
-        },
-        createEnv()
-      );
+      const res = await app.request('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      }, createEnv());
 
       expect(res.status).toBe(200);
     });
@@ -236,14 +200,10 @@ describe('Transcribe Routes', () => {
       const audioBlob = new Blob(['fake-audio-data'], { type: 'audio/webm' });
       formData.append('audio', audioBlob, 'recording.webm');
 
-      const res = await app.request(
-        '/api/transcribe',
-        {
-          method: 'POST',
-          body: formData,
-        },
-        createEnv()
-      );
+      const res = await app.request('/api/transcribe', {
+        method: 'POST',
+        body: formData,
+      }, createEnv());
 
       expect(res.status).toBe(200);
       const body = await res.json();

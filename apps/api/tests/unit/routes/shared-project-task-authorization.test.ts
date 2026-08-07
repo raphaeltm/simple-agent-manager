@@ -189,7 +189,7 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
           body: JSON.stringify({}),
         }),
         mockEnv,
-        mockCtx
+        mockCtx,
       );
 
       expect(response.status).toBe(404);
@@ -218,7 +218,7 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
           method: 'POST',
         }),
         mockEnv,
-        mockCtx
+        mockCtx,
       );
 
       expect(response.status).toBe(404);
@@ -246,7 +246,7 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
           method: 'POST',
         }),
         mockEnv,
-        mockCtx
+        mockCtx,
       );
 
       expect(response.status).toBe(200);
@@ -256,7 +256,7 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
         'task-cleanup-1',
         mockEnv,
         undefined,
-        'caller-user'
+        'caller-user',
       );
     });
   });
@@ -290,7 +290,7 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
           body: JSON.stringify({ workspaceId: 'ws-in-B' }),
         }),
         mockEnv,
-        mockCtx
+        mockCtx,
       );
 
       expect(response.status).toBe(404);
@@ -326,7 +326,7 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
           body: JSON.stringify({ toStatus: 'cancelled' }),
         }),
         mockEnv,
-        mockCtx
+        mockCtx,
       );
 
       expect(response.status).toBe(200);
@@ -337,7 +337,7 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
           status: 'cancelled',
           requiredUserId: 'caller-user',
           projectId: 'project-A',
-        })
+        }),
       );
     });
   });
@@ -357,16 +357,13 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
       vi.mocked(drizzle).mockReturnValue(db as never);
 
       const response = await createCrudApp().fetch(
-        new Request(
-          'https://api.test/api/projects/project-A/tasks/task-in-victim-project/delegate',
-          {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ workspaceId: 'ws-1' }),
-          }
-        ),
+        new Request('https://api.test/api/projects/project-A/tasks/task-in-victim-project/delegate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workspaceId: 'ws-1' }),
+        }),
         mockEnv,
-        mockCtx
+        mockCtx,
       );
 
       expect(response.status).toBe(404);
@@ -396,7 +393,7 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
           method: 'POST',
         }),
         mockEnv,
-        mockCtx
+        mockCtx,
       );
 
       expect(response.status).toBe(404);

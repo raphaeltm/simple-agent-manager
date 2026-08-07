@@ -160,8 +160,9 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => createMockDb(),
 }));
 
-const { registerDeploymentEnvironmentLifecycleRoutes } =
-  await import('../../../src/routes/deployment-environment-lifecycle');
+const { registerDeploymentEnvironmentLifecycleRoutes } = await import(
+  '../../../src/routes/deployment-environment-lifecycle'
+);
 
 function eqValue(condition: Condition, col: unknown): unknown {
   if (!condition) {
@@ -203,8 +204,7 @@ function selectRows(table: unknown, condition: Condition, selection?: Record<str
     const id = eqValue(condition, nodes.id);
     const userId = eqValue(condition, nodes.userId);
     rows = nodeRows.filter(
-      (row) =>
-        (id === undefined || row.id === id) && (userId === undefined || row.userId === userId)
+      (row) => (id === undefined || row.id === id) && (userId === undefined || row.userId === userId)
     );
   } else if (table === deploymentEnvironments) {
     const id = eqValue(condition, deploymentEnvironments.id);
@@ -221,9 +221,7 @@ function selectRows(table: unknown, condition: Condition, selection?: Record<str
       .sort((a, b) => (b.version as number) - (a.version as number));
   } else if (table === deploymentVolumes) {
     const environmentId = eqValue(condition, deploymentVolumes.environmentId);
-    rows = volumeRows.filter(
-      (row) => environmentId === undefined || row.environmentId === environmentId
-    );
+    rows = volumeRows.filter((row) => environmentId === undefined || row.environmentId === environmentId);
   }
   return rows.map((row) => projectSelection(row, selection));
 }
@@ -286,11 +284,19 @@ function env(): Env {
 }
 
 function stop(app: ReturnType<typeof createApp>) {
-  return app.request('/api/projects/proj-1/environments/env-1/stop', { method: 'POST' }, env());
+  return app.request(
+    '/api/projects/proj-1/environments/env-1/stop',
+    { method: 'POST' },
+    env()
+  );
 }
 
 function start(app: ReturnType<typeof createApp>) {
-  return app.request('/api/projects/proj-1/environments/env-1/start', { method: 'POST' }, env());
+  return app.request(
+    '/api/projects/proj-1/environments/env-1/start',
+    { method: 'POST' },
+    env()
+  );
 }
 
 describe('deployment environment stop/start lifecycle', () => {
@@ -310,13 +316,7 @@ describe('deployment environment stop/start lifecycle', () => {
       volumeRows.filter((row) => row.environmentId === environmentId)
     );
     mockDetachEnvironmentVolumes.mockImplementation(
-      async (
-        _db: unknown,
-        _env: unknown,
-        _userId: unknown,
-        environmentId: string,
-        serverId: string
-      ) => {
+      async (_db: unknown, _env: unknown, _userId: unknown, environmentId: string, serverId: string) => {
         const detached = volumeRows.filter(
           (row) => row.environmentId === environmentId && row.attachedServerId === serverId
         );
@@ -340,21 +340,11 @@ describe('deployment environment stop/start lifecycle', () => {
       if (target) {
         target.nodeId = 'node-2';
       }
-      return {
-        nodeId: 'node-2',
-        provisioningStarted: false,
-        provisioningPromise: Promise.resolve(),
-      };
+      return { nodeId: 'node-2', provisioningStarted: false, provisioningPromise: Promise.resolve() };
     });
 
     envRows = [
-      {
-        id: 'env-1',
-        projectId: 'proj-1',
-        nodeId: 'node-1',
-        status: 'active',
-        requiresVolumes: true,
-      },
+      { id: 'env-1', projectId: 'proj-1', nodeId: 'node-1', status: 'active', requiresVolumes: true },
     ];
     releaseRows = [{ id: 'rel-1', environmentId: 'env-1', version: 7, status: 'created' }];
     volumeRows = [

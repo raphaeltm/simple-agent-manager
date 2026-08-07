@@ -21,55 +21,20 @@ const mockKV = {
  * Drizzle D1 uses .raw() which returns arrays — values must be in this exact order.
  */
 const TASK_COLUMNS = [
-  'id',
-  'projectId',
-  'userId',
-  'chatSessionId',
-  'parentTaskId',
-  'workspaceId',
-  'title',
-  'description',
-  'status',
-  'executionStep',
-  'priority',
-  'agentProfileHint',
-  'startedAt',
-  'completedAt',
-  'errorMessage',
-  'outputSummary',
-  'outputBranch',
-  'outputPrUrl',
-  'finalizedAt',
-  'taskMode',
-  'dispatchDepth',
-  'autoProvisionedNodeId',
-  'createdBy',
-  'createdAt',
-  'updatedAt',
+  'id', 'projectId', 'userId', 'chatSessionId', 'parentTaskId', 'workspaceId', 'title',
+  'description', 'status', 'executionStep', 'priority', 'agentProfileHint',
+  'startedAt', 'completedAt', 'errorMessage', 'outputSummary', 'outputBranch',
+  'outputPrUrl', 'finalizedAt', 'taskMode', 'dispatchDepth',
+  'autoProvisionedNodeId', 'createdBy', 'createdAt', 'updatedAt',
 ] as const;
 
 const PROJECT_COLUMNS = [
-  'id',
-  'userId',
-  'name',
-  'repository',
-  'defaultBranch',
-  'installationId',
-  'defaultVmSize',
-  'defaultWorkspaceProfile',
-  'defaultProvider',
-  'defaultAgentType',
-  'defaultLocation',
-  'taskExecutionTimeoutMs',
-  'maxConcurrentTasks',
-  'maxDispatchDepth',
-  'maxSubTasksPerTask',
-  'warmNodeTimeoutMs',
-  'maxWorkspacesPerNode',
-  'nodeCpuThresholdPercent',
-  'nodeMemoryThresholdPercent',
-  'createdAt',
-  'updatedAt',
+  'id', 'userId', 'name', 'repository', 'defaultBranch', 'installationId',
+  'defaultVmSize', 'defaultWorkspaceProfile', 'defaultProvider', 'defaultAgentType',
+  'defaultLocation', 'taskExecutionTimeoutMs', 'maxConcurrentTasks',
+  'maxDispatchDepth', 'maxSubTasksPerTask', 'warmNodeTimeoutMs',
+  'maxWorkspacesPerNode', 'nodeCpuThresholdPercent', 'nodeMemoryThresholdPercent',
+  'createdAt', 'updatedAt',
 ] as const;
 
 /** Convert a keyed object to a positional array matching a column list */
@@ -152,7 +117,9 @@ function createMockD1() {
   let lastQuery = '';
 
   function findHandler(method: string) {
-    return handlers.find((h) => h.method === method && !h.consumed && lastQuery.includes(h.match));
+    return handlers.find(
+      (h) => h.method === method && !h.consumed && lastQuery.includes(h.match),
+    );
   }
 
   const stmt = {
@@ -263,19 +230,19 @@ function jsonRpcRequest(method: string, params?: Record<string, unknown>) {
   };
 }
 
-async function mcpRequest(app: Hono, body: unknown, token: string = 'valid-token') {
-  return app.request(
-    '/mcp',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(body),
+async function mcpRequest(
+  app: Hono,
+  body: unknown,
+  token: string = 'valid-token',
+) {
+  return app.request('/mcp', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
     },
-    mockEnv
-  );
+    body: JSON.stringify(body),
+  }, mockEnv);
 }
 
 describe('MCP Orchestration Tools', () => {
@@ -301,7 +268,7 @@ describe('MCP Orchestration Tools', () => {
     /** Set up all D1 mocks needed for a successful retry */
     function setupRetryHappyPath(
       childOverrides: Partial<Record<string, unknown>> = {},
-      options: { runningAgentSession?: boolean } = {}
+      options: { runningAgentSession?: boolean } = {},
     ) {
       const childTask = makeTask(childOverrides);
       const project = makeProjectObj();
@@ -359,13 +326,10 @@ describe('MCP Orchestration Tools', () => {
     }
 
     it('should reject missing taskId', async () => {
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'retry_subtask',
-          arguments: {},
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: {},
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('taskId is required');
@@ -373,13 +337,10 @@ describe('MCP Orchestration Tools', () => {
 
     it('should reject when child task not found', async () => {
       // Default returns empty — no handler needed
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'retry_subtask',
-          arguments: { taskId: 'nonexistent' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'nonexistent' },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('Task not found');
@@ -394,13 +355,10 @@ describe('MCP Orchestration Tools', () => {
         once: true,
       });
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'retry_subtask',
-          arguments: { taskId: 'child-1' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-1' },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('Only the direct parent');
@@ -409,13 +367,10 @@ describe('MCP Orchestration Tools', () => {
     it('should retry a failed child task and dispatch replacement', async () => {
       setupRetryHappyPath();
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'retry_subtask',
-          arguments: { taskId: 'child-1' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-1' },
+      }));
 
       const body = await res.json();
       expect(body.result).toBeDefined();
@@ -437,13 +392,10 @@ describe('MCP Orchestration Tools', () => {
 
       // Create a description that exceeds the default max (32000)
       const longDesc = 'x'.repeat(33000);
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'retry_subtask',
-          arguments: { taskId: 'child-1', newDescription: longDesc },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-1', newDescription: longDesc },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('exceeds maximum length');
@@ -465,13 +417,10 @@ describe('MCP Orchestration Tools', () => {
         result: [[4]],
       });
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'retry_subtask',
-          arguments: { taskId: 'child-1' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-1' },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('Retry limit reached');
@@ -482,13 +431,10 @@ describe('MCP Orchestration Tools', () => {
       // Override createSession to fail
       mockDoStub.createSession = vi.fn().mockRejectedValue(new Error('DO unavailable'));
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'retry_subtask',
-          arguments: { taskId: 'child-1' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-1' },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('Failed to create chat session');
@@ -499,13 +445,10 @@ describe('MCP Orchestration Tools', () => {
       // Override TaskRunner stub to fail
       mockTaskRunnerStub.start = vi.fn().mockRejectedValue(new Error('DO start failed'));
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'retry_subtask',
-          arguments: { taskId: 'child-1' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-1' },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('Failed to start task runner');
@@ -518,13 +461,10 @@ describe('MCP Orchestration Tools', () => {
         workspaceId: 'ws-child',
       });
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'retry_subtask',
-          arguments: { taskId: 'child-active', newDescription: 'Try again with fix' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-active', newDescription: 'Try again with fix' },
+      }));
 
       const body = await res.json();
       expect(body.result).toBeDefined();
@@ -536,17 +476,16 @@ describe('MCP Orchestration Tools', () => {
         'ws-child',
         'agent-session-child',
         mockEnv,
-        'user-789'
+        'user-789',
       );
       expect(mockDoStub.stopSession).toHaveBeenCalledWith('session-to-stop');
       expect(mockTaskRunnerStub.start).toHaveBeenCalled();
       expect(
-        mockD1.prepare.mock.calls.some(
-          ([sql]) =>
-            String(sql).includes('update "agent_sessions"') &&
-            String(sql).includes('"status"') &&
-            String(sql).includes('"stopped_at"')
-        )
+        mockD1.prepare.mock.calls.some(([sql]) =>
+          String(sql).includes('update "agent_sessions"')
+          && String(sql).includes('"status"')
+          && String(sql).includes('"stopped_at"')
+        ),
       ).toBe(true);
     });
 
@@ -557,13 +496,10 @@ describe('MCP Orchestration Tools', () => {
         workspaceId: null,
       });
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'retry_subtask',
-          arguments: { taskId: 'child-queued', newDescription: 'Try again once ready' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-queued', newDescription: 'Try again once ready' },
+      }));
 
       const body = await res.json();
       expect(body.result).toBeDefined();
@@ -575,22 +511,16 @@ describe('MCP Orchestration Tools', () => {
     });
 
     it('should retry delegated child task when no running agent session exists', async () => {
-      setupRetryHappyPath(
-        {
-          id: 'child-delegated',
-          status: 'delegated',
-          workspaceId: 'ws-child',
-        },
-        { runningAgentSession: false }
-      );
+      setupRetryHappyPath({
+        id: 'child-delegated',
+        status: 'delegated',
+        workspaceId: 'ws-child',
+      }, { runningAgentSession: false });
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'retry_subtask',
-          arguments: { taskId: 'child-delegated', newDescription: 'Try delegated work again' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-delegated', newDescription: 'Try delegated work again' },
+      }));
 
       const body = await res.json();
       expect(body.result).toBeDefined();
@@ -609,13 +539,10 @@ describe('MCP Orchestration Tools', () => {
       });
       mockStopAgentSessionOnNode.mockRejectedValueOnce(new Error('node unavailable'));
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'retry_subtask',
-          arguments: { taskId: 'child-active', newDescription: 'Try again with fix' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'retry_subtask',
+        arguments: { taskId: 'child-active', newDescription: 'Try again with fix' },
+      }));
 
       const body = await res.json();
       expect(body.error).toBeDefined();
@@ -629,26 +556,20 @@ describe('MCP Orchestration Tools', () => {
 
   describe('add_dependency', () => {
     it('should reject missing params', async () => {
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'add_dependency',
-          arguments: {},
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'add_dependency',
+        arguments: {},
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('taskId and dependsOnTaskId are required');
     });
 
     it('should reject self-dependency', async () => {
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'add_dependency',
-          arguments: { taskId: 'task-1', dependsOnTaskId: 'task-1' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'add_dependency',
+        arguments: { taskId: 'task-1', dependsOnTaskId: 'task-1' },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('cannot depend on itself');
@@ -663,13 +584,10 @@ describe('MCP Orchestration Tools', () => {
         once: true,
       });
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'add_dependency',
-          arguments: { taskId: 'task-1', dependsOnTaskId: 'task-2' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'add_dependency',
+        arguments: { taskId: 'task-1', dependsOnTaskId: 'task-2' },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('not found');
@@ -686,13 +604,10 @@ describe('MCP Orchestration Tools', () => {
         once: true,
       });
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'add_dependency',
-          arguments: { taskId: 'task-1', dependsOnTaskId: 'task-2' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'add_dependency',
+        arguments: { taskId: 'task-1', dependsOnTaskId: 'task-2' },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('Caller must be the parent');
@@ -711,13 +626,10 @@ describe('MCP Orchestration Tools', () => {
         once: true,
       });
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'add_dependency',
-          arguments: { taskId: 'task-a', dependsOnTaskId: 'parent-task-1' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'add_dependency',
+        arguments: { taskId: 'task-a', dependsOnTaskId: 'parent-task-1' },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('Caller must be the parent');
@@ -748,13 +660,10 @@ describe('MCP Orchestration Tools', () => {
         result: [],
       });
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'add_dependency',
-          arguments: { taskId: 'task-a', dependsOnTaskId: 'task-b' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'add_dependency',
+        arguments: { taskId: 'task-a', dependsOnTaskId: 'task-b' },
+      }));
       const body = await res.json();
       expect(body.result).toBeDefined();
       const content = JSON.parse(body.result.content[0].text);
@@ -785,13 +694,10 @@ describe('MCP Orchestration Tools', () => {
         result: [['task-b', 'task-a']],
       });
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'add_dependency',
-          arguments: { taskId: 'task-a', dependsOnTaskId: 'task-b' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'add_dependency',
+        arguments: { taskId: 'task-a', dependsOnTaskId: 'task-b' },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('cycle');
@@ -819,20 +725,14 @@ describe('MCP Orchestration Tools', () => {
       mockD1._handlers.push({
         match: 'inner join "tasks"',
         method: 'raw',
-        result: [
-          ['task-a', 'task-b'],
-          ['task-b', 'task-c'],
-        ],
+        result: [['task-a', 'task-b'], ['task-b', 'task-c']],
       });
       // BFS from task-a: follows A→B→C, finds C === taskId → CYCLE
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'add_dependency',
-          arguments: { taskId: 'task-c', dependsOnTaskId: 'task-a' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'add_dependency',
+        arguments: { taskId: 'task-c', dependsOnTaskId: 'task-a' },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('cycle');
@@ -855,13 +755,10 @@ describe('MCP Orchestration Tools', () => {
         result: { count: 50 },
       });
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'add_dependency',
-          arguments: { taskId: 'task-a', dependsOnTaskId: 'task-b' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'add_dependency',
+        arguments: { taskId: 'task-a', dependsOnTaskId: 'task-b' },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('edge limit');
@@ -872,26 +769,20 @@ describe('MCP Orchestration Tools', () => {
 
   describe('remove_pending_subtask', () => {
     it('should reject missing taskId', async () => {
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'remove_pending_subtask',
-          arguments: {},
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'remove_pending_subtask',
+        arguments: {},
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('taskId is required');
     });
 
     it('should reject when task not found', async () => {
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'remove_pending_subtask',
-          arguments: { taskId: 'nonexistent' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'remove_pending_subtask',
+        arguments: { taskId: 'nonexistent' },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('Task not found');
@@ -906,13 +797,10 @@ describe('MCP Orchestration Tools', () => {
         once: true,
       });
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'remove_pending_subtask',
-          arguments: { taskId: 'child-1' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'remove_pending_subtask',
+        arguments: { taskId: 'child-1' },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain('Only the direct parent');
@@ -926,13 +814,10 @@ describe('MCP Orchestration Tools', () => {
         once: true,
       });
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'remove_pending_subtask',
-          arguments: { taskId: 'child-1' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'remove_pending_subtask',
+        arguments: { taskId: 'child-1' },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain("Cannot remove task in 'in_progress' status");
@@ -947,13 +832,10 @@ describe('MCP Orchestration Tools', () => {
         once: true,
       });
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'remove_pending_subtask',
-          arguments: { taskId: 'child-done' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'remove_pending_subtask',
+        arguments: { taskId: 'child-done' },
+      }));
       const body = await res.json();
       expect(body.error).toBeDefined();
       expect(body.error.message).toContain("Cannot remove task in 'completed' status");
@@ -968,13 +850,10 @@ describe('MCP Orchestration Tools', () => {
         once: true,
       });
 
-      const res = await mcpRequest(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'remove_pending_subtask',
-          arguments: { taskId: 'child-queued' },
-        })
-      );
+      const res = await mcpRequest(app, jsonRpcRequest('tools/call', {
+        name: 'remove_pending_subtask',
+        arguments: { taskId: 'child-queued' },
+      }));
       const body = await res.json();
       expect(body.result).toBeDefined();
       const content = JSON.parse(body.result.content[0].text);
@@ -1020,9 +899,7 @@ describe('MCP Orchestration Tools', () => {
     it('remove_pending_subtask requires taskId', async () => {
       const res = await mcpRequest(app, jsonRpcRequest('tools/list'));
       const body = await res.json();
-      const tool = body.result.tools.find(
-        (t: { name: string }) => t.name === 'remove_pending_subtask'
-      );
+      const tool = body.result.tools.find((t: { name: string }) => t.name === 'remove_pending_subtask');
       expect(tool).toBeDefined();
       expect(tool.inputSchema.required).toContain('taskId');
     });

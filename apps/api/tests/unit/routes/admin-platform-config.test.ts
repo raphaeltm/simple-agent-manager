@@ -186,29 +186,23 @@ describe('admin platform config routes', () => {
       GOOGLE_CLIENT_ID: 'env-infra-client',
       GOOGLE_CLIENT_SECRET: 'env-infra-secret',
     });
-    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ error: 'invalid_grant' }), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' },
-      })
-    );
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+      JSON.stringify({ error: 'invalid_grant' }),
+      { status: 400, headers: { 'Content-Type': 'application/json' } },
+    ));
 
-    const save = await createApp().request(
-      '/api/admin/platform-config',
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
-        body: JSON.stringify({
-          config: {
-            googleInfrastructure: {
-              clientId: 'runtime-infra-client',
-              clientSecret: 'runtime-infra-secret',
-            },
+    const save = await createApp().request('/api/admin/platform-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
+      body: JSON.stringify({
+        config: {
+          googleInfrastructure: {
+            clientId: 'runtime-infra-client',
+            clientSecret: 'runtime-infra-secret',
           },
-        }),
-      },
-      env
-    );
+        },
+      }),
+    }, env);
 
     expect(save.status).toBe(200);
     const saveBody = await save.text();
@@ -224,48 +218,40 @@ describe('admin platform config routes', () => {
     const secretRow = await env.DATABASE.prepare(
       `SELECT encrypted_token AS encryptedToken, updated_by AS updatedBy
        FROM platform_credentials
-       WHERE provider = 'google-infrastructure'`
+       WHERE provider = 'google-infrastructure'`,
     ).first<{ encryptedToken: string; updatedBy: string }>();
     expect(secretRow?.encryptedToken).not.toContain('runtime-infra-secret');
     expect(secretRow?.updatedBy).toBe('superadmin-1');
 
-    const rotate = await createApp().request(
-      '/api/admin/platform-config',
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
-        body: JSON.stringify({
-          config: {
-            googleInfrastructure: {
-              clientId: 'runtime-infra-client-rotated',
-              clientSecret: 'runtime-infra-secret-rotated',
-            },
+    const rotate = await createApp().request('/api/admin/platform-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
+      body: JSON.stringify({
+        config: {
+          googleInfrastructure: {
+            clientId: 'runtime-infra-client-rotated',
+            clientSecret: 'runtime-infra-secret-rotated',
           },
-        }),
-      },
-      env
-    );
+        },
+      }),
+    }, env);
     expect(rotate.status).toBe(200);
     expect(await rotate.text()).not.toContain('runtime-infra-secret-rotated');
     const rotatedRows = await env.DATABASE.prepare(
       `SELECT encrypted_token AS encryptedToken, updated_by AS updatedBy
        FROM platform_credentials
-       WHERE provider = 'google-infrastructure'`
+       WHERE provider = 'google-infrastructure'`,
     ).all<{ encryptedToken: string; updatedBy: string }>();
     expect(rotatedRows.results).toHaveLength(1);
     expect(rotatedRows.results[0]?.encryptedToken).not.toBe(secretRow?.encryptedToken);
     expect(rotatedRows.results[0]?.encryptedToken).not.toContain('runtime-infra-secret-rotated');
     expect(rotatedRows.results[0]?.updatedBy).toBe('superadmin-1');
 
-    const remove = await createApp().request(
-      '/api/admin/platform-config',
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
-        body: JSON.stringify({ config: { googleInfrastructure: { remove: true } } }),
-      },
-      env
-    );
+    const remove = await createApp().request('/api/admin/platform-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
+      body: JSON.stringify({ config: { googleInfrastructure: { remove: true } } }),
+    }, env);
     expect(remove.status).toBe(200);
     await expect(remove.json()).resolves.toMatchObject({
       status: {
@@ -298,15 +284,11 @@ describe('admin platform config routes', () => {
   });
 
   it('rejects malformed platform config bodies before persistence', async () => {
-    const res = await createApp().request(
-      '/api/admin/platform-config',
-      {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
-        body: JSON.stringify({ config: 'not-an-object' }),
-      },
-      createEnv()
-    );
+    const res = await createApp().request('/api/admin/platform-config', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', 'X-Test-Role': 'superadmin' },
+      body: JSON.stringify({ config: 'not-an-object' }),
+    }, createEnv());
 
     expect(res.status).toBe(400);
   });

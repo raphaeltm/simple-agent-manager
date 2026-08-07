@@ -386,9 +386,7 @@ describe('project member offboarding apply', () => {
           updatedRows.push({ table, values });
           const updateChain = {
             where: vi.fn(() => updateChain),
-            returning: vi.fn(() =>
-              Promise.resolve(updateReturningRows.shift() ?? [{ id: 'updated' }])
-            ),
+            returning: vi.fn(() => Promise.resolve(updateReturningRows.shift() ?? [{ id: 'updated' }])),
             then: (resolve: () => unknown) => Promise.resolve(undefined).then(resolve),
           };
           return updateChain;
@@ -412,9 +410,7 @@ describe('project member offboarding apply', () => {
     app.route('/api/projects', projectMembersRoutes);
   });
 
-  async function apply(
-    actions: Array<{ resourceKind: string; resourceId: string; action: string }>
-  ) {
+  async function apply(actions: Array<{ resourceKind: string; resourceId: string; action: string }>) {
     return app.request(
       '/api/projects/proj-1/members/departing-user/offboarding-apply',
       {
@@ -452,11 +448,7 @@ describe('project member offboarding apply', () => {
       [],
       [],
     ];
-    updateReturningRows = [
-      [{ id: 'trigger-personal' }],
-      [{ id: 'task-queued' }],
-      [{ userId: 'departing-user' }],
-    ];
+    updateReturningRows = [[{ id: 'trigger-personal' }], [{ id: 'task-queued' }], [{ userId: 'departing-user' }]];
 
     const response = await apply([
       { resourceKind: 'trigger', resourceId: 'trigger-personal', action: 'break_and_flag' },

@@ -222,9 +222,7 @@ describe('node-lifecycle BYO gates', () => {
     it('stores agentVersion reported by /ready', async () => {
       const res = await appRequest('/api/nodes/node-1/ready', { agentVersion: 'build-sha-1' });
       expect(res.status).toBe(200);
-      expect(state.updates).toContainEqual(
-        expect.objectContaining({ agentVersion: 'build-sha-1' })
-      );
+      expect(state.updates).toContainEqual(expect.objectContaining({ agentVersion: 'build-sha-1' }));
     });
 
     it('stores agentVersion reported by heartbeat', async () => {
@@ -233,9 +231,7 @@ describe('node-lifecycle BYO gates', () => {
         agentVersion: 'build-sha-2',
       });
       expect(res.status).toBe(200);
-      expect(state.updates).toContainEqual(
-        expect.objectContaining({ agentVersion: 'build-sha-2' })
-      );
+      expect(state.updates).toContainEqual(expect.objectContaining({ agentVersion: 'build-sha-2' }));
     });
   });
 

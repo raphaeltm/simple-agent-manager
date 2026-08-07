@@ -108,19 +108,19 @@ function jsonRpcNotification(method: string, params?: Record<string, unknown>) {
   };
 }
 
-async function mcpPost(app: Hono, body: unknown, token: string = 'valid-token') {
-  return app.request(
-    '/mcp',
-    {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-      },
-      body: JSON.stringify(body),
+async function mcpPost(
+  app: Hono,
+  body: unknown,
+  token: string = 'valid-token',
+) {
+  return app.request('/mcp', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
     },
-    mockEnv
-  );
+    body: JSON.stringify(body),
+  }, mockEnv);
 }
 
 describe('MCP Streamable HTTP Compliance', () => {
@@ -151,13 +151,10 @@ describe('MCP Streamable HTTP Compliance', () => {
     });
 
     it('should return 202 with no body for notifications/cancelled', async () => {
-      const res = await mcpPost(
-        app,
-        jsonRpcNotification('notifications/cancelled', {
-          requestId: '1',
-          reason: 'User cancelled',
-        })
-      );
+      const res = await mcpPost(app, jsonRpcNotification('notifications/cancelled', {
+        requestId: '1',
+        reason: 'User cancelled',
+      }));
 
       expect(res.status).toBe(202);
       const body = await res.text();
@@ -165,14 +162,11 @@ describe('MCP Streamable HTTP Compliance', () => {
     });
 
     it('should return 202 with no body for notifications/progress', async () => {
-      const res = await mcpPost(
-        app,
-        jsonRpcNotification('notifications/progress', {
-          progressToken: 'tok-1',
-          progress: 50,
-          total: 100,
-        })
-      );
+      const res = await mcpPost(app, jsonRpcNotification('notifications/progress', {
+        progressToken: 'tok-1',
+        progress: 50,
+        total: 100,
+      }));
 
       expect(res.status).toBe(202);
       const body = await res.text();
@@ -237,26 +231,18 @@ describe('MCP Streamable HTTP Compliance', () => {
 
   describe('HTTP method restrictions', () => {
     it('should return 405 with Allow header for GET /mcp', async () => {
-      const res = await app.request(
-        '/mcp',
-        {
-          method: 'GET',
-        },
-        mockEnv
-      );
+      const res = await app.request('/mcp', {
+        method: 'GET',
+      }, mockEnv);
 
       expect(res.status).toBe(405);
       expect(res.headers.get('Allow')).toBe('POST');
     });
 
     it('should return 405 with Allow header for DELETE /mcp', async () => {
-      const res = await app.request(
-        '/mcp',
-        {
-          method: 'DELETE',
-        },
-        mockEnv
-      );
+      const res = await app.request('/mcp', {
+        method: 'DELETE',
+      }, mockEnv);
 
       expect(res.status).toBe(405);
       expect(res.headers.get('Allow')).toBe('POST');
@@ -293,13 +279,10 @@ describe('MCP Streamable HTTP Compliance', () => {
 
       // Step 4: tools/call — expect 200 with JSON-RPC response (not 202)
       // We verify the HTTP status and response format, not the tool's internal logic
-      const callRes = await mcpPost(
-        app,
-        jsonRpcRequest('tools/call', {
-          name: 'get_instructions',
-          arguments: {},
-        })
-      );
+      const callRes = await mcpPost(app, jsonRpcRequest('tools/call', {
+        name: 'get_instructions',
+        arguments: {},
+      }));
       expect(callRes.status).toBe(200);
       const callBody = await callRes.json();
       expect(callBody.jsonrpc).toBe('2.0');
@@ -346,7 +329,10 @@ describe('MCP Streamable HTTP Compliance', () => {
     });
 
     it('batch JSON-RPC array returns 400 error (not 500)', async () => {
-      const res = await mcpPost(app, [jsonRpcRequest('initialize'), jsonRpcRequest('tools/list')]);
+      const res = await mcpPost(app, [
+        jsonRpcRequest('initialize'),
+        jsonRpcRequest('tools/list'),
+      ]);
       expect(res.status).toBe(400);
       const body = await res.json();
       expect(body.error).toBeDefined();

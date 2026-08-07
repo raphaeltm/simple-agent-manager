@@ -181,14 +181,10 @@ describe('shared-project task lifecycle — positive paths for a non-creator mem
     );
     // Repo access is re-verified for the CALLER, not the task creator.
     expect(mocks.requireRepositoryUserAccess).toHaveBeenCalledWith(
-      expect.anything(),
-      expect.anything(),
-      expect.anything(),
-      MEMBER
+      expect.anything(), expect.anything(), expect.anything(), MEMBER
     );
     expect(mocks.startTaskRunnerDO).not.toHaveBeenCalledWith(
-      expect.anything(),
-      expect.objectContaining({ userId: CREATOR })
+      expect.anything(), expect.objectContaining({ userId: CREATOR })
     );
   });
 
@@ -260,9 +256,7 @@ describe('shared-project task lifecycle — positive paths for a non-creator mem
     await seedTask({ status: 'in_progress', taskMode: 'conversation' });
 
     const response = await makeApp(crudRoutes).fetch(
-      new Request(`https://api.test/api/projects/${PROJECT}/tasks/task-1/close`, {
-        method: 'POST',
-      }),
+      new Request(`https://api.test/api/projects/${PROJECT}/tasks/task-1/close`, { method: 'POST' }),
       env,
       mockCtx
     );
@@ -293,9 +287,7 @@ describe('POST /:taskId/close — workspace teardown stays caller-scoped (real S
 
   async function close() {
     return makeApp(crudRoutes).fetch(
-      new Request(`https://api.test/api/projects/${PROJECT}/tasks/task-1/close`, {
-        method: 'POST',
-      }),
+      new Request(`https://api.test/api/projects/${PROJECT}/tasks/task-1/close`, { method: 'POST' }),
       env,
       mockCtx
     );
@@ -320,10 +312,7 @@ describe('POST /:taskId/close — workspace teardown stays caller-scoped (real S
 
     expect(response.status).toBe(200);
     expect(mocks.cleanupWorkspaceForDeletion).toHaveBeenCalledWith(
-      expect.objectContaining({
-        workspace: expect.objectContaining({ id: 'ws-conv' }),
-        userId: MEMBER,
-      })
+      expect.objectContaining({ workspace: expect.objectContaining({ id: 'ws-conv' }), userId: MEMBER })
     );
   });
 });

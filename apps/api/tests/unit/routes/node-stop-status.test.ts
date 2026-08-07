@@ -87,7 +87,7 @@ function createApp() {
     if (typeof appError.statusCode === 'number') {
       return c.json(
         { error: appError.error, message: appError.message },
-        appError.statusCode as any
+        appError.statusCode as any,
       );
     }
     return c.json({ error: 'INTERNAL_ERROR', message: String(err) }, 500);
@@ -174,7 +174,7 @@ describe('POST /api/nodes/:id/stop', () => {
         statusCode: 404,
         error: 'NOT_FOUND',
         message: 'Node not found',
-      })
+      }),
     );
 
     const response = await app.request('/api/nodes/node-1/stop', { method: 'POST' }, env);
@@ -228,7 +228,11 @@ describe('DELETE /api/nodes/:id', () => {
       nodeRole: 'deployment',
     });
 
-    const response = await app.request('/api/nodes/node-deploy-1', { method: 'DELETE' }, env);
+    const response = await app.request(
+      '/api/nodes/node-deploy-1',
+      { method: 'DELETE' },
+      env,
+    );
 
     expect(response.status).toBe(409);
     await expect(response.json()).resolves.toMatchObject({
@@ -239,7 +243,11 @@ describe('DELETE /api/nodes/:id', () => {
   });
 
   it('keeps existing workspace-node deletion behavior when cleanup reports errors', async () => {
-    const response = await app.request('/api/nodes/node-1', { method: 'DELETE' }, env);
+    const response = await app.request(
+      '/api/nodes/node-1',
+      { method: 'DELETE' },
+      env,
+    );
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ success: true });

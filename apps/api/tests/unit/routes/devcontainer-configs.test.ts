@@ -100,7 +100,9 @@ describe('parseDevcontainerConfigs', () => {
   });
 
   it('ignores deeply nested devcontainer.json files', () => {
-    const tree = [{ path: '.devcontainer/deep/nested/devcontainer.json', type: 'blob' }];
+    const tree = [
+      { path: '.devcontainer/deep/nested/devcontainer.json', type: 'blob' },
+    ];
     const result = parseDevcontainerConfigs(tree);
     expect(result.configs).toEqual([]);
   });
@@ -137,13 +139,10 @@ describe('parseDevcontainerConfigs', () => {
 describe('discoverGitHubDevcontainerConfigs', () => {
   it('returns no configs when the repo has no devcontainer files', async () => {
     const mockFetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          tree: [{ path: 'src/main.ts', type: 'blob' }],
-          truncated: false,
-        }),
-        { status: 200 }
-      )
+      new Response(JSON.stringify({
+        tree: [{ path: 'src/main.ts', type: 'blob' }],
+        truncated: false,
+      }), { status: 200 }),
     );
     vi.stubGlobal('fetch', mockFetch);
 
@@ -158,13 +157,10 @@ describe('discoverGitHubDevcontainerConfigs', () => {
 
   it('returns discovered default and named configs from the GitHub tree', async () => {
     const mockFetch = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({
-          tree: MIXED_DEVCONTAINER_TREE,
-          truncated: false,
-        }),
-        { status: 200 }
-      )
+      new Response(JSON.stringify({
+        tree: MIXED_DEVCONTAINER_TREE,
+        truncated: false,
+      }), { status: 200 }),
     );
     vi.stubGlobal('fetch', mockFetch);
 
@@ -178,20 +174,16 @@ describe('discoverGitHubDevcontainerConfigs', () => {
   });
 
   it('falls back to contents API when the recursive tree is truncated', async () => {
-    const mockFetch = vi
-      .fn()
+    const mockFetch = vi.fn()
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ tree: [], truncated: true }), { status: 200 })
+        new Response(JSON.stringify({ tree: [], truncated: true }), { status: 200 }),
       )
       .mockResolvedValueOnce(new Response('', { status: 404 }))
       .mockResolvedValueOnce(
-        new Response(
-          JSON.stringify([
-            { name: 'python', type: 'dir' },
-            { name: 'notes.md', type: 'file' },
-          ]),
-          { status: 200 }
-        )
+        new Response(JSON.stringify([
+          { name: 'python', type: 'dir' },
+          { name: 'notes.md', type: 'file' },
+        ]), { status: 200 }),
       )
       .mockResolvedValueOnce(new Response('', { status: 200 }));
     vi.stubGlobal('fetch', mockFetch);
@@ -256,12 +248,10 @@ function makeProject(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function setupGithubProject(
-  options: {
-    token?: string;
-    project?: Record<string, unknown>;
-  } = {}
-) {
+function setupGithubProject(options: {
+  token?: string;
+  project?: Record<string, unknown>;
+} = {}) {
   const token = options.token ?? 'ghs_test';
   mockRequireProjectAccess.mockResolvedValue(makeProject(options.project));
   mockRequireOwnedInstallation.mockResolvedValue({ installationId: '12345' });
@@ -273,9 +263,9 @@ function setupGithubProject(
 }
 
 function stubTreeResponse(tree: Array<{ path: string; type: string }>) {
-  const mockFetch = vi
-    .fn()
-    .mockResolvedValue(new Response(JSON.stringify({ tree, truncated: false }), { status: 200 }));
+  const mockFetch = vi.fn().mockResolvedValue(
+    new Response(JSON.stringify({ tree, truncated: false }), { status: 200 }),
+  );
   vi.stubGlobal('fetch', mockFetch);
   return mockFetch;
 }
@@ -338,7 +328,7 @@ describe('GET /projects/:projectId/devcontainer-configs', () => {
 
   it('enforces project ownership', async () => {
     mockRequireProjectAccess.mockRejectedValue(
-      Object.assign(new Error('Project not found'), { statusCode: 404, error: 'NOT_FOUND' })
+      Object.assign(new Error('Project not found'), { statusCode: 404, error: 'NOT_FOUND' }),
     );
 
     const res = await requestConfigs(app);
@@ -348,7 +338,9 @@ describe('GET /projects/:projectId/devcontainer-configs', () => {
   it('returns 502 when GitHub API fails', async () => {
     const token = setupGithubProject();
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Not Found', { status: 404 })));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
+      new Response('Not Found', { status: 404 }),
+    ));
 
     const res = await requestConfigs(app);
     expect(res.status).toBe(502);

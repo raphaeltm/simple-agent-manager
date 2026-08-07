@@ -20,7 +20,9 @@ vi.mock('../../../src/services/project-orchestrator', () => ({
 }));
 
 function createEnvWithTaskProject(projectId: string | null): Env {
-  const first = vi.fn(async () => (projectId === null ? null : { projectId }));
+  const first = vi.fn(async () => (
+    projectId === null ? null : { projectId }
+  ));
   const bind = vi.fn(() => ({ first }));
   const prepare = vi.fn(() => ({ bind }));
 
@@ -57,7 +59,7 @@ describe('MCP orchestrator lifecycle tools', () => {
         reason: 'manual override',
       },
       tokenData,
-      env
+      env,
     );
 
     expect(result.error).toMatchObject({
@@ -91,17 +93,12 @@ describe('MCP orchestrator lifecycle tools', () => {
         reason: 'manual override',
       },
       tokenData,
-      env
+      env,
     );
 
     expect(result.error).toBeUndefined();
     expect(result.result).toEqual({
-      content: [
-        {
-          type: 'text',
-          text: JSON.stringify({ success: true, taskId: 'task-target', newState: 'blocked_human' }),
-        },
-      ],
+      content: [{ type: 'text', text: JSON.stringify({ success: true, taskId: 'task-target', newState: 'blocked_human' }) }],
     });
     expect(mocks.overrideTaskState).toHaveBeenCalledWith(
       env,
@@ -109,7 +106,7 @@ describe('MCP orchestrator lifecycle tools', () => {
       'mission-caller',
       'task-target',
       'blocked_human',
-      'manual override'
+      'manual override',
     );
   });
 });

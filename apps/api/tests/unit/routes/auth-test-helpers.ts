@@ -17,7 +17,7 @@ export function createMockAuth() {
 export function buildAuthTestApp(
   routes: Hono<{ Bindings: Env }>,
   routePath: string,
-  envOverrides: Record<string, unknown> = {}
+  envOverrides: Record<string, unknown> = {},
 ) {
   const env: Record<string, unknown> = {
     BASE_DOMAIN: 'test.example.com',

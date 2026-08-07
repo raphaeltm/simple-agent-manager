@@ -6,7 +6,7 @@
  * 2. Conversation-mode complete_task does NOT trigger cleanup
  * 3. Trigger execution sync happens on complete_task
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 // ── Module mocks (must be before imports) ───────────────────────────────────
 
@@ -105,9 +105,7 @@ function createMockEnv(mockD1: ReturnType<typeof createMockD1>) {
 function createMockExecutionCtx(): ExecutionContext {
   const promises: Promise<unknown>[] = [];
   return {
-    waitUntil: (p: Promise<unknown>) => {
-      promises.push(p);
-    },
+    waitUntil: (p: Promise<unknown>) => { promises.push(p); },
     passThroughOnException: () => {},
     // Expose for test inspection
     _promises: promises,
@@ -145,9 +143,7 @@ describe('complete_task cleanup behavior', () => {
     const result = await handleCompleteTask(1, { summary: 'Done' }, tokenData, env, ctx);
 
     expect(result.result).toBeDefined();
-    expect((result.result as { content: Array<{ text: string }> }).content[0].text).toContain(
-      'completed'
-    );
+    expect((result.result as { content: Array<{ text: string }> }).content[0].text).toContain('completed');
 
     // Wait for background work to complete
     await Promise.allSettled(ctx._promises);
@@ -180,9 +176,7 @@ describe('complete_task cleanup behavior', () => {
     const result = await handleCompleteTask(1, { summary: 'Explored' }, tokenData, env, ctx);
 
     expect(result.result).toBeDefined();
-    expect((result.result as { content: Array<{ text: string }> }).content[0].text).toContain(
-      'Conversation remains open'
-    );
+    expect((result.result as { content: Array<{ text: string }> }).content[0].text).toContain('Conversation remains open');
 
     // Wait for any background work
     await Promise.allSettled(ctx._promises);
@@ -214,7 +208,7 @@ describe('complete_task cleanup behavior', () => {
     expect(syncTriggerSpy).toHaveBeenCalledWith(
       expect.anything(), // D1 database
       'task-123',
-      'completed'
+      'completed',
     );
   });
 
@@ -236,9 +230,7 @@ describe('complete_task cleanup behavior', () => {
     const result = await handleCompleteTask(1, { summary: 'Done' }, tokenData, env);
 
     expect(result.result).toBeDefined();
-    expect((result.result as { content: Array<{ text: string }> }).content[0].text).toContain(
-      'completed'
-    );
+    expect((result.result as { content: Array<{ text: string }> }).content[0].text).toContain('completed');
 
     // Cleanup not called since no executionCtx
     expect(stopSessionSpy).not.toHaveBeenCalled();
