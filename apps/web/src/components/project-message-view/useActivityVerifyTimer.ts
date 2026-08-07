@@ -9,6 +9,8 @@ interface ActivityVerifyTimerOptions {
   delayMs: number;
   logMessage: string;
   onVerifiedIdle: () => void;
+  /** Called once when the server confirms idle while the UI was showing "working". */
+  onVerifiedStale?: () => void;
   onStateSnapshot?: (state: Awaited<ReturnType<typeof getChatSessionState>>['state']) => void;
 }
 
@@ -18,6 +20,7 @@ export function useActivityVerifyTimer({
   delayMs,
   logMessage,
   onVerifiedIdle,
+  onVerifiedStale,
   onStateSnapshot,
 }: ActivityVerifyTimerOptions) {
   const timerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -53,6 +56,7 @@ export function useActivityVerifyTimer({
             armVerifyTimer();
           } else {
             nullStateVerifyCountRef.current = 0;
+            onVerifiedStale?.();
             onVerifiedIdle();
           }
         } catch (err) {
