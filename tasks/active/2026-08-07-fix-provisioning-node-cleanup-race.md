@@ -110,6 +110,15 @@ Staging deployment and verification are intentionally skipped because the user
 explicitly prohibited staging for this urgent hotfix. No staging mutation was made.
 GitHub CI remains the final validation gate before archival.
 
+## Pull Request and CI
+
+- Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/1764
+- The initial preflight-evidence job captured the PR immediately after creation, before
+  its body was populated, and failed only with `Pull request body is empty`. The full PR
+  template is now populated. This task-evidence commit intentionally triggers a fresh
+  synchronize run so preflight evaluates the current body.
+- The PR remains draft and must not be merged without explicit authorization.
+
 ## Acceptance Criteria
 
 - An active queued/delegated/in-progress task whose `auto_provisioned_node_id` points to
