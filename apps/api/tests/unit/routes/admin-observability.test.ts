@@ -1,3 +1,4 @@
+import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -6,6 +7,7 @@ import {
   diagnosticSecretCanaries,
   expectDiagnosticCanariesAbsent,
 } from '../../helpers/diagnostic-secret-canaries';
+import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 // Mock auth middleware
 const mockGetUserId = vi.fn().mockReturnValue('user-superadmin');
@@ -92,6 +94,7 @@ vi.mock('../../../src/services/observability', () => ({
 const mockGetDiagnosticIncidentsByErrorIds = vi.fn().mockResolvedValue(new Map());
 const mockGetDiagnosticIncidentByErrorId = vi.fn();
 const mockGetDiagnosticArtifactForDownload = vi.fn();
+const mockGetDiagnosticIncidentsByNodeId = vi.fn();
 vi.mock('../../../src/services/diagnostic-incidents', () => ({
   getDiagnosticIncidentsByErrorIds: (...args: unknown[]) =>
     mockGetDiagnosticIncidentsByErrorIds(...args),
@@ -99,6 +102,8 @@ vi.mock('../../../src/services/diagnostic-incidents', () => ({
     mockGetDiagnosticIncidentByErrorId(...args),
   getDiagnosticArtifactForDownload: (...args: unknown[]) =>
     mockGetDiagnosticArtifactForDownload(...args),
+  getDiagnosticIncidentsByNodeId: (...args: unknown[]) =>
+    mockGetDiagnosticIncidentsByNodeId(...args),
 }));
 
 // Mock rate-limit middleware (allow all by default)
@@ -320,6 +325,29 @@ describe('Admin Observability Routes', () => {
       );
     });
 
+    it('passes every exact-match correlation filter and epoch endTime to queryErrors', async () => {
+      mockQueryErrors.mockResolvedValue({ errors: [], cursor: null, hasMore: false, total: 0 });
+      const endTime = Date.UTC(2026, 7, 7, 23, 59, 59);
+
+      await app.request(
+        `/api/admin/observability/errors?nodeId=node-1&workspaceId=workspace-1&taskId=task-1&sessionId=session-1&userId=user-1&endTime=${endTime}`,
+        {},
+        createEnv()
+      );
+
+      expect(mockQueryErrors).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          nodeId: 'node-1',
+          workspaceId: 'workspace-1',
+          taskId: 'task-1',
+          sessionId: 'session-1',
+          userId: 'user-1',
+          endTime,
+        })
+      );
+    });
+
     it('should pass time range params to queryErrors', async () => {
       mockQueryErrors.mockResolvedValue({ errors: [], cursor: null, hasMore: false, total: 0 });
 
@@ -461,6 +489,143 @@ describe('Admin Observability Routes', () => {
       expect(body.cursor).toBe('next-cursor');
       expect(body.hasMore).toBe(true);
       expect(body.total).toBe(100);
+    });
+  });
+
+  describe('node observability routes', () => {
+    it('rejects non-superadmins on node summaries and incidents before database reads', async () => {
+      const headers = { 'x-test-role': 'non-superadmin' };
+      const nodes = await app.request('/api/admin/observability/nodes', { headers }, createEnv());
+      const incidents = await app.request(
+        '/api/admin/observability/nodes/node-1/incidents',
+        { headers },
+        createEnv()
+      );
+      expect(nodes.status).toBe(403);
+      expect(incidents.status).toBe(403);
+      expect(mockGetDiagnosticIncidentsByNodeId).not.toHaveBeenCalled();
+    });
+
+    it('returns stopped/error and recent destroyed nodes with NULL heartbeats last', async () => {
+      const sqlite = new Database(':memory:');
+      sqlite.exec(`
+        CREATE TABLE nodes (
+          id TEXT PRIMARY KEY, name TEXT NOT NULL, status TEXT NOT NULL,
+          health_status TEXT, last_heartbeat_at TEXT, cloud_provider TEXT,
+          node_class TEXT, agent_version TEXT, error_message TEXT,
+          created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+        );
+      `);
+      const insert = sqlite.prepare(`INSERT INTO nodes VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+      const now = Date.now();
+      insert.run(
+        'node-error',
+        'Error node',
+        'error',
+        'unhealthy',
+        new Date(now - 1_000).toISOString(),
+        'hetzner',
+        'managed',
+        'build-1',
+        'agent stopped',
+        new Date(now - 100_000).toISOString(),
+        new Date(now - 1_000).toISOString()
+      );
+      insert.run(
+        'node-recent-destroyed',
+        'Recent destroyed',
+        'destroyed',
+        'unhealthy',
+        new Date(now - 2_000).toISOString(),
+        'hetzner',
+        'managed',
+        'build-2',
+        null,
+        new Date(now - 100_000).toISOString(),
+        new Date(now - 60_000).toISOString()
+      );
+      insert.run(
+        'node-stopped',
+        'Stopped node',
+        'stopped',
+        'unhealthy',
+        null,
+        'hetzner',
+        'managed',
+        'build-3',
+        null,
+        new Date(now - 100_000).toISOString(),
+        new Date(now - 3_000).toISOString()
+      );
+      insert.run(
+        'node-old-destroyed',
+        'Old destroyed',
+        'destroyed',
+        'unhealthy',
+        new Date(now - 200_000).toISOString(),
+        'hetzner',
+        'managed',
+        'build-old',
+        null,
+        new Date(now - 200_000_000).toISOString(),
+        new Date(now - 25 * 60 * 60 * 1_000).toISOString()
+      );
+
+      try {
+        const response = await app.request(
+          '/api/admin/observability/nodes',
+          {},
+          createEnv({ DATABASE: createSqliteD1(sqlite) })
+        );
+        expect(response.status).toBe(200);
+        const body = await response.json();
+        expect(body.nodes.map((node: { id: string }) => node.id)).toEqual([
+          'node-error',
+          'node-recent-destroyed',
+          'node-stopped',
+        ]);
+        expect(body.nodes[0]).toMatchObject({
+          provider: 'hetzner',
+          vmAgentBuild: 'build-1',
+          errorMessage: 'agent stopped',
+        });
+      } finally {
+        sqlite.close();
+      }
+    });
+
+    it('returns bounded node incidents with artifact status after node death', async () => {
+      mockGetDiagnosticIncidentsByNodeId.mockResolvedValue([
+        { id: 'incident-1', status: 'available', artifacts: [{ status: 'available' }] },
+      ]);
+      const response = await app.request(
+        '/api/admin/observability/nodes/dead-node/incidents?limit=12',
+        {},
+        createEnv()
+      );
+      expect(response.status).toBe(200);
+      expect(await response.json()).toEqual({
+        incidents: [
+          { id: 'incident-1', status: 'available', artifacts: [{ status: 'available' }] },
+        ],
+      });
+      expect(mockGetDiagnosticIncidentsByNodeId).toHaveBeenCalledWith(
+        expect.anything(),
+        'dead-node',
+        12
+      );
+    });
+
+    it('rejects node and incident limits above their contract maxima', async () => {
+      const nodes = await app.request('/api/admin/observability/nodes?limit=101', {}, createEnv());
+      const incidents = await app.request(
+        '/api/admin/observability/nodes/node-1/incidents?limit=51',
+        {},
+        createEnv()
+      );
+      expect(nodes.status).toBe(400);
+      expect(incidents.status).toBe(400);
+      expect(mockGetDiagnosticIncidentsByNodeId).not.toHaveBeenCalled();
     });
   });
 
@@ -618,6 +783,7 @@ describe('Admin Observability Routes', () => {
         search: 'timeout',
         limit: 50,
         cursor: 'page-2',
+        scriptName: 'sam-api-prod',
       });
 
       expect(mockQueryCloudflareLogs).toHaveBeenCalledWith(
@@ -629,8 +795,15 @@ describe('Admin Observability Routes', () => {
           search: 'timeout',
           limit: 50,
           cursor: 'page-2',
+          scriptName: 'sam-api-prod',
         })
       );
+    });
+
+    it('rejects script names outside the safe Worker-name pattern', async () => {
+      const response = await postLogs({ ...validBody, scriptName: 'bad/script/name' });
+      expect(response.status).toBe(400);
+      expect(mockQueryCloudflareLogs).not.toHaveBeenCalled();
     });
 
     it('should return 400 when CF credentials are not configured', async () => {

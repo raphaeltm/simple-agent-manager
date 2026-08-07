@@ -37,7 +37,7 @@ describe('stuck-tasks OBSERVABILITY_DATABASE recording (TDF-7)', () => {
   });
 
   it('records stuck task recovery in OBSERVABILITY_DATABASE', () => {
-    expect(stuckTasksSource).toContain('persistError(env.OBSERVABILITY_DATABASE');
+    expect(stuckTasksSource).toMatch(/persistError\(\s*env\.OBSERVABILITY_DATABASE/);
   });
 
   it('uses "warn" level for recovery events', () => {
@@ -55,7 +55,7 @@ describe('stuck-tasks OBSERVABILITY_DATABASE recording (TDF-7)', () => {
       startIdx,
       stuckTasksSource.indexOf('switch (task.status)', startIdx)
     );
-    expect(cleanupSection).toContain('persistError(env.OBSERVABILITY_DATABASE');
+    expect(cleanupSection).toMatch(/persistError\(\s*env\.OBSERVABILITY_DATABASE/);
     expect(cleanupSection).toContain("level: 'error'");
   });
 
@@ -63,7 +63,7 @@ describe('stuck-tasks OBSERVABILITY_DATABASE recording (TDF-7)', () => {
     const failureSection = stuckTasksSource.slice(
       stuckTasksSource.indexOf('// Record recovery failure')
     );
-    expect(failureSection).toContain('persistError(env.OBSERVABILITY_DATABASE');
+    expect(failureSection).toMatch(/persistError\(\s*env\.OBSERVABILITY_DATABASE/);
     expect(failureSection).toContain("level: 'error'");
   });
 

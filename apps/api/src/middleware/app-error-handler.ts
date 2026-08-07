@@ -87,7 +87,7 @@ export function handleAppError(err: Error, c: AppContext): Response {
 
   if (err instanceof AppError) {
     status = err.statusCode;
-    body = err.toJSON();
+    body = { ...err.toJSON() };
   } else if (err instanceof GcpApiError) {
     status = 502;
     body = {

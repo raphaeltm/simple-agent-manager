@@ -24,6 +24,12 @@ function errorApp(errorFactory: () => Error): Hono<{ Bindings: Env }> {
   app.get('/api/projects/:projectId/tasks/:taskId/sessions/:sessionId/fail', () => {
     throw errorFactory();
   });
+  app.get('/api/nodes/:id/fail', () => {
+    throw errorFactory();
+  });
+  app.get('/api/workspaces/:id/fail', () => {
+    throw errorFactory();
+  });
   return app;
 }
 
@@ -111,6 +117,36 @@ describe('global app.onError observability persistence', () => {
     expect(row!.message).toContain('[REDACTED]');
     expect(row!.stack).toContain('[REDACTED]');
     expect(JSON.stringify(row)).not.toContain(secret);
+  });
+
+  it('derives node and workspace correlation from conventional :id route params', async () => {
+    const pending: Promise<unknown>[] = [];
+    const app = errorApp(() => new Error('route exploded'));
+    const [nodeResponse, workspaceResponse] = await Promise.all([
+      app.fetch(
+        new Request('https://api.test.example.com/api/nodes/node-1/fail'),
+        env,
+        executionContext(pending)
+      ),
+      app.fetch(
+        new Request('https://api.test.example.com/api/workspaces/workspace-1/fail'),
+        env,
+        executionContext(pending)
+      ),
+    ]);
+    expect(nodeResponse.status).toBe(500);
+    expect(workspaceResponse.status).toBe(500);
+    await Promise.all(pending);
+
+    const rows = await env.OBSERVABILITY_DATABASE.prepare(
+      'SELECT node_id, workspace_id FROM platform_errors ORDER BY node_id DESC'
+    ).all<{ node_id: string | null; workspace_id: string | null }>();
+    expect(rows.results).toEqual(
+      expect.arrayContaining([
+        { node_id: 'node-1', workspace_id: null },
+        { node_id: null, workspace_id: 'workspace-1' },
+      ])
+    );
   });
 
   it('does not persist 4xx AppErrors or add a requestId to their response', async () => {

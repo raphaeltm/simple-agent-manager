@@ -301,6 +301,8 @@ export { NOTIFICATION_CHANNELS, NOTIFICATION_TYPES, NOTIFICATION_URGENCIES } fro
 // Admin Observability
 export type {
   AdminLogEntry,
+  AdminNodesResponse,
+  AdminNodeSummary,
   ErrorListResponse,
   ErrorTrendBucket,
   ErrorTrendResponse,

@@ -1,10 +1,11 @@
 import type {
+  AdminNodeSummary,
   PlatformErrorLevel,
   PlatformErrorSource,
   UserRole,
   UserStatus,
 } from '@simple-agent-manager/shared';
-import { desc, eq, inArray } from 'drizzle-orm';
+import { desc, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -41,6 +42,7 @@ import {
   getDiagnosticArtifactForDownload,
   getDiagnosticIncidentByErrorId,
   getDiagnosticIncidentsByErrorIds,
+  getDiagnosticIncidentsByNodeId,
 } from '../services/diagnostic-incidents';
 import { getRuntimeLimits } from '../services/limits';
 import {
@@ -288,6 +290,30 @@ adminRoutes.get('/tasks/recent-failures', async (c) => {
 
 const VALID_ERROR_SOURCES = new Set<string>(['client', 'vm-agent', 'api']);
 const VALID_ERROR_LEVELS = new Set<string>(['error', 'warn', 'info']);
+const DEFAULT_ADMIN_OBSERVABILITY_NODE_LIMIT = 50;
+const DEFAULT_ADMIN_OBSERVABILITY_NODE_MAX_LIMIT = 100;
+const DEFAULT_ADMIN_OBSERVABILITY_DESTROYED_NODE_RETENTION_HOURS = 24;
+const DEFAULT_ADMIN_OBSERVABILITY_NODE_INCIDENT_LIMIT = 50;
+const DEFAULT_ADMIN_OBSERVABILITY_NODE_INCIDENT_MAX_LIMIT = 50;
+
+function positiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function boundedLimit(
+  raw: string | undefined,
+  configuredDefault: number,
+  configuredMax: number,
+  label: string
+): number {
+  if (!raw) return Math.min(configuredDefault, configuredMax);
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > configuredMax) {
+    throw errors.badRequest(`${label} must be between 1 and ${configuredMax}`);
+  }
+  return parsed;
+}
 
 function parseErrorTimestamp(value: string | undefined, label: string): number | undefined {
   if (!value) return undefined;
@@ -370,6 +396,72 @@ adminRoutes.get('/observability/errors/:errorId/incident', async (c) => {
   const incident = await getDiagnosticIncidentByErrorId(c.env, c.req.param('errorId'));
   if (!incident) throw errors.notFound('Diagnostic incident');
   return c.json({ incident });
+});
+
+/** Bounded cross-tenant node health summaries for post-mortem observability. */
+adminRoutes.get('/observability/nodes', async (c) => {
+  const maxLimit = Math.min(
+    positiveInteger(
+      c.env.OBSERVABILITY_ADMIN_NODES_MAX_LIMIT,
+      DEFAULT_ADMIN_OBSERVABILITY_NODE_MAX_LIMIT
+    ),
+    DEFAULT_ADMIN_OBSERVABILITY_NODE_MAX_LIMIT
+  );
+  const defaultLimit = positiveInteger(
+    c.env.OBSERVABILITY_ADMIN_NODES_DEFAULT_LIMIT,
+    DEFAULT_ADMIN_OBSERVABILITY_NODE_LIMIT
+  );
+  const limit = boundedLimit(c.req.query('limit'), defaultLimit, maxLimit, 'limit');
+  const destroyedRetentionHours = positiveInteger(
+    c.env.OBSERVABILITY_DESTROYED_NODE_RETENTION_HOURS,
+    DEFAULT_ADMIN_OBSERVABILITY_DESTROYED_NODE_RETENTION_HOURS
+  );
+  const destroyedCutoff = new Date(
+    Date.now() - destroyedRetentionHours * 60 * 60 * 1000
+  ).toISOString();
+  const db = drizzle(c.env.DATABASE, { schema });
+  const rows = await db
+    .select({
+      id: schema.nodes.id,
+      name: schema.nodes.name,
+      status: schema.nodes.status,
+      healthStatus: schema.nodes.healthStatus,
+      lastHeartbeatAt: schema.nodes.lastHeartbeatAt,
+      provider: schema.nodes.cloudProvider,
+      nodeClass: schema.nodes.nodeClass,
+      vmAgentBuild: schema.nodes.agentVersion,
+      errorMessage: schema.nodes.errorMessage,
+      createdAt: schema.nodes.createdAt,
+    })
+    .from(schema.nodes)
+    .where(
+      sql`${schema.nodes.status} <> 'destroyed'
+          OR datetime(${schema.nodes.updatedAt}) >= datetime(${destroyedCutoff})`
+    )
+    .orderBy(
+      sql`CASE WHEN ${schema.nodes.lastHeartbeatAt} IS NULL THEN 1 ELSE 0 END`,
+      sql`datetime(${schema.nodes.lastHeartbeatAt}) DESC`
+    )
+    .limit(limit);
+  return c.json({ nodes: rows satisfies AdminNodeSummary[] });
+});
+
+/** Diagnostic evidence remains queryable after the node itself stops or is destroyed. */
+adminRoutes.get('/observability/nodes/:nodeId/incidents', async (c) => {
+  const maxLimit = Math.min(
+    positiveInteger(
+      c.env.OBSERVABILITY_NODE_INCIDENTS_MAX_LIMIT,
+      DEFAULT_ADMIN_OBSERVABILITY_NODE_INCIDENT_MAX_LIMIT
+    ),
+    DEFAULT_ADMIN_OBSERVABILITY_NODE_INCIDENT_MAX_LIMIT
+  );
+  const defaultLimit = positiveInteger(
+    c.env.OBSERVABILITY_NODE_INCIDENTS_DEFAULT_LIMIT,
+    DEFAULT_ADMIN_OBSERVABILITY_NODE_INCIDENT_LIMIT
+  );
+  const limit = boundedLimit(c.req.query('limit'), defaultLimit, maxLimit, 'limit');
+  const incidents = await getDiagnosticIncidentsByNodeId(c.env, c.req.param('nodeId'), limit);
+  return c.json({ incidents });
 });
 
 adminRoutes.get(
@@ -494,6 +586,7 @@ adminRoutes.post(
         limit: body.limit,
         cursor: body.cursor || undefined,
         queryId: body.queryId || undefined,
+        scriptName: body.scriptName || undefined,
       });
 
       return c.json(result);
