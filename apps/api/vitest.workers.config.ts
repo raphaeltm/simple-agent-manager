@@ -90,10 +90,6 @@ export default defineConfig({
           TASK_RUNNER: {
             className: 'TaskRunner',
           },
-          DIAGNOSIS_RUNNER: {
-            className: 'DiagnosisRunner',
-            useSQLite: true,
-          },
           NODE_LIFECYCLE: {
             className: 'NodeLifecycleTestDouble',
           },
