@@ -1,21 +1,33 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
+  DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT,
   type D1MigrationSafetyRunner,
   type D1TableCount,
   discoverProtectedTables,
   parseAllowlist,
+  parseChurningTableMaxDecreasePercent,
+  parseChurningTableSelectors,
   runSafeRemoteMigrations,
   verifyNoUnexpectedProtectedTableDecrease,
 } from '../deploy/d1-migration-safety';
 
 class FakeRunner implements D1MigrationSafetyRunner {
   public readonly commands: string[] = [];
+  private readonly migrationCountsByDb = new Map<string, number>();
 
   constructor(
     private readonly tablesByDb: Record<string, string[] | string[][]>,
-    private readonly countsByDbAndTable: Record<string, number[]>
-  ) {}
+    private readonly countsByDbAndTable: Record<string, number[]>,
+    private readonly pendingMigrationsByDb: Record<string, number> = {}
+  ) {
+    for (const [database, configuredTables] of Object.entries(tablesByDb)) {
+      const firstTables = Array.isArray(configuredTables[0])
+        ? (configuredTables[0] as string[])
+        : (configuredTables as string[]);
+      this.migrationCountsByDb.set(database, firstTables.includes('d1_migrations') ? 100 : 0);
+    }
+  }
 
   executeJson(command: string, args: string[]): unknown {
     this.commands.push([command, ...args].join(' '));
@@ -34,6 +46,10 @@ class FakeRunner implements D1MigrationSafetyRunner {
     if (!countMatch) throw new Error(`unexpected SQL: ${sql}`);
 
     const table = countMatch[1];
+    if (table === 'd1_migrations') {
+      return [{ results: [{ count: this.migrationCountsByDb.get(dbName) ?? 0 }] }];
+    }
+
     const key = `${dbName}:${table}`;
     const counts = this.countsByDbAndTable[key];
     if (!counts || counts.length === 0) throw new Error(`count failure for ${key}`);
@@ -42,6 +58,11 @@ class FakeRunner implements D1MigrationSafetyRunner {
 
   execute(command: string, args: string[]): void {
     this.commands.push([command, ...args].join(' '));
+    if (args.includes('migrations') && args.includes('apply')) {
+      const dbName = args[5];
+      const applied = this.pendingMigrationsByDb[dbName] ?? 1;
+      this.migrationCountsByDb.set(dbName, (this.migrationCountsByDb.get(dbName) ?? 0) + applied);
+    }
   }
 
   nowIso(): string {
@@ -75,7 +96,7 @@ describe('D1 migration safety gates', () => {
   });
 
   it('fails closed on protected-table count failures', () => {
-    const runner = new FakeRunner({ main: ['users'] }, {});
+    const runner = new FakeRunner({ main: ['d1_migrations', 'users'] }, {});
 
     expect(() =>
       runSafeRemoteMigrations({
@@ -132,7 +153,7 @@ describe('D1 migration safety gates', () => {
   });
 
   it('fails closed when a post-migration protected-table count cannot be read', () => {
-    const runner = new FakeRunner({ main: ['users'] }, { 'main:users': [3] });
+    const runner = new FakeRunner({ main: ['d1_migrations', 'users'] }, { 'main:users': [3] });
 
     expect(() =>
       runSafeRemoteMigrations({
@@ -150,6 +171,49 @@ describe('D1 migration safety gates', () => {
     expect(parseAllowlist(undefined)).toEqual([]);
     expect(() => parseAllowlist('{"database":"main"}')).toThrow(/must be a JSON array/);
     expect(() => parseAllowlist('{not-json')).toThrow();
+  });
+
+  it('validates configurable churning-table selectors and decrease thresholds', () => {
+    expect(parseChurningTableSelectors(undefined)).toContain(
+      'OBSERVABILITY_DATABASE.platform_errors'
+    );
+    expect(
+      parseChurningTableSelectors(' DATABASE.sessions,OBSERVABILITY_DATABASE.platform_errors ')
+    ).toEqual(['DATABASE.sessions', 'OBSERVABILITY_DATABASE.platform_errors']);
+    expect(() => parseChurningTableSelectors('DATABASE.users')).toThrow(/protected business table/);
+    expect(() => parseChurningTableSelectors('platform_errors')).toThrow(
+      /Expected <binding>\.<table>/
+    );
+
+    expect(parseChurningTableMaxDecreasePercent(undefined)).toBe(
+      DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT
+    );
+    expect(parseChurningTableMaxDecreasePercent('12.5')).toBe(12.5);
+    expect(() => parseChurningTableMaxDecreasePercent('-1')).toThrow(/between 0 and 100/);
+    expect(() => parseChurningTableMaxDecreasePercent('101')).toThrow(/between 0 and 100/);
+    expect(() => parseChurningTableMaxDecreasePercent('not-a-number')).toThrow(/between 0 and 100/);
+  });
+
+  it('blocks a churning-table decrease above the configured percentage limit', () => {
+    expect(() =>
+      verifyNoUnexpectedProtectedTableDecrease(
+        [count('obs', 'OBSERVABILITY_DATABASE', 'platform_errors', 10)],
+        [count('obs', 'OBSERVABILITY_DATABASE', 'platform_errors', 4)],
+        [],
+        ['OBSERVABILITY_DATABASE.platform_errors'],
+        50
+      )
+    ).toThrow(/60\.000% decrease exceeds 50%/);
+
+    expect(() =>
+      verifyNoUnexpectedProtectedTableDecrease(
+        [count('obs', 'OBSERVABILITY_DATABASE', 'platform_errors', 10)],
+        [count('obs', 'OBSERVABILITY_DATABASE', 'platform_errors', 5)],
+        [],
+        ['OBSERVABILITY_DATABASE.platform_errors'],
+        50
+      )
+    ).not.toThrow();
   });
 
   it('allows reviewed explicit row-count decrease allowlist entries', () => {
@@ -170,7 +234,10 @@ describe('D1 migration safety gates', () => {
   });
 
   it('rejects malformed or duplicate decrease allowlist entries before migrations run', () => {
-    const malformedRunner = new FakeRunner({ main: ['users'] }, { 'main:users': [4, 3] });
+    const malformedRunner = new FakeRunner(
+      { main: ['d1_migrations', 'users'] },
+      { 'main:users': [4, 3] }
+    );
 
     expect(() =>
       runSafeRemoteMigrations({
@@ -216,8 +283,8 @@ describe('D1 migration safety gates', () => {
   it('counts and verifies both main and observability databases', () => {
     const runner = new FakeRunner(
       {
-        main: ['users'],
-        obs: ['platform_errors'],
+        main: ['d1_migrations', 'users'],
+        obs: ['d1_migrations', 'platform_errors'],
       },
       {
         'main:users': [4, 4],
@@ -241,9 +308,94 @@ describe('D1 migration safety gates', () => {
     );
   });
 
+  it('does not block on a small churning-table decrease when no migrations were applied', () => {
+    const runner = new FakeRunner(
+      { obs: ['d1_migrations', 'platform_errors'] },
+      { 'obs:platform_errors': [6306, 6305] },
+      { obs: 0 }
+    );
+
+    expect(() =>
+      runSafeRemoteMigrations({
+        environment: 'staging',
+        databases: [{ binding: 'OBSERVABILITY_DATABASE', name: 'obs' }],
+        runner,
+      })
+    ).not.toThrow();
+  });
+
+  it('skips the post-migration comparison when the migration ledger does not advance', () => {
+    const runner = new FakeRunner(
+      { obs: ['d1_migrations', 'platform_errors'] },
+      { 'obs:platform_errors': [6306] },
+      { obs: 0 }
+    );
+
+    runSafeRemoteMigrations({
+      environment: 'staging',
+      databases: [{ binding: 'OBSERVABILITY_DATABASE', name: 'obs' }],
+      runner,
+    });
+
+    expect(
+      runner.commands.filter(
+        (command) => command.includes('COUNT(*)') && command.includes('platform_errors')
+      )
+    ).toHaveLength(1);
+  });
+
+  it('allows a small decrease in a churning table when a migration was applied', () => {
+    const runner = new FakeRunner(
+      { obs: ['d1_migrations', 'platform_errors'] },
+      { 'obs:platform_errors': [6306, 6305] }
+    );
+
+    expect(() =>
+      runSafeRemoteMigrations({
+        environment: 'production',
+        databases: [{ binding: 'OBSERVABILITY_DATABASE', name: 'obs' }],
+        runner,
+      })
+    ).not.toThrow();
+  });
+
+  it('blocks protected-business-table loss and prints recovery timestamp and commands', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+    const runner = new FakeRunner(
+      {
+        main: ['d1_migrations', 'users'],
+        obs: ['d1_migrations', 'platform_errors'],
+      },
+      {
+        'main:users': [2, 1],
+        'obs:platform_errors': [6306, 6305],
+      }
+    );
+
+    try {
+      expect(() =>
+        runSafeRemoteMigrations({
+          environment: 'production',
+          databases: [
+            { binding: 'DATABASE', name: 'main' },
+            { binding: 'OBSERVABILITY_DATABASE', name: 'obs' },
+          ],
+          runner,
+        })
+      ).toThrow(/DATABASE\.users: 2 -> 1/);
+
+      const recoveryOutput = errorSpy.mock.calls.flat().join('\n');
+      expect(recoveryOutput).toContain('Pre-migration timestamp: 2026-08-05T00:00:00Z');
+      expect(recoveryOutput).toContain('d1 time-travel restore main');
+      expect(recoveryOutput).toContain('d1 time-travel restore obs');
+    } finally {
+      errorSpy.mockRestore();
+    }
+  });
+
   it('orders backup/counts before migrations and post-count verification after migrations', () => {
     const runner = new FakeRunner(
-      { main: ['users'] },
+      { main: ['d1_migrations', 'users'] },
       {
         'main:users': [3, 3],
       }

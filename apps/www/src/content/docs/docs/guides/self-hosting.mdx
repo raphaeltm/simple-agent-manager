@@ -246,6 +246,8 @@ Before deploying the API Worker, the workflow reads its applied Durable Object m
 
 If migration state cannot be read or does not match the checked-in history, deployment stops before Wrangler runs rather than risking migration replay or namespace replacement.
 
+The workflow also records D1 row counts before migrations. It compares a database only when that database's D1 migration ledger advances, so ordinary traffic cannot fail a deploy when no migration ran. Business tables have zero decrease tolerance. Tables with automatic retention or expiry use a 50% default limit so small routine churn is accepted while a destructive wipe still blocks deployment. Self-hosters can tune the qualified table list with the `D1_MIGRATION_CHURNING_TABLES` repository variable and the limit with `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` (0–100).
+
 If deployment stops with a Durable Object migration-state error:
 
 - **Errors mentioning listing lag or a Worker "created moments ago" are transient.** The workflow already retries the state probe a few times (tune with the `DO_MIGRATION_STATE_PROBE_ATTEMPTS` and `DO_MIGRATION_STATE_PROBE_RETRY_DELAY_MS` GitHub repository variables); re-running the deployment is safe and resumes cleanly.

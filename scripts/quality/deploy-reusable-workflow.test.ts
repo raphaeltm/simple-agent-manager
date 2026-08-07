@@ -191,6 +191,12 @@ describe('deploy reusable workflow', () => {
     expect(block).toContain('--database=DATABASE:$DB_NAME');
     expect(block).toContain('--database=OBSERVABILITY_DATABASE:$OBS_DB_NAME');
     expect(block).toContain('CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}');
+    expect(block).toContain(
+      'D1_MIGRATION_CHURNING_TABLES: ${{ vars.D1_MIGRATION_CHURNING_TABLES }}'
+    );
+    expect(block).toContain(
+      'D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT: ${{ vars.D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT }}'
+    );
   });
 
   it('passes derived deployment identity through the shared Wrangler config sync env', () => {

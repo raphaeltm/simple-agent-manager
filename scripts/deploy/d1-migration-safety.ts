@@ -36,14 +36,42 @@ export interface SafeRemoteMigrationOptions {
   environment: string;
   databases: D1DatabaseTarget[];
   allowlist?: CountDecreaseAllowlistEntry[];
+  churningTableSelectors?: string[];
+  maxChurningTableDecreasePercent?: number;
   cwd?: string;
   runner: D1MigrationSafetyRunner;
 }
 
 const APPS_API_DIR = resolve(import.meta.dirname, '../../apps/api');
 const WRANGLER_COMMAND = 'pnpm';
+const D1_MIGRATIONS_TABLE = 'd1_migrations';
 
-const SYSTEM_TABLES = new Set(['_cf_KV', 'd1_migrations', 'sqlite_sequence']);
+const SYSTEM_TABLES = new Set(['_cf_KV', D1_MIGRATIONS_TABLE, 'sqlite_sequence']);
+
+export const DEFAULT_D1_MIGRATION_CHURNING_TABLES = [
+  'DATABASE.github_webhook_deliveries',
+  'DATABASE.registry_credential_rate_limits',
+  'DATABASE.sessions',
+  'DATABASE.trial_waitlist',
+  'DATABASE.trigger_executions',
+  'DATABASE.verifications',
+  'DATABASE.webhook_deliveries',
+  'OBSERVABILITY_DATABASE.platform_errors',
+] as const;
+export const DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT = 50;
+
+const ALWAYS_PROTECTED_BUSINESS_TABLES = new Set([
+  'DATABASE.cc_credentials',
+  'DATABASE.credentials',
+  'DATABASE.deployment_secrets',
+  'DATABASE.nodes',
+  'DATABASE.platform_credentials',
+  'DATABASE.project_deployment_credentials',
+  'DATABASE.projects',
+  'DATABASE.tasks',
+  'DATABASE.users',
+  'DATABASE.workspaces',
+]);
 
 export class MigrationSafetyError extends Error {}
 
@@ -116,6 +144,61 @@ function parseCountValue(value: unknown, db: D1DatabaseTarget, table: string): n
   }
 
   return count;
+}
+
+function databaseKey(db: D1DatabaseTarget): string {
+  return `${db.binding}:${db.name}`;
+}
+
+function tableSelector(entry: Pick<D1TableCount, 'binding' | 'table'>): string {
+  return `${entry.binding}.${entry.table}`;
+}
+
+function validateChurningTableSelectors(selectors: readonly string[]): string[] {
+  const normalized = selectors.map((selector) => selector.trim());
+  const unique = new Set<string>();
+
+  for (const selector of normalized) {
+    if (!selector || !selector.includes('.')) {
+      throw new MigrationSafetyError(
+        `Invalid D1 churning-table selector "${selector}". Expected <binding>.<table>`
+      );
+    }
+    if (unique.has(selector)) {
+      throw new MigrationSafetyError(`Duplicate D1 churning-table selector: ${selector}`);
+    }
+    if (ALWAYS_PROTECTED_BUSINESS_TABLES.has(selector)) {
+      throw new MigrationSafetyError(
+        `${selector} is a protected business table and cannot receive a row-count decrease tolerance`
+      );
+    }
+    unique.add(selector);
+  }
+
+  return normalized;
+}
+
+export function parseChurningTableSelectors(value: string | undefined): string[] {
+  if (!value?.trim()) {
+    return [...DEFAULT_D1_MIGRATION_CHURNING_TABLES];
+  }
+  return validateChurningTableSelectors(value.split(','));
+}
+
+function validateChurningTableMaxDecreasePercent(value: number): number {
+  if (!Number.isFinite(value) || value < 0 || value > 100) {
+    throw new MigrationSafetyError(
+      'D1 churning-table maximum decrease percent must be a number between 0 and 100'
+    );
+  }
+  return value;
+}
+
+export function parseChurningTableMaxDecreasePercent(value: string | undefined): number {
+  if (!value?.trim()) {
+    return DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT;
+  }
+  return validateChurningTableMaxDecreasePercent(Number(value));
 }
 
 export function normalizeDiscoveredTables(rows: Record<string, unknown>[]): string[] {
@@ -208,6 +291,39 @@ export function countProtectedTables(
   });
 }
 
+function countAppliedMigrationRecords(
+  runner: D1MigrationSafetyRunner,
+  environment: string,
+  db: D1DatabaseTarget,
+  cwd = APPS_API_DIR
+): number {
+  let rows: Record<string, unknown>[];
+  try {
+    rows = parseD1Rows(
+      runner.executeJson(
+        WRANGLER_COMMAND,
+        wranglerArgs(
+          environment,
+          db.name,
+          `SELECT COUNT(*) as count FROM ${quoteSqlIdentifier(D1_MIGRATIONS_TABLE)}`
+        ),
+        { cwd }
+      )
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new MigrationSafetyError(`Failed to read ${db.binding} migration ledger: ${message}`);
+  }
+
+  if (rows.length !== 1 || !('count' in rows[0])) {
+    throw new MigrationSafetyError(
+      `Failed to read ${db.binding} migration ledger: missing count row`
+    );
+  }
+
+  return parseCountValue(rows[0].count, db, D1_MIGRATIONS_TABLE);
+}
+
 export function validateCountDecreaseAllowlist(
   allowlist: CountDecreaseAllowlistEntry[]
 ): CountDecreaseAllowlistEntry[] {
@@ -249,7 +365,9 @@ export function validateCountDecreaseAllowlist(
 export function verifyNoUnexpectedProtectedTableDecrease(
   before: D1TableCount[],
   after: D1TableCount[],
-  allowlist: CountDecreaseAllowlistEntry[] = []
+  allowlist: CountDecreaseAllowlistEntry[] = [],
+  churningTableSelectors: readonly string[] = DEFAULT_D1_MIGRATION_CHURNING_TABLES,
+  maxChurningTableDecreasePercent = DEFAULT_D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT
 ): void {
   const afterByKey = new Map(after.map((entry) => [`${entry.database}:${entry.table}`, entry]));
   const allowed = new Map(
@@ -257,6 +375,10 @@ export function verifyNoUnexpectedProtectedTableDecrease(
       `${entry.database}:${entry.table}`,
       entry,
     ])
+  );
+  const churningTables = new Set(validateChurningTableSelectors(churningTableSelectors));
+  const churningDecreaseLimit = validateChurningTableMaxDecreasePercent(
+    maxChurningTableDecreasePercent
   );
   const failures: string[] = [];
 
@@ -270,8 +392,22 @@ export function verifyNoUnexpectedProtectedTableDecrease(
 
     if (post.count < pre.count) {
       const entry = allowed.get(key);
-      if (!entry?.reviewedBy || !entry.reason) {
-        failures.push(`${pre.binding}.${pre.table}: ${pre.count} -> ${post.count}`);
+      if (entry?.reviewedBy && entry.reason) {
+        continue;
+      }
+
+      const selector = tableSelector(pre);
+      const decreasePercent = ((pre.count - post.count) / pre.count) * 100;
+      if (churningTables.has(selector) && decreasePercent <= churningDecreaseLimit) {
+        continue;
+      }
+
+      if (churningTables.has(selector)) {
+        failures.push(
+          `${selector}: ${pre.count} -> ${post.count} (${decreasePercent.toFixed(3)}% decrease exceeds ${churningDecreaseLimit}% churning-table limit)`
+        );
+      } else {
+        failures.push(`${selector}: ${pre.count} -> ${post.count}`);
       }
     }
   }
@@ -301,6 +437,17 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
   const backupTimestamp = options.runner.nowIso();
   const before: D1TableCount[] = [];
   const allowlist = validateCountDecreaseAllowlist(options.allowlist ?? []);
+  const churningTableSelectors =
+    options.churningTableSelectors === undefined
+      ? parseChurningTableSelectors(process.env.D1_MIGRATION_CHURNING_TABLES)
+      : validateChurningTableSelectors(options.churningTableSelectors);
+  const maxChurningTableDecreasePercent =
+    options.maxChurningTableDecreasePercent === undefined
+      ? parseChurningTableMaxDecreasePercent(
+          process.env.D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT
+        )
+      : validateChurningTableMaxDecreasePercent(options.maxChurningTableDecreasePercent);
+  const migrationCountsBefore = new Map<string, number>();
 
   console.log('Recording D1 time-travel recovery timestamp before migrations...');
   console.log(`Pre-migration timestamp: ${backupTimestamp}`);
@@ -310,11 +457,19 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
       const allTables = discoverDatabaseTableNames(options.runner, options.environment, db, cwd);
       const tables = normalizeDiscoveredTables(allTables.map((name) => ({ name })));
 
-      if (tables.length === 0 && allTables.includes('d1_migrations')) {
+      const hasMigrationLedger = allTables.includes(D1_MIGRATIONS_TABLE);
+      if (tables.length === 0 && hasMigrationLedger) {
         throw new MigrationSafetyError(
           `No protected tables discovered for initialized ${db.binding} (${db.name}); refusing to treat an upgrade as a clean install`
         );
       }
+
+      migrationCountsBefore.set(
+        databaseKey(db),
+        hasMigrationLedger
+          ? countAppliedMigrationRecords(options.runner, options.environment, db, cwd)
+          : 0
+      );
 
       if (tables.length === 0) {
         console.log(
@@ -331,13 +486,64 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
     }
 
     const after: D1TableCount[] = [];
+    const databasesWithAppliedMigrations = new Set<string>();
     for (const db of options.databases) {
-      const tables = discoverProtectedTables(options.runner, options.environment, db, cwd);
+      const allTables = discoverDatabaseTableNames(options.runner, options.environment, db, cwd);
+      if (!allTables.includes(D1_MIGRATIONS_TABLE)) {
+        throw new MigrationSafetyError(
+          `Migration ledger missing after migrations for ${db.binding} (${db.name})`
+        );
+      }
+
+      const migrationsBefore = migrationCountsBefore.get(databaseKey(db)) ?? 0;
+      const migrationsAfter = countAppliedMigrationRecords(
+        options.runner,
+        options.environment,
+        db,
+        cwd
+      );
+      if (migrationsAfter < migrationsBefore) {
+        throw new MigrationSafetyError(
+          `${db.binding} migration ledger decreased: ${migrationsBefore} -> ${migrationsAfter}`
+        );
+      }
+      if (migrationsAfter === migrationsBefore) {
+        console.log(
+          `No migrations applied to ${db.binding} (${db.name}); skipping row-count comparison`
+        );
+        continue;
+      }
+
+      const appliedCount = migrationsAfter - migrationsBefore;
+      console.log(`Detected ${appliedCount} migration(s) applied to ${db.binding} (${db.name})`);
+      databasesWithAppliedMigrations.add(databaseKey(db));
+      const tables = normalizeDiscoveredTables(allTables.map((name) => ({ name })));
+      if (tables.length === 0) {
+        throw new MigrationSafetyError(
+          `No protected tables discovered for ${db.binding} (${db.name}); refusing to migrate`
+        );
+      }
       after.push(...countProtectedTables(options.runner, options.environment, db, tables, cwd));
     }
 
-    verifyNoUnexpectedProtectedTableDecrease(before, after, allowlist);
-    console.log('Post-migration data integrity check PASSED. No protected table decreases.');
+    if (databasesWithAppliedMigrations.size === 0) {
+      console.log(
+        'Post-migration data integrity check SKIPPED. No migrations were applied to any database.'
+      );
+      return backupTimestamp;
+    }
+
+    const beforeForMigratedDatabases = before.filter((entry) =>
+      databasesWithAppliedMigrations.has(`${entry.binding}:${entry.database}`)
+    );
+    verifyNoUnexpectedProtectedTableDecrease(
+      beforeForMigratedDatabases,
+      after,
+      allowlist,
+      churningTableSelectors,
+      maxChurningTableDecreasePercent
+    );
+    console.log('Post-migration data integrity check PASSED. No unexpected table decreases.');
     return backupTimestamp;
   } catch (error) {
     console.error('POST-MIGRATION DATA INTEGRITY CHECK FAILED — DEPLOY BLOCKED');
