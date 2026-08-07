@@ -1,9 +1,9 @@
-import { Body,Button, Card, Spinner } from '@simple-agent-manager/ui';
-import { type FC, useCallback,useState } from 'react';
+import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
+import { type FC, useCallback, useState } from 'react';
 
-import { type LogLevel, type LogTimeRange,useAdminLogQuery } from '../../hooks/useAdminLogQuery';
+import { type LogLevel, type LogTimeRange, useAdminLogQuery } from '../../hooks/useAdminLogQuery';
 import { CopyButton } from '../shared/log';
-import { formatLogEntries,LEVEL_COLORS, LEVEL_TINTS, LogEntryRow } from './LogEntryRow';
+import { formatLogEntries, LEVEL_COLORS, LEVEL_TINTS, LogEntryRow } from './LogEntryRow';
 
 const LEVEL_OPTIONS: { value: LogLevel; label: string }[] = [
   { value: 'error', label: 'Error' },
@@ -30,30 +30,43 @@ export const LogViewer: FC = () => {
     setLevels,
     setSearch,
     setTimeRange,
+    setScriptName,
     loadMore,
     refresh,
+    applyFilters,
   } = useAdminLogQuery();
 
-  const [searchInput, setSearchInput] = useState('');
+  const [searchInput, setSearchInput] = useState(filter.search);
+  const [scriptNameInput, setScriptNameInput] = useState(filter.scriptName);
+
+  const handleApply = useCallback(() => {
+    setSearch(searchInput);
+    setScriptName(scriptNameInput);
+    applyFilters();
+  }, [searchInput, scriptNameInput, setSearch, setScriptName, applyFilters]);
 
   const handleSearchSubmit = useCallback(() => {
     setSearch(searchInput);
-  }, [searchInput, setSearch]);
+    applyFilters();
+  }, [searchInput, setSearch, applyFilters]);
 
-  const handleLevelToggle = useCallback((level: LogLevel) => {
-    setLevels(
-      filter.levels.includes(level)
-        ? filter.levels.filter(l => l !== level)
-        : [...filter.levels, level]
-    );
-  }, [filter.levels, setLevels]);
+  const handleLevelToggle = useCallback(
+    (level: LogLevel) => {
+      setLevels(
+        filter.levels.includes(level)
+          ? filter.levels.filter((l) => l !== level)
+          : [...filter.levels, level],
+      );
+    },
+    [filter.levels, setLevels],
+  );
 
   const getCopyAllText = useCallback(() => formatLogEntries(logs), [logs]);
 
   return (
     <div>
       {error && (
-        <div className="p-3 mb-4 rounded-sm bg-danger-tint text-danger-fg text-sm flex justify-between items-center">
+        <div className="mb-4 flex items-center justify-between rounded-sm bg-danger-tint p-3 text-sm text-danger-fg">
           <span>{error}</span>
           <Button size="sm" variant="ghost" onClick={refresh}>
             Retry
@@ -63,26 +76,26 @@ export const LogViewer: FC = () => {
 
       <Card>
         {/* Filters */}
-        <div className="px-4 py-3 border-b border-border-default flex flex-wrap gap-2 items-center">
-          {/* Time range */}
+        <div className="flex flex-wrap items-center gap-2 border-b border-border-default px-4 py-3">
           <select
             value={filter.timeRange}
             onChange={(e) => setTimeRange(e.target.value as LogTimeRange)}
             aria-label="Time range"
-            className="px-2 py-1 rounded-sm text-fg-primary text-sm"
+            className="rounded-sm bg-surface-secondary border border-border-default px-2 py-1 text-sm text-fg-primary"
           >
-            {TIME_RANGE_OPTIONS.map(opt => (
-              <option key={opt.value} value={opt.value}>{opt.label}</option>
+            {TIME_RANGE_OPTIONS.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
             ))}
           </select>
 
-          {/* Level toggles */}
           <div className="flex gap-1">
-            {LEVEL_OPTIONS.map(opt => (
+            {LEVEL_OPTIONS.map((opt) => (
               <button
                 key={opt.value}
                 onClick={() => handleLevelToggle(opt.value)}
-                className="rounded-sm border border-border-default text-xs cursor-pointer"
+                className="cursor-pointer rounded-sm border border-border-default text-xs"
                 style={{
                   padding: '2px 8px',
                   backgroundColor: filter.levels.includes(opt.value)
@@ -98,8 +111,16 @@ export const LogViewer: FC = () => {
             ))}
           </div>
 
-          {/* Search */}
-          <div className="flex gap-1 flex-1 min-w-0">
+          <input
+            type="text"
+            placeholder="Script name"
+            value={scriptNameInput}
+            onChange={(e) => setScriptNameInput(e.target.value.trim())}
+            aria-label="Worker script name"
+            className="w-32 rounded-sm bg-surface-secondary border border-border-default px-2 py-1 text-sm text-fg-primary"
+          />
+
+          <div className="flex min-w-0 flex-1 gap-1">
             <input
               type="text"
               placeholder="Search logs..."
@@ -107,10 +128,10 @@ export const LogViewer: FC = () => {
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearchSubmit()}
               aria-label="Search logs"
-              className="flex-1 px-2 py-1 rounded-sm text-fg-primary text-sm"
+              className="min-w-0 flex-1 rounded-sm bg-surface-secondary border border-border-default px-2 py-1 text-sm text-fg-primary"
             />
-            <Button size="sm" variant="ghost" onClick={handleSearchSubmit}>
-              Search
+            <Button size="sm" variant="secondary" onClick={handleApply}>
+              Apply
             </Button>
           </div>
 
@@ -118,7 +139,6 @@ export const LogViewer: FC = () => {
             Refresh
           </Button>
 
-          {/* Copy All */}
           {logs.length > 0 && (
             <CopyButton
               getText={getCopyAllText}

@@ -1,5 +1,5 @@
 import type { AdminLogEntry } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useRef,useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { queryAdminLogs } from '../lib/api';
 
@@ -10,6 +10,7 @@ export interface LogFilterState {
   levels: LogLevel[];
   search: string;
   timeRange: LogTimeRange;
+  scriptName: string;
 }
 
 export interface UseAdminLogQueryReturn {
@@ -21,8 +22,10 @@ export interface UseAdminLogQueryReturn {
   setLevels: (levels: LogLevel[]) => void;
   setSearch: (search: string) => void;
   setTimeRange: (range: LogTimeRange) => void;
+  setScriptName: (name: string) => void;
   loadMore: () => void;
   refresh: () => void;
+  applyFilters: () => void;
 }
 
 const TIME_RANGE_MS: Record<LogTimeRange, number> = {
@@ -41,15 +44,19 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
     levels: [],
     search: '',
     timeRange: '1h',
+    scriptName: '',
   });
 
   const cursorRef = useRef<string | null>(null);
   const queryIdRef = useRef<string | undefined>(undefined);
   const mountedRef = useRef(true);
+  const initialFetchDone = useRef(false);
 
   useEffect(() => {
     mountedRef.current = true;
-    return () => { mountedRef.current = false; };
+    return () => {
+      mountedRef.current = false;
+    };
   }, []);
 
   const buildTimeRange = useCallback(() => {
@@ -61,60 +68,81 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
     };
   }, [filter.timeRange]);
 
-  const fetchLogs = useCallback(async (append = false) => {
-    try {
-      setLoading(true);
-      setError(null);
+  const fetchLogs = useCallback(
+    async (append = false) => {
+      try {
+        setLoading(true);
+        setError(null);
 
-      const result = await queryAdminLogs({
-        timeRange: buildTimeRange(),
-        levels: filter.levels.length > 0 ? filter.levels : undefined,
-        search: filter.search || undefined,
-        limit: 100,
-        cursor: append ? cursorRef.current : undefined,
-        queryId: append ? queryIdRef.current : undefined,
-      });
+        const params: Parameters<typeof queryAdminLogs>[0] = {
+          timeRange: buildTimeRange(),
+          levels: filter.levels.length > 0 ? filter.levels : undefined,
+          search: filter.search || undefined,
+          limit: 100,
+          cursor: append ? cursorRef.current : undefined,
+          queryId: append ? queryIdRef.current : undefined,
+        };
+        if (filter.scriptName) {
+          (params as unknown as Record<string, unknown>).scriptName = filter.scriptName;
+        }
 
-      if (!mountedRef.current) return;
+        const result = await queryAdminLogs(params);
 
-      if (append) {
-        setLogs(prev => [...prev, ...result.logs]);
-      } else {
-        setLogs(result.logs);
+        if (!mountedRef.current) return;
+
+        if (append) {
+          setLogs((prev) => [...prev, ...result.logs]);
+        } else {
+          setLogs(result.logs);
+        }
+
+        cursorRef.current = result.cursor;
+        queryIdRef.current = result.queryId;
+        setHasMore(result.hasMore);
+      } catch (err) {
+        if (mountedRef.current) {
+          setError(err instanceof Error ? err.message : 'Failed to query logs');
+        }
+      } finally {
+        if (mountedRef.current) {
+          setLoading(false);
+        }
       }
+    },
+    [buildTimeRange, filter.levels, filter.search, filter.scriptName],
+  );
 
-      cursorRef.current = result.cursor;
-      queryIdRef.current = result.queryId;
-      setHasMore(result.hasMore);
-    } catch (err) {
-      if (mountedRef.current) {
-        setError(err instanceof Error ? err.message : 'Failed to query logs');
-      }
-    } finally {
-      if (mountedRef.current) {
-        setLoading(false);
-      }
-    }
-  }, [buildTimeRange, filter.levels, filter.search]);
-
-  // Don't auto-fetch on mount — user triggers query manually or we fetch once
+  // Only auto-fetch once on mount
   useEffect(() => {
+    if (!initialFetchDone.current) {
+      initialFetchDone.current = true;
+      cursorRef.current = null;
+      queryIdRef.current = undefined;
+      fetchLogs(false);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const setLevels = useCallback((levels: LogLevel[]) => {
+    setFilter((prev) => ({ ...prev, levels }));
+  }, []);
+
+  const setSearch = useCallback((search: string) => {
+    setFilter((prev) => ({ ...prev, search }));
+  }, []);
+
+  const setTimeRange = useCallback((timeRange: LogTimeRange) => {
+    setFilter((prev) => ({ ...prev, timeRange }));
+  }, []);
+
+  const setScriptName = useCallback((scriptName: string) => {
+    setFilter((prev) => ({ ...prev, scriptName }));
+  }, []);
+
+  const applyFilters = useCallback(() => {
     cursorRef.current = null;
     queryIdRef.current = undefined;
     fetchLogs(false);
   }, [fetchLogs]);
-
-  const setLevels = useCallback((levels: LogLevel[]) => {
-    setFilter(prev => ({ ...prev, levels }));
-  }, []);
-
-  const setSearch = useCallback((search: string) => {
-    setFilter(prev => ({ ...prev, search }));
-  }, []);
-
-  const setTimeRange = useCallback((timeRange: LogTimeRange) => {
-    setFilter(prev => ({ ...prev, timeRange }));
-  }, []);
 
   const loadMore = useCallback(() => {
     if (hasMore && !loading) {
@@ -137,7 +165,9 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
     setLevels,
     setSearch,
     setTimeRange,
+    setScriptName,
     loadMore,
     refresh,
+    applyFilters,
   };
 }
