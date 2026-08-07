@@ -1,7 +1,14 @@
 import { act, renderHook, waitFor } from '@testing-library/react';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import type { ReactNode } from 'react';
+import { createElement } from 'react';
+import { MemoryRouter } from 'react-router';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useAdminErrors } from '../../../src/hooks/useAdminErrors';
+
+// The hook syncs filters to URL params, so it needs a router context.
+const wrapper = ({ children }: { children: ReactNode }) =>
+  createElement(MemoryRouter, null, children);
 
 // Mock the API
 const mockFetchAdminErrors = vi.fn();
@@ -22,7 +29,7 @@ describe('useAdminErrors', () => {
   });
 
   it('should start in loading state', () => {
-    const { result } = renderHook(() => useAdminErrors());
+    const { result } = renderHook(() => useAdminErrors(), { wrapper });
     expect(result.current.loading).toBe(true);
   });
 
@@ -37,7 +44,7 @@ describe('useAdminErrors', () => {
       total: 1,
     });
 
-    const { result } = renderHook(() => useAdminErrors());
+    const { result } = renderHook(() => useAdminErrors(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -49,17 +56,22 @@ describe('useAdminErrors', () => {
   });
 
   it('should have default filter state', () => {
-    const { result } = renderHook(() => useAdminErrors());
+    const { result } = renderHook(() => useAdminErrors(), { wrapper });
     expect(result.current.filter).toEqual({
       source: 'all',
       level: 'all',
       search: '',
       timeRange: '24h',
+      nodeId: '',
+      workspaceId: '',
+      taskId: '',
+      sessionId: '',
+      userId: '',
     });
   });
 
   it('should update source filter', async () => {
-    const { result } = renderHook(() => useAdminErrors());
+    const { result } = renderHook(() => useAdminErrors(), { wrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -71,7 +83,7 @@ describe('useAdminErrors', () => {
   });
 
   it('should update level filter', async () => {
-    const { result } = renderHook(() => useAdminErrors());
+    const { result } = renderHook(() => useAdminErrors(), { wrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -83,7 +95,7 @@ describe('useAdminErrors', () => {
   });
 
   it('should update search filter', async () => {
-    const { result } = renderHook(() => useAdminErrors());
+    const { result } = renderHook(() => useAdminErrors(), { wrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -95,7 +107,7 @@ describe('useAdminErrors', () => {
   });
 
   it('should update time range filter', async () => {
-    const { result } = renderHook(() => useAdminErrors());
+    const { result } = renderHook(() => useAdminErrors(), { wrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -109,7 +121,7 @@ describe('useAdminErrors', () => {
   it('should handle API errors', async () => {
     mockFetchAdminErrors.mockRejectedValue(new Error('Network failure'));
 
-    const { result } = renderHook(() => useAdminErrors());
+    const { result } = renderHook(() => useAdminErrors(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -120,7 +132,7 @@ describe('useAdminErrors', () => {
   });
 
   it('should pass filter params to fetchAdminErrors', async () => {
-    const { result } = renderHook(() => useAdminErrors());
+    const { result } = renderHook(() => useAdminErrors(), { wrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -139,7 +151,7 @@ describe('useAdminErrors', () => {
       total: 2,
     });
 
-    const { result } = renderHook(() => useAdminErrors());
+    const { result } = renderHook(() => useAdminErrors(), { wrapper });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -174,7 +186,7 @@ describe('useAdminErrors', () => {
       total: 0,
     });
 
-    const { result } = renderHook(() => useAdminErrors());
+    const { result } = renderHook(() => useAdminErrors(), { wrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -191,7 +203,7 @@ describe('useAdminErrors', () => {
   });
 
   it('should refresh by re-fetching without cursor', async () => {
-    const { result } = renderHook(() => useAdminErrors());
+    const { result } = renderHook(() => useAdminErrors(), { wrapper });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
