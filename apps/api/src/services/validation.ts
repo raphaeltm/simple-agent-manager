@@ -11,6 +11,7 @@ import { fetchWithTimeout } from './fetch-timeout';
 
 const ANTHROPIC_API_KEY_PREFIX = 'sk-ant-api';
 const CLAUDE_OAUTH_TOKEN_PREFIX = 'sk-ant-oat';
+const MAX_CLAUDE_OAUTH_TOKEN_LENGTH = 8192;
 
 /**
  * Result from OpenAI Codex auth.json validation, including optional metadata
@@ -300,7 +301,7 @@ export async function validateUpCloudCredentialWithProvider(
 
 export async function validateDigitalOceanCredentialWithProvider(
   token: string,
-  options?: CredentialValidationOptions,
+  options?: CredentialValidationOptions
 ): Promise<CredentialValidationStatus> {
   return runProviderCheck(
     {
@@ -309,7 +310,7 @@ export async function validateDigitalOceanCredentialWithProvider(
       init: { headers: { Authorization: `Bearer ${token}` } },
     },
     'DigitalOcean credential validated.',
-    options,
+    options
   );
 }
 
@@ -452,6 +453,18 @@ export class CredentialValidator {
         return {
           valid: false,
           error: 'Claude OAuth token should start with "sk-ant-oat".',
+        };
+      }
+      if (agentType === 'claude-code' && credential.length > MAX_CLAUDE_OAUTH_TOKEN_LENGTH) {
+        return {
+          valid: false,
+          error: 'Claude OAuth token is too long.',
+        };
+      }
+      if (agentType === 'claude-code' && !/^[A-Za-z0-9._-]+$/.test(credential)) {
+        return {
+          valid: false,
+          error: 'Claude OAuth token contains invalid characters.',
         };
       }
     }

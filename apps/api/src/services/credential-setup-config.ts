@@ -62,6 +62,7 @@ export const ACTIVE_SETUP_STATUSES = [
   'admitting',
   'provisioning',
   'waiting_for_user',
+  'exchanging',
   'capturing',
   'saving',
 ] as const;

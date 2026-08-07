@@ -97,6 +97,9 @@ type DeviceAuthDetailsRow = {
 /** Relative paths of captured credential files inside the per-session setup home. */
 const CODEX_AUTH_FILE = 'auth.json';
 const CLAUDE_OAUTH_TOKEN_FILE = 'claude-oauth-token.txt';
+const CLAUDE_VERIFICATION_CODE_FILE = 'verification-code.txt';
+const MAX_CLAUDE_VERIFICATION_CODE_LENGTH = 1024;
+const CLAUDE_VERIFICATION_CODE_PATTERN = /^[A-Za-z0-9._~#-]+$/;
 const DEVICE_AUTH_STATE_FILE = 'device-auth-state.json';
 
 function setupDisplayName(agentType: string): string {
@@ -116,6 +119,28 @@ interface DeviceAuthState {
   verificationUrl?: string;
   userCode?: string;
   error?: string | null;
+  /** Optional machine-readable failure class from the driver (e.g. `exchange_timeout`). */
+  code?: string;
+  /** Optional short diagnostic extracted from the provider CLI's error screen. */
+  detail?: string | null;
+}
+
+/**
+ * The driver state file is written inside the sandbox, so treat its diagnostic
+ * text as untrusted: printable ASCII only, secrets redacted, hard length cap.
+ * The driver's free-form `error` field is never surfaced — only this bounded
+ * detail — mirroring the sanitized-failure posture of the existing mapping.
+ */
+const MAX_DRIVER_DETAIL_LENGTH = 160;
+function sanitizeDriverDetail(detail: string | null | undefined): string | null {
+  if (typeof detail !== 'string') return null;
+  const cleaned = detail
+    .replace(/sk-ant[A-Za-z0-9._-]*/gi, '[redacted]')
+    .replace(/[^\x20-\x7e]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, MAX_DRIVER_DETAIL_LENGTH);
+  return cleaned.length > 0 ? cleaned : null;
 }
 
 export class CredentialSetupSession extends DurableObject<Env> {
@@ -200,7 +225,10 @@ export class CredentialSetupSession extends DurableObject<Env> {
   getState(): SetupSessionStateResult | null {
     const row = this.readRow();
     if (!row) return null;
-    const deviceAuth = row.status === 'waiting_for_user' ? this.readDeviceAuthDetails() : null;
+    const deviceAuth =
+      row.status === 'waiting_for_user' || row.status === 'exchanging'
+        ? this.readDeviceAuthDetails()
+        : null;
     return {
       id: row.id,
       status: row.status as SetupSessionStatus,
@@ -255,6 +283,38 @@ export class CredentialSetupSession extends DurableObject<Env> {
     };
   }
 
+  /** Forward the browser-displayed short-lived code to the sandboxed Claude CLI. */
+  async submitVerificationCode(code: string): Promise<SetupSessionStateResult> {
+    const row = this.readRow();
+    if (!row) throw new Error('Setup session not found');
+    if (row.agent_type !== 'claude-code') {
+      throw new Error('Verification code submission is only supported for Claude Code setup');
+    }
+    if (row.status !== 'waiting_for_user') {
+      throw new Error('Claude Code setup is not waiting for a verification code');
+    }
+
+    const normalizedCode = code.trim().replace(/\s+/g, '');
+    if (
+      normalizedCode.length === 0 ||
+      normalizedCode.length > MAX_CLAUDE_VERIFICATION_CODE_LENGTH ||
+      !CLAUDE_VERIFICATION_CODE_PATTERN.test(normalizedCode)
+    ) {
+      throw new Error('Invalid Claude verification code');
+    }
+
+    const sandbox = await getSandboxInstance(this.env, row.id);
+    await sandbox.writeFile(`${row.codex_home}/${CLAUDE_VERIFICATION_CODE_FILE}`, normalizedCode);
+    const current = this.readRow();
+    if (!current || current.status !== 'waiting_for_user') {
+      throw new Error('Claude Code setup is no longer waiting for a verification code');
+    }
+    this.setStatus(row.id, 'exchanging');
+    await this.updateD1Status(row.id, 'exchanging');
+    await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+    return this.getState() ?? this.terminalState(row, 'exchanging');
+  }
+
   /**
    * Alarm loop: provisions on the first tick, then polls for the captured
    * auth.json, and enforces the TTL. Every branch either reschedules the alarm
@@ -285,7 +345,47 @@ export class CredentialSetupSession extends DurableObject<Env> {
         await this.pollDeviceAuth(row);
         return;
       }
-      // waiting_for_user | capturing | saving — poll for the credential file.
+      if (row.status === 'saving') {
+        await this.ctx.storage.setAlarm(Date.now() + row.capture_poll_ms);
+        return;
+      }
+      // waiting_for_user | exchanging | capturing — observe driver failure and capture output.
+      const driverState = await this.readDeviceAuthState(row);
+      if (driverState?.status === 'failed') {
+        let errorCode = 'setup_failed';
+        let errorMessage = 'Claude Code could not complete sign-in';
+        if (row.status === 'exchanging') {
+          switch (driverState.code) {
+            case 'exchange_timeout':
+              errorCode = 'exchange_timeout';
+              errorMessage =
+                'Claude sign-in did not complete in time. Start again and paste a fresh code.';
+              break;
+            case 'code_incomplete':
+              errorCode = 'code_incomplete';
+              errorMessage =
+                'The pasted code was incomplete. Copy the entire code Claude shows — it has a # in the middle — then start again.';
+              break;
+            case 'exchange_network_error':
+              errorCode = 'exchange_network_error';
+              errorMessage =
+                'The sign-in sandbox hit a network error talking to Claude. Start again in a moment.';
+              break;
+            default:
+              errorCode = 'code_rejected';
+              errorMessage =
+                'Claude rejected the verification code. Start again and use a fresh code.';
+          }
+        }
+        const detail = sanitizeDriverDetail(driverState.detail);
+        await this.teardown(
+          row,
+          'failed',
+          errorCode,
+          detail ? `${errorMessage} [CLI: ${detail}]` : errorMessage
+        );
+        return;
+      }
       await this.attemptCapture(row);
     } catch (err) {
       // Unexpected transient error — log and reschedule; the TTL guard bounds
@@ -350,11 +450,19 @@ export class CredentialSetupSession extends DurableObject<Env> {
   private startSetupDriverCommand(row: SetupSessionRow, statePath: string): string {
     if (row.agent_type === 'claude-code') {
       const credentialPath = `${row.codex_home}/${CLAUDE_OAUTH_TOKEN_FILE}`;
+      const verificationCodePath = `${row.codex_home}/${CLAUDE_VERIFICATION_CODE_FILE}`;
+      const enterDelayEnv = this.env.CLAUDE_SETUP_ENTER_DELAY_MS
+        ? ` CLAUDE_SETUP_ENTER_DELAY_MS=${shellQuote(this.env.CLAUDE_SETUP_ENTER_DELAY_MS)}`
+        : '';
+      const exchangeTimeoutEnv = this.env.CLAUDE_SETUP_EXCHANGE_TIMEOUT_MS
+        ? ` CLAUDE_SETUP_EXCHANGE_TIMEOUT_MS=${shellQuote(this.env.CLAUDE_SETUP_EXCHANGE_TIMEOUT_MS)}`
+        : '';
       return (
         `nohup env CLAUDE_CONFIG_DIR=${shellQuote(row.codex_home)} ` +
-        'DISABLE_AUTOUPDATER=1 NO_COLOR=1 TERM=dumb ' +
+        'DISABLE_AUTOUPDATER=1 NO_COLOR=1 TERM=dumb' +
+        `${enterDelayEnv}${exchangeTimeoutEnv} ` +
         `node /usr/local/bin/sam-claude-setup-token.mjs ${shellQuote(statePath)} ` +
-        `${shellQuote(credentialPath)} >/dev/null 2>&1 &`
+        `${shellQuote(credentialPath)} ${shellQuote(verificationCodePath)} >/dev/null 2>&1 &`
       );
     }
 
@@ -574,6 +682,23 @@ export class CredentialSetupSession extends DurableObject<Env> {
   // ---------------------------------------------------------------------------
   // Helpers
   // ---------------------------------------------------------------------------
+
+  private terminalState(
+    row: SetupSessionRow,
+    status: SetupSessionStatus,
+    errorCode: string | null = null,
+    errorMessage: string | null = null
+  ): SetupSessionStateResult {
+    return {
+      id: row.id,
+      status,
+      expiresAt: row.expires_at,
+      errorCode,
+      errorMessage,
+      verificationUrl: null,
+      userCode: null,
+    };
+  }
 
   private readRow(): SetupSessionRow | undefined {
     return this.sql.exec<SetupSessionRow>('SELECT * FROM setup_session LIMIT 1').toArray()[0];

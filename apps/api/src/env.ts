@@ -131,6 +131,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SETUP_SESSION_TTL_MS?: string; // Setup session lifetime in ms before auto-teardown (default: 900000 = 15 min)
   SETUP_SESSION_CAPTURE_POLL_MS?: string; // credential capture poll interval in ms (default: 3000)
   CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS?: string; // App-server JSON-RPC request timeout in ms (default: 30000)
+  CLAUDE_SETUP_ENTER_DELAY_MS?: string; // Claude guided-login: delay before the separate Enter keypress after pasting the code into the sandboxed CLI (default: 1000)
+  CLAUDE_SETUP_EXCHANGE_TIMEOUT_MS?: string; // Claude guided-login: max wait for the CLI code exchange after submission before failing visibly (default: 120000)
   SETUP_SESSION_SWEEP_MAX_CANDIDATES?: string; // Max expired sessions torn down per cron sweep (default: 50)
   POOL_LEASE_BUFFER_MS?: string; // Grace beyond TTL before a leaked pool lease self-prunes (default: 300000 = 5 min)
   // Deployment signing keys (Ed25519 — separate from callback JWT)

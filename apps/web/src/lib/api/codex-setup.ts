@@ -33,6 +33,7 @@ export type AgentCredentialSetupStatus =
   | 'admitting'
   | 'provisioning'
   | 'waiting_for_user'
+  | 'exchanging'
   | 'capturing'
   | 'saving'
   | 'completed'
@@ -180,3 +181,17 @@ export async function cancelAgentCredentialSetupSession(
 }
 
 export const cancelCodexSetupSession = cancelAgentCredentialSetupSession;
+
+/** POST /:id/verification-code — forward Claude Code browser code to its sandboxed CLI. */
+export async function submitAgentCredentialSetupVerificationCode(
+  id: string,
+  code: string
+): Promise<AgentCredentialSetupSession> {
+  return request<AgentCredentialSetupSession>(
+    `${BASE_PATH}/${encodeURIComponent(id)}/verification-code`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ code }),
+    }
+  );
+}
