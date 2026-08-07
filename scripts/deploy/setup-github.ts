@@ -138,6 +138,10 @@ After creating your GitHub App and configuring credentials:
 1. Finish configuring the production GitHub Environment with the Cloudflare,
    R2, Pulumi, and GitHub App values from the self-hosting guide.
 
+   Before adding secrets, restrict that environment's Deployment branches and
+   tags to the selected branch \`main\` only. This external policy prevents a
+   workflow dispatched from another ref from accessing production secrets.
+
 2. Required GitHub App environment secrets:
    - GH_APP_ID
    - GH_CLIENT_ID

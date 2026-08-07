@@ -33,6 +33,8 @@ These Cloudflare Worker secrets are generated or copied during deployment and ar
 
 Security keys are automatically generated and persisted by Pulumi on first deployment. Cloudflare secrets remain Worker secrets because they are deployment trust roots. GitHub App/OAuth, GitHub webhook, Google OAuth, GitLab OAuth, analytics forwarding, R2 attachment-upload credentials, devcontainer cache credentials, trial provider keys, and smoke-test auth flags can be supplied as optional Worker secret fallbacks when an installation needs them. Runtime platform values saved through first-run setup or the superadmin platform config UI are stored encrypted in D1 and override environment fallbacks. They never appear in source control.
 
+Production deployment secrets are additionally bounded by a GitHub Environment policy that permits deployments from the selected `main` branch only. This external policy is required because a workflow file on another branch cannot be trusted to enforce its own branch check. Automatic deployments also re-resolve the current `main` tip after entering the serialized production deployment queue, so a slower CI run for an older commit cannot roll back a newer deployment.
+
 New VM nodes do not require static `ORIGIN_CA_CERT` or `ORIGIN_CA_KEY` Worker secrets. If those legacy secrets exist from an older deployment, remove them after draining old nodes and confirming the per-node CSR model is deployed.
 
 ### Platform Integration Credentials

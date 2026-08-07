@@ -155,6 +155,12 @@ Add this passphrase to the GitHub Actions environment in the next step and keep 
 
 In your fork: Settings → Environments → New environment → name it `production`.
 
+Before adding secrets, open the environment's **Deployment branches and tags** setting, choose
+**Selected branches and tags**, and add only the `main` branch. This external GitHub Environment
+policy is required: it prevents a workflow dispatched from another branch or tag from reaching
+production secrets, even if that branch changes the workflow's in-repository checks. Existing
+installations must add this policy before their next production deployment.
+
 **Environment variables:**
 
 | Variable                  | Description                                                                                             | Example                   |

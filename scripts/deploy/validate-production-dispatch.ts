@@ -34,7 +34,7 @@ export function normalizeSha(value: string | undefined): string {
   const sha = (value ?? '').trim();
   if (!SHA_PATTERN.test(sha)) {
     throw new Error(
-      'Manual production deployment requires target_commit_sha to be an exact 40-character commit SHA.'
+      'Production deployment requires target_commit_sha to be an exact 40-character commit SHA.'
     );
   }
   return sha.toLowerCase();
@@ -55,7 +55,7 @@ export function validateEmergencyOverrideReason(
   value: string | undefined,
   minLength = DEFAULT_OVERRIDE_REASON_MIN_LENGTH
 ): string | undefined {
-  const reason = (value ?? '').trim();
+  const reason = (value ?? '').trim().replace(/\s+/g, ' ');
   if (!reason) {
     return undefined;
   }
@@ -157,6 +157,31 @@ async function getCurrentMainTip(
 
   const body = (await response.json()) as GithubRefResponse;
   return normalizeSha(body.object?.sha);
+}
+
+async function requireCurrentMainTip(env: ValidationEnv, sha: string): Promise<void> {
+  if (!env.githubRepository || !env.githubToken) {
+    throw new Error('GITHUB_REPOSITORY and GITHUB_TOKEN are required to verify main provenance.');
+  }
+
+  let mainTip: string;
+  try {
+    mainTip = await getCurrentMainTip({
+      githubRepository: env.githubRepository,
+      githubToken: env.githubToken,
+    });
+  } catch (error) {
+    const message = redact(error instanceof Error ? error.message : String(error));
+    throw new Error(
+      `${message}. Unable to prove trusted main provenance; deployment failed closed before production mutation.`
+    );
+  }
+
+  if (sha !== mainTip) {
+    throw new Error(
+      `target_commit_sha ${sha} does not match the current trusted main tip ${mainTip}. Deployment failed closed before production mutation.`
+    );
+  }
 }
 
 async function getRepositoryMetadata(
@@ -272,9 +297,30 @@ export async function validateProductionDispatch(env: ValidationEnv): Promise<{
   return { sha, ciVerified: false, emergencyOverride: true };
 }
 
+export async function validateAutomaticProductionDispatch(env: ValidationEnv): Promise<{
+  sha: string;
+  ciVerified: true;
+  emergencyOverride: false;
+}> {
+  if (env.githubEventName !== 'workflow_run') {
+    throw new Error('Automatic production deployment validation requires a workflow_run event.');
+  }
+
+  const sha = normalizeSha(env.targetCommitSha);
+  await requireCurrentMainTip(env, sha);
+
+  append(env.githubOutput, `deploy_sha=${sha}\n`);
+  append(
+    env.githubStepSummary,
+    `## Automatic production deployment gate\n\n- Target commit: \`${sha}\`\n- Main provenance: verified current \`main\` tip after the production deployment queue\n- CI gate: verified by trusted successful \`workflow_run\` event\n`
+  );
+
+  return { sha, ciVerified: true, emergencyOverride: false };
+}
+
 if (import.meta.url === `file://${process.argv[1]}`) {
   try {
-    await validateProductionDispatch({
+    const env: ValidationEnv = {
       githubEventName: process.env.GITHUB_EVENT_NAME,
       githubRepository: process.env.GITHUB_REPOSITORY,
       githubToken: process.env.GITHUB_TOKEN,
@@ -283,10 +329,15 @@ if (import.meta.url === `file://${process.argv[1]}`) {
       overrideReasonMinLength: process.env.PRODUCTION_DEPLOY_OVERRIDE_REASON_MIN_LENGTH,
       githubOutput: process.env.GITHUB_OUTPUT,
       githubStepSummary: process.env.GITHUB_STEP_SUMMARY,
-    });
+    };
+    if (env.githubEventName === 'workflow_run') {
+      await validateAutomaticProductionDispatch(env);
+    } else {
+      await validateProductionDispatch(env);
+    }
   } catch (error: unknown) {
     const message = redact(error instanceof Error ? error.message : String(error));
-    console.error(`::error title=Manual production deployment gate failed::${message}`);
+    console.error(`::error title=Production deployment gate failed::${message}`);
     process.exit(1);
   }
 }

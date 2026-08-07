@@ -39,7 +39,7 @@ concurrency:
 jobs:
   validate-manual-dispatch:
     name: Validate manual production target
-    if: ${{ github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     outputs:
       deploy_sha: ${{ steps.gate.outputs.deploy_sha }}
@@ -64,10 +64,42 @@ jobs:
           EMERGENCY_OVERRIDE_REASON: ${{ inputs.emergency_override_reason }}
           PRODUCTION_DEPLOY_OVERRIDE_REASON_MIN_LENGTH: ${{ vars.PRODUCTION_DEPLOY_OVERRIDE_REASON_MIN_LENGTH }}
 
+  validate-automatic-dispatch:
+    name: Validate automatic production target
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.conclusion == 'success' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.head_repository.full_name == github.repository
+    runs-on: ubuntu-latest
+    outputs:
+      deploy_sha: ${{ steps.gate.outputs.deploy_sha }}
+    steps:
+      - name: Checkout trusted current main
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: refs/heads/main
+      - name: Setup pnpm
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Re-verify current main after deployment queue
+        id: gate
+        run: pnpm tsx scripts/deploy/validate-production-dispatch.ts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TARGET_COMMIT_SHA: ${{ github.event.workflow_run.head_sha }}
+
   # Gate only on the GitHub Actions CI workflow result. SonarCloud is a
   # separate GitHub App check and must not suppress production deploys.
   deploy:
-    needs: [validate-manual-dispatch]
+    needs: [validate-manual-dispatch, validate-automatic-dispatch]
     if: >-
       always() &&
       (
@@ -77,16 +109,13 @@ jobs:
         ) ||
         (
           github.event_name == 'workflow_run' &&
-          github.event.workflow_run.conclusion == 'success' &&
-          github.event.workflow_run.event == 'push' &&
-          github.event.workflow_run.head_branch == 'main' &&
-          github.event.workflow_run.head_repository.full_name == github.repository
+          needs.validate-automatic-dispatch.result == 'success'
         )
       )
     uses: ./.github/workflows/deploy-reusable.yml
     with:
       environment: production
-      target_commit_sha: ${{ github.event_name == 'workflow_dispatch' && needs.validate-manual-dispatch.outputs.deploy_sha || github.event.workflow_run.head_sha }}
+      target_commit_sha: ${{ github.event_name == 'workflow_dispatch' && needs.validate-manual-dispatch.outputs.deploy_sha || needs.validate-automatic-dispatch.outputs.deploy_sha }}
       skip_agent: ${{ inputs.skip_agent || false }}
       dry_run: ${{ inputs.dry_run || false }}
     secrets: inherit
