@@ -580,24 +580,10 @@ function artifactSummary(row: ArtifactRow): DiagnosticArtifactSummary {
   };
 }
 
-export async function getDiagnosticIncidentsByErrorIds(
+async function summarizeIncidentRows(
   env: Env,
-  errorIds: string[]
-): Promise<Map<string, DiagnosticIncidentSummary>> {
-  const ids = [...new Set(errorIds)].slice(0, 200);
-  if (ids.length === 0) return new Map();
-  const incidentRows: IncidentRow[] = [];
-  for (let offset = 0; offset < ids.length; offset += D1_MAX_BOUND_PARAMETERS) {
-    const chunk = ids.slice(offset, offset + D1_MAX_BOUND_PARAMETERS);
-    const incidents = await env.DATABASE.prepare(
-      `SELECT id, platform_error_id, node_id, workspace_id, status, artifact_count,
-       total_bytes, manifest_json, preview_json, failure_reason, expires_at, created_at, updated_at
-       FROM diagnostic_incidents WHERE platform_error_id IN (${chunk.map(() => '?').join(',')})`
-    )
-      .bind(...chunk)
-      .all<IncidentRow>();
-    incidentRows.push(...incidents.results);
-  }
+  incidentRows: IncidentRow[]
+): Promise<DiagnosticIncidentSummary[]> {
   const incidentIds = incidentRows.map((row) => row.id);
   const artifactRows: ArtifactRow[] = [];
   for (let offset = 0; offset < incidentIds.length; offset += D1_MAX_BOUND_PARAMETERS) {
@@ -619,27 +605,63 @@ export async function getDiagnosticIncidentsByErrorIds(
     current.push(artifactSummary(artifact));
     byIncident.set(artifact.incident_id, current);
   }
-  return new Map(
-    incidentRows.map((row) => [
-      row.platform_error_id,
-      {
-        id: row.id,
-        platformErrorId: row.platform_error_id,
-        nodeId: row.node_id,
-        workspaceId: row.workspace_id,
-        status: row.status,
-        artifactCount: row.artifact_count,
-        totalBytes: row.total_bytes,
-        manifest: parseJson<DiagnosticIncidentManifest>(row.manifest_json),
-        preview: parseJson<Record<string, unknown>>(row.preview_json),
-        failureReason: row.failure_reason,
-        expiresAt: row.expires_at,
-        createdAt: row.created_at,
-        updatedAt: row.updated_at,
-        artifacts: byIncident.get(row.id) ?? [],
-      },
-    ])
-  );
+  return incidentRows.map((row) => ({
+    id: row.id,
+    platformErrorId: row.platform_error_id,
+    nodeId: row.node_id,
+    workspaceId: row.workspace_id,
+    status: row.status,
+    artifactCount: row.artifact_count,
+    totalBytes: row.total_bytes,
+    manifest: parseJson<DiagnosticIncidentManifest>(row.manifest_json),
+    preview: parseJson<Record<string, unknown>>(row.preview_json),
+    failureReason: row.failure_reason,
+    expiresAt: row.expires_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    artifacts: byIncident.get(row.id) ?? [],
+  }));
+}
+
+export async function getDiagnosticIncidentsByErrorIds(
+  env: Env,
+  errorIds: string[]
+): Promise<Map<string, DiagnosticIncidentSummary>> {
+  const ids = [...new Set(errorIds)].slice(0, 200);
+  if (ids.length === 0) return new Map();
+  const incidentRows: IncidentRow[] = [];
+  for (let offset = 0; offset < ids.length; offset += D1_MAX_BOUND_PARAMETERS) {
+    const chunk = ids.slice(offset, offset + D1_MAX_BOUND_PARAMETERS);
+    const incidents = await env.DATABASE.prepare(
+      `SELECT id, platform_error_id, node_id, workspace_id, status, artifact_count,
+       total_bytes, manifest_json, preview_json, failure_reason, expires_at, created_at, updated_at
+       FROM diagnostic_incidents WHERE platform_error_id IN (${chunk.map(() => '?').join(',')})`
+    )
+      .bind(...chunk)
+      .all<IncidentRow>();
+    incidentRows.push(...incidents.results);
+  }
+  const summaries = await summarizeIncidentRows(env, incidentRows);
+  return new Map(summaries.map((summary) => [summary.platformErrorId, summary]));
+}
+
+/** List recent incident evidence by node without requiring the node row to still exist. */
+export async function getDiagnosticIncidentsByNodeId(
+  env: Env,
+  nodeId: string,
+  limit: number
+): Promise<DiagnosticIncidentSummary[]> {
+  const incidents = await env.DATABASE.prepare(
+    `SELECT id, platform_error_id, node_id, workspace_id, status, artifact_count,
+       total_bytes, manifest_json, preview_json, failure_reason, expires_at, created_at, updated_at
+       FROM diagnostic_incidents
+       WHERE node_id = ?
+       ORDER BY created_at DESC
+       LIMIT ?`
+  )
+    .bind(nodeId, limit)
+    .all<IncidentRow>();
+  return summarizeIncidentRows(env, incidents.results);
 }
 
 export async function getDiagnosticIncidentByErrorId(

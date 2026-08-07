@@ -835,6 +835,7 @@ describe('VM Agent Errors Route', () => {
 
     it('should still return 204 even if persistErrorBatch fails', async () => {
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
       mockPersistErrorBatch.mockRejectedValueOnce(new Error('D1 down'));
       const mockObsDb = {} as D1Database;
 
@@ -849,8 +850,13 @@ describe('VM Agent Errors Route', () => {
       );
 
       expect(res.status).toBe(204);
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('"event":"observability.persist_vm_legacy_batch_failed"')
+      );
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('"count":1'));
 
       spy.mockRestore();
+      warnSpy.mockRestore();
     });
   });
 

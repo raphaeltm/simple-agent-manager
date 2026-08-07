@@ -7,7 +7,13 @@
  * See: specs/018-project-first-architecture/tasks.md (T027)
  */
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
-import { DEFAULT_CHAT_COMPACT_MODE, DEFAULT_CHAT_SESSION_MESSAGE_LIMIT, DEFAULT_CHAT_SESSION_MESSAGE_MAX, isTaskExecutionStep, isTaskMode } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_CHAT_COMPACT_MODE,
+  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+  DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+  isTaskExecutionStep,
+  isTaskMode,
+} from '@simple-agent-manager/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context } from 'hono';
@@ -22,7 +28,12 @@ import { ulid } from '../lib/ulid';
 import { getAuth, getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
-import { CreateChatSessionSchema, LinkTaskToChatSchema, parseOptionalBody, SendChatMessageSchema } from '../schemas';
+import {
+  CreateChatSessionSchema,
+  LinkTaskToChatSchema,
+  parseOptionalBody,
+  SendChatMessageSchema,
+} from '../schemas';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as chatPersistence from '../services/chat-persistence';
 import { persistError } from '../services/observability';
@@ -31,7 +42,11 @@ import { isTaskStatus } from '../services/task-status';
 import { resolveChatAgentState } from './chat-agent-state';
 import { chatForkRoutes } from './chat-fork';
 import { getChatSessionRouteContext } from './chat-route-context';
-import { enrichSessionsWithCreators, getSessionListScope, requireSessionCreator } from './chat-session-ownership';
+import {
+  enrichSessionsWithCreators,
+  getSessionListScope,
+  requireSessionCreator,
+} from './chat-session-ownership';
 import { chatStateRoutes } from './chat-state';
 import { registerChatStopRoute } from './chat-stop';
 import { resolveLiveAgentSessionForChat } from './chat-workspace-resolver';
@@ -95,16 +110,21 @@ async function recordChatSessionLoadFailure(
   });
 
   if (c.env.OBSERVABILITY_DATABASE) {
-    await persistError(c.env.OBSERVABILITY_DATABASE, {
-      source: 'api',
-      level: 'error',
-      message: 'chat.session_detail_load_failed',
-      stack: diagnostic.stack,
-      context,
-      userId: input.userId,
-      ipAddress: c.req.header('CF-Connecting-IP') ?? null,
-      userAgent: c.req.header('User-Agent') ?? null,
-    }, c.env);
+    await persistError(
+      c.env.OBSERVABILITY_DATABASE,
+      {
+        source: 'api',
+        level: 'error',
+        message: 'chat.session_detail_load_failed',
+        stack: diagnostic.stack,
+        context,
+        userId: input.userId,
+        sessionId: input.sessionId,
+        ipAddress: c.req.header('CF-Connecting-IP') ?? null,
+        userAgent: c.req.header('User-Agent') ?? null,
+      },
+      c.env
+    );
   }
 
   const body: Record<string, unknown> = {
@@ -139,13 +159,15 @@ async function recordChatSessionLoadFailure(
  */
 function getSessionMessageLimit(env: Env, requestedLimit?: string): number {
   const configuredDefault = Number.parseInt(env.CHAT_SESSION_MESSAGE_LIMIT || '', 10);
-  const defaultLimit = Number.isFinite(configuredDefault) && configuredDefault > 0
-    ? configuredDefault
-    : DEFAULT_CHAT_SESSION_MESSAGE_LIMIT;
+  const defaultLimit =
+    Number.isFinite(configuredDefault) && configuredDefault > 0
+      ? configuredDefault
+      : DEFAULT_CHAT_SESSION_MESSAGE_LIMIT;
   const configuredMax = Number.parseInt(env.CHAT_SESSION_MESSAGE_MAX || '', 10);
-  const maxLimit = Number.isFinite(configuredMax) && configuredMax > 0
-    ? configuredMax
-    : DEFAULT_CHAT_SESSION_MESSAGE_MAX;
+  const maxLimit =
+    Number.isFinite(configuredMax) && configuredMax > 0
+      ? configuredMax
+      : DEFAULT_CHAT_SESSION_MESSAGE_MAX;
   // Guard against misconfiguration where the default page size exceeds the max.
   // We promote the ceiling to the page size so the default page always fits, but
   // this silently overrides an operator's intended (smaller) ceiling — warn so it
@@ -246,15 +268,31 @@ chatRoutes.post('/', async (c) => {
   const taskId = ulid();
   const now = new Date().toISOString();
   await db.insert(schema.tasks).values({
-    id: taskId, projectId, userId, title: topic || "Conversation",
-    status: "queued", executionStep: "session_persistence", taskMode: "conversation",
-    triggeredBy: "user", credentialAttributionUserId: userId,
-    credentialAttributionSource: "user", createdBy: userId, createdAt: now, updatedAt: now,
+    id: taskId,
+    projectId,
+    userId,
+    title: topic || 'Conversation',
+    status: 'queued',
+    executionStep: 'session_persistence',
+    taskMode: 'conversation',
+    triggeredBy: 'user',
+    credentialAttributionUserId: userId,
+    credentialAttributionSource: 'user',
+    createdBy: userId,
+    createdAt: now,
+    updatedAt: now,
   });
   const sessionId = await chatPersistence.createChatSession(
-    c.env, projectId, workspaceId, topic, taskId, userId
+    c.env,
+    projectId,
+    workspaceId,
+    topic,
+    taskId,
+    userId
   );
-  await db.update(schema.tasks).set({ chatSessionId: sessionId, workspaceId, updatedAt: now })
+  await db
+    .update(schema.tasks)
+    .set({ chatSessionId: sessionId, workspaceId, updatedAt: now })
     .where(eq(schema.tasks.id, taskId));
 
   return c.json({ id: sessionId, sessionId, taskId }, 201);
@@ -397,7 +435,13 @@ chatRoutes.get('/:sessionId', async (c) => {
   });
 
   return c.json({
-    session: (await enrichSessionsWithCreators(db, [{ ...session, agentSessionId, agentType, task }], userId))[0],
+    session: (
+      await enrichSessionsWithCreators(
+        db,
+        [{ ...session, agentSessionId, agentType, task }],
+        userId
+      )
+    )[0],
     messages: messagesResult.messages,
     hasMore: messagesResult.hasMore,
     state,
@@ -529,10 +573,17 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
   // The enriched message goes to the agent; the clean message was already
   // persisted in chat by the VM agent message reporting flow.
   const { enrichMessageWithMentions } = await import('../services/mention-enrichment');
-  const { enrichedMessage } = await enrichMessageWithMentions(content, db, projectId, userId, c.env);
+  const { enrichedMessage } = await enrichMessageWithMentions(
+    content,
+    db,
+    projectId,
+    userId,
+    c.env
+  );
 
   // Forward the prompt to the VM agent
-  const { getCfContainerWakeTimeoutMs, sendPromptToAgentOnNode } = await import('../services/node-agent');
+  const { getCfContainerWakeTimeoutMs, sendPromptToAgentOnNode } =
+    await import('../services/node-agent');
   const result = await sendPromptToAgentOnNode(
     workspace.nodeId,
     workspace.id,
@@ -693,12 +744,23 @@ chatRoutes.get('/:sessionId/ideas', async (c) => {
   const links = await projectDataService.getIdeasForSession(c.env, projectId, sessionId);
 
   // Enrich with task details from D1 in a single query
-  let ideas: Array<{ taskId: string; title: string | null; status: string | null; context: string | null; linkedAt: number }> = [];
+  let ideas: Array<{
+    taskId: string;
+    title: string | null;
+    status: string | null;
+    context: string | null;
+    linkedAt: number;
+  }> = [];
   if (links.length > 0) {
     const taskRows = await db
       .select({ id: schema.tasks.id, title: schema.tasks.title, status: schema.tasks.status })
       .from(schema.tasks)
-      .where(inArray(schema.tasks.id, links.map((l) => l.taskId)));
+      .where(
+        inArray(
+          schema.tasks.id,
+          links.map((l) => l.taskId)
+        )
+      );
 
     const taskMap = new Map(taskRows.map((t) => [t.id, t]));
 

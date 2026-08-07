@@ -13,6 +13,7 @@ import {
   ensurePendingIncidents,
   getDiagnosticIncidentByErrorId,
   getDiagnosticIncidentsByErrorIds,
+  getDiagnosticIncidentsByNodeId,
   registerDiagnosticArtifact,
   uploadDiagnosticArtifact,
 } from '../../../src/services/diagnostic-incidents';
@@ -530,5 +531,20 @@ describe('diagnostic incident storage boundary', () => {
     const incidents = await getDiagnosticIncidentsByErrorIds(env, ids);
     expect(incidents.size).toBe(200);
     expect(incidents.get('incident-199')).toMatchObject({ platformErrorId: 'incident-199' });
+  });
+
+  it('lists node incidents and artifact status without joining a live node row', async () => {
+    const bytes = new TextEncoder().encode('safe');
+    await seedIncident('destroyed-node');
+    await registerDiagnosticArtifact(env, 'destroyed-node', INCIDENT_ID, registration(bytes));
+
+    const incidents = await getDiagnosticIncidentsByNodeId(env, 'destroyed-node', 10);
+    expect(incidents).toHaveLength(1);
+    expect(incidents[0]).toMatchObject({
+      id: INCIDENT_ID,
+      nodeId: 'destroyed-node',
+      status: 'pending',
+      artifacts: [{ id: ARTIFACT_ID, status: 'pending' }],
+    });
   });
 });

@@ -88,6 +88,7 @@ export interface LogQueryParams {
   search?: string;
   limit?: number;
   cursor?: string | null;
+  scriptName?: string;
   /** Caller-supplied queryId for pagination consistency. Generated server-side if omitted. */
   queryId?: string;
 }

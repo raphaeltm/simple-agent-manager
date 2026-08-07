@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { failTask, transitionToInProgress } from '../../../src/durable-objects/task-runner/state-machine';
+import {
+  failTask,
+  transitionToInProgress,
+} from '../../../src/durable-objects/task-runner/state-machine';
 import type {
   TaskRunnerContext,
   TaskRunnerState,
@@ -10,6 +13,7 @@ const {
   cleanupTaskRunMock,
   failSessionMock,
   notifyTaskEventMock,
+  persistErrorMock,
   persistMessageMock,
   revokeMcpTokenMock,
   stopComputeTrackingMock,
@@ -19,6 +23,7 @@ const {
   cleanupTaskRunMock: vi.fn(async () => undefined),
   failSessionMock: vi.fn(async () => undefined),
   notifyTaskEventMock: vi.fn(async () => undefined),
+  persistErrorMock: vi.fn(async () => undefined),
   persistMessageMock: vi.fn(async () => undefined),
   revokeMcpTokenMock: vi.fn(async () => undefined),
   stopComputeTrackingMock: vi.fn(async () => undefined),
@@ -33,6 +38,13 @@ vi.mock('../../../src/lib/ulid', () => ({
 vi.mock('../../../src/services/trigger-execution-sync', () => ({
   syncTriggerExecutionStatus: syncTriggerExecutionStatusMock,
 }));
+
+vi.mock('../../../src/services/observability', async () => {
+  const actual = await vi.importActual<typeof import('../../../src/services/observability')>(
+    '../../../src/services/observability'
+  );
+  return { ...actual, persistError: persistErrorMock };
+});
 
 vi.mock('../../../src/services/project-data', () => ({
   failSession: failSessionMock,
@@ -90,7 +102,6 @@ function createD1State() {
     tasks: new Map<string, TaskRow>(),
     workspaces: new Map<string, WorkspaceRow>(),
     statusEvents: [] as TaskStatusEventRow[],
-    errors: [] as Array<{ message: string; context: string }>,
   };
 }
 
@@ -140,14 +151,6 @@ function createD1Database(state: ReturnType<typeof createD1State>) {
               from_status: isInProgressEvent ? 'delegated' : String(params[2]),
               to_status: isInProgressEvent ? 'in_progress' : 'failed',
               reason: String(isInProgressEvent ? params[2] : params[3]),
-            });
-            return { success: true, meta: { changes: 1 } };
-          }
-
-          if (sql.includes("INSERT INTO errors")) {
-            state.errors.push({
-              message: String(params[1]),
-              context: String(params[2]),
             });
             return { success: true, meta: { changes: 1 } };
           }
@@ -341,11 +344,13 @@ describe('transitionToInProgress', () => {
       execution_step: null,
       error_message: 'Task orchestration was superseded before agent handoff completed.',
     });
-    expect(dbState.statusEvents).toContainEqual(expect.objectContaining({
-      task_id: 'task-1',
-      from_status: 'queued',
-      to_status: 'failed',
-    }));
+    expect(dbState.statusEvents).toContainEqual(
+      expect.objectContaining({
+        task_id: 'task-1',
+        from_status: 'queued',
+        to_status: 'failed',
+      })
+    );
     expect(state.completed).toBe(true);
     expect(storageWrites.at(-1)).toMatchObject({ completed: true });
   });
@@ -408,7 +413,9 @@ describe('failTask', () => {
       status: 'delegated',
       execution_step: 'agent_session',
     });
-    const state = makeState();
+    const state = makeState({
+      stepResults: { ...makeState().stepResults, chatSessionId: 'session-1' },
+    });
 
     await failTask(state, 'agent session failed permanently', rc);
 
@@ -428,9 +435,26 @@ describe('failTask', () => {
       expect.anything(),
       'task-1',
       'failed',
-      'agent session failed permanently',
+      'agent session failed permanently'
     );
     expect(storageWrites.at(-1)).toMatchObject({ completed: true });
+    expect(persistErrorMock).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.objectContaining({ taskId: 'task-1', sessionId: 'session-1' }),
+      rc.env
+    );
+  });
+
+  it('redacts sensitive failure text before observability persistence', async () => {
+    const { dbState, rc } = createContext();
+    seedTask(dbState);
+    const secret = `sk-ant-${'a'.repeat(32)}`;
+
+    await failTask(makeState(), `provider rejected ${secret}`, rc);
+
+    const persisted = persistErrorMock.mock.calls.at(-1)?.[1];
+    expect(persisted?.message).toContain('[REDACTED]');
+    expect(persisted?.message).not.toContain(secret);
   });
 
   it('revokes MCP token on failure and clears it from DO state', async () => {

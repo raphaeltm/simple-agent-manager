@@ -148,6 +148,12 @@ export const AdminLogQuerySchema = v.object({
   limit: v.optional(v.number()),
   cursor: v.optional(v.string()),
   queryId: v.optional(v.string()),
+  scriptName: v.optional(
+    v.pipe(
+      v.string(),
+      v.regex(/^[a-zA-Z0-9_-]{1,64}$/, 'scriptName must contain 1-64 safe characters')
+    )
+  ),
 });
 
 export const RunDebugDiagnosisSchema = v.object({

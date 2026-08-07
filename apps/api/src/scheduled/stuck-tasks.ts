@@ -112,6 +112,7 @@ export interface StuckTaskCandidate {
   started_at: string | null;
   workspace_id: string | null;
   auto_provisioned_node_id: string | null;
+  chat_session_id: string | null;
 }
 
 export interface StuckTaskScanCursor {
@@ -223,7 +224,7 @@ function parseStuckTaskScanCursor(raw: string | null): StuckTaskScanCursor | nul
 }
 
 const STUCK_TASK_CANDIDATE_COLUMNS = `id, project_id, user_id, status, execution_step, updated_at, started_at,
-       workspace_id, auto_provisioned_node_id`;
+       workspace_id, auto_provisioned_node_id, chat_session_id`;
 
 /**
  * Select one bounded, fair page of active tasks. A KV cursor prevents old live
@@ -827,20 +828,26 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         taskId: task.id,
         error: err instanceof Error ? err.message : String(err),
       });
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'warn',
-        message: `Compaction-loop detection failed for task ${task.id}: ${err instanceof Error ? err.message : String(err)}`,
-        stack: err instanceof Error ? err.stack : undefined,
-        context: {
-          recoveryType: 'claude_code_compaction_loop_detection_failure',
+      await persistError(
+        env.OBSERVABILITY_DATABASE,
+        {
+          source: 'api',
+          level: 'warn',
+          message: `Compaction-loop detection failed for task ${task.id}: ${err instanceof Error ? err.message : String(err)}`,
+          stack: err instanceof Error ? err.stack : undefined,
+          context: {
+            recoveryType: 'claude_code_compaction_loop_detection_failure',
+            taskId: task.id,
+            taskStatus: task.status,
+            executionStep: task.execution_step,
+          },
+          userId: task.user_id,
+          workspaceId: task.workspace_id,
           taskId: task.id,
-          taskStatus: task.status,
-          executionStep: task.execution_step,
+          sessionId: task.chat_session_id,
         },
-        userId: task.user_id,
-        workspaceId: task.workspace_id,
-      }, env);
+        env
+      );
     }
 
     // Compute task-scoped liveness at most once per candidate: both the
@@ -911,22 +918,28 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
                   hardTimeoutMs,
                 });
 
-                await persistError(env.OBSERVABILITY_DATABASE, {
-                  source: 'api',
-                  level: 'info',
-                  message: `Skipped stuck task recovery: VM agent heartbeat is recent (task running ${Math.round(executionMs / 60000)} min, hard timeout at ${Math.round(hardTimeoutMs / 60000)} min)`,
-                  context: {
-                    recoveryType: 'stuck_task_heartbeat_skip',
-                    taskId: task.id,
+                await persistError(
+                  env.OBSERVABILITY_DATABASE,
+                  {
+                    source: 'api',
+                    level: 'info',
+                    message: `Skipped stuck task recovery: VM agent heartbeat is recent (task running ${Math.round(executionMs / 60000)} min, hard timeout at ${Math.round(hardTimeoutMs / 60000)} min)`,
+                    context: {
+                      recoveryType: 'stuck_task_heartbeat_skip',
+                      taskId: task.id,
+                      nodeId: liveness.nodeId,
+                      activeAcpSessionId: liveness.activeAcpSessionId,
+                      executionMs,
+                      maxExecutionMs,
+                      hardTimeoutMs,
+                    },
+                    userId: task.user_id,
                     nodeId: liveness.nodeId,
-                    activeAcpSessionId: liveness.activeAcpSessionId,
-                    executionMs,
-                    maxExecutionMs,
-                    hardTimeoutMs,
+                    taskId: task.id,
+                    sessionId: task.chat_session_id,
                   },
-                  userId: task.user_id,
-                  nodeId: liveness.nodeId,
-                }, env);
+                  env
+                );
                 result.heartbeatSkipped++;
               }
               break;
@@ -998,30 +1011,36 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           // Deduplicate: only persist if no recent mismatch record exists for this task
           const recentMismatch = await env.OBSERVABILITY_DATABASE.prepare(
             `SELECT id FROM platform_errors
-               WHERE context LIKE ? AND timestamp > ?
+               WHERE task_id = ? AND context LIKE ? AND timestamp > ?
                LIMIT 1`
           )
-            .bind(`%do_task_status_mismatch%${task.id}%`, Date.now() - 30 * 60 * 1000)
+            .bind(task.id, '%do_task_status_mismatch%', Date.now() - 30 * 60 * 1000)
             .first();
 
           if (!recentMismatch) {
-            await persistError(env.OBSERVABILITY_DATABASE, {
-              source: 'api',
-              level: 'warn',
-              message: `TaskRunner DO completed but task still in '${task.status}' — possible D1 update failure`,
-              context: {
-                recoveryType: 'do_task_status_mismatch',
+            await persistError(
+              env.OBSERVABILITY_DATABASE,
+              {
+                source: 'api',
+                level: 'warn',
+                message: `TaskRunner DO completed but task still in '${task.status}' — possible D1 update failure`,
+                context: {
+                  recoveryType: 'do_task_status_mismatch',
+                  taskId: task.id,
+                  taskStatus: task.status,
+                  executionStep: task.execution_step,
+                  doCurrentStep: doStatus.currentStep,
+                  doRetryCount: doStatus.retryCount,
+                  timeForCheck,
+                  taskRunnerProbeOutcome: doProbe.outcome,
+                  livenessReason: liveness?.reason ?? null,
+                },
+                userId: task.user_id,
                 taskId: task.id,
-                taskStatus: task.status,
-                executionStep: task.execution_step,
-                doCurrentStep: doStatus.currentStep,
-                doRetryCount: doStatus.retryCount,
-                timeForCheck,
-                taskRunnerProbeOutcome: doProbe.outcome,
-                livenessReason: liveness?.reason ?? null,
+                sessionId: task.chat_session_id,
               },
-              userId: task.user_id,
-            }, env);
+              env
+            );
           }
         }
       }
@@ -1058,37 +1077,43 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       });
 
       // Record recovery in OBSERVABILITY_DATABASE for admin visibility (TDF-7)
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'warn',
-        message: reason,
-        context: {
-          ...(compactionLoopRecovery
-            ? { recoveryType: 'claude_code_compaction_loop' }
-            : { recoveryType: 'stuck_task' }),
-          taskStatus: task.status,
-          executionStep: task.execution_step,
-          elapsedMs: diagnosticElapsedMs,
-          compactionLoop: compactionLoopRecovery
-            ? {
-                sessionId: compactionLoopRecovery.sessionId,
-                agentSessionId: compactionLoopRecovery.agentSessionId,
-                recentMessageLimit: compactionLoopRecovery.recentMessageLimit,
-                evidence: compactionLoopRecovery.evidence,
-              }
-            : null,
-          workspaceId: diagnostics.workspaceId,
-          workspaceStatus: diagnostics.workspaceStatus,
+      await persistError(
+        env.OBSERVABILITY_DATABASE,
+        {
+          source: 'api',
+          level: 'warn',
+          message: reason,
+          context: {
+            ...(compactionLoopRecovery
+              ? { recoveryType: 'claude_code_compaction_loop' }
+              : { recoveryType: 'stuck_task' }),
+            taskStatus: task.status,
+            executionStep: task.execution_step,
+            elapsedMs: diagnosticElapsedMs,
+            compactionLoop: compactionLoopRecovery
+              ? {
+                  sessionId: compactionLoopRecovery.sessionId,
+                  agentSessionId: compactionLoopRecovery.agentSessionId,
+                  recentMessageLimit: compactionLoopRecovery.recentMessageLimit,
+                  evidence: compactionLoopRecovery.evidence,
+                }
+              : null,
+            workspaceId: diagnostics.workspaceId,
+            workspaceStatus: diagnostics.workspaceStatus,
+            nodeId: diagnostics.nodeId,
+            nodeStatus: diagnostics.nodeStatus,
+            nodeHealthStatus: diagnostics.nodeHealthStatus,
+            autoProvisionedNodeId: diagnostics.autoProvisionedNodeId,
+            doState: diagnostics.doState,
+          },
+          userId: task.user_id,
           nodeId: diagnostics.nodeId,
-          nodeStatus: diagnostics.nodeStatus,
-          nodeHealthStatus: diagnostics.nodeHealthStatus,
-          autoProvisionedNodeId: diagnostics.autoProvisionedNodeId,
-          doState: diagnostics.doState,
+          workspaceId: diagnostics.workspaceId,
+          taskId: task.id,
+          sessionId: task.chat_session_id,
         },
-        userId: task.user_id,
-        nodeId: diagnostics.nodeId,
-        workspaceId: diagnostics.workspaceId,
-      }, env);
+        env
+      );
 
       const nowIso = now.toISOString();
       // Use optimistic locking: only fail the task if it's still in the
@@ -1154,21 +1179,27 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         });
 
         // Record cleanup failure in OBSERVABILITY_DATABASE (TDF-7)
-        await persistError(env.OBSERVABILITY_DATABASE, {
-          source: 'api',
-          level: 'error',
-          message: `Stuck task cleanup failed: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`,
-          stack: cleanupErr instanceof Error ? cleanupErr.stack : undefined,
-          context: {
-            recoveryType: 'stuck_task_cleanup_failure',
+        await persistError(
+          env.OBSERVABILITY_DATABASE,
+          {
+            source: 'api',
+            level: 'error',
+            message: `Stuck task cleanup failed: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`,
+            stack: cleanupErr instanceof Error ? cleanupErr.stack : undefined,
+            context: {
+              recoveryType: 'stuck_task_cleanup_failure',
+              taskId: task.id,
+              taskStatus: task.status,
+              executionStep: task.execution_step,
+            },
+            userId: task.user_id,
+            nodeId: diagnostics.nodeId,
+            workspaceId: diagnostics.workspaceId,
             taskId: task.id,
-            taskStatus: task.status,
-            executionStep: task.execution_step,
+            sessionId: task.chat_session_id,
           },
-          userId: task.user_id,
-          nodeId: diagnostics.nodeId,
-          workspaceId: diagnostics.workspaceId,
-        }, env);
+          env
+        );
       }
 
       switch (task.status) {
@@ -1191,19 +1222,25 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       });
 
       // Record recovery failure in OBSERVABILITY_DATABASE (TDF-7)
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'error',
-        message: `Stuck task recovery failed: ${err instanceof Error ? err.message : String(err)}`,
-        stack: err instanceof Error ? err.stack : undefined,
-        context: {
-          recoveryType: 'stuck_task_recovery_failure',
+      await persistError(
+        env.OBSERVABILITY_DATABASE,
+        {
+          source: 'api',
+          level: 'error',
+          message: `Stuck task recovery failed: ${err instanceof Error ? err.message : String(err)}`,
+          stack: err instanceof Error ? err.stack : undefined,
+          context: {
+            recoveryType: 'stuck_task_recovery_failure',
+            taskId: task.id,
+            taskStatus: task.status,
+            executionStep: task.execution_step,
+          },
+          userId: task.user_id,
           taskId: task.id,
-          taskStatus: task.status,
-          executionStep: task.execution_step,
+          sessionId: task.chat_session_id,
         },
-        userId: task.user_id,
-      }, env);
+        env
+      );
 
       result.errors++;
     }

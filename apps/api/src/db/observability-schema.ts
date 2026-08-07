@@ -1,5 +1,5 @@
 import { sql } from 'drizzle-orm';
-import { index,integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
+import { index, integer, sqliteTable, text } from 'drizzle-orm/sqlite-core';
 
 /**
  * Observability D1 schema — stored in OBSERVABILITY_DATABASE (separate from main DATABASE).
@@ -21,6 +21,8 @@ export const platformErrors = sqliteTable(
     userId: text('user_id'),
     nodeId: text('node_id'),
     workspaceId: text('workspace_id'),
+    taskId: text('task_id'),
+    sessionId: text('session_id'),
     ipAddress: text('ip_address'),
     userAgent: text('user_agent'),
     timestamp: integer('timestamp').notNull(), // millisecond epoch (client-reported time)
@@ -30,9 +32,19 @@ export const platformErrors = sqliteTable(
   },
   (table) => ({
     timestampIdx: index('idx_platform_errors_timestamp').on(table.timestamp),
-    sourceTimestampIdx: index('idx_platform_errors_source_timestamp').on(table.source, table.timestamp),
-    levelTimestampIdx: index('idx_platform_errors_level_timestamp').on(table.level, table.timestamp),
+    sourceTimestampIdx: index('idx_platform_errors_source_timestamp').on(
+      table.source,
+      table.timestamp
+    ),
+    levelTimestampIdx: index('idx_platform_errors_level_timestamp').on(
+      table.level,
+      table.timestamp
+    ),
     createdAtIdx: index('idx_platform_errors_created_at').on(table.createdAt),
+    taskIdIdx: index('idx_platform_errors_task_id').on(table.taskId),
+    sessionIdIdx: index('idx_platform_errors_session_id').on(table.sessionId),
+    nodeIdIdx: index('idx_platform_errors_node_id').on(table.nodeId),
+    workspaceIdIdx: index('idx_platform_errors_workspace_id').on(table.workspaceId),
   })
 );
 

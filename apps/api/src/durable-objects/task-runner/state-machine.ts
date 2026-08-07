@@ -5,6 +5,7 @@
  * cleanup on failure, and D1 execution step updates.
  */
 import { log } from '../../lib/logger';
+import { persistError, redactSensitiveData } from '../../services/observability';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -23,7 +24,7 @@ import type { TaskRunnerContext, TaskRunnerState } from './types';
 export async function ensureSessionLinked(
   state: TaskRunnerState,
   workspaceId: string,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<void> {
   if (!state.stepResults.chatSessionId) return;
 
@@ -34,7 +35,9 @@ export async function ensureSessionLinked(
   try {
     await rc.env.DATABASE.prepare(
       `UPDATE workspaces SET chat_session_id = ?, updated_at = ? WHERE id = ?`
-    ).bind(state.stepResults.chatSessionId, now, workspaceId).run();
+    )
+      .bind(state.stepResults.chatSessionId, now, workspaceId)
+      .run();
 
     log.info('task_runner_do.session_d1_linked', {
       taskId: state.taskId,
@@ -67,7 +70,7 @@ export async function ensureSessionLinked(
       rc.env,
       state.projectId,
       state.stepResults.chatSessionId,
-      workspaceId,
+      workspaceId
     );
 
     if (state.config.taskMode === 'task') {
@@ -76,7 +79,7 @@ export async function ensureSessionLinked(
         state.projectId,
         state.stepResults.chatSessionId,
         workspaceId,
-        state.taskId,
+        state.taskId
       );
       log.info('task_runner_do.session_idle_cleanup_scheduled', {
         taskId: state.taskId,
@@ -111,19 +114,21 @@ export async function ensureSessionLinked(
  */
 export async function transitionToInProgress(
   state: TaskRunnerState,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<void> {
   const now = new Date().toISOString();
 
   // Optimistic lock: only transition if still delegated
   const result = await rc.env.DATABASE.prepare(
     `UPDATE tasks SET status = 'in_progress', started_at = ?, execution_step = 'running', updated_at = ? WHERE id = ? AND status = 'delegated'`
-  ).bind(now, now, state.taskId).run();
+  )
+    .bind(now, now, state.taskId)
+    .run();
 
   if (!result.meta.changes || result.meta.changes === 0) {
-    const authoritative = await rc.env.DATABASE.prepare(
-      `SELECT status FROM tasks WHERE id = ?`
-    ).bind(state.taskId).first<{ status: string }>();
+    const authoritative = await rc.env.DATABASE.prepare(`SELECT status FROM tasks WHERE id = ?`)
+      .bind(state.taskId)
+      .first<{ status: string }>();
     log.warn('task_runner_do.aborted_by_recovery', {
       taskId: state.taskId,
       step: 'in_progress_transition',
@@ -149,12 +154,14 @@ export async function transitionToInProgress(
   await rc.env.DATABASE.prepare(
     `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
      VALUES (?, ?, 'delegated', 'in_progress', 'system', NULL, ?, ?)`
-  ).bind(
-    ulid(),
-    state.taskId,
-    `Agent session ${state.stepResults.agentSessionId} created. Task execution started.`,
-    now,
-  ).run();
+  )
+    .bind(
+      ulid(),
+      state.taskId,
+      `Agent session ${state.stepResults.agentSessionId} created. Task execution started.`,
+      now
+    )
+    .run();
 
   log.info('task_runner_do.step.in_progress', {
     taskId: state.taskId,
@@ -197,7 +204,7 @@ export async function transitionToInProgress(
 export async function failTask(
   state: TaskRunnerState,
   errorMessage: string,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<void> {
   const now = new Date().toISOString();
 
@@ -209,12 +216,16 @@ export async function failTask(
   });
 
   // Check current status before failing (idempotent)
-  const task = await rc.env.DATABASE.prepare(
-    `SELECT status, mission_id FROM tasks WHERE id = ?`
-  ).bind(state.taskId).first<{ status: string; mission_id: string | null }>();
+  const task = await rc.env.DATABASE.prepare(`SELECT status, mission_id FROM tasks WHERE id = ?`)
+    .bind(state.taskId)
+    .first<{ status: string; mission_id: string | null }>();
 
   const currentStatus = task?.status;
-  if (currentStatus === 'failed' || currentStatus === 'completed' || currentStatus === 'cancelled') {
+  if (
+    currentStatus === 'failed' ||
+    currentStatus === 'completed' ||
+    currentStatus === 'cancelled'
+  ) {
     // Already terminal — skip
     state.completed = true;
     await rc.ctx.storage.put('state', state);
@@ -227,7 +238,9 @@ export async function failTask(
   await rc.env.DATABASE.prepare(
     `UPDATE tasks SET status = 'failed', execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
      WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled')`
-  ).bind(errorMessage, now, now, state.taskId).run();
+  )
+    .bind(errorMessage, now, now, state.taskId)
+    .run();
 
   // Sync trigger execution status (best-effort) — without this, cron triggers
   // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
@@ -237,7 +250,9 @@ export async function failTask(
   await rc.env.DATABASE.prepare(
     `INSERT INTO task_status_events (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
      VALUES (?, ?, ?, 'failed', 'system', NULL, ?, ?)`
-  ).bind(ulid(), state.taskId, currentStatus || 'queued', errorMessage, now).run();
+  )
+    .bind(ulid(), state.taskId, currentStatus || 'queued', errorMessage, now)
+    .run();
 
   // Notify orchestrator of task failure (best-effort) — triggers scheduling cycle
   // so dependent tasks can react to the failure (e.g., unblock blocked_dependency tasks)
@@ -259,31 +274,31 @@ export async function failTask(
     }
   }
 
-  // Write to observability database
-  try {
-    await rc.env.OBSERVABILITY_DATABASE.prepare(
-      `INSERT INTO errors (id, source, level, message, stack, context, user_id, node_id, workspace_id, ip_address, user_agent, timestamp)
-       VALUES (?, 'api', 'error', ?, NULL, ?, ?, ?, ?, NULL, NULL, ?)`
-    ).bind(
-      ulid(),
-      `Task ${state.taskId} failed at step ${state.currentStep}: ${errorMessage}`,
-      JSON.stringify({
-        taskId: state.taskId,
-        projectId: state.projectId,
-        step: state.currentStep,
-        retryCount: state.retryCount,
-      }),
-      state.userId,
-      state.stepResults.nodeId,
-      state.stepResults.workspaceId,
-      now,
-    ).run();
-  } catch (err) {
-    log.error('task_runner_do.observability_write_failed', {
+  // Write bounded, redacted diagnostics without allowing observability to affect task failure.
+  const safeError = redactSensitiveData({
+    message: `Task ${state.taskId} failed at step ${state.currentStep}: ${errorMessage}`,
+    context: {
       taskId: state.taskId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
+      projectId: state.projectId,
+      step: state.currentStep,
+      retryCount: state.retryCount,
+    },
+  });
+  await persistError(
+    rc.env.OBSERVABILITY_DATABASE,
+    {
+      source: 'api',
+      level: 'error',
+      message: safeError.message,
+      context: safeError.context,
+      userId: state.userId,
+      nodeId: state.stepResults.nodeId,
+      workspaceId: state.stepResults.workspaceId,
+      taskId: state.taskId,
+      sessionId: state.stepResults.chatSessionId,
+    },
+    rc.env
+  );
 
   // Inject error into chat session and mark it as failed. The UI also
   // cross-references task.status so even if this RPC fails the session will
@@ -350,14 +365,16 @@ export async function failTask(
  */
 export async function cleanupOnFailure(
   state: TaskRunnerState,
-  rc: TaskRunnerContext,
+  rc: TaskRunnerContext
 ): Promise<void> {
   const now = new Date().toISOString();
 
   if (state.stepResults.workspaceId && state.stepResults.nodeId) {
     const node = await rc.env.DATABASE.prepare(
       `SELECT runtime FROM nodes WHERE id = ? AND user_id = ?`
-    ).bind(state.stepResults.nodeId, state.userId).first<{ runtime: string | null }>();
+    )
+      .bind(state.stepResults.nodeId, state.userId)
+      .first<{ runtime: string | null }>();
 
     if (node?.runtime === 'cf-container') {
       try {
@@ -383,7 +400,7 @@ export async function cleanupOnFailure(
         state.stepResults.nodeId,
         state.stepResults.workspaceId,
         rc.env,
-        state.userId,
+        state.userId
       );
     } catch (err) {
       log.error('task_runner_do.cleanup.workspace_stop_failed', {
@@ -394,7 +411,9 @@ export async function cleanupOnFailure(
 
     await rc.env.DATABASE.prepare(
       `UPDATE workspaces SET status = 'stopped', updated_at = ? WHERE id = ?`
-    ).bind(now, state.stepResults.workspaceId).run();
+    )
+      .bind(now, state.stepResults.workspaceId)
+      .run();
 
     // Stop compute usage metering (best-effort)
     try {
@@ -415,8 +434,9 @@ export async function cleanupOnFailure(
     try {
       const doId = rc.env.NODE_LIFECYCLE.idFromName(state.stepResults.nodeId);
       const stub = rc.env.NODE_LIFECYCLE.get(doId);
-      await (stub as unknown as import('../node-lifecycle').NodeLifecycle)
-        .scheduleWorkspaceDeletion(state.stepResults.workspaceId, state.userId);
+      await (
+        stub as unknown as import('../node-lifecycle').NodeLifecycle
+      ).scheduleWorkspaceDeletion(state.stepResults.workspaceId, state.userId);
     } catch (err) {
       log.warn('task_runner_do.cleanup.schedule_deletion_failed', {
         taskId: state.taskId,
@@ -450,8 +470,14 @@ export async function cleanupOnFailure(
         const { NodeLifecycle } = await import('../node-lifecycle');
         void NodeLifecycle; // imported for type only; DO stub is from env binding
         const doId = rc.env.NODE_LIFECYCLE.idFromName(state.stepResults.nodeId);
-        const stub = rc.env.NODE_LIFECYCLE.get(doId) as DurableObjectStub<import('../node-lifecycle').NodeLifecycle>;
-        await stub.markIdle(state.stepResults.nodeId, state.userId, state.config.projectScaling?.warmNodeTimeoutMs);
+        const stub = rc.env.NODE_LIFECYCLE.get(doId) as DurableObjectStub<
+          import('../node-lifecycle').NodeLifecycle
+        >;
+        await stub.markIdle(
+          state.stepResults.nodeId,
+          state.userId,
+          state.config.projectScaling?.warmNodeTimeoutMs
+        );
 
         log.info('task_runner_do.cleanup.node_marked_warm_direct', {
           taskId: state.taskId,
