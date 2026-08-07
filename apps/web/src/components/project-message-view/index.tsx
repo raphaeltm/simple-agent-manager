@@ -450,7 +450,7 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
 
-      {/* Resume error banner */}
+      {/* Resume / delivery error banner with retry */}
       {lc.resumeError && (
         <div
           role="alert"
@@ -459,13 +459,27 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           <span className="min-w-0 flex-1 break-words [overflow-wrap:anywhere]">
             {lc.resumeError}
           </span>
-          <button
-            type="button"
-            className="ml-auto shrink-0 px-2 py-1 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer hover:bg-surface-raised"
-            onClick={lc.clearResumeError}
-          >
-            Dismiss
-          </button>
+          <div className="flex items-center gap-1.5 shrink-0">
+            {lc.followUp.trim() && (
+              <button
+                type="button"
+                className="px-2 py-1 text-xs font-medium rounded border border-danger/30 bg-transparent cursor-pointer hover:bg-danger-tint text-danger-fg transition-colors"
+                onClick={() => {
+                  lc.clearResumeError();
+                  void lc.handleSendFollowUp();
+                }}
+              >
+                Retry
+              </button>
+            )}
+            <button
+              type="button"
+              className="px-2 py-1 text-xs font-medium rounded border border-border-default bg-transparent cursor-pointer hover:bg-surface-raised"
+              onClick={lc.clearResumeError}
+            >
+              Dismiss
+            </button>
+          </div>
         </div>
       )}
 
