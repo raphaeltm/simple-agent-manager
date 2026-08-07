@@ -227,7 +227,7 @@ VM failures use a durable local SQLite outbox and a private R2 artifact. Generat
 | `VM_INCIDENT_PENDING_TIMEOUT_MINUTES` | `30`                   | Incomplete-upload timeout and upload-lease duration                            |
 | `VM_INCIDENT_RECONCILE_BATCH_SIZE`    | `50`                   | Maximum artifacts/incidents repaired per scheduled pass (minimum: 6)           |
 
-The VM Agent process accepts the corresponding `ERROR_REPORT_*` overrides for flush interval, batch size/bytes, outbox size and path, SQLite busy timeout, HTTP timeout, retry bounds, attempts, spool path/bytes, artifact bytes, retention, collector timeout/count, document bytes, recursive value depth/items, string bytes, and structured event limit. Generated deployments pass these validated values through cloud-init into the VM Agent systemd service, so overrides apply to newly provisioned nodes. Defaults are listed in `apps/api/.env.example`; the common defaults are a 32 KiB error batch, 1,000-row outbox, 2 MiB artifact, 20 MiB spool, and 24-hour local retention.
+The VM Agent process accepts the corresponding `ERROR_REPORT_*` overrides for flush interval, batch size/bytes, outbox size and path, SQLite busy timeout, HTTP timeout, retry bounds, attempts, spool path/bytes, artifact bytes, retention, collector timeout/count/concurrency, document bytes, recursive value depth/items, string bytes, structured event limit, response-read bytes, and persisted-error bytes. Generated deployments pass these validated values through cloud-init into the VM Agent systemd service, so overrides apply to newly provisioned nodes. Defaults are listed in `apps/api/.env.example`; the common defaults are a 32 KiB error batch, 1,000-row outbox, 2 MiB artifact, 20 MiB spool, and 24-hour local retention.
 
 Pulumi options `diagnosticIncidentPrefix` (default `diagnostic-incidents`) and `diagnosticIncidentTtlDays` (default `7`, any positive integer) configure the private prefix and an independent R2 lifecycle rule. They do not require a separate bucket or manually managed Worker variable. The prefix cannot begin with the application-owned namespaces `agents`, `cli`, `compose-image-artifacts`, `library`, `session-snapshots`, `temp-uploads`, or `tts`, because the lifecycle would otherwise expire unrelated objects.
 
@@ -663,6 +663,7 @@ Applied via cloud-init on each node:
 | `VITE_ANALYTICS_MAX_QUEUE_SIZE`       | `100`              | Max client-side analytics events retained before oldest events drop  |
 | `VITE_ANALYTICS_FLUSH_THRESHOLD`      | `10`               | Client event count that triggers an immediate analytics flush        |
 | `VITE_ANALYTICS_FLUSH_INTERVAL_MS`    | `5000`             | Client analytics background flush interval in milliseconds           |
+| `VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES` | `100`              | Max paginated diagnosis-event pages loaded per browser request        |
 
 ## Analytics
 

@@ -205,6 +205,9 @@ write_files:
       Environment=ERROR_REPORT_MAX_VALUE_ITEMS={{ error_report_max_value_items }}
       Environment=ERROR_REPORT_MAX_STRING_BYTES={{ error_report_max_string_bytes }}
       Environment=ERROR_REPORT_EVENT_LIMIT={{ error_report_event_limit }}
+      Environment=ERROR_REPORT_RESPONSE_MAX_BYTES={{ error_report_response_max_bytes }}
+      Environment=ERROR_REPORT_STORED_ERROR_MAX_BYTES={{ error_report_stored_error_max_bytes }}
+      Environment=ERROR_REPORT_COLLECTOR_CONCURRENCY={{ error_report_collector_concurrency }}
       ExecStart=/usr/local/bin/vm-agent
       Restart=always
       RestartSec=5

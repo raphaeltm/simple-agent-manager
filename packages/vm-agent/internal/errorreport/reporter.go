@@ -91,7 +91,7 @@ func New(apiBaseURL, nodeID, authToken string, cfg Config) *Reporter {
 		snapshotWakeC: make(chan struct{}, 1),
 		snapshotStopC: make(chan struct{}),
 		snapshotDoneC: make(chan struct{}),
-		collectorSem:  make(chan struct{}, 1),
+		collectorSem:  make(chan struct{}, cfg.CollectorWorkers),
 	}
 	r.SetCollectors()
 	if err == nil && cfg.SpoolDir != "" {
@@ -217,7 +217,7 @@ func (r *Reporter) Report(entry ErrorEntry) string {
 
 	err = r.insertEntry(entry, string(contextJSON))
 	if err != nil {
-		slog.Warn("errorreport: durable enqueue failed", "incidentId", entry.IncidentID, "error", boundedError(err))
+		slog.Warn("errorreport: durable enqueue failed", "incidentId", entry.IncidentID, "error", boundedError(err, r.config.StoredErrorBytes))
 		return entry.IncidentID
 	}
 	if entry.Level == "error" {
@@ -306,17 +306,17 @@ func (r *Reporter) flush() {
 		return
 	}
 	if err := r.terminalizeExpired(); err != nil {
-		slog.Warn("errorreport: expiry terminalization failed", "error", boundedError(err))
+		slog.Warn("errorreport: expiry terminalization failed", "error", boundedError(err, r.config.StoredErrorBytes))
 	}
 	if err := r.flushReports(); err != nil {
-		slog.Warn("errorreport: structured incident flush failed", "error", boundedError(err))
+		slog.Warn("errorreport: structured incident flush failed", "error", boundedError(err, r.config.StoredErrorBytes))
 		return
 	}
 	if err := r.flushArtifacts(); err != nil {
-		slog.Warn("errorreport: evidence flush failed", "error", boundedError(err))
+		slog.Warn("errorreport: evidence flush failed", "error", boundedError(err, r.config.StoredErrorBytes))
 	}
 	if err := r.deleteAcknowledged(); err != nil {
-		slog.Warn("errorreport: acknowledged cleanup failed", "error", boundedError(err))
+		slog.Warn("errorreport: acknowledged cleanup failed", "error", boundedError(err, r.config.StoredErrorBytes))
 	}
 }
 
@@ -515,7 +515,7 @@ func (r *Reporter) doRequest(
 		return 0, "", err
 	}
 	defer resp.Body.Close()
-	response, readErr := io.ReadAll(io.LimitReader(resp.Body, 4096))
+	response, readErr := io.ReadAll(io.LimitReader(resp.Body, int64(r.config.ResponseMaxBytes)))
 	if readErr != nil {
 		return resp.StatusCode, "", readErr
 	}

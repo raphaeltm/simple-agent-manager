@@ -177,6 +177,14 @@ describe('deploy reusable workflow', () => {
     }
   });
 
+  it('passes the bounded diagnosis event-page limit into the web build', () => {
+    const build = stepBlock('Build Applications');
+
+    expect(build).toContain(
+      "VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES: ${{ vars.VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES || '100' }}"
+    );
+  });
+
   it('does not fail preflight when GitHub integration secrets are missing', () => {
     const validationBlock = stepBlock('Check Required Configuration');
 

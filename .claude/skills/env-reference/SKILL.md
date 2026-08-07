@@ -283,6 +283,9 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `ERROR_REPORT_MAX_VALUE_DEPTH` / `ERROR_REPORT_MAX_VALUE_ITEMS` — Recursive sanitizer bounds (defaults: 8 / 256)
 - `ERROR_REPORT_MAX_STRING_BYTES` — Per-string sanitizer limit (default: 4096)
 - `ERROR_REPORT_EVENT_LIMIT` — Max structured event or workspace previews collected (default: 100)
+- `ERROR_REPORT_RESPONSE_MAX_BYTES` — Max control-plane response bytes read into a diagnostic error (default: 4096)
+- `ERROR_REPORT_STORED_ERROR_MAX_BYTES` — Max bytes persisted for a durable reporter error (default: 512)
+- `ERROR_REPORT_COLLECTOR_CONCURRENCY` — Max automatic-evidence collectors running concurrently (default: 1)
 
 ### Message Reporting
 

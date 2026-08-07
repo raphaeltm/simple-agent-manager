@@ -327,6 +327,9 @@ type Config struct {
 	ErrorReportValueItems     int           // Recursive evidence item bound (default: 256)
 	ErrorReportStringBytes    int           // Maximum safe evidence string bytes (default: 4096)
 	ErrorReportEventLimit     int           // Maximum structured events in automatic evidence (default: 100)
+	ErrorReportResponseBytes  int           // Maximum control-plane response bytes read for diagnostics (default: 4096)
+	ErrorReportStoredErrBytes int           // Maximum durable last-error bytes (default: 512)
+	ErrorReportCollectorJobs  int           // Maximum concurrent automatic evidence collectors (default: 1)
 
 	// System info collection settings - configurable per constitution principle XI
 	SysInfoDockerTimeout  time.Duration // Timeout for Docker CLI commands in system info (default: 10s)
@@ -628,6 +631,9 @@ func Load() (*Config, error) {
 		ErrorReportValueItems:     getEnvInt("ERROR_REPORT_MAX_VALUE_ITEMS", DefaultErrorReportMaxValueItems),
 		ErrorReportStringBytes:    getEnvInt("ERROR_REPORT_MAX_STRING_BYTES", DefaultErrorReportMaxStringBytes),
 		ErrorReportEventLimit:     getEnvInt("ERROR_REPORT_EVENT_LIMIT", DefaultErrorReportEventLimit),
+		ErrorReportResponseBytes:  getEnvInt("ERROR_REPORT_RESPONSE_MAX_BYTES", DefaultErrorReportResponseMaxBytes),
+		ErrorReportStoredErrBytes: getEnvInt("ERROR_REPORT_STORED_ERROR_MAX_BYTES", DefaultErrorReportStoredErrorBytes),
+		ErrorReportCollectorJobs:  getEnvInt("ERROR_REPORT_COLLECTOR_CONCURRENCY", DefaultErrorReportCollectorWorkers),
 
 		// System info settings - configurable per constitution principle XI
 		SysInfoDockerTimeout:  getEnvDuration("SYSINFO_DOCKER_TIMEOUT", 10*time.Second),

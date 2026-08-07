@@ -139,7 +139,7 @@ Automated triage and superadmin-initiated diagnosis have **separate** daily toke
 
 The agent reads bounded, redacted evidence — recent errors, a health summary, error trends, Worker logs, and related entity state — and returns a written analysis. The panel shows the model, turn count, tokens for that run, and your usage against the daily budget.
 
-Diagnosis runs are **durable**. Starting one returns immediately and the work continues server-side, so closing the tab doesn't kill it. A **Recent diagnosis runs** card lists the last several runs with their status (`queued`, `running`, `succeeded`, `failed`); an in-flight run is marked recoverable after refresh, and a failed one gets a **Retry** button.
+Diagnosis runs are **durable**. Starting one returns immediately and the work continues server-side, so closing the tab doesn't kill it. A **Recent diagnosis runs** card lists the last several runs with their status (`queued`, `running`, `succeeded`, `failed`, `cancelled`); an in-flight run is marked recoverable after refresh and can be cancelled at a durable checkpoint. Failed runs can be retried from the card, while failed or cancelled runs can be retried from their detail page.
 
 When a diagnosis is worth keeping, **Save as draft Idea** files it into a project you choose so it becomes tracked work instead of a panel you have to leave open.
 

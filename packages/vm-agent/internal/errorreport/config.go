@@ -23,6 +23,9 @@ const (
 	DefaultMaxValueDepth    = 8
 	DefaultMaxValueItems    = 256
 	DefaultMaxStringBytes   = 4096
+	DefaultResponseMaxBytes = 4096
+	DefaultStoredErrorBytes = 512
+	DefaultCollectorWorkers = 1
 )
 
 // Config holds bounded settings for durable structured errors and safe evidence.
@@ -47,6 +50,9 @@ type Config struct {
 	MaxValueDepth    int
 	MaxValueItems    int
 	MaxStringBytes   int
+	ResponseMaxBytes int
+	StoredErrorBytes int
+	CollectorWorkers int
 }
 
 func (c Config) withDefaults() Config {
@@ -106,6 +112,15 @@ func (c Config) withDefaults() Config {
 	}
 	if c.MaxStringBytes <= 0 {
 		c.MaxStringBytes = DefaultMaxStringBytes
+	}
+	if c.ResponseMaxBytes <= 0 {
+		c.ResponseMaxBytes = DefaultResponseMaxBytes
+	}
+	if c.StoredErrorBytes <= 0 {
+		c.StoredErrorBytes = DefaultStoredErrorBytes
+	}
+	if c.CollectorWorkers <= 0 {
+		c.CollectorWorkers = DefaultCollectorWorkers
 	}
 	return c
 }

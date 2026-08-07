@@ -50,11 +50,11 @@ export function DiagnosticIncidentCard({ errorId, incident }: DiagnosticIncident
   return (
     <Card className="overflow-hidden">
       <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border-default px-4 py-3">
-        <div>
+        <div className="min-w-0 flex-1">
           <h2 className="text-sm font-semibold">Automatic VM evidence</h2>
-          <p className="mt-1 text-xs text-fg-muted">{statusCopy(incident)}</p>
+          <p className="mt-1 break-words text-xs text-fg-muted">{statusCopy(incident)}</p>
         </div>
-        <span className="rounded-full bg-surface-secondary px-2.5 py-1 text-xs font-semibold uppercase text-fg-primary">
+        <span className="shrink-0 rounded-full bg-surface-secondary px-2.5 py-1 text-xs font-semibold uppercase text-fg-primary">
           {incident?.status ?? 'missing'}
         </span>
       </div>

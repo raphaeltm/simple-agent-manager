@@ -132,6 +132,9 @@ func runDeploymentMode(cfg *config.Config) {
 		MaxValueDepth:    cfg.ErrorReportValueDepth,
 		MaxValueItems:    cfg.ErrorReportValueItems,
 		MaxStringBytes:   cfg.ErrorReportStringBytes,
+		ResponseMaxBytes: cfg.ErrorReportResponseBytes,
+		StoredErrorBytes: cfg.ErrorReportStoredErrBytes,
+		CollectorWorkers: cfg.ErrorReportCollectorJobs,
 	})
 	if err := bootReporter.InitError(); err != nil {
 		slog.Error("Failed to initialize durable deployment error reporter", "error", err)

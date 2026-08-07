@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import migrationSql from '../../../src/db/migrations/0106_diagnostic_incidents.sql?raw';
 import expiryIndexMigrationSql from '../../../src/db/migrations/0107_diagnostic_artifact_expiry_index.sql?raw';
+import statusOrderMigrationSql from '../../../src/db/migrations/0108_diagnostic_reconciliation_status_order.sql?raw';
 import type { Env } from '../../../src/env';
 import { reconcileDiagnosticIncidents } from '../../../src/services/diagnostic-incident-reconciliation';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -34,6 +35,7 @@ describe('diagnostic incident reconciliation', () => {
     main = new Database(':memory:');
     main.exec(migrationSql);
     main.exec(expiryIndexMigrationSql);
+    main.exec(statusOrderMigrationSql);
     observability = new Database(':memory:');
     observability.exec(`
       CREATE TABLE platform_errors (
@@ -62,9 +64,30 @@ describe('diagnostic incident reconciliation', () => {
       )
       .all('2026-08-06T20:00:00.000Z', 20) as Array<{ detail: string }>;
 
-    expect(plan.some((step) => step.detail.includes('idx_diagnostic_artifacts_pending_expiry'))).toBe(
-      true
-    );
+    expect(
+      plan.some((step) => step.detail.includes('idx_diagnostic_artifacts_pending_expiry'))
+    ).toBe(true);
+    expect(plan.some((step) => step.detail.includes('USE TEMP B-TREE'))).toBe(false);
+  });
+
+  it('uses the status-order index for bounded reconciliation scans', () => {
+    const plan = main
+      .prepare(
+        `EXPLAIN QUERY PLAN
+         SELECT id, incident_id, node_id, status, object_key, checksum_sha256, expected_bytes
+         FROM diagnostic_artifacts
+         WHERE status = 'pending' AND datetime(updated_at) < datetime(?)
+           AND (upload_lease_id IS NULL OR datetime(upload_lease_expires_at) <= datetime(?))
+         ORDER BY datetime(updated_at) ASC, id ASC LIMIT ?`
+      )
+      .all('2026-08-06T20:00:00.000Z', '2026-08-06T20:00:00.000Z', 20) as Array<{
+      detail: string;
+    }>;
+
+    expect(
+      plan.some((step) => step.detail.includes('idx_diagnostic_artifacts_status_updated'))
+    ).toBe(true);
+    expect(plan.some((step) => step.detail.includes('<expr><?'))).toBe(true);
     expect(plan.some((step) => step.detail.includes('USE TEMP B-TREE'))).toBe(false);
   });
 

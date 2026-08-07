@@ -61,7 +61,7 @@ const ERROR = {
   id: ERROR_ID,
   source: 'vm-agent',
   level: 'error',
-  message: 'Workspace transition failed for café deployment — <script> is text',
+  message: `Workspace transition failed for café deployment — <script> is text ${'unbroken-diagnostic-context-'.repeat(12)}`,
   stack: 'Error: transition failed\n    at reconcile (/worker/src/reconcile.ts:42:7)',
   context: { requestId: 'req-debug', retry: 3 },
   userId: 'visible-to-admin',
@@ -236,6 +236,10 @@ async function setup(
   let paginatedRequestCount = 0;
   let activeDetailRequestCount = 0;
   let activePageRequestCount = 0;
+  let releaseActivePage: (() => void) | null = null;
+  const activePageGate = new Promise<void>((resolve) => {
+    releaseActivePage = resolve;
+  });
   const activeIncident = behavior.incident === undefined ? INCIDENT : behavior.incident;
   const activeError = { ...ERROR, incident: activeIncident };
   const activeSucceededRun = { ...SUCCEEDED_RUN, incident: activeIncident };
@@ -312,7 +316,7 @@ async function setup(
       behavior.activePollingEvents
     ) {
       activePageRequestCount++;
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      await activePageGate;
       return respond(200, {
         events: Array.from({ length: 5 }, (_, index) => ({
           ...diagnosisEvent(index + 101),
@@ -323,7 +327,11 @@ async function setup(
     }
     if (path === '/api/admin/observability/diagnosis-runs/run-running-1') {
       activeDetailRequestCount++;
-      const eventCount = behavior.activePollingEvents && activeDetailRequestCount > 1 ? 100 : 2;
+      const eventCount = behavior.activePollingEvents
+        ? activeDetailRequestCount > 1
+          ? 100
+          : 2
+        : 0;
       return respond(200, {
         run: { ...RUNNING_RUN, status: runningStatus },
         events: Array.from({ length: eventCount }, (_, index) => ({
@@ -396,6 +404,7 @@ async function setup(
     activePageRequestCount: () => activePageRequestCount,
     cancelRequestCount: () => cancelRequestCount,
     paginatedRequestCount: () => paginatedRequestCount,
+    releaseActivePage: () => releaseActivePage?.(),
   };
 }
 
@@ -456,6 +465,18 @@ test.describe('Deployment diagnosis visual audit', () => {
     await assertAdminViewportIsStable(page);
     await screenshot(page, `debug-diagnosis-budget-error-${name}`);
     await assertNoOverflow(page);
+    const message = page.getByText(/Workspace transition failed for café deployment/);
+    await expect(message).toBeVisible();
+    expect(
+      await message.evaluate((element) => ({
+        clientWidth: element.clientWidth,
+        scrollWidth: element.scrollWidth,
+        whiteSpace: getComputedStyle(element).whiteSpace,
+      }))
+    ).toMatchObject({ whiteSpace: 'normal' });
+    expect(await message.evaluate((element) => element.scrollWidth <= element.clientWidth)).toBe(
+      true
+    );
   });
 
   test('shows recoverable active and cancellation states without overflow', async ({ page }) => {
@@ -488,7 +509,8 @@ test.describe('Deployment diagnosis visual audit', () => {
     await expect(events).toHaveCount(2);
     await expect.poll(requests.activePageRequestCount, { timeout: 5_000 }).toBe(1);
     expect(requests.activeDetailRequestCount()).toBeGreaterThanOrEqual(2);
-    await expect(events).toHaveCount(2);
+    expect(await events.count()).toBe(2);
+    requests.releaseActivePage();
     await expect(events).toHaveCount(105);
     await assertNoOverflow(page);
   });
@@ -594,7 +616,7 @@ test.describe('Deployment diagnosis visual audit', () => {
         status: 'failed',
         artifactCount: 0,
         artifacts: [],
-        failureReason: 'Snapshot quota reached',
+        failureReason: `Snapshot quota reached ${'unbroken-failure-context-'.repeat(12)}`,
       },
       copy: 'Snapshot quota reached',
     },
@@ -609,7 +631,13 @@ test.describe('Deployment diagnosis visual audit', () => {
       await setup(page, 200, 'complete', { incident: state.incident as IncidentFixture });
       await page.goto('/admin/diagnoses/run-succeeded-1');
       await expect(page.getByRole('heading', { name: 'Automatic VM evidence' })).toBeVisible();
-      await expect(page.getByText(new RegExp(state.copy, 'i'))).toBeVisible();
+      const stateCopy = page.getByText(new RegExp(state.copy, 'i'));
+      await expect(stateCopy).toBeVisible();
+      if (state.label === 'failed') {
+        expect(
+          await stateCopy.evaluate((element) => element.scrollWidth <= element.clientWidth)
+        ).toBe(true);
+      }
       await expect(page.getByRole('button', { name: 'Download safe evidence' })).toHaveCount(0);
       await assertNoOverflow(page);
       await screenshot(page, `debug-incident-${state.label}-${name}`);

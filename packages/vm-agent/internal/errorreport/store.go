@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	_ "modernc.org/sqlite"
 )
@@ -349,7 +350,7 @@ func (r *Reporter) markAttempt(rows []outboxRow, reportErr error, permanent bool
 		_, err := tx.Exec(`UPDATE error_report_outbox SET attempts = ?, last_error = ?,
 			next_attempt_at = ?, report_ack = MAX(report_ack, ?), artifact_ack = MAX(artifact_ack, ?),
 			artifact_state = CASE WHEN ? = 1 AND artifact_required = 1 THEN 'failed' ELSE artifact_state END
-			WHERE id = ?`, attempts, boundedError(reportErr),
+			WHERE id = ?`, attempts, boundedError(reportErr, r.config.StoredErrorBytes),
 			time.Now().UTC().Add(delay).Format(time.RFC3339Nano), reportAck, artifactAck,
 			boolInt(permanent || attempts >= r.config.MaxAttempts), row.id)
 		if err != nil {
@@ -371,13 +372,16 @@ func retryDelay(initial, maximum time.Duration, attempts int) time.Duration {
 	return delay
 }
 
-func boundedError(err error) string {
+func boundedError(err error, maxBytes int) string {
 	if err == nil {
 		return ""
 	}
 	message := err.Error()
-	if len(message) > 512 {
-		message = message[:512]
+	if len(message) > maxBytes {
+		message = message[:maxBytes]
+		for !utf8.ValidString(message) {
+			message = message[:len(message)-1]
+		}
 	}
 	return message
 }
@@ -394,7 +398,7 @@ func (r *Reporter) markSnapshotFailed(incidentID string, snapshotErr error) {
 	_, err := r.db.Exec(`UPDATE error_report_outbox SET artifact_state = 'failed',
 		last_error = ?, manifest_json = '{"version":1,"collectors":[],"unavailable":true}',
 		preview_json = '{}' WHERE incident_id = ? AND artifact_state = 'pending'`,
-		boundedError(snapshotErr), incidentID)
+		boundedError(snapshotErr, r.config.StoredErrorBytes), incidentID)
 	if err != nil {
 		return
 	}
@@ -406,7 +410,7 @@ func (r *Reporter) markArtifactUnavailable(row outboxRow, artifactErr error) err
 		last_error = ?, next_attempt_at = ?,
 		manifest_json = '{"version":1,"collectors":[],"unavailable":true}',
 		preview_json = '{}' WHERE id = ? AND artifact_ack = 0`,
-		boundedError(artifactErr), time.Now().UTC().Format(time.RFC3339Nano), row.id)
+		boundedError(artifactErr, r.config.StoredErrorBytes), time.Now().UTC().Format(time.RFC3339Nano), row.id)
 	if err == nil && r.isPrivateSpoolPath(row.spoolPath) && r.spoolRoot != nil {
 		_ = r.spoolRoot.Remove(filepath.Base(row.spoolPath))
 	}

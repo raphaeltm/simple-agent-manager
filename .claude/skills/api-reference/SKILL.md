@@ -113,7 +113,7 @@ The MCP `create_trigger` tool intentionally creates cron triggers only. Generic 
 
 - `POST /api/nodes/:id/ready` — Node Agent ready callback
 - `POST /api/nodes/:id/heartbeat` — Node Agent heartbeat callback
-- `POST /api/nodes/:id/errors` — VM agent error report batch. An optional stable ULID `incidentId` makes persistence idempotent and creates the same-installation diagnostic incident before acknowledgment.
+- `POST /api/nodes/:id/errors` — VM agent error report batch. An optional stable ULID `incidentId` makes persistence idempotent; error-level entries create the same-installation diagnostic incident before acknowledgment.
 - `POST /api/nodes/:id/diagnostic-incidents/:incidentId/artifacts` — Register bounded, redacted VM evidence metadata using the node callback JWT
 - `PUT /api/nodes/:id/diagnostic-incidents/:incidentId/artifacts/:artifactId/content` — Stream the registered gzip artifact into private R2 storage using the node callback JWT
 - `POST /api/workspaces/:id/ready` — Workspace ready callback

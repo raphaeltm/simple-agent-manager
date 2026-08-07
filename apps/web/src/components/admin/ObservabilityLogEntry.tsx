@@ -118,7 +118,7 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({
         </div>
       </div>
       {/* Message on its own line for better mobile readability */}
-      <div className="text-sm text-fg-primary mt-1 overflow-hidden text-ellipsis whitespace-nowrap">
+      <div className="mt-1 min-w-0 whitespace-normal break-words text-sm text-fg-primary">
         {entry.message}
       </div>
 

@@ -2384,6 +2384,14 @@ export const diagnosticArtifacts = sqliteTable(
       table.createdAt
     ),
     expiryIdx: index('idx_diagnostic_artifacts_expiry').on(table.status, table.expiresAt),
+    pendingExpiryIdx: index('idx_diagnostic_artifacts_pending_expiry')
+      .on(table.expiresAt)
+      .where(sql`${table.status} <> 'expired'`),
+    statusUpdatedIdx: index('idx_diagnostic_artifacts_status_updated').on(
+      table.status,
+      sql`datetime(${table.updatedAt})`,
+      table.id
+    ),
   })
 );
 

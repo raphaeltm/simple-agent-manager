@@ -2062,6 +2062,9 @@ describe('VM error reporter environment', () => {
     );
     expect(defaults).toContain('Environment=ERROR_REPORT_DB_BUSY_TIMEOUT=5s');
     expect(defaults).toContain('Environment=ERROR_REPORT_EVENT_LIMIT=100');
+    expect(defaults).toContain('Environment=ERROR_REPORT_RESPONSE_MAX_BYTES=4096');
+    expect(defaults).toContain('Environment=ERROR_REPORT_STORED_ERROR_MAX_BYTES=512');
+    expect(defaults).toContain('Environment=ERROR_REPORT_COLLECTOR_CONCURRENCY=1');
 
     const overridden = generateCloudInit(
       baseVariables({
@@ -2070,6 +2073,9 @@ describe('VM error reporter environment', () => {
         errorReportDbPath: '/var/lib/vm-agent/custom-errors.db',
         errorReportDbBusyTimeout: '750ms',
         errorReportEventLimit: '75',
+        errorReportResponseMaxBytes: '2048',
+        errorReportStoredErrorMaxBytes: '256',
+        errorReportCollectorConcurrency: '2',
       }),
       { validateSize: false }
     );
@@ -2080,6 +2086,9 @@ describe('VM error reporter environment', () => {
     );
     expect(overridden).toContain('Environment=ERROR_REPORT_DB_BUSY_TIMEOUT=750ms');
     expect(overridden).toContain('Environment=ERROR_REPORT_EVENT_LIMIT=75');
+    expect(overridden).toContain('Environment=ERROR_REPORT_RESPONSE_MAX_BYTES=2048');
+    expect(overridden).toContain('Environment=ERROR_REPORT_STORED_ERROR_MAX_BYTES=256');
+    expect(overridden).toContain('Environment=ERROR_REPORT_COLLECTOR_CONCURRENCY=2');
   });
 
   it('rejects unsafe duration, numeric, and path overrides', () => {

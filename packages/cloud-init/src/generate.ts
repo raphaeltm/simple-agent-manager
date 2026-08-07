@@ -262,6 +262,9 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
     ['errorReportMaxValueItems', variables.errorReportMaxValueItems],
     ['errorReportMaxStringBytes', variables.errorReportMaxStringBytes],
     ['errorReportEventLimit', variables.errorReportEventLimit],
+    ['errorReportResponseMaxBytes', variables.errorReportResponseMaxBytes],
+    ['errorReportStoredErrorMaxBytes', variables.errorReportStoredErrorMaxBytes],
+    ['errorReportCollectorConcurrency', variables.errorReportCollectorConcurrency],
   ] as const) {
     const numeric = Number(value);
     if (
@@ -375,6 +378,9 @@ export interface CloudInitVariables {
   errorReportMaxValueItems?: string;
   errorReportMaxStringBytes?: string;
   errorReportEventLimit?: string;
+  errorReportResponseMaxBytes?: string;
+  errorReportStoredErrorMaxBytes?: string;
+  errorReportCollectorConcurrency?: string;
 }
 
 /**
@@ -451,6 +457,9 @@ export function generateCloudInit(
     '{{ error_report_max_value_items }}': variables.errorReportMaxValueItems ?? '256',
     '{{ error_report_max_string_bytes }}': variables.errorReportMaxStringBytes ?? '4096',
     '{{ error_report_event_limit }}': variables.errorReportEventLimit ?? '100',
+    '{{ error_report_response_max_bytes }}': variables.errorReportResponseMaxBytes ?? '4096',
+    '{{ error_report_stored_error_max_bytes }}': variables.errorReportStoredErrorMaxBytes ?? '512',
+    '{{ error_report_collector_concurrency }}': variables.errorReportCollectorConcurrency ?? '1',
   };
 
   // Use function replacement to prevent $-pattern interpretation in values.

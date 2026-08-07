@@ -54,8 +54,9 @@ vi.mock('../../../src/services/jwt', () => ({
   signNodeCallbackToken: vi.fn().mockResolvedValue('callback-token'),
 }));
 
+const generateCloudInit = vi.fn(() => 'cloud-init-yaml');
 vi.mock('@simple-agent-manager/cloud-init', () => ({
-  generateCloudInit: () => 'cloud-init-yaml',
+  generateCloudInit: (...args: unknown[]) => generateCloudInit(...args),
   validateCloudInitSize: () => true,
 }));
 
@@ -87,6 +88,9 @@ const ENV = {
   DATABASE: {},
   OBSERVABILITY_DATABASE: {},
   BASE_DOMAIN: 'example.com',
+  ERROR_REPORT_RESPONSE_MAX_BYTES: '2048',
+  ERROR_REPORT_STORED_ERROR_MAX_BYTES: '256',
+  ERROR_REPORT_COLLECTOR_CONCURRENCY: '2',
 } as unknown as Parameters<typeof provisionNode>[1];
 
 beforeEach(() => {
@@ -109,6 +113,18 @@ beforeEach(() => {
 });
 
 describe('provisionNode backend DNS records', () => {
+  it('passes configurable reporter bounds into generated cloud-init', async () => {
+    await provisionNode('node-1', ENV);
+
+    expect(generateCloudInit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        errorReportResponseMaxBytes: '2048',
+        errorReportStoredErrorMaxBytes: '256',
+        errorReportCollectorConcurrency: '2',
+      }),
+    );
+  });
+
   it('creates and stores a backend DNS record for deployment nodes with a VM IP', async () => {
     await provisionNode(
       'node-1',

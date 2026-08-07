@@ -112,7 +112,7 @@ async function reconcilePending(
      FROM diagnostic_artifacts
      WHERE status = 'pending' AND datetime(updated_at) < datetime(?)
        AND (upload_lease_id IS NULL OR datetime(upload_lease_expires_at) <= datetime(?))
-     ORDER BY updated_at ASC LIMIT ?`
+     ORDER BY datetime(updated_at) ASC, id ASC LIMIT ?`
   )
     .bind(staleBefore, checkedAt, limit)
     .all<ReconcileArtifactRow>();

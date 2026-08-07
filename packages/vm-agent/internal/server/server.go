@@ -373,6 +373,9 @@ func New(cfg *config.Config) (*Server, error) {
 		MaxValueDepth:    cfg.ErrorReportValueDepth,
 		MaxValueItems:    cfg.ErrorReportValueItems,
 		MaxStringBytes:   cfg.ErrorReportStringBytes,
+		ResponseMaxBytes: cfg.ErrorReportResponseBytes,
+		StoredErrorBytes: cfg.ErrorReportStoredErrBytes,
+		CollectorWorkers: cfg.ErrorReportCollectorJobs,
 	})
 	if err := errorReporter.InitError(); err != nil {
 		jwtValidator.Close()

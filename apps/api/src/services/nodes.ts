@@ -266,6 +266,9 @@ export async function provisionNode(
       errorReportMaxValueItems: env.ERROR_REPORT_MAX_VALUE_ITEMS,
       errorReportMaxStringBytes: env.ERROR_REPORT_MAX_STRING_BYTES,
       errorReportEventLimit: env.ERROR_REPORT_EVENT_LIMIT,
+      errorReportResponseMaxBytes: env.ERROR_REPORT_RESPONSE_MAX_BYTES,
+      errorReportStoredErrorMaxBytes: env.ERROR_REPORT_STORED_ERROR_MAX_BYTES,
+      errorReportCollectorConcurrency: env.ERROR_REPORT_COLLECTOR_CONCURRENCY,
     });
 
     if (!validateCloudInitSize(cloudInit)) {

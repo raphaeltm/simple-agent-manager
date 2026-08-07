@@ -747,4 +747,42 @@ func TestDefaultConfig(t *testing.T) {
 	if reporter.config.ArtifactMaxBytes != DefaultArtifactMaxBytes || reporter.config.SpoolMaxBytes != DefaultSpoolMaxBytes {
 		t.Fatalf("unexpected evidence defaults: %#v", reporter.config)
 	}
+	if reporter.config.ResponseMaxBytes != DefaultResponseMaxBytes ||
+		reporter.config.StoredErrorBytes != DefaultStoredErrorBytes ||
+		cap(reporter.collectorSem) != DefaultCollectorWorkers {
+		t.Fatalf("unexpected transport/evidence worker defaults: %#v", reporter.config)
+	}
+}
+
+func TestConfigurableResponseErrorAndCollectorBounds(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "response-body-that-must-be-bounded")
+	}))
+	defer server.Close()
+	cfg := testConfig(t)
+	cfg.ResponseMaxBytes = 8
+	cfg.StoredErrorBytes = 5
+	cfg.CollectorWorkers = 3
+	reporter := New(server.URL, "node-1", "token", cfg)
+	defer reporter.Shutdown()
+
+	status, body, err := reporter.doRequest(
+		context.Background(),
+		http.MethodGet,
+		server.URL,
+		"token",
+		"application/json",
+		nil,
+		-1,
+		"",
+	)
+	if err != nil || status != http.StatusOK || body != "response" {
+		t.Fatalf("status=%d body=%q error=%v", status, body, err)
+	}
+	if got := boundedError(fmt.Errorf("ééé"), reporter.config.StoredErrorBytes); got != "éé" {
+		t.Fatalf("bounded unicode error=%q, want two complete characters", got)
+	}
+	if got := cap(reporter.collectorSem); got != 3 {
+		t.Fatalf("collector concurrency=%d, want 3", got)
+	}
 }

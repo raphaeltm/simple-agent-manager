@@ -1,4 +1,5 @@
 import { mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 import { expect, type Page, type Route, test } from '@playwright/test';
 
@@ -39,7 +40,7 @@ export async function screenshot(page: Page, name: string) {
   await page.waitForTimeout(600);
   const viewport = page.viewportSize();
   const suffix = viewport ? `-${viewport.width}x${viewport.height}` : '';
-  const screenshotDir = `${process.cwd()}/.codex/tmp/playwright-screenshots`;
+  const screenshotDir = resolve(process.cwd(), '../../.codex/tmp/playwright-screenshots');
   mkdirSync(screenshotDir, { recursive: true });
   await page.screenshot({
     path: `${screenshotDir}/${name}${suffix}.png`,

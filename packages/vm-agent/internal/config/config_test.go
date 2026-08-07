@@ -165,6 +165,9 @@ func TestLoadDurableErrorReportGuardrails(t *testing.T) {
 	t.Setenv("ERROR_REPORT_MAX_VALUE_ITEMS", "77")
 	t.Setenv("ERROR_REPORT_MAX_STRING_BYTES", "888")
 	t.Setenv("ERROR_REPORT_EVENT_LIMIT", "9")
+	t.Setenv("ERROR_REPORT_RESPONSE_MAX_BYTES", "1234")
+	t.Setenv("ERROR_REPORT_STORED_ERROR_MAX_BYTES", "321")
+	t.Setenv("ERROR_REPORT_COLLECTOR_CONCURRENCY", "3")
 
 	cfg, err := Load()
 	if err != nil {
@@ -180,7 +183,8 @@ func TestLoadDurableErrorReportGuardrails(t *testing.T) {
 		cfg.ErrorReportCollectTimeout != 4*time.Second || cfg.ErrorReportCollectorDocs != 5 ||
 		cfg.ErrorReportDocumentBytes != 6000 || cfg.ErrorReportValueDepth != 6 ||
 		cfg.ErrorReportValueItems != 77 || cfg.ErrorReportStringBytes != 888 ||
-		cfg.ErrorReportEventLimit != 9 {
+		cfg.ErrorReportEventLimit != 9 || cfg.ErrorReportResponseBytes != 1234 ||
+		cfg.ErrorReportStoredErrBytes != 321 || cfg.ErrorReportCollectorJobs != 3 {
 		t.Fatalf("unexpected durable error report config: %#v", cfg)
 	}
 	if cfg.ErrorReportDBPath != filepath.Join(persistenceDir, "error-reports.db") ||
@@ -195,6 +199,27 @@ func TestValidateRejectsUnsafeErrorReportEventLimits(t *testing.T) {
 	cfg.ErrorReportEventLimit = -1
 	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "ERROR_REPORT_EVENT_LIMIT") {
 		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestValidateRejectsUnsafeErrorReportBounds(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		set  func(*Config)
+	}{
+		{"response bytes", "ERROR_REPORT_RESPONSE_MAX_BYTES", func(cfg *Config) { cfg.ErrorReportResponseBytes = 0 }},
+		{"stored error bytes", "ERROR_REPORT_STORED_ERROR_MAX_BYTES", func(cfg *Config) { cfg.ErrorReportStoredErrBytes = 0 }},
+		{"collector concurrency", "ERROR_REPORT_COLLECTOR_CONCURRENCY", func(cfg *Config) { cfg.ErrorReportCollectorJobs = 0 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := validConfig()
+			test.set(cfg)
+			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), test.env) {
+				t.Fatalf("error=%v", err)
+			}
+		})
 	}
 }
 
@@ -839,6 +864,9 @@ func validConfig() *Config {
 		ACPCredentialSyncTimeout:      DefaultACPCredentialSyncTimeout,
 		ACPActivityReportTimeout:      DefaultACPActivityReportTimeout,
 		WorkspaceReadyCallbackTimeout: DefaultWorkspaceReadyCallbackTimeout,
+		ErrorReportResponseBytes:      DefaultErrorReportResponseMaxBytes,
+		ErrorReportStoredErrBytes:     DefaultErrorReportStoredErrorBytes,
+		ErrorReportCollectorJobs:      DefaultErrorReportCollectorWorkers,
 		DevcontainerCachePushTimeout:  DefaultDevcontainerCachePushTimeout,
 		DeployPreflightCommandTimeout: DefaultDeployPreflightCommandTimeout,
 		LogStreamPingWriteTimeout:     DefaultLogStreamPingWriteTimeout,

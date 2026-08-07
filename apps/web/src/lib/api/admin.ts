@@ -23,6 +23,15 @@ import { DEFAULT_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES } from '@simple-agent-manager/s
 
 import { API_URL, request } from './client';
 
+const parsedDiagnosisEventMaxPages = Number.parseInt(
+  import.meta.env.VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES ?? '',
+  10
+);
+const diagnosisEventMaxPages =
+  Number.isSafeInteger(parsedDiagnosisEventMaxPages) && parsedDiagnosisEventMaxPages > 0
+    ? parsedDiagnosisEventMaxPages
+    : DEFAULT_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES;
+
 // =============================================================================
 // Admin
 // =============================================================================
@@ -167,7 +176,7 @@ export async function fetchAdminDebugDiagnosisRun(
   let pages = 1;
   while (nextCursor !== null) {
     const pageCursor = nextCursor;
-    if (seenCursors.has(pageCursor) || pages >= DEFAULT_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES) {
+    if (seenCursors.has(pageCursor) || pages >= diagnosisEventMaxPages) {
       throw new Error('Diagnosis event pagination did not make bounded forward progress');
     }
     seenCursors.add(pageCursor);

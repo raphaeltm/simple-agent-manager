@@ -332,6 +332,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   ERROR_REPORT_MAX_VALUE_ITEMS?: string;
   ERROR_REPORT_MAX_STRING_BYTES?: string;
   ERROR_REPORT_EVENT_LIMIT?: string;
+  ERROR_REPORT_RESPONSE_MAX_BYTES?: string;
+  ERROR_REPORT_STORED_ERROR_MAX_BYTES?: string;
+  ERROR_REPORT_COLLECTOR_CONCURRENCY?: string;
   VM_INCIDENT_R2_PREFIX?: string; // Private R2 prefix for safe VM incident artifacts (default: diagnostic-incidents)
   VM_INCIDENT_ARTIFACT_MAX_BYTES?: string; // Max single compressed artifact bytes (default: 2097152)
   VM_INCIDENT_REGISTRATION_MAX_BYTES?: string; // Max registration JSON bytes (default: 262144)
