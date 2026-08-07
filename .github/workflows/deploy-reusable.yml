@@ -124,6 +124,24 @@ jobs:
         with:
           ref: ${{ inputs.target_commit_sha || github.sha }}
 
+      - name: Resolve and Verify Deployment SHA
+        id: deploy-sha
+        env:
+          EXPECTED_DEPLOY_SHA: ${{ inputs.target_commit_sha || github.sha }}
+          SKIP_AGENT: ${{ inputs.skip_agent }}
+        run: |
+          ACTUAL_DEPLOY_SHA=$(git rev-parse HEAD)
+          if [ "$ACTUAL_DEPLOY_SHA" != "$EXPECTED_DEPLOY_SHA" ]; then
+            echo "::error::Checked out SHA $ACTUAL_DEPLOY_SHA does not match verified deployment SHA $EXPECTED_DEPLOY_SHA"
+            exit 1
+          fi
+          echo "value=$ACTUAL_DEPLOY_SHA" >> "$GITHUB_OUTPUT"
+          if [ "$SKIP_AGENT" = "true" ]; then
+            echo "agent_version=" >> "$GITHUB_OUTPUT"
+          else
+            echo "agent_version=$ACTUAL_DEPLOY_SHA" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Setup pnpm
         uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
@@ -336,6 +354,7 @@ jobs:
           CLOUDFLARE_API_USER_SERVICE_KEY: ${{ secrets.CF_ORIGIN_CA_KEY }}
           PULUMI_REFRESH_MAX_ATTEMPTS: ${{ vars.PULUMI_REFRESH_MAX_ATTEMPTS }}
           PULUMI_REFRESH_RETRY_DELAY_SECONDS: ${{ vars.PULUMI_REFRESH_RETRY_DELAY_SECONDS }}
+          PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES: ${{ vars.PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES }}
 
       - name: Pulumi Up
         if: ${{ inputs.dry_run != true }}
@@ -363,7 +382,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
           RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
-          VM_AGENT_REQUIRED_VERSION: ${{ inputs.skip_agent == true && '' || github.sha }}
+          VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
           SETUP_FORCE: ${{ vars.SETUP_FORCE }}
           HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
@@ -499,12 +518,14 @@ jobs:
         if: ${{ inputs.dry_run != true }}
         run: |
           BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          make -C packages/vm-agent prepare-container VERSION="$GITHUB_SHA" BUILD_DATE="$BUILD_DATE"
+          make -C packages/vm-agent prepare-container VERSION="$DEPLOY_SHA" BUILD_DATE="$BUILD_DATE"
           cat apps/api/container-artifacts/vm-agent-version.json
           echo "### CF Container runtime artifact" >> "$GITHUB_STEP_SUMMARY"
           echo '```json' >> "$GITHUB_STEP_SUMMARY"
           cat apps/api/container-artifacts/vm-agent-version.json >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
+        env:
+          DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}
 
       - name: Run Database Migrations With Safety Gates
         if: ${{ inputs.dry_run != true }}
@@ -534,7 +555,9 @@ jobs:
         # version string as the container-baked binary (prepare-container above).
         run: |
           BUILD_DATE=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-          make -C packages/vm-agent build-all VERSION="$GITHUB_SHA" BUILD_DATE="$BUILD_DATE"
+          make -C packages/vm-agent build-all VERSION="$DEPLOY_SHA" BUILD_DATE="$BUILD_DATE"
+        env:
+          DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}
 
       - name: Upload VM Agent Binaries
         if: ${{ inputs.dry_run != true && inputs.skip_agent != true }}
@@ -600,7 +623,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
           RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}
-          VM_AGENT_REQUIRED_VERSION: ${{ inputs.skip_agent == true && '' || github.sha }}
+          VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}
           REQUIRE_APPROVAL: ${{ vars.REQUIRE_APPROVAL }}
           SETUP_FORCE: ${{ vars.SETUP_FORCE }}
           HETZNER_BASE_IMAGE: ${{ vars.HETZNER_BASE_IMAGE }}
@@ -828,7 +851,7 @@ jobs:
           elif [ "${{ job.status }}" = "success" ]; then
             echo "## Deployment Complete (${{ inputs.environment }})" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Commit:** \`${{ steps.deploy-sha.outputs.value || inputs.target_commit_sha || github.sha }}\`" >> $GITHUB_STEP_SUMMARY
             echo "**Environment:** ${{ inputs.environment }}" >> $GITHUB_STEP_SUMMARY
             echo "**Base Domain:** ${{ vars.BASE_DOMAIN }}" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
@@ -848,7 +871,7 @@ jobs:
           else
             echo "## Deployment Failed (${{ inputs.environment }})" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
-            echo "**Commit:** \`${{ github.sha }}\`" >> $GITHUB_STEP_SUMMARY
+            echo "**Commit:** \`${{ steps.deploy-sha.outputs.value || inputs.target_commit_sha || github.sha }}\`" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             echo "Check the logs above for error details." >> $GITHUB_STEP_SUMMARY
           fi

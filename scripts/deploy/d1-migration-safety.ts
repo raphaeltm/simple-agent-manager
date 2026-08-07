@@ -208,13 +208,56 @@ export function countProtectedTables(
   });
 }
 
+export function validateCountDecreaseAllowlist(
+  allowlist: CountDecreaseAllowlistEntry[]
+): CountDecreaseAllowlistEntry[] {
+  const keys = new Set<string>();
+  const normalized: CountDecreaseAllowlistEntry[] = [];
+  for (const entry of allowlist) {
+    if (
+      typeof entry.database !== 'string' ||
+      !entry.database.trim() ||
+      typeof entry.table !== 'string' ||
+      !entry.table.trim() ||
+      typeof entry.reviewedBy !== 'string' ||
+      !entry.reviewedBy.trim() ||
+      typeof entry.reason !== 'string' ||
+      !entry.reason.trim()
+    ) {
+      throw new MigrationSafetyError(
+        'Every D1 migration decrease allowlist entry requires non-empty string database, table, reviewedBy, and reason fields'
+      );
+    }
+
+    const normalizedEntry = {
+      database: entry.database.trim(),
+      table: entry.table.trim(),
+      reviewedBy: entry.reviewedBy.trim(),
+      reason: entry.reason.trim(),
+    };
+    const key = `${normalizedEntry.database}:${normalizedEntry.table}`;
+    if (keys.has(key)) {
+      throw new MigrationSafetyError(`Duplicate D1 migration decrease allowlist entry: ${key}`);
+    }
+    keys.add(key);
+    normalized.push(normalizedEntry);
+  }
+
+  return normalized;
+}
+
 export function verifyNoUnexpectedProtectedTableDecrease(
   before: D1TableCount[],
   after: D1TableCount[],
   allowlist: CountDecreaseAllowlistEntry[] = []
 ): void {
   const afterByKey = new Map(after.map((entry) => [`${entry.database}:${entry.table}`, entry]));
-  const allowed = new Map(allowlist.map((entry) => [`${entry.database}:${entry.table}`, entry]));
+  const allowed = new Map(
+    validateCountDecreaseAllowlist(allowlist).map((entry) => [
+      `${entry.database}:${entry.table}`,
+      entry,
+    ])
+  );
   const failures: string[] = [];
 
   for (const pre of before) {
@@ -257,6 +300,7 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
   const cwd = options.cwd ?? APPS_API_DIR;
   const backupTimestamp = options.runner.nowIso();
   const before: D1TableCount[] = [];
+  const allowlist = validateCountDecreaseAllowlist(options.allowlist ?? []);
 
   console.log('Creating D1 time-travel bookmark before migrations...');
   console.log(`Pre-migration timestamp: ${backupTimestamp}`);
@@ -292,7 +336,7 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
       after.push(...countProtectedTables(options.runner, options.environment, db, tables, cwd));
     }
 
-    verifyNoUnexpectedProtectedTableDecrease(before, after, options.allowlist);
+    verifyNoUnexpectedProtectedTableDecrease(before, after, allowlist);
     console.log('Post-migration data integrity check PASSED. No protected table decreases.');
     return backupTimestamp;
   } catch (error) {
@@ -300,7 +344,7 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
     console.error(`Pre-migration timestamp: ${backupTimestamp}`);
     for (const db of options.databases) {
       console.error(
-        `Restore ${db.binding}: wrangler d1 time-travel restore ${db.name} --timestamp=${backupTimestamp}`
+        `Restore ${db.binding}: cd apps/api && pnpm exec wrangler d1 time-travel restore ${db.name} --env ${options.environment} --timestamp=${backupTimestamp}`
       );
     }
     throw error;
@@ -309,11 +353,11 @@ export function runSafeRemoteMigrations(options: SafeRemoteMigrationOptions): st
 
 function parseAllowlist(json: string | undefined): CountDecreaseAllowlistEntry[] {
   if (!json) return [];
-  const parsed = JSON.parse(json) as CountDecreaseAllowlistEntry[];
+  const parsed = JSON.parse(json) as unknown;
   if (!Array.isArray(parsed)) {
     throw new MigrationSafetyError('D1 migration decrease allowlist must be a JSON array');
   }
-  return parsed;
+  return parsed as CountDecreaseAllowlistEntry[];
 }
 
 function parseCliArgs(args: string[]): {

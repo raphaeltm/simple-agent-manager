@@ -132,6 +132,50 @@ describe('D1 migration safety gates', () => {
     ).not.toThrow();
   });
 
+  it('rejects malformed or duplicate decrease allowlist entries before migrations run', () => {
+    const malformedRunner = new FakeRunner({ main: ['users'] }, { 'main:users': [4, 3] });
+
+    expect(() =>
+      runSafeRemoteMigrations({
+        environment: 'production',
+        databases: [{ binding: 'DATABASE', name: 'main' }],
+        runner: malformedRunner,
+        allowlist: [
+          {
+            database: 'main',
+            table: 'users',
+            reviewedBy: '   ',
+            reason: 'planned cleanup',
+          },
+        ],
+      })
+    ).toThrow(/requires non-empty string/);
+    expect(malformedRunner.commands.some((command) => command.includes('migrations apply'))).toBe(
+      false
+    );
+
+    expect(() =>
+      verifyNoUnexpectedProtectedTableDecrease(
+        [count('main', 'DATABASE', 'users', 4)],
+        [count('main', 'DATABASE', 'users', 3)],
+        [
+          {
+            database: 'main',
+            table: 'users',
+            reviewedBy: 'reviewer@example.com',
+            reason: 'planned cleanup',
+          },
+          {
+            database: 'main',
+            table: 'users',
+            reviewedBy: 'reviewer@example.com',
+            reason: 'duplicate entry',
+          },
+        ]
+      )
+    ).toThrow(/Duplicate D1 migration decrease allowlist entry/);
+  });
+
   it('counts and verifies both main and observability databases', () => {
     const runner = new FakeRunner(
       {
