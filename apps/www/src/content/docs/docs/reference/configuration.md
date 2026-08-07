@@ -59,12 +59,16 @@ Set as `[vars]` in `wrangler.toml` or as environment variables:
 
 Set in GitHub Settings → Environments → production:
 
-| Variable               | Description                                                                                                    | Example                |
-| ---------------------- | -------------------------------------------------------------------------------------------------------------- | ---------------------- |
-| `BASE_DOMAIN`          | Deployment domain                                                                                              | `example.com`          |
-| `RESOURCE_PREFIX`      | Domain-derived Cloudflare resource name prefix                                                                 | `sa379a6`              |
-| `PULUMI_STATE_BUCKET`  | R2 bucket for Pulumi state                                                                                     | `sa379a6-pulumi-state` |
-| `CF_CONTAINER_ENABLED` | Optional instant-session runtime toggle. Generated deploys default to `true`; set `false` to force VM runtime. | `false`                |
+| Variable                                           | Description                                                                                                                                         | Example                                  |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `BASE_DOMAIN`                                      | Deployment domain                                                                                                                                   | `example.com`                            |
+| `RESOURCE_PREFIX`                                  | Domain-derived Cloudflare resource name prefix                                                                                                      | `sa379a6`                                |
+| `PULUMI_STATE_BUCKET`                              | R2 bucket for Pulumi state                                                                                                                          | `sa379a6-pulumi-state`                   |
+| `CF_CONTAINER_ENABLED`                             | Optional instant-session runtime toggle. Generated deploys default to `true`; set `false` to force VM runtime.                                      | `false`                                  |
+| `D1_MIGRATION_CHURNING_TABLES`                     | Optional comma-separated `<binding>.<table>` subset of the reviewed retention/expiry table list. May narrow the built-in list but cannot expand it. | `OBSERVABILITY_DATABASE.platform_errors` |
+| `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | Maximum allowed decrease for reviewed churning tables. Defaults to `50`; range `0`–`100`. A decrease exactly at the limit is accepted.              | `25`                                     |
+
+The reviewed default churning selectors are `DATABASE.github_webhook_deliveries`, `DATABASE.registry_credential_rate_limits`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. All other application tables retain zero row-decrease tolerance. Leave `D1_MIGRATION_CHURNING_TABLES` unset to use the complete reviewed default list.
 
 `RESOURCE_PREFIX` is generated from `BASE_DOMAIN` as `s` plus the first six hex
 characters of the domain's SHA-256 hash. The self-host onboarding flow fills it
@@ -245,13 +249,13 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 
 ## Warm Node Pooling
 
-| Variable                        | Default            | Description                                           |
-| ------------------------------- | ------------------ | ----------------------------------------------------- |
-| `NODE_WARM_TIMEOUT_MS`          | `1800000` (30 min) | Time a node stays warm after idea execution completes |
+| Variable                        | Default            | Description                                                            |
+| ------------------------------- | ------------------ | ---------------------------------------------------------------------- |
+| `NODE_WARM_TIMEOUT_MS`          | `1800000` (30 min) | Time a node stays warm after idea execution completes                  |
 | `MAX_AUTO_NODE_LIFETIME_MS`     | `14400000` (4 hr)  | Max lifetime for an auto-provisioned node holding no active workspaces |
-| `NODE_WARM_GRACE_PERIOD_MS`     | `2100000` (35 min) | Cron sweep grace period (must be > warm timeout)      |
-| `NODE_LIFECYCLE_ALARM_RETRY_MS` | `60000` (1 min)    | Retry delay for DO alarm failures                     |
-| `DEFAULT_TASK_AGENT_TYPE`       | `opencode`         | Default agent for autonomous idea execution           |
+| `NODE_WARM_GRACE_PERIOD_MS`     | `2100000` (35 min) | Cron sweep grace period (must be > warm timeout)                       |
+| `NODE_LIFECYCLE_ALARM_RETRY_MS` | `60000` (1 min)    | Retry delay for DO alarm failures                                      |
+| `DEFAULT_TASK_AGENT_TYPE`       | `opencode`         | Default agent for autonomous idea execution                            |
 
 ## Idle & Orphan Node Reaping
 
@@ -265,13 +269,13 @@ Reaping only ever applies to nodes with `node_role = 'workspace'` and
 and legitimately hold zero workspaces forever, so they are never reaped by these
 timers; they are released when their last deployment environment is deleted.
 
-| Variable                                   | Default            | Description                                                                                     |
-| ------------------------------------------ | ------------------ | ----------------------------------------------------------------------------------------------- |
-| `NODE_ORPHAN_IDLE_TIMEOUT_MS`              | `2700000` (45 min) | Idle window before a running workspace node with no active workspaces is destroyed. Keep above `NODE_WARM_TIMEOUT_MS` so the warm path reclaims reusable nodes first. |
+| Variable                                   | Default            | Description                                                                                                                                                                                                                                                |
+| ------------------------------------------ | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_ORPHAN_IDLE_TIMEOUT_MS`              | `2700000` (45 min) | Idle window before a running workspace node with no active workspaces is destroyed. Keep above `NODE_WARM_TIMEOUT_MS` so the warm path reclaims reusable nodes first.                                                                                      |
 | `NODE_ABSOLUTE_MAX_LIFETIME_MS`            | `86400000` (24 hr) | Hard ceiling on auto-provisioned workspace node age. Applies even when a workspace row still reports `running`, provided no workspace has reported activity within the idle window — this is what stops a stuck workspace row from making a node immortal. |
-| `NODE_CLEANUP_SWEEP_LIMIT`                 | `25`               | Max node candidates processed per cleanup phase per cron run.                                    |
-| `WORKSPACE_CLEANUP_SWEEP_LIMIT`            | `50`               | Max workspace candidates processed per cleanup phase per cron run.                               |
-| `NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS` | `5000` (5 s)       | VM-agent request timeout for background sweeps. Deliberately far below the interactive `NODE_AGENT_REQUEST_TIMEOUT_MS` (30 s) so a sweep over unreachable nodes cannot exhaust the Worker's wall-clock budget. |
+| `NODE_CLEANUP_SWEEP_LIMIT`                 | `25`               | Max node candidates processed per cleanup phase per cron run.                                                                                                                                                                                              |
+| `WORKSPACE_CLEANUP_SWEEP_LIMIT`            | `50`               | Max workspace candidates processed per cleanup phase per cron run.                                                                                                                                                                                         |
+| `NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS` | `5000` (5 s)       | VM-agent request timeout for background sweeps. Deliberately far below the interactive `NODE_AGENT_REQUEST_TIMEOUT_MS` (30 s) so a sweep over unreachable nodes cannot exhaust the Worker's wall-clock budget.                                             |
 
 ## Provider-Side Orphan Reconciliation
 
@@ -279,19 +283,19 @@ Reclaims cloud servers that exist at the provider but which no live database row
 claims — for example when a server was created but the control plane failed before
 recording its instance ID.
 
-Because this is the only path that destroys infrastructure on the basis of *absent*
+Because this is the only path that destroys infrastructure on the basis of _absent_
 evidence, it fails closed at every step. It considers only servers carrying the
 current deployment's `env` label, so multiple SAM installations can safely share one
 cloud account. Servers created before that label existed carry no `env` value and are
 permanently out of scope. Any lookup failure aborts the run without destroying
 anything.
 
-| Variable                                 | Default          | Description                                                                                    |
-| ---------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------ |
-| `PROVIDER_ORPHAN_RECONCILIATION_ENABLED` | `true`           | Set to `false` to disable provider-side reconciliation entirely.                                |
+| Variable                                 | Default          | Description                                                                                                                                                                       |
+| ---------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PROVIDER_ORPHAN_RECONCILIATION_ENABLED` | `true`           | Set to `false` to disable provider-side reconciliation entirely.                                                                                                                  |
 | `PROVIDER_ORPHAN_MIN_AGE_MS`             | `3600000` (1 hr) | Minimum server age before it can be treated as an orphan. Must comfortably exceed provisioning time, since a server's instance ID is recorded only after the provider returns it. |
-| `PROVIDER_ORPHAN_DESTROY_LIMIT`          | `5`              | Max servers destroyed per reconciliation run.                                                   |
-| `PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS`  | `3600000` (1 hr) | Minimum interval between runs. Invoked by the 5-minute cron but self-throttled to this interval via KV. |
+| `PROVIDER_ORPHAN_DESTROY_LIMIT`          | `5`              | Max servers destroyed per reconciliation run.                                                                                                                                     |
+| `PROVIDER_ORPHAN_RECONCILE_INTERVAL_MS`  | `3600000` (1 hr) | Minimum interval between runs. Invoked by the 5-minute cron but self-throttled to this interval via KV.                                                                           |
 
 ## Project Invites
 
@@ -415,7 +419,7 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 | `STUCK_TASK_MAX_CANDIDATES_PER_SWEEP`              | `100`                                  | Maximum active tasks inspected by each recovery sweep                                                                                                                                                                                                                  |
 | `STUCK_TASK_SCAN_CURSOR_KV_KEY`                    | `scheduled:stuck-tasks:scan-cursor:v1` | KV key used to resume bounded recovery scans fairly across active tasks                                                                                                                                                                                                |
 | `TASK_LIVENESS_MAX_ACP_SESSIONS`                   | `5`                                    | Maximum task-scoped ACP sessions inspected per liveness probe                                                                                                                                                                                                          |
-| `TASK_LIVENESS_PROBE_TIMEOUT_MS`                   | `5000` (5 sec)                         | Per-candidate timeout for ACP and Instant lifecycle probes used by ProjectData heartbeat deferral, idle cleanup, and stuck-task reconciliation; a timeout is inconclusive and preserves the task and workspace                                                        |
+| `TASK_LIVENESS_PROBE_TIMEOUT_MS`                   | `5000` (5 sec)                         | Per-candidate timeout for ACP and Instant lifecycle probes used by ProjectData heartbeat deferral, idle cleanup, and stuck-task reconciliation; a timeout is inconclusive and preserves the task and workspace                                                         |
 | `IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP`            | `5`                                    | Maximum exact-session task candidates inspected by a ProjectData idle-cleanup pass; workspace deletion is deferred when this bound cannot prove every reporter-scoped runtime conclusively dead                                                                        |
 | `TASK_RUN_ABSOLUTE_CEILING_MS`                     | `86400000` (24 hr)                     | Absolute runaway-cost ceiling; fails even a task with a demonstrably live runtime                                                                                                                                                                                      |
 | `CLAUDE_CODE_COMPACTION_LOOP_DETECTOR_ENABLED`     | `true`                                 | Enable Claude Code compaction-loop shutdown from recent message evidence                                                                                                                                                                                               |
@@ -436,14 +440,14 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 
 ## Node & Workspace Readiness
 
-| Variable                                 | Default            | Description                                                   |
-| ---------------------------------------- | ------------------ | ------------------------------------------------------------- |
-| `NODE_AGENT_READY_TIMEOUT_MS`            | `600000` (10 min)  | Wait for VM agent to report ready                             |
-| `NODE_AGENT_READY_POLL_INTERVAL_MS`      | `5000`             | Poll interval for agent readiness                             |
+| Variable                                 | Default              | Description                                                                                                                                                                                                  |
+| ---------------------------------------- | -------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `NODE_AGENT_READY_TIMEOUT_MS`            | `600000` (10 min)    | Wait for VM agent to report ready                                                                                                                                                                            |
+| `NODE_AGENT_READY_POLL_INTERVAL_MS`      | `5000`               | Poll interval for agent readiness                                                                                                                                                                            |
 | `VM_AGENT_REQUIRED_VERSION`              | _(deploy-generated)_ | Required vm-agent build for reusable VM nodes. Official deploys derive this from the Git commit SHA after publishing matching binaries; leave unset only for local/manual development or skip-agent deploys. |
-| `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` | `1800000` (30 min) | Max wait for workspace-ready callback                         |
-| `PROVISIONING_TIMEOUT_MS`                | `1800000` (30 min) | Cron marks stuck workspaces as error                          |
-| `NODE_HEARTBEAT_STALE_SECONDS`           | `180`              | Seconds without a heartbeat before a node is treated as stale |
+| `TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS` | `1800000` (30 min)   | Max wait for workspace-ready callback                                                                                                                                                                        |
+| `PROVISIONING_TIMEOUT_MS`                | `1800000` (30 min)   | Cron marks stuck workspaces as error                                                                                                                                                                         |
+| `NODE_HEARTBEAT_STALE_SECONDS`           | `180`                | Seconds without a heartbeat before a node is treated as stale                                                                                                                                                |
 
 ## App Deployment Routing
 
@@ -625,13 +629,13 @@ Applied via cloud-init on each node:
 
 ## Web UI (Build-Time)
 
-| Variable                              | Default            | Description                                                          |
-| ------------------------------------- | ------------------ | -------------------------------------------------------------------- |
-| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES`  | `10485760` (10 MB) | Images below this size render inline automatically                   |
-| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`    | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link |
-| `VITE_ANALYTICS_MAX_QUEUE_SIZE`       | `100`              | Max client-side analytics events retained before oldest events drop  |
-| `VITE_ANALYTICS_FLUSH_THRESHOLD`      | `10`               | Client event count that triggers an immediate analytics flush        |
-| `VITE_ANALYTICS_FLUSH_INTERVAL_MS`    | `5000`             | Client analytics background flush interval in milliseconds           |
+| Variable                             | Default            | Description                                                          |
+| ------------------------------------ | ------------------ | -------------------------------------------------------------------- |
+| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES` | `10485760` (10 MB) | Images below this size render inline automatically                   |
+| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`   | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link |
+| `VITE_ANALYTICS_MAX_QUEUE_SIZE`      | `100`              | Max client-side analytics events retained before oldest events drop  |
+| `VITE_ANALYTICS_FLUSH_THRESHOLD`     | `10`               | Client event count that triggers an immediate analytics flush        |
+| `VITE_ANALYTICS_FLUSH_INTERVAL_MS`   | `5000`             | Client analytics background flush interval in milliseconds           |
 
 ## Analytics
 
@@ -639,22 +643,22 @@ SAM uses first-party analytics ingestion for operational/product aggregates. Bro
 
 Client page/referrer fields follow a privacy normalization contract before enqueue: query strings, fragments, protocol, host/userinfo for page values, credentials, emails, UUIDs/ULIDs, long opaque tokens, common secret prefixes, repository/code file identifiers, and values after sensitive route markers are removed or replaced with `[redacted]`. Non-sensitive nested path shape, event names, durations, UTM source/medium/campaign, session ID, visitor/authenticated user ID, and explicit safe entity metadata are preserved for aggregate reporting.
 
-| Variable                                   | Default                                      | Description                                                                    |
-| ------------------------------------------ | -------------------------------------------- | ------------------------------------------------------------------------------ |
-| `ANALYTICS_ENABLED`                        | `true`                                       | Enable API middleware analytics; set `false` to skip request event writes      |
-| `ANALYTICS_SKIP_ROUTES`                    | _(built-in skip list)_                       | Comma-separated extra route prefixes/patterns excluded from middleware writes  |
-| `ANALYTICS_DATASET`                        | _(deployment-generated)_                     | Cloudflare Analytics Engine dataset name                                       |
-| `ANALYTICS_SQL_API_URL`                    | `https://api.cloudflare.com/client/v4/accounts` | Analytics Engine SQL API base URL override                                  |
-| `ANALYTICS_DEFAULT_PERIOD_DAYS`            | `30`                                         | Default admin analytics query lookback in days                                 |
-| `ANALYTICS_TOP_EVENTS_LIMIT`               | `50`                                         | Max rows returned by top-events admin query                                    |
-| `ANALYTICS_GEO_LIMIT`                      | `50`                                         | Max countries in geographic distribution view                                  |
-| `ANALYTICS_RETENTION_WEEKS`                | `12`                                         | Number of weeks for retention cohort analysis                                  |
-| `ANALYTICS_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT` | `20`                                        | Max top pages/referrers/events in website traffic sections                     |
-| `ANALYTICS_INGEST_ENABLED`                 | `true`                                       | Enable browser event ingestion at `/api/t`; `false` returns success without writes |
-| `RATE_LIMIT_ANALYTICS_INGEST`              | `500`                                        | Analytics ingest requests allowed per IP per hour                              |
-| `MAX_ANALYTICS_INGEST_BATCH_SIZE`          | `25`                                         | Max browser events accepted per ingest request                                 |
-| `MAX_ANALYTICS_INGEST_BODY_BYTES`          | `65536`                                      | Max ingest request body size in bytes                                          |
-| `MAX_ANALYTICS_DURATION_MS`                | `3600000`                                    | Max accepted page-duration value; larger values are clamped                    |
+| Variable                                    | Default                                         | Description                                                                        |
+| ------------------------------------------- | ----------------------------------------------- | ---------------------------------------------------------------------------------- |
+| `ANALYTICS_ENABLED`                         | `true`                                          | Enable API middleware analytics; set `false` to skip request event writes          |
+| `ANALYTICS_SKIP_ROUTES`                     | _(built-in skip list)_                          | Comma-separated extra route prefixes/patterns excluded from middleware writes      |
+| `ANALYTICS_DATASET`                         | _(deployment-generated)_                        | Cloudflare Analytics Engine dataset name                                           |
+| `ANALYTICS_SQL_API_URL`                     | `https://api.cloudflare.com/client/v4/accounts` | Analytics Engine SQL API base URL override                                         |
+| `ANALYTICS_DEFAULT_PERIOD_DAYS`             | `30`                                            | Default admin analytics query lookback in days                                     |
+| `ANALYTICS_TOP_EVENTS_LIMIT`                | `50`                                            | Max rows returned by top-events admin query                                        |
+| `ANALYTICS_GEO_LIMIT`                       | `50`                                            | Max countries in geographic distribution view                                      |
+| `ANALYTICS_RETENTION_WEEKS`                 | `12`                                            | Number of weeks for retention cohort analysis                                      |
+| `ANALYTICS_WEBSITE_TRAFFIC_TOP_PAGES_LIMIT` | `20`                                            | Max top pages/referrers/events in website traffic sections                         |
+| `ANALYTICS_INGEST_ENABLED`                  | `true`                                          | Enable browser event ingestion at `/api/t`; `false` returns success without writes |
+| `RATE_LIMIT_ANALYTICS_INGEST`               | `500`                                           | Analytics ingest requests allowed per IP per hour                                  |
+| `MAX_ANALYTICS_INGEST_BATCH_SIZE`           | `25`                                            | Max browser events accepted per ingest request                                     |
+| `MAX_ANALYTICS_INGEST_BODY_BYTES`           | `65536`                                         | Max ingest request body size in bytes                                              |
+| `MAX_ANALYTICS_DURATION_MS`                 | `3600000`                                       | Max accepted page-duration value; larger values are clamped                        |
 
 ## Analytics Forwarding
 

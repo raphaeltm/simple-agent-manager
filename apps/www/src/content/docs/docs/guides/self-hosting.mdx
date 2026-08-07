@@ -163,13 +163,17 @@ installations must add this policy before their next production deployment.
 
 **Environment variables:**
 
-| Variable                  | Description                                                                                             | Example                   |
-| ------------------------- | ------------------------------------------------------------------------------------------------------- | ------------------------- |
-| `BASE_DOMAIN`             | Your domain                                                                                             | `example.com`             |
-| `PREVIEW_BASE_DOMAIN`     | Optional full preview hostname override; defaults to `preview.BASE_DOMAIN`                              | `usercontent.example.com` |
-| `PREVIEW_URL_TTL_SECONDS` | Optional lifetime for signed interactive-preview URLs                                                   | `300`                     |
-| `RESOURCE_PREFIX`         | Domain-derived Cloudflare resource prefix                                                               | `sa379a6`                 |
-| `CF_CONTAINER_ENABLED`    | Optional instant-session runtime toggle. Generated deploys set `true`; set `false` to force VM runtime. | `false`                   |
+| Variable                                           | Description                                                                                                                                         | Example                                  |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------- |
+| `BASE_DOMAIN`                                      | Your domain                                                                                                                                         | `example.com`                            |
+| `PREVIEW_BASE_DOMAIN`                              | Optional full preview hostname override; defaults to `preview.BASE_DOMAIN`                                                                          | `usercontent.example.com`                |
+| `PREVIEW_URL_TTL_SECONDS`                          | Optional lifetime for signed interactive-preview URLs                                                                                               | `300`                                    |
+| `RESOURCE_PREFIX`                                  | Domain-derived Cloudflare resource prefix                                                                                                           | `sa379a6`                                |
+| `CF_CONTAINER_ENABLED`                             | Optional instant-session runtime toggle. Generated deploys set `true`; set `false` to force VM runtime.                                             | `false`                                  |
+| `D1_MIGRATION_CHURNING_TABLES`                     | Optional comma-separated `<binding>.<table>` subset of the reviewed retention/expiry table list. May narrow the built-in list but cannot expand it. | `OBSERVABILITY_DATABASE.platform_errors` |
+| `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | Maximum allowed decrease for reviewed churning tables. Defaults to `50`; range `0`–`100`. A decrease exactly at the limit is accepted.              | `25`                                     |
+
+The reviewed default churning selectors are `DATABASE.github_webhook_deliveries`, `DATABASE.registry_credential_rate_limits`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. All other application tables retain zero row-decrease tolerance. Leave `D1_MIGRATION_CHURNING_TABLES` unset to use the complete reviewed default list.
 
 The guided setup generates `RESOURCE_PREFIX` from `BASE_DOMAIN` as `s` plus the
 first six hex characters of the domain's SHA-256 hash. Use that generated value
@@ -247,6 +251,18 @@ Before deploying the API Worker, the workflow reads its applied Durable Object m
 If migration state cannot be read or does not match the checked-in history, deployment stops before Wrangler runs rather than risking migration replay or namespace replacement.
 
 The workflow also records D1 row counts before migrations. It compares a database only when that database's D1 migration ledger advances, so ordinary traffic cannot fail a deploy when no migration ran. Business tables have zero decrease tolerance. Code-reviewed tables with automatic retention or expiry use a 50% default limit so small routine churn is accepted while a destructive wipe still blocks deployment. Self-hosters can narrow (but not expand) that reviewed table list with the `D1_MIGRATION_CHURNING_TABLES` repository variable and tune the limit with `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` (0–100).
+
+If deployment stops with `POST-MIGRATION DATA INTEGRITY CHECK FAILED`, it has blocked Worker deployment before serving against the suspect database state. The failed step prints the pre-migration RFC3339 recovery timestamp and an exact `wrangler d1 time-travel restore` command for each database. Preserve that output and inspect the reported table decreases before restoring.
+
+For guided recovery, run the **D1 Time Travel Restore** workflow (`d1-restore.yml`) with the printed timestamp. Always preview first with `dry_run=true`; select `main`, `observability`, or `both`, then repeat with `dry_run=false` only after confirming the target. For example:
+
+```bash
+gh workflow run d1-restore.yml --ref main \
+  -f environment=production \
+  -f timestamp=2026-08-07T06:16:19Z \
+  -f database=both \
+  -f dry_run=true
+```
 
 If deployment stops with a Durable Object migration-state error:
 
