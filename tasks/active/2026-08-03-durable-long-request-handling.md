@@ -62,3 +62,22 @@ Goal: persist user intent quickly, return durable IDs/status quickly, continue l
 - Follow-up prompt durability was evaluated and deferred to `tasks/backlog/2026-08-03-durable-follow-up-prompt-delivery.md` because it requires a separate durable prompt-delivery state machine for existing sessions.
 - Local verification completed: focused typechecks/tests, full `pnpm test`, full `pnpm build`, and D1/DO migration safety/order gates.
 - Staging verification completed on 2026-08-03: deploy workflow 30797392483 passed; admin diagnosis quick-accepted and recovered run `01KZ3CNRZZQ8AHJB2CNWGSNFBT`; Instant cf-container start quick-accepted in 6.5s with task `01KZ3CNFTECCEA3NMFBAWMP6TA`, session `be166489-2f3e-44b6-b227-0c03d84570eb`, and direct task recovery showed persisted workspace `01KZ3CNG93WS8J4Q285EXKDBCZ`.
+
+## Post-merge correction (2026-08-07)
+
+PR #1722 merged 2026-08-03, but two acceptance-criteria claims did not hold in
+production and were corrected by
+`tasks/archive/2026-08-07-fix-stuck-sweep-like-limit-and-durable-instant-launch.md`:
+
+- "Launch continues in server-owned context" — the launch continuation was owned
+  by request-scoped `ctx.waitUntil`, which Cloudflare cancels ~30s after the
+  response without running catch blocks. A 33s clone stranded task
+  `01KZECB26257JD03VFSNW0J5G6` (EffProp) in `queued` on 2026-08-07 with zero
+  error. The continuation now runs from a TaskRunner DO alarm
+  (`durable-objects/task-runner/instant-launch.ts`).
+- "No known path leaves accepted Instant starts stuck indefinitely" — the
+  stale-instant sweep guard existed but the whole `stuck_tasks` sweep had been
+  crashing every run since 2026-08-06 on a 52-byte LIKE pattern vs D1's 50-byte
+  limit, so the escape path was dead. Fixed in the same 2026-08-07 PR.
+
+See `.claude/rules/55-d1-statement-limits-and-request-scoped-waituntil.md`.
