@@ -112,6 +112,7 @@ export interface StuckTaskCandidate {
   started_at: string | null;
   workspace_id: string | null;
   auto_provisioned_node_id: string | null;
+  chat_session_id: string | null;
 }
 
 export interface StuckTaskScanCursor {
@@ -223,7 +224,7 @@ function parseStuckTaskScanCursor(raw: string | null): StuckTaskScanCursor | nul
 }
 
 const STUCK_TASK_CANDIDATE_COLUMNS = `id, project_id, user_id, status, execution_step, updated_at, started_at,
-       workspace_id, auto_provisioned_node_id`;
+       workspace_id, auto_provisioned_node_id, chat_session_id`;
 
 /**
  * Select one bounded, fair page of active tasks. A KV cursor prevents old live
@@ -827,20 +828,24 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         taskId: task.id,
         error: err instanceof Error ? err.message : String(err),
       });
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'warn',
-        message: `Compaction-loop detection failed for task ${task.id}: ${err instanceof Error ? err.message : String(err)}`,
-        stack: err instanceof Error ? err.stack : undefined,
-        context: {
-          recoveryType: 'claude_code_compaction_loop_detection_failure',
-          taskId: task.id,
-          taskStatus: task.status,
-          executionStep: task.execution_step,
+      await persistError(
+        env.OBSERVABILITY_DATABASE,
+        {
+          source: 'api',
+          level: 'warn',
+          message: `Compaction-loop detection failed for task ${task.id}: ${err instanceof Error ? err.message : String(err)}`,
+          stack: err instanceof Error ? err.stack : undefined,
+          context: {
+            recoveryType: 'claude_code_compaction_loop_detection_failure',
+            taskId: task.id,
+            taskStatus: task.status,
+            executionStep: task.execution_step,
+          },
+          userId: task.user_id,
+          workspaceId: task.workspace_id,
         },
-        userId: task.user_id,
-        workspaceId: task.workspace_id,
-      }, env);
+        env
+      );
     }
 
     // Compute task-scoped liveness at most once per candidate: both the
@@ -867,165 +872,222 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       return cachedTaskRunnerProbe;
     };
 
-    if (!isStuck) {
-      switch (task.status) {
-        case 'queued':
-          if (
-            task.execution_step === 'instant_persistence' &&
-            elapsedMs > instantStartStaleTimeoutMs
-          ) {
-            isStuck = true;
-            reason = `Instant session start accepted but still queued for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(instantStartStaleTimeoutMs / 1000)}s).${stepInfo} Background container launch may not have completed.`;
-          } else if (elapsedMs > queuedTimeoutMs) {
-            isStuck = true;
-            reason = `Task stuck in 'queued' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(queuedTimeoutMs / 1000)}s).${stepInfo} Node provisioning may have failed silently.`;
-          }
-          break;
-        case 'delegated':
-          if (elapsedMs > delegatedTimeoutMs) {
-            isStuck = true;
-            reason = `Task stuck in 'delegated' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(delegatedTimeoutMs / 1000)}s).${stepInfo} Workspace may have failed to start.`;
-          }
-          break;
-        case 'in_progress': {
-          // A task-mode task legitimately paused at execution_step
-          // 'awaiting_followup' keeps status 'in_progress'; it is protected here
-          // by the same liveness gate (a live workspace/agent is never failed).
-          const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
-          const executionMs = now.getTime() - startedAt;
-          if (executionMs > maxExecutionMs) {
-            if (executionMs > absoluteCeilingMs) {
+    // Rule 53: every candidate's evaluation is individually isolated. Before
+    // this guard, a single throwing candidate (e.g. the >50-byte D1 LIKE
+    // pattern in the mismatch dedup below) aborted the whole sweep for every
+    // later candidate AND prevented the scan cursor from advancing, so the
+    // sweep re-died on the same candidate every run (2026-08-06/07 production
+    // outage: 311 consecutive sweep failures).
+    try {
+      if (!isStuck) {
+        switch (task.status) {
+          case 'queued':
+            if (
+              task.execution_step === 'instant_persistence' &&
+              elapsedMs > instantStartStaleTimeoutMs
+            ) {
               isStuck = true;
-              reason = `Task exceeded the absolute runaway-cost ceiling of ${Math.round(absoluteCeilingMs / 60000)} minutes; live-runtime tasks are bounded to prevent unbounded compute.${stepInfo}`;
-              break;
+              reason = `Instant session start accepted but still queued for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(instantStartStaleTimeoutMs / 1000)}s).${stepInfo} Background container launch may not have completed.`;
+            } else if (elapsedMs > queuedTimeoutMs) {
+              isStuck = true;
+              reason = `Task stuck in 'queued' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(queuedTimeoutMs / 1000)}s).${stepInfo} Node provisioning may have failed silently.`;
             }
-            const liveness = await probeLiveness();
-            if (liveness.live || !liveness.conclusive) {
-              if (liveness.live) {
-                log.info('stuck_task.skipped_active_heartbeat', {
-                  taskId: task.id,
-                  nodeId: liveness.nodeId,
-                  activeAcpSessionId: liveness.activeAcpSessionId,
-                  executionMs,
-                  maxExecutionMs,
-                  hardTimeoutMs,
-                });
-
-                await persistError(env.OBSERVABILITY_DATABASE, {
-                  source: 'api',
-                  level: 'info',
-                  message: `Skipped stuck task recovery: VM agent heartbeat is recent (task running ${Math.round(executionMs / 60000)} min, hard timeout at ${Math.round(hardTimeoutMs / 60000)} min)`,
-                  context: {
-                    recoveryType: 'stuck_task_heartbeat_skip',
+            break;
+          case 'delegated':
+            if (elapsedMs > delegatedTimeoutMs) {
+              isStuck = true;
+              reason = `Task stuck in 'delegated' for ${Math.round(elapsedMs / 1000)}s (threshold: ${Math.round(delegatedTimeoutMs / 1000)}s).${stepInfo} Workspace may have failed to start.`;
+            }
+            break;
+          case 'in_progress': {
+            // A task-mode task legitimately paused at execution_step
+            // 'awaiting_followup' keeps status 'in_progress'; it is protected here
+            // by the same liveness gate (a live workspace/agent is never failed).
+            const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
+            const executionMs = now.getTime() - startedAt;
+            if (executionMs > maxExecutionMs) {
+              if (executionMs > absoluteCeilingMs) {
+                isStuck = true;
+                reason = `Task exceeded the absolute runaway-cost ceiling of ${Math.round(absoluteCeilingMs / 60000)} minutes; live-runtime tasks are bounded to prevent unbounded compute.${stepInfo}`;
+                break;
+              }
+              const liveness = await probeLiveness();
+              if (liveness.live || !liveness.conclusive) {
+                if (liveness.live) {
+                  log.info('stuck_task.skipped_active_heartbeat', {
                     taskId: task.id,
                     nodeId: liveness.nodeId,
                     activeAcpSessionId: liveness.activeAcpSessionId,
                     executionMs,
                     maxExecutionMs,
                     hardTimeoutMs,
-                  },
-                  userId: task.user_id,
-                  nodeId: liveness.nodeId,
-                }, env);
-                result.heartbeatSkipped++;
+                  });
+
+                  await persistError(
+                    env.OBSERVABILITY_DATABASE,
+                    {
+                      source: 'api',
+                      level: 'info',
+                      message: `Skipped stuck task recovery: VM agent heartbeat is recent (task running ${Math.round(executionMs / 60000)} min, hard timeout at ${Math.round(hardTimeoutMs / 60000)} min)`,
+                      context: {
+                        recoveryType: 'stuck_task_heartbeat_skip',
+                        taskId: task.id,
+                        nodeId: liveness.nodeId,
+                        activeAcpSessionId: liveness.activeAcpSessionId,
+                        executionMs,
+                        maxExecutionMs,
+                        hardTimeoutMs,
+                      },
+                      userId: task.user_id,
+                      nodeId: liveness.nodeId,
+                    },
+                    env
+                  );
+                  result.heartbeatSkipped++;
+                }
+                break;
               }
-              break;
+              isStuck = true;
+              const threshold = executionMs > hardTimeoutMs ? hardTimeoutMs : maxExecutionMs;
+              reason = `Task runtime is no longer live after ${Math.round(threshold / 60000)} minutes. Last liveness result: ${liveness.reason}.${stepInfo}`;
             }
-            isStuck = true;
-            const threshold = executionMs > hardTimeoutMs ? hardTimeoutMs : maxExecutionMs;
-            reason = `Task runtime is no longer live after ${Math.round(threshold / 60000)} minutes. Last liveness result: ${liveness.reason}.${stepInfo}`;
+            break;
           }
-          break;
         }
       }
-    }
 
-    // For non-stuck tasks, check DO health as defense-in-depth (TDF-7).
-    // If the task has been sitting for at least half its threshold time,
-    // proactively verify the DO is still alive and making progress.
-    if (!isStuck) {
-      // Use the correct time base per status:
-      // - queued/delegated: elapsedMs (time since last updated_at)
-      // - in_progress: executionMs (time since started_at, consistent with stuck detection)
-      let timeForCheck = elapsedMs;
-      let halfThreshold: number;
-      if (task.status === 'queued') {
-        halfThreshold = queuedTimeoutMs / 2;
-      } else if (task.status === 'delegated') {
-        halfThreshold = delegatedTimeoutMs / 2;
-      } else {
-        // in_progress — use started_at for consistent time base
-        const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
-        timeForCheck = now.getTime() - startedAt;
-        halfThreshold = maxExecutionMs / 2;
+      // For non-stuck tasks, check DO health as defense-in-depth (TDF-7).
+      // If the task has been sitting for at least half its threshold time,
+      // proactively verify the DO is still alive and making progress.
+      if (!isStuck) {
+        // Use the correct time base per status:
+        // - queued/delegated: elapsedMs (time since last updated_at)
+        // - in_progress: executionMs (time since started_at, consistent with stuck detection)
+        let timeForCheck = elapsedMs;
+        let halfThreshold: number;
+        if (task.status === 'queued') {
+          halfThreshold = queuedTimeoutMs / 2;
+        } else if (task.status === 'delegated') {
+          halfThreshold = delegatedTimeoutMs / 2;
+        } else {
+          // in_progress — use started_at for consistent time base
+          const startedAt = task.started_at ? new Date(task.started_at).getTime() : updatedAt;
+          timeForCheck = now.getTime() - startedAt;
+          halfThreshold = maxExecutionMs / 2;
+        }
+
+        if (timeForCheck > Math.min(halfThreshold, mismatchGraceMs)) {
+          const doProbe = await probeTaskRunner();
+          const doStatus = doProbe.status;
+          const liveness = task.status === 'in_progress' ? await probeLiveness() : null;
+
+          // TaskRunner.completed means orchestration handed off successfully, not
+          // that the agent later finalized D1. Conclusive task-scoped runtime death
+          // is therefore authoritative after the mismatch grace; the DO RPC remains
+          // best-effort diagnostic evidence and cannot strand an immortal row.
+          if (liveness?.conclusive && !liveness.live) {
+            isStuck = true;
+            deadRuntimeRecovery = true;
+            reason = `Task runtime is conclusively gone after reconciliation grace (${liveness.reason}).`;
+            log.warn('stuck_task.dead_runtime_reconciliation', {
+              taskId: task.id,
+              taskStatus: task.status,
+              executionStep: task.execution_step,
+              livenessReason: liveness.reason,
+              taskRunnerProbeOutcome: doProbe.outcome,
+              taskRunnerCompleted: doStatus?.completed ?? null,
+              timeForCheck,
+            });
+          }
+
+          if (doStatus?.completed) {
+            // Reconcile only with conclusive dead-runtime evidence. Live or unknown
+            // task-scoped runtime state remains active and is logged for investigation.
+            // Deduplicate the persisted mismatch signal independently of reconciliation.
+            log.warn('stuck_task.do_completed_but_task_active', {
+              taskId: task.id,
+              taskStatus: task.status,
+              doCurrentStep: doStatus.currentStep,
+              doRetryCount: doStatus.retryCount,
+            });
+
+            // Deduplicate: only persist if no recent mismatch record exists for this task.
+            // D1 caps LIKE patterns at 50 bytes (error: "LIKE or GLOB pattern too
+            // complex"), and the check only fires when like() evaluates a row — so a
+            // single combined `%do_task_status_mismatch%<26-char-taskId>%` pattern
+            // (52 bytes) passed empty-table tests but crashed every production sweep.
+            // Keep each bound pattern ≤50 bytes.
+            const recentMismatch = await env.OBSERVABILITY_DATABASE.prepare(
+              `SELECT id FROM platform_errors
+               WHERE context LIKE ? AND context LIKE ? AND timestamp > ?
+               LIMIT 1`
+            )
+              .bind('%do_task_status_mismatch%', `%${task.id}%`, Date.now() - 30 * 60 * 1000)
+              .first();
+
+            if (!recentMismatch) {
+              await persistError(
+                env.OBSERVABILITY_DATABASE,
+                {
+                  source: 'api',
+                  level: 'warn',
+                  message: `TaskRunner DO completed but task still in '${task.status}' — possible D1 update failure`,
+                  context: {
+                    recoveryType: 'do_task_status_mismatch',
+                    taskId: task.id,
+                    taskStatus: task.status,
+                    executionStep: task.execution_step,
+                    doCurrentStep: doStatus.currentStep,
+                    doRetryCount: doStatus.retryCount,
+                    timeForCheck,
+                    taskRunnerProbeOutcome: doProbe.outcome,
+                    livenessReason: liveness?.reason ?? null,
+                  },
+                  userId: task.user_id,
+                },
+                env
+              );
+            }
+          }
+        }
+        if (!isStuck) continue;
       }
-
-      if (timeForCheck > Math.min(halfThreshold, mismatchGraceMs)) {
-        const doProbe = await probeTaskRunner();
-        const doStatus = doProbe.status;
-        const liveness = task.status === 'in_progress' ? await probeLiveness() : null;
-
-        // TaskRunner.completed means orchestration handed off successfully, not
-        // that the agent later finalized D1. Conclusive task-scoped runtime death
-        // is therefore authoritative after the mismatch grace; the DO RPC remains
-        // best-effort diagnostic evidence and cannot strand an immortal row.
-        if (liveness?.conclusive && !liveness.live) {
-          isStuck = true;
-          deadRuntimeRecovery = true;
-          reason = `Task runtime is conclusively gone after reconciliation grace (${liveness.reason}).`;
-          log.warn('stuck_task.dead_runtime_reconciliation', {
+    } catch (evalErr) {
+      // Contain the failure (log + persist + count) and move to the next
+      // candidate. The failure-recording path must not be able to re-abort
+      // the sweep, so the observability write is itself guarded.
+      result.errors++;
+      const evalMessage = evalErr instanceof Error ? evalErr.message : String(evalErr);
+      log.error('stuck_task.candidate_evaluation_failed', {
+        taskId: task.id,
+        taskStatus: task.status,
+        executionStep: task.execution_step,
+        error: evalMessage,
+      });
+      await persistError(
+        env.OBSERVABILITY_DATABASE,
+        {
+          source: 'api',
+          level: 'error',
+          message: `Stuck-task candidate evaluation failed for task ${task.id}: ${evalMessage}`,
+          stack: evalErr instanceof Error ? evalErr.stack : undefined,
+          context: {
+            recoveryType: 'stuck_task_candidate_evaluation_failure',
             taskId: task.id,
             taskStatus: task.status,
             executionStep: task.execution_step,
-            livenessReason: liveness.reason,
-            taskRunnerProbeOutcome: doProbe.outcome,
-            taskRunnerCompleted: doStatus?.completed ?? null,
-            timeForCheck,
-          });
-        }
-
-        if (doStatus?.completed) {
-          // Reconcile only with conclusive dead-runtime evidence. Live or unknown
-          // task-scoped runtime state remains active and is logged for investigation.
-          // Deduplicate the persisted mismatch signal independently of reconciliation.
-          log.warn('stuck_task.do_completed_but_task_active', {
-            taskId: task.id,
-            taskStatus: task.status,
-            doCurrentStep: doStatus.currentStep,
-            doRetryCount: doStatus.retryCount,
-          });
-
-          // Deduplicate: only persist if no recent mismatch record exists for this task
-          const recentMismatch = await env.OBSERVABILITY_DATABASE.prepare(
-            `SELECT id FROM platform_errors
-               WHERE context LIKE ? AND timestamp > ?
-               LIMIT 1`
-          )
-            .bind(`%do_task_status_mismatch%${task.id}%`, Date.now() - 30 * 60 * 1000)
-            .first();
-
-          if (!recentMismatch) {
-            await persistError(env.OBSERVABILITY_DATABASE, {
-              source: 'api',
-              level: 'warn',
-              message: `TaskRunner DO completed but task still in '${task.status}' — possible D1 update failure`,
-              context: {
-                recoveryType: 'do_task_status_mismatch',
-                taskId: task.id,
-                taskStatus: task.status,
-                executionStep: task.execution_step,
-                doCurrentStep: doStatus.currentStep,
-                doRetryCount: doStatus.retryCount,
-                timeForCheck,
-                taskRunnerProbeOutcome: doProbe.outcome,
-                livenessReason: liveness?.reason ?? null,
-              },
-              userId: task.user_id,
-            }, env);
-          }
-        }
-      }
-      if (!isStuck) continue;
+          },
+          userId: task.user_id,
+          workspaceId: task.workspace_id,
+        },
+        env
+      ).catch((persistErr) => {
+        log.error('stuck_task.candidate_evaluation_failure_persist_failed', {
+          taskId: task.id,
+          error: persistErr instanceof Error ? persistErr.message : String(persistErr),
+        });
+      });
+      continue;
     }
 
     try {
@@ -1058,37 +1120,41 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       });
 
       // Record recovery in OBSERVABILITY_DATABASE for admin visibility (TDF-7)
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'warn',
-        message: reason,
-        context: {
-          ...(compactionLoopRecovery
-            ? { recoveryType: 'claude_code_compaction_loop' }
-            : { recoveryType: 'stuck_task' }),
-          taskStatus: task.status,
-          executionStep: task.execution_step,
-          elapsedMs: diagnosticElapsedMs,
-          compactionLoop: compactionLoopRecovery
-            ? {
-                sessionId: compactionLoopRecovery.sessionId,
-                agentSessionId: compactionLoopRecovery.agentSessionId,
-                recentMessageLimit: compactionLoopRecovery.recentMessageLimit,
-                evidence: compactionLoopRecovery.evidence,
-              }
-            : null,
-          workspaceId: diagnostics.workspaceId,
-          workspaceStatus: diagnostics.workspaceStatus,
+      await persistError(
+        env.OBSERVABILITY_DATABASE,
+        {
+          source: 'api',
+          level: 'warn',
+          message: reason,
+          context: {
+            ...(compactionLoopRecovery
+              ? { recoveryType: 'claude_code_compaction_loop' }
+              : { recoveryType: 'stuck_task' }),
+            taskStatus: task.status,
+            executionStep: task.execution_step,
+            elapsedMs: diagnosticElapsedMs,
+            compactionLoop: compactionLoopRecovery
+              ? {
+                  sessionId: compactionLoopRecovery.sessionId,
+                  agentSessionId: compactionLoopRecovery.agentSessionId,
+                  recentMessageLimit: compactionLoopRecovery.recentMessageLimit,
+                  evidence: compactionLoopRecovery.evidence,
+                }
+              : null,
+            workspaceId: diagnostics.workspaceId,
+            workspaceStatus: diagnostics.workspaceStatus,
+            nodeId: diagnostics.nodeId,
+            nodeStatus: diagnostics.nodeStatus,
+            nodeHealthStatus: diagnostics.nodeHealthStatus,
+            autoProvisionedNodeId: diagnostics.autoProvisionedNodeId,
+            doState: diagnostics.doState,
+          },
+          userId: task.user_id,
           nodeId: diagnostics.nodeId,
-          nodeStatus: diagnostics.nodeStatus,
-          nodeHealthStatus: diagnostics.nodeHealthStatus,
-          autoProvisionedNodeId: diagnostics.autoProvisionedNodeId,
-          doState: diagnostics.doState,
+          workspaceId: diagnostics.workspaceId,
         },
-        userId: task.user_id,
-        nodeId: diagnostics.nodeId,
-        workspaceId: diagnostics.workspaceId,
-      }, env);
+        env
+      );
 
       const nowIso = now.toISOString();
       // Use optimistic locking: only fail the task if it's still in the
@@ -1126,18 +1192,19 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
       await syncTriggerExecutionStatus(env.DATABASE, task.id, 'failed', reason);
 
-      if (compactionLoopRecovery?.sessionId) {
+      // Mark the linked chat session failed so the UI stops showing the
+      // conversation as live (parity with TaskRunner failTask, which does this
+      // for every task with a chatSessionId). Before this, only
+      // compaction-loop recoveries failed the session — a recovered instant
+      // conversation kept an active-looking session forever.
+      const failedChatSessionId = compactionLoopRecovery?.sessionId ?? task.chat_session_id;
+      if (failedChatSessionId) {
         try {
-          await projectDataService.failSession(
-            env,
-            task.project_id,
-            compactionLoopRecovery.sessionId,
-            reason
-          );
+          await projectDataService.failSession(env, task.project_id, failedChatSessionId, reason);
         } catch (sessionErr) {
-          log.warn('stuck_task.compaction_loop_session_fail_failed', {
+          log.warn('stuck_task.session_fail_failed', {
             taskId: task.id,
-            sessionId: compactionLoopRecovery.sessionId,
+            sessionId: failedChatSessionId,
             error: sessionErr instanceof Error ? sessionErr.message : String(sessionErr),
           });
         }
@@ -1154,21 +1221,25 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         });
 
         // Record cleanup failure in OBSERVABILITY_DATABASE (TDF-7)
-        await persistError(env.OBSERVABILITY_DATABASE, {
-          source: 'api',
-          level: 'error',
-          message: `Stuck task cleanup failed: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`,
-          stack: cleanupErr instanceof Error ? cleanupErr.stack : undefined,
-          context: {
-            recoveryType: 'stuck_task_cleanup_failure',
-            taskId: task.id,
-            taskStatus: task.status,
-            executionStep: task.execution_step,
+        await persistError(
+          env.OBSERVABILITY_DATABASE,
+          {
+            source: 'api',
+            level: 'error',
+            message: `Stuck task cleanup failed: ${cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr)}`,
+            stack: cleanupErr instanceof Error ? cleanupErr.stack : undefined,
+            context: {
+              recoveryType: 'stuck_task_cleanup_failure',
+              taskId: task.id,
+              taskStatus: task.status,
+              executionStep: task.execution_step,
+            },
+            userId: task.user_id,
+            nodeId: diagnostics.nodeId,
+            workspaceId: diagnostics.workspaceId,
           },
-          userId: task.user_id,
-          nodeId: diagnostics.nodeId,
-          workspaceId: diagnostics.workspaceId,
-        }, env);
+          env
+        );
       }
 
       switch (task.status) {
@@ -1191,19 +1262,23 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
       });
 
       // Record recovery failure in OBSERVABILITY_DATABASE (TDF-7)
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'error',
-        message: `Stuck task recovery failed: ${err instanceof Error ? err.message : String(err)}`,
-        stack: err instanceof Error ? err.stack : undefined,
-        context: {
-          recoveryType: 'stuck_task_recovery_failure',
-          taskId: task.id,
-          taskStatus: task.status,
-          executionStep: task.execution_step,
+      await persistError(
+        env.OBSERVABILITY_DATABASE,
+        {
+          source: 'api',
+          level: 'error',
+          message: `Stuck task recovery failed: ${err instanceof Error ? err.message : String(err)}`,
+          stack: err instanceof Error ? err.stack : undefined,
+          context: {
+            recoveryType: 'stuck_task_recovery_failure',
+            taskId: task.id,
+            taskStatus: task.status,
+            executionStep: task.execution_step,
+          },
+          userId: task.user_id,
         },
-        userId: task.user_id,
-      }, env);
+        env
+      );
 
       result.errors++;
     }
