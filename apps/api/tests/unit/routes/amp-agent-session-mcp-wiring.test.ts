@@ -161,15 +161,19 @@ describe('Amp project-chat MCP wiring', () => {
   it('mints a scoped MCP token and sends MCP config during direct agent-session creation', async () => {
     const app = await createTestApp();
 
-    const res = await app.request('/api/workspaces/workspace-123/agent-sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label: 'Amp', agentType: 'amp' }),
-    }, {
-      DATABASE: {},
-      KV: {},
-      BASE_DOMAIN: 'example.com',
-    });
+    const res = await app.request(
+      '/api/workspaces/workspace-123/agent-sessions',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: 'Amp', agentType: 'amp' }),
+      },
+      {
+        DATABASE: {},
+        KV: {},
+        BASE_DOMAIN: 'example.com',
+      }
+    );
 
     expect(res.status).toBe(201);
     expect(storeMcpTokenMock).toHaveBeenCalledWith(
@@ -183,7 +187,7 @@ describe('Amp project-chat MCP wiring', () => {
         chatSessionId: 'chat-123',
         agentSessionId: 'agent-session-123',
       }),
-      expect.objectContaining({ BASE_DOMAIN: 'example.com' }),
+      expect.objectContaining({ BASE_DOMAIN: 'example.com' })
     );
     expect(createAgentSessionOnNodeMock).toHaveBeenCalledWith(
       'node-123',
@@ -197,7 +201,7 @@ describe('Amp project-chat MCP wiring', () => {
       {
         url: 'https://api.example.com/mcp',
         token: 'mcp-token-123',
-      },
+      }
     );
     expect(revokeMcpTokenMock).not.toHaveBeenCalled();
   });
@@ -206,15 +210,19 @@ describe('Amp project-chat MCP wiring', () => {
     createAgentSessionOnNodeMock.mockRejectedValueOnce(new Error('VM agent unreachable'));
 
     const app = await createTestApp();
-    const res = await app.request('/api/workspaces/workspace-123/agent-sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label: 'Amp', agentType: 'amp' }),
-    }, {
-      DATABASE: {},
-      KV: {},
-      BASE_DOMAIN: 'example.com',
-    });
+    const res = await app.request(
+      '/api/workspaces/workspace-123/agent-sessions',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: 'Amp', agentType: 'amp' }),
+      },
+      {
+        DATABASE: {},
+        KV: {},
+        BASE_DOMAIN: 'example.com',
+      }
+    );
 
     expect(res.status).toBe(500);
     expect(storeMcpTokenMock).toHaveBeenCalledTimes(1);
@@ -232,15 +240,19 @@ describe('Amp project-chat MCP wiring', () => {
     };
 
     const app = await createTestApp();
-    const res = await app.request('/api/workspaces/workspace-123/agent-sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label: 'Amp', agentType: 'amp' }),
-    }, {
-      DATABASE: {},
-      KV: {},
-      BASE_DOMAIN: 'example.com',
-    });
+    const res = await app.request(
+      '/api/workspaces/workspace-123/agent-sessions',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: 'Amp', agentType: 'amp' }),
+      },
+      {
+        DATABASE: {},
+        KV: {},
+        BASE_DOMAIN: 'example.com',
+      }
+    );
 
     expect(res.status).toBe(201);
     expect(storeMcpTokenMock).not.toHaveBeenCalled();
@@ -253,25 +265,33 @@ describe('Amp project-chat MCP wiring', () => {
       'user-123',
       null,
       null,
-      undefined,
+      undefined
     );
   });
 
   it('blocks before direct agent-session provisioning when GitHub owner access is revoked', async () => {
     vi.mocked(projectHelpers.requireRepositoryOwnerAccess).mockRejectedValueOnce(
-      new AppError(403, 'Repository access is no longer available', 'GITHUB_REPOSITORY_ACCESS_DENIED'),
+      new AppError(
+        403,
+        'Repository access is no longer available',
+        'GITHUB_REPOSITORY_ACCESS_DENIED'
+      )
     );
 
     const app = await createTestApp();
-    const res = await app.request('/api/workspaces/workspace-123/agent-sessions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label: 'Amp', agentType: 'amp' }),
-    }, {
-      DATABASE: {},
-      KV: {},
-      BASE_DOMAIN: 'example.com',
-    });
+    const res = await app.request(
+      '/api/workspaces/workspace-123/agent-sessions',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ label: 'Amp', agentType: 'amp' }),
+      },
+      {
+        DATABASE: {},
+        KV: {},
+        BASE_DOMAIN: 'example.com',
+      }
+    );
 
     expect(res.status).toBe(403);
     expect(projectHelpers.requireRepositoryOwnerAccess).toHaveBeenCalledWith(
@@ -279,7 +299,7 @@ describe('Amp project-chat MCP wiring', () => {
       expect.anything(),
       expect.objectContaining({ id: 'project-123', repository: 'octo/repo' }),
       'user-123',
-      'workspace-agent-session',
+      'workspace-agent-session'
     );
     expect(storeMcpTokenMock).not.toHaveBeenCalled();
     expect(createAgentSessionOnNodeMock).not.toHaveBeenCalled();

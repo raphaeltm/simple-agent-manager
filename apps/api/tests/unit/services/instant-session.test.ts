@@ -46,7 +46,26 @@ vi.mock('../../../src/services/project-data', () => mocks.projectData);
 vi.mock('../../../src/services/vm-agent-container', () => mocks.container);
 vi.mock('../../../src/lib/ulid', () => ({ ulid: mocks.ulid }));
 
-import { launchInstantSession } from '../../../src/services/instant-session';
+import {
+  acceptInstantSession,
+  continueInstantSessionLaunch,
+  type LaunchInstantSessionInput,
+} from '../../../src/services/instant-session';
+
+/**
+ * Accept + continue composed the way production drives them (route/dispatch
+ * accepts inline, the TaskRunner DO alarm runs the continuation). Composing
+ * them here keeps these vertical-slice assertions exercising the real
+ * building blocks end-to-end.
+ */
+async function launchInstantSession(
+  db: never,
+  env: Parameters<typeof acceptInstantSession>[1],
+  input: LaunchInstantSessionInput
+) {
+  const accepted = await acceptInstantSession(db, env, input);
+  return continueInstantSessionLaunch(db, env, input, accepted);
+}
 
 function makeDb(selectResults: unknown[][] = []) {
   const inserts: unknown[] = [];

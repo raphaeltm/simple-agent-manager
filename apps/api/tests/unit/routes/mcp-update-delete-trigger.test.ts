@@ -6,7 +6,8 @@ import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
 import { handleDeleteTrigger, handleUpdateTrigger } from '../../../src/routes/mcp/trigger-tools';
 
 function createTestD1(sqlite: Database.Database): D1Database {
-  const normalize = (params: unknown[]): unknown[] => params.map((p) => (p === undefined ? null : p));
+  const normalize = (params: unknown[]): unknown[] =>
+    params.map((p) => (p === undefined ? null : p));
 
   const makeBound = (sql: string, params: unknown[]) => ({
     async run() {
@@ -22,7 +23,9 @@ function createTestD1(sqlite: Database.Database): D1Database {
       return { success: true, results, meta: {} };
     },
     async first(col?: string) {
-      const row = sqlite.prepare(sql).get(...normalize(params)) as Record<string, unknown> | undefined;
+      const row = sqlite.prepare(sql).get(...normalize(params)) as
+        | Record<string, unknown>
+        | undefined;
       if (col != null) return row ? (row[col] ?? null) : null;
       return row ?? null;
     },
@@ -63,7 +66,9 @@ interface TriggerRow {
   prompt_template: string;
 }
 
-function parseContent(response: Awaited<ReturnType<typeof handleUpdateTrigger>>): Record<string, unknown> {
+function parseContent(
+  response: Awaited<ReturnType<typeof handleUpdateTrigger>>
+): Record<string, unknown> {
   expect(response.error).toBeUndefined();
   const content = response.result as { content: Array<{ text: string }> };
   return JSON.parse(content.content[0]?.text ?? '{}') as Record<string, unknown>;
@@ -125,23 +130,25 @@ describe('MCP update_trigger and delete_trigger handlers', () => {
   });
 
   function insertTrigger(id: string, projectId = tokenData.projectId): void {
-    sqlite.prepare(
-      `INSERT INTO triggers (
+    sqlite
+      .prepare(
+        `INSERT INTO triggers (
         id, project_id, user_id, name, description, status, source_type,
         cron_expression, cron_timezone, skip_if_running, prompt_template,
         agent_profile_id, skill_id, task_mode, vm_size_override, max_concurrent,
         next_fire_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, NULL, 'active', 'cron', '0 9 * * *', 'UTC', 1, ?, NULL, NULL, 'task', NULL, 1, ?, ?, ?)`,
-    ).run(
-      id,
-      projectId,
-      projectId === tokenData.projectId ? tokenData.userId : 'other-user',
-      `Trigger ${id}`,
-      'Original prompt',
-      '2000-01-01T00:00:00.000Z',
-      '2026-01-01T00:00:00.000Z',
-      '2026-01-01T00:00:00.000Z',
-    );
+      ) VALUES (?, ?, ?, ?, NULL, 'active', 'cron', '0 9 * * *', 'UTC', 1, ?, NULL, NULL, 'task', NULL, 1, ?, ?, ?)`
+      )
+      .run(
+        id,
+        projectId,
+        projectId === tokenData.projectId ? tokenData.userId : 'other-user',
+        `Trigger ${id}`,
+        'Original prompt',
+        '2000-01-01T00:00:00.000Z',
+        '2026-01-01T00:00:00.000Z',
+        '2026-01-01T00:00:00.000Z'
+      );
   }
 
   it('updates a trigger and recomputes next_fire_at', async () => {
@@ -158,10 +165,12 @@ describe('MCP update_trigger and delete_trigger handlers', () => {
         maxConcurrent: 2,
       },
       tokenData,
-      env,
+      env
     );
     const payload = parseContent(response);
-    const row = sqlite.prepare('SELECT * FROM triggers WHERE id = ?').get('trigger-1') as TriggerRow;
+    const row = sqlite
+      .prepare('SELECT * FROM triggers WHERE id = ?')
+      .get('trigger-1') as TriggerRow;
 
     expect(row.name).toBe('Updated trigger');
     expect(row.cron_expression).toBe('30 14 * * 1-5');
@@ -175,19 +184,35 @@ describe('MCP update_trigger and delete_trigger handlers', () => {
 
   it('deletes a trigger and cascades GitHub config and executions', async () => {
     insertTrigger('trigger-2');
-    sqlite.prepare(
-      "INSERT INTO github_trigger_configs (id, trigger_id, event_type, filters_json) VALUES ('config-1', 'trigger-2', 'issues', '{}')",
-    ).run();
-    sqlite.prepare(
-      "INSERT INTO trigger_executions (id, trigger_id, project_id, status) VALUES ('exec-1', 'trigger-2', 'project-1', 'running')",
-    ).run();
+    sqlite
+      .prepare(
+        "INSERT INTO github_trigger_configs (id, trigger_id, event_type, filters_json) VALUES ('config-1', 'trigger-2', 'issues', '{}')"
+      )
+      .run();
+    sqlite
+      .prepare(
+        "INSERT INTO trigger_executions (id, trigger_id, project_id, status) VALUES ('exec-1', 'trigger-2', 'project-1', 'running')"
+      )
+      .run();
 
     const response = await handleDeleteTrigger('req-1', { triggerId: 'trigger-2' }, tokenData, env);
 
     expect(response.error).toBeUndefined();
-    expect(sqlite.prepare("SELECT COUNT(*) AS count FROM github_trigger_configs WHERE trigger_id = 'trigger-2'").get()).toEqual({ count: 0 });
-    expect(sqlite.prepare("SELECT COUNT(*) AS count FROM trigger_executions WHERE trigger_id = 'trigger-2'").get()).toEqual({ count: 0 });
-    expect(sqlite.prepare("SELECT COUNT(*) AS count FROM triggers WHERE id = 'trigger-2'").get()).toEqual({ count: 0 });
+    expect(
+      sqlite
+        .prepare(
+          "SELECT COUNT(*) AS count FROM github_trigger_configs WHERE trigger_id = 'trigger-2'"
+        )
+        .get()
+    ).toEqual({ count: 0 });
+    expect(
+      sqlite
+        .prepare("SELECT COUNT(*) AS count FROM trigger_executions WHERE trigger_id = 'trigger-2'")
+        .get()
+    ).toEqual({ count: 0 });
+    expect(
+      sqlite.prepare("SELECT COUNT(*) AS count FROM triggers WHERE id = 'trigger-2'").get()
+    ).toEqual({ count: 0 });
   });
 
   it('rejects cross-project updates without mutating the trigger', async () => {
@@ -197,9 +222,11 @@ describe('MCP update_trigger and delete_trigger handlers', () => {
       'req-1',
       { triggerId: 'trigger-3', name: 'Unauthorized update' },
       tokenData,
-      env,
+      env
     );
-    const row = sqlite.prepare('SELECT * FROM triggers WHERE id = ?').get('trigger-3') as TriggerRow;
+    const row = sqlite
+      .prepare('SELECT * FROM triggers WHERE id = ?')
+      .get('trigger-3') as TriggerRow;
 
     expect(response.error?.message).toContain('Trigger not found in this project');
     expect(row.project_id).toBe('project-2');
@@ -208,14 +235,22 @@ describe('MCP update_trigger and delete_trigger handlers', () => {
 
   it('rejects cross-project deletes without mutating the trigger', async () => {
     insertTrigger('trigger-4', 'project-2');
-    sqlite.prepare(
-      "INSERT INTO trigger_executions (id, trigger_id, project_id, status) VALUES ('exec-4', 'trigger-4', 'project-2', 'running')",
-    ).run();
+    sqlite
+      .prepare(
+        "INSERT INTO trigger_executions (id, trigger_id, project_id, status) VALUES ('exec-4', 'trigger-4', 'project-2', 'running')"
+      )
+      .run();
 
     const response = await handleDeleteTrigger('req-1', { triggerId: 'trigger-4' }, tokenData, env);
 
     expect(response.error?.message).toContain('Trigger not found in this project');
-    expect(sqlite.prepare("SELECT COUNT(*) AS count FROM triggers WHERE id = 'trigger-4'").get()).toEqual({ count: 1 });
-    expect(sqlite.prepare("SELECT COUNT(*) AS count FROM trigger_executions WHERE trigger_id = 'trigger-4'").get()).toEqual({ count: 1 });
+    expect(
+      sqlite.prepare("SELECT COUNT(*) AS count FROM triggers WHERE id = 'trigger-4'").get()
+    ).toEqual({ count: 1 });
+    expect(
+      sqlite
+        .prepare("SELECT COUNT(*) AS count FROM trigger_executions WHERE trigger_id = 'trigger-4'")
+        .get()
+    ).toEqual({ count: 1 });
   });
 });

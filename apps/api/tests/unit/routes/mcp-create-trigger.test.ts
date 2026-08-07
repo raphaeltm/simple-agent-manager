@@ -11,7 +11,9 @@ import type { McpTokenData } from '../../../src/routes/mcp/_helpers';
 
 // ─── Mocks ──────────────────────────────────────────────────────────────────
 
-const mockValidateCron = vi.fn().mockReturnValue({ valid: true, humanReadable: 'Every day at 9:00 AM' });
+const mockValidateCron = vi
+  .fn()
+  .mockReturnValue({ valid: true, humanReadable: 'Every day at 9:00 AM' });
 vi.mock('../../../src/services/cron-utils', () => ({
   validateCronExpression: (...args: unknown[]) => mockValidateCron(...args),
   cronToNextFire: vi.fn().mockReturnValue('2026-04-10T09:00:00.000Z'),
@@ -81,7 +83,7 @@ describe('MCP create_trigger tool', () => {
         promptTemplate: 'Review all open PRs',
       },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeUndefined();
@@ -101,7 +103,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { cronExpression: '0 9 * * *', promptTemplate: 'Do stuff' },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -113,7 +115,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { name: 'Test', cronExpression: '', promptTemplate: 'Do stuff' },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -125,7 +127,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: '   ' },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -138,7 +140,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: longTemplate },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -152,7 +154,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { name: 'Test', cronExpression: 'not-valid', promptTemplate: 'Do stuff' },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -162,9 +164,14 @@ describe('MCP create_trigger tool', () => {
   it('rejects invalid timezone', async () => {
     const result = await handleCreateTrigger(
       'req-1',
-      { name: 'Test', cronExpression: '0 9 * * *', cronTimezone: 'Invalid/Zone', promptTemplate: 'Do stuff' },
+      {
+        name: 'Test',
+        cronExpression: '0 9 * * *',
+        cronTimezone: 'Invalid/Zone',
+        promptTemplate: 'Do stuff',
+      },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -184,7 +191,7 @@ describe('MCP create_trigger tool', () => {
         agentProfileId: 'nonexistent-profile',
       },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -199,7 +206,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { name: 'Daily Review', cronExpression: '0 9 * * *', promptTemplate: 'Review PRs' },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -216,7 +223,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: 'Do stuff' },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeDefined();
@@ -231,7 +238,7 @@ describe('MCP create_trigger tool', () => {
       'req-1',
       { name: 'Test', cronExpression: '0 9 * * *', promptTemplate: 'Do stuff' },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeUndefined();
@@ -259,7 +266,7 @@ describe('MCP create_trigger tool', () => {
         vmSizeOverride: 'large',
       },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeUndefined();
@@ -282,7 +289,7 @@ describe('MCP create_trigger tool', () => {
         vmSizeOverride: 'xlarge',
       },
       tokenData,
-      env as Env,
+      env as Env
     );
 
     expect(result.error).toBeUndefined();

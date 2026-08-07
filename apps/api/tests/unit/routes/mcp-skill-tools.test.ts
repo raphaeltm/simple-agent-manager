@@ -95,7 +95,9 @@ describe('MCP Skill Tools', () => {
       expect(result.id).toBe(1);
       expect(result.error).toBeUndefined();
 
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.count).toBe(2);
       expect(content.skills[0]).toEqual({
         id: 'skill-1',
@@ -115,7 +117,9 @@ describe('MCP Skill Tools', () => {
       vi.mocked(skillService.listSkills).mockResolvedValue([]);
       await handleListSkills(1, {}, tokenData, mockEnv);
       expect(skillService.listSkills).toHaveBeenCalledWith(
-        expect.anything(), 'proj-456', 'user-789',
+        expect.anything(),
+        'proj-456',
+        'user-789'
       );
     });
 
@@ -123,7 +127,9 @@ describe('MCP Skill Tools', () => {
       vi.mocked(skillService.listSkills).mockResolvedValue([]);
 
       const result = await handleListSkills(1, {}, tokenData, mockEnv);
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.count).toBe(0);
       expect(content.skills).toEqual([]);
     });
@@ -152,7 +158,9 @@ describe('MCP Skill Tools', () => {
       const result = await handleGetSkill(1, { skillId: 'skill-1' }, tokenData, mockEnv);
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.id).toBe('skill-1');
       expect(content.systemPromptAppend).toBe('Focus on tests.');
       expect(content.maxTurns).toBe(50);
@@ -167,7 +175,10 @@ describe('MCP Skill Tools', () => {
       vi.mocked(skillService.getSkill).mockResolvedValue(makeSkill());
       await handleGetSkill(1, { skillId: 'skill-1' }, tokenData, mockEnv);
       expect(skillService.getSkill).toHaveBeenCalledWith(
-        expect.anything(), 'proj-456', 'skill-1', 'user-789',
+        expect.anything(),
+        'proj-456',
+        'skill-1',
+        'user-789'
       );
     });
 
@@ -209,27 +220,34 @@ describe('MCP Skill Tools', () => {
       const created = makeSkill({ id: 'skill-new', name: 'my-skill' });
       vi.mocked(skillService.createSkill).mockResolvedValue(created);
 
-      const result = await handleCreateSkill(1, {
-        name: 'my-skill',
-        description: 'Custom skill',
-        agentType: 'claude-code',
-        model: 'claude-opus-4-6',
-        permissionMode: 'plan',
-        systemPromptAppend: 'Be thorough.',
-        maxTurns: 100,
-        timeoutMinutes: 60,
-        vmSizeOverride: 'large',
-        provider: 'hetzner',
-        vmLocation: 'fsn1',
-        workspaceProfile: 'full',
-        devcontainerConfigName: 'python-dev',
-        taskMode: 'task',
-        resourceRequirementsJson: '{"gpu":true}',
-        defaultProfileId: 'prof-9',
-      }, tokenData, mockEnv);
+      const result = await handleCreateSkill(
+        1,
+        {
+          name: 'my-skill',
+          description: 'Custom skill',
+          agentType: 'claude-code',
+          model: 'claude-opus-4-6',
+          permissionMode: 'plan',
+          systemPromptAppend: 'Be thorough.',
+          maxTurns: 100,
+          timeoutMinutes: 60,
+          vmSizeOverride: 'large',
+          provider: 'hetzner',
+          vmLocation: 'fsn1',
+          workspaceProfile: 'full',
+          devcontainerConfigName: 'python-dev',
+          taskMode: 'task',
+          resourceRequirementsJson: '{"gpu":true}',
+          defaultProfileId: 'prof-9',
+        },
+        tokenData,
+        mockEnv
+      );
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.id).toBe('skill-new');
       expect(content.name).toBe('my-skill');
       expect(content.message).toContain('created');
@@ -248,7 +266,7 @@ describe('MCP Skill Tools', () => {
           resourceRequirementsJson: '{"gpu":true}',
           defaultProfileId: 'prof-9',
         }),
-        mockEnv,
+        mockEnv
       );
     });
 
@@ -264,7 +282,7 @@ describe('MCP Skill Tools', () => {
         'proj-456',
         'user-789',
         { name: 'minimal' },
-        mockEnv,
+        mockEnv
       );
     });
 
@@ -281,7 +299,9 @@ describe('MCP Skill Tools', () => {
     });
 
     it('returns conflict error for duplicate name', async () => {
-      const err = new Error('Skill "review" already exists in this project') as Error & { statusCode: number };
+      const err = new Error('Skill "review" already exists in this project') as Error & {
+        statusCode: number;
+      };
       err.statusCode = 409;
       vi.mocked(skillService.createSkill).mockRejectedValue(err);
 
@@ -296,7 +316,12 @@ describe('MCP Skill Tools', () => {
       err.statusCode = 400;
       vi.mocked(skillService.createSkill).mockRejectedValue(err);
 
-      const result = await handleCreateSkill(1, { name: 'my-skill', agentType: 'bad-type' }, tokenData, mockEnv);
+      const result = await handleCreateSkill(
+        1,
+        { name: 'my-skill', agentType: 'bad-type' },
+        tokenData,
+        mockEnv
+      );
       expect(result.error!.code).toBe(-32602);
       expect(result.error!.message).toContain('Invalid agent type');
     });
@@ -316,15 +341,22 @@ describe('MCP Skill Tools', () => {
       const updated = makeSkill({ id: 'skill-1', name: 'renamed', model: 'claude-opus-4-6' });
       vi.mocked(skillService.updateSkill).mockResolvedValue(updated);
 
-      const result = await handleUpdateSkill(1, {
-        skillId: 'skill-1',
-        name: 'renamed',
-        model: 'claude-opus-4-6',
-        resourceRequirementsJson: '{"gpu":false}',
-      }, tokenData, mockEnv);
+      const result = await handleUpdateSkill(
+        1,
+        {
+          skillId: 'skill-1',
+          name: 'renamed',
+          model: 'claude-opus-4-6',
+          resourceRequirementsJson: '{"gpu":false}',
+        },
+        tokenData,
+        mockEnv
+      );
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.updated).toBe(true);
       expect(content.updatedFields).toContain('name');
       expect(content.updatedFields).toContain('model');
@@ -336,7 +368,7 @@ describe('MCP Skill Tools', () => {
         'proj-456',
         'skill-1',
         'user-789',
-        expect.objectContaining({ name: 'renamed', model: 'claude-opus-4-6' }),
+        expect.objectContaining({ name: 'renamed', model: 'claude-opus-4-6' })
       );
     });
 
@@ -363,10 +395,15 @@ describe('MCP Skill Tools', () => {
       err.statusCode = 404;
       vi.mocked(skillService.updateSkill).mockRejectedValue(err);
 
-      const result = await handleUpdateSkill(1, {
-        skillId: 'nonexistent',
-        name: 'new-name',
-      }, tokenData, mockEnv);
+      const result = await handleUpdateSkill(
+        1,
+        {
+          skillId: 'nonexistent',
+          name: 'new-name',
+        },
+        tokenData,
+        mockEnv
+      );
       expect(result.error).toBeDefined();
       expect(result.error!.code).toBe(-32602);
       expect(result.error!.message).toContain('Skill not found: nonexistent');
@@ -377,10 +414,15 @@ describe('MCP Skill Tools', () => {
       err.statusCode = 409;
       vi.mocked(skillService.updateSkill).mockRejectedValue(err);
 
-      const result = await handleUpdateSkill(1, {
-        skillId: 'skill-1',
-        name: 'review',
-      }, tokenData, mockEnv);
+      const result = await handleUpdateSkill(
+        1,
+        {
+          skillId: 'skill-1',
+          name: 'review',
+        },
+        tokenData,
+        mockEnv
+      );
       expect(result.error!.code).toBe(-32602);
       expect(result.error!.message).toContain('already exists');
     });
@@ -390,10 +432,15 @@ describe('MCP Skill Tools', () => {
       err.statusCode = 400;
       vi.mocked(skillService.updateSkill).mockRejectedValue(err);
 
-      const result = await handleUpdateSkill(1, {
-        skillId: 'skill-1',
-        agentType: 'bad-type',
-      }, tokenData, mockEnv);
+      const result = await handleUpdateSkill(
+        1,
+        {
+          skillId: 'skill-1',
+          agentType: 'bad-type',
+        },
+        tokenData,
+        mockEnv
+      );
       expect(result.error!.code).toBe(-32602);
       expect(result.error!.message).toContain('Invalid agent type');
     });
@@ -403,20 +450,30 @@ describe('MCP Skill Tools', () => {
       err.statusCode = 403;
       vi.mocked(skillService.updateSkill).mockRejectedValue(err);
 
-      const result = await handleUpdateSkill(1, {
-        skillId: 'skill-1',
-        name: 'new-name',
-      }, tokenData, mockEnv);
+      const result = await handleUpdateSkill(
+        1,
+        {
+          skillId: 'skill-1',
+          name: 'new-name',
+        },
+        tokenData,
+        mockEnv
+      );
       expect(result.error!.code).toBe(-32602);
       expect(result.error!.message).toContain('Builtin skills cannot be modified');
     });
 
     it('returns INTERNAL_ERROR for unexpected service failures', async () => {
       vi.mocked(skillService.updateSkill).mockRejectedValue(new Error('DB timeout'));
-      const result = await handleUpdateSkill(1, {
-        skillId: 'skill-1',
-        name: 'new-name',
-      }, tokenData, mockEnv);
+      const result = await handleUpdateSkill(
+        1,
+        {
+          skillId: 'skill-1',
+          name: 'new-name',
+        },
+        tokenData,
+        mockEnv
+      );
       expect(result.error!.code).toBe(-32603);
       expect(result.error!.message).toContain('Failed to update skill');
     });
@@ -431,7 +488,9 @@ describe('MCP Skill Tools', () => {
       const result = await handleDeleteSkill(1, { skillId: 'skill-1' }, tokenData, mockEnv);
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.deleted).toBe(true);
       expect(content.skillId).toBe('skill-1');
     });
@@ -467,7 +526,7 @@ describe('MCP Skill Tools', () => {
         expect.anything(), // db
         tokenData.projectId,
         'skill-1',
-        tokenData.userId,
+        tokenData.userId
       );
     });
 

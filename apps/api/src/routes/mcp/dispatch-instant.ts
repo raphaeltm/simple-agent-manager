@@ -3,17 +3,19 @@ import { isAgentProfileRuntime } from '@simple-agent-manager/shared';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import type * as schema from '../../db/schema';
+import type { TaskRunner } from '../../durable-objects/task-runner';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { launchInstantSession } from '../../services/instant-session';
+import {
+  type AcceptedInstantSession,
+  acceptInstantSession,
+  type LaunchInstantSessionInput,
+  markInstantLaunchFailed,
+} from '../../services/instant-session';
 import type { AgentSessionOverrides } from '../../services/node-agent';
 import { markQueuedTaskFailed } from '../../services/task-failure';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
-
-export interface DispatchExecutionContext {
-  waitUntil(promise: Promise<unknown>): void;
-}
 
 const VM_ONLY_FIELDS = [
   'vmSize',
@@ -62,13 +64,12 @@ export interface LaunchDispatchedInstantInput {
   overrides?: AgentSessionOverrides;
 }
 
-export function launchDispatchedInstantSession(
+export async function launchDispatchedInstantSession(
   db: Db,
   env: Env,
-  input: LaunchDispatchedInstantInput,
-  execCtx?: DispatchExecutionContext
+  input: LaunchDispatchedInstantInput
 ): Promise<void> {
-  const launch = launchInstantSession(db, env, {
+  const launchInput: LaunchInstantSessionInput = {
     taskId: input.taskId,
     project: input.project,
     userId: input.userId,
@@ -80,20 +81,22 @@ export function launchDispatchedInstantSession(
     branch: input.branch,
     taskMode: input.taskMode,
     overrides: input.overrides,
-  }).then(() => undefined);
+  };
 
-  const guarded = launch.catch(async (err) => {
+  // Phase 1: synchronous accept — persists the node record, workspace row,
+  // chat session, and initial message. Failures here may predate any resource
+  // creation, so only the queued task row is marked failed (the queued-status
+  // guard makes this a no-op if a later path already marked it).
+  let accepted: AcceptedInstantSession;
+  try {
+    accepted = await acceptInstantSession(db, env, launchInput);
+  } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     log.error('mcp.dispatch_task.instant_launch_failed', {
       taskId: input.taskId,
       projectId: input.project.id,
       error: errorMsg,
     });
-    // Setup failures before launchInstantSession's own guarded window (node
-    // record, chat session, message persist) would otherwise leave the task
-    // 'queued' with no error until the stuck-task cron. Failures inside that
-    // window already mark the task failed; the queued-status guard makes this
-    // a no-op then.
     try {
       await markQueuedTaskFailed(db, input.taskId, `Instant launch failed: ${errorMsg}`);
     } catch (persistErr) {
@@ -103,10 +106,38 @@ export function launchDispatchedInstantSession(
       });
     }
     throw err;
-  });
+  }
 
-  if (!execCtx) return guarded;
-
-  execCtx.waitUntil(guarded.catch(() => undefined));
-  return Promise.resolve();
+  // Phase 2: durable handoff. The TaskRunner DO alarm runs the launch in a
+  // job-owned context (rule 43) — the request-scoped waitUntil this replaces
+  // was cancelled ~30s after the response, stranding slow launches in
+  // `queued` with no error and no cleanup.
+  try {
+    const stub = env.TASK_RUNNER.get(
+      env.TASK_RUNNER.idFromName(input.taskId)
+    ) as unknown as TaskRunner;
+    await stub.startInstantLaunch(launchInput, accepted);
+  } catch (err) {
+    const errorMsg = err instanceof Error ? err.message : String(err);
+    log.error('mcp.dispatch_task.instant_handoff_failed', {
+      taskId: input.taskId,
+      projectId: input.project.id,
+      error: errorMsg,
+    });
+    // Accept already created the node/workspace/session — tear it all down.
+    await markInstantLaunchFailed(
+      db,
+      env,
+      {
+        taskId: input.taskId,
+        projectId: accepted.projectId,
+        chatSessionId: accepted.chatSessionId,
+        workspaceId: accepted.workspaceId,
+        nodeId: accepted.nodeId,
+        containerId: accepted.containerId,
+      },
+      `Instant launch handoff failed: ${errorMsg}`
+    );
+    throw err;
+  }
 }

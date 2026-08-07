@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const instantSessionMocks = vi.hoisted(() => ({
-  launchInstantSession: vi.fn(),
+  acceptInstantSession: vi.fn(),
+  markInstantLaunchFailed: vi.fn(),
 }));
 
 const taskFailureMocks = vi.hoisted(() => ({
@@ -9,7 +10,8 @@ const taskFailureMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('../../../src/services/instant-session', () => ({
-  launchInstantSession: instantSessionMocks.launchInstantSession,
+  acceptInstantSession: instantSessionMocks.acceptInstantSession,
+  markInstantLaunchFailed: instantSessionMocks.markInstantLaunchFailed,
 }));
 
 vi.mock('../../../src/services/task-failure', () => ({
@@ -34,116 +36,152 @@ function makeInput(): LaunchDispatchedInstantInput {
   };
 }
 
+function makeAccepted() {
+  return {
+    taskId: 'task-1',
+    runtime: 'cf-container',
+    nodeId: 'node-1',
+    workspaceId: 'ws-1',
+    projectId: 'proj-1',
+    chatSessionId: 'chat-1',
+    agentType: 'openai-codex',
+    containerId: 'node-1',
+    workspaceUrl: 'https://ws-ws-1.example.com',
+    branch: 'main',
+    workspaceName: 'fix-the-bug',
+    workspaceDir: '/workspaces/repo',
+    nodeCallbackToken: 'token',
+    startedAt: 0,
+    gitSource: { repoProvider: 'github' },
+  };
+}
+
 const fakeDb = { marker: 'db' } as never;
+
+function makeEnv(startInstantLaunch: ReturnType<typeof vi.fn>) {
+  return {
+    TASK_RUNNER: {
+      idFromName: vi.fn(() => ({ name: 'do-id' })),
+      get: vi.fn(() => ({ startInstantLaunch })),
+    },
+  } as never;
+}
 
 describe('launchDispatchedInstantSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     taskFailureMocks.markQueuedTaskFailed.mockResolvedValue(true);
+    instantSessionMocks.markInstantLaunchFailed.mockResolvedValue(undefined);
   });
 
-  it('offloads the launch to waitUntil and resolves before the launch settles', async () => {
-    let resolveLaunch: (value: unknown) => void = () => undefined;
-    instantSessionMocks.launchInstantSession.mockReturnValueOnce(
-      new Promise((resolve) => {
-        resolveLaunch = resolve;
-      })
-    );
-    const waited: Promise<unknown>[] = [];
-    const execCtx = {
-      waitUntil: (promise: Promise<unknown>) => {
-        waited.push(promise);
-      },
-    };
+  it('accepts inline and hands the launch to the TaskRunner DO', async () => {
+    const accepted = makeAccepted();
+    instantSessionMocks.acceptInstantSession.mockResolvedValueOnce(accepted);
+    const startInstantLaunch = vi.fn().mockResolvedValue(undefined);
+    const env = makeEnv(startInstantLaunch);
 
-    // Resolves immediately while the launch promise is still pending
-    await expect(
-      launchDispatchedInstantSession(fakeDb, {} as never, makeInput(), execCtx)
-    ).resolves.toBeUndefined();
-    expect(waited).toHaveLength(1);
-    expect(instantSessionMocks.launchInstantSession).toHaveBeenCalledTimes(1);
+    await expect(launchDispatchedInstantSession(fakeDb, env, makeInput())).resolves.toBeUndefined();
 
-    resolveLaunch({ taskId: 'task-1', runtime: 'cf-container' });
-    await expect(waited[0]).resolves.toBeUndefined();
-    expect(taskFailureMocks.markQueuedTaskFailed).not.toHaveBeenCalled();
-  });
-
-  it('marks the task failed and logs when a waitUntil-offloaded launch rejects', async () => {
-    instantSessionMocks.launchInstantSession.mockRejectedValueOnce(
-      new Error('container pool exhausted')
-    );
-    const logSpy = vi.spyOn(log, 'error').mockImplementation(() => undefined);
-    const waited: Promise<unknown>[] = [];
-    const execCtx = {
-      waitUntil: (promise: Promise<unknown>) => {
-        waited.push(promise);
-      },
-    };
-
-    await expect(
-      launchDispatchedInstantSession(fakeDb, {} as never, makeInput(), execCtx)
-    ).resolves.toBeUndefined();
-
-    // The rejection is captured: structured log + queued-guarded task failure
-    expect(waited).toHaveLength(1);
-    await expect(waited[0]).resolves.toBeUndefined();
-    expect(logSpy).toHaveBeenCalledWith(
-      'mcp.dispatch_task.instant_launch_failed',
+    expect(instantSessionMocks.acceptInstantSession).toHaveBeenCalledTimes(1);
+    expect(instantSessionMocks.acceptInstantSession).toHaveBeenCalledWith(
+      fakeDb,
+      env,
       expect.objectContaining({
         taskId: 'task-1',
-        projectId: 'proj-1',
-        error: 'container pool exhausted',
+        initialPrompt: 'Fix the bug',
+        taskMode: 'task',
       })
     );
-    expect(taskFailureMocks.markQueuedTaskFailed).toHaveBeenCalledWith(
+    // The durable handoff receives the SAME launch input and accepted record —
+    // the DO alarm runs the continuation from these exact values.
+    expect(startInstantLaunch).toHaveBeenCalledTimes(1);
+    expect(startInstantLaunch).toHaveBeenCalledWith(
+      expect.objectContaining({ taskId: 'task-1' }),
+      accepted
+    );
+    expect(taskFailureMocks.markQueuedTaskFailed).not.toHaveBeenCalled();
+    expect(instantSessionMocks.markInstantLaunchFailed).not.toHaveBeenCalled();
+  });
+
+  it('appends the profile system prompt to the initial prompt', async () => {
+    instantSessionMocks.acceptInstantSession.mockResolvedValueOnce(makeAccepted());
+    const startInstantLaunch = vi.fn().mockResolvedValue(undefined);
+    const env = makeEnv(startInstantLaunch);
+
+    await launchDispatchedInstantSession(fakeDb, env, {
+      ...makeInput(),
+      systemPromptAppend: 'Always answer in French.',
+    });
+
+    expect(instantSessionMocks.acceptInstantSession).toHaveBeenCalledWith(
       fakeDb,
-      'task-1',
-      'Instant launch failed: container pool exhausted'
+      env,
+      expect.objectContaining({
+        initialPrompt: 'Fix the bug\n\nAlways answer in French.',
+        displayMessage: 'Fix the bug',
+      })
     );
   });
 
-  it('marks the task failed and propagates the rejection without an execution context', async () => {
-    instantSessionMocks.launchInstantSession.mockRejectedValueOnce(
-      new Error('container pool exhausted')
-    );
+  it('marks the queued task failed and rethrows when accept fails', async () => {
+    instantSessionMocks.acceptInstantSession.mockRejectedValueOnce(new Error('quota exceeded'));
     vi.spyOn(log, 'error').mockImplementation(() => undefined);
+    const startInstantLaunch = vi.fn();
+    const env = makeEnv(startInstantLaunch);
 
-    await expect(
-      launchDispatchedInstantSession(fakeDb, {} as never, makeInput(), undefined)
-    ).rejects.toThrow('container pool exhausted');
+    await expect(launchDispatchedInstantSession(fakeDb, env, makeInput())).rejects.toThrow(
+      'quota exceeded'
+    );
+
     expect(taskFailureMocks.markQueuedTaskFailed).toHaveBeenCalledWith(
       fakeDb,
       'task-1',
-      'Instant launch failed: container pool exhausted'
+      'Instant launch failed: quota exceeded'
     );
+    expect(startInstantLaunch).not.toHaveBeenCalled();
+    expect(instantSessionMocks.markInstantLaunchFailed).not.toHaveBeenCalled();
   });
 
-  it('still propagates the launch failure when persisting the failure also throws', async () => {
-    instantSessionMocks.launchInstantSession.mockRejectedValueOnce(
-      new Error('container pool exhausted')
-    );
+  it('still rethrows the original accept error when failure persistence fails', async () => {
+    instantSessionMocks.acceptInstantSession.mockRejectedValueOnce(new Error('quota exceeded'));
     taskFailureMocks.markQueuedTaskFailed.mockRejectedValueOnce(new Error('D1 unavailable'));
     const logSpy = vi.spyOn(log, 'error').mockImplementation(() => undefined);
+    const env = makeEnv(vi.fn());
 
-    await expect(
-      launchDispatchedInstantSession(fakeDb, {} as never, makeInput(), undefined)
-    ).rejects.toThrow('container pool exhausted');
+    await expect(launchDispatchedInstantSession(fakeDb, env, makeInput())).rejects.toThrow(
+      'quota exceeded'
+    );
     expect(logSpy).toHaveBeenCalledWith(
       'mcp.dispatch_task.instant_failure_persist_failed',
       expect.objectContaining({ taskId: 'task-1', error: 'D1 unavailable' })
     );
   });
 
-  it('resolves the inline launch when it succeeds without an execution context', async () => {
-    instantSessionMocks.launchInstantSession.mockResolvedValueOnce({
-      taskId: 'task-1',
-      runtime: 'cf-container',
-    });
+  it('tears down accepted resources and rethrows when the DO handoff fails', async () => {
+    const accepted = makeAccepted();
+    instantSessionMocks.acceptInstantSession.mockResolvedValueOnce(accepted);
+    vi.spyOn(log, 'error').mockImplementation(() => undefined);
+    const startInstantLaunch = vi.fn().mockRejectedValueOnce(new Error('do unavailable'));
+    const env = makeEnv(startInstantLaunch);
 
-    await expect(
-      launchDispatchedInstantSession(fakeDb, {} as never, makeInput(), undefined)
-    ).resolves.toBeUndefined();
-    expect(instantSessionMocks.launchInstantSession).toHaveBeenCalledTimes(1);
+    await expect(launchDispatchedInstantSession(fakeDb, env, makeInput())).rejects.toThrow(
+      'do unavailable'
+    );
+
+    expect(instantSessionMocks.markInstantLaunchFailed).toHaveBeenCalledWith(
+      fakeDb,
+      env,
+      {
+        taskId: 'task-1',
+        projectId: 'proj-1',
+        chatSessionId: 'chat-1',
+        workspaceId: 'ws-1',
+        nodeId: 'node-1',
+        containerId: 'node-1',
+      },
+      'Instant launch handoff failed: do unavailable'
+    );
+    // Full teardown supersedes the queued-only marker on this path.
     expect(taskFailureMocks.markQueuedTaskFailed).not.toHaveBeenCalled();
   });
 });

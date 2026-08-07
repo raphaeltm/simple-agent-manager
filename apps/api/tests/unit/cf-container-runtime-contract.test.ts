@@ -103,7 +103,11 @@ describe('cf-container runtime spike contracts', () => {
     expect(chatStartRoute).toContain('resolveWorkspaceRuntime');
     expect(chatStartRoute).toContain("runtime.runtime !== 'cf-container'");
     expect(chatStartRoute).toContain('acceptInstantSession');
-    expect(chatStartRoute).toContain('continueInstantSessionLaunch');
+    // Durable handoff: the launch runs from the TaskRunner DO alarm, never
+    // under the request's cancellable waitUntil (comments may reference the
+    // word; an actual executionCtx.waitUntil call must not reappear).
+    expect(chatStartRoute).toContain('startInstantLaunch');
+    expect(chatStartRoute).not.toContain('executionCtx.waitUntil');
     expect(chatStartRoute).toContain("status: 'starting'");
     const containerDo = read('durable-objects/vm-agent-container.ts');
     expect(containerDo).toContain("NODE_ROLE: 'standalone'");

@@ -11,7 +11,8 @@ const deploymentToolMocks = vi.hoisted(() => ({
 }));
 
 const instantSessionMocks = vi.hoisted(() => ({
-  launchInstantSession: vi.fn(),
+  acceptInstantSession: vi.fn(),
+  markInstantLaunchFailed: vi.fn(),
 }));
 
 vi.mock('../../../src/services/agent-profiles', () => ({
@@ -28,7 +29,8 @@ vi.mock('../../../src/routes/projects/_helpers', () => ({
 }));
 
 vi.mock('../../../src/services/instant-session', () => ({
-  launchInstantSession: instantSessionMocks.launchInstantSession,
+  acceptInstantSession: instantSessionMocks.acceptInstantSession,
+  markInstantLaunchFailed: instantSessionMocks.markInstantLaunchFailed,
 }));
 
 vi.mock('../../../src/routes/mcp/deployment-tools', async () => {
@@ -238,6 +240,7 @@ const mockProjectData = {
 // Mock TaskRunner DO namespace
 const mockTaskRunnerStub = {
   start: vi.fn().mockResolvedValue(undefined),
+  startInstantLaunch: vi.fn().mockResolvedValue(undefined),
 };
 const mockTaskRunner = {
   idFromName: vi.fn().mockReturnValue('task-runner-do-id'),
@@ -1129,7 +1132,9 @@ describe('MCP Routes', () => {
         { id: 'msg-old', role: 'assistant', content: 'Earlier analysis', createdAt: 1710000001000 },
       ]);
       expect(data.recentAssistantMessages[0].content).toBe('Final detailed findings');
-      expect(data.recentAssistantMessages[0].createdAt).toBeGreaterThan(data.recentAssistantMessages[1].createdAt);
+      expect(data.recentAssistantMessages[0].createdAt).toBeGreaterThan(
+        data.recentAssistantMessages[1].createdAt
+      );
     });
 
     it('should still return task details if recent assistant messages cannot be read', async () => {
@@ -1874,7 +1879,7 @@ describe('MCP Routes', () => {
       setupHappyPathMocks();
       mockEnv.CF_CONTAINER_ENABLED = 'true';
       mockInstantProfile();
-      instantSessionMocks.launchInstantSession.mockResolvedValue({
+      instantSessionMocks.acceptInstantSession.mockResolvedValue({
         taskId: 'generated-task',
         runtime: 'cf-container',
       });
@@ -1905,8 +1910,8 @@ describe('MCP Routes', () => {
       expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
       expect(mockDoStub.createSession).not.toHaveBeenCalled();
       expect(mockDoStub.persistMessage).not.toHaveBeenCalled();
-      expect(instantSessionMocks.launchInstantSession).toHaveBeenCalledTimes(1);
-      expect(instantSessionMocks.launchInstantSession).toHaveBeenCalledWith(
+      expect(instantSessionMocks.acceptInstantSession).toHaveBeenCalledTimes(1);
+      expect(instantSessionMocks.acceptInstantSession).toHaveBeenCalledWith(
         expect.anything(),
         expect.anything(),
         expect.objectContaining({
@@ -1930,7 +1935,7 @@ describe('MCP Routes', () => {
       setupHappyPathMocks();
       mockEnv.CF_CONTAINER_ENABLED = 'true';
       mockInstantProfile();
-      instantSessionMocks.launchInstantSession.mockResolvedValue({
+      instantSessionMocks.acceptInstantSession.mockResolvedValue({
         taskId: 'generated-task',
         runtime: 'cf-container',
       });
@@ -1956,14 +1961,14 @@ describe('MCP Routes', () => {
       const preflightCall = vi.mocked(projectHelpers.requireRepositoryOwnerAccess).mock.calls[0]!;
       expect(preflightCall[3]).toBe('user-789');
       expect(preflightCall[4]).toBe('mcp-dispatch');
-      expect(instantSessionMocks.launchInstantSession).not.toHaveBeenCalled();
+      expect(instantSessionMocks.acceptInstantSession).not.toHaveBeenCalled();
       expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
     });
 
     it('lets an explicit cf-container runtime launch Instant without a profile', async () => {
       setupHappyPathMocks();
       mockEnv.CF_CONTAINER_ENABLED = 'true';
-      instantSessionMocks.launchInstantSession.mockResolvedValue({
+      instantSessionMocks.acceptInstantSession.mockResolvedValue({
         taskId: 'generated-task',
         runtime: 'cf-container',
       });
@@ -1986,7 +1991,7 @@ describe('MCP Routes', () => {
         runtime: 'cf-container',
         runtimeReason: 'explicit-cf-container',
       });
-      expect(instantSessionMocks.launchInstantSession).toHaveBeenCalledTimes(1);
+      expect(instantSessionMocks.acceptInstantSession).toHaveBeenCalledTimes(1);
       expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
     });
 
@@ -2010,14 +2015,14 @@ describe('MCP Routes', () => {
       const data = JSON.parse((await res.json()).result.content[0].text);
       expect(data).toMatchObject({ runtime: 'vm', runtimeReason: 'explicit-vm' });
       expect(mockTaskRunnerStub.start).toHaveBeenCalledTimes(1);
-      expect(instantSessionMocks.launchInstantSession).not.toHaveBeenCalled();
+      expect(instantSessionMocks.acceptInstantSession).not.toHaveBeenCalled();
     });
 
     it('lets explicit cf-container override a vm profile', async () => {
       setupHappyPathMocks();
       mockEnv.CF_CONTAINER_ENABLED = 'true';
       mockInstantProfile('vm');
-      instantSessionMocks.launchInstantSession.mockResolvedValue({
+      instantSessionMocks.acceptInstantSession.mockResolvedValue({
         taskId: 'generated-task',
         runtime: 'cf-container',
       });
@@ -2043,7 +2048,7 @@ describe('MCP Routes', () => {
         runtimeReason: 'explicit-cf-container',
       });
       expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
-      expect(instantSessionMocks.launchInstantSession).toHaveBeenCalledTimes(1);
+      expect(instantSessionMocks.acceptInstantSession).toHaveBeenCalledTimes(1);
     });
 
     it('rejects an unrecognized runtime value', async () => {
@@ -2064,7 +2069,7 @@ describe('MCP Routes', () => {
       expect(body.error.code).toBe(-32602);
       expect(body.error.message).toContain('runtime must be vm or cf-container');
       expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
-      expect(instantSessionMocks.launchInstantSession).not.toHaveBeenCalled();
+      expect(instantSessionMocks.acceptInstantSession).not.toHaveBeenCalled();
     });
 
     it('rejects VM-only fields with explicit cf-container runtime', async () => {
@@ -2129,7 +2134,7 @@ describe('MCP Routes', () => {
       const data = JSON.parse((await res.json()).result.content[0].text);
       expect(data).toMatchObject({ runtime: 'vm', runtimeReason: 'sandbox-disabled' });
       expect(mockTaskRunnerStub.start).toHaveBeenCalledTimes(1);
-      expect(instantSessionMocks.launchInstantSession).not.toHaveBeenCalled();
+      expect(instantSessionMocks.acceptInstantSession).not.toHaveBeenCalled();
     });
 
     it('should dispatch task successfully (happy path)', async () => {
@@ -2366,7 +2371,7 @@ describe('MCP Routes', () => {
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([]);
       mockD1._stmt.run.mockResolvedValue({ success: true, meta: { changes: 1 } });
-      instantSessionMocks.launchInstantSession.mockResolvedValue({
+      instantSessionMocks.acceptInstantSession.mockResolvedValue({
         taskId: 'generated-task',
         runtime: 'cf-container',
       });
@@ -2388,7 +2393,7 @@ describe('MCP Routes', () => {
         runtime: 'cf-container',
         runtimeReason: 'explicit-cf-container',
       });
-      expect(instantSessionMocks.launchInstantSession).toHaveBeenCalledTimes(1);
+      expect(instantSessionMocks.acceptInstantSession).toHaveBeenCalledTimes(1);
       expect(mockTaskRunnerStub.start).not.toHaveBeenCalled();
     });
 

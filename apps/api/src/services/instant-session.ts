@@ -1,6 +1,6 @@
 import type { AgentProfileRuntime, TaskMode } from '@simple-agent-manager/shared';
 import { DEFAULT_TASK_TITLE_MAX_LENGTH } from '@simple-agent-manager/shared';
-import { eq } from 'drizzle-orm';
+import { and, eq, notInArray } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -175,15 +175,6 @@ function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-export async function launchInstantSession(
-  db: Db,
-  env: Env,
-  input: LaunchInstantSessionInput
-): Promise<LaunchInstantSessionResult> {
-  const accepted = await acceptInstantSession(db, env, input);
-  return continueInstantSessionLaunch(db, env, input, accepted);
-}
-
 export async function acceptInstantSession(
   db: Db,
   env: Env,
@@ -291,11 +282,34 @@ export async function acceptInstantSession(
   };
 }
 
+/**
+ * Milestone hooks for a durable launch driver (TaskRunner DO). The driver
+ * persists progress at the agent-bootstrap boundary so an interrupted attempt
+ * can be classified on retry: before `beforeAgentBootstrap` the container can
+ * be torn down safely; after `afterAgentBootstrap` the agent is live and only
+ * the idempotent finalize writes remain.
+ */
+export interface InstantLaunchHooks {
+  beforeAgentBootstrap?: () => Promise<void>;
+  afterAgentBootstrap?: (agentSessionId: string) => Promise<void>;
+}
+
+/** Identity refs needed to fail-and-clean-up a launch without its live promise. */
+export interface InstantLaunchFailureRef {
+  taskId: string;
+  projectId: string;
+  chatSessionId: string;
+  workspaceId: string;
+  nodeId: string;
+  containerId: string;
+}
+
 export async function continueInstantSessionLaunch(
   db: Db,
   env: Env,
   input: LaunchInstantSessionInput,
-  accepted: AcceptedInstantSession
+  accepted: AcceptedInstantSession,
+  hooks?: InstantLaunchHooks
 ): Promise<LaunchInstantSessionResult> {
   requireVmAgentContainer(env);
 
@@ -316,7 +330,6 @@ export async function continueInstantSessionLaunch(
   const vmAgentPort = config.vmAgentPort;
   const controlPlaneUrl = `https://api.${env.BASE_DOMAIN}`;
   const phaseDetail = { nodeId, workspaceId, containerId };
-  const node = { id: nodeId };
 
   try {
     const launchStart = Date.now();
@@ -376,6 +389,7 @@ export async function continueInstantSessionLaunch(
 
     const acpSessionCreateStart = Date.now();
     const phaseDurations = new Map<string, number>();
+    await hooks?.beforeAgentBootstrap?.();
     const bootstrapResult = await startSamAwareAgentSession(db, env, {
       nodeId,
       workspaceId,
@@ -421,21 +435,9 @@ export async function continueInstantSessionLaunch(
       (phaseDurations.get('start_acp_session') ?? 0) +
       (phaseDurations.get('mark_acp_session_running') ?? 0);
 
-    await db
-      .update(schema.workspaces)
-      .set({ dispatchedAt: new Date().toISOString(), updatedAt: new Date().toISOString() })
-      .where(eq(schema.workspaces.id, workspaceId));
+    await hooks?.afterAgentBootstrap?.(bootstrapResult.agentSessionId);
 
-    await db
-      .update(schema.tasks)
-      .set({
-        status: 'in_progress',
-        executionStep: 'agent_running',
-        workspaceId,
-        autoProvisionedNodeId: nodeId,
-        updatedAt: new Date().toISOString(),
-      })
-      .where(eq(schema.tasks.id, input.taskId));
+    await finalizeInstantLaunch(db, input.taskId, workspaceId, nodeId);
 
     const totalDurationMs = Date.now() - startedAt;
     const preContainerDurationMs = launchStart - startedAt;
@@ -468,71 +470,165 @@ export async function continueInstantSessionLaunch(
       timings,
     };
   } catch (err) {
-    const message = errorMessage(err);
-    const failedAt = new Date().toISOString();
-    await db
-      .update(schema.tasks)
-      .set({
-        status: 'failed',
-        executionStep: 'launch_failed',
-        errorMessage: message,
+    await markInstantLaunchFailed(
+      db,
+      env,
+      {
+        taskId: input.taskId,
+        projectId: input.project.id,
+        chatSessionId,
         workspaceId,
-        autoProvisionedNodeId: nodeId,
-        updatedAt: failedAt,
-      })
-      .where(eq(schema.tasks.id, input.taskId))
-      .catch((updateErr) => {
-        log.warn('instant_session.task_error_update_failed', {
-          taskId: input.taskId,
-          error: errorMessage(updateErr),
-        });
-      });
-    await projectDataService
-      .failSession(env, input.project.id, chatSessionId, message)
-      .catch((updateErr) => {
-        log.warn('instant_session.chat_error_update_failed', {
-          taskId: input.taskId,
-          chatSessionId,
-          error: errorMessage(updateErr),
-        });
-      });
-    await db
-      .update(schema.workspaces)
-      .set({
-        status: 'error',
-        errorMessage: message,
-        updatedAt: failedAt,
-      })
-      .where(eq(schema.workspaces.id, workspaceId))
-      .catch((updateErr) => {
-        log.warn('instant_session.workspace_error_update_failed', {
-          workspaceId,
-          error: errorMessage(updateErr),
-        });
-      });
-    await db
-      .update(schema.nodes)
-      .set({
-        status: 'error',
-        healthStatus: 'unhealthy',
-        errorMessage: message,
-        updatedAt: failedAt,
-      })
-      .where(eq(schema.nodes.id, node.id))
-      .catch((updateErr) => {
-        log.warn('instant_session.node_error_update_failed', {
-          nodeId,
-          error: errorMessage(updateErr),
-        });
-      });
-    await destroyVmAgentContainer(env, containerId).catch((destroyErr) => {
-      log.error('instant_session.container_destroy_after_failure_failed', {
         nodeId,
-        workspaceId,
         containerId,
-        error: errorMessage(destroyErr),
-      });
-    });
+      },
+      errorMessage(err)
+    );
     throw err;
   }
+}
+
+/**
+ * Idempotent success tail of an instant launch: mark the workspace dispatched
+ * and advance the task queued -> in_progress/agent_running. Guarded on
+ * status='queued' so a concurrent terminal transition (e.g. the stuck-task
+ * sweep failing an over-deadline launch and destroying its container) is never
+ * resurrected by a late finalize.
+ */
+export async function finalizeInstantLaunch(
+  db: Db,
+  taskId: string,
+  workspaceId: string,
+  nodeId: string
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const updated = await db
+    .update(schema.tasks)
+    .set({
+      status: 'in_progress',
+      executionStep: 'agent_running',
+      workspaceId,
+      autoProvisionedNodeId: nodeId,
+      updatedAt: nowIso,
+    })
+    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.status, 'queued')));
+  // Defensive meta access mirrors services/bootstrap.ts: only a driver that
+  // affirmatively reports zero changed rows is treated as a conflict.
+  const changes = typeof updated?.meta?.changes === 'number' ? updated.meta.changes : 1;
+  if (changes === 0) {
+    log.warn('instant_session.finalize_conflict', {
+      taskId,
+      workspaceId,
+      nodeId,
+      message: 'Task left queued state before finalize; skipping in_progress transition',
+    });
+    return;
+  }
+  await db
+    .update(schema.workspaces)
+    .set({ dispatchedAt: nowIso, updatedAt: nowIso })
+    .where(eq(schema.workspaces.id, workspaceId));
+}
+
+/**
+ * Mark a failed or interrupted instant launch terminally failed and tear down
+ * everything it created: task -> failed (never clobbering an already-terminal
+ * row), chat session -> failed (UI-visible), workspace + node -> error,
+ * lingering running agent_sessions rows -> error, and destroy the container.
+ * Every step is individually guarded so partial teardown still proceeds.
+ *
+ * Callable without the live launch promise: the TaskRunner DO uses it when it
+ * finds an attempt that died mid-flight (rule 43 — the job-owned context, not
+ * the original HTTP request, owns failure-marking).
+ */
+export async function markInstantLaunchFailed(
+  db: Db,
+  env: Env,
+  ref: InstantLaunchFailureRef,
+  message: string
+): Promise<void> {
+  const failedAt = new Date().toISOString();
+  await db
+    .update(schema.tasks)
+    .set({
+      status: 'failed',
+      executionStep: 'launch_failed',
+      errorMessage: message,
+      completedAt: failedAt,
+      workspaceId: ref.workspaceId,
+      autoProvisionedNodeId: ref.nodeId,
+      updatedAt: failedAt,
+    })
+    .where(
+      and(
+        eq(schema.tasks.id, ref.taskId),
+        notInArray(schema.tasks.status, ['completed', 'failed', 'cancelled'])
+      )
+    )
+    .catch((updateErr) => {
+      log.warn('instant_session.task_error_update_failed', {
+        taskId: ref.taskId,
+        error: errorMessage(updateErr),
+      });
+    });
+  await db
+    .update(schema.agentSessions)
+    .set({ status: 'error', errorMessage: message, stoppedAt: failedAt, updatedAt: failedAt })
+    .where(
+      and(
+        eq(schema.agentSessions.workspaceId, ref.workspaceId),
+        eq(schema.agentSessions.status, 'running')
+      )
+    )
+    .catch((updateErr) => {
+      log.warn('instant_session.agent_session_error_update_failed', {
+        workspaceId: ref.workspaceId,
+        error: errorMessage(updateErr),
+      });
+    });
+  await projectDataService
+    .failSession(env, ref.projectId, ref.chatSessionId, message)
+    .catch((updateErr) => {
+      log.warn('instant_session.chat_error_update_failed', {
+        taskId: ref.taskId,
+        chatSessionId: ref.chatSessionId,
+        error: errorMessage(updateErr),
+      });
+    });
+  await db
+    .update(schema.workspaces)
+    .set({
+      status: 'error',
+      errorMessage: message,
+      updatedAt: failedAt,
+    })
+    .where(eq(schema.workspaces.id, ref.workspaceId))
+    .catch((updateErr) => {
+      log.warn('instant_session.workspace_error_update_failed', {
+        workspaceId: ref.workspaceId,
+        error: errorMessage(updateErr),
+      });
+    });
+  await db
+    .update(schema.nodes)
+    .set({
+      status: 'error',
+      healthStatus: 'unhealthy',
+      errorMessage: message,
+      updatedAt: failedAt,
+    })
+    .where(eq(schema.nodes.id, ref.nodeId))
+    .catch((updateErr) => {
+      log.warn('instant_session.node_error_update_failed', {
+        nodeId: ref.nodeId,
+        error: errorMessage(updateErr),
+      });
+    });
+  await destroyVmAgentContainer(env, ref.containerId).catch((destroyErr) => {
+    log.error('instant_session.container_destroy_after_failure_failed', {
+      nodeId: ref.nodeId,
+      workspaceId: ref.workspaceId,
+      containerId: ref.containerId,
+      error: errorMessage(destroyErr),
+    });
+  });
 }

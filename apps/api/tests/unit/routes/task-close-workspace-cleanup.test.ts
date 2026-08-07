@@ -108,16 +108,18 @@ describe('POST /api/projects/:projectId/tasks/:taskId/close workspace cleanup', 
     await expect(response.json()).resolves.toMatchObject({ status: 'completed' });
 
     expect(mocks.cleanupWorkspaceForDeletion).toHaveBeenCalledTimes(1);
-    expect(mocks.cleanupWorkspaceForDeletion).toHaveBeenCalledWith(expect.objectContaining({
-      db,
-      workspace,
-      userId: 'user-close-1',
-      logContext: expect.objectContaining({
-        taskId: 'task-close-1',
-        projectId: 'project-close-1',
-        closePath: 'conversation',
-      }),
-    }));
+    expect(mocks.cleanupWorkspaceForDeletion).toHaveBeenCalledWith(
+      expect.objectContaining({
+        db,
+        workspace,
+        userId: 'user-close-1',
+        logContext: expect.objectContaining({
+          taskId: 'task-close-1',
+          projectId: 'project-close-1',
+          closePath: 'conversation',
+        }),
+      })
+    );
     expect(db.update).toHaveBeenCalled();
     expect(waitUntil).toHaveBeenCalledTimes(1);
   });
@@ -137,9 +139,12 @@ describe('POST /api/projects/:projectId/tasks/:taskId/close workspace cleanup', 
     vi.mocked(drizzle).mockReturnValue(db as never);
 
     const response = await createApp().fetch(
-      new Request('https://api.test/api/projects/project-route/tasks/task-close-cross-project/close', {
-        method: 'POST',
-      }),
+      new Request(
+        'https://api.test/api/projects/project-route/tasks/task-close-cross-project/close',
+        {
+          method: 'POST',
+        }
+      ),
       { DATABASE: {} } as Env,
       { waitUntil: vi.fn(), passThroughOnException: vi.fn() } as unknown as ExecutionContext
     );

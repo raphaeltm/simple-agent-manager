@@ -7,6 +7,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
+import type { TaskRunner } from '../durable-objects/task-runner';
 import type { Env } from '../env';
 import { parsePositiveInt, requireRouteParam } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
@@ -14,7 +15,7 @@ import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
 import { jsonValidator, StartChatSessionSchema } from '../schemas';
-import { acceptInstantSession, continueInstantSessionLaunch } from '../services/instant-session';
+import { acceptInstantSession, markInstantLaunchFailed } from '../services/instant-session';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
 import { resolveSkillProfile } from '../services/skills';
 import { truncateTitle } from '../services/task-title';
@@ -34,18 +35,6 @@ type ParentLineage = {
   credentialAttributionSource: string | null;
 };
 const chatStartRoutes = new Hono<{ Bindings: Env }>();
-
-function scheduleBackground(
-  c: { executionCtx: { waitUntil(promise: Promise<unknown>): void } },
-  promise: Promise<unknown> | undefined
-): void {
-  if (!promise || typeof promise.catch !== 'function') return;
-  try {
-    c.executionCtx.waitUntil(promise);
-  } catch {
-    promise.catch(() => undefined);
-  }
-}
 
 function appendSystemPrompt(
   message: string,
@@ -253,7 +242,33 @@ chatStartRoutes.post(
       throw err;
     }
 
-    scheduleBackground(c, continueInstantSessionLaunch(db, c.env, launchInput, accepted));
+    // Hand the launch to the TaskRunner DO for durable, alarm-driven
+    // execution. Request-scoped waitUntil is cancelled ~30s after the
+    // response (and on client disconnect) WITHOUT running catch blocks,
+    // which stranded slow launches in `queued` forever (2026-08-07 incident).
+    try {
+      const stub = c.env.TASK_RUNNER.get(
+        c.env.TASK_RUNNER.idFromName(taskId)
+      ) as unknown as TaskRunner;
+      await stub.startInstantLaunch(launchInput, accepted);
+    } catch (err) {
+      // Accept already created the node/workspace/session — tear it all down,
+      // not just the task row.
+      await markInstantLaunchFailed(
+        db,
+        c.env,
+        {
+          taskId,
+          projectId: accepted.projectId,
+          chatSessionId: accepted.chatSessionId,
+          workspaceId: accepted.workspaceId,
+          nodeId: accepted.nodeId,
+          containerId: accepted.containerId,
+        },
+        `Instant launch handoff failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+      throw err;
+    }
 
     return c.json(
       {

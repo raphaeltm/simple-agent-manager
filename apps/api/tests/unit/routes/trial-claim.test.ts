@@ -78,7 +78,7 @@ function makeEnv(
     trialUpdateChanges?: number;
     batchReject?: Error;
     rollbackChanges?: number;
-  } = {},
+  } = {}
 ): ClaimTestEnv {
   const statements: MockD1Statement[] = [];
   const prepare = vi.fn((sql: string) => ({
@@ -119,11 +119,7 @@ async function postClaim(
 ): Promise<Response> {
   const headers: Record<string, string> = { 'content-type': 'application/json' };
   if (cookie) headers['cookie'] = `sam_trial_claim=${encodeURIComponent(cookie)}`;
-  return app.request(
-    '/api/trial/claim',
-    { method: 'POST', headers, body: '{}' },
-    env
-  );
+  return app.request('/api/trial/claim', { method: 'POST', headers, body: '{}' }, env);
 }
 
 function futurePayload(
@@ -208,14 +204,13 @@ describe('POST /api/trial/claim', () => {
 
   it('returns 400 when cookie projectId disagrees with record projectId', async () => {
     const app = makeApp();
-    const token = await signClaimToken(
-      futurePayload({ projectId: 'proj_cookie' }),
-      SECRET
+    const token = await signClaimToken(futurePayload({ projectId: 'proj_cookie' }), SECRET);
+    readTrialMock.mockResolvedValueOnce(
+      trialRecord({
+        trialId: 'trial_good',
+        projectId: 'proj_record_different',
+      })
     );
-    readTrialMock.mockResolvedValueOnce(trialRecord({
-      trialId: 'trial_good',
-      projectId: 'proj_record_different',
-    }));
     const resp = await postClaim(app, token);
     expect(resp.status).toBe(400);
   });
@@ -255,8 +250,11 @@ describe('POST /api/trial/claim', () => {
 
     expect(resp.status).toBe(500);
     expect(markTrialClaimedMock).not.toHaveBeenCalled();
-    const rollback = env.__statements.find((stmt) =>
-      stmt.sql.includes('UPDATE projects') && stmt.sql.includes('WHERE id = ?') && stmt.binds[0] === 'system_anonymous_trials'
+    const rollback = env.__statements.find(
+      (stmt) =>
+        stmt.sql.includes('UPDATE projects') &&
+        stmt.sql.includes('WHERE id = ?') &&
+        stmt.binds[0] === 'system_anonymous_trials'
     );
     expect(rollback).toBeDefined();
     expect(rollback?.run).toHaveBeenCalledTimes(1);

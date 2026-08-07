@@ -20,9 +20,7 @@ vi.mock('../../../src/lib/logger', () => ({
 
 const { insertMock, valuesMock, onConflictMock } = vi.hoisted(() => {
   const onConflictMock = vi.fn().mockResolvedValue(undefined);
-  const valuesMock = vi
-    .fn()
-    .mockReturnValue({ onConflictDoNothing: onConflictMock });
+  const valuesMock = vi.fn().mockReturnValue({ onConflictDoNothing: onConflictMock });
   const insertMock = vi.fn().mockReturnValue({ values: valuesMock });
   return { insertMock, valuesMock, onConflictMock };
 });

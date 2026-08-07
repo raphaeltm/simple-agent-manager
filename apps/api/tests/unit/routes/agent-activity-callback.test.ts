@@ -366,9 +366,7 @@ describe('agent activity callback', () => {
       expect(mocks.projectData.transitionAcpSession).not.toHaveBeenCalled();
       expect(mocks.projectData.failSession).not.toHaveBeenCalled();
       expect(mocks.updateSets).toHaveLength(0);
-      expect(
-        mocks.container.markVmAgentContainerActiveWorkEndedBestEffort
-      ).not.toHaveBeenCalled();
+      expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
       expect(mocks.log.warn).toHaveBeenCalledWith(
         'acp_activity.rejected_stale_callback',
         expect.objectContaining({

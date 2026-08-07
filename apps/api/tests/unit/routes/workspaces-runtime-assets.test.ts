@@ -34,10 +34,14 @@ describe('workspaces runtime-assets callback route', () => {
   } as Env;
 
   const requestRuntimeAssets = (path = '/api/workspaces/WS_1/runtime-assets') =>
-    app.request(path, {
-      method: 'GET',
-      headers: { Authorization: 'Bearer callback-token' },
-    }, runtimeBindings);
+    app.request(
+      path,
+      {
+        method: 'GET',
+        headers: { Authorization: 'Bearer callback-token' },
+      },
+      runtimeBindings
+    );
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -73,7 +77,9 @@ describe('workspaces runtime-assets callback route', () => {
   });
 
   it('passes taskless agent session context to the resolver', async () => {
-    const res = await requestRuntimeAssets('/api/workspaces/WS_1/runtime-assets?agentSessionId=agent-session-1');
+    const res = await requestRuntimeAssets(
+      '/api/workspaces/WS_1/runtime-assets?agentSessionId=agent-session-1'
+    );
 
     expect(res.status).toBe(200);
     expect(mocks.getWorkspaceRuntimeAssets).toHaveBeenCalledWith(

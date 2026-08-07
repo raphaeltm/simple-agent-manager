@@ -15,7 +15,9 @@ vi.mock('../../../src/middleware/rate-limit', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/middleware/rate-limit')>();
   return {
     ...actual,
-    checkRateLimit: vi.fn(() => Promise.resolve({ allowed: true, remaining: 10, resetAt: 9999999999 })),
+    checkRateLimit: vi.fn(() =>
+      Promise.resolve({ allowed: true, remaining: 10, resetAt: 9999999999 })
+    ),
   };
 });
 
@@ -23,7 +25,15 @@ import { deviceFlowRoutes } from '../../../src/routes/device-flow';
 
 let currentMockDB: ReturnType<typeof createMockDB>;
 
-function createMockDB(user: unknown = { id: 'user-1', email: 'test@example.com', name: 'Test User', status: 'active', role: 'user' }) {
+function createMockDB(
+  user: unknown = {
+    id: 'user-1',
+    email: 'test@example.com',
+    name: 'Test User',
+    status: 'active',
+    role: 'user',
+  }
+) {
   return {
     select: vi.fn(() => {
       const chain = {

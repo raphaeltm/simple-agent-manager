@@ -16,7 +16,7 @@ const mocks = vi.hoisted(() => ({
   },
   instant: {
     acceptInstantSession: vi.fn(),
-    continueInstantSessionLaunch: vi.fn(),
+    markInstantLaunchFailed: vi.fn(),
   },
   mention: {
     enrichMessageWithMentions: vi.fn(),
@@ -50,11 +50,17 @@ const BASE_URL = 'https://api.test.example.com';
 const ROUTE_PATH = '/api/projects/:projectId/sessions';
 const REQUEST_PATH = '/api/projects/project-1/sessions/start';
 
+const startInstantLaunch = vi.fn();
+
 function makeEnv(): Env {
   return {
     DATABASE: {} as never,
     DEFAULT_TASK_AGENT_TYPE: 'opencode',
     MAX_TASK_MESSAGE_LENGTH: '16000',
+    TASK_RUNNER: {
+      idFromName: vi.fn(() => ({ name: 'task-runner-do-id' })),
+      get: vi.fn(() => ({ startInstantLaunch })),
+    } as never,
   } as Env;
 }
 
@@ -112,12 +118,15 @@ describe('chatStartRoutes', () => {
     mocks.mention.enrichMessageWithMentions.mockResolvedValue({
       enrichedMessage: 'enriched hello',
     });
-    mocks.instant.continueInstantSessionLaunch.mockResolvedValue(undefined);
+    startInstantLaunch.mockResolvedValue(undefined);
+    mocks.instant.markInstantLaunchFailed.mockResolvedValue(undefined);
     mocks.instant.acceptInstantSession.mockResolvedValue({
       taskId: 'task-1',
+      projectId: 'project-1',
       chatSessionId: 'chat-session-1',
       workspaceId: 'workspace-1',
       nodeId: 'node-1',
+      containerId: 'node-1',
       workspaceUrl: 'https://ws-workspace-1.example.com',
     });
   });
@@ -154,11 +163,41 @@ describe('chatStartRoutes', () => {
         agentType: 'claude-code',
       })
     );
-    expect(mocks.instant.continueInstantSessionLaunch).toHaveBeenCalledWith(
-      db,
-      expect.anything(),
+    // The launch is handed to the TaskRunner DO (durable, alarm-driven) —
+    // never run under the request's cancellable waitUntil.
+    expect(startInstantLaunch).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: expect.any(String) }),
       expect.objectContaining({ chatSessionId: 'chat-session-1' })
+    );
+  });
+
+  it('tears down accepted resources and errors when the DO handoff fails', async () => {
+    startInstantLaunch.mockRejectedValueOnce(new Error('do unavailable'));
+    const app = makeApp();
+
+    const res = await app.request(
+      `${BASE_URL}${REQUEST_PATH}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: 'hello', agentProfileId: 'profile-1' }),
+      },
+      makeEnv()
+    );
+
+    expect(res.status).toBe(500);
+    expect(mocks.instant.markInstantLaunchFailed).toHaveBeenCalledWith(
+      db,
+      expect.anything(),
+      {
+        taskId: expect.any(String),
+        projectId: 'project-1',
+        chatSessionId: 'chat-session-1',
+        workspaceId: 'workspace-1',
+        nodeId: 'node-1',
+        containerId: 'node-1',
+      },
+      'Instant launch handoff failed: do unavailable'
     );
   });
 

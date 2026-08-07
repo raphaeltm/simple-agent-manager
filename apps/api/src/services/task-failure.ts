@@ -16,9 +16,9 @@ import { ulid } from '../lib/ulid';
  *
  * The update is optimistically locked on `status = 'queued'` so a concurrent
  * handler that already advanced or terminally transitioned the task (e.g.
- * `launchInstantSession`'s own failure path, or a TaskRunner DO that started
- * despite a thrown ack) is never clobbered. Returns true when this call
- * performed the transition.
+ * the instant-launch failure path in `markInstantLaunchFailed`, or a
+ * TaskRunner DO that started despite a thrown ack) is never clobbered.
+ * Returns true when this call performed the transition.
  */
 export async function markQueuedTaskFailed(
   db: DrizzleD1Database<typeof schema>,

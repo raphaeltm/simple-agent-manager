@@ -17,7 +17,10 @@ vi.mock('drizzle-orm/d1', () => ({
 
 vi.mock('../../../src/services/project-data', () => mocks.projectData);
 
-import { handleGetInstructions, resolveInstructionContext } from '../../../src/routes/mcp/instruction-tools';
+import {
+  handleGetInstructions,
+  resolveInstructionContext,
+} from '../../../src/routes/mcp/instruction-tools';
 import { handleUpdateTaskStatus } from '../../../src/routes/mcp/task-tools';
 import type { McpTokenData } from '../../../src/services/mcp-token';
 
@@ -123,14 +126,18 @@ describe('MCP instruction context handlers', () => {
       topic: 'Instant topic',
     });
 
-    const response = await handleGetInstructions('request-1', {
-      ...baseToken,
-      taskId: '',
-      contextType: 'conversation',
-      taskMode: 'conversation',
-      chatSessionId: 'chat-1',
-      agentSessionId: 'agent-1',
-    }, makeEnv());
+    const response = await handleGetInstructions(
+      'request-1',
+      {
+        ...baseToken,
+        taskId: '',
+        contextType: 'conversation',
+        taskMode: 'conversation',
+        chatSessionId: 'chat-1',
+        agentSessionId: 'agent-1',
+      },
+      makeEnv()
+    );
     const payload = parseInstructionPayload(response);
 
     expect(payload.context).toMatchObject({
@@ -141,24 +148,32 @@ describe('MCP instruction context handlers', () => {
     });
     expect(payload.task).toBeUndefined();
     expect(payload.session).toMatchObject({ id: 'chat-1', topic: 'Instant topic' });
-    expect(JSON.stringify(payload.instructions)).toContain('Do NOT call the SAM MCP `complete_task` tool');
+    expect(JSON.stringify(payload.instructions)).toContain(
+      'Do NOT call the SAM MCP `complete_task` tool'
+    );
     expect(String(payload.knowledgeDirectives)).toContain('Worker control plane');
     expect(String(payload.policyDirectives)).toContain('Call get_instructions');
   });
 
   it('resolves trial and direct-workspace contexts without a task row', async () => {
-    const trial = await resolveInstructionContext({
-      ...baseToken,
-      taskId: '',
-      contextType: 'trial',
-      agentSessionId: 'trial-agent',
-    }, makeEnv());
-    const direct = await resolveInstructionContext({
-      ...baseToken,
-      taskId: '',
-      contextType: 'direct-workspace',
-      agentSessionId: 'direct-agent',
-    }, makeEnv());
+    const trial = await resolveInstructionContext(
+      {
+        ...baseToken,
+        taskId: '',
+        contextType: 'trial',
+        agentSessionId: 'trial-agent',
+      },
+      makeEnv()
+    );
+    const direct = await resolveInstructionContext(
+      {
+        ...baseToken,
+        taskId: '',
+        contextType: 'direct-workspace',
+        agentSessionId: 'direct-agent',
+      },
+      makeEnv()
+    );
 
     expect(trial).toMatchObject({
       ok: true,
@@ -166,18 +181,25 @@ describe('MCP instruction context handlers', () => {
     });
     expect(direct).toMatchObject({
       ok: true,
-      context: { type: 'direct-workspace', workspaceId: 'workspace-1', agentSessionId: 'direct-agent' },
+      context: {
+        type: 'direct-workspace',
+        workspaceId: 'workspace-1',
+        agentSessionId: 'direct-agent',
+      },
     });
   });
 
   it('fails closed for malformed taskless conversation tokens', async () => {
-    const result = await resolveInstructionContext({
-      ...baseToken,
-      taskId: '',
-      contextType: 'conversation',
-      taskMode: 'conversation',
-      chatSessionId: undefined,
-    }, makeEnv());
+    const result = await resolveInstructionContext(
+      {
+        ...baseToken,
+        taskId: '',
+        contextType: 'conversation',
+        taskMode: 'conversation',
+        chatSessionId: undefined,
+      },
+      makeEnv()
+    );
 
     expect(result).toEqual({ ok: false, message: 'Conversation context missing chatSessionId' });
   });

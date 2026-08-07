@@ -142,7 +142,8 @@ describe('error message sanitization', () => {
   });
 
   it('internal error from resolveUpstreamAuth contains actionable detail for logging', () => {
-    const internalError = 'Unified Billing enabled but no CF token is configured (set CF_AIG_TOKEN or CF_API_TOKEN)';
+    const internalError =
+      'Unified Billing enabled but no CF token is configured (set CF_AIG_TOKEN or CF_API_TOKEN)';
 
     // This message should be logged server-side but never sent to clients
     expect(internalError).toContain('CF_AIG_TOKEN');

@@ -84,9 +84,8 @@ vi.mock('../../../src/services/gcp-setup', () => ({
   listGcpProjects: vi.fn().mockResolvedValue([]),
 }));
 
-const { projectDeploymentRoutes, gcpDeployCallbackRoute, deploymentIdentityTokenRoute } = await import(
-  '../../../src/routes/project-deployment'
-);
+const { projectDeploymentRoutes, gcpDeployCallbackRoute, deploymentIdentityTokenRoute } =
+  await import('../../../src/routes/project-deployment');
 
 // ─── Test Setup ─────────────────────────────────────────────────────────
 
@@ -160,7 +159,7 @@ describe('GET /:id/deployment-identity-token', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment-identity-token',
       { method: 'GET' },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(401);
   });
@@ -170,7 +169,7 @@ describe('GET /:id/deployment-identity-token', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment-identity-token',
       { method: 'GET', headers: { Authorization: 'Basic abc' } },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(401);
   });
@@ -186,7 +185,7 @@ describe('GET /:id/deployment-identity-token', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment-identity-token',
       { method: 'GET', headers: { Authorization: 'Bearer mcp-token-1' } },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(403);
   });
@@ -203,7 +202,7 @@ describe('GET /:id/deployment-identity-token', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment-identity-token',
       { method: 'GET', headers: { Authorization: 'Bearer mcp-token-1' } },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(404);
   });
@@ -221,7 +220,7 @@ describe('GET /:id/deployment-identity-token', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment-identity-token',
       { method: 'GET', headers: { Authorization: 'Bearer mcp-token-1' } },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -236,7 +235,7 @@ describe('GET /:id/deployment-identity-token', () => {
         audience: expect.stringContaining('123456'),
       }),
       mockEnv,
-      expect.any(Number),
+      expect.any(Number)
     );
   });
 
@@ -248,7 +247,7 @@ describe('GET /:id/deployment-identity-token', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment-identity-token',
       { method: 'GET', headers: { Authorization: 'Bearer callback-token-1' } },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(403);
     const body = await res.json();
@@ -265,7 +264,7 @@ describe('GET /:id/deployment-identity-token', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment-identity-token',
       { method: 'GET', headers: { Authorization: 'Bearer random-invalid-token' } },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(403);
   });
@@ -275,7 +274,7 @@ describe('GET /:id/deployment-identity-token', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment-identity-token',
       { method: 'GET', headers: { Authorization: 'Bearer ' } },
-      mockEnv,
+      mockEnv
     );
     // 'Bearer ' without a token value fails the startsWith check
     expect(res.status).toBe(401);
@@ -289,7 +288,7 @@ describe('GET /:id/deployment-identity-token', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment-identity-token',
       { method: 'GET', headers: { Authorization: 'Bearer any-token' } },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(500);
     expect(mockSignIdentityToken).not.toHaveBeenCalled();
@@ -308,7 +307,7 @@ describe('GET /:id/deployment-identity-token', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment-identity-token',
       { method: 'GET', headers: { Authorization: 'Bearer mcp-token-1' } },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(500);
   });
@@ -337,7 +336,10 @@ describe('GET /:id/deployment-identity-token — rate limiting', () => {
     mockKvGet.mockImplementation(async (key: string, format?: string) => {
       if (typeof key === 'string' && key.startsWith('ratelimit:identity-token:')) {
         if (format === 'json') {
-          return { count: DEFAULT_IDENTITY_TOKEN_LIMIT, windowStart: Math.floor(Date.now() / 1000 / 3600) * 3600 };
+          return {
+            count: DEFAULT_IDENTITY_TOKEN_LIMIT,
+            windowStart: Math.floor(Date.now() / 1000 / 3600) * 3600,
+          };
         }
       }
       return null; // no cached token
@@ -347,7 +349,7 @@ describe('GET /:id/deployment-identity-token — rate limiting', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment-identity-token',
       { method: 'GET', headers: { Authorization: 'Bearer mcp-token-1' } },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(429);
     expect(res.headers.get('Retry-After')).toBeTruthy();
@@ -372,7 +374,7 @@ describe('GET /:id/deployment-identity-token — rate limiting', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment-identity-token',
       { method: 'GET', headers: { Authorization: 'Bearer mcp-token-1' } },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(200);
     expect(res.headers.get('X-RateLimit-Limit')).toBe(String(DEFAULT_IDENTITY_TOKEN_LIMIT));
@@ -403,13 +405,14 @@ describe('GET /:id/deployment-identity-token — rate limiting', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment-identity-token',
       { method: 'GET', headers: { Authorization: 'Bearer mcp-token-1' } },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(200);
     // After this request, count becomes previousCount+1
-    expect(Number(res.headers.get('X-RateLimit-Remaining'))).toBe(DEFAULT_IDENTITY_TOKEN_LIMIT - (previousCount + 1));
+    expect(Number(res.headers.get('X-RateLimit-Remaining'))).toBe(
+      DEFAULT_IDENTITY_TOKEN_LIMIT - (previousCount + 1)
+    );
   });
-
 });
 
 describe('GET /:id/deployment-identity-token — token caching', () => {
@@ -437,7 +440,7 @@ describe('GET /:id/deployment-identity-token — token caching', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment-identity-token',
       { method: 'GET', headers: { Authorization: 'Bearer mcp-token-1' } },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -446,7 +449,8 @@ describe('GET /:id/deployment-identity-token — token caching', () => {
     expect(mockSignIdentityToken).not.toHaveBeenCalled();
     // Rate limit counter should NOT have been incremented (cache hit returns early)
     const rateLimitPuts = mockKvPut.mock.calls.filter(
-      (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).startsWith('ratelimit:'),
+      (call: unknown[]) =>
+        typeof call[0] === 'string' && (call[0] as string).startsWith('ratelimit:')
     );
     expect(rateLimitPuts).toHaveLength(0);
   });
@@ -466,7 +470,7 @@ describe('GET /:id/deployment-identity-token — token caching', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment-identity-token',
       { method: 'GET', headers: { Authorization: 'Bearer mcp-token-1' } },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -477,7 +481,7 @@ describe('GET /:id/deployment-identity-token — token caching', () => {
     expect(mockKvPut).toHaveBeenCalledWith(
       expect.stringMatching(/^identity-token-cache:u1:ws-1:https:/),
       'fresh-signed-jwt',
-      { expirationTtl: 540 },
+      { expirationTtl: 540 }
     );
   });
 });
@@ -497,7 +501,7 @@ describe('GET /:id/deployment/gcp', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment/gcp',
       { method: 'GET' },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -511,7 +515,7 @@ describe('GET /:id/deployment/gcp', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment/gcp',
       { method: 'GET' },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -535,7 +539,7 @@ describe('DELETE /:id/deployment/gcp', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment/gcp',
       { method: 'DELETE' },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -557,7 +561,7 @@ describe('GET /:id/deployment/gcp/authorize', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment/gcp/authorize',
       { method: 'GET', redirect: 'manual' },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(302);
     const location = res.headers.get('Location')!;
@@ -574,7 +578,7 @@ describe('GET /:id/deployment/gcp/authorize', () => {
     expect(mockKvPut).toHaveBeenCalledWith(
       expect.stringContaining('gcp-deploy-oauth-state:'),
       expect.any(String),
-      expect.objectContaining({ expirationTtl: expect.any(Number) }),
+      expect.objectContaining({ expirationTtl: expect.any(Number) })
     );
   });
 });
@@ -592,7 +596,7 @@ describe('GET /api/deployment/gcp/callback (static URI)', () => {
     const res = await app.request(
       '/api/deployment/gcp/callback?error=access_denied',
       { method: 'GET', redirect: 'manual' },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(302);
     const location = res.headers.get('Location')!;
@@ -604,7 +608,7 @@ describe('GET /api/deployment/gcp/callback (static URI)', () => {
     const res = await app.request(
       '/api/deployment/gcp/callback?code=abc',
       { method: 'GET', redirect: 'manual' },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(302);
     const location = res.headers.get('Location')!;
@@ -616,7 +620,7 @@ describe('GET /api/deployment/gcp/callback (static URI)', () => {
     const res = await app.request(
       '/api/deployment/gcp/callback?code=abc&state=not-a-uuid',
       { method: 'GET', redirect: 'manual' },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(302);
     const location = res.headers.get('Location')!;
@@ -632,7 +636,7 @@ describe('GET /api/deployment/gcp/callback (static URI)', () => {
     const res = await app.request(
       '/api/deployment/gcp/callback?code=abc&state=00000000-0000-0000-0000-000000000000',
       { method: 'GET', redirect: 'manual' },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(302);
     const location = res.headers.get('Location')!;
@@ -641,15 +645,13 @@ describe('GET /api/deployment/gcp/callback (static URI)', () => {
 
   it('redirects with error when state userId does not match session and preserves state token', async () => {
     // KV returns state with a different userId than the session (test-user-id)
-    mockKvGet.mockResolvedValue(
-      JSON.stringify({ projectId: 'proj-1', userId: 'different-user' }),
-    );
+    mockKvGet.mockResolvedValue(JSON.stringify({ projectId: 'proj-1', userId: 'different-user' }));
 
     const app = createTestApp();
     const res = await app.request(
       '/api/deployment/gcp/callback?code=abc&state=11111111-1111-1111-1111-111111111111',
       { method: 'GET', redirect: 'manual' },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(302);
     const location = res.headers.get('Location')!;
@@ -663,19 +665,21 @@ describe('GET /api/deployment/gcp/callback (static URI)', () => {
   it('redirects to correct project settings using projectId from KV state', async () => {
     // KV state has projectId — this is the ONLY source of project context
     mockKvGet.mockResolvedValue(
-      JSON.stringify({ projectId: 'proj-from-state', userId: 'test-user-id' }),
+      JSON.stringify({ projectId: 'proj-from-state', userId: 'test-user-id' })
     );
 
     // Mock successful token exchange
-    const mockFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(JSON.stringify({ access_token: 'gcp-token-123' }), { status: 200 }),
-    );
+    const mockFetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ access_token: 'gcp-token-123' }), { status: 200 })
+      );
 
     const app = createTestApp();
     const res = await app.request(
       '/api/deployment/gcp/callback?code=abc&state=11111111-1111-1111-1111-111111111111',
       { method: 'GET', redirect: 'manual' },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(302);
     const location = res.headers.get('Location')!;
@@ -693,19 +697,19 @@ describe('GET /api/deployment/gcp/callback (static URI)', () => {
   });
 
   it('REGRESSION: redirect URL never contains the OAuth handle as a query parameter value', async () => {
-    mockKvGet.mockResolvedValue(
-      JSON.stringify({ projectId: 'proj-1', userId: 'test-user-id' }),
-    );
+    mockKvGet.mockResolvedValue(JSON.stringify({ projectId: 'proj-1', userId: 'test-user-id' }));
 
-    const mockFetch = vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(
-      new Response(JSON.stringify({ access_token: 'gcp-token-123' }), { status: 200 }),
-    );
+    const mockFetch = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ access_token: 'gcp-token-123' }), { status: 200 })
+      );
 
     const app = createTestApp();
     const res = await app.request(
       '/api/deployment/gcp/callback?code=abc&state=11111111-1111-1111-1111-111111111111',
       { method: 'GET', redirect: 'manual' },
-      mockEnv,
+      mockEnv
     );
     const location = res.headers.get('Location')!;
 
@@ -725,7 +729,7 @@ describe('GET /api/deployment/gcp/callback (static URI)', () => {
     expect(mockKvPut).toHaveBeenCalledWith(
       expect.stringContaining('gcp-deploy-oauth-result:test-user-id:proj-1'),
       expect.any(String),
-      expect.objectContaining({ expirationTtl: expect.any(Number) }),
+      expect.objectContaining({ expirationTtl: expect.any(Number) })
     );
 
     mockFetch.mockRestore();
@@ -747,7 +751,7 @@ describe('GET /:id/deployment/gcp/oauth-result', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment/gcp/oauth-result',
       { method: 'GET' },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(200);
     const body = await res.json();
@@ -767,7 +771,7 @@ describe('GET /:id/deployment/gcp/oauth-result', () => {
     const res = await app.request(
       '/api/projects/proj-1/deployment/gcp/oauth-result',
       { method: 'GET' },
-      mockEnv,
+      mockEnv
     );
     expect(res.status).toBe(404);
   });

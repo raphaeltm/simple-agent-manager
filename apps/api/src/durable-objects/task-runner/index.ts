@@ -42,8 +42,17 @@ import { DurableObject } from 'cloudflare:workers';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import type {
+  AcceptedInstantSession,
+  LaunchInstantSessionInput,
+} from '../../services/instant-session';
 import { handleAgentSession } from './agent-session-step';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
+import {
+  INSTANT_LAUNCH_STORAGE_KEY,
+  type InstantLaunchJob,
+  runInstantLaunchAlarm,
+} from './instant-launch';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
 import { failTask } from './state-machine';
 import { redactTaskRunnerStatus } from './status';
@@ -68,6 +77,13 @@ export class TaskRunner extends DurableObject<Env> {
    * Persists initial state and schedules the first alarm immediately.
    */
   async start(input: StartTaskInput): Promise<void> {
+    const instantJob = await this.ctx.storage.get<InstantLaunchJob>(INSTANT_LAUNCH_STORAGE_KEY);
+    if (instantJob) {
+      // One DO per taskId: a task is either an instant launch or a VM run.
+      throw new Error(
+        `TaskRunner for task ${input.taskId} already owns an instant launch; cannot start VM orchestration`
+      );
+    }
     const existing = await this.getState();
     if (existing) {
       // Idempotent: if already started, don't re-initialize.
@@ -130,13 +146,69 @@ export class TaskRunner extends DurableObject<Env> {
   }
 
   /**
+   * Accept an instant (cf-container) launch for durable, alarm-driven
+   * execution. Called from the chat-start route and the MCP dispatch path
+   * AFTER `acceptInstantSession` persisted the task/node/workspace/session
+   * rows. Fast: commits the job and its wake-up atomically, then returns —
+   * the launch itself runs in the alarm handler, independent of the HTTP
+   * request context (rule 43; the request-scoped `waitUntil` this replaces
+   * was cancelled ~30s after the response, stranding tasks in `queued`).
+   */
+  async startInstantLaunch(
+    input: LaunchInstantSessionInput,
+    accepted: AcceptedInstantSession
+  ): Promise<void> {
+    const vmState = await this.getState();
+    if (vmState) {
+      throw new Error(
+        `TaskRunner for task ${accepted.taskId} already owns VM orchestration; cannot start an instant launch`
+      );
+    }
+    const existing = await this.ctx.storage.get<InstantLaunchJob>(INSTANT_LAUNCH_STORAGE_KEY);
+    if (existing) {
+      // Idempotent: keep the durable wake-up armed on a duplicate accept.
+      if ((await this.ctx.storage.getAlarm()) === null) {
+        await this.ctx.storage.setAlarm(Date.now());
+      }
+      log.warn('instant_launch_do.start.already_initialized', {
+        taskId: accepted.taskId,
+        milestone: existing.milestone,
+        attempted: existing.attempted,
+      });
+      return;
+    }
+
+    const job: InstantLaunchJob = {
+      version: 1,
+      input,
+      accepted,
+      attempted: false,
+      milestone: 'pending',
+      agentSessionId: null,
+      createdAt: Date.now(),
+    };
+    // Commit the job and first alarm together: a readable job must prove the
+    // wake-up was durably scheduled as well (same contract as start()).
+    await this.ctx.storage.transaction(async (transaction) => {
+      await transaction.put(INSTANT_LAUNCH_STORAGE_KEY, job);
+      await transaction.setAlarm(Date.now());
+    });
+
+    log.info('instant_launch_do.accepted', {
+      taskId: accepted.taskId,
+      nodeId: accepted.nodeId,
+      workspaceId: accepted.workspaceId,
+    });
+  }
+
+  /**
    * Called when the workspace-ready callback arrives from the VM agent.
    * If the DO is waiting at `workspace_ready` step, this advances it immediately.
    * If the DO hasn't reached that step yet, the signal is stored for later.
    */
   async advanceWorkspaceReady(
     status: 'running' | 'recovery' | 'error',
-    errorMessage: string | null,
+    errorMessage: string | null
   ): Promise<void> {
     const state = await this.getState();
     if (!state || state.completed) return;
@@ -180,7 +252,9 @@ export class TaskRunner extends DurableObject<Env> {
 
   private async ensureAlarm(state: TaskRunnerState): Promise<void> {
     const isTerminal =
-      state.completed || state.currentStep === 'running' || state.currentStep === 'awaiting_followup';
+      state.completed ||
+      state.currentStep === 'running' ||
+      state.currentStep === 'awaiting_followup';
     if (!isTerminal && (await this.ctx.storage.getAlarm()) === null) {
       await this.ctx.storage.setAlarm(Date.now());
     }
@@ -191,6 +265,14 @@ export class TaskRunner extends DurableObject<Env> {
   // =========================================================================
 
   async alarm(): Promise<void> {
+    // Instant launches use their own storage key and never enter the VM step
+    // machine; a task is one or the other (enforced by the start RPC guards).
+    const instantJob = await this.ctx.storage.get<InstantLaunchJob>(INSTANT_LAUNCH_STORAGE_KEY);
+    if (instantJob) {
+      await runInstantLaunchAlarm(this.env, this.ctx.storage, instantJob);
+      return;
+    }
+
     const state = await this.getState();
     if (!state || state.completed) return;
 
@@ -228,7 +310,10 @@ export class TaskRunner extends DurableObject<Env> {
           // Terminal DO steps — agent manages from here via callbacks
           return;
         default:
-          log.error('task_runner_do.unknown_step', { taskId: state.taskId, step: state.currentStep });
+          log.error('task_runner_do.unknown_step', {
+            taskId: state.taskId,
+            step: state.currentStep,
+          });
           await failTask(state, `Unknown execution step: ${state.currentStep}`, rc);
           return;
       }
@@ -251,7 +336,7 @@ export class TaskRunner extends DurableObject<Env> {
         const backoff = computeBackoffMs(
           state.retryCount,
           this.getRetryBaseDelayMs(),
-          this.getRetryMaxDelayMs(),
+          this.getRetryMaxDelayMs()
         );
         await this.ctx.storage.setAlarm(Date.now() + backoff);
 
@@ -306,7 +391,9 @@ export class TaskRunner extends DurableObject<Env> {
         }
         await this.env.DATABASE.prepare(
           `UPDATE tasks SET execution_step = ?, updated_at = ? WHERE id = ?`
-        ).bind(step, new Date().toISOString(), taskId).run();
+        )
+          .bind(step, new Date().toISOString(), taskId)
+          .run();
       },
     };
   }
@@ -339,86 +426,83 @@ export class TaskRunner extends DurableObject<Env> {
   // =========================================================================
 
   private getMaxRetries(): number {
-    return parseEnvInt(
-      this.env.TASK_RUNNER_STEP_MAX_RETRIES,
-      DEFAULT_TASK_RUNNER_STEP_MAX_RETRIES,
-    );
+    return parseEnvInt(this.env.TASK_RUNNER_STEP_MAX_RETRIES, DEFAULT_TASK_RUNNER_STEP_MAX_RETRIES);
   }
 
   private getRetryBaseDelayMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_RETRY_BASE_DELAY_MS,
-      DEFAULT_TASK_RUNNER_RETRY_BASE_DELAY_MS,
+      DEFAULT_TASK_RUNNER_RETRY_BASE_DELAY_MS
     );
   }
 
   private getRetryMaxDelayMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_RETRY_MAX_DELAY_MS,
-      DEFAULT_TASK_RUNNER_RETRY_MAX_DELAY_MS,
+      DEFAULT_TASK_RUNNER_RETRY_MAX_DELAY_MS
     );
   }
 
   private getAgentPollIntervalMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_AGENT_POLL_INTERVAL_MS,
-      DEFAULT_TASK_RUNNER_AGENT_POLL_INTERVAL_MS,
+      DEFAULT_TASK_RUNNER_AGENT_POLL_INTERVAL_MS
     );
   }
 
   private getAgentReadyTimeoutMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_AGENT_READY_TIMEOUT_MS,
-      DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS,
+      DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS
     );
   }
 
   private getWorkspaceDispatchTimeoutMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS,
-      DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS,
+      DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS
     );
   }
 
   private getWorkspaceDispatchBaseDelayMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS,
-      DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS,
+      DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS
     );
   }
 
   private getWorkspaceDispatchMaxDelayMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS,
-      DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS,
+      DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS
     );
   }
 
   private getWorkspaceReadyTimeoutMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS,
-      DEFAULT_TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS,
+      DEFAULT_TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS
     );
   }
 
   private getWorkspaceReadyPollIntervalMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS,
-      DEFAULT_TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS,
+      DEFAULT_TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS
     );
   }
 
   private getProvisionPollIntervalMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_PROVISION_POLL_INTERVAL_MS,
-      DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS,
+      DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS
     );
   }
 
   private getProvisionTimeoutMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_PROVISION_TIMEOUT_MS,
-      DEFAULT_TASK_RUNNER_PROVISION_TIMEOUT_MS,
+      DEFAULT_TASK_RUNNER_PROVISION_TIMEOUT_MS
     );
   }
 }

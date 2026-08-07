@@ -104,7 +104,13 @@ describe('API token routes', () => {
     currentMockDB = createMockDB({
       selectGetResults: [
         { id: 'token-1', userId: 'user-1', revokedAt: null },
-        { id: 'user-1', email: 'test@example.com', name: 'Test User', status: 'active', role: 'user' },
+        {
+          id: 'user-1',
+          email: 'test@example.com',
+          name: 'Test User',
+          status: 'active',
+          role: 'user',
+        },
       ],
     });
 
@@ -125,7 +131,13 @@ describe('API token routes', () => {
     currentMockDB = createMockDB({
       selectGetResults: [
         { id: 'token-1', userId: 'user-1', revokedAt: null },
-        { id: 'user-1', email: 'legacy@example.com', name: 'Legacy', status: 'active', role: 'user' },
+        {
+          id: 'user-1',
+          email: 'legacy@example.com',
+          name: 'Legacy',
+          status: 'active',
+          role: 'user',
+        },
       ],
     });
 

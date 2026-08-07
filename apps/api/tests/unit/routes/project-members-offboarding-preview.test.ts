@@ -224,8 +224,10 @@ describe('project member offboarding preview', () => {
       chain.where = vi.fn(() => chain);
       chain.limit = vi.fn(() => Promise.resolve(selectResults.shift() ?? []));
       chain.orderBy = vi.fn(() => Promise.resolve(selectResults.shift() ?? []));
-      chain.then = (resolve: (value: QueryResult) => unknown, reject: (reason?: unknown) => unknown) =>
-        Promise.resolve(selectResults.shift() ?? []).then(resolve, reject);
+      chain.then = (
+        resolve: (value: QueryResult) => unknown,
+        reject: (reason?: unknown) => unknown
+      ) => Promise.resolve(selectResults.shift() ?? []).then(resolve, reject);
       return chain;
     };
 
@@ -342,12 +344,9 @@ describe('project member offboarding preview', () => {
       },
     });
     expect(body.offboardingPlanId).toMatch(/^off_/);
-    expect(body.resources.map((resource: { resourceKind: string }) => resource.resourceKind)).toEqual([
-      'trigger',
-      'task_tree',
-      'node',
-      'project_attachment',
-    ]);
+    expect(
+      body.resources.map((resource: { resourceKind: string }) => resource.resourceKind)
+    ).toEqual(['trigger', 'task_tree', 'node', 'project_attachment']);
     expect(
       body.resources.every(
         (resource: { recommendedAction: string }) => resource.recommendedAction === 'break_and_flag'
@@ -450,6 +449,8 @@ describe('project member offboarding preview', () => {
     const values = planInsert?.values as { createdAt: string; expiresAt: string } | undefined;
     expect(values).toBeDefined();
     if (!values) throw new Error('Expected offboarding plan insert');
-    expect(new Date(values.expiresAt).getTime() - new Date(values.createdAt).getTime()).toBe(120_000);
+    expect(new Date(values.expiresAt).getTime() - new Date(values.createdAt).getTime()).toBe(
+      120_000
+    );
   });
 });

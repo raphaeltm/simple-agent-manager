@@ -36,7 +36,7 @@ function makePersistedMessage(
   role: string,
   content: string,
   createdAt: number,
-  sequence: number,
+  sequence: number
 ) {
   return {
     id,
@@ -183,18 +183,22 @@ describe('chatRoutes agent session routing', () => {
     mocks.drizzle.mockReturnValue({
       select: vi
         .fn()
-        .mockReturnValueOnce(makeTaskQuery([{
-          id: 'task-1',
-          status: 'in_progress',
-          executionStep: 'agent_session',
-          errorMessage: null,
-          outputBranch: 'sam/feature-x',
-          outputPrUrl: null,
-          outputSummary: null,
-          finalizedAt: null,
-          taskMode: input.taskMode,
-          agentProfileHint: input.storedHint,
-        }]))
+        .mockReturnValueOnce(
+          makeTaskQuery([
+            {
+              id: 'task-1',
+              status: 'in_progress',
+              executionStep: 'agent_session',
+              errorMessage: null,
+              outputBranch: 'sam/feature-x',
+              outputPrUrl: null,
+              outputSummary: null,
+              finalizedAt: null,
+              taskMode: input.taskMode,
+              agentProfileHint: input.storedHint,
+            },
+          ])
+        )
         .mockReturnValueOnce(makeProfileQuery(input.profileRows)),
     });
 
@@ -210,11 +214,9 @@ describe('chatRoutes agent session routing', () => {
       createdAt: 1,
     });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
-    );
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+    } as Env);
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -237,17 +239,16 @@ describe('chatRoutes agent session routing', () => {
     const response = await app.request(
       '/api/projects/proj-1/sessions/chat-1',
       { method: 'GET' },
-      { DATABASE: {} as D1Database },
+      { DATABASE: {} as D1Database }
     );
 
     expect(response.status).toBe(200);
     const body = await response.json();
     expect(body.session.agentSessionId).toBe('acp-chat-1');
-    expect(mocks.listAcpSessions).toHaveBeenCalledWith(
-      expect.anything(),
-      'proj-1',
-      { chatSessionId: 'chat-1', limit: 1 },
-    );
+    expect(mocks.listAcpSessions).toHaveBeenCalledWith(expect.anything(), 'proj-1', {
+      chatSessionId: 'chat-1',
+      limit: 1,
+    });
     expect(orderBySpy).not.toHaveBeenCalled();
   });
 
@@ -257,11 +258,9 @@ describe('chatRoutes agent session routing', () => {
       total: 0,
     });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
-    );
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+    } as Env);
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -281,11 +280,9 @@ describe('chatRoutes agent session routing', () => {
       total: 1,
     });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
-    );
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+    } as Env);
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -319,7 +316,7 @@ describe('chatRoutes agent session routing', () => {
     const response = await app.request(
       '/api/projects/proj-1/sessions/chat-1/state',
       { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
+      { DATABASE: {} as D1Database } as Env
     );
 
     expect(response.status).toBe(200);
@@ -343,7 +340,7 @@ describe('chatRoutes agent session routing', () => {
       {
         DATABASE: {} as D1Database,
         CHAT_SESSION_MESSAGE_MAX: '5000',
-      } as Env,
+      } as Env
     );
 
     expect(response.status).toBe(200);
@@ -354,7 +351,7 @@ describe('chatRoutes agent session routing', () => {
       5000,
       null,
       undefined,
-      true,
+      true
     );
   });
 
@@ -373,7 +370,7 @@ describe('chatRoutes agent session routing', () => {
         DATABASE: {} as D1Database,
         CHAT_SESSION_MESSAGE_LIMIT: '500',
         CHAT_SESSION_MESSAGE_MAX: '50000',
-      } as Env,
+      } as Env
     );
 
     expect(response.status).toBe(200);
@@ -384,7 +381,7 @@ describe('chatRoutes agent session routing', () => {
       50000,
       null,
       undefined,
-      true,
+      true
     );
   });
 
@@ -397,15 +394,11 @@ describe('chatRoutes agent session routing', () => {
     // Operator misconfiguration: page-size default (8000) exceeds the ceiling (3000).
     // The guard promotes the effective ceiling to the page size so the default page
     // still fits — an unspecified request resolves to the default, not the smaller max.
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      {
-        DATABASE: {} as D1Database,
-        CHAT_SESSION_MESSAGE_LIMIT: '8000',
-        CHAT_SESSION_MESSAGE_MAX: '3000',
-      } as Env,
-    );
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+      CHAT_SESSION_MESSAGE_LIMIT: '8000',
+      CHAT_SESSION_MESSAGE_MAX: '3000',
+    } as Env);
 
     expect(response.status).toBe(200);
     expect(mocks.getMessages).toHaveBeenCalledWith(
@@ -415,7 +408,7 @@ describe('chatRoutes agent session routing', () => {
       8000,
       null,
       undefined,
-      true,
+      true
     );
   });
 
@@ -425,11 +418,10 @@ describe('chatRoutes agent session routing', () => {
       total: 0,
     });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      { DATABASE: {} as D1Database, CHAT_SESSION_MESSAGE_LIMIT: '500' } as Env,
-    );
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+      CHAT_SESSION_MESSAGE_LIMIT: '500',
+    } as Env);
 
     expect(response.status).toBe(200);
     expect(mocks.getMessages).toHaveBeenCalledWith(
@@ -439,7 +431,7 @@ describe('chatRoutes agent session routing', () => {
       500,
       null,
       undefined,
-      true,
+      true
     );
   });
 
@@ -449,14 +441,10 @@ describe('chatRoutes agent session routing', () => {
       total: 0,
     });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      {
-        DATABASE: {} as D1Database,
-        OBSERVABILITY_DATABASE: {} as D1Database,
-      } as Env,
-    );
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+      OBSERVABILITY_DATABASE: {} as D1Database,
+    } as Env);
 
     expect(response.status).toBe(200);
     expect(mocks.persistError).not.toHaveBeenCalled();
@@ -472,7 +460,7 @@ describe('chatRoutes agent session routing', () => {
       {
         DATABASE: {} as D1Database,
         OBSERVABILITY_DATABASE: {} as D1Database,
-      } as Env,
+      } as Env
     );
 
     expect(response.status).toBe(500);
@@ -511,14 +499,10 @@ describe('chatRoutes agent session routing', () => {
   it('returns safe diagnostics for regular users when message lookup fails', async () => {
     mocks.getMessages.mockRejectedValue(new Error('Malformed tool metadata'));
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      {
-        DATABASE: {} as D1Database,
-        OBSERVABILITY_DATABASE: {} as D1Database,
-      } as Env,
-    );
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+      OBSERVABILITY_DATABASE: {} as D1Database,
+    } as Env);
 
     expect(response.status).toBe(500);
     const body = await response.json();
@@ -535,14 +519,10 @@ describe('chatRoutes agent session routing', () => {
     mocks.userRole = 'admin';
     mocks.getMessages.mockRejectedValue(new Error('Malformed tool metadata'));
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      {
-        DATABASE: {} as D1Database,
-        OBSERVABILITY_DATABASE: {} as D1Database,
-      } as Env,
-    );
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+      OBSERVABILITY_DATABASE: {} as D1Database,
+    } as Env);
 
     expect(response.status).toBe(500);
     const body = await response.json();
@@ -571,11 +551,9 @@ describe('chatRoutes agent session routing', () => {
       total: 1,
     });
 
-    const response = await app.request(
-      '/api/projects/proj-1/sessions/chat-1',
-      { method: 'GET' },
-      { DATABASE: {} as D1Database } as Env,
-    );
+    const response = await app.request('/api/projects/proj-1/sessions/chat-1', { method: 'GET' }, {
+      DATABASE: {} as D1Database,
+    } as Env);
 
     expect(response.status).toBe(200);
     const body = await response.json();
@@ -644,7 +622,7 @@ describe('chatRoutes message list', () => {
     const response = await app.request(
       '/api/projects/proj-1/sessions/chat-1/messages?roles=user&limit=20&before=2000&compact=true',
       { method: 'GET' },
-      { DATABASE: {}, CHAT_SESSION_MESSAGE_LIMIT: '500' } as Env,
+      { DATABASE: {}, CHAT_SESSION_MESSAGE_LIMIT: '500' } as Env
     );
 
     expect(response.status).toBe(200);
@@ -659,7 +637,7 @@ describe('chatRoutes message list', () => {
       2000,
       ['user'],
       true,
-      'desc',
+      'desc'
     );
   });
 
@@ -667,7 +645,7 @@ describe('chatRoutes message list', () => {
     const response = await app.request(
       '/api/projects/proj-1/sessions/chat-1/messages?roles=user&limit=1&compact=true&order=asc',
       { method: 'GET' },
-      { DATABASE: {}, CHAT_SESSION_MESSAGE_LIMIT: '500' } as Env,
+      { DATABASE: {}, CHAT_SESSION_MESSAGE_LIMIT: '500' } as Env
     );
 
     expect(response.status).toBe(200);
@@ -679,7 +657,7 @@ describe('chatRoutes message list', () => {
       null,
       ['user'],
       true,
-      'asc',
+      'asc'
     );
   });
 
@@ -689,7 +667,7 @@ describe('chatRoutes message list', () => {
     const response = await app.request(
       '/api/projects/proj-1/sessions/missing/messages?roles=user',
       { method: 'GET' },
-      { DATABASE: {} } as Env,
+      { DATABASE: {} } as Env
     );
 
     expect(response.status).toBe(404);
@@ -700,7 +678,7 @@ describe('chatRoutes message list', () => {
     const response = await app.request(
       '/api/projects/proj-1/sessions/chat-1/messages?before=not-a-timestamp',
       { method: 'GET' },
-      { DATABASE: {} } as Env,
+      { DATABASE: {} } as Env
     );
 
     expect(response.status).toBe(400);
@@ -711,7 +689,7 @@ describe('chatRoutes message list', () => {
     const response = await app.request(
       '/api/projects/proj-1/sessions/chat-1/messages?order=sideways',
       { method: 'GET' },
-      { DATABASE: {} } as Env,
+      { DATABASE: {} } as Env
     );
 
     expect(response.status).toBe(400);

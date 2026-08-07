@@ -218,8 +218,7 @@ function selectRows(table: unknown, condition: Condition): unknown[] {
     const userId = eqValue(condition, nodes.userId);
     return nodeRows.filter(
       (row) =>
-        (id === undefined || row.id === id) &&
-        (userId === undefined || row.userId === userId)
+        (id === undefined || row.id === id) && (userId === undefined || row.userId === userId)
     );
   }
 
