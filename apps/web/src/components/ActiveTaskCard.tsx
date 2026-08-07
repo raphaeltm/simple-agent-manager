@@ -83,12 +83,16 @@ export function ActiveTaskCard({ task }: ActiveTaskCardProps) {
           {task.projectName}
         </div>
 
-        {/* Execution step (if provisioning) */}
-        {stepLabel && (
+        {/* Execution step (if provisioning) or failed indicator */}
+        {task.status === 'failed' ? (
+          <div className="sam-type-caption text-danger-fg mb-2 overflow-hidden text-ellipsis whitespace-nowrap">
+            {stepLabel ? `Failed at: ${stepLabel}` : 'Task failed'}
+          </div>
+        ) : stepLabel ? (
           <div className="sam-type-caption text-info-fg mb-2 overflow-hidden text-ellipsis whitespace-nowrap">
             {stepLabel}
           </div>
-        )}
+        ) : null}
 
         {/* Time info */}
         <div className="flex items-center justify-between sam-type-caption text-fg-muted gap-2">

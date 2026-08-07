@@ -81,6 +81,18 @@ export function TaskList({
               )}
             </div>
 
+            {/* Error preview for failed tasks */}
+            {task.status === 'failed' && task.errorMessage && (
+              <p
+                className="text-[11px] text-danger-fg m-0 leading-snug truncate"
+                title={task.errorMessage}
+              >
+                {task.errorMessage.length > 120
+                  ? `${task.errorMessage.slice(0, 120)}...`
+                  : task.errorMessage}
+              </p>
+            )}
+
             {/* Row 2: quick actions */}
             <div className="flex items-center gap-2 flex-wrap">
               {options.length > 0 && (
