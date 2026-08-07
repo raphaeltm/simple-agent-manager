@@ -28,7 +28,7 @@ describe('R2 Bucket Resource', () => {
     });
   });
 
-  it('provisions prefix-scoped session snapshot expiration with the configured TTL', async () => {
+  it('provisions both independent prefix-scoped retention rules', async () => {
     const lifecycle = findRegisteredResource(
       `${configModule.prefix}-r2-lifecycle`,
       'cloudflare:index/r2BucketLifecycle:R2BucketLifecycle'
@@ -47,6 +47,17 @@ describe('R2 Bucket Resource', () => {
           deleteObjectsTransition: {
             condition: {
               maxAge: configModule.DEFAULT_SESSION_SNAPSHOT_TTL_DAYS * 24 * 60 * 60,
+              type: 'Age',
+            },
+          },
+        },
+        {
+          id: storageModule.DIAGNOSTIC_INCIDENT_LIFECYCLE_RULE_ID,
+          conditions: { prefix: storageModule.DIAGNOSTIC_INCIDENT_R2_PREFIX },
+          enabled: true,
+          deleteObjectsTransition: {
+            condition: {
+              maxAge: configModule.DEFAULT_DIAGNOSTIC_INCIDENT_TTL_DAYS * 24 * 60 * 60,
               type: 'Age',
             },
           },

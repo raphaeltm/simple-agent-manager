@@ -311,7 +311,7 @@ async function reconcile(
           minAgeMs,
         },
         nodeId: candidate.nodeId,
-      });
+      }, env);
 
       result.destroyed++;
     } catch (err) {

@@ -47,6 +47,8 @@ describe('infra config parsing', () => {
       r2Location: configModule.DEFAULT_R2_LOCATION,
       pagesProductionBranch: configModule.DEFAULT_PAGES_PRODUCTION_BRANCH,
       sessionSnapshotTtlDays: configModule.DEFAULT_SESSION_SNAPSHOT_TTL_DAYS,
+      diagnosticIncidentPrefix: configModule.DEFAULT_DIAGNOSTIC_INCIDENT_PREFIX,
+      diagnosticIncidentTtlDays: configModule.DEFAULT_DIAGNOSTIC_INCIDENT_TTL_DAYS,
     });
     expect(parsed.prefix).toBe(configModule.derivePrefix('example.com'));
   });
@@ -58,6 +60,8 @@ describe('infra config parsing', () => {
         r2Location: 'WEUR',
         pagesProductionBranch: 'release/2026-06',
         sessionSnapshotTtlDays: '14',
+        diagnosticIncidentPrefix: 'private/vm-incidents',
+        diagnosticIncidentTtlDays: '3',
       }),
       'prod'
     );
@@ -67,6 +71,8 @@ describe('infra config parsing', () => {
       r2Location: 'WEUR',
       pagesProductionBranch: 'release/2026-06',
       sessionSnapshotTtlDays: 14,
+      diagnosticIncidentPrefix: 'private/vm-incidents',
+      diagnosticIncidentTtlDays: 3,
     });
   });
 
@@ -81,6 +87,16 @@ describe('infra config parsing', () => {
     ['pagesProductionBranch', '   ', 'must not be empty'],
     ['sessionSnapshotTtlDays', '0', 'must be a positive integer'],
     ['sessionSnapshotTtlDays', '1.5', 'must be a positive integer'],
+    ['diagnosticIncidentPrefix', '../unsafe', 'must be a safe private R2 prefix'],
+    ['diagnosticIncidentPrefix', 'unsafe//prefix', 'must be a safe private R2 prefix'],
+    ['diagnosticIncidentPrefix', 'agents', 'must not use a reserved application R2 prefix'],
+    [
+      'diagnosticIncidentPrefix',
+      'session-snapshots/incidents',
+      'must not use a reserved application R2 prefix',
+    ],
+    ['diagnosticIncidentTtlDays', '0', 'must be a positive integer'],
+    ['diagnosticIncidentTtlDays', '1.5', 'must be a positive integer'],
   ])('fails fast for invalid %s config', (key, value, expectedMessage) => {
     const beforeResourceCount = getRegisteredResources().length;
 
@@ -106,4 +122,24 @@ describe('infra config parsing', () => {
       ).toBe(location);
     }
   });
+
+  it.each([
+    'agents',
+    'cli',
+    'compose-image-artifacts',
+    'library',
+    'session-snapshots',
+    'temp-uploads',
+    'tts',
+  ])(
+    'rejects the reserved %s object namespace for diagnostic lifecycle expiry',
+    (reservedPrefix) => {
+      expect(() =>
+        configModule.parseInfraConfig(
+          makeConfig({ diagnosticIncidentPrefix: `${reservedPrefix}/diagnostic-incidents` }),
+          'staging'
+        )
+      ).toThrow(`reserved application R2 prefix: ${reservedPrefix}`);
+    }
+  );
 });

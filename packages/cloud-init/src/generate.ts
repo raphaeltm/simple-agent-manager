@@ -36,6 +36,16 @@ const SAFE_DEPLOY_COMPOSE_CMD_RE = /^[a-zA-Z0-9_./:-]+(?: [a-zA-Z0-9_./:-]+)*$/;
 /** Go duration syntax accepted for deployment health timeout (e.g. 5m, 1m30s). */
 const GO_DURATION_RE = /^(?:[0-9]+(?:ns|us|ms|s|m|h))+$/;
 
+/** Absolute Linux path without whitespace or shell metacharacters. */
+const SAFE_ABSOLUTE_PATH_RE = /^\/[a-zA-Z0-9._/-]+$/;
+
+function isSafeAbsolutePath(value: string): boolean {
+  if (!SAFE_ABSOLUTE_PATH_RE.test(value) || value.includes('//')) {
+    return false;
+  }
+  return value.split('/').every((segment) => segment !== '.' && segment !== '..');
+}
+
 /**
  * Validate all CloudInitVariables before they are embedded into shell/YAML.
  * Throws an error describing the first invalid field found.
@@ -226,6 +236,53 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
       );
     }
   }
+  for (const [name, value] of [
+    ['errorReportFlushInterval', variables.errorReportFlushInterval],
+    ['errorReportHttpTimeout', variables.errorReportHttpTimeout],
+    ['errorReportRetryInitial', variables.errorReportRetryInitial],
+    ['errorReportRetryMax', variables.errorReportRetryMax],
+    ['errorReportDbBusyTimeout', variables.errorReportDbBusyTimeout],
+    ['errorReportRetention', variables.errorReportRetention],
+    ['errorReportCollectorTimeout', variables.errorReportCollectorTimeout],
+  ] as const) {
+    if (value !== undefined && value !== '' && !GO_DURATION_RE.test(value)) {
+      errors.push(`${name}: must be a Go duration (got ${JSON.stringify(value)})`);
+    }
+  }
+  for (const [name, value] of [
+    ['errorReportMaxBatchSize', variables.errorReportMaxBatchSize],
+    ['errorReportMaxBatchBytes', variables.errorReportMaxBatchBytes],
+    ['errorReportMaxQueueSize', variables.errorReportMaxQueueSize],
+    ['errorReportMaxAttempts', variables.errorReportMaxAttempts],
+    ['errorReportArtifactMaxBytes', variables.errorReportArtifactMaxBytes],
+    ['errorReportSpoolMaxBytes', variables.errorReportSpoolMaxBytes],
+    ['errorReportMaxCollectorDocs', variables.errorReportMaxCollectorDocs],
+    ['errorReportMaxDocumentBytes', variables.errorReportMaxDocumentBytes],
+    ['errorReportMaxValueDepth', variables.errorReportMaxValueDepth],
+    ['errorReportMaxValueItems', variables.errorReportMaxValueItems],
+    ['errorReportMaxStringBytes', variables.errorReportMaxStringBytes],
+    ['errorReportEventLimit', variables.errorReportEventLimit],
+    ['errorReportResponseMaxBytes', variables.errorReportResponseMaxBytes],
+    ['errorReportStoredErrorMaxBytes', variables.errorReportStoredErrorMaxBytes],
+    ['errorReportCollectorConcurrency', variables.errorReportCollectorConcurrency],
+  ] as const) {
+    const numeric = Number(value);
+    if (
+      value !== undefined &&
+      value !== '' &&
+      (!NUMERIC_RE.test(value) || !Number.isSafeInteger(numeric) || numeric < 1)
+    ) {
+      errors.push(`${name}: must be a positive integer (got ${JSON.stringify(value)})`);
+    }
+  }
+  for (const [name, value] of [
+    ['errorReportDbPath', variables.errorReportDbPath],
+    ['errorReportSpoolDir', variables.errorReportSpoolDir],
+  ] as const) {
+    if (value !== undefined && value !== '' && !isSafeAbsolutePath(value)) {
+      errors.push(`${name}: must be a safe absolute path (got ${JSON.stringify(value)})`);
+    }
+  }
 
   if (errors.length > 0) {
     throw new Error(`Cloud-init variable validation failed:\n${errors.join('\n')}`);
@@ -299,6 +356,31 @@ export interface CloudInitVariables {
   deployComposeCmd?: string;
   /** Max time for deployment health checks, as Go duration string. */
   deployHealthTimeout?: string;
+  /** VM Agent durable error reporter tunables. */
+  errorReportFlushInterval?: string;
+  errorReportMaxBatchSize?: string;
+  errorReportMaxBatchBytes?: string;
+  errorReportMaxQueueSize?: string;
+  errorReportHttpTimeout?: string;
+  errorReportRetryInitial?: string;
+  errorReportRetryMax?: string;
+  errorReportMaxAttempts?: string;
+  errorReportDbPath?: string;
+  errorReportDbBusyTimeout?: string;
+  errorReportSpoolDir?: string;
+  errorReportArtifactMaxBytes?: string;
+  errorReportSpoolMaxBytes?: string;
+  errorReportRetention?: string;
+  errorReportCollectorTimeout?: string;
+  errorReportMaxCollectorDocs?: string;
+  errorReportMaxDocumentBytes?: string;
+  errorReportMaxValueDepth?: string;
+  errorReportMaxValueItems?: string;
+  errorReportMaxStringBytes?: string;
+  errorReportEventLimit?: string;
+  errorReportResponseMaxBytes?: string;
+  errorReportStoredErrorMaxBytes?: string;
+  errorReportCollectorConcurrency?: string;
 }
 
 /**
@@ -352,6 +434,32 @@ export function generateCloudInit(
     '{{ deploy_acme_ca }}': variables.deployAcmeCa ?? '',
     '{{ deploy_compose_cmd }}': variables.deployComposeCmd ?? '',
     '{{ deploy_health_timeout }}': variables.deployHealthTimeout ?? '',
+    '{{ error_report_flush_interval }}': variables.errorReportFlushInterval ?? '30s',
+    '{{ error_report_max_batch_size }}': variables.errorReportMaxBatchSize ?? '10',
+    '{{ error_report_max_batch_bytes }}': variables.errorReportMaxBatchBytes ?? '32768',
+    '{{ error_report_max_queue_size }}': variables.errorReportMaxQueueSize ?? '1000',
+    '{{ error_report_http_timeout }}': variables.errorReportHttpTimeout ?? '10s',
+    '{{ error_report_retry_initial }}': variables.errorReportRetryInitial ?? '1s',
+    '{{ error_report_retry_max }}': variables.errorReportRetryMax ?? '5m',
+    '{{ error_report_max_attempts }}': variables.errorReportMaxAttempts ?? '20',
+    '{{ error_report_db_path }}':
+      variables.errorReportDbPath ?? '/var/lib/vm-agent/error-reports.db',
+    '{{ error_report_db_busy_timeout }}': variables.errorReportDbBusyTimeout ?? '5s',
+    '{{ error_report_spool_dir }}':
+      variables.errorReportSpoolDir ?? '/var/lib/vm-agent/diagnostic-incidents',
+    '{{ error_report_artifact_max_bytes }}': variables.errorReportArtifactMaxBytes ?? '2097152',
+    '{{ error_report_spool_max_bytes }}': variables.errorReportSpoolMaxBytes ?? '20971520',
+    '{{ error_report_retention }}': variables.errorReportRetention ?? '24h',
+    '{{ error_report_collector_timeout }}': variables.errorReportCollectorTimeout ?? '10s',
+    '{{ error_report_max_collector_docs }}': variables.errorReportMaxCollectorDocs ?? '8',
+    '{{ error_report_max_document_bytes }}': variables.errorReportMaxDocumentBytes ?? '131072',
+    '{{ error_report_max_value_depth }}': variables.errorReportMaxValueDepth ?? '8',
+    '{{ error_report_max_value_items }}': variables.errorReportMaxValueItems ?? '256',
+    '{{ error_report_max_string_bytes }}': variables.errorReportMaxStringBytes ?? '4096',
+    '{{ error_report_event_limit }}': variables.errorReportEventLimit ?? '100',
+    '{{ error_report_response_max_bytes }}': variables.errorReportResponseMaxBytes ?? '4096',
+    '{{ error_report_stored_error_max_bytes }}': variables.errorReportStoredErrorMaxBytes ?? '512',
+    '{{ error_report_collector_concurrency }}': variables.errorReportCollectorConcurrency ?? '1',
   };
 
   // Use function replacement to prevent $-pattern interpretation in values.

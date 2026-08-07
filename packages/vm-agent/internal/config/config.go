@@ -4,7 +4,6 @@ package config
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -307,10 +306,30 @@ type Config struct {
 	WorkspaceReadyCallbackTimeout time.Duration // HTTP timeout for workspace-ready retry callbacks (env: WORKSPACE_READY_CALLBACK_TIMEOUT, default: 30s)
 
 	// Error reporting settings - configurable per constitution principle XI
-	ErrorReportFlushInterval time.Duration // Background flush interval (default: 30s)
-	ErrorReportMaxBatchSize  int           // Immediate flush threshold (default: 10)
-	ErrorReportMaxQueueSize  int           // Max queued entries before dropping (default: 100)
-	ErrorReportHTTPTimeout   time.Duration // HTTP POST timeout (default: 10s)
+	ErrorReportFlushInterval  time.Duration // Background flush interval (default: 30s)
+	ErrorReportMaxBatchSize   int           // Immediate flush threshold (default: 10)
+	ErrorReportMaxBatchBytes  int           // Maximum structured error body bytes (default: 32 KiB)
+	ErrorReportMaxQueueSize   int           // Maximum durable outbox rows (default: 1000)
+	ErrorReportHTTPTimeout    time.Duration // HTTP POST timeout (default: 10s)
+	ErrorReportRetryInitial   time.Duration // Initial transient delivery backoff (default: 1s)
+	ErrorReportRetryMax       time.Duration // Maximum transient delivery backoff (default: 5m)
+	ErrorReportMaxAttempts    int           // Bounded delivery attempts (default: 20)
+	ErrorReportDBPath         string        // SQLite WAL outbox path
+	ErrorReportDBBusyTimeout  time.Duration // SQLite outbox contention timeout (default: 5s)
+	ErrorReportSpoolDir       string        // Private automatic-evidence spool directory
+	ErrorReportArtifactBytes  int64         // Maximum compressed automatic artifact bytes (default: 2 MiB)
+	ErrorReportSpoolBytes     int64         // Maximum local spool bytes (default: 20 MiB)
+	ErrorReportRetention      time.Duration // Maximum local outbox/spool retention (default: 24h)
+	ErrorReportCollectTimeout time.Duration // Total safe collector deadline (default: 10s)
+	ErrorReportCollectorDocs  int           // Maximum allowlisted collector documents (default: 8)
+	ErrorReportDocumentBytes  int           // Maximum bytes per collector document (default: 128 KiB)
+	ErrorReportValueDepth     int           // Recursive evidence depth bound (default: 8)
+	ErrorReportValueItems     int           // Recursive evidence item bound (default: 256)
+	ErrorReportStringBytes    int           // Maximum safe evidence string bytes (default: 4096)
+	ErrorReportEventLimit     int           // Maximum structured events in automatic evidence (default: 100)
+	ErrorReportResponseBytes  int           // Maximum control-plane response bytes read for diagnostics (default: 4096)
+	ErrorReportStoredErrBytes int           // Maximum durable last-error bytes (default: 512)
+	ErrorReportCollectorJobs  int           // Maximum concurrent automatic evidence collectors (default: 1)
 
 	// System info collection settings - configurable per constitution principle XI
 	SysInfoDockerTimeout  time.Duration // Timeout for Docker CLI commands in system info (default: 10s)
@@ -407,6 +426,8 @@ func Load() (*Config, error) {
 		// matches the basename of the local folder passed to --workspace-folder.
 		containerWorkDir = deriveContainerWorkDir(workspaceDir)
 	}
+	persistenceDBPath := getEnv("PERSISTENCE_DB_PATH", "/var/lib/vm-agent/state.db")
+	persistenceDir := filepath.Dir(persistenceDBPath)
 
 	cfg := &Config{
 		// Node role
@@ -553,7 +574,7 @@ func Load() (*Config, error) {
 		TaskMode:      getEnv("TASK_MODE", "task"),
 
 		// Persistence settings
-		PersistenceDBPath: getEnv("PERSISTENCE_DB_PATH", "/var/lib/vm-agent/state.db"),
+		PersistenceDBPath: persistenceDBPath,
 		EventStoreDBPath:  getEnv("EVENTSTORE_DB_PATH", "/var/lib/vm-agent/events.db"),
 		MetricsDBPath:     getEnv("METRICS_DB_PATH", "/var/lib/vm-agent/metrics.db"),
 		MetricsInterval:   getEnvDuration("METRICS_INTERVAL", time.Minute),
@@ -589,10 +610,30 @@ func Load() (*Config, error) {
 		WorkspaceReadyCallbackTimeout: getEnvDuration("WORKSPACE_READY_CALLBACK_TIMEOUT", DefaultWorkspaceReadyCallbackTimeout),
 
 		// Error reporting settings - configurable per constitution principle XI
-		ErrorReportFlushInterval: getEnvDuration("ERROR_REPORT_FLUSH_INTERVAL", 30*time.Second),
-		ErrorReportMaxBatchSize:  getEnvInt("ERROR_REPORT_MAX_BATCH_SIZE", 10),
-		ErrorReportMaxQueueSize:  getEnvInt("ERROR_REPORT_MAX_QUEUE_SIZE", 100),
-		ErrorReportHTTPTimeout:   getEnvDuration("ERROR_REPORT_HTTP_TIMEOUT", 10*time.Second),
+		ErrorReportFlushInterval:  getEnvDuration("ERROR_REPORT_FLUSH_INTERVAL", 30*time.Second),
+		ErrorReportMaxBatchSize:   getEnvInt("ERROR_REPORT_MAX_BATCH_SIZE", 10),
+		ErrorReportMaxBatchBytes:  getEnvInt("ERROR_REPORT_MAX_BATCH_BYTES", DefaultErrorReportMaxBatchBytes),
+		ErrorReportMaxQueueSize:   getEnvInt("ERROR_REPORT_MAX_QUEUE_SIZE", 1000),
+		ErrorReportHTTPTimeout:    getEnvDuration("ERROR_REPORT_HTTP_TIMEOUT", 10*time.Second),
+		ErrorReportRetryInitial:   getEnvDuration("ERROR_REPORT_RETRY_INITIAL", DefaultErrorReportRetryInitial),
+		ErrorReportRetryMax:       getEnvDuration("ERROR_REPORT_RETRY_MAX", DefaultErrorReportRetryMax),
+		ErrorReportMaxAttempts:    getEnvInt("ERROR_REPORT_MAX_ATTEMPTS", DefaultErrorReportMaxAttempts),
+		ErrorReportDBPath:         getEnv("ERROR_REPORT_DB_PATH", filepath.Join(persistenceDir, "error-reports.db")),
+		ErrorReportDBBusyTimeout:  getEnvDuration("ERROR_REPORT_DB_BUSY_TIMEOUT", DefaultErrorReportDBBusyTimeout),
+		ErrorReportSpoolDir:       getEnv("ERROR_REPORT_SPOOL_DIR", filepath.Join(persistenceDir, "diagnostic-incidents")),
+		ErrorReportArtifactBytes:  getEnvInt64("ERROR_REPORT_ARTIFACT_MAX_BYTES", DefaultErrorReportArtifactMaxBytes),
+		ErrorReportSpoolBytes:     getEnvInt64("ERROR_REPORT_SPOOL_MAX_BYTES", DefaultErrorReportSpoolMaxBytes),
+		ErrorReportRetention:      getEnvDuration("ERROR_REPORT_RETENTION", DefaultErrorReportRetention),
+		ErrorReportCollectTimeout: getEnvDuration("ERROR_REPORT_COLLECTOR_TIMEOUT", DefaultErrorReportCollectorTimeout),
+		ErrorReportCollectorDocs:  getEnvInt("ERROR_REPORT_MAX_COLLECTOR_DOCS", DefaultErrorReportMaxCollectorDocs),
+		ErrorReportDocumentBytes:  getEnvInt("ERROR_REPORT_MAX_DOCUMENT_BYTES", DefaultErrorReportMaxDocumentBytes),
+		ErrorReportValueDepth:     getEnvInt("ERROR_REPORT_MAX_VALUE_DEPTH", DefaultErrorReportMaxValueDepth),
+		ErrorReportValueItems:     getEnvInt("ERROR_REPORT_MAX_VALUE_ITEMS", DefaultErrorReportMaxValueItems),
+		ErrorReportStringBytes:    getEnvInt("ERROR_REPORT_MAX_STRING_BYTES", DefaultErrorReportMaxStringBytes),
+		ErrorReportEventLimit:     getEnvInt("ERROR_REPORT_EVENT_LIMIT", DefaultErrorReportEventLimit),
+		ErrorReportResponseBytes:  getEnvInt("ERROR_REPORT_RESPONSE_MAX_BYTES", DefaultErrorReportResponseMaxBytes),
+		ErrorReportStoredErrBytes: getEnvInt("ERROR_REPORT_STORED_ERROR_MAX_BYTES", DefaultErrorReportStoredErrorBytes),
+		ErrorReportCollectorJobs:  getEnvInt("ERROR_REPORT_COLLECTOR_CONCURRENCY", DefaultErrorReportCollectorWorkers),
 
 		// System info settings - configurable per constitution principle XI
 		SysInfoDockerTimeout:  getEnvDuration("SYSINFO_DOCKER_TIMEOUT", 10*time.Second),
@@ -719,79 +760,4 @@ func (c *Config) IsDeploymentMode() bool {
 // single-workspace container without Docker/devcontainer indirection.
 func (c *Config) IsStandaloneMode() bool {
 	return c.Role == RoleStandalone
-}
-
-func deriveWorkspaceDir(workspaceBaseDir, repository string) string {
-	baseDir := strings.TrimSpace(workspaceBaseDir)
-	if baseDir == "" {
-		baseDir = "/workspace"
-	}
-
-	repoDirName := DeriveRepoDirName(repository)
-	if repoDirName == "" {
-		// Preserve legacy behavior when the repo is unknown: a fixed base directory.
-		return baseDir
-	}
-
-	return filepath.Join(baseDir, repoDirName)
-}
-
-func deriveContainerWorkDir(workspaceDir string) string {
-	if strings.TrimSpace(workspaceDir) == "" {
-		return "/workspaces"
-	}
-	base := filepath.Base(workspaceDir)
-	if base == "" || base == "." || base == "/" {
-		return "/workspaces"
-	}
-	return filepath.Join("/workspaces", base)
-}
-
-// DeriveRepoDirName extracts a filesystem-safe directory name from a repository
-// URL or owner/repo string. Exported for use by the bootstrap package.
-func DeriveRepoDirName(repository string) string {
-	repo := strings.TrimSpace(repository)
-	if repo == "" {
-		return ""
-	}
-
-	// Handle full URLs (https://github.com/org/repo.git).
-	if strings.Contains(repo, "://") {
-		if parsed, err := url.Parse(repo); err == nil {
-			repo = parsed.Path
-		}
-	}
-
-	repo = strings.Trim(repo, "/")
-	if repo == "" {
-		return ""
-	}
-
-	parts := strings.Split(repo, "/")
-	name := parts[len(parts)-1]
-	name = strings.TrimSuffix(name, ".git")
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return ""
-	}
-
-	// Keep the name filesystem-safe. This is intentionally conservative.
-	var b strings.Builder
-	b.Grow(len(name))
-	for _, r := range name {
-		switch {
-		case r >= 'a' && r <= 'z':
-			b.WriteRune(r)
-		case r >= 'A' && r <= 'Z':
-			b.WriteRune(r)
-		case r >= '0' && r <= '9':
-			b.WriteRune(r)
-		case r == '-' || r == '_' || r == '.':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('-')
-		}
-	}
-	safe := strings.Trim(b.String(), "-")
-	return safe
 }

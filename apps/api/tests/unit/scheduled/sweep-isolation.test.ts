@@ -116,7 +116,8 @@ describe('createSweepIsolator', () => {
         level: 'error',
         message: expect.stringContaining('node_cleanup'),
         context: expect.objectContaining({ recoveryType: 'cron_sweep_failure' }),
-      })
+      }),
+      expect.anything()
     );
   });
 

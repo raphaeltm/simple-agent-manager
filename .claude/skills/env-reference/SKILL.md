@@ -167,6 +167,21 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `MAX_CLIENT_ERROR_BODY_BYTES` — Max request body size (default: 65536)
 - `MAX_VM_AGENT_ERROR_BODY_BYTES` — Max VM agent error request body (default: 32768)
 - `MAX_VM_AGENT_ERROR_BATCH_SIZE` — Max VM agent errors per request (default: 10)
+- `MAX_VM_AGENT_ERROR_SOURCE_LENGTH` — Max redacted VM error source length (default: 256)
+- `OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH` — Max persisted observability error message length (default: 2048)
+- `OBSERVABILITY_ERROR_STACK_MAX_LENGTH` — Max persisted observability stack length (default: 4096)
+- `OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH` — Max persisted observability user-agent length (default: 512)
+- `VM_INCIDENT_R2_PREFIX` — Private R2 object-key prefix (default: `diagnostic-incidents`; generated deployments use the Pulumi output)
+- `VM_INCIDENT_ARTIFACT_MAX_BYTES` — Max compressed artifact bytes (default: 2097152)
+- `VM_INCIDENT_REGISTRATION_MAX_BYTES` — Max artifact registration body bytes (default: 262144)
+- `VM_INCIDENT_MANIFEST_MAX_BYTES` — Max redacted manifest bytes (default: 131072)
+- `VM_INCIDENT_PREVIEW_MAX_BYTES` — Max redacted preview bytes (default: 131072)
+- `VM_INCIDENT_MAX_ARTIFACTS_PER_NODE` — Active artifact quota per node (default: 50)
+- `VM_INCIDENT_MAX_BYTES_PER_NODE` — Active expected-byte quota per node (default: 104857600)
+- `VM_INCIDENT_RETENTION_DAYS` — Private object and active metadata retention (default: 7; generated deployments use the Pulumi output)
+- `VM_INCIDENT_METADATA_RETENTION_DAYS` — Expired metadata retention after object deletion (default: 30)
+- `VM_INCIDENT_PENDING_TIMEOUT_MINUTES` — Incomplete upload timeout and upload-lease duration (default: 30)
+- `VM_INCIDENT_RECONCILE_BATCH_SIZE` — Max rows repaired per scheduled pass (default: 50; minimum: 6)
 
 ### Project File Library
 
@@ -251,10 +266,30 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 
 ### Error Reporting
 
+Generated deployments validate and pass these values through cloud-init to newly provisioned VM Agent systemd services.
+
 - `ERROR_REPORT_FLUSH_INTERVAL` — Background error flush interval (default: 30s)
 - `ERROR_REPORT_MAX_BATCH_SIZE` — Immediate flush threshold (default: 10)
-- `ERROR_REPORT_MAX_QUEUE_SIZE` — Max queued error entries (default: 100)
+- `ERROR_REPORT_MAX_BATCH_BYTES` — Max serialized batch bytes, aligned with Worker ingestion (default: 32768)
+- `ERROR_REPORT_MAX_QUEUE_SIZE` — Max durable SQLite outbox entries (default: 1000)
 - `ERROR_REPORT_HTTP_TIMEOUT` — HTTP POST timeout for error reports (default: 10s)
+- `ERROR_REPORT_RETRY_INITIAL` / `ERROR_REPORT_RETRY_MAX` — Exponential retry bounds (defaults: 1s / 5m)
+- `ERROR_REPORT_MAX_ATTEMPTS` — Retry attempts before a report expires locally (default: 20)
+- `ERROR_REPORT_DB_PATH` — Durable SQLite outbox path (default: next to the VM Agent persistence database)
+- `ERROR_REPORT_DB_BUSY_TIMEOUT` — SQLite outbox contention timeout (default: 5s)
+- `ERROR_REPORT_SPOOL_DIR` — Private evidence spool path (default: `diagnostic-incidents` beside the persistence database)
+- `ERROR_REPORT_ARTIFACT_MAX_BYTES` — Max compressed artifact bytes (default: 2097152)
+- `ERROR_REPORT_SPOOL_MAX_BYTES` — Max local evidence spool bytes (default: 20971520)
+- `ERROR_REPORT_RETENTION` — Max local report/evidence retention (default: 24h)
+- `ERROR_REPORT_COLLECTOR_TIMEOUT` — Shared allowlisted collector deadline (default: 10s)
+- `ERROR_REPORT_MAX_COLLECTOR_DOCS` — Max structured collector documents (default: 8)
+- `ERROR_REPORT_MAX_DOCUMENT_BYTES` — Cumulative redacted preview budget (default: 131072)
+- `ERROR_REPORT_MAX_VALUE_DEPTH` / `ERROR_REPORT_MAX_VALUE_ITEMS` — Recursive sanitizer bounds (defaults: 8 / 256)
+- `ERROR_REPORT_MAX_STRING_BYTES` — Per-string sanitizer limit (default: 4096)
+- `ERROR_REPORT_EVENT_LIMIT` — Max structured event or workspace previews collected (default: 100)
+- `ERROR_REPORT_RESPONSE_MAX_BYTES` — Max control-plane response bytes read into a diagnostic error (default: 4096)
+- `ERROR_REPORT_STORED_ERROR_MAX_BYTES` — Max bytes persisted for a durable reporter error (default: 512)
+- `ERROR_REPORT_COLLECTOR_CONCURRENCY` — Max automatic-evidence collectors running concurrently (default: 1)
 
 ### Message Reporting
 

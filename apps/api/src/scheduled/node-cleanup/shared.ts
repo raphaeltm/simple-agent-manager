@@ -233,7 +233,7 @@ export async function destroyNodeForCleanup(
       },
       userId: node.user_id,
       nodeId: node.id,
-    });
+    }, env);
 
     await db
       .update(schema.nodes)
@@ -261,7 +261,7 @@ export async function destroyNodeForCleanup(
       },
       userId: node.user_id,
       nodeId: node.id,
-    });
+    }, env);
 
     return false;
   }

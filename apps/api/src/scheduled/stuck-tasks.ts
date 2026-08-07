@@ -840,7 +840,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         },
         userId: task.user_id,
         workspaceId: task.workspace_id,
-      });
+      }, env);
     }
 
     // Compute task-scoped liveness at most once per candidate: both the
@@ -926,7 +926,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
                   },
                   userId: task.user_id,
                   nodeId: liveness.nodeId,
-                });
+                }, env);
                 result.heartbeatSkipped++;
               }
               break;
@@ -1021,7 +1021,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
                 livenessReason: liveness?.reason ?? null,
               },
               userId: task.user_id,
-            });
+            }, env);
           }
         }
       }
@@ -1088,7 +1088,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
         userId: task.user_id,
         nodeId: diagnostics.nodeId,
         workspaceId: diagnostics.workspaceId,
-      });
+      }, env);
 
       const nowIso = now.toISOString();
       // Use optimistic locking: only fail the task if it's still in the
@@ -1168,7 +1168,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           userId: task.user_id,
           nodeId: diagnostics.nodeId,
           workspaceId: diagnostics.workspaceId,
-        });
+        }, env);
       }
 
       switch (task.status) {
@@ -1203,7 +1203,7 @@ export async function recoverStuckTasks(env: Env): Promise<StuckTaskResult> {
           executionStep: task.execution_step,
         },
         userId: task.user_id,
-      });
+      }, env);
 
       result.errors++;
     }

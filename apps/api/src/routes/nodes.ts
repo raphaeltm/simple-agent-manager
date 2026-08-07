@@ -54,6 +54,7 @@ nodesRoutes.use('/*', async (c, next) => {
     path.endsWith('/ready') ||
     path.endsWith('/heartbeat') ||
     path.endsWith('/errors') ||
+    path.includes('/diagnostic-incidents/') ||
     path.endsWith('/deploy-release') ||
     path.endsWith('/deploy-routes') ||
     path.endsWith('/origin-ca-certificate')

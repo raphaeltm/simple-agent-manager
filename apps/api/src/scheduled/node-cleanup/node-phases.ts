@@ -92,7 +92,7 @@ export async function sweepTerminalCfContainers(
         userId: candidate.user_id,
         nodeId: candidate.node_id,
         workspaceId: candidate.workspace_id,
-      });
+      }, env);
 
       result.cfContainersDestroyed++;
     } catch (err) {

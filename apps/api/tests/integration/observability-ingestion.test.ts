@@ -80,7 +80,10 @@ function createTestD1(sqlite: Database.Database): D1Database {
       return { success: true, results, meta: {} };
     },
     async raw() {
-      return sqlite.prepare(sql).raw().all(...normalize(params));
+      return sqlite
+        .prepare(sql)
+        .raw()
+        .all(...normalize(params));
     },
     async first(col?: string) {
       const row = sqlite.prepare(sql).get(...normalize(params)) as
@@ -261,13 +264,40 @@ describe('observability error ingestion pipeline (behavioral)', () => {
         timestamp: Date.now(),
       });
 
-      const row = sqlite
-        .prepare('SELECT message, stack FROM platform_errors LIMIT 1')
-        .get() as { message: string; stack: string };
+      const row = sqlite.prepare('SELECT message, stack FROM platform_errors LIMIT 1').get() as {
+        message: string;
+        stack: string;
+      };
       expect(row.message.endsWith('...')).toBe(true);
       expect(row.message.length).toBe(2048 + 3);
       expect(row.stack.endsWith('...')).toBe(true);
       expect(row.stack.length).toBe(4096 + 3);
+    });
+
+    it('honors configured message, stack, and user-agent persistence limits', async () => {
+      await persistError(
+        obsDb,
+        {
+          source: 'api',
+          message: 'm'.repeat(20),
+          stack: 's'.repeat(20),
+          userAgent: 'u'.repeat(20),
+        },
+        {
+          OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH: '7',
+          OBSERVABILITY_ERROR_STACK_MAX_LENGTH: '8',
+          OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH: '9',
+        } as Env
+      );
+
+      const row = sqlite
+        .prepare('SELECT message, stack, user_agent FROM platform_errors LIMIT 1')
+        .get() as { message: string; stack: string; user_agent: string };
+      expect(row).toEqual({
+        message: `${'m'.repeat(7)}...`,
+        stack: `${'s'.repeat(8)}...`,
+        user_agent: `${'u'.repeat(9)}...`,
+      });
     });
 
     it('persistErrorBatch writes every input', async () => {
@@ -294,6 +324,27 @@ describe('observability error ingestion pipeline (behavioral)', () => {
       expect(countRows(sqlite)).toBe(3);
     });
 
+    it('persistErrorBatch forwards configured field limits to each insert', async () => {
+      await persistErrorBatch(
+        obsDb,
+        [{ source: 'client', message: 'abcdefgh', stack: '12345678', userAgent: 'ABCDEFGH' }],
+        {
+          OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH: '3',
+          OBSERVABILITY_ERROR_STACK_MAX_LENGTH: '4',
+          OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH: '5',
+        } as Env
+      );
+
+      const row = sqlite
+        .prepare('SELECT message, stack, user_agent FROM platform_errors LIMIT 1')
+        .get() as { message: string; stack: string; user_agent: string };
+      expect(row).toEqual({
+        message: 'abc...',
+        stack: '1234...',
+        user_agent: 'ABCDE...',
+      });
+    });
+
     it('is fail-silent when the database throws', async () => {
       await expect(
         persistError(createBrokenD1(), {
@@ -301,7 +352,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
           level: 'error',
           message: 'will-fail',
           timestamp: Date.now(),
-        }),
+        })
       ).resolves.toBeUndefined();
     });
 
@@ -497,7 +548,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
           }),
         },
         { KV: fakeKV, OBSERVABILITY_DATABASE: obsDb } as unknown as Env,
-        { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} },
+        { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} }
       );
 
       expect(res.status).toBe(204);
@@ -535,7 +586,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
           }),
         },
         { KV: fakeKV, OBSERVABILITY_DATABASE: obsDb } as unknown as Env,
-        { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} },
+        { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} }
       );
 
       expect(res.status).toBe(204);
@@ -565,7 +616,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
           body: JSON.stringify({ errors: oversized }),
         },
         { KV: fakeKV, OBSERVABILITY_DATABASE: obsDb } as unknown as Env,
-        { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} },
+        { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} }
       );
 
       expect(res.status).toBe(400);
@@ -591,8 +642,12 @@ describe('observability error ingestion pipeline (behavioral)', () => {
           }),
         },
         // Cap the body at 10 bytes so the 500-byte Content-Length trips the guard.
-        { KV: fakeKV, OBSERVABILITY_DATABASE: obsDb, MAX_CLIENT_ERROR_BODY_BYTES: '10' } as unknown as Env,
-        { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} },
+        {
+          KV: fakeKV,
+          OBSERVABILITY_DATABASE: obsDb,
+          MAX_CLIENT_ERROR_BODY_BYTES: '10',
+        } as unknown as Env,
+        { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} }
       );
 
       expect(res.status).toBe(400);
@@ -612,7 +667,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
           body: JSON.stringify({ errors: [] }),
         },
         { KV: fakeKV, OBSERVABILITY_DATABASE: obsDb } as unknown as Env,
-        { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} },
+        { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} }
       );
 
       expect(res.status).toBe(204);
@@ -640,13 +695,11 @@ describe('observability error ingestion pipeline (behavioral)', () => {
               'CF-Connecting-IP': '203.0.113.7',
             },
             body: JSON.stringify({
-              errors: [
-                { message: 'rl', source: 'app.tsx', level: 'error', timestamp: Date.now() },
-              ],
+              errors: [{ message: 'rl', source: 'app.tsx', level: 'error', timestamp: Date.now() }],
             }),
           },
           env,
-          { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} },
+          { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} }
         );
         await Promise.all(pending);
         return res;
@@ -678,7 +731,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
       const priorWindow = getCurrentWindowStart(windowSeconds) - windowSeconds;
       await kv.put(
         createRateLimitKey('client-errors', ip, priorWindow),
-        JSON.stringify({ count: 5, windowStart: priorWindow }),
+        JSON.stringify({ count: 5, windowStart: priorWindow })
       );
 
       const send = async () => {
@@ -689,11 +742,13 @@ describe('observability error ingestion pipeline (behavioral)', () => {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': ip },
             body: JSON.stringify({
-              errors: [{ message: 'rollover', source: 'app.tsx', level: 'error', timestamp: Date.now() }],
+              errors: [
+                { message: 'rollover', source: 'app.tsx', level: 'error', timestamp: Date.now() },
+              ],
             }),
           },
           env,
-          { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} },
+          { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} }
         );
         await Promise.all(pending);
         return res;
@@ -758,7 +813,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
           }),
         },
         authEnv,
-        { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} },
+        { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} }
       );
       await Promise.all(pending);
       return res;
@@ -778,16 +833,14 @@ describe('observability error ingestion pipeline (behavioral)', () => {
       expect(errors[0].workspaceId).toBe('ws-77');
     });
 
-    it('accepts a legacy no-scope callback token whose workspace matches the node', async () => {
+    it('rejects a legacy no-scope callback token even when its workspace matches the node', async () => {
       const legacy = await signLegacyNodeCallbackToken(NODE_ID, authEnv);
       const res = await postNodeErrors(legacy);
 
-      expect(res.status).toBe(204);
+      expect(res.status).toBe(403);
 
       const { errors } = await queryErrors(obsDb, {});
-      expect(errors).toHaveLength(1);
-      expect(errors[0].source).toBe('vm-agent');
-      expect(errors[0].nodeId).toBe(NODE_ID);
+      expect(errors).toHaveLength(0);
     });
 
     it('coerces an unrecognized vm-agent level to "error" on the persisted row', async () => {
@@ -815,7 +868,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
           }),
         },
         authEnv,
-        { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} },
+        { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} }
       );
 
       expect(res.status).toBe(204);
@@ -849,7 +902,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
           body: JSON.stringify({ errors: oversized }),
         },
         authEnv,
-        { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} },
+        { waitUntil: (p: Promise<unknown>) => pending.push(p), passThroughOnException: () => {} }
       );
 
       expect(res.status).toBe(400);
@@ -890,7 +943,9 @@ describe('observability error ingestion pipeline (behavioral)', () => {
         message: `row-${i}`,
         timestamp: Date.now() + i,
       }));
-      await persistErrorBatch(obsDb, inputs, { OBSERVABILITY_ERROR_BATCH_SIZE: '100' } as unknown as Env);
+      await persistErrorBatch(obsDb, inputs, {
+        OBSERVABILITY_ERROR_BATCH_SIZE: '100',
+      } as unknown as Env);
       expect(countRows(sqlite)).toBe(8);
 
       const result = await runObservabilityPurge({
@@ -907,7 +962,7 @@ describe('observability error ingestion pipeline (behavioral)', () => {
       const dayMs = 86_400_000;
       // Seed two old rows and one fresh row directly with explicit created_at.
       const insert = sqlite.prepare(
-        'INSERT INTO platform_errors (id, source, level, message, timestamp, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO platform_errors (id, source, level, message, timestamp, created_at) VALUES (?, ?, ?, ?, ?, ?)'
       );
       insert.run('old-1', 'api', 'error', 'old one', now - 40 * dayMs, now - 40 * dayMs);
       insert.run('old-2', 'api', 'error', 'old two', now - 35 * dayMs, now - 35 * dayMs);

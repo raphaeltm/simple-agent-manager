@@ -112,11 +112,34 @@ func runDeploymentMode(cfg *config.Config) {
 	// is nil-safe and started here so progress and any terminal failure are
 	// flushed to the control plane before this function can exit.
 	bootReporter := errorreport.New(cfg.ControlPlaneURL, cfg.NodeID, cfg.CallbackToken, errorreport.Config{
-		FlushInterval: cfg.ErrorReportFlushInterval,
-		MaxBatchSize:  cfg.ErrorReportMaxBatchSize,
-		MaxQueueSize:  cfg.ErrorReportMaxQueueSize,
-		HTTPTimeout:   cfg.ErrorReportHTTPTimeout,
+		FlushInterval:    cfg.ErrorReportFlushInterval,
+		MaxBatchSize:     cfg.ErrorReportMaxBatchSize,
+		MaxBatchBytes:    cfg.ErrorReportMaxBatchBytes,
+		MaxQueueSize:     cfg.ErrorReportMaxQueueSize,
+		HTTPTimeout:      cfg.ErrorReportHTTPTimeout,
+		RetryInitial:     cfg.ErrorReportRetryInitial,
+		RetryMax:         cfg.ErrorReportRetryMax,
+		MaxAttempts:      cfg.ErrorReportMaxAttempts,
+		DBPath:           cfg.ErrorReportDBPath,
+		DBBusyTimeout:    cfg.ErrorReportDBBusyTimeout,
+		SpoolDir:         cfg.ErrorReportSpoolDir,
+		ArtifactMaxBytes: cfg.ErrorReportArtifactBytes,
+		SpoolMaxBytes:    cfg.ErrorReportSpoolBytes,
+		Retention:        cfg.ErrorReportRetention,
+		CollectorTimeout: cfg.ErrorReportCollectTimeout,
+		MaxCollectorDocs: cfg.ErrorReportCollectorDocs,
+		MaxDocumentBytes: cfg.ErrorReportDocumentBytes,
+		MaxValueDepth:    cfg.ErrorReportValueDepth,
+		MaxValueItems:    cfg.ErrorReportValueItems,
+		MaxStringBytes:   cfg.ErrorReportStringBytes,
+		ResponseMaxBytes: cfg.ErrorReportResponseBytes,
+		StoredErrorBytes: cfg.ErrorReportStoredErrBytes,
+		CollectorWorkers: cfg.ErrorReportCollectorJobs,
 	})
+	if err := bootReporter.InitError(); err != nil {
+		slog.Error("Failed to initialize durable deployment error reporter", "error", err)
+		os.Exit(1)
+	}
 	bootReporter.Start()
 	bootReporter.ReportInfo("deploy: agent started in deployment mode; ensuring host runtime", "deploy.bootstrap", "", map[string]interface{}{
 		"environmentId": cfg.EnvironmentID,

@@ -17,10 +17,41 @@ const DEFAULT_MIGRATION_DIRS = [
   resolve(import.meta.dirname, '../../apps/api/src/db/migrations/observability'),
 ];
 
-const LEGACY_ALLOWED_DUPLICATE_PREFIXES = new Map<string, Set<string>>([
+const LEGACY_ALLOWED_DUPLICATE_FILES = new Map<string, Map<string, Set<string>>>([
   [
     'apps/api/src/db/migrations',
-    new Set(['0002', '0013', '0016', '0024', '0029', '0036', '0037', '0042', '0052', '0069']),
+    new Map([
+      ['0002', new Set(['0002_betterauth_tables.sql', '0002_multi_agent_acp.sql'])],
+      [
+        '0013',
+        new Set(['0013_project_first_architecture.sql', '0013_task_auto_provisioned_node.sql']),
+      ],
+      ['0016', new Set(['0016_remove_idle_timeout.sql', '0016_session_suspend_resume.sql'])],
+      [
+        '0024',
+        new Set(['0024_project_default_workspace_profile.sql', '0024_unique_chat_session_id.sql']),
+      ],
+      ['0029', new Set(['0029_project_idle_timeouts.sql', '0029_task_dispatch_depth.sql'])],
+      ['0036', new Set(['0036_project_file_library.sql', '0036_triggers.sql'])],
+      ['0037', new Set(['0037_platform_credentials.sql', '0037_project_file_directories.sql'])],
+      ['0042', new Set(['0042_project_agent_defaults.sql', '0042_project_scoped_credentials.sql'])],
+      [
+        '0052',
+        new Set(['0052_github_installation_accounts.sql', '0052_profile_runtime_assets.sql']),
+      ],
+      [
+        '0069',
+        new Set(['0069_deployment_environment_placement.sql', '0069_deployment_volumes.sql']),
+      ],
+      // These draft migrations were already applied to staging before current-main
+      // migrations claimed the same numeric prefixes. Wrangler tracks exact
+      // filenames, so renaming the applied files would replay them.
+      [
+        '0105',
+        new Set(['0105_bootstrap_token_consumes.sql', '0105_debug_diagnosis_canonical_status.sql']),
+      ],
+      ['0106', new Set(['0106_diagnostic_incidents.sql', '0106_node_agent_version.sql'])],
+    ]),
   ],
 ]);
 
@@ -38,8 +69,10 @@ function getMigrationDirs(): string[] {
   return explicitDirs.length > 0 ? explicitDirs.map((dir) => resolve(dir)) : DEFAULT_MIGRATION_DIRS;
 }
 
-function allowedDuplicatesFor(dir: string): Set<string> {
-  return LEGACY_ALLOWED_DUPLICATE_PREFIXES.get(repoRelative(dir)) ?? new Set();
+export function isAllowedDuplicateSet(dir: string, prefix: string, files: string[]): boolean {
+  const expected = LEGACY_ALLOWED_DUPLICATE_FILES.get(repoRelative(dir))?.get(prefix);
+  if (!expected || expected.size !== files.length) return false;
+  return files.every((file) => expected.has(file));
 }
 
 function validateDirectory(dir: string): Violation[] {
@@ -83,10 +116,9 @@ function validateDirectory(dir: string): Violation[] {
     byPrefix.set(prefix, files);
   }
 
-  const allowed = allowedDuplicatesFor(dir);
   for (const [prefix, files] of byPrefix) {
     if (files.length <= 1) continue;
-    if (allowed.has(prefix)) continue;
+    if (isAllowedDuplicateSet(dir, prefix, files)) continue;
     violations.push({
       dir,
       message: `Duplicate migration numeric prefix ${prefix}: ${files.join(', ')}`,

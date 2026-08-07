@@ -30,6 +30,7 @@ import {
   getFeatureTokenBudget,
   releaseFeatureTokenBudget,
 } from './ai-token-budget';
+import { getDiagnosticIncidentByErrorId } from './diagnostic-incidents';
 import {
   getErrorTrends,
   getHealthSummary,
@@ -82,6 +83,15 @@ export interface Completion {
 }
 
 const TOOLS = [
+  {
+    type: 'function',
+    function: {
+      name: 'get_vm_incident',
+      description:
+        'Read bounded, allowlisted, recursively redacted automatic VM incident metadata and safe previews correlated to the selected platform error. Returns no raw artifact bytes, storage keys, URLs, logs, environment values, prompts, messages, repository content, command lines, credentials, or tokens.',
+      parameters: { type: 'object', properties: {}, additionalProperties: false },
+    },
+  },
   {
     type: 'function',
     function: {
@@ -188,11 +198,26 @@ export function resolveDebugAgentConfig(env: Env): DebugConfig {
       DEFAULT_DEBUG_AGENT_MAX_WINDOW_HOURS
     ),
     timeoutMs: positiveInteger(env.DEBUG_AGENT_TIMEOUT_MS, DEFAULT_DEBUG_AGENT_TIMEOUT_MS),
-    hardDeadlineMs: positiveInteger(env.DEBUG_AGENT_HARD_DEADLINE_MS, DEFAULT_DEBUG_AGENT_HARD_DEADLINE_MS),
-    staleHeartbeatMs: positiveInteger(env.DEBUG_AGENT_STALE_HEARTBEAT_MS, DEFAULT_DEBUG_AGENT_STALE_HEARTBEAT_MS),
-    retryBaseDelayMs: positiveInteger(env.DEBUG_AGENT_RETRY_BASE_DELAY_MS, DEFAULT_DEBUG_AGENT_RETRY_BASE_DELAY_MS),
-    retryMaxDelayMs: positiveInteger(env.DEBUG_AGENT_RETRY_MAX_DELAY_MS, DEFAULT_DEBUG_AGENT_RETRY_MAX_DELAY_MS),
-    stepMaxRetries: positiveInteger(env.DEBUG_AGENT_STEP_MAX_RETRIES, DEFAULT_DEBUG_AGENT_STEP_MAX_RETRIES),
+    hardDeadlineMs: positiveInteger(
+      env.DEBUG_AGENT_HARD_DEADLINE_MS,
+      DEFAULT_DEBUG_AGENT_HARD_DEADLINE_MS
+    ),
+    staleHeartbeatMs: positiveInteger(
+      env.DEBUG_AGENT_STALE_HEARTBEAT_MS,
+      DEFAULT_DEBUG_AGENT_STALE_HEARTBEAT_MS
+    ),
+    retryBaseDelayMs: positiveInteger(
+      env.DEBUG_AGENT_RETRY_BASE_DELAY_MS,
+      DEFAULT_DEBUG_AGENT_RETRY_BASE_DELAY_MS
+    ),
+    retryMaxDelayMs: positiveInteger(
+      env.DEBUG_AGENT_RETRY_MAX_DELAY_MS,
+      DEFAULT_DEBUG_AGENT_RETRY_MAX_DELAY_MS
+    ),
+    stepMaxRetries: positiveInteger(
+      env.DEBUG_AGENT_STEP_MAX_RETRIES,
+      DEFAULT_DEBUG_AGENT_STEP_MAX_RETRIES
+    ),
   };
 }
 
@@ -306,7 +331,18 @@ export async function executeTool(
 ): Promise<string> {
   let result: unknown;
   try {
-    if (call.function.name === 'get_recent_errors') {
+    if (call.function.name === 'get_vm_incident') {
+      result = window.errorId
+        ? ((await getDiagnosticIncidentByErrorId(env, window.errorId)) ?? {
+            status: 'missing',
+            message: 'No automatic VM incident evidence is associated with the selected error.',
+          })
+        : {
+            status: 'unavailable',
+            message:
+              'Automatic VM incident evidence is available only for a selected platform error.',
+          };
+    } else if (call.function.name === 'get_recent_errors') {
       result = await queryErrors(env.OBSERVABILITY_DATABASE, {
         startTime: window.startMs,
         endTime: window.endMs,
@@ -341,7 +377,9 @@ export async function executeTool(
       result = { error: 'Unknown read-only debugging tool' };
     }
   } catch (cause) {
-    const sanitizedCause = redactSensitiveData(cause instanceof Error ? cause.message : String(cause));
+    const sanitizedCause = redactSensitiveData(
+      cause instanceof Error ? cause.message : String(cause)
+    );
     result = {
       error: 'Read-only evidence source unavailable',
       tool: call.function.name,
@@ -412,6 +450,8 @@ function toDiagnosisRun(
   row: typeof schema.debugDiagnosisRuns.$inferSelect,
   diagnosis?: DebugDiagnosis | null
 ): DebugDiagnosisRun {
+  const { legacyStatus, ...publicRow } = row;
+  void legacyStatus;
   const usage: DebugAgentUsage = {
     turns: row.turns,
     inputTokens: row.inputTokens,
@@ -420,9 +460,8 @@ function toDiagnosisRun(
     dailyTokensUsed: row.dailyTokensUsed,
     dailyTokenLimit: row.dailyTokenLimit,
   };
-  return { ...row, usage, diagnosis };
+  return { ...publicRow, usage, diagnosis };
 }
-
 
 export async function createDebugDiagnosisRun(
   env: Env,
@@ -438,6 +477,7 @@ export async function createDebugDiagnosisRun(
   const deadlineAt = new Date(Date.parse(now) + config.hardDeadlineMs).toISOString();
   await db.insert(schema.debugDiagnosisRuns).values({
     id,
+    legacyStatus: 'queued',
     status: 'queued',
     errorId: window.errorId,
     startTime: new Date(window.startMs).toISOString(),
@@ -451,68 +491,40 @@ export async function createDebugDiagnosisRun(
     createdAt: now,
     updatedAt: now,
   });
-  const row = await db.select().from(schema.debugDiagnosisRuns).where(eq(schema.debugDiagnosisRuns.id, id)).get();
+  const row = await db
+    .select()
+    .from(schema.debugDiagnosisRuns)
+    .where(eq(schema.debugDiagnosisRuns.id, id))
+    .get();
   if (!row) throw new Error('Failed to persist debugging diagnosis run');
   return toDiagnosisRun(row, null);
 }
 
-export async function executeDebugDiagnosisRun(env: Env, runId: string): Promise<void> {
+export async function retryDebugDiagnosisRun(
+  env: Env,
+  runId: string,
+  createdBy: string
+): Promise<DebugDiagnosisRun> {
   const db = drizzle(env.DATABASE, { schema });
-  const row = await db.select().from(schema.debugDiagnosisRuns).where(eq(schema.debugDiagnosisRuns.id, runId)).get();
-  if (!row || row.status === 'succeeded' || row.status === 'running') return;
-
-  const startedAt = new Date().toISOString();
-  await db
-    .update(schema.debugDiagnosisRuns)
-    .set({ status: 'running', startedAt, updatedAt: startedAt, errorMessage: null })
-    .where(eq(schema.debugDiagnosisRuns.id, runId));
-
-  try {
-    const diagnosis = await runDebugDiagnosis(
-      env,
-      row.createdBy,
-      row.errorId ? { errorId: row.errorId } : { startTime: row.startTime, endTime: row.endTime }
-    );
-    const completedAt = new Date().toISOString();
-    await db
-      .update(schema.debugDiagnosisRuns)
-      .set({
-        status: 'succeeded',
-        diagnosisId: diagnosis.id,
-        model: diagnosis.model,
-        turns: diagnosis.usage.turns,
-        inputTokens: diagnosis.usage.inputTokens,
-        outputTokens: diagnosis.usage.outputTokens,
-        dailyTokensUsed: diagnosis.usage.dailyTokensUsed,
-        dailyTokenLimit: diagnosis.usage.dailyTokenLimit,
-        completedAt,
-        updatedAt: completedAt,
-      })
-      .where(eq(schema.debugDiagnosisRuns.id, runId));
-  } catch (err) {
-    const completedAt = new Date().toISOString();
-    await db
-      .update(schema.debugDiagnosisRuns)
-      .set({
-        status: 'failed',
-        errorMessage: err instanceof Error ? err.message : String(err),
-        completedAt,
-        updatedAt: completedAt,
-      })
-      .where(eq(schema.debugDiagnosisRuns.id, runId));
-  }
-}
-
-export async function retryDebugDiagnosisRun(env: Env, runId: string, createdBy: string): Promise<DebugDiagnosisRun> {
-  const db = drizzle(env.DATABASE, { schema });
-  const row = await db.select().from(schema.debugDiagnosisRuns).where(eq(schema.debugDiagnosisRuns.id, runId)).get();
+  const row = await db
+    .select()
+    .from(schema.debugDiagnosisRuns)
+    .where(eq(schema.debugDiagnosisRuns.id, runId))
+    .get();
   if (!row) throw new Error('Diagnosis run not found');
-  if (!['failed', 'cancelled'].includes(row.status)) throw new Error('Only failed or cancelled diagnosis runs can be retried');
+  if (!['failed', 'cancelled'].includes(row.status))
+    throw new Error('Only failed or cancelled diagnosis runs can be retried');
   const existing = await env.DATABASE.prepare(
-    "SELECT id FROM debug_diagnosis_runs WHERE retry_of_run_id=? AND created_by=? AND status IN ('queued','running','succeeded') ORDER BY created_at DESC LIMIT 1"
-  ).bind(runId, createdBy).first<{ id: string }>();
+    "SELECT id FROM debug_diagnosis_runs WHERE retry_of_run_id=? AND created_by=? AND run_status IN ('queued','running','succeeded') ORDER BY created_at DESC LIMIT 1"
+  )
+    .bind(runId, createdBy)
+    .first<{ id: string }>();
   if (existing) {
-    const existingRow = await db.select().from(schema.debugDiagnosisRuns).where(eq(schema.debugDiagnosisRuns.id, existing.id)).get();
+    const existingRow = await db
+      .select()
+      .from(schema.debugDiagnosisRuns)
+      .where(eq(schema.debugDiagnosisRuns.id, existing.id))
+      .get();
     if (existingRow) return toDiagnosisRun(existingRow, null);
   }
   return createDebugDiagnosisRun(
@@ -684,16 +696,33 @@ export async function listDebugDiagnoses(
   }
   return {
     diagnoses,
-    runs: runRows.map((run) => toDiagnosisRun(run, run.diagnosisId ? diagnosisById.get(run.diagnosisId) ?? null : null)),
+    runs: runRows.map((run) =>
+      toDiagnosisRun(run, run.diagnosisId ? (diagnosisById.get(run.diagnosisId) ?? null) : null)
+    ),
   };
 }
 
-export async function getDebugDiagnosisRun(env: Env, runId: string): Promise<DebugDiagnosisRun | null> {
+export async function getDebugDiagnosisRun(
+  env: Env,
+  runId: string
+): Promise<DebugDiagnosisRun | null> {
   const db = drizzle(env.DATABASE, { schema });
-  const row = await db.select().from(schema.debugDiagnosisRuns).where(eq(schema.debugDiagnosisRuns.id, runId)).get();
+  const row = await db
+    .select()
+    .from(schema.debugDiagnosisRuns)
+    .where(eq(schema.debugDiagnosisRuns.id, runId))
+    .get();
   if (!row) return null;
-  const diagnosisRow = row.diagnosisId ? await db.select().from(schema.debugDiagnoses).where(eq(schema.debugDiagnoses.id, row.diagnosisId)).get() : null;
-  return toDiagnosisRun(row, diagnosisRow ? toDiagnosis(diagnosisRow) : null);
+  const diagnosisRow = row.diagnosisId
+    ? await db
+        .select()
+        .from(schema.debugDiagnoses)
+        .where(eq(schema.debugDiagnoses.id, row.diagnosisId))
+        .get()
+    : null;
+  const run = toDiagnosisRun(row, diagnosisRow ? toDiagnosis(diagnosisRow) : null);
+  if (row.errorId) run.incident = await getDiagnosticIncidentByErrorId(env, row.errorId);
+  return run;
 }
 
 export async function saveDebugDiagnosisAsIdea(

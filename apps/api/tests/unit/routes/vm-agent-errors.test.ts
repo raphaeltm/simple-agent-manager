@@ -5,7 +5,9 @@ import type { Env } from '../../../src/env';
 
 // Mock JWT verification — accept any token
 vi.mock('../../../src/services/jwt', () => ({
-  verifyCallbackToken: vi.fn().mockResolvedValue({ workspace: 'node-123', type: 'callback', scope: 'node' }),
+  verifyCallbackToken: vi
+    .fn()
+    .mockResolvedValue({ workspace: 'node-123', type: 'callback', scope: 'node' }),
   signCallbackToken: vi.fn(),
   signNodeCallbackToken: vi.fn(),
   signNodeManagementToken: vi.fn(),
@@ -86,9 +88,24 @@ vi.mock('../../../src/services/project-data', () => ({
 
 // Mock observability service
 const mockPersistErrorBatch = vi.fn().mockResolvedValue(undefined);
+const mockPersistErrorBatchStrict = vi.fn().mockResolvedValue(undefined);
 vi.mock('../../../src/services/observability', () => ({
   persistErrorBatch: (...args: unknown[]) => mockPersistErrorBatch(...args),
   persistError: vi.fn().mockResolvedValue(undefined),
+  redactSensitiveData: (value: unknown) => value,
+}));
+vi.mock('../../../src/services/observability-strict', () => ({
+  persistErrorBatchStrict: (...args: unknown[]) => mockPersistErrorBatchStrict(...args),
+}));
+const mockEnsurePendingIncidents = vi.fn().mockResolvedValue(undefined);
+const mockRegisterDiagnosticArtifact = vi.fn().mockResolvedValue({
+  artifactId: 'artifact-1',
+  status: 'pending',
+});
+vi.mock('../../../src/services/diagnostic-incidents', () => ({
+  ensurePendingIncidents: (...args: unknown[]) => mockEnsurePendingIncidents(...args),
+  registerDiagnosticArtifact: (...args: unknown[]) => mockRegisterDiagnosticArtifact(...args),
+  uploadDiagnosticArtifact: vi.fn(),
 }));
 
 // Import after mocking
@@ -99,6 +116,9 @@ describe('VM Agent Errors Route', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    mockPersistErrorBatch.mockResolvedValue(undefined);
+    mockPersistErrorBatchStrict.mockResolvedValue(undefined);
+    mockEnsurePendingIncidents.mockResolvedValue(undefined);
 
     app = new Hono<{ Bindings: Env }>();
 
@@ -138,18 +158,105 @@ describe('VM Agent Errors Route', () => {
 
   const authHeaders = {
     'Content-Type': 'application/json',
-    'Authorization': 'Bearer test-callback-token',
+    Authorization: 'Bearer test-callback-token',
   };
 
   describe('POST /api/nodes/:id/errors', () => {
     it('should accept a valid batch and return 204', async () => {
-      const res = await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody([validEntry()]),
-      }, createEnv());
+      const res = await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody([validEntry()]),
+        },
+        createEnv()
+      );
 
       expect(res.status).toBe(204);
+    });
+
+    it('strictly acknowledges a caller incident ID in both D1 stores before returning 204', async () => {
+      const incidentId = '01KZ8V0GMXQ4ZCSERPRT2X2K6Q';
+      const obsDb = {} as D1Database;
+      const database = {} as D1Database;
+      const res = await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody([validEntry({ incidentId })]),
+        },
+        createEnv({ DATABASE: database, OBSERVABILITY_DATABASE: obsDb })
+      );
+
+      expect(res.status).toBe(204);
+      expect(mockEnsurePendingIncidents).toHaveBeenCalledWith(
+        expect.objectContaining({ DATABASE: database }),
+        [
+          {
+            incidentId,
+            platformErrorId: incidentId,
+            nodeId: 'node-123',
+            workspaceId: 'ws-abc',
+          },
+        ]
+      );
+      expect(mockPersistErrorBatchStrict).toHaveBeenCalledWith(
+        obsDb,
+        [expect.objectContaining({ id: incidentId, source: 'vm-agent', nodeId: 'node-123' })],
+        expect.anything()
+      );
+      expect(mockPersistErrorBatch).not.toHaveBeenCalled();
+    });
+
+    it('does not acknowledge caller-ID delivery when observability persistence fails', async () => {
+      mockPersistErrorBatchStrict.mockRejectedValueOnce(new Error('D1 unavailable'));
+      const res = await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody([validEntry({ incidentId: '01KZ8V0GMXQ4ZCSERPRT2X2K6R' })]),
+        },
+        createEnv({ DATABASE: {} as D1Database, OBSERVABILITY_DATABASE: {} as D1Database })
+      );
+      expect(res.status).toBe(500);
+      expect(mockEnsurePendingIncidents).not.toHaveBeenCalled();
+    });
+
+    it('retains the exact observability row for retry when primary incident metadata fails', async () => {
+      mockEnsurePendingIncidents.mockRejectedValueOnce(new Error('primary D1 unavailable'));
+      const incidentId = '01KZ8V0GMXQ4ZCSERPRT2X2K6T';
+      const res = await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody([validEntry({ incidentId })]),
+        },
+        createEnv({ DATABASE: {} as D1Database, OBSERVABILITY_DATABASE: {} as D1Database })
+      );
+      expect(res.status).toBe(500);
+      expect(mockPersistErrorBatchStrict).toHaveBeenCalledWith(
+        expect.anything(),
+        [expect.objectContaining({ id: incidentId, message: 'Agent crashed on startup' })],
+        expect.anything()
+      );
+    });
+
+    it('rejects caller-ID delivery when observability storage is unavailable', async () => {
+      const res = await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody([validEntry({ incidentId: '01KZ8V0GMXQ4ZCSERPRT2X2K6S' })]),
+        },
+        createEnv({ DATABASE: {} as D1Database })
+      );
+      expect(res.status).toBe(500);
+      expect(mockPersistErrorBatchStrict).not.toHaveBeenCalled();
     });
 
     it('should accept multiple entries', async () => {
@@ -159,11 +266,15 @@ describe('VM Agent Errors Route', () => {
         validEntry({ message: 'Error 3', level: 'warn' }),
       ];
 
-      const res = await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody(entries),
-      }, createEnv());
+      const res = await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       expect(res.status).toBe(204);
     });
@@ -171,16 +282,17 @@ describe('VM Agent Errors Route', () => {
     it('should log each entry via console.error with [vm-agent-error] prefix', async () => {
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      const entries = [
-        validEntry({ message: 'Error A' }),
-        validEntry({ message: 'Error B' }),
-      ];
+      const entries = [validEntry({ message: 'Error A' }), validEntry({ message: 'Error B' })];
 
-      await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody(entries),
-      }, createEnv());
+      await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       // Logger emits a single JSON string per call
       const firstEntry = JSON.parse(spy.mock.calls[0][0] as string);
@@ -201,15 +313,25 @@ describe('VM Agent Errors Route', () => {
     it('should include nodeId in log output', async () => {
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody([validEntry()]),
-      }, createEnv());
+      await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody([validEntry()]),
+        },
+        createEnv()
+      );
 
       // Logger emits a single JSON string; find the vm_agent_error log entry
       const loggedEntry = spy.mock.calls
-        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .map((call) => {
+          try {
+            return JSON.parse(call[0] as string);
+          } catch {
+            return null;
+          }
+        })
         .find((entry) => entry?.event === 'vm_agent_error');
       expect(loggedEntry).toBeDefined();
       expect(loggedEntry!.nodeId).toBe('node-123');
@@ -218,21 +340,29 @@ describe('VM Agent Errors Route', () => {
     });
 
     it('should return 204 for empty batch', async () => {
-      const res = await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody([]),
-      }, createEnv());
+      const res = await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody([]),
+        },
+        createEnv()
+      );
 
       expect(res.status).toBe(204);
     });
 
     it('should return 400 for invalid JSON', async () => {
-      const res = await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: { ...authHeaders },
-        body: 'not-json',
-      }, createEnv());
+      const res = await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: { ...authHeaders },
+          body: 'not-json',
+        },
+        createEnv()
+      );
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -240,11 +370,15 @@ describe('VM Agent Errors Route', () => {
     });
 
     it('should return 400 when body lacks errors array', async () => {
-      const res = await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: JSON.stringify({ data: [] }),
-      }, createEnv());
+      const res = await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: JSON.stringify({ data: [] }),
+        },
+        createEnv()
+      );
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -252,15 +386,17 @@ describe('VM Agent Errors Route', () => {
     });
 
     it('should return 400 when batch exceeds max size', async () => {
-      const entries = Array.from({ length: 15 }, (_, i) =>
-        validEntry({ message: `Error ${i}` })
-      );
+      const entries = Array.from({ length: 15 }, (_, i) => validEntry({ message: `Error ${i}` }));
 
-      const res = await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody(entries),
-      }, createEnv());
+      const res = await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       expect(res.status).toBe(400);
       const body = await res.json();
@@ -268,19 +404,36 @@ describe('VM Agent Errors Route', () => {
     });
 
     it('should respect configurable MAX_VM_AGENT_ERROR_BATCH_SIZE', async () => {
-      const entries = Array.from({ length: 5 }, (_, i) =>
-        validEntry({ message: `Error ${i}` })
-      );
+      const entries = Array.from({ length: 5 }, (_, i) => validEntry({ message: `Error ${i}` }));
 
-      const res = await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody(entries),
-      }, createEnv({ MAX_VM_AGENT_ERROR_BATCH_SIZE: '3' }));
+      const res = await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody(entries),
+        },
+        createEnv({ MAX_VM_AGENT_ERROR_BATCH_SIZE: '3' })
+      );
 
       expect(res.status).toBe(400);
       const body = await res.json();
       expect(body.message).toContain('max 3');
+    });
+
+    it('rejects an oversized body even when Content-Length is forged smaller', async () => {
+      const res = await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: { ...authHeaders, 'Content-Length': '1' },
+          body: makeBody([validEntry({ message: 'x'.repeat(1024) })]),
+        },
+        createEnv({ MAX_VM_AGENT_ERROR_BODY_BYTES: '128' })
+      );
+      expect(res.status).toBe(400);
+      expect((await res.json()).message).toContain('Request body too large');
+      expect(mockPersistErrorBatchStrict).not.toHaveBeenCalled();
     });
 
     it('should skip malformed entries without message', async () => {
@@ -291,14 +444,24 @@ describe('VM Agent Errors Route', () => {
         validEntry({ message: 'Valid one' }),
       ];
 
-      await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody(entries),
-      }, createEnv());
+      await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       const vmAgentCalls = spy.mock.calls
-        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .map((call) => {
+          try {
+            return JSON.parse(call[0] as string);
+          } catch {
+            return null;
+          }
+        })
         .filter((entry) => entry?.event === 'vm_agent_error');
       expect(vmAgentCalls.length).toBe(1);
       expect(vmAgentCalls[0].message).toBe('Valid one');
@@ -314,14 +477,24 @@ describe('VM Agent Errors Route', () => {
         validEntry({ message: 'Has source' }),
       ];
 
-      await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody(entries),
-      }, createEnv());
+      await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       const vmAgentCalls = spy.mock.calls
-        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .map((call) => {
+          try {
+            return JSON.parse(call[0] as string);
+          } catch {
+            return null;
+          }
+        })
         .filter((entry) => entry?.event === 'vm_agent_error');
       expect(vmAgentCalls.length).toBe(1);
       expect(vmAgentCalls[0].message).toBe('Has source');
@@ -335,17 +508,70 @@ describe('VM Agent Errors Route', () => {
       const longMessage = 'x'.repeat(3000);
       const entries = [validEntry({ message: longMessage })];
 
-      await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody(entries),
-      }, createEnv());
+      await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       const vmAgentCalls = spy.mock.calls
-        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .map((call) => {
+          try {
+            return JSON.parse(call[0] as string);
+          } catch {
+            return null;
+          }
+        })
         .filter((entry) => entry?.event === 'vm_agent_error');
       const loggedMessage = vmAgentCalls[0].message as string;
       expect(loggedMessage.length).toBeLessThanOrEqual(2048 + 3); // +3 for '...'
+
+      spy.mockRestore();
+    });
+
+    it('uses operator-configured diagnostic field limits', async () => {
+      const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const obsDb = {} as D1Database;
+
+      await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody([
+            validEntry({
+              message: 'message-too-long',
+              source: 'source-too-long',
+              stack: 'stack-too-long',
+            }),
+          ]),
+        },
+        createEnv({
+          OBSERVABILITY_DATABASE: obsDb,
+          OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH: '4',
+          MAX_VM_AGENT_ERROR_SOURCE_LENGTH: '5',
+          OBSERVABILITY_ERROR_STACK_MAX_LENGTH: '6',
+        })
+      );
+
+      expect(mockPersistErrorBatch).toHaveBeenCalledWith(
+        obsDb,
+        [
+          expect.objectContaining({
+            message: 'mess...',
+            stack: 'stack-...',
+          }),
+        ],
+        expect.anything()
+      );
+      const vmAgentCall = spy.mock.calls
+        .map((call) => JSON.parse(call[0] as string))
+        .find((entry) => entry.event === 'vm_agent_error');
+      expect(vmAgentCall.source).toBe('sourc...');
 
       spy.mockRestore();
     });
@@ -356,24 +582,36 @@ describe('VM Agent Errors Route', () => {
 
       const entries = [validEntry({ level: 'info', message: 'ACP NewSession succeeded' })];
 
-      await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody(entries),
-      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+      await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody(entries),
+        },
+        createEnv({ OBSERVABILITY_DATABASE: mockObsDb })
+      );
 
       const vmAgentCalls = spy.mock.calls
-        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .map((call) => {
+          try {
+            return JSON.parse(call[0] as string);
+          } catch {
+            return null;
+          }
+        })
         .filter((entry) => entry?.event === 'vm_agent_error');
       const loggedLevel = vmAgentCalls[0].level;
       expect(loggedLevel).toBe('info');
 
       const persistedInput = mockPersistErrorBatch.mock.calls[0][1][0];
-      expect(persistedInput).toEqual(expect.objectContaining({
-        level: 'info',
-        message: 'ACP NewSession succeeded',
-        source: 'vm-agent',
-      }));
+      expect(persistedInput).toEqual(
+        expect.objectContaining({
+          level: 'info',
+          message: 'ACP NewSession succeeded',
+          source: 'vm-agent',
+        })
+      );
 
       spy.mockRestore();
     });
@@ -383,14 +621,24 @@ describe('VM Agent Errors Route', () => {
 
       const entries = [validEntry({ level: 'warn', message: 'ACP SetSessionMode failed' })];
 
-      await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody(entries),
-      }, createEnv());
+      await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       const vmAgentCalls = spy.mock.calls
-        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .map((call) => {
+          try {
+            return JSON.parse(call[0] as string);
+          } catch {
+            return null;
+          }
+        })
         .filter((entry) => entry?.event === 'vm_agent_error');
       const loggedLevel = vmAgentCalls[0].level;
       expect(loggedLevel).toBe('warn');
@@ -404,14 +652,24 @@ describe('VM Agent Errors Route', () => {
 
       const entries = [validEntry({ level: 'critical' })];
 
-      await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody(entries),
-      }, createEnv());
+      await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       const vmAgentCalls = spy.mock.calls
-        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .map((call) => {
+          try {
+            return JSON.parse(call[0] as string);
+          } catch {
+            return null;
+          }
+        })
         .filter((entry) => entry?.event === 'vm_agent_error');
       const loggedLevel = vmAgentCalls[0].level;
       expect(loggedLevel).toBe('error');
@@ -425,14 +683,24 @@ describe('VM Agent Errors Route', () => {
       const ctx = { step: 'agent_crash', exitCode: 127 };
       const entries = [validEntry({ workspaceId: 'ws-xyz', context: ctx })];
 
-      await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody(entries),
-      }, createEnv());
+      await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       const vmAgentCalls = spy.mock.calls
-        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .map((call) => {
+          try {
+            return JSON.parse(call[0] as string);
+          } catch {
+            return null;
+          }
+        })
         .filter((entry) => entry?.event === 'vm_agent_error');
       const logged = vmAgentCalls[0];
       expect(logged.workspaceId).toBe('ws-xyz');
@@ -446,14 +714,24 @@ describe('VM Agent Errors Route', () => {
 
       const entries = [null, 'string', 42, validEntry()];
 
-      await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody(entries),
-      }, createEnv());
+      await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody(entries),
+        },
+        createEnv()
+      );
 
       const vmAgentCalls = spy.mock.calls
-        .map((call) => { try { return JSON.parse(call[0] as string); } catch { return null; } })
+        .map((call) => {
+          try {
+            return JSON.parse(call[0] as string);
+          } catch {
+            return null;
+          }
+        })
         .filter((entry) => entry?.event === 'vm_agent_error');
       expect(vmAgentCalls.length).toBe(1);
 
@@ -470,11 +748,15 @@ describe('VM Agent Errors Route', () => {
 
       const entries = [validEntry({ message: 'D1 vm-agent test' })];
 
-      await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody(entries),
-      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+      await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody(entries),
+        },
+        createEnv({ OBSERVABILITY_DATABASE: mockObsDb })
+      );
 
       expect(mockPersistErrorBatch).toHaveBeenCalledTimes(1);
       expect(mockPersistErrorBatch).toHaveBeenCalledWith(
@@ -496,11 +778,15 @@ describe('VM Agent Errors Route', () => {
     it('should NOT call persistErrorBatch when OBSERVABILITY_DATABASE is not set', async () => {
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
-      await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody([validEntry()]),
-      }, createEnv()); // No OBSERVABILITY_DATABASE
+      await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody([validEntry()]),
+        },
+        createEnv()
+      ); // No OBSERVABILITY_DATABASE
 
       expect(mockPersistErrorBatch).not.toHaveBeenCalled();
 
@@ -511,11 +797,15 @@ describe('VM Agent Errors Route', () => {
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const mockObsDb = {} as D1Database;
 
-      await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody([validEntry()]),
-      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+      await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody([validEntry()]),
+        },
+        createEnv({ OBSERVABILITY_DATABASE: mockObsDb })
+      );
 
       const persistedInput = mockPersistErrorBatch.mock.calls[0][1][0];
       expect(persistedInput.nodeId).toBe('node-123');
@@ -527,11 +817,15 @@ describe('VM Agent Errors Route', () => {
       const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const mockObsDb = {} as D1Database;
 
-      await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody([validEntry({ workspaceId: 'ws-abc' })]),
-      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+      await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody([validEntry({ workspaceId: 'ws-abc' })]),
+        },
+        createEnv({ OBSERVABILITY_DATABASE: mockObsDb })
+      );
 
       const persistedInput = mockPersistErrorBatch.mock.calls[0][1][0];
       expect(persistedInput.workspaceId).toBe('ws-abc');
@@ -544,15 +838,47 @@ describe('VM Agent Errors Route', () => {
       mockPersistErrorBatch.mockRejectedValueOnce(new Error('D1 down'));
       const mockObsDb = {} as D1Database;
 
-      const res = await app.request('/api/nodes/node-123/errors', {
-        method: 'POST',
-        headers: authHeaders,
-        body: makeBody([validEntry()]),
-      }, createEnv({ OBSERVABILITY_DATABASE: mockObsDb }));
+      const res = await app.request(
+        '/api/nodes/node-123/errors',
+        {
+          method: 'POST',
+          headers: authHeaders,
+          body: makeBody([validEntry()]),
+        },
+        createEnv({ OBSERVABILITY_DATABASE: mockObsDb })
+      );
 
       expect(res.status).toBe(204);
 
       spy.mockRestore();
+    });
+  });
+
+  describe('POST /api/nodes/:id/diagnostic-incidents/:incidentId/artifacts', () => {
+    it('rejects a forged small Content-Length before registration storage', async () => {
+      const incidentId = '01KZ8V0GMXQ4ZCSERPRT2X2K6Q';
+      const body = JSON.stringify({
+        artifactId: `${incidentId}-safe`,
+        kind: 'safe-vm-incident-v1',
+        contentType: 'application/gzip',
+        sizeBytes: 10,
+        checksumSha256: 'a'.repeat(64),
+        manifest: { version: 1, incidentId, padding: 'x'.repeat(512) },
+        preview: {},
+        status: 'ready',
+      });
+      const res = await app.request(
+        `/api/nodes/node-123/diagnostic-incidents/${incidentId}/artifacts`,
+        {
+          method: 'POST',
+          headers: { ...authHeaders, 'Content-Length': '1' },
+          body,
+        },
+        createEnv({ VM_INCIDENT_REGISTRATION_MAX_BYTES: '128' })
+      );
+      expect(res.status).toBe(400);
+      expect((await res.json()).message).toContain('registration size');
+      expect(mockRegisterDiagnosticArtifact).not.toHaveBeenCalled();
     });
   });
 });

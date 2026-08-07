@@ -422,7 +422,8 @@ describe('node resource deletion services', () => {
         level: 'error',
         nodeId: 'node-1',
         userId: 'user-1',
-      })
+      }),
+      expect.anything()
     );
   });
 });

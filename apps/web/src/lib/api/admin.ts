@@ -19,8 +19,18 @@ import type {
   UserRole,
   UserStatus,
 } from '@simple-agent-manager/shared';
+import { DEFAULT_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES } from '@simple-agent-manager/shared';
 
 import { API_URL, request } from './client';
+
+const parsedDiagnosisEventMaxPages = Number.parseInt(
+  import.meta.env.VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES ?? '',
+  10
+);
+const diagnosisEventMaxPages =
+  Number.isSafeInteger(parsedDiagnosisEventMaxPages) && parsedDiagnosisEventMaxPages > 0
+    ? parsedDiagnosisEventMaxPages
+    : DEFAULT_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES;
 
 // =============================================================================
 // Admin
@@ -77,9 +87,7 @@ export interface AdminErrorsFilter {
   cursor?: string;
 }
 
-export async function fetchAdminErrors(
-  filter?: AdminErrorsFilter
-): Promise<ErrorListResponse> {
+export async function fetchAdminErrors(filter?: AdminErrorsFilter): Promise<ErrorListResponse> {
   const params = new URLSearchParams();
   if (filter?.source && filter.source !== 'all') params.set('source', filter.source);
   if (filter?.level && filter.level !== 'all') params.set('level', filter.level);
@@ -90,18 +98,14 @@ export async function fetchAdminErrors(
   if (filter?.cursor) params.set('cursor', filter.cursor);
 
   const qs = params.toString();
-  return request<ErrorListResponse>(
-    `/api/admin/observability/errors${qs ? `?${qs}` : ''}`
-  );
+  return request<ErrorListResponse>(`/api/admin/observability/errors${qs ? `?${qs}` : ''}`);
 }
 
 export async function fetchAdminHealth(): Promise<HealthSummary> {
   return request<HealthSummary>('/api/admin/observability/health');
 }
 
-export async function fetchAdminErrorTrends(
-  range?: string
-): Promise<ErrorTrendResponse> {
+export async function fetchAdminErrorTrends(range?: string): Promise<ErrorTrendResponse> {
   const params = range ? `?range=${range}` : '';
   return request<ErrorTrendResponse>(`/api/admin/observability/trends${params}`);
 }
@@ -125,9 +129,7 @@ export function getAdminLogStreamUrl(): string {
   return `${base}/api/admin/observability/logs/stream`;
 }
 
-export async function queryAdminLogs(
-  params: AdminLogQueryParams
-): Promise<LogQueryResponse> {
+export async function queryAdminLogs(params: AdminLogQueryParams): Promise<LogQueryResponse> {
   return request<LogQueryResponse>('/api/admin/observability/logs/query', {
     method: 'POST',
     body: JSON.stringify(params),
@@ -143,9 +145,11 @@ export async function runAdminDebugDiagnosis(
   });
 }
 
-export async function fetchAdminDebugDiagnoses(
-  filter: { errorId?: string; startTime?: string; endTime?: string }
-): Promise<DebugDiagnosisListResponse> {
+export async function fetchAdminDebugDiagnoses(filter: {
+  errorId?: string;
+  startTime?: string;
+  endTime?: string;
+}): Promise<DebugDiagnosisListResponse> {
   const params = new URLSearchParams();
   if (filter.errorId) params.set('errorId', filter.errorId);
   if (filter.startTime) params.set('startTime', filter.startTime);
@@ -159,32 +163,100 @@ export async function fetchAdminDebugProjects(): Promise<DebugProjectOptionsResp
   return request<DebugProjectOptionsResponse>('/api/admin/observability/debug/projects');
 }
 
-export async function fetchAdminDebugDiagnosisRun(runId: string, cursor = 0): Promise<DebugDiagnosisRunDetailResponse> {
-  return request<DebugDiagnosisRunDetailResponse>('/api/admin/observability/diagnosis-runs/' + encodeURIComponent(runId) + '?cursor=' + cursor);
+export async function fetchAdminDebugDiagnosisRun(
+  runId: string,
+  cursor = 0
+): Promise<DebugDiagnosisRunDetailResponse> {
+  const detail = await request<DebugDiagnosisRunDetailResponse>(
+    '/api/admin/observability/diagnosis-runs/' + encodeURIComponent(runId) + '?cursor=' + cursor
+  );
+  const events = [...detail.events];
+  const seenCursors = new Set<number>([cursor]);
+  let nextCursor = detail.nextCursor;
+  let pages = 1;
+  while (nextCursor !== null) {
+    const pageCursor = nextCursor;
+    if (seenCursors.has(pageCursor) || pages >= diagnosisEventMaxPages) {
+      throw new Error('Diagnosis event pagination did not make bounded forward progress');
+    }
+    seenCursors.add(pageCursor);
+    const page = await fetchAdminDebugDiagnosisRunEvents(runId, pageCursor);
+    if (page.events.some((event) => event.sequence <= pageCursor)) {
+      throw new Error('Diagnosis event pagination returned a non-monotonic sequence');
+    }
+    events.push(...page.events);
+    nextCursor = page.nextCursor;
+    pages++;
+  }
+  return { ...detail, events, nextCursor: null };
 }
 
-export async function fetchAdminDebugDiagnosisRunEvents(runId: string, cursor = 0): Promise<DebugDiagnosisRunEventsResponse> {
-  return request<DebugDiagnosisRunEventsResponse>('/api/admin/observability/diagnosis-runs/' + encodeURIComponent(runId) + '/events?cursor=' + cursor);
+export async function fetchAdminDebugDiagnosisRunEvents(
+  runId: string,
+  cursor = 0
+): Promise<DebugDiagnosisRunEventsResponse> {
+  return request<DebugDiagnosisRunEventsResponse>(
+    '/api/admin/observability/diagnosis-runs/' +
+      encodeURIComponent(runId) +
+      '/events?cursor=' +
+      cursor
+  );
+}
+
+export async function downloadAdminDiagnosticArtifact(
+  errorId: string,
+  artifactId: string
+): Promise<void> {
+  const response = await fetch(
+    `${API_URL}/api/admin/observability/errors/${encodeURIComponent(
+      errorId
+    )}/incident/artifacts/${encodeURIComponent(artifactId)}/download`,
+    { credentials: 'include' }
+  );
+  if (!response.ok) {
+    throw new Error(`Automatic evidence download failed (HTTP ${response.status})`);
+  }
+  const blob = await response.blob();
+  const disposition = response.headers.get('content-disposition');
+  const filename =
+    disposition?.match(/filename="([^"]+)"/)?.[1] ?? `vm-incident-${artifactId}.tar.gz`;
+  const href = URL.createObjectURL(blob);
+  try {
+    const link = document.createElement('a');
+    link.href = href;
+    link.download = filename;
+    link.click();
+  } finally {
+    URL.revokeObjectURL(href);
+  }
 }
 
 export async function cancelAdminDebugDiagnosisRun(runId: string): Promise<{ accepted: boolean }> {
-  return request('/api/admin/observability/diagnosis-runs/' + encodeURIComponent(runId) + '/cancel', { method: 'POST' });
+  return request(
+    '/api/admin/observability/diagnosis-runs/' + encodeURIComponent(runId) + '/cancel',
+    { method: 'POST' }
+  );
 }
 
-export async function retryAdminDebugDiagnosisRun(runId: string): Promise<RunDebugDiagnosisResponse> {
-  return request<RunDebugDiagnosisResponse>(`/api/admin/observability/diagnosis-runs/${runId}/retry`, {
-    method: 'POST',
-  });
+export async function retryAdminDebugDiagnosisRun(
+  runId: string
+): Promise<RunDebugDiagnosisResponse> {
+  return request<RunDebugDiagnosisResponse>(
+    `/api/admin/observability/diagnosis-runs/${encodeURIComponent(runId)}/retry`,
+    {
+      method: 'POST',
+    }
+  );
 }
 
 export async function saveAdminDebugDiagnosisAsIdea(
   diagnosisId: string,
   body: { projectId: string; title?: string }
 ): Promise<{ ideaId: string }> {
-  return request<{ ideaId: string }>(
-    `/api/admin/observability/diagnoses/${diagnosisId}/idea`,
-    { method: 'POST', body: JSON.stringify(body) }
-  );
+  return request<{ ideaId: string }>(`/api/admin/observability/diagnoses/${diagnosisId}/idea`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
 }
 
 // =============================================================================
@@ -197,7 +269,12 @@ export interface AnalyticsDauResponse {
 }
 
 export interface AnalyticsEventsResponse {
-  events: Array<{ event_name: string; count: number; unique_users: number; avg_response_ms: number }>;
+  events: Array<{
+    event_name: string;
+    count: number;
+    unique_users: number;
+    avg_response_ms: number;
+  }>;
   period: string;
 }
 
@@ -242,9 +319,13 @@ export interface AnalyticsRetentionResponse {
   truncated?: boolean;
 }
 
-export async function fetchAnalyticsFeatureAdoption(period?: string): Promise<AnalyticsFeatureAdoptionResponse> {
+export async function fetchAnalyticsFeatureAdoption(
+  period?: string
+): Promise<AnalyticsFeatureAdoptionResponse> {
   const params = period ? `?period=${period}` : '';
-  return request<AnalyticsFeatureAdoptionResponse>(`/api/admin/analytics/feature-adoption${params}`);
+  return request<AnalyticsFeatureAdoptionResponse>(
+    `/api/admin/analytics/feature-adoption${params}`
+  );
 }
 
 export async function fetchAnalyticsGeo(period?: string): Promise<AnalyticsGeoResponse> {
@@ -280,7 +361,9 @@ export interface AnalyticsWebsiteTrafficResponse {
   period: string;
 }
 
-export async function fetchAnalyticsWebsiteTraffic(period?: string): Promise<AnalyticsWebsiteTrafficResponse> {
+export async function fetchAnalyticsWebsiteTraffic(
+  period?: string
+): Promise<AnalyticsWebsiteTrafficResponse> {
   const params = period ? `?period=${period}` : '';
   return request<AnalyticsWebsiteTrafficResponse>(`/api/admin/analytics/website-traffic${params}`);
 }
@@ -476,7 +559,7 @@ export async function fetchAdminTrialsConfig(): Promise<AdminTrialsConfigRespons
 }
 
 export async function updateAdminTrialsConfig(
-  enabled: boolean,
+  enabled: boolean
 ): Promise<AdminTrialsConfigResponse> {
   return request<AdminTrialsConfigResponse>('/api/admin/trials/config', {
     method: 'PATCH',
@@ -493,7 +576,7 @@ export async function listPlatformCredentials(): Promise<ListPlatformCredentials
 }
 
 export async function createPlatformCredential(
-  data: CreatePlatformCredentialRequest,
+  data: CreatePlatformCredentialRequest
 ): Promise<PlatformCredentialResponse> {
   return request<PlatformCredentialResponse>('/api/admin/platform-credentials', {
     method: 'POST',
@@ -503,7 +586,7 @@ export async function createPlatformCredential(
 
 export async function updatePlatformCredential(
   id: string,
-  data: UpdatePlatformCredentialRequest,
+  data: UpdatePlatformCredentialRequest
 ): Promise<PlatformCredentialResponse> {
   return request<PlatformCredentialResponse>(`/api/admin/platform-credentials/${id}`, {
     method: 'PATCH',
@@ -584,7 +667,7 @@ export async function fetchAdminPlatformConfig(): Promise<PlatformConfigStatusRe
 }
 
 export async function updateAdminPlatformConfig(
-  config: PlatformIntegrationConfigInput,
+  config: PlatformIntegrationConfigInput
 ): Promise<PlatformConfigStatusResponse> {
   return request<PlatformConfigStatusResponse>('/api/admin/platform-config', {
     method: 'PUT',
@@ -596,7 +679,10 @@ export async function updateAdminPlatformConfig(
 // Admin Compute Usage
 // =============================================================================
 
-export type { AdminComputeUsageResponse, AdminUserDetailedUsage } from '@simple-agent-manager/shared';
+export type {
+  AdminComputeUsageResponse,
+  AdminUserDetailedUsage,
+} from '@simple-agent-manager/shared';
 
 export async function fetchAdminComputeUsage(): Promise<
   import('@simple-agent-manager/shared').AdminComputeUsageResponse
@@ -605,7 +691,7 @@ export async function fetchAdminComputeUsage(): Promise<
 }
 
 export async function fetchAdminUserComputeUsage(
-  userId: string,
+  userId: string
 ): Promise<import('@simple-agent-manager/shared').AdminUserDetailedUsage> {
   return request(`/api/admin/usage/compute/${userId}`);
 }
@@ -614,7 +700,10 @@ export async function fetchAdminUserComputeUsage(
 // Admin Node Usage
 // =============================================================================
 
-export type { AdminNodeUsageResponse, AdminUserNodeDetailedUsage } from '@simple-agent-manager/shared';
+export type {
+  AdminNodeUsageResponse,
+  AdminUserNodeDetailedUsage,
+} from '@simple-agent-manager/shared';
 
 export async function fetchAdminNodeUsage(): Promise<
   import('@simple-agent-manager/shared').AdminNodeUsageResponse
@@ -623,7 +712,7 @@ export async function fetchAdminNodeUsage(): Promise<
 }
 
 export async function fetchAdminUserNodeUsage(
-  userId: string,
+  userId: string
 ): Promise<import('@simple-agent-manager/shared').AdminUserNodeDetailedUsage> {
   return request(`/api/admin/usage/nodes/${userId}`);
 }
@@ -646,7 +735,7 @@ export async function fetchAdminDefaultQuota(): Promise<
 }
 
 export async function updateAdminDefaultQuota(
-  monthlyVcpuHoursLimit: number | null,
+  monthlyVcpuHoursLimit: number | null
 ): Promise<import('@simple-agent-manager/shared').AdminDefaultQuotaResponse> {
   return request('/api/admin/quotas/default', {
     method: 'PUT',
@@ -661,15 +750,21 @@ export async function fetchAdminUserQuotas(): Promise<
 }
 
 export async function fetchAdminUserQuota(
-  userId: string,
+  userId: string
 ): Promise<import('@simple-agent-manager/shared').AdminUserResolvedQuota> {
   return request(`/api/admin/quotas/users/${userId}`);
 }
 
 export async function updateAdminUserQuota(
   userId: string,
-  monthlyVcpuHoursLimit: number | null,
-): Promise<{ userId: string; monthlyVcpuHoursLimit: number | null; source: string; currentUsage: number; remaining: number | null }> {
+  monthlyVcpuHoursLimit: number | null
+): Promise<{
+  userId: string;
+  monthlyVcpuHoursLimit: number | null;
+  source: string;
+  currentUsage: number;
+  remaining: number | null;
+}> {
   return request(`/api/admin/quotas/users/${userId}`, {
     method: 'PUT',
     body: JSON.stringify({ monthlyVcpuHoursLimit }),

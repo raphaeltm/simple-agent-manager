@@ -1,5 +1,7 @@
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
+import type { Env } from '../../../src/env';
+
 // Mock the observability service before importing logger
 const mockPersistError = vi.fn().mockResolvedValue(undefined);
 vi.mock('../../../src/services/observability', () => ({
@@ -23,7 +25,10 @@ describe('Instrumented Logger', () => {
   });
 
   it('should write error-level entries to D1 when db is provided', async () => {
-    const logger = createInstrumentedLogger(mockDb, mockWaitUntil);
+    const env = {
+      OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH: '64',
+    } as Env;
+    const logger = createInstrumentedLogger(mockDb, mockWaitUntil, env);
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
     logger.error('test_event', { detail: 'value' });
@@ -34,6 +39,7 @@ describe('Instrumented Logger', () => {
     // Should persist to D1 via waitUntil
     await waitForPersistCall();
     expect(mockPersistError).toHaveBeenCalledTimes(1);
+    expect(mockPersistError).toHaveBeenCalledWith(mockDb, expect.any(Object), env);
 
     errorSpy.mockRestore();
   });
@@ -106,7 +112,8 @@ describe('Instrumented Logger', () => {
         level: 'error',
         message: 'api_failure',
         context: expect.objectContaining({ userId: 'user-1', path: '/api/test', authorization: '[REDACTED]' }),
-      })
+      }),
+      undefined
     );
 
     errorSpy.mockRestore();
@@ -126,7 +133,8 @@ describe('Instrumented Logger', () => {
         level: 'error',
         message: 'node_provision_failed',
         context: expect.objectContaining({ nodeId: 'node-1', reason: 'timeout' }),
-      })
+      }),
+      undefined
     );
 
     errorSpy.mockRestore();
@@ -143,7 +151,8 @@ describe('Instrumented Logger', () => {
       mockDb,
       expect.objectContaining({
         context: null,
-      })
+      }),
+      undefined
     );
 
     errorSpy.mockRestore();

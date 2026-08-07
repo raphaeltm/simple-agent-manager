@@ -13,11 +13,11 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { extractBearerToken } from '../lib/auth-helpers';
 import { log } from '../lib/logger';
-import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireNodeOwnership } from '../middleware/node-auth';
-import { jsonValidator, NodeErrorBatchSchema, NodeHeartbeatSchema } from '../schemas';
+import { jsonValidator, NodeHeartbeatSchema } from '../schemas';
 import {
   buildObservedDeploymentUpdate,
   reconcileDeploymentReleaseStatuses,
@@ -35,10 +35,10 @@ import {
   nodeStatusBlocksTokenRefresh,
   verifyNodeCallbackAuth,
 } from '../services/node-callback-auth';
-import { persistErrorBatch, type PersistErrorInput } from '../services/observability';
 import { issueNodeOriginCertificate } from '../services/origin-ca-certificates';
 import * as projectDataService from '../services/project-data';
 import { resolveWorkspaceGitSourceByProjectId } from '../services/workspace-git-source';
+import { nodeDiagnosticIncidentRoutes } from './node-diagnostic-incidents';
 
 const nodeLifecycleRoutes = new Hono<{ Bindings: Env }>();
 const NODE_DNS_ERROR_MESSAGE_MAX_LENGTH = 500;
@@ -653,141 +653,6 @@ nodeLifecycleRoutes.post('/:id/heartbeat', jsonValidator(NodeHeartbeatSchema), a
   return c.json(response);
 });
 
-/** Default max body size for VM agent error reports: 32 KB */
-const DEFAULT_MAX_VM_ERROR_BODY_BYTES = 32_768;
-
-/** Default max batch size for VM agent error reports */
-const DEFAULT_MAX_VM_ERROR_BATCH_SIZE = 10;
-
-/** Truncation limits for VM agent error string fields */
-const MAX_VM_ERROR_MESSAGE_LENGTH = 2048;
-const MAX_VM_ERROR_SOURCE_LENGTH = 256;
-const MAX_VM_ERROR_STACK_LENGTH = 4096;
-
-type VMAgentReportLevel = 'error' | 'warn' | 'info';
-
-const VALID_VM_ERROR_LEVELS = new Set<string>(['error', 'warn', 'info']);
-
-function isVMAgentReportLevel(value: unknown): value is VMAgentReportLevel {
-  return typeof value === 'string' && VALID_VM_ERROR_LEVELS.has(value);
-}
-
-function normalizeVMAgentReportLevel(value: unknown): VMAgentReportLevel {
-  return isVMAgentReportLevel(value) ? value : 'error';
-}
-
-function truncateString(value: string, maxLength: number): string {
-  return value.length > maxLength ? value.slice(0, maxLength) + '...' : value;
-}
-
-/**
- * POST /:id/errors
- *
- * Accepts a batch of VM agent error entries and logs each to
- * Workers observability via structured logger. Uses callback JWT auth
- * (same as heartbeat/ready). Returns 204.
- *
- * Body: { errors: VMAgentErrorEntry[] }
- */
-nodeLifecycleRoutes.post('/:id/errors', jsonValidator(NodeErrorBatchSchema), async (c) => {
-  const nodeId = c.req.param('id');
-  await verifyNodeCallbackAuth(c, nodeId);
-
-  const maxBodyBytes = parseInt(
-    c.env.MAX_VM_AGENT_ERROR_BODY_BYTES || String(DEFAULT_MAX_VM_ERROR_BODY_BYTES),
-    10
-  );
-  const maxBatchSize = parseInt(
-    c.env.MAX_VM_AGENT_ERROR_BATCH_SIZE || String(DEFAULT_MAX_VM_ERROR_BATCH_SIZE),
-    10
-  );
-
-  // Check Content-Length before reading body
-  const contentLength = parseInt(c.req.header('Content-Length') || '0', 10);
-  if (contentLength > maxBodyBytes) {
-    throw errors.badRequest(`Request body too large (max ${maxBodyBytes} bytes)`);
-  }
-
-  const body = c.req.valid('json');
-  const entries = body.errors;
-
-  if (entries.length === 0) {
-    return c.body(null, 204);
-  }
-
-  if (entries.length > maxBatchSize) {
-    throw errors.badRequest(`Batch too large (max ${maxBatchSize} entries)`);
-  }
-
-  // Collect validated entries for D1 persistence
-  const persistInputs: PersistErrorInput[] = [];
-
-  // Log each entry individually for CF observability searchability
-  for (const entry of entries) {
-    let e: Record<string, unknown>;
-    try {
-      e = expectJsonRecord(entry, 'node-lifecycle.error.entry');
-    } catch {
-      continue;
-    }
-
-    // Validate required fields
-    const message = typeof e.message === 'string' ? e.message : null;
-    const source = typeof e.source === 'string' ? e.source : null;
-
-    if (!message || !source) continue; // Skip malformed entries
-
-    // VM agent reports include both failures and operational lifecycle entries.
-    // Preserve the agent's intentional severity: info for successful progress,
-    // warn for degraded/non-fatal behavior, error for user-impacting failures.
-    const level = normalizeVMAgentReportLevel(e.level);
-
-    log[level]('vm_agent_error', {
-      level,
-      message: truncateString(message, MAX_VM_ERROR_MESSAGE_LENGTH),
-      source: truncateString(source, MAX_VM_ERROR_SOURCE_LENGTH),
-      stack:
-        typeof e.stack === 'string' ? truncateString(e.stack, MAX_VM_ERROR_STACK_LENGTH) : null,
-      workspaceId: typeof e.workspaceId === 'string' ? e.workspaceId : null,
-      timestamp: typeof e.timestamp === 'string' ? e.timestamp : null,
-      context: maybeJsonRecord(e.context),
-      nodeId,
-    });
-
-    // Collect for D1 persistence
-    persistInputs.push({
-      source: 'vm-agent',
-      level: level as PersistErrorInput['level'],
-      message,
-      stack: typeof e.stack === 'string' ? e.stack : null,
-      context: maybeJsonRecord(e.context),
-      nodeId,
-      workspaceId: typeof e.workspaceId === 'string' ? e.workspaceId : null,
-      timestamp:
-        typeof e.timestamp === 'string'
-          ? new Date(e.timestamp).getTime() || Date.now()
-          : Date.now(),
-    });
-  }
-
-  // Persist to observability D1 (fire-and-forget, fail-silent)
-  if (persistInputs.length > 0 && c.env.OBSERVABILITY_DATABASE) {
-    const promise = persistErrorBatch(c.env.OBSERVABILITY_DATABASE, persistInputs, c.env).catch(
-      (e) => {
-        log.error('observability.persist_error_batch_failed', {
-          count: persistInputs.length,
-          error: String(e),
-        });
-      }
-    );
-    try {
-      c.executionCtx.waitUntil(promise);
-    } catch {
-      /* no exec ctx (e.g. tests) */
-    }
-  }
-
-  return c.body(null, 204);
-});
+nodeLifecycleRoutes.route('/', nodeDiagnosticIncidentRoutes);
 
 export { nodeLifecycleRoutes };

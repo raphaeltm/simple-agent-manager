@@ -1,8 +1,18 @@
 import * as cloudflare from '@pulumi/cloudflare';
-import { accountId, prefix, r2Location, sessionSnapshotTtlDays, stack } from './config';
+import {
+  accountId,
+  diagnosticIncidentPrefix,
+  diagnosticIncidentTtlDays,
+  prefix,
+  r2Location,
+  sessionSnapshotTtlDays,
+  stack,
+} from './config';
 
 export const SESSION_SNAPSHOT_LIFECYCLE_RULE_ID = 'expire-session-snapshots';
 export const SESSION_SNAPSHOT_R2_PREFIX = 'session-snapshots/';
+export const DIAGNOSTIC_INCIDENT_LIFECYCLE_RULE_ID = 'expire-diagnostic-incidents';
+export const DIAGNOSTIC_INCIDENT_R2_PREFIX = `${diagnosticIncidentPrefix}/`;
 const SECONDS_PER_DAY = 24 * 60 * 60;
 
 export const r2Bucket = new cloudflare.R2Bucket(`${prefix}-r2`, {
@@ -24,6 +34,17 @@ export const r2BucketLifecycle = new cloudflare.R2BucketLifecycle(
         deleteObjectsTransition: {
           condition: {
             maxAge: sessionSnapshotTtlDays * SECONDS_PER_DAY,
+            type: 'Age',
+          },
+        },
+      },
+      {
+        id: DIAGNOSTIC_INCIDENT_LIFECYCLE_RULE_ID,
+        conditions: { prefix: DIAGNOSTIC_INCIDENT_R2_PREFIX },
+        enabled: true,
+        deleteObjectsTransition: {
+          condition: {
+            maxAge: diagnosticIncidentTtlDays * SECONDS_PER_DAY,
             type: 'Age',
           },
         },

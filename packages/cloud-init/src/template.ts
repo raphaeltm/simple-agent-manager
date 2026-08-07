@@ -184,6 +184,30 @@ write_files:
       Environment=DEPLOY_ACME_CA={{ deploy_acme_ca }}
       Environment="DEPLOY_COMPOSE_CMD={{ deploy_compose_cmd }}"
       Environment=DEPLOY_HEALTH_TIMEOUT={{ deploy_health_timeout }}
+      Environment=ERROR_REPORT_FLUSH_INTERVAL={{ error_report_flush_interval }}
+      Environment=ERROR_REPORT_MAX_BATCH_SIZE={{ error_report_max_batch_size }}
+      Environment=ERROR_REPORT_MAX_BATCH_BYTES={{ error_report_max_batch_bytes }}
+      Environment=ERROR_REPORT_MAX_QUEUE_SIZE={{ error_report_max_queue_size }}
+      Environment=ERROR_REPORT_HTTP_TIMEOUT={{ error_report_http_timeout }}
+      Environment=ERROR_REPORT_RETRY_INITIAL={{ error_report_retry_initial }}
+      Environment=ERROR_REPORT_RETRY_MAX={{ error_report_retry_max }}
+      Environment=ERROR_REPORT_MAX_ATTEMPTS={{ error_report_max_attempts }}
+      Environment=ERROR_REPORT_DB_PATH={{ error_report_db_path }}
+      Environment=ERROR_REPORT_DB_BUSY_TIMEOUT={{ error_report_db_busy_timeout }}
+      Environment=ERROR_REPORT_SPOOL_DIR={{ error_report_spool_dir }}
+      Environment=ERROR_REPORT_ARTIFACT_MAX_BYTES={{ error_report_artifact_max_bytes }}
+      Environment=ERROR_REPORT_SPOOL_MAX_BYTES={{ error_report_spool_max_bytes }}
+      Environment=ERROR_REPORT_RETENTION={{ error_report_retention }}
+      Environment=ERROR_REPORT_COLLECTOR_TIMEOUT={{ error_report_collector_timeout }}
+      Environment=ERROR_REPORT_MAX_COLLECTOR_DOCS={{ error_report_max_collector_docs }}
+      Environment=ERROR_REPORT_MAX_DOCUMENT_BYTES={{ error_report_max_document_bytes }}
+      Environment=ERROR_REPORT_MAX_VALUE_DEPTH={{ error_report_max_value_depth }}
+      Environment=ERROR_REPORT_MAX_VALUE_ITEMS={{ error_report_max_value_items }}
+      Environment=ERROR_REPORT_MAX_STRING_BYTES={{ error_report_max_string_bytes }}
+      Environment=ERROR_REPORT_EVENT_LIMIT={{ error_report_event_limit }}
+      Environment=ERROR_REPORT_RESPONSE_MAX_BYTES={{ error_report_response_max_bytes }}
+      Environment=ERROR_REPORT_STORED_ERROR_MAX_BYTES={{ error_report_stored_error_max_bytes }}
+      Environment=ERROR_REPORT_COLLECTOR_CONCURRENCY={{ error_report_collector_concurrency }}
       ExecStart=/usr/local/bin/vm-agent
       Restart=always
       RestartSec=5

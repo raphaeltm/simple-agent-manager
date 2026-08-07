@@ -141,6 +141,88 @@ func TestLoadCallbackTokenEnvFallback(t *testing.T) {
 	}
 }
 
+func TestLoadDurableErrorReportGuardrails(t *testing.T) {
+	persistenceDir := t.TempDir()
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("PERSISTENCE_DB_PATH", filepath.Join(persistenceDir, "state.db"))
+	t.Setenv("ERROR_REPORT_FLUSH_INTERVAL", "11s")
+	t.Setenv("ERROR_REPORT_MAX_BATCH_SIZE", "4")
+	t.Setenv("ERROR_REPORT_MAX_BATCH_BYTES", "12000")
+	t.Setenv("ERROR_REPORT_MAX_QUEUE_SIZE", "44")
+	t.Setenv("ERROR_REPORT_HTTP_TIMEOUT", "12s")
+	t.Setenv("ERROR_REPORT_RETRY_INITIAL", "2s")
+	t.Setenv("ERROR_REPORT_RETRY_MAX", "1m")
+	t.Setenv("ERROR_REPORT_MAX_ATTEMPTS", "7")
+	t.Setenv("ERROR_REPORT_DB_BUSY_TIMEOUT", "750ms")
+	t.Setenv("ERROR_REPORT_ARTIFACT_MAX_BYTES", "4567")
+	t.Setenv("ERROR_REPORT_SPOOL_MAX_BYTES", "8901")
+	t.Setenv("ERROR_REPORT_RETENTION", "2h")
+	t.Setenv("ERROR_REPORT_COLLECTOR_TIMEOUT", "4s")
+	t.Setenv("ERROR_REPORT_MAX_COLLECTOR_DOCS", "5")
+	t.Setenv("ERROR_REPORT_MAX_DOCUMENT_BYTES", "6000")
+	t.Setenv("ERROR_REPORT_MAX_VALUE_DEPTH", "6")
+	t.Setenv("ERROR_REPORT_MAX_VALUE_ITEMS", "77")
+	t.Setenv("ERROR_REPORT_MAX_STRING_BYTES", "888")
+	t.Setenv("ERROR_REPORT_EVENT_LIMIT", "9")
+	t.Setenv("ERROR_REPORT_RESPONSE_MAX_BYTES", "1234")
+	t.Setenv("ERROR_REPORT_STORED_ERROR_MAX_BYTES", "321")
+	t.Setenv("ERROR_REPORT_COLLECTOR_CONCURRENCY", "3")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.ErrorReportFlushInterval != 11*time.Second ||
+		cfg.ErrorReportMaxBatchSize != 4 || cfg.ErrorReportMaxBatchBytes != 12000 ||
+		cfg.ErrorReportMaxQueueSize != 44 || cfg.ErrorReportHTTPTimeout != 12*time.Second ||
+		cfg.ErrorReportRetryInitial != 2*time.Second || cfg.ErrorReportRetryMax != time.Minute ||
+		cfg.ErrorReportMaxAttempts != 7 || cfg.ErrorReportDBBusyTimeout != 750*time.Millisecond ||
+		cfg.ErrorReportArtifactBytes != 4567 ||
+		cfg.ErrorReportSpoolBytes != 8901 || cfg.ErrorReportRetention != 2*time.Hour ||
+		cfg.ErrorReportCollectTimeout != 4*time.Second || cfg.ErrorReportCollectorDocs != 5 ||
+		cfg.ErrorReportDocumentBytes != 6000 || cfg.ErrorReportValueDepth != 6 ||
+		cfg.ErrorReportValueItems != 77 || cfg.ErrorReportStringBytes != 888 ||
+		cfg.ErrorReportEventLimit != 9 || cfg.ErrorReportResponseBytes != 1234 ||
+		cfg.ErrorReportStoredErrBytes != 321 || cfg.ErrorReportCollectorJobs != 3 {
+		t.Fatalf("unexpected durable error report config: %#v", cfg)
+	}
+	if cfg.ErrorReportDBPath != filepath.Join(persistenceDir, "error-reports.db") ||
+		cfg.ErrorReportSpoolDir != filepath.Join(persistenceDir, "diagnostic-incidents") {
+		t.Fatalf("reporter paths did not derive from PERSISTENCE_DB_PATH: db=%q spool=%q",
+			cfg.ErrorReportDBPath, cfg.ErrorReportSpoolDir)
+	}
+}
+
+func TestValidateRejectsUnsafeErrorReportEventLimits(t *testing.T) {
+	cfg := validConfig()
+	cfg.ErrorReportEventLimit = -1
+	if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "ERROR_REPORT_EVENT_LIMIT") {
+		t.Fatalf("error=%v", err)
+	}
+}
+
+func TestValidateRejectsUnsafeErrorReportBounds(t *testing.T) {
+	tests := []struct {
+		name string
+		env  string
+		set  func(*Config)
+	}{
+		{"response bytes", "ERROR_REPORT_RESPONSE_MAX_BYTES", func(cfg *Config) { cfg.ErrorReportResponseBytes = 0 }},
+		{"stored error bytes", "ERROR_REPORT_STORED_ERROR_MAX_BYTES", func(cfg *Config) { cfg.ErrorReportStoredErrBytes = 0 }},
+		{"collector concurrency", "ERROR_REPORT_COLLECTOR_CONCURRENCY", func(cfg *Config) { cfg.ErrorReportCollectorJobs = 0 }},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			cfg := validConfig()
+			test.set(cfg)
+			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), test.env) {
+				t.Fatalf("error=%v", err)
+			}
+		})
+	}
+}
+
 func TestAdditionalFeaturesDefault(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("WORKSPACE_ID", "ws-123")
@@ -782,6 +864,9 @@ func validConfig() *Config {
 		ACPCredentialSyncTimeout:      DefaultACPCredentialSyncTimeout,
 		ACPActivityReportTimeout:      DefaultACPActivityReportTimeout,
 		WorkspaceReadyCallbackTimeout: DefaultWorkspaceReadyCallbackTimeout,
+		ErrorReportResponseBytes:      DefaultErrorReportResponseMaxBytes,
+		ErrorReportStoredErrBytes:     DefaultErrorReportStoredErrorBytes,
+		ErrorReportCollectorJobs:      DefaultErrorReportCollectorWorkers,
 		DevcontainerCachePushTimeout:  DefaultDevcontainerCachePushTimeout,
 		DeployPreflightCommandTimeout: DefaultDeployPreflightCommandTimeout,
 		LogStreamPingWriteTimeout:     DefaultLogStreamPingWriteTimeout,

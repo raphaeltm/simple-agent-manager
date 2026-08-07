@@ -23,9 +23,11 @@
  *
  * Instrumented logger (persists error-level entries to observability D1):
  *   import { createInstrumentedLogger } from '../lib/logger';
- *   const ilog = createInstrumentedLogger(env.OBSERVABILITY_DATABASE, ctx.waitUntil.bind(ctx));
+ *   const ilog = createInstrumentedLogger(env.OBSERVABILITY_DATABASE, ctx.waitUntil.bind(ctx), env);
  *   ilog.error('api_failure', { path: '/api/test' }); // also writes to D1
  */
+
+import type { Env } from '../env';
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
@@ -143,7 +145,8 @@ export function createModuleLogger(module: string): Logger {
  */
 export function createInstrumentedLogger(
   db: D1Database | null,
-  waitUntil: ((promise: Promise<unknown>) => void) | null
+  waitUntil: ((promise: Promise<unknown>) => void) | null,
+  env?: Env
 ): Logger {
   return {
     debug: (event: string, details?: Record<string, unknown>) => emit('debug', event, details),
@@ -156,12 +159,16 @@ export function createInstrumentedLogger(
       if (db && waitUntil) {
         waitUntil(
           import('../services/observability').then(({ persistError }) =>
-            persistError(db, {
-              source: 'api',
-              level: 'error',
-              message: event,
-              context: details ? sanitizeLogDetails(details) : null,
-            })
+            persistError(
+              db,
+              {
+                source: 'api',
+                level: 'error',
+                message: event,
+                context: details ? sanitizeLogDetails(details) : null,
+              },
+              env
+            )
           )
         );
       }

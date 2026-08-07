@@ -9,7 +9,9 @@ function createKv(): KVNamespace {
   const values = new Map<string, string>();
   return {
     get: vi.fn(async (key: string) => values.get(key) ?? null),
-    put: vi.fn(async (key: string, value: string) => { values.set(key, value); }),
+    put: vi.fn(async (key: string, value: string) => {
+      values.set(key, value);
+    }),
   } as unknown as KVNamespace;
 }
 
@@ -37,34 +39,53 @@ describe('runDebugDiagnosis vertical slice', () => {
     `);
     const timestamp = Date.parse('2026-07-29T10:00:00.000Z');
     const canary = 'sk-ant-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
-    observability.prepare(`
+    observability
+      .prepare(
+        `
       INSERT INTO platform_errors
         (id, source, level, message, stack, context, user_id, node_id, workspace_id,
          ip_address, user_agent, timestamp, created_at)
       VALUES (?, 'api', 'error', ?, NULL, ?, 'user-private', NULL, NULL,
               '192.0.2.1', 'private-agent', ?, ?)
-    `).run('err-1', `provider failed with ${canary}`, JSON.stringify({
-      authorization: 'Bearer abcdefghijklmnopqrstuvwxyz',
-    }), timestamp, timestamp);
+    `
+      )
+      .run(
+        'err-1',
+        `provider failed with ${canary}`,
+        JSON.stringify({
+          authorization: 'Bearer abcdefghijklmnopqrstuvwxyz',
+        }),
+        timestamp,
+        timestamp
+      );
 
     const responses = [
       {
-        choices: [{
-          message: {
-            content: null,
-            tool_calls: [{
-              id: 'call-1',
-              type: 'function',
-              function: { name: 'get_recent_errors', arguments: '{}' },
-            }],
+        choices: [
+          {
+            message: {
+              content: null,
+              tool_calls: [
+                {
+                  id: 'call-1',
+                  type: 'function',
+                  function: { name: 'get_recent_errors', arguments: '{}' },
+                },
+              ],
+            },
           },
-        }],
+        ],
         usage: { prompt_tokens: 100, completion_tokens: 20, total_tokens: 120 },
       },
       {
-        choices: [{
-          message: { content: '## Summary\nThe provider call failed repeatedly.', tool_calls: [] },
-        }],
+        choices: [
+          {
+            message: {
+              content: '## Summary\nThe provider call failed repeatedly.',
+              tool_calls: [],
+            },
+          },
+        ],
         usage: { prompt_tokens: 180, completion_tokens: 30, total_tokens: 210 },
       },
     ];
@@ -76,16 +97,25 @@ describe('runDebugDiagnosis vertical slice', () => {
       expect(headers.get('Authorization')).toBe('Bearer server-only-cloudflare-token');
       expect(headers.get('cf-aig-metadata')).toContain('deployment-debug-agent');
       const payload = JSON.parse(String(init?.body)) as {
-        model: string; max_tokens: number; stream: boolean; tool_choice: string;
+        model: string;
+        max_tokens: number;
+        stream: boolean;
+        tool_choice: string;
         tools: Array<{ function: { name: string } }>;
       };
       expect(payload).toMatchObject({
-        model: '@cf/zai-org/glm-5.2', stream: false, tool_choice: 'auto',
+        model: '@cf/zai-org/glm-5.2',
+        stream: false,
+        tool_choice: 'auto',
       });
       expect(payload.max_tokens).toBeGreaterThan(0);
       expect(payload.tools.map((tool) => tool.function.name)).toEqual([
-        'get_recent_errors', 'get_health_summary', 'get_error_trends',
-        'query_cloudflare_logs', 'get_related_entity_state',
+        'get_vm_incident',
+        'get_recent_errors',
+        'get_health_summary',
+        'get_error_trends',
+        'query_cloudflare_logs',
+        'get_related_entity_state',
       ]);
       if (fetchMock.mock.calls.length === 2) {
         const body = String(init?.body);
@@ -121,8 +151,9 @@ describe('runDebugDiagnosis vertical slice', () => {
       dailyTokensUsed: 330,
     });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(main.prepare('SELECT COUNT(*) AS count FROM debug_diagnoses').get())
-      .toEqual({ count: 1 });
+    expect(main.prepare('SELECT COUNT(*) AS count FROM debug_diagnoses').get()).toEqual({
+      count: 1,
+    });
     for (const [, init] of fetchMock.mock.calls) {
       expect(String(init?.body)).not.toContain('server-only-cloudflare-token');
     }

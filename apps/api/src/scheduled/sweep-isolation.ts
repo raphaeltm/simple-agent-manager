@@ -47,7 +47,13 @@ export interface SweepIsolator {
   failures(): SweepFailure[];
 }
 
-type IsolatorEnv = Pick<Env, 'OBSERVABILITY_DATABASE'>;
+type IsolatorEnv = Pick<
+  Env,
+  | 'OBSERVABILITY_DATABASE'
+  | 'OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH'
+  | 'OBSERVABILITY_ERROR_STACK_MAX_LENGTH'
+  | 'OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH'
+>;
 
 export function createSweepIsolator(env: IsolatorEnv): SweepIsolator {
   const failures: SweepFailure[] = [];
@@ -77,7 +83,7 @@ export function createSweepIsolator(env: IsolatorEnv): SweepIsolator {
             message: `Scheduled sweep "${sweep}" failed: ${message}`,
             stack: err instanceof Error ? err.stack : undefined,
             context: { recoveryType: 'cron_sweep_failure', sweep },
-          });
+          }, env);
         } catch (persistErr) {
           log.error('cron.sweep_failure_persist_failed', {
             sweep,

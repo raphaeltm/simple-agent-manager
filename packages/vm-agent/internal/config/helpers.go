@@ -228,6 +228,31 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.ErrorReportEventLimit < 0 {
+		errs = append(errs, fmt.Errorf(
+			"ERROR_REPORT_EVENT_LIMIT must be non-negative, got %d",
+			c.ErrorReportEventLimit,
+		))
+	}
+	if c.ErrorReportResponseBytes <= 0 {
+		errs = append(errs, fmt.Errorf(
+			"ERROR_REPORT_RESPONSE_MAX_BYTES must be positive, got %d",
+			c.ErrorReportResponseBytes,
+		))
+	}
+	if c.ErrorReportStoredErrBytes <= 0 {
+		errs = append(errs, fmt.Errorf(
+			"ERROR_REPORT_STORED_ERROR_MAX_BYTES must be positive, got %d",
+			c.ErrorReportStoredErrBytes,
+		))
+	}
+	if c.ErrorReportCollectorJobs <= 0 {
+		errs = append(errs, fmt.Errorf(
+			"ERROR_REPORT_COLLECTOR_CONCURRENCY must be positive, got %d",
+			c.ErrorReportCollectorJobs,
+		))
+	}
+
 	if c.JWTIssuer != "" {
 		if err := auth.ValidateIssuerURL(c.JWTIssuer); err != nil {
 			errs = append(errs, fmt.Errorf("JWT_ISSUER: %w", err))

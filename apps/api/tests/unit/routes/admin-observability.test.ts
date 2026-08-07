@@ -2,6 +2,10 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import {
+  diagnosticSecretCanaries,
+  expectDiagnosticCanariesAbsent,
+} from '../../helpers/diagnostic-secret-canaries';
 
 // Mock auth middleware
 const mockGetUserId = vi.fn().mockReturnValue('user-superadmin');
@@ -85,6 +89,18 @@ vi.mock('../../../src/services/observability', () => ({
   CfApiError: MockCfApiError,
 }));
 
+const mockGetDiagnosticIncidentsByErrorIds = vi.fn().mockResolvedValue(new Map());
+const mockGetDiagnosticIncidentByErrorId = vi.fn();
+const mockGetDiagnosticArtifactForDownload = vi.fn();
+vi.mock('../../../src/services/diagnostic-incidents', () => ({
+  getDiagnosticIncidentsByErrorIds: (...args: unknown[]) =>
+    mockGetDiagnosticIncidentsByErrorIds(...args),
+  getDiagnosticIncidentByErrorId: (...args: unknown[]) =>
+    mockGetDiagnosticIncidentByErrorId(...args),
+  getDiagnosticArtifactForDownload: (...args: unknown[]) =>
+    mockGetDiagnosticArtifactForDownload(...args),
+}));
+
 // Mock rate-limit middleware (allow all by default)
 const mockRateLimitMiddleware = vi.fn((_c: any, next: any) => next());
 vi.mock('../../../src/middleware/rate-limit', () => ({
@@ -158,6 +174,130 @@ describe('Admin Observability Routes', () => {
       expect(body.errors).toHaveLength(1);
       expect(body.errors[0].source).toBe('client');
       expect(body.total).toBe(1);
+      expect(mockGetDiagnosticIncidentsByErrorIds).toHaveBeenCalledWith(expect.anything(), [
+        'err-1',
+      ]);
+    });
+
+    it('batch-decorates errors with incident summaries without per-row reads', async () => {
+      const incident = {
+        id: 'incident-1',
+        platformErrorId: 'err-1',
+        status: 'pending',
+        artifacts: [],
+      };
+      mockQueryErrors.mockResolvedValue({
+        errors: [
+          {
+            id: 'err-1',
+            source: 'vm-agent',
+            level: 'error',
+            message: 'failed',
+            timestamp: '2026-08-05T12:00:00.000Z',
+          },
+          {
+            id: 'err-2',
+            source: 'api',
+            level: 'error',
+            message: 'other',
+            timestamp: '2026-08-05T12:00:00.000Z',
+          },
+        ],
+        cursor: null,
+        hasMore: false,
+        total: 2,
+      });
+      mockGetDiagnosticIncidentsByErrorIds.mockResolvedValue(new Map([['err-1', incident]]));
+
+      const res = await app.request('/api/admin/observability/errors', {}, createEnv());
+      expect(res.status).toBe(200);
+      expect((await res.json()).errors).toEqual([
+        expect.objectContaining({ id: 'err-1', incident }),
+        expect.objectContaining({ id: 'err-2', incident: null }),
+      ]);
+      expect(mockGetDiagnosticIncidentsByErrorIds).toHaveBeenCalledTimes(1);
+      expect(mockGetDiagnosticIncidentByErrorId).not.toHaveBeenCalled();
+    });
+
+    it('rejects non-superadmins before incident summary or download reads', async () => {
+      const headers = { 'x-test-role': 'non-superadmin' };
+      const summary = await app.request(
+        '/api/admin/observability/errors/err-1/incident',
+        { headers },
+        createEnv()
+      );
+      const download = await app.request(
+        '/api/admin/observability/errors/err-1/incident/artifacts/art-1/download',
+        { headers },
+        createEnv()
+      );
+      expect(summary.status).toBe(403);
+      expect(download.status).toBe(403);
+      expect(mockGetDiagnosticIncidentByErrorId).not.toHaveBeenCalled();
+      expect(mockGetDiagnosticArtifactForDownload).not.toHaveBeenCalled();
+    });
+
+    it('returns the sanitized incident contract without any shared canary in the admin response', async () => {
+      mockGetDiagnosticIncidentByErrorId.mockResolvedValue({
+        id: 'incident-safe',
+        platformErrorId: 'err-1',
+        status: 'available',
+        preview: {
+          health: 'degraded',
+          values: diagnosticSecretCanaries.map(() => '[REDACTED]'),
+        },
+        artifacts: [],
+      });
+
+      const res = await app.request(
+        '/api/admin/observability/errors/err-1/incident',
+        {},
+        createEnv()
+      );
+      expect(res.status).toBe(200);
+      const body = await res.text();
+      expect(body).toContain('[REDACTED]');
+      expectDiagnosticCanariesAbsent(body);
+    });
+
+    it('streams an available artifact through the private no-store admin proxy', async () => {
+      const safeArchive = JSON.stringify({
+        values: diagnosticSecretCanaries.map(() => '[REDACTED]'),
+      });
+      mockGetDiagnosticArtifactForDownload.mockResolvedValue({
+        row: {
+          id: 'art-1',
+          incident_id: 'incident-1',
+          content_type: 'application/gzip',
+          actual_bytes: 4,
+        },
+        object: {
+          body: new ReadableStream({
+            start(controller) {
+              controller.enqueue(new TextEncoder().encode(safeArchive));
+              controller.close();
+            },
+          }),
+        },
+      });
+      const res = await app.request(
+        '/api/admin/observability/errors/err-1/incident/artifacts/art-1/download',
+        {},
+        createEnv()
+      );
+      expect(res.status).toBe(200);
+      expect(res.headers.get('cache-control')).toBe('private, no-store');
+      expect(res.headers.get('content-type')).toBe('application/gzip');
+      expect(res.headers.get('content-disposition')).toBe('attachment; filename="art-1.tar.gz"');
+      expect(res.headers.get('x-content-type-options')).toBe('nosniff');
+      const body = await res.text();
+      expect(body).toBe(safeArchive);
+      expectDiagnosticCanariesAbsent(body);
+      expect(mockGetDiagnosticArtifactForDownload).toHaveBeenCalledWith(
+        expect.anything(),
+        'err-1',
+        'art-1'
+      );
     });
 
     it('should pass filter params to queryErrors', async () => {
@@ -735,9 +875,13 @@ describe('Admin Observability Routes', () => {
       console.log('DEBUG_RESPONSE', await response.clone().json());
       expect(response.status).toBe(202);
       expect(await response.json()).toEqual({ run: diagnosis });
-      expect(mockCreateDebugDiagnosisRun).toHaveBeenCalledWith(expect.any(Object), 'user-superadmin', {
-        errorId: 'err-1',
-      });
+      expect(mockCreateDebugDiagnosisRun).toHaveBeenCalledWith(
+        expect.any(Object),
+        'user-superadmin',
+        {
+          errorId: 'err-1',
+        }
+      );
     });
 
     it('returns 429 when the deployment feature budget is exhausted', async () => {

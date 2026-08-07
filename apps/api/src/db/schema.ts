@@ -2303,6 +2303,98 @@ export const sessionSummaries = sqliteTable(
 export type SessionSummaryRow = typeof sessionSummaries.$inferSelect;
 export type NewSessionSummaryRow = typeof sessionSummaries.$inferInsert;
 
+export const diagnosticIncidents = sqliteTable(
+  'diagnostic_incidents',
+  {
+    id: text('id').primaryKey(),
+    platformErrorId: text('platform_error_id').notNull().unique(),
+    nodeId: text('node_id').notNull(),
+    workspaceId: text('workspace_id'),
+    status: text('status', { enum: ['pending', 'available', 'failed', 'expired'] })
+      .notNull()
+      .default('pending'),
+    artifactCount: integer('artifact_count').notNull().default(0),
+    totalBytes: integer('total_bytes').notNull().default(0),
+    manifestJson: text('manifest_json'),
+    previewJson: text('preview_json'),
+    failureReason: text('failure_reason'),
+    expiresAt: text('expires_at').notNull(),
+    deleteAfter: text('delete_after').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    nodeStatusIdx: index('idx_diagnostic_incidents_node_status').on(
+      table.nodeId,
+      table.status,
+      table.createdAt
+    ),
+    expiryIdx: index('idx_diagnostic_incidents_expiry').on(table.status, table.expiresAt),
+    deleteAfterIdx: index('idx_diagnostic_incidents_delete_after').on(table.deleteAfter),
+  })
+);
+
+export const diagnosticArtifacts = sqliteTable(
+  'diagnostic_artifacts',
+  {
+    id: text('id').primaryKey(),
+    incidentId: text('incident_id')
+      .notNull()
+      .references(() => diagnosticIncidents.id),
+    nodeId: text('node_id').notNull(),
+    kind: text('kind').notNull(),
+    status: text('status', { enum: ['pending', 'available', 'failed', 'expired'] })
+      .notNull()
+      .default('pending'),
+    objectKey: text('object_key').notNull().unique(),
+    contentType: text('content_type').notNull(),
+    checksumSha256: text('checksum_sha256'),
+    expectedBytes: integer('expected_bytes').notNull().default(0),
+    actualBytes: integer('actual_bytes'),
+    manifestJson: text('manifest_json'),
+    previewJson: text('preview_json'),
+    uploadAttempts: integer('upload_attempts').notNull().default(0),
+    uploadLeaseId: text('upload_lease_id'),
+    uploadLeaseExpiresAt: text('upload_lease_expires_at'),
+    failureReason: text('failure_reason'),
+    expiresAt: text('expires_at').notNull(),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text('updated_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => ({
+    incidentKindUnique: uniqueIndex('idx_diagnostic_artifacts_incident_kind').on(
+      table.incidentId,
+      table.kind
+    ),
+    incidentStatusIdx: index('idx_diagnostic_artifacts_incident_status').on(
+      table.incidentId,
+      table.status
+    ),
+    nodeStatusIdx: index('idx_diagnostic_artifacts_node_status').on(
+      table.nodeId,
+      table.status,
+      table.createdAt
+    ),
+    expiryIdx: index('idx_diagnostic_artifacts_expiry').on(table.status, table.expiresAt),
+    pendingExpiryIdx: index('idx_diagnostic_artifacts_pending_expiry')
+      .on(table.expiresAt)
+      .where(sql`${table.status} <> 'expired'`),
+    statusUpdatedIdx: index('idx_diagnostic_artifacts_status_updated').on(
+      table.status,
+      sql`datetime(${table.updatedAt})`,
+      table.id
+    ),
+  })
+);
+
 export const debugDiagnoses = sqliteTable(
   'debug_diagnoses',
   {
@@ -2334,7 +2426,10 @@ export const debugDiagnosisRuns = sqliteTable(
   'debug_diagnosis_runs',
   {
     id: text('id').primaryKey(),
-    status: text('status', { enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'] }).notNull(),
+    legacyStatus: text('status', { enum: ['queued', 'running', 'succeeded', 'failed'] }).notNull(),
+    status: text('run_status', {
+      enum: ['queued', 'running', 'succeeded', 'failed', 'cancelled'],
+    }).notNull(),
     errorId: text('error_id'),
     startTime: text('start_time').notNull(),
     endTime: text('end_time').notNull(),
@@ -2366,8 +2461,18 @@ export const debugDiagnosisRuns = sqliteTable(
       .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
-    statusCreatedIdx: index('idx_debug_diagnosis_runs_status_created').on(table.status, table.createdAt),
-    errorCreatedIdx: index('idx_debug_diagnosis_runs_error_created').on(table.errorId, table.createdAt),
+    statusCreatedIdx: index('idx_debug_diagnosis_runs_canonical_status_created').on(
+      table.status,
+      table.createdAt
+    ),
+    activeDeadlineIdx: index('idx_debug_diagnosis_runs_canonical_active_deadline').on(
+      table.status,
+      table.deadlineAt
+    ),
+    errorCreatedIdx: index('idx_debug_diagnosis_runs_error_created').on(
+      table.errorId,
+      table.createdAt
+    ),
     windowIdx: index('idx_debug_diagnosis_runs_window').on(table.startTime, table.endTime),
   })
 );
@@ -2376,7 +2481,9 @@ export const debugDiagnosisRunEvents = sqliteTable(
   'debug_diagnosis_run_events',
   {
     id: text('id').primaryKey(),
-    runId: text('run_id').notNull().references(() => debugDiagnosisRuns.id, { onDelete: 'cascade' }),
+    runId: text('run_id')
+      .notNull()
+      .references(() => debugDiagnosisRuns.id, { onDelete: 'cascade' }),
     sequence: integer('sequence').notNull(),
     stepKey: text('step_key').notNull(),
     eventType: text('event_type').notNull(),
@@ -2389,11 +2496,19 @@ export const debugDiagnosisRunEvents = sqliteTable(
     retryAttempt: integer('retry_attempt').notNull().default(0),
     errorCode: text('error_code'),
     errorMessage: text('error_message'),
-    createdAt: text('created_at').notNull().default(sql`CURRENT_TIMESTAMP`),
+    createdAt: text('created_at')
+      .notNull()
+      .default(sql`CURRENT_TIMESTAMP`),
   },
   (table) => ({
-    runSequenceIdx: index('idx_debug_diagnosis_events_run_sequence').on(table.runId, table.sequence),
-    runStepUnique: uniqueIndex('idx_debug_diagnosis_events_run_step').on(table.runId, table.stepKey),
+    runSequenceIdx: index('idx_debug_diagnosis_events_run_sequence').on(
+      table.runId,
+      table.sequence
+    ),
+    runStepUnique: uniqueIndex('idx_debug_diagnosis_events_run_step').on(
+      table.runId,
+      table.stepKey
+    ),
   })
 );
 

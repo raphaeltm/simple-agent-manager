@@ -139,7 +139,7 @@ Automated triage and superadmin-initiated diagnosis have **separate** daily toke
 
 The agent reads bounded, redacted evidence — recent errors, a health summary, error trends, Worker logs, and related entity state — and returns a written analysis. The panel shows the model, turn count, tokens for that run, and your usage against the daily budget.
 
-Diagnosis runs are **durable**. Starting one returns immediately and the work continues server-side, so closing the tab doesn't kill it. A **Recent diagnosis runs** card lists the last several runs with their status (`queued`, `running`, `succeeded`, `failed`); an in-flight run is marked recoverable after refresh, and a failed one gets a **Retry** button.
+Diagnosis runs are **durable**. Starting one returns immediately and the work continues server-side, so closing the tab doesn't kill it. A **Recent diagnosis runs** card lists the last several runs with their status (`queued`, `running`, `succeeded`, `failed`, `cancelled`); an in-flight run is marked recoverable after refresh and can be cancelled at a durable checkpoint. Failed runs can be retried from the card, while failed or cancelled runs can be retried from their detail page.
 
 When a diagnosis is worth keeping, **Save as draft Idea** files it into a project you choose so it becomes tracked work instead of a panel you have to leave open.
 
@@ -148,6 +148,18 @@ When a diagnosis is worth keeping, **Save as draft Idea** files it into a projec
 `/admin/errors` is superadmin-only and its raw rows can contain local user IDs, IP addresses, and user-agent strings. Before any tool result reaches the model, SAM recursively strips those fields plus credential-shaped values — API tokens, JWTs, authorization headers, private keys, and long secret-like strings. Cloudflare credentials stay server-side and never enter model messages or saved diagnosis text.
 
 The same redactor now also runs on the **Worker log query** behind `/admin/logs`, over each entry's `details` object. So a superadmin browsing logs directly will see `[REDACTED]` in place of values — including `user_id`, `ip_address`, and `user_agent`, which are correlation fields rather than secrets. That is expected, not a bug. It does not cover an entry's `message` text, so treat log messages as unredacted.
+
+### Automatic VM diagnostic evidence
+
+For VM Agent failures, the error row can include a **Diagnostic evidence** card. The VM Agent assigns one stable incident ID, durably queues the error, and collects a small same-installation snapshot while it retries delivery. The snapshot is deliberately narrower than a debug package:
+
+- allowlisted runtime health, agent version, bounded system resources, structured event metadata, and workspace lifecycle state;
+- recursive credential-shaped value redaction plus depth, item, string, document, archive, spool, and retention limits;
+- no repository files, arbitrary filesystem reads, environment dumps, shell history, raw command output, session transcript, or cross-installation transport.
+
+The redacted preview is stored in D1. Compressed bytes remain in the deployment's private R2 bucket and are streamed only through a superadmin-authenticated download route; SAM never returns the R2 object key or a direct object URL to the browser or diagnosis model. The card shows `pending`, `available`, `failed`, `expired`, or `missing` explicitly, including collector failures and truncation/redaction counts. A pending upload is not presented as complete.
+
+The diagnosis agent gets only the bounded redacted preview through its read-only incident tool. Downloading the private archive is a separate human action. **Collect debug package** remains a separate, explicit, broader live-node action and is never run automatically or exposed to the diagnosis model.
 
 ### Diagnosis limits
 

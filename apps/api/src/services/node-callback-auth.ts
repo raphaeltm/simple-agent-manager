@@ -46,10 +46,25 @@ export function nodeStatusBlocksTokenRefresh(status: string | null | undefined):
 
 export async function verifyNodeCallbackAuth(
   c: Context<{ Bindings: Env }>,
-  nodeId: string
+  nodeId: string,
+  options: { requireExplicitScope?: boolean } = {}
 ): Promise<void> {
   const token = extractBearerToken(c.req.header('Authorization'));
-  const payload = await verifyCallbackToken(token, c.env);
+  let payload: CallbackTokenPayload;
+  try {
+    payload = options.requireExplicitScope
+      ? await verifyCallbackToken(token, c.env, { expectedScope: 'node' })
+      : await verifyCallbackToken(token, c.env);
+  } catch (cause) {
+    if (!options.requireExplicitScope) throw cause;
+    const message = cause instanceof Error ? cause.message : 'Invalid callback token';
+    if (message.includes('scope')) throw errors.forbidden('Insufficient token scope');
+    throw errors.unauthorized('Invalid callback token');
+  }
+
+  if (options.requireExplicitScope && payload.scope !== 'node') {
+    throw errors.forbidden('Insufficient token scope');
+  }
 
   // Workspace-scoped tokens CANNOT be used for node-level endpoints.
   if (payload.scope === 'workspace') {

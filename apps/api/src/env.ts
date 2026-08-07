@@ -307,6 +307,45 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // VM agent error reporting
   MAX_VM_AGENT_ERROR_BODY_BYTES?: string;
   MAX_VM_AGENT_ERROR_BATCH_SIZE?: string;
+  MAX_VM_AGENT_ERROR_SOURCE_LENGTH?: string;
+  OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH?: string;
+  OBSERVABILITY_ERROR_STACK_MAX_LENGTH?: string;
+  OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH?: string;
+  ERROR_REPORT_FLUSH_INTERVAL?: string;
+  ERROR_REPORT_MAX_BATCH_SIZE?: string;
+  ERROR_REPORT_MAX_BATCH_BYTES?: string;
+  ERROR_REPORT_MAX_QUEUE_SIZE?: string;
+  ERROR_REPORT_HTTP_TIMEOUT?: string;
+  ERROR_REPORT_RETRY_INITIAL?: string;
+  ERROR_REPORT_RETRY_MAX?: string;
+  ERROR_REPORT_MAX_ATTEMPTS?: string;
+  ERROR_REPORT_DB_PATH?: string;
+  ERROR_REPORT_DB_BUSY_TIMEOUT?: string;
+  ERROR_REPORT_SPOOL_DIR?: string;
+  ERROR_REPORT_ARTIFACT_MAX_BYTES?: string;
+  ERROR_REPORT_SPOOL_MAX_BYTES?: string;
+  ERROR_REPORT_RETENTION?: string;
+  ERROR_REPORT_COLLECTOR_TIMEOUT?: string;
+  ERROR_REPORT_MAX_COLLECTOR_DOCS?: string;
+  ERROR_REPORT_MAX_DOCUMENT_BYTES?: string;
+  ERROR_REPORT_MAX_VALUE_DEPTH?: string;
+  ERROR_REPORT_MAX_VALUE_ITEMS?: string;
+  ERROR_REPORT_MAX_STRING_BYTES?: string;
+  ERROR_REPORT_EVENT_LIMIT?: string;
+  ERROR_REPORT_RESPONSE_MAX_BYTES?: string;
+  ERROR_REPORT_STORED_ERROR_MAX_BYTES?: string;
+  ERROR_REPORT_COLLECTOR_CONCURRENCY?: string;
+  VM_INCIDENT_R2_PREFIX?: string; // Private R2 prefix for safe VM incident artifacts (default: diagnostic-incidents)
+  VM_INCIDENT_ARTIFACT_MAX_BYTES?: string; // Max single compressed artifact bytes (default: 2097152)
+  VM_INCIDENT_REGISTRATION_MAX_BYTES?: string; // Max registration JSON bytes (default: 262144)
+  VM_INCIDENT_MANIFEST_MAX_BYTES?: string; // Max redacted manifest JSON bytes (default: 131072)
+  VM_INCIDENT_PREVIEW_MAX_BYTES?: string; // Max redacted preview JSON bytes (default: 131072)
+  VM_INCIDENT_MAX_ARTIFACTS_PER_NODE?: string; // Active artifact count quota per node (default: 50)
+  VM_INCIDENT_MAX_BYTES_PER_NODE?: string; // Active expected-byte quota per node (default: 104857600)
+  VM_INCIDENT_RETENTION_DAYS?: string; // Private R2 and active metadata retention (default: 7)
+  VM_INCIDENT_METADATA_RETENTION_DAYS?: string; // Expired metadata retention after R2 deletion (default: 30)
+  VM_INCIDENT_PENDING_TIMEOUT_MINUTES?: string; // Stale pending upload threshold (default: 30)
+  VM_INCIDENT_RECONCILE_BATCH_SIZE?: string; // Max artifacts/incidents per reconciliation pass (default: 50, minimum: 6)
   // Observability configuration (spec 023)
   OBSERVABILITY_ERROR_RETENTION_DAYS?: string;
   OBSERVABILITY_ERROR_MAX_ROWS?: string;
