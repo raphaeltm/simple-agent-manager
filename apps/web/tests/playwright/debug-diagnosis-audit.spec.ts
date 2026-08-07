@@ -152,6 +152,7 @@ type PaginationMode = 'complete' | 'repeated';
 type IncidentFixture = typeof INCIDENT | null;
 
 interface SetupBehavior {
+  activePollingEvents?: boolean;
   cancelDelayMs?: number;
   cancelStatus?: number;
   incident?: IncidentFixture;
@@ -233,6 +234,8 @@ async function setup(
   let runningStatus: 'running' | 'cancelled' = 'running';
   let cancelRequestCount = 0;
   let paginatedRequestCount = 0;
+  let activeDetailRequestCount = 0;
+  let activePageRequestCount = 0;
   const activeIncident = behavior.incident === undefined ? INCIDENT : behavior.incident;
   const activeError = { ...ERROR, incident: activeIncident };
   const activeSucceededRun = { ...SUCCEEDED_RUN, incident: activeIncident };
@@ -303,12 +306,33 @@ async function setup(
         nextCursor: null,
       });
     }
-    if (path === '/api/admin/observability/diagnosis-runs/run-running-1')
+    if (
+      path === '/api/admin/observability/diagnosis-runs/run-running-1/events' &&
+      url.searchParams.get('cursor') === '100' &&
+      behavior.activePollingEvents
+    ) {
+      activePageRequestCount++;
+      await new Promise((resolve) => setTimeout(resolve, 500));
       return respond(200, {
-        run: { ...RUNNING_RUN, status: runningStatus },
-        events: [],
+        events: Array.from({ length: 5 }, (_, index) => ({
+          ...diagnosisEvent(index + 101),
+          runId: 'run-running-1',
+        })),
         nextCursor: null,
       });
+    }
+    if (path === '/api/admin/observability/diagnosis-runs/run-running-1') {
+      activeDetailRequestCount++;
+      const eventCount = behavior.activePollingEvents && activeDetailRequestCount > 1 ? 100 : 2;
+      return respond(200, {
+        run: { ...RUNNING_RUN, status: runningStatus },
+        events: Array.from({ length: eventCount }, (_, index) => ({
+          ...diagnosisEvent(index + 1),
+          runId: 'run-running-1',
+        })),
+        nextCursor: eventCount === 100 ? 100 : null,
+      });
+    }
     if (path === '/api/admin/observability/diagnosis-runs/run-running-1/cancel') {
       cancelRequestCount++;
       await new Promise((resolve) => setTimeout(resolve, behavior.cancelDelayMs ?? 150));
@@ -368,6 +392,8 @@ async function setup(
     return respond(200, {});
   });
   return {
+    activeDetailRequestCount: () => activeDetailRequestCount,
+    activePageRequestCount: () => activePageRequestCount,
     cancelRequestCount: () => cancelRequestCount,
     paginatedRequestCount: () => paginatedRequestCount,
   };
@@ -448,6 +474,22 @@ test.describe('Deployment diagnosis visual audit', () => {
     await page.getByRole('button', { name: 'Retry' }).click();
     await expect(page).toHaveURL(/\/admin\/diagnoses\/run-running-2$/);
     await expect(page.getByRole('button', { name: 'Cancel' })).toBeEnabled();
+    await assertNoOverflow(page);
+  });
+
+  test('keeps the previous timeline visible while an active poll loads every next page', async ({
+    page,
+  }) => {
+    const requests = await setup(page, 200, 'complete', { activePollingEvents: true });
+    await page.goto('/admin/diagnoses/run-running-1');
+    const events = page
+      .getByRole('list', { name: 'Diagnosis event timeline' })
+      .locator(':scope > li');
+    await expect(events).toHaveCount(2);
+    await expect.poll(requests.activePageRequestCount, { timeout: 5_000 }).toBe(1);
+    expect(requests.activeDetailRequestCount()).toBeGreaterThanOrEqual(2);
+    await expect(events).toHaveCount(2);
+    await expect(events).toHaveCount(105);
     await assertNoOverflow(page);
   });
 
