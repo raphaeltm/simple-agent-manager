@@ -7,9 +7,11 @@ import { seedUser } from './helpers/seed-d1';
 
 beforeAll(async () => {
   const migrations = (
-    env as unknown as { TEST_PRIMARY_MIGRATIONS: Parameters<typeof applyD1Migrations>[1] }
+    env as unknown as { TEST_PRIMARY_MIGRATIONS?: Parameters<typeof applyD1Migrations>[1] }
   ).TEST_PRIMARY_MIGRATIONS;
-  await applyD1Migrations(env.DATABASE, migrations);
+  // The focused debugging config supplies migrations as a binding. The full
+  // Worker corpus applies them once from its shared setup file instead.
+  if (migrations) await applyD1Migrations(env.DATABASE, migrations);
 });
 
 function stub(runId: string): DurableObjectStub<DiagnosisRunner> {

@@ -29,14 +29,20 @@ async function checksum(bytes: Uint8Array): Promise<string> {
 
 beforeAll(async () => {
   const migrationBindings = env as unknown as {
-    TEST_PRIMARY_MIGRATIONS: Parameters<typeof applyD1Migrations>[1];
-    TEST_OBSERVABILITY_MIGRATIONS: Parameters<typeof applyD1Migrations>[1];
+    TEST_PRIMARY_MIGRATIONS?: Parameters<typeof applyD1Migrations>[1];
+    TEST_OBSERVABILITY_MIGRATIONS?: Parameters<typeof applyD1Migrations>[1];
   };
-  await applyD1Migrations(env.DATABASE, migrationBindings.TEST_PRIMARY_MIGRATIONS);
-  await applyD1Migrations(
-    env.OBSERVABILITY_DATABASE,
-    migrationBindings.TEST_OBSERVABILITY_MIGRATIONS
-  );
+  // The focused debugging config supplies migrations as bindings. The full
+  // Worker corpus applies them once from its shared setup file instead.
+  if (migrationBindings.TEST_PRIMARY_MIGRATIONS) {
+    await applyD1Migrations(env.DATABASE, migrationBindings.TEST_PRIMARY_MIGRATIONS);
+  }
+  if (migrationBindings.TEST_OBSERVABILITY_MIGRATIONS) {
+    await applyD1Migrations(
+      env.OBSERVABILITY_DATABASE,
+      migrationBindings.TEST_OBSERVABILITY_MIGRATIONS
+    );
+  }
   nodeToken = await signNodeCallbackToken(NODE_ID, env as never);
   otherNodeToken = await signNodeCallbackToken('diagnostic-other-node', env as never);
   workspaceToken = await signCallbackToken(WORKSPACE_ID, env as never);
