@@ -31,9 +31,24 @@ permissions:
   contents: read
   actions: read
 
-# Only one production deployment at a time, queue subsequent ones
+# Serialize only trusted production candidates. Every no-op/untrusted event gets
+# a unique group so it cannot replace GitHub's single pending production run.
 concurrency:
-  group: deploy-production
+  group: >-
+    ${{
+      (
+        (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') ||
+        (
+          github.event_name == 'workflow_run' &&
+          github.event.workflow_run.conclusion == 'success' &&
+          github.event.workflow_run.event == 'push' &&
+          github.event.workflow_run.head_branch == 'main' &&
+          github.event.workflow_run.head_repository.full_name == github.repository
+        )
+      ) &&
+      'deploy-production' ||
+      format('deploy-production-noop-{0}', github.run_id)
+    }}
   cancel-in-progress: false
 
 jobs:

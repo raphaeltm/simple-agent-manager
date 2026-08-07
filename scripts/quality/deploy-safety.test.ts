@@ -270,6 +270,8 @@ describe('deployment workflow safety wiring', () => {
   it('preserves successful automatic deployment path from workflow_run CI success', () => {
     const deploy = workflow('deploy.yml');
 
+    expect(deploy).toContain("'deploy-production'");
+    expect(deploy).toContain("format('deploy-production-noop-{0}', github.run_id)");
     expect(deploy).toContain("github.event_name == 'workflow_run'");
     expect(deploy).toContain("github.event.workflow_run.conclusion == 'success'");
     expect(deploy).toContain("github.event.workflow_run.event == 'push'");
