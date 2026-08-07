@@ -4,6 +4,7 @@ import {
   type D1MigrationSafetyRunner,
   type D1TableCount,
   discoverProtectedTables,
+  parseAllowlist,
   runSafeRemoteMigrations,
   verifyNoUnexpectedProtectedTableDecrease,
 } from '../deploy/d1-migration-safety';
@@ -113,6 +114,42 @@ describe('D1 migration safety gates', () => {
       })
     ).toThrow(/refusing to treat an upgrade as a clean install/);
     expect(runner.commands.some((command) => command.includes('migrations apply'))).toBe(false);
+  });
+
+  it('fails closed when a clean install remains empty after migrations', () => {
+    const runner = new FakeRunner({ main: [[], ['d1_migrations']] }, {});
+
+    expect(() =>
+      runSafeRemoteMigrations({
+        environment: 'staging',
+        databases: [{ binding: 'DATABASE', name: 'main' }],
+        runner,
+      })
+    ).toThrow(/No protected tables discovered.*refusing to migrate/);
+    expect(runner.commands.filter((command) => command.includes('migrations apply'))).toHaveLength(
+      1
+    );
+  });
+
+  it('fails closed when a post-migration protected-table count cannot be read', () => {
+    const runner = new FakeRunner({ main: ['users'] }, { 'main:users': [3] });
+
+    expect(() =>
+      runSafeRemoteMigrations({
+        environment: 'production',
+        databases: [{ binding: 'DATABASE', name: 'main' }],
+        runner,
+      })
+    ).toThrow(/count failure for main:users/);
+    expect(runner.commands.filter((command) => command.includes('migrations apply'))).toHaveLength(
+      1
+    );
+  });
+
+  it('parses only JSON arrays for CLI decrease allowlists', () => {
+    expect(parseAllowlist(undefined)).toEqual([]);
+    expect(() => parseAllowlist('{"database":"main"}')).toThrow(/must be a JSON array/);
+    expect(() => parseAllowlist('{not-json')).toThrow();
   });
 
   it('allows reviewed explicit row-count decrease allowlist entries', () => {

@@ -1,7 +1,7 @@
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 
 import { describe, expect, it, vi } from 'vitest';
 
@@ -310,6 +310,72 @@ describe('deployment workflow safety wiring', () => {
     expect(output).toContain('refresh succeeded');
   });
 
+  it('returns the final Pulumi status after the exact bounded attempt count', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'sam-refresh-fail-'));
+    const pulumi = join(dir, 'pulumi');
+    const attempts = join(dir, 'attempts.txt');
+    const summary = join(dir, 'summary.md');
+    writeFileSync(
+      pulumi,
+      '#!/bin/bash\ncount=$(cat "$SAM_ATTEMPTS_FILE" 2>/dev/null || echo 0)\ncount=$((count + 1))\necho "$count" > "$SAM_ATTEMPTS_FILE"\necho "provider unavailable" >&2\nexit 7\n'
+    );
+    execFileSync('chmod', ['+x', pulumi]);
+
+    const result = spawnSync('bash', ['scripts/deploy/pulumi-refresh-safe.sh'], {
+      cwd: new URL('../..', import.meta.url),
+      env: {
+        ...process.env,
+        PATH: `${dir}:${process.env.PATH}`,
+        SAM_ATTEMPTS_FILE: attempts,
+        GITHUB_STEP_SUMMARY: summary,
+        PULUMI_REFRESH_MAX_ATTEMPTS: '3',
+        PULUMI_REFRESH_RETRY_DELAY_SECONDS: '0',
+        PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES: '10',
+      },
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(7);
+    expect(readFileSync(attempts, 'utf8').trim()).toBe('3');
+    expect(readFileSync(summary, 'utf8')).toContain('failed after 3 attempt(s)');
+    expect(readFileSync(summary, 'utf8')).toContain('failed closed before `pulumi up`');
+    expect(result.stdout).not.toContain('refresh succeeded');
+  });
+
+  it.each([
+    ['PULUMI_REFRESH_MAX_ATTEMPTS', '0'],
+    ['PULUMI_REFRESH_MAX_ATTEMPTS', '6'],
+    ['PULUMI_REFRESH_MAX_ATTEMPTS', 'abc'],
+    ['PULUMI_REFRESH_RETRY_DELAY_SECONDS', '-1'],
+    ['PULUMI_REFRESH_RETRY_DELAY_SECONDS', '301'],
+    ['PULUMI_REFRESH_RETRY_DELAY_SECONDS', 'abc'],
+    ['PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES', '0'],
+    ['PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES', '501'],
+    ['PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES', 'abc'],
+  ])('rejects invalid %s=%s before invoking Pulumi', (name, value) => {
+    const dir = mkdtempSync(join(tmpdir(), 'sam-refresh-config-'));
+    const pulumi = join(dir, 'pulumi');
+    const invoked = join(dir, 'invoked.txt');
+    writeFileSync(pulumi, `#!/bin/bash\ntouch "${invoked}"\n`);
+    execFileSync('chmod', ['+x', pulumi]);
+
+    const result = spawnSync('bash', ['scripts/deploy/pulumi-refresh-safe.sh'], {
+      cwd: new URL('../..', import.meta.url),
+      env: {
+        ...process.env,
+        PATH: `${dir}:${process.env.PATH}`,
+        PULUMI_REFRESH_MAX_ATTEMPTS: '3',
+        PULUMI_REFRESH_RETRY_DELAY_SECONDS: '0',
+        PULUMI_REFRESH_DIAGNOSTIC_TAIL_LINES: '80',
+        [name]: value,
+      },
+      encoding: 'utf8',
+    });
+
+    expect(result.status).toBe(2);
+    expect(existsSync(invoked)).toBe(false);
+  });
+
   it('redacts refresh diagnostics before writing logs or step summaries', () => {
     const dir = mkdtempSync(join(tmpdir(), 'sam-refresh-'));
     const pulumi = join(dir, 'pulumi');
@@ -335,6 +401,7 @@ describe('deployment workflow safety wiring', () => {
         stdio: ['ignore', 'pipe', 'pipe'],
       });
     } catch (error) {
+      expect((error as { status?: number }).status).toBe(7);
       stderr = String((error as { stderr?: string }).stderr ?? '');
     }
 
