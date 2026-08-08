@@ -34,8 +34,35 @@ This is a quality-gate repair only. It must not change runtime UI, API, CLI, clo
 - [x] Expose the public site Playwright suite as a package script and keep link checking build-backed.
 - [x] Add one blocking CI job for the workspace validator, Storybook production build/audit, public docs links, and public browser tests.
 - [x] Run affected tests/coverage, Storybook build/audit, public docs link/browser checks, tail-worker tests, terminal lint/typecheck, and the full root quality suite.
-- [ ] Complete all mandated local specialist reviews and address every material finding.
+- [x] Complete all mandated local specialist reviews and address every material finding.
 - [ ] Open one non-draft PR against `main`, wait for every applicable GitHub check to turn green, and stop without staging, merge, or task archive.
+
+## Changed contracts
+
+- `quality:workspace-test-surfaces` discovers tested workspaces and rejects missing/placeholder `test` or `test:coverage` scripts. It also binds the specialized Storybook/www gates to pnpm workspace membership, exact package identity, and runnable script names so exact-name filters cannot silently select nothing.
+- `apps/tail-worker`, `apps/www`, `packages/cloud-init`, `packages/ui`, and `infra` now expose real coverage commands, making all 20 root Turbo coverage tasks executable. `tools/og-image` remains the explicit narrow exception because it has no tests.
+- `packages/terminal` lint includes `.test.tsx`, and its typecheck includes the dedicated no-emit test project.
+- `packages/ui` owns installable Storybook build/dev/browser scripts, production Vite/Tailwind configuration, dynamic built-story discovery, semantic token assertions, desktop/mobile screenshots, and axe checks in both themes.
+- `apps/www` owns separate unit/coverage/browser commands. Browser tests build with a loopback analytics domain and automatically block/fail on any canonical production analytics request.
+- CI runs the repository guard, Storybook production build/audit, public docs build/link check, and public browser suite as a blocking job. A post-run evidence manifest requires every built Storybook story/theme/project screenshot and both public-site project screenshots before artifact upload.
+
+## Validation evidence
+
+- Baseline mutation proof: the unmodified UI Storybook command exited zero despite no script, and the Turbo dry run returned five tested workspaces as `NONEXISTENT`; the checked-in omission fixtures fail for missing package membership, package identity, required scripts, placeholder scripts, and incomplete browser evidence.
+- Affected coverage: tail-worker 30 tests, cloud-init 190, infra 56, UI 87, terminal 99, and www 2 emitted/source tracker tests; www source coverage is 85.13% statements and 91.04% lines.
+- Browser/public surfaces: Storybook production build passed; 32/32 Storybook desktop/mobile/theme audits passed; www reported 0 broken links across 26 docs pages and 14/14 browser tests passed; the complete browser-evidence manifest passed.
+- Static/full gates: terminal lint/typecheck passed; `pnpm lint`, `pnpm typecheck`, `pnpm test:coverage` (20/20 Turbo tasks), and `pnpm build` passed; `pnpm quality:scripts:test` passed 20 files / 224 tests.
+- Release constraints: latest `origin/main` remains `8eed3b740`; shared staging was not mutated, no merge occurred, the task remains active, and the user-owned `.codex/config.toml` was never staged or edited.
+
+## Specialist review outcomes
+
+- `test-engineer`: PASS after placeholder rejection, built-story discovery, and emitted/source tracker coverage were separated.
+- `ui-ux-specialist`: PASS after faithful semantic Tailwind mapping, computed token assertions, complete screenshots, and fail-on-missing artifact handling; independently rebuilt and passed 32/32 audits.
+- `doc-sync-validator`: PASS after adding this post-mortem timeline; no public docs or `CLAUDE.md` change is required for internal developer/CI commands.
+- `constitution-validator`: PASS; no runtime/deployment hardcoded values or constitution violations.
+- `security-auditor`: PASS after isolating browser analytics to loopback and adding a fail-closed production-request blocker.
+- Independent defensive regression reviewer: PASS after specialized gates were bound to exact workspace/package/script identity and the complete evidence manifest was added.
+- Every material finding was addressed; no finding was deferred.
 
 ## Acceptance criteria
 
