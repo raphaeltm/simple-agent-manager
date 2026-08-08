@@ -158,22 +158,6 @@ export class GcpProvider implements Provider {
     const headers = await this.authHeaders(context);
     const url = `${this.projectUrl()}/global/firewalls`;
 
-    const body = {
-      name,
-      network: `${this.projectUrl()}/global/networks/default`,
-      direction: 'INGRESS',
-      priority: 1000,
-      targetTags: [targetTag],
-      allowed: [
-        {
-          IPProtocol: 'tcp',
-          ports: [...ports],
-        },
-      ],
-      sourceRanges: [...sourceRanges],
-      description,
-    };
-
     try {
       const res = await providerFetch(
         'gcp',
@@ -181,7 +165,9 @@ export class GcpProvider implements Provider {
         {
           method: 'POST',
           headers,
-          body: JSON.stringify(body),
+          body: JSON.stringify(
+            this.buildFirewallRuleBody(name, ports, sourceRanges, description, targetTag)
+          ),
         },
         this.timeoutMs,
         undefined,
@@ -202,6 +188,25 @@ export class GcpProvider implements Provider {
       if (err instanceof ProviderError && err.statusCode === 409) return;
       throw err;
     }
+  }
+
+  private buildFirewallRuleBody(
+    name: string,
+    ports: readonly string[],
+    sourceRanges: readonly string[],
+    description: string,
+    targetTag: string
+  ) {
+    return {
+      name,
+      network: `${this.projectUrl()}/global/networks/default`,
+      direction: 'INGRESS',
+      priority: 1000,
+      targetTags: [targetTag],
+      allowed: [{ IPProtocol: 'tcp', ports: [...ports] }],
+      sourceRanges: [...sourceRanges],
+      description,
+    };
   }
 
   /**
@@ -568,8 +573,16 @@ export class GcpProvider implements Provider {
   ): Promise<GcpInstancePayload | null> {
     throwIfProviderRequestAborted(context);
     const headers = await this.authHeaders(context);
+    const namedInstance = await this.findNamedInstance(idOrName, headers, context);
+    if (namedInstance) return namedInstance;
+    return await this.findAggregatedInstance(idOrName, headers, context);
+  }
 
-    // First try as a name in each zone
+  private async findNamedInstance(
+    idOrName: string,
+    headers: Record<string, string>,
+    context?: ProviderRequestContext
+  ): Promise<GcpInstancePayload | null> {
     for (const zone of this.locations) {
       throwIfProviderRequestAborted(context);
       try {
@@ -595,8 +608,14 @@ export class GcpProvider implements Provider {
         throw err;
       }
     }
+    return null;
+  }
 
-    // If not found by name, try aggregated list with filter by label
+  private async findAggregatedInstance(
+    idOrName: string,
+    headers: Record<string, string>,
+    context?: ProviderRequestContext
+  ): Promise<GcpInstancePayload | null> {
     try {
       const filterStr = `labels.sam-managed=true`;
       let found: GcpInstancePayload | null = null;
