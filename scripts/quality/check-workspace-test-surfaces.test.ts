@@ -62,7 +62,7 @@ describe('workspace test surface guard', () => {
     ]);
 
     expect(() => assertWorkspaceTestSurfaces(root, NO_SPECIALIZED_REQUIREMENTS)).toThrow(
-      '@fixture/omitted (packages/omitted): missing or placeholder test:coverage'
+      '@fixture/omitted (packages/omitted): missing or invalid test:coverage'
     );
   });
 
@@ -79,7 +79,7 @@ describe('workspace test surface guard', () => {
       ]);
 
       expect(() => assertWorkspaceTestSurfaces(root, NO_SPECIALIZED_REQUIREMENTS)).toThrow(
-        '@fixture/placeholder (packages/placeholder): missing or placeholder test:coverage'
+        '@fixture/placeholder (packages/placeholder): missing or invalid test:coverage'
       );
     }
   );
@@ -133,7 +133,7 @@ describe('workspace test surface guard', () => {
           scripts: ['build-browser', 'test:browser'],
         },
       ])
-    ).toThrow('@fixture/specialized (packages/specialized): missing or placeholder build-browser');
+    ).toThrow('@fixture/specialized (packages/specialized): missing or invalid build-browser');
   });
 
   it('fails when a required specialized package is absent', () => {
@@ -147,7 +147,50 @@ describe('workspace test surface guard', () => {
           scripts: ['test:browser'],
         },
       ])
-    ).toThrow('@fixture/absent (packages/absent): missing or placeholder test:browser');
+    ).toThrow('missing or invalid pnpm workspace membership');
+  });
+
+  it('fails when a specialized package path leaves the pnpm workspace graph', () => {
+    const root = createFixture([]);
+    const workspaceRoot = join(root, 'apps/www');
+    mkdirSync(workspaceRoot, { recursive: true });
+    writeFileSync(
+      join(workspaceRoot, 'package.json'),
+      JSON.stringify({
+        name: '@fixture/www',
+        scripts: { 'test:browser': 'playwright test' },
+      })
+    );
+
+    expect(() =>
+      assertWorkspaceTestSurfaces(root, [
+        {
+          workspace: 'apps/www',
+          packageName: '@fixture/www',
+          scripts: ['test:browser'],
+        },
+      ])
+    ).toThrow('@fixture/www (apps/www): missing or invalid pnpm workspace membership');
+  });
+
+  it('fails when a specialized package manifest has the wrong package name', () => {
+    const root = createFixture([
+      {
+        path: 'packages/specialized',
+        name: '@fixture/renamed',
+        scripts: { 'test:browser': 'playwright test' },
+      },
+    ]);
+
+    expect(() =>
+      assertWorkspaceTestSurfaces(root, [
+        {
+          workspace: 'packages/specialized',
+          packageName: '@fixture/expected',
+          scripts: ['test:browser'],
+        },
+      ])
+    ).toThrow('missing or invalid package name @fixture/expected');
   });
 
   it('passes against the checked-in workspace graph', () => {
