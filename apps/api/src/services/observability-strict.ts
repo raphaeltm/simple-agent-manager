@@ -1,10 +1,12 @@
 import type { Env } from '../env';
 import type { PersistErrorInput } from './observability';
+import { serializeBoundedContext } from './observability';
 
 const DEFAULT_BATCH_SIZE = 25;
 const DEFAULT_MESSAGE_MAX_LENGTH = 2048;
 const DEFAULT_STACK_MAX_LENGTH = 4096;
 const DEFAULT_USER_AGENT_MAX_LENGTH = 512;
+const DEFAULT_CONTEXT_MAX_LENGTH = 8192;
 const VALID_SOURCES = new Set<string>(['client', 'vm-agent', 'api']);
 const VALID_LEVELS = new Set<string>(['error', 'warn', 'info']);
 
@@ -41,6 +43,10 @@ export async function persistErrorBatchStrict(
     env?.OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH,
     DEFAULT_USER_AGENT_MAX_LENGTH
   );
+  const contextMaxLength = positiveInteger(
+    env?.OBSERVABILITY_ERROR_CONTEXT_MAX_LENGTH,
+    DEFAULT_CONTEXT_MAX_LENGTH
+  );
   if (inputs.length > limit) {
     throw new Error(`Strict observability batch exceeds configured limit of ${limit}`);
   }
@@ -63,7 +69,7 @@ export async function persistErrorBatchStrict(
         level,
         truncate(input.message, messageMaxLength),
         input.stack ? truncate(input.stack, stackMaxLength) : null,
-        input.context ? JSON.stringify(input.context) : null,
+        input.context ? serializeBoundedContext(input.context, contextMaxLength) : null,
         input.userId ?? null,
         input.nodeId ?? null,
         input.workspaceId ?? null,

@@ -16,7 +16,7 @@ import {
 } from '@simple-agent-manager/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type { Context } from 'hono';
+
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
@@ -25,7 +25,7 @@ import { log } from '../lib/logger';
 import { requireRouteParam } from '../lib/route-helpers';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
-import { getAuth, getUserId, requireApproved, requireAuth } from '../middleware/auth';
+import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import {
@@ -36,10 +36,11 @@ import {
 } from '../schemas';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as chatPersistence from '../services/chat-persistence';
-import { persistError } from '../services/observability';
+
 import * as projectDataService from '../services/project-data';
 import { isTaskStatus } from '../services/task-status';
 import { resolveChatAgentState } from './chat-agent-state';
+import { recordChatSessionLoadFailure } from './chat-load-diagnostics';
 import { chatForkRoutes } from './chat-fork';
 import { getChatSessionRouteContext } from './chat-route-context';
 import {
@@ -54,96 +55,6 @@ import { resolveLiveAgentSessionForChat } from './chat-workspace-resolver';
 const chatRoutes = new Hono<{ Bindings: Env }>();
 
 chatRoutes.use('/*', requireAuth(), requireApproved());
-
-type ChatSessionLoadPhase = 'get_session' | 'get_messages';
-
-function isDiagnosticRole(role: string): boolean {
-  return role === 'admin' || role === 'superadmin';
-}
-
-function serializeDiagnosticError(err: unknown): {
-  name: string;
-  message: string;
-  stack: string | null;
-} {
-  if (err instanceof Error) {
-    return {
-      name: err.name,
-      message: err.message,
-      stack: err.stack ?? null,
-    };
-  }
-
-  return {
-    name: 'NonError',
-    message: String(err),
-    stack: null,
-  };
-}
-
-async function recordChatSessionLoadFailure(
-  c: Context<{ Bindings: Env }>,
-  input: {
-    err: unknown;
-    phase: ChatSessionLoadPhase;
-    projectId: string;
-    sessionId: string;
-    userId: string;
-  }
-): Promise<Response> {
-  const requestId = crypto.randomUUID();
-  const diagnostic = serializeDiagnosticError(input.err);
-  const context = {
-    requestId,
-    route: 'GET /api/projects/:projectId/sessions/:sessionId',
-    phase: input.phase,
-    projectId: input.projectId,
-    sessionId: input.sessionId,
-    userId: input.userId,
-    errorName: diagnostic.name,
-    errorMessage: diagnostic.message,
-  };
-
-  log.error('chat.session_detail_load_failed', {
-    ...context,
-    stack: diagnostic.stack,
-  });
-
-  if (c.env.OBSERVABILITY_DATABASE) {
-    await persistError(
-      c.env.OBSERVABILITY_DATABASE,
-      {
-        source: 'api',
-        level: 'error',
-        message: 'chat.session_detail_load_failed',
-        stack: diagnostic.stack,
-        context,
-        userId: input.userId,
-        sessionId: input.sessionId,
-        ipAddress: c.req.header('CF-Connecting-IP') ?? null,
-        userAgent: c.req.header('User-Agent') ?? null,
-      },
-      c.env
-    );
-  }
-
-  const body: Record<string, unknown> = {
-    error: 'CHAT_SESSION_LOAD_FAILED',
-    message: 'Failed to load chat session',
-    requestId,
-    phase: input.phase,
-  };
-
-  if (isDiagnosticRole(getAuth(c).user.role)) {
-    body.details = {
-      errorName: diagnostic.name,
-      errorMessage: diagnostic.message,
-      stack: diagnostic.stack,
-    };
-  }
-
-  return c.json(body, 500);
-}
 
 /**
  * Resolve the effective message limit for a chat session REST response.
