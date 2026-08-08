@@ -62,6 +62,7 @@ This is a quality-gate repair only. It must not change runtime UI, API, CLI, clo
 - `constitution-validator`: PASS; no runtime/deployment hardcoded values or constitution violations.
 - `security-auditor`: PASS after isolating browser analytics to loopback and adding a fail-closed production-request blocker.
 - Independent defensive regression reviewer: PASS after specialized gates were bound to exact workspace/package/script identity and the complete evidence manifest was added.
+- `task-completion-validator`: PASS; every research finding, checklist item, and implementation acceptance criterion maps to substantive diff/test evidence, with the PR/check wait intentionally remaining as the sole release item.
 - Every material finding was addressed; no finding was deferred.
 
 ## Acceptance criteria
