@@ -343,6 +343,7 @@ export async function provisionNode(
     try {
       backendDnsRecordId = await createNodeBackendDNSRecord(node.id, vm.ip, env);
     } catch (dnsErr) {
+      throwIfProviderRequestAborted(providerContext);
       log.error('node_provisioning.dns_record_failed', {
         nodeId: node.id,
         ...serializeError(dnsErr),
@@ -350,6 +351,7 @@ export async function provisionNode(
       dnsErrorMessage = dnsErr instanceof Error ? dnsErr.message : String(dnsErr);
     }
 
+    throwIfProviderRequestAborted(providerContext);
     await db
       .update(schema.nodes)
       .set({

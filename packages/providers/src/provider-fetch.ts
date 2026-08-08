@@ -53,11 +53,31 @@ export async function providerFetch(
       signal: abortScope.signal,
     });
     await assertProviderResponseOk(providerName, response, maxErrorBodyChars);
-    return response;
+    return await completeAbortableResponse(response, abortScope.signal);
   } catch (err) {
     normalizeProviderFetchError(providerName, url, timeoutMs, abortScope.abortSource(), err);
   } finally {
     abortScope.cleanup();
+  }
+}
+
+/**
+ * Keep cancellation active through response-body delivery while returning an
+ * equivalent, unread response to existing callers.
+ */
+export async function completeAbortableResponse(
+  response: Response,
+  signal: AbortSignal
+): Promise<Response> {
+  if (!response.body) return response;
+  const replayableResponse = response.clone();
+
+  try {
+    await drainResponseBody(response, signal);
+    return replayableResponse;
+  } catch (error) {
+    void replayableResponse.body?.cancel(error).catch(() => undefined);
+    throw error;
   }
 }
 
@@ -110,6 +130,25 @@ function createProviderAbortScope(
       }
     },
   };
+}
+
+async function drainResponseBody(response: Response, signal: AbortSignal): Promise<void> {
+  if (signal.aborted) throw signal.reason;
+  let onAbort: (() => void) | undefined;
+  const aborted = new Promise<never>((_resolve, reject) => {
+    onAbort = () => {
+      void response.body?.cancel(signal.reason).catch(() => undefined);
+      reject(signal.reason);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    if (signal.aborted) onAbort();
+  });
+
+  try {
+    await Promise.race([response.arrayBuffer(), aborted]);
+  } finally {
+    if (onAbort) signal.removeEventListener('abort', onAbort);
+  }
 }
 
 async function assertProviderResponseOk(

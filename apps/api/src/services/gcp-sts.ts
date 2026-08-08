@@ -148,6 +148,7 @@ export async function getGcpAccessToken(
   if (cacheTtl > 0) {
     throwIfProviderRequestAborted(context);
     await env.KV.put(cacheKey, result.accessToken, { expirationTtl: cacheTtl });
+    throwIfProviderRequestAborted(context);
   }
   return result.accessToken;
 }

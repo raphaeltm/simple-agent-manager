@@ -3,7 +3,17 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { provisionNode } from '../../../src/services/nodes';
 
-const { persistError } = vi.hoisted(() => ({ persistError: vi.fn() }));
+const { logError, persistError } = vi.hoisted(() => ({
+  logError: vi.fn(),
+  persistError: vi.fn(),
+}));
+
+vi.mock('../../../src/lib/logger', () => ({
+  log: { error: logError, info: vi.fn(), warn: vi.fn(), debug: vi.fn() },
+  serializeError: (error: unknown) => ({
+    error: error instanceof Error ? error.message : String(error),
+  }),
+}));
 
 // Records the write operations the drizzle mock receives so tests can assert
 // whether the failed node row was DELETED (capacity) or UPDATEd to status:'error'
@@ -273,6 +283,37 @@ describe('provisionNode rethrowProviderError', () => {
     expect(ops.slice(operationCountAtAbort)).toEqual([]);
     expect(createNodeBackendDNSRecord).not.toHaveBeenCalled();
     expect(persistError).not.toHaveBeenCalled();
+  });
+
+  it('preserves cancellation during DNS creation and performs no later bookkeeping', async () => {
+    const controller = new AbortController();
+    const callerReason = new ProviderError('hetzner', 404, 'caller cancelled pending DNS');
+    let releaseDns: () => void = () => undefined;
+    const dnsStarted = new Promise<void>((resolveStarted) => {
+      createNodeBackendDNSRecord.mockImplementationOnce(async () => {
+        resolveStarted();
+        return await new Promise<string>((resolve) => {
+          releaseDns = () => resolve('dns-record-id');
+        });
+      });
+    });
+
+    const provisioning = provisionNode('node-1', ENV, undefined, {
+      signal: controller.signal,
+    });
+    await dnsStarted;
+    const operationCountAtAbort = ops.length;
+    controller.abort(callerReason);
+    releaseDns();
+
+    await expect(provisioning).rejects.toBe(callerReason);
+    expect(ops.slice(operationCountAtAbort)).toEqual([]);
+    expect(persistError).not.toHaveBeenCalled();
+    expect(logError).not.toHaveBeenCalledWith(
+      'node_provisioning.dns_record_failed',
+      expect.anything()
+    );
+    expect(logError).not.toHaveBeenCalledWith('node_provisioning.failed', expect.anything());
   });
 
   it('deletes the failed node row and re-throws on transient capacity exhaustion', async () => {

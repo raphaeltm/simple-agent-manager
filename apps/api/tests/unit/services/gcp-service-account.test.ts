@@ -215,6 +215,48 @@ describe('service-account verification and caching', () => {
     expect(kv.namespace.put).not.toHaveBeenCalled();
   });
 
+  it('preserves cancellation that arrives while the derivative token cache write is pending', async () => {
+    const credential = await parseGcpServiceAccountJson(serviceAccountJson(), 'us-central1-a');
+    const kv = createKv();
+    const caller = new AbortController();
+    const reason = new ProviderError('gcp', 409, 'caller cancelled pending token cache write');
+    let releasePut: () => void = () => undefined;
+    const putStarted = new Promise<void>((resolveStarted) => {
+      vi.mocked(kv.namespace.put).mockImplementationOnce(async () => {
+        resolveStarted();
+        await new Promise<void>((resolve) => {
+          releasePut = resolve;
+        });
+      });
+    });
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access_token: 'short-lived-token',
+          token_type: 'Bearer',
+          expires_in: 3600,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = getGcpAccessToken(
+      'user-1',
+      'project-a',
+      credential,
+      { KV: kv.namespace } as Env,
+      { signal: caller.signal }
+    );
+    await putStarted;
+    caller.abort(reason);
+    releasePut();
+
+    await expect(request).rejects.toBe(reason);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(kv.namespace.put).toHaveBeenCalledTimes(1);
+  });
+
   it('checks the selected Compute zone with a bearer token', async () => {
     const credential = await parseGcpServiceAccountJson(serviceAccountJson(), 'us-central1-a');
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
