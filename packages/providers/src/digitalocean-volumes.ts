@@ -1,8 +1,14 @@
 import {
-  DIGITALOCEAN_VOLUME_NAME_TAG_KEY,
-  digitalOceanTagsToLabels,
-  labelsToDigitalOceanTags,
-} from './digitalocean-tags';
+  DIGITALOCEAN_API_URL,
+  DIGITALOCEAN_LIST_PER_PAGE,
+  type DigitalOceanErrorMapper,
+  type DigitalOceanVolumeClientOptions,
+  mapDigitalOceanVolume,
+  sanitizeDigitalOceanVolumeName,
+  toDigitalOceanDropletId,
+  validateDigitalOceanVolumeSize,
+} from './digitalocean-metadata';
+import { DIGITALOCEAN_VOLUME_NAME_TAG_KEY, labelsToDigitalOceanTags } from './digitalocean-tags';
 import {
   providerDelay,
   providerFetch,
@@ -13,21 +19,14 @@ import type {
   ProviderLogger,
   ProviderRequestContext,
   VolumeAttachmentConfig,
-  VolumeCapabilities,
   VolumeConfig,
   VolumeDetachConfig,
   VolumeInstance,
   VolumeListConfig,
   VolumeLookupConfig,
   VolumeResizeConfig,
-  VolumeStatus,
 } from './types';
-import {
-  ProviderError,
-  SAM_VOLUME_FILESYSTEM_FORMAT,
-  SAM_VOLUME_FSTAB_OPTIONS,
-  SAM_VOLUME_MOUNT_PATH_TEMPLATE,
-} from './types';
+import { ProviderError } from './types';
 import { parseProviderJson } from './validation';
 import {
   type DigitalOceanActionPayload,
@@ -37,62 +36,17 @@ import {
   validateDigitalOceanVolumesResponse,
 } from './validation-digitalocean';
 
-const DIGITALOCEAN_API_URL = 'https://api.digitalocean.com/v2';
-const DIGITALOCEAN_LIST_PER_PAGE = 200;
-
-export const DIGITALOCEAN_VOLUME_MIN_SIZE_GB = 1;
-export const DIGITALOCEAN_VOLUME_MAX_SIZE_GB = 16_384;
-export const DEFAULT_DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS = 60_000;
-
-/** DigitalOcean volume names: lowercase letters/numbers/hyphens, must start with a letter, <=64 chars. */
-const DIGITALOCEAN_VOLUME_NAME_MAX_LENGTH = 64;
-
-export const DIGITALOCEAN_VOLUME_CAPABILITIES: VolumeCapabilities = {
-  supported: true,
-  minSizeGb: DIGITALOCEAN_VOLUME_MIN_SIZE_GB,
-  maxSizeGb: DIGITALOCEAN_VOLUME_MAX_SIZE_GB,
-  growOnlyResize: true,
-  requiresSameLocation: true,
-  defaultFormat: SAM_VOLUME_FILESYSTEM_FORMAT,
-  lifecycle: {
-    filesystem: SAM_VOLUME_FILESYSTEM_FORMAT,
-    mountPathTemplate: SAM_VOLUME_MOUNT_PATH_TEMPLATE,
-    fstabOptions: SAM_VOLUME_FSTAB_OPTIONS,
-  },
-  notes: [
-    'DigitalOcean Block Storage is available in all current DO regions; create the volume in the same region as its droplet.',
-    'DO volume names are lowercased/sanitized/truncated to 64 chars; SAM round-trips the exact volume name via a sam-name tag. The provider creates raw block devices; SAM node-side code formats ext4 and mounts with nofail.',
-    'linuxDevice is the deterministic DO by-id path /dev/disk/by-id/scsi-0DO_Volume_<name>.',
-  ],
-};
-
-export type DigitalOceanErrorMapper = (err: unknown) => unknown;
-
-export interface DigitalOceanVolumeClientOptions {
-  requestTimeoutMs: number;
-  actionPollTimeoutMs: number;
-  actionPollIntervalMs: number;
-  maxListPages: number;
-  logger?: ProviderLogger;
-}
-
-/**
- * Sanitize a SAM volume name into a valid DigitalOcean volume name:
- * lowercase, `[a-z0-9-]` only, must start with a letter, <=64 chars, no trailing hyphen.
- */
-export function sanitizeDigitalOceanVolumeName(name: string): string {
-  let sanitized = name
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, '-')
-    .slice(0, DIGITALOCEAN_VOLUME_NAME_MAX_LENGTH)
-    // Strip trailing hyphen AFTER truncating so a slice mid-hyphen can't leave a trailing '-'.
-    .replace(/-+$/g, '');
-  // DO requires the name to start with a letter.
-  if (!/^[a-z]/.test(sanitized)) {
-    sanitized = `v${sanitized}`.slice(0, DIGITALOCEAN_VOLUME_NAME_MAX_LENGTH).replace(/-+$/g, '');
-  }
-  return sanitized || 'sam-volume';
-}
+export type {
+  DigitalOceanErrorMapper,
+  DigitalOceanVolumeClientOptions,
+} from './digitalocean-metadata';
+export {
+  DEFAULT_DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS,
+  DIGITALOCEAN_VOLUME_CAPABILITIES,
+  DIGITALOCEAN_VOLUME_MAX_SIZE_GB,
+  DIGITALOCEAN_VOLUME_MIN_SIZE_GB,
+  sanitizeDigitalOceanVolumeName,
+} from './digitalocean-metadata';
 
 export class DigitalOceanVolumeClient {
   private readonly requestTimeoutMs: number;
@@ -118,7 +72,7 @@ export class DigitalOceanVolumeClient {
     context?: ProviderRequestContext
   ): Promise<VolumeInstance> {
     throwIfProviderRequestAborted(context);
-    this.validateRequestedVolumeSize(config.sizeGb);
+    validateDigitalOceanVolumeSize(config.sizeGb);
 
     // DO volume names are lossy (lowercased/sanitized/truncated). Round-trip the EXACT
     // SAM name via a sam-name tag so getVolume/listVolumes stays faithful.
@@ -154,7 +108,7 @@ export class DigitalOceanVolumeClient {
       'createVolume'
     );
     throwIfProviderRequestAborted(context);
-    return this.mapVolume(data.volume);
+    return mapDigitalOceanVolume(data.volume);
   }
 
   async attachVolume(
@@ -162,7 +116,7 @@ export class DigitalOceanVolumeClient {
     context?: ProviderRequestContext
   ): Promise<VolumeInstance> {
     throwIfProviderRequestAborted(context);
-    const dropletId = toDropletId(config.serverId);
+    const dropletId = toDigitalOceanDropletId(config.serverId);
     await this.runVolumeAction(
       config.volumeId,
       'attachVolume',
@@ -214,7 +168,7 @@ export class DigitalOceanVolumeClient {
       'detachVolume',
       {
         type: 'detach',
-        droplet_id: toDropletId(attached),
+        droplet_id: toDigitalOceanDropletId(attached),
         region: config.location,
       },
       context
@@ -229,7 +183,7 @@ export class DigitalOceanVolumeClient {
     context?: ProviderRequestContext
   ): Promise<VolumeInstance> {
     throwIfProviderRequestAborted(context);
-    this.validateRequestedVolumeSize(config.sizeGb);
+    validateDigitalOceanVolumeSize(config.sizeGb);
     const currentSizeGb =
       config.currentSizeGb ?? (await this.getCurrentVolumeSize(config, context));
     if (config.sizeGb < currentSizeGb) {
@@ -306,7 +260,7 @@ export class DigitalOceanVolumeClient {
         'getVolume'
       );
       throwIfProviderRequestAborted(context);
-      return this.mapVolume(data.volume);
+      return mapDigitalOceanVolume(data.volume);
     } catch (err) {
       rethrowIfProviderRequestAborted(err, context);
       if (err instanceof ProviderError && err.statusCode === 404) {
@@ -323,7 +277,7 @@ export class DigitalOceanVolumeClient {
     throwIfProviderRequestAborted(context);
     const volumes = await this.fetchAllVolumes(config.location, context);
     throwIfProviderRequestAborted(context);
-    let mapped = volumes.map((volume) => this.mapVolume(volume));
+    let mapped = volumes.map((volume) => mapDigitalOceanVolume(volume));
 
     if (config.labels && Object.keys(config.labels).length > 0) {
       const entries = Object.entries(config.labels);
@@ -459,49 +413,6 @@ export class DigitalOceanVolumeClient {
     return data.action;
   }
 
-  private mapVolume(volume: DigitalOceanVolumePayload): VolumeInstance {
-    const decoded = digitalOceanTagsToLabels(volume.tags);
-    const { [DIGITALOCEAN_VOLUME_NAME_TAG_KEY]: encodedName, ...labels } = decoded;
-    const attachedServerId =
-      volume.droplet_ids.length > 0 ? String(volume.droplet_ids[0]) : undefined;
-
-    return {
-      id: volume.id,
-      name: encodedName ?? volume.name,
-      sizeGb: volume.size_gigabytes,
-      location: volume.region_slug,
-      status: this.mapStatus(attachedServerId),
-      ...(attachedServerId ? { attachedServerId } : {}),
-      // DO exposes attached volumes deterministically at this by-id path (from the DO name).
-      ...(volume.name ? { linuxDevice: `/dev/disk/by-id/scsi-0DO_Volume_${volume.name}` } : {}),
-      createdAt: volume.created_at,
-      labels,
-    };
-  }
-
-  private mapStatus(attachedServerId?: string): VolumeStatus {
-    return attachedServerId ? 'attached' : 'available';
-  }
-
-  private validateRequestedVolumeSize(sizeGb: number): void {
-    if (!Number.isInteger(sizeGb) || sizeGb < DIGITALOCEAN_VOLUME_MIN_SIZE_GB) {
-      throw new ProviderError(
-        'digitalocean',
-        undefined,
-        `DigitalOcean volume size must be an integer >= ${DIGITALOCEAN_VOLUME_MIN_SIZE_GB}GB`,
-        { category: 'invalid_config' }
-      );
-    }
-    if (sizeGb > DIGITALOCEAN_VOLUME_MAX_SIZE_GB) {
-      throw new ProviderError(
-        'digitalocean',
-        undefined,
-        `DigitalOcean volume size must be <= ${DIGITALOCEAN_VOLUME_MAX_SIZE_GB}GB`,
-        { category: 'invalid_config' }
-      );
-    }
-  }
-
   private async getCurrentVolumeSize(
     config: VolumeResizeConfig,
     context?: ProviderRequestContext
@@ -552,20 +463,4 @@ export class DigitalOceanVolumeClient {
       throw this.mapProviderError(err);
     }
   }
-}
-
-/** Convert a SAM server id (stringified DO droplet integer id) into the integer DO API expects. */
-function toDropletId(serverId: string): number {
-  const dropletId = Number(serverId);
-  if (!Number.isInteger(dropletId) || dropletId <= 0) {
-    throw new ProviderError(
-      'digitalocean',
-      undefined,
-      `Invalid DigitalOcean droplet id: "${serverId}"`,
-      {
-        category: 'invalid_config',
-      }
-    );
-  }
-  return dropletId;
 }

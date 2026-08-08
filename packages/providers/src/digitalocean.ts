@@ -4,6 +4,24 @@ import {
   DEFAULT_DIGITALOCEAN_REGION,
 } from '@simple-agent-manager/shared';
 
+import {
+  classifyDigitalOceanError,
+  DEFAULT_DIGITALOCEAN_ACTION_POLL_INTERVAL_MS,
+  DEFAULT_DIGITALOCEAN_IP_POLL_INTERVAL_MS,
+  DEFAULT_DIGITALOCEAN_IP_POLL_TIMEOUT_MS,
+  DEFAULT_DIGITALOCEAN_MAX_LIST_PAGES,
+  DEFAULT_DIGITALOCEAN_REQUEST_TIMEOUT_MS,
+  DIGITALOCEAN_API_URL,
+  DIGITALOCEAN_LIST_PER_PAGE,
+  DIGITALOCEAN_LOCATION_META,
+  DIGITALOCEAN_LOCATIONS,
+  DIGITALOCEAN_SIZE_CONFIGS,
+  type DigitalOceanProviderRuntimeOptions,
+  extractPublicIp,
+  mapDigitalOceanStatus,
+  resolveDigitalOceanImage,
+  sanitizeDropletName,
+} from './digitalocean-metadata';
 import { digitalOceanTagsToLabels, labelsToDigitalOceanTags } from './digitalocean-tags';
 import {
   DEFAULT_DIGITALOCEAN_ACTION_POLL_TIMEOUT_MS,
@@ -19,13 +37,11 @@ import {
 import type {
   LocationMeta,
   Provider,
-  ProviderErrorCategory,
   ProviderLogger,
   ProviderRequestContext,
   SizeConfig,
   VMConfig,
   VMInstance,
-  VMStatus,
   VolumeAttachmentConfig,
   VolumeCapabilities,
   VolumeConfig,
@@ -39,152 +55,28 @@ import { noopProviderLogger, ProviderError } from './types';
 import { parseProviderJson } from './validation';
 import {
   type DigitalOceanDropletPayload,
-  type DigitalOceanNetworkV4,
   validateDigitalOceanDropletResponse,
   validateDigitalOceanDropletsResponse,
 } from './validation-digitalocean';
 
-const DIGITALOCEAN_API_URL = 'https://api.digitalocean.com/v2';
-
-export const DEFAULT_DIGITALOCEAN_REQUEST_TIMEOUT_MS = 30_000;
-export const DEFAULT_DIGITALOCEAN_IP_POLL_TIMEOUT_MS = 20_000;
-export const DEFAULT_DIGITALOCEAN_IP_POLL_INTERVAL_MS = 3_000;
-export const DEFAULT_DIGITALOCEAN_ACTION_POLL_INTERVAL_MS = 1_000;
-export const DEFAULT_DIGITALOCEAN_MAX_LIST_PAGES = 20;
-const DIGITALOCEAN_LIST_PER_PAGE = 200;
-
-export const DIGITALOCEAN_LOCATIONS = [
-  'fra1',
-  'ams3',
-  'lon1',
-  'nyc1',
-  'nyc3',
-  'sfo3',
-  'tor1',
-  'sgp1',
-  'blr1',
-  'syd1',
-] as const;
-
-const DIGITALOCEAN_LOCATION_META: Record<string, LocationMeta> = {
-  fra1: { name: 'Frankfurt', country: 'DE' },
-  ams3: { name: 'Amsterdam', country: 'NL' },
-  lon1: { name: 'London', country: 'GB' },
-  nyc1: { name: 'New York 1', country: 'US' },
-  nyc3: { name: 'New York 3', country: 'US' },
-  sfo3: { name: 'San Francisco', country: 'US' },
-  tor1: { name: 'Toronto', country: 'CA' },
-  sgp1: { name: 'Singapore', country: 'SG' },
-  blr1: { name: 'Bangalore', country: 'IN' },
-  syd1: { name: 'Sydney', country: 'AU' },
-};
-
-const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
-  small: {
-    type: 's-2vcpu-4gb',
-    price: '~$24/mo',
-    vcpu: 2,
-    ramGb: 4,
-    storageGb: 80,
-  },
-  medium: {
-    type: 's-4vcpu-8gb',
-    price: '~$48/mo',
-    vcpu: 4,
-    ramGb: 8,
-    storageGb: 160,
-  },
-  large: {
-    type: 's-8vcpu-16gb',
-    price: '~$96/mo',
-    vcpu: 8,
-    ramGb: 16,
-    storageGb: 320,
-  },
-};
-
-export interface DigitalOceanProviderRuntimeOptions {
-  region?: string;
-  image?: string;
-  requestTimeoutMs?: number;
-  ipPollTimeoutMs?: number;
-  ipPollIntervalMs?: number;
-  actionPollTimeoutMs?: number;
-  actionPollIntervalMs?: number;
-  maxListPages?: number;
-  logger?: ProviderLogger;
-}
-
-/**
- * Classify a DigitalOcean API error into a normalized ProviderErrorCategory.
- *
- * DO error responses are `{ id: "<code>", message: "<message>", request_id }`. The
- * top-level `message` is surfaced by provider-fetch; classification uses the HTTP
- * status plus message heuristics.
- */
-export function classifyDigitalOceanError(
-  statusCode: number | undefined,
-  message: string
-): ProviderErrorCategory {
-  if (statusCode === 401 || statusCode === 403) return 'auth_error';
-  if (statusCode === 429) return 'rate_limited';
-  if (typeof statusCode === 'number' && statusCode >= 500) return 'transient_capacity';
-  if (/not available|no capacity|out of stock|sold out|no available|unavailable/i.test(message)) {
-    return 'transient_capacity';
-  }
-  if (statusCode === 400 || statusCode === 404 || statusCode === 422) return 'invalid_config';
-  return 'unknown';
-}
-
-/**
- * Map DigitalOcean's droplet `status` onto a normalized VMStatus.
- * - `new`: provisioning
- * - `active`: powered on and running
- * - `off`: powered off
- * - `archive`: archived (treated as off — VMStatus has no terminated state)
- */
-export function mapDigitalOceanStatus(status: string): VMStatus {
-  switch (status) {
-    case 'new':
-      return 'initializing';
-    case 'active':
-      return 'running';
-    case 'off':
-    case 'archive':
-      return 'off';
-    default:
-      return 'initializing';
-  }
-}
-
-/** Extract the public IPv4 address from a droplet's `networks.v4[]` (empty until active). */
-export function extractPublicIp(networks: DigitalOceanNetworkV4[]): string {
-  const publicNet = networks.find((net) => net.type === 'public' && net.ip_address);
-  return publicNet?.ip_address ?? '';
-}
-
-/** Sanitize a SAM node name into a valid DigitalOcean droplet name (lowercase alnum + hyphen, <=63 chars). */
-function sanitizeDropletName(name: string): string {
-  const host = name
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, '-')
-    .slice(0, 63)
-    // Strip AFTER truncating so a slice landing mid-hyphen can't leave a trailing '-'.
-    .replace(/^-+|-+$/g, '');
-  return host || 'sam-node';
-}
-
-/** DO `image` accepts a slug string or a numeric image id. */
-function resolveImage(image: string): string | number {
-  const trimmed = image.trim();
-  return /^\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) : trimmed;
-}
+export type { DigitalOceanProviderRuntimeOptions } from './digitalocean-metadata';
+export {
+  classifyDigitalOceanError,
+  DEFAULT_DIGITALOCEAN_ACTION_POLL_INTERVAL_MS,
+  DEFAULT_DIGITALOCEAN_IP_POLL_INTERVAL_MS,
+  DEFAULT_DIGITALOCEAN_IP_POLL_TIMEOUT_MS,
+  DEFAULT_DIGITALOCEAN_MAX_LIST_PAGES,
+  DEFAULT_DIGITALOCEAN_REQUEST_TIMEOUT_MS,
+  DIGITALOCEAN_LOCATIONS,
+  extractPublicIp,
+  mapDigitalOceanStatus,
+} from './digitalocean-metadata';
 
 export class DigitalOceanProvider implements Provider {
   readonly name = 'digitalocean';
   readonly locations: readonly string[] = DIGITALOCEAN_LOCATIONS;
   readonly locationMetadata: Readonly<Record<string, LocationMeta>> = DIGITALOCEAN_LOCATION_META;
-  readonly sizes: Readonly<Record<VMSize, SizeConfig>> = SIZE_CONFIGS;
+  readonly sizes: Readonly<Record<VMSize, SizeConfig>> = DIGITALOCEAN_SIZE_CONFIGS;
   readonly volumeCapabilities: VolumeCapabilities = DIGITALOCEAN_VOLUME_CAPABILITIES;
   readonly defaultLocation: string;
 
@@ -256,7 +148,7 @@ export class DigitalOceanProvider implements Provider {
           name: sanitizeDropletName(config.name),
           region,
           size: sizeConfig.type,
-          image: resolveImage(config.image || this.image),
+          image: resolveDigitalOceanImage(config.image || this.image),
           // DigitalOcean user_data is PLAIN TEXT (max 64 KiB) — no base64 needed.
           user_data: config.userData,
           tags: labelsToDigitalOceanTags(config.labels || {}),
