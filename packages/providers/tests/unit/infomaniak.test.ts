@@ -45,7 +45,10 @@ function volume(overrides: Record<string, unknown> = {}): Record<string, unknown
   };
 }
 
-afterEach(() => vi.restoreAllMocks());
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 describe('InfomaniakProvider', () => {
   it('authenticates with explicit Keystone application credentials and validates the full catalog', async () => {
@@ -186,6 +189,66 @@ describe('InfomaniakProvider', () => {
         metadata: { project: 'p1' },
       },
     });
+  });
+
+  it('stops IP polling at caller cancellation without another provider read', async () => {
+    vi.useFakeTimers();
+    let serverReads = 0;
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url.endsWith('/auth/tokens')) return auth();
+      if (url.startsWith(`${IMAGE}/v2/images`))
+        return json({ images: [{ id: 'image-1', name: 'Ubuntu 24.04 noble' }] });
+      if (url.startsWith(`${COMPUTE}/flavors/detail`))
+        return json({ flavors: [{ id: 'flavor-1', name: 'a2-ram4-disk20-perf1' }] });
+      if (url.startsWith(`${NETWORK}/v2.0/networks`))
+        return json({ networks: [{ id: 'network-1', name: 'ext-net1' }] });
+      if (url === `${COMPUTE}/servers` && init?.method === 'POST')
+        return json({ server: { id: 'server-pending' } }, 202);
+      if (url === `${COMPUTE}/servers/server-pending`) {
+        serverReads += 1;
+        return json({
+          server: {
+            id: 'server-pending',
+            name: 'sam-node',
+            status: 'BUILD',
+            addresses: {},
+            flavor: { id: 'flavor-1' },
+            created: '2026-08-08T00:00:00Z',
+            metadata: {},
+          },
+        });
+      }
+      throw new Error(`Unexpected request ${init?.method ?? 'GET'} ${url}`);
+    });
+    const provider = new InfomaniakProvider('id', 'secret', {
+      authUrl: AUTH_URL,
+      ipPollTimeoutMs: 1_000,
+      ipPollIntervalMs: 100,
+    });
+    const caller = new AbortController();
+    const reason = new ProviderError('infomaniak', 503, 'caller cancelled IP polling');
+
+    const outcome = provider
+      .createVM(
+        {
+          name: 'sam-node',
+          size: 'small',
+          location: 'dc4-a',
+          userData: '#cloud-config',
+        },
+        { signal: caller.signal }
+      )
+      .catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(serverReads).toBe(1);
+
+    caller.abort(reason);
+    await vi.runAllTimersAsync();
+
+    expect(await outcome).toBe(reason);
+    expect(serverReads).toBe(1);
+    expect(fetchMock).toHaveBeenCalled();
   });
 
   it('attaches through Nova with the exact payload and returns stable device discovery data', async () => {

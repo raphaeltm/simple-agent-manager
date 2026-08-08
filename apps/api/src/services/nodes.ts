@@ -1,5 +1,11 @@
 import { generateCloudInit, validateCloudInitSize } from '@simple-agent-manager/cloud-init';
-import { isTransientCapacityError, ProviderError } from '@simple-agent-manager/providers';
+import {
+  isTransientCapacityError,
+  ProviderError,
+  type ProviderRequestContext,
+  rethrowIfProviderRequestAborted,
+  throwIfProviderRequestAborted,
+} from '@simple-agent-manager/providers';
 import {
   type CredentialProvider,
   type CredentialSource,
@@ -155,6 +161,8 @@ export interface ProvisionNodeOptions {
    * Legacy callers omit this and retain the original swallow-and-record behavior.
    */
   rethrowProviderError?: boolean;
+  /** Explicit lifecycle cancellation for provider work; detached HTTP callers omit this. */
+  signal?: AbortSignal;
 }
 
 export async function provisionNode(
@@ -164,6 +172,10 @@ export async function provisionNode(
   options?: ProvisionNodeOptions,
   deploymentContext?: DeploymentProvisionContext
 ): Promise<void> {
+  const providerContext: ProviderRequestContext | undefined = options?.signal
+    ? { signal: options.signal }
+    : undefined;
+  throwIfProviderRequestAborted(providerContext);
   const db = drizzle(env.DATABASE, { schema });
 
   const nodes = await db.select().from(schema.nodes).where(eq(schema.nodes.id, nodeId)).limit(1);
@@ -197,6 +209,7 @@ export async function provisionNode(
           : 'Cloud provider account not connected'
       );
     }
+    throwIfProviderRequestAborted(providerContext);
     attemptedProvider = providerResult.providerName;
 
     // Persist the resolved provider identity before external provisioning so
@@ -282,7 +295,7 @@ export async function provisionNode(
       env.HETZNER_BASE_IMAGE
     );
 
-    const vm = await provider.createVM({
+    const vmConfig = {
       name: `node-${node.id.toLowerCase()}`,
       size: node.vmSize as 'small' | 'medium' | 'large',
       location: node.vmLocation,
@@ -293,7 +306,11 @@ export async function provisionNode(
         isDeploymentNode,
         environmentLabel: resolveEnvironmentLabel(env),
       }),
-    });
+    };
+    const vm = providerContext
+      ? await provider.createVM(vmConfig, providerContext)
+      : await provider.createVM(vmConfig);
+    throwIfProviderRequestAborted(providerContext);
 
     // Scaleway allocates IPs asynchronously after boot — vm.ip will be empty.
     // Store the provider instance ID and mark as pending-ip; heartbeat backfill
@@ -318,6 +335,7 @@ export async function provisionNode(
           updatedAt: new Date().toISOString(),
         })
         .where(eq(schema.nodes.id, node.id));
+      throwIfProviderRequestAborted(providerContext);
       return;
     }
 
@@ -326,6 +344,7 @@ export async function provisionNode(
     try {
       backendDnsRecordId = await createNodeBackendDNSRecord(node.id, vm.ip, env);
     } catch (dnsErr) {
+      throwIfProviderRequestAborted(providerContext);
       log.error('node_provisioning.dns_record_failed', {
         nodeId: node.id,
         ...serializeError(dnsErr),
@@ -333,6 +352,7 @@ export async function provisionNode(
       dnsErrorMessage = dnsErr instanceof Error ? dnsErr.message : String(dnsErr);
     }
 
+    throwIfProviderRequestAborted(providerContext);
     await db
       .update(schema.nodes)
       .set({
@@ -353,7 +373,9 @@ export async function provisionNode(
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.nodes.id, node.id));
+    throwIfProviderRequestAborted(providerContext);
   } catch (err) {
+    rethrowIfProviderRequestAborted(err, providerContext);
     // Sanitize GCP errors to prevent leaking resource paths in client-visible errorMessage
     const errorMessage =
       err instanceof GcpApiError
@@ -375,22 +397,26 @@ export async function provisionNode(
 
     // Persist detailed error to observability database
     try {
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'error',
-        message: `Node provisioning failed: ${errorMessage}`,
-        context: {
-          component: 'node-provisioning',
+      await persistError(
+        env.OBSERVABILITY_DATABASE,
+        {
+          source: 'api',
+          level: 'error',
+          message: `Node provisioning failed: ${errorMessage}`,
+          context: {
+            component: 'node-provisioning',
+            nodeId: node.id,
+            userId: node.userId,
+            provider: providerName,
+            vmSize: node.vmSize,
+            vmLocation: node.vmLocation,
+            statusCode,
+          },
           nodeId: node.id,
           userId: node.userId,
-          provider: providerName,
-          vmSize: node.vmSize,
-          vmLocation: node.vmLocation,
-          statusCode,
         },
-        nodeId: node.id,
-        userId: node.userId,
-      }, env);
+        env
+      );
     } catch (obsErr) {
       log.error('node_provisioning.observability_persist_failed', serializeError(obsErr));
     }

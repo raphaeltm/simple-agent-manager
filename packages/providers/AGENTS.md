@@ -27,6 +27,9 @@ pnpm --filter @simple-agent-manager/providers lint        # ESLint
 ## Conventions
 
 - Every provider implements the `Provider` interface from `src/types.ts`
+- Every public VM and volume operation accepts an optional `ProviderRequestContext` and propagates
+  it through HTTP, delays, retries, polling, pagination, and delegated helpers. Preserve the exact
+  caller cancellation reason and begin no follow-up request or resource mutation after cancellation.
 - Provider methods accept user-supplied API tokens (BYOC model) — never platform credentials
 - Location validation uses `PROVIDER_LOCATIONS` registry from `@simple-agent-manager/shared`
 - New providers: create `src/<provider-name>.ts`, implement `Provider` interface, export from `src/index.ts`

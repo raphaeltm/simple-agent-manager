@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { InfomaniakProvider } from '../../src/infomaniak';
 import type { Provider } from '../../src/types';
+import { runProviderCancellationContractTests } from './provider-contract.test';
 
 describe('InfomaniakProvider contract surface', () => {
   it('implements every VM and volume lifecycle operation', () => {
@@ -32,3 +33,8 @@ describe('InfomaniakProvider contract surface', () => {
     }
   });
 });
+
+runProviderCancellationContractTests(
+  () => new InfomaniakProvider('contract-credential-id', 'contract-credential-secret'),
+  { name: 'InfomaniakProvider Contract' }
+);

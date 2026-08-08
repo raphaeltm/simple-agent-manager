@@ -1,9 +1,11 @@
-import { providerFetch } from './provider-fetch';
 import {
-  labelsToScalewayTags,
-  scalewayTagsToLabels,
-} from './scaleway-tags';
+  providerFetch,
+  rethrowIfProviderRequestAborted,
+  throwIfProviderRequestAborted,
+} from './provider-fetch';
+import { labelsToScalewayTags, scalewayTagsToLabels } from './scaleway-tags';
 import type {
+  ProviderRequestContext,
   VolumeAttachmentConfig,
   VolumeCapabilities,
   VolumeConfig,
@@ -61,10 +63,14 @@ export class ScalewayVolumeClient {
   constructor(
     private readonly secretKey: string,
     private readonly projectId: string,
-    private readonly mapProviderError: ScalewayErrorMapper,
+    private readonly mapProviderError: ScalewayErrorMapper
   ) {}
 
-  async createVolume(config: VolumeConfig): Promise<VolumeInstance> {
+  async createVolume(
+    config: VolumeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
     this.validateRequestedVolumeSize(config.sizeGb);
 
     let response: Response;
@@ -88,19 +94,29 @@ export class ScalewayVolumeClient {
             tags: labelsToScalewayTags(config.labels || {}),
           }),
         },
+        undefined,
+        undefined,
+        context
       );
+      throwIfProviderRequestAborted(context);
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       throw this.mapProviderError(err);
     }
 
     const data = validateScalewayBlockVolumeResponse(
       await parseProviderJson(response, 'scaleway', 'createVolume'),
-      'createVolume',
+      'createVolume'
     );
+    throwIfProviderRequestAborted(context);
     return this.mapVolumeToInstance(data.volume);
   }
 
-  async attachVolume(config: VolumeAttachmentConfig): Promise<VolumeInstance> {
+  async attachVolume(
+    config: VolumeAttachmentConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
     await providerFetch(
       'scaleway',
       `${SCALEWAY_INSTANCE_API_URL}/${config.location}/servers/${config.serverId}/attach-volume`,
@@ -116,18 +132,34 @@ export class ScalewayVolumeClient {
           boot: false,
         }),
       },
+      undefined,
+      undefined,
+      context
     );
+    throwIfProviderRequestAborted(context);
 
-    const volume = await this.getVolume({ volumeId: config.volumeId, location: config.location });
+    const volume = await this.getVolume(
+      { volumeId: config.volumeId, location: config.location },
+      context
+    );
     if (!volume) {
-      throw new ProviderError('scaleway', 404, `Scaleway volume ${config.volumeId} not found after attach`, {
-        category: 'invalid_config',
-      });
+      throw new ProviderError(
+        'scaleway',
+        404,
+        `Scaleway volume ${config.volumeId} not found after attach`,
+        {
+          category: 'invalid_config',
+        }
+      );
     }
     return volume;
   }
 
-  async detachVolume(config: VolumeDetachConfig): Promise<VolumeInstance | null> {
+  async detachVolume(
+    config: VolumeDetachConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null> {
+    throwIfProviderRequestAborted(context);
     if (!config.serverId) {
       throw new ProviderError('scaleway', undefined, 'Scaleway detachVolume requires serverId', {
         category: 'invalid_config',
@@ -146,26 +178,36 @@ export class ScalewayVolumeClient {
           },
           body: JSON.stringify({ volume_id: config.volumeId }),
         },
+        undefined,
+        undefined,
+        context
       );
+      throwIfProviderRequestAborted(context);
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       if (err instanceof ProviderError && err.statusCode === 404) {
         return null;
       }
       throw err;
     }
 
-    return this.getVolume({ volumeId: config.volumeId, location: config.location });
+    return this.getVolume({ volumeId: config.volumeId, location: config.location }, context);
   }
 
-  async resizeVolume(config: VolumeResizeConfig): Promise<VolumeInstance> {
+  async resizeVolume(
+    config: VolumeResizeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
     this.validateRequestedVolumeSize(config.sizeGb);
-    const currentSizeGb = config.currentSizeGb ?? await this.getCurrentVolumeSize(config);
+    const currentSizeGb =
+      config.currentSizeGb ?? (await this.getCurrentVolumeSize(config, context));
     if (config.sizeGb < currentSizeGb) {
       throw new ProviderError(
         'scaleway',
         undefined,
         `Cannot shrink Scaleway volume ${config.volumeId} from ${currentSizeGb}GB to ${config.sizeGb}GB`,
-        { category: 'invalid_config' },
+        { category: 'invalid_config' }
       );
     }
 
@@ -180,16 +222,22 @@ export class ScalewayVolumeClient {
         },
         body: JSON.stringify({ size: this.gbToBytes(config.sizeGb) }),
       },
+      undefined,
+      undefined,
+      context
     );
+    throwIfProviderRequestAborted(context);
 
     const data = validateScalewayBlockVolumeResponse(
       await parseProviderJson(response, 'scaleway', 'resizeVolume'),
-      'resizeVolume',
+      'resizeVolume'
     );
+    throwIfProviderRequestAborted(context);
     return this.mapVolumeToInstance(data.volume);
   }
 
-  async deleteVolume(config: VolumeLookupConfig): Promise<void> {
+  async deleteVolume(config: VolumeLookupConfig, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
     try {
       await providerFetch(
         'scaleway',
@@ -198,8 +246,13 @@ export class ScalewayVolumeClient {
           method: 'DELETE',
           headers: { 'X-Auth-Token': this.secretKey },
         },
+        undefined,
+        undefined,
+        context
       );
+      throwIfProviderRequestAborted(context);
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       if (err instanceof ProviderError && err.statusCode === 404) {
         return;
       }
@@ -207,7 +260,11 @@ export class ScalewayVolumeClient {
     }
   }
 
-  async getVolume(config: VolumeLookupConfig): Promise<VolumeInstance | null> {
+  async getVolume(
+    config: VolumeLookupConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null> {
+    throwIfProviderRequestAborted(context);
     try {
       const response = await providerFetch(
         'scaleway',
@@ -215,14 +272,20 @@ export class ScalewayVolumeClient {
         {
           headers: { 'X-Auth-Token': this.secretKey },
         },
+        undefined,
+        undefined,
+        context
       );
+      throwIfProviderRequestAborted(context);
 
       const data = validateScalewayBlockVolumeResponse(
         await parseProviderJson(response, 'scaleway', 'getVolume'),
-        'getVolume',
+        'getVolume'
       );
+      throwIfProviderRequestAborted(context);
       return this.mapVolumeToInstance(data.volume);
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       if (err instanceof ProviderError && err.statusCode === 404) {
         return null;
       }
@@ -230,7 +293,11 @@ export class ScalewayVolumeClient {
     }
   }
 
-  async listVolumes(config: VolumeListConfig): Promise<VolumeInstance[]> {
+  async listVolumes(
+    config: VolumeListConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance[]> {
+    throwIfProviderRequestAborted(context);
     const params = new URLSearchParams({
       project_id: this.projectId,
       include_deleted: 'false',
@@ -247,18 +314,24 @@ export class ScalewayVolumeClient {
       {
         headers: { 'X-Auth-Token': this.secretKey },
       },
+      undefined,
+      undefined,
+      context
     );
+    throwIfProviderRequestAborted(context);
 
     const data = validateScalewayBlockVolumesResponse(
       await parseProviderJson(response, 'scaleway', 'listVolumes'),
-      'listVolumes',
+      'listVolumes'
     );
+    throwIfProviderRequestAborted(context);
     return data.volumes.map((volume) => this.mapVolumeToInstance(volume));
   }
 
   private mapVolumeToInstance(volume: ScalewayBlockVolumePayload): VolumeInstance {
-    const attachedReference = volume.references.find((reference) => reference.status === 'attached')
-      ?? volume.references[0];
+    const attachedReference =
+      volume.references.find((reference) => reference.status === 'attached') ??
+      volume.references[0];
 
     return {
       id: volume.id,
@@ -303,7 +376,7 @@ export class ScalewayVolumeClient {
         'scaleway',
         undefined,
         `Scaleway volume size must be an integer >= ${SCALEWAY_VOLUME_MIN_SIZE_GB}GB`,
-        { category: 'invalid_config' },
+        { category: 'invalid_config' }
       );
     }
     if (sizeGb > SCALEWAY_VOLUME_MAX_SIZE_GB) {
@@ -311,13 +384,19 @@ export class ScalewayVolumeClient {
         'scaleway',
         undefined,
         `Scaleway volume size must be <= ${SCALEWAY_VOLUME_MAX_SIZE_GB}GB`,
-        { category: 'invalid_config' },
+        { category: 'invalid_config' }
       );
     }
   }
 
-  private async getCurrentVolumeSize(config: VolumeResizeConfig): Promise<number> {
-    const volume = await this.getVolume({ volumeId: config.volumeId, location: config.location });
+  private async getCurrentVolumeSize(
+    config: VolumeResizeConfig,
+    context?: ProviderRequestContext
+  ): Promise<number> {
+    const volume = await this.getVolume(
+      { volumeId: config.volumeId, location: config.location },
+      context
+    );
     if (!volume) {
       throw new ProviderError('scaleway', 404, `Scaleway volume ${config.volumeId} not found`, {
         category: 'invalid_config',
@@ -333,5 +412,4 @@ export class ScalewayVolumeClient {
   private bytesToGb(sizeBytes: number): number {
     return sizeBytes / SCALEWAY_BYTES_PER_GB;
   }
-
 }
