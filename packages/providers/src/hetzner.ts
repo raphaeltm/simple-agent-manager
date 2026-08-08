@@ -7,6 +7,7 @@ import {
   DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS,
   DEFAULT_HETZNER_MAX_LIST_PAGES,
   DEFAULT_PLACEMENT_RETRY_DELAY_MS,
+  buildHetznerListUrl,
   HETZNER_API_URL,
   HETZNER_LOCATION_META,
   HETZNER_LOCATIONS,
@@ -20,6 +21,7 @@ import {
   mapHetznerProviderError,
   mapHetznerServerToVMInstance,
   mapHetznerVolumeToInstance,
+  recordHetznerListPage,
 } from './hetzner-metadata';
 import {
   providerDelay,
@@ -702,19 +704,9 @@ export class HetznerProvider implements Provider {
 
     for (let pageCount = 0; pageCount < DEFAULT_HETZNER_MAX_LIST_PAGES; pageCount += 1) {
       throwIfProviderRequestAborted(context);
-      if (seenPages.has(page)) {
-        throw new ProviderError(
-          this.name,
-          undefined,
-          `Hetzner ${operation} pagination repeated page ${page}`,
-          {
-            category: 'invalid_config',
-          }
-        );
-      }
-      seenPages.add(page);
+      recordHetznerListPage(seenPages, page, operation);
 
-      const url = this.buildHetznerListUrl(resource, baseParams, labelParts, page);
+      const url = buildHetznerListUrl(resource, baseParams, labelParts, page);
       const response = await providerFetch(
         this.name,
         url,
@@ -744,21 +736,6 @@ export class HetznerProvider implements Provider {
         category: 'invalid_config',
       }
     );
-  }
-
-  private buildHetznerListUrl(
-    resource: 'servers' | 'volumes',
-    baseParams: URLSearchParams,
-    labelParts: string[],
-    page: number
-  ): string {
-    const params = new URLSearchParams(baseParams);
-    if (labelParts.length > 0) params.set('label_selector', labelParts.join(','));
-    if (page !== 1) params.set('page', String(page));
-    const queryString = params.toString();
-    return queryString
-      ? `${HETZNER_API_URL}/${resource}?${queryString}`
-      : `${HETZNER_API_URL}/${resource}`;
   }
 
   private validateRequestedVolumeSize(sizeGb: number): void {

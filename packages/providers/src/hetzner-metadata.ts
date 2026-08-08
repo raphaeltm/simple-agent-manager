@@ -42,6 +42,37 @@ export const HETZNER_MAX_VOLUMES_PER_SERVER = 16;
 // 100 pages × 25 items/page ≈ 2,500 resources — well above any realistic fleet
 export const DEFAULT_HETZNER_MAX_LIST_PAGES = 100;
 
+export function recordHetznerListPage(
+  seenPages: Set<number>,
+  page: number,
+  operation: 'listVMs' | 'listVolumes'
+): void {
+  if (seenPages.has(page)) {
+    throw new ProviderError(
+      'hetzner',
+      undefined,
+      `Hetzner ${operation} pagination repeated page ${page}`,
+      { category: 'invalid_config' }
+    );
+  }
+  seenPages.add(page);
+}
+
+export function buildHetznerListUrl(
+  resource: 'servers' | 'volumes',
+  baseParams: URLSearchParams,
+  labelParts: string[],
+  page: number
+): string {
+  const params = new URLSearchParams(baseParams);
+  if (labelParts.length > 0) params.set('label_selector', labelParts.join(','));
+  if (page !== 1) params.set('page', String(page));
+  const queryString = params.toString();
+  return queryString
+    ? `${HETZNER_API_URL}/${resource}?${queryString}`
+    : `${HETZNER_API_URL}/${resource}`;
+}
+
 export const HETZNER_VOLUME_CAPABILITIES: VolumeCapabilities = {
   supported: true,
   minSizeGb: HETZNER_VOLUME_MIN_SIZE_GB,
