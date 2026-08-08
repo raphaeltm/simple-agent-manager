@@ -22,6 +22,7 @@ export default defineConfig({
     ? undefined
     : {
         command: 'pnpm build && pnpm preview --host 127.0.0.1 --port 4321',
+        env: { PUBLIC_BASE_DOMAIN: 'localhost' },
         url: 'http://127.0.0.1:4321/self-host/',
         reuseExistingServer: false,
         timeout: 120_000,
