@@ -26,7 +26,7 @@ This remediation must preserve public/API/CLI/data behavior, the historical migr
 - [x] Apply the existing DROP, unscoped DELETE/UPDATE, TRUNCATE, and `PRAGMA foreign_keys = OFF` rules to complete tokenized statements while preserving temporary-table and historical allowlist behavior.
 - [x] Add an optional migration-directory CLI seam and replace duplicated-regex tests with production-checker scenarios plus a CLI diagnostic capability test.
 - [x] Cover the known multiline bypass, multiline DROP/ALTER/rename forms, comments between tokens, strings, quoted identifiers, triggers, safe SQL, malformed SQL diagnostics, historical clean-install corpus, and upgrade-style fixture corpus.
-- [ ] Prove current migration ordering, clean D1 application, upgrade D1 application, and post-apply safety checks remain successful.
+- [x] Prove current migration ordering, clean D1 application, upgrade D1 application, and post-apply safety checks remain successful.
 - [ ] Run all requested local reviewers and address every correctness/security/test-quality finding.
 - [ ] Rebase conservatively on current `origin/main`, open one focused PR, and wait for every applicable GitHub check.
 - [ ] Preserve the user release contract: no shared-staging deployment and no merge.
@@ -63,3 +63,6 @@ This remediation must preserve public/API/CLI/data behavior, the historical migr
 - `scripts/quality/check-migration-safety.ts` loads each migration once, shares the parsed statements between FK extraction and destructive scanning, normalizes SQLite identifiers case-insensitively, and checks trigger body DML as independent logical statements.
 - The current parser reports 140 FK relationships instead of the old regex's 145 because the old extractor double-counted all five table-level `FOREIGN KEY` declarations (its inline and table-level regexes both matched them). The resulting CASCADE parent/child map is preserved.
 - Focused suite: 26/26 passed. Complete `pnpm quality:scripts:test`: 225/225 passed. `quality:migration-safety`, `quality:migration-ordering`, TypeScript deploy-script checking, formatting, and file-size checks passed.
+- First formal defensive review found SQLite-valid single-quoted table identifiers, qualified/parenthesized `PRAGMA foreign_keys` forms, numeric-zero PRAGMA variants, and qualified trigger identifiers that needed more contextual handling. Regression tests were added before fixes; the focused suite now passes 44/44 scenarios.
+- Real Wrangler 4.118.0 clean install applied all 121 primary and 2 observability migrations to fresh local D1 stores; both ledgers matched and both `PRAGMA foreign_key_check` results were empty.
+- Real persisted upgrade applied the checked-in chain through 0047, seeded a `users` parent plus `credentials` child, applied the remaining history through 0108, and preserved both rows (`user_rows=1`, `credential_rows=1`) with 121 ledger entries and an empty `foreign_key_check`. A second apply completed with no pending migrations.

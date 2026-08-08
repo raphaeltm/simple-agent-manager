@@ -159,7 +159,10 @@ export function isKeyword(token: SqlToken | undefined, keyword: string): boolean
 }
 
 export function isIdentifier(token: SqlToken | undefined): token is SqlToken {
-  return token?.kind === 'word' || token?.kind === 'quotedIdentifier';
+  // SQLite accepts single-quoted tokens as identifiers when grammar requires
+  // an identifier (a historical compatibility behavior). They remain string
+  // tokens elsewhere, so inert SQL text never becomes a keyword.
+  return token?.kind === 'word' || token?.kind === 'quotedIdentifier' || token?.kind === 'string';
 }
 
 function isCreateTrigger(tokens: SqlToken[]): boolean {
@@ -198,15 +201,22 @@ export function splitSqlStatements(tokens: SqlToken[], file: string): SqlStateme
     }
 
     current.push(token);
-    if (!triggerBody && isCreateTrigger(current) && isKeyword(token, 'begin')) {
+    const previous = current[current.length - 2];
+    const isQualifiedIdentifier = previous?.kind === 'symbol' && previous.value === '.';
+    if (
+      !triggerBody &&
+      isCreateTrigger(current) &&
+      !isQualifiedIdentifier &&
+      isKeyword(token, 'begin')
+    ) {
       triggerBody = true;
       continue;
     }
     if (!triggerBody) continue;
 
-    if (isKeyword(token, 'case')) {
+    if (!isQualifiedIdentifier && isKeyword(token, 'case')) {
       caseDepth += 1;
-    } else if (isKeyword(token, 'end')) {
+    } else if (!isQualifiedIdentifier && isKeyword(token, 'end')) {
       if (caseDepth > 0) caseDepth -= 1;
       else triggerClosed = true;
     }

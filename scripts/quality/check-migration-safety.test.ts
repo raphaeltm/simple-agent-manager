@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 
 import { checkMigrationSafety, type MigrationSafetyReport } from './check-migration-safety';
+import { splitSqlStatements, tokenizeSql } from './sql-migration-parser';
 
 const ROOT = join(import.meta.dirname, '../..');
 const SCRIPT = join(ROOT, 'scripts/quality/check-migration-safety.ts');
@@ -91,6 +92,7 @@ describe('D1 migration safety — multiline destructive statements', () => {
     ['backtick-quoted target', 'DROP TABLE `parent_table`;'],
     ['bracket-quoted target', 'DROP TABLE [parent_table];'],
     ['schema-qualified target', 'DROP TABLE main."parent_table";'],
+    ['SQLite single-quoted target', "DROP TABLE 'parent_table';"],
   ])('blocks %s', (_name, sql) => {
     expectBlocked(sql, 'DROP TABLE on CASCADE parent');
   });
@@ -138,6 +140,34 @@ SET note = 'WHERE';`,
     expectBlocked('PRAGMA/* gap */foreign_keys\n=\nOFF;', 'PRAGMA foreign_keys = OFF');
     expectBlocked('PRAGMA foreign_keys = 0;', 'PRAGMA foreign_keys = OFF');
     expectBlocked('PRAGMA foreign_keys = FALSE;', 'PRAGMA foreign_keys = OFF');
+    expectBlocked("DELETE FROM 'parent_table';", 'DELETE FROM without WHERE on CASCADE parent');
+    expectBlocked("UPDATE 'parent_table' SET note = 1;", 'UPDATE without WHERE on CASCADE parent');
+  });
+
+  it.each([
+    ['schema-qualified', 'PRAGMA main.foreign_keys = OFF;'],
+    ['parenthesized', 'PRAGMA foreign_keys(OFF);'],
+    ['double-quoted', 'PRAGMA "foreign_keys" = OFF;'],
+    ['bracket-quoted', 'PRAGMA [foreign_keys] = FALSE;'],
+    ['backtick-quoted', 'PRAGMA `foreign_keys` = 0;'],
+    ['single-quoted', "PRAGMA 'foreign_keys' = 'OFF';"],
+    ['SQLite NO value', 'PRAGMA foreign_keys = NO;'],
+    ['zero-padded numeric', 'PRAGMA foreign_keys = 00;'],
+    ['positive signed zero', 'PRAGMA foreign_keys = +0;'],
+    ['negative signed zero', 'PRAGMA foreign_keys = -0;'],
+    ['hexadecimal zero', 'PRAGMA foreign_keys = 0x0;'],
+    ['decimal zero', 'PRAGMA foreign_keys = 0.0;'],
+  ])('blocks the %s foreign-key disabling PRAGMA form', (_name, sql) => {
+    expectBlocked(sql, 'PRAGMA foreign_keys = OFF');
+  });
+
+  it.each([
+    ['decimal one', 'PRAGMA foreign_keys = 1;'],
+    ['hexadecimal one', 'PRAGMA foreign_keys = 0x1;'],
+    ['positive one', 'PRAGMA foreign_keys = +1;'],
+    ['fraction', 'PRAGMA foreign_keys = 0.1;'],
+  ])('allows the non-disabling %s PRAGMA form', (_name, sql) => {
+    expect(checkDangerous(sql).newViolations).toEqual([]);
   });
 
   it('does not let a WHERE in a comment, string, subquery, or later statement mask unscoped DML', () => {
@@ -262,6 +292,27 @@ END;`,
       'UPDATE without WHERE on CASCADE parent'
     );
     expect(unsafe.newViolations[0]?.line).toBe(3);
+  });
+
+  it('treats valid qualified begin/end words as trigger identifiers', () => {
+    const triggerSql = `
+CREATE TRIGGER qualified_keyword_columns
+AFTER UPDATE ON child_table
+WHEN NEW.begin IS NOT NULL
+BEGIN
+  UPDATE parent_table
+  SET note = NEW.end
+  WHERE id = NEW.end;
+END;
+`;
+    const parsed = splitSqlStatements(
+      tokenizeSql(triggerSql, 'qualified-keyword-trigger.sql'),
+      'qualified-keyword-trigger.sql'
+    );
+    const report = checkDangerous(triggerSql);
+
+    expect(parsed).toHaveLength(1);
+    expect(report.newViolations).toEqual([]);
   });
 
   it('does not hide a destructive statement after a trigger body', () => {

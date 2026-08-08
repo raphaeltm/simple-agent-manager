@@ -225,6 +225,27 @@ function isTemporaryTable(tableName: string): boolean {
   return tableName.endsWith('_new') || tableName.endsWith('_tmp');
 }
 
+function isForeignKeysDisabledValue(
+  tokens: SqlToken[],
+  start: number,
+  parenthesized: boolean
+): boolean {
+  const end = parenthesized
+    ? tokens.findIndex(
+        (token, index) => index >= start && token.kind === 'symbol' && token.value === ')'
+      )
+    : tokens.length;
+  const valueTokens = tokens.slice(start, end < 0 ? tokens.length : end);
+  if (valueTokens.length === 0) return false;
+  const value = valueTokens
+    .map((token) => token.value)
+    .join('')
+    .toLowerCase();
+  if (['off', 'false', 'no'].includes(value)) return true;
+  if (/^[+-]?0x0+$/.test(value)) return true;
+  return /^[+-]?(?:0+(?:\.0*)?|\.0+)(?:e[+-]?\d+)?$/.test(value);
+}
+
 function scanClause(
   file: string,
   tokens: SqlToken[],
@@ -333,15 +354,20 @@ function scanClause(
       continue;
     }
 
-    if (
-      isKeyword(operation, 'pragma') &&
-      isKeyword(tokens[index + 1], 'foreign_keys') &&
-      tokens[index + 2]?.kind === 'symbol' &&
-      tokens[index + 2]?.value === '=' &&
-      (isKeyword(tokens[index + 3], 'off') ||
-        isKeyword(tokens[index + 3], 'false') ||
-        tokens[index + 3]?.value === '0')
-    ) {
+    if (isKeyword(operation, 'pragma')) {
+      const pragma = parseIdentifier(tokens, index + 1);
+      if (!pragma || pragma.name !== 'foreign_keys') continue;
+      const separator = tokens[pragma.next];
+      const value = tokens[pragma.next + 1];
+      const isAssignment = separator?.kind === 'symbol' && separator.value === '=';
+      const isParenthesized = separator?.kind === 'symbol' && separator.value === '(';
+      if (
+        (!isAssignment && !isParenthesized) ||
+        !value ||
+        !isForeignKeysDisabledValue(tokens, pragma.next + 1, isParenthesized)
+      ) {
+        continue;
+      }
       violations.push({
         file,
         line: operation?.line ?? 1,
