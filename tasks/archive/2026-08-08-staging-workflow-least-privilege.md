@@ -70,9 +70,9 @@ deploy to shared staging; the final integration task owns staging verification.
 - [x] Complete security, independent defensive, constitution, and test-quality
       reviews; address every correctness finding.
 - [x] Complete the mandatory task-completion review immediately before archive.
-- [ ] Rebase on current `origin/main`, re-run validation, push, open one PR, and
+- [x] Rebase on current `origin/main`, re-run validation, push, open one PR, and
       wait for every GitHub check to finish green.
-- [ ] Leave the PR open and unmerged; do not trigger shared staging.
+- [x] Leave the PR open and unmerged; do not trigger shared staging.
 
 ## Acceptance Criteria
 
@@ -85,8 +85,8 @@ deploy to shared staging; the final integration task owns staging verification.
       `skip_agent`, `dry_run`, and inherited secrets unchanged.
 - [x] The reusable workflow's boolean dry-run contract remains valid under
       `actionlint` and the focused contract test.
-- [ ] Local applicable CI and every GitHub PR check are completely green.
-- [ ] PR evidence records that staging was intentionally not deployed and the PR
+- [x] Local applicable CI and every GitHub PR check are completely green.
+- [x] PR evidence records that staging was intentionally not deployed and the PR
       was intentionally not merged under the direct user override.
 
 ## Validation Evidence
@@ -122,6 +122,15 @@ deploy to shared staging; the final integration task owns staging verification.
 - Task-completion validation passed checks A-F with no missing implementation,
   contract, or verification work. Rebase, PR checks, and final release-state
   evidence remain sequential delivery gates.
+- The branch rebased cleanly onto `origin/main` at
+  `8eed3b7402d2e036900a67db0232fe6c8623155a`; the rebase was a no-op because
+  main had not advanced. Post-rebase frozen install, actionlint, focused 44/44,
+  quality 225/225, lint, typecheck, and build all passed.
+- PR #1772 is open and unmerged. GitHub CI run `31259521318`, E2E Smoke run
+  `31259521329`, CodSpeed run `31259521315`, and SonarCloud all completed green,
+  including Test (7m26s) and Durable Object Workers (7m50s).
+- Shared staging was intentionally not deployed or mutated. The final
+  integration task retains ownership of staging verification.
 
 ## References
 
