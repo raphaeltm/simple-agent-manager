@@ -524,6 +524,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MCP_MESSAGE_LIST_LIMIT?: string; // Default raw tokens per request (default: 50)
   MCP_MESSAGE_LIST_MAX?: string; // Max raw tokens per request (default: 200)
   MCP_MESSAGE_SEARCH_MAX?: string; // Max search results for search_messages (default: 20)
+  MCP_TRIGGER_LIST_LIMIT?: string; // Default page size for list_triggers (default: 20)
+  MCP_TRIGGER_LIST_MAX?: string; // Max page size for list_triggers (default: 100)
   MCP_DEPLOYMENT_LOG_DEFAULT_LIMIT?: string; // Default deployment log rows for read_deployment_logs (default: 200)
   MCP_DEPLOYMENT_LOG_MAX_LIMIT?: string; // Max deployment log rows for read_deployment_logs (default: 1000)
   // Configurable content limits

@@ -5,7 +5,6 @@ import type {
   GitHubTriggerFilters,
   ListTriggersResponse,
   TriggerResponse,
-  TriggerStatus,
 } from '@simple-agent-manager/shared';
 import {
   DEFAULT_CRON_MIN_INTERVAL_MINUTES,
@@ -28,12 +27,9 @@ import { getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { CreateTriggerSchema, jsonValidator, UpdateTriggerSchema } from '../../schemas';
 import { buildCredentialAttributionForTriggers } from '../../services/credential-attribution-health';
-import {
-  cronToHumanReadable,
-  cronToNextFire,
-  validateCronExpression,
-} from '../../services/cron-utils';
+import { cronToNextFire, validateCronExpression } from '../../services/cron-utils';
 import { getProjectMultiplayerState } from '../../services/project-multiplayer';
+import { listTriggerRows, toTriggerResponse } from '../../services/trigger-read';
 import {
   getWebhookTriggerLimits,
   validateWebhookTriggerConfig,
@@ -50,35 +46,6 @@ import { buildWebhookCredential } from './webhooks';
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
 type Database = ReturnType<typeof drizzle<typeof schema>>;
-
-function toTriggerResponse(row: schema.TriggerRow): TriggerResponse {
-  return {
-    id: row.id,
-    projectId: row.projectId,
-    userId: row.userId,
-    name: row.name,
-    description: row.description,
-    status: row.status as TriggerStatus,
-    sourceType: row.sourceType as TriggerResponse['sourceType'],
-    cronExpression: row.cronExpression,
-    cronTimezone: row.cronTimezone ?? 'UTC',
-    skipIfRunning: row.skipIfRunning,
-    promptTemplate: row.promptTemplate,
-    agentProfileId: row.agentProfileId,
-    skillId: row.skillId,
-    taskMode: (row.taskMode ?? 'task') as TriggerResponse['taskMode'],
-    vmSizeOverride: row.vmSizeOverride,
-    maxConcurrent: row.maxConcurrent,
-    lastTriggeredAt: row.lastTriggeredAt,
-    triggerCount: row.triggerCount,
-    nextFireAt: row.nextFireAt,
-    createdAt: row.createdAt,
-    updatedAt: row.updatedAt,
-    cronHumanReadable: row.cronExpression
-      ? cronToHumanReadable(row.cronExpression, row.cronTimezone ?? 'UTC')
-      : undefined,
-  };
-}
 
 async function attribution(
   db: Database,
@@ -312,11 +279,7 @@ crudRoutes.get('/', async (c) => {
   const projectId = requireRouteParam(c, 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
   const project = await requireProjectTaskRead(db, projectId, getAuth(c).user.id);
-  const rows = await db
-    .select()
-    .from(schema.triggers)
-    .where(eq(schema.triggers.projectId, projectId))
-    .orderBy(desc(schema.triggers.createdAt));
+  const rows = await listTriggerRows(db, projectId);
   const ids = rows.map((row) => row.id);
   const [githubConfigs, webhookConfigs, attributionById] = await Promise.all([
     ids.length

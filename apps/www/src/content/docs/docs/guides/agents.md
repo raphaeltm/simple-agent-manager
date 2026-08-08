@@ -191,6 +191,7 @@ Running agents have access to project-aware MCP tools:
 | `list_sessions`        | View chat sessions                                                                                                   |
 | `get_session_messages` | Read conversation history (consecutive streaming tokens are concatenated into logical messages)                      |
 | `search_messages`      | Search messages by keyword — uses FTS5 full-text search for completed sessions; keyword matching for active sessions |
+| `list_triggers`        | List this project's automation triggers, optionally filtered by status or source type                                |
 | `update_task_status`   | Report progress                                                                                                      |
 | `get_task_details`     | Inspect task state, persisted output fields, PR/error details, session id, and bounded recent assistant diagnostics  |
 | `complete_task`        | Mark current work as done, optionally with structured completion evidence                                            |

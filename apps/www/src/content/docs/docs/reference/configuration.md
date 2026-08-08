@@ -646,7 +646,7 @@ Applied via cloud-init on each node:
 | `REPO_BROWSE_MAX_INLINE_BYTES`  | `1000000` (1 MB) | Max bytes to inline as text in the file viewer; larger stream raw |
 | `REPO_BROWSE_MAX_COMPARE_FILES` | `300`            | Max changed files in an Artifacts diff before truncation          |
 
-## MCP Idea Tools
+## MCP Tool Limits
 
 | Variable                      | Default | Description                                     |
 | ----------------------------- | ------- | ----------------------------------------------- |
@@ -657,6 +657,8 @@ Applied via cloud-init on each node:
 | `MCP_MESSAGE_SEARCH_MAX`      | `20`    | Max results from `search_messages`              |
 | `MCP_MESSAGE_LIST_LIMIT`      | `50`    | Default page size for `get_session_messages`    |
 | `MCP_MESSAGE_LIST_MAX`        | `200`   | Max messages per `get_session_messages` request |
+| `MCP_TRIGGER_LIST_LIMIT`      | `20`    | Default page size for `list_triggers`           |
+| `MCP_TRIGGER_LIST_MAX`        | `100`   | Max triggers per `list_triggers` request        |
 
 ## Web UI (Build-Time)
 

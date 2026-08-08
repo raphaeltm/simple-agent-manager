@@ -1,8 +1,36 @@
 /**
  * MCP tool definitions — trigger management tools.
  */
+import { TRIGGER_SOURCE_TYPES, TRIGGER_STATUSES } from '@simple-agent-manager/shared';
 
 export const TRIGGER_TOOLS = [
+  {
+    name: 'list_triggers',
+    description:
+      'List automation triggers in the current project. ' +
+      'Returns bounded operational metadata for cron, webhook, and GitHub triggers without prompt templates, webhook credentials/configuration, or execution history.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        status: {
+          type: 'string',
+          description: 'Optional trigger status filter.',
+          enum: [...TRIGGER_STATUSES],
+        },
+        sourceType: {
+          type: 'string',
+          description: 'Optional trigger source filter.',
+          enum: [...TRIGGER_SOURCE_TYPES],
+        },
+        limit: {
+          type: 'number',
+          description: 'Maximum number of triggers to return. The server applies a configured cap.',
+          minimum: 1,
+        },
+      },
+      additionalProperties: false,
+    },
+  },
   {
     name: 'create_trigger',
     description:

@@ -136,7 +136,7 @@ async function countRows(table: 'github_trigger_configs' | 'trigger_executions' 
 }
 
 describe('MCP trigger management tools', () => {
-  it('lists update_trigger and delete_trigger in tools/list', async () => {
+  it('lists trigger management tools in tools/list', async () => {
     const { userId, projectId } = await seedProjectGraph('list');
     const token = `${TEST_PREFIX}-list-token`;
     await storeToken(token, projectId, userId);
@@ -144,9 +144,56 @@ describe('MCP trigger management tools', () => {
     const response = await listTools(token);
     const toolNames = response.result?.tools?.map((tool) => tool.name) ?? [];
 
+    expect(toolNames).toContain('list_triggers');
     expect(toolNames).toContain('create_trigger');
     expect(toolNames).toContain('update_trigger');
     expect(toolNames).toContain('delete_trigger');
+  });
+
+  it('dispatches list_triggers with project scoping and filters', async () => {
+    const caller = await seedProjectGraph('list-caller');
+    const other = await seedProjectGraph('list-other');
+    const token = `${TEST_PREFIX}-list-call-token`;
+    await storeToken(token, caller.projectId, caller.userId);
+    await seedTrigger(`${TEST_PREFIX}-caller-active`, caller.projectId, caller.userId, {
+      name: 'Caller active trigger',
+      status: 'active',
+      sourceType: 'cron',
+    });
+    await seedTrigger(`${TEST_PREFIX}-caller-paused`, caller.projectId, caller.userId, {
+      name: 'Caller paused trigger',
+      status: 'paused',
+      sourceType: 'webhook',
+    });
+    await seedTrigger(`${TEST_PREFIX}-caller-paused-cron`, caller.projectId, caller.userId, {
+      name: 'Caller paused cron trigger',
+      status: 'paused',
+      sourceType: 'cron',
+    });
+    await seedTrigger(`${TEST_PREFIX}-caller-active-webhook`, caller.projectId, caller.userId, {
+      name: 'Caller active webhook trigger',
+      status: 'active',
+      sourceType: 'webhook',
+    });
+    await seedTrigger(`${TEST_PREFIX}-foreign-paused`, other.projectId, other.userId, {
+      name: 'Foreign paused trigger',
+      status: 'paused',
+      sourceType: 'webhook',
+    });
+
+    const response = await callMcpTool(token, 'list_triggers', {
+      status: 'paused',
+      sourceType: 'webhook',
+    });
+    const payload = parseToolContent(response) as { triggers: Array<Record<string, unknown>> };
+
+    expect(payload.triggers).toHaveLength(1);
+    expect(payload.triggers[0]).toMatchObject({
+      id: `${TEST_PREFIX}-caller-paused`,
+      name: 'Caller paused trigger',
+      status: 'paused',
+      sourceType: 'webhook',
+    });
   });
 
   it('updates a trigger and recomputes next_fire_at', async () => {

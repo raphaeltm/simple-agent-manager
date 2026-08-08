@@ -9,7 +9,8 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn(),
 }));
 
-vi.mock('@simple-agent-manager/shared', () => ({
+vi.mock('@simple-agent-manager/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/shared')>()),
   DEFAULT_MISSION_MAX_PER_PROJECT: 50,
   DEFAULT_SAM_SEARCH_LIMIT: 10,
   DEFAULT_SAM_SEARCH_MAX_LIMIT: 50,
