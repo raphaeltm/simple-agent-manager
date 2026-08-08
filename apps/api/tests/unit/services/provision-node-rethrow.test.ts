@@ -24,6 +24,7 @@ interface RecordedOp {
 }
 const ops: RecordedOp[] = [];
 const nodeRows: unknown[] = [];
+let updateBarrier: Promise<void> | undefined;
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => ({
@@ -39,7 +40,7 @@ vi.mock('drizzle-orm/d1', () => ({
       set: (val: Record<string, unknown>) => ({
         where: () => {
           ops.push({ kind: 'update', set: val });
-          return Promise.resolve();
+          return updateBarrier ?? Promise.resolve();
         },
       }),
     }),
@@ -108,6 +109,7 @@ const ENV = {
 beforeEach(() => {
   ops.length = 0;
   nodeRows.length = 0;
+  updateBarrier = undefined;
   vi.clearAllMocks();
   nodeRows.push({
     id: 'node-1',
@@ -313,6 +315,32 @@ describe('provisionNode rethrowProviderError', () => {
       'node_provisioning.dns_record_failed',
       expect.anything()
     );
+    expect(logError).not.toHaveBeenCalledWith('node_provisioning.failed', expect.anything());
+  });
+
+  it.each([
+    ['terminal running-node write', '203.0.113.10'],
+    ['terminal awaiting-IP write', ''],
+  ])('preserves cancellation during the %s', async (_boundary, vmIp) => {
+    createVM.mockResolvedValueOnce({ id: 'provider-vm-1', ip: vmIp });
+    const controller = new AbortController();
+    const callerReason = new ProviderError('hetzner', 503, `caller cancelled ${_boundary}`);
+    let releaseUpdate: () => void = () => undefined;
+    updateBarrier = new Promise<void>((resolve) => {
+      releaseUpdate = resolve;
+    });
+
+    const provisioning = provisionNode('node-1', ENV, undefined, {
+      signal: controller.signal,
+    });
+    await vi.waitFor(() => expect(ops).toHaveLength(1));
+    const operationCountAtAbort = ops.length;
+    controller.abort(callerReason);
+    releaseUpdate();
+
+    await expect(provisioning).rejects.toBe(callerReason);
+    expect(ops.slice(operationCountAtAbort)).toEqual([]);
+    expect(persistError).not.toHaveBeenCalled();
     expect(logError).not.toHaveBeenCalledWith('node_provisioning.failed', expect.anything());
   });
 

@@ -194,6 +194,26 @@ describe('providerFetch', () => {
     });
   });
 
+  it('preserves cancellation that wins as a successful zero-body response settles', async () => {
+    const caller = new AbortController();
+    const reason = new ProviderError('digitalocean', 404, 'caller cancelled DELETE response');
+    globalThis.fetch = vi.fn(() => {
+      queueMicrotask(() => caller.abort(reason));
+      return Promise.resolve(new Response(null, { status: 204 }));
+    });
+
+    await expect(
+      providerFetch(
+        'digitalocean',
+        'https://api.digitalocean.test/v2/droplets/123',
+        { method: 'DELETE' },
+        10_000,
+        undefined,
+        { signal: caller.signal }
+      )
+    ).rejects.toBe(reason);
+  });
+
   it('uses the first caller cancellation when it wins the race with the internal timeout', async () => {
     const { getRequestSignal } = installPendingAbortAwareFetch();
     const initCaller = new AbortController();

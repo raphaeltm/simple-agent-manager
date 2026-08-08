@@ -1,4 +1,7 @@
-import type { ProviderRequestContext } from '@simple-agent-manager/providers';
+import {
+  completeAbortableResponse,
+  type ProviderRequestContext,
+} from '@simple-agent-manager/providers';
 
 /**
  * GCP HTTP timeout wrapper that composes caller cancellation without changing
@@ -36,7 +39,7 @@ export async function fetchGcpWithTimeout(
 
   try {
     const response = await fetch(url, { ...init, signal: controller.signal });
-    return await completeGcpResponse(response, controller.signal);
+    return await completeAbortableResponse(response, controller.signal);
   } catch (error) {
     if (callerSignal) throw callerSignal.reason;
     throw error;
@@ -45,30 +48,6 @@ export async function fetchGcpWithTimeout(
     for (const { signal, listener } of listeners) {
       signal.removeEventListener('abort', listener);
     }
-  }
-}
-
-async function completeGcpResponse(response: Response, signal: AbortSignal): Promise<Response> {
-  if (!response.body) return response;
-  const replayableResponse = response.clone();
-  let onAbort: (() => void) | undefined;
-  const aborted = new Promise<never>((_resolve, reject) => {
-    onAbort = () => {
-      void response.body?.cancel(signal.reason).catch(() => undefined);
-      reject(signal.reason);
-    };
-    signal.addEventListener('abort', onAbort, { once: true });
-    if (signal.aborted) onAbort();
-  });
-
-  try {
-    await Promise.race([response.arrayBuffer(), aborted]);
-    return replayableResponse;
-  } catch (error) {
-    void replayableResponse.body?.cancel(error).catch(() => undefined);
-    throw error;
-  } finally {
-    if (onAbort) signal.removeEventListener('abort', onAbort);
   }
 }
 
