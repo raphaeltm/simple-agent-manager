@@ -1,8 +1,10 @@
 import { ProviderError } from '@simple-agent-manager/providers';
 import {
   DEFAULT_GCP_COMPUTE_API_BASE_URL,
+  DEFAULT_GCP_IAM_CREDENTIALS_BASE_URL,
   DEFAULT_GCP_SERVICE_ACCOUNT_TOKEN_URL,
   DEFAULT_GCP_STS_SCOPE,
+  DEFAULT_GCP_STS_TOKEN_URL,
   GCP_CREDENTIAL_VERSION,
   type GcpOidcCredential,
 } from '@simple-agent-manager/shared';
@@ -21,6 +23,10 @@ import {
   getGcpAccessToken,
   getGcpAccessTokenCacheKey,
 } from '../../../src/services/gcp-sts';
+
+vi.mock('../../../src/services/jwt', () => ({
+  signIdentityToken: vi.fn().mockResolvedValue('sam-identity-token'),
+}));
 
 let privateKey: string;
 
@@ -60,6 +66,20 @@ function createKv() {
         cacheStatus: null,
       })),
     } as unknown as KVNamespace,
+  };
+}
+
+function workloadIdentityCredential(): GcpOidcCredential {
+  return {
+    version: GCP_CREDENTIAL_VERSION,
+    provider: 'gcp',
+    authType: 'workload-identity',
+    gcpProjectId: 'sam-test-project',
+    gcpProjectNumber: '123456789',
+    serviceAccountEmail: 'sam-agent@sam-test-project.iam.gserviceaccount.com',
+    wifPoolId: 'sam-pool',
+    wifProviderId: 'sam-provider',
+    defaultZone: 'us-central1-a',
   };
 }
 
@@ -210,6 +230,79 @@ describe('service-account verification and caching', () => {
     );
   });
 
+  it('cancels a pending WIF STS exchange without IAM impersonation or token caching', async () => {
+    const credential = workloadIdentityCredential();
+    const kv = createKv();
+    const caller = new AbortController();
+    const reason = new ProviderError('gcp', 429, 'caller cancelled STS exchange');
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      const signal = init?.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = getGcpAccessToken(
+      'user-1',
+      'project-a',
+      credential,
+      { KV: kv.namespace } as Env,
+      { signal: caller.signal }
+    );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    caller.abort(reason);
+
+    await expect(request).rejects.toBe(reason);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(DEFAULT_GCP_STS_TOKEN_URL);
+    expect(kv.namespace.put).not.toHaveBeenCalled();
+  });
+
+  it('cancels WIF IAM impersonation after STS without caching or another request', async () => {
+    const credential = workloadIdentityCredential();
+    const kv = createKv();
+    const caller = new AbortController();
+    const reason = new ProviderError('gcp', 503, 'caller cancelled IAM impersonation');
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      if (fetchMock.mock.calls.length === 1) {
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              access_token: 'sts-access-token',
+              token_type: 'Bearer',
+              expires_in: 3600,
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } }
+          )
+        );
+      }
+      const signal = init?.signal;
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener('abort', () => reject(signal.reason), { once: true });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = getGcpAccessToken(
+      'user-1',
+      'project-a',
+      credential,
+      { KV: kv.namespace } as Env,
+      { signal: caller.signal }
+    );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    caller.abort(reason);
+
+    await expect(request).rejects.toBe(reason);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(DEFAULT_GCP_STS_TOKEN_URL);
+    expect(fetchMock.mock.calls[1]?.[0]).toBe(
+      `${DEFAULT_GCP_IAM_CREDENTIALS_BASE_URL}/${credential.serviceAccountEmail}:generateAccessToken`
+    );
+    expect(kv.namespace.put).not.toHaveBeenCalled();
+  });
+
   it('isolates derivative tokens by project and key id, then clears every project', async () => {
     const credential = await parseGcpServiceAccountJson(serviceAccountJson(), 'us-central1-a');
     const rotated = { ...credential, privateKeyId: 'key-id-rotated' };
@@ -254,15 +347,8 @@ describe('service-account verification and caching', () => {
 
   it('isolates WIF tokens by impersonated service account and clears legacy cache keys', async () => {
     const credential: GcpOidcCredential = {
-      version: GCP_CREDENTIAL_VERSION,
-      provider: 'gcp',
-      authType: 'workload-identity',
-      gcpProjectId: 'sam-test-project',
-      gcpProjectNumber: '123456789',
+      ...workloadIdentityCredential(),
       serviceAccountEmail: 'first@sam-test-project.iam.gserviceaccount.com',
-      wifPoolId: 'sam-pool',
-      wifProviderId: 'sam-provider',
-      defaultZone: 'us-central1-a',
     };
     const otherServiceAccount = {
       ...credential,
