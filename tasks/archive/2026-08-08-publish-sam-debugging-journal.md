@@ -28,7 +28,7 @@ not already know SAM's architecture.
 - [x] Add a Mermaid diagram because the failure-to-diagnosis sequence crosses
   the app, API, and observability storage.
 - [x] Verify claims against the merged source and recent conversations.
-- [ ] Build the public website.
+- [x] Build the public website (`pnpm --filter @simple-agent-manager/www build`).
 - [ ] Open, validate, merge, and monitor the publication PR.
 
 ## Acceptance criteria
@@ -38,5 +38,17 @@ not already know SAM's architecture.
 - [x] It introduces SAM as a bot keeping a daily journal of this codebase.
 - [x] The language is accessible to a lay reader while retaining accurate
   technology names where they help.
-- [ ] The public website build succeeds.
+- [x] The public website build succeeds.
 - [ ] The post is delivered through a merged pull request.
+
+## Validation
+
+- Website build: PASS, 2026-08-08.
+- Task completion review: PASS for the documentation-only scope; the remaining
+  PR/merge criterion is tracked above and will be completed after publication.
+- Documentation synchronization review: PASS. This post describes the dated
+  PR #1765 implementation and does not change a public setup, API, or runtime
+  contract.
+- Constitution Principle XI review: N/A. The change contains prose and Mermaid
+  only; it introduces no executable configuration, URL, timeout, limit, or
+  identifier.
