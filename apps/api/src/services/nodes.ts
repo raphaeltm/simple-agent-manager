@@ -335,6 +335,7 @@ export async function provisionNode(
           updatedAt: new Date().toISOString(),
         })
         .where(eq(schema.nodes.id, node.id));
+      throwIfProviderRequestAborted(providerContext);
       return;
     }
 
@@ -372,6 +373,7 @@ export async function provisionNode(
         updatedAt: new Date().toISOString(),
       })
       .where(eq(schema.nodes.id, node.id));
+    throwIfProviderRequestAborted(providerContext);
   } catch (err) {
     rethrowIfProviderRequestAborted(err, providerContext);
     // Sanitize GCP errors to prevent leaking resource paths in client-visible errorMessage

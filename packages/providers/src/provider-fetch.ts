@@ -69,11 +69,13 @@ export async function completeAbortableResponse(
   response: Response,
   signal: AbortSignal
 ): Promise<Response> {
+  if (signal.aborted) throw signal.reason;
   if (!response.body) return response;
   const replayableResponse = response.clone();
 
   try {
     await drainResponseBody(response, signal);
+    if (signal.aborted) throw signal.reason;
     return replayableResponse;
   } catch (error) {
     void replayableResponse.body?.cancel(error).catch(() => undefined);

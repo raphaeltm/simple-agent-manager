@@ -85,6 +85,24 @@ describe('fetchGcpWithTimeout', () => {
     expect(requestSignal?.reason).toBe(reason);
   });
 
+  it('preserves cancellation that wins as a successful zero-body GCP response settles', async () => {
+    const caller = new AbortController();
+    const reason = new ProviderError('gcp', 409, 'caller cancelled zero-body GCP response');
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => {
+        queueMicrotask(() => caller.abort(reason));
+        return Promise.resolve(new Response(null, { status: 204 }));
+      })
+    );
+
+    await expect(
+      fetchGcpWithTimeout('https://compute.googleapis.test/operation', {}, 10_000, {
+        signal: caller.signal,
+      })
+    ).rejects.toBe(reason);
+  });
+
   it('keeps an internal timeout distinct when it wins before caller cancellation', async () => {
     vi.useFakeTimers();
     const { getRequestSignal } = pendingAbortAwareFetch();
