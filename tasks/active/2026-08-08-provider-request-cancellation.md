@@ -55,32 +55,32 @@ lifecycle/inventory changes.
 
 ## Implementation Checklist
 
-- [ ] Add an exported optional `ProviderRequestContext` carrying `signal?: AbortSignal`
+- [x] Add an exported optional `ProviderRequestContext` carrying `signal?: AbortSignal`
       to every public VM and volume provider method while preserving all existing call
       shapes.
-- [ ] Make `providerFetch()` compose the caller signal with its internal timeout,
+- [x] Make `providerFetch()` compose the caller signal with its internal timeout,
       preserve the exact caller abort reason/identity, keep internal timeout errors as
       bounded `ProviderError`s, and remove listeners/timers on every exit path.
-- [ ] Add shared cancellation helpers for entry checks and abortable waits so provider
+- [x] Add shared cancellation helpers for entry checks and abortable waits so provider
       implementations do not copy subtly different listener/timer logic.
-- [ ] Thread context through Hetzner, Scaleway, GCP, DigitalOcean, Vultr, Infomaniak,
+- [x] Thread context through Hetzner, Scaleway, GCP, DigitalOcean, Vultr, Infomaniak,
       UpCloud, and their volume/helper clients, including pagination, retries, and
       polling.
-- [ ] Extend `GcpTokenProvider` source-compatibly and propagate the context through
+- [x] Extend `GcpTokenProvider` source-compatibly and propagate the context through
       provider-credential closures, WIF/service-account token HTTP, and token-cache
       writes before any Compute request.
-- [ ] Ensure cancellation is never swallowed by best-effort polling catches and no
+- [x] Ensure cancellation is never swallowed by best-effort polling catches and no
       retry, poll request, or later resource mutation begins after abort.
-- [ ] Add optional signal propagation to `provisionNode()` and prevent its catch path
+- [x] Add optional signal propagation to `provisionNode()` and prevent its catch path
       from recording/logging a provider failure or mutating node status after caller
       cancellation.
-- [ ] Add scenario-first RED regressions for abort before fetch, during fetch, retry,
+- [x] Add scenario-first RED regressions for abort before fetch, during fetch, retry,
       provider polling, caller abort versus internal timeout, listener cleanup, normal
       requests, and no post-cancel resource mutation.
-- [ ] Exercise pre-aborted cancellation across every provider implementation through
+- [x] Exercise pre-aborted cancellation across every provider implementation through
       the reusable provider contract suite, plus focused polling/retry and API caller
       capability coverage with realistic boundary state.
-- [ ] Extend the cancellation regression guidance in `.claude/rules/02-quality-gates.md`
+- [x] Extend the cancellation regression guidance in `.claude/rules/02-quality-gates.md`
       so future timeout wrappers and retry/poll loops must prove caller-signal
       composition and post-cancel quiescence.
 - [ ] Run provider/API lint, typecheck, unit/integration tests, coverage, full build,

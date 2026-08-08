@@ -47,7 +47,9 @@ function createKv() {
         values.set(key, value);
         puts.push({ key, ttl: options?.expirationTtl });
       }),
-      delete: vi.fn(async (key: string) => { values.delete(key); }),
+      delete: vi.fn(async (key: string) => {
+        values.delete(key);
+      }),
       list: vi.fn(async (options: { prefix?: string }) => ({
         keys: Array.from(values.keys())
           .filter((name) => !options.prefix || name.startsWith(options.prefix))
@@ -71,10 +73,7 @@ beforeEach(() => {
 
 describe('parseGcpServiceAccountJson', () => {
   it('imports a PKCS#8 key and ignores uploaded token_uri', async () => {
-    const credential = await parseGcpServiceAccountJson(
-      serviceAccountJson(),
-      'us-central1-a',
-    );
+    const credential = await parseGcpServiceAccountJson(serviceAccountJson(), 'us-central1-a');
 
     expect(credential).toMatchObject({
       version: 1,
@@ -102,11 +101,16 @@ describe('parseGcpServiceAccountJson', () => {
 describe('service-account JWT exchange contract', () => {
   it('posts a form-encoded RS256 assertion only to the fixed Google endpoint', async () => {
     const credential = await parseGcpServiceAccountJson(serviceAccountJson(), 'us-central1-a');
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
-      access_token: 'short-lived-token',
-      token_type: 'Bearer',
-      expires_in: 3600,
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          access_token: 'short-lived-token',
+          token_type: 'Bearer',
+          expires_in: 3600,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
+    );
     vi.stubGlobal('fetch', fetchMock);
 
     await expect(exchangeGcpServiceAccountAccessToken(credential, {} as Env)).resolves.toEqual({
@@ -136,10 +140,14 @@ describe('service-account JWT exchange contract', () => {
 
   it('does not retain the assertion or response body on token rejection', async () => {
     const credential = await parseGcpServiceAccountJson(serviceAccountJson(), 'us-central1-a');
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(
-      JSON.stringify({ error: 'invalid_grant', assertion: 'echoed-secret' }),
-      { status: 400 },
-    )));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ error: 'invalid_grant', assertion: 'echoed-secret' }), {
+          status: 400,
+        })
+      )
+    );
 
     let caught: unknown;
     try {
@@ -155,6 +163,37 @@ describe('service-account JWT exchange contract', () => {
 });
 
 describe('service-account verification and caching', () => {
+  it('cancels token exchange with the exact caller reason and does not cache a token', async () => {
+    const credential = await parseGcpServiceAccountJson(serviceAccountJson(), 'us-central1-a');
+    const kv = createKv();
+    const controller = new AbortController();
+    const callerReason = new ProviderError('gcp', 503, 'caller cancelled token exchange');
+    let requestSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        requestSignal?.addEventListener('abort', () => reject(requestSignal?.reason), {
+          once: true,
+        });
+      });
+    });
+    vi.stubGlobal('fetch', fetchMock);
+
+    const request = getGcpAccessToken(
+      'user-1',
+      'project-a',
+      credential,
+      { KV: kv.namespace } as Env,
+      { signal: controller.signal }
+    );
+    await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+    controller.abort(callerReason);
+
+    await expect(request).rejects.toBe(callerReason);
+    expect(requestSignal?.aborted).toBe(true);
+    expect(kv.namespace.put).not.toHaveBeenCalled();
+  });
+
   it('checks the selected Compute zone with a bearer token', async () => {
     const credential = await parseGcpServiceAccountJson(serviceAccountJson(), 'us-central1-a');
     const fetchMock = vi.fn().mockResolvedValue(new Response('{}', { status: 200 }));
@@ -166,7 +205,7 @@ describe('service-account verification and caching', () => {
       `${DEFAULT_GCP_COMPUTE_API_BASE_URL}/projects/sam-test-project/zones/us-central1-a`,
       expect.objectContaining({
         headers: { Authorization: 'Bearer access-token' },
-      }),
+      })
     );
   });
 
@@ -174,20 +213,29 @@ describe('service-account verification and caching', () => {
     const credential = await parseGcpServiceAccountJson(serviceAccountJson(), 'us-central1-a');
     const rotated = { ...credential, privateKeyId: 'key-id-rotated' };
     const kv = createKv();
-    const fetchMock = vi.fn().mockImplementation(async () => new Response(JSON.stringify({
-      access_token: 'short-lived-token',
-      token_type: 'Bearer',
-      expires_in: 3600,
-    }), { status: 200, headers: { 'Content-Type': 'application/json' } }));
+    const fetchMock = vi.fn().mockImplementation(
+      async () =>
+        new Response(
+          JSON.stringify({
+            access_token: 'short-lived-token',
+            token_type: 'Bearer',
+            expires_in: 3600,
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
+    );
     vi.stubGlobal('fetch', fetchMock);
     const env = { KV: kv.namespace } as Env;
 
-    await expect(getGcpAccessToken('user-1', 'project-a', credential, env))
-      .resolves.toBe('short-lived-token');
-    await expect(getGcpAccessToken('user-1', 'project-a', credential, env))
-      .resolves.toBe('short-lived-token');
-    await expect(getGcpAccessToken('user-1', 'project-b', credential, env))
-      .resolves.toBe('short-lived-token');
+    await expect(getGcpAccessToken('user-1', 'project-a', credential, env)).resolves.toBe(
+      'short-lived-token'
+    );
+    await expect(getGcpAccessToken('user-1', 'project-a', credential, env)).resolves.toBe(
+      'short-lived-token'
+    );
+    await expect(getGcpAccessToken('user-1', 'project-b', credential, env)).resolves.toBe(
+      'short-lived-token'
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(kv.puts.every(({ ttl }) => ttl === 3300)).toBe(true);
@@ -219,14 +267,16 @@ describe('service-account verification and caching', () => {
       ...credential,
       serviceAccountEmail: 'second@sam-test-project.iam.gserviceaccount.com',
     };
-    expect(getGcpAccessTokenCacheKey('user-1', 'project-a', otherServiceAccount))
-      .not.toBe(getGcpAccessTokenCacheKey('user-1', 'project-a', credential));
+    expect(getGcpAccessTokenCacheKey('user-1', 'project-a', otherServiceAccount)).not.toBe(
+      getGcpAccessTokenCacheKey('user-1', 'project-a', credential)
+    );
 
     const kv = createKv();
     await clearGcpAccessTokenCache({ KV: kv.namespace } as Env, 'user-1', credential);
 
     expect(kv.namespace.delete).toHaveBeenCalledWith(
-      'gcp-token:v2:user-1:sam-test-project:workload-identity:123456789:sam-pool:sam-provider',
+      'gcp-token:v2:user-1:sam-test-project:workload-identity:123456789:sam-pool:sam-provider'
     );
   });
 });
+import { ProviderError } from '@simple-agent-manager/providers';

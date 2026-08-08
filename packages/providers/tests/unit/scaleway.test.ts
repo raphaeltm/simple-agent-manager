@@ -1,4 +1,4 @@
-import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ScalewayProvider } from '../../src/scaleway';
 import type { VMConfig } from '../../src/types';
@@ -140,30 +140,33 @@ describe('ScalewayProvider', () => {
       labels: { node: 'node-123', managed: 'simple-agent-manager' },
     };
 
-    const createResponse = () => new Response(JSON.stringify({
-      server: createMockScalewayServer({
-        id: 'created-server-id',
-        state: 'stopped',
-        public_ip: null,
-        public_ips: [],
-      }),
-    }), { status: 201 });
+    const createResponse = () =>
+      new Response(
+        JSON.stringify({
+          server: createMockScalewayServer({
+            id: 'created-server-id',
+            state: 'stopped',
+            public_ip: null,
+            public_ips: [],
+          }),
+        }),
+        { status: 201 }
+      );
 
-    const imageResponse = () => new Response(
-      JSON.stringify({ images: [{ id: 'img-uuid-1234', name: 'ubuntu_noble' }] }),
-      { status: 200 },
-    );
+    const imageResponse = () =>
+      new Response(JSON.stringify({ images: [{ id: 'img-uuid-1234', name: 'ubuntu_noble' }] }), {
+        status: 200,
+      });
 
-    const jsonErrorResponse = (message: string, status: number) => new Response(
-      JSON.stringify({ message }),
-      { status },
-    );
+    const jsonErrorResponse = (message: string, status: number) =>
+      new Response(JSON.stringify({ message }), { status });
 
     function mockCreateFailure(
       failedStep: 'cloud-init' | 'poweron',
-      cleanupResponse = new Response(JSON.stringify({ task: {} }), { status: 202 }),
+      cleanupResponse = new Response(JSON.stringify({ task: {} }), { status: 202 })
     ) {
-      const mockFetch = vi.fn()
+      const mockFetch = vi
+        .fn()
         .mockResolvedValueOnce(imageResponse())
         .mockResolvedValueOnce(createResponse());
 
@@ -187,7 +190,7 @@ describe('ScalewayProvider', () => {
         const callerReason = new ProviderError(
           'scaleway',
           409,
-          `caller cancelled during ${cancelAt}`,
+          `caller cancelled during ${cancelAt}`
         );
         const mutationLedger: string[] = [];
         globalThis.fetch = vi.fn(async (url: string, init: RequestInit = {}) => {
@@ -213,17 +216,17 @@ describe('ScalewayProvider', () => {
           throw new Error(`Unexpected Scaleway request: ${method} ${url}`);
         });
 
-        await expect(
-          provider.createVM(vmConfig, { signal: controller.signal } as never),
-        ).rejects.toBe(callerReason);
+        await expect(provider.createVM(vmConfig, { signal: controller.signal })).rejects.toBe(
+          callerReason
+        );
 
         expect(mutationLedger).toEqual(
           cancelAt === 'cloud-init'
             ? ['create-server', 'upload-cloud-init']
-            : ['create-server', 'upload-cloud-init', 'poweron'],
+            : ['create-server', 'upload-cloud-init', 'poweron']
         );
         expect(mutationLedger).not.toContain('terminate');
-      },
+      }
     );
 
     it('should perform three-step creation: create server, set cloud-init, poweron', async () => {
@@ -278,7 +281,10 @@ describe('ScalewayProvider', () => {
 
       await provider.createVM(vmConfig);
 
-      const headers = fetchCall(fetch as ReturnType<typeof vi.fn>, 1).init.headers as Record<string, string>;
+      const headers = fetchCall(fetch as ReturnType<typeof vi.fn>, 1).init.headers as Record<
+        string,
+        string
+      >;
       expect(headers['X-Auth-Token']).toBe('test-secret-key');
     });
 
@@ -341,9 +347,9 @@ describe('ScalewayProvider', () => {
     });
 
     it('should throw ProviderError on API failure', async () => {
-      globalThis.fetch = vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ message: 'Forbidden' }), { status: 403 }),
-      );
+      globalThis.fetch = vi
+        .fn()
+        .mockResolvedValue(new Response(JSON.stringify({ message: 'Forbidden' }), { status: 403 }));
 
       await expect(provider.createVM(vmConfig)).rejects.toThrow(ProviderError);
     });
@@ -410,6 +416,5 @@ describe('ScalewayProvider', () => {
       expect((err as ProviderError).context).toBeUndefined();
       expect(mockFetch).toHaveBeenCalledTimes(4);
     });
-
   });
 });

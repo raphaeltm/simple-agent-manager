@@ -212,6 +212,12 @@ export interface VolumeInstance {
   labels: Record<string, string>;
 }
 
+/** Optional caller-owned lifecycle context for a provider operation. */
+export interface ProviderRequestContext {
+  /** Cancels pending HTTP, retry, polling, and follow-up work for this operation. */
+  readonly signal?: AbortSignal;
+}
+
 /**
  * Cloud provider interface.
  * Implementations handle VM lifecycle through their respective cloud APIs.
@@ -236,46 +242,61 @@ export interface Provider {
   readonly volumeCapabilities: VolumeCapabilities;
 
   /** Provision a new VM */
-  createVM(config: VMConfig): Promise<VMInstance>;
+  createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance>;
 
   /** Delete a VM. MUST be idempotent (no error on 404). */
-  deleteVM(id: string): Promise<void>;
+  deleteVM(id: string, context?: ProviderRequestContext): Promise<void>;
 
   /** Get VM by ID. Returns null if not found (no throw). */
-  getVM(id: string): Promise<VMInstance | null>;
+  getVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null>;
 
   /** List VMs with optional label-based filtering */
-  listVMs(labels?: Record<string, string>): Promise<VMInstance[]>;
+  listVMs(labels?: Record<string, string>, context?: ProviderRequestContext): Promise<VMInstance[]>;
 
   /** Power off a VM */
-  powerOff(id: string): Promise<void>;
+  powerOff(id: string, context?: ProviderRequestContext): Promise<void>;
 
   /** Power on a VM */
-  powerOn(id: string): Promise<void>;
+  powerOn(id: string, context?: ProviderRequestContext): Promise<void>;
 
   /** Validate provider credentials. Returns true if valid, throws ProviderError on failure. */
-  validateToken(): Promise<boolean>;
+  validateToken(context?: ProviderRequestContext): Promise<boolean>;
 
   /** Create a provider block volume. */
-  createVolume(config: VolumeConfig): Promise<VolumeInstance>;
+  createVolume(config: VolumeConfig, context?: ProviderRequestContext): Promise<VolumeInstance>;
 
   /** Attach a volume to a server in the same location/zone. */
-  attachVolume(config: VolumeAttachmentConfig): Promise<VolumeInstance>;
+  attachVolume(
+    config: VolumeAttachmentConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance>;
 
   /** Detach a volume from its server. MUST be idempotent on already-detached 404s where provider allows it. */
-  detachVolume(config: VolumeDetachConfig): Promise<VolumeInstance | null>;
+  detachVolume(
+    config: VolumeDetachConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null>;
 
   /** Resize a volume upward only. Implementations MUST reject shrink requests before API calls. */
-  resizeVolume(config: VolumeResizeConfig): Promise<VolumeInstance>;
+  resizeVolume(
+    config: VolumeResizeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance>;
 
   /** Delete a volume. MUST be idempotent (no error on 404). */
-  deleteVolume(config: VolumeLookupConfig): Promise<void>;
+  deleteVolume(config: VolumeLookupConfig, context?: ProviderRequestContext): Promise<void>;
 
   /** Get volume by ID. Returns null if not found (no throw). */
-  getVolume(config: VolumeLookupConfig): Promise<VolumeInstance | null>;
+  getVolume(
+    config: VolumeLookupConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null>;
 
   /** List volumes in an explicit location/zone with optional label-based filtering. */
-  listVolumes(config: VolumeListConfig): Promise<VolumeInstance[]>;
+  listVolumes(
+    config: VolumeListConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance[]>;
 }
 
 /**
@@ -393,7 +414,7 @@ export interface GcpProviderConfig {
   provider: 'gcp';
   projectId: string;
   /** Function that returns a valid GCP access token (via STS exchange) */
-  tokenProvider: () => Promise<string>;
+  tokenProvider: (context?: ProviderRequestContext) => Promise<string>;
   defaultZone?: string;
   imageFamily?: string;
   imageProject?: string;

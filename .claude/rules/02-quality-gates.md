@@ -34,6 +34,7 @@ If you build or modify a feature, you MUST add tests that prove it works before 
 ### Quick Testing Gate
 
 Before marking feature work complete:
+
 - [ ] Unit tests added/updated for all changed behavior
 - [ ] Integration tests added where cross-layer behavior exists
 - [ ] Capability test verifies complete happy path across system boundaries (see `10-e2e-verification.md`)
@@ -54,7 +55,7 @@ Before marking feature work complete:
 
 ### Prohibited Test Patterns
 
-**Source-contract tests (`readFileSync` + `toContain()`) are NOT valid behavioral tests.** Reading a component's source code as a string and asserting substrings exist proves that code is *present*, not that it *works*. This pattern creates false confidence — tests pass while the feature is broken.
+**Source-contract tests (`readFileSync` + `toContain()`) are NOT valid behavioral tests.** Reading a component's source code as a string and asserting substrings exist proves that code is _present_, not that it _works_. This pattern creates false confidence — tests pass while the feature is broken.
 
 - Any component with user interactions (click handlers, navigation, form submission, state changes) MUST have tests that **render** the component and **simulate** those interactions.
 - Source-contract tests may only be used for static configuration or structural verification (e.g., "does this config file export certain keys", "does this theme file define required tokens").
@@ -63,6 +64,7 @@ Before marking feature work complete:
 ### Interactive Element Test Requirement
 
 Every new button, link, form, or interactive element MUST ship with at least one behavioral test that:
+
 1. **Renders** the component (using `render()` from a test framework)
 2. **Simulates** the user interaction (click, submit, type, navigate)
 3. **Asserts** the user-visible outcome (DOM change, navigation, displayed text)
@@ -89,6 +91,7 @@ Ask: "What test, if it existed before the breaking change was introduced, would 
 - **Write a test that exercises the contract that was violated.** Not just the symptom — the invariant that should always hold.
 - **If mocks hid the bug**, the right response is often an integration or E2E test that uses real (or more realistic) dependencies. Shallow unit tests with overly permissive mocks can give false confidence.
 - **If the bug was a missing propagation** (value set in A but never forwarded to B), write a test that constructs the real lifecycle (A then B) and asserts the value arrives.
+- **If the bug involves cancellation through a timeout, retry, poll, or multi-step resource boundary**, the regression must prove the caller signal is composed with (not replaced by) internal timeouts, the exact caller reason survives provider-specific error handling, listeners/timers are cleaned up, and no later retry, poll, cleanup, cache write, or resource mutation starts after cancellation. Include a cancellation reason shaped like an otherwise retryable or idempotent domain error so classification catches cannot swallow it.
 - **If the bug involves streamed UI data that is later reconstructed from durable storage**, write a parity regression test for the persisted representation, not only the live stream. The test MUST include a partial/status-only update event and assert omitted fields do not clear previously visible metadata. See the retained incident lesson in this rule.
 - **If the bug involves lifecycle control across a runtime boundary** (agent/session/workspace/node stop, cancel, retry, replacement, suspend, or resume), the regression test MUST assert the runtime command is invoked before accepting the terminal state or dispatching replacement work. Database state changes and successful JSON responses are insufficient; the test must prove the external agent/node/workspace control side effect.
 - **If runtime liveness is represented in more than one control plane** (for example D1, a session Durable Object, and a runtime Durable Object), timeout and cleanup tests MUST cross those boundaries with deliberately stale secondary state. A heartbeat timeout or sweep may terminalize work only after the runtime owner reports a conclusively terminal lifecycle; sleep, wake, restore, replacement, probe failure, and unknown state are inconclusive. Use one shared lifecycle classifier for every cleanup path so a stale replica cannot strand recoverable work.
@@ -107,6 +110,7 @@ When a workflow deletes state, metadata, lock files, Pulumi stacks, or other rec
 When a heartbeat, callback, webhook, cron sweep, or reconcile operation converts observed external state into database mutations, updates MUST be scoped to the specific entity or sequence the reporter actually identified. Do not use broad predicates such as "all rows newer than the reported cursor" for terminal failure handling unless the reporter explicitly attested to every affected row.
 
 Required coverage for reconcile/sweep changes:
+
 - At least one regression test with a newer unrelated row that must remain unchanged.
 - At least one assertion that only the reported entity/sequence receives the terminal status.
 - For ordered state machines, a test where a newer row is created before the same reconcile tick evaluates pending work.
@@ -118,6 +122,7 @@ When a workflow allocates a paid or externally visible resource before later set
 ### Evaluating Test Realism
 
 Before finalizing tests, ask:
+
 - Do these mocks accurately represent the real system? Would a broken invariant actually cause a test failure here?
 - Is there a cross-component boundary that unit tests can't cover? If so, add an integration test.
 - Would a developer introducing the original regression have seen a red CI from these tests? If not, the tests aren't defensive enough.
@@ -129,6 +134,7 @@ For exported helpers that return canonical domain types, include at least one di
 When a health gate, readiness gate, reconciler, or deploy/apply workflow decides pass/fail from an external system snapshot, the failure path MUST preserve diagnosable state before cleanup, revert, or retry can destroy the evidence.
 
 Required coverage for external-system gates:
+
 - Emit a Warn-or-higher structured diagnostic that includes the evaluated resources and the exact blockers that caused the gate to fail.
 - Surface the blockers in the returned error, observed state, or control-plane payload that operators can inspect after cleanup.
 - Redact secrets before logging or surfacing raw external command output.
@@ -146,12 +152,13 @@ Record the post-mortem in the relevant task record or archive entry, covering:
 2. **Root cause**: Trace to the specific code change that introduced the bug
 3. **Timeline**: When was the bug introduced, when was it discovered, what happened in between?
 4. **Why it wasn't caught**: Analyze which practices failed — missing tests, wrong test type, insufficient review, missing trace, etc.
-5. **Class of bug**: Generalize beyond this specific instance — what *category* of bug is this? (e.g., "state interaction race conditions", "mock-hidden integration failures", "aspirational documentation treated as fact")
-6. **Process fix**: What changes to rules, checklists, agent instructions, or review procedures would prevent this *class* of bug in the future?
+5. **Class of bug**: Generalize beyond this specific instance — what _category_ of bug is this? (e.g., "state interaction race conditions", "mock-hidden integration failures", "aspirational documentation treated as fact")
+6. **Process fix**: What changes to rules, checklists, agent instructions, or review procedures would prevent this _class_ of bug in the future?
 
 ### 2. Process Fix (in the same PR)
 
 The PR MUST include concrete changes to at least one of:
+
 - `.claude/rules/` — agent guidelines and quality gates
 - `.claude/agents/` — reviewer agent instructions
 - `.github/pull_request_template.md` — PR checklist items
@@ -173,22 +180,23 @@ For current-PR or current-workspace critique, reviewers may be local subagents. 
 
 Run local subagents **in parallel** covering each language and discipline touched by the PR:
 
-| PR touches | Required reviewer agent |
-|------------|----------------------|
-| **Always (if task-driven)** | `task-completion-validator` — planned vs. actual work, research gaps, unwired UI, missing tests |
-| Go code (`packages/vm-agent/`) | `go-specialist` — concurrency, resource leaks, Go idioms |
-| TypeScript API (`apps/api/`) | `cloudflare-specialist` — D1, KV, Workers patterns |
-| UI code (`apps/web/`, `packages/ui/`) | `ui-ux-specialist` — accessibility, layout, interactions |
-| Auth, credentials, tokens | `security-auditor` — credential safety, OWASP, JWT, multi-tenant IAM scope |
+| PR touches                                           | Required reviewer agent                                                                                           |
+| ---------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| **Always (if task-driven)**                          | `task-completion-validator` — planned vs. actual work, research gaps, unwired UI, missing tests                   |
+| Go code (`packages/vm-agent/`)                       | `go-specialist` — concurrency, resource leaks, Go idioms                                                          |
+| TypeScript API (`apps/api/`)                         | `cloudflare-specialist` — D1, KV, Workers patterns                                                                |
+| UI code (`apps/web/`, `packages/ui/`)                | `ui-ux-specialist` — accessibility, layout, interactions                                                          |
+| Auth, credentials, tokens                            | `security-auditor` — credential safety, OWASP, JWT, multi-tenant IAM scope                                        |
 | External service integration (OAuth, cloud IAM, WIF) | Manual design review — consumer simulation, static URIs, binding scope (see `19-external-service-integration.md`) |
-| Environment variables | `env-validator` — GH_ vs GITHUB_, deployment mapping |
-| Documentation changes | `doc-sync-validator` — docs match code reality |
-| Business logic, config | `constitution-validator` — no hardcoded values |
-| Tests added/changed | `test-engineer` — coverage, realism, TDD compliance |
+| Environment variables                                | `env-validator` — GH* vs GITHUB*, deployment mapping                                                              |
+| Documentation changes                                | `doc-sync-validator` — docs match code reality                                                                    |
+| Business logic, config                               | `constitution-validator` — no hardcoded values                                                                    |
+| Tests added/changed                                  | `test-engineer` — coverage, realism, TDD compliance                                                               |
 
 ### What Reviewers Must Check
 
 Each reviewer should:
+
 1. **Read every changed file** in the PR diff
 2. **Challenge assumptions** — what could go wrong? What edge cases are missed?
 3. **Check test adequacy** — do the tests actually prove the fix/feature works, or are they too shallow?
@@ -212,6 +220,7 @@ Changes to **cloud-init templates, VM agent configuration, DNS records, or TLS c
 ### When This Applies
 
 This gate applies when a PR modifies ANY of:
+
 - `packages/cloud-init/` — cloud-init templates or generation logic
 - `packages/vm-agent/` — VM agent startup, TLS, heartbeat, or configuration
 - DNS record creation/modification in `apps/api/src/services/dns.ts`
@@ -233,7 +242,7 @@ If VM provisioning fails, heartbeats do not arrive, or the workspace is unreacha
 
 ### No Self-Exemptions
 
-**Fixing a broken gate does not exempt you from the gate.** If staging is currently broken by the bug you are fixing, you MUST still deploy your fix branch to staging and verify it *fixes* the broken state. "This is the fix for the thing the gate tests" is not a valid N/A rationale — it is the *strongest* reason to run the gate. The TLS YAML fix PR (#322) was merged without infrastructure verification despite modifying `packages/cloud-init/` — the exact scenario this gate exists to prevent.
+**Fixing a broken gate does not exempt you from the gate.** If staging is currently broken by the bug you are fixing, you MUST still deploy your fix branch to staging and verify it _fixes_ the broken state. "This is the fix for the thing the gate tests" is not a valid N/A rationale — it is the _strongest_ reason to run the gate. The TLS YAML fix PR (#322) was merged without infrastructure verification despite modifying `packages/cloud-init/` — the exact scenario this gate exists to prevent.
 
 ### Why This Gate Exists
 

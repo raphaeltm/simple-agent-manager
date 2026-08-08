@@ -3,9 +3,15 @@ import {
   digitalOceanTagsToLabels,
   labelsToDigitalOceanTags,
 } from './digitalocean-tags';
-import { providerFetch } from './provider-fetch';
+import {
+  providerDelay,
+  providerFetch,
+  rethrowIfProviderRequestAborted,
+  throwIfProviderRequestAborted,
+} from './provider-fetch';
 import type {
   ProviderLogger,
+  ProviderRequestContext,
   VolumeAttachmentConfig,
   VolumeCapabilities,
   VolumeConfig,
@@ -107,7 +113,11 @@ export class DigitalOceanVolumeClient {
     this.logger = options.logger;
   }
 
-  async createVolume(config: VolumeConfig): Promise<VolumeInstance> {
+  async createVolume(
+    config: VolumeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
     this.validateRequestedVolumeSize(config.sizeGb);
 
     // DO volume names are lossy (lowercased/sanitized/truncated). Round-trip the EXACT
@@ -119,35 +129,56 @@ export class DigitalOceanVolumeClient {
 
     let response: Response;
     try {
-      response = await this.doFetch('/volumes', {
-        method: 'POST',
-        body: JSON.stringify({
-          name: sanitizeDigitalOceanVolumeName(config.name),
-          region: config.location,
-          size_gigabytes: config.sizeGb,
-          tags,
-        }),
-      });
+      response = await this.doFetch(
+        '/volumes',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            name: sanitizeDigitalOceanVolumeName(config.name),
+            region: config.location,
+            size_gigabytes: config.sizeGb,
+            tags,
+          }),
+        },
+        undefined,
+        context
+      );
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       throw this.mapProviderError(err);
     }
 
+    throwIfProviderRequestAborted(context);
     const data = validateDigitalOceanVolumeResponse(
       await parseProviderJson(response, 'digitalocean', 'createVolume'),
       'createVolume'
     );
+    throwIfProviderRequestAborted(context);
     return this.mapVolume(data.volume);
   }
 
-  async attachVolume(config: VolumeAttachmentConfig): Promise<VolumeInstance> {
+  async attachVolume(
+    config: VolumeAttachmentConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
     const dropletId = toDropletId(config.serverId);
-    await this.runVolumeAction(config.volumeId, 'attachVolume', {
-      type: 'attach',
-      droplet_id: dropletId,
-      region: config.location,
-    });
+    await this.runVolumeAction(
+      config.volumeId,
+      'attachVolume',
+      {
+        type: 'attach',
+        droplet_id: dropletId,
+        region: config.location,
+      },
+      context
+    );
 
-    const volume = await this.getVolume({ volumeId: config.volumeId, location: config.location });
+    throwIfProviderRequestAborted(context);
+    const volume = await this.getVolume(
+      { volumeId: config.volumeId, location: config.location },
+      context
+    );
     if (!volume) {
       throw new ProviderError(
         'digitalocean',
@@ -161,8 +192,16 @@ export class DigitalOceanVolumeClient {
     return volume;
   }
 
-  async detachVolume(config: VolumeDetachConfig): Promise<VolumeInstance | null> {
-    const current = await this.getVolume({ volumeId: config.volumeId, location: config.location });
+  async detachVolume(
+    config: VolumeDetachConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null> {
+    throwIfProviderRequestAborted(context);
+    const current = await this.getVolume(
+      { volumeId: config.volumeId, location: config.location },
+      context
+    );
+    throwIfProviderRequestAborted(context);
     if (!current) return null; // Already gone — idempotent.
 
     // Detach from whatever droplet the volume is actually attached to (authoritative),
@@ -170,18 +209,29 @@ export class DigitalOceanVolumeClient {
     const attached = current.attachedServerId ?? config.serverId;
     if (!attached) return current;
 
-    await this.runVolumeAction(config.volumeId, 'detachVolume', {
-      type: 'detach',
-      droplet_id: toDropletId(attached),
-      region: config.location,
-    });
+    await this.runVolumeAction(
+      config.volumeId,
+      'detachVolume',
+      {
+        type: 'detach',
+        droplet_id: toDropletId(attached),
+        region: config.location,
+      },
+      context
+    );
 
-    return this.getVolume({ volumeId: config.volumeId, location: config.location });
+    throwIfProviderRequestAborted(context);
+    return this.getVolume({ volumeId: config.volumeId, location: config.location }, context);
   }
 
-  async resizeVolume(config: VolumeResizeConfig): Promise<VolumeInstance> {
+  async resizeVolume(
+    config: VolumeResizeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
     this.validateRequestedVolumeSize(config.sizeGb);
-    const currentSizeGb = config.currentSizeGb ?? (await this.getCurrentVolumeSize(config));
+    const currentSizeGb =
+      config.currentSizeGb ?? (await this.getCurrentVolumeSize(config, context));
     if (config.sizeGb < currentSizeGb) {
       throw new ProviderError(
         'digitalocean',
@@ -191,13 +241,22 @@ export class DigitalOceanVolumeClient {
       );
     }
 
-    await this.runVolumeAction(config.volumeId, 'resizeVolume', {
-      type: 'resize',
-      size_gigabytes: config.sizeGb,
-      region: config.location,
-    });
+    await this.runVolumeAction(
+      config.volumeId,
+      'resizeVolume',
+      {
+        type: 'resize',
+        size_gigabytes: config.sizeGb,
+        region: config.location,
+      },
+      context
+    );
 
-    const volume = await this.getVolume({ volumeId: config.volumeId, location: config.location });
+    throwIfProviderRequestAborted(context);
+    const volume = await this.getVolume(
+      { volumeId: config.volumeId, location: config.location },
+      context
+    );
     if (!volume) {
       throw new ProviderError(
         'digitalocean',
@@ -211,10 +270,17 @@ export class DigitalOceanVolumeClient {
     return volume;
   }
 
-  async deleteVolume(config: VolumeLookupConfig): Promise<void> {
+  async deleteVolume(config: VolumeLookupConfig, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
     try {
-      await this.doFetch(`/volumes/${encodeURIComponent(config.volumeId)}`, { method: 'DELETE' });
+      await this.doFetch(
+        `/volumes/${encodeURIComponent(config.volumeId)}`,
+        { method: 'DELETE' },
+        undefined,
+        context
+      );
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       if (err instanceof ProviderError && err.statusCode === 404) {
         return; // Idempotent
       }
@@ -222,15 +288,27 @@ export class DigitalOceanVolumeClient {
     }
   }
 
-  async getVolume(config: VolumeLookupConfig): Promise<VolumeInstance | null> {
+  async getVolume(
+    config: VolumeLookupConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null> {
+    throwIfProviderRequestAborted(context);
     try {
-      const response = await this.doFetch(`/volumes/${encodeURIComponent(config.volumeId)}`);
+      const response = await this.doFetch(
+        `/volumes/${encodeURIComponent(config.volumeId)}`,
+        undefined,
+        undefined,
+        context
+      );
+      throwIfProviderRequestAborted(context);
       const data = validateDigitalOceanVolumeResponse(
         await parseProviderJson(response, 'digitalocean', 'getVolume'),
         'getVolume'
       );
+      throwIfProviderRequestAborted(context);
       return this.mapVolume(data.volume);
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       if (err instanceof ProviderError && err.statusCode === 404) {
         return null;
       }
@@ -238,8 +316,13 @@ export class DigitalOceanVolumeClient {
     }
   }
 
-  async listVolumes(config: VolumeListConfig): Promise<VolumeInstance[]> {
-    const volumes = await this.fetchAllVolumes(config.location);
+  async listVolumes(
+    config: VolumeListConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance[]> {
+    throwIfProviderRequestAborted(context);
+    const volumes = await this.fetchAllVolumes(config.location, context);
+    throwIfProviderRequestAborted(context);
     let mapped = volumes.map((volume) => this.mapVolume(volume));
 
     if (config.labels && Object.keys(config.labels).length > 0) {
@@ -251,15 +334,26 @@ export class DigitalOceanVolumeClient {
     return mapped;
   }
 
-  private async fetchAllVolumes(location: string): Promise<DigitalOceanVolumePayload[]> {
+  private async fetchAllVolumes(
+    location: string,
+    context?: ProviderRequestContext
+  ): Promise<DigitalOceanVolumePayload[]> {
+    throwIfProviderRequestAborted(context);
     const all: DigitalOceanVolumePayload[] = [];
     for (let page = 1; page <= this.maxListPages; page += 1) {
+      throwIfProviderRequestAborted(context);
       const params = new URLSearchParams({
         per_page: String(DIGITALOCEAN_LIST_PER_PAGE),
         page: String(page),
         region: location,
       });
-      const response = await this.doFetch(`/volumes?${params.toString()}`);
+      const response = await this.doFetch(
+        `/volumes?${params.toString()}`,
+        undefined,
+        undefined,
+        context
+      );
+      throwIfProviderRequestAborted(context);
       const data = validateDigitalOceanVolumesResponse(
         await parseProviderJson(response, 'digitalocean', 'listVolumes'),
         'listVolumes'
@@ -277,28 +371,42 @@ export class DigitalOceanVolumeClient {
   /** Issue a volume action and poll it to completion within the configured budget. */
   private async runVolumeAction(
     volumeId: string,
-    context: string,
-    body: Record<string, unknown>
+    operation: string,
+    body: Record<string, unknown>,
+    context?: ProviderRequestContext
   ): Promise<void> {
-    const response = await this.doFetch(`/volumes/${encodeURIComponent(volumeId)}/actions`, {
-      method: 'POST',
-      body: JSON.stringify(body),
-    });
-    const data = validateDigitalOceanActionResponse(
-      await parseProviderJson(response, 'digitalocean', context),
+    throwIfProviderRequestAborted(context);
+    const response = await this.doFetch(
+      `/volumes/${encodeURIComponent(volumeId)}/actions`,
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+      undefined,
       context
     );
-    await this.pollAction(data.action, context);
+    throwIfProviderRequestAborted(context);
+    const data = validateDigitalOceanActionResponse(
+      await parseProviderJson(response, 'digitalocean', operation),
+      operation
+    );
+    throwIfProviderRequestAborted(context);
+    await this.pollAction(data.action, operation, context);
   }
 
   /** Poll a DigitalOcean async action to `completed`, hard-bounded by actionPollTimeoutMs. */
-  private async pollAction(action: DigitalOceanActionPayload, context: string): Promise<void> {
+  private async pollAction(
+    action: DigitalOceanActionPayload,
+    operation: string,
+    context?: ProviderRequestContext
+  ): Promise<void> {
+    throwIfProviderRequestAborted(context);
     if (action.status === 'completed') return;
     if (action.status === 'errored') {
       throw new ProviderError(
         'digitalocean',
         undefined,
-        `DigitalOcean ${context} action ${action.id} errored`,
+        `DigitalOcean ${operation} action ${action.id} errored`,
         {
           category: 'transient_capacity',
         }
@@ -307,16 +415,20 @@ export class DigitalOceanVolumeClient {
 
     const deadline = Date.now() + this.actionPollTimeoutMs;
     while (Date.now() < deadline) {
-      await delay(Math.min(this.actionPollIntervalMs, deadline - Date.now()));
+      await providerDelay(Math.min(this.actionPollIntervalMs, deadline - Date.now()), context);
       const remaining = deadline - Date.now();
       if (remaining <= 0) break;
-      const current = await this.getAction(action.id, Math.min(this.requestTimeoutMs, remaining));
+      const current = await this.getAction(
+        action.id,
+        Math.min(this.requestTimeoutMs, remaining),
+        context
+      );
       if (current.status === 'completed') return;
       if (current.status === 'errored') {
         throw new ProviderError(
           'digitalocean',
           undefined,
-          `DigitalOcean ${context} action ${action.id} errored`,
+          `DigitalOcean ${operation} action ${action.id} errored`,
           {
             category: 'transient_capacity',
           }
@@ -326,17 +438,24 @@ export class DigitalOceanVolumeClient {
     throw new ProviderError(
       'digitalocean',
       undefined,
-      `DigitalOcean ${context} action ${action.id} did not complete within ${this.actionPollTimeoutMs}ms`,
+      `DigitalOcean ${operation} action ${action.id} did not complete within ${this.actionPollTimeoutMs}ms`,
       { category: 'transient_capacity' }
     );
   }
 
-  private async getAction(actionId: number, timeoutMs: number): Promise<DigitalOceanActionPayload> {
-    const response = await this.doFetch(`/actions/${actionId}`, undefined, timeoutMs);
+  private async getAction(
+    actionId: number,
+    timeoutMs: number,
+    context?: ProviderRequestContext
+  ): Promise<DigitalOceanActionPayload> {
+    throwIfProviderRequestAborted(context);
+    const response = await this.doFetch(`/actions/${actionId}`, undefined, timeoutMs, context);
+    throwIfProviderRequestAborted(context);
     const data = validateDigitalOceanActionResponse(
       await parseProviderJson(response, 'digitalocean', 'pollAction'),
       'pollAction'
     );
+    throwIfProviderRequestAborted(context);
     return data.action;
   }
 
@@ -383,8 +502,15 @@ export class DigitalOceanVolumeClient {
     }
   }
 
-  private async getCurrentVolumeSize(config: VolumeResizeConfig): Promise<number> {
-    const volume = await this.getVolume({ volumeId: config.volumeId, location: config.location });
+  private async getCurrentVolumeSize(
+    config: VolumeResizeConfig,
+    context?: ProviderRequestContext
+  ): Promise<number> {
+    throwIfProviderRequestAborted(context);
+    const volume = await this.getVolume(
+      { volumeId: config.volumeId, location: config.location },
+      context
+    );
     if (!volume) {
       throw new ProviderError(
         'digitalocean',
@@ -401,8 +527,10 @@ export class DigitalOceanVolumeClient {
   private async doFetch(
     path: string,
     init?: RequestInit,
-    timeoutMs: number = this.requestTimeoutMs
+    timeoutMs: number = this.requestTimeoutMs,
+    context?: ProviderRequestContext
   ): Promise<Response> {
+    throwIfProviderRequestAborted(context);
     try {
       return await providerFetch(
         'digitalocean',
@@ -415,9 +543,12 @@ export class DigitalOceanVolumeClient {
             ...(init?.headers ?? {}),
           },
         },
-        timeoutMs
+        timeoutMs,
+        undefined,
+        context
       );
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       throw this.mapProviderError(err);
     }
   }
@@ -437,8 +568,4 @@ function toDropletId(serverId: string): number {
     );
   }
   return dropletId;
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
 }

@@ -22,7 +22,7 @@ export function runProviderContractTests(
     name?: string;
     /** Whether createVM is expected to return an IP immediately. */
     createReturnsIp?: boolean;
-  },
+  }
 ) {
   const suiteName = options?.name || 'Provider Contract';
   const createReturnsIp = options?.createReturnsIp ?? true;
@@ -181,9 +181,9 @@ export function runProviderCancellationContractTests(
       caller.abort(cancellation);
 
       try {
-        const validateWithContext = provider.validateToken as (
-          context?: { signal?: AbortSignal }
-        ) => Promise<boolean>;
+        const validateWithContext = provider.validateToken as (context?: {
+          signal?: AbortSignal;
+        }) => Promise<boolean>;
         await expect(validateWithContext.call(provider, { signal: caller.signal })).rejects.toBe(
           cancellation
         );

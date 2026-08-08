@@ -2,31 +2,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DigitalOceanProvider } from '../../src/digitalocean';
 import { HetznerProvider } from '../../src/hetzner';
-import type {
-  Provider,
-  VMConfig,
-  VMInstance,
-  VolumeAttachmentConfig,
-  VolumeInstance,
-} from '../../src/types';
+import type { VMConfig } from '../../src/types';
 import { ProviderError } from '../../src/types';
 import { VultrProvider } from '../../src/vultr';
-import { createMockDigitalOceanDroplet, createMockDigitalOceanVolume } from '../fixtures/digitalocean-mocks';
+import {
+  createMockDigitalOceanDroplet,
+  createMockDigitalOceanVolume,
+} from '../fixtures/digitalocean-mocks';
 import { createMockServer } from '../fixtures/hetzner-mocks';
 import { createMockVultrInstance } from '../fixtures/vultr-mocks';
-
-interface CancellationContext {
-  signal?: AbortSignal;
-}
-
-interface CancellableProviderWorkflows {
-  createVM(config: VMConfig, context?: CancellationContext): Promise<VMInstance>;
-  deleteVM(id: string, context?: CancellationContext): Promise<void>;
-  attachVolume(
-    config: VolumeAttachmentConfig,
-    context?: CancellationContext,
-  ): Promise<VolumeInstance>;
-}
 
 const originalFetch = globalThis.fetch;
 
@@ -44,12 +28,6 @@ const vmConfig: VMConfig = {
   labels: { 'sam-project': 'project-1', 'sam-node': 'node-1' },
 };
 
-function cancellable(provider: Provider): CancellableProviderWorkflows {
-  // This cast keeps the RED regression runnable against the pre-fix public contract.
-  // The implementation makes this optional context part of Provider itself.
-  return provider as unknown as CancellableProviderWorkflows;
-}
-
 function jsonResponse(body: unknown, status = 200): Promise<Response> {
   return Promise.resolve(new Response(JSON.stringify(body), { status }));
 }
@@ -60,7 +38,8 @@ function methodOf(init?: RequestInit): string {
 
 function countCalls(mock: ReturnType<typeof vi.fn>, method: string, matcher: RegExp): number {
   return mock.mock.calls.filter(
-    ([url, init]) => methodOf(init as RequestInit | undefined) === method && matcher.test(String(url)),
+    ([url, init]) =>
+      methodOf(init as RequestInit | undefined) === method && matcher.test(String(url))
   ).length;
 }
 
@@ -68,15 +47,10 @@ describe('provider workflow cancellation', () => {
   describe('Hetzner create retries', () => {
     it('cancels the placement wait without treating a 412-shaped abort reason as another placement failure', async () => {
       vi.useFakeTimers();
-      const provider = new HetznerProvider(
-        'test-token',
-        'fsn1',
-        1_000,
-        true,
-        1_000,
-        1_000,
-        { capacityRetryMaxAttempts: 3, capacityRetryBudgetMs: 10_000 },
-      );
+      const provider = new HetznerProvider('test-token', 'fsn1', 1_000, true, 1_000, 1_000, {
+        capacityRetryMaxAttempts: 3,
+        capacityRetryBudgetMs: 10_000,
+      });
       const fetchMock = vi
         .fn()
         .mockResolvedValueOnce(
@@ -84,14 +58,13 @@ describe('provider workflow cancellation', () => {
             JSON.stringify({
               error: { code: 'placement_error', message: 'placement could not be satisfied' },
             }),
-            { status: 412 },
-          ),
+            { status: 412 }
+          )
         )
         .mockResolvedValue(
-          new Response(
-            JSON.stringify({ server: createMockServer({ status: 'initializing' }) }),
-            { status: 201 },
-          ),
+          new Response(JSON.stringify({ server: createMockServer({ status: 'initializing' }) }), {
+            status: 201,
+          })
         );
       globalThis.fetch = fetchMock;
       const controller = new AbortController();
@@ -99,10 +72,10 @@ describe('provider workflow cancellation', () => {
         'hetzner',
         412,
         'caller cancelled a superseded placement request',
-        { providerCode: 'placement_error', category: 'invalid_config' },
+        { providerCode: 'placement_error', category: 'invalid_config' }
       );
 
-      const outcome = cancellable(provider)
+      const outcome = provider
         .createVM(vmConfig, { signal: controller.signal })
         .catch((error: unknown) => error);
       await vi.advanceTimersByTimeAsync(0);
@@ -117,15 +90,10 @@ describe('provider workflow cancellation', () => {
 
     it('cancels the capacity backoff without retrying a transient-capacity-shaped abort reason', async () => {
       vi.useFakeTimers();
-      const provider = new HetznerProvider(
-        'test-token',
-        'fsn1',
-        1_000,
-        false,
-        1_000,
-        1_000,
-        { capacityRetryMaxAttempts: 3, capacityRetryBudgetMs: 10_000 },
-      );
+      const provider = new HetznerProvider('test-token', 'fsn1', 1_000, false, 1_000, 1_000, {
+        capacityRetryMaxAttempts: 3,
+        capacityRetryBudgetMs: 10_000,
+      });
       const fetchMock = vi
         .fn()
         .mockResolvedValueOnce(
@@ -133,14 +101,13 @@ describe('provider workflow cancellation', () => {
             JSON.stringify({
               error: { code: 'resource_unavailable', message: 'no capacity in fsn1' },
             }),
-            { status: 422 },
-          ),
+            { status: 422 }
+          )
         )
         .mockResolvedValue(
-          new Response(
-            JSON.stringify({ server: createMockServer({ status: 'initializing' }) }),
-            { status: 201 },
-          ),
+          new Response(JSON.stringify({ server: createMockServer({ status: 'initializing' }) }), {
+            status: 201,
+          })
         );
       globalThis.fetch = fetchMock;
       const controller = new AbortController();
@@ -148,10 +115,10 @@ describe('provider workflow cancellation', () => {
         'hetzner',
         422,
         'caller cancelled a capacity-constrained request',
-        { providerCode: 'resource_unavailable', category: 'transient_capacity' },
+        { providerCode: 'resource_unavailable', category: 'transient_capacity' }
       );
 
-      const outcome = cancellable(provider)
+      const outcome = provider
         .createVM(vmConfig, { signal: controller.signal })
         .catch((error: unknown) => error);
       await vi.advanceTimersByTimeAsync(0);
@@ -192,7 +159,7 @@ describe('provider workflow cancellation', () => {
       const controller = new AbortController();
       const reason = new Error('caller cancelled DigitalOcean IP discovery');
 
-      const outcome = cancellable(provider)
+      const outcome = provider
         .createVM({ ...vmConfig, location: 'fra1' }, { signal: controller.signal })
         .catch((error: unknown) => error);
       await vi.advanceTimersByTimeAsync(10);
@@ -234,11 +201,8 @@ describe('provider workflow cancellation', () => {
       const controller = new AbortController();
       const reason = new Error('caller cancelled Vultr IP discovery');
 
-      const outcome = cancellable(provider)
-        .createVM(
-          { ...vmConfig, location: 'fra', image: '1743' },
-          { signal: controller.signal },
-        )
+      const outcome = provider
+        .createVM({ ...vmConfig, location: 'fra', image: '1743' }, { signal: controller.signal })
         .catch((error: unknown) => error);
       await vi.advanceTimersByTimeAsync(10);
       expect(countCalls(fetchMock, 'GET', /\/v2\/instances\/vultr-instance-1$/)).toBe(1);
@@ -287,10 +251,10 @@ describe('provider workflow cancellation', () => {
       const controller = new AbortController();
       const reason = new Error('caller cancelled volume attachment');
 
-      const outcome = cancellable(provider)
+      const outcome = provider
         .attachVolume(
           { volumeId: 'do-volume-1', serverId: '123', location: 'fra1' },
-          { signal: controller.signal },
+          { signal: controller.signal }
         )
         .catch((error: unknown) => error);
       await vi.advanceTimersByTimeAsync(10);
@@ -330,10 +294,10 @@ describe('provider workflow cancellation', () => {
       'digitalocean',
       404,
       'caller cancelled deletion of an obsolete resource',
-      { category: 'invalid_config' },
+      { category: 'invalid_config' }
     );
 
-    const outcome = cancellable(provider)
+    const outcome = provider
       .deleteVM('already-gone', { signal: controller.signal })
       .catch((error: unknown) => error);
     await vi.advanceTimersByTimeAsync(0);
