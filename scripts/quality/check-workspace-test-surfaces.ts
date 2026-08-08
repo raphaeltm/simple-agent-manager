@@ -143,10 +143,18 @@ export function findWorkspaceTestSurfaceFindings(
   }
 
   for (const requirement of requiredWorkspaceScripts) {
-    const manifestPath = resolve(root, requirement.workspace, 'package.json');
+    const requiredWorkspaceDirectory = resolve(root, requirement.workspace);
+    const manifestPath = resolve(requiredWorkspaceDirectory, 'package.json');
     const manifest = existsSync(manifestPath) ? readManifest(manifestPath) : undefined;
-    const invalidScripts = requirement.scripts.filter(
-      (script) => !isRunnableScript(manifest?.scripts?.[script])
+    const invalidScripts: string[] = [];
+    if (!workspaceDirectories.includes(requiredWorkspaceDirectory)) {
+      invalidScripts.push('pnpm workspace membership');
+    }
+    if (manifest?.name !== requirement.packageName) {
+      invalidScripts.push(`package name ${requirement.packageName}`);
+    }
+    invalidScripts.push(
+      ...requirement.scripts.filter((script) => !isRunnableScript(manifest?.scripts?.[script]))
     );
     if (invalidScripts.length === 0) continue;
 
@@ -176,7 +184,7 @@ export function assertWorkspaceTestSurfaces(
 
   const details = findings.map(
     (finding) =>
-      `- ${finding.packageName} (${finding.workspace}): missing or placeholder ${finding.invalidScripts.join(', ')}`
+      `- ${finding.packageName} (${finding.workspace}): missing or invalid ${finding.invalidScripts.join(', ')}`
   );
   throw new Error(
     ['Workspaces must expose every required non-placeholder quality script:', ...details].join('\n')
