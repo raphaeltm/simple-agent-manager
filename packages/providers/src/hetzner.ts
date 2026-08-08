@@ -1,6 +1,26 @@
-import type { VMSize } from '@simple-agent-manager/shared';
 import { DEFAULT_HETZNER_DATACENTER, DEFAULT_HETZNER_IMAGE } from '@simple-agent-manager/shared';
 
+import {
+  DEFAULT_CAPACITY_RETRY_BUDGET_MS,
+  DEFAULT_CAPACITY_RETRY_INITIAL_DELAY_MS,
+  DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS,
+  DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS,
+  DEFAULT_HETZNER_MAX_LIST_PAGES,
+  DEFAULT_PLACEMENT_RETRY_DELAY_MS,
+  HETZNER_API_URL,
+  HETZNER_LOCATION_META,
+  HETZNER_LOCATIONS,
+  HETZNER_SIZE_CONFIGS,
+  HETZNER_VOLUME_CAPABILITIES,
+  HETZNER_VOLUME_MAX_SIZE_GB,
+  HETZNER_VOLUME_MIN_SIZE_GB,
+  type HetznerProviderRuntimeOptions,
+  isAlreadyDetachedVolumeError,
+  isTransientCapacityError,
+  mapHetznerProviderError,
+  mapHetznerServerToVMInstance,
+  mapHetznerVolumeToInstance,
+} from './hetzner-metadata';
 import {
   providerDelay,
   providerFetch,
@@ -10,30 +30,20 @@ import {
 import type {
   LocationMeta,
   Provider,
-  ProviderErrorCategory,
   ProviderLogger,
   ProviderRequestContext,
   SizeConfig,
   VMConfig,
   VMInstance,
-  VMStatus,
   VolumeAttachmentConfig,
-  VolumeCapabilities,
   VolumeConfig,
   VolumeDetachConfig,
   VolumeInstance,
   VolumeListConfig,
   VolumeLookupConfig,
   VolumeResizeConfig,
-  VolumeStatus,
 } from './types';
-import {
-  noopProviderLogger,
-  ProviderError,
-  SAM_VOLUME_FILESYSTEM_FORMAT,
-  SAM_VOLUME_FSTAB_OPTIONS,
-  SAM_VOLUME_MOUNT_PATH_TEMPLATE,
-} from './types';
+import { noopProviderLogger, ProviderError, SAM_VOLUME_FILESYSTEM_FORMAT } from './types';
 import {
   type HetznerServerPayload,
   type HetznerVolumePayload,
@@ -44,170 +54,27 @@ import {
   validateHetznerVolumesResponse,
 } from './validation';
 
-const HETZNER_API_URL = 'https://api.hetzner.cloud/v1';
-
-const HETZNER_LOCATIONS = ['fsn1', 'nbg1', 'hel1', 'ash', 'hil'] as const;
-
-const HETZNER_LOCATION_META: Record<string, LocationMeta> = {
-  fsn1: { name: 'Falkenstein', country: 'DE' },
-  nbg1: { name: 'Nuremberg', country: 'DE' },
-  hel1: { name: 'Helsinki', country: 'FI' },
-  ash: { name: 'Ashburn', country: 'US' },
-  hil: { name: 'Hillsboro', country: 'US' },
-};
-
-export const DEFAULT_PLACEMENT_RETRY_DELAY_MS = 3_000;
-export const DEFAULT_CAPACITY_RETRY_INITIAL_DELAY_MS = 15_000;
-export const DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS = 120_000;
-export const DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS = 10;
-export const DEFAULT_CAPACITY_RETRY_BUDGET_MS = 300_000;
-export const HETZNER_VOLUME_MIN_SIZE_GB = 10;
-export const HETZNER_VOLUME_MAX_SIZE_GB = 10_000;
-export const HETZNER_MAX_VOLUMES_PER_SERVER = 16;
-// 100 pages × 25 items/page ≈ 2,500 resources — well above any realistic fleet
-export const DEFAULT_HETZNER_MAX_LIST_PAGES = 100;
-
-const HETZNER_VOLUME_CAPABILITIES: VolumeCapabilities = {
-  supported: true,
-  minSizeGb: HETZNER_VOLUME_MIN_SIZE_GB,
-  maxSizeGb: HETZNER_VOLUME_MAX_SIZE_GB,
-  growOnlyResize: true,
-  requiresSameLocation: true,
-  maxAttachedVolumesPerServer: HETZNER_MAX_VOLUMES_PER_SERVER,
-  defaultFormat: SAM_VOLUME_FILESYSTEM_FORMAT,
-  lifecycle: {
-    filesystem: SAM_VOLUME_FILESYSTEM_FORMAT,
-    mountPathTemplate: SAM_VOLUME_MOUNT_PATH_TEMPLATE,
-    fstabOptions: SAM_VOLUME_FSTAB_OPTIONS,
-  },
-};
-
-export interface HetznerProviderRuntimeOptions {
-  capacityRetryMaxAttempts?: number;
-  capacityRetryBudgetMs?: number;
-  logger?: ProviderLogger;
-}
-
-/**
- * Fallback message patterns for transient capacity detection when the structured
- * `error.code` is unavailable. Secondary heuristic only — prefer `providerCode`.
- */
-const TRANSIENT_CAPACITY_PATTERNS: RegExp[] = [
-  /unavailable/i,
-  /currently not available/i,
-  /no capacity/i,
-  /not enough resources/i,
-  /resource[s]?\s+(?:temporarily\s+)?unavailable/i,
-  /could not (?:find|allocate)/i,
-  /unsupported location for server type/i,
-];
-
-/**
- * Classify a Hetzner API error into a normalized ProviderErrorCategory.
- *
- * Primary signal: structured `error.code` from the JSON response.
- * Fallback: message regex patterns for cases where the code is missing.
- *
- * Hetzner error codes (from API docs):
- * - resource_unavailable → transient_capacity
- * - uniqueness_error → invalid_config
- * - invalid_input → invalid_config
- * - forbidden → auth_error
- * - unauthorized → auth_error
- * - rate_limit_exceeded → rate_limited
- * - conflict → invalid_config
- * - server_limit_exceeded → quota_exceeded
- * - placement_error → invalid_config (handled separately as 412)
- */
-export function classifyHetznerError(
-  statusCode: number | undefined,
-  providerCode: string | undefined,
-  message: string
-): ProviderErrorCategory {
-  // Primary signal: structured error code
-  if (providerCode) {
-    switch (providerCode) {
-      case 'resource_unavailable':
-        return 'transient_capacity';
-      case 'server_limit_exceeded':
-        return 'quota_exceeded';
-      case 'uniqueness_error':
-      case 'invalid_input':
-      case 'conflict':
-      case 'placement_error':
-        return 'invalid_config';
-      case 'forbidden':
-      case 'unauthorized':
-        return 'auth_error';
-      case 'rate_limit_exceeded':
-        return 'rate_limited';
-    }
-  }
-
-  // HTTP status code heuristics
-  if (statusCode === 401 || statusCode === 403) return 'auth_error';
-  if (statusCode === 429) return 'rate_limited';
-
-  // Fallback: message pattern matching for 422 without a recognized code
-  if (statusCode === 422) {
-    if (TRANSIENT_CAPACITY_PATTERNS.some((pattern) => pattern.test(message))) {
-      return 'transient_capacity';
-    }
-  }
-
-  return 'unknown';
-}
-
-/**
- * Determine whether a ProviderError represents a transient capacity issue.
- * Uses the normalized `category` field as primary signal, with fallback
- * classification for errors that don't have a category set.
- */
-export function isTransientCapacityError(err: ProviderError): boolean {
-  if (err.category === 'transient_capacity') return true;
-  // Fallback classification for errors without a pre-set category
-  if (err.statusCode === 422 && err.category === 'unknown') {
-    return (
-      classifyHetznerError(err.statusCode, err.providerCode, err.message) === 'transient_capacity'
-    );
-  }
-  return false;
-}
-
-function isAlreadyDetachedVolumeError(err: ProviderError): boolean {
-  return err.statusCode === 422 && /volume/i.test(err.message) && /not attached/i.test(err.message);
-}
-
-const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
-  small: {
-    type: 'cx23',
-    price: '€3.99/mo',
-    vcpu: 2,
-    ramGb: 4,
-    storageGb: 40,
-  },
-  medium: {
-    type: 'cx33',
-    price: '€7.49/mo',
-    vcpu: 4,
-    ramGb: 8,
-    storageGb: 80,
-  },
-  large: {
-    type: 'cx43',
-    price: '€14.49/mo',
-    vcpu: 8,
-    ramGb: 16,
-    storageGb: 160,
-  },
-};
+export type { HetznerProviderRuntimeOptions } from './hetzner-metadata';
+export {
+  classifyHetznerError,
+  DEFAULT_CAPACITY_RETRY_BUDGET_MS,
+  DEFAULT_CAPACITY_RETRY_INITIAL_DELAY_MS,
+  DEFAULT_CAPACITY_RETRY_MAX_ATTEMPTS,
+  DEFAULT_CAPACITY_RETRY_MAX_DELAY_MS,
+  DEFAULT_HETZNER_MAX_LIST_PAGES,
+  DEFAULT_PLACEMENT_RETRY_DELAY_MS,
+  HETZNER_MAX_VOLUMES_PER_SERVER,
+  HETZNER_VOLUME_MAX_SIZE_GB,
+  HETZNER_VOLUME_MIN_SIZE_GB,
+  isTransientCapacityError,
+} from './hetzner-metadata';
 
 export class HetznerProvider implements Provider {
   readonly name = 'hetzner';
   readonly locations: readonly string[] = HETZNER_LOCATIONS;
   readonly locationMetadata: Readonly<Record<string, LocationMeta>> = HETZNER_LOCATION_META;
-  readonly sizes: Readonly<Record<VMSize, SizeConfig>> = SIZE_CONFIGS;
-  readonly volumeCapabilities: VolumeCapabilities = HETZNER_VOLUME_CAPABILITIES;
+  readonly sizes = HETZNER_SIZE_CONFIGS;
+  readonly volumeCapabilities = HETZNER_VOLUME_CAPABILITIES;
   readonly defaultLocation: string;
 
   private readonly apiToken: string;
@@ -390,7 +257,7 @@ export class HetznerProvider implements Provider {
             selectedLocation: attempt.location,
           });
         }
-        return this.mapServerToVMInstance(data.server);
+        return mapHetznerServerToVMInstance(data.server);
       } catch (err) {
         rethrowIfProviderRequestAborted(err, context);
         if (err instanceof ProviderError && err.statusCode === 412) {
@@ -456,7 +323,7 @@ export class HetznerProvider implements Provider {
         'getVM'
       );
       throwIfProviderRequestAborted(context);
-      return this.mapServerToVMInstance(data.server);
+      return mapHetznerServerToVMInstance(data.server);
     } catch (err) {
       rethrowIfProviderRequestAborted(err, context);
       if (err instanceof ProviderError && err.statusCode === 404) {
@@ -488,7 +355,7 @@ export class HetznerProvider implements Provider {
     );
 
     throwIfProviderRequestAborted(context);
-    return servers.map((server) => this.mapServerToVMInstance(server));
+    return servers.map(mapHetznerServerToVMInstance);
   }
 
   async powerOff(id: string, context?: ProviderRequestContext): Promise<void> {
@@ -575,7 +442,7 @@ export class HetznerProvider implements Provider {
       );
     } catch (err) {
       rethrowIfProviderRequestAborted(err, context);
-      throw this.mapProviderError(err);
+      throw mapHetznerProviderError(err);
     }
 
     throwIfProviderRequestAborted(context);
@@ -584,7 +451,7 @@ export class HetznerProvider implements Provider {
       'createVolume'
     );
     throwIfProviderRequestAborted(context);
-    return this.mapVolumeToInstance(data.volume);
+    return mapHetznerVolumeToInstance(data.volume);
   }
 
   async attachVolume(
@@ -768,7 +635,7 @@ export class HetznerProvider implements Provider {
         'getVolume'
       );
       throwIfProviderRequestAborted(context);
-      return this.mapVolumeToInstance(data.volume);
+      return mapHetznerVolumeToInstance(data.volume);
     } catch (err) {
       rethrowIfProviderRequestAborted(err, context);
       if (err instanceof ProviderError && err.statusCode === 404) {
@@ -799,7 +666,7 @@ export class HetznerProvider implements Provider {
     );
 
     throwIfProviderRequestAborted(context);
-    return volumes.map((volume) => this.mapVolumeToInstance(volume));
+    return volumes.map(mapHetznerVolumeToInstance);
   }
 
   private toHetznerLabelSelectorParts(labels?: Record<string, string>): string[] {
@@ -872,45 +739,6 @@ export class HetznerProvider implements Provider {
     );
   }
 
-  private mapServerToVMInstance(server: HetznerServerPayload): VMInstance {
-    return {
-      id: String(server.id),
-      name: server.name,
-      ip: server.public_net.ipv4.ip,
-      status: this.mapStatus(server.status),
-      serverType: server.server_type.name,
-      createdAt: server.created,
-      labels: server.labels,
-    };
-  }
-
-  private mapVolumeToInstance(volume: HetznerVolumePayload): VolumeInstance {
-    return {
-      id: String(volume.id),
-      name: volume.name,
-      sizeGb: volume.size,
-      location: volume.location.name,
-      status: this.mapVolumeStatus(volume.status),
-      ...(volume.server ? { attachedServerId: String(volume.server.id) } : {}),
-      ...(volume.linux_device ? { linuxDevice: volume.linux_device } : {}),
-      createdAt: volume.created,
-      labels: volume.labels,
-    };
-  }
-
-  private mapVolumeStatus(status: string): VolumeStatus {
-    switch (status) {
-      case 'creating':
-        return 'creating';
-      case 'available':
-        return 'available';
-      case 'in-use':
-        return 'attached';
-      default:
-        return 'unknown';
-    }
-  }
-
   private validateRequestedVolumeSize(sizeGb: number): void {
     if (!Number.isInteger(sizeGb) || sizeGb < HETZNER_VOLUME_MIN_SIZE_GB) {
       throw new ProviderError(
@@ -945,27 +773,5 @@ export class HetznerProvider implements Provider {
       });
     }
     return volume.sizeGb;
-  }
-
-  private mapProviderError(err: unknown): unknown {
-    if (!(err instanceof ProviderError)) return err;
-    return new ProviderError(this.name, err.statusCode, err.message, {
-      cause: err,
-      providerCode: err.providerCode,
-      category: classifyHetznerError(err.statusCode, err.providerCode, err.message),
-    });
-  }
-
-  private mapStatus(hetznerStatus: string): VMStatus {
-    switch (hetznerStatus) {
-      case 'initializing':
-      case 'running':
-      case 'off':
-      case 'starting':
-      case 'stopping':
-        return hetznerStatus;
-      default:
-        return 'initializing';
-    }
   }
 }

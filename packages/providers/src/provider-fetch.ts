@@ -45,13 +45,45 @@ export async function providerFetch(
   maxErrorBodyChars: number = DEFAULT_MAX_PROVIDER_ERROR_BODY_CHARS,
   context?: ProviderRequestContext
 ): Promise<Response> {
-  const callerSignals = uniqueSignals(init?.signal, context?.signal);
+  const abortScope = createProviderAbortScope(init?.signal, context?.signal, timeoutMs);
+
+  try {
+    const response = await fetch(url.toString(), {
+      ...init,
+      signal: abortScope.signal,
+    });
+    await assertProviderResponseOk(providerName, response, maxErrorBodyChars);
+    return response;
+  } catch (err) {
+    normalizeProviderFetchError(providerName, url, timeoutMs, abortScope.abortSource(), err);
+  } finally {
+    abortScope.cleanup();
+  }
+}
+
+type ProviderAbortSource =
+  | { type: 'caller'; signal: AbortSignal }
+  | { type: 'timeout' }
+  | undefined;
+
+interface ProviderAbortScope {
+  signal: AbortSignal;
+  abortSource: () => ProviderAbortSource;
+  cleanup: () => void;
+}
+
+function createProviderAbortScope(
+  initSignal: AbortSignal | null | undefined,
+  contextSignal: AbortSignal | undefined,
+  timeoutMs: number
+): ProviderAbortScope {
+  const callerSignals = uniqueSignals(initSignal, contextSignal);
   for (const signal of callerSignals) {
     if (signal.aborted) throw signal.reason;
   }
 
   const controller = new AbortController();
-  let abortSource: { type: 'caller'; signal: AbortSignal } | { type: 'timeout' } | undefined;
+  let abortSource: ProviderAbortSource;
   const callerListeners = callerSignals.map((signal) => {
     const listener = () => {
       if (abortSource) return;
@@ -68,91 +100,94 @@ export async function providerFetch(
     controller.abort();
   }, timeoutMs);
 
-  try {
-    const response = await fetch(url.toString(), {
-      ...init,
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      let errorMessage: string;
-      let providerCode: string | undefined;
-      try {
-        const body = await response.text();
-        // Try parsing as JSON for structured error messages
-        try {
-          const json = expectObject(JSON.parse(body), 'provider', 'error_response');
-          // `error` may be a nested object ({code,message}, Hetzner/GCP-style) OR a
-          // plain string (Vultr: {"error":"...","status":n}). Handle both without
-          // throwing — a thrown expectObject would drop us to the raw-body fallback,
-          // dumping the whole JSON blob into the message.
-          const rawError = json.error;
-          const error =
-            rawError && typeof rawError === 'object' && !Array.isArray(rawError)
-              ? (rawError as Record<string, unknown>)
-              : null;
-          const stringError = typeof rawError === 'string' ? rawError : undefined;
-          // Extract structured error code from the provider response
-          providerCode =
-            (typeof error?.code === 'string' ? error.code : undefined) ||
-            (typeof json.type === 'string' ? json.type : undefined) ||
-            (typeof json.code === 'string' ? json.code : undefined) ||
-            (typeof error?.status === 'string' ? error.status : undefined) ||
-            (typeof json.status === 'string' && isNaN(Number(json.status))
-              ? json.status
-              : undefined) ||
-            undefined;
-          errorMessage = boundProviderErrorDetail(
-            maxErrorBodyChars,
-            (typeof error?.message === 'string' ? error.message : undefined) ||
-              stringError ||
-              (typeof json.message === 'string' ? json.message : undefined) ||
-              body
-          );
-        } catch {
-          errorMessage = body
-            ? boundProviderErrorDetail(maxErrorBodyChars, body)
-            : `HTTP ${response.status}`;
-        }
-      } catch {
-        errorMessage = `HTTP ${response.status}`;
+  return {
+    signal: controller.signal,
+    abortSource: () => abortSource,
+    cleanup: () => {
+      clearTimeout(timeoutId);
+      for (const { signal, listener } of callerListeners) {
+        signal.removeEventListener('abort', listener);
       }
+    },
+  };
+}
 
-      throw new ProviderError(
-        providerName,
-        response.status,
-        `${providerName} API error (${response.status}): ${errorMessage}`,
-        { providerCode }
+async function assertProviderResponseOk(
+  providerName: string,
+  response: Response,
+  maxErrorBodyChars: number
+): Promise<void> {
+  if (response.ok) return;
+
+  let errorMessage: string;
+  let providerCode: string | undefined;
+  try {
+    const body = await response.text();
+    try {
+      const json = expectObject(JSON.parse(body), 'provider', 'error_response');
+      const rawError = json.error;
+      const error =
+        rawError && typeof rawError === 'object' && !Array.isArray(rawError)
+          ? (rawError as Record<string, unknown>)
+          : null;
+      const stringError = typeof rawError === 'string' ? rawError : undefined;
+      providerCode =
+        (typeof error?.code === 'string' ? error.code : undefined) ||
+        (typeof json.type === 'string' ? json.type : undefined) ||
+        (typeof json.code === 'string' ? json.code : undefined) ||
+        (typeof error?.status === 'string' ? error.status : undefined) ||
+        (typeof json.status === 'string' && isNaN(Number(json.status)) ? json.status : undefined) ||
+        undefined;
+      errorMessage = boundProviderErrorDetail(
+        maxErrorBodyChars,
+        (typeof error?.message === 'string' ? error.message : undefined) ||
+          stringError ||
+          (typeof json.message === 'string' ? json.message : undefined) ||
+          body
       );
+    } catch {
+      errorMessage = body
+        ? boundProviderErrorDetail(maxErrorBodyChars, body)
+        : `HTTP ${response.status}`;
     }
+  } catch {
+    errorMessage = `HTTP ${response.status}`;
+  }
 
-    return response;
-  } catch (err) {
-    if (abortSource?.type === 'caller') throw abortSource.signal.reason;
+  throw new ProviderError(
+    providerName,
+    response.status,
+    `${providerName} API error (${response.status}): ${errorMessage}`,
+    { providerCode }
+  );
+}
 
-    if (abortSource?.type === 'timeout') {
-      throw new ProviderError(
-        providerName,
-        undefined,
-        `${providerName} API request timed out after ${timeoutMs}ms: ${url}`,
-        { cause: err instanceof Error ? err : undefined }
-      );
-    }
+function normalizeProviderFetchError(
+  providerName: string,
+  url: string | URL,
+  timeoutMs: number,
+  abortSource: ProviderAbortSource,
+  error: unknown
+): never {
+  if (abortSource?.type === 'caller') throw abortSource.signal.reason;
 
-    if (err instanceof ProviderError) throw err;
-
+  if (abortSource?.type === 'timeout') {
     throw new ProviderError(
       providerName,
       undefined,
-      `${providerName} API request failed: ${err instanceof Error ? err.message : String(err)}`,
-      { cause: err instanceof Error ? err : undefined }
+      `${providerName} API request timed out after ${timeoutMs}ms: ${url}`,
+      { cause: error instanceof Error ? error : undefined }
     );
-  } finally {
-    clearTimeout(timeoutId);
-    for (const { signal, listener } of callerListeners) {
-      signal.removeEventListener('abort', listener);
-    }
   }
+
+  if (error instanceof ProviderError) throw error;
+
+  throw new ProviderError(
+    providerName,
+    undefined,
+    `${providerName} API request failed: ${error instanceof Error ? error.message : String(error)}`,
+    { cause: error instanceof Error ? error : undefined }
+  );
 }
 
 /** Throw the caller's exact abort reason before starting more provider work. */

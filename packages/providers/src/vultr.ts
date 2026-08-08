@@ -11,13 +11,11 @@ import {
 import type {
   LocationMeta,
   Provider,
-  ProviderErrorCategory,
   ProviderLogger,
   ProviderRequestContext,
   SizeConfig,
   VMConfig,
   VMInstance,
-  VMStatus,
   VolumeAttachmentConfig,
   VolumeCapabilities,
   VolumeConfig,
@@ -36,170 +34,43 @@ import {
   type VultrInstancePayload,
   type VultrOsPayload,
 } from './validation-vultr';
+import {
+  classifyVultrError,
+  DEFAULT_VULTR_IP_POLL_INTERVAL_MS,
+  DEFAULT_VULTR_IP_POLL_TIMEOUT_MS,
+  DEFAULT_VULTR_REQUEST_TIMEOUT_MS,
+  findVultrOs,
+  mapVultrStatus,
+  normalizeVultrIp,
+  positiveVultrOption,
+  sanitizeVultrHostname,
+  toVultrBase64,
+  VULTR_API_URL,
+  VULTR_LIST_PER_PAGE,
+  VULTR_LOCATION_META,
+  VULTR_LOCATIONS,
+  VULTR_MAX_LIST_PAGES,
+  VULTR_SIZE_CONFIGS,
+  type VultrProviderRuntimeOptions,
+} from './vultr-metadata';
 import { VULTR_VOLUME_CAPABILITIES, VultrVolumeClient } from './vultr-volumes';
 
-const VULTR_API_URL = 'https://api.vultr.com/v2';
-
-export const DEFAULT_VULTR_REQUEST_TIMEOUT_MS = 30_000;
-export const DEFAULT_VULTR_IP_POLL_TIMEOUT_MS = 15_000;
-export const DEFAULT_VULTR_IP_POLL_INTERVAL_MS = 3_000;
-const VULTR_LIST_PER_PAGE = 100;
-const VULTR_MAX_LIST_PAGES = 50;
-const VULTR_UNASSIGNED_IP = '0.0.0.0';
-
-export const VULTR_LOCATIONS = [
-  'fra',
-  'ams',
-  'lhr',
-  'ewr',
-  'ord',
-  'lax',
-  'nrt',
-  'sgp',
-  'syd',
-] as const;
-
-const VULTR_LOCATION_META: Record<string, LocationMeta> = {
-  fra: { name: 'Frankfurt', country: 'DE' },
-  ams: { name: 'Amsterdam', country: 'NL' },
-  lhr: { name: 'London', country: 'GB' },
-  ewr: { name: 'New Jersey', country: 'US' },
-  ord: { name: 'Chicago', country: 'US' },
-  lax: { name: 'Los Angeles', country: 'US' },
-  nrt: { name: 'Tokyo', country: 'JP' },
-  sgp: { name: 'Singapore', country: 'SG' },
-  syd: { name: 'Sydney', country: 'AU' },
-};
-
-const SIZE_CONFIGS: Record<VMSize, SizeConfig> = {
-  small: {
-    type: 'vc2-2c-4gb',
-    price: '~$20/mo',
-    vcpu: 2,
-    ramGb: 4,
-    storageGb: 80,
-  },
-  medium: {
-    type: 'vc2-4c-8gb',
-    price: '~$40/mo',
-    vcpu: 4,
-    ramGb: 8,
-    storageGb: 160,
-  },
-  large: {
-    type: 'vc2-6c-16gb',
-    price: '~$80/mo',
-    vcpu: 6,
-    ramGb: 16,
-    storageGb: 320,
-  },
-};
-
-export interface VultrProviderRuntimeOptions {
-  region?: string;
-  osName?: string;
-  requestTimeoutMs?: number;
-  ipPollTimeoutMs?: number;
-  ipPollIntervalMs?: number;
-  logger?: ProviderLogger;
-}
-
-/**
- * Classify a Vultr API error into a normalized ProviderErrorCategory.
- *
- * Vultr error responses are `{ "error": "<message>", "status": <int> }` — the top-level
- * `error` is a plain STRING (no structured code), so classification uses the HTTP status
- * plus message heuristics rather than a providerCode.
- */
-export function classifyVultrError(
-  statusCode: number | undefined,
-  message: string
-): ProviderErrorCategory {
-  if (statusCode === 401 || statusCode === 403) return 'auth_error';
-  if (statusCode === 429) return 'rate_limited';
-  if (statusCode === 503) return 'transient_capacity';
-  if (
-    /not available|no capacity|out of stock|sold out|no available|temporarily unavailable/i.test(
-      message
-    )
-  ) {
-    return 'transient_capacity';
-  }
-  if (statusCode === 400 || statusCode === 404 || statusCode === 422) return 'invalid_config';
-  return 'unknown';
-}
-
-/**
- * Combine Vultr's three status fields into a normalized VMStatus.
- * - `status`: pending | active | suspended | resizing
- * - `power_status`: running | stopped
- * - `server_status`: none | locked | installingbooting | ok
- */
-export function mapVultrStatus(
-  status: string,
-  powerStatus: string,
-  serverStatus: string
-): VMStatus {
-  if (status === 'pending' || status === 'installing') return 'initializing';
-  if (status === 'resizing') return 'starting';
-  if (status === 'suspended') return 'off';
-  if (status === 'active') {
-    if (powerStatus === 'stopped') return 'off';
-    if (powerStatus === 'running') {
-      return serverStatus === 'ok' ? 'running' : 'starting';
-    }
-    return 'initializing';
-  }
-  return 'initializing';
-}
-
-/** Normalize Vultr's `main_ip`: the placeholder `0.0.0.0` means "not allocated yet". */
-function normalizeVultrIp(ip: string): string {
-  return !ip || ip === VULTR_UNASSIGNED_IP ? '' : ip;
-}
-
-/** Sanitize a SAM node name into a valid Vultr hostname (lowercase alnum + hyphen, <=63 chars). */
-function sanitizeHostname(name: string): string {
-  const host = name
-    .toLowerCase()
-    .replace(/[^a-z0-9-]/g, '-')
-    .slice(0, 63)
-    // Strip AFTER truncating so a slice landing mid-hyphen can't leave a trailing '-'.
-    .replace(/^-+|-+$/g, '');
-  return host || 'sam-node';
-}
-
-/** Workers-safe base64 of a UTF-8 string (Vultr requires base64-encoded user_data). */
-function toBase64(input: string): string {
-  const bytes = new TextEncoder().encode(input);
-  let binary = '';
-  const chunkSize = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunkSize) {
-    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize));
-  }
-  return btoa(binary);
-}
-
-/** Find the OS whose name matches `targetName` (exact first, then all-token-subset match). */
-export function findVultrOs(
-  list: VultrOsPayload[],
-  targetName: string
-): VultrOsPayload | undefined {
-  const lower = targetName.toLowerCase();
-  const exact = list.find((os) => os.name.toLowerCase() === lower);
-  if (exact) return exact;
-  const tokens = lower.split(/\s+/).filter((token) => token.length > 1);
-  return list.find((os) => {
-    const name = os.name.toLowerCase();
-    return tokens.every((token) => name.includes(token));
-  });
-}
+export {
+  classifyVultrError,
+  DEFAULT_VULTR_IP_POLL_INTERVAL_MS,
+  DEFAULT_VULTR_IP_POLL_TIMEOUT_MS,
+  DEFAULT_VULTR_REQUEST_TIMEOUT_MS,
+  findVultrOs,
+  mapVultrStatus,
+  VULTR_LOCATIONS,
+  type VultrProviderRuntimeOptions,
+} from './vultr-metadata';
 
 export class VultrProvider implements Provider {
   readonly name = 'vultr';
   readonly locations: readonly string[] = VULTR_LOCATIONS;
   readonly locationMetadata: Readonly<Record<string, LocationMeta>> = VULTR_LOCATION_META;
-  readonly sizes: Readonly<Record<VMSize, SizeConfig>> = SIZE_CONFIGS;
+  readonly sizes: Readonly<Record<VMSize, SizeConfig>> = VULTR_SIZE_CONFIGS;
   readonly volumeCapabilities: VolumeCapabilities = VULTR_VOLUME_CAPABILITIES;
   readonly defaultLocation: string;
 
@@ -218,9 +89,15 @@ export class VultrProvider implements Provider {
     this.region = options?.region || DEFAULT_VULTR_REGION;
     this.defaultLocation = this.region;
     this.osName = options?.osName || DEFAULT_VULTR_OS_NAME;
-    this.requestTimeoutMs = positiveOr(options?.requestTimeoutMs, DEFAULT_VULTR_REQUEST_TIMEOUT_MS);
-    this.ipPollTimeoutMs = positiveOr(options?.ipPollTimeoutMs, DEFAULT_VULTR_IP_POLL_TIMEOUT_MS);
-    this.ipPollIntervalMs = positiveOr(
+    this.requestTimeoutMs = positiveVultrOption(
+      options?.requestTimeoutMs,
+      DEFAULT_VULTR_REQUEST_TIMEOUT_MS
+    );
+    this.ipPollTimeoutMs = positiveVultrOption(
+      options?.ipPollTimeoutMs,
+      DEFAULT_VULTR_IP_POLL_TIMEOUT_MS
+    );
+    this.ipPollIntervalMs = positiveVultrOption(
       options?.ipPollIntervalMs,
       DEFAULT_VULTR_IP_POLL_INTERVAL_MS
     );
@@ -253,8 +130,8 @@ export class VultrProvider implements Provider {
           plan: sizeConfig.type,
           os_id: osId,
           label: config.name,
-          hostname: sanitizeHostname(config.name),
-          user_data: toBase64(config.userData),
+          hostname: sanitizeVultrHostname(config.name),
+          user_data: toVultrBase64(config.userData),
           tags: labelsToKvTags(config.labels || {}),
           backups: 'disabled',
           activation_email: false,
@@ -588,8 +465,4 @@ export class VultrProvider implements Provider {
       category: classifyVultrError(err.statusCode, err.message),
     });
   }
-}
-
-function positiveOr(value: number | undefined, fallback: number): number {
-  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : fallback;
 }
