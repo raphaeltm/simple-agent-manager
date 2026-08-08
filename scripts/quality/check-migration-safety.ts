@@ -63,6 +63,8 @@ interface ParsedIdentifier {
   next: number;
 }
 
+type CascadeMap = Map<string, { childTable: string; migrationFile: string }[]>;
+
 function normalizeIdentifier(value: string): string {
   return value.toLowerCase();
 }
@@ -180,10 +182,8 @@ function extractForeignKeys(migrations: ParsedMigration[]): ForeignKey[] {
   return foreignKeys;
 }
 
-function buildCascadeMap(
-  foreignKeys: ForeignKey[]
-): Map<string, { childTable: string; migrationFile: string }[]> {
-  const cascadeMap = new Map<string, { childTable: string; migrationFile: string }[]>();
+function buildCascadeMap(foreignKeys: ForeignKey[]): CascadeMap {
+  const cascadeMap: CascadeMap = new Map();
   for (const foreignKey of foreignKeys) {
     if (foreignKey.onDelete !== 'CASCADE') continue;
     const children = cascadeMap.get(foreignKey.parentTable) ?? [];
@@ -259,146 +259,168 @@ function isForeignKeysDisabledValue(
   return true;
 }
 
-function scanClause(
+function scanDropTable(
   file: string,
   tokens: SqlToken[],
-  cascadeMap: Map<string, { childTable: string; migrationFile: string }[]>
-): Violation[] {
+  index: number,
+  cascadeMap: CascadeMap
+): Violation | undefined {
+  let targetIndex = index + 2;
+  if (isKeyword(tokens[targetIndex], 'if') && isKeyword(tokens[targetIndex + 1], 'exists')) {
+    targetIndex += 2;
+  }
+  const target = parseIdentifier(tokens, targetIndex);
+  if (!target || isTemporaryTable(target.name)) return undefined;
+  const operation = tokens[index];
+  const children = cascadeMap.get(target.name);
+  if (children && children.length > 0) {
+    const childList = children
+      .map((child) => `${child.childTable} (from ${child.migrationFile})`)
+      .join(', ');
+    return {
+      file,
+      line: operation?.line ?? 1,
+      pattern: 'DROP TABLE on CASCADE parent',
+      message:
+        `DROP TABLE ${target.name} will CASCADE-delete all rows in: ${childList}. ` +
+        'Use ALTER TABLE ADD COLUMN instead, or if table recreation is unavoidable, ' +
+        'manually re-parent child tables before dropping. ' +
+        'See .claude/rules/31-migration-safety.md for safe alternatives.',
+    };
+  }
+  const migrationNumber = Number.parseInt(file.match(/^(\d+)/)?.[1] ?? '0', 10);
+  if (migrationNumber <= 47) return undefined;
+  return {
+    file,
+    line: operation?.line ?? 1,
+    pattern: 'DROP TABLE in new migration',
+    message:
+      `DROP TABLE ${target.name} — new migrations should never drop tables. ` +
+      'Even tables without CASCADE children may have data that cannot be recovered. ' +
+      'Use ALTER TABLE ADD COLUMN or CREATE TABLE IF NOT EXISTS.',
+  };
+}
+
+function scanDelete(
+  file: string,
+  tokens: SqlToken[],
+  index: number,
+  cascadeMap: CascadeMap
+): Violation | undefined {
+  const target = parseIdentifier(tokens, index + 2);
+  const children = target ? cascadeMap.get(target.name) : undefined;
+  if (
+    !target ||
+    !children?.length ||
+    hasWhereAtDepth(tokens, target.next, depthBefore(tokens, index))
+  ) {
+    return undefined;
+  }
+  return {
+    file,
+    line: tokens[index]?.line ?? 1,
+    pattern: 'DELETE FROM without WHERE on CASCADE parent',
+    message:
+      `DELETE FROM ${target.name} without WHERE will CASCADE-delete all rows in: ` +
+      `${children.map((child) => child.childTable).join(', ')}. ` +
+      'Add a WHERE clause or reconsider the migration.',
+  };
+}
+
+function scanTruncate(
+  file: string,
+  tokens: SqlToken[],
+  index: number,
+  cascadeMap: CascadeMap
+): Violation | undefined {
+  const targetIndex = isKeyword(tokens[index + 1], 'table') ? index + 2 : index + 1;
+  const target = parseIdentifier(tokens, targetIndex);
+  if (!target || !cascadeMap.get(target.name)?.length) return undefined;
+  return {
+    file,
+    line: tokens[index]?.line ?? 1,
+    pattern: 'TRUNCATE on CASCADE parent',
+    message: `TRUNCATE ${target.name} will delete all rows and cascade to child tables.`,
+  };
+}
+
+function scanUpdate(
+  file: string,
+  tokens: SqlToken[],
+  index: number,
+  cascadeMap: CascadeMap
+): Violation | undefined {
+  const target = parseIdentifier(tokens, index + 1);
+  if (!target || !isKeyword(tokens[target.next], 'set')) return undefined;
+  if (
+    !cascadeMap.get(target.name)?.length ||
+    hasWhereAtDepth(tokens, target.next + 1, depthBefore(tokens, index))
+  ) {
+    return undefined;
+  }
+  return {
+    file,
+    line: tokens[index]?.line ?? 1,
+    pattern: 'UPDATE without WHERE on CASCADE parent',
+    message:
+      `UPDATE ${target.name} SET without WHERE modifies all rows in a CASCADE parent. ` +
+      'Add a WHERE clause to scope the update.',
+  };
+}
+
+function scanPragma(file: string, tokens: SqlToken[], index: number): Violation | undefined {
+  const pragma = parseIdentifier(tokens, index + 1);
+  if (!pragma || pragma.name !== 'foreign_keys') return undefined;
+  const separator = tokens[pragma.next];
+  const isAssignment = separator?.kind === 'symbol' && separator.value === '=';
+  const isParenthesized = separator?.kind === 'symbol' && separator.value === '(';
+  if (
+    (!isAssignment && !isParenthesized) ||
+    !tokens[pragma.next + 1] ||
+    !isForeignKeysDisabledValue(tokens, pragma.next + 1, isParenthesized)
+  ) {
+    return undefined;
+  }
+  return {
+    file,
+    line: tokens[index]?.line ?? 1,
+    pattern: 'PRAGMA foreign_keys = OFF',
+    message:
+      'Disabling foreign key enforcement is dangerous — it usually precedes a DROP TABLE / ' +
+      'table recreation that bypasses CASCADE checks. D1 may not honor this PRAGMA across ' +
+      'statement boundaries. Use ALTER TABLE ADD COLUMN instead of table recreation.',
+  };
+}
+
+function scanOperation(
+  file: string,
+  tokens: SqlToken[],
+  index: number,
+  cascadeMap: CascadeMap
+): Violation | undefined {
+  const operation = tokens[index];
+  if (isKeyword(operation, 'drop') && isKeyword(tokens[index + 1], 'table')) {
+    return scanDropTable(file, tokens, index, cascadeMap);
+  }
+  if (isKeyword(operation, 'delete') && isKeyword(tokens[index + 1], 'from')) {
+    return scanDelete(file, tokens, index, cascadeMap);
+  }
+  if (isKeyword(operation, 'truncate')) return scanTruncate(file, tokens, index, cascadeMap);
+  if (isKeyword(operation, 'update')) return scanUpdate(file, tokens, index, cascadeMap);
+  if (isKeyword(operation, 'pragma')) return scanPragma(file, tokens, index);
+  return undefined;
+}
+
+function scanClause(file: string, tokens: SqlToken[], cascadeMap: CascadeMap): Violation[] {
   const violations: Violation[] = [];
   for (let index = 0; index < tokens.length; index += 1) {
-    const operation = tokens[index];
-
-    if (isKeyword(operation, 'drop') && isKeyword(tokens[index + 1], 'table')) {
-      let targetIndex = index + 2;
-      if (isKeyword(tokens[targetIndex], 'if') && isKeyword(tokens[targetIndex + 1], 'exists')) {
-        targetIndex += 2;
-      }
-      const target = parseIdentifier(tokens, targetIndex);
-      if (!target || isTemporaryTable(target.name)) continue;
-      const children = cascadeMap.get(target.name);
-      if (children && children.length > 0) {
-        const childList = children
-          .map((child) => `${child.childTable} (from ${child.migrationFile})`)
-          .join(', ');
-        violations.push({
-          file,
-          line: operation?.line ?? 1,
-          pattern: 'DROP TABLE on CASCADE parent',
-          message:
-            `DROP TABLE ${target.name} will CASCADE-delete all rows in: ${childList}. ` +
-            'Use ALTER TABLE ADD COLUMN instead, or if table recreation is unavoidable, ' +
-            'manually re-parent child tables before dropping. ' +
-            'See .claude/rules/31-migration-safety.md for safe alternatives.',
-        });
-      } else {
-        const migrationNumber = Number.parseInt(file.match(/^(\d+)/)?.[1] ?? '0', 10);
-        if (migrationNumber > 47) {
-          violations.push({
-            file,
-            line: operation?.line ?? 1,
-            pattern: 'DROP TABLE in new migration',
-            message:
-              `DROP TABLE ${target.name} — new migrations should never drop tables. ` +
-              'Even tables without CASCADE children may have data that cannot be recovered. ' +
-              'Use ALTER TABLE ADD COLUMN or CREATE TABLE IF NOT EXISTS.',
-          });
-        }
-      }
-      continue;
-    }
-
-    if (isKeyword(operation, 'delete') && isKeyword(tokens[index + 1], 'from')) {
-      const target = parseIdentifier(tokens, index + 2);
-      const children = target ? cascadeMap.get(target.name) : undefined;
-      const operationDepth = depthBefore(tokens, index);
-      if (
-        target &&
-        children &&
-        children.length > 0 &&
-        !hasWhereAtDepth(tokens, target.next, operationDepth)
-      ) {
-        violations.push({
-          file,
-          line: operation?.line ?? 1,
-          pattern: 'DELETE FROM without WHERE on CASCADE parent',
-          message:
-            `DELETE FROM ${target.name} without WHERE will CASCADE-delete all rows in: ` +
-            `${children.map((child) => child.childTable).join(', ')}. ` +
-            'Add a WHERE clause or reconsider the migration.',
-        });
-      }
-      continue;
-    }
-
-    if (isKeyword(operation, 'truncate')) {
-      const targetIndex = isKeyword(tokens[index + 1], 'table') ? index + 2 : index + 1;
-      const target = parseIdentifier(tokens, targetIndex);
-      const children = target ? cascadeMap.get(target.name) : undefined;
-      if (target && children && children.length > 0) {
-        violations.push({
-          file,
-          line: operation?.line ?? 1,
-          pattern: 'TRUNCATE on CASCADE parent',
-          message: `TRUNCATE ${target.name} will delete all rows and cascade to child tables.`,
-        });
-      }
-      continue;
-    }
-
-    if (isKeyword(operation, 'update')) {
-      const target = parseIdentifier(tokens, index + 1);
-      if (!target || !isKeyword(tokens[target.next], 'set')) continue;
-      const children = cascadeMap.get(target.name);
-      const operationDepth = depthBefore(tokens, index);
-      if (
-        children &&
-        children.length > 0 &&
-        !hasWhereAtDepth(tokens, target.next + 1, operationDepth)
-      ) {
-        violations.push({
-          file,
-          line: operation?.line ?? 1,
-          pattern: 'UPDATE without WHERE on CASCADE parent',
-          message:
-            `UPDATE ${target.name} SET without WHERE modifies all rows in a CASCADE parent. ` +
-            'Add a WHERE clause to scope the update.',
-        });
-      }
-      continue;
-    }
-
-    if (isKeyword(operation, 'pragma')) {
-      const pragma = parseIdentifier(tokens, index + 1);
-      if (!pragma || pragma.name !== 'foreign_keys') continue;
-      const separator = tokens[pragma.next];
-      const value = tokens[pragma.next + 1];
-      const isAssignment = separator?.kind === 'symbol' && separator.value === '=';
-      const isParenthesized = separator?.kind === 'symbol' && separator.value === '(';
-      if (
-        (!isAssignment && !isParenthesized) ||
-        !value ||
-        !isForeignKeysDisabledValue(tokens, pragma.next + 1, isParenthesized)
-      ) {
-        continue;
-      }
-      violations.push({
-        file,
-        line: operation?.line ?? 1,
-        pattern: 'PRAGMA foreign_keys = OFF',
-        message:
-          'Disabling foreign key enforcement is dangerous — it usually precedes a DROP TABLE / ' +
-          'table recreation that bypasses CASCADE checks. D1 may not honor this PRAGMA across ' +
-          'statement boundaries. Use ALTER TABLE ADD COLUMN instead of table recreation.',
-      });
-    }
+    const violation = scanOperation(file, tokens, index, cascadeMap);
+    if (violation) violations.push(violation);
   }
   return violations;
 }
 
-function scanForViolations(
-  migrations: ParsedMigration[],
-  cascadeMap: Map<string, { childTable: string; migrationFile: string }[]>
-): Violation[] {
+function scanForViolations(migrations: ParsedMigration[], cascadeMap: CascadeMap): Violation[] {
   const violations: Violation[] = [];
   for (const migration of migrations) {
     for (const statement of migration.statements) {

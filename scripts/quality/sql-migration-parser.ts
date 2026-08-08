@@ -27,131 +27,139 @@ function isWordCharacter(char: string): boolean {
   return /[A-Za-z0-9_$]/.test(char) || char.charCodeAt(0) > 127;
 }
 
+interface TokenizerState {
+  sql: string;
+  file: string;
+  tokens: SqlToken[];
+  offset: number;
+  line: number;
+  column: number;
+}
+
+function advance(state: TokenizerState): string {
+  const char = state.sql[state.offset] ?? '';
+  if (char === '\r') {
+    state.offset += state.sql[state.offset + 1] === '\n' ? 2 : 1;
+    state.line += 1;
+    state.column = 1;
+  } else if (char === '\n') {
+    state.offset += 1;
+    state.line += 1;
+    state.column = 1;
+  } else {
+    state.offset += 1;
+    state.column += 1;
+  }
+  return char;
+}
+
+function readDelimited(
+  state: TokenizerState,
+  closer: string,
+  kind: 'string' | 'quotedIdentifier',
+  description: string,
+  doubledEscape: boolean
+): void {
+  const { line, column } = state;
+  let value = '';
+  advance(state);
+  while (state.offset < state.sql.length) {
+    const char = state.sql[state.offset] ?? '';
+    if (char !== closer) {
+      value += advance(state);
+      continue;
+    }
+    if (doubledEscape && state.sql[state.offset + 1] === closer) {
+      value += closer;
+      advance(state);
+      advance(state);
+      continue;
+    }
+    advance(state);
+    state.tokens.push({ kind, value, line, column });
+    return;
+  }
+  throw new SqlParseError(state.file, line, column, `unterminated ${description}`);
+}
+
+function skipBlockComment(state: TokenizerState): void {
+  const { line, column } = state;
+  advance(state);
+  advance(state);
+  while (state.offset < state.sql.length) {
+    if (state.sql[state.offset] === '*' && state.sql[state.offset + 1] === '/') {
+      advance(state);
+      advance(state);
+      return;
+    }
+    advance(state);
+  }
+  throw new SqlParseError(state.file, line, column, 'unterminated block comment');
+}
+
+function skipLineComment(state: TokenizerState): void {
+  advance(state);
+  advance(state);
+  while (
+    state.offset < state.sql.length &&
+    state.sql[state.offset] !== '\r' &&
+    state.sql[state.offset] !== '\n'
+  ) {
+    advance(state);
+  }
+}
+
+function readQuotedToken(state: TokenizerState, char: string): boolean {
+  if (char === "'") {
+    readDelimited(state, "'", 'string', 'single-quoted string', true);
+  } else if (char === '"') {
+    readDelimited(state, '"', 'quotedIdentifier', 'double-quoted identifier', true);
+  } else if (char === '`') {
+    readDelimited(state, '`', 'quotedIdentifier', 'backtick-quoted identifier', true);
+  } else if (char === '[') {
+    readDelimited(state, ']', 'quotedIdentifier', 'bracket-quoted identifier', false);
+  } else {
+    return false;
+  }
+  return true;
+}
+
+function readWordOrSymbol(state: TokenizerState, char: string): void {
+  const { line, column } = state;
+  if (!isWordCharacter(char)) {
+    state.tokens.push({ kind: 'symbol', value: advance(state), line, column });
+    return;
+  }
+  let value = '';
+  while (state.offset < state.sql.length && isWordCharacter(state.sql[state.offset] ?? '')) {
+    value += advance(state);
+  }
+  state.tokens.push({ kind: 'word', value, line, column });
+}
+
+function readNextToken(state: TokenizerState): void {
+  const char = state.sql[state.offset] ?? '';
+  const next = state.sql[state.offset + 1] ?? '';
+  if (/\s/.test(char)) {
+    advance(state);
+  } else if (char === '-' && next === '-') {
+    skipLineComment(state);
+  } else if (char === '/' && next === '*') {
+    skipBlockComment(state);
+  } else if (!readQuotedToken(state, char)) {
+    readWordOrSymbol(state, char);
+  }
+}
+
 /**
  * Tokenize the SQLite syntax used by D1 migrations while retaining source
  * positions. Comments are whitespace, string contents never become grammar
  * tokens, and quoted identifiers remain distinguishable from keywords.
  */
 export function tokenizeSql(sql: string, file: string): SqlToken[] {
-  const tokens: SqlToken[] = [];
-  let offset = 0;
-  let line = 1;
-  let column = 1;
-
-  const advance = (): string => {
-    const char = sql[offset] ?? '';
-    if (char === '\r') {
-      offset += sql[offset + 1] === '\n' ? 2 : 1;
-      line += 1;
-      column = 1;
-    } else if (char === '\n') {
-      offset += 1;
-      line += 1;
-      column = 1;
-    } else {
-      offset += 1;
-      column += 1;
-    }
-    return char;
-  };
-
-  const readDelimited = (
-    closer: string,
-    kind: 'string' | 'quotedIdentifier',
-    description: string,
-    doubledEscape: boolean
-  ): void => {
-    const startLine = line;
-    const startColumn = column;
-    let value = '';
-    advance();
-
-    while (offset < sql.length) {
-      const char = sql[offset] ?? '';
-      if (char === closer) {
-        if (doubledEscape && sql[offset + 1] === closer) {
-          value += closer;
-          advance();
-          advance();
-          continue;
-        }
-        advance();
-        tokens.push({ kind, value, line: startLine, column: startColumn });
-        return;
-      }
-      value += advance();
-    }
-
-    throw new SqlParseError(file, startLine, startColumn, `unterminated ${description}`);
-  };
-
-  while (offset < sql.length) {
-    const char = sql[offset] ?? '';
-    const next = sql[offset + 1] ?? '';
-
-    if (/\s/.test(char)) {
-      advance();
-      continue;
-    }
-
-    if (char === '-' && next === '-') {
-      advance();
-      advance();
-      while (offset < sql.length && sql[offset] !== '\r' && sql[offset] !== '\n') advance();
-      continue;
-    }
-
-    if (char === '/' && next === '*') {
-      const startLine = line;
-      const startColumn = column;
-      advance();
-      advance();
-      let closed = false;
-      while (offset < sql.length) {
-        if (sql[offset] === '*' && sql[offset + 1] === '/') {
-          advance();
-          advance();
-          closed = true;
-          break;
-        }
-        advance();
-      }
-      if (!closed) {
-        throw new SqlParseError(file, startLine, startColumn, 'unterminated block comment');
-      }
-      continue;
-    }
-
-    if (char === "'") {
-      readDelimited("'", 'string', 'single-quoted string', true);
-      continue;
-    }
-    if (char === '"') {
-      readDelimited('"', 'quotedIdentifier', 'double-quoted identifier', true);
-      continue;
-    }
-    if (char === '`') {
-      readDelimited('`', 'quotedIdentifier', 'backtick-quoted identifier', true);
-      continue;
-    }
-    if (char === '[') {
-      readDelimited(']', 'quotedIdentifier', 'bracket-quoted identifier', false);
-      continue;
-    }
-
-    const startLine = line;
-    const startColumn = column;
-    if (isWordCharacter(char)) {
-      let value = '';
-      while (offset < sql.length && isWordCharacter(sql[offset] ?? '')) value += advance();
-      tokens.push({ kind: 'word', value, line: startLine, column: startColumn });
-      continue;
-    }
-
-    tokens.push({ kind: 'symbol', value: advance(), line: startLine, column: startColumn });
-  }
-
-  return tokens;
+  const state: TokenizerState = { sql, file, tokens: [], offset: 0, line: 1, column: 1 };
+  while (state.offset < sql.length) readNextToken(state);
+  return state.tokens;
 }
 
 export function isKeyword(token: SqlToken | undefined, keyword: string): boolean {
@@ -174,65 +182,75 @@ function isCreateTrigger(tokens: SqlToken[]): boolean {
   );
 }
 
+interface StatementSplitState {
+  statements: SqlStatement[];
+  current: SqlToken[];
+  triggerBody: boolean;
+  triggerClosed: boolean;
+  caseDepth: number;
+}
+
+function finishStatement(state: StatementSplitState): void {
+  if (state.current.length > 0) state.statements.push({ tokens: state.current });
+  state.current = [];
+  state.triggerBody = false;
+  state.triggerClosed = false;
+  state.caseDepth = 0;
+}
+
+function appendStatementToken(state: StatementSplitState, token: SqlToken): void {
+  state.current.push(token);
+  const previous = state.current[state.current.length - 2];
+  const qualified = previous?.kind === 'symbol' && previous.value === '.';
+  if (
+    !state.triggerBody &&
+    isCreateTrigger(state.current) &&
+    !qualified &&
+    isKeyword(token, 'begin')
+  ) {
+    state.triggerBody = true;
+  } else if (state.triggerBody && !qualified && isKeyword(token, 'case')) {
+    state.caseDepth += 1;
+  } else if (state.triggerBody && !qualified && isKeyword(token, 'end')) {
+    if (state.caseDepth > 0) state.caseDepth -= 1;
+    else state.triggerClosed = true;
+  }
+}
+
+function appendOrFinishStatement(state: StatementSplitState, token: SqlToken): void {
+  if (token.kind !== 'symbol' || token.value !== ';') {
+    appendStatementToken(state, token);
+  } else if (state.triggerBody && !state.triggerClosed) {
+    state.current.push(token);
+  } else {
+    finishStatement(state);
+  }
+}
+
+function assertCompleteTrigger(state: StatementSplitState, file: string): void {
+  if (!state.triggerBody || state.triggerClosed) return;
+  const start = state.current[0];
+  throw new SqlParseError(
+    file,
+    start?.line ?? 1,
+    start?.column ?? 1,
+    'unterminated CREATE TRIGGER body'
+  );
+}
+
 /** Split top-level SQL while keeping CREATE TRIGGER BEGIN...END programs intact. */
 export function splitSqlStatements(tokens: SqlToken[], file: string): SqlStatement[] {
-  const statements: SqlStatement[] = [];
-  let current: SqlToken[] = [];
-  let triggerBody = false;
-  let triggerClosed = false;
-  let caseDepth = 0;
-
-  const finish = (): void => {
-    if (current.length > 0) statements.push({ tokens: current });
-    current = [];
-    triggerBody = false;
-    triggerClosed = false;
-    caseDepth = 0;
+  const state: StatementSplitState = {
+    statements: [],
+    current: [],
+    triggerBody: false,
+    triggerClosed: false,
+    caseDepth: 0,
   };
-
-  for (const token of tokens) {
-    if (token.kind === 'symbol' && token.value === ';') {
-      if (triggerBody && !triggerClosed) {
-        current.push(token);
-      } else {
-        finish();
-      }
-      continue;
-    }
-
-    current.push(token);
-    const previous = current[current.length - 2];
-    const isQualifiedIdentifier = previous?.kind === 'symbol' && previous.value === '.';
-    if (
-      !triggerBody &&
-      isCreateTrigger(current) &&
-      !isQualifiedIdentifier &&
-      isKeyword(token, 'begin')
-    ) {
-      triggerBody = true;
-      continue;
-    }
-    if (!triggerBody) continue;
-
-    if (!isQualifiedIdentifier && isKeyword(token, 'case')) {
-      caseDepth += 1;
-    } else if (!isQualifiedIdentifier && isKeyword(token, 'end')) {
-      if (caseDepth > 0) caseDepth -= 1;
-      else triggerClosed = true;
-    }
-  }
-
-  if (triggerBody && !triggerClosed) {
-    const start = current[0];
-    throw new SqlParseError(
-      file,
-      start?.line ?? 1,
-      start?.column ?? 1,
-      'unterminated CREATE TRIGGER body'
-    );
-  }
-  finish();
-  return statements;
+  for (const token of tokens) appendOrFinishStatement(state, token);
+  assertCompleteTrigger(state, file);
+  finishStatement(state);
+  return state.statements;
 }
 
 /**

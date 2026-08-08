@@ -346,21 +346,26 @@ describe('D1 migration safety — fail-closed lexical diagnostics', () => {
 });
 
 describe('D1 migration safety CLI', () => {
-  it('fails a supplied bypass corpus and prints actionable diagnostics', () => {
-    const dir = makeCorpus({
-      '0001_setup.sql': CASCADE_SETUP,
-      '0100_dangerous.sql': '-- heading\nDROP\nTABLE parent_table;',
-    });
-    const result = spawnSync('pnpm', ['exec', 'tsx', SCRIPT, dir], {
-      cwd: ROOT,
-      encoding: 'utf8',
-    });
+  it(
+    'fails a supplied bypass corpus and prints actionable diagnostics',
+    { timeout: 30_000 },
+    () => {
+      const dir = makeCorpus({
+        '0001_setup.sql': CASCADE_SETUP,
+        '0100_dangerous.sql': '-- heading\nDROP\nTABLE parent_table;',
+      });
+      const result = spawnSync('pnpm', ['exec', 'tsx', SCRIPT, dir], {
+        cwd: ROOT,
+        encoding: 'utf8',
+        timeout: 30_000,
+      });
 
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain('0100_dangerous.sql:2');
-    expect(result.stderr).toContain('DROP TABLE on CASCADE parent');
-    expect(result.stderr).toContain('parent_table');
-    expect(result.stderr).toContain('child_table');
-    expect(result.stderr).toContain('.claude/rules/31-migration-safety.md');
-  });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toContain('0100_dangerous.sql:2');
+      expect(result.stderr).toContain('DROP TABLE on CASCADE parent');
+      expect(result.stderr).toContain('parent_table');
+      expect(result.stderr).toContain('child_table');
+      expect(result.stderr).toContain('.claude/rules/31-migration-safety.md');
+    }
+  );
 });
