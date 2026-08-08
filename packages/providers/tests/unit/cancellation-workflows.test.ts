@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { DigitalOceanProvider } from '../../src/digitalocean';
 import { HetznerProvider } from '../../src/hetzner';
+import { ScalewayProvider } from '../../src/scaleway';
 import type { VMConfig } from '../../src/types';
 import { ProviderError } from '../../src/types';
 import { VultrProvider } from '../../src/vultr';
@@ -267,6 +268,98 @@ describe('provider workflow cancellation', () => {
       expect(countCalls(fetchMock, 'POST', /\/v2\/volumes\/do-volume-1\/actions$/)).toBe(1);
       expect(countCalls(fetchMock, 'GET', /\/v2\/actions\/77$/)).toBe(1);
       expect(countCalls(fetchMock, 'GET', /\/v2\/volumes\/do-volume-1$/)).toBe(0);
+    });
+  });
+
+  describe('delegated volume clients', () => {
+    it('cancels Vultr live-size discovery through the public provider before resize mutation', async () => {
+      const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+        const method = methodOf(init);
+        if (method !== 'GET' || !/\/v2\/blocks\/vultr-block-1$/.test(url)) {
+          throw new Error(`Unexpected Vultr volume request: ${method} ${url}`);
+        }
+
+        const signal = init?.signal;
+        if (!signal) throw new Error('Expected Vultr volume request to carry an abort signal');
+        return new Promise<Response>((_resolve, reject) => {
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      });
+      globalThis.fetch = fetchMock as typeof fetch;
+      const provider = new VultrProvider('test-token');
+      const controller = new AbortController();
+      const reason = new ProviderError('vultr', 404, 'caller cancelled stale volume resize', {
+        category: 'invalid_config',
+      });
+
+      const outcome = provider
+        .resizeVolume(
+          { volumeId: 'vultr-block-1', location: 'fra', sizeGb: 80 },
+          { signal: controller.signal }
+        )
+        .catch((error: unknown) => error);
+      expect(countCalls(fetchMock, 'GET', /\/v2\/blocks\/vultr-block-1$/)).toBe(1);
+
+      controller.abort(reason);
+
+      expect(await outcome).toBe(reason);
+      expect(countCalls(fetchMock, 'GET', /\/v2\/blocks\/vultr-block-1$/)).toBe(1);
+      expect(countCalls(fetchMock, 'PATCH', /\/v2\/blocks\/vultr-block-1$/)).toBe(0);
+    });
+
+    it('cancels Scaleway live-size discovery through the public provider before resize mutation', async () => {
+      const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+        const method = methodOf(init);
+        if (
+          method !== 'GET' ||
+          !/\/block\/v1\/zones\/fr-par-1\/volumes\/scaleway-volume-1$/.test(url)
+        ) {
+          throw new Error(`Unexpected Scaleway volume request: ${method} ${url}`);
+        }
+
+        const signal = init?.signal;
+        if (!signal) throw new Error('Expected Scaleway volume request to carry an abort signal');
+        return new Promise<Response>((_resolve, reject) => {
+          if (signal.aborted) {
+            reject(signal.reason);
+            return;
+          }
+          signal.addEventListener('abort', () => reject(signal.reason), { once: true });
+        });
+      });
+      globalThis.fetch = fetchMock as typeof fetch;
+      const provider = new ScalewayProvider('test-token', 'project-1', 'fr-par-1');
+      const controller = new AbortController();
+      const reason = new ProviderError(
+        'scaleway',
+        409,
+        'caller cancelled superseded volume resize',
+        { category: 'invalid_config' }
+      );
+
+      const outcome = provider
+        .resizeVolume(
+          { volumeId: 'scaleway-volume-1', location: 'fr-par-1', sizeGb: 80 },
+          { signal: controller.signal }
+        )
+        .catch((error: unknown) => error);
+      expect(
+        countCalls(fetchMock, 'GET', /\/block\/v1\/zones\/fr-par-1\/volumes\/scaleway-volume-1$/)
+      ).toBe(1);
+
+      controller.abort(reason);
+
+      expect(await outcome).toBe(reason);
+      expect(
+        countCalls(fetchMock, 'GET', /\/block\/v1\/zones\/fr-par-1\/volumes\/scaleway-volume-1$/)
+      ).toBe(1);
+      expect(
+        countCalls(fetchMock, 'PATCH', /\/block\/v1\/zones\/fr-par-1\/volumes\/scaleway-volume-1$/)
+      ).toBe(0);
     });
   });
 

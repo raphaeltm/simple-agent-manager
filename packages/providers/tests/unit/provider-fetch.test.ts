@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   getMaxProviderErrorBodyChars,
   getTimeoutMs,
+  providerDelay,
   providerFetch,
 } from '../../src/provider-fetch';
 import { ProviderError } from '../../src/types';
@@ -465,5 +466,52 @@ describe('providerFetch', () => {
       expect(pe.providerCode).toBe('x');
       expect(pe.message).not.toContain('{"error"');
     }
+  });
+});
+
+describe('providerDelay', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('resolves after the requested delay and removes its caller listener', async () => {
+    vi.useFakeTimers();
+    const caller = new AbortController();
+    const addListener = vi.spyOn(caller.signal, 'addEventListener');
+    const removeListener = vi.spyOn(caller.signal, 'removeEventListener');
+
+    const delay = providerDelay(25, { signal: caller.signal });
+    expect(vi.getTimerCount()).toBe(1);
+
+    await vi.advanceTimersByTimeAsync(25);
+    await expect(delay).resolves.toBeUndefined();
+
+    const listener = addListener.mock.calls[0]?.[1];
+    expect(listener).toBeTypeOf('function');
+    expect(removeListener).toHaveBeenCalledWith('abort', listener);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('rejects with the exact caller reason and clears its timer and listener', async () => {
+    vi.useFakeTimers();
+    const caller = new AbortController();
+    const addListener = vi.spyOn(caller.signal, 'addEventListener');
+    const removeListener = vi.spyOn(caller.signal, 'removeEventListener');
+    const reason = new ProviderError('hetzner', 503, 'caller cancelled provider backoff', {
+      category: 'transient_capacity',
+    });
+
+    const delay = providerDelay(10_000, { signal: caller.signal });
+    const rejection = expect(delay).rejects.toBe(reason);
+    expect(vi.getTimerCount()).toBe(1);
+
+    caller.abort(reason);
+    await rejection;
+
+    const listener = addListener.mock.calls[0]?.[1];
+    expect(listener).toBeTypeOf('function');
+    expect(removeListener).toHaveBeenCalledWith('abort', listener);
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
