@@ -50,6 +50,7 @@ export {
 
 // Re-export utilities
 export {
+  completeAbortableResponse,
   getMaxProviderErrorBodyChars,
   getTimeoutMs,
   isProviderRequestAborted,

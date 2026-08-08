@@ -54,6 +54,37 @@ describe('fetchGcpWithTimeout', () => {
     expect(getRequestSignal()?.reason).toBe(reason);
   });
 
+  it('preserves caller cancellation after GCP response headers while the body is pending', async () => {
+    let requestSignal: AbortSignal | undefined;
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: RequestInit) => {
+        requestSignal = init?.signal ?? undefined;
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            requestSignal?.addEventListener(
+              'abort',
+              () => controller.error(requestSignal?.reason),
+              { once: true }
+            );
+          },
+        });
+        return Promise.resolve(new Response(body));
+      })
+    );
+    const caller = new AbortController();
+    const reason = new ProviderError('gcp', 409, 'caller cancelled pending GCP body');
+
+    const request = fetchGcpWithTimeout('https://oauth2.googleapis.test/token', {}, 10_000, {
+      signal: caller.signal,
+    });
+    await vi.waitFor(() => expect(requestSignal).toBeDefined());
+    caller.abort(reason);
+
+    await expect(request).rejects.toBe(reason);
+    expect(requestSignal?.reason).toBe(reason);
+  });
+
   it('keeps an internal timeout distinct when it wins before caller cancellation', async () => {
     vi.useFakeTimers();
     const { getRequestSignal } = pendingAbortAwareFetch();

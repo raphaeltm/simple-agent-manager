@@ -134,6 +134,36 @@ describe('provider workflow cancellation', () => {
   });
 
   describe('post-create IP polling', () => {
+    it('does not begin DigitalOcean polling when cancellation arrives during the create body', async () => {
+      const fetchMock = vi.fn((url: string, init?: RequestInit) => {
+        const method = methodOf(init);
+        if (method !== 'POST' || !/\/v2\/droplets$/.test(url)) {
+          throw new Error(`Unexpected DigitalOcean request after cancellation: ${method} ${url}`);
+        }
+        const signal = init?.signal;
+        const body = new ReadableStream<Uint8Array>({
+          start(controller) {
+            signal?.addEventListener('abort', () => controller.error(signal.reason), { once: true });
+          },
+        });
+        return Promise.resolve(new Response(body, { status: 202 }));
+      });
+      globalThis.fetch = fetchMock as typeof fetch;
+      const provider = new DigitalOceanProvider('test-token', { requestTimeoutMs: 10_000 });
+      const controller = new AbortController();
+      const reason = new ProviderError('digitalocean', 409, 'caller cancelled create response body');
+
+      const outcome = provider
+        .createVM({ ...vmConfig, location: 'fra1' }, { signal: controller.signal })
+        .catch((error: unknown) => error);
+      await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1));
+      controller.abort(reason);
+
+      expect(await outcome).toBe(reason);
+      expect(countCalls(fetchMock, 'POST', /\/v2\/droplets$/)).toBe(1);
+      expect(countCalls(fetchMock, 'GET', /\/v2\/droplets\//)).toBe(0);
+    });
+
     it('stops DigitalOcean polling at caller cancellation and preserves the exact reason', async () => {
       vi.useFakeTimers();
       const pendingDroplet = createMockDigitalOceanDroplet({

@@ -131,6 +131,69 @@ describe('providerFetch', () => {
     await rejection;
   });
 
+  it('preserves caller cancellation after headers while the response body is pending', async () => {
+    let requestSignal: AbortSignal | undefined;
+    globalThis.fetch = vi.fn((_url: string, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          requestSignal?.addEventListener('abort', () => controller.error(requestSignal?.reason), {
+            once: true,
+          });
+        },
+      });
+      return Promise.resolve(new Response(body));
+    }) as typeof fetch;
+    const caller = new AbortController();
+    const addListener = vi.spyOn(caller.signal, 'addEventListener');
+    const removeListener = vi.spyOn(caller.signal, 'removeEventListener');
+    const reason = new ProviderError('gcp', 409, 'caller cancelled pending provider body');
+
+    const request = providerFetch(
+      'gcp',
+      'https://compute.googleapis.test/instances',
+      undefined,
+      10_000,
+      undefined,
+      { signal: caller.signal }
+    );
+    await vi.waitFor(() => expect(requestSignal).toBeDefined());
+    const callerListener = addListener.mock.calls[0]?.[1];
+    expect(callerListener).toBeTypeOf('function');
+    expect(removeListener).not.toHaveBeenCalledWith('abort', callerListener);
+    caller.abort(reason);
+
+    await expect(request).rejects.toBe(reason);
+    expect(requestSignal?.reason).toBe(reason);
+    expect(removeListener).toHaveBeenCalledWith('abort', callerListener);
+  });
+
+  it('reports the internal timeout when it expires after headers but before the body', async () => {
+    vi.useFakeTimers();
+    globalThis.fetch = vi.fn((_url: string, init?: RequestInit) => {
+      const signal = init?.signal;
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          signal?.addEventListener('abort', () => controller.error(signal.reason), { once: true });
+        },
+      });
+      return Promise.resolve(new Response(body));
+    }) as typeof fetch;
+
+    const request = providerFetch(
+      'gcp',
+      'https://compute.googleapis.test/instances',
+      undefined,
+      40
+    ).catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(40);
+
+    await expect(request).resolves.toMatchObject({
+      providerName: 'gcp',
+      message: expect.stringContaining('timed out after 40ms'),
+    });
+  });
+
   it('uses the first caller cancellation when it wins the race with the internal timeout', async () => {
     const { getRequestSignal } = installPendingAbortAwareFetch();
     const initCaller = new AbortController();
