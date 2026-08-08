@@ -1,16 +1,25 @@
 import { act, fireEvent, render as baseRender, type RenderOptions, screen, within } from '@testing-library/react';
-import type { ReactElement } from 'react';
+import { type ReactElement, useEffect, useState } from 'react';
 import { MemoryRouter, useNavigate } from 'react-router';
 import { afterEach, beforeAll, beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { AppShell } from '../../src/components/AppShell';
 import { GLOBAL_NAV_ITEMS, PROJECT_NAV_ITEMS } from '../../src/components/NavSidebar';
 import { ThemeProvider } from '../../src/contexts/ThemeContext';
+import { QueryTestWrapper } from '../test-utils/query-test-utils';
 
 // AppShell renders the shared <ThemeSwitcher /> (desktop sidebar footer and the
 // mobile drawer), which calls useTheme and requires a ThemeProvider ancestor.
 function render(ui: ReactElement, options?: Omit<RenderOptions, 'wrapper'>) {
-  return baseRender(ui, { wrapper: ThemeProvider, ...options });
+  function Wrapper({ children }: { children: ReactElement }) {
+    return (
+      <QueryTestWrapper>
+        <ThemeProvider>{children}</ThemeProvider>
+      </QueryTestWrapper>
+    );
+  }
+
+  return baseRender(ui, { wrapper: Wrapper, ...options });
 }
 
 // Mutable auth state so individual tests can override
@@ -21,6 +30,14 @@ let mockAuthState: Record<string, unknown> = {
 
 // jsdom does not implement window.matchMedia — stub it for useIsMobile hook
 let matchMediaMatches = false;
+const matchMediaListeners = new Set<(event: MediaQueryListEvent) => void>();
+
+function setMatchMediaMatches(matches: boolean) {
+  matchMediaMatches = matches;
+  const event = { matches, media: '(max-width: 767px)' } as MediaQueryListEvent;
+  for (const listener of matchMediaListeners) listener(event);
+}
+
 beforeAll(() => {
   Object.defineProperty(window, 'matchMedia', {
     writable: true,
@@ -30,8 +47,16 @@ beforeAll(() => {
       onchange: null,
       addListener: vi.fn(),
       removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
+      addEventListener: vi.fn(
+        (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+          matchMediaListeners.add(listener);
+        },
+      ),
+      removeEventListener: vi.fn(
+        (_type: string, listener: (event: MediaQueryListEvent) => void) => {
+          matchMediaListeners.delete(listener);
+        },
+      ),
       dispatchEvent: vi.fn(),
     })),
   });
@@ -81,6 +106,7 @@ vi.mock('../../src/components/GlobalCommandPalette', () => ({
 }));
 
 beforeEach(() => {
+  matchMediaListeners.clear();
   matchMediaMatches = false;
   mockAuthState = {
     user: { name: 'Test User', email: 'test@example.com', image: null },
@@ -418,6 +444,41 @@ describe('AppShell (mobile)', () => {
 
     expect(screen.queryByRole('dialog', { name: 'Navigation menu' })).not.toBeInTheDocument();
     vi.useRealTimers();
+  });
+
+  it('preserves routed child state when rotation crosses the mobile breakpoint', () => {
+    let mountCount = 0;
+
+    function StatefulPage() {
+      const [draft, setDraft] = useState('');
+      useEffect(() => {
+        mountCount += 1;
+      }, []);
+
+      return (
+        <label>
+          Draft
+          <input value={draft} onChange={(event) => setDraft(event.target.value)} />
+        </label>
+      );
+    }
+
+    render(
+      <MemoryRouter initialEntries={['/dashboard']}>
+        <AppShell>
+          <StatefulPage />
+        </AppShell>
+      </MemoryRouter>,
+    );
+
+    fireEvent.change(screen.getByLabelText('Draft'), { target: { value: 'keep this' } });
+
+    act(() => {
+      setMatchMediaMatches(false);
+    });
+
+    expect(screen.getByLabelText('Draft')).toHaveValue('keep this');
+    expect(mountCount).toBe(1);
   });
 });
 

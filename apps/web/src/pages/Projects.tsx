@@ -1,14 +1,20 @@
-import { Alert, Button, EmptyState, PageLayout, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
+import { Alert, Button, EmptyState, PageLayout, SkeletonCard } from '@simple-agent-manager/ui';
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
 
+import { useAuth } from '../components/AuthProvider';
 import { ProjectSummaryCard } from '../components/ProjectSummaryCard';
 import { useProjectList } from '../hooks/useProjectData';
 import { deleteProject } from '../lib/api';
+import { PROJECT_LIST_LIMIT } from '../lib/project-query-config';
 
 export function Projects() {
   const navigate = useNavigate();
-  const { projects, loading, isRefreshing, error, refresh } = useProjectList({ sort: 'last_activity', limit: 50 });
+  const { user } = useAuth();
+  const { projects, loading, error, refresh } = useProjectList({
+    queryScope: user?.id ?? '',
+    limit: PROJECT_LIST_LIMIT,
+  });
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const handleDelete = async (id: string) => {
@@ -26,7 +32,6 @@ export function Projects() {
       <div className="flex items-center justify-between gap-3 flex-wrap mb-4">
         <p className="m-0 text-fg-muted flex items-center gap-2">
           Projects are repository-backed planning spaces for backlog tasks and delegation.
-          {isRefreshing && <Spinner size="sm" />}
         </p>
         <Button onClick={() => navigate('/projects/new')}>
           New Project
@@ -55,7 +60,7 @@ export function Projects() {
             <SkeletonCard key={i} lines={2} />
           ))}
         </div>
-      ) : projects.length === 0 ? (
+      ) : error && projects.length === 0 ? null : projects.length === 0 ? (
         <EmptyState
           heading="No projects yet"
           description="Create your first project to start organizing workspaces and tasks."
@@ -64,7 +69,12 @@ export function Projects() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
           {projects.map((project) => (
-            <ProjectSummaryCard key={project.id} project={project} onDelete={handleDelete} />
+          <ProjectSummaryCard
+            key={project.id}
+            project={project}
+            queryScope={user?.id ?? ''}
+            onDelete={handleDelete}
+          />
           ))}
         </div>
       )}

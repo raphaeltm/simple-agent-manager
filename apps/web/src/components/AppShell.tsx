@@ -14,6 +14,7 @@ import {
   nextFocusMode,
 } from '../lib/focus-mode';
 import { isMacPlatform } from '../lib/keyboard-shortcuts';
+import { PROJECT_LIST_LIMIT, SIDEBAR_PROJECT_POLL_INTERVAL_MS } from '../lib/project-query-config';
 import { useAuth } from './AuthProvider';
 import { CredentialHealthNavItem } from './CredentialHealthNavItem';
 import { FocusModeToggle } from './FocusModeToggle';
@@ -64,9 +65,14 @@ export function AppShell({ children }: AppShellProps) {
   const [showGlobalNav, setShowGlobalNav] = useState(false);
   const [focusModeState, setFocusModeState] = useState<FocusMode>('default');
   const commandPalette = useGlobalCommandPalette();
-  const { projects: sidebarProjects, loading: sidebarProjectsLoading } = useProjectList({
-    limit: 50,
-    pollInterval: 60000,
+  const {
+    projects: sidebarProjects,
+    loading: sidebarProjectsLoading,
+    error: sidebarProjectsError,
+  } = useProjectList({
+    queryScope: user?.id ?? '',
+    limit: PROJECT_LIST_LIMIT,
+    pollInterval: SIDEBAR_PROJECT_POLL_INTERVAL_MS,
   });
 
   const setProjectName = useCallback((name: string | undefined) => {
@@ -188,12 +194,14 @@ export function AppShell({ children }: AppShellProps) {
       <SidebarProjectList
         projects={sidebarProjects}
         loading={sidebarProjectsLoading}
+        error={sidebarProjectsError}
         currentProjectId={projectId}
         onNavigate={handleProjectNavigate}
+        queryScope={user?.id ?? ''}
         variant="mobile"
       />
     ),
-    [sidebarProjects, sidebarProjectsLoading, projectId, handleProjectNavigate],
+    [sidebarProjects, sidebarProjectsLoading, sidebarProjectsError, projectId, handleProjectNavigate, user?.id],
   );
 
   const desktopProjectListSection = useMemo(
@@ -201,12 +209,14 @@ export function AppShell({ children }: AppShellProps) {
       <SidebarProjectList
         projects={sidebarProjects}
         loading={sidebarProjectsLoading}
+        error={sidebarProjectsError}
         currentProjectId={projectId}
         onNavigate={handleProjectNavigate}
+        queryScope={user?.id ?? ''}
         variant="desktop"
       />
     ),
-    [sidebarProjects, sidebarProjectsLoading, projectId, handleProjectNavigate],
+    [sidebarProjects, sidebarProjectsLoading, sidebarProjectsError, projectId, handleProjectNavigate, user?.id],
   );
 
   const projectHealthElement = projectId ? (
@@ -292,11 +302,13 @@ export function AppShell({ children }: AppShellProps) {
           </div>
         </header>
 
-        <main id="main-content" className="sam-main-content flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col min-w-0">
+        <main key="main-content" id="main-content" className="sam-main-content flex-1 min-h-0 overflow-y-auto overflow-x-hidden flex flex-col min-w-0">
           {children ?? <Outlet />}
         </main>
 
-        <GlobalAudioPlayer />
+        <div key="global-audio" className="shrink-0">
+          <GlobalAudioPlayer />
+        </div>
 
         {drawerOpen && user && (
           <MobileNavDrawer
@@ -453,11 +465,11 @@ export function AppShell({ children }: AppShellProps) {
         </aside>
       )}
 
-      <main id="main-content" className="sam-main-content flex-1 overflow-y-auto overflow-x-hidden flex flex-col min-w-0" style={{ gridRow: '1' }}>
+      <main key="main-content" id="main-content" className="sam-main-content flex-1 overflow-y-auto overflow-x-hidden flex flex-col min-w-0" style={{ gridRow: '1' }}>
         {children ?? <Outlet />}
       </main>
 
-      <div style={{ gridColumn: '1 / -1', gridRow: '2' }}>
+      <div key="global-audio" style={{ gridColumn: '1 / -1', gridRow: '2' }}>
         <GlobalAudioPlayer />
       </div>
 

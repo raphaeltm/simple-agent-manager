@@ -1,15 +1,17 @@
-import { act, render, screen, waitFor } from '@testing-library/react';
+import type { ProjectDetailResponse } from '@simple-agent-manager/shared';
+import { act, screen, waitFor } from '@testing-library/react';
 import { useEffect } from 'react';
-import { MemoryRouter, Route,Routes } from 'react-router';
+import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { Project } from '../../src/pages/Project';
 import { useProjectContext } from '../../src/pages/ProjectContext';
+import { renderWithQuery } from '../test-utils/query-test-utils';
 
 // Mock AuthProvider
 vi.mock('../../src/components/AuthProvider', () => ({
   useAuth: () => ({
-    user: { name: 'Test User', email: 'test@example.com', image: null },
+    user: { id: 'user-1', name: 'Test User', email: 'test@example.com', image: null },
   }),
 }));
 
@@ -40,22 +42,24 @@ const defaultProject = {
   description: 'A test project',
   repository: 'owner/repo',
   defaultBranch: 'main',
+  repoProvider: 'github',
   installationId: 'inst-1',
   status: 'active',
   createdAt: '2026-01-01T00:00:00Z',
   updatedAt: '2026-01-01T00:00:00Z',
   userId: 'user-1',
   summary: {
+    repoProvider: 'github',
     activeWorkspaceCount: 2,
     activeSessionCount: 3,
     lastActivityAt: '2026-01-15T12:00:00Z',
     taskCountsByStatus: { ready: 1, in_progress: 2 },
     linkedWorkspaces: 2,
   },
-};
+} satisfies ProjectDetailResponse;
 
 function renderProject(path = '/projects/proj-1/overview') {
-  return render(
+  return renderWithQuery(
     <MemoryRouter initialEntries={[path]}>
       <Routes>
         <Route path="/projects/:id" element={<Project />}>
@@ -90,6 +94,15 @@ describe('Project shell (non-chat routes)', () => {
   it('renders child route content via Outlet', async () => {
     renderProject('/projects/proj-1/overview');
     expect(await screen.findByTestId('overview-content')).toBeInTheDocument();
+  });
+
+  it('renders one truthful initial error without also claiming the project was not found', async () => {
+    mockGetProject.mockRejectedValueOnce(new Error('Project service unavailable'));
+    renderProject('/projects/proj-1/overview');
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Project service unavailable');
+    expect(screen.getAllByRole('alert')).toHaveLength(1);
+    expect(screen.queryByText('Project not found.')).not.toBeInTheDocument();
   });
 });
 
@@ -137,7 +150,7 @@ describe('Project reload (stale-while-revalidate)', () => {
     // Initial load resolves immediately
     mockGetProject.mockResolvedValueOnce(defaultProject);
 
-    const { findByTestId, getByTestId } = render(
+    const { findByTestId, getByTestId } = renderWithQuery(
       <MemoryRouter initialEntries={['/projects/proj-1/overview']}>
         <Routes>
           <Route path="/projects/:id" element={<Project />}>
@@ -177,5 +190,37 @@ describe('Project reload (stale-while-revalidate)', () => {
     // Child is still mounted after reload completes
     expect(getByTestId('child-content')).toBeInTheDocument();
     expect(unmountSpy).not.toHaveBeenCalled();
+  });
+
+  it('keeps child content mounted and does not replace it with an alert when reload fails', async () => {
+    function ReloadChild() {
+      const { reload } = useProjectContext();
+      return (
+        <div>
+          <div data-testid="stale-child-content">Cached project content</div>
+          <button data-testid="failed-reload-btn" onClick={() => void reload()}>Reload</button>
+        </div>
+      );
+    }
+
+    const { findByTestId, getByTestId, queryByRole } = renderWithQuery(
+      <MemoryRouter initialEntries={['/projects/proj-1/overview']}>
+        <Routes>
+          <Route path="/projects/:id" element={<Project />}>
+            <Route path="overview" element={<ReloadChild />} />
+          </Route>
+        </Routes>
+      </MemoryRouter>,
+    );
+
+    await findByTestId('stale-child-content');
+    mockGetProject.mockRejectedValueOnce(new Error('Background reload failed'));
+    await act(async () => {
+      getByTestId('failed-reload-btn').click();
+    });
+
+    await waitFor(() => expect(mockGetProject).toHaveBeenCalledTimes(2));
+    expect(getByTestId('stale-child-content')).toHaveTextContent('Cached project content');
+    expect(queryByRole('alert')).not.toBeInTheDocument();
   });
 });

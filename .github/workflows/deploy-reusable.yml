@@ -546,6 +546,11 @@ jobs:
           VITE_PUBLIC_WEBSITE_URL: ${{ vars.PUBLIC_WEBSITE_URL || '' }}
           VITE_FEATURE_MULTI_TERMINAL: 'true'
           VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES: ${{ vars.VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES || '100' }}
+          VITE_PROJECT_LIST_LIMIT: ${{ vars.VITE_PROJECT_LIST_LIMIT || '50' }}
+          VITE_PROJECT_POLL_INTERVAL_MS: ${{ vars.VITE_PROJECT_POLL_INTERVAL_MS || '30000' }}
+          VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS: ${{ vars.VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS || '60000' }}
+          VITE_PROJECT_PREFETCH_DELAY_MS: ${{ vars.VITE_PROJECT_PREFETCH_DELAY_MS || '120' }}
+          VITE_BACKGROUND_FETCH_DELAY_MS: ${{ vars.VITE_BACKGROUND_FETCH_DELAY_MS || '150' }}
 
       # Bake the deployment-built vm-agent before Wrangler builds the raw container.
       - name: Setup Go for Container Runtime

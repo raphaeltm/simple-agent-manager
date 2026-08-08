@@ -1,8 +1,12 @@
-import { fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import type { ProjectSummary } from '@simple-agent-manager/shared';
+import { QueryClientProvider, useQuery } from '@tanstack/react-query';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AuthProvider, useAuth } from '../../../src/components/AuthProvider';
 import { GITHUB_REAUTH_REQUIRED_EVENT } from '../../../src/lib/api/client';
+import { queryClient } from '../../../src/lib/query-client';
+import { projectQueryKeys } from '../../../src/lib/query-options';
 
 const { mockUseSession, mockSignOut, mockClearLibraryCache, mockClearLegacyLibraryCache } = vi.hoisted(() => ({
   mockUseSession: vi.fn(),
@@ -22,6 +26,8 @@ vi.mock('../../../src/lib/library-cache', async (importOriginal) => ({
   clearLegacyLibraryCache: mockClearLegacyLibraryCache,
 }));
 
+const clearQueryCacheSpy = vi.spyOn(queryClient, 'clear');
+
 function AuthConsumer() {
   const auth = useAuth();
   return (
@@ -34,11 +40,9 @@ function AuthConsumer() {
   );
 }
 
-function renderWithAuth() {
+function renderWithAuth(children = <AuthConsumer />) {
   return render(
-    <AuthProvider>
-      <AuthConsumer />
-    </AuthProvider>,
+    <AuthProvider>{children}</AuthProvider>,
   );
 }
 
@@ -47,9 +51,48 @@ const validSession = {
   session: { id: 's1' },
 };
 
+const PRIVATE_PROJECT = {
+  id: 'private-project',
+  name: 'User one private project',
+  repository: 'private/repository',
+  githubRepoId: 101,
+  defaultBranch: 'main',
+  repoProvider: 'github',
+  status: 'active',
+  activeWorkspaceCount: 1,
+  activeSessionCount: 0,
+  lastActivityAt: '2026-08-07T20:00:00.000Z',
+  createdAt: '2026-08-07T19:00:00.000Z',
+  taskCountsByStatus: {},
+  linkedWorkspaces: 1,
+} satisfies ProjectSummary;
+
+const cacheRenderLog: string[] = [];
+
+function ScopedProjectCacheConsumer() {
+  const { user } = useAuth();
+  const queryScope = user?.id ?? '';
+  const { data = [] } = useQuery({
+    queryKey: projectQueryKeys.list(queryScope, 50),
+    queryFn: async (): Promise<ProjectSummary[]> => [],
+    enabled: Boolean(queryScope),
+  });
+  const renderedProject = data[0]?.name ?? 'none';
+  cacheRenderLog.push(`${queryScope}:${renderedProject}`);
+  return (
+    <div>
+      <span data-testid="cache-user">{queryScope}</span>
+      <span data-testid="cached-project">{renderedProject}</span>
+    </div>
+  );
+}
+
 describe('AuthProvider', () => {
   beforeEach(() => {
+    queryClient.clear();
+    clearQueryCacheSpy.mockClear();
     vi.clearAllMocks();
+    cacheRenderLog.length = 0;
   });
 
   it('shows authenticated when session is valid', () => {
@@ -202,8 +245,6 @@ describe('AuthProvider', () => {
     expect(screen.getByTestId('user-name')).toHaveTextContent('Updated User');
   });
 
-
-
   it('does not clear the same user namespace during transient refetch errors', () => {
     mockUseSession.mockReturnValue({
       data: validSession,
@@ -213,6 +254,7 @@ describe('AuthProvider', () => {
     });
     const { rerender } = renderWithAuth();
     expect(mockClearLegacyLibraryCache).toHaveBeenCalledTimes(1);
+    clearQueryCacheSpy.mockClear();
 
     mockUseSession.mockReturnValue({
       data: null,
@@ -229,6 +271,7 @@ describe('AuthProvider', () => {
     expect(screen.getByTestId('authenticated')).toHaveTextContent('true');
     expect(mockClearLibraryCache).not.toHaveBeenCalled();
     expect(mockClearLegacyLibraryCache).toHaveBeenCalledTimes(1);
+    expect(clearQueryCacheSpy).not.toHaveBeenCalled();
   });
 
   it('clears the previous user namespace and legacy cache on clean null session expiry', () => {
@@ -241,6 +284,7 @@ describe('AuthProvider', () => {
     const { rerender } = renderWithAuth();
     mockClearLibraryCache.mockClear();
     mockClearLegacyLibraryCache.mockClear();
+    clearQueryCacheSpy.mockClear();
 
     mockUseSession.mockReturnValue({
       data: null,
@@ -257,6 +301,7 @@ describe('AuthProvider', () => {
     expect(screen.getByTestId('authenticated')).toHaveTextContent('false');
     expect(mockClearLibraryCache).toHaveBeenCalledWith('user:u1');
     expect(mockClearLegacyLibraryCache).toHaveBeenCalledOnce();
+    expect(clearQueryCacheSpy).toHaveBeenCalledOnce();
   });
 
   it('clears the previous user namespace on account switch without clearing the new user cache', () => {
@@ -269,6 +314,7 @@ describe('AuthProvider', () => {
     const { rerender } = renderWithAuth();
     mockClearLibraryCache.mockClear();
     mockClearLegacyLibraryCache.mockClear();
+    clearQueryCacheSpy.mockClear();
 
     mockUseSession.mockReturnValue({
       data: {
@@ -290,6 +336,87 @@ describe('AuthProvider', () => {
     expect(mockClearLibraryCache).toHaveBeenCalledWith('user:u1');
     expect(mockClearLibraryCache).not.toHaveBeenCalledWith('user:u2');
     expect(mockClearLegacyLibraryCache).toHaveBeenCalledOnce();
+    expect(clearQueryCacheSpy).toHaveBeenCalledOnce();
+  });
+
+  it('never renders the previous user query cache during a direct account switch', async () => {
+    mockUseSession.mockReturnValue({
+      data: validSession,
+      isPending: false,
+      error: null,
+      isRefetching: false,
+    });
+
+    const renderTree = () => (
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <ScopedProjectCacheConsumer />
+        </AuthProvider>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(renderTree());
+    await waitFor(() => expect(screen.getByTestId('cache-user')).toHaveTextContent('u1'));
+
+    act(() => {
+      queryClient.setQueryData(projectQueryKeys.list('u1', 50), [PRIVATE_PROJECT]);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('cached-project')).toHaveTextContent(PRIVATE_PROJECT.name);
+    });
+    cacheRenderLog.length = 0;
+
+    mockUseSession.mockReturnValue({
+      data: {
+        ...validSession,
+        user: { ...validSession.user, id: 'u2', email: 'other@test.com', name: 'Other User' },
+      },
+      isPending: false,
+      error: null,
+      isRefetching: false,
+    });
+    rerender(renderTree());
+
+    await waitFor(() => expect(screen.getByTestId('cache-user')).toHaveTextContent('u2'));
+    expect(screen.getByTestId('cached-project')).toHaveTextContent('none');
+    expect(cacheRenderLog).not.toContain(`u2:${PRIVATE_PROJECT.name}`);
+    expect(queryClient.getQueryData(projectQueryKeys.list('u1', 50))).toBeUndefined();
+  });
+
+  it('gates protected cache consumers while the next identity is unresolved', async () => {
+    mockUseSession.mockReturnValue({
+      data: validSession,
+      isPending: false,
+      error: null,
+      isRefetching: false,
+    });
+
+    const renderTree = () => (
+      <QueryClientProvider client={queryClient}>
+        <AuthProvider>
+          <ScopedProjectCacheConsumer />
+        </AuthProvider>
+      </QueryClientProvider>
+    );
+    const { rerender } = render(renderTree());
+    await waitFor(() => expect(screen.getByTestId('cache-user')).toHaveTextContent('u1'));
+
+    act(() => {
+      queryClient.setQueryData(projectQueryKeys.list('u1', 50), [PRIVATE_PROJECT]);
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('cached-project')).toHaveTextContent(PRIVATE_PROJECT.name);
+    });
+
+    mockUseSession.mockReturnValue({
+      data: null,
+      isPending: true,
+      error: null,
+      isRefetching: false,
+    });
+    rerender(renderTree());
+
+    expect(screen.queryByTestId('cache-user')).not.toBeInTheDocument();
+    expect(screen.queryByText(PRIVATE_PROJECT.name)).not.toBeInTheDocument();
   });
 
   it('shows a GitHub reauth prompt and signs out when reconnect is clicked', () => {

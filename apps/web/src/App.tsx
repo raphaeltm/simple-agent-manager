@@ -4,6 +4,7 @@ import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router';
 
 import { AppShell } from './components/AppShell';
 import { AuthProvider, useAuth } from './components/AuthProvider';
+import { BackgroundFetchIndicator } from './components/BackgroundFetchIndicator';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { PageViewTracker } from './components/PageViewTracker';
 import { ProtectedRoute } from './components/ProtectedRoute';
@@ -125,6 +126,7 @@ export default function App() {
     <ErrorBoundary>
       <ThemeProvider>
         <QueryClientProvider client={queryClient}>
+          <BackgroundFetchIndicator />
           <AuthProvider>
             <ToastProvider>
               <GlobalAudioProvider>

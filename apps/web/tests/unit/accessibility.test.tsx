@@ -1,5 +1,6 @@
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render as baseRender, type RenderOptions, screen } from '@testing-library/react';
-import type { ReactElement } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import { MemoryRouter } from 'react-router';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -7,8 +8,19 @@ import { AppShell } from '../../src/components/AppShell';
 import { SkipToContent } from '../../src/components/SkipToContent';
 import { ThemeProvider } from '../../src/contexts/ThemeContext';
 
+function TestProviders({ children }: { children: ReactNode }) {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return (
+    <QueryClientProvider client={queryClient}>
+      <ThemeProvider>{children}</ThemeProvider>
+    </QueryClientProvider>
+  );
+}
+
 function render(ui: ReactElement, options?: Omit<RenderOptions, 'wrapper'>) {
-  return baseRender(ui, { wrapper: ThemeProvider, ...options });
+  return baseRender(ui, { wrapper: TestProviders, ...options });
 }
 
 let matchMediaMatches = false;

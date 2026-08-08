@@ -668,6 +668,11 @@ Applied via cloud-init on each node:
 | `VITE_ANALYTICS_FLUSH_THRESHOLD`       | `10`               | Client event count that triggers an immediate analytics flush         |
 | `VITE_ANALYTICS_FLUSH_INTERVAL_MS`     | `5000`             | Client analytics background flush interval in milliseconds            |
 | `VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES` | `100`              | Max paginated diagnosis-event pages loaded per browser request        |
+| `VITE_PROJECT_LIST_LIMIT`              | `50`               | Projects loaded into each shared list-cache entry                     |
+| `VITE_PROJECT_POLL_INTERVAL_MS`        | `30000`            | Project-list page refresh cadence in milliseconds; `0` disables       |
+| `VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS` | `60000`           | App-shell project-list refresh cadence in milliseconds; `0` disables  |
+| `VITE_PROJECT_PREFETCH_DELAY_MS`       | `120`              | Mouse dwell before project-detail prefetch; focus/touch are immediate |
+| `VITE_BACKGROUND_FETCH_DELAY_MS`       | `150`              | Delay before background query activity is shown and announced         |
 
 ## Analytics
 

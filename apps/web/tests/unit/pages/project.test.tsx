@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Navigate, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ToastProvider } from '../../../src/hooks/useToast';
+import { renderWithQuery } from '../../test-utils/query-test-utils';
 
 const mocks = vi.hoisted(() => ({
   getProject: vi.fn(),
@@ -101,7 +102,7 @@ import {
 import { ProjectTasks } from '../../../src/pages/ProjectTasks';
 
 function renderProjectPage(path = '/projects/proj-1/tasks') {
-  return render(
+  return renderWithQuery(
     <ToastProvider>
       <MemoryRouter initialEntries={[path]}>
         <Routes>
