@@ -83,7 +83,7 @@ lifecycle/inventory changes.
 - [x] Extend the cancellation regression guidance in `.claude/rules/02-quality-gates.md`
       so future timeout wrappers and retry/poll loops must prove caller-signal
       composition and post-cancel quiescence.
-- [ ] Run provider/API lint, typecheck, unit/integration tests, coverage, full build,
+- [x] Run provider/API lint, typecheck, unit/integration tests, coverage, full build,
       task-completion validation, all required local reviews, and every applicable
       GitHub check.
 - [x] Rebase conservatively on refreshed `origin/main`, create one focused PR, record
@@ -181,6 +181,14 @@ listener cleanup, and zero post-cancel boundary calls or mutations.
   Evidence check exposed a missing hidden PR-body evidence block; the required Agent
   Preflight markers, classifications, impact analysis, documentation evidence, and
   constitution/risk evidence were added before the fresh final CI run.
+- The fresh final GitHub rollup at `5ec34fd87` is fully green: Build, Code Quality
+  Checks, Detect Changes, Durable Object Workers, Lint, Preflight Evidence, Pulumi
+  Infrastructure Tests, SonarCloud Code Analysis, Specialist Review Evidence, Test,
+  Type Check, UI Compliance, Validate Deploy Scripts, both VM Agent Smoke jobs,
+  CodSpeed Performance Analysis, and Run benchmarks all succeeded. Path-filtered CLI,
+  Playwright, VM Agent test/integration/E2E, and devcontainer jobs were correctly
+  skipped. GitHub reports the PR `OPEN`, non-draft, and merge-clean; it remains
+  unmerged, and no staging workflow or shared staging mutation was performed.
 
 ## References
 
