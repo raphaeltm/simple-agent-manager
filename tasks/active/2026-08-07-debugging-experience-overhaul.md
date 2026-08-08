@@ -114,6 +114,14 @@ Both B and C may add exports to `apps/web/src/lib/api/index.ts` (coordinator res
 2. One staging deploy of the integration branch; Playwright token-login verification of: admin errors filters/copy/links, diagnosis surfaces, chat failure card with a real failed task, deep links. Hetzner discipline: zero VMs at rest; any test node deleted immediately.
 3. Final PR `sam/rest-night-least-next-7491fj` → `main` with preflight + specialist review evidence + staging evidence.
 
+## Execution record (2026-08-08)
+
+- Workstream PRs #1766 (admin FE), #1767 (user FE), #1768 (backend) merged into the integration branch with zero conflicts (ownership matrix held).
+- Five specialist reviews (security, cloudflare, ui-ux, test, constitution) ran on the integrated diff; every CRITICAL/HIGH fixed on-branch (file-size gate splits, FailureCard accessible name, phantom Tailwind tokens, stale-notice resume lifecycle, context bounding + rule-50 reads, requestId 500-body test). MEDIUM/LOW deferrals recorded in `tasks/backlog/2026-08-08-debugging-overhaul-review-followups.md`.
+- Full suites green on the final tree: API 6,749; web 2,936+; workers 585; shared 568.
+- Staging deploy 31230856753 (SHA abf58296f) green; scripted verification 14/14 PASS including copy-as-markdown on a seeded real error, URL-param deep-link prefilter, and the failure card + timeline + copy-debug-report on a real reconciliation-killed task at desktop and mobile. Zero VMs provisioned; residual console noise attributed to pre-existing analytics beacon aborts and expected deleted-workspace 404s.
+- Latent production bug found and fixed en route: `failTask`'s observability write targeted a nonexistent `errors` table (fail-silent since inception); now uses `persistError` against `platform_errors` with correlation columns.
+
 ## Follow-ups filed (not tonight)
 
 - `tasks/backlog/2026-08-07-pre-destroy-safe-evidence-capture.md` — safe allowlisted snapshot before node reaping/heartbeat-death (vm-agent + cleanup sweep).
