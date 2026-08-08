@@ -1,3 +1,4 @@
+import { ProviderError } from '@simple-agent-manager/providers';
 import {
   DEFAULT_GCP_COMPUTE_API_BASE_URL,
   DEFAULT_GCP_SERVICE_ACCOUNT_TOKEN_URL,
@@ -279,4 +280,3 @@ describe('service-account verification and caching', () => {
     );
   });
 });
-import { ProviderError } from '@simple-agent-manager/providers';
