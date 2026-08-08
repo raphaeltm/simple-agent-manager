@@ -1,4 +1,4 @@
-import { assert, describe, expect,it } from 'vitest';
+import { assert, describe, expect, it } from 'vitest';
 
 import {
   encodeTerminalWsCreateSession,
@@ -15,11 +15,15 @@ import {
 
 describe('terminal WebSocket protocol', () => {
   it('encodes input messages expected by the VM Agent', () => {
-    expect(encodeTerminalWsInput('ls\n')).toBe(JSON.stringify({ type: 'input', data: { data: 'ls\n' } }));
+    expect(encodeTerminalWsInput('ls\n')).toBe(
+      JSON.stringify({ type: 'input', data: { data: 'ls\n' } })
+    );
   });
 
   it('encodes resize messages expected by the VM Agent', () => {
-    expect(encodeTerminalWsResize(24, 80)).toBe(JSON.stringify({ type: 'resize', data: { rows: 24, cols: 80 } }));
+    expect(encodeTerminalWsResize(24, 80)).toBe(
+      JSON.stringify({ type: 'resize', data: { rows: 24, cols: 80 } })
+    );
   });
 
   it('encodes ping messages expected by the VM Agent', () => {
@@ -170,8 +174,8 @@ describe('isSessionListMessage', () => {
 
     if (isSessionListMessage(msg) && msg.data) {
       expect(msg.data.sessions).toHaveLength(2);
-      expect(msg.data.sessions[0].status).toBe('running');
-      expect(msg.data.sessions[1].status).toBe('exited');
+      expect(msg.data.sessions[0]?.status).toBe('running');
+      expect(msg.data.sessions[1]?.status).toBe('exited');
     }
   });
 

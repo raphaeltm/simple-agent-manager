@@ -1,5 +1,4 @@
 /** @vitest-environment jsdom */
-import trackerScript from '../public/scripts/tracker.js?raw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 async function readBeaconEvents(sendBeacon: ReturnType<typeof vi.fn>) {
@@ -7,7 +6,7 @@ async function readBeaconEvents(sendBeacon: ReturnType<typeof vi.fn>) {
   return JSON.parse(await blob.text()).events as Array<Record<string, unknown>>;
 }
 
-function installTracker(url: string, referrer = '') {
+async function installTracker(url: string, referrer = '') {
   window.history.pushState({}, '', url);
   Object.defineProperty(document, 'referrer', { value: referrer, configurable: true });
 
@@ -19,7 +18,8 @@ function installTracker(url: string, referrer = '') {
   Object.defineProperty(navigator, 'sendBeacon', { value: sendBeacon, configurable: true });
   vi.spyOn(crypto, 'randomUUID').mockReturnValue('00000000-0000-4000-8000-000000000001');
 
-  window.eval(trackerScript);
+  vi.resetModules();
+  await import('../src/scripts/tracker');
   return { sendBeacon };
 }
 
@@ -31,7 +31,7 @@ describe('public website tracker', () => {
   });
 
   it('redacts sensitive URL data, preserves allowed metadata, and avoids duplicate page views', async () => {
-    const { sendBeacon } = installTracker(
+    const { sendBeacon } = await installTracker(
       '/projects/01KZ941C7W5JRFDA9RDZASV8EE/repos/raphaeltm/simple-agent-manager/blob/apps/www/src/scripts/tracker.ts?utm_source=newsletter&utm_medium=email&utm_campaign=launch&token=secret#frag',
       'https://user:pass@example.com/oauth/callback/user@example.com?code=secret#frag'
     );

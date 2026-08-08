@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { MultiTerminal } from '../../src/MultiTerminal';
 
 // Mock xterm.js
@@ -154,9 +155,9 @@ Object.defineProperty(globalThis, 'WebSocket', {
 // Mock ResizeObserver (not available in jsdom)
 Object.defineProperty(globalThis, 'ResizeObserver', {
   value: class MockResizeObserver {
-  observe() {}
-  unobserve() {}
-  disconnect() {}
+    observe() {}
+    unobserve() {}
+    disconnect() {}
   },
   writable: true,
   configurable: true,

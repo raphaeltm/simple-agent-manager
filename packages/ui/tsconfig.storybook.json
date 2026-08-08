@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "."
+  },
+  "include": [
+    ".storybook/**/*.ts",
+    "src/**/*.stories.tsx",
+    "playwright.storybook.config.ts",
+    "tests/playwright/**/*.ts"
+  ],
+  "exclude": ["node_modules", "dist", "coverage", "storybook-static"]
+}

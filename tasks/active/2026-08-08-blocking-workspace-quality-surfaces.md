@@ -25,14 +25,14 @@ This is a quality-gate repair only. It must not change runtime UI, API, CLI, clo
 
 ## Implementation checklist
 
-- [ ] Add a fail-closed workspace quality validator that discovers tested pnpm workspaces and requires a real `test:coverage` command.
-- [ ] Add fixture tests proving an omitted script/package fails and a complete workspace set passes.
-- [ ] Add `test:coverage` and the V8 provider dependency to every currently omitted tested workspace.
-- [ ] Install a single compatible Storybook toolchain for Vite 8/React 19, add development/production scripts, and typecheck stories/configuration.
-- [ ] Add deterministic Storybook browser screenshots and axe assertions for both current shared component stories at mobile and desktop sizes.
-- [ ] Include terminal `tests/**/*.tsx` in ESLint and add a dedicated no-emit TypeScript test project.
-- [ ] Expose the public site Playwright suite as a package script and keep link checking build-backed.
-- [ ] Add one blocking CI job for the workspace validator, Storybook production build/audit, public docs links, and public browser tests.
+- [x] Add a fail-closed workspace quality validator that discovers tested pnpm workspaces and requires a real `test:coverage` command.
+- [x] Add fixture tests proving an omitted script/package fails and a complete workspace set passes.
+- [x] Add `test:coverage` and the V8 provider dependency to every currently omitted tested workspace.
+- [x] Install a single compatible Storybook toolchain for Vite 8/React 19, add development/production scripts, and typecheck stories/configuration.
+- [x] Add deterministic Storybook browser screenshots and axe assertions for both current shared component stories at mobile and desktop sizes.
+- [x] Include terminal `tests/**/*.tsx` in ESLint and add a dedicated no-emit TypeScript test project.
+- [x] Expose the public site Playwright suite as a package script and keep link checking build-backed.
+- [x] Add one blocking CI job for the workspace validator, Storybook production build/audit, public docs links, and public browser tests.
 - [ ] Run affected tests/coverage, Storybook build/audit, public docs link/browser checks, tail-worker tests, terminal lint/typecheck, and the full root quality suite.
 - [ ] Complete all mandated local specialist reviews and address every material finding.
 - [ ] Open one non-draft PR against `main`, wait for every applicable GitHub check to turn green, and stop without staging, merge, or task archive.

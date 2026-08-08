@@ -10,6 +10,8 @@ build/
 # Test coverage
 coverage/
 packages/cli/coverage.out
+**/test-results/
+**/storybook-static/
 
 # Generated Go binaries
 packages/cli/bin/
