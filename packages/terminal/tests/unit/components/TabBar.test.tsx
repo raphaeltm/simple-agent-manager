@@ -1,5 +1,6 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
 import { TabBar } from '../../../src/components/TabBar';
 import type { TerminalSession } from '../../../src/types/multi-terminal';
 
@@ -81,8 +82,8 @@ describe('TabBar', () => {
         status: 'connected' as const,
         createdAt: new Date(),
         lastActivityAt: new Date(),
-      isActive: false,
-      order: 0,
+        isActive: false,
+        order: 0,
         workingDirectory: '/workspace',
       }));
       render(<TabBar {...defaultProps} sessions={maxedSessions} maxTabs={10} />);
@@ -205,7 +206,7 @@ describe('TabBar', () => {
       const tab = screen.getByText('Terminal 1');
       fireEvent.doubleClick(tab);
 
-      const input = await screen.findByDisplayValue('Terminal 1') as HTMLInputElement;
+      const input = (await screen.findByDisplayValue('Terminal 1')) as HTMLInputElement;
       expect(input.selectionStart).toBe(0);
       expect(input.selectionEnd).toBe('Terminal 1'.length);
     });
@@ -225,9 +226,7 @@ describe('TabBar', () => {
         workingDirectory: '/workspace',
       }));
 
-      const { container } = render(
-        <TabBar {...defaultProps} sessions={manySessions} />
-      );
+      const { container } = render(<TabBar {...defaultProps} sessions={manySessions} />);
 
       // Mock scrollWidth > clientWidth
       const tabContainer = container.querySelector('.tab-container');

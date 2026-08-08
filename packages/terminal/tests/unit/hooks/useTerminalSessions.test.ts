@@ -1,5 +1,5 @@
-import { act,renderHook } from '@testing-library/react';
-import { afterEach,assert, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, renderHook } from '@testing-library/react';
+import { afterEach, assert, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { useTerminalSessions } from '../../../src/hooks/useTerminalSessions';
 
@@ -187,7 +187,7 @@ describe('useTerminalSessions', () => {
       const initialTime = result.current.sessions.get(sessionId)?.lastActivityAt;
 
       // Wait a bit to ensure time difference
-      await new Promise(resolve => setTimeout(resolve, 10));
+      await new Promise((resolve) => setTimeout(resolve, 10));
 
       act(() => {
         result.current.activateSession(sessionId);
@@ -251,7 +251,9 @@ describe('useTerminalSessions', () => {
       });
 
       // Sort by order to verify reordering (Map iteration order is insertion order)
-      const sessions = Array.from(result.current.sessions.values()).sort((a, b) => a.order - b.order);
+      const sessions = Array.from(result.current.sessions.values()).sort(
+        (a, b) => a.order - b.order
+      );
       expect(sessions[0]?.order).toBe(0);
       expect(sessions[1]?.order).toBe(1);
       expect(sessions[2]?.order).toBe(2);
@@ -351,10 +353,10 @@ describe('useTerminalSessions', () => {
       const loaded = result.current.getPersistedSessions();
       assert(loaded !== null, 'expected loaded sessions');
       expect(loaded).toHaveLength(2);
-      expect(loaded[0].serverSessionId).toBe('server-111');
-      expect(loaded[0].name).toBe('Tab 1');
-      expect(loaded[1].serverSessionId).toBe('server-222');
-      expect(loaded[1].name).toBe('Tab 2');
+      expect(loaded[0]?.serverSessionId).toBe('server-111');
+      expect(loaded[0]?.name).toBe('Tab 1');
+      expect(loaded[1]?.serverSessionId).toBe('server-222');
+      expect(loaded[1]?.name).toBe('Tab 2');
     });
 
     it('should restore counter from persisted state', () => {
@@ -427,7 +429,7 @@ describe('useTerminalSessions', () => {
 
       // Sessions should be persisted in order
       const sorted = [...parsed.sessions].sort(
-        (a: { order: number }, b: { order: number }) => a.order - b.order,
+        (a: { order: number }, b: { order: number }) => a.order - b.order
       );
       expect(sorted[0].name).toBe('First');
       expect(sorted[0].serverSessionId).toBe('server-aaa');
@@ -452,16 +454,19 @@ describe('useTerminalSessions', () => {
       const loaded = result.current.getPersistedSessions();
       assert(loaded !== null, 'expected loaded sessions');
       expect(loaded).toHaveLength(2);
-      expect(loaded[0].name).toBe('Dev Server');
-      expect(loaded[1].name).toBe('Build');
+      expect(loaded[0]?.name).toBe('Dev Server');
+      expect(loaded[1]?.name).toBe('Build');
+
+      const [firstPersisted, secondPersisted] = loaded;
+      assert(firstPersisted && secondPersisted, 'expected both persisted sessions');
 
       // Simulate what MultiTerminal does when server returns empty session_list:
       // create fresh sessions with the persisted names
       let freshId1 = '';
       let freshId2 = '';
       act(() => {
-        freshId1 = result.current.createSession(loaded[0].name);
-        freshId2 = result.current.createSession(loaded[1].name);
+        freshId1 = result.current.createSession(firstPersisted.name);
+        freshId2 = result.current.createSession(secondPersisted.name);
       });
 
       // Verify sessions were created with the original names
@@ -479,7 +484,7 @@ describe('useTerminalSessions', () => {
       assert(raw !== null, 'expected persisted state');
       const parsed = JSON.parse(raw);
       const sorted = [...parsed.sessions].sort(
-        (a: { order: number }, b: { order: number }) => a.order - b.order,
+        (a: { order: number }, b: { order: number }) => a.order - b.order
       );
       expect(sorted[0].serverSessionId).toBe('new-srv-AAA');
       expect(sorted[1].serverSessionId).toBe('new-srv-BBB');
@@ -513,14 +518,12 @@ describe('useTerminalSessions', () => {
       };
       sessionStorage.setItem(PERSISTENCE_KEY, JSON.stringify(persisted));
 
-      const { result } = renderHook(() =>
-        useTerminalSessions(10, PERSISTENCE_KEY, wsUrl)
-      );
+      const { result } = renderHook(() => useTerminalSessions(10, PERSISTENCE_KEY, wsUrl));
 
       const loaded = result.current.getPersistedSessions();
       assert(loaded !== null, 'expected loaded sessions');
       expect(loaded).toHaveLength(1);
-      expect(loaded[0].name).toBe('Tab 1');
+      expect(loaded[0]?.name).toBe('Tab 1');
     });
 
     it('should clear malformed storage on parse failure', () => {
@@ -536,9 +539,7 @@ describe('useTerminalSessions', () => {
 
     it('should persist wsUrl in storage for scope validation', () => {
       const wsUrl = 'ws://myhost/ws';
-      const { result } = renderHook(() =>
-        useTerminalSessions(10, PERSISTENCE_KEY, wsUrl)
-      );
+      const { result } = renderHook(() => useTerminalSessions(10, PERSISTENCE_KEY, wsUrl));
 
       act(() => {
         result.current.createSession('Tab 1');

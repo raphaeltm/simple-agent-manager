@@ -15,9 +15,11 @@
     "build": "tsup src/index.ts --format esm --dts",
     "dev": "tsup src/index.ts --format esm --dts --watch",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
+    "@vitest/coverage-v8": "catalog:",
     "tsup": "8.5.1",
     "typescript": "catalog:",
     "vitest": "catalog:",

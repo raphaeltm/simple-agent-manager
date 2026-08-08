@@ -17,8 +17,8 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit",
-    "lint": "eslint 'src/**/*.ts' 'src/**/*.tsx' 'tests/**/*.ts'"
+    "typecheck": "tsc --noEmit && tsc --project tsconfig.test.json --noEmit",
+    "lint": "eslint 'src/**/*.ts' 'src/**/*.tsx' 'tests/**/*.{ts,tsx}'"
   },
   "dependencies": {
     "@xterm/xterm": "catalog:",

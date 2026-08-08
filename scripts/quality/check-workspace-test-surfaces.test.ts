@@ -1,0 +1,102 @@
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+
+import {
+  assertWorkspaceTestSurfaces,
+  findWorkspaceTestSurfaceFindings,
+} from './check-workspace-test-surfaces';
+
+const temporaryRoots: string[] = [];
+
+function createFixture(
+  packages: Array<{
+    path: string;
+    name: string;
+    scripts?: Record<string, string>;
+    testFile?: string;
+  }>
+): string {
+  const root = mkdtempSync(join(tmpdir(), 'workspace-test-surfaces-'));
+  temporaryRoots.push(root);
+  writeFileSync(join(root, 'pnpm-workspace.yaml'), "packages:\n  - 'packages/*'\n");
+
+  for (const workspace of packages) {
+    const workspaceRoot = join(root, workspace.path);
+    mkdirSync(workspaceRoot, { recursive: true });
+    writeFileSync(
+      join(workspaceRoot, 'package.json'),
+      JSON.stringify({ name: workspace.name, scripts: workspace.scripts ?? {} })
+    );
+    if (workspace.testFile) {
+      const testPath = join(workspaceRoot, workspace.testFile);
+      mkdirSync(dirname(testPath), { recursive: true });
+      writeFileSync(testPath, "import { it } from 'vitest';\nit('runs', () => {});\n");
+    }
+  }
+  return root;
+}
+
+afterEach(() => {
+  for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true });
+});
+
+describe('workspace test surface guard', () => {
+  it('fails visibly when a tested workspace omits its coverage script', () => {
+    const root = createFixture([
+      {
+        path: 'packages/covered',
+        name: '@fixture/covered',
+        scripts: { test: 'vitest run', 'test:coverage': 'vitest run --coverage' },
+        testFile: 'tests/covered.test.ts',
+      },
+      {
+        path: 'packages/omitted',
+        name: '@fixture/omitted',
+        scripts: { test: 'vitest run' },
+        testFile: 'tests/omitted.test.ts',
+      },
+    ]);
+
+    expect(() => assertWorkspaceTestSurfaces(root)).toThrow(
+      '@fixture/omitted (packages/omitted): missing test:coverage'
+    );
+  });
+
+  it('detects a package with test files even when both scripts were omitted', () => {
+    const root = createFixture([
+      {
+        path: 'packages/no-scripts',
+        name: '@fixture/no-scripts',
+        testFile: '__tests__/component.spec.tsx',
+      },
+    ]);
+
+    expect(findWorkspaceTestSurfaceFindings(root)).toEqual([
+      {
+        workspace: 'packages/no-scripts',
+        packageName: '@fixture/no-scripts',
+        missingScripts: ['test', 'test:coverage'],
+      },
+    ]);
+  });
+
+  it('passes when every tested workspace exposes both commands', () => {
+    const root = createFixture([
+      {
+        path: 'packages/complete',
+        name: '@fixture/complete',
+        scripts: { test: 'vitest run', 'test:coverage': 'vitest run --coverage' },
+        testFile: 'tests/complete.test.ts',
+      },
+      { path: 'packages/no-tests', name: '@fixture/no-tests' },
+    ]);
+
+    expect(() => assertWorkspaceTestSurfaces(root)).not.toThrow();
+  });
+
+  it('passes against the checked-in workspace graph', () => {
+    expect(() => assertWorkspaceTestSurfaces(resolve(import.meta.dirname, '../..'))).not.toThrow();
+  });
+});
