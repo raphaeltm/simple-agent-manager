@@ -65,9 +65,11 @@ deploy to shared staging; the final integration task owns staging verification.
       valid.
 - [x] Run the focused Vitest contract suite and pinned `actionlint` against all
       workflows.
-- [ ] Run all applicable repository quality gates without piping or skipped output.
-- [ ] Complete security, independent defensive, constitution, test-quality, and
-      task-completion reviews; address every correctness finding.
+- [x] Run all applicable repository quality gates without piping or skipped output;
+      record current-main/local-runner failures separately from branch regressions.
+- [x] Complete security, independent defensive, constitution, and test-quality
+      reviews; address every correctness finding.
+- [x] Complete the mandatory task-completion review immediately before archive.
 - [ ] Rebase on current `origin/main`, re-run validation, push, open one PR, and
       wait for every GitHub check to finish green.
 - [ ] Leave the PR open and unmerged; do not trigger shared staging.
@@ -86,6 +88,40 @@ deploy to shared staging; the final integration task owns staging verification.
 - [ ] Local applicable CI and every GitHub PR check are completely green.
 - [ ] PR evidence records that staging was intentionally not deployed and the PR
       was intentionally not merged under the direct user override.
+
+## Validation Evidence
+
+- TDD red: the new permission contract failed against the original workflow,
+  reporting both the unexpected exact-allowlist entry and
+  `pull-requests: write`.
+- Focused contract suites: 44/44 passed across the new staging-permission,
+  reusable-workflow, and deployment-hardening suites.
+- Security, constitution, test-quality, and independent defensive reviewers
+  approve after adversarial re-review. Their attempted bypasses now have
+  regression fixtures for quoted and Unicode-escaped YAML keys, nested reusable
+  permission overrides, multiline token-backed `gh api`, and third-party PR
+  comment actions.
+- `pnpm install --frozen-lockfile` passes with the new direct `yaml@2.9.0` test
+  dependency. Its lockfile change is limited to the root importer's three lines;
+  the package and snapshot already existed in the base lock.
+- Repository quality scripts: 225/225 passed. Source-contract, file-size,
+  dependency-governance, and stale-binary checks also passed.
+- `actionlint` v1.7.12 passed every repository workflow after its official
+  GitHub artifact attestation was verified. Optional shellcheck/pyflakes
+  integrations were disabled because those binaries are not installed.
+- `pnpm lint -- --quiet` passed (7/7), `pnpm typecheck` passed (16/16), and
+  `pnpm build` passed (9/9).
+- The exact local `pnpm test:coverage` gate completed but the API package had 20
+  timeout-only failures under workspace load. No API file differs from
+  `origin/main`, and the exact base SHA has a successful GitHub CI run. This is
+  recorded as a local-runner limitation, not as a green result; clean-runner
+  GitHub CI must pass before delivery.
+- Repository-wide `pnpm format:check` reports 2,394 pre-existing files on the
+  unchanged base. Every file changed by WP-121 passes its focused Prettier
+  check.
+- Task-completion validation passed checks A-F with no missing implementation,
+  contract, or verification work. Rebase, PR checks, and final release-state
+  evidence remain sequential delivery gates.
 
 ## References
 

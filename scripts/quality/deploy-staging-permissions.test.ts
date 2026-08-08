@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 
 import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
 
 const stagingWorkflow = readFileSync(
   new URL('../../.github/workflows/deploy-staging.yml', import.meta.url),
@@ -21,42 +22,57 @@ const PR_WRITE_CONSUMERS = [
   /actions\/github-script@/,
   /github\.rest\.(?:issues|pulls)/,
   /\bgh\s+pr\s+(?:comment|edit|review|close|merge|ready|reopen)\b/,
+  /\bgh\s+api\b/i,
   /api\.github\.com\/repos\/[^\s]+\/(?:issues|pulls)(?:\/|\b)/,
-  /\bcomment-on-pr\s*:/,
+  /\b(?:GH_TOKEN|GITHUB_TOKEN)\b/,
+  /\${{\s*(?:github\.token|secrets(?:\.GITHUB_TOKEN|\[['"]GITHUB_TOKEN['"]\]))\s*}}/,
+  /\b(?:pull-request-comment|comment-on-pr)\b/i,
 ] as const;
 
 type PermissionMap = Record<string, string>;
+type YamlRecord = Record<string, unknown>;
 
-function permissionMaps(workflow: string): Array<{ indent: number; permissions: PermissionMap }> {
-  const lines = workflow.split('\n');
-  const maps: Array<{ indent: number; permissions: PermissionMap }> = [];
+function asRecord(value: unknown): YamlRecord | undefined {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    ? (value as YamlRecord)
+    : undefined;
+}
 
-  for (let index = 0; index < lines.length; index += 1) {
-    const header = lines[index]?.match(/^(\s*)permissions:\s*(.*?)\s*$/);
-    if (!header) continue;
-
-    const indent = header[1]?.length ?? 0;
-    const inline = header[2];
-    if (inline) {
-      maps.push({ indent, permissions: { '*': inline } });
-      continue;
-    }
-
-    const permissions: PermissionMap = {};
-    for (let childIndex = index + 1; childIndex < lines.length; childIndex += 1) {
-      const child = lines[childIndex];
-      if (!child?.trim() || child.trimStart().startsWith('#')) continue;
-
-      const childIndent = child.match(/^\s*/)?.[0].length ?? 0;
-      if (childIndent <= indent) break;
-
-      const entry = child.match(/^\s+([a-z-]+):\s*([a-z-]+)\s*(?:#.*)?$/);
-      if (entry?.[1] && entry[2]) permissions[entry[1]] = entry[2];
-    }
-    maps.push({ indent, permissions });
+function parseWorkflow(workflow: string, errors: string[]): YamlRecord | undefined {
+  try {
+    const parsed = asRecord(parse(workflow));
+    if (!parsed) errors.push('workflow YAML must parse to a mapping');
+    return parsed;
+  } catch {
+    errors.push('workflow YAML must be structurally parseable');
+    return undefined;
   }
+}
 
-  return maps;
+function permissionMap(value: unknown): PermissionMap | undefined {
+  const record = asRecord(value);
+  if (!record) return undefined;
+  return Object.fromEntries(
+    Object.entries(record).map(([scope, access]) => [scope, String(access)])
+  );
+}
+
+function jobPermissionValues(workflow: YamlRecord | undefined): unknown[] {
+  const jobs = asRecord(workflow?.jobs);
+  if (!jobs) return [];
+  return Object.values(jobs).flatMap((job) => {
+    const jobRecord = asRecord(job);
+    return jobRecord && Object.hasOwn(jobRecord, 'permissions') ? [jobRecord.permissions] : [];
+  });
+}
+
+function isExactPermissionMap(actual: PermissionMap | undefined, expected: PermissionMap): boolean {
+  if (!actual) return false;
+  const actualEntries = Object.entries(actual).sort(([left], [right]) => left.localeCompare(right));
+  const expectedEntries = Object.entries(expected).sort(([left], [right]) =>
+    left.localeCompare(right)
+  );
+  return JSON.stringify(actualEntries) === JSON.stringify(expectedEntries);
 }
 
 function block(workflow: string, start: RegExp, nextTopLevelKey: RegExp): string {
@@ -70,14 +86,32 @@ function block(workflow: string, start: RegExp, nextTopLevelKey: RegExp): string
 
 function stagingPermissionContractErrors(staging: string, reusable: string): string[] {
   const errors: string[] = [];
-  const stagingMaps = permissionMaps(staging);
-  const rootPermissions = stagingMaps.find(({ indent }) => indent === 0)?.permissions;
+  const stagingConfig = parseWorkflow(staging, errors);
+  const reusableConfig = parseWorkflow(reusable, errors);
+  const rootPermissions = permissionMap(stagingConfig?.permissions);
 
-  if (JSON.stringify(rootPermissions) !== JSON.stringify(REQUIRED_STAGING_PERMISSIONS)) {
+  if (!isExactPermissionMap(rootPermissions, REQUIRED_STAGING_PERMISSIONS)) {
     errors.push('staging root permissions must match the exact least-privilege allowlist');
   }
 
-  for (const { permissions } of [...stagingMaps, ...permissionMaps(reusable)]) {
+  const nestedPermissionValues = [
+    ...jobPermissionValues(stagingConfig),
+    ...(reusableConfig && Object.hasOwn(reusableConfig, 'permissions')
+      ? [reusableConfig.permissions]
+      : []),
+    ...jobPermissionValues(reusableConfig),
+  ];
+  if (nestedPermissionValues.length > 0) {
+    errors.push('nested or reusable permission overrides are forbidden');
+  }
+
+  const permissionValues = [stagingConfig?.permissions, ...nestedPermissionValues];
+  for (const value of permissionValues) {
+    const permissions = permissionMap(value);
+    if (!permissions) {
+      if (value !== undefined) errors.push('broad or inline permission grants are forbidden');
+      continue;
+    }
     if ('*' in permissions) {
       errors.push('broad or inline permission grants are forbidden');
       continue;
@@ -152,6 +186,43 @@ describe('staging deployment permission contract', () => {
     }
   );
 
+  it.each([
+    '      pull-requests : write',
+    '      "pull-requests": "write"',
+    "      'pull-requests': 'write'",
+    '    "\\u0070ermissions":\n      pull-requests: write',
+  ])('rejects alternate valid YAML spelling of job-level PR authority: %s', (permissionLine) => {
+    const permissionBlock = permissionLine.startsWith('    ')
+      ? permissionLine
+      : `    permissions:\n${permissionLine}`;
+    const alternateSpelling = stagingWorkflow.replace(
+      /^  smoke-tests:\s*$/m,
+      (jobHeader) => `${jobHeader}\n${permissionBlock}`
+    );
+
+    expect(stagingPermissionContractErrors(alternateSpelling, reusableWorkflow)).not.toEqual([]);
+  });
+
+  it('rejects a reusable job override that silently removes checkout authority', () => {
+    const checkoutBreakingOverride = reusableWorkflow.replace(
+      /^  deploy:\s*$/m,
+      '  deploy:\n    permissions:\n      deployments: none\n      id-token: none'
+    );
+
+    expect(stagingPermissionContractErrors(stagingWorkflow, checkoutBreakingOverride)).toContain(
+      'nested or reusable permission overrides are forbidden'
+    );
+  });
+
+  it('accepts the exact root permission map regardless of key order', () => {
+    const reorderedRoot = stagingWorkflow.replace(
+      /permissions:\n(?:  [a-z-]+: [a-z-]+\n)+/,
+      'permissions:\n  id-token: none\n  contents: read\n  deployments: none\n'
+    );
+
+    expect(stagingPermissionContractErrors(reorderedRoot, reusableWorkflow)).toEqual([]);
+  });
+
   it.each(Object.keys(REQUIRED_STAGING_PERMISSIONS))(
     'rejects removal of the explicit %s scope declaration',
     (scope) => {
@@ -179,6 +250,31 @@ describe('staging deployment permission contract', () => {
 
     expect(stagingPermissionContractErrors(stagingWorkflow, prCommentConsumer)).toContain(
       'pull-request write consumer is present: actions\\/github-script@'
+    );
+  });
+
+  it('rejects a token-backed GitHub API mutation hidden in a shell step', () => {
+    const apiMutationConsumer = [
+      reusableWorkflow,
+      '      - env:',
+      `          "GH_TOKEN": \${{ secrets['GITHUB_TOKEN'] }}`,
+      '        run: |',
+      '          gh api \\',
+      '            --method POST \\',
+      '            "repos/$GITHUB_REPOSITORY/issues/123/comments" \\',
+      '            -f body=test',
+    ].join('\n');
+
+    expect(stagingPermissionContractErrors(stagingWorkflow, apiMutationConsumer)).toEqual(
+      expect.arrayContaining([expect.stringContaining('pull-request write consumer is present')])
+    );
+  });
+
+  it('rejects introducing a third-party pull-request commenting action', () => {
+    const commentingAction = `${reusableWorkflow}\n      - uses: marocchino/sticky-pull-request-comment@773744901bac0e8cbb5a0dc842800d45e9b2b101\n`;
+
+    expect(stagingPermissionContractErrors(stagingWorkflow, commentingAction)).toContain(
+      'pull-request write consumer is present: \\b(?:pull-request-comment|comment-on-pr)\\b'
     );
   });
 });
