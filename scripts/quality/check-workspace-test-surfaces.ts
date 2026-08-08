@@ -10,8 +10,27 @@ type PackageManifest = {
 export type WorkspaceTestSurfaceFinding = {
   workspace: string;
   packageName: string;
-  invalidScripts: Array<'test' | 'test:coverage'>;
+  invalidScripts: string[];
 };
+
+export type RequiredWorkspaceScripts = {
+  workspace: string;
+  packageName: string;
+  scripts: string[];
+};
+
+export const REQUIRED_WORKSPACE_SCRIPTS: RequiredWorkspaceScripts[] = [
+  {
+    workspace: 'packages/ui',
+    packageName: '@simple-agent-manager/ui',
+    scripts: ['build-storybook', 'test:storybook'],
+  },
+  {
+    workspace: 'apps/www',
+    packageName: '@simple-agent-manager/www',
+    scripts: ['check:links', 'test:browser'],
+  },
+];
 
 const TEST_FILE_PATTERN = /(?:^|\/)(?:[^/]+\.(?:test|spec)\.(?:[cm]?[jt]sx?)|[^/]+_test\.go)$/;
 const IGNORED_DIRECTORIES = new Set([
@@ -90,7 +109,10 @@ function readManifest(manifestPath: string): PackageManifest {
   }
 }
 
-export function findWorkspaceTestSurfaceFindings(root: string): WorkspaceTestSurfaceFinding[] {
+export function findWorkspaceTestSurfaceFindings(
+  root: string,
+  requiredWorkspaceScripts: RequiredWorkspaceScripts[] = REQUIRED_WORKSPACE_SCRIPTS
+): WorkspaceTestSurfaceFinding[] {
   const workspaceFile = resolve(root, 'pnpm-workspace.yaml');
   const workspacePatterns = parseWorkspacePatterns(readFileSync(workspaceFile, 'utf8'));
   const workspaceDirectories = workspacePatterns.flatMap((pattern) =>
@@ -120,11 +142,36 @@ export function findWorkspaceTestSurfaceFindings(root: string): WorkspaceTestSur
     });
   }
 
+  for (const requirement of requiredWorkspaceScripts) {
+    const manifestPath = resolve(root, requirement.workspace, 'package.json');
+    const manifest = existsSync(manifestPath) ? readManifest(manifestPath) : undefined;
+    const invalidScripts = requirement.scripts.filter(
+      (script) => !isRunnableScript(manifest?.scripts?.[script])
+    );
+    if (invalidScripts.length === 0) continue;
+
+    const existing = findings.find((finding) => finding.workspace === requirement.workspace);
+    if (existing) {
+      existing.invalidScripts.push(
+        ...invalidScripts.filter((script) => !existing.invalidScripts.includes(script))
+      );
+    } else {
+      findings.push({
+        workspace: requirement.workspace,
+        packageName: manifest?.name ?? requirement.packageName,
+        invalidScripts,
+      });
+    }
+  }
+
   return findings.sort((left, right) => left.workspace.localeCompare(right.workspace));
 }
 
-export function assertWorkspaceTestSurfaces(root: string): void {
-  const findings = findWorkspaceTestSurfaceFindings(root);
+export function assertWorkspaceTestSurfaces(
+  root: string,
+  requiredWorkspaceScripts: RequiredWorkspaceScripts[] = REQUIRED_WORKSPACE_SCRIPTS
+): void {
+  const findings = findWorkspaceTestSurfaceFindings(root, requiredWorkspaceScripts);
   if (findings.length === 0) return;
 
   const details = findings.map(
@@ -132,10 +179,7 @@ export function assertWorkspaceTestSurfaces(root: string): void {
       `- ${finding.packageName} (${finding.workspace}): missing or placeholder ${finding.invalidScripts.join(', ')}`
   );
   throw new Error(
-    [
-      'Tested workspaces must expose non-placeholder test and test:coverage scripts:',
-      ...details,
-    ].join('\n')
+    ['Workspaces must expose every required non-placeholder quality script:', ...details].join('\n')
   );
 }
 
@@ -145,7 +189,7 @@ if (resolve(process.argv[1] ?? '') === fileURLToPath(import.meta.url)) {
   try {
     assertWorkspaceTestSurfaces(repositoryRoot);
     console.log(
-      'Workspace test surfaces: all tested pnpm workspaces expose test and test:coverage'
+      'Workspace quality surfaces: all tested workspaces and specialized browser packages expose required scripts'
     );
   } catch (error) {
     console.error(error instanceof Error ? error.message : String(error));

@@ -6,9 +6,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   assertWorkspaceTestSurfaces,
   findWorkspaceTestSurfaceFindings,
+  type RequiredWorkspaceScripts,
 } from './check-workspace-test-surfaces';
 
 const temporaryRoots: string[] = [];
+const NO_SPECIALIZED_REQUIREMENTS: RequiredWorkspaceScripts[] = [];
 
 function createFixture(
   packages: Array<{
@@ -59,7 +61,7 @@ describe('workspace test surface guard', () => {
       },
     ]);
 
-    expect(() => assertWorkspaceTestSurfaces(root)).toThrow(
+    expect(() => assertWorkspaceTestSurfaces(root, NO_SPECIALIZED_REQUIREMENTS)).toThrow(
       '@fixture/omitted (packages/omitted): missing or placeholder test:coverage'
     );
   });
@@ -76,7 +78,7 @@ describe('workspace test surface guard', () => {
         },
       ]);
 
-      expect(() => assertWorkspaceTestSurfaces(root)).toThrow(
+      expect(() => assertWorkspaceTestSurfaces(root, NO_SPECIALIZED_REQUIREMENTS)).toThrow(
         '@fixture/placeholder (packages/placeholder): missing or placeholder test:coverage'
       );
     }
@@ -91,7 +93,7 @@ describe('workspace test surface guard', () => {
       },
     ]);
 
-    expect(findWorkspaceTestSurfaceFindings(root)).toEqual([
+    expect(findWorkspaceTestSurfaceFindings(root, NO_SPECIALIZED_REQUIREMENTS)).toEqual([
       {
         workspace: 'packages/no-scripts',
         packageName: '@fixture/no-scripts',
@@ -111,7 +113,41 @@ describe('workspace test surface guard', () => {
       { path: 'packages/no-tests', name: '@fixture/no-tests' },
     ]);
 
-    expect(() => assertWorkspaceTestSurfaces(root)).not.toThrow();
+    expect(() => assertWorkspaceTestSurfaces(root, NO_SPECIALIZED_REQUIREMENTS)).not.toThrow();
+  });
+
+  it('fails when a specialized browser package omits a required script', () => {
+    const root = createFixture([
+      {
+        path: 'packages/specialized',
+        name: '@fixture/specialized',
+        scripts: { 'test:browser': 'playwright test' },
+      },
+    ]);
+
+    expect(() =>
+      assertWorkspaceTestSurfaces(root, [
+        {
+          workspace: 'packages/specialized',
+          packageName: '@fixture/specialized',
+          scripts: ['build-browser', 'test:browser'],
+        },
+      ])
+    ).toThrow('@fixture/specialized (packages/specialized): missing or placeholder build-browser');
+  });
+
+  it('fails when a required specialized package is absent', () => {
+    const root = createFixture([]);
+
+    expect(() =>
+      assertWorkspaceTestSurfaces(root, [
+        {
+          workspace: 'packages/absent',
+          packageName: '@fixture/absent',
+          scripts: ['test:browser'],
+        },
+      ])
+    ).toThrow('@fixture/absent (packages/absent): missing or placeholder test:browser');
   });
 
   it('passes against the checked-in workspace graph', () => {

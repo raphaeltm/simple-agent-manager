@@ -19,6 +19,7 @@ function expectBlockingWorkspaceSurfaces(workflow: string): void {
     'pnpm --filter @simple-agent-manager/www build && pnpm --filter @simple-agent-manager/www check:links',
     'pnpm --filter @simple-agent-manager/ui test:storybook',
     'pnpm --filter @simple-agent-manager/www test:browser',
+    'pnpm quality:browser-evidence',
   ];
 
   for (const command of requiredCommands) {
@@ -26,6 +27,8 @@ function expectBlockingWorkspaceSurfaces(workflow: string): void {
   }
 
   expect(job).not.toContain('continue-on-error');
+  expect(job).toContain('path: .codex/tmp/playwright-screenshots/');
+  expect(job).toContain('if-no-files-found: error');
 }
 
 describe('CI workspace quality surface wiring', () => {
