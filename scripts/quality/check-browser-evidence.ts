@@ -19,7 +19,7 @@ export function expectedBrowserEvidence(root: string): string[] {
   const stories = Object.values(index.entries)
     .filter((entry) => entry.type === 'story')
     .map((entry) => entry.id)
-    .sort();
+    .sort((left, right) => left.localeCompare(right));
   if (stories.length === 0) {
     throw new Error('Browser evidence check failed: Storybook index has no stories');
   }

@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -63,14 +63,26 @@ function parseWorkspacePatterns(workspaceSource: string): string[] {
     if (inPackages && /^\S/.test(line) && line.trim() !== '') break;
     if (!inPackages) continue;
 
-    const match = line.match(/^\s+-\s+['"]?([^'"]+)['"]?\s*$/);
-    if (match?.[1]) patterns.push(match[1]);
+    const entry = parseWorkspaceEntry(line);
+    if (entry) patterns.push(entry);
   }
 
   if (patterns.length === 0) {
     throw new Error('pnpm-workspace.yaml does not declare any package patterns');
   }
   return patterns;
+}
+
+function parseWorkspaceEntry(line: string): string | undefined {
+  const trimmed = line.trim();
+  if (!trimmed.startsWith('-')) return undefined;
+
+  const value = trimmed.slice(1).trim();
+  const quote = value.at(0);
+  if ((quote === "'" || quote === '"') && value.endsWith(quote)) {
+    return value.slice(1, -1);
+  }
+  return value || undefined;
 }
 
 function expandWorkspacePattern(root: string, pattern: string): string[] {
@@ -109,15 +121,10 @@ function readManifest(manifestPath: string): PackageManifest {
   }
 }
 
-export function findWorkspaceTestSurfaceFindings(
+function findTestedWorkspaceFindings(
   root: string,
-  requiredWorkspaceScripts: RequiredWorkspaceScripts[] = REQUIRED_WORKSPACE_SCRIPTS
+  workspaceDirectories: string[]
 ): WorkspaceTestSurfaceFinding[] {
-  const workspaceFile = resolve(root, 'pnpm-workspace.yaml');
-  const workspacePatterns = parseWorkspacePatterns(readFileSync(workspaceFile, 'utf8'));
-  const workspaceDirectories = workspacePatterns.flatMap((pattern) =>
-    expandWorkspacePattern(root, pattern)
-  );
   const findings: WorkspaceTestSurfaceFinding[] = [];
 
   for (const workspaceDirectory of workspaceDirectories) {
@@ -129,47 +136,78 @@ export function findWorkspaceTestSurfaceFindings(
     const hasTestScript = isRunnableScript(manifest.scripts?.test);
     if (!hasTests && !hasTestScript) continue;
 
-    const invalidScripts: WorkspaceTestSurfaceFinding['invalidScripts'] = [];
-    if (!hasTestScript) invalidScripts.push('test');
-    if (!isRunnableScript(manifest.scripts?.['test:coverage']))
-      invalidScripts.push('test:coverage');
-    if (invalidScripts.length === 0) continue;
-
-    findings.push({
-      workspace: relative(root, workspaceDirectory),
-      packageName: manifest.name ?? relative(root, workspaceDirectory),
-      invalidScripts,
-    });
-  }
-
-  for (const requirement of requiredWorkspaceScripts) {
-    const requiredWorkspaceDirectory = resolve(root, requirement.workspace);
-    const manifestPath = resolve(requiredWorkspaceDirectory, 'package.json');
-    const manifest = existsSync(manifestPath) ? readManifest(manifestPath) : undefined;
-    const invalidScripts: string[] = [];
-    if (!workspaceDirectories.includes(requiredWorkspaceDirectory)) {
-      invalidScripts.push('pnpm workspace membership');
-    }
-    if (manifest?.name !== requirement.packageName) {
-      invalidScripts.push(`package name ${requirement.packageName}`);
-    }
-    invalidScripts.push(
-      ...requirement.scripts.filter((script) => !isRunnableScript(manifest?.scripts?.[script]))
+    const invalidScripts = ['test', 'test:coverage'].filter((script) =>
+      script === 'test' ? !hasTestScript : !isRunnableScript(manifest.scripts?.[script])
     );
-    if (invalidScripts.length === 0) continue;
-
-    const existing = findings.find((finding) => finding.workspace === requirement.workspace);
-    if (existing) {
-      existing.invalidScripts.push(
-        ...invalidScripts.filter((script) => !existing.invalidScripts.includes(script))
-      );
-    } else {
+    if (invalidScripts.length > 0) {
       findings.push({
-        workspace: requirement.workspace,
-        packageName: manifest?.name ?? requirement.packageName,
+        workspace: relative(root, workspaceDirectory),
+        packageName: manifest.name ?? relative(root, workspaceDirectory),
         invalidScripts,
       });
     }
+  }
+
+  return findings;
+}
+
+function findRequiredWorkspaceFinding(
+  root: string,
+  workspaceDirectories: string[],
+  requirement: RequiredWorkspaceScripts
+): WorkspaceTestSurfaceFinding | undefined {
+  const workspaceDirectory = resolve(root, requirement.workspace);
+  const manifestPath = resolve(workspaceDirectory, 'package.json');
+  const manifest = existsSync(manifestPath) ? readManifest(manifestPath) : undefined;
+  const invalidScripts = requirement.scripts.filter(
+    (script) => !isRunnableScript(manifest?.scripts?.[script])
+  );
+
+  if (!workspaceDirectories.includes(workspaceDirectory)) {
+    invalidScripts.unshift('pnpm workspace membership');
+  }
+  if (manifest?.name !== requirement.packageName) {
+    invalidScripts.push(`package name ${requirement.packageName}`);
+  }
+  if (invalidScripts.length === 0) return undefined;
+
+  return {
+    workspace: requirement.workspace,
+    packageName: manifest?.name ?? requirement.packageName,
+    invalidScripts,
+  };
+}
+
+function mergeFinding(
+  findings: WorkspaceTestSurfaceFinding[],
+  candidate: WorkspaceTestSurfaceFinding
+): void {
+  const existing = findings.find((finding) => finding.workspace === candidate.workspace);
+  if (!existing) {
+    findings.push(candidate);
+    return;
+  }
+
+  const additions = candidate.invalidScripts.filter(
+    (script) => !existing.invalidScripts.includes(script)
+  );
+  existing.invalidScripts.push(...additions);
+}
+
+export function findWorkspaceTestSurfaceFindings(
+  root: string,
+  requiredWorkspaceScripts: RequiredWorkspaceScripts[] = REQUIRED_WORKSPACE_SCRIPTS
+): WorkspaceTestSurfaceFinding[] {
+  const workspaceFile = resolve(root, 'pnpm-workspace.yaml');
+  const workspacePatterns = parseWorkspacePatterns(readFileSync(workspaceFile, 'utf8'));
+  const workspaceDirectories = workspacePatterns.flatMap((pattern) =>
+    expandWorkspacePattern(root, pattern)
+  );
+  const findings = findTestedWorkspaceFindings(root, workspaceDirectories);
+
+  for (const requirement of requiredWorkspaceScripts) {
+    const finding = findRequiredWorkspaceFinding(root, workspaceDirectories, requirement);
+    if (finding) mergeFinding(findings, finding);
   }
 
   return findings.sort((left, right) => left.workspace.localeCompare(right.workspace));
