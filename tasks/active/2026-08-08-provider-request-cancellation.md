@@ -86,7 +86,7 @@ lifecycle/inventory changes.
 - [ ] Run provider/API lint, typecheck, unit/integration tests, coverage, full build,
       task-completion validation, all required local reviews, and every applicable
       GitHub check.
-- [ ] Rebase conservatively on refreshed `origin/main`, create one focused PR, record
+- [x] Rebase conservatively on refreshed `origin/main`, create one focused PR, record
       the explicit no-staging decision, and stop with the PR open and unmerged.
 
 ## Acceptance Criteria
@@ -175,7 +175,12 @@ listener cleanup, and zero post-cancel boundary calls or mutations.
 - Independent local reviews: test engineering, constitution, Cloudflare/Workers,
   defensive security regression, and documentation synchronization all PASS.
 - Shared staging was intentionally not deployed or mutated under the user's explicit
-  release contract. GitHub checks and the final current-main rebase remain PR gates.
+  release contract. The final main refresh/rebase was a no-op at `8eed3b740`.
+- PR [#1773](https://github.com/raphaeltm/simple-agent-manager/pull/1773) is open,
+  non-draft, and explicitly marked DO NOT MERGE / NO STAGING. The initial Preflight
+  Evidence check exposed a missing hidden PR-body evidence block; the required Agent
+  Preflight markers, classifications, impact analysis, documentation evidence, and
+  constitution/risk evidence were added before the fresh final CI run.
 
 ## References
 
