@@ -42,6 +42,16 @@ lifecycle/inventory changes.
 8. Existing configurable timeout, retry, polling, and pagination values remain the
    applicable bounds. Cancellation adds no new timeout or limit and therefore needs no
    new deployment configuration.
+9. GCP authentication is part of the provider request path. `GcpTokenProvider` is
+   currently zero-argument, and the API closures in
+   `apps/api/src/services/provider-credentials.ts` call token exchange helpers whose
+   local timeout wrappers also replace `RequestInit.signal`. The optional context must
+   reach WIF/service-account exchange and cancellation must prevent a later KV token
+   cache write or Compute request.
+10. Caller abort reasons are arbitrary values, including `ProviderError` instances
+    shaped like retryable 412/503/`transient_capacity`, idempotent 404, or tolerated GCP
+    409 errors. Cancellation identity checks must run before provider-specific retry,
+    idempotency, cleanup, or error-mapping branches.
 
 ## Implementation Checklist
 
@@ -56,6 +66,9 @@ lifecycle/inventory changes.
 - [ ] Thread context through Hetzner, Scaleway, GCP, DigitalOcean, Vultr, Infomaniak,
       UpCloud, and their volume/helper clients, including pagination, retries, and
       polling.
+- [ ] Extend `GcpTokenProvider` source-compatibly and propagate the context through
+      provider-credential closures, WIF/service-account token HTTP, and token-cache
+      writes before any Compute request.
 - [ ] Ensure cancellation is never swallowed by best-effort polling catches and no
       retry, poll request, or later resource mutation begins after abort.
 - [ ] Add optional signal propagation to `provisionNode()` and prevent its catch path

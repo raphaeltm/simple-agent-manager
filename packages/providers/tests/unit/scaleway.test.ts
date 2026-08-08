@@ -180,6 +180,52 @@ describe('ScalewayProvider', () => {
       return mockFetch;
     }
 
+    it.each(['cloud-init', 'poweron'] as const)(
+      'preserves cancellation during %s and starts no later forward or cleanup mutation',
+      async (cancelAt) => {
+        const controller = new AbortController();
+        const callerReason = new ProviderError(
+          'scaleway',
+          409,
+          `caller cancelled during ${cancelAt}`,
+        );
+        const mutationLedger: string[] = [];
+        globalThis.fetch = vi.fn(async (url: string, init: RequestInit = {}) => {
+          const method = init.method ?? 'GET';
+          if (url.includes('/images')) return imageResponse();
+          if (url.endsWith('/servers') && method === 'POST') {
+            mutationLedger.push('create-server');
+            return createResponse();
+          }
+          if (url.includes('/user_data/cloud-init')) {
+            mutationLedger.push('upload-cloud-init');
+            if (cancelAt === 'cloud-init') controller.abort(callerReason);
+            return new Response(null, { status: 204 });
+          }
+          if (url.endsWith('/action') && method === 'POST') {
+            const body = jsonBody(init);
+            mutationLedger.push(String(body.action));
+            if (body.action === 'poweron' && cancelAt === 'poweron') {
+              controller.abort(callerReason);
+            }
+            return new Response(JSON.stringify({ task: {} }), { status: 202 });
+          }
+          throw new Error(`Unexpected Scaleway request: ${method} ${url}`);
+        });
+
+        await expect(
+          provider.createVM(vmConfig, { signal: controller.signal } as never),
+        ).rejects.toBe(callerReason);
+
+        expect(mutationLedger).toEqual(
+          cancelAt === 'cloud-init'
+            ? ['create-server', 'upload-cloud-init']
+            : ['create-server', 'upload-cloud-init', 'poweron'],
+        );
+        expect(mutationLedger).not.toContain('terminate');
+      },
+    );
+
     it('should perform three-step creation: create server, set cloud-init, poweron', async () => {
       const mockFetch = createScalewayFetchMock();
       globalThis.fetch = mockFetch;

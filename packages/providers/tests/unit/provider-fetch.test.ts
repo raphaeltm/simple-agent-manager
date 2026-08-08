@@ -52,9 +52,42 @@ describe('getMaxProviderErrorBodyChars', () => {
 describe('providerFetch', () => {
   const originalFetch = globalThis.fetch;
 
+  type ProviderRequestContext = { signal?: AbortSignal };
+  const fetchWithContext = providerFetch as (
+    providerName: string,
+    url: string | URL,
+    init?: RequestInit,
+    timeoutMs?: number,
+    maxErrorBodyChars?: number,
+    context?: ProviderRequestContext
+  ) => Promise<Response>;
+
   afterEach(() => {
     globalThis.fetch = originalFetch;
+    vi.useRealTimers();
   });
+
+  function installPendingAbortAwareFetch() {
+    let requestSignal: AbortSignal | undefined;
+    const fetchMock = vi.fn((_url: string, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        if (!requestSignal) {
+          reject(new Error('Expected provider request to include a signal'));
+          return;
+        }
+        if (requestSignal.aborted) {
+          reject(requestSignal.reason);
+          return;
+        }
+        requestSignal.addEventListener('abort', () => reject(requestSignal?.reason), {
+          once: true,
+        });
+      });
+    });
+    globalThis.fetch = fetchMock as typeof fetch;
+    return { fetchMock, getRequestSignal: () => requestSignal };
+  }
 
   it('returns response on successful fetch', async () => {
     globalThis.fetch = vi
@@ -65,6 +98,129 @@ describe('providerFetch', () => {
     expect(response.ok).toBe(true);
     const body = await response.json();
     expect(body).toEqual({ data: 'ok' });
+  });
+
+  it('does not start a request when the existing RequestInit signal is already cancelled', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response('should not run'));
+    globalThis.fetch = fetchMock;
+    const cancellation = new ProviderError(
+      'hetzner',
+      undefined,
+      'caller cancelled before provisioning'
+    );
+    const caller = new AbortController();
+    caller.abort(cancellation);
+
+    await expect(
+      providerFetch(
+        'hetzner',
+        'https://api.example.com/servers',
+        { method: 'POST', signal: caller.signal },
+        10_000
+      )
+    ).rejects.toBe(cancellation);
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it('preserves the exact caller reason when cancellation interrupts a pending fetch', async () => {
+    const { fetchMock } = installPendingAbortAwareFetch();
+    const caller = new AbortController();
+    const cancellation = new Error('caller stopped waiting for the provider');
+
+    const request = providerFetch(
+      'hetzner',
+      'https://api.example.com/servers/server-1',
+      { signal: caller.signal },
+      25
+    );
+    const rejection = expect(request).rejects.toBe(cancellation);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    caller.abort(cancellation);
+    await rejection;
+  });
+
+  it('uses the first caller cancellation when it wins the race with the internal timeout', async () => {
+    const { getRequestSignal } = installPendingAbortAwareFetch();
+    const initCaller = new AbortController();
+    const contextCaller = new AbortController();
+    const cancellation = new ProviderError(
+      'hetzner',
+      undefined,
+      'request owner cancelled the operation'
+    );
+
+    const request = fetchWithContext(
+      'hetzner',
+      'https://api.example.com/servers/server-1',
+      { signal: initCaller.signal },
+      25,
+      undefined,
+      { signal: contextCaller.signal }
+    );
+    const rejection = expect(request).rejects.toBe(cancellation);
+
+    contextCaller.abort(cancellation);
+    await rejection;
+    expect(getRequestSignal()?.reason).toBe(cancellation);
+  });
+
+  it('reports the configured timeout when it wins before either caller signal', async () => {
+    vi.useFakeTimers();
+    const { getRequestSignal } = installPendingAbortAwareFetch();
+    const initCaller = new AbortController();
+    const contextCaller = new AbortController();
+
+    const request = fetchWithContext(
+      'hetzner',
+      'https://api.example.com/servers/server-1',
+      { signal: initCaller.signal },
+      40,
+      undefined,
+      { signal: contextCaller.signal }
+    );
+    const result = request.catch((error: unknown) => error);
+    await vi.advanceTimersByTimeAsync(40);
+
+    const error = await result;
+    expect(error).toBeInstanceOf(ProviderError);
+    expect(error).toMatchObject({
+      providerName: 'hetzner',
+      message: expect.stringContaining('timed out after 40ms'),
+    });
+
+    const timeoutReason = getRequestSignal()?.reason;
+    const lateCallerReason = new Error('caller was too late');
+    contextCaller.abort(lateCallerReason);
+    expect(getRequestSignal()?.reason).toBe(timeoutReason);
+  });
+
+  it('cleans caller listeners and the internal timer after a normal request', async () => {
+    vi.useFakeTimers();
+    let requestSignal: AbortSignal | undefined;
+    globalThis.fetch = vi.fn((_url: string, init?: RequestInit) => {
+      requestSignal = init?.signal ?? undefined;
+      return Promise.resolve(new Response('ok', { status: 200 }));
+    }) as typeof fetch;
+    const initCaller = new AbortController();
+    const contextCaller = new AbortController();
+
+    const response = await fetchWithContext(
+      'hetzner',
+      'https://api.example.com/servers',
+      { signal: initCaller.signal },
+      10_000,
+      undefined,
+      { signal: contextCaller.signal }
+    );
+
+    expect(await response.text()).toBe('ok');
+    expect(requestSignal?.aborted).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+
+    initCaller.abort(new Error('request already completed'));
+    contextCaller.abort(new Error('request already completed'));
+    expect(requestSignal?.aborted).toBe(false);
   });
 
   it('throws ProviderError on HTTP 4xx with JSON error body', async () => {
