@@ -27,7 +27,7 @@ This remediation must preserve public/API/CLI/data behavior, the historical migr
 - [x] Add an optional migration-directory CLI seam and replace duplicated-regex tests with production-checker scenarios plus a CLI diagnostic capability test.
 - [x] Cover the known multiline bypass, multiline DROP/ALTER/rename forms, comments between tokens, strings, quoted identifiers, triggers, safe SQL, malformed SQL diagnostics, historical clean-install corpus, and upgrade-style fixture corpus.
 - [x] Prove current migration ordering, clean D1 application, upgrade D1 application, and post-apply safety checks remain successful.
-- [ ] Run all requested local reviewers and address every correctness/security/test-quality finding.
+- [x] Run all requested local reviewers and address every correctness/security/test-quality finding.
 - [ ] Rebase conservatively on current `origin/main`, open one focused PR, and wait for every applicable GitHub check.
 - [ ] Preserve the user release contract: no shared-staging deployment and no merge.
 
@@ -67,3 +67,5 @@ This remediation must preserve public/API/CLI/data behavior, the historical migr
 - Real Wrangler 4.118.0 clean install applied all 121 primary and 2 observability migrations to fresh local D1 stores; both ledgers matched and both `PRAGMA foreign_key_check` results were empty.
 - Real persisted upgrade applied the checked-in chain through 0047, seeded a `users` parent plus `credentials` child, applied the remaining history through 0108, and preserved both rows (`user_rows=1`, `credential_rows=1`) with 121 ledger entries and an empty `foreign_key_check`. A second apply completed with no pending migrations.
 - Engine-backed SQLite capability probes confirmed fractional/negative/zero-leading PRAGMA values disable FKs while positive-leading values enable them. The guard now mirrors that coercion and fails closed on unknown values. The existing post-apply suite passed 19/19 and the complete quality-script suite passed 247/247 after review fixes.
+- Cloudflare, constitution, test-quality, task-completion, and independent defensive reviews all completed. Review findings were fixed: SQLite single-quoted identifiers; qualified/parenthesized/coerced PRAGMAs; qualified trigger control words; three constitutionally oversized functions; and the cold-start timeout bound for the real CLI capability test. Final focused reviewer reruns passed 48/48 with no remaining findings.
+- Final local gates after review: `pnpm build`, `pnpm typecheck`, and `pnpm lint` passed (lint: 0 errors and pre-existing warnings); the rebased production-checker/post-apply suites passed 67/67; migration safety/order passed. Full local `pnpm test` and `pnpm test:coverage` were executed but encountered unrelated monorepo load-sensitive 5-second timeouts outside this diff; focused reruns passed. The PR remains blocked on a green GitHub coverage job and all other applicable checks rather than treating partial/local output as green.
