@@ -1,4 +1,5 @@
 @import 'tailwindcss';
+@import './sam-tailwind-theme.css';
 @import '../src/styles.css';
 @source '../src/**/*.{ts,tsx}';
 

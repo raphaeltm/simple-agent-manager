@@ -10,7 +10,7 @@ type PackageManifest = {
 export type WorkspaceTestSurfaceFinding = {
   workspace: string;
   packageName: string;
-  missingScripts: Array<'test' | 'test:coverage'>;
+  invalidScripts: Array<'test' | 'test:coverage'>;
 };
 
 const TEST_FILE_PATTERN = /(?:^|\/)(?:[^/]+\.(?:test|spec)\.(?:[cm]?[jt]sx?)|[^/]+_test\.go)$/;
@@ -23,6 +23,14 @@ const IGNORED_DIRECTORIES = new Set([
   'node_modules',
   'storybook-static',
 ]);
+
+function isRunnableScript(command: string | undefined): boolean {
+  const normalized = command?.trim();
+  if (!normalized) return false;
+  if (/^(?:true|:|exit\s+0)$/i.test(normalized)) return false;
+  if (/^(?:echo|printf)\b/i.test(normalized) && !/(?:&&|\|\||;)/.test(normalized)) return false;
+  return true;
+}
 
 function parseWorkspacePatterns(workspaceSource: string): string[] {
   const patterns: string[] = [];
@@ -96,18 +104,19 @@ export function findWorkspaceTestSurfaceFindings(root: string): WorkspaceTestSur
 
     const manifest = readManifest(manifestPath);
     const hasTests = containsTestFile(workspaceDirectory);
-    const hasTestScript = Boolean(manifest.scripts?.test?.trim());
+    const hasTestScript = isRunnableScript(manifest.scripts?.test);
     if (!hasTests && !hasTestScript) continue;
 
-    const missingScripts: WorkspaceTestSurfaceFinding['missingScripts'] = [];
-    if (!hasTestScript) missingScripts.push('test');
-    if (!manifest.scripts?.['test:coverage']?.trim()) missingScripts.push('test:coverage');
-    if (missingScripts.length === 0) continue;
+    const invalidScripts: WorkspaceTestSurfaceFinding['invalidScripts'] = [];
+    if (!hasTestScript) invalidScripts.push('test');
+    if (!isRunnableScript(manifest.scripts?.['test:coverage']))
+      invalidScripts.push('test:coverage');
+    if (invalidScripts.length === 0) continue;
 
     findings.push({
       workspace: relative(root, workspaceDirectory),
       packageName: manifest.name ?? relative(root, workspaceDirectory),
-      missingScripts,
+      invalidScripts,
     });
   }
 
@@ -120,12 +129,13 @@ export function assertWorkspaceTestSurfaces(root: string): void {
 
   const details = findings.map(
     (finding) =>
-      `- ${finding.packageName} (${finding.workspace}): missing ${finding.missingScripts.join(', ')}`
+      `- ${finding.packageName} (${finding.workspace}): missing or placeholder ${finding.invalidScripts.join(', ')}`
   );
   throw new Error(
-    ['Tested workspaces must expose runnable test and test:coverage scripts:', ...details].join(
-      '\n'
-    )
+    [
+      'Tested workspaces must expose non-placeholder test and test:coverage scripts:',
+      ...details,
+    ].join('\n')
   );
 }
 
