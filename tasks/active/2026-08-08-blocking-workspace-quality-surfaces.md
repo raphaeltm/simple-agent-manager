@@ -33,7 +33,7 @@ This is a quality-gate repair only. It must not change runtime UI, API, CLI, clo
 - [x] Include terminal `tests/**/*.tsx` in ESLint and add a dedicated no-emit TypeScript test project.
 - [x] Expose the public site Playwright suite as a package script and keep link checking build-backed.
 - [x] Add one blocking CI job for the workspace validator, Storybook production build/audit, public docs links, and public browser tests.
-- [ ] Run affected tests/coverage, Storybook build/audit, public docs link/browser checks, tail-worker tests, terminal lint/typecheck, and the full root quality suite.
+- [x] Run affected tests/coverage, Storybook build/audit, public docs link/browser checks, tail-worker tests, terminal lint/typecheck, and the full root quality suite.
 - [ ] Complete all mandated local specialist reviews and address every material finding.
 - [ ] Open one non-draft PR against `main`, wait for every applicable GitHub check to turn green, and stop without staging, merge, or task archive.
 
@@ -42,6 +42,7 @@ This is a quality-gate repair only. It must not change runtime UI, API, CLI, clo
 - Every pnpm workspace that has a test script also has a non-placeholder `test:coverage` script; future omissions fail a checked-in behavioral fixture and blocking CI.
 - Root `pnpm test:coverage` executes coverage commands for `apps/tail-worker`, `apps/www`, `packages/cloud-init`, `packages/ui`, and `infra` instead of Turbo `NONEXISTENT` tasks.
 - `packages/ui` installs from the frozen lockfile, typechecks its Storybook config/stories, builds static Storybook output, and passes mobile/desktop screenshot plus serious axe checks.
+- The Storybook axe gate explicitly expects the two existing dark-theme `color-contrast` findings for primary and danger buttons. They remain visible in test output and are exact assertions rather than skips: the gate fails when either finding changes/disappears or any unlisted serious violation appears. Changing runtime color tokens belongs to a separate UI fix because this packet is non-breaking.
 - A lint-invalid or type-invalid terminal `.test.tsx` file is within the configured lint/typecheck inputs; the existing terminal suite remains green.
 - `apps/www` internal docs links and its local production-preview Playwright flow are blocking CI checks.
 - `apps/tail-worker` tests execute through root coverage and pass directly.
@@ -57,6 +58,12 @@ Quality surfaces existed in source but were unreachable from the commands and CI
 ### Root cause
 
 Turbo intentionally tolerates missing workspace tasks. The repository had no invariant checker distinguishing a workspace with no relevant surface from a tested workspace that accidentally omitted the required script. Standalone Storybook, link, browser, and static-test-input configurations were added without a durable CI wiring contract.
+
+### Timeline
+
+- Before 2026-08-08, the workspace omissions accumulated across separate changes; the exact introducing commits are not recoverable from the accepted audit identifiers, so this record does not infer them.
+- The accepted `6050d049…`, `253325b4…`, R9-007, and R10-009 audits identified the Storybook, terminal TSX, public-site/tail-worker, and Turbo coverage roots.
+- On 2026-08-08, WP-065 reproduced the silent green baseline, added fail-closed package-graph and CI fixtures, exposed the missing package commands, and made deterministic Storybook/public browser surfaces blocking.
 
 ### Why it was not caught
 

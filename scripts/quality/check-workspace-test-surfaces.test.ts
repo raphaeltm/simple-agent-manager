@@ -60,9 +60,27 @@ describe('workspace test surface guard', () => {
     ]);
 
     expect(() => assertWorkspaceTestSurfaces(root)).toThrow(
-      '@fixture/omitted (packages/omitted): missing test:coverage'
+      '@fixture/omitted (packages/omitted): missing or placeholder test:coverage'
     );
   });
+
+  it.each(['true', ':', 'exit 0', 'echo skipped'])(
+    'rejects placeholder coverage command %s',
+    (command) => {
+      const root = createFixture([
+        {
+          path: 'packages/placeholder',
+          name: '@fixture/placeholder',
+          scripts: { test: 'vitest run', 'test:coverage': command },
+          testFile: 'tests/placeholder.test.ts',
+        },
+      ]);
+
+      expect(() => assertWorkspaceTestSurfaces(root)).toThrow(
+        '@fixture/placeholder (packages/placeholder): missing or placeholder test:coverage'
+      );
+    }
+  );
 
   it('detects a package with test files even when both scripts were omitted', () => {
     const root = createFixture([
@@ -77,7 +95,7 @@ describe('workspace test surface guard', () => {
       {
         workspace: 'packages/no-scripts',
         packageName: '@fixture/no-scripts',
-        missingScripts: ['test', 'test:coverage'],
+        invalidScripts: ['test', 'test:coverage'],
       },
     ]);
   });
