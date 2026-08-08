@@ -1,403 +1,437 @@
+#!/usr/bin/env tsx
 /**
- * Migration Safety Check
+ * D1 migration safety check.
  *
- * Scans all D1 migration files and blocks dangerous patterns that can cause
- * production data loss. This check runs in CI and blocks merge.
- *
- * What it catches:
- *
- * 1. DROP TABLE on any table that is a parent in an ON DELETE CASCADE
- *    foreign key relationship. Dropping such a table can wipe all rows
- *    in child tables — even with PRAGMA foreign_keys = OFF in some
- *    D1 execution contexts.
- *
- * 2. Table recreation patterns (CREATE new, copy, DROP old, RENAME) that
- *    target FK parent tables. The "safe" SQLite pattern for altering columns
- *    is catastrophically unsafe when the table has CASCADE children.
- *
- * 3. TRUNCATE / DELETE FROM without WHERE on FK parent tables.
- *
- * 4. UPDATE without WHERE on FK parent tables (can corrupt all rows
- *    and trigger CASCADE side effects depending on triggers).
- *
- * 5. PRAGMA foreign_keys = OFF without a corresponding ON — disabling
- *    FK enforcement is a red flag that usually precedes table recreation.
- *
- * 6. Any DROP TABLE on ANY table (even non-CASCADE parents) in migrations
- *    numbered higher than the last allowlisted migration. New migrations
- *    should never drop tables — only add columns or create new tables.
- *
- * Why this exists:
- * Migration 0047 dropped and recreated the `projects` table. The `triggers`,
- * `tasks`, `agent_profiles`, `deployment_credentials`, and other tables had
- * ON DELETE CASCADE referencing projects. The DROP TABLE cascaded and wiped
- * all data from every child table in production.
- *
- * See: docs/notes/2026-04-25-migration-cascade-data-loss-postmortem.md
+ * Parses complete SQL statements before enforcing the established destructive
+ * migration rules. This prevents physical newlines, comments, quoted
+ * identifiers, strings, and trigger bodies from bypassing or confusing the
+ * pre-apply guard.
  */
 
 import { readFileSync, readdirSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { basename, join, resolve } from 'node:path';
 
-const MIGRATIONS_DIR = resolve(
-  import.meta.dirname,
-  '../../apps/api/src/db/migrations'
-);
+import {
+  isIdentifier,
+  isKeyword,
+  logicalSqlStatements,
+  type SqlStatement,
+  type SqlToken,
+  splitSqlStatements,
+  tokenizeSql,
+} from './sql-migration-parser';
 
-/**
- * Allowlist for migrations that already ran in production before this check existed.
- * These are grandfathered — they cannot be un-run, and blocking CI on them is pointless.
- * NEVER add new migrations to this list. If a new migration triggers a violation,
- * fix the migration — do not allowlist it.
- *
- * Format: "filename:line" matching the violation output.
- */
+const MIGRATIONS_DIR = resolve(import.meta.dirname, '../../apps/api/src/db/migrations');
+const DEFAULT_MIGRATION_DIRS = [MIGRATIONS_DIR, join(MIGRATIONS_DIR, 'observability')];
+
+/** Historical violations that ran before the guard existed. Never add new entries. */
 const ALLOWLISTED_VIOLATIONS = new Set([
-  // Ran before any child tables existed — no actual cascade risk at the time.
-  // These are safe on fresh forks (tables are empty when they run).
   '0002_betterauth_tables.sql:27',
   '0003_users_timestamp_to_integer.sql:39',
   '0037_project_file_directories.sql:44',
-  // NOTE: 0047 was rewritten to use safe ALTER TABLE ADD COLUMN.
-  // No longer needs an allowlist entry.
 ]);
 
-interface ForeignKey {
+export interface ForeignKey {
   childTable: string;
   parentTable: string;
   onDelete: string;
   migrationFile: string;
 }
 
-interface Violation {
+export interface Violation {
   file: string;
   line: number;
   pattern: string;
   message: string;
 }
 
-/**
- * Parse all migration files and extract FK relationships.
- */
-function extractForeignKeys(migrationsDir: string): ForeignKey[] {
-  const fks: ForeignKey[] = [];
-  const files = readdirSync(migrationsDir)
-    .filter((f) => f.endsWith('.sql'))
-    .sort();
-
-  for (const file of files) {
-    const content = readFileSync(join(migrationsDir, file), 'utf-8');
-
-    // Find CREATE TABLE blocks and extract their table name + FK references
-    // Match both inline column FKs and table-level FOREIGN KEY constraints
-    const createTableRegex =
-      /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?(\w+)\s*\(([\s\S]*?)\);/gi;
-    let createMatch;
-    while ((createMatch = createTableRegex.exec(content)) !== null) {
-      const tableName = createMatch[1];
-      const tableBody = createMatch[2];
-
-      // Skip _new/_tmp tables — they're intermediate recreation targets
-      if (tableName.endsWith('_new') || tableName.endsWith('_tmp')) continue;
-
-      // Inline column FK: REFERENCES parent_table(col) ON DELETE CASCADE
-      const inlineFkRegex =
-        /REFERENCES\s+(\w+)\s*\([^)]+\)\s+ON\s+DELETE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)/gi;
-      let fkMatch;
-      while ((fkMatch = inlineFkRegex.exec(tableBody)) !== null) {
-        fks.push({
-          childTable: tableName,
-          parentTable: fkMatch[1],
-          onDelete: fkMatch[2].toUpperCase(),
-          migrationFile: file,
-        });
-      }
-
-      // Table-level: FOREIGN KEY (col) REFERENCES parent_table(col) ON DELETE CASCADE
-      const tableFkRegex =
-        /FOREIGN\s+KEY\s*\([^)]+\)\s+REFERENCES\s+(\w+)\s*\([^)]+\)\s+ON\s+DELETE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)/gi;
-      let tableFkMatch;
-      while ((tableFkMatch = tableFkRegex.exec(tableBody)) !== null) {
-        fks.push({
-          childTable: tableName,
-          parentTable: tableFkMatch[1],
-          onDelete: tableFkMatch[2].toUpperCase(),
-          migrationFile: file,
-        });
-      }
-    }
-
-    // Also catch ALTER TABLE ... ADD COLUMN ... REFERENCES ... ON DELETE CASCADE
-    const alterFkRegex =
-      /ALTER\s+TABLE\s+(\w+)\s+ADD\s+(?:COLUMN\s+)?\w+[^;]*REFERENCES\s+(\w+)\s*\([^)]+\)\s+ON\s+DELETE\s+(CASCADE|SET\s+NULL|SET\s+DEFAULT|RESTRICT|NO\s+ACTION)/gi;
-    let alterMatch;
-    while ((alterMatch = alterFkRegex.exec(content)) !== null) {
-      fks.push({
-        childTable: alterMatch[1],
-        parentTable: alterMatch[2],
-        onDelete: alterMatch[3].toUpperCase(),
-        migrationFile: file,
-      });
-    }
-  }
-
-  return fks;
+export interface MigrationSafetyReport {
+  foreignKeys: ForeignKey[];
+  cascadeMap: Map<string, { childTable: string; migrationFile: string }[]>;
+  violations: Violation[];
+  allowlistedViolations: Violation[];
+  newViolations: Violation[];
 }
 
-/**
- * Build a map of parent table -> child tables with CASCADE deletes.
- */
-function buildCascadeMap(
-  fks: ForeignKey[]
-): Map<string, { childTable: string; migrationFile: string }[]> {
-  const cascadeMap = new Map<
-    string,
-    { childTable: string; migrationFile: string }[]
-  >();
+interface ParsedMigration {
+  file: string;
+  statements: SqlStatement[];
+}
 
-  for (const fk of fks) {
-    if (fk.onDelete === 'CASCADE') {
-      const existing = cascadeMap.get(fk.parentTable) ?? [];
-      existing.push({
-        childTable: fk.childTable,
-        migrationFile: fk.migrationFile,
+interface ParsedIdentifier {
+  name: string;
+  next: number;
+}
+
+function normalizeIdentifier(value: string): string {
+  return value.toLowerCase();
+}
+
+function parseIdentifier(tokens: SqlToken[], start: number): ParsedIdentifier | undefined {
+  const first = tokens[start];
+  if (!isIdentifier(first)) return undefined;
+
+  let name = normalizeIdentifier(first.value);
+  let next = start + 1;
+  while (
+    tokens[next]?.kind === 'symbol' &&
+    tokens[next]?.value === '.' &&
+    isIdentifier(tokens[next + 1])
+  ) {
+    name = normalizeIdentifier(tokens[next + 1]?.value ?? '');
+    next += 2;
+  }
+  return { name, next };
+}
+
+function loadMigrations(migrationDirs: string[]): ParsedMigration[] {
+  const migrations: ParsedMigration[] = [];
+  for (const dir of migrationDirs) {
+    for (const file of readdirSync(dir)
+      .filter((entry) => entry.endsWith('.sql'))
+      .sort()) {
+      const content = readFileSync(join(dir, file), 'utf8');
+      migrations.push({
+        file: basename(file),
+        statements: splitSqlStatements(tokenizeSql(content, file), file),
       });
-      cascadeMap.set(fk.parentTable, existing);
     }
   }
+  return migrations;
+}
 
+function tableDefinition(
+  statement: SqlStatement
+): { table: string; referencesStart: number } | null {
+  const tokens = statement.tokens;
+  if (isKeyword(tokens[0], 'create') && isKeyword(tokens[1], 'table')) {
+    let index = 2;
+    if (
+      isKeyword(tokens[index], 'if') &&
+      isKeyword(tokens[index + 1], 'not') &&
+      isKeyword(tokens[index + 2], 'exists')
+    ) {
+      index += 3;
+    }
+    const identifier = parseIdentifier(tokens, index);
+    return identifier ? { table: identifier.name, referencesStart: identifier.next } : null;
+  }
+
+  if (isKeyword(tokens[0], 'alter') && isKeyword(tokens[1], 'table')) {
+    const identifier = parseIdentifier(tokens, 2);
+    return identifier ? { table: identifier.name, referencesStart: identifier.next } : null;
+  }
+  return null;
+}
+
+function findOnDeleteAction(tokens: SqlToken[], start: number): string | undefined {
+  let depth = 0;
+  for (let index = start; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token?.kind === 'symbol') {
+      if (token.value === '(') depth += 1;
+      else if (token.value === ')') depth = Math.max(0, depth - 1);
+      else if (token.value === ',' && depth === 0) return undefined;
+    }
+    if (depth !== 0 || !isKeyword(token, 'on') || !isKeyword(tokens[index + 1], 'delete')) {
+      continue;
+    }
+
+    const action = tokens[index + 2];
+    if (isKeyword(action, 'cascade') || isKeyword(action, 'restrict')) {
+      return action.value.toUpperCase();
+    }
+    if (
+      (isKeyword(action, 'set') &&
+        (isKeyword(tokens[index + 3], 'null') || isKeyword(tokens[index + 3], 'default'))) ||
+      (isKeyword(action, 'no') && isKeyword(tokens[index + 3], 'action'))
+    ) {
+      return `${action.value} ${tokens[index + 3]?.value}`.toUpperCase();
+    }
+    return undefined;
+  }
+  return undefined;
+}
+
+function extractForeignKeys(migrations: ParsedMigration[]): ForeignKey[] {
+  const foreignKeys: ForeignKey[] = [];
+  for (const migration of migrations) {
+    for (const statement of migration.statements) {
+      const definition = tableDefinition(statement);
+      if (!definition || definition.table.endsWith('_new') || definition.table.endsWith('_tmp')) {
+        continue;
+      }
+
+      for (let index = definition.referencesStart; index < statement.tokens.length; index += 1) {
+        if (!isKeyword(statement.tokens[index], 'references')) continue;
+        const parent = parseIdentifier(statement.tokens, index + 1);
+        if (!parent) continue;
+        const onDelete = findOnDeleteAction(statement.tokens, parent.next);
+        if (!onDelete) continue;
+        foreignKeys.push({
+          childTable: definition.table,
+          parentTable: parent.name,
+          onDelete,
+          migrationFile: migration.file,
+        });
+      }
+    }
+  }
+  return foreignKeys;
+}
+
+function buildCascadeMap(
+  foreignKeys: ForeignKey[]
+): Map<string, { childTable: string; migrationFile: string }[]> {
+  const cascadeMap = new Map<string, { childTable: string; migrationFile: string }[]>();
+  for (const foreignKey of foreignKeys) {
+    if (foreignKey.onDelete !== 'CASCADE') continue;
+    const children = cascadeMap.get(foreignKey.parentTable) ?? [];
+    children.push({
+      childTable: foreignKey.childTable,
+      migrationFile: foreignKey.migrationFile,
+    });
+    cascadeMap.set(foreignKey.parentTable, children);
+  }
   return cascadeMap;
 }
 
-/**
- * Scan migration files for dangerous DROP TABLE / DELETE FROM patterns
- * targeting FK parent tables.
- */
-function scanForViolations(
-  migrationsDir: string,
+function depthBefore(tokens: SqlToken[], end: number): number {
+  let depth = 0;
+  for (let index = 0; index < end; index += 1) {
+    const token = tokens[index];
+    if (token?.kind !== 'symbol') continue;
+    if (token.value === '(') depth += 1;
+    else if (token.value === ')') depth = Math.max(0, depth - 1);
+  }
+  return depth;
+}
+
+function hasWhereAtDepth(tokens: SqlToken[], start: number, requiredDepth: number): boolean {
+  let depth = depthBefore(tokens, start);
+  for (let index = start; index < tokens.length; index += 1) {
+    const token = tokens[index];
+    if (token?.kind === 'symbol') {
+      if (token.value === '(') depth += 1;
+      else if (token.value === ')') depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (depth === requiredDepth && isKeyword(token, 'where')) return true;
+  }
+  return false;
+}
+
+function isTemporaryTable(tableName: string): boolean {
+  return tableName.endsWith('_new') || tableName.endsWith('_tmp');
+}
+
+function scanClause(
+  file: string,
+  tokens: SqlToken[],
   cascadeMap: Map<string, { childTable: string; migrationFile: string }[]>
 ): Violation[] {
   const violations: Violation[] = [];
-  const files = readdirSync(migrationsDir)
-    .filter((f) => f.endsWith('.sql'))
-    .sort();
+  for (let index = 0; index < tokens.length; index += 1) {
+    const operation = tokens[index];
 
-  for (const file of files) {
-    const content = readFileSync(join(migrationsDir, file), 'utf-8');
-    const lines = content.split('\n');
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const lineNum = i + 1;
-
-      // Skip comments
-      if (line.trim().startsWith('--')) continue;
-
-      // Check for DROP TABLE targeting a CASCADE parent
-      const dropMatch = line.match(
-        /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)/i
-      );
-      if (dropMatch) {
-        const tableName = dropMatch[1];
-
-        // Allow dropping _new/_tmp tables (cleanup of failed recreation)
-        if (tableName.endsWith('_new') || tableName.endsWith('_tmp')) continue;
-
-        const children = cascadeMap.get(tableName);
-        if (children && children.length > 0) {
-          const childList = children
-            .map((c) => `${c.childTable} (from ${c.migrationFile})`)
-            .join(', ');
-          violations.push({
-            file,
-            line: lineNum,
-            pattern: 'DROP TABLE on CASCADE parent',
-            message:
-              `DROP TABLE ${tableName} will CASCADE-delete all rows in: ${childList}. ` +
-              `Use ALTER TABLE ADD COLUMN instead, or if table recreation is unavoidable, ` +
-              `manually re-parent child tables before dropping. ` +
-              `See .claude/rules/31-migration-safety.md for safe alternatives.`,
-          });
-        }
+    if (isKeyword(operation, 'drop') && isKeyword(tokens[index + 1], 'table')) {
+      let targetIndex = index + 2;
+      if (isKeyword(tokens[targetIndex], 'if') && isKeyword(tokens[targetIndex + 1], 'exists')) {
+        targetIndex += 2;
       }
-
-      // Check for DELETE FROM without WHERE on a CASCADE parent
-      const deleteMatch = line.match(/DELETE\s+FROM\s+(\w+)/i);
-      if (deleteMatch) {
-        const tableName = deleteMatch[1];
-        const children = cascadeMap.get(tableName);
-
-        // Check if there's a WHERE clause on this line or the next few lines
-        const contextLines = lines.slice(i, Math.min(i + 3, lines.length)).join(' ');
-        if (children && children.length > 0 && !/WHERE/i.test(contextLines)) {
-          const childList = children.map((c) => c.childTable).join(', ');
-          violations.push({
-            file,
-            line: lineNum,
-            pattern: 'DELETE FROM without WHERE on CASCADE parent',
-            message:
-              `DELETE FROM ${tableName} without WHERE will CASCADE-delete all rows in: ${childList}. ` +
-              `Add a WHERE clause or reconsider the migration.`,
-          });
-        }
-      }
-
-      // Check for TRUNCATE (SQLite doesn't have TRUNCATE, but catch it anyway)
-      const truncateMatch = line.match(/TRUNCATE\s+(?:TABLE\s+)?(\w+)/i);
-      if (truncateMatch) {
-        const tableName = truncateMatch[1];
-        const children = cascadeMap.get(tableName);
-        if (children && children.length > 0) {
-          violations.push({
-            file,
-            line: lineNum,
-            pattern: 'TRUNCATE on CASCADE parent',
-            message: `TRUNCATE ${tableName} will delete all rows and cascade to child tables.`,
-          });
-        }
-      }
-
-      // Check for UPDATE without WHERE on a CASCADE parent
-      const updateMatch = line.match(/UPDATE\s+(\w+)\s+SET\b/i);
-      if (updateMatch) {
-        const tableName = updateMatch[1];
-        const children = cascadeMap.get(tableName);
-        const contextLines = lines
-          .slice(i, Math.min(i + 3, lines.length))
-          .join(' ');
-        if (children && children.length > 0 && !/WHERE/i.test(contextLines)) {
-          violations.push({
-            file,
-            line: lineNum,
-            pattern: 'UPDATE without WHERE on CASCADE parent',
-            message:
-              `UPDATE ${tableName} SET without WHERE modifies all rows in a CASCADE parent. ` +
-              `Add a WHERE clause to scope the update.`,
-          });
-        }
-      }
-
-      // Check for PRAGMA foreign_keys = OFF (red flag for table recreation)
-      if (/PRAGMA\s+foreign_keys\s*=\s*(OFF|0|FALSE)/i.test(line)) {
+      const target = parseIdentifier(tokens, targetIndex);
+      if (!target || isTemporaryTable(target.name)) continue;
+      const children = cascadeMap.get(target.name);
+      if (children && children.length > 0) {
+        const childList = children
+          .map((child) => `${child.childTable} (from ${child.migrationFile})`)
+          .join(', ');
         violations.push({
           file,
-          line: lineNum,
-          pattern: 'PRAGMA foreign_keys = OFF',
+          line: operation?.line ?? 1,
+          pattern: 'DROP TABLE on CASCADE parent',
           message:
-            'Disabling foreign key enforcement is dangerous — it usually precedes ' +
-            'a DROP TABLE / table recreation that bypasses CASCADE checks. ' +
-            'D1 may not honor this PRAGMA across statement boundaries. ' +
-            'Use ALTER TABLE ADD COLUMN instead of table recreation.',
+            `DROP TABLE ${target.name} will CASCADE-delete all rows in: ${childList}. ` +
+            'Use ALTER TABLE ADD COLUMN instead, or if table recreation is unavoidable, ' +
+            'manually re-parent child tables before dropping. ' +
+            'See .claude/rules/31-migration-safety.md for safe alternatives.',
         });
-      }
-
-      // Check for DROP TABLE on ANY table in new migrations (post-allowlist era).
-      // Even non-CASCADE parents should not be dropped in new migrations.
-      const anyDropMatch = line.match(
-        /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?(\w+)/i
-      );
-      if (anyDropMatch) {
-        const tableName = anyDropMatch[1];
-        if (
-          !tableName.endsWith('_new') &&
-          !tableName.endsWith('_tmp') &&
-          !cascadeMap.has(tableName) // already caught by the CASCADE check above
-        ) {
-          // Only flag if this is a "new era" migration (after 0047)
-          const migNum = parseInt(file.match(/^(\d+)/)?.[1] ?? '0', 10);
-          if (migNum > 47) {
-            violations.push({
-              file,
-              line: lineNum,
-              pattern: 'DROP TABLE in new migration',
-              message:
-                `DROP TABLE ${tableName} — new migrations should never drop tables. ` +
-                `Even tables without CASCADE children may have data that cannot be recovered. ` +
-                `Use ALTER TABLE ADD COLUMN or CREATE TABLE IF NOT EXISTS.`,
-            });
-          }
+      } else {
+        const migrationNumber = Number.parseInt(file.match(/^(\d+)/)?.[1] ?? '0', 10);
+        if (migrationNumber > 47) {
+          violations.push({
+            file,
+            line: operation?.line ?? 1,
+            pattern: 'DROP TABLE in new migration',
+            message:
+              `DROP TABLE ${target.name} — new migrations should never drop tables. ` +
+              'Even tables without CASCADE children may have data that cannot be recovered. ' +
+              'Use ALTER TABLE ADD COLUMN or CREATE TABLE IF NOT EXISTS.',
+          });
         }
       }
+      continue;
+    }
+
+    if (isKeyword(operation, 'delete') && isKeyword(tokens[index + 1], 'from')) {
+      const target = parseIdentifier(tokens, index + 2);
+      const children = target ? cascadeMap.get(target.name) : undefined;
+      const operationDepth = depthBefore(tokens, index);
+      if (
+        target &&
+        children &&
+        children.length > 0 &&
+        !hasWhereAtDepth(tokens, target.next, operationDepth)
+      ) {
+        violations.push({
+          file,
+          line: operation?.line ?? 1,
+          pattern: 'DELETE FROM without WHERE on CASCADE parent',
+          message:
+            `DELETE FROM ${target.name} without WHERE will CASCADE-delete all rows in: ` +
+            `${children.map((child) => child.childTable).join(', ')}. ` +
+            'Add a WHERE clause or reconsider the migration.',
+        });
+      }
+      continue;
+    }
+
+    if (isKeyword(operation, 'truncate')) {
+      const targetIndex = isKeyword(tokens[index + 1], 'table') ? index + 2 : index + 1;
+      const target = parseIdentifier(tokens, targetIndex);
+      const children = target ? cascadeMap.get(target.name) : undefined;
+      if (target && children && children.length > 0) {
+        violations.push({
+          file,
+          line: operation?.line ?? 1,
+          pattern: 'TRUNCATE on CASCADE parent',
+          message: `TRUNCATE ${target.name} will delete all rows and cascade to child tables.`,
+        });
+      }
+      continue;
+    }
+
+    if (isKeyword(operation, 'update')) {
+      const target = parseIdentifier(tokens, index + 1);
+      if (!target || !isKeyword(tokens[target.next], 'set')) continue;
+      const children = cascadeMap.get(target.name);
+      const operationDepth = depthBefore(tokens, index);
+      if (
+        children &&
+        children.length > 0 &&
+        !hasWhereAtDepth(tokens, target.next + 1, operationDepth)
+      ) {
+        violations.push({
+          file,
+          line: operation?.line ?? 1,
+          pattern: 'UPDATE without WHERE on CASCADE parent',
+          message:
+            `UPDATE ${target.name} SET without WHERE modifies all rows in a CASCADE parent. ` +
+            'Add a WHERE clause to scope the update.',
+        });
+      }
+      continue;
+    }
+
+    if (
+      isKeyword(operation, 'pragma') &&
+      isKeyword(tokens[index + 1], 'foreign_keys') &&
+      tokens[index + 2]?.kind === 'symbol' &&
+      tokens[index + 2]?.value === '=' &&
+      (isKeyword(tokens[index + 3], 'off') ||
+        isKeyword(tokens[index + 3], 'false') ||
+        tokens[index + 3]?.value === '0')
+    ) {
+      violations.push({
+        file,
+        line: operation?.line ?? 1,
+        pattern: 'PRAGMA foreign_keys = OFF',
+        message:
+          'Disabling foreign key enforcement is dangerous — it usually precedes a DROP TABLE / ' +
+          'table recreation that bypasses CASCADE checks. D1 may not honor this PRAGMA across ' +
+          'statement boundaries. Use ALTER TABLE ADD COLUMN instead of table recreation.',
+      });
     }
   }
-
   return violations;
 }
 
-function main(): void {
-  // Also check the observability migrations subdirectory
-  const migrationDirs = [MIGRATIONS_DIR];
-  const obsMigrationsDir = join(MIGRATIONS_DIR, 'observability');
-  try {
-    readdirSync(obsMigrationsDir);
-    migrationDirs.push(obsMigrationsDir);
-  } catch {
-    // observability subdirectory may not exist
+function scanForViolations(
+  migrations: ParsedMigration[],
+  cascadeMap: Map<string, { childTable: string; migrationFile: string }[]>
+): Violation[] {
+  const violations: Violation[] = [];
+  for (const migration of migrations) {
+    for (const statement of migration.statements) {
+      for (const clause of logicalSqlStatements(statement)) {
+        violations.push(...scanClause(migration.file, clause, cascadeMap));
+      }
+    }
   }
+  return violations;
+}
 
-  // Collect all FK relationships across all migration directories
-  const allFks: ForeignKey[] = [];
-  for (const dir of migrationDirs) {
-    allFks.push(...extractForeignKeys(dir));
-  }
+export function checkMigrationSafety(migrationDirs: string[]): MigrationSafetyReport {
+  const migrations = loadMigrations(migrationDirs);
+  const foreignKeys = extractForeignKeys(migrations);
+  const cascadeMap = buildCascadeMap(foreignKeys);
+  const violations = scanForViolations(migrations, cascadeMap);
+  const allowlistedViolations = violations.filter((violation) =>
+    ALLOWLISTED_VIOLATIONS.has(`${violation.file}:${violation.line}`)
+  );
+  const newViolations = violations.filter(
+    (violation) => !ALLOWLISTED_VIOLATIONS.has(`${violation.file}:${violation.line}`)
+  );
+  return { foreignKeys, cascadeMap, violations, allowlistedViolations, newViolations };
+}
 
-  const cascadeMap = buildCascadeMap(allFks);
-
-  // Report the FK cascade map for visibility
+function printReport(report: MigrationSafetyReport): void {
   console.log('Foreign key CASCADE relationships detected:');
-  for (const [parent, children] of cascadeMap) {
-    const childNames = [...new Set(children.map((c) => c.childTable))].join(
-      ', '
+  for (const [parent, children] of report.cascadeMap) {
+    console.log(
+      `  ${parent} -> [${[...new Set(children.map((child) => child.childTable))].join(', ')}]`
     );
-    console.log(`  ${parent} -> [${childNames}]`);
   }
   console.log('');
 
-  // Scan for violations
-  const allViolations: Violation[] = [];
-  for (const dir of migrationDirs) {
-    allViolations.push(...scanForViolations(dir, cascadeMap));
-  }
-
-  // Separate allowlisted (already-applied) from new violations
-  const newViolations = allViolations.filter(
-    (v) => !ALLOWLISTED_VIOLATIONS.has(`${v.file}:${v.line}`)
-  );
-  const allowlistedCount = allViolations.length - newViolations.length;
-
-  if (allowlistedCount > 0) {
+  if (report.allowlistedViolations.length > 0) {
     console.log(
-      `${allowlistedCount} allowlisted violation(s) in already-applied migrations (grandfathered).`
+      `${report.allowlistedViolations.length} allowlisted violation(s) in already-applied migrations (grandfathered).`
     );
   }
-
-  if (newViolations.length > 0) {
-    console.error(
-      `\nMigration safety check FAILED — ${newViolations.length} NEW violation(s):\n`
+  if (report.newViolations.length === 0) {
+    console.log(
+      `Migration safety check passed. ${report.foreignKeys.length} FK relationships scanned, 0 violations.`
     );
-    for (const v of newViolations) {
-      console.error(`  ${v.file}:${v.line}`);
-      console.error(`  Pattern: ${v.pattern}`);
-      console.error(`  ${v.message}`);
-      console.error('');
-    }
-    console.error(
-      'These patterns have caused production data loss. See:'
-    );
-    console.error(
-      '  docs/notes/2026-04-25-migration-cascade-data-loss-postmortem.md'
-    );
-    console.error('  .claude/rules/31-migration-safety.md\n');
-    process.exit(1);
+    return;
   }
 
-  console.log(
-    `Migration safety check passed. ${allFks.length} FK relationships scanned, 0 violations.`
+  console.error(
+    `\nMigration safety check FAILED — ${report.newViolations.length} NEW violation(s):\n`
   );
+  for (const violation of report.newViolations) {
+    console.error(`  ${violation.file}:${violation.line}`);
+    console.error(`  Pattern: ${violation.pattern}`);
+    console.error(`  ${violation.message}\n`);
+  }
+  console.error('These patterns have caused production data loss. See:');
+  console.error('  .claude/rules/31-migration-safety.md\n');
 }
 
-// Only run main when executed directly (not when imported for testing).
-const isDirectExecution = process.argv[1]?.endsWith('check-migration-safety.ts');
-if (isDirectExecution) {
-  main();
+function main(): void {
+  const migrationDirs =
+    process.argv.length > 2
+      ? process.argv.slice(2).map((dir) => resolve(dir))
+      : DEFAULT_MIGRATION_DIRS;
+  try {
+    const report = checkMigrationSafety(migrationDirs);
+    printReport(report);
+    if (report.newViolations.length > 0) process.exitCode = 1;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(`\nMigration safety check FAILED — SQL parse error:\n\n  ${message}\n`);
+    process.exitCode = 1;
+  }
 }
+
+if (process.argv[1]?.endsWith('check-migration-safety.ts')) main();
