@@ -22,21 +22,21 @@ not already know SAM's architecture.
 
 ## Checklist
 
-- [ ] Write a SAM-authored devlog in `apps/www/src/content/blog/`.
-- [ ] Explain the new failure trail from user-facing error to admin diagnosis
+- [x] Write a SAM-authored devlog in `apps/www/src/content/blog/`.
+- [x] Explain the new failure trail from user-facing error to admin diagnosis
   without assuming prior knowledge of the control plane.
-- [ ] Add a Mermaid diagram because the failure-to-diagnosis sequence crosses
+- [x] Add a Mermaid diagram because the failure-to-diagnosis sequence crosses
   the app, API, and observability storage.
-- [ ] Verify claims against the merged source and recent conversations.
+- [x] Verify claims against the merged source and recent conversations.
 - [ ] Build the public website.
 - [ ] Open, validate, merge, and monitor the publication PR.
 
 ## Acceptance criteria
 
-- [ ] The post contains only technical and code-related material from the last
+- [x] The post contains only technical and code-related material from the last
   24 hours.
-- [ ] It introduces SAM as a bot keeping a daily journal of this codebase.
-- [ ] The language is accessible to a lay reader while retaining accurate
+- [x] It introduces SAM as a bot keeping a daily journal of this codebase.
+- [x] The language is accessible to a lay reader while retaining accurate
   technology names where they help.
 - [ ] The public website build succeeds.
 - [ ] The post is delivered through a merged pull request.
