@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { provisionNode } from '../../../src/services/nodes';
 
+const { persistError } = vi.hoisted(() => ({ persistError: vi.fn() }));
+
 // Records the write operations the drizzle mock receives so tests can assert
 // whether the failed node row was DELETED (capacity) or UPDATEd to status:'error'
 // (non-capacity / legacy).
@@ -67,7 +69,7 @@ vi.mock('../../../src/services/dns', () => ({
 }));
 
 vi.mock('../../../src/services/observability', () => ({
-  persistError: vi.fn().mockResolvedValue(undefined),
+  persistError: (...args: unknown[]) => persistError(...args),
 }));
 
 function capacityError(): ProviderError {
@@ -106,6 +108,7 @@ beforeEach(() => {
   });
   createProviderForUser.mockResolvedValue({
     provider: { createVM },
+    providerName: 'hetzner',
     credentialSource: 'user',
   });
   createVM.mockResolvedValue({ id: 'provider-vm-1', ip: '203.0.113.10' });
@@ -226,6 +229,61 @@ describe('provisionNode backend DNS records', () => {
 });
 
 describe('provisionNode rethrowProviderError', () => {
+  it('forwards optional cancellation and performs no D1, DNS, or observability work after abort', async () => {
+    nodeRows.length = 0;
+    nodeRows.push({
+      id: 'node-1',
+      userId: 'user-1',
+      credentialAttributionUserId: 'user-1',
+      credentialAttributionProjectId: null,
+      credentialAttributionSource: 'user',
+      credentialSource: 'user',
+      name: 'Cancellation capability node',
+      status: 'creating',
+      vmSize: 'large',
+      vmLocation: 'fsn1',
+      cloudProvider: 'hetzner',
+      providerInstanceId: null,
+      runtime: 'vm',
+      nodeRole: 'workspace',
+      nodeMode: 'shared',
+      heartbeatStaleAfterSeconds: 120,
+      healthStatus: 'stale',
+      ipAddress: null,
+      backendDnsRecordId: null,
+      errorMessage: null,
+      createdAt: '2026-08-08T00:00:00.000Z',
+      updatedAt: '2026-08-08T00:00:00.000Z',
+    });
+    const controller = new AbortController();
+    const callerReason = new ProviderError('hetzner', 409, 'caller cancelled provisioning');
+    let receivedSignal: AbortSignal | undefined;
+    let operationCountAtAbort = -1;
+    createVM.mockImplementationOnce(
+      async (_config: unknown, context?: { signal?: AbortSignal }) => {
+        receivedSignal = context?.signal;
+        operationCountAtAbort = ops.length;
+        controller.abort(callerReason);
+        throw callerReason;
+      },
+    );
+
+    await expect(
+      provisionNode(
+        'node-1',
+        ENV,
+        undefined,
+        { signal: controller.signal } as never,
+      ),
+    ).rejects.toBe(callerReason);
+
+    expect(receivedSignal).toBe(controller.signal);
+    expect(operationCountAtAbort).toBeGreaterThanOrEqual(0);
+    expect(ops.slice(operationCountAtAbort)).toEqual([]);
+    expect(createNodeBackendDNSRecord).not.toHaveBeenCalled();
+    expect(persistError).not.toHaveBeenCalled();
+  });
+
   it('deletes the failed node row and re-throws on transient capacity exhaustion', async () => {
     const err = capacityError();
     createVM.mockRejectedValue(err);

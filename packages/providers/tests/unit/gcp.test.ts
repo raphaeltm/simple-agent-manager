@@ -7,7 +7,7 @@ import {
   DEFAULT_GCP_MAX_LIST_PAGES,
   GcpProvider,
 } from '../../src/gcp';
-import type { VMConfig } from '../../src/types';
+import { ProviderError, type VMConfig } from '../../src/types';
 import { expectDefined, fetchCall, jsonBody, testCidr, testIpv4 } from './test-helpers';
 
 
@@ -107,6 +107,138 @@ describe('GcpProvider', () => {
   });
 
   describe('createVM', () => {
+    const cancellationConfig: VMConfig = {
+      name: 'cancelled-vm',
+      size: 'small',
+      location: 'us-central1-a',
+      userData: '#cloud-config',
+    };
+
+    function successfulCreateResponse(url: string, init: RequestInit): Response {
+      const method = init.method ?? 'GET';
+      if (url.endsWith('/global/firewalls') && method === 'POST') {
+        return new Response(JSON.stringify({ error: { code: 409, message: 'already exists' } }), {
+          status: 409,
+        });
+      }
+      if (url.endsWith('/instances') && method === 'POST') {
+        return new Response(JSON.stringify({ name: 'instance-op', status: 'PENDING' }));
+      }
+      if (url.includes('/operations/')) {
+        return new Response(JSON.stringify({ name: 'instance-op', status: 'DONE' }));
+      }
+      if (url.includes('/instances/cancelled-vm')) {
+        return new Response(JSON.stringify(gcpInstance({ name: 'cancelled-vm' })));
+      }
+      return new Response(JSON.stringify({ items: {} }));
+    }
+
+    it('stops before provider HTTP when cancellation occurs inside the GCP token provider', async () => {
+      const controller = new AbortController();
+      const callerReason = new ProviderError('gcp', 503, 'caller cancelled token acquisition');
+      const ledger: string[] = [];
+      const tokenProvider = vi.fn(async (context?: { signal?: AbortSignal }) => {
+        ledger.push('token-provider');
+        controller.abort(callerReason);
+        if (context?.signal?.aborted) throw context.signal.reason;
+        return 'test-gcp-token';
+      });
+      const cancellationProvider = new GcpProvider(
+        'test-project',
+        tokenProvider,
+        'us-central1-a',
+      );
+      globalThis.fetch = vi.fn(async (url: string, init: RequestInit = {}) => {
+        ledger.push(`${init.method ?? 'GET'} ${url}`);
+        return successfulCreateResponse(url, init);
+      });
+
+      await expect(
+        cancellationProvider.createVM(
+          cancellationConfig,
+          { signal: controller.signal } as never,
+        ),
+      ).rejects.toBe(callerReason);
+
+      expect(ledger).toEqual(['token-provider']);
+    });
+
+    it('does not treat a 409-shaped caller cancellation as an existing firewall or start later mutations', async () => {
+      const controller = new AbortController();
+      const callerReason = new ProviderError('gcp', 409, 'caller cancelled after firewall creation');
+      const mutationLedger: string[] = [];
+      globalThis.fetch = vi.fn(async (url: string, init: RequestInit = {}) => {
+        const method = init.method ?? 'GET';
+        if (url.endsWith('/global/firewalls') && method === 'POST') {
+          const body = JSON.parse(String(init.body)) as { targetTags: string[] };
+          const mutation = body.targetTags.includes('sam-agent')
+            ? 'create-agent-firewall'
+            : 'create-app-firewall';
+          mutationLedger.push(mutation);
+          if (mutation === 'create-agent-firewall') {
+            return new Response(JSON.stringify({ name: 'firewall-op', status: 'PENDING' }));
+          }
+          return new Response(JSON.stringify({ error: { code: 409, message: 'already exists' } }), {
+            status: 409,
+          });
+        }
+        if (url.includes('/global/operations/firewall-op')) {
+          mutationLedger.push('poll-agent-firewall');
+          controller.abort(callerReason);
+          return new Response(JSON.stringify({ name: 'firewall-op', status: 'DONE' }));
+        }
+        if (url.endsWith('/instances') && method === 'POST') {
+          mutationLedger.push('create-instance');
+        }
+        return successfulCreateResponse(url, init);
+      });
+
+      await expect(
+        provider.createVM(cancellationConfig, { signal: controller.signal } as never),
+      ).rejects.toBe(callerReason);
+
+      expect(mutationLedger).toEqual([
+        'create-agent-firewall',
+        'poll-agent-firewall',
+      ]);
+    });
+
+    it('preserves a 503-shaped cancellation during instance polling and performs no later read', async () => {
+      const controller = new AbortController();
+      const callerReason = new ProviderError('gcp', 503, 'caller cancelled instance polling');
+      const requestLedger: string[] = [];
+      globalThis.fetch = vi.fn(async (url: string, init: RequestInit = {}) => {
+        const method = init.method ?? 'GET';
+        if (url.endsWith('/global/firewalls') && method === 'POST') {
+          const body = JSON.parse(String(init.body)) as { targetTags: string[] };
+          requestLedger.push(
+            body.targetTags.includes('sam-agent') ? 'agent-firewall' : 'app-firewall',
+          );
+        } else if (url.endsWith('/instances') && method === 'POST') {
+          requestLedger.push('instance-create');
+          return new Response(JSON.stringify({ name: 'instance-op', status: 'PENDING' }));
+        } else if (url.includes('/zones/us-central1-a/operations/instance-op')) {
+          requestLedger.push('instance-poll');
+          controller.abort(callerReason);
+          return new Response(JSON.stringify({ name: 'instance-op', status: 'DONE' }));
+        } else if (url.includes('/instances/cancelled-vm')) {
+          requestLedger.push('instance-read');
+        }
+        return successfulCreateResponse(url, init);
+      });
+
+      await expect(
+        provider.createVM(cancellationConfig, { signal: controller.signal } as never),
+      ).rejects.toBe(callerReason);
+
+      expect(requestLedger).toEqual([
+        'agent-firewall',
+        'app-firewall',
+        'instance-create',
+        'instance-poll',
+      ]);
+    });
+
     it('should call Compute Engine API with correct body', async () => {
       const mockInstance = {
         id: '12345',
