@@ -137,39 +137,14 @@ export class HetznerProvider implements Provider {
       try {
         return await this.attemptCreateWithPlacementFallback(config, sizeConfig, context);
       } catch (err) {
-        rethrowIfProviderRequestAborted(err, context);
-        if (err instanceof ProviderError && isTransientCapacityError(err)) {
-          lastCapacityError = err;
-          const delay = this.computeCapacityRetryDelay(capacityAttempt);
-          const isLastAttempt = capacityAttempt >= this.capacityRetryMaxAttempts - 1;
-          const wouldExceedBudget = Date.now() + delay > deadline;
-
-          if (isLastAttempt || wouldExceedBudget) {
-            throw new ProviderError(
-              this.name,
-              422,
-              `Capacity exhausted after ${capacityAttempt + 1} attempts for ` +
-                `server type ${sizeConfig.type} in ${config.location || this.datacenter}: ` +
-                err.message,
-              { cause: err, category: 'transient_capacity' }
-            );
-          }
-
-          this.logger.warn('hetzner transient capacity error; retrying createVM', {
-            delayMs: delay,
-            attempt: capacityAttempt + 1,
-            maxAttempts: this.capacityRetryMaxAttempts,
-            budgetRemainingMs: Math.max(0, deadline - Date.now()),
-            serverType: sizeConfig.type,
-            location: config.location || this.datacenter,
-            statusCode: err.statusCode,
-            providerCode: err.providerCode,
-          });
-
-          await providerDelay(delay, context);
-          continue;
-        }
-        throw err;
+        lastCapacityError = await this.retryAfterCapacityError(
+          err,
+          capacityAttempt,
+          deadline,
+          config,
+          sizeConfig,
+          context
+        );
       }
     }
 
@@ -177,6 +152,45 @@ export class HetznerProvider implements Provider {
     throw new ProviderError(this.name, undefined, 'Capacity retry loop exited unexpectedly', {
       cause: lastCapacityError,
     });
+  }
+
+  private async retryAfterCapacityError(
+    error: unknown,
+    attempt: number,
+    deadline: number,
+    config: VMConfig,
+    sizeConfig: SizeConfig,
+    context?: ProviderRequestContext
+  ): Promise<ProviderError> {
+    rethrowIfProviderRequestAborted(error, context);
+    if (!(error instanceof ProviderError) || !isTransientCapacityError(error)) throw error;
+
+    const delay = this.computeCapacityRetryDelay(attempt);
+    const isLastAttempt = attempt >= this.capacityRetryMaxAttempts - 1;
+    const wouldExceedBudget = Date.now() + delay > deadline;
+    if (isLastAttempt || wouldExceedBudget) {
+      throw new ProviderError(
+        this.name,
+        422,
+        `Capacity exhausted after ${attempt + 1} attempts for ` +
+          `server type ${sizeConfig.type} in ${config.location || this.datacenter}: ` +
+          error.message,
+        { cause: error, category: 'transient_capacity' }
+      );
+    }
+
+    this.logger.warn('hetzner transient capacity error; retrying createVM', {
+      delayMs: delay,
+      attempt: attempt + 1,
+      maxAttempts: this.capacityRetryMaxAttempts,
+      budgetRemainingMs: Math.max(0, deadline - Date.now()),
+      serverType: sizeConfig.type,
+      location: config.location || this.datacenter,
+      statusCode: error.statusCode,
+      providerCode: error.providerCode,
+    });
+    await providerDelay(delay, context);
+    return error;
   }
 
   /**
@@ -700,14 +714,7 @@ export class HetznerProvider implements Provider {
       }
       seenPages.add(page);
 
-      const params = new URLSearchParams(baseParams);
-      if (labelParts.length > 0) params.set('label_selector', labelParts.join(','));
-      if (page !== 1) params.set('page', String(page));
-      const queryString = params.toString();
-      const url =
-        queryString.length > 0
-          ? `${HETZNER_API_URL}/${resource}?${queryString}`
-          : `${HETZNER_API_URL}/${resource}`;
+      const url = this.buildHetznerListUrl(resource, baseParams, labelParts, page);
       const response = await providerFetch(
         this.name,
         url,
@@ -737,6 +744,21 @@ export class HetznerProvider implements Provider {
         category: 'invalid_config',
       }
     );
+  }
+
+  private buildHetznerListUrl(
+    resource: 'servers' | 'volumes',
+    baseParams: URLSearchParams,
+    labelParts: string[],
+    page: number
+  ): string {
+    const params = new URLSearchParams(baseParams);
+    if (labelParts.length > 0) params.set('label_selector', labelParts.join(','));
+    if (page !== 1) params.set('page', String(page));
+    const queryString = params.toString();
+    return queryString
+      ? `${HETZNER_API_URL}/${resource}?${queryString}`
+      : `${HETZNER_API_URL}/${resource}`;
   }
 
   private validateRequestedVolumeSize(sizeGb: number): void {
