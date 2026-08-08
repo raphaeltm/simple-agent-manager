@@ -3,21 +3,27 @@
 ## Provider Implementation
 
 ```typescript
-import { Provider, VMConfig, VMInstance } from './types';
+import type { Provider, ProviderRequestContext, VMConfig, VMInstance } from './types';
 
 export class MyProvider implements Provider {
-  async createVM(config: VMConfig): Promise<VMInstance> {
-    // Implementation
+  async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
+    // Propagate context through HTTP, waits, retries, polling, pagination, and helpers.
   }
 }
 ```
+
+Every public VM and volume operation accepts the optional `ProviderRequestContext`.
+Implementations must preserve the caller's exact cancellation reason and must not
+start retries, polling, helper requests, or resource mutations after cancellation.
 
 ## Adding a New Provider
 
 1. Create provider class in `packages/providers/src/`
 2. Implement `Provider` interface
 3. Export from `packages/providers/src/index.ts`
-4. Add unit tests
+4. Propagate the optional request context through every HTTP and orchestration boundary
+5. Add scenario tests for pre-cancel, in-flight cancel, timeout distinction, cleanup,
+   and zero post-cancel requests or mutations
 
 ## React Component Pattern
 

@@ -27,15 +27,18 @@ export function getMaxProviderErrorBodyChars(
 
 /**
  * Fetch wrapper for provider API calls.
- * Adds configurable timeout via AbortController and wraps errors into ProviderError.
+ * Composes caller-owned cancellation with a configurable internal timeout and
+ * keeps both active through response-body delivery. The first abort source wins.
  *
  * @param providerName - Provider identifier for error context
  * @param url - The URL to fetch
  * @param init - Standard RequestInit options
  * @param timeoutMs - Timeout in milliseconds (default 30s)
  * @param maxErrorBodyChars - Maximum provider error-body detail to include in the error message
+ * @param context - Optional caller lifecycle context whose signal remains authoritative
  * @returns The fetch Response
- * @throws ProviderError on HTTP errors, timeouts, and network failures
+ * @throws The caller's exact signal reason on caller cancellation; ProviderError on HTTP errors,
+ * timeouts, and network failures
  */
 export async function providerFetch(
   providerName: string,
