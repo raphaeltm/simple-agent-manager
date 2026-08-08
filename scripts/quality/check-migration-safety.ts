@@ -242,8 +242,21 @@ function isForeignKeysDisabledValue(
     .join('')
     .toLowerCase();
   if (['off', 'false', 'no'].includes(value)) return true;
-  if (/^[+-]?0x0+$/.test(value)) return true;
-  return /^[+-]?(?:0+(?:\.0*)?|\.0+)(?:e[+-]?\d+)?$/.test(value);
+  if (['on', 'true', 'yes'].includes(value)) return false;
+  if (/^\+?0x[0-9a-f]+$/.test(value)) return BigInt(value.replace(/^\+/, '')) === 0n;
+  if (/^-0x[0-9a-f]+$/.test(value)) return true;
+
+  // SQLite's PRAGMA boolean coercion uses the leading signed integer for
+  // numeric-looking values: 0.9/0e1/-1 disable, while 1.0/1e-1/2 enable.
+  if (/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/.test(value)) {
+    if (value.startsWith('-')) return true;
+    const leadingInteger = value.replace(/^\+/, '').match(/^\d+/)?.[0] ?? '0';
+    return BigInt(leadingInteger) === 0n;
+  }
+
+  // Unknown values also coerce to false in SQLite. Fail closed rather than
+  // allowing a new spelling to disable enforcement unnoticed.
+  return true;
 }
 
 function scanClause(

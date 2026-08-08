@@ -157,6 +157,9 @@ SET note = 'WHERE';`,
     ['negative signed zero', 'PRAGMA foreign_keys = -0;'],
     ['hexadecimal zero', 'PRAGMA foreign_keys = 0x0;'],
     ['decimal zero', 'PRAGMA foreign_keys = 0.0;'],
+    ['sub-one fraction', 'PRAGMA foreign_keys = 0.1;'],
+    ['negative integer', 'PRAGMA foreign_keys = -1;'],
+    ['zero mantissa', 'PRAGMA foreign_keys = 0e1;'],
   ])('blocks the %s foreign-key disabling PRAGMA form', (_name, sql) => {
     expectBlocked(sql, 'PRAGMA foreign_keys = OFF');
   });
@@ -165,7 +168,8 @@ SET note = 'WHERE';`,
     ['decimal one', 'PRAGMA foreign_keys = 1;'],
     ['hexadecimal one', 'PRAGMA foreign_keys = 0x1;'],
     ['positive one', 'PRAGMA foreign_keys = +1;'],
-    ['fraction', 'PRAGMA foreign_keys = 0.1;'],
+    ['decimal one', 'PRAGMA foreign_keys = 1.0;'],
+    ['positive exponent', 'PRAGMA foreign_keys = 1e-1;'],
   ])('allows the non-disabling %s PRAGMA form', (_name, sql) => {
     expect(checkDangerous(sql).newViolations).toEqual([]);
   });
