@@ -146,14 +146,15 @@ export function FailureCard({
       }}
     >
       {/* Compact summary — always visible */}
+      {/* No aria-label here: the accessible name must derive from the full
+          content (label, badges, explanation) so screen readers hear it all. */}
       <button
         type="button"
         onClick={() => setExpanded((v) => !v)}
         className="w-full text-left px-3 py-2.5 flex items-start gap-2 cursor-pointer bg-transparent border-0 hover:brightness-110 transition-all"
         aria-expanded={expanded}
-        aria-label={`${classification.label} — ${expanded ? 'collapse' : 'expand'} details`}
       >
-        <span className="shrink-0 mt-0.5" style={{ color: style.fg }}>
+        <span className="shrink-0 mt-0.5" aria-hidden="true" style={{ color: style.fg }}>
           <ClassificationIcon code={classification.code} />
         </span>
         <div className="flex-1 min-w-0">
@@ -179,7 +180,7 @@ export function FailureCard({
             {classification.explanation}
           </p>
         </div>
-        <span className="shrink-0 mt-0.5 text-fg-muted">
+        <span className="shrink-0 mt-0.5 text-fg-muted" aria-hidden="true">
           {expanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
         </span>
       </button>

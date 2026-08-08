@@ -81,7 +81,7 @@ export const LogViewer: FC = () => {
             value={filter.timeRange}
             onChange={(e) => setTimeRange(e.target.value as LogTimeRange)}
             aria-label="Time range"
-            className="rounded-sm bg-surface-secondary border border-border-default px-2 py-1 text-sm text-fg-primary"
+            className="rounded-sm bg-surface border border-border-default px-2 py-1 text-sm text-fg-primary"
           >
             {TIME_RANGE_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
@@ -117,7 +117,7 @@ export const LogViewer: FC = () => {
             value={scriptNameInput}
             onChange={(e) => setScriptNameInput(e.target.value.trim())}
             aria-label="Worker script name"
-            className="w-32 rounded-sm bg-surface-secondary border border-border-default px-2 py-1 text-sm text-fg-primary"
+            className="w-32 rounded-sm bg-surface border border-border-default px-2 py-1 text-sm text-fg-primary"
           />
 
           <div className="flex min-w-0 flex-1 gap-1">
@@ -128,7 +128,7 @@ export const LogViewer: FC = () => {
               onChange={(e) => setSearchInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleSearchSubmit()}
               aria-label="Search logs"
-              className="min-w-0 flex-1 rounded-sm bg-surface-secondary border border-border-default px-2 py-1 text-sm text-fg-primary"
+              className="min-w-0 flex-1 rounded-sm bg-surface border border-border-default px-2 py-1 text-sm text-fg-primary"
             />
             <Button size="sm" variant="secondary" onClick={handleApply}>
               Apply

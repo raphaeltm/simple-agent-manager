@@ -163,7 +163,7 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({
           {entry.incident && (
             <button
               type="button"
-              className="inline-flex items-center rounded-full bg-surface-secondary px-2 py-0.5 text-[0.7rem] font-medium text-fg-muted hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-primary transition-colors cursor-pointer"
+              className="inline-flex items-center rounded-full bg-surface px-2 py-0.5 text-[0.7rem] font-medium text-fg-muted hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent transition-colors cursor-pointer"
               aria-label={`Toggle incident details: ${entry.incident.status}`}
               aria-expanded={incidentExpanded}
               onClick={() => setIncidentExpanded(!incidentExpanded)}
@@ -183,7 +183,7 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({
         <div className="flex shrink-0 items-center gap-1 self-end sm:ml-auto sm:self-auto">
           <button
             type="button"
-            className="flex min-h-8 min-w-8 shrink-0 items-center justify-center rounded-sm text-fg-muted transition-colors hover:bg-control-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+            className="flex min-h-8 min-w-8 shrink-0 items-center justify-center rounded-sm text-fg-muted transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
             aria-label={copied ? 'Copied error as markdown' : 'Copy error as markdown'}
             title="Copy as markdown"
             onClick={handleCopyMarkdown}
@@ -206,7 +206,7 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({
           {hasDetails && (
             <button
               type="button"
-              className="flex min-h-8 min-w-8 shrink-0 items-center justify-center rounded-sm text-[0.7rem] text-fg-muted transition-colors hover:bg-control-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus"
+              className="flex min-h-8 min-w-8 shrink-0 items-center justify-center rounded-sm text-[0.7rem] text-fg-muted transition-colors hover:bg-surface-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               aria-label={expanded ? 'Hide error details' : 'Show error details'}
               aria-expanded={expanded}
               onClick={() => setExpanded(!expanded)}
@@ -233,7 +233,7 @@ export const ObservabilityLogEntry: FC<ObservabilityLogEntryProps> = ({
 
       {/* Incident details (expandable) */}
       {incidentExpanded && entry.incident && (
-        <div className="mt-2 rounded-sm border border-border-default bg-surface-secondary p-3">
+        <div className="mt-2 rounded-sm border border-border-default bg-surface p-3">
           <div className="text-xs font-medium text-fg-primary">Automatic VM evidence</div>
           <div className="mt-1 text-xs text-fg-muted">
             Status: {entry.incident.status}

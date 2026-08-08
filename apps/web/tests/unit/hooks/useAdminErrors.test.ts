@@ -214,4 +214,61 @@ describe('useAdminErrors', () => {
     // Should have been called multiple times
     expect(mockFetchAdminErrors.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
+
+  it.each([
+    ['setNodeId', 'nodeId', 'node-77'],
+    ['setWorkspaceId', 'workspaceId', 'ws-77'],
+    ['setTaskId', 'taskId', 'task-77'],
+    ['setSessionId', 'sessionId', 'sess-77'],
+    ['setUserId', 'userId', 'user-77'],
+  ] as const)('%s updates filter state and refetches with the ID param', async (setter, field, value) => {
+    const { result } = renderHook(() => useAdminErrors(), { wrapper });
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    act(() => {
+      (result.current[setter] as (v: string) => void)(value);
+    });
+
+    await waitFor(() => {
+      expect(result.current.filter[field]).toBe(value);
+      const lastCall = mockFetchAdminErrors.mock.calls.at(-1)?.[0] as Record<string, unknown>;
+      expect(lastCall[field]).toBe(value);
+    });
+  });
+
+  it('auto-refresh interval refetches in the background without clearing loaded errors', async () => {
+    const rows = [
+      { id: 'err-1', source: 'client', level: 'error', message: 'first', stack: null, context: null, userId: null, nodeId: null, workspaceId: null, ipAddress: null, userAgent: null, timestamp: '2026-02-14T12:00:00.000Z' },
+    ];
+    mockFetchAdminErrors.mockResolvedValue({ errors: rows, cursor: null, hasMore: false, total: 1 });
+
+    const { result } = renderHook(() => useAdminErrors(), { wrapper });
+    await waitFor(() => expect(result.current.errors).toHaveLength(1));
+    const callsBefore = mockFetchAdminErrors.mock.calls.length;
+
+    vi.useFakeTimers();
+    try {
+      act(() => {
+        result.current.setAutoRefresh(true);
+      });
+      await act(async () => {
+        vi.advanceTimersByTime(30_000);
+      });
+      expect(mockFetchAdminErrors.mock.calls.length).toBeGreaterThan(callsBefore);
+      // Already-loaded rows stay available throughout the background refetch.
+      expect(result.current.errors).toHaveLength(1);
+
+      // Disabling stops the interval.
+      act(() => {
+        result.current.setAutoRefresh(false);
+      });
+      const callsAfterDisable = mockFetchAdminErrors.mock.calls.length;
+      await act(async () => {
+        vi.advanceTimersByTime(90_000);
+      });
+      expect(mockFetchAdminErrors.mock.calls.length).toBe(callsAfterDisable);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

@@ -65,6 +65,13 @@ vi.mock('../../../src/hooks/useChatWebSocket', () => ({
   },
 }));
 
+// The FailureCard inside the floating header reads auth state for the
+// superadmin-only admin-errors deep link.
+vi.mock('../../../src/components/AuthProvider', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/components/AuthProvider')>()),
+  useAuth: () => ({ user: { id: 'user-1' }, isSuperadmin: false, isLoading: false }),
+}));
+
 vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@simple-agent-manager/acp-client')>();
   return {
@@ -1752,15 +1759,21 @@ describe('ProjectMessageView — inline idle indicator', () => {
       <ProjectMessageView projectId="proj-1" sessionId="sess-err" />,
     );
 
+    // The failure card classifies "Node provisioning failed" and renders the
+    // classification summary in the floating header.
     await waitFor(() => {
-      expect(screen.getByText('Task failed:')).toBeTruthy();
+      expect(screen.getByText('Provisioning failed')).toBeTruthy();
     });
 
-    // Error banner should have glass-chrome styling
-    const errorBanner = screen.getByText('Node provisioning failed').closest('div');
-    expect(errorBanner).toBeTruthy();
-    expect(errorBanner!.className).toContain('glass-chrome');
-    // glass-composited removed — its transform: translateZ(0) broke backdrop-filter blur
+    // The failure card wrapper keeps the glass-chrome header treatment
+    const errorWrapper = screen.getByText('Provisioning failed').closest('.glass-chrome');
+    expect(errorWrapper).toBeTruthy();
+
+    // Expanding the card reveals the raw error message
+    fireEvent.click(screen.getByRole('button', { name: /Provisioning failed/ }));
+    await waitFor(() => {
+      expect(screen.getByText('Node provisioning failed')).toBeTruthy();
+    });
 
     // SessionHeader should have hasContentBelow (no rounded-b-2xl)
     const headerEl = container.querySelector('.glass-chrome.border-t-0');

@@ -54,7 +54,7 @@ export function DiagnosticIncidentCard({ errorId, incident }: DiagnosticIncident
           <h2 className="text-sm font-semibold">Automatic VM evidence</h2>
           <p className="mt-1 break-words text-xs text-fg-muted">{statusCopy(incident)}</p>
         </div>
-        <span className="shrink-0 rounded-full bg-surface-secondary px-2.5 py-1 text-xs font-semibold uppercase text-fg-primary">
+        <span className="shrink-0 rounded-full bg-surface px-2.5 py-1 text-xs font-semibold uppercase text-fg-primary">
           {incident?.status ?? 'missing'}
         </span>
       </div>
@@ -107,7 +107,7 @@ export function DiagnosticIncidentCard({ errorId, incident }: DiagnosticIncident
               <summary className="cursor-pointer text-sm font-medium">
                 Safe evidence preview
               </summary>
-              <pre className="mt-2 max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-all rounded bg-surface-secondary p-3 text-xs">
+              <pre className="mt-2 max-h-72 max-w-full overflow-auto whitespace-pre-wrap break-all rounded bg-surface p-3 text-xs">
                 {JSON.stringify(incident.preview, null, 2)}
               </pre>
             </details>
@@ -135,7 +135,7 @@ export function DiagnosticIncidentCard({ errorId, incident }: DiagnosticIncident
         </div>
       )}
 
-      <div className="border-t border-border-default bg-surface-secondary px-4 py-3 text-xs text-fg-muted">
+      <div className="border-t border-border-default bg-surface px-4 py-3 text-xs text-fg-muted">
         This automatic artifact is deliberately narrow and safe for diagnosis. The separate live
         node debug package is broader, operator-initiated, and is never captured or fed to the
         diagnosis model automatically.

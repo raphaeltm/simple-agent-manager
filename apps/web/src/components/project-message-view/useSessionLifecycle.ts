@@ -232,6 +232,8 @@ export function useSessionLifecycle(
         // clobber onAgentActivity's verified timer and flip to idle during long tool calls.
         if (msg.role !== 'user') {
           setAgentActivity('responding');
+          // Fresh agent output disproves the stall — retire the notice.
+          setStaleNotice(false);
           startVerifyDecayTimer();
         }
       },
@@ -277,6 +279,8 @@ export function useSessionLifecycle(
         setAgentActivity(working ? activity : 'idle');
         setPromptStartedAt(working ? (promptStartedAt ?? Date.now()) : null);
         if (working) {
+          // A live working signal disproves the stall — retire the notice.
+          setStaleNotice(false);
           // Arm the shared verify-before-decay timer (prevents false idle during long tool calls).
           startVerifyDecayTimer();
         } else {

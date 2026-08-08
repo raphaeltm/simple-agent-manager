@@ -52,9 +52,9 @@ const SEARCH_DEBOUNCE_MS = 300;
 const ID_DEBOUNCE_MS = 500;
 
 const selectClass =
-  'px-3 py-2 rounded-sm text-fg-primary text-sm cursor-pointer outline-none bg-surface-secondary border border-border-default';
+  'px-3 py-2 rounded-sm text-fg-primary text-sm cursor-pointer outline-none bg-surface border border-border-default';
 const inputClass =
-  'min-w-0 px-3 py-2 rounded-sm text-fg-primary text-sm outline-none bg-surface-secondary border border-border-default';
+  'min-w-0 px-3 py-2 rounded-sm text-fg-primary text-sm outline-none bg-surface border border-border-default';
 
 export const ObservabilityFilters: FC<ObservabilityFiltersProps> = ({
   source,
@@ -189,7 +189,7 @@ export const ObservabilityFilters: FC<ObservabilityFiltersProps> = ({
           <button
             type="button"
             onClick={() => setIdExpanded(!idExpanded)}
-            className="flex items-center gap-1 rounded-sm px-2 py-1.5 text-xs text-fg-muted hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent-primary transition-colors"
+            className="flex items-center gap-1 rounded-sm px-2 py-1.5 text-xs text-fg-muted hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent transition-colors"
             aria-expanded={idExpanded}
             aria-label="Toggle ID filters"
           >

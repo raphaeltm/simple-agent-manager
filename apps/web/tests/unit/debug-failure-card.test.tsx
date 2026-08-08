@@ -319,4 +319,59 @@ describe('FailureCard', () => {
       expect(screen.getByText('Network error')).toBeInTheDocument();
     });
   });
+
+  it('shows "Copy failed" when the clipboard write rejects', async () => {
+    const writeTextMock = vi.fn().mockRejectedValue(new Error('denied'));
+    Object.defineProperty(navigator, 'clipboard', {
+      value: { writeText: writeTextMock },
+      writable: true,
+      configurable: true,
+    });
+
+    render(
+      <FailureCard
+        projectId="proj-1"
+        taskEmbed={makeTaskEmbed()}
+        recoverable={false}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Agent crashed/i }));
+    await waitFor(() => {
+      expect(screen.getByText('Copy debug report')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('Copy debug report'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Copy failed')).toBeInTheDocument();
+    });
+  });
+
+  it('shows "Copy failed" when the clipboard API is unavailable', async () => {
+    Object.defineProperty(navigator, 'clipboard', {
+      value: undefined,
+      writable: true,
+      configurable: true,
+    });
+
+    render(
+      <FailureCard
+        projectId="proj-1"
+        taskEmbed={makeTaskEmbed()}
+        recoverable={false}
+      />
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /Agent crashed/i }));
+    await waitFor(() => {
+      expect(screen.getByText('Copy debug report')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('Copy debug report'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Copy failed')).toBeInTheDocument();
+    });
+  });
 });

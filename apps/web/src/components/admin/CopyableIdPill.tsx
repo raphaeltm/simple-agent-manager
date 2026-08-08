@@ -27,11 +27,11 @@ export const CopyableIdPill: FC<CopyableIdPillProps> = ({ label, value, href }) 
   const truncated = value.length > 14 ? `${value.slice(0, 6)}…${value.slice(-4)}` : value;
 
   const segmentClass =
-    'inline-flex items-center gap-1 px-1.5 py-0.5 cursor-pointer hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary transition-colors min-w-0';
+    'inline-flex items-center gap-1 px-1.5 py-0.5 cursor-pointer hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent transition-colors min-w-0';
 
   return (
     <span
-      className="inline-flex items-stretch text-[11px] font-mono rounded border border-border-default bg-surface-secondary overflow-hidden min-w-0"
+      className="inline-flex items-stretch text-[11px] font-mono rounded border border-border-default bg-surface overflow-hidden min-w-0"
       style={{ color: copied ? 'var(--sam-color-success)' : 'var(--sam-color-fg-muted)' }}
     >
       <button

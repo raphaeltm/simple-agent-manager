@@ -51,6 +51,11 @@ describe('useActivityVerifyTimer', () => {
 
     expect(onVerifiedStale).toHaveBeenCalledTimes(1);
     expect(onVerifiedIdle).toHaveBeenCalledTimes(1);
+    // The stale notice must be armed BEFORE the activity state clears, so the
+    // UI can never render an idle frame without the notice.
+    expect(onVerifiedStale.mock.invocationCallOrder[0]).toBeLessThan(
+      onVerifiedIdle.mock.invocationCallOrder[0]
+    );
   });
 
   it('does not call onVerifiedStale when activity is working', async () => {
