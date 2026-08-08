@@ -159,6 +159,24 @@ timeout wrappers must compose rather than replace caller cancellation, and tests
 retry/poll/multi-step resource paths must assert prompt cancellation, preserved reason,
 listener cleanup, and zero post-cancel boundary calls or mutations.
 
+## Validation Evidence
+
+- RED on refreshed `origin/main` (`8eed3b740`): caller cancellation used a different
+  fetch signal and settled only at the 75 ms internal timeout; focused regression
+  commit `5e56b8ad9` produced 21 provider failures and one API failure.
+- Provider final: lint 0 errors / 26 existing warnings; typecheck and build pass;
+  32 files / 582 tests pass; coverage 86.52% statements, 78.41% branches,
+  90.85% functions, and 87.70% lines.
+- API final: lint 0 errors / 1,647 existing warnings; typecheck and build pass;
+  500 files / 6,769 tests pass; coverage 68.11% statements, 60.22% branches,
+  67.40% functions, and 69.08% lines.
+- Focused boundary evidence: 43/43 provider cancellation tests, 37/37 GCP/API
+  boundary tests, and 13/13 corrected terminal-D1 tests pass.
+- Independent local reviews: test engineering, constitution, Cloudflare/Workers,
+  defensive security regression, and documentation synchronization all PASS.
+- Shared staging was intentionally not deployed or mutated under the user's explicit
+  release contract. GitHub checks and the final current-main rebase remain PR gates.
+
 ## References
 
 - `packages/providers/src/types.ts`
