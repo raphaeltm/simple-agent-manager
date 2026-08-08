@@ -319,21 +319,36 @@ describe('provisionNode rethrowProviderError', () => {
   });
 
   it.each([
-    ['terminal running-node write', '203.0.113.10'],
-    ['terminal awaiting-IP write', ''],
-  ])('preserves cancellation during the %s', async (_boundary, vmIp) => {
-    createVM.mockResolvedValueOnce({ id: 'provider-vm-1', ip: vmIp });
+    [
+      'terminal running-node write',
+      '203.0.113.10',
+      { status: 'running', ipAddress: '203.0.113.10' },
+    ],
+    [
+      'terminal awaiting-IP write',
+      '',
+      { status: 'creating', errorMessage: 'Awaiting IP allocation — will be set on first heartbeat' },
+    ],
+  ])('preserves cancellation during the %s', async (_boundary, vmIp, expectedTerminalSet) => {
     const controller = new AbortController();
     const callerReason = new ProviderError('hetzner', 503, `caller cancelled ${_boundary}`);
     let releaseUpdate: () => void = () => undefined;
-    updateBarrier = new Promise<void>((resolve) => {
-      releaseUpdate = resolve;
+    createVM.mockImplementationOnce(async () => {
+      updateBarrier = new Promise<void>((resolve) => {
+        releaseUpdate = resolve;
+      });
+      return { id: 'provider-vm-1', ip: vmIp };
     });
 
     const provisioning = provisionNode('node-1', ENV, undefined, {
       signal: controller.signal,
     });
-    await vi.waitFor(() => expect(ops).toHaveLength(1));
+    await vi.waitFor(() => expect(ops).toHaveLength(2));
+    expect(createVM).toHaveBeenCalledTimes(1);
+    expect(ops[1]).toEqual({
+      kind: 'update',
+      set: expect.objectContaining(expectedTerminalSet),
+    });
     const operationCountAtAbort = ops.length;
     controller.abort(callerReason);
     releaseUpdate();
