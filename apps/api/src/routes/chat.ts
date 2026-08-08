@@ -16,7 +16,6 @@ import {
 } from '@simple-agent-manager/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
@@ -36,12 +35,11 @@ import {
 } from '../schemas';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as chatPersistence from '../services/chat-persistence';
-
 import * as projectDataService from '../services/project-data';
 import { isTaskStatus } from '../services/task-status';
 import { resolveChatAgentState } from './chat-agent-state';
-import { recordChatSessionLoadFailure } from './chat-load-diagnostics';
 import { chatForkRoutes } from './chat-fork';
+import { recordChatSessionLoadFailure } from './chat-load-diagnostics';
 import { getChatSessionRouteContext } from './chat-route-context';
 import {
   enrichSessionsWithCreators,

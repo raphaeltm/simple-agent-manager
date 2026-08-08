@@ -16,6 +16,17 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord, optionalJsonRecord } from '../lib/runtime-validation';
+import {
+  DEFAULT_MAX_CONTEXT_LENGTH,
+  DEFAULT_MAX_MESSAGE_LENGTH,
+  DEFAULT_MAX_STACK_LENGTH,
+  DEFAULT_MAX_USER_AGENT_LENGTH,
+  getFieldLimit,
+  type ObservabilityFieldLimitEnv,
+  safeParseContext,
+  serializeBoundedContext as boundContext,
+  truncate,
+} from './observability-fields';
 import { REDACTED, redactSecretPatterns } from './secret-redaction';
 
 // =============================================================================
@@ -25,10 +36,6 @@ import { REDACTED, redactSecretPatterns } from './secret-redaction';
 const DEFAULT_RETENTION_DAYS = 30;
 const DEFAULT_MAX_ROWS = 100_000;
 const DEFAULT_BATCH_SIZE = 25;
-const DEFAULT_MAX_MESSAGE_LENGTH = 2048;
-const DEFAULT_MAX_STACK_LENGTH = 4096;
-const DEFAULT_MAX_USER_AGENT_LENGTH = 512;
-const DEFAULT_MAX_CONTEXT_LENGTH = 8192;
 const MAX_QUERY_LIMIT = 200;
 const DEFAULT_QUERY_LIMIT = 50;
 
@@ -39,30 +46,9 @@ const VALID_LEVELS = new Set<string>(['error', 'warn', 'info']);
 // Helpers
 // =============================================================================
 
-function truncate(value: string, maxLength: number): string {
-  return value.length > maxLength ? value.slice(0, maxLength) + '...' : value;
-}
-
-/**
- * Parse a stored context JSON string, tolerating a single malformed row
- * (rule 50): a bad context degrades to null with a structured warn instead
- * of throwing the whole list read.
- */
-function safeParseContext(
-  context: string | null,
-  rowId: string
-): Record<string, unknown> | null {
-  if (!context) return null;
-  try {
-    return JSON.parse(context) as Record<string, unknown>;
-  } catch (err) {
-    log.warn('observability.context_parse_skipped', {
-      rowId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-    return null;
-  }
-}
+// Field-bounding helpers live in observability-fields.ts (rule 18 split);
+// re-exported here so existing consumers keep their import path.
+export { type ObservabilityFieldLimitEnv, serializeBoundedContext } from './observability-fields';
 
 function generateId(): string {
   return crypto.randomUUID();
@@ -75,43 +61,6 @@ function getConfigNumber(env: Env, key: keyof Env, fallback: number): number {
     if (Number.isSafeInteger(n) && n > 0) return n;
   }
   return fallback;
-}
-
-export type ObservabilityFieldLimitEnv = Pick<
-  Env,
-  | 'OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH'
-  | 'OBSERVABILITY_ERROR_STACK_MAX_LENGTH'
-  | 'OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH'
-  | 'OBSERVABILITY_ERROR_CONTEXT_MAX_LENGTH'
->;
-
-/**
- * Serialize a context object with a byte bound. Oversized contexts are
- * replaced by a small valid-JSON sentinel (never sliced JSON, which would
- * break the reader's parse) that preserves diagnosability.
- */
-export function serializeBoundedContext(
-  context: Record<string, unknown>,
-  maxLength: number
-): string {
-  const serialized = JSON.stringify(context);
-  if (serialized.length <= maxLength) {
-    return serialized;
-  }
-  return JSON.stringify({
-    contextTruncated: true,
-    originalLength: serialized.length,
-    preview: serialized.slice(0, Math.max(0, Math.min(maxLength, 512))),
-  });
-}
-
-function getFieldLimit(
-  env: ObservabilityFieldLimitEnv,
-  key: keyof ObservabilityFieldLimitEnv,
-  fallback: number
-): number {
-  const parsed = Number.parseInt(env[key] ?? '', 10);
-  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
 }
 
 // =============================================================================
@@ -172,7 +121,7 @@ export async function persistError(
       level,
       message: truncate(input.message, messageMaxLength),
       stack: input.stack ? truncate(input.stack, stackMaxLength) : null,
-      context: input.context ? serializeBoundedContext(input.context, contextMaxLength) : null,
+      context: input.context ? boundContext(input.context, contextMaxLength) : null,
       userId: input.userId ?? null,
       nodeId: input.nodeId ?? null,
       workspaceId: input.workspaceId ?? null,

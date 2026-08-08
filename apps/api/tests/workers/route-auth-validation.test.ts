@@ -371,10 +371,14 @@ describe('node-level ACP heartbeat auth', () => {
     // extractBearerToken only validates the Bearer shape. A malformed JWT is
     // rejected by jose with a non-AppError, so the current global handler maps
     // it to its sanitized INTERNAL_ERROR response rather than leaking details.
+    // 5xx responses now carry a correlation requestId (persisted alongside the
+    // observability error row) — still no error internals in the body.
     expect(response.status).toBe(500);
-    expect(await response.json()).toEqual({
+    const body = (await response.json()) as Record<string, unknown>;
+    expect(body).toEqual({
       error: 'INTERNAL_ERROR',
       message: 'Internal server error',
+      requestId: expect.stringMatching(/^[0-9a-f-]{36}$/),
     });
   });
 

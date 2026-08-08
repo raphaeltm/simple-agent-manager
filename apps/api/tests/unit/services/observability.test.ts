@@ -607,7 +607,7 @@ describe('Observability Service', () => {
 });
 
 // Imported after mocks (same pattern as above)
-// eslint-disable-next-line import/first
+
 import { serializeBoundedContext } from '../../../src/services/observability';
 
 describe('bounded context serialization (rule 50 companion)', () => {
