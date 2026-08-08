@@ -1,4 +1,8 @@
-import type { Provider, ProviderConfig } from '@simple-agent-manager/providers';
+import type {
+  Provider,
+  ProviderConfig,
+  ProviderRequestContext,
+} from '@simple-agent-manager/providers';
 import { createProvider, GcpProvider } from '@simple-agent-manager/providers';
 import {
   computeAssembler,
@@ -506,7 +510,8 @@ async function resolveProviderViaCC(
     const { getGcpAccessToken } = await import('./gcp-sts');
     const cacheUserId = ccConfig.isPlatform ? `platform:${userId}` : userId;
     const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
-    const tokenProvider = () => getGcpAccessToken(cacheUserId, cacheProjectId, gcpCred, env);
+    const tokenProvider = (context?: ProviderRequestContext) =>
+      getGcpAccessToken(cacheUserId, cacheProjectId, gcpCred, env, context);
     const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
     return { provider, providerName, credentialSource };
   }
@@ -554,7 +559,8 @@ async function createProviderForUserLegacy(
       const gcpCred = parseGcpCredential(decryptedToken);
       const { getGcpAccessToken } = await import('./gcp-sts');
       const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
-      const tokenProvider = () => getGcpAccessToken(userId, cacheProjectId, gcpCred, env);
+      const tokenProvider = (context?: ProviderRequestContext) =>
+        getGcpAccessToken(userId, cacheProjectId, gcpCred, env, context);
 
       const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
       return { provider, providerName, credentialSource: 'user' };
@@ -576,8 +582,8 @@ async function createProviderForUserLegacy(
     const gcpCred = parseGcpCredential(decryptedToken);
     const { getGcpAccessToken } = await import('./gcp-sts');
     const cacheProjectId = projectId ?? gcpCred.gcpProjectId;
-    const tokenProvider = () =>
-      getGcpAccessToken(`platform:${userId}`, cacheProjectId, gcpCred, env);
+    const tokenProvider = (context?: ProviderRequestContext) =>
+      getGcpAccessToken(`platform:${userId}`, cacheProjectId, gcpCred, env, context);
 
     const provider = new GcpProvider(gcpCred.gcpProjectId, tokenProvider, gcpCred.defaultZone);
     return { provider, providerName: platformProvider, credentialSource: 'platform' };

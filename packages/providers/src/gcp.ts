@@ -1,11 +1,17 @@
 import type { VMSize } from '@simple-agent-manager/shared';
 
 import { CLOUDFLARE_IPV4_RANGES } from './cloudflare-ranges';
-import { providerFetch } from './provider-fetch';
+import {
+  providerDelay,
+  providerFetch,
+  rethrowIfProviderRequestAborted,
+  throwIfProviderRequestAborted,
+} from './provider-fetch';
 import type {
   LocationMeta,
   Provider,
   ProviderErrorCategory,
+  ProviderRequestContext,
   SizeConfig,
   VMConfig,
   VMInstance,
@@ -61,7 +67,7 @@ export const DEFAULT_GCP_MAX_LIST_PAGES = 100;
 export function classifyGcpError(
   statusCode: number | undefined,
   providerCode: string | undefined,
-  message: string,
+  message: string
 ): ProviderErrorCategory {
   if (providerCode) {
     switch (providerCode) {
@@ -153,7 +159,9 @@ const GCP_VOLUME_CAPABILITIES: VolumeCapabilities = {
     mountPathTemplate: SAM_VOLUME_MOUNT_PATH_TEMPLATE,
     fstabOptions: SAM_VOLUME_FSTAB_OPTIONS,
   },
-  notes: ['GCP first-class persistent disk operations are not implemented in this provider package yet.'],
+  notes: [
+    'GCP first-class persistent disk operations are not implemented in this provider package yet.',
+  ],
 };
 
 /** Map GCP instance status to SAM VMStatus */
@@ -189,7 +197,7 @@ function extractIp(networkInterfaces?: GcpNetworkInterfacePayload[]): string {
  * The GCP provider doesn't handle token exchange directly —
  * callers provide a function that returns a valid access token.
  */
-export type GcpTokenProvider = () => Promise<string>;
+export type GcpTokenProvider = (context?: ProviderRequestContext) => Promise<string>;
 
 /**
  * GCP Compute Engine provider.
@@ -218,13 +226,15 @@ export class GcpProvider implements Provider {
     private readonly firewallSourceRanges: readonly string[] = DEFAULT_GCP_FIREWALL_SOURCE_RANGES,
     private readonly agentPorts: readonly string[] = DEFAULT_GCP_AGENT_PORTS,
     private readonly appRouteSourceRanges: readonly string[] = DEFAULT_GCP_APP_ROUTE_SOURCE_RANGES,
-    private readonly appRoutePorts: readonly string[] = DEFAULT_GCP_APP_ROUTE_PORTS,
+    private readonly appRoutePorts: readonly string[] = DEFAULT_GCP_APP_ROUTE_PORTS
   ) {
     this.defaultLocation = defaultZone || 'us-central1-a';
   }
 
-  private async authHeaders(): Promise<Record<string, string>> {
-    const token = await this.tokenProvider();
+  private async authHeaders(context?: ProviderRequestContext): Promise<Record<string, string>> {
+    throwIfProviderRequestAborted(context);
+    const token = context ? await this.tokenProvider(context) : await this.tokenProvider();
+    throwIfProviderRequestAborted(context);
     return {
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
@@ -238,19 +248,26 @@ export class GcpProvider implements Provider {
   /**
    * Poll a zonal operation until it completes or times out.
    */
-  private async pollOperation(zone: string, operationName: string): Promise<void> {
+  private async pollOperation(
+    zone: string,
+    operationName: string,
+    context?: ProviderRequestContext
+  ): Promise<void> {
     const deadline = Date.now() + this.operationPollTimeoutMs;
     let delayMs = 1000;
     const maxDelayMs = 30_000;
 
     while (Date.now() < deadline) {
-      const headers = await this.authHeaders();
+      throwIfProviderRequestAborted(context);
+      const headers = await this.authHeaders(context);
       const url = `${this.projectUrl()}/zones/${zone}/operations/${operationName}`;
-      const res = await providerFetch('gcp', url, { headers }, this.timeoutMs);
+      const res = await providerFetch('gcp', url, { headers }, this.timeoutMs, undefined, context);
+      throwIfProviderRequestAborted(context);
       const op = validateGcpOperation(
         await parseProviderJson(res, 'gcp', 'pollOperation'),
-        'pollOperation',
+        'pollOperation'
       );
+      throwIfProviderRequestAborted(context);
 
       if (op.status === 'DONE') {
         if (op.error?.errors?.length) {
@@ -260,11 +277,15 @@ export class GcpProvider implements Provider {
         return;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await providerDelay(delayMs, context);
       delayMs = Math.min(delayMs * 2, maxDelayMs);
     }
 
-    throw new ProviderError('gcp', undefined, `GCP operation timed out after ${this.operationPollTimeoutMs}ms`);
+    throw new ProviderError(
+      'gcp',
+      undefined,
+      `GCP operation timed out after ${this.operationPollTimeoutMs}ms`
+    );
   }
 
   private async ensureFirewallRule(
@@ -273,8 +294,10 @@ export class GcpProvider implements Provider {
     sourceRanges: readonly string[],
     description: string,
     targetTag: string,
+    context?: ProviderRequestContext
   ): Promise<void> {
-    const headers = await this.authHeaders();
+    throwIfProviderRequestAborted(context);
+    const headers = await this.authHeaders(context);
     const url = `${this.projectUrl()}/global/firewalls`;
 
     const body = {
@@ -294,19 +317,29 @@ export class GcpProvider implements Provider {
     };
 
     try {
-      const res = await providerFetch('gcp', url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      }, this.timeoutMs);
+      const res = await providerFetch(
+        'gcp',
+        url,
+        {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+        },
+        this.timeoutMs,
+        undefined,
+        context
+      );
+      throwIfProviderRequestAborted(context);
       const op = validateGcpOperation(
         await parseProviderJson(res, 'gcp', 'ensureFirewallRule'),
         'ensureFirewallRule',
-        { requireName: true },
+        { requireName: true }
       );
+      throwIfProviderRequestAborted(context);
       // Firewall operations are global, poll via global operations endpoint
-      await this.pollGlobalOperation(op.name);
+      await this.pollGlobalOperation(op.name, context);
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       // 409 = already exists — that's fine
       if (err instanceof ProviderError && err.statusCode === 409) return;
       throw err;
@@ -317,39 +350,48 @@ export class GcpProvider implements Provider {
    * Ensure firewall rules for both Cloudflare-routed VM-agent traffic and
    * direct public app-route traffic served by Caddy.
    */
-  private async ensureFirewallRules(): Promise<void> {
+  private async ensureFirewallRules(context?: ProviderRequestContext): Promise<void> {
     await this.ensureFirewallRule(
       SAM_AGENT_FIREWALL_RULE_NAME,
       this.agentPorts,
       this.firewallSourceRanges,
       'Allow configured inbound access to SAM VM agent (managed by Simple Agent Manager)',
       SAM_NETWORK_TAG,
+      context
     );
+    throwIfProviderRequestAborted(context);
     await this.ensureFirewallRule(
       SAM_APP_ROUTE_FIREWALL_RULE_NAME,
       this.appRoutePorts,
       this.appRouteSourceRanges,
       'Allow public HTTP/HTTPS access to SAM deployment app routes (managed by Simple Agent Manager)',
       SAM_DEPLOYMENT_APP_ROUTE_NETWORK_TAG,
+      context
     );
   }
 
   /**
    * Poll a global operation (used for firewall rules which are not zone-scoped).
    */
-  private async pollGlobalOperation(operationName: string): Promise<void> {
+  private async pollGlobalOperation(
+    operationName: string,
+    context?: ProviderRequestContext
+  ): Promise<void> {
     const deadline = Date.now() + this.operationPollTimeoutMs;
     let delayMs = 1000;
     const maxDelayMs = 30_000;
 
     while (Date.now() < deadline) {
-      const headers = await this.authHeaders();
+      throwIfProviderRequestAborted(context);
+      const headers = await this.authHeaders(context);
       const url = `${this.projectUrl()}/global/operations/${operationName}`;
-      const res = await providerFetch('gcp', url, { headers }, this.timeoutMs);
+      const res = await providerFetch('gcp', url, { headers }, this.timeoutMs, undefined, context);
+      throwIfProviderRequestAborted(context);
       const op = validateGcpOperation(
         await parseProviderJson(res, 'gcp', 'pollGlobalOperation'),
-        'pollGlobalOperation',
+        'pollGlobalOperation'
       );
+      throwIfProviderRequestAborted(context);
 
       if (op.status === 'DONE') {
         if (op.error?.errors?.length) {
@@ -359,24 +401,30 @@ export class GcpProvider implements Provider {
         return;
       }
 
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
+      await providerDelay(delayMs, context);
       delayMs = Math.min(delayMs * 2, maxDelayMs);
     }
 
-    throw new ProviderError('gcp', undefined, `GCP global operation timed out after ${this.operationPollTimeoutMs}ms`);
+    throw new ProviderError(
+      'gcp',
+      undefined,
+      `GCP global operation timed out after ${this.operationPollTimeoutMs}ms`
+    );
   }
 
-  async createVM(config: VMConfig): Promise<VMInstance> {
+  async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
+    throwIfProviderRequestAborted(context);
     const zone = config.location || this.defaultLocation;
     const sizeConfig = SIZE_MAP[config.size];
     if (!sizeConfig) {
       throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`);
     }
     const machineType = sizeConfig.type;
-    const headers = await this.authHeaders();
+    const headers = await this.authHeaders(context);
 
     // Ensure firewall rules exist before creating VM
-    await this.ensureFirewallRules();
+    await this.ensureFirewallRules(context);
+    throwIfProviderRequestAborted(context);
 
     const networkTags = [SAM_NETWORK_TAG];
     if (config.labels?.role === 'deployment') {
@@ -425,58 +473,83 @@ export class GcpProvider implements Provider {
     };
 
     const url = `${this.projectUrl()}/zones/${zone}/instances`;
-    const res = await providerFetch('gcp', url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(body),
-    }, this.timeoutMs);
-
-    const op = validateGcpOperation(
-      await parseProviderJson(res, 'gcp', 'createVM'),
-      'createVM',
-      { requireName: true },
+    const res = await providerFetch(
+      'gcp',
+      url,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      },
+      this.timeoutMs,
+      undefined,
+      context
     );
-    await this.pollOperation(zone, op.name);
+    throwIfProviderRequestAborted(context);
+
+    const op = validateGcpOperation(await parseProviderJson(res, 'gcp', 'createVM'), 'createVM', {
+      requireName: true,
+    });
+    throwIfProviderRequestAborted(context);
+    await this.pollOperation(zone, op.name, context);
 
     // Fetch the created instance to get its details
-    const instance = await this.getVM(config.name);
+    const instance = await this.getVM(config.name, context);
     if (!instance) {
-      throw new ProviderError('gcp', undefined, `VM ${config.name} created but not found after polling`);
+      throw new ProviderError(
+        'gcp',
+        undefined,
+        `VM ${config.name} created but not found after polling`
+      );
     }
     return instance;
   }
 
-  async deleteVM(id: string): Promise<void> {
+  async deleteVM(id: string, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
     // GCP uses name-based lookups, so we need to find the zone
-    const instance = await this.findInstanceByIdOrName(id);
+    const instance = await this.findInstanceByIdOrName(id, context);
     if (!instance) return; // Idempotent — already deleted
 
     const zone = this.extractZone(instance.machineType);
-    const headers = await this.authHeaders();
+    const headers = await this.authHeaders(context);
     const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}`;
 
     try {
-      const res = await providerFetch('gcp', url, { method: 'DELETE', headers }, this.timeoutMs);
-      const op = validateGcpOperation(
-        await parseProviderJson(res, 'gcp', 'deleteVM'),
-        'deleteVM',
-        { requireName: true },
+      const res = await providerFetch(
+        'gcp',
+        url,
+        { method: 'DELETE', headers },
+        this.timeoutMs,
+        undefined,
+        context
       );
-      await this.pollOperation(zone, op.name);
+      throwIfProviderRequestAborted(context);
+      const op = validateGcpOperation(await parseProviderJson(res, 'gcp', 'deleteVM'), 'deleteVM', {
+        requireName: true,
+      });
+      throwIfProviderRequestAborted(context);
+      await this.pollOperation(zone, op.name, context);
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       if (err instanceof ProviderError && err.statusCode === 404) return;
       throw err;
     }
   }
 
-  async getVM(id: string): Promise<VMInstance | null> {
-    const instance = await this.findInstanceByIdOrName(id);
+  async getVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null> {
+    throwIfProviderRequestAborted(context);
+    const instance = await this.findInstanceByIdOrName(id, context);
     if (!instance) return null;
     return this.toVMInstance(instance);
   }
 
-  async listVMs(labels?: Record<string, string>): Promise<VMInstance[]> {
-    const headers = await this.authHeaders();
+  async listVMs(
+    labels?: Record<string, string>,
+    context?: ProviderRequestContext
+  ): Promise<VMInstance[]> {
+    throwIfProviderRequestAborted(context);
+    const headers = await this.authHeaders(context);
     const results: VMInstance[] = [];
 
     // Build filter from labels
@@ -490,6 +563,7 @@ export class GcpProvider implements Provider {
 
     // Query all configured zones
     for (const zone of this.locations) {
+      throwIfProviderRequestAborted(context);
       try {
         await this.fetchPaginatedGcpInstances(
           `${this.projectUrl()}/zones/${zone}/instances`,
@@ -499,14 +573,16 @@ export class GcpProvider implements Provider {
           (data) => {
             results.push(...(data.items || []).map((i) => this.toVMInstance(i)));
           },
+          context
         );
       } catch (err) {
+        rethrowIfProviderRequestAborted(err, context);
         if (this.isToleratedZoneListError(err)) continue;
         throw new ProviderError(
           'gcp',
           err instanceof ProviderError ? err.statusCode : undefined,
           `GCP zone ${zone} list failed: ${err instanceof Error ? err.message : String(err)}`,
-          { cause: err instanceof Error ? err : undefined },
+          { cause: err instanceof Error ? err : undefined }
         );
       }
     }
@@ -514,90 +590,149 @@ export class GcpProvider implements Provider {
     return results;
   }
 
-  async powerOff(id: string): Promise<void> {
-    const instance = await this.findInstanceByIdOrName(id);
+  async powerOff(id: string, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    const instance = await this.findInstanceByIdOrName(id, context);
     if (!instance) throw new ProviderError('gcp', 404, `VM ${id} not found`);
 
     const zone = this.extractZone(instance.machineType);
-    const headers = await this.authHeaders();
+    const headers = await this.authHeaders(context);
     const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}/stop`;
-    const res = await providerFetch('gcp', url, { method: 'POST', headers }, this.timeoutMs);
-    const op = validateGcpOperation(
-      await parseProviderJson(res, 'gcp', 'powerOff'),
-      'powerOff',
-      { requireName: true },
+    const res = await providerFetch(
+      'gcp',
+      url,
+      { method: 'POST', headers },
+      this.timeoutMs,
+      undefined,
+      context
     );
-    await this.pollOperation(zone, op.name);
+    throwIfProviderRequestAborted(context);
+    const op = validateGcpOperation(await parseProviderJson(res, 'gcp', 'powerOff'), 'powerOff', {
+      requireName: true,
+    });
+    throwIfProviderRequestAborted(context);
+    await this.pollOperation(zone, op.name, context);
   }
 
-  async powerOn(id: string): Promise<void> {
-    const instance = await this.findInstanceByIdOrName(id);
+  async powerOn(id: string, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    const instance = await this.findInstanceByIdOrName(id, context);
     if (!instance) throw new ProviderError('gcp', 404, `VM ${id} not found`);
 
     const zone = this.extractZone(instance.machineType);
-    const headers = await this.authHeaders();
+    const headers = await this.authHeaders(context);
     const url = `${this.projectUrl()}/zones/${zone}/instances/${instance.name}/start`;
-    const res = await providerFetch('gcp', url, { method: 'POST', headers }, this.timeoutMs);
-    const op = validateGcpOperation(
-      await parseProviderJson(res, 'gcp', 'powerOn'),
-      'powerOn',
-      { requireName: true },
+    const res = await providerFetch(
+      'gcp',
+      url,
+      { method: 'POST', headers },
+      this.timeoutMs,
+      undefined,
+      context
     );
-    await this.pollOperation(zone, op.name);
+    throwIfProviderRequestAborted(context);
+    const op = validateGcpOperation(await parseProviderJson(res, 'gcp', 'powerOn'), 'powerOn', {
+      requireName: true,
+    });
+    throwIfProviderRequestAborted(context);
+    await this.pollOperation(zone, op.name, context);
   }
 
-  async validateToken(): Promise<boolean> {
-    const headers = await this.authHeaders();
+  async validateToken(context?: ProviderRequestContext): Promise<boolean> {
+    throwIfProviderRequestAborted(context);
+    const headers = await this.authHeaders(context);
     // Try a lightweight API call to verify credentials
     const url = `${this.projectUrl()}/zones/${this.defaultLocation}/machineTypes/e2-standard-2`;
-    await providerFetch('gcp', url, { headers }, this.timeoutMs);
+    await providerFetch('gcp', url, { headers }, this.timeoutMs, undefined, context);
+    throwIfProviderRequestAborted(context);
     return true;
   }
 
-  createVolume(_config: VolumeConfig): Promise<VolumeInstance> {
-    return Promise.reject(this.unsupportedVolumeOperation('createVolume'));
+  async createVolume(
+    _config: VolumeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
+    throw this.unsupportedVolumeOperation('createVolume');
   }
 
-  attachVolume(_config: VolumeAttachmentConfig): Promise<VolumeInstance> {
-    return Promise.reject(this.unsupportedVolumeOperation('attachVolume'));
+  async attachVolume(
+    _config: VolumeAttachmentConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
+    throw this.unsupportedVolumeOperation('attachVolume');
   }
 
-  detachVolume(_config: VolumeDetachConfig): Promise<VolumeInstance | null> {
-    return Promise.reject(this.unsupportedVolumeOperation('detachVolume'));
+  async detachVolume(
+    _config: VolumeDetachConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null> {
+    throwIfProviderRequestAborted(context);
+    throw this.unsupportedVolumeOperation('detachVolume');
   }
 
-  resizeVolume(_config: VolumeResizeConfig): Promise<VolumeInstance> {
-    return Promise.reject(this.unsupportedVolumeOperation('resizeVolume'));
+  async resizeVolume(
+    _config: VolumeResizeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
+    throw this.unsupportedVolumeOperation('resizeVolume');
   }
 
-  deleteVolume(_config: VolumeLookupConfig): Promise<void> {
-    return Promise.reject(this.unsupportedVolumeOperation('deleteVolume'));
+  async deleteVolume(_config: VolumeLookupConfig, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    throw this.unsupportedVolumeOperation('deleteVolume');
   }
 
-  getVolume(_config: VolumeLookupConfig): Promise<VolumeInstance | null> {
-    return Promise.reject(this.unsupportedVolumeOperation('getVolume'));
+  async getVolume(
+    _config: VolumeLookupConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null> {
+    throwIfProviderRequestAborted(context);
+    throw this.unsupportedVolumeOperation('getVolume');
   }
 
-  listVolumes(_config: VolumeListConfig): Promise<VolumeInstance[]> {
-    return Promise.reject(this.unsupportedVolumeOperation('listVolumes'));
+  async listVolumes(
+    _config: VolumeListConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance[]> {
+    throwIfProviderRequestAborted(context);
+    throw this.unsupportedVolumeOperation('listVolumes');
   }
 
   /**
    * Find a GCP instance by numeric ID or name across all configured zones.
    */
-  private async findInstanceByIdOrName(idOrName: string): Promise<GcpInstancePayload | null> {
-    const headers = await this.authHeaders();
+  private async findInstanceByIdOrName(
+    idOrName: string,
+    context?: ProviderRequestContext
+  ): Promise<GcpInstancePayload | null> {
+    throwIfProviderRequestAborted(context);
+    const headers = await this.authHeaders(context);
 
     // First try as a name in each zone
     for (const zone of this.locations) {
+      throwIfProviderRequestAborted(context);
       try {
         const url = `${this.projectUrl()}/zones/${zone}/instances/${idOrName}`;
-        const res = await providerFetch('gcp', url, { headers }, this.timeoutMs);
-        return validateGcpInstance(
-          await parseProviderJson(res, 'gcp', `findInstanceByIdOrName.${zone}`),
-          `findInstanceByIdOrName.${zone}`,
+        const res = await providerFetch(
+          'gcp',
+          url,
+          { headers },
+          this.timeoutMs,
+          undefined,
+          context
         );
+        throwIfProviderRequestAborted(context);
+        const instance = validateGcpInstance(
+          await parseProviderJson(res, 'gcp', `findInstanceByIdOrName.${zone}`),
+          `findInstanceByIdOrName.${zone}`
+        );
+        throwIfProviderRequestAborted(context);
+        return instance;
       } catch (err) {
+        rethrowIfProviderRequestAborted(err, context);
         if (err instanceof ProviderError && err.statusCode === 404) continue;
         throw err;
       }
@@ -623,20 +758,21 @@ export class GcpProvider implements Provider {
             }
           }
         },
+        context
       );
       if (found) return found;
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       throw new ProviderError(
         'gcp',
         err instanceof ProviderError ? err.statusCode : undefined,
         `GCP aggregated instance lookup failed for ${idOrName}: ${err instanceof Error ? err.message : String(err)}`,
-        { cause: err instanceof Error ? err : undefined },
+        { cause: err instanceof Error ? err : undefined }
       );
     }
 
     return null;
   }
-
 
   private async fetchPaginatedGcpInstances(
     baseUrl: string,
@@ -644,12 +780,20 @@ export class GcpProvider implements Provider {
     headers: Record<string, string>,
     context: string,
     handlePage: (data: { items?: GcpInstancePayload[]; nextPageToken?: string }) => boolean | void,
+    requestContext?: ProviderRequestContext
   ): Promise<void> {
-    await this.fetchPaginatedGcpList(baseUrl, baseParams, headers, context, async (payload) => {
-      const data = validateGcpInstancesList(payload, context);
-      const stop = handlePage(data);
-      return { nextPageToken: data.nextPageToken, stop: stop === true };
-    });
+    await this.fetchPaginatedGcpList(
+      baseUrl,
+      baseParams,
+      headers,
+      context,
+      async (payload) => {
+        const data = validateGcpInstancesList(payload, context);
+        const stop = handlePage(data);
+        return { nextPageToken: data.nextPageToken, stop: stop === true };
+      },
+      requestContext
+    );
   }
 
   private async fetchPaginatedGcpAggregatedInstances(
@@ -657,13 +801,24 @@ export class GcpProvider implements Provider {
     baseParams: URLSearchParams,
     headers: Record<string, string>,
     context: string,
-    handlePage: (data: { items?: Record<string, { instances?: GcpInstancePayload[] }>; nextPageToken?: string }) => boolean | void,
+    handlePage: (data: {
+      items?: Record<string, { instances?: GcpInstancePayload[] }>;
+      nextPageToken?: string;
+    }) => boolean | void,
+    requestContext?: ProviderRequestContext
   ): Promise<void> {
-    await this.fetchPaginatedGcpList(baseUrl, baseParams, headers, context, async (payload) => {
-      const data = validateGcpAggregatedInstances(payload, context);
-      const stop = handlePage(data);
-      return { nextPageToken: data.nextPageToken, stop: stop === true };
-    });
+    await this.fetchPaginatedGcpList(
+      baseUrl,
+      baseParams,
+      headers,
+      context,
+      async (payload) => {
+        const data = validateGcpAggregatedInstances(payload, context);
+        const stop = handlePage(data);
+        return { nextPageToken: data.nextPageToken, stop: stop === true };
+      },
+      requestContext
+    );
   }
 
   private async fetchPaginatedGcpList(
@@ -672,28 +827,49 @@ export class GcpProvider implements Provider {
     headers: Record<string, string>,
     context: string,
     handlePage: (payload: unknown) => Promise<{ nextPageToken?: string; stop?: boolean }>,
+    requestContext?: ProviderRequestContext
   ): Promise<void> {
     const seenTokens = new Set<string>();
     let pageToken: string | undefined;
 
     for (let pageCount = 0; pageCount < DEFAULT_GCP_MAX_LIST_PAGES; pageCount += 1) {
+      throwIfProviderRequestAborted(requestContext);
       const params = new URLSearchParams(baseParams);
       if (pageToken) params.set('pageToken', pageToken);
-      const res = await providerFetch('gcp', `${baseUrl}?${params.toString()}`, { headers }, this.timeoutMs);
+      const res = await providerFetch(
+        'gcp',
+        `${baseUrl}?${params.toString()}`,
+        { headers },
+        this.timeoutMs,
+        undefined,
+        requestContext
+      );
+      throwIfProviderRequestAborted(requestContext);
       const result = await handlePage(await parseProviderJson(res, 'gcp', context));
+      throwIfProviderRequestAborted(requestContext);
       if (result.stop || !result.nextPageToken) return;
       if (seenTokens.has(result.nextPageToken)) {
-        throw new ProviderError('gcp', undefined, `GCP ${context} pagination repeated nextPageToken`, {
-          category: 'invalid_config',
-        });
+        throw new ProviderError(
+          'gcp',
+          undefined,
+          `GCP ${context} pagination repeated nextPageToken`,
+          {
+            category: 'invalid_config',
+          }
+        );
       }
       seenTokens.add(result.nextPageToken);
       pageToken = result.nextPageToken;
     }
 
-    throw new ProviderError('gcp', undefined, `GCP ${context} exceeded ${DEFAULT_GCP_MAX_LIST_PAGES} pages`, {
-      category: 'invalid_config',
-    });
+    throw new ProviderError(
+      'gcp',
+      undefined,
+      `GCP ${context} exceeded ${DEFAULT_GCP_MAX_LIST_PAGES} pages`,
+      {
+        category: 'invalid_config',
+      }
+    );
   }
 
   private toVMInstance(instance: GcpInstancePayload): VMInstance {
@@ -709,8 +885,7 @@ export class GcpProvider implements Provider {
   }
 
   private isToleratedZoneListError(err: unknown): boolean {
-    return err instanceof ProviderError
-      && (err.statusCode === 404 || err.statusCode === 503);
+    return err instanceof ProviderError && (err.statusCode === 404 || err.statusCode === 503);
   }
 
   private unsupportedVolumeOperation(operation: string): ProviderError {
@@ -718,7 +893,7 @@ export class GcpProvider implements Provider {
       this.name,
       undefined,
       `GCP provider does not support volume operation ${operation}`,
-      { category: 'invalid_config' },
+      { category: 'invalid_config' }
     );
   }
 

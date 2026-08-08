@@ -1,9 +1,16 @@
 import type { VMSize } from '@simple-agent-manager/shared';
 
-import { getTimeoutMs, providerFetch } from './provider-fetch';
+import {
+  getTimeoutMs,
+  providerDelay,
+  providerFetch,
+  rethrowIfProviderRequestAborted,
+  throwIfProviderRequestAborted,
+} from './provider-fetch';
 import type {
   Provider,
   ProviderLogger,
+  ProviderRequestContext,
   SizeConfig,
   VMConfig,
   VMInstance,
@@ -34,7 +41,6 @@ import {
   toUpCloudVM,
   toUpCloudVolume,
   upCloudBasicAuth,
-  upCloudDelay,
   upCloudDevicePath,
 } from './upcloud-utils';
 import { parseProviderJson } from './validation';
@@ -153,10 +159,11 @@ export class UpCloudProvider implements Provider {
     this.stopTimeoutSeconds = options.stopTimeoutSeconds ?? DEFAULT_UPCLOUD_STOP_TIMEOUT_SECONDS;
     this.logger = options.logger ?? noLogger;
   }
-  async createVM(config: VMConfig): Promise<VMInstance> {
-    await this.assertZoneAvailable(config.location);
-    await this.assertPlanAvailable(this.sizes[config.size].type);
-    const template = config.image ?? (await this.resolveTemplate());
+  async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
+    throwIfProviderRequestAborted(context);
+    await this.assertZoneAvailable(config.location, context);
+    await this.assertPlanAvailable(this.sizes[config.size].type, context);
+    const template = config.image ?? (await this.resolveTemplate(context));
     const body = {
       server: {
         zone: config.location,
@@ -189,77 +196,107 @@ export class UpCloudProvider implements Provider {
         },
       },
     };
-    const response = await this.request('/server', { method: 'POST', body: JSON.stringify(body) });
+    const response = await this.request(
+      '/server',
+      { method: 'POST', body: JSON.stringify(body) },
+      context
+    );
     let server = validateUpCloudServerResponse(
       await parseProviderJson(response, 'upcloud', 'createVM'),
       'createVM'
     );
-    server = await this.pollForIp(server);
+    server = await this.pollForIp(server, context);
     return toUpCloudVM(server);
   }
-  async deleteVM(id: string): Promise<void> {
-    const server = await this.getServer(id);
+  async deleteVM(id: string, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    const server = await this.getServer(id, context);
     if (!server) return;
-    if (server.state !== 'stopped') await this.powerOff(id);
+    if (server.state !== 'stopped') await this.powerOff(id, context);
     const root = server.storageDevices.find(
       (d) => d.address === 'virtio:0' || d.bootDisk === '1'
     )?.storage;
     try {
-      await this.request(`/server/${encodeURIComponent(id)}?storages=0`, { method: 'DELETE' });
+      await this.request(
+        `/server/${encodeURIComponent(id)}?storages=0`,
+        { method: 'DELETE' },
+        context
+      );
     } catch (error) {
+      rethrowIfProviderRequestAborted(error, context);
       if (isUpCloudNotFound(error)) return;
       throw error;
     }
-    if (root) await this.deleteStorageIdempotent(root);
+    if (root) await this.deleteStorageIdempotent(root, context);
   }
-  async getVM(id: string): Promise<VMInstance | null> {
-    const server = await this.getServer(id);
+  async getVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null> {
+    throwIfProviderRequestAborted(context);
+    const server = await this.getServer(id, context);
     return server ? toUpCloudVM(server) : null;
   }
-  async listVMs(labels?: Record<string, string>): Promise<VMInstance[]> {
-    const response = await this.request('/server');
+  async listVMs(
+    labels?: Record<string, string>,
+    context?: ProviderRequestContext
+  ): Promise<VMInstance[]> {
+    throwIfProviderRequestAborted(context);
+    const response = await this.request('/server', {}, context);
     const servers = validateUpCloudServersResponse(
       await parseProviderJson(response, 'upcloud', 'listVMs'),
       'listVMs'
     );
     return servers.filter((server) => matchesUpCloudLabels(server.labels, labels)).map(toUpCloudVM);
   }
-  async powerOff(id: string): Promise<void> {
-    await this.request(`/server/${encodeURIComponent(id)}/stop`, {
-      method: 'POST',
-      body: JSON.stringify({
-        stop_server: { stop_type: 'soft', timeout: String(this.stopTimeoutSeconds) },
-      }),
-    });
-    await this.waitForState(id, 'stopped');
+  async powerOff(id: string, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    await this.request(
+      `/server/${encodeURIComponent(id)}/stop`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          stop_server: { stop_type: 'soft', timeout: String(this.stopTimeoutSeconds) },
+        }),
+      },
+      context
+    );
+    await this.waitForState(id, 'stopped', context);
   }
-  async powerOn(id: string): Promise<void> {
-    await this.request(`/server/${encodeURIComponent(id)}/start`, { method: 'POST' });
+  async powerOn(id: string, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    await this.request(`/server/${encodeURIComponent(id)}/start`, { method: 'POST' }, context);
   }
-  async validateToken(): Promise<boolean> {
-    const response = await this.request('/account');
+  async validateToken(context?: ProviderRequestContext): Promise<boolean> {
+    throwIfProviderRequestAborted(context);
+    const response = await this.request('/account', {}, context);
     validateUpCloudAccountResponse(
       await parseProviderJson(response, 'upcloud', 'validateToken'),
       'validateToken'
     );
     return true;
   }
-  async createVolume(config: VolumeConfig): Promise<VolumeInstance> {
-    await this.assertZoneAvailable(config.location);
+  async createVolume(
+    config: VolumeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
+    await this.assertZoneAvailable(config.location, context);
     assertUpCloudVolumeSize(config.sizeGb, UPCLOUD_VOLUME_MIN_SIZE_GB, UPCLOUD_VOLUME_MAX_SIZE_GB);
-    const response = await this.request('/storage', {
-      method: 'POST',
-      body: JSON.stringify({
-        storage: {
-          zone: config.location,
-          title: config.name,
-          size: config.sizeGb,
-          tier: 'maxiops',
-          encrypted: 'yes',
-          labels: toUpCloudLabels(config.labels),
-        },
-      }),
-    });
+    const response = await this.request(
+      '/storage',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          storage: {
+            zone: config.location,
+            title: config.name,
+            size: config.sizeGb,
+            tier: 'maxiops',
+            encrypted: 'yes',
+            labels: toUpCloudLabels(config.labels),
+          },
+        }),
+      },
+      context
+    );
     return toUpCloudVolume(
       validateUpCloudStorageResponse(
         await parseProviderJson(response, 'upcloud', 'createVolume'),
@@ -267,8 +304,12 @@ export class UpCloudProvider implements Provider {
       )
     );
   }
-  async attachVolume(config: VolumeAttachmentConfig): Promise<VolumeInstance> {
-    await this.assertLocations(config);
+  async attachVolume(
+    config: VolumeAttachmentConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
+    await this.assertLocations(config, context);
     const response = await this.request(
       `/server/${encodeURIComponent(config.serverId)}/storage/attach`,
       {
@@ -281,13 +322,17 @@ export class UpCloudProvider implements Provider {
             boot_disk: '0',
           },
         }),
-      }
+      },
+      context
     );
     const server = validateUpCloudServerResponse(
       await parseProviderJson(response, 'upcloud', 'attachVolume'),
       'attachVolume'
     );
-    const volume = await this.getVolume({ volumeId: config.volumeId, location: config.location });
+    const volume = await this.getVolume(
+      { volumeId: config.volumeId, location: config.location },
+      context
+    );
     if (!volume) throw new ProviderError('upcloud', 404, 'UpCloud storage not found after attach');
     const device = server.storageDevices.find((d) => d.storage === config.volumeId);
     return {
@@ -296,36 +341,56 @@ export class UpCloudProvider implements Provider {
       linuxDevice: upCloudDevicePath(device?.address),
     };
   }
-  async detachVolume(config: VolumeDetachConfig): Promise<VolumeInstance | null> {
+  async detachVolume(
+    config: VolumeDetachConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null> {
+    throwIfProviderRequestAborted(context);
     if (!config.serverId)
       throw new ProviderError('upcloud', 400, 'UpCloud detach requires serverId', {
         category: 'invalid_config',
       });
-    const current = await this.getVolume({ volumeId: config.volumeId, location: config.location });
+    const current = await this.getVolume(
+      { volumeId: config.volumeId, location: config.location },
+      context
+    );
     if (!current) return null;
     if (!current.attachedServerId) return current;
     try {
-      await this.request(`/server/${encodeURIComponent(config.serverId)}/storage/detach`, {
-        method: 'POST',
-        body: JSON.stringify({ storage_device: { storage: config.volumeId } }),
-      });
+      await this.request(
+        `/server/${encodeURIComponent(config.serverId)}/storage/detach`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ storage_device: { storage: config.volumeId } }),
+        },
+        context
+      );
     } catch (error) {
+      rethrowIfProviderRequestAborted(error, context);
       if (!isUpCloudNotFound(error)) throw error;
     }
-    return this.getVolume({ volumeId: config.volumeId, location: config.location });
+    return this.getVolume({ volumeId: config.volumeId, location: config.location }, context);
   }
-  async resizeVolume(config: VolumeResizeConfig): Promise<VolumeInstance> {
-    const current = config.currentSizeGb ?? (await this.requireVolume(config)).sizeGb;
+  async resizeVolume(
+    config: VolumeResizeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
+    const current = config.currentSizeGb ?? (await this.requireVolume(config, context)).sizeGb;
     if (config.sizeGb < current)
       throw new ProviderError('upcloud', 400, 'UpCloud storage cannot be shrunk', {
         category: 'invalid_config',
       });
-    if (config.sizeGb === current) return this.requireVolume(config);
+    if (config.sizeGb === current) return this.requireVolume(config, context);
     assertUpCloudVolumeSize(config.sizeGb, UPCLOUD_VOLUME_MIN_SIZE_GB, UPCLOUD_VOLUME_MAX_SIZE_GB);
-    const response = await this.request(`/storage/${encodeURIComponent(config.volumeId)}`, {
-      method: 'PUT',
-      body: JSON.stringify({ storage: { size: config.sizeGb } }),
-    });
+    const response = await this.request(
+      `/storage/${encodeURIComponent(config.volumeId)}`,
+      {
+        method: 'PUT',
+        body: JSON.stringify({ storage: { size: config.sizeGb } }),
+      },
+      context
+    );
     return toUpCloudVolume(
       validateUpCloudStorageResponse(
         await parseProviderJson(response, 'upcloud', 'resizeVolume'),
@@ -333,18 +398,27 @@ export class UpCloudProvider implements Provider {
       )
     );
   }
-  async deleteVolume(config: VolumeLookupConfig): Promise<void> {
-    const volume = await this.getVolume(config);
+  async deleteVolume(config: VolumeLookupConfig, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    const volume = await this.getVolume(config, context);
     if (!volume) return;
     if (volume.attachedServerId)
       throw new ProviderError('upcloud', 409, 'Detach UpCloud storage before deleting it', {
         category: 'invalid_config',
       });
-    await this.deleteStorageIdempotent(config.volumeId);
+    await this.deleteStorageIdempotent(config.volumeId, context);
   }
-  async getVolume(config: VolumeLookupConfig): Promise<VolumeInstance | null> {
+  async getVolume(
+    config: VolumeLookupConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null> {
+    throwIfProviderRequestAborted(context);
     try {
-      const response = await this.request(`/storage/${encodeURIComponent(config.volumeId)}`);
+      const response = await this.request(
+        `/storage/${encodeURIComponent(config.volumeId)}`,
+        {},
+        context
+      );
       const storage = validateUpCloudStorageResponse(
         await parseProviderJson(response, 'upcloud', 'getVolume'),
         'getVolume'
@@ -355,12 +429,17 @@ export class UpCloudProvider implements Provider {
         });
       return toUpCloudVolume(storage);
     } catch (error) {
+      rethrowIfProviderRequestAborted(error, context);
       if (isUpCloudNotFound(error)) return null;
       throw error;
     }
   }
-  async listVolumes(config: VolumeListConfig): Promise<VolumeInstance[]> {
-    const response = await this.request('/storage/normal');
+  async listVolumes(
+    config: VolumeListConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance[]> {
+    throwIfProviderRequestAborted(context);
+    const response = await this.request('/storage/normal', {}, context);
     return validateUpCloudStoragesResponse(
       await parseProviderJson(response, 'upcloud', 'listVolumes'),
       'listVolumes'
@@ -368,51 +447,62 @@ export class UpCloudProvider implements Provider {
       .filter((s) => s.zone === config.location && matchesUpCloudLabels(s.labels, config.labels))
       .map(toUpCloudVolume);
   }
-  private async getServer(id: string) {
+  private async getServer(id: string, context?: ProviderRequestContext) {
+    throwIfProviderRequestAborted(context);
     try {
-      const response = await this.request(`/server/${encodeURIComponent(id)}`);
+      const response = await this.request(`/server/${encodeURIComponent(id)}`, {}, context);
       return validateUpCloudServerResponse(
         await parseProviderJson(response, 'upcloud', 'getVM'),
         'getVM'
       );
     } catch (error) {
+      rethrowIfProviderRequestAborted(error, context);
       if (isUpCloudNotFound(error)) return null;
       throw error;
     }
   }
-  private async assertZoneAvailable(zone: string) {
+  private async assertZoneAvailable(zone: string, context?: ProviderRequestContext) {
+    throwIfProviderRequestAborted(context);
     if (!this.zoneNames) {
-      const response = await this.request('/zone');
-      this.zoneNames = new Set(
+      const response = await this.request('/zone', {}, context);
+      const zoneNames = new Set(
         validateUpCloudZonesResponse(
           await parseProviderJson(response, 'upcloud', 'zones'),
           'zones'
         ).map((value) => value.id)
       );
+      throwIfProviderRequestAborted(context);
+      this.zoneNames = zoneNames;
     }
+    throwIfProviderRequestAborted(context);
     if (!this.zoneNames.has(zone))
       throw new ProviderError('upcloud', 400, 'UpCloud zone is not currently available: ' + zone, {
         category: 'invalid_config',
       });
   }
-  private async assertPlanAvailable(plan: string) {
+  private async assertPlanAvailable(plan: string, context?: ProviderRequestContext) {
+    throwIfProviderRequestAborted(context);
     if (!this.planNames) {
-      const response = await this.request('/plan');
-      this.planNames = new Set(
+      const response = await this.request('/plan', {}, context);
+      const planNames = new Set(
         validateUpCloudPlansResponse(
           await parseProviderJson(response, 'upcloud', 'plans'),
           'plans'
         ).map((value) => value.name)
       );
+      throwIfProviderRequestAborted(context);
+      this.planNames = planNames;
     }
+    throwIfProviderRequestAborted(context);
     if (!this.planNames.has(plan))
       throw new ProviderError('upcloud', 400, 'UpCloud plan is not currently available: ' + plan, {
         category: 'invalid_config',
       });
   }
-  private async resolveTemplate() {
+  private async resolveTemplate(context?: ProviderRequestContext) {
+    throwIfProviderRequestAborted(context);
     if (this.templateId) return this.templateId;
-    const response = await this.request('/storage/template');
+    const response = await this.request('/storage/template', {}, context);
     const templates = validateUpCloudStoragesResponse(
       await parseProviderJson(response, 'upcloud', 'templates'),
       'templates'
@@ -426,38 +516,52 @@ export class UpCloudProvider implements Provider {
       throw new ProviderError('upcloud', 400, `No cloud-init template matches ${this.imageTitle}`, {
         category: 'invalid_config',
       });
-    return (this.templateId = found.uuid);
+    throwIfProviderRequestAborted(context);
+    this.templateId = found.uuid;
+    return found.uuid;
   }
-  private async pollForIp(server: UpCloudServer) {
+  private async pollForIp(server: UpCloudServer, context?: ProviderRequestContext) {
+    throwIfProviderRequestAborted(context);
     const deadline = Date.now() + this.ipPollTimeoutMs;
     while (!publicUpCloudIPv4(server) && Date.now() < deadline) {
-      await upCloudDelay(Math.min(this.ipPollIntervalMs, Math.max(0, deadline - Date.now())));
-      const next = await this.getServer(server.uuid);
+      await providerDelay(
+        Math.min(this.ipPollIntervalMs, Math.max(0, deadline - Date.now())),
+        context
+      );
+      const next = await this.getServer(server.uuid, context);
       if (!next) break;
       server = next;
     }
+    throwIfProviderRequestAborted(context);
     if (!publicUpCloudIPv4(server))
       this.logger.warn('upcloud.ip_poll_timeout', { serverId: server.uuid });
     return server;
   }
-  private async waitForState(id: string, state: string) {
+  private async waitForState(id: string, state: string, context?: ProviderRequestContext) {
+    throwIfProviderRequestAborted(context);
     const deadline = Date.now() + this.ipPollTimeoutMs;
     while (Date.now() < deadline) {
-      const server = await this.getServer(id);
+      const server = await this.getServer(id, context);
       if (!server || server.state === state) return;
-      await upCloudDelay(Math.min(this.ipPollIntervalMs, Math.max(0, deadline - Date.now())));
+      await providerDelay(
+        Math.min(this.ipPollIntervalMs, Math.max(0, deadline - Date.now())),
+        context
+      );
     }
+    throwIfProviderRequestAborted(context);
     throw new ProviderError(
       'upcloud',
       409,
       `Timed out waiting for server ${id} to become ${state}`
     );
   }
-  private async assertLocations(config: VolumeAttachmentConfig) {
+  private async assertLocations(config: VolumeAttachmentConfig, context?: ProviderRequestContext) {
+    throwIfProviderRequestAborted(context);
     const [volume, server] = await Promise.all([
-      this.requireVolume({ volumeId: config.volumeId, location: config.location }),
-      this.getServer(config.serverId),
+      this.requireVolume({ volumeId: config.volumeId, location: config.location }, context),
+      this.getServer(config.serverId, context),
     ]);
+    throwIfProviderRequestAborted(context);
     if (!server) throw new ProviderError('upcloud', 404, 'UpCloud server not found');
     if (volume.location !== config.location || server.zone !== config.location)
       throw new ProviderError(
@@ -467,19 +571,23 @@ export class UpCloudProvider implements Provider {
         { category: 'invalid_config' }
       );
   }
-  private async requireVolume(config: VolumeLookupConfig) {
-    const value = await this.getVolume(config);
+  private async requireVolume(config: VolumeLookupConfig, context?: ProviderRequestContext) {
+    throwIfProviderRequestAborted(context);
+    const value = await this.getVolume(config, context);
     if (!value) throw new ProviderError('upcloud', 404, 'UpCloud storage not found');
     return value;
   }
-  private async deleteStorageIdempotent(id: string) {
+  private async deleteStorageIdempotent(id: string, context?: ProviderRequestContext) {
+    throwIfProviderRequestAborted(context);
     try {
-      await this.request(`/storage/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      await this.request(`/storage/${encodeURIComponent(id)}`, { method: 'DELETE' }, context);
     } catch (error) {
+      rethrowIfProviderRequestAborted(error, context);
       if (!isUpCloudNotFound(error)) throw error;
     }
   }
-  private async request(path: string, init: RequestInit = {}) {
+  private async request(path: string, init: RequestInit = {}, context?: ProviderRequestContext) {
+    throwIfProviderRequestAborted(context);
     try {
       return await providerFetch(
         'upcloud',
@@ -493,9 +601,12 @@ export class UpCloudProvider implements Provider {
             ...init.headers,
           },
         },
-        getTimeoutMs(undefined, this.requestTimeoutMs)
+        getTimeoutMs(undefined, this.requestTimeoutMs),
+        undefined,
+        context
       );
     } catch (error) {
+      rethrowIfProviderRequestAborted(error, context);
       if (error instanceof ProviderError)
         throw new ProviderError('upcloud', error.statusCode, error.message, {
           providerCode: error.providerCode,

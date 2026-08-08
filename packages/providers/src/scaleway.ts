@@ -1,23 +1,19 @@
 import type { VMSize } from '@simple-agent-manager/shared';
-import {
-  DEFAULT_SCALEWAY_IMAGE_NAME,
-  DEFAULT_SCALEWAY_ZONE,
-} from '@simple-agent-manager/shared';
+import { DEFAULT_SCALEWAY_IMAGE_NAME, DEFAULT_SCALEWAY_ZONE } from '@simple-agent-manager/shared';
 
-import { providerFetch } from './provider-fetch';
 import {
-  labelsToScalewayTags,
-  scalewayTagsToLabels,
-} from './scaleway-tags';
-import {
-  SCALEWAY_VOLUME_CAPABILITIES,
-  ScalewayVolumeClient,
-} from './scaleway-volumes';
+  providerFetch,
+  rethrowIfProviderRequestAborted,
+  throwIfProviderRequestAborted,
+} from './provider-fetch';
+import { labelsToScalewayTags, scalewayTagsToLabels } from './scaleway-tags';
+import { SCALEWAY_VOLUME_CAPABILITIES, ScalewayVolumeClient } from './scaleway-volumes';
 import type {
   LocationMeta,
   Provider,
   ProviderErrorCategory,
   ProviderErrorContext,
+  ProviderRequestContext,
   SizeConfig,
   VMConfig,
   VMInstance,
@@ -64,7 +60,7 @@ const SCALEWAY_INSTANCE_API_URL = 'https://api.scaleway.com/instance/v1/zones';
 export function classifyScalewayError(
   statusCode: number | undefined,
   providerCode: string | undefined,
-  message: string,
+  message: string
 ): ProviderErrorCategory {
   if (providerCode) {
     switch (providerCode) {
@@ -96,9 +92,14 @@ export function classifyScalewayError(
 }
 
 export const SCALEWAY_LOCATIONS = [
-  'fr-par-1', 'fr-par-2', 'fr-par-3',
-  'nl-ams-1', 'nl-ams-2', 'nl-ams-3',
-  'pl-waw-1', 'pl-waw-2',
+  'fr-par-1',
+  'fr-par-2',
+  'fr-par-3',
+  'nl-ams-1',
+  'nl-ams-2',
+  'nl-ams-3',
+  'pl-waw-1',
+  'pl-waw-2',
 ] as const;
 
 const SCALEWAY_LOCATION_META: Record<string, LocationMeta> = {
@@ -150,21 +151,14 @@ export class ScalewayProvider implements Provider {
   private readonly imageName: string;
   private readonly volumeClient: ScalewayVolumeClient;
 
-  constructor(
-    secretKey: string,
-    projectId: string,
-    zone?: string,
-    imageName?: string,
-  ) {
+  constructor(secretKey: string, projectId: string, zone?: string, imageName?: string) {
     this.secretKey = secretKey;
     this.projectId = projectId;
     this.zone = zone || DEFAULT_SCALEWAY_ZONE;
     this.defaultLocation = this.zone;
     this.imageName = imageName || DEFAULT_SCALEWAY_IMAGE_NAME;
-    this.volumeClient = new ScalewayVolumeClient(
-      this.secretKey,
-      this.projectId,
-      (err) => this.mapProviderError(err),
+    this.volumeClient = new ScalewayVolumeClient(this.secretKey, this.projectId, (err) =>
+      this.mapProviderError(err)
     );
   }
 
@@ -178,7 +172,8 @@ export class ScalewayProvider implements Provider {
    * will have an empty `ip` field. The caller (provisionNode) handles this via
    * fail-fast guard + heartbeat IP backfill.
    */
-  async createVM(config: VMConfig): Promise<VMInstance> {
+  async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
+    throwIfProviderRequestAborted(context);
     const sizeConfig = this.sizes[config.size];
     if (!sizeConfig) {
       throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`);
@@ -186,7 +181,7 @@ export class ScalewayProvider implements Provider {
     const location = config.location || this.zone;
 
     // Resolve image UUID by name for the target zone
-    const imageId = await this.resolveImageId(location, config.image);
+    const imageId = await this.resolveImageId(location, config.image, context);
 
     // Convert labels to tags: ["key=value", ...]
     const tags = labelsToScalewayTags(config.labels || {});
@@ -210,12 +205,17 @@ export class ScalewayProvider implements Provider {
           tags,
         }),
       },
+      undefined,
+      undefined,
+      context
     );
+    throwIfProviderRequestAborted(context);
 
     const createData = validateScalewayServerResponse(
       await parseProviderJson(createResponse, this.name, 'createVM.createServer'),
-      'createVM.createServer',
+      'createVM.createServer'
     );
+    throwIfProviderRequestAborted(context);
     const serverId = createData.server.id;
 
     try {
@@ -231,16 +231,28 @@ export class ScalewayProvider implements Provider {
           },
           body: config.userData,
         },
+        undefined,
+        undefined,
+        context
       );
+      throwIfProviderRequestAborted(context);
     } catch (err) {
-      throw await this.withCreatedServerCleanupContext(err, location, serverId, 'cloud-init-upload');
+      rethrowIfProviderRequestAborted(err, context);
+      throw await this.withCreatedServerCleanupContext(
+        err,
+        location,
+        serverId,
+        'cloud-init-upload',
+        context
+      );
     }
 
     try {
       // Step 3: Power on
-      await this.performAction(location, serverId, 'poweron');
+      await this.performAction(location, serverId, 'poweron', context);
     } catch (err) {
-      throw await this.withCreatedServerCleanupContext(err, location, serverId, 'poweron');
+      rethrowIfProviderRequestAborted(err, context);
+      throw await this.withCreatedServerCleanupContext(err, location, serverId, 'poweron', context);
     }
 
     // Return immediately — IP will be empty at this point.
@@ -250,19 +262,26 @@ export class ScalewayProvider implements Provider {
     return this.mapServerToVMInstance(createData.server);
   }
 
-  async deleteVM(id: string): Promise<void> {
-    const server = await this.findServerInAnyZone(id);
+  async deleteVM(id: string, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    const server = await this.findServerInAnyZone(id, context);
     if (!server) return;
 
-    await this.cleanupKnownServer(server.zone, id);
+    await this.cleanupKnownServer(server.zone, id, context);
   }
 
-  private async cleanupKnownServer(zone: string, serverId: string): Promise<void> {
+  private async cleanupKnownServer(
+    zone: string,
+    serverId: string,
+    context?: ProviderRequestContext
+  ): Promise<void> {
+    throwIfProviderRequestAborted(context);
     try {
       // Scaleway cannot delete running servers — try terminate action first
       // which handles poweroff + delete in one step
-      await this.performAction(zone, serverId, 'terminate');
+      await this.performAction(zone, serverId, 'terminate', context);
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       if (err instanceof ProviderError && err.statusCode === 404) {
         return; // Idempotent: already deleted
       }
@@ -276,8 +295,13 @@ export class ScalewayProvider implements Provider {
               method: 'DELETE',
               headers: { 'X-Auth-Token': this.secretKey },
             },
+            undefined,
+            undefined,
+            context
           );
+          throwIfProviderRequestAborted(context);
         } catch (deleteErr) {
+          rethrowIfProviderRequestAborted(deleteErr, context);
           if (deleteErr instanceof ProviderError && deleteErr.statusCode === 404) {
             return; // Idempotent
           }
@@ -294,11 +318,13 @@ export class ScalewayProvider implements Provider {
     zone: string,
     serverId: string,
     failedStep: 'cloud-init-upload' | 'poweron',
+    context?: ProviderRequestContext
   ): Promise<Error> {
     try {
-      await this.cleanupKnownServer(zone, serverId);
+      await this.cleanupKnownServer(zone, serverId, context);
       return this.normalizeCreateFailure(original);
     } catch (cleanupErr) {
+      rethrowIfProviderRequestAborted(cleanupErr, context);
       const originalError = this.normalizeCreateFailure(original);
       return new ProviderError(
         this.name,
@@ -310,12 +336,16 @@ export class ScalewayProvider implements Provider {
             failedStep,
             cleanup: this.cleanupContext(zone, serverId, cleanupErr),
           },
-        },
+        }
       );
     }
   }
 
-  private cleanupContext(zone: string, serverId: string, cleanupErr: unknown): ProviderErrorContext {
+  private cleanupContext(
+    zone: string,
+    serverId: string,
+    cleanupErr: unknown
+  ): ProviderErrorContext {
     return {
       operation: 'cleanup-created-server',
       provider: this.name,
@@ -350,12 +380,17 @@ export class ScalewayProvider implements Provider {
     return new ProviderError(this.name, undefined, `Scaleway createVM failed: ${String(err)}`);
   }
 
-  async getVM(id: string): Promise<VMInstance | null> {
-    const server = await this.findServerInAnyZone(id);
+  async getVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null> {
+    throwIfProviderRequestAborted(context);
+    const server = await this.findServerInAnyZone(id, context);
     return server ? this.mapServerToVMInstance(server.payload) : null;
   }
 
-  async listVMs(labels?: Record<string, string>): Promise<VMInstance[]> {
+  async listVMs(
+    labels?: Record<string, string>,
+    context?: ProviderRequestContext
+  ): Promise<VMInstance[]> {
+    throwIfProviderRequestAborted(context);
     const params = new URLSearchParams();
     if (labels) {
       // Scaleway filters by individual tags — use the first label as primary filter
@@ -367,22 +402,31 @@ export class ScalewayProvider implements Provider {
 
     const vms: VMInstance[] = [];
     for (const zone of this.scalewayZones()) {
+      throwIfProviderRequestAborted(context);
       const queryString = params.toString();
       const url = queryString
         ? `${SCALEWAY_INSTANCE_API_URL}/${zone}/servers?${queryString}`
         : `${SCALEWAY_INSTANCE_API_URL}/${zone}/servers`;
 
       try {
-        const response = await providerFetch(this.name, url, {
-          headers: { 'X-Auth-Token': this.secretKey },
-        });
+        const response = await providerFetch(
+          this.name,
+          url,
+          { headers: { 'X-Auth-Token': this.secretKey } },
+          undefined,
+          undefined,
+          context
+        );
+        throwIfProviderRequestAborted(context);
 
         const data = validateScalewayServersResponse(
           await parseProviderJson(response, this.name, `listVMs.${zone}`),
-          `listVMs.${zone}`,
+          `listVMs.${zone}`
         );
+        throwIfProviderRequestAborted(context);
         vms.push(...data.servers.map((server) => this.mapServerToVMInstance(server)));
       } catch (err) {
+        rethrowIfProviderRequestAborted(err, context);
         if (err instanceof ProviderError && err.statusCode === 404) continue;
         throw err;
       }
@@ -390,23 +434,26 @@ export class ScalewayProvider implements Provider {
     return vms;
   }
 
-  async powerOff(id: string): Promise<void> {
-    const server = await this.findServerInAnyZone(id);
+  async powerOff(id: string, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    const server = await this.findServerInAnyZone(id, context);
     if (!server) {
       throw new ProviderError(this.name, 404, `Scaleway server ${id} not found`);
     }
-    await this.performAction(server.zone, id, 'poweroff');
+    await this.performAction(server.zone, id, 'poweroff', context);
   }
 
-  async powerOn(id: string): Promise<void> {
-    const server = await this.findServerInAnyZone(id);
+  async powerOn(id: string, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    const server = await this.findServerInAnyZone(id, context);
     if (!server) {
       throw new ProviderError(this.name, 404, `Scaleway server ${id} not found`);
     }
-    await this.performAction(server.zone, id, 'poweron');
+    await this.performAction(server.zone, id, 'poweron', context);
   }
 
-  async validateToken(): Promise<boolean> {
+  async validateToken(context?: ProviderRequestContext): Promise<boolean> {
+    throwIfProviderRequestAborted(context);
     // Validate by listing servers scoped to the user's project.
     // The Account API v3 requires organization_id which we don't collect,
     // so we use the Instance API instead — this also validates that the
@@ -417,43 +464,70 @@ export class ScalewayProvider implements Provider {
       {
         headers: { 'X-Auth-Token': this.secretKey },
       },
+      undefined,
+      undefined,
+      context
     );
+    throwIfProviderRequestAborted(context);
     return true;
   }
 
-  async createVolume(config: VolumeConfig): Promise<VolumeInstance> {
-    return this.volumeClient.createVolume(config);
+  async createVolume(
+    config: VolumeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    return this.volumeClient.createVolume(config, context);
   }
 
-  async attachVolume(config: VolumeAttachmentConfig): Promise<VolumeInstance> {
-    return this.volumeClient.attachVolume(config);
+  async attachVolume(
+    config: VolumeAttachmentConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    return this.volumeClient.attachVolume(config, context);
   }
 
-  async detachVolume(config: VolumeDetachConfig): Promise<VolumeInstance | null> {
-    return this.volumeClient.detachVolume(config);
+  async detachVolume(
+    config: VolumeDetachConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null> {
+    return this.volumeClient.detachVolume(config, context);
   }
 
-  async resizeVolume(config: VolumeResizeConfig): Promise<VolumeInstance> {
-    return this.volumeClient.resizeVolume(config);
+  async resizeVolume(
+    config: VolumeResizeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    return this.volumeClient.resizeVolume(config, context);
   }
 
-  async deleteVolume(config: VolumeLookupConfig): Promise<void> {
-    await this.volumeClient.deleteVolume(config);
+  async deleteVolume(config: VolumeLookupConfig, context?: ProviderRequestContext): Promise<void> {
+    await this.volumeClient.deleteVolume(config, context);
   }
 
-  async getVolume(config: VolumeLookupConfig): Promise<VolumeInstance | null> {
-    return this.volumeClient.getVolume(config);
+  async getVolume(
+    config: VolumeLookupConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null> {
+    return this.volumeClient.getVolume(config, context);
   }
 
-  async listVolumes(config: VolumeListConfig): Promise<VolumeInstance[]> {
-    return this.volumeClient.listVolumes(config);
+  async listVolumes(
+    config: VolumeListConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance[]> {
+    return this.volumeClient.listVolumes(config, context);
   }
 
   /**
    * Resolve an OS image UUID by name for a given zone.
    * If the image parameter looks like a UUID, use it directly.
    */
-  private async resolveImageId(zone: string, image?: string): Promise<string> {
+  private async resolveImageId(
+    zone: string,
+    image?: string,
+    context?: ProviderRequestContext
+  ): Promise<string> {
+    throwIfProviderRequestAborted(context);
     // If caller provided a UUID-like string, use it directly
     if (image && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(image)) {
       return image;
@@ -466,17 +540,22 @@ export class ScalewayProvider implements Provider {
       {
         headers: { 'X-Auth-Token': this.secretKey },
       },
+      undefined,
+      undefined,
+      context
     );
+    throwIfProviderRequestAborted(context);
 
     const data = validateScalewayImageResponse(
       await parseProviderJson(response, this.name, 'resolveImageId'),
-      'resolveImageId',
+      'resolveImageId'
     );
+    throwIfProviderRequestAborted(context);
     if (data.images.length === 0) {
       throw new ProviderError(
         this.name,
         undefined,
-        `No image found matching name "${imageName}" in zone ${zone}`,
+        `No image found matching name "${imageName}" in zone ${zone}`
       );
     }
 
@@ -485,13 +564,19 @@ export class ScalewayProvider implements Provider {
       throw new ProviderError(
         this.name,
         undefined,
-        `No image found matching name "${imageName}" in zone ${zone}`,
+        `No image found matching name "${imageName}" in zone ${zone}`
       );
     }
     return firstImage.id;
   }
 
-  private async performAction(zone: string, serverId: string, action: string): Promise<void> {
+  private async performAction(
+    zone: string,
+    serverId: string,
+    action: string,
+    context?: ProviderRequestContext
+  ): Promise<void> {
+    throwIfProviderRequestAborted(context);
     await providerFetch(
       this.name,
       `${SCALEWAY_INSTANCE_API_URL}/${zone}/servers/${serverId}/action`,
@@ -503,11 +588,19 @@ export class ScalewayProvider implements Provider {
         },
         body: JSON.stringify({ action }),
       },
+      undefined,
+      undefined,
+      context
     );
+    throwIfProviderRequestAborted(context);
   }
 
-  private async findServerInAnyZone(id: string): Promise<{ zone: string; payload: ScalewayServerPayload } | null> {
+  private async findServerInAnyZone(
+    id: string,
+    context?: ProviderRequestContext
+  ): Promise<{ zone: string; payload: ScalewayServerPayload } | null> {
     for (const zone of this.scalewayZones()) {
+      throwIfProviderRequestAborted(context);
       try {
         const response = await providerFetch(
           this.name,
@@ -515,14 +608,20 @@ export class ScalewayProvider implements Provider {
           {
             headers: { 'X-Auth-Token': this.secretKey },
           },
+          undefined,
+          undefined,
+          context
         );
+        throwIfProviderRequestAborted(context);
 
         const data = validateScalewayServerResponse(
           await parseProviderJson(response, this.name, `findServerInAnyZone.${zone}`),
-          `findServerInAnyZone.${zone}`,
+          `findServerInAnyZone.${zone}`
         );
+        throwIfProviderRequestAborted(context);
         return { zone, payload: data.server };
       } catch (err) {
+        rethrowIfProviderRequestAborted(err, context);
         if (err instanceof ProviderError && err.statusCode === 404) continue;
         throw err;
       }
@@ -531,10 +630,7 @@ export class ScalewayProvider implements Provider {
   }
 
   private scalewayZones(): readonly string[] {
-    return [
-      this.zone,
-      ...SCALEWAY_LOCATIONS.filter((zone) => zone !== this.zone),
-    ];
+    return [this.zone, ...SCALEWAY_LOCATIONS.filter((zone) => zone !== this.zone)];
   }
 
   private mapServerToVMInstance(server: ScalewayServerPayload): VMInstance {
@@ -577,5 +673,4 @@ export class ScalewayProvider implements Provider {
         return 'initializing';
     }
   }
-
 }

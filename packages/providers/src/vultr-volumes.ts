@@ -1,5 +1,10 @@
-import { providerFetch } from './provider-fetch';
+import {
+  providerFetch,
+  rethrowIfProviderRequestAborted,
+  throwIfProviderRequestAborted,
+} from './provider-fetch';
 import type {
+  ProviderRequestContext,
   VolumeAttachmentConfig,
   VolumeCapabilities,
   VolumeConfig,
@@ -60,10 +65,14 @@ export class VultrVolumeClient {
   constructor(
     private readonly apiToken: string,
     private readonly mapProviderError: VultrErrorMapper,
-    private readonly requestTimeoutMs: number,
+    private readonly requestTimeoutMs: number
   ) {}
 
-  async createVolume(config: VolumeConfig): Promise<VolumeInstance> {
+  async createVolume(
+    config: VolumeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
     this.validateRequestedVolumeSize(config.sizeGb);
 
     const label = encodeVultrBlockLabel({
@@ -73,87 +82,145 @@ export class VultrVolumeClient {
 
     let response: Response;
     try {
-      response = await this.vultrFetch('/blocks', {
-        method: 'POST',
-        body: JSON.stringify({
-          region: config.location,
-          size_gb: config.sizeGb,
-          label,
-          block_type: VULTR_BLOCK_TYPE,
-        }),
-      });
+      response = await this.vultrFetch(
+        '/blocks',
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            region: config.location,
+            size_gb: config.sizeGb,
+            label,
+            block_type: VULTR_BLOCK_TYPE,
+          }),
+        },
+        context
+      );
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       throw this.mapProviderError(err);
     }
 
+    throwIfProviderRequestAborted(context);
     const data = validateVultrBlockResponse(
       await parseProviderJson(response, 'vultr', 'createVolume'),
-      'createVolume',
+      'createVolume'
     );
+    throwIfProviderRequestAborted(context);
     return this.mapVolume(data.block);
   }
 
-  async attachVolume(config: VolumeAttachmentConfig): Promise<VolumeInstance> {
-    await this.vultrFetch(`/blocks/${encodeURIComponent(config.volumeId)}/attach`, {
-      method: 'POST',
-      body: JSON.stringify({ instance_id: config.serverId, live: true }),
-    });
+  async attachVolume(
+    config: VolumeAttachmentConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
+    await this.vultrFetch(
+      `/blocks/${encodeURIComponent(config.volumeId)}/attach`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ instance_id: config.serverId, live: true }),
+      },
+      context
+    );
 
-    const volume = await this.getVolume({ volumeId: config.volumeId, location: config.location });
+    throwIfProviderRequestAborted(context);
+    const volume = await this.getVolume(
+      { volumeId: config.volumeId, location: config.location },
+      context
+    );
     if (!volume) {
-      throw new ProviderError('vultr', 404, `Vultr block ${config.volumeId} not found after attach`, {
-        category: 'invalid_config',
-      });
+      throw new ProviderError(
+        'vultr',
+        404,
+        `Vultr block ${config.volumeId} not found after attach`,
+        {
+          category: 'invalid_config',
+        }
+      );
     }
     return volume;
   }
 
-  async detachVolume(config: VolumeDetachConfig): Promise<VolumeInstance | null> {
+  async detachVolume(
+    config: VolumeDetachConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null> {
+    throwIfProviderRequestAborted(context);
     try {
-      await this.vultrFetch(`/blocks/${encodeURIComponent(config.volumeId)}/detach`, {
-        method: 'POST',
-        body: JSON.stringify({ live: true }),
-      });
+      await this.vultrFetch(
+        `/blocks/${encodeURIComponent(config.volumeId)}/detach`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ live: true }),
+        },
+        context
+      );
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       if (err instanceof ProviderError && err.statusCode === 404) {
         return null;
       }
       throw err;
     }
 
-    return this.getVolume({ volumeId: config.volumeId, location: config.location });
+    throwIfProviderRequestAborted(context);
+    return this.getVolume({ volumeId: config.volumeId, location: config.location }, context);
   }
 
-  async resizeVolume(config: VolumeResizeConfig): Promise<VolumeInstance> {
+  async resizeVolume(
+    config: VolumeResizeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
     this.validateRequestedVolumeSize(config.sizeGb);
-    const currentSizeGb = config.currentSizeGb ?? (await this.getCurrentVolumeSize(config));
+    const currentSizeGb =
+      config.currentSizeGb ?? (await this.getCurrentVolumeSize(config, context));
     if (config.sizeGb < currentSizeGb) {
       throw new ProviderError(
         'vultr',
         undefined,
         `Cannot shrink Vultr block ${config.volumeId} from ${currentSizeGb}GB to ${config.sizeGb}GB`,
-        { category: 'invalid_config' },
+        { category: 'invalid_config' }
       );
     }
 
-    await this.vultrFetch(`/blocks/${encodeURIComponent(config.volumeId)}`, {
-      method: 'PATCH',
-      body: JSON.stringify({ size_gb: config.sizeGb }),
-    });
+    await this.vultrFetch(
+      `/blocks/${encodeURIComponent(config.volumeId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify({ size_gb: config.sizeGb }),
+      },
+      context
+    );
 
-    const volume = await this.getVolume({ volumeId: config.volumeId, location: config.location });
+    throwIfProviderRequestAborted(context);
+    const volume = await this.getVolume(
+      { volumeId: config.volumeId, location: config.location },
+      context
+    );
     if (!volume) {
-      throw new ProviderError('vultr', 404, `Vultr block ${config.volumeId} not found after resize`, {
-        category: 'invalid_config',
-      });
+      throw new ProviderError(
+        'vultr',
+        404,
+        `Vultr block ${config.volumeId} not found after resize`,
+        {
+          category: 'invalid_config',
+        }
+      );
     }
     return volume;
   }
 
-  async deleteVolume(config: VolumeLookupConfig): Promise<void> {
+  async deleteVolume(config: VolumeLookupConfig, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
     try {
-      await this.vultrFetch(`/blocks/${encodeURIComponent(config.volumeId)}`, { method: 'DELETE' });
+      await this.vultrFetch(
+        `/blocks/${encodeURIComponent(config.volumeId)}`,
+        { method: 'DELETE' },
+        context
+      );
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       if (err instanceof ProviderError && err.statusCode === 404) {
         return; // Idempotent
       }
@@ -161,15 +228,26 @@ export class VultrVolumeClient {
     }
   }
 
-  async getVolume(config: VolumeLookupConfig): Promise<VolumeInstance | null> {
+  async getVolume(
+    config: VolumeLookupConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null> {
+    throwIfProviderRequestAborted(context);
     try {
-      const response = await this.vultrFetch(`/blocks/${encodeURIComponent(config.volumeId)}`);
+      const response = await this.vultrFetch(
+        `/blocks/${encodeURIComponent(config.volumeId)}`,
+        undefined,
+        context
+      );
+      throwIfProviderRequestAborted(context);
       const data = validateVultrBlockResponse(
         await parseProviderJson(response, 'vultr', 'getVolume'),
-        'getVolume',
+        'getVolume'
       );
+      throwIfProviderRequestAborted(context);
       return this.mapVolume(data.block);
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       if (err instanceof ProviderError && err.statusCode === 404) {
         return null;
       }
@@ -177,29 +255,39 @@ export class VultrVolumeClient {
     }
   }
 
-  async listVolumes(config: VolumeListConfig): Promise<VolumeInstance[]> {
-    const blocks = await this.fetchAllBlocks();
+  async listVolumes(
+    config: VolumeListConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance[]> {
+    throwIfProviderRequestAborted(context);
+    const blocks = await this.fetchAllBlocks(context);
+    throwIfProviderRequestAborted(context);
     let volumes = blocks
       .map((block) => this.mapVolume(block))
       .filter((volume) => volume.location === config.location);
 
     if (config.labels && Object.keys(config.labels).length > 0) {
       const entries = Object.entries(config.labels);
-      volumes = volumes.filter((volume) => entries.every(([key, value]) => volume.labels[key] === value));
+      volumes = volumes.filter((volume) =>
+        entries.every(([key, value]) => volume.labels[key] === value)
+      );
     }
     return volumes;
   }
 
-  private async fetchAllBlocks(): Promise<VultrBlockPayload[]> {
+  private async fetchAllBlocks(context?: ProviderRequestContext): Promise<VultrBlockPayload[]> {
+    throwIfProviderRequestAborted(context);
     const all: VultrBlockPayload[] = [];
     let cursor: string | undefined;
     for (let page = 0; page < VULTR_MAX_LIST_PAGES; page += 1) {
+      throwIfProviderRequestAborted(context);
       const params = new URLSearchParams({ per_page: String(VULTR_LIST_PER_PAGE) });
       if (cursor) params.set('cursor', cursor);
-      const response = await this.vultrFetch(`/blocks?${params.toString()}`);
+      const response = await this.vultrFetch(`/blocks?${params.toString()}`, undefined, context);
+      throwIfProviderRequestAborted(context);
       const data = validateVultrBlocksResponse(
         await parseProviderJson(response, 'vultr', 'listVolumes'),
-        'listVolumes',
+        'listVolumes'
       );
       all.push(...data.blocks);
       if (!data.nextCursor) break;
@@ -245,7 +333,7 @@ export class VultrVolumeClient {
         'vultr',
         undefined,
         `Vultr block size must be an integer >= ${VULTR_VOLUME_MIN_SIZE_GB}GB`,
-        { category: 'invalid_config' },
+        { category: 'invalid_config' }
       );
     }
     if (sizeGb > VULTR_VOLUME_MAX_SIZE_GB) {
@@ -253,13 +341,20 @@ export class VultrVolumeClient {
         'vultr',
         undefined,
         `Vultr block size must be <= ${VULTR_VOLUME_MAX_SIZE_GB}GB`,
-        { category: 'invalid_config' },
+        { category: 'invalid_config' }
       );
     }
   }
 
-  private async getCurrentVolumeSize(config: VolumeResizeConfig): Promise<number> {
-    const volume = await this.getVolume({ volumeId: config.volumeId, location: config.location });
+  private async getCurrentVolumeSize(
+    config: VolumeResizeConfig,
+    context?: ProviderRequestContext
+  ): Promise<number> {
+    throwIfProviderRequestAborted(context);
+    const volume = await this.getVolume(
+      { volumeId: config.volumeId, location: config.location },
+      context
+    );
     if (!volume) {
       throw new ProviderError('vultr', 404, `Vultr block ${config.volumeId} not found`, {
         category: 'invalid_config',
@@ -268,7 +363,12 @@ export class VultrVolumeClient {
     return volume.sizeGb;
   }
 
-  private async vultrFetch(path: string, init?: RequestInit): Promise<Response> {
+  private async vultrFetch(
+    path: string,
+    init?: RequestInit,
+    context?: ProviderRequestContext
+  ): Promise<Response> {
+    throwIfProviderRequestAborted(context);
     try {
       return await providerFetch(
         'vultr',
@@ -282,8 +382,11 @@ export class VultrVolumeClient {
           },
         },
         this.requestTimeoutMs,
+        undefined,
+        context
       );
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       throw this.mapProviderError(err);
     }
   }

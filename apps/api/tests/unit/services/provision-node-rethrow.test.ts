@@ -124,42 +124,40 @@ describe('provisionNode backend DNS records', () => {
         errorReportResponseMaxBytes: '2048',
         errorReportStoredErrorMaxBytes: '256',
         errorReportCollectorConcurrency: '2',
-      }),
+      })
     );
   });
 
   it('creates and stores a backend DNS record for deployment nodes with a VM IP', async () => {
-    await provisionNode(
-      'node-1',
-      ENV,
-      undefined,
-      undefined,
-      { environmentId: 'env-1' },
-    );
+    await provisionNode('node-1', ENV, undefined, undefined, { environmentId: 'env-1' });
 
     expect(createNodeBackendDNSRecord).toHaveBeenCalledWith('node-1', '203.0.113.10', ENV);
-    expect(ops).toContainEqual(expect.objectContaining({
-      kind: 'update',
-      set: expect.objectContaining({
-        providerInstanceId: 'provider-vm-1',
-        ipAddress: '203.0.113.10',
-        backendDnsRecordId: 'dns-record-id',
-        status: 'running',
-      }),
-    }));
+    expect(ops).toContainEqual(
+      expect.objectContaining({
+        kind: 'update',
+        set: expect.objectContaining({
+          providerInstanceId: 'provider-vm-1',
+          ipAddress: '203.0.113.10',
+          backendDnsRecordId: 'dns-record-id',
+          status: 'running',
+        }),
+      })
+    );
   });
 
   it('keeps existing workspace-node backend DNS behavior intact', async () => {
     await provisionNode('node-1', ENV);
 
     expect(createNodeBackendDNSRecord).toHaveBeenCalledWith('node-1', '203.0.113.10', ENV);
-    expect(ops).toContainEqual(expect.objectContaining({
-      kind: 'update',
-      set: expect.objectContaining({
-        backendDnsRecordId: 'dns-record-id',
-        status: 'running',
-      }),
-    }));
+    expect(ops).toContainEqual(
+      expect.objectContaining({
+        kind: 'update',
+        set: expect.objectContaining({
+          backendDnsRecordId: 'dns-record-id',
+          status: 'running',
+        }),
+      })
+    );
   });
 
   it('uses project-pinned compute attribution when resolving the provider', async () => {
@@ -188,43 +186,41 @@ describe('provisionNode backend DNS records', () => {
       'test-key',
       ENV,
       'hetzner',
-      'project-1',
+      'project-1'
     );
-    expect(ops).toContainEqual(expect.objectContaining({
-      kind: 'update',
-      set: expect.objectContaining({
-        credentialSource: 'project',
-        credentialAttributionUserId: 'member-a',
-        credentialAttributionProjectId: 'project-1',
-        credentialAttributionSource: 'project',
-      }),
-    }));
+    expect(ops).toContainEqual(
+      expect.objectContaining({
+        kind: 'update',
+        set: expect.objectContaining({
+          credentialSource: 'project',
+          credentialAttributionUserId: 'member-a',
+          credentialAttributionProjectId: 'project-1',
+          credentialAttributionSource: 'project',
+        }),
+      })
+    );
   });
 
   it('records explicit node state when backend DNS creation fails', async () => {
     createNodeBackendDNSRecord.mockRejectedValue(new Error('Cloudflare DNS unavailable'));
 
     await expect(
-      provisionNode(
-        'node-1',
-        ENV,
-        undefined,
-        undefined,
-        { environmentId: 'env-1' },
-      )
+      provisionNode('node-1', ENV, undefined, undefined, { environmentId: 'env-1' })
     ).resolves.toBeUndefined();
 
-    expect(ops).toContainEqual(expect.objectContaining({
-      kind: 'update',
-      set: expect.objectContaining({
-        providerInstanceId: 'provider-vm-1',
-        ipAddress: '203.0.113.10',
-        backendDnsRecordId: null,
-        status: 'error',
-        healthStatus: 'unhealthy',
-        errorMessage: expect.stringContaining('Backend DNS record creation failed'),
-      }),
-    }));
+    expect(ops).toContainEqual(
+      expect.objectContaining({
+        kind: 'update',
+        set: expect.objectContaining({
+          providerInstanceId: 'provider-vm-1',
+          ipAddress: '203.0.113.10',
+          backendDnsRecordId: null,
+          status: 'error',
+          healthStatus: 'unhealthy',
+          errorMessage: expect.stringContaining('Backend DNS record creation failed'),
+        }),
+      })
+    );
   });
 });
 
@@ -265,16 +261,11 @@ describe('provisionNode rethrowProviderError', () => {
         operationCountAtAbort = ops.length;
         controller.abort(callerReason);
         throw callerReason;
-      },
+      }
     );
 
     await expect(
-      provisionNode(
-        'node-1',
-        ENV,
-        undefined,
-        { signal: controller.signal } as never,
-      ),
+      provisionNode('node-1', ENV, undefined, { signal: controller.signal })
     ).rejects.toBe(callerReason);
 
     expect(receivedSignal).toBe(controller.signal);

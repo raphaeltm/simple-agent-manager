@@ -1,3 +1,7 @@
+import {
+  type ProviderRequestContext,
+  throwIfProviderRequestAborted,
+} from '@simple-agent-manager/providers';
 import type { GcpServiceAccountKeyCredential } from '@simple-agent-manager/shared';
 import {
   DEFAULT_GCP_API_TIMEOUT_MS,
@@ -13,6 +17,7 @@ import * as v from 'valibot';
 import type { Env } from '../env';
 import { readResponseJson } from '../lib/runtime-validation';
 import { GcpApiError } from './gcp-errors';
+import { fetchGcpWithTimeout as fetchWithTimeout } from './gcp-fetch';
 
 const serviceAccountTokenResponseSchema = v.object({
   access_token: v.string(),
@@ -55,7 +60,7 @@ function apiTimeoutMs(env: Env): number {
  */
 export async function parseGcpServiceAccountJson(
   jsonText: string,
-  defaultZone: string,
+  defaultZone: string
 ): Promise<GcpServiceAccountKeyCredential> {
   let parsed: unknown;
   try {
@@ -107,7 +112,9 @@ export async function parseGcpServiceAccountJson(
 export async function exchangeGcpServiceAccountAccessToken(
   credential: GcpServiceAccountKeyCredential,
   env: Env,
+  context?: ProviderRequestContext
 ): Promise<GcpAccessTokenResult> {
+  throwIfProviderRequestAborted(context);
   let privateKey: CryptoKey;
   try {
     privateKey = await importPKCS8(credential.privateKey, 'RS256');
@@ -139,7 +146,9 @@ export async function exchangeGcpServiceAccountAccessToken(
       }),
     },
     apiTimeoutMs(env),
+    context
   );
+  throwIfProviderRequestAborted(context);
 
   if (!response.ok) {
     throw new GcpApiError({
@@ -152,7 +161,7 @@ export async function exchangeGcpServiceAccountAccessToken(
   const token = await readResponseJson(
     response,
     serviceAccountTokenResponseSchema,
-    'gcp.service_account.token_response',
+    'gcp.service_account.token_response'
   );
   return {
     accessToken: token.access_token,
@@ -169,28 +178,22 @@ export async function verifyGcpServiceAccountAccess(
   credential: GcpServiceAccountKeyCredential,
   accessToken: string,
   env: Env,
+  context?: ProviderRequestContext
 ): Promise<void> {
+  throwIfProviderRequestAborted(context);
   const url = `${DEFAULT_GCP_COMPUTE_API_BASE_URL}/projects/${encodeURIComponent(credential.gcpProjectId)}/zones/${encodeURIComponent(credential.defaultZone)}`;
   const response = await fetchWithTimeout(
     url,
     { headers: { Authorization: `Bearer ${accessToken}` } },
     apiTimeoutMs(env),
+    context
   );
+  throwIfProviderRequestAborted(context);
   if (!response.ok) {
     throw new GcpApiError({
       step: 'service_account_compute_verify',
       message: `Service account cannot access the selected Compute zone (${response.status})`,
       statusCode: response.status,
     });
-  }
-}
-
-async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response> {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    return await fetch(url, { ...init, signal: controller.signal });
-  } finally {
-    clearTimeout(timeoutId);
   }
 }

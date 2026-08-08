@@ -22,6 +22,7 @@ export type {
   ProviderErrorContextValue,
   ProviderLogContext,
   ProviderLogger,
+  ProviderRequestContext,
   ScalewayProviderConfig,
   SizeConfig,
   UpCloudProviderConfig,
@@ -48,7 +49,15 @@ export {
 } from './types';
 
 // Re-export utilities
-export { getMaxProviderErrorBodyChars, getTimeoutMs, providerFetch } from './provider-fetch';
+export {
+  getMaxProviderErrorBodyChars,
+  getTimeoutMs,
+  isProviderRequestAborted,
+  providerDelay,
+  providerFetch,
+  rethrowIfProviderRequestAborted,
+  throwIfProviderRequestAborted,
+} from './provider-fetch';
 
 // Re-export providers and classification functions
 export type { DigitalOceanProviderRuntimeOptions } from './digitalocean';

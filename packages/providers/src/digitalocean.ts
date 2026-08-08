@@ -10,12 +10,18 @@ import {
   DIGITALOCEAN_VOLUME_CAPABILITIES,
   DigitalOceanVolumeClient,
 } from './digitalocean-volumes';
-import { providerFetch } from './provider-fetch';
+import {
+  providerDelay,
+  providerFetch,
+  rethrowIfProviderRequestAborted,
+  throwIfProviderRequestAborted,
+} from './provider-fetch';
 import type {
   LocationMeta,
   Provider,
   ProviderErrorCategory,
   ProviderLogger,
+  ProviderRequestContext,
   SizeConfig,
   VMConfig,
   VMInstance,
@@ -174,10 +180,6 @@ function resolveImage(image: string): string | number {
   return /^\d+$/.test(trimmed) ? Number.parseInt(trimmed, 10) : trimmed;
 }
 
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
 export class DigitalOceanProvider implements Provider {
   readonly name = 'digitalocean';
   readonly locations: readonly string[] = DIGITALOCEAN_LOCATIONS;
@@ -236,7 +238,8 @@ export class DigitalOceanProvider implements Provider {
     );
   }
 
-  async createVM(config: VMConfig): Promise<VMInstance> {
+  async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
+    throwIfProviderRequestAborted(context);
     const sizeConfig = this.sizes[config.size];
     if (!sizeConfig) {
       throw new ProviderError(this.name, undefined, `Unknown VM size: ${config.size}`, {
@@ -245,22 +248,28 @@ export class DigitalOceanProvider implements Provider {
     }
     const region = config.location || this.region;
 
-    const response = await this.doFetch('/droplets', {
-      method: 'POST',
-      body: JSON.stringify({
-        name: sanitizeDropletName(config.name),
-        region,
-        size: sizeConfig.type,
-        image: resolveImage(config.image || this.image),
-        // DigitalOcean user_data is PLAIN TEXT (max 64 KiB) — no base64 needed.
-        user_data: config.userData,
-        tags: labelsToDigitalOceanTags(config.labels || {}),
-        backups: false,
-        ipv6: false,
-        monitoring: false,
-      }),
-    });
+    const response = await this.doFetch(
+      '/droplets',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          name: sanitizeDropletName(config.name),
+          region,
+          size: sizeConfig.type,
+          image: resolveImage(config.image || this.image),
+          // DigitalOcean user_data is PLAIN TEXT (max 64 KiB) — no base64 needed.
+          user_data: config.userData,
+          tags: labelsToDigitalOceanTags(config.labels || {}),
+          backups: false,
+          ipv6: false,
+          monitoring: false,
+        }),
+      },
+      undefined,
+      context
+    );
 
+    throwIfProviderRequestAborted(context);
     const data = validateDigitalOceanDropletResponse(
       await parseProviderJson(response, this.name, 'createVM'),
       'createVM'
@@ -271,27 +280,43 @@ export class DigitalOceanProvider implements Provider {
     // tolerates it and the heartbeat IP backfill self-heals on first heartbeat.
     const ip = await this.pollForIp(
       String(data.droplet.id),
-      extractPublicIp(data.droplet.networks_v4)
+      extractPublicIp(data.droplet.networks_v4),
+      context
     );
+    throwIfProviderRequestAborted(context);
     return { ...this.mapDroplet(data.droplet), ip };
   }
 
-  async deleteVM(id: string): Promise<void> {
+  async deleteVM(id: string, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
     try {
-      await this.doFetch(`/droplets/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      await this.doFetch(
+        `/droplets/${encodeURIComponent(id)}`,
+        { method: 'DELETE' },
+        undefined,
+        context
+      );
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       if (err instanceof ProviderError && err.statusCode === 404) return; // Idempotent
       throw err;
     }
   }
 
-  async getVM(id: string): Promise<VMInstance | null> {
-    const droplet = await this.getDropletRaw(id);
+  async getVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null> {
+    throwIfProviderRequestAborted(context);
+    const droplet = await this.getDropletRaw(id, undefined, context);
+    throwIfProviderRequestAborted(context);
     return droplet ? this.mapDroplet(droplet) : null;
   }
 
-  async listVMs(labels?: Record<string, string>): Promise<VMInstance[]> {
-    const droplets = await this.fetchAllDroplets();
+  async listVMs(
+    labels?: Record<string, string>,
+    context?: ProviderRequestContext
+  ): Promise<VMInstance[]> {
+    throwIfProviderRequestAborted(context);
+    const droplets = await this.fetchAllDroplets(context);
+    throwIfProviderRequestAborted(context);
     let result = droplets.map((droplet) => this.mapDroplet(droplet));
     if (labels && Object.keys(labels).length > 0) {
       const entries = Object.entries(labels);
@@ -300,56 +325,92 @@ export class DigitalOceanProvider implements Provider {
     return result;
   }
 
-  async powerOff(id: string): Promise<void> {
+  async powerOff(id: string, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
     // Hard power-off — matches Hetzner/Vultr semantics (SAM does not await async completion).
-    await this.dropletAction(id, 'power_off');
+    await this.dropletAction(id, 'power_off', context);
   }
 
-  async powerOn(id: string): Promise<void> {
-    await this.dropletAction(id, 'power_on');
+  async powerOn(id: string, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    await this.dropletAction(id, 'power_on', context);
   }
 
-  async validateToken(): Promise<boolean> {
-    await this.doFetch('/account');
+  async validateToken(context?: ProviderRequestContext): Promise<boolean> {
+    throwIfProviderRequestAborted(context);
+    await this.doFetch('/account', undefined, undefined, context);
+    throwIfProviderRequestAborted(context);
     return true;
   }
 
-  createVolume(config: VolumeConfig): Promise<VolumeInstance> {
-    return this.volumeClient.createVolume(config);
+  createVolume(config: VolumeConfig, context?: ProviderRequestContext): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
+    return this.volumeClient.createVolume(config, context);
   }
 
-  attachVolume(config: VolumeAttachmentConfig): Promise<VolumeInstance> {
-    return this.volumeClient.attachVolume(config);
+  attachVolume(
+    config: VolumeAttachmentConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
+    return this.volumeClient.attachVolume(config, context);
   }
 
-  detachVolume(config: VolumeDetachConfig): Promise<VolumeInstance | null> {
-    return this.volumeClient.detachVolume(config);
+  detachVolume(
+    config: VolumeDetachConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null> {
+    throwIfProviderRequestAborted(context);
+    return this.volumeClient.detachVolume(config, context);
   }
 
-  resizeVolume(config: VolumeResizeConfig): Promise<VolumeInstance> {
-    return this.volumeClient.resizeVolume(config);
+  resizeVolume(
+    config: VolumeResizeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
+    return this.volumeClient.resizeVolume(config, context);
   }
 
-  async deleteVolume(config: VolumeLookupConfig): Promise<void> {
-    await this.volumeClient.deleteVolume(config);
+  async deleteVolume(config: VolumeLookupConfig, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    await this.volumeClient.deleteVolume(config, context);
   }
 
-  getVolume(config: VolumeLookupConfig): Promise<VolumeInstance | null> {
-    return this.volumeClient.getVolume(config);
+  getVolume(
+    config: VolumeLookupConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null> {
+    throwIfProviderRequestAborted(context);
+    return this.volumeClient.getVolume(config, context);
   }
 
-  listVolumes(config: VolumeListConfig): Promise<VolumeInstance[]> {
-    return this.volumeClient.listVolumes(config);
+  listVolumes(
+    config: VolumeListConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance[]> {
+    throwIfProviderRequestAborted(context);
+    return this.volumeClient.listVolumes(config, context);
   }
 
-  private async fetchAllDroplets(): Promise<DigitalOceanDropletPayload[]> {
+  private async fetchAllDroplets(
+    context?: ProviderRequestContext
+  ): Promise<DigitalOceanDropletPayload[]> {
+    throwIfProviderRequestAborted(context);
     const all: DigitalOceanDropletPayload[] = [];
     for (let page = 1; page <= this.maxListPages; page += 1) {
+      throwIfProviderRequestAborted(context);
       const params = new URLSearchParams({
         per_page: String(DIGITALOCEAN_LIST_PER_PAGE),
         page: String(page),
       });
-      const response = await this.doFetch(`/droplets?${params.toString()}`);
+      const response = await this.doFetch(
+        `/droplets?${params.toString()}`,
+        undefined,
+        undefined,
+        context
+      );
+      throwIfProviderRequestAborted(context);
       const data = validateDigitalOceanDropletsResponse(
         await parseProviderJson(response, this.name, 'listVMs'),
         'listVMs'
@@ -366,26 +427,36 @@ export class DigitalOceanProvider implements Provider {
 
   private async getDropletRaw(
     id: string,
-    timeoutMs?: number
+    timeoutMs?: number,
+    context?: ProviderRequestContext
   ): Promise<DigitalOceanDropletPayload | null> {
+    throwIfProviderRequestAborted(context);
     try {
       const response = await this.doFetch(
         `/droplets/${encodeURIComponent(id)}`,
         undefined,
-        timeoutMs
+        timeoutMs,
+        context
       );
+      throwIfProviderRequestAborted(context);
       const data = validateDigitalOceanDropletResponse(
         await parseProviderJson(response, this.name, 'getVM'),
         'getVM'
       );
       return data.droplet;
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       if (err instanceof ProviderError && err.statusCode === 404) return null;
       throw err;
     }
   }
 
-  private async pollForIp(dropletId: string, initialIp: string): Promise<string> {
+  private async pollForIp(
+    dropletId: string,
+    initialIp: string,
+    context?: ProviderRequestContext
+  ): Promise<string> {
+    throwIfProviderRequestAborted(context);
     if (initialIp) return initialIp;
 
     // Hard-bound total wall time to ipPollTimeoutMs: cap both the inter-poll delay and
@@ -393,28 +464,40 @@ export class DigitalOceanProvider implements Provider {
     // overshoot. Best-effort — heartbeat IP backfill is the durable fallback.
     const deadline = Date.now() + this.ipPollTimeoutMs;
     while (Date.now() < deadline) {
-      await delay(Math.min(this.ipPollIntervalMs, deadline - Date.now()));
+      await providerDelay(Math.min(this.ipPollIntervalMs, deadline - Date.now()), context);
       const remaining = deadline - Date.now();
       if (remaining <= 0) break;
       try {
         const droplet = await this.getDropletRaw(
           dropletId,
-          Math.min(this.requestTimeoutMs, remaining)
+          Math.min(this.requestTimeoutMs, remaining),
+          context
         );
         const ip = extractPublicIp(droplet?.networks_v4 ?? []);
         if (ip) return ip;
-      } catch {
+      } catch (err) {
+        rethrowIfProviderRequestAborted(err, context);
         this.logger.warn('digitalocean.ip_poll_error', { dropletId });
       }
     }
     return '';
   }
 
-  private async dropletAction(id: string, type: 'power_off' | 'power_on'): Promise<void> {
-    await this.doFetch(`/droplets/${encodeURIComponent(id)}/actions`, {
-      method: 'POST',
-      body: JSON.stringify({ type }),
-    });
+  private async dropletAction(
+    id: string,
+    type: 'power_off' | 'power_on',
+    context?: ProviderRequestContext
+  ): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    await this.doFetch(
+      `/droplets/${encodeURIComponent(id)}/actions`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ type }),
+      },
+      undefined,
+      context
+    );
   }
 
   private mapDroplet(droplet: DigitalOceanDropletPayload): VMInstance {
@@ -432,8 +515,10 @@ export class DigitalOceanProvider implements Provider {
   private async doFetch(
     path: string,
     init?: RequestInit,
-    timeoutMs: number = this.requestTimeoutMs
+    timeoutMs: number = this.requestTimeoutMs,
+    context?: ProviderRequestContext
   ): Promise<Response> {
+    throwIfProviderRequestAborted(context);
     try {
       return await providerFetch(
         this.name,
@@ -446,9 +531,12 @@ export class DigitalOceanProvider implements Provider {
             ...(init?.headers ?? {}),
           },
         },
-        timeoutMs
+        timeoutMs,
+        undefined,
+        context
       );
     } catch (err) {
+      rethrowIfProviderRequestAborted(err, context);
       throw this.mapProviderError(err);
     }
   }

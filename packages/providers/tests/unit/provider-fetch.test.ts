@@ -52,16 +52,6 @@ describe('getMaxProviderErrorBodyChars', () => {
 describe('providerFetch', () => {
   const originalFetch = globalThis.fetch;
 
-  type ProviderRequestContext = { signal?: AbortSignal };
-  const fetchWithContext = providerFetch as (
-    providerName: string,
-    url: string | URL,
-    init?: RequestInit,
-    timeoutMs?: number,
-    maxErrorBodyChars?: number,
-    context?: ProviderRequestContext
-  ) => Promise<Response>;
-
   afterEach(() => {
     globalThis.fetch = originalFetch;
     vi.useRealTimers();
@@ -150,7 +140,7 @@ describe('providerFetch', () => {
       'request owner cancelled the operation'
     );
 
-    const request = fetchWithContext(
+    const request = providerFetch(
       'hetzner',
       'https://api.example.com/servers/server-1',
       { signal: initCaller.signal },
@@ -171,7 +161,7 @@ describe('providerFetch', () => {
     const initCaller = new AbortController();
     const contextCaller = new AbortController();
 
-    const request = fetchWithContext(
+    const request = providerFetch(
       'hetzner',
       'https://api.example.com/servers/server-1',
       { signal: initCaller.signal },
@@ -205,7 +195,7 @@ describe('providerFetch', () => {
     const initCaller = new AbortController();
     const contextCaller = new AbortController();
 
-    const response = await fetchWithContext(
+    const response = await providerFetch(
       'hetzner',
       'https://api.example.com/servers',
       { signal: initCaller.signal },
@@ -221,6 +211,49 @@ describe('providerFetch', () => {
     initCaller.abort(new Error('request already completed'));
     contextCaller.abort(new Error('request already completed'));
     expect(requestSignal?.aborted).toBe(false);
+  });
+
+  it.each([
+    { name: 'network failure', outcome: 'network' },
+    { name: 'caller cancellation', outcome: 'caller' },
+    { name: 'internal timeout', outcome: 'timeout' },
+  ] as const)('removes caller listeners after $name', async ({ outcome }) => {
+    vi.useFakeTimers();
+    const caller = new AbortController();
+    const addListener = vi.spyOn(caller.signal, 'addEventListener');
+    const removeListener = vi.spyOn(caller.signal, 'removeEventListener');
+    const callerReason = new Error('request owner cancelled');
+
+    if (outcome === 'network') {
+      globalThis.fetch = vi.fn().mockRejectedValue(new Error('provider network failed'));
+    } else {
+      globalThis.fetch = vi.fn((_url: string, init?: RequestInit) => {
+        const requestSignal = init?.signal;
+        return new Promise<Response>((_resolve, reject) => {
+          requestSignal?.addEventListener('abort', () => reject(requestSignal.reason), {
+            once: true,
+          });
+        });
+      }) as typeof fetch;
+    }
+
+    const request = providerFetch(
+      'hetzner',
+      'https://api.example.com/servers',
+      undefined,
+      50,
+      undefined,
+      { signal: caller.signal }
+    ).catch((error: unknown) => error);
+
+    if (outcome === 'caller') caller.abort(callerReason);
+    if (outcome === 'timeout') await vi.advanceTimersByTimeAsync(50);
+    await request;
+
+    const listener = addListener.mock.calls[0]?.[1];
+    expect(listener).toBeTypeOf('function');
+    expect(removeListener).toHaveBeenCalledWith('abort', listener);
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it('throws ProviderError on HTTP 4xx with JSON error body', async () => {

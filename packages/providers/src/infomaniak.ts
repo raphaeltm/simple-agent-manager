@@ -1,6 +1,11 @@
 import type { VMSize } from '@simple-agent-manager/shared';
 
-import { providerFetch } from './provider-fetch';
+import {
+  providerDelay,
+  providerFetch,
+  rethrowIfProviderRequestAborted,
+  throwIfProviderRequestAborted,
+} from './provider-fetch';
 import {
   type LocationMeta,
   noopProviderLogger,
@@ -8,6 +13,7 @@ import {
   ProviderError,
   type ProviderErrorCategory,
   type ProviderLogger,
+  type ProviderRequestContext,
   SAM_VOLUME_FILESYSTEM_FORMAT,
   SAM_VOLUME_FSTAB_OPTIONS,
   SAM_VOLUME_MOUNT_PATH_TEMPLATE,
@@ -216,7 +222,8 @@ export class InfomaniakProvider implements Provider {
     this.logger = options.logger ?? noopProviderLogger;
   }
 
-  private async authenticate(force = false): Promise<Session> {
+  private async authenticate(force = false, context?: ProviderRequestContext): Promise<Session> {
+    throwIfProviderRequestAborted(context);
     if (this.session && !force) return this.session;
     const response = await providerFetch(
       'infomaniak',
@@ -233,7 +240,9 @@ export class InfomaniakProvider implements Provider {
           },
         }),
       },
-      this.timeout
+      this.timeout,
+      undefined,
+      context
     );
     const token = response.headers.get('x-subject-token');
     if (!token)
@@ -264,7 +273,8 @@ export class InfomaniakProvider implements Provider {
         .replace(/\/$/, '')
         .replace('%(project_id)s', projectId);
     };
-    this.session = {
+    throwIfProviderRequestAborted(context);
+    const session = {
       token,
       endpoints: {
         compute: endpoint('compute'),
@@ -273,15 +283,18 @@ export class InfomaniakProvider implements Provider {
         network: endpoint('network'),
       },
     };
-    return this.session;
+    this.session = session;
+    return session;
   }
 
   private async request(
     url: string,
     init: RequestInit = {},
-    allow404 = false
+    allow404 = false,
+    context?: ProviderRequestContext
   ): Promise<Response | null> {
-    const session = await this.authenticate();
+    throwIfProviderRequestAborted(context);
+    const session = await this.authenticate(false, context);
     try {
       return await providerFetch(
         'infomaniak',
@@ -294,9 +307,12 @@ export class InfomaniakProvider implements Provider {
             ...init.headers,
           },
         },
-        this.timeout
+        this.timeout,
+        undefined,
+        context
       );
     } catch (error) {
+      rethrowIfProviderRequestAborted(error, context);
       if (allow404 && error instanceof ProviderError && error.statusCode === 404) return null;
       if (error instanceof ProviderError)
         throw new ProviderError('infomaniak', error.statusCode, error.message, {
@@ -307,8 +323,9 @@ export class InfomaniakProvider implements Provider {
       throw error;
     }
   }
-  async validateToken(): Promise<boolean> {
-    await this.authenticate(true);
+  async validateToken(context?: ProviderRequestContext): Promise<boolean> {
+    throwIfProviderRequestAborted(context);
+    await this.authenticate(true, context);
     return true;
   }
 
@@ -316,20 +333,28 @@ export class InfomaniakProvider implements Provider {
     endpoint: string,
     path: string,
     key: string,
-    name: string
+    name: string,
+    context?: ProviderRequestContext
   ): Promise<string> {
-    const response = await this.request(`${endpoint}/${path}?name=${encodeURIComponent(name)}`);
+    const response = await this.request(
+      `${endpoint}/${path}?name=${encodeURIComponent(name)}`,
+      {},
+      false,
+      context
+    );
     const values = asArray(asRecord(await response?.json(), path)[key], key).map((value, i) =>
       asRecord(value, `${key}[${i}]`)
     );
     const match = values.find((value) => value.name === name);
+    throwIfProviderRequestAborted(context);
     if (!match)
       throw new ProviderError('infomaniak', 404, `${name} was not found in Infomaniak ${key}`, {
         category: 'invalid_config',
       });
     return asString(match.id, `${key}.id`);
   }
-  async createVM(config: VMConfig): Promise<VMInstance> {
+  async createVM(config: VMConfig, context?: ProviderRequestContext): Promise<VMInstance> {
+    throwIfProviderRequestAborted(context);
     if (config.location !== this.region)
       throw new ProviderError(
         'infomaniak',
@@ -337,42 +362,60 @@ export class InfomaniakProvider implements Provider {
         `VM region ${config.location} does not match credential region ${this.region}`,
         { category: 'invalid_config' }
       );
-    const session = await this.authenticate();
+    const session = await this.authenticate(false, context);
     const [imageRef, flavorRef, networkId] = await Promise.all([
-      this.resolve(session.endpoints.image, 'v2/images', 'images', config.image ?? this.imageName),
+      this.resolve(
+        session.endpoints.image,
+        'v2/images',
+        'images',
+        config.image ?? this.imageName,
+        context
+      ),
       this.resolve(
         session.endpoints.compute,
         'flavors/detail',
         'flavors',
-        this.flavors[config.size]
+        this.flavors[config.size],
+        context
       ),
-      this.resolve(session.endpoints.network, 'v2.0/networks', 'networks', this.networkName),
+      this.resolve(
+        session.endpoints.network,
+        'v2.0/networks',
+        'networks',
+        this.networkName,
+        context
+      ),
     ]);
-    const response = await this.request(`${session.endpoints.compute}/servers`, {
-      method: 'POST',
-      body: JSON.stringify({
-        server: {
-          name: config.name,
-          imageRef,
-          flavorRef,
-          networks: [{ uuid: networkId }],
-          user_data: base64(config.userData),
-          metadata: config.labels ?? {},
-        },
-      }),
-    });
+    throwIfProviderRequestAborted(context);
+    const response = await this.request(
+      `${session.endpoints.compute}/servers`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          server: {
+            name: config.name,
+            imageRef,
+            flavorRef,
+            networks: [{ uuid: networkId }],
+            user_data: base64(config.userData),
+            metadata: config.labels ?? {},
+          },
+        }),
+      },
+      false,
+      context
+    );
     const id = asString(
       asRecord(asRecord(await response?.json(), 'create').server, 'server').id,
       'server.id'
     );
     const deadline = Date.now() + this.pollTimeout;
-    let vm = await this.getVM(id);
+    let vm = await this.getVM(id, context);
     while (vm && !vm.ip && Date.now() < deadline) {
-      await new Promise((resolve) =>
-        setTimeout(resolve, Math.min(this.pollInterval, deadline - Date.now()))
-      );
-      vm = await this.getVM(id);
+      await providerDelay(Math.min(this.pollInterval, deadline - Date.now()), context);
+      vm = await this.getVM(id, context);
     }
+    throwIfProviderRequestAborted(context);
     if (!vm) throw new ProviderError('infomaniak', undefined, `Created server ${id} was not found`);
     if (!vm.ip)
       this.logger.warn('Infomaniak VM has no public IPv4 yet', {
@@ -404,14 +447,19 @@ export class InfomaniakProvider implements Provider {
       labels: metadata(server.metadata),
     };
   }
-  async getVM(id: string): Promise<VMInstance | null> {
-    const s = await this.authenticate();
-    const r = await this.request(`${s.endpoints.compute}/servers/${id}`, {}, true);
+  async getVM(id: string, context?: ProviderRequestContext): Promise<VMInstance | null> {
+    throwIfProviderRequestAborted(context);
+    const s = await this.authenticate(false, context);
+    const r = await this.request(`${s.endpoints.compute}/servers/${id}`, {}, true, context);
     return r ? this.vm(asRecord(await r.json(), 'root').server) : null;
   }
-  async listVMs(filter?: Record<string, string>): Promise<VMInstance[]> {
-    const s = await this.authenticate();
-    const r = await this.request(`${s.endpoints.compute}/servers/detail`);
+  async listVMs(
+    filter?: Record<string, string>,
+    context?: ProviderRequestContext
+  ): Promise<VMInstance[]> {
+    throwIfProviderRequestAborted(context);
+    const s = await this.authenticate(false, context);
+    const r = await this.request(`${s.endpoints.compute}/servers/detail`, {}, false, context);
     const values = asArray(asRecord(await r?.json(), 'root').servers, 'servers').map((value) =>
       this.vm(value)
     );
@@ -421,23 +469,36 @@ export class InfomaniakProvider implements Provider {
         )
       : values;
   }
-  async deleteVM(id: string): Promise<void> {
-    const s = await this.authenticate();
-    await this.request(`${s.endpoints.compute}/servers/${id}`, { method: 'DELETE' }, true);
+  async deleteVM(id: string, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    const s = await this.authenticate(false, context);
+    await this.request(`${s.endpoints.compute}/servers/${id}`, { method: 'DELETE' }, true, context);
   }
-  async powerOff(id: string): Promise<void> {
-    const s = await this.authenticate();
-    await this.request(`${s.endpoints.compute}/servers/${id}/action`, {
-      method: 'POST',
-      body: JSON.stringify({ 'os-stop': null }),
-    });
+  async powerOff(id: string, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    const s = await this.authenticate(false, context);
+    await this.request(
+      `${s.endpoints.compute}/servers/${id}/action`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ 'os-stop': null }),
+      },
+      false,
+      context
+    );
   }
-  async powerOn(id: string): Promise<void> {
-    const s = await this.authenticate();
-    await this.request(`${s.endpoints.compute}/servers/${id}/action`, {
-      method: 'POST',
-      body: JSON.stringify({ 'os-start': null }),
-    });
+  async powerOn(id: string, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    const s = await this.authenticate(false, context);
+    await this.request(
+      `${s.endpoints.compute}/servers/${id}/action`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ 'os-start': null }),
+      },
+      false,
+      context
+    );
   }
 
   private volume(value: unknown): VolumeInstance {
@@ -461,7 +522,11 @@ export class InfomaniakProvider implements Provider {
       labels: metadata(volume.metadata),
     };
   }
-  async createVolume(config: VolumeConfig): Promise<VolumeInstance> {
+  async createVolume(
+    config: VolumeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
     if (config.location !== this.region)
       throw new ProviderError('infomaniak', 400, 'Volume and credential regions must match', {
         category: 'invalid_config',
@@ -484,28 +549,46 @@ export class InfomaniakProvider implements Provider {
           category: 'invalid_config',
         }
       );
-    const s = await this.authenticate();
-    const r = await this.request(`${s.endpoints.volumev3}/volumes`, {
-      method: 'POST',
-      body: JSON.stringify({
-        volume: {
-          name: config.name,
-          size: config.sizeGb,
-          volume_type: this.volumeType,
-          metadata: config.labels ?? {},
-        },
-      }),
-    });
+    const s = await this.authenticate(false, context);
+    const r = await this.request(
+      `${s.endpoints.volumev3}/volumes`,
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          volume: {
+            name: config.name,
+            size: config.sizeGb,
+            volume_type: this.volumeType,
+            metadata: config.labels ?? {},
+          },
+        }),
+      },
+      false,
+      context
+    );
     return this.volume(asRecord(await r?.json(), 'root').volume);
   }
-  async getVolume(config: VolumeLookupConfig): Promise<VolumeInstance | null> {
-    const s = await this.authenticate();
-    const r = await this.request(`${s.endpoints.volumev3}/volumes/${config.volumeId}`, {}, true);
+  async getVolume(
+    config: VolumeLookupConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null> {
+    throwIfProviderRequestAborted(context);
+    const s = await this.authenticate(false, context);
+    const r = await this.request(
+      `${s.endpoints.volumev3}/volumes/${config.volumeId}`,
+      {},
+      true,
+      context
+    );
     return r ? this.volume(asRecord(await r.json(), 'root').volume) : null;
   }
-  async listVolumes(config: VolumeListConfig): Promise<VolumeInstance[]> {
-    const s = await this.authenticate();
-    const r = await this.request(`${s.endpoints.volumev3}/volumes/detail`);
+  async listVolumes(
+    config: VolumeListConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance[]> {
+    throwIfProviderRequestAborted(context);
+    const s = await this.authenticate(false, context);
+    const r = await this.request(`${s.endpoints.volumev3}/volumes/detail`, {}, false, context);
     const values = asArray(asRecord(await r?.json(), 'root').volumes, 'volumes').map((value) =>
       this.volume(value)
     );
@@ -515,8 +598,9 @@ export class InfomaniakProvider implements Provider {
         )
       : values;
   }
-  async deleteVolume(config: VolumeLookupConfig): Promise<void> {
-    const current = await this.getVolume(config);
+  async deleteVolume(config: VolumeLookupConfig, context?: ProviderRequestContext): Promise<void> {
+    throwIfProviderRequestAborted(context);
+    const current = await this.getVolume(config, context);
     if (!current) return;
     if (current.attachedServerId)
       throw new ProviderError(
@@ -525,50 +609,74 @@ export class InfomaniakProvider implements Provider {
         'Refusing to delete an attached Infomaniak volume',
         { category: 'invalid_config' }
       );
-    const s = await this.authenticate();
+    throwIfProviderRequestAborted(context);
+    const s = await this.authenticate(false, context);
     await this.request(
       `${s.endpoints.volumev3}/volumes/${config.volumeId}`,
       { method: 'DELETE' },
-      true
+      true,
+      context
     );
   }
-  async attachVolume(config: VolumeAttachmentConfig): Promise<VolumeInstance> {
+  async attachVolume(
+    config: VolumeAttachmentConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
     if (config.location !== this.region)
       throw new ProviderError('infomaniak', 400, 'Server and volume regions must match', {
         category: 'invalid_config',
       });
-    const s = await this.authenticate();
-    await this.request(`${s.endpoints.compute}/servers/${config.serverId}/os-volume_attachments`, {
-      method: 'POST',
-      body: JSON.stringify({ volumeAttachment: { volumeId: config.volumeId } }),
-    });
-    const result = await this.getVolume(config);
+    const s = await this.authenticate(false, context);
+    await this.request(
+      `${s.endpoints.compute}/servers/${config.serverId}/os-volume_attachments`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ volumeAttachment: { volumeId: config.volumeId } }),
+      },
+      false,
+      context
+    );
+    const result = await this.getVolume(config, context);
     if (!result) throw new ProviderError('infomaniak', 404, 'Attached volume was not found');
     return result;
   }
-  async detachVolume(config: VolumeDetachConfig): Promise<VolumeInstance | null> {
-    const current = await this.getVolume(config);
+  async detachVolume(
+    config: VolumeDetachConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance | null> {
+    throwIfProviderRequestAborted(context);
+    const current = await this.getVolume(config, context);
     if (!current?.attachedServerId) return current;
     const serverId = config.serverId ?? current.attachedServerId;
-    const s = await this.authenticate();
+    const s = await this.authenticate(false, context);
     const r = await this.request(
-      `${s.endpoints.compute}/servers/${serverId}/os-volume_attachments`
+      `${s.endpoints.compute}/servers/${serverId}/os-volume_attachments`,
+      {},
+      false,
+      context
     );
     const attachments = asArray(
       asRecord(await r?.json(), 'root').volumeAttachments,
       'volumeAttachments'
     ).map((value) => asRecord(value, 'attachment'));
     const match = attachments.find((item) => item.volumeId === config.volumeId);
+    throwIfProviderRequestAborted(context);
     if (match)
       await this.request(
         `${s.endpoints.compute}/servers/${serverId}/os-volume_attachments/${asString(match.id, 'attachment.id')}`,
         { method: 'DELETE' },
-        true
+        true,
+        context
       );
-    return this.getVolume(config);
+    return this.getVolume(config, context);
   }
-  async resizeVolume(config: VolumeResizeConfig): Promise<VolumeInstance> {
-    const current = await this.getVolume(config);
+  async resizeVolume(
+    config: VolumeResizeConfig,
+    context?: ProviderRequestContext
+  ): Promise<VolumeInstance> {
+    throwIfProviderRequestAborted(context);
+    const current = await this.getVolume(config, context);
     if (!current)
       throw new ProviderError('infomaniak', 404, 'Volume not found', {
         category: 'invalid_config',
@@ -581,12 +689,18 @@ export class InfomaniakProvider implements Provider {
       throw new ProviderError('infomaniak', 409, 'Detach the Infomaniak volume before resizing', {
         category: 'invalid_config',
       });
-    const s = await this.authenticate();
-    await this.request(`${s.endpoints.volumev3}/volumes/${config.volumeId}/action`, {
-      method: 'POST',
-      body: JSON.stringify({ 'os-extend': { new_size: config.sizeGb } }),
-    });
-    const result = await this.getVolume(config);
+    throwIfProviderRequestAborted(context);
+    const s = await this.authenticate(false, context);
+    await this.request(
+      `${s.endpoints.volumev3}/volumes/${config.volumeId}/action`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ 'os-extend': { new_size: config.sizeGb } }),
+      },
+      false,
+      context
+    );
+    const result = await this.getVolume(config, context);
     if (!result) throw new ProviderError('infomaniak', 404, 'Resized volume was not found');
     return result;
   }
