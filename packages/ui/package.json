@@ -17,9 +17,13 @@
   },
   "scripts": {
     "build": "tsc",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --project tsconfig.storybook.json --noEmit",
     "test": "vitest run",
-    "lint": "eslint 'src/**/*.{ts,tsx}'"
+    "test:coverage": "vitest run --coverage",
+    "storybook": "storybook dev --port 6006",
+    "build-storybook": "storybook build",
+    "test:storybook": "playwright test --config playwright.storybook.config.ts",
+    "lint": "eslint 'src/**/*.{ts,tsx}' '.storybook/**/*.{ts,tsx}' 'tests/playwright/**/*.{ts,tsx}' 'playwright.storybook.config.ts'"
   },
   "peerDependencies": {
     "lucide-react": "catalog:",
@@ -29,18 +33,29 @@
     "tailwindcss": "^4.0.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.12.1",
+    "@playwright/test": "1.62.1",
+    "@storybook/addon-a11y": "10.5.7",
+    "@storybook/addon-docs": "10.5.7",
+    "@storybook/react": "10.5.7",
+    "@storybook/react-vite": "10.5.7",
+    "@tailwindcss/vite": "4.2.3",
     "@testing-library/dom": "catalog:",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
     "@vitejs/plugin-react": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
     "jsdom": "catalog:",
     "lucide-react": "catalog:",
     "react": "catalog:",
     "react-dom": "catalog:",
     "react-router": "catalog:",
+    "storybook": "10.5.7",
+    "tailwindcss": "4.3.2",
     "typescript": "catalog:",
+    "vite": "catalog:",
     "vitest": "catalog:"
   }
 }

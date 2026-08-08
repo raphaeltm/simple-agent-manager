@@ -4,8 +4,10 @@ export default defineConfig({
   testDir: './tests/playwright',
   timeout: 30_000,
   expect: { timeout: 5_000 },
+  fullyParallel: true,
   use: {
-    baseURL: process.env.PLAYWRIGHT_BASE_URL ?? 'http://127.0.0.1:4321',
+    baseURL: 'http://127.0.0.1:6006',
+    screenshot: 'only-on-failure',
     trace: 'on-first-retry',
   },
   projects: [
@@ -18,13 +20,10 @@ export default defineConfig({
       use: { ...devices['Pixel 5'], viewport: { width: 375, height: 667 } },
     },
   ],
-  webServer: process.env.PLAYWRIGHT_BASE_URL
-    ? undefined
-    : {
-        command: 'pnpm build && pnpm preview --host 127.0.0.1 --port 4321',
-        env: { PUBLIC_BASE_DOMAIN: 'localhost' },
-        url: 'http://127.0.0.1:4321/self-host/',
-        reuseExistingServer: false,
-        timeout: 120_000,
-      },
+  webServer: {
+    command: 'python3 -m http.server 6006 --bind 127.0.0.1 --directory storybook-static',
+    url: 'http://127.0.0.1:6006/index.json',
+    reuseExistingServer: false,
+    timeout: 30_000,
+  },
 });

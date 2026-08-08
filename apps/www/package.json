@@ -9,7 +9,9 @@
     "build:blog-mermaid": "pnpm exec esbuild src/scripts/blog-mermaid.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=public/scripts/blog-mermaid.js",
     "build:docs-mermaid": "pnpm exec esbuild src/scripts/docs-mermaid.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=public/scripts/docs-mermaid.js",
     "build:tracker": "npx tsx scripts/build-tracker.ts",
-    "test": "vitest run --exclude tests/playwright/**",
+    "test": "pnpm build:tracker && vitest run --exclude 'tests/playwright/**'",
+    "test:coverage": "pnpm build:tracker && vitest run --coverage --exclude 'tests/playwright/**'",
+    "test:browser": "playwright test",
     "build": "pnpm build:assets && astro build",
     "preview": "astro preview",
     "check:links": "python3 scripts/check-doc-links.py"
@@ -21,8 +23,10 @@
     "mermaid": "11.14.0"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.12.1",
+    "@playwright/test": "1.62.1",
+    "@vitest/coverage-v8": "catalog:",
     "esbuild": "0.28.1",
-    "typescript": "catalog:",
-    "@playwright/test": "1.62.1"
+    "typescript": "catalog:"
   }
 }

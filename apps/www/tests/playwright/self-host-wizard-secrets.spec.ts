@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 
 const STORAGE_KEY = 'sam-self-host-wizard-v1';
 const LEGACY_WEBHOOK_CANARY = 'legacy-webhook-secret-canary-0123456789abcdef';

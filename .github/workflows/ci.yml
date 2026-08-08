@@ -225,6 +225,55 @@ jobs:
       - name: Build all packages
         run: pnpm build
 
+  workspace-quality-surfaces:
+    name: Workspace Quality Surfaces
+    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
+
+      - name: Require test coverage scripts for every tested workspace
+        run: pnpm quality:workspace-test-surfaces
+
+      - name: Build Storybook production bundle
+        run: pnpm --filter @simple-agent-manager/ui build-storybook
+
+      - name: Build public docs and check internal links
+        run: pnpm --filter @simple-agent-manager/www build && pnpm --filter @simple-agent-manager/www check:links
+
+      - name: Install Chromium
+        working-directory: packages/ui
+        run: ./node_modules/.bin/playwright install --with-deps chromium
+
+      - name: Audit Storybook in desktop and mobile browsers
+        run: pnpm --filter @simple-agent-manager/ui test:storybook
+
+      - name: Test public site in desktop and mobile browsers
+        run: pnpm --filter @simple-agent-manager/www test:browser
+
+      - name: Require complete Storybook and public browser evidence
+        run: pnpm quality:browser-evidence
+
+      - name: Upload workspace browser evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: workspace-browser-evidence
+          path: .codex/tmp/playwright-screenshots/
+          if-no-files-found: error
+          retention-days: 7
+
   playwright-visual:
     name: Playwright Visual Tests
     needs: [changes]
@@ -369,6 +418,8 @@ jobs:
 
       - name: Dependency governance pinning check
         run: pnpm quality:dependency-governance
+      - name: Workspace test surface completeness
+        run: pnpm quality:workspace-test-surfaces
       - name: CI workflow wiring tests
         run: pnpm exec vitest run --config scripts/quality/vitest.config.ts scripts/quality/ci-worker-suite.test.ts
 
