@@ -52,7 +52,7 @@ export function acceptPromptDelivery(
   sql: SqlStorage,
   env: Env,
   input: AcceptPromptDeliveryInput,
-  now = Date.now(),
+  now = Date.now()
 ): AcceptedPromptDelivery {
   const targetSessionId = input.targetSessionId.trim();
   const displayContent = input.displayContent.trim();
@@ -60,14 +60,12 @@ export function acceptPromptDelivery(
   if (!targetSessionId) throw new Error('targetSessionId is required');
   if (!displayContent || !deliveryContent) throw new Error('prompt content is required');
 
-  const existing = input.deliveryId
-    ? mailbox.getMessage(sql, input.deliveryId)
-    : null;
+  const existing = input.deliveryId ? mailbox.getMessage(sql, input.deliveryId) : null;
   if (existing) {
     if (
-      existing.targetSessionId !== targetSessionId
-      || existing.sourceKind !== input.sourceKind
-      || existing.content !== deliveryContent
+      existing.targetSessionId !== targetSessionId ||
+      existing.sourceKind !== input.sourceKind ||
+      existing.content !== deliveryContent
     ) {
       throw new Error('deliveryId already belongs to a different prompt intent');
     }
@@ -95,7 +93,7 @@ export function acceptPromptDelivery(
     'user',
     displayContent,
     toolMetadata,
-    deliveryId,
+    deliveryId
   );
   const delivery = mailbox.enqueueMessage(sql, {
     id: deliveryId,
@@ -113,6 +111,7 @@ export function acceptPromptDelivery(
     promptMessageId: persisted.id,
     now,
     ackRequired: false,
+    durableDelivery: true,
   });
 
   return {
@@ -136,7 +135,7 @@ export interface PromptDeliveryClaim {
 export function expireDuePromptDeliveries(
   sql: SqlStorage,
   config: DurableExecutionConfig,
-  now = Date.now(),
+  now = Date.now()
 ): { expired: number; failed: number } {
   const expired = sql.exec(
     `UPDATE session_inbox
@@ -146,7 +145,7 @@ export function expireDuePromptDeliveries(
      WHERE delivery_state IN ('queued', 'retry_wait', 'delivering')
        AND expires_at IS NOT NULL
        AND expires_at <= ?`,
-    now,
+    now
   ).rowsWritten;
   const failed = sql.exec(
     `UPDATE session_inbox
@@ -155,7 +154,7 @@ export function expireDuePromptDeliveries(
          last_error = COALESCE(last_error, 'Prompt delivery maximum attempts exceeded')
      WHERE delivery_state IN ('queued', 'retry_wait')
        AND delivery_attempts >= ?`,
-    config.maxAttempts,
+    config.maxAttempts
   ).rowsWritten;
   return { expired, failed };
 }
@@ -163,12 +162,13 @@ export function expireDuePromptDeliveries(
 export function claimDuePromptDeliveries(
   sql: SqlStorage,
   config: DurableExecutionConfig,
-  now = Date.now(),
+  now = Date.now()
 ): PromptDeliveryClaim[] {
   expireDuePromptDeliveries(sql, config, now);
   const staleBefore = now - config.receiptTimeoutMs;
-  const rows = sql.exec(
-    `SELECT * FROM session_inbox
+  const rows = sql
+    .exec(
+      `SELECT * FROM session_inbox
      WHERE (
        delivery_state IN ('queued', 'retry_wait')
        AND COALESCE(next_attempt_at, created_at) <= ?
@@ -189,11 +189,12 @@ export function claimDuePromptDeliveries(
        END DESC,
        created_at ASC
      LIMIT ?`,
-    now,
-    config.maxAttempts,
-    staleBefore,
-    config.maxCandidatesPerAlarm,
-  ).toArray();
+      now,
+      config.maxAttempts,
+      staleBefore,
+      config.maxCandidatesPerAlarm
+    )
+    .toArray();
 
   const claims: PromptDeliveryClaim[] = [];
   for (const row of rows) {
@@ -207,13 +208,12 @@ export function claimDuePromptDeliveries(
       });
       continue;
     }
-    const mode: DeliveryClaimMode = message.deliveryState === 'delivering'
-      ? 'reconcile'
-      : 'submit';
+    const mode: DeliveryClaimMode = message.deliveryState === 'delivering' ? 'reconcile' : 'submit';
     const attemptId = ulid();
-    const result = mode === 'submit'
-      ? sql.exec(
-          `UPDATE session_inbox
+    const result =
+      mode === 'submit'
+        ? sql.exec(
+            `UPDATE session_inbox
            SET delivery_state = 'delivering',
                delivery_attempts = delivery_attempts + 1,
                attempt_id = ?,
@@ -223,23 +223,23 @@ export function claimDuePromptDeliveries(
            WHERE id = ?
              AND delivery_state IN ('queued', 'retry_wait')
              AND COALESCE(next_attempt_at, created_at) <= ?`,
-          attemptId,
-          now,
-          now,
-          message.id,
-          now,
-        )
-      : sql.exec(
-          `UPDATE session_inbox
+            attemptId,
+            now,
+            now,
+            message.id,
+            now
+          )
+        : sql.exec(
+            `UPDATE session_inbox
            SET attempt_id = ?, attempt_started_at = ?
            WHERE id = ?
              AND delivery_state = 'delivering'
              AND attempt_started_at <= ?`,
-          attemptId,
-          now,
-          message.id,
-          staleBefore,
-        );
+            attemptId,
+            now,
+            message.id,
+            staleBefore
+          );
     if (result.rowsWritten === 0) continue;
     const claimed = mailbox.getMessage(sql, message.id);
     if (claimed) claims.push({ message: claimed, attemptId, mode });
@@ -296,12 +296,13 @@ export function applyPromptDeliveryResult(
   claim: PromptDeliveryClaim,
   result: PromptDeliveryResult,
   config: DurableExecutionConfig,
-  now = Date.now(),
+  now = Date.now()
 ): boolean {
   const capability = capabilitiesColumns(result.capabilities);
   if (result.kind === 'accepted') {
-    return sql.exec(
-      `UPDATE session_inbox
+    return (
+      sql.exec(
+        `UPDATE session_inbox
        SET delivery_state = CASE WHEN ack_required = 1 THEN 'delivered' ELSE 'acked' END,
            delivered_at = COALESCE(delivered_at, ?),
            acked_at = CASE WHEN ack_required = 0 THEN COALESCE(acked_at, ?) ELSE acked_at END,
@@ -316,27 +317,27 @@ export function applyPromptDeliveryResult(
            adapter_protocol_version = ?,
            receipt_supported = ?
        WHERE id = ? AND delivery_state = 'delivering' AND attempt_id = ?`,
-      now,
-      now,
-      result.promptEpoch,
-      result.runtimeIdentity,
-      result.receipt?.state ?? 'accepted',
-      result.receipt?.runtimeIdentity ?? result.runtimeIdentity,
-      now,
-      capability.protocolVersion,
-      capability.receiptSupported,
-      claim.message.id,
-      claim.attemptId,
-    ).rowsWritten > 0;
+        now,
+        now,
+        result.promptEpoch,
+        result.runtimeIdentity,
+        result.receipt?.state ?? 'accepted',
+        result.receipt?.runtimeIdentity ?? result.runtimeIdentity,
+        now,
+        capability.protocolVersion,
+        capability.receiptSupported,
+        claim.message.id,
+        claim.attemptId
+      ).rowsWritten > 0
+    );
   }
 
   if (result.kind === 'retry') {
-    const nextAttemptAt = now + promptDeliveryBackoffMs(
-      Math.max(1, claim.message.deliveryAttempts),
-      config,
-    );
-    return sql.exec(
-      `UPDATE session_inbox
+    const nextAttemptAt =
+      now + promptDeliveryBackoffMs(Math.max(1, claim.message.deliveryAttempts), config);
+    return (
+      sql.exec(
+        `UPDATE session_inbox
        SET delivery_state = 'retry_wait',
            next_attempt_at = ?,
            last_error = ?,
@@ -344,19 +345,21 @@ export function applyPromptDeliveryResult(
            adapter_protocol_version = ?,
            receipt_supported = ?
        WHERE id = ? AND delivery_state = 'delivering' AND attempt_id = ?`,
-      nextAttemptAt,
-      boundedError(result.error),
-      result.runtimeIdentity,
-      capability.protocolVersion,
-      capability.receiptSupported,
-      claim.message.id,
-      claim.attemptId,
-    ).rowsWritten > 0;
+        nextAttemptAt,
+        boundedError(result.error),
+        result.runtimeIdentity,
+        capability.protocolVersion,
+        capability.receiptSupported,
+        claim.message.id,
+        claim.attemptId
+      ).rowsWritten > 0
+    );
   }
 
   const state = result.kind === 'failed' ? 'failed' : 'ambiguous';
-  return sql.exec(
-    `UPDATE session_inbox
+  return (
+    sql.exec(
+      `UPDATE session_inbox
      SET delivery_state = ?,
          terminal_reason = ?,
          last_error = ?,
@@ -368,24 +371,25 @@ export function applyPromptDeliveryResult(
          adapter_protocol_version = ?,
          receipt_supported = ?
      WHERE id = ? AND delivery_state = 'delivering' AND attempt_id = ?`,
-    state,
-    result.reason,
-    boundedError(result.error),
-    result.runtimeIdentity,
-    result.kind === 'ambiguous' ? (result.receipt?.state ?? 'ambiguous') : null,
-    result.kind === 'ambiguous' ? result.receipt?.runtimeIdentity ?? null : null,
-    result.kind === 'ambiguous' ? now : null,
-    capability.protocolVersion,
-    capability.receiptSupported,
-    claim.message.id,
-    claim.attemptId,
-  ).rowsWritten > 0;
+      state,
+      result.reason,
+      boundedError(result.error),
+      result.runtimeIdentity,
+      result.kind === 'ambiguous' ? (result.receipt?.state ?? 'ambiguous') : null,
+      result.kind === 'ambiguous' ? (result.receipt?.runtimeIdentity ?? null) : null,
+      result.kind === 'ambiguous' ? now : null,
+      capability.protocolVersion,
+      capability.receiptSupported,
+      claim.message.id,
+      claim.attemptId
+    ).rowsWritten > 0
+  );
 }
 
 export function nudgePromptDeliveriesForTarget(
   sql: SqlStorage,
   targetSessionId: string,
-  now = Date.now(),
+  now = Date.now()
 ): number {
   return sql.exec(
     `UPDATE session_inbox
@@ -395,17 +399,18 @@ export function nudgePromptDeliveriesForTarget(
        AND (next_attempt_at IS NULL OR next_attempt_at > ?)`,
     now,
     targetSessionId,
-    now,
+    now
   ).rowsWritten;
 }
 
 export function computePromptDeliveryAlarmTime(
   sql: SqlStorage,
   config: DurableExecutionConfig,
-  now = Date.now(),
+  now = Date.now()
 ): number | null {
-  const row = sql.exec(
-    `SELECT MIN(due_at) AS due_at FROM (
+  const row = sql
+    .exec(
+      `SELECT MIN(due_at) AS due_at FROM (
        SELECT MIN(COALESCE(next_attempt_at, created_at)) AS due_at
        FROM session_inbox
        WHERE delivery_state IN ('queued', 'retry_wait')
@@ -419,8 +424,9 @@ export function computePromptDeliveryAlarmTime(
        WHERE delivery_state IN ('queued', 'retry_wait', 'delivering')
          AND expires_at IS NOT NULL
      )`,
-    config.receiptTimeoutMs,
-  ).toArray()[0];
+      config.receiptTimeoutMs
+    )
+    .toArray()[0];
   const dueAt = typeof row?.due_at === 'number' ? row.due_at : null;
   if (dueAt === null) return null;
   return Math.max(dueAt, now + config.minAlarmDelayMs);

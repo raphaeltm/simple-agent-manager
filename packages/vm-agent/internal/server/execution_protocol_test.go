@@ -126,6 +126,57 @@ func TestVersionedPromptResponseMatchesSharedProtocolFixture(t *testing.T) {
 	assertJSONContractEqual(t, response, fixture.NewPrompt)
 }
 
+func TestVersionedPromptHTTPResponsesMatchSharedProtocolFixture(t *testing.T) {
+	fixture := loadDurableExecutionProtocolFixture(t)
+	acceptedAt := int64(1_786_312_800_123)
+	receipt := persistence.PromptDeliveryReceipt{
+		DeliveryID:      "delivery-01",
+		State:           persistence.PromptReceiptInFlight,
+		RuntimeIdentity: "runtime-vm-01",
+		AcceptedAt:      &acceptedAt,
+	}
+	tests := []struct {
+		name       string
+		statusCode int
+		status     string
+		fixture    json.RawMessage
+	}{
+		{name: "new", statusCode: http.StatusAccepted, status: "accepted", fixture: fixture.NewPrompt},
+		{name: "duplicate", statusCode: http.StatusOK, status: "duplicate", fixture: fixture.DuplicatePrompt},
+		{name: "conflict", statusCode: http.StatusConflict, status: "conflict", fixture: fixture.ConflictPrompt},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			writeVersionedPromptResponse(recorder, tc.statusCode, tc.status, "session-01", receipt)
+			if recorder.Code != tc.statusCode {
+				t.Fatalf("status = %d, want %d", recorder.Code, tc.statusCode)
+			}
+			assertJSONContractEqual(t, json.RawMessage(recorder.Body.Bytes()), tc.fixture)
+		})
+	}
+
+	notReadyReceipt := receipt
+	notReadyReceipt.State = persistence.PromptReceiptAccepted
+	recorder := httptest.NewRecorder()
+	writeVersionedPromptResponse(recorder, http.StatusConflict, "not_ready", "session-01", notReadyReceipt)
+	if recorder.Code != http.StatusConflict {
+		t.Fatalf("not_ready status = %d, want 409", recorder.Code)
+	}
+	assertJSONContractEqual(t, json.RawMessage(recorder.Body.Bytes()), fixture.NotReadyPrompt)
+}
+
+func TestPromptReceiptNotFoundHTTPResponseMatchesSharedProtocolFixture(t *testing.T) {
+	fixture := loadDurableExecutionProtocolFixture(t)
+	s := &Server{executionRuntimeID: "runtime-vm-01"}
+	recorder := httptest.NewRecorder()
+	s.writePromptReceiptNotFound(recorder, "delivery-01")
+	if recorder.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want 404", recorder.Code)
+	}
+	assertJSONContractEqual(t, json.RawMessage(recorder.Body.Bytes()), fixture.NotFoundReceipt)
+}
+
 func TestVersionedPromptConflictMatchesSharedProtocolFixture(t *testing.T) {
 	fixture := loadDurableExecutionProtocolFixture(t)
 	acceptedAt := int64(1_786_312_800_123)
@@ -159,8 +210,11 @@ func TestAmbiguousPromptReceiptMatchesSharedProtocolFixture(t *testing.T) {
 type durableExecutionProtocolFixture struct {
 	Capabilities     json.RawMessage `json:"capabilities"`
 	NewPrompt        json.RawMessage `json:"newPrompt"`
+	DuplicatePrompt  json.RawMessage `json:"duplicatePrompt"`
+	NotReadyPrompt   json.RawMessage `json:"notReadyPrompt"`
 	ConflictPrompt   json.RawMessage `json:"conflictPrompt"`
 	AmbiguousReceipt json.RawMessage `json:"ambiguousReceipt"`
+	NotFoundReceipt  json.RawMessage `json:"notFoundReceipt"`
 }
 
 func loadDurableExecutionProtocolFixture(t *testing.T) durableExecutionProtocolFixture {

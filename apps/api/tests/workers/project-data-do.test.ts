@@ -102,15 +102,15 @@ describe('ProjectData Durable Object', () => {
         senderType: 'human',
         senderId: 'user-1',
         messageClass: 'deliver',
-        sourceKind: 'user_followup',
+        sourceKind: 'agent_mailbox',
         ttlMs: 60_000,
       });
 
       await runInDurableObject(stub, async (instance, state) => {
         state.storage.sql.exec(
-          `UPDATE session_inbox SET expires_at = 0 WHERE id = 'delivery-expired-1'`,
+          `UPDATE session_inbox SET expires_at = 0 WHERE id = 'delivery-expired-1'`
         );
-        await instance.alarm();
+        await instance.alarmWithDurablePromptDelivery();
       });
 
       const snapshot = await stub.getDurableExecutionSnapshot(sessionId);
@@ -120,7 +120,7 @@ describe('ProjectData Durable Object', () => {
           deliveryState: 'expired',
           terminalReason: 'ttl_expired',
           lastError: 'Prompt delivery TTL expired',
-        }),
+        })
       );
     });
   });

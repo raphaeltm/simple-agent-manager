@@ -459,3 +459,31 @@ func TestCheckpointRolloverIsSupersededByNaturalCompletionOrUserCancel(t *testin
 		})
 	}
 }
+
+func TestCheckpointTerminalClaimPreventsRestartWhenCompletionWinsBeforeStop(t *testing.T) {
+	host := newRecoveryTestHost(t, time.Second)
+	defer host.Stop()
+	oldProc, reader, writer := newFakeAgentProcess(time.Now().Add(-10*time.Second), true)
+	serveCheckpointACP(t, reader, writer)
+	conn := acpsdk.NewClientSideConnection(&sessionHostClient{host: host}, oldProc.Stdin(), oldProc.Stdout())
+	_, cancel := context.WithCancel(context.Background())
+	attempt, _ := host.beginPrompt(cancel, nil)
+	close(attempt.rpcDone)
+	host.config.BeforeCheckpointProcessStop = func() {
+		attempt.completeWith(host, "end_turn", nil, host.markPromptDone)
+	}
+	host.mu.Lock()
+	host.process, host.acpConn, host.status = oldProc, conn, HostPrompting
+	host.agentType, host.sessionID, host.agentSupportsLoadSession = "openai-codex", "same-session", true
+	host.mu.Unlock()
+
+	ctx, deadlineCancel := context.WithTimeout(context.Background(), time.Second)
+	defer deadlineCancel()
+	result, err := host.CheckpointRollover(ctx, 100*time.Millisecond)
+	if err != nil || result.State != "superseded" {
+		t.Fatalf("result=%+v err=%v", result, err)
+	}
+	if oldProc.stopCount.Load() != 0 {
+		t.Fatalf("superseded rollover stopped process %d times", oldProc.stopCount.Load())
+	}
+}

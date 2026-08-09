@@ -18,9 +18,11 @@ import { NodeAgentHttpError, nodeAgentRequest, sendPromptToAgentOnNode } from '.
 
 const log = createModuleLogger('vm_prompt_delivery_adapter');
 
+const RuntimeIdentitySchema = v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(256));
+
 const CapabilitiesSchema = v.object({
   protocolVersion: v.number(),
-  runtimeIdentity: v.string(),
+  runtimeIdentity: RuntimeIdentitySchema,
   promptReceipts: v.object({
     supported: v.boolean(),
     lookup: v.boolean(),
@@ -39,7 +41,7 @@ const CapabilitiesSchema = v.object({
 const ReceiptSchema = v.object({
   deliveryId: v.string(),
   state: v.picklist(['accepted', 'in_flight', 'completed', 'not_found', 'ambiguous']),
-  runtimeIdentity: v.string(),
+  runtimeIdentity: RuntimeIdentitySchema,
   acceptedAt: v.nullable(v.number()),
   completedAt: v.nullable(v.number()),
 });
@@ -110,7 +112,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
   async submit(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult> {
     const resolution = await this.resolveTarget(
       input.projectId,
-      input.claim.message.targetSessionId,
+      input.claim.message.targetSessionId
     );
     if (resolution.kind === 'failed') {
       return {
@@ -166,7 +168,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
               protocolVersion: VM_PROMPT_DELIVERY_PROTOCOL_VERSION,
               deliveryId: input.claim.message.id,
             }
-          : { requestTimeoutMs: input.requestTimeoutMs },
+          : { requestTimeoutMs: input.requestTimeoutMs }
       );
       if (capabilities.protocolVersion === 0 && input.allowLegacyVm) {
         return {
@@ -185,7 +187,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
           input.claim,
           capabilities,
           new Error('Target VM returned an invalid versioned prompt response'),
-          input.requestTimeoutMs,
+          input.requestTimeoutMs
         );
       }
       const response: VmPromptDeliveryResponse = parsed.output;
@@ -264,7 +266,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         input.claim,
         capabilities,
         error,
-        input.requestTimeoutMs,
+        input.requestTimeoutMs
       );
     }
   }
@@ -272,15 +274,16 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
   async reconcile(input: VmPromptDeliveryAdapterInput): Promise<PromptDeliveryResult> {
     const resolution = await this.resolveTarget(
       input.projectId,
-      input.claim.message.targetSessionId,
+      input.claim.message.targetSessionId
     );
     if (resolution.kind === 'failed') {
       return {
-        kind: 'failed',
-        reason: resolution.reason,
-        error: resolution.error,
+        kind: 'ambiguous',
+        reason: 'receipt_unavailable',
+        error: `Prior delivery cannot be reconciled after target loss: ${resolution.error}`,
         runtimeIdentity: null,
         capabilities: null,
+        receipt: null,
       };
     }
     if (resolution.kind === 'retry') {
@@ -348,7 +351,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
        LEFT JOIN agent_sessions a ON a.workspace_id = w.id
        WHERE w.project_id = ? AND w.chat_session_id = ?
        ORDER BY a.created_at DESC
-       LIMIT 1`,
+       LIMIT 1`
     )
       .bind(projectId, chatSessionId)
       .first<{
@@ -432,7 +435,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
 
   private async getCapabilities(
     target: VmPromptDeliveryTarget,
-    requestTimeoutMs: number,
+    requestTimeoutMs: number
   ): Promise<VmPromptDeliveryCapabilities | null> {
     try {
       const raw = await nodeAgentRequest(
@@ -444,7 +447,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
           userId: target.userId,
           workspaceId: target.workspaceId,
           requestTimeoutMs,
-        },
+        }
       );
       const capabilities = v.parse(CapabilitiesSchema, raw);
       if (capabilities.protocolVersion !== VM_PROMPT_DELIVERY_PROTOCOL_VERSION) {
@@ -474,7 +477,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     claim: PromptDeliveryClaim,
     capabilities: VmPromptDeliveryCapabilities,
     submitError: unknown,
-    requestTimeoutMs: number,
+    requestTimeoutMs: number
   ): Promise<PromptDeliveryResult> {
     if (!capabilities.promptReceipts.supported || !capabilities.promptReceipts.lookup) {
       return {
@@ -493,7 +496,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     target: VmPromptDeliveryTarget,
     claim: PromptDeliveryClaim,
     capabilities: VmPromptDeliveryCapabilities,
-    requestTimeoutMs: number,
+    requestTimeoutMs: number
   ): Promise<PromptDeliveryResult> {
     try {
       const raw = await nodeAgentRequest(
@@ -502,14 +505,14 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         buildVmPromptDeliveryReceiptPath(
           target.workspaceId,
           target.agentSessionId,
-          claim.message.id,
+          claim.message.id
         ),
         {
           method: 'GET',
           userId: target.userId,
           workspaceId: target.workspaceId,
           requestTimeoutMs,
-        },
+        }
       );
       const receipt: VmPromptDeliveryReceipt = v.parse(ReceiptSchema, raw);
       if (receipt.deliveryId !== claim.message.id) {
@@ -576,7 +579,9 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         httpStatus(error) === 404 &&
         notFound?.state === 'not_found' &&
         notFound.deliveryId === claim.message.id &&
-        notFound.runtimeIdentity === capabilities.runtimeIdentity
+        notFound.runtimeIdentity === capabilities.runtimeIdentity &&
+        notFound.acceptedAt === null &&
+        notFound.completedAt === null
       ) {
         return {
           kind: 'retry',

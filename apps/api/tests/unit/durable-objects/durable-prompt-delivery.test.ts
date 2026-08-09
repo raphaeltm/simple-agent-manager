@@ -62,7 +62,7 @@ describe('ProjectData durable prompt delivery', () => {
     sql.exec(
       `INSERT INTO chat_sessions
        (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
-       VALUES ('chat-1', 'workspace-1', 'Test', 'active', 0, 10000, 10000, 10000)`,
+       VALUES ('chat-1', 'workspace-1', 'Test', 'active', 0, 10000, 10000, 10000)`
     );
   });
 
@@ -71,7 +71,11 @@ describe('ProjectData durable prompt delivery', () => {
     vi.useRealTimers();
   });
 
-  function accept(deliveryId = 'delivery-1', ttlMs = config.ttlMs) {
+  function accept(
+    deliveryId = 'delivery-1',
+    ttlMs = config.ttlMs,
+    sourceKind: 'user_followup' | 'agent_mailbox' = 'user_followup'
+  ) {
     return acceptPromptDelivery(
       sql,
       {},
@@ -83,10 +87,10 @@ describe('ProjectData durable prompt delivery', () => {
         senderType: 'human',
         senderId: 'user-1',
         messageClass: 'deliver',
-        sourceKind: 'user_followup',
+        sourceKind,
         ttlMs,
       },
-      Date.now(),
+      Date.now()
     );
   }
 
@@ -122,8 +126,8 @@ describe('ProjectData durable prompt delivery', () => {
           senderType: 'human',
           sourceKind: 'user_followup',
         },
-        Date.now(),
-      ),
+        Date.now()
+      )
     ).toThrow('different prompt intent');
   });
 
@@ -207,8 +211,8 @@ describe('ProjectData durable prompt delivery', () => {
           capabilities: null,
         },
         config,
-        10_100,
-      ),
+        10_100
+      )
     ).toBe(true);
 
     const message = mailbox.getMessage(sql, 'delivery-1');
@@ -233,8 +237,8 @@ describe('ProjectData durable prompt delivery', () => {
           receipt: null,
         },
         config,
-        10_100,
-      ),
+        10_100
+      )
     ).toBe(true);
 
     const message = mailbox.getMessage(sql, 'delivery-1');
@@ -248,7 +252,7 @@ describe('ProjectData durable prompt delivery', () => {
     accept('attempt-delivery');
     sql.exec(
       `UPDATE session_inbox SET delivery_attempts = ? WHERE id = 'attempt-delivery'`,
-      config.maxAttempts,
+      config.maxAttempts
     );
 
     expect(expireDuePromptDeliveries(sql, config, 10_100)).toEqual({ expired: 1, failed: 1 });
@@ -258,22 +262,35 @@ describe('ProjectData durable prompt delivery', () => {
   });
 
   it('keeps durable delivery states out of the legacy mailbox expiry sweep', () => {
-    accept('durable-expired', 100);
-    accept('durable-exhausted');
+    accept('durable-expired', 100, 'agent_mailbox');
+    accept('durable-exhausted', config.ttlMs, 'agent_mailbox');
+    mailbox.enqueueMessage(sql, {
+      id: 'legacy-expired',
+      targetSessionId: 'chat-1',
+      sourceTaskId: null,
+      senderType: 'system',
+      senderId: null,
+      messageClass: 'deliver',
+      content: 'legacy mailbox delivery',
+      sourceKind: 'agent_mailbox',
+      ttlMs: 100,
+      now: 10_000,
+    });
     sql.exec(
       `UPDATE session_inbox SET delivery_attempts = ? WHERE id = 'durable-exhausted'`,
-      config.maxAttempts,
+      config.maxAttempts
     );
 
     vi.setSystemTime(10_100);
-    expect(mailbox.expireStaleMessages(sql, config.maxAttempts)).toBe(0);
+    expect(mailbox.expireStaleMessages(sql, config.maxAttempts)).toBe(1);
     expect(mailbox.getMessage(sql, 'durable-expired')?.deliveryState).toBe('queued');
     expect(mailbox.getMessage(sql, 'durable-exhausted')?.deliveryState).toBe('queued');
+    expect(mailbox.getMessage(sql, 'legacy-expired')?.deliveryState).toBe('expired');
 
     expect(expireDuePromptDeliveries(sql, config, 10_100)).toEqual({ expired: 1, failed: 1 });
     expect(mailbox.getMessage(sql, 'durable-expired')?.terminalReason).toBe('ttl_expired');
     expect(mailbox.getMessage(sql, 'durable-exhausted')?.terminalReason).toBe(
-      'max_attempts_exceeded',
+      'max_attempts_exceeded'
     );
   });
 });

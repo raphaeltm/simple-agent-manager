@@ -170,6 +170,10 @@ type SessionHostConfig struct {
 	// uses StartProcess via startAgentProcess.
 	StartProcess func(*agentStartup) (agentProcess, error)
 
+	// BeforeCheckpointProcessStop is an internal deterministic-race test hook.
+	// Production code leaves it nil.
+	BeforeCheckpointProcessStop func()
+
 	// RuntimeAssetsProvider fetches resolved project/profile/skill runtime assets
 	// for standalone sessions. It must not log or persist secret values.
 	RuntimeAssetsProvider RuntimeAssetsProvider
@@ -315,7 +319,9 @@ type promptAttempt struct {
 	cancel              context.CancelFunc
 	done                chan struct{}
 	rpcDone             chan struct{}
-	once                sync.Once
+	terminalMu          sync.Mutex
+	terminal            bool
+	checkpointOwned     bool
 	observer            PromptTerminalObserver
 	checkpointRequested atomic.Bool
 }
@@ -364,7 +370,7 @@ func (e *checkpointRolloverEpisode) completeStrictResume(h *SessionHost, result 
 	if e.terminal.Load() {
 		return e.finalResult, false
 	}
-	if !e.attempt.complete(h, checkpointPreemptedStopReason, nil) {
+	if !e.attempt.completeCheckpoint(h, checkpointPreemptedStopReason, nil) {
 		superseded := CheckpointRolloverResult{State: "superseded", ACPSessionID: e.sessionID}
 		e.completeLocked(superseded, true)
 		return superseded, false
@@ -378,27 +384,55 @@ func (a *promptAttempt) complete(h *SessionHost, stopReason string, promptErr er
 }
 
 func (a *promptAttempt) completeWith(h *SessionHost, stopReason string, promptErr error, finalize func()) bool {
-	won := false
-	a.once.Do(func() {
-		won = true
-		// Release the admission gate before publishing the terminal status. The
-		// public AcceptPrompt path also requires HostReady, so the intermediate
-		// prompting/starting/error status cannot admit a new prompt. This ordering
-		// makes terminal state observations imply that cancellation fields and the
-		// in-flight gate have already converged.
-		h.releasePrompt(a)
-		if finalize != nil {
-			finalize()
-		}
-		close(a.done)
-		if cb := h.config.OnPromptComplete; cb != nil {
-			go cb(stopReason, promptErr)
-		}
-		if a.observer != nil {
-			go a.observer(stopReason, promptErr)
-		}
-	})
-	return won
+	a.terminalMu.Lock()
+	if a.terminal || a.checkpointOwned {
+		a.terminalMu.Unlock()
+		return false
+	}
+	a.terminal = true
+	a.terminalMu.Unlock()
+	a.publishCompletion(h, stopReason, promptErr, finalize)
+	return true
+}
+
+func (a *promptAttempt) claimCheckpointTerminal() bool {
+	a.terminalMu.Lock()
+	defer a.terminalMu.Unlock()
+	if a.terminal || a.checkpointOwned {
+		return false
+	}
+	a.checkpointOwned = true
+	return true
+}
+
+func (a *promptAttempt) completeCheckpoint(h *SessionHost, stopReason string, promptErr error) bool {
+	a.terminalMu.Lock()
+	if a.terminal || !a.checkpointOwned {
+		a.terminalMu.Unlock()
+		return false
+	}
+	a.checkpointOwned = false
+	a.terminal = true
+	a.terminalMu.Unlock()
+	a.publishCompletion(h, stopReason, promptErr, nil)
+	return true
+}
+
+func (a *promptAttempt) publishCompletion(h *SessionHost, stopReason string, promptErr error, finalize func()) {
+	// Release the admission gate before publishing the terminal status. The
+	// public AcceptPrompt path also requires HostReady, so the intermediate
+	// prompting/starting/error status cannot admit a new prompt.
+	h.releasePrompt(a)
+	if finalize != nil {
+		finalize()
+	}
+	close(a.done)
+	if cb := h.config.OnPromptComplete; cb != nil {
+		go cb(stopReason, promptErr)
+	}
+	if a.observer != nil {
+		go a.observer(stopReason, promptErr)
+	}
 }
 
 func (h *SessionHost) now() time.Time {

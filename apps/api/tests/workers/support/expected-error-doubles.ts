@@ -29,6 +29,17 @@ function capture(error: unknown): CapturedExpectedError {
  * behavior while returning a serializable assertion value to Vitest.
  */
 export class ProjectDataTestDouble extends ProjectData {
+  async alarmWithDurablePromptDelivery(): Promise<void> {
+    const previous = this.env.DURABLE_PROMPT_DELIVERY_ENABLED;
+    this.env.DURABLE_PROMPT_DELIVERY_ENABLED = 'true';
+    try {
+      await this.alarm();
+    } finally {
+      if (previous === undefined) delete this.env.DURABLE_PROMPT_DELIVERY_ENABLED;
+      else this.env.DURABLE_PROMPT_DELIVERY_ENABLED = previous;
+    }
+  }
+
   async fetch(request: Request): Promise<Response> {
     if (new URL(request.url).pathname !== '/__capture-expected-error') {
       return super.fetch(request);

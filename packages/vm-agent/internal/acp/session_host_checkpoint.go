@@ -125,6 +125,13 @@ func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duratio
 		return CheckpointRolloverResult{State: "superseded", ACPSessionID: episode.sessionID}, nil
 	default:
 	}
+	if h.config.BeforeCheckpointProcessStop != nil {
+		h.config.BeforeCheckpointProcessStop()
+	}
+	if !attempt.claimCheckpointTerminal() {
+		h.clearCheckpointRollover(episode)
+		return CheckpointRolloverResult{State: "superseded", ACPSessionID: episode.sessionID}, nil
+	}
 
 	h.mu.Lock()
 	if h.checkpointRollover != episode || h.process != process {
@@ -133,7 +140,7 @@ func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duratio
 		result := CheckpointRolloverResult{State: "failed", Forced: forced, ACPSessionID: episode.sessionID,
 			ErrorCode: "process_changed", ErrorMessage: message}
 		episode.complete(result, true)
-		attempt.complete(h, fatalErrorStopReason, errors.New(message))
+		attempt.completeCheckpoint(h, fatalErrorStopReason, errors.New(message))
 		h.setStatus(HostError, message)
 		h.reportActivity("error")
 		return result, fmt.Errorf("%w: %s", ErrCheckpointUnavailable, message)
@@ -146,7 +153,7 @@ func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duratio
 		result := CheckpointRolloverResult{State: "failed", Forced: forced, ACPSessionID: episode.sessionID,
 			ErrorCode: "process_stop_failed", ErrorMessage: message}
 		episode.complete(result, true)
-		attempt.complete(h, fatalErrorStopReason, fmt.Errorf("%s: %w", message, err))
+		attempt.completeCheckpoint(h, fatalErrorStopReason, fmt.Errorf("%s: %w", message, err))
 		h.setStatus(HostError, message)
 		h.reportActivity("error")
 		return result, fmt.Errorf("%s: %w", message, err)
@@ -169,7 +176,7 @@ func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duratio
 			}
 			return result, nil
 		}
-		attempt.complete(h, fatalErrorStopReason, errors.New(message))
+		attempt.completeCheckpoint(h, fatalErrorStopReason, errors.New(message))
 		h.setStatus(HostError, message)
 		h.reportActivity("error")
 		return result, ctx.Err()

@@ -42,6 +42,8 @@ export interface EnqueueOptions {
   promptMessageId?: string;
   now?: number;
   ackRequired?: boolean;
+  /** Persisted ownership fence separating the durable engine from legacy mailbox sweeps. */
+  durableDelivery?: boolean;
 }
 
 /**
@@ -63,7 +65,7 @@ export function enqueueMessage(sql: SqlStorage, opts: EnqueueOptions): AgentMail
     const [countRow] = sql
       .exec(
         `SELECT COUNT(*) as cnt FROM session_inbox
-         WHERE delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`,
+         WHERE delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`
       )
       .toArray();
     const count = (countRow as { cnt: number })?.cnt ?? 0;
@@ -78,8 +80,8 @@ export function enqueueMessage(sql: SqlStorage, opts: EnqueueOptions): AgentMail
        created_at, delivered_at, message_class, delivery_state, sender_type,
        sender_id, ack_required, acked_at, ack_timeout_ms, expires_at,
        delivery_attempts, last_delivery_at, metadata, source_kind,
-       prompt_message_id, next_attempt_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 0, NULL, ?, ?, ?, ?)`,
+       prompt_message_id, next_attempt_at, durable_delivery)
+    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 0, NULL, ?, ?, ?, ?, ?)`,
     id,
     opts.targetSessionId,
     opts.sourceTaskId,
@@ -98,6 +100,7 @@ export function enqueueMessage(sql: SqlStorage, opts: EnqueueOptions): AgentMail
     opts.sourceKind ?? 'agent_mailbox',
     opts.promptMessageId ?? id,
     now,
+    opts.durableDelivery ? 1 : 0
   );
 
   log.info('mailbox.enqueued', {
@@ -148,7 +151,7 @@ export function enqueueMessage(sql: SqlStorage, opts: EnqueueOptions): AgentMail
 export function getPendingMessages(
   sql: SqlStorage,
   targetSessionId: string,
-  limit = 50,
+  limit = 50
 ): AgentMailboxMessage[] {
   const rows = sql
     .exec(
@@ -167,7 +170,7 @@ export function getPendingMessages(
          created_at ASC
        LIMIT ?`,
       targetSessionId,
-      limit,
+      limit
     )
     .toArray();
   return rows.map(parseMailboxMessageRow);
@@ -207,14 +210,14 @@ function transitionState(sql: SqlStorage, messageId: string, toState: DeliverySt
       now,
       msg.deliveryAttempts + 1,
       now,
-      messageId,
+      messageId
     );
   } else if (toState === 'acked') {
     sql.exec(
       `UPDATE session_inbox SET delivery_state = ?, acked_at = ? WHERE id = ?`,
       toState,
       now,
-      messageId,
+      messageId
     );
   } else {
     sql.exec(`UPDATE session_inbox SET delivery_state = ? WHERE id = ?`, toState, messageId);
@@ -257,9 +260,9 @@ export function expireStaleMessages(sql: SqlStorage, maxAttempts: number): numbe
       `SELECT id FROM session_inbox
        WHERE expires_at IS NOT NULL
          AND expires_at <= ?
-         AND source_kind = 'agent_mailbox'
+         AND durable_delivery = 0
          AND delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`,
-      now,
+      now
     )
     .toArray();
 
@@ -273,9 +276,9 @@ export function expireStaleMessages(sql: SqlStorage, maxAttempts: number): numbe
     .exec(
       `SELECT id FROM session_inbox
        WHERE delivery_attempts >= ?
-         AND source_kind = 'agent_mailbox'
+         AND durable_delivery = 0
          AND delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`,
-      maxAttempts,
+      maxAttempts
     )
     .toArray();
 
@@ -296,7 +299,7 @@ export function expireStaleMessages(sql: SqlStorage, maxAttempts: number): numbe
  */
 export function getUnackedMessages(
   sql: SqlStorage,
-  defaultAckTimeoutMs: number,
+  defaultAckTimeoutMs: number
 ): AgentMailboxMessage[] {
   const now = Date.now();
   const rows = sql
@@ -310,7 +313,7 @@ export function getUnackedMessages(
          )`,
       now,
       defaultAckTimeoutMs,
-      now,
+      now
     )
     .toArray();
   return rows.map(parseMailboxMessageRow);
@@ -328,7 +331,7 @@ export function requeueForRedelivery(sql: SqlStorage, messageId: string): boolea
       `UPDATE session_inbox
        SET delivered_at = NULL, delivery_attempts = delivery_attempts + 1
        WHERE id = ?`,
-      messageId,
+      messageId
     );
   }
   return requeued;
@@ -345,7 +348,7 @@ export function listMessages(
     messageClass?: MessageClass;
     limit?: number;
     offset?: number;
-  } = {},
+  } = {}
 ): { messages: AgentMailboxMessage[]; total: number } {
   const limit = opts.limit ?? 50;
   const offset = opts.offset ?? 0;
@@ -378,7 +381,7 @@ export function listMessages(
       `SELECT * FROM session_inbox ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       ...params,
       limit,
-      offset,
+      offset
     )
     .toArray();
 
@@ -437,7 +440,7 @@ export function getMailboxStats(sql: SqlStorage): Record<string, number> {
 export function runDeliverySweep(
   sql: SqlStorage,
   defaultAckTimeoutMs: number,
-  maxAttempts: number,
+  maxAttempts: number
 ): { expired: number; requeued: number } {
   // 1. Expire stale messages (TTL exceeded or max attempts reached)
   const expired = expireStaleMessages(sql, maxAttempts);
@@ -465,7 +468,7 @@ export function computeMailboxAlarmTime(sql: SqlStorage, pollIntervalMs: number)
   const [row] = sql
     .exec(
       `SELECT COUNT(*) as cnt FROM session_inbox
-       WHERE delivery_state IN ('queued', 'delivered')`,
+       WHERE delivery_state IN ('queued', 'delivered')`
     )
     .toArray();
 

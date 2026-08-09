@@ -178,7 +178,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 				ACPSessionID: rollover.sessionID, ErrorCode: "strict_resume_failed", ErrorMessage: message}
 			rollover.complete(result, true)
 			h.mu.Unlock()
-			rollover.attempt.complete(h, fatalErrorStopReason, errors.New(message))
+			rollover.attempt.completeCheckpoint(h, fatalErrorStopReason, errors.New(message))
 			h.broadcastAgentStatus(StatusError, agentType, message)
 			h.reportActivity("error")
 			return
@@ -193,7 +193,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 				ACPSessionID: rollover.sessionID, ErrorCode: "session_identity_mismatch", ErrorMessage: message}
 			rollover.complete(result, true)
 			h.mu.Unlock()
-			rollover.attempt.complete(h, fatalErrorStopReason, errors.New(message))
+			rollover.attempt.completeCheckpoint(h, fatalErrorStopReason, errors.New(message))
 			h.broadcastAgentStatus(StatusError, agentType, message)
 			h.reportActivity("error")
 			return
