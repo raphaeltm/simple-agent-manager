@@ -83,8 +83,8 @@ merged scheduled sweeps and R2 lifecycle policies.
 - [x] Add independent `temp-uploads/` and `tts/` lifecycle rules to the existing R2
       lifecycle resource for clean installs and upgrades; add no lifecycle for
       `library/` or `compose-image-artifacts/`.
-- [ ] Add explicit project-library tag/file delete statements scoped by project ID.
-- [ ] Schedule `library/{projectId}/` R2 list/delete cleanup with `waitUntil`, strict
+- [x] Add explicit project-library tag/file delete statements scoped by project ID.
+- [x] Schedule `library/{projectId}/` R2 list/delete cleanup with `waitUntil`, strict
       prefix validation, batched deletes, and structured failure context.
 
 ### Deploy safety and documentation
@@ -107,7 +107,7 @@ merged scheduled sweeps and R2 lifecycle policies.
       per-environment isolation; batch bound; two-pass zombie/stability proof.
 - [x] Real-SQL session snapshot tests: expired deletion; unexpired retention; exact ISO
       ordering/boundary behavior; batch bound; stable second pass.
-- [ ] Real-SQL library attack/control test: deleting project A removes only A's tags,
+- [x] Real-SQL library attack/control test: deleting project A removes only A's tags,
       rows, and R2 keys while project B remains intact; prove the pair discriminating.
 - [x] Scheduled isolation regression naming a throwing new step and proving later steps
       still execute with an undefined failure result.

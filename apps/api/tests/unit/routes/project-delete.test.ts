@@ -124,7 +124,13 @@ describe('DELETE /api/projects/:id', () => {
     consoleWarnSpy.mockRestore();
   });
 
-  const env = { DATABASE: {} as any } as Env;
+  const env = {
+    DATABASE: {} as any,
+    R2: {
+      list: vi.fn().mockResolvedValue({ objects: [], truncated: false }),
+      delete: vi.fn().mockResolvedValue(undefined),
+    } as any,
+  } as Env;
 
   it('returns 200 and success when project is deleted', async () => {
     // select: tasks for project → no tasks
@@ -162,9 +168,10 @@ describe('DELETE /api/projects/:id', () => {
 
     // With tasks: taskStatusEvents(1) + taskDependencies(2) + tasks(1) +
     // runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) +
-    // projectGithubRepositories(1) + projectGitlabRepositories(1) + projects(1) = 10
+    // projectGithubRepositories(1) + projectGitlabRepositories(1) +
+    // projectFileTags(1) + projectFiles(1) + projects(1) = 12
     const deleteOps = operations.filter((o) => o.startsWith('delete:'));
-    expect(deleteOps.length).toBe(10);
+    expect(deleteOps.length).toBe(12);
   });
 
   it('skips task grandchild cleanup when no tasks exist', async () => {
@@ -182,9 +189,10 @@ describe('DELETE /api/projects/:id', () => {
     expect(response.status).toBe(200);
 
     // Without tasks: tasks(1) + runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) +
-    // projectGithubRepositories(1) + projectGitlabRepositories(1) + projects(1) = 7
+    // projectGithubRepositories(1) + projectGitlabRepositories(1) +
+    // projectFileTags(1) + projectFiles(1) + projects(1) = 9
     const deleteOps = operations.filter((o) => o.startsWith('delete:'));
-    expect(deleteOps.length).toBe(7);
+    expect(deleteOps.length).toBe(9);
   });
 
   it('nullifies workspace project_id in the batch', async () => {
@@ -230,8 +238,8 @@ describe('DELETE /api/projects/:id', () => {
 
     // All mutations should be collected and passed to batch
     // With 1 task: 3 grandchild + 6 child (tasks, env, files, profiles, githubRepos, gitlabRepos)
-    // + 1 update + 1 project = 11
-    expect(batchedStatements.length).toBe(11);
+    // + 2 library deletes + 1 update + 1 project = 13
+    expect(batchedStatements.length).toBe(13);
   });
 
   it('calls requireProjectCapability for authorization', async () => {
@@ -287,9 +295,10 @@ describe('DELETE /api/projects/:id', () => {
 
     // With 1 task: taskStatusEvents(1) + taskDependencies(2) + tasks(1) +
     // runtimeEnvVars(1) + runtimeFiles(1) + agentProfiles(1) +
-    // projectGithubRepositories(1) + projectGitlabRepositories(1) + projects(1) = 10
+    // projectGithubRepositories(1) + projectGitlabRepositories(1) +
+    // projectFileTags(1) + projectFiles(1) + projects(1) = 12
     const deleteOps = operations.filter((o) => o.startsWith('delete:'));
-    expect(deleteOps.length).toBe(10);
+    expect(deleteOps.length).toBe(12);
   });
 
   it('deletes the Artifacts repo after project rows are deleted', async () => {
