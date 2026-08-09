@@ -83,6 +83,7 @@ type TaskRow = {
   completed_at: string | null;
   started_at: string | null;
   mission_id: string | null;
+  parent_task_id: string | null;
 };
 
 type WorkspaceRow = {
@@ -114,9 +115,15 @@ function createD1Database(state: ReturnType<typeof createD1State>) {
             const task = state.tasks.get(String(params[0]));
             return task ? { status: task.status } : null;
           }
-          if (sql.includes('SELECT status, mission_id FROM tasks WHERE id = ?')) {
+          if (sql.includes('SELECT status, mission_id, parent_task_id FROM tasks WHERE id = ?')) {
             const task = state.tasks.get(String(params[0]));
-            return task ? { status: task.status, mission_id: task.mission_id } : null;
+            return task
+              ? {
+                  status: task.status,
+                  mission_id: task.mission_id,
+                  parent_task_id: task.parent_task_id,
+                }
+              : null;
           }
           return null;
         },
@@ -136,7 +143,9 @@ function createD1Database(state: ReturnType<typeof createD1State>) {
           if (sql.includes("UPDATE tasks SET status = 'failed'")) {
             const taskId = String(params[3]);
             const task = state.tasks.get(taskId);
-            if (!task) return { success: true, meta: { changes: 0 } };
+            if (!task || ['completed', 'failed', 'cancelled'].includes(task.status)) {
+              return { success: true, meta: { changes: 0 } };
+            }
             task.status = 'failed';
             task.execution_step = null;
             task.error_message = String(params[0]);
@@ -274,6 +283,7 @@ function seedTask(dbState: ReturnType<typeof createD1State>, overrides: Partial<
     completed_at: null,
     started_at: null,
     mission_id: null,
+    parent_task_id: null,
     ...overrides,
   };
   dbState.tasks.set(task.id, task);

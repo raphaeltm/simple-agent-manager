@@ -23,7 +23,8 @@ vi.mock('../../../src/durable-objects/migrations', () => ({
   runMigrations: vi.fn(),
 }));
 
-vi.mock('@simple-agent-manager/shared', () => ({
+vi.mock('@simple-agent-manager/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/shared')>()),
   ACP_SESSION_DEFAULTS: {
     DETECTION_WINDOW_MS: 30000,
     MAX_FORK_DEPTH: 5,

@@ -54,7 +54,8 @@ vi.mock('../../../src/services/notification', () => ({
 }));
 
 // Mock logger
-vi.mock('../../../src/lib/logger', () => ({
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
