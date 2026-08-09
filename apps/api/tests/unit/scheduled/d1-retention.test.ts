@@ -5,8 +5,10 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import {
   DEFAULT_DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY,
+  DEFAULT_SESSION_SNAPSHOT_PURGE_LAST_RUN_KV_KEY,
   runDeploymentReleaseRetention,
   runScheduledDeploymentReleaseRetention,
+  runScheduledSessionSnapshotPurge,
   runSessionSnapshotPurge,
 } from '../../../src/scheduled/d1-retention';
 import { createMemoryKv, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
@@ -179,6 +181,32 @@ describe('D1 retention sweeps', () => {
 
     expect(skipped).toMatchObject({ skipped: true, skipReason: 'interval-not-elapsed' });
     expect(ran.deletedReleases).toBe(2);
+  });
+
+  it('uses an independent KV marker for scheduled snapshot purging', async () => {
+    addEnvironment('env-marker');
+    for (let version = 1; version <= 4; version += 1) {
+      addRelease('env-marker', version, 'applied');
+    }
+    addSnapshot('expired-marker', '2026-08-01T00:00:00.000Z');
+    await env.KV.put(
+      DEFAULT_DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY,
+      '2026-08-09T00:00:00.000Z'
+    );
+    const now = new Date('2026-08-09T01:00:00.000Z');
+
+    const releaseResult = await runScheduledDeploymentReleaseRetention(env, now);
+    const snapshotResult = await runScheduledSessionSnapshotPurge(env, now);
+
+    expect(releaseResult).toMatchObject({ skipped: true, skipReason: 'interval-not-elapsed' });
+    expect(snapshotResult.deletedSnapshots).toBe(1);
+    expect(snapshotResult.skipped).toBe(false);
+    expect(await env.KV.get(DEFAULT_SESSION_SNAPSHOT_PURGE_LAST_RUN_KV_KEY)).toBe(
+      now.toISOString()
+    );
+    expect(await env.KV.get(DEFAULT_DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY)).toBe(
+      '2026-08-09T00:00:00.000Z'
+    );
   });
 
   it('purges only snapshots whose ISO expiry is strictly before now', async () => {

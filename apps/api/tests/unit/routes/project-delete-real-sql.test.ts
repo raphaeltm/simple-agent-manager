@@ -9,6 +9,20 @@ import { AppError } from '../../../src/middleware/error';
 import { crudRoutes } from '../../../src/routes/projects/crud';
 import { createAllSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
+const mocks = vi.hoisted(() => ({
+  log: {
+    debug: vi.fn(),
+    error: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+  },
+}));
+
+vi.mock('../../../src/lib/logger', () => ({
+  log: mocks.log,
+  createModuleLogger: () => mocks.log,
+}));
+
 const OWNER_A = 'user-a';
 const PROJECT_A = 'project-a';
 const PROJECT_B = 'project-b';
@@ -62,10 +76,7 @@ describe('DELETE /api/projects/:id library cleanup — real SQL vertical slice',
       .run(fileId, `tag-${fileId}`);
   }
 
-  function ids(
-    table: 'projects' | 'project_files' | 'project_file_tags',
-    column = 'id'
-  ): string[] {
+  function ids(table: 'projects' | 'project_files' | 'project_file_tags', column = 'id'): string[] {
     return sqlite
       .prepare(`SELECT ${column} AS id FROM ${table} ORDER BY ${column}`)
       .all()
@@ -73,6 +84,7 @@ describe('DELETE /api/projects/:id library cleanup — real SQL vertical slice',
   }
 
   beforeEach(() => {
+    vi.clearAllMocks();
     sqlite = new Database(':memory:');
     createAllSchemaTables(sqlite, schema);
     objects = new Set([
@@ -141,15 +153,67 @@ describe('DELETE /api/projects/:id library cleanup — real SQL vertical slice',
     expect(ids('projects')).toEqual([PROJECT_B]);
     expect(ids('project_files')).toEqual(['b-file-1']);
     expect(ids('project_file_tags', 'file_id')).toEqual(['b-file-1']);
-    expect(deletedObjects).toEqual([
-      'library/project-a/a-file-1',
-      'library/project-a/a-file-2',
-    ]);
+    expect(deletedObjects).toEqual(['library/project-a/a-file-1', 'library/project-a/a-file-2']);
 
     // Attack case: the same request cannot remove another project's rows or object.
     expect([...objects]).toEqual(['library/project-b/b-file-1']);
     expect(env.R2.list).toHaveBeenCalledWith(
       expect.objectContaining({ prefix: 'library/project-a/' })
     );
+  });
+
+  it('returns after registering waitUntil without waiting for R2 cleanup', async () => {
+    addProject(PROJECT_A, OWNER_A);
+    let resolveList: ((value: R2Objects) => void) | undefined;
+    env.R2.list = vi.fn(
+      () =>
+        new Promise<R2Objects>((resolve) => {
+          resolveList = resolve;
+        })
+    );
+    const executionContext = {
+      waitUntil: (promise: Promise<unknown>) => waitUntilPromises.push(promise),
+      passThroughOnException: vi.fn(),
+    } as unknown as ExecutionContext;
+
+    const responsePromise = app.fetch(
+      new Request(`https://api.test/api/projects/${PROJECT_A}`, { method: 'DELETE' }),
+      env,
+      executionContext
+    );
+    const outcome = await Promise.race([
+      responsePromise.then(() => 'response'),
+      new Promise<'blocked'>((resolve) => setTimeout(() => resolve('blocked'), 250)),
+    ]);
+
+    expect(outcome).toBe('response');
+    expect(waitUntilPromises).toHaveLength(1);
+    expect(resolveList).toBeDefined();
+    resolveList?.({ objects: [], truncated: false });
+    await Promise.all(waitUntilPromises);
+    expect((await responsePromise).status).toBe(200);
+  });
+
+  it('logs structured project context when background R2 cleanup fails', async () => {
+    addProject(PROJECT_A, OWNER_A);
+    env.R2.list = vi.fn().mockRejectedValue(new Error('R2 unavailable'));
+    const executionContext = {
+      waitUntil: (promise: Promise<unknown>) => waitUntilPromises.push(promise),
+      passThroughOnException: vi.fn(),
+    } as unknown as ExecutionContext;
+
+    const response = await app.fetch(
+      new Request(`https://api.test/api/projects/${PROJECT_A}`, { method: 'DELETE' }),
+      env,
+      executionContext
+    );
+    await Promise.all(waitUntilPromises);
+
+    expect(response.status).toBe(200);
+    expect(mocks.log.warn).toHaveBeenCalledWith('project_delete.library_cleanup_failed', {
+      projectId: PROJECT_A,
+      prefix: 'library/project-a/',
+      error: 'R2 unavailable',
+    });
   });
 });

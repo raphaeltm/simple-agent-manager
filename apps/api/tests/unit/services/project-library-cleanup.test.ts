@@ -117,6 +117,65 @@ describe('project library cleanup', () => {
     expect(deleteObjects).not.toHaveBeenCalled();
   });
 
+  it('deletes every owned object across paginated R2 listings', async () => {
+    const deleted: string[] = [];
+    const list = vi
+      .fn()
+      .mockResolvedValueOnce({
+        objects: [{ key: 'library/project-a/a-file-1' }, { key: 'library/project-a/a-file-2' }],
+        truncated: true,
+        cursor: 'project-a-page-2',
+      })
+      .mockResolvedValueOnce({
+        objects: [{ key: 'library/project-a/a-file-3' }],
+        truncated: false,
+      });
+    const r2 = {
+      list,
+      delete: vi.fn(async (keys: string[]) => deleted.push(...keys)),
+    } as unknown as R2Bucket;
+
+    const stats = await deleteProjectLibraryObjects(r2, 'project-a', 2);
+
+    expect(list).toHaveBeenNthCalledWith(1, {
+      prefix: 'library/project-a/',
+      cursor: undefined,
+      limit: 2,
+    });
+    expect(list).toHaveBeenNthCalledWith(2, {
+      prefix: 'library/project-a/',
+      cursor: 'project-a-page-2',
+      limit: 2,
+    });
+    expect(deleted).toEqual([
+      'library/project-a/a-file-1',
+      'library/project-a/a-file-2',
+      'library/project-a/a-file-3',
+    ]);
+    expect(new Set(deleted).size).toBe(deleted.length);
+    expect(deleted).not.toContain('library/project-b/b-file-1');
+    expect(stats).toEqual({
+      prefix: 'library/project-a/',
+      listedObjects: 3,
+      deletedObjects: 3,
+    });
+  });
+
+  it('fails closed when a truncated R2 listing has no continuation cursor', async () => {
+    const r2 = {
+      list: vi.fn().mockResolvedValue({
+        objects: [],
+        truncated: true,
+      }),
+      delete: vi.fn(),
+    } as unknown as R2Bucket;
+
+    await expect(deleteProjectLibraryObjects(r2, 'project-a', 25)).rejects.toThrow(
+      'truncated project library listing without a cursor'
+    );
+    expect(r2.delete).not.toHaveBeenCalled();
+  });
+
   it('uses a configurable cleanup page size capped at the R2 maximum', () => {
     expect(
       getProjectDeleteCleanupBatchSize({
