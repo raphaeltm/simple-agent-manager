@@ -20,21 +20,22 @@ import {
   X,
 } from 'lucide-react';
 import { type ReactNode, useMemo, useState } from 'react';
+
 import {
   CHAT_MESSAGES,
+  type ChatMessageMock,
   CHECKPOINT_NOTES,
   CODE_ANCHOR,
   CODE_CONTENT,
+  type CommentMock,
   EMPTY_COMMENTS,
   ERROR_MESSAGE,
   LIBRARY_ANCHORS,
+  type LibraryAnchorMock,
   MANY_COMMENTS,
   MARKDOWN_CONTENT,
   MESSAGE_NOTES,
   PEOPLE,
-  type ChatMessageMock,
-  type CommentMock,
-  type LibraryAnchorMock,
   type PrototypePerson,
 } from './mock-data';
 
@@ -207,7 +208,7 @@ function PrototypeControls({
 }) {
   return (
     <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-border-default bg-surface/70 px-3 py-2 md:px-5">
-      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-muted">
+      <span className="hidden shrink-0 text-[10px] font-semibold uppercase tracking-[0.12em] text-fg-muted md:inline">
         Mock controls
       </span>
       {surface === 'chat' && (
@@ -622,7 +623,10 @@ function ChatSurface({
 }) {
   const defaultPanel = initialParam('panel', ['open', 'closed'] as const, 'open') === 'open';
   const [panelOpen, setPanelOpen] = useState(defaultPanel);
-  const [selectedMessageId, setSelectedMessageId] = useState<string | 'checkpoint'>('message-2');
+  const initialAnchor = initialParam('anchor', ['message', 'checkpoint'] as const, 'message');
+  const [selectedMessageId, setSelectedMessageId] = useState<string | 'checkpoint'>(
+    initialAnchor === 'checkpoint' ? 'checkpoint' : 'message-2'
+  );
   const [included, setIncluded] = useState(new Set(CHECKPOINT_NOTES.map((note) => note.id)));
 
   const selectedMessage = CHAT_MESSAGES.find((message) => message.id === selectedMessageId);
