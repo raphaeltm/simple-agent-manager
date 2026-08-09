@@ -23,6 +23,15 @@ burned the full timeout per candidate, moving DO P99/P999 wall time from about
 weeks because no check watched DO wall-time percentiles, and some candidates
 were logged-and-skipped without a terminal disposition.
 
+The 2026-08-09 billing-risk audit found the complementary failure mode: loops
+whose work was cheap but whose state machine had no terminal exit. A
+`NodeLifecycle` object in `destroying` re-armed every minute after its D1 row
+was gone, a zero-task mission remained active forever, and failed cleanup
+candidates stayed at the front of a bounded page. The same audit found an
+API/tail-worker feedback cycle where observing the ingest request produced the
+next ingest request. Cheap iterations are still runaway spend when iteration
+count is unbounded.
+
 ## Hard Requirements
 
 1. **Alarm/cron/sweep handlers get a wall-time budget.** DO `alarm()` handlers,
@@ -52,6 +61,23 @@ were logged-and-skipped without a terminal disposition.
    sweep/cron/alarm loop must state the expected candidate volume and
    worst-case per-candidate cost.
 
+5. **Every persisted alarm state needs a terminal exit and maximum residence
+   time.** For every state that re-arms an alarm, document the durable condition
+   that stops re-arming. When external state owns completion, re-read that state
+   and self-clean after it becomes terminal or disappears. Also enforce an
+   env-configurable maximum age with a `DEFAULT_*` constant so inconsistent
+   external state cannot keep the alarm alive forever.
+
+6. **Missing work needs a grace period, not an infinite wait.** Empty task or
+   candidate sets may be transient, but the grace period and overall lifecycle
+   must both be env-configurable and bounded. Transitional states such as
+   `completing` must converge to a final state.
+
+7. **Control-loop edges must not observe themselves.** Logging, telemetry,
+   retries, and tail delivery must exclude their own ingestion/control paths.
+   A failed downstream observation must update cached demand to the safe idle
+   state instead of leaving an open-loop retry condition.
+
 ## Required Tests
 
 For every new or changed sweep/reconcile candidate class, include a zombie
@@ -63,6 +89,11 @@ prevention regression test:
 - If the loop can call a dead target, include a test proving the dead-target
   path does not await the interactive timeout inside the control-loop critical
   path.
+- For an alarm state that should terminate, run two alarm ticks and assert the
+  first tick deletes or terminalizes durable state and the second tick does not
+  re-arm or repeat work.
+- For feedback-prone ingestion paths, prove both that the request logger omits
+  the ingest edge and that downstream failures cache zero demand.
 
 ## Reviewer Checklist
 
@@ -78,6 +109,9 @@ Before merging a PR that touches an alarm, cron, sweep, or reconcile loop:
 - [ ] If candidate selection widened, does the PR state expected candidate
       volume and worst-case per-candidate cost?
 - [ ] Is the permanent-failure candidate covered by a two-sweep regression test?
+- [ ] Does every re-arming state have both a durable terminal condition and a
+      bounded maximum age?
+- [ ] Can any log, tail, notification, or retry edge feed its own input?
 
 ## References
 

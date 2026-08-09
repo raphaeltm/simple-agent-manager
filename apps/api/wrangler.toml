@@ -4,6 +4,13 @@ compatibility_date = "2026-01-01"
 compatibility_flags = ["nodejs_compat"]
 port = 8787
 
+# Paid Workers and sub-hour Cron Triggers default to 30s CPU. Declaring that
+# budget explicitly prevents an accidental dashboard increase from turning a
+# runaway loop into unbounded CPU spend. Network I/O wait is not charged as CPU,
+# so this leaves generous headroom for the five-minute I/O-heavy sweep.
+[limits]
+cpu_ms = 30000
+
 # unicorn-magic exports toPath/traversePathUp only under the "node" condition.
 # Wrangler's esbuild resolves "default" which lacks them, breaking the
 # @mastra/core → execa → npm-run-path → unicorn-magic import chain.
@@ -14,6 +21,12 @@ port = 8787
 [vars]
 BASE_DOMAIN = "workspaces.example.com"
 VERSION = "0.1.0"
+CRON_SWEEPS_ENABLED_KV_KEY = "control-loops:cron-enabled"
+DO_ALARMS_ENABLED_KV_KEY = "control-loops:alarms-enabled"
+CONTROL_LOOP_KILL_SWITCH_CACHE_MS = "30000"
+CONTROL_LOOP_DISABLED_ALARM_RETRY_MS = "300000"
+CRON_FAILURE_NOTIFICATION_THROTTLE_MS = "3600000"
+CRON_FAILURE_NOTIFICATION_KV_PREFIX = "cron-failure-notification"
 MAX_NODES_PER_USER = "10"
 MAX_WORKSPACES_PER_NODE = "3"
 MAX_AGENT_SESSIONS_PER_WORKSPACE = "10"
@@ -80,6 +93,11 @@ DEVCONTAINER_CACHE_CREDENTIAL_EXPIRATION_MINUTES = "120"
 # rollback without a code change (also set via GH repo variable HETZNER_BASE_IMAGE).
 HETZNER_BASE_IMAGE = "docker-ce"
 TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS = "30000"
+NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS = "86400000"
+NODE_CLEANUP_FAILURE_BACKOFF_MS = "3600000"
+DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS = "1000"
+ORCHESTRATOR_ZERO_TASK_GRACE_MS = "600000"
+ORCHESTRATOR_MAX_MISSION_LIFETIME_MS = "86400000"
 # Task reconciliation — inactivity check-in for silent task agents
 TASK_RECONCILIATION_IDLE_MS = "300000"
 TASK_RECONCILIATION_RESPONSE_DEADLINE_MS = "60000"

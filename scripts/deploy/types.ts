@@ -407,6 +407,7 @@ export interface WranglerToml extends WranglerTomlBindings {
   compatibility_date?: string;
   compatibility_flags?: string[];
   vars?: Record<string, string>;
+  limits?: WorkerLimitsConfig;
   env?: Record<string, WranglerEnvConfig>;
   [key: string]: unknown;
 }
@@ -461,6 +462,10 @@ export interface ObservabilityConfig {
   };
 }
 
+export interface WorkerLimitsConfig {
+  cpu_ms: number;
+}
+
 export interface ContainerBinding {
   class_name: string;
   image: string;
@@ -487,6 +492,7 @@ export interface WranglerEnvConfig {
   tail_consumers?: TailConsumer[];
   migrations?: MigrationEntry[];
   observability?: ObservabilityConfig;
+  limits?: WorkerLimitsConfig;
   vars?: Record<string, string>;
   [key: string]: unknown;
 }

@@ -45,6 +45,21 @@ afterEach(() => {
 });
 
 describe('sync wrangler config', () => {
+  it('propagates the top-level CPU limit into generated deployment environments', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    const envConfig = generateApiWorkerEnv(
+      { limits: { cpu_ms: 30_000 } },
+      outputs,
+      'prod',
+      false,
+      false,
+      null
+    );
+
+    expect(envConfig.limits).toEqual({ cpu_ms: 30_000 });
+  });
+
   it('keeps Analytics Engine binding dataset aligned with generated query dataset', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
 

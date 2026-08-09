@@ -256,6 +256,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   TASK_RUN_CLEANUP_DELAY_MS?: string;
   // Warm node pooling configuration
   NODE_WARM_TIMEOUT_MS?: string;
+  NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS?: string; // Destroying-state alarm backstop (default: 86400000)
   MAX_AUTO_NODE_LIFETIME_MS?: string;
   NODE_WARM_GRACE_PERIOD_MS?: string;
   ORPHANED_WORKSPACE_GRACE_PERIOD_MS?: string;
@@ -583,6 +584,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MISSION_LIST_MAX_PAGE_SIZE?: string; // Max mission list page size (default: 100)
   // Project Orchestrator (Phase 3)
   ORCHESTRATOR_SCHEDULING_INTERVAL_MS?: string; // Scheduling loop interval (default: 30000)
+  ORCHESTRATOR_ZERO_TASK_GRACE_MS?: string; // Grace before empty mission terminalization (default: 600000)
+  ORCHESTRATOR_MAX_MISSION_LIFETIME_MS?: string; // Mission lifecycle backstop (default: 86400000)
   ORCHESTRATOR_STALL_TIMEOUT_MS?: string; // Stall detection threshold (default: 1200000)
   ORCHESTRATOR_MAX_DISPATCHES_PER_CYCLE?: string; // Max dispatches per cycle (default: 5)
   ORCHESTRATOR_MAX_ACTIVE_TASKS_PER_MISSION?: string; // Max active tasks per mission (default: 5)

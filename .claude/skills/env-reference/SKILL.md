@@ -84,6 +84,24 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES` — Maximum snapshot coordination JSON body (default: `262144`)
 - `SESSION_SNAPSHOT_R2_PREFIX` — Private R2 object prefix for session snapshots (default: `session-snapshots`)
 
+### Operational Control Loops
+
+- `CRON_SWEEPS_ENABLED_KV_KEY` — Fail-open KV brake key for the five-minute operational sweep (default: `control-loops:cron-enabled`)
+- `DO_ALARMS_ENABLED_KV_KEY` — Fail-open KV brake key shared by alarm-bearing DOs (default: `control-loops:alarms-enabled`)
+- `CONTROL_LOOP_KILL_SWITCH_CACHE_MS` — In-memory brake cache, clamped to 30000ms (default: `30000`)
+- `CONTROL_LOOP_DISABLED_ALARM_RETRY_MS` — Alarm recheck interval while disabled (default: `300000`)
+- `CRON_FAILURE_NOTIFICATION_THROTTLE_MS` — Per-sweep failure-notification throttle (default: `3600000`)
+- `CRON_FAILURE_NOTIFICATION_KV_PREFIX` — KV prefix for failure-notification throttle markers (default: `cron-failure-notification`)
+- `NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS` — Maximum destroying-state residence before DO self-cleanup (default: `86400000`)
+- `NODE_CLEANUP_FAILURE_BACKOFF_MS` — Failed cleanup-candidate exclusion window (default: `3600000`)
+- `DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS` — Minimum re-arm delay for completed diagnosis steps (default: `1000`)
+- `ORCHESTRATOR_ZERO_TASK_GRACE_MS` — Grace before a zero-task mission terminalizes (default: `600000`)
+- `ORCHESTRATOR_MAX_MISSION_LIFETIME_MS` — Mission lifetime backstop (default: `86400000`)
+
+Absent operational brake keys and KV read errors mean enabled. This fail-open
+behavior preserves availability and intentionally differs from the fail-closed
+trials entitlement switch.
+
 ### Devcontainer Cache
 
 - `DEVCONTAINER_CACHE_ENABLED` — Enables opportunistic devcontainer image caching

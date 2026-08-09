@@ -35,6 +35,7 @@ import type {
   DurableObjectsConfig,
   MigrationEntry,
   PulumiOutputs,
+  WorkerLimitsConfig,
   WranglerEnvConfig,
   WranglerToml,
 } from './types.js';
@@ -291,6 +292,7 @@ function extractStaticBindings(topLevel: WranglerToml): {
   containers: ContainerBinding[] | undefined;
   migrations: MigrationEntry[] | undefined;
   artifacts: unknown[] | undefined;
+  limits: WorkerLimitsConfig | undefined;
 } {
   return {
     durable_objects: topLevel.durable_objects as DurableObjectsConfig | undefined,
@@ -301,6 +303,7 @@ function extractStaticBindings(topLevel: WranglerToml): {
     containers: topLevel.containers as ContainerBinding[] | undefined,
     migrations: topLevel.migrations as MigrationEntry[] | undefined,
     artifacts: topLevel.artifacts as unknown[] | undefined,
+    limits: topLevel.limits as WorkerLimitsConfig | undefined,
   };
 }
 
@@ -446,6 +449,17 @@ function getApiWorkerVars(
     VM_INCIDENT_RETENTION_DAYS: String(outputs.diagnosticIncidentTtlDays),
     ...getOptionalProcessEnvVars([
       'REQUIRE_APPROVAL',
+      'CRON_SWEEPS_ENABLED_KV_KEY',
+      'DO_ALARMS_ENABLED_KV_KEY',
+      'CONTROL_LOOP_KILL_SWITCH_CACHE_MS',
+      'CONTROL_LOOP_DISABLED_ALARM_RETRY_MS',
+      'CRON_FAILURE_NOTIFICATION_THROTTLE_MS',
+      'CRON_FAILURE_NOTIFICATION_KV_PREFIX',
+      'NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS',
+      'NODE_CLEANUP_FAILURE_BACKOFF_MS',
+      'DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS',
+      'ORCHESTRATOR_ZERO_TASK_GRACE_MS',
+      'ORCHESTRATOR_MAX_MISSION_LIFETIME_MS',
       'HETZNER_BASE_IMAGE',
       'MAX_VM_AGENT_ERROR_BODY_BYTES',
       'MAX_VM_AGENT_ERROR_BATCH_SIZE',
@@ -558,6 +572,7 @@ function getStaticApiWorkerBindings(
     ...(durableObjectMigrations ? { migrations: durableObjectMigrations } : {}),
     ...(containers ? { containers } : {}),
     ...(includeArtifactsBinding ? { artifacts: staticBindings.artifacts } : {}),
+    ...(staticBindings.limits ? { limits: staticBindings.limits } : {}),
   };
 }
 
