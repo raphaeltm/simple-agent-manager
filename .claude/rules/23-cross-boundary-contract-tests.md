@@ -91,6 +91,20 @@ For every caller that supplies security- or identity-sensitive metadata:
   external request.
 - Re-check deferred/replay paths separately from the primary dispatch path.
 
+### Versioned Protocols and Durable Identities
+
+When a cross-service protocol adds a version, idempotency/delivery ID, receipt,
+or runtime identity, both implementations MUST consume the same serialized
+contract fixture. The fixture must cover capability negotiation, new and
+duplicate acceptance, conflicts/non-acceptance, lookup, and not-found behavior,
+including status codes and timestamp units.
+
+A caller-side adapter mock is not proof that the production HTTP path sends the
+negotiated envelope. Add a test at the real request serializer that inspects the
+final URL and JSON body. For replay decisions, test changed and unproven runtime
+identity separately; only an explicit same-runtime non-acceptance receipt may
+authorize automatic replay.
+
 ### Agent Startup Generated-Config Boundaries
 
 When vm-agent generates an agent config file plus sibling process environment
