@@ -14,7 +14,7 @@ different matcher logic in workflow YAML; see `.github/workflows/ci.yml` and
 
 ## Authoritative and advisory layers
 
-- ESLint 9 flat config remains authoritative. `eslint.config.js` preserves the captured legacy
+- ESLint 9 flat config remains authoritative. `eslint.config.mjs` preserves the captured legacy
   finding set, hosts `@simple-agent-manager/eslint-plugin-sam`, and retains `simple-import-sort`.
 - The three `sam/*` rules provide advisory editor diagnostics. Their ownership, stages,
   baselines, and expiring exemptions live in
