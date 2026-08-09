@@ -663,6 +663,21 @@ describe('parseInboxMessageRow', () => {
     delivery_attempts: 0,
     last_delivery_at: null,
     metadata: null,
+    // Durable delivery columns (migration 025)
+    source_kind: 'agent_mailbox',
+    prompt_message_id: 'msg-1',
+    next_attempt_at: null,
+    last_error: null,
+    terminal_reason: null,
+    attempt_id: null,
+    attempt_started_at: null,
+    runtime_identity: null,
+    receipt_state: null,
+    receipt_runtime_identity: null,
+    receipt_checked_at: null,
+    accepted_at: null,
+    adapter_protocol_version: null,
+    receipt_supported: null,
   };
 
   it('parses valid row with snake_case to camelCase mapping', () => {
