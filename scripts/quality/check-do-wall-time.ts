@@ -21,6 +21,7 @@
  *   DO_WALL_TIME_INVOCATION_TYPES    Optional comma-separated type filter (default: alarm; use all to disable)
  *   DO_WALL_TIME_GRAPHQL_ENDPOINT    Optional GraphQL endpoint override
  *   DO_CRON_LIVENESS_MAX_AGE_HOURS   Maximum cron.completed age (default: 3)
+ *   DO_CRON_LIVENESS_SCRIPT_NAMES    Cron service filter (falls back to DO_WALL_TIME_SCRIPT_NAMES; one is required)
  *   DO_CRON_LIVENESS_ENDPOINT        Optional Workers telemetry endpoint override
  *
  * Exit codes:
@@ -56,6 +57,7 @@ interface Config {
   invocationTypes: string[];
   graphqlEndpoint: string;
   cronLivenessMaxAgeHours: number;
+  cronLivenessScriptNames: string[];
   cronLivenessEndpoint: string;
   now: Date;
 }
@@ -188,6 +190,12 @@ export function getConfig(now = new Date()): Config {
   if (!cfToken) throw new Error('CF_TOKEN environment variable is required');
   if (!cfAccountId) throw new Error('CF_ACCOUNT_ID environment variable is required');
 
+  const scriptNames = parseCsvEnv('DO_WALL_TIME_SCRIPT_NAMES');
+  const cronLivenessScriptNames = resolveCronLivenessScriptNames(
+    scriptNames,
+    parseCsvEnv('DO_CRON_LIVENESS_SCRIPT_NAMES')
+  );
+
   return {
     cfToken,
     cfAccountId,
@@ -200,7 +208,7 @@ export function getConfig(now = new Date()): Config {
     ),
     minRequests: parseNumberEnv('DO_WALL_TIME_MIN_REQUESTS', DEFAULT_MIN_REQUESTS),
     queryLimit: parseNumberEnv('DO_WALL_TIME_LIMIT', DEFAULT_QUERY_LIMIT),
-    scriptNames: parseCsvEnv('DO_WALL_TIME_SCRIPT_NAMES'),
+    scriptNames,
     namespaceIds: parseCsvEnv('DO_WALL_TIME_NAMESPACE_IDS'),
     objectNames: parseCsvEnv('DO_WALL_TIME_OBJECT_NAMES'),
     invocationTypes: parseInvocationTypesEnv(),
@@ -209,11 +217,27 @@ export function getConfig(now = new Date()): Config {
       'DO_CRON_LIVENESS_MAX_AGE_HOURS',
       DEFAULT_CRON_LIVENESS_MAX_AGE_HOURS
     ),
+    cronLivenessScriptNames,
     cronLivenessEndpoint:
       process.env.DO_CRON_LIVENESS_ENDPOINT ??
       `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/workers/observability/v1/query`,
     now,
   };
+}
+
+export function resolveCronLivenessScriptNames(
+  wallTimeScriptNames: string[],
+  configuredCronScriptNames: string[]
+): string[] {
+  const resolved = configuredCronScriptNames.length > 0
+    ? configuredCronScriptNames
+    : wallTimeScriptNames;
+  if (resolved.length === 0) {
+    throw new Error(
+      'DO_CRON_LIVENESS_SCRIPT_NAMES or DO_WALL_TIME_SCRIPT_NAMES must target the API Worker'
+    );
+  }
+  return resolved;
 }
 
 export function getWindows(
@@ -576,12 +600,9 @@ function escapeSqlLiteral(value: string): string {
 }
 
 async function queryCronLiveness(config: Config): Promise<boolean> {
-  const serviceFilter =
-    config.scriptNames.length === 0
-      ? ''
-      : ` AND $metadata.service IN (${config.scriptNames
-          .map((name) => `'${escapeSqlLiteral(name)}'`)
-          .join(', ')})`;
+  const serviceFilter = ` AND $metadata.service IN (${config.cronLivenessScriptNames
+    .map((name) => `'${escapeSqlLiteral(name)}'`)
+    .join(', ')})`;
   const query =
     `SELECT COUNT(*) AS cnt FROM events WHERE ` +
     `($message = 'cron.completed' OR $message LIKE '%cron.completed%')${serviceFilter}`;
@@ -618,6 +639,7 @@ async function main(): Promise<void> {
     `Wall-time threshold: ${config.regressionRatio}x | Rate threshold: ${config.invocationRateRegressionRatio}x | Minimum requests: ${config.minRequests} | Limit: ${config.queryLimit}`
   );
   console.log(`Cron liveness maximum age: ${config.cronLivenessMaxAgeHours}h`);
+  console.log(`Cron liveness service filter: ${config.cronLivenessScriptNames.join(', ')}`);
   if (config.scriptNames.length > 0) console.log(`Script filter: ${config.scriptNames.join(', ')}`);
   if (config.namespaceIds.length > 0)
     console.log(`Namespace filter: ${config.namespaceIds.join(', ')}`);

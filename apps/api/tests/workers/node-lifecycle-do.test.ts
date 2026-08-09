@@ -298,6 +298,29 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     expect(await getAlarm(stub)).toBeNull();
   });
 
+  it('terminally cleans a destroying state when its D1 node row is absent', async () => {
+    const nodeId = 'nl-test-destroy-absent-001';
+    await seedUser(TEST_USER_ID);
+    const stub = getStub(nodeId);
+
+    await runInDurableObject(stub, async (instance) => {
+      await instance.ctx.storage.put('state', {
+        nodeId,
+        userId: TEST_USER_ID,
+        status: 'destroying',
+        warmSince: null,
+        destroyingSince: Date.now(),
+        claimedByTask: null,
+      } satisfies StoredNodeLifecycleState);
+      await instance.ctx.storage.setAlarm(Date.now() + 1_000);
+      await instance.alarm();
+    });
+
+    expect(await getStoredState(stub)).toBeNull();
+    expect(await getAlarm(stub)).toBeNull();
+    expect(await getNodeFromD1(nodeId)).toBeNull();
+  });
+
   it('retries a failed warm-to-destroying D1 handoff, then terminates next tick', async () => {
     const nodeId = 'nl-test-destroy-retry-001';
     await seedTestNode(nodeId);

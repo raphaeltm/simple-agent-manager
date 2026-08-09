@@ -16,6 +16,9 @@ source of truth:
   `KV_NAMESPACE_ID`
 - `RESOURCE_PREFIX` plus stack (`staging` or `prod`) -> Worker name
   `<prefix>-api-<stack>`
+- GitHub Environment variables `CRON_SWEEPS_ENABLED_KV_KEY` and
+  `DO_ALARMS_ENABLED_KV_KEY` -> deployed switch keys (use the documented
+  defaults only when the variables are absent)
 
 Do not print token values. Validate every resolved target before a write:
 
@@ -23,8 +26,12 @@ Do not print token values. Validate every resolved target before a write:
 test -n "$CLOUDFLARE_API_TOKEN"
 test -n "$CLOUDFLARE_ACCOUNT_ID"
 test -n "$KV_NAMESPACE_ID"
+CRON_SWITCH_KEY="${CRON_SWEEPS_ENABLED_KV_KEY:-control-loops:cron-enabled}"
+ALARM_SWITCH_KEY="${DO_ALARMS_ENABLED_KV_KEY:-control-loops:alarms-enabled}"
 printf 'environment=%s account=%s namespace=%s worker=%s\n' \
   "$TARGET_ENVIRONMENT" "$CLOUDFLARE_ACCOUNT_ID" "$KV_NAMESPACE_ID" "$WORKER_NAME"
+printf 'cron_switch_key=%s alarm_switch_key=%s\n' \
+  "$CRON_SWITCH_KEY" "$ALARM_SWITCH_KEY"
 ```
 
 Production commonly uses `TARGET_ENVIRONMENT=production`, stack `prod`, and a
@@ -41,9 +48,9 @@ configured disabled interval, so re-enabling resumes their chains cleanly.
 
 ```bash
 cd apps/api
-pnpm exec wrangler kv key put "control-loops:cron-enabled" "false" \
+pnpm exec wrangler kv key put "$CRON_SWITCH_KEY" "false" \
   --namespace-id "$KV_NAMESPACE_ID" --remote
-pnpm exec wrangler kv key put "control-loops:alarms-enabled" "false" \
+pnpm exec wrangler kv key put "$ALARM_SWITCH_KEY" "false" \
   --namespace-id "$KV_NAMESPACE_ID" --remote
 ```
 
@@ -52,9 +59,9 @@ Within one cache window plus one scheduled tick, verify
 Observability and verify the suspected work has stopped. Restore deliberately:
 
 ```bash
-pnpm exec wrangler kv key put "control-loops:cron-enabled" "true" \
+pnpm exec wrangler kv key put "$CRON_SWITCH_KEY" "true" \
   --namespace-id "$KV_NAMESPACE_ID" --remote
-pnpm exec wrangler kv key put "control-loops:alarms-enabled" "true" \
+pnpm exec wrangler kv key put "$ALARM_SWITCH_KEY" "true" \
   --namespace-id "$KV_NAMESPACE_ID" --remote
 ```
 

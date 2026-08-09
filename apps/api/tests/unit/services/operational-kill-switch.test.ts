@@ -5,6 +5,7 @@ import {
   __resetOperationalKillSwitchCacheForTest,
   deferAlarmWhenDisabled,
   isOperationalLoopEnabled,
+  resolveDisabledAlarmRetryMs,
   resolveOperationalKillSwitchCacheMs,
   setOperationalLoopEnabled,
 } from '../../../src/services/operational-kill-switch';
@@ -67,5 +68,13 @@ describe('operational control-loop kill switches', () => {
     expect(resolveOperationalKillSwitchCacheMs(makeEnv(vi.fn(), vi.fn(), {
       CONTROL_LOOP_KILL_SWITCH_CACHE_MS: '60000',
     }))).toBe(30_000);
+  });
+
+  it('clamps a dangerously short disabled-alarm retry to the safety floor', () => {
+    expect(
+      resolveDisabledAlarmRetryMs(
+        makeEnv(vi.fn(), vi.fn(), { CONTROL_LOOP_DISABLED_ALARM_RETRY_MS: '1' })
+      )
+    ).toBe(60_000);
   });
 });

@@ -53,6 +53,9 @@ jobs:
           DO_WALL_TIME_MIN_REQUESTS: ${{ vars.DO_WALL_TIME_MIN_REQUESTS }}
           DO_WALL_TIME_LIMIT: ${{ vars.DO_WALL_TIME_LIMIT }}
           DO_CRON_LIVENESS_MAX_AGE_HOURS: ${{ vars.DO_CRON_LIVENESS_MAX_AGE_HOURS }}
+          # Must resolve to the target API Worker. The script falls back to
+          # DO_WALL_TIME_SCRIPT_NAMES and fails closed if neither is configured.
+          DO_CRON_LIVENESS_SCRIPT_NAMES: ${{ vars.DO_CRON_LIVENESS_SCRIPT_NAMES }}
         run: |
           set -o pipefail
           pnpm quality:do-wall-time | tee do-wall-time-report.txt

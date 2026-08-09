@@ -7,7 +7,10 @@
  *
  * Uses Miniflare with real DOs (embedded SQLite) — no vi.mock().
  */
-import type { TaskEventNotification } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_ORCHESTRATOR_ZERO_TASK_GRACE_MS,
+  type TaskEventNotification,
+} from '@simple-agent-manager/shared';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
@@ -79,6 +82,30 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
 
     const status = await getOrchestratorStatus(env, projectId);
     expect(status.activeMissions).toHaveLength(1);
+  });
+
+  it('terminalizes a zero-task mission after its grace period', async () => {
+    const projectId = 'proj-po-zero-task-001';
+    const missionId = 'mission-zero-task-001';
+    await seedTestProject(projectId);
+    await seedMission(missionId, projectId, TEST_USER_ID);
+    await startOrchestration(env, projectId, missionId);
+
+    await runInDurableObject(getStub(projectId), async (instance) => {
+      instance.ctx.storage.sql.exec(
+        'UPDATE orchestrator_missions SET registered_at = ? WHERE mission_id = ?',
+        Date.now() - DEFAULT_ORCHESTRATOR_ZERO_TASK_GRACE_MS - 1,
+        missionId
+      );
+      await instance.alarm();
+    });
+
+    expect(
+      await env.DATABASE.prepare('SELECT status FROM missions WHERE id = ?')
+        .bind(missionId)
+        .first<{ status: string }>()
+    ).toEqual({ status: 'completed' });
+    expect((await getOrchestratorStatus(env, projectId)).activeMissions).toHaveLength(0);
   });
 
   it('pauseMission transitions active → paused', async () => {

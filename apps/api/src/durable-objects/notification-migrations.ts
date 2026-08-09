@@ -75,6 +75,21 @@ export const NOTIFICATION_MIGRATIONS: NotificationMigration[] = [
       );
     },
   },
+  {
+    name: '003-notification-dedup-claims',
+    run: (sql) => {
+      sql.exec(`
+        CREATE TABLE notification_dedup_claims (
+          dedup_key TEXT PRIMARY KEY,
+          expires_at INTEGER NOT NULL
+        )
+      `);
+      sql.exec(
+        `CREATE INDEX idx_notification_dedup_claims_expiry
+         ON notification_dedup_claims(expires_at)`
+      );
+    },
+  },
 ];
 
 /**

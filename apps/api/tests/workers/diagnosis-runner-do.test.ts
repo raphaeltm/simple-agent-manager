@@ -61,6 +61,25 @@ describe('DiagnosisRunner DO durability and fault injection', () => {
     });
   });
 
+  it('re-arms a completed step with a positive delay instead of spinning immediately', async () => {
+    const runId = 'diagnosis-do-completed-step-delay-001';
+    await seedRun(runId, 'diagnosis-user-completed-step-delay');
+    const runner = stub(runId);
+    await runner.start(runId);
+
+    const before = Date.now();
+    await runInDurableObject(runner, async (instance) => {
+      const state = await instance.ctx.storage.get<Record<string, unknown>>('state');
+      expect(state).toBeTruthy();
+      await instance.ctx.storage.put('state', {
+        ...state,
+        completedStepKeys: ['model:1'],
+      });
+      await instance.alarm();
+      expect(await instance.ctx.storage.getAlarm()).toBeGreaterThanOrEqual(before + 900);
+    });
+  });
+
   it('fault-injected restart after an external-step claim fails visibly without repeating the step', async () => {
     const runId = 'diagnosis-do-ambiguous-001';
     await seedRun(runId, 'diagnosis-user-ambiguous');

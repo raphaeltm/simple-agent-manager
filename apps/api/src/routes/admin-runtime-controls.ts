@@ -59,6 +59,7 @@ adminRuntimeControlRoutes.patch('/', async (c) => {
   }
 
   log.info('admin.runtime_controls.updated', {
+    actorUserId: c.get('auth')?.user.id,
     cronSweepsEnabled: body.cronSweepsEnabled,
     doAlarmsEnabled: body.doAlarmsEnabled,
   });

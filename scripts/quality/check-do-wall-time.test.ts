@@ -9,6 +9,7 @@ import {
   type DurableObjectWallTimeRow,
   formatReport,
   hasCronCompletedEvent,
+  resolveCronLivenessScriptNames,
   summarizeInvocationRates,
   summarizeRows,
 } from './check-do-wall-time';
@@ -49,6 +50,7 @@ describe('check-do-wall-time', () => {
     expect(workflow).toContain('default: production');
     expect(workflow).toContain('- staging');
     expect(workflow).toContain('- production');
+    expect(workflow).toContain('DO_CRON_LIVENESS_SCRIPT_NAMES');
   });
 
   it('summarizes realistic GraphQL rows by script namespace and name', () => {
@@ -202,5 +204,17 @@ describe('check-do-wall-time', () => {
     expect(hasCronCompletedEvent({ success: true, result: { data: [{ cnt: 1 }] } })).toBe(true);
     expect(hasCronCompletedEvent({ success: true, result: { data: [{ cnt: 0 }] } })).toBe(false);
     expect(hasCronCompletedEvent({ success: true, result: { data: [] } })).toBe(false);
+  });
+
+  it('requires cron liveness to target an explicit API Worker service', () => {
+    expect(resolveCronLivenessScriptNames(['sam-api-production'], [])).toEqual([
+      'sam-api-production',
+    ]);
+    expect(resolveCronLivenessScriptNames([], ['sam-api-staging'])).toEqual([
+      'sam-api-staging',
+    ]);
+    expect(() => resolveCronLivenessScriptNames([], [])).toThrow(
+      'must target the API Worker'
+    );
   });
 });

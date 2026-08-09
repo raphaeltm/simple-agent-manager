@@ -2,7 +2,7 @@ import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
-import { sendNotification } from '../services/notification';
+import { sendNotificationOnce } from '../services/notification';
 
 export const DEFAULT_CRON_FAILURE_NOTIFICATION_THROTTLE_MS = 60 * 60_000;
 export const DEFAULT_CRON_FAILURE_NOTIFICATION_KV_PREFIX = 'cron-failure-notification';
@@ -41,6 +41,8 @@ export async function notifyFailedSweeps(
   let notifiedSweeps = 0;
   let notificationsSent = 0;
   const throttleMs = resolveThrottleMs(env);
+  const now = Date.now();
+  const dedupExpiresAt = now + throttleMs;
   const expirationTtl = Math.max(60, Math.ceil(throttleMs / 1_000));
 
   for (const sweepName of [...new Set(failedSweeps)]) {
@@ -61,16 +63,27 @@ export async function notifyFailedSweeps(
 
     notifiedSweeps++;
     const deliveries = await Promise.allSettled(
-      (superadmins.results ?? []).map((user) => sendNotification(env, user.id, {
-        type: 'cron_failure',
-        urgency: 'high',
-        title: `Operational sweep failed: ${sweepName}`,
-        body: 'A scheduled recovery sweep failed. Review Workers logs and runtime controls.',
-        actionUrl: '/admin/observability',
-        metadata: { sweepName },
-      })),
+      (superadmins.results ?? []).map((user) =>
+        sendNotificationOnce(
+          env,
+          user.id,
+          key,
+          dedupExpiresAt,
+          {
+            type: 'cron_failure',
+            urgency: 'high',
+            title: `Operational sweep failed: ${sweepName}`,
+            body: 'A scheduled recovery sweep failed. Review Workers logs and runtime controls.',
+            actionUrl: '/admin/observability',
+            metadata: { sweepName },
+          },
+          now
+        )
+      ),
     );
-    notificationsSent += deliveries.filter((delivery) => delivery.status === 'fulfilled').length;
+    notificationsSent += deliveries.filter(
+      (delivery) => delivery.status === 'fulfilled' && delivery.value
+    ).length;
     const failedDeliveries = deliveries.length -
       deliveries.filter((delivery) => delivery.status === 'fulfilled').length;
     if (failedDeliveries > 0) {

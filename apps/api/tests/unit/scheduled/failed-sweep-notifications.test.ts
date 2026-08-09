@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { sendNotificationMock } = vi.hoisted(() => ({ sendNotificationMock: vi.fn() }));
+const { sendNotificationOnceMock } = vi.hoisted(() => ({
+  sendNotificationOnceMock: vi.fn(),
+}));
 vi.mock('../../../src/services/notification', () => ({
-  sendNotification: sendNotificationMock,
+  sendNotificationOnce: sendNotificationOnceMock,
 }));
 
 import type { Env } from '../../../src/env';
@@ -29,7 +31,7 @@ function makeEnv() {
 describe('failed sweep notifications', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    sendNotificationMock.mockResolvedValue(undefined);
+    sendNotificationOnceMock.mockResolvedValue(true);
   });
 
   it('notifies real superadmins once per sweep name per throttle window', async () => {
@@ -43,7 +45,7 @@ describe('failed sweep notifications', () => {
       notifiedSweeps: 0,
       notificationsSent: 0,
     });
-    expect(sendNotificationMock).toHaveBeenCalledTimes(2);
+    expect(sendNotificationOnceMock).toHaveBeenCalledTimes(2);
     expect(bind).toHaveBeenCalledWith('system-sentinel');
     expect(prepare.mock.calls[0]![0]).toContain("status != 'system'");
   });
@@ -51,13 +53,23 @@ describe('failed sweep notifications', () => {
   it('throttles each sweep independently', async () => {
     const { env } = makeEnv();
     await notifyFailedSweeps(env, ['node_cleanup', 'stuck_tasks']);
-    expect(sendNotificationMock).toHaveBeenCalledTimes(4);
+    expect(sendNotificationOnceMock).toHaveBeenCalledTimes(4);
   });
 
   it('does not send when the throttle KV cannot enforce the spam bound', async () => {
     const { env } = makeEnv();
     vi.mocked(env.KV.get).mockRejectedValue(new Error('KV unavailable'));
     await notifyFailedSweeps(env, ['node_cleanup']);
-    expect(sendNotificationMock).not.toHaveBeenCalled();
+    expect(sendNotificationOnceMock).not.toHaveBeenCalled();
+  });
+
+  it('counts only per-user Durable Object dedup claims that succeed', async () => {
+    const { env } = makeEnv();
+    sendNotificationOnceMock.mockResolvedValueOnce(true).mockResolvedValueOnce(false);
+
+    expect(await notifyFailedSweeps(env, ['node_cleanup'])).toEqual({
+      notifiedSweeps: 1,
+      notificationsSent: 1,
+    });
   });
 });

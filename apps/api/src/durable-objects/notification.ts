@@ -60,6 +60,23 @@ export class NotificationService extends DurableObject<Env> {
   // RPC Methods (called from API routes via stub)
   // ---------------------------------------------------------------------------
 
+  /** Atomically claim an expiring notification key within this per-user DO. */
+  async claimNotificationDeduplication(
+    dedupKey: string,
+    expiresAt: number,
+    now: number = Date.now()
+  ): Promise<boolean> {
+    return this.ctx.storage.transactionSync(() => {
+      this.sql.exec('DELETE FROM notification_dedup_claims WHERE expires_at <= ?', now);
+      const result = this.sql.exec(
+        'INSERT OR IGNORE INTO notification_dedup_claims (dedup_key, expires_at) VALUES (?, ?)',
+        dedupKey,
+        expiresAt
+      );
+      return result.rowsWritten > 0;
+    });
+  }
+
   /** Create a new notification and broadcast to connected WebSocket clients. */
   async createNotification(
     userId: string,

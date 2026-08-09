@@ -12,6 +12,7 @@ export const DEFAULT_DO_ALARMS_ENABLED_KV_KEY = 'control-loops:alarms-enabled';
 export const DEFAULT_CONTROL_LOOP_KILL_SWITCH_CACHE_MS = 30_000;
 export const MAX_CONTROL_LOOP_KILL_SWITCH_CACHE_MS = 30_000;
 export const DEFAULT_CONTROL_LOOP_DISABLED_ALARM_RETRY_MS = 5 * 60_000;
+export const MIN_CONTROL_LOOP_DISABLED_ALARM_RETRY_MS = 60_000;
 
 export type OperationalLoop = 'cron' | 'alarms';
 
@@ -49,9 +50,10 @@ export function resolveOperationalKillSwitchCacheMs(env: OperationalKillSwitchEn
 
 export function resolveDisabledAlarmRetryMs(env: OperationalKillSwitchEnv): number {
   const parsed = Number.parseInt(env.CONTROL_LOOP_DISABLED_ALARM_RETRY_MS ?? '', 10);
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : DEFAULT_CONTROL_LOOP_DISABLED_ALARM_RETRY_MS;
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return DEFAULT_CONTROL_LOOP_DISABLED_ALARM_RETRY_MS;
+  }
+  return Math.max(parsed, MIN_CONTROL_LOOP_DISABLED_ALARM_RETRY_MS);
 }
 
 export async function isOperationalLoopEnabled(

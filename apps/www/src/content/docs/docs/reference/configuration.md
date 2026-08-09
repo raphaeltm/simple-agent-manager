@@ -320,12 +320,22 @@ KV procedure in `.claude/rules/55-runaway-cost-emergency-ops.md`.
 | `CRON_SWEEPS_ENABLED_KV_KEY`            | `control-loops:cron-enabled`   | KV key gating the five-minute operational sweep block            |
 | `DO_ALARMS_ENABLED_KV_KEY`              | `control-loops:alarms-enabled` | Shared KV key gating alarm-bearing Durable Objects               |
 | `CONTROL_LOOP_KILL_SWITCH_CACHE_MS`     | `30000`                        | In-memory switch cache; runtime clamps it to at most 30 seconds  |
-| `CONTROL_LOOP_DISABLED_ALARM_RETRY_MS`  | `300000` (5 min)               | Safe alarm recheck interval while DO work is disabled            |
-| `CRON_FAILURE_NOTIFICATION_THROTTLE_MS` | `3600000` (1 hr)               | Per-sweep throttle for failed-sweep superadmin notifications     |
+| `CONTROL_LOOP_DISABLED_ALARM_RETRY_MS`  | `300000` (5 min)               | Safe alarm recheck interval while DO work is disabled; values below 60 seconds are clamped |
+| `CRON_FAILURE_NOTIFICATION_THROTTLE_MS` | `3600000` (1 hr)               | Per-sweep throttle enforced by a KV cache plus an atomic per-user Notification DO claim |
 | `CRON_FAILURE_NOTIFICATION_KV_PREFIX`   | `cron-failure-notification`    | KV prefix for notification throttle markers                      |
 | `DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS` | `1000`                         | Minimum delayed re-arm for an already-completed diagnosis step   |
 | `ORCHESTRATOR_ZERO_TASK_GRACE_MS`       | `600000` (10 min)              | Grace period before an active mission with no tasks terminalizes |
 | `ORCHESTRATOR_MAX_MISSION_LIFETIME_MS`  | `86400000` (24 hr)             | Backstop that force-completes active/completing missions         |
+
+The scheduled Durable Object billing monitor reads these non-secret variables
+from the selected GitHub Environment, not from the API Worker runtime:
+
+| Variable                              | Default/fallback               | Description |
+| ------------------------------------- | ------------------------------ | ----------- |
+| `DO_WALL_TIME_SCRIPT_NAMES`           | none                           | Optional comma-separated API Worker filter for wall-time and invocation-rate analysis |
+| `DO_INVOCATION_RATE_REGRESSION_RATIO` | `2`                            | Recent-versus-seven-day-baseline request-rate failure ratio |
+| `DO_CRON_LIVENESS_MAX_AGE_HOURS`      | `3`                            | Maximum age of the most recent targeted `cron.completed` event |
+| `DO_CRON_LIVENESS_SCRIPT_NAMES`       | `DO_WALL_TIME_SCRIPT_NAMES`    | Explicit API Worker service target for cron liveness; one of these script-name variables is required |
 
 ## Provider-Side Orphan Reconciliation
 

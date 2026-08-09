@@ -9,8 +9,9 @@
  *
  * Run: pnpm test:workers
  */
-import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
 import { resolve } from 'node:path';
+
+import { cloudflareTest, readD1Migrations } from '@cloudflare/vitest-pool-workers';
 import { defineConfig } from 'vitest/config';
 
 const d1Migrations = await readD1Migrations(resolve(__dirname, './src/db/migrations'));
@@ -95,6 +96,10 @@ export default defineConfig({
           },
           PROJECT_ORCHESTRATOR: {
             className: 'ProjectOrchestrator',
+            useSQLite: true,
+          },
+          NOTIFICATION: {
+            className: 'NotificationService',
             useSQLite: true,
           },
           // Container-less stand-in for the Instant runtime container DO. The

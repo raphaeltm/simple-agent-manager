@@ -89,8 +89,8 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `CRON_SWEEPS_ENABLED_KV_KEY` — Fail-open KV brake key for the five-minute operational sweep (default: `control-loops:cron-enabled`)
 - `DO_ALARMS_ENABLED_KV_KEY` — Fail-open KV brake key shared by alarm-bearing DOs (default: `control-loops:alarms-enabled`)
 - `CONTROL_LOOP_KILL_SWITCH_CACHE_MS` — In-memory brake cache, clamped to 30000ms (default: `30000`)
-- `CONTROL_LOOP_DISABLED_ALARM_RETRY_MS` — Alarm recheck interval while disabled (default: `300000`)
-- `CRON_FAILURE_NOTIFICATION_THROTTLE_MS` — Per-sweep failure-notification throttle (default: `3600000`)
+- `CONTROL_LOOP_DISABLED_ALARM_RETRY_MS` — Alarm recheck interval while disabled, clamped to at least 60000ms (default: `300000`)
+- `CRON_FAILURE_NOTIFICATION_THROTTLE_MS` — Per-sweep failure-notification throttle backed by KV and an atomic per-user Notification DO claim (default: `3600000`)
 - `CRON_FAILURE_NOTIFICATION_KV_PREFIX` — KV prefix for failure-notification throttle markers (default: `cron-failure-notification`)
 - `NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS` — Maximum destroying-state residence before DO self-cleanup (default: `86400000`)
 - `NODE_CLEANUP_FAILURE_BACKOFF_MS` — Failed cleanup-candidate exclusion window (default: `3600000`)
@@ -101,6 +101,13 @@ See `apps/api/.env.example` for the full list. Key variables:
 Absent operational brake keys and KV read errors mean enabled. This fail-open
 behavior preserves availability and intentionally differs from the fail-closed
 trials entitlement switch.
+
+GitHub Environment variables for the scheduled Durable Object monitor:
+
+- `DO_WALL_TIME_SCRIPT_NAMES` — Optional wall-time/rate service filter and fallback cron-liveness target
+- `DO_INVOCATION_RATE_REGRESSION_RATIO` — Recent-versus-baseline invocation-rate threshold (default: `2`)
+- `DO_CRON_LIVENESS_MAX_AGE_HOURS` — Maximum allowed age of `cron.completed` (default: `3`)
+- `DO_CRON_LIVENESS_SCRIPT_NAMES` — Explicit API Worker service target for cron liveness; required when `DO_WALL_TIME_SCRIPT_NAMES` is absent
 
 ### Devcontainer Cache
 

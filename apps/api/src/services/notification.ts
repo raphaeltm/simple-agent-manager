@@ -92,6 +92,25 @@ export async function sendNotification(
 }
 
 /**
+ * Send only after atomically claiming an expiring key in the per-user DO.
+ * KV may be used as a coarse outer cache, but this claim is the strict
+ * concurrency boundary for notification throttles.
+ */
+export async function sendNotificationOnce(
+  env: NotificationEnv,
+  userId: string,
+  dedupKey: string,
+  expiresAt: number,
+  notification: CreateNotificationRequest,
+  now: number = Date.now()
+): Promise<boolean> {
+  const stub = getStub(env, userId);
+  if (!(await stub.claimNotificationDeduplication(dedupKey, expiresAt, now))) return false;
+  await stub.createNotification(userId, notification);
+  return true;
+}
+
+/**
  * Emit a "task_complete" notification when a task finishes successfully.
  */
 export async function notifyTaskComplete(

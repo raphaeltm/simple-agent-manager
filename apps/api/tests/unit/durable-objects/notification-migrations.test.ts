@@ -70,6 +70,7 @@ describe('Notification DO Migrations', () => {
     expect(applied.length).toBe(NOTIFICATION_MIGRATIONS.length);
     expect(applied[0]?.name).toBe('001-initial-schema');
     expect(applied[1]?.name).toBe('002-session-filter-index');
+    expect(applied[2]?.name).toBe('003-notification-dedup-claims');
   });
 
   it('should skip already-applied migrations', () => {
@@ -100,5 +101,6 @@ describe('Notification DO Migrations', () => {
     expect(log).toContain('CREATE INDEX idx_notifications_type');
     expect(log).toContain('CREATE INDEX idx_notifications_session_type');
     expect(log).toContain('notifications(user_id, project_id, session_id, type, created_at DESC)');
+    expect(log).toContain('CREATE TABLE notification_dedup_claims');
   });
 });
