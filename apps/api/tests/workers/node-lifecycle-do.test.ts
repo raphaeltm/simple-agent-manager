@@ -321,6 +321,23 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     expect(await getNodeFromD1(nodeId)).toBeNull();
   });
 
+  it('finalizeDeletion routes an API-deleted node through destroying terminal cleanup', async () => {
+    const nodeId = 'nl-test-api-delete-terminal-001';
+    await seedTestNode(nodeId);
+    const stub = getStub(nodeId);
+
+    await stub.markIdle(nodeId, TEST_USER_ID);
+    expect(await getStoredState(stub)).toMatchObject({ nodeId, status: 'warm' });
+    expect(await getAlarm(stub)).not.toBeNull();
+
+    await env.DATABASE.prepare('DELETE FROM nodes WHERE id = ?').bind(nodeId).run();
+    await stub.finalizeDeletion(nodeId, TEST_USER_ID);
+
+    expect(await getStoredState(stub)).toBeNull();
+    expect(await getAlarm(stub)).toBeNull();
+    expect(await getNodeFromD1(nodeId)).toBeNull();
+  });
+
   it('retries a failed warm-to-destroying D1 handoff, then terminates next tick', async () => {
     const nodeId = 'nl-test-destroy-retry-001';
     await seedTestNode(nodeId);

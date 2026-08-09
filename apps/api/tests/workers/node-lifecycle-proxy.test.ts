@@ -9,7 +9,13 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
-import { getStatus, markActive, markIdle, tryClaim } from '../../src/services/node-lifecycle';
+import {
+  finalizeDeletion,
+  getStatus,
+  markActive,
+  markIdle,
+  tryClaim,
+} from '../../src/services/node-lifecycle';
 import { seedNode, seedUser } from './helpers/seed-d1';
 import {
   captureNodeLifecycleExpectedError,
@@ -259,6 +265,21 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
     expect(proxyStatus.status).toBe(directStatus.status);
     expect(proxyStatus.nodeId).toBe(directStatus.nodeId);
     expect(proxyStatus.warmSince).toBe(directStatus.warmSince);
+  });
+
+  it('finalizeDeletion clears lifecycle state and alarms after the API deletes D1 state', async () => {
+    const nodeId = 'nlp-finalize-delete-001';
+    await seedTestNode(nodeId);
+    await markIdle(env, nodeId, TEST_USER_ID, 30_000);
+
+    await env.DATABASE.prepare('DELETE FROM nodes WHERE id = ?').bind(nodeId).run();
+    await finalizeDeletion(env, nodeId, TEST_USER_ID);
+
+    expect(await getStoredState(nodeId)).toBeNull();
+    const alarm = await runInDurableObject(getStub(nodeId), async (instance) => {
+      return instance.ctx.storage.getAlarm();
+    });
+    expect(alarm).toBeNull();
   });
 
   it('full lifecycle: idle → claim → active → idle', async () => {

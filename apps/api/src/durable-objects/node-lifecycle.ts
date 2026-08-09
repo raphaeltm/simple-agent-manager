@@ -210,6 +210,30 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     return this.toPublicState(state);
   }
 
+  /**
+   * Reconcile an explicit API deletion with this node's lifecycle state.
+   *
+   * The API removes provider resources and D1 rows synchronously. Routing that
+   * terminal action through the same destroying handler clears any warm or
+   * workspace-deletion alarm and emits the canonical terminal event instead of
+   * leaving an orphaned Durable Object alarm behind.
+   */
+  async finalizeDeletion(nodeId: string, userId: string): Promise<void> {
+    const previous = await this.getStoredState();
+    const state: StoredState = {
+      nodeId,
+      userId,
+      status: 'destroying',
+      warmSince: previous?.warmSince ?? null,
+      claimedByTask: null,
+      warmTimeoutOverrideMs: previous?.warmTimeoutOverrideMs ?? null,
+      destroyingSince: previous?.destroyingSince ?? Date.now(),
+    };
+
+    await this.ctx.storage.put('state', state);
+    await this.handleDestroyingAlarm(state);
+  }
+
   // =========================================================================
   // Workspace auto-deletion scheduling
   // =========================================================================

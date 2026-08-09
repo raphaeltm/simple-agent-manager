@@ -32,6 +32,7 @@ import {
   getNodeSystemInfoFromNode,
   listNodeContainersFromNode,
 } from '../services/node-agent-diagnostics';
+import { finalizeDeletion as finalizeNodeLifecycleDeletion } from '../services/node-lifecycle';
 import {
   createNodeRecord,
   deleteNodeResources,
@@ -429,6 +430,8 @@ nodesRoutes.delete('/:id', async (c) => {
       .delete(schema.nodes)
       .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)));
   }
+
+  await finalizeNodeLifecycleDeletion(c.env, nodeId, userId);
 
   return c.json({ success: true });
 });
