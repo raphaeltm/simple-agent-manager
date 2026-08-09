@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Append-only migration ledger must preserve one auditable execution order. See .claude/rules/18-file-size-limits.md
 /**
  * Durable Object SQLite migration runner and migration definitions.
  *
