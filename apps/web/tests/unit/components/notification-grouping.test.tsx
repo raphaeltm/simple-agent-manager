@@ -320,14 +320,16 @@ describe('NotificationCenter tab filtering', () => {
     makeNotification({ id: 'n-error', type: 'error', title: 'Something broke' }),
     makeNotification({ id: 'n-session', type: 'session_ended', title: 'Session ended' }),
     makeNotification({ id: 'n-pr', type: 'pr_created', title: 'PR opened' }),
+    makeNotification({ id: 'n-cron', type: 'cron_failure', title: 'Sweep failed' }),
   ];
 
-  it('defaults to Attention tab showing only needs_input and error', () => {
-    renderNotificationCenter(mixedNotifications, 6);
+  it('defaults to Attention tab showing needs_input, error, and operational failures', () => {
+    renderNotificationCenter(mixedNotifications, 7);
 
     // Attention items visible
     expect(screen.getByText('Agent needs help')).toBeInTheDocument();
     expect(screen.getByText('Something broke')).toBeInTheDocument();
+    expect(screen.getByText('Sweep failed')).toBeInTheDocument();
 
     // Non-attention items NOT visible on the default tab
     expect(screen.queryByText('Task finished')).toBeNull();
@@ -337,7 +339,7 @@ describe('NotificationCenter tab filtering', () => {
   });
 
   it('Updates tab shows task_complete, progress, session_ended, pr_created', () => {
-    renderNotificationCenter(mixedNotifications, 6);
+    renderNotificationCenter(mixedNotifications, 7);
     fireEvent.click(screen.getByRole('tab', { name: /updates/i }));
 
     // Update items visible
@@ -349,10 +351,11 @@ describe('NotificationCenter tab filtering', () => {
     // Attention items NOT visible
     expect(screen.queryByText('Agent needs help')).toBeNull();
     expect(screen.queryByText('Something broke')).toBeNull();
+    expect(screen.queryByText('Sweep failed')).toBeNull();
   });
 
   it('All tab shows every notification', () => {
-    renderNotificationCenter(mixedNotifications, 6);
+    renderNotificationCenter(mixedNotifications, 7);
     fireEvent.click(screen.getByRole('tab', { name: /^all$/i }));
 
     expect(screen.getByText('Agent needs help')).toBeInTheDocument();
@@ -361,6 +364,7 @@ describe('NotificationCenter tab filtering', () => {
     expect(screen.getByText('Something broke')).toBeInTheDocument();
     expect(screen.getByText('Session ended')).toBeInTheDocument();
     expect(screen.getByText('PR opened')).toBeInTheDocument();
+    expect(screen.getByText('Sweep failed')).toBeInTheDocument();
   });
 
   it('shows attention unread count badge on the Attention tab', () => {

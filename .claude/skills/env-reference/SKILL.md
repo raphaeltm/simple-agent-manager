@@ -107,7 +107,7 @@ GitHub Environment variables for the scheduled Durable Object monitor:
 - `DO_WALL_TIME_SCRIPT_NAMES` — Optional wall-time/rate service filter and fallback cron-liveness target
 - `DO_INVOCATION_RATE_REGRESSION_RATIO` — Recent-versus-baseline invocation-rate threshold (default: `2`)
 - `DO_CRON_LIVENESS_MAX_AGE_HOURS` — Maximum allowed age of `cron.completed` (default: `3`)
-- `DO_CRON_LIVENESS_SCRIPT_NAMES` — Explicit API Worker service target for cron liveness; required when `DO_WALL_TIME_SCRIPT_NAMES` is absent
+- `DO_CRON_LIVENESS_SCRIPT_NAMES` — Explicit API Worker service target for cron liveness; the GitHub workflow derives both script-name filters from `RESOURCE_PREFIX` and the selected stack when unset
 
 ### Devcontainer Cache
 

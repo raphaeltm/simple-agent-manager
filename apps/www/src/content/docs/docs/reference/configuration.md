@@ -335,7 +335,7 @@ from the selected GitHub Environment, not from the API Worker runtime:
 | `DO_WALL_TIME_SCRIPT_NAMES`           | none                           | Optional comma-separated API Worker filter for wall-time and invocation-rate analysis |
 | `DO_INVOCATION_RATE_REGRESSION_RATIO` | `2`                            | Recent-versus-seven-day-baseline request-rate failure ratio |
 | `DO_CRON_LIVENESS_MAX_AGE_HOURS`      | `3`                            | Maximum age of the most recent targeted `cron.completed` event |
-| `DO_CRON_LIVENESS_SCRIPT_NAMES`       | `DO_WALL_TIME_SCRIPT_NAMES`    | Explicit API Worker service target for cron liveness; one of these script-name variables is required |
+| `DO_CRON_LIVENESS_SCRIPT_NAMES`       | `DO_WALL_TIME_SCRIPT_NAMES`    | Explicit API Worker service target for cron liveness; the GitHub workflow derives both from `RESOURCE_PREFIX` and the selected stack when unset |
 
 ## Provider-Side Orphan Reconciliation
 

@@ -35,6 +35,7 @@ const NOTIFICATION_TYPE_CONFIG: Record<NotificationType, {
   progress: { icon: Activity, color: 'text-fg-muted', label: 'Progress' },
   session_ended: { icon: MessageSquare, color: 'text-accent', label: 'Session Ended' },
   pr_created: { icon: GitPullRequest, color: 'text-success-fg', label: 'PR Created' },
+  cron_failure: { icon: AlertCircle, color: 'text-danger-fg', label: 'Operational Failure' },
 };
 
 const TYPE_FILTER_OPTIONS: { value: NotificationType | 'all'; label: string }[] = [

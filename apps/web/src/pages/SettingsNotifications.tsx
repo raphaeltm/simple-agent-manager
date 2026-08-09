@@ -33,6 +33,10 @@ const TYPE_LABELS: Record<NotificationType, { label: string; description: string
     label: 'PR Created',
     description: 'When an agent creates a pull request',
   },
+  cron_failure: {
+    label: 'Operational Failure',
+    description: 'When a scheduled recovery sweep reports a failure',
+  },
 };
 
 /** A global preference is one not scoped to any project (`projectId === null`). */

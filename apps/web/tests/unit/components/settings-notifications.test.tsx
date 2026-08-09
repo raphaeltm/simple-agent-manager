@@ -54,7 +54,8 @@ describe('SettingsNotifications', () => {
       expect(screen.getByText('Task Complete')).toBeInTheDocument();
     });
     const switches = screen.getAllByRole('switch');
-    expect(switches).toHaveLength(6);
+    expect(switches).toHaveLength(7);
+    expect(screen.getByText('Operational Failure')).toBeInTheDocument();
     for (const sw of switches) {
       expect(sw).toHaveAttribute('aria-checked', 'true');
     }

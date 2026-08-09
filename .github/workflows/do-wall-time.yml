@@ -42,6 +42,8 @@ jobs:
         env:
           CF_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          TARGET_ENVIRONMENT: ${{ inputs.environment || 'production' }}
+          RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}
           DO_WALL_TIME_SCRIPT_NAMES: ${{ vars.DO_WALL_TIME_SCRIPT_NAMES }}
           DO_WALL_TIME_NAMESPACE_IDS: ${{ vars.DO_WALL_TIME_NAMESPACE_IDS }}
           DO_WALL_TIME_OBJECT_NAMES: ${{ vars.DO_WALL_TIME_OBJECT_NAMES }}
@@ -58,6 +60,21 @@ jobs:
           DO_CRON_LIVENESS_SCRIPT_NAMES: ${{ vars.DO_CRON_LIVENESS_SCRIPT_NAMES }}
         run: |
           set -o pipefail
+          case "$TARGET_ENVIRONMENT" in
+            production) TARGET_STACK="prod" ;;
+            staging) TARGET_STACK="staging" ;;
+            *) echo "Unsupported target environment: $TARGET_ENVIRONMENT" >&2; exit 2 ;;
+          esac
+          if [ -z "$RESOURCE_PREFIX" ]; then
+            echo "RESOURCE_PREFIX GitHub Environment variable is required" >&2
+            exit 2
+          fi
+          if [ -z "$DO_WALL_TIME_SCRIPT_NAMES" ]; then
+            export DO_WALL_TIME_SCRIPT_NAMES="${RESOURCE_PREFIX}-api-${TARGET_STACK}"
+          fi
+          if [ -z "$DO_CRON_LIVENESS_SCRIPT_NAMES" ]; then
+            export DO_CRON_LIVENESS_SCRIPT_NAMES="$DO_WALL_TIME_SCRIPT_NAMES"
+          fi
           pnpm quality:do-wall-time | tee do-wall-time-report.txt
 
       - name: Publish check summary

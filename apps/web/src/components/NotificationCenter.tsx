@@ -33,6 +33,7 @@ const NOTIFICATION_TYPE_CONFIG: Record<NotificationType, {
   progress: { icon: Activity, color: 'text-fg-muted', label: 'Progress' },
   session_ended: { icon: MessageSquare, color: 'text-accent', label: 'Session Ended' },
   pr_created: { icon: GitPullRequest, color: 'text-success-fg', label: 'PR Created' },
+  cron_failure: { icon: AlertCircle, color: 'text-danger-fg', label: 'Operational Failure' },
 };
 
 type FilterTab = 'attention' | 'updates' | 'all';
@@ -43,7 +44,11 @@ type FilterTab = 'attention' | 'updates' | 'all';
  * Low-value updates (task_complete, progress, session_ended, pr_created) are
  * accessible in the Updates tab but do not inflate the badge count.
  */
-export const ATTENTION_TYPES: ReadonlySet<string> = new Set(['needs_input', 'error']);
+export const ATTENTION_TYPES: ReadonlySet<string> = new Set([
+  'needs_input',
+  'error',
+  'cron_failure',
+]);
 
 export function NotificationCenter() {
   const [isOpen, setIsOpen] = useState(false);
