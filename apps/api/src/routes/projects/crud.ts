@@ -46,6 +46,12 @@ import {
 } from '../../schemas';
 import { seedArtifactsReadme } from '../../services/artifacts/seed-readme';
 import { encrypt } from '../../services/encryption';
+import {
+  buildProjectLibraryDeleteStatements,
+  buildProjectLibraryR2Prefix,
+  deleteProjectLibraryObjects,
+  getProjectDeleteCleanupBatchSize,
+} from '../../services/file-library';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import {
   listGitLabBranches,
@@ -1095,6 +1101,7 @@ crudRoutes.delete('/:id', async (c) => {
       .delete(schema.projectGitlabRepositories)
       .where(eq(schema.projectGitlabRepositories.projectId, projectId)),
   );
+  statements.push(...buildProjectLibraryDeleteStatements(db, projectId));
 
   // Detach workspaces (ALTER TABLE FK ON DELETE SET NULL is not enforced)
   statements.push(
@@ -1113,6 +1120,39 @@ crudRoutes.delete('/:id', async (c) => {
 
   // 3. Execute all mutations atomically via D1 batch.
   await db.batch(statements as [typeof statements[0]]);
+
+  // R2 deletion can require paginated storage I/O, so keep it outside the D1 batch
+  // and off the request's critical path. The helper derives and validates the exact
+  // library/{projectId}/ prefix; a foreign key from R2 aborts the page fail-closed.
+  const libraryPrefix = buildProjectLibraryR2Prefix(projectId);
+  const libraryCleanup = deleteProjectLibraryObjects(
+    c.env.R2,
+    projectId,
+    getProjectDeleteCleanupBatchSize(c.env)
+  )
+    .then((stats) => {
+      log.info('project_delete.library_cleanup_completed', {
+        projectId,
+        prefix: stats.prefix,
+        listedObjects: stats.listedObjects,
+        deletedObjects: stats.deletedObjects,
+      });
+    })
+    .catch((err) => {
+      log.warn('project_delete.library_cleanup_failed', {
+        projectId,
+        prefix: libraryPrefix,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+  try {
+    c.executionCtx.waitUntil(libraryCleanup);
+  } catch {
+    // Hono unit tests do not always provide an execution context. Production Workers
+    // always take the waitUntil path; awaiting here keeps the fallback deterministic.
+    await libraryCleanup;
+  }
 
   // Artifacts repo count limits are enforced from project rows. If this
   // best-effort external cleanup cannot run, the deleted project no longer

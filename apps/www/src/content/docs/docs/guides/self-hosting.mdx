@@ -173,7 +173,7 @@ installations must add this policy before their next production deployment.
 | `D1_MIGRATION_CHURNING_TABLES`                     | Optional comma-separated `<binding>.<table>` subset of the reviewed retention/expiry table list. May narrow the built-in list but cannot expand it. | `OBSERVABILITY_DATABASE.platform_errors` |
 | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | Maximum allowed decrease for reviewed churning tables. Defaults to `50`; range `0`–`100`. A decrease exactly at the limit is accepted.              | `25`                                     |
 
-The reviewed default churning selectors are `DATABASE.github_webhook_deliveries`, `DATABASE.registry_credential_rate_limits`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. All other application tables retain zero row-decrease tolerance. Leave `D1_MIGRATION_CHURNING_TABLES` unset to use the complete reviewed default list.
+The reviewed default churning selectors are `DATABASE.deployment_releases`, `DATABASE.github_webhook_deliveries`, `DATABASE.project_files`, `DATABASE.registry_credential_rate_limits`, `DATABASE.session_snapshots`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. All other application tables retain zero row-decrease tolerance. Leave `D1_MIGRATION_CHURNING_TABLES` unset to use the complete reviewed default list.
 
 The guided setup generates `RESOURCE_PREFIX` from `BASE_DOMAIN` as `s` plus the
 first six hex characters of the domain's SHA-256 hash. Use that generated value
@@ -240,13 +240,19 @@ Go to Actions → Deploy Production → Run workflow. Choose the `main` branch a
 The workflow:
 
 1. Validates configuration
-2. Provisions infrastructure via Pulumi (D1, KV, R2, DNS), including private VM diagnostic evidence retention
+2. Provisions infrastructure via Pulumi (D1, KV, R2, DNS), including prefix-scoped R2 retention for session snapshots, private VM diagnostic evidence, one-day temporary uploads, and thirty-day TTS cache objects (`infra/resources/storage.ts:r2BucketLifecycle`)
 3. Deploys API Worker and Web UI
 4. Runs database migrations
 5. Builds and uploads VM Agent binaries
 6. Runs health check
 
 Before deploying the API Worker, the workflow reads its applied Durable Object migration tag. A fresh installation creates every namespace with SQLite storage; an existing installation retains its already-applied namespace history and storage backends. This is automatic—do not edit historical migration entries or create namespaces manually.
+
+Pulumi also creates or updates the assets bucket lifecycle resource on every deploy.
+The defaults are `sessionSnapshotTtlDays=7`, `diagnosticIncidentTtlDays=7`,
+`tempUploadTtlDays=1`, and `ttsTtlDays=30`; each accepts a positive-integer Pulumi
+config override. There is deliberately no age-only rule for durable `library/` data or
+release-referenced `compose-image-artifacts/`.
 
 If migration state cannot be read or does not match the checked-in history, deployment stops before Wrangler runs rather than risking migration replay or namespace replacement.
 

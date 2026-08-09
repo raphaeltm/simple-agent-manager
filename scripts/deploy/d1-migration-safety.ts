@@ -49,8 +49,11 @@ const D1_MIGRATIONS_TABLE = 'd1_migrations';
 const SYSTEM_TABLES = new Set(['_cf_KV', D1_MIGRATIONS_TABLE, 'sqlite_sequence']);
 
 export const DEFAULT_D1_MIGRATION_CHURNING_TABLES = [
+  'DATABASE.deployment_releases',
   'DATABASE.github_webhook_deliveries',
+  'DATABASE.project_files',
   'DATABASE.registry_credential_rate_limits',
+  'DATABASE.session_snapshots',
   'DATABASE.sessions',
   'DATABASE.trial_waitlist',
   'DATABASE.trigger_executions',

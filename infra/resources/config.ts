@@ -7,6 +7,8 @@ export type R2Location = (typeof SUPPORTED_R2_LOCATIONS)[number];
 
 export const DEFAULT_PAGES_PRODUCTION_BRANCH = 'main';
 export const DEFAULT_SESSION_SNAPSHOT_TTL_DAYS = 7;
+export const DEFAULT_TEMP_UPLOAD_TTL_DAYS = 1;
+export const DEFAULT_TTS_TTL_DAYS = 30;
 export const DEFAULT_DIAGNOSTIC_INCIDENT_PREFIX = 'diagnostic-incidents';
 export const DEFAULT_DIAGNOSTIC_INCIDENT_TTL_DAYS = 7;
 export const RESERVED_R2_TOP_LEVEL_PREFIXES = new Set([
@@ -33,6 +35,8 @@ export interface InfraConfig {
   r2Location: R2Location;
   pagesProductionBranch: string;
   sessionSnapshotTtlDays: number;
+  tempUploadTtlDays: number;
+  ttsTtlDays: number;
   diagnosticIncidentPrefix: string;
   diagnosticIncidentTtlDays: number;
 }
@@ -56,6 +60,16 @@ export function parseInfraConfig(config: ConfigReader, currentStack: string): In
       optionalNonEmptyConfig(config, 'sessionSnapshotTtlDays'),
       DEFAULT_SESSION_SNAPSHOT_TTL_DAYS,
       'sessionSnapshotTtlDays'
+    ),
+    tempUploadTtlDays: parsePositiveInteger(
+      optionalNonEmptyConfig(config, 'tempUploadTtlDays'),
+      DEFAULT_TEMP_UPLOAD_TTL_DAYS,
+      'tempUploadTtlDays'
+    ),
+    ttsTtlDays: parsePositiveInteger(
+      optionalNonEmptyConfig(config, 'ttsTtlDays'),
+      DEFAULT_TTS_TTL_DAYS,
+      'ttsTtlDays'
     ),
     diagnosticIncidentPrefix: parseR2Prefix(
       optionalNonEmptyConfig(config, 'diagnosticIncidentPrefix') ??
@@ -89,6 +103,8 @@ export const prefix = infraConfig.prefix;
 export const r2Location = infraConfig.r2Location;
 export const pagesProductionBranch = infraConfig.pagesProductionBranch;
 export const sessionSnapshotTtlDays = infraConfig.sessionSnapshotTtlDays;
+export const tempUploadTtlDays = infraConfig.tempUploadTtlDays;
+export const ttsTtlDays = infraConfig.ttsTtlDays;
 export const diagnosticIncidentPrefix = infraConfig.diagnosticIncidentPrefix;
 export const diagnosticIncidentTtlDays = infraConfig.diagnosticIncidentTtlDays;
 

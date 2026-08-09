@@ -59,6 +59,7 @@ export {
   getMaxFilesPerProject,
   getMaxTagLength,
   getMaxTagsPerFile,
+  getProjectDeleteCleanupBatchSize,
   getTagQueryBatchSize,
   getUploadMaxBytes,
   resolvePageSize,
@@ -67,6 +68,75 @@ export {
   validateTag,
 } from './file-library-config';
 export { listDirectories, moveFile } from './file-library-directories';
+
+export interface ProjectLibraryObjectCleanupStats {
+  prefix: string;
+  listedObjects: number;
+  deletedObjects: number;
+}
+
+/** Build the canonical project-owned R2 prefix and reject hierarchy injection. */
+export function buildProjectLibraryR2Prefix(projectId: string): string {
+  if (!projectId || projectId.includes('/')) {
+    throw new Error('Project ID is not safe for a library R2 prefix');
+  }
+  return buildLibraryR2Key(projectId, '');
+}
+
+/**
+ * Build the exact D1 statements used by project deletion. Tags must be selected
+ * through project_files because project_file_tags intentionally has no project_id.
+ */
+export function buildProjectLibraryDeleteStatements(db: AppDb, projectId: string) {
+  const projectFileIds = db
+    .select({ id: schema.projectFiles.id })
+    .from(schema.projectFiles)
+    .where(eq(schema.projectFiles.projectId, projectId));
+
+  return [
+    db.delete(schema.projectFileTags).where(inArray(schema.projectFileTags.fileId, projectFileIds)),
+    db.delete(schema.projectFiles).where(eq(schema.projectFiles.projectId, projectId)),
+  ];
+}
+
+/** List and delete only one project's canonical library prefix. */
+export async function deleteProjectLibraryObjects(
+  r2: R2Bucket,
+  projectId: string,
+  batchSize: number
+): Promise<ProjectLibraryObjectCleanupStats> {
+  const prefix = buildProjectLibraryR2Prefix(projectId);
+  const stats: ProjectLibraryObjectCleanupStats = {
+    prefix,
+    listedObjects: 0,
+    deletedObjects: 0,
+  };
+  let cursor: string | undefined;
+
+  do {
+    const page = await r2.list({ prefix, cursor, limit: batchSize });
+    const keys = page.objects.map((object) => object.key);
+    stats.listedObjects += keys.length;
+
+    // Defence in depth: never trust a storage adapter that returns keys outside the
+    // requested tenant prefix. Abort before deleting any key from that page.
+    if (keys.some((key) => !key.startsWith(prefix))) {
+      throw new Error('R2 returned an object outside the requested project library prefix');
+    }
+
+    if (keys.length > 0) {
+      await r2.delete(keys);
+      stats.deletedObjects += keys.length;
+    }
+
+    if (page.truncated && !page.cursor) {
+      throw new Error('R2 returned a truncated project library listing without a cursor');
+    }
+    cursor = page.truncated ? page.cursor : undefined;
+  } while (cursor);
+
+  return stats;
+}
 
 // ---------------------------------------------------------------------------
 // Row → API type mapping
@@ -178,7 +248,9 @@ export async function uploadFile(
     )
     .limit(1);
   if (existing.length > 0) {
-    throw errors.conflict(`File "${filename}" already exists in directory "${directory}". Use replace to update it.`);
+    throw errors.conflict(
+      `File "${filename}" already exists in directory "${directory}". Use replace to update it.`
+    );
   }
 
   // Validate tags
@@ -235,7 +307,13 @@ export async function uploadFile(
       tagSource,
     }));
     await db.insert(schema.projectFileTags).values(tagInserts);
-    tagRows.push(...tagInserts.map((t) => ({ fileId: t.fileId, tag: t.tag, tagSource: t.tagSource as FileTagSource })));
+    tagRows.push(
+      ...tagInserts.map((t) => ({
+        fileId: t.fileId,
+        tag: t.tag,
+        tagSource: t.tagSource as FileTagSource,
+      }))
+    );
   }
 
   log.info('file_library_upload', { projectId, fileId, filename, sizeBytes: data.byteLength });
@@ -295,7 +373,8 @@ export async function replaceFile(
       filename,
       mimeType,
       sizeBytes: data.byteLength,
-      description: options.description !== undefined ? options.description : existing[0].description,
+      description:
+        options.description !== undefined ? options.description : existing[0].description,
       replacedAt: now,
       replacedBy: userId,
       r2Key: r2Key,
@@ -344,10 +423,7 @@ export async function listFiles(
   projectId: string,
   filters: ListFilesRequest = {}
 ): Promise<ListFilesResponse> {
-  const pageSize = Math.min(
-    filters.limit ?? getListDefaultPageSize(env),
-    getListMaxPageSize(env)
-  );
+  const pageSize = Math.min(filters.limit ?? getListDefaultPageSize(env), getListMaxPageSize(env));
 
   // Build conditions
   const conditions = [eq(schema.projectFiles.projectId, projectId)];
@@ -385,14 +461,19 @@ export async function listFiles(
   if (filters.cursor) {
     // Cursor pagination only works correctly with ID/createdAt ordering (ULIDs are time-sorted)
     if (filters.sortBy && filters.sortBy !== 'createdAt') {
-      throw errors.badRequest('Cursor pagination is only supported with sortBy=createdAt or default sort');
+      throw errors.badRequest(
+        'Cursor pagination is only supported with sortBy=createdAt or default sort'
+      );
     }
     conditions.push(sql`${schema.projectFiles.id} > ${filters.cursor}`);
   }
 
   // Validate and determine sort
   const VALID_SORT_FIELDS = ['filename', 'createdAt', 'updatedAt', 'sizeBytes'] as const;
-  if (filters.sortBy && !VALID_SORT_FIELDS.includes(filters.sortBy as (typeof VALID_SORT_FIELDS)[number])) {
+  if (
+    filters.sortBy &&
+    !VALID_SORT_FIELDS.includes(filters.sortBy as (typeof VALID_SORT_FIELDS)[number])
+  ) {
     throw errors.badRequest(`Invalid sortBy value: ${filters.sortBy}`);
   }
   const sortField = filters.sortBy ?? 'createdAt';
@@ -410,7 +491,10 @@ export async function listFiles(
     conditions.push(
       sql`${schema.projectFiles.id} IN (
         SELECT ${schema.projectFileTags.fileId} FROM ${schema.projectFileTags}
-        WHERE ${schema.projectFileTags.tag} IN (${sql.join(filters.tags.map((t) => sql`${t}`), sql`, `)})
+        WHERE ${schema.projectFileTags.tag} IN (${sql.join(
+          filters.tags.map((t) => sql`${t}`),
+          sql`, `
+        )})
         GROUP BY ${schema.projectFileTags.fileId}
         HAVING COUNT(DISTINCT ${schema.projectFileTags.tag}) = ${filters.tags.length}
       )`
@@ -428,7 +512,7 @@ export async function listFiles(
   // Determine pagination
   const hasMore = files.length > pageSize;
   const resultFiles = hasMore ? files.slice(0, pageSize) : files;
-  const nextCursor = hasMore ? resultFiles[resultFiles.length - 1]?.id ?? null : null;
+  const nextCursor = hasMore ? (resultFiles[resultFiles.length - 1]?.id ?? null) : null;
 
   // Fetch tags for result files
   const resultFileIds = resultFiles.map((f) => f.id);
@@ -465,7 +549,8 @@ export async function listFiles(
     countConds.push(eq(schema.projectFiles.directory, '/'));
   }
   if (filters.status) countConds.push(eq(schema.projectFiles.status, filters.status));
-  if (filters.uploadSource) countConds.push(eq(schema.projectFiles.uploadSource, filters.uploadSource));
+  if (filters.uploadSource)
+    countConds.push(eq(schema.projectFiles.uploadSource, filters.uploadSource));
   if (filters.mimeType) {
     const escapedMime = filters.mimeType.replace(/[%_]/g, '\\$&');
     countConds.push(like(schema.projectFiles.mimeType, `${escapedMime}%`));
@@ -478,7 +563,10 @@ export async function listFiles(
     countConds.push(
       sql`${schema.projectFiles.id} IN (
         SELECT ${schema.projectFileTags.fileId} FROM ${schema.projectFileTags}
-        WHERE ${schema.projectFileTags.tag} IN (${sql.join(filters.tags.map((t) => sql`${t}`), sql`, `)})
+        WHERE ${schema.projectFileTags.tag} IN (${sql.join(
+          filters.tags.map((t) => sql`${t}`),
+          sql`, `
+        )})
         GROUP BY ${schema.projectFileTags.fileId}
         HAVING COUNT(DISTINCT ${schema.projectFileTags.tag}) = ${filters.tags.length}
       )`
@@ -661,9 +749,9 @@ export async function updateTags(
     }
 
     if (newTags.length > 0) {
-      await db.insert(schema.projectFileTags).values(
-        newTags.map((tag) => ({ fileId, tag, tagSource }))
-      );
+      await db
+        .insert(schema.projectFileTags)
+        .values(newTags.map((tag) => ({ fileId, tag, tagSource })));
     }
   }
 

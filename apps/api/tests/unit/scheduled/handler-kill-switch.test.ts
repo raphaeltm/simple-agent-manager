@@ -18,7 +18,7 @@ vi.mock('../../../src/scheduled/sweep-isolation', () => ({
 }));
 vi.mock('drizzle-orm/d1', () => ({ drizzle: vi.fn(() => ({})) }));
 vi.mock('../../../src/lib/logger', async (importOriginal) => ({
-  ...await importOriginal<typeof import('../../../src/lib/logger')>(),
+  ...(await importOriginal<typeof import('../../../src/lib/logger')>()),
   log: { info: logInfoMock, warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
 }));
 
@@ -50,10 +50,16 @@ describe('scheduled operational sweep kill switch', () => {
     await scheduled(controller, env, context);
 
     expect(isolateMock).toHaveBeenCalled();
-    expect(isolateMock.mock.calls.map(([name]) => name)).toContain('node_cleanup');
+    const sweepNames = isolateMock.mock.calls.map(([name]) => name);
+    expect(sweepNames).toContain('node_cleanup');
+    expect(sweepNames).toContain('deployment_release_retention');
+    expect(sweepNames).toContain('session_snapshot_purge');
+    expect(sweepNames.indexOf('deployment_release_retention')).toBeLessThan(
+      sweepNames.indexOf('compose_artifact_cleanup')
+    );
     expect(logInfoMock).toHaveBeenCalledWith(
       'cron.completed',
-      expect.objectContaining({ type: 'sweep', failedSweeps: [] }),
+      expect.objectContaining({ type: 'sweep', failedSweeps: [] })
     );
   });
 });

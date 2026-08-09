@@ -174,6 +174,13 @@ describe('D1 migration safety gates', () => {
   });
 
   it('validates configurable churning-table selectors and decrease thresholds', () => {
+    expect(parseChurningTableSelectors(undefined)).toEqual(
+      expect.arrayContaining([
+        'DATABASE.deployment_releases',
+        'DATABASE.session_snapshots',
+        'DATABASE.project_files',
+      ])
+    );
     expect(parseChurningTableSelectors(undefined)).toContain(
       'OBSERVABILITY_DATABASE.platform_errors'
     );
@@ -196,6 +203,21 @@ describe('D1 migration safety gates', () => {
     expect(() => parseChurningTableMaxDecreasePercent('101')).toThrow(/between 0 and 100/);
     expect(() => parseChurningTableMaxDecreasePercent('not-a-number')).toThrow(/between 0 and 100/);
   });
+
+  it.each(['deployment_releases', 'session_snapshots', 'project_files'])(
+    'accepts routine retention churn for reviewed DATABASE.%s',
+    (table) => {
+      expect(() =>
+        verifyNoUnexpectedProtectedTableDecrease(
+          [count('main', 'DATABASE', table, 10)],
+          [count('main', 'DATABASE', table, 5)],
+          [],
+          [`DATABASE.${table}`],
+          50
+        )
+      ).not.toThrow();
+    }
+  );
 
   it('blocks a churning-table decrease above the configured percentage limit', () => {
     expect(() =>

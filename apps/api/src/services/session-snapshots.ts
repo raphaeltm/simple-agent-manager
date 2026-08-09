@@ -3,7 +3,6 @@ import { type drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
 
@@ -272,21 +271,4 @@ export async function recordSessionSnapshotRestoreResult(
       updatedAt: new Date().toISOString(),
     })
     .where(eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId));
-}
-
-export async function deleteSessionSnapshotArtifacts(
-  env: Env,
-  chatSessionId: string
-): Promise<void> {
-  await Promise.all(
-    (['home', 'wip', 'manifest'] as const).map((artifact) =>
-      env.R2.delete(buildSessionSnapshotR2Key(env, chatSessionId, artifact)).catch((err) => {
-        log.warn('session_snapshot.r2_delete_failed', {
-          chatSessionId,
-          artifact,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      })
-    )
-  );
 }

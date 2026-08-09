@@ -12,6 +12,10 @@ import { runAnalyticsForwardJob } from './analytics-forward';
 import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifact-cleanup';
 import { runComputeUsageCleanup } from './compute-usage-cleanup';
 import { runCronTriggerSweep } from './cron-triggers';
+import {
+  runScheduledDeploymentReleaseRetention,
+  runScheduledSessionSnapshotPurge,
+} from './d1-retention';
 import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runNodeCleanupSweep } from './node-cleanup';
 import { runObservabilityPurge } from './observability-purge';
@@ -33,7 +37,7 @@ import { runTriggerExecutionCleanup } from './trigger-execution-cleanup';
 export async function scheduled(
   controller: ScheduledController,
   env: Env,
-  ctx: ExecutionContext,
+  ctx: ExecutionContext
 ): Promise<void> {
   const rolloverCron = env.TRIAL_CRON_ROLLOVER_CRON ?? '0 5 1 * *';
   const waitlistCleanupCron = env.TRIAL_CRON_WAITLIST_CLEANUP ?? '0 4 * * *';
@@ -58,43 +62,49 @@ export async function scheduled(
   if (scheduleHourlyPlatformMaintenance(controller.cron, env, ctx.waitUntil.bind(ctx))) return;
 
   if (isDailyForward) {
-    ctx.waitUntil((async () => {
-      const forward = await runAnalyticsForwardJob(env);
-      log.info('cron.completed', {
-        cron: controller.cron,
-        type: 'daily-forward',
-        forwardEnabled: forward.enabled,
-        forwardEventsQueried: forward.eventsQueried,
-        forwardSegmentSent: forward.segment.sent,
-        forwardGA4Sent: forward.ga4.sent,
-        forwardCursorUpdated: forward.cursorUpdated,
-      });
-    })());
+    ctx.waitUntil(
+      (async () => {
+        const forward = await runAnalyticsForwardJob(env);
+        log.info('cron.completed', {
+          cron: controller.cron,
+          type: 'daily-forward',
+          forwardEnabled: forward.enabled,
+          forwardEventsQueried: forward.eventsQueried,
+          forwardSegmentSent: forward.segment.sent,
+          forwardGA4Sent: forward.ga4.sent,
+          forwardCursorUpdated: forward.cursorUpdated,
+        });
+      })()
+    );
     return;
   }
 
   if (isTrialRollover) {
-    ctx.waitUntil((async () => {
-      const rollover = await runTrialRolloverAudit(env);
-      log.info('cron.completed', {
-        cron: controller.cron,
-        type: 'trial-rollover',
-        trialRolloverMonthKey: rollover.monthKey,
-        trialRolloverPruned: rollover.pruned,
-      });
-    })());
+    ctx.waitUntil(
+      (async () => {
+        const rollover = await runTrialRolloverAudit(env);
+        log.info('cron.completed', {
+          cron: controller.cron,
+          type: 'trial-rollover',
+          trialRolloverMonthKey: rollover.monthKey,
+          trialRolloverPruned: rollover.pruned,
+        });
+      })()
+    );
     return;
   }
 
   if (isTrialWaitlistCleanup) {
-    ctx.waitUntil((async () => {
-      const waitlist = await runTrialWaitlistCleanup(env);
-      log.info('cron.completed', {
-        cron: controller.cron,
-        type: 'trial-waitlist-cleanup',
-        trialWaitlistPurged: waitlist.purged,
-      });
-    })());
+    ctx.waitUntil(
+      (async () => {
+        const waitlist = await runTrialWaitlistCleanup(env);
+        log.info('cron.completed', {
+          cron: controller.cron,
+          type: 'trial-waitlist-cleanup',
+          trialWaitlistPurged: waitlist.purged,
+        });
+      })()
+    );
     return;
   }
 
@@ -106,32 +116,51 @@ export async function scheduled(
   // Every sweep is isolated so one failure cannot suppress later recovery work.
   const sweeps = createSweepIsolator(env);
   const diagnosisRecovery = await sweeps.isolate('diagnosis_reconcile', () =>
-    reconcileDiagnosisRuns(env));
+    reconcileDiagnosisRuns(env)
+  );
   const incidentRecovery = await sweeps.isolate('diagnostic_incident_reconciliation', () =>
-    reconcileDiagnosticIncidents(env));
+    reconcileDiagnosticIncidents(env)
+  );
   const stuckTasks = await sweeps.isolate('stuck_tasks', () => recoverStuckTasks(env));
   const timedOut = await sweeps.isolate('provisioning_timeouts', () =>
-    checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE));
+    checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE)
+  );
 
   const db = drizzle(env.DATABASE, { schema });
   const migrated = await sweeps.isolate('orphaned_workspace_migration', () =>
-    migrateOrphanedWorkspaces(db));
+    migrateOrphanedWorkspaces(db)
+  );
   const nodeCleanup = await sweeps.isolate('node_cleanup', () => runNodeCleanupSweep(env));
   const providerOrphans = await sweeps.isolate('provider_orphan_reconciliation', () =>
-    runProviderOrphanReconciliation(env));
+    runProviderOrphanReconciliation(env)
+  );
   const observabilityPurge = await sweeps.isolate('observability_purge', () =>
-    runObservabilityPurge(env));
+    runObservabilityPurge(env)
+  );
   const cronTriggers = await sweeps.isolate('cron_triggers', () => runCronTriggerSweep(env));
   const triggerCleanup = await sweeps.isolate('trigger_execution_cleanup', () =>
-    runTriggerExecutionCleanup(env));
+    runTriggerExecutionCleanup(env)
+  );
   const sessionTaskRepair = await sweeps.isolate('session_task_reconciliation', () =>
-    runSessionTaskReconciliation(env));
+    runSessionTaskReconciliation(env)
+  );
   const setupSessionSweep = await sweeps.isolate('setup_session_sweep', () =>
-    runSetupSessionSweep(env, ctx));
+    runSetupSessionSweep(env, ctx)
+  );
+  // Retire superseded releases before compose cleanup re-derives referenced artifacts.
+  const deploymentReleaseRetention = await sweeps.isolate('deployment_release_retention', () =>
+    runScheduledDeploymentReleaseRetention(env)
+  );
+  // R2 lifecycle owns snapshot object expiry; this bounds the corresponding D1 metadata.
+  const sessionSnapshotPurge = await sweeps.isolate('session_snapshot_purge', () =>
+    runScheduledSessionSnapshotPurge(env)
+  );
   const composeArtifactCleanup = await sweeps.isolate('compose_artifact_cleanup', () =>
-    runScheduledComposeImageArtifactCleanup(env));
+    runScheduledComposeImageArtifactCleanup(env)
+  );
   const computeUsageClosed = await sweeps.isolate('compute_usage_cleanup', () =>
-    runComputeUsageCleanup(env));
+    runComputeUsageCleanup(env)
+  );
   const trialExpire = await sweeps.isolate('trial_expire', () => runTrialExpireSweep(env));
 
   const failedSweeps = sweeps.failedSweeps();
@@ -196,6 +225,12 @@ export async function scheduled(
     sessionTaskRepairReused: sessionTaskRepair?.reused,
     sessionTaskRepairErrors: sessionTaskRepair?.errors,
     sessionTaskRepairResidual: sessionTaskRepair?.residual,
+    deploymentReleaseRetentionSkipped: deploymentReleaseRetention?.skipped,
+    deploymentReleaseRetentionSkipReason: deploymentReleaseRetention?.skipReason,
+    deploymentReleaseRetentionDeleted: deploymentReleaseRetention?.deletedReleases,
+    sessionSnapshotPurgeSkipped: sessionSnapshotPurge?.skipped,
+    sessionSnapshotPurgeSkipReason: sessionSnapshotPurge?.skipReason,
+    sessionSnapshotPurgeDeleted: sessionSnapshotPurge?.deletedSnapshots,
     composeArtifactCleanupSkipped: composeArtifactCleanup?.skipped,
     composeArtifactCleanupSkipReason: composeArtifactCleanup?.skipReason,
     composeArtifactCleanupScanned: composeArtifactCleanup?.scannedObjects,

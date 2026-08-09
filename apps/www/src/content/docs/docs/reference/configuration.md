@@ -68,7 +68,7 @@ Set in GitHub Settings → Environments → production:
 | `D1_MIGRATION_CHURNING_TABLES`                     | Optional comma-separated `<binding>.<table>` subset of the reviewed retention/expiry table list. May narrow the built-in list but cannot expand it. | `OBSERVABILITY_DATABASE.platform_errors` |
 | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | Maximum allowed decrease for reviewed churning tables. Defaults to `50`; range `0`–`100`. A decrease exactly at the limit is accepted.              | `25`                                     |
 
-The reviewed default churning selectors are `DATABASE.github_webhook_deliveries`, `DATABASE.registry_credential_rate_limits`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. All other application tables retain zero row-decrease tolerance. Leave `D1_MIGRATION_CHURNING_TABLES` unset to use the complete reviewed default list.
+The reviewed default churning selectors are `DATABASE.deployment_releases`, `DATABASE.github_webhook_deliveries`, `DATABASE.project_files`, `DATABASE.registry_credential_rate_limits`, `DATABASE.session_snapshots`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. All other application tables retain zero row-decrease tolerance. Leave `D1_MIGRATION_CHURNING_TABLES` unset to use the complete reviewed default list.
 
 `RESOURCE_PREFIX` is generated from `BASE_DOMAIN` as `s` plus the first six hex
 characters of the domain's SHA-256 hash. The self-host onboarding flow fills it
@@ -124,15 +124,62 @@ The variables below tune the **Instant** (Cloudflare Container) runtime — how 
 
 Sleeping and reclaimed Instant sessions are restored from a snapshot of the agent's home directory and the repository work in progress. None of these limits are surfaced in the UI, so operators should set expectations deliberately — see [What gets restored](/docs/guides/instant-sessions/#what-gets-restored).
 
-| Variable                                 | Default                   | Description                                                                                                                                                                                                                                                                                                                  |
-| ---------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SESSION_SNAPSHOT_TTL_DAYS`              | `7`                       | Snapshot retention. A session sleeping longer than this cannot be fully restored.                                                                                                                                                                                                                                            |
-| `SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`    | `104857600` (100 MB)      | Max combined size of the home + work-in-progress snapshot                                                                                                                                                                                                                                                                    |
-| `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES` | `52428800` (50 MB)        | Largest single file or directory the snapshot scanner will include                                                                                                                                                                                                                                                           |
-| `REQUIRE_APPROVAL`                       | _(unset)_                 | Default signup approval gate. Superadmins can override it at runtime in Admin → Users without redeploying; when no runtime override exists, this value is used. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access). |
-| `TRIAL_ANONYMOUS_USER_ID`                | `system_anonymous_trials` | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id.                                                                                                                                                                 |
-| `CAPACITY_SIZE_FALLBACK_ENABLED`         | `true`                    | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable.                                                                                             |
-| `ORIGIN_CA_CERT_VALIDITY_DAYS`           | `7`                       | Validity for per-node Cloudflare Origin CA certificates issued from node-generated CSRs. Must be one of Cloudflare's supported values: 7, 30, 90, 365, 730, 1095, or 5475.                                                                                                                                                   |
+| Variable                                 | Default                              | Description                                                                                                                                                                                                                                                                                                                  |
+| ---------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SESSION_SNAPSHOT_TTL_DAYS`              | `7`                                  | Snapshot retention. A session sleeping longer than this cannot be fully restored.                                                                                                                                                                                                                                            |
+| `SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`    | `104857600` (100 MB)                 | Max combined size of the home + work-in-progress snapshot                                                                                                                                                                                                                                                                    |
+| `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES` | `52428800` (50 MB)                   | Largest single file or directory the snapshot scanner will include                                                                                                                                                                                                                                                           |
+| `SESSION_SNAPSHOT_PURGE_ENABLED`         | `true`                               | Enables the bounded D1 purge for expired snapshot metadata. R2 object expiry remains lifecycle-owned.                                                                                                                                                                                                                        |
+| `SESSION_SNAPSHOT_PURGE_BATCH_SIZE`      | `250`                                | Maximum expired snapshot rows deleted per daily purge.                                                                                                                                                                                                                                                                       |
+| `SESSION_SNAPSHOT_PURGE_INTERVAL_HOURS`  | `24`                                 | Minimum interval between snapshot metadata purges.                                                                                                                                                                                                                                                                           |
+| `SESSION_SNAPSHOT_PURGE_LAST_RUN_KV_KEY` | `cleanup:session-snapshots:last-run` | KV marker used to interval-gate snapshot metadata purges.                                                                                                                                                                                                                                                                    |
+| `REQUIRE_APPROVAL`                       | _(unset)_                            | Default signup approval gate. Superadmins can override it at runtime in Admin → Users without redeploying; when no runtime override exists, this value is used. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access). |
+| `TRIAL_ANONYMOUS_USER_ID`                | `system_anonymous_trials`            | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id.                                                                                                                                                                 |
+| `CAPACITY_SIZE_FALLBACK_ENABLED`         | `true`                               | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable.                                                                                             |
+| `ORIGIN_CA_CERT_VALIDITY_DAYS`           | `7`                                  | Validity for per-node Cloudflare Origin CA certificates issued from node-generated CSRs. Must be one of Cloudflare's supported values: 7, 30, 90, 365, 730, 1095, or 5475.                                                                                                                                                   |
+
+### Project file library cleanup
+
+| Variable                                    | Default | Description                                                                                                                                          |
+| ------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE` | `1000`  | Maximum project-owned library objects listed and deleted per R2 page after project deletion. Values above R2's 1,000-object page maximum are capped. |
+
+### Deployment release and compose artifact retention
+
+The scheduled Worker prunes only terminal deployment releases outside the protected
+window (`apps/api/src/scheduled/d1-retention.ts:runDeploymentReleaseRetention()`). It
+always retains the newest releases per environment, the version reported in
+`deployment_environments.observed_applied_seq`, and every non-terminal release. The
+compose artifact cleanup then re-derives references from the remaining manifests
+(`apps/api/src/scheduled/compose-image-artifact-cleanup.ts:runComposeImageArtifactCleanup()`).
+
+| Variable                                       | Default                                | Description                                                                                           |
+| ---------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `DEPLOYMENT_RELEASE_RETENTION_ENABLED`         | `true`                                 | Enables bounded terminal release pruning.                                                             |
+| `DEPLOYMENT_RELEASE_RETENTION_COUNT`           | `3`                                    | Newest releases protected per environment, in addition to observed-applied and non-terminal releases. |
+| `DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE`      | `250`                                  | Maximum release rows deleted per run.                                                                 |
+| `DEPLOYMENT_RELEASE_RETENTION_INTERVAL_HOURS`  | `24`                                   | Minimum interval between release retention runs.                                                      |
+| `DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY` | `cleanup:deployment-releases:last-run` | KV interval marker.                                                                                   |
+| `COMPOSE_IMAGE_ARTIFACT_CLEANUP_BATCH_SIZE`    | `250`                                  | Maximum abandoned compose archives deleted per daily run.                                             |
+
+### R2 object lifecycle retention
+
+Pulumi updates the existing assets bucket lifecycle resource on upgrades and creates
+the same rules on clean installs (`infra/resources/storage.ts:r2BucketLifecycle`).
+`temp-uploads/` is transient browser-upload staging; `tts/` is a regenerable audio
+cache. Durable `library/` content is deleted only with its project, and reachable
+`compose-image-artifacts/` are governed by deployment release retention, so neither
+durable prefix has an age-only lifecycle rule.
+
+| Pulumi option               | Default | Object prefix        | Description                                  |
+| --------------------------- | ------- | -------------------- | -------------------------------------------- |
+| `sessionSnapshotTtlDays`    | `7`     | `session-snapshots/` | Hibernated session snapshot object retention |
+| `diagnosticIncidentTtlDays` | `7`     | configured private   | Private diagnostic artifact retention        |
+| `tempUploadTtlDays`         | `1`     | `temp-uploads/`      | Abandoned presigned browser upload retention |
+| `ttsTtlDays`                | `30`    | `tts/`               | Regenerable TTS audio-cache retention        |
+
+All TTL options must be positive integers. Set overrides with `pulumi config set`
+against the target stack before running its deployment workflow.
 
 ## Google OAuth and GCP provisioning
 

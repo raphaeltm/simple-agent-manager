@@ -40,7 +40,7 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Secret   | `TRIAL_CLAIM_TOKEN_SECRET`                         | No (auto-generated)                                                |
 | Variable | `ORIGIN_CA_CERT_VALIDITY_DAYS`                     | No (default: 7)                                                    |
 
-`D1_MIGRATION_CHURNING_TABLES` is a comma-separated `<binding>.<table>` subset of the reviewed defaults: `DATABASE.github_webhook_deliveries`, `DATABASE.registry_credential_rate_limits`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. It may narrow but cannot expand this list; unset uses all reviewed defaults. `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` accepts `0`–`100`; a decrease exactly at the configured limit is accepted and a larger decrease blocks.
+`D1_MIGRATION_CHURNING_TABLES` is a comma-separated `<binding>.<table>` subset of the reviewed defaults: `DATABASE.deployment_releases`, `DATABASE.github_webhook_deliveries`, `DATABASE.project_files`, `DATABASE.registry_credential_rate_limits`, `DATABASE.session_snapshots`, `DATABASE.sessions`, `DATABASE.trial_waitlist`, `DATABASE.trigger_executions`, `DATABASE.verifications`, `DATABASE.webhook_deliveries`, and `OBSERVABILITY_DATABASE.platform_errors`. It may narrow but cannot expand this list; unset uses all reviewed defaults. `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` accepts `0`–`100`; a decrease exactly at the configured limit is accepted and a larger decrease blocks.
 
 `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` are legacy rotation inputs for nodes provisioned before per-node Origin CA CSR signing. They are not required for new node provisioning.
 
@@ -83,6 +83,19 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS` — Progress-idle timeout for snapshot upload/download (default: `30000`)
 - `SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES` — Maximum snapshot coordination JSON body (default: `262144`)
 - `SESSION_SNAPSHOT_R2_PREFIX` — Private R2 object prefix for session snapshots (default: `session-snapshots`)
+- `SESSION_SNAPSHOT_PURGE_ENABLED` — Kill switch for expired D1 snapshot metadata purge (default: enabled)
+- `SESSION_SNAPSHOT_PURGE_BATCH_SIZE` — Maximum expired snapshot rows deleted per run (default: `250`)
+- `SESSION_SNAPSHOT_PURGE_INTERVAL_HOURS` — Minimum interval between snapshot row purges (default: `24`)
+- `SESSION_SNAPSHOT_PURGE_LAST_RUN_KV_KEY` — KV interval marker (default: `cleanup:session-snapshots:last-run`)
+
+### Deployment Storage Retention
+
+- `DEPLOYMENT_RELEASE_RETENTION_ENABLED` — Kill switch for superseded terminal release pruning (default: enabled)
+- `DEPLOYMENT_RELEASE_RETENTION_COUNT` — Newest releases protected per deployment environment, in addition to observed-applied and non-terminal releases (default: `3`)
+- `DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE` — Maximum terminal release rows deleted per run (default: `250`)
+- `DEPLOYMENT_RELEASE_RETENTION_INTERVAL_HOURS` — Minimum interval between release retention runs (default: `24`)
+- `DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY` — KV interval marker (default: `cleanup:deployment-releases:last-run`)
+- `COMPOSE_IMAGE_ARTIFACT_CLEANUP_BATCH_SIZE` — Maximum abandoned compose archives deleted per daily run (default: `250`)
 
 ### Operational Control Loops
 
@@ -219,6 +232,7 @@ by the read-only cron-liveness check.
 - `LIBRARY_LIST_DEFAULT_PAGE_SIZE` — Default file-list page size (default: 50)
 - `LIBRARY_LIST_MAX_PAGE_SIZE` — Maximum file-list page size (default: 200)
 - `LIBRARY_TAG_QUERY_BATCH_SIZE` — File IDs per tag metadata lookup query (default: 80, capped below D1 bind-variable limits)
+- `LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE` — Maximum project-owned R2 library objects listed and deleted per page after project deletion (default: `1000`, capped at R2's page maximum)
 - Other library upload, directory, search, preview, and encryption settings are listed in `apps/api/.env.example`.
 
 ### Codex OAuth Refresh Proxy (`CodexRefreshLock` DO + `/api/auth/codex-refresh`)

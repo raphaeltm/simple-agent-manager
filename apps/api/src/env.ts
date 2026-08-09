@@ -189,15 +189,25 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   COMPOSE_IMAGE_ARTIFACT_DOWNLOAD_URL_TTL_SECONDS?: string; // Presigned download URL TTL for compose image artifacts
   COMPOSE_IMAGE_ARTIFACT_CLEANUP_ENABLED?: string; // Kill switch: "false" disables abandoned artifact cleanup (default: enabled)
   COMPOSE_IMAGE_ARTIFACT_ABANDONED_RETENTION_HOURS?: string; // Hours to keep unreferenced uploaded artifacts before cleanup (default: 48)
-  COMPOSE_IMAGE_ARTIFACT_CLEANUP_BATCH_SIZE?: string; // Max abandoned compose artifacts to delete per cleanup run (default: 50)
+  COMPOSE_IMAGE_ARTIFACT_CLEANUP_BATCH_SIZE?: string; // Max abandoned compose artifacts to delete per cleanup run (default: 250)
   COMPOSE_IMAGE_ARTIFACT_CLEANUP_INTERVAL_HOURS?: string; // Minimum hours between R2 cleanup scans from cron (default: 24)
   COMPOSE_IMAGE_ARTIFACT_CLEANUP_LAST_RUN_KV_KEY?: string; // KV key for cleanup interval gating
+  DEPLOYMENT_RELEASE_RETENTION_ENABLED?: string; // Kill switch: "false" disables terminal release pruning (default: enabled)
+  DEPLOYMENT_RELEASE_RETENTION_COUNT?: string; // Releases protected per environment by newest version (default: 3)
+  DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE?: string; // Max terminal releases deleted per run (default: 250)
+  DEPLOYMENT_RELEASE_RETENTION_INTERVAL_HOURS?: string; // Minimum hours between release retention runs (default: 24)
+  DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY?: string; // KV key for release retention interval gating
   SESSION_SNAPSHOT_TTL_DAYS?: string; // Runtime hibernate snapshot retention (default: 7)
   SESSION_SNAPSHOT_R2_PREFIX?: string; // R2 key prefix for runtime hibernate snapshots
   SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES?: string; // Max combined home/WIP snapshot size (default: 104857600)
   SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES?: string; // Max individual file/dir included by vm-agent scanner (default: 52428800)
   SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS?: string; // No-progress upload/download watchdog window (default: 30000)
   SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES?: string; // Max snapshot control-plane JSON request size (default: 262144)
+  SESSION_SNAPSHOT_PURGE_ENABLED?: string; // Kill switch: "false" disables expired snapshot row purge (default: enabled)
+  SESSION_SNAPSHOT_PURGE_BATCH_SIZE?: string; // Max expired snapshot rows deleted per run (default: 250)
+  SESSION_SNAPSHOT_PURGE_INTERVAL_HOURS?: string; // Minimum hours between snapshot row purge runs (default: 24)
+  SESSION_SNAPSHOT_PURGE_LAST_RUN_KV_KEY?: string; // KV key for snapshot purge interval gating
+  LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE?: string; // R2 objects listed/deleted per project cleanup page (default: 1000)
   DEPLOY_ACME_EMAIL?: string; // Contact email for deployment-node ACME certificates
   DEPLOY_ACME_CA?: string; // ACME CA directory override for deployment nodes
   DEPLOY_COMPOSE_CMD?: string; // Docker Compose command override on deployment nodes
