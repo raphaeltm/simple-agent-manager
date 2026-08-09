@@ -250,3 +250,26 @@ func (s *Store) getCheckpointRolloverLocked(workspaceID, sessionID, operationID 
 	op.Forced = forced != 0
 	return op, err
 }
+
+// DeleteWorkspaceExecutionProtocol removes receipt and rollover ledgers once
+// their workspace is deleted. The ledgers are intentionally durable across
+// process restarts, but have no reconciliation value after workspace teardown.
+func (s *Store) DeleteWorkspaceExecutionProtocol(workspaceID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	tx, err := s.db.Begin()
+	if err != nil {
+		return fmt.Errorf("begin workspace execution protocol cleanup: %w", err)
+	}
+	defer tx.Rollback()
+	if _, err = tx.Exec(`DELETE FROM prompt_delivery_receipts WHERE workspace_id = ?`, workspaceID); err != nil {
+		return fmt.Errorf("delete workspace prompt receipts: %w", err)
+	}
+	if _, err = tx.Exec(`DELETE FROM checkpoint_rollover_operations WHERE workspace_id = ?`, workspaceID); err != nil {
+		return fmt.Errorf("delete workspace checkpoint rollovers: %w", err)
+	}
+	if err = tx.Commit(); err != nil {
+		return fmt.Errorf("commit workspace execution protocol cleanup: %w", err)
+	}
+	return nil
+}

@@ -32,18 +32,18 @@ type CheckpointRolloverResult struct {
 // grace, force-stops if needed, restarts the harness, and strictly LoadSessions
 // the same ACP session. It never falls back to NewSession.
 func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duration) (CheckpointRolloverResult, error) {
+	h.mu.Lock()
 	h.promptMu.Lock()
 	attempt := h.promptAttempt
 	active := h.promptInFlight && attempt != nil
-	h.promptMu.Unlock()
-
-	h.mu.Lock()
 	if h.checkpointRollover != nil {
+		h.promptMu.Unlock()
 		h.mu.Unlock()
 		return CheckpointRolloverResult{}, ErrCheckpointInProgress
 	}
 	if !active || h.status != HostPrompting || h.process == nil || h.acpConn == nil ||
 		h.sessionID == "" || !h.agentSupportsLoadSession {
+		h.promptMu.Unlock()
 		h.mu.Unlock()
 		return CheckpointRolloverResult{}, ErrCheckpointUnavailable
 	}
@@ -58,6 +58,7 @@ func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duratio
 	sessionID := h.sessionID
 	h.checkpointRollover = episode
 	attempt.checkpointRequested.Store(true)
+	h.promptMu.Unlock()
 	h.mu.Unlock()
 	graceStartedAt := h.now()
 
@@ -80,6 +81,12 @@ func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duratio
 	}
 
 	forced := false
+	select {
+	case <-attempt.done:
+		h.clearCheckpointRollover(episode)
+		return CheckpointRolloverResult{State: "superseded", ACPSessionID: episode.sessionID}, nil
+	default:
+	}
 	remainingGrace := grace - h.now().Sub(graceStartedAt)
 	if remainingGrace <= 0 {
 		forced = true
@@ -91,6 +98,12 @@ func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duratio
 			h.clearCheckpointRollover(episode)
 			return CheckpointRolloverResult{State: "superseded", ACPSessionID: episode.sessionID}, nil
 		case <-attempt.rpcDone:
+			select {
+			case <-attempt.done:
+				h.clearCheckpointRollover(episode)
+				return CheckpointRolloverResult{State: "superseded", ACPSessionID: episode.sessionID}, nil
+			default:
+			}
 		case <-timer.C:
 			forced = true
 		case <-ctx.Done():
@@ -105,6 +118,12 @@ func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duratio
 			h.reportActivity("error")
 			return result, ctx.Err()
 		}
+	}
+	select {
+	case <-attempt.done:
+		h.clearCheckpointRollover(episode)
+		return CheckpointRolloverResult{State: "superseded", ACPSessionID: episode.sessionID}, nil
+	default:
 	}
 
 	h.mu.Lock()

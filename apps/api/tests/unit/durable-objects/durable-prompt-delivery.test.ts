@@ -72,17 +72,22 @@ describe('ProjectData durable prompt delivery', () => {
   });
 
   function accept(deliveryId = 'delivery-1', ttlMs = config.ttlMs) {
-    return acceptPromptDelivery(sql, {}, {
-      deliveryId,
-      targetSessionId: 'chat-1',
-      displayContent: 'Visible follow-up',
-      deliveryContent: 'Enriched follow-up',
-      senderType: 'human',
-      senderId: 'user-1',
-      messageClass: 'deliver',
-      sourceKind: 'user_followup',
-      ttlMs,
-    }, Date.now());
+    return acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId,
+        targetSessionId: 'chat-1',
+        displayContent: 'Visible follow-up',
+        deliveryContent: 'Enriched follow-up',
+        senderType: 'human',
+        senderId: 'user-1',
+        messageClass: 'deliver',
+        sourceKind: 'user_followup',
+        ttlMs,
+      },
+      Date.now(),
+    );
   }
 
   const hooks = {
@@ -105,14 +110,21 @@ describe('ProjectData durable prompt delivery', () => {
 
   it('rejects reuse of a stable delivery identity for different prompt intent', () => {
     accept();
-    expect(() => acceptPromptDelivery(sql, {}, {
-      deliveryId: 'delivery-1',
-      targetSessionId: 'chat-1',
-      displayContent: 'different',
-      deliveryContent: 'different',
-      senderType: 'human',
-      sourceKind: 'user_followup',
-    }, Date.now())).toThrow('different prompt intent');
+    expect(() =>
+      acceptPromptDelivery(
+        sql,
+        {},
+        {
+          deliveryId: 'delivery-1',
+          targetSessionId: 'chat-1',
+          displayContent: 'different',
+          deliveryContent: 'different',
+          senderType: 'human',
+          sourceKind: 'user_followup',
+        },
+        Date.now(),
+      ),
+    ).toThrow('different prompt intent');
   });
 
   it('retries busy delivery on readiness and accepts it exactly once despite duplicate alarms', async () => {
@@ -183,13 +195,21 @@ describe('ProjectData durable prompt delivery', () => {
   ] as const)('fails %s targets explicitly', (reason, error) => {
     accept();
     const [claim] = claimDuePromptDeliveries(sql, config, 10_000);
-    expect(applyPromptDeliveryResult(sql, claim!, {
-      kind: 'failed',
-      reason,
-      error,
-      runtimeIdentity: null,
-      capabilities: null,
-    }, config, 10_100)).toBe(true);
+    expect(
+      applyPromptDeliveryResult(
+        sql,
+        claim!,
+        {
+          kind: 'failed',
+          reason,
+          error,
+          runtimeIdentity: null,
+          capabilities: null,
+        },
+        config,
+        10_100,
+      ),
+    ).toBe(true);
 
     const message = mailbox.getMessage(sql, 'delivery-1');
     expect(message?.deliveryState).toBe('failed');
@@ -200,14 +220,22 @@ describe('ProjectData durable prompt delivery', () => {
   it('marks cross-runtime uncertainty ambiguous and never requeues it', () => {
     accept();
     const [claim] = claimDuePromptDeliveries(sql, config, 10_000);
-    expect(applyPromptDeliveryResult(sql, claim!, {
-      kind: 'ambiguous',
-      reason: 'runtime_changed',
-      error: 'runtime identity changed',
-      runtimeIdentity: 'runtime-2',
-      capabilities,
-      receipt: null,
-    }, config, 10_100)).toBe(true);
+    expect(
+      applyPromptDeliveryResult(
+        sql,
+        claim!,
+        {
+          kind: 'ambiguous',
+          reason: 'runtime_changed',
+          error: 'runtime identity changed',
+          runtimeIdentity: 'runtime-2',
+          capabilities,
+          receipt: null,
+        },
+        config,
+        10_100,
+      ),
+    ).toBe(true);
 
     const message = mailbox.getMessage(sql, 'delivery-1');
     expect(message?.deliveryState).toBe('ambiguous');
@@ -227,5 +255,25 @@ describe('ProjectData durable prompt delivery', () => {
     expect(mailbox.getMessage(sql, 'ttl-delivery')?.deliveryState).toBe('expired');
     expect(mailbox.getMessage(sql, 'attempt-delivery')?.deliveryState).toBe('failed');
     expect(claimDuePromptDeliveries(sql, config, 10_100)).toHaveLength(0);
+  });
+
+  it('keeps durable delivery states out of the legacy mailbox expiry sweep', () => {
+    accept('durable-expired', 100);
+    accept('durable-exhausted');
+    sql.exec(
+      `UPDATE session_inbox SET delivery_attempts = ? WHERE id = 'durable-exhausted'`,
+      config.maxAttempts,
+    );
+
+    vi.setSystemTime(10_100);
+    expect(mailbox.expireStaleMessages(sql, config.maxAttempts)).toBe(0);
+    expect(mailbox.getMessage(sql, 'durable-expired')?.deliveryState).toBe('queued');
+    expect(mailbox.getMessage(sql, 'durable-exhausted')?.deliveryState).toBe('queued');
+
+    expect(expireDuePromptDeliveries(sql, config, 10_100)).toEqual({ expired: 1, failed: 1 });
+    expect(mailbox.getMessage(sql, 'durable-expired')?.terminalReason).toBe('ttl_expired');
+    expect(mailbox.getMessage(sql, 'durable-exhausted')?.terminalReason).toBe(
+      'max_attempts_exceeded',
+    );
   });
 });

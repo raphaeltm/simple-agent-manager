@@ -1,6 +1,10 @@
 package persistence
 
-import "testing"
+import (
+	"database/sql"
+	"errors"
+	"testing"
+)
 
 func TestPromptDeliveryReceiptDuplicateLostResponseAndRestartDurability(t *testing.T) {
 	dbPath := tempDBPath(t)
@@ -88,5 +92,37 @@ func TestCheckpointOperationIsIdempotentAndInterruptedRuntimeFailsExplicitly(t *
 	_, created, conflict, err = store.AcceptCheckpointRollover("ws", "session", "op-1", 1, "different")
 	if err != nil || created || !conflict {
 		t.Fatalf("conflict created=%v conflict=%v err=%v", created, conflict, err)
+	}
+}
+
+func TestDeleteWorkspaceExecutionProtocolRemovesOnlyTargetWorkspaceLedgers(t *testing.T) {
+	store, err := Open(tempDBPath(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	for _, workspaceID := range []string{"ws-delete", "ws-keep"} {
+		if _, _, _, err := store.AcceptPromptDelivery(workspaceID, "session", "delivery", 1, "hash"); err != nil {
+			t.Fatal(err)
+		}
+		if _, _, _, err := store.AcceptCheckpointRollover(workspaceID, "session", "operation", 1, "hash"); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if err := store.DeleteWorkspaceExecutionProtocol("ws-delete"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.GetPromptDelivery("ws-delete", "session", "delivery", "runtime"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("deleted prompt receipt err = %v, want sql.ErrNoRows", err)
+	}
+	if _, err := store.GetCheckpointRollover("ws-delete", "session", "operation", "runtime"); !errors.Is(err, sql.ErrNoRows) {
+		t.Fatalf("deleted rollover err = %v, want sql.ErrNoRows", err)
+	}
+	if _, err := store.GetPromptDelivery("ws-keep", "session", "delivery", "runtime"); err != nil {
+		t.Fatalf("unrelated prompt receipt removed: %v", err)
+	}
+	if _, err := store.GetCheckpointRollover("ws-keep", "session", "operation", "runtime"); err != nil {
+		t.Fatalf("unrelated rollover removed: %v", err)
 	}
 }

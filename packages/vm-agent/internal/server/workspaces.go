@@ -903,6 +903,9 @@ func (s *Server) handleDeleteWorkspace(w http.ResponseWriter, r *http.Request) {
 		if err := s.store.DeleteWorkspaceMcpServers(workspaceID); err != nil {
 			slog.Warn("Failed to delete persisted MCP servers for workspace", "workspace", workspaceID, "error", err)
 		}
+		if err := s.store.DeleteWorkspaceExecutionProtocol(workspaceID); err != nil {
+			slog.Warn("Failed to delete durable execution ledgers for workspace", "workspace", workspaceID, "error", err)
+		}
 	}
 
 	s.appendNodeEvent(workspaceID, "info", "workspace.deleted", "Workspace deleted", nil)
@@ -1622,7 +1625,7 @@ func (s *Server) handleGetPromptReceipt(w http.ResponseWriter, r *http.Request) 
 	workspaceID := r.PathValue("workspaceId")
 	sessionID := r.PathValue("sessionId")
 	deliveryID := strings.TrimSpace(r.PathValue("deliveryId"))
-	if workspaceID == "" || sessionID == "" || deliveryID == "" {
+	if workspaceID == "" || sessionID == "" || !validExecutionProtocolID(deliveryID, maxDeliveryIDLength) {
 		writeError(w, http.StatusBadRequest, "workspaceId, sessionId, and deliveryId are required")
 		return
 	}
@@ -1791,7 +1794,7 @@ func (s *Server) handleGetCheckpointRollover(w http.ResponseWriter, r *http.Requ
 	workspaceID := r.PathValue("workspaceId")
 	sessionID := r.PathValue("sessionId")
 	operationID := strings.TrimSpace(r.PathValue("operationId"))
-	if workspaceID == "" || sessionID == "" || operationID == "" {
+	if workspaceID == "" || sessionID == "" || !validExecutionProtocolID(operationID, maxRolloverOperationIDLength) {
 		writeError(w, http.StatusBadRequest, "workspaceId, sessionId, and operationId are required")
 		return
 	}

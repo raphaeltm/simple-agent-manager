@@ -28,6 +28,10 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 	intentionalPromptCancel := h.intentionalPromptCancelProcessStop
 	h.intentionalPromptCancelProcessStop = false
 	rollover := h.checkpointRollover
+	rolloverForced := false
+	if rollover != nil {
+		rolloverForced = rollover.forced
+	}
 	previousAcpSessionID := string(h.sessionID)
 	crashRecovery := h.crashRecoverySnapshotLocked()
 	recoveryNotify := process.RecoveryNotify()
@@ -111,7 +115,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 	h.mu.Unlock()
 
 	if rollover != nil {
-		slog.Info("Attempting strict agent restart for checkpoint rollover", "acpSessionId", rollover.sessionID, "forced", rollover.forced)
+		slog.Info("Attempting strict agent restart for checkpoint rollover", "acpSessionId", rollover.sessionID, "forced", rolloverForced)
 	} else if intentionalPromptCancel {
 		slog.Info("Attempting agent restart after user prompt cancel", "restartCount", h.restartCount, "maxRestarts", maxRestarts)
 	} else {
@@ -195,7 +199,8 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 			return
 		}
 		result := CheckpointRolloverResult{State: "completed", Forced: rollover.forced, ACPSessionID: rollover.sessionID}
-		if !rollover.complete(result, false) {
+		decided, promptWon := rollover.completeStrictResume(h, result)
+		if !promptWon && decided.State != "superseded" {
 			h.stopCurrentAgentLocked()
 			h.status = HostError
 			if h.statusErr == "" {
@@ -205,15 +210,14 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 			h.mu.Unlock()
 			return
 		}
+		h.status = HostReady
+		h.statusErr = ""
 		h.checkpointRollover = nil
 		h.mu.Unlock()
-		rollover.attempt.completeWith(h, checkpointPreemptedStopReason, nil, func() {
-			h.setStatus(HostReady, "")
-			h.stopPromptActivityRereport()
-			h.broadcastControl(MsgSessionPromptDone, nil)
-			h.broadcastAgentStatus(StatusReady, agentType, "")
-			h.reportActivity("idle")
-		})
+		h.stopPromptActivityRereport()
+		h.broadcastControl(MsgSessionPromptDone, nil)
+		h.broadcastAgentStatus(StatusReady, agentType, "")
+		h.reportActivity("idle")
 		return
 	}
 	if !h.restartAgentLocked(ctx, agentType, cred, settings, loadSessionID, crashRecovery, recoveryNotify) {

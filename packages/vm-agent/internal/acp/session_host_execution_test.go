@@ -439,6 +439,10 @@ func TestCheckpointRolloverIsSupersededByNaturalCompletionOrUserCancel(t *testin
 						host.promptCancelMu.Unlock()
 					}
 					attempt.completeWith(host, tc.stopReason, nil, host.markPromptDone)
+					// Real AcceptedPrompt.Run closes rpcDone as it returns. Keeping
+					// both channels ready proves checkpoint prioritizes the prompt's
+					// terminal owner instead of randomly selecting strict restart.
+					close(attempt.rpcDone)
 					return
 				}
 			}()

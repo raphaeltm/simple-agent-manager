@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   NodeAgentHttpError: class NodeAgentHttpError extends Error {
     constructor(
       public readonly statusCode: number,
-      public readonly responseBody: string
+      public readonly responseBody: string,
     ) {
       super(`Node Agent request failed: ${statusCode} ${responseBody}`);
     }
@@ -30,8 +30,8 @@ vi.mock('../../../src/services/node-agent', () => ({
 const protocolFixture = JSON.parse(
   readFileSync(
     new URL('../../../../../tests/fixtures/durable-execution-protocol-v1.json', import.meta.url),
-    'utf8'
-  )
+    'utf8',
+  ),
 ) as {
   capabilities: Record<string, unknown>;
   ambiguousReceipt: Record<string, unknown>;
@@ -143,6 +143,21 @@ describe('VM prompt delivery adapter', () => {
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
+  it('terminalizes stale reconciliation when the target is temporarily not ready', async () => {
+    const adapter = new DefaultVmPromptDeliveryAdapter(
+      envWithTarget({
+        ...targetRow,
+        node_status: 'creating',
+      }),
+    );
+
+    const result = await adapter.reconcile(input(false));
+
+    expect(result).toMatchObject({ kind: 'ambiguous', reason: 'receipt_unavailable' });
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+  });
+
   it('preserves the old VM submit path only behind its explicit compatibility flag', async () => {
     mocks.nodeAgentRequest.mockRejectedValue(new Error('Node Agent request failed: 404'));
     mocks.sendPromptToAgentOnNode.mockResolvedValue({ status: 'accepted', sessionId: 'acp-1' });
@@ -159,7 +174,7 @@ describe('VM prompt delivery adapter', () => {
       expect.anything(),
       'user-1',
       'delivery-1',
-      { requestTimeoutMs: 1_234 }
+      { requestTimeoutMs: 1_234 },
     );
   });
 
@@ -183,7 +198,7 @@ describe('VM prompt delivery adapter', () => {
       'node-1',
       expect.anything(),
       '/workspaces/workspace-1/agent-sessions/acp-1/prompt-receipts/delivery-1',
-      expect.objectContaining({ requestTimeoutMs: 1_234 })
+      expect.objectContaining({ requestTimeoutMs: 1_234 }),
     );
   });
 
@@ -206,7 +221,7 @@ describe('VM prompt delivery adapter', () => {
       'node-1',
       expect.anything(),
       '/workspaces/workspace-1/agent-capabilities',
-      expect.anything()
+      expect.anything(),
     );
     expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledWith(
       'node-1',
@@ -216,7 +231,7 @@ describe('VM prompt delivery adapter', () => {
       expect.anything(),
       'user-1',
       'delivery-1',
-      { requestTimeoutMs: 1_234, protocolVersion: 1, deliveryId: 'delivery-1' }
+      { requestTimeoutMs: 1_234, protocolVersion: 1, deliveryId: 'delivery-1' },
     );
   });
 
@@ -224,7 +239,10 @@ describe('VM prompt delivery adapter', () => {
     mocks.nodeAgentRequest
       .mockResolvedValueOnce(protocolFixture.capabilities)
       .mockRejectedValueOnce(
-        new mocks.NodeAgentHttpError(404, JSON.stringify(protocolFixture.notFoundReceipt))
+        new mocks.NodeAgentHttpError(
+          404,
+          JSON.stringify({ ...protocolFixture.notFoundReceipt, deliveryId: 'delivery-1' }),
+        ),
       );
     const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
 
@@ -233,10 +251,50 @@ describe('VM prompt delivery adapter', () => {
     expect(result).toMatchObject({ kind: 'retry', reason: 'receipt_not_found' });
   });
 
+  it('does not replay a 200 not_found receipt', async () => {
+    mocks.nodeAgentRequest
+      .mockResolvedValueOnce(protocolFixture.capabilities)
+      .mockResolvedValueOnce({
+        ...protocolFixture.notFoundReceipt,
+        deliveryId: 'delivery-1',
+      });
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.reconcile(input(false));
+
+    expect(result).toMatchObject({ kind: 'ambiguous', reason: 'receipt_unavailable' });
+  });
+
+  it('rejects receipt evidence for another delivery on every reconciliation status', async () => {
+    mocks.nodeAgentRequest
+      .mockResolvedValueOnce(protocolFixture.capabilities)
+      .mockRejectedValueOnce(
+        new mocks.NodeAgentHttpError(
+          404,
+          JSON.stringify({ ...protocolFixture.notFoundReceipt, deliveryId: 'delivery-other' }),
+        ),
+      );
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.reconcile(input(false));
+
+    expect(result).toMatchObject({ kind: 'ambiguous', reason: 'receipt_unavailable' });
+  });
+
   it('fails a canonical delivery conflict without retrying', async () => {
     mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
     mocks.sendPromptToAgentOnNode.mockRejectedValue(
-      new mocks.NodeAgentHttpError(409, JSON.stringify(protocolFixture.conflictPrompt))
+      new mocks.NodeAgentHttpError(
+        409,
+        JSON.stringify({
+          ...protocolFixture.conflictPrompt,
+          sessionId: 'acp-1',
+          receipt: {
+            ...(protocolFixture.conflictPrompt.receipt as Record<string, unknown>),
+            deliveryId: 'delivery-1',
+          },
+        }),
+      ),
     );
     const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
 
@@ -246,10 +304,52 @@ describe('VM prompt delivery adapter', () => {
     expect(mocks.nodeAgentRequest).toHaveBeenCalledTimes(1);
   });
 
+  it('does not honor a 409 response for another delivery', async () => {
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    mocks.sendPromptToAgentOnNode.mockRejectedValue(
+      new mocks.NodeAgentHttpError(
+        409,
+        JSON.stringify({
+          ...protocolFixture.conflictPrompt,
+          sessionId: 'acp-1',
+          receipt: {
+            ...(protocolFixture.conflictPrompt.receipt as Record<string, unknown>),
+            deliveryId: 'delivery-other',
+          },
+        }),
+      ),
+    );
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.submit(input(false));
+
+    expect(result).toMatchObject({ kind: 'ambiguous' });
+  });
+
+  it('does not accept a successful response for another delivery', async () => {
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    mocks.sendPromptToAgentOnNode.mockResolvedValue({
+      ...protocolFixture.newPrompt,
+      sessionId: 'acp-1',
+      receipt: {
+        ...(protocolFixture.newPrompt.receipt as Record<string, unknown>),
+        deliveryId: 'delivery-other',
+      },
+    });
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.submit(input(false));
+
+    expect(result).toMatchObject({ kind: 'ambiguous', reason: 'receipt_unavailable' });
+  });
+
   it('preserves a canonical ambiguous receipt as terminal ambiguity', async () => {
     mocks.nodeAgentRequest
       .mockResolvedValueOnce(protocolFixture.capabilities)
-      .mockResolvedValueOnce(protocolFixture.ambiguousReceipt);
+      .mockResolvedValueOnce({
+        ...protocolFixture.ambiguousReceipt,
+        deliveryId: 'delivery-1',
+      });
     const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
 
     const result = await adapter.reconcile(input(false));
@@ -257,7 +357,7 @@ describe('VM prompt delivery adapter', () => {
     expect(result).toMatchObject({
       kind: 'ambiguous',
       reason: 'lost_response',
-      receipt: protocolFixture.ambiguousReceipt,
+      receipt: { ...protocolFixture.ambiguousReceipt, deliveryId: 'delivery-1' },
     });
   });
 
@@ -283,8 +383,8 @@ describe('VM prompt delivery adapter', () => {
           JSON.stringify({
             ...protocolFixture.notFoundReceipt,
             runtimeIdentity: 'runtime-vm-02',
-          })
-        )
+          }),
+        ),
       );
     const unproven = await adapter.reconcile(input(false));
     expect(unproven).toMatchObject({ kind: 'ambiguous', reason: 'receipt_unavailable' });

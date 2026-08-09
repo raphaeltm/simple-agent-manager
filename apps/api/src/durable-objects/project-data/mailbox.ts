@@ -48,19 +48,14 @@ export interface EnqueueOptions {
  * Insert a new message into the mailbox with delivery_state='queued'.
  * For 'notify' class, ack is not required. For durable classes, ack is required.
  */
-export function enqueueMessage(
-  sql: SqlStorage,
-  opts: EnqueueOptions,
-): AgentMailboxMessage {
+export function enqueueMessage(sql: SqlStorage, opts: EnqueueOptions): AgentMailboxMessage {
   const id = opts.id ?? ulid();
   const now = opts.now ?? Date.now();
   const isDurable = (DURABLE_MESSAGE_CLASSES as readonly string[]).includes(opts.messageClass);
-  const ackRequired = opts.ackRequired === undefined
-    ? (isDurable ? 1 : 0)
-    : (opts.ackRequired ? 1 : 0);
-  const ttlMs = typeof opts.ttlMs === 'number' && opts.ttlMs > 0
-    ? opts.ttlMs
-    : MAILBOX_DEFAULTS.TTL_MS;
+  const ackRequired =
+    opts.ackRequired === undefined ? (isDurable ? 1 : 0) : opts.ackRequired ? 1 : 0;
+  const ttlMs =
+    typeof opts.ttlMs === 'number' && opts.ttlMs > 0 ? opts.ttlMs : MAILBOX_DEFAULTS.TTL_MS;
   const expiresAt = now + ttlMs;
 
   // Enforce per-project message cap
@@ -181,10 +176,7 @@ export function getPendingMessages(
 /**
  * Get a single message by ID.
  */
-export function getMessage(
-  sql: SqlStorage,
-  messageId: string,
-): AgentMailboxMessage | null {
+export function getMessage(sql: SqlStorage, messageId: string): AgentMailboxMessage | null {
   const [row] = sql.exec('SELECT * FROM session_inbox WHERE id = ?', messageId).toArray();
   return row ? parseMailboxMessageRow(row) : null;
 }
@@ -192,11 +184,7 @@ export function getMessage(
 /**
  * Transition a message's delivery state. Validates the transition is legal.
  */
-function transitionState(
-  sql: SqlStorage,
-  messageId: string,
-  toState: DeliveryState,
-): boolean {
+function transitionState(sql: SqlStorage, messageId: string, toState: DeliveryState): boolean {
   const msg = getMessage(sql, messageId);
   if (!msg) return false;
 
@@ -229,11 +217,7 @@ function transitionState(
       messageId,
     );
   } else {
-    sql.exec(
-      `UPDATE session_inbox SET delivery_state = ? WHERE id = ?`,
-      toState,
-      messageId,
-    );
+    sql.exec(`UPDATE session_inbox SET delivery_state = ? WHERE id = ?`, toState, messageId);
   }
 
   return true;
@@ -263,10 +247,7 @@ export function expireMessage(sql: SqlStorage, messageId: string): boolean {
 /**
  * Expire messages that have exceeded their TTL or max delivery attempts.
  */
-export function expireStaleMessages(
-  sql: SqlStorage,
-  maxAttempts: number,
-): number {
+export function expireStaleMessages(sql: SqlStorage, maxAttempts: number): number {
   const now = Date.now();
   let expired = 0;
 
@@ -276,6 +257,7 @@ export function expireStaleMessages(
       `SELECT id FROM session_inbox
        WHERE expires_at IS NOT NULL
          AND expires_at <= ?
+         AND source_kind = 'agent_mailbox'
          AND delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`,
       now,
     )
@@ -291,6 +273,7 @@ export function expireStaleMessages(
     .exec(
       `SELECT id FROM session_inbox
        WHERE delivery_attempts >= ?
+         AND source_kind = 'agent_mailbox'
          AND delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`,
       maxAttempts,
     )
@@ -385,7 +368,9 @@ export function listMessages(
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  const [countRow] = sql.exec(`SELECT COUNT(*) as cnt FROM session_inbox ${where}`, ...params).toArray();
+  const [countRow] = sql
+    .exec(`SELECT COUNT(*) as cnt FROM session_inbox ${where}`, ...params)
+    .toArray();
   const total = (countRow as { cnt: number })?.cnt ?? 0;
 
   const rows = sql
@@ -419,9 +404,7 @@ export function cancelMessage(sql: SqlStorage, messageId: string): boolean {
  */
 export function getMailboxStats(sql: SqlStorage): Record<string, number> {
   const rows = sql
-    .exec(
-      `SELECT delivery_state, COUNT(*) as cnt FROM session_inbox GROUP BY delivery_state`,
-    )
+    .exec(`SELECT delivery_state, COUNT(*) as cnt FROM session_inbox GROUP BY delivery_state`)
     .toArray();
 
   const stats: Record<string, number> = {
@@ -477,10 +460,7 @@ export function runDeliverySweep(
  * Compute the next alarm time for the mailbox delivery sweep.
  * Returns null if no messages need attention.
  */
-export function computeMailboxAlarmTime(
-  sql: SqlStorage,
-  pollIntervalMs: number,
-): number | null {
+export function computeMailboxAlarmTime(sql: SqlStorage, pollIntervalMs: number): number | null {
   // Check if there are any queued or delivered messages that need attention
   const [row] = sql
     .exec(

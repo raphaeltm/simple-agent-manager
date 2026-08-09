@@ -326,23 +326,51 @@ type checkpointRolloverEpisode struct {
 	result       chan CheckpointRolloverResult
 	operationCtx context.Context
 	forced       bool
+	decisionMu   sync.Mutex
 	outcome      sync.Once
 	terminal     atomic.Bool
+	finalResult  CheckpointRolloverResult
 }
 
 // complete is the checkpoint episode's linearization point. A terminal caller
 // that wins permanently suppresses process-exit restart for this episode; a
 // successful strict resume that wins cannot be overturned by a later deadline.
 func (e *checkpointRolloverEpisode) complete(result CheckpointRolloverResult, terminal bool) bool {
+	e.decisionMu.Lock()
+	defer e.decisionMu.Unlock()
+	return e.completeLocked(result, terminal)
+}
+
+func (e *checkpointRolloverEpisode) completeLocked(result CheckpointRolloverResult, terminal bool) bool {
 	won := false
 	e.outcome.Do(func() {
 		won = true
+		e.finalResult = result
 		if terminal {
 			e.terminal.Store(true)
 		}
 		e.result <- result
 	})
 	return won
+}
+
+// completeStrictResume atomically orders the checkpoint outcome after the
+// prompt attempt's terminal arbiter. Natural completion or user cancellation
+// therefore wins as superseded; an already-terminal episode can never publish
+// a later successful resume.
+func (e *checkpointRolloverEpisode) completeStrictResume(h *SessionHost, result CheckpointRolloverResult) (CheckpointRolloverResult, bool) {
+	e.decisionMu.Lock()
+	defer e.decisionMu.Unlock()
+	if e.terminal.Load() {
+		return e.finalResult, false
+	}
+	if !e.attempt.complete(h, checkpointPreemptedStopReason, nil) {
+		superseded := CheckpointRolloverResult{State: "superseded", ACPSessionID: e.sessionID}
+		e.completeLocked(superseded, true)
+		return superseded, false
+	}
+	e.completeLocked(result, false)
+	return result, true
 }
 
 func (a *promptAttempt) complete(h *SessionHost, stopReason string, promptErr error) bool {

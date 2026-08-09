@@ -90,6 +90,39 @@ describe('ProjectData Durable Object', () => {
       });
       expect(transitioned).toMatchObject({ state: 'preempt_requested', attemptCount: 1 });
     });
+
+    it('lets the durable receipt alarm own terminal expiry instead of the legacy sweep', async () => {
+      const stub = getStub('project-durable-alarm-expiry');
+      const sessionId = await stub.createSession('workspace-1', 'Durable alarm expiry');
+      await stub.acceptPromptDelivery({
+        deliveryId: 'delivery-expired-1',
+        targetSessionId: sessionId,
+        displayContent: 'visible prompt',
+        deliveryContent: 'enriched prompt',
+        senderType: 'human',
+        senderId: 'user-1',
+        messageClass: 'deliver',
+        sourceKind: 'user_followup',
+        ttlMs: 60_000,
+      });
+
+      await runInDurableObject(stub, async (instance, state) => {
+        state.storage.sql.exec(
+          `UPDATE session_inbox SET expires_at = 0 WHERE id = 'delivery-expired-1'`,
+        );
+        await instance.alarm();
+      });
+
+      const snapshot = await stub.getDurableExecutionSnapshot(sessionId);
+      expect(snapshot.deliveries).toContainEqual(
+        expect.objectContaining({
+          id: 'delivery-expired-1',
+          deliveryState: 'expired',
+          terminalReason: 'ttl_expired',
+          lastError: 'Prompt delivery TTL expired',
+        }),
+      );
+    });
   });
 
   // =========================================================================
