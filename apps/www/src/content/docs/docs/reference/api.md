@@ -284,3 +284,31 @@ Rate-limited to 20 submissions per clock hour per user (`RATE_LIMIT_REPORT_ISSUE
 ### `POST /api/admin/observability/feedback-triage`
 
 Superadmin only. Runs a platform-error triage sweep immediately instead of waiting for the hourly cron. There is no UI for this yet, so it is the only way to verify a freshly configured `PLATFORM_FEEDBACK_PROJECT_ID` without waiting up to an hour.
+
+## Admin Runtime Controls
+
+These endpoints require an approved, authenticated **superadmin**. The switches
+are availability brakes: an absent KV key or KV read error means enabled
+(fail-open), so a transient KV outage does not silently halt recovery work.
+
+### `GET /api/admin/runtime-controls`
+
+Read the cron-sweep and Durable Object alarm switches. The response includes
+`cronSweepsEnabled`, `doAlarmsEnabled`, the resolved KV keys, the in-memory
+cache TTL, the disabled-alarm retry interval, and `semantics: "fail-open"`.
+
+### `PATCH /api/admin/runtime-controls`
+
+Update either or both switches. At least one field is required and every
+provided value must be boolean.
+
+```json
+{
+  "cronSweepsEnabled": false,
+  "doAlarmsEnabled": false
+}
+```
+
+Disabling the alarm switch does not drop alarm chains: each affected Durable
+Object re-arms at the reported safe retry interval and resumes normally after
+the switch is enabled again.

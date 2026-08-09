@@ -58,6 +58,7 @@ jobs:
           # Must resolve to the target API Worker. The script falls back to
           # DO_WALL_TIME_SCRIPT_NAMES and fails closed if neither is configured.
           DO_CRON_LIVENESS_SCRIPT_NAMES: ${{ vars.DO_CRON_LIVENESS_SCRIPT_NAMES }}
+          DO_CRON_LIVENESS_ENDPOINT: ${{ vars.DO_CRON_LIVENESS_ENDPOINT }}
         run: |
           set -o pipefail
           case "$TARGET_ENVIRONMENT" in

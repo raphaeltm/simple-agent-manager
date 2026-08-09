@@ -15,6 +15,7 @@ SAM includes an in-app notification system that keeps you informed about agent p
 | **progress** | Low | An agent reports incremental progress via `update_task_status` |
 | **session_ended** | Medium | A conversation-mode session turn completes |
 | **pr_created** | Medium | An agent creates a pull request |
+| **cron_failure** | High | A five-minute operational recovery sweep fails (active superadmins only) |
 
 ## Real-Time Delivery
 
@@ -60,6 +61,14 @@ When agents call `update_task_status`, SAM creates progress notifications. To av
 SAM automatically deduplicates notifications:
 - `task_complete` notifications are deduplicated within a 60-second window (configurable via `NOTIFICATION_DEDUP_WINDOW_MS`)
 - Progress notifications are batched per task per 5-minute window
+- `cron_failure` notifications are throttled per sweep name. KV provides the
+  expiring coarse marker, and an atomic per-user Notification Durable Object
+  claim guarantees that overlapping cron invocations do not send duplicates.
+
+Operational sweep failures are sent only to active superadmin accounts. System
+and anonymous-trial sentinel users are excluded. The notification links to the
+admin log viewer for investigation and respects the recipient's in-app
+`cron_failure` preference.
 
 ### Retention
 
@@ -76,3 +85,5 @@ SAM automatically deduplicates notifications:
 | `NOTIFICATION_AUTO_DELETE_AGE_MS` | `7776000000` (90 days) | Auto-delete threshold |
 | `MAX_NOTIFICATIONS_PER_USER` | `500` | Max stored notifications before oldest are removed |
 | `NOTIFICATION_PAGE_SIZE` | `50` | Default page size for notification list |
+| `CRON_FAILURE_NOTIFICATION_THROTTLE_MS` | `3600000` (1 hr) | Per-sweep superadmin alert throttle |
+| `CRON_FAILURE_NOTIFICATION_KV_PREFIX` | `cron-failure-notification` | KV prefix used for coarse throttle markers and atomic deduplication keys |

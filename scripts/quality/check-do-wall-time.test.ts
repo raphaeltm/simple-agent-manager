@@ -51,6 +51,7 @@ describe('check-do-wall-time', () => {
     expect(workflow).toContain('- staging');
     expect(workflow).toContain('- production');
     expect(workflow).toContain('DO_CRON_LIVENESS_SCRIPT_NAMES');
+    expect(workflow).toContain('DO_CRON_LIVENESS_ENDPOINT');
     expect(workflow).toContain('RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}');
     expect(workflow).toContain('TARGET_STACK="prod"');
     expect(workflow).toContain('TARGET_STACK="staging"');

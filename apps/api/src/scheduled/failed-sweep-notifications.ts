@@ -74,7 +74,7 @@ export async function notifyFailedSweeps(
             urgency: 'high',
             title: `Operational sweep failed: ${sweepName}`,
             body: 'A scheduled recovery sweep failed. Review Workers logs and runtime controls.',
-            actionUrl: '/admin/observability',
+            actionUrl: '/admin/logs',
             metadata: { sweepName },
           },
           now

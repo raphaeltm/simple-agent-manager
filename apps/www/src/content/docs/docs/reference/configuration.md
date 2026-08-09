@@ -336,6 +336,7 @@ from the selected GitHub Environment, not from the API Worker runtime:
 | `DO_INVOCATION_RATE_REGRESSION_RATIO` | `2`                            | Recent-versus-seven-day-baseline request-rate failure ratio |
 | `DO_CRON_LIVENESS_MAX_AGE_HOURS`      | `3`                            | Maximum age of the most recent targeted `cron.completed` event |
 | `DO_CRON_LIVENESS_SCRIPT_NAMES`       | `DO_WALL_TIME_SCRIPT_NAMES`    | Explicit API Worker service target for cron liveness; the GitHub workflow derives both from `RESOURCE_PREFIX` and the selected stack when unset |
+| `DO_CRON_LIVENESS_ENDPOINT`           | Cloudflare Workers Observability query endpoint | Optional endpoint override for compatible/private telemetry gateways |
 
 ## Provider-Side Orphan Reconciliation
 

@@ -46,6 +46,14 @@ describe('failed sweep notifications', () => {
       notificationsSent: 0,
     });
     expect(sendNotificationOnceMock).toHaveBeenCalledTimes(2);
+    expect(sendNotificationOnceMock).toHaveBeenCalledWith(
+      env,
+      'admin-1',
+      'cron-failure-notification:node_cleanup',
+      expect.any(Number),
+      expect.objectContaining({ actionUrl: '/admin/logs', type: 'cron_failure' }),
+      expect.any(Number)
+    );
     expect(bind).toHaveBeenCalledWith('system-sentinel');
     expect(prepare.mock.calls[0]![0]).toContain("status != 'system'");
   });
