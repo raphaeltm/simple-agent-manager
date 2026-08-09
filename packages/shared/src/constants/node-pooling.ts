@@ -17,6 +17,9 @@ export const DEFAULT_ORPHANED_WORKSPACE_GRACE_PERIOD_MS = 10 * 60 * 1000; // 10 
 /** Default alarm retry delay (ms) when node destruction fails. */
 export const DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS = 60 * 1000; // 1 minute
 
+/** Maximum time the NodeLifecycle nudge may remain in destroying before self-cleaning. */
+export const DEFAULT_NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
 // =============================================================================
 // Idle / Orphan Node Reaping (cron sweep)
 // =============================================================================

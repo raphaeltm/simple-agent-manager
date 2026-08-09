@@ -34,6 +34,7 @@ interface StoredNodeLifecycleState {
   warmSince: number | null;
   claimedByTask: string | null;
   warmTimeoutOverrideMs?: number | null;
+  destroyingSince?: number;
 }
 
 async function seedTestNode(nodeId: string, userId: string = TEST_USER_ID): Promise<void> {
@@ -265,6 +266,84 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     const dbNode = await getNodeFromD1(nodeId);
     expect(dbNode!.status).toBe('stopped');
     expect(dbNode!.warm_since).toBeNull();
+    expect(await getAlarm(stub)).not.toBeNull();
+  });
+
+  it('terminally cleans a destroying node and does not re-arm on a second alarm', async () => {
+    const nodeId = 'nl-test-destroy-terminal-001';
+    await seedTestNode(nodeId);
+    await env.DATABASE.prepare(`UPDATE nodes SET status = 'stopped' WHERE id = ?`)
+      .bind(nodeId)
+      .run();
+
+    const stub = getStub(nodeId);
+    await runInDurableObject(stub, async (instance) => {
+      await instance.ctx.storage.put('state', {
+        nodeId,
+        userId: TEST_USER_ID,
+        status: 'destroying',
+        warmSince: null,
+        destroyingSince: Date.now(),
+        claimedByTask: null,
+      } satisfies StoredNodeLifecycleState);
+      await instance.ctx.storage.setAlarm(Date.now() + 1_000);
+      await instance.alarm();
+    });
+
+    expect(await getStoredState(stub)).toBeNull();
+    expect(await getAlarm(stub)).toBeNull();
+
+    await runInDurableObject(stub, async (instance) => instance.alarm());
+    expect(await getStoredState(stub)).toBeNull();
+    expect(await getAlarm(stub)).toBeNull();
+  });
+
+  it('retries a failed warm-to-destroying D1 handoff, then terminates next tick', async () => {
+    const nodeId = 'nl-test-destroy-retry-001';
+    await seedTestNode(nodeId);
+    const stub = getStub(nodeId);
+
+    await runInDurableObject(stub, async (instance) => {
+      await instance.ctx.storage.put('state', {
+        nodeId,
+        userId: TEST_USER_ID,
+        status: 'destroying',
+        warmSince: null,
+        destroyingSince: Date.now(),
+        claimedByTask: null,
+      } satisfies StoredNodeLifecycleState);
+      await instance.alarm();
+    });
+
+    expect((await getNodeFromD1(nodeId))?.status).toBe('stopped');
+    expect((await getStoredState(stub))?.status).toBe('destroying');
+    expect(await getAlarm(stub)).not.toBeNull();
+
+    await runInDurableObject(stub, async (instance) => instance.alarm());
+    expect(await getStoredState(stub)).toBeNull();
+    expect(await getAlarm(stub)).toBeNull();
+  });
+
+  it('self-cleans a destroying state after the maximum destroying age', async () => {
+    const nodeId = 'nl-test-destroy-max-age-001';
+    await seedTestNode(nodeId);
+    const stub = getStub(nodeId);
+
+    await runInDurableObject(stub, async (instance) => {
+      await instance.ctx.storage.put('state', {
+        nodeId,
+        userId: TEST_USER_ID,
+        status: 'destroying',
+        warmSince: null,
+        destroyingSince: Date.now() - 25 * 60 * 60 * 1_000,
+        claimedByTask: null,
+      } satisfies StoredNodeLifecycleState);
+      await instance.alarm();
+    });
+
+    expect(await getStoredState(stub)).toBeNull();
+    expect(await getAlarm(stub)).toBeNull();
+    expect((await getNodeFromD1(nodeId))?.status).toBe('running');
   });
 
   it('tryClaim on node with no stored state returns false and the default active state', async () => {
