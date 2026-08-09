@@ -517,8 +517,8 @@ export type {
   SendDurableMessageResponse,
   SenderType,
   VmPromptDeliveryCapabilities,
-  VmPromptDeliveryResponse,
   VmPromptDeliveryReceipt,
+  VmPromptDeliveryResponse,
   VmPromptReceiptState,
 } from './mailbox';
 export {
