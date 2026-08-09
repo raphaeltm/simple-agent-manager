@@ -22,9 +22,8 @@ Discovered during task-submission-file-attachments implementation (PR on branch 
 
 ## Completion Note
 
-Completed with option A on 2026-08-09 by the cohesive R2 storage retention PR from
-branch `sam/implement-r2-storage-retention-ph7yyq`. The PR link will be added to this
-archived record before merge.
+Completed with option A on 2026-08-09 by the cohesive R2 storage retention
+[PR #1776](https://github.com/raphaeltm/simple-agent-manager/pull/1776).
 
 Pulumi now owns an upgrade-safe `temp-uploads/` lifecycle rule with a configurable
 positive `tempUploadTtlDays` value and a one-day default
