@@ -110,6 +110,11 @@ GitHub Environment variables for the scheduled Durable Object monitor:
 - `DO_CRON_LIVENESS_SCRIPT_NAMES` — Explicit API Worker service target for cron liveness; the GitHub workflow derives both script-name filters from `RESOURCE_PREFIX` and the selected stack when unset
 - `DO_CRON_LIVENESS_ENDPOINT` — Optional Workers Observability query endpoint override passed by the monitor workflow
 
+The monitor's `CF_API_TOKEN` GitHub Environment secret must include the
+Cloudflare `Workers Observability Write` permission. Despite the permission
+name, Cloudflare documents it for the supported telemetry query endpoint used
+by the read-only cron-liveness check.
+
 ### Devcontainer Cache
 
 - `DEVCONTAINER_CACHE_ENABLED` — Enables opportunistic devcontainer image caching

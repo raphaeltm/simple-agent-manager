@@ -40,6 +40,7 @@ export const DEFAULT_QUERY_LIMIT = 10_000;
 export const DEFAULT_GRAPHQL_ENDPOINT = 'https://api.cloudflare.com/client/v4/graphql';
 export const DEFAULT_CRON_LIVENESS_MAX_AGE_HOURS = 3;
 export const DEFAULT_INVOCATION_TYPES = ['alarm'];
+export const DEFAULT_CRON_LIVENESS_QUERY_ID = 'sam-cron-liveness';
 const WALL_TIME_MICROSECONDS_PER_MILLISECOND = 1_000;
 
 interface Config {
@@ -227,7 +228,7 @@ export function getConfig(now = new Date()): Config {
     cronLivenessScriptNames,
     cronLivenessEndpoint: resolveOptionalEndpoint(
       'DO_CRON_LIVENESS_ENDPOINT',
-      `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/workers/observability/v1/query`
+      `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/workers/observability/telemetry/query`
     ),
     now,
   };
@@ -237,9 +238,8 @@ export function resolveCronLivenessScriptNames(
   wallTimeScriptNames: string[],
   configuredCronScriptNames: string[]
 ): string[] {
-  const resolved = configuredCronScriptNames.length > 0
-    ? configuredCronScriptNames
-    : wallTimeScriptNames;
+  const resolved =
+    configuredCronScriptNames.length > 0 ? configuredCronScriptNames : wallTimeScriptNames;
   if (resolved.length === 0) {
     throw new Error(
       'DO_CRON_LIVENESS_SCRIPT_NAMES or DO_WALL_TIME_SCRIPT_NAMES must target the API Worker'
@@ -574,9 +574,12 @@ export function formatInvocationRateReport(
     `Recent invocation-rate series: ${result.recentSeries.length}`,
     `Baseline invocation-rate series: ${result.baselineSeries.length}`,
   ];
-  if (result.skipped.length > 0) lines.push(`Skipped invocation-rate series: ${result.skipped.length}`);
+  if (result.skipped.length > 0)
+    lines.push(`Skipped invocation-rate series: ${result.skipped.length}`);
   if (result.findings.length === 0) {
-    lines.push(`No Durable Object invocation-rate regressions detected at ${threshold}x threshold.`);
+    lines.push(
+      `No Durable Object invocation-rate regressions detected at ${threshold}x threshold.`
+    );
     return lines.join('\n');
   }
   lines.push(`Durable Object invocation-rate regressions detected: ${result.findings.length}`);
@@ -599,31 +602,66 @@ export function hasCronCompletedEvent(payload: unknown): boolean {
     throw new Error('Workers telemetry cron-liveness query was unsuccessful');
   }
   const result = payload.result;
-  if (!isRecord(result) || !Array.isArray(result.data)) return false;
-  return result.data.some((row) => isRecord(row) && Number(row.cnt ?? 0) > 0);
+  if (!isRecord(result)) return false;
+  if (Array.isArray(result.calculations)) {
+    return result.calculations.some((calculation) => {
+      if (!isRecord(calculation) || !Array.isArray(calculation.aggregates)) return false;
+      return calculation.aggregates.some(
+        (aggregate) => isRecord(aggregate) && Number(aggregate.value ?? aggregate.count ?? 0) > 0
+      );
+    });
+  }
+  return (
+    Array.isArray(result.data) &&
+    result.data.some((row) => isRecord(row) && Number(row.cnt ?? 0) > 0)
+  );
 }
 
-function escapeSqlLiteral(value: string): string {
-  return value.replaceAll("'", "''");
+export function buildCronLivenessQuery(
+  now: Date,
+  maxAgeHours: number,
+  scriptNames: string[]
+): Record<string, unknown> {
+  const to = now.getTime();
+  const from = to - maxAgeHours * 60 * 60 * 1_000;
+  return {
+    queryId: DEFAULT_CRON_LIVENESS_QUERY_ID,
+    timeframe: { from, to },
+    dry: true,
+    chart: false,
+    ignoreSeries: true,
+    view: 'calculations',
+    parameters: {
+      calculations: [{ operator: 'count', alias: 'cron_completed_count' }],
+      filterCombination: 'and',
+      filters: [
+        {
+          key: '$metadata.service',
+          operation: 'in',
+          type: 'string',
+          value: scriptNames.join(','),
+        },
+      ],
+      needle: { value: 'cron.completed', matchCase: true, isRegex: false },
+      limit: 1,
+    },
+  };
 }
 
 async function queryCronLiveness(config: Config): Promise<boolean> {
-  const serviceFilter = ` AND $metadata.service IN (${config.cronLivenessScriptNames
-    .map((name) => `'${escapeSqlLiteral(name)}'`)
-    .join(', ')})`;
-  const query =
-    `SELECT COUNT(*) AS cnt FROM events WHERE ` +
-    `($message = 'cron.completed' OR $message LIKE '%cron.completed%')${serviceFilter}`;
   const response = await fetch(config.cronLivenessEndpoint, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${config.cfToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      query,
-      timeframe: Math.ceil(config.cronLivenessMaxAgeHours * 60 * 60),
-    }),
+    body: JSON.stringify(
+      buildCronLivenessQuery(
+        config.now,
+        config.cronLivenessMaxAgeHours,
+        config.cronLivenessScriptNames
+      )
+    ),
   });
   if (!response.ok) {
     throw new Error(`Workers telemetry query failed: ${response.status} ${response.statusText}`);

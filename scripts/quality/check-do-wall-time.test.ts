@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import {
   analyzeInvocationRateRegression,
   analyzeWallTimeRegression,
+  buildCronLivenessQuery,
   type DurableObjectWallTimeRow,
   formatReport,
   getConfig,
@@ -58,7 +59,7 @@ describe('check-do-wall-time', () => {
       process.env.DO_CRON_LIVENESS_ENDPOINT = '';
 
       expect(getConfig().cronLivenessEndpoint).toBe(
-        'https://api.cloudflare.com/client/v4/accounts/account-id/workers/observability/v1/query'
+        'https://api.cloudflare.com/client/v4/accounts/account-id/workers/observability/telemetry/query'
       );
     } finally {
       for (const [name, value] of Object.entries(previous)) {
@@ -174,12 +175,8 @@ describe('check-do-wall-time', () => {
   });
 
   it('flags a per-script and namespace invocation-rate explosion normalized by window length', () => {
-    const baseline = [
-      row({ hour: '2026-06-25T08:00:00Z', p99: 5_000_000, requests: 168 }),
-    ];
-    const recent = [
-      row({ hour: '2026-07-02T08:00:00Z', p99: 5_000_000, requests: 240 }),
-    ];
+    const baseline = [row({ hour: '2026-06-25T08:00:00Z', p99: 5_000_000, requests: 168 })];
+    const recent = [row({ hour: '2026-07-02T08:00:00Z', p99: 5_000_000, requests: 240 })];
 
     const result = analyzeInvocationRateRegression(recent, baseline, {
       recentHours: 24,
@@ -233,20 +230,64 @@ describe('check-do-wall-time', () => {
   });
 
   it('treats cron liveness as healthy only when cron.completed has been observed', () => {
-    expect(hasCronCompletedEvent({ success: true, result: { data: [{ cnt: 1 }] } })).toBe(true);
-    expect(hasCronCompletedEvent({ success: true, result: { data: [{ cnt: 0 }] } })).toBe(false);
-    expect(hasCronCompletedEvent({ success: true, result: { data: [] } })).toBe(false);
+    expect(
+      hasCronCompletedEvent({
+        success: true,
+        result: {
+          calculations: [
+            {
+              calculation: 'count',
+              alias: 'cron_completed_count',
+              aggregates: [{ value: 1, count: 1 }],
+            },
+          ],
+        },
+      })
+    ).toBe(true);
+    expect(
+      hasCronCompletedEvent({
+        success: true,
+        result: { calculations: [{ aggregates: [{ value: 0, count: 0 }] }] },
+      })
+    ).toBe(false);
+    expect(hasCronCompletedEvent({ success: true, result: { calculations: [] } })).toBe(false);
+  });
+
+  it('builds the supported Workers Observability telemetry query for cron liveness', () => {
+    expect(
+      buildCronLivenessQuery(new Date('2026-08-09T04:30:00.000Z'), 3, ['sam-api-staging'])
+    ).toEqual({
+      queryId: 'sam-cron-liveness',
+      timeframe: {
+        from: Date.parse('2026-08-09T01:30:00.000Z'),
+        to: Date.parse('2026-08-09T04:30:00.000Z'),
+      },
+      dry: true,
+      chart: false,
+      ignoreSeries: true,
+      view: 'calculations',
+      parameters: {
+        calculations: [{ operator: 'count', alias: 'cron_completed_count' }],
+        filterCombination: 'and',
+        filters: [
+          {
+            key: '$metadata.service',
+            operation: 'in',
+            type: 'string',
+            value: 'sam-api-staging',
+          },
+        ],
+        needle: { value: 'cron.completed', matchCase: true, isRegex: false },
+        limit: 1,
+      },
+    });
   });
 
   it('requires cron liveness to target an explicit API Worker service', () => {
     expect(resolveCronLivenessScriptNames(['sam-api-production'], [])).toEqual([
       'sam-api-production',
     ]);
-    expect(resolveCronLivenessScriptNames([], ['sam-api-staging'])).toEqual([
-      'sam-api-staging',
-    ]);
-    expect(() => resolveCronLivenessScriptNames([], [])).toThrow(
-      'must target the API Worker'
-    );
+    expect(resolveCronLivenessScriptNames([], ['sam-api-staging'])).toEqual(['sam-api-staging']);
+    expect(() => resolveCronLivenessScriptNames([], [])).toThrow('must target the API Worker');
   });
 });
