@@ -1,0 +1,5 @@
+{
+  "$schema": "./fixtures/supply-chain/direct-dependency-evidence.schema.json",
+  "npm": {},
+  "go": {}
+}

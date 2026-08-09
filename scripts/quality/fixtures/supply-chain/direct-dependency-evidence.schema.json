@@ -1,0 +1,8 @@
+{
+  "type": "object",
+  "properties": {
+    "npm": { "type": "object" },
+    "go": { "type": "object" }
+  },
+  "additionalProperties": false
+}
