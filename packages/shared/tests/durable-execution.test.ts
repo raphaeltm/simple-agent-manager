@@ -18,8 +18,8 @@ describe('durable execution contracts', () => {
   });
 
   it('builds encoded VM capability and receipt contract paths', () => {
-    expect(buildVmPromptDeliveryCapabilitiesPath('workspace/a', 'session b')).toBe(
-      '/workspaces/workspace%2Fa/agent-sessions/session%20b/prompt-delivery-capabilities',
+    expect(buildVmPromptDeliveryCapabilitiesPath('workspace/a')).toBe(
+      '/workspaces/workspace%2Fa/agent-capabilities',
     );
     expect(buildVmPromptDeliveryReceiptPath('workspace/a', 'session b', 'delivery/c')).toBe(
       '/workspaces/workspace%2Fa/agent-sessions/session%20b/prompt-receipts/delivery%2Fc',
