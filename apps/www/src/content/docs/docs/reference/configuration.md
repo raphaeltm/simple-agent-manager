@@ -124,15 +124,37 @@ The variables below tune the **Instant** (Cloudflare Container) runtime — how 
 
 Sleeping and reclaimed Instant sessions are restored from a snapshot of the agent's home directory and the repository work in progress. None of these limits are surfaced in the UI, so operators should set expectations deliberately — see [What gets restored](/docs/guides/instant-sessions/#what-gets-restored).
 
-| Variable                                 | Default                   | Description                                                                                                                                                                                                                                                                                                                  |
-| ---------------------------------------- | ------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `SESSION_SNAPSHOT_TTL_DAYS`              | `7`                       | Snapshot retention. A session sleeping longer than this cannot be fully restored.                                                                                                                                                                                                                                            |
-| `SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`    | `104857600` (100 MB)      | Max combined size of the home + work-in-progress snapshot                                                                                                                                                                                                                                                                    |
-| `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES` | `52428800` (50 MB)        | Largest single file or directory the snapshot scanner will include                                                                                                                                                                                                                                                           |
-| `REQUIRE_APPROVAL`                       | _(unset)_                 | Default signup approval gate. Superadmins can override it at runtime in Admin → Users without redeploying; when no runtime override exists, this value is used. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access). |
-| `TRIAL_ANONYMOUS_USER_ID`                | `system_anonymous_trials` | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id.                                                                                                                                                                 |
-| `CAPACITY_SIZE_FALLBACK_ENABLED`         | `true`                    | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable.                                                                                             |
-| `ORIGIN_CA_CERT_VALIDITY_DAYS`           | `7`                       | Validity for per-node Cloudflare Origin CA certificates issued from node-generated CSRs. Must be one of Cloudflare's supported values: 7, 30, 90, 365, 730, 1095, or 5475.                                                                                                                                                   |
+| Variable                                 | Default                              | Description                                                                                                                                                                                                                                                                                                                  |
+| ---------------------------------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `SESSION_SNAPSHOT_TTL_DAYS`              | `7`                                  | Snapshot retention. A session sleeping longer than this cannot be fully restored.                                                                                                                                                                                                                                            |
+| `SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`    | `104857600` (100 MB)                 | Max combined size of the home + work-in-progress snapshot                                                                                                                                                                                                                                                                    |
+| `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES` | `52428800` (50 MB)                   | Largest single file or directory the snapshot scanner will include                                                                                                                                                                                                                                                           |
+| `SESSION_SNAPSHOT_PURGE_ENABLED`         | `true`                               | Enables the bounded D1 purge for expired snapshot metadata. R2 object expiry remains lifecycle-owned.                                                                                                                                                                                                                        |
+| `SESSION_SNAPSHOT_PURGE_BATCH_SIZE`      | `250`                                | Maximum expired snapshot rows deleted per daily purge.                                                                                                                                                                                                                                                                       |
+| `SESSION_SNAPSHOT_PURGE_INTERVAL_HOURS`  | `24`                                 | Minimum interval between snapshot metadata purges.                                                                                                                                                                                                                                                                           |
+| `SESSION_SNAPSHOT_PURGE_LAST_RUN_KV_KEY` | `cleanup:session-snapshots:last-run` | KV marker used to interval-gate snapshot metadata purges.                                                                                                                                                                                                                                                                    |
+| `REQUIRE_APPROVAL`                       | _(unset)_                            | Default signup approval gate. Superadmins can override it at runtime in Admin → Users without redeploying; when no runtime override exists, this value is used. The first genuine human becomes superadmin regardless of this flag — see [First Login & Admin Access](/docs/guides/self-hosting/#first-login--admin-access). |
+| `TRIAL_ANONYMOUS_USER_ID`                | `system_anonymous_trials`            | Id of the internal anonymous-trial sentinel user, excluded from first-user superadmin checks. Override only if your deployment uses a different sentinel id.                                                                                                                                                                 |
+| `CAPACITY_SIZE_FALLBACK_ENABLED`         | `true`                               | When a new node's VM size is exhausted on transient capacity, descend the size chain (large→medium→small). Only applies to default-derived sizes (project/platform default), never user-requested sizes. Set `false` to disable.                                                                                             |
+| `ORIGIN_CA_CERT_VALIDITY_DAYS`           | `7`                                  | Validity for per-node Cloudflare Origin CA certificates issued from node-generated CSRs. Must be one of Cloudflare's supported values: 7, 30, 90, 365, 730, 1095, or 5475.                                                                                                                                                   |
+
+### Deployment release and compose artifact retention
+
+The scheduled Worker prunes only terminal deployment releases outside the protected
+window (`apps/api/src/scheduled/d1-retention.ts:runDeploymentReleaseRetention()`). It
+always retains the newest releases per environment, the version reported in
+`deployment_environments.observed_applied_seq`, and every non-terminal release. The
+compose artifact cleanup then re-derives references from the remaining manifests
+(`apps/api/src/scheduled/compose-image-artifact-cleanup.ts:runComposeImageArtifactCleanup()`).
+
+| Variable                                       | Default                                | Description                                                                                           |
+| ---------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `DEPLOYMENT_RELEASE_RETENTION_ENABLED`         | `true`                                 | Enables bounded terminal release pruning.                                                             |
+| `DEPLOYMENT_RELEASE_RETENTION_COUNT`           | `3`                                    | Newest releases protected per environment, in addition to observed-applied and non-terminal releases. |
+| `DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE`      | `250`                                  | Maximum release rows deleted per run.                                                                 |
+| `DEPLOYMENT_RELEASE_RETENTION_INTERVAL_HOURS`  | `24`                                   | Minimum interval between release retention runs.                                                      |
+| `DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY` | `cleanup:deployment-releases:last-run` | KV interval marker.                                                                                   |
+| `COMPOSE_IMAGE_ARTIFACT_CLEANUP_BATCH_SIZE`    | `250`                                  | Maximum abandoned compose archives deleted per daily run.                                             |
 
 ## Google OAuth and GCP provisioning
 
@@ -211,25 +233,25 @@ The `/admin/errors` view remains superadmin-only and may show local user IDs, IP
 
 VM failures use a durable local SQLite outbox and a private R2 artifact. Generated deployments set the R2 prefix and object lifecycle from Pulumi; the remaining Worker bounds can be overridden through deployment environment variables.
 
-| Worker variable                       | Default                | Description                                                                    |
-| ------------------------------------- | ---------------------- | ------------------------------------------------------------------------------ |
-| `MAX_VM_AGENT_ERROR_BODY_BYTES`       | `32768`                | Maximum VM error batch body                                                    |
-| `MAX_VM_AGENT_ERROR_BATCH_SIZE`       | `10`                   | Maximum errors per VM batch                                                    |
-| `MAX_VM_AGENT_ERROR_SOURCE_LENGTH`    | `256`                  | Maximum redacted VM error source length                                        |
-| `OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH` | `2048`              | Maximum persisted observability error message length                           |
-| `OBSERVABILITY_ERROR_STACK_MAX_LENGTH` | `4096`                | Maximum persisted observability stack length                                   |
-| `OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH` | `512`             | Maximum persisted observability user-agent length                              |
-| `VM_INCIDENT_R2_PREFIX`               | `diagnostic-incidents` | Private object prefix; generated from the Pulumi output                        |
-| `VM_INCIDENT_ARTIFACT_MAX_BYTES`      | `2097152`              | Maximum compressed artifact size                                               |
-| `VM_INCIDENT_REGISTRATION_MAX_BYTES`  | `262144`               | Maximum registration JSON body                                                 |
-| `VM_INCIDENT_MANIFEST_MAX_BYTES`      | `131072`               | Maximum redacted manifest                                                      |
-| `VM_INCIDENT_PREVIEW_MAX_BYTES`       | `131072`               | Maximum redacted model/UI preview                                              |
-| `VM_INCIDENT_MAX_ARTIFACTS_PER_NODE`  | `50`                   | Active artifact quota per node                                                 |
-| `VM_INCIDENT_MAX_BYTES_PER_NODE`      | `104857600`            | Active expected-byte quota per node                                            |
-| `VM_INCIDENT_RETENTION_DAYS`          | `7`                    | Private object and active metadata retention                                   |
-| `VM_INCIDENT_METADATA_RETENTION_DAYS` | `30`                   | Expired metadata retention after object deletion                               |
-| `VM_INCIDENT_PENDING_TIMEOUT_MINUTES` | `30`                   | Incomplete-upload timeout and upload-lease duration                            |
-| `VM_INCIDENT_RECONCILE_BATCH_SIZE`    | `50`                   | Maximum artifacts/incidents repaired per scheduled pass (minimum: 6)           |
+| Worker variable                             | Default                | Description                                                          |
+| ------------------------------------------- | ---------------------- | -------------------------------------------------------------------- |
+| `MAX_VM_AGENT_ERROR_BODY_BYTES`             | `32768`                | Maximum VM error batch body                                          |
+| `MAX_VM_AGENT_ERROR_BATCH_SIZE`             | `10`                   | Maximum errors per VM batch                                          |
+| `MAX_VM_AGENT_ERROR_SOURCE_LENGTH`          | `256`                  | Maximum redacted VM error source length                              |
+| `OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH`    | `2048`                 | Maximum persisted observability error message length                 |
+| `OBSERVABILITY_ERROR_STACK_MAX_LENGTH`      | `4096`                 | Maximum persisted observability stack length                         |
+| `OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH` | `512`                  | Maximum persisted observability user-agent length                    |
+| `VM_INCIDENT_R2_PREFIX`                     | `diagnostic-incidents` | Private object prefix; generated from the Pulumi output              |
+| `VM_INCIDENT_ARTIFACT_MAX_BYTES`            | `2097152`              | Maximum compressed artifact size                                     |
+| `VM_INCIDENT_REGISTRATION_MAX_BYTES`        | `262144`               | Maximum registration JSON body                                       |
+| `VM_INCIDENT_MANIFEST_MAX_BYTES`            | `131072`               | Maximum redacted manifest                                            |
+| `VM_INCIDENT_PREVIEW_MAX_BYTES`             | `131072`               | Maximum redacted model/UI preview                                    |
+| `VM_INCIDENT_MAX_ARTIFACTS_PER_NODE`        | `50`                   | Active artifact quota per node                                       |
+| `VM_INCIDENT_MAX_BYTES_PER_NODE`            | `104857600`            | Active expected-byte quota per node                                  |
+| `VM_INCIDENT_RETENTION_DAYS`                | `7`                    | Private object and active metadata retention                         |
+| `VM_INCIDENT_METADATA_RETENTION_DAYS`       | `30`                   | Expired metadata retention after object deletion                     |
+| `VM_INCIDENT_PENDING_TIMEOUT_MINUTES`       | `30`                   | Incomplete-upload timeout and upload-lease duration                  |
+| `VM_INCIDENT_RECONCILE_BATCH_SIZE`          | `50`                   | Maximum artifacts/incidents repaired per scheduled pass (minimum: 6) |
 
 The VM Agent process accepts the corresponding `ERROR_REPORT_*` overrides for flush interval, batch size/bytes, outbox size and path, SQLite busy timeout, HTTP timeout, retry bounds, attempts, spool path/bytes, artifact bytes, retention, collector timeout/count/concurrency, document bytes, recursive value depth/items, string bytes, structured event limit, response-read bytes, and persisted-error bytes. Generated deployments pass these validated values through cloud-init into the VM Agent systemd service, so overrides apply to newly provisioned nodes. Defaults are listed in `apps/api/.env.example`; the common defaults are a 32 KiB error batch, 1,000-row outbox, 2 MiB artifact, 20 MiB spool, and 24-hour local retention.
 
@@ -297,13 +319,13 @@ Reaping only ever applies to nodes with `node_role = 'workspace'` and
 and legitimately hold zero workspaces forever, so they are never reaped by these
 timers; they are released when their last deployment environment is deleted.
 
-| Variable                                   | Default            | Description                                                                                                                                                                                                                                                |
-| ------------------------------------------ | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Variable                                   | Default            | Description                                                                                                                                                                                                                                                         |
+| ------------------------------------------ | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `NODE_ORPHAN_IDLE_TIMEOUT_MS`              | `2700000` (45 min) | Idle window before a running workspace node with no active workspaces is destroyed, and minimum pre-heartbeat grace before an unversioned, unclaimed workspace VM can be retired. Keep above `NODE_WARM_TIMEOUT_MS` so the warm path reclaims reusable nodes first. |
-| `NODE_ABSOLUTE_MAX_LIFETIME_MS`            | `86400000` (24 hr) | Hard ceiling on auto-provisioned workspace node age. Applies even when a workspace row still reports `running`, provided no workspace has reported activity within the idle window — this is what stops a stuck workspace row from making a node immortal. |
-| `NODE_CLEANUP_SWEEP_LIMIT`                 | `25`               | Max node candidates processed per cleanup phase per cron run.                                                                                                                                                                                              |
-| `WORKSPACE_CLEANUP_SWEEP_LIMIT`            | `50`               | Max workspace candidates processed per cleanup phase per cron run.                                                                                                                                                                                         |
-| `NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS` | `5000` (5 s)       | VM-agent request timeout for background sweeps. Deliberately far below the interactive `NODE_AGENT_REQUEST_TIMEOUT_MS` (30 s) so a sweep over unreachable nodes cannot exhaust the Worker's wall-clock budget.                                             |
+| `NODE_ABSOLUTE_MAX_LIFETIME_MS`            | `86400000` (24 hr) | Hard ceiling on auto-provisioned workspace node age. Applies even when a workspace row still reports `running`, provided no workspace has reported activity within the idle window — this is what stops a stuck workspace row from making a node immortal.          |
+| `NODE_CLEANUP_SWEEP_LIMIT`                 | `25`               | Max node candidates processed per cleanup phase per cron run.                                                                                                                                                                                                       |
+| `WORKSPACE_CLEANUP_SWEEP_LIMIT`            | `50`               | Max workspace candidates processed per cleanup phase per cron run.                                                                                                                                                                                                  |
+| `NODE_AGENT_BACKGROUND_REQUEST_TIMEOUT_MS` | `5000` (5 s)       | VM-agent request timeout for background sweeps. Deliberately far below the interactive `NODE_AGENT_REQUEST_TIMEOUT_MS` (30 s) so a sweep over unreachable nodes cannot exhaust the Worker's wall-clock budget.                                                      |
 
 ## Provider-Side Orphan Reconciliation
 
@@ -586,15 +608,15 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 
 ## Admin Observability
 
-| Variable                             | Default  | Description                      |
-| ------------------------------------ | -------- | -------------------------------- |
-| `OBSERVABILITY_ERROR_RETENTION_DAYS` | `30`     | Error log retention              |
-| `OBSERVABILITY_ERROR_MAX_ROWS`       | `100000` | Max stored error rows            |
-| `OBSERVABILITY_ERROR_BATCH_SIZE`     | `25`     | Error ingestion batch size       |
-| `OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH` | `2048` | Maximum persisted message length |
-| `OBSERVABILITY_ERROR_STACK_MAX_LENGTH` | `4096` | Maximum persisted stack length   |
-| `OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH` | `512` | Maximum persisted user-agent length |
-| `OBSERVABILITY_LOG_QUERY_RATE_LIMIT` | `30`     | Log queries per minute per admin |
+| Variable                                    | Default  | Description                         |
+| ------------------------------------------- | -------- | ----------------------------------- |
+| `OBSERVABILITY_ERROR_RETENTION_DAYS`        | `30`     | Error log retention                 |
+| `OBSERVABILITY_ERROR_MAX_ROWS`              | `100000` | Max stored error rows               |
+| `OBSERVABILITY_ERROR_BATCH_SIZE`            | `25`     | Error ingestion batch size          |
+| `OBSERVABILITY_ERROR_MESSAGE_MAX_LENGTH`    | `2048`   | Maximum persisted message length    |
+| `OBSERVABILITY_ERROR_STACK_MAX_LENGTH`      | `4096`   | Maximum persisted stack length      |
+| `OBSERVABILITY_ERROR_USER_AGENT_MAX_LENGTH` | `512`    | Maximum persisted user-agent length |
+| `OBSERVABILITY_LOG_QUERY_RATE_LIMIT`        | `30`     | Log queries per minute per admin    |
 
 ## VM TLS
 
@@ -660,14 +682,14 @@ Applied via cloud-init on each node:
 
 ## Web UI (Build-Time)
 
-| Variable                               | Default            | Description                                                           |
-| -------------------------------------- | ------------------ | --------------------------------------------------------------------- |
-| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES`   | `10485760` (10 MB) | Images below this size render inline automatically                    |
-| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`     | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link  |
-| `VITE_ANALYTICS_MAX_QUEUE_SIZE`        | `100`              | Max client-side analytics events retained before oldest events drop   |
-| `VITE_ANALYTICS_FLUSH_THRESHOLD`       | `10`               | Client event count that triggers an immediate analytics flush         |
-| `VITE_ANALYTICS_FLUSH_INTERVAL_MS`     | `5000`             | Client analytics background flush interval in milliseconds            |
-| `VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES` | `100`              | Max paginated diagnosis-event pages loaded per browser request        |
+| Variable                               | Default            | Description                                                          |
+| -------------------------------------- | ------------------ | -------------------------------------------------------------------- |
+| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES`   | `10485760` (10 MB) | Images below this size render inline automatically                   |
+| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`     | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link |
+| `VITE_ANALYTICS_MAX_QUEUE_SIZE`        | `100`              | Max client-side analytics events retained before oldest events drop  |
+| `VITE_ANALYTICS_FLUSH_THRESHOLD`       | `10`               | Client event count that triggers an immediate analytics flush        |
+| `VITE_ANALYTICS_FLUSH_INTERVAL_MS`     | `5000`             | Client analytics background flush interval in milliseconds           |
+| `VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES` | `100`              | Max paginated diagnosis-event pages loaded per browser request       |
 
 ## Analytics
 

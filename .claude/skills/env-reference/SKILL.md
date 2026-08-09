@@ -83,6 +83,19 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS` — Progress-idle timeout for snapshot upload/download (default: `30000`)
 - `SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES` — Maximum snapshot coordination JSON body (default: `262144`)
 - `SESSION_SNAPSHOT_R2_PREFIX` — Private R2 object prefix for session snapshots (default: `session-snapshots`)
+- `SESSION_SNAPSHOT_PURGE_ENABLED` — Kill switch for expired D1 snapshot metadata purge (default: enabled)
+- `SESSION_SNAPSHOT_PURGE_BATCH_SIZE` — Maximum expired snapshot rows deleted per run (default: `250`)
+- `SESSION_SNAPSHOT_PURGE_INTERVAL_HOURS` — Minimum interval between snapshot row purges (default: `24`)
+- `SESSION_SNAPSHOT_PURGE_LAST_RUN_KV_KEY` — KV interval marker (default: `cleanup:session-snapshots:last-run`)
+
+### Deployment Storage Retention
+
+- `DEPLOYMENT_RELEASE_RETENTION_ENABLED` — Kill switch for superseded terminal release pruning (default: enabled)
+- `DEPLOYMENT_RELEASE_RETENTION_COUNT` — Newest releases protected per deployment environment, in addition to observed-applied and non-terminal releases (default: `3`)
+- `DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE` — Maximum terminal release rows deleted per run (default: `250`)
+- `DEPLOYMENT_RELEASE_RETENTION_INTERVAL_HOURS` — Minimum interval between release retention runs (default: `24`)
+- `DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY` — KV interval marker (default: `cleanup:deployment-releases:last-run`)
+- `COMPOSE_IMAGE_ARTIFACT_CLEANUP_BATCH_SIZE` — Maximum abandoned compose archives deleted per daily run (default: `250`)
 
 ### Devcontainer Cache
 

@@ -64,16 +64,16 @@ merged scheduled sweeps and R2 lifecycle policies.
 
 ### Scheduled retention
 
-- [ ] Add an env-configurable, interval-gated deployment-release retention sweep with
+- [x] Add an env-configurable, interval-gated deployment-release retention sweep with
       defaults for enabled state, keep count (3), batch size, interval, and KV marker.
-- [ ] Protect newest N per environment, the observed applied version, and every
+- [x] Protect newest N per environment, the observed applied version, and every
       non-terminal/unknown-status release; delete only bounded applied/failed rows.
-- [ ] Add an env-configurable, interval-gated session-snapshot D1 purge using ISO
+- [x] Add an env-configurable, interval-gated session-snapshot D1 purge using ISO
       expiry comparison and a bounded indexed delete.
-- [ ] Remove `deleteSessionSnapshotArtifacts()`; R2 lifecycle owns snapshot objects.
-- [ ] Wire both jobs as independent isolated scheduled steps and add completion-log
+- [x] Remove `deleteSessionSnapshotArtifacts()`; R2 lifecycle owns snapshot objects.
+- [x] Wire both jobs as independent isolated scheduled steps and add completion-log
       counters before compose artifact cleanup.
-- [ ] Raise compose artifact cleanup's default batch from 50 to 250 so the current
+- [x] Raise compose artifact cleanup's default batch from 50 to 250 so the current
       backlog drains in roughly one to two daily runs while preserving its override.
 
 ### R2 lifecycle and project cleanup
@@ -102,16 +102,16 @@ merged scheduled sweeps and R2 lifecycle policies.
 
 ### Required tests
 
-- [ ] Real-SQL deployment release tests: old terminal pruning; newest-N retention;
+- [x] Real-SQL deployment release tests: old terminal pruning; newest-N retention;
       observed applied retention outside the window; stuck applying/unknown retention;
       per-environment isolation; batch bound; two-pass zombie/stability proof.
-- [ ] Real-SQL session snapshot tests: expired deletion; unexpired retention; exact ISO
+- [x] Real-SQL session snapshot tests: expired deletion; unexpired retention; exact ISO
       ordering/boundary behavior; batch bound; stable second pass.
 - [ ] Real-SQL library attack/control test: deleting project A removes only A's tags,
       rows, and R2 keys while project B remains intact; prove the pair discriminating.
-- [ ] Scheduled isolation regression naming a throwing new step and proving later steps
+- [x] Scheduled isolation regression naming a throwing new step and proving later steps
       still execute with an undefined failure result.
-- [ ] Preserve all existing compose artifact cleanup tests and update only the expected
+- [x] Preserve all existing compose artifact cleanup tests and update only the expected
       default/config documentation for the larger default batch.
 
 ### `/do` delivery gates

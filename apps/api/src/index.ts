@@ -140,6 +140,10 @@ import { runAnalyticsForwardJob } from './scheduled/analytics-forward';
 import { runScheduledComposeImageArtifactCleanup } from './scheduled/compose-image-artifact-cleanup';
 import { runComputeUsageCleanup } from './scheduled/compute-usage-cleanup';
 import { runCronTriggerSweep } from './scheduled/cron-triggers';
+import {
+  runScheduledDeploymentReleaseRetention,
+  runScheduledSessionSnapshotPurge,
+} from './scheduled/d1-retention';
 import { runNodeCleanupSweep } from './scheduled/node-cleanup';
 import { runObservabilityPurge } from './scheduled/observability-purge';
 import {
@@ -973,6 +977,18 @@ export default {
       runSetupSessionSweep(env, ctx)
     );
 
+    // Retire superseded terminal deployment releases first so the compose artifact
+    // sweep below re-derives a smaller protected-key set in the same cron invocation.
+    const deploymentReleaseRetention = await sweeps.isolate('deployment_release_retention', () =>
+      runScheduledDeploymentReleaseRetention(env)
+    );
+
+    // R2 lifecycle owns snapshot object expiry; this independent D1-only step keeps
+    // the indexed metadata table bounded.
+    const sessionSnapshotPurge = await sweeps.isolate('session_snapshot_purge', () =>
+      runScheduledSessionSnapshotPurge(env)
+    );
+
     // Clean up abandoned R2 compose image artifacts. The cleanup module is
     // interval-gated through KV so the 5-minute sweep does not scan R2 every run.
     const composeArtifactCleanup = await sweeps.isolate('compose_artifact_cleanup', () =>
@@ -1044,6 +1060,12 @@ export default {
       sessionTaskRepairReused: sessionTaskRepair?.reused,
       sessionTaskRepairErrors: sessionTaskRepair?.errors,
       sessionTaskRepairResidual: sessionTaskRepair?.residual,
+      deploymentReleaseRetentionSkipped: deploymentReleaseRetention?.skipped,
+      deploymentReleaseRetentionSkipReason: deploymentReleaseRetention?.skipReason,
+      deploymentReleaseRetentionDeleted: deploymentReleaseRetention?.deletedReleases,
+      sessionSnapshotPurgeSkipped: sessionSnapshotPurge?.skipped,
+      sessionSnapshotPurgeSkipReason: sessionSnapshotPurge?.skipReason,
+      sessionSnapshotPurgeDeleted: sessionSnapshotPurge?.deletedSnapshots,
       composeArtifactCleanupSkipped: composeArtifactCleanup?.skipped,
       composeArtifactCleanupSkipReason: composeArtifactCleanup?.skipReason,
       composeArtifactCleanupScanned: composeArtifactCleanup?.scannedObjects,

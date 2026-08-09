@@ -13,7 +13,9 @@ const log = createModuleLogger('compose-image-artifact-cleanup');
 
 export const COMPOSE_IMAGE_ARTIFACT_PREFIX = 'compose-image-artifacts/';
 const DEFAULT_ABANDONED_RETENTION_HOURS = 48;
-const DEFAULT_CLEANUP_BATCH_SIZE = 50;
+// Production accumulated 281 superseded compose archives before release retention
+// existed. A 250-object default drains that backlog in roughly one to two daily runs.
+const DEFAULT_CLEANUP_BATCH_SIZE = 250;
 const DEFAULT_CLEANUP_INTERVAL_HOURS = 24;
 const DEFAULT_LAST_RUN_KV_KEY = 'cleanup:compose-image-artifacts:last-run';
 
@@ -48,7 +50,9 @@ export interface ComposeImageArtifactCleanupStats {
   errors: number;
 }
 
-function emptyStats(overrides: Partial<ComposeImageArtifactCleanupStats> = {}): ComposeImageArtifactCleanupStats {
+function emptyStats(
+  overrides: Partial<ComposeImageArtifactCleanupStats> = {}
+): ComposeImageArtifactCleanupStats {
   return {
     enabled: true,
     skipped: false,

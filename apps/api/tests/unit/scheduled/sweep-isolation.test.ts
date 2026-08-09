@@ -70,12 +70,7 @@ describe('createSweepIsolator', () => {
     });
 
     // Every sweep ran, in order — this is the whole point.
-    expect(order).toEqual([
-      'diagnosis_reconcile',
-      'node_cleanup',
-      'cron_triggers',
-      'trial_expire',
-    ]);
+    expect(order).toEqual(['diagnosis_reconcile', 'node_cleanup', 'cron_triggers', 'trial_expire']);
 
     expect(first).toEqual({ restarted: 1 });
     expect(downstream).toEqual({ fired: 3 });
@@ -156,5 +151,33 @@ describe('createSweepIsolator', () => {
     });
 
     expect(sweeps.failures()).toEqual([{ sweep: 'node_cleanup', error: 'string failure' }]);
+  });
+
+  it('a throwing retention step cannot suppress the later snapshot and artifact steps', async () => {
+    const order: string[] = [];
+    const sweeps = createSweepIsolator(makeEnv());
+
+    const releaseRetention = await sweeps.isolate('deployment_release_retention', async () => {
+      order.push('deployment_release_retention');
+      throw new Error('D1 release retention failure');
+    });
+    const snapshotPurge = await sweeps.isolate('session_snapshot_purge', async () => {
+      order.push('session_snapshot_purge');
+      return { deletedSnapshots: 2 };
+    });
+    const composeCleanup = await sweeps.isolate('compose_artifact_cleanup', async () => {
+      order.push('compose_artifact_cleanup');
+      return { deletedObjects: 3 };
+    });
+
+    expect(order).toEqual([
+      'deployment_release_retention',
+      'session_snapshot_purge',
+      'compose_artifact_cleanup',
+    ]);
+    expect(releaseRetention).toBeUndefined();
+    expect(snapshotPurge).toEqual({ deletedSnapshots: 2 });
+    expect(composeCleanup).toEqual({ deletedObjects: 3 });
+    expect(sweeps.failedSweeps()).toEqual(['deployment_release_retention']);
   });
 });
