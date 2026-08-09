@@ -269,7 +269,7 @@ func (s *Server) clearReadyCallbackPending(workspaceID string) {
 }
 
 // effectivePromptTimeout returns the prompt timeout based on session type.
-// Task-driven workspaces (TaskID set) use ACPTaskPromptTimeout (default 6h).
+// Task-driven workspaces (TaskID set) use ACPTaskPromptTimeout (default 8h).
 // Direct workspace sessions use ACPPromptTimeout (default 0 = no timeout).
 //
 // Evaluated once at server startup. The result is baked into acpConfig.PromptTimeout

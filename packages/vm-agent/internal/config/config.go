@@ -206,7 +206,7 @@ type Config struct {
 	ACPPingInterval                   time.Duration // WebSocket ping interval (default: 30s)
 	ACPPongTimeout                    time.Duration // WebSocket pong deadline after ping (default: 10s)
 	ACPPromptTimeout                  time.Duration // Max prompt runtime; 0 = no timeout (default: 0). Used for workspace sessions; task sessions use ACPTaskPromptTimeout via effectivePromptTimeout().
-	ACPTaskPromptTimeout              time.Duration // Max prompt runtime for task-driven sessions; 0 = no timeout (default: 6h)
+	ACPTaskPromptTimeout              time.Duration // Max prompt runtime for task-driven sessions; 0 = no timeout (default: 8h)
 	ACPPromptCancelGrace              time.Duration // Wait after cancel before force-stop fallback (default: 5s)
 	ACPPromptRetryMaxRetries          int           // Retryable transient provider prompt errors after initial attempt (default: 2)
 	ACPPromptRetryInitial             time.Duration // Initial backoff for transient provider prompt retries (default: 15s)
@@ -514,7 +514,7 @@ func Load() (*Config, error) {
 		ACPPingInterval:                   getEnvDuration("ACP_PING_INTERVAL", 30*time.Second),
 		ACPPongTimeout:                    getEnvDuration("ACP_PONG_TIMEOUT", 10*time.Second),
 		ACPPromptTimeout:                  getEnvDuration("ACP_PROMPT_TIMEOUT", 0),
-		ACPTaskPromptTimeout:              getEnvDuration("ACP_TASK_PROMPT_TIMEOUT", 6*time.Hour),
+		ACPTaskPromptTimeout:              getEnvDuration("ACP_TASK_PROMPT_TIMEOUT", 8*time.Hour),
 		ACPPromptCancelGrace:              getEnvDuration("ACP_PROMPT_CANCEL_GRACE_PERIOD", 5*time.Second),
 		ACPPromptRetryMaxRetries:          getEnvInt("ACP_PROMPT_RETRY_MAX_RETRIES", 2),
 		ACPPromptRetryInitial:             getEnvDuration("ACP_PROMPT_RETRY_INITIAL_BACKOFF", 15*time.Second),

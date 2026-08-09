@@ -1313,6 +1313,28 @@ func TestLoadACPPromptRetryConfig(t *testing.T) {
 	}
 }
 
+func TestLoadACPTaskPromptTimeoutDefaultAndOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("NODE_ID", "node-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() default error = %v", err)
+	}
+	if cfg.ACPTaskPromptTimeout != 8*time.Hour {
+		t.Fatalf("ACPTaskPromptTimeout default = %v, want 8h", cfg.ACPTaskPromptTimeout)
+	}
+
+	t.Setenv("ACP_TASK_PROMPT_TIMEOUT", "3h")
+	cfg, err = Load()
+	if err != nil {
+		t.Fatalf("Load() override error = %v", err)
+	}
+	if cfg.ACPTaskPromptTimeout != 3*time.Hour {
+		t.Fatalf("ACPTaskPromptTimeout override = %v, want 3h", cfg.ACPTaskPromptTimeout)
+	}
+}
+
 func TestLoadDeployArtifactAndApplyTimeouts(t *testing.T) {
 	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
 	t.Setenv("NODE_ID", "node-123")
