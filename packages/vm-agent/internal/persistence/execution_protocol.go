@@ -16,17 +16,18 @@ const (
 // PromptDeliveryReceipt is the durable VM acknowledgement for one stable
 // control-plane delivery ID. It never contains prompt content.
 type PromptDeliveryReceipt struct {
-	WorkspaceID     string `json:"workspaceId"`
-	SessionID       string `json:"sessionId"`
 	DeliveryID      string `json:"deliveryId"`
-	ProtocolVersion int    `json:"protocolVersion"`
 	State           string `json:"state"`
-	StopReason      string `json:"stopReason,omitempty"`
-	ErrorCode       string `json:"errorCode,omitempty"`
-	CreatedAt       string `json:"createdAt"`
-	UpdatedAt       string `json:"updatedAt"`
+	RuntimeIdentity string `json:"runtimeIdentity"`
+	AcceptedAt      *int64 `json:"acceptedAt"`
+	CompletedAt     *int64 `json:"completedAt"`
+	workspaceID     string
+	sessionID       string
+	protocolVersion int
 	requestHash     string
-	runtimeID       string
+	stopReason      string
+	errorCode       string
+	updatedAt       int64
 }
 
 // AcceptPromptDelivery records durable acceptance. A matching replay returns
@@ -40,13 +41,13 @@ func (s *Store) AcceptPromptDelivery(workspaceID, sessionID, deliveryID string, 
 		return PromptDeliveryReceipt{}, false, false, err
 	}
 	if err == nil {
-		conflict := existing.requestHash != requestHash || existing.ProtocolVersion != protocolVersion
+		conflict := existing.requestHash != requestHash || existing.protocolVersion != protocolVersion
 		return existing, false, conflict, nil
 	}
 
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UnixMilli()
 	_, err = s.db.Exec(`INSERT INTO prompt_delivery_receipts
-		(workspace_id, session_id, delivery_id, protocol_version, request_hash, state, created_at, updated_at)
+		(workspace_id, session_id, delivery_id, protocol_version, request_hash, state, accepted_at, updated_at)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, workspaceID, sessionID, deliveryID,
 		protocolVersion, requestHash, PromptReceiptAccepted, now, now)
 	if err != nil {
@@ -61,7 +62,7 @@ func (s *Store) AcceptPromptDelivery(workspaceID, sessionID, deliveryID string, 
 func (s *Store) ClaimPromptDelivery(workspaceID, sessionID, deliveryID, runtimeID string) (PromptDeliveryReceipt, bool, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UnixMilli()
 	result, err := s.db.Exec(`UPDATE prompt_delivery_receipts
 		SET state = ?, runtime_id = ?, updated_at = ?
 		WHERE workspace_id = ? AND session_id = ? AND delivery_id = ? AND state = ?`,
@@ -82,12 +83,12 @@ func (s *Store) ClaimPromptDelivery(workspaceID, sessionID, deliveryID, runtimeI
 func (s *Store) CompletePromptDelivery(workspaceID, sessionID, deliveryID, runtimeID, stopReason, errorCode string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	now := time.Now().UTC().Format(time.RFC3339Nano)
+	now := time.Now().UnixMilli()
 	_, err := s.db.Exec(`UPDATE prompt_delivery_receipts
-		SET state = ?, stop_reason = ?, error_code = ?, updated_at = ?
+		SET state = ?, stop_reason = ?, error_code = ?, completed_at = ?, updated_at = ?
 		WHERE workspace_id = ? AND session_id = ? AND delivery_id = ?
 		AND state = ? AND runtime_id = ?`, PromptReceiptCompleted, stopReason,
-		errorCode, now, workspaceID, sessionID, deliveryID, PromptReceiptInFlight, runtimeID)
+		errorCode, now, now, workspaceID, sessionID, deliveryID, PromptReceiptInFlight, runtimeID)
 	if err != nil {
 		return fmt.Errorf("complete prompt delivery: %w", err)
 	}
@@ -103,8 +104,8 @@ func (s *Store) GetPromptDelivery(workspaceID, sessionID, deliveryID, runtimeID 
 	if err != nil {
 		return PromptDeliveryReceipt{}, err
 	}
-	if receipt.State == PromptReceiptInFlight && receipt.runtimeID != "" && receipt.runtimeID != runtimeID {
-		now := time.Now().UTC().Format(time.RFC3339Nano)
+	if receipt.State == PromptReceiptInFlight && receipt.RuntimeIdentity != "" && receipt.RuntimeIdentity != runtimeID {
+		now := time.Now().UnixMilli()
 		_, err = s.db.Exec(`UPDATE prompt_delivery_receipts SET state = ?, error_code = ?, updated_at = ?
 			WHERE workspace_id = ? AND session_id = ? AND delivery_id = ? AND state = ?`,
 			PromptReceiptAmbiguous, "runtime_changed_after_invocation_claim", now,
@@ -120,11 +121,12 @@ func (s *Store) GetPromptDelivery(workspaceID, sessionID, deliveryID, runtimeID 
 func (s *Store) getPromptDeliveryLocked(workspaceID, sessionID, deliveryID string) (PromptDeliveryReceipt, error) {
 	var receipt PromptDeliveryReceipt
 	err := s.db.QueryRow(`SELECT workspace_id, session_id, delivery_id, protocol_version,
-		request_hash, state, runtime_id, stop_reason, error_code, created_at, updated_at
+		request_hash, state, runtime_id, stop_reason, error_code, accepted_at, completed_at, updated_at
 		FROM prompt_delivery_receipts WHERE workspace_id = ? AND session_id = ? AND delivery_id = ?`,
-		workspaceID, sessionID, deliveryID).Scan(&receipt.WorkspaceID, &receipt.SessionID,
-		&receipt.DeliveryID, &receipt.ProtocolVersion, &receipt.requestHash, &receipt.State,
-		&receipt.runtimeID, &receipt.StopReason, &receipt.ErrorCode, &receipt.CreatedAt, &receipt.UpdatedAt)
+		workspaceID, sessionID, deliveryID).Scan(&receipt.workspaceID, &receipt.sessionID,
+		&receipt.DeliveryID, &receipt.protocolVersion, &receipt.requestHash, &receipt.State,
+		&receipt.RuntimeIdentity, &receipt.stopReason, &receipt.errorCode, &receipt.AcceptedAt,
+		&receipt.CompletedAt, &receipt.updatedAt)
 	if err != nil {
 		return PromptDeliveryReceipt{}, err
 	}

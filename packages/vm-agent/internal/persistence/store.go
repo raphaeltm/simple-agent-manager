@@ -183,8 +183,9 @@ func migrateV11(db *sql.DB) error {
 			runtime_id TEXT NOT NULL DEFAULT '',
 			stop_reason TEXT NOT NULL DEFAULT '',
 			error_code TEXT NOT NULL DEFAULT '',
-			created_at TEXT NOT NULL,
-			updated_at TEXT NOT NULL,
+			accepted_at INTEGER NOT NULL,
+			completed_at INTEGER,
+			updated_at INTEGER NOT NULL,
 			PRIMARY KEY (workspace_id, session_id, delivery_id)
 		);
 		CREATE INDEX IF NOT EXISTS idx_prompt_receipts_state

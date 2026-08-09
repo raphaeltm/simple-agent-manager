@@ -5,7 +5,9 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 	"time"
 
@@ -77,13 +79,13 @@ func TestPromptReceiptObserverDurablyCompletesOnce(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if receipt.State != persistence.PromptReceiptCompleted || receipt.StopReason != "end_turn" || receipt.ErrorCode != "" {
+	if receipt.State != persistence.PromptReceiptCompleted || receipt.CompletedAt == nil {
 		t.Fatalf("receipt changed after late duplicate: %+v", receipt)
 	}
 }
 
 func TestAgentCapabilitiesAdvertiseVersionedInertExecutionFeatures(t *testing.T) {
-	s := &Server{config: &config.Config{
+	s := &Server{executionRuntimeID: "runtime-vm-01", config: &config.Config{
 		ACPCheckpointPreemptGrace:    30 * time.Second,
 		ACPCheckpointPreemptMaxGrace: 2 * time.Minute,
 		ACPCheckpointRolloverTimeout: 2 * time.Minute,
@@ -102,6 +104,63 @@ func TestAgentCapabilitiesAdvertiseVersionedInertExecutionFeatures(t *testing.T)
 	}
 	if rollover["defaultGraceMs"] != int64(30_000) || rollover["operationTimeoutMs"] != int64(120_000) {
 		t.Fatalf("checkpoint defaults = %#v", rollover)
+	}
+
+	fixture := loadDurableExecutionProtocolFixture(t)
+	assertJSONContractEqual(t, capabilities, fixture.Capabilities)
+}
+
+func TestVersionedPromptResponseMatchesSharedProtocolFixture(t *testing.T) {
+	fixture := loadDurableExecutionProtocolFixture(t)
+	acceptedAt := int64(1_786_312_800_123)
+	response := versionedPromptResponse{
+		Status:    "accepted",
+		SessionID: "session-01",
+		Receipt: persistence.PromptDeliveryReceipt{
+			DeliveryID:      "delivery-01",
+			State:           persistence.PromptReceiptInFlight,
+			RuntimeIdentity: "runtime-vm-01",
+			AcceptedAt:      &acceptedAt,
+		},
+	}
+	assertJSONContractEqual(t, response, fixture.NewPrompt)
+}
+
+type durableExecutionProtocolFixture struct {
+	Capabilities json.RawMessage `json:"capabilities"`
+	NewPrompt    json.RawMessage `json:"newPrompt"`
+}
+
+func loadDurableExecutionProtocolFixture(t *testing.T) durableExecutionProtocolFixture {
+	t.Helper()
+	path := filepath.Join("..", "..", "..", "..", "tests", "fixtures", "durable-execution-protocol-v1.json")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read shared protocol fixture: %v", err)
+	}
+	var fixture durableExecutionProtocolFixture
+	if err := json.Unmarshal(data, &fixture); err != nil {
+		t.Fatalf("decode shared protocol fixture: %v", err)
+	}
+	return fixture
+}
+
+func assertJSONContractEqual(t *testing.T, actual interface{}, expected json.RawMessage) {
+	t.Helper()
+	actualJSON, err := json.Marshal(actual)
+	if err != nil {
+		t.Fatalf("encode actual contract: %v", err)
+	}
+	var actualValue interface{}
+	var expectedValue interface{}
+	if err := json.Unmarshal(actualJSON, &actualValue); err != nil {
+		t.Fatalf("decode actual contract: %v", err)
+	}
+	if err := json.Unmarshal(expected, &expectedValue); err != nil {
+		t.Fatalf("decode expected contract: %v", err)
+	}
+	if !reflect.DeepEqual(actualValue, expectedValue) {
+		t.Fatalf("contract mismatch\nactual:   %s\nexpected: %s", actualJSON, expected)
 	}
 }
 

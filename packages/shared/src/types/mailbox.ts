@@ -81,17 +81,34 @@ export type VmPromptReceiptState = (typeof VM_PROMPT_RECEIPT_STATES)[number];
 
 export interface VmPromptDeliveryCapabilities {
   protocolVersion: number;
-  stableReceipts: boolean;
-  receiptLookup: boolean;
-  runtimeIdentity: string | null;
+  runtimeIdentity: string;
+  promptReceipts: {
+    supported: boolean;
+    lookup: boolean;
+    states: readonly VmPromptReceiptState[];
+  };
+  checkpointRollover: {
+    supported: boolean;
+    automatic: boolean;
+    states: readonly string[];
+    defaultGraceMs: number;
+    maxGraceMs: number;
+    operationTimeoutMs: number;
+  };
 }
 
 export interface VmPromptDeliveryReceipt {
   deliveryId: string;
   state: VmPromptReceiptState;
-  runtimeIdentity: string | null;
+  runtimeIdentity: string;
   acceptedAt: number | null;
   completedAt: number | null;
+}
+
+export interface VmPromptDeliveryResponse {
+  status: 'accepted' | 'duplicate' | 'not_ready' | 'conflict';
+  sessionId: string;
+  receipt: VmPromptDeliveryReceipt;
 }
 
 // ─── Sender identity ──────────────────────────────────────────────────────

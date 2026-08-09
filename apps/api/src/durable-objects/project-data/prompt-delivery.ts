@@ -267,7 +267,7 @@ export type PromptDeliveryResult =
     }
   | {
       kind: 'failed';
-      reason: 'terminal_target' | 'dead_target' | 'unsupported_capability';
+      reason: 'terminal_target' | 'dead_target' | 'unsupported_capability' | 'delivery_conflict';
       error: string;
       runtimeIdentity: string | null;
       capabilities: VmPromptDeliveryCapabilities | null;
@@ -287,7 +287,7 @@ function capabilitiesColumns(capabilities: VmPromptDeliveryCapabilities | null):
 } {
   return {
     protocolVersion: capabilities?.protocolVersion ?? null,
-    receiptSupported: capabilities ? (capabilities.stableReceipts ? 1 : 0) : null,
+    receiptSupported: capabilities ? (capabilities.promptReceipts.supported ? 1 : 0) : null,
   };
 }
 

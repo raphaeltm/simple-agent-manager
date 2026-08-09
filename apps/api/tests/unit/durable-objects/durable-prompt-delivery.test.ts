@@ -33,9 +33,20 @@ const config: DurableExecutionConfig = {
 
 const capabilities = {
   protocolVersion: 1,
-  stableReceipts: true,
-  receiptLookup: true,
   runtimeIdentity: 'runtime-1',
+  promptReceipts: {
+    supported: true,
+    lookup: true,
+    states: ['accepted', 'in_flight', 'completed', 'not_found', 'ambiguous'] as const,
+  },
+  checkpointRollover: {
+    supported: true,
+    automatic: true,
+    states: ['requested', 'stopping', 'resuming', 'completed', 'failed'] as const,
+    defaultGraceMs: 30_000,
+    maxGraceMs: 120_000,
+    operationTimeoutMs: 300_000,
+  },
 };
 
 describe('ProjectData durable prompt delivery', () => {

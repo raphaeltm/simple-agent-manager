@@ -30,7 +30,7 @@ func TestPromptDeliveryReceiptDuplicateLostResponseAndRestartDurability(t *testi
 	}
 	defer reopened.Close()
 	reconciled, err := reopened.GetPromptDelivery("ws", "session", "delivery-1", "runtime-b")
-	if err != nil || reconciled.State != PromptReceiptAmbiguous || reconciled.ErrorCode != "runtime_changed_after_invocation_claim" {
+	if err != nil || reconciled.State != PromptReceiptAmbiguous || reconciled.errorCode != "runtime_changed_after_invocation_claim" {
 		t.Fatalf("reconciled = %+v err=%v", reconciled, err)
 	}
 	_, created, conflict, err = reopened.AcceptPromptDelivery("ws", "session", "delivery-1", 1, "hash-a")
@@ -58,7 +58,7 @@ func TestPromptDeliveryCompletedReceiptNeverClaimsAgain(t *testing.T) {
 		t.Fatal(err)
 	}
 	receipt, err := store.GetPromptDelivery("ws", "session", "delivery", "runtime")
-	if err != nil || receipt.State != PromptReceiptCompleted || receipt.StopReason != "end_turn" {
+	if err != nil || receipt.State != PromptReceiptCompleted || receipt.stopReason != "end_turn" || receipt.CompletedAt == nil {
 		t.Fatalf("receipt = %+v err=%v", receipt, err)
 	}
 	_, won, err = store.ClaimPromptDelivery("ws", "session", "delivery", "runtime")

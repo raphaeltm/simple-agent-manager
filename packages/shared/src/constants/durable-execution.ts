@@ -45,9 +45,8 @@ export const VM_PROMPT_DELIVERY_RECEIPTS_CAPABILITY = 'prompt_delivery_receipts_
 
 export function buildVmPromptDeliveryCapabilitiesPath(
   workspaceId: string,
-  acpSessionId: string,
 ): string {
-  return `/workspaces/${encodeURIComponent(workspaceId)}/agent-sessions/${encodeURIComponent(acpSessionId)}/prompt-delivery-capabilities`;
+  return `/workspaces/${encodeURIComponent(workspaceId)}/agent-capabilities`;
 }
 
 export function buildVmPromptDeliveryReceiptPath(

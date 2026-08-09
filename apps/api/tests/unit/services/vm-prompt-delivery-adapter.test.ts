@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
@@ -9,12 +11,30 @@ import {
 const mocks = vi.hoisted(() => ({
   nodeAgentRequest: vi.fn(),
   sendPromptToAgentOnNode: vi.fn(),
+  NodeAgentHttpError: class NodeAgentHttpError extends Error {
+    constructor(
+      public readonly statusCode: number,
+      public readonly responseBody: string,
+    ) {
+      super(`Node Agent request failed: ${statusCode} ${responseBody}`);
+    }
+  },
 }));
 
 vi.mock('../../../src/services/node-agent', () => ({
   nodeAgentRequest: mocks.nodeAgentRequest,
   sendPromptToAgentOnNode: mocks.sendPromptToAgentOnNode,
+  NodeAgentHttpError: mocks.NodeAgentHttpError,
 }));
+
+const protocolFixture = JSON.parse(readFileSync(
+  new URL('../../../../../tests/fixtures/durable-execution-protocol-v1.json', import.meta.url),
+  'utf8',
+)) as {
+  capabilities: Record<string, unknown>;
+  newPrompt: Record<string, unknown>;
+  notFoundReceipt: Record<string, unknown>;
+};
 
 const targetRow = {
   workspace_id: 'workspace-1',
@@ -141,16 +161,11 @@ describe('VM prompt delivery adapter', () => {
 
   it('reconciles a lost submit response through the stable receipt endpoint', async () => {
     mocks.nodeAgentRequest
-      .mockResolvedValueOnce({
-        protocolVersion: 1,
-        stableReceipts: true,
-        receiptLookup: true,
-        runtimeIdentity: 'node-1:acp-1:v1:2026-08-09T00:00:00Z',
-      })
+      .mockResolvedValueOnce(protocolFixture.capabilities)
       .mockResolvedValueOnce({
         deliveryId: 'delivery-1',
         state: 'accepted',
-        runtimeIdentity: 'node-1:acp-1:v1:2026-08-09T00:00:00Z',
+        runtimeIdentity: 'runtime-vm-01',
         acceptedAt: 500,
         completedAt: null,
       });
@@ -166,5 +181,76 @@ describe('VM prompt delivery adapter', () => {
       '/workspaces/workspace-1/agent-sessions/acp-1/prompt-receipts/delivery-1',
       expect.objectContaining({ requestTimeoutMs: 1_234 }),
     );
+  });
+
+  it('serializes protocolVersion and deliveryId in the real versioned request body', async () => {
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    mocks.sendPromptToAgentOnNode.mockResolvedValue({
+      ...protocolFixture.newPrompt,
+      sessionId: 'acp-1',
+      receipt: {
+        ...(protocolFixture.newPrompt.receipt as Record<string, unknown>),
+        deliveryId: 'delivery-1',
+      },
+    });
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.submit(input(false));
+
+    expect(result).toMatchObject({ kind: 'accepted', runtimeIdentity: 'runtime-vm-01' });
+    expect(mocks.nodeAgentRequest).toHaveBeenCalledWith(
+      'node-1',
+      expect.anything(),
+      '/workspaces/workspace-1/agent-capabilities',
+      expect.anything(),
+    );
+    expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledWith(
+      'node-1',
+      'workspace-1',
+      'acp-1',
+      'hello',
+      expect.anything(),
+      'user-1',
+      'delivery-1',
+      { requestTimeoutMs: 1_234, protocolVersion: 1, deliveryId: 'delivery-1' },
+    );
+  });
+
+  it('replays only after a positive same-runtime 404 not_found receipt', async () => {
+    mocks.nodeAgentRequest
+      .mockResolvedValueOnce(protocolFixture.capabilities)
+      .mockRejectedValueOnce(new mocks.NodeAgentHttpError(
+        404,
+        JSON.stringify(protocolFixture.notFoundReceipt),
+      ));
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.reconcile(input(false));
+
+    expect(result).toMatchObject({ kind: 'retry', reason: 'receipt_not_found' });
+  });
+
+  it('treats changed or unproven runtime receipt absence as terminal ambiguity', async () => {
+    const changedRuntime = {
+      ...protocolFixture.capabilities,
+      runtimeIdentity: 'runtime-vm-02',
+    };
+    const claim = input(false);
+    claim.claim.message.runtimeIdentity = 'runtime-vm-01';
+    mocks.nodeAgentRequest.mockResolvedValueOnce(changedRuntime);
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const changed = await adapter.reconcile(claim);
+    expect(changed).toMatchObject({ kind: 'ambiguous', reason: 'runtime_changed' });
+
+    vi.clearAllMocks();
+    mocks.nodeAgentRequest
+      .mockResolvedValueOnce(protocolFixture.capabilities)
+      .mockRejectedValueOnce(new mocks.NodeAgentHttpError(404, JSON.stringify({
+        ...protocolFixture.notFoundReceipt,
+        runtimeIdentity: 'runtime-vm-02',
+      })));
+    const unproven = await adapter.reconcile(input(false));
+    expect(unproven).toMatchObject({ kind: 'ambiguous', reason: 'receipt_unavailable' });
   });
 });

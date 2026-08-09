@@ -1268,8 +1268,8 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 			return
 		}
 		if conflict {
-			writeJSON(w, http.StatusConflict, map[string]interface{}{
-				"error": "delivery_id_conflict", "deliveryId": body.DeliveryID,
+			writeJSON(w, http.StatusConflict, versionedPromptResponse{
+				Status: "conflict", SessionID: sessionID, Receipt: receipt,
 			})
 			return
 		}
@@ -1280,19 +1280,25 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 				writeError(w, http.StatusInternalServerError, "failed to reconcile prompt receipt")
 				return
 			}
-			writeJSON(w, http.StatusOK, receipt)
+			writeJSON(w, http.StatusOK, versionedPromptResponse{
+				Status: "duplicate", SessionID: sessionID, Receipt: receipt,
+			})
 			return
 		}
 		receipt, claimed, claimErr := s.store.ClaimPromptDelivery(workspaceID, sessionID,
 			body.DeliveryID, s.executionRuntimeID)
 		if claimErr != nil || !claimed {
-			writeError(w, http.StatusConflict, "prompt delivery could not be claimed")
+			writeJSON(w, http.StatusConflict, versionedPromptResponse{
+				Status: "not_ready", SessionID: sessionID, Receipt: receipt,
+			})
 			return
 		}
 		observer := s.promptReceiptObserver(workspaceID, sessionID, body.DeliveryID)
 		go s.startAgentWithPromptObserved(host, workspaceID, sessionID, body.AgentType,
 			body.InitialPrompt, body.InjectedInstructions, body.MessageID, observer)
-		writeJSON(w, http.StatusAccepted, receipt)
+		writeJSON(w, http.StatusAccepted, versionedPromptResponse{
+			Status: "accepted", SessionID: sessionID, Receipt: receipt,
+		})
 		return
 	}
 
@@ -1529,6 +1535,12 @@ func promptDeliveryFingerprint(protocolVersion int, messageID, prompt string) st
 	return fmt.Sprintf("%x", sum[:])
 }
 
+type versionedPromptResponse struct {
+	Status    string                            `json:"status"`
+	SessionID string                            `json:"sessionId"`
+	Receipt   persistence.PromptDeliveryReceipt `json:"receipt"`
+}
+
 func (s *Server) handleVersionedPromptDelivery(
 	w http.ResponseWriter,
 	host *acp.SessionHost,
@@ -1545,9 +1557,8 @@ func (s *Server) handleVersionedPromptDelivery(
 		return
 	}
 	if conflict {
-		writeJSON(w, http.StatusConflict, map[string]interface{}{
-			"error":      "delivery_id_conflict",
-			"deliveryId": deliveryID,
+		writeJSON(w, http.StatusConflict, versionedPromptResponse{
+			Status: "conflict", SessionID: sessionID, Receipt: receipt,
 		})
 		return
 	}
@@ -1557,7 +1568,9 @@ func (s *Server) handleVersionedPromptDelivery(
 			writeError(w, http.StatusInternalServerError, "failed to reconcile prompt receipt")
 			return
 		}
-		writeJSON(w, http.StatusOK, receipt)
+		writeJSON(w, http.StatusOK, versionedPromptResponse{
+			Status: "duplicate", SessionID: sessionID, Receipt: receipt,
+		})
 		return
 	}
 
@@ -1565,7 +1578,10 @@ func (s *Server) handleVersionedPromptDelivery(
 	accepted, ok := host.AcceptPrompt(context.Background(), reqID, promptParams,
 		"control-plane", false, observer)
 	if !ok {
-		writeJSON(w, http.StatusConflict, receipt)
+		receipt.RuntimeIdentity = s.executionRuntimeID
+		writeJSON(w, http.StatusConflict, versionedPromptResponse{
+			Status: "not_ready", SessionID: sessionID, Receipt: receipt,
+		})
 		return
 	}
 	receipt, claimed, err := s.store.ClaimPromptDelivery(workspaceID, sessionID,
@@ -1576,12 +1592,16 @@ func (s *Server) handleVersionedPromptDelivery(
 			claimErr = errors.New("delivery receipt was not claimable")
 		}
 		accepted.Abort(claimErr)
-		writeError(w, http.StatusConflict, "prompt delivery could not be claimed")
+		writeJSON(w, http.StatusConflict, versionedPromptResponse{
+			Status: "not_ready", SessionID: sessionID, Receipt: receipt,
+		})
 		return
 	}
 
 	go accepted.Run()
-	writeJSON(w, http.StatusAccepted, receipt)
+	writeJSON(w, http.StatusAccepted, versionedPromptResponse{
+		Status: "accepted", SessionID: sessionID, Receipt: receipt,
+	})
 }
 
 func (s *Server) promptReceiptObserver(workspaceID, sessionID, deliveryID string) acp.PromptTerminalObserver {
@@ -1611,7 +1631,9 @@ func (s *Server) handleGetPromptReceipt(w http.ResponseWriter, r *http.Request) 
 	}
 	receipt, err := s.store.GetPromptDelivery(workspaceID, sessionID, deliveryID, s.executionRuntimeID)
 	if errors.Is(err, sql.ErrNoRows) {
-		writeError(w, http.StatusNotFound, "prompt receipt not found")
+		writeJSON(w, http.StatusNotFound, persistence.PromptDeliveryReceipt{
+			DeliveryID: deliveryID, State: "not_found", RuntimeIdentity: s.executionRuntimeID,
+		})
 		return
 	}
 	if err != nil {
@@ -1636,8 +1658,10 @@ func (s *Server) handleAgentCapabilities(w http.ResponseWriter, r *http.Request)
 func (s *Server) agentCapabilities() map[string]interface{} {
 	return map[string]interface{}{
 		"protocolVersion": vmExecutionProtocolVersion,
+		"runtimeIdentity": s.executionRuntimeID,
 		"promptReceipts": map[string]interface{}{
 			"supported": true,
+			"lookup":    true,
 			"states": []string{persistence.PromptReceiptAccepted, persistence.PromptReceiptInFlight,
 				persistence.PromptReceiptCompleted, persistence.PromptReceiptAmbiguous},
 		},

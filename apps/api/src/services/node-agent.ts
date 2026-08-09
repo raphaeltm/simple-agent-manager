@@ -71,6 +71,16 @@ export class NodeAgentRequestError extends AppError {
   }
 }
 
+export class NodeAgentHttpError extends Error {
+  constructor(
+    public readonly statusCode: number,
+    public readonly responseBody: string,
+  ) {
+    super(`Node Agent request failed: ${statusCode} ${responseBody}`);
+    this.name = 'NodeAgentHttpError';
+  }
+}
+
 function requestInitWithoutSignal(options: RequestInit): RequestInit {
   const serializableOptions = { ...options };
   delete serializableOptions.signal;
@@ -203,7 +213,7 @@ export async function nodeAgentRequest(
       );
     }
 
-    throw new Error(`Node Agent request failed: ${response.status} ${body}`);
+    throw new NodeAgentHttpError(response.status, body);
   }
 
   if (response.status === 204) {
@@ -556,10 +566,21 @@ export async function sendPromptToAgentOnNode(
   env: Env,
   userId: string,
   messageId?: string,
-  options?: { requestTimeoutMs?: number }
+  options?: {
+    requestTimeoutMs?: number;
+    protocolVersion?: number;
+    deliveryId?: string;
+  }
 ): Promise<unknown> {
-  const body: { prompt: string; messageId?: string } = { prompt };
+  const body: {
+    prompt: string;
+    messageId?: string;
+    protocolVersion?: number;
+    deliveryId?: string;
+  } = { prompt };
   if (messageId) body.messageId = messageId;
+  if (options?.protocolVersion !== undefined) body.protocolVersion = options.protocolVersion;
+  if (options?.deliveryId) body.deliveryId = options.deliveryId;
 
   await markVmAgentContainerActiveWorkStarted(env, nodeId, {
     workspaceId,

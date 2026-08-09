@@ -18,16 +18,16 @@ This task is SAM task `01KZM7QR5CW8T93FMS8X5CDF7A` on branch `sam/resume-ship-du
 
 ## Implementation checklist
 
-- [ ] Cherry-pick the complete VM foundation history through exact tip `9c53b61e2`, resolving against current `main` without weakening commit `8c689a6a7`.
-- [ ] Cherry-pick the complete Worker foundation history through exact tip `4847cf0b8`, resolving control-loop, migration, fixture, and documentation conflicts against current `main`.
-- [ ] Define exact cross-contract protocol-v1 fixtures used by both VM and Worker tests.
-- [ ] Align VM capabilities, versioned prompt submission/lookup, wrapped response, receipt fields, time units, and 202/200/404/409 semantics with the canonical contract.
+- [x] Cherry-pick the complete VM foundation history through exact tip `9c53b61e2`, resolving against current `main` without weakening commit `8c689a6a7`.
+- [x] Cherry-pick the complete Worker foundation history through exact tip `4847cf0b8`, resolving control-loop, migration, fixture, and documentation conflicts against current `main`.
+- [x] Define exact cross-contract protocol-v1 fixtures used by both VM and Worker tests.
+- [x] Align VM capabilities, versioned prompt submission/lookup, wrapped response, receipt fields, time units, and 202/200/404/409 semantics with the canonical contract.
 - [ ] Add durable VM terminal ownership and restart suppression so cancel, deadline, process exit, and strict-resume failure cannot create a fresh session or late `Ready`.
 - [ ] Add deterministic delayed-`process.Wait` race tests proving no `NewSession`/`Ready` after terminal ownership and exact-once convergence.
-- [ ] Serialize `protocolVersion` and `deliveryId` in the Worker’s real prompt request body while preserving legacy callers.
-- [ ] Align Worker capability discovery and receipt reconciliation with nested VM-authoritative runtime identity and epoch-millisecond timestamps.
-- [ ] Prove replay occurs only after same-runtime positive `not_found`; changed or unproven runtime becomes terminal `ambiguous_delivery`.
-- [ ] Preserve the latest main control-loop limits, alarm isolation, finite mailbox expiry, and operational stop controls.
+- [x] Serialize `protocolVersion` and `deliveryId` in the Worker’s real prompt request body while preserving legacy callers.
+- [x] Align Worker capability discovery and receipt reconciliation with nested VM-authoritative runtime identity and epoch-millisecond timestamps.
+- [x] Prove replay occurs only after same-runtime positive `not_found`; changed or unproven runtime becomes terminal `ambiguous_delivery`.
+- [x] Preserve the latest main control-loop limits, alarm isolation, finite mailbox expiry, and operational stop controls.
 - [ ] Run focused contract, Go race, Miniflare/workerd, migration, and normal prompt/cancel regression suites.
 - [ ] Run full repository lint, typecheck, test, build, and quality gates.
 - [ ] Run task-completion, Go, Cloudflare, constitution, documentation, and test specialist reviews; address all blocking findings.
@@ -42,7 +42,7 @@ This task is SAM task `01KZM7QR5CW8T93FMS8X5CDF7A` on branch `sam/resume-ship-du
 - Canonical responses use nested capabilities, VM runtime identity, wrapped prompt responses, epoch-millisecond receipt timestamps, 202 new/200 duplicate, and specified 404/409 meanings end to end.
 - Automatic replay is permitted only with positive same-runtime `not_found`; runtime mismatch or inability to prove identity produces terminal ambiguity without invoking the prompt twice.
 - VM cancel, deadline, delayed process exit, and strict-resume failure each converge exactly once and cannot produce a later fresh `NewSession` or `Ready`.
-- Migration 025 and all ProjectData migrations pass clean-install, upgrade, safety, and workerd/Miniflare tests.
+- Migration 026 and all ProjectData migrations pass clean-install, upgrade, safety, and workerd/Miniflare tests.
 - Full Go tests including `-race`, repository quality gates, specialist reviews, CI, fresh-VM staging verification, cleanup, merge, and production deployment complete successfully.
 
 ## References
