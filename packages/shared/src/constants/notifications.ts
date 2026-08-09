@@ -24,6 +24,7 @@ export const NOTIFICATION_TYPE_URGENCY: Record<NotificationType, NotificationUrg
   progress: 'low',
   session_ended: 'medium',
   pr_created: 'medium',
+  cron_failure: 'high',
 };
 
 /** Batch window for progress notifications — only one per task within this window. Default: 5 minutes.

@@ -12,6 +12,7 @@ import { runAnalyticsForwardJob } from './analytics-forward';
 import { runScheduledComposeImageArtifactCleanup } from './compose-image-artifact-cleanup';
 import { runComputeUsageCleanup } from './compute-usage-cleanup';
 import { runCronTriggerSweep } from './cron-triggers';
+import { notifyFailedSweeps } from './failed-sweep-notifications';
 import { runNodeCleanupSweep } from './node-cleanup';
 import { runObservabilityPurge } from './observability-purge';
 import {
@@ -134,11 +135,19 @@ export async function scheduled(
   const trialExpire = await sweeps.isolate('trial_expire', () => runTrialExpireSweep(env));
 
   const failedSweeps = sweeps.failedSweeps();
+  const failureNotifications = await notifyFailedSweeps(env, failedSweeps).catch((err) => {
+    log.error('cron.failed_sweep_notifications_failed', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return { notifiedSweeps: 0, notificationsSent: 0 };
+  });
   log.info('cron.completed', {
     cron: controller.cron,
     type: 'sweep',
     failedSweeps,
     failedSweepCount: failedSweeps.length,
+    failedSweepNotifications: failureNotifications.notificationsSent,
+    failedSweepNamesNotified: failureNotifications.notifiedSweeps,
     diagnosisRunsRestarted: diagnosisRecovery?.restarted,
     diagnosisRunsTerminalized: diagnosisRecovery?.terminalized,
     diagnosticIncidentsChecked: incidentRecovery?.checked,

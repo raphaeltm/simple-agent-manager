@@ -84,6 +84,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   DO_ALARMS_ENABLED_KV_KEY?: string; // DO alarm brake key (default: control-loops:alarms-enabled)
   CONTROL_LOOP_KILL_SWITCH_CACHE_MS?: string; // Operational brake cache, capped at 30000
   CONTROL_LOOP_DISABLED_ALARM_RETRY_MS?: string; // Disabled DO recheck interval (default: 300000)
+  CRON_FAILURE_NOTIFICATION_THROTTLE_MS?: string; // Per-sweep superadmin notification throttle (default: 3600000)
+  CRON_FAILURE_NOTIFICATION_KV_PREFIX?: string; // KV prefix for failed-sweep notification throttle
   // Secrets
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;

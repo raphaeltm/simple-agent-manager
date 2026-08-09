@@ -17,6 +17,7 @@ const NotificationTypeSchema = v.picklist([
   'progress',
   'session_ended',
   'pr_created',
+  'cron_failure',
 ]);
 
 const NotificationUrgencySchema = v.picklist(['high', 'medium', 'low']);

@@ -9,6 +9,7 @@ export const NOTIFICATION_TYPES = [
   'progress',
   'session_ended',
   'pr_created',
+  'cron_failure',
 ] as const;
 export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 
