@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
 
 const ci = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
@@ -6,21 +7,36 @@ const osvWorkflow = readFileSync(
   new URL('../../.github/workflows/osv-scan.yml', import.meta.url),
   'utf8'
 );
-const rootManifest = JSON.parse(
+const parsedRootManifest: unknown = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
-) as { scripts: Record<string, string> };
+);
+if (
+  typeof parsedRootManifest !== 'object' ||
+  parsedRootManifest === null ||
+  !('scripts' in parsedRootManifest) ||
+  typeof parsedRootManifest.scripts !== 'object' ||
+  parsedRootManifest.scripts === null
+) {
+  throw new Error('Root package manifest scripts are invalid.');
+}
+const rootScripts = Object.fromEntries(
+  Object.entries(parsedRootManifest.scripts).filter(
+    (entry): entry is [string, string] => typeof entry[1] === 'string'
+  )
+);
 
 function jobBlock(workflow: string, jobName: string): string {
   const match = workflow.match(
     new RegExp(String.raw`\n  ${jobName}:\n[\s\S]*?(?=\n  [a-zA-Z0-9_-]+:\n|\n*$)`)
   );
   expect(match?.[0], `missing ${jobName} job`).toBeDefined();
-  return match![0];
+  if (!match) throw new Error(`Missing ${jobName} job.`);
+  return match[0];
 }
 
 describe('deterministic quality-program CI wiring', () => {
   it('uses the same check:fast leaf commands in the blocking lint job', () => {
-    expect(rootManifest.scripts['check:fast']).toBe(
+    expect(rootScripts['check:fast']).toBe(
       'pnpm format:check && pnpm lint:oxlint && pnpm lint && pnpm quality:type-boundaries'
     );
     const lint = jobBlock(ci, 'lint');
@@ -36,6 +52,7 @@ describe('deterministic quality-program CI wiring', () => {
       expect(current, `${command} must be an executable lint-job leaf`).toBeGreaterThan(previous);
       previous = current;
     }
+    expect(lint).toContain('run: pnpm --filter @simple-agent-manager/eslint-plugin-sam test');
     expect(lint).toContain('pnpm lint:oxlint:sam-shadow');
     expect(lint).toContain('continue-on-error: true');
   });
@@ -61,10 +78,12 @@ describe('deterministic quality-program CI wiring', () => {
     expect(quality).toContain('pnpm quality:runtime-boundary-semantics');
   });
 
-  it('runs OSV only on a schedule/manual request and routes summary-only private SAM follow-up', () => {
+  it('runs OSV only from the trusted default-branch schedule and routes a private summary', () => {
     expect(osvWorkflow).toContain('schedule:');
-    expect(osvWorkflow).toContain('workflow_dispatch:');
+    expect(osvWorkflow).not.toContain('workflow_dispatch:');
     expect(osvWorkflow).not.toContain('pull_request:');
+    expect(osvWorkflow).toContain('OSV_POLICY_EVENT: schedule');
+    expect(osvWorkflow).toContain('SAM_OSV_PRIVATE_ROUTING_CONFIGURED:');
     expect(osvWorkflow).toContain('SAM_OSV_WEBHOOK_TOKEN: ${{ secrets.SAM_OSV_WEBHOOK_TOKEN }}');
     expect(osvWorkflow).toContain('SAM_OSV_WEBHOOK_URL: ${{ secrets.SAM_OSV_WEBHOOK_URL }}');
     expect(osvWorkflow).toContain('run: pnpm quality:osv-advisory');

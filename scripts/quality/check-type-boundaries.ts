@@ -1,18 +1,19 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
+import { relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+
 import {
-  Node,
-  Project,
-  SyntaxKind,
   type ArrowFunction,
   type AsExpression,
   type CallExpression,
   type FunctionDeclaration,
   type FunctionExpression,
+  Node,
+  Project,
   type SourceFile,
+  SyntaxKind,
 } from 'ts-morph';
-import { existsSync, readFileSync } from 'node:fs';
-import { relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 type BlockingClass = 'as-any' | 'hono-req-json-generic' | 'typed-json-parse' | 'local-record-guard';
 type ReportOnlyClass = 'record-string-unknown' | 'unknown-double-assertion';
@@ -72,13 +73,24 @@ function zeroReportOnly(): Record<ReportOnlyClass, number> {
 }
 
 function trackedFiles(root: string, scope?: string): string[] {
-  const args = ['ls-files', '*.ts', '*.tsx', '*.mts', '*.cts'];
-  if (scope) args.push(scope);
+  const extensionPatterns = ['*.ts', '*.tsx', '*.mts', '*.cts'];
+  const normalizedScope = scope?.replaceAll('\\', '/').replace(/\/$/, '');
+  const pathspecs = normalizedScope
+    ? extensionPatterns.map((pattern) => `${normalizedScope}/**/${pattern}`)
+    : extensionPatterns;
+  const args = ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', ...pathspecs];
   const output = execFileSync('git', args, { cwd: root, encoding: 'utf8' });
   return output
-    .split('\n')
+    .split('\0')
     .filter(Boolean)
     .filter((file) => !isExcluded(file))
+    .filter((file) => {
+      const sourcePath = resolve(root, file);
+      if (!existsSync(sourcePath)) return false;
+      const stat = lstatSync(sourcePath);
+      if (!stat.isFile()) throw new Error(`Boundary source is not a regular file: ${file}`);
+      return true;
+    })
     .sort();
 }
 
@@ -313,12 +325,53 @@ export function compareBlockingCounts(
     .map((klass) => ({ class: klass, allowed: allowed[klass], current: current[klass] }));
 }
 
-function loadBaseline(path: string): Baseline {
-  const parsed = JSON.parse(readFileSync(path, 'utf8')) as unknown;
+export function parseBoundaryBaseline(raw: string, path = '<memory>'): Baseline {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error(`Invalid type-boundary baseline at ${path}`);
+  }
   if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
     throw new Error(`Invalid type-boundary baseline at ${path}`);
   }
-  return parsed as Baseline;
+  const baseline = parsed as Partial<Baseline>;
+  const metadata = baseline.metadata;
+  const hasClasses = <T extends string>(value: unknown, expected: T[]): value is T[] =>
+    Array.isArray(value) &&
+    value.length === expected.length &&
+    expected.every((klass) => value.includes(klass));
+  const validCounts = <T extends string>(
+    value: unknown,
+    classes: T[]
+  ): value is Record<T, number> =>
+    typeof value === 'object' &&
+    value !== null &&
+    classes.every((klass) => {
+      const count = Reflect.get(value, klass) as unknown;
+      return Number.isInteger(count) && (count as number) >= 0;
+    });
+  if (
+    typeof metadata !== 'object' ||
+    metadata === null ||
+    typeof metadata.owner !== 'string' ||
+    !metadata.owner.trim() ||
+    typeof metadata.backlog !== 'string' ||
+    !metadata.backlog.trim() ||
+    typeof metadata.review !== 'string' ||
+    !metadata.review.trim() ||
+    !hasClasses(metadata.blockingClasses, blockingClasses) ||
+    !hasClasses(metadata.reportOnlyClasses, reportOnlyClasses) ||
+    !validCounts(baseline.counts, blockingClasses) ||
+    !validCounts(baseline.reportOnlyCounts, reportOnlyClasses)
+  ) {
+    throw new Error(`Invalid type-boundary baseline at ${path}`);
+  }
+  return baseline as Baseline;
+}
+
+export function loadBaseline(path: string): Baseline {
+  return parseBoundaryBaseline(readFileSync(path, 'utf8'), path);
 }
 
 function printSummary(result: AuditResult) {
@@ -341,7 +394,6 @@ function main() {
   const result = auditTypeBoundaries(ROOT, scope);
   printSummary(result);
 
-  if (!existsSync(baselinePath)) return;
   const baseline = loadBaseline(baselinePath);
   const failures = compareBlockingCounts(result.blockingCounts, baseline.counts).map(
     ({ class: klass, current, allowed }) => {

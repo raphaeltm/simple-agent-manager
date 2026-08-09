@@ -2,6 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 import { auditRuntimeBoundarySemantics } from './check-runtime-boundary-semantics';
@@ -61,6 +62,23 @@ describe('runtime-boundary semantic checks', () => {
     });
     expect(auditRuntimeBoundarySemantics(root)).toMatchObject([
       { rule: 'unvalidated-row-narrowing', file: 'apps/api/src/one-hop.ts', line: 6 },
+    ]);
+  });
+
+  it('includes untracked source in the advisory repository audit', () => {
+    const root = fixtureRepo({
+      'apps/api/src/tracked.ts': 'export const tracked = true;',
+    });
+    writeFileSync(
+      join(root, 'apps/api/src/untracked.ts'),
+      `type Body = { name: string };\nexport async function read(request: Request) { return await request.json() as Body; }`
+    );
+
+    expect(auditRuntimeBoundarySemantics(root)).toMatchObject([
+      {
+        rule: 'blind-external-payload-narrowing',
+        file: 'apps/api/src/untracked.ts',
+      },
     ]);
   });
 

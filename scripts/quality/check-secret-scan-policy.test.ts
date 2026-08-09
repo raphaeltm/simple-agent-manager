@@ -1,11 +1,18 @@
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
+
 import {
   evaluateGitleaksFindings,
   gitleaksArgsForMode,
   redactSecretScanOutput,
-  secretFindingDigest,
   type SecretFindingBaseline,
+  secretFindingDigest,
 } from './check-secret-scan-policy';
+import { createCurrentTreeSnapshot } from './run-gitleaks';
 
 const syntheticFinding = {
   RuleID: 'synthetic-rule',
@@ -16,9 +23,11 @@ const syntheticFinding = {
 };
 
 function baseline(expiresAt = '2099-01-01T00:00:00.000Z'): SecretFindingBaseline {
+  const digest = secretFindingDigest(syntheticFinding);
+  if (!digest) throw new Error('Synthetic finding must produce a digest.');
   return {
     version: 1,
-    matcherVersion: 'gitleaks-finding-v1',
+    matcherVersion: 'gitleaks-finding-v2-unredacted',
     baseCommit: 'fixture',
     groups: [
       {
@@ -27,7 +36,7 @@ function baseline(expiresAt = '2099-01-01T00:00:00.000Z'): SecretFindingBaseline
         owner: 'security',
         reviewedAt: '2026-08-09T00:00:00.000Z',
         expiresAt,
-        digests: [secretFindingDigest(syntheticFinding)!],
+        digests: [digest],
       },
     ],
   };
@@ -64,6 +73,17 @@ describe('secret scan policy', () => {
     expect(changed).toMatchObject({ ok: false, reviewedFindingCount: 0, newFindingCount: 1 });
   });
 
+  it('rejects redacted findings because location-only hashes are forgeable', () => {
+    const result = evaluateGitleaksFindings(
+      JSON.stringify([{ ...syntheticFinding, Secret: 'REDACTED', Match: 'TOKEN=REDACTED' }]),
+      JSON.stringify(baseline()),
+      new Date('2026-08-09T12:00:00.000Z')
+    );
+
+    expect(result).toMatchObject({ ok: false, reviewedFindingCount: 0, newFindingCount: 1 });
+    expect(result.errors).toContain('Gitleaks output contained an incomplete finding.');
+  });
+
   it('fails closed when a reviewed exemption expires', () => {
     const result = evaluateGitleaksFindings(
       JSON.stringify([syntheticFinding]),
@@ -88,7 +108,6 @@ describe('secret scan policy', () => {
     expect(gitleaksArgsForMode('current-tree')).toEqual([
       'dir',
       '.',
-      '--redact=100',
       '--no-banner',
       '--no-color',
       '--report-format=json',
@@ -98,10 +117,29 @@ describe('secret scan policy', () => {
       '.',
       '--log-opts',
       'origin/base..HEAD',
-      '--redact=100',
       '--no-banner',
       '--no-color',
       '--report-format=json',
     ]);
   });
+
+  it.runIf(process.platform !== 'win32')(
+    'snapshots symlink blobs without following targets outside the repository',
+    () => {
+      const root = mkdtempSync(join(tmpdir(), 'sam-gitleaks-source-'));
+      const snapshot = mkdtempSync(join(tmpdir(), 'sam-gitleaks-snapshot-'));
+      const outside = join(tmpdir(), 'sam-gitleaks-outside.txt');
+      writeFileSync(outside, 'outside file contents must not be copied');
+      execFileSync('git', ['init', '--quiet'], { cwd: root });
+      symlinkSync(outside, join(root, 'tracked-link'));
+      execFileSync('git', ['add', 'tracked-link'], { cwd: root });
+
+      createCurrentTreeSnapshot(root, snapshot);
+
+      expect(readFileSync(join(snapshot, 'tracked-link'), 'utf8')).toBe(outside);
+      expect(readFileSync(join(snapshot, 'tracked-link'), 'utf8')).not.toContain(
+        'outside file contents'
+      );
+    }
+  );
 });

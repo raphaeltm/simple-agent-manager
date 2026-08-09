@@ -1,7 +1,9 @@
-import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { basename, dirname, join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+import * as v from 'valibot';
 
 export type DependencyEcosystem = 'npm' | 'go';
 
@@ -35,6 +37,15 @@ const evidencePath = join(repoRoot, 'scripts/quality/direct-dependency-evidence.
 const urlPattern = /^https:\/\/[^\s"<>]+$/;
 const goRequirePattern =
   /^\+\s*(?:require\s+)?([A-Za-z0-9_.~/-]+\.[A-Za-z0-9_.~/-]+)\s+v[^\s]+(?:\s*\/\/.*)?$/;
+const DependencyEvidenceSchema = v.object({
+  registryUrl: v.optional(v.string()),
+  homepageUrl: v.optional(v.string()),
+  necessity: v.optional(v.string()),
+});
+const EvidenceFileSchema = v.looseObject({
+  npm: v.optional(v.record(v.string(), DependencyEvidenceSchema)),
+  go: v.optional(v.record(v.string(), DependencyEvidenceSchema)),
+});
 
 function readJson(path: string): unknown {
   return JSON.parse(readFileSync(path, 'utf8')) as unknown;
@@ -68,27 +79,14 @@ function npmDependencyFromRemovedLine(line: string): { name: string; version: st
   return { name: match[1], version: match[2] };
 }
 
-function nearestWorkspacePackageName(manifestPath: string): string | undefined {
-  try {
-    const manifest = readJson(join(repoRoot, manifestPath));
-    if (
-      typeof manifest === 'object' &&
-      manifest !== null &&
-      'name' in manifest &&
-      typeof manifest.name === 'string'
-    ) {
-      return manifest.name;
-    }
-  } catch {
-    return undefined;
-  }
-  return undefined;
-}
-
-function isInternalNpmDependency(name: string, version: string, manifestPath: string): boolean {
+function isInternalNpmDependency(
+  name: string,
+  version: string,
+  workspacePackageName?: string
+): boolean {
   if (version.startsWith('workspace:')) return true;
   if (name.startsWith('@simple-agent-manager/')) return true;
-  return nearestWorkspacePackageName(manifestPath) === name;
+  return workspacePackageName === name;
 }
 
 function isInternalGoDependency(name: string): boolean {
@@ -131,7 +129,7 @@ export function extractDirectDependencyAdditions(diff: string): DependencyAdditi
           manifestPath: currentFile,
           name: dependency.name,
           production: npmSection === 'dependencies',
-          internal: isInternalNpmDependency(dependency.name, dependency.version, currentFile),
+          internal: isInternalNpmDependency(dependency.name, dependency.version),
         });
       }
       continue;
@@ -166,6 +164,164 @@ export function extractDirectDependencyAdditions(diff: string): DependencyAdditi
   }
 
   return additions;
+}
+
+interface NpmManifestSnapshot {
+  name?: string;
+  dependencies: Record<string, string>;
+  devDependencies: Record<string, string>;
+}
+
+function stringRecord(value: unknown, label: string): Record<string, string> {
+  if (value === undefined) return {};
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    throw new Error(`Invalid ${label} in package manifest.`);
+  }
+  const result: Record<string, string> = {};
+  for (const [name, version] of Object.entries(value)) {
+    if (typeof version !== 'string') throw new Error(`Invalid ${label} in package manifest.`);
+    result[name] = version;
+  }
+  return result;
+}
+
+function parseNpmManifestSnapshot(raw: string | undefined): NpmManifestSnapshot {
+  if (raw === undefined) return { dependencies: {}, devDependencies: {} };
+  const parsed = JSON.parse(raw) as unknown;
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('Invalid package manifest.');
+  }
+  const name = 'name' in parsed ? parsed.name : undefined;
+  const dependencies = 'dependencies' in parsed ? parsed.dependencies : undefined;
+  const devDependencies = 'devDependencies' in parsed ? parsed.devDependencies : undefined;
+  if (name !== undefined && typeof name !== 'string') {
+    throw new Error('Invalid package name in package manifest.');
+  }
+  return {
+    name,
+    dependencies: stringRecord(dependencies, 'dependencies'),
+    devDependencies: stringRecord(devDependencies, 'devDependencies'),
+  };
+}
+
+function parseDirectGoRequirements(raw: string | undefined): Map<string, string> {
+  const requirements = new Map<string, string>();
+  if (raw === undefined) return requirements;
+  let inRequireBlock = false;
+  for (const sourceLine of raw.split('\n')) {
+    const line = sourceLine.trim();
+    if (line === 'require (') {
+      inRequireBlock = true;
+      continue;
+    }
+    if (inRequireBlock && line === ')') {
+      inRequireBlock = false;
+      continue;
+    }
+    const candidate = inRequireBlock ? line : line.startsWith('require ') ? line.slice(8) : '';
+    if (!candidate || /\/\/\s*indirect\s*$/.test(candidate)) continue;
+    const match = /^([^\s]+)\s+(v[^\s]+)(?:\s*\/\/.*)?$/.exec(candidate);
+    if (match?.[1] && match[2]) requirements.set(match[1], match[2]);
+  }
+  return requirements;
+}
+
+/** Compare complete manifest snapshots so diff context cannot hide additions. */
+export function compareManifestSnapshots(
+  manifestPath: string,
+  beforeRaw: string | undefined,
+  afterRaw: string | undefined
+): DependencyAddition[] {
+  if (basename(manifestPath) === 'package.json') {
+    const before = parseNpmManifestSnapshot(beforeRaw);
+    const after = parseNpmManifestSnapshot(afterRaw);
+    const existingNames = new Set([
+      ...Object.keys(before.dependencies),
+      ...Object.keys(before.devDependencies),
+    ]);
+    const additions: DependencyAddition[] = [];
+    for (const [section, production] of [
+      [after.dependencies, true],
+      [after.devDependencies, false],
+    ] as const) {
+      for (const [name, version] of Object.entries(section).sort(([left], [right]) =>
+        left.localeCompare(right)
+      )) {
+        if (existingNames.has(name)) continue;
+        additions.push({
+          ecosystem: 'npm',
+          manifestPath,
+          name,
+          production,
+          internal: isInternalNpmDependency(name, version, after.name),
+        });
+      }
+    }
+    return additions;
+  }
+
+  if (basename(manifestPath) === 'go.mod') {
+    const before = parseDirectGoRequirements(beforeRaw);
+    return [...parseDirectGoRequirements(afterRaw)]
+      .filter(([name]) => !before.has(name))
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([name]) => ({
+        ecosystem: 'go' as const,
+        manifestPath,
+        name,
+        production: true,
+        internal: isInternalGoDependency(name),
+      }));
+  }
+
+  return [];
+}
+
+function gitOutput(
+  repositoryRoot: string,
+  args: string[],
+  allowMissing = false
+): string | undefined {
+  const result = spawnSync('git', args, {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    maxBuffer: 64 * 1024 * 1024,
+  });
+  if (allowMissing && result.status === 128) return undefined;
+  if (result.error || result.status !== 0) {
+    throw new Error('Could not compare direct dependency manifests against the base revision.');
+  }
+  return result.stdout;
+}
+
+function changedManifestPaths(repositoryRoot: string, base: string): string[] {
+  const tracked =
+    gitOutput(repositoryRoot, ['diff', '--name-only', '--diff-filter=ACMRT', '-z', base, '--'])
+      ?.split('\0')
+      .filter(Boolean) ?? [];
+  const untracked =
+    gitOutput(repositoryRoot, ['ls-files', '--others', '--exclude-standard', '-z'])
+      ?.split('\0')
+      .filter(Boolean) ?? [];
+  return [...new Set([...tracked, ...untracked])]
+    .map(normalizeRepoPath)
+    .filter((path) => basename(path) === 'package.json' || basename(path) === 'go.mod')
+    .sort();
+}
+
+export function directDependencyAdditionsAgainstBase(
+  repositoryRoot: string,
+  base: string
+): DependencyAddition[] {
+  return changedManifestPaths(repositoryRoot, base).flatMap((manifestPath) => {
+    const before = gitOutput(repositoryRoot, ['show', `${base}:${manifestPath}`], true);
+    const currentPath = join(repositoryRoot, manifestPath);
+    if (!existsSync(currentPath)) return [];
+    if (!lstatSync(currentPath).isFile()) {
+      throw new Error('Direct dependency manifests must be regular files.');
+    }
+    return compareManifestSnapshots(manifestPath, before, readFileSync(currentPath, 'utf8'));
+  });
 }
 
 function validateEvidenceEntry(
@@ -204,37 +360,26 @@ export function checkDirectDependencyEvidence(diff: string, evidence: EvidenceFi
 }
 
 export function loadEvidence(path = evidencePath): EvidenceFile {
-  if (!existsSync(path)) return {};
+  if (!existsSync(path)) throw new Error('Direct dependency evidence file is missing.');
   const parsed = readJson(path);
-  if (typeof parsed !== 'object' || parsed === null) return {};
-  return parsed as EvidenceFile;
+  return v.parse(EvidenceFileSchema, parsed);
 }
 
-function diffAgainstBase(): string {
+function baseRevision(): string {
   const base = process.env.GITHUB_BASE_REF
     ? `origin/${process.env.GITHUB_BASE_REF}`
     : 'origin/main';
-  return execFileSync(
-    'git',
-    [
-      'diff',
-      '--unified=0',
-      `${base}...HEAD`,
-      '--',
-      'package.json',
-      'go.mod',
-      '**/package.json',
-      '**/go.mod',
-    ],
-    {
-      cwd: repoRoot,
-      encoding: 'utf8',
-    }
-  );
+  return base;
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {
-  const result = checkDirectDependencyEvidence(diffAgainstBase(), loadEvidence());
+  const additions = directDependencyAdditionsAgainstBase(repoRoot, baseRevision());
+  const relevantAdditions = additions.filter((addition) => !addition.internal);
+  const evidence = loadEvidence();
+  const errors = relevantAdditions.flatMap((addition) =>
+    validateEvidenceEntry(addition, evidence[addition.ecosystem]?.[addition.name])
+  );
+  const result = { ok: errors.length === 0, additions, errors };
   if (!result.ok) {
     console.error(
       [

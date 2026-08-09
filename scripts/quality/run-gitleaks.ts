@@ -6,10 +6,13 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readlinkSync,
   rmSync,
+  writeFileSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve, sep } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { evaluateGitleaksFindings, gitleaksArgsForMode } from './check-secret-scan-policy';
 
@@ -25,7 +28,7 @@ function argument(name: string): string | undefined {
     ?.slice(prefix.length);
 }
 
-function createCurrentTreeSnapshot(repositoryRoot: string, treeDirectory: string): void {
+export function createCurrentTreeSnapshot(repositoryRoot: string, treeDirectory: string): void {
   const listed = spawnSync(
     'git',
     ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
@@ -44,10 +47,14 @@ function createCurrentTreeSnapshot(repositoryRoot: string, treeDirectory: string
     }
     if (!existsSync(sourcePath)) continue;
     const stat = lstatSync(sourcePath);
-    if (!stat.isFile()) continue;
     const destinationPath = join(treeDirectory, relativePath);
     mkdirSync(dirname(destinationPath), { recursive: true });
-    copyFileSync(sourcePath, destinationPath);
+    if (stat.isFile()) {
+      copyFileSync(sourcePath, destinationPath);
+    } else if (stat.isSymbolicLink()) {
+      // Scan the Git symlink blob (its target text) without following it.
+      writeFileSync(destinationPath, readlinkSync(sourcePath), { mode: 0o600 });
+    }
   }
 }
 
@@ -73,7 +80,7 @@ function run(): void {
     const result = spawnSync(
       'gitleaks',
       [...gitleaksArgsForMode(mode, range), '--report-path', reportPath],
-      { cwd: scanDirectory, encoding: 'utf8' }
+      { cwd: scanDirectory, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }
     );
     if (result.error || (result.status !== 0 && result.status !== 1)) {
       console.error('Gitleaks could not complete. Scanner output is withheld by policy.');
@@ -87,7 +94,13 @@ function run(): void {
     } catch {
       report = result.status === 0 ? '[]' : '';
     }
-    const baseline = readFileSync(join(repositoryRoot, BASELINE_PATH), 'utf8');
+    // The report is intentionally unredacted so reviewed hashes cannot be
+    // forged by replacing a secret at the same rule/file/line. It remains only
+    // in the private temporary directory and no scanner output is forwarded.
+    const baseline =
+      mode === 'current-tree'
+        ? readFileSync(join(repositoryRoot, BASELINE_PATH), 'utf8')
+        : '{"version":1,"matcherVersion":"gitleaks-finding-v2-unredacted","baseCommit":"none","groups":[]}';
     const evaluated = evaluateGitleaksFindings(report, baseline);
     if (!evaluated.ok) {
       console.error(
@@ -105,4 +118,6 @@ function run(): void {
   }
 }
 
-run();
+const isDirectExecution =
+  process.argv[1] !== undefined && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isDirectExecution) run();

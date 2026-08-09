@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
 import * as v from 'valibot';
 
 interface AstroCheckBaseline {
@@ -28,19 +29,33 @@ export interface AstroCheckSummary {
   warnings: number;
 }
 
-const ANSI_PATTERN = /\u001b\[[0-9;]*m/g;
+const ANSI_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
 
 export function parseAstroCheckSummary(output: string): AstroCheckSummary | undefined {
   const plain = output.replace(ANSI_PATTERN, '');
   const result = /Result \(\d+ files\):([\s\S]*)/.exec(plain)?.[1];
   if (!result) return undefined;
-  const count = (label: string): number =>
-    Number(new RegExp(`-\\s+(\\d+)\\s+${label}`).exec(result)?.[1] ?? 0);
-  return { errors: count('errors'), warnings: count('warnings'), hints: count('hints') };
+  const count = (label: string): number | undefined => {
+    const value = new RegExp(`-\\s+(\\d+)\\s+${label}`).exec(result)?.[1];
+    return value === undefined ? undefined : Number(value);
+  };
+  const errors = count('errors');
+  const warnings = count('warnings');
+  const hints = count('hints');
+  if (errors === undefined || warnings === undefined || hints === undefined) return undefined;
+  return { errors, warnings, hints };
 }
 
 export function exceedsAstroErrorBaseline(summary: AstroCheckSummary, allowed: number): boolean {
   return summary.errors > allowed;
+}
+
+export function isCompleteAstroCheckResult(
+  status: number | null,
+  summary: AstroCheckSummary | undefined,
+  executionError: unknown
+): summary is AstroCheckSummary {
+  return !executionError && (status === 0 || status === 1) && summary !== undefined;
 }
 
 export function parseAstroCheckBaseline(input: string): AstroCheckBaseline {
@@ -60,7 +75,7 @@ function run(): void {
   });
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
   const summary = parseAstroCheckSummary(output);
-  if (result.error || !summary) {
+  if (!isCompleteAstroCheckResult(result.status, summary, result.error)) {
     console.error('Astro template validation did not produce a complete diagnostic summary.');
     process.exit(1);
   }

@@ -26,11 +26,7 @@ export function validateOsvPolicy(input: OsvPolicyInput, now = new Date()): OsvP
   const errors: string[] = [];
   const advisoryRun = input.eventName === 'schedule' || input.eventName === 'workflow_dispatch';
 
-  if (input.eventName === 'pull_request') {
-    return { ok: true, errors: [], advisoryRun: false };
-  }
-
-  if (!advisoryRun) {
+  if (!advisoryRun && input.eventName !== 'pull_request') {
     errors.push(`Unsupported OSV policy event: ${input.eventName}`);
   }
 
@@ -78,8 +74,8 @@ function main(): void {
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
   const config = readFileSync(resolve(repoRoot, 'osv-scanner.toml'), 'utf8');
   const result = validateOsvPolicy({
-    eventName: 'schedule',
-    hasPrivateBacklogRouting: true,
+    eventName: process.env.OSV_POLICY_EVENT ?? 'pull_request',
+    hasPrivateBacklogRouting: process.env.SAM_OSV_PRIVATE_ROUTING_CONFIGURED === 'true',
     ignores: extractOsvIgnores(config),
   });
   if (!result.ok) {

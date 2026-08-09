@@ -175,6 +175,9 @@ jobs:
       - name: Enforce type-boundary ratchet
         run: pnpm quality:type-boundaries
 
+      - name: Run SAM RuleTester fixtures
+        run: pnpm --filter @simple-agent-manager/eslint-plugin-sam test
+
       - name: Shadow SAM fixtures through Oxlint alpha host
         continue-on-error: true
         run: pnpm lint:oxlint:sam-shadow

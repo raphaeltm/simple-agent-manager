@@ -21,7 +21,7 @@ export interface ReviewedSecretFindingGroup {
 
 export interface SecretFindingBaseline {
   version: 1;
-  matcherVersion: 'gitleaks-finding-v1';
+  matcherVersion: 'gitleaks-finding-v2-unredacted';
   baseCommit: string;
   groups: ReviewedSecretFindingGroup[];
 }
@@ -56,11 +56,14 @@ export function secretFindingDigest(finding: SecretFinding): string | undefined 
   ) {
     return undefined;
   }
+  if (/\[?REDACTED\]?/i.test(finding.Secret) || /\[?REDACTED\]?/i.test(finding.Match)) {
+    return undefined;
+  }
 
   return createHash('sha256')
     .update(
       JSON.stringify([
-        'gitleaks-finding-v1',
+        'gitleaks-finding-v2-unredacted',
         finding.RuleID,
         normalizeFindingPath(finding.File),
         finding.StartLine,
@@ -84,7 +87,7 @@ function parseBaseline(rawJson: string, now: Date): { digests: Set<string>; erro
     typeof baseline !== 'object' ||
     baseline === null ||
     baseline.version !== 1 ||
-    baseline.matcherVersion !== 'gitleaks-finding-v1' ||
+    baseline.matcherVersion !== 'gitleaks-finding-v2-unredacted' ||
     typeof baseline.baseCommit !== 'string' ||
     !Array.isArray(baseline.groups)
   ) {
@@ -135,7 +138,7 @@ function parseBaseline(rawJson: string, now: Date): { digests: Set<string>; erro
 
 export function evaluateGitleaksFindings(
   rawJson: string,
-  baselineJson = '{"version":1,"matcherVersion":"gitleaks-finding-v1","baseCommit":"none","groups":[]}',
+  baselineJson = '{"version":1,"matcherVersion":"gitleaks-finding-v2-unredacted","baseCommit":"none","groups":[]}',
   now = new Date()
 ): SecretScanResult {
   let parsed: unknown;
@@ -209,8 +212,11 @@ export function evaluateGitleaksFindings(
 }
 
 export function gitleaksArgsForMode(mode: 'current-tree' | 'pr-range', range?: string): string[] {
-  const safeOutput = ['--redact=100', '--no-banner', '--no-color', '--report-format=json'];
-  if (mode === 'current-tree') return ['dir', '.', ...safeOutput];
+  // Exact baselines must include the actual match bytes. The caller captures
+  // the report in a private temporary directory and never forwards scanner
+  // stdout/stderr or finding metadata to logs.
+  const privateReport = ['--no-banner', '--no-color', '--report-format=json'];
+  if (mode === 'current-tree') return ['dir', '.', ...privateReport];
   if (!range) throw new Error('PR range is required for pr-range scans');
-  return ['git', '.', '--log-opts', range, ...safeOutput];
+  return ['git', '.', '--log-opts', range, ...privateReport];
 }

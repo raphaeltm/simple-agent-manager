@@ -3,7 +3,6 @@ name: Scheduled OSV Advisory
 on:
   schedule:
     - cron: '17 4 * * 1'
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -35,6 +34,9 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Validate ignore ownership and expiry
+        env:
+          OSV_POLICY_EVENT: schedule
+          SAM_OSV_PRIVATE_ROUTING_CONFIGURED: ${{ secrets.SAM_OSV_WEBHOOK_URL != '' && secrets.SAM_OSV_WEBHOOK_TOKEN != '' }}
         run: pnpm quality:osv-policy
 
       - name: Install verified OSV-Scanner release

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+
 import { extractOsvIgnores, validateOsvPolicy } from './check-osv-policy';
 
 const now = new Date('2026-08-09T00:00:00Z');
@@ -9,12 +10,26 @@ describe('OSV policy validator', () => {
       {
         eventName: 'pull_request',
         hasPrivateBacklogRouting: false,
-        ignores: [{ id: 'GHSA-test', expires: '2020-01-01', reason: '' }],
+        ignores: [],
       },
       now
     );
 
     expect(result).toEqual({ ok: true, errors: [], advisoryRun: false });
+  });
+
+  it('still validates ignore ownership and expiry outside scheduled runs', () => {
+    const result = validateOsvPolicy(
+      {
+        eventName: 'pull_request',
+        hasPrivateBacklogRouting: false,
+        ignores: [{ id: 'GHSA-test', expires: '2020-01-01', reason: '' }],
+      },
+      now
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.advisoryRun).toBe(false);
   });
 
   it('requires private SAM/backlog routing for scheduled advisory follow-up', () => {

@@ -2,9 +2,15 @@ import { execFileSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
-import { auditTypeBoundaries, compareBlockingCounts } from './check-type-boundaries';
+import {
+  auditTypeBoundaries,
+  compareBlockingCounts,
+  loadBaseline,
+  parseBoundaryBaseline,
+} from './check-type-boundaries';
 
 function fixtureRepo(files: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), 'sam-type-boundary-'));
@@ -110,6 +116,32 @@ describe('type-boundary ratchet audit', () => {
         'local-record-guard': 1,
       })
     ).toEqual([]);
+  });
+
+  it('includes untracked source so local checks cannot miss newly generated debt', () => {
+    const root = fixtureRepo({ 'src/tracked.ts': 'export const tracked = true;' });
+    writeFileSync(join(root, 'src/untracked.ts'), 'export const unsafe = value as any;');
+
+    expect(auditTypeBoundaries(root).blockingCounts['as-any']).toBe(1);
+  });
+
+  it('fails closed when the baseline is missing or structurally incomplete', () => {
+    expect(() => loadBaseline(join(tmpdir(), 'missing-sam-type-boundary-baseline.json'))).toThrow();
+    expect(() =>
+      parseBoundaryBaseline(
+        JSON.stringify({
+          metadata: {
+            owner: 'quality',
+            backlog: 'task',
+            review: 'review',
+            blockingClasses: [],
+            reportOnlyClasses: [],
+          },
+          counts: {},
+          reportOnlyCounts: {},
+        })
+      )
+    ).toThrow('Invalid type-boundary baseline');
   });
 
   it('matches known function and arrow record guards, including array-accepting variants', () => {

@@ -1,9 +1,16 @@
-import { readFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
+
 import {
   checkDirectDependencyEvidence,
+  compareManifestSnapshots,
+  directDependencyAdditionsAgainstBase,
   extractDirectDependencyAdditions,
+  loadEvidence,
 } from './check-direct-dependency-evidence';
 
 const fixtureRoot = join(import.meta.dirname, 'fixtures/supply-chain');
@@ -82,6 +89,52 @@ describe('direct dependency evidence checker', () => {
     expect(additions).toMatchObject([
       { ecosystem: 'npm', manifestPath: 'package.json', name: 'root-package' },
     ]);
+  });
+
+  it('compares complete npm snapshots when a zero-context patch omits the section name', () => {
+    expect(
+      compareManifestSnapshots(
+        'package.json',
+        JSON.stringify({ scripts: { test: 'vitest' }, dependencies: {} }),
+        JSON.stringify({ scripts: { test: 'vitest' }, dependencies: { valibot: '1.2.0' } })
+      )
+    ).toEqual([
+      {
+        ecosystem: 'npm',
+        manifestPath: 'package.json',
+        name: 'valibot',
+        production: true,
+        internal: false,
+      },
+    ]);
+  });
+
+  it('wires the repository check to manifest snapshots instead of diff context', () => {
+    const root = mkdtempSync(join(tmpdir(), 'sam-dependency-evidence-'));
+    execFileSync('git', ['init', '--quiet'], { cwd: root });
+    execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
+    execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ scripts: { test: 'vitest' }, dependencies: {} }, null, 2)
+    );
+    execFileSync('git', ['add', 'package.json'], { cwd: root });
+    execFileSync('git', ['commit', '-m', 'base', '--quiet'], { cwd: root });
+    const base = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim();
+    writeFileSync(
+      join(root, 'package.json'),
+      JSON.stringify({ scripts: { test: 'vitest' }, dependencies: { valibot: '1.2.0' } }, null, 2)
+    );
+
+    expect(directDependencyAdditionsAgainstBase(root, base)).toMatchObject([
+      { ecosystem: 'npm', manifestPath: 'package.json', name: 'valibot' },
+    ]);
+  });
+
+  it('fails closed when the durable evidence file is missing', () => {
+    expect(() => loadEvidence(join(tmpdir(), 'missing-sam-dependency-evidence.json'))).toThrow(
+      'evidence file is missing'
+    );
   });
 
   it('does not treat transitive Go requirements as direct additions', () => {

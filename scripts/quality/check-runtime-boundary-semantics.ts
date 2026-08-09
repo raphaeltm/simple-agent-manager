@@ -1,13 +1,15 @@
 import { execFileSync } from 'node:child_process';
+import { existsSync, lstatSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
 import {
-  Node,
-  Project,
-  SyntaxKind,
   type AsExpression,
   type CallExpression,
+  Node,
+  Project,
   type SourceFile,
+  SyntaxKind,
 } from 'ts-morph';
 
 type SemanticRule = 'unvalidated-row-narrowing' | 'blind-external-payload-narrowing';
@@ -55,11 +57,23 @@ const externalPayloadPatterns = [
 ];
 
 function trackedFiles(root: string, scope: string): string[] {
-  return execFileSync('git', ['ls-files', scope], { cwd: root, encoding: 'utf8' })
-    .split('\n')
+  return execFileSync(
+    'git',
+    ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', scope],
+    { cwd: root, encoding: 'utf8' }
+  )
+    .split('\0')
     .filter(Boolean)
     .filter((file) => file.endsWith('.ts'))
     .filter((file) => !file.endsWith('.test.ts') && !file.includes('/fixtures/'))
+    .filter((file) => {
+      const sourcePath = resolve(root, file);
+      if (!existsSync(sourcePath)) return false;
+      if (!lstatSync(sourcePath).isFile()) {
+        throw new Error(`Runtime-boundary source is not a regular file: ${file}`);
+      }
+      return true;
+    })
     .sort();
 }
 

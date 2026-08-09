@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import {
   exceedsAstroErrorBaseline,
+  isCompleteAstroCheckResult,
   parseAstroCheckBaseline,
   parseAstroCheckSummary,
 } from './check-astro-templates';
@@ -33,5 +34,11 @@ describe('Astro template validation ratchet', () => {
 
   it('fails closed when Astro does not emit a complete result', () => {
     expect(parseAstroCheckSummary('Astro crashed before diagnostics.')).toBeUndefined();
+    expect(parseAstroCheckSummary('Result (1 files):\n- 0 errors')).toBeUndefined();
+    const complete = { errors: 0, warnings: 0, hints: 0 };
+    expect(isCompleteAstroCheckResult(0, complete, undefined)).toBe(true);
+    expect(isCompleteAstroCheckResult(1, complete, undefined)).toBe(true);
+    expect(isCompleteAstroCheckResult(2, complete, undefined)).toBe(false);
+    expect(isCompleteAstroCheckResult(0, complete, new Error('spawn failed'))).toBe(false);
   });
 });
