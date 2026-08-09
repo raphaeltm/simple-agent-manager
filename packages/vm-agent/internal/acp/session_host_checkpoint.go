@@ -48,9 +48,10 @@ func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duratio
 		return CheckpointRolloverResult{}, ErrCheckpointUnavailable
 	}
 	episode := &checkpointRolloverEpisode{
-		sessionID: string(h.sessionID),
-		attempt:   attempt,
-		result:    make(chan CheckpointRolloverResult, 1),
+		sessionID:    string(h.sessionID),
+		attempt:      attempt,
+		result:       make(chan CheckpointRolloverResult, 1),
+		operationCtx: ctx,
 	}
 	process := h.process
 	conn := h.acpConn
@@ -93,14 +94,16 @@ func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duratio
 		case <-timer.C:
 			forced = true
 		case <-ctx.Done():
-			h.clearCheckpointRollover(episode)
 			message := "checkpoint rollover cancelled before process restart"
+			result := CheckpointRolloverResult{State: "failed", ACPSessionID: episode.sessionID,
+				ErrorCode: "rollover_cancelled", ErrorMessage: message}
+			episode.complete(result, true)
 			_ = process.Stop()
 			attempt.complete(h, fatalErrorStopReason, errors.New(message))
 			h.setStatus(HostError, message)
 			h.stopPromptActivityRereport()
 			h.reportActivity("error")
-			return CheckpointRolloverResult{}, ctx.Err()
+			return result, ctx.Err()
 		}
 	}
 
@@ -108,22 +111,26 @@ func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duratio
 	if h.checkpointRollover != episode || h.process != process {
 		h.mu.Unlock()
 		message := "agent process changed during checkpoint rollover"
+		result := CheckpointRolloverResult{State: "failed", Forced: forced, ACPSessionID: episode.sessionID,
+			ErrorCode: "process_changed", ErrorMessage: message}
+		episode.complete(result, true)
 		attempt.complete(h, fatalErrorStopReason, errors.New(message))
 		h.setStatus(HostError, message)
 		h.reportActivity("error")
-		return CheckpointRolloverResult{}, fmt.Errorf("%w: %s", ErrCheckpointUnavailable, message)
+		return result, fmt.Errorf("%w: %s", ErrCheckpointUnavailable, message)
 	}
 	episode.forced = forced
 	h.mu.Unlock()
 
 	if err := process.Stop(); err != nil {
-		h.clearCheckpointRollover(episode)
 		message := "failed to stop agent process for checkpoint rollover"
+		result := CheckpointRolloverResult{State: "failed", Forced: forced, ACPSessionID: episode.sessionID,
+			ErrorCode: "process_stop_failed", ErrorMessage: message}
+		episode.complete(result, true)
 		attempt.complete(h, fatalErrorStopReason, fmt.Errorf("%s: %w", message, err))
 		h.setStatus(HostError, message)
 		h.reportActivity("error")
-		return CheckpointRolloverResult{State: "failed", Forced: forced, ACPSessionID: episode.sessionID,
-			ErrorCode: "process_stop_failed", ErrorMessage: message}, fmt.Errorf("%s: %w", message, err)
+		return result, fmt.Errorf("%s: %w", message, err)
 	}
 
 	select {
@@ -134,11 +141,19 @@ func (h *SessionHost) CheckpointRollover(ctx context.Context, grace time.Duratio
 		return result, nil
 	case <-ctx.Done():
 		message := "checkpoint rollover did not converge before its operation deadline"
+		result := CheckpointRolloverResult{State: "failed", Forced: forced, ACPSessionID: episode.sessionID,
+			ErrorCode: "rollover_deadline_exceeded", ErrorMessage: message}
+		if !episode.complete(result, true) {
+			result = <-episode.result
+			if result.State == "failed" {
+				return result, errors.New(result.ErrorMessage)
+			}
+			return result, nil
+		}
 		attempt.complete(h, fatalErrorStopReason, errors.New(message))
 		h.setStatus(HostError, message)
 		h.reportActivity("error")
-		return CheckpointRolloverResult{State: "failed", Forced: forced, ACPSessionID: episode.sessionID,
-			ErrorCode: "rollover_deadline_exceeded", ErrorMessage: message}, ctx.Err()
+		return result, ctx.Err()
 	}
 }
 

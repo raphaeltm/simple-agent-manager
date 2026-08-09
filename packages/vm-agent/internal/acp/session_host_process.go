@@ -51,6 +51,19 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		slog.Info("Agent process monitor: session stopped, skipping restart")
 		return
 	}
+	if rollover != nil && rollover.terminal.Load() {
+		h.clearCurrentAgentSessionLocked()
+		if h.statusErr == "" {
+			h.statusErr = "checkpoint rollover terminated before process restart"
+		}
+		h.status = HostError
+		if h.checkpointRollover == rollover {
+			h.checkpointRollover = nil
+		}
+		h.mu.Unlock()
+		slog.Info("Checkpoint terminal owner suppressed delayed process restart", "acpSessionId", rollover.sessionID)
+		return
+	}
 	h.promptMu.Lock()
 	promptActive := h.promptInFlight
 	h.promptMu.Unlock()
@@ -113,6 +126,18 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		h.mu.Unlock()
 		return
 	}
+	if rollover != nil && rollover.terminal.Load() {
+		if h.statusErr == "" {
+			h.statusErr = "checkpoint rollover terminated before strict resume"
+		}
+		h.status = HostError
+		if h.checkpointRollover == rollover {
+			h.checkpointRollover = nil
+		}
+		h.mu.Unlock()
+		slog.Info("Checkpoint terminal owner suppressed strict resume", "acpSessionId", rollover.sessionID)
+		return
+	}
 	loadSessionID := ""
 	if rollover != nil {
 		loadSessionID = rollover.sessionID
@@ -128,31 +153,56 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		}
 	}
 	if rollover != nil {
-		err := h.startAgentForCrashRecovery(ctx, agentType, cred, settings, loadSessionID)
+		err := h.startAgentForCrashRecovery(rollover.operationCtx, agentType, cred, settings, loadSessionID)
+		if rollover.terminal.Load() {
+			h.stopCurrentAgentLocked()
+			if h.statusErr == "" {
+				h.statusErr = "checkpoint rollover terminated during strict resume"
+			}
+			h.status = HostError
+			h.checkpointRollover = nil
+			h.mu.Unlock()
+			return
+		}
 		if err != nil {
 			message := fmt.Sprintf("strict same-session checkpoint resume failed: %s", redactAgentDiagnosticText(err.Error()))
+			h.stopCurrentAgentLocked()
 			h.status = HostError
 			h.statusErr = message
 			h.checkpointRollover = nil
+			result := CheckpointRolloverResult{State: "failed", Forced: rollover.forced,
+				ACPSessionID: rollover.sessionID, ErrorCode: "strict_resume_failed", ErrorMessage: message}
+			rollover.complete(result, true)
 			h.mu.Unlock()
 			rollover.attempt.complete(h, fatalErrorStopReason, errors.New(message))
 			h.broadcastAgentStatus(StatusError, agentType, message)
 			h.reportActivity("error")
-			rollover.result <- CheckpointRolloverResult{State: "failed", Forced: rollover.forced,
-				ACPSessionID: rollover.sessionID, ErrorCode: "strict_resume_failed", ErrorMessage: message}
 			return
 		}
 		if string(h.sessionID) != rollover.sessionID {
 			message := "strict checkpoint resume returned a different ACP session"
+			h.stopCurrentAgentLocked()
 			h.status = HostError
 			h.statusErr = message
 			h.checkpointRollover = nil
+			result := CheckpointRolloverResult{State: "failed", Forced: rollover.forced,
+				ACPSessionID: rollover.sessionID, ErrorCode: "session_identity_mismatch", ErrorMessage: message}
+			rollover.complete(result, true)
 			h.mu.Unlock()
 			rollover.attempt.complete(h, fatalErrorStopReason, errors.New(message))
 			h.broadcastAgentStatus(StatusError, agentType, message)
 			h.reportActivity("error")
-			rollover.result <- CheckpointRolloverResult{State: "failed", Forced: rollover.forced,
-				ACPSessionID: rollover.sessionID, ErrorCode: "session_identity_mismatch", ErrorMessage: message}
+			return
+		}
+		result := CheckpointRolloverResult{State: "completed", Forced: rollover.forced, ACPSessionID: rollover.sessionID}
+		if !rollover.complete(result, false) {
+			h.stopCurrentAgentLocked()
+			h.status = HostError
+			if h.statusErr == "" {
+				h.statusErr = "checkpoint rollover terminal owner won during strict resume"
+			}
+			h.checkpointRollover = nil
+			h.mu.Unlock()
 			return
 		}
 		h.checkpointRollover = nil
@@ -164,7 +214,6 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 			h.broadcastAgentStatus(StatusReady, agentType, "")
 			h.reportActivity("idle")
 		})
-		rollover.result <- CheckpointRolloverResult{State: "completed", Forced: rollover.forced, ACPSessionID: rollover.sessionID}
 		return
 	}
 	if !h.restartAgentLocked(ctx, agentType, cred, settings, loadSessionID, crashRecovery, recoveryNotify) {

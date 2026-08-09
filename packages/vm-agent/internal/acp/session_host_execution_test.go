@@ -271,7 +271,13 @@ func TestCheckpointRolloverStrictResumeFailureIsExplicit(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 	t.Setenv("CODEX_HOME", "")
 	host.config.ContainerResolver = func() (string, error) { return "", nil }
-	host.config.StartProcess = func(*agentStartup) (agentProcess, error) { return nil, errors.New("spawn failed") }
+	var starts atomic.Int32
+	host.config.StartProcess = func(*agentStartup) (agentProcess, error) {
+		starts.Add(1)
+		return nil, errors.New("spawn failed")
+	}
+	completed := make(chan string, 2)
+	host.config.OnPromptComplete = func(reason string, _ error) { completed <- reason }
 	oldProc, reader, writer := newFakeAgentProcess(time.Now().Add(-10*time.Second), true)
 	serveCheckpointACP(t, reader, writer)
 	conn := acpsdk.NewClientSideConnection(&sessionHostClient{host: host}, oldProc.Stdin(), oldProc.Stdout())
@@ -292,6 +298,111 @@ func TestCheckpointRolloverStrictResumeFailureIsExplicit(t *testing.T) {
 	}
 	if host.Status() != HostError {
 		t.Fatalf("status = %s, want error", host.Status())
+	}
+	time.Sleep(1200 * time.Millisecond)
+	if starts.Load() != 1 {
+		t.Fatalf("strict resume starts = %d, want exactly one and no fresh fallback", starts.Load())
+	}
+	assertSingleCheckpointTerminal(t, completed)
+	assertNoReadyStatus(t, host)
+}
+
+func TestCheckpointTerminalOwnershipSuppressesDelayedProcessExitRestart(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		deadline  time.Duration
+		grace     time.Duration
+		closeRPC  bool
+		errorCode string
+	}{
+		{name: "operation deadline", deadline: 40 * time.Millisecond, grace: time.Millisecond, closeRPC: true, errorCode: "rollover_deadline_exceeded"},
+		{name: "caller cancellation", deadline: 40 * time.Millisecond, grace: time.Second, closeRPC: false, errorCode: "rollover_cancelled"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			host := newRecoveryTestHost(t, time.Second)
+			defer host.Stop()
+			t.Setenv("HOME", t.TempDir())
+			t.Setenv("CODEX_HOME", "")
+			host.config.ContainerResolver = func() (string, error) { return "", nil }
+			var starts atomic.Int32
+			host.config.StartProcess = countingSpawn(t, &starts)
+			completed := make(chan string, 2)
+			host.config.OnPromptComplete = func(reason string, _ error) { completed <- reason }
+
+			oldProc, reader, writer := newFakeAgentProcess(time.Now().Add(-10*time.Second), false)
+			serveCheckpointACP(t, reader, writer)
+			conn := acpsdk.NewClientSideConnection(&sessionHostClient{host: host}, oldProc.Stdin(), oldProc.Stdout())
+			_, cancelPrompt := context.WithCancel(context.Background())
+			attempt, ok := host.beginPrompt(cancelPrompt, nil)
+			if !ok {
+				t.Fatal("prompt was not accepted")
+			}
+			if tc.closeRPC {
+				close(attempt.rpcDone)
+			}
+			host.mu.Lock()
+			host.process, host.acpConn, host.status = oldProc, conn, HostPrompting
+			host.agentType, host.sessionID, host.agentSupportsLoadSession = "openai-codex", "same-session", true
+			host.mu.Unlock()
+			go host.monitorProcessExit(context.Background(), oldProc, "openai-codex", &agentCredential{credentialKind: "api-key"}, nil)
+
+			ctx, cancel := context.WithTimeout(context.Background(), tc.deadline)
+			defer cancel()
+			result, err := host.CheckpointRollover(ctx, tc.grace)
+			if err == nil || result.State != "failed" || result.ErrorCode != tc.errorCode {
+				t.Fatalf("result=%+v err=%v", result, err)
+			}
+
+			// Release process.Wait only after terminal ownership is durable. The
+			// delayed exit monitor must observe suppression rather than taking its
+			// generic one-second restart path.
+			close(oldProc.waitCh)
+			time.Sleep(1300 * time.Millisecond)
+			if starts.Load() != 0 {
+				t.Fatalf("process starts after terminal = %d, want 0", starts.Load())
+			}
+			if host.Status() != HostError {
+				t.Fatalf("status after delayed exit = %s, want error", host.Status())
+			}
+			assertSingleCheckpointTerminal(t, completed)
+			assertNoReadyStatus(t, host)
+			host.mu.RLock()
+			rollover, process := host.checkpointRollover, host.process
+			host.mu.RUnlock()
+			if rollover != nil || process != nil {
+				t.Fatalf("terminal episode did not converge: rollover=%v process=%v", rollover != nil, process != nil)
+			}
+		})
+	}
+}
+
+func assertSingleCheckpointTerminal(t *testing.T, completed <-chan string) {
+	t.Helper()
+	select {
+	case reason := <-completed:
+		if reason != fatalErrorStopReason {
+			t.Fatalf("completion reason = %q, want %q", reason, fatalErrorStopReason)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("checkpoint terminal completion callback missing")
+	}
+	select {
+	case reason := <-completed:
+		t.Fatalf("duplicate checkpoint terminal completion: %q", reason)
+	case <-time.After(80 * time.Millisecond):
+	}
+}
+
+func assertNoReadyStatus(t *testing.T, host *SessionHost) {
+	t.Helper()
+	host.bufMu.RLock()
+	messages := append([]BufferedMessage(nil), host.messageBuf...)
+	host.bufMu.RUnlock()
+	for _, message := range messages {
+		var status AgentStatusMessage
+		if err := json.Unmarshal(message.Data, &status); err == nil && status.Type == MsgAgentStatus && status.Status == StatusReady {
+			t.Fatalf("late Ready observed after terminal checkpoint ownership: %s", message.Data)
+		}
 	}
 }
 

@@ -321,10 +321,28 @@ type promptAttempt struct {
 }
 
 type checkpointRolloverEpisode struct {
-	sessionID string
-	attempt   *promptAttempt
-	result    chan CheckpointRolloverResult
-	forced    bool
+	sessionID    string
+	attempt      *promptAttempt
+	result       chan CheckpointRolloverResult
+	operationCtx context.Context
+	forced       bool
+	outcome      sync.Once
+	terminal     atomic.Bool
+}
+
+// complete is the checkpoint episode's linearization point. A terminal caller
+// that wins permanently suppresses process-exit restart for this episode; a
+// successful strict resume that wins cannot be overturned by a later deadline.
+func (e *checkpointRolloverEpisode) complete(result CheckpointRolloverResult, terminal bool) bool {
+	won := false
+	e.outcome.Do(func() {
+		won = true
+		if terminal {
+			e.terminal.Store(true)
+		}
+		e.result <- result
+	})
+	return won
 }
 
 func (a *promptAttempt) complete(h *SessionHost, stopReason string, promptErr error) bool {

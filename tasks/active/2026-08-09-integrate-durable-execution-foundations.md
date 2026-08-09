@@ -22,8 +22,8 @@ This task is SAM task `01KZM7QR5CW8T93FMS8X5CDF7A` on branch `sam/resume-ship-du
 - [x] Cherry-pick the complete Worker foundation history through exact tip `4847cf0b8`, resolving control-loop, migration, fixture, and documentation conflicts against current `main`.
 - [x] Define exact cross-contract protocol-v1 fixtures used by both VM and Worker tests.
 - [x] Align VM capabilities, versioned prompt submission/lookup, wrapped response, receipt fields, time units, and 202/200/404/409 semantics with the canonical contract.
-- [ ] Add durable VM terminal ownership and restart suppression so cancel, deadline, process exit, and strict-resume failure cannot create a fresh session or late `Ready`.
-- [ ] Add deterministic delayed-`process.Wait` race tests proving no `NewSession`/`Ready` after terminal ownership and exact-once convergence.
+- [x] Add durable VM terminal ownership and restart suppression so cancel, deadline, process exit, and strict-resume failure cannot create a fresh session or late `Ready`.
+- [x] Add deterministic delayed-`process.Wait` race tests proving no `NewSession`/`Ready` after terminal ownership and exact-once convergence.
 - [x] Serialize `protocolVersion` and `deliveryId` in the Worker’s real prompt request body while preserving legacy callers.
 - [x] Align Worker capability discovery and receipt reconciliation with nested VM-authoritative runtime identity and epoch-millisecond timestamps.
 - [x] Prove replay occurs only after same-runtime positive `not_found`; changed or unproven runtime becomes terminal `ambiguous_delivery`.
