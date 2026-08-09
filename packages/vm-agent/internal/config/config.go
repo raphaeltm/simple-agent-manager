@@ -56,6 +56,16 @@ const (
 	// activity report retries. Override via ACTIVITY_TERMINAL_REPORT_BACKOFF.
 	DefaultACPTerminalActivityReportBackoff = time.Second
 
+	// DefaultACPCheckpointPreemptGrace bounds graceful ACP cancel/close before
+	// checkpoint rollover force-stops the harness.
+	DefaultACPCheckpointPreemptGrace = 30 * time.Second
+
+	// DefaultACPCheckpointPreemptMaxGrace caps caller-requested graceful waits.
+	DefaultACPCheckpointPreemptMaxGrace = 2 * time.Minute
+
+	// DefaultACPCheckpointRolloverTimeout bounds the full strict restart/resume.
+	DefaultACPCheckpointRolloverTimeout = 2 * time.Minute
+
 	// DefaultGitCredentialTimeout bounds credential-helper calls back to the
 	// local VM agent. Override via GIT_CREDENTIAL_TIMEOUT.
 	DefaultGitCredentialTimeout = 5 * time.Second
@@ -221,6 +231,9 @@ type Config struct {
 	ACPTerminalActivityReportBackoff  time.Duration // Retry backoff for terminal activity reports (default: 1s, env: ACTIVITY_TERMINAL_REPORT_BACKOFF)
 	ACPCredentialSyncTimeout          time.Duration // Timeout for auth-file sync-back during shutdown (default: 10s, env: ACP_CREDENTIAL_SYNC_TIMEOUT)
 	ACPActivityReportTimeout          time.Duration // Timeout for each ACP activity callback attempt (default: 10s, env: ACP_ACTIVITY_REPORT_TIMEOUT)
+	ACPCheckpointPreemptGrace         time.Duration // Graceful cancel/close wait before force fallback (default: 30s, env: ACP_CHECKPOINT_PREEMPT_GRACE)
+	ACPCheckpointPreemptMaxGrace      time.Duration // Maximum caller-selected grace (default: 2m, env: ACP_CHECKPOINT_PREEMPT_MAX_GRACE)
+	ACPCheckpointRolloverTimeout      time.Duration // Full strict rollover operation deadline (default: 2m, env: ACP_CHECKPOINT_ROLLOVER_TIMEOUT)
 
 	// Event log settings - configurable per constitution principle XI
 	MaxNodeEvents      int // Max node-level events retained in memory (default: 500)
@@ -529,6 +542,9 @@ func Load() (*Config, error) {
 		ACPTerminalActivityReportBackoff:  getEnvDuration("ACTIVITY_TERMINAL_REPORT_BACKOFF", DefaultACPTerminalActivityReportBackoff),
 		ACPCredentialSyncTimeout:          getEnvDuration("ACP_CREDENTIAL_SYNC_TIMEOUT", DefaultACPCredentialSyncTimeout),
 		ACPActivityReportTimeout:          getEnvDuration("ACP_ACTIVITY_REPORT_TIMEOUT", DefaultACPActivityReportTimeout),
+		ACPCheckpointPreemptGrace:         getEnvDuration("ACP_CHECKPOINT_PREEMPT_GRACE", DefaultACPCheckpointPreemptGrace),
+		ACPCheckpointPreemptMaxGrace:      getEnvDuration("ACP_CHECKPOINT_PREEMPT_MAX_GRACE", DefaultACPCheckpointPreemptMaxGrace),
+		ACPCheckpointRolloverTimeout:      getEnvDuration("ACP_CHECKPOINT_ROLLOVER_TIMEOUT", DefaultACPCheckpointRolloverTimeout),
 
 		// Event log settings
 		MaxNodeEvents:      getEnvInt("MAX_NODE_EVENTS", 500),
@@ -740,6 +756,18 @@ func Load() (*Config, error) {
 
 	if cfg.NodeID == "" {
 		return nil, fmt.Errorf("NODE_ID is required")
+	}
+	if cfg.ACPCheckpointPreemptGrace < 0 {
+		return nil, fmt.Errorf("ACP_CHECKPOINT_PREEMPT_GRACE must be non-negative")
+	}
+	if cfg.ACPCheckpointPreemptMaxGrace <= 0 {
+		return nil, fmt.Errorf("ACP_CHECKPOINT_PREEMPT_MAX_GRACE must be positive")
+	}
+	if cfg.ACPCheckpointPreemptGrace > cfg.ACPCheckpointPreemptMaxGrace {
+		return nil, fmt.Errorf("ACP_CHECKPOINT_PREEMPT_GRACE must not exceed ACP_CHECKPOINT_PREEMPT_MAX_GRACE")
+	}
+	if cfg.ACPCheckpointRolloverTimeout <= 0 {
+		return nil, fmt.Errorf("ACP_CHECKPOINT_ROLLOVER_TIMEOUT must be positive")
 	}
 	if cfg.MaxWorktreesPerWorkspace < 1 {
 		cfg.MaxWorktreesPerWorkspace = 1
