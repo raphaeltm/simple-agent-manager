@@ -9,10 +9,6 @@ project_doc_fallback_filenames = ["CLAUDE.md"]
 
 # Stop hook: block task completion if cross-boundary files lack vertical slice tests.
 # Uses the same script as Claude Code for consistency.
-[[hooks.Stop]]
-type = "command"
-command = ".claude/hooks/verify-test-quality.sh"
-timeout = 30000
 
 # BEGIN SAM MANAGED MCP
 # Added by SAM vm-agent for Codex ACP sessions.
@@ -23,3 +19,8 @@ url = "https://api.simple-agent-manager.org/mcp"
 bearer_token_env_var = "SAM_MCP_TOKEN"
 
 # END SAM MANAGED MCP
+
+[[hooks.Stop]]
+type = "command"
+command = ".claude/hooks/verify-test-quality.sh"
+timeout = 30000
