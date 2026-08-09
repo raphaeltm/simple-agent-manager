@@ -1,0 +1,25 @@
+{
+  "metadata": {
+    "owner": "SAM quality program",
+    "backlog": "tasks/active/2026-08-09-deterministic-runtime-boundary-quality.md",
+    "review": "Local task-completion/test/constitution review before promotion to CI wiring",
+    "blockingClasses": [
+      "as-any",
+      "hono-req-json-generic",
+      "typed-json-parse",
+      "local-record-guard"
+    ],
+    "reportOnlyClasses": ["record-string-unknown", "unknown-double-assertion"],
+    "notes": "Blocking classes fail only on repository-wide net increases. Report-only classes are counted for visibility and never fail this ratchet."
+  },
+  "counts": {
+    "as-any": 0,
+    "hono-req-json-generic": 24,
+    "typed-json-parse": 23,
+    "local-record-guard": 7
+  },
+  "reportOnlyCounts": {
+    "record-string-unknown": 90,
+    "unknown-double-assertion": 132
+  }
+}
