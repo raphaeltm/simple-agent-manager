@@ -49,6 +49,24 @@
       "completedAt": null
     }
   },
+  "conflictPrompt": {
+    "status": "conflict",
+    "sessionId": "session-01",
+    "receipt": {
+      "deliveryId": "delivery-01",
+      "state": "in_flight",
+      "runtimeIdentity": "runtime-vm-01",
+      "acceptedAt": 1786312800123,
+      "completedAt": null
+    }
+  },
+  "ambiguousReceipt": {
+    "deliveryId": "delivery-01",
+    "state": "ambiguous",
+    "runtimeIdentity": "runtime-vm-01",
+    "acceptedAt": 1786312800123,
+    "completedAt": 1786312801123
+  },
   "notFoundReceipt": {
     "deliveryId": "delivery-01",
     "state": "not_found",

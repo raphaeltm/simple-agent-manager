@@ -126,9 +126,41 @@ func TestVersionedPromptResponseMatchesSharedProtocolFixture(t *testing.T) {
 	assertJSONContractEqual(t, response, fixture.NewPrompt)
 }
 
+func TestVersionedPromptConflictMatchesSharedProtocolFixture(t *testing.T) {
+	fixture := loadDurableExecutionProtocolFixture(t)
+	acceptedAt := int64(1_786_312_800_123)
+	response := versionedPromptResponse{
+		Status:    "conflict",
+		SessionID: "session-01",
+		Receipt: persistence.PromptDeliveryReceipt{
+			DeliveryID:      "delivery-01",
+			State:           persistence.PromptReceiptInFlight,
+			RuntimeIdentity: "runtime-vm-01",
+			AcceptedAt:      &acceptedAt,
+		},
+	}
+	assertJSONContractEqual(t, response, fixture.ConflictPrompt)
+}
+
+func TestAmbiguousPromptReceiptMatchesSharedProtocolFixture(t *testing.T) {
+	fixture := loadDurableExecutionProtocolFixture(t)
+	acceptedAt := int64(1_786_312_800_123)
+	completedAt := int64(1_786_312_801_123)
+	receipt := persistence.PromptDeliveryReceipt{
+		DeliveryID:      "delivery-01",
+		State:           persistence.PromptReceiptAmbiguous,
+		RuntimeIdentity: "runtime-vm-01",
+		AcceptedAt:      &acceptedAt,
+		CompletedAt:     &completedAt,
+	}
+	assertJSONContractEqual(t, receipt, fixture.AmbiguousReceipt)
+}
+
 type durableExecutionProtocolFixture struct {
-	Capabilities json.RawMessage `json:"capabilities"`
-	NewPrompt    json.RawMessage `json:"newPrompt"`
+	Capabilities     json.RawMessage `json:"capabilities"`
+	NewPrompt        json.RawMessage `json:"newPrompt"`
+	ConflictPrompt   json.RawMessage `json:"conflictPrompt"`
+	AmbiguousReceipt json.RawMessage `json:"ambiguousReceipt"`
 }
 
 func loadDurableExecutionProtocolFixture(t *testing.T) durableExecutionProtocolFixture {
