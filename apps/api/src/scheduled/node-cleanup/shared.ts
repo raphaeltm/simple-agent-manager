@@ -15,6 +15,7 @@ import {
   DEFAULT_MAX_AUTO_NODE_LIFETIME_MS,
   DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS,
   DEFAULT_NODE_CLEANUP_SWEEP_LIMIT,
+  DEFAULT_NODE_CLEANUP_FAILURE_BACKOFF_MS,
   DEFAULT_NODE_ORPHAN_IDLE_TIMEOUT_MS,
   DEFAULT_NODE_WARM_GRACE_PERIOD_MS,
   DEFAULT_NODE_WARM_TIMEOUT_MS,
@@ -95,6 +96,7 @@ export interface CleanupConfig {
   nodeSweepLimit: number;
   workspaceSweepLimit: number;
   cfContainerSweepLimit: number;
+  failureBackoffMs: number;
   /** VM-agent timeout for background calls — see rule 47. */
   agentTimeoutMs: number;
 }
@@ -170,11 +172,37 @@ function buildCleanupConfig(env: Env): CleanupConfig {
       env.CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT,
       DEFAULT_CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT
     ),
+    failureBackoffMs: parseMs(
+      env.NODE_CLEANUP_FAILURE_BACKOFF_MS,
+      DEFAULT_NODE_CLEANUP_FAILURE_BACKOFF_MS
+    ),
     agentTimeoutMs: getNodeAgentBackgroundRequestTimeoutMs(env),
   };
 }
 
 export type CleanupContext = Record<string, string | number | null | undefined>;
+
+export async function markNodeCleanupBackoff(
+  env: Env,
+  nodeId: string,
+  backoffUntil: string
+): Promise<void> {
+  try {
+    await env.DATABASE.prepare(
+      'UPDATE nodes SET cleanup_backoff_until = ?, updated_at = ? WHERE id = ?'
+    )
+      .bind(backoffUntil, new Date().toISOString(), nodeId)
+      .run();
+    log.warn('node_cleanup.candidate_backed_off', { nodeId, backoffUntil });
+  } catch (err) {
+    // Preserve the original cleanup error; a backoff-write failure is surfaced
+    // separately and must not abort the remaining bounded candidate page.
+    log.error('node_cleanup.candidate_backoff_failed', {
+      nodeId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
 
 /**
  * SQL fragment computing a node's last workspace activity.
@@ -210,6 +238,7 @@ export async function destroyNodeForCleanup(
     recoveryType: string;
     failureRecoveryType: string;
     level?: 'info' | 'warn';
+    failureBackoffMs: number;
     context: CleanupContext;
   }
 ): Promise<boolean> {
@@ -237,7 +266,13 @@ export async function destroyNodeForCleanup(
 
     await db
       .update(schema.nodes)
-      .set({ status: 'deleted', warmSince: null, healthStatus: 'stale', updatedAt: nowIso })
+      .set({
+        status: 'deleted',
+        warmSince: null,
+        healthStatus: 'stale',
+        cleanupBackoffUntil: null,
+        updatedAt: nowIso,
+      })
       .where(eq(schema.nodes.id, node.id));
 
     return true;
@@ -248,20 +283,33 @@ export async function destroyNodeForCleanup(
       error: err instanceof Error ? err.message : String(err),
     });
 
-    await persistError(env.OBSERVABILITY_DATABASE, {
-      source: 'api',
-      level: 'error',
-      message:
-        options.failureMessagePrefix + ': ' + (err instanceof Error ? err.message : String(err)),
-      stack: err instanceof Error ? err.stack : undefined,
-      context: {
-        recoveryType: options.failureRecoveryType,
+    const backoffUntil = new Date(
+      new Date(nowIso).getTime() + options.failureBackoffMs
+    ).toISOString();
+    await markNodeCleanupBackoff(env, node.id, backoffUntil);
+
+    try {
+      await persistError(env.OBSERVABILITY_DATABASE, {
+        source: 'api',
+        level: 'error',
+        message:
+          options.failureMessagePrefix + ': ' + (err instanceof Error ? err.message : String(err)),
+        stack: err instanceof Error ? err.stack : undefined,
+        context: {
+          recoveryType: options.failureRecoveryType,
+          nodeId: node.id,
+          backoffUntil,
+          ...options.context,
+        },
+        userId: node.user_id,
         nodeId: node.id,
-        ...options.context,
-      },
-      userId: node.user_id,
-      nodeId: node.id,
-    }, env);
+      }, env);
+    } catch (persistErr) {
+      log.error('node_cleanup.failure_observability_write_failed', {
+        nodeId: node.id,
+        error: persistErr instanceof Error ? persistErr.message : String(persistErr),
+      });
+    }
 
     return false;
   }

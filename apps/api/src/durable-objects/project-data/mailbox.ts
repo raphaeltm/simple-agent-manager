@@ -14,6 +14,7 @@ import type {
 import {
   DELIVERY_STATE_TRANSITIONS,
   DURABLE_MESSAGE_CLASSES,
+  MAILBOX_DEFAULTS,
 } from '@simple-agent-manager/shared';
 
 import { createModuleLogger } from '../../lib/logger';
@@ -49,7 +50,10 @@ export function enqueueMessage(
   const now = Date.now();
   const isDurable = (DURABLE_MESSAGE_CLASSES as readonly string[]).includes(opts.messageClass);
   const ackRequired = isDurable ? 1 : 0;
-  const expiresAt = opts.ttlMs ? now + opts.ttlMs : null;
+  const ttlMs = typeof opts.ttlMs === 'number' && opts.ttlMs > 0
+    ? opts.ttlMs
+    : MAILBOX_DEFAULTS.TTL_MS;
+  const expiresAt = now + ttlMs;
 
   // Enforce per-project message cap
   if (opts.maxMessages) {
@@ -308,7 +312,12 @@ export function requeueForRedelivery(sql: SqlStorage, messageId: string): boolea
   const requeued = transitionState(sql, messageId, 'queued');
   if (requeued) {
     // Clear delivered_at so the message appears fresh for next delivery attempt
-    sql.exec(`UPDATE session_inbox SET delivered_at = NULL WHERE id = ?`, messageId);
+    sql.exec(
+      `UPDATE session_inbox
+       SET delivered_at = NULL, delivery_attempts = delivery_attempts + 1
+       WHERE id = ?`,
+      messageId,
+    );
   }
   return requeued;
 }

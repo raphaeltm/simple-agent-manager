@@ -1,4 +1,13 @@
+import { DEFAULT_DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS } from '@simple-agent-manager/shared';
+
 import { redactSensitiveData } from './observability';
+
+export function resolveDiagnosisCompletedStepDelayMs(value: string | undefined): number {
+  const parsed = Number.parseInt(value ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : DEFAULT_DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS;
+}
 
 export function safeDiagnosisMessage(error: unknown): string {
   const raw = error instanceof Error ? error.message : String(error);

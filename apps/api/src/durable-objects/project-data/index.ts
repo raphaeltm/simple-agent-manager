@@ -7,7 +7,11 @@
  * See: specs/018-project-first-architecture/research.md
  * See: specs/018-project-first-architecture/data-model.md
  */
-import type { AcpSessionEventActorType, AcpSessionStatus } from '@simple-agent-manager/shared';
+import {
+  MAILBOX_DEFAULTS,
+  type AcpSessionEventActorType,
+  type AcpSessionStatus,
+} from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
@@ -590,7 +594,14 @@ export class ProjectData extends DurableObject<Env> {
   // --- Agent Mailbox (Durable Messaging) ---
 
   async enqueueMailboxMessage(opts: Parameters<typeof mailbox.enqueueMessage>[1]): Promise<ReturnType<typeof mailbox.enqueueMessage>> {
-    const msg = mailbox.enqueueMessage(this.sql, opts);
+    const configuredTtl = Number.parseInt(this.env.MAILBOX_TTL_MS ?? '', 10);
+    const defaultTtlMs = Number.isFinite(configuredTtl) && configuredTtl > 0
+      ? configuredTtl
+      : MAILBOX_DEFAULTS.TTL_MS;
+    const msg = mailbox.enqueueMessage(this.sql, {
+      ...opts,
+      ttlMs: typeof opts.ttlMs === 'number' && opts.ttlMs > 0 ? opts.ttlMs : defaultTtlMs,
+    });
     this.broadcastEvent('mailbox.enqueued', { messageId: msg.id, messageClass: msg.messageClass, targetSessionId: msg.targetSessionId });
     this.recalculateAlarm().catch((err) =>
       log.warn('schedule_mailbox_alarm_failed', { messageId: msg.id, error: err instanceof Error ? err.message : String(err) }),

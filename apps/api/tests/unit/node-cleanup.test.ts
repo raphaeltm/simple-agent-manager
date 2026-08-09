@@ -9,6 +9,11 @@ import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
+import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/node-phases';
+import {
+  emptyResult,
+  resolveCleanupConfig,
+} from '../../src/scheduled/node-cleanup/shared';
 
 // Mock deleteNodeResources
 vi.mock('../../src/services/nodes', () => ({
@@ -187,6 +192,18 @@ describe('runNodeCleanupSweep', () => {
       expect(result.lifetimeSkipped).toBe(1);
       expect(result.lifetimeDestroyed).toBe(0);
     });
+  });
+
+  it('applies cleanup backoff to every node candidate query', async () => {
+    const env = createMockEnv(new Map(), { VM_AGENT_REQUIRED_VERSION: 'required-sha' });
+
+    await runNodeCleanupSweep(env);
+
+    const nodeCandidateQueries = vi.mocked(env.DATABASE.prepare).mock.calls
+      .map(([sql]) => sql)
+      .filter((sql) => sql.includes('FROM nodes n'));
+    expect(nodeCandidateQueries).toHaveLength(6);
+    expect(nodeCandidateQueries.every((sql) => sql.includes('cleanup_backoff_until'))).toBe(true);
   });
 
   describe('Layer 1: stale warm node destruction', () => {
@@ -396,7 +413,59 @@ describe('runNodeCleanupSweep', () => {
       const cfStatement = prepare.mock.results[cfQueryIndex]?.value as {
         bind: ReturnType<typeof vi.fn>;
       };
-      expect(cfStatement.bind.mock.calls[0]?.[1]).toBe(3);
+      expect(cfStatement.bind.mock.calls[0]?.[2]).toBe(3);
     });
+  });
+});
+
+describe('node cleanup permanent-failure escape', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('backs off a failed candidate so the next sweep page can advance', async () => {
+    const { stopNodeResources } = await import('../../src/services/nodes');
+    vi.mocked(stopNodeResources).mockRejectedValue(new Error('provider returned 403'));
+    const now = new Date('2026-08-09T00:00:00.000Z');
+    let cleanupBackoffUntil: string | null = null;
+    const candidate = {
+      node_id: 'node-permanent-403',
+      user_id: 'user-1',
+      workspace_id: 'workspace-1',
+      task_id: 'task-1',
+      task_status: 'failed',
+    };
+
+    const env = createMockEnv(new Map(), {
+      NODE_CLEANUP_FAILURE_BACKOFF_MS: '3600000',
+      DATABASE: {
+        prepare: vi.fn((sql: string) => ({
+          bind: vi.fn((...args: unknown[]) => ({
+            all: vi.fn(async () => {
+              if (!sql.includes('SELECT DISTINCT n.id')) return { results: [] };
+              return { results: cleanupBackoffUntil === null ? [candidate] : [] };
+            }),
+            run: vi.fn(async () => {
+              if (sql.includes('cleanup_backoff_until')) {
+                cleanupBackoffUntil = args[0] as string;
+              }
+              return { meta: { changes: 1 } };
+            }),
+          })),
+        })),
+      } as unknown as D1Database,
+    });
+    const config = resolveCleanupConfig(env);
+
+    await sweepTerminalCfContainers(env, now, config, emptyResult());
+    expect(cleanupBackoffUntil).toBe('2026-08-09T01:00:00.000Z');
+    await sweepTerminalCfContainers(env, now, config, emptyResult());
+
+    expect(stopNodeResources).toHaveBeenCalledTimes(1);
+    expect(cleanupBackoffUntil).toBe('2026-08-09T01:00:00.000Z');
+    const candidateQuery = vi.mocked(env.DATABASE.prepare).mock.calls
+      .map(([sql]) => sql)
+      .find((sql) => sql.includes('SELECT DISTINCT n.id'));
+    expect(candidateQuery).toContain('cleanup_backoff_until');
   });
 });

@@ -1035,6 +1035,8 @@ export const nodes = sqliteTable(
     /** Cloudflare Tunnel display name for user-owned tunnel nodes. Null otherwise. */
     tunnelName: text('tunnel_name'),
     errorMessage: text('error_message'),
+    /** Candidate-page escape after cleanup failure; ISO-8601 UTC timestamp. */
+    cleanupBackoffUntil: text('cleanup_backoff_until'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),

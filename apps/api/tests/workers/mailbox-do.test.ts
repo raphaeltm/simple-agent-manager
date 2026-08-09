@@ -42,6 +42,8 @@ describe('Agent Mailbox (Durable Messaging)', () => {
       expect(msg.messageClass).toBe('notify');
       expect(msg.ackRequired).toBe(false); // notify is best-effort
       expect(msg.content).toBe('Hello from parent');
+      expect(msg.expiresAt).not.toBeNull();
+      expect(msg.expiresAt! - msg.createdAt).toBe(3_600_000);
     });
 
     it('enqueues a durable message with ackRequired=true', async () => {
@@ -162,6 +164,27 @@ describe('Agent Mailbox (Durable Messaging)', () => {
       // Cannot ack a queued message (must be delivered first)
       const acked = await stub.acknowledgeMailboxMessage(msg.id);
       expect(acked).toBe(false);
+    });
+
+    it('increments delivery attempts when requeueing for redelivery', async () => {
+      const stub = getStub('mailbox-requeue-attempt-test');
+      const sessionId = await stub.createSession(null, 'Redelivery attempts');
+      const msg = await stub.enqueueMailboxMessage({
+        targetSessionId: sessionId,
+        sourceTaskId: 'task-redelivery-1',
+        senderType: 'agent',
+        senderId: null,
+        messageClass: 'deliver',
+        content: 'Retry this message',
+      });
+
+      await stub.markMailboxMessageDelivered(msg.id);
+      expect((await stub.getMailboxMessage(msg.id))!.deliveryAttempts).toBe(1);
+
+      await stub.requeueMailboxMessage(msg.id);
+      const requeued = await stub.getMailboxMessage(msg.id);
+      expect(requeued!.deliveryState).toBe('queued');
+      expect(requeued!.deliveryAttempts).toBe(2);
     });
 
     it('cannot ack an already expired message', async () => {

@@ -8,6 +8,8 @@
  * See: specs/018-project-first-architecture/research.md (Decision 6)
  */
 
+import { MAILBOX_DEFAULTS } from '@simple-agent-manager/shared';
+
 import { log } from '../lib/logger';
 import { parseMigrationName } from './project-data/row-schemas';
 
@@ -643,6 +645,20 @@ export const MIGRATIONS: Migration[] = [
     name: '024-chat-message-origin',
     run: (sql) => {
       sql.exec(`ALTER TABLE chat_messages ADD COLUMN origin TEXT`);
+    },
+  },
+  {
+    // Legacy messages could be inserted with NULL expiry when callers omitted
+    // ttlMs. Backfill in place; the WHERE clause is mandatory for DO migration
+    // safety and leaves finite caller-provided expiries untouched.
+    name: '025-mailbox-null-ttl-backfill',
+    run: (sql) => {
+      sql.exec(
+        `UPDATE session_inbox
+         SET expires_at = created_at + ?
+         WHERE expires_at IS NULL`,
+        MAILBOX_DEFAULTS.TTL_MS,
+      );
     },
   },
 ];

@@ -21,6 +21,7 @@ import {
 import {
   classifyDiagnosisFailure,
   diagnosisRetryDelay,
+  resolveDiagnosisCompletedStepDelayMs,
   safeDiagnosisMessage,
 } from '../services/diagnosis-runner-policy';
 import { redactSensitiveData } from '../services/observability';
@@ -167,7 +168,11 @@ export class DiagnosisRunner extends DurableObject<Env> {
         ? `model:${state.turns + 1}`
         : `tool:${state.turns}:${state.pendingTools[0]?.id ?? 'missing'}`;
     if (state.completedStepKeys.includes(stepKey)) {
-      await this.ctx.storage.setAlarm(Date.now());
+      const now = Date.now();
+      const minimumDelayMs = resolveDiagnosisCompletedStepDelayMs(
+        this.env.DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS
+      );
+      await this.ctx.storage.setAlarm(Math.max(now + minimumDelayMs, now + 1));
       return;
     }
     if (state.inFlightStepKey === stepKey) {

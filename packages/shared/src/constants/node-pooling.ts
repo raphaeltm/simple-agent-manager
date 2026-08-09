@@ -56,6 +56,9 @@ export const DEFAULT_NODE_ABSOLUTE_MAX_LIFETIME_MS = 24 * 60 * 60 * 1000; // 24 
  */
 export const DEFAULT_NODE_CLEANUP_SWEEP_LIMIT = 25;
 
+/** Backoff after a node cleanup candidate fails permanently or transiently. */
+export const DEFAULT_NODE_CLEANUP_FAILURE_BACKOFF_MS = 60 * 60 * 1000; // 1 hour
+
 /**
  * Default maximum workspace candidates processed per cleanup phase per sweep (rule 47).
  * Override via WORKSPACE_CLEANUP_SWEEP_LIMIT env var.

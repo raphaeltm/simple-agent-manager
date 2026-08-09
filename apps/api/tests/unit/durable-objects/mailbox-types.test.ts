@@ -10,7 +10,7 @@ import {
   MESSAGE_CLASSES,
   SENDER_TYPES,
 } from '@simple-agent-manager/shared';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { MIGRATIONS } from '../../../src/durable-objects/migrations';
 
@@ -110,5 +110,20 @@ describe('Migration 017 Safety', () => {
     const source = m017!.run.toString();
     expect(source).toContain('idx_inbox_delivery_sweep');
     expect(source).toContain('idx_inbox_target_state');
+  });
+});
+
+describe('Migration 025 mailbox TTL backfill', () => {
+  it('backfills only NULL expiries with the default finite TTL', () => {
+    const migration = MIGRATIONS.find((m) => m.name === '025-mailbox-null-ttl-backfill');
+    expect(migration).toBeDefined();
+    const exec = vi.fn(() => ({ toArray: () => [] }));
+
+    migration!.run({ exec } as unknown as SqlStorage);
+
+    expect(exec).toHaveBeenCalledWith(
+      expect.stringMatching(/UPDATE session_inbox[\s\S]*WHERE expires_at IS NULL/i),
+      MAILBOX_DEFAULTS.TTL_MS,
+    );
   });
 });

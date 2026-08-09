@@ -22,6 +22,7 @@ import {
   type CleanupDb,
   destroyNodeForCleanup,
   LAST_WORKSPACE_ACTIVITY_SQL,
+  markNodeCleanupBackoff,
   type NodeCleanupResult,
 } from './shared';
 
@@ -43,6 +44,7 @@ export async function sweepTerminalCfContainers(
        AND n.status NOT IN ('deleted', 'stopped')
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
+       AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        AND w.status IN ('running', 'creating', 'recovery', 'sleeping', 'stopped')
        AND t.status IN ('completed', 'failed', 'cancelled')
        AND NOT EXISTS (
@@ -55,6 +57,7 @@ export async function sweepTerminalCfContainers(
      LIMIT ?`
   )
     .bind(
+      now.toISOString(),
       new Date(now.getTime() - config.orphanGracePeriodMs).toISOString(),
       config.cfContainerSweepLimit
     )
@@ -96,6 +99,11 @@ export async function sweepTerminalCfContainers(
 
       result.cfContainersDestroyed++;
     } catch (err) {
+      await markNodeCleanupBackoff(
+        env,
+        candidate.node_id,
+        new Date(now.getTime() + config.failureBackoffMs).toISOString()
+      );
       log.error('node_cleanup.cf_container_terminal_task_destroy_failed', {
         nodeId: candidate.node_id,
         workspaceId: candidate.workspace_id,
@@ -128,11 +136,12 @@ export async function sweepStaleWarmNodes(
        AND n.status = 'running'
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
+       AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
      GROUP BY n.id, n.user_id, n.warm_since
      ORDER BY n.warm_since ASC
      LIMIT ?`
   )
-    .bind(staleThreshold, config.nodeSweepLimit)
+    .bind(staleThreshold, now.toISOString(), config.nodeSweepLimit)
     .all<{
       id: string;
       user_id: string;
@@ -158,6 +167,7 @@ export async function sweepStaleWarmNodes(
       failureMessagePrefix: 'Failed to destroy stale warm node',
       recoveryType: 'stale_warm_node_cleanup',
       failureRecoveryType: 'stale_warm_node_cleanup_failure',
+      failureBackoffMs: config.failureBackoffMs,
       level: 'info',
       context: { warmSince: node.warm_since, gracePeriodMs: config.gracePeriodMs },
     });
@@ -208,12 +218,13 @@ export async function sweepMaxLifetimeNodes(
        AND n.status NOT IN ('stopped', 'deleted')
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
+       AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        AND n.created_at < ?
      GROUP BY n.id, n.user_id, n.status, n.created_at
      ORDER BY n.created_at ASC
      LIMIT ?`
   )
-    .bind(lifetimeThreshold, config.nodeSweepLimit)
+    .bind(now.toISOString(), lifetimeThreshold, config.nodeSweepLimit)
     .all<{
       id: string;
       user_id: string;
@@ -258,6 +269,7 @@ export async function sweepMaxLifetimeNodes(
         ? 'absolute_max_lifetime_node_cleanup'
         : 'max_lifetime_node_cleanup',
       failureRecoveryType: 'max_lifetime_node_cleanup_failure',
+      failureBackoffMs: config.failureBackoffMs,
       context: {
         createdAt: node.created_at,
         lastWorkspaceActivity: node.last_activity,
@@ -297,12 +309,13 @@ export async function sweepStoppedHandoffNodes(
      WHERE n.status = 'stopped'
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
+       AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        AND n.created_at < ?
      GROUP BY n.id, n.user_id, n.status, n.created_at, n.updated_at
      ORDER BY n.created_at ASC
      LIMIT ?`
   )
-    .bind(threshold, config.nodeSweepLimit)
+    .bind(now.toISOString(), threshold, config.nodeSweepLimit)
     .all<{
       id: string;
       user_id: string;
@@ -331,6 +344,7 @@ export async function sweepStoppedHandoffNodes(
       failureMessagePrefix: 'Failed to destroy stopped handoff node',
       recoveryType: 'stopped_node_handoff_cleanup',
       failureRecoveryType: 'stopped_node_handoff_cleanup_failure',
+      failureBackoffMs: config.failureBackoffMs,
       context: {
         createdAt: node.created_at,
         updatedAt: node.updated_at,
@@ -383,13 +397,14 @@ export async function sweepIncompatibleVmAgentNodes(
      WHERE n.status = 'running'
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
+       AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        AND (n.runtime IS NULL OR n.runtime = 'vm')
        AND (n.agent_version IS NULL OR n.agent_version != ?)
      GROUP BY n.id, n.user_id, n.status, n.created_at, n.agent_version
      ORDER BY n.created_at ASC
      LIMIT ?`
   )
-    .bind(requiredVersion, config.nodeSweepLimit)
+    .bind(now.toISOString(), requiredVersion, config.nodeSweepLimit)
     .all<{
       id: string;
       user_id: string;
@@ -447,6 +462,7 @@ export async function sweepIncompatibleVmAgentNodes(
       failureMessagePrefix: 'Failed to destroy incompatible VM agent node',
       recoveryType: 'incompatible_vm_agent_cleanup',
       failureRecoveryType: 'incompatible_vm_agent_cleanup_failure',
+      failureBackoffMs: config.failureBackoffMs,
       level: 'warn',
       context: {
         createdAt: node.created_at,
@@ -494,6 +510,7 @@ export async function sweepIdleOrphanNodes(
      WHERE n.status = 'running'
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
+       AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        AND n.warm_since IS NULL
        AND n.created_at < ?
        AND NOT EXISTS (
@@ -506,7 +523,7 @@ export async function sweepIdleOrphanNodes(
      ORDER BY last_activity ASC
      LIMIT ?`
   )
-    .bind(idleThreshold, idleThreshold, config.nodeSweepLimit)
+    .bind(now.toISOString(), idleThreshold, idleThreshold, config.nodeSweepLimit)
     .all<{
       id: string;
       user_id: string;
@@ -524,6 +541,7 @@ export async function sweepIdleOrphanNodes(
       failureMessagePrefix: 'Failed to destroy idle orphan node',
       recoveryType: 'idle_orphan_node_cleanup',
       failureRecoveryType: 'idle_orphan_node_cleanup_failure',
+      failureBackoffMs: config.failureBackoffMs,
       context: {
         createdAt: node.created_at,
         lastWorkspaceActivity: node.last_activity,
