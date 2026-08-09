@@ -30,8 +30,9 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
+import { logDecision, pruneDecisionLog } from './decision-log';
 import { runOrchestratorMigrations } from './migrations';
-import { logDecision, pruneDecisionLog, runSchedulingCycle } from './scheduling';
+import { runSchedulingCycle } from './scheduling';
 
 export class ProjectOrchestrator extends DurableObject<Env> {
   private projectId: string | null = null;

@@ -5,7 +5,6 @@
  * handoff packets, recompute scheduler states, detect stalls, and
  * log decisions.
  */
-import type { DecisionAction } from '@simple-agent-manager/shared';
 import type { HandoffFact } from '@simple-agent-manager/shared';
 import type { HandoffPacket } from '@simple-agent-manager/shared';
 import type { OrchestratorConfig } from '@simple-agent-manager/shared';
@@ -31,6 +30,8 @@ import { ulid } from '../../lib/ulid';
 import * as projectDataService from '../../services/project-data';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
+import { logDecision } from './decision-log';
+import { detectStalls, resolveActiveSessionIdsForTaskIds } from './stall-detection';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -61,12 +62,6 @@ const routableHandoffSchema = v.object({
   suggestedActions: v.optional(v.array(v.string())),
 });
 
-interface TaskSessionRow extends Record<string, unknown> {
-  id: string;
-  taskId: string;
-  status: 'active';
-}
-
 // ── Scheduling Cycle ──────────────────────────────────────────────────────────
 
 /**
@@ -84,14 +79,16 @@ export async function runSchedulingCycle(
   // Include completing rows left by the old lifecycle so they receive a
   // terminal cleanup instead of pinning an alarm chain forever.
   const missions = sql
-    .exec(`SELECT mission_id, status, registered_at
+    .exec(
+      `SELECT mission_id, status, registered_at
            FROM orchestrator_missions
-           WHERE status IN ('active', 'completing')`)
+           WHERE status IN ('active', 'completing')`
+    )
     .toArray() as unknown as Array<{
-      mission_id: string;
-      status?: string;
-      registered_at?: number;
-    }>;
+    mission_id: string;
+    status?: string;
+    registered_at?: number;
+  }>;
 
   if (missions.length === 0) return;
 
@@ -122,15 +119,7 @@ export async function runSchedulingCycle(
         continue;
       }
 
-      await processMission(
-        sql,
-        env,
-        projectId,
-        mission.mission_id,
-        config,
-        now,
-        registeredAt
-      );
+      await processMission(sql, env, projectId, mission.mission_id, config, now, registeredAt);
     } catch (err) {
       log.error('orchestrator.scheduling_cycle.mission_error', {
         projectId,
@@ -701,166 +690,4 @@ function readHandoffFacts(
     const factValue = item.value ? item.value : (item.fact ?? null);
     return key && factValue ? [{ key, value: factValue }] : [];
   });
-}
-
-async function resolveActiveSessionIdsForTaskIds(
-  env: Env,
-  projectId: string,
-  taskIds: string[]
-): Promise<Map<string, string>> {
-  const uniqueTaskIds = [...new Set(taskIds)];
-  const sessions = await projectDataService.getSessionsByTaskIds(env, projectId, uniqueTaskIds);
-  const resolved = new Map<string, string>();
-
-  for (const taskId of uniqueTaskIds) {
-    const session = sessions.find((candidate) => isActiveSessionForTask(candidate, taskId));
-    if (session) {
-      resolved.set(taskId, session.id);
-    }
-  }
-
-  return resolved;
-}
-
-function isActiveSessionForTask(
-  candidate: Record<string, unknown>,
-  taskId: string
-): candidate is TaskSessionRow {
-  return (
-    candidate.taskId === taskId && candidate.status === 'active' && typeof candidate.id === 'string'
-  );
-}
-
-// ── Stall Detection ───────────────────────────────────────────────────────────
-
-/**
- * Detect tasks that have been running without progress for too long.
- */
-async function detectStalls(
-  sql: SqlStorage,
-  env: Env,
-  projectId: string,
-  missionId: string,
-  tasks: TaskRow[],
-  config: OrchestratorConfig,
-  now: number
-): Promise<void> {
-  const stallThreshold = now - config.stallTimeoutMs;
-
-  const runningTasks = tasks.filter((t) => t.status === 'running' || t.status === 'delegated');
-
-  const runningTaskIds = runningTasks.map((task) => task.id);
-  const sessionResolutions = await resolveActiveSessionIdsForTaskIds(
-    env,
-    projectId,
-    runningTaskIds
-  );
-
-  for (const task of runningTasks) {
-    const updatedAt = new Date(task.updated_at).getTime();
-    if (updatedAt > stallThreshold) continue;
-
-    // Check if we already sent a stall interrupt recently
-    const recentStall = sql
-      .exec(
-        `SELECT 1 FROM decision_log
-       WHERE task_id = ? AND action = 'stall_detected'
-       AND created_at > ?
-       LIMIT 1`,
-        task.id,
-        stallThreshold
-      )
-      .toArray();
-    if (recentStall.length > 0) continue;
-
-    // Send interrupt message to the stalled task
-    const targetSessionId = sessionResolutions.get(task.id) ?? null;
-    if (!targetSessionId) {
-      const reason = 'No active chat session found for stalled task; interrupt not enqueued';
-      log.warn('orchestrator.stall_target_session_missing', {
-        projectId,
-        missionId,
-        taskId: task.id,
-        reason,
-      });
-      logDecision(sql, missionId, task.id, 'skip', reason, now, {
-        reason: 'missing_target_session',
-        stallDurationMs: now - updatedAt,
-      });
-      continue;
-    }
-
-    try {
-      await projectDataService.enqueueMailboxMessage(env, projectId, {
-        targetSessionId,
-        sourceTaskId: null,
-        senderType: 'orchestrator' as const,
-        senderId: `orchestrator:${projectId}`,
-        messageClass: 'interrupt' as const,
-        content:
-          `[Orchestrator] This task has not reported progress for ${Math.round(config.stallTimeoutMs / 60000)} minutes. ` +
-          `Please provide a status update. If you are blocked, update your task status or request human input.`,
-        metadata: { reason: 'stall_detection', stallDurationMs: now - updatedAt },
-      });
-
-      logDecision(
-        sql,
-        missionId,
-        task.id,
-        'stall_detected',
-        `Task stalled for ${Math.round((now - updatedAt) / 60000)}min — interrupt sent`,
-        now
-      );
-
-      log.info('orchestrator.stall_detected', {
-        projectId,
-        missionId,
-        taskId: task.id,
-        stallDurationMs: now - updatedAt,
-      });
-    } catch (err) {
-      log.warn('orchestrator.stall_interrupt_failed', {
-        projectId,
-        missionId,
-        taskId: task.id,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-}
-
-// ── Decision Log ──────────────────────────────────────────────────────────────
-
-export function logDecision(
-  sql: SqlStorage,
-  missionId: string,
-  taskId: string | null,
-  action: DecisionAction,
-  reason: string,
-  now: number,
-  metadata?: Record<string, unknown>
-): void {
-  sql.exec(
-    `INSERT INTO decision_log (id, mission_id, task_id, action, reason, metadata, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    ulid(),
-    missionId,
-    taskId,
-    action,
-    reason,
-    metadata ? JSON.stringify(metadata) : null,
-    now
-  );
-}
-
-/**
- * Prune old decision log entries beyond the configured max.
- */
-export function pruneDecisionLog(sql: SqlStorage, maxEntries: number): void {
-  sql.exec(
-    `DELETE FROM decision_log WHERE id NOT IN (
-       SELECT id FROM decision_log ORDER BY created_at DESC LIMIT ?
-     )`,
-    maxEntries
-  );
 }

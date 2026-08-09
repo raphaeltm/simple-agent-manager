@@ -29,12 +29,12 @@ import { DurableObject } from 'cloudflare:workers';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
-import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { saveAgentCredentialForUser } from '../../services/agent-credential-save';
 import {
   isTerminalSetupStatus,
   type SetupSessionStatus,
 } from '../../services/credential-setup-config';
+import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import {
   destroySandboxInstance,
   getSandboxConfig,
