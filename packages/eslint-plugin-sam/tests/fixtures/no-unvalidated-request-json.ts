@@ -8,10 +8,9 @@ export async function currentTruePositive(c: { req: { json<T>(): Promise<T> } })
 }
 
 export async function multilineTruePositive(context: { req: { json<T>(): Promise<T> } }) {
-  const body = await context.req
-    .json<{
-      defaultModel: string;
-    }>();
+  const body = await context.req.json<{
+    defaultModel: string;
+  }>();
   return body.defaultModel;
 }
 
@@ -19,10 +18,16 @@ export async function safeUntyped(c: { req: { json(): Promise<unknown> } }) {
   return c.req.json();
 }
 
-export async function safeValidatorRoute(app: { post(path: string, validator: unknown, handler: unknown): void }) {
-  app.post('/ok', jsonValidator('json', {}), async (c: { req: { valid(kind: 'json'): CreatePolicyRequest } }) => {
-    return c.req.valid('json');
-  });
+export async function safeValidatorRoute(app: {
+  post(path: string, validator: unknown, handler: unknown): void;
+}) {
+  app.post(
+    '/ok',
+    jsonValidator('json', {}),
+    async (c: { req: { valid(kind: 'json'): CreatePolicyRequest } }) => {
+      return c.req.valid('json');
+    }
+  );
 }
 
 export async function aliasNearMiss(c: { request: { json<T>(): Promise<T> } }) {

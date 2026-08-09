@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { validateOsvPolicy } from './check-osv-policy';
+import { extractOsvIgnores, validateOsvPolicy } from './check-osv-policy';
 
 const now = new Date('2026-08-09T00:00:00Z');
 
@@ -51,6 +51,34 @@ describe('OSV policy validator', () => {
     expect(result.errors).toEqual([
       'OSV ignore GHSA-expired requires a future expiry.',
       'OSV ignore GHSA-missing-reason requires a reason.',
+    ]);
+  });
+
+  it('extracts vulnerability and package overrides for the same expiry policy', () => {
+    expect(
+      extractOsvIgnores(`
+        [[IgnoredVulns]]
+        id = "GHSA-example"
+        reason = "Awaiting an upstream fix."
+        ignoreUntil = "2026-09-01"
+
+        [[PackageOverrides]]
+        name = "example-package"
+        vulnerability.ignore = true
+        reason = "Not reachable in production."
+        effectiveUntil = "2026-09-02"
+      `)
+    ).toEqual([
+      {
+        id: 'GHSA-example',
+        reason: 'Awaiting an upstream fix.',
+        expires: '2026-09-01',
+      },
+      {
+        id: 'example-package',
+        reason: 'Not reachable in production.',
+        expires: '2026-09-02',
+      },
     ]);
   });
 });

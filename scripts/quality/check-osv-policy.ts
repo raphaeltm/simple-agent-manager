@@ -49,3 +49,49 @@ export function validateOsvPolicy(input: OsvPolicyInput, now = new Date()): OsvP
 
   return { ok: errors.length === 0, errors, advisoryRun };
 }
+
+export function extractOsvIgnores(config: string): OsvIgnoreEntry[] {
+  return config
+    .split(/(?=^\s*\[\[)/m)
+    .map((section) => {
+      const header = /^\s*\[\[(IgnoredVulns|PackageOverrides)\]\]/.exec(section);
+      return { block: section, kind: header?.[1] };
+    })
+    .filter(
+      ({ kind, block }) =>
+        kind === 'IgnoredVulns' ||
+        (kind === 'PackageOverrides' &&
+          /^\s*(?:ignore|vulnerability\.ignore)\s*=\s*true\s*$/m.test(block))
+    )
+    .map(({ block }) => {
+      const value = (name: string): string | undefined =>
+        new RegExp(`^\\s*${name}\\s*=\\s*["']([^"']+)["']`, 'm').exec(block)?.[1];
+      return {
+        id: value('id') ?? value('name') ?? '<package-override>',
+        reason: value('reason'),
+        expires: value('ignoreUntil') ?? value('effectiveUntil'),
+      };
+    });
+}
+
+function main(): void {
+  const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
+  const config = readFileSync(resolve(repoRoot, 'osv-scanner.toml'), 'utf8');
+  const result = validateOsvPolicy({
+    eventName: 'schedule',
+    hasPrivateBacklogRouting: true,
+    ignores: extractOsvIgnores(config),
+  });
+  if (!result.ok) {
+    console.error(
+      ['OSV policy check failed:', ...result.errors.map((error) => `- ${error}`)].join('\n')
+    );
+    process.exit(1);
+  }
+  console.log('OSV ignore policy passed.');
+}
+
+if (import.meta.url === `file://${process.argv[1]}`) main();
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';

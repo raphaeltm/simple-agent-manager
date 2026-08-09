@@ -1,5 +1,4 @@
 import { readFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { RuleTester } from 'eslint';
@@ -10,9 +9,6 @@ import noLocalRecordGuard from '../src/rules/no-local-record-guard.js';
 import noUnsafeJsonParseAssertion from '../src/rules/no-unsafe-json-parse-assertion.js';
 import noUnvalidatedRequestJson from '../src/rules/no-unvalidated-request-json.js';
 
-const require = createRequire(import.meta.url);
-const eslintVersion = require('eslint/package.json').version;
-const eslintMajor = Number(eslintVersion.split('.')[0]);
 const dirname = fileURLToPath(new URL('.', import.meta.url));
 
 function fixture(name) {
@@ -23,10 +19,9 @@ const unvalidatedRequestJsonFixture = fixture('no-unvalidated-request-json.ts');
 const unsafeJsonParseAssertionFixture = fixture('no-unsafe-json-parse-assertion.ts');
 const localRecordGuardFixture = fixture('no-local-record-guard.ts');
 
-function expectedError(messageId, suggestionMessageId) {
-  return eslintMajor >= 9
-    ? { messageId, suggestions: 1 }
-    : { messageId, suggestions: [{ messageId: suggestionMessageId }] };
+function expectedError(messageId, suggestionMessageId, output) {
+  if (!suggestionMessageId || !output) return { messageId };
+  return { messageId, suggestions: [{ messageId: suggestionMessageId, output }] };
 }
 
 const languageOptions = {
@@ -39,21 +34,12 @@ RuleTester.describe = describe;
 RuleTester.it = it;
 RuleTester.itOnly = it.only;
 
-const ruleTester =
-  eslintMajor >= 9
-    ? new RuleTester({ languageOptions })
-    : new RuleTester({
-        parser: require.resolve('@typescript-eslint/parser'),
-        parserOptions: {
-          ecmaVersion: 2022,
-          sourceType: 'module',
-        },
-      });
+const ruleTester = new RuleTester({ languageOptions });
 
 ruleTester.run('no-unvalidated-request-json', noUnvalidatedRequestJson, {
   valid: [
-    "const body = await c.req.json();",
-    "const body = await c.request.json<Payload>();",
+    'const body = await c.req.json();',
+    'const body = await c.request.json<Payload>();',
     "const body = await c.req['json']<Payload>();",
     "app.post('/ok', jsonValidator('json', schema), (c) => c.req.valid('json'));",
     "const text = 'await c.req.json<Payload>()'; // await c.req.json<Payload>()",
@@ -62,8 +48,22 @@ ruleTester.run('no-unvalidated-request-json', noUnvalidatedRequestJson, {
     {
       code: unvalidatedRequestJsonFixture,
       errors: [
-        expectedError('unvalidatedRequestJson', 'useRuntimeValidator'),
-        expectedError('unvalidatedRequestJson', 'useRuntimeValidator'),
+        expectedError(
+          'unvalidatedRequestJson',
+          'useRuntimeValidator',
+          unvalidatedRequestJsonFixture.replace(
+            'c.req.json<CreatePolicyRequest>()',
+            'c.req.json<unknown>()'
+          )
+        ),
+        expectedError(
+          'unvalidatedRequestJson',
+          'useRuntimeValidator',
+          unvalidatedRequestJsonFixture.replace(
+            '.json<{\n    defaultModel: string;\n  }>()',
+            '.json<unknown>()'
+          )
+        ),
       ],
     },
   ],
@@ -80,10 +80,38 @@ ruleTester.run('no-unsafe-json-parse-assertion', noUnsafeJsonParseAssertion, {
     {
       code: unsafeJsonParseAssertionFixture,
       errors: [
-        expectedError('unsafeAssertion', 'parseUnknownThenValidate'),
-        expectedError('unsafeAssertion', 'parseUnknownThenValidate'),
-        expectedError('unsafeAssertion', 'parseUnknownThenValidate'),
-        expectedError('unsafeAssertion', 'parseUnknownThenValidate'),
+        expectedError(
+          'unsafeAssertion',
+          'parseUnknownThenValidate',
+          unsafeJsonParseAssertionFixture.replace(
+            'JSON.parse(raw) as Record<string, unknown>',
+            'JSON.parse(raw) as unknown'
+          )
+        ),
+        expectedError(
+          'unsafeAssertion',
+          'parseUnknownThenValidate',
+          unsafeJsonParseAssertionFixture.replace(
+            'JSON.parse(raw) as Partial<Payload>',
+            'JSON.parse(raw) as unknown'
+          )
+        ),
+        expectedError(
+          'unsafeAssertion',
+          'parseUnknownThenValidate',
+          unsafeJsonParseAssertionFixture.replace(
+            'JSON.parse(raw) as { error?: string; cause?: string }',
+            'JSON.parse(raw) as unknown'
+          )
+        ),
+        expectedError(
+          'unsafeAssertion',
+          'parseUnknownThenValidate',
+          unsafeJsonParseAssertionFixture.replace(
+            'JSON.parse(raw) as unknown as Payload',
+            'JSON.parse(raw) as unknown as unknown'
+          )
+        ),
       ],
     },
   ],
@@ -99,10 +127,7 @@ ruleTester.run('no-local-record-guard', noLocalRecordGuard, {
   invalid: [
     {
       code: localRecordGuardFixture,
-      errors: [
-        expectedError('localRecordGuard', 'useSharedValidation'),
-        expectedError('localRecordGuard', 'useSharedValidation'),
-      ],
+      errors: [expectedError('localRecordGuard'), expectedError('localRecordGuard')],
     },
   ],
 });

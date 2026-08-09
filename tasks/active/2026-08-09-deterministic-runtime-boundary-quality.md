@@ -52,20 +52,20 @@ The implementation must improve editor feedback and CI determinism without chang
 
 Tracked files were counted with `git ls-files` for `.ts`, `.tsx`, `.mts`, `.cts`, and `.astro`, so generated/untracked output is excluded.
 
-| Workspace | Lint today | Type/template check today | TS | TSX | MTS | CTS | Astro | Total |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| `apps/api` | yes | yes | 1151 | 0 | 0 | 0 | 0 | 1151 |
-| `apps/tail-worker` | no | yes | 4 | 0 | 0 | 0 | 0 | 4 |
-| `apps/web` | yes | yes | 335 | 501 | 0 | 0 | 0 | 836 |
-| `apps/www` | no | no | 12 | 0 | 0 | 0 | 32 | 44 |
-| `infra` | no | yes | 20 | 0 | 0 | 0 | 0 | 20 |
-| `packages/acp-client` | yes | yes | 34 | 41 | 0 | 0 | 0 | 75 |
-| `packages/cloud-init` | no | yes | 5 | 0 | 0 | 0 | 0 | 5 |
-| `packages/providers` | yes | yes | 60 | 0 | 0 | 0 | 0 | 60 |
-| `packages/shared` | yes | yes | 104 | 0 | 0 | 0 | 0 | 104 |
-| `packages/terminal` | yes | yes | 12 | 9 | 0 | 0 | 0 | 21 |
-| `packages/ui` | yes | yes | 8 | 30 | 0 | 0 | 0 | 38 |
-| `tools/og-image` | no | no | 3 | 0 | 0 | 0 | 0 | 3 |
+| Workspace             | Lint today | Type/template check today |   TS | TSX | MTS | CTS | Astro | Total |
+| --------------------- | ---------- | ------------------------- | ---: | --: | --: | --: | ----: | ----: |
+| `apps/api`            | yes        | yes                       | 1151 |   0 |   0 |   0 |     0 |  1151 |
+| `apps/tail-worker`    | no         | yes                       |    4 |   0 |   0 |   0 |     0 |     4 |
+| `apps/web`            | yes        | yes                       |  335 | 501 |   0 |   0 |     0 |   836 |
+| `apps/www`            | no         | no                        |   12 |   0 |   0 |   0 |    32 |    44 |
+| `infra`               | no         | yes                       |   20 |   0 |   0 |   0 |     0 |    20 |
+| `packages/acp-client` | yes        | yes                       |   34 |  41 |   0 |   0 |     0 |    75 |
+| `packages/cloud-init` | no         | yes                       |    5 |   0 |   0 |   0 |     0 |     5 |
+| `packages/providers`  | yes        | yes                       |   60 |   0 |   0 |   0 |     0 |    60 |
+| `packages/shared`     | yes        | yes                       |  104 |   0 |   0 |   0 |     0 |   104 |
+| `packages/terminal`   | yes        | yes                       |   12 |   9 |   0 |   0 |     0 |    21 |
+| `packages/ui`         | yes        | yes                       |    8 |  30 |   0 |   0 |     0 |    38 |
+| `tools/og-image`      | no         | no                        |    3 |   0 |   0 |   0 |     0 |     3 |
 
 The five lint gaps now contain **76** tracked TS/Astro files, not the historical 44. The repository has 2,401 tracked TS-family files; the audited non-test/config source scope contains 1,315 files.
 
@@ -73,16 +73,16 @@ The five lint gaps now contain **76** tracked TS/Astro files, not the historical
 
 A ts-morph syntax pass over the 1,315-file non-test/config source scope found:
 
-| Pattern | Current count | Rollout role |
-| --- | ---: | --- |
-| `as any` assertions | 1 | remove the runtime occurrence, then block at zero |
-| Hono-style `*.req.json<T>()` | 24 | advisory ESLint diagnostic + blocking net-count ratchet |
-| typed `JSON.parse(...) as T` excluding `as unknown` | 23 | advisory ESLint diagnostic + blocking net-count ratchet |
-| local `isRecord`/`isObject` definitions | 9 | advisory ESLint diagnostic + blocking net-count ratchet |
-| `as Record<string, unknown>` | 90 | report-only population; never a broad ban |
-| nested `as unknown as` | 132 | report-only population; never a blanket ban |
-| files importing Valibot | 70 | context only |
-| files importing Zod | 5 | bounded existing subsystems; no incidental migration |
+| Pattern                                             | Current count | Rollout role                                            |
+| --------------------------------------------------- | ------------: | ------------------------------------------------------- |
+| `as any` assertions                                 |             1 | remove the runtime occurrence, then block at zero       |
+| Hono-style `*.req.json<T>()`                        |            24 | advisory ESLint diagnostic + blocking net-count ratchet |
+| typed `JSON.parse(...) as T` excluding `as unknown` |            23 | advisory ESLint diagnostic + blocking net-count ratchet |
+| local `isRecord`/`isObject` definitions             |             9 | advisory ESLint diagnostic + blocking net-count ratchet |
+| `as Record<string, unknown>`                        |            90 | report-only population; never a broad ban               |
+| nested `as unknown as`                              |           132 | report-only population; never a blanket ban             |
+| files importing Valibot                             |            70 | context only                                            |
+| files importing Zod                                 |             5 | bounded existing subsystems; no incidental migration    |
 
 The one real non-test `as any` is `apps/web/src/pages/ToolsCli.tsx:58`. `JSON.parse(...) as unknown` is explicitly safe and excluded from the unsafe-assertion rule and ratchet.
 

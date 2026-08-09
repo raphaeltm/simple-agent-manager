@@ -33,7 +33,8 @@ function isUnknownAssertion(node) {
   return node.typeAnnotation?.type === 'TSUnknownKeyword';
 }
 
-export default {
+/** @type {import('eslint').Rule.RuleModule} */
+const rule = {
   meta: {
     type: 'problem',
     docs: {
@@ -51,8 +52,6 @@ export default {
     schema: [],
   },
   create(context) {
-    const sourceCode = context.sourceCode ?? context.getSourceCode();
-
     return {
       TSAsExpression(node) {
         if (isUnknownAssertion(node)) {
@@ -69,7 +68,7 @@ export default {
           suggest: [
             {
               messageId: 'parseUnknownThenValidate',
-              fix: (fixer) => fixer.replaceText(node, sourceCode.getText(node)),
+              fix: (fixer) => fixer.replaceText(node.typeAnnotation, 'unknown'),
             },
           ],
         });
@@ -77,3 +76,5 @@ export default {
     };
   },
 };
+
+export default rule;

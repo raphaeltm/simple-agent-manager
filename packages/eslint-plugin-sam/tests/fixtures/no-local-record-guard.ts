@@ -10,7 +10,12 @@ export function isRuntimeRecord(value: unknown): value is Record<string, unknown
 }
 
 export function isRecordWithSemantics(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value) && Object.keys(value).length > 0;
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    Object.keys(value).length > 0
+  );
 }
 
 export function isRecordBoolean(value: unknown): boolean {

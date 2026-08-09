@@ -16,7 +16,7 @@
     "as-any": 0,
     "hono-req-json-generic": 24,
     "typed-json-parse": 23,
-    "local-record-guard": 7
+    "local-record-guard": 9
   },
   "reportOnlyCounts": {
     "record-string-unknown": 90,

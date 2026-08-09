@@ -1,0 +1,59 @@
+name: Scheduled OSV Advisory
+
+on:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scheduled-osv-advisory
+  cancel-in-progress: false
+
+env:
+  OSV_SCANNER_VERSION: 2.5.0
+
+jobs:
+  scan:
+    name: Scan and Route Private Follow-up
+    if: github.repository == 'raphaeltm/simple-agent-manager'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Validate ignore ownership and expiry
+        run: pnpm quality:osv-policy
+
+      - name: Install verified OSV-Scanner release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/osv-scanner"
+          cd "$RUNNER_TEMP/osv-scanner"
+          gh release download "v${OSV_SCANNER_VERSION}" \
+            --repo google/osv-scanner \
+            --pattern osv-scanner_linux_amd64 \
+            --pattern osv-scanner_SHA256SUMS
+          sha256sum --ignore-missing --check osv-scanner_SHA256SUMS
+          chmod +x osv-scanner_linux_amd64
+          mv osv-scanner_linux_amd64 osv-scanner
+          echo "$RUNNER_TEMP/osv-scanner" >> "$GITHUB_PATH"
+
+      - name: Scan main and route owned private SAM follow-up
+        env:
+          SAM_OSV_WEBHOOK_TOKEN: ${{ secrets.SAM_OSV_WEBHOOK_TOKEN }}
+          SAM_OSV_WEBHOOK_URL: ${{ secrets.SAM_OSV_WEBHOOK_URL }}
+        run: pnpm quality:osv-advisory

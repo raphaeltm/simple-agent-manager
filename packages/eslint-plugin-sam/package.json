@@ -17,7 +17,7 @@
   },
   "devDependencies": {
     "@typescript-eslint/parser": "catalog:",
-    "eslint": "^9.39.1",
+    "eslint": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

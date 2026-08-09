@@ -149,6 +149,7 @@ export function extractDirectDependencyAdditions(diff: string): DependencyAdditi
       if (!line.startsWith('+') || line.startsWith('+++')) continue;
       const match = goRequirePattern.exec(line);
       if (match?.[1]) {
+        if (/\/\/\s*indirect\s*$/.test(line)) continue;
         const removedSameModulePattern = new RegExp(
           `^-\\s*(?:require\\s+)?${match[1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+v\\S+`
         );
@@ -195,9 +196,7 @@ function validateEvidenceEntry(
 
 export function checkDirectDependencyEvidence(diff: string, evidence: EvidenceFile): CheckResult {
   const additions = extractDirectDependencyAdditions(diff);
-  const relevantAdditions = additions.filter(
-    (addition) => addition.production && !addition.internal
-  );
+  const relevantAdditions = additions.filter((addition) => !addition.internal);
   const errors = relevantAdditions.flatMap((addition) =>
     validateEvidenceEntry(addition, evidence[addition.ecosystem]?.[addition.name])
   );
@@ -217,7 +216,16 @@ function diffAgainstBase(): string {
     : 'origin/main';
   return execFileSync(
     'git',
-    ['diff', '--unified=0', `${base}...HEAD`, '--', '**/package.json', '**/go.mod'],
+    [
+      'diff',
+      '--unified=0',
+      `${base}...HEAD`,
+      '--',
+      'package.json',
+      'go.mod',
+      '**/package.json',
+      '**/go.mod',
+    ],
     {
       cwd: repoRoot,
       encoding: 'utf8',

@@ -21,7 +21,8 @@ function isHonoRequestJsonCall(node) {
   return !reqMember.computed && getPropertyName(reqMember.property) === 'req';
 }
 
-export default {
+/** @type {import('eslint').Rule.RuleModule} */
+const rule = {
   meta: {
     type: 'problem',
     docs: {
@@ -39,11 +40,10 @@ export default {
     schema: [],
   },
   create(context) {
-    const sourceCode = context.sourceCode ?? context.getSourceCode();
-
     return {
       CallExpression(node) {
-        if (!getCallTypeArguments(node) || !isHonoRequestJsonCall(node)) {
+        const typeArguments = getCallTypeArguments(node);
+        if (!typeArguments || !isHonoRequestJsonCall(node)) {
           return;
         }
 
@@ -53,7 +53,7 @@ export default {
           suggest: [
             {
               messageId: 'useRuntimeValidator',
-              fix: (fixer) => fixer.replaceText(node, sourceCode.getText(node)),
+              fix: (fixer) => fixer.replaceText(typeArguments, '<unknown>'),
             },
           ],
         });
@@ -61,3 +61,5 @@ export default {
     };
   },
 };
+
+export default rule;

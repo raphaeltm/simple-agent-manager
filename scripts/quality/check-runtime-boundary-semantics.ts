@@ -8,7 +8,6 @@ import {
   type AsExpression,
   type CallExpression,
   type SourceFile,
-  type VariableDeclaration,
 } from 'ts-morph';
 
 type SemanticRule = 'unvalidated-row-narrowing' | 'blind-external-payload-narrowing';
@@ -74,10 +73,6 @@ function typeText(assertion: AsExpression): string {
   return assertion.getTypeNode()?.getText().replace(/\s+/g, ' ').trim() ?? '';
 }
 
-function isUnknownOrRecordTarget(target: string): boolean {
-  return target === 'unknown' || /^Record\s*</.test(target) || /^Promise\s*</.test(target);
-}
-
 function nearestStatementText(node: Node): string {
   return node.getFirstAncestorByKind(SyntaxKind.VariableStatement)?.getText() ?? node.getText();
 }
@@ -100,47 +95,65 @@ function isSanctionedHelperCall(call: CallExpression): boolean {
   return false;
 }
 
-function hasGuardBefore(assertion: AsExpression): boolean {
+function assertedIdentifier(assertion: AsExpression): string | undefined {
+  let expression = assertion.getExpression();
+  while (Node.isParenthesizedExpression(expression)) expression = expression.getExpression();
+  return Node.isIdentifier(expression) ? expression.getText() : undefined;
+}
+
+export function hasValidationGuardBefore(assertion: AsExpression): boolean {
+  const identifier = assertedIdentifier(assertion);
+  if (!identifier) return false;
   const block = assertion.getFirstAncestorByKind(SyntaxKind.Block);
   if (!block) return false;
   const assertionStart = assertion.getStart();
-  const guardedNames = new Set<string>();
-  for (const identifier of assertion.getExpression().getDescendantsOfKind(SyntaxKind.Identifier)) {
-    guardedNames.add(identifier.getText());
-  }
   const priorText = block
     .getStatements()
     .filter((statement) => statement.getStart() < assertionStart)
-    .slice(-6)
+    .slice(-8)
     .map((statement) => statement.getText())
     .join('\n');
-  if (
-    /\b(parseWithSchema|expectJsonRecord|maybeJsonRecord|readResponseJson|safeParse|jsonValidator)\b/.test(
-      priorText
+  const escaped = identifier.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const namedGuard = new RegExp(`\\bis[A-Z]\\w*\\(\\s*${escaped}\\s*\\)`).test(priorText);
+  const schemaGuard = new RegExp(
+    `\\b(parseWithSchema|expectJsonRecord|maybeJsonRecord|safeParse|v\\.safeParse)\\([^;]*\\b${escaped}\\b`
+  ).test(priorText);
+  const structuralGuard =
+    new RegExp(`typeof\\s+${escaped}\\s*={2,3}\\s*['"]object['"]`).test(priorText) &&
+    new RegExp(`typeof\\s+${escaped}\\.[A-Za-z_$][\\w$]*\\s*={2,3}`).test(priorText);
+  return namedGuard || schemaGuard || structuralGuard;
+}
+
+export function sourceExpressionText(assertion: AsExpression): string {
+  const identifier = assertedIdentifier(assertion);
+  if (!identifier) return expressionText(assertion);
+  const functionScopeStart = (node: Node): number | undefined =>
+    node
+      .getAncestors()
+      .find(
+        (ancestor) =>
+          Node.isFunctionDeclaration(ancestor) ||
+          Node.isFunctionExpression(ancestor) ||
+          Node.isArrowFunction(ancestor) ||
+          Node.isMethodDeclaration(ancestor)
+      )
+      ?.getStart();
+  const assertionScope = functionScopeStart(assertion);
+  const declaration = assertion
+    .getSourceFile()
+    .getDescendantsOfKind(SyntaxKind.VariableDeclaration)
+    .filter(
+      (candidate) =>
+        candidate.getName() === identifier &&
+        candidate.getStart() < assertion.getStart() &&
+        functionScopeStart(candidate) === assertionScope
     )
-  )
-    return true;
-  for (const name of guardedNames) {
-    if (
-      new RegExp(
-        `typeof\\s+${name}\\s*===|${name}\\s*!==\\s*null|Array\\.isArray\\(${name}\\)|is[A-Z]\\w*\\(${name}\\)`
-      ).test(priorText)
-    ) {
-      return true;
-    }
-  }
-  return false;
+    .at(-1);
+  return declaration?.getInitializer()?.getText().replace(/\s+/g, ' ') ?? identifier;
 }
 
-function initializerOf(assertion: AsExpression): string {
-  const variable = assertion.getFirstAncestorByKind(SyntaxKind.VariableDeclaration) as
-    | VariableDeclaration
-    | undefined;
-  return variable?.getInitializer()?.getText().replace(/\s+/g, ' ') ?? expressionText(assertion);
-}
-
-function isRowNarrowing(assertion: AsExpression): boolean {
-  const source = initializerOf(assertion);
+export function isRowNarrowing(assertion: AsExpression): boolean {
+  const source = sourceExpressionText(assertion);
   if (
     Node.isAsExpression(assertion.getExpression()) &&
     typeText(assertion.getExpression()) === 'unknown'
@@ -150,13 +163,15 @@ function isRowNarrowing(assertion: AsExpression): boolean {
 }
 
 function isExternalPayloadNarrowing(assertion: AsExpression): boolean {
-  const source = expressionText(assertion);
+  const source = sourceExpressionText(assertion);
   return externalPayloadPatterns.some((pattern) => pattern.test(source));
 }
 
 function isSafe(assertion: AsExpression): boolean {
-  if (isUnknownOrRecordTarget(typeText(assertion))) return true;
-  if (hasGuardBefore(assertion)) return true;
+  if (typeText(assertion) === 'unknown') return true;
+  const expression = assertion.getExpression();
+  if (Node.isAsExpression(expression) && typeText(expression) === 'unknown') return true;
+  if (hasValidationGuardBefore(assertion)) return true;
   const parentCall = assertion.getFirstAncestorByKind(SyntaxKind.CallExpression);
   return parentCall ? isSanctionedHelperCall(parentCall) : false;
 }
@@ -217,19 +232,31 @@ export function auditRuntimeBoundarySemantics(root = ROOT, scope = DEFAULT_SCOPE
 function main() {
   const scopeArg = process.argv.slice(2).find((arg) => arg.startsWith('--scope='));
   const shouldFail = process.argv.includes('--fail-on-findings');
+  const showDetails = shouldFail || process.argv.includes('--details');
   const scope = scopeArg?.slice('--scope='.length) ?? DEFAULT_SCOPE;
   const findings = auditRuntimeBoundarySemantics(ROOT, scope);
   if (findings.length === 0) {
     console.log(`Runtime-boundary semantic checks passed for ${scope}.`);
     return;
   }
-  for (const finding of findings) {
-    console.error(`${finding.file}:${finding.line} ${finding.rule}: ${finding.message}`);
-    console.error(`  ${finding.code}`);
+  if (showDetails) {
+    for (const finding of findings) {
+      console.error(`${finding.file}:${finding.line} ${finding.rule}: ${finding.message}`);
+      console.error(`  ${finding.code}`);
+    }
   }
-  console.error(
-    `Runtime-boundary semantic checks found ${findings.length} report-only diagnostics in ${scope}.`
+  const counts = Object.fromEntries(
+    [...new Set(findings.map((finding) => finding.rule))]
+      .sort()
+      .map((rule) => [rule, findings.filter((finding) => finding.rule === rule).length])
   );
+  console.log(
+    `Runtime-boundary semantic shadow: ${findings.length} advisory diagnostic(s) in ${scope} ` +
+      `(${Object.entries(counts)
+        .map(([rule, count]) => `${rule}=${count}`)
+        .join(', ')}).`
+  );
+  if (!showDetails) console.log('Run with --details for deterministic file:line diagnostics.');
   if (shouldFail) process.exit(1);
 }
 

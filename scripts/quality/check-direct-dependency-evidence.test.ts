@@ -49,17 +49,47 @@ describe('direct dependency evidence checker', () => {
     ]);
   });
 
-  it('does not require evidence for removals, version updates, dev dependencies, or workspace/internal dependencies', () => {
-    const diffs = [
-      'dependency-update-remove.diff',
-      'direct-dependency-dev.diff',
-      'direct-dependency-workspace.diff',
-    ].map(readFixture);
+  it('does not require evidence for removals, version updates, or workspace/internal dependencies', () => {
+    const diffs = ['dependency-update-remove.diff', 'direct-dependency-workspace.diff'].map(
+      readFixture
+    );
 
     for (const diff of diffs) {
       const result = checkDirectDependencyEvidence(diff, {});
       expect(result.ok).toBe(true);
     }
+  });
+
+  it('requires evidence for direct dev dependency additions too', () => {
+    const missing = checkDirectDependencyEvidence(readFixture('direct-dependency-dev.diff'), {});
+    expect(missing.errors).toContain('Missing direct dependency evidence for npm:vitest');
+
+    const present = checkDirectDependencyEvidence(readFixture('direct-dependency-dev.diff'), {
+      npm: {
+        vitest: {
+          registryUrl: 'https://www.npmjs.com/package/vitest',
+          necessity: 'Runs deterministic unit test fixtures.',
+        },
+      },
+    });
+    expect(present.ok).toBe(true);
+  });
+
+  it('detects additions in the repository-root package manifest', () => {
+    const additions = extractDirectDependencyAdditions(
+      `diff --git a/package.json b/package.json\n--- a/package.json\n+++ b/package.json\n@@ -3,0 +4,3 @@\n+  "dependencies": {\n+    "root-package": "1.0.0"\n+  }\n`
+    );
+    expect(additions).toMatchObject([
+      { ecosystem: 'npm', manifestPath: 'package.json', name: 'root-package' },
+    ]);
+  });
+
+  it('does not treat transitive Go requirements as direct additions', () => {
+    const result = checkDirectDependencyEvidence(
+      `diff --git a/packages/vm-agent/go.mod b/packages/vm-agent/go.mod\n--- a/packages/vm-agent/go.mod\n+++ b/packages/vm-agent/go.mod\n@@ -3,0 +4 @@\n+require golang.org/x/text v0.3.0 // indirect\n`,
+      {}
+    );
+    expect(result).toMatchObject({ ok: true, additions: [] });
   });
 
   it('extracts Go direct additions from module manifests only', () => {

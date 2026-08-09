@@ -24,6 +24,36 @@ export interface OxlintSummary {
   topRules: Array<{ count: number; rule: string }>;
 }
 
+function parseOxlintReport(raw: string): OxlintReport {
+  const parsed = JSON.parse(raw) as unknown;
+  if (
+    typeof parsed !== 'object' ||
+    parsed === null ||
+    !('diagnostics' in parsed) ||
+    !Array.isArray(parsed.diagnostics) ||
+    !('number_of_files' in parsed) ||
+    typeof parsed.number_of_files !== 'number' ||
+    !('number_of_rules' in parsed) ||
+    typeof parsed.number_of_rules !== 'number' ||
+    !('start_time' in parsed) ||
+    typeof parsed.start_time !== 'number' ||
+    !('threads_count' in parsed) ||
+    typeof parsed.threads_count !== 'number' ||
+    !parsed.diagnostics.every(
+      (diagnostic) =>
+        typeof diagnostic === 'object' &&
+        diagnostic !== null &&
+        'code' in diagnostic &&
+        typeof diagnostic.code === 'string' &&
+        'severity' in diagnostic &&
+        typeof diagnostic.severity === 'string'
+    )
+  ) {
+    throw new Error('Oxlint returned an unexpected JSON report shape.');
+  }
+  return parsed as OxlintReport;
+}
+
 export function summarizeOxlintReport(report: OxlintReport): OxlintSummary {
   const counts = new Map<string, number>();
   for (const diagnostic of report.diagnostics) {
@@ -82,7 +112,7 @@ function runOxlintShadow(): void {
     throw new Error(`Oxlint shadow execution failed: ${diagnostic}`);
   }
 
-  const report = JSON.parse(result.stdout) as OxlintReport;
+  const report = parseOxlintReport(result.stdout);
   const summary = summarizeOxlintReport(report);
   if (process.argv.includes('--json')) {
     console.log(JSON.stringify(summary));

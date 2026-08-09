@@ -4,11 +4,11 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
-import { auditTypeBoundaries } from './check-type-boundaries';
+import { auditTypeBoundaries, compareBlockingCounts } from './check-type-boundaries';
 
 function fixtureRepo(files: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), 'sam-type-boundary-'));
-  execFileSync('git', ['init'], { cwd: root });
+  execFileSync('git', ['init', '--quiet'], { cwd: root });
   execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
   execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
   for (const [path, content] of Object.entries(files)) {
@@ -57,8 +57,14 @@ describe('type-boundary ratchet audit', () => {
       'src/a.ts': `const unsafe = value as any;`,
     });
     const result = auditTypeBoundaries(root);
-    expect(result.blockingCounts['as-any']).toBeGreaterThan(0);
-    expect(result.blockingCounts['as-any']).toBeGreaterThan(0);
+    expect(
+      compareBlockingCounts(result.blockingCounts, {
+        'as-any': 0,
+        'hono-req-json-generic': 0,
+        'typed-json-parse': 0,
+        'local-record-guard': 0,
+      })
+    ).toEqual([{ class: 'as-any', allowed: 0, current: 1 }]);
   });
 
   it('moves and splits pass because only net counts are compared', () => {
@@ -73,6 +79,14 @@ describe('type-boundary ratchet audit', () => {
     expect(auditTypeBoundaries(split).blockingCounts).toEqual(
       auditTypeBoundaries(moved).blockingCounts
     );
+    expect(
+      compareBlockingCounts(auditTypeBoundaries(split).blockingCounts, {
+        'as-any': 1,
+        'hono-req-json-generic': 0,
+        'typed-json-parse': 1,
+        'local-record-guard': 0,
+      })
+    ).toEqual([]);
   });
 
   it('decreases pass and repeated output is identical', () => {
@@ -88,5 +102,29 @@ describe('type-boundary ratchet audit', () => {
       'local-record-guard': 0,
     });
     expect(second).toEqual(first);
+    expect(
+      compareBlockingCounts(first.blockingCounts, {
+        'as-any': 1,
+        'hono-req-json-generic': 1,
+        'typed-json-parse': 1,
+        'local-record-guard': 1,
+      })
+    ).toEqual([]);
+  });
+
+  it('matches known function and arrow record guards, including array-accepting variants', () => {
+    const root = fixtureRepo({
+      'src/guards.ts': `
+        function isRecord(value: unknown): value is Record<string, unknown> {
+          return typeof value === 'object' && value !== null;
+        }
+        const isObject = (candidate: unknown): candidate is object =>
+          typeof candidate === 'object' && candidate !== null && !Array.isArray(candidate);
+        function isRecordWithSemantics(value: unknown): value is Record<string, unknown> {
+          return typeof value === 'object' && value !== null && Object.keys(value).length > 0;
+        }
+      `,
+    });
+    expect(auditTypeBoundaries(root).blockingCounts['local-record-guard']).toBe(2);
   });
 });

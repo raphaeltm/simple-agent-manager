@@ -8,8 +8,16 @@ import simpleImportSort from 'eslint-plugin-simple-import-sort';
 import globals from 'globals';
 import tseslint from 'typescript-eslint';
 
+import samPlugin from './packages/eslint-plugin-sam/src/index.js';
+
 const typescriptFiles = ['**/*.{ts,tsx,mts,cts}'];
 const astroFiles = ['**/*.astro'];
+const samPluginFiles = ['packages/eslint-plugin-sam/**/*.js'];
+const samAdvisoryRules = {
+  'sam/no-local-record-guard': 'warn',
+  'sam/no-unsafe-json-parse-assertion': 'warn',
+  'sam/no-unvalidated-request-json': 'warn',
+};
 
 const upstreamNoUnusedVars = tseslint.plugin.rules['no-unused-vars'];
 const noUnusedVarsEslint8Compat = {
@@ -72,6 +80,31 @@ const legacyTypescriptRecommendedRules = {
   'no-unused-expressions': 'off',
 };
 
+const onboardingAdvisoryRules = Object.fromEntries(
+  Object.entries({
+    ...legacyJsRecommendedRules,
+    ...tseslint.configs.eslintRecommended.rules,
+    ...legacyTypescriptRecommendedRules,
+    '@typescript-eslint/consistent-type-imports': [
+      'error',
+      {
+        disallowTypeAnnotations: false,
+        fixStyle: 'inline-type-imports',
+        prefer: 'type-imports',
+      },
+    ],
+    '@typescript-eslint/no-explicit-any': 'warn',
+    '@typescript-eslint/no-non-null-assertion': 'warn',
+    '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
+    'no-var': 'error',
+    'simple-import-sort/exports': 'error',
+    'simple-import-sort/imports': 'error',
+  }).map(([name, config]) => [
+    name,
+    config === 'off' || config === 0 ? config : withSeverity(config, 'warn'),
+  ])
+);
+
 export default defineConfig([
   {
     ignores: [
@@ -81,12 +114,20 @@ export default defineConfig([
       '**/node_modules/**',
       '**/.turbo/**',
       '**/*.cjs',
-      '**/*.js',
       '**/*.min.js',
     ],
     linterOptions: {
       reportUnusedDisableDirectives: 'off',
     },
+  },
+  {
+    files: samPluginFiles,
+    languageOptions: {
+      ecmaVersion: 'latest',
+      globals: globals.node,
+      sourceType: 'module',
+    },
+    rules: legacyJsRecommendedRules,
   },
   {
     files: typescriptFiles,
@@ -126,6 +167,7 @@ export default defineConfig([
     },
     plugins: {
       'react-hooks': reactHooks,
+      sam: samPlugin,
       'simple-import-sort': simpleImportSort,
     },
     rules: {
@@ -143,6 +185,7 @@ export default defineConfig([
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'simple-import-sort/exports': 'error',
       'simple-import-sort/imports': 'error',
+      ...samAdvisoryRules,
     },
   },
   ...eslintPluginAstro.configs['flat/base'],
@@ -160,6 +203,7 @@ export default defineConfig([
     },
     plugins: {
       '@typescript-eslint': typescriptEslintCompatPlugin,
+      sam: samPlugin,
       'simple-import-sort': simpleImportSort,
     },
     rules: {
@@ -177,6 +221,7 @@ export default defineConfig([
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'simple-import-sort/exports': 'error',
       'simple-import-sort/imports': 'error',
+      ...samAdvisoryRules,
     },
   },
   {
@@ -246,5 +291,18 @@ export default defineConfig([
     rules: {
       'no-console': 'error',
     },
+  },
+  {
+    // These five workspaces had no lint path before this rollout. Preserve all
+    // newly surfaced findings as advisory while fatal parser/config failures
+    // remain blocking; debt cleanup can promote individual rules deliberately.
+    files: [
+      'apps/www/**/*.{ts,tsx,mts,cts,astro}',
+      'apps/tail-worker/**/*.{ts,tsx,mts,cts}',
+      'infra/**/*.{ts,tsx,mts,cts}',
+      'packages/cloud-init/**/*.{ts,tsx,mts,cts}',
+      'tools/og-image/**/*.{ts,tsx,mts,cts}',
+    ],
+    rules: onboardingAdvisoryRules,
   },
 ]);

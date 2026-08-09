@@ -119,7 +119,7 @@ function isKnownLocalRecordGuard(functionNode) {
     (clause) =>
       isTypeofObjectCheck(clause, parameter.name) ||
       isNotNullCheck(clause, parameter.name) ||
-      isNotArrayCheck(clause, parameter.name),
+      isNotArrayCheck(clause, parameter.name)
   );
 
   return clauses.length >= 2 && hasObject && hasNotNull && onlyKnownClauses;
@@ -140,32 +140,23 @@ function checkNode(context, node) {
     node,
     messageId: 'localRecordGuard',
     data: { name },
-    suggest: [
-      {
-        messageId: 'useSharedValidation',
-        fix: (fixer) => {
-          const sourceCode = context.sourceCode ?? context.getSourceCode();
-          return fixer.replaceText(node, sourceCode.getText(node));
-        },
-      },
-    ],
   });
 }
 
-export default {
+/** @type {import('eslint').Rule.RuleModule} */
+const rule = {
   meta: {
     type: 'suggestion',
     docs: {
-      description: 'Discourage local isRecord/isObject guard definitions that duplicate shared runtime validation.',
+      description:
+        'Discourage local isRecord/isObject guard definitions that duplicate shared runtime validation.',
       recommended: false,
       url: docsUrl,
     },
-    hasSuggestions: true,
+    hasSuggestions: false,
     messages: {
       localRecordGuard:
         'Local {{name}} guard definitions drift from shared runtime-validation helpers. Use the established helper instead.',
-      useSharedValidation:
-        'Replace this local guard with the shared runtime-validation helper after checking call-site semantics.',
     },
     schema: [],
   },
@@ -180,3 +171,5 @@ export default {
     };
   },
 };
+
+export default rule;

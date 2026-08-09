@@ -8,7 +8,7 @@ import { auditRuntimeBoundarySemantics } from './check-runtime-boundary-semantic
 
 function fixtureRepo(files: Record<string, string>): string {
   const root = mkdtempSync(join(tmpdir(), 'sam-runtime-semantics-'));
-  execFileSync('git', ['init'], { cwd: root });
+  execFileSync('git', ['init', '--quiet'], { cwd: root });
   execFileSync('git', ['config', 'user.email', 'test@example.com'], { cwd: root });
   execFileSync('git', ['config', 'user.name', 'Test'], { cwd: root });
   for (const [path, content] of Object.entries(files)) {
@@ -32,13 +32,35 @@ describe('runtime-boundary semantic checks', () => {
         }
         async function badPayload(request: Request) {
           const body = await request.json() as { name: string };
-          return body;
+          const broad = await request.json() as Record<string, unknown>;
+          return { body, broad };
         }
       `,
     });
     expect(auditRuntimeBoundarySemantics(root)).toMatchObject([
       { rule: 'unvalidated-row-narrowing', file: 'apps/api/src/bad.ts', line: 4 },
       { rule: 'blind-external-payload-narrowing', file: 'apps/api/src/bad.ts', line: 8 },
+      { rule: 'blind-external-payload-narrowing', file: 'apps/api/src/bad.ts', line: 9 },
+    ]);
+  });
+
+  it('tracks one-hop boundary variables and accepts an explicit named runtime guard', () => {
+    const root = fixtureRepo({
+      'apps/api/src/one-hop.ts': `
+        type Row = { id: string };
+        declare function isRow(value: unknown): value is Row;
+        async function check(storage: { sql: { exec(sql: string): { toArray(): unknown[] } } }, request: Request) {
+          const unsafeRow = storage.sql.exec('select id').toArray()[0];
+          const finding = unsafeRow as Row;
+          const payload = await request.json();
+          if (!isRow(payload)) throw new Error('invalid');
+          const safe = payload as Row;
+          return { finding, safe };
+        }
+      `,
+    });
+    expect(auditRuntimeBoundarySemantics(root)).toMatchObject([
+      { rule: 'unvalidated-row-narrowing', file: 'apps/api/src/one-hop.ts', line: 6 },
     ]);
   });
 

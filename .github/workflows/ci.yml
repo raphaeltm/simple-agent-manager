@@ -9,6 +9,8 @@ on:
 
 env:
   DEVCONTAINERS_CLI_VERSION: 0.80.2
+  GITLEAKS_VERSION: 8.30.1
+  GOVULNCHECK_VERSION: v1.6.0
 
 permissions:
   contents: read
@@ -39,6 +41,7 @@ jobs:
       devcontainer: ${{ steps.filter.outputs.devcontainer }}
       devcontainer-volume-mount: ${{ steps.filter.outputs.devcontainer-volume-mount }}
       web-ui: ${{ steps.filter.outputs.web-ui }}
+      go-modules: ${{ steps.filter.outputs.go-modules }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
@@ -67,6 +70,11 @@ jobs:
               - 'packages/ui/**'
               - 'packages/terminal/**'
               - 'packages/acp-client/**'
+              - '.github/workflows/ci.yml'
+            go-modules:
+              - '**/go.mod'
+              - '**/go.sum'
+              - 'scripts/quality/check-go-vulnerability-diff.ts'
               - '.github/workflows/ci.yml'
 
   preflight-evidence:
@@ -142,6 +150,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
@@ -153,8 +163,62 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Lint
+      - name: Check formatting
+        run: pnpm format:check
+
+      - name: Run Oxlint shadow
+        run: pnpm lint:oxlint
+
+      - name: Run ESLint authoritative layer
         run: pnpm lint
+
+      - name: Enforce type-boundary ratchet
+        run: pnpm quality:type-boundaries
+
+      - name: Shadow SAM fixtures through Oxlint alpha host
+        continue-on-error: true
+        run: pnpm lint:oxlint:sam-shadow
+
+  secret-scan:
+    name: Secret Scan
+    if: github.event_name == 'pull_request' || github.repository == 'raphaeltm/simple-agent-manager'
+    timeout-minutes: 15
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install verified Gitleaks release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/gitleaks"
+          cd "$RUNNER_TEMP/gitleaks"
+          gh release download "v${GITLEAKS_VERSION}" \
+            --repo gitleaks/gitleaks \
+            --pattern "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            --pattern "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          sha256sum --ignore-missing --check "gitleaks_${GITLEAKS_VERSION}_checksums.txt"
+          tar -xzf "gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          echo "$RUNNER_TEMP/gitleaks" >> "$GITHUB_PATH"
+
+      - name: Scan current tree
+        run: pnpm quality:gitleaks:current
+
+      - name: Scan pull request commit range
+        if: github.event_name == 'pull_request'
+        run: pnpm quality:gitleaks:pr
 
   typecheck:
     name: Type Check
@@ -332,6 +396,8 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
 
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
@@ -369,8 +435,50 @@ jobs:
 
       - name: Dependency governance pinning check
         run: pnpm quality:dependency-governance
+
+      - name: Direct dependency evidence
+        run: pnpm quality:direct-dependency-evidence
+
+      - name: OSV ignore expiry policy
+        run: pnpm quality:osv-policy
+
+      - name: Runtime-boundary semantic shadow
+        run: pnpm quality:runtime-boundary-semantics
+
       - name: CI workflow wiring tests
-        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts scripts/quality/ci-worker-suite.test.ts
+        run: pnpm exec vitest run --config scripts/quality/vitest.config.ts 'scripts/quality/ci-*.test.ts'
+
+  go-vulnerability-diff:
+    name: Go Vulnerability Diff
+    needs: [changes]
+    if: needs.changes.outputs.go-modules == 'true'
+    timeout-minutes: 20
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.25'
+
+      - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install govulncheck
+        run: go install "golang.org/x/vuln/cmd/govulncheck@${GOVULNCHECK_VERSION}"
+
+      - name: Scan changed Go modules
+        run: pnpm quality:govulncheck-diff
 
   durable-object-workers:
     name: Durable Object Workers

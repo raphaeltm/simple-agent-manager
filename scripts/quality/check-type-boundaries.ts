@@ -3,11 +3,12 @@ import {
   Node,
   Project,
   SyntaxKind,
+  type ArrowFunction,
   type AsExpression,
   type CallExpression,
   type FunctionDeclaration,
+  type FunctionExpression,
   type SourceFile,
-  type TypeAliasDeclaration,
 } from 'ts-morph';
 import { existsSync, readFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
@@ -17,14 +18,14 @@ type BlockingClass = 'as-any' | 'hono-req-json-generic' | 'typed-json-parse' | '
 type ReportOnlyClass = 'record-string-unknown' | 'unknown-double-assertion';
 type BoundaryClass = BlockingClass | ReportOnlyClass;
 
-interface Finding {
+export interface Finding {
   class: BoundaryClass;
   file: string;
   line: number;
   text: string;
 }
 
-interface Baseline {
+export interface Baseline {
   metadata: {
     owner: string;
     backlog: string;
@@ -36,7 +37,7 @@ interface Baseline {
   reportOnlyCounts: Record<ReportOnlyClass, number>;
 }
 
-interface AuditResult {
+export interface AuditResult {
   findings: Finding[];
   blockingCounts: Record<BlockingClass, number>;
   reportOnlyCounts: Record<ReportOnlyClass, number>;
@@ -123,6 +124,7 @@ function typeText(node: AsExpression): string {
 }
 
 function isJsonParseCall(node: Node): boolean {
+  while (Node.isParenthesizedExpression(node)) node = node.getExpression();
   if (!Node.isCallExpression(node)) return false;
   const expression = node.getExpression();
   return Node.isPropertyAccessExpression(expression) && expression.getText() === 'JSON.parse';
@@ -136,24 +138,47 @@ function isHonoReqJsonCall(call: CallExpression): boolean {
   return Node.isPropertyAccessExpression(receiver) && receiver.getName() === 'req';
 }
 
-function hasRecordReturnType(fn: FunctionDeclaration): boolean {
-  const returnType = fn.getReturnTypeNode()?.getText().replace(/\s+/g, ' ') ?? '';
-  return /value\s+is\s+Record\s*<\s*string\s*,\s*unknown\s*>/.test(returnType);
+type RecordGuardFunction = FunctionDeclaration | FunctionExpression | ArrowFunction;
+
+function returnExpressionText(fn: RecordGuardFunction): string | undefined {
+  const body = fn.getBody();
+  if (!Node.isBlock(body)) return body.getText();
+  const statements = body.getStatements();
+  if (statements.length !== 1 || !Node.isReturnStatement(statements[0])) return undefined;
+  return statements[0].getExpression()?.getText();
 }
 
-function hasObjectNullArrayChecks(fn: FunctionDeclaration): boolean {
-  const text = fn.getBodyText() ?? '';
-  return (
-    /typeof\s+\w+\s*===\s*['"]object['"]/.test(text) &&
-    /!==\s*null|===\s*null/.test(text) &&
-    /Array\.isArray/.test(text)
-  );
+function stripOuterParentheses(value: string): string {
+  let result = value;
+  while (result.startsWith('(') && result.endsWith(')')) result = result.slice(1, -1);
+  return result;
 }
 
-function isLocalRecordGuard(fn: FunctionDeclaration): boolean {
-  const name = fn.getName();
+function isLocalRecordGuard(fn: RecordGuardFunction, name: string | undefined): boolean {
   if (name !== 'isRecord' && name !== 'isObject') return false;
-  return hasRecordReturnType(fn) && hasObjectNullArrayChecks(fn);
+  const parameter = fn.getParameters()[0]?.getNameNode();
+  if (!parameter || !Node.isIdentifier(parameter)) return false;
+  const parameterName = parameter.getText();
+  const returnType = fn.getReturnTypeNode()?.getText().replace(/\s+/g, ' ').trim() ?? '';
+  if (!returnType.startsWith(`${parameterName} is `)) return false;
+
+  const expression = returnExpressionText(fn);
+  if (!expression) return false;
+  const clauses = expression.replace(/\s+/g, '').split('&&').map(stripOuterParentheses);
+  const objectChecks = new Set([
+    `typeof${parameterName}==='object'`,
+    `typeof${parameterName}==="object"`,
+  ]);
+  const nullChecks = new Set([`${parameterName}!==null`, `${parameterName}!=null`]);
+  const arrayCheck = `!Array.isArray(${parameterName})`;
+  return (
+    clauses.length >= 2 &&
+    clauses.every(
+      (clause) => objectChecks.has(clause) || nullChecks.has(clause) || clause === arrayCheck
+    ) &&
+    clauses.some((clause) => objectChecks.has(clause)) &&
+    clauses.some((clause) => nullChecks.has(clause))
+  );
 }
 
 function countInPlace<T extends BoundaryClass>(
@@ -214,10 +239,8 @@ export function auditTypeBoundaries(root = ROOT, scope?: string): AuditResult {
           assertion
         );
       }
-      if (
-        Node.isAsExpression(assertion.getExpression()) &&
-        typeText(assertion.getExpression()) === 'unknown'
-      ) {
+      const assertionExpression = assertion.getExpression();
+      if (Node.isAsExpression(assertionExpression) && typeText(assertionExpression) === 'unknown') {
         countInPlace(
           reportOnlyCounts,
           'unknown-double-assertion',
@@ -243,8 +266,20 @@ export function auditTypeBoundaries(root = ROOT, scope?: string): AuditResult {
       );
     }
 
-    for (const fn of sf.getFunctions()) {
-      if (!isLocalRecordGuard(fn)) continue;
+    const guardCandidates: Array<{ fn: RecordGuardFunction; name: string | undefined }> = sf
+      .getFunctions()
+      .map((fn) => ({ fn, name: fn.getName() }));
+    for (const declaration of sf.getVariableDeclarations()) {
+      const initializer = declaration.getInitializer();
+      if (
+        initializer &&
+        (Node.isArrowFunction(initializer) || Node.isFunctionExpression(initializer))
+      ) {
+        guardCandidates.push({ fn: initializer, name: declaration.getName() });
+      }
+    }
+    for (const { fn, name } of guardCandidates) {
+      if (!isLocalRecordGuard(fn, name)) continue;
       countInPlace(
         blockingCounts,
         'local-record-guard',
@@ -261,6 +296,21 @@ export function auditTypeBoundaries(root = ROOT, scope?: string): AuditResult {
     (a, b) => a.class.localeCompare(b.class) || a.file.localeCompare(b.file) || a.line - b.line
   );
   return { findings, blockingCounts, reportOnlyCounts };
+}
+
+export interface RatchetFailure {
+  class: BlockingClass;
+  allowed: number;
+  current: number;
+}
+
+export function compareBlockingCounts(
+  current: Record<BlockingClass, number>,
+  allowed: Record<BlockingClass, number>
+): RatchetFailure[] {
+  return blockingClasses
+    .filter((klass) => current[klass] > allowed[klass])
+    .map((klass) => ({ class: klass, allowed: allowed[klass], current: current[klass] }));
 }
 
 function loadBaseline(path: string): Baseline {
@@ -293,11 +343,8 @@ function main() {
 
   if (!existsSync(baselinePath)) return;
   const baseline = loadBaseline(baselinePath);
-  const failures: string[] = [];
-  for (const klass of blockingClasses) {
-    const current = result.blockingCounts[klass];
-    const allowed = baseline.counts[klass];
-    if (current > allowed) {
+  const failures = compareBlockingCounts(result.blockingCounts, baseline.counts).map(
+    ({ class: klass, current, allowed }) => {
       const over = current - allowed;
       const examples = result.findings
         .filter((finding) => finding.class === klass)
@@ -307,9 +354,12 @@ function main() {
             `    ${finding.file}:${finding.line} ${finding.text.replace(/\s+/g, ' ').slice(0, 140)}`
         )
         .join('\n');
-      failures.push(`${klass} increased from baseline ${allowed} to ${current}.\n${examples}`);
+      return (
+        `${klass} increased from baseline ${allowed} to ${current}.\n${examples}\n` +
+        '    Keep the value unknown until jsonValidator, parseWithSchema, readResponseJson, a row mapper, or another sanctioned runtime helper validates it.'
+      );
     }
-  }
+  );
 
   if (failures.length > 0) {
     console.error('\nType-boundary ratchet failed:\n' + failures.join('\n\n'));

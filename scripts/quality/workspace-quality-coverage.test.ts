@@ -46,7 +46,7 @@ function parseWorkspacePatterns(workspaceYaml: string): string[] {
 function expandWorkspacePattern(repoRoot: string, pattern: string): string[] {
   if (!pattern.endsWith('/*')) {
     return [pattern].filter((workspacePath) =>
-      existsSync(path.join(repoRoot, workspacePath, 'package.json')),
+      existsSync(path.join(repoRoot, workspacePath, 'package.json'))
     );
   }
 
@@ -60,16 +60,22 @@ function expandWorkspacePattern(repoRoot: string, pattern: string): string[] {
     .map((entry) => path.join(parent, entry).replaceAll(path.sep, '/'))
     .filter((workspacePath) => {
       const absolutePath = path.join(repoRoot, workspacePath);
-      return statSync(absolutePath).isDirectory() && existsSync(path.join(absolutePath, 'package.json'));
+      return (
+        statSync(absolutePath).isDirectory() && existsSync(path.join(absolutePath, 'package.json'))
+      );
     });
 }
 
 function listTrackedSourceFiles(repoRoot: string): string[] {
   try {
-    return execFileSync('git', ['ls-files', ...SOURCE_EXTENSIONS.map((extension) => `*${extension}`)], {
-      cwd: repoRoot,
-      encoding: 'utf8',
-    })
+    return execFileSync(
+      'git',
+      ['ls-files', ...SOURCE_EXTENSIONS.map((extension) => `*${extension}`)],
+      {
+        cwd: repoRoot,
+        encoding: 'utf8',
+      }
+    )
       .split('\n')
       .filter(Boolean)
       .sort();
@@ -97,12 +103,21 @@ function listFixtureSourceFiles(repoRoot: string): string[] {
   return files.sort();
 }
 
-function inventoryWorkspaces(repoRoot: string, sourceFiles = listTrackedSourceFiles(repoRoot)): WorkspaceInventory[] {
-  const patterns = parseWorkspacePatterns(readFileSync(path.join(repoRoot, 'pnpm-workspace.yaml'), 'utf8'));
-  const workspacePaths = patterns.flatMap((pattern) => expandWorkspacePattern(repoRoot, pattern)).sort();
+function inventoryWorkspaces(
+  repoRoot: string,
+  sourceFiles = listTrackedSourceFiles(repoRoot)
+): WorkspaceInventory[] {
+  const patterns = parseWorkspacePatterns(
+    readFileSync(path.join(repoRoot, 'pnpm-workspace.yaml'), 'utf8')
+  );
+  const workspacePaths = patterns
+    .flatMap((pattern) => expandWorkspacePattern(repoRoot, pattern))
+    .sort();
 
   return workspacePaths.map((workspacePath) => {
-    const manifest = JSON.parse(readFileSync(path.join(repoRoot, workspacePath, 'package.json'), 'utf8'));
+    const manifest = JSON.parse(
+      readFileSync(path.join(repoRoot, workspacePath, 'package.json'), 'utf8')
+    );
     const files = sourceFiles.filter((file) => file.startsWith(`${workspacePath}/`));
     const counts = Object.fromEntries(SOURCE_EXTENSIONS.map((extension) => [extension, 0]));
     for (const file of files) {
@@ -134,21 +149,38 @@ function validateWorkspaceCoverage(workspaces: WorkspaceInventory[]): CoverageFa
       });
     }
 
-    const typeScriptFileCount = SOURCE_EXTENSIONS.filter((extension) => extension !== '.astro').reduce(
-      (sum, extension) => sum + workspace.counts[extension],
-      0,
-    );
+    const typeScriptFileCount = SOURCE_EXTENSIONS.filter(
+      (extension) => extension !== '.astro'
+    ).reduce((sum, extension) => sum + workspace.counts[extension], 0);
     const astroFileCount = workspace.counts['.astro'];
     const validationScript = scripts.typecheck ?? scripts.check ?? '';
 
-    if (typeScriptFileCount > 0 && !/\btsc\b|\bastro\s+check\b/.test(validationScript)) {
+    if (
+      astroFileCount > 0 &&
+      !/\*[^'"]*\.astro|\{[^}]*\bastro\b[^}]*\}|eslint\s+['"]?\.(?:['"]?\s|$)/.test(
+        scripts.lint ?? ''
+      )
+    ) {
+      failures.push({
+        workspace: workspace.path,
+        reason: `lint script does not include ${astroFileCount} tracked Astro template(s)`,
+      });
+    }
+
+    if (
+      typeScriptFileCount > 0 &&
+      !/\btsc\b|\bastro\s+check\b|\bcheck-astro-templates\b/.test(validationScript)
+    ) {
       failures.push({
         workspace: workspace.path,
         reason: `missing TypeScript validation for ${typeScriptFileCount} tracked TS-family file(s)`,
       });
     }
 
-    if (astroFileCount > 0 && !/\bastro\s+check\b/.test(validationScript)) {
+    if (
+      astroFileCount > 0 &&
+      !/\bastro\s+check\b|\bcheck-astro-templates\b/.test(validationScript)
+    ) {
       failures.push({
         workspace: workspace.path,
         reason: `Astro templates require astro check; tsc does not validate ${astroFileCount} .astro file(s)`,
@@ -174,9 +206,12 @@ describe('workspace quality coverage contract', () => {
   });
 
   it('fails clearly when a new TypeScript workspace has no lint script', () => {
-    const fixtureRoot = path.join(import.meta.dirname, 'fixtures/workspace-quality-coverage/missing-lint');
+    const fixtureRoot = path.join(
+      import.meta.dirname,
+      'fixtures/workspace-quality-coverage/missing-lint'
+    );
     const failures = validateWorkspaceCoverage(
-      inventoryWorkspaces(fixtureRoot, listFixtureSourceFiles(fixtureRoot)),
+      inventoryWorkspaces(fixtureRoot, listFixtureSourceFiles(fixtureRoot))
     );
 
     expect(failures).toContainEqual({
@@ -186,21 +221,31 @@ describe('workspace quality coverage contract', () => {
   });
 
   it('requires astro check rather than tsc-only validation for Astro templates', () => {
-    const fixtureRoot = path.join(import.meta.dirname, 'fixtures/workspace-quality-coverage/astro-tsc-only');
+    const fixtureRoot = path.join(
+      import.meta.dirname,
+      'fixtures/workspace-quality-coverage/astro-tsc-only'
+    );
     const failures = validateWorkspaceCoverage(
-      inventoryWorkspaces(fixtureRoot, listFixtureSourceFiles(fixtureRoot)),
+      inventoryWorkspaces(fixtureRoot, listFixtureSourceFiles(fixtureRoot))
     );
 
     expect(failures).toContainEqual({
       workspace: 'apps/www',
       reason: 'Astro templates require astro check; tsc does not validate 1 .astro file(s)',
     });
+    expect(failures).toContainEqual({
+      workspace: 'apps/www',
+      reason: 'lint script does not include 1 tracked Astro template(s)',
+    });
   });
 
   it('accepts a covered TypeScript workspace fixture', () => {
-    const fixtureRoot = path.join(import.meta.dirname, 'fixtures/workspace-quality-coverage/covered');
+    const fixtureRoot = path.join(
+      import.meta.dirname,
+      'fixtures/workspace-quality-coverage/covered'
+    );
     const failures = validateWorkspaceCoverage(
-      inventoryWorkspaces(fixtureRoot, listFixtureSourceFiles(fixtureRoot)),
+      inventoryWorkspaces(fixtureRoot, listFixtureSourceFiles(fixtureRoot))
     );
 
     expect(failures).toEqual([]);
