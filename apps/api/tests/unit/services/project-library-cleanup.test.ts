@@ -7,6 +7,10 @@ import {
   buildProjectLibraryDeleteStatements,
   deleteProjectLibraryObjects,
 } from '../../../src/services/file-library';
+import {
+  DEFAULT_LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE,
+  getProjectDeleteCleanupBatchSize,
+} from '../../../src/services/file-library-config';
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 describe('project library cleanup', () => {
@@ -71,7 +75,11 @@ describe('project library cleanup', () => {
     const db = drizzle(createSqliteD1(sqlite), { schema });
     const statements = buildProjectLibraryDeleteStatements(db, 'project-a');
     await db.batch(statements as [(typeof statements)[number]]);
-    const stats = await deleteProjectLibraryObjects(r2, 'project-a');
+    const stats = await deleteProjectLibraryObjects(
+      r2,
+      'project-a',
+      getProjectDeleteCleanupBatchSize({} as never)
+    );
 
     // Owner-path control: A really is removed, so the B safety assertion cannot pass
     // merely because cleanup is a no-op.
@@ -86,6 +94,11 @@ describe('project library cleanup', () => {
 
     // Attack case: another project's row and object survive the exact same cleanup.
     expect([...objects]).toEqual(['library/project-b/b-file-1']);
+    expect(r2.list).toHaveBeenCalledWith({
+      prefix: 'library/project-a/',
+      cursor: undefined,
+      limit: DEFAULT_LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE,
+    });
   });
 
   it('fails closed before deletion when R2 returns a foreign project key', async () => {
@@ -98,9 +111,22 @@ describe('project library cleanup', () => {
       delete: deleteObjects,
     } as unknown as R2Bucket;
 
-    await expect(deleteProjectLibraryObjects(r2, 'project-a')).rejects.toThrow(
+    await expect(deleteProjectLibraryObjects(r2, 'project-a', 25)).rejects.toThrow(
       'outside the requested project library prefix'
     );
     expect(deleteObjects).not.toHaveBeenCalled();
+  });
+
+  it('uses a configurable cleanup page size capped at the R2 maximum', () => {
+    expect(
+      getProjectDeleteCleanupBatchSize({
+        LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE: '25',
+      } as never)
+    ).toBe(25);
+    expect(
+      getProjectDeleteCleanupBatchSize({
+        LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE: '2500',
+      } as never)
+    ).toBe(DEFAULT_LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE);
   });
 });

@@ -54,6 +54,7 @@ import {
   buildProjectLibraryDeleteStatements,
   buildProjectLibraryR2Prefix,
   deleteProjectLibraryObjects,
+  getProjectDeleteCleanupBatchSize,
 } from '../../services/file-library';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import {
@@ -1233,7 +1234,11 @@ crudRoutes.delete('/:id', async (c) => {
   // and off the request's critical path. The helper derives and validates the exact
   // library/{projectId}/ prefix; a foreign key from R2 aborts the page fail-closed.
   const libraryPrefix = buildProjectLibraryR2Prefix(projectId);
-  const libraryCleanup = deleteProjectLibraryObjects(c.env.R2, projectId)
+  const libraryCleanup = deleteProjectLibraryObjects(
+    c.env.R2,
+    projectId,
+    getProjectDeleteCleanupBatchSize(c.env)
+  )
     .then((stats) => {
       log.info('project_delete.library_cleanup_completed', {
         projectId,

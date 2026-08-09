@@ -97,7 +97,7 @@ merged scheduled sweeps and R2 lifecycle policies.
       the expanded reviewed-table list.
 - [x] Update infra config/storage tests for defaults, overrides, invalid TTLs, and all
       four independent lifecycle rules.
-- [ ] Move `tasks/backlog/2026-03-29-r2-temp-uploads-lifecycle-cleanup.md` to archive
+- [x] Move `tasks/backlog/2026-03-29-r2-temp-uploads-lifecycle-cleanup.md` to archive
       with an option-A completion note referencing this cohesive PR.
 
 ### Required tests

@@ -66,7 +66,7 @@ async function runIntervalGatedSweep<T extends ScheduledSweepResult>(
 
   const result = await options.run();
   await options.env.KV.put(options.lastRunKey, options.now.toISOString(), {
-    expirationTtl: Math.max(options.intervalHours * 2 * 60 * 60, 60 * 60),
+    expirationTtl: options.intervalHours * 2 * 60 * 60,
   });
   return result;
 }

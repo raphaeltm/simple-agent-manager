@@ -87,6 +87,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `SESSION_SNAPSHOT_PURGE_BATCH_SIZE` — Maximum expired snapshot rows deleted per run (default: `250`)
 - `SESSION_SNAPSHOT_PURGE_INTERVAL_HOURS` — Minimum interval between snapshot row purges (default: `24`)
 - `SESSION_SNAPSHOT_PURGE_LAST_RUN_KV_KEY` — KV interval marker (default: `cleanup:session-snapshots:last-run`)
+- `LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE` — Maximum project-owned R2 library objects listed and deleted per page after project deletion (default: `1000`, capped at R2's page maximum)
 
 ### Deployment Storage Retention
 

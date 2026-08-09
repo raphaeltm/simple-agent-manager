@@ -200,6 +200,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_SNAPSHOT_PURGE_BATCH_SIZE?: string; // Max expired snapshot rows deleted per run (default: 250)
   SESSION_SNAPSHOT_PURGE_INTERVAL_HOURS?: string; // Minimum hours between snapshot row purge runs (default: 24)
   SESSION_SNAPSHOT_PURGE_LAST_RUN_KV_KEY?: string; // KV key for snapshot purge interval gating
+  LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE?: string; // R2 objects listed/deleted per project cleanup page (default: 1000)
   DEPLOY_ACME_EMAIL?: string; // Contact email for deployment-node ACME certificates
   DEPLOY_ACME_CA?: string; // ACME CA directory override for deployment nodes
   DEPLOY_COMPOSE_CMD?: string; // Docker Compose command override on deployment nodes

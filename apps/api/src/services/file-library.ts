@@ -40,6 +40,7 @@ import {
   getMaxDirectoriesPerProject,
   getMaxFilesPerProject,
   getMaxTagsPerFile,
+  getProjectDeleteCleanupBatchSize,
   getTagQueryBatchSize,
   getUploadMaxBytes,
   validateDirectory,
@@ -59,6 +60,7 @@ export {
   getMaxFilesPerProject,
   getMaxTagLength,
   getMaxTagsPerFile,
+  getProjectDeleteCleanupBatchSize,
   getTagQueryBatchSize,
   getUploadMaxBytes,
   resolvePageSize,
@@ -101,7 +103,8 @@ export function buildProjectLibraryDeleteStatements(db: AppDb, projectId: string
 /** List and delete only one project's canonical library prefix. */
 export async function deleteProjectLibraryObjects(
   r2: R2Bucket,
-  projectId: string
+  projectId: string,
+  batchSize: number
 ): Promise<ProjectLibraryObjectCleanupStats> {
   const prefix = buildProjectLibraryR2Prefix(projectId);
   const stats: ProjectLibraryObjectCleanupStats = {
@@ -112,7 +115,7 @@ export async function deleteProjectLibraryObjects(
   let cursor: string | undefined;
 
   do {
-    const page = await r2.list({ prefix, cursor, limit: 1000 });
+    const page = await r2.list({ prefix, cursor, limit: batchSize });
     const keys = page.objects.map((object) => object.key);
     stats.listedObjects += keys.length;
 
