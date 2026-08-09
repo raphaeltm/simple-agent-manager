@@ -25,15 +25,15 @@ Do not implement checkpointing, liveness redesign, prompt rollover, or recovery 
 - [x] Update relevant vm-agent tests/fixtures so expected defaults are consistent.
 - [x] Add or update a vm-agent config test proving the env default is `8h` and env override remains configurable.
 - [x] Keep historical archive notes unchanged unless needed for current docs consistency.
-- [ ] Run applicable Go/package and repo-level quality gates.
+- [x] Run applicable Go/package and repo-level quality gates.
 - [ ] Run specialist review for Go, env docs, documentation sync, constitution compliance, task completion, and tests.
 - [ ] Deploy/verify according to repository rules, open PR, merge once green, and monitor production deployment.
 
 ## Acceptance criteria
 
-- [ ] Task-driven vm-agent sessions default to an `8h` ACP prompt timeout.
-- [ ] Direct workspace sessions remain governed by `ACP_PROMPT_TIMEOUT` and default to no prompt timeout.
-- [ ] `ACP_TASK_PROMPT_TIMEOUT` remains configurable via environment variable override.
-- [ ] Current authoritative docs and environment references consistently say `8h`.
-- [ ] Relevant tests pass and include coverage for the default and override.
-- [ ] PR scope contains only this bounded timeout-default mitigation.
+- [x] Task-driven vm-agent sessions default to an `8h` ACP prompt timeout.
+- [x] Direct workspace sessions remain governed by `ACP_PROMPT_TIMEOUT` and default to no prompt timeout.
+- [x] `ACP_TASK_PROMPT_TIMEOUT` remains configurable via environment variable override.
+- [x] Current authoritative docs and environment references consistently say `8h`.
+- [x] Relevant tests pass and include coverage for the default and override.
+- [x] PR scope contains only this bounded timeout-default mitigation.
