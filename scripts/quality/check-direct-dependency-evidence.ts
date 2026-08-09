@@ -226,6 +226,26 @@ function parseDirectGoRequirements(raw: string | undefined): Map<string, string>
   return requirements;
 }
 
+function parseGoTools(raw: string | undefined): Set<string> {
+  const tools = new Set<string>();
+  if (raw === undefined) return tools;
+  let inToolBlock = false;
+  for (const sourceLine of raw.split('\n')) {
+    const line = sourceLine.trim();
+    if (line === 'tool (') {
+      inToolBlock = true;
+      continue;
+    }
+    if (inToolBlock && line === ')') {
+      inToolBlock = false;
+      continue;
+    }
+    const tool = inToolBlock ? line : line.startsWith('tool ') ? line.slice(5).trim() : '';
+    if (tool && !tool.startsWith('//')) tools.add(tool);
+  }
+  return tools;
+}
+
 /** Compare complete manifest snapshots so diff context cannot hide additions. */
 export function compareManifestSnapshots(
   manifestPath: string,
@@ -262,9 +282,8 @@ export function compareManifestSnapshots(
 
   if (basename(manifestPath) === 'go.mod') {
     const before = parseDirectGoRequirements(beforeRaw);
-    return [...parseDirectGoRequirements(afterRaw)]
+    const requirementAdditions = [...parseDirectGoRequirements(afterRaw)]
       .filter(([name]) => !before.has(name))
-      .sort(([left], [right]) => left.localeCompare(right))
       .map(([name]) => ({
         ecosystem: 'go' as const,
         manifestPath,
@@ -272,6 +291,19 @@ export function compareManifestSnapshots(
         production: true,
         internal: isInternalGoDependency(name),
       }));
+    const beforeTools = parseGoTools(beforeRaw);
+    const toolAdditions = [...parseGoTools(afterRaw)]
+      .filter((name) => !beforeTools.has(name))
+      .map((name) => ({
+        ecosystem: 'go' as const,
+        manifestPath,
+        name,
+        production: true,
+        internal: isInternalGoDependency(name),
+      }));
+    return [...requirementAdditions, ...toolAdditions].sort((left, right) =>
+      left.name.localeCompare(right.name)
+    );
   }
 
   return [];

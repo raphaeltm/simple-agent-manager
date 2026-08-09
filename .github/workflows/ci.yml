@@ -482,7 +482,8 @@ jobs:
       - name: Install govulncheck
         run: |
           mkdir -p "$RUNNER_TEMP/go/bin"
-          GOBIN="$RUNNER_TEMP/go/bin" go install golang.org/x/vuln/cmd/govulncheck@v1.6.0
+          cd scripts/quality/govulncheck-tool
+          go build -o "$RUNNER_TEMP/go/bin/govulncheck" golang.org/x/vuln/cmd/govulncheck
 
       - name: Scan changed Go modules
         env:

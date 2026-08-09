@@ -30,6 +30,10 @@ updates:
     directory: '/packages/harness'
     schedule:
       interval: weekly
+  - package-ecosystem: 'gomod'
+    directory: '/scripts/quality/govulncheck-tool'
+    schedule:
+      interval: weekly
   - package-ecosystem: 'docker'
     directory: '/apps/api'
     schedule:

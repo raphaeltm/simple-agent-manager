@@ -79,7 +79,7 @@ function trackedFiles(root: string, scope?: string): string[] {
     ? extensionPatterns.map((pattern) => `${normalizedScope}/**/${pattern}`)
     : extensionPatterns;
   const args = ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', ...pathspecs];
-  const output = execFileSync('git', args, { cwd: root, encoding: 'utf8' });
+  const output = execFileSync('/usr/bin/git', args, { cwd: root, encoding: 'utf8' });
   return output
     .split('\0')
     .filter(Boolean)
@@ -91,7 +91,7 @@ function trackedFiles(root: string, scope?: string): string[] {
       if (!stat.isFile()) throw new Error(`Boundary source is not a regular file: ${file}`);
       return true;
     })
-    .sort();
+    .sort((left, right) => left.localeCompare(right));
 }
 
 function isExcluded(file: string): boolean {

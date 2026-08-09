@@ -158,4 +158,22 @@ describe('direct dependency evidence checker', () => {
       },
     ]);
   });
+
+  it('treats a Go tool directive as direct dependency evidence', () => {
+    expect(
+      compareManifestSnapshots(
+        'scripts/quality/govulncheck-tool/go.mod',
+        'module example.com/tools\n\ngo 1.25.0\n',
+        'module example.com/tools\n\ngo 1.25.0\n\ntool golang.org/x/vuln/cmd/govulncheck\n'
+      )
+    ).toEqual([
+      {
+        ecosystem: 'go',
+        manifestPath: 'scripts/quality/govulncheck-tool/go.mod',
+        name: 'golang.org/x/vuln/cmd/govulncheck',
+        production: true,
+        internal: false,
+      },
+    ]);
+  });
 });

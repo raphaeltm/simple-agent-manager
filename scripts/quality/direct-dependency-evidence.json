@@ -58,5 +58,10 @@
       "necessity": "Runs local plugin and quality checker fixtures."
     }
   },
-  "go": {}
+  "go": {
+    "golang.org/x/vuln/cmd/govulncheck": {
+      "registryUrl": "https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck",
+      "necessity": "Pins the official govulncheck CLI used by the diff-local Go vulnerability gate."
+    }
+  }
 }
