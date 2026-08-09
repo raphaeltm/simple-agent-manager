@@ -184,6 +184,10 @@ function parseInvocationTypesEnv(): string[] {
   return configured;
 }
 
+function resolveOptionalEndpoint(name: string, fallback: string): string {
+  return process.env[name]?.trim() || fallback;
+}
+
 export function getConfig(now = new Date()): Config {
   const cfToken = process.env.CF_TOKEN;
   const cfAccountId = process.env.CF_ACCOUNT_ID;
@@ -212,15 +216,19 @@ export function getConfig(now = new Date()): Config {
     namespaceIds: parseCsvEnv('DO_WALL_TIME_NAMESPACE_IDS'),
     objectNames: parseCsvEnv('DO_WALL_TIME_OBJECT_NAMES'),
     invocationTypes: parseInvocationTypesEnv(),
-    graphqlEndpoint: process.env.DO_WALL_TIME_GRAPHQL_ENDPOINT ?? DEFAULT_GRAPHQL_ENDPOINT,
+    graphqlEndpoint: resolveOptionalEndpoint(
+      'DO_WALL_TIME_GRAPHQL_ENDPOINT',
+      DEFAULT_GRAPHQL_ENDPOINT
+    ),
     cronLivenessMaxAgeHours: parseNumberEnv(
       'DO_CRON_LIVENESS_MAX_AGE_HOURS',
       DEFAULT_CRON_LIVENESS_MAX_AGE_HOURS
     ),
     cronLivenessScriptNames,
-    cronLivenessEndpoint:
-      process.env.DO_CRON_LIVENESS_ENDPOINT ??
-      `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/workers/observability/v1/query`,
+    cronLivenessEndpoint: resolveOptionalEndpoint(
+      'DO_CRON_LIVENESS_ENDPOINT',
+      `https://api.cloudflare.com/client/v4/accounts/${cfAccountId}/workers/observability/v1/query`
+    ),
     now,
   };
 }

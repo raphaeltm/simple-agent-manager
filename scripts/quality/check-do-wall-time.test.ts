@@ -8,6 +8,7 @@ import {
   analyzeWallTimeRegression,
   type DurableObjectWallTimeRow,
   formatReport,
+  getConfig,
   hasCronCompletedEvent,
   resolveCronLivenessScriptNames,
   summarizeInvocationRates,
@@ -43,6 +44,30 @@ function row(input: {
 }
 
 describe('check-do-wall-time', () => {
+  it('uses the Cloudflare cron endpoint when GitHub passes an unset variable as empty', () => {
+    const previous = {
+      CF_TOKEN: process.env.CF_TOKEN,
+      CF_ACCOUNT_ID: process.env.CF_ACCOUNT_ID,
+      DO_WALL_TIME_SCRIPT_NAMES: process.env.DO_WALL_TIME_SCRIPT_NAMES,
+      DO_CRON_LIVENESS_ENDPOINT: process.env.DO_CRON_LIVENESS_ENDPOINT,
+    };
+    try {
+      process.env.CF_TOKEN = 'test-token';
+      process.env.CF_ACCOUNT_ID = 'account-id';
+      process.env.DO_WALL_TIME_SCRIPT_NAMES = 'sam-api-staging';
+      process.env.DO_CRON_LIVENESS_ENDPOINT = '';
+
+      expect(getConfig().cronLivenessEndpoint).toBe(
+        'https://api.cloudflare.com/client/v4/accounts/account-id/workers/observability/v1/query'
+      );
+    } finally {
+      for (const [name, value] of Object.entries(previous)) {
+        if (value === undefined) delete process.env[name];
+        else process.env[name] = value;
+      }
+    }
+  });
+
   it('binds scheduled checks to production and supports staging pre-merge dispatches', () => {
     const workflow = readFileSync(resolve('.github/workflows/do-wall-time.yml'), 'utf8');
 
