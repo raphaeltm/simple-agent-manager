@@ -1,7 +1,6 @@
 import {
   CHECKPOINT_EPISODE_TRANSITIONS,
   type CheckpointEpisode,
-  type CheckpointEpisodeState,
   type CheckpointEpisodeTransitionInput,
   type CreateCheckpointEpisodeInput,
 } from '@simple-agent-manager/shared';
@@ -151,16 +150,6 @@ export function listCheckpointEpisodes(
   return episodes;
 }
 
-function transitionTimestampColumn(state: CheckpointEpisodeState): string | null {
-  if (state === 'preempt_requested') return 'preempt_requested_at';
-  if (state === 'waiting_ready') return 'preempt_accepted_at';
-  if (state === 'resume_queued') return 'ready_observed_at';
-  if (state === 'resumed') return 'resume_accepted_at';
-  if (state === 'completed') return 'completed_at';
-  if (state === 'failed_recoverable' || state === 'failed_terminal') return 'failed_at';
-  return null;
-}
-
 export function transitionCheckpointEpisode(
   sql: SqlStorage,
   episodeId: string,
@@ -174,19 +163,6 @@ export function transitionCheckpointEpisode(
     throw new Error(`Invalid checkpoint transition ${current.state} -> ${input.toState}`);
   }
 
-  const timestampColumn = transitionTimestampColumn(input.toState);
-  const timestampSql = timestampColumn ? `, ${timestampColumn} = ?` : '';
-  const args: unknown[] = [
-    input.toState,
-    input.incrementAttempt ? 1 : 0,
-    bounded(input.lastError, MAX_CHECKPOINT_ERROR_LENGTH),
-    input.mailboxMessageId ?? current.mailboxMessageId,
-    input.promptDeliveryId ?? current.promptDeliveryId,
-    now,
-  ];
-  if (timestampColumn) args.push(now);
-  args.push(episodeId, current.state);
-
   const result = sql.exec(
     `UPDATE checkpoint_episodes
      SET state = ?,
@@ -194,10 +170,34 @@ export function transitionCheckpointEpisode(
          last_error = ?,
          mailbox_message_id = ?,
          prompt_delivery_id = ?,
-         updated_at = ?
-         ${timestampSql}
+         updated_at = ?,
+         preempt_requested_at = CASE WHEN ? = 'preempt_requested' THEN ? ELSE preempt_requested_at END,
+         preempt_accepted_at = CASE WHEN ? = 'waiting_ready' THEN ? ELSE preempt_accepted_at END,
+         ready_observed_at = CASE WHEN ? = 'resume_queued' THEN ? ELSE ready_observed_at END,
+         resume_accepted_at = CASE WHEN ? = 'resumed' THEN ? ELSE resume_accepted_at END,
+         completed_at = CASE WHEN ? = 'completed' THEN ? ELSE completed_at END,
+         failed_at = CASE WHEN ? IN ('failed_recoverable', 'failed_terminal') THEN ? ELSE failed_at END
      WHERE id = ? AND state = ?`,
-    ...args,
+    input.toState,
+    input.incrementAttempt ? 1 : 0,
+    bounded(input.lastError, MAX_CHECKPOINT_ERROR_LENGTH),
+    input.mailboxMessageId ?? current.mailboxMessageId,
+    input.promptDeliveryId ?? current.promptDeliveryId,
+    now,
+    input.toState,
+    now,
+    input.toState,
+    now,
+    input.toState,
+    now,
+    input.toState,
+    now,
+    input.toState,
+    now,
+    input.toState,
+    now,
+    episodeId,
+    current.state,
   );
   if (result.rowsWritten === 0) return getCheckpointEpisode(sql, episodeId);
   return getCheckpointEpisode(sql, episodeId);
