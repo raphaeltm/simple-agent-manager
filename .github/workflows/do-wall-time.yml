@@ -4,6 +4,15 @@ on:
   schedule:
     - cron: '17 9 * * *'
   workflow_dispatch:
+    inputs:
+      environment:
+        description: GitHub Environment supplying the target Cloudflare credentials
+        required: true
+        default: production
+        type: choice
+        options:
+          - staging
+          - production
 
 permissions:
   contents: read
@@ -13,6 +22,9 @@ jobs:
     name: Check DO Wall-Time
     timeout-minutes: 15
     runs-on: ubuntu-latest
+    # Scheduled runs execute from main against production. Manual branch runs
+    # select staging so branch-restricted production credentials remain protected.
+    environment: ${{ inputs.environment || 'production' }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -37,8 +49,10 @@ jobs:
           DO_WALL_TIME_RECENT_HOURS: ${{ vars.DO_WALL_TIME_RECENT_HOURS }}
           DO_WALL_TIME_BASELINE_HOURS: ${{ vars.DO_WALL_TIME_BASELINE_HOURS }}
           DO_WALL_TIME_REGRESSION_RATIO: ${{ vars.DO_WALL_TIME_REGRESSION_RATIO }}
+          DO_INVOCATION_RATE_REGRESSION_RATIO: ${{ vars.DO_INVOCATION_RATE_REGRESSION_RATIO }}
           DO_WALL_TIME_MIN_REQUESTS: ${{ vars.DO_WALL_TIME_MIN_REQUESTS }}
           DO_WALL_TIME_LIMIT: ${{ vars.DO_WALL_TIME_LIMIT }}
+          DO_CRON_LIVENESS_MAX_AGE_HOURS: ${{ vars.DO_CRON_LIVENESS_MAX_AGE_HOURS }}
         run: |
           set -o pipefail
           pnpm quality:do-wall-time | tee do-wall-time-report.txt
