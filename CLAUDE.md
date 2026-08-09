@@ -18,6 +18,7 @@ packages/
 ├── terminal/     # Shared terminal component
 ├── cloud-init/   # Cloud-init template generator
 ├── acp-client/   # Shared ACP React components (MessageBubble, MessageActions, AudioPlayer)
+├── eslint-plugin-sam/ # Unpublished repository-specific ESLint boundary rules
 ├── ui/           # Design system tokens and shared UI components
 └── vm-agent/     # Go VM agent (PTY, WebSocket, ACP, MCP tool endpoints)
 tasks/            # Task tracking (backlog -> active -> archive)
@@ -33,7 +34,12 @@ pnpm test             # Run tests
 pnpm typecheck        # Type check
 pnpm lint             # Lint
 pnpm format           # Format
+pnpm check:fast       # Deterministic local quality contract used by CI leaf commands
 ```
+
+`pnpm check:fast` runs the formatting ratchet, report-only Oxlint shadow, authoritative
+ESLint workspace checks (including the SAM custom-rule tail), and the blocking type-boundary
+ratchet. Scanner and quality-policy commands are documented in `scripts/quality/README.md`.
 
 ## Build Order
 
