@@ -63,41 +63,41 @@ This task implements the Worker-owned durability foundation from SAM idea `01KZK
 
 ### Schema and shared contracts
 
-- [ ] Add append-only ProjectData migration 025 for durable delivery metadata and `checkpoint_episodes`, using only additive CREATE/ALTER/INDEX statements.
-- [ ] Add Valibot-backed row schemas and shared delivery/checkpoint/capability/receipt types and state transitions.
-- [ ] Add named shared defaults for flags, candidate cap, background timeout, exponential backoff, TTL, receipt timeout, and max attempts.
-- [ ] Add migration clean-install, upgrade-chain, schema-barrier, and persisted-state coverage.
+- [x] Add append-only ProjectData migration 025 for durable delivery metadata and `checkpoint_episodes`, using only additive CREATE/ALTER/INDEX statements.
+- [x] Add Valibot-backed row schemas and shared delivery/checkpoint/capability/receipt types and state transitions.
+- [x] Add named shared defaults for flags, candidate cap, background timeout, exponential backoff, TTL, receipt timeout, and max attempts.
+- [x] Add migration clean-install, upgrade-chain, schema-barrier, and persisted-state coverage.
 
 ### Prompt epochs and checkpoint episodes
 
-- [ ] Preserve original same-epoch `prompt_started_at` across prompting/recovering rereports.
-- [ ] Accept a newer epoch only when explicitly supplied from a genuinely accepted prompt and clear the active epoch on terminal/idle activity.
-- [ ] Add the recent-activity/old-prompt regression plus real SQLite same-epoch/new-epoch tests with an injected/fake clock.
-- [ ] Add typed idempotent checkpoint episode create/get/list/transition APIs keyed by ACP session and prompt epoch.
-- [ ] Persist attempts, bounded sanitized errors, progress-envelope metadata, activity events, and debug visibility for checkpoint transitions.
+- [x] Preserve original same-epoch `prompt_started_at` across prompting/recovering rereports.
+- [x] Accept a newer epoch only when explicitly supplied from a genuinely accepted prompt and clear the active epoch on terminal/idle activity.
+- [x] Add the recent-activity/old-prompt regression plus real SQLite same-epoch/new-epoch tests with an injected/fake clock.
+- [x] Add typed idempotent checkpoint episode create/get/list/transition APIs keyed by ACP session and prompt epoch.
+- [x] Persist attempts, bounded sanitized errors, progress-envelope metadata, activity events, and debug visibility for checkpoint transitions.
 
 ### One durable delivery pipeline
 
-- [ ] Add atomic ProjectData durable acceptance for transcript plus mailbox identity and use it from durable followups, mailbox sends, and orchestration handoffs.
-- [ ] Refactor immediate and queued delivery through one typed/injectable VM adapter.
-- [ ] Claim a bounded batch, attempt real queued delivery off the alarm critical path, and retry busy/not-ready rows with named exponential backoff.
-- [ ] Fail TTL/max-attempt/dead/terminal targets explicitly and prove duplicate alarms cannot invoke a delivery twice.
-- [ ] Reconcile stable receipts before retry; mark lost-response/runtime-change/no-receipt ambiguity explicitly and never replay it.
-- [ ] Recalculate delivery on enqueue, readiness/activity changes, attempt completion, retry scheduling, and duplicate alarms through the canonical alarm calculator.
-- [ ] Preserve old VM/direct followup behavior behind flags and fail closed when a required capability is absent.
+- [x] Add atomic ProjectData durable acceptance for transcript plus mailbox identity and use it from durable followups, mailbox sends, and orchestration handoffs.
+- [x] Refactor immediate and queued delivery through one typed/injectable VM adapter.
+- [x] Claim a bounded batch, attempt real queued delivery off the alarm critical path, and retry busy/not-ready rows with named exponential backoff.
+- [x] Fail TTL/max-attempt/dead/terminal targets explicitly and prove duplicate alarms cannot invoke a delivery twice.
+- [x] Reconcile stable receipts before retry; mark lost-response/runtime-change/no-receipt ambiguity explicitly and never replay it.
+- [x] Recalculate delivery on enqueue, readiness/activity changes, attempt completion, retry scheduling, and duplicate alarms through the canonical alarm calculator.
+- [x] Preserve old VM/direct followup behavior behind flags and fail closed when a required capability is absent.
 
 ### APIs, hook seam, observability, and docs
 
-- [ ] Expose durable delivery/checkpoint state through typed ProjectData service methods and project/session debug REST reads.
-- [ ] Add the shared terminal-transition hook seam without implementing subscriptions or parent wake delivery.
-- [ ] Emit structured transition logs/activity events and delivery/checkpoint/ambiguity/latency metrics.
-- [ ] Document every new environment variable in `apps/api/.env.example`, `apps/api/src/env.ts`, and the public configuration reference.
-- [ ] Document the implemented Worker schema/adapter contract and explicitly identify checkpoint preemption and park/wake as future integration work.
+- [x] Expose durable delivery/checkpoint state through typed ProjectData service methods and project/session debug REST reads.
+- [x] Add the shared terminal-transition hook seam without implementing subscriptions or parent wake delivery.
+- [x] Emit structured transition logs/activity events and delivery/checkpoint/ambiguity/latency metrics.
+- [x] Document every new environment variable in `apps/api/.env.example`, `apps/api/src/env.ts`, and the public configuration reference.
+- [x] Document the implemented Worker schema/adapter contract and explicitly identify checkpoint preemption and park/wake as future integration work.
 
 ### Verification and shipping
 
-- [ ] Add fake-clock unit and real ProjectData SQLite/workerd tests for busy→ready exactly once, retry/backoff/TTL, dead/terminal targets, duplicate alarms, stable receipt reconciliation, ambiguity, old VM compatibility, and normal task/chat prompts.
-- [ ] Add vertical-slice/contract coverage for browser/API→ProjectData→VM adapter and MCP mailbox/handoff producers.
+- [x] Add fake-clock unit and real ProjectData SQLite/workerd tests for busy→ready exactly once, retry/backoff/TTL, dead/terminal targets, duplicate alarms, stable receipt reconciliation, ambiguity, old VM compatibility, and normal task/chat prompts.
+- [x] Add vertical-slice/contract coverage for browser/API→ProjectData→VM adapter and MCP mailbox/handoff producers.
 - [ ] Run focused tests and full `pnpm lint && pnpm typecheck && pnpm test && pnpm build` plus migration safety gates.
 - [ ] Run task-completion, Cloudflare, security, environment, constitution, documentation, and test specialist reviews; address all blocking findings.
 - [ ] Deploy to staging, verify ProjectData migration state via Cloudflare, exercise real task/chat/followup/mailbox behavior, and clean up any test VMs.

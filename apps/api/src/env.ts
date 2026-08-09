@@ -530,6 +530,20 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MAILBOX_DELIVERY_POLL_INTERVAL_MS?: string; // DO alarm sweep interval (default: 30000)
   MAILBOX_MAX_MESSAGES_PER_PROJECT?: string; // Max active messages per project (default: 1000)
   MAILBOX_MESSAGE_MAX_LENGTH?: string; // Max message content length (default: 32768)
+  // Durable prompt delivery / checkpoint foundation (all execution features inert by default)
+  DURABLE_PROMPT_DELIVERY_ENABLED?: string;
+  PROMPT_DELIVERY_LEGACY_VM_COMPAT_ENABLED?: string;
+  PROMPT_DELIVERY_MAX_CANDIDATES_PER_ALARM?: string;
+  PROMPT_DELIVERY_MAX_ATTEMPTS?: string;
+  PROMPT_DELIVERY_RETRY_BASE_MS?: string;
+  PROMPT_DELIVERY_RETRY_MAX_MS?: string;
+  PROMPT_DELIVERY_TTL_MS?: string;
+  PROMPT_DELIVERY_RECEIPT_TIMEOUT_MS?: string;
+  PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS?: string;
+  PROMPT_DELIVERY_MIN_ALARM_DELAY_MS?: string;
+  ACP_LONG_TURN_SUPERVISOR_ENABLED?: string;
+  ACP_LONG_TURN_CHECKPOINT_MS?: string;
+  ACP_CHECKPOINT_PREEMPT_GRACE_MS?: string;
   // MCP get_session_messages limits
   MCP_MESSAGE_LIST_LIMIT?: string; // Default raw tokens per request (default: 50)
   MCP_MESSAGE_LIST_MAX?: string; // Max raw tokens per request (default: 200)

@@ -23,6 +23,7 @@ import * as orchestratorService from '../../services/project-orchestrator';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { getLatestAssistantMessageForTask } from '../../services/task-final-assistant-message';
 import { cleanupTerminalTaskResources } from '../../services/task-terminal-cleanup';
+import { runTaskTerminalTransitionHooks } from '../../services/task-terminal-transition-hooks';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
   ACTIVE_STATUSES,
@@ -299,7 +300,7 @@ export async function handleCompleteTask(
   // instead of completing the task. This prevents agents that ignore conversation-mode instructions
   // from prematurely ending the conversation.
   const taskRow = await env.DATABASE.prepare(
-    `SELECT task_mode, user_id, title, output_pr_url, output_branch, mission_id FROM tasks WHERE id = ? AND project_id = ?`
+    `SELECT task_mode, user_id, title, output_pr_url, output_branch, mission_id, parent_task_id FROM tasks WHERE id = ? AND project_id = ?`
   )
     .bind(tokenData.taskId, tokenData.projectId)
     .first<{
@@ -309,6 +310,7 @@ export async function handleCompleteTask(
       output_pr_url: string | null;
       output_branch: string | null;
       mission_id: string | null;
+      parent_task_id: string | null;
     }>();
 
   const isConversation = taskRow?.task_mode === 'conversation';
@@ -537,6 +539,16 @@ export async function handleCompleteTask(
     });
     throw err;
   }
+
+  await runTaskTerminalTransitionHooks({
+    taskId: tokenData.taskId,
+    projectId: tokenData.projectId,
+    parentTaskId: taskRow?.parent_task_id ?? null,
+    status: 'completed',
+    reason: summary,
+    occurredAt: now,
+    source: 'mcp.complete_task',
+  });
 
   log.info('mcp.complete_task', {
     taskId: tokenData.taskId,

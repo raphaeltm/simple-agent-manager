@@ -7,12 +7,24 @@
  *
  * See: specs/018-project-first-architecture/research.md (Decision 3)
  */
+import type {
+  AgentMailboxMessage,
+  CheckpointEpisode,
+  CheckpointEpisodeTransitionInput,
+  CreateCheckpointEpisodeInput,
+  DeliveryState,
+  MessageClass,
+} from '@simple-agent-manager/shared';
 import {
   resolveHandoffLimits,
   resolveMissionStateLimits,
 } from '@simple-agent-manager/shared';
 
 import type { ProjectData } from '../durable-objects/project-data';
+import type {
+  AcceptedPromptDelivery,
+  AcceptPromptDeliveryInput,
+} from '../durable-objects/project-data/prompt-delivery';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import {
@@ -785,7 +797,14 @@ export { createPolicy, getActivePolicies, getPolicy, listPolicies, removePolicy,
 
 // ── Agent Mailbox (Durable Messaging) ────────────────────────────────────
 
-import type { AgentMailboxMessage, DeliveryState, MessageClass } from '@simple-agent-manager/shared';
+export async function acceptPromptDelivery(
+  env: Env,
+  projectId: string,
+  input: AcceptPromptDeliveryInput,
+): Promise<AcceptedPromptDelivery> {
+  const stub = await getStub(env, projectId);
+  return stub.acceptPromptDelivery(input);
+}
 
 export async function enqueueMailboxMessage(
   env: Env,
@@ -855,6 +874,43 @@ export async function getMailboxStats(
 ): Promise<Record<string, number>> {
   const stub = await getStub(env, projectId);
   return stub.getMailboxStats();
+}
+
+export async function createCheckpointEpisode(
+  env: Env,
+  projectId: string,
+  input: CreateCheckpointEpisodeInput,
+): Promise<{ episode: CheckpointEpisode; created: boolean }> {
+  const stub = await getStub(env, projectId);
+  return stub.createCheckpointEpisode(input);
+}
+
+export async function getCheckpointEpisode(
+  env: Env,
+  projectId: string,
+  episodeId: string,
+): Promise<CheckpointEpisode | null> {
+  const stub = await getStub(env, projectId);
+  return stub.getCheckpointEpisode(episodeId);
+}
+
+export async function transitionCheckpointEpisode(
+  env: Env,
+  projectId: string,
+  episodeId: string,
+  input: CheckpointEpisodeTransitionInput,
+): Promise<CheckpointEpisode | null> {
+  const stub = await getStub(env, projectId);
+  return stub.transitionCheckpointEpisode(episodeId, input);
+}
+
+export async function getDurableExecutionSnapshot(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+) {
+  const stub = await getStub(env, projectId);
+  return stub.getDurableExecutionSnapshot(sessionId);
 }
 
 // ── Mission State & Handoffs ──────────────────────────────────────────────

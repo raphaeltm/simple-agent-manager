@@ -451,6 +451,27 @@ chatRoutes.post('/:sessionId/idle-reset', async (c) => {
 });
 
 /**
+ * GET /api/projects/:projectId/sessions/:sessionId/durability
+ * Project-scoped debug snapshot for durable prompt/checkpoint state.
+ */
+chatRoutes.get('/:sessionId/durability', async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const sessionId = requireRouteParam(c, 'sessionId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
+  await requireProjectCapability(db, projectId, userId, 'task:read');
+  await requireSessionCreator(c.env, projectId, sessionId, userId);
+
+  const snapshot = await projectDataService.getDurableExecutionSnapshot(
+    c.env,
+    projectId,
+    sessionId,
+  );
+  return c.json(snapshot);
+});
+
+/**
  * POST /api/projects/:projectId/sessions/:sessionId/prompt
  * Forward a follow-up prompt to the running agent session on the VM.
  * Looks up workspace + agent session from D1, then calls the VM agent.
@@ -470,14 +491,6 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
     throw errors.badRequest('content is required');
   }
 
-  // Resolve the live workspace + running agent session, tenant-scoped and
-  // fail-fast (see resolveLiveAgentSessionForChat).
-  const { workspace, agentSession } = await resolveLiveAgentSessionForChat(db, {
-    projectId,
-    sessionId,
-    userId,
-  });
-
   // Enrich @mentions with agent profile context before forwarding.
   // The enriched message goes to the agent; the clean message was already
   // persisted in chat by the VM agent message reporting flow.
@@ -489,6 +502,38 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
     userId,
     c.env
   );
+
+  const { resolveDurableExecutionConfig } = await import(
+    '../durable-objects/project-data/durable-execution-config'
+  );
+  const durableConfig = resolveDurableExecutionConfig(c.env);
+  if (durableConfig.deliveryEnabled) {
+    const accepted = await projectDataService.acceptPromptDelivery(c.env, projectId, {
+      targetSessionId: sessionId,
+      displayContent: content,
+      deliveryContent: enrichedMessage,
+      senderType: 'human',
+      senderId: userId,
+      messageClass: 'deliver',
+      sourceKind: 'user_followup',
+      ttlMs: durableConfig.ttlMs,
+      metadata: { userId },
+    });
+    return c.json({
+      accepted: true,
+      status: 'queued',
+      deliveryId: accepted.message.id,
+      messageId: accepted.transcriptMessageId,
+    }, 202);
+  }
+
+  // Compatibility path for deployments that have not enabled durable prompt
+  // delivery yet. It preserves the current request-bound old-VM behavior.
+  const { workspace, agentSession } = await resolveLiveAgentSessionForChat(db, {
+    projectId,
+    sessionId,
+    userId,
+  });
 
   // Forward the prompt to the VM agent
   const { getCfContainerWakeTimeoutMs, sendPromptToAgentOnNode } =

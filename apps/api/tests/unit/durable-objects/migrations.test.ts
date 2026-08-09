@@ -1,6 +1,8 @@
+import Database from 'better-sqlite3';
 import { describe, expect, it } from 'vitest';
 
 import { MIGRATIONS, runMigrations } from '../../../src/durable-objects/migrations';
+import { createSqlStorage } from './sql-storage-test-utils';
 
 /**
  * In-memory mock of SqlStorage for testing migration logic.
@@ -130,6 +132,71 @@ describe('DO Migrations', () => {
 
       expect(sql1.getMigrationsTable().length).toBe(sql2.getMigrationsTable().length);
     });
+
+    it('applies the full SQLite chain on a clean install', () => {
+      const db = new Database(':memory:');
+      try {
+        const sql = createSqlStorage(db);
+        runMigrations(sql);
+
+        const applied = db.prepare('SELECT name FROM migrations ORDER BY rowid').all() as Array<{ name: string }>;
+        expect(applied.map((row) => row.name)).toEqual(MIGRATIONS.map((migration) => migration.name));
+        expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'checkpoint_episodes'").get()).toEqual({ name: 'checkpoint_episodes' });
+        const inboxColumns = db.prepare('PRAGMA table_info(session_inbox)').all() as Array<{ name: string }>;
+        expect(inboxColumns.map((column) => column.name)).toContain('receipt_state');
+        expect(inboxColumns.map((column) => column.name)).toContain('next_attempt_at');
+      } finally {
+        db.close();
+      }
+    });
+
+    it('upgrades a migration-024 database without replacing ProjectData parent tables', () => {
+      const db = new Database(':memory:');
+      try {
+        const sql = createSqlStorage(db);
+        sql.exec(`CREATE TABLE migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)`);
+        for (const migration of MIGRATIONS.slice(0, -1)) {
+          migration.run(sql);
+          sql.exec(
+            'INSERT INTO migrations (name, applied_at) VALUES (?, ?)',
+            migration.name,
+            1,
+          );
+        }
+        sql.exec(
+          `INSERT INTO chat_sessions
+           (id, topic, status, message_count, started_at, created_at, updated_at)
+           VALUES ('chat-upgrade', 'Existing', 'active', 0, 1, 1, 1)`,
+        );
+        sql.exec(
+          `INSERT INTO session_state
+           (session_id, activity, activity_at, prompt_started_at, restart_count)
+           VALUES ('acp-upgrade', 'prompting', 2, 1, 0)`,
+        );
+        sql.exec(
+          `INSERT INTO session_inbox
+           (id, target_session_id, message_type, content, priority, created_at,
+            message_class, delivery_state, sender_type, ack_required, delivery_attempts)
+           VALUES ('mail-upgrade', 'chat-upgrade', 'deliver', 'existing', 'high', 2,
+                   'deliver', 'queued', 'agent', 1, 0)`,
+        );
+
+        runMigrations(sql);
+
+        expect(db.prepare("SELECT content, prompt_message_id, next_attempt_at FROM session_inbox WHERE id = 'mail-upgrade'").get()).toEqual({
+          content: 'existing',
+          prompt_message_id: 'mail-upgrade',
+          next_attempt_at: 2,
+        });
+        expect(db.prepare("SELECT prompt_started_at, prompt_epoch FROM session_state WHERE session_id = 'acp-upgrade'").get()).toEqual({
+          prompt_started_at: 1,
+          prompt_epoch: null,
+        });
+        expect(db.prepare("SELECT COUNT(*) AS count FROM chat_sessions WHERE id = 'chat-upgrade'").get()).toEqual({ count: 1 });
+      } finally {
+        db.close();
+      }
+    });
   });
 
   describe('001-initial-schema migration', () => {
@@ -209,7 +276,7 @@ describe('DO Migrations', () => {
       // session_attention_markers: 2 (active, expiry) from migration 020
       // activity_events: 1 (session_id, created_at partial) from migration 022
       // chat_sessions: 1 (created_by_user_id) from migration 023
-      expect(indexes.length).toBe(41);
+      expect(indexes.length).toBe(45);
     });
   });
 });

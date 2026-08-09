@@ -645,6 +645,87 @@ export const MIGRATIONS: Migration[] = [
       sql.exec(`ALTER TABLE chat_messages ADD COLUMN origin TEXT`);
     },
   },
+  {
+    // Worker-owned durable prompt delivery and checkpoint episode foundation.
+    // session_inbox remains the only queue; these columns add attempt/receipt
+    // reconciliation without creating a competing delivery store.
+    name: '025-durable-prompt-delivery-checkpoints',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE session_state ADD COLUMN prompt_epoch INTEGER`);
+
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'agent_mailbox'`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN prompt_message_id TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN next_attempt_at INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN last_error TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN terminal_reason TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN attempt_id TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN attempt_started_at INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN runtime_identity TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN receipt_state TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN receipt_runtime_identity TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN receipt_checked_at INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN accepted_at INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN adapter_protocol_version INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN receipt_supported INTEGER`);
+
+      sql.exec(`
+        UPDATE session_inbox
+        SET prompt_message_id = id
+        WHERE prompt_message_id IS NULL
+      `);
+      sql.exec(`
+        UPDATE session_inbox
+        SET next_attempt_at = created_at
+        WHERE next_attempt_at IS NULL AND delivery_state = 'queued'
+      `);
+
+      sql.exec(`
+        CREATE INDEX idx_inbox_delivery_due
+        ON session_inbox(delivery_state, next_attempt_at, created_at)
+        WHERE delivery_state IN ('queued', 'retry_wait')
+      `);
+      sql.exec(`
+        CREATE INDEX idx_inbox_delivery_claims
+        ON session_inbox(delivery_state, attempt_started_at)
+        WHERE delivery_state = 'delivering'
+      `);
+
+      sql.exec(`
+        CREATE TABLE checkpoint_episodes (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          task_id TEXT,
+          workspace_id TEXT,
+          acp_session_id TEXT NOT NULL,
+          prompt_epoch INTEGER NOT NULL,
+          reason TEXT NOT NULL,
+          state TEXT NOT NULL,
+          progress_envelope_json TEXT,
+          mailbox_message_id TEXT,
+          prompt_delivery_id TEXT,
+          preempt_requested_at INTEGER,
+          preempt_accepted_at INTEGER,
+          ready_observed_at INTEGER,
+          resume_accepted_at INTEGER,
+          completed_at INTEGER,
+          failed_at INTEGER,
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(acp_session_id, prompt_epoch)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX idx_checkpoint_episodes_session
+        ON checkpoint_episodes(session_id, created_at DESC)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_checkpoint_episodes_state
+        ON checkpoint_episodes(state, updated_at)
+      `);
+    },
+  },
 ];
 
 /**

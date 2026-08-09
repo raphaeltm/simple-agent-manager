@@ -25,6 +25,10 @@ export {
   parseWorkspaceId,
 } from './row-schemas/aggregates';
 export { parseAttentionExpiryRow, parseAttentionMarkerRow, parseAttentionSummaryRow } from './row-schemas/attention';
+export {
+  parseCheckpointEpisodeRow,
+  parseCheckpointProgressEnvelope,
+} from './row-schemas/checkpoints';
 export { parseRow, safeParseJson } from './row-schemas/core';
 export {
   parseKnowledgeEntityBasicRow,

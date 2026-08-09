@@ -128,3 +128,29 @@ export function recordNodeRoutingMetric(metric: NodeRoutingMetric, _env: Env): v
     aggregate,
   });
 }
+
+export type DurableExecutionMetricName =
+  | 'prompt_delivery_attempt'
+  | 'prompt_delivery_accepted'
+  | 'prompt_delivery_retry'
+  | 'prompt_delivery_failed'
+  | 'prompt_delivery_ambiguous'
+  | 'checkpoint_episode_transition';
+
+export interface DurableExecutionMetric {
+  metric: DurableExecutionMetricName;
+  projectId: string | null;
+  sessionId: string | null;
+  deliveryId?: string | null;
+  checkpointEpisodeId?: string | null;
+  attemptCount?: number;
+  durationMs?: number;
+  reason?: string | null;
+}
+
+export function recordDurableExecutionMetric(
+  metric: DurableExecutionMetric,
+  _env: Env,
+): void {
+  log.info('durable_execution.telemetry', { ...metric });
+}

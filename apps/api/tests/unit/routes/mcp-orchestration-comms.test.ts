@@ -9,6 +9,7 @@ const mockSendPromptToAgentOnNode = vi.fn();
 const mockStopAgentSessionOnNode = vi.fn();
 const mockPersistOrchestrationPrompt = vi.fn();
 const mockEnqueueMailboxMessage = vi.fn();
+const mockAcceptPromptDelivery = vi.fn();
 
 vi.mock('../../../src/services/node-agent', () => ({
   sendPromptToAgentOnNode: (...args: unknown[]) => mockSendPromptToAgentOnNode(...args),
@@ -21,6 +22,7 @@ vi.mock('../../../src/services/orchestration-prompts', () => ({
 
 vi.mock('../../../src/services/project-data', () => ({
   enqueueMailboxMessage: (...args: unknown[]) => mockEnqueueMailboxMessage(...args),
+  acceptPromptDelivery: (...args: unknown[]) => mockAcceptPromptDelivery(...args),
 }));
 
 // Mock ulid for deterministic IDs
@@ -92,6 +94,7 @@ describe('MCP Orchestration Communication Tools', () => {
     mockStopAgentSessionOnNode.mockResolvedValue(undefined);
     mockPersistOrchestrationPrompt.mockResolvedValue('persisted-msg-001');
     mockEnqueueMailboxMessage.mockResolvedValue({ id: 'mailbox-msg-001' });
+    mockAcceptPromptDelivery.mockResolvedValue({ message: { id: 'durable-message-001' } });
 
     const mod = await import('../../../src/routes/mcp/orchestration-comms');
     handleSendMessageToSubtask = mod.handleSendMessageToSubtask;
@@ -260,6 +263,57 @@ describe('MCP Orchestration Communication Tools', () => {
       expect(mockPersistOrchestrationPrompt.mock.invocationCallOrder[0]).toBeLessThan(
         mockSendPromptToAgentOnNode.mock.invocationCallOrder[0],
       );
+    });
+
+    it('durably accepts the handoff and skips direct VM delivery when enabled', async () => {
+      mockD1ResultSequence([
+        [{
+          id: 'child-001',
+          status: 'in_progress',
+          workspace_id: 'ws-child-001',
+          project_id: 'proj-001',
+          parent_task_id: 'parent-task-001',
+        }],
+        [{
+          id: 'ws-child-001',
+          node_id: 'node-001',
+          chat_session_id: 'chat-child-001',
+          status: 'running',
+        }],
+        [{ id: 'agent-session-001' }],
+      ]);
+      const durableEnv = {
+        ...mockEnv,
+        DURABLE_PROMPT_DELIVERY_ENABLED: 'true',
+      } as Env;
+
+      const result = await handleSendMessageToSubtask(
+        1,
+        { taskId: 'child-001', message: 'durable handoff' },
+        parentTokenData,
+        durableEnv,
+      );
+
+      expect(result.error).toBeUndefined();
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0]!.text,
+      );
+      expect(content).toEqual({
+        delivered: false,
+        queued: true,
+        accepted: true,
+        messageId: 'durable-message-001',
+      });
+      expect(mockAcceptPromptDelivery).toHaveBeenCalledWith(
+        durableEnv,
+        'proj-001',
+        expect.objectContaining({
+          targetSessionId: 'chat-child-001',
+          sourceKind: 'orchestration_handoff',
+        }),
+      );
+      expect(mockSendPromptToAgentOnNode).not.toHaveBeenCalled();
+      expect(mockPersistOrchestrationPrompt).not.toHaveBeenCalled();
     });
 
     it('should return agent_busy when child responds with 409', async () => {
