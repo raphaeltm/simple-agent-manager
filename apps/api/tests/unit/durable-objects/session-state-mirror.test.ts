@@ -67,6 +67,40 @@ describe('Session State Mirror — vertical slice', () => {
       const state = sessionState.getSessionState(sql, 'nonexistent');
       expect(state).toBeNull();
     });
+
+    it('preserves the original prompt epoch across same-epoch prompting and recovering rereports', () => {
+      sessionState.upsertActivityState(sql, 'sess-epoch', {
+        activity: 'prompting',
+        promptStartedAt: 1_000,
+        now: 1_100,
+      });
+      sessionState.upsertActivityState(sql, 'sess-epoch', {
+        activity: 'prompting',
+        promptStartedAt: 5_000,
+        now: 5_100,
+      });
+      sessionState.upsertActivityState(sql, 'sess-epoch', {
+        activity: 'recovering',
+        promptStartedAt: 8_000,
+        now: 8_100,
+      });
+
+      expect(sessionState.getSessionState(sql, 'sess-epoch')?.promptStartedAt).toBe(1_000);
+      expect(sessionState.getPromptEpoch(sql, 'sess-epoch')).toBe(1_000);
+    });
+
+    it('accepts a newer epoch only through positive prompt acceptance', () => {
+      sessionState.upsertActivityState(sql, 'sess-new-epoch', {
+        activity: 'prompting',
+        promptStartedAt: 1_000,
+        now: 1_000,
+      });
+
+      expect(sessionState.markPromptAccepted(sql, 'sess-new-epoch', 900, 2_000)).toBe(false);
+      expect(sessionState.markPromptAccepted(sql, 'sess-new-epoch', 3_000, 3_100)).toBe(true);
+      expect(sessionState.getSessionState(sql, 'sess-new-epoch')?.promptStartedAt).toBe(3_000);
+      expect(sessionState.getPromptEpoch(sql, 'sess-new-epoch')).toBe(3_000);
+    });
   });
 
   describe('Plan message persistence → retrieval', () => {
@@ -130,6 +164,8 @@ describe('Session State Mirror — vertical slice', () => {
 
       expect(healed).toEqual(['stuck-sess']);
       expect(sessionState.getSessionState(sql, 'stuck-sess')!.activity).toBe('idle');
+      expect(sessionState.getSessionState(sql, 'stuck-sess')!.promptStartedAt).toBeNull();
+      expect(sessionState.getPromptEpoch(sql, 'stuck-sess')).toBeNull();
       expect(sessionState.getSessionState(sql, 'fresh-sess')!.activity).toBe('prompting');
     });
 
@@ -189,6 +225,40 @@ describe('Session State Mirror — vertical slice', () => {
       const after = sessionState.getSessionState(sql, 'acp-1')!.activityAt;
       expect(after).toBeGreaterThan(before);
     });
+
+    it('keeps an old prompt epoch when recent progress refreshes activity', async () => {
+      const oldPromptAt = 1_000;
+      const recentActivityAt = 10_000;
+      sql.exec(
+        `INSERT INTO chat_sessions (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES ('chat-old-prompt', 'ws-old-prompt', 'Topic', 'active', 0, ?, ?, ?)`,
+        oldPromptAt,
+        oldPromptAt,
+        oldPromptAt,
+      );
+      sql.exec(
+        `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, status, agent_type, created_at, updated_at)
+         VALUES ('acp-old-prompt', 'chat-old-prompt', 'ws-old-prompt', 'running', 'claude_code', ?, ?)`,
+        oldPromptAt,
+        oldPromptAt,
+      );
+      sessionState.upsertActivityState(sql, 'acp-old-prompt', {
+        activity: 'prompting',
+        promptStartedAt: oldPromptAt,
+        now: oldPromptAt,
+      });
+
+      sessionState.refreshWorkingActivityForChatSession(
+        sql,
+        'chat-old-prompt',
+        recentActivityAt,
+      );
+
+      const state = sessionState.getSessionState(sql, 'acp-old-prompt');
+      expect(state?.activityAt).toBe(recentActivityAt);
+      expect(state?.promptStartedAt).toBe(oldPromptAt);
+      expect(sessionState.getPromptEpoch(sql, 'acp-old-prompt')).toBe(oldPromptAt);
+    });
   });
 
   describe('Session lifecycle transitions', () => {
@@ -209,6 +279,8 @@ describe('Session State Mirror — vertical slice', () => {
       state = sessionState.getSessionState(sql, 'sess-1');
       expect(state!.activity).toBe('stopped');
       expect(state!.lastStopReason).toBe('user_requested');
+      expect(state!.promptStartedAt).toBeNull();
+      expect(sessionState.getPromptEpoch(sql, 'sess-1')).toBeNull();
     });
 
     it('markSessionError writes error state', () => {

@@ -571,6 +571,28 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 | `TASK_RECONCILIATION_MIN_ALARM_DELAY_MS`           | `10000` (10 sec)                       | Minimum delay before the next reconciliation alarm can fire                                                                                                                                                                                                            |
 | `INSTANT_START_STALE_TIMEOUT_MS`                   | `600000` (10 min)                      | How long an Instant session may sit mid-launch (execution step `instant_persistence`) before the recovery sweep treats its start as stuck and fails it. Instant starts are accepted and then finished in the background, so this bounds a launch that never completes. |
 
+### Durable prompt delivery and checkpoint storage
+
+These controls are a compatibility-gated durability foundation. Both execution flags default to `false`; keep them disabled until every target VM advertises the stable receipt protocol. Invalid values fail the new delivery path closed.
+
+| Variable                                           | Default          | Description |
+| -------------------------------------------------- | ---------------- | ----------- |
+| `DURABLE_PROMPT_DELIVERY_ENABLED`                  | `false`          | Persist prompts and deliver them from ProjectData alarms. |
+| `PROMPT_DELIVERY_LEGACY_VM_COMPAT_ENABLED`         | `false`          | Explicit old-VM compatibility switch; receipt ambiguity still fails visibly and is never guessed or replayed. |
+| `PROMPT_DELIVERY_MAX_CANDIDATES_PER_ALARM`         | `5`              | Maximum delivery claims started by one alarm pass. |
+| `PROMPT_DELIVERY_MAX_ATTEMPTS`                     | `5`              | Maximum positive busy/not-ready attempts. |
+| `PROMPT_DELIVERY_RETRY_BASE_MS`                    | `5000`           | Initial retry delay. |
+| `PROMPT_DELIVERY_RETRY_MAX_MS`                     | `300000`         | Maximum exponential retry delay. |
+| `PROMPT_DELIVERY_TTL_MS`                           | `3600000`        | Maximum unresolved delivery lifetime. |
+| `PROMPT_DELIVERY_RECEIPT_TIMEOUT_MS`               | `30000`          | Age at which an unconfirmed claim enters receipt reconciliation. |
+| `PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS`            | `5000`           | Timeout for background VM delivery and receipt calls. |
+| `PROMPT_DELIVERY_MIN_ALARM_DELAY_MS`               | `1000`           | Minimum delay before the next delivery alarm. |
+| `ACP_LONG_TURN_SUPERVISOR_ENABLED`                 | `false`          | Reserved long-turn candidate/preemption engine switch; this release leaves it inert. |
+| `ACP_LONG_TURN_CHECKPOINT_MS`                      | `18000000` (5 hr)| Reserved checkpoint eligibility threshold. |
+| `ACP_CHECKPOINT_PREEMPT_GRACE_MS`                  | `30000`          | Reserved graceful preemption window. |
+
+ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed by ACP session and prompt epoch. There is no automatic checkpoint preemption, parent wake behavior, or `wait_for_subtasks` support in this foundation.
+
 > **Liveness-gated recovery.** Stuck-task recovery for `in_progress` tasks (including task-mode work paused at the `awaiting_followup` execution step) is gated on **task-scoped** liveness — a live workspace, a healthy node with a recent heartbeat, **and** an active task-scoped ACP session. A shared-node heartbeat alone is never sufficient. Consequently, `TASK_RUN_HARD_TIMEOUT_MS` and `TASK_RUN_MAX_EXECUTION_MS` bound the point at which a task with **no** proven live runtime is failed; a task with a demonstrably live runtime is preserved past those thresholds, but remains bounded by `TASK_RUN_ABSOLUTE_CEILING_MS` (24 hours by default) as a runaway-cost backstop. When liveness cannot be determined (probe timeout or error), the task is left untouched (fail-safe) until it reaches that absolute ceiling.
 
 ## Node & Workspace Readiness

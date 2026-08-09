@@ -26,6 +26,19 @@ vi.mock('@simple-agent-manager/shared', () => ({
   DEFAULT_CHAT_SESSION_MESSAGE_MAX: 50000,
   DEFAULT_CHAT_COMPACT_MODE: true,
   DEFAULT_WORKSPACE_PROFILE: 'full',
+  DEFAULT_DURABLE_PROMPT_DELIVERY_ENABLED: false,
+  DEFAULT_PROMPT_DELIVERY_LEGACY_VM_COMPAT_ENABLED: false,
+  DEFAULT_ACP_LONG_TURN_SUPERVISOR_ENABLED: false,
+  DEFAULT_ACP_LONG_TURN_CHECKPOINT_MS: 18_000_000,
+  DEFAULT_ACP_CHECKPOINT_PREEMPT_GRACE_MS: 30_000,
+  DEFAULT_PROMPT_DELIVERY_MAX_CANDIDATES_PER_ALARM: 5,
+  DEFAULT_PROMPT_DELIVERY_MAX_ATTEMPTS: 5,
+  DEFAULT_PROMPT_DELIVERY_RETRY_BASE_MS: 5_000,
+  DEFAULT_PROMPT_DELIVERY_RETRY_MAX_MS: 300_000,
+  DEFAULT_PROMPT_DELIVERY_TTL_MS: 3_600_000,
+  DEFAULT_PROMPT_DELIVERY_RECEIPT_TIMEOUT_MS: 30_000,
+  DEFAULT_PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS: 5_000,
+  DEFAULT_PROMPT_DELIVERY_MIN_ALARM_DELAY_MS: 1_000,
   isTaskExecutionStep: () => true,
   isTaskMode: (v: unknown) => v === 'task' || v === 'conversation',
 }));
@@ -69,6 +82,8 @@ vi.mock('../../../src/services/project-data', () => ({
   stopSession: vi.fn(),
   linkSessionIdea: vi.fn(),
   unlinkSessionIdea: vi.fn(),
+  acceptPromptDelivery: vi.fn(),
+  getDurableExecutionSnapshot: vi.fn(),
 }));
 
 vi.mock('../../../src/services/observability', () => ({
@@ -238,7 +253,7 @@ describe('GET /sessions', () => {
 });
 
 describe('POST /sessions/:sessionId/prompt', () => {
-  function postPrompt() {
+  function postPrompt(envOverrides: Partial<Env> = {}) {
     return app.request(
       '/api/projects/proj-1/sessions/chat-1/prompt',
       {
@@ -246,7 +261,7 @@ describe('POST /sessions/:sessionId/prompt', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: 'hello agent' }),
       },
-      { DATABASE: {} as D1Database } as Env
+      { DATABASE: {} as D1Database, ...envOverrides } as Env
     );
   }
 
@@ -270,6 +285,34 @@ describe('POST /sessions/:sessionId/prompt', () => {
       undefined,
       undefined
     );
+  });
+
+  it('durably accepts a prompt before runtime resolution when the feature is enabled', async () => {
+    vi.mocked(projectDataService.acceptPromptDelivery).mockResolvedValue({
+      message: { id: 'delivery-1' },
+      transcriptMessageId: 'delivery-1',
+    } as Awaited<ReturnType<typeof projectDataService.acceptPromptDelivery>>);
+
+    const response = await postPrompt({ DURABLE_PROMPT_DELIVERY_ENABLED: 'true' });
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      accepted: true,
+      status: 'queued',
+      deliveryId: 'delivery-1',
+      messageId: 'delivery-1',
+    });
+    expect(projectDataService.acceptPromptDelivery).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      expect.objectContaining({
+        targetSessionId: 'chat-1',
+        displayContent: 'hello agent',
+        sourceKind: 'user_followup',
+      }),
+    );
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+    expect(mocks.drizzle).toHaveBeenCalledTimes(1);
   });
 
   it('uses the extended wake budget for a sleeping session', async () => {

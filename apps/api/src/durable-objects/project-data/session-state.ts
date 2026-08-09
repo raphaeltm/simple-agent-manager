@@ -30,6 +30,7 @@ export interface ActivityUpdate {
   agentType?: string | null;
   restartCount?: number | null;
   statusError?: string | null;
+  now?: number;
 }
 
 export function upsertActivityState(
@@ -37,18 +38,31 @@ export function upsertActivityState(
   sessionId: string,
   update: ActivityUpdate,
 ): void {
-  const now = Date.now();
+  const now = update.now ?? Date.now();
   const promptStartedAt = update.activity === 'prompting' || update.activity === 'recovering'
     ? (update.promptStartedAt ?? now)
     : null;
 
   sql.exec(
-    `INSERT INTO session_state (session_id, activity, activity_at, prompt_started_at, agent_type, restart_count, status_error)
-     VALUES (?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO session_state (session_id, activity, activity_at, prompt_started_at, prompt_epoch, agent_type, restart_count, status_error)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(session_id) DO UPDATE SET
        activity = excluded.activity,
        activity_at = excluded.activity_at,
-       prompt_started_at = CASE WHEN excluded.activity IN ('prompting', 'recovering') THEN excluded.prompt_started_at ELSE session_state.prompt_started_at END,
+       prompt_started_at = CASE
+         WHEN excluded.activity NOT IN ('prompting', 'recovering', 'error') THEN NULL
+         WHEN session_state.activity IN ('prompting', 'recovering', 'error')
+           AND session_state.prompt_started_at IS NOT NULL
+           THEN session_state.prompt_started_at
+         ELSE excluded.prompt_started_at
+       END,
+       prompt_epoch = CASE
+         WHEN excluded.activity NOT IN ('prompting', 'recovering', 'error') THEN NULL
+         WHEN session_state.activity IN ('prompting', 'recovering', 'error')
+           AND session_state.prompt_epoch IS NOT NULL
+           THEN session_state.prompt_epoch
+         ELSE excluded.prompt_epoch
+       END,
        agent_type = COALESCE(excluded.agent_type, session_state.agent_type),
        restart_count = COALESCE(excluded.restart_count, session_state.restart_count),
        status_error = excluded.status_error`,
@@ -56,10 +70,56 @@ export function upsertActivityState(
     update.activity,
     now,
     promptStartedAt,
+    promptStartedAt,
     update.agentType ?? null,
     update.restartCount ?? 0,
     update.statusError ?? null,
   );
+}
+
+/**
+ * Establish a new prompt epoch only after the delivery owner has positive
+ * acceptance evidence. Activity rereports never call this function.
+ */
+export function markPromptAccepted(
+  sql: SqlStorage,
+  sessionId: string,
+  promptEpoch: number,
+  now = Date.now(),
+): boolean {
+  const existing = sql.exec(
+    'SELECT prompt_epoch FROM session_state WHERE session_id = ?',
+    sessionId,
+  ).toArray()[0];
+  const existingEpoch = typeof existing?.prompt_epoch === 'number'
+    ? existing.prompt_epoch
+    : null;
+  if (existingEpoch !== null && promptEpoch <= existingEpoch) return false;
+
+  sql.exec(
+    `INSERT INTO session_state
+       (session_id, activity, activity_at, prompt_started_at, prompt_epoch, restart_count)
+     VALUES (?, 'prompting', ?, ?, ?, 0)
+     ON CONFLICT(session_id) DO UPDATE SET
+       activity = 'prompting',
+       activity_at = excluded.activity_at,
+       prompt_started_at = excluded.prompt_started_at,
+       prompt_epoch = excluded.prompt_epoch,
+       status_error = NULL`,
+    sessionId,
+    now,
+    promptEpoch,
+    promptEpoch,
+  );
+  return true;
+}
+
+export function getPromptEpoch(sql: SqlStorage, sessionId: string): number | null {
+  const row = sql.exec(
+    'SELECT prompt_epoch FROM session_state WHERE session_id = ?',
+    sessionId,
+  ).toArray()[0];
+  return typeof row?.prompt_epoch === 'number' ? row.prompt_epoch : null;
 }
 
 export function refreshWorkingActivityForChatSession(
@@ -115,7 +175,10 @@ export function markSessionStopped(
 ): void {
   const now = Date.now();
   sql.exec(
-    `UPDATE session_state SET activity = 'stopped', activity_at = ?, last_stop_reason = ? WHERE session_id = ?`,
+    `UPDATE session_state
+     SET activity = 'stopped', activity_at = ?, last_stop_reason = ?,
+         prompt_started_at = NULL, prompt_epoch = NULL
+     WHERE session_id = ?`,
     now,
     reason,
     sessionId,
@@ -266,7 +329,8 @@ export function reconcileStaleActivity(
     const sessionId = row.session_id as string;
     sql.exec(
       `UPDATE session_state
-       SET activity = 'idle', activity_at = ?
+       SET activity = 'idle', activity_at = ?,
+           prompt_started_at = NULL, prompt_epoch = NULL
        WHERE session_id = ?`,
       now,
       sessionId,

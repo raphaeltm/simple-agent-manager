@@ -21,7 +21,13 @@ export interface PreparedLiveAgentPrompt {
 export async function preparePromptForLiveAgent(
   env: Env,
   db: ChatDb,
-  input: { projectId: string; sessionId: string; userId: string; content: string }
+  input: {
+    projectId: string;
+    sessionId: string;
+    userId: string;
+    content: string;
+    enrichedMessage?: string;
+  }
 ): Promise<PreparedLiveAgentPrompt> {
   const { projectId, sessionId, userId, content } = input;
   const { workspace, agentSession } = await resolveLiveAgentSessionForChat(db, {
@@ -29,7 +35,9 @@ export async function preparePromptForLiveAgent(
     sessionId,
     userId,
   });
-  const { enrichedMessage } = await enrichMessageWithMentions(content, db, projectId, userId, env);
+  const enrichedMessage =
+    input.enrichedMessage ??
+    (await enrichMessageWithMentions(content, db, projectId, userId, env)).enrichedMessage;
   return {
     nodeId: workspace.nodeId,
     workspaceId: workspace.id,
@@ -67,7 +75,13 @@ export function sendPreparedPromptToLiveAgent(
 export async function forwardPromptToLiveAgent(
   env: Env,
   db: ChatDb,
-  input: { projectId: string; sessionId: string; userId: string; content: string }
+  input: {
+    projectId: string;
+    sessionId: string;
+    userId: string;
+    content: string;
+    enrichedMessage?: string;
+  }
 ): Promise<unknown> {
   const prepared = await preparePromptForLiveAgent(env, db, input);
   return sendPreparedPromptToLiveAgent(env, prepared);

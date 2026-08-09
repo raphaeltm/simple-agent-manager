@@ -11,6 +11,8 @@
 import {
   type AcpSessionEventActorType,
   type AcpSessionStatus,
+  type CheckpointEpisodeTransitionInput,
+  type CreateCheckpointEpisodeInput,
   MAILBOX_DEFAULTS,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
@@ -18,14 +20,18 @@ import { DurableObject } from 'cloudflare:workers';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { expectJsonRecord } from '../../lib/runtime-validation';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
+import { recordDurableExecutionMetric } from '../../services/telemetry';
+import { DefaultVmPromptDeliveryAdapter } from '../../services/vm-prompt-delivery-adapter';
 import { runMigrations } from '../migrations';
 import * as acpSessions from './acp-sessions';
 import * as activity from './activity';
 import { computeProjectDataAlarmTime } from './alarm-schedule';
 import * as attention from './attention';
 import * as attentionExpiry from './attention-expiry';
+import * as checkpointEpisodes from './checkpoint-episodes';
 import * as commands from './commands';
 import { stopTimedOutConversationWorkspaces } from './conversation-timeout';
+import { resolveDurableExecutionConfig } from './durable-execution-config';
 import * as ideas from './ideas';
 import * as idleCleanup from './idle-cleanup';
 import * as knowledge from './knowledge';
@@ -35,6 +41,8 @@ import * as messagePersistence from './message-persistence';
 import * as messages from './messages';
 import * as missionState from './missions';
 import * as policies from './policies';
+import * as promptDelivery from './prompt-delivery';
+import { runPromptDeliveryClaim } from './prompt-delivery-runner';
 import * as reconciliation from './reconciliation';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
@@ -227,6 +235,54 @@ export class ProjectData extends DurableObject<Env> {
       sessionId,
       batchMessages
     );
+  }
+
+  async acceptPromptDelivery(
+    input: promptDelivery.AcceptPromptDeliveryInput,
+  ): Promise<promptDelivery.AcceptedPromptDelivery> {
+    const accepted = this.ctx.storage.transactionSync(() =>
+      promptDelivery.acceptPromptDelivery(this.sql, this.env, input)
+    );
+
+    if (accepted.transcriptInserted) {
+      idleCleanup.resetIdleCleanup(this.sql, this.env, input.targetSessionId);
+      if (input.senderType === 'human') {
+        attention.resolveAttentionMarkers(
+          this.sql,
+          input.targetSessionId,
+          accepted.transcriptMessageId,
+          'human',
+          'human_message',
+        );
+      }
+      if (accepted.workspaceId) {
+        activity.updateMessageActivity(this.sql, accepted.workspaceId, input.targetSessionId);
+      }
+      this.scheduleSummarySync();
+      this.broadcastEvent('message.new', {
+        sessionId: input.targetSessionId,
+        messageId: accepted.transcriptMessageId,
+        role: 'user',
+        content: input.displayContent.trim(),
+        toolMetadata: {
+          ...(input.metadata ?? {}),
+          source: input.sourceKind,
+          kind: 'durable_prompt_delivery',
+          deliveryId: accepted.message.id,
+        },
+        createdAt: accepted.transcriptCreatedAt,
+        sequence: accepted.transcriptSequence,
+        origin: null,
+      }, input.targetSessionId);
+    }
+    this.broadcastEvent('mailbox.enqueued', {
+      messageId: accepted.message.id,
+      messageClass: accepted.message.messageClass,
+      targetSessionId: accepted.message.targetSessionId,
+      sourceKind: accepted.message.sourceKind,
+    }, input.targetSessionId);
+    await this.recalculateAlarm();
+    return accepted;
   }
 
   private messagePersistenceHooks(): messagePersistence.MessagePersistenceHooks {
@@ -607,11 +663,21 @@ export class ProjectData extends DurableObject<Env> {
       .toArray()[0];
     const chatSessionId = (acpRow?.chat_session_id as string | undefined) ?? sessionId;
 
+    const persistedState = sessionState.getSessionState(this.sql, sessionId);
     this.broadcastEvent(
       'session.activity',
-      { sessionId: chatSessionId, activity, promptStartedAt: extra?.promptStartedAt ?? null },
+      {
+        sessionId: chatSessionId,
+        activity,
+        promptStartedAt: extra?.promptStartedAt ?? persistedState?.promptStartedAt ?? null,
+      },
       chatSessionId
     );
+
+    if (activity === 'idle') {
+      const nudged = promptDelivery.nudgePromptDeliveriesForTarget(this.sql, chatSessionId);
+      if (nudged > 0) await this.recalculateAlarm();
+    }
   }
 
   getSessionState(sessionId: string) {
@@ -620,6 +686,118 @@ export class ProjectData extends DurableObject<Env> {
 
   getLatestPersistedPlan(sessionId: string) {
     return sessionState.getLatestPersistedPlan(this.sql, sessionId);
+  }
+
+  createCheckpointEpisode(input: CreateCheckpointEpisodeInput) {
+    const result = this.ctx.storage.transactionSync(() =>
+      checkpointEpisodes.createCheckpointEpisode(this.sql, input)
+    );
+    if (result.created) {
+      recordDurableExecutionMetric({
+        metric: 'checkpoint_episode_transition',
+        projectId: this.getProjectId(),
+        sessionId: input.sessionId,
+        checkpointEpisodeId: result.episode.id,
+        attemptCount: result.episode.attemptCount,
+        reason: 'planned',
+      }, this.env as unknown as import('../../env').Env);
+      activity.recordActivityEventInternal(
+        this.sql,
+        'checkpoint_episode.planned',
+        'system',
+        null,
+        input.workspaceId ?? null,
+        input.sessionId,
+        input.taskId ?? null,
+        JSON.stringify({
+          episodeId: result.episode.id,
+          acpSessionId: input.acpSessionId,
+          promptEpoch: input.promptEpoch,
+          reason: input.reason,
+        }),
+      );
+      this.broadcastEvent('checkpoint_episode.created', {
+        episodeId: result.episode.id,
+        sessionId: input.sessionId,
+        state: result.episode.state,
+      }, input.sessionId);
+    }
+    return result;
+  }
+
+  getCheckpointEpisode(episodeId: string) {
+    return checkpointEpisodes.getCheckpointEpisode(this.sql, episodeId);
+  }
+
+  getCheckpointEpisodeByPrompt(acpSessionId: string, promptEpoch: number) {
+    return checkpointEpisodes.getCheckpointEpisodeByPrompt(this.sql, acpSessionId, promptEpoch);
+  }
+
+  listCheckpointEpisodes(sessionId: string, limit?: number) {
+    return checkpointEpisodes.listCheckpointEpisodes(this.sql, sessionId, limit);
+  }
+
+  transitionCheckpointEpisode(
+    episodeId: string,
+    input: CheckpointEpisodeTransitionInput,
+  ) {
+    const before = checkpointEpisodes.getCheckpointEpisode(this.sql, episodeId);
+    const episode = this.ctx.storage.transactionSync(() =>
+      checkpointEpisodes.transitionCheckpointEpisode(this.sql, episodeId, input)
+    );
+    if (episode && before && episode.state !== before.state) {
+      recordDurableExecutionMetric({
+        metric: 'checkpoint_episode_transition',
+        projectId: this.getProjectId(),
+        sessionId: episode.sessionId,
+        checkpointEpisodeId: episode.id,
+        attemptCount: episode.attemptCount,
+        reason: `${before.state}->${episode.state}`,
+      }, this.env as unknown as import('../../env').Env);
+      activity.recordActivityEventInternal(
+        this.sql,
+        `checkpoint_episode.${episode.state}`,
+        'system',
+        null,
+        episode.workspaceId,
+        episode.sessionId,
+        episode.taskId,
+        JSON.stringify({
+          episodeId,
+          fromState: before.state,
+          toState: episode.state,
+          attemptCount: episode.attemptCount,
+          hasError: episode.lastError !== null,
+        }),
+      );
+      this.broadcastEvent('checkpoint_episode.updated', {
+        episodeId,
+        sessionId: episode.sessionId,
+        fromState: before.state,
+        toState: episode.state,
+      }, episode.sessionId);
+    }
+    return episode;
+  }
+
+  getDurableExecutionSnapshot(sessionId: string) {
+    const acpRows = this.sql.exec(
+      `SELECT id FROM acp_sessions
+       WHERE chat_session_id = ?
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      sessionId,
+    ).toArray();
+    const acpSessionId = typeof acpRows[0]?.id === 'string' ? acpRows[0].id : sessionId;
+    const deliveryResult = mailbox.listMessages(this.sql, { targetSessionId: sessionId, limit: 50 });
+    return {
+      featureConfig: resolveDurableExecutionConfig(this.env),
+      sessionState: sessionState.getSessionState(this.sql, acpSessionId),
+      promptEpoch: sessionState.getPromptEpoch(this.sql, acpSessionId),
+      checkpointEpisodes: checkpointEpisodes.listCheckpointEpisodes(this.sql, sessionId, 50),
+      deliveries: deliveryResult.messages,
+      deliveryTotal: deliveryResult.total,
+    };
   }
 
   async forkAcpSession(sessionId: string, contextSummary: string) {
@@ -759,6 +937,43 @@ export class ProjectData extends DurableObject<Env> {
     const ackTimeoutMs = parseInt(this.env.MAILBOX_ACK_TIMEOUT_MS ?? '300000', 10);
     const maxAttempts = parseInt(this.env.MAILBOX_REDELIVERY_MAX_ATTEMPTS ?? '5', 10);
     mailbox.runDeliverySweep(this.sql, ackTimeoutMs, maxAttempts);
+
+    // Durable prompt delivery is feature-gated and inert by default. Claims are
+    // persisted synchronously; VM I/O runs out of the alarm critical path.
+    try {
+      const deliveryConfig = resolveDurableExecutionConfig(this.env);
+      if (deliveryConfig.deliveryEnabled) {
+        const claims = this.ctx.storage.transactionSync(() =>
+          promptDelivery.claimDuePromptDeliveries(this.sql, deliveryConfig)
+        );
+        const adapter = new DefaultVmPromptDeliveryAdapter(
+          this.env as unknown as import('../../env').Env,
+        );
+        for (const claim of claims) {
+          this.ctx.waitUntil(runPromptDeliveryClaim(
+            this.sql,
+            this.env,
+            deliveryConfig,
+            claim,
+            adapter,
+            {
+              projectId: this.getProjectId(),
+              recalculateAlarm: () => this.recalculateAlarm(),
+              broadcastEvent: (type, payload, sessionId) =>
+                this.broadcastEvent(type, payload, sessionId),
+            },
+          ).catch((err) => {
+            log.error('alarm.prompt_delivery_claim_failed', {
+              messageId: claim.message.id,
+              attemptId: claim.attemptId,
+              ...serializeError(err),
+            });
+          }));
+        }
+      }
+    } catch (err) {
+      log.error('alarm.prompt_delivery_failed_closed', serializeError(err));
+    }
 
     await this.recalculateAlarm();
   }

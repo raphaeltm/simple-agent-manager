@@ -29,8 +29,12 @@ export const DURABLE_MESSAGE_CLASSES: readonly MessageClass[] = [
 
 export const DELIVERY_STATES = [
   'queued',
+  'delivering',
+  'retry_wait',
   'delivered',
   'acked',
+  'failed',
+  'ambiguous',
   'expired',
 ] as const;
 
@@ -38,13 +42,57 @@ export type DeliveryState = (typeof DELIVERY_STATES)[number];
 
 /** Valid state transitions for the delivery state machine. */
 export const DELIVERY_STATE_TRANSITIONS: Record<DeliveryState, DeliveryState[]> = {
-  queued: ['delivered', 'expired'],
+  queued: ['delivering', 'delivered', 'failed', 'ambiguous', 'expired'],
+  delivering: ['retry_wait', 'delivered', 'failed', 'ambiguous', 'expired'],
+  retry_wait: ['delivering', 'failed', 'ambiguous', 'expired'],
   delivered: ['acked', 'expired', 'queued'],
   acked: [],
+  failed: [],
+  ambiguous: [],
   expired: [],
 };
 
-export const DELIVERY_TERMINAL_STATES: readonly DeliveryState[] = ['acked', 'expired'];
+export const DELIVERY_TERMINAL_STATES: readonly DeliveryState[] = [
+  'acked',
+  'failed',
+  'ambiguous',
+  'expired',
+];
+
+export const PROMPT_DELIVERY_SOURCES = [
+  'user_followup',
+  'agent_mailbox',
+  'orchestration_handoff',
+  'checkpoint_continuation',
+  'parent_wakeup',
+] as const;
+
+export type PromptDeliverySource = (typeof PROMPT_DELIVERY_SOURCES)[number];
+
+export const VM_PROMPT_RECEIPT_STATES = [
+  'accepted',
+  'in_flight',
+  'completed',
+  'not_found',
+  'ambiguous',
+] as const;
+
+export type VmPromptReceiptState = (typeof VM_PROMPT_RECEIPT_STATES)[number];
+
+export interface VmPromptDeliveryCapabilities {
+  protocolVersion: number;
+  stableReceipts: boolean;
+  receiptLookup: boolean;
+  runtimeIdentity: string | null;
+}
+
+export interface VmPromptDeliveryReceipt {
+  deliveryId: string;
+  state: VmPromptReceiptState;
+  runtimeIdentity: string | null;
+  acceptedAt: number | null;
+  completedAt: number | null;
+}
 
 // ─── Sender identity ──────────────────────────────────────────────────────
 
@@ -71,6 +119,20 @@ export interface AgentMailboxMessage {
   createdAt: number;
   deliveredAt: number | null;
   ackedAt: number | null;
+  sourceKind: PromptDeliverySource;
+  promptMessageId: string;
+  nextAttemptAt: number | null;
+  lastError: string | null;
+  terminalReason: string | null;
+  attemptId: string | null;
+  attemptStartedAt: number | null;
+  runtimeIdentity: string | null;
+  receiptState: VmPromptReceiptState | null;
+  receiptRuntimeIdentity: string | null;
+  receiptCheckedAt: number | null;
+  acceptedAt: number | null;
+  adapterProtocolVersion: number | null;
+  receiptSupported: boolean | null;
 }
 
 // ─── API request/response shapes ───────────────────────────────────────────

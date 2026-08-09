@@ -20,6 +20,20 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+export const TASK_TERMINAL_STATUSES = ['completed', 'failed', 'cancelled'] as const;
+export type TaskTerminalStatus = (typeof TASK_TERMINAL_STATUSES)[number];
+
+/** Stable event contract for subscribers that react after a task wins a terminal transition. */
+export interface TaskTerminalTransitionEvent {
+  taskId: string;
+  projectId: string;
+  parentTaskId: string | null;
+  status: TaskTerminalStatus;
+  reason: string | null;
+  occurredAt: string;
+  source: string;
+}
+
 /** Runtime type guard for TaskStatus values from untrusted sources (e.g. database rows). */
 export function isTaskStatus(value: unknown): value is TaskStatus {
   return typeof value === 'string' && (TASK_STATUSES as readonly string[]).includes(value);

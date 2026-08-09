@@ -9,6 +9,7 @@ import type {
   AgentMailboxMessage,
   DeliveryState,
   MessageClass,
+  PromptDeliverySource,
   SenderType,
 } from '@simple-agent-manager/shared';
 import {
@@ -26,6 +27,7 @@ const log = createModuleLogger('mailbox');
 // ─── Core operations ───────────────────────────────────────────────────────
 
 export interface EnqueueOptions {
+  id?: string;
   targetSessionId: string;
   sourceTaskId: string | null;
   senderType: SenderType;
@@ -36,6 +38,10 @@ export interface EnqueueOptions {
   ackTimeoutMs?: number | null;
   ttlMs?: number | null;
   maxMessages?: number;
+  sourceKind?: PromptDeliverySource;
+  promptMessageId?: string;
+  now?: number;
+  ackRequired?: boolean;
 }
 
 /**
@@ -46,10 +52,12 @@ export function enqueueMessage(
   sql: SqlStorage,
   opts: EnqueueOptions,
 ): AgentMailboxMessage {
-  const id = ulid();
-  const now = Date.now();
+  const id = opts.id ?? ulid();
+  const now = opts.now ?? Date.now();
   const isDurable = (DURABLE_MESSAGE_CLASSES as readonly string[]).includes(opts.messageClass);
-  const ackRequired = isDurable ? 1 : 0;
+  const ackRequired = opts.ackRequired === undefined
+    ? (isDurable ? 1 : 0)
+    : (opts.ackRequired ? 1 : 0);
   const ttlMs = typeof opts.ttlMs === 'number' && opts.ttlMs > 0
     ? opts.ttlMs
     : MAILBOX_DEFAULTS.TTL_MS;
@@ -58,7 +66,10 @@ export function enqueueMessage(
   // Enforce per-project message cap
   if (opts.maxMessages) {
     const [countRow] = sql
-      .exec('SELECT COUNT(*) as cnt FROM session_inbox WHERE delivery_state NOT IN (?, ?)', 'acked', 'expired')
+      .exec(
+        `SELECT COUNT(*) as cnt FROM session_inbox
+         WHERE delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`,
+      )
       .toArray();
     const count = (countRow as { cnt: number })?.cnt ?? 0;
     if (count >= opts.maxMessages) {
@@ -71,8 +82,9 @@ export function enqueueMessage(
       (id, target_session_id, source_task_id, message_type, content, priority,
        created_at, delivered_at, message_class, delivery_state, sender_type,
        sender_id, ack_required, acked_at, ack_timeout_ms, expires_at,
-       delivery_attempts, last_delivery_at, metadata)
-    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 0, NULL, ?)`,
+       delivery_attempts, last_delivery_at, metadata, source_kind,
+       prompt_message_id, next_attempt_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 0, NULL, ?, ?, ?, ?)`,
     id,
     opts.targetSessionId,
     opts.sourceTaskId,
@@ -88,6 +100,9 @@ export function enqueueMessage(
     opts.ackTimeoutMs ?? null,
     expiresAt,
     opts.metadata ? JSON.stringify(opts.metadata) : null,
+    opts.sourceKind ?? 'agent_mailbox',
+    opts.promptMessageId ?? id,
+    now,
   );
 
   log.info('mailbox.enqueued', {
@@ -115,6 +130,20 @@ export function enqueueMessage(
     createdAt: now,
     deliveredAt: null,
     ackedAt: null,
+    sourceKind: opts.sourceKind ?? 'agent_mailbox',
+    promptMessageId: opts.promptMessageId ?? id,
+    nextAttemptAt: now,
+    lastError: null,
+    terminalReason: null,
+    attemptId: null,
+    attemptStartedAt: null,
+    runtimeIdentity: null,
+    receiptState: null,
+    receiptRuntimeIdentity: null,
+    receiptCheckedAt: null,
+    acceptedAt: null,
+    adapterProtocolVersion: null,
+    receiptSupported: null,
   };
 }
 
@@ -130,7 +159,7 @@ export function getPendingMessages(
     .exec(
       `SELECT * FROM session_inbox
        WHERE target_session_id = ?
-         AND delivery_state IN ('queued', 'delivered')
+         AND delivery_state IN ('queued', 'retry_wait', 'delivered')
        ORDER BY
          CASE message_class
            WHEN 'shutdown_with_final_prompt' THEN 5
@@ -247,7 +276,7 @@ export function expireStaleMessages(
       `SELECT id FROM session_inbox
        WHERE expires_at IS NOT NULL
          AND expires_at <= ?
-         AND delivery_state NOT IN ('acked', 'expired')`,
+         AND delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`,
       now,
     )
     .toArray();
@@ -262,7 +291,7 @@ export function expireStaleMessages(
     .exec(
       `SELECT id FROM session_inbox
        WHERE delivery_attempts >= ?
-         AND delivery_state NOT IN ('acked', 'expired')`,
+         AND delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`,
       maxAttempts,
     )
     .toArray();
@@ -399,6 +428,10 @@ export function getMailboxStats(sql: SqlStorage): Record<string, number> {
     queued: 0,
     delivered: 0,
     acked: 0,
+    delivering: 0,
+    retry_wait: 0,
+    failed: 0,
+    ambiguous: 0,
     expired: 0,
     total: 0,
   };

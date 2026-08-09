@@ -6,6 +6,7 @@
  */
 import { log } from '../../lib/logger';
 import { persistError, redactSensitiveData } from '../../services/observability';
+import { runTaskTerminalTransitionHooks } from '../../services/task-terminal-transition-hooks';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -216,9 +217,11 @@ export async function failTask(
   });
 
   // Check current status before failing (idempotent)
-  const task = await rc.env.DATABASE.prepare(`SELECT status, mission_id FROM tasks WHERE id = ?`)
+  const task = await rc.env.DATABASE.prepare(
+    `SELECT status, mission_id, parent_task_id FROM tasks WHERE id = ?`,
+  )
     .bind(state.taskId)
-    .first<{ status: string; mission_id: string | null }>();
+    .first<{ status: string; mission_id: string | null; parent_task_id: string | null }>();
 
   const currentStatus = task?.status;
   if (
@@ -235,12 +238,18 @@ export async function failTask(
   // Fail the task. The status predicate makes this idempotent against a
   // concurrent terminal transition that lands between the check above and this
   // write — never clobber an already-terminal row (completed/failed/cancelled).
-  await rc.env.DATABASE.prepare(
+  const failureTransition = await rc.env.DATABASE.prepare(
     `UPDATE tasks SET status = 'failed', execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
      WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled')`
   )
     .bind(errorMessage, now, now, state.taskId)
     .run();
+
+  if (!failureTransition.meta.changes) {
+    state.completed = true;
+    await rc.ctx.storage.put('state', state);
+    return;
+  }
 
   // Sync trigger execution status (best-effort) — without this, cron triggers
   // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
@@ -253,6 +262,16 @@ export async function failTask(
   )
     .bind(ulid(), state.taskId, currentStatus || 'queued', errorMessage, now)
     .run();
+
+  await runTaskTerminalTransitionHooks({
+    taskId: state.taskId,
+    projectId: state.projectId,
+    parentTaskId: task?.parent_task_id ?? null,
+    status: 'failed',
+    reason: errorMessage,
+    occurredAt: now,
+    source: 'task_runner.fail_task',
+  });
 
   // Notify orchestrator of task failure (best-effort) — triggers scheduling cycle
   // so dependent tasks can react to the failure (e.g., unblock blocked_dependency tasks)
