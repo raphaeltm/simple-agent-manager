@@ -28,8 +28,8 @@ This task is SAM task `01KZM7QR5CW8T93FMS8X5CDF7A` on branch `sam/resume-ship-du
 - [x] Align Worker capability discovery and receipt reconciliation with nested VM-authoritative runtime identity and epoch-millisecond timestamps.
 - [x] Prove replay occurs only after same-runtime positive `not_found`; changed or unproven runtime becomes terminal `ambiguous_delivery`.
 - [x] Preserve the latest main control-loop limits, alarm isolation, finite mailbox expiry, and operational stop controls.
-- [ ] Run focused contract, Go race, Miniflare/workerd, migration, and normal prompt/cancel regression suites.
-- [ ] Run full repository lint, typecheck, test, build, and quality gates.
+- [x] Run focused contract, Go race, Miniflare/workerd, migration, and normal prompt/cancel regression suites.
+- [x] Run full repository lint, typecheck, test, build, and quality gates.
 - [ ] Run task-completion, Go, Cloudflare, constitution, documentation, and test specialist reviews; address all blocking findings.
 - [ ] Delete all staging nodes, deploy the final branch, provision a fresh VM, verify heartbeat/workspace/protocol behavior end to end, and delete all staging test resources so zero VMs remain.
 - [ ] Open/update the PR with evidence, obtain green CI, merge, and monitor the matching production deployment to success.
