@@ -3,8 +3,8 @@ import {
   buildVmPromptDeliveryReceiptPath,
   VM_PROMPT_DELIVERY_PROTOCOL_VERSION,
   type VmPromptDeliveryCapabilities,
-  type VmPromptDeliveryResponse,
   type VmPromptDeliveryReceipt,
+  type VmPromptDeliveryResponse,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
