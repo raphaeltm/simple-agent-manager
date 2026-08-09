@@ -24,21 +24,21 @@ Scope is limited to `packages/vm-agent/` and authoritative VM-facing protocol/co
 
 ## Implementation checklist
 
-- [ ] Add one accepted-prompt lifecycle object/arbiter that records the start epoch once and owns exactly one terminal outcome/callback across natural completion, user cancel, checkpoint preempt, process exit/recovery, and hard deadline.
-- [ ] Make every `prompting` rereport reuse the stored start epoch; clear it only after the winning terminal transition; add injected-clock tests for repeated reports and a subsequent new prompt.
-- [ ] Make hard deadline converge truthfully: no `idle` report with `HostError`, no stale active prompt, and exactly one recoverable/fatal task callback even when the prompt RPC does not return before force-stop.
-- [ ] Add versioned checkpoint-rollover request/lookup routes with durable idempotent operation records, workspace auth, bounded request validation, and additive capability advertisement.
-- [ ] Implement checkpoint rollover as ACP cancel plus close notification, configurable bounded grace, forced process fallback, intentional restart without crash-budget consumption, strict same-agent/same-ACP-session `LoadSession`, and explicit failure without `NewSession` fallback.
-- [ ] Preserve terminal precedence: natural completion or user cancel supersedes automatic rollover; late deadline/process signals cannot emit a second callback.
-- [ ] Add a SQLite persistence migration and focused store API for delivery receipts and rollover operations, storing request fingerprints rather than prompt text.
-- [ ] Extend VM prompt submission with an optional versioned delivery ID. Atomically persist acceptance and mark `in_flight` before actual ACP invocation; duplicate same-payload IDs return the existing receipt and never invoke twice; conflicting payload reuse fails closed.
-- [ ] Add authenticated receipt lookup for lost-response reconciliation. On VM runtime restart, convert prior-runtime `in_flight` receipts to explicit `ambiguous`; never replay them automatically. Definitively pre-invocation `accepted` records may be claimed safely.
-- [ ] Mark receipt completion from the winning prompt terminal transition, including stop reason and bounded sanitized error code, so crash recovery and timeout paths cannot leave a false success.
-- [ ] Preserve old-client behavior when delivery IDs/protocol-version fields are absent; do not start automatic checkpoints or change short-prompt behavior until the Worker invokes the advertised capability.
-- [ ] Add named configuration defaults and validation for checkpoint preempt grace, maximum request grace, and rollover operation timeout; wire and document all VM Agent settings.
-- [ ] Update VM Agent endpoint, capability, receipt-state, rollover-state, compatibility, configuration, and risk contracts in public and agent references, citing the implementing code paths.
-- [ ] Add behavioral tests for epoch stability/new epoch, exact-once race matrices, graceful/forced preempt, strict resume failure, timeout convergence, duplicate/lost-response/restart receipt durability, cross-runtime ambiguity, capability advertisement, authentication, input bounds, and legacy clients.
-- [ ] Run focused Go tests while implementing, then `go test ./...`, `go test -race ./...`, `go vet ./...`, repository lint/typecheck/test/build gates, specialist reviews, and task-completion validation.
+- [x] Add one accepted-prompt lifecycle object/arbiter that records the start epoch once and owns exactly one terminal outcome/callback across natural completion, user cancel, checkpoint preempt, process exit/recovery, and hard deadline.
+- [x] Make every `prompting` rereport reuse the stored start epoch; clear it only after the winning terminal transition; add injected-clock tests for repeated reports and a subsequent new prompt.
+- [x] Make hard deadline converge truthfully: no `idle` report with `HostError`, no stale active prompt, and exactly one recoverable/fatal task callback even when the prompt RPC does not return before force-stop.
+- [x] Add versioned checkpoint-rollover request/lookup routes with durable idempotent operation records, workspace auth, bounded request validation, and additive capability advertisement.
+- [x] Implement checkpoint rollover as ACP cancel plus close notification, configurable bounded grace, forced process fallback, intentional restart without crash-budget consumption, strict same-agent/same-ACP-session `LoadSession`, and explicit failure without `NewSession` fallback.
+- [x] Preserve terminal precedence: natural completion or user cancel supersedes automatic rollover; late deadline/process signals cannot emit a second callback.
+- [x] Add a SQLite persistence migration and focused store API for delivery receipts and rollover operations, storing request fingerprints rather than prompt text.
+- [x] Extend VM prompt submission with an optional versioned delivery ID. Atomically persist acceptance and mark `in_flight` before actual ACP invocation; duplicate same-payload IDs return the existing receipt and never invoke twice; conflicting payload reuse fails closed.
+- [x] Add authenticated receipt lookup for lost-response reconciliation. On VM runtime restart, convert prior-runtime `in_flight` receipts to explicit `ambiguous`; never replay them automatically. Definitively pre-invocation `accepted` records may be claimed safely.
+- [x] Mark receipt completion from the winning prompt terminal transition, including stop reason and bounded sanitized error code, so crash recovery and timeout paths cannot leave a false success.
+- [x] Preserve old-client behavior when delivery IDs/protocol-version fields are absent; do not start automatic checkpoints or change short-prompt behavior until the Worker invokes the advertised capability.
+- [x] Add named configuration defaults and validation for checkpoint preempt grace, maximum request grace, and rollover operation timeout; wire and document all VM Agent settings.
+- [x] Update VM Agent endpoint, capability, receipt-state, rollover-state, compatibility, configuration, and risk contracts in public and agent references, citing the implementing code paths.
+- [x] Add behavioral tests for epoch stability/new epoch, exact-once race matrices, graceful/forced preempt, strict resume failure, timeout convergence, duplicate/lost-response/restart receipt durability, cross-runtime ambiguity, capability advertisement, authentication, input bounds, and legacy clients.
+- [ ] Run focused Go tests while implementing, then `go test ./...`, `go test -race ./...`, `go vet ./...`, repository lint/typecheck/test/build gates, specialist reviews, and task-completion validation. Focused/full/race/vet Go gates are green; repository gates and reviews remain.
 - [ ] Deploy to staging, provision a real VM, verify heartbeat/workspace access and real graceful/forced rollover behavior, then clean up the staging workspace/node immediately.
 - [ ] Open a PR with review/staging evidence, update from latest `main`, merge only after all checks are green, monitor production deployment, and publish endpoint/receipt/capability contracts plus residual risks to the mission.
 

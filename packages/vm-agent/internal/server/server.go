@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/auth"
@@ -92,6 +93,7 @@ type Server struct {
 	sessionProfileOvr   map[string]profileOverrides     // hostKey → model/permissionMode/effort overrides from agent profiles
 	sessionTaskCtx      map[string]taskCallbackContext  // hostKey → task callback ownership context
 	store               *persistence.Store
+	executionRuntimeID  string
 	errorReporter       *errorreport.Reporter
 	messageReportersMu  sync.RWMutex
 	messageReporters    map[string]*messagereport.Reporter // keyed by workspaceID
@@ -526,6 +528,7 @@ func New(cfg *config.Config) (*Server, error) {
 		sessionProfileOvr:   make(map[string]profileOverrides),
 		sessionTaskCtx:      make(map[string]taskCallbackContext),
 		store:               store,
+		executionRuntimeID:  uuid.NewString(),
 		errorReporter:       errorReporter,
 		messageReporters:    messageReporters,
 		worktreeCache:       make(map[string]cachedWorktreeList),
@@ -1077,6 +1080,10 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/suspend", s.handleSuspendAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/resume", s.handleResumeAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt", s.handleSendPrompt)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt-receipts/{deliveryId}", s.handleGetPromptReceipt)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/checkpoint-rollovers", s.handleCheckpointRollover)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions/{sessionId}/checkpoint-rollovers/{operationId}", s.handleGetCheckpointRollover)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-capabilities", s.handleAgentCapabilities)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/hibernate", s.handleHibernateAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/restore", s.handleRestoreAgentSession)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/tabs", s.handleListTabs)
@@ -1353,7 +1360,7 @@ func (s *Server) makeTaskCompletionCallback(
 			return
 		}
 
-		if stopReason == "recovered" {
+		if stopReason == "recovered" || stopReason == "checkpoint_preempted" {
 			s.postTaskCallback(
 				callbackURL,
 				taskID,

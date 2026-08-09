@@ -2,6 +2,8 @@ package server
 
 import (
 	"context"
+	"crypto/sha256"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +12,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"time"
 
 	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
@@ -18,6 +21,33 @@ import (
 	"github.com/workspace/vm-agent/internal/persistence"
 	"github.com/workspace/vm-agent/internal/sysinfo"
 )
+
+const (
+	vmExecutionProtocolVersion   = 1
+	maxDeliveryIDLength          = 128
+	maxRolloverOperationIDLength = 128
+)
+
+type sendPromptRequest struct {
+	ProtocolVersion int    `json:"protocolVersion,omitempty"`
+	DeliveryID      string `json:"deliveryId,omitempty"`
+	Prompt          string `json:"prompt"`
+	MessageID       string `json:"messageId"`
+}
+
+func validExecutionProtocolID(value string, maxLength int) bool {
+	if value == "" || len(value) > maxLength {
+		return false
+	}
+	for _, char := range value {
+		if (char >= 'a' && char <= 'z') || (char >= 'A' && char <= 'Z') ||
+			(char >= '0' && char <= '9') || char == '-' || char == '_' || char == '.' || char == ':' {
+			continue
+		}
+		return false
+	}
+	return true
+}
 
 func (s *Server) stopSessionHost(workspaceID, sessionID string) {
 	hostKey := workspaceID + ":" + sessionID
@@ -1108,6 +1138,9 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	}
 
 	var body struct {
+		ProtocolVersion  int                  `json:"protocolVersion,omitempty"`
+		DeliveryID       string               `json:"deliveryId,omitempty"`
+		MessageID        string               `json:"messageId,omitempty"`
 		AgentType        string               `json:"agentType"`
 		InitialPrompt    string               `json:"initialPrompt"`
 		McpServers       []acp.McpServerEntry `json:"mcpServers,omitempty"`
@@ -1135,6 +1168,21 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 	if strings.TrimSpace(body.InitialPrompt) == "" {
 		writeError(w, http.StatusBadRequest, "initialPrompt is required")
 		return
+	}
+	body.DeliveryID = strings.TrimSpace(body.DeliveryID)
+	body.MessageID = strings.TrimSpace(body.MessageID)
+	if body.DeliveryID != "" {
+		if body.ProtocolVersion != vmExecutionProtocolVersion {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"error":             "unsupported_protocol_version",
+				"supportedVersions": []int{vmExecutionProtocolVersion},
+			})
+			return
+		}
+		if !validExecutionProtocolID(body.DeliveryID, maxDeliveryIDLength) {
+			writeError(w, http.StatusBadRequest, "deliveryId has an invalid format")
+			return
+		}
 	}
 
 	session, exists := s.agentSessions.Get(workspaceID, sessionID)
@@ -1210,6 +1258,44 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 		"agentType": body.AgentType,
 	})
 
+	if body.DeliveryID != "" {
+		hash := promptDeliveryFingerprint(body.ProtocolVersion, body.MessageID,
+			body.InitialPrompt+"\x00"+body.InjectedInstructions)
+		receipt, _, conflict, receiptErr := s.store.AcceptPromptDelivery(workspaceID, sessionID,
+			body.DeliveryID, body.ProtocolVersion, hash)
+		if receiptErr != nil {
+			writeError(w, http.StatusInternalServerError, "failed to persist prompt receipt")
+			return
+		}
+		if conflict {
+			writeJSON(w, http.StatusConflict, map[string]interface{}{
+				"error": "delivery_id_conflict", "deliveryId": body.DeliveryID,
+			})
+			return
+		}
+		if receipt.State != persistence.PromptReceiptAccepted {
+			receipt, receiptErr = s.store.GetPromptDelivery(workspaceID, sessionID,
+				body.DeliveryID, s.executionRuntimeID)
+			if receiptErr != nil {
+				writeError(w, http.StatusInternalServerError, "failed to reconcile prompt receipt")
+				return
+			}
+			writeJSON(w, http.StatusOK, receipt)
+			return
+		}
+		receipt, claimed, claimErr := s.store.ClaimPromptDelivery(workspaceID, sessionID,
+			body.DeliveryID, s.executionRuntimeID)
+		if claimErr != nil || !claimed {
+			writeError(w, http.StatusConflict, "prompt delivery could not be claimed")
+			return
+		}
+		observer := s.promptReceiptObserver(workspaceID, sessionID, body.DeliveryID)
+		go s.startAgentWithPromptObserved(host, workspaceID, sessionID, body.AgentType,
+			body.InitialPrompt, body.InjectedInstructions, body.MessageID, observer)
+		writeJSON(w, http.StatusAccepted, receipt)
+		return
+	}
+
 	// Start agent and send initial prompt in a background goroutine.
 	// The endpoint returns 202 immediately — the agent runs asynchronously.
 	go s.startAgentWithPrompt(host, workspaceID, sessionID, body.AgentType, body.InitialPrompt, body.InjectedInstructions)
@@ -1221,6 +1307,10 @@ func (s *Server) handleStartAgentSession(w http.ResponseWriter, r *http.Request)
 }
 
 func buildInitialPromptParams(initialPrompt, injectedInstructions string) ([]byte, error) {
+	return buildInitialPromptParamsWithMessageID(initialPrompt, injectedInstructions, "")
+}
+
+func buildInitialPromptParamsWithMessageID(initialPrompt, injectedInstructions, messageID string) ([]byte, error) {
 	promptBlocks := []map[string]interface{}{
 		{"type": "text", "text": initialPrompt},
 	}
@@ -1232,13 +1322,18 @@ func buildInitialPromptParams(initialPrompt, injectedInstructions string) ([]byt
 		})
 	}
 	return json.Marshal(map[string]interface{}{
-		"prompt": promptBlocks,
+		"messageId": messageID,
+		"prompt":    promptBlocks,
 	})
 }
 
 // startAgentWithPrompt runs SelectAgent and then sends the initial prompt.
 // Called as a goroutine from handleStartAgentSession.
 func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions string) {
+	s.startAgentWithPromptObserved(host, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions, "", nil)
+}
+
+func (s *Server) startAgentWithPromptObserved(host *acp.SessionHost, workspaceID, sessionID, agentType, initialPrompt, injectedInstructions, messageID string, observer acp.PromptTerminalObserver) {
 	ctx := context.Background()
 
 	// Idempotency: if the host is already prompting, a prompt is in progress —
@@ -1247,6 +1342,9 @@ func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessio
 	if currentStatus == acp.HostPrompting {
 		slog.Info("Agent already processing a prompt, skipping duplicate",
 			"workspace", workspaceID, "session", sessionID)
+		if observer != nil {
+			observer("error", errors.New("agent is already processing another prompt"))
+		}
 		return
 	}
 	if currentStatus == acp.HostReady {
@@ -1265,8 +1363,12 @@ func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessio
 
 			// Fire the completion callback with error so the control plane
 			// can transition the task to failed.
+			promptErr := fmt.Errorf("%s: agent status is %s", errMsg, host.Status())
 			if cb := host.OnPromptCompleteCallback(); cb != nil {
-				cb("error", fmt.Errorf("%s: agent status is %s", errMsg, host.Status()))
+				cb("error", promptErr)
+			}
+			if observer != nil {
+				observer("error", promptErr)
 			}
 			return
 		}
@@ -1287,9 +1389,15 @@ func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessio
 	// INBOUND JSON-RPC params (parsed by parsePromptBlocks) — it is read in-process
 	// before any SDK marshaling, so it reaches persistence even though the SDK
 	// strips _meta on outbound serialization.
-	promptParams, err := buildInitialPromptParams(initialPrompt, injectedInstructions)
+	promptParams, err := buildInitialPromptParamsWithMessageID(initialPrompt, injectedInstructions, messageID)
 	if err != nil {
 		slog.Error("Failed to encode initial prompt", "workspace", workspaceID, "session", sessionID, "error", err)
+		if observer != nil {
+			observer("error", err)
+		}
+		if cb := host.OnPromptCompleteCallback(); cb != nil {
+			cb("error", err)
+		}
 		return
 	}
 	syntheticReqID, _ := json.Marshal("server-initiated-1")
@@ -1298,7 +1406,20 @@ func (s *Server) startAgentWithPrompt(host *acp.SessionHost, workspaceID, sessio
 	// callback fires automatically, handling git push and task status updates.
 	// trustedSource=true: this is the SAM-built initial task prompt, the only
 	// legitimate origin=system producer (the injected instructions block).
-	host.HandlePrompt(ctx, syntheticReqID, promptParams, "server", true)
+	if observer == nil {
+		host.HandlePrompt(ctx, syntheticReqID, promptParams, "server", true)
+		return
+	}
+	accepted, ok := host.AcceptPrompt(ctx, syntheticReqID, promptParams, "server", true, observer)
+	if !ok {
+		promptErr := errors.New("initial prompt was not accepted by the session host")
+		observer("error", promptErr)
+		if cb := host.OnPromptCompleteCallback(); cb != nil {
+			cb("error", promptErr)
+		}
+		return
+	}
+	accepted.Run()
 }
 
 // handleSendPrompt sends a follow-up prompt to a running agent session.
@@ -1316,17 +1437,30 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var body struct {
-		Prompt    string `json:"prompt"`
-		MessageID string `json:"messageId"`
-	}
+	var body sendPromptRequest
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if strings.TrimSpace(body.Prompt) == "" {
+	body.Prompt = strings.TrimSpace(body.Prompt)
+	body.MessageID = strings.TrimSpace(body.MessageID)
+	body.DeliveryID = strings.TrimSpace(body.DeliveryID)
+	if body.Prompt == "" {
 		writeError(w, http.StatusBadRequest, "prompt is required")
 		return
+	}
+	if body.DeliveryID != "" {
+		if body.ProtocolVersion != vmExecutionProtocolVersion {
+			writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+				"error":             "unsupported_protocol_version",
+				"supportedVersions": []int{vmExecutionProtocolVersion},
+			})
+			return
+		}
+		if !validExecutionProtocolID(body.DeliveryID, maxDeliveryIDLength) {
+			writeError(w, http.StatusBadRequest, "deliveryId has an invalid format")
+			return
+		}
 	}
 
 	// Look up the existing SessionHost for this session.
@@ -1340,16 +1474,18 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Check agent status — must be ready (not already prompting).
+	// Legacy callers retain the historical status response. Versioned callers
+	// reserve the SessionHost synchronously below so status and invocation cannot
+	// race two accepted deliveries.
 	status := host.Status()
-	if status == acp.HostPrompting {
+	if body.DeliveryID == "" && status == acp.HostPrompting {
 		writeJSON(w, http.StatusConflict, map[string]interface{}{
 			"status":  "busy",
 			"message": "Agent is already processing a prompt",
 		})
 		return
 	}
-	if status != acp.HostReady {
+	if body.DeliveryID == "" && status != acp.HostReady {
 		writeJSON(w, http.StatusConflict, map[string]interface{}{
 			"status":  string(status),
 			"message": "Agent is not ready for prompts",
@@ -1359,17 +1495,23 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 
 	// Build JSON-RPC params matching what HandlePrompt expects.
 	promptParams, _ := json.Marshal(map[string]interface{}{
-		"messageId": strings.TrimSpace(body.MessageID),
+		"messageId": body.MessageID,
 		"prompt": []map[string]string{
-			{"type": "text", "text": strings.TrimSpace(body.Prompt)},
+			{"type": "text", "text": body.Prompt},
 		},
 	})
 	syntheticReqID, _ := json.Marshal("control-plane-followup")
 
 	s.appendNodeEvent(workspaceID, "info", "agent_session.followup_prompt", "Sending follow-up prompt to agent", map[string]interface{}{
 		"sessionId": sessionID,
-		"messageId": strings.TrimSpace(body.MessageID),
+		"messageId": body.MessageID,
 	})
+
+	if body.DeliveryID != "" {
+		s.handleVersionedPromptDelivery(w, host, workspaceID, sessionID, body.ProtocolVersion,
+			body.DeliveryID, body.MessageID, body.Prompt, syntheticReqID, promptParams)
+		return
+	}
 
 	// Dispatch asynchronously — HandlePrompt blocks until the agent completes.
 	// trustedSource=false: a follow-up carries the user's own message text and
@@ -1380,6 +1522,268 @@ func (s *Server) handleSendPrompt(w http.ResponseWriter, r *http.Request) {
 		"status":    "prompting",
 		"sessionId": sessionID,
 	})
+}
+
+func promptDeliveryFingerprint(protocolVersion int, messageID, prompt string) string {
+	sum := sha256.Sum256([]byte(fmt.Sprintf("%d\x00%s\x00%s", protocolVersion, messageID, prompt)))
+	return fmt.Sprintf("%x", sum[:])
+}
+
+func (s *Server) handleVersionedPromptDelivery(
+	w http.ResponseWriter,
+	host *acp.SessionHost,
+	workspaceID, sessionID string,
+	protocolVersion int,
+	deliveryID, messageID, prompt string,
+	reqID, promptParams json.RawMessage,
+) {
+	hash := promptDeliveryFingerprint(protocolVersion, messageID, prompt)
+	receipt, _, conflict, err := s.store.AcceptPromptDelivery(workspaceID, sessionID,
+		deliveryID, protocolVersion, hash)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to persist prompt receipt")
+		return
+	}
+	if conflict {
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"error":      "delivery_id_conflict",
+			"deliveryId": deliveryID,
+		})
+		return
+	}
+	if receipt.State != persistence.PromptReceiptAccepted {
+		receipt, err = s.store.GetPromptDelivery(workspaceID, sessionID, deliveryID, s.executionRuntimeID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to reconcile prompt receipt")
+			return
+		}
+		writeJSON(w, http.StatusOK, receipt)
+		return
+	}
+
+	observer := s.promptReceiptObserver(workspaceID, sessionID, deliveryID)
+	accepted, ok := host.AcceptPrompt(context.Background(), reqID, promptParams,
+		"control-plane", false, observer)
+	if !ok {
+		writeJSON(w, http.StatusConflict, receipt)
+		return
+	}
+	receipt, claimed, err := s.store.ClaimPromptDelivery(workspaceID, sessionID,
+		deliveryID, s.executionRuntimeID)
+	if err != nil || !claimed {
+		claimErr := err
+		if claimErr == nil {
+			claimErr = errors.New("delivery receipt was not claimable")
+		}
+		accepted.Abort(claimErr)
+		writeError(w, http.StatusConflict, "prompt delivery could not be claimed")
+		return
+	}
+
+	go accepted.Run()
+	writeJSON(w, http.StatusAccepted, receipt)
+}
+
+func (s *Server) promptReceiptObserver(workspaceID, sessionID, deliveryID string) acp.PromptTerminalObserver {
+	return func(stopReason string, promptErr error) {
+		errorCode := ""
+		if promptErr != nil {
+			errorCode = "prompt_terminal_error"
+		}
+		if err := s.store.CompletePromptDelivery(workspaceID, sessionID, deliveryID,
+			s.executionRuntimeID, stopReason, errorCode); err != nil {
+			slog.Error("Failed to complete prompt delivery receipt", "workspace", workspaceID,
+				"session", sessionID, "deliveryId", deliveryID, "error", err)
+		}
+	}
+}
+
+func (s *Server) handleGetPromptReceipt(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	sessionID := r.PathValue("sessionId")
+	deliveryID := strings.TrimSpace(r.PathValue("deliveryId"))
+	if workspaceID == "" || sessionID == "" || deliveryID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId, sessionId, and deliveryId are required")
+		return
+	}
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+	receipt, err := s.store.GetPromptDelivery(workspaceID, sessionID, deliveryID, s.executionRuntimeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "prompt receipt not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read prompt receipt")
+		return
+	}
+	writeJSON(w, http.StatusOK, receipt)
+}
+
+func (s *Server) handleAgentCapabilities(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	if workspaceID == "" {
+		writeError(w, http.StatusBadRequest, workspaceIDRequiredMessage)
+		return
+	}
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+	writeJSON(w, http.StatusOK, s.agentCapabilities())
+}
+
+func (s *Server) agentCapabilities() map[string]interface{} {
+	return map[string]interface{}{
+		"protocolVersion": vmExecutionProtocolVersion,
+		"promptReceipts": map[string]interface{}{
+			"supported": true,
+			"states": []string{persistence.PromptReceiptAccepted, persistence.PromptReceiptInFlight,
+				persistence.PromptReceiptCompleted, persistence.PromptReceiptAmbiguous},
+		},
+		"checkpointRollover": map[string]interface{}{
+			"supported": true,
+			"automatic": false,
+			"states": []string{persistence.RolloverAccepted, persistence.RolloverInProgress,
+				persistence.RolloverCompleted, persistence.RolloverSuperseded, persistence.RolloverFailed},
+			"defaultGraceMs":     s.config.ACPCheckpointPreemptGrace.Milliseconds(),
+			"maxGraceMs":         s.config.ACPCheckpointPreemptMaxGrace.Milliseconds(),
+			"operationTimeoutMs": s.config.ACPCheckpointRolloverTimeout.Milliseconds(),
+		},
+	}
+}
+
+func (s *Server) handleCheckpointRollover(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	sessionID := r.PathValue("sessionId")
+	if workspaceID == "" || sessionID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId and sessionId are required")
+		return
+	}
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+	var body struct {
+		ProtocolVersion int    `json:"protocolVersion"`
+		OperationID     string `json:"operationId"`
+		GraceMs         *int64 `json:"graceMs,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	body.OperationID = strings.TrimSpace(body.OperationID)
+	if body.ProtocolVersion != vmExecutionProtocolVersion {
+		writeJSON(w, http.StatusBadRequest, map[string]interface{}{
+			"error":             "unsupported_protocol_version",
+			"supportedVersions": []int{vmExecutionProtocolVersion},
+		})
+		return
+	}
+	if !validExecutionProtocolID(body.OperationID, maxRolloverOperationIDLength) {
+		writeError(w, http.StatusBadRequest, "operationId has an invalid format")
+		return
+	}
+	grace := s.config.ACPCheckpointPreemptGrace
+	if body.GraceMs != nil {
+		if *body.GraceMs < 0 {
+			writeError(w, http.StatusBadRequest, "graceMs must be non-negative")
+			return
+		}
+		if *body.GraceMs > s.config.ACPCheckpointPreemptMaxGrace.Milliseconds() {
+			writeError(w, http.StatusBadRequest, "graceMs exceeds the advertised maximum")
+			return
+		}
+		grace = time.Duration(*body.GraceMs) * time.Millisecond
+	}
+	if grace > s.config.ACPCheckpointPreemptMaxGrace {
+		writeError(w, http.StatusBadRequest, "graceMs exceeds the advertised maximum")
+		return
+	}
+
+	hostKey := workspaceID + ":" + sessionID
+	s.sessionHostMu.Lock()
+	host := s.sessionHosts[hostKey]
+	s.sessionHostMu.Unlock()
+	if host == nil {
+		writeError(w, http.StatusNotFound, "no active agent session found")
+		return
+	}
+	hash := promptDeliveryFingerprint(body.ProtocolVersion, body.OperationID, grace.String())
+	op, _, conflict, err := s.store.AcceptCheckpointRollover(workspaceID, sessionID,
+		body.OperationID, body.ProtocolVersion, hash)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to persist rollover operation")
+		return
+	}
+	if conflict {
+		writeJSON(w, http.StatusConflict, map[string]interface{}{
+			"error":       "operation_id_conflict",
+			"operationId": body.OperationID,
+		})
+		return
+	}
+	if op.State != persistence.RolloverAccepted {
+		op, err = s.store.GetCheckpointRollover(workspaceID, sessionID, body.OperationID, s.executionRuntimeID)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "failed to reconcile rollover operation")
+			return
+		}
+		writeJSON(w, http.StatusOK, op)
+		return
+	}
+	op, started, err := s.store.StartCheckpointRollover(workspaceID, sessionID,
+		body.OperationID, s.executionRuntimeID)
+	if err != nil || !started {
+		writeError(w, http.StatusConflict, "rollover operation could not be started")
+		return
+	}
+	go s.runCheckpointRollover(host, workspaceID, sessionID, body.OperationID, grace)
+	writeJSON(w, http.StatusAccepted, op)
+}
+
+func (s *Server) runCheckpointRollover(host *acp.SessionHost, workspaceID, sessionID, operationID string, grace time.Duration) {
+	ctx, cancel := context.WithTimeout(context.Background(), s.config.ACPCheckpointRolloverTimeout)
+	defer cancel()
+	result, err := host.CheckpointRollover(ctx, grace)
+	state := result.State
+	if state == "" {
+		state = persistence.RolloverFailed
+		result.ErrorCode = "rollover_failed"
+		result.ErrorMessage = "checkpoint rollover failed"
+	}
+	if err != nil && result.ErrorMessage == "" {
+		result.ErrorMessage = "checkpoint rollover failed"
+	}
+	if persistErr := s.store.CompleteCheckpointRollover(workspaceID, sessionID, operationID,
+		s.executionRuntimeID, state, result.Forced, result.ACPSessionID,
+		result.ErrorCode, result.ErrorMessage); persistErr != nil {
+		slog.Error("Failed to complete checkpoint rollover operation", "workspace", workspaceID,
+			"session", sessionID, "operationId", operationID, "error", persistErr)
+	}
+}
+
+func (s *Server) handleGetCheckpointRollover(w http.ResponseWriter, r *http.Request) {
+	workspaceID := r.PathValue("workspaceId")
+	sessionID := r.PathValue("sessionId")
+	operationID := strings.TrimSpace(r.PathValue("operationId"))
+	if workspaceID == "" || sessionID == "" || operationID == "" {
+		writeError(w, http.StatusBadRequest, "workspaceId, sessionId, and operationId are required")
+		return
+	}
+	if !s.requireNodeManagementAuth(w, r, workspaceID) {
+		return
+	}
+	op, err := s.store.GetCheckpointRollover(workspaceID, sessionID, operationID, s.executionRuntimeID)
+	if errors.Is(err, sql.ErrNoRows) {
+		writeError(w, http.StatusNotFound, "checkpoint rollover operation not found")
+		return
+	}
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to read checkpoint rollover operation")
+		return
+	}
+	writeJSON(w, http.StatusOK, op)
 }
 
 func (s *Server) handleCancelAgentSession(w http.ResponseWriter, r *http.Request) {

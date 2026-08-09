@@ -231,6 +231,7 @@ type SessionHost struct {
 	// when a user cancel intentionally terminates an agent that lacks native
 	// session/cancel support.
 	intentionalPromptCancelProcessStop bool
+	checkpointRollover                 *checkpointRolloverEpisode
 
 	// replaySuppressed is set while an ACP LoadSession is in flight. LoadSession
 	// makes the agent replay the entire transcript as session/update
@@ -261,6 +262,10 @@ type SessionHost struct {
 	promptMu       sync.Mutex
 	promptInFlight bool
 	promptSeq      uint64
+	// promptAttempt remains attached until the next accepted prompt so late
+	// terminal signals from the same runtime are absorbed by its exact-once
+	// arbiter instead of reaching the control plane twice.
+	promptAttempt *promptAttempt
 	// promptCancelMu guards promptCancel independently from promptMu so that
 	// CancelPrompt() can read it without waiting for Prompt() to finish.
 	promptCancelMu sync.Mutex
@@ -297,6 +302,64 @@ type SessionHost struct {
 	// Lifecycle
 	ctx    context.Context
 	cancel context.CancelFunc
+}
+
+// PromptTerminalObserver receives the terminal state of one accepted prompt.
+// It is used by the VM HTTP delivery protocol to durably complete a receipt.
+// Implementations must return quickly; notification runs asynchronously.
+type PromptTerminalObserver func(stopReason string, promptErr error)
+
+type promptAttempt struct {
+	id                  uint64
+	startedAt           time.Time
+	cancel              context.CancelFunc
+	done                chan struct{}
+	rpcDone             chan struct{}
+	once                sync.Once
+	observer            PromptTerminalObserver
+	checkpointRequested atomic.Bool
+}
+
+type checkpointRolloverEpisode struct {
+	sessionID string
+	attempt   *promptAttempt
+	result    chan CheckpointRolloverResult
+	forced    bool
+}
+
+func (a *promptAttempt) complete(h *SessionHost, stopReason string, promptErr error) bool {
+	return a.completeWith(h, stopReason, promptErr, nil)
+}
+
+func (a *promptAttempt) completeWith(h *SessionHost, stopReason string, promptErr error, finalize func()) bool {
+	won := false
+	a.once.Do(func() {
+		won = true
+		// Release the admission gate before publishing the terminal status. The
+		// public AcceptPrompt path also requires HostReady, so the intermediate
+		// prompting/starting/error status cannot admit a new prompt. This ordering
+		// makes terminal state observations imply that cancellation fields and the
+		// in-flight gate have already converged.
+		h.releasePrompt(a)
+		if finalize != nil {
+			finalize()
+		}
+		close(a.done)
+		if cb := h.config.OnPromptComplete; cb != nil {
+			go cb(stopReason, promptErr)
+		}
+		if a.observer != nil {
+			go a.observer(stopReason, promptErr)
+		}
+	})
+	return won
+}
+
+func (h *SessionHost) now() time.Time {
+	if h.config.Now != nil {
+		return h.config.Now()
+	}
+	return time.Now()
 }
 
 // NewSessionHost creates a new SessionHost for the given session.
@@ -646,6 +709,13 @@ func (h *SessionHost) StopProcessForPromptCancel() {
 // as stopped. This is the only way to terminate the agent — browser disconnects
 // do NOT call this.
 func (h *SessionHost) Stop() {
+	h.promptMu.Lock()
+	attempt := h.promptAttempt
+	activePrompt := h.promptInFlight
+	h.promptMu.Unlock()
+	if activePrompt && attempt != nil {
+		attempt.complete(h, "cancelled", context.Canceled)
+	}
 	h.mu.Lock()
 	if h.status == HostStopped {
 		h.mu.Unlock()

@@ -134,9 +134,16 @@ func (h *SessionHost) beginCrashRecoveryWithPrerequisites(reqID json.RawMessage,
 		return prerequisites.agentType, stderr, nil, missing, nil, false
 	}
 
+	h.promptMu.Lock()
+	attempt := h.promptAttempt
+	h.promptMu.Unlock()
 	once := &sync.Once{}
 	notify := func(stopReason string, err error) {
 		once.Do(func() {
+			if attempt != nil {
+				attempt.complete(h, stopReason, err)
+				return
+			}
 			h.notifyPromptComplete(stopReason, err)
 		})
 	}

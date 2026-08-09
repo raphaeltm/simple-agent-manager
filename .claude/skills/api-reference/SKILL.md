@@ -76,6 +76,17 @@ user-invocable: false
 - `PATCH /api/workspaces/:id/agent-sessions/:sessionId` — Rename agent session label
 - `POST /api/workspaces/:id/agent-sessions/:sessionId/stop` — Stop agent session
 
+### VM Agent direct execution protocol (node-management JWT)
+
+- `GET /workspaces/:workspaceId/agent-capabilities` — Discover VM execution protocol version, durable receipt support, checkpoint-rollover support, and configured timing bounds
+- `POST /workspaces/:workspaceId/agent-sessions/:sessionId/start` — Start a session; optional protocol-v1 `deliveryId` durably guards the initial prompt
+- `POST /workspaces/:workspaceId/agent-sessions/:sessionId/prompt` — Send a follow-up; optional protocol-v1 `deliveryId` durably guards agent invocation
+- `GET /workspaces/:workspaceId/agent-sessions/:sessionId/prompt-receipts/:deliveryId` — Reconcile `accepted`, `in_flight`, `completed`, or cross-runtime `ambiguous` delivery state
+- `POST /workspaces/:workspaceId/agent-sessions/:sessionId/checkpoint-rollovers` — Submit an idempotent protocol-v1 graceful/forced strict same-session rollover operation
+- `GET /workspaces/:workspaceId/agent-sessions/:sessionId/checkpoint-rollovers/:operationId` — Reconcile rollover state
+
+All direct routes require the workspace-scoped node-management Bearer token. Omitting new version/delivery fields preserves the legacy start/prompt behavior. Automatic rollover remains disabled until a control-plane caller invokes it.
+
 ## Agent Settings
 
 - `GET /api/agent-settings/:agentType` — Get user's agent settings

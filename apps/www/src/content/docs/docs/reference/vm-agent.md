@@ -41,6 +41,10 @@ GET    /workspaces/{workspaceId}/agent-sessions
 POST   /workspaces/{workspaceId}/agent-sessions
 POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/start
 POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt
+GET    /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt-receipts/{deliveryId}
+POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/checkpoint-rollovers
+GET    /workspaces/{workspaceId}/agent-sessions/{sessionId}/checkpoint-rollovers/{operationId}
+GET    /workspaces/{workspaceId}/agent-capabilities
 POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/cancel
 POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/stop
 POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/suspend
@@ -48,6 +52,37 @@ POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/resume
 POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/hibernate
 POST   /workspaces/{workspaceId}/agent-sessions/{sessionId}/restore
 ```
+
+#### Durable prompt delivery protocol
+
+Protocol version 1 adds an optional exact-once delivery envelope to both the session `start` request (for its `initialPrompt`) and the existing `prompt` endpoint. Existing callers may omit `deliveryId` and preserve the legacy behavior. A versioned follow-up caller sends:
+
+```json
+{
+  "protocolVersion": 1,
+  "deliveryId": "stable-control-plane-delivery-id",
+  "messageId": "chat-message-id",
+  "prompt": "Prompt text"
+}
+```
+
+For `start`, place the same `protocolVersion`, `deliveryId`, and optional `messageId` alongside the existing `agentType` and `initialPrompt` fields. The VM persists the receipt before invocation and returns one of `accepted`, `in_flight`, `completed`, or `ambiguous`. Repeating the same delivery ID and identical request never invokes the agent twice. Reusing an ID for different content returns `delivery_id_conflict`. After a lost HTTP response, read the receipt endpoint before deciding what to do. An `in_flight` receipt discovered after the VM Agent runtime has restarted becomes `ambiguous`; it is deliberately never replayed because the prior agent invocation may have occurred. Receipts store a request hash and lifecycle metadata, not prompt text.
+
+#### Checkpoint rollover protocol
+
+Checkpoint rollover is opt-in and inert until the control plane calls it. Discover support and configured bounds from `GET /workspaces/{workspaceId}/agent-capabilities`, then submit:
+
+```json
+{
+  "protocolVersion": 1,
+  "operationId": "stable-rollover-operation-id",
+  "graceMs": 30000
+}
+```
+
+The operation moves through `accepted`, `in_progress`, then `completed`, `superseded`, or `failed`. The VM sends ACP `session/cancel` and `session/close`, waits the bounded grace, force-stops the harness if necessary, restarts it, and requires `LoadSession` of the exact previous ACP session ID. Failure to load that session is explicit; the VM never creates a fresh session as fallback. Natural completion and explicit user cancellation supersede checkpoint preemption. Repeat the same operation ID to reconcile a lost response; a different request with the same ID returns `operation_id_conflict`.
+
+Activity reports use one immutable `promptStartedAt` epoch for the accepted prompt. Periodic re-reports reuse it, and only a newly accepted prompt gets a new epoch. Hard deadlines report terminal `error`, not `idle`, so an errored host cannot appear available with stale work.
 
 ### Tab Management
 
@@ -169,6 +204,9 @@ Environment variables set by the cloud-init template:
 | `ACP_PROMPT_RETRY_MAX_RETRIES` | `2` | Max transient provider prompt retries after the initial attempt |
 | `ACP_PROMPT_RETRY_INITIAL_BACKOFF` | `15s` | Initial backoff before retrying transient provider prompt errors |
 | `ACP_PROMPT_RETRY_MAX_BACKOFF` | `2m` | Max exponential backoff for transient provider prompt retries |
+| `ACP_CHECKPOINT_PREEMPT_GRACE` | `30s` | Grace after ACP cancel/close before force-stopping the harness |
+| `ACP_CHECKPOINT_PREEMPT_MAX_GRACE` | `2m` | Maximum `graceMs` accepted by the rollover endpoint |
+| `ACP_CHECKPOINT_ROLLOVER_TIMEOUT` | `2m` | Deadline for the complete stop, restart, and strict LoadSession operation |
 | `ACP_NOTIF_SERIALIZE_TIMEOUT` | `5s` | Timeout for ACP notification serialization |
 | `STANDALONE_CLONE_FILTER` | `blob:none` | Git partial-clone filter for standalone (Cloudflare Container) workspace clones, which run synchronously inside the control plane's create-workspace request (`cloneStandaloneRepository` in `internal/server/standalone_workspace.go`). Set `off` to force full clones. The control plane forwards `CF_CONTAINER_CLONE_FILTER` here. |
 | `GRACEFUL_SHUTDOWN_TIMEOUT` | `30s` | Max time to wait for VM-agent HTTP server shutdown after SIGTERM |

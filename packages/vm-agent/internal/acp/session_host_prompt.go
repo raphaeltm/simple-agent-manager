@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	acpsdk "github.com/coder/acp-go-sdk"
@@ -22,48 +23,117 @@ import (
 // untrusted browser prompt must not be able to mark its own content as
 // origin=system (which would hide it from search, dedup, topic, and attention).
 func (h *SessionHost) HandlePrompt(ctx context.Context, reqID json.RawMessage, params json.RawMessage, viewerID string, trustedSource bool) {
-	promptReq, ok := h.preparePromptRequest(params, viewerID, reqID, trustedSource)
+	accepted, ok := h.AcceptPrompt(ctx, reqID, params, viewerID, trustedSource, nil)
 	if !ok {
 		return
 	}
+	accepted.Run()
+}
+
+// AcceptedPrompt is a synchronously reserved prompt that has not yet invoked
+// the ACP agent. The HTTP delivery path uses this boundary to durably claim a
+// receipt after admission but immediately before Run performs the invocation.
+type AcceptedPrompt struct {
+	host          *SessionHost
+	ctx           context.Context
+	cancel        context.CancelFunc
+	reqID         json.RawMessage
+	request       preparedPromptRequest
+	viewerID      string
+	timeout       time.Duration
+	attempt       *promptAttempt
+	trustedSource bool
+}
+
+// AcceptPrompt validates and reserves one prompt without invoking the agent.
+// It returns false after emitting the legacy JSON-RPC error when admission
+// fails. Only an accepted prompt creates a new prompt epoch.
+func (h *SessionHost) AcceptPrompt(
+	ctx context.Context,
+	reqID json.RawMessage,
+	params json.RawMessage,
+	viewerID string,
+	trustedSource bool,
+	observer PromptTerminalObserver,
+) (*AcceptedPrompt, bool) {
+	if h.Status() != HostReady {
+		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, "Agent is not ready for prompts")
+		return nil, false
+	}
+	promptReq, ok := h.preparePromptRequest(params, viewerID, reqID, trustedSource)
+	if !ok {
+		return nil, false
+	}
+
+	promptCtx, promptCancel, promptTimeout := h.newPromptContext(ctx)
+	attempt, ok := h.beginPrompt(promptCancel, observer)
+	if !ok {
+		promptCancel()
+		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, "Prompt already in progress")
+		return nil, false
+	}
+
+	// These side effects occur only after the serialization gate accepts the
+	// prompt. A rejected concurrent delivery therefore cannot be persisted or
+	// mirrored as if the agent had consumed it.
 	h.persistLastPrompt(promptReq.firstTextContent)
 	h.injectUserMessageNotifications(promptReq.sessionID, promptReq.blocks, promptReq.messageID)
 	h.cancelAutoSuspendTimer()
 
-	promptCtx, promptCancel, promptTimeout := h.newPromptContext(ctx)
-	promptID, ok := h.beginPrompt(promptCancel)
-	if !ok {
-		promptCancel()
-		h.sendJSONRPCErrorToViewer(viewerID, reqID, -32603, "Prompt already in progress")
-		return
+	return &AcceptedPrompt{
+		host:          h,
+		ctx:           promptCtx,
+		cancel:        promptCancel,
+		reqID:         append(json.RawMessage(nil), reqID...),
+		request:       promptReq,
+		viewerID:      viewerID,
+		timeout:       promptTimeout,
+		attempt:       attempt,
+		trustedSource: trustedSource,
+	}, true
+}
+
+// Abort releases an accepted prompt before ACP invocation. It is used only
+// when the durable receipt claim fails closed.
+func (p *AcceptedPrompt) Abort(err error) {
+	if err == nil {
+		err = errors.New("prompt admission aborted")
 	}
-	defer func() {
-		h.endPrompt(promptID)
-		promptCancel()
-	}()
+	p.attempt.completeWith(p.host, "error", err, p.host.stopPromptActivityRereport)
+	p.cancel()
+}
 
-	promptDone := h.startPromptWatchdog(promptID, promptCtx, viewerID, reqID, promptTimeout)
+// Run invokes an already accepted prompt and blocks until ACP returns or crash
+// recovery takes ownership of the terminal outcome.
+func (p *AcceptedPrompt) Run() {
+	h := p.host
+	promptDone := h.startPromptWatchdog(p.attempt.id, p.ctx, p.viewerID, p.reqID, p.timeout)
 	defer close(promptDone)
+	defer p.cancel()
+	defer close(p.attempt.rpcDone)
 
-	promptStart := time.Now()
 	// Capture recovery prerequisites (session ID, agent type, LoadSession
 	// capability, process) BEFORE dispatching the prompt. If the agent process
 	// exits mid-prompt, a concurrent monitorProcessExit can clear these live
 	// fields before the blocked Prompt returns "peer disconnected"; the captured
 	// snapshot lets finishPromptWithError still begin LoadSession recovery.
 	recovery := h.captureCrashRecoveryPrerequisites()
-	h.markPromptStarted(promptReq.sessionID, len(promptReq.blocks), viewerID)
-	resp, err := h.promptWithTransientRetry(promptCtx, promptReq, promptStart)
+	h.markPromptStarted(p.request.sessionID, len(p.request.blocks), p.viewerID)
+	resp, err := h.promptWithTransientRetry(p.ctx, p.request, p.attempt.startedAt)
 
-	if !h.isPromptActive(promptID) {
+	if !h.isPromptActive(p.attempt.id) {
 		return
 	}
-	cancelRequested := h.isPromptCancelRequested(promptID)
-	h.markPromptDone()
-	h.finishPrompt(promptCtx, reqID, promptStartInfo{
-		startedAt: promptStart,
-		timeout:   promptTimeout,
-		viewerID:  viewerID,
+	cancelRequested := h.isPromptCancelRequested(p.attempt.id)
+	if p.attempt.checkpointRequested.Load() && !cancelRequested && err != nil {
+		// Checkpoint rollover owns this cancellation. The terminal arbiter is
+		// completed only after strict same-session LoadSession succeeds or fails.
+		return
+	}
+	h.finishPrompt(p.attempt, p.ctx, p.reqID, promptStartInfo{
+		startedAt: p.attempt.startedAt,
+		timeout:   p.timeout,
+		viewerID:  p.viewerID,
 		recovery:  recovery,
 	}, resp, err, cancelRequested)
 }
@@ -487,6 +557,7 @@ func (h *SessionHost) stopPromptActivityRereport() {
 }
 
 func (h *SessionHost) finishPrompt(
+	attempt *promptAttempt,
 	promptCtx context.Context,
 	reqID json.RawMessage,
 	info promptStartInfo,
@@ -495,11 +566,14 @@ func (h *SessionHost) finishPrompt(
 	cancelRequested bool,
 ) {
 	if cancelRequested {
-		h.finishPromptCancelled(reqID, info)
+		h.finishPromptCancelled(attempt, reqID, info)
 		return
 	}
 	if err != nil {
-		h.finishPromptWithError(promptCtx, reqID, info, err)
+		h.finishPromptAttemptWithError(attempt, promptCtx, reqID, info, err)
+		return
+	}
+	if !attempt.completeWith(h, string(resp.StopReason), nil, h.markPromptDone) {
 		return
 	}
 
@@ -510,19 +584,20 @@ func (h *SessionHost) finishPrompt(
 	})
 	h.checkStderrForSilentErrors(resp.StopReason)
 	h.broadcastPromptResponse(reqID, resp)
-	h.notifyPromptComplete(string(resp.StopReason), nil)
 }
 
-func (h *SessionHost) finishPromptCancelled(reqID json.RawMessage, info promptStartInfo) {
+func (h *SessionHost) finishPromptCancelled(attempt *promptAttempt, reqID json.RawMessage, info promptStartInfo) {
+	if !attempt.completeWith(h, "cancelled", context.Canceled, h.markPromptDone) {
+		return
+	}
 	slog.Info("ACP: Prompt cancelled")
 	h.reportLifecycle("info", "ACP Prompt cancelled", map[string]interface{}{
 		"duration": time.Since(info.startedAt).String(),
 	})
 	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32800, "Prompt cancelled"))
-	h.notifyPromptComplete("cancelled", context.Canceled)
 }
 
-func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
+func (h *SessionHost) finishPromptAttemptWithError(attempt *promptAttempt, promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
 	if errors.Is(promptCtx.Err(), context.DeadlineExceeded) {
 		errMsg := "Prompt cancelled (context deadline exceeded)"
 		if info.timeout > 0 {
@@ -534,7 +609,11 @@ func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID jso
 			"duration": time.Since(info.startedAt).String(),
 		})
 		h.broadcastMessage(h.marshalJSONRPCError(reqID, -32603, errMsg))
-		h.notifyPromptComplete(fatalErrorStopReason, err)
+		attempt.completeWith(h, fatalErrorStopReason, err, func() {
+			h.setStatus(HostError, errMsg)
+			h.stopPromptActivityRereport()
+			h.reportActivity("error")
+		})
 		return
 	}
 
@@ -554,7 +633,7 @@ func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID jso
 			}
 			return
 		}
-		h.finishUnrecoverableCrashPrompt(reqID, info, agentType, stderr, missing, err)
+		h.finishUnrecoverableCrashPrompt(attempt, reqID, info, agentType, stderr, missing, err)
 		return
 	}
 
@@ -572,10 +651,29 @@ func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID jso
 		"duration": time.Since(info.startedAt).String(),
 	})
 	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32603, errMsg))
-	h.notifyPromptComplete("error", err)
+	attempt.completeWith(h, "error", err, h.markPromptDone)
 }
 
-func (h *SessionHost) finishUnrecoverableCrashPrompt(reqID json.RawMessage, info promptStartInfo, agentType, stderr string, missing []string, err error) {
+// finishPromptWithError preserves the focused-test seam used by the crash
+// recovery suite. Production prompt execution always supplies the accepted
+// attempt explicitly through finishPromptAttemptWithError.
+func (h *SessionHost) finishPromptWithError(promptCtx context.Context, reqID json.RawMessage, info promptStartInfo, err error) {
+	h.promptMu.Lock()
+	attempt := h.promptAttempt
+	if attempt == nil {
+		attempt = &promptAttempt{
+			id:        atomic.AddUint64(&h.promptSeq, 1),
+			startedAt: info.startedAt,
+			done:      make(chan struct{}),
+			rpcDone:   make(chan struct{}),
+		}
+		h.promptAttempt = attempt
+	}
+	h.promptMu.Unlock()
+	h.finishPromptAttemptWithError(attempt, promptCtx, reqID, info, err)
+}
+
+func (h *SessionHost) finishUnrecoverableCrashPrompt(attempt *promptAttempt, reqID json.RawMessage, info promptStartInfo, agentType, stderr string, missing []string, err error) {
 	if agentType == "" {
 		agentType = "unknown"
 	}
@@ -598,7 +696,10 @@ func (h *SessionHost) finishUnrecoverableCrashPrompt(reqID json.RawMessage, info
 	h.broadcastMessage(h.marshalJSONRPCError(reqID, -32603, message))
 	h.setStatus(HostError, message)
 	h.broadcastAgentStatus(StatusError, agentType, message)
-	h.notifyPromptComplete(fatalErrorStopReason, fmt.Errorf("%s: %w", message, err))
+	attempt.completeWith(h, fatalErrorStopReason, fmt.Errorf("%s: %w", message, err), func() {
+		h.stopPromptActivityRereport()
+		h.reportActivity("error")
+	})
 }
 
 func (h *SessionHost) broadcastPromptResponse(reqID json.RawMessage, resp acpsdk.PromptResponse) {
@@ -613,6 +714,13 @@ func (h *SessionHost) broadcastPromptResponse(reqID json.RawMessage, resp acpsdk
 }
 
 func (h *SessionHost) notifyPromptComplete(stopReason string, err error) {
+	h.promptMu.Lock()
+	attempt := h.promptAttempt
+	h.promptMu.Unlock()
+	if attempt != nil {
+		attempt.complete(h, stopReason, err)
+		return
+	}
 	if cb := h.config.OnPromptComplete; cb != nil {
 		go cb(stopReason, err)
 	}
