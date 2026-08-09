@@ -40,7 +40,6 @@ import {
   getMaxDirectoriesPerProject,
   getMaxFilesPerProject,
   getMaxTagsPerFile,
-  getProjectDeleteCleanupBatchSize,
   getTagQueryBatchSize,
   getUploadMaxBytes,
   validateDirectory,
