@@ -39,11 +39,16 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { deleteWorkspaceOnNode } from '../services/node-agent';
+import { deferAlarmWhenDisabled } from '../services/operational-kill-switch';
 
 type NodeLifecycleEnv = {
   DATABASE: D1Database;
+  KV: KVNamespace;
   NODE_WARM_TIMEOUT_MS?: string;
   NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS?: string;
+  DO_ALARMS_ENABLED_KV_KEY?: string;
+  CONTROL_LOOP_KILL_SWITCH_CACHE_MS?: string;
+  CONTROL_LOOP_DISABLED_ALARM_RETRY_MS?: string;
   WORKSPACE_STOPPED_TTL_MS?: string;
 };
 
@@ -254,6 +259,8 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
    * Processes expired workspace deletions first, then handles warm timeout.
    */
   async alarm(): Promise<void> {
+    if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'NodeLifecycle')) return;
+
     const state = await this.getStoredState();
     if (!state) return;
 

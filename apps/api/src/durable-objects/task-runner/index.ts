@@ -42,6 +42,7 @@ import { DurableObject } from 'cloudflare:workers';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { handleAgentSession } from './agent-session-step';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
@@ -191,6 +192,8 @@ export class TaskRunner extends DurableObject<Env> {
   // =========================================================================
 
   async alarm(): Promise<void> {
+    if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'TaskRunner')) return;
+
     const state = await this.getState();
     if (!state || state.completed) return;
 

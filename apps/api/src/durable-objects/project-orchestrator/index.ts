@@ -29,6 +29,7 @@ import { DurableObject } from 'cloudflare:workers';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { runOrchestratorMigrations } from './migrations';
 import { logDecision, pruneDecisionLog, runSchedulingCycle } from './scheduling';
 
@@ -358,6 +359,8 @@ export class ProjectOrchestrator extends DurableObject<Env> {
   // =========================================================================
 
   override async alarm(): Promise<void> {
+    if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'ProjectOrchestrator')) return;
+
     const config = resolveOrchestratorConfig(this.env);
 
     // Need to know which project this DO belongs to

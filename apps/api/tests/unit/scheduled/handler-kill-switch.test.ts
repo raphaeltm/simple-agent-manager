@@ -1,0 +1,59 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const { enabledMock, isolateMock, logInfoMock } = vi.hoisted(() => ({
+  enabledMock: vi.fn(),
+  isolateMock: vi.fn(async () => undefined),
+  logInfoMock: vi.fn(),
+}));
+
+vi.mock('../../../src/services/operational-kill-switch', () => ({
+  isOperationalLoopEnabled: enabledMock,
+}));
+vi.mock('../../../src/scheduled/platform-feedback-hourly', () => ({
+  isHourlyPlatformMaintenanceCron: vi.fn(() => false),
+  scheduleHourlyPlatformMaintenance: vi.fn(() => false),
+}));
+vi.mock('../../../src/scheduled/sweep-isolation', () => ({
+  createSweepIsolator: vi.fn(() => ({ isolate: isolateMock, failedSweeps: () => [] })),
+}));
+vi.mock('drizzle-orm/d1', () => ({ drizzle: vi.fn(() => ({})) }));
+vi.mock('../../../src/lib/logger', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../../../src/lib/logger')>(),
+  log: { info: logInfoMock, warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
+}));
+
+const { scheduled } = await import('../../../src/scheduled/handler');
+
+const controller = { cron: '*/5 * * * *' } as ScheduledController;
+const context = { waitUntil: vi.fn() } as unknown as ExecutionContext;
+const env = { DATABASE: {}, OBSERVABILITY_DATABASE: {}, KV: {} } as never;
+
+describe('scheduled operational sweep kill switch', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('stops every operational sweep while disabled', async () => {
+    enabledMock.mockResolvedValue(false);
+
+    await scheduled(controller, env, context);
+
+    expect(isolateMock).not.toHaveBeenCalled();
+    expect(logInfoMock).toHaveBeenCalledWith('cron.skipped_disabled', {
+      cron: controller.cron,
+      type: 'sweep',
+      switch: 'cron',
+    });
+  });
+
+  it('resumes the complete sweep block after re-enable', async () => {
+    enabledMock.mockResolvedValue(true);
+
+    await scheduled(controller, env, context);
+
+    expect(isolateMock).toHaveBeenCalled();
+    expect(isolateMock.mock.calls.map(([name]) => name)).toContain('node_cleanup');
+    expect(logInfoMock).toHaveBeenCalledWith(
+      'cron.completed',
+      expect.objectContaining({ type: 'sweep', failedSweeps: [] }),
+    );
+  });
+});

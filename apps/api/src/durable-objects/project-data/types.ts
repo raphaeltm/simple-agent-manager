@@ -6,6 +6,7 @@ import type { VmAgentContainer } from '../vm-agent-container';
 
 export type Env = {
   DATABASE: D1Database;
+  KV: KVNamespace;
   VM_AGENT_CONTAINER?: DurableObjectNamespace<VmAgentContainer>;
   NODE_HEARTBEAT_STALE_SECONDS?: string;
   TASK_LIVENESS_MAX_ACP_SESSIONS?: string;
@@ -38,6 +39,9 @@ export type Env = {
   TASK_RECONCILIATION_PROMPT_HARD_STALL_MS?: string;
   TASK_RECONCILIATION_MIN_ALARM_DELAY_MS?: string;
   SESSION_ACTIVITY_STALE_THRESHOLD_MS?: string;
+  DO_ALARMS_ENABLED_KV_KEY?: string;
+  CONTROL_LOOP_KILL_SWITCH_CACHE_MS?: string;
+  CONTROL_LOOP_DISABLED_ALARM_RETRY_MS?: string;
 };
 
 export interface SummaryData {

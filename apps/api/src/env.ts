@@ -80,6 +80,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   PREVIEW_URL_TTL_SECONDS?: string;
   PREVIEW_SIGNING_KEY?: string;
   VERSION: string;
+  CRON_SWEEPS_ENABLED_KV_KEY?: string; // Operational sweep brake key (default: control-loops:cron-enabled)
+  DO_ALARMS_ENABLED_KV_KEY?: string; // DO alarm brake key (default: control-loops:alarms-enabled)
+  CONTROL_LOOP_KILL_SWITCH_CACHE_MS?: string; // Operational brake cache, capped at 30000
+  CONTROL_LOOP_DISABLED_ALARM_RETRY_MS?: string; // Disabled DO recheck interval (default: 300000)
   // Secrets
   GITHUB_CLIENT_ID?: string;
   GITHUB_CLIENT_SECRET?: string;

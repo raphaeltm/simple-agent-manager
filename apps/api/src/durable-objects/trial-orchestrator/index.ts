@@ -40,6 +40,7 @@ import { DurableObject } from 'cloudflare:workers';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { computeBackoffMs, isTransientError, parseEnvInt, safeEmitTrialEvent } from './helpers';
 import {
   handleDiscoveryAgentStart,
@@ -157,6 +158,8 @@ export class TrialOrchestrator extends DurableObject<Env> {
   // =========================================================================
 
   async alarm(): Promise<void> {
+    if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'TrialOrchestrator')) return;
+
     const state = await this.getState();
     log.info('trial_orchestrator_do.alarm.enter', {
       trialId: state?.trialId ?? null,

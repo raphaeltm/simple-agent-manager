@@ -29,6 +29,7 @@ import { DurableObject } from 'cloudflare:workers';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { saveAgentCredentialForUser } from '../../services/agent-credential-save';
 import {
   isTerminalSetupStatus,
@@ -261,6 +262,8 @@ export class CredentialSetupSession extends DurableObject<Env> {
    * or reaches a terminal teardown, so a session cannot get stuck armed.
    */
   async alarm(): Promise<void> {
+    if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'CredentialSetupSession')) return;
+
     const row = this.readRow();
     if (!row) return; // torn down / never created — nothing to do
     if (isTerminalSetupStatus(row.status)) return;

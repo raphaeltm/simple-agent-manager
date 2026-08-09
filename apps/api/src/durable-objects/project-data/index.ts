@@ -33,6 +33,7 @@ import * as messages from './messages';
 import * as missionState from './missions';
 import * as policies from './policies';
 import * as reconciliation from './reconciliation';
+import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
 import * as sessionState from './session-state';
@@ -346,6 +347,8 @@ export class ProjectData extends DurableObject<Env> {
   // --- DO Alarm Handler ---
 
   async alarm(): Promise<void> {
+    if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'ProjectData')) return;
+
     const timedOut = await checkRuntimeHeartbeatTimeouts(
       this.sql, this.env, this.transitionAcpSession.bind(this));
 
