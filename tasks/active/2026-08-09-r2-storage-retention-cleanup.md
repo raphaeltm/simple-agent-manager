@@ -89,10 +89,10 @@ merged scheduled sweeps and R2 lifecycle policies.
 
 ### Deploy safety and documentation
 
-- [ ] Register `DATABASE.deployment_releases`, `DATABASE.session_snapshots`, and
+- [x] Register `DATABASE.deployment_releases`, `DATABASE.session_snapshots`, and
       `DATABASE.project_files` as reviewed churning tables in deploy row-count safety;
       pin their acceptance and the closed-list rejection behavior in tests.
-- [ ] Update `apps/api/src/env.ts`, `apps/api/.env.example`, the env-reference skill,
+- [x] Update `apps/api/src/env.ts`, `apps/api/.env.example`, the env-reference skill,
       and public self-host/configuration docs for every new runtime/config value and
       the expanded reviewed-table list.
 - [x] Update infra config/storage tests for defaults, overrides, invalid TTLs, and all
