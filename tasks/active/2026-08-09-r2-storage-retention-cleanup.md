@@ -78,9 +78,9 @@ merged scheduled sweeps and R2 lifecycle policies.
 
 ### R2 lifecycle and project cleanup
 
-- [ ] Add validated Pulumi defaults/overrides: `tempUploadTtlDays=1` and
+- [x] Add validated Pulumi defaults/overrides: `tempUploadTtlDays=1` and
       `ttsTtlDays=30`.
-- [ ] Add independent `temp-uploads/` and `tts/` lifecycle rules to the existing R2
+- [x] Add independent `temp-uploads/` and `tts/` lifecycle rules to the existing R2
       lifecycle resource for clean installs and upgrades; add no lifecycle for
       `library/` or `compose-image-artifacts/`.
 - [ ] Add explicit project-library tag/file delete statements scoped by project ID.
@@ -95,7 +95,7 @@ merged scheduled sweeps and R2 lifecycle policies.
 - [ ] Update `apps/api/src/env.ts`, `apps/api/.env.example`, the env-reference skill,
       and public self-host/configuration docs for every new runtime/config value and
       the expanded reviewed-table list.
-- [ ] Update infra config/storage tests for defaults, overrides, invalid TTLs, and all
+- [x] Update infra config/storage tests for defaults, overrides, invalid TTLs, and all
       four independent lifecycle rules.
 - [ ] Move `tasks/backlog/2026-03-29-r2-temp-uploads-lifecycle-cleanup.md` to archive
       with an option-A completion note referencing this cohesive PR.

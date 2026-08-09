@@ -28,7 +28,7 @@ describe('R2 Bucket Resource', () => {
     });
   });
 
-  it('provisions both independent prefix-scoped retention rules', async () => {
+  it('provisions all independent prefix-scoped retention rules', async () => {
     const lifecycle = findRegisteredResource(
       `${configModule.prefix}-r2-lifecycle`,
       'cloudflare:index/r2BucketLifecycle:R2BucketLifecycle'
@@ -62,7 +62,42 @@ describe('R2 Bucket Resource', () => {
             },
           },
         },
+        {
+          id: storageModule.TEMP_UPLOAD_LIFECYCLE_RULE_ID,
+          conditions: { prefix: storageModule.TEMP_UPLOAD_R2_PREFIX },
+          enabled: true,
+          deleteObjectsTransition: {
+            condition: {
+              maxAge: configModule.DEFAULT_TEMP_UPLOAD_TTL_DAYS * 24 * 60 * 60,
+              type: 'Age',
+            },
+          },
+        },
+        {
+          id: storageModule.TTS_LIFECYCLE_RULE_ID,
+          conditions: { prefix: storageModule.TTS_R2_PREFIX },
+          enabled: true,
+          deleteObjectsTransition: {
+            condition: {
+              maxAge: configModule.DEFAULT_TTS_TTL_DAYS * 24 * 60 * 60,
+              type: 'Age',
+            },
+          },
+        },
       ],
     });
+  });
+
+  it('does not apply age-based expiry to durable library or compose artifacts', () => {
+    const lifecycle = findRegisteredResource(
+      `${configModule.prefix}-r2-lifecycle`,
+      'cloudflare:index/r2BucketLifecycle:R2BucketLifecycle'
+    );
+    const prefixes = (lifecycle.inputs.rules as Array<{ conditions: { prefix: string } }>).map(
+      (rule) => rule.conditions.prefix
+    );
+
+    expect(prefixes).not.toContain('library/');
+    expect(prefixes).not.toContain('compose-image-artifacts/');
   });
 });

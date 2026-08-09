@@ -156,6 +156,25 @@ compose artifact cleanup then re-derives references from the remaining manifests
 | `DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY` | `cleanup:deployment-releases:last-run` | KV interval marker.                                                                                   |
 | `COMPOSE_IMAGE_ARTIFACT_CLEANUP_BATCH_SIZE`    | `250`                                  | Maximum abandoned compose archives deleted per daily run.                                             |
 
+### R2 object lifecycle retention
+
+Pulumi updates the existing assets bucket lifecycle resource on upgrades and creates
+the same rules on clean installs (`infra/resources/storage.ts:r2BucketLifecycle`).
+`temp-uploads/` is transient browser-upload staging; `tts/` is a regenerable audio
+cache. Durable `library/` content is deleted only with its project, and reachable
+`compose-image-artifacts/` are governed by deployment release retention, so neither
+durable prefix has an age-only lifecycle rule.
+
+| Pulumi option               | Default | Object prefix        | Description                                  |
+| --------------------------- | ------- | -------------------- | -------------------------------------------- |
+| `sessionSnapshotTtlDays`    | `7`     | `session-snapshots/` | Hibernated session snapshot object retention |
+| `diagnosticIncidentTtlDays` | `7`     | configured private   | Private diagnostic artifact retention        |
+| `tempUploadTtlDays`         | `1`     | `temp-uploads/`      | Abandoned presigned browser upload retention |
+| `ttsTtlDays`                | `30`    | `tts/`               | Regenerable TTS audio-cache retention        |
+
+All TTL options must be positive integers. Set overrides with `pulumi config set`
+against the target stack before running its deployment workflow.
+
 ## Google OAuth and GCP provisioning
 
 Google login and Google infrastructure authorization are independent credential families:
