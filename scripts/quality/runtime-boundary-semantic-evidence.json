@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "auditedAt": "2026-08-09T00:00:00.000Z",
+  "scope": "apps/api/src",
+  "stage": "advisory",
+  "blockingEnabled": false,
+  "rules": {
+    "blind-external-payload-narrowing": 39,
+    "unvalidated-row-narrowing": 6
+  },
+  "totalDiagnostics": 45,
+  "fixtureTests": 3,
+  "sampleReview": {
+    "method": "first ten deterministic file-and-line ordered diagnostics",
+    "sampleSize": 10,
+    "potentialFalsePositives": 2,
+    "potentialFalsePositivePercent": 20
+  },
+  "decision": {
+    "promote": false,
+    "reason": "The bounded checker finds useful candidates but the sampled potential false-positive rate exceeds the 5% promotion threshold. Keep it advisory until sanctioned row coercions are discriminated without losing external-payload findings."
+  }
+}

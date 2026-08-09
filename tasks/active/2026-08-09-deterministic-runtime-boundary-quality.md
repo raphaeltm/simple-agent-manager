@@ -112,64 +112,64 @@ The durable dependency graph lives in `.workflow-state.md` (gitignored). Coding 
 
 ### Foundation and coverage
 
-- [ ] Add lint scripts for `apps/www`, `apps/tail-worker`, `packages/cloud-init`, `infra`, and `tools/og-image`, covering all 76 current TS/Astro files without broad repository churn.
-- [ ] Add explicit type/template validation for `apps/www` through `astro check` and for `tools/og-image` through a scoped TypeScript configuration.
-- [ ] Add a deterministic inventory/contract test proving every pnpm workspace has intended lint and type/template coverage.
-- [ ] Enforce `format:check` in CI through the same leaf command used by `check:fast`.
-- [ ] Align supported ESLint/typescript-eslint versions and migrate to ESLint 9 flat config with unchanged rule semantics.
-- [ ] Capture machine-readable ESLint before/after finding parity for the prior authoritative scope.
-- [ ] Remove dead Husky/lint-staged dependencies/configuration unless concrete active hook ownership is established; CI remains authoritative.
-- [ ] Add caching only where local/CI measurements justify it and invalidation is obvious.
+- [x] Add lint scripts for `apps/www`, `apps/tail-worker`, `packages/cloud-init`, `infra`, and `tools/og-image`, covering all 76 current TS/Astro files without broad repository churn.
+- [x] Add explicit type/template validation for `apps/www` through `astro check` and for `tools/og-image` through a scoped TypeScript configuration.
+- [x] Add a deterministic inventory/contract test proving every pnpm workspace has intended lint and type/template coverage.
+- [x] Enforce `format:check` in CI through the same leaf command used by `check:fast`; current-main debt is ratcheted at 2,390 files rather than made blocking.
+- [x] Align supported ESLint/typescript-eslint versions and migrate to ESLint 9 flat config with unchanged rule semantics.
+- [x] Capture machine-readable ESLint before/after finding parity for the prior authoritative scope.
+- [x] Remove dead Husky/lint-staged dependencies/configuration unless concrete active hook ownership is established; CI remains authoritative.
+- [x] Measure caching before adoption. Prettier's built-in cache did not materially reduce the 2,390-file debt scan, so the ratchet uses the pinned-base delta and completes in about eight seconds without a cache.
 
 ### Local SAM ESLint plugin and lifecycle
 
-- [ ] Create an unpublished workspace plugin tested with ESLint 9 `RuleTester`.
-- [ ] Implement `sam/no-unvalidated-request-json` for precise Hono-style `*.req.json<T>()` calls, with a non-automatic suggestion.
-- [ ] Implement `sam/no-unsafe-json-parse-assertion` for `TSAsExpression` over `JSON.parse`, excluding only an `unknown` target and narrowly justified fixtures.
-- [ ] Implement `sam/no-local-record-guard` for known local `isRecord`/`isObject` definition shapes, suggestion only and no semantic-changing fix.
-- [ ] Include every current true-positive shape plus comments, strings, multiline calls, aliases/near misses, and at least two negative edge cases per rule.
-- [ ] Keep DO/D1 row narrowing and blind external-payload narrowing out of the syntax plugin.
-- [ ] Add `rules.manifest.json` with evidence, owner, matcher version, stage, gate owner, baseline/backlog link, dates, false-positive samples, and expiring exemptions; standard `meta.docs.url` points to the manifest/docs.
-- [ ] Configure boundary rules as advisory while debt exists; do not add inline suppressions.
+- [x] Create an unpublished workspace plugin tested with ESLint 9 `RuleTester`.
+- [x] Implement `sam/no-unvalidated-request-json` for precise Hono-style `*.req.json<T>()` calls, with a non-automatic suggestion.
+- [x] Implement `sam/no-unsafe-json-parse-assertion` for `TSAsExpression` over `JSON.parse`, excluding only an `unknown` target and narrowly justified fixtures.
+- [x] Implement `sam/no-local-record-guard` for known local `isRecord`/`isObject` definition shapes, diagnostic only and no semantic-changing fix.
+- [x] Include every current true-positive shape plus comments, strings, multiline calls, aliases/near misses, and at least two negative edge cases per rule.
+- [x] Keep DO/D1 row narrowing and blind external-payload narrowing out of the syntax plugin.
+- [x] Add `rules.manifest.json` with evidence, owner, matcher version, stage, gate owner, baseline/backlog link, dates, false-positive samples, and expiring exemptions; standard `meta.docs.url` points to the manifest/docs.
+- [x] Configure boundary rules as advisory while debt exists; zero inline suppressions were added.
 
 ### Dedicated type-boundary ratchet
 
-- [ ] Add a deterministic repository-wide checker and Vitest suite for `as any`, `*.req.json<T>()`, local record-guard definitions, and typed JSON.parse assertions excluding `as unknown`.
-- [ ] Check in current counts with owner/backlog/review metadata; existing debt passes and net increases fail with precise `file:line` guidance.
-- [ ] Prove N→N+1 fails, a file move/split passes, decreases pass without unrelated cleanup, and repeated clean runs are identical.
-- [ ] Keep `Record<string, unknown>` and `as unknown as` populations report-only until discriminating matchers exist.
+- [x] Add a deterministic repository-wide checker and Vitest suite for `as any`, `*.req.json<T>()`, local record-guard definitions, and typed JSON.parse assertions excluding `as unknown`.
+- [x] Check in current counts with owner/backlog/review metadata; existing debt passes and net increases fail with precise `file:line` guidance.
+- [x] Prove N→N+1 fails, a file move/split passes, decreases pass without unrelated cleanup, and repeated clean runs are identical.
+- [x] Keep `Record<string, unknown>` and `as unknown as` populations report-only until discriminating matchers exist.
 
 ### Remaining quality controls
 
-- [ ] Add a portable `.claude/rules/` runtime-boundary rule citing current Valibot helpers and sanctioned env/DO-stub/RPC/guard-then-cast patterns.
-- [ ] Replace the one runtime `navigator as any` with a bounded local interface, if it still exists at integration time.
-- [ ] Add Gitleaks for current-tree and PR-range scanning; keep full-history audit output private operational evidence.
-- [ ] Add deterministic direct-dependency evidence enforcement for npm and Go manifest diffs, with authoritative registry/homepage link and one-line necessity.
-- [ ] Add diff-local blocking `govulncheck` when Go module files change.
-- [ ] Add scheduled OSV source scanning with private owned SAM/backlog routing; every ignore requires a reason and expiry.
-- [ ] Extend a bounded ts-morph checker with only unvalidated DO/D1 row narrowing and blind external-payload narrowing, initially scoped to `apps/api/src`, with positive/negative fixtures and low-noise evidence.
-- [ ] Do not add generic mock-density, PR-size, Semgrep, Knip, whole-repo type-aware lint, or other unproven gates.
+- [x] Add a portable `.claude/rules/` runtime-boundary rule citing current Valibot helpers and sanctioned env/DO-stub/RPC/guard-then-cast patterns.
+- [x] Replace the one runtime `navigator as any` with a bounded local interface after re-auditing that it still existed.
+- [x] Add Gitleaks for current-tree and PR-range scanning; keep full-history audit output private operational evidence.
+- [x] Add deterministic direct-dependency evidence enforcement for npm and Go manifest diffs, with authoritative registry/homepage link and one-line necessity.
+- [x] Add diff-local blocking `govulncheck` when Go module files change.
+- [ ] Add scheduled OSV source scanning with private owned SAM/backlog routing; code and policy are complete, but the canonical repository lacks both required routing secrets. Private follow-up idea `01KZKYAVJGW1YT71X61XTHM0W4` records the current scan without public finding details.
+- [x] Extend a bounded ts-morph checker with only unvalidated DO/D1 row narrowing and blind external-payload narrowing, initially scoped to `apps/api/src`, with positive/negative fixtures. The sampled noise gate is not met, so all 45 diagnostics remain advisory.
+- [x] Do not add generic mock-density, PR-size, Semgrep, Knip, whole-repo type-aware lint, or other unproven gates.
 
 ### Oxlint measured adoption
 
-- [ ] Install/configure Oxlint in report-only shadow mode without type-aware mode.
-- [ ] Compare standard/recommended TypeScript, React/hooks/a11y, API `no-console`/logger exclusion, and `typescript/consistent-type-imports` inline-import behavior against ESLint.
-- [ ] Capture machine-readable finding parity, safe-fix diff parity, correct ignores/scopes, TS/Astro coverage, suppression count, and clean cold timing.
-- [ ] Shadow-run the SAM fixture corpus through Oxlint's alpha JS-plugin host and record conformance; it remains non-authoritative unless 100% parity survives controlled upgrades.
-- [ ] Promote Oxlint only if all intended findings remain, no unreviewed semantic fix drift exists, no new inline suppression exists, directory/template coverage is correct, and clean cold CI time is faster.
-- [ ] Keep Oxlint shadow-only if sampled false positives exceed 5%, more than three suppressions would be needed, scoping/template coverage fails, findings regress, fix semantics drift, or no speed improvement is measured.
-- [ ] If promotion gates pass, run Oxlint first and use `eslint-plugin-oxlint` to disable overlap; keep only SAM rules and simple-import-sort in the ESLint tail.
+- [x] Install/configure Oxlint in report-only shadow mode without type-aware mode.
+- [x] Compare standard/recommended TypeScript, React/hooks/a11y, API `no-console`/logger exclusion, and `typescript/consistent-type-imports` inline-import behavior against ESLint.
+- [x] Capture machine-readable finding parity, safe-fix diff parity, correct ignores/scopes, TS/Astro coverage, suppression count, and clean cold timing in `scripts/quality/lint-adoption-evidence.json`.
+- [x] Shadow-run the SAM fixture corpus through Oxlint's alpha JS-plugin host and record 8/8 conformance; it remains non-authoritative.
+- [x] Evaluate every promotion gate. Finding and safe-fix parity are not met, so promotion is forbidden despite faster cold runtime and zero new suppressions.
+- [x] Keep Oxlint shadow-only because finding regression, safe-fix drift, and aligned-scope mismatch trigger explicit rollback/stay-shadow criteria.
+- [x] Do not add `eslint-plugin-oxlint`: promotion gates failed, so ESLint remains the complete authoritative layer and Oxlint remains report-only.
 
 ### Root developer/CI contract
 
-- [ ] Add one obvious `pnpm check:fast` entry point running format check, Oxlint/current lint layer, ESLint custom tail, and the boundary ratchet deterministically.
-- [ ] Make CI call the same leaf commands, including workspace lint/type/template coverage, quality checker tests, secret/dependency/vulnerability gates, and source-contract/wiring tests.
-- [ ] Keep pre-existing debt advisory/baselined and reject only net-new debt.
-- [ ] Keep old authoritative systems enabled until proven parity and document every rollback switch.
+- [x] Add one obvious `pnpm check:fast` entry point running format check, Oxlint/current lint layer, ESLint custom tail, and the boundary ratchet deterministically.
+- [x] Make CI call the same leaf commands, including workspace lint/type/template coverage, quality checker tests, secret/dependency/vulnerability gates, and source-contract/wiring tests.
+- [x] Keep pre-existing debt advisory/baselined and reject only net-new debt.
+- [x] Keep old authoritative systems enabled until proven parity and document every rollback switch.
 
 ### Integration, review, staging, and delivery
 
-- [ ] Integrate child commits/PRs in progressively ordered commits and re-audit current main before accepting baselines.
+- [x] Integrate child commits/PRs in progressively ordered commits and re-audit current main before accepting baselines.
 - [ ] Run and archive concise evidence for frozen-lockfile clean install, format, lint/plugin fixtures, all workspace type/template checks, affected JS/TS tests and coverage, quality checker tests, Go tests/race/govulncheck as applicable, build, ESLint parity, Oxlint benchmark, CI wiring, and artifact/suppression cleanliness.
 - [ ] Run independent picky architecture/code-quality, security, test, constitution, doc-sync, and task-completion reviews; fix every actionable correctness/security concern.
 - [ ] Re-run the local contract after review fixes and ensure CI is green.
