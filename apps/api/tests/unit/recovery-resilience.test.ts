@@ -24,7 +24,7 @@ const taskRunnerSource = readFileSync(
   resolve(process.cwd(), 'src/services/task-runner.ts'),
   'utf8'
 );
-const indexSource = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
+const scheduledSource = readFileSync(resolve(process.cwd(), 'src/scheduled/handler.ts'), 'utf8');
 const adminSource = readFileSync(resolve(process.cwd(), 'src/routes/admin.ts'), 'utf8');
 
 // =========================================================================
@@ -190,7 +190,7 @@ describe('stuck-tasks DO health checks (TDF-7)', () => {
   it('cron handler logs doHealthChecked count', () => {
     // Optional-chained: a sweep that threw yields undefined rather than a zero
     // result, so a crashed sweep stays distinguishable from an empty one.
-    expect(indexSource).toContain('stuckTaskDoHealthChecked: stuckTasks?.doHealthChecked');
+    expect(scheduledSource).toContain('stuckTaskDoHealthChecked: stuckTasks?.doHealthChecked');
   });
 
   it('isolates every sweep so a cleanup failure cannot suppress the others', () => {
@@ -202,9 +202,9 @@ describe('stuck-tasks DO health checks (TDF-7)', () => {
     //
     // Isolation is the real property, so assert it directly: no sweep in the
     // 5-minute branch may be awaited outside the isolator.
-    const sweepStart = indexSource.indexOf('// 5-minute operational sweep');
-    const sweepEnd = indexSource.indexOf("log.info('cron.completed'", sweepStart);
-    const sweepBody = indexSource.slice(sweepStart, sweepEnd);
+    const sweepStart = scheduledSource.indexOf('const sweeps = createSweepIsolator(env)');
+    const sweepEnd = scheduledSource.indexOf("log.info('cron.completed'", sweepStart);
+    const sweepBody = scheduledSource.slice(sweepStart, sweepEnd);
 
     expect(sweepBody).toContain('const sweeps = createSweepIsolator(env)');
 
@@ -341,8 +341,8 @@ describe('node-cleanup orphan detection (TDF-7)', () => {
   });
 
   it('cron handler logs orphan counts', () => {
-    expect(indexSource).toContain('orphanedWorkspacesFlagged');
-    expect(indexSource).toContain('orphanedNodesDestroyed');
+    expect(scheduledSource).toContain('orphanedWorkspacesFlagged');
+    expect(scheduledSource).toContain('orphanedNodesDestroyed');
   });
 
   it('uses an idleness signal that heartbeats cannot defeat', () => {
@@ -387,7 +387,7 @@ describe('timeout service OBSERVABILITY_DATABASE recording (TDF-7)', () => {
   });
 
   it('cron handler passes OBSERVABILITY_DATABASE to checkProvisioningTimeouts', () => {
-    expect(indexSource).toContain(
+    expect(scheduledSource).toContain(
       'checkProvisioningTimeouts(env.DATABASE, env, env.OBSERVABILITY_DATABASE)'
     );
   });

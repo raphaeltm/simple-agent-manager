@@ -37,9 +37,17 @@ describe('Tail Worker handler', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockFetch = vi.fn().mockResolvedValue(new Response('OK', { status: 200 }));
+    mockFetch = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ subscribers: 1 }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
     env = {
       API_WORKER: { fetch: mockFetch },
+      // Formatting/forwarding tests are independent of the subscriber gate;
+      // TTL 0 prevents a deliberate failure case from suppressing later cases.
+      TAIL_SUBSCRIBER_CACHE_MS: '0',
     };
   });
 

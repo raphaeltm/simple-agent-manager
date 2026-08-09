@@ -55,7 +55,8 @@ function createDb() {
       tunnel_name TEXT,
       error_message TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      cleanup_backoff_until TEXT
     );
     CREATE TABLE workspaces (
       id TEXT PRIMARY KEY,

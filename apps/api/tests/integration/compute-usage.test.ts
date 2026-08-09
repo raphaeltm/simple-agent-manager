@@ -17,12 +17,28 @@ import { describe, expect, it } from 'vitest';
 describe('compute usage metering pipeline', () => {
   const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
   const serviceFile = readFileSync(resolve(process.cwd(), 'src/services/compute-usage.ts'), 'utf8');
-  const nodeUsageServiceFile = readFileSync(resolve(process.cwd(), 'src/services/node-usage.ts'), 'utf8');
+  const nodeUsageServiceFile = readFileSync(
+    resolve(process.cwd(), 'src/services/node-usage.ts'),
+    'utf8'
+  );
   const crudFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/crud.ts'), 'utf8');
-  const lifecycleFile = readFileSync(resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'), 'utf8');
-  const stateMachineFile = readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner/state-machine.ts'), 'utf8');
-  const workspaceStepsFile = readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner/workspace-steps.ts'), 'utf8');
-  const cleanupFile = readFileSync(resolve(process.cwd(), 'src/scheduled/compute-usage-cleanup.ts'), 'utf8');
+  const lifecycleFile = readFileSync(
+    resolve(process.cwd(), 'src/routes/workspaces/lifecycle.ts'),
+    'utf8'
+  );
+  const stateMachineFile = readFileSync(
+    resolve(process.cwd(), 'src/durable-objects/task-runner/state-machine.ts'),
+    'utf8'
+  );
+  const workspaceStepsFile = readFileSync(
+    resolve(process.cwd(), 'src/durable-objects/task-runner/workspace-steps.ts'),
+    'utf8'
+  );
+  const cleanupFile = readFileSync(
+    resolve(process.cwd(), 'src/scheduled/compute-usage-cleanup.ts'),
+    'utf8'
+  );
+  const scheduledFile = readFileSync(resolve(process.cwd(), 'src/scheduled/handler.ts'), 'utf8');
   const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
   const adminUsageRoute = readFileSync(resolve(process.cwd(), 'src/routes/admin-usage.ts'), 'utf8');
   const usageRoute = readFileSync(resolve(process.cwd(), 'src/routes/usage.ts'), 'utf8');
@@ -112,7 +128,7 @@ describe('compute usage metering pipeline', () => {
     });
 
     it('calculateVcpuHoursForPeriod supports credentialSource filter', () => {
-      expect(serviceFile).toContain("eq(schema.computeUsage.credentialSource, credentialSource)");
+      expect(serviceFile).toContain('eq(schema.computeUsage.credentialSource, credentialSource)');
     });
 
     it('closeOrphanedComputeUsage joins with workspaces table', () => {
@@ -179,7 +195,7 @@ describe('compute usage metering pipeline', () => {
     });
 
     it('cron handler invokes compute usage cleanup', () => {
-      expect(indexFile).toContain('runComputeUsageCleanup');
+      expect(scheduledFile).toContain('runComputeUsageCleanup');
     });
   });
 

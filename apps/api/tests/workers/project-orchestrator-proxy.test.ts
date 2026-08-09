@@ -330,7 +330,7 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     expect(dbTask!.scheduler_state).not.toBe('blocked_human');
   });
 
-  it('notifyTaskEvent rearms immediate scheduling for an active mission', async () => {
+  it('notifyTaskEvent schedules and fully terminalizes an active mission', async () => {
     const projectId = 'proj-po-notify-001';
     const missionId = 'mission-notify-001';
     const taskId = 'task-notify-001';
@@ -381,8 +381,7 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
 
     expect(missionStatus).toBe('completed');
     const status = await getOrchestratorStatus(env, projectId);
-    expect(status.activeMissions).toHaveLength(1);
-    expect(status.activeMissions[0]?.status).toBe('completing');
+    expect(status.activeMissions).toHaveLength(0);
     expect(status.recentDecisions.length).toBeGreaterThan(decisionsBefore);
   });
 
