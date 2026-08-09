@@ -15,7 +15,8 @@
     "build": "tsup src/index.ts --format esm --dts",
     "dev": "tsup src/index.ts --format esm --dts --watch",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts' --rule 'simple-import-sort/imports: off' --rule 'simple-import-sort/exports: off'"
   },
   "devDependencies": {
     "tsup": "8.5.1",
