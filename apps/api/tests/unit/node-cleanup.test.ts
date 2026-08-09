@@ -425,16 +425,29 @@ describe('node cleanup permanent-failure escape', () => {
 
   it('backs off a failed candidate so the next sweep page can advance', async () => {
     const { stopNodeResources } = await import('../../src/services/nodes');
-    vi.mocked(stopNodeResources).mockRejectedValue(new Error('provider returned 403'));
+    vi.mocked(stopNodeResources).mockImplementation(async (nodeId) => {
+      if (nodeId === 'node-permanent-403') {
+        throw new Error('provider returned 403');
+      }
+    });
     const now = new Date('2026-08-09T00:00:00.000Z');
-    let cleanupBackoffUntil: string | null = null;
-    const candidate = {
-      node_id: 'node-permanent-403',
-      user_id: 'user-1',
-      workspace_id: 'workspace-1',
-      task_id: 'task-1',
-      task_status: 'failed',
-    };
+    const cleanupBackoffUntil = new Map<string, string>();
+    const candidates = [
+      {
+        node_id: 'node-permanent-403',
+        user_id: 'user-1',
+        workspace_id: 'workspace-1',
+        task_id: 'task-1',
+        task_status: 'failed',
+      },
+      {
+        node_id: 'node-healthy',
+        user_id: 'user-2',
+        workspace_id: 'workspace-2',
+        task_id: 'task-2',
+        task_status: 'completed',
+      },
+    ];
 
     const env = createMockEnv(new Map(), {
       NODE_CLEANUP_FAILURE_BACKOFF_MS: '3600000',
@@ -443,11 +456,20 @@ describe('node cleanup permanent-failure escape', () => {
           bind: vi.fn((...args: unknown[]) => ({
             all: vi.fn(async () => {
               if (!sql.includes('SELECT DISTINCT n.id')) return { results: [] };
-              return { results: cleanupBackoffUntil === null ? [candidate] : [] };
+              const queryTime = args[0] as string;
+              const limit = args[2] as number;
+              return {
+                results: candidates
+                  .filter((candidate) => {
+                    const backedOffUntil = cleanupBackoffUntil.get(candidate.node_id);
+                    return backedOffUntil === undefined || backedOffUntil <= queryTime;
+                  })
+                  .slice(0, limit),
+              };
             }),
             run: vi.fn(async () => {
               if (sql.includes('cleanup_backoff_until')) {
-                cleanupBackoffUntil = args[0] as string;
+                cleanupBackoffUntil.set(args[2] as string, args[0] as string);
               }
               return { meta: { changes: 1 } };
             }),
@@ -456,13 +478,23 @@ describe('node cleanup permanent-failure escape', () => {
       } as unknown as D1Database,
     });
     const config = resolveCleanupConfig(env);
+    config.cfContainerSweepLimit = 1;
 
-    await sweepTerminalCfContainers(env, now, config, emptyResult());
-    expect(cleanupBackoffUntil).toBe('2026-08-09T01:00:00.000Z');
-    await sweepTerminalCfContainers(env, now, config, emptyResult());
+    const firstResult = emptyResult();
+    await sweepTerminalCfContainers(env, now, config, firstResult);
+    expect(cleanupBackoffUntil.get('node-permanent-403')).toBe(
+      '2026-08-09T01:00:00.000Z',
+    );
+    expect(firstResult).toMatchObject({ cfContainersDestroyed: 0, errors: 1 });
 
-    expect(stopNodeResources).toHaveBeenCalledTimes(1);
-    expect(cleanupBackoffUntil).toBe('2026-08-09T01:00:00.000Z');
+    const secondResult = emptyResult();
+    await sweepTerminalCfContainers(env, now, config, secondResult);
+
+    expect(vi.mocked(stopNodeResources).mock.calls.map(([nodeId]) => nodeId)).toEqual([
+      'node-permanent-403',
+      'node-healthy',
+    ]);
+    expect(secondResult).toMatchObject({ cfContainersDestroyed: 1, errors: 0 });
     const candidateQuery = vi.mocked(env.DATABASE.prepare).mock.calls
       .map(([sql]) => sql)
       .find((sql) => sql.includes('SELECT DISTINCT n.id'));
