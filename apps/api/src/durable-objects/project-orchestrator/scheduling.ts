@@ -81,16 +81,56 @@ export async function runSchedulingCycle(
 ): Promise<void> {
   const now = Date.now();
 
-  // Load active missions (raw snake_case from SQLite)
+  // Include completing rows left by the old lifecycle so they receive a
+  // terminal cleanup instead of pinning an alarm chain forever.
   const missions = sql
-    .exec(`SELECT mission_id FROM orchestrator_missions WHERE status = 'active'`)
-    .toArray() as unknown as Array<{ mission_id: string }>;
+    .exec(`SELECT mission_id, status, registered_at
+           FROM orchestrator_missions
+           WHERE status IN ('active', 'completing')`)
+    .toArray() as unknown as Array<{
+      mission_id: string;
+      status?: string;
+      registered_at?: number;
+    }>;
 
   if (missions.length === 0) return;
 
   for (const mission of missions) {
     try {
-      await processMission(sql, env, projectId, mission.mission_id, config, now);
+      const status = mission.status ?? 'active';
+      if (status === 'completing') {
+        cleanupMissionTracking(sql, mission.mission_id);
+        log.info('orchestrator.mission_terminal', {
+          projectId,
+          missionId: mission.mission_id,
+          reason: 'completing_reconciled',
+        });
+        continue;
+      }
+
+      const registeredAt = mission.registered_at ?? now;
+      if (now - registeredAt >= config.maxMissionLifetimeMs) {
+        await terminalizeMission(
+          sql,
+          env,
+          projectId,
+          mission.mission_id,
+          'completed',
+          'max_mission_lifetime',
+          now
+        );
+        continue;
+      }
+
+      await processMission(
+        sql,
+        env,
+        projectId,
+        mission.mission_id,
+        config,
+        now,
+        registeredAt
+      );
     } catch (err) {
       log.error('orchestrator.scheduling_cycle.mission_error', {
         projectId,
@@ -117,7 +157,8 @@ async function processMission(
   projectId: string,
   missionId: string,
   config: OrchestratorConfig,
-  now: number
+  now: number,
+  registeredAt: number
 ): Promise<void> {
   // 1. Fetch all tasks for this mission from D1
   const tasksResult = await env.DATABASE.prepare(
@@ -128,7 +169,20 @@ async function processMission(
     .all<TaskRow>();
 
   const tasks = tasksResult.results ?? [];
-  if (tasks.length === 0) return;
+  if (tasks.length === 0) {
+    if (now - registeredAt >= config.zeroTaskGraceMs) {
+      await terminalizeMission(
+        sql,
+        env,
+        projectId,
+        missionId,
+        'completed',
+        'zero_tasks_grace_expired',
+        now
+      );
+    }
+    return;
+  }
 
   // 2. Recompute scheduler states
   await recomputeMissionSchedulerStates(env.DATABASE, missionId);
@@ -153,17 +207,6 @@ async function processMission(
     const anyFailed = tasks.some((t) => t.status === 'failed');
     const newMissionStatus = anyFailed ? 'failed' : 'completed';
 
-    // Update D1 mission status
-    await env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
-      .bind(newMissionStatus, new Date().toISOString(), missionId)
-      .run();
-
-    // Remove from orchestrator tracking
-    sql.exec(
-      `UPDATE orchestrator_missions SET status = 'completing' WHERE mission_id = ?`,
-      missionId
-    );
-
     logDecision(
       sql,
       missionId,
@@ -173,8 +216,38 @@ async function processMission(
       now
     );
 
-    log.info('orchestrator.mission_completed', { projectId, missionId, status: newMissionStatus });
+    await terminalizeMission(
+      sql,
+      env,
+      projectId,
+      missionId,
+      newMissionStatus,
+      'all_tasks_terminal',
+      now
+    );
   }
+}
+
+function cleanupMissionTracking(sql: SqlStorage, missionId: string): void {
+  sql.exec('DELETE FROM scheduling_queue WHERE mission_id = ?', missionId);
+  sql.exec('DELETE FROM orchestrator_missions WHERE mission_id = ?', missionId);
+}
+
+async function terminalizeMission(
+  sql: SqlStorage,
+  env: Env,
+  projectId: string,
+  missionId: string,
+  status: 'completed' | 'failed',
+  reason: string,
+  now: number
+): Promise<void> {
+  await env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
+    .bind(status, new Date(now).toISOString(), missionId)
+    .run();
+
+  cleanupMissionTracking(sql, missionId);
+  log.info('orchestrator.mission_terminal', { projectId, missionId, status, reason });
 }
 
 // ── Auto-Dispatch ─────────────────────────────────────────────────────────────

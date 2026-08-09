@@ -61,7 +61,10 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     const existing = sql.exec(
       'SELECT 1 FROM orchestrator_missions WHERE mission_id = ?', missionId,
     ).toArray();
-    if (existing.length > 0) return;
+    if (existing.length > 0) {
+      await this.armAlarm();
+      return;
+    }
 
     sql.exec(
       `INSERT INTO orchestrator_missions (mission_id, status, last_checked_at, last_dispatch_at, registered_at)
@@ -374,9 +377,9 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     // Prune decision log
     pruneDecisionLog(this.ctx.storage.sql, config.decisionLogMaxEntries);
 
-    // Re-arm if there are still active missions
+    // Re-arm while active or legacy completing missions still need work.
     const activeMissions = this.ctx.storage.sql.exec(
-      `SELECT 1 FROM orchestrator_missions WHERE status = 'active' LIMIT 1`,
+      `SELECT 1 FROM orchestrator_missions WHERE status IN ('active', 'completing') LIMIT 1`,
     ).toArray();
 
     if (activeMissions.length > 0) {

@@ -36,7 +36,15 @@ function makeSqlStorage(tables: Record<string, unknown[]> = {}) {
 
       // Handle DELETE
       if (q.startsWith('DELETE')) {
-        return { rowsWritten: 0, toArray: () => [] };
+        const tableMatch = query.match(/DELETE FROM (\w+)/i);
+        const tableName = tableMatch?.[1];
+        if (tableName && data[tableName]) {
+          const missionId = params[0];
+          data[tableName] = data[tableName].filter(
+            (row) => (row as { mission_id?: unknown }).mission_id !== missionId,
+          );
+        }
+        return { rowsWritten: 1, toArray: () => [] };
       }
 
       // Handle SELECT on orchestrator_missions
@@ -113,6 +121,7 @@ function makeMockEnv(overrides: {
   const mailboxMessages: MockProjectDataMessage[] = [];
   const sessionsCreated: string[] = [];
   const messagesPersisted: unknown[] = [];
+  const d1Runs: Array<{ query: string; args: unknown[] }> = [];
   const generatedSessions = new Map<string, MockSessionRow>();
 
   const projectDataStub = {
@@ -220,7 +229,10 @@ function makeMockEnv(overrides: {
             }
             return null;
           }),
-          run: vi.fn(async () => ({ meta: { changes: 1 } })),
+          run: vi.fn(async () => {
+            d1Runs.push({ query, args });
+            return { meta: { changes: 1 } };
+          }),
         })),
       })),
     },
@@ -244,6 +256,7 @@ function makeMockEnv(overrides: {
     messagesPersisted,
     projectDataStub,
     taskRunnerStub,
+    d1Runs,
   };
 }
 
@@ -578,6 +591,85 @@ describe('Scheduling Cycle — Mission Completion', () => {
       (call: unknown[]) => (call as string[]).some(arg => typeof arg === 'string' && arg.includes('Mission completed')),
     );
     expect(completionDecision).toBeDefined();
+  });
+
+  it('terminalizes a zero-task mission after the configured grace period', async () => {
+    const now = Date.now();
+    const sql = makeSqlStorage({
+      orchestrator_missions: [{
+        mission_id: 'mission-1',
+        status: 'active',
+        registered_at: now - 11 * 60_000,
+      }],
+    });
+    const { env, d1Runs } = makeMockEnv({ tasks: [] });
+
+    await runSchedulingCycle(sql, env, 'proj-1', {
+      ...config,
+      zeroTaskGraceMs: 10 * 60_000,
+    });
+
+    expect(d1Runs).toContainEqual(expect.objectContaining({
+      query: expect.stringContaining('UPDATE missions SET status'),
+      args: expect.arrayContaining(['completed', 'mission-1']),
+    }));
+    expect((sql as unknown as { _data: Record<string, unknown[]> })._data.orchestrator_missions)
+      .toEqual([]);
+  });
+
+  it('keeps a newly registered zero-task mission active during its grace period', async () => {
+    const sql = makeSqlStorage({
+      orchestrator_missions: [{
+        mission_id: 'mission-1',
+        status: 'active',
+        registered_at: Date.now(),
+      }],
+    });
+    const { env, d1Runs } = makeMockEnv({ tasks: [] });
+
+    await runSchedulingCycle(sql, env, 'proj-1', config);
+
+    expect(d1Runs).toEqual([]);
+    expect((sql as unknown as { _data: Record<string, unknown[]> })._data.orchestrator_missions)
+      .toHaveLength(1);
+  });
+
+  it('removes legacy completing rows so they cannot keep an alarm chain alive', async () => {
+    const sql = makeSqlStorage({
+      orchestrator_missions: [{
+        mission_id: 'mission-1',
+        status: 'completing',
+        registered_at: Date.now() - 60_000,
+      }],
+    });
+    const { env } = makeMockEnv();
+
+    await runSchedulingCycle(sql, env, 'proj-1', config);
+
+    expect((sql as unknown as { _data: Record<string, unknown[]> })._data.orchestrator_missions)
+      .toEqual([]);
+  });
+
+  it('force-completes a mission after the maximum mission lifetime', async () => {
+    const sql = makeSqlStorage({
+      orchestrator_missions: [{
+        mission_id: 'mission-1',
+        status: 'active',
+        registered_at: Date.now() - 25 * 60 * 60_000,
+      }],
+    });
+    const { env, d1Runs } = makeMockEnv({
+      tasks: [makeTask({ id: 'task-running', status: 'running', scheduler_state: 'running' })],
+    });
+
+    await runSchedulingCycle(sql, env, 'proj-1', config);
+
+    expect(d1Runs).toContainEqual(expect.objectContaining({
+      query: expect.stringContaining('UPDATE missions SET status'),
+      args: expect.arrayContaining(['completed', 'mission-1']),
+    }));
+    expect((sql as unknown as { _data: Record<string, unknown[]> })._data.orchestrator_missions)
+      .toEqual([]);
   });
 
   it('marks mission as failed when any task failed', async () => {
