@@ -30,6 +30,7 @@ import { AdminTrials } from './pages/AdminTrials';
 import { AdminUsers } from './pages/AdminUsers';
 import { AgentContextPage } from './pages/AgentContextPage';
 import { Chats } from './pages/Chats';
+import { CommentsPrototype } from './pages/comments-prototype';
 import { CreateWorkspace } from './pages/CreateWorkspace';
 import { Dashboard } from './pages/Dashboard';
 import { DeviceAuth } from './pages/DeviceAuth';
@@ -108,7 +109,13 @@ function SuperadminRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-export const DEV_ONLY_ROUTE_PATHS = ['/sam', '/__test/trial-chat-gate', '/__test/error-boundary', '/ui-standards'] as const;
+export const DEV_ONLY_ROUTE_PATHS = [
+  '/sam',
+  '/prototype/comments',
+  '/__test/trial-chat-gate',
+  '/__test/error-boundary',
+  '/ui-standards',
+] as const;
 
 /** TEMP audit-only harness — forces ErrorBoundary crash screen for Playwright review. Reverted after use. */
 function ErrorBoundaryAuditHarness(): never {
@@ -144,9 +151,14 @@ export default function App() {
                       <>
                         {/* SAM prototype — local/test only, no auth */}
                         <Route path="/sam" element={<SamPrototype />} />
+                        {/* Comments prototype — local/test only, no auth */}
+                        <Route path="/prototype/comments" element={<CommentsPrototype />} />
                         {/* Harness for Playwright audits — mounts trial components with mock data */}
                         <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
-                        <Route path="/__test/error-boundary" element={<ErrorBoundaryAuditHarness />} />
+                        <Route
+                          path="/__test/error-boundary"
+                          element={<ErrorBoundaryAuditHarness />}
+                        />
                       </>
                     )}
                     {/* Protected routes with AppShell (persistent navigation) */}
