@@ -117,9 +117,9 @@ merged scheduled sweeps and R2 lifecycle policies.
 ### `/do` delivery gates
 
 - [x] Run focused tests plus lint, typecheck, full test, and build.
-- [ ] Run task-completion, Cloudflare, environment, constitution, documentation, and
+- [x] Run task-completion, Cloudflare, environment, constitution, documentation, and
       test-engineering specialist reviews; address all blocking findings.
-- [ ] Check staging contention, deploy the branch, run the full regression checklist,
+- [x] Check staging contention, deploy the branch, run the full regression checklist,
       verify both scheduled sweeps report no failures, and read the staging R2 lifecycle
       rules through the Cloudflare API with `$CF_TOKEN`; provision no VM/node.
 - [ ] Create one PR, validate its live evidence locally, pass every CI gate, merge,
@@ -166,3 +166,15 @@ merged scheduled sweeps and R2 lifecycle policies.
   2,936 tests passed.
 - Repository typecheck, lint (existing warnings only), build, and D1 migration-safety
   gates pass.
+- Specialist reviews all pass after addressing deployment-variable propagation,
+  documentation taxonomy, pagination/fail-closed, waitUntil logging, and independent
+  sweep-marker coverage.
+- Staging workflow run 31289708182 passed at commit `97df79157`; its authenticated
+  Playwright suite passed 12/12 dashboard, projects, settings, health/CORS, navigation,
+  and browser-console checks. No VM or node was provisioned.
+- Cloudflare API read of `sam-staging-assets` confirmed enabled `temp-uploads/` expiry
+  at 86,400 seconds and `tts/` expiry at 2,592,000 seconds, while retaining the two
+  existing lifecycle rules and adding no lifecycle for durable library/compose keys.
+- Live tail of deployed Worker version `e3602f6a-0e62-4c7a-a13d-81713908202d`
+  captured `cron.completed` with both new sweep counters, `failedSweeps: []`, and
+  `failedSweepCount: 0`. The interval-gated no-op was expected after the initial run.
