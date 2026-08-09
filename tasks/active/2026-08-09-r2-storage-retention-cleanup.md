@@ -116,7 +116,7 @@ merged scheduled sweeps and R2 lifecycle policies.
 
 ### `/do` delivery gates
 
-- [ ] Run focused tests plus lint, typecheck, full test, and build.
+- [x] Run focused tests plus lint, typecheck, full test, and build.
 - [ ] Run task-completion, Cloudflare, environment, constitution, documentation, and
       test-engineering specialist reviews; address all blocking findings.
 - [ ] Check staging contention, deploy the branch, run the full regression checklist,
@@ -156,4 +156,13 @@ merged scheduled sweeps and R2 lifecycle policies.
 - `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`
 - `tasks/archive/2026-06-27-compose-image-artifact-cleanup.md`
 - `tasks/archive/2026-08-06-fix-node-reaping-orphan-reconciliation.md`
-- `tasks/backlog/2026-03-29-r2-temp-uploads-lifecycle-cleanup.md`
+- `tasks/archive/2026-03-29-r2-temp-uploads-lifecycle-cleanup.md`
+
+## Validation evidence
+
+- Focused retention, project-delete/library, infra lifecycle, and deploy-safety suites
+  pass, including the real-SQL route-entry attack/control test.
+- Full API suite: 500 files and 6,760 tests passed. Full web suite: 243 files and
+  2,936 tests passed.
+- Repository typecheck, lint (existing warnings only), build, and D1 migration-safety
+  gates pass.
