@@ -2,6 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import * as v from 'valibot';
 
 interface AstroCheckBaseline {
   errors: number;
@@ -11,6 +12,15 @@ interface AstroCheckBaseline {
     review: string;
   };
 }
+
+const AstroCheckBaselineSchema = v.object({
+  errors: v.number(),
+  metadata: v.object({
+    owner: v.string(),
+    backlog: v.string(),
+    review: v.string(),
+  }),
+});
 
 export interface AstroCheckSummary {
   errors: number;
@@ -33,11 +43,15 @@ export function exceedsAstroErrorBaseline(summary: AstroCheckSummary, allowed: n
   return summary.errors > allowed;
 }
 
+export function parseAstroCheckBaseline(input: string): AstroCheckBaseline {
+  return v.parse(AstroCheckBaselineSchema, JSON.parse(input) as unknown);
+}
+
 function run(): void {
   const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
-  const baseline = JSON.parse(
+  const baseline = parseAstroCheckBaseline(
     readFileSync(resolve(repoRoot, 'scripts/quality/astro-check-baseline.json'), 'utf8')
-  ) as AstroCheckBaseline;
+  );
   const result = spawnSync('astro', ['check'], {
     cwd: resolve(repoRoot, 'apps/www'),
     encoding: 'utf8',
