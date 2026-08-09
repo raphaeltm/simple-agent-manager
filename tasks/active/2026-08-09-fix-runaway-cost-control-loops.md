@@ -1,6 +1,6 @@
 # Fix runaway-cost and infinite-loop control paths
 
-**Status:** Backlog  
+**Status:** Active  
 **Date:** 2026-08-09  
 **SAM task:** `01KZHZ5SYWMK5YME8WRSRCYDHK`  
 **Audit idea:** `01KZHYEGJMCWRYRX5CE5PPD6M1`  

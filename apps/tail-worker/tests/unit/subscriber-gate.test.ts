@@ -124,7 +124,7 @@ describe('Tail Worker subscriber-aware gate', () => {
     expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
-  it('does not gate when the response body is not JSON (count stays unknown)', async () => {
+  it('fails to zero when the response body has no subscriber count', async () => {
     const handler = await loadHandler();
     const mockFetch = vi.fn().mockResolvedValue(new Response('OK', { status: 200 }));
     const env: TestEnv = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '60000' };
@@ -132,8 +132,7 @@ describe('Tail Worker subscriber-aware gate', () => {
     await handler.tail([createTraceItem()], env);
     await handler.tail([createTraceItem()], env);
 
-    // Unknown count never gates forwarding off
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('forwards the parsed log entries to the ingest endpoint', async () => {
@@ -154,49 +153,31 @@ describe('Tail Worker subscriber-aware gate', () => {
     expect(body.logs[0].entry.message).toBe('boom');
   });
 
-  it('fails open: a DO fetch error never re-arms the zero-count gate (cache ts not refreshed)', async () => {
-    vi.useFakeTimers();
+  it('fails to zero when the DO fetch rejects', async () => {
     const handler = await loadHandler();
-    let mode: 'zero' | 'throw' = 'zero';
-    const mockFetch = vi.fn().mockImplementation(() => {
-      if (mode === 'throw') return Promise.reject(new Error('DO unreachable'));
-      return Promise.resolve(ingestResponse(0));
-    });
-    const env: TestEnv = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '5000' };
+    const mockFetch = vi.fn().mockRejectedValue(new Error('DO unreachable'));
+    const env: TestEnv = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '60000' };
 
-    // Cache subscribers=0 (gate armed)
     await handler.tail([createTraceItem()], env);
+    await handler.tail([createTraceItem()], env);
+
     expect(mockFetch).toHaveBeenCalledTimes(1);
-
-    // After TTL, the DO is unreachable. The re-probe throws and is swallowed —
-    // crucially it must NOT refresh subscriberCache.ts, otherwise a flapping DO
-    // would extend the gate-closed window indefinitely.
-    mode = 'throw';
-    vi.advanceTimersByTime(6000);
-    await handler.tail([createTraceItem()], env);
-    expect(mockFetch).toHaveBeenCalledTimes(2);
-
-    // The cache ts was not refreshed by the failed probe, so the very next
-    // invocation still attempts to forward (fail-open) rather than being gated.
-    await handler.tail([createTraceItem()], env);
-    expect(mockFetch).toHaveBeenCalledTimes(3);
   });
 
-  it('does not corrupt the cache when the ingest endpoint returns a non-2xx body', async () => {
+  it('fails to zero when the ingest endpoint returns a non-2xx body', async () => {
     const handler = await loadHandler();
     const mockFetch = vi
       .fn()
       .mockResolvedValue(new Response('Internal Server Error', { status: 500 }));
     const env: TestEnv = { API_WORKER: { fetch: mockFetch }, TAIL_SUBSCRIBER_CACHE_MS: '60000' };
 
-    // 500 has no subscribers field → count stays unknown → never gates off
     await handler.tail([createTraceItem()], env);
     await handler.tail([createTraceItem()], env);
 
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  it('fails open when a non-2xx ingest response contains subscribers=0 JSON', async () => {
+  it('fails to zero when a non-2xx ingest response contains subscribers=0 JSON', async () => {
     const handler = await loadHandler();
     const response = new Response(JSON.stringify({ ok: false, subscribers: 0 }), {
       status: 500,
@@ -209,11 +190,11 @@ describe('Tail Worker subscriber-aware gate', () => {
     await handler.tail([createTraceItem()], env);
     await handler.tail([createTraceItem()], env);
 
-    expect(jsonSpy).toHaveBeenCalledTimes(2);
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(jsonSpy).toHaveBeenCalledTimes(1);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
-  it('ignores malformed subscriber counts on successful ingest responses', async () => {
+  it('fails to zero for malformed subscriber counts on successful ingest responses', async () => {
     const handler = await loadHandler();
     const mockFetch = vi.fn().mockResolvedValue(
       new Response(JSON.stringify({ subscribers: -1 }), {
@@ -226,7 +207,7 @@ describe('Tail Worker subscriber-aware gate', () => {
     await handler.tail([createTraceItem()], env);
     await handler.tail([createTraceItem()], env);
 
-    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
   });
 
   it('applies the gate using the default TTL when TAIL_SUBSCRIBER_CACHE_MS is unset', async () => {

@@ -36,6 +36,7 @@ import { resolvePagesProxyTarget } from './lib/pages-proxy';
 import { parseWorkspaceSubdomain } from './lib/workspace-subdomain';
 import { analyticsMiddleware } from './middleware/analytics';
 import { handleAppError } from './middleware/app-error-handler';
+import { requestLoggingMiddleware } from './middleware/request-logging';
 import { accountMapRoutes } from './routes/account-map';
 import { activityRoutes } from './routes/activity';
 import { adminRoutes } from './routes/admin';
@@ -589,22 +590,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   return response;
 });
 
-// Structured request/response logging middleware.
-// Emits one JSON log per request with method, path, status, and duration.
-app.use('*', async (c, next) => {
-  const start = Date.now();
-  await next();
-  const durationMs = Date.now() - start;
-  const path = new URL(c.req.url).pathname;
-  // Skip noisy health checks from structured logs
-  if (path === '/health') return;
-  log.info('http.request', {
-    method: c.req.method,
-    path,
-    status: c.res.status,
-    durationMs,
-  });
-});
+app.use('*', requestLoggingMiddleware());
 
 // Analytics Engine — writes one data point per request (non-blocking, fire-and-forget)
 app.use('*', analyticsMiddleware());

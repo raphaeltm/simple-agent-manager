@@ -124,12 +124,17 @@ function parseStructuredMessage(message: unknown): Record<string, unknown> {
   }
 }
 
-function successfulSubscriberCount(response: Response, result: unknown): number | null {
-  if (!response.ok || typeof result !== 'object' || result === null) return null;
+function subscriberCountOrZero(response: Response, result: unknown): number {
+  if (!response.ok || typeof result !== 'object' || result === null) return 0;
   const subscribers = (result as { subscribers?: unknown }).subscribers;
   return typeof subscribers === 'number' && Number.isFinite(subscribers) && subscribers >= 0
     ? subscribers
-    : null;
+    : 0;
+}
+
+function cacheSubscriberCount(count: number): void {
+  subscriberCache.count = count;
+  subscriberCache.ts = Date.now();
 }
 
 export default {
@@ -198,13 +203,11 @@ export default {
       // reading it would tear down the connection and record the upstream
       // invocation as `canceled`/clientDisconnected.
       const result = await response.json().catch(() => null);
-      const subscribers = successfulSubscriberCount(response, result);
-      if (subscribers !== null) {
-        subscriberCache.count = subscribers;
-        subscriberCache.ts = Date.now();
-      }
+      cacheSubscriberCount(subscriberCountOrZero(response, result));
     } catch (err) {
-      // Fail silently — tail workers must not throw
+      // A failed AdminLogs probe cannot demonstrate a live subscriber. Cache
+      // zero so the tail Worker does not run open-loop against an erroring DO.
+      cacheSubscriberCount(0);
       console.error('[tail-worker] Failed to forward logs to AdminLogs DO:', err);
     }
   },
