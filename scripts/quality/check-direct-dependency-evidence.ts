@@ -282,7 +282,7 @@ function gitOutput(
   args: string[],
   allowMissing = false
 ): string | undefined {
-  const result = spawnSync('git', args, {
+  const result = spawnSync('/usr/bin/git', args, {
     cwd: repositoryRoot,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
@@ -306,7 +306,7 @@ function changedManifestPaths(repositoryRoot: string, base: string): string[] {
   return [...new Set([...tracked, ...untracked])]
     .map(normalizeRepoPath)
     .filter((path) => basename(path) === 'package.json' || basename(path) === 'go.mod')
-    .sort();
+    .sort((left, right) => left.localeCompare(right));
 }
 
 export function directDependencyAdditionsAgainstBase(

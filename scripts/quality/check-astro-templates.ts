@@ -29,14 +29,14 @@ export interface AstroCheckSummary {
   warnings: number;
 }
 
-const ANSI_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-9;]*m`, 'g');
+const ANSI_PATTERN = new RegExp(String.raw`${String.fromCodePoint(27)}\[[0-9;]*m`, 'g');
 
 export function parseAstroCheckSummary(output: string): AstroCheckSummary | undefined {
   const plain = output.replace(ANSI_PATTERN, '');
   const result = /Result \(\d+ files\):([\s\S]*)/.exec(plain)?.[1];
   if (!result) return undefined;
   const count = (label: string): number | undefined => {
-    const value = new RegExp(`-\\s+(\\d+)\\s+${label}`).exec(result)?.[1];
+    const value = new RegExp(String.raw`-\s+(\d+)\s+${label}`).exec(result)?.[1];
     return value === undefined ? undefined : Number(value);
   };
   const errors = count('errors');
@@ -67,12 +67,16 @@ function run(): void {
   const baseline = parseAstroCheckBaseline(
     readFileSync(resolve(repoRoot, 'scripts/quality/astro-check-baseline.json'), 'utf8')
   );
-  const result = spawnSync('astro', ['check'], {
-    cwd: resolve(repoRoot, 'apps/www'),
-    encoding: 'utf8',
-    env: process.env,
-    maxBuffer: 32 * 1024 * 1024,
-  });
+  const result = spawnSync(
+    process.execPath,
+    [resolve(repoRoot, 'apps/www/node_modules/astro/bin/astro.mjs'), 'check'],
+    {
+      cwd: resolve(repoRoot, 'apps/www'),
+      encoding: 'utf8',
+      env: process.env,
+      maxBuffer: 32 * 1024 * 1024,
+    }
+  );
   const output = `${result.stdout ?? ''}${result.stderr ?? ''}`;
   const summary = parseAstroCheckSummary(output);
   if (!isCompleteAstroCheckResult(result.status, summary, result.error)) {

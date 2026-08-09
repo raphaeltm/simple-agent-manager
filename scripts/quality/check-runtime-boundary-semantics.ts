@@ -58,7 +58,7 @@ const externalPayloadPatterns = [
 
 function trackedFiles(root: string, scope: string): string[] {
   return execFileSync(
-    'git',
+    '/usr/bin/git',
     ['ls-files', '--cached', '--others', '--exclude-standard', '-z', '--', scope],
     { cwd: root, encoding: 'utf8' }
   )
@@ -74,7 +74,7 @@ function trackedFiles(root: string, scope: string): string[] {
       }
       return true;
     })
-    .sort();
+    .sort((left, right) => left.localeCompare(right));
 }
 
 function createProject(root: string, files: string[]): Project {
@@ -261,7 +261,7 @@ function main() {
   }
   const counts = Object.fromEntries(
     [...new Set(findings.map((finding) => finding.rule))]
-      .sort()
+      .sort((left, right) => left.localeCompare(right))
       .map((rule) => [rule, findings.filter((finding) => finding.rule === rule).length])
   );
   console.log(

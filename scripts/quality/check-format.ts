@@ -63,7 +63,7 @@ function readBaseline(repositoryRoot: string): FormatBaseline {
 }
 
 function gitPaths(repositoryRoot: string, args: string[]): string[] {
-  const result = spawnSync('git', args, {
+  const result = spawnSync('/usr/bin/git', args, {
     cwd: repositoryRoot,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,
@@ -84,7 +84,7 @@ function changedPaths(repositoryRoot: string, baseCommit: string): string[] {
     '--',
   ]);
   const untracked = gitPaths(repositoryRoot, ['ls-files', '--others', '--exclude-standard', '-z']);
-  return [...new Set([...tracked, ...untracked])].sort();
+  return [...new Set([...tracked, ...untracked])].sort((left, right) => left.localeCompare(right));
 }
 
 function fileAtRevision(
@@ -92,7 +92,7 @@ function fileAtRevision(
   revision: string,
   path: string
 ): string | undefined {
-  const result = spawnSync('git', ['show', `${revision}:${path}`], {
+  const result = spawnSync('/usr/bin/git', ['show', `${revision}:${path}`], {
     cwd: repositoryRoot,
     encoding: 'utf8',
     maxBuffer: 64 * 1024 * 1024,

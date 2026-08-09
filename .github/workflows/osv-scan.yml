@@ -31,7 +31,7 @@ jobs:
           cache: 'pnpm'
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Validate ignore ownership and expiry
         env:
@@ -52,10 +52,10 @@ jobs:
           sha256sum --ignore-missing --check osv-scanner_SHA256SUMS
           chmod +x osv-scanner_linux_amd64
           mv osv-scanner_linux_amd64 osv-scanner
-          echo "$RUNNER_TEMP/osv-scanner" >> "$GITHUB_PATH"
 
       - name: Scan main and route owned private SAM follow-up
         env:
+          SAM_OSV_SCANNER_BIN: ${{ runner.temp }}/osv-scanner/osv-scanner
           SAM_OSV_WEBHOOK_TOKEN: ${{ secrets.SAM_OSV_WEBHOOK_TOKEN }}
           SAM_OSV_WEBHOOK_URL: ${{ secrets.SAM_OSV_WEBHOOK_URL }}
         run: pnpm quality:osv-advisory

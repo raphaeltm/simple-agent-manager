@@ -30,7 +30,7 @@ function argument(name: string): string | undefined {
 
 export function createCurrentTreeSnapshot(repositoryRoot: string, treeDirectory: string): void {
   const listed = spawnSync(
-    'git',
+    '/usr/bin/git',
     ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
     { cwd: repositoryRoot, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }
   );
@@ -78,7 +78,7 @@ function run(): void {
     const scanDirectory = mode === 'current-tree' ? treeDirectory : repositoryRoot;
     if (mode === 'current-tree') createCurrentTreeSnapshot(repositoryRoot, treeDirectory);
     const result = spawnSync(
-      'gitleaks',
+      process.env.SAM_GITLEAKS_BIN ?? '/usr/local/bin/gitleaks',
       [...gitleaksArgsForMode(mode, range), '--report-path', reportPath],
       { cwd: scanDirectory, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }
     );

@@ -6,20 +6,20 @@ import { fileURLToPath } from 'node:url';
 
 export function countOsvVulnerabilities(report: unknown): number {
   if (typeof report !== 'object' || report === null || !('results' in report)) {
-    throw new Error('OSV-Scanner returned an unexpected report shape.');
+    throw new TypeError('OSV-Scanner returned an unexpected report shape.');
   }
   const { results } = report;
   if (!Array.isArray(results)) {
-    throw new Error('OSV-Scanner returned an unexpected report shape.');
+    throw new TypeError('OSV-Scanner returned an unexpected report shape.');
   }
   let count = 0;
   for (const result of results) {
     if (typeof result !== 'object' || result === null || !('packages' in result)) {
-      throw new Error('OSV-Scanner returned an unexpected report shape.');
+      throw new TypeError('OSV-Scanner returned an unexpected report shape.');
     }
     const { packages } = result;
     if (!Array.isArray(packages)) {
-      throw new Error('OSV-Scanner returned an unexpected report shape.');
+      throw new TypeError('OSV-Scanner returned an unexpected report shape.');
     }
     for (const packageResult of packages) {
       if (
@@ -28,7 +28,7 @@ export function countOsvVulnerabilities(report: unknown): number {
         !('vulnerabilities' in packageResult) ||
         !Array.isArray(packageResult.vulnerabilities)
       ) {
-        throw new Error('OSV-Scanner returned an unexpected report shape.');
+        throw new TypeError('OSV-Scanner returned an unexpected report shape.');
       }
       if (
         packageResult.vulnerabilities.some(
@@ -40,7 +40,7 @@ export function countOsvVulnerabilities(report: unknown): number {
             !vulnerability.id
         )
       ) {
-        throw new Error('OSV-Scanner returned an unexpected report shape.');
+        throw new TypeError('OSV-Scanner returned an unexpected report shape.');
       }
       count += packageResult.vulnerabilities.length;
     }
@@ -142,7 +142,7 @@ async function routePrivateFollowUp(count: number): Promise<void> {
     body: request.body,
     redirect: 'error',
   });
-  if (!response.ok) throw new Error('Private SAM OSV routing rejected the advisory.');
+  if (!response.ok) throw new TypeError('Private SAM OSV routing rejected the advisory.');
 }
 
 async function run(): Promise<void> {
@@ -151,7 +151,7 @@ async function run(): Promise<void> {
   const reportPath = join(temporaryDirectory, 'report.json');
   try {
     const result = spawnSync(
-      'osv-scanner',
+      process.env.SAM_OSV_SCANNER_BIN ?? '/usr/local/bin/osv-scanner',
       [
         'scan',
         'source',
@@ -167,7 +167,7 @@ async function run(): Promise<void> {
       { cwd: repoRoot, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }
     );
     if (result.error || (result.status !== 0 && result.status !== 1)) {
-      throw new Error('OSV-Scanner could not complete; scanner output is withheld.');
+      throw new TypeError('OSV-Scanner could not complete; scanner output is withheld.');
     }
     const report = JSON.parse(readFileSync(reportPath, 'utf8')) as unknown;
     const findingCount = countOsvVulnerabilities(report);
