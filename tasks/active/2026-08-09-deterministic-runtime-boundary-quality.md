@@ -100,7 +100,7 @@ The one real non-test `as any` is `apps/web/src/pages/ToolsCli.tsx:58`. `JSON.pa
 
 The durable dependency graph lives in `.workflow-state.md` (gitignored). Coding lanes start only from the pushed integration branch and must not deploy staging or merge to main.
 
-- Coordinator exclusively owns `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, root ESLint/Oxlint configuration, `turbo.json`, `.github/workflows/ci.yml`, scheduled workflow integration, parity/benchmark evidence, integration commits, and the final PR.
+- Coordinator exclusively owns `package.json`, `pnpm-lock.yaml`, `pnpm-workspace.yaml`, root ESLint/Oxlint configuration, `turbo.json`, `.github/workflows/ci.yml`, parity/benchmark evidence, integration commits, and the final PR.
 - Child lane 1 exclusively owns the new unpublished ESLint plugin workspace implementation, RuleTester fixtures, and rule manifest.
 - Child lane 2 exclusively owns named type-boundary ratchet and targeted semantic-check files/tests/baselines under `scripts/quality/`.
 - Child lane 3 exclusively owns named supply-chain checker/helper files and their tests; coordinator owns workflow wiring.
@@ -168,7 +168,7 @@ The durable dependency graph lives in `.workflow-state.md` (gitignored). Coding 
 ### Integration, review, staging, and delivery
 
 - [x] Integrate child commits/PRs in progressively ordered commits and re-audit current main before accepting baselines.
-- [x] Remove load-sensitive setup from timed API test and hook bodies: collect the heartbeat route once and generate the contract-test RSA key pair during module setup. The full 6,799-test API suite and five repeated 70-test focused runs pass without retries or relaxed assertions.
+- [x] Remove load-sensitive setup from timed API test and hook bodies: collect the heartbeat route and node-agent client once, generate the contract-test RSA key pair during module setup, and reuse a resettable fetch boundary. The 6,799-test API baseline passed, followed by ten consecutive 70-test focused runs under concurrent workspace typecheck load without retries, timeout changes, skips, or relaxed assertions.
 - [ ] Run and archive concise evidence for frozen-lockfile clean install, format, lint/plugin fixtures, all workspace type/template checks, affected JS/TS tests and coverage, quality checker tests, Go tests/race/govulncheck as applicable, build, ESLint parity, Oxlint benchmark, CI wiring, and artifact/suppression cleanliness.
 - [ ] Run independent picky architecture/code-quality, security, test, constitution, doc-sync, and task-completion reviews; fix every actionable correctness/security concern.
 - [ ] Re-run the local contract after review fixes and ensure CI is green.
