@@ -35,6 +35,8 @@ SAM's static agent model catalog is the fallback and validation source for model
 - Task completion validator: PASS for staging; all implementation checks A–F are covered and remaining delivery evidence belongs to the pending lifecycle phases.
 - Constitution validator: PASS; no Principle XI configuration violations were introduced.
 - Test engineer: PASS; focused lifecycle, ID, and display-name regressions are sufficient, and vertical-slice coverage is not newly applicable to a pure shared static-data change.
+- Staging deployment run `31376144854` passed at branch SHA `d6662d91c`, including its 12 Playwright smoke tests.
+- Authenticated staging browser verification passed: token login returned 200, `app.sammy.party/dashboard` loaded, static Claude/OpenAI/Mistral/Gemini catalogs exposed the expected additions/removals/labels, and the cached OpenCode consumer exposed the active source records.
 
 ## Acceptance criteria
 
