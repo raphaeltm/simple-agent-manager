@@ -82,12 +82,16 @@ export async function assertNoOverflow(page: Page) {
  *  - `data-intentional-clip` — an explicit, self-documenting opt-out for
  *    carousels and sliding panels (see `NavSidebar.tsx`), which are legitimately
  *    wider than their viewport. Declaring it beats a silent blind spot.
+ *  - `<input>` / `<select>` — a native control scrolls its own value as the
+ *    caret moves, so a value wider than the field is expected behaviour
  */
 export async function assertNoClippedOverflow(page: Page) {
   const offenders = await page.evaluate(() => {
     const found: string[] = [];
+    const SELF_SCROLLING_CONTROLS = new Set(['INPUT', 'SELECT']);
 
     for (const el of Array.from(document.body.querySelectorAll('*'))) {
+      if (SELF_SCROLLING_CONTROLS.has(el.tagName)) continue;
       const style = getComputedStyle(el);
       if (style.display === 'none' || style.visibility === 'hidden') continue;
       if (style.overflowX !== 'hidden' && style.overflowX !== 'clip') continue;
