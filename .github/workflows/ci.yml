@@ -369,6 +369,10 @@ jobs:
 
       - name: Dependency governance pinning check
         run: pnpm quality:dependency-governance
+
+      - name: OSV ignore expiry policy
+        run: pnpm quality:osv-policy
+
       - name: CI workflow wiring tests
         run: pnpm exec vitest run --config scripts/quality/vitest.config.ts scripts/quality/ci-worker-suite.test.ts
 

@@ -15,12 +15,12 @@ Preserve the scheduled OSV advisory integration from PR #1784 in a separate draf
 
 ## Implementation checklist
 
-- [ ] Copy `.github/workflows/osv-scan.yml`, `osv-scanner.toml`, the OSV policy validator/test, and the OSV advisory runner/test faithfully from the source commit.
-- [ ] Add `quality:osv-policy` and `quality:osv-advisory` to the root package scripts.
-- [ ] Add the blocking `OSV ignore expiry policy` step to the CI `code-quality` job.
-- [ ] Add focused OSV documentation under `scripts/quality/README.md`, adapted to the files present on current `main`.
-- [ ] Add a standalone OSV workflow-contract test covering schedule-only execution, event/routing gates, secret wiring, and prohibited public artifacts or issue permissions.
-- [ ] Run `pnpm quality:scripts:test`, `pnpm quality:osv-policy`, `pnpm lint`, and `pnpm typecheck`.
+- [x] Copy `.github/workflows/osv-scan.yml`, `osv-scanner.toml`, the OSV policy validator/test, and the OSV advisory runner/test faithfully from the source commit.
+- [x] Add `quality:osv-policy` and `quality:osv-advisory` to the root package scripts.
+- [x] Add the blocking `OSV ignore expiry policy` step to the CI `code-quality` job.
+- [x] Add focused OSV documentation under `scripts/quality/README.md`, adapted to the files present on current `main`.
+- [x] Add a standalone OSV workflow-contract test covering schedule-only execution, event/routing gates, secret wiring, and prohibited public artifacts or issue permissions.
+- [x] Run `pnpm quality:scripts:test`, `pnpm quality:osv-policy`, `pnpm lint`, and `pnpm typecheck`.
 - [ ] Complete specialist review and task-completion validation.
 - [ ] Open the required draft PR against `main`, wait for CI, and report results without staging or merge.
 
