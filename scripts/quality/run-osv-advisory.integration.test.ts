@@ -121,4 +121,39 @@ describe('scheduled OSV scanner-to-private-intake slice', () => {
       force: true,
     });
   });
+
+  it('fails closed without routing and still cleans up when the scanner cannot complete', async () => {
+    mocks.spawnSync.mockReturnValue({ status: 2, stderr: 'withheld scanner detail' });
+
+    await expect(import('./run-osv-advisory')).rejects.toThrow(
+      'OSV-Scanner could not complete; scanner output is withheld.'
+    );
+
+    expect(mocks.readFileSync).not.toHaveBeenCalled();
+    expect(mocks.fetch).not.toHaveBeenCalled();
+    expect(mocks.rmSync).toHaveBeenCalledWith('/tmp/sam-osv-integration', {
+      recursive: true,
+      force: true,
+    });
+  });
+
+  it('fails closed and cleans up when the private intake rejects the advisory', async () => {
+    mocks.spawnSync.mockReturnValue({ status: 1 });
+    mocks.readFileSync.mockReturnValue(
+      JSON.stringify({
+        results: [{ packages: [{ vulnerabilities: [{ id: 'GHSA-private-detail' }] }] }],
+      })
+    );
+    mocks.fetch.mockResolvedValue(new Response('withheld private intake detail', { status: 503 }));
+
+    await expect(import('./run-osv-advisory')).rejects.toThrow(
+      'Private SAM OSV routing rejected the advisory.'
+    );
+
+    expect(mocks.fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.rmSync).toHaveBeenCalledWith('/tmp/sam-osv-integration', {
+      recursive: true,
+      force: true,
+    });
+  });
 });
