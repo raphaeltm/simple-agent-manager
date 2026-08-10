@@ -3,12 +3,11 @@ import type {
   TriggerResponse,
   UpdateTriggerRequest,
 } from '@simple-agent-manager/shared';
-import { Spinner } from '@simple-agent-manager/ui';
+import { Spinner, StatusBadge } from '@simple-agent-manager/ui';
 import {
   ArrowLeft,
   Calendar,
   CheckCircle,
-  Clock,
   Pause,
   Pencil,
   Play,
@@ -19,6 +18,14 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
 
 import { ExecutionHistory } from '../components/triggers/ExecutionHistory';
+import {
+  FOCUS_RING,
+  formatDateFull,
+  formatDuration,
+  formatTriggerSource,
+  sourceIcon,
+  statusBadgeKey,
+} from '../components/triggers/trigger-presentation';
 import { TriggerConfiguration } from '../components/triggers/TriggerConfiguration';
 import { TriggerCredentialWarning } from '../components/triggers/TriggerCredentialWarning';
 import { TriggerForm } from '../components/triggers/TriggerForm';
@@ -37,42 +44,7 @@ import { useProjectContext } from './ProjectContext';
 // Constants
 // ---------------------------------------------------------------------------
 
-const FOCUS_RING =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
-
-const STATUS_CONFIG: Record<string, { color: string; label: string }> = {
-  active: { color: 'var(--sam-color-success)', label: 'Active' },
-  paused: { color: 'var(--sam-color-warning)', label: 'Paused' },
-  disabled: { color: 'var(--sam-color-fg-muted)', label: 'Disabled' },
-};
-
 const EXECUTIONS_PER_PAGE = 20;
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function formatDateFull(dateStr: string): string {
-  return new Date(dateStr).toLocaleString(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZoneName: 'short',
-  });
-}
-
-function formatDuration(startedAt: string | null, completedAt: string | null): string {
-  if (!startedAt || !completedAt) return '—';
-  const durationMs = new Date(completedAt).getTime() - new Date(startedAt).getTime();
-  if (durationMs < 1000) return '<1s';
-  const seconds = Math.floor(durationMs / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return secs > 0 ? `${minutes}m ${secs}s` : `${minutes}m`;
-}
 
 // ---------------------------------------------------------------------------
 // Page
@@ -95,7 +67,14 @@ export function ProjectTriggerDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false);
 
   const loadTrigger = useCallback(async () => {
-    if (!triggerId) return;
+    // The early return used to skip the `finally` below, leaving `loading` true
+    // forever — a missing route param rendered an endless spinner with no error
+    // and no way to recover.
+    if (!triggerId) {
+      setError('Missing trigger id');
+      setLoading(false);
+      return;
+    }
     try {
       const resp = await getTrigger(projectId, triggerId);
       setTrigger(resp);
@@ -195,7 +174,7 @@ export function ProjectTriggerDetail() {
     return finished ?? null;
   }, [executions]);
 
-  if (loading) {
+  if (loading && !trigger) {
     return (
       <div className="flex justify-center items-center py-16">
         <Spinner size="lg" />
@@ -203,7 +182,12 @@ export function ProjectTriggerDetail() {
     );
   }
 
-  if (error || !trigger) {
+  // Fatal only when there is no trigger to fall back to. `loadTrigger` re-runs
+  // after Run Now, Pause/Resume, save and token rotation — a transient failure
+  // on any of those used to replace the whole page (header, execution history,
+  // webhook panel, and any open dialog) with a "Trigger not found" screen whose
+  // only button navigates away (rule 48).
+  if (!trigger) {
     return (
       <div className="text-center py-16">
         <p className="text-danger mb-4">{error ?? 'Trigger not found'}</p>
@@ -217,10 +201,6 @@ export function ProjectTriggerDetail() {
     );
   }
 
-  const statusCfg = STATUS_CONFIG[trigger.status] ?? {
-    color: 'var(--sam-color-fg-muted)',
-    label: 'Disabled',
-  };
   const handleLoadMore = () => {
     loadExecutions(nextExecutionCursor).catch(() => undefined);
   };
@@ -233,7 +213,7 @@ export function ProjectTriggerDetail() {
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6">
+    <div className="w-full min-w-0 max-w-3xl mx-auto px-4 py-6">
       {/* Back link */}
       <button
         onClick={() => navigate(`/projects/${projectId}/triggers`)}
@@ -243,32 +223,35 @@ export function ProjectTriggerDetail() {
         Back to triggers
       </button>
 
+      {error && (
+        <div
+          role="alert"
+          className="mb-4 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger [overflow-wrap:anywhere]"
+        >
+          Could not refresh this trigger — {error}
+        </div>
+      )}
+
       {/* Header */}
       <div className="flex flex-col gap-4 mb-6 sm:flex-row sm:items-start sm:justify-between">
         <div className="min-w-0 flex-1">
-          <div className="flex min-w-0 items-start gap-2">
-            <span
-              className="mt-2 inline-block w-3 h-3 rounded-full shrink-0"
-              style={{ backgroundColor: statusCfg.color }}
-              aria-label={`Status: ${statusCfg.label}`}
-            />
-            <h1 className="sam-type-page-title m-0 min-w-0 max-w-full whitespace-normal [overflow-wrap:anywhere]">
-              {trigger.name}
-            </h1>
-          </div>
+          <h1 className="sam-type-page-title m-0 min-w-0 max-w-full whitespace-normal [overflow-wrap:anywhere]">
+            {trigger.name}
+          </h1>
           {trigger.description && (
             <p className="sam-type-secondary text-fg-muted mt-1 mb-0 [overflow-wrap:anywhere]">
               {trigger.description}
             </p>
           )}
-          <p className="text-sm text-fg-muted mt-2 mb-0 flex flex-wrap items-center gap-1.5">
-            <Clock size={14} aria-hidden="true" />
-            {trigger.sourceType === 'webhook'
-              ? trigger.webhookConfig?.sourceLabel || 'Generic webhook'
-              : trigger.sourceType === 'github'
-                ? `GitHub ${trigger.githubConfig?.eventType?.replace(/_/g, ' ') ?? 'event'}`
-                : (trigger.cronHumanReadable ?? trigger.cronExpression)}
-          </p>
+          {/* Status reads as text, not just a coloured dot, and the source
+              description matches the card exactly (one shared formatter). */}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <StatusBadge status={statusBadgeKey(trigger.status)} pulse={false} />
+            <span className="inline-flex min-w-0 items-center gap-1.5 text-sm text-fg-muted">
+              <span className="shrink-0">{sourceIcon(trigger)}</span>
+              <span className="[overflow-wrap:anywhere]">{formatTriggerSource(trigger)}</span>
+            </span>
+          </div>
         </div>
 
         {/* Actions */}

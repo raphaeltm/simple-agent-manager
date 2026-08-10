@@ -53,6 +53,63 @@ export async function assertNoOverflow(page: Page) {
     () => document.documentElement.scrollWidth > window.innerWidth
   );
   expect(overflow).toBe(false);
+  await assertNoClippedOverflow(page);
+}
+
+/**
+ * Detects horizontal overflow that `assertNoOverflow`'s document-level check
+ * CANNOT see.
+ *
+ * AppShell puts `overflow-x-hidden` on `<main>` (AppShell.tsx) and `Project.tsx`
+ * repeats it on its page wrapper. Anything wider than the viewport inside those
+ * is therefore *clipped* — `document.documentElement.scrollWidth` never grows,
+ * so the document-level assertion passes while the user sees content sheared off
+ * at the right edge with no way to scroll to it.
+ *
+ * That false-pass shipped the Triggers mobile bug: the page root rendered 768px
+ * wide inside a 375px viewport (`mx-auto` on a column-flex child disables
+ * `align-items: stretch`, `min-width: auto` then floors the width at the
+ * subtree's min-content, and Tailwind `truncate` makes a heading's min-content
+ * its FULL untruncated string) while 25 `assertNoOverflow` assertions stayed
+ * green.
+ *
+ * The signal is an element that *clips* horizontally (`overflow-x` resolved to
+ * `hidden` or `clip`) whose content is wider than its box. Deliberate clipping
+ * is excluded:
+ *  - `text-overflow: ellipsis` (Tailwind `truncate`) — the ellipsis IS the design
+ *  - `overflow-x: auto | scroll` — the user can scroll to the rest
+ *  - sub-4px boxes — `sr-only` clipping helpers
+ *  - `data-intentional-clip` — an explicit, self-documenting opt-out for
+ *    carousels and sliding panels (see `NavSidebar.tsx`), which are legitimately
+ *    wider than their viewport. Declaring it beats a silent blind spot.
+ */
+export async function assertNoClippedOverflow(page: Page) {
+  const offenders = await page.evaluate(() => {
+    const found: string[] = [];
+
+    for (const el of Array.from(document.body.querySelectorAll('*'))) {
+      const style = getComputedStyle(el);
+      if (style.display === 'none' || style.visibility === 'hidden') continue;
+      if (style.overflowX !== 'hidden' && style.overflowX !== 'clip') continue;
+      if (style.textOverflow === 'ellipsis') continue;
+      if (el.clientWidth <= 4) continue;
+      if (el.closest('[data-intentional-clip]')) continue;
+      // +1 absorbs sub-pixel layout rounding.
+      if (el.scrollWidth <= el.clientWidth + 1) continue;
+
+      const cls = (el.getAttribute('class') ?? '').slice(0, 80);
+      const text = (el.textContent ?? '').trim().slice(0, 40).replace(/\s+/g, ' ');
+      found.push(
+        `<${el.tagName.toLowerCase()} class="${cls}"> content ${el.scrollWidth}px ` +
+          `clipped to ${el.clientWidth}px — "${text}"`
+      );
+    }
+
+    return found;
+  });
+
+  expect(offenders, `Horizontally clipped content (invisible to the user):\n${offenders.join('\n')}`)
+    .toEqual([]);
 }
 
 /**

@@ -82,10 +82,10 @@ describe('TriggerCard — Delete action', () => {
     const user = userEvent.setup();
     renderCard();
 
-    const menuBtn = screen.getByRole('button', { name: 'Trigger actions' });
+    const menuBtn = screen.getByRole('button', { name: /^Actions for/ });
     await user.click(menuBtn);
 
-    expect(screen.getByRole('button', { name: /delete/i })).toBeInTheDocument();
+    expect(screen.getByRole('menuitem', { name: /delete/i })).toBeInTheDocument();
   });
 
   it('does not show Delete when onDelete is not provided', async () => {
@@ -98,7 +98,7 @@ describe('TriggerCard — Delete action', () => {
       />,
     );
 
-    const menuBtn = screen.getByRole('button', { name: 'Trigger actions' });
+    const menuBtn = screen.getByRole('button', { name: /^Actions for/ });
     await user.click(menuBtn);
 
     expect(screen.queryByRole('button', { name: /delete/i })).not.toBeInTheDocument();
@@ -109,10 +109,10 @@ describe('TriggerCard — Delete action', () => {
     const onDelete = vi.fn();
     const { trigger } = renderCard({ onDelete });
 
-    const menuBtn = screen.getByRole('button', { name: 'Trigger actions' });
+    const menuBtn = screen.getByRole('button', { name: /^Actions for/ });
     await user.click(menuBtn);
 
-    const deleteBtn = screen.getByRole('button', { name: /delete/i });
+    const deleteBtn = screen.getByRole('menuitem', { name: /delete/i });
     await user.click(deleteBtn);
 
     expect(onDelete).toHaveBeenCalledWith(trigger);
@@ -123,10 +123,10 @@ describe('TriggerCard — Delete action', () => {
     const user = userEvent.setup();
     renderCard();
 
-    const menuBtn = screen.getByRole('button', { name: 'Trigger actions' });
+    const menuBtn = screen.getByRole('button', { name: /^Actions for/ });
     await user.click(menuBtn);
 
-    const deleteBtn = screen.getByRole('button', { name: /delete/i });
+    const deleteBtn = screen.getByRole('menuitem', { name: /delete/i });
     await user.click(deleteBtn);
 
     await waitFor(() => {
@@ -138,10 +138,10 @@ describe('TriggerCard — Delete action', () => {
     const user = userEvent.setup();
     renderCard();
 
-    const menuBtn = screen.getByRole('button', { name: 'Trigger actions' });
+    const menuBtn = screen.getByRole('button', { name: /^Actions for/ });
     await user.click(menuBtn);
 
-    const deleteBtn = screen.getByRole('button', { name: /delete/i });
+    const deleteBtn = screen.getByRole('menuitem', { name: /delete/i });
     expect(deleteBtn.className).toContain('text-danger');
   });
 });

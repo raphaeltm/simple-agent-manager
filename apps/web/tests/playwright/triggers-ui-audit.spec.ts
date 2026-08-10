@@ -677,6 +677,39 @@ test.describe('Triggers List — Mobile', () => {
     await assertNoOverflow(page);
   });
 
+  /**
+   * Regression guard for the reported mobile bug: a long trigger name made the
+   * page render 768px wide inside a 375px viewport, sheared off by the
+   * ancestors' `overflow-x-hidden`. This measures the page root directly —
+   * `document.documentElement.scrollWidth` never grew, which is why the
+   * document-level check stayed green while the page was visibly broken.
+   */
+  test('a long trigger name cannot widen the page past the viewport', async ({ page }) => {
+    await setupApiMocks(page, {
+      triggers: [
+        makeTrigger({
+          id: 'wide-1',
+          name: 'TTV weekly dependency and security maintenance with a deliberately long tail',
+          description: 'Weekly compatible dependency upgrades, security audit, full verification.',
+        }),
+      ],
+    });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=TTV weekly dependency');
+
+    const { pageWidth, viewportWidth } = await page.evaluate(() => {
+      const root = document.querySelector('main [class*="max-w-3xl"]');
+      return {
+        pageWidth: Math.round(root?.getBoundingClientRect().width ?? 0),
+        viewportWidth: window.innerWidth,
+      };
+    });
+    expect(pageWidth).toBeGreaterThan(0);
+    expect(pageWidth).toBeLessThanOrEqual(viewportWidth);
+
+    await assertNoOverflow(page);
+  });
+
   test('empty state', async ({ page }) => {
     await setupApiMocks(page, { triggers: [] });
     await page.goto('/projects/proj-test-1/triggers');
@@ -705,7 +738,7 @@ test.describe('Triggers List — Mobile', () => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
     await page.goto('/projects/proj-test-1/triggers');
     await page.waitForSelector('text=Daily Code Review');
-    const menuBtns = page.getByRole('button', { name: 'Trigger actions' });
+    const menuBtns = page.getByRole('button', { name: /^Actions for/ });
     await menuBtns.first().click();
     await page.waitForSelector('text=Delete');
     await screenshot(page, 'triggers-delete-menu-mobile');
@@ -716,10 +749,10 @@ test.describe('Triggers List — Mobile', () => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
     await page.goto('/projects/proj-test-1/triggers');
     await page.waitForSelector('text=Daily Code Review');
-    const menuBtns = page.getByRole('button', { name: 'Trigger actions' });
+    const menuBtns = page.getByRole('button', { name: /^Actions for/ });
     await menuBtns.first().click();
     await page.waitForSelector('text=Delete');
-    await page.getByRole('button', { name: /delete/i }).click();
+    await page.getByRole('menuitem', { name: /delete/i }).click();
     await page.waitForSelector('role=alertdialog');
     await screenshot(page, 'triggers-delete-confirm-mobile');
     await assertNoOverflow(page);
@@ -762,7 +795,7 @@ test.describe('Triggers List — Desktop', () => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
     await page.goto('/projects/proj-test-1/triggers');
     await page.waitForSelector('text=Daily Code Review');
-    const menuBtns = page.getByRole('button', { name: 'Trigger actions' });
+    const menuBtns = page.getByRole('button', { name: /^Actions for/ });
     await menuBtns.first().click();
     await page.waitForSelector('text=Delete');
     await screenshot(page, 'triggers-delete-menu-desktop');
@@ -773,10 +806,10 @@ test.describe('Triggers List — Desktop', () => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
     await page.goto('/projects/proj-test-1/triggers');
     await page.waitForSelector('text=Daily Code Review');
-    const menuBtns = page.getByRole('button', { name: 'Trigger actions' });
+    const menuBtns = page.getByRole('button', { name: /^Actions for/ });
     await menuBtns.first().click();
     await page.waitForSelector('text=Delete');
-    await page.getByRole('button', { name: /delete/i }).click();
+    await page.getByRole('menuitem', { name: /delete/i }).click();
     await page.waitForSelector('role=alertdialog');
     await screenshot(page, 'triggers-delete-confirm-desktop');
     await assertNoOverflow(page);

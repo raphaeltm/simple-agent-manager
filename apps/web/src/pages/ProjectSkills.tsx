@@ -9,7 +9,7 @@ export function ProjectSkills() {
   const { skills, loading, error, refresh, createSkill, updateSkill, deleteSkill } = useSkills(projectId);
 
   return (
-    <div className="mx-auto max-w-3xl px-4 py-6">
+    <div className="w-full min-w-0 mx-auto max-w-3xl px-4 py-6">
       <h1 className="mb-1 text-lg font-semibold text-fg-primary">Skills</h1>
       <p className="mb-4 text-sm text-fg-muted">
         Reusable bundles of agent settings. When a skill is selected for a task, its values override

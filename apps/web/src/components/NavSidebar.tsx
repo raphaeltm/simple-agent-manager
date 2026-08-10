@@ -199,7 +199,11 @@ export function NavSidebar({ className, projectName, showGlobalNav, onToggleGlob
       : GLOBAL_NAV_ITEMS;
 
     return (
-      <div className={`relative overflow-hidden ${className ?? ''}`}>
+      /* `data-intentional-clip`: this is a two-panel carousel — both panels sit
+         side by side (2x width) and are translated into view, so its content is
+         deliberately wider than its box. Marks it as intentional for the
+         `assertNoClippedOverflow` audit guard. */
+      <div data-intentional-clip className={`relative overflow-hidden ${className ?? ''}`}>
         {/* Sliding container — holds both panels side by side */}
         <div
           className="flex transition-transform duration-200 ease-out motion-reduce:transition-none"
