@@ -76,10 +76,19 @@ export interface SlotShape {
  * Proposed platform default, replacing PLATFORM_RESOURCE_DEFAULTS
  * (currently minVcpu 2 / minMemoryGb 4, which allows only 2 agents on a medium).
  *
- * Grounded in production: a medium node (4 vCPU / 8 GB) has already run 14
- * concurrent workspaces with zero OOM events recorded, and a live sample showed
- * ~475 MB per running workspace. 0.5 GB reproduces exactly that density —
- * medium fits 14, large fits 30, small fits 5.
+ * HYPOTHESIS, NOT A VALIDATED NUMBER. The only hard datapoint is a live medium
+ * node running two workspaces at 19.4% of 8 GB against a 7.6% empty baseline —
+ * about 475 MB per workspace, at unknown activity level — plus no recorded OOM.
+ *
+ * An earlier version cited "14 concurrent workspaces on a medium" from
+ * compute_usage interval overlaps. That was wrong by ~3x: compute_usage is open
+ * from workspace creation to DELETION, while the placement cap counts only
+ * running/creating/recovery, so stopped-but-undeleted workspaces inflated it.
+ * Do not reason about concurrency from compute_usage — it measures existence.
+ *
+ * These values give medium 14 / large 30 / small 5, which is the right
+ * direction (2 agents on a 16 GB machine is clearly over-provisioned) but the
+ * magnitude needs per-workspace telemetry before it ships.
  */
 export const DEFAULT_SLOT: SlotShape = { vcpu: 0.25, ramGb: 0.5, diskGb: 3 };
 
