@@ -21,7 +21,7 @@ Preserve the scheduled OSV advisory integration from PR #1784 in a separate draf
 - [x] Add focused OSV documentation under `scripts/quality/README.md`, adapted to the files present on current `main`.
 - [x] Add a standalone OSV workflow-contract test covering schedule-only execution, event/routing gates, secret wiring, and prohibited public artifacts or issue permissions.
 - [x] Run `pnpm quality:scripts:test`, `pnpm quality:osv-policy`, `pnpm lint`, and `pnpm typecheck`.
-- [ ] Complete specialist review and task-completion validation.
+- [x] Complete specialist review and task-completion validation.
 - [ ] Open the required draft PR against `main`, wait for CI, and report results without staging or merge.
 
 ## Acceptance criteria
@@ -42,3 +42,12 @@ Preserve the scheduled OSV advisory integration from PR #1784 in a separate draf
 - `scripts/quality/vitest.config.ts`
 - `.claude/rules/25-review-merge-gate.md`
 - `.specify/memory/constitution.md` Principle XI
+
+## Validation evidence
+
+- `pnpm quality:scripts:test`: 22 files and 237 tests passed.
+- `pnpm quality:osv-policy`, `pnpm lint`, `pnpm typecheck`, `pnpm build`, formatting, source-contract, and `git diff --check` gates passed.
+- The broad `pnpm test` run reached 6,799 API tests and reported three unrelated timeout-only failures; all three affected files then passed in isolation (3 files, 125 tests).
+- Task completion, security, environment, documentation, constitution, and test-quality reviews completed. No CRITICAL/HIGH blocker applies to creating the requested parked draft.
+- Staging was intentionally skipped and not mutated, per the task's hard constraint.
+- Draft PR creation and CI reporting remain the Phase 7 lifecycle step; the PR must remain draft and unmerged.
