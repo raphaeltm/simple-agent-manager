@@ -59,28 +59,71 @@ export function toEur(price: number, currency: 'EUR' | 'USD'): number {
 }
 
 /**
- * One "agent slot" — the resource envelope a single agent needs.
- * Mirrors PLATFORM_RESOURCE_DEFAULTS in packages/shared/src/constants/resource-defaults.ts.
+ * The resource envelope a single agent declares it needs.
+ *
+ * There is deliberately NO "agents per machine" count anywhere in this model.
+ * Density is derived entirely from the requirement, so a bigger machine holds
+ * proportionally more agents without anyone configuring a number.
  */
 export interface SlotShape {
   vcpu: number;
   ramGb: number;
+  /** Per-agent disk DELTA — working tree and worktrees, not the shared base image. */
   diskGb: number;
 }
 
-export const DEFAULT_SLOT: SlotShape = { vcpu: 2, ramGb: 4, diskGb: 40 };
+/**
+ * Proposed platform default, replacing PLATFORM_RESOURCE_DEFAULTS
+ * (currently minVcpu 2 / minMemoryGb 4, which allows only 2 agents on a medium).
+ *
+ * Grounded in production: a medium node (4 vCPU / 8 GB) has already run 14
+ * concurrent workspaces with zero OOM events recorded, and a live sample showed
+ * ~475 MB per running workspace. 0.5 GB reproduces exactly that density —
+ * medium fits 14, large fits 30, small fits 5.
+ */
+export const DEFAULT_SLOT: SlotShape = { vcpu: 0.25, ramGb: 0.5, diskGb: 3 };
 
-/** How many agent slots of `slot` fit on `c`, capped by a co-tenancy limit. */
-export function slotsFor(c: Candidate, slot: SlotShape, maxCoTenants = 4): number {
-  const bySpec = Math.floor(
-    Math.min(c.vcpu / slot.vcpu, c.ramGb / slot.ramGb, c.diskGb / slot.diskGb),
+/**
+ * Fixed per-node overhead reserved before any agent is placed: host OS, the
+ * vm-agent, Docker, and the shared devcontainer base image.
+ */
+export const NODE_OVERHEAD = { vcpu: 0.3, ramGb: 1, diskGb: 25 };
+
+/**
+ * How many agents of shape `slot` fit on `c`.
+ *
+ * Disk is deliberately NOT divided the way CPU and memory are. The devcontainer
+ * base image is shared across every workspace on the node, so per-agent disk is
+ * a delta on top of a fixed overhead — dividing total disk by a per-agent figure
+ * would badly under-count density on small-disk machines.
+ */
+export function slotsFor(c: Candidate, slot: SlotShape): number {
+  const usableVcpu = c.vcpu - NODE_OVERHEAD.vcpu;
+  const usableRam = c.ramGb - NODE_OVERHEAD.ramGb;
+  const usableDisk = c.diskGb - NODE_OVERHEAD.diskGb;
+  if (usableVcpu <= 0 || usableRam <= 0 || usableDisk <= 0) return 0;
+  return Math.max(
+    0,
+    Math.floor(
+      Math.min(usableVcpu / slot.vcpu, usableRam / slot.ramGb, usableDisk / slot.diskGb),
+    ),
   );
-  return Math.max(0, Math.min(bySpec, maxCoTenants));
+}
+
+/** Which dimension limits density on this machine — useful for explaining the number. */
+export function bindingConstraint(c: Candidate, slot: SlotShape): 'cpu' | 'memory' | 'disk' {
+  const byVcpu = (c.vcpu - NODE_OVERHEAD.vcpu) / slot.vcpu;
+  const byRam = (c.ramGb - NODE_OVERHEAD.ramGb) / slot.ramGb;
+  const byDisk = (c.diskGb - NODE_OVERHEAD.diskGb) / slot.diskGb;
+  const min = Math.min(byVcpu, byRam, byDisk);
+  if (min === byVcpu) return 'cpu';
+  if (min === byRam) return 'memory';
+  return 'disk';
 }
 
 /** Cost per agent-slot-hour, in EUR. Infinity when the machine fits no slot. */
-export function pricePerSlotEur(c: Candidate, slot: SlotShape, maxCoTenants = 4): number {
-  const slots = slotsFor(c, slot, maxCoTenants);
+export function pricePerSlotEur(c: Candidate, slot: SlotShape): number {
+  const slots = slotsFor(c, slot);
   if (slots === 0) return Number.POSITIVE_INFINITY;
   return toEur(c.pricePerHour, c.currency) / slots;
 }
@@ -335,7 +378,11 @@ export interface Strategy {
   rules: string[];
   /** Reject any candidate costing more than this multiple of the cheapest slot price. */
   spillCeiling: number;
-  maxCoTenants: number;
+  /**
+   * Give each agent the whole machine. Mirrors the `exclusiveNode` field that
+   * already exists in ResourceRequirements — NOT a co-tenancy count.
+   */
+  exclusiveNode: boolean;
 }
 
 export const STRATEGIES: Record<StrategyId, Strategy> = {
@@ -345,13 +392,13 @@ export const STRATEGIES: Record<StrategyId, Strategy> = {
     tagline: 'Fewest, biggest machines. Best price per agent.',
     who: 'You run several agents at once and want them sharing hardware.',
     rules: [
-      'Rank by price per agent slot, not by sticker price',
-      'Prefer the machine that fits the most agents',
+      'Rank by cost per agent, not by sticker price',
+      'Density comes from each agent\'s declared vCPU and memory',
       'Reuse a warm machine before starting a new one',
       'Never pay more than 2× the cheapest option — queue instead',
     ],
     spillCeiling: 2,
-    maxCoTenants: 4,
+    exclusiveNode: false,
   },
   spread: {
     id: 'spread',
@@ -361,11 +408,11 @@ export const STRATEGIES: Record<StrategyId, Strategy> = {
     rules: [
       'Rank by absolute hourly price',
       'Pick the smallest machine that meets the requirement',
-      'One agent per machine, shut down as soon as it goes idle',
+      'One agent per machine (exclusiveNode), shut down when idle',
       'Never pay more than 1.5× the cheapest option — queue instead',
     ],
     spillCeiling: 1.5,
-    maxCoTenants: 1,
+    exclusiveNode: true,
   },
 };
 
@@ -423,7 +470,7 @@ export function rankCandidates(input: RankInput): RankedCandidate[] {
   const { strategy, slot, disabledRegions, overflowPolicy, candidates } = input;
 
   const scored: RankedCandidate[] = candidates.map((candidate) => {
-    const slots = slotsFor(candidate, slot, strategy.maxCoTenants);
+    const slots = strategy.exclusiveNode ? Math.min(1, slotsFor(candidate, slot)) : slotsFor(candidate, slot);
     const hourlyEur = toEur(candidate.pricePerHour, candidate.currency);
     const slotPriceEur = slots === 0 ? Number.POSITIVE_INFINITY : hourlyEur / slots;
     return { candidate, slots, slotPriceEur, hourlyEur };
