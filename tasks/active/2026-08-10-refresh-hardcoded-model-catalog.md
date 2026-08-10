@@ -18,13 +18,19 @@ SAM's static agent model catalog is the fallback and validation source for model
 
 ## Implementation checklist
 
-- [ ] Remove retired Claude Opus 4.1 from the dropdown and platform proxy catalogs and add it to the retired-model regression list.
-- [ ] Reconcile OpenAI group names and display labels with current lifecycle evidence without removing still-useful callable legacy choices.
-- [ ] Clearly label retained Gemini 2.5 choices with their documented shutdown date.
-- [ ] Replace unsupported Mistral IDs, prune deprecated choices, and retain current documented coding/general/efficient models.
-- [ ] Synchronize OpenCode Zen and Go fallback IDs and display names with live Models.dev records.
-- [ ] Update focused shared-catalog and platform-registry tests for additions, removals, IDs, names, and lifecycle labels.
+- [x] Remove retired Claude Opus 4.1 from the dropdown and platform proxy catalogs and add it to the retired-model regression list.
+- [x] Reconcile OpenAI group names and display labels with current lifecycle evidence without removing still-useful callable legacy choices.
+- [x] Clearly label retained Gemini 2.5 choices with their documented shutdown date.
+- [x] Replace unsupported Mistral IDs, prune deprecated choices, and retain current documented coding/general/efficient models.
+- [x] Synchronize OpenCode Zen and Go fallback IDs and display names with live Models.dev records.
+- [x] Update focused shared-catalog and platform-registry tests for additions, removals, IDs, names, and lifecycle labels.
 - [ ] Run focused and repository-wide quality checks, specialist reviews, staging verification, CI, merge, and production deployment monitoring.
+
+## Validation evidence
+
+- Focused shared catalog/registry suite: 3 files, 59 tests passed.
+- Shared package typecheck and lint passed (lint warnings are pre-existing and non-blocking).
+- A live post-change comparison against `https://models.dev/api.json` found zero additions, removals, or display-name differences for both `opencode` and `opencode-go`.
 
 ## Acceptance criteria
 
