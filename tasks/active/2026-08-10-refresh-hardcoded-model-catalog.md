@@ -30,7 +30,11 @@ SAM's static agent model catalog is the fallback and validation source for model
 
 - Focused shared catalog/registry suite: 3 files, 59 tests passed.
 - Shared package typecheck and lint passed (lint warnings are pre-existing and non-blocking).
+- Repository gates passed: lint, typecheck, full test suite, and build; the API suite alone covered 507 files and 6,799 tests.
 - A live post-change comparison against `https://models.dev/api.json` found zero additions, removals, or display-name differences for both `opencode` and `opencode-go`.
+- Task completion validator: PASS for staging; all implementation checks A–F are covered and remaining delivery evidence belongs to the pending lifecycle phases.
+- Constitution validator: PASS; no Principle XI configuration violations were introduced.
+- Test engineer: PASS; focused lifecycle, ID, and display-name regressions are sufficient, and vertical-slice coverage is not newly applicable to a pure shared static-data change.
 
 ## Acceptance criteria
 

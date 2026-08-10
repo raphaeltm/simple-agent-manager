@@ -44,7 +44,13 @@ describe('model-catalog', () => {
       );
       expect(
         groups.find((group) => group.label === 'Codex (Current)')?.models.map((model) => model.id)
-      ).toContain('gpt-5.3-codex');
+      ).toEqual(['gpt-5.3-codex']);
+      expect(
+        groups.find((group) => group.label === 'Deprecated')?.models.map((model) => model.id)
+      ).toEqual(['gpt-5.2-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini', 'o4-mini']);
+      expect(
+        groups.find((group) => group.label === 'GPT-5 (Previous)')?.models.map((model) => model.id)
+      ).toEqual(['gpt-5-mini']);
       expect(namesById.get('gpt-5.3-codex')).toBe('GPT-5.3 Codex');
       expect(namesById.get('gpt-5.2-codex')).toContain('Deprecated');
       expect(namesById.get('gpt-5.1-codex-max')).toContain('Deprecated');
