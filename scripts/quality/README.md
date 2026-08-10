@@ -51,9 +51,6 @@ configuration.
   full-history evidence remain private.
 - `pnpm quality:govulncheck-diff` blocks locally changed Go modules and uses the locked tool module
   in `scripts/quality/govulncheck-tool/`.
-- `pnpm quality:osv-policy` validates OSV policy and expiring ignores. The scheduled workflow
-  routes validated results to an authenticated private owner and fails closed when routing is not
-  configured; it does not create public vulnerability issues or fail unrelated PRs.
 
 Scanner jobs install the frozen lockfile without lifecycle scripts, and CI passes explicit scanner
 binary paths to the wrappers. Do not publish scanner reports, hashes, advisories, or candidate

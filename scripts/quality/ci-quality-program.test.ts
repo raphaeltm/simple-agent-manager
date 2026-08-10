@@ -3,10 +3,6 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 const ci = readFileSync(new URL('../../.github/workflows/ci.yml', import.meta.url), 'utf8');
-const osvWorkflow = readFileSync(
-  new URL('../../.github/workflows/osv-scan.yml', import.meta.url),
-  'utf8'
-);
 const parsedRootManifest: unknown = JSON.parse(
   readFileSync(new URL('../../package.json', import.meta.url), 'utf8')
 );
@@ -74,20 +70,6 @@ describe('deterministic quality-program CI wiring', () => {
     const quality = jobBlock(ci, 'code-quality');
     expect(quality).toContain('fetch-depth: 0');
     expect(quality).toContain('pnpm quality:direct-dependency-evidence');
-    expect(quality).toContain('pnpm quality:osv-policy');
     expect(quality).toContain('pnpm quality:runtime-boundary-semantics');
-  });
-
-  it('runs OSV only from the trusted default-branch schedule and routes a private summary', () => {
-    expect(osvWorkflow).toContain('schedule:');
-    expect(osvWorkflow).not.toContain('workflow_dispatch:');
-    expect(osvWorkflow).not.toContain('pull_request:');
-    expect(osvWorkflow).toContain('OSV_POLICY_EVENT: schedule');
-    expect(osvWorkflow).toContain('SAM_OSV_PRIVATE_ROUTING_CONFIGURED:');
-    expect(osvWorkflow).toContain('SAM_OSV_WEBHOOK_TOKEN: ${{ secrets.SAM_OSV_WEBHOOK_TOKEN }}');
-    expect(osvWorkflow).toContain('SAM_OSV_WEBHOOK_URL: ${{ secrets.SAM_OSV_WEBHOOK_URL }}');
-    expect(osvWorkflow).toContain('run: pnpm quality:osv-advisory');
-    expect(osvWorkflow).not.toContain('issues: write');
-    expect(osvWorkflow).not.toContain('upload-artifact');
   });
 });

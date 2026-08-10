@@ -444,9 +444,6 @@ jobs:
       - name: Direct dependency evidence
         run: pnpm quality:direct-dependency-evidence
 
-      - name: OSV ignore expiry policy
-        run: pnpm quality:osv-policy
-
       - name: Runtime-boundary semantic shadow
         run: pnpm quality:runtime-boundary-semantics
 

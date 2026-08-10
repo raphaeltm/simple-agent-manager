@@ -26,21 +26,18 @@ import {
   WorkspaceReadyRequestSchema,
   WorkspaceReadyResponseSchema,
 } from '@simple-agent-manager/shared';
-import { exportPKCS8, exportSPKI,generateKeyPair } from 'jose';
-import { afterEach,beforeAll, describe, expect, it, vi } from 'vitest';
+import { exportPKCS8, exportSPKI, generateKeyPair } from 'jose';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // =============================================================================
 // Key generation for JWT tests
 // =============================================================================
 
-let testPrivateKey: string;
-let testPublicKey: string;
-
-beforeAll(async () => {
-  const { privateKey, publicKey } = await generateKeyPair('RS256', { extractable: true });
-  testPrivateKey = await exportPKCS8(privateKey);
-  testPublicKey = await exportSPKI(publicKey);
-});
+const { privateKey, publicKey } = await generateKeyPair('RS256', { extractable: true });
+const [testPrivateKey, testPublicKey] = await Promise.all([
+  exportPKCS8(privateKey),
+  exportSPKI(publicKey),
+]);
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -989,7 +986,7 @@ describe('Node Agent client functions send correct payloads', () => {
       'user-123',
       'chat-123',
       'proj-123',
-      { url: 'https://api.example.com/mcp', token: 'mcp-token' },
+      { url: 'https://api.example.com/mcp', token: 'mcp-token' }
     );
 
     const parsedBody = JSON.parse(capturedBody!);
@@ -1082,9 +1079,13 @@ describe('Node Agent client functions send correct payloads', () => {
     }));
 
     vi.doMock('../../src/services/fetch-timeout', () => ({
-      fetchWithTimeout: vi.fn().mockRejectedValue(
-        new Error('Request timed out after 30000ms: https://node-abc.vm.example.com:8443/workspaces/ws-test')
-      ),
+      fetchWithTimeout: vi
+        .fn()
+        .mockRejectedValue(
+          new Error(
+            'Request timed out after 30000ms: https://node-abc.vm.example.com:8443/workspaces/ws-test'
+          )
+        ),
       getTimeoutMs: vi.fn().mockReturnValue(30000),
     }));
 

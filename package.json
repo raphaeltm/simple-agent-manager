@@ -59,8 +59,6 @@
     "quality:runtime-boundary-semantics": "tsx scripts/quality/check-runtime-boundary-semantics.ts",
     "quality:direct-dependency-evidence": "tsx scripts/quality/check-direct-dependency-evidence.ts",
     "quality:govulncheck-diff": "tsx scripts/quality/check-go-vulnerability-diff.ts",
-    "quality:osv-policy": "tsx scripts/quality/check-osv-policy.ts",
-    "quality:osv-advisory": "tsx scripts/quality/run-osv-advisory.ts",
     "quality:gitleaks:current": "tsx scripts/quality/run-gitleaks.ts --mode=current-tree",
     "quality:gitleaks:pr": "tsx scripts/quality/run-gitleaks.ts --mode=pr-range",
     "check:fast": "pnpm format:check && pnpm lint:oxlint && pnpm lint && pnpm quality:type-boundaries"

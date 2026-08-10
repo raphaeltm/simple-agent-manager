@@ -1,3 +1,0 @@
-# OSV scanning is advisory and routes findings to private SAM follow-up.
-# Every future [[IgnoredVulns]] or vulnerability-ignoring [[PackageOverrides]]
-# entry must include a reason and a future ignoreUntil/effectiveUntil date.

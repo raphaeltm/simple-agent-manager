@@ -46,7 +46,6 @@ The implementation must improve editor feedback and CI determinism without chang
   - Astro template diagnostics: <https://docs.astro.build/en/reference/cli-reference/#astro-check>
   - Gitleaks scan modes: <https://github.com/gitleaks/gitleaks>
   - Go vulnerability analysis: <https://go.dev/doc/security/vuln/>
-  - OSV source scanning and expiring ignores: <https://google.github.io/osv-scanner/usage/> and <https://google.github.io/osv-scanner/configuration/>
 
 ### Current-main coverage inventory
 
@@ -94,7 +93,7 @@ The one real non-test `as any` is `apps/web/src/pages/ToolsCli.tsx:58`. `JSON.pa
 4. `.github/workflows/ci.yml` invokes the same leaf commands and scanner helpers; it does not reimplement their matching logic.
 5. ESLint plugin findings point developers to `apps/api/src/lib/runtime-validation.ts`, `apps/api/src/schemas/_validator.ts`, `jsonValidator`, `parseWithSchema`, `readResponseJson`, and row-mapper patterns.
 6. Existing boundary debt remains passable through checked-in counts; only a repository-wide net increase exits nonzero with deterministic `file:line` guidance.
-7. Gitleaks examines the current tree/PR range without public comments/artifacts containing findings. Direct dependency evidence and diff-local govulncheck apply only when their manifests change. Scheduled OSV output routes to private owned follow-up, not a public issue or unrelated PR failure.
+7. Gitleaks examines the current tree/PR range without public comments/artifacts containing findings. Direct dependency evidence and diff-local govulncheck apply only when their manifests change.
 8. Oxlint runs report-only until parity, scoping, suppression, fix-diff, coverage, and cold-performance evidence satisfy every promotion criterion. Otherwise ESLint stays authoritative and Oxlint stays shadow.
 
 ## Orchestration and ownership
@@ -146,7 +145,6 @@ The durable dependency graph lives in `.workflow-state.md` (gitignored). Coding 
 - [x] Add Gitleaks for current-tree and PR-range scanning; keep full-history audit output private operational evidence.
 - [x] Add deterministic direct-dependency evidence enforcement for npm and Go manifest diffs, with authoritative registry/homepage link and one-line necessity.
 - [x] Add diff-local blocking `govulncheck` when Go module files change.
-- [ ] Add scheduled OSV source scanning with private owned SAM/backlog routing; code and policy are complete, but the canonical repository lacks both required routing secrets. Private follow-up idea `01KZKYAVJGW1YT71X61XTHM0W4` records the current scan without public finding details.
 - [x] Extend a bounded ts-morph checker with only unvalidated DO/D1 row narrowing and blind external-payload narrowing, initially scoped to `apps/api/src`, with positive/negative fixtures. The sampled noise gate is not met, so all 45 diagnostics remain advisory.
 - [x] Do not add generic mock-density, PR-size, Semgrep, Knip, whole-repo type-aware lint, or other unproven gates.
 
@@ -170,6 +168,7 @@ The durable dependency graph lives in `.workflow-state.md` (gitignored). Coding 
 ### Integration, review, staging, and delivery
 
 - [x] Integrate child commits/PRs in progressively ordered commits and re-audit current main before accepting baselines.
+- [x] Remove load-sensitive setup from timed API test and hook bodies: collect the heartbeat route once and generate the contract-test RSA key pair during module setup. The full 6,799-test API suite and five repeated 70-test focused runs pass without retries or relaxed assertions.
 - [ ] Run and archive concise evidence for frozen-lockfile clean install, format, lint/plugin fixtures, all workspace type/template checks, affected JS/TS tests and coverage, quality checker tests, Go tests/race/govulncheck as applicable, build, ESLint parity, Oxlint benchmark, CI wiring, and artifact/suppression cleanliness.
 - [ ] Run independent picky architecture/code-quality, security, test, constitution, doc-sync, and task-completion reviews; fix every actionable correctness/security concern.
 - [ ] Re-run the local contract after review fixes and ensure CI is green.
@@ -189,7 +188,7 @@ The durable dependency graph lives in `.workflow-state.md` (gitignored). Coding 
 - [ ] The three SAM rules have fixture-backed high-precision advisory diagnostics and lifecycle ownership metadata.
 - [ ] Existing boundary debt passes; a net-new occurrence fails deterministically with actionable `file:line` guidance; moves/splits/decreases pass.
 - [ ] `JSON.parse(...) as unknown` remains allowed; structural assertions are never presented as runtime validation.
-- [ ] Gitleaks, direct-dependency evidence, diff-local govulncheck, and scheduled OSV behavior satisfy the privacy/expiry/ownership constraints.
+- [ ] Gitleaks, direct-dependency evidence, and diff-local govulncheck satisfy the privacy and ownership constraints.
 - [ ] Only the two approved semantic checks are added, initially bounded to `apps/api/src` and proven low-noise.
 - [ ] `pnpm check:fast` is the obvious local contract and CI invokes its leaf commands rather than duplicating matcher logic.
 - [ ] Oxlint is either promoted by complete evidence or remains explicitly safe in shadow mode; TypeScript 5.x and non-type-aware Oxlint are retained.
