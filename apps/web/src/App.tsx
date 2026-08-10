@@ -66,6 +66,7 @@ import { ProjectSkills } from './pages/ProjectSkills';
 import { ProjectTriggerDetail } from './pages/ProjectTriggerDetail';
 import { ProjectTriggers } from './pages/ProjectTriggers';
 import { SamPrototype } from './pages/SamPrototype';
+import { CapacityPoolsPrototype } from './pages/capacity-pools-prototype';
 import { Settings } from './pages/Settings';
 import { SettingsAgents } from './pages/SettingsAgents';
 import { SettingsApiTokens } from './pages/SettingsApiTokens';
@@ -108,7 +109,7 @@ function SuperadminRoute({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-export const DEV_ONLY_ROUTE_PATHS = ['/sam', '/__test/trial-chat-gate', '/__test/error-boundary', '/ui-standards'] as const;
+export const DEV_ONLY_ROUTE_PATHS = ['/sam', '/prototype/capacity-pools', '/__test/trial-chat-gate', '/__test/error-boundary', '/ui-standards'] as const;
 
 /** TEMP audit-only harness — forces ErrorBoundary crash screen for Playwright review. Reverted after use. */
 function ErrorBoundaryAuditHarness(): never {
@@ -144,6 +145,8 @@ export default function App() {
                       <>
                         {/* SAM prototype — local/test only, no auth */}
                         <Route path="/sam" element={<SamPrototype />} />
+                        {/* Capacity-pool placement prototype — local/test only, no auth */}
+                        <Route path="/prototype/capacity-pools" element={<CapacityPoolsPrototype />} />
                         {/* Harness for Playwright audits — mounts trial components with mock data */}
                         <Route path="/__test/trial-chat-gate" element={<TrialChatGateHarness />} />
                         <Route path="/__test/error-boundary" element={<ErrorBoundaryAuditHarness />} />
