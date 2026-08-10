@@ -194,7 +194,7 @@ jobs:
           BUCKET_NAME="${{ vars.PULUMI_STATE_BUCKET || format('{0}-pulumi-state', steps.prefix.outputs.value) }}"
 
           set +e
-          OUTPUT=$(npx wrangler r2 bucket create "$BUCKET_NAME" 2>&1)
+          OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler r2 bucket create "$BUCKET_NAME" 2>&1)
           STATUS=$?
           set -e
           echo "$OUTPUT"

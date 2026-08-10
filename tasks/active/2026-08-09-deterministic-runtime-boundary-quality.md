@@ -169,6 +169,7 @@ The durable dependency graph lives in `.workflow-state.md` (gitignored). Coding 
 
 - [x] Integrate child commits/PRs in progressively ordered commits and re-audit current main before accepting baselines.
 - [x] Remove load-sensitive setup from timed API test and hook bodies: collect the heartbeat route and node-agent client once, generate the contract-test RSA key pair during module setup, and reuse a resettable fetch boundary. The 6,799-test API baseline passed, followed by ten consecutive 70-test focused runs under concurrent workspace typecheck load without retries, timeout changes, skips, or relaxed assertions.
+- [x] Make the staging state-bucket preflight use the repository-pinned `apps/api` Wrangler binary after the registry-dependent `npx` bootstrap failed deterministically before deployment; cover the command source contract in `deploy-reusable-workflow.test.ts`.
 - [ ] Run and archive concise evidence for frozen-lockfile clean install, format, lint/plugin fixtures, all workspace type/template checks, affected JS/TS tests and coverage, quality checker tests, Go tests/race/govulncheck as applicable, build, ESLint parity, Oxlint benchmark, CI wiring, and artifact/suppression cleanliness.
 - [ ] Run independent picky architecture/code-quality, security, test, constitution, doc-sync, and task-completion reviews; fix every actionable correctness/security concern.
 - [ ] Re-run the local contract after review fixes and ensure CI is green.
