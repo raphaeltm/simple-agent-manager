@@ -14,7 +14,8 @@ run, policy validation fails closed unless both `SAM_OSV_WEBHOOK_URL` and
 2.5.0 release only after verifying its published SHA256 checksum, then runs
 `pnpm quality:osv-advisory`.
 
-The advisory runner withholds vulnerability and package details from public logs and sends only
-an authenticated summary count to the configured private SAM intake. It does not create public
-GitHub issues or upload scanner reports. Keep the workflow parked until the repository secrets,
-the SAM-side private webhook intake, and end-to-end routing verification all exist.
+The advisory runner withholds vulnerability and package details from public logs and sends an
+authenticated summary payload containing the count and bounded run metadata to the configured
+private SAM intake. It does not create public GitHub issues or upload scanner reports. Keep this
+PR parked as draft until the repository secrets, the SAM-side private webhook intake, and
+end-to-end routing verification all exist.
