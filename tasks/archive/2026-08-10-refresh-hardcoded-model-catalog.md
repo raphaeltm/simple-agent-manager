@@ -24,7 +24,7 @@ SAM's static agent model catalog is the fallback and validation source for model
 - [x] Replace unsupported Mistral IDs, prune deprecated choices, and retain current documented coding/general/efficient models.
 - [x] Synchronize OpenCode Zen and Go fallback IDs and display names with live Models.dev records.
 - [x] Update focused shared-catalog and platform-registry tests for additions, removals, IDs, names, and lifecycle labels.
-- [ ] Run focused and repository-wide quality checks, specialist reviews, staging verification, CI, merge, and production deployment monitoring.
+- [x] Run focused and repository-wide quality checks, specialist reviews, staging verification, CI, merge, and production deployment monitoring.
 
 ## Validation evidence
 
@@ -37,6 +37,8 @@ SAM's static agent model catalog is the fallback and validation source for model
 - Test engineer: PASS; focused lifecycle, ID, and display-name regressions are sufficient, and vertical-slice coverage is not newly applicable to a pure shared static-data change.
 - Staging deployment run `31376144854` passed at branch SHA `d6662d91c`, including its 12 Playwright smoke tests.
 - Authenticated staging browser verification passed: token login returned 200, `app.sammy.party/dashboard` loaded, static Claude/OpenAI/Mistral/Gemini catalogs exposed the expected additions/removals/labels, and the cached OpenCode consumer exposed the active source records.
+- Pull request [#1786](https://github.com/raphaeltm/simple-agent-manager/pull/1786) passed all required CI checks and was squash-merged as `43e2cd3c43d7a81a10c4d5cad98e19b32eec8dfa`.
+- Production deployment run [31379045015](https://github.com/raphaeltm/simple-agent-manager/actions/runs/31379045015) completed successfully on attempt 3 for the exact merge SHA. Attempt 1 stopped before changes at the D1 safety parser, attempt 2 passed D1 integrity checks but hit a transient Cloudflare container-registry upload authorization failure, and attempt 3 passed the safety gate, Worker/container rollout, web deployment, secret configuration, binary uploads, and deployment health checks.
 
 ## Acceptance criteria
 
