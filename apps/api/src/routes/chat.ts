@@ -56,6 +56,7 @@ import {
 } from './chat-session-ownership';
 import { chatStateRoutes } from './chat-state';
 import { registerChatStopRoute } from './chat-stop';
+import { resolveLiveAgentSessionForChat } from './chat-workspace-resolver';
 
 const chatRoutes = new Hono<{ Bindings: Env }>();
 
@@ -473,7 +474,7 @@ chatRoutes.get('/:sessionId/durability', async (c) => {
   const snapshot = await projectDataService.getDurableExecutionSnapshot(
     c.env,
     projectId,
-    sessionId,
+    sessionId
   );
   return c.json(snapshot);
 });
@@ -522,12 +523,15 @@ chatRoutes.post('/:sessionId/prompt', async (c) => {
       ttlMs: durableConfig.ttlMs,
       metadata: { userId },
     });
-    return c.json({
-      accepted: true,
-      status: 'queued',
-      deliveryId: accepted.message.id,
-      messageId: accepted.transcriptMessageId,
-    }, 202);
+    return c.json(
+      {
+        accepted: true,
+        status: 'queued',
+        deliveryId: accepted.message.id,
+        messageId: accepted.transcriptMessageId,
+      },
+      202
+    );
   }
 
   // Compatibility path for deployments that have not enabled durable prompt

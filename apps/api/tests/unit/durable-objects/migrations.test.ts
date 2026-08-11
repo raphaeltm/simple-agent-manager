@@ -139,10 +139,22 @@ describe('DO Migrations', () => {
         const sql = createSqlStorage(db);
         runMigrations(sql);
 
-        const applied = db.prepare('SELECT name FROM migrations ORDER BY rowid').all() as Array<{ name: string }>;
-        expect(applied.map((row) => row.name)).toEqual(MIGRATIONS.map((migration) => migration.name));
-        expect(db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'checkpoint_episodes'").get()).toEqual({ name: 'checkpoint_episodes' });
-        const inboxColumns = db.prepare('PRAGMA table_info(session_inbox)').all() as Array<{ name: string }>;
+        const applied = db.prepare('SELECT name FROM migrations ORDER BY rowid').all() as Array<{
+          name: string;
+        }>;
+        expect(applied.map((row) => row.name)).toEqual(
+          MIGRATIONS.map((migration) => migration.name)
+        );
+        expect(
+          db
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'checkpoint_episodes'"
+            )
+            .get()
+        ).toEqual({ name: 'checkpoint_episodes' });
+        const inboxColumns = db.prepare('PRAGMA table_info(session_inbox)').all() as Array<{
+          name: string;
+        }>;
         expect(inboxColumns.map((column) => column.name)).toContain('receipt_state');
         expect(inboxColumns.map((column) => column.name)).toContain('next_attempt_at');
       } finally {
@@ -157,21 +169,17 @@ describe('DO Migrations', () => {
         sql.exec(`CREATE TABLE migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)`);
         for (const migration of MIGRATIONS.slice(0, -1)) {
           migration.run(sql);
-          sql.exec(
-            'INSERT INTO migrations (name, applied_at) VALUES (?, ?)',
-            migration.name,
-            1,
-          );
+          sql.exec('INSERT INTO migrations (name, applied_at) VALUES (?, ?)', migration.name, 1);
         }
         sql.exec(
           `INSERT INTO chat_sessions
            (id, topic, status, message_count, started_at, created_at, updated_at)
-           VALUES ('chat-upgrade', 'Existing', 'active', 0, 1, 1, 1)`,
+           VALUES ('chat-upgrade', 'Existing', 'active', 0, 1, 1, 1)`
         );
         sql.exec(
           `INSERT INTO session_state
            (session_id, activity, activity_at, prompt_started_at, restart_count)
-           VALUES ('acp-upgrade', 'prompting', 2, 1, 0)`,
+           VALUES ('acp-upgrade', 'prompting', 2, 1, 0)`
         );
         sql.exec(
           `INSERT INTO session_inbox
@@ -179,21 +187,35 @@ describe('DO Migrations', () => {
             message_class, delivery_state, sender_type, ack_required, delivery_attempts,
             expires_at)
            VALUES ('mail-upgrade', 'chat-upgrade', 'deliver', 'existing', 'high', 2,
-                   'deliver', 'queued', 'agent', 1, 0, 60002)`,
+                   'deliver', 'queued', 'agent', 1, 0, 60002)`
         );
 
         runMigrations(sql);
 
-        expect(db.prepare("SELECT content, prompt_message_id, next_attempt_at FROM session_inbox WHERE id = 'mail-upgrade'").get()).toEqual({
+        expect(
+          db
+            .prepare(
+              "SELECT content, prompt_message_id, next_attempt_at FROM session_inbox WHERE id = 'mail-upgrade'"
+            )
+            .get()
+        ).toEqual({
           content: 'existing',
           prompt_message_id: 'mail-upgrade',
           next_attempt_at: 2,
         });
-        expect(db.prepare("SELECT prompt_started_at, prompt_epoch FROM session_state WHERE session_id = 'acp-upgrade'").get()).toEqual({
+        expect(
+          db
+            .prepare(
+              "SELECT prompt_started_at, prompt_epoch FROM session_state WHERE session_id = 'acp-upgrade'"
+            )
+            .get()
+        ).toEqual({
           prompt_started_at: 1,
           prompt_epoch: null,
         });
-        expect(db.prepare("SELECT COUNT(*) AS count FROM chat_sessions WHERE id = 'chat-upgrade'").get()).toEqual({ count: 1 });
+        expect(
+          db.prepare("SELECT COUNT(*) AS count FROM chat_sessions WHERE id = 'chat-upgrade'").get()
+        ).toEqual({ count: 1 });
       } finally {
         db.close();
       }
@@ -220,7 +242,9 @@ describe('DO Migrations', () => {
       const createStatements = log.filter((q) => {
         const upper = q.toUpperCase();
         // Match "CREATE TABLE chat_messages" but not "CREATE TABLE chat_messages_grouped"
-        return upper.includes('CREATE TABLE CHAT_MESSAGES') && !upper.includes('CHAT_MESSAGES_GROUPED');
+        return (
+          upper.includes('CREATE TABLE CHAT_MESSAGES') && !upper.includes('CHAT_MESSAGES_GROUPED')
+        );
       });
       expect(createStatements.length).toBe(1);
     });
@@ -278,9 +302,10 @@ describe('DO Migrations', () => {
       // activity_events: 1 (session_id, created_at partial) from migration 022
       // chat_sessions: 1 (created_by_user_id) from migration 023
       // session_attention_markers: 1 (next_escalation_at partial) from migration 026
+      // delivery-aware attention expiry: 1 from migration 026
       // session_inbox: 2 (durable delivery due + claims) from migration 027
       // checkpoint_episodes: 2 (session + state) from migration 027
-      expect(indexes.length).toBe(45);
+      expect(indexes.length).toBe(46);
     });
   });
 });
