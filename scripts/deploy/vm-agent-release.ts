@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, type ExecFileSyncOptionsWithStringEncoding } from 'node:child_process';
 import { createHash } from 'node:crypto';
 
 export const VM_AGENT_REQUIRED_VERSION_BINDING = 'VM_AGENT_REQUIRED_VERSION';
@@ -55,32 +55,40 @@ function requireGitCommitSha(ref: string): string {
   return commitSha;
 }
 
+function runGit(repositoryRoot: string, args: string[]): string {
+  const options: ExecFileSyncOptionsWithStringEncoding = {
+    cwd: repositoryRoot,
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  };
+  // Security: every dynamic ref in the private callers is a strict hex SHA,
+  // arguments never enter a shell, and Git receives an option terminator.
+  // Sonar cannot infer the custom validator, so suppress that false positive.
+  return execFileSync('git', args, options); // NOSONAR
+}
+
 export function createGitBuildInputReader(repositoryRoot: string): VmAgentBuildInputReader {
   return {
     listTrackedInputs(ref) {
       const commitSha = requireGitCommitSha(ref);
-      return execFileSync(
-        'git',
-        ['ls-tree', '-r', '-z', '--end-of-options', commitSha, '--', VM_AGENT_SOURCE_PATH],
-        {
-          cwd: repositoryRoot,
-          encoding: 'utf8',
-          stdio: ['ignore', 'pipe', 'pipe'],
-        }
-      );
+      return runGit(repositoryRoot, [
+        'ls-tree',
+        '-r',
+        '-z',
+        '--end-of-options',
+        commitSha,
+        '--',
+        VM_AGENT_SOURCE_PATH,
+      ]);
     },
     readCompatibilityVersion(ref) {
       const commitSha = requireGitCommitSha(ref);
       try {
-        return execFileSync(
-          'git',
-          ['show', '--end-of-options', `${commitSha}:${VM_AGENT_COMPATIBILITY_MARKER_PATH}`],
-          {
-            cwd: repositoryRoot,
-            encoding: 'utf8',
-            stdio: ['ignore', 'pipe', 'pipe'],
-          }
-        );
+        return runGit(repositoryRoot, [
+          'show',
+          '--end-of-options',
+          `${commitSha}:${VM_AGENT_COMPATIBILITY_MARKER_PATH}`,
+        ]);
       } catch {
         return null;
       }
