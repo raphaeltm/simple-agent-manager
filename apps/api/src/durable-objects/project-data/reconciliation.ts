@@ -12,16 +12,6 @@
  * - Sessions with active `needs_input` attention markers
  * - Sessions that already have an unresolved `reconciliation_checkin` marker
  */
-import {
-  DEFAULT_TASK_RECONCILIATION_IDLE_MS,
-  DEFAULT_TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP,
-  DEFAULT_TASK_RECONCILIATION_MIN_ALARM_DELAY_MS,
-  DEFAULT_TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS,
-  DEFAULT_TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS,
-  DEFAULT_TASK_RECONCILIATION_PROMPT_HARD_STALL_MS,
-  DEFAULT_TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS,
-  DEFAULT_TASK_RECONCILIATION_RESPONSE_DEADLINE_MS,
-} from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import type { Env as WorkerEnv } from '../../env';
@@ -35,6 +25,16 @@ import {
   type ReconciliationProcessingHooks,
   terminallyFailDeadTarget,
 } from './reconciliation-dead-target';
+import {
+  maxCandidatesPerSweep,
+  minReconciliationAlarmDelayMs,
+  nodeHeartbeatStaleMs,
+  promptHardStallMs,
+  promptSoftStallMs,
+  reconciliationDeadlineMs,
+  reconciliationIdleMs,
+  reconciliationNodeCallTimeoutMs,
+} from './reconciliation-thresholds';
 import { upsertActivityState } from './session-state';
 import type { Env as DOEnv } from './types';
 
@@ -87,76 +87,6 @@ type WorkspaceDeliveryTargetResult =
       userId: string | null;
       projectId: string | null;
     };
-
-function envNumber(env: DOEnv, key: string, fallback: number): number {
-  const value = Number.parseInt(
-    (env as unknown as Record<string, string | undefined>)[key] ?? '',
-    10
-  );
-  return Number.isFinite(value) && value > 0 ? value : fallback;
-}
-
-function reconciliationIdleMs(env: DOEnv): number {
-  return envNumber(env, 'TASK_RECONCILIATION_IDLE_MS', DEFAULT_TASK_RECONCILIATION_IDLE_MS);
-}
-
-function reconciliationDeadlineMs(env: DOEnv): number {
-  return envNumber(
-    env,
-    'TASK_RECONCILIATION_RESPONSE_DEADLINE_MS',
-    DEFAULT_TASK_RECONCILIATION_RESPONSE_DEADLINE_MS
-  );
-}
-
-function promptSoftStallMs(env: DOEnv): number {
-  return envNumber(
-    env,
-    'TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS',
-    DEFAULT_TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS
-  );
-}
-
-function promptHardStallMs(env: DOEnv): number {
-  const softMs = promptSoftStallMs(env);
-  const hardMs = envNumber(
-    env,
-    'TASK_RECONCILIATION_PROMPT_HARD_STALL_MS',
-    DEFAULT_TASK_RECONCILIATION_PROMPT_HARD_STALL_MS
-  );
-  return Math.max(hardMs, softMs);
-}
-
-function minReconciliationAlarmDelayMs(env: DOEnv): number {
-  return envNumber(
-    env,
-    'TASK_RECONCILIATION_MIN_ALARM_DELAY_MS',
-    DEFAULT_TASK_RECONCILIATION_MIN_ALARM_DELAY_MS
-  );
-}
-
-function maxCandidatesPerSweep(env: DOEnv): number {
-  return envNumber(
-    env,
-    'TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP',
-    DEFAULT_TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP
-  );
-}
-
-function nodeHeartbeatStaleMs(env: DOEnv): number {
-  return envNumber(
-    env,
-    'TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS',
-    DEFAULT_TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS
-  );
-}
-
-function reconciliationNodeCallTimeoutMs(env: DOEnv): number {
-  return envNumber(
-    env,
-    'TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS',
-    DEFAULT_TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS
-  );
-}
 
 /**
  * Find task-mode sessions that are idle and eligible for a SAM check-in.
