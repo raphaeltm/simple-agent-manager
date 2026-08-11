@@ -67,7 +67,7 @@ Full design/research context is in SAM idea `01KZPTT49W10FC1P9G9RQEK8M1`.
       demo instructions.
 - [x] Add a local fake-server/transcript smoke test covering first prompt,
       follow-up prompt, assistant notifications, cancellation, and request shapes.
-- [ ] Run proportional syntax/smoke validation, targeted reviewers, and local PR
+- [x] Run proportional syntax/smoke validation, targeted reviewers, and local PR
       evidence checks. Do not deploy to staging.
 - [ ] Push the assigned branch and open a draft PR. Do not merge.
 
