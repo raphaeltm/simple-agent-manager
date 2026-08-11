@@ -1,3 +1,8 @@
+// FILE SIZE EXCEPTION: Hand-maintained OpenAPI document literal with a byte-exact
+// generated-artifact contract (openapi:check regenerates apps/api/openapi/sam-cli.openapi.json
+// from this file and diffs it byte-for-byte; apps/api/tests/unit/openapi/sam-cli-openapi.test.ts
+// asserts the same equality). Splitting the spec literal across modules adds import complexity
+// and artifact-drift risk without a reviewability benefit. See .claude/rules/18-file-size-limits.md
 type SchemaObject = {
   type?: string | string[];
   format?: string;
