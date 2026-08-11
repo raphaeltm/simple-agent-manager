@@ -16,6 +16,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord, optionalJsonRecord } from '../lib/runtime-validation';
+import { CfApiError, redactSensitiveData } from './observability-cf-support';
 import {
   DEFAULT_MAX_CONTEXT_LENGTH,
   DEFAULT_MAX_MESSAGE_LENGTH,
@@ -27,7 +28,6 @@ import {
   serializeBoundedContext as boundContext,
   truncate,
 } from './observability-fields';
-import { REDACTED, redactSecretPatterns } from './secret-redaction';
 
 // =============================================================================
 // Constants (configurable via env)
@@ -49,6 +49,11 @@ const VALID_LEVELS = new Set<string>(['error', 'warn', 'info']);
 // Field-bounding helpers live in observability-fields.ts (rule 18 split);
 // re-exported here so existing consumers keep their import path.
 export { type ObservabilityFieldLimitEnv, serializeBoundedContext } from './observability-fields';
+
+// CF Observability API error type + secret redaction live in
+// observability-cf-support.ts (rule 18 split); re-exported here so existing
+// consumers keep their import path.
+export { CfApiError, redactSensitiveData } from './observability-cf-support';
 
 function generateId(): string {
   return crypto.randomUUID();
@@ -766,37 +771,4 @@ export async function queryCloudflareLogs(input: QueryCloudflarLogsInput): Promi
     hasMore: nextCursor !== null && logs.length >= limit,
     queryId,
   };
-}
-
-/**
- * Remove potentially sensitive fields from CF API response details.
- */
-const SENSITIVE_KEY_PATTERN =
-  /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|token|secret|password|private[-_]?key|user[-_]?id|ip[-_]?address|user[-_]?agent)$/i;
-
-function redactString(value: string): string {
-  return redactSecretPatterns(value);
-}
-
-/** Deterministically redact nested tool/log data before it can enter model context. */
-export function redactSensitiveData<T>(value: T): T {
-  if (typeof value === 'string') return redactString(value) as T;
-  if (Array.isArray(value)) return value.map((item) => redactSensitiveData(item)) as T;
-  if (!value || typeof value !== 'object') return value;
-
-  const result: Record<string, unknown> = {};
-  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
-    result[key] = SENSITIVE_KEY_PATTERN.test(key) ? REDACTED : redactSensitiveData(nested);
-  }
-  return result as T;
-}
-
-/**
- * Error class for CF API failures — surfaces a safe message.
- */
-export class CfApiError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'CfApiError';
-  }
 }
