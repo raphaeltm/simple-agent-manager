@@ -1,38 +1,4 @@
-import {
-  AlertTriangle,
-  ArrowRight,
-  BarChart3,
-  Bell,
-  Bot,
-  Cloud,
-  Cpu,
-  DollarSign,
-  FolderKanban,
-  Gauge,
-  Github,
-  Home,
-  Key,
-  KeyRound,
-  LayoutDashboard,
-  LineChart,
-  ListChecks,
-  LogOut,
-  Map,
-  MessageSquare,
-  MessageSquarePlus,
-  Monitor,
-  Moon,
-  Plus,
-  Radio,
-  ScrollText,
-  Search,
-  Server,
-  Settings,
-  Shield,
-  Sun,
-  Users,
-  Wrench,
-} from 'lucide-react';
+import { ArrowRight, FolderKanban, MessageSquare, Search, Server } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useLocation, useNavigate } from 'react-router';
@@ -41,10 +7,14 @@ import { useTheme } from '../contexts/ThemeContext';
 import { useCommandPaletteContext } from '../hooks/useCommandPaletteContext';
 import type { SessionSummaryItem } from '../lib/api';
 import { getAllChats, listNodes, listProjects } from '../lib/api';
-import { signOut } from '../lib/auth';
-import { fuzzyMatch } from '../lib/fuzzy-match';
 import { isMacPlatform } from '../lib/keyboard-shortcuts';
 import { useAuth } from './AuthProvider';
+import { buildActionItems } from './global-command-palette-action-items';
+import { buildResultGroups } from './global-command-palette-groups';
+import { HighlightedText } from './global-command-palette-highlighted-text';
+import { buildNavigationItems } from './global-command-palette-navigation-items';
+import type { PaletteResult } from './global-command-palette-types';
+import { resultKey } from './global-command-palette-types';
 
 // ── Configurable limits ──
 
@@ -59,117 +29,10 @@ const MAX_RESULTS_PER_CATEGORY = parseInt(
     String(DEFAULT_MAX_RESULTS_PER_CATEGORY)
 );
 
-// ── Result types ──
-
-interface NavigationResult {
-  kind: 'navigation';
-  id: string;
-  label: string;
-  path: string;
-  icon: React.ReactNode;
-  score: number;
-  matches: number[];
-}
-
-interface ProjectResult {
-  kind: 'project';
-  id: string;
-  label: string;
-  path: string;
-  score: number;
-  matches: number[];
-}
-
-interface NodeResult {
-  kind: 'node';
-  id: string;
-  label: string;
-  path: string;
-  score: number;
-  matches: number[];
-}
-
-interface ChatResult {
-  kind: 'chat';
-  id: string;
-  label: string;
-  path: string;
-  projectName: string;
-  createdAt: number;
-  score: number;
-  matches: number[];
-}
-
-interface ActionResult {
-  kind: 'action';
-  id: string;
-  label: string;
-  action: () => void;
-  icon: React.ReactNode;
-  score: number;
-  matches: number[];
-}
-
-type PaletteResult = NavigationResult | ProjectResult | NodeResult | ChatResult | ActionResult;
-
-interface CategoryGroup {
-  category: string;
-  results: PaletteResult[];
-}
-
 // ── Props ──
 
 interface GlobalCommandPaletteProps {
   onClose: () => void;
-}
-
-// ── Helpers ──
-
-/** Render text with matched character indices highlighted. */
-function HighlightedText({ text, matches }: { text: string; matches: number[] }) {
-  if (matches.length === 0) return <>{text}</>;
-
-  const matchSet = new Set(matches);
-  const parts: Array<{ text: string; highlighted: boolean }> = [];
-  let current = '';
-  let currentHighlighted = false;
-
-  for (let i = 0; i < text.length; i++) {
-    // text.length-bounded index, so text[i] is always defined here; the
-    // `continue` is unreachable but required for type narrowing.
-    const ch = text[i];
-    if (ch === undefined) continue;
-    const isMatch = matchSet.has(i);
-    if (i === 0) {
-      currentHighlighted = isMatch;
-      current = ch;
-    } else if (isMatch === currentHighlighted) {
-      current += ch;
-    } else {
-      parts.push({ text: current, highlighted: currentHighlighted });
-      current = ch;
-      currentHighlighted = isMatch;
-    }
-  }
-  if (current) parts.push({ text: current, highlighted: currentHighlighted });
-
-  return (
-    <>
-      {parts.map((part, i) =>
-        part.highlighted ? (
-          <span key={i} className="text-accent font-semibold">
-            {part.text}
-          </span>
-        ) : (
-          <span key={i}>{part.text}</span>
-        )
-      )}
-    </>
-  );
-}
-
-function resultKey(result: PaletteResult): string {
-  return `${result.kind}:${result.id}`;
 }
 
 // ── Component ──
@@ -242,407 +105,40 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   }, []);
 
   // Build navigation items
-  const navigationItems = useMemo(() => {
-    const items: Array<{ id: string; label: string; path: string; icon: React.ReactNode }> = [
-      { id: 'nav-dashboard', label: 'Home', path: '/dashboard', icon: <Home size={14} /> },
-      { id: 'nav-chats', label: 'Chats', path: '/chats', icon: <MessageSquare size={14} /> },
-      {
-        id: 'nav-projects',
-        label: 'Projects',
-        path: '/projects',
-        icon: <FolderKanban size={14} />,
-      },
-      { id: 'nav-nodes', label: 'Nodes', path: '/nodes', icon: <Server size={14} /> },
-      {
-        id: 'nav-workspaces',
-        label: 'Workspaces',
-        path: '/workspaces',
-        icon: <Monitor size={14} />,
-      },
-      { id: 'nav-map', label: 'Map', path: '/account-map', icon: <Map size={14} /> },
-      { id: 'nav-tools', label: 'Tools', path: '/tools', icon: <Wrench size={14} /> },
-      { id: 'nav-settings', label: 'Settings', path: '/settings', icon: <Settings size={14} /> },
-      // Settings deep-links (always available)
-      {
-        id: 'nav-settings-cloud-provider',
-        label: 'Settings: Cloud Provider',
-        path: '/settings/cloud-provider',
-        icon: <Cloud size={14} />,
-      },
-      {
-        id: 'nav-settings-github',
-        label: 'Settings: GitHub',
-        path: '/settings/github',
-        icon: <Github size={14} />,
-      },
-      {
-        id: 'nav-settings-agents',
-        label: 'Settings: Agents',
-        path: '/settings/agents',
-        icon: <Bot size={14} />,
-      },
-      {
-        id: 'nav-settings-notifications',
-        label: 'Settings: Notifications',
-        path: '/settings/notifications',
-        icon: <Bell size={14} />,
-      },
-      {
-        id: 'nav-settings-usage',
-        label: 'Settings: Usage',
-        path: '/settings/usage',
-        icon: <BarChart3 size={14} />,
-      },
-      {
-        id: 'nav-settings-api-tokens',
-        label: 'Settings: API Tokens',
-        path: '/settings/api-tokens',
-        icon: <Key size={14} />,
-      },
-    ];
-    if (isSuperadmin) {
-      items.push(
-        { id: 'nav-admin', label: 'Admin', path: '/admin', icon: <Shield size={14} /> },
-        {
-          id: 'nav-admin-users',
-          label: 'Admin: Users',
-          path: '/admin/users',
-          icon: <Users size={14} />,
-        },
-        {
-          id: 'nav-admin-credentials',
-          label: 'Admin: Credentials',
-          path: '/admin/credentials',
-          icon: <KeyRound size={14} />,
-        },
-        {
-          id: 'nav-admin-ai-proxy',
-          label: 'Admin: AI Proxy',
-          path: '/admin/ai-proxy',
-          icon: <Cpu size={14} />,
-        },
-        {
-          id: 'nav-admin-trials',
-          label: 'Admin: Trials',
-          path: '/admin/trials',
-          icon: <ListChecks size={14} />,
-        },
-        {
-          id: 'nav-admin-costs',
-          label: 'Admin: Costs',
-          path: '/admin/costs',
-          icon: <DollarSign size={14} />,
-        },
-        {
-          id: 'nav-admin-usage',
-          label: 'Admin: Usage',
-          path: '/admin/usage',
-          icon: <BarChart3 size={14} />,
-        },
-        {
-          id: 'nav-admin-quotas',
-          label: 'Admin: Quotas',
-          path: '/admin/quotas',
-          icon: <Gauge size={14} />,
-        },
-        {
-          id: 'nav-admin-errors',
-          label: 'Admin: Errors',
-          path: '/admin/errors',
-          icon: <AlertTriangle size={14} />,
-        },
-        {
-          id: 'nav-admin-overview',
-          label: 'Admin: Overview',
-          path: '/admin/overview',
-          icon: <LayoutDashboard size={14} />,
-        },
-        {
-          id: 'nav-admin-logs',
-          label: 'Admin: Logs',
-          path: '/admin/logs',
-          icon: <ScrollText size={14} />,
-        },
-        {
-          id: 'nav-admin-stream',
-          label: 'Admin: Stream',
-          path: '/admin/stream',
-          icon: <Radio size={14} />,
-        },
-        {
-          id: 'nav-admin-analytics',
-          label: 'Admin: Analytics',
-          path: '/admin/analytics',
-          icon: <LineChart size={14} />,
-        }
-      );
-    }
-    return items;
-  }, [isSuperadmin]);
+  const navigationItems = useMemo(() => buildNavigationItems(isSuperadmin), [isSuperadmin]);
 
   // Build action items
-  const actionItems = useMemo(() => {
-    const items: Array<{ id: string; label: string; action: () => void; icon: React.ReactNode }> = [
-      {
-        id: 'action-new-project',
-        label: 'New Project',
-        action: () => navigate('/projects/new'),
-        icon: <Plus size={14} />,
-      },
-      {
-        id: 'action-create-node',
-        label: 'Go to Nodes',
-        action: () => navigate('/nodes'),
-        icon: <Server size={14} />,
-      },
-      {
-        id: 'action-toggle-theme',
-        label: 'Toggle Theme',
-        action: () => setTheme(isDark ? 'light' : 'dark'),
-        icon: isDark ? <Sun size={14} /> : <Moon size={14} />,
-      },
-      {
-        id: 'action-sign-out',
-        label: 'Sign Out',
-        action: () => {
-          void signOut();
-        },
-        icon: <LogOut size={14} />,
-      },
-    ];
-    return items;
-  }, [navigate, isDark, setTheme]);
+  const actionItems = useMemo(
+    () => buildActionItems({ navigate, isDark, setTheme }),
+    [navigate, isDark, setTheme]
+  );
 
   // Build results with fuzzy matching
-  const groups = useMemo(() => {
-    const result: CategoryGroup[] = [];
-    const currentProjectId = context.projectId;
-
-    // Context — URL-aware actions shown first
-    if (contextActions.length > 0) {
-      const ctxResults: ActionResult[] = [];
-      for (const ctxAction of contextActions) {
-        if (!query) {
-          ctxResults.push({
-            kind: 'action',
-            id: ctxAction.id,
-            label: ctxAction.label,
-            action: ctxAction.action,
-            icon: ctxAction.icon,
-            score: 0,
-            matches: [],
-          });
-        } else {
-          const m = fuzzyMatch(query, ctxAction.label);
-          if (m) {
-            ctxResults.push({
-              kind: 'action',
-              id: ctxAction.id,
-              label: ctxAction.label,
-              action: ctxAction.action,
-              icon: ctxAction.icon,
-              score: m.score,
-              matches: m.matches,
-            });
-          }
-        }
-      }
-      ctxResults.sort((a, b) => b.score - a.score);
-      if (ctxResults.length > 0) {
-        result.push({ category: 'Context', results: ctxResults });
-      }
-    }
-
-    // Navigation
-    const navResults: NavigationResult[] = [];
-    for (const item of navigationItems) {
-      if (!query) {
-        navResults.push({ kind: 'navigation', ...item, score: 0, matches: [] });
-      } else {
-        const m = fuzzyMatch(query, item.label);
-        if (m) {
-          navResults.push({ kind: 'navigation', ...item, score: m.score, matches: m.matches });
-        }
-      }
-    }
-    navResults.sort((a, b) => b.score - a.score);
-    if (navResults.length > 0) {
-      result.push({ category: 'Navigation', results: navResults });
-    }
-
-    // Projects (only if we have data)
-    if (projects.length > 0) {
-      const projectResults: ProjectResult[] = [];
-      for (const project of projects) {
-        if (!query) {
-          projectResults.push({
-            kind: 'project',
-            id: project.id,
-            label: project.name,
-            path: `/projects/${project.id}`,
-            score: 0,
-            matches: [],
-          });
-        } else {
-          const m = fuzzyMatch(query, project.name);
-          if (m) {
-            projectResults.push({
-              kind: 'project',
-              id: project.id,
-              label: project.name,
-              path: `/projects/${project.id}`,
-              score: m.score,
-              matches: m.matches,
-            });
-          }
-        }
-      }
-      projectResults.sort((a, b) => b.score - a.score);
-      const capped = projectResults.slice(0, MAX_RESULTS_PER_CATEGORY);
-      if (capped.length > 0) {
-        result.push({ category: 'Projects', results: capped });
-      }
-    }
-
-    // Chats (only if we have sessions)
-    if (chatSessions.length > 0) {
-      const chatResults: ChatResult[] = [];
-      for (const session of chatSessions) {
-        const displayLabel = session.topic || 'Untitled Chat';
-        if (!query) {
-          chatResults.push({
-            kind: 'chat',
-            id: session.id,
-            label: displayLabel,
-            path: `/projects/${session.projectId}/chat/${session.id}`,
-            projectName: session.projectName,
-            createdAt: session.createdAt,
-            score: 0,
-            matches: [],
-          });
-        } else {
-          const m = fuzzyMatch(query, displayLabel);
-          if (m) {
-            chatResults.push({
-              kind: 'chat',
-              id: session.id,
-              label: displayLabel,
-              path: `/projects/${session.projectId}/chat/${session.id}`,
-              projectName: session.projectName,
-              createdAt: session.createdAt,
-              score: m.score,
-              matches: m.matches,
-            });
-          }
-        }
-      }
-      // Sort: when inside a project, prioritize that project's chats.
-      // Within same-project group, sort by score then recency.
-      chatResults.sort((a, b) => {
-        if (currentProjectId) {
-          const aIsCurrentProject =
-            chatSessions.find((s) => s.id === a.id)?.projectId === currentProjectId;
-          const bIsCurrentProject =
-            chatSessions.find((s) => s.id === b.id)?.projectId === currentProjectId;
-          if (aIsCurrentProject && !bIsCurrentProject) return -1;
-          if (!aIsCurrentProject && bIsCurrentProject) return 1;
-        }
-        return b.score - a.score || b.createdAt - a.createdAt;
-      });
-      const cappedChats = chatResults.slice(0, MAX_RESULTS_PER_CATEGORY);
-      if (cappedChats.length > 0) {
-        result.push({ category: 'Chats', results: cappedChats });
-      }
-    }
-
-    // Quick Actions — per-project actions (only when searching)
-    if (projects.length > 0 && query) {
-      const quickActionResults: ActionResult[] = [];
-      for (const project of projects) {
-        const searchText = `${project.name} New Chat`;
-        const m = fuzzyMatch(query, searchText);
-        if (m) {
-          const projectId = project.id;
-          quickActionResults.push({
-            kind: 'action',
-            id: `quick-new-chat-${projectId}`,
-            label: searchText,
-            action: () => navigate(`/projects/${projectId}/chat`),
-            icon: <MessageSquarePlus size={14} />,
-            score: m.score,
-            matches: m.matches,
-          });
-        }
-      }
-      quickActionResults.sort((a, b) => b.score - a.score);
-      const cappedQuickActions = quickActionResults.slice(0, MAX_RESULTS_PER_CATEGORY);
-      if (cappedQuickActions.length > 0) {
-        result.push({ category: 'Quick Actions', results: cappedQuickActions });
-      }
-    }
-
-    // Nodes (only if we have data)
-    if (nodes.length > 0) {
-      const nodeResults: NodeResult[] = [];
-      for (const node of nodes) {
-        if (!query) {
-          nodeResults.push({
-            kind: 'node',
-            id: node.id,
-            label: node.name,
-            path: `/nodes/${node.id}`,
-            score: 0,
-            matches: [],
-          });
-        } else {
-          const m = fuzzyMatch(query, node.name);
-          if (m) {
-            nodeResults.push({
-              kind: 'node',
-              id: node.id,
-              label: node.name,
-              path: `/nodes/${node.id}`,
-              score: m.score,
-              matches: m.matches,
-            });
-          }
-        }
-      }
-      nodeResults.sort((a, b) => b.score - a.score);
-      const capped = nodeResults.slice(0, MAX_RESULTS_PER_CATEGORY);
-      if (capped.length > 0) {
-        result.push({ category: 'Nodes', results: capped });
-      }
-    }
-
-    // Actions
-    const actionResults: ActionResult[] = [];
-    for (const item of actionItems) {
-      if (!query) {
-        actionResults.push({ kind: 'action', ...item, score: 0, matches: [] });
-      } else {
-        const m = fuzzyMatch(query, item.label);
-        if (m) {
-          actionResults.push({ kind: 'action', ...item, score: m.score, matches: m.matches });
-        }
-      }
-    }
-    actionResults.sort((a, b) => b.score - a.score);
-    if (actionResults.length > 0) {
-      result.push({ category: 'Actions', results: actionResults });
-    }
-
-    return result;
-  }, [
-    query,
-    navigationItems,
-    projects,
-    nodes,
-    chatSessions,
-    actionItems,
-    contextActions,
-    context.projectId,
-  ]);
+  const groups = useMemo(
+    () =>
+      buildResultGroups({
+        query,
+        navigationItems,
+        projects,
+        nodes,
+        chatSessions,
+        actionItems,
+        contextActions,
+        currentProjectId: context.projectId,
+        navigate,
+        maxResultsPerCategory: MAX_RESULTS_PER_CATEGORY,
+      }),
+    [
+      query,
+      navigationItems,
+      projects,
+      nodes,
+      chatSessions,
+      actionItems,
+      contextActions,
+      context.projectId,
+    ]
+  );
 
   // Flatten results for keyboard navigation
   const flatResults = useMemo(() => {
