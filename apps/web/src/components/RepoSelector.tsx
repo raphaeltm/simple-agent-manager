@@ -229,10 +229,12 @@ export function RepoSelector({
           style={{
             position: 'fixed',
             zIndex: 'var(--sam-z-dropdown)' as unknown as number,
-            ...(containerRef.current ? (() => {
-              const r = containerRef.current!.getBoundingClientRect();
+            ...(() => {
+              const container = containerRef.current;
+              if (!container) return {};
+              const r = container.getBoundingClientRect();
               return { top: r.bottom + 4, left: r.left, width: r.width };
-            })() : {}),
+            })(),
             borderRadius: 'var(--sam-radius-md)',
             boxShadow: 'var(--sam-shadow-overlay)',
             maxHeight: '15rem',

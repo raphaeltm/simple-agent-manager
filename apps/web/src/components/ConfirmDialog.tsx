@@ -93,8 +93,11 @@ export function ConfirmDialog({
         return;
       }
 
-      const first = focusable[0]!;
-      const last = focusable[focusable.length - 1]!;
+      const first = focusable.at(0);
+      const last = focusable.at(-1);
+      if (!first || !last) {
+        return;
+      }
       if (e.shiftKey && document.activeElement === first) {
         e.preventDefault();
         last.focus();

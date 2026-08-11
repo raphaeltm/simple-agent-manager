@@ -217,8 +217,8 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
     setAttachments((prev) => [...prev, ...newFiles]);
 
     // Start uploads
-    for (let i = 0; i < newFiles.length; i++) {
-      void uploadFile(newFiles[i]!.file, startIndex + i);
+    for (const [i, newFile] of newFiles.entries()) {
+      void uploadFile(newFile.file, startIndex + i);
     }
   }, [attachments, uploadFile]);
 
@@ -227,9 +227,9 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   }, []);
 
   const buildOptions = (): TaskSubmitOptions => {
-    const completedAttachments = attachments
-      .filter((a) => a.status === 'complete' && a.ref)
-      .map((a) => a.ref!);
+    const completedAttachments = attachments.flatMap((a) =>
+      a.status === 'complete' && a.ref ? [a.ref] : []
+    );
 
     const base = hasProfile
       ? {

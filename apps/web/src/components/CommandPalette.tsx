@@ -108,13 +108,12 @@ function buildResults(
         } else {
           best = pathMatch;
         }
+      } else if (nameMatch) {
+        // Only a name match — adjust indices to reference the full path
+        const offset = path.length - fileName.length;
+        best = { score: nameMatch.score, matches: nameMatch.matches.map((i) => i + offset) };
       } else {
-        best = pathMatch ?? nameMatch
-          ? (nameMatch ? {
-              score: nameMatch!.score,
-              matches: nameMatch!.matches.map((i) => i + path.length - fileName.length),
-            } : pathMatch)
-          : null;
+        best = pathMatch;
       }
       if (best) {
         fileResults.push({ kind: 'file', path, label: path, score: best.score, matches: best.matches });
@@ -173,15 +172,19 @@ function HighlightedText({ text, matches }: { text: string; matches: number[] })
   let currentHighlighted = false;
 
   for (let i = 0; i < text.length; i++) {
+    // text.length-bounded index, so text[i] is always defined here; the
+    // `continue` is unreachable but required for type narrowing.
+    const ch = text[i];
+    if (ch === undefined) continue;
     const isMatch = matchSet.has(i);
     if (i === 0) {
       currentHighlighted = isMatch;
-      current = text[i]!;
+      current = ch;
     } else if (isMatch === currentHighlighted) {
-      current += text[i];
+      current += ch;
     } else {
       parts.push({ text: current, highlighted: currentHighlighted });
-      current = text[i]!;
+      current = ch;
       currentHighlighted = isMatch;
     }
   }

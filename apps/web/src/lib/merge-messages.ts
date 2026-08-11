@@ -226,5 +226,5 @@ function mergePrepend(
  * Used by autoscroll to detect genuinely new messages (vs. dedup artifacts).
  */
 export function getLastMessageId(messages: ChatMessageResponse[]): string | null {
-  return messages.length > 0 ? messages[messages.length - 1]!.id : null;
+  return messages.at(-1)?.id ?? null;
 }

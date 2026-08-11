@@ -107,7 +107,10 @@ export function SettingsNotifications() {
         );
         if (existing >= 0) {
           const updated = [...prev];
-          updated[existing] = { ...updated[existing]!, enabled: nextEnabled };
+          const existingPref = updated[existing];
+          if (existingPref) {
+            updated[existing] = { ...existingPref, enabled: nextEnabled };
+          }
           return updated;
         }
         return [

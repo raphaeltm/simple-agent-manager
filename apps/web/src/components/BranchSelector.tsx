@@ -174,10 +174,12 @@ export function BranchSelector({
           style={{
             position: 'fixed',
             zIndex: 'var(--sam-z-dropdown)' as unknown as number,
-            ...(containerRef.current ? (() => {
-              const r = containerRef.current!.getBoundingClientRect();
+            ...(() => {
+              const container = containerRef.current;
+              if (!container) return {};
+              const r = container.getBoundingClientRect();
               return { top: r.bottom + 4, left: r.left, width: r.width };
-            })() : {}),
+            })(),
             borderRadius: 'var(--sam-radius-md)',
             boxShadow: 'var(--sam-shadow-overlay)',
             maxHeight: compact ? '12rem' : '15rem',
@@ -247,10 +249,12 @@ export function BranchSelector({
           style={{
             position: 'fixed',
             zIndex: 'var(--sam-z-dropdown)' as unknown as number,
-            ...(containerRef.current ? (() => {
-              const r = containerRef.current!.getBoundingClientRect();
+            ...(() => {
+              const container = containerRef.current;
+              if (!container) return {};
+              const r = container.getBoundingClientRect();
               return { top: r.bottom + 4, left: r.left, width: r.width };
-            })() : {}),
+            })(),
             borderRadius: 'var(--sam-radius-md)',
             boxShadow: 'var(--sam-shadow-overlay)',
             padding: '0.5rem 0.75rem',

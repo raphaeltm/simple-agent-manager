@@ -115,12 +115,12 @@ export function GitLabProjectSelector({
             style={{
               position: 'fixed',
               zIndex: 'var(--sam-z-dropdown)' as unknown as number,
-              ...(containerRef.current
-                ? (() => {
-                    const rect = containerRef.current!.getBoundingClientRect();
-                    return { top: rect.bottom + 4, left: rect.left, width: rect.width };
-                  })()
-                : {}),
+              ...(() => {
+                const container = containerRef.current;
+                if (!container) return {};
+                const rect = container.getBoundingClientRect();
+                return { top: rect.bottom + 4, left: rect.left, width: rect.width };
+              })(),
               borderRadius: 'var(--sam-radius-md)',
               boxShadow: 'var(--sam-shadow-overlay)',
               maxHeight: '15rem',

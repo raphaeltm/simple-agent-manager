@@ -29,7 +29,8 @@ export function HierarchyNodeCard({
       type="button"
       data-focus={isFocus ? 'true' : undefined}
       onClick={() => {
-        if (hasSession) onNavigate(node.sessionId!);
+        const { sessionId } = node;
+        if (sessionId != null) onNavigate(sessionId);
       }}
       disabled={isDisabled}
       title={isDisabled ? 'Task is queued — no session yet' : node.task.title}

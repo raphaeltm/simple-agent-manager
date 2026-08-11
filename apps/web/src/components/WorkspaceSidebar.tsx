@@ -505,7 +505,7 @@ export const WorkspaceSidebar: FC<WorkspaceSidebarProps> = ({
                       <button
                         onClick={(e) => {
                           e.stopPropagation();
-                          onStopSession!(tab.sessionId);
+                          onStopSession?.(tab.sessionId);
                         }}
                         title="Stop session"
                         aria-label={`Stop session ${tab.title}`}

@@ -31,7 +31,11 @@ import {
 import { ProfileRuntimeSection } from './ProfileRuntimeSection';
 
 /** Default agent type derived from the catalog — avoids hardcoding 'claude-code' */
-const DEFAULT_AGENT_TYPE = AGENT_CATALOG[0]!.id;
+const defaultAgentCatalogEntry = AGENT_CATALOG[0];
+if (!defaultAgentCatalogEntry) {
+  throw new Error('ProfileFormDialog: AGENT_CATALOG is empty — cannot resolve a default agent type');
+}
+const DEFAULT_AGENT_TYPE = defaultAgentCatalogEntry.id;
 
 interface ProfileFormDialogProps {
   isOpen: boolean;

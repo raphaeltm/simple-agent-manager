@@ -275,10 +275,11 @@ export function useWorkspaceCore(
   // The terminalToken dep ensures events are fetched once the token arrives.
   useEffect(() => {
     if (!id || !workspace?.url || !terminalToken || !isRunning) return;
+    const workspaceUrl = workspace.url;
 
     const fetchEvents = async () => {
       try {
-        const data = await listWorkspaceEvents(workspace.url!, id, terminalToken, 50);
+        const data = await listWorkspaceEvents(workspaceUrl, id, terminalToken, 50);
         setWorkspaceEvents(data.events || []);
       } catch {
         // Events are secondary — polling retries

@@ -36,8 +36,9 @@ interface Props {
 
 /** Custom tooltip for feature adoption chart. */
 function AdoptionTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: { label: string; count: number; unique_users: number } }> }) {
-  if (!active || !payload?.length) return null;
-  const d = payload[0]!.payload;
+  const point = payload?.[0];
+  if (!active || !point) return null;
+  const d = point.payload;
   return (
     <div className="rounded-md px-3 py-2 shadow-lg text-sm" style={chartTooltipStyle}>
       <div className="text-fg-primary font-medium">{d.label}</div>

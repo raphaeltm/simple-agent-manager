@@ -76,7 +76,7 @@ export function useAttachments(projectId: string, setSubmitError: (e: string | n
     if (newFiles.length === 0) return;
     const startIndex = chatAttachments.length;
     setChatAttachments((prev) => [...prev, ...newFiles]);
-    for (let i = 0; i < newFiles.length; i++) { void handleChatFileUpload(newFiles[i]!.file, startIndex + i); }
+    for (const [i, newFile] of newFiles.entries()) { void handleChatFileUpload(newFile.file, startIndex + i); }
   }, [chatAttachments, handleChatFileUpload, setSubmitError]);
 
   const handleRemoveChatAttachment = useCallback((index: number) => {

@@ -43,7 +43,7 @@ import { useSessionTimeline } from './useSessionTimeline';
  */
 function nearestItemId(items: ConversationItem[], timestamp: number): string | undefined {
   if (items.length === 0) return undefined;
-  let candidateId = items[0]!.id;
+  let candidateId = items[0]?.id;
   for (const item of items) {
     const ts = 'timestamp' in item && typeof item.timestamp === 'number' ? item.timestamp : 0;
     if (ts <= timestamp) candidateId = item.id;

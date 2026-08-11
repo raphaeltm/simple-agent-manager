@@ -129,8 +129,9 @@ export function useAdminLogStream(bufferSize = DEFAULT_BUFFER_SIZE): UseAdminLog
         switch (msg.type) {
           case 'log':
             if (msg.entry) {
+              const entry = msg.entry;
               setEntries((prev) => {
-                const next = [...prev, msg.entry!];
+                const next = [...prev, entry];
                 return next.length > bufferSize ? next.slice(next.length - bufferSize) : next;
               });
             }

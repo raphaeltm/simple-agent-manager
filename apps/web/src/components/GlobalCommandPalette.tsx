@@ -136,15 +136,19 @@ function HighlightedText({ text, matches }: { text: string; matches: number[] })
   let currentHighlighted = false;
 
   for (let i = 0; i < text.length; i++) {
+    // text.length-bounded index, so text[i] is always defined here; the
+    // `continue` is unreachable but required for type narrowing.
+    const ch = text[i];
+    if (ch === undefined) continue;
     const isMatch = matchSet.has(i);
     if (i === 0) {
       currentHighlighted = isMatch;
-      current = text[i]!;
+      current = ch;
     } else if (isMatch === currentHighlighted) {
-      current += text[i];
+      current += ch;
     } else {
       parts.push({ text: current, highlighted: currentHighlighted });
-      current = text[i]!;
+      current = ch;
       currentHighlighted = isMatch;
     }
   }

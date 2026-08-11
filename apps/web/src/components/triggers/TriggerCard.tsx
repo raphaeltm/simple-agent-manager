@@ -126,12 +126,12 @@ export const TriggerCard: FC<TriggerCardProps> = ({
                 style={{
                   position: 'fixed',
                   zIndex: 20,
-                  ...(menuBtnRef.current
-                    ? (() => {
-                        const r = menuBtnRef.current!.getBoundingClientRect();
-                        return { top: r.bottom + 4, right: window.innerWidth - r.right };
-                      })()
-                    : {}),
+                  ...(() => {
+                    const menuBtn = menuBtnRef.current;
+                    if (!menuBtn) return {};
+                    const r = menuBtn.getBoundingClientRect();
+                    return { top: r.bottom + 4, right: window.innerWidth - r.right };
+                  })(),
                 }}
               >
                 <button

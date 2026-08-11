@@ -265,7 +265,8 @@ export function useAgentChat({ apiBase }: UseAgentChatOptions): UseAgentChatRetu
                 if (m.id !== agentMsgId) return m;
                 const calls = [...(m.toolCalls || [])];
                 const idx = calls.findIndex((tc) => tc.name === event.tool && !tc.result);
-                if (idx >= 0) calls[idx] = { name: calls[idx]!.name, result: event.result };
+                const existing = idx >= 0 ? calls[idx] : undefined;
+                if (existing) calls[idx] = { name: existing.name, result: event.result };
                 return { ...m, toolCalls: calls };
               }),
             );

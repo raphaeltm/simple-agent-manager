@@ -84,7 +84,8 @@ export function useSessionState(
     () => new Map(configuredAgents.map((a) => [a.id, a.name])),
     [configuredAgents]
   );
-  const defaultAgentId: AgentType | null = configuredAgents.length === 1 ? configuredAgents[0]!.id : null;
+  const defaultAgentId: AgentType | null =
+    configuredAgents.length === 1 ? (configuredAgents.at(0)?.id ?? null) : null;
   const defaultAgentName = defaultAgentId ? (agentNameById.get(defaultAgentId) ?? null) : null;
 
   const activeChatSessionId = viewMode === 'conversation'

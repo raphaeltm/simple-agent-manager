@@ -182,8 +182,15 @@ function parseShortVolume(
     return null;
   }
 
-  const source = parts[0]!;
-  const target = parts[1]!;
+  const [source, target] = parts;
+  if (source === undefined || target === undefined) {
+    // Unreachable given the length check above, but required for type narrowing.
+    errors.push({
+      path,
+      message: `Volume "${spec}" must be in "name:/container/path" format.`,
+    });
+    return null;
+  }
 
   // Detect bind mounts: source starts with / or . or ~
   if (source.startsWith('/') || source.startsWith('.') || source.startsWith('~')) {
@@ -468,9 +475,9 @@ export function extractPortRouteHint(
 
   if (typeof portSpec === 'string') {
     // Formats: "80", "8080:80", "0.0.0.0:8080:80", "80/tcp"
-    const cleaned = portSpec.split('/')[0]!; // Remove protocol suffix
+    const [cleaned = portSpec] = portSpec.split('/'); // Remove protocol suffix
     const parts = cleaned.split(':');
-    const containerPart = parts[parts.length - 1]!;
+    const containerPart = parts.at(-1) ?? cleaned;
     const port = parseInt(containerPart, 10);
     return isNaN(port) ? null : { port, mode: 'public' };
   }
@@ -655,8 +662,11 @@ function parseMemoryString(value: unknown): number | null {
   const match = str.match(/^(\d+(?:\.\d+)?)\s*(b|k|kb|m|mb|g|gb)?$/i);
   if (!match) return null;
 
-  const num = parseFloat(match[1]!);
-  const unit = (match[2] ?? 'b').toLowerCase();
+  const [, numStr, unitStr] = match;
+  if (numStr === undefined) return null; // Unreachable — group 1 is mandatory in the pattern above.
+
+  const num = parseFloat(numStr);
+  const unit = (unitStr ?? 'b').toLowerCase();
 
   switch (unit) {
     case 'b':

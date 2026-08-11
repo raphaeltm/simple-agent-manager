@@ -49,6 +49,8 @@ export const ErrorTrends: FC = () => {
   const maxTotal = data
     ? Math.max(1, ...data.buckets.map((b) => b.total))
     : 1;
+  const firstBucketTimestamp = data?.buckets.at(0)?.timestamp;
+  const lastBucketTimestamp = data?.buckets.at(-1)?.timestamp;
 
   return (
     <Card>
@@ -123,13 +125,13 @@ export const ErrorTrends: FC = () => {
         )}
 
         {/* Time axis labels */}
-        {data && data.buckets.length > 0 && (
+        {data && data.buckets.length > 0 && firstBucketTimestamp && lastBucketTimestamp && (
           <div className="flex justify-between pt-1">
             <Body className="text-[0.65rem] text-fg-muted">
-              {formatTimestamp(data.buckets[0]!.timestamp, range)}
+              {formatTimestamp(firstBucketTimestamp, range)}
             </Body>
             <Body className="text-[0.65rem] text-fg-muted">
-              {formatTimestamp(data.buckets[data.buckets.length - 1]!.timestamp, range)}
+              {formatTimestamp(lastBucketTimestamp, range)}
             </Body>
           </div>
         )}

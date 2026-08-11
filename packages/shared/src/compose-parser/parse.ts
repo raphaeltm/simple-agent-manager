@@ -173,8 +173,9 @@ function validateTopLevelFields(root: Record<string, unknown>, errors: ComposePa
     if (TOP_LEVEL_ALLOWED.has(key)) continue;
 
     // Check denylist
-    if (key in DENIED_TOP_LEVEL_FIELDS) {
-      errors.push({ path: key, message: DENIED_TOP_LEVEL_FIELDS[key]! });
+    const deniedMessage = DENIED_TOP_LEVEL_FIELDS[key];
+    if (deniedMessage !== undefined) {
+      errors.push({ path: key, message: deniedMessage });
       continue;
     }
 
@@ -327,11 +328,12 @@ function parseImageReference(ref: string): UnresolvedImage {
 
   // Check if the first part looks like a registry (contains a dot or colon, or is localhost)
   const parts = ref.split('/');
+  const [firstPart = ''] = parts;
   if (
     parts.length > 1 &&
-    (parts[0]!.includes('.') || parts[0]!.includes(':') || parts[0] === 'localhost')
+    (firstPart.includes('.') || firstPart.includes(':') || firstPart === 'localhost')
   ) {
-    registry = parts[0]!;
+    registry = firstPart;
     remainder = parts.slice(1).join('/');
   } else {
     registry = 'docker.io';

@@ -148,14 +148,16 @@ export function NotificationCenter() {
     const groupMap = new Map<string, { projectId: string | null; projectName: string; notifications: NotificationResponse[] }>();
     for (const n of filteredNotifications) {
       const key = n.projectId ?? 'none';
-      if (!groupMap.has(key)) {
+      let group = groupMap.get(key);
+      if (!group) {
         const metadataProjectName = maybeJsonRecord(n.metadata)?.projectName;
         const projectName = typeof metadataProjectName === 'string'
           ? metadataProjectName
           : (n.projectId ? `Project ${n.projectId.slice(0, 8)}` : 'General');
-        groupMap.set(key, { projectId: n.projectId, projectName, notifications: [] });
+        group = { projectId: n.projectId, projectName, notifications: [] };
+        groupMap.set(key, group);
       }
-      groupMap.get(key)!.notifications.push(n);
+      group.notifications.push(n);
     }
     return { groups: Array.from(groupMap.values()), shouldGroup: true };
   }, [filteredNotifications]);
@@ -220,10 +222,10 @@ export function NotificationCenter() {
               const idx = tabIds.indexOf(activeTab);
               if (e.key === 'ArrowRight') {
                 e.preventDefault();
-                setActiveTab(tabIds[(idx + 1) % tabIds.length]!);
+                setActiveTab(tabIds[(idx + 1) % tabIds.length] ?? activeTab);
               } else if (e.key === 'ArrowLeft') {
                 e.preventDefault();
-                setActiveTab(tabIds[(idx - 1 + tabIds.length) % tabIds.length]!);
+                setActiveTab(tabIds[(idx - 1 + tabIds.length) % tabIds.length] ?? activeTab);
               }
             }}
           >
@@ -479,24 +481,27 @@ function NotificationGroup({
           )}
         </span>
       </button>
-      {!isCollapsed && notifications.map((notification) => (
-        <NotificationItem
-          key={notification.id}
-          notification={notification}
-          onClick={() => onNotificationClick(notification)}
-          onDismiss={(e) => {
-            e.stopPropagation();
-            onDismiss(notification.id);
-          }}
-          onMarkRead={(e) => {
-            e.stopPropagation();
-            onMarkRead(notification.id);
-          }}
-          onViewInProject={notification.projectId && onViewInProject
-            ? () => onViewInProject(notification.projectId!)
-            : undefined}
-        />
-      ))}
+      {!isCollapsed && notifications.map((notification) => {
+        const projectId = notification.projectId;
+        return (
+          <NotificationItem
+            key={notification.id}
+            notification={notification}
+            onClick={() => onNotificationClick(notification)}
+            onDismiss={(e) => {
+              e.stopPropagation();
+              onDismiss(notification.id);
+            }}
+            onMarkRead={(e) => {
+              e.stopPropagation();
+              onMarkRead(notification.id);
+            }}
+            onViewInProject={projectId && onViewInProject
+              ? () => onViewInProject(projectId)
+              : undefined}
+          />
+        );
+      })}
     </div>
   );
 }

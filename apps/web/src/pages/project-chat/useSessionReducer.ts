@@ -213,7 +213,8 @@ function patchSession(
 ): ChatSessionListItem[] {
   const idx = sessions.findIndex((s) => s.id === sessionId);
   if (idx === -1) return sessions;
-  const existing = sessions[idx]!;
+  const existing = sessions[idx];
+  if (!existing) return sessions;
   const updated = updater(existing);
   if (updated === existing) return sessions;
   const next = sessions.slice();

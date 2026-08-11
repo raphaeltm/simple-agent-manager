@@ -20,31 +20,34 @@ function getWorkspaceActions(
   const isTransitional = workspace.status === 'creating' || workspace.status === 'stopping';
 
   if (workspace.status === 'running' || workspace.status === 'recovery') {
-    if (handlers.onStop) {
+    const onStop = handlers.onStop;
+    if (onStop) {
       items.push({
         id: 'stop',
         label: 'Stop',
-        onClick: () => handlers.onStop!(workspace.id),
+        onClick: () => onStop(workspace.id),
       });
     }
   }
 
   if (workspace.status === 'stopped') {
-    if (handlers.onRestart) {
+    const onRestart = handlers.onRestart;
+    if (onRestart) {
       items.push({
         id: 'restart',
         label: 'Restart',
-        onClick: () => handlers.onRestart!(workspace.id),
+        onClick: () => onRestart(workspace.id),
       });
     }
   }
 
-  if (handlers.onDelete) {
+  const onDelete = handlers.onDelete;
+  if (onDelete) {
     items.push({
       id: 'delete',
       label: 'Delete',
       variant: 'danger',
-      onClick: () => handlers.onDelete!(workspace.id),
+      onClick: () => onDelete(workspace.id),
       disabled: isTransitional,
       disabledReason: 'Cannot delete while workspace is transitioning',
     });

@@ -64,7 +64,12 @@ export function buildHierarchyTree(
   // Recursively build tree (bounded depth)
   const MAX_DEPTH = 10;
   function buildNode(taskId: string, depth: number): HierarchyNode {
-    const info = taskInfoMap.get(taskId)!;
+    const info = taskInfoMap.get(taskId);
+    if (!info) {
+      // Every taskId passed to buildNode comes from taskInfoMap's own keys
+      // (see childrenOf construction above and the rootInfo check below).
+      throw new Error(`buildHierarchyTree: taskInfoMap missing entry for task "${taskId}"`);
+    }
     const session = taskToSession.get(taskId);
 
     const childIds = depth < MAX_DEPTH ? (childrenOf.get(taskId) ?? []) : [];

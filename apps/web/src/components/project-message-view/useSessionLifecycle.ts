@@ -355,8 +355,9 @@ export function useSessionLifecycle(
     const RETRY_DELAYS_MS = [2_000, 5_000, 10_000];
 
     async function attemptFetch(attempt = 0) {
+      if (!wsId) return;
       try {
-        const ws = await getWorkspace(wsId!);
+        const ws = await getWorkspace(wsId);
         if (cancelled) return;
         setWorkspace(ws);
         if (ws.nodeId) {
@@ -631,7 +632,9 @@ export function useSessionLifecycle(
             break;
           }
           accumulated.unshift(...data.messages);
-          oldest = data.messages[0]!.createdAt;
+          const firstMessage = data.messages[0];
+          if (!firstMessage) break; // Unreachable — the length check above guarantees this.
+          oldest = firstMessage.createdAt;
           before = oldest;
           more = data.hasMore;
         }

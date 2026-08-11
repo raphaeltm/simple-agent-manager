@@ -127,8 +127,8 @@ export function VoiceButton({ onTranscription, disabled = false, apiUrl, onError
         analyser.getByteFrequencyData(dataArray);
         // Compute average amplitude (0-255), normalize to 0-1
         let sum = 0;
-        for (let i = 0; i < dataArray.length; i++) {
-          sum += dataArray[i]!;
+        for (const value of dataArray) {
+          sum += value;
         }
         const avg = sum / dataArray.length;
         setAmplitude(Math.min(avg / 128, 1)); // 0-1 range, capped

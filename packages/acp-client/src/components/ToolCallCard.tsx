@@ -63,12 +63,13 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
   const handleToggle = async () => {
     if (!hasContent) return;
 
-    if (!expanded && needsLazyLoad && !lazyContent && !loadFailed) {
+    const { messageId } = toolCall;
+    if (!expanded && needsLazyLoad && !lazyContent && !loadFailed && onLoadContent && messageId) {
       setExpanded(true);
       setLoading(true);
       setLoadFailed(false);
       try {
-        const content = await onLoadContent!(toolCall.messageId!);
+        const content = await onLoadContent(messageId);
         setLazyContent(content);
       } catch {
         setLoadFailed(true);

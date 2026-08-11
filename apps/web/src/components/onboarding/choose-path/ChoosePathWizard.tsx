@@ -72,8 +72,9 @@ export function ChoosePathWizard() {
       ).filter((el) => el.offsetParent !== null);
       if (focusable.length === 0) return;
 
-      const first = focusable[0]!;
-      const last = focusable[focusable.length - 1]!;
+      const first = focusable.at(0);
+      const last = focusable.at(-1);
+      if (!first || !last) return;
       const active = document.activeElement;
 
       if (e.shiftKey) {

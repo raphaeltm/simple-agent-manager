@@ -35,7 +35,7 @@ interface MessageBubbleProps {
  * Detect whether a markdown link href looks like a file path rather than a URL.
  * File paths are routed to the file browser instead of opening a new window.
  */
-export function isFilePathHref(href: string | undefined): boolean {
+export function isFilePathHref(href: string | undefined): href is string {
   if (!href) return false;
   // URLs, anchors, and special protocols are not file paths
   if (/^(https?:|ftp:|wss?:|file:|mailto:|#|javascript:|tel:|data:|blob:)/i.test(href)) return false;
@@ -54,7 +54,11 @@ export function isFilePathHref(href: string | undefined): boolean {
 export function parseFilePathRef(ref: string): { path: string; line: number | null } {
   const match = ref.match(/^(.+?):(\d+)$/);
   if (match) {
-    return { path: match[1]!, line: parseInt(match[2]!, 10) };
+    const [, path, lineStr] = match;
+    if (path === undefined || lineStr === undefined) {
+      throw new Error(`parseFilePathRef: regex match unexpectedly missing capture groups for "${ref}"`);
+    }
+    return { path, line: parseInt(lineStr, 10) };
   }
   return { path: ref, line: null };
 }
@@ -218,7 +222,7 @@ function buildAgentMarkdownComponents(
     code: makeCodeComponent('bg-gray-100 text-gray-800', options),
     a: ({ href, children }) => {
       if (isFilePathHref(href)) {
-        const { path, line } = parseFilePathRef(href!);
+        const { path, line } = parseFilePathRef(href);
         return (
           <button
             type="button"

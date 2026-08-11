@@ -21,12 +21,13 @@ function formatDateTick(dateStr: string): string {
 
 /** Custom tooltip for DAU chart. */
 function DauTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number }>; label?: string }) {
-  if (!active || !payload?.length) return null;
+  const point = payload?.[0];
+  if (!active || !point) return null;
   return (
     <div className="rounded-md px-3 py-2 shadow-lg text-sm" style={chartTooltipStyle}>
       <div className="text-fg-muted text-xs">{label ? formatDateTick(label) : ''}</div>
       <div className="text-fg-primary font-semibold tabular-nums">
-        {payload[0]!.value.toLocaleString()} users
+        {point.value.toLocaleString()} users
       </div>
     </div>
   );

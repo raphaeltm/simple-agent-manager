@@ -61,9 +61,13 @@ export function Project() {
     return () => setProjectName(undefined);
   }, [project?.name, setProjectName]);
 
+  // Hooks must run unconditionally, so this memo is computed even on renders
+  // where projectId is still undefined (before the "Project ID is missing"
+  // guard below returns). The '' fallback is never actually consumed — every
+  // code path that reads contextValue.projectId runs after that guard.
   const contextValue = useMemo(
     () => ({
-      projectId: projectId!,
+      projectId: projectId ?? '',
       project,
       installations,
       reload: loadProject,

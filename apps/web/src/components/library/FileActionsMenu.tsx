@@ -75,10 +75,12 @@ export function FileActionsMenu({
           style={{
             position: 'fixed',
             zIndex: 20,
-            ...(triggerRef.current ? (() => {
-              const r = triggerRef.current!.getBoundingClientRect();
+            ...(() => {
+              const trigger = triggerRef.current;
+              if (!trigger) return {};
+              const r = trigger.getBoundingClientRect();
               return { top: r.bottom + 4, right: window.innerWidth - r.right };
-            })() : {}),
+            })(),
           }}
         >
           {onPreview && isPreviewableMime(file.mimeType, file.filename) && (
