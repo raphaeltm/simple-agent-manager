@@ -11,12 +11,25 @@ import { AI_ADMIN_ALLOWANCE_KV_PREFIX } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { jsonValidator } from '../schemas';
 import { getAiBudgetLimits } from '../services/ai-token-budget';
+
+// Fields are validated loosely (v.unknown()) so the handler's existing manual
+// checks below — which produce specific error messages — remain in control of
+// the accepted domain (e.g. "must be a non-negative number or null").
+const UpdateAdminAiAllowanceBodySchema = v.object({
+  maxDailyInputTokens: v.optional(v.unknown()),
+  maxDailyOutputTokens: v.optional(v.unknown()),
+  maxMonthlyCostCapUsd: v.optional(v.unknown()),
+  allowedModelTiers: v.optional(v.unknown()),
+});
+type UpdateAdminAiAllowanceBody = v.InferOutput<typeof UpdateAdminAiAllowanceBodySchema>;
 
 const adminAiAllowanceRoutes = new Hono<{ Bindings: Env }>();
 
@@ -59,7 +72,7 @@ async function requireUserExists(db: ReturnType<typeof drizzle>, userId: string)
 }
 
 function validateNullableNumber(
-  body: UpdateAdminAiAllowanceRequest,
+  body: UpdateAdminAiAllowanceBody,
   field: 'maxDailyInputTokens' | 'maxDailyOutputTokens' | 'maxMonthlyCostCapUsd',
 ): void {
   const value = body[field];
@@ -69,7 +82,7 @@ function validateNullableNumber(
   }
 }
 
-function validateAllowanceBody(body: UpdateAdminAiAllowanceRequest): void {
+function validateAllowanceBody(body: UpdateAdminAiAllowanceBody): void {
   validateNullableNumber(body, 'maxDailyInputTokens');
   validateNullableNumber(body, 'maxDailyOutputTokens');
   validateNullableNumber(body, 'maxMonthlyCostCapUsd');
@@ -82,7 +95,7 @@ function validateAllowanceBody(body: UpdateAdminAiAllowanceRequest): void {
 }
 
 function pickAllowanceValue<T extends keyof UpdateAdminAiAllowanceRequest>(
-  body: UpdateAdminAiAllowanceRequest,
+  body: UpdateAdminAiAllowanceBody,
   existing: AdminAiAllowance | null,
   field: T,
 ): AdminAiAllowance[T] {
@@ -92,7 +105,7 @@ function pickAllowanceValue<T extends keyof UpdateAdminAiAllowanceRequest>(
 }
 
 function buildAllowance(
-  body: UpdateAdminAiAllowanceRequest,
+  body: UpdateAdminAiAllowanceBody,
   existing: AdminAiAllowance | null,
   adminUserId: string,
 ): AdminAiAllowance {
@@ -135,13 +148,13 @@ adminAiAllowanceRoutes.get('/:userId', async (c) => {
  * PUT /api/admin/ai-allowance/:userId
  * Set or update admin-managed AI allowance for a user.
  */
-adminAiAllowanceRoutes.put('/:userId', async (c) => {
+adminAiAllowanceRoutes.put('/:userId', jsonValidator(UpdateAdminAiAllowanceBodySchema), async (c) => {
   const adminUserId = getUserId(c);
   const targetUserId = c.req.param('userId');
   const db = drizzle(c.env.DATABASE, { schema });
   await requireUserExists(db, targetUserId);
 
-  const body = await c.req.json<UpdateAdminAiAllowanceRequest>();
+  const body = c.req.valid('json');
   validateAllowanceBody(body);
 
   const existing = await getAllowance(c.env.KV, targetUserId);

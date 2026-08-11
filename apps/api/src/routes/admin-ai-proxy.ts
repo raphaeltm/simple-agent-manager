@@ -19,6 +19,7 @@ import {
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -26,8 +27,20 @@ import { log } from '../lib/logger';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { jsonValidator } from '../schemas';
 import { resolveBillingMode, resolveUnifiedBillingToken } from '../services/ai-billing';
 import { getPlatformAgentCredential } from '../services/platform-credentials';
+
+// Fields are validated loosely (v.unknown()) so the handler's existing manual
+// checks below — which produce specific error messages — remain in control of
+// the accepted domain.
+const UpdateAiProxyDefaultModelSchema = v.object({
+  defaultModel: v.optional(v.unknown()),
+});
+
+const UpdateAiProxyBillingModeSchema = v.object({
+  billingMode: v.optional(v.unknown()),
+});
 
 const adminAIProxyRoutes = new Hono<{ Bindings: Env }>();
 
@@ -115,16 +128,16 @@ adminAIProxyRoutes.get('/config', async (c) => {
  * - The model ID is in the PLATFORM_AI_MODELS list
  * - If a paid provider model is selected, a credential or Unified Billing is configured
  */
-adminAIProxyRoutes.put('/config', async (c) => {
-  const body = await c.req.json<{ defaultModel: string }>();
+adminAIProxyRoutes.put('/config', jsonValidator(UpdateAiProxyDefaultModelSchema), async (c) => {
+  const { defaultModel } = c.req.valid('json');
 
-  if (!body.defaultModel || typeof body.defaultModel !== 'string') {
+  if (!defaultModel || typeof defaultModel !== 'string') {
     throw errors.badRequest('defaultModel is required');
   }
 
-  const model = PLATFORM_AI_MODELS.find((m) => m.id === body.defaultModel);
+  const model = PLATFORM_AI_MODELS.find((m) => m.id === defaultModel);
   if (!model) {
-    throw errors.badRequest(`Unknown model: ${body.defaultModel}. Available: ${PLATFORM_AI_MODELS.map((m) => m.id).join(', ')}`);
+    throw errors.badRequest(`Unknown model: ${defaultModel}. Available: ${PLATFORM_AI_MODELS.map((m) => m.id).join(', ')}`);
   }
 
   const hasUnifiedBilling = !!resolveUnifiedBillingToken(c.env);
@@ -152,14 +165,14 @@ adminAIProxyRoutes.put('/config', async (c) => {
   }
 
   const config: AIProxyConfig = {
-    defaultModel: body.defaultModel,
+    defaultModel,
     updatedAt: new Date().toISOString(),
   };
 
   await c.env.KV.put(AI_PROXY_DEFAULT_MODEL_KV_KEY, JSON.stringify(config));
 
   log.info('admin.ai_proxy.config_updated', {
-    defaultModel: body.defaultModel,
+    defaultModel,
     provider: model.provider,
     tier: model.tier,
   });
@@ -176,33 +189,33 @@ adminAIProxyRoutes.put('/config', async (c) => {
  *
  * Update the billing mode. Stored in KV for persistence across deploys.
  */
-adminAIProxyRoutes.patch('/config', async (c) => {
-  const body = await c.req.json<{ billingMode: string }>();
+adminAIProxyRoutes.patch('/config', jsonValidator(UpdateAiProxyBillingModeSchema), async (c) => {
+  const { billingMode } = c.req.valid('json');
 
-  if (!body.billingMode || typeof body.billingMode !== 'string') {
+  if (!billingMode || typeof billingMode !== 'string') {
     throw errors.badRequest('billingMode is required');
   }
 
-  if (!VALID_BILLING_MODES.includes(body.billingMode as BillingMode)) {
-    throw errors.badRequest(`Invalid billing mode: ${body.billingMode}. Valid values: ${VALID_BILLING_MODES.join(', ')}`);
+  if (!VALID_BILLING_MODES.includes(billingMode as BillingMode)) {
+    throw errors.badRequest(`Invalid billing mode: ${billingMode}. Valid values: ${VALID_BILLING_MODES.join(', ')}`);
   }
 
   // Validate that unified billing can work with available credentials
-  if (body.billingMode === 'unified' && !c.env.CF_AIG_TOKEN) {
+  if (billingMode === 'unified' && !c.env.CF_AIG_TOKEN) {
     throw errors.badRequest(
       'Cannot set billing mode to "unified" without CF_AIG_TOKEN configured. '
       + 'Set CF_AIG_TOKEN as a Worker secret first, or use "auto" mode.',
     );
   }
 
-  await c.env.KV.put(AI_PROXY_BILLING_MODE_KV_KEY, body.billingMode);
+  await c.env.KV.put(AI_PROXY_BILLING_MODE_KV_KEY, billingMode);
 
   log.info('admin.ai_proxy.billing_mode_updated', {
-    billingMode: body.billingMode,
+    billingMode,
   });
 
   return c.json({
-    billingMode: body.billingMode as BillingMode,
+    billingMode: billingMode as BillingMode,
   });
 });
 

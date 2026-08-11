@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { createMemoryKv } from '../../helpers/sqlite-d1';
 
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: any, next: any) => next()),
@@ -150,5 +151,51 @@ describe('admin trial config routes', () => {
     expect(res.status).toBe(400);
     expect(body.message).toBe('enabled must be a boolean');
     expect(put).not.toHaveBeenCalled();
+  });
+
+  it('rejects a malformed JSON body with the standard jsonValidator 400 shape (not a 500)', async () => {
+    const app = createApp();
+    // createMemoryKv() is already typed as a real KVNamespace, so no
+    // `unknown` intermediate cast is needed to pass it as an override.
+    const kv = createMemoryKv();
+    const putSpy = vi.spyOn(kv, 'put');
+    const env = createEnv({ KV: kv });
+
+    const res = await app.request(
+      '/api/admin/trials/config',
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{not valid json',
+      },
+      env,
+    );
+    const body = (await res.json()) as { error: string; message: string };
+
+    expect(res.status).toBe(400);
+    expect(body.error).toBe('BAD_REQUEST');
+    expect(putSpy).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing enabled field with the same boolean-required message', async () => {
+    const app = createApp();
+    const kv = createMemoryKv();
+    const putSpy = vi.spyOn(kv, 'put');
+    const env = createEnv({ KV: kv });
+
+    const res = await app.request(
+      '/api/admin/trials/config',
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      },
+      env,
+    );
+    const body = (await res.json()) as { message: string };
+
+    expect(res.status).toBe(400);
+    expect(body.message).toBe('enabled must be a boolean');
+    expect(putSpy).not.toHaveBeenCalled();
   });
 });
