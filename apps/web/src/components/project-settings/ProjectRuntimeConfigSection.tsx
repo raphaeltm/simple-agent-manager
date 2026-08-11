@@ -45,7 +45,6 @@ export function ProjectRuntimeConfigSection({ projectId }: ProjectRuntimeConfigS
     } finally {
       setRuntimeConfigLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
   }, [projectId]);
 
   useEffect(() => {

@@ -305,7 +305,7 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `data` is read for first-load guard only; `toast` removed per stale-while-revalidate rule
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `data` is read only for the first-load guard; including it would change `load`'s identity on every setData() call (fresh object each time), re-triggering the `[load]` effect below in an infinite refetch loop
   }, [projectId]);
 
   useEffect(() => {

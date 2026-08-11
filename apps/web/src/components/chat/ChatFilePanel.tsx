@@ -223,14 +223,20 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
     [fileIndex, searchQuery]
   );
 
-  // Initial load based on mode
+  // Initial load based on mode. Mount-only: every mode-changing handler below
+  // (navigateDir/openFile/openDiff/goBack, and the browse/git-status shortcuts
+  // in the header) already triggers its own load imperatively in the same
+  // tick that it calls setMode, so re-running this effect on mode/path
+  // changes would double-fetch every navigation (and races two overlapping
+  // requests toggling the same loading flag). This effect exists solely to
+  // cover the initial mount, before any handler has run.
   useEffect(() => {
     if (mode === 'browse') loadListing(currentPath);
     else if (mode === 'view' && filePath && !isImageFile(filePath)) loadFile(filePath);
     else if (mode === 'git-status') loadGitStatus();
     else if (mode === 'diff' && filePath) loadDiff(filePath);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-only load; see comment above
+  }, []);
 
   const navigateDir = (path: string) => {
     setCurrentPath(path);

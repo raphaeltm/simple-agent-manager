@@ -158,22 +158,27 @@ export function HierarchyModal({
 
   const tree = treeResult?.tree ?? null;
 
-  // Initialize collapse state for new nodes
+  // Initialize collapse state for new nodes. Uses the functional setState form
+  // so the previous state is read via `prev` (always current) rather than the
+  // `collapseState` closure — this avoids needing it as a dependency (which
+  // would otherwise re-run this whole-tree walk on every toggleExpanded click).
   useEffect(() => {
     if (!tree) return;
-    const newState = new Map(collapseState);
-    let changed = false;
-    function walk(node: HierarchyNode, depth: number) {
-      if (node.children.length > 0 && !newState.has(node.task.id)) {
-        const hasFocus = containsFocus(node, focusTaskId);
-        newState.set(node.task.id, hasFocus || depth < 2);
-        changed = true;
+    setCollapseState((prev) => {
+      const newState = new Map(prev);
+      let changed = false;
+      function walk(node: HierarchyNode, depth: number) {
+        if (node.children.length > 0 && !newState.has(node.task.id)) {
+          const hasFocus = containsFocus(node, focusTaskId);
+          newState.set(node.task.id, hasFocus || depth < 2);
+          changed = true;
+        }
+        node.children.forEach((c) => walk(c, depth + 1));
       }
-      node.children.forEach((c) => walk(c, depth + 1));
-    }
-    walk(tree, 0);
-    if (changed) setCollapseState(newState);
-  }, [tree, focusTaskId]); // eslint-disable-line react-hooks/exhaustive-deps
+      walk(tree, 0);
+      return changed ? newState : prev;
+    });
+  }, [tree, focusTaskId]);
 
   const isExpanded = useCallback(
     (taskId: string) => collapseState.get(taskId) ?? false,

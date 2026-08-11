@@ -106,7 +106,6 @@ export function useTerminalSessions(
     if (state) {
       sessionCounter.current = state.counter;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /**

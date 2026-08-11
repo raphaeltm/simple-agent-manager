@@ -318,7 +318,7 @@ export function useProjectChatState() {
     return () => {
       cancelled = true;
     };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const loadProfiles = useCallback(() => {
     void listAgentProfiles(projectId)
@@ -414,7 +414,7 @@ export function useProjectChatState() {
   useEffect(() => {
     setLoading(true);
     void loadSessions().finally(() => setLoading(false));
-  }, [loadSessions]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadSessions]);
 
   // Periodic background sync — self-heals if a WebSocket delta was silently dropped.
   // Depends on `loading` to defer until the first load completes.

@@ -94,7 +94,12 @@ export function Workspace() {
   // ── View mode auto-selection ──
   useEffect(() => {
     if (sessionIdParam && viewMode !== 'conversation') setViewMode('conversation');
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+    // Mount-only: applies the initial URL intent once. Re-running on every
+    // sessionIdParam/viewMode change would fight deliberate user tab switches
+    // (see the ref-guarded effect below for the async-data equivalent of this
+    // one-time-apply pattern).
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-only effect; sessionIdParam/viewMode are read only for their initial-mount values
+  }, []);
 
   const initialViewResolvedRef = useRef(false);
   useEffect(() => {
@@ -195,6 +200,10 @@ export function Workspace() {
     if (tab.status === 'suspended') { void sessions.handleResumeSession(tab.sessionId); return; }
     sessions.handleAttachSession(tab.sessionId);
   };
+  // Kept fresh every render so memoized callers (below) always invoke the
+  // latest closure without needing `handleSelectWorkspaceTab` in their deps.
+  const handleSelectWorkspaceTabRef = useRef(handleSelectWorkspaceTab);
+  handleSelectWorkspaceTabRef.current = handleSelectWorkspaceTab;
 
   const activeTabId = useMemo(() => {
     if (viewMode === 'terminal') {
@@ -220,6 +229,9 @@ export function Workspace() {
     if (tab.kind === 'terminal') { multiTerminalRef.current?.closeSession(tab.sessionId); return; }
     void sessions.handleStopSession(tab.sessionId);
   };
+  // Kept fresh every render — same rationale as handleSelectWorkspaceTabRef above.
+  const handleCloseWorkspaceTabRef = useRef(handleCloseWorkspaceTab);
+  handleCloseWorkspaceTabRef.current = handleCloseWorkspaceTab;
 
   const handleRenameWorkspaceTab = useCallback(
     (tabItem: WorkspaceTabItem, newName: string) => {
@@ -235,12 +247,12 @@ export function Workspace() {
   );
 
   const handleSelectTabItem = useCallback(
-    (ti: WorkspaceTabItem) => { const t = workspaceTabs.find((w) => w.id === ti.id); if (t) handleSelectWorkspaceTab(t); },
-    [workspaceTabs] // eslint-disable-line react-hooks/exhaustive-deps
+    (ti: WorkspaceTabItem) => { const t = workspaceTabs.find((w) => w.id === ti.id); if (t) handleSelectWorkspaceTabRef.current(t); },
+    [workspaceTabs]
   );
   const handleCloseTabItem = useCallback(
-    (ti: WorkspaceTabItem) => { const t = workspaceTabs.find((w) => w.id === ti.id); if (t) handleCloseWorkspaceTab(t); },
-    [workspaceTabs] // eslint-disable-line react-hooks/exhaustive-deps
+    (ti: WorkspaceTabItem) => { const t = workspaceTabs.find((w) => w.id === ti.id); if (t) handleCloseWorkspaceTabRef.current(t); },
+    [workspaceTabs]
   );
   const tabStripItems = useMemo<WorkspaceTabItem[]>(
     () => workspaceTabs.map((t) => ({
@@ -290,8 +302,8 @@ export function Workspace() {
   }, [showCommandPalette, core.workspace?.url, core.terminalToken, id, core.isRunning, nav.activeWorktree]);
 
   const handlePaletteSelectTab = useCallback(
-    (tab: WorkspaceTabItem) => { const wt = workspaceTabs.find((t) => t.id === tab.id); if (wt) { handleSelectWorkspaceTab(wt); if (wt.kind === 'terminal') multiTerminalRef.current?.focus?.(); else chatSessionRefs.current.get(wt.sessionId)?.focusInput?.(); } },
-    [workspaceTabs] // eslint-disable-line react-hooks/exhaustive-deps
+    (tab: WorkspaceTabItem) => { const wt = workspaceTabs.find((t) => t.id === tab.id); if (wt) { handleSelectWorkspaceTabRef.current(wt); if (wt.kind === 'terminal') multiTerminalRef.current?.focus?.(); else chatSessionRefs.current.get(wt.sessionId)?.focusInput?.(); } },
+    [workspaceTabs]
   );
 
   // ── Early returns ──

@@ -210,7 +210,6 @@ export function useAccountMapData({ isMobile, activeOnly }: UseAccountMapDataOpt
       },
       isEmpty: totalEntities === 0,
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rawData, isMobile, layoutKey]);
 
   const reorganize = useCallback(() => {

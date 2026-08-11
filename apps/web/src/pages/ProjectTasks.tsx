@@ -85,7 +85,7 @@ export function ProjectTasks() {
     } finally {
       setTasksLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule; hasLoaded is read for first-load guard only
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hasLoaded is read only for the first-load guard; including it would change loadTasks's identity once hasLoaded flips true, re-triggering the `[loadTasks]` effect below for one extra fetch
   }, [projectId, filters.status, filters.minPriority, filters.sort]);
 
   useEffect(() => { void loadTasks(); }, [loadTasks]);

@@ -477,7 +477,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
 
     transportRef.current = transport;
     return transport;
-  }, [handleAgentStatus, handleAcpMessage, handleSessionState, handleSessionReplayComplete, handleSessionPrompting, logLifecycle, clearError, setStructuredError]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [handleAgentStatus, handleAcpMessage, handleSessionState, handleSessionReplayComplete, handleSessionPrompting, logLifecycle, clearError, setStructuredError]);
 
   const resolveConnectUrl = useCallback((fallbackUrl?: string | null) => {
     if (resolveWsUrlRef.current) {

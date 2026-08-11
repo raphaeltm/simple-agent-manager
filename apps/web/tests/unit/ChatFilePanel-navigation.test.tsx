@@ -33,6 +33,13 @@ vi.mock('../../src/components/MarkdownRenderer', () => ({
   SyntaxHighlightedCode: ({ content }: { content: string }) => <pre>{content}</pre>,
 }));
 
+import {
+  getSessionFileContent,
+  getSessionFileList,
+  getSessionGitDiff,
+  getSessionGitStatus,
+} from '../../src/lib/api';
+
 import { ChatFilePanel } from '../../src/components/chat/ChatFilePanel';
 
 // ChatFilePanel renders via createPortal to document.body, so we query there
@@ -120,6 +127,78 @@ describe('ChatFilePanel back navigation', () => {
       expect(within(dialog).getByText('Files', { selector: 'span' })).toBeInTheDocument();
     });
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  // Regression coverage for the mount-only initial-load effect (previously
+  // keyed on `[mode]`, which re-fired on every mode transition ON TOP OF the
+  // imperative load each handler already performs — doubling every fetch).
+  describe('does not double-fetch on navigation (mount-only initial load)', () => {
+    it('fetches diff exactly once when opening it from git-status, and does not re-fetch git-status via the mount effect on the way back', async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+
+      render(
+        <ChatFilePanel projectId="proj-1" sessionId="sess-1" initialMode="git-status" onClose={onClose} />,
+      );
+
+      await waitFor(() => {
+        expect(body().getByText('Staged (1)')).toBeInTheDocument();
+      });
+      expect(getSessionGitStatus).toHaveBeenCalledTimes(1);
+
+      const diffButtons = body().getAllByText('Diff');
+      await user.click(diffButtons[0]);
+
+      await waitFor(() => {
+        expect(body().getByText(/Diff: staged\.ts/)).toBeInTheDocument();
+      });
+      // Opening the diff already loads it imperatively in openDiff(); the
+      // mount-only effect must NOT re-fire and fetch it a second time.
+      expect(getSessionGitDiff).toHaveBeenCalledTimes(1);
+
+      const backButton = body().getByLabelText('Back');
+      await user.click(backButton);
+
+      await waitFor(() => {
+        expect(body().getByText('Git Changes')).toBeInTheDocument();
+      });
+      // goBack() imperatively reloads git-status (call #2, expected); the
+      // mount-only effect must NOT contribute a 3rd call.
+      expect(getSessionGitStatus).toHaveBeenCalledTimes(2);
+    });
+
+    it('fetches file content exactly once when opening it from browse, and does not add an extra listing fetch via the mount effect on the way back', async () => {
+      const user = userEvent.setup();
+      const onClose = vi.fn();
+
+      render(
+        <ChatFilePanel projectId="proj-1" sessionId="sess-1" initialMode="browse" onClose={onClose} />,
+      );
+
+      await waitFor(() => {
+        expect(body().getByText('hello.ts')).toBeInTheDocument();
+      });
+      expect(getSessionFileList).toHaveBeenCalledTimes(1);
+
+      await user.click(body().getByText('hello.ts'));
+
+      await waitFor(() => {
+        expect(body().getByLabelText('Back')).toBeInTheDocument();
+      });
+      // openFile() already loads the content imperatively; the mount-only
+      // effect must NOT re-fire and fetch it a second time.
+      expect(getSessionFileContent).toHaveBeenCalledTimes(1);
+
+      await user.click(body().getByLabelText('Back'));
+
+      await waitFor(() => {
+        const dialog = body().getByRole('dialog');
+        expect(within(dialog).getByText('Files', { selector: 'span' })).toBeInTheDocument();
+      });
+      // goBack() imperatively reloads the listing (call #2, expected); the
+      // mount-only effect must NOT contribute a 3rd call.
+      expect(getSessionFileList).toHaveBeenCalledTimes(2);
+    });
   });
 
   it('calls onClose when pressing close from git-status (top level)', async () => {

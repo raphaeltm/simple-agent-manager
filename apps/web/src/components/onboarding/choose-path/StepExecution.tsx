@@ -49,7 +49,7 @@ export function StepExecution({ steps, onComplete }: StepExecutionProps) {
   // Focus step heading via ref callback — React re-invokes when currentStepIndex changes
   const stepHeadingRef = useCallback(
     (el: HTMLHeadingElement | null) => el?.focus(),
-    [currentStepIndex] // eslint-disable-line react-hooks/exhaustive-deps
+    [currentStepIndex] // eslint-disable-line react-hooks/exhaustive-deps -- currentStepIndex is intentionally unused in the body; it exists only to change this callback's identity so React detaches/reattaches the ref (and thus re-focuses) on every step transition
   );
 
   // Cleanup ref callback — abort in-flight requests and clear timers when root element unmounts

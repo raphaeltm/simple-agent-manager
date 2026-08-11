@@ -102,7 +102,13 @@ export function ProjectNotifications() {
     }
   }, [projectId, typeFilter, notifications.length]);
 
-  useEffect(() => { void loadNotifications(); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // loadNotifications is intentionally omitted: its own deps include
+  // notifications.length, which changes as a RESULT of calling it, so
+  // depending on it here would create a self-triggering refetch loop.
+  // projectId is the actual "what to fetch" identifier; typeFilter changes
+  // are already handled by handleTypeFilterChange's explicit imperative call
+  // with a fresh argument (not read from this closure).
+  useEffect(() => { void loadNotifications(); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps -- see comment above; loadNotifications is unstable (deps include notifications.length) and must not be listed here
 
   const handleTypeFilterChange = (newFilter: NotificationType | 'all') => {
     setTypeFilter(newFilter);

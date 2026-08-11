@@ -409,7 +409,8 @@ export function useAudioPlayback({
     }
   }, []);
 
-  // Cleanup on unmount
+  // Cleanup on unmount. abortFetches/clearTimeInterval are both
+  // useCallback([]) — stable for the component's lifetime.
   useEffect(() => {
     return () => {
       abortFetches();
@@ -427,8 +428,7 @@ export function useAudioPlayback({
       }
       playbackLockRef.current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [abortFetches, clearTimeInterval]);
 
   return {
     state,

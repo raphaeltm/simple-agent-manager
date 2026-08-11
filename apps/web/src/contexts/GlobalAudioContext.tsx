@@ -385,7 +385,9 @@ export function GlobalAudioProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Cleanup on unmount (should rarely happen since this is at app root)
+  // Cleanup on unmount (should rarely happen since this is at app root).
+  // abortFetches/clearTimeInterval are both useCallback([]) — stable for the
+  // component's lifetime — so listing them does not cause this to re-run.
   useEffect(() => {
     return () => {
       abortFetches();
@@ -403,8 +405,7 @@ export function GlobalAudioProvider({ children }: { children: ReactNode }) {
       }
       playbackLockRef.current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [abortFetches, clearTimeInterval]);
 
   // Memoized so consumers (and any useCallback/useEffect depending on this
   // context) do not churn identity on unrelated provider re-renders.

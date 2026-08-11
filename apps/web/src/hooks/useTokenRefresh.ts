@@ -131,7 +131,7 @@ export function useTokenRefresh(options: UseTokenRefreshOptions): UseTokenRefres
       mountedRef.current = false;
       clearRefreshTimer();
     };
-  }, [enabled]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [enabled]);
 
   // Manual refresh for 401 recovery
   const refresh = useCallback(async () => {

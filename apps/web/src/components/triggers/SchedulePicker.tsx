@@ -243,11 +243,15 @@ export const SchedulePicker: FC<SchedulePickerProps> = ({
     [onChange, onDescriptionChange],
   );
 
-  // Emit on initial render
+  // Emit on initial render. Mount-only: every field's onChange handler below
+  // already calls emitChange(...) with the fresh value in the same tick it
+  // calls its setter, so re-running this on every field change would
+  // double-emit. This effect exists solely to emit the description matching
+  // the initial `value` prop, before any handler has run.
   useEffect(() => {
     const cron = buildCron(mode, hour, minute, everyNHours, dailyVariant, weeklyDays, monthDay, advancedCron);
     onDescriptionChange?.(describeCron(cron));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-only emit; see comment above
   }, []);
 
   function handleModeChange(newMode: ScheduleMode) {

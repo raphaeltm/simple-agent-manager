@@ -120,7 +120,7 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
       queryIdRef.current = undefined;
       fetchLogs(false);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const setLevels = useCallback((levels: LogLevel[]) => {
     setFilter((prev) => ({ ...prev, levels }));

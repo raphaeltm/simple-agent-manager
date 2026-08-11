@@ -335,7 +335,6 @@ function MemoryCard({ entity, projectId, onRefresh }: { entity: KnowledgeEntity;
         if (!cancelled) setLoadingDetail(false);
       });
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
   }, [detail, entity.id, expanded, projectId]);
 
   const handleSavedEntity = async () => {
