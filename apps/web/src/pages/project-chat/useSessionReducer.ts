@@ -115,7 +115,7 @@ export function rawToSessionEvent(raw: RawSessionEvent): SessionEvent | null {
 
 export function applySessionEvent(
   sessions: ChatSessionListItem[],
-  event: SessionEvent,
+  event: SessionEvent
 ): ChatSessionListItem[] {
   switch (event.type) {
     case 'session.created': {
@@ -193,7 +193,7 @@ export function applySessionEvent(
  */
 export function applySessionEvents(
   sessions: ChatSessionListItem[],
-  events: SessionEvent[],
+  events: SessionEvent[]
 ): ChatSessionListItem[] {
   let result = sessions;
   for (const event of events) {
@@ -209,7 +209,7 @@ export function applySessionEvents(
 function patchSession(
   sessions: ChatSessionListItem[],
   sessionId: string,
-  updater: (s: ChatSessionListItem) => ChatSessionListItem,
+  updater: (s: ChatSessionListItem) => ChatSessionListItem
 ): ChatSessionListItem[] {
   const idx = sessions.findIndex((s) => s.id === sessionId);
   if (idx === -1) return sessions;
@@ -229,7 +229,7 @@ function patchSession(
 const DEFAULT_SESSION_BATCH_DELAY_MS = 16; // ~1 animation frame
 const BATCH_DELAY_MS = parseInt(
   import.meta.env.VITE_SESSION_BATCH_DELAY_MS || String(DEFAULT_SESSION_BATCH_DELAY_MS),
-  10,
+  10
 );
 
 export function useSessionReducer() {
@@ -245,12 +245,15 @@ export function useSessionReducer() {
     setSessions((prev) => applySessionEvents(prev, events));
   }, []);
 
-  const dispatchEvent = useCallback((event: SessionEvent) => {
-    batchRef.current.push(event);
-    if (!batchTimerRef.current) {
-      batchTimerRef.current = setTimeout(flushBatch, BATCH_DELAY_MS);
-    }
-  }, [flushBatch]);
+  const dispatchEvent = useCallback(
+    (event: SessionEvent) => {
+      batchRef.current.push(event);
+      if (!batchTimerRef.current) {
+        batchTimerRef.current = setTimeout(flushBatch, BATCH_DELAY_MS);
+      }
+    },
+    [flushBatch]
+  );
 
   const resetSessions = useCallback((next: ChatSessionListItem[]) => {
     batchRef.current = [];

@@ -67,7 +67,7 @@ function stripPreview(file: FileWithTags): CachedIndexFile {
 
 export function useLibraryIndex(
   projectId: string,
-  cacheNamespace?: string | null,
+  cacheNamespace?: string | null
 ): UseLibraryIndexResult {
   const cap = resolveCap();
   const maxSweepPages = resolveMaxSweepPages();

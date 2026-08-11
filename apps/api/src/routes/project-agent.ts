@@ -60,7 +60,7 @@ app.post('/chat', requireAuth(), jsonValidator(AgentChatRequestSchema), async (c
     headers: {
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
-      'connection': 'keep-alive',
+      connection: 'keep-alive',
     },
   });
 });

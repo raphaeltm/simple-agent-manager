@@ -388,7 +388,10 @@ describe('Agent Profile Service', () => {
 
     it('degrades a malformed (invalid JSON) githubCliPolicy to null instead of throwing', async () => {
       const db = createMockDB();
-      const profile = makeProfileRow({ id: 'bad-json-profile', githubCliPolicy: '{not-valid-json' });
+      const profile = makeProfileRow({
+        id: 'bad-json-profile',
+        githubCliPolicy: '{not-valid-json',
+      });
       db._pushResult([profile]);
 
       const result = await agentProfileService.resolveAgentProfile(

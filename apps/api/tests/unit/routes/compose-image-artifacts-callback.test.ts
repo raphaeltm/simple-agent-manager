@@ -69,7 +69,8 @@ vi.mock('../../../src/services/deployment-control', () => ({
 }));
 
 vi.mock('../../../src/services/compose-image-artifacts', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('../../../src/services/compose-image-artifacts')>();
+  const actual =
+    await importOriginal<typeof import('../../../src/services/compose-image-artifacts')>();
   return {
     ...actual,
     createComposeImageArtifactUploads: (...args: unknown[]) =>
@@ -82,9 +83,8 @@ vi.mock('../../../src/lib/logger', () => ({
 }));
 
 async function buildApp() {
-  const { composeImageArtifactsCallbackRoute } = await import(
-    '../../../src/routes/projects/compose-image-artifacts-callback'
-  );
+  const { composeImageArtifactsCallbackRoute } =
+    await import('../../../src/routes/projects/compose-image-artifacts-callback');
   const app = new Hono();
   app.onError((err, c) => {
     if (err instanceof AppError) {

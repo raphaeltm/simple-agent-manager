@@ -1143,7 +1143,9 @@ describe('MCP Routes', () => {
         { id: 'msg-old', role: 'assistant', content: 'Earlier analysis', createdAt: 1710000001000 },
       ]);
       expect(data.recentAssistantMessages[0].content).toBe('Final detailed findings');
-      expect(data.recentAssistantMessages[0].createdAt).toBeGreaterThan(data.recentAssistantMessages[1].createdAt);
+      expect(data.recentAssistantMessages[0].createdAt).toBeGreaterThan(
+        data.recentAssistantMessages[1].createdAt
+      );
     });
 
     it('should still return task details if recent assistant messages cannot be read', async () => {

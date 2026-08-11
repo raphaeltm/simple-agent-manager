@@ -349,21 +349,24 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     ['a JSON array', '[]'],
     ['a JSON null', 'null'],
     ['a bare JSON number', '200'],
-  ])('treats a syntactically valid but non-object restore body (%s) as degraded', async (_label, body) => {
-    const { fake, values } = makeRecoveryFake({
-      restoreResponse: new Response(body, { status: 200 }),
-    });
+  ])(
+    'treats a syntactically valid but non-object restore body (%s) as degraded',
+    async (_label, body) => {
+      const { fake, values } = makeRecoveryFake({
+        restoreResponse: new Response(body, { status: 200 }),
+      });
 
-    const result = await callEnsureAwake(fake);
+      const result = await callEnsureAwake(fake);
 
-    expect(result).toMatchObject({ ok: false, status: 'degraded' });
-    expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
-    expect(recoveryMocks.persistFailed).not.toHaveBeenCalled();
-    expect(values.get('runtimeRecovery')).toMatchObject({
-      phase: 'degraded',
-      lastFailure: { kind: 'restore_status' },
-    });
-  });
+      expect(result).toMatchObject({ ok: false, status: 'degraded' });
+      expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
+      expect(recoveryMocks.persistFailed).not.toHaveBeenCalled();
+      expect(values.get('runtimeRecovery')).toMatchObject({
+        phase: 'degraded',
+        lastFailure: { kind: 'restore_status' },
+      });
+    }
+  );
 
   it('keeps an explicit stop terminal when it crosses an active restore', async () => {
     let finishRestore!: (response: Response) => void;
@@ -512,7 +515,11 @@ describe('VmAgentContainer wake concurrency and persistence', () => {
     // Every later request hits an exhausted record. Pre-fix this re-ran
     // exhaustRecovery() (a full D1 batch + persistRuntimeRecoveryFailed) each time.
     const second = await callEnsureAwake(fake);
-    expect(second).toMatchObject({ ok: false, status: 'degraded', code: 'RUNTIME_RECOVERY_DEGRADED' });
+    expect(second).toMatchObject({
+      ok: false,
+      status: 'degraded',
+      code: 'RUNTIME_RECOVERY_DEGRADED',
+    });
     expect(recoveryMocks.persistFailed).toHaveBeenCalledTimes(1);
   });
 

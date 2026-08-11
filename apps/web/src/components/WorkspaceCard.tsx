@@ -14,7 +14,11 @@ interface WorkspaceCardProps {
 
 function getWorkspaceActions(
   workspace: WorkspaceResponse,
-  handlers: { onStop?: (id: string) => void; onRestart?: (id: string) => void; onDelete?: (id: string) => void },
+  handlers: {
+    onStop?: (id: string) => void;
+    onRestart?: (id: string) => void;
+    onDelete?: (id: string) => void;
+  }
 ): DropdownMenuItem[] {
   const items: DropdownMenuItem[] = [];
   const isTransitional = workspace.status === 'creating' || workspace.status === 'stopping';
@@ -69,7 +73,11 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
     }
     const opened = window.open(path, '_blank');
     if (opened) {
-      try { opened.opener = null; } catch { /* ignore */ }
+      try {
+        opened.opener = null;
+      } catch {
+        /* ignore */
+      }
       return;
     }
     navigate(path);
@@ -78,7 +86,11 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
   const overflowItems = getWorkspaceActions(workspace, { onStop, onRestart, onDelete });
 
   return (
-    <Card variant="glass" className="transition-[border-color] duration-150" style={{ padding: 'var(--sam-space-3) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }}>
+    <Card
+      variant="glass"
+      className="transition-[border-color] duration-150"
+      style={{ padding: 'var(--sam-space-3) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }}
+    >
       <div className="flex items-center gap-3">
         {/* Main content */}
         <div className="flex-1 min-w-0 flex items-center gap-3">
@@ -119,24 +131,23 @@ export function WorkspaceCard({ workspace, onStop, onRestart, onDelete }: Worksp
           </div>
         )}
         {(workspace.status === 'creating' || workspace.status === 'stopping') && (
-          <span className="sam-type-caption text-fg-muted shrink-0">
-            Please wait...
-          </span>
+          <span className="sam-type-caption text-fg-muted shrink-0">Please wait...</span>
         )}
 
         {/* Overflow menu */}
         {overflowItems.length > 0 && (
           <div className="shrink-0">
-            <DropdownMenu items={overflowItems} aria-label={`Actions for ${workspace.displayName || workspace.name}`} />
+            <DropdownMenu
+              items={overflowItems}
+              aria-label={`Actions for ${workspace.displayName || workspace.name}`}
+            />
           </div>
         )}
       </div>
 
       {workspace.errorMessage && (
         <div className="mt-2 p-2 bg-danger-tint rounded-sm">
-          <span className="sam-type-caption text-danger">
-            {workspace.errorMessage}
-          </span>
+          <span className="sam-type-caption text-danger">{workspace.errorMessage}</span>
         </div>
       )}
     </Card>

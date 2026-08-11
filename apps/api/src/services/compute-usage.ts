@@ -68,10 +68,7 @@ export async function stopComputeTracking(
     .update(schema.computeUsage)
     .set({ endedAt: now })
     .where(
-      and(
-        eq(schema.computeUsage.workspaceId, workspaceId),
-        isNull(schema.computeUsage.endedAt)
-      )
+      and(eq(schema.computeUsage.workspaceId, workspaceId), isNull(schema.computeUsage.endedAt))
     );
 
   // D1 does not expose rows_affected via Drizzle; log unconditionally on attempt.
@@ -231,12 +228,7 @@ export async function getUserUsageSummary(
       credentialSource: schema.computeUsage.credentialSource,
     })
     .from(schema.computeUsage)
-    .where(
-      and(
-        eq(schema.computeUsage.userId, userId),
-        isNull(schema.computeUsage.endedAt)
-      )
-    );
+    .where(and(eq(schema.computeUsage.userId, userId), isNull(schema.computeUsage.endedAt)));
 
   const activeSessions: ActiveComputeSession[] = activeRows.map((r) => ({
     workspaceId: r.workspaceId,
@@ -292,7 +284,10 @@ export async function getAllUsersUsageSummary(
   const periodEnd = new Date(end);
   const nowIso = new Date().toISOString();
 
-  const userMap = new Map<string, { totalHours: number; platformHours: number; userHours: number; activeCount: number }>();
+  const userMap = new Map<
+    string,
+    { totalHours: number; platformHours: number; userHours: number; activeCount: number }
+  >();
   const rowsByUser = new Map<string, typeof rows>();
 
   for (const row of rows) {
@@ -416,10 +411,7 @@ export async function closeOrphanedComputeUsage(
       workspaceUpdatedAt: schema.workspaces.updatedAt,
     })
     .from(schema.computeUsage)
-    .leftJoin(
-      schema.workspaces,
-      eq(schema.computeUsage.workspaceId, schema.workspaces.id)
-    )
+    .leftJoin(schema.workspaces, eq(schema.computeUsage.workspaceId, schema.workspaces.id))
     .where(
       and(
         isNull(schema.computeUsage.endedAt),

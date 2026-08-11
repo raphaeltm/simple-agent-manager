@@ -34,10 +34,12 @@ const SetupRequestBodySchema = v.object({
 });
 
 function clientIdentifier(c: SetupContext): string {
-  return c.req.header('CF-Connecting-IP')
-    ?? c.req.header('X-Forwarded-For')
-    ?? c.req.header('User-Agent')
-    ?? 'unknown';
+  return (
+    c.req.header('CF-Connecting-IP') ??
+    c.req.header('X-Forwarded-For') ??
+    c.req.header('User-Agent') ??
+    'unknown'
+  );
 }
 
 function setupClosed(): AppError {
@@ -104,7 +106,11 @@ async function assertSetupOpen(env: Env): Promise<void> {
 async function assertSetupToken(env: Env, token: string, identifier: string): Promise<void> {
   const result = await verifySetupToken(env, token, identifier);
   if (!result.ok) {
-    throw new AppError(result.status, result.status === 429 ? 'TOO_MANY_REQUESTS' : 'UNAUTHORIZED', result.message);
+    throw new AppError(
+      result.status,
+      result.status === 429 ? 'TOO_MANY_REQUESTS' : 'UNAUTHORIZED',
+      result.message
+    );
   }
 }
 

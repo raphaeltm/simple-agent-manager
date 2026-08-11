@@ -50,10 +50,7 @@ describe('mapRows', () => {
   });
 
   it('returns an empty, non-throwing array when every row is malformed', () => {
-    const rows = [
-      { id: 'bad-1', count: null },
-      { id: 'bad-2' },
-    ];
+    const rows = [{ id: 'bad-1', count: null }, { id: 'bad-2' }];
     expect(() => mapRows(rows, TestSchema, 'test.list')).not.toThrow();
     expect(mapRows(rows, TestSchema, 'test.list')).toEqual([]);
   });
@@ -82,7 +79,10 @@ describe('mapRows', () => {
     expect(warn).not.toHaveBeenCalledWith('test.clean_list_degraded', expect.anything());
 
     mapRows(
-      [{ id: 'ok', count: 1 }, { id: 'bad', count: 'x' }],
+      [
+        { id: 'ok', count: 1 },
+        { id: 'bad', count: 'x' },
+      ],
       TestSchema,
       'test.dirty_list'
     );
@@ -196,7 +196,10 @@ describe('parseRowOrNull', () => {
     );
     expect(warn).toHaveBeenCalledWith(
       'orchestrator.resolve_row_skipped',
-      expect.objectContaining({ rowId: 'mission-7', error: expect.stringContaining('registered_at') })
+      expect.objectContaining({
+        rowId: 'mission-7',
+        error: expect.stringContaining('registered_at'),
+      })
     );
     warn.mockRestore();
   });
@@ -262,9 +265,9 @@ describe('MessageRowSchema', () => {
   });
 
   it('rejects a non-numeric sequence', () => {
-    expect(
-      v.safeParse(MessageRowSchema, { ...validRow, sequence: 'not-a-number' }).success
-    ).toBe(false);
+    expect(v.safeParse(MessageRowSchema, { ...validRow, sequence: 'not-a-number' }).success).toBe(
+      false
+    );
   });
 
   it('rejects a null role (NOT NULL in both DOs schema)', () => {
@@ -278,9 +281,9 @@ describe('MessageRowSchema', () => {
 
 describe('RateLimitRowSchema', () => {
   it('validates a well-formed row', () => {
-    expect(
-      v.safeParse(RateLimitRowSchema, { window_start: 1000, request_count: 3 }).success
-    ).toBe(true);
+    expect(v.safeParse(RateLimitRowSchema, { window_start: 1000, request_count: 3 }).success).toBe(
+      true
+    );
   });
 
   it('rejects a non-numeric window_start', () => {

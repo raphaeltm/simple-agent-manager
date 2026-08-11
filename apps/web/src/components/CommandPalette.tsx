@@ -1,9 +1,9 @@
-import { useEffect, useMemo,useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { fileNameFromPath, fuzzyMatch, type FuzzyMatchResult } from '../lib/fuzzy-match';
 import type { ShortcutDefinition } from '../lib/keyboard-shortcuts';
-import { formatShortcut,getPaletteShortcuts } from '../lib/keyboard-shortcuts';
+import { formatShortcut, getPaletteShortcuts } from '../lib/keyboard-shortcuts';
 import type { WorkspaceTabItem } from './WorkspaceTabStrip';
 
 // ── Result types ──
@@ -69,7 +69,7 @@ function displayShortcutKey(shortcut: ShortcutDefinition): string {
 function buildResults(
   query: string,
   tabs: WorkspaceTabItem[],
-  fileIndex: string[],
+  fileIndex: string[]
 ): CategoryGroup[] {
   const groups: CategoryGroup[] = [];
 
@@ -116,7 +116,13 @@ function buildResults(
         best = pathMatch;
       }
       if (best) {
-        fileResults.push({ kind: 'file', path, label: path, score: best.score, matches: best.matches });
+        fileResults.push({
+          kind: 'file',
+          path,
+          label: path,
+          score: best.score,
+          matches: best.matches,
+        });
       }
     }
     fileResults.sort((a, b) => b.score - a.score);
@@ -224,10 +230,7 @@ export function CommandPalette({
   const inputRef = useRef<HTMLInputElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
 
-  const groups = useMemo(
-    () => buildResults(query, tabs, fileIndex),
-    [query, tabs, fileIndex]
-  );
+  const groups = useMemo(() => buildResults(query, tabs, fileIndex), [query, tabs, fileIndex]);
 
   // Flatten all results for keyboard navigation
   const flatResults = useMemo(() => {
@@ -300,7 +303,11 @@ export function CommandPalette({
 
   return createPortal(
     <>
-      <div onClick={onClose} aria-hidden="true" className="fixed inset-0 glass-backdrop-dim z-dialog-backdrop" />
+      <div
+        onClick={onClose}
+        aria-hidden="true"
+        className="fixed inset-0 glass-backdrop-dim z-dialog-backdrop"
+      />
 
       <div
         role="dialog"
@@ -322,15 +329,11 @@ export function CommandPalette({
 
         <div role="listbox" className="max-h-90 overflow-y-auto py-1">
           {flatResults.length === 0 && !fileIndexLoading && (
-            <div className="p-4 text-center text-tn-fg-muted text-xs">
-              No matching results
-            </div>
+            <div className="p-4 text-center text-tn-fg-muted text-xs">No matching results</div>
           )}
 
           {fileIndexLoading && query && flatResults.length === 0 && (
-            <div className="p-4 text-center text-tn-fg-muted text-xs">
-              Loading files...
-            </div>
+            <div className="p-4 text-center text-tn-fg-muted text-xs">Loading files...</div>
           )}
 
           {groups.map((group) => (
@@ -361,9 +364,7 @@ export function CommandPalette({
                     }`}
                   >
                     <div className="flex items-center gap-2 min-w-0 flex-1">
-                      <span className="text-xs shrink-0">
-                        {resultIcon(result)}
-                      </span>
+                      <span className="text-xs shrink-0">{resultIcon(result)}</span>
                       <span className="text-xs text-tn-fg overflow-hidden text-ellipsis whitespace-nowrap">
                         <HighlightedText text={result.label} matches={result.matches} />
                       </span>
@@ -386,7 +387,7 @@ export function CommandPalette({
         </div>
       </div>
     </>,
-    document.body,
+    document.body
   );
 }
 
@@ -394,9 +395,12 @@ export function CommandPalette({
 
 function resultKey(result: PaletteResult): string {
   switch (result.kind) {
-    case 'tab': return `tab:${result.tab.id}`;
-    case 'file': return `file:${result.path}`;
-    case 'command': return `cmd:${result.shortcut.id}`;
+    case 'tab':
+      return `tab:${result.tab.id}`;
+    case 'file':
+      return `file:${result.path}`;
+    case 'command':
+      return `cmd:${result.shortcut.id}`;
   }
 }
 

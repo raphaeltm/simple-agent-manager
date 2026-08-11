@@ -49,7 +49,10 @@ const CHECKIN_PROMPT =
   'If you do not respond shortly, this task will be marked as failed.';
 
 /** Source metadata attached to the persisted check-in message. */
-const CHECKIN_METADATA = JSON.stringify({ source: 'sam_orchestrator', kind: 'reconciliation_checkin' });
+const CHECKIN_METADATA = JSON.stringify({
+  source: 'sam_orchestrator',
+  kind: 'reconciliation_checkin',
+});
 
 export interface ReconciliationCandidate {
   sessionId: string;
@@ -77,10 +80,19 @@ interface WorkspaceDeliveryTarget {
 
 type WorkspaceDeliveryTargetResult =
   | { ok: true; target: WorkspaceDeliveryTarget }
-  | { ok: false; reason: string; nodeId: string | null; userId: string | null; projectId: string | null };
+  | {
+      ok: false;
+      reason: string;
+      nodeId: string | null;
+      userId: string | null;
+      projectId: string | null;
+    };
 
 function envNumber(env: DOEnv, key: string, fallback: number): number {
-  const value = Number.parseInt((env as unknown as Record<string, string | undefined>)[key] ?? '', 10);
+  const value = Number.parseInt(
+    (env as unknown as Record<string, string | undefined>)[key] ?? '',
+    10
+  );
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
@@ -92,7 +104,7 @@ function reconciliationDeadlineMs(env: DOEnv): number {
   return envNumber(
     env,
     'TASK_RECONCILIATION_RESPONSE_DEADLINE_MS',
-    DEFAULT_TASK_RECONCILIATION_RESPONSE_DEADLINE_MS,
+    DEFAULT_TASK_RECONCILIATION_RESPONSE_DEADLINE_MS
   );
 }
 
@@ -100,7 +112,7 @@ function promptSoftStallMs(env: DOEnv): number {
   return envNumber(
     env,
     'TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS',
-    DEFAULT_TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS,
+    DEFAULT_TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS
   );
 }
 
@@ -109,7 +121,7 @@ function promptHardStallMs(env: DOEnv): number {
   const hardMs = envNumber(
     env,
     'TASK_RECONCILIATION_PROMPT_HARD_STALL_MS',
-    DEFAULT_TASK_RECONCILIATION_PROMPT_HARD_STALL_MS,
+    DEFAULT_TASK_RECONCILIATION_PROMPT_HARD_STALL_MS
   );
   return Math.max(hardMs, softMs);
 }
@@ -118,7 +130,7 @@ function minReconciliationAlarmDelayMs(env: DOEnv): number {
   return envNumber(
     env,
     'TASK_RECONCILIATION_MIN_ALARM_DELAY_MS',
-    DEFAULT_TASK_RECONCILIATION_MIN_ALARM_DELAY_MS,
+    DEFAULT_TASK_RECONCILIATION_MIN_ALARM_DELAY_MS
   );
 }
 
@@ -126,7 +138,7 @@ function maxCandidatesPerSweep(env: DOEnv): number {
   return envNumber(
     env,
     'TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP',
-    DEFAULT_TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP,
+    DEFAULT_TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP
   );
 }
 
@@ -134,7 +146,7 @@ function nodeHeartbeatStaleMs(env: DOEnv): number {
   return envNumber(
     env,
     'TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS',
-    DEFAULT_TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS,
+    DEFAULT_TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS
   );
 }
 
@@ -142,7 +154,7 @@ function reconciliationNodeCallTimeoutMs(env: DOEnv): number {
   return envNumber(
     env,
     'TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS',
-    DEFAULT_TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS,
+    DEFAULT_TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS
   );
 }
 
@@ -158,7 +170,7 @@ function reconciliationNodeCallTimeoutMs(env: DOEnv): number {
  */
 export async function getReconciliationCandidates(
   sql: SqlStorage,
-  env: DOEnv,
+  env: DOEnv
 ): Promise<ReconciliationCandidate[]> {
   const now = Date.now();
   const idleThresholdMs = reconciliationIdleMs(env);
@@ -171,8 +183,9 @@ export async function getReconciliationCandidates(
   // reconciliation must still protect them.
   // Join with workspace_activity to get last activity timestamp.
   // Exclude sessions that already have active needs_input or reconciliation_checkin markers.
-  const rows = sql.exec(
-    `SELECT
+  const rows = sql
+    .exec(
+      `SELECT
        cs.id AS session_id,
        COALESCE(ics.workspace_id, cs.workspace_id) AS workspace_id,
        COALESCE(ics.task_id, cs.task_id) AS task_id,
@@ -199,8 +212,9 @@ export async function getReconciliationCandidates(
          WHERE sam.session_id = cs.id
            AND sam.resolved_at IS NULL
            AND sam.kind IN ('needs_input', 'reconciliation_checkin')
-       )`,
-  ).toArray();
+       )`
+    )
+    .toArray();
 
   const candidates: ReconciliationCandidate[] = [];
 
@@ -216,8 +230,10 @@ export async function getReconciliationCandidates(
     // Verify task is still active and task_mode = 'task' via D1
     try {
       const taskRow = await env.DATABASE.prepare(
-        `SELECT task_mode, status FROM tasks WHERE id = ? LIMIT 1`,
-      ).bind(taskId).first<{ task_mode: string | null; status: string }>();
+        `SELECT task_mode, status FROM tasks WHERE id = ? LIMIT 1`
+      )
+        .bind(taskId)
+        .first<{ task_mode: string | null; status: string }>();
 
       if (!taskRow) continue;
       if (taskRow.task_mode !== 'task') continue;
@@ -228,12 +244,14 @@ export async function getReconciliationCandidates(
     }
 
     // Find active ACP session for this workspace (DO SQLite)
-    const acpRows = sql.exec(
-      `SELECT id FROM acp_sessions
+    const acpRows = sql
+      .exec(
+        `SELECT id FROM acp_sessions
        WHERE workspace_id = ? AND status IN ('running', 'started')
        ORDER BY created_at DESC LIMIT 1`,
-      workspaceId,
-    ).toArray();
+        workspaceId
+      )
+      .toArray();
 
     const acpRow = acpRows[0];
     if (!acpRow?.id) {
@@ -243,10 +261,12 @@ export async function getReconciliationCandidates(
 
     const acpSessionId = acpRow.id as string;
     const stateRow = parseRowOrNull(
-      sql.exec(
-        `SELECT activity, activity_at, prompt_started_at FROM session_state WHERE session_id = ?`,
-        acpSessionId,
-      ).toArray()[0],
+      sql
+        .exec(
+          `SELECT activity, activity_at, prompt_started_at FROM session_state WHERE session_id = ?`,
+          acpSessionId
+        )
+        .toArray()[0],
       SessionStateRowSchema,
       'reconciliation.session_state'
     );
@@ -298,133 +318,159 @@ export async function processReconciliationCandidates(
   sql: SqlStorage,
   env: DOEnv,
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void,
-  hooks: ReconciliationProcessingHooks = {},
+  hooks: ReconciliationProcessingHooks = {}
 ): Promise<number> {
-  const candidates = (await getReconciliationCandidates(sql, env)).slice(0, maxCandidatesPerSweep(env));
+  const candidates = (await getReconciliationCandidates(sql, env)).slice(
+    0,
+    maxCandidatesPerSweep(env)
+  );
   if (candidates.length === 0) return 0;
 
   const deadlineMs = reconciliationDeadlineMs(env);
 
-  const results = await Promise.allSettled(candidates.map(async (candidate) => {
-    try {
-      const targetResult = await resolveWorkspaceDeliveryTarget(
-        env as unknown as WorkerEnv,
-        candidate.workspaceId,
-        hooks.projectId ?? null,
-      );
-      if (!targetResult.ok) {
-        await terminallyFailDeadTarget(sql, env, candidate, targetResult, hooks);
-        return 1;
-      }
+  const results = await Promise.allSettled(
+    candidates.map(async (candidate) => {
+      try {
+        const targetResult = await resolveWorkspaceDeliveryTarget(
+          env as unknown as WorkerEnv,
+          candidate.workspaceId,
+          hooks.projectId ?? null
+        );
+        if (!targetResult.ok) {
+          await terminallyFailDeadTarget(sql, env, candidate, targetResult, hooks);
+          return 1;
+        }
 
-      if (candidate.action === 'observe_prompt') {
-        return recordPromptInFlightObservation(sql, candidate) ? 1 : 0;
-      }
+        if (candidate.action === 'observe_prompt') {
+          return recordPromptInFlightObservation(sql, candidate) ? 1 : 0;
+        }
 
-      if (candidate.action === 'cancel_prompt') {
-        await cancelStalledPrompt(sql, env, candidate, targetResult.target, broadcastEvent);
-        return 1;
-      }
+        if (candidate.action === 'cancel_prompt') {
+          await cancelStalledPrompt(sql, env, candidate, targetResult.target, broadcastEvent);
+          return 1;
+        }
 
-      // 1. Persist the check-in as a user-role message with SAM metadata
-      const msgResult = persistMessage(
-        sql, env, candidate.sessionId, 'user', CHECKIN_PROMPT, CHECKIN_METADATA,
-      );
+        // 1. Persist the check-in as a user-role message with SAM metadata
+        const msgResult = persistMessage(
+          sql,
+          env,
+          candidate.sessionId,
+          'user',
+          CHECKIN_PROMPT,
+          CHECKIN_METADATA
+        );
 
-      // 2. Create a reconciliation_checkin attention marker with deadline expiry
-      const marker = createAttentionMarker(sql, {
-        sessionId: candidate.sessionId,
-        taskId: candidate.taskId,
-        workspaceId: candidate.workspaceId,
-        kind: 'reconciliation_checkin',
-        source: 'sam_orchestrator',
-        sourceMessageId: msgResult.id,
-        reason: `Agent idle for ${Math.round(candidate.idleDurationMs / 1000)}s — SAM check-in sent`,
-        expiresAt: Date.now() + deadlineMs,
-      });
-
-      // 3. Send the prompt to the VM agent off the alarm critical path. The
-      //    marker above is the correctness boundary: send failure lets it expire.
-      waitUntil(hooks, sendCheckinToAgent(env, candidate, targetResult.target).catch((err) => {
-        log.warn('reconciliation.send_prompt_failed', {
+        // 2. Create a reconciliation_checkin attention marker with deadline expiry
+        const marker = createAttentionMarker(sql, {
           sessionId: candidate.sessionId,
+          taskId: candidate.taskId,
           workspaceId: candidate.workspaceId,
-          error: err instanceof Error ? err.message : String(err),
+          kind: 'reconciliation_checkin',
+          source: 'sam_orchestrator',
+          sourceMessageId: msgResult.id,
+          reason: `Agent idle for ${Math.round(candidate.idleDurationMs / 1000)}s — SAM check-in sent`,
+          expiresAt: Date.now() + deadlineMs,
         });
-      }));
 
-      // 4. Record activity event
-      recordActivityEventInternal(
-        sql,
-        'reconciliation.checkin_sent',
-        'system',
-        null,
-        candidate.workspaceId,
-        candidate.sessionId,
-        candidate.taskId,
-        JSON.stringify({
-          messageId: msgResult.id,
+        // 3. Send the prompt to the VM agent off the alarm critical path. The
+        //    marker above is the correctness boundary: send failure lets it expire.
+        waitUntil(
+          hooks,
+          sendCheckinToAgent(env, candidate, targetResult.target).catch((err) => {
+            log.warn('reconciliation.send_prompt_failed', {
+              sessionId: candidate.sessionId,
+              workspaceId: candidate.workspaceId,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          })
+        );
+
+        // 4. Record activity event
+        recordActivityEventInternal(
+          sql,
+          'reconciliation.checkin_sent',
+          'system',
+          null,
+          candidate.workspaceId,
+          candidate.sessionId,
+          candidate.taskId,
+          JSON.stringify({
+            messageId: msgResult.id,
+            markerId: marker.id,
+            idleDurationMs: candidate.idleDurationMs,
+            deadlineMs,
+          })
+        );
+
+        broadcastEvent(
+          'message.new',
+          {
+            sessionId: candidate.sessionId,
+            messageId: msgResult.id,
+            role: 'user',
+            content: CHECKIN_PROMPT,
+            toolMetadata: JSON.parse(CHECKIN_METADATA),
+            createdAt: msgResult.now,
+            sequence: msgResult.sequence,
+          },
+          candidate.sessionId
+        );
+
+        broadcastEvent(
+          'attention.created',
+          {
+            sessionId: candidate.sessionId,
+            markerId: marker.id,
+            kind: 'reconciliation_checkin',
+          },
+          candidate.sessionId
+        );
+
+        log.info('reconciliation.checkin_sent', {
+          sessionId: candidate.sessionId,
+          taskId: candidate.taskId,
+          workspaceId: candidate.workspaceId,
           markerId: marker.id,
+          messageId: msgResult.id,
           idleDurationMs: candidate.idleDurationMs,
-          deadlineMs,
-        }),
-      );
+        });
 
-      broadcastEvent('message.new', {
-        sessionId: candidate.sessionId,
-        messageId: msgResult.id,
-        role: 'user',
-        content: CHECKIN_PROMPT,
-        toolMetadata: JSON.parse(CHECKIN_METADATA),
-        createdAt: msgResult.now,
-        sequence: msgResult.sequence,
-      }, candidate.sessionId);
+        return 1;
+      } catch (err) {
+        log.error('reconciliation.checkin_failed', {
+          sessionId: candidate.sessionId,
+          taskId: candidate.taskId,
+          ...serializeError(err),
+        });
+        return 0;
+      }
+    })
+  );
 
-      broadcastEvent('attention.created', {
-        sessionId: candidate.sessionId,
-        markerId: marker.id,
-        kind: 'reconciliation_checkin',
-      }, candidate.sessionId);
-
-      log.info('reconciliation.checkin_sent', {
-        sessionId: candidate.sessionId,
-        taskId: candidate.taskId,
-        workspaceId: candidate.workspaceId,
-        markerId: marker.id,
-        messageId: msgResult.id,
-        idleDurationMs: candidate.idleDurationMs,
-      });
-
-      return 1;
-    } catch (err) {
-      log.error('reconciliation.checkin_failed', {
-        sessionId: candidate.sessionId,
-        taskId: candidate.taskId,
-        ...serializeError(err),
-      });
-      return 0;
-    }
-  }));
-
-  return results.reduce((count, result) => count + (result.status === 'fulfilled' ? result.value : 0), 0);
+  return results.reduce(
+    (count, result) => count + (result.status === 'fulfilled' ? result.value : 0),
+    0
+  );
 }
 
 function recordPromptInFlightObservation(
   sql: SqlStorage,
-  candidate: ReconciliationCandidate,
+  candidate: ReconciliationCandidate
 ): boolean {
   const observedSince = candidate.promptStartedAt ?? candidate.lastActivityAt;
-  const alreadyObserved = sql.exec(
-    `SELECT 1 FROM activity_events
+  const alreadyObserved = sql
+    .exec(
+      `SELECT 1 FROM activity_events
      WHERE event_type = 'reconciliation.prompt_in_flight_observed'
        AND session_id = ?
        AND task_id = ?
        AND created_at >= ?
      LIMIT 1`,
-    candidate.sessionId,
-    candidate.taskId,
-    observedSince,
-  ).toArray();
+      candidate.sessionId,
+      candidate.taskId,
+      observedSince
+    )
+    .toArray();
   if (alreadyObserved.length > 0) return false;
 
   recordActivityEventInternal(
@@ -440,7 +486,7 @@ function recordPromptInFlightObservation(
       promptStartedAt: candidate.promptStartedAt,
       promptAgeMs: candidate.promptAgeMs,
       idleDurationMs: candidate.idleDurationMs,
-    }),
+    })
   );
 
   log.info('reconciliation.prompt_in_flight_observed', {
@@ -459,7 +505,7 @@ async function cancelStalledPrompt(
   env: DOEnv,
   candidate: ReconciliationCandidate,
   target: WorkspaceDeliveryTarget,
-  broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void,
+  broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void
 ): Promise<void> {
   const workerEnv = env as unknown as WorkerEnv;
 
@@ -469,18 +515,22 @@ async function cancelStalledPrompt(
     candidate.acpSessionId,
     workerEnv,
     target.userId,
-    { requestTimeoutMs: reconciliationNodeCallTimeoutMs(env) },
+    { requestTimeoutMs: reconciliationNodeCallTimeoutMs(env) }
   );
 
   if (!result.success && result.status === 409) {
     // The VM no longer has a prompt in flight; repair the stale mirror so the
     // next reconciliation pass can send the visible check-in normally.
     upsertActivityState(sql, candidate.acpSessionId, { activity: 'idle' });
-    broadcastEvent('session.activity', {
-      sessionId: candidate.sessionId,
-      activity: 'idle',
-      promptStartedAt: null,
-    }, candidate.sessionId);
+    broadcastEvent(
+      'session.activity',
+      {
+        sessionId: candidate.sessionId,
+        activity: 'idle',
+        promptStartedAt: null,
+      },
+      candidate.sessionId
+    );
   }
 
   recordActivityEventInternal(
@@ -498,7 +548,7 @@ async function cancelStalledPrompt(
       idleDurationMs: candidate.idleDurationMs,
       success: result.success,
       status: result.status,
-    }),
+    })
   );
 
   log.warn('reconciliation.prompt_cancel_requested', {
@@ -519,7 +569,7 @@ async function cancelStalledPrompt(
 async function sendCheckinToAgent(
   env: DOEnv,
   candidate: ReconciliationCandidate,
-  target: WorkspaceDeliveryTarget,
+  target: WorkspaceDeliveryTarget
 ): Promise<void> {
   const workerEnv = env as unknown as WorkerEnv;
 
@@ -531,14 +581,14 @@ async function sendCheckinToAgent(
     workerEnv,
     target.userId,
     undefined,
-    { requestTimeoutMs: reconciliationNodeCallTimeoutMs(env) },
+    { requestTimeoutMs: reconciliationNodeCallTimeoutMs(env) }
   );
 }
 
 async function resolveWorkspaceDeliveryTarget(
   env: WorkerEnv,
   workspaceId: string,
-  projectId: string | null,
+  projectId: string | null
 ): Promise<WorkspaceDeliveryTargetResult> {
   const staleMs = nodeHeartbeatStaleMs(env as unknown as DOEnv);
   const wsRow = await env.DATABASE.prepare(
@@ -552,15 +602,17 @@ async function resolveWorkspaceDeliveryTarget(
      FROM workspaces w
      LEFT JOIN nodes n ON n.id = w.node_id
      WHERE w.id = ?
-     LIMIT 1`,
-  ).bind(workspaceId).first<{
-    node_id: string | null;
-    user_id: string;
-    project_id: string | null;
-    node_status: string | null;
-    health_status: string | null;
-    last_heartbeat_at: string | null;
-  }>();
+     LIMIT 1`
+  )
+    .bind(workspaceId)
+    .first<{
+      node_id: string | null;
+      user_id: string;
+      project_id: string | null;
+      node_status: string | null;
+      health_status: string | null;
+      last_heartbeat_at: string | null;
+    }>();
 
   if (!wsRow) {
     log.warn('reconciliation.workspace_missing', { workspaceId });
@@ -670,10 +722,7 @@ function waitUntil(hooks: ReconciliationProcessingHooks, promise: Promise<unknow
  * check should fire. Task mode is verified when processing candidates; this
  * alarm calculation intentionally stays DO-local.
  */
-export function computeReconciliationAlarmTime(
-  sql: SqlStorage,
-  env: DOEnv,
-): number | null {
+export function computeReconciliationAlarmTime(sql: SqlStorage, env: DOEnv): number | null {
   const idleThresholdMs = reconciliationIdleMs(env);
   const softPromptMs = promptSoftStallMs(env);
   const hardPromptMs = promptHardStallMs(env);
@@ -683,8 +732,9 @@ export function computeReconciliationAlarmTime(
   // have an active reconciliation or needs_input marker. Join active ACP
   // sessions so old active chat rows without a running agent do not keep the
   // ProjectData alarm hot forever.
-  const rows = sql.exec(
-    `SELECT
+  const rows = sql
+    .exec(
+      `SELECT
        COALESCE(
          CASE
            WHEN wa.last_message_at IS NULL THEN wa.last_terminal_activity_at
@@ -714,8 +764,9 @@ export function computeReconciliationAlarmTime(
          WHERE sam.session_id = cs.id
            AND sam.resolved_at IS NULL
            AND sam.kind IN ('needs_input', 'reconciliation_checkin')
-       )`,
-  ).toArray();
+       )`
+    )
+    .toArray();
 
   if (rows.length === 0) {
     return null;
@@ -730,9 +781,10 @@ export function computeReconciliationAlarmTime(
 
     let candidateTime = lastActivity + idleThresholdMs;
     if (row.session_activity === 'prompting') {
-      const promptStartedAt = (row.prompt_started_at as number | null | undefined)
-        || (row.session_activity_at as number | null | undefined)
-        || lastActivity;
+      const promptStartedAt =
+        (row.prompt_started_at as number | null | undefined) ||
+        (row.session_activity_at as number | null | undefined) ||
+        lastActivity;
       const promptAgeMs = Math.max(0, now - promptStartedAt);
       const promptThreshold = promptAgeMs < softPromptMs ? softPromptMs : hardPromptMs;
       candidateTime = Math.max(candidateTime, promptStartedAt + promptThreshold);

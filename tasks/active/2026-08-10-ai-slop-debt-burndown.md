@@ -26,45 +26,51 @@ Raphaël's instruction: single PR; all code production dispatched to smaller mod
 ## Implementation checklist
 
 ### Phase 0 — security-first boundary fixes
-- [ ] `deployment-routing.ts:334,341` validate manifests via `DeploymentManifestSchema`/`validateManifest`; harden write path in `compose-publish-release-callback.ts`; discriminating regression test (unvalidated `routes` array must be rejected, valid manifest control passes)
-- [ ] `session-snapshots.ts:169` schema for VM-agent-submitted `SessionSnapshotManifest` sub-shapes
-- [ ] `local-forward.ts:115-117` validated body (null body → 400, not 500)
-- [ ] `github-trigger-filter.ts` `parseWebhookPayload` → Valibot transcription of `GitHubWebhookEvent`
-- [ ] Review undocumented `eslint-disable no-control-regex` at `routes/mcp/_helpers.ts:177` — document or fix
+
+- [x] `deployment-routing.ts:334,341` validate manifests via `DeploymentManifestSchema`/`validateManifest`; harden write path in `compose-publish-release-callback.ts`; discriminating regression test (unvalidated `routes` array must be rejected, valid manifest control passes)
+- [x] `session-snapshots.ts:169` schema for VM-agent-submitted `SessionSnapshotManifest` sub-shapes
+- [x] `local-forward.ts:115-117` validated body (null body → 400, not 500)
+- [x] `github-trigger-filter.ts` `parseWebhookPayload` → Valibot transcription of `GitHubWebhookEvent`
+- [x] Review undocumented `eslint-disable no-control-regex` at `routes/mcp/_helpers.ts:177` — document or fix
 
 ### Phase 1 — blocking classes 24/23/9 → 0
-- [ ] WP-1: 11 admin-route `c.req.json<T>()` → `jsonValidator` (admin-ai-allowance, admin-ai-proxy ×2, admin-quotas ×2, admin-runtime-controls, admin-sandbox ×4, admin-trials) + 400-path tests
-- [ ] WP-2: 13 user-facing sites → `jsonValidator` (knowledge ×4, library ×2, policies ×2, orchestrator, project-agent, sam, agent-credential-setup-sessions, mcp/index JSON-RPC envelope) + 400-path tests
-- [ ] WP-3/4/5/6: all 23 typed `JSON.parse` sites → `parseWithSchema`/`parseJsonRecord`/`readResponseJson` per cluster map in `.do-state.md`; dedup the duplicate `GitHubCliPolicy` parser (agent-profiles.ts:36 / github-cli-policy.ts:39)
-- [ ] WP-6/8/9/10: all 9 local record guards → shared helpers; add minimal dependency-free record predicate to `packages/shared` first; verify call sites where guards currently accept arrays (`row-schemas/messages.ts:114`, `document-card-data.ts:57`); non-throwing predicate for `canonical-json.ts`
-- [ ] Zero endgame: baseline counts → 0; `sam/no-unvalidated-request-json`, `sam/no-unsafe-json-parse-assertion`, `sam/no-local-record-guard` → `error` in `eslint.config.mjs`; manifest exemptions removed
+
+- [x] WP-1: 11 admin-route `c.req.json<T>()` → `jsonValidator` (admin-ai-allowance, admin-ai-proxy ×2, admin-quotas ×2, admin-runtime-controls, admin-sandbox ×4, admin-trials) + 400-path tests
+- [x] WP-2: 13 user-facing sites → `jsonValidator` (knowledge ×4, library ×2, policies ×2, orchestrator, project-agent, sam, agent-credential-setup-sessions, mcp/index JSON-RPC envelope) + 400-path tests
+- [x] WP-3/4/5/6: all 23 typed `JSON.parse` sites → `parseWithSchema`/`parseJsonRecord`/`readResponseJson` per cluster map in `.do-state.md`; dedup the duplicate `GitHubCliPolicy` parser (agent-profiles.ts:36 / github-cli-policy.ts:39)
+- [x] WP-6/8/9/10: all 9 local record guards → shared helpers; add minimal dependency-free record predicate to `packages/shared` first; verify call sites where guards currently accept arrays (`row-schemas/messages.ts:114`, `document-card-data.ts:57`); non-throwing predicate for `canonical-json.ts`
+- [x] Zero endgame: baseline counts → 0; `sam/no-unvalidated-request-json`, `sam/no-unsafe-json-parse-assertion`, `sam/no-local-record-guard` → `error` in `eslint.config.mjs`; manifest exemptions removed
 
 ### Phase 2 — semantic diagnostics 45 → 0 + checker promotion
-- [ ] WP-7: DO SQLite row-mapper cluster (project-agent, sam-session, project-orchestrator ×2, reconciliation:242, services/diagnosis-runner:36) — shared Valibot row schemas (`ConversationRow`/`MessageRow` identical across two DOs), rule-50 per-row fault isolation, good/bad/good regression tests
-- [ ] Remaining blind-external-payload sites (VM-agent callback routes, setup.ts, devcontainer-configs, webhook-trigger-store, node-selector, origin-ca-certificates, platform-config-validation, github-app ×3, mappers, vm-agent-container-runtime, debug-agent, stuck-tasks, credential-setup-session)
-- [ ] `useNotifications.ts:147` WS frame schema (apps/web)
-- [ ] `pnpm quality:runtime-boundary-semantics` → 0 diagnostics; promote checker to blocking for apps/api/src; update `runtime-boundary-semantic-evidence.json` decision block
+
+- [x] WP-7: DO SQLite row-mapper cluster (project-agent, sam-session, project-orchestrator ×2, reconciliation:242, services/diagnosis-runner:36) — shared Valibot row schemas (`ConversationRow`/`MessageRow` identical across two DOs), rule-50 per-row fault isolation, good/bad/good regression tests
+- [x] Remaining blind-external-payload sites (VM-agent callback routes, setup.ts, devcontainer-configs, webhook-trigger-store, node-selector, origin-ca-certificates, platform-config-validation, github-app ×3, mappers, vm-agent-container-runtime, debug-agent, stuck-tasks, credential-setup-session)
+- [x] `useNotifications.ts:147` WS frame schema (apps/web)
+- [x] `pnpm quality:runtime-boundary-semantics` → 0 diagnostics; promote checker to blocking for apps/api/src; update `runtime-boundary-semantic-evidence.json` decision block
 
 ### Phase 3 — cast hygiene
-- [ ] Remaining category-D casts of the 28 not covered above
-- [ ] Fix `ListProjectsResponse.projects` type (`Project[]` → `ProjectSummary[]`; removes double-casts at `projects/crud.ts:518` + `useProjectData.ts:36`)
-- [ ] Amend `.claude/rules/51-runtime-boundary-validation.md` with 3 sanctioned bullets (CSS-var-as-number casts; third-party generic container/lib-type-gap casts; self-constructed log/display payload widening)
-- [ ] Lower report-only baseline counts to the post-fix floor
+
+- [x] Remaining category-D casts of the 28 not covered above
+- [x] Fix `ListProjectsResponse.projects` type (`Project[]` → `ProjectSummary[]`; removes double-casts at `projects/crud.ts:518` + `useProjectData.ts:36`)
+- [x] Amend `.claude/rules/51-runtime-boundary-validation.md` with 3 sanctioned bullets (CSS-var-as-number casts; third-party generic container/lib-type-gap casts; self-constructed log/display payload widening)
+- [x] Lower report-only baseline counts to the post-fix floor
 
 ### Phase 4 — lint debt
-- [ ] `eslint --fix` 61 `no-var` in apps/www; hand-fix 7 `no-unused-vars` + 2 `no-empty` + the 1 production `any`
-- [ ] Delete dead root `.eslintrc.cjs` (verify flat-config parity for `react/jsx-no-constructed-context-values` first); update `.claude/rules/48` reference
-- [ ] a11y: fix all 64 jsx-a11y warnings; promote `jsx-a11y/*` to error; archive `tasks/backlog/2026-04-01-promote-a11y-eslint-to-errors.md`
-- [ ] Production `no-non-null-assertion` burn-down (256 src sites; top `services/cron-utils.ts` 31) with real narrowing, no new suppressions
-- [ ] Scope `no-non-null-assertion`/`no-explicit-any` warn to non-test files; document decision
-- [ ] Review 35 `react-hooks/exhaustive-deps` suppressions against rule 48; fix unsafe ones, document safe ones
-- [ ] Scripts: 2 `scripts/quality` typed parses → `as unknown` + guard; `check-do-wall-time.ts:160` guard
-- [ ] Extend `check-file-sizes.ts` to scan `scripts/`; add documented FILE SIZE EXCEPTION to `sync-wrangler-config.ts`
+
+- [x] `eslint --fix` 61 `no-var` in apps/www; hand-fix 7 `no-unused-vars` + 2 `no-empty` + the 1 production `any`
+- [x] Delete dead root `.eslintrc.cjs` (verify flat-config parity for `react/jsx-no-constructed-context-values` first); update `.claude/rules/48` reference
+- [x] a11y: fix all 64 jsx-a11y warnings; promote `jsx-a11y/*` to error; archive `tasks/backlog/2026-04-01-promote-a11y-eslint-to-errors.md`
+- [x] Production `no-non-null-assertion` burn-down (256 src sites; top `services/cron-utils.ts` 31) with real narrowing, no new suppressions
+- [x] Scope `no-non-null-assertion`/`no-explicit-any` warn to non-test files; document decision
+- [x] Review 35 `react-hooks/exhaustive-deps` suppressions against rule 48; fix unsafe ones, document safe ones
+- [x] Scripts: 2 `scripts/quality` typed parses → `as unknown` + guard; `check-do-wall-time.ts:160` guard
+- [x] Extend `check-file-sizes.ts` to scan `scripts/`; add documented FILE SIZE EXCEPTION to `sync-wrangler-config.ts`
 
 ### Cross-cutting
-- [ ] All baseline files lowered in this PR (type-boundary, semantic evidence, format count for touched files)
-- [ ] Playwright visual audit for changed apps/web surfaces (mobile 375 + desktop 1280, overflow assertions)
-- [ ] Docs sync: rules 48/51 updates included; no stale references to removed config
+
+- [x] All baseline files lowered in this PR (type-boundary, semantic evidence, format count for touched files)
+- [x] Playwright visual audit for changed apps/web surfaces (mobile 375 + desktop 1280, overflow assertions)
+- [x] Docs sync: rules 48/51 updates included; no stale references to removed config
 
 ## Acceptance criteria
 

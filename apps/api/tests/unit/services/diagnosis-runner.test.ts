@@ -98,7 +98,12 @@ describe('listDiagnosisEvents', () => {
 
   it('returns well-formed events in sequence order', async () => {
     insertEvent(sqlite, { id: 'e1', sequence: 1, step_key: 'step-1' });
-    insertEvent(sqlite, { id: 'e2', sequence: 2, step_key: 'step-2', source_name: 'get_recent_errors' });
+    insertEvent(sqlite, {
+      id: 'e2',
+      sequence: 2,
+      step_key: 'step-2',
+      source_name: 'get_recent_errors',
+    });
 
     const { events, nextCursor } = await listDiagnosisEvents(env, RUN_ID);
 

@@ -24,9 +24,8 @@ vi.mock('../../../src/middleware/auth', () => ({
 }));
 
 const { adminRuntimeControlRoutes } = await import('../../../src/routes/admin-runtime-controls');
-const { __resetOperationalKillSwitchCacheForTest } = await import(
-  '../../../src/services/operational-kill-switch'
-);
+const { __resetOperationalKillSwitchCacheForTest } =
+  await import('../../../src/services/operational-kill-switch');
 
 function createApp() {
   const app = new Hono<{ Bindings: Env }>();
@@ -67,25 +66,33 @@ describe('admin runtime controls', () => {
     const env = {
       KV: {
         get: vi.fn(async (key: string) => values.get(key) ?? null),
-        put: vi.fn(async (key: string, value: string) => { values.set(key, value); }),
+        put: vi.fn(async (key: string, value: string) => {
+          values.set(key, value);
+        }),
       },
     } as unknown as Env;
 
-    const response = await createApp().request('/api/admin/runtime-controls', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-test-role': 'superadmin' },
-      body: JSON.stringify({ cronSweepsEnabled: false, doAlarmsEnabled: false }),
-    }, env);
+    const response = await createApp().request(
+      '/api/admin/runtime-controls',
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-test-role': 'superadmin' },
+        body: JSON.stringify({ cronSweepsEnabled: false, doAlarmsEnabled: false }),
+      },
+      env
+    );
 
     expect(response.status).toBe(200);
     expect(await response.json()).toMatchObject({
       cronSweepsEnabled: false,
       doAlarmsEnabled: false,
     });
-    expect(values).toEqual(new Map([
-      ['control-loops:cron-enabled', 'false'],
-      ['control-loops:alarms-enabled', 'false'],
-    ]));
+    expect(values).toEqual(
+      new Map([
+        ['control-loops:cron-enabled', 'false'],
+        ['control-loops:alarms-enabled', 'false'],
+      ])
+    );
   });
 
   it('rejects a non-superadmin before reading either switch', async () => {
@@ -130,11 +137,15 @@ describe('admin runtime controls', () => {
     const putSpy = vi.spyOn(kv, 'put');
     const env = { KV: kv } as Env;
 
-    const response = await createApp().request('/api/admin/runtime-controls', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-test-role': 'superadmin' },
-      body: JSON.stringify({}),
-    }, env);
+    const response = await createApp().request(
+      '/api/admin/runtime-controls',
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-test-role': 'superadmin' },
+        body: JSON.stringify({}),
+      },
+      env
+    );
 
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({
@@ -148,11 +159,15 @@ describe('admin runtime controls', () => {
     const putSpy = vi.spyOn(kv, 'put');
     const env = { KV: kv } as Env;
 
-    const response = await createApp().request('/api/admin/runtime-controls', {
-      method: 'PATCH',
-      headers: { 'Content-Type': 'application/json', 'x-test-role': 'superadmin' },
-      body: JSON.stringify({ cronSweepsEnabled: 'yes' }),
-    }, env);
+    const response = await createApp().request(
+      '/api/admin/runtime-controls',
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'x-test-role': 'superadmin' },
+        body: JSON.stringify({ cronSweepsEnabled: 'yes' }),
+      },
+      env
+    );
 
     expect(response.status).toBe(400);
     expect(await response.json()).toMatchObject({

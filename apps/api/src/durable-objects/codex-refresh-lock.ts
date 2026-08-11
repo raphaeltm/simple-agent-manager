@@ -106,7 +106,8 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       });
     }
 
-    const lockTimeout = parseInt(this.env.CODEX_REFRESH_LOCK_TIMEOUT_MS || '', 10) || DEFAULT_LOCK_TIMEOUT_MS;
+    const lockTimeout =
+      parseInt(this.env.CODEX_REFRESH_LOCK_TIMEOUT_MS || '', 10) || DEFAULT_LOCK_TIMEOUT_MS;
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), lockTimeout);
 
@@ -120,10 +121,10 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
         );
       }
       // Do not expose internal error details to caller.
-      return new Response(
-        JSON.stringify({ error: 'internal_error' }),
-        { status: 500, headers: { 'Content-Type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({ error: 'internal_error' }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      });
     } finally {
       clearTimeout(timeoutId);
     }
@@ -167,10 +168,10 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     // Look up the stored credential — prefer project-scoped when projectId is set.
     const credential = await this.getStoredCredential(userId, projectId ?? null);
     if (!credential) {
-      return new Response(
-        JSON.stringify({ error: 'refresh_token_invalidated' }),
-        { status: 401, headers: { 'Content-Type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({ error: 'refresh_token_invalidated' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
     }
 
     // Decrypt the stored credential to get the current auth.json.
@@ -267,7 +268,8 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
 
     // Token matches — forward to OpenAI for a real refresh.
     const upstreamUrl = this.env.CODEX_REFRESH_UPSTREAM_URL || DEFAULT_UPSTREAM_URL;
-    const upstreamTimeout = parseInt(this.env.CODEX_REFRESH_UPSTREAM_TIMEOUT_MS || '', 10) || DEFAULT_UPSTREAM_TIMEOUT_MS;
+    const upstreamTimeout =
+      parseInt(this.env.CODEX_REFRESH_UPSTREAM_TIMEOUT_MS || '', 10) || DEFAULT_UPSTREAM_TIMEOUT_MS;
 
     // Use the lock-level signal for the upstream fetch, with a tighter upstream-specific timeout.
     const upstreamController = new AbortController();
@@ -375,7 +377,11 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     }
 
     // Parse new tokens from OpenAI response.
-    const newTokens = await readResponseJson(upstreamResponse, v.record(v.string(), v.unknown()), 'codex-refresh.tokens');
+    const newTokens = await readResponseJson(
+      upstreamResponse,
+      v.record(v.string(), v.unknown()),
+      'codex-refresh.tokens'
+    );
 
     // Scope validation (MEDIUM #6) — fail closed by default. Disable with
     // CODEX_EXPECTED_SCOPES="" only when explicitly opting out of validation.
@@ -389,7 +395,11 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
 
     // Before updating tokens, record the old refresh_token in the grace window
     // so concurrent sessions holding it can still refresh successfully.
-    if (storedRefreshToken && typeof newTokens.refresh_token === 'string' && newTokens.refresh_token !== storedRefreshToken) {
+    if (
+      storedRefreshToken &&
+      typeof newTokens.refresh_token === 'string' &&
+      newTokens.refresh_token !== storedRefreshToken
+    ) {
       await this.recordRotatedToken(storedRefreshToken);
     }
 
@@ -398,8 +408,10 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
       storedAuth.tokens = {};
     }
     const authTokens = storedAuth.tokens as Record<string, string>;
-    if (typeof newTokens.access_token === 'string') authTokens.access_token = newTokens.access_token;
-    if (typeof newTokens.refresh_token === 'string') authTokens.refresh_token = newTokens.refresh_token;
+    if (typeof newTokens.access_token === 'string')
+      authTokens.access_token = newTokens.access_token;
+    if (typeof newTokens.refresh_token === 'string')
+      authTokens.refresh_token = newTokens.refresh_token;
     if (typeof newTokens.id_token === 'string') authTokens.id_token = newTokens.id_token;
     authTokens.last_refresh = new Date().toISOString();
 
@@ -409,7 +421,9 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
 
     const db = this.env.DATABASE;
     await db
-      .prepare('UPDATE credentials SET encrypted_token = ?, iv = ?, updated_at = datetime(\'now\') WHERE id = ?')
+      .prepare(
+        "UPDATE credentials SET encrypted_token = ?, iv = ?, updated_at = datetime('now') WHERE id = ?"
+      )
       .bind(ciphertext, iv, credential.id)
       .run();
 
@@ -471,9 +485,14 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
    * have independent budgets. A loop on one credential must not exhaust the
    * budget for the user's other credentials.
    */
-  private async enforceRateLimit(credentialId: string): Promise<{ allowed: boolean; resetAt: number }> {
-    const limit = parseInt(this.env.RATE_LIMIT_CODEX_REFRESH_PER_HOUR || '', 10) || DEFAULT_RATE_LIMIT;
-    const windowSeconds = parseInt(this.env.RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS || '', 10) || DEFAULT_RATE_WINDOW_SECONDS;
+  private async enforceRateLimit(
+    credentialId: string
+  ): Promise<{ allowed: boolean; resetAt: number }> {
+    const limit =
+      parseInt(this.env.RATE_LIMIT_CODEX_REFRESH_PER_HOUR || '', 10) || DEFAULT_RATE_LIMIT;
+    const windowSeconds =
+      parseInt(this.env.RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS || '', 10) ||
+      DEFAULT_RATE_WINDOW_SECONDS;
     const now = Math.floor(Date.now() / 1000);
     const currentWindowStart = Math.floor(now / windowSeconds) * windowSeconds;
     const resetAt = currentWindowStart + windowSeconds;
@@ -524,16 +543,18 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
     // Read configured scopes. Distinguish "env var unset" (use default) from
     // "env var set to empty string" (validation disabled).
     const expectedScopesEnv = this.env.CODEX_EXPECTED_SCOPES;
-    const rawScopes =
-      expectedScopesEnv === undefined
-        ? DEFAULT_EXPECTED_SCOPES
-        : expectedScopesEnv;
+    const rawScopes = expectedScopesEnv === undefined ? DEFAULT_EXPECTED_SCOPES : expectedScopesEnv;
     if (rawScopes === '') {
       // Explicitly disabled.
       return { ok: true };
     }
 
-    const expectedScopes = new Set(rawScopes.split(',').map((s) => s.trim()).filter(Boolean));
+    const expectedScopes = new Set(
+      rawScopes
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+    );
     const returnedScopes = scope.split(' ').filter(Boolean);
     const unexpected = returnedScopes.filter((s) => !expectedScopes.has(s));
 
@@ -590,26 +611,18 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
    * Check whether the given refresh token was rotated out within the grace window.
    * Returns true if the token hash matches a recently-rotated entry.
    */
-  private async isWithinGraceWindow(
-    refreshToken: string,
-    graceWindowMs: number
-  ): Promise<boolean> {
+  private async isWithinGraceWindow(refreshToken: string, graceWindowMs: number): Promise<boolean> {
     const entries = await this.getRotatedTokenEntries();
     if (entries.length === 0) return false;
 
     const hash = await this.hashToken(refreshToken);
     const now = Date.now();
 
-    return entries.some(
-      (e) => e.tokenHash === hash && now - e.rotatedAt < graceWindowMs
-    );
+    return entries.some((e) => e.tokenHash === hash && now - e.rotatedAt < graceWindowMs);
   }
 
   private getGraceWindowMs(): number {
-    return (
-      parseInt(this.env.CODEX_REFRESH_GRACE_WINDOW_MS || '', 10) ||
-      DEFAULT_GRACE_WINDOW_MS
-    );
+    return parseInt(this.env.CODEX_REFRESH_GRACE_WINDOW_MS || '', 10) || DEFAULT_GRACE_WINDOW_MS;
   }
 
   private async getRotatedTokenEntries(): Promise<RotatedTokenEntry[]> {
@@ -654,7 +667,12 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
   private async getStoredCredential(
     userId: string,
     projectId: string | null
-  ): Promise<{ id: string; encryptedToken: string; iv: string; scopeProjectId: string | null } | null> {
+  ): Promise<{
+    id: string;
+    encryptedToken: string;
+    iv: string;
+    scopeProjectId: string | null;
+  } | null> {
     const db = this.env.DATABASE;
 
     if (projectId) {
@@ -703,6 +721,11 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
 
     if (!result) return null;
     // User-scoped fallback row — its scope is null (no project override).
-    return { id: result.id, encryptedToken: result.encrypted_token, iv: result.iv, scopeProjectId: null };
+    return {
+      id: result.id,
+      encryptedToken: result.encrypted_token,
+      iv: result.iv,
+      scopeProjectId: null,
+    };
   }
 }

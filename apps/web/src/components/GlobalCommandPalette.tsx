@@ -33,14 +33,14 @@ import {
   Users,
   Wrench,
 } from 'lucide-react';
-import { useCallback,useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useLocation,useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 
 import { useTheme } from '../contexts/ThemeContext';
 import { useCommandPaletteContext } from '../hooks/useCommandPaletteContext';
 import type { SessionSummaryItem } from '../lib/api';
-import { getAllChats,listNodes, listProjects } from '../lib/api';
+import { getAllChats, listNodes, listProjects } from '../lib/api';
 import { signOut } from '../lib/auth';
 import { fuzzyMatch } from '../lib/fuzzy-match';
 import { isMacPlatform } from '../lib/keyboard-shortcuts';
@@ -52,12 +52,11 @@ const DEFAULT_PROJECT_FETCH_LIMIT = 50;
 const DEFAULT_MAX_RESULTS_PER_CATEGORY = 10;
 
 const PROJECT_FETCH_LIMIT = parseInt(
-  import.meta.env.VITE_CMD_PALETTE_PROJECT_FETCH_LIMIT ||
-    String(DEFAULT_PROJECT_FETCH_LIMIT),
+  import.meta.env.VITE_CMD_PALETTE_PROJECT_FETCH_LIMIT || String(DEFAULT_PROJECT_FETCH_LIMIT)
 );
 const MAX_RESULTS_PER_CATEGORY = parseInt(
   import.meta.env.VITE_CMD_PALETTE_MAX_RESULTS_PER_CATEGORY ||
-    String(DEFAULT_MAX_RESULTS_PER_CATEGORY),
+    String(DEFAULT_MAX_RESULTS_PER_CATEGORY)
 );
 
 // ── Result types ──
@@ -163,7 +162,7 @@ function HighlightedText({ text, matches }: { text: string; matches: number[] })
           </span>
         ) : (
           <span key={i}>{part.text}</span>
-        ),
+        )
       )}
     </>
   );
@@ -206,24 +205,30 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
     async function fetchData() {
       try {
         const [projectsRes, nodesRes] = await Promise.all([
-          listProjects(PROJECT_FETCH_LIMIT).catch(() => ({ projects: [] as Array<{ id: string; name: string }> })),
+          listProjects(PROJECT_FETCH_LIMIT).catch(() => ({
+            projects: [] as Array<{ id: string; name: string }>,
+          })),
           listNodes().catch(() => [] as Array<{ id: string; name: string }>),
         ]);
         if (cancelled) return;
 
         const projectList = 'projects' in projectsRes ? projectsRes.projects : [];
-        const mappedProjects = projectList.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }));
+        const mappedProjects = projectList.map((p: { id: string; name: string }) => ({
+          id: p.id,
+          name: p.name,
+        }));
         setProjects(mappedProjects);
 
         const nodeList = Array.isArray(nodesRes) ? nodesRes : [];
         setNodes(nodeList.map((n: { id: string; name: string }) => ({ id: n.id, name: n.name })));
 
         // Fetch chat sessions via single D1 query (no DO fan-out)
-        const chatsRes = await getAllChats({ limit: 100 }).catch(() => ({ sessions: [], total: 0 }));
+        const chatsRes = await getAllChats({ limit: 100 }).catch(() => ({
+          sessions: [],
+          total: 0,
+        }));
         if (!cancelled) {
-          setChatSessions(
-            chatsRes.sessions.map((s) => ({ ...s, createdAt: s.startedAt })),
-          );
+          setChatSessions(chatsRes.sessions.map((s) => ({ ...s, createdAt: s.startedAt })));
           setLoading(false);
         }
       } catch {
@@ -231,7 +236,9 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
       }
     }
     fetchData();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Build navigation items
@@ -239,35 +246,135 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
     const items: Array<{ id: string; label: string; path: string; icon: React.ReactNode }> = [
       { id: 'nav-dashboard', label: 'Home', path: '/dashboard', icon: <Home size={14} /> },
       { id: 'nav-chats', label: 'Chats', path: '/chats', icon: <MessageSquare size={14} /> },
-      { id: 'nav-projects', label: 'Projects', path: '/projects', icon: <FolderKanban size={14} /> },
+      {
+        id: 'nav-projects',
+        label: 'Projects',
+        path: '/projects',
+        icon: <FolderKanban size={14} />,
+      },
       { id: 'nav-nodes', label: 'Nodes', path: '/nodes', icon: <Server size={14} /> },
-      { id: 'nav-workspaces', label: 'Workspaces', path: '/workspaces', icon: <Monitor size={14} /> },
+      {
+        id: 'nav-workspaces',
+        label: 'Workspaces',
+        path: '/workspaces',
+        icon: <Monitor size={14} />,
+      },
       { id: 'nav-map', label: 'Map', path: '/account-map', icon: <Map size={14} /> },
       { id: 'nav-tools', label: 'Tools', path: '/tools', icon: <Wrench size={14} /> },
       { id: 'nav-settings', label: 'Settings', path: '/settings', icon: <Settings size={14} /> },
       // Settings deep-links (always available)
-      { id: 'nav-settings-cloud-provider', label: 'Settings: Cloud Provider', path: '/settings/cloud-provider', icon: <Cloud size={14} /> },
-      { id: 'nav-settings-github', label: 'Settings: GitHub', path: '/settings/github', icon: <Github size={14} /> },
-      { id: 'nav-settings-agents', label: 'Settings: Agents', path: '/settings/agents', icon: <Bot size={14} /> },
-      { id: 'nav-settings-notifications', label: 'Settings: Notifications', path: '/settings/notifications', icon: <Bell size={14} /> },
-      { id: 'nav-settings-usage', label: 'Settings: Usage', path: '/settings/usage', icon: <BarChart3 size={14} /> },
-      { id: 'nav-settings-api-tokens', label: 'Settings: API Tokens', path: '/settings/api-tokens', icon: <Key size={14} /> },
+      {
+        id: 'nav-settings-cloud-provider',
+        label: 'Settings: Cloud Provider',
+        path: '/settings/cloud-provider',
+        icon: <Cloud size={14} />,
+      },
+      {
+        id: 'nav-settings-github',
+        label: 'Settings: GitHub',
+        path: '/settings/github',
+        icon: <Github size={14} />,
+      },
+      {
+        id: 'nav-settings-agents',
+        label: 'Settings: Agents',
+        path: '/settings/agents',
+        icon: <Bot size={14} />,
+      },
+      {
+        id: 'nav-settings-notifications',
+        label: 'Settings: Notifications',
+        path: '/settings/notifications',
+        icon: <Bell size={14} />,
+      },
+      {
+        id: 'nav-settings-usage',
+        label: 'Settings: Usage',
+        path: '/settings/usage',
+        icon: <BarChart3 size={14} />,
+      },
+      {
+        id: 'nav-settings-api-tokens',
+        label: 'Settings: API Tokens',
+        path: '/settings/api-tokens',
+        icon: <Key size={14} />,
+      },
     ];
     if (isSuperadmin) {
       items.push(
         { id: 'nav-admin', label: 'Admin', path: '/admin', icon: <Shield size={14} /> },
-        { id: 'nav-admin-users', label: 'Admin: Users', path: '/admin/users', icon: <Users size={14} /> },
-        { id: 'nav-admin-credentials', label: 'Admin: Credentials', path: '/admin/credentials', icon: <KeyRound size={14} /> },
-        { id: 'nav-admin-ai-proxy', label: 'Admin: AI Proxy', path: '/admin/ai-proxy', icon: <Cpu size={14} /> },
-        { id: 'nav-admin-trials', label: 'Admin: Trials', path: '/admin/trials', icon: <ListChecks size={14} /> },
-        { id: 'nav-admin-costs', label: 'Admin: Costs', path: '/admin/costs', icon: <DollarSign size={14} /> },
-        { id: 'nav-admin-usage', label: 'Admin: Usage', path: '/admin/usage', icon: <BarChart3 size={14} /> },
-        { id: 'nav-admin-quotas', label: 'Admin: Quotas', path: '/admin/quotas', icon: <Gauge size={14} /> },
-        { id: 'nav-admin-errors', label: 'Admin: Errors', path: '/admin/errors', icon: <AlertTriangle size={14} /> },
-        { id: 'nav-admin-overview', label: 'Admin: Overview', path: '/admin/overview', icon: <LayoutDashboard size={14} /> },
-        { id: 'nav-admin-logs', label: 'Admin: Logs', path: '/admin/logs', icon: <ScrollText size={14} /> },
-        { id: 'nav-admin-stream', label: 'Admin: Stream', path: '/admin/stream', icon: <Radio size={14} /> },
-        { id: 'nav-admin-analytics', label: 'Admin: Analytics', path: '/admin/analytics', icon: <LineChart size={14} /> },
+        {
+          id: 'nav-admin-users',
+          label: 'Admin: Users',
+          path: '/admin/users',
+          icon: <Users size={14} />,
+        },
+        {
+          id: 'nav-admin-credentials',
+          label: 'Admin: Credentials',
+          path: '/admin/credentials',
+          icon: <KeyRound size={14} />,
+        },
+        {
+          id: 'nav-admin-ai-proxy',
+          label: 'Admin: AI Proxy',
+          path: '/admin/ai-proxy',
+          icon: <Cpu size={14} />,
+        },
+        {
+          id: 'nav-admin-trials',
+          label: 'Admin: Trials',
+          path: '/admin/trials',
+          icon: <ListChecks size={14} />,
+        },
+        {
+          id: 'nav-admin-costs',
+          label: 'Admin: Costs',
+          path: '/admin/costs',
+          icon: <DollarSign size={14} />,
+        },
+        {
+          id: 'nav-admin-usage',
+          label: 'Admin: Usage',
+          path: '/admin/usage',
+          icon: <BarChart3 size={14} />,
+        },
+        {
+          id: 'nav-admin-quotas',
+          label: 'Admin: Quotas',
+          path: '/admin/quotas',
+          icon: <Gauge size={14} />,
+        },
+        {
+          id: 'nav-admin-errors',
+          label: 'Admin: Errors',
+          path: '/admin/errors',
+          icon: <AlertTriangle size={14} />,
+        },
+        {
+          id: 'nav-admin-overview',
+          label: 'Admin: Overview',
+          path: '/admin/overview',
+          icon: <LayoutDashboard size={14} />,
+        },
+        {
+          id: 'nav-admin-logs',
+          label: 'Admin: Logs',
+          path: '/admin/logs',
+          icon: <ScrollText size={14} />,
+        },
+        {
+          id: 'nav-admin-stream',
+          label: 'Admin: Stream',
+          path: '/admin/stream',
+          icon: <Radio size={14} />,
+        },
+        {
+          id: 'nav-admin-analytics',
+          label: 'Admin: Analytics',
+          path: '/admin/analytics',
+          icon: <LineChart size={14} />,
+        }
       );
     }
     return items;
@@ -433,8 +540,10 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
       // Within same-project group, sort by score then recency.
       chatResults.sort((a, b) => {
         if (currentProjectId) {
-          const aIsCurrentProject = chatSessions.find((s) => s.id === a.id)?.projectId === currentProjectId;
-          const bIsCurrentProject = chatSessions.find((s) => s.id === b.id)?.projectId === currentProjectId;
+          const aIsCurrentProject =
+            chatSessions.find((s) => s.id === a.id)?.projectId === currentProjectId;
+          const bIsCurrentProject =
+            chatSessions.find((s) => s.id === b.id)?.projectId === currentProjectId;
           if (aIsCurrentProject && !bIsCurrentProject) return -1;
           if (!aIsCurrentProject && bIsCurrentProject) return 1;
         }
@@ -524,7 +633,16 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
     }
 
     return result;
-  }, [query, navigationItems, projects, nodes, chatSessions, actionItems, contextActions, context.projectId]);
+  }, [
+    query,
+    navigationItems,
+    projects,
+    nodes,
+    chatSessions,
+    actionItems,
+    contextActions,
+    context.projectId,
+  ]);
 
   // Flatten results for keyboard navigation
   const flatResults = useMemo(() => {
@@ -588,7 +706,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
       }
       onClose();
     },
-    [navigate, location.pathname, onClose],
+    [navigate, location.pathname, onClose]
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -637,7 +755,11 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   return createPortal(
     <>
       {/* Backdrop */}
-      <div onClick={onClose} aria-hidden="true" className="fixed inset-0 glass-backdrop-dim border-0 z-dialog-backdrop" />
+      <div
+        onClick={onClose}
+        aria-hidden="true"
+        className="fixed inset-0 glass-backdrop-dim border-0 z-dialog-backdrop"
+      />
 
       {/* Palette dialog */}
       <div
@@ -672,7 +794,12 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         </div>
 
         {/* Results */}
-        <div role="listbox" id="gcp-listbox" aria-label="Command palette results" className="max-h-[360px] overflow-y-auto py-1">
+        <div
+          role="listbox"
+          id="gcp-listbox"
+          aria-label="Command palette results"
+          className="max-h-[360px] overflow-y-auto py-1"
+        >
           {flatResults.length === 0 && !loading && (
             <div className="p-4 text-center text-fg-muted text-xs">No matching results</div>
           )}
@@ -682,7 +809,11 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
           )}
 
           {groups.map((group) => (
-            <div key={group.category} role="group" aria-labelledby={`gcp-category-${group.category}`}>
+            <div
+              key={group.category}
+              role="group"
+              aria-labelledby={`gcp-category-${group.category}`}
+            >
               <div
                 id={`gcp-category-${group.category}`}
                 className="px-4 pt-2 pb-1 text-[10px] font-semibold text-fg-muted uppercase tracking-wider select-none"
@@ -726,9 +857,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
                         {result.projectName}
                       </span>
                     )}
-                    {isSelected && (
-                      <ArrowRight size={12} className="text-fg-muted shrink-0" />
-                    )}
+                    {isSelected && <ArrowRight size={12} className="text-fg-muted shrink-0" />}
                   </div>
                 );
               })}
@@ -740,12 +869,18 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         <div className="flex items-center justify-between px-4 py-2 border-t border-border-default text-[10px] text-fg-muted">
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1">
-              <kbd className="font-mono bg-inset border border-border-default rounded px-1 py-0.5">&uarr;</kbd>
-              <kbd className="font-mono bg-inset border border-border-default rounded px-1 py-0.5">&darr;</kbd>
+              <kbd className="font-mono bg-inset border border-border-default rounded px-1 py-0.5">
+                &uarr;
+              </kbd>
+              <kbd className="font-mono bg-inset border border-border-default rounded px-1 py-0.5">
+                &darr;
+              </kbd>
               <span>navigate</span>
             </span>
             <span className="flex items-center gap-1">
-              <kbd className="font-mono bg-inset border border-border-default rounded px-1 py-0.5">&crarr;</kbd>
+              <kbd className="font-mono bg-inset border border-border-default rounded px-1 py-0.5">
+                &crarr;
+              </kbd>
               <span>open</span>
             </span>
           </div>
@@ -755,6 +890,6 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         </div>
       </div>
     </>,
-    document.body,
+    document.body
   );
 }

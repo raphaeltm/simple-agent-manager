@@ -171,7 +171,11 @@ describe('admin sandbox routes', () => {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ repoUrl: 'https://github.com/org/repo', branch: 'main', depth: 1 }),
+          body: JSON.stringify({
+            repoUrl: 'https://github.com/org/repo',
+            branch: 'main',
+            depth: 1,
+          }),
         },
         bindings()
       );
@@ -358,7 +362,11 @@ describe('admin sandbox routes', () => {
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action: 'restore', backupId: 'backup-1', backupDir: '/workspace' }),
+          body: JSON.stringify({
+            action: 'restore',
+            backupId: 'backup-1',
+            backupDir: '/workspace',
+          }),
         },
         bindings()
       );

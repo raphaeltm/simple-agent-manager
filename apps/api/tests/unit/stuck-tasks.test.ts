@@ -1409,8 +1409,14 @@ describe('recoverStuckTasks', () => {
       ['a bare JSON null', 'null'],
       ['an object missing taskId', JSON.stringify({ updatedAt: '2026-07-12T10:00:00.000Z' })],
       ['an object with a non-string updatedAt', JSON.stringify({ updatedAt: 123, taskId: 'x' })],
-      ['an object with a non-string taskId', JSON.stringify({ updatedAt: '2026-07-12T10:00:00.000Z', taskId: 7 })],
-      ['an object with an unparsable updatedAt', JSON.stringify({ updatedAt: 'not-a-date', taskId: 'x' })],
+      [
+        'an object with a non-string taskId',
+        JSON.stringify({ updatedAt: '2026-07-12T10:00:00.000Z', taskId: 7 }),
+      ],
+      [
+        'an object with an unparsable updatedAt',
+        JSON.stringify({ updatedAt: 'not-a-date', taskId: 'x' }),
+      ],
     ])(
       'treats a syntactically valid but structurally invalid cursor (%s) as absent',
       async (_label, rawCursor) => {

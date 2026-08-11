@@ -1,4 +1,4 @@
-import { useCallback,useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 /**
  * Default buffer before token expiry to trigger refresh (5 minutes).

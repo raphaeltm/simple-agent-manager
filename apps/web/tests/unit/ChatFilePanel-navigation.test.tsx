@@ -11,7 +11,11 @@ vi.mock('../../src/lib/api', () => ({
   getSessionFileContent: vi.fn().mockResolvedValue('file content'),
   getSessionFileIndex: vi.fn().mockResolvedValue([]),
   getSessionFileRawUrl: vi.fn().mockReturnValue('http://localhost/file.png'),
-  getSessionGitDiff: vi.fn().mockResolvedValue('diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new'),
+  getSessionGitDiff: vi
+    .fn()
+    .mockResolvedValue(
+      'diff --git a/file.txt b/file.txt\n--- a/file.txt\n+++ b/file.txt\n@@ -1 +1 @@\n-old\n+new'
+    ),
   getSessionGitStatus: vi.fn().mockResolvedValue({
     staged: [{ path: 'staged.ts', status: 'modified' }],
     unstaged: [{ path: 'unstaged.ts', status: 'modified' }],
@@ -60,7 +64,7 @@ describe('ChatFilePanel back navigation', () => {
         sessionId="sess-1"
         initialMode="git-status"
         onClose={onClose}
-      />,
+      />
     );
 
     // Wait for git status to load — the "Staged" section should appear
@@ -95,12 +99,7 @@ describe('ChatFilePanel back navigation', () => {
     const onClose = vi.fn();
 
     render(
-      <ChatFilePanel
-        projectId="proj-1"
-        sessionId="sess-1"
-        initialMode="browse"
-        onClose={onClose}
-      />,
+      <ChatFilePanel projectId="proj-1" sessionId="sess-1" initialMode="browse" onClose={onClose} />
     );
 
     // Wait for file listing to load — 'hello.ts' comes from the default mock
@@ -137,7 +136,12 @@ describe('ChatFilePanel back navigation', () => {
       const onClose = vi.fn();
 
       render(
-        <ChatFilePanel projectId="proj-1" sessionId="sess-1" initialMode="git-status" onClose={onClose} />,
+        <ChatFilePanel
+          projectId="proj-1"
+          sessionId="sess-1"
+          initialMode="git-status"
+          onClose={onClose}
+        />
       );
 
       await waitFor(() => {
@@ -171,7 +175,12 @@ describe('ChatFilePanel back navigation', () => {
       const onClose = vi.fn();
 
       render(
-        <ChatFilePanel projectId="proj-1" sessionId="sess-1" initialMode="browse" onClose={onClose} />,
+        <ChatFilePanel
+          projectId="proj-1"
+          sessionId="sess-1"
+          initialMode="browse"
+          onClose={onClose}
+        />
       );
 
       await waitFor(() => {
@@ -210,7 +219,7 @@ describe('ChatFilePanel back navigation', () => {
         sessionId="sess-1"
         initialMode="git-status"
         onClose={onClose}
-      />,
+      />
     );
 
     // Wait for git status to load

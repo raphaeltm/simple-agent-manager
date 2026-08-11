@@ -51,7 +51,11 @@ describe('useNotifications — malformed payload resilience', () => {
   });
 
   it('ignores WebSocket frames whose notification payload is malformed', async () => {
-    mockListNotifications.mockResolvedValue({ notifications: [], unreadCount: 0, nextCursor: null });
+    mockListNotifications.mockResolvedValue({
+      notifications: [],
+      unreadCount: 0,
+      nextCursor: null,
+    });
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const { result } = renderHook(() => useNotifications());
@@ -74,7 +78,11 @@ describe('useNotifications — malformed payload resilience', () => {
   });
 
   it('ignores a WebSocket frame with an invalid enum value instead of coercing it', async () => {
-    mockListNotifications.mockResolvedValue({ notifications: [], unreadCount: 0, nextCursor: null });
+    mockListNotifications.mockResolvedValue({
+      notifications: [],
+      unreadCount: 0,
+      nextCursor: null,
+    });
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
 
     const { result } = renderHook(() => useNotifications());
@@ -90,9 +98,19 @@ describe('useNotifications — malformed payload resilience', () => {
       data: JSON.stringify({
         type: 'notification.new',
         notification: {
-          id: 'n-bad', projectId: null, taskId: null, sessionId: null, type: 'task_complete',
-          urgency: 'info', title: 'Bad', body: null, actionUrl: null, metadata: null,
-          readAt: null, dismissedAt: null, createdAt: '2026-07-17T00:00:00.000Z',
+          id: 'n-bad',
+          projectId: null,
+          taskId: null,
+          sessionId: null,
+          type: 'task_complete',
+          urgency: 'info',
+          title: 'Bad',
+          body: null,
+          actionUrl: null,
+          metadata: null,
+          readAt: null,
+          dismissedAt: null,
+          createdAt: '2026-07-17T00:00:00.000Z',
         },
       }),
     });
@@ -103,7 +121,11 @@ describe('useNotifications — malformed payload resilience', () => {
   });
 
   it('applies a well-formed notification.new WebSocket frame to state', async () => {
-    mockListNotifications.mockResolvedValue({ notifications: [], unreadCount: 0, nextCursor: null });
+    mockListNotifications.mockResolvedValue({
+      notifications: [],
+      unreadCount: 0,
+      nextCursor: null,
+    });
 
     const { result } = renderHook(() => useNotifications());
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -113,9 +135,19 @@ describe('useNotifications — malformed payload resilience', () => {
     ws.onopen?.();
 
     const notification = {
-      id: 'n2', projectId: null, taskId: null, sessionId: null, type: 'task_complete',
-      urgency: 'medium', title: 'Deployed', body: null, actionUrl: null, metadata: null,
-      readAt: null, dismissedAt: null, createdAt: '2026-07-17T00:00:00.000Z',
+      id: 'n2',
+      projectId: null,
+      taskId: null,
+      sessionId: null,
+      type: 'task_complete',
+      urgency: 'medium',
+      title: 'Deployed',
+      body: null,
+      actionUrl: null,
+      metadata: null,
+      readAt: null,
+      dismissedAt: null,
+      createdAt: '2026-07-17T00:00:00.000Z',
     };
     ws.onmessage?.({ data: JSON.stringify({ type: 'notification.new', notification }) });
 
@@ -125,7 +157,11 @@ describe('useNotifications — malformed payload resilience', () => {
   });
 
   it('applies a well-formed notification.unread_count WebSocket frame to state', async () => {
-    mockListNotifications.mockResolvedValue({ notifications: [], unreadCount: 0, nextCursor: null });
+    mockListNotifications.mockResolvedValue({
+      notifications: [],
+      unreadCount: 0,
+      nextCursor: null,
+    });
 
     const { result } = renderHook(() => useNotifications());
     await waitFor(() => expect(result.current.loading).toBe(false));
@@ -142,12 +178,26 @@ describe('useNotifications — malformed payload resilience', () => {
   it('keeps a valid payload intact', async () => {
     const items = [
       {
-        id: 'n1', projectId: null, taskId: null, sessionId: null, type: 'task_complete',
-        urgency: 'info', title: 'Done', body: null, actionUrl: null, metadata: null,
-        readAt: null, dismissedAt: null, createdAt: '2026-07-17T00:00:00.000Z',
+        id: 'n1',
+        projectId: null,
+        taskId: null,
+        sessionId: null,
+        type: 'task_complete',
+        urgency: 'info',
+        title: 'Done',
+        body: null,
+        actionUrl: null,
+        metadata: null,
+        readAt: null,
+        dismissedAt: null,
+        createdAt: '2026-07-17T00:00:00.000Z',
       },
     ];
-    mockListNotifications.mockResolvedValue({ notifications: items, unreadCount: 1, nextCursor: null });
+    mockListNotifications.mockResolvedValue({
+      notifications: items,
+      unreadCount: 1,
+      nextCursor: null,
+    });
 
     const { result } = renderHook(() => useNotifications());
 

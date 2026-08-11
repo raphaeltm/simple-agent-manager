@@ -208,7 +208,13 @@ export async function createEnvironmentVolume(
   assertSafeVolumeName(opts.name);
 
   const projectId = await getEnvironmentProjectId(db, opts.environmentId);
-  const { provider, providerName } = await getProviderForUser(db, userId, env, opts.targetProvider, projectId);
+  const { provider, providerName } = await getProviderForUser(
+    db,
+    userId,
+    env,
+    opts.targetProvider,
+    projectId
+  );
 
   // Check volume capabilities
   const caps = provider.volumeCapabilities;

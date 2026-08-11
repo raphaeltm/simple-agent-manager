@@ -30,7 +30,11 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readRequestJsonRecord, readResponseJson } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
-import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
+import {
+  checkRateLimit,
+  createRateLimitKey,
+  getCurrentWindowStart,
+} from '../middleware/rate-limit';
 import {
   createAnthropicToOpenAIStream,
   translateRequestToAnthropic,
@@ -81,7 +85,12 @@ const anthropicResponseSchema = v.object({
 
 /** Check if a model ID is an OpenAI model (routed through AI Gateway /openai path). */
 function isOpenAIModel(modelId: string): boolean {
-  return modelId.startsWith('gpt-') || modelId.startsWith('o1-') || modelId.startsWith('o3') || modelId.startsWith('o4-');
+  return (
+    modelId.startsWith('gpt-') ||
+    modelId.startsWith('o1-') ||
+    modelId.startsWith('o3') ||
+    modelId.startsWith('o4-')
+  );
 }
 
 /** Determine the provider for a model ID. */
@@ -91,11 +100,16 @@ function getModelProvider(modelId: string): 'anthropic' | 'openai' | 'workers-ai
   return 'workers-ai';
 }
 
-
 /** Parse allowed models from env or use defaults, normalizing prefixes. */
 function getAllowedModels(env: Env): Set<string> {
   const raw = env.AI_PROXY_ALLOWED_MODELS || DEFAULT_AI_PROXY_ALLOWED_MODELS;
-  return new Set(raw.split(',').map((m) => m.trim()).filter(Boolean).map((m) => normalizeModelId(m)));
+  return new Set(
+    raw
+      .split(',')
+      .map((m) => m.trim())
+      .filter(Boolean)
+      .map((m) => normalizeModelId(m))
+  );
 }
 
 /** Normalize model ID: ensure @cf/ prefix for Workers AI models, leave Anthropic/OpenAI models as-is. */
@@ -126,7 +140,9 @@ async function resolveModelId(model: string | undefined, env: Env): Promise<stri
     try {
       const parsed: AIProxyConfig = JSON.parse(kvConfig);
       if (parsed.defaultModel) return normalizeModelId(parsed.defaultModel);
-    } catch { /* ignore corrupt KV data, fall through */ }
+    } catch {
+      /* ignore corrupt KV data, fall through */
+    }
   }
 
   return normalizeModelId(env.AI_PROXY_DEFAULT_MODEL || DEFAULT_AI_PROXY_MODEL);
@@ -155,7 +171,6 @@ function buildOpenAIResponsesUrl(env: Env): string {
   return 'https://api.openai.com/v1/responses';
 }
 
-
 // =============================================================================
 // Input Token Estimation
 // =============================================================================
@@ -168,9 +183,12 @@ function estimateInputTokens(messages: Array<{ role: string; content: unknown }>
   const totalChars = messages.reduce((sum, m) => {
     if (typeof m.content === 'string') return sum + m.content.length;
     if (Array.isArray(m.content)) {
-      return sum + m.content.reduce((s: number, p: { type: string; text?: string }) => {
-        return s + (p.type === 'text' && p.text ? p.text.length : 0);
-      }, 0);
+      return (
+        sum +
+        m.content.reduce((s: number, p: { type: string; text?: string }) => {
+          return s + (p.type === 'text' && p.text ? p.text.length : 0);
+        }, 0)
+      );
     }
     return sum;
   }, 0);
@@ -202,7 +220,7 @@ async function forwardToWorkersAI(
   env: Env,
   body: Record<string, unknown>,
   modelId: string,
-  aigMetadata: string,
+  aigMetadata: string
 ): Promise<Response> {
   const gatewayUrl = buildWorkersAIGatewayUrl(env);
   const gatewayBody = { ...body, model: modelId };
@@ -210,7 +228,7 @@ async function forwardToWorkersAI(
   const response = await fetch(gatewayUrl, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${env.CF_API_TOKEN}`,
+      Authorization: `Bearer ${env.CF_API_TOKEN}`,
       'Content-Type': 'application/json',
       'cf-aig-metadata': aigMetadata,
     },
@@ -223,12 +241,15 @@ async function forwardToWorkersAI(
       status: response.status,
       body: errorText.slice(0, 500),
     });
-    return new Response(JSON.stringify({
-      error: {
-        message: `AI inference failed (${response.status}). Please try again.`,
-        type: 'server_error',
-      },
-    }), { status: response.status, headers: { 'Content-Type': 'application/json' } });
+    return new Response(
+      JSON.stringify({
+        error: {
+          message: `AI inference failed (${response.status}). Please try again.`,
+          type: 'server_error',
+        },
+      }),
+      { status: response.status, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 
   // Pass through transparently
@@ -250,9 +271,8 @@ async function forwardToAnthropic(
   body: Record<string, unknown>,
   modelId: string,
   aigMetadata: string,
-  upstreamAuth: UpstreamAuth,
+  upstreamAuth: UpstreamAuth
 ): Promise<Response> {
-
   // Translate OpenAI format → Anthropic Messages format
   const anthropicRequest = translateRequestToAnthropic(body, modelId);
   const gatewayUrl = buildAnthropicGatewayUrl(env);
@@ -274,17 +294,24 @@ async function forwardToAnthropic(
       status: response.status,
       body: errorText.slice(0, 500),
     });
-    return new Response(JSON.stringify({
-      error: {
-        message: `AI inference failed (${response.status}). Please try again.`,
-        type: 'server_error',
-      },
-    }), { status: response.status, headers: { 'Content-Type': 'application/json' } });
+    return new Response(
+      JSON.stringify({
+        error: {
+          message: `AI inference failed (${response.status}). Please try again.`,
+          type: 'server_error',
+        },
+      }),
+      { status: response.status, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 
   // Non-streaming: translate response
   if (!body.stream) {
-    const anthropicResponse = await readResponseJson(response, anthropicResponseSchema, 'ai-proxy.anthropic_response');
+    const anthropicResponse = await readResponseJson(
+      response,
+      anthropicResponseSchema,
+      'ai-proxy.anthropic_response'
+    );
     const openAIResponse = translateResponseToOpenAI(anthropicResponse);
     return new Response(JSON.stringify(openAIResponse), {
       status: 200,
@@ -294,9 +321,12 @@ async function forwardToAnthropic(
 
   // Streaming: pipe through format translation transform
   if (!response.body) {
-    return new Response(JSON.stringify({
-      error: { message: 'No response body from Anthropic', type: 'server_error' },
-    }), { status: 502, headers: { 'Content-Type': 'application/json' } });
+    return new Response(
+      JSON.stringify({
+        error: { message: 'No response body from Anthropic', type: 'server_error' },
+      }),
+      { status: 502, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 
   const transformStream = createAnthropicToOpenAIStream(modelId);
@@ -307,7 +337,7 @@ async function forwardToAnthropic(
     headers: {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive',
+      Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     },
   });
@@ -319,7 +349,7 @@ async function forwardToOpenAI(
   body: Record<string, unknown>,
   modelId: string,
   aigMetadata: string,
-  openaiApiKey: string,
+  openaiApiKey: string
 ): Promise<Response> {
   const gatewayUrl = buildOpenAIUrl(env);
   const gatewayBody = { ...body, model: modelId };
@@ -349,12 +379,15 @@ async function forwardToOpenAI(
       status: response.status,
       body: errorText.slice(0, 500),
     });
-    return new Response(JSON.stringify({
-      error: {
-        message: `AI inference failed (${response.status}). Please try again.`,
-        type: 'server_error',
-      },
-    }), { status: response.status, headers: { 'Content-Type': 'application/json' } });
+    return new Response(
+      JSON.stringify({
+        error: {
+          message: `AI inference failed (${response.status}). Please try again.`,
+          type: 'server_error',
+        },
+      }),
+      { status: response.status, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 
   // OpenAI returns OpenAI-compatible format — pass through transparently
@@ -376,7 +409,7 @@ async function forwardToOpenAIResponses(
   body: Record<string, unknown>,
   modelId: string,
   aigMetadata: string,
-  openaiApiKey: string,
+  openaiApiKey: string
 ): Promise<Response> {
   const gatewayUrl = buildOpenAIResponsesUrl(env);
   const gatewayBody = { ...body, model: modelId };
@@ -404,12 +437,15 @@ async function forwardToOpenAIResponses(
       status: response.status,
       body: errorText.slice(0, 500),
     });
-    return new Response(JSON.stringify({
-      error: {
-        message: `AI inference failed (${response.status}). Please try again.`,
-        type: 'server_error',
-      },
-    }), { status: response.status, headers: { 'Content-Type': 'application/json' } });
+    return new Response(
+      JSON.stringify({
+        error: {
+          message: `AI inference failed (${response.status}). Please try again.`,
+          type: 'server_error',
+        },
+      }),
+      { status: response.status, headers: { 'Content-Type': 'application/json' } }
+    );
   }
 
   const responseHeaders = new Headers();
@@ -429,7 +465,7 @@ function proxyJsonError(
   message: string,
   type: string,
   status: ProxyErrorStatus,
-  extra?: Record<string, unknown>,
+  extra?: Record<string, unknown>
 ): Response {
   return c.json({ error: { message, type, ...(extra ?? {}) } }, status);
 }
@@ -441,7 +477,12 @@ async function prepareAIProxyRequest(c: AIProxyContext): Promise<Response | AIPr
 
   const token = extractCallbackToken(c.req.header('Authorization'), undefined);
   if (!token) {
-    return proxyJsonError(c, 'Missing or invalid Authorization header', 'invalid_request_error', 401);
+    return proxyJsonError(
+      c,
+      'Missing or invalid Authorization header',
+      'invalid_request_error',
+      401
+    );
   }
 
   const db = drizzle(c.env.DATABASE, { schema });
@@ -450,19 +491,31 @@ async function prepareAIProxyRequest(c: AIProxyContext): Promise<Response | AIPr
     return { ...auth, db };
   } catch (err) {
     if (err instanceof AIProxyAuthError) {
-      return proxyJsonError(c, err.message, 'invalid_request_error', err.statusCode as 401 | 403 | 404);
+      return proxyJsonError(
+        c,
+        err.message,
+        'invalid_request_error',
+        err.statusCode as 401 | 403 | 404
+      );
     }
     return proxyJsonError(c, 'Invalid or expired token', 'invalid_request_error', 401);
   }
 }
 
 async function enforceRateLimit(c: AIProxyContext, userId: string): Promise<Response | null> {
-  const rpmLimit = parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
-  const windowSeconds = parseInt(c.env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10)
-    || DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
+  const rpmLimit =
+    parseInt(c.env.AI_PROXY_RATE_LIMIT_RPM || '', 10) || DEFAULT_AI_PROXY_RATE_LIMIT_RPM;
+  const windowSeconds =
+    parseInt(c.env.AI_PROXY_RATE_LIMIT_WINDOW_SECONDS || '', 10) ||
+    DEFAULT_AI_PROXY_RATE_LIMIT_WINDOW_SECONDS;
   const windowStart = getCurrentWindowStart(windowSeconds);
   const rateLimitKey = createRateLimitKey('ai-proxy', userId, windowStart);
-  const { allowed, remaining, resetAt } = await checkRateLimit(c.env.KV, rateLimitKey, rpmLimit, windowSeconds);
+  const { allowed, remaining, resetAt } = await checkRateLimit(
+    c.env.KV,
+    rateLimitKey,
+    rpmLimit,
+    windowSeconds
+  );
 
   c.header('X-RateLimit-Limit', rpmLimit.toString());
   c.header('X-RateLimit-Remaining', remaining.toString());
@@ -481,20 +534,32 @@ async function enforceUsageGate(c: AIProxyContext, userId: string): Promise<Resp
 
   if (usageGate.reason === 'daily-token-budget') {
     const { budget } = usageGate;
-    return proxyJsonError(c, 'Daily token budget exceeded. Resets at midnight UTC.', 'rate_limit_error', 429, {
-      budget: {
-        inputTokens: { used: budget.usage.inputTokens, limit: budget.inputLimit },
-        outputTokens: { used: budget.usage.outputTokens, limit: budget.outputLimit },
-      },
-    });
+    return proxyJsonError(
+      c,
+      'Daily token budget exceeded. Resets at midnight UTC.',
+      'rate_limit_error',
+      429,
+      {
+        budget: {
+          inputTokens: { used: budget.usage.inputTokens, limit: budget.inputLimit },
+          outputTokens: { used: budget.usage.outputTokens, limit: budget.outputLimit },
+        },
+      }
+    );
   }
 
-  return proxyJsonError(c, 'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.', 'rate_limit_error', 429, {
-    monthlyCost: {
-      used: usageGate.monthlyCap.costUsd,
-      cap: usageGate.monthlyCap.capUsd,
-    },
-  });
+  return proxyJsonError(
+    c,
+    'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.',
+    'rate_limit_error',
+    429,
+    {
+      monthlyCost: {
+        used: usageGate.monthlyCap.costUsd,
+        cap: usageGate.monthlyCap.capUsd,
+      },
+    }
+  );
 }
 
 function validateAllowedModel(c: AIProxyContext, modelId: string): Response | null {
@@ -505,27 +570,31 @@ function validateAllowedModel(c: AIProxyContext, modelId: string): Response | nu
     c,
     `Model '${modelId}' is not available. Allowed models: ${Array.from(allowedModels).join(', ')}`,
     'invalid_request_error',
-    400,
+    400
   );
 }
 
 function enforceInputLimit(c: AIProxyContext, estimatedInputTokens: number): Response | null {
-  const maxInputPerRequest = parseInt(c.env.AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST || '', 10)
-    || DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST;
+  const maxInputPerRequest =
+    parseInt(c.env.AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST || '', 10) ||
+    DEFAULT_AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST;
   if (estimatedInputTokens <= maxInputPerRequest) return null;
 
   return proxyJsonError(
     c,
     `Request too large: estimated ${estimatedInputTokens} input tokens exceeds limit of ${maxInputPerRequest}`,
     'invalid_request_error',
-    400,
+    400
   );
 }
 
 function buildProxyMetadata(
-  auth: Pick<AIProxyRequestContext, 'userId' | 'workspaceId' | 'projectId' | 'chatSessionId' | 'trialId'>,
+  auth: Pick<
+    AIProxyRequestContext,
+    'userId' | 'workspaceId' | 'projectId' | 'chatSessionId' | 'trialId'
+  >,
   body: Record<string, unknown>,
-  modelId: string,
+  modelId: string
 ): string {
   return buildAIGatewayMetadata({
     userId: auth.userId,
@@ -550,7 +619,7 @@ async function resolveOpenAIProxyKey(c: AIProxyContext, db: AIProxyDb): Promise<
     c,
     'No OpenAI API key configured. An admin must add a Codex platform credential or configure Unified Billing.',
     'server_error',
-    503,
+    503
   );
 }
 
@@ -558,10 +627,14 @@ function accountingResponse(
   c: AIProxyContext,
   response: Response,
   userId: string,
-  estimatedInputTokens: number,
+  estimatedInputTokens: number
 ): Promise<Response> {
   let executionCtx: Pick<ExecutionContext, 'waitUntil'> | undefined;
-  try { executionCtx = c.executionCtx; } catch { /* no exec ctx in tests */ }
+  try {
+    executionCtx = c.executionCtx;
+  } catch {
+    /* no exec ctx in tests */
+  }
   return attachTokenUsageAccounting(response, {
     env: c.env,
     userId,
@@ -597,18 +670,26 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
 
   // Minimal validation: messages must be present
   if (!body.messages || !Array.isArray(body.messages) || body.messages.length === 0) {
-    return c.json({ error: { message: 'messages array is required', type: 'invalid_request_error' } }, 400);
+    return c.json(
+      { error: { message: 'messages array is required', type: 'invalid_request_error' } },
+      400
+    );
   }
 
   // --- Resolve and validate model ---
-  const modelId = await resolveModelId(typeof body.model === 'string' ? body.model : undefined, c.env);
+  const modelId = await resolveModelId(
+    typeof body.model === 'string' ? body.model : undefined,
+    c.env
+  );
   const modelError = validateAllowedModel(c, modelId);
   if (modelError) return modelError;
   const usageError = await enforceUsageGate(c, prepared.userId);
   if (usageError) return usageError;
 
   // --- Rough input token estimate for pre-flight check ---
-  const estimatedInputTokens = estimateInputTokens(body.messages as Array<{ role: string; content: unknown }>);
+  const estimatedInputTokens = estimateInputTokens(
+    body.messages as Array<{ role: string; content: unknown }>
+  );
   const inputLimitError = enforceInputLimit(c, estimatedInputTokens);
   if (inputLimitError) return inputLimitError;
 
@@ -627,12 +708,15 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
         workspaceId: prepared.workspaceId,
         reason: err instanceof Error ? err.message : String(err),
       });
-      return c.json({
-        error: {
-          message: 'AI proxy is not configured. Contact an administrator.',
-          type: 'server_error',
+      return c.json(
+        {
+          error: {
+            message: 'AI proxy is not configured. Contact an administrator.',
+            type: 'server_error',
+          },
         },
-      }, 503);
+        503
+      );
     }
   }
 
@@ -683,9 +767,12 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
       provider,
       error: err instanceof Error ? err.message : String(err),
     });
-    return c.json({
-      error: { message: 'Failed to reach upstream. Please try again.', type: 'server_error' },
-    }, 502);
+    return c.json(
+      {
+        error: { message: 'Failed to reach upstream. Please try again.', type: 'server_error' },
+      },
+      502
+    );
   }
 });
 
@@ -710,20 +797,29 @@ aiProxyRoutes.post('/responses', async (c) => {
   }
 
   if (!body.input && !body.instructions) {
-    return c.json({ error: { message: 'input or instructions is required', type: 'invalid_request_error' } }, 400);
+    return c.json(
+      { error: { message: 'input or instructions is required', type: 'invalid_request_error' } },
+      400
+    );
   }
 
-  const modelId = await resolveModelId(typeof body.model === 'string' ? body.model : undefined, c.env);
+  const modelId = await resolveModelId(
+    typeof body.model === 'string' ? body.model : undefined,
+    c.env
+  );
   const modelError = validateAllowedModel(c, modelId);
   if (modelError) return modelError;
 
   if (getModelProvider(modelId) !== 'openai') {
-    return c.json({
-      error: {
-        message: 'Responses API is only available for OpenAI models.',
-        type: 'invalid_request_error',
+    return c.json(
+      {
+        error: {
+          message: 'Responses API is only available for OpenAI models.',
+          type: 'invalid_request_error',
+        },
       },
-    }, 400);
+      400
+    );
   }
 
   const usageError = await enforceUsageGate(c, prepared.userId);
@@ -746,7 +842,13 @@ aiProxyRoutes.post('/responses', async (c) => {
   });
 
   try {
-    const response = await forwardToOpenAIResponses(c.env, body, modelId, aigMetadata, openaiApiKey);
+    const response = await forwardToOpenAIResponses(
+      c.env,
+      body,
+      modelId,
+      aigMetadata,
+      openaiApiKey
+    );
 
     log.info('ai_proxy.responses.response', {
       userId: prepared.userId,
@@ -763,9 +865,12 @@ aiProxyRoutes.post('/responses', async (c) => {
       modelId,
       error: err instanceof Error ? err.message : String(err),
     });
-    return c.json({
-      error: { message: 'Failed to reach upstream. Please try again.', type: 'server_error' },
-    }, 502);
+    return c.json(
+      {
+        error: { message: 'Failed to reach upstream. Please try again.', type: 'server_error' },
+      },
+      502
+    );
   }
 });
 
@@ -791,4 +896,11 @@ aiProxyRoutes.get('/models', async (c) => {
 });
 
 // Export for testing
-export { aiProxyRoutes, getModelProvider, isAnthropicModel, isOpenAIModel, normalizeModelId, resolveModelId };
+export {
+  aiProxyRoutes,
+  getModelProvider,
+  isAnthropicModel,
+  isOpenAIModel,
+  normalizeModelId,
+  resolveModelId,
+};

@@ -25,7 +25,7 @@ export interface HierarchyNode {
 export function buildHierarchyTree(
   taskInfoMap: Map<string, TaskInfo>,
   sessions: ChatSessionListItem[],
-  focusTaskId: string,
+  focusTaskId: string
 ): { tree: HierarchyNode; rootTaskId: string } | null {
   const focusTask = taskInfoMap.get(focusTaskId);
   if (!focusTask) return null;
@@ -123,10 +123,7 @@ export function hasMatchingDescendant(node: HierarchyNode, matchIds: Set<string>
 }
 
 /** Walk from root to focus node, returning the ancestor path (root first). */
-export function getAncestorPath(
-  tree: HierarchyNode,
-  focusTaskId: string,
-): HierarchyNode[] {
+export function getAncestorPath(tree: HierarchyNode, focusTaskId: string): HierarchyNode[] {
   const path: HierarchyNode[] = [];
   function walk(node: HierarchyNode): boolean {
     if (node.task.id === focusTaskId) {
@@ -185,10 +182,7 @@ export function collectMatchIds(node: HierarchyNode, query: string): Set<string>
  * Determine if a task has hierarchy relationships (parent or children) in the taskInfoMap.
  * Used to decide whether to show the hierarchy trigger button.
  */
-export function hasHierarchy(
-  taskId: string,
-  taskInfoMap: Map<string, TaskInfo>,
-): boolean {
+export function hasHierarchy(taskId: string, taskInfoMap: Map<string, TaskInfo>): boolean {
   const info = taskInfoMap.get(taskId);
   if (!info) return false;
 

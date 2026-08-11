@@ -512,7 +512,10 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
 // ---------------------------------------------------------------------------
 
 describe('CredentialSetupSession — device-auth-state.json validation', () => {
-  async function createAndAdmit(id = 'setup-device-state', paramOverrides: Partial<typeof BASE_PARAMS> = {}) {
+  async function createAndAdmit(
+    id = 'setup-device-state',
+    paramOverrides: Partial<typeof BASE_PARAMS> = {}
+  ) {
     const created = createDO();
     await Promise.resolve();
     const fakeSandbox = createFakeSandbox();

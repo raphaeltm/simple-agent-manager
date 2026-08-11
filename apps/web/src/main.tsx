@@ -7,7 +7,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import { applyThemeAttribute, readStoredTheme } from './contexts/ThemeContext';
 import { initAnalytics } from './lib/analytics';
-import { getAnalyticsApiUrl,getClientErrorsApiUrl } from './lib/api';
+import { getAnalyticsApiUrl, getClientErrorsApiUrl } from './lib/api';
 import { initErrorReporter } from './lib/error-reporter';
 import { startMobileViewportSync } from './lib/mobile-viewport';
 import { registerAppServiceWorker } from './lib/pwa';

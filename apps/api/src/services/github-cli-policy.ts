@@ -160,10 +160,7 @@ export async function resolveWorkspaceGitHubTokenOptions(
       and(
         eq(schema.agentProfiles.id, profileId),
         eq(schema.agentProfiles.userId, input.userId),
-        or(
-          eq(schema.agentProfiles.projectId, projectId),
-          isNull(schema.agentProfiles.projectId)
-        )
+        or(eq(schema.agentProfiles.projectId, projectId), isNull(schema.agentProfiles.projectId))
       )
     )
     .limit(1);

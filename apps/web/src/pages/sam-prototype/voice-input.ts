@@ -56,7 +56,7 @@ export function useVoiceInput(opts: {
         // AudioContext not supported
       }
     },
-    [amplitudeRef],
+    [amplitudeRef]
   );
 
   const stopAmplitudeMonitor = useCallback(() => {

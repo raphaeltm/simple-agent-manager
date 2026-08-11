@@ -98,9 +98,7 @@ describe('GitHub CLI policy token options', () => {
       [{ githubCliPolicy: JSON.stringify(policy) }]
     );
 
-    await expect(
-      resolveWorkspaceGitHubTokenOptions(db as never, DEFAULT_INPUT)
-    ).resolves.toEqual({
+    await expect(resolveWorkspaceGitHubTokenOptions(db as never, DEFAULT_INPUT)).resolves.toEqual({
       repositoryIds: [12345],
       permissions: {
         contents: 'read',
@@ -110,9 +108,7 @@ describe('GitHub CLI policy token options', () => {
   });
 
   it('returns null when workspace has no profile hint', async () => {
-    const db = makeFakeDb(
-      [{ agentProfileHint: null, projectId: 'project-1' }]
-    );
+    const db = makeFakeDb([{ agentProfileHint: null, projectId: 'project-1' }]);
 
     await expect(
       resolveWorkspaceGitHubTokenOptions(db as never, DEFAULT_INPUT)
@@ -125,9 +121,9 @@ describe('GitHub CLI policy token options', () => {
       [{ githubCliPolicy: '{invalid' }]
     );
 
-    await expect(
-      resolveWorkspaceGitHubTokenOptions(db as never, DEFAULT_INPUT)
-    ).rejects.toThrow(GitHubCliPolicyError);
+    await expect(resolveWorkspaceGitHubTokenOptions(db as never, DEFAULT_INPUT)).rejects.toThrow(
+      GitHubCliPolicyError
+    );
   });
 
   it('fails closed when a workspace-linked profile stores an "inherit" policy', async () => {
@@ -140,9 +136,9 @@ describe('GitHub CLI policy token options', () => {
       [{ githubCliPolicy: JSON.stringify(makePolicy({ mode: 'inherit' })) }]
     );
 
-    await expect(
-      resolveWorkspaceGitHubTokenOptions(db as never, DEFAULT_INPUT)
-    ).rejects.toThrow(GitHubCliPolicyError);
+    await expect(resolveWorkspaceGitHubTokenOptions(db as never, DEFAULT_INPUT)).rejects.toThrow(
+      GitHubCliPolicyError
+    );
   });
 
   it('fails closed when a stored custom policy has an out-of-range permission value', async () => {
@@ -171,9 +167,9 @@ describe('GitHub CLI policy token options', () => {
       ]
     );
 
-    await expect(
-      resolveWorkspaceGitHubTokenOptions(db as never, DEFAULT_INPUT)
-    ).rejects.toThrow(GitHubCliPolicyError);
+    await expect(resolveWorkspaceGitHubTokenOptions(db as never, DEFAULT_INPUT)).rejects.toThrow(
+      GitHubCliPolicyError
+    );
   });
 });
 

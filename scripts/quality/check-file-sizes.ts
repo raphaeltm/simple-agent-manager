@@ -80,10 +80,7 @@ function main(): void {
 
   // Find all source files
   const cmd = `find ${SCAN_DIRECTORIES.join(' ')} -type f \\( -name '*.ts' -o -name '*.tsx' -o -name '*.go' \\) | grep -v node_modules | grep -v dist | grep -v '.d.ts'`;
-  const files = execSync(cmd, { cwd: ROOT, encoding: 'utf-8' })
-    .trim()
-    .split('\n')
-    .filter(Boolean);
+  const files = execSync(cmd, { cwd: ROOT, encoding: 'utf-8' }).trim().split('\n').filter(Boolean);
 
   const violations: FileSizeViolation[] = [];
 
@@ -117,13 +114,17 @@ function main(): void {
     if (errors.length === 0) {
       console.log(`File size check passed. No files exceed ${HARD_LIMIT} lines.`);
       if (warnings.length > 0) {
-        console.log(`\n${warnings.length} files between ${WARN_LIMIT}-${HARD_LIMIT} lines (consider splitting):`);
+        console.log(
+          `\n${warnings.length} files between ${WARN_LIMIT}-${HARD_LIMIT} lines (consider splitting):`
+        );
         for (const w of warnings) {
           console.log(`  ${w.file}: ${w.lines} lines`);
         }
       }
     } else {
-      console.error(`\nFile size check FAILED. ${errors.length} files exceed ${HARD_LIMIT} lines:\n`);
+      console.error(
+        `\nFile size check FAILED. ${errors.length} files exceed ${HARD_LIMIT} lines:\n`
+      );
       for (const e of errors) {
         console.error(`  ${e.file}: ${e.lines} lines (limit: ${HARD_LIMIT})`);
       }

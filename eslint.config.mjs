@@ -13,11 +13,34 @@ import samPlugin from './packages/eslint-plugin-sam/src/index.js';
 const typescriptFiles = ['**/*.{ts,tsx,mts,cts}'];
 const astroFiles = ['**/*.astro'];
 const samPluginFiles = ['packages/eslint-plugin-sam/**/*.js'];
-const samAdvisoryRules = {
-  'sam/no-local-record-guard': 'warn',
-  'sam/no-unsafe-json-parse-assertion': 'warn',
-  'sam/no-unvalidated-request-json': 'warn',
+// Promoted to error 2026-08-11 (ai-slop debt burn-down, see
+// tasks/active/2026-08-10-ai-slop-debt-burndown.md): production sites for all
+// three rules were at zero. Test files are exempted below (testFileGlobs
+// block) because test-double typing is idiomatic and these rules target
+// production request/row-narrowing patterns.
+const samBlockingRules = {
+  'sam/no-local-record-guard': 'error',
+  'sam/no-unsafe-json-parse-assertion': 'error',
+  'sam/no-unvalidated-request-json': 'error',
 };
+// Onboarding workspaces that had no lint path before the deterministic
+// runtime-boundary rollout (see rules.manifest.json / scripts/quality/README.md).
+// Reused below both to force most rules advisory and to re-promote the two
+// already-clean rules (no-explicit-any, no-non-null-assertion) to error.
+const onboardingAdvisoryFiles = [
+  'apps/www/**/*.{ts,tsx,mts,cts,astro}',
+  'apps/tail-worker/**/*.{ts,tsx,mts,cts}',
+  'infra/**/*.{ts,tsx,mts,cts}',
+  'packages/cloud-init/**/*.{ts,tsx,mts,cts}',
+  'tools/og-image/**/*.{ts,tsx,mts,cts}',
+];
+// Test-double typing (mocks, fixtures, assertion helpers) idiomatically needs
+// `any` and non-null assertions, and the sam/* runtime-boundary trio targets
+// production request/row-narrowing patterns that don't apply to test setup.
+// De-scoped 2026-08-11 (ai-slop debt burn-down) after confirming production
+// source was clean at zero for all five rules; see
+// tasks/active/2026-08-10-ai-slop-debt-burndown.md.
+const testFileGlobs = ['**/tests/**', '**/*.test.{ts,tsx,mts,cts}', '**/*.spec.{ts,tsx,mts,cts}'];
 
 const upstreamNoUnusedVars = tseslint.plugin.rules['no-unused-vars'];
 const noUnusedVarsEslint8Compat = {
@@ -189,12 +212,12 @@ export default defineConfig([
           prefer: 'type-imports',
         },
       ],
-      '@typescript-eslint/no-explicit-any': 'warn',
-      '@typescript-eslint/no-non-null-assertion': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-non-null-assertion': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'simple-import-sort/exports': 'error',
       'simple-import-sort/imports': 'error',
-      ...samAdvisoryRules,
+      ...samBlockingRules,
     },
   },
   ...eslintPluginAstro.configs['flat/base'],
@@ -225,12 +248,12 @@ export default defineConfig([
           prefer: 'type-imports',
         },
       ],
-      '@typescript-eslint/no-explicit-any': 'warn',
-      '@typescript-eslint/no-non-null-assertion': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-non-null-assertion': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'simple-import-sort/exports': 'error',
       'simple-import-sort/imports': 'error',
-      ...samAdvisoryRules,
+      ...samBlockingRules,
     },
   },
   {
@@ -367,13 +390,41 @@ export default defineConfig([
     // These five workspaces had no lint path before this rollout. Preserve all
     // newly surfaced findings as advisory while fatal parser/config failures
     // remain blocking; debt cleanup can promote individual rules deliberately.
-    files: [
-      'apps/www/**/*.{ts,tsx,mts,cts,astro}',
-      'apps/tail-worker/**/*.{ts,tsx,mts,cts}',
-      'infra/**/*.{ts,tsx,mts,cts}',
-      'packages/cloud-init/**/*.{ts,tsx,mts,cts}',
-      'tools/og-image/**/*.{ts,tsx,mts,cts}',
-    ],
+    files: onboardingAdvisoryFiles,
     rules: onboardingAdvisoryRules,
+  },
+  {
+    // apps/www, apps/tail-worker, infra, packages/cloud-init, and
+    // tools/og-image have zero `!`/`any` findings in production source as of
+    // the 2026-08-11 ai-slop debt burn-down (see
+    // tasks/active/2026-08-10-ai-slop-debt-burndown.md). The onboarding-advisory
+    // block above force-downgrades every rule (including these two) to `warn`
+    // for its broader "no lint path existed before this rollout" rationale;
+    // re-promote just these two already-clean rules to `error` here so new
+    // debt in these workspaces is caught the same way as everywhere else.
+    // Every other rule in the block above remains advisory.
+    files: onboardingAdvisoryFiles,
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'error',
+      '@typescript-eslint/no-non-null-assertion': 'error',
+    },
+  },
+  {
+    // Test-double typing is idiomatic (mocks/fixtures routinely need `any`
+    // and non-null assertions), and the sam/* runtime-boundary trio targets
+    // production request/row-narrowing patterns that don't apply to test
+    // setup. Keep all five rules non-blocking in test files while every
+    // block above enforces `error` in production source, repo-wide
+    // (including the onboarding-advisory workspaces). This block must stay
+    // last so it wins over every earlier matching block. See
+    // tasks/active/2026-08-10-ai-slop-debt-burndown.md.
+    files: testFileGlobs,
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+      '@typescript-eslint/no-non-null-assertion': 'off',
+      'sam/no-local-record-guard': 'off',
+      'sam/no-unsafe-json-parse-assertion': 'off',
+      'sam/no-unvalidated-request-json': 'off',
+    },
   },
 ]);

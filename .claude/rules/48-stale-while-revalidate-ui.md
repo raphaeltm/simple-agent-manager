@@ -66,10 +66,14 @@ A refetch must never unmount already-rendered content:
 
 ```tsx
 // BAD — content unmounts on every refetch
-{loading ? <Spinner /> : <Content data={data} />}
+{
+  loading ? <Spinner /> : <Content data={data} />;
+}
 
 // GOOD — spinner only before first data; refetches keep content visible
-{data === null ? <Spinner /> : <Content data={data} />}
+{
+  data === null ? <Spinner /> : <Content data={data} />;
+}
 ```
 
 - Track "have we ever loaded" (`data !== null`, or a `hasLoadedRef`) separately
@@ -112,6 +116,7 @@ merge blocker.
 ## Quick Compliance Check
 
 Before committing UI data-fetching or context changes:
+
 - [ ] Every `Provider value=` is `useMemo`-stable (lint enforces this)
 - [ ] No loader `useCallback` lists a context object (e.g. `toast`) in deps
 - [ ] No loader `catch` sets state that can re-trigger the loader

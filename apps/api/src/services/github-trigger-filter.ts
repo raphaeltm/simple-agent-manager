@@ -54,7 +54,10 @@ export function evaluateFilters(
   // Action filter
   if (filters.actions && filters.actions.length > 0) {
     if (!event.action || !filters.actions.includes(event.action)) {
-      return { matched: false, reason: `action '${event.action ?? ''}' not in [${filters.actions.join(', ')}]` };
+      return {
+        matched: false,
+        reason: `action '${event.action ?? ''}' not in [${filters.actions.join(', ')}]`,
+      };
     }
   }
 
@@ -112,7 +115,10 @@ export function evaluateFilters(
     }
     const branchSet = new Set(filters.branches.map((b: string) => b.toLowerCase()));
     if (!branchSet.has(branch.toLowerCase())) {
-      return { matched: false, reason: `branch '${branch}' not in [${filters.branches.join(', ')}]` };
+      return {
+        matched: false,
+        reason: `branch '${branch}' not in [${filters.branches.join(', ')}]`,
+      };
     }
   }
 

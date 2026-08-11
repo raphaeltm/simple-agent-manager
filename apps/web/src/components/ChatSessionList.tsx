@@ -33,12 +33,20 @@ export function ChatSessionList({ sessions, onSelect }: ChatSessionListProps) {
                   {session.topic || `Session ${session.id.slice(0, 8)}`}
                 </span>
                 <StatusBadge
-                  status={session.status === 'active' ? 'running' : session.status === 'error' ? 'error' : 'stopped'}
+                  status={
+                    session.status === 'active'
+                      ? 'running'
+                      : session.status === 'error'
+                        ? 'error'
+                        : 'stopped'
+                  }
                   label={session.status}
                 />
               </div>
               <div className="flex gap-3 text-xs text-fg-muted">
-                <span>{session.messageCount} message{session.messageCount !== 1 ? 's' : ''}</span>
+                <span>
+                  {session.messageCount} message{session.messageCount !== 1 ? 's' : ''}
+                </span>
                 <span>{formatDuration(session.startedAt, session.endedAt)}</span>
               </div>
             </div>

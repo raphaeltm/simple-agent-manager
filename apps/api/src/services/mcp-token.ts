@@ -13,7 +13,10 @@
  * activity.
  */
 
-import { DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS, DEFAULT_MCP_TOKEN_TTL_SECONDS } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_MCP_TOKEN_MAX_LIFETIME_SECONDS,
+  DEFAULT_MCP_TOKEN_TTL_SECONDS,
+} from '@simple-agent-manager/shared';
 
 /** KV key prefix for MCP tokens */
 const MCP_TOKEN_PREFIX = 'mcp:';
@@ -90,7 +93,7 @@ export async function storeMcpToken(
   kv: KVNamespace,
   token: string,
   data: McpTokenData,
-  env?: McpTokenEnv,
+  env?: McpTokenEnv
 ): Promise<void> {
   const ttl = getMcpTokenTTL(env);
   await kv.put(`${MCP_TOKEN_PREFIX}${token}`, JSON.stringify(data), {
@@ -115,7 +118,7 @@ export async function storeMcpToken(
 export async function validateMcpToken(
   kv: KVNamespace,
   token: string,
-  env?: McpTokenEnv,
+  env?: McpTokenEnv
 ): Promise<McpTokenData | null> {
   const key = `${MCP_TOKEN_PREFIX}${token}`;
   const data = await kv.get<McpTokenData>(key, { type: 'json' });
@@ -165,9 +168,6 @@ export async function validateMcpToken(
 /**
  * Revoke an MCP token (e.g., when task completes or fails).
  */
-export async function revokeMcpToken(
-  kv: KVNamespace,
-  token: string,
-): Promise<void> {
+export async function revokeMcpToken(kv: KVNamespace, token: string): Promise<void> {
   await kv.delete(`${MCP_TOKEN_PREFIX}${token}`);
 }

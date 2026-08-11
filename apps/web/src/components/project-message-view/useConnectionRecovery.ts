@@ -211,7 +211,9 @@ export function useConnectionRecovery(
           setIsResuming(false);
           setResumeStartedAt(null);
           setSession((prev) =>
-            prev ? ({ ...prev, isIdle: false, agentCompletedAt: null } as ChatSessionResponse) : prev
+            prev
+              ? ({ ...prev, isIdle: false, agentCompletedAt: null } as ChatSessionResponse)
+              : prev
           );
 
           const pending = pendingFollowUpRef.current;

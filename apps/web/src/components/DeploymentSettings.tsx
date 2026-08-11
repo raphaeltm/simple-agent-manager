@@ -33,7 +33,9 @@ export function DeploymentSettings({ projectId, compact = false }: DeploymentSet
   const [deploymentCred, setDeploymentCred] = useState<ProjectDeploymentGcpResponse | null>(null);
 
   // Setup flow state
-  const [phase, setPhase] = useState<'idle' | 'loading-projects' | 'project-select' | 'setting-up'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'loading-projects' | 'project-select' | 'setting-up'>(
+    'idle'
+  );
   const [gcpProjects, setGcpProjects] = useState<GcpProject[]>([]);
   const [selectedGcpProject, setSelectedGcpProject] = useState<string>('');
   const [oauthHandle, setOauthHandle] = useState<string>('');
@@ -153,9 +155,7 @@ export function DeploymentSettings({ projectId, compact = false }: DeploymentSet
   if (loading && !hasLoaded) {
     return (
       <section className="glass-surface rounded-lg p-4 grid gap-3">
-        <HeadingTag className={`${headingClass} m-0 text-fg-primary`}>
-          Deploy to Cloud
-        </HeadingTag>
+        <HeadingTag className={`${headingClass} m-0 text-fg-primary`}>Deploy to Cloud</HeadingTag>
         <div className="flex items-center gap-2" role="status">
           <Spinner size="sm" />
           <span className="text-sm text-fg-muted">Loading deployment config...</span>
@@ -167,11 +167,10 @@ export function DeploymentSettings({ projectId, compact = false }: DeploymentSet
   return (
     <section className="glass-surface rounded-lg p-4 grid gap-3">
       <div>
-        <HeadingTag className={`${headingClass} m-0 text-fg-primary`}>
-          Deploy to Cloud
-        </HeadingTag>
+        <HeadingTag className={`${headingClass} m-0 text-fg-primary`}>Deploy to Cloud</HeadingTag>
         <p className="m-0 mt-1 text-xs text-fg-muted">
-          Connect a GCP project for deployments via Defang. Agents use OIDC for short-lived credentials — no secrets stored.
+          Connect a GCP project for deployments via Defang. Agents use OIDC for short-lived
+          credentials — no secrets stored.
         </p>
       </div>
 
@@ -196,11 +195,7 @@ export function DeploymentSettings({ projectId, compact = false }: DeploymentSet
           </div>
 
           <div className="flex gap-2">
-            <Button
-              variant="danger"
-              size="sm"
-              onClick={() => setShowDisconnectConfirm(true)}
-            >
+            <Button variant="danger" size="sm" onClick={() => setShowDisconnectConfirm(true)}>
               Disconnect
             </Button>
           </div>
@@ -242,7 +237,10 @@ export function DeploymentSettings({ projectId, compact = false }: DeploymentSet
           {gcpProjects.length > 0 ? (
             <>
               <div>
-                <label htmlFor="gcp-deploy-project" className="block text-xs font-medium text-fg-muted mb-1">
+                <label
+                  htmlFor="gcp-deploy-project"
+                  className="block text-xs font-medium text-fg-muted mb-1"
+                >
                   Select GCP Project
                 </label>
                 <Select
@@ -295,11 +293,7 @@ export function DeploymentSettings({ projectId, compact = false }: DeploymentSet
                 <Button size="sm" onClick={handleConnectGcp}>
                   Try Again
                 </Button>
-                <Button
-                  variant="secondary"
-                  size="sm"
-                  onClick={() => setPhase('idle')}
-                >
+                <Button variant="secondary" size="sm" onClick={() => setPhase('idle')}>
                   Cancel
                 </Button>
               </div>

@@ -55,7 +55,10 @@ export type CompactMessageOptions = {
 
 export const DEFAULT_DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES = 16 * 1024;
 
-export function parseChatMessageRowCompact(row: unknown, options?: CompactMessageOptions): {
+export function parseChatMessageRowCompact(
+  row: unknown,
+  options?: CompactMessageOptions
+): {
   id: string;
   sessionId: string;
   role: string;

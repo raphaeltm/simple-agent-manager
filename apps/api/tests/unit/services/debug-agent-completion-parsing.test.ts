@@ -56,9 +56,11 @@ describe('complete() — validated Completion response parsing', () => {
   });
 
   it('parses a response with no choices/usage at all (every field is optional)', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
+      );
     vi.stubGlobal('fetch', fetchMock);
 
     const config = resolveDebugAgentConfig({} as Env);
@@ -70,9 +72,11 @@ describe('complete() — validated Completion response parsing', () => {
     // `null` with no error at all. The caller's existing catch
     // (`releaseFeatureTokenBudget` + rethrow) only fires when complete()
     // actually throws — a silently-null completion skipped that path.
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response('null', { status: 200, headers: { 'Content-Type': 'application/json' } })
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response('null', { status: 200, headers: { 'Content-Type': 'application/json' } })
+      );
     vi.stubGlobal('fetch', fetchMock);
 
     const config = resolveDebugAgentConfig({} as Env);

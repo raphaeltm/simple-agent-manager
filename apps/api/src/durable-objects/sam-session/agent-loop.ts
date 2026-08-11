@@ -194,7 +194,13 @@ function parseCollectedToolCalls(raw: string): CollectedToolCall[] {
       try {
         const item = expectJsonRecord(entry, `sam-session.tool_calls[${index}]`);
         if (typeof item.id !== 'string' || typeof item.name !== 'string') return [];
-        return [{ id: item.id, name: item.name, input: expectJsonRecord(item.input ?? {}, `sam-session.tool_calls[${index}].input`) }];
+        return [
+          {
+            id: item.id,
+            name: item.name,
+            input: expectJsonRecord(item.input ?? {}, `sam-session.tool_calls[${index}].input`),
+          },
+        ];
       } catch {
         return [];
       }
@@ -247,7 +253,9 @@ async function getAnthropicApiKey(env: Env): Promise<string> {
   const encryptionKey = getCredentialEncryptionKey(env);
   const cred = await getPlatformAgentCredential(db, 'claude-code', encryptionKey);
   if (!cred?.credential) {
-    throw new Error('No Anthropic API key configured. An admin must add a Claude Code platform credential.');
+    throw new Error(
+      'No Anthropic API key configured. An admin must add a Claude Code platform credential.'
+    );
   }
   return cred.credential;
 }
@@ -262,7 +270,7 @@ async function callLLM(
   userId: string,
   conversationId: string,
   baseSystemPrompt: string,
-  tools: AnthropicToolDef[],
+  tools: AnthropicToolDef[]
 ): Promise<Response> {
   const model = config.model;
   const systemPrompt = config.systemPromptAppend
@@ -277,15 +285,36 @@ async function callLLM(
   });
 
   // Timeout to prevent hanging fetches inside DOs
-  const timeoutMs = parseInt(String((env as unknown as Record<string, string>).SAM_LLM_TIMEOUT_MS) || '', 10) || DEFAULT_LLM_TIMEOUT_MS;
+  const timeoutMs =
+    parseInt(String((env as unknown as Record<string, string>).SAM_LLM_TIMEOUT_MS) || '', 10) ||
+    DEFAULT_LLM_TIMEOUT_MS;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
 
   try {
     if (isAnthropicModel(model)) {
-      return await callAnthropicLLM(env, model, systemPrompt, messages, openAITools, aigMetadata, config.maxTokens, controller.signal, tools);
+      return await callAnthropicLLM(
+        env,
+        model,
+        systemPrompt,
+        messages,
+        openAITools,
+        aigMetadata,
+        config.maxTokens,
+        controller.signal,
+        tools
+      );
     } else if (isWorkersAIModel(model)) {
-      return await callWorkersAILLM(env, model, systemPrompt, messages, openAITools, aigMetadata, config.maxTokens, controller.signal);
+      return await callWorkersAILLM(
+        env,
+        model,
+        systemPrompt,
+        messages,
+        openAITools,
+        aigMetadata,
+        config.maxTokens,
+        controller.signal
+      );
     } else {
       throw new Error(`Unknown model provider for model: ${model}`);
     }
@@ -304,7 +333,7 @@ async function callAnthropicLLM(
   aigMetadata: string,
   maxTokens: number,
   signal: AbortSignal,
-  anthropicTools: AnthropicToolDef[],
+  anthropicTools: AnthropicToolDef[]
 ): Promise<Response> {
   const apiKey = await getAnthropicApiKey(env);
   const url = buildAnthropicGatewayUrl(env);
@@ -321,7 +350,11 @@ async function callAnthropicLLM(
         if (m.tool_calls) {
           for (const tc of m.tool_calls) {
             let input: unknown = {};
-            try { input = JSON.parse(tc.function.arguments); } catch { /* empty */ }
+            try {
+              input = JSON.parse(tc.function.arguments);
+            } catch {
+              /* empty */
+            }
             content.push({ type: 'tool_use', id: tc.id, name: tc.function.name, input });
           }
         }
@@ -329,7 +362,9 @@ async function callAnthropicLLM(
       } else if (m.role === 'tool') {
         return {
           role: 'user' as const,
-          content: [{ type: 'tool_result', tool_use_id: m.tool_call_id || '', content: m.content || '' }],
+          content: [
+            { type: 'tool_result', tool_use_id: m.tool_call_id || '', content: m.content || '' },
+          ],
         };
       }
       return { role: 'user' as const, content: m.content || '' };
@@ -364,20 +399,17 @@ async function callWorkersAILLM(
   openAITools: OpenAITool[],
   aigMetadata: string,
   maxTokens: number,
-  signal: AbortSignal,
+  signal: AbortSignal
 ): Promise<Response> {
   const url = buildWorkersAIGatewayUrl(env);
 
-  const fullMessages: OpenAIMessage[] = [
-    { role: 'system', content: systemPrompt },
-    ...messages,
-  ];
+  const fullMessages: OpenAIMessage[] = [{ role: 'system', content: systemPrompt }, ...messages];
 
   return fetch(url, {
     method: 'POST',
     signal,
     headers: {
-      'Authorization': `Bearer ${env.CF_API_TOKEN}`,
+      Authorization: `Bearer ${env.CF_API_TOKEN}`,
       'Content-Type': 'application/json',
       'cf-aig-metadata': aigMetadata,
     },
@@ -397,7 +429,7 @@ async function callWorkersAILLM(
  */
 async function processAnthropicStream(
   response: Response,
-  writer: WritableStreamDefaultWriter<Uint8Array>,
+  writer: WritableStreamDefaultWriter<Uint8Array>
 ): Promise<{ textContent: string; toolCalls: CollectedToolCall[] }> {
   if (!response.body) {
     throw new Error('No response body from Anthropic');
@@ -416,7 +448,10 @@ async function processAnthropicStream(
   let streamDone = false;
   while (!streamDone) {
     const { done, value } = await reader.read();
-    if (done) { streamDone = true; break; }
+    if (done) {
+      streamDone = true;
+      break;
+    }
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
@@ -437,16 +472,21 @@ async function processAnthropicStream(
       const eventType = event.type as string;
 
       if (eventType === 'content_block_start') {
-        const block = expectJsonRecord(event.content_block, 'sam-session.anthropic_stream.content_block');
+        const block = expectJsonRecord(
+          event.content_block,
+          'sam-session.anthropic_stream.content_block'
+        );
         if (block?.type === 'tool_use') {
           currentToolId = typeof block.id === 'string' ? block.id : '';
           currentToolName = typeof block.name === 'string' ? block.name : '';
           currentToolInputJson = '';
-          await writer.write(encodeSseEvent({
-            type: 'tool_start',
-            tool: currentToolName,
-            input: {},
-          }));
+          await writer.write(
+            encodeSseEvent({
+              type: 'tool_start',
+              tool: currentToolName,
+              input: {},
+            })
+          );
         }
       } else if (eventType === 'content_block_delta') {
         const delta = expectJsonRecord(event.delta, 'sam-session.anthropic_stream.delta');
@@ -459,7 +499,10 @@ async function processAnthropicStream(
         }
       } else if (eventType === 'content_block_stop') {
         if (currentToolId) {
-          const input = parseToolInput(currentToolInputJson, 'sam-session.anthropic_stream.tool_input');
+          const input = parseToolInput(
+            currentToolInputJson,
+            'sam-session.anthropic_stream.tool_input'
+          );
           toolCalls.push({ id: currentToolId, name: currentToolName, input });
           currentToolId = '';
           currentToolName = '';
@@ -467,7 +510,8 @@ async function processAnthropicStream(
         }
       } else if (eventType === 'error') {
         const errorObj = expectJsonRecord(event.error ?? {}, 'sam-session.anthropic_stream.error');
-        const message = typeof errorObj.message === 'string' ? errorObj.message : 'Anthropic API error';
+        const message =
+          typeof errorObj.message === 'string' ? errorObj.message : 'Anthropic API error';
         await writer.write(encodeSseEvent({ type: 'error', message }));
       }
     }
@@ -482,7 +526,7 @@ async function processAnthropicStream(
  */
 async function processOpenAIStream(
   response: Response,
-  writer: WritableStreamDefaultWriter<Uint8Array>,
+  writer: WritableStreamDefaultWriter<Uint8Array>
 ): Promise<{ textContent: string; toolCalls: CollectedToolCall[] }> {
   if (!response.body) {
     throw new Error('No response body from LLM');
@@ -499,7 +543,10 @@ async function processOpenAIStream(
   let streamDone = false;
   while (!streamDone) {
     const { done, value } = await reader.read();
-    if (done) { streamDone = true; break; }
+    if (done) {
+      streamDone = true;
+      break;
+    }
 
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split('\n');
@@ -518,12 +565,16 @@ async function processOpenAIStream(
       }
 
       const choices = Array.isArray(chunk.choices)
-        ? chunk.choices.map((choice, index) => expectJsonRecord(choice, `sam-session.openai_stream.choices[${index}]`))
+        ? chunk.choices.map((choice, index) =>
+            expectJsonRecord(choice, `sam-session.openai_stream.choices[${index}]`)
+          )
         : undefined;
       const firstChoice = choices?.[0];
       if (!firstChoice) continue;
 
-      const delta = firstChoice.delta ? expectJsonRecord(firstChoice.delta, 'sam-session.openai_stream.delta') : undefined;
+      const delta = firstChoice.delta
+        ? expectJsonRecord(firstChoice.delta, 'sam-session.openai_stream.delta')
+        : undefined;
       if (!delta) continue;
 
       // Text content
@@ -534,16 +585,21 @@ async function processOpenAIStream(
 
       // Tool calls (streamed as deltas with index)
       const deltaToolCalls = Array.isArray(delta.tool_calls)
-        ? delta.tool_calls.map((toolCall, index) => expectJsonRecord(toolCall, `sam-session.openai_stream.tool_calls[${index}]`))
+        ? delta.tool_calls.map((toolCall, index) =>
+            expectJsonRecord(toolCall, `sam-session.openai_stream.tool_calls[${index}]`)
+          )
         : undefined;
       if (deltaToolCalls) {
         for (const dtc of deltaToolCalls) {
           const index = typeof dtc.index === 'number' ? dtc.index : 0;
-          const fn = dtc.function ? expectJsonRecord(dtc.function, 'sam-session.openai_stream.tool_call.function') : undefined;
+          const fn = dtc.function
+            ? expectJsonRecord(dtc.function, 'sam-session.openai_stream.tool_call.function')
+            : undefined;
 
           let builder = toolCallBuilders.get(index);
           if (!builder) {
-            const id = typeof dtc.id === 'string' ? dtc.id : `call_${crypto.randomUUID().slice(0, 8)}`;
+            const id =
+              typeof dtc.id === 'string' ? dtc.id : `call_${crypto.randomUUID().slice(0, 8)}`;
             const name = typeof fn?.name === 'string' ? fn.name : '';
             builder = { id, name, args: '' };
             toolCallBuilders.set(index, builder);
@@ -554,7 +610,9 @@ async function processOpenAIStream(
 
           if (fn?.name && typeof fn.name === 'string' && !builder.name) {
             builder.name = fn.name;
-            await writer.write(encodeSseEvent({ type: 'tool_start', tool: builder.name, input: {} }));
+            await writer.write(
+              encodeSseEvent({ type: 'tool_start', tool: builder.name, input: {} })
+            );
           }
           if (fn?.arguments && typeof fn.arguments === 'string') {
             builder.args += fn.arguments;
@@ -563,7 +621,8 @@ async function processOpenAIStream(
       }
 
       // Finalize tool calls on finish_reason
-      const finishReason = typeof firstChoice.finish_reason === 'string' ? firstChoice.finish_reason : undefined;
+      const finishReason =
+        typeof firstChoice.finish_reason === 'string' ? firstChoice.finish_reason : undefined;
       if (finishReason === 'tool_calls' || finishReason === 'stop') {
         for (const [, builder] of toolCallBuilders) {
           if (builder.name) {
@@ -618,11 +677,14 @@ export async function runAgentLoop(
     role: string,
     content: string,
     toolCallsJson?: string | null,
-    toolCallId?: string | null,
+    toolCallId?: string | null
   ) => void,
-  searchMessages?: (query: string, limit: number) => Array<{ snippet: string; role: string; sequence: number; createdAt: string }>,
+  searchMessages?: (
+    query: string,
+    limit: number
+  ) => Array<{ snippet: string; role: string; sequence: number; createdAt: string }>,
   options?: AgentLoopOptions,
-  executionCtx?: Pick<ExecutionContext, 'waitUntil'>,
+  executionCtx?: Pick<ExecutionContext, 'waitUntil'>
 ): Promise<void> {
   const messages: OpenAIMessage[] = [
     ...toOpenAIMessages(historyRows),
@@ -631,7 +693,8 @@ export async function runAgentLoop(
 
   const systemPrompt = options?.systemPrompt ?? SAM_SYSTEM_PROMPT;
   const tools = options?.tools ?? [];
-  const executeToolFn = options?.executeTool ?? (async () => ({ error: 'No tool executor configured' }));
+  const executeToolFn =
+    options?.executeTool ?? (async () => ({ error: 'No tool executor configured' }));
   const toolCtx: ToolContext = {
     env: expectJsonRecord(env, 'sam-session.tool_context.env'),
     userId,
@@ -639,14 +702,15 @@ export async function runAgentLoop(
     ...options?.toolContextExtras,
   };
   const useAnthropicParser = isAnthropicModel(config.model);
-  const tokenUsageFormat = useAnthropicParser ? 'anthropic' as const : 'openai' as const;
+  const tokenUsageFormat = useAnthropicParser ? ('anthropic' as const) : ('openai' as const);
 
   // Workers AI models have smaller context windows, so use a tighter budget
   // unless the user explicitly set SAM_MAX_REQUEST_BODY_BYTES as an override.
   const hasExplicitOverride = !!env.SAM_MAX_REQUEST_BODY_BYTES;
-  const effectiveBudget = (!hasExplicitOverride && isWorkersAIModel(config.model))
-    ? DEFAULT_SAM_MAX_REQUEST_BODY_BYTES_WORKERS_AI
-    : config.maxRequestBodyBytes;
+  const effectiveBudget =
+    !hasExplicitOverride && isWorkersAIModel(config.model)
+      ? DEFAULT_SAM_MAX_REQUEST_BODY_BYTES_WORKERS_AI
+      : config.maxRequestBodyBytes;
   const fixedOverhead = systemPrompt.length + JSON.stringify(tools).length + 500;
 
   let turnCount = 0;
@@ -669,9 +733,10 @@ export async function runAgentLoop(
 
     const usageGate = await checkAiUsageGate(env.KV, userId, env);
     if (!usageGate.allowed) {
-      const message = usageGate.reason === 'daily-token-budget'
-        ? 'Daily token budget exceeded. Resets at midnight UTC.'
-        : 'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.';
+      const message =
+        usageGate.reason === 'daily-token-budget'
+          ? 'Daily token budget exceeded. Resets at midnight UTC.'
+          : 'Monthly cost cap exceeded. Adjust your cap in Settings > Usage.';
       log.warn('sam.ai_usage_gate_denied', {
         userId,
         conversationId,
@@ -684,7 +749,15 @@ export async function runAgentLoop(
 
     let response: Response;
     try {
-      response = await callLLM(env, config, llmMessages, userId, conversationId, systemPrompt, tools);
+      response = await callLLM(
+        env,
+        config,
+        llmMessages,
+        userId,
+        conversationId,
+        systemPrompt,
+        tools
+      );
       response = await attachTokenUsageAccounting(response, {
         env,
         userId,
@@ -699,24 +772,36 @@ export async function runAgentLoop(
         error: errMsg,
         isTimeout,
       });
-      await writer.write(encodeSseEvent({
-        type: 'error',
-        message: isTimeout
-          ? 'AI request timed out. Please try again.'
-          : 'Failed to reach AI service. Please try again.',
-      }));
+      await writer.write(
+        encodeSseEvent({
+          type: 'error',
+          message: isTimeout
+            ? 'AI request timed out. Please try again.'
+            : 'Failed to reach AI service. Please try again.',
+        })
+      );
       break;
     }
 
-    log.info('sam.llm_response', { status: response.status, hasBody: !!response.body, model: config.model });
+    log.info('sam.llm_response', {
+      status: response.status,
+      hasBody: !!response.body,
+      model: config.model,
+    });
 
     if (!response.ok) {
       const errorText = await response.text().catch(() => 'Unknown error');
-      log.error('sam.llm_error', { status: response.status, body: errorText.slice(0, 500), model: config.model });
-      await writer.write(encodeSseEvent({
-        type: 'error',
-        message: `AI error (${response.status}). Please try again.`,
-      }));
+      log.error('sam.llm_error', {
+        status: response.status,
+        body: errorText.slice(0, 500),
+        model: config.model,
+      });
+      await writer.write(
+        encodeSseEvent({
+          type: 'error',
+          message: `AI error (${response.status}). Please try again.`,
+        })
+      );
       break;
     }
 
@@ -733,10 +818,12 @@ export async function runAgentLoop(
         model: config.model,
         error: streamErr instanceof Error ? streamErr.message : String(streamErr),
       });
-      await writer.write(encodeSseEvent({
-        type: 'error',
-        message: 'Error processing AI response. Please try again.',
-      }));
+      await writer.write(
+        encodeSseEvent({
+          type: 'error',
+          message: 'Error processing AI response. Please try again.',
+        })
+      );
       break;
     }
 
@@ -745,7 +832,7 @@ export async function runAgentLoop(
       conversationId,
       'assistant',
       textContent,
-      toolCalls.length > 0 ? JSON.stringify(toolCalls) : null,
+      toolCalls.length > 0 ? JSON.stringify(toolCalls) : null
     );
 
     if (toolCalls.length > 0) {
@@ -782,10 +869,12 @@ export async function runAgentLoop(
   }
 
   if (continueLoop && turnCount >= config.maxTurns) {
-    await writer.write(encodeSseEvent({
-      type: 'error',
-      message: 'Maximum tool iterations reached. Please try a simpler request.',
-    }));
+    await writer.write(
+      encodeSseEvent({
+        type: 'error',
+        message: 'Maximum tool iterations reached. Please try a simpler request.',
+      })
+    );
   }
 
   await writer.write(encodeSseEvent({ type: 'done' }));

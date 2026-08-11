@@ -102,11 +102,7 @@ export function useWorkspaceCore(
   }, [tokenRefreshError]);
 
   // Boot log streaming
-  const { logs: streamedBootLogs } = useBootLogStream(
-    id,
-    workspace?.url,
-    workspace?.status
-  );
+  const { logs: streamedBootLogs } = useBootLogStream(id, workspace?.url, workspace?.status);
 
   // Ref for terminalToken so loadWorkspaceState doesn't need it as a dependency.
   // This prevents token refreshes from invalidating the callback and cascading
@@ -310,7 +306,9 @@ export function useWorkspaceCore(
     try {
       setActionLoading(true);
       await restartWorkspace(id);
-      setWorkspace((prev) => (prev ? { ...prev, status: 'creating', errorMessage: null, bootLogs: [] } : null));
+      setWorkspace((prev) =>
+        prev ? { ...prev, status: 'creating', errorMessage: null, bootLogs: [] } : null
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to restart workspace');
     } finally {
@@ -327,7 +325,9 @@ export function useWorkspaceCore(
     try {
       setActionLoading(true);
       await rebuildWorkspace(id);
-      setWorkspace((prev) => (prev ? { ...prev, status: 'creating', errorMessage: null, bootLogs: [] } : null));
+      setWorkspace((prev) =>
+        prev ? { ...prev, status: 'creating', errorMessage: null, bootLogs: [] } : null
+      );
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to rebuild workspace');
     } finally {

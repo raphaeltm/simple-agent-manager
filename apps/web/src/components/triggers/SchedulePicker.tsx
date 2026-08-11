@@ -90,7 +90,12 @@ function parseCronToMode(cron: string): {
   // parts.length === 5 (checked above) guarantees indices 0, 1, 2, and 4 are
   // all present, but TS can't correlate a runtime length check to the
   // destructure — fall back to 'advanced' like the length check above would.
-  if (minStr === undefined || hourStr === undefined || domStr === undefined || dowStr === undefined) {
+  if (
+    minStr === undefined ||
+    hourStr === undefined ||
+    domStr === undefined ||
+    dowStr === undefined
+  ) {
     return { mode: 'advanced', ...defaults };
   }
 
@@ -100,7 +105,15 @@ function parseCronToMode(cron: string): {
   // Hourly: */N * * * * or 0 */N * * *
   if (hourStr.startsWith('*/') && domStr === '*' && dowStr === '*') {
     const n = parseInt(hourStr.slice(2), 10);
-    return { mode: 'hourly', hour: 0, minute, everyNHours: isNaN(n) ? 1 : n, dailyVariant: 'every', weeklyDays: [1], monthDay: 1 };
+    return {
+      mode: 'hourly',
+      hour: 0,
+      minute,
+      everyNHours: isNaN(n) ? 1 : n,
+      dailyVariant: 'every',
+      weeklyDays: [1],
+      monthDay: 1,
+    };
   }
 
   const hour = parseInt(hourStr, 10);
@@ -109,25 +122,70 @@ function parseCronToMode(cron: string): {
   // Monthly: M H D * *
   if (domStr !== '*' && dowStr === '*') {
     const dom = parseInt(domStr, 10);
-    return { mode: 'monthly', hour, minute, everyNHours: 1, dailyVariant: 'every', weeklyDays: [1], monthDay: isNaN(dom) ? 1 : dom };
+    return {
+      mode: 'monthly',
+      hour,
+      minute,
+      everyNHours: 1,
+      dailyVariant: 'every',
+      weeklyDays: [1],
+      monthDay: isNaN(dom) ? 1 : dom,
+    };
   }
 
   // Weekly: M H * * 1,3,5
   if (domStr === '*' && dowStr !== '*') {
-    const days = dowStr.split(',').map(Number).filter((n) => !isNaN(n));
+    const days = dowStr
+      .split(',')
+      .map(Number)
+      .filter((n) => !isNaN(n));
     // Check if weekday or weekend
     const isWeekday = days.length === 5 && [1, 2, 3, 4, 5].every((d) => days.includes(d));
     const isWeekend = days.length === 2 && [0, 6].every((d) => days.includes(d));
 
-    if (isWeekday) return { mode: 'daily', hour, minute, everyNHours: 1, dailyVariant: 'weekday', weeklyDays: days, monthDay: 1 };
-    if (isWeekend) return { mode: 'daily', hour, minute, everyNHours: 1, dailyVariant: 'weekend', weeklyDays: days, monthDay: 1 };
+    if (isWeekday)
+      return {
+        mode: 'daily',
+        hour,
+        minute,
+        everyNHours: 1,
+        dailyVariant: 'weekday',
+        weeklyDays: days,
+        monthDay: 1,
+      };
+    if (isWeekend)
+      return {
+        mode: 'daily',
+        hour,
+        minute,
+        everyNHours: 1,
+        dailyVariant: 'weekend',
+        weeklyDays: days,
+        monthDay: 1,
+      };
 
-    return { mode: 'weekly', hour, minute, everyNHours: 1, dailyVariant: 'every', weeklyDays: days, monthDay: 1 };
+    return {
+      mode: 'weekly',
+      hour,
+      minute,
+      everyNHours: 1,
+      dailyVariant: 'every',
+      weeklyDays: days,
+      monthDay: 1,
+    };
   }
 
   // Daily: M H * * *
   if (domStr === '*' && dowStr === '*') {
-    return { mode: 'daily', hour, minute, everyNHours: 1, dailyVariant: 'every', weeklyDays: [1], monthDay: 1 };
+    return {
+      mode: 'daily',
+      hour,
+      minute,
+      everyNHours: 1,
+      dailyVariant: 'every',
+      weeklyDays: [1],
+      monthDay: 1,
+    };
   }
 
   return { mode: 'advanced', ...defaults };
@@ -141,7 +199,7 @@ function buildCron(
   dailyVariant: DailyVariant,
   weeklyDays: number[],
   monthDay: number,
-  advancedCron: string,
+  advancedCron: string
 ): string {
   switch (mode) {
     case 'hourly':
@@ -168,7 +226,12 @@ function describeCron(cron: string): string {
     // parts.length === 5 (checked above) guarantees indices 0, 1, 2, and 4 are
     // all present, but TS can't correlate a runtime length check to the
     // destructure — treat it the same as the length check above.
-    if (minStr === undefined || hourStr === undefined || domStr === undefined || dowStr === undefined) {
+    if (
+      minStr === undefined ||
+      hourStr === undefined ||
+      domStr === undefined ||
+      dowStr === undefined
+    ) {
       return 'Invalid expression';
     }
     const min = parseInt(minStr, 10);
@@ -246,13 +309,13 @@ export const SchedulePicker: FC<SchedulePickerProps> = ({
       dv: DailyVariant,
       wd: number[],
       md: number,
-      ac: string,
+      ac: string
     ) => {
       const cron = buildCron(m, h, min, nh, dv, wd, md, ac);
       onChange(cron);
       onDescriptionChange?.(describeCron(cron));
     },
-    [onChange, onDescriptionChange],
+    [onChange, onDescriptionChange]
   );
 
   // Emit on initial render. Mount-only: every field's onChange handler below
@@ -261,7 +324,16 @@ export const SchedulePicker: FC<SchedulePickerProps> = ({
   // double-emit. This effect exists solely to emit the description matching
   // the initial `value` prop, before any handler has run.
   useEffect(() => {
-    const cron = buildCron(mode, hour, minute, everyNHours, dailyVariant, weeklyDays, monthDay, advancedCron);
+    const cron = buildCron(
+      mode,
+      hour,
+      minute,
+      everyNHours,
+      dailyVariant,
+      weeklyDays,
+      monthDay,
+      advancedCron
+    );
     onDescriptionChange?.(describeCron(cron));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-only emit; see comment above
   }, []);
@@ -269,11 +341,29 @@ export const SchedulePicker: FC<SchedulePickerProps> = ({
   function handleModeChange(newMode: ScheduleMode) {
     setMode(newMode);
     if (newMode === 'advanced') {
-      const current = buildCron(mode, hour, minute, everyNHours, dailyVariant, weeklyDays, monthDay, advancedCron);
+      const current = buildCron(
+        mode,
+        hour,
+        minute,
+        everyNHours,
+        dailyVariant,
+        weeklyDays,
+        monthDay,
+        advancedCron
+      );
       setAdvancedCron(current);
       emitChange(newMode, hour, minute, everyNHours, dailyVariant, weeklyDays, monthDay, current);
     } else {
-      emitChange(newMode, hour, minute, everyNHours, dailyVariant, weeklyDays, monthDay, advancedCron);
+      emitChange(
+        newMode,
+        hour,
+        minute,
+        everyNHours,
+        dailyVariant,
+        weeklyDays,
+        monthDay,
+        advancedCron
+      );
     }
   }
 
@@ -312,7 +402,9 @@ export const SchedulePicker: FC<SchedulePickerProps> = ({
             className={`px-2 py-1.5 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
           >
             {[1, 2, 3, 4, 6, 8, 12].map((n) => (
-              <option key={n} value={n}>{n}</option>
+              <option key={n} value={n}>
+                {n}
+              </option>
             ))}
           </select>
           <span className="text-fg-muted">hour(s), starting at minute</span>
@@ -324,7 +416,16 @@ export const SchedulePicker: FC<SchedulePickerProps> = ({
             onChange={(e) => {
               const m = Math.min(59, Math.max(0, parseInt(e.target.value, 10) || 0));
               setMinute(m);
-              emitChange(mode, hour, m, everyNHours, dailyVariant, weeklyDays, monthDay, advancedCron);
+              emitChange(
+                mode,
+                hour,
+                m,
+                everyNHours,
+                dailyVariant,
+                weeklyDays,
+                monthDay,
+                advancedCron
+              );
             }}
             className={`w-16 px-2 py-1.5 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
           />
@@ -352,8 +453,32 @@ export const SchedulePicker: FC<SchedulePickerProps> = ({
             <TimeInput
               hour={hour}
               minute={minute}
-              onHourChange={(h) => { setHour(h); emitChange(mode, h, minute, everyNHours, dailyVariant, weeklyDays, monthDay, advancedCron); }}
-              onMinuteChange={(m) => { setMinute(m); emitChange(mode, hour, m, everyNHours, dailyVariant, weeklyDays, monthDay, advancedCron); }}
+              onHourChange={(h) => {
+                setHour(h);
+                emitChange(
+                  mode,
+                  h,
+                  minute,
+                  everyNHours,
+                  dailyVariant,
+                  weeklyDays,
+                  monthDay,
+                  advancedCron
+                );
+              }}
+              onMinuteChange={(m) => {
+                setMinute(m);
+                emitChange(
+                  mode,
+                  hour,
+                  m,
+                  everyNHours,
+                  dailyVariant,
+                  weeklyDays,
+                  monthDay,
+                  advancedCron
+                );
+              }}
             />
           </div>
         </div>
@@ -373,7 +498,16 @@ export const SchedulePicker: FC<SchedulePickerProps> = ({
                       : [...weeklyDays, day.cron];
                     const days = next.length > 0 ? next : [day.cron];
                     setWeeklyDays(days);
-                    emitChange(mode, hour, minute, everyNHours, dailyVariant, days, monthDay, advancedCron);
+                    emitChange(
+                      mode,
+                      hour,
+                      minute,
+                      everyNHours,
+                      dailyVariant,
+                      days,
+                      monthDay,
+                      advancedCron
+                    );
                   }}
                   aria-pressed={selected}
                   aria-label={day.label}
@@ -393,8 +527,32 @@ export const SchedulePicker: FC<SchedulePickerProps> = ({
             <TimeInput
               hour={hour}
               minute={minute}
-              onHourChange={(h) => { setHour(h); emitChange(mode, h, minute, everyNHours, dailyVariant, weeklyDays, monthDay, advancedCron); }}
-              onMinuteChange={(m) => { setMinute(m); emitChange(mode, hour, m, everyNHours, dailyVariant, weeklyDays, monthDay, advancedCron); }}
+              onHourChange={(h) => {
+                setHour(h);
+                emitChange(
+                  mode,
+                  h,
+                  minute,
+                  everyNHours,
+                  dailyVariant,
+                  weeklyDays,
+                  monthDay,
+                  advancedCron
+                );
+              }}
+              onMinuteChange={(m) => {
+                setMinute(m);
+                emitChange(
+                  mode,
+                  hour,
+                  m,
+                  everyNHours,
+                  dailyVariant,
+                  weeklyDays,
+                  monthDay,
+                  advancedCron
+                );
+              }}
             />
           </div>
         </div>
@@ -411,7 +569,16 @@ export const SchedulePicker: FC<SchedulePickerProps> = ({
             onChange={(e) => {
               const d = Math.min(28, Math.max(1, parseInt(e.target.value, 10) || 1));
               setMonthDay(d);
-              emitChange(mode, hour, minute, everyNHours, dailyVariant, weeklyDays, d, advancedCron);
+              emitChange(
+                mode,
+                hour,
+                minute,
+                everyNHours,
+                dailyVariant,
+                weeklyDays,
+                d,
+                advancedCron
+              );
             }}
             className={`w-16 px-2 py-1.5 rounded-md text-fg-primary text-sm ${FOCUS_RING}`}
           />
@@ -419,8 +586,32 @@ export const SchedulePicker: FC<SchedulePickerProps> = ({
           <TimeInput
             hour={hour}
             minute={minute}
-            onHourChange={(h) => { setHour(h); emitChange(mode, h, minute, everyNHours, dailyVariant, weeklyDays, monthDay, advancedCron); }}
-            onMinuteChange={(m) => { setMinute(m); emitChange(mode, hour, m, everyNHours, dailyVariant, weeklyDays, monthDay, advancedCron); }}
+            onHourChange={(h) => {
+              setHour(h);
+              emitChange(
+                mode,
+                h,
+                minute,
+                everyNHours,
+                dailyVariant,
+                weeklyDays,
+                monthDay,
+                advancedCron
+              );
+            }}
+            onMinuteChange={(m) => {
+              setMinute(m);
+              emitChange(
+                mode,
+                hour,
+                m,
+                everyNHours,
+                dailyVariant,
+                weeklyDays,
+                monthDay,
+                advancedCron
+              );
+            }}
           />
         </div>
       )}
@@ -432,7 +623,16 @@ export const SchedulePicker: FC<SchedulePickerProps> = ({
             value={advancedCron}
             onChange={(e) => {
               setAdvancedCron(e.target.value);
-              emitChange(mode, hour, minute, everyNHours, dailyVariant, weeklyDays, monthDay, e.target.value);
+              emitChange(
+                mode,
+                hour,
+                minute,
+                everyNHours,
+                dailyVariant,
+                weeklyDays,
+                monthDay,
+                e.target.value
+              );
             }}
             placeholder="0 9 * * 1-5"
             className={`w-full px-3 py-2 rounded-md text-fg-primary text-sm font-mono ${FOCUS_RING}`}
@@ -455,7 +655,9 @@ export const SchedulePicker: FC<SchedulePickerProps> = ({
             aria-label="Timezone"
           >
             {COMMON_TIMEZONES.map((tz) => (
-              <option key={tz} value={tz}>{tz.replace(/_/g, ' ')}</option>
+              <option key={tz} value={tz}>
+                {tz.replace(/_/g, ' ')}
+              </option>
             ))}
           </select>
           <ChevronDown
@@ -469,7 +671,18 @@ export const SchedulePicker: FC<SchedulePickerProps> = ({
       {/* Human-readable description */}
       {mode !== 'advanced' && (
         <p className="text-xs text-fg-muted m-0 italic">
-          {describeCron(buildCron(mode, hour, minute, everyNHours, dailyVariant, weeklyDays, monthDay, advancedCron))}
+          {describeCron(
+            buildCron(
+              mode,
+              hour,
+              minute,
+              everyNHours,
+              dailyVariant,
+              weeklyDays,
+              monthDay,
+              advancedCron
+            )
+          )}
           {timezone !== 'UTC' && ` (${timezone.replace(/_/g, ' ')})`}
         </p>
       )}

@@ -47,7 +47,9 @@ export function Project() {
     }
   }, [projectId]);
 
-  useEffect(() => { void loadProject(); }, [loadProject]);
+  useEffect(() => {
+    void loadProject();
+  }, [loadProject]);
 
   useEffect(() => {
     void listGitHubInstallations()
@@ -96,7 +98,9 @@ export function Project() {
           </div>
         ) : error ? (
           <div className="p-4">
-            <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
+            <Alert variant="error" onDismiss={() => setError(null)}>
+              {error}
+            </Alert>
           </div>
         ) : !project ? (
           <div className="p-4">
@@ -119,14 +123,17 @@ export function Project() {
       <main
         aria-label={project?.name ? `${project.name} — Project` : 'Project'}
         className={`max-w-[80rem] w-full mx-auto min-w-0 ${isMobile ? 'flex flex-col flex-1 min-h-0' : ''}`}
-        style={isMobile
-          ? { padding: 'var(--sam-space-3) var(--sam-space-3)' }
-          : { padding: 'var(--sam-space-8) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }
+        style={
+          isMobile
+            ? { padding: 'var(--sam-space-3) var(--sam-space-3)' }
+            : { padding: 'var(--sam-space-8) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }
         }
       >
         {error && (
           <div className="mt-3">
-            <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
+            <Alert variant="error" onDismiss={() => setError(null)}>
+              {error}
+            </Alert>
           </div>
         )}
 

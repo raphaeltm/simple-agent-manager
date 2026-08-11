@@ -71,7 +71,7 @@ function isModelAvailable(
   provider: string,
   hasAnthropic: boolean,
   hasOpenAI: boolean,
-  hasUnifiedBilling: boolean,
+  hasUnifiedBilling: boolean
 ): boolean {
   if (provider === 'workers-ai') return true;
   if (provider === 'anthropic') return hasAnthropic || hasUnifiedBilling;
@@ -100,9 +100,8 @@ adminAIProxyRoutes.get('/config', async (c) => {
   const billingMode = await resolveBillingMode(c.env);
 
   // Effective default: KV override > env var > shared constant
-  const effectiveDefault = parsed?.defaultModel
-    ?? c.env.AI_PROXY_DEFAULT_MODEL
-    ?? DEFAULT_AI_PROXY_MODEL;
+  const effectiveDefault =
+    parsed?.defaultModel ?? c.env.AI_PROXY_DEFAULT_MODEL ?? DEFAULT_AI_PROXY_MODEL;
 
   const models = PLATFORM_AI_MODELS.map((m) => ({
     ...m,
@@ -111,7 +110,11 @@ adminAIProxyRoutes.get('/config', async (c) => {
 
   return c.json({
     defaultModel: effectiveDefault,
-    source: parsed ? 'admin' as const : (c.env.AI_PROXY_DEFAULT_MODEL ? 'env' as const : 'default' as const),
+    source: parsed
+      ? ('admin' as const)
+      : c.env.AI_PROXY_DEFAULT_MODEL
+        ? ('env' as const)
+        : ('default' as const),
     updatedAt: parsed?.updatedAt ?? null,
     hasAnthropicCredential: hasAnthropic,
     hasOpenAICredential: hasOpenAI,
@@ -137,7 +140,9 @@ adminAIProxyRoutes.put('/config', jsonValidator(UpdateAiProxyDefaultModelSchema)
 
   const model = PLATFORM_AI_MODELS.find((m) => m.id === defaultModel);
   if (!model) {
-    throw errors.badRequest(`Unknown model: ${defaultModel}. Available: ${PLATFORM_AI_MODELS.map((m) => m.id).join(', ')}`);
+    throw errors.badRequest(
+      `Unknown model: ${defaultModel}. Available: ${PLATFORM_AI_MODELS.map((m) => m.id).join(', ')}`
+    );
   }
 
   const hasUnifiedBilling = !!resolveUnifiedBillingToken(c.env);
@@ -147,8 +152,8 @@ adminAIProxyRoutes.put('/config', jsonValidator(UpdateAiProxyDefaultModelSchema)
     const hasAnthropic = await hasPlatformCredential(c.env, 'claude-code');
     if (!hasAnthropic) {
       throw errors.badRequest(
-        'Cannot select an Anthropic model without a Claude Code platform credential or Unified Billing. '
-        + 'Add a credential on the Credentials tab first.',
+        'Cannot select an Anthropic model without a Claude Code platform credential or Unified Billing. ' +
+          'Add a credential on the Credentials tab first.'
       );
     }
   }
@@ -158,8 +163,8 @@ adminAIProxyRoutes.put('/config', jsonValidator(UpdateAiProxyDefaultModelSchema)
     const hasOpenAI = await hasPlatformCredential(c.env, 'codex');
     if (!hasOpenAI) {
       throw errors.badRequest(
-        'Cannot select an OpenAI model without a Codex platform credential or Unified Billing. '
-        + 'Add a credential on the Credentials tab first.',
+        'Cannot select an OpenAI model without a Codex platform credential or Unified Billing. ' +
+          'Add a credential on the Credentials tab first.'
       );
     }
   }
@@ -197,14 +202,16 @@ adminAIProxyRoutes.patch('/config', jsonValidator(UpdateAiProxyBillingModeSchema
   }
 
   if (!VALID_BILLING_MODES.includes(billingMode as BillingMode)) {
-    throw errors.badRequest(`Invalid billing mode: ${billingMode}. Valid values: ${VALID_BILLING_MODES.join(', ')}`);
+    throw errors.badRequest(
+      `Invalid billing mode: ${billingMode}. Valid values: ${VALID_BILLING_MODES.join(', ')}`
+    );
   }
 
   // Validate that unified billing can work with available credentials
   if (billingMode === 'unified' && !c.env.CF_AIG_TOKEN) {
     throw errors.badRequest(
-      'Cannot set billing mode to "unified" without CF_AIG_TOKEN configured. '
-      + 'Set CF_AIG_TOKEN as a Worker secret first, or use "auto" mode.',
+      'Cannot set billing mode to "unified" without CF_AIG_TOKEN configured. ' +
+        'Set CF_AIG_TOKEN as a Worker secret first, or use "auto" mode.'
     );
   }
 
@@ -233,7 +240,7 @@ adminAIProxyRoutes.delete('/config', async (c) => {
   const effectiveDefault = c.env.AI_PROXY_DEFAULT_MODEL ?? DEFAULT_AI_PROXY_MODEL;
   return c.json({
     defaultModel: effectiveDefault,
-    source: c.env.AI_PROXY_DEFAULT_MODEL ? 'env' as const : 'default' as const,
+    source: c.env.AI_PROXY_DEFAULT_MODEL ? ('env' as const) : ('default' as const),
     updatedAt: null,
   });
 });

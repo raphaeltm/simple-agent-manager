@@ -24,3 +24,24 @@ Avoid these patterns in new code:
 - Local `isRecord`/`isObject` helpers that recreate shared validation helpers.
 - D1/Durable Object row arrays narrowed directly from `.toArray()`, `.first()`, `.all()`, or raw SQL results without a row mapper, schema parse, or guard.
 - External webhook/fetch/request payloads narrowed directly to domain types without validation.
+
+## Sanctioned non-boundary casts
+
+The report-only `record-string-unknown` / `unknown-double-assertion` populations in
+`scripts/quality/type-boundary-baseline.json` are not a queue of unaddressed trust-boundary debt —
+the current floor (measured 2026-08-11, ai-slop debt burn-down) is dominated by these three
+sanctioned shapes, none of which narrow a value that crossed a trust boundary (D1/DO row, request
+body, external fetch response):
+
+- **CSS custom-property-as-number style casts** (e.g. `'var(--x)' as unknown as number` on a React
+  `style` prop) — the value is a string literal the component itself authored, not external input;
+  the cast exists only to satisfy `CSSProperties`' numeric typing for a property the browser accepts
+  as a custom-property reference.
+- **Third-party generic container / library type-gap casts** (React Flow's `NodeProps.data`,
+  `BodyInit`/`BufferSource` DOM-lib gaps, MemoryFS shims) — the unsafe span is inside a third-party
+  type definition that under- or over-constrains a shape SAM's own code already controls end to end,
+  not a runtime value arriving from outside the process.
+- **Self-constructed display/log payload widening** — building a human-readable diagnostic, log
+  line, or UI display string from values the current function already validated or itself
+  constructed is not re-parsing untrusted input; the cast only reconciles TypeScript's structural
+  typing with a shape the author assembled.

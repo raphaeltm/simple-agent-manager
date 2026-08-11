@@ -140,7 +140,7 @@ export interface WebGLBackgroundOptions {
 export function useWebGLBackground(
   canvasRef: React.RefObject<HTMLCanvasElement | null>,
   amplitudeRef: React.RefObject<number>,
-  options?: WebGLBackgroundOptions,
+  options?: WebGLBackgroundOptions
 ) {
   const speed = options?.speed ?? 0.4;
   const noiseSize = options?.noiseSize ?? 1.02;

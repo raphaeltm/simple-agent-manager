@@ -127,9 +127,11 @@ describe('origin CA certificate issuance', () => {
     // uncaught TypeError ("Cannot read properties of null") instead of the
     // domain-specific "non-JSON response" error every other malformed-body
     // path already produces.
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response('null', { status: 200, headers: { 'Content-Type': 'application/json' } })
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response('null', { status: 200, headers: { 'Content-Type': 'application/json' } })
+      );
 
     await expect(issueNodeOriginCertificate(env(), CSR, fetchMock)).rejects.toThrow(
       'Cloudflare Origin CA returned non-JSON response (200)'
@@ -140,9 +142,11 @@ describe('origin CA certificate issuance', () => {
     // Arrays are typeof 'object' in JS, so the old blind cast tolerated them
     // too (property access just returned undefined). The schema-validated
     // path preserves that tolerance rather than rejecting it as non-JSON.
-    const fetchMock = vi.fn().mockResolvedValue(
-      new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })
-    );
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })
+      );
 
     await expect(issueNodeOriginCertificate(env(), CSR, fetchMock)).rejects.toThrow(
       'Cloudflare Origin CA certificate issuance failed (200)'

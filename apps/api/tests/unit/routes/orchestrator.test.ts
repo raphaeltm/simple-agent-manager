@@ -20,7 +20,9 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => vi.fn((_c: unknown, next: () => unknown) => next()),
   requireApproved: () => vi.fn((_c: unknown, next: () => unknown) => next()),
-  getAuth: () => ({ user: { id: 'user-1', email: 'u@test.dev', name: 'U', role: 'user', status: 'active' } }),
+  getAuth: () => ({
+    user: { id: 'user-1', email: 'u@test.dev', name: 'U', role: 'user', status: 'active' },
+  }),
 }));
 vi.mock('../../../src/middleware/project-auth', () => ({
   requireProjectCapability: mocks.requireProjectCapability,
@@ -59,7 +61,10 @@ function makeApp(): Hono<{ Bindings: Env }> {
   app.onError((err, c) => {
     const appError = err as { statusCode?: number; error?: string; message?: string };
     if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
-      return c.json({ error: appError.error, message: appError.message }, appError.statusCode as 400);
+      return c.json(
+        { error: appError.error, message: appError.message },
+        appError.statusCode as 400
+      );
     }
     return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
   });
@@ -80,54 +85,79 @@ describe('orchestrator override route', () => {
     mockMissionQuery([{ id: 'mission-1' }]);
     mocks.overrideTaskState.mockResolvedValueOnce(true);
 
-    const res = await app.request(`${BASE}/tasks/task-1/override`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ missionId: 'mission-1', newState: 'schedulable', reason: 'manual retry' }),
-    }, makeEnv());
+    const res = await app.request(
+      `${BASE}/tasks/task-1/override`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          missionId: 'mission-1',
+          newState: 'schedulable',
+          reason: 'manual retry',
+        }),
+      },
+      makeEnv()
+    );
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toEqual({ success: true });
     expect(mocks.overrideTaskState).toHaveBeenCalledWith(
-      expect.anything(), 'project-1', 'mission-1', 'task-1', 'schedulable', 'manual retry'
+      expect.anything(),
+      'project-1',
+      'mission-1',
+      'task-1',
+      'schedulable',
+      'manual retry'
     );
   });
 
   it('rejects a malformed body (wrong-type missionId) with the standard 400 shape before calling the service', async () => {
-    const res = await app.request(`${BASE}/tasks/task-1/override`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ missionId: 42, newState: 'schedulable', reason: 'x' }),
-    }, makeEnv());
+    const res = await app.request(
+      `${BASE}/tasks/task-1/override`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ missionId: 42, newState: 'schedulable', reason: 'x' }),
+      },
+      makeEnv()
+    );
 
     expect(res.status).toBe(400);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toBe('BAD_REQUEST');
     expect(mocks.overrideTaskState).not.toHaveBeenCalled();
   });
 
   it('preserves the "Missing missionId, newState, or reason" message when a field is missing', async () => {
-    const res = await app.request(`${BASE}/tasks/task-1/override`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ missionId: 'mission-1', newState: 'schedulable' }),
-    }, makeEnv());
+    const res = await app.request(
+      `${BASE}/tasks/task-1/override`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ missionId: 'mission-1', newState: 'schedulable' }),
+      },
+      makeEnv()
+    );
 
     expect(res.status).toBe(400);
-    const body = await res.json() as { message: string };
+    const body = (await res.json()) as { message: string };
     expect(body.message).toBe('Missing missionId, newState, or reason');
     expect(mocks.overrideTaskState).not.toHaveBeenCalled();
   });
 
   it('preserves the "Invalid state" message for a newState outside the overridable allowlist', async () => {
-    const res = await app.request(`${BASE}/tasks/task-1/override`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ missionId: 'mission-1', newState: 'not-a-real-state', reason: 'x' }),
-    }, makeEnv());
+    const res = await app.request(
+      `${BASE}/tasks/task-1/override`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ missionId: 'mission-1', newState: 'not-a-real-state', reason: 'x' }),
+      },
+      makeEnv()
+    );
 
     expect(res.status).toBe(400);
-    const body = await res.json() as { message: string };
+    const body = (await res.json()) as { message: string };
     expect(body.message).toContain('Invalid state: not-a-real-state');
     expect(mocks.overrideTaskState).not.toHaveBeenCalled();
   });

@@ -1,5 +1,5 @@
 import type { DetectedPort } from '@simple-agent-manager/shared';
-import { useEffect, useRef,useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { listWorkspacePorts } from '../lib/api';
 

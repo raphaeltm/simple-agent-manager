@@ -444,7 +444,7 @@ jobs:
       - name: Direct dependency evidence
         run: pnpm quality:direct-dependency-evidence
 
-      - name: Runtime-boundary semantic shadow
+      - name: Runtime-boundary semantic check (blocking for apps/api/src)
         run: pnpm quality:runtime-boundary-semantics
 
       - name: CI workflow wiring tests

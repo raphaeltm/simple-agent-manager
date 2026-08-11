@@ -1,4 +1,8 @@
-import type { CredentialProvider, Project, UpdateProjectRequest } from '@simple-agent-manager/shared';
+import type {
+  CredentialProvider,
+  Project,
+  UpdateProjectRequest,
+} from '@simple-agent-manager/shared';
 import {
   DEFAULT_NODE_WARM_TIMEOUT_MS,
   MAX_NODE_IDLE_TIMEOUT_MS,
@@ -10,10 +14,10 @@ import {
   type ScalingParamMeta,
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
-import { useCallback,useEffect, useId, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 
 import { useToast } from '../hooks/useToast';
-import { listCredentials,updateProject } from '../lib/api';
+import { listCredentials, updateProject } from '../lib/api';
 
 /** Format milliseconds as a human-readable duration. */
 function formatMs(ms: number): string {
@@ -46,7 +50,11 @@ function ScalingField({
 
   return (
     <div className="flex items-center gap-2">
-      <label htmlFor={fieldId} className="text-xs text-fg-muted flex-1 min-w-0" title={`Env: ${meta.envVar}`}>
+      <label
+        htmlFor={fieldId}
+        className="text-xs text-fg-muted flex-1 min-w-0"
+        title={`Env: ${meta.envVar}`}
+      >
         {meta.label}
       </label>
       <input
@@ -125,14 +133,12 @@ export function ScalingSettings({
   useEffect(() => {
     listCredentials()
       .then((creds) => {
-        const providers = [...new Set(
-          creds
-            .filter((c) => c.connected)
-            .map((c) => c.provider)
-        )];
+        const providers = [...new Set(creds.filter((c) => c.connected).map((c) => c.provider))];
         setConfiguredProviders(providers);
       })
-      .catch((err: unknown) => { console.error('Failed to load credentials', err); });
+      .catch((err: unknown) => {
+        console.error('Failed to load credentials', err);
+      });
   }, []);
 
   // Sync from project prop
@@ -183,11 +189,21 @@ export function ScalingSettings({
 
   // Task limit params
   const taskParams = SCALING_PARAMS.filter((p) =>
-    ['taskExecutionTimeoutMs', 'maxConcurrentTasks', 'maxDispatchDepth', 'maxSubTasksPerTask'].includes(p.key)
+    [
+      'taskExecutionTimeoutMs',
+      'maxConcurrentTasks',
+      'maxDispatchDepth',
+      'maxSubTasksPerTask',
+    ].includes(p.key)
   );
   // Node scheduling params
   const nodeParams = SCALING_PARAMS.filter((p) =>
-    ['warmNodeTimeoutMs', 'maxWorkspacesPerNode', 'nodeCpuThresholdPercent', 'nodeMemoryThresholdPercent'].includes(p.key)
+    [
+      'warmNodeTimeoutMs',
+      'maxWorkspacesPerNode',
+      'nodeCpuThresholdPercent',
+      'nodeMemoryThresholdPercent',
+    ].includes(p.key)
   );
 
   return (
@@ -195,7 +211,8 @@ export function ScalingSettings({
       <div>
         <h2 className="sam-type-section-heading m-0 text-fg-primary">Scaling & Scheduling</h2>
         <p className="m-0 mt-1 text-xs text-fg-muted">
-          Override platform defaults for this project. Empty fields use the platform default shown as placeholder.
+          Override platform defaults for this project. Empty fields use the platform default shown
+          as placeholder.
         </p>
       </div>
 
@@ -307,7 +324,9 @@ export function ScalingSettings({
           />
           {nodeIdleTimeoutMs != null && (
             <>
-              <span className="text-xs text-fg-muted min-w-[3rem]">{formatMs(nodeIdleTimeoutMs)}</span>
+              <span className="text-xs text-fg-muted min-w-[3rem]">
+                {formatMs(nodeIdleTimeoutMs)}
+              </span>
               <button
                 type="button"
                 onClick={() => setNodeIdleTimeoutMs(null)}
@@ -320,12 +339,7 @@ export function ScalingSettings({
         </div>
       </div>
 
-      <Button
-        variant="primary"
-        size="sm"
-        onClick={handleSaveScaling}
-        disabled={savingScaling}
-      >
+      <Button variant="primary" size="sm" onClick={handleSaveScaling} disabled={savingScaling}>
         {savingScaling ? 'Saving...' : 'Save Scaling Settings'}
       </Button>
     </section>

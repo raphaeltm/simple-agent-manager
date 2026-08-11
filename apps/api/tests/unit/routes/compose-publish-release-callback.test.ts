@@ -668,9 +668,7 @@ volumes:
 
     // Defense-in-depth: even feeding the stored manifest through the REAL
     // route-discovery function must never surface the smuggled route.
-    const { buildReleaseRouteDiscovery } = await import(
-      '../../../src/services/deployment-routing'
-    );
+    const { buildReleaseRouteDiscovery } = await import('../../../src/services/deployment-routing');
     const discovery = buildReleaseRouteDiscovery(inserted[0].manifest as string, {
       environmentId: 'env-1',
       baseDomain: 'sammy.party',
@@ -699,9 +697,7 @@ volumes:
     expect(res.status, JSON.stringify(body)).toBe(200);
     expect(inserted).toHaveLength(1);
 
-    const { buildReleaseRouteDiscovery } = await import(
-      '../../../src/services/deployment-routing'
-    );
+    const { buildReleaseRouteDiscovery } = await import('../../../src/services/deployment-routing');
     const discovery = buildReleaseRouteDiscovery(inserted[0].manifest as string, {
       environmentId: 'env-1',
       baseDomain: 'sammy.party',

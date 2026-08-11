@@ -554,9 +554,7 @@ test.describe('Library interactive preview — visual audit', () => {
     // Isolation contract unchanged, and no confirmation dialog was shown.
     await expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
     await expect(page.getByRole('alertdialog')).toHaveCount(0);
-    await expect(
-      page.getByRole('button', { name: 'Run interactive preview' })
-    ).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Run interactive preview' })).toHaveCount(0);
     return frame;
   }
 

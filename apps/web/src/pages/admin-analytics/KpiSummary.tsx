@@ -84,12 +84,8 @@ export const KpiSummary: FC<Props> = ({ dau, funnel, events }) => {
           <div className="text-xs font-medium text-fg-muted uppercase tracking-wide">
             {card.label}
           </div>
-          <div className="mt-1 text-2xl font-bold text-fg-primary tabular-nums">
-            {card.value}
-          </div>
-          {card.sub && (
-            <div className="mt-0.5 text-xs text-fg-muted">{card.sub}</div>
-          )}
+          <div className="mt-1 text-2xl font-bold text-fg-primary tabular-nums">{card.value}</div>
+          {card.sub && <div className="mt-0.5 text-xs text-fg-muted">{card.sub}</div>}
         </div>
       ))}
     </div>

@@ -30,11 +30,12 @@ describe('runtime-boundary semantic adoption evidence', () => {
     );
   });
 
-  it('stays advisory while the sampled noise gate is unmet', () => {
-    expect(evidence.stage).toBe('advisory');
-    expect(evidence.blockingEnabled).toBe(false);
-    expect(evidence.sampleReview.potentialFalsePositivePercent).toBeGreaterThan(5);
-    expect(evidence.decision.promote).toBe(false);
+  it('is promoted to blocking now that the sampled noise gate is met (zero diagnostics)', () => {
+    expect(evidence.stage).toBe('blocking');
+    expect(evidence.blockingEnabled).toBe(true);
+    expect(evidence.totalDiagnostics).toBe(0);
+    expect(evidence.sampleReview.potentialFalsePositivePercent).toBeLessThanOrEqual(5);
+    expect(evidence.decision.promote).toBe(true);
     expect(evidence.decision.reason).not.toHaveLength(0);
   });
 });

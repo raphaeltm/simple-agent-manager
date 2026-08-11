@@ -75,10 +75,7 @@ const artifactCompleteRequestSchema = v.object({
   artifacts: v.optional(v.array(artifactCompleteItemSchema)),
 });
 
-async function verifyArtifactPolicy(
-  c: Context<{ Bindings: Env }>,
-  logPrefix: string
-) {
+async function verifyArtifactPolicy(c: Context<{ Bindings: Env }>, logPrefix: string) {
   const verified = await verifyWorkspacePublishCallback(
     c,
     logPrefix,

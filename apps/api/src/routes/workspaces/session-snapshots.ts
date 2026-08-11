@@ -203,7 +203,11 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
   const manifestRecord = expectJsonRecord(body.manifest, 'snapshot manifest');
   let manifest: SessionSnapshotManifest;
   try {
-    manifest = parseWithSchema(SessionSnapshotManifestSchema, manifestRecord, 'session snapshot manifest');
+    manifest = parseWithSchema(
+      SessionSnapshotManifestSchema,
+      manifestRecord,
+      'session snapshot manifest'
+    );
   } catch {
     throw errors.badRequest('Snapshot manifest is invalid');
   }

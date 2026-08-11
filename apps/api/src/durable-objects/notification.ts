@@ -83,11 +83,7 @@ export class NotificationService extends DurableObject<Env> {
     request: CreateNotificationRequest
   ): Promise<NotificationResponse> {
     // Check if this notification type is enabled for the user
-    const enabled = await this.isNotificationEnabled(
-      userId,
-      request.type,
-      request.projectId
-    );
+    const enabled = await this.isNotificationEnabled(userId, request.type, request.projectId);
     if (!enabled) {
       return this.stubResponse(request, Date.now());
     }
@@ -101,7 +97,9 @@ export class NotificationService extends DurableObject<Env> {
 
     // Suppression: batch progress notifications — update existing instead of creating new
     if (request.type === 'progress' && request.taskId) {
-      const batchWindow = parseInt(this.env.NOTIFICATION_PROGRESS_BATCH_WINDOW_MS || '') || DEFAULT_NOTIFICATION_PROGRESS_BATCH_WINDOW_MS;
+      const batchWindow =
+        parseInt(this.env.NOTIFICATION_PROGRESS_BATCH_WINDOW_MS || '') ||
+        DEFAULT_NOTIFICATION_PROGRESS_BATCH_WINDOW_MS;
       const cutoff = now - batchWindow;
       const existing = this.sql
         .exec(
@@ -132,7 +130,9 @@ export class NotificationService extends DurableObject<Env> {
 
     // Suppression: deduplicate needs_input notifications for the same task (prevent notification spam)
     if (request.type === 'needs_input' && request.taskId) {
-      const dedupWindow = parseInt(this.env.NOTIFICATION_DEDUP_WINDOW_MS || '') || DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS;
+      const dedupWindow =
+        parseInt(this.env.NOTIFICATION_DEDUP_WINDOW_MS || '') ||
+        DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS;
       const cutoff = now - dedupWindow;
       const existing = this.sql
         .exec(
@@ -161,7 +161,9 @@ export class NotificationService extends DurableObject<Env> {
 
     // Suppression: deduplicate task_complete notifications for the same task
     if (request.type === 'task_complete' && request.taskId) {
-      const dedupWindow = parseInt(this.env.NOTIFICATION_DEDUP_WINDOW_MS || '') || DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS;
+      const dedupWindow =
+        parseInt(this.env.NOTIFICATION_DEDUP_WINDOW_MS || '') ||
+        DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS;
       const cutoff = now - dedupWindow;
       const existing = this.sql
         .exec(
@@ -236,7 +238,9 @@ export class NotificationService extends DurableObject<Env> {
     nextCursor: string | null;
   }> {
     const pageSize = Math.min(
-      options.limit || parseInt(this.env.NOTIFICATION_PAGE_SIZE || '') || DEFAULT_NOTIFICATION_PAGE_SIZE,
+      options.limit ||
+        parseInt(this.env.NOTIFICATION_PAGE_SIZE || '') ||
+        DEFAULT_NOTIFICATION_PAGE_SIZE,
       MAX_NOTIFICATION_PAGE_SIZE
     );
 
@@ -272,9 +276,8 @@ export class NotificationService extends DurableObject<Env> {
 
     const notifications = items.map((row) => parseNotificationRow(row));
     const lastNotification = notifications.at(-1);
-    const nextCursor = hasMore && lastNotification
-      ? String(new Date(lastNotification.createdAt).getTime())
-      : null;
+    const nextCursor =
+      hasMore && lastNotification ? String(new Date(lastNotification.createdAt).getTime()) : null;
 
     const unreadCount = this.getUnreadCount(userId);
 
@@ -500,9 +503,7 @@ export class NotificationService extends DurableObject<Env> {
   }
 
   private getNotificationById(id: string): NotificationResponse | null {
-    const rows = this.sql
-      .exec(`SELECT * FROM notifications WHERE id = ?`, id)
-      .toArray();
+    const rows = this.sql.exec(`SELECT * FROM notifications WHERE id = ?`, id).toArray();
     if (rows.length === 0) return null;
     return parseNotificationRow(rows[0]);
   }
@@ -518,16 +519,15 @@ export class NotificationService extends DurableObject<Env> {
   }
 
   private enforceLimit(userId: string): void {
-    const maxNotifications = parseInt(this.env.MAX_NOTIFICATIONS_PER_USER || '') || DEFAULT_MAX_NOTIFICATIONS_PER_USER;
-    const autoDeleteAge = parseInt(this.env.NOTIFICATION_AUTO_DELETE_AGE_MS || '') || DEFAULT_NOTIFICATION_AUTO_DELETE_AGE_MS;
+    const maxNotifications =
+      parseInt(this.env.MAX_NOTIFICATIONS_PER_USER || '') || DEFAULT_MAX_NOTIFICATIONS_PER_USER;
+    const autoDeleteAge =
+      parseInt(this.env.NOTIFICATION_AUTO_DELETE_AGE_MS || '') ||
+      DEFAULT_NOTIFICATION_AUTO_DELETE_AGE_MS;
 
     // Delete old notifications
     const cutoff = Date.now() - autoDeleteAge;
-    this.sql.exec(
-      `DELETE FROM notifications WHERE user_id = ? AND created_at < ?`,
-      userId,
-      cutoff
-    );
+    this.sql.exec(`DELETE FROM notifications WHERE user_id = ? AND created_at < ?`, userId, cutoff);
 
     // Enforce max count (delete oldest dismissed first, then oldest read)
     const countRow = this.sql

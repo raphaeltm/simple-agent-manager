@@ -1,4 +1,8 @@
-import { NOTIFICATION_TYPES, NOTIFICATION_URGENCIES, type NotificationResponse } from '@simple-agent-manager/shared';
+import {
+  NOTIFICATION_TYPES,
+  NOTIFICATION_URGENCIES,
+  type NotificationResponse,
+} from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as v from 'valibot';
 
@@ -66,7 +70,9 @@ export function useNotifications(): UseNotificationsReturn {
   const [notifications, setNotifications] = useState<NotificationResponse[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [connectionState, setConnectionState] = useState<'connecting' | 'connected' | 'disconnected'>('disconnected');
+  const [connectionState, setConnectionState] = useState<
+    'connecting' | 'connected' | 'disconnected'
+  >('disconnected');
   const [nextCursor, setNextCursor] = useState<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
@@ -161,7 +167,10 @@ export function useNotifications(): UseNotificationsReturn {
         setConnectionState('connecting');
 
         ws.onopen = () => {
-          if (!mountedRef.current) { ws.close(); return; }
+          if (!mountedRef.current) {
+            ws.close();
+            return;
+          }
           setConnectionState('connected');
           retriesRef.current = 0;
 
@@ -208,9 +217,7 @@ export function useNotifications(): UseNotificationsReturn {
                     setUnreadCount((c) => c + 1);
                   }
                 }
-                return prev.map((n) =>
-                  n.id === msg.notification.id ? msg.notification : n
-                );
+                return prev.map((n) => (n.id === msg.notification.id ? msg.notification : n));
               });
               break;
             }
@@ -218,17 +225,13 @@ export function useNotifications(): UseNotificationsReturn {
             case 'notification.read':
               setNotifications((prev) =>
                 prev.map((n) =>
-                  n.id === msg.notificationId
-                    ? { ...n, readAt: new Date().toISOString() }
-                    : n
+                  n.id === msg.notificationId ? { ...n, readAt: new Date().toISOString() } : n
                 )
               );
               break;
 
             case 'notification.dismissed':
-              setNotifications((prev) =>
-                prev.filter((n) => n.id !== msg.notificationId)
-              );
+              setNotifications((prev) => prev.filter((n) => n.id !== msg.notificationId));
               break;
 
             case 'notification.all_read':

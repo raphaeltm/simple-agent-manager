@@ -131,9 +131,7 @@ type CompletionEvidenceValidationResult =
   | { ok: true; value: CompletionEvidence }
   | { ok: false; error: string };
 
-type OptionalStringValidationResult =
-  | { ok: true; value?: string }
-  | { ok: false; error: string };
+type OptionalStringValidationResult = { ok: true; value?: string } | { ok: false; error: string };
 
 function optionalTrimmedString(
   value: unknown,
@@ -158,7 +156,10 @@ function validateEvidenceArray<T>(
   value: unknown,
   field: string,
   maxItems: number,
-  parseItem: (item: Record<string, unknown>, index: number) => { ok: true; value: T } | { ok: false; error: string }
+  parseItem: (
+    item: Record<string, unknown>,
+    index: number
+  ) => { ok: true; value: T } | { ok: false; error: string }
 ): { ok: true; value: T[] } | { ok: false; error: string } {
   if (!Array.isArray(value)) {
     return { ok: false, error: `${field} must be an array` };

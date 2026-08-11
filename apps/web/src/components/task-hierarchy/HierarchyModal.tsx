@@ -37,11 +37,7 @@ function StatusSummaryBar({ tree }: { tree: HierarchyNode }) {
           const cfg = getStatusConfig(status);
           const Icon = cfg.icon;
           return (
-            <span
-              key={status}
-              className="flex items-center gap-1"
-              style={{ color: cfg.colorVar }}
-            >
+            <span key={status} className="flex items-center gap-1" style={{ color: cfg.colorVar }}>
               <Icon size={10} />
               <span className="font-semibold">{count}</span>
               <span style={{ color: 'var(--sam-color-fg-muted)' }}>
@@ -75,7 +71,9 @@ function AncestorBreadcrumbs({
           const nearEnd = ancestors[ancestors.length - 3];
           const secondToLast = ancestors[ancestors.length - 2];
           if (!first || !nearEnd || !secondToLast) {
-            throw new Error('AncestorBreadcrumbs: expected ancestors array to have at least 5 entries');
+            throw new Error(
+              'AncestorBreadcrumbs: expected ancestors array to have at least 5 entries'
+            );
           }
           return [first, null, nearEnd, secondToLast];
         })();
@@ -158,7 +156,7 @@ export function HierarchyModal({
   // Build tree from live data
   const treeResult = useMemo(
     () => buildHierarchyTree(taskInfoMap, sessions, focusTaskId),
-    [taskInfoMap, sessions, focusTaskId],
+    [taskInfoMap, sessions, focusTaskId]
   );
 
   const tree = treeResult?.tree ?? null;
@@ -187,19 +185,16 @@ export function HierarchyModal({
 
   const isExpanded = useCallback(
     (taskId: string) => collapseState.get(taskId) ?? false,
-    [collapseState],
+    [collapseState]
   );
 
-  const toggleExpanded = useCallback(
-    (taskId: string) => {
-      setCollapseState((prev) => {
-        const next = new Map(prev);
-        next.set(taskId, !prev.get(taskId));
-        return next;
-      });
-    },
-    [],
-  );
+  const toggleExpanded = useCallback((taskId: string) => {
+    setCollapseState((prev) => {
+      const next = new Map(prev);
+      next.set(taskId, !prev.get(taskId));
+      return next;
+    });
+  }, []);
 
   // Auto-scroll to focus node on first open
   useEffect(() => {
@@ -233,7 +228,7 @@ export function HierarchyModal({
   const totalNodes = tree ? countNodes(tree) : 0;
   const ancestors = useMemo(
     () => (tree ? getAncestorPath(tree, focusTaskId) : []),
-    [tree, focusTaskId],
+    [tree, focusTaskId]
   );
 
   if (!tree) return null;
@@ -248,7 +243,11 @@ export function HierarchyModal({
     >
       <div className="flex items-center gap-2">
         <div className="flex-1">
-          <div id="dialog-title" className="text-sm font-semibold" style={{ color: 'var(--sam-color-fg-primary)' }}>
+          <div
+            id="dialog-title"
+            className="text-sm font-semibold"
+            style={{ color: 'var(--sam-color-fg-primary)' }}
+          >
             Task Hierarchy
           </div>
           <div style={{ fontSize: 11, color: 'var(--sam-color-fg-muted)' }}>
@@ -293,7 +292,12 @@ export function HierarchyModal({
           }}
         />
         {filterMatchIds && (
-          <div className="mt-1" role="status" aria-live="polite" style={{ fontSize: 10, color: 'var(--sam-color-fg-muted)' }}>
+          <div
+            className="mt-1"
+            role="status"
+            aria-live="polite"
+            style={{ fontSize: 10, color: 'var(--sam-color-fg-muted)' }}
+          >
             {filterMatchIds.size} match{filterMatchIds.size !== 1 ? 'es' : ''}
           </div>
         )}

@@ -109,7 +109,7 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
         }
       }
     },
-    [buildTimeRange, filter.levels, filter.search, filter.scriptName],
+    [buildTimeRange, filter.levels, filter.search, filter.scriptName]
   );
 
   // Only auto-fetch once on mount

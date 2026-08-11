@@ -31,7 +31,7 @@ describe('ChatSessionList', () => {
       <ChatSessionList
         sessions={[makeSession({ id: 's-1', topic: 'Fix the bug', messageCount: 3 })]}
         onSelect={vi.fn()}
-      />,
+      />
     );
 
     expect(screen.getByText('Fix the bug')).toBeInTheDocument();
@@ -40,9 +40,7 @@ describe('ChatSessionList', () => {
 
   it('calls onSelect with the session id on click', () => {
     const onSelect = vi.fn();
-    render(
-      <ChatSessionList sessions={[makeSession({ id: 'sess-42' })]} onSelect={onSelect} />,
-    );
+    render(<ChatSessionList sessions={[makeSession({ id: 'sess-42' })]} onSelect={onSelect} />);
 
     fireEvent.click(screen.getByRole('button', { name: /Fix the bug/ }));
 
@@ -58,9 +56,7 @@ describe('ChatSessionList', () => {
   // .claude/rules/02-quality-gates.md interactive-element test requirement.
   it('calls onSelect when the row is activated with Enter from the keyboard', async () => {
     const onSelect = vi.fn();
-    render(
-      <ChatSessionList sessions={[makeSession({ id: 'sess-enter' })]} onSelect={onSelect} />,
-    );
+    render(<ChatSessionList sessions={[makeSession({ id: 'sess-enter' })]} onSelect={onSelect} />);
 
     const row = screen.getByRole('button', { name: /Fix the bug/ });
     row.focus();
@@ -72,9 +68,7 @@ describe('ChatSessionList', () => {
 
   it('calls onSelect when the row is activated with Space from the keyboard', async () => {
     const onSelect = vi.fn();
-    render(
-      <ChatSessionList sessions={[makeSession({ id: 'sess-space' })]} onSelect={onSelect} />,
-    );
+    render(<ChatSessionList sessions={[makeSession({ id: 'sess-space' })]} onSelect={onSelect} />);
 
     const row = screen.getByRole('button', { name: /Fix the bug/ });
     row.focus();
@@ -93,7 +87,7 @@ describe('ChatSessionList', () => {
           makeSession({ id: 's-2', topic: 'Second session' }),
         ]}
         onSelect={onSelect}
-      />,
+      />
     );
 
     const rows = screen.getAllByRole('button');

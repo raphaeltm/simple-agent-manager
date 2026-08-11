@@ -38,7 +38,7 @@ beforeAll(async () => {
   for (const userId of [USER, USER_RAW_HETZNER, ADMIN]) {
     await env.DATABASE.prepare(
       `INSERT OR IGNORE INTO users (id, github_id, email, name, created_at, updated_at)
-       VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`,
+       VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`
     )
       .bind(userId, `gh-${userId}`, `${userId}@test.com`, `Test ${userId}`)
       .run();
@@ -49,27 +49,22 @@ beforeAll(async () => {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO credentials
      (id, user_id, project_id, credential_type, credential_kind, agent_type, provider, encrypted_token, iv, is_active, created_at, updated_at)
-     VALUES (?, ?, NULL, 'agent-api-key', 'api-key', 'claude-code', 'anthropic', ?, ?, 1, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, NULL, 'agent-api-key', 'api-key', 'claude-code', 'anthropic', ?, ?, 1, datetime('now'), datetime('now'))`
   )
     .bind(`${TEST_PREFIX}-cred-agent`, USER, ciphertext, iv)
     .run();
 
-  const { runBackfill } = await import(
-    '../../src/services/composable-credentials/backfill-service'
-  );
+  const { runBackfill } =
+    await import('../../src/services/composable-credentials/backfill-service');
   await runBackfill(db, { userId: USER });
 });
 
-async function seedPlatformCloudProvider(opts: {
-  id: string;
-  provider: string;
-  secret: string;
-}) {
+async function seedPlatformCloudProvider(opts: { id: string; provider: string; secret: string }) {
   const { ciphertext, iv } = await encrypt(opts.secret, ENCRYPTION_KEY);
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO platform_credentials
      (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv, is_enabled, created_by, created_at, updated_at)
-     VALUES (?, 'cloud-provider', ?, NULL, 'api-key', ?, ?, ?, 1, ?, datetime('now'), datetime('now'))`,
+     VALUES (?, 'cloud-provider', ?, NULL, 'api-key', ?, ?, ?, 1, ?, datetime('now'), datetime('now'))`
   )
     .bind(opts.id, opts.provider, `platform ${opts.provider}`, ciphertext, iv, ADMIN)
     .run();
@@ -85,7 +80,7 @@ async function seedLegacyCloudProvider(opts: {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO credentials
      (id, user_id, project_id, credential_type, credential_kind, agent_type, provider, encrypted_token, iv, is_active, created_at, updated_at)
-     VALUES (?, ?, NULL, 'cloud-provider', 'api-key', NULL, ?, ?, ?, 1, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, NULL, 'cloud-provider', 'api-key', NULL, ?, ?, ?, 1, datetime('now'), datetime('now'))`
   )
     .bind(opts.id, opts.userId, opts.provider, ciphertext, iv)
     .run();
@@ -101,7 +96,7 @@ async function seedConfiguration(opts: {
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO cc_configurations
      (id, owner_id, name, consumer_kind, consumer_target, credential_id, settings_json, is_active, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, NULL, ?, 1, datetime('now'), datetime('now'))`,
+     VALUES (?, ?, ?, ?, ?, NULL, ?, 1, datetime('now'), datetime('now'))`
   )
     .bind(
       opts.id,
@@ -109,7 +104,7 @@ async function seedConfiguration(opts: {
       `config ${opts.id}`,
       opts.consumerKind,
       opts.consumerTarget,
-      opts.settingsJson,
+      opts.settingsJson
     )
     .run();
 }
@@ -124,9 +119,7 @@ describe('snapshot resilience to raw cloud-provider platform defaults', () => {
       secret: 'raw-hetzner-token-not-json-1234567890abcdef',
     });
 
-    const { buildSnapshot } = await import(
-      '../../src/services/composable-credentials/snapshot'
-    );
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
     // Must not throw.
     const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
 
@@ -136,7 +129,7 @@ describe('snapshot resilience to raw cloud-provider platform defaults', () => {
     expect(hetznerDefault.credential?.secret.kind).toBe('cloud-provider');
     if (hetznerDefault.credential?.secret.kind === 'cloud-provider') {
       expect(hetznerDefault.credential.secret.token).toBe(
-        'raw-hetzner-token-not-json-1234567890abcdef',
+        'raw-hetzner-token-not-json-1234567890abcdef'
       );
       // Raw hetzner tokens have no embedded provider; the snapshot must
       // backfill it from the platform_credentials.provider column so an empty
@@ -153,38 +146,31 @@ describe('snapshot resilience to raw cloud-provider platform defaults', () => {
       secret: 'raw-user-hetzner-token-not-json-1234567890abcdef',
     });
 
-    const { runBackfill } = await import(
-      '../../src/services/composable-credentials/backfill-service'
-    );
+    const { runBackfill } =
+      await import('../../src/services/composable-credentials/backfill-service');
     await runBackfill(db, { userId: USER_RAW_HETZNER });
 
-    const { buildSnapshot } = await import(
-      '../../src/services/composable-credentials/snapshot'
-    );
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
     const snapshot = await buildSnapshot(db, USER_RAW_HETZNER, ENCRYPTION_KEY);
     const computeConfig = snapshot.configurations.find(
       (configuration) =>
-        configuration.consumer.kind === 'compute' &&
-        configuration.consumer.provider === 'hetzner',
+        configuration.consumer.kind === 'compute' && configuration.consumer.provider === 'hetzner'
     );
     expect(computeConfig).toBeDefined();
 
     const credential = snapshot.credentials.find(
-      (candidate) => candidate.id === computeConfig?.credentialId,
+      (candidate) => candidate.id === computeConfig?.credentialId
     );
     expect(credential?.secret.kind).toBe('cloud-provider');
     if (credential?.secret.kind === 'cloud-provider') {
       expect(credential.secret.provider).toBe('hetzner');
-      expect(credential.secret.token).toBe(
-        'raw-user-hetzner-token-not-json-1234567890abcdef',
-      );
+      expect(credential.secret.token).toBe('raw-user-hetzner-token-not-json-1234567890abcdef');
     }
 
-    const { resolveComputeConfig } = await import(
-      '../../src/services/composable-credentials/resolve'
-    );
+    const { resolveComputeConfig } =
+      await import('../../src/services/composable-credentials/resolve');
     await expect(
-      resolveComputeConfig(db, USER_RAW_HETZNER, ENCRYPTION_KEY, 'hetzner'),
+      resolveComputeConfig(db, USER_RAW_HETZNER, ENCRYPTION_KEY, 'hetzner')
     ).resolves.toMatchObject({
       provider: 'hetzner',
       token: 'raw-user-hetzner-token-not-json-1234567890abcdef',
@@ -193,9 +179,8 @@ describe('snapshot resilience to raw cloud-provider platform defaults', () => {
   });
 
   it('agent resolution still succeeds despite the raw cloud-provider default', async () => {
-    const { resolveForConsumer } = await import(
-      '../../src/services/composable-credentials/resolve'
-    );
+    const { resolveForConsumer } =
+      await import('../../src/services/composable-credentials/resolve');
     const resolved = await resolveForConsumer(db, USER, ENCRYPTION_KEY, {
       kind: 'agent',
       agentType: 'claude-code',
@@ -224,9 +209,7 @@ describe('snapshot resilience to raw cloud-provider platform defaults', () => {
       secret: JSON.stringify({ provider: 'scaleway', token: 'scw-secret-token' }),
     });
 
-    const { buildSnapshot } = await import(
-      '../../src/services/composable-credentials/snapshot'
-    );
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
     const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
 
     const scwDefault = snapshot.platform['compute:scaleway'];
@@ -242,14 +225,12 @@ describe('snapshot resilience to raw cloud-provider platform defaults', () => {
     await env.DATABASE.prepare(
       `INSERT OR IGNORE INTO cc_credentials
        (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
-       VALUES (?, ?, 'broken', 'api-key', 'not-real-ciphertext', 'bad-iv', 1, datetime('now'), datetime('now'))`,
+       VALUES (?, ?, 'broken', 'api-key', 'not-real-ciphertext', 'bad-iv', 1, datetime('now'), datetime('now'))`
     )
       .bind(`${TEST_PREFIX}-cred-broken`, USER)
       .run();
 
-    const { buildSnapshot } = await import(
-      '../../src/services/composable-credentials/snapshot'
-    );
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
     // Must not throw — the broken row is skipped.
     const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
 
@@ -266,14 +247,12 @@ describe('snapshot resilience to raw cloud-provider platform defaults', () => {
     await env.DATABASE.prepare(
       `INSERT OR IGNORE INTO platform_credentials
        (id, credential_type, provider, agent_type, credential_kind, label, encrypted_token, iv, is_enabled, created_by, created_at, updated_at)
-       VALUES (?, 'cloud-provider', 'aws', NULL, 'api-key', 'broken aws', 'not-real-ciphertext', 'bad-iv', 1, ?, datetime('now'), datetime('now'))`,
+       VALUES (?, 'cloud-provider', 'aws', NULL, 'api-key', 'broken aws', 'not-real-ciphertext', 'bad-iv', 1, ?, datetime('now'), datetime('now'))`
     )
       .bind(`${TEST_PREFIX}-plat-broken`, ADMIN)
       .run();
 
-    const { buildSnapshot } = await import(
-      '../../src/services/composable-credentials/snapshot'
-    );
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
     // Must not throw — the broken platform row is skipped.
     const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
 
@@ -292,20 +271,16 @@ describe('snapshot resilience to raw cloud-provider platform defaults', () => {
     await env.DATABASE.prepare(
       `INSERT OR IGNORE INTO cc_credentials
        (id, owner_id, name, kind, encrypted_token, iv, is_active, created_at, updated_at)
-       VALUES (?, ?, 'raw-openai', 'openai-compatible', ?, ?, 1, datetime('now'), datetime('now'))`,
+       VALUES (?, ?, 'raw-openai', 'openai-compatible', ?, ?, 1, datetime('now'), datetime('now'))`
     )
       .bind(`${TEST_PREFIX}-cred-openai`, USER, ciphertext, iv)
       .run();
 
-    const { buildSnapshot } = await import(
-      '../../src/services/composable-credentials/snapshot'
-    );
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
     // Must not throw.
     const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
 
-    const cred = snapshot.credentials.find(
-      (c) => c.id === `${TEST_PREFIX}-cred-openai`,
-    );
+    const cred = snapshot.credentials.find((c) => c.id === `${TEST_PREFIX}-cred-openai`);
     expect(cred).toBeDefined();
     expect(cred?.secret.kind).toBe('openai-compatible');
     if (cred?.secret.kind === 'openai-compatible') {
@@ -325,14 +300,12 @@ describe('snapshot resilience to malformed configuration settings_json', () => {
       settingsJson: '{not valid json',
     });
 
-    const { buildSnapshot } = await import(
-      '../../src/services/composable-credentials/snapshot'
-    );
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
     // Must not throw.
     const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
 
     const config = snapshot.configurations.find(
-      (candidate) => candidate.id === `${TEST_PREFIX}-cfg-badjson`,
+      (candidate) => candidate.id === `${TEST_PREFIX}-cfg-badjson`
     );
     expect(config).toBeDefined();
     expect(config?.settings).toEqual({});
@@ -350,13 +323,11 @@ describe('snapshot resilience to malformed configuration settings_json', () => {
       settingsJson: JSON.stringify('just a string'),
     });
 
-    const { buildSnapshot } = await import(
-      '../../src/services/composable-credentials/snapshot'
-    );
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
     const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
 
     const config = snapshot.configurations.find(
-      (candidate) => candidate.id === `${TEST_PREFIX}-cfg-nonobject`,
+      (candidate) => candidate.id === `${TEST_PREFIX}-cfg-nonobject`
     );
     expect(config?.settings).toEqual({});
   });
@@ -374,13 +345,11 @@ describe('snapshot resilience to malformed configuration settings_json', () => {
       settingsJson: JSON.stringify({ model: null, providerId: 'anthropic' }),
     });
 
-    const { buildSnapshot } = await import(
-      '../../src/services/composable-credentials/snapshot'
-    );
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
     const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
 
     const config = snapshot.configurations.find(
-      (candidate) => candidate.id === `${TEST_PREFIX}-cfg-nullfield`,
+      (candidate) => candidate.id === `${TEST_PREFIX}-cfg-nullfield`
     );
     expect(config?.settings.model).toBeUndefined();
     expect(config?.settings.providerId).toBe('anthropic');
@@ -398,13 +367,11 @@ describe('snapshot resilience to malformed configuration settings_json', () => {
       settingsJson: JSON.stringify({ model: 'glm-4.6', samProxyBaseUrl: '/ai/proxy/custom' }),
     });
 
-    const { buildSnapshot } = await import(
-      '../../src/services/composable-credentials/snapshot'
-    );
+    const { buildSnapshot } = await import('../../src/services/composable-credentials/snapshot');
     const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
 
     const config = snapshot.configurations.find(
-      (candidate) => candidate.id === `${TEST_PREFIX}-cfg-good`,
+      (candidate) => candidate.id === `${TEST_PREFIX}-cfg-good`
     );
     expect(config?.settings).toEqual({
       model: 'glm-4.6',

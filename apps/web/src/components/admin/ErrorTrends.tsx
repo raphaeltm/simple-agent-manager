@@ -1,6 +1,6 @@
-import type { ErrorTrendBucket,ErrorTrendResponse } from '@simple-agent-manager/shared';
-import { Body,Button, Card, Spinner } from '@simple-agent-manager/ui';
-import { type FC, useCallback,useEffect, useState } from 'react';
+import type { ErrorTrendBucket, ErrorTrendResponse } from '@simple-agent-manager/shared';
+import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
+import { type FC, useCallback, useEffect, useState } from 'react';
 
 import { fetchAdminErrorTrends } from '../../lib/api';
 
@@ -46,9 +46,7 @@ export const ErrorTrends: FC = () => {
     setRange(r);
   };
 
-  const maxTotal = data
-    ? Math.max(1, ...data.buckets.map((b) => b.total))
-    : 1;
+  const maxTotal = data ? Math.max(1, ...data.buckets.map((b) => b.total)) : 1;
   const firstBucketTimestamp = data?.buckets.at(0)?.timestamp;
   const lastBucketTimestamp = data?.buckets.at(-1)?.timestamp;
 
@@ -83,9 +81,7 @@ export const ErrorTrends: FC = () => {
                 className="inline-block w-3 h-3 rounded-sm"
                 style={{ backgroundColor: SOURCE_COLORS[key] }}
               />
-              <Body className="text-xs text-fg-muted">
-                {label}
-              </Body>
+              <Body className="text-xs text-fg-muted">{label}</Body>
             </div>
           ))}
         </div>
@@ -157,7 +153,10 @@ const TrendBar: FC<TrendBarProps> = ({ bucket, maxTotal }) => {
         className="flex-1 h-full flex items-end"
         style={{ minWidth: 2 }}
       >
-        <div className="w-full bg-border-default opacity-30" style={{ height: 2, borderRadius: 1 }} />
+        <div
+          className="w-full bg-border-default opacity-30"
+          style={{ height: 2, borderRadius: 1 }}
+        />
       </div>
     );
   }

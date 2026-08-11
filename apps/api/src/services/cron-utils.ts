@@ -1,7 +1,5 @@
 import type { CronValidationResult } from '@simple-agent-manager/shared';
-import {
-  DEFAULT_CRON_MIN_INTERVAL_MINUTES,
-} from '@simple-agent-manager/shared';
+import { DEFAULT_CRON_MIN_INTERVAL_MINUTES } from '@simple-agent-manager/shared';
 
 // =============================================================================
 // Lightweight 5-field Cron Parser (no external dependencies)
@@ -31,12 +29,28 @@ const FIELD_RANGES: Record<string, { min: number; max: number }> = {
 };
 
 const MONTH_NAMES: Record<string, number> = {
-  jan: 1, feb: 2, mar: 3, apr: 4, may: 5, jun: 6,
-  jul: 7, aug: 8, sep: 9, oct: 10, nov: 11, dec: 12,
+  jan: 1,
+  feb: 2,
+  mar: 3,
+  apr: 4,
+  may: 5,
+  jun: 6,
+  jul: 7,
+  aug: 8,
+  sep: 9,
+  oct: 10,
+  nov: 11,
+  dec: 12,
 };
 
 const DOW_NAMES: Record<string, number> = {
-  sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6,
+  sun: 0,
+  mon: 1,
+  tue: 2,
+  wed: 3,
+  thu: 4,
+  fri: 5,
+  sat: 6,
 };
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -121,7 +135,9 @@ function parseField(field: string, fieldName: string): CronField {
 function parseCron(expression: string): ParsedCron {
   const parts = expression.trim().split(/\s+/);
   if (parts.length !== 5) {
-    throw new Error(`Expected 5 fields (minute hour dayOfMonth month dayOfWeek), got ${parts.length}`);
+    throw new Error(
+      `Expected 5 fields (minute hour dayOfMonth month dayOfWeek), got ${parts.length}`
+    );
   }
 
   return {
@@ -176,7 +192,10 @@ function getMinGap(values: number[], wrap: number): number {
   if (values.length <= 1) return wrap;
   let minGap = wrap;
   for (let i = 1; i < values.length; i++) {
-    minGap = Math.min(minGap, valueAt(values, i, 'cron values') - valueAt(values, i - 1, 'cron values'));
+    minGap = Math.min(
+      minGap,
+      valueAt(values, i, 'cron values') - valueAt(values, i - 1, 'cron values')
+    );
   }
   // Wrap-around gap
   minGap = Math.min(
@@ -299,7 +318,14 @@ export function cronToNextFire(expression: string, timezone: string, after?: Dat
       const nh = nextValue(parsed.hour.values, p.hour + 1);
       const firstMinute = valueAt(parsed.minute.values, 0, 'minute field values');
       if (nh.wrapped) {
-        candidate = buildDateInTimezone(p.year, p.month, p.day + 1, nh.value, firstMinute, timezone);
+        candidate = buildDateInTimezone(
+          p.year,
+          p.month,
+          p.day + 1,
+          nh.value,
+          firstMinute,
+          timezone
+        );
       } else {
         candidate = buildDateInTimezone(p.year, p.month, p.day, nh.value, firstMinute, timezone);
       }
@@ -364,7 +390,7 @@ function buildDateInTimezone(
 
   // Handle day boundary
   if (parts.day !== tempDay) {
-    if (parts.day < tempDay || (parts.month < tempMonth)) {
+    if (parts.day < tempDay || parts.month < tempMonth) {
       diffMinutes += 24 * 60;
     } else {
       diffMinutes -= 24 * 60;
@@ -477,9 +503,17 @@ function buildHumanReadable(parsed: ParsedCron): string {
 
   if (!dowIsWild && domIsWild) {
     const days = parsed.dayOfWeek.values.map((d) => DAY_NAMES[d]);
-    if (days.length === 5 && !parsed.dayOfWeek.values.includes(0) && !parsed.dayOfWeek.values.includes(6)) {
+    if (
+      days.length === 5 &&
+      !parsed.dayOfWeek.values.includes(0) &&
+      !parsed.dayOfWeek.values.includes(6)
+    ) {
       parts.push('on weekdays');
-    } else if (days.length === 2 && parsed.dayOfWeek.values.includes(0) && parsed.dayOfWeek.values.includes(6)) {
+    } else if (
+      days.length === 2 &&
+      parsed.dayOfWeek.values.includes(0) &&
+      parsed.dayOfWeek.values.includes(6)
+    ) {
       parts.push('on weekends');
     } else {
       parts.push(`on ${days.join(', ')}`);
@@ -492,7 +526,20 @@ function buildHumanReadable(parsed: ParsedCron): string {
   }
 
   if (!monthIsWild) {
-    const monthNames = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    const monthNames = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec',
+    ];
     const months = parsed.month.values.map((m) => monthNames[m - 1]);
     parts.push(`in ${months.join(', ')}`);
   }

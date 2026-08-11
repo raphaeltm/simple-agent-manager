@@ -5,7 +5,11 @@
  * Provides CRUD for dynamic project policies (Phase 4: Policy Propagation).
  */
 import type { UpdatePolicyRequest } from '@simple-agent-manager/shared';
-import { isPolicyCategory, isPolicySource, resolvePolicyLimits } from '@simple-agent-manager/shared';
+import {
+  isPolicyCategory,
+  isPolicySource,
+  resolvePolicyLimits,
+} from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -41,12 +45,17 @@ policyRoutes.get('/', async (c) => {
   const includeInactive = c.req.query('includeInactive') === 'true';
   const limit = Math.min(
     parseInt(c.req.query('limit') || String(limits.listPageSize), 10) || limits.listPageSize,
-    limits.listMaxPageSize,
+    limits.listMaxPageSize
   );
   const offset = parseInt(c.req.query('offset') || '0', 10) || 0;
 
   const result = await projectDataService.listPolicies(
-    c.env, projectId, category, !includeInactive, limit, offset,
+    c.env,
+    projectId,
+    category,
+    !includeInactive,
+    limit,
+    offset
   );
 
   return c.json(result);
@@ -90,21 +99,29 @@ policyRoutes.post('/', jsonValidator(CreatePolicySchema), async (c) => {
   }
   if (!body.content?.trim()) throw errors.badRequest('content is required');
   if (body.content.length > limits.contentMaxLength) {
-    throw errors.badRequest(`content exceeds maximum length of ${limits.contentMaxLength} characters`);
+    throw errors.badRequest(
+      `content exceeds maximum length of ${limits.contentMaxLength} characters`
+    );
   }
   if (body.source !== undefined && !isPolicySource(body.source)) {
     throw errors.badRequest('source must be one of: explicit, inferred');
   }
-  if (body.confidence !== undefined && (typeof body.confidence !== 'number' || body.confidence < 0 || body.confidence > 1)) {
+  if (
+    body.confidence !== undefined &&
+    (typeof body.confidence !== 'number' || body.confidence < 0 || body.confidence > 1)
+  ) {
     throw errors.badRequest('confidence must be a number between 0.0 and 1.0');
   }
 
   const result = await projectDataService.createPolicy(
-    c.env, projectId,
-    body.category, sanitizeUserInput(body.title.trim()), sanitizeUserInput(body.content.trim()),
+    c.env,
+    projectId,
+    body.category,
+    sanitizeUserInput(body.title.trim()),
+    sanitizeUserInput(body.content.trim()),
     body.source || 'explicit',
     null, // sourceSessionId — REST has no task context
-    body.confidence ?? limits.defaultConfidence,
+    body.confidence ?? limits.defaultConfidence
   );
 
   return c.json(result, 201);
@@ -129,14 +146,18 @@ policyRoutes.patch('/:policyId', jsonValidator(UpdatePolicySchema), async (c) =>
   if (body.title !== undefined) {
     if (!body.title.trim()) throw errors.badRequest('title must be non-empty');
     if (body.title.length > limits.titleMaxLength) {
-      throw errors.badRequest(`title exceeds maximum length of ${limits.titleMaxLength} characters`);
+      throw errors.badRequest(
+        `title exceeds maximum length of ${limits.titleMaxLength} characters`
+      );
     }
     updates.title = sanitizeUserInput(body.title.trim());
   }
   if (body.content !== undefined) {
     if (!body.content.trim()) throw errors.badRequest('content must be non-empty');
     if (body.content.length > limits.contentMaxLength) {
-      throw errors.badRequest(`content exceeds maximum length of ${limits.contentMaxLength} characters`);
+      throw errors.badRequest(
+        `content exceeds maximum length of ${limits.contentMaxLength} characters`
+      );
     }
     updates.content = sanitizeUserInput(body.content.trim());
   }

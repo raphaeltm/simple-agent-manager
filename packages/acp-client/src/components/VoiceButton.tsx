@@ -1,4 +1,4 @@
-import { useCallback, useEffect,useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { parseJsonRecord, readResponseJsonRecord } from '../runtime-validation';
 
@@ -83,7 +83,12 @@ function Spinner({ className }: { className?: string }) {
  * States: idle -> recording -> processing -> idle (or error -> idle)
  * Toggle interaction: click to start, click to stop.
  */
-export function VoiceButton({ onTranscription, disabled = false, apiUrl, onError }: VoiceButtonProps) {
+export function VoiceButton({
+  onTranscription,
+  disabled = false,
+  apiUrl,
+  onError,
+}: VoiceButtonProps) {
   const [state, setState] = useState<VoiceState>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [amplitude, setAmplitude] = useState(0);
@@ -255,7 +260,11 @@ export function VoiceButton({ onTranscription, disabled = false, apiUrl, onError
         stopAmplitudeMonitor();
         setState('error');
         setErrorMessage('Recording failed');
-        onError?.({ message: 'Recording failed', source: 'VoiceButton', context: { phase: 'recording' } });
+        onError?.({
+          message: 'Recording failed',
+          source: 'VoiceButton',
+          context: { phase: 'recording' },
+        });
         setTimeout(() => setState('idle'), 3000);
       };
 
@@ -350,12 +359,8 @@ export function VoiceButton({ onTranscription, disabled = false, apiUrl, onError
       data-amplitude={state === 'recording' ? amplitude.toFixed(2) : undefined}
     >
       {state === 'recording' && <StopIcon />}
-      {state === 'processing' && (
-        <Spinner className="animate-spin" />
-      )}
-      {(state === 'idle' || state === 'error') && (
-        <MicIcon />
-      )}
+      {state === 'processing' && <Spinner className="animate-spin" />}
+      {(state === 'idle' || state === 'error') && <MicIcon />}
     </button>
   );
 }

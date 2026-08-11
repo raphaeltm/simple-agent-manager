@@ -58,7 +58,7 @@ function buildKey(
   projectId: string,
   type: 'files' | 'dirs',
   params: string,
-  namespace?: LibraryCacheNamespace,
+  namespace?: LibraryCacheNamespace
 ): string {
   return `${buildProjectPrefix(projectId, namespace)}:${type}:${params}`;
 }
@@ -166,9 +166,11 @@ export function getCachedFiles(
   projectId: string,
   directory: string,
   sortBy: string,
-  namespace?: LibraryCacheNamespace,
+  namespace?: LibraryCacheNamespace
 ): ListFilesResponse | null {
-  return readCache<ListFilesResponse>(buildKey(projectId, 'files', `${directory}:${sortBy}`, namespace));
+  return readCache<ListFilesResponse>(
+    buildKey(projectId, 'files', `${directory}:${sortBy}`, namespace)
+  );
 }
 
 export function setCachedFiles(
@@ -176,7 +178,7 @@ export function setCachedFiles(
   directory: string,
   sortBy: string,
   data: ListFilesResponse,
-  namespace?: LibraryCacheNamespace,
+  namespace?: LibraryCacheNamespace
 ): void {
   writeCache(buildKey(projectId, 'files', `${directory}:${sortBy}`, namespace), data);
 }
@@ -184,7 +186,7 @@ export function setCachedFiles(
 export function getCachedDirectories(
   projectId: string,
   parentDirectory: string,
-  namespace?: LibraryCacheNamespace,
+  namespace?: LibraryCacheNamespace
 ): DirectoryEntry[] | null {
   return readCache<DirectoryEntry[]>(buildKey(projectId, 'dirs', parentDirectory, namespace));
 }
@@ -193,7 +195,7 @@ export function setCachedDirectories(
   projectId: string,
   parentDirectory: string,
   data: DirectoryEntry[],
-  namespace?: LibraryCacheNamespace,
+  namespace?: LibraryCacheNamespace
 ): void {
   writeCache(buildKey(projectId, 'dirs', parentDirectory, namespace), data);
 }
@@ -204,7 +206,7 @@ export function setCachedDirectories(
 
 export function getCachedIndex(
   projectId: string,
-  namespace?: LibraryCacheNamespace,
+  namespace?: LibraryCacheNamespace
 ): CachedLibraryIndex | null {
   try {
     const key = buildIndexKey(projectId, namespace);
@@ -241,7 +243,7 @@ export function getCachedIndex(
 export function setCachedIndex(
   projectId: string,
   files: CachedIndexFile[],
-  namespace?: LibraryCacheNamespace,
+  namespace?: LibraryCacheNamespace
 ): boolean {
   const index: CachedLibraryIndex = { files, count: files.length, sweptAt: Date.now() };
   try {

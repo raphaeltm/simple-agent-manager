@@ -85,7 +85,10 @@ export async function issueNodeOriginCertificate(
 
   const certificate = payload.result?.certificate;
   if (!response.ok || !payload.success || !certificate) {
-    const apiMessage = payload.errors?.map((err) => err.message).filter(Boolean).join('; ');
+    const apiMessage = payload.errors
+      ?.map((err) => err.message)
+      .filter(Boolean)
+      .join('; ');
     throw new Error(
       `Cloudflare Origin CA certificate issuance failed (${response.status})${apiMessage ? `: ${apiMessage}` : ''}`
     );

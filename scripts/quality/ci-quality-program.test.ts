@@ -66,7 +66,7 @@ describe('deterministic quality-program CI wiring', () => {
     expect(govulncheck).toContain('pnpm quality:govulncheck-diff');
   });
 
-  it('enforces dependency evidence and keeps semantic findings in shadow mode', () => {
+  it('enforces dependency evidence and blocks apps/api/src semantic findings', () => {
     const quality = jobBlock(ci, 'code-quality');
     expect(quality).toContain('fetch-depth: 0');
     expect(quality).toContain('pnpm quality:direct-dependency-evidence');

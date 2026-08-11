@@ -4,7 +4,7 @@ import {
   type NotificationType,
 } from '@simple-agent-manager/shared';
 import { Card } from '@simple-agent-manager/ui';
-import { useCallback,useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 
 import { getNotificationPreferences, updateNotificationPreference } from '../lib/api';
 
@@ -71,15 +71,11 @@ export function SettingsNotifications() {
 
   const isEnabled = (type: NotificationType): boolean => {
     // Check specific type preference
-    const typePref = preferences.find(
-      (p) => p.notificationType === type && isGlobalInAppPref(p)
-    );
+    const typePref = preferences.find((p) => p.notificationType === type && isGlobalInAppPref(p));
     if (typePref) return typePref.enabled;
 
     // Check global default
-    const globalPref = preferences.find(
-      (p) => p.notificationType === '*' && isGlobalInAppPref(p)
-    );
+    const globalPref = preferences.find((p) => p.notificationType === '*' && isGlobalInAppPref(p));
     if (globalPref) return globalPref.enabled;
 
     // Default: enabled
@@ -102,9 +98,7 @@ export function SettingsNotifications() {
       // Commit local state only after the server confirms the change, so the
       // switch never shows a value the backend did not accept.
       setPreferences((prev) => {
-        const existing = prev.findIndex(
-          (p) => p.notificationType === type && isGlobalInAppPref(p)
-        );
+        const existing = prev.findIndex((p) => p.notificationType === type && isGlobalInAppPref(p));
         if (existing >= 0) {
           const updated = [...prev];
           const existingPref = updated[existing];
@@ -125,9 +119,7 @@ export function SettingsNotifications() {
       });
     } catch (err) {
       console.error('Failed to update preference:', err);
-      setSaveError(
-        `Could not save the "${TYPE_LABELS[type].label}" setting. Please try again.`
-      );
+      setSaveError(`Could not save the "${TYPE_LABELS[type].label}" setting. Please try again.`);
     } finally {
       setSaving(null);
     }
@@ -137,9 +129,7 @@ export function SettingsNotifications() {
     <div className="space-y-4">
       <Card variant="glass">
         <div className="p-4">
-          <h3 className="text-sm font-semibold text-fg-primary mb-1">
-            In-App Notifications
-          </h3>
+          <h3 className="text-sm font-semibold text-fg-primary mb-1">In-App Notifications</h3>
           <p className="text-xs text-fg-muted mb-4">
             Choose which notifications appear in your notification center.
           </p>

@@ -2,7 +2,10 @@ import '../../styles/acp-chat.css';
 import '../../styles/workspace-chrome.css';
 
 import type { AgentSession } from '@simple-agent-manager/shared';
-import type { MultiTerminalHandle, MultiTerminalSessionSnapshot } from '@simple-agent-manager/terminal';
+import type {
+  MultiTerminalHandle,
+  MultiTerminalSessionSnapshot,
+} from '@simple-agent-manager/terminal';
 import { MultiTerminal, Terminal } from '@simple-agent-manager/terminal';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { X } from 'lucide-react';
@@ -63,7 +66,12 @@ export function Workspace() {
 
   // ── Navigation (git, files, worktrees) ──
   const nav = useWorkspaceNavigation(
-    id, navigate, searchParams, core.workspace?.url, core.terminalToken, core.isRunning
+    id,
+    navigate,
+    searchParams,
+    core.workspace?.url,
+    core.terminalToken,
+    core.isRunning
   );
 
   // ── UI state ──
@@ -86,9 +94,19 @@ export function Workspace() {
 
   // ── Session state ──
   const sessions = useSessionState(
-    id, navigate, searchParams, viewMode, setViewMode,
-    core.isRunning, core.agentSessions, core.setAgentSessions, core.setError,
-    core.loadWorkspaceState, nav.activeWorktree, chatSessionRefs, tabOrder.assignOrder
+    id,
+    navigate,
+    searchParams,
+    viewMode,
+    setViewMode,
+    core.isRunning,
+    core.agentSessions,
+    core.setAgentSessions,
+    core.setError,
+    core.loadWorkspaceState,
+    nav.activeWorktree,
+    chatSessionRefs,
+    tabOrder.assignOrder
   );
 
   // ── View mode auto-selection ──
@@ -104,8 +122,14 @@ export function Workspace() {
   const initialViewResolvedRef = useRef(false);
   useEffect(() => {
     if (initialViewResolvedRef.current) return;
-    if (viewOverride) { initialViewResolvedRef.current = true; return; }
-    if (sessionIdParam) { initialViewResolvedRef.current = true; return; }
+    if (viewOverride) {
+      initialViewResolvedRef.current = true;
+      return;
+    }
+    if (sessionIdParam) {
+      initialViewResolvedRef.current = true;
+      return;
+    }
     // If workspace has a linked project chat session, auto-select conversation view
     if (core.workspace?.chatSessionId) {
       initialViewResolvedRef.current = true;
@@ -130,61 +154,110 @@ export function Workspace() {
     } else {
       initialViewResolvedRef.current = true;
     }
-  }, [core.agentSessions, core.workspace?.chatSessionId, viewOverride, sessionIdParam, id, navigate, searchParams, sessions.recentlyStopped]);
+  }, [
+    core.agentSessions,
+    core.workspace?.chatSessionId,
+    viewOverride,
+    sessionIdParam,
+    id,
+    navigate,
+    searchParams,
+    sessions.recentlyStopped,
+  ]);
 
   // ── Activity throttle ──
   const activityThrottleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const handleTerminalActivity = useCallback(() => {
     if (!id || activityThrottleRef.current) return;
-    activityThrottleRef.current = setTimeout(() => { activityThrottleRef.current = null; }, ACTIVITY_THROTTLE_MS);
+    activityThrottleRef.current = setTimeout(() => {
+      activityThrottleRef.current = null;
+    }, ACTIVITY_THROTTLE_MS);
     void core.loadWorkspaceState();
   }, [id, core.loadWorkspaceState]);
-  useEffect(() => () => { if (activityThrottleRef.current) clearTimeout(activityThrottleRef.current); }, []);
+  useEffect(
+    () => () => {
+      if (activityThrottleRef.current) clearTimeout(activityThrottleRef.current);
+    },
+    []
+  );
 
   // ── Tab management ──
   const visibleTerminalTabs = useMemo<MultiTerminalSessionSnapshot[]>(
-    () => (!core.isRunning || !featureFlags.multiTerminal) ? [] : terminalTabs,
+    () => (!core.isRunning || !featureFlags.multiTerminal ? [] : terminalTabs),
     [featureFlags.multiTerminal, core.isRunning, terminalTabs]
   );
 
   const workspaceTabs = useMemo<WorkspaceTab[]>(() => {
     const termTabs: WorkspaceTab[] = visibleTerminalTabs.map((s) => ({
-      id: `terminal:${s.id}`, kind: 'terminal', sessionId: s.id, title: s.name,
-      status: s.status, badge: deriveWorktreeBadge(s.workingDirectory, nav.worktrees),
+      id: `terminal:${s.id}`,
+      kind: 'terminal',
+      sessionId: s.id,
+      title: s.name,
+      status: s.status,
+      badge: deriveWorktreeBadge(s.workingDirectory, nav.worktrees),
     }));
     let chatTabs: WorkspaceTab[];
     if (core.workspace?.chatSessionId) {
       // Workspace linked to a project chat session — show a single "Chat" tab
-      chatTabs = [{
-        id: `chat:${core.workspace.chatSessionId}`, kind: 'chat' as const,
-        sessionId: core.workspace.chatSessionId, title: 'Chat',
-        status: 'running', hostStatus: null, viewerCount: null,
-      }];
+      chatTabs = [
+        {
+          id: `chat:${core.workspace.chatSessionId}`,
+          kind: 'chat' as const,
+          sessionId: core.workspace.chatSessionId,
+          title: 'Chat',
+          status: 'running',
+          hostStatus: null,
+          viewerCount: null,
+        },
+      ];
     } else {
       // Fallback: per-agent-session tabs for workspaces without a linked project session
       chatTabs = core.agentSessions
-        .filter((s) => (isSessionActive(s) || s.status === 'suspended') && !sessions.recentlyStopped.has(s.id))
+        .filter(
+          (s) =>
+            (isSessionActive(s) || s.status === 'suspended') && !sessions.recentlyStopped.has(s.id)
+        )
         .map((s) => {
           const pref = sessions.preferredAgentsBySession[s.id];
           const prefName = pref ? sessions.agentNameById.get(pref) : undefined;
-          const title = s.label?.trim() || (prefName ? `${prefName} Chat` : `Chat ${s.id.slice(-4)}`);
+          const title =
+            s.label?.trim() || (prefName ? `${prefName} Chat` : `Chat ${s.id.slice(-4)}`);
           return {
-            id: `chat:${s.id}`, kind: 'chat' as const, sessionId: s.id, title,
-            status: s.status, hostStatus: s.hostStatus, viewerCount: s.viewerCount,
+            id: `chat:${s.id}`,
+            kind: 'chat' as const,
+            sessionId: s.id,
+            title,
+            status: s.status,
+            hostStatus: s.hostStatus,
+            viewerCount: s.viewerCount,
             badge: deriveWorktreeBadge(s.worktreePath ?? undefined, nav.worktrees),
           };
         });
     }
     return tabOrder.getSortedTabs([...termTabs, ...chatTabs]);
-  }, [sessions.agentNameById, core.agentSessions, core.workspace?.chatSessionId, sessions.preferredAgentsBySession, sessions.recentlyStopped, tabOrder, visibleTerminalTabs, nav.worktrees]);
+  }, [
+    sessions.agentNameById,
+    core.agentSessions,
+    core.workspace?.chatSessionId,
+    sessions.preferredAgentsBySession,
+    sessions.recentlyStopped,
+    tabOrder,
+    visibleTerminalTabs,
+    nav.worktrees,
+  ]);
 
   const handleCreateTerminalTab = () => {
     setViewMode('terminal');
     const params = new URLSearchParams(searchParams);
-    params.set('view', 'terminal'); params.delete('sessionId');
+    params.set('view', 'terminal');
+    params.delete('sessionId');
     navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
     const sid = multiTerminalRef.current?.createSession();
-    if (sid) { tabOrder.assignOrder(`terminal:${sid}`); setActiveTerminalSessionId(sid); multiTerminalRef.current?.activateSession(sid); }
+    if (sid) {
+      tabOrder.assignOrder(`terminal:${sid}`);
+      setActiveTerminalSessionId(sid);
+      multiTerminalRef.current?.activateSession(sid);
+    }
     setCreateMenuOpen(false);
   };
 
@@ -192,12 +265,16 @@ export function Workspace() {
     if (tab.kind === 'terminal') {
       setViewMode('terminal');
       const params = new URLSearchParams(searchParams);
-      params.set('view', 'terminal'); params.delete('sessionId');
+      params.set('view', 'terminal');
+      params.delete('sessionId');
       navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
       multiTerminalRef.current?.activateSession(tab.sessionId);
       return;
     }
-    if (tab.status === 'suspended') { void sessions.handleResumeSession(tab.sessionId); return; }
+    if (tab.status === 'suspended') {
+      void sessions.handleResumeSession(tab.sessionId);
+      return;
+    }
     sessions.handleAttachSession(tab.sessionId);
   };
   // Kept fresh every render so memoized callers (below) always invoke the
@@ -220,18 +297,23 @@ export function Workspace() {
       const remaining = workspaceTabs.filter((c) => c.id !== tab.id);
       if (remaining.length > 0) {
         const nextTab = remaining[Math.min(ci, remaining.length - 1)];
-        if (!nextTab) throw new Error('handleCloseWorkspaceTab: failed to resolve next tab after closing');
+        if (!nextTab)
+          throw new Error('handleCloseWorkspaceTab: failed to resolve next tab after closing');
         handleSelectWorkspaceTab(nextTab);
-      }
-      else {
-        setViewMode('terminal'); setActiveTerminalSessionId(null);
+      } else {
+        setViewMode('terminal');
+        setActiveTerminalSessionId(null);
         const params = new URLSearchParams(searchParams);
-        params.set('view', 'terminal'); params.delete('sessionId');
+        params.set('view', 'terminal');
+        params.delete('sessionId');
         navigate(`/workspaces/${id}?${params.toString()}`, { replace: true });
       }
     }
     tabOrder.removeTab(tab.id);
-    if (tab.kind === 'terminal') { multiTerminalRef.current?.closeSession(tab.sessionId); return; }
+    if (tab.kind === 'terminal') {
+      multiTerminalRef.current?.closeSession(tab.sessionId);
+      return;
+    }
     void sessions.handleStopSession(tab.sessionId);
   };
   // Kept fresh every render — same rationale as handleSelectWorkspaceTabRef above.
@@ -244,54 +326,128 @@ export function Workspace() {
       if (!tab) return;
       if (tab.kind === 'terminal') multiTerminalRef.current?.renameSession(tab.sessionId, newName);
       else if (tab.kind === 'chat' && id) {
-        core.setAgentSessions((prev) => prev.map((s) => (s.id === tab.sessionId ? { ...s, label: newName } : s)));
-        void renameAgentSession(id, tab.sessionId, newName).catch(() => { void listAgentSessions(id).then(core.setAgentSessions); });
+        core.setAgentSessions((prev) =>
+          prev.map((s) => (s.id === tab.sessionId ? { ...s, label: newName } : s))
+        );
+        void renameAgentSession(id, tab.sessionId, newName).catch(() => {
+          void listAgentSessions(id).then(core.setAgentSessions);
+        });
       }
     },
     [id, workspaceTabs, core.setAgentSessions]
   );
 
   const handleSelectTabItem = useCallback(
-    (ti: WorkspaceTabItem) => { const t = workspaceTabs.find((w) => w.id === ti.id); if (t) handleSelectWorkspaceTabRef.current(t); },
+    (ti: WorkspaceTabItem) => {
+      const t = workspaceTabs.find((w) => w.id === ti.id);
+      if (t) handleSelectWorkspaceTabRef.current(t);
+    },
     [workspaceTabs]
   );
   const handleCloseTabItem = useCallback(
-    (ti: WorkspaceTabItem) => { const t = workspaceTabs.find((w) => w.id === ti.id); if (t) handleCloseWorkspaceTabRef.current(t); },
+    (ti: WorkspaceTabItem) => {
+      const t = workspaceTabs.find((w) => w.id === ti.id);
+      if (t) handleCloseWorkspaceTabRef.current(t);
+    },
     [workspaceTabs]
   );
   const tabStripItems = useMemo<WorkspaceTabItem[]>(
-    () => workspaceTabs.map((t) => ({
-      id: t.id, kind: t.kind, sessionId: t.sessionId, title: t.title,
-      statusColor: workspaceTabStatusColor(t), badge: t.badge,
-      dimmed: t.kind === 'chat' && t.status === 'suspended',
-    })),
+    () =>
+      workspaceTabs.map((t) => ({
+        id: t.id,
+        kind: t.kind,
+        sessionId: t.sessionId,
+        title: t.title,
+        statusColor: workspaceTabStatusColor(t),
+        badge: t.badge,
+        dimmed: t.kind === 'chat' && t.status === 'suspended',
+      })),
     [workspaceTabs]
   );
 
   // ── Keyboard shortcuts & menus ──
   useEffect(() => {
     if (!createMenuOpen) return;
-    const h = (e: MouseEvent) => { if (createMenuRef.current && !createMenuRef.current.contains(e.target as Node)) setCreateMenuOpen(false); };
-    document.addEventListener('mousedown', h); return () => document.removeEventListener('mousedown', h);
+    const h = (e: MouseEvent) => {
+      if (createMenuRef.current && !createMenuRef.current.contains(e.target as Node))
+        setCreateMenuOpen(false);
+    };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
   }, [createMenuOpen]);
   useEffect(() => {
     if (!mobileMenuOpen) return;
-    const h = (e: KeyboardEvent) => { if (e.key === 'Escape') setMobileMenuOpen(false); };
-    document.addEventListener('keydown', h); return () => document.removeEventListener('keydown', h);
+    const h = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setMobileMenuOpen(false);
+    };
+    document.addEventListener('keydown', h);
+    return () => document.removeEventListener('keydown', h);
   }, [mobileMenuOpen]);
 
   const shortcutHandlers = {
-    'toggle-file-browser': () => { if (core.isRunning && core.terminalToken) { filesParam ? nav.handleCloseFileBrowser() : nav.handleOpenFileBrowser(); } },
-    'toggle-git-changes': () => { if (core.isRunning && core.terminalToken) { gitParam ? nav.handleCloseGitPanel() : nav.handleOpenGitChanges(); } },
-    'focus-chat': () => { const activeChatSessionId = sessions.activeChatSessionId; if (activeChatSessionId) { if (viewMode !== 'conversation') sessions.handleAttachSession(activeChatSessionId); requestAnimationFrame(() => chatSessionRefs.current.get(activeChatSessionId)?.focusInput()); } },
-    'focus-terminal': () => { if (viewMode !== 'terminal') { const ft = workspaceTabs.find((t) => t.kind === 'terminal'); if (ft) handleSelectWorkspaceTab(ft); } requestAnimationFrame(() => multiTerminalRef.current?.focus()); },
-    'switch-worktree': () => { if (core.isRunning && nav.worktrees.length > 0) document.getElementById('worktree-selector-trigger')?.click(); },
-    'next-tab': () => { if (workspaceTabs.length > 1) { const ci = workspaceTabs.findIndex((t) => t.id === activeTabId); const nextTab = workspaceTabs[(ci + 1) % workspaceTabs.length]; if (nextTab) handleSelectWorkspaceTab(nextTab); } },
-    'prev-tab': () => { if (workspaceTabs.length > 1) { const ci = workspaceTabs.findIndex((t) => t.id === activeTabId); const prevTab = workspaceTabs[ci <= 0 ? workspaceTabs.length - 1 : ci - 1]; if (prevTab) handleSelectWorkspaceTab(prevTab); } },
-    ...Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`tab-${i + 1}`, () => { if (i < workspaceTabs.length) { const tab = workspaceTabs[i]; if (tab) handleSelectWorkspaceTab(tab); } }])),
-    'new-chat': () => { if (core.isRunning) void sessions.handleCreateSession(sessions.defaultAgentId ?? undefined); },
-    'new-terminal': () => { if (core.isRunning) handleCreateTerminalTab(); },
-    'command-palette': () => { setShowCommandPalette((p) => !p); setShowShortcutsHelp(false); },
+    'toggle-file-browser': () => {
+      if (core.isRunning && core.terminalToken) {
+        filesParam ? nav.handleCloseFileBrowser() : nav.handleOpenFileBrowser();
+      }
+    },
+    'toggle-git-changes': () => {
+      if (core.isRunning && core.terminalToken) {
+        gitParam ? nav.handleCloseGitPanel() : nav.handleOpenGitChanges();
+      }
+    },
+    'focus-chat': () => {
+      const activeChatSessionId = sessions.activeChatSessionId;
+      if (activeChatSessionId) {
+        if (viewMode !== 'conversation') sessions.handleAttachSession(activeChatSessionId);
+        requestAnimationFrame(() => chatSessionRefs.current.get(activeChatSessionId)?.focusInput());
+      }
+    },
+    'focus-terminal': () => {
+      if (viewMode !== 'terminal') {
+        const ft = workspaceTabs.find((t) => t.kind === 'terminal');
+        if (ft) handleSelectWorkspaceTab(ft);
+      }
+      requestAnimationFrame(() => multiTerminalRef.current?.focus());
+    },
+    'switch-worktree': () => {
+      if (core.isRunning && nav.worktrees.length > 0)
+        document.getElementById('worktree-selector-trigger')?.click();
+    },
+    'next-tab': () => {
+      if (workspaceTabs.length > 1) {
+        const ci = workspaceTabs.findIndex((t) => t.id === activeTabId);
+        const nextTab = workspaceTabs[(ci + 1) % workspaceTabs.length];
+        if (nextTab) handleSelectWorkspaceTab(nextTab);
+      }
+    },
+    'prev-tab': () => {
+      if (workspaceTabs.length > 1) {
+        const ci = workspaceTabs.findIndex((t) => t.id === activeTabId);
+        const prevTab = workspaceTabs[ci <= 0 ? workspaceTabs.length - 1 : ci - 1];
+        if (prevTab) handleSelectWorkspaceTab(prevTab);
+      }
+    },
+    ...Object.fromEntries(
+      Array.from({ length: 9 }, (_, i) => [
+        `tab-${i + 1}`,
+        () => {
+          if (i < workspaceTabs.length) {
+            const tab = workspaceTabs[i];
+            if (tab) handleSelectWorkspaceTab(tab);
+          }
+        },
+      ])
+    ),
+    'new-chat': () => {
+      if (core.isRunning) void sessions.handleCreateSession(sessions.defaultAgentId ?? undefined);
+    },
+    'new-terminal': () => {
+      if (core.isRunning) handleCreateTerminalTab();
+    },
+    'command-palette': () => {
+      setShowCommandPalette((p) => !p);
+      setShowShortcutsHelp(false);
+    },
     'show-shortcuts': () => setShowShortcutsHelp((p) => !p),
   };
   useKeyboardShortcuts(shortcutHandlers, core.isRunning);
@@ -302,74 +458,234 @@ export function Workspace() {
     paletteFileIndexLoaded.current = true;
     setPaletteFileIndexLoading(true);
     getFileIndex(core.workspace.url, id, core.terminalToken, nav.activeWorktree ?? undefined)
-      .then((f) => setPaletteFileIndex(f)).catch((e) => console.warn('[palette] Failed:', e))
+      .then((f) => setPaletteFileIndex(f))
+      .catch((e) => console.warn('[palette] Failed:', e))
       .finally(() => setPaletteFileIndexLoading(false));
-  }, [showCommandPalette, core.workspace?.url, core.terminalToken, id, core.isRunning, nav.activeWorktree]);
+  }, [
+    showCommandPalette,
+    core.workspace?.url,
+    core.terminalToken,
+    id,
+    core.isRunning,
+    nav.activeWorktree,
+  ]);
 
   const handlePaletteSelectTab = useCallback(
-    (tab: WorkspaceTabItem) => { const wt = workspaceTabs.find((t) => t.id === tab.id); if (wt) { handleSelectWorkspaceTabRef.current(wt); if (wt.kind === 'terminal') multiTerminalRef.current?.focus?.(); else chatSessionRefs.current.get(wt.sessionId)?.focusInput?.(); } },
+    (tab: WorkspaceTabItem) => {
+      const wt = workspaceTabs.find((t) => t.id === tab.id);
+      if (wt) {
+        handleSelectWorkspaceTabRef.current(wt);
+        if (wt.kind === 'terminal') multiTerminalRef.current?.focus?.();
+        else chatSessionRefs.current.get(wt.sessionId)?.focusInput?.();
+      }
+    },
     [workspaceTabs]
   );
 
   // ── Early returns ──
-  if (core.loading && !core.workspace) return <div className="flex items-center justify-center" style={{ height: 'var(--sam-app-height)', backgroundColor: 'var(--sam-workspace-chrome-bg)' }}><Spinner size="lg" /></div>;
-  if (core.error && !core.workspace) return (
-    <div className="flex flex-col" style={{ height: 'var(--sam-app-height)', backgroundColor: 'var(--sam-workspace-chrome-bg)' }}>
-      <MinimalToolbar onBack={() => navigate('/dashboard')} />
-      <CenteredStatus color="var(--sam-color-danger-fg)" title="Failed to Load Workspace" subtitle={core.error} action={<Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>Back to Dashboard</Button>} />
-    </div>
-  );
+  if (core.loading && !core.workspace)
+    return (
+      <div
+        className="flex items-center justify-center"
+        style={{
+          height: 'var(--sam-app-height)',
+          backgroundColor: 'var(--sam-workspace-chrome-bg)',
+        }}
+      >
+        <Spinner size="lg" />
+      </div>
+    );
+  if (core.error && !core.workspace)
+    return (
+      <div
+        className="flex flex-col"
+        style={{
+          height: 'var(--sam-app-height)',
+          backgroundColor: 'var(--sam-workspace-chrome-bg)',
+        }}
+      >
+        <MinimalToolbar onBack={() => navigate('/dashboard')} />
+        <CenteredStatus
+          color="var(--sam-color-danger-fg)"
+          title="Failed to Load Workspace"
+          subtitle={core.error}
+          action={
+            <Button variant="ghost" size="sm" onClick={() => navigate('/dashboard')}>
+              Back to Dashboard
+            </Button>
+          }
+        />
+      </div>
+    );
 
   return (
-    <div className="flex flex-col overflow-hidden" style={{ height: 'var(--sam-app-height)', backgroundColor: 'var(--sam-workspace-chrome-bg)' }}>
-      <WorkspaceHeader workspace={core.workspace} isMobile={isMobile} isRunning={core.isRunning} terminalToken={core.terminalToken}
-        error={core.error} gitChangeCount={nav.gitChangeCount} gitStatusStale={nav.gitStatusStale}
-        worktrees={nav.worktrees} activeWorktree={nav.activeWorktree} worktreeLoading={nav.worktreeLoading}
-        remoteBranches={nav.remoteBranches} remoteBranchesLoading={nav.remoteBranchesLoading}
-        onBack={() => core.workspace?.projectId ? navigate(`/projects/${core.workspace.projectId}`) : navigate('/dashboard')}
-        onClearError={() => core.setError(null)} onOpenFileBrowser={nav.handleOpenFileBrowser}
-        onOpenGitChanges={nav.handleOpenGitChanges} onOpenCommandPalette={() => setShowCommandPalette(true)}
-        onOpenMobileMenu={() => setMobileMenuOpen(true)} onSelectWorktree={nav.handleSelectWorktree}
-        onCreateWorktree={nav.handleCreateWorktree} onRemoveWorktree={nav.handleRemoveWorktree} onRequestBranches={nav.fetchRemoteBranches} />
+    <div
+      className="flex flex-col overflow-hidden"
+      style={{ height: 'var(--sam-app-height)', backgroundColor: 'var(--sam-workspace-chrome-bg)' }}
+    >
+      <WorkspaceHeader
+        workspace={core.workspace}
+        isMobile={isMobile}
+        isRunning={core.isRunning}
+        terminalToken={core.terminalToken}
+        error={core.error}
+        gitChangeCount={nav.gitChangeCount}
+        gitStatusStale={nav.gitStatusStale}
+        worktrees={nav.worktrees}
+        activeWorktree={nav.activeWorktree}
+        worktreeLoading={nav.worktreeLoading}
+        remoteBranches={nav.remoteBranches}
+        remoteBranchesLoading={nav.remoteBranchesLoading}
+        onBack={() =>
+          core.workspace?.projectId
+            ? navigate(`/projects/${core.workspace.projectId}`)
+            : navigate('/dashboard')
+        }
+        onClearError={() => core.setError(null)}
+        onOpenFileBrowser={nav.handleOpenFileBrowser}
+        onOpenGitChanges={nav.handleOpenGitChanges}
+        onOpenCommandPalette={() => setShowCommandPalette(true)}
+        onOpenMobileMenu={() => setMobileMenuOpen(true)}
+        onSelectWorktree={nav.handleSelectWorktree}
+        onCreateWorktree={nav.handleCreateWorktree}
+        onRemoveWorktree={nav.handleRemoveWorktree}
+        onRequestBranches={nav.fetchRemoteBranches}
+      />
 
       {isMobile && core.error && (
-        <div style={{ padding: '6px 12px', backgroundColor: 'var(--sam-color-danger-tint)', borderBottom: '1px solid var(--sam-color-border-default)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-danger-fg)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{core.error}</span>
-          <button onClick={() => core.setError(null)} style={{ background: 'none', border: 'none', color: 'var(--sam-color-danger-fg)', cursor: 'pointer', padding: '4px 8px', fontSize: 'var(--sam-type-secondary-size)', flexShrink: 0 }}>×</button>
+        <div
+          style={{
+            padding: '6px 12px',
+            backgroundColor: 'var(--sam-color-danger-tint)',
+            borderBottom: '1px solid var(--sam-color-border-default)',
+            fontSize: 'var(--sam-type-caption-size)',
+            color: 'var(--sam-color-danger-fg)',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexShrink: 0,
+          }}
+        >
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {core.error}
+          </span>
+          <button
+            onClick={() => core.setError(null)}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--sam-color-danger-fg)',
+              cursor: 'pointer',
+              padding: '4px 8px',
+              fontSize: 'var(--sam-type-secondary-size)',
+              flexShrink: 0,
+            }}
+          >
+            ×
+          </button>
         </div>
       )}
 
       {core.isRunning && sessions.orphanedSessions.length > 0 && !sessions.dismissedOrphans && (
-        <OrphanedSessionsBanner orphanedSessions={sessions.orphanedSessions} onStopAll={sessions.handleStopAllOrphans} onDismiss={() => sessions.setDismissedOrphans(true)} />
+        <OrphanedSessionsBanner
+          orphanedSessions={sessions.orphanedSessions}
+          onStopAll={sessions.handleStopAllOrphans}
+          onDismiss={() => sessions.setDismissedOrphans(true)}
+        />
       )}
 
       <div className="flex flex-1 min-h-0">
         <div className="flex flex-col flex-1 min-w-0 min-h-0">
           {core.isRunning && (
-            <WorkspaceTabStrip tabs={tabStripItems} activeTabId={activeTabId} isMobile={isMobile}
-              onSelect={handleSelectTabItem} onClose={handleCloseTabItem} onRename={handleRenameWorkspaceTab} onReorder={tabOrder.reorderTab}
-              createMenuSlot={<WorkspaceCreateMenu createMenuRef={createMenuRef} createMenuOpen={createMenuOpen} setCreateMenuOpen={setCreateMenuOpen} sessionsLoading={sessions.sessionsLoading} isMobile={isMobile} configuredAgents={sessions.configuredAgents} defaultAgentId={sessions.defaultAgentId} defaultAgentName={sessions.defaultAgentName} onCreateTerminalTab={handleCreateTerminalTab} onCreateSession={(agentId) => void sessions.handleCreateSession(agentId)} />} />
+            <WorkspaceTabStrip
+              tabs={tabStripItems}
+              activeTabId={activeTabId}
+              isMobile={isMobile}
+              onSelect={handleSelectTabItem}
+              onClose={handleCloseTabItem}
+              onRename={handleRenameWorkspaceTab}
+              onReorder={tabOrder.reorderTab}
+              createMenuSlot={
+                <WorkspaceCreateMenu
+                  createMenuRef={createMenuRef}
+                  createMenuOpen={createMenuOpen}
+                  setCreateMenuOpen={setCreateMenuOpen}
+                  sessionsLoading={sessions.sessionsLoading}
+                  isMobile={isMobile}
+                  configuredAgents={sessions.configuredAgents}
+                  defaultAgentId={sessions.defaultAgentId}
+                  defaultAgentName={sessions.defaultAgentName}
+                  onCreateTerminalTab={handleCreateTerminalTab}
+                  onCreateSession={(agentId) => void sessions.handleCreateSession(agentId)}
+                />
+              }
+            />
           )}
           <div className="flex flex-col flex-1 min-h-0 relative">
             {core.isRunning ? (
               <>
-                <div className="h-full" style={{ display: viewMode === 'terminal' ? 'block' : 'none' }}>
+                <div
+                  className="h-full"
+                  style={{ display: viewMode === 'terminal' ? 'block' : 'none' }}
+                >
                   {core.wsUrl ? (
                     featureFlags.multiTerminal ? (
-                      <MultiTerminal ref={multiTerminalRef} wsUrl={core.wsUrl} resolveWsUrl={core.resolveTerminalWsUrl} defaultWorkDir={nav.activeWorktree ?? undefined} onActivity={handleTerminalActivity} className="h-full" persistenceKey={id ? `sam-terminal-sessions-${id}` : undefined} hideTabBar
-                        onSessionsChange={(s: MultiTerminalSessionSnapshot[], a: string | null) => { setTerminalTabs(s); setActiveTerminalSessionId(a); }} />
-                    ) : <Terminal wsUrl={core.wsUrl} resolveWsUrl={core.resolveTerminalWsUrl} onActivity={handleTerminalActivity} className="h-full" />
+                      <MultiTerminal
+                        ref={multiTerminalRef}
+                        wsUrl={core.wsUrl}
+                        resolveWsUrl={core.resolveTerminalWsUrl}
+                        defaultWorkDir={nav.activeWorktree ?? undefined}
+                        onActivity={handleTerminalActivity}
+                        className="h-full"
+                        persistenceKey={id ? `sam-terminal-sessions-${id}` : undefined}
+                        hideTabBar
+                        onSessionsChange={(s: MultiTerminalSessionSnapshot[], a: string | null) => {
+                          setTerminalTabs(s);
+                          setActiveTerminalSessionId(a);
+                        }}
+                      />
+                    ) : (
+                      <Terminal
+                        wsUrl={core.wsUrl}
+                        resolveWsUrl={core.resolveTerminalWsUrl}
+                        onActivity={handleTerminalActivity}
+                        className="h-full"
+                      />
+                    )
                   ) : core.terminalLoading ? (
-                    <CenteredStatus color="var(--sam-color-info)" title="Connecting to Terminal..." subtitle="Establishing secure connection" loading />
+                    <CenteredStatus
+                      color="var(--sam-color-info)"
+                      title="Connecting to Terminal..."
+                      subtitle="Establishing secure connection"
+                      loading
+                    />
                   ) : (
-                    <CenteredStatus color="var(--sam-color-danger-fg)" title="Connection Failed" subtitle={core.terminalError || 'Unable to connect to terminal'}
-                      action={<Button variant="secondary" size="sm" onClick={() => { core.terminalWsUrlCacheRef.current = null; void core.refreshTerminalToken(); }} disabled={core.terminalLoading}>Retry Connection</Button>} />
+                    <CenteredStatus
+                      color="var(--sam-color-danger-fg)"
+                      title="Connection Failed"
+                      subtitle={core.terminalError || 'Unable to connect to terminal'}
+                      action={
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          onClick={() => {
+                            core.terminalWsUrlCacheRef.current = null;
+                            void core.refreshTerminalToken();
+                          }}
+                          disabled={core.terminalLoading}
+                        >
+                          Retry Connection
+                        </Button>
+                      }
+                    />
                   )}
                 </div>
                 {/* Chat view — use ProjectMessageView when workspace is linked to a project chat session.
                     This reuses the stable project chat component, avoiding the render-loop crashes
                     that plagued the workspace-specific ChatSession component. */}
-                {viewMode === 'conversation' && core.workspace?.projectId && core.workspace?.chatSessionId ? (
+                {viewMode === 'conversation' &&
+                core.workspace?.projectId &&
+                core.workspace?.chatSessionId ? (
                   <div className="flex flex-col flex-1 min-h-0">
                     <WorkspaceChatView
                       projectId={core.workspace.projectId}
@@ -384,66 +700,259 @@ export function Workspace() {
                     const workspaceUrl = core.workspace?.url;
                     if (!workspaceUrl) return null;
                     return sessions.runningChatSessions.map((session: AgentSession) => (
-                      <ChatSession key={session.id} ref={(h) => { if (h) chatSessionRefs.current.set(session.id, h); else chatSessionRefs.current.delete(session.id); }}
-                        workspaceId={id} workspaceUrl={workspaceUrl} sessionId={session.id} worktreePath={session.worktreePath}
-                        preferredAgentId={session.agentType || sessions.preferredAgentsBySession[session.id] || sessions.configuredAgents.at(0)?.id}
-                        configuredAgents={sessions.configuredAgents} active={sessions.activeChatSessionId === session.id}
-                        onActivity={handleTerminalActivity} onUsageChange={sessions.handleUsageChange} />
+                      <ChatSession
+                        key={session.id}
+                        ref={(h) => {
+                          if (h) chatSessionRefs.current.set(session.id, h);
+                          else chatSessionRefs.current.delete(session.id);
+                        }}
+                        workspaceId={id}
+                        workspaceUrl={workspaceUrl}
+                        sessionId={session.id}
+                        worktreePath={session.worktreePath}
+                        preferredAgentId={
+                          session.agentType ||
+                          sessions.preferredAgentsBySession[session.id] ||
+                          sessions.configuredAgents.at(0)?.id
+                        }
+                        configuredAgents={sessions.configuredAgents}
+                        active={sessions.activeChatSessionId === session.id}
+                        onActivity={handleTerminalActivity}
+                        onUsageChange={sessions.handleUsageChange}
+                      />
                     ));
                   })()
                 ) : null}
               </>
-            ) : (
-              core.workspace?.status === 'creating' ? <BootProgress logs={core.streamedBootLogs.length > 0 ? core.streamedBootLogs : core.workspace.bootLogs} />
-              : core.workspace?.status === 'stopping' ? <CenteredStatus color="var(--sam-color-warning-fg)" title="Stopping Workspace" loading />
-              : core.workspace?.status === 'stopped' ? <CenteredStatus color="var(--sam-color-fg-muted)" title="Workspace Stopped" subtitle="Restart to access the terminal." action={<Button variant="primary" size="sm" onClick={core.handleRestart} disabled={core.actionLoading} loading={core.actionLoading}>Restart Workspace</Button>} />
-              : core.workspace?.status === 'error' ? <CenteredStatus color="var(--sam-color-danger-fg)" title="Workspace Error" subtitle={core.workspace?.errorMessage || 'An unexpected error occurred.'} action={<div className="flex gap-2 flex-wrap justify-center"><Button variant="primary" size="sm" onClick={core.handleRebuild} disabled={core.actionLoading} loading={core.actionLoading}>Rebuild Container</Button><Button variant="secondary" size="sm" onClick={core.handleRestart} disabled={core.actionLoading} loading={core.actionLoading}>Restart Workspace</Button></div>} />
-              : null
-            )}
+            ) : core.workspace?.status === 'creating' ? (
+              <BootProgress
+                logs={
+                  core.streamedBootLogs.length > 0 ? core.streamedBootLogs : core.workspace.bootLogs
+                }
+              />
+            ) : core.workspace?.status === 'stopping' ? (
+              <CenteredStatus
+                color="var(--sam-color-warning-fg)"
+                title="Stopping Workspace"
+                loading
+              />
+            ) : core.workspace?.status === 'stopped' ? (
+              <CenteredStatus
+                color="var(--sam-color-fg-muted)"
+                title="Workspace Stopped"
+                subtitle="Restart to access the terminal."
+                action={
+                  <Button
+                    variant="primary"
+                    size="sm"
+                    onClick={core.handleRestart}
+                    disabled={core.actionLoading}
+                    loading={core.actionLoading}
+                  >
+                    Restart Workspace
+                  </Button>
+                }
+              />
+            ) : core.workspace?.status === 'error' ? (
+              <CenteredStatus
+                color="var(--sam-color-danger-fg)"
+                title="Workspace Error"
+                subtitle={core.workspace?.errorMessage || 'An unexpected error occurred.'}
+                action={
+                  <div className="flex gap-2 flex-wrap justify-center">
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={core.handleRebuild}
+                      disabled={core.actionLoading}
+                      loading={core.actionLoading}
+                    >
+                      Rebuild Container
+                    </Button>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      onClick={core.handleRestart}
+                      disabled={core.actionLoading}
+                      loading={core.actionLoading}
+                    >
+                      Restart Workspace
+                    </Button>
+                  </div>
+                }
+              />
+            ) : null}
           </div>
         </div>
-        {!isMobile && <aside className="flex flex-col w-80 min-w-80 border-l border-border-default bg-surface">
-          <WorkspaceSidebar workspace={core.workspace} isRunning={core.isRunning} isMobile={isMobile} actionLoading={core.actionLoading}
-            onStop={core.handleStop} onRestart={core.handleRestart} onRebuild={core.handleRebuild}
-            displayNameInput={core.displayNameInput} onDisplayNameChange={core.setDisplayNameInput} onRename={core.handleRename} renaming={core.renaming}
-            workspaceTabs={workspaceTabs} activeTabId={activeTabId}
-            onSelectTab={(tab: SidebarTab) => { const f = workspaceTabs.find((t) => t.id === tab.id); if (f) handleSelectWorkspaceTab(f); }}
-            onStopSession={sessions.handleStopSession} historySessions={sessions.historySessions}
-            onResumeSession={sessions.handleResumeSession} onDeleteSession={sessions.handleDeleteHistorySession}
-            gitStatus={nav.gitStatus} onOpenGitChanges={nav.handleOpenGitChanges}
-            sessionTokenUsages={sessions.sessionTokenUsages} detectedPorts={core.detectedPorts} workspaceEvents={core.workspaceEvents} />
-        </aside>}
+        {!isMobile && (
+          <aside className="flex flex-col w-80 min-w-80 border-l border-border-default bg-surface">
+            <WorkspaceSidebar
+              workspace={core.workspace}
+              isRunning={core.isRunning}
+              isMobile={isMobile}
+              actionLoading={core.actionLoading}
+              onStop={core.handleStop}
+              onRestart={core.handleRestart}
+              onRebuild={core.handleRebuild}
+              displayNameInput={core.displayNameInput}
+              onDisplayNameChange={core.setDisplayNameInput}
+              onRename={core.handleRename}
+              renaming={core.renaming}
+              workspaceTabs={workspaceTabs}
+              activeTabId={activeTabId}
+              onSelectTab={(tab: SidebarTab) => {
+                const f = workspaceTabs.find((t) => t.id === tab.id);
+                if (f) handleSelectWorkspaceTab(f);
+              }}
+              onStopSession={sessions.handleStopSession}
+              historySessions={sessions.historySessions}
+              onResumeSession={sessions.handleResumeSession}
+              onDeleteSession={sessions.handleDeleteHistorySession}
+              gitStatus={nav.gitStatus}
+              onOpenGitChanges={nav.handleOpenGitChanges}
+              sessionTokenUsages={sessions.sessionTokenUsages}
+              detectedPorts={core.detectedPorts}
+              workspaceEvents={core.workspaceEvents}
+            />
+          </aside>
+        )}
       </div>
 
       {isMobile && mobileMenuOpen && (
         <>
-          <div data-testid="mobile-menu-backdrop" onClick={() => setMobileMenuOpen(false)} aria-hidden="true" className="fixed inset-0 glass-backdrop-dim z-drawer-backdrop" />
-          <div role="dialog" aria-label="Workspace menu" data-testid="mobile-menu-panel" className="fixed top-0 right-0 bottom-0 w-[85vw] max-w-[360px] glass-modal glass-panel-container glass-composited border-l border-border-default z-drawer flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between border-b border-border-default shrink-0" style={{ padding: 'var(--sam-space-3) var(--sam-space-4)' }}>
-              <span className="font-semibold text-fg-primary" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Workspace</span>
-              <button onClick={() => setMobileMenuOpen(false)} aria-label="Close workspace menu" className="bg-transparent border-none cursor-pointer text-fg-muted p-2 flex items-center justify-center min-w-[44px] min-h-[44px]"><X size={18} /></button>
+          <div
+            data-testid="mobile-menu-backdrop"
+            onClick={() => setMobileMenuOpen(false)}
+            aria-hidden="true"
+            className="fixed inset-0 glass-backdrop-dim z-drawer-backdrop"
+          />
+          <div
+            role="dialog"
+            aria-label="Workspace menu"
+            data-testid="mobile-menu-panel"
+            className="fixed top-0 right-0 bottom-0 w-[85vw] max-w-[360px] glass-modal glass-panel-container glass-composited border-l border-border-default z-drawer flex flex-col overflow-hidden"
+          >
+            <div
+              className="flex items-center justify-between border-b border-border-default shrink-0"
+              style={{ padding: 'var(--sam-space-3) var(--sam-space-4)' }}
+            >
+              <span
+                className="font-semibold text-fg-primary"
+                style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+              >
+                Workspace
+              </span>
+              <button
+                onClick={() => setMobileMenuOpen(false)}
+                aria-label="Close workspace menu"
+                className="bg-transparent border-none cursor-pointer text-fg-muted p-2 flex items-center justify-center min-w-[44px] min-h-[44px]"
+              >
+                <X size={18} />
+              </button>
             </div>
             <div className="flex flex-col flex-1 overflow-auto">
-              <WorkspaceSidebar workspace={core.workspace} isRunning={core.isRunning} isMobile={isMobile} actionLoading={core.actionLoading}
-                onStop={core.handleStop} onRestart={core.handleRestart} onRebuild={core.handleRebuild}
-                displayNameInput={core.displayNameInput} onDisplayNameChange={core.setDisplayNameInput} onRename={core.handleRename} renaming={core.renaming}
-                workspaceTabs={workspaceTabs} activeTabId={activeTabId}
-                onSelectTab={(tab: SidebarTab) => { const f = workspaceTabs.find((t) => t.id === tab.id); if (f) handleSelectWorkspaceTab(f); }}
-                onStopSession={sessions.handleStopSession} historySessions={sessions.historySessions}
-                onResumeSession={sessions.handleResumeSession} onDeleteSession={sessions.handleDeleteHistorySession}
-                gitStatus={nav.gitStatus} onOpenGitChanges={nav.handleOpenGitChanges}
-                sessionTokenUsages={sessions.sessionTokenUsages} detectedPorts={core.detectedPorts} workspaceEvents={core.workspaceEvents} />
+              <WorkspaceSidebar
+                workspace={core.workspace}
+                isRunning={core.isRunning}
+                isMobile={isMobile}
+                actionLoading={core.actionLoading}
+                onStop={core.handleStop}
+                onRestart={core.handleRestart}
+                onRebuild={core.handleRebuild}
+                displayNameInput={core.displayNameInput}
+                onDisplayNameChange={core.setDisplayNameInput}
+                onRename={core.handleRename}
+                renaming={core.renaming}
+                workspaceTabs={workspaceTabs}
+                activeTabId={activeTabId}
+                onSelectTab={(tab: SidebarTab) => {
+                  const f = workspaceTabs.find((t) => t.id === tab.id);
+                  if (f) handleSelectWorkspaceTab(f);
+                }}
+                onStopSession={sessions.handleStopSession}
+                historySessions={sessions.historySessions}
+                onResumeSession={sessions.handleResumeSession}
+                onDeleteSession={sessions.handleDeleteHistorySession}
+                gitStatus={nav.gitStatus}
+                onOpenGitChanges={nav.handleOpenGitChanges}
+                sessionTokenUsages={sessions.sessionTokenUsages}
+                detectedPorts={core.detectedPorts}
+                workspaceEvents={core.workspaceEvents}
+              />
             </div>
           </div>
         </>
       )}
 
-      {gitParam === 'changes' && core.terminalToken && core.workspace?.url && id && <GitChangesPanel workspaceUrl={core.workspace.url} workspaceId={id} token={core.terminalToken} worktree={nav.activeWorktree} isMobile={isMobile} onClose={nav.handleCloseGitPanel} onSelectFile={nav.handleNavigateToGitDiff} onStatusChange={nav.applyGitStatus} onStatusFetchError={nav.markGitStatusStale} />}
-      {gitParam === 'diff' && gitFileParam && core.terminalToken && core.workspace?.url && id && <GitDiffView workspaceUrl={core.workspace.url} workspaceId={id} token={core.terminalToken} worktree={nav.activeWorktree} filePath={gitFileParam} staged={gitStagedParam === 'true'} isMobile={isMobile} onBack={nav.handleBackFromGitDiff} onClose={nav.handleCloseGitPanel} onViewInFileBrowser={nav.handleGitDiffToFileBrowser} />}
-      {filesParam === 'browse' && core.terminalToken && core.workspace?.url && id && <FileBrowserPanel workspaceUrl={core.workspace.url} workspaceId={id} token={core.terminalToken} worktree={nav.activeWorktree} initialPath={filesPathParam ?? '.'} isMobile={isMobile} onClose={nav.handleCloseFileBrowser} onSelectFile={nav.handleFileViewerOpen} onNavigate={nav.handleFileBrowserNavigate} />}
-      {filesParam === 'view' && filesPathParam && core.terminalToken && core.workspace?.url && id && <FileViewerPanel workspaceUrl={core.workspace.url} workspaceId={id} token={core.terminalToken} worktree={nav.activeWorktree} filePath={filesPathParam} isMobile={isMobile} onBack={nav.handleFileViewerBack} onClose={nav.handleCloseFileBrowser} onViewDiff={nav.handleFileViewerToDiff} />}
+      {gitParam === 'changes' && core.terminalToken && core.workspace?.url && id && (
+        <GitChangesPanel
+          workspaceUrl={core.workspace.url}
+          workspaceId={id}
+          token={core.terminalToken}
+          worktree={nav.activeWorktree}
+          isMobile={isMobile}
+          onClose={nav.handleCloseGitPanel}
+          onSelectFile={nav.handleNavigateToGitDiff}
+          onStatusChange={nav.applyGitStatus}
+          onStatusFetchError={nav.markGitStatusStale}
+        />
+      )}
+      {gitParam === 'diff' && gitFileParam && core.terminalToken && core.workspace?.url && id && (
+        <GitDiffView
+          workspaceUrl={core.workspace.url}
+          workspaceId={id}
+          token={core.terminalToken}
+          worktree={nav.activeWorktree}
+          filePath={gitFileParam}
+          staged={gitStagedParam === 'true'}
+          isMobile={isMobile}
+          onBack={nav.handleBackFromGitDiff}
+          onClose={nav.handleCloseGitPanel}
+          onViewInFileBrowser={nav.handleGitDiffToFileBrowser}
+        />
+      )}
+      {filesParam === 'browse' && core.terminalToken && core.workspace?.url && id && (
+        <FileBrowserPanel
+          workspaceUrl={core.workspace.url}
+          workspaceId={id}
+          token={core.terminalToken}
+          worktree={nav.activeWorktree}
+          initialPath={filesPathParam ?? '.'}
+          isMobile={isMobile}
+          onClose={nav.handleCloseFileBrowser}
+          onSelectFile={nav.handleFileViewerOpen}
+          onNavigate={nav.handleFileBrowserNavigate}
+        />
+      )}
+      {filesParam === 'view' &&
+        filesPathParam &&
+        core.terminalToken &&
+        core.workspace?.url &&
+        id && (
+          <FileViewerPanel
+            workspaceUrl={core.workspace.url}
+            workspaceId={id}
+            token={core.terminalToken}
+            worktree={nav.activeWorktree}
+            filePath={filesPathParam}
+            isMobile={isMobile}
+            onBack={nav.handleFileViewerBack}
+            onClose={nav.handleCloseFileBrowser}
+            onViewDiff={nav.handleFileViewerToDiff}
+          />
+        )}
       {showShortcutsHelp && <KeyboardShortcutsHelp onClose={() => setShowShortcutsHelp(false)} />}
-      {showCommandPalette && <CommandPalette onClose={() => setShowCommandPalette(false)} handlers={shortcutHandlers} tabs={tabStripItems} fileIndex={paletteFileIndex} fileIndexLoading={paletteFileIndexLoading} onSelectTab={handlePaletteSelectTab} onSelectFile={(fp: string) => nav.handleFileViewerOpen(fp)} />}
+      {showCommandPalette && (
+        <CommandPalette
+          onClose={() => setShowCommandPalette(false)}
+          handlers={shortcutHandlers}
+          tabs={tabStripItems}
+          fileIndex={paletteFileIndex}
+          fileIndexLoading={paletteFileIndexLoading}
+          onSelectTab={handlePaletteSelectTab}
+          onSelectFile={(fp: string) => nav.handleFileViewerOpen(fp)}
+        />
+      )}
     </div>
   );
 }

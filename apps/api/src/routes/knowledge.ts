@@ -4,7 +4,10 @@
  * Mounted at /api/projects/:projectId/knowledge
  * Provides CRUD for entities, observations, and search for the UI.
  */
-import type { KnowledgeEntityType, UpdateKnowledgeEntityRequest } from '@simple-agent-manager/shared';
+import type {
+  KnowledgeEntityType,
+  UpdateKnowledgeEntityRequest,
+} from '@simple-agent-manager/shared';
 import {
   KNOWLEDGE_DEFAULTS,
   KNOWLEDGE_ENTITY_TYPES,
@@ -60,13 +63,28 @@ knowledgeRoutes.get('/', async (c) => {
   await requireProjectAccess(db, projectId, auth.user.id);
 
   const entityType = c.req.query('entityType') || null;
-  const defaultPageSize = getLimit(c.env, 'KNOWLEDGE_LIST_PAGE_SIZE', KNOWLEDGE_DEFAULTS.listPageSize);
-  const maxPageSize = getLimit(c.env, 'KNOWLEDGE_LIST_MAX_PAGE_SIZE', KNOWLEDGE_DEFAULTS.listMaxPageSize);
-  const limit = Math.min(parseInt(c.req.query('limit') || String(defaultPageSize), 10) || defaultPageSize, maxPageSize);
+  const defaultPageSize = getLimit(
+    c.env,
+    'KNOWLEDGE_LIST_PAGE_SIZE',
+    KNOWLEDGE_DEFAULTS.listPageSize
+  );
+  const maxPageSize = getLimit(
+    c.env,
+    'KNOWLEDGE_LIST_MAX_PAGE_SIZE',
+    KNOWLEDGE_DEFAULTS.listMaxPageSize
+  );
+  const limit = Math.min(
+    parseInt(c.req.query('limit') || String(defaultPageSize), 10) || defaultPageSize,
+    maxPageSize
+  );
   const offset = parseInt(c.req.query('offset') || '0', 10) || 0;
 
   const result = await projectDataService.listKnowledgeEntities(
-    c.env, projectId, entityType, limit, offset,
+    c.env,
+    projectId,
+    entityType,
+    limit,
+    offset
   );
 
   return c.json(result);
@@ -87,11 +105,23 @@ knowledgeRoutes.get('/search', async (c) => {
   const minConfidenceRaw = c.req.query('minConfidence');
   const minConfidence = minConfidenceRaw ? parseFloat(minConfidenceRaw) : null;
   const searchLimit = getLimit(c.env, 'KNOWLEDGE_SEARCH_LIMIT', KNOWLEDGE_DEFAULTS.searchLimit);
-  const searchMaxLimit = getLimit(c.env, 'KNOWLEDGE_SEARCH_MAX_LIMIT', KNOWLEDGE_DEFAULTS.searchMaxLimit);
-  const limit = Math.min(parseInt(c.req.query('limit') || String(searchLimit), 10) || searchLimit, searchMaxLimit);
+  const searchMaxLimit = getLimit(
+    c.env,
+    'KNOWLEDGE_SEARCH_MAX_LIMIT',
+    KNOWLEDGE_DEFAULTS.searchMaxLimit
+  );
+  const limit = Math.min(
+    parseInt(c.req.query('limit') || String(searchLimit), 10) || searchLimit,
+    searchMaxLimit
+  );
 
   const results = await projectDataService.searchKnowledgeObservations(
-    c.env, projectId, query, entityType, minConfidence, limit,
+    c.env,
+    projectId,
+    query,
+    entityType,
+    minConfidence,
+    limit
   );
 
   return c.json({ results, total: results.length });
@@ -110,7 +140,10 @@ knowledgeRoutes.get('/:entityId', async (c) => {
   if (!entity) throw errors.notFound('Entity not found');
 
   const observations = await projectDataService.getKnowledgeObservationsForEntity(
-    c.env, projectId, entityId, c.req.query('includeInactive') === 'true',
+    c.env,
+    projectId,
+    entityId,
+    c.req.query('includeInactive') === 'true'
   );
   const relations = await projectDataService.getKnowledgeRelated(c.env, projectId, entityId, null);
 
@@ -131,12 +164,26 @@ knowledgeRoutes.post('/', jsonValidator(CreateKnowledgeEntitySchema), async (c) 
     throw errors.badRequest(`Invalid entityType. Valid: ${KNOWLEDGE_ENTITY_TYPES.join(', ')}`);
   }
 
-  const nameMaxLen = getLimit(c.env, 'KNOWLEDGE_ENTITY_NAME_MAX_LENGTH', KNOWLEDGE_DEFAULTS.entityNameMaxLength);
+  const nameMaxLen = getLimit(
+    c.env,
+    'KNOWLEDGE_ENTITY_NAME_MAX_LENGTH',
+    KNOWLEDGE_DEFAULTS.entityNameMaxLength
+  );
   const name = body.name.trim().slice(0, nameMaxLen);
-  const description = body.description?.trim().slice(0, getLimit(c.env, 'KNOWLEDGE_DESCRIPTION_MAX_LENGTH', KNOWLEDGE_DEFAULTS.descriptionMaxLength)) ?? null;
+  const description =
+    body.description
+      ?.trim()
+      .slice(
+        0,
+        getLimit(c.env, 'KNOWLEDGE_DESCRIPTION_MAX_LENGTH', KNOWLEDGE_DEFAULTS.descriptionMaxLength)
+      ) ?? null;
 
   const result = await projectDataService.createKnowledgeEntity(
-    c.env, projectId, name, body.entityType, description,
+    c.env,
+    projectId,
+    name,
+    body.entityType,
+    description
   );
 
   return c.json(result, 201);
@@ -155,7 +202,11 @@ knowledgeRoutes.patch('/:entityId', jsonValidator(UpdateKnowledgeEntitySchema), 
   const updates: UpdateKnowledgeEntityRequest = {};
 
   if (body.name !== undefined) {
-    const nameMaxLen = getLimit(c.env, 'KNOWLEDGE_ENTITY_NAME_MAX_LENGTH', KNOWLEDGE_DEFAULTS.entityNameMaxLength);
+    const nameMaxLen = getLimit(
+      c.env,
+      'KNOWLEDGE_ENTITY_NAME_MAX_LENGTH',
+      KNOWLEDGE_DEFAULTS.entityNameMaxLength
+    );
     updates.name = body.name.trim().slice(0, nameMaxLen);
   }
   if (body.entityType !== undefined) {
@@ -165,7 +216,17 @@ knowledgeRoutes.patch('/:entityId', jsonValidator(UpdateKnowledgeEntitySchema), 
     updates.entityType = body.entityType;
   }
   if (body.description !== undefined) {
-    updates.description = body.description?.trim().slice(0, getLimit(c.env, 'KNOWLEDGE_DESCRIPTION_MAX_LENGTH', KNOWLEDGE_DEFAULTS.descriptionMaxLength)) ?? null;
+    updates.description =
+      body.description
+        ?.trim()
+        .slice(
+          0,
+          getLimit(
+            c.env,
+            'KNOWLEDGE_DESCRIPTION_MAX_LENGTH',
+            KNOWLEDGE_DEFAULTS.descriptionMaxLength
+          )
+        ) ?? null;
   }
 
   try {
@@ -202,17 +263,31 @@ knowledgeRoutes.post('/:entityId/observations', jsonValidator(AddObservationSche
   const body = c.req.valid('json');
   if (!body.content?.trim()) throw errors.badRequest('content is required');
 
-  const obsMaxLen = getLimit(c.env, 'KNOWLEDGE_OBSERVATION_MAX_LENGTH', KNOWLEDGE_DEFAULTS.observationMaxLength);
+  const obsMaxLen = getLimit(
+    c.env,
+    'KNOWLEDGE_OBSERVATION_MAX_LENGTH',
+    KNOWLEDGE_DEFAULTS.observationMaxLength
+  );
   const content = body.content.trim().slice(0, obsMaxLen);
-  const confidence = typeof body.confidence === 'number' ? Math.min(Math.max(0, body.confidence), 1) : KNOWLEDGE_DEFAULTS.defaultConfidence;
+  const confidence =
+    typeof body.confidence === 'number'
+      ? Math.min(Math.max(0, body.confidence), 1)
+      : KNOWLEDGE_DEFAULTS.defaultConfidence;
   const sourceType =
-    typeof body.sourceType === 'string' && (KNOWLEDGE_SOURCE_TYPES as readonly string[]).includes(body.sourceType)
+    typeof body.sourceType === 'string' &&
+    (KNOWLEDGE_SOURCE_TYPES as readonly string[]).includes(body.sourceType)
       ? body.sourceType
       : 'explicit';
 
   try {
     const result = await projectDataService.addKnowledgeObservation(
-      c.env, projectId, entityId, content, confidence, sourceType, null,
+      c.env,
+      projectId,
+      entityId,
+      content,
+      confidence,
+      sourceType,
+      null
     );
     return c.json(result, 201);
   } catch (err) {
@@ -222,41 +297,54 @@ knowledgeRoutes.post('/:entityId/observations', jsonValidator(AddObservationSche
 
 // ─── PATCH /observations/:observationId — update observation ────────────────
 
-knowledgeRoutes.patch('/observations/:observationId', jsonValidator(UpdateObservationSchema), async (c) => {
-  const auth = getAuth(c);
-  const projectId = requireParam(c.req.param('projectId'), 'projectId');
-  const observationId = requireParam(c.req.param('observationId'), 'observationId');
-  const db = drizzle(c.env.DATABASE, { schema });
-  await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
+knowledgeRoutes.patch(
+  '/observations/:observationId',
+  jsonValidator(UpdateObservationSchema),
+  async (c) => {
+    const auth = getAuth(c);
+    const projectId = requireParam(c.req.param('projectId'), 'projectId');
+    const observationId = requireParam(c.req.param('observationId'), 'observationId');
+    const db = drizzle(c.env.DATABASE, { schema });
+    await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
 
-  const body = c.req.valid('json');
-  if (body.content !== undefined && !body.content.trim()) {
-    throw errors.badRequest('content cannot be empty');
-  }
-
-  const obsMaxLen = getLimit(c.env, 'KNOWLEDGE_OBSERVATION_MAX_LENGTH', KNOWLEDGE_DEFAULTS.observationMaxLength);
-  const content = body.content?.trim().slice(0, obsMaxLen);
-  const confidence = typeof body.confidence === 'number' ? Math.min(Math.max(0, body.confidence), 1) : null;
-
-  if (!content && confidence === null) {
-    throw errors.badRequest('At least content or confidence must be provided');
-  }
-
-  try {
-    if (content) {
-      const result = await projectDataService.updateKnowledgeObservation(
-        c.env, projectId, observationId, content, confidence,
-      );
-      return c.json(result);
-    } else {
-      // confidence-only update — confirm pattern
-      await projectDataService.confirmKnowledgeObservation(c.env, projectId, observationId);
-      return c.json({ updated: true });
+    const body = c.req.valid('json');
+    if (body.content !== undefined && !body.content.trim()) {
+      throw errors.badRequest('content cannot be empty');
     }
-  } catch (err) {
-    throw errors.badRequest((err as Error).message);
+
+    const obsMaxLen = getLimit(
+      c.env,
+      'KNOWLEDGE_OBSERVATION_MAX_LENGTH',
+      KNOWLEDGE_DEFAULTS.observationMaxLength
+    );
+    const content = body.content?.trim().slice(0, obsMaxLen);
+    const confidence =
+      typeof body.confidence === 'number' ? Math.min(Math.max(0, body.confidence), 1) : null;
+
+    if (!content && confidence === null) {
+      throw errors.badRequest('At least content or confidence must be provided');
+    }
+
+    try {
+      if (content) {
+        const result = await projectDataService.updateKnowledgeObservation(
+          c.env,
+          projectId,
+          observationId,
+          content,
+          confidence
+        );
+        return c.json(result);
+      } else {
+        // confidence-only update — confirm pattern
+        await projectDataService.confirmKnowledgeObservation(c.env, projectId, observationId);
+        return c.json({ updated: true });
+      }
+    } catch (err) {
+      throw errors.badRequest((err as Error).message);
+    }
   }
-});
+);
 
 // ─── DELETE /observations/:observationId — remove observation ────────────────
 

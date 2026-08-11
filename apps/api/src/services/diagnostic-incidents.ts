@@ -591,7 +591,10 @@ function parseJsonColumn(value: string | null): unknown {
  * `null` (and is logged) instead of reaching callers with a blindly-cast,
  * possibly-missing `collectors` array.
  */
-function parseDiagnosticManifest(value: string | null, incidentId: string): DiagnosticIncidentManifest | null {
+function parseDiagnosticManifest(
+  value: string | null,
+  incidentId: string
+): DiagnosticIncidentManifest | null {
   const parsed = parseJsonColumn(value);
   if (parsed === null) return null;
   const result = v.safeParse(diagnosticIncidentManifestSchema, parsed);

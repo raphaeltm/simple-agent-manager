@@ -588,19 +588,21 @@ async function syncDirectUserInstallations(
     });
     if (accessibleInstallations.length === 0) return;
 
-    const canonicalInstallations = accessibleInstallations.filter((inst) =>
-      normalizeAccountType(inst.account.type) === 'organization' ||
-      isAuthenticatedUsersPersonalInstallation(inst, authenticatedGitHubUser)
+    const canonicalInstallations = accessibleInstallations.filter(
+      (inst) =>
+        normalizeAccountType(inst.account.type) === 'organization' ||
+        isAuthenticatedUsersPersonalInstallation(inst, authenticatedGitHubUser)
     );
     const syncableInstallations = accessibleInstallations.filter((inst) =>
       isAuthenticatedUsersPersonalInstallation(inst, authenticatedGitHubUser)
     );
-    const deferredOrgInstallationCount = accessibleInstallations.filter((inst) =>
-      normalizeAccountType(inst.account.type) === 'organization'
+    const deferredOrgInstallationCount = accessibleInstallations.filter(
+      (inst) => normalizeAccountType(inst.account.type) === 'organization'
     ).length;
-    const rejectedPersonalInstallationCount = accessibleInstallations.filter((inst) =>
-      normalizeAccountType(inst.account.type) === 'personal' &&
-      !isAuthenticatedUsersPersonalInstallation(inst, authenticatedGitHubUser)
+    const rejectedPersonalInstallationCount = accessibleInstallations.filter(
+      (inst) =>
+        normalizeAccountType(inst.account.type) === 'personal' &&
+        !isAuthenticatedUsersPersonalInstallation(inst, authenticatedGitHubUser)
     ).length;
     if (deferredOrgInstallationCount > 0) {
       log.info('github.installations_sync.deferred_org_installations', {

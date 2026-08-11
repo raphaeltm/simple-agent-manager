@@ -389,11 +389,7 @@ describe('webhook trigger management vertical slice', () => {
     });
 
     it('does not let one malformed filters_json row break the trigger list (good/bad/good)', async () => {
-      const response = await app.request(
-        '/api/projects/project-1/triggers',
-        undefined,
-        env
-      );
+      const response = await app.request('/api/projects/project-1/triggers', undefined, env);
 
       expect(response.status).toBe(200);
       const body = await response.json<{

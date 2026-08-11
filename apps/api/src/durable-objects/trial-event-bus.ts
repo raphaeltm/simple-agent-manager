@@ -96,10 +96,10 @@ export class TrialEventBus extends DurableObject<Env> {
     });
     if (this.closed) {
       log.warn('trial_event_bus.handleAppend.rejected_closed', {});
-      return new Response(
-        JSON.stringify({ error: 'closed' }),
-        { status: 409, headers: { 'content-type': 'application/json' } }
-      );
+      return new Response(JSON.stringify({ error: 'closed' }), {
+        status: 409,
+        headers: { 'content-type': 'application/json' },
+      });
     }
     let event: TrialEvent;
     try {

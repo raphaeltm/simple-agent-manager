@@ -74,9 +74,5 @@ export const UserMessageFade = memo(function UserMessageFade({
     return nodes;
   }, [text, baseCharDelayMs, maxTotalMs, fadeDurationMs, prefersReducedMotion]);
 
-  return (
-    <span aria-label={text}>
-      {elements}
-    </span>
-  );
+  return <span aria-label={text}>{elements}</span>;
 });

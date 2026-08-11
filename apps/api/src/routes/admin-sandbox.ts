@@ -17,11 +17,7 @@ import type { Env } from '../env';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { jsonValidator } from '../schemas';
-import {
-  getSandboxConfig,
-  getSandboxInstance,
-  requireSandbox,
-} from '../services/sandbox';
+import { getSandboxConfig, getSandboxInstance, requireSandbox } from '../services/sandbox';
 
 // All fields below are validated loosely (v.unknown(), wrapped in
 // v.optional() so an entirely-missing key doesn't trip Valibot's own
@@ -267,7 +263,8 @@ adminSandboxRoutes.post('/backup', jsonValidator(SandboxBackupSchema), async (c)
       throw errors.badRequest('backupId is required for restore action');
     }
     const rawBackupDir = body.backupDir;
-    const backupDir = typeof rawBackupDir === 'string' && rawBackupDir ? rawBackupDir : '/workspace';
+    const backupDir =
+      typeof rawBackupDir === 'string' && rawBackupDir ? rawBackupDir : '/workspace';
     const result = await sandbox.restoreBackup({
       id: backupId,
       dir: backupDir,

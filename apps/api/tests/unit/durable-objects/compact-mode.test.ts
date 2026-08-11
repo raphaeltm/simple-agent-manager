@@ -283,17 +283,21 @@ describe('getMessageToolContent', () => {
 
   it('returns content array for a valid message with tool_metadata', () => {
     const content = [{ type: 'content', text: 'hello' }];
-    const sql = makeSql([{ role: 'tool', tool_metadata: JSON.stringify({ toolCallId: 'tc-1', content }) }]);
+    const sql = makeSql([
+      { role: 'tool', tool_metadata: JSON.stringify({ toolCallId: 'tc-1', content }) },
+    ]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
     expect(result).toEqual(content);
   });
 
   it('round-trips normalized Codex output through compact metadata and lazy reload', () => {
-    const content = [{
-      type: 'terminal',
-      output: 'SAM_DURABLE_COMMAND_OUTPUT_112',
-      exitCode: 0,
-    }];
+    const content = [
+      {
+        type: 'terminal',
+        output: 'SAM_DURABLE_COMMAND_OUTPUT_112',
+        exitCode: 0,
+      },
+    ];
     const toolMetadata = {
       toolCallId: 'codex-command-1',
       title: 'Run shell command',
@@ -332,7 +336,12 @@ describe('getMessageToolContent', () => {
   });
 
   it('returns null when message is not a tool message', () => {
-    const sql = makeSql([{ role: 'assistant', tool_metadata: JSON.stringify({ content: [{ type: 'content', text: 'ignored' }] }) }]);
+    const sql = makeSql([
+      {
+        role: 'assistant',
+        tool_metadata: JSON.stringify({ content: [{ type: 'content', text: 'ignored' }] }),
+      },
+    ]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
     expect(result).toBeNull();
   });
@@ -344,7 +353,9 @@ describe('getMessageToolContent', () => {
   });
 
   it('returns empty content when tool_metadata has no content array', () => {
-    const sql = makeSql([{ role: 'tool', tool_metadata: JSON.stringify({ toolCallId: 'tc-1', title: 'Read' }) }]);
+    const sql = makeSql([
+      { role: 'tool', tool_metadata: JSON.stringify({ toolCallId: 'tc-1', title: 'Read' }) },
+    ]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
     expect(result).toEqual([]);
   });

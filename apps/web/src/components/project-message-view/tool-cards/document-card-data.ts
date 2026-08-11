@@ -70,9 +70,9 @@ function parseResultPayload(rawOutput: unknown): Record<string, unknown> | null 
   if (Array.isArray(rawOutput)) {
     for (const block of rawOutput) {
       if (
-        isJsonRecord(block)
-        && (block.type === 'text' || block.type === 'content')
-        && typeof block.text === 'string'
+        isJsonRecord(block) &&
+        (block.type === 'text' || block.type === 'content') &&
+        typeof block.text === 'string'
       ) {
         try {
           const parsed = JSON.parse(block.text) as unknown;
@@ -127,14 +127,14 @@ export function extractDocumentCardData(item: ToolCallItem): DocumentCardData {
   const result = parseResultPayload(item.rawOutput ?? item.content);
 
   const error = result ? str(result.error) : undefined;
-  const existingFile = result && isJsonRecord(result.existingFile) ? result.existingFile : undefined;
+  const existingFile =
+    result && isJsonRecord(result.existingFile) ? result.existingFile : undefined;
 
   // FILE_EXISTS surfaces the pre-existing file as the document to show.
   const source = existingFile ?? result ?? {};
 
   const fileId = str(source.id) ?? str(source.fileId) ?? str(input.fileId);
-  const fileName =
-    str(source.filename) ?? basename(str(input.filePath));
+  const fileName = str(source.filename) ?? basename(str(input.filePath));
   const mimeType = str(source.mimeType);
   const sizeBytes = num(source.sizeBytes);
   const caption = str(input.caption) ?? (result ? str(result.caption) : undefined);

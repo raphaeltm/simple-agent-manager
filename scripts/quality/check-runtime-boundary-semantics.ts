@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, lstatSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import { relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -25,6 +25,61 @@ interface Finding {
 const __filename = fileURLToPath(import.meta.url);
 const ROOT = resolve(__filename, '../..', '..');
 const DEFAULT_SCOPE = 'apps/api/src';
+const DEFAULT_EVIDENCE_PATH = resolve(
+  ROOT,
+  'scripts/quality/runtime-boundary-semantic-evidence.json'
+);
+
+// Blocking-promotion contract: scripts/quality/runtime-boundary-semantic-evidence.json
+// is the single source of truth for whether a given scope is enforced. When
+// evidence.blockingEnabled is true AND evidence.scope matches the scope this
+// run audits, a nonzero finding count exits nonzero even without the
+// `--fail-on-findings` CLI flag — see the "Promotion" section of
+// tasks/active/2026-08-10-ai-slop-debt-burndown.md. This mirrors the
+// checked-in-baseline-drives-exit-code pattern in check-type-boundaries.ts.
+export interface SemanticEvidence {
+  scope: string;
+  blockingEnabled: boolean;
+}
+
+export function parseSemanticEvidence(raw: string, path = '<memory>'): SemanticEvidence {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw) as unknown;
+  } catch {
+    throw new Error(`Invalid runtime-boundary semantic evidence at ${path}`);
+  }
+  if (typeof parsed !== 'object' || parsed === null) {
+    throw new Error(`Invalid runtime-boundary semantic evidence at ${path}`);
+  }
+  // Mirrors parseBoundaryBaseline's Partial<Baseline> idiom in the sibling
+  // check-type-boundaries.ts (a specific domain-shaped cast, not a broad
+  // Record<string, unknown>) so this local baseline-style parse doesn't add
+  // to the report-only type-boundary population.
+  const evidence = parsed as Partial<SemanticEvidence>;
+  if (
+    typeof evidence.scope !== 'string' ||
+    !evidence.scope ||
+    typeof evidence.blockingEnabled !== 'boolean'
+  ) {
+    throw new Error(`Invalid runtime-boundary semantic evidence at ${path}`);
+  }
+  return evidence as SemanticEvidence;
+}
+
+export function loadSemanticEvidence(path: string): SemanticEvidence {
+  return parseSemanticEvidence(readFileSync(path, 'utf8'), path);
+}
+
+/** True when the checked-in evidence says this exact scope is promoted to blocking. */
+export function isBlockingForScope(evidence: SemanticEvidence, scope: string): boolean {
+  return evidence.blockingEnabled && evidence.scope === scope;
+}
+
+/** Pure exit-code decision: nonzero only when there are findings AND the run should fail. */
+export function computeExitCode(findingsCount: number, shouldFail: boolean): 0 | 1 {
+  return findingsCount > 0 && shouldFail ? 1 : 0;
+}
 
 const sanctionedValidationNames = new Set([
   'jsonValidator',
@@ -244,10 +299,18 @@ export function auditRuntimeBoundarySemantics(root = ROOT, scope = DEFAULT_SCOPE
 }
 
 function main() {
-  const scopeArg = process.argv.slice(2).find((arg) => arg.startsWith('--scope='));
-  const shouldFail = process.argv.includes('--fail-on-findings');
-  const showDetails = shouldFail || process.argv.includes('--details');
+  const args = process.argv.slice(2);
+  const scopeArg = args.find((arg) => arg.startsWith('--scope='));
+  const evidenceArg = args.find((arg) => arg.startsWith('--evidence='));
+  const cliShouldFail = args.includes('--fail-on-findings');
   const scope = scopeArg?.slice('--scope='.length) ?? DEFAULT_SCOPE;
+  const evidencePath = evidenceArg
+    ? resolve(ROOT, evidenceArg.slice('--evidence='.length))
+    : DEFAULT_EVIDENCE_PATH;
+  const evidence = loadSemanticEvidence(evidencePath);
+  const blockingFromEvidence = isBlockingForScope(evidence, scope);
+  const shouldFail = cliShouldFail || blockingFromEvidence;
+  const showDetails = shouldFail || args.includes('--details');
   const findings = auditRuntimeBoundarySemantics(ROOT, scope);
   if (findings.length === 0) {
     console.log(`Runtime-boundary semantic checks passed for ${scope}.`);
@@ -264,14 +327,16 @@ function main() {
       .sort((left, right) => left.localeCompare(right))
       .map((rule) => [rule, findings.filter((finding) => finding.rule === rule).length])
   );
+  const label = blockingFromEvidence ? 'blocking' : 'shadow';
+  const qualifier = blockingFromEvidence ? '' : 'advisory ';
   console.log(
-    `Runtime-boundary semantic shadow: ${findings.length} advisory diagnostic(s) in ${scope} ` +
+    `Runtime-boundary semantic ${label}: ${findings.length} ${qualifier}diagnostic(s) in ${scope} ` +
       `(${Object.entries(counts)
         .map(([rule, count]) => `${rule}=${count}`)
         .join(', ')}).`
   );
   if (!showDetails) console.log('Run with --details for deterministic file:line diagnostics.');
-  if (shouldFail) process.exit(1);
+  if (computeExitCode(findings.length, shouldFail) === 1) process.exit(1);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main();

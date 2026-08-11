@@ -60,9 +60,8 @@ vi.mock('../../../src/lib/logger', () => ({
 }));
 
 async function buildApp() {
-  const { deploymentPublishJobCallbackRoute } = await import(
-    '../../../src/routes/projects/deployment-publish-job-callback'
-  );
+  const { deploymentPublishJobCallbackRoute } =
+    await import('../../../src/routes/projects/deployment-publish-job-callback');
   const app = new Hono();
   app.onError((err, c) => {
     if (err instanceof AppError) {

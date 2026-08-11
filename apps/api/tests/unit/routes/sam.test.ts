@@ -21,7 +21,9 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../../src/middleware/auth', () => ({
   requireAuth: () => async (c: Context, next: Next) => {
-    c.set('auth', { user: { id: 'user-1', email: 'u@test.dev', name: 'U', role: 'user', status: 'active' } });
+    c.set('auth', {
+      user: { id: 'user-1', email: 'u@test.dev', name: 'U', role: 'user', status: 'active' },
+    });
     await next();
   },
 }));
@@ -44,7 +46,10 @@ function makeApp(): Hono<{ Bindings: Env }> {
   app.onError((err, c) => {
     const appError = err as { statusCode?: number; error?: string; message?: string };
     if (typeof appError.statusCode === 'number' && typeof appError.error === 'string') {
-      return c.json({ error: appError.error, message: appError.message }, appError.statusCode as 400);
+      return c.json(
+        { error: appError.error, message: appError.message },
+        appError.statusCode as 400
+      );
     }
     return c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500);
   });
@@ -61,15 +66,21 @@ describe('sam chat route', () => {
   });
 
   it('forwards a valid chat message to the SamSession DO with the exact payload', async () => {
-    mocks.doFetch.mockResolvedValueOnce(new Response('data: hi\n\n', {
-      headers: { 'content-type': 'text/event-stream' },
-    }));
+    mocks.doFetch.mockResolvedValueOnce(
+      new Response('data: hi\n\n', {
+        headers: { 'content-type': 'text/event-stream' },
+      })
+    );
 
-    const res = await app.request(`${BASE}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ conversationId: 'conv-1', message: 'Hello SAM' }),
-    }, makeEnv());
+    const res = await app.request(
+      `${BASE}/chat`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId: 'conv-1', message: 'Hello SAM' }),
+      },
+      makeEnv()
+    );
 
     expect(res.status).toBe(200);
     expect(mocks.doFetch).toHaveBeenCalledWith(
@@ -82,27 +93,35 @@ describe('sam chat route', () => {
   });
 
   it('rejects a malformed body (wrong-type conversationId array with wrong-type message) with the standard 400 shape', async () => {
-    const res = await app.request(`${BASE}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ message: { nested: true } }),
-    }, makeEnv());
+    const res = await app.request(
+      `${BASE}/chat`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: { nested: true } }),
+      },
+      makeEnv()
+    );
 
     expect(res.status).toBe(400);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body.error).toBe('BAD_REQUEST');
     expect(mocks.doFetch).not.toHaveBeenCalled();
   });
 
   it('preserves the "Message is required" response for a missing message', async () => {
-    const res = await app.request(`${BASE}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({}),
-    }, makeEnv());
+    const res = await app.request(
+      `${BASE}/chat`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      },
+      makeEnv()
+    );
 
     expect(res.status).toBe(400);
-    const body = await res.json() as { error: string };
+    const body = (await res.json()) as { error: string };
     expect(body).toEqual({ error: 'Message is required' });
     expect(mocks.doFetch).not.toHaveBeenCalled();
   });

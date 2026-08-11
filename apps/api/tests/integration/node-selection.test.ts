@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 /**
  * Extract a section of source code between two marker strings.
@@ -23,7 +23,8 @@ function extractSection(source: string, startMarker: string, endMarker: string):
   const end = source.indexOf(endMarker, start + 1);
   if (start === -1) throw new Error(`Start marker not found: ${startMarker}`);
   if (end === -1) throw new Error(`End marker not found: ${endMarker}`);
-  if (end <= start) throw new Error(`End marker "${endMarker}" precedes start marker "${startMarker}"`);
+  if (end <= start)
+    throw new Error(`End marker "${endMarker}" precedes start marker "${startMarker}"`);
   return source.slice(start, end);
 }
 
@@ -48,7 +49,9 @@ const taskRunnerSource = [
   'agent-session-step.ts',
   'state-machine.ts',
   'helpers.ts',
-].map(f => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8')).join('\n');
+]
+  .map((f) => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8'))
+  .join('\n');
 
 // =============================================================================
 // Concurrent warm pool claiming — safety mechanisms
@@ -100,7 +103,7 @@ describe('concurrent warm pool claiming safety', () => {
       );
       // The defense-in-depth check re-queries D1
       expect(warmSection).toContain('freshNode');
-      expect(warmSection).toContain("eq(schema.nodes.id, warmNode.id)");
+      expect(warmSection).toContain('eq(schema.nodes.id, warmNode.id)');
     });
 
     it('skips node if D1 shows status changed to non-running', () => {
@@ -273,7 +276,10 @@ describe('capacity scoring consistency', () => {
     // task-runner.ts
     const trSort = taskRunnerSource.slice(
       taskRunnerSource.indexOf('async function findNodeWithCapacity('),
-      taskRunnerSource.indexOf('// ====', taskRunnerSource.indexOf('async function findNodeWithCapacity(') + 100)
+      taskRunnerSource.indexOf(
+        '// ====',
+        taskRunnerSource.indexOf('async function findNodeWithCapacity(') + 100
+      )
     );
     expect(trSort).toContain('aLoc');
     expect(trSort).toContain('aSize');

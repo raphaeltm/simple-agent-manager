@@ -2,7 +2,12 @@
  * File Library directory operations — move files and list directories.
  */
 
-import type { DirectoryEntry, FileStatus, FileUploadSource, ProjectFile } from '@simple-agent-manager/shared';
+import type {
+  DirectoryEntry,
+  FileStatus,
+  FileUploadSource,
+  ProjectFile,
+} from '@simple-agent-manager/shared';
 import { LIBRARY_DEFAULTS } from '@simple-agent-manager/shared';
 import { and, eq, like, sql } from 'drizzle-orm';
 
@@ -130,12 +135,14 @@ export async function listDirectories(
   projectId: string,
   parentDirectory: string = '/',
   env?: Env,
-  search?: string,
+  search?: string
 ): Promise<DirectoryEntry[]> {
   // When searching, query ALL directories in the project (not just children of parentDirectory)
   const useParent = search ? '/' : parentDirectory;
   const escapedParent = useParent.replace(/[%_]/g, '\\$&');
-  const maxDirs = env ? getMaxDirectoriesPerProject(env) : LIBRARY_DEFAULTS.MAX_DIRECTORIES_PER_PROJECT;
+  const maxDirs = env
+    ? getMaxDirectoriesPerProject(env)
+    : LIBRARY_DEFAULTS.MAX_DIRECTORIES_PER_PROJECT;
   const allDirs = await db
     .select({
       directory: schema.projectFiles.directory,

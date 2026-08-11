@@ -46,14 +46,20 @@ describe('ProjectAgent DO — Message Persistence', () => {
 
     const listResp = await stub.fetch('https://project-agent/conversations');
     expect(listResp.status).toBe(200);
-    const listData = (await listResp.json()) as { conversations: Array<{ id: string; title: string }> };
+    const listData = (await listResp.json()) as {
+      conversations: Array<{ id: string; title: string }>;
+    };
     const conv = listData.conversations.find((c) => c.id === conversationId);
     expect(conv).toBeTruthy();
     expect(conv!.title).toBe('Hello ProjectAgent');
 
-    const msgResp = await stub.fetch(`https://project-agent/conversations/${conversationId}/messages`);
+    const msgResp = await stub.fetch(
+      `https://project-agent/conversations/${conversationId}/messages`
+    );
     expect(msgResp.status).toBe(200);
-    const msgData = (await msgResp.json()) as { messages: Array<{ role: string; content: string; sequence: number }> };
+    const msgData = (await msgResp.json()) as {
+      messages: Array<{ role: string; content: string; sequence: number }>;
+    };
     const userMsg = msgData.messages.find((m) => m.role === 'user');
     expect(userMsg).toBeTruthy();
     expect(userMsg!.content).toBe('Hello ProjectAgent');
@@ -75,7 +81,9 @@ describe('ProjectAgent DO — Row Fault Isolation', () => {
 
     const listResp = await stub.fetch('https://project-agent/conversations');
     expect(listResp.status).toBe(200);
-    const listData = (await listResp.json()) as { conversations: Array<{ id: string; title: string }> };
+    const listData = (await listResp.json()) as {
+      conversations: Array<{ id: string; title: string }>;
+    };
     expect(listData.conversations.length).toBeGreaterThanOrEqual(1);
   });
 
@@ -94,7 +102,11 @@ describe('ProjectAgent DO — Row Fault Isolation', () => {
     const convId = text1.match(/"conversationId":"([^"]+)"/)?.[1];
     expect(convId).toBeTruthy();
 
-    const second = await sendChat(stub, { conversationId: convId, message: 'Good message two', projectId });
+    const second = await sendChat(stub, {
+      conversationId: convId,
+      message: 'Good message two',
+      projectId,
+    });
     await second.text();
 
     await runInDurableObject(stub, async (_instance, state) => {
@@ -113,7 +125,9 @@ describe('ProjectAgent DO — Row Fault Isolation', () => {
     const contents = msgData.messages.map((m) => m.content);
     expect(contents).toContain('Good message one');
     expect(contents).toContain('Good message two');
-    expect(msgData.messages.find((m) => m.id === 'msg-agent-malformed-row-fault-001')).toBeUndefined();
+    expect(
+      msgData.messages.find((m) => m.id === 'msg-agent-malformed-row-fault-001')
+    ).toBeUndefined();
   });
 
   // REGRESSION (rule 50 — single-row degrade): `rate_limits` was narrowed
@@ -129,7 +143,9 @@ describe('ProjectAgent DO — Row Fault Isolation', () => {
     await seed.text();
 
     await runInDurableObject(stub, async (_instance, state) => {
-      state.storage.sql.exec(`UPDATE rate_limits SET window_start = 'not-a-timestamp' WHERE id = 1`);
+      state.storage.sql.exec(
+        `UPDATE rate_limits SET window_start = 'not-a-timestamp' WHERE id = 1`
+      );
     });
 
     const resp = await sendChat(stub, { message: 'after corruption', projectId });

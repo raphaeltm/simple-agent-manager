@@ -80,8 +80,7 @@ const GITHUB_API_HEADERS = {
 
 function isValidDevcontainerConfigName(name: string): boolean {
   return (
-    DEVCONTAINER_CONFIG_NAME_REGEX.test(name) &&
-    name.length <= DEVCONTAINER_CONFIG_NAME_MAX_LENGTH
+    DEVCONTAINER_CONFIG_NAME_REGEX.test(name) && name.length <= DEVCONTAINER_CONFIG_NAME_MAX_LENGTH
   );
 }
 
@@ -106,7 +105,7 @@ async function githubPathExists(
   repo: string,
   path: string,
   branch: string,
-  headers: HeadersInit,
+  headers: HeadersInit
 ): Promise<boolean> {
   const response = await fetch(makeContentsUrl(owner, repo, path, branch), { headers });
   return response.ok;
@@ -152,7 +151,7 @@ async function fetchDevcontainerDirectory(
   owner: string,
   repo: string,
   branch: string,
-  headers: HeadersInit,
+  headers: HeadersInit
 ): Promise<GitHubContentsEntry[]> {
   const response = await fetch(makeContentsUrl(owner, repo, '.devcontainer', branch), { headers });
   if (!response.ok) return [];
@@ -165,7 +164,7 @@ async function findFallbackNamedConfigs(
   repo: string,
   branch: string,
   headers: HeadersInit,
-  entries: GitHubContentsEntry[],
+  entries: GitHubContentsEntry[]
 ): Promise<DevcontainerConfigEntry[]> {
   const configs: DevcontainerConfigEntry[] = [];
 
@@ -189,13 +188,19 @@ async function fetchDevcontainerConfigsFallback(
   owner: string,
   repo: string,
   branch: string,
-  token: string,
+  token: string
 ): Promise<{ defaultConfigExists: boolean; configs: DevcontainerConfigEntry[] }> {
   const headers = makeGitHubHeaders(token);
-  const rootDefaultExists = await githubPathExists(owner, repo, '.devcontainer.json', branch, headers);
+  const rootDefaultExists = await githubPathExists(
+    owner,
+    repo,
+    '.devcontainer.json',
+    branch,
+    headers
+  );
   const entries = await fetchDevcontainerDirectory(owner, repo, branch, headers);
   const directoryDefaultExists = entries.some(
-    (entry) => entry.name === 'devcontainer.json' && entry.type === 'file',
+    (entry) => entry.name === 'devcontainer.json' && entry.type === 'file'
   );
   const configs = await findFallbackNamedConfigs(owner, repo, branch, headers, entries);
 
@@ -207,8 +212,12 @@ export async function discoverGitHubDevcontainerConfigs(
   owner: string,
   repo: string,
   branch: string,
-  token: string,
-): Promise<{ defaultConfigExists: boolean; configs: DevcontainerConfigEntry[]; truncated: boolean }> {
+  token: string
+): Promise<{
+  defaultConfigExists: boolean;
+  configs: DevcontainerConfigEntry[];
+  truncated: boolean;
+}> {
   const treeResp = await fetch(
     `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/${encodeURIComponent(branch)}?recursive=1`,
     {
@@ -216,7 +225,7 @@ export async function discoverGitHubDevcontainerConfigs(
         ...GITHUB_API_HEADERS,
         Authorization: `Bearer ${token}`,
       },
-    },
+    }
   );
 
   if (!treeResp.ok) {
@@ -224,11 +233,11 @@ export async function discoverGitHubDevcontainerConfigs(
     throw new Error(`GitHub tree fetch failed: ${treeResp.status} ${errBody.slice(0, 200)}`.trim());
   }
 
-  const treeData = await treeResp.json() as GitTreeResponse;
+  const treeData = (await treeResp.json()) as GitTreeResponse;
 
   if (treeData.truncated) {
     return {
-      ...await fetchDevcontainerConfigsFallback(owner, repo, branch, token),
+      ...(await fetchDevcontainerConfigsFallback(owner, repo, branch, token)),
       truncated: true,
     };
   }
@@ -276,7 +285,7 @@ devcontainerConfigRoutes.get('/:projectId/devcontainer-configs', async (c) => {
       owner,
       repo,
       branch,
-      token,
+      token
     );
 
     return c.json({
@@ -292,7 +301,10 @@ devcontainerConfigRoutes.get('/:projectId/devcontainer-configs', async (c) => {
       projectId,
       error: err instanceof Error ? err.message : String(err),
     });
-    return c.json({ error: 'GITHUB_API_ERROR', message: 'Failed to discover devcontainer configs' }, 502);
+    return c.json(
+      { error: 'GITHUB_API_ERROR', message: 'Failed to discover devcontainer configs' },
+      502
+    );
   }
 });
 

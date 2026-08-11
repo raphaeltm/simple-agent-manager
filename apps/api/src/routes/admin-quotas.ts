@@ -107,12 +107,14 @@ adminQuotaRoutes.get('/users/:userId', async (c) => {
   );
 
   const rounded = Math.round(currentUsage * 100) / 100;
-  const remaining = quota.monthlyVcpuHoursLimit !== null
-    ? Math.round((quota.monthlyVcpuHoursLimit - currentUsage) * 100) / 100
-    : null;
-  const percentUsed = quota.monthlyVcpuHoursLimit !== null && quota.monthlyVcpuHoursLimit > 0
-    ? Math.round((rounded / quota.monthlyVcpuHoursLimit) * 100)
-    : null;
+  const remaining =
+    quota.monthlyVcpuHoursLimit !== null
+      ? Math.round((quota.monthlyVcpuHoursLimit - currentUsage) * 100) / 100
+      : null;
+  const percentUsed =
+    quota.monthlyVcpuHoursLimit !== null && quota.monthlyVcpuHoursLimit > 0
+      ? Math.round((rounded / quota.monthlyVcpuHoursLimit) * 100)
+      : null;
 
   return c.json({
     userId: targetUserId,

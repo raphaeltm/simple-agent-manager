@@ -1,5 +1,5 @@
-import type { ProjectDetailResponse,ProjectSummary } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useRef,useState } from 'react';
+import type { ProjectDetailResponse, ProjectSummary } from '@simple-agent-manager/shared';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import * as api from '../lib/api';
 
@@ -55,7 +55,9 @@ export function useProjectList(options: UseProjectListOptions = {}): UseProjectL
 }
 
 interface UseProjectDetailResult {
-  project: (ProjectDetailResponse & { recentSessions?: unknown[]; recentActivity?: unknown[] }) | null;
+  project:
+    | (ProjectDetailResponse & { recentSessions?: unknown[]; recentActivity?: unknown[] })
+    | null;
   loading: boolean;
   error: string | null;
   refresh: () => void;

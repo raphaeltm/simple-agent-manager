@@ -314,7 +314,11 @@ export class VmAgentContainer extends Container<Env> {
   }
 
   async inspectLifecycle(): Promise<VmAgentContainerLifecycleInspection> {
-    return inspectStoredVmAgentContainerLifecycle(this.ctx.storage, RECOVERY_STATE_KEY, ACTIVE_WORK_KEY);
+    return inspectStoredVmAgentContainerLifecycle(
+      this.ctx.storage,
+      RECOVERY_STATE_KEY,
+      ACTIVE_WORK_KEY
+    );
   }
 
   async renewActiveWorkKeepalive(): Promise<void> {

@@ -316,9 +316,7 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
   const attributionById = await attribution(db, c.env, project, [created]);
   const response: CreateTriggerResponse = {
     ...(await enrichTrigger(db, created, attributionById.get(id))),
-    webhookCredential: webhookToken
-      ? buildWebhookCredential(c.env, webhookToken.token)
-      : undefined,
+    webhookCredential: webhookToken ? buildWebhookCredential(c.env, webhookToken.token) : undefined,
   };
   log.info('trigger.created', { triggerId: id, projectId, sourceType: body.sourceType });
   if (webhookToken) c.header('Cache-Control', 'private, no-store');

@@ -33,7 +33,7 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
         onClose();
       }
     },
-    [onClose],
+    [onClose]
   );
 
   useEffect(() => {
@@ -61,9 +61,7 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
   };
 
   const truncatedPath =
-    currentDirectory.length > 40
-      ? '…' + currentDirectory.slice(-38)
-      : currentDirectory;
+    currentDirectory.length > 40 ? '…' + currentDirectory.slice(-38) : currentDirectory;
 
   return createPortal(
     <div
@@ -91,7 +89,10 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
         <form onSubmit={handleSubmit}>
           <label htmlFor="dir-name-input" className="block text-sm text-fg-muted mb-1">
             Creating in:{' '}
-            <span className="font-mono text-fg-primary truncate inline-block max-w-[200px] align-bottom" title={currentDirectory}>
+            <span
+              className="font-mono text-fg-primary truncate inline-block max-w-[200px] align-bottom"
+              title={currentDirectory}
+            >
               {truncatedPath}
             </span>
           </label>
@@ -133,6 +134,6 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
         </form>
       </div>
     </div>,
-    document.body,
+    document.body
   );
 };
