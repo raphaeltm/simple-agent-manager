@@ -157,10 +157,6 @@ interface WindowRange {
   end: Date;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function parseNumberEnv(name: string, fallback: number): number {
   const raw = process.env[name];
   if (raw === undefined || raw.trim() === '') return fallback;
@@ -315,7 +311,9 @@ query DurableObjectWallTime(
 }`;
 
 function parseGraphQLResponse(payload: unknown): DurableObjectWallTimeRow[] {
-  if (!isRecord(payload)) throw new Error('GraphQL response must be an object');
+  const payloadIsObject =
+    typeof payload === 'object' && payload !== null && !Array.isArray(payload);
+  if (!payloadIsObject) throw new Error('GraphQL response must be an object');
   const response = payload as GraphQLResponse;
   if (response.errors?.length) {
     throw new Error(
@@ -598,22 +596,39 @@ export function formatInvocationRateReport(
 }
 
 export function hasCronCompletedEvent(payload: unknown): boolean {
-  if (!isRecord(payload) || payload.success !== true) {
+  const payloadIsObject =
+    typeof payload === 'object' && payload !== null && !Array.isArray(payload);
+  if (!payloadIsObject || (payload as { success?: unknown }).success !== true) {
     throw new Error('Workers telemetry cron-liveness query was unsuccessful');
   }
-  const result = payload.result;
-  if (!isRecord(result)) return false;
-  if (Array.isArray(result.calculations)) {
-    return result.calculations.some((calculation) => {
-      if (!isRecord(calculation) || !Array.isArray(calculation.aggregates)) return false;
-      return calculation.aggregates.some(
-        (aggregate) => isRecord(aggregate) && Number(aggregate.value ?? aggregate.count ?? 0) > 0
-      );
+  const result = (payload as { result?: unknown }).result;
+  const resultIsObject = typeof result === 'object' && result !== null && !Array.isArray(result);
+  if (!resultIsObject) return false;
+  const { calculations, data } = result as { calculations?: unknown; data?: unknown };
+
+  if (Array.isArray(calculations)) {
+    return calculations.some((calculation: unknown) => {
+      const calculationIsObject =
+        typeof calculation === 'object' && calculation !== null && !Array.isArray(calculation);
+      if (!calculationIsObject) return false;
+      const { aggregates } = calculation as { aggregates?: unknown };
+      if (!Array.isArray(aggregates)) return false;
+      return aggregates.some((aggregate: unknown) => {
+        const aggregateIsObject =
+          typeof aggregate === 'object' && aggregate !== null && !Array.isArray(aggregate);
+        if (!aggregateIsObject) return false;
+        const { value, count } = aggregate as { value?: unknown; count?: unknown };
+        return Number(value ?? count ?? 0) > 0;
+      });
     });
   }
+
   return (
-    Array.isArray(result.data) &&
-    result.data.some((row) => isRecord(row) && Number(row.cnt ?? 0) > 0)
+    Array.isArray(data) &&
+    data.some((row: unknown) => {
+      const rowIsObject = typeof row === 'object' && row !== null && !Array.isArray(row);
+      return rowIsObject && Number((row as { cnt?: unknown }).cnt ?? 0) > 0;
+    })
   );
 }
 

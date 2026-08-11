@@ -11,7 +11,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type ExtraProps } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 const SAFE_MARKDOWN_URL_PROTOCOLS = new Set(['http:', 'https:']);
@@ -175,6 +175,10 @@ export const SyntaxHighlightedCode: FC<{ content: string; language: string }> = 
 
 // ---------- Markdown Rendering ----------
 
+// One child of a HAST element's `children` array (as produced by react-markdown's
+// `node` prop) — a union of comment/element/text nodes, narrowed via `.type`.
+type MarkdownHastChild = NonNullable<ExtraProps['node']>['children'][number];
+
 export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inline?: boolean }> = ({ content, style, inline }) => {
   return (
     <div
@@ -238,7 +242,9 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
           // We detect mermaid by inspecting the HAST node's code child className.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           pre: ({ node, children }: { node?: any; children?: ReactNode }) => {
-            const codeChild = node?.children?.find((c: any) => c.tagName === 'code');
+            const codeChild = node?.children?.find(
+              (c: MarkdownHastChild) => c.type === 'element' && c.tagName === 'code',
+            );
             if (codeChild?.properties?.className?.includes('language-mermaid')) {
               return <>{children}</>;
             }

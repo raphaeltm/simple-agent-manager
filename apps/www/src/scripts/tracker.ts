@@ -52,7 +52,7 @@ interface AnalyticsEvent {
   function safeDecode(value: string): string {
     try {
       return decodeURIComponent(value);
-    } catch (_) {
+    } catch {
       return value;
     }
   }
@@ -86,10 +86,10 @@ interface AnalyticsEvent {
   function toUrl(value: string): URL | null {
     try {
       return new URL(value);
-    } catch (_) {
+    } catch {
       try {
         return new URL(value, 'https://analytics.local');
-      } catch (_) {
+      } catch {
         return null;
       }
     }
@@ -118,7 +118,7 @@ interface AnalyticsEvent {
           : Date.now().toString(36) + Math.random().toString(36).slice(2);
       store.setItem(key, id);
       return id;
-    } catch (_) {
+    } catch {
       return '';
     }
   }
@@ -129,7 +129,7 @@ interface AnalyticsEvent {
   function utmParam(name: string): string {
     try {
       return new URLSearchParams(location.search).get(name) ?? '';
-    } catch (_) {
+    } catch {
       return '';
     }
   }

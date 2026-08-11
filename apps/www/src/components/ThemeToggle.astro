@@ -110,7 +110,10 @@ const { class: className } = Astro.props;
               'starlight-theme',
               pref === 'auto' ? '' : pref
             );
-          } catch {}
+          } catch {
+            // localStorage may be unavailable (private browsing, disabled
+            // storage) — theme still applies for this page load, just isn't persisted.
+          }
         }
         // Keep Starlight's own picker (docs) in sync if present on this page.
         const sl = document.querySelector('starlight-theme-select select');

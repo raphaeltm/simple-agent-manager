@@ -1,4 +1,5 @@
 #!/usr/bin/env tsx
+// FILE SIZE EXCEPTION: Deploy-critical Pulumi output -> wrangler.toml config generator; splitting deferred to tasks/backlog/2026-04-03-split-oversized-files.md to avoid coupling a structural refactor to this staging-gated PR. See .claude/rules/18-file-size-limits.md
 /**
  * Sync Pulumi outputs to wrangler.toml
  *

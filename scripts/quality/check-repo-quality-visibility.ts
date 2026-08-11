@@ -107,7 +107,35 @@ export function classifyFileSize(
 }
 
 function loadBaseline(): Baseline {
-  return JSON.parse(readFileSync(BASELINE_PATH, 'utf-8')) as Baseline;
+  const raw = JSON.parse(readFileSync(BASELINE_PATH, 'utf-8')) as unknown;
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error(`Invalid repo quality baseline at ${BASELINE_PATH}`);
+  }
+  const baseline = raw as Partial<Baseline>;
+
+  const isFiniteNumber = (value: unknown): value is number =>
+    typeof value === 'number' && Number.isFinite(value);
+  const budgets = baseline.fileSizeBudgets;
+  if (
+    typeof budgets !== 'object' ||
+    budgets === null ||
+    !isFiniteNumber(budgets.sourceWarnLines) ||
+    !isFiniteNumber(budgets.sourceOversizedLines) ||
+    !isFiniteNumber(budgets.testWarnLines) ||
+    !isFiniteNumber(budgets.testOversizedLines)
+  ) {
+    throw new Error(`Invalid fileSizeBudgets in repo quality baseline at ${BASELINE_PATH}`);
+  }
+
+  if (
+    typeof baseline.coverageThresholds !== 'object' ||
+    baseline.coverageThresholds === null ||
+    Array.isArray(baseline.coverageThresholds)
+  ) {
+    throw new Error(`Invalid coverageThresholds in repo quality baseline at ${BASELINE_PATH}`);
+  }
+
+  return baseline as Baseline;
 }
 
 function listCandidateFiles(): string[] {

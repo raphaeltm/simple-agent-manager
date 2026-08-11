@@ -33,7 +33,7 @@ value from state/ref). Never an inline object/array literal, and never an
 unmemoized `const value = {...}` built during render.
 
 Enforced by ESLint: `react/jsx-no-constructed-context-values` is `error` for
-all `.tsx` files (see `.eslintrc.cjs`). Do not disable it inline; fix the
+all `.tsx` files (see `eslint.config.mjs`). Do not disable it inline; fix the
 provider instead.
 
 ```tsx
