@@ -1,3 +1,4 @@
+import { isJsonRecord } from '../runtime-validation';
 import type { ResourceRequirements, ResourceRequirementsSource } from './resource';
 import type { CredentialProvider } from './user';
 import type { VMLocation, VMSize, WorkspaceProfile } from './workspace';
@@ -134,10 +135,6 @@ type OptionalStringValidationResult =
   | { ok: true; value?: string }
   | { ok: false; error: string };
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function optionalTrimmedString(
   value: unknown,
   field: string,
@@ -172,7 +169,7 @@ function validateEvidenceArray<T>(
 
   const parsed: T[] = [];
   for (const [index, item] of value.entries()) {
-    if (!isRecord(item)) {
+    if (!isJsonRecord(item)) {
       return { ok: false, error: `${field}[${index}] must be an object` };
     }
     const result = parseItem(item, index);
@@ -266,7 +263,7 @@ function validateCompletionVerification(
 }
 
 export function validateCompletionEvidence(value: unknown): CompletionEvidenceValidationResult {
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     return { ok: false, error: 'evidence must be an object' };
   }
 

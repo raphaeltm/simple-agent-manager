@@ -1,6 +1,5 @@
 import type {
   ListProjectsResponse,
-  Project,
   ProjectDetailResponse,
   RepoProvider,
   TaskStatus,
@@ -514,9 +513,7 @@ crudRoutes.get('/', async (c) => {
   }
 
   const response: ListProjectsResponse = {
-    projects: projects.map((p) =>
-      toProjectSummaryResponse(p, workspaceCountMap.get(p.id) ?? 0) as unknown as Project
-    ),
+    projects: projects.map((p) => toProjectSummaryResponse(p, workspaceCountMap.get(p.id) ?? 0)),
     nextCursor,
   };
 

@@ -32,8 +32,7 @@ export function useProjectList(options: UseProjectListOptions = {}): UseProjectL
     }
     try {
       const result = await api.listProjects(limit);
-      // The API now returns ProjectSummary objects via ListProjectsResponse
-      setProjects(result.projects as unknown as ProjectSummary[]);
+      setProjects(result.projects);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load projects');
