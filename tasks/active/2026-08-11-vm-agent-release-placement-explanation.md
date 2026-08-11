@@ -187,12 +187,15 @@ will be reviewed in one draft PR.
 - `pnpm typecheck` — passed; the WWW package reported its expected baseline-only note.
 - `pnpm build` — passed with the existing CSS minification and chunk-size warnings.
 - `pnpm test` — passed all 21 Turbo tasks; Web 255 files / 3,069 tests passed. The
-  final post-review API suite separately passed 538 files / 7,111 tests.
+  final post-review API suite separately passed 539 files / 7,114 tests.
 - `pnpm format:check` — passed the repository format ratchet.
 - Release-resolution and workflow focused suites — 93/93 passed.
 - Final manual-placement review suite — 41/41 API tests; shared placement parser —
   9/9; broader placement/persistence/API/MCP focused suites — 200+; UI placement unit
   tests — 3/3.
+- TaskRunner placement vertical slice — 3/3 passed against real in-memory SQLite,
+  covering reused and provision-new selection through workspace persistence/dispatch,
+  write-before-advance ordering, and a typed terminal provisioning timeout.
 - Local Playwright UI audit — 16/16 dark/light mobile/desktop scenarios passed with
   explicit horizontal-overflow and accessibility checks. No environment was deployed.
 
