@@ -86,6 +86,15 @@ PR validation covered the updated staging preflight but did not enforce the same
 
 Extend `scripts/quality/deployment-workflow-hardening.test.ts` so both marketing workflows must use the directly declared, catalog-pinned marketing workspace executable and may not use `npx wrangler`.
 
+## Validation evidence
+
+- Test-first contract failed against the pre-fix workflow and passed 9/9 after implementation.
+- An offline frozen install resolved `@simple-agent-manager/www` Wrangler 4.118.0 without registry access.
+- Full local gates passed: 13/13 lint tasks, 19/19 type/build tasks, 21/21 test tasks, 9/9 builds, and 32 quality files with 297 tests.
+- Task completion, Cloudflare, test, constitution, and documentation reviewers are PASS or ADDRESSED with no unresolved blocking finding.
+- The exact branch head `47774d3deb5a4f12789211c263ccdca812a29d53` completed the live `Deploy Marketing Site` workflow: https://github.com/raphaeltm/simple-agent-manager/actions/runs/31488280296
+- Wrangler 4.118.0 uploaded 153 files and produced `https://fbc054e7.sam-www.pages.dev/` plus branch alias `https://sam-looks-merged-couple-prs.sam-www.pages.dev/`; both returned HTTP 200.
+
 ## References
 
 - `.github/workflows/deploy-www.yml`
