@@ -231,7 +231,7 @@ export function sanitizePlacementExplanation(
   const evaluatedNodes = explanation.evaluatedNodes
     .slice(0, PLACEMENT_MAX_EVALUATED_NODES)
     .map((evaluation) => {
-      if (evaluation.accepted) return evaluation;
+      if (evaluation.nodeId === explanation.selectedNodeId) return evaluation;
       let alias = aliases.get(evaluation.nodeId);
       if (!alias) {
         alias = `candidate-${aliases.size + 1}`;

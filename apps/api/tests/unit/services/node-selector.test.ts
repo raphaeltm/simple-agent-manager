@@ -553,6 +553,74 @@ describe('selectNodeForTaskRun VM size minimum behavior', () => {
   });
 
   it.each([
+    ['capacity', undefined],
+    ['trial', 'trial'],
+  ] as const)(
+    'keeps only the selected real node ID on the %s path',
+    async (_path, selectionPath) => {
+      const db = createMockDb({
+        nodes: [
+          node({ id: 'selected-node', lastMetrics: JSON.stringify({ cpuLoadAvg1: 1 }) }),
+          node({ id: 'other-eligible-node', lastMetrics: JSON.stringify({ cpuLoadAvg1: 10 }) }),
+        ],
+      });
+
+      const result = await selectNodeWithExplanation(
+        db as never,
+        'user-1',
+        {},
+        {
+          vmSize: 'medium',
+          vmLocation: 'fsn1',
+          ...(selectionPath ? { selectionPath } : {}),
+        }
+      );
+
+      expect(result.node?.id).toBe('selected-node');
+      expect(result.explanation.selectedNodeId).toBe('selected-node');
+      expect(JSON.stringify(result.explanation)).not.toContain('other-eligible-node');
+      expect(result.explanation.evaluatedNodes.map((evaluation) => evaluation.nodeId)).toEqual([
+        'selected-node',
+        'candidate-1',
+      ]);
+    }
+  );
+
+  it('keeps only the claimed real node ID when several warm nodes qualify', async () => {
+    vi.mocked(nodeLifecycle.tryClaim).mockResolvedValue({ claimed: true });
+    const warmSince = new Date().toISOString();
+    const db = createMockDb({
+      nodes: [
+        node({
+          id: 'selected-warm-node',
+          warmSince,
+          lastMetrics: JSON.stringify({ cpuLoadAvg1: 1 }),
+        }),
+        node({
+          id: 'other-eligible-warm-node',
+          warmSince,
+          lastMetrics: JSON.stringify({ cpuLoadAvg1: 10 }),
+        }),
+      ],
+    });
+
+    const result = await selectNodeWithExplanation(
+      db as never,
+      'user-1',
+      { NODE_LIFECYCLE: {} as DurableObjectNamespace },
+      { vmSize: 'medium', vmLocation: 'fsn1', taskId: 'task-1' }
+    );
+
+    expect(result.node?.id).toBe('selected-warm-node');
+    expect(result.explanation.selectedNodeId).toBe('selected-warm-node');
+    expect(JSON.stringify(result.explanation)).not.toContain('other-eligible-warm-node');
+    expect(result.explanation.evaluatedNodes.map((evaluation) => evaluation.nodeId)).toEqual([
+      'selected-warm-node',
+      'candidate-1',
+    ]);
+  });
+
+  it.each([
     ['preferred', { preferredNodeId: 'incompatible-node' }],
     [
       'manual',
