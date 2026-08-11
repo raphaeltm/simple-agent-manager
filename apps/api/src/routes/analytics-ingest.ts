@@ -115,6 +115,7 @@ analyticsIngestRoutes.post('/', async (c) => {
   if (!c.env.ANALYTICS) {
     return c.body(null, 204);
   }
+  const analytics = c.env.ANALYTICS;
 
   const maxBodyBytes = parseInt(
     c.env.MAX_ANALYTICS_INGEST_BODY_BYTES || String(DEFAULT_MAX_BODY_BYTES),
@@ -203,7 +204,7 @@ analyticsIngestRoutes.post('/', async (c) => {
         // (browsers enforce Origin on cross-origin requests; client JSON body is untrusted)
         const host = serverHost || validated.host;
 
-        c.env.ANALYTICS!.writeDataPoint({
+        analytics.writeDataPoint({
           indexes: [index],
           blobs: [
             validated.event,       // blob1: event name

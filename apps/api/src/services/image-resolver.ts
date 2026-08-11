@@ -158,7 +158,8 @@ function parseBearerChallenge(header: string): { realm: string; service?: string
   const match = BEARER_CHALLENGE_RE.exec(header);
   if (!match) return null;
 
-  const params = match[1]!;
+  const [, params] = match;
+  if (params === undefined) return null;
   const realm = extractParam(params, 'realm');
   if (!realm) return null;
 

@@ -217,13 +217,14 @@ deploymentSecretRoutes.delete(
       )
       .limit(1);
 
-    if (existing.length === 0) {
+    const existingSecret = existing[0];
+    if (!existingSecret) {
       throw errors.notFound('Secret');
     }
 
     await db
       .delete(schema.deploymentSecrets)
-      .where(eq(schema.deploymentSecrets.id, existing[0]!.id));
+      .where(eq(schema.deploymentSecrets.id, existingSecret.id));
 
     // Mark environment as having updated secrets
     await touchSecretsTimestamp(db, envId);

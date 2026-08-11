@@ -89,7 +89,8 @@ export async function moveFile(
       )
     )
     .limit(1);
-  if (collision.length > 0 && collision[0]!.id !== fileId) {
+  const collisionRow = collision[0];
+  if (collisionRow && collisionRow.id !== fileId) {
     throw errors.conflict(`File "${newFilename}" already exists in directory "${newDirectory}"`);
   }
 
@@ -113,7 +114,11 @@ export async function moveFile(
     .from(schema.projectFiles)
     .where(eq(schema.projectFiles.id, fileId))
     .limit(1);
-  return rowToProjectFile(updated[0]!);
+  const updatedRow = updated[0];
+  if (!updatedRow) {
+    throw new Error(`File ${fileId} disappeared after being moved`);
+  }
+  return rowToProjectFile(updatedRow);
 }
 
 // ---------------------------------------------------------------------------
@@ -162,13 +167,20 @@ export async function listDirectories(
     }
 
     return Array.from(matchedDirs.entries())
-      .map(([path, fileCount]) => {
+      .flatMap(([path, fileCount]) => {
         const segments = path.split('/').filter(Boolean);
-        return {
-          path,
-          name: segments[segments.length - 1]!,
-          fileCount,
-        };
+        const name = segments.at(-1);
+        if (name === undefined) {
+          // Every path in matchedDirs matched a non-empty segment search, so
+          // this should never happen — skip defensively rather than surface
+          // a corrupt entry.
+          log.warn('file_library_list_directories.invalid_search_path_skipped', {
+            projectId,
+            path,
+          });
+          return [];
+        }
+        return [{ path, name, fileCount }];
       })
       .sort((a, b) => a.name.localeCompare(b.name));
   }
@@ -199,13 +211,21 @@ export async function listDirectories(
   }
 
   return Array.from(childDirs.entries())
-    .map(([path, fileCount]) => {
+    .flatMap(([path, fileCount]) => {
       const segments = path.split('/').filter(Boolean);
-      return {
-        path,
-        name: segments[segments.length - 1]!,
-        fileCount,
-      };
+      const name = segments.at(-1);
+      if (name === undefined) {
+        // childPath is always built from at least one non-empty segment
+        // (segments.length > parentDepth >= 0 was checked above), so this
+        // should never happen — skip defensively rather than surface a
+        // corrupt entry.
+        log.warn('file_library_list_directories.invalid_child_path_skipped', {
+          projectId,
+          path,
+        });
+        return [];
+      }
+      return [{ path, name, fileCount }];
     })
     .sort((a, b) => a.name.localeCompare(b.name));
 }

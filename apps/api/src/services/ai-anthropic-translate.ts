@@ -297,9 +297,9 @@ export function createAnthropicToOpenAIStream(model: string): TransformStream<Ui
 function normalizeContent(content: string | ContentPart[] | null): AnthropicContentBlock[] {
   if (!content) return [{ type: 'text', text: '' }];
   if (typeof content === 'string') return [{ type: 'text', text: content }];
-  return content
-    .filter((p) => p.type === 'text' && p.text)
-    .map((p) => ({ type: 'text' as const, text: p.text! }));
+  return content.flatMap((p) =>
+    p.type === 'text' && p.text ? [{ type: 'text' as const, text: p.text }] : []
+  );
 }
 
 function mergeConsecutiveMessages(messages: AnthropicMessage[]): AnthropicMessage[] {

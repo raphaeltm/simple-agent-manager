@@ -248,6 +248,22 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
     throw errors.badRequest(`maxConcurrent must be between 1 and ${maxConcurrentLimit}`);
   }
 
+  // validateCron() above already throws when cronExpression is falsy for a
+  // 'cron' trigger, but that guarantee doesn't propagate back onto
+  // body.cronExpression's type here — re-check explicitly instead of
+  // asserting.
+  let cronExpression: string | null = null;
+  let cronTimezone: string | null = null;
+  let nextFireAt: string | null = null;
+  if (body.sourceType === 'cron') {
+    if (!body.cronExpression) {
+      throw errors.badRequest('cronExpression is required for cron triggers');
+    }
+    cronExpression = body.cronExpression;
+    cronTimezone = body.cronTimezone ?? 'UTC';
+    nextFireAt = cronToNextFire(cronExpression, cronTimezone);
+  }
+
   const id = ulid();
   const now = new Date().toISOString();
   const values: schema.NewTriggerRow = {
@@ -258,8 +274,8 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
     description: body.description?.trim() || null,
     status: 'active',
     sourceType: body.sourceType,
-    cronExpression: body.sourceType === 'cron' ? body.cronExpression! : null,
-    cronTimezone: body.sourceType === 'cron' ? (body.cronTimezone ?? 'UTC') : null,
+    cronExpression,
+    cronTimezone,
     skipIfRunning: body.skipIfRunning ?? true,
     promptTemplate,
     agentProfileId: body.agentProfileId ?? null,
@@ -267,10 +283,7 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
     taskMode: body.taskMode ?? 'task',
     vmSizeOverride: body.vmSizeOverride ?? null,
     maxConcurrent,
-    nextFireAt:
-      body.sourceType === 'cron'
-        ? cronToNextFire(body.cronExpression!, body.cronTimezone ?? 'UTC')
-        : null,
+    nextFireAt,
     createdAt: now,
     updatedAt: now,
   };
@@ -447,10 +460,15 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
     const expression = body.cronExpression ?? trigger.cronExpression ?? undefined;
     const timezone = body.cronTimezone ?? trigger.cronTimezone ?? 'UTC';
     validateCron(c.env, expression, timezone);
+    if (!expression) {
+      // validateCron() above already throws when expression is falsy —
+      // should never happen.
+      throw errors.badRequest('cronExpression is required for cron triggers');
+    }
     updates.cronExpression = expression;
     updates.cronTimezone = timezone;
     if ((body.status ?? trigger.status) === 'active') {
-      updates.nextFireAt = cronToNextFire(expression!, timezone);
+      updates.nextFireAt = cronToNextFire(expression, timezone);
     }
   }
   if (body.status !== undefined) {

@@ -242,7 +242,7 @@ describe('selectNodeForTaskRun capacity path', () => {
   it('sorts candidates by location match, then size match, then load score', () => {
     const sortSection = selectorSource.slice(
       selectorSource.indexOf('Sort candidates'),
-      selectorSource.indexOf('return candidates[0]')
+      selectorSource.indexOf('const best = candidates[0]')
     );
     // Location first
     expect(sortSection).toContain('aLocationMatch');
@@ -257,13 +257,14 @@ describe('selectNodeForTaskRun capacity path', () => {
   });
 
   it('returns the first candidate (lowest load, best match)', () => {
-    expect(selectorSource).toContain('return candidates[0]!');
+    expect(selectorSource).toContain('const best = candidates[0];');
+    expect(selectorSource).toContain('return best;');
   });
 
   it('nodes with null metrics are ranked lower than nodes with scores', () => {
     const sortSection = selectorSource.slice(
       selectorSource.indexOf('Sort candidates'),
-      selectorSource.indexOf('return candidates[0]')
+      selectorSource.indexOf('const best = candidates[0]')
     );
     // null scores go to end
     expect(sortSection).toContain('aScore === null');
@@ -352,7 +353,7 @@ describe('selectNodeForTaskRun edge cases', () => {
   it('handles preferred location and size being undefined in capacity sort', () => {
     const capacitySort = selectorSource.slice(
       selectorSource.indexOf('Sort candidates'),
-      selectorSource.indexOf('return candidates[0]')
+      selectorSource.indexOf('const best = candidates[0]')
     );
     expect(capacitySort).toContain('preferredLocation &&');
     expect(capacitySort).toContain('preferredSize &&');

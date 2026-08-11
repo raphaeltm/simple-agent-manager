@@ -495,8 +495,14 @@ export async function handleAddDependency(
   }
 
   // Authorization: caller must be parent of both tasks, or caller is a sibling
-  const taskA = tasks.find((t) => t.id === taskId)!;
-  const taskB = tasks.find((t) => t.id === dependsOnTaskId)!;
+  const taskA = tasks.find((t) => t.id === taskId);
+  const taskB = tasks.find((t) => t.id === dependsOnTaskId);
+  if (!taskA || !taskB) {
+    // tasks.length === 2 with an inArray([taskId, dependsOnTaskId]) filter and
+    // distinct ids (checked above) guarantees both are present — this should
+    // never happen.
+    return jsonRpcError(requestId, INTERNAL_ERROR, 'Task lookup mismatch while checking dependency');
+  }
 
   const callerIsParentOfBoth =
     taskA.parentTaskId === tokenData.taskId &&
@@ -567,7 +573,11 @@ export async function handleAddDependency(
     if (++bfsIterations > MAX_BFS_ITERATIONS) {
       return jsonRpcError(requestId, INTERNAL_ERROR, 'Dependency graph too complex for cycle check');
     }
-    const current = queue.shift()!;
+    const current = queue.shift();
+    if (current === undefined) {
+      // queue.length > 0 was just checked above, so this should never happen.
+      continue;
+    }
     if (current === taskId) {
       return jsonRpcError(
         requestId,

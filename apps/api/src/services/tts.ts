@@ -497,7 +497,11 @@ export async function generateSpeechAudio(
   const chunks = splitTextIntoChunks(text, chunkSize);
 
   if (chunks.length === 1) {
-    return generateSpeechAudioChunk(chunks[0]!, ai, config);
+    const [chunk] = chunks;
+    if (chunk === undefined) {
+      throw new Error('Internal error: expected exactly one text chunk');
+    }
+    return generateSpeechAudioChunk(chunk, ai, config);
   }
 
   // Guard against CPU time exhaustion on Workers runtime
@@ -521,9 +525,7 @@ export async function generateSpeechAudio(
 
   // Generate audio for each chunk sequentially to avoid rate limiting
   const audioBuffers: ArrayBuffer[] = [];
-  for (let i = 0; i < chunks.length; i++) {
-    const chunkText = chunks[i]!;
-
+  for (const [i, chunkText] of chunks.entries()) {
     // Try per-chunk R2 cache first
     if (r2 && storageId && userId) {
       const chunkKey = buildChunkR2Key(storageId, userId, i, chunkText, config);

@@ -113,7 +113,7 @@ export class NotificationService extends DurableObject<Env> {
         .toArray();
 
       if (existing.length > 0) {
-        const existingId = parseIdRow(existing[0]!, 'notification.progress_dedup');
+        const existingId = parseIdRow(existing[0], 'notification.progress_dedup');
         this.sql.exec(
           `UPDATE notifications SET body = ?, title = ?, metadata = ?, read_at = NULL WHERE id = ?`,
           request.body ?? null,
@@ -144,7 +144,7 @@ export class NotificationService extends DurableObject<Env> {
         .toArray();
       if (existing.length > 0) {
         // Update the existing unread needs_input notification instead of creating a new one
-        const existingId = parseIdRow(existing[0]!, 'notification.needs_input_dedup');
+        const existingId = parseIdRow(existing[0], 'notification.needs_input_dedup');
         this.sql.exec(
           `UPDATE notifications SET body = ?, title = ?, read_at = NULL WHERE id = ?`,
           request.body ?? null,
@@ -271,8 +271,9 @@ export class NotificationService extends DurableObject<Env> {
     const items = hasMore ? rows.slice(0, pageSize) : rows;
 
     const notifications = items.map((row) => parseNotificationRow(row));
-    const nextCursor = hasMore && notifications.length > 0
-      ? String(new Date(notifications[notifications.length - 1]!.createdAt).getTime())
+    const lastNotification = notifications.at(-1);
+    const nextCursor = hasMore && lastNotification
+      ? String(new Date(lastNotification.createdAt).getTime())
       : null;
 
     const unreadCount = this.getUnreadCount(userId);
@@ -391,7 +392,7 @@ export class NotificationService extends DurableObject<Env> {
         )
         .toArray();
       if (rows.length > 0) {
-        return parseEnabled(rows[0]!, 'notification.pref_project');
+        return parseEnabled(rows[0], 'notification.pref_project');
       }
     }
 
@@ -406,7 +407,7 @@ export class NotificationService extends DurableObject<Env> {
       )
       .toArray();
     if (typeRows.length > 0) {
-      return parseEnabled(typeRows[0]!, 'notification.pref_type');
+      return parseEnabled(typeRows[0], 'notification.pref_type');
     }
 
     // Check wildcard global preference
@@ -419,7 +420,7 @@ export class NotificationService extends DurableObject<Env> {
       )
       .toArray();
     if (globalRows.length > 0) {
-      return parseEnabled(globalRows[0]!, 'notification.pref_global');
+      return parseEnabled(globalRows[0], 'notification.pref_global');
     }
 
     // Default: enabled
@@ -503,7 +504,7 @@ export class NotificationService extends DurableObject<Env> {
       .exec(`SELECT * FROM notifications WHERE id = ?`, id)
       .toArray();
     if (rows.length === 0) return null;
-    return parseNotificationRow(rows[0]!);
+    return parseNotificationRow(rows[0]);
   }
 
   private getUnreadCount(userId: string): number {

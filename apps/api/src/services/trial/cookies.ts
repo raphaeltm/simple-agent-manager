@@ -47,7 +47,7 @@ export interface TrialClaimPayload {
 function base64urlEncode(bytes: Uint8Array): string {
   // btoa requires a binary string; Uint8Array iteration is safe for bytes.
   let binary = '';
-  for (let i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]!);
+  for (const byte of bytes) binary += String.fromCharCode(byte);
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 

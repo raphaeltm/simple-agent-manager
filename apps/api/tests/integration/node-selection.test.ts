@@ -266,7 +266,7 @@ describe('capacity scoring consistency', () => {
     // node-selector.ts
     const selectorSort = selectorSource.slice(
       selectorSource.indexOf('Sort candidates'),
-      selectorSource.indexOf('return candidates[0]')
+      selectorSource.indexOf('const best = candidates[0]')
     );
     expect(selectorSort).toContain('aLocationMatch');
 

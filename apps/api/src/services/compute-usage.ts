@@ -142,9 +142,7 @@ export function calculateNodeVcpuHours(
       continue;
     }
 
-    for (let i = 1; i < nodeIntervals.length; i++) {
-      const next = nodeIntervals[i]!;
-
+    for (const next of nodeIntervals.slice(1)) {
       if (next.startMs <= current.endMs) {
         current.endMs = Math.max(current.endMs, next.endMs);
         current.vcpuCount = Math.max(current.vcpuCount, next.vcpuCount);
@@ -339,9 +337,8 @@ export async function getAllUsersUsageSummary(
     .where(inArray(schema.users.id, userIds));
 
   const userLookup = new Map(users.map((u) => [u.id, u]));
-  const summaries: AdminUserUsageSummary[] = userIds
-    .map((userId) => {
-      const usage = userMap.get(userId)!;
+  const summaries: AdminUserUsageSummary[] = Array.from(userMap.entries())
+    .map(([userId, usage]) => {
       const user = userLookup.get(userId);
       return {
         userId,

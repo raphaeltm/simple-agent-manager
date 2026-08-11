@@ -267,8 +267,11 @@ deploymentEnvironmentRoutes.post(
       .from(schema.deploymentEnvironments)
       .where(eq(schema.deploymentEnvironments.id, id))
       .limit(1);
+    if (!created) {
+      throw new Error(`Deployment environment ${id} disappeared immediately after creation`);
+    }
 
-    return c.json(await buildDeploymentEnvironmentResponse(db, c.env, created!), 201);
+    return c.json(await buildDeploymentEnvironmentResponse(db, c.env, created), 201);
   }
 );
 
@@ -421,15 +424,18 @@ deploymentEnvironmentRoutes.patch(
       .from(schema.deploymentEnvironments)
       .where(eq(schema.deploymentEnvironments.id, envId))
       .limit(1);
+    if (!updated) {
+      throw new Error(`Deployment environment ${envId} disappeared immediately after update`);
+    }
 
     log.info('deployment_environment.policy_updated', {
       projectId,
       envId,
-      agentDeployEnabled: updated?.agentDeployEnabled,
+      agentDeployEnabled: updated.agentDeployEnabled,
       allowedProfileCount: uniqueDeployProfileIds(body.allowedDeployProfileIds).length,
     });
 
-    return c.json(await buildDeploymentEnvironmentResponse(db, c.env, updated!));
+    return c.json(await buildDeploymentEnvironmentResponse(db, c.env, updated));
   }
 );
 
@@ -563,10 +569,10 @@ deploymentEnvironmentRoutes.delete(
       )
       .limit(1);
 
-    if (envRows.length === 0) {
+    const environment = envRows[0];
+    if (!environment) {
       throw errors.notFound('Deployment environment');
     }
-    const environment = envRows[0]!;
 
     // Reconstruct app-route hostnames from each release's manifest before the
     // cascade delete removes the rows.

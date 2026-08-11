@@ -84,7 +84,8 @@ knowledgeRoutes.get('/search', async (c) => {
   if (!query.trim()) throw errors.badRequest('Query parameter "q" is required');
 
   const entityType = c.req.query('entityType') || null;
-  const minConfidence = c.req.query('minConfidence') ? parseFloat(c.req.query('minConfidence')!) : null;
+  const minConfidenceRaw = c.req.query('minConfidence');
+  const minConfidence = minConfidenceRaw ? parseFloat(minConfidenceRaw) : null;
   const searchLimit = getLimit(c.env, 'KNOWLEDGE_SEARCH_LIMIT', KNOWLEDGE_DEFAULTS.searchLimit);
   const searchMaxLimit = getLimit(c.env, 'KNOWLEDGE_SEARCH_MAX_LIMIT', KNOWLEDGE_DEFAULTS.searchMaxLimit);
   const limit = Math.min(parseInt(c.req.query('limit') || String(searchLimit), 10) || searchLimit, searchMaxLimit);

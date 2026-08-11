@@ -150,12 +150,18 @@ githubRoutes.get('/repositories', requireAuth(), requireApproved(), async (c) =>
 
   const allRepos: Repository[] = [];
   const failedInstallations: string[] = [];
-  for (let i = 0; i < repoResults.length; i++) {
-    const result = repoResults[i]!;
+  for (const [i, result] of repoResults.entries()) {
+    // repoResults is 1:1 with targetInstallations (produced via
+    // targetInstallations.map(...)), so this index is always in range —
+    // guard defensively rather than crash the whole repos listing.
+    const inst = targetInstallations[i];
+    if (!inst) {
+      log.error('github.get_repos_result_index_mismatch', { index: i });
+      continue;
+    }
     if (result.status === 'fulfilled') {
       allRepos.push(...result.value);
     } else {
-      const inst = targetInstallations[i]!;
       log.error('github.get_repos_failed', {
         accountName: inst.accountName,
         installationId: inst.id,
@@ -363,8 +369,8 @@ githubRoutes.get('/callback', optionalAuth(), async (c) => {
       return c.redirect(`${settingsUrl}?github_app=error&reason=installation_not_accessible`);
     }
 
-    if (existing.length > 0) {
-      const existingInstallation = existing[0]!;
+    const existingInstallation = existing[0];
+    if (existingInstallation) {
       await upsertCanonicalInstallationAccount(
         db,
         {

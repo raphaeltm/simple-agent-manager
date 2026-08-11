@@ -164,8 +164,8 @@ export function parseGithubRepoUrl(url: string): ParsedRepoUrl | null {
       trimmed
     );
   if (!match) return null;
-  const owner = match[1]!;
-  const name = match[2]!;
+  const [, owner, name] = match;
+  if (owner === undefined || name === undefined) return null;
   return { owner, name, canonical: `https://github.com/${owner}/${name}` };
 }
 

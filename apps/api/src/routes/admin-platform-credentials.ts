@@ -169,7 +169,10 @@ adminPlatformCredentialRoutes.patch('/:id', jsonValidator(UpdatePlatformCredenti
     .where(eq(schema.platformCredentials.id, credentialId))
     .limit(1);
 
-  const row = updated[0]!;
+  const row = updated[0];
+  if (!row) {
+    throw new Error(`Platform credential ${credentialId} disappeared immediately after update`);
+  }
   const response: PlatformCredentialResponse = {
     id: row.id,
     credentialType: row.credentialType as PlatformCredentialResponse['credentialType'],

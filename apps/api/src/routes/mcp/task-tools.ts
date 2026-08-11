@@ -715,9 +715,19 @@ export async function handleSearchTasks(
   const db = drizzle(env.DATABASE, { schema });
   const searchPattern = `%${query}%`;
 
+  const titleOrDescriptionMatch = or(
+    like(schema.tasks.title, searchPattern),
+    like(schema.tasks.description, searchPattern)
+  );
+  if (!titleOrDescriptionMatch) {
+    // or() only returns undefined when given zero defined conditions — both
+    // like() calls above always return a defined SQL expression.
+    throw new Error('Internal error: failed to build task search condition');
+  }
+
   const conditions: SQL[] = [
     eq(schema.tasks.projectId, tokenData.projectId),
-    or(like(schema.tasks.title, searchPattern), like(schema.tasks.description, searchPattern))!,
+    titleOrDescriptionMatch,
   ];
 
   if (status) {

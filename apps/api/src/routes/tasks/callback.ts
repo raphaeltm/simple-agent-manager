@@ -71,6 +71,7 @@ taskCallbackRoute.post('/:projectId/tasks/:taskId/status/callback', jsonValidato
   if (!task.workspaceId || payload.workspace !== task.workspaceId) {
     throw errors.forbidden('Token workspace mismatch');
   }
+  const workspaceId = task.workspaceId;
 
   // --- Execution-step-only update (no status transition) ---
   // When executionStep is provided without toStatus, update the step and
@@ -165,7 +166,7 @@ taskCallbackRoute.post('/:projectId/tasks/:taskId/status/callback', jsonValidato
           const [ws] = await db
             .select({ chatSessionId: schema.workspaces.chatSessionId })
             .from(schema.workspaces)
-            .where(eq(schema.workspaces.id, task.workspaceId!))
+            .where(eq(schema.workspaces.id, workspaceId))
             .limit(1);
 
           await projectDataService.recordActivityEvent(
@@ -305,7 +306,7 @@ taskCallbackRoute.post('/:projectId/tasks/:taskId/status/callback', jsonValidato
           const [ws] = await db
             .select({ chatSessionId: schema.workspaces.chatSessionId })
             .from(schema.workspaces)
-            .where(eq(schema.workspaces.id, updatedTask.workspaceId!))
+            .where(eq(schema.workspaces.id, workspaceId))
             .limit(1);
           const sessionId = ws?.chatSessionId ?? null;
 

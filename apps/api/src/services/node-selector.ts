@@ -342,5 +342,11 @@ export async function selectNodeForTaskRun(
     return aScore - bScore;
   });
 
-  return candidates[0]!;
+  const best = candidates[0];
+  if (!best) {
+    // candidates.length === 0 was already handled above, and sort() does not
+    // change the array length — this should never happen.
+    return null;
+  }
+  return best;
 }

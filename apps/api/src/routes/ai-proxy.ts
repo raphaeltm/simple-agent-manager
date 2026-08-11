@@ -654,7 +654,12 @@ aiProxyRoutes.post('/chat/completions', async (c) => {
   try {
     let response: Response;
     if (provider === 'anthropic') {
-      response = await forwardToAnthropic(c.env, body, modelId, aigMetadata, anthropicAuth!);
+      if (!anthropicAuth) {
+        // provider === 'anthropic' guarantees anthropicAuth was resolved above
+        // (the function already returned on failure) — should never happen.
+        throw new Error('Internal error: missing Anthropic upstream auth for anthropic provider');
+      }
+      response = await forwardToAnthropic(c.env, body, modelId, aigMetadata, anthropicAuth);
     } else if (provider === 'openai') {
       response = await forwardToOpenAI(c.env, body, modelId, aigMetadata, openaiApiKey);
     } else {

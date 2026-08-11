@@ -79,11 +79,16 @@ export async function verifyPreviewPath(
 ): Promise<PreviewPathScope | null> {
   const match = pathname.match(/^\/p\/([^/]+)\/([^/]+)\/([^/]+)\/(\d+)\/([^/]+)\/index\.html$/);
   if (!match) return null;
-  const encodedProjectId = match[1]!;
-  const encodedFileId = match[2]!;
-  const encodedVersion = match[3]!;
-  const expiryRaw = match[4]!;
-  const signatureRaw = match[5]!;
+  const [, encodedProjectId, encodedFileId, encodedVersion, expiryRaw, signatureRaw] = match;
+  if (
+    encodedProjectId === undefined ||
+    encodedFileId === undefined ||
+    encodedVersion === undefined ||
+    expiryRaw === undefined ||
+    signatureRaw === undefined
+  ) {
+    return null;
+  }
   const projectId = decodePart(encodedProjectId);
   const fileId = decodePart(encodedFileId);
   const version = decodePart(encodedVersion);

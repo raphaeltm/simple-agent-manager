@@ -404,11 +404,19 @@ export async function getErrorTrends(
   range: string = '24h',
   interval?: string
 ): Promise<ErrorTrendsResult> {
-  const rangeMs = RANGE_TO_MS[range] ?? RANGE_TO_MS['24h']!;
+  const fallbackRangeMs = RANGE_TO_MS['24h'];
+  if (fallbackRangeMs === undefined) {
+    throw new Error('Internal error: RANGE_TO_MS is missing the 24h fallback entry');
+  }
+  const rangeMs = RANGE_TO_MS[range] ?? fallbackRangeMs;
+
+  const fallbackInterval = RANGE_TO_INTERVAL['24h'];
+  if (fallbackInterval === undefined) {
+    throw new Error('Internal error: RANGE_TO_INTERVAL is missing the 24h fallback entry');
+  }
+  const rangeInterval = RANGE_TO_INTERVAL[range];
   const resolvedInterval =
-    interval && RANGE_TO_INTERVAL[range]
-      ? RANGE_TO_INTERVAL[range]!
-      : (RANGE_TO_INTERVAL[range] ?? RANGE_TO_INTERVAL['24h']!);
+    interval && rangeInterval ? rangeInterval : (rangeInterval ?? fallbackInterval);
 
   const now = Date.now();
   const startTime = now - rangeMs;

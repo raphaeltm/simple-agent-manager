@@ -41,6 +41,22 @@ const DOW_NAMES: Record<string, number> = {
 
 const DAY_NAMES = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
+/**
+ * Read `values[index]`, throwing a descriptive error if it is absent.
+ * Call sites in this file only reach `valueAt` after a length check, a
+ * successful regex match, or another invariant guarantees the index is
+ * populated — this converts that invariant into a diagnosable failure
+ * instead of a silent `undefined` (`noUncheckedIndexedAccess` cannot see
+ * those guarantees statically).
+ */
+function valueAt<T>(values: readonly T[], index: number, context: string): T {
+  const value = values[index];
+  if (value === undefined) {
+    throw new Error(`Expected a value at index ${index} (${context})`);
+  }
+  return value;
+}
+
 function replaceNames(field: string, fieldName: string): string {
   let result = field.toLowerCase();
   const names = fieldName === 'month' ? MONTH_NAMES : fieldName === 'dayOfWeek' ? DOW_NAMES : null;
@@ -53,7 +69,11 @@ function replaceNames(field: string, fieldName: string): string {
 }
 
 function parseField(field: string, fieldName: string): CronField {
-  const { min, max } = FIELD_RANGES[fieldName]!;
+  const range = FIELD_RANGES[fieldName];
+  if (!range) {
+    throw new Error(`Unknown cron field: ${fieldName}`);
+  }
+  const { min, max } = range;
   const resolved = replaceNames(field, fieldName);
   const values = new Set<number>();
 
@@ -65,8 +85,8 @@ function parseField(field: string, fieldName: string): CronField {
 
     // Handle step: */2, 1-10/3, or just a range/value
     const stepMatch = trimmed.match(/^(.+)\/(\d+)$/);
-    const step = stepMatch ? parseInt(stepMatch[2]!, 10) : 1;
-    const base = stepMatch ? stepMatch[1]! : trimmed;
+    const step = stepMatch ? parseInt(valueAt(stepMatch, 2, `step in ${fieldName} field`), 10) : 1;
+    const base = stepMatch ? valueAt(stepMatch, 1, `base in ${fieldName} field`) : trimmed;
 
     if (step < 1) {
       throw new Error(`Invalid step value in ${fieldName}: ${trimmed}`);
@@ -78,8 +98,8 @@ function parseField(field: string, fieldName: string): CronField {
       }
     } else if (base.includes('-')) {
       const rangeParts = base.split('-');
-      const start = parseInt(rangeParts[0]!, 10);
-      const end = parseInt(rangeParts[1]!, 10);
+      const start = parseInt(valueAt(rangeParts, 0, `range start in ${fieldName} field`), 10);
+      const end = parseInt(valueAt(rangeParts, 1, `range end in ${fieldName} field`), 10);
       if (isNaN(start) || isNaN(end) || start < min || end > max || start > end) {
         throw new Error(`Invalid range in ${fieldName}: ${base} (valid: ${min}-${max})`);
       }
@@ -105,11 +125,11 @@ function parseCron(expression: string): ParsedCron {
   }
 
   return {
-    minute: parseField(parts[0]!, 'minute'),
-    hour: parseField(parts[1]!, 'hour'),
-    dayOfMonth: parseField(parts[2]!, 'dayOfMonth'),
-    month: parseField(parts[3]!, 'month'),
-    dayOfWeek: parseField(parts[4]!, 'dayOfWeek'),
+    minute: parseField(valueAt(parts, 0, 'minute field'), 'minute'),
+    hour: parseField(valueAt(parts, 1, 'hour field'), 'hour'),
+    dayOfMonth: parseField(valueAt(parts, 2, 'dayOfMonth field'), 'dayOfMonth'),
+    month: parseField(valueAt(parts, 3, 'month field'), 'month'),
+    dayOfWeek: parseField(valueAt(parts, 4, 'dayOfWeek field'), 'dayOfWeek'),
   };
 }
 
@@ -156,10 +176,13 @@ function getMinGap(values: number[], wrap: number): number {
   if (values.length <= 1) return wrap;
   let minGap = wrap;
   for (let i = 1; i < values.length; i++) {
-    minGap = Math.min(minGap, values[i]! - values[i - 1]!);
+    minGap = Math.min(minGap, valueAt(values, i, 'cron values') - valueAt(values, i - 1, 'cron values'));
   }
   // Wrap-around gap
-  minGap = Math.min(minGap, values[0]! + wrap - values[values.length - 1]!);
+  minGap = Math.min(
+    minGap,
+    valueAt(values, 0, 'cron values') + wrap - valueAt(values, values.length - 1, 'cron values')
+  );
   return minGap;
 }
 
@@ -210,7 +233,7 @@ function nextValue(values: number[], target: number): { value: number; wrapped: 
   for (const v of values) {
     if (v >= target) return { value: v, wrapped: false };
   }
-  return { value: values[0]!, wrapped: true };
+  return { value: valueAt(values, 0, 'cron field values'), wrapped: true };
 }
 
 /**
@@ -274,10 +297,11 @@ export function cronToNextFire(expression: string, timezone: string, after?: Dat
     // Check hour
     if (!parsed.hour.values.includes(p.hour)) {
       const nh = nextValue(parsed.hour.values, p.hour + 1);
+      const firstMinute = valueAt(parsed.minute.values, 0, 'minute field values');
       if (nh.wrapped) {
-        candidate = buildDateInTimezone(p.year, p.month, p.day + 1, nh.value, parsed.minute.values[0]!, timezone);
+        candidate = buildDateInTimezone(p.year, p.month, p.day + 1, nh.value, firstMinute, timezone);
       } else {
-        candidate = buildDateInTimezone(p.year, p.month, p.day, nh.value, parsed.minute.values[0]!, timezone);
+        candidate = buildDateInTimezone(p.year, p.month, p.day, nh.value, firstMinute, timezone);
       }
       continue;
     }
@@ -417,20 +441,27 @@ function buildHumanReadable(parsed: ParsedCron): string {
   const hours = parsed.hour.values;
 
   if (minutes.length === 1 && hours.length === 1) {
-    // Safe: length checks above guarantee indices exist
-    parts.push(`At ${formatTime(hours[0]!, minutes[0]!)}`);
+    // Length checks above guarantee these indices exist.
+    const hour = valueAt(hours, 0, 'hours');
+    const minute = valueAt(minutes, 0, 'minutes');
+    parts.push(`At ${formatTime(hour, minute)}`);
   } else if (minutes.length === 1 && hours.length === 24) {
-    parts.push(`Every hour at minute ${minutes[0]!}`);
+    parts.push(`Every hour at minute ${valueAt(minutes, 0, 'minutes')}`);
   } else if (hours.length === 1) {
+    const hour = valueAt(hours, 0, 'hours');
     if (isStep(minutes, 0, 59)) {
-      const step = minutes[1]! - minutes[0]!;
-      parts.push(`Every ${step} minutes during hour ${formatHour(hours[0]!)}`);
+      const firstMinute = valueAt(minutes, 0, 'minutes');
+      const secondMinute = valueAt(minutes, 1, 'minutes');
+      const step = secondMinute - firstMinute;
+      parts.push(`Every ${step} minutes during hour ${formatHour(hour)}`);
     } else {
-      parts.push(`At ${minutes.map((m) => formatTime(hours[0]!, m)).join(', ')}`);
+      parts.push(`At ${minutes.map((m) => formatTime(hour, m)).join(', ')}`);
     }
   } else if (hours.length === 24 && minutes.length > 1) {
     if (isStep(minutes, 0, 59)) {
-      const step = minutes[1]! - minutes[0]!;
+      const firstMinute = valueAt(minutes, 0, 'minutes');
+      const secondMinute = valueAt(minutes, 1, 'minutes');
+      const step = secondMinute - firstMinute;
       parts.push(`Every ${step} minutes`);
     } else {
       parts.push(`At minutes ${minutes.join(', ')} of every hour`);
@@ -484,13 +515,13 @@ function formatHour(hour: number): string {
 /** Check if values form a regular step sequence. */
 function isStep(values: number[], min: number, max: number): boolean {
   if (values.length < 2) return false;
-  const first = values[0]!;
-  const second = values[1]!;
+  const first = valueAt(values, 0, 'values');
+  const second = valueAt(values, 1, 'values');
   const step = second - first;
   if (step < 1) return false;
   for (let i = 2; i < values.length; i++) {
-    if (values[i]! - values[i - 1]! !== step) return false;
+    if (valueAt(values, i, 'values') - valueAt(values, i - 1, 'values') !== step) return false;
   }
   // Verify it covers the full range
-  return first === min && values[values.length - 1]! <= max;
+  return first === min && valueAt(values, values.length - 1, 'values') <= max;
 }

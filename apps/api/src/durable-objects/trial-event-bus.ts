@@ -168,9 +168,8 @@ export class TrialEventBus extends DurableObject<Env> {
   }
 
   private buildPollResponse(events: BufferedEvent[]): Response {
-    const lastCursor = events.length > 0
-      ? events[events.length - 1]!.cursor
-      : (this.buffer.length > 0 ? this.buffer[this.buffer.length - 1]!.cursor : 0);
+    const lastEvent = events.at(-1) ?? this.buffer.at(-1);
+    const lastCursor = lastEvent?.cursor ?? 0;
     return Response.json({
       events: events.map((e) => ({ cursor: e.cursor, event: e.event })),
       cursor: lastCursor,
