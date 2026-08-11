@@ -1281,8 +1281,7 @@
               "provisioning-timeout",
               "readiness-timeout",
               "node-unavailable"
-            ],
-            "nullable": true
+            ]
           }
         },
         "required": [
@@ -1408,7 +1407,16 @@
                 "type": "integer"
               },
               "source": {
-                "type": "string"
+                "type": "string",
+                "enum": [
+                  "task",
+                  "trigger",
+                  "skill",
+                  "agent-profile",
+                  "project",
+                  "user",
+                  "platform"
+                ]
               },
               "sourceId": {
                 "type": "string"

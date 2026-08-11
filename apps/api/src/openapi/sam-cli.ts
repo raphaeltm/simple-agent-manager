@@ -520,7 +520,7 @@ export const samCliOpenApiDocument: OpenApiDocument = {
             type: 'string',
             enum: ['started', 'succeeded', 'capacity-rejected', 'failed'],
           },
-          failureReason: nullable({
+          failureReason: {
             type: 'string',
             enum: [
               'capacity-unavailable',
@@ -532,7 +532,7 @@ export const samCliOpenApiDocument: OpenApiDocument = {
               'readiness-timeout',
               'node-unavailable',
             ],
-          }),
+          },
         },
         ['vmSize', 'vmLocation', 'outcome']
       ),
@@ -588,7 +588,10 @@ export const samCliOpenApiDocument: OpenApiDocument = {
               diskMb: integerSchema(),
               exclusiveNode: booleanSchema(),
               maxCoTenants: integerSchema(),
-              source: stringSchema(),
+              source: {
+                type: 'string',
+                enum: ['task', 'trigger', 'skill', 'agent-profile', 'project', 'user', 'platform'],
+              },
               sourceId: stringSchema(),
               version: integerSchema(),
             },

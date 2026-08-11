@@ -179,4 +179,103 @@ describe('manual workspace placement persistence', () => {
     expect(JSON.stringify(updates)).not.toContain('CANARY_PROVIDER_DETAIL');
     expect(mocks.scheduleWorkspaceCreateOnNode).not.toHaveBeenCalled();
   });
+
+  it('finalizes a reused decision in both workspace and task before scheduling', async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    mocks.drizzle.mockReturnValue({
+      update() {
+        return {
+          set(value: Record<string, unknown>) {
+            updates.push(value);
+            return { async where() {} };
+          },
+        };
+      },
+    });
+    const explanation = placement('reused');
+    explanation.selectedNodeId = 'node-existing';
+
+    await completeManualWorkspacePlacement({
+      env: { DATABASE: {} },
+      explanation,
+      mustProvisionNode: false,
+      nodeId: 'node-existing',
+      workspaceId: 'workspace-1',
+      taskId: 'task-1',
+      userId: 'user-1',
+      repository: 'owner/repo',
+      branch: 'main',
+      project: { id: 'project-1' },
+      vmSize: 'medium',
+      vmLocation: 'hel1',
+    } as never);
+
+    const persisted = updates.filter((update) => 'placementExplanationJson' in update);
+    expect(persisted).toHaveLength(2);
+    expect(
+      persisted.map((update) => JSON.parse(update.placementExplanationJson as string))
+    ).toEqual([
+      expect.objectContaining({ outcome: 'reused', selectedNodeId: 'node-existing' }),
+      expect.objectContaining({ outcome: 'reused', selectedNodeId: 'node-existing' }),
+    ]);
+    expect(mocks.scheduleWorkspaceCreateOnNode).toHaveBeenCalledOnce();
+  });
+
+  it('persists started then succeeded provisioning in both records before scheduling', async () => {
+    const updates: Array<Record<string, unknown>> = [];
+    mocks.drizzle.mockReturnValue({
+      update() {
+        return {
+          set(value: Record<string, unknown>) {
+            updates.push(value);
+            return { async where() {} };
+          },
+        };
+      },
+      select() {
+        return {
+          from: () => ({
+            where: () => ({
+              limit: async () => [{ status: 'running', errorMessage: null }],
+            }),
+          }),
+        };
+      },
+    });
+    mocks.provisionNode.mockResolvedValue(undefined);
+    mocks.waitForNodeAgentReady.mockResolvedValue(undefined);
+    const explanation = placement('provisioned');
+    explanation.selectionPath = 'provisioning';
+    explanation.provisioningAttempts = [
+      { vmSize: 'medium', vmLocation: 'hel1', outcome: 'started' },
+    ];
+
+    await completeManualWorkspacePlacement({
+      env: { DATABASE: {} },
+      explanation,
+      mustProvisionNode: true,
+      nodeId: 'node-new',
+      workspaceId: 'workspace-1',
+      taskId: 'task-1',
+      userId: 'user-1',
+      repository: 'owner/repo',
+      branch: 'main',
+      project: { id: 'project-1' },
+      vmSize: 'medium',
+      vmLocation: 'hel1',
+    } as never);
+
+    const persisted = updates.filter((update) => 'placementExplanationJson' in update);
+    expect(persisted).toHaveLength(2);
+    for (const update of persisted) {
+      expect(JSON.parse(update.placementExplanationJson as string)).toMatchObject({
+        outcome: 'provisioned',
+        selectedNodeId: 'node-new',
+        provisioningAttempts: [{ outcome: 'started' }, { outcome: 'succeeded' }],
+      });
+    }
+    expect(mocks.provisionNode).toHaveBeenCalledWith('node-new', expect.anything());
+    expect(mocks.waitForNodeAgentReady).toHaveBeenCalledWith('node-new', expect.anything());
+    expect(mocks.scheduleWorkspaceCreateOnNode).toHaveBeenCalledOnce();
+  });
 });

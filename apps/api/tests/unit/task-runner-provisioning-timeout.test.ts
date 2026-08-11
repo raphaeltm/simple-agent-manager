@@ -92,7 +92,7 @@ function makeProvisioningExplanation(): PlacementExplanation {
   const now = new Date().toISOString();
   return {
     schemaVersion: 2,
-    outcome: 'provisioning',
+    outcome: 'provisioned',
     selectionPath: 'provisioning',
     selectedNodeId: null,
     summary: 'No reusable node was eligible; provisioning is required.',
@@ -415,6 +415,7 @@ describe('timeout parity — node_agent_ready vs node_provisioning', () => {
     const state = makeState({
       currentStep: 'node_agent_ready',
       agentReadyStartedAt: Date.now() - 1_000_000, // way past 15 min timeout
+      placementExplanation: makeProvisioningExplanation(),
       stepResults: { ...makeState().stepResults, nodeId: 'node-1' },
     });
 
@@ -428,10 +429,17 @@ describe('timeout parity — node_agent_ready vs node_provisioning', () => {
           agent_version: null,
           status: 'running',
         }),
+        run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
       }),
     });
 
     await expect(handleNodeAgentReady(state, rc)).rejects.toThrow(/Node agent not ready within/);
+    expect(state.placementExplanation?.provisioningAttempts.at(-1)).toMatchObject({
+      outcome: 'failed',
+      failureReason: 'readiness-timeout',
+    });
+    expect(rc.ctx.storage.put).toHaveBeenCalledWith('state', state);
+    expect(rc.ctx.storage.setAlarm).not.toHaveBeenCalled();
   });
 
   it('handleNodeProvisioning throws after timeout (matching pattern)', async () => {

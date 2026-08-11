@@ -272,6 +272,11 @@ export async function completeManualWorkspacePlacement(input: {
       await persistFailure('Node agent not reachable after provisioning');
       return;
     }
+  } else {
+    // The create route writes the initial decision to both records. Repeat that
+    // write at the async boundary so every successful reusable path has the
+    // same finalized persistence guarantee as provisioning paths.
+    await persist();
   }
 
   await scheduleWorkspaceCreateOnNode(

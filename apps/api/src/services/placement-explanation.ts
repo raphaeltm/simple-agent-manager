@@ -250,7 +250,7 @@ export function selectPlacementNode(
 }
 
 /**
- * Remove cross-project/trial host identifiers from rejected candidates before
+ * Remove cross-project/trial host identifiers from unselected candidates before
  * any placement explanation is persisted, logged, or exposed. The selected
  * node remains visible because it is already part of the workspace contract.
  */

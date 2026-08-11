@@ -361,7 +361,7 @@ describe('handleNodeAgentReady', () => {
     const decidedAt = new Date(waitStartedAt - 1_000).toISOString();
     state.placementExplanation = {
       schemaVersion: 2,
-      outcome: 'provisioning',
+      outcome: 'provisioned',
       selectionPath: 'provisioning',
       selectedNodeId: null,
       summary: 'No reusable node was eligible; provisioning is required.',

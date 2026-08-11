@@ -10,6 +10,8 @@ type SchemaLike = {
   $ref?: string;
   type?: string | string[];
   format?: string;
+  enum?: unknown[];
+  nullable?: boolean;
   items?: SchemaLike;
   properties?: Record<string, SchemaLike>;
 };
@@ -115,6 +117,32 @@ describe('SAM CLI OpenAPI contract', () => {
 
     const sessionDetail = schema('SessionDetailResponse');
     expect(refName(arrayItem(property(sessionDetail, 'messages')))).toBe('ChatMessage');
+
+    const provisioningAttempt = schema('PlacementProvisioningAttempt');
+    const failureReason = property(provisioningAttempt, 'failureReason');
+    expect(failureReason.nullable).toBeUndefined();
+    expect(failureReason.enum).toEqual([
+      'capacity-unavailable',
+      'node-limit',
+      'quota-exceeded',
+      'credentials-unavailable',
+      'provider-failed',
+      'provisioning-timeout',
+      'readiness-timeout',
+      'node-unavailable',
+    ]);
+
+    const legacyExplanation = schema('LegacyPlacementExplanation');
+    const reservation = property(legacyExplanation, 'reservation');
+    expect(property(reservation, 'source').enum).toEqual([
+      'task',
+      'trigger',
+      'skill',
+      'agent-profile',
+      'project',
+      'user',
+      'platform',
+    ]);
   });
 
   it('keeps the checked artifact in sync with the source document', async () => {
