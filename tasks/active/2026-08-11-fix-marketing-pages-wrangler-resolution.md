@@ -51,7 +51,7 @@ The public site remains available from the last successful deployment, but chang
 - [x] Add deterministic workflow contract tests covering dependency ownership, deployment, provisioning, and rejection of `npx wrangler`.
 - [x] Make Pages project provisioning skip only an existing project and fail on list/create/JSON errors.
 - [x] Reproduce the exact CLI resolution path after a frozen clean install.
-- [ ] Run the complete repository quality suite and specialist reviews.
+- [x] Run the complete repository quality suite and specialist reviews.
 - [ ] Confirm the final candidate passes CI and the marketing Pages workflow deploys successfully.
 
 ## Acceptance criteria
