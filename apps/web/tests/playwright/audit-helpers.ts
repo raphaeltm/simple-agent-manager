@@ -53,7 +53,9 @@ export async function assertNoOverflow(page: Page) {
     () => document.documentElement.scrollWidth > window.innerWidth
   );
   expect(overflow).toBe(false);
-  await assertNoClippedOverflow(page);
+  // Advisory here, blocking via `assertNoClippedOverflow` — see the rollout note
+  // on `findClippedOverflow` below.
+  await reportClippedOverflow(page);
 }
 
 /**
@@ -84,9 +86,22 @@ export async function assertNoOverflow(page: Page) {
  *    wider than their viewport. Declaring it beats a silent blind spot.
  *  - `<input>` / `<select>` — a native control scrolls its own value as the
  *    caret moves, so a value wider than the field is expected behaviour
+ *
+ * ROLLOUT (progressive, per the repo's quality-tool policy: introduce new
+ * checks in advisory mode, ratchet existing debt, promote to blocking once a
+ * surface is clean — do NOT fail unrelated specs on day one).
+ *
+ * A full sweep on 2026-08-11 found this same bug class already present on 11
+ * other surfaces (settings pages, project settings, deployments, agent context,
+ * skills, the composer wizard). Those are tracked in
+ * `tasks/backlog/2026-08-11-clipped-overflow-debt-sweep.md`.
+ *
+ * So: `assertNoOverflow` REPORTS offenders (advisory), and surfaces that are
+ * clean call `assertNoClippedOverflow` directly to make it BLOCKING. The trigger
+ * audits do. As each surface on the list is fixed, switch it over too.
  */
-export async function assertNoClippedOverflow(page: Page) {
-  const offenders = await page.evaluate(() => {
+export async function findClippedOverflow(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
     const found: string[] = [];
     const SELF_SCROLLING_CONTROLS = new Set(['INPUT', 'SELECT']);
 
@@ -111,9 +126,29 @@ export async function assertNoClippedOverflow(page: Page) {
 
     return found;
   });
+}
 
+/** Blocking form. Use on surfaces that are already clean. */
+export async function assertNoClippedOverflow(page: Page) {
+  const offenders = await findClippedOverflow(page);
   expect(offenders, `Horizontally clipped content (invisible to the user):\n${offenders.join('\n')}`)
     .toEqual([]);
+}
+
+/**
+ * Advisory form. Prints offenders so the debt stays visible in test output
+ * without failing specs for pre-existing clipping on surfaces this change does
+ * not touch.
+ */
+export async function reportClippedOverflow(page: Page) {
+  const offenders = await findClippedOverflow(page);
+  if (offenders.length === 0) return;
+  const where = page.url().replace(/^https?:\/\/[^/]+/, '');
+  const width = page.viewportSize()?.width ?? '?';
+  console.warn(
+    `[clipped-overflow] ${offenders.length} clipped element(s) at ${width}px on ${where}:\n` +
+      offenders.map((o) => `  ${o}`).join('\n')
+  );
 }
 
 /**
