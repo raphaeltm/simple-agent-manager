@@ -297,7 +297,7 @@ export function CommandPalette({
 
   return createPortal(
     <>
-      <div onClick={onClose} className="fixed inset-0 glass-backdrop-dim z-dialog-backdrop" />
+      <div onClick={onClose} aria-hidden="true" className="fixed inset-0 glass-backdrop-dim z-dialog-backdrop" />
 
       <div
         role="dialog"
@@ -347,7 +347,11 @@ export function CommandPalette({
                     ref={isSelected ? selectedRef : undefined}
                     role="option"
                     aria-selected={isSelected}
+                    tabIndex={-1}
                     onClick={() => executeResult(result)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') executeResult(result);
+                    }}
                     onMouseEnter={() => setSelectedIndex(currentFlatIndex)}
                     className={`flex justify-between items-center px-4 py-[7px] cursor-pointer gap-3 transition-colors duration-100 ${
                       isSelected ? 'bg-tn-selected' : 'bg-transparent'

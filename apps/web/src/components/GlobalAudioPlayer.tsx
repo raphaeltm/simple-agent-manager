@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useId, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { useGlobalAudio } from '../contexts/GlobalAudioContext';
@@ -32,6 +32,7 @@ export function GlobalAudioPlayer() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
+  const speedId = useId();
 
   const isVisible = audio.state !== 'idle';
   const isLoading = audio.state === 'loading';
@@ -278,10 +279,11 @@ export function GlobalAudioPlayer() {
             </p>
           )}
           <div className="flex items-center gap-1.5 shrink-0">
-            <label className="text-[10px]" style={{ color: 'var(--sam-color-fg-muted)' }}>
+            <label htmlFor={speedId} className="text-[10px]" style={{ color: 'var(--sam-color-fg-muted)' }}>
               Speed
             </label>
             <select
+              id={speedId}
               value={audio.playbackRate}
               onChange={handleSpeedChange}
               className="text-[10px] rounded px-1 py-0.5 cursor-pointer"

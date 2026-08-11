@@ -117,7 +117,7 @@ export const NodeCard: FC<NodeCardProps> = ({
           </div>
 
           {overflowItems.length > 0 && (
-            <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+            <div role="presentation" onClick={(e) => e.stopPropagation()} className="shrink-0">
               <DropdownMenu items={overflowItems} aria-label={`Actions for ${node.name}`} />
             </div>
           )}
@@ -204,7 +204,7 @@ export const NodeCard: FC<NodeCardProps> = ({
           ) : visibleWorkspaces.length > 0 ? (
             <>
               {visibleWorkspaces.map((ws) => (
-                <div key={ws.id} onClick={(e) => e.stopPropagation()}>
+                <div key={ws.id} role="presentation" onClick={(e) => e.stopPropagation()}>
                   <NodeWorkspaceMiniCard workspace={ws} />
                 </div>
               ))}

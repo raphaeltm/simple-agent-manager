@@ -1,4 +1,4 @@
-import { fireEvent,render, screen } from '@testing-library/react';
+import { fireEvent,render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -128,7 +128,11 @@ describe('Chats page', () => {
 
     expect(screen.getByText(longTitle)).toBeInTheDocument();
     expect(screen.getByText('Chat session 30')).toBeInTheDocument();
-    expect(screen.getAllByRole('listitem')).toHaveLength(30);
+    // Each row is a native <button> (its real, correct role — a `role="listitem"`
+    // override on an interactive element was an accessibility bug, since fixed).
+    // Scope to the list container so this only counts session rows.
+    const list = screen.getByRole('list', { name: 'Active chat sessions' });
+    expect(within(list).getAllByRole('button')).toHaveLength(30);
   });
 
   it('renders session rows with topic, project name, and state badge', () => {

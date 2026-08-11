@@ -42,7 +42,7 @@ describe('CopyButton', () => {
   it('stops propagation on click', async () => {
     const parentHandler = vi.fn();
     render(
-      <div onClick={parentHandler}>
+      <div role="presentation" onClick={parentHandler}>
         <CopyButton getText={() => 'text'} label="Copy" />
       </div>,
     );

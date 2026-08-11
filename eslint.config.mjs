@@ -52,6 +52,15 @@ const typescriptEslintCompatPlugin = {
 const withSeverity = (ruleConfig, severity) =>
   Array.isArray(ruleConfig) ? [severity, ...ruleConfig.slice(1)] : severity;
 
+// Like withSeverity, but also merges extra options onto whatever options the
+// recommended preset already sets for the rule (if any), instead of
+// discarding them. Used to both promote severity AND fix false positives for
+// apps/web-specific patterns (see the apps/web jsx-a11y block below).
+const withSeverityAndOptions = (ruleConfig, severity, extraOptions) => {
+  const existingOptions = Array.isArray(ruleConfig) ? ruleConfig[1] : undefined;
+  return [severity, { ...existingOptions, ...extraOptions }];
+};
+
 // ESLint 9 and typescript-eslint 8 are the supported flat-config host. Keep
 // the ESLint 8 / typescript-eslint 7 recommended semantics during this
 // foundation migration; the parity evidence for the audited repository must
@@ -283,6 +292,68 @@ export default defineConfig([
       react: {
         version: 'detect',
       },
+    },
+  },
+  {
+    // apps/web (the control-plane UI) has zero jsx-a11y violations as of the
+    // 2026-08-11 a11y burndown (see tasks/archive/2026-04-01-promote-a11y-eslint-to-errors.md).
+    // Promote the jsx-a11y family from warn to error here so regressions fail
+    // CI. Other tsx-bearing workspaces (packages/acp-client, and the
+    // onboarding-advisory workspaces below) keep the shared 'warn' baseline
+    // from the block above until they receive the same cleanup.
+    //
+    // Two rules also get extra options merged in on top of the recommended
+    // preset's own options, fixing real false positives rather than masking
+    // findings:
+    //   - aria-role: ignoreNonDOM skips the `role` attribute check for custom
+    //     React components (e.g. `<MessageBubble role="user" />`, where
+    //     `role` is a component prop unrelated to ARIA, never forwarded to a
+    //     DOM node). It never skips a literal `role="..."` on a real DOM
+    //     element, so it cannot hide a genuine invalid-role bug.
+    //   - label-has-associated-control: controlComponents teaches the rule
+    //     that `<Input>` (packages/ui, a thin wrapper that always renders a
+    //     native `<input>` and forwards all props) is a real form control
+    //     when nested in a `<label>` — the same implicit-association
+    //     technique as native `<label><input/></label>`. depth raises the
+    //     default nesting search from 2 to 3 so the rule can see label text
+    //     that renders through one extra wrapper element (verified against
+    //     the exact JSX shape in apps/web before choosing this value).
+    files: ['apps/web/**/*.tsx'],
+    rules: {
+      'jsx-a11y/aria-role': withSeverityAndOptions(
+        jsxA11y.configs.recommended.rules['jsx-a11y/aria-role'],
+        'error',
+        { ignoreNonDOM: true }
+      ),
+      'jsx-a11y/click-events-have-key-events': withSeverity(
+        jsxA11y.configs.recommended.rules['jsx-a11y/click-events-have-key-events'],
+        'error'
+      ),
+      'jsx-a11y/interactive-supports-focus': withSeverity(
+        jsxA11y.configs.recommended.rules['jsx-a11y/interactive-supports-focus'],
+        'error'
+      ),
+      'jsx-a11y/label-has-associated-control': withSeverityAndOptions(
+        jsxA11y.configs.recommended.rules['jsx-a11y/label-has-associated-control'],
+        'error',
+        { controlComponents: ['Input'], depth: 3 }
+      ),
+      'jsx-a11y/no-autofocus': withSeverity(
+        jsxA11y.configs.recommended.rules['jsx-a11y/no-autofocus'],
+        'error'
+      ),
+      'jsx-a11y/no-interactive-element-to-noninteractive-role': withSeverity(
+        jsxA11y.configs.recommended.rules['jsx-a11y/no-interactive-element-to-noninteractive-role'],
+        'error'
+      ),
+      'jsx-a11y/no-noninteractive-element-interactions': withSeverity(
+        jsxA11y.configs.recommended.rules['jsx-a11y/no-noninteractive-element-interactions'],
+        'error'
+      ),
+      'jsx-a11y/no-static-element-interactions': withSeverity(
+        jsxA11y.configs.recommended.rules['jsx-a11y/no-static-element-interactions'],
+        'error'
+      ),
     },
   },
   {

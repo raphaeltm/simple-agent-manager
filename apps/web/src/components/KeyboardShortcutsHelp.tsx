@@ -42,6 +42,7 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
       {/* Backdrop */}
       <div
         onClick={onClose}
+        aria-hidden="true"
         className="fixed inset-0 glass-backdrop-dim z-dialog-backdrop"
       />
 

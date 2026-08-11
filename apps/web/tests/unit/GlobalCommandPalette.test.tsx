@@ -215,6 +215,25 @@ describe('GlobalCommandPalette', () => {
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
+  // Each option row has its own onKeyDown (in addition to the search input's
+  // arrow-key/Enter navigation tested below) so the "option" ARIA role is
+  // never left with an onClick and no keyboard equivalent at the element
+  // level (jsx-a11y/click-events-have-key-events).
+  it('navigates to page when Enter is pressed directly on the option row', async () => {
+    const onClose = vi.fn();
+    renderPalette(onClose);
+
+    await waitFor(() => {
+      expect(screen.getByText('Settings')).toBeInTheDocument();
+    });
+
+    const options = screen.getAllByRole('option');
+    const settingsOption = options.find((o) => o.textContent?.includes('Settings'));
+    fireEvent.keyDown(settingsOption!, { key: 'Enter' });
+
+    expect(mockNavigate).toHaveBeenCalledWith('/settings');
+  });
+
   it('navigates to project when project result is clicked', async () => {
     const onClose = vi.fn();
     renderPalette(onClose);

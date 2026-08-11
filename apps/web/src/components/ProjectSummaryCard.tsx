@@ -83,7 +83,7 @@ export function ProjectSummaryCard({ project, onDelete }: ProjectSummaryCardProp
 
         {/* Overflow menu */}
         {overflowItems.length > 0 && (
-          <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+          <div role="presentation" onClick={(e) => e.stopPropagation()} className="shrink-0">
             <DropdownMenu items={overflowItems} aria-label={`Actions for ${project.name}`} />
           </div>
         )}

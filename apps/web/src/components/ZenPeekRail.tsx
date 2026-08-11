@@ -38,6 +38,7 @@ export function ZenPeekRail({
   return (
     <div style={{ gridRow, width: 0 }}>
       <div
+        role="presentation"
         className={`fixed left-0 z-40 h-1/2 w-3 ${isTop ? 'top-0' : 'bottom-0'}`}
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={(e) => {

@@ -12,8 +12,13 @@ describe('CreateDirectoryDialog', () => {
 
     const dialog = screen.getByRole('dialog');
     expect(dialog).toHaveAttribute('aria-modal', 'true');
-    expect(dialog).toHaveClass('glass-backdrop-dim');
-    expect(dialog.firstElementChild).toHaveClass('glass-modal');
+    // The dim backdrop is a decorative sibling of the dialog card (not the
+    // dialog element itself), so it can be aria-hidden without hiding the
+    // real dialog content — see jsx-a11y/no-noninteractive-element-interactions.
+    const backdrop = screen.getByTestId('create-directory-backdrop');
+    expect(backdrop).toHaveClass('glass-backdrop-dim');
+    expect(backdrop).toHaveAttribute('aria-hidden', 'true');
+    expect(dialog.querySelector('.glass-modal')).toBeInTheDocument();
     expect(screen.getByText('New Folder')).toBeInTheDocument();
   });
 
@@ -63,10 +68,18 @@ describe('CreateDirectoryDialog', () => {
       <CreateDirectoryDialog currentDirectory="/" onCreated={vi.fn()} onClose={onClose} />,
     );
 
-    // Click the backdrop (the dialog wrapper div)
-    const dialog = screen.getByRole('dialog');
-    await userEvent.click(dialog);
+    await userEvent.click(screen.getByTestId('create-directory-backdrop'));
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('does not call onClose when clicking inside the dialog card', async () => {
+    const onClose = vi.fn();
+    render(
+      <CreateDirectoryDialog currentDirectory="/" onCreated={vi.fn()} onClose={onClose} />,
+    );
+
+    await userEvent.click(screen.getByText('New Folder'));
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it('clears error when input changes', async () => {

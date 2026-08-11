@@ -213,6 +213,7 @@ export function NotificationCenter() {
           <div
             role="tablist"
             aria-label="Notification filters"
+            tabIndex={-1}
             className="flex border-b border-border-default"
             onKeyDown={(e) => {
               const tabIds: FilterTab[] = ['attention', 'updates', 'all'];

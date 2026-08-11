@@ -258,7 +258,7 @@ describe('NodeWorkspaceMiniCard', () => {
 
       render(
         <MemoryRouter>
-          <div onClick={onClickParent}>
+          <div role="presentation" onClick={onClickParent}>
             <NodeWorkspaceMiniCard workspace={workspace} />
           </div>
         </MemoryRouter>

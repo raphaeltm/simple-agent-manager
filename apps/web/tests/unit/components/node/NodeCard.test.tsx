@@ -379,7 +379,7 @@ describe('NodeCard', () => {
 
       const { container } = render(
         <MemoryRouter>
-          <div onClick={onCardClick}>
+          <div role="presentation" onClick={onCardClick}>
             <NodeCard node={node} workspaces={[]} {...defaultHandlers} />
           </div>
         </MemoryRouter>
@@ -593,7 +593,7 @@ describe('NodeCard', () => {
 
       render(
         <MemoryRouter>
-          <div onClick={onCardClick}>
+          <div role="presentation" onClick={onCardClick}>
             <NodeCard node={node} workspaces={[]} {...defaultHandlers} />
           </div>
         </MemoryRouter>

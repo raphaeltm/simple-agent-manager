@@ -173,7 +173,10 @@ export function Nodes() {
             </div>
           )}
           <div>
-            <label className="block text-fg-muted font-medium mb-2" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Node Size</label>
+            {/* Not a <label>: this text describes a group of selectable cards
+                (VmSizeCard), not a single form control, so there is nothing
+                for a <label> to associate with (jsx-a11y/label-has-associated-control). */}
+            <div className="block text-fg-muted font-medium mb-2" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Node Size</div>
             <div className="grid grid-cols-3 gap-3">
               {(['small', 'medium', 'large'] as VMSize[]).map((size) => (
                 <VmSizeCard

@@ -633,7 +633,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   return createPortal(
     <>
       {/* Backdrop */}
-      <div onClick={onClose} className="fixed inset-0 glass-backdrop-dim border-0 z-dialog-backdrop" />
+      <div onClick={onClose} aria-hidden="true" className="fixed inset-0 glass-backdrop-dim border-0 z-dialog-backdrop" />
 
       {/* Palette dialog */}
       <div
@@ -703,7 +703,11 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
                         ? `${result.label}, ${result.projectName}`
                         : result.label
                     }
+                    tabIndex={-1}
                     onClick={() => executeResult(result)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') executeResult(result);
+                    }}
                     onMouseEnter={() => setSelectedIndex(currentFlatIndex)}
                     className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors duration-100 ${
                       isSelected ? 'bg-[rgba(34,197,94,0.06)]' : 'bg-transparent'

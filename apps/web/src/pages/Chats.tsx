@@ -61,7 +61,6 @@ export function Chats() {
             return (
               <button
                 key={session.id}
-                role="listitem"
                 onClick={() =>
                   navigate(`/projects/${session.projectId}/chat/${session.id}`)
                 }

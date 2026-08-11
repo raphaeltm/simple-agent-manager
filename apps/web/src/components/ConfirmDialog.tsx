@@ -153,6 +153,7 @@ export function ConfirmDialog({
       {/* Backdrop */}
       <div
         className="fixed inset-0 glass-backdrop-dim transition-opacity duration-150"
+        aria-hidden="true"
         onClick={loading ? undefined : onClose}
       />
 

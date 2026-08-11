@@ -10,7 +10,7 @@ import {
   type ScalingParamMeta,
 } from '@simple-agent-manager/shared';
 import { Button } from '@simple-agent-manager/ui';
-import { useCallback,useEffect, useState } from 'react';
+import { useCallback,useEffect, useId, useState } from 'react';
 
 import { useToast } from '../hooks/useToast';
 import { listCredentials,updateProject } from '../lib/api';
@@ -42,13 +42,15 @@ function ScalingField({
       : meta.unit === 'percent'
         ? `${meta.defaultValue}%`
         : String(meta.defaultValue);
+  const fieldId = useId();
 
   return (
     <div className="flex items-center gap-2">
-      <label className="text-xs text-fg-muted flex-1 min-w-0" title={`Env: ${meta.envVar}`}>
+      <label htmlFor={fieldId} className="text-xs text-fg-muted flex-1 min-w-0" title={`Env: ${meta.envVar}`}>
         {meta.label}
       </label>
       <input
+        id={fieldId}
         type="number"
         min={meta.min}
         max={meta.max}
@@ -94,6 +96,7 @@ export function ScalingSettings({
   reload: () => Promise<void>;
 }) {
   const toast = useToast();
+  const nodeIdleTimeoutId = useId();
 
   // Provider & Location state
   const [selectedProvider, setSelectedProvider] = useState<CredentialProvider | null>(
@@ -285,10 +288,11 @@ export function ScalingSettings({
         ))}
         {/* Node Idle Timeout — existing dead column, now wired up */}
         <div className="flex items-center gap-2">
-          <label className="text-xs text-fg-muted flex-1 min-w-0">
+          <label htmlFor={nodeIdleTimeoutId} className="text-xs text-fg-muted flex-1 min-w-0">
             Node Idle Timeout
           </label>
           <input
+            id={nodeIdleTimeoutId}
             type="number"
             min={MIN_NODE_IDLE_TIMEOUT_MS}
             max={MAX_NODE_IDLE_TIMEOUT_MS}

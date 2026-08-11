@@ -1,7 +1,7 @@
 import type { AgentProfile, AgentSkill, CredentialProvider, UpdateAgentProfileRequest,VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
 import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
 import { Paperclip, Settings, X } from 'lucide-react';
-import { type FC, useCallback, useEffect, useRef,useState } from 'react';
+import { type FC, useCallback, useEffect, useId, useRef,useState } from 'react';
 
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import type { TaskAttachmentRef } from '../../lib/api';
@@ -72,6 +72,9 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [attachments, setAttachments] = useState<AttachmentState[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Base id for the advanced-options field labels below — each field appends
+  // its own suffix (React's recommended pattern for multiple related ids).
+  const fieldId = useId();
 
   const hasProfile = !!agentProfileId;
   const selectedProfile = hasProfile
@@ -410,10 +413,11 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
       {showAdvanced && (
         <div className="grid gap-2 mt-2 p-3 bg-page rounded-md border border-border-default">
           <div>
-            <label className="text-xs text-fg-muted block mb-1">
+            <label htmlFor={`${fieldId}-description`} className="text-xs text-fg-muted block mb-1">
               Description (optional)
             </label>
             <textarea
+              id={`${fieldId}-description`}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Additional context for the agent..."
@@ -425,10 +429,11 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
           <div className="flex gap-3 flex-wrap items-end">
             {skills.length > 0 && (
               <div className="min-w-[180px]">
-                <label className="text-xs text-fg-muted block mb-1">
+                <label htmlFor={`${fieldId}-skill`} className="text-xs text-fg-muted block mb-1">
                   Skill
                 </label>
                 <SkillSelector
+                  id={`${fieldId}-skill`}
                   skills={skills}
                   selectedSkillId={skillId}
                   onChange={setSkillId}
@@ -441,10 +446,11 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
             {profiles.length > 0 && (
               <div className="flex items-end gap-1">
                 <div>
-                  <label className="text-xs text-fg-muted block mb-1">
+                  <label htmlFor={`${fieldId}-agent-profile`} className="text-xs text-fg-muted block mb-1">
                     Agent Profile
                   </label>
                   <ProfileSelector
+                    id={`${fieldId}-agent-profile`}
                     profiles={profiles}
                     selectedProfileId={agentProfileId}
                     onChange={setAgentProfileId}
@@ -467,10 +473,11 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
             )}
 
             <div>
-              <label className="text-xs text-fg-muted block mb-1">
+              <label htmlFor={`${fieldId}-priority`} className="text-xs text-fg-muted block mb-1">
                 Priority
               </label>
               <select
+                id={`${fieldId}-priority`}
                 value={priority}
                 onChange={(e) => setPriority(Number(e.target.value))}
                 className="py-1 px-2 rounded-sm text-fg-primary text-sm"
@@ -485,7 +492,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
             {!hasProfile && (
               <>
                 <div>
-                  <label className="text-xs text-fg-muted block mb-1">
+                  <label htmlFor={`${fieldId}-vm-size`} className="text-xs text-fg-muted block mb-1">
                     VM Size
                     {providerContext && (
                       <span className="text-fg-muted font-normal ml-1">
@@ -494,6 +501,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
                     )}
                   </label>
                   <select
+                    id={`${fieldId}-vm-size`}
                     value={vmSize}
                     onChange={(e) => setVmSize(e.target.value as VMSize | '')}
                     className="py-1 px-2 rounded-sm text-fg-primary text-sm"
@@ -508,10 +516,11 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-xs text-fg-muted block mb-1">
+                  <label htmlFor={`${fieldId}-workspace-profile`} className="text-xs text-fg-muted block mb-1">
                     Workspace
                   </label>
                   <select
+                    id={`${fieldId}-workspace-profile`}
                     value={workspaceProfile}
                     onChange={(e) => setWorkspaceProfile(e.target.value as WorkspaceProfile | '')}
                     className="py-1 px-2 rounded-sm text-fg-primary text-sm"
@@ -524,10 +533,11 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
 
                 {workspaceProfile !== 'lightweight' && (
                   <div>
-                    <label className="text-xs text-fg-muted block mb-1">
+                    <label htmlFor={`${fieldId}-devcontainer-config`} className="text-xs text-fg-muted block mb-1">
                       Devcontainer Config
                     </label>
                     <input
+                      id={`${fieldId}-devcontainer-config`}
                       type="text"
                       value={devcontainerConfigName}
                       onChange={(e) => setDevcontainerConfigName(e.target.value)}

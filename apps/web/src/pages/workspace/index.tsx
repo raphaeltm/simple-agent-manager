@@ -394,7 +394,7 @@ export function Workspace() {
 
       {isMobile && mobileMenuOpen && (
         <>
-          <div data-testid="mobile-menu-backdrop" onClick={() => setMobileMenuOpen(false)} className="fixed inset-0 glass-backdrop-dim z-drawer-backdrop" />
+          <div data-testid="mobile-menu-backdrop" onClick={() => setMobileMenuOpen(false)} aria-hidden="true" className="fixed inset-0 glass-backdrop-dim z-drawer-backdrop" />
           <div role="dialog" aria-label="Workspace menu" data-testid="mobile-menu-panel" className="fixed top-0 right-0 bottom-0 w-[85vw] max-w-[360px] glass-modal glass-panel-container glass-composited border-l border-border-default z-drawer flex flex-col overflow-hidden">
             <div className="flex items-center justify-between border-b border-border-default shrink-0" style={{ padding: 'var(--sam-space-3) var(--sam-space-4)' }}>
               <span className="font-semibold text-fg-primary" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Workspace</span>
