@@ -5,8 +5,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({
   createSession: vi.fn(),
   createWorkspaceOnNode: vi.fn(),
+  provisionNode: vi.fn(),
   recordActivityEvent: vi.fn(),
   signCallbackToken: vi.fn(),
+  waitForNodeAgentReady: vi.fn(),
 }));
 
 vi.mock('../../../src/middleware/auth', () => ({
@@ -26,6 +28,11 @@ vi.mock('../../../src/middleware/auth', () => ({
 vi.mock('../../../src/services/node-agent', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/services/node-agent')>()),
   createWorkspaceOnNode: mocks.createWorkspaceOnNode,
+  waitForNodeAgentReady: mocks.waitForNodeAgentReady,
+}));
+vi.mock('../../../src/services/nodes', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../src/services/nodes')>()),
+  provisionNode: mocks.provisionNode,
 }));
 vi.mock('../../../src/services/jwt', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/services/jwt')>()),
@@ -119,6 +126,8 @@ describe('manual workspace placement route vertical slice', () => {
     mocks.createSession.mockResolvedValue('session-1');
     mocks.recordActivityEvent.mockResolvedValue(undefined);
     mocks.signCallbackToken.mockResolvedValue('callback-token');
+    mocks.provisionNode.mockResolvedValue(undefined);
+    mocks.waitForNodeAgentReady.mockResolvedValue(undefined);
   });
 
   afterEach(() => sqlite.close());
@@ -182,5 +191,83 @@ describe('manual workspace placement route vertical slice', () => {
         evaluatedNodes: [{ nodeId: NODE_ID, path: 'manual', accepted: true, rejectionReasons: [] }],
       });
     }
+  });
+
+  it('carries real credential resolution and create-node output into started then succeeded records', async () => {
+    const now = '2026-08-11T00:00:00.000Z';
+    sqlite
+      .prepare(
+        `INSERT INTO credentials
+           (id, user_id, provider, credential_type, credential_kind, is_active,
+            encrypted_token, iv, created_at, updated_at)
+         VALUES (?, ?, 'hetzner', 'cloud-provider', 'api-key', 1, ?, ?, ?, ?)`
+      )
+      .run('credential-1', 'user-1', 'encrypted-not-read-by-resolution', 'iv-not-read', now, now);
+
+    let provisionedNodeId: string | null = null;
+    mocks.provisionNode.mockImplementation(async (nodeId: string) => {
+      provisionedNodeId = nodeId;
+      const workspace = sqlite
+        .prepare(`SELECT placement_explanation_json FROM workspaces WHERE project_id = ?`)
+        .get('project-1') as { placement_explanation_json: string };
+      const task = sqlite
+        .prepare(`SELECT placement_explanation_json FROM tasks WHERE project_id = ?`)
+        .get('project-1') as { placement_explanation_json: string };
+      for (const row of [workspace, task]) {
+        expect(JSON.parse(row.placement_explanation_json)).toMatchObject({
+          schemaVersion: 2,
+          outcome: 'provisioned',
+          selectionPath: 'provisioning',
+          selectedNodeId: nodeId,
+          provisioningAttempts: [{ vmSize: 'medium', vmLocation: 'hel1', outcome: 'started' }],
+        });
+      }
+      sqlite.prepare(`UPDATE nodes SET status = 'running' WHERE id = ?`).run(nodeId);
+    });
+    mocks.createWorkspaceOnNode.mockImplementation(async (nodeId: string) => {
+      const workspace = sqlite
+        .prepare(`SELECT placement_explanation_json FROM workspaces WHERE project_id = ?`)
+        .get('project-1') as { placement_explanation_json: string };
+      const task = sqlite
+        .prepare(`SELECT placement_explanation_json FROM tasks WHERE project_id = ?`)
+        .get('project-1') as { placement_explanation_json: string };
+      for (const row of [workspace, task]) {
+        expect(JSON.parse(row.placement_explanation_json)).toMatchObject({
+          outcome: 'provisioned',
+          selectedNodeId: nodeId,
+          provisioningAttempts: [{ outcome: 'started' }, { outcome: 'succeeded' }],
+        });
+      }
+      return { workspaceId: 'workspace-new', status: 'creating' };
+    });
+    const waitUntilPromises: Promise<unknown>[] = [];
+    const executionContext = {
+      waitUntil: vi.fn((promise: Promise<unknown>) => waitUntilPromises.push(promise)),
+      passThroughOnException: vi.fn(),
+    } as unknown as ExecutionContext;
+
+    const response = await app.request(
+      '/api/workspaces',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: 'Provisioned workspace',
+          projectId: 'project-1',
+          provider: 'hetzner',
+          vmSize: 'medium',
+          vmLocation: 'hel1',
+        }),
+      },
+      env,
+      executionContext
+    );
+    await Promise.all(waitUntilPromises);
+
+    expect(response.status).toBe(201);
+    expect(provisionedNodeId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(mocks.provisionNode).toHaveBeenCalledOnce();
+    expect(mocks.waitForNodeAgentReady).toHaveBeenCalledWith(provisionedNodeId, env);
+    expect(mocks.createWorkspaceOnNode).toHaveBeenCalledOnce();
   });
 });

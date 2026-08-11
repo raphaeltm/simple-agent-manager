@@ -151,13 +151,23 @@ describe('manual workspace placement persistence', () => {
   });
 
   it('updates both workspace and task when asynchronous provisioning fails', async () => {
-    const updates: Array<Record<string, unknown>> = [];
+    const updates: Array<{
+      target: 'workspace' | 'task';
+      id: string;
+      value: Record<string, unknown>;
+    }> = [];
     const db = {
-      update() {
+      update(table: unknown) {
+        const target = table === schema.workspaces ? 'workspace' : 'task';
         return {
           set(value: Record<string, unknown>) {
-            updates.push(value);
-            return { async where() {} };
+            return {
+              async where(condition: unknown) {
+                const id = target === 'workspace' ? 'workspace-1' : 'task-1';
+                expect(sqlValues(condition)).toContain(id);
+                updates.push({ target, id, value });
+              },
+            };
           },
         };
       },
@@ -183,13 +193,43 @@ describe('manual workspace placement persistence', () => {
       vmLocation: 'hel1',
     } as never);
 
-    expect(updates).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({ placementExplanationJson: expect.any(String) }),
-        expect.objectContaining({ status: 'error', errorMessage: 'Node provisioning failed' }),
-        expect.objectContaining({ status: 'failed', errorMessage: 'Node provisioning failed' }),
-      ])
-    );
+    expect(updates.map(({ target, id, value }) => ({ target, id, value }))).toEqual([
+      {
+        target: 'workspace',
+        id: 'workspace-1',
+        value: expect.objectContaining({ placementExplanationJson: expect.any(String) }),
+      },
+      {
+        target: 'task',
+        id: 'task-1',
+        value: expect.objectContaining({ placementExplanationJson: expect.any(String) }),
+      },
+      {
+        target: 'workspace',
+        id: 'workspace-1',
+        value: expect.objectContaining({
+          status: 'error',
+          errorMessage: 'Node provisioning failed',
+        }),
+      },
+      {
+        target: 'task',
+        id: 'task-1',
+        value: expect.objectContaining({
+          status: 'failed',
+          errorMessage: 'Node provisioning failed',
+        }),
+      },
+    ]);
+    for (const update of updates.slice(0, 2)) {
+      expect(JSON.parse(update.value.placementExplanationJson as string)).toMatchObject({
+        outcome: 'failed',
+        selectedNodeId: 'node-new',
+        provisioningAttempts: [
+          expect.objectContaining({ outcome: 'failed', failureReason: 'provider-failed' }),
+        ],
+      });
+    }
     expect(JSON.stringify(updates)).not.toContain('CANARY_PROVIDER_DETAIL');
     expect(mocks.scheduleWorkspaceCreateOnNode).not.toHaveBeenCalled();
   });
