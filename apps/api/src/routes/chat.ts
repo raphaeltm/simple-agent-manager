@@ -19,7 +19,6 @@ import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
-import { resolveDurableExecutionConfig } from '../durable-objects/project-data/durable-execution-config';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { requireRouteParam } from '../lib/route-helpers';
@@ -33,21 +32,19 @@ import {
   LinkTaskToChatSchema,
   parseOptionalBody,
   ResolveAttentionAnswerSchema,
-  SendChatMessageSchema,
 } from '../schemas';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as chatPersistence from '../services/chat-persistence';
-import { enrichMessageWithMentions } from '../services/mention-enrichment';
 import * as projectDataService from '../services/project-data';
 import { isTaskStatus } from '../services/task-status';
 import { resolveChatAgentState } from './chat-agent-state';
 import { chatForkRoutes } from './chat-fork';
 import { recordChatSessionLoadFailure } from './chat-load-diagnostics';
 import {
-  forwardPromptToLiveAgent,
   preparePromptForLiveAgent,
   sendPreparedPromptToLiveAgent,
 } from './chat-prompt-forward';
+import { registerChatPromptRoute } from './chat-prompt-route';
 import { getChatSessionRouteContext } from './chat-route-context';
 import {
   enrichSessionsWithCreators,
@@ -479,72 +476,7 @@ chatRoutes.get('/:sessionId/durability', async (c) => {
   return c.json(snapshot);
 });
 
-/**
- * POST /api/projects/:projectId/sessions/:sessionId/prompt
- * Forward a follow-up prompt to the running agent session on the VM.
- * Looks up workspace + agent session from D1, then calls the VM agent.
- */
-chatRoutes.post('/:sessionId/prompt', async (c) => {
-  const userId = getUserId(c);
-  const projectId = requireRouteParam(c, 'projectId');
-  const sessionId = requireRouteParam(c, 'sessionId');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  await requireProjectCapability(db, projectId, userId, 'task:write');
-  await requireSessionCreator(c.env, projectId, sessionId, userId);
-
-  const body = await parseOptionalBody(c.req.raw, SendChatMessageSchema, {});
-  const content = body.content?.trim();
-  if (!content) {
-    throw errors.badRequest('content is required');
-  }
-
-  // Enrich @mentions with agent profile context before forwarding.
-  // The enriched message goes to the agent; the clean message was already
-  // persisted in chat by the VM agent message reporting flow.
-  const { enrichedMessage } = await enrichMessageWithMentions(
-    content,
-    db,
-    projectId,
-    userId,
-    c.env
-  );
-
-  const durableConfig = resolveDurableExecutionConfig(c.env);
-  if (durableConfig.deliveryEnabled) {
-    const accepted = await projectDataService.acceptPromptDelivery(c.env, projectId, {
-      targetSessionId: sessionId,
-      displayContent: content,
-      deliveryContent: enrichedMessage,
-      senderType: 'human',
-      senderId: userId,
-      messageClass: 'deliver',
-      sourceKind: 'user_followup',
-      ttlMs: durableConfig.ttlMs,
-      metadata: { userId },
-    });
-    return c.json(
-      {
-        accepted: true,
-        status: 'queued',
-        deliveryId: accepted.message.id,
-        messageId: accepted.transcriptMessageId,
-      },
-      202
-    );
-  }
-
-  // Compatibility path for deployments that have not enabled durable prompt
-  // delivery yet. It preserves the current request-bound old-VM behavior.
-  const result = await forwardPromptToLiveAgent(c.env, db, {
-    projectId,
-    sessionId,
-    userId,
-    content,
-    enrichedMessage,
-  });
-  return c.json(expectJsonRecord(result, 'chat.agent_prompt_result'));
-});
+registerChatPromptRoute(chatRoutes);
 
 /**
  * POST /api/projects/:projectId/sessions/:sessionId/attention/:markerId/resolve
