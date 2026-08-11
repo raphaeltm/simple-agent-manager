@@ -2,6 +2,8 @@ import type { AgentSkill } from '@simple-agent-manager/shared';
 import { Zap } from 'lucide-react';
 import { type FC } from 'react';
 
+import { expectJsonRecord } from '../../lib/runtime-validation';
+
 interface SkillSelectorProps {
   skills: AgentSkill[];
   selectedSkillId: string | null;
@@ -14,7 +16,12 @@ interface SkillSelectorProps {
 function formatResourceSummary(skill: AgentSkill | null) {
   if (!skill?.resourceRequirementsJson) return null;
   try {
-    const req = JSON.parse(skill.resourceRequirementsJson) as Record<string, unknown>;
+    // expectJsonRecord throws for non-object JSON (arrays, primitives, null),
+    // which the catch below treats the same as invalid JSON — no summary.
+    const req = expectJsonRecord(
+      JSON.parse(skill.resourceRequirementsJson) as unknown,
+      'skill.resourceRequirementsJson'
+    );
     return [
       typeof req.minVcpu === 'number' ? `${req.minVcpu} vCPU` : null,
       typeof req.minMemoryGb === 'number' ? `${req.minMemoryGb} GB RAM` : null,

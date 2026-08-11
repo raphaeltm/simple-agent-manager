@@ -6,6 +6,8 @@ import {
   type ProjectFileTag,
 } from '@simple-agent-manager/shared';
 
+import { isJsonRecord } from './runtime-validation';
+
 const CACHE_PREFIX = 'sam-library:';
 const USER_NAMESPACE_PREFIX = 'user:';
 export const UNAUTHENTICATED_LIBRARY_CACHE_NAMESPACE = `${USER_NAMESPACE_PREFIX}unauthenticated`;
@@ -72,8 +74,11 @@ function isLegacyLibraryKey(key: string): boolean {
 /** Best-effort timestamp extraction for LRU eviction across mixed entry shapes. */
 function entryTimestamp(raw: string): number {
   try {
-    const parsed = JSON.parse(raw) as { timestamp?: number; sweptAt?: number };
-    return parsed.sweptAt ?? parsed.timestamp ?? 0;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isJsonRecord(parsed)) return 0;
+    const sweptAt = typeof parsed.sweptAt === 'number' ? parsed.sweptAt : undefined;
+    const timestamp = typeof parsed.timestamp === 'number' ? parsed.timestamp : undefined;
+    return sweptAt ?? timestamp ?? 0;
   } catch {
     return 0;
   }
@@ -205,7 +210,23 @@ export function getCachedIndex(
     const key = buildIndexKey(projectId, namespace);
     const raw = localStorage.getItem(key);
     if (!raw) return null;
-    const index = JSON.parse(raw) as CachedLibraryIndex;
+    const parsed = JSON.parse(raw) as unknown;
+    // Malformed or schema-drifted entries (localStorage is user-tamperable and
+    // survives across deploys) must degrade to a cache miss, never a lie about
+    // the shape via a blind cast.
+    if (
+      !isJsonRecord(parsed) ||
+      !Array.isArray(parsed.files) ||
+      typeof parsed.count !== 'number' ||
+      typeof parsed.sweptAt !== 'number'
+    ) {
+      return null;
+    }
+    const index: CachedLibraryIndex = {
+      files: parsed.files as CachedIndexFile[],
+      count: parsed.count,
+      sweptAt: parsed.sweptAt,
+    };
     if (Date.now() - index.sweptAt > CACHE_TTL_MS) {
       localStorage.removeItem(key);
       return null;

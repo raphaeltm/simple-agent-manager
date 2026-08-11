@@ -166,4 +166,51 @@ describe('extractDocumentCardData', () => {
 
     expect(data).toMatchObject({ state: 'ready', fileId: 'f-str', fileName: 'y.md' });
   });
+
+  // Array-input parity: isRecord() used to accept arrays (typeof === 'object'),
+  // isJsonRecord() rejects them. The only place an array is a legitimate
+  // payload shape (the MCP content wrapper) is dispatched via Array.isArray
+  // before any isJsonRecord check runs, so none of these should ever legally
+  // be arrays — but they must still degrade gracefully, not throw, if they are.
+  describe('array inputs (isRecord -> isJsonRecord parity)', () => {
+    it('treats an array rawInput as absent input rather than a record', () => {
+      const data = extractDocumentCardData(toolItem({
+        toolName: 'mcp__sam-mcp__upload_to_library',
+        status: 'completed',
+        rawInput: ['not', 'a', 'record'],
+        rawOutput: undefined,
+      }));
+
+      expect(data.state).toBe('unavailable');
+      expect(data.fileId).toBeUndefined();
+      expect(data.fileName).toBeUndefined();
+    });
+
+    it('treats a tool-result text block that parses to a JSON array as no result (not a crash)', () => {
+      const data = extractDocumentCardData(toolItem({
+        toolName: 'mcp__sam-mcp__upload_to_library',
+        status: 'completed',
+        rawInput: {},
+        rawOutput: [{ type: 'text', text: '[1,2,3]' }],
+      }));
+
+      expect(data.state).toBe('unavailable');
+      expect(data.fileId).toBeUndefined();
+    });
+
+    it('treats an array-shaped existingFile as absent rather than surfacing it as the document', () => {
+      const data = extractDocumentCardData(toolItem({
+        toolName: 'mcp__sam-mcp__upload_to_library',
+        status: 'completed',
+        rawInput: { filePath: '/tmp/report.md' },
+        rawOutput: rawOutput({ error: 'FILE_EXISTS', existingFile: ['not', 'a', 'record'] }),
+      }));
+
+      // existingFile is rejected (not a record), so it falls back to the raw
+      // result object, which has no id/fileId of its own either — no crash,
+      // no bogus array-derived fileId.
+      expect(data.state).toBe('unavailable');
+      expect(data.fileId).toBeUndefined();
+    });
+  });
 });

@@ -10,12 +10,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ApiClientError } from '../../lib/api/client';
+import { isJsonRecord } from '../../lib/runtime-validation';
 
 export type OffboardingMode = 'remove' | 'leave';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function detailString(details: Record<string, unknown>, key: string): string | null {
   const value = details[key];
@@ -25,7 +22,7 @@ function detailString(details: Record<string, unknown>, key: string): string | n
 function hasRemainingProjectCoverage(resource: ProjectMemberOffboardingResourcePreview): boolean {
   const coverage = resource.details.remainingProjectCoverage;
   if (!coverage) return false;
-  if (isRecord(coverage)) {
+  if (isJsonRecord(coverage)) {
     return Object.values(coverage).some(Boolean);
   }
   return Boolean(coverage);

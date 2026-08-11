@@ -1,5 +1,6 @@
-import type { NotificationResponse, NotificationWsMessage } from '@simple-agent-manager/shared';
+import { NOTIFICATION_TYPES, NOTIFICATION_URGENCIES, type NotificationResponse } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import * as v from 'valibot';
 
 import {
   dismissNotification as apiDismiss,
@@ -9,12 +10,44 @@ import {
   markAllNotificationsRead as apiMarkAllRead,
   markNotificationRead as apiMarkRead,
 } from '../lib/api';
-import { expectJsonRecord } from '../lib/runtime-validation';
 
 const RECONNECT_BASE_DELAY = 1000;
 const MAX_RECONNECT_DELAY = 30000;
 const MAX_RETRIES = 10;
 const PING_INTERVAL_MS = 30000;
+
+const notificationResponseSchema = v.object({
+  id: v.string(),
+  projectId: v.nullable(v.string()),
+  taskId: v.nullable(v.string()),
+  sessionId: v.nullable(v.string()),
+  type: v.picklist(NOTIFICATION_TYPES),
+  urgency: v.picklist(NOTIFICATION_URGENCIES),
+  title: v.string(),
+  body: v.nullable(v.string()),
+  actionUrl: v.nullable(v.string()),
+  metadata: v.nullable(v.record(v.string(), v.unknown())),
+  readAt: v.nullable(v.string()),
+  dismissedAt: v.nullable(v.string()),
+  createdAt: v.string(),
+});
+
+/**
+ * Validates an incoming WebSocket frame against the full NotificationWsMessage
+ * contract (kept in sync with packages/shared/src/types/notification.ts).
+ * Replaces a prior partial guard that only checked `notification?.id` was a
+ * string — any other malformed field (or a missing notification object) used
+ * to silently reach state. A frame that fails validation is dropped entirely.
+ */
+const notificationWsMessageSchema = v.variant('type', [
+  v.object({ type: v.literal('notification.new'), notification: notificationResponseSchema }),
+  v.object({ type: v.literal('notification.updated'), notification: notificationResponseSchema }),
+  v.object({ type: v.literal('notification.read'), notificationId: v.string() }),
+  v.object({ type: v.literal('notification.dismissed'), notificationId: v.string() }),
+  v.object({ type: v.literal('notification.all_read') }),
+  v.object({ type: v.literal('notification.unread_count'), count: v.number() }),
+  v.object({ type: v.literal('pong') }),
+]);
 
 export interface UseNotificationsReturn {
   notifications: NotificationResponse[];
@@ -142,74 +175,74 @@ export function useNotifications(): UseNotificationsReturn {
 
         ws.onmessage = (event) => {
           if (!mountedRef.current) return;
+
+          let parsed: unknown;
           try {
-            const rawMsg = expectJsonRecord(JSON.parse(event.data), 'notifications.websocket.message');
-            const msg = rawMsg as unknown as NotificationWsMessage;
-
-            // Same shape guard as the REST path: a malformed frame must not
-            // insert undefined into the list — the crash it causes happens in
-            // a later render, outside this try/catch.
-            const hasValidNotification =
-              (msg.type === 'notification.new' || msg.type === 'notification.updated') &&
-              typeof (msg as { notification?: { id?: unknown } }).notification?.id === 'string';
-
-            switch (msg.type) {
-              case 'notification.new':
-                if (!hasValidNotification) break;
-                setNotifications((prev) => [msg.notification, ...prev]);
-                setUnreadCount((prev) => prev + 1);
-                break;
-
-              case 'notification.updated': {
-                if (!hasValidNotification) break;
-                // Reconcile unreadCount if readAt status changed
-                setNotifications((prev) => {
-                  const existing = prev.find((n) => n.id === msg.notification.id);
-                  if (existing) {
-                    if (!existing.readAt && msg.notification.readAt) {
-                      setUnreadCount((c) => Math.max(0, c - 1));
-                    } else if (existing.readAt && !msg.notification.readAt) {
-                      setUnreadCount((c) => c + 1);
-                    }
-                  }
-                  return prev.map((n) =>
-                    n.id === msg.notification.id ? msg.notification : n
-                  );
-                });
-                break;
-              }
-
-              case 'notification.read':
-                setNotifications((prev) =>
-                  prev.map((n) =>
-                    n.id === msg.notificationId
-                      ? { ...n, readAt: new Date().toISOString() }
-                      : n
-                  )
-                );
-                break;
-
-              case 'notification.dismissed':
-                setNotifications((prev) =>
-                  prev.filter((n) => n.id !== msg.notificationId)
-                );
-                break;
-
-              case 'notification.all_read':
-                setNotifications((prev) =>
-                  prev.map((n) => (n.readAt ? n : { ...n, readAt: new Date().toISOString() }))
-                );
-                break;
-
-              case 'notification.unread_count':
-                setUnreadCount(typeof msg.count === 'number' ? msg.count : 0);
-                break;
-
-              case 'pong':
-                break;
-            }
+            parsed = JSON.parse(event.data) as unknown;
           } catch {
             // Ignore non-JSON messages
+            return;
+          }
+
+          const result = v.safeParse(notificationWsMessageSchema, parsed);
+          if (!result.success) {
+            console.warn('Dropping malformed notification WebSocket frame', result.issues);
+            return;
+          }
+          const msg = result.output;
+
+          switch (msg.type) {
+            case 'notification.new':
+              setNotifications((prev) => [msg.notification, ...prev]);
+              setUnreadCount((prev) => prev + 1);
+              break;
+
+            case 'notification.updated': {
+              // Reconcile unreadCount if readAt status changed
+              setNotifications((prev) => {
+                const existing = prev.find((n) => n.id === msg.notification.id);
+                if (existing) {
+                  if (!existing.readAt && msg.notification.readAt) {
+                    setUnreadCount((c) => Math.max(0, c - 1));
+                  } else if (existing.readAt && !msg.notification.readAt) {
+                    setUnreadCount((c) => c + 1);
+                  }
+                }
+                return prev.map((n) =>
+                  n.id === msg.notification.id ? msg.notification : n
+                );
+              });
+              break;
+            }
+
+            case 'notification.read':
+              setNotifications((prev) =>
+                prev.map((n) =>
+                  n.id === msg.notificationId
+                    ? { ...n, readAt: new Date().toISOString() }
+                    : n
+                )
+              );
+              break;
+
+            case 'notification.dismissed':
+              setNotifications((prev) =>
+                prev.filter((n) => n.id !== msg.notificationId)
+              );
+              break;
+
+            case 'notification.all_read':
+              setNotifications((prev) =>
+                prev.map((n) => (n.readAt ? n : { ...n, readAt: new Date().toISOString() }))
+              );
+              break;
+
+            case 'notification.unread_count':
+              setUnreadCount(msg.count);
+              break;
+
+            case 'pong':
+              break;
           }
         };
 

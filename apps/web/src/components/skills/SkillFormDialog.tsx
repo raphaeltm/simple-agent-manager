@@ -2,6 +2,7 @@ import type { AgentProfile, AgentSkill, CreateSkillRequest, UpdateSkillRequest }
 import { Button, Dialog, Input } from '@simple-agent-manager/ui';
 import { type FC, useEffect, useState } from 'react';
 
+import { expectJsonRecord } from '../../lib/runtime-validation';
 import { SkillRuntimeSection } from './SkillRuntimeSection';
 
 interface SkillFormDialogProps {
@@ -50,7 +51,12 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
     // Deserialize resource requirements JSON into individual fields
     if (skill?.resourceRequirementsJson) {
       try {
-        const req = JSON.parse(skill.resourceRequirementsJson) as Record<string, unknown>;
+        // expectJsonRecord throws for non-object JSON (arrays, primitives, null),
+        // which the catch below treats the same as invalid JSON — blank fields.
+        const req = expectJsonRecord(
+          JSON.parse(skill.resourceRequirementsJson) as unknown,
+          'skill.resourceRequirementsJson'
+        );
         setMinVcpu(typeof req.minVcpu === 'number' ? String(req.minVcpu) : '');
         setMinMemoryGb(typeof req.minMemoryGb === 'number' ? String(req.minMemoryGb) : '');
         setMinDiskGb(typeof req.minDiskGb === 'number' ? String(req.minDiskGb) : '');
