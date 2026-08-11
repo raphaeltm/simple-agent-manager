@@ -79,6 +79,35 @@ describe('parsePlacementExplanationJson', () => {
     expect(parsed).not.toHaveProperty('reservation.providerError');
   });
 
+  it('allows explicit VM-size selection but rejects it as a reservation source', () => {
+    const legacy = {
+      selectedVmSize: 'medium',
+      vmSizeSource: 'explicit',
+      reservation: {
+        cpuMillis: 1000,
+        memoryMb: 2048,
+        diskMb: 4096,
+        exclusiveNode: false,
+        maxCoTenants: 5,
+        source: 'project',
+        sourceId: 'project-1',
+        version: 1,
+      },
+      reason: 'Legacy explicit size',
+      decidedAt: '2026-08-10T00:00:00.000Z',
+    };
+
+    expect(parsePlacementExplanationJson(JSON.stringify(legacy))).toMatchObject({
+      vmSizeSource: 'explicit',
+      reservation: { source: 'project' },
+    });
+    expect(
+      parsePlacementExplanationJson(
+        JSON.stringify({ ...legacy, reservation: { ...legacy.reservation, source: 'explicit' } })
+      )
+    ).toBeNull();
+  });
+
   it.each([
     null,
     '',

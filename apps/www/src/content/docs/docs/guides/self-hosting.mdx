@@ -252,10 +252,12 @@ version and skip the binary build/upload. A change to VM-agent build inputs—or
 `scripts/deploy/vm-agent-compatibility-version.txt` when a protocol change requires a
 new exact build—publishes the binaries before the Worker begins enforcing that version.
 Legacy or otherwise unproven equivalence also publishes a fresh release when agent
-building is enabled. The workflow stops if release metadata is unreadable or invalid,
-publication fails, or `skip_agent` attempts to bypass a first, changed, or unproven
-release. `VM_AGENT_REQUIRED_VERSION` and `VM_AGENT_BUILD_FINGERPRINT` are generated
-release metadata; self-hosters should not set or rotate them manually.
+building is enabled. The workflow stops if Worker settings cannot be read, the settings
+response is malformed, publication fails, or `skip_agent` attempts to bypass a first,
+changed, or unproven release. Empty or malformed release hashes are never carried and
+force a fresh publication when building is enabled. `VM_AGENT_REQUIRED_VERSION` and
+`VM_AGENT_BUILD_FINGERPRINT` are generated release metadata; self-hosters should not set
+or rotate them manually.
 
 Before deploying the API Worker, the workflow reads its applied Durable Object migration tag. A fresh installation creates every namespace with SQLite storage; an existing installation retains its already-applied namespace history and storage backends. This is automatic—do not edit historical migration entries or create namespaces manually.
 

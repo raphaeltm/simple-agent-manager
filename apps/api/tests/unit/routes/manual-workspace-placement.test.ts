@@ -1,6 +1,8 @@
 import type { PlacementExplanation } from '@simple-agent-manager/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
+
 const mocks = vi.hoisted(() => ({
   createNodeRecord: vi.fn(),
   drizzle: vi.fn(),
@@ -87,6 +89,18 @@ function insertDb() {
       },
     },
   };
+}
+
+function sqlValues(value: unknown, seen = new Set<unknown>()): unknown[] {
+  if (value === null || typeof value !== 'object' || seen.has(value)) return [];
+  seen.add(value);
+  const record = value as Record<string, unknown>;
+  const own = Object.hasOwn(record, 'value') ? [record.value] : [];
+  return own.concat(
+    Object.values(record).flatMap((child) =>
+      Array.isArray(child) ? child.flatMap((item) => sqlValues(item, seen)) : sqlValues(child, seen)
+    )
+  );
 }
 
 beforeEach(() => {
@@ -182,15 +196,26 @@ describe('manual workspace placement persistence', () => {
 
   it('finalizes a reused decision in both workspace and task before scheduling', async () => {
     const updates: Array<Record<string, unknown>> = [];
+    const events: string[] = [];
     mocks.drizzle.mockReturnValue({
-      update() {
+      update(table: unknown) {
+        const target = table === schema.workspaces ? 'workspace' : 'task';
         return {
           set(value: Record<string, unknown>) {
             updates.push(value);
-            return { async where() {} };
+            return {
+              async where(condition: unknown) {
+                const expectedId = target === 'workspace' ? 'workspace-1' : 'task-1';
+                expect(sqlValues(condition)).toContain(expectedId);
+                events.push(`${target}:persist`);
+              },
+            };
           },
         };
       },
+    });
+    mocks.scheduleWorkspaceCreateOnNode.mockImplementation(async () => {
+      events.push('schedule');
     });
     const explanation = placement('reused');
     explanation.selectedNodeId = 'node-existing';
@@ -219,16 +244,25 @@ describe('manual workspace placement persistence', () => {
       expect.objectContaining({ outcome: 'reused', selectedNodeId: 'node-existing' }),
     ]);
     expect(mocks.scheduleWorkspaceCreateOnNode).toHaveBeenCalledOnce();
+    expect(events).toEqual(['workspace:persist', 'task:persist', 'schedule']);
   });
 
   it('persists started then succeeded provisioning in both records before scheduling', async () => {
     const updates: Array<Record<string, unknown>> = [];
+    const events: string[] = [];
     mocks.drizzle.mockReturnValue({
-      update() {
+      update(table: unknown) {
+        const target = table === schema.workspaces ? 'workspace' : 'task';
         return {
           set(value: Record<string, unknown>) {
             updates.push(value);
-            return { async where() {} };
+            return {
+              async where(condition: unknown) {
+                const expectedId = target === 'workspace' ? 'workspace-1' : 'task-1';
+                expect(sqlValues(condition)).toContain(expectedId);
+                events.push(`${target}:persist`);
+              },
+            };
           },
         };
       },
@@ -244,6 +278,9 @@ describe('manual workspace placement persistence', () => {
     });
     mocks.provisionNode.mockResolvedValue(undefined);
     mocks.waitForNodeAgentReady.mockResolvedValue(undefined);
+    mocks.scheduleWorkspaceCreateOnNode.mockImplementation(async () => {
+      events.push('schedule');
+    });
     const explanation = placement('provisioned');
     explanation.selectionPath = 'provisioning';
     explanation.provisioningAttempts = [
@@ -277,5 +314,6 @@ describe('manual workspace placement persistence', () => {
     expect(mocks.provisionNode).toHaveBeenCalledWith('node-new', expect.anything());
     expect(mocks.waitForNodeAgentReady).toHaveBeenCalledWith('node-new', expect.anything());
     expect(mocks.scheduleWorkspaceCreateOnNode).toHaveBeenCalledOnce();
+    expect(events).toEqual(['workspace:persist', 'task:persist', 'schedule']);
   });
 });

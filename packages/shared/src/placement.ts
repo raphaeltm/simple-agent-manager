@@ -52,7 +52,7 @@ const PROVISIONING_FAILURES = new Set<NonNullable<PlacementProvisioningAttempt['
   'readiness-timeout',
   'node-unavailable',
 ]);
-const RESOURCE_SOURCES = new Set<ResourceRequirementsSource | 'explicit'>([
+const RESOURCE_SOURCES = new Set<ResourceRequirementsSource>([
   'task',
   'trigger',
   'skill',
@@ -60,6 +60,9 @@ const RESOURCE_SOURCES = new Set<ResourceRequirementsSource | 'explicit'>([
   'project',
   'user',
   'platform',
+]);
+const VM_SIZE_SOURCES = new Set<ResourceRequirementsSource | 'explicit'>([
+  ...RESOURCE_SOURCES,
   'explicit',
 ]);
 
@@ -257,7 +260,7 @@ function parseLegacy(value: unknown): LegacyPlacementExplanation | null {
   if (
     !selectedVmSize ||
     typeof vmSizeSource !== 'string' ||
-    !RESOURCE_SOURCES.has(vmSizeSource as ResourceRequirementsSource | 'explicit') ||
+    !VM_SIZE_SOURCES.has(vmSizeSource as ResourceRequirementsSource | 'explicit') ||
     !reason ||
     !decidedAt ||
     !reservation ||
