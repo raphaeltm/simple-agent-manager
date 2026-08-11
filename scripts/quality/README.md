@@ -55,8 +55,10 @@ configuration.
   manifest changes. Its checked-in snapshot makes staged, unstaged, and untracked manifest
   changes visible to the same policy.
 - `pnpm quality:gitleaks:current` and `pnpm quality:gitleaks:pr` run Gitleaks against the current
-  tree and PR range. Public logs expose counts and disposition only; secret-like findings and
-  full-history evidence remain private.
+  tree and PR range. Both modes accept only exact, unredacted, expiring digests from the reviewed
+  baseline, so a formatting-only touch to a known marker does not require history rewriting while
+  changed bytes remain blocking. Public logs expose counts and disposition only; secret-like
+  findings and full-history evidence remain private.
 - `pnpm quality:govulncheck-diff` blocks locally changed Go modules and uses the locked tool module
   in `scripts/quality/govulncheck-tool/`.
 

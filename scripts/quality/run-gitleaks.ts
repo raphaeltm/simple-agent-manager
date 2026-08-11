@@ -97,10 +97,10 @@ function run(): void {
     // The report is intentionally unredacted so reviewed hashes cannot be
     // forged by replacing a secret at the same rule/file/line. It remains only
     // in the private temporary directory and no scanner output is forwarded.
-    const baseline =
-      mode === 'current-tree'
-        ? readFileSync(join(repositoryRoot, BASELINE_PATH), 'utf8')
-        : '{"version":1,"matcherVersion":"gitleaks-finding-v2-unredacted","baseCommit":"none","groups":[]}';
+    // Both bounded modes honor the same exact, expiring reviewed digests. This
+    // lets the PR-range scan distinguish a known non-secret marker touched by
+    // formatting from genuinely new bytes without exposing finding metadata.
+    const baseline = readFileSync(join(repositoryRoot, BASELINE_PATH), 'utf8');
     const evaluated = evaluateGitleaksFindings(report, baseline);
     if (!evaluated.ok) {
       console.error(
