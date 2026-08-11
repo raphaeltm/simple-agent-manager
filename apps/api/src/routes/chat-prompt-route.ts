@@ -9,7 +9,7 @@ import { expectJsonRecord } from '../lib/runtime-validation';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
-import { SendChatMessageSchema, parseOptionalBody } from '../schemas';
+import { parseOptionalBody,SendChatMessageSchema } from '../schemas';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
 import * as projectDataService from '../services/project-data';
 import { forwardPromptToLiveAgent } from './chat-prompt-forward';
