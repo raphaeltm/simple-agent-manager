@@ -19,6 +19,7 @@ import type {
 import { consumerKey, mapKind } from '@simple-agent-manager/shared';
 import { and, eq, isNull,or } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
+import * as v from 'valibot';
 
 import {
   ccAttachments,
@@ -26,27 +27,70 @@ import {
   ccCredentials,
   platformCredentials,
 } from '../../db/schema';
+import { maybeJsonRecord } from '../../lib/runtime-validation';
 import { decrypt } from '../encryption';
+
+// A named field may legitimately be stored as JSON `null` (the write-time
+// validator in routes/composable-credentials.ts only rejects a non-HTTPS
+// baseUrl — it never blocks `{ model: null }`), but ConfigurationSettings
+// types these fields as `string | undefined`, never `string | null`.
+// Normalize null -> absent at the schema level instead of rejecting the
+// whole settings object over one nulled-out field.
+const nullableNamedStringField = v.optional(
+  v.pipe(
+    v.nullable(v.string()),
+    v.transform((value) => value ?? undefined)
+  )
+);
+
+// Mirrors ConfigurationSettings (packages/shared/src/composable-credentials/types.ts):
+// a handful of named string fields plus an explicit `[key: string]: unknown`
+// passthrough (assemblers.ts and ai-proxy-passthrough.ts also read
+// settings.samProxyBaseUrl / settings.dialect, which aren't in the named
+// type). v.looseObject keeps any other keys instead of stripping them, so
+// this validates the settings *shape* (a record, with named fields typed
+// correctly when present) without narrowing the "kept open" contract the
+// shared type already documents.
+const ccConfigurationSettingsSchema = v.looseObject({
+  model: nullableNamedStringField,
+  baseUrl: nullableNamedStringField,
+  providerId: nullableNamedStringField,
+  providerName: nullableNamedStringField,
+  permissionMode: nullableNamedStringField,
+});
 
 /** Safely parse JSON settings, returning empty object on malformed data. */
 function safeParseJson(json: string, contextId: string): CCConfigurationSettings {
+  let parsed: unknown;
   try {
-    return JSON.parse(json) as CCConfigurationSettings;
+    parsed = JSON.parse(json);
   } catch {
     // eslint-disable-next-line no-console -- structured error log for malformed settings JSON
     console.error('snapshot.settings_parse_error', { configId: contextId });
     return {};
   }
+  // JSON.parse succeeding is not enough: the function's contract is "empty
+  // object on malformed data", but a syntactically valid non-record JSON
+  // value (an array, a string, a number, ...) previously passed straight
+  // through via the blind cast this schema check replaces.
+  const result = v.safeParse(ccConfigurationSettingsSchema, parsed);
+  if (!result.success) {
+    // eslint-disable-next-line no-console -- structured error log for malformed settings JSON
+    console.error('snapshot.settings_parse_error', { configId: contextId });
+    return {};
+  }
+  return result.output;
 }
 
 /** Attempt to parse a decrypted token as a JSON object; returns null if it is not JSON. */
 function tryParseJsonObject(decryptedToken: string): Record<string, unknown> | null {
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(decryptedToken);
-    return parsed !== null && typeof parsed === 'object' ? (parsed as Record<string, unknown>) : null;
+    parsed = JSON.parse(decryptedToken);
   } catch {
     return null;
   }
+  return maybeJsonRecord(parsed);
 }
 
 /**

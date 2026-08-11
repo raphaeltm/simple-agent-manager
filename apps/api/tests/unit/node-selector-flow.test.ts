@@ -314,15 +314,18 @@ describe('parseMetrics (internal)', () => {
     expect(selectorSource).toContain('return null');
   });
 
-  it('validates the parsed object has at least one metric field', () => {
-    expect(selectorSource).toContain("typeof parsed.cpuLoadAvg1 === 'number'");
-    expect(selectorSource).toContain("typeof parsed.memoryPercent === 'number'");
-    expect(selectorSource).toContain("typeof parsed.diskPercent === 'number'");
-  });
-
-  it('returns null for non-object parsed values', () => {
-    expect(selectorSource).toContain("typeof parsed === 'object'");
-    expect(selectorSource).toContain('parsed !== null');
+  it('validates the parsed object against the NodeMetrics schema', () => {
+    // parseMetrics now schema-validates via valibot (nodeMetricsSchema)
+    // instead of a manual `typeof parsed.x === 'number'` OR-chain followed by
+    // a blind cast — a mistyped field used to slip through this check and
+    // poison scoreNodeLoad()/nodeHasCapacity() with NaN. Behavioral coverage
+    // for the schema-validated cases (mistyped field, no recognized fields,
+    // array, invalid JSON, well-formed) lives in
+    // tests/unit/services/node-selector.test.ts, exercised through
+    // selectNodeForTaskRun()'s returned lastMetrics — parseMetrics itself is
+    // not exported.
+    expect(selectorSource).toContain('const nodeMetricsSchema = v.object({');
+    expect(selectorSource).toContain('v.safeParse(nodeMetricsSchema, parsed)');
   });
 });
 

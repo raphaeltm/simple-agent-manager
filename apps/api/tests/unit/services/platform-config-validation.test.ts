@@ -139,3 +139,53 @@ describe('validatePlatformIntegrationInput — Google infrastructure OAuth', () 
     expect(body.get('redirect_uri')).toBe('https://api.example.com/auth/google/callback');
   });
 });
+
+describe('validatePlatformIntegrationInput — OAuth ping error-probe resilience', () => {
+  it('does not crash and reports no rejection when GitHub returns a non-JSON error body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('<html>rate limited</html>', {
+        status: 429,
+        headers: { 'Content-Type': 'text/html' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(validatePlatformIntegrationInput(env, {
+      github: { clientId: 'github-client-id', clientSecret: 'github-client-secret' },
+    })).resolves.toEqual({ ok: true, errors: [] });
+  });
+
+  it('does not crash and reports no rejection when Google returns a JSON body shaped as an array', async () => {
+    // Valid JSON, but not the { error?: string } object shape the probe
+    // reads — the old blind cast tolerated it silently; the schema-validated
+    // probe must degrade to the same non-error outcome, not throw.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(['unexpected', 'shape']), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(validatePlatformIntegrationInput(env, {
+      google: { clientId: 'google-client-id', clientSecret: 'google-client-secret' },
+    })).resolves.toEqual({ ok: true, errors: [] });
+  });
+
+  it('still detects a well-formed GitHub rejection body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'incorrect_client_credentials' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(validatePlatformIntegrationInput(env, {
+      github: { clientId: 'github-client-id', clientSecret: 'github-client-secret' },
+    })).resolves.toEqual({
+      ok: false,
+      errors: ['GitHub OAuth client id/secret were rejected'],
+    });
+  });
+});

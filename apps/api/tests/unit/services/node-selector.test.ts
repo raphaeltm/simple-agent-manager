@@ -283,6 +283,81 @@ describe('nodeHasCapacity', () => {
 });
 
 // =============================================================================
+// parseMetrics (internal, exercised via selectNodeForTaskRun's returned
+// lastMetrics) — schema-validated parsing of the nodes.last_metrics column
+// =============================================================================
+
+describe('parseMetrics via selectNodeForTaskRun.lastMetrics', () => {
+  it('treats a metrics object with a mistyped field as absent metrics, not NaN-poisoned', async () => {
+    // Regression: the old guard only required *one* of the three fields to
+    // be a number, then blindly cast the whole object. cpuLoadAvg1 here is a
+    // string, which used to slip through and later produce
+    // `"not-a-number" * 0.4` -> NaN in scoreNodeLoad's sort comparator.
+    const db = createMockDb({
+      nodes: [
+        node({
+          id: 'node-mistyped',
+          lastMetrics: JSON.stringify({ cpuLoadAvg1: 'not-a-number', memoryPercent: 50 }),
+        }),
+      ],
+    });
+
+    const selected = await selectNodeForTaskRun(db as never, 'user-1', {});
+
+    expect(selected?.id).toBe('node-mistyped');
+    expect(selected?.lastMetrics).toBeNull();
+  });
+
+  it('treats metrics with no recognized numeric fields as absent (same as before)', async () => {
+    const db = createMockDb({
+      nodes: [node({ id: 'node-empty', lastMetrics: JSON.stringify({ foo: 'bar' }) })],
+    });
+
+    const selected = await selectNodeForTaskRun(db as never, 'user-1', {});
+
+    expect(selected?.id).toBe('node-empty');
+    expect(selected?.lastMetrics).toBeNull();
+  });
+
+  it('treats a JSON array metrics column as absent (same as before)', async () => {
+    const db = createMockDb({
+      nodes: [node({ id: 'node-array', lastMetrics: JSON.stringify([1, 2, 3]) })],
+    });
+
+    const selected = await selectNodeForTaskRun(db as never, 'user-1', {});
+
+    expect(selected?.id).toBe('node-array');
+    expect(selected?.lastMetrics).toBeNull();
+  });
+
+  it('treats invalid JSON as absent (same as before)', async () => {
+    const db = createMockDb({
+      nodes: [node({ id: 'node-badjson', lastMetrics: '{not valid json' })],
+    });
+
+    const selected = await selectNodeForTaskRun(db as never, 'user-1', {});
+
+    expect(selected?.id).toBe('node-badjson');
+    expect(selected?.lastMetrics).toBeNull();
+  });
+
+  it('still parses well-formed metrics', async () => {
+    const db = createMockDb({
+      nodes: [
+        node({
+          id: 'node-good',
+          lastMetrics: JSON.stringify({ cpuLoadAvg1: 12.5, memoryPercent: 40 }),
+        }),
+      ],
+    });
+
+    const selected = await selectNodeForTaskRun(db as never, 'user-1', {});
+
+    expect(selected?.lastMetrics).toEqual({ cpuLoadAvg1: 12.5, memoryPercent: 40 });
+  });
+});
+
+// =============================================================================
 // selectNodeForTaskRun — VM size minimum behavior
 // =============================================================================
 

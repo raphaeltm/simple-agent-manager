@@ -366,6 +366,60 @@ describe('getAuthenticatedUserOrganizations', () => {
     });
     expect(JSON.stringify(mocks.log.warn.mock.calls)).not.toContain('expired-token');
   });
+
+  it('throws a clear error when the GitHub error probe body is non-JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('<html>rate limited</html>', {
+          status: 429,
+          headers: { 'Content-Type': 'text/html' },
+        })
+      )
+    );
+
+    await expect(getAuthenticatedUserOrganizations('expired-token', {
+      flow: 'shared-org-discovery',
+      userId: 'user-1',
+    })).rejects.toThrow('Failed to get user organizations: 429');
+  });
+
+  it('skips malformed org entries (null, missing login) without crashing and keeps valid ones', async () => {
+    // Regression: `null` entries previously threw `Cannot read properties of
+    // null (reading 'login')` uncaught; non-null malformed entries (missing
+    // `login`) silently produced `{ login: undefined }`. Both degrade to a
+    // logged skip instead.
+    const page = [
+      { login: 'org-good-1' },
+      null,
+      { notLogin: 'wrong-shape' },
+      { login: 42 },
+      { login: 'org-good-2' },
+    ];
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json(page)));
+
+    const result = await getAuthenticatedUserOrganizations('github-user-token', {
+      flow: 'shared-org-discovery',
+      userId: 'user-1',
+    });
+
+    expect(result).toEqual([{ login: 'org-good-1' }, { login: 'org-good-2' }]);
+    expect(mocks.log.warn).toHaveBeenCalledWith('github.user_organizations.invalid_entry', {
+      flow: 'shared-org-discovery',
+      userId: 'user-1',
+      page: 1,
+    });
+    expect(mocks.log.warn).toHaveBeenCalledTimes(3);
+  });
+
+  it('throws a clear error when the organizations response is not a JSON array', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ not: 'an array' })));
+
+    await expect(getAuthenticatedUserOrganizations('github-user-token', {
+      flow: 'shared-org-discovery',
+      userId: 'user-1',
+    })).rejects.toThrow('Failed to get user organizations: response was not a JSON array');
+  });
 });
 
 describe('verifyUserInstallationAccess', () => {
@@ -443,6 +497,25 @@ describe('verifyUserInstallationAccess', () => {
       installationId: '120081765',
       accountName: 'effprop',
     })).rejects.toThrow('Server unavailable');
+  });
+
+  it('falls back to a generic message when the error probe body is non-JSON', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue(
+        new Response('<html>bad gateway</html>', {
+          status: 502,
+          headers: { 'Content-Type': 'text/html' },
+        })
+      )
+    );
+
+    await expect(verifyUserInstallationAccess('github-user-token', '120081765', {
+      flow: 'shared-org-discovery',
+      userId: 'user-1',
+      installationId: '120081765',
+      accountName: 'effprop',
+    })).rejects.toThrow('Failed to verify user installation access: 502');
   });
 });
 

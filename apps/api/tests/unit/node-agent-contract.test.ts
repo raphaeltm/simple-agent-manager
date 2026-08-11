@@ -988,4 +988,53 @@ describe('Node Agent client functions send correct payloads', () => {
       deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
     ).rejects.toThrow('Request timed out');
   });
+
+  it('classifies a runtime-recovery error body into a typed NodeAgentRequestError', async () => {
+    fetchWithTimeoutMock.mockResolvedValue(
+      new Response(JSON.stringify({ error: 'RUNTIME_RECOVERING' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    await expect(
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      error: 'RUNTIME_RECOVERING',
+      message: 'Instant session interrupted; restoring the last safe checkpoint.',
+    });
+  });
+
+  it('never throws while probing a non-JSON error body — falls back to the generic error', async () => {
+    // Regression guard for the recovery-payload probe: `JSON.parse(body)`
+    // used to be blindly cast (`as { error?: unknown; message?: unknown }`).
+    // A garbage body must still fall through to the existing generic
+    // "Node Agent request failed" handling, not throw from inside the probe.
+    fetchWithTimeoutMock.mockResolvedValue(
+      new Response('<html>upstream gateway error</html>', {
+        status: 502,
+        headers: { 'Content-Type': 'text/html' },
+      })
+    );
+
+    await expect(
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
+    ).rejects.toThrow('Node Agent request failed: 502');
+  });
+
+  it('never throws while probing a JSON array error body — falls back to the generic error', async () => {
+    // Arrays are typeof 'object' in JS; the probe must not mistake one for a
+    // valid { error, message } record and must still fall back cleanly.
+    fetchWithTimeoutMock.mockResolvedValue(
+      new Response(JSON.stringify(['unexpected', 'shape']), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    await expect(
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
+    ).rejects.toThrow('Node Agent request failed: 500');
+  });
 });

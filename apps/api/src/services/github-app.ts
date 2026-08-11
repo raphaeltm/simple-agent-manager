@@ -62,6 +62,10 @@ const branchSchema = v.object({
   name: v.string(),
 });
 
+const githubOrgSchema = v.object({
+  login: v.string(),
+});
+
 async function readGitHubError(response: Response, fallback: string): Promise<string> {
   try {
     const error = await readResponseJson(response, githubErrorSchema, 'github.error');
@@ -661,11 +665,24 @@ export async function getAuthenticatedUserOrganizations(
         ok: false,
         organizationCount: 0,
       });
-      const error = await response.json().catch(() => ({})) as { message?: string };
-      throw new Error(error.message || `Failed to get user organizations: ${response.status}`);
+      throw new Error(
+        await readGitHubError(response, `Failed to get user organizations: ${response.status}`)
+      );
     }
 
-    const data = await response.json() as Array<{ login: string }>;
+    let parsedBody: unknown;
+    try {
+      parsedBody = await response.json();
+    } catch (err) {
+      throw new Error(
+        err instanceof Error
+          ? `Failed to parse user organizations response: ${err.message}`
+          : 'Failed to parse user organizations response'
+      );
+    }
+    if (!Array.isArray(parsedBody)) {
+      throw new Error('Failed to get user organizations: response was not a JSON array');
+    }
 
     log.info('github.user_organizations.response', {
       flow: diagnostics.flow,
@@ -673,11 +690,26 @@ export async function getAuthenticatedUserOrganizations(
       page,
       status: response.status,
       ok: true,
-      organizationCount: data.length,
+      organizationCount: parsedBody.length,
     });
 
-    allOrganizations.push(...data.map((org) => ({ login: org.login })));
-    hasMore = data.length === perPage;
+    // Per-entry validation instead of a blind cast: a null/malformed entry
+    // previously either crashed (null.login) or silently produced
+    // `{ login: undefined }`. Skip and log instead, matching rule 50's
+    // list-read fault isolation — one bad entry no longer breaks the page.
+    for (const entry of parsedBody) {
+      const result = v.safeParse(githubOrgSchema, entry);
+      if (result.success) {
+        allOrganizations.push({ login: result.output.login });
+      } else {
+        log.warn('github.user_organizations.invalid_entry', {
+          flow: diagnostics.flow,
+          userId: diagnostics.userId,
+          page,
+        });
+      }
+    }
+    hasMore = parsedBody.length === perPage;
     page++;
   }
 
@@ -724,8 +756,9 @@ export async function verifyUserInstallationAccess(
     return false;
   }
 
-  const error = await response.json().catch(() => ({})) as { message?: string };
-  throw new Error(error.message || `Failed to verify user installation access: ${response.status}`);
+  throw new Error(
+    await readGitHubError(response, `Failed to verify user installation access: ${response.status}`)
+  );
 }
 
 function githubUserTokenHeaders(accessToken: string): HeadersInit {

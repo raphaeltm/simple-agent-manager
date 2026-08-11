@@ -91,6 +91,29 @@ async function seedLegacyCloudProvider(opts: {
     .run();
 }
 
+async function seedConfiguration(opts: {
+  id: string;
+  userId: string;
+  consumerKind: 'agent' | 'compute';
+  consumerTarget: string;
+  settingsJson: string | null;
+}) {
+  await env.DATABASE.prepare(
+    `INSERT OR IGNORE INTO cc_configurations
+     (id, owner_id, name, consumer_kind, consumer_target, credential_id, settings_json, is_active, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, NULL, ?, 1, datetime('now'), datetime('now'))`,
+  )
+    .bind(
+      opts.id,
+      opts.userId,
+      `config ${opts.id}`,
+      opts.consumerKind,
+      opts.consumerTarget,
+      opts.settingsJson,
+    )
+    .run();
+}
+
 describe('snapshot resilience to raw cloud-provider platform defaults', () => {
   it('raw (non-JSON) hetzner platform token does not crash the snapshot', async () => {
     // Hetzner tokens are stored raw — not JSON. This is the exact row that
@@ -289,5 +312,103 @@ describe('snapshot resilience to raw cloud-provider platform defaults', () => {
       expect(cred.secret.apiKey).toBe('raw-openai-key-not-json');
       expect(cred.secret.baseUrl).toBe('');
     }
+  });
+});
+
+describe('snapshot resilience to malformed configuration settings_json', () => {
+  it('a JSON-syntax-invalid settings_json degrades that configuration to empty settings, not fatal', async () => {
+    await seedConfiguration({
+      id: `${TEST_PREFIX}-cfg-badjson`,
+      userId: USER,
+      consumerKind: 'agent',
+      consumerTarget: 'claude-code',
+      settingsJson: '{not valid json',
+    });
+
+    const { buildSnapshot } = await import(
+      '../../src/services/composable-credentials/snapshot'
+    );
+    // Must not throw.
+    const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
+
+    const config = snapshot.configurations.find(
+      (candidate) => candidate.id === `${TEST_PREFIX}-cfg-badjson`,
+    );
+    expect(config).toBeDefined();
+    expect(config?.settings).toEqual({});
+  });
+
+  it('a settings_json that decodes to a non-object degrades to empty settings, not fatal', async () => {
+    // Valid JSON, but not a record — the previous blind cast
+    // (`JSON.parse(json) as CCConfigurationSettings`) would have handed the
+    // raw string through unchanged instead of the documented `{}` fallback.
+    await seedConfiguration({
+      id: `${TEST_PREFIX}-cfg-nonobject`,
+      userId: USER,
+      consumerKind: 'agent',
+      consumerTarget: 'claude-code',
+      settingsJson: JSON.stringify('just a string'),
+    });
+
+    const { buildSnapshot } = await import(
+      '../../src/services/composable-credentials/snapshot'
+    );
+    const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
+
+    const config = snapshot.configurations.find(
+      (candidate) => candidate.id === `${TEST_PREFIX}-cfg-nonobject`,
+    );
+    expect(config?.settings).toEqual({});
+  });
+
+  it('a null-valued named field normalizes to absent instead of discarding sibling fields', async () => {
+    // routes/composable-credentials.ts's write-time validator only rejects a
+    // non-HTTPS baseUrl — it does not block `{ model: null }`. A settings
+    // blob with one nulled-out named field is well-formed, not malformed;
+    // it must not degrade the whole blob to {} and lose providerId alongside it.
+    await seedConfiguration({
+      id: `${TEST_PREFIX}-cfg-nullfield`,
+      userId: USER,
+      consumerKind: 'agent',
+      consumerTarget: 'claude-code',
+      settingsJson: JSON.stringify({ model: null, providerId: 'anthropic' }),
+    });
+
+    const { buildSnapshot } = await import(
+      '../../src/services/composable-credentials/snapshot'
+    );
+    const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
+
+    const config = snapshot.configurations.find(
+      (candidate) => candidate.id === `${TEST_PREFIX}-cfg-nullfield`,
+    );
+    expect(config?.settings.model).toBeUndefined();
+    expect(config?.settings.providerId).toBe('anthropic');
+  });
+
+  it('a well-formed settings_json still parses, preserving passthrough keys outside the named fields', async () => {
+    // ConfigurationSettings is intentionally "kept open" ([key: string]:
+    // unknown) — assemblers.ts reads settings.samProxyBaseUrl, which isn't
+    // one of the named fields the schema types explicitly.
+    await seedConfiguration({
+      id: `${TEST_PREFIX}-cfg-good`,
+      userId: USER,
+      consumerKind: 'agent',
+      consumerTarget: 'openai-codex',
+      settingsJson: JSON.stringify({ model: 'glm-4.6', samProxyBaseUrl: '/ai/proxy/custom' }),
+    });
+
+    const { buildSnapshot } = await import(
+      '../../src/services/composable-credentials/snapshot'
+    );
+    const snapshot = await buildSnapshot(db, USER, ENCRYPTION_KEY);
+
+    const config = snapshot.configurations.find(
+      (candidate) => candidate.id === `${TEST_PREFIX}-cfg-good`,
+    );
+    expect(config?.settings).toEqual({
+      model: 'glm-4.6',
+      samProxyBaseUrl: '/ai/proxy/custom',
+    });
   });
 });

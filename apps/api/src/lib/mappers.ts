@@ -24,23 +24,44 @@ import {
   DEFAULT_WORKSPACE_PROFILE,
   isTaskExecutionStep,
   parseCompletionEvidenceJson,
+  VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
+
+// Mirrors ProjectAgentDefaults (packages/shared/src/types/project.ts) and the
+// write-time AgentDefaultEntrySchema (apps/api/src/schemas/projects.ts,
+// unexported so it isn't reused directly): a record keyed by agent type, each
+// entry optionally overriding model/permissionMode. Any row written through
+// the PATCH route already satisfies this; the schema exists to stop a
+// pre-validation legacy or hand-edited row from being blindly cast and handed
+// to callers as if it were well-formed.
+const agentDefaultEntrySchema = v.object({
+  model: v.optional(v.nullable(v.string())),
+  permissionMode: v.optional(v.nullable(v.picklist(VALID_PERMISSION_MODES))),
+});
+const projectAgentDefaultsSchema = v.record(v.string(), agentDefaultEntrySchema);
 
 /**
  * Parse the project.agentDefaults JSON column. Returns null if unset or invalid.
- * We intentionally do NOT re-validate contents here — validation happens at write time.
+ * We validate the *shape* (a record of agent-type -> { model?, permissionMode? }
+ * objects); per-field content validation beyond that (e.g. the permission-mode
+ * enum) mirrors the write-time schema so the inferred type lines up with
+ * ProjectAgentDefaults, not an independent re-validation policy.
  */
 function parseAgentDefaults(raw: string | null): ProjectAgentDefaults | null {
   if (!raw) return null;
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-      return parsed as ProjectAgentDefaults;
-    }
-    return null;
+    parsed = JSON.parse(raw);
   } catch {
     return null;
   }
+  // v.record() alone accepts arrays (numeric indices satisfy string keys), so
+  // the array rejection needs to stay explicit — matching the original
+  // `!Array.isArray(parsed)` guard — rather than relying on the record schema.
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) return null;
+  const result = v.safeParse(projectAgentDefaultsSchema, parsed);
+  return result.success ? result.output : null;
 }
 
 import type * as schema from '../db/schema';

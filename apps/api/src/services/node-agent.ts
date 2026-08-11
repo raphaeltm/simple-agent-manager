@@ -8,7 +8,7 @@ import {
   type RuntimeRecoveryCode,
 } from '../durable-objects/vm-agent-container-recovery';
 import type { Env } from '../env';
-import { expectJsonRecord } from '../lib/runtime-validation';
+import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { AppError } from '../middleware/error';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import { signNodeManagementToken, signTerminalToken } from './jwt';
@@ -179,9 +179,9 @@ export async function nodeAgentRequest(
   if (!response.ok) {
     const body = await response.text().catch(() => '');
 
-    let recoveryPayload: { error?: unknown; message?: unknown } | null = null;
+    let recoveryPayload: ReturnType<typeof maybeJsonRecord> = null;
     try {
-      recoveryPayload = JSON.parse(body) as { error?: unknown; message?: unknown };
+      recoveryPayload = maybeJsonRecord(JSON.parse(body) as unknown);
     } catch {
       // Non-recovery Node Agent responses retain the existing generic handling.
     }

@@ -1,7 +1,9 @@
 import { DEFAULT_GCP_API_TIMEOUT_MS } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
+import { parseWithSchema } from '../lib/runtime-validation';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import type { PlatformIntegrationInput, ResolvedPlatformConfig } from './platform-config';
 
@@ -9,6 +11,20 @@ const log = createModuleLogger('platform-config-validation');
 
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+
+// Best-effort read of the OAuth token error probe body. Both callers only
+// care about the `error` code; a non-object or unparseable body degrades to
+// `null` exactly like the previous `.catch(() => null)` did.
+const oauthErrorProbeSchema = v.object({ error: v.optional(v.string()) });
+
+async function readOAuthErrorProbe(response: Response): Promise<{ error?: string } | null> {
+  try {
+    const body: unknown = await response.json();
+    return parseWithSchema(oauthErrorProbeSchema, body, 'platform-config-validation.oauth_error_probe');
+  } catch {
+    return null;
+  }
+}
 
 export interface PlatformConfigValidationResult {
   ok: boolean;
@@ -83,7 +99,7 @@ async function pingGitHubOAuth(clientId: string, clientSecret: string): Promise<
       code: 'sam-setup-validation',
     }),
   });
-  const body = await response.json().catch(() => null) as { error?: string } | null;
+  const body = await readOAuthErrorProbe(response);
   if (body?.error === 'incorrect_client_credentials') {
     return 'GitHub OAuth client id/secret were rejected';
   }
@@ -107,7 +123,7 @@ async function pingGoogleOAuth(
       grant_type: 'authorization_code',
     }),
   }, timeoutMs);
-  const body = await response.json().catch(() => null) as { error?: string } | null;
+  const body = await readOAuthErrorProbe(response);
   if (body?.error === 'invalid_client' || body?.error === 'unauthorized_client') {
     return 'Google OAuth client id/secret were rejected';
   }
