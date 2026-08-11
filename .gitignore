@@ -77,3 +77,6 @@ pnpm-debug.log*
 
 # /workflow orchestrator state (ephemeral, per-session)
 .workflow-state.md
+
+# Playwright run artifacts
+apps/web/test-results/

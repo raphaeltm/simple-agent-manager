@@ -14,21 +14,11 @@ import { type FC, useCallback, useState } from 'react';
 
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { cleanupStuckExecutions, deleteExecution } from '../../lib/api/triggers';
+import { FOCUS_RING, formatDuration } from './trigger-presentation';
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-function formatDuration(startedAt: string | null, completedAt: string | null): string {
-  if (!startedAt || !completedAt) return '\u2014';
-  const durationMs = new Date(completedAt).getTime() - new Date(startedAt).getTime();
-  if (durationMs < 1000) return '<1s';
-  const seconds = Math.floor(durationMs / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  const secs = seconds % 60;
-  return secs > 0 ? `${minutes}m ${secs}s` : `${minutes}m`;
-}
 
 function formatDateTime(dateStr: string): string {
   return new Date(dateStr).toLocaleString(undefined, {
@@ -91,9 +81,6 @@ const STUCK_STATUSES = new Set(['queued']);
 
 /** Statuses where individual deletion is allowed (non-running). */
 const DELETABLE_STATUSES = new Set(['queued', 'failed', 'skipped', 'completed']);
-
-const FOCUS_RING =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 
 // ---------------------------------------------------------------------------
 // Component

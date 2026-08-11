@@ -98,11 +98,11 @@ async function openDeleteMenu(user: ReturnType<typeof userEvent.setup>) {
   await screen.findByText('Daily Backup');
 
   // Open the first card's overflow menu
-  const menuBtns = screen.getAllByRole('button', { name: 'Trigger actions' });
+  const menuBtns = screen.getAllByRole('button', { name: /^Actions for/ });
   await user.click(menuBtns[0]);
 
   // Click Delete
-  const deleteBtn = screen.getByRole('button', { name: /delete/i });
+  const deleteBtn = screen.getByRole('menuitem', { name: /delete/i });
   await user.click(deleteBtn);
 }
 

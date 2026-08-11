@@ -136,7 +136,14 @@ function AccountMapCanvasInner({ nodes: initialNodes, edges: initialEdges, isMob
   }, [isMobile, tooltip]);
 
   return (
-    <div className="relative w-full h-full" role="region" aria-label="Account map visualization">
+    /* `data-intentional-clip`: react-flow is a pan/zoom canvas — its viewport
+       is deliberately larger than the visible frame. */
+    <div
+      data-intentional-clip
+      className="relative w-full h-full"
+      role="region"
+      aria-label="Account map visualization"
+    >
       <ReactFlow
         nodes={nodes}
         edges={edges}
