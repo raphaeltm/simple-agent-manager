@@ -1,5 +1,7 @@
 import * as v from 'valibot';
 
+import { PlacementNodeIdSchema, VMLocationSchema } from './placement';
+
 const CredentialProviderSchema = v.picklist([
   'hetzner',
   'scaleway',
@@ -15,11 +17,11 @@ const CredentialKindSchema = v.picklist(['api-key', 'oauth-token']);
 export const CreateWorkspaceSchema = v.object({
   name: v.string(),
   projectId: v.string(),
-  nodeId: v.optional(v.string()),
+  nodeId: v.optional(PlacementNodeIdSchema),
   repository: v.optional(v.string()),
   branch: v.optional(v.string()),
   vmSize: v.optional(VMSizeSchema),
-  vmLocation: v.optional(v.string()),
+  vmLocation: v.optional(VMLocationSchema),
   installationId: v.optional(v.string()),
   provider: v.optional(CredentialProviderSchema),
 });

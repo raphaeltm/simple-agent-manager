@@ -1,10 +1,15 @@
 import { describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../../src/db/schema';
 import { handleNodeSelection } from '../../../src/durable-objects/task-runner/node-steps';
 import type {
   TaskRunnerContext,
   TaskRunnerState,
 } from '../../../src/durable-objects/task-runner/types';
+
+vi.mock('drizzle-orm/d1', () => ({
+  drizzle: (database: unknown) => database,
+}));
 
 type D1ResultMap = {
   preferredNode?: {
@@ -44,36 +49,55 @@ type D1ResultMap = {
   >;
 };
 
-function createStatement(sql: string, results: D1ResultMap) {
-  let bound: unknown[] = [];
+function createDatabase(results: D1ResultMap) {
+  const now = new Date().toISOString();
+  const placementNodes = [
+    ...(results.preferredNode ? [results.preferredNode] : []),
+    ...(results.warmNodes ?? []),
+    ...(results.existingNodes ?? []),
+  ].map((candidate) => {
+    const fresh = results.healthByNode?.[candidate.id];
+    return {
+      id: candidate.id,
+      status: 'status' in candidate ? candidate.status : 'running',
+      runtime: 'vm',
+      vmSize: candidate.vm_size,
+      vmLocation: 'vm_location' in candidate ? candidate.vm_location : 'fsn1',
+      healthStatus:
+        fresh?.health_status ??
+        ('health_status' in candidate ? candidate.health_status : 'healthy'),
+      lastHeartbeatAt: fresh?.last_heartbeat_at ?? now,
+      agentReadyAt: fresh?.agent_ready_at ?? now,
+      agentVersion: fresh?.agent_version ?? candidate.agent_version ?? null,
+      lastMetrics: 'last_metrics' in candidate ? candidate.last_metrics : null,
+      warmSince: (results.warmNodes ?? []).some((node) => node.id === candidate.id) ? now : null,
+    };
+  });
+  const workspaceRows = (results.workspaceCounts ?? []).flatMap((count) =>
+    Array.from({ length: count.c }, (_, index) => ({
+      id: `workspace-${count.node_id}-${index}`,
+      nodeId: count.node_id,
+    }))
+  );
+
   return {
-    bind(...args: unknown[]) {
-      bound = args;
-      return this;
+    select() {
+      return {
+        from(table: unknown) {
+          return {
+            where() {
+              return Promise.resolve(table === schema.nodes ? placementNodes : workspaceRows);
+            },
+          };
+        },
+      };
     },
-    first() {
-      if (sql.includes('SELECT id, status, vm_size')) {
-        return Promise.resolve(results.preferredNode ?? null);
-      }
-      if (sql.includes('SELECT status, warm_since')) {
-        return Promise.resolve(results.freshWarmNode ?? null);
-      }
-      if (sql.includes('SELECT health_status, last_heartbeat_at, agent_ready_at')) {
-        return Promise.resolve(results.healthByNode?.[String(bound[0])] ?? null);
-      }
-      return Promise.resolve(null);
-    },
-    all() {
-      if (sql.includes('warm_since IS NOT NULL')) {
-        return Promise.resolve({ results: results.warmNodes ?? [] });
-      }
-      if (sql.includes('SELECT id, vm_size, vm_location, health_status, last_metrics')) {
-        return Promise.resolve({ results: results.existingNodes ?? [] });
-      }
-      if (sql.includes('SELECT node_id, COUNT(*) as c FROM workspaces')) {
-        return Promise.resolve({ results: results.workspaceCounts ?? [] });
-      }
-      return Promise.resolve({ results: [] });
+    prepare() {
+      return {
+        bind() {
+          return { run: async () => ({ meta: { changes: 1 } }) };
+        },
+      };
     },
   };
 }
@@ -82,9 +106,7 @@ function createContext(results: D1ResultMap): TaskRunnerContext {
   return {
     env: {
       DATABASE: {
-        prepare(sql: string) {
-          return createStatement(sql, results);
-        },
+        ...createDatabase(results),
       },
       NODE_HEARTBEAT_STALE_SECONDS: '180',
       MAX_WORKSPACES_PER_NODE: '5',
@@ -93,6 +115,7 @@ function createContext(results: D1ResultMap): TaskRunnerContext {
     ctx: {
       storage: {
         setAlarm: vi.fn(),
+        put: vi.fn(),
       },
     },
     advanceToStep: vi.fn().mockResolvedValue(undefined),

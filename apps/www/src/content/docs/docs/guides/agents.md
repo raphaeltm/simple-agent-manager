@@ -193,8 +193,13 @@ Running agents have access to project-aware MCP tools:
 | `search_messages`      | Search messages by keyword — uses FTS5 full-text search for completed sessions; keyword matching for active sessions |
 | `update_task_status`   | Report progress                                                                                                      |
 | `get_task_details`     | Inspect task state, persisted output fields, PR/error details, session id, and bounded recent assistant diagnostics  |
+| `get_workspace_info`   | Read VM-local workspace metadata plus the D1-backed, non-sensitive node-placement summary and typed detail           |
 | `complete_task`        | Mark current work as done, optionally with structured completion evidence                                            |
 | `request_human_input`  | Record a user decision request and notify the user; the tool call itself is non-blocking                             |
+
+`get_workspace_info` returns `placement: null | { summary, detail }`. `summary` is a
+concise non-sensitive outcome, while `detail` contains the typed placement explanation
+when one was persisted.
 
 `get_task_details` keeps `outputSummary` and `completionEvidence` as the canonical persisted completion fields. When a task has a linked chat session, it can also include a bounded `recentAssistantMessages` array with up to five recent assistant messages, each capped to 2,000 characters, so orchestrators can recover useful final output when the persisted summary is sparse. The SAM session (Anthropic tool) variant returns a single `finalAssistantMessage` (the latest assistant message, content capped to 2,000 characters) instead of the full array. If session diagnostics are unavailable, task details still return and the diagnostic fields are empty/null.
 

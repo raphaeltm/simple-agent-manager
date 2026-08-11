@@ -7,6 +7,7 @@ import type {
   AgentEffort,
   CredentialProvider,
   CredentialSource,
+  PlacementExplanation,
   ResolvedResourceReservation,
   ResourceRequirements,
   ResourceRequirementsSource,
@@ -113,6 +114,8 @@ export interface TaskRunnerState {
   currentStep: TaskExecutionStep;
   stepResults: StepResults;
   config: TaskRunConfig;
+  /** Versioned, non-sensitive placement audit record persisted to D1. */
+  placementExplanation?: PlacementExplanation;
   retryCount: number;
   workspaceReadyReceived: boolean;
   workspaceReadyStatus: 'running' | 'recovery' | 'error' | null;

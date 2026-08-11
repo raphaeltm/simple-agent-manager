@@ -39,3 +39,6 @@ export * from './failure-classification';
 
 // Runtime validation (dependency-free "is this a plain JSON object" predicate)
 export * from './runtime-validation';
+
+// Versioned, safely parsed placement audit records
+export * from './placement';

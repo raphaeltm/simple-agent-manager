@@ -5,6 +5,7 @@
  * the resource is already missing/deleted and must not re-enter the warm pool.
  */
 import { log } from '../../lib/logger';
+import { recordPlacementFailure } from './placement';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 export async function assertClaimedNodeAvailable(
@@ -22,6 +23,7 @@ export async function assertClaimedNodeAvailable(
 
   state.stepResults.autoProvisioned = false;
   await rc.ctx.storage.put('state', state);
+  await recordPlacementFailure(state, rc, 'node-unavailable');
 
   log.error('task_runner_do.claimed_node_unavailable', {
     taskId: state.taskId,

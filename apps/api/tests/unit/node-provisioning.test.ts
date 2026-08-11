@@ -14,7 +14,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { parseEnvInt } from '../../src/durable-objects/task-runner/helpers';
 
@@ -34,6 +34,10 @@ const indexSource = readFileSync(
   resolve(process.cwd(), 'src/env.ts'),
   'utf8'
 );
+const provisioningGuardsSource = readFileSync(
+  resolve(doDir, 'provisioning-guards.ts'),
+  'utf8'
+);
 
 // =============================================================================
 // Node Limit Enforcement
@@ -45,21 +49,15 @@ describe('node limit enforcement', () => {
       expect(indexSource).toContain("MAX_NODES_PER_USER?: string");
     });
 
-    it('handleNodeProvisioning reads MAX_NODES_PER_USER via parseEnvInt', () => {
-      const section = doSource.slice(
-        doSource.indexOf('export async function handleNodeProvisioning('),
-        doSource.indexOf('export async function handleNodeAgentReady(')
-      );
-      expect(section).toContain('MAX_NODES_PER_USER');
-      expect(section).toContain('parseEnvInt');
+    it('the provisioning guard reads MAX_NODES_PER_USER via parseEnvInt', () => {
+      expect(provisioningGuardsSource).toContain('MAX_NODES_PER_USER');
+      expect(provisioningGuardsSource).toContain('parseEnvInt');
     });
 
-    it('defaults to 10 when env var is not set', () => {
-      const section = doSource.slice(
-        doSource.indexOf('export async function handleNodeProvisioning('),
-        doSource.indexOf('export async function handleNodeAgentReady(')
+    it('uses the shared default when the env var is not set', () => {
+      expect(provisioningGuardsSource).toContain(
+        'parseEnvInt(rc.env.MAX_NODES_PER_USER, DEFAULT_MAX_NODES_PER_USER)'
       );
-      expect(section).toContain('parseEnvInt(rc.env.MAX_NODES_PER_USER, 10)');
     });
   });
 
@@ -93,51 +91,33 @@ describe('node limit enforcement', () => {
     });
   });
 
-  describe('limit check in handleNodeProvisioning', () => {
+  describe('limit check in the provisioning guard', () => {
     it('queries node count for the user from D1', () => {
-      const section = doSource.slice(
-        doSource.indexOf('export async function handleNodeProvisioning('),
-        doSource.indexOf('export async function handleNodeAgentReady(')
+      expect(provisioningGuardsSource).toContain(
+        "SELECT COUNT(*) as c FROM nodes WHERE user_id = ? AND status IN ('running', 'creating', 'recovery')"
       );
-      expect(section).toContain("SELECT COUNT(*) as c FROM nodes WHERE user_id = ? AND status IN ('running', 'creating', 'recovery')");
     });
 
     it('only counts active nodes (excludes deleted/stopped) in limit check', () => {
-      const section = doSource.slice(
-        doSource.indexOf('export async function handleNodeProvisioning('),
-        doSource.indexOf('export async function handleNodeAgentReady(')
-      );
       // Must filter by active statuses to avoid false limit hits from deleted/stopped nodes.
       // See: 2026-03-09-fix-node-workspace-limit-count-filters
-      expect(section).toContain("status IN ('running', 'creating', 'recovery')");
+      expect(provisioningGuardsSource).toContain("status IN ('running', 'creating', 'recovery')");
     });
 
     it('throws permanent error when at or over limit', () => {
-      const section = doSource.slice(
-        doSource.indexOf('export async function handleNodeProvisioning('),
-        doSource.indexOf('export async function handleNodeAgentReady(')
-      );
-      expect(section).toContain('>= maxNodes');
-      expect(section).toContain('Cannot auto-provision');
-      expect(section).toContain('permanent: true');
+      expect(provisioningGuardsSource).toContain('>= maxNodes');
+      expect(provisioningGuardsSource).toContain('Cannot auto-provision');
+      expect(provisioningGuardsSource).toContain('permanent: true');
     });
 
     it('error message includes the actual limit value', () => {
-      const section = doSource.slice(
-        doSource.indexOf('export async function handleNodeProvisioning('),
-        doSource.indexOf('export async function handleNodeAgentReady(')
-      );
-      expect(section).toContain('`Maximum ${maxNodes} nodes allowed');
+      expect(provisioningGuardsSource).toContain('`Maximum ${maxNodes} nodes allowed');
     });
 
     it('uses >= comparison (at limit = rejected)', () => {
-      const section = doSource.slice(
-        doSource.indexOf('export async function handleNodeProvisioning('),
-        doSource.indexOf('export async function handleNodeAgentReady(')
-      );
       // Verify it uses >= not >
-      expect(section).toContain('>= maxNodes');
-      expect(section).not.toContain('> maxNodes');
+      expect(provisioningGuardsSource).toContain('>= maxNodes');
+      expect(provisioningGuardsSource).not.toContain('> maxNodes');
     });
   });
 });

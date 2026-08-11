@@ -190,7 +190,7 @@ by the read-only cron-liveness check.
 - `AGENT_SETTINGS_VALIDATION_LIMITS` — Optional JSON object overriding
   agent-settings validation bounds for model IDs, tool lists, additional env
   entries, provider display names, and OpenCode base URLs. See
-  `apps/api/.env.example` and `apps/www/src/content/docs/docs/guides/self-hosting.md` for supported keys
+  `apps/api/.env.example` and `apps/www/src/content/docs/docs/guides/self-hosting.mdx` for supported keys
   and defaults.
 
 ### Pagination
@@ -215,7 +215,8 @@ by the read-only cron-liveness check.
 - `NODE_HEARTBEAT_STALE_SECONDS` — Staleness threshold for node health
 - `NODE_AGENT_READY_TIMEOUT_MS` — Max wait for freshly provisioned node-agent health
 - `NODE_AGENT_READY_POLL_INTERVAL_MS` — Polling interval for fresh-node readiness checks
-- `VM_AGENT_REQUIRED_VERSION` — Deployment-generated required vm-agent build for reusable VM nodes. Official deploys set this from the Git commit SHA after publishing matching binaries; unset disables rollout gating for local/manual or skip-agent deploys.
+- `VM_AGENT_REQUIRED_VERSION` — Deployment-generated exact vm-agent build for reusable VM nodes. Official deploys carry the last published Git SHA when build inputs are unchanged and advance it only after publishing a changed release; unset disables rollout gating only for local/manual development.
+- `VM_AGENT_BUILD_FINGERPRINT` — Deployment-generated fingerprint of vm-agent source, Go dependency/toolchain inputs, build scripts, and the explicit compatibility marker. It is release metadata, not an operator-maintained value.
 - `HETZNER_API_TIMEOUT_MS` — Timeout for Hetzner Cloud API calls (default: 30000)
 - `CF_API_TIMEOUT_MS` — Timeout for Cloudflare DNS API calls (default: 30000)
 - `NODE_AGENT_REQUEST_TIMEOUT_MS` — Timeout for Node Agent HTTP requests (default: 30000)

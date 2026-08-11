@@ -375,6 +375,11 @@ export interface Task {
   resolvedReservationJson: string | null;
   /** JSON snapshot of the PlacementExplanation. */
   placementExplanationJson: string | null;
+  /** Safely parsed placement explanation for API consumers. */
+  placementExplanation?:
+    | import('./resource').PlacementExplanation
+    | import('./resource').LegacyPlacementExplanation
+    | null;
   startedAt: string | null;
   completedAt: string | null;
   errorMessage: string | null;

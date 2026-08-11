@@ -4,8 +4,9 @@ import {
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
+import { PlacementNodeIdSchema, VMLocationSchema } from './placement';
+
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
-const VMLocationSchema = v.string();
 const WorkspaceProfileSchema = v.picklist(['full', 'lightweight']);
 const CredentialProviderSchema = v.picklist([
   'hetzner',
@@ -83,7 +84,7 @@ export const SubmitTaskSchema = v.object({
   message: v.string(),
   vmSize: v.optional(VMSizeSchema),
   vmLocation: v.optional(VMLocationSchema),
-  nodeId: v.optional(v.string()),
+  nodeId: v.optional(PlacementNodeIdSchema),
   agentType: v.optional(v.string()),
   workspaceProfile: v.optional(WorkspaceProfileSchema),
   devcontainerConfigName: v.optional(v.nullable(DevcontainerConfigNameSchema)),
@@ -136,7 +137,7 @@ export const RunTaskSchema = v.object({
   vmLocation: v.optional(VMLocationSchema),
   workspaceProfile: v.optional(WorkspaceProfileSchema),
   devcontainerConfigName: v.optional(v.nullable(DevcontainerConfigNameSchema)),
-  nodeId: v.optional(v.string()),
+  nodeId: v.optional(PlacementNodeIdSchema),
   branch: v.optional(v.string()),
 });
 

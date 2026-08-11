@@ -1,10 +1,11 @@
+import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFileSync, spawnSync } from 'node:child_process';
 
 import { describe, expect, it, vi } from 'vitest';
 
+import { validatePulumiOutputs } from '../deploy/sync-wrangler-config.js';
 import {
   normalizeSha,
   selectSuccessfulCiRun,
@@ -12,7 +13,6 @@ import {
   validateEmergencyOverrideReason,
   validateProductionDispatch,
 } from '../deploy/validate-production-dispatch.js';
-import { validatePulumiOutputs } from '../deploy/sync-wrangler-config.js';
 
 const greenSha = 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const redSha = 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
@@ -291,12 +291,16 @@ describe('deployment workflow safety wiring', () => {
 
     expect(reusable).toContain('target_commit_sha:');
     expect(reusable).toContain('ref: ${{ inputs.target_commit_sha || github.sha }}');
+    expect(reusable).toContain('fetch-depth: 0');
     expect(reusable).toContain('- name: Resolve and Verify Deployment SHA');
     expect(reusable).toContain('ACTUAL_DEPLOY_SHA=$(git rev-parse HEAD)');
-    expect(reusable).toContain('echo "agent_version=" >> "$GITHUB_OUTPUT"');
-    expect(reusable).toContain('echo "agent_version=$ACTUAL_DEPLOY_SHA" >> "$GITHUB_OUTPUT"');
+    expect(reusable).toContain('- name: Resolve VM Agent Release');
+    expect(reusable).toContain('scripts/deploy/resolve-vm-agent-release.ts');
     expect(reusable).toContain(
-      'VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}'
+      'VM_AGENT_REQUIRED_VERSION: ${{ steps.vm-agent-release.outputs.required_version }}'
+    );
+    expect(reusable).toContain(
+      'VM_AGENT_BUILD_FINGERPRINT: ${{ steps.vm-agent-release.outputs.fingerprint }}'
     );
     expect(reusable).toContain('steps.deploy-sha.outputs.value');
   });

@@ -189,6 +189,7 @@ describe('sync wrangler config', () => {
   it('generates Cloudflare container max_instances with unchanged safe defaults', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     vi.stubEnv('VM_AGENT_REQUIRED_VERSION', 'deploy-sha');
+    vi.stubEnv('VM_AGENT_BUILD_FINGERPRINT', 'fingerprint-sha256');
 
     const containers = [
       {
@@ -208,6 +209,7 @@ describe('sync wrangler config', () => {
     const envConfig = generateApiWorkerEnv({ containers }, outputs, 'prod', false, false, null);
 
     expect(envConfig.vars?.VM_AGENT_REQUIRED_VERSION).toBe('deploy-sha');
+    expect(envConfig.vars?.VM_AGENT_BUILD_FINGERPRINT).toBe('fingerprint-sha256');
 
     expect(envConfig.containers).toEqual([
       {

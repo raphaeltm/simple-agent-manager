@@ -4,6 +4,8 @@
  * One DO instance per trialId, alarm-driven, mirrors TaskRunner's pattern.
  * See `apps/api/src/durable-objects/trial-orchestrator/index.ts` for lifecycle.
  */
+import type { PlacementExplanation } from '@simple-agent-manager/shared';
+
 import type { Env } from '../../env';
 
 /**
@@ -39,6 +41,8 @@ export interface TrialOrchestratorState {
   projectId: string | null;
   nodeId: string | null;
   autoProvisionedNode: boolean;
+  /** Versioned, non-sensitive placement audit record persisted to D1. */
+  placementExplanation?: PlacementExplanation;
   workspaceId: string | null;
   chatSessionId: string | null;
   acpSessionId: string | null;

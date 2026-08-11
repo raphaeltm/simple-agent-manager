@@ -12,6 +12,8 @@ const CredentialProviderSchema = v.picklist([
 ]);
 const VMSizeSchema = v.picklist(['small', 'medium', 'large']);
 const WorkspaceProfileSchema = v.picklist(['full', 'lightweight']);
+const PositiveIntegerSchema = v.pipe(v.number(), v.integer(), v.minValue(1));
+const PercentageSchema = v.pipe(v.number(), v.integer(), v.minValue(0), v.maxValue(100));
 
 // Per-agent-type override (model + permission mode). Both fields are optional and nullable.
 // Null = clear the override for that field; missing = leave unchanged.
@@ -54,9 +56,9 @@ export const UpdateProjectSchema = v.object({
   maxDispatchDepth: v.optional(v.nullable(v.number())),
   maxSubTasksPerTask: v.optional(v.nullable(v.number())),
   warmNodeTimeoutMs: v.optional(v.nullable(v.number())),
-  maxWorkspacesPerNode: v.optional(v.nullable(v.number())),
-  nodeCpuThresholdPercent: v.optional(v.nullable(v.number())),
-  nodeMemoryThresholdPercent: v.optional(v.nullable(v.number())),
+  maxWorkspacesPerNode: v.optional(v.nullable(PositiveIntegerSchema)),
+  nodeCpuThresholdPercent: v.optional(v.nullable(PercentageSchema)),
+  nodeMemoryThresholdPercent: v.optional(v.nullable(PercentageSchema)),
 });
 
 export const UpsertProjectRuntimeEnvVarSchema = v.object({

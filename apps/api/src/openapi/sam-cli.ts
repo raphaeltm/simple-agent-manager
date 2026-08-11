@@ -7,12 +7,13 @@ type SchemaObject = {
   type?: string | string[];
   format?: string;
   description?: string;
-  enum?: string[];
+  enum?: Array<string | number>;
   items?: SchemaObject | ReferenceObject;
   properties?: Record<string, SchemaObject | ReferenceObject>;
   required?: string[];
   additionalProperties?: boolean | SchemaObject | ReferenceObject;
   nullable?: boolean;
+  oneOf?: Array<SchemaObject | ReferenceObject>;
 };
 
 type ReferenceObject = {
@@ -176,6 +177,10 @@ const taskBaseFields: Record<string, SchemaObject | ReferenceObject> = {
   outputPrUrl: nullable(stringSchema()),
   outputSummary: nullable(stringSchema()),
   completionEvidence: nullable(objectSchema({}, [], true)),
+  placementExplanationJson: nullable(
+    stringSchema('Raw persisted placement JSON retained for backward compatibility.')
+  ),
+  placementExplanation: nullable(ref('PlacementExplanation')),
   errorMessage: nullable(stringSchema()),
   finalizedAt: nullable(dateTimeSchema()),
   createdAt: dateTimeSchema(),
@@ -427,6 +432,188 @@ export const samCliOpenApiDocument: OpenApiDocument = {
           'interval',
         ]
       ),
+      PlacementRequestSnapshot: objectSchema(
+        {
+          runtime: { type: 'string', enum: ['vm'] },
+          vmSize: { type: 'string', enum: ['small', 'medium', 'large'] },
+          vmLocation: stringSchema('Configured placement location; never a credential value.'),
+          maxWorkspacesPerNode: integerSchema(),
+          cpuThresholdPercent: integerSchema(),
+          memoryThresholdPercent: integerSchema(),
+          heartbeatStaleSeconds: integerSchema(),
+        },
+        [
+          'runtime',
+          'vmSize',
+          'vmLocation',
+          'maxWorkspacesPerNode',
+          'cpuThresholdPercent',
+          'memoryThresholdPercent',
+          'heartbeatStaleSeconds',
+        ]
+      ),
+      PlacementNodeSnapshot: objectSchema(
+        {
+          runtime: { type: 'string', enum: ['vm', 'other'] },
+          vmSize: stringSchema(),
+          vmLocation: stringSchema(),
+          healthStatus: {
+            type: 'string',
+            enum: ['healthy', 'stale', 'unhealthy', 'unknown'],
+          },
+          agentVersionCompatible: booleanSchema(),
+          heartbeatAgeSeconds: nullable(numberSchema()),
+          activeWorkspaceCount: integerSchema(),
+          cpuLoadAvg1: nullable(numberSchema()),
+          memoryPercent: nullable(numberSchema()),
+        },
+        [
+          'runtime',
+          'vmSize',
+          'vmLocation',
+          'healthStatus',
+          'agentVersionCompatible',
+          'heartbeatAgeSeconds',
+          'activeWorkspaceCount',
+          'cpuLoadAvg1',
+          'memoryPercent',
+        ]
+      ),
+      PlacementNodeEvaluation: objectSchema(
+        {
+          nodeId: stringSchema(
+            'Selected node ID, or a stable candidate-N alias for an unselected node.'
+          ),
+          path: {
+            type: 'string',
+            enum: ['preferred', 'warm', 'capacity', 'trial', 'manual'],
+          },
+          accepted: booleanSchema(),
+          rejectionReasons: arrayOf({
+            type: 'string',
+            enum: [
+              'node-not-found',
+              'not-running',
+              'wrong-runtime',
+              'unhealthy',
+              'heartbeat-missing',
+              'heartbeat-stale',
+              'agent-not-ready',
+              'agent-version-mismatch',
+              'undersized',
+              'workspace-limit',
+              'cpu-threshold',
+              'memory-threshold',
+              'not-warm',
+              'warm-claim-lost',
+            ],
+          }),
+          snapshot: ref('PlacementNodeSnapshot'),
+        },
+        ['nodeId', 'path', 'accepted', 'rejectionReasons', 'snapshot']
+      ),
+      PlacementProvisioningAttempt: objectSchema(
+        {
+          vmSize: { type: 'string', enum: ['small', 'medium', 'large'] },
+          vmLocation: stringSchema(),
+          outcome: {
+            type: 'string',
+            enum: ['started', 'succeeded', 'capacity-rejected', 'failed'],
+          },
+          failureReason: {
+            type: 'string',
+            enum: [
+              'capacity-unavailable',
+              'node-limit',
+              'quota-exceeded',
+              'credentials-unavailable',
+              'provider-failed',
+              'provisioning-timeout',
+              'readiness-timeout',
+              'node-unavailable',
+            ],
+          },
+        },
+        ['vmSize', 'vmLocation', 'outcome']
+      ),
+      PlacementExplanationV2: objectSchema(
+        {
+          schemaVersion: { type: 'integer', enum: [2] },
+          outcome: { type: 'string', enum: ['reused', 'provisioned', 'failed'] },
+          selectionPath: {
+            type: 'string',
+            enum: ['preferred', 'warm', 'capacity', 'trial', 'manual', 'provisioning'],
+          },
+          selectedNodeId: nullable(stringSchema()),
+          summary: stringSchema(),
+          request: ref('PlacementRequestSnapshot'),
+          evaluatedNodes: arrayOf(ref('PlacementNodeEvaluation')),
+          provisioningAttempts: arrayOf(ref('PlacementProvisioningAttempt')),
+          decidedAt: dateTimeSchema(),
+          updatedAt: dateTimeSchema(),
+        },
+        [
+          'schemaVersion',
+          'outcome',
+          'selectionPath',
+          'selectedNodeId',
+          'summary',
+          'request',
+          'evaluatedNodes',
+          'provisioningAttempts',
+          'decidedAt',
+          'updatedAt',
+        ]
+      ),
+      LegacyPlacementExplanation: objectSchema(
+        {
+          selectedVmSize: { type: 'string', enum: ['small', 'medium', 'large'] },
+          vmSizeSource: {
+            type: 'string',
+            enum: [
+              'task',
+              'trigger',
+              'skill',
+              'agent-profile',
+              'project',
+              'user',
+              'platform',
+              'explicit',
+            ],
+          },
+          reservation: objectSchema(
+            {
+              cpuMillis: integerSchema(),
+              memoryMb: integerSchema(),
+              diskMb: integerSchema(),
+              exclusiveNode: booleanSchema(),
+              maxCoTenants: integerSchema(),
+              source: {
+                type: 'string',
+                enum: ['task', 'trigger', 'skill', 'agent-profile', 'project', 'user', 'platform'],
+              },
+              sourceId: stringSchema(),
+              version: integerSchema(),
+            },
+            [
+              'cpuMillis',
+              'memoryMb',
+              'diskMb',
+              'exclusiveNode',
+              'maxCoTenants',
+              'source',
+              'sourceId',
+              'version',
+            ]
+          ),
+          reason: stringSchema(),
+          decidedAt: dateTimeSchema(),
+        },
+        ['selectedVmSize', 'vmSizeSource', 'reservation', 'reason', 'decidedAt']
+      ),
+      PlacementExplanation: {
+        oneOf: [ref('PlacementExplanationV2'), ref('LegacyPlacementExplanation')],
+      },
       Project: objectSchema({ ...projectBaseFields }, ['id', 'name']),
       // Mirrors packages/shared/src/types/project.ts's ProjectSummary — the
       // actual shape GET /api/projects returns (toProjectSummaryResponse() in
@@ -790,6 +977,7 @@ export const samCliOpenApiDocument: OpenApiDocument = {
           url: stringSchema(),
           repository: stringSchema(),
           branch: stringSchema(),
+          placementExplanation: nullable(ref('PlacementExplanation')),
           createdAt: dateTimeSchema(),
           updatedAt: dateTimeSchema(),
         },

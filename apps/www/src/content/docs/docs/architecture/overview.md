@@ -259,6 +259,28 @@ graph LR
 
 Cross-DO coordination with NodeLifecycle (for warm node claims) and ProjectData (for session linkage). Exponential backoff on transient errors.
 
+### Reusable VM placement evidence
+
+Every reusable-VM decision goes through one selector for preferred, warm-pool,
+capacity, trial, and manually selected nodes. The selector keeps the exact
+published VM-agent build check: a node with an unknown or different build is
+not eligible for new work. It also evaluates runtime, VM size, health,
+heartbeat freshness, agent readiness, workspace count, and configured CPU and
+memory thresholds before choosing a node.
+
+SAM stores a versioned placement explanation on the task or trial as soon as
+the decision is made, appends provisioning attempts and typed failure reasons,
+and copies the final record to the workspace. Workspace and task APIs,
+`get_workspace_info`, and the workspace sidebar expose this evidence. The
+record contains only bounded metric snapshots, identifiers, and typed outcomes;
+it deliberately excludes raw agent versions, raw metrics, provider errors,
+credentials, prompts, repositories, and environment values.
+
+The selected node ID remains visible because it is already part of the workspace
+contract. Every rejected or otherwise unselected candidate is persisted as a stable
+`candidate-N` alias, so one tenant's placement evidence cannot reveal another trial's
+or project's host identifiers.
+
 ## ACP Session Lifecycle
 
 Agent sessions are managed by the ProjectData DO with this state machine:
@@ -302,15 +324,26 @@ graph TD
     P1 -.- P1D["D1, KV, R2, DNS records"]
     P2["Phase 2: Configuration"] --> P3
     P2 -.- P2D["Sync wrangler.toml, read security keys"]
-    P3["Phase 3: Application"] --> P4
-    P3 -.- P3D["Build → Bake vm-agent into container image → Deploy Worker → Deploy Pages → Migrations → Secrets"]
-    P4["Phase 4: VM Agent"] --> P5
-    P4 -.- P4D["Build Go (multi-arch) → Upload to R2"]
+    P3["Phase 3: Application + artifacts"] --> P4
+    P3 -.- P3D["Build apps → Bake container artifact → Migrate D1 → Publish changed reusable-VM binaries → Deploy Worker/Pages"]
+    P4["Phase 4: Secrets"] --> P5
+    P4 -.- P4D["Apply deployment-managed Worker secrets"]
     P5["Phase 5: Validation"]
     P5 -.- P5D["Health check polling"]
 ```
 
 CI runs lint, typecheck, tests, and build on pull requests and on canonical-repository `main` pushes. In the canonical repository, Deploy Production runs after successful `main` CI and re-verifies that the completed CI SHA is still the current `main` tip after entering the serialized deployment queue. In self-host forks, `main` push CI is intentionally skipped, so operators update their instance by manually running **Deploy Production** against the exact commit SHA from the fork's synced `main` branch. The production GitHub Environment must separately restrict deployments to the selected `main` branch so other refs cannot access its secrets with modified workflow code.
+
+Reusable-VM agent releases have their own identity inside that pipeline. A
+deterministic fingerprint covers the tracked `packages/vm-agent` build inputs
+and an explicit compatibility marker. An unrelated application deploy carries
+forward the last actually published required build and skips the reusable-VM
+binary upload. Changed inputs or an explicit compatibility bump publish the new
+binaries before the Worker begins requiring that exact deployment SHA. A
+requested agent skip fails closed when compatibility changed or no prior
+published release can be proven. The separately baked Cloudflare Container
+image remains part of the Worker/container rollback boundary and does not share
+the reusable VM release identity.
 
 ## Key Design Decisions
 

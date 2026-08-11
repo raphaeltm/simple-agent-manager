@@ -1090,6 +1090,380 @@
         ],
         "additionalProperties": false
       },
+      "PlacementRequestSnapshot": {
+        "type": "object",
+        "properties": {
+          "runtime": {
+            "type": "string",
+            "enum": [
+              "vm"
+            ]
+          },
+          "vmSize": {
+            "type": "string",
+            "enum": [
+              "small",
+              "medium",
+              "large"
+            ]
+          },
+          "vmLocation": {
+            "type": "string",
+            "description": "Configured placement location; never a credential value."
+          },
+          "maxWorkspacesPerNode": {
+            "type": "integer"
+          },
+          "cpuThresholdPercent": {
+            "type": "integer"
+          },
+          "memoryThresholdPercent": {
+            "type": "integer"
+          },
+          "heartbeatStaleSeconds": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "runtime",
+          "vmSize",
+          "vmLocation",
+          "maxWorkspacesPerNode",
+          "cpuThresholdPercent",
+          "memoryThresholdPercent",
+          "heartbeatStaleSeconds"
+        ],
+        "additionalProperties": false
+      },
+      "PlacementNodeSnapshot": {
+        "type": "object",
+        "properties": {
+          "runtime": {
+            "type": "string",
+            "enum": [
+              "vm",
+              "other"
+            ]
+          },
+          "vmSize": {
+            "type": "string"
+          },
+          "vmLocation": {
+            "type": "string"
+          },
+          "healthStatus": {
+            "type": "string",
+            "enum": [
+              "healthy",
+              "stale",
+              "unhealthy",
+              "unknown"
+            ]
+          },
+          "agentVersionCompatible": {
+            "type": "boolean"
+          },
+          "heartbeatAgeSeconds": {
+            "type": "number",
+            "nullable": true
+          },
+          "activeWorkspaceCount": {
+            "type": "integer"
+          },
+          "cpuLoadAvg1": {
+            "type": "number",
+            "nullable": true
+          },
+          "memoryPercent": {
+            "type": "number",
+            "nullable": true
+          }
+        },
+        "required": [
+          "runtime",
+          "vmSize",
+          "vmLocation",
+          "healthStatus",
+          "agentVersionCompatible",
+          "heartbeatAgeSeconds",
+          "activeWorkspaceCount",
+          "cpuLoadAvg1",
+          "memoryPercent"
+        ],
+        "additionalProperties": false
+      },
+      "PlacementNodeEvaluation": {
+        "type": "object",
+        "properties": {
+          "nodeId": {
+            "type": "string",
+            "description": "Selected node ID, or a stable candidate-N alias for an unselected node."
+          },
+          "path": {
+            "type": "string",
+            "enum": [
+              "preferred",
+              "warm",
+              "capacity",
+              "trial",
+              "manual"
+            ]
+          },
+          "accepted": {
+            "type": "boolean"
+          },
+          "rejectionReasons": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "enum": [
+                "node-not-found",
+                "not-running",
+                "wrong-runtime",
+                "unhealthy",
+                "heartbeat-missing",
+                "heartbeat-stale",
+                "agent-not-ready",
+                "agent-version-mismatch",
+                "undersized",
+                "workspace-limit",
+                "cpu-threshold",
+                "memory-threshold",
+                "not-warm",
+                "warm-claim-lost"
+              ]
+            }
+          },
+          "snapshot": {
+            "$ref": "#/components/schemas/PlacementNodeSnapshot"
+          }
+        },
+        "required": [
+          "nodeId",
+          "path",
+          "accepted",
+          "rejectionReasons",
+          "snapshot"
+        ],
+        "additionalProperties": false
+      },
+      "PlacementProvisioningAttempt": {
+        "type": "object",
+        "properties": {
+          "vmSize": {
+            "type": "string",
+            "enum": [
+              "small",
+              "medium",
+              "large"
+            ]
+          },
+          "vmLocation": {
+            "type": "string"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "started",
+              "succeeded",
+              "capacity-rejected",
+              "failed"
+            ]
+          },
+          "failureReason": {
+            "type": "string",
+            "enum": [
+              "capacity-unavailable",
+              "node-limit",
+              "quota-exceeded",
+              "credentials-unavailable",
+              "provider-failed",
+              "provisioning-timeout",
+              "readiness-timeout",
+              "node-unavailable"
+            ]
+          }
+        },
+        "required": [
+          "vmSize",
+          "vmLocation",
+          "outcome"
+        ],
+        "additionalProperties": false
+      },
+      "PlacementExplanationV2": {
+        "type": "object",
+        "properties": {
+          "schemaVersion": {
+            "type": "integer",
+            "enum": [
+              2
+            ]
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "reused",
+              "provisioned",
+              "failed"
+            ]
+          },
+          "selectionPath": {
+            "type": "string",
+            "enum": [
+              "preferred",
+              "warm",
+              "capacity",
+              "trial",
+              "manual",
+              "provisioning"
+            ]
+          },
+          "selectedNodeId": {
+            "type": "string",
+            "nullable": true
+          },
+          "summary": {
+            "type": "string"
+          },
+          "request": {
+            "$ref": "#/components/schemas/PlacementRequestSnapshot"
+          },
+          "evaluatedNodes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlacementNodeEvaluation"
+            }
+          },
+          "provisioningAttempts": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/PlacementProvisioningAttempt"
+            }
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "schemaVersion",
+          "outcome",
+          "selectionPath",
+          "selectedNodeId",
+          "summary",
+          "request",
+          "evaluatedNodes",
+          "provisioningAttempts",
+          "decidedAt",
+          "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "LegacyPlacementExplanation": {
+        "type": "object",
+        "properties": {
+          "selectedVmSize": {
+            "type": "string",
+            "enum": [
+              "small",
+              "medium",
+              "large"
+            ]
+          },
+          "vmSizeSource": {
+            "type": "string",
+            "enum": [
+              "task",
+              "trigger",
+              "skill",
+              "agent-profile",
+              "project",
+              "user",
+              "platform",
+              "explicit"
+            ]
+          },
+          "reservation": {
+            "type": "object",
+            "properties": {
+              "cpuMillis": {
+                "type": "integer"
+              },
+              "memoryMb": {
+                "type": "integer"
+              },
+              "diskMb": {
+                "type": "integer"
+              },
+              "exclusiveNode": {
+                "type": "boolean"
+              },
+              "maxCoTenants": {
+                "type": "integer"
+              },
+              "source": {
+                "type": "string",
+                "enum": [
+                  "task",
+                  "trigger",
+                  "skill",
+                  "agent-profile",
+                  "project",
+                  "user",
+                  "platform"
+                ]
+              },
+              "sourceId": {
+                "type": "string"
+              },
+              "version": {
+                "type": "integer"
+              }
+            },
+            "required": [
+              "cpuMillis",
+              "memoryMb",
+              "diskMb",
+              "exclusiveNode",
+              "maxCoTenants",
+              "source",
+              "sourceId",
+              "version"
+            ],
+            "additionalProperties": false
+          },
+          "reason": {
+            "type": "string"
+          },
+          "decidedAt": {
+            "type": "string",
+            "format": "date-time"
+          }
+        },
+        "required": [
+          "selectedVmSize",
+          "vmSizeSource",
+          "reservation",
+          "reason",
+          "decidedAt"
+        ],
+        "additionalProperties": false
+      },
+      "PlacementExplanation": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/PlacementExplanationV2"
+          },
+          {
+            "$ref": "#/components/schemas/LegacyPlacementExplanation"
+          }
+        ]
+      },
       "Project": {
         "type": "object",
         "properties": {
@@ -1552,6 +1926,15 @@
             "additionalProperties": true,
             "nullable": true
           },
+          "placementExplanationJson": {
+            "type": "string",
+            "description": "Raw persisted placement JSON retained for backward compatibility.",
+            "nullable": true
+          },
+          "placementExplanation": {
+            "$ref": "#/components/schemas/PlacementExplanation",
+            "nullable": true
+          },
           "errorMessage": {
             "type": "string",
             "nullable": true
@@ -1641,6 +2024,15 @@
             "properties": {},
             "required": [],
             "additionalProperties": true,
+            "nullable": true
+          },
+          "placementExplanationJson": {
+            "type": "string",
+            "description": "Raw persisted placement JSON retained for backward compatibility.",
+            "nullable": true
+          },
+          "placementExplanation": {
+            "$ref": "#/components/schemas/PlacementExplanation",
             "nullable": true
           },
           "errorMessage": {
@@ -2347,6 +2739,10 @@
           },
           "branch": {
             "type": "string"
+          },
+          "placementExplanation": {
+            "$ref": "#/components/schemas/PlacementExplanation",
+            "nullable": true
           },
           "createdAt": {
             "type": "string",

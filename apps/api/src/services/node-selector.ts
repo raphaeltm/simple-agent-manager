@@ -1,29 +1,28 @@
-import type { NodeMetrics } from '@simple-agent-manager/shared';
-import {
-  canSatisfyVmSize,
-  DEFAULT_MAX_WORKSPACES_PER_NODE,
-  DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
-  DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
+import type {
+  NodeMetrics,
+  PlacementExplanation,
+  PlacementNodeEvaluation,
+  PlacementSelectionPath,
+  VMSize,
 } from '@simple-agent-manager/shared';
-import { and, count, eq, inArray, isNotNull } from 'drizzle-orm';
+import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
+import { and, eq, inArray } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
-import * as v from 'valibot';
 
 import * as schema from '../db/schema';
-import { isNodeAgentVersionCompatible } from './node-agent-compatibility';
 import * as nodeLifecycle from './node-lifecycle';
-
-// Mirrors NodeMetrics (packages/shared/src/types/workspace.ts) exactly: all
-// three fields are optional heartbeat samples. A present field with the wrong
-// type (e.g. a stringified number) previously slipped through the old
-// `typeof parsed.x === 'number'`-on-at-least-one-field check and got blindly
-// cast, so a single mistyped field poisoned scoreNodeLoad()/nodeHasCapacity()
-// with NaN instead of being treated as absent metrics.
-const nodeMetricsSchema = v.object({
-  cpuLoadAvg1: v.optional(v.number()),
-  memoryPercent: v.optional(v.number()),
-  diskPercent: v.optional(v.number()),
-});
+import {
+  createPlacementExplanation,
+  evaluatePlacementNode,
+  type PlacementLimitsEnv,
+  type PlacementLimitsOverride,
+  placementLoadScore,
+  type PlacementNodeInput,
+  requireProvisioning,
+  resolvePlacementRequest,
+  sanitizePlacementExplanation,
+  selectPlacementNode,
+} from './placement-explanation';
 
 export interface NodeCandidate {
   id: string;
@@ -35,318 +34,328 @@ export interface NodeCandidate {
   activeWorkspaceCount: number;
 }
 
-export interface NodeSelectionResult {
-  nodeId: string;
-  autoProvisioned: boolean;
-}
-
-export interface NodeSelectorEnv {
-  TASK_RUN_NODE_CPU_THRESHOLD_PERCENT?: string;
-  TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT?: string;
-  MAX_WORKSPACES_PER_NODE?: string;
+export interface NodeSelectorEnv extends PlacementLimitsEnv {
   NODE_LIFECYCLE?: DurableObjectNamespace;
-  VM_AGENT_REQUIRED_VERSION?: string;
 }
 
-function parseThreshold(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed < 0 || parsed > 100) return fallback;
-  return parsed;
+export interface NodePlacementOptions {
+  vmSize: VMSize;
+  vmLocation: string;
+  taskId?: string;
+  preferredNodeId?: string;
+  preferredOnly?: boolean;
+  selectionPath?: 'trial' | 'manual';
+  limits?: PlacementLimitsOverride;
+  nowMs?: number;
 }
 
-function parsePositiveInt(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  if (!Number.isFinite(parsed) || parsed < 1) return fallback;
-  return parsed;
+export interface NodePlacementResult {
+  node: NodeCandidate | null;
+  explanation: PlacementExplanation;
 }
+
+type PlacementDb = ReturnType<typeof drizzle<typeof schema>>;
 
 function parseMetrics(raw: string | null): NodeMetrics | null {
   if (!raw) return null;
-  let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    const value = JSON.parse(raw) as unknown;
+    if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
+    const candidate = value as Record<string, unknown>;
+    if (
+      ['cpuLoadAvg1', 'memoryPercent', 'diskPercent'].some(
+        (field) =>
+          field in candidate &&
+          (typeof candidate[field] !== 'number' || !Number.isFinite(candidate[field]))
+      )
+    ) {
+      return null;
+    }
+    const metrics: NodeMetrics = {};
+    if (typeof candidate.cpuLoadAvg1 === 'number' && Number.isFinite(candidate.cpuLoadAvg1)) {
+      metrics.cpuLoadAvg1 = candidate.cpuLoadAvg1;
+    }
+    if (typeof candidate.memoryPercent === 'number' && Number.isFinite(candidate.memoryPercent)) {
+      metrics.memoryPercent = candidate.memoryPercent;
+    }
+    if (typeof candidate.diskPercent === 'number' && Number.isFinite(candidate.diskPercent)) {
+      metrics.diskPercent = candidate.diskPercent;
+    }
+    return Object.keys(metrics).length > 0 ? metrics : null;
   } catch {
     return null;
   }
-  const result = v.safeParse(nodeMetricsSchema, parsed);
-  if (!result.success) return null;
-  const metrics = result.output;
-  // Preserve the existing "at least one recognized field present" gate — a
-  // technically-valid-but-empty metrics object is still treated as absent.
-  if (
-    metrics.cpuLoadAvg1 === undefined &&
-    metrics.memoryPercent === undefined &&
-    metrics.diskPercent === undefined
-  ) {
-    return null;
-  }
-  return metrics;
 }
 
-/**
- * Score a node by its resource usage. Lower score = more available capacity.
- * Returns a value between 0 and 100, where 0 is fully idle and 100 is fully loaded.
- * Returns null if metrics are unavailable (node can still be used but ranked lower).
- */
 export function scoreNodeLoad(metrics: NodeMetrics | null): number | null {
   if (!metrics) return null;
-
-  const cpu = metrics.cpuLoadAvg1 ?? 0;
-  const memory = metrics.memoryPercent ?? 0;
-
-  // Weighted average: 40% CPU, 60% memory (memory is more constraining for agent workloads)
-  return cpu * 0.4 + memory * 0.6;
+  return Math.max(metrics.cpuLoadAvg1 ?? 0, metrics.memoryPercent ?? 0);
 }
 
-/**
- * Determine if a node has capacity for another workspace based on resource thresholds.
- * This checks CPU/memory metrics only. The hard workspace count limit is enforced
- * separately in selectNodeForTaskRun() after computing activeCount.
- */
 export function nodeHasCapacity(
   metrics: NodeMetrics | null,
   cpuThreshold: number,
   memoryThreshold: number
 ): boolean {
-  if (!metrics) {
-    // If no metrics available, allow it (node may still be starting up)
-    return true;
-  }
-
-  const cpu = metrics.cpuLoadAvg1 ?? 0;
-  const memory = metrics.memoryPercent ?? 0;
-
-  return cpu < cpuThreshold && memory < memoryThreshold;
+  if (!metrics) return true;
+  return (
+    (metrics.cpuLoadAvg1 ?? 0) < cpuThreshold && (metrics.memoryPercent ?? 0) < memoryThreshold
+  );
 }
 
-/**
- * Select the best available node for a task run, or indicate that a new node is needed.
- *
- * Selection algorithm:
- * 0. Try to claim a warm node first (fast startup for sequential tasks)
- * 1. Get all running, healthy (or stale) nodes for the user
- * 2. For each node, check resource metrics (CPU/memory thresholds)
- * 3. Filter to nodes with capacity
- * 4. If a specific vmLocation is requested, prefer nodes in that location
- * 5. Sort by load score (lowest first) — prefer the least loaded node
- * 6. Return the best node, or null if no node has capacity
- */
-export async function selectNodeForTaskRun(
-  db: ReturnType<typeof drizzle<typeof schema>>,
-  userId: string,
-  env: NodeSelectorEnv,
-  preferredLocation?: string,
-  preferredSize?: string,
-  taskId?: string
-): Promise<NodeCandidate | null> {
-  const cpuThreshold = parseThreshold(
-    env.TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
-    DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT
-  );
-  const memoryThreshold = parseThreshold(
-    env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
-    DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT
-  );
-  const maxWorkspacesPerNode = parsePositiveInt(
-    env.MAX_WORKSPACES_PER_NODE,
-    DEFAULT_MAX_WORKSPACES_PER_NODE
-  );
-
-  // Step 0: Try to claim a warm node (fast startup for sequential tasks)
-  if (taskId && env.NODE_LIFECYCLE) {
-    const warmNodes = await db
-      .select({
-        id: schema.nodes.id,
-        status: schema.nodes.status,
-        healthStatus: schema.nodes.healthStatus,
-        vmSize: schema.nodes.vmSize,
-        vmLocation: schema.nodes.vmLocation,
-        lastMetrics: schema.nodes.lastMetrics,
-        warmSince: schema.nodes.warmSince,
-        agentVersion: schema.nodes.agentVersion,
-      })
-      .from(schema.nodes)
-      .where(
-        and(
-          eq(schema.nodes.userId, userId),
-          eq(schema.nodes.status, 'running'),
-          eq(schema.nodes.nodeRole, 'workspace'),
-          isNotNull(schema.nodes.warmSince)
-        )
-      );
-
-    // Try each warm node that can satisfy the requested size, preferring exact size/location.
-    const sortedWarm = warmNodes
-      .filter((node) =>
-        isNodeAgentVersionCompatible(node.agentVersion, env.VM_AGENT_REQUIRED_VERSION)
-      )
-      .filter((node) => canSatisfyVmSize(node.vmSize, preferredSize))
-      .sort((a, b) => {
-        const aSizeMatch = preferredSize && a.vmSize === preferredSize ? 1 : 0;
-        const bSizeMatch = preferredSize && b.vmSize === preferredSize ? 1 : 0;
-        if (aSizeMatch !== bSizeMatch) return bSizeMatch - aSizeMatch;
-        const aLocMatch = preferredLocation && a.vmLocation === preferredLocation ? 1 : 0;
-        const bLocMatch = preferredLocation && b.vmLocation === preferredLocation ? 1 : 0;
-        return bLocMatch - aLocMatch;
-      });
-
-    for (const warmNode of sortedWarm) {
-      try {
-        // Defense-in-depth: re-check D1 status before DO call to avoid
-        // unnecessary DO round-trips for nodes that changed between query and claim.
-        const [freshNode] = await db
-          .select({
-            status: schema.nodes.status,
-            warmSince: schema.nodes.warmSince,
-            agentVersion: schema.nodes.agentVersion,
-          })
-          .from(schema.nodes)
-          .where(eq(schema.nodes.id, warmNode.id))
-          .limit(1);
-
-        if (
-          !freshNode ||
-          freshNode.status !== 'running' ||
-          !freshNode.warmSince ||
-          !isNodeAgentVersionCompatible(freshNode.agentVersion, env.VM_AGENT_REQUIRED_VERSION)
-        ) {
-          continue; // Node state changed since initial query
-        }
-
-        const result = await nodeLifecycle.tryClaim(
-          env as unknown as import('../env').Env,
-          warmNode.id,
-          taskId
-        );
-        if (result.claimed) {
-          // Defense-in-depth: verify workspace count even for warm nodes
-          const [wsCountRow] = await db
-            .select({ count: count() })
-            .from(schema.workspaces)
-            .where(
-              and(
-                eq(schema.workspaces.nodeId, warmNode.id),
-                eq(schema.workspaces.userId, userId),
-                inArray(schema.workspaces.status, ['running', 'creating', 'recovery'])
-              )
-            );
-          const warmActiveCount = wsCountRow?.count ?? 0;
-          if (warmActiveCount >= maxWorkspacesPerNode) {
-            continue; // At capacity despite being warm — skip
-          }
-          return {
-            id: warmNode.id,
-            status: warmNode.status,
-            healthStatus: warmNode.healthStatus,
-            vmSize: warmNode.vmSize,
-            vmLocation: warmNode.vmLocation,
-            lastMetrics: parseMetrics(warmNode.lastMetrics),
-            activeWorkspaceCount: warmActiveCount,
-          };
-        }
-      } catch {
-        // tryClaim failed (e.g. concurrent claim) — try next
-      }
-    }
-  }
-
-  // Get all running nodes for this user (deployment-role nodes excluded — not eligible for task placement)
-  const nodes = await db
-    .select()
+async function loadPlacementNodes(db: PlacementDb, userId: string): Promise<PlacementNodeInput[]> {
+  const rows = await db
+    .select({
+      id: schema.nodes.id,
+      status: schema.nodes.status,
+      runtime: schema.nodes.runtime,
+      vmSize: schema.nodes.vmSize,
+      vmLocation: schema.nodes.vmLocation,
+      healthStatus: schema.nodes.healthStatus,
+      lastHeartbeatAt: schema.nodes.lastHeartbeatAt,
+      agentReadyAt: schema.nodes.agentReadyAt,
+      agentVersion: schema.nodes.agentVersion,
+      lastMetrics: schema.nodes.lastMetrics,
+      warmSince: schema.nodes.warmSince,
+    })
     .from(schema.nodes)
+    .where(and(eq(schema.nodes.userId, userId), eq(schema.nodes.nodeRole, 'workspace')));
+
+  if (rows.length === 0) return [];
+  const counts = await db
+    .select({ nodeId: schema.workspaces.nodeId, id: schema.workspaces.id })
+    .from(schema.workspaces)
     .where(
       and(
-        eq(schema.nodes.userId, userId),
-        eq(schema.nodes.status, 'running'),
-        eq(schema.nodes.nodeRole, 'workspace')
+        eq(schema.workspaces.userId, userId),
+        inArray(schema.workspaces.status, ['running', 'creating', 'recovery'])
       )
     );
-
-  if (nodes.length === 0) {
-    return null;
+  const countByNode = new Map<string, number>();
+  for (const row of counts) {
+    if (row.nodeId) countByNode.set(row.nodeId, (countByNode.get(row.nodeId) ?? 0) + 1);
   }
+  return rows.map((row) => ({
+    ...row,
+    activeWorkspaceCount: countByNode.get(row.id) ?? 0,
+  }));
+}
 
-  // Filter by resource metrics (CPU/memory thresholds)
-  const candidates: NodeCandidate[] = [];
-  for (const node of nodes) {
-    // Skip unhealthy nodes
-    if (node.healthStatus === 'unhealthy') {
-      continue;
-    }
-    if (!isNodeAgentVersionCompatible(node.agentVersion, env.VM_AGENT_REQUIRED_VERSION)) {
-      continue;
-    }
-    if (!canSatisfyVmSize(node.vmSize, preferredSize)) {
-      continue;
-    }
+function toCandidate(node: PlacementNodeInput): NodeCandidate {
+  return {
+    id: node.id,
+    status: node.status,
+    healthStatus: node.healthStatus ?? 'unknown',
+    vmSize: node.vmSize,
+    vmLocation: node.vmLocation,
+    lastMetrics: parseMetrics(node.lastMetrics),
+    activeWorkspaceCount: node.activeWorkspaceCount,
+  };
+}
 
-    const [wsCountRow] = await db
-      .select({ count: count() })
-      .from(schema.workspaces)
-      .where(
-        and(
-          eq(schema.workspaces.nodeId, node.id),
-          eq(schema.workspaces.userId, userId),
-          inArray(schema.workspaces.status, ['running', 'creating', 'recovery'])
-        )
-      );
-
-    const activeCount = wsCountRow?.count ?? 0;
-
-    // Hard workspace count limit — reject node regardless of CPU/memory metrics
-    if (activeCount >= maxWorkspacesPerNode) {
-      continue;
-    }
-
-    const metrics = parseMetrics(node.lastMetrics);
-
-    const candidate: NodeCandidate = {
-      id: node.id,
-      status: node.status,
-      healthStatus: node.healthStatus,
-      vmSize: node.vmSize,
-      vmLocation: node.vmLocation,
-      lastMetrics: metrics,
-      activeWorkspaceCount: activeCount,
-    };
-
-    if (nodeHasCapacity(metrics, cpuThreshold, memoryThreshold)) {
-      candidates.push(candidate);
-    }
-  }
-
-  if (candidates.length === 0) {
-    return null;
-  }
-
-  // Sort candidates: prefer matching location/size, then lowest load
-  candidates.sort((a, b) => {
-    // Prefer matching location
-    const aLocationMatch = preferredLocation && a.vmLocation === preferredLocation ? 1 : 0;
-    const bLocationMatch = preferredLocation && b.vmLocation === preferredLocation ? 1 : 0;
-    if (aLocationMatch !== bLocationMatch) return bLocationMatch - aLocationMatch;
-
-    // Prefer matching size
-    const aSizeMatch = preferredSize && a.vmSize === preferredSize ? 1 : 0;
-    const bSizeMatch = preferredSize && b.vmSize === preferredSize ? 1 : 0;
-    if (aSizeMatch !== bSizeMatch) return bSizeMatch - aSizeMatch;
-
-    // Prefer lowest load score
-    const aScore = scoreNodeLoad(a.lastMetrics);
-    const bScore = scoreNodeLoad(b.lastMetrics);
-    if (aScore === null && bScore === null) return 0;
+function sortEvaluations(
+  evaluations: PlacementNodeEvaluation[],
+  vmSize: string,
+  vmLocation: string
+): PlacementNodeEvaluation[] {
+  return evaluations.sort((a, b) => {
+    const aLocation = a.snapshot.vmLocation === vmLocation ? 1 : 0;
+    const bLocation = b.snapshot.vmLocation === vmLocation ? 1 : 0;
+    if (aLocation !== bLocation) return bLocation - aLocation;
+    const aSize = a.snapshot.vmSize === vmSize ? 1 : 0;
+    const bSize = b.snapshot.vmSize === vmSize ? 1 : 0;
+    if (aSize !== bSize) return bSize - aSize;
+    const aScore = placementLoadScore(a);
+    const bScore = placementLoadScore(b);
+    if (aScore === null && bScore === null) return a.nodeId.localeCompare(b.nodeId);
     if (aScore === null) return 1;
     if (bScore === null) return -1;
-    return aScore - bScore;
+    return aScore - bScore || a.nodeId.localeCompare(b.nodeId);
   });
+}
 
-  const best = candidates[0];
-  if (!best) {
-    // candidates.length === 0 was already handled above, and sort() does not
-    // change the array length — this should never happen.
-    return null;
+function missingNodeEvaluation(
+  nodeId: string,
+  path: PlacementNodeEvaluation['path']
+): PlacementNodeEvaluation {
+  return {
+    nodeId,
+    path,
+    accepted: false,
+    rejectionReasons: ['node-not-found'],
+    snapshot: {
+      runtime: 'vm',
+      vmSize: 'unknown',
+      vmLocation: 'unknown',
+      healthStatus: 'unknown',
+      agentVersionCompatible: false,
+      heartbeatAgeSeconds: null,
+      activeWorkspaceCount: 0,
+      cpuLoadAvg1: null,
+      memoryPercent: null,
+    },
+  };
+}
+
+function placementResult(
+  node: NodeCandidate | null,
+  explanation: PlacementExplanation
+): NodePlacementResult {
+  return { node, explanation: sanitizePlacementExplanation(explanation) };
+}
+
+export async function selectNodeWithExplanation(
+  db: PlacementDb,
+  userId: string,
+  env: NodeSelectorEnv,
+  options: NodePlacementOptions
+): Promise<NodePlacementResult> {
+  const nowMs = options.nowMs ?? Date.now();
+  const now = new Date(nowMs).toISOString();
+  const request = resolvePlacementRequest(env, options.vmSize, options.vmLocation, options.limits);
+  const initialPath: PlacementSelectionPath = options.preferredNodeId
+    ? options.selectionPath === 'manual'
+      ? 'manual'
+      : 'preferred'
+    : (options.selectionPath ?? 'capacity');
+  let explanation = createPlacementExplanation(request, initialPath, now);
+  const nodes = await loadPlacementNodes(db, userId);
+
+  if (options.preferredNodeId) {
+    const node = nodes.find((candidate) => candidate.id === options.preferredNodeId);
+    const path = initialPath as 'preferred' | 'manual';
+    const evaluation = node
+      ? evaluatePlacementNode(node, request, path, env.VM_AGENT_REQUIRED_VERSION, nowMs)
+      : missingNodeEvaluation(options.preferredNodeId, path);
+    explanation.evaluatedNodes.push(evaluation);
+    if (node && evaluation.accepted) {
+      return placementResult(toCandidate(node), selectPlacementNode(explanation, evaluation, now));
+    }
+    explanation.summary = 'The preferred node was rejected.';
+    explanation.outcome = 'failed';
+    return placementResult(null, explanation);
   }
-  return best;
+
+  if (options.taskId && env.NODE_LIFECYCLE && !options.selectionPath) {
+    const warmExclusions = new Map<string, PlacementNodeEvaluation['rejectionReasons']>();
+    const warmEvaluations = sortEvaluations(
+      nodes.map((node) =>
+        evaluatePlacementNode(node, request, 'warm', env.VM_AGENT_REQUIRED_VERSION, nowMs)
+      ),
+      options.vmSize,
+      options.vmLocation
+    );
+    explanation.evaluatedNodes.push(...warmEvaluations);
+    for (const evaluation of warmEvaluations.filter((item) => item.accepted)) {
+      // Refresh every eligibility input before taking the atomic lifecycle
+      // claim. If the node changed since the candidate read, exclude it without
+      // consuming its warm state or cancelling its teardown alarm.
+      const freshNode = (await loadPlacementNodes(db, userId)).find(
+        (candidate) => candidate.id === evaluation.nodeId
+      );
+      const freshEvaluation = freshNode
+        ? evaluatePlacementNode(freshNode, request, 'warm', env.VM_AGENT_REQUIRED_VERSION, nowMs)
+        : missingNodeEvaluation(evaluation.nodeId, 'warm');
+      evaluation.snapshot = freshEvaluation.snapshot;
+      if (!freshNode || !freshEvaluation.accepted) {
+        evaluation.accepted = false;
+        evaluation.rejectionReasons = freshEvaluation.rejectionReasons;
+        warmExclusions.set(evaluation.nodeId, evaluation.rejectionReasons);
+        continue;
+      }
+      try {
+        const claimed = await nodeLifecycle.tryClaim(
+          env as unknown as import('../env').Env,
+          evaluation.nodeId,
+          options.taskId
+        );
+        if (claimed.claimed) {
+          return placementResult(
+            toCandidate(freshNode),
+            selectPlacementNode(explanation, evaluation, now)
+          );
+        }
+      } catch {
+        // The typed reason below intentionally replaces raw DO/provider errors.
+      }
+      evaluation.accepted = false;
+      evaluation.rejectionReasons.push('warm-claim-lost');
+      warmExclusions.set(evaluation.nodeId, evaluation.rejectionReasons);
+    }
+    const evaluations = sortEvaluations(
+      nodes.map((node) => {
+        const evaluation = evaluatePlacementNode(
+          node,
+          request,
+          'capacity',
+          env.VM_AGENT_REQUIRED_VERSION,
+          nowMs
+        );
+        const exclusionReasons = warmExclusions.get(evaluation.nodeId);
+        if (exclusionReasons) {
+          evaluation.accepted = false;
+          evaluation.rejectionReasons = [
+            ...new Set([...evaluation.rejectionReasons, ...exclusionReasons]),
+          ];
+        }
+        return evaluation;
+      }),
+      options.vmSize,
+      options.vmLocation
+    );
+    explanation.evaluatedNodes.push(...evaluations);
+    const selected = evaluations.find((evaluation) => evaluation.accepted);
+    const selectedNode = selected
+      ? (nodes.find((candidate) => candidate.id === selected.nodeId) ?? null)
+      : null;
+    if (selected && selectedNode) {
+      return placementResult(
+        toCandidate(selectedNode),
+        selectPlacementNode(explanation, selected, now)
+      );
+    }
+  } else {
+    const capacityPath = options.selectionPath ?? 'capacity';
+    const evaluations = sortEvaluations(
+      nodes.map((node) =>
+        evaluatePlacementNode(node, request, capacityPath, env.VM_AGENT_REQUIRED_VERSION, nowMs)
+      ),
+      options.vmSize,
+      options.vmLocation
+    );
+    explanation.evaluatedNodes.push(...evaluations);
+    const selected = evaluations.find((evaluation) => evaluation.accepted);
+    const selectedNode = selected
+      ? (nodes.find((candidate) => candidate.id === selected.nodeId) ?? null)
+      : null;
+    if (selected && selectedNode) {
+      return placementResult(
+        toCandidate(selectedNode),
+        selectPlacementNode(explanation, selected, now)
+      );
+    }
+  }
+  explanation = requireProvisioning(explanation, now);
+  return placementResult(null, explanation);
+}
+
+/** Backward-compatible selector wrapper for callers that only need the selected node. */
+export async function selectNodeForTaskRun(
+  db: PlacementDb,
+  userId: string,
+  env: NodeSelectorEnv,
+  preferredLocation = DEFAULT_VM_LOCATION,
+  preferredSize: string = DEFAULT_VM_SIZE,
+  taskId?: string
+): Promise<NodeCandidate | null> {
+  const vmSize = ['small', 'medium', 'large'].includes(preferredSize)
+    ? (preferredSize as VMSize)
+    : DEFAULT_VM_SIZE;
+  return (
+    await selectNodeWithExplanation(db, userId, env, {
+      vmSize,
+      vmLocation: preferredLocation,
+      taskId,
+    })
+  ).node;
 }
