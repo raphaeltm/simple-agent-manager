@@ -23,8 +23,10 @@ directory:
   robust, explicit, durable turn-completion signal.
 - **Bindings are memory-only.** There is no channel → SAM session persistence,
   session resume/load, or transparent rebind. Restarting the harness loses its
-  bindings and creates a new SAM conversation on the next prompt.
-- **Runtime loss is terminal here.** If a VM or Instant session dies, the turn
+  bindings and creates a new SAM conversation on the next prompt. Within one
+  process, the bridge rejects a channel change instead of silently crossing
+  channel boundaries.
+- **Runtime loss is terminal here.** If the VM-backed SAM session dies, the turn
   fails loudly. The real design needs runtime-neutral dormant resume that
   restores each harness's native files plus git WIP; replaying ProjectData chat
   text is not equivalent to restoring harness state.
@@ -42,13 +44,18 @@ directory:
 Requirements: Node 20+, the current SAM CLI, the Buzz CLI on `PATH`, and Buzz
 Desktop.
 
+Use a **private, single-user demo channel** and a dedicated least-privilege SAM
+project/profile. Anyone who can invoke this harness in its Buzz channel can
+exercise the configured SAM session-cookie authority and should be treated as a
+SAM operator. This prototype is not a multi-user authorization boundary.
+
 1. Authenticate and find the IDs to bind:
 
    ```bash
    sam auth login
-   sam projects
-   sam project use <project-id>
-   sam profiles
+   sam projects --json
+   sam project use <full-project-id>
+   sam profiles --json
    ```
 
    `sam auth login` writes the cookie this script reuses at
@@ -58,8 +65,9 @@ Desktop.
 2. Copy [`harness-definition.json`](./harness-definition.json) into Buzz's
    `<app-data>/custom_harnesses/` directory (or enter the same fields in Buzz's
    custom-harness UI). Edit the absolute script path, `SAM_PROJECT_ID`, and
-   `SAM_AGENT_PROFILE_ID` placeholders. The profile determines the SAM agent,
-   model, and VM/Instant runtime used by the demo.
+   `SAM_AGENT_PROFILE_ID` placeholders. The profile supplies the SAM agent,
+   model, and settings. The current `/tasks/submit` path used by this spike is
+   VM-backed; this prototype does not select or abstract VM/Instant runtimes.
 
 3. Refresh Buzz's harness catalog, create a managed agent using **SAM ACP
    prototype**, add it to a channel, and mention it. Keep Buzz Desktop and this
@@ -87,7 +95,12 @@ Authentication defaults to the current SAM CLI config. For an isolated test,
 `SAM_API_URL` and `SAM_SESSION_COOKIE` may be set together. Other optional
 prototype knobs are `BUZZ_CLI`, `SAM_ACP_POLL_MS`, `SAM_ACP_SETTLE_MS`,
 `SAM_ACP_TURN_TIMEOUT_MS`, `SAM_ACP_HTTP_TIMEOUT_MS`,
-`SAM_ACP_KEEPALIVE_MS`, and `SAM_ACP_TASK_CHECK_MS`.
+`SAM_ACP_KEEPALIVE_MS`, `SAM_ACP_TASK_CHECK_MS`, `SAM_ACP_MESSAGE_LIMIT`,
+`SAM_ACP_ERROR_BODY_LIMIT`, and `SAM_ACP_BUZZ_STDERR_LIMIT`.
+
+The bridge removes known SAM/GitHub credential environment variables before it
+starts the local Buzz CLI. That is defense in depth, not a substitute for the
+single-user/least-privilege restriction above.
 
 ## Local validation
 

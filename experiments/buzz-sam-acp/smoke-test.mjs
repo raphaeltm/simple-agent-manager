@@ -12,7 +12,9 @@ import { fileURLToPath } from 'node:url';
 const experimentDir = dirname(fileURLToPath(import.meta.url));
 const bridgePath = join(experimentDir, 'buzz-sam-acp.mjs');
 const channelId = '11111111-1111-4111-8111-111111111111';
+const otherChannelId = '22222222-2222-4222-8222-222222222222';
 const replyId = 'a'.repeat(64);
+const projectPath = '/api/projects/project-1';
 
 function json(response, status, body) {
   response.writeHead(status, { 'Content-Type': 'application/json' });
@@ -55,7 +57,7 @@ async function main() {
       requests.push({ method: request.method, path: url.pathname, search: url.search, body });
       assert.equal(request.headers.cookie, 'sam_session=smoke-cookie');
 
-      if (request.method === 'POST' && url.pathname.endsWith('/tasks/submit')) {
+      if (request.method === 'POST' && url.pathname === `${projectPath}/tasks/submit`) {
         activeTurn = 1;
         statePoll = 0;
         return json(response, 202, {
@@ -65,20 +67,29 @@ async function main() {
           status: 'queued',
         });
       }
-      if (request.method === 'GET' && url.pathname.endsWith('/tasks/task-1')) {
+      if (request.method === 'GET' && url.pathname === `${projectPath}/tasks/task-1`) {
         return json(response, 200, { id: 'task-1', status: 'in_progress' });
       }
-      if (request.method === 'POST' && url.pathname.endsWith('/sessions/sam-session-1/prompt')) {
+      if (
+        request.method === 'POST' &&
+        url.pathname === `${projectPath}/sessions/sam-session-1/prompt`
+      ) {
         activeTurn += 1;
         statePoll = 0;
         promptPosts += 1;
         return json(response, 200, { accepted: true });
       }
-      if (request.method === 'POST' && url.pathname.endsWith('/sessions/sam-session-1/cancel')) {
+      if (
+        request.method === 'POST' &&
+        url.pathname === `${projectPath}/sessions/sam-session-1/cancel`
+      ) {
         cancelPosts += 1;
         return json(response, 200, { status: 'cancelled' });
       }
-      if (request.method === 'GET' && url.pathname.endsWith('/sessions/sam-session-1/state')) {
+      if (
+        request.method === 'GET' &&
+        url.pathname === `${projectPath}/sessions/sam-session-1/state`
+      ) {
         statePoll += 1;
         return json(response, 200, {
           state: {
@@ -91,12 +102,25 @@ async function main() {
           agentType: 'openai-codex',
         });
       }
-      if (request.method === 'GET' && url.pathname.endsWith('/sessions/sam-session-1/messages')) {
+      if (
+        request.method === 'GET' &&
+        url.pathname === `${projectPath}/sessions/sam-session-1/messages`
+      ) {
         if (activeTurn === 1 && statePoll >= 1 && assistantMessages.length === 0) {
-          assistantMessages.push(
-            { id: 'first-1', role: 'assistant', content: 'Hello', createdAt: 1 },
-            { id: 'first-2', role: 'assistant', content: ' from SAM.', createdAt: 2 }
-          );
+          assistantMessages.push({
+            id: 'first-1',
+            role: 'assistant',
+            content: 'Hello',
+            createdAt: 1,
+          });
+        }
+        if (activeTurn === 1 && statePoll >= 2 && assistantMessages.length === 1) {
+          assistantMessages.push({
+            id: 'first-2',
+            role: 'assistant',
+            content: ' from SAM.',
+            createdAt: 2,
+          });
         }
         if (activeTurn === 2 && statePoll >= 1 && assistantMessages.length === 2) {
           assistantMessages.push({
@@ -131,7 +155,17 @@ async function main() {
 import { appendFileSync } from 'node:fs';
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
-appendFileSync(process.env.FAKE_BUZZ_LOG, JSON.stringify({ args: process.argv.slice(2), content: Buffer.concat(chunks).toString('utf8') }) + '\\n');
+appendFileSync(process.env.FAKE_BUZZ_LOG, JSON.stringify({
+  args: process.argv.slice(2),
+  content: Buffer.concat(chunks).toString('utf8'),
+  secrets: {
+    samSessionCookie: process.env.SAM_SESSION_COOKIE ?? null,
+    samApiToken: process.env.SAM_API_TOKEN ?? null,
+    samMcpToken: process.env.SAM_MCP_TOKEN ?? null,
+    ghToken: process.env.GH_TOKEN ?? null,
+    githubToken: process.env.GITHUB_TOKEN ?? null,
+  },
+}) + '\\n');
 `
   );
   await chmod(fakeBuzz, 0o755);
@@ -144,6 +178,10 @@ appendFileSync(process.env.FAKE_BUZZ_LOG, JSON.stringify({ args: process.argv.sl
       SAM_CONFIG_DIR: scratch,
       SAM_PROJECT_ID: 'project-1',
       SAM_AGENT_PROFILE_ID: 'profile-1',
+      SAM_API_TOKEN: 'must-not-reach-buzz',
+      SAM_MCP_TOKEN: 'must-not-reach-buzz',
+      GH_TOKEN: 'must-not-reach-buzz',
+      GITHUB_TOKEN: 'must-not-reach-buzz',
       BUZZ_CLI: fakeBuzz,
       FAKE_BUZZ_LOG: buzzLog,
       SAM_ACP_POLL_MS: '10',
@@ -189,8 +227,13 @@ appendFileSync(process.env.FAKE_BUZZ_LOG, JSON.stringify({ args: process.argv.sl
   const request = (method, params) => {
     const id = nextId++;
     const promise = new Promise((resolve, reject) => pending.set(id, { resolve, reject }));
+    let timeout;
+    const timedOut = new Promise((_, reject) => {
+      timeout = setTimeout(() => reject(new Error(`${method} response timed out`)), 2_000);
+      timeout.unref();
+    });
     child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
-    return promise;
+    return Promise.race([promise, timedOut]).finally(() => clearTimeout(timeout));
   };
   const notify = (method, params) => {
     child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', method, params })}\n`);
@@ -203,7 +246,7 @@ appendFileSync(process.env.FAKE_BUZZ_LOG, JSON.stringify({ args: process.argv.sl
   const created = await request('session/new', { cwd: scratch, mcpServers: [] });
   assert.match(created.sessionId, /^sam-prototype-/);
 
-  const firstPrompt = `[Context]\nChannel: Demo (#${channelId})\nIMPORTANT: reply with --reply-to ${replyId}\nContent: hello`;
+  const firstPrompt = `[Context]\nChannel: Demo (#${channelId})\nChannel: #${channelId}\nIMPORTANT: reply with --reply-to ${replyId}\nContent: hello`;
   assert.deepEqual(
     await request('session/prompt', {
       sessionId: created.sessionId,
@@ -212,14 +255,32 @@ appendFileSync(process.env.FAKE_BUZZ_LOG, JSON.stringify({ args: process.argv.sl
     { stopReason: 'end_turn' }
   );
 
-  const submit = requests.find((entry) => entry.path.endsWith('/tasks/submit'));
+  const submit = requests.find((entry) => entry.path === `${projectPath}/tasks/submit`);
+  assert.equal(submit.method, 'POST');
   assert.equal(submit.body.taskMode, 'conversation');
   assert.equal(submit.body.agentProfileId, 'profile-1');
   assert.match(submit.body.message, /Do not run the local `buzz` CLI/);
 
+  for (const entry of requests.filter(
+    (requestEntry) => requestEntry.path === `${projectPath}/sessions/sam-session-1/messages`
+  )) {
+    const query = new URLSearchParams(entry.search);
+    assert.equal(entry.method, 'GET');
+    assert.equal(query.get('roles'), 'assistant');
+    assert.equal(query.get('compact'), 'false');
+    assert.equal(query.get('order'), 'desc');
+    assert.equal(query.get('limit'), '500');
+  }
+
   const firstChunks = notifications
     .filter((message) => message.params?.update?.sessionUpdate === 'agent_message_chunk')
-    .map((message) => message.params.update.content.text);
+    .map((message) => {
+      assert.equal(message.jsonrpc, '2.0');
+      assert.equal(message.method, 'session/update');
+      assert.equal(message.params.sessionId, created.sessionId);
+      assert.equal(message.params.update.content.type, 'text');
+      return message.params.update.content.text;
+    });
   assert.deepEqual(firstChunks, ['Hello', ' from SAM.']);
 
   assert.deepEqual(
@@ -235,6 +296,27 @@ appendFileSync(process.env.FAKE_BUZZ_LOG, JSON.stringify({ args: process.argv.sl
     .map((message) => message.params.update.content.text);
   assert.deepEqual(allChunks, ['Hello', ' from SAM.', 'Second turn.']);
 
+  const followup = requests.find(
+    (entry) =>
+      entry.method === 'POST' && entry.path === `${projectPath}/sessions/sam-session-1/prompt`
+  );
+  assert.deepEqual(Object.keys(followup.body), ['content']);
+  assert.match(followup.body.content, /Content: again/);
+  assert.match(followup.body.content, /SAM Buzz ACP prototype transport/);
+
+  await assert.rejects(
+    request('session/prompt', {
+      sessionId: created.sessionId,
+      prompt: [
+        {
+          type: 'text',
+          text: firstPrompt.replaceAll(channelId, otherChannelId),
+        },
+      ],
+    }),
+    /already bound to Buzz channel/
+  );
+
   const cancelled = request('session/prompt', {
     sessionId: created.sessionId,
     prompt: [{ type: 'text', text: firstPrompt.replace('hello', 'cancel this') }],
@@ -243,6 +325,19 @@ appendFileSync(process.env.FAKE_BUZZ_LOG, JSON.stringify({ args: process.argv.sl
   notify('session/cancel', { sessionId: created.sessionId });
   assert.deepEqual(await cancelled, { stopReason: 'cancelled' });
   assert.equal(cancelPosts, 1);
+  assert.equal(
+    requests.filter(
+      (entry) =>
+        entry.method === 'POST' && entry.path === `${projectPath}/sessions/sam-session-1/cancel`
+    ).length,
+    1
+  );
+  assert.ok(
+    requests.some(
+      (entry) =>
+        entry.method === 'GET' && entry.path === `${projectPath}/sessions/sam-session-1/state`
+    )
+  );
 
   const buzzPosts = (await readFile(buzzLog, 'utf8'))
     .trim()
@@ -261,6 +356,13 @@ appendFileSync(process.env.FAKE_BUZZ_LOG, JSON.stringify({ args: process.argv.sl
   ]);
   assert.equal(buzzPosts[0].content, 'Hello from SAM.');
   assert.equal(buzzPosts[1].content, 'Second turn.');
+  assert.deepEqual(buzzPosts[0].secrets, {
+    samSessionCookie: null,
+    samApiToken: null,
+    samMcpToken: null,
+    ghToken: null,
+    githubToken: null,
+  });
 
   assert.equal(
     requests.some((entry) => entry.path.includes('/terminal/') || entry.path.includes('/agent/ws')),

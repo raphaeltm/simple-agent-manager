@@ -33,7 +33,9 @@ const DEFAULT_TURN_TIMEOUT_MS = 30 * 60 * 1_000;
 const DEFAULT_HTTP_TIMEOUT_MS = 30_000;
 const DEFAULT_KEEPALIVE_MS = 10_000;
 const DEFAULT_TASK_CHECK_MS = 5_000;
-const MESSAGE_LIMIT = 500;
+const DEFAULT_MESSAGE_LIMIT = 500;
+const DEFAULT_ERROR_BODY_LIMIT = 1_000;
+const DEFAULT_BUZZ_STDERR_LIMIT = 4_000;
 const ERROR_INVALID_REQUEST = -32600;
 const ERROR_METHOD_NOT_FOUND = -32601;
 const ERROR_INVALID_PARAMS = -32602;
@@ -53,6 +55,12 @@ class SamApiError extends Error {
     this.status = status;
     this.code = code;
   }
+}
+
+function safeDiagnostic(value, limit) {
+  return String(value ?? '')
+    .replace(/((?:authorization|cookie|password|secret|token)\s*[=:]\s*)[^\s,;]+/gi, '$1[redacted]')
+    .slice(0, limit);
 }
 
 function envText(name) {
@@ -128,6 +136,9 @@ async function loadConfiguration() {
     httpTimeoutMs: positiveInteger('SAM_ACP_HTTP_TIMEOUT_MS', DEFAULT_HTTP_TIMEOUT_MS),
     keepaliveMs: positiveInteger('SAM_ACP_KEEPALIVE_MS', DEFAULT_KEEPALIVE_MS),
     taskCheckMs: positiveInteger('SAM_ACP_TASK_CHECK_MS', DEFAULT_TASK_CHECK_MS),
+    messageLimit: positiveInteger('SAM_ACP_MESSAGE_LIMIT', DEFAULT_MESSAGE_LIMIT),
+    errorBodyLimit: positiveInteger('SAM_ACP_ERROR_BODY_LIMIT', DEFAULT_ERROR_BODY_LIMIT),
+    buzzStderrLimit: positiveInteger('SAM_ACP_BUZZ_STDERR_LIMIT', DEFAULT_BUZZ_STDERR_LIMIT),
   };
 }
 
@@ -159,14 +170,17 @@ class SamApi {
       try {
         payload = JSON.parse(text);
       } catch {
-        payload = { message: text.slice(0, 1_000) };
+        payload = { message: safeDiagnostic(text, this.config.errorBodyLimit) };
       }
     }
     if (!response.ok) {
       throw new SamApiError(
         response.status,
         typeof payload.error === 'string' ? payload.error : 'HTTP_ERROR',
-        typeof payload.message === 'string' ? payload.message : response.statusText
+        safeDiagnostic(
+          typeof payload.message === 'string' ? payload.message : response.statusText,
+          this.config.errorBodyLimit
+        )
       );
     }
     return payload;
@@ -203,7 +217,7 @@ class SamApi {
   getAssistantMessages(sessionId) {
     const query = new URLSearchParams({
       roles: 'assistant',
-      limit: String(MESSAGE_LIMIT),
+      limit: String(this.config.messageLimit),
       compact: 'false',
       order: 'desc',
     });
@@ -237,18 +251,30 @@ function promptText(params) {
 }
 
 function parseBuzzTarget(text) {
-  const channelMatch = text.match(
-    /^\s*Channel:\s+.*\(#([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\)\s*$/im
-  );
-  const bareChannelMatch = text.match(
-    /^\s*Channel:\s+#?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\s*$/im
-  );
-  const replyMatch = text.match(/--reply-to\s+([0-9a-f]{64})\b/i);
-  const channelId = channelMatch?.[1] ?? bareChannelMatch?.[1] ?? null;
-  if (!channelId) {
+  const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
+  const channelIds = new Set();
+  for (const pattern of [
+    new RegExp(`^\\s*Channel:\\s+.*\\(#(${uuid})\\)\\s*$`, 'gim'),
+    new RegExp(`^\\s*Channel:\\s+#?(${uuid})\\s*$`, 'gim'),
+  ]) {
+    for (const match of text.matchAll(pattern)) channelIds.add(match[1].toLowerCase());
+  }
+  if (channelIds.size === 0) {
     throw new Error('Buzz prompt did not contain a recognizable channel UUID');
   }
-  return { channelId, replyTo: replyMatch?.[1] ?? null };
+  if (channelIds.size > 1) {
+    throw new Error('Buzz prompt contained conflicting channel UUIDs');
+  }
+
+  const replyIds = new Set(
+    [...text.matchAll(/--reply-to\s+([0-9a-f]{64})\b/gi)].map((match) => match[1].toLowerCase())
+  );
+  if (replyIds.size > 1) throw new Error('Buzz prompt contained conflicting reply targets');
+
+  return {
+    channelId: [...channelIds][0],
+    replyTo: replyIds.size === 1 ? [...replyIds][0] : null,
+  };
 }
 
 function samPrompt(original) {
@@ -263,19 +289,40 @@ async function postToBuzz(config, target, content) {
   if (target.replyTo) args.push('--reply-to', target.replyTo);
 
   await new Promise((resolve, reject) => {
+    const childEnv = { ...process.env };
+    for (const name of [
+      'SAM_SESSION_COOKIE',
+      'SAM_API_TOKEN',
+      'SAM_MCP_TOKEN',
+      'GH_TOKEN',
+      'GITHUB_TOKEN',
+    ]) {
+      delete childEnv[name];
+    }
     const child = spawn(config.buzzCli, args, {
-      env: process.env,
+      env: childEnv,
       stdio: ['pipe', 'ignore', 'pipe'],
     });
     let stderr = '';
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk) => {
-      stderr = `${stderr}${chunk}`.slice(-4_000);
+      stderr = `${stderr}${chunk}`.slice(-config.buzzStderrLimit);
     });
-    child.on('error', (error) => reject(new Error(`failed to start Buzz CLI: ${error.message}`)));
+    child.on('error', (error) =>
+      reject(
+        new Error(
+          `failed to start Buzz CLI: ${safeDiagnostic(error.message, config.buzzStderrLimit)}`
+        )
+      )
+    );
     child.on('close', (code) => {
       if (code === 0) resolve();
-      else reject(new Error(`Buzz CLI exited ${code}: ${stderr.trim() || 'no error detail'}`));
+      else
+        reject(
+          new Error(
+            `Buzz CLI exited ${code}: ${safeDiagnostic(stderr.trim(), config.buzzStderrLimit) || 'no error detail'}`
+          )
+        );
     });
     child.stdin.end(content);
   });
@@ -339,13 +386,15 @@ class AcpBridge {
       }
     } catch (error) {
       if (message.id === undefined) {
-        console.error(`ACP notification failed: ${error.message}`);
+        console.error(
+          `ACP notification failed: ${safeDiagnostic(error.message, this.config.errorBodyLimit)}`
+        );
         return;
       }
       this.error(
         message.id,
         error instanceof RpcError ? error.code : ERROR_INTERNAL,
-        error.message || String(error)
+        safeDiagnostic(error.message || String(error), this.config.errorBodyLimit)
       );
     }
   }
@@ -377,6 +426,7 @@ class AcpBridge {
       localSessionId,
       samSessionId: null,
       taskId: null,
+      buzzChannelId: null,
       inFlight: null,
     });
     this.response(id, { sessionId: localSessionId });
@@ -402,6 +452,13 @@ class AcpBridge {
 
     const originalPrompt = promptText(params);
     const target = parseBuzzTarget(originalPrompt);
+    if (session.buzzChannelId && session.buzzChannelId !== target.channelId) {
+      throw new RpcError(
+        ERROR_INVALID_PARAMS,
+        `this prototype ACP session is already bound to Buzz channel ${session.buzzChannelId}`
+      );
+    }
+    session.buzzChannelId ??= target.channelId;
     const turn = { cancelRequested: false, cancelPromise: null };
     session.inFlight = turn;
 
@@ -537,12 +594,16 @@ async function main() {
   input.on('line', (line) => {
     if (!line.trim()) return;
     void bridge.receive(line).catch((error) => {
-      console.error(`unhandled ACP bridge error: ${error.stack || error}`);
+      console.error(
+        `unhandled ACP bridge error: ${safeDiagnostic(error.stack || error, config.errorBodyLimit)}`
+      );
     });
   });
 }
 
 main().catch((error) => {
-  console.error(`SAM ACP prototype failed to start: ${error.message}`);
+  console.error(
+    `SAM ACP prototype failed to start: ${safeDiagnostic(error.message, DEFAULT_ERROR_BODY_LIMIT)}`
+  );
   process.exitCode = 1;
 });
