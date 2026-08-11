@@ -4,7 +4,11 @@
  * Validates:
  *   1. resolveProjectAgentDefault() parses JSON and extracts per-agent-type overrides
  *   2. Schema + shared types have the new column / field
- *   3. API PATCH validates agent types + permission modes and persists the JSON
+ *   3. API PATCH validates agent types + permission modes and persists the JSON —
+ *      behavioral (real Hono route + in-memory SQLite via createSqliteD1), not a
+ *      source-text check. See .claude/rules/02-quality-gates.md: source-contract
+ *      tests (readFileSync + toContain) prove code is present, not that it works,
+ *      and broke here when prettier rewrapped the update-set line in crud.ts.
  *   4. Task submit and MCP dispatch consult project.agentDefaults
  *   5. Agent-settings callback merges project → user fallback
  *   6. Project Settings UI renders the new section
@@ -12,14 +16,20 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import Database from 'better-sqlite3';
+import { Hono } from 'hono';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
+import * as schema from '../../src/db/schema';
+import type { Env } from '../../src/env';
+import type { AuthContext } from '../../src/middleware/auth';
+import { AppError } from '../../src/middleware/error';
+import { crudRoutes } from '../../src/routes/projects/crud';
 import { resolveProjectAgentDefault } from '../../src/services/project-agent-defaults';
+import { createAllSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
-const apiSrc = (rel: string) =>
-  readFileSync(resolve(process.cwd(), 'src', rel), 'utf8');
-const webSrc = (rel: string) =>
-  readFileSync(resolve(process.cwd(), '../web/src', rel), 'utf8');
+const apiSrc = (rel: string) => readFileSync(resolve(process.cwd(), 'src', rel), 'utf8');
+const webSrc = (rel: string) => readFileSync(resolve(process.cwd(), '../web/src', rel), 'utf8');
 const sharedSrc = (rel: string) =>
   readFileSync(resolve(process.cwd(), '../../packages/shared/src', rel), 'utf8');
 
@@ -189,28 +199,182 @@ describe('Project agent defaults — valibot schema', () => {
 });
 
 describe('Project agent defaults — API PATCH route', () => {
-  const crud = apiSrc('routes/projects/crud.ts');
+  const OWNER = 'user-owner';
+  const PROJECT_ID = 'project-agent-defaults';
 
-  it('imports AGENT_CATALOG and VALID_PERMISSION_MODES for validation', () => {
-    expect(crud).toContain('AGENT_CATALOG');
-    expect(crud).toContain('VALID_PERMISSION_MODES');
+  let sqlite: Database.Database;
+  let env: Env;
+  let app: Hono<{ Bindings: Env }>;
+
+  function authContext(): AuthContext {
+    return {
+      user: {
+        id: OWNER,
+        email: 'owner@example.test',
+        name: 'Project owner',
+        avatarUrl: null,
+        role: 'user',
+        status: 'active',
+      },
+      session: {
+        id: 'session-owner',
+        expiresAt: new Date('2026-08-10T00:00:00.000Z'),
+      },
+    };
+  }
+
+  // installation_id is left NULL so the PATCH handler's GitHub-repository-access
+  // recheck (`existing.installationId && existing.repoProvider !== 'artifacts'`)
+  // is skipped — this describe block is scoped to agentDefaults
+  // validation/persistence, not GitHub access verification.
+  function seedProject(agentDefaultsJson: string | null): void {
+    const now = '2026-07-01T00:00:00.000Z';
+    sqlite
+      .prepare(
+        `INSERT INTO projects
+           (id, user_id, name, normalized_name, repository, default_branch, repo_provider, status, agent_defaults, created_by, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'main', 'github', 'active', ?, ?, ?, ?)`
+      )
+      .run(
+        PROJECT_ID,
+        OWNER,
+        'Agent Defaults Project',
+        'agent defaults project',
+        'acme/repo',
+        agentDefaultsJson,
+        OWNER,
+        now,
+        now
+      );
+    sqlite
+      .prepare(
+        `INSERT INTO project_members (project_id, user_id, role, status, created_at, updated_at)
+         VALUES (?, ?, 'owner', 'active', ?, ?)`
+      )
+      .run(PROJECT_ID, OWNER, now, now);
+  }
+
+  function readStoredAgentDefaults(): string | null {
+    const row = sqlite
+      .prepare(`SELECT agent_defaults FROM projects WHERE id = ?`)
+      .get(PROJECT_ID) as { agent_defaults: string | null } | undefined;
+    return row?.agent_defaults ?? null;
+  }
+
+  async function patchProject(body: Record<string, unknown>): Promise<Response> {
+    return app.request(
+      `/api/projects/${PROJECT_ID}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      env
+    );
+  }
+
+  beforeEach(() => {
+    sqlite = new Database(':memory:');
+    createAllSchemaTables(sqlite, schema);
+    env = { DATABASE: createSqliteD1(sqlite) } as Env;
+
+    app = new Hono<{ Bindings: Env }>();
+    app.use('*', async (c, next) => {
+      c.set('auth', authContext());
+      await next();
+    });
+    app.onError((err, c) =>
+      err instanceof AppError
+        ? c.json(err.toJSON(), err.statusCode as never)
+        : c.json({ error: 'INTERNAL_ERROR', message: err.message }, 500)
+    );
+    app.route('/api/projects', crudRoutes);
   });
 
-  it('includes agentDefaults in the "at least one field" check', () => {
-    expect(crud).toContain("'agentDefaults'");
+  afterEach(() => sqlite.close());
+
+  it('persists agentDefaults as a JSON string — a single-field body also proves agentDefaults satisfies the "at least one field" requirement', async () => {
+    seedProject(null);
+
+    const payload = {
+      'claude-code': { model: 'claude-opus-4-7', permissionMode: 'acceptEdits' },
+      'openai-codex': { model: 'gpt-5-codex' },
+    };
+
+    // The body contains ONLY agentDefaults. If agentDefaults were removed from
+    // the route's allowed-field allowlist, this request would 400 with "At least
+    // one field is required" instead of persisting.
+    const response = await patchProject({ agentDefaults: payload });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { agentDefaults: Record<string, unknown> | null };
+    expect(body.agentDefaults).toEqual(payload);
+
+    // The column must hold a JSON *string* that round-trips to the payload —
+    // the behavioral mirror of the old "persists as JSON string" source check.
+    const stored = readStoredAgentDefaults();
+    expect(typeof stored).toBe('string');
+    expect(JSON.parse(stored as string)).toEqual(payload);
   });
 
-  it('validates agent types against AGENT_CATALOG', () => {
-    expect(crud).toContain('unknown agent type');
+  it('leaves agentDefaults unchanged when the field is omitted (undefined) from the request', async () => {
+    const seeded = JSON.stringify({ 'claude-code': { model: 'claude-opus-4-7' } });
+    seedProject(seeded);
+
+    // agentDefaults is absent from the body entirely — only an unrelated field
+    // is updated. Omitted must mean "leave alone", not "clear".
+    const response = await patchProject({ description: 'updated description' });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { agentDefaults: Record<string, unknown> | null };
+    expect(body.agentDefaults).toEqual({ 'claude-code': { model: 'claude-opus-4-7' } });
+    expect(readStoredAgentDefaults()).toBe(seeded);
   });
 
-  it('validates permissionMode against VALID_PERMISSION_MODES', () => {
-    expect(crud).toContain('permissionMode must be one of');
+  it('clears agentDefaults to SQL NULL (not the string "null") when explicitly set to null', async () => {
+    seedProject(JSON.stringify({ 'claude-code': { model: 'claude-opus-4-7' } }));
+
+    const response = await patchProject({ agentDefaults: null });
+
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { agentDefaults: Record<string, unknown> | null };
+    expect(body.agentDefaults).toBeNull();
+    // Must be a real NULL. A naive `JSON.stringify(body.agentDefaults)` would
+    // store the four-character string "null", which the response mapper hides
+    // (it parses back to null) — only this DB read-back catches it.
+    expect(readStoredAgentDefaults()).toBeNull();
   });
 
-  it('persists agentDefaults as JSON string in the update set', () => {
-    expect(crud).toContain('agentDefaults: agentDefaultsColumn');
-    expect(crud).toContain('JSON.stringify(body.agentDefaults)');
+  it('rejects an unknown agent type with 400 and never persists it', async () => {
+    const seeded = JSON.stringify({ 'claude-code': { model: 'claude-opus-4-7' } });
+    seedProject(seeded);
+
+    // The valibot schema accepts any string key (v.record), so unknown agent
+    // types specifically exercise the handler's AGENT_CATALOG validation.
+    const response = await patchProject({
+      agentDefaults: { 'not-a-real-agent': { model: 'some-model' } },
+    });
+
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { message: string };
+    expect(body.message).toMatch(/unknown agent type/i);
+    expect(readStoredAgentDefaults()).toBe(seeded);
+  });
+
+  it('rejects an invalid permissionMode with 400 and never persists it', async () => {
+    const seeded = JSON.stringify({ 'claude-code': { model: 'claude-opus-4-7' } });
+    seedProject(seeded);
+
+    // Two layers enforce this (the valibot picklist in jsonValidator fires
+    // first; the handler's VALID_PERMISSION_MODES check is defense-in-depth),
+    // so assert the black-box contract — 400 + unchanged row — rather than
+    // coupling to which layer's message wins.
+    const response = await patchProject({
+      agentDefaults: { 'claude-code': { permissionMode: 'notAValidMode' } },
+    });
+
+    expect(response.status).toBe(400);
+    expect(readStoredAgentDefaults()).toBe(seeded);
   });
 });
 
