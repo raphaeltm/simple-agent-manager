@@ -67,6 +67,10 @@ Full design/research context is in SAM idea `01KZPTT49W10FC1P9G9RQEK8M1`.
       demo instructions.
 - [x] Add a local fake-server/transcript smoke test covering first prompt,
       follow-up prompt, assistant notifications, cancellation, and request shapes.
+- [x] Keep the executable below the source-file review threshold by separating
+      configuration, SAM API, and Buzz CLI process concerns into small local modules.
+- [x] Allowlist the Buzz child environment, enforce HTTPS except for loopback
+      tests, and bound/clean up the Buzz CLI process on timeout.
 - [x] Run proportional syntax/smoke validation, targeted reviewers, and local PR
       evidence checks. Do not deploy to staging.
 - [x] Push the assigned branch and open draft PR #1805. Do not merge.

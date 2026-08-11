@@ -9,6 +9,9 @@ import { dirname, join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { fileURLToPath } from 'node:url';
 
+import { postToBuzz } from './buzz-cli.mjs';
+import { validateApiUrl } from './configuration.mjs';
+
 const experimentDir = dirname(fileURLToPath(import.meta.url));
 const bridgePath = join(experimentDir, 'buzz-sam-acp.mjs');
 const channelId = '11111111-1111-4111-8111-111111111111';
@@ -40,6 +43,18 @@ function waitFor(predicate, timeoutMs = 2_000) {
 }
 
 async function main() {
+  assert.equal(validateApiUrl('https://api.example.com/'), 'https://api.example.com');
+  assert.equal(validateApiUrl('http://127.0.0.1:8787/'), 'http://127.0.0.1:8787');
+  assert.throws(() => validateApiUrl('http://api.example.com'), /must use HTTPS/);
+  assert.throws(
+    () => validateApiUrl('https://user:password@api.example.com'),
+    /must not contain embedded credentials/
+  );
+  assert.throws(
+    () => validateApiUrl('https://api.example.com/proxy'),
+    /must be an origin without a path/
+  );
+
   const scratch = await mkdtemp(join(tmpdir(), 'sam-buzz-acp-smoke-'));
   const buzzLog = join(scratch, 'buzz.jsonl');
   const fakeBuzz = join(scratch, 'fake-buzz.mjs');
@@ -155,17 +170,25 @@ async function main() {
 import { appendFileSync } from 'node:fs';
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
-appendFileSync(process.env.FAKE_BUZZ_LOG, JSON.stringify({
+const content = Buffer.concat(chunks).toString('utf8');
+appendFileSync(process.env.BUZZ_FAKE_LOG, JSON.stringify({
+  pid: process.pid,
   args: process.argv.slice(2),
-  content: Buffer.concat(chunks).toString('utf8'),
+  content,
+  buzzPrivateKey: process.env.BUZZ_PRIVATE_KEY ?? null,
   secrets: {
     samSessionCookie: process.env.SAM_SESSION_COOKIE ?? null,
     samApiToken: process.env.SAM_API_TOKEN ?? null,
     samMcpToken: process.env.SAM_MCP_TOKEN ?? null,
     ghToken: process.env.GH_TOKEN ?? null,
     githubToken: process.env.GITHUB_TOKEN ?? null,
+    anthropicApiKey: process.env.ANTHROPIC_API_KEY ?? null,
+    openaiApiKey: process.env.OPENAI_API_KEY ?? null,
+    cloudflareToken: process.env.CF_TOKEN ?? null,
+    awsSecretAccessKey: process.env.AWS_SECRET_ACCESS_KEY ?? null,
   },
 }) + '\\n');
+if (content === '__HANG__') setInterval(() => {}, 1_000);
 `
   );
   await chmod(fakeBuzz, 0o755);
@@ -182,8 +205,13 @@ appendFileSync(process.env.FAKE_BUZZ_LOG, JSON.stringify({
       SAM_MCP_TOKEN: 'must-not-reach-buzz',
       GH_TOKEN: 'must-not-reach-buzz',
       GITHUB_TOKEN: 'must-not-reach-buzz',
+      ANTHROPIC_API_KEY: 'must-not-reach-buzz',
+      OPENAI_API_KEY: 'must-not-reach-buzz',
+      CF_TOKEN: 'must-not-reach-buzz',
+      AWS_SECRET_ACCESS_KEY: 'must-not-reach-buzz',
       BUZZ_CLI: fakeBuzz,
-      FAKE_BUZZ_LOG: buzzLog,
+      BUZZ_FAKE_LOG: buzzLog,
+      BUZZ_PRIVATE_KEY: 'nsec-demo-only',
       SAM_ACP_POLL_MS: '10',
       SAM_ACP_SETTLE_MS: '25',
       SAM_ACP_TURN_TIMEOUT_MS: '5000',
@@ -356,13 +384,42 @@ appendFileSync(process.env.FAKE_BUZZ_LOG, JSON.stringify({
   ]);
   assert.equal(buzzPosts[0].content, 'Hello from SAM.');
   assert.equal(buzzPosts[1].content, 'Second turn.');
+  assert.equal(buzzPosts[0].buzzPrivateKey, 'nsec-demo-only');
   assert.deepEqual(buzzPosts[0].secrets, {
     samSessionCookie: null,
     samApiToken: null,
     samMcpToken: null,
     ghToken: null,
     githubToken: null,
+    anthropicApiKey: null,
+    openaiApiKey: null,
+    cloudflareToken: null,
+    awsSecretAccessKey: null,
   });
+  assert.equal(JSON.stringify(requests).includes('nsec-demo-only'), false);
+
+  await assert.rejects(
+    postToBuzz(
+      { buzzCli: fakeBuzz, buzzStderrLimit: 1_000, buzzTimeoutMs: 1_000 },
+      { channelId, replyTo: null },
+      '__HANG__',
+      {
+        ...process.env,
+        BUZZ_FAKE_LOG: buzzLog,
+        BUZZ_PRIVATE_KEY: 'nsec-demo-only',
+        SAM_SESSION_COOKIE: 'must-not-reach-buzz',
+        OPENAI_API_KEY: 'must-not-reach-buzz',
+      }
+    ),
+    /Buzz CLI timed out after 1000ms/
+  );
+  const timeoutPost = (await readFile(buzzLog, 'utf8'))
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line))
+    .at(-1);
+  assert.equal(timeoutPost.content, '__HANG__');
+  assert.throws(() => process.kill(timeoutPost.pid, 0), { code: 'ESRCH' });
 
   assert.equal(
     requests.some((entry) => entry.path.includes('/terminal/') || entry.path.includes('/agent/ws')),

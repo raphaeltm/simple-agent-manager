@@ -19,23 +19,14 @@
  * - No VM/cf-container error taxonomy is guessed. A dead session fails loudly.
  */
 
-import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 
+import { parseBuzzTarget, postToBuzz } from './buzz-cli.mjs';
+import { DEFAULT_ERROR_BODY_LIMIT, loadConfiguration, safeDiagnostic } from './configuration.mjs';
+import { SamApi } from './sam-api.mjs';
+
 const PROTOCOL_VERSION = 2;
-const DEFAULT_POLL_MS = 1_000;
-const DEFAULT_SETTLE_MS = 2_500;
-const DEFAULT_TURN_TIMEOUT_MS = 30 * 60 * 1_000;
-const DEFAULT_HTTP_TIMEOUT_MS = 30_000;
-const DEFAULT_KEEPALIVE_MS = 10_000;
-const DEFAULT_TASK_CHECK_MS = 5_000;
-const DEFAULT_MESSAGE_LIMIT = 500;
-const DEFAULT_ERROR_BODY_LIMIT = 1_000;
-const DEFAULT_BUZZ_STDERR_LIMIT = 4_000;
 const ERROR_INVALID_REQUEST = -32600;
 const ERROR_METHOD_NOT_FOUND = -32601;
 const ERROR_INVALID_PARAMS = -32602;
@@ -46,188 +37,6 @@ class RpcError extends Error {
   constructor(code, message) {
     super(message);
     this.code = code;
-  }
-}
-
-class SamApiError extends Error {
-  constructor(status, code, message) {
-    super(`SAM API ${status} ${code}: ${message}`);
-    this.status = status;
-    this.code = code;
-  }
-}
-
-function safeDiagnostic(value, limit) {
-  return String(value ?? '')
-    .replace(/((?:authorization|cookie|password|secret|token)\s*[=:]\s*)[^\s,;]+/gi, '$1[redacted]')
-    .slice(0, limit);
-}
-
-function envText(name) {
-  return process.env[name]?.trim() ?? '';
-}
-
-function positiveInteger(name, fallback) {
-  const raw = envText(name);
-  if (!raw) return fallback;
-  const value = Number.parseInt(raw, 10);
-  if (!Number.isSafeInteger(value) || value <= 0) {
-    throw new Error(`${name} must be a positive integer`);
-  }
-  return value;
-}
-
-function resolveConfigFile() {
-  const explicit = envText('SAM_CONFIG_DIR');
-  if (explicit) return join(explicit, 'config.json');
-  const xdg = envText('XDG_CONFIG_HOME');
-  if (xdg) return join(xdg, 'sam', 'config.json');
-  return join(homedir(), '.config', 'sam', 'config.json');
-}
-
-async function loadConfiguration() {
-  const envApiUrl = envText('SAM_API_URL');
-  const envCookie = envText('SAM_SESSION_COOKIE');
-  let cliConfig = {};
-
-  if (envApiUrl || envCookie) {
-    if (!envApiUrl || !envCookie) {
-      throw new Error('SAM_API_URL and SAM_SESSION_COOKIE must be set together');
-    }
-  } else {
-    const configFile = resolveConfigFile();
-    let raw;
-    try {
-      raw = await readFile(configFile, 'utf8');
-    } catch (error) {
-      if (error?.code === 'ENOENT') {
-        throw new Error(`SAM auth config not found at ${configFile}; run \`sam auth login\` first`);
-      }
-      throw error;
-    }
-    try {
-      cliConfig = JSON.parse(raw);
-    } catch (error) {
-      throw new Error(`failed to parse SAM auth config: ${error.message}`);
-    }
-  }
-
-  const apiUrl = (envApiUrl || cliConfig.apiUrl || '').replace(/\/+$/, '');
-  const sessionCookie = envCookie || cliConfig.sessionCookie || '';
-  if (!apiUrl || !sessionCookie) {
-    throw new Error('SAM auth config is missing apiUrl or sessionCookie; run `sam auth login`');
-  }
-
-  const projectId = envText('SAM_PROJECT_ID');
-  const agentProfileId = envText('SAM_AGENT_PROFILE_ID');
-  if (!projectId || !agentProfileId) {
-    throw new Error('SAM_PROJECT_ID and SAM_AGENT_PROFILE_ID are required');
-  }
-
-  return {
-    apiUrl,
-    sessionCookie,
-    projectId,
-    agentProfileId,
-    buzzCli: envText('BUZZ_CLI') || 'buzz',
-    pollMs: positiveInteger('SAM_ACP_POLL_MS', DEFAULT_POLL_MS),
-    settleMs: positiveInteger('SAM_ACP_SETTLE_MS', DEFAULT_SETTLE_MS),
-    turnTimeoutMs: positiveInteger('SAM_ACP_TURN_TIMEOUT_MS', DEFAULT_TURN_TIMEOUT_MS),
-    httpTimeoutMs: positiveInteger('SAM_ACP_HTTP_TIMEOUT_MS', DEFAULT_HTTP_TIMEOUT_MS),
-    keepaliveMs: positiveInteger('SAM_ACP_KEEPALIVE_MS', DEFAULT_KEEPALIVE_MS),
-    taskCheckMs: positiveInteger('SAM_ACP_TASK_CHECK_MS', DEFAULT_TASK_CHECK_MS),
-    messageLimit: positiveInteger('SAM_ACP_MESSAGE_LIMIT', DEFAULT_MESSAGE_LIMIT),
-    errorBodyLimit: positiveInteger('SAM_ACP_ERROR_BODY_LIMIT', DEFAULT_ERROR_BODY_LIMIT),
-    buzzStderrLimit: positiveInteger('SAM_ACP_BUZZ_STDERR_LIMIT', DEFAULT_BUZZ_STDERR_LIMIT),
-  };
-}
-
-function projectPath(projectId, ...segments) {
-  const encoded = [projectId, ...segments].map((part) => encodeURIComponent(part));
-  return `/api/projects/${encoded.join('/')}`;
-}
-
-class SamApi {
-  constructor(config) {
-    this.config = config;
-  }
-
-  async request(path, options = {}) {
-    const response = await fetch(`${this.config.apiUrl}${path}`, {
-      method: options.method ?? 'GET',
-      headers: {
-        Accept: 'application/json',
-        Cookie: this.config.sessionCookie,
-        ...(options.body ? { 'Content-Type': 'application/json' } : {}),
-      },
-      body: options.body ? JSON.stringify(options.body) : undefined,
-      signal: AbortSignal.timeout(this.config.httpTimeoutMs),
-    });
-
-    const text = await response.text();
-    let payload = {};
-    if (text) {
-      try {
-        payload = JSON.parse(text);
-      } catch {
-        payload = { message: safeDiagnostic(text, this.config.errorBodyLimit) };
-      }
-    }
-    if (!response.ok) {
-      throw new SamApiError(
-        response.status,
-        typeof payload.error === 'string' ? payload.error : 'HTTP_ERROR',
-        safeDiagnostic(
-          typeof payload.message === 'string' ? payload.message : response.statusText,
-          this.config.errorBodyLimit
-        )
-      );
-    }
-    return payload;
-  }
-
-  submitConversation(message) {
-    return this.request(projectPath(this.config.projectId, 'tasks', 'submit'), {
-      method: 'POST',
-      body: {
-        message,
-        taskMode: 'conversation',
-        agentProfileId: this.config.agentProfileId,
-      },
-    });
-  }
-
-  sendPrompt(sessionId, content) {
-    return this.request(projectPath(this.config.projectId, 'sessions', sessionId, 'prompt'), {
-      method: 'POST',
-      body: { content },
-    });
-  }
-
-  cancel(sessionId) {
-    return this.request(projectPath(this.config.projectId, 'sessions', sessionId, 'cancel'), {
-      method: 'POST',
-    });
-  }
-
-  getState(sessionId) {
-    return this.request(projectPath(this.config.projectId, 'sessions', sessionId, 'state'));
-  }
-
-  getAssistantMessages(sessionId) {
-    const query = new URLSearchParams({
-      roles: 'assistant',
-      limit: String(this.config.messageLimit),
-      compact: 'false',
-      order: 'desc',
-    });
-    return this.request(
-      `${projectPath(this.config.projectId, 'sessions', sessionId, 'messages')}?${query}`
-    );
-  }
-
-  getTask(taskId) {
-    return this.request(projectPath(this.config.projectId, 'tasks', taskId));
   }
 }
 
@@ -250,82 +59,8 @@ function promptText(params) {
   return text;
 }
 
-function parseBuzzTarget(text) {
-  const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
-  const channelIds = new Set();
-  for (const pattern of [
-    new RegExp(`^\\s*Channel:\\s+.*\\(#(${uuid})\\)\\s*$`, 'gim'),
-    new RegExp(`^\\s*Channel:\\s+#?(${uuid})\\s*$`, 'gim'),
-  ]) {
-    for (const match of text.matchAll(pattern)) channelIds.add(match[1].toLowerCase());
-  }
-  if (channelIds.size === 0) {
-    throw new Error('Buzz prompt did not contain a recognizable channel UUID');
-  }
-  if (channelIds.size > 1) {
-    throw new Error('Buzz prompt contained conflicting channel UUIDs');
-  }
-
-  const replyIds = new Set(
-    [...text.matchAll(/--reply-to\s+([0-9a-f]{64})\b/gi)].map((match) => match[1].toLowerCase())
-  );
-  if (replyIds.size > 1) throw new Error('Buzz prompt contained conflicting reply targets');
-
-  return {
-    channelId: [...channelIds][0],
-    replyTo: replyIds.size === 1 ? [...replyIds][0] : null,
-  };
-}
-
 function samPrompt(original) {
   return `${original}\n\n[SAM Buzz ACP prototype transport]\nReturn the reply as your final assistant text. Do not run the local \`buzz\` CLI: this bridge will publish the final text from the Buzz machine, and the Buzz identity is intentionally not available in the remote SAM workspace.`;
-}
-
-async function postToBuzz(config, target, content) {
-  // PROTOTYPE SHORTCUT: the reply-only posture keeps the Buzz identity on this
-  // machine. A product version needs an explicit capability/trust design before
-  // it can delegate Buzz tools or identity to a remote workspace.
-  const args = ['messages', 'send', '--channel', target.channelId, '--content', '-'];
-  if (target.replyTo) args.push('--reply-to', target.replyTo);
-
-  await new Promise((resolve, reject) => {
-    const childEnv = { ...process.env };
-    for (const name of [
-      'SAM_SESSION_COOKIE',
-      'SAM_API_TOKEN',
-      'SAM_MCP_TOKEN',
-      'GH_TOKEN',
-      'GITHUB_TOKEN',
-    ]) {
-      delete childEnv[name];
-    }
-    const child = spawn(config.buzzCli, args, {
-      env: childEnv,
-      stdio: ['pipe', 'ignore', 'pipe'],
-    });
-    let stderr = '';
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk) => {
-      stderr = `${stderr}${chunk}`.slice(-config.buzzStderrLimit);
-    });
-    child.on('error', (error) =>
-      reject(
-        new Error(
-          `failed to start Buzz CLI: ${safeDiagnostic(error.message, config.buzzStderrLimit)}`
-        )
-      )
-    );
-    child.on('close', (code) => {
-      if (code === 0) resolve();
-      else
-        reject(
-          new Error(
-            `Buzz CLI exited ${code}: ${safeDiagnostic(stderr.trim(), config.buzzStderrLimit) || 'no error detail'}`
-          )
-        );
-    });
-    child.stdin.end(content);
-  });
 }
 
 class AcpBridge {

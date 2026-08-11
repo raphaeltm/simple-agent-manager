@@ -6,7 +6,8 @@
 > used as a lifecycle/recovery design reference. Full context lives in SAM idea
 > `01KZPTT49W10FC1P9G9RQEK8M1`.
 
-The dependency-free Node script speaks ACP JSON-RPC over stdio NDJSON to Buzz.
+The dependency-free Node executable and its small local modules speak ACP
+JSON-RPC over stdio NDJSON to Buzz.
 On the first Buzz prompt it submits a SAM task with `taskMode: "conversation"`;
 later prompts and cancels use the SAM session HTTP endpoints. It polls persisted
 SAM session state and assistant message rows, emits ACP message chunks, and
@@ -96,11 +97,15 @@ Authentication defaults to the current SAM CLI config. For an isolated test,
 prototype knobs are `BUZZ_CLI`, `SAM_ACP_POLL_MS`, `SAM_ACP_SETTLE_MS`,
 `SAM_ACP_TURN_TIMEOUT_MS`, `SAM_ACP_HTTP_TIMEOUT_MS`,
 `SAM_ACP_KEEPALIVE_MS`, `SAM_ACP_TASK_CHECK_MS`, `SAM_ACP_MESSAGE_LIMIT`,
-`SAM_ACP_ERROR_BODY_LIMIT`, and `SAM_ACP_BUZZ_STDERR_LIMIT`.
+`SAM_ACP_ERROR_BODY_LIMIT`, `SAM_ACP_BUZZ_STDERR_LIMIT`, and
+`SAM_ACP_BUZZ_TIMEOUT_MS`.
 
-The bridge removes known SAM/GitHub credential environment variables before it
-starts the local Buzz CLI. That is defense in depth, not a substitute for the
-single-user/least-privilege restriction above.
+The bridge gives the local Buzz CLI only `BUZZ_*` variables plus the small set
+of OS path, home, temporary-directory, and locale variables needed to launch a
+local executable. SAM, provider, cloud, and GitHub credentials are not inherited.
+That is defense in depth, not a substitute for the single-user/least-privilege
+restriction above. The Buzz CLI call also has a bounded timeout and is killed
+before a timeout error is returned.
 
 ## Local validation
 
@@ -108,10 +113,14 @@ No staging deployment is needed or intended. Run:
 
 ```bash
 node --check experiments/buzz-sam-acp/buzz-sam-acp.mjs
+node --check experiments/buzz-sam-acp/configuration.mjs
+node --check experiments/buzz-sam-acp/sam-api.mjs
+node --check experiments/buzz-sam-acp/buzz-cli.mjs
 node --check experiments/buzz-sam-acp/smoke-test.mjs
 node experiments/buzz-sam-acp/smoke-test.mjs
 ```
 
 The smoke test starts a local fake SAM server and fake Buzz CLI, then exercises
 initialize, session/new, first and follow-up prompts, persisted assistant
-chunks, local Buzz posting, and cancellation.
+chunks, local Buzz posting, child-process credential isolation and timeout
+cleanup, and cancellation.
