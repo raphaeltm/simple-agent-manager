@@ -100,23 +100,23 @@ will be reviewed in one draft PR.
 
 ### A. Deterministic VM-agent release resolution
 
-- [ ] Add a versioned compatibility marker with a documented legacy baseline.
-- [ ] Add a tested release-resolution module that deterministically fingerprints the
+- [x] Add a versioned compatibility marker with a documented legacy baseline.
+- [x] Add a tested release-resolution module that deterministically fingerprints the
       tracked VM-agent package inputs at a Git ref and emits `build_agent`,
       `required_version`, `fingerprint`, and a machine-readable reason.
-- [ ] Read only the allowlisted deployed Worker bindings needed for resolution; treat
+- [x] Read only the allowlisted deployed Worker bindings needed for resolution; treat
       missing Worker state as first install and fail closed on unreadable/invalid state.
-- [ ] Infer an absent first-rollout fingerprint from the prior required Git SHA when
+- [x] Infer an absent first-rollout fingerprint from the prior required Git SHA when
       possible; publish when equivalence cannot be proven.
-- [ ] Carry the prior required release and skip R2 build/upload when the fingerprint is
+- [x] Carry the prior required release and skip R2 build/upload when the fingerprint is
       unchanged.
-- [ ] Publish and advance to the target deployment SHA when inputs or the explicit marker
+- [x] Publish and advance to the target deployment SHA when inputs or the explicit marker
       changed.
-- [ ] Preserve the prior release for unchanged `skip_agent`; reject changed-input or
+- [x] Preserve the prior release for unchanged `skip_agent`; reject changed-input or
       first-deploy `skip_agent`.
-- [ ] Use the release outputs for every Wrangler sync invocation and ensure official
+- [x] Use the release outputs for every Wrangler sync invocation and ensure official
       deployed environments never receive an empty requirement.
-- [ ] Keep the separate Cloudflare Container image build/version boundary intact.
+- [x] Keep the separate Cloudflare Container image build/version boundary intact.
 
 ### B. Typed placement evaluation and persistence
 
@@ -151,10 +151,10 @@ will be reviewed in one draft PR.
 
 ### D. Verification
 
-- [ ] Add release-resolution tests for unchanged inputs, source/toolchain/build-script
+- [x] Add release-resolution tests for unchanged inputs, source/toolchain/build-script
       changes, compatibility-marker changes, first install, first-rollout inference,
       changed/unchanged `skip_agent`, invalid metadata, and no empty enforcement.
-- [ ] Update workflow/sync safety tests for release outputs, step ordering, and
+- [x] Update workflow/sync safety tests for release outputs, step ordering, and
       conditional R2 build/upload.
 - [ ] Add behavioral selector tests covering reuse, exact incompatibility on every path,
       deterministic reasons/metrics, healthy-versus-better-incompatible ranking, and

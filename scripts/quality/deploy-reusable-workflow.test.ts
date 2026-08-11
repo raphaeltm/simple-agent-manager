@@ -118,7 +118,7 @@ describe('deploy reusable workflow', () => {
     expect(block).not.toContain('npx wrangler');
   });
 
-  it('behaviorally verifies the checked-out SHA and skip-agent output', () => {
+  it('behaviorally verifies the checked-out SHA without deciding the agent release', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'sam-deploy-sha-'));
     const script = stepRunScript('Resolve and Verify Deployment SHA');
 
@@ -140,36 +140,19 @@ describe('deploy reusable workflow', () => {
         env: {
           ...process.env,
           EXPECTED_DEPLOY_SHA: head,
-          SKIP_AGENT: 'false',
           GITHUB_OUTPUT: normalOutput,
         },
         encoding: 'utf8',
       });
       expect(normal.status).toBe(0);
       expect(readFileSync(normalOutput, 'utf8')).toContain(`value=${head}`);
-      expect(readFileSync(normalOutput, 'utf8')).toContain(`agent_version=${head}`);
-
-      const skippedOutput = join(tmp, 'skipped-output.txt');
-      const skipped = spawnSync('bash', ['-c', script], {
-        cwd: tmp,
-        env: {
-          ...process.env,
-          EXPECTED_DEPLOY_SHA: head,
-          SKIP_AGENT: 'true',
-          GITHUB_OUTPUT: skippedOutput,
-        },
-        encoding: 'utf8',
-      });
-      expect(skipped.status).toBe(0);
-      expect(readFileSync(skippedOutput, 'utf8')).toContain(`value=${head}`);
-      expect(readFileSync(skippedOutput, 'utf8')).toMatch(/agent_version=\n/);
+      expect(readFileSync(normalOutput, 'utf8')).not.toContain('agent_version=');
 
       const mismatch = spawnSync('bash', ['-c', script], {
         cwd: tmp,
         env: {
           ...process.env,
           EXPECTED_DEPLOY_SHA: 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
-          SKIP_AGENT: 'false',
           GITHUB_OUTPUT: join(tmp, 'mismatch-output.txt'),
         },
         encoding: 'utf8',
@@ -216,7 +199,10 @@ describe('deploy reusable workflow', () => {
     expect(initialSync).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
     expect(initialSync).toContain('RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}');
     expect(initialSync).toContain(
-      'VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}'
+      'VM_AGENT_REQUIRED_VERSION: ${{ steps.vm-agent-release.outputs.required_version }}'
+    );
+    expect(initialSync).toContain(
+      'VM_AGENT_BUILD_FINGERPRINT: ${{ steps.vm-agent-release.outputs.fingerprint }}'
     );
     expect(initialSync).toContain(
       'ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}'
@@ -226,7 +212,10 @@ describe('deploy reusable workflow', () => {
     expect(firstDeployResync).toContain('BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}');
     expect(firstDeployResync).toContain('RESOURCE_PREFIX: ${{ steps.prefix.outputs.value }}');
     expect(firstDeployResync).toContain(
-      'VM_AGENT_REQUIRED_VERSION: ${{ steps.deploy-sha.outputs.agent_version }}'
+      'VM_AGENT_REQUIRED_VERSION: ${{ steps.vm-agent-release.outputs.required_version }}'
+    );
+    expect(firstDeployResync).toContain(
+      'VM_AGENT_BUILD_FINGERPRINT: ${{ steps.vm-agent-release.outputs.fingerprint }}'
     );
     expect(firstDeployResync).toContain(
       'ARTIFACTS_BINDING_ENABLED: ${{ vars.ARTIFACTS_BINDING_ENABLED }}'
@@ -245,8 +234,12 @@ describe('deploy reusable workflow', () => {
       expect(firstDeployResync).toContain(mapping);
     }
 
+    const generatedReleaseVars = new Set([
+      'VM_AGENT_REQUIRED_VERSION',
+      'VM_AGENT_BUILD_FINGERPRINT',
+    ]);
     for (const envVar of extractOptionalWorkerEnvVars().filter(
-      (name) => name !== 'VM_AGENT_REQUIRED_VERSION'
+      (name) => !generatedReleaseVars.has(name)
     )) {
       const mapping = `${envVar}: \${{ vars.${envVar} }}`;
       expect(initialSync).toContain(mapping);
@@ -394,14 +387,32 @@ describe('deploy reusable workflow', () => {
     expect(sync).toContain('POOL_LEASE_BUFFER_MS: ${{ vars.POOL_LEASE_BUFFER_MS }}');
   });
 
-  it('versions the R2 vm-agent binaries with the same commit SHA as the container binary', () => {
+  it('builds reusable-VM binaries only for the resolved published release', () => {
     const build = stepBlock('Build VM Agent');
 
-    // Both the container-baked binary and the R2-uploaded binaries must report
-    // the deploy commit SHA so a running agent can be correlated to its artifact.
     expect(build).toContain('make -C packages/vm-agent build-all');
-    expect(build).toContain('VERSION="$DEPLOY_SHA"');
-    expect(build).toContain('DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}');
+    expect(build).toContain('VERSION="$AGENT_VERSION"');
+    expect(build).toContain("steps.vm-agent-release.outputs.build_agent == 'true'");
+    expect(build).toContain(
+      'AGENT_VERSION: ${{ steps.vm-agent-release.outputs.required_version }}'
+    );
+  });
+
+  it('resolves release metadata before Wrangler sync and artifact publication', () => {
+    const resolutionIndex = workflow.indexOf('- name: Resolve VM Agent Release');
+    const syncIndex = workflow.indexOf('- name: Sync Wrangler Config (API + Tail Worker)');
+    const buildIndex = workflow.indexOf('- name: Build VM Agent');
+    const uploadIndex = workflow.indexOf('- name: Upload VM Agent Binaries');
+    const deployIndex = workflow.indexOf('- name: Deploy API Worker');
+
+    expect(resolutionIndex).toBeGreaterThan(-1);
+    expect(syncIndex).toBeGreaterThan(resolutionIndex);
+    expect(buildIndex).toBeGreaterThan(syncIndex);
+    expect(uploadIndex).toBeGreaterThan(buildIndex);
+    expect(deployIndex).toBeGreaterThan(uploadIndex);
+    expect(stepBlock('Resolve VM Agent Release')).toContain(
+      'pnpm tsx scripts/deploy/resolve-vm-agent-release.ts'
+    );
   });
 
   it('continues deployment when workers.dev subdomain setup succeeds', () => {
