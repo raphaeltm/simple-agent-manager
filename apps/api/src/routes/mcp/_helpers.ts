@@ -275,7 +275,7 @@ export function getMcpLimits(env: Env) {
 // trailing comment so Prettier's line-wrapping of a long `.replace(...)`
 // call cannot separate the disable directive from the regex it targets \u2014
 // see the discriminating incident this pattern replaced during the 2026-08-11
-// ai-slop debt burn-down (tasks/active/2026-08-10-ai-slop-debt-burndown.md).
+// ai-slop debt burn-down (tasks/archive/2026-08-10-ai-slop-debt-burndown.md).
 const CONTROL_CHAR_PATTERN =
   /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g; // eslint-disable-line no-control-regex -- see comment above
 

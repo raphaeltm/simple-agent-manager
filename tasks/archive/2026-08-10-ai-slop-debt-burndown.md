@@ -75,11 +75,11 @@ Raphaël's instruction: single PR; all code production dispatched to smaller mod
 
 ## Acceptance criteria
 
-- [ ] `pnpm quality:type-boundaries`: blocking counts 0/0/0/0; report-only counts at recomputed floor; `sam/*` rules at `error` with zero inline suppressions added
-- [ ] `pnpm quality:runtime-boundary-semantics`: 0 diagnostics, blocking for apps/api/src
-- [ ] `pnpm lint`: 0 errors; warnings reduced to the documented floor (test-file populations excluded by scoping decision); jsx-a11y at error with 0 violations
+- [x] `pnpm quality:type-boundaries`: blocking counts 0/0/0/0; report-only counts at recomputed floor; `sam/*` rules at `error` with zero inline suppressions added
+- [x] `pnpm quality:runtime-boundary-semantics`: 0 diagnostics, blocking for apps/api/src
+- [x] `pnpm lint`: 0 errors; warnings reduced to the documented floor (test-file populations excluded by scoping decision); jsx-a11y at error with 0 violations
 - [ ] `pnpm check:fast && pnpm typecheck && pnpm test && pnpm build` all green
-- [ ] No behavior regressions: invalid-body paths return structured 400s with tests; guard swaps verified at call sites
+- [x] No behavior regressions: invalid-body paths return structured 400s with tests; guard swaps verified at call sites
 - [ ] Staging deploy green; regression checklist passes; **a real agent session dispatched on staging returns a good multi-message response thread**; staging nodes/workspaces deleted afterward
 - [ ] PR merged with full Specialist Review Evidence; production deploy monitored to success
 

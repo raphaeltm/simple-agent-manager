@@ -4,7 +4,7 @@
   "stage": "blocking",
   "gateOwner": "deterministic-runtime-boundary-quality",
   "baselineBacklogLink": "tasks/active/2026-08-09-deterministic-runtime-boundary-quality.md",
-  "promotionNote": "Promoted advisory -> blocking 2026-08-11 (ai-slop debt burn-down, tasks/active/2026-08-10-ai-slop-debt-burndown.md) after production sites reached zero for all three rules. All three are 'error' in eslint.config.mjs for production source and 'off' for test files (idiomatic test-double typing).",
+  "promotionNote": "Promoted advisory -> blocking 2026-08-11 (ai-slop debt burn-down, tasks/archive/2026-08-10-ai-slop-debt-burndown.md) after production sites reached zero for all three rules. All three are 'error' in eslint.config.mjs for production source and 'off' for test files (idiomatic test-double typing).",
   "rules": [
     {
       "name": "sam/no-unvalidated-request-json",

@@ -35,7 +35,7 @@ const DEFAULT_EVIDENCE_PATH = resolve(
 // evidence.blockingEnabled is true AND evidence.scope matches the scope this
 // run audits, a nonzero finding count exits nonzero even without the
 // `--fail-on-findings` CLI flag — see the "Promotion" section of
-// tasks/active/2026-08-10-ai-slop-debt-burndown.md. This mirrors the
+// tasks/archive/2026-08-10-ai-slop-debt-burndown.md. This mirrors the
 // checked-in-baseline-drives-exit-code pattern in check-type-boundaries.ts.
 export interface SemanticEvidence {
   scope: string;

@@ -2,7 +2,7 @@
 
 **Created**: 2026-08-11
 **Priority**: Medium
-**Context**: AI-slop debt burn-down PR (`tasks/active/2026-08-10-ai-slop-debt-burndown.md`)
+**Context**: AI-slop debt burn-down PR (`tasks/archive/2026-08-10-ai-slop-debt-burndown.md`)
 
 ## Problem
 
@@ -113,4 +113,4 @@ underlying migration approach/helpers were established there.
 - `apps/api/tests/unit/project-agent-defaults.test.ts` (lines 1-15 docstring, 429-454 UI section block)
 - `apps/api/tests/unit/project-default-provider.test.ts` (lines 1-19 docstring, 295-312 settings UI block)
 - `tasks/backlog/2026-03-01-migrate-source-contract-tests.md` — same bug class, different files, filed earlier
-- `tasks/active/2026-08-10-ai-slop-debt-burndown.md` — the burn-down PR whose prettier rewrap first broke the API-PATCH-route sibling blocks in these same two files
+- `tasks/archive/2026-08-10-ai-slop-debt-burndown.md` — the burn-down PR whose prettier rewrap first broke the API-PATCH-route sibling blocks in these same two files

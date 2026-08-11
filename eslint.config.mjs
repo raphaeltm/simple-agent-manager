@@ -14,7 +14,7 @@ const typescriptFiles = ['**/*.{ts,tsx,mts,cts}'];
 const astroFiles = ['**/*.astro'];
 const samPluginFiles = ['packages/eslint-plugin-sam/**/*.js'];
 // Promoted to error 2026-08-11 (ai-slop debt burn-down, see
-// tasks/active/2026-08-10-ai-slop-debt-burndown.md): production sites for all
+// tasks/archive/2026-08-10-ai-slop-debt-burndown.md): production sites for all
 // three rules were at zero. Test files are exempted below (testFileGlobs
 // block) because test-double typing is idiomatic and these rules target
 // production request/row-narrowing patterns.
@@ -39,7 +39,7 @@ const onboardingAdvisoryFiles = [
 // production request/row-narrowing patterns that don't apply to test setup.
 // De-scoped 2026-08-11 (ai-slop debt burn-down) after confirming production
 // source was clean at zero for all five rules; see
-// tasks/active/2026-08-10-ai-slop-debt-burndown.md.
+// tasks/archive/2026-08-10-ai-slop-debt-burndown.md.
 const testFileGlobs = ['**/tests/**', '**/*.test.{ts,tsx,mts,cts}', '**/*.spec.{ts,tsx,mts,cts}'];
 
 const upstreamNoUnusedVars = tseslint.plugin.rules['no-unused-vars'];
@@ -397,7 +397,7 @@ export default defineConfig([
     // apps/www, apps/tail-worker, infra, packages/cloud-init, and
     // tools/og-image have zero `!`/`any` findings in production source as of
     // the 2026-08-11 ai-slop debt burn-down (see
-    // tasks/active/2026-08-10-ai-slop-debt-burndown.md). The onboarding-advisory
+    // tasks/archive/2026-08-10-ai-slop-debt-burndown.md). The onboarding-advisory
     // block above force-downgrades every rule (including these two) to `warn`
     // for its broader "no lint path existed before this rollout" rationale;
     // re-promote just these two already-clean rules to `error` here so new
@@ -417,7 +417,7 @@ export default defineConfig([
     // block above enforces `error` in production source, repo-wide
     // (including the onboarding-advisory workspaces). This block must stay
     // last so it wins over every earlier matching block. See
-    // tasks/active/2026-08-10-ai-slop-debt-burndown.md.
+    // tasks/archive/2026-08-10-ai-slop-debt-burndown.md.
     files: testFileGlobs,
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',

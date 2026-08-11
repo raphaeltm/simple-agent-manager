@@ -8,7 +8,7 @@ application-layer allowlist on the control-plane side, so the control plane
 rejects the submission with `400 Invalid snapshot degradation` instead of
 recording the (otherwise complete) snapshot. This is a pre-existing bug,
 discovered incidentally while auditing runtime-boundary validation call sites
-for `tasks/active/2026-08-10-ai-slop-debt-burndown.md`; it is not caused by
+for `tasks/archive/2026-08-10-ai-slop-debt-burndown.md`; it is not caused by
 and not fixed by that task.
 
 ## Context
@@ -108,5 +108,5 @@ data problem.
 - `packages/vm-agent/internal/server/session_snapshot.go:282-288`
 - `apps/api/src/routes/workspaces/session-snapshots.ts:19-35,199-269`
 - `apps/api/src/services/session-snapshots.ts:20`
-- `tasks/active/2026-08-10-ai-slop-debt-burndown.md` (discovered during this task's boundary validation audit)
+- `tasks/archive/2026-08-10-ai-slop-debt-burndown.md` (discovered during this task's boundary validation audit)
 - `.claude/rules/23-cross-boundary-contract-tests.md` (inter-service contract verification)

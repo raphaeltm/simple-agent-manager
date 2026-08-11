@@ -7,7 +7,7 @@
 destructures them in the hook body, but its fetch function never forwards
 either value to the API client — they are silently discarded. This was
 discovered incidentally while auditing UI-to-backend data paths for
-`tasks/active/2026-08-10-ai-slop-debt-burndown.md`; it is not caused by and
+`tasks/archive/2026-08-10-ai-slop-debt-burndown.md`; it is not caused by and
 not fixed by that task.
 
 ## Context
@@ -79,5 +79,5 @@ unsorted/unfiltered results with no error.
 - `apps/web/src/hooks/useProjectData.ts:6-44`
 - `apps/web/src/lib/api/projects.ts:116-125`
 - `apps/api/src/routes/projects/crud.ts:445-454`
-- `tasks/active/2026-08-10-ai-slop-debt-burndown.md` (discovered during this task's boundary validation audit)
+- `tasks/archive/2026-08-10-ai-slop-debt-burndown.md` (discovered during this task's boundary validation audit)
 - `.claude/rules/06-technical-patterns.md` (UI-to-Backend Data Path Verification)
