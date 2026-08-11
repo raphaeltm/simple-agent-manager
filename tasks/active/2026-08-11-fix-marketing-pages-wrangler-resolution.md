@@ -48,17 +48,17 @@ The public site remains available from the last successful deployment, but chang
 - [x] Replace `npx wrangler` in the marketing deployment workflow with the marketing workspace's pinned executable.
 - [x] Replace `npx wrangler` in the marketing provisioning workflow with the same pinned executable.
 - [x] Add deterministic workflow contract tests covering dependency ownership, deployment, provisioning, and rejection of `npx wrangler`.
-- [ ] Reproduce the exact CLI resolution path after a frozen clean install.
+- [x] Reproduce the exact CLI resolution path after a frozen clean install.
 - [ ] Run the complete repository quality suite and specialist reviews.
 - [ ] Confirm the final candidate passes CI and the marketing Pages workflow deploys successfully.
 
 ## Acceptance criteria
 
-- [ ] A frozen pnpm install exposes Wrangler 4.118.0 through `@simple-agent-manager/www` without registry fallback.
-- [ ] Both marketing workflows use the marketing workspace's pinned Wrangler executable.
-- [ ] Neither marketing workflow contains an `npx wrangler` invocation.
-- [ ] Workflow contract tests fail if either invocation regresses to unpinned resolution or the direct dependency is removed.
-- [ ] Existing marketing project naming, build output, Cloudflare credentials, permissions, and deployment flags remain unchanged.
+- [x] A frozen pnpm install exposes Wrangler 4.118.0 through `@simple-agent-manager/www` without registry fallback.
+- [x] Both marketing workflows use the marketing workspace's pinned Wrangler executable.
+- [x] Neither marketing workflow contains an `npx wrangler` invocation.
+- [x] Workflow contract tests fail if either invocation regresses to unpinned resolution or the direct dependency is removed.
+- [x] Existing marketing project naming, build output, Cloudflare credentials, permissions, and deployment flags remain unchanged.
 - [ ] The production marketing workflow succeeds and `https://www.simple-agent-manager.org/` serves the merged commit's deployment.
 
 ## Post-mortem
