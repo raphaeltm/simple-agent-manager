@@ -175,9 +175,9 @@ will be reviewed in one draft PR.
       normal, long, empty/legacy, many-rejection, error, and special-character scenarios
       at mobile and desktop widths with no horizontal overflow.
 - [x] Run focused suites, `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
-- [ ] Run required task-completion, Cloudflare, environment, security, UI/UX,
-      documentation, constitution, and test-engineering specialist reviews; address all
-      findings.
+- [x] Run Cloudflare, environment, security, UI/UX, documentation, constitution, and
+      test-engineering specialist reviews; address all findings.
+- [ ] Run the mandatory task-completion validator after this final task/evidence update.
 - [ ] Push the output branch, open a draft PR explicitly stating “not deployed to
       staging” and “do not merge”, wait for applicable CI, and leave it open/unmerged.
 
@@ -186,14 +186,28 @@ will be reviewed in one draft PR.
 - `pnpm lint` — passed with only the repository's existing warnings.
 - `pnpm typecheck` — passed; the WWW package reported its expected baseline-only note.
 - `pnpm build` — passed with the existing CSS minification and chunk-size warnings.
-- `pnpm test` — passed all 21 Turbo tasks; API 535 files / 7,077 tests and Web 255
-  files / 3,069 tests passed.
+- `pnpm test` — passed all 21 Turbo tasks; Web 255 files / 3,069 tests passed. The
+  final post-review API suite separately passed 538 files / 7,111 tests.
 - `pnpm format:check` — passed the repository format ratchet.
-- Release-resolution focused suites — 92/92 passed.
-- Placement/parser/persistence/API/MCP/UI focused suites — 200+ API tests, 7 shared
-  parser tests, and 3 UI unit tests passed.
+- Release-resolution and workflow focused suites — 93/93 passed.
+- Final manual-placement review suite — 41/41 API tests; shared placement parser —
+  9/9; broader placement/persistence/API/MCP focused suites — 200+; UI placement unit
+  tests — 3/3.
 - Local Playwright UI audit — 16/16 dark/light mobile/desktop scenarios passed with
   explicit horizontal-overflow and accessibility checks. No environment was deployed.
+
+## Specialist Review Evidence
+
+| Reviewer                  | Status           | Outcome                                                                                                                      |
+| ------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| Cloudflare specialist     | PASS             | Release metadata, Worker settings, migration ordering, and R2 publication behavior verified after fixes through `935379670`. |
+| Environment validator     | PASS             | Generated deployment-owned bindings and documentation remain consistent; no new manual secret prerequisite.                  |
+| Security auditor          | ADDRESSED / PASS | Candidate identifiers and untrusted placement input were bounded/aliased; final tenant-safe review passed at `30fd67ea5`.    |
+| UI/UX specialist          | PASS             | Default-collapsed sidebar, accessibility, responsive behavior, and 16 local Playwright scenarios passed.                     |
+| Documentation validator   | ADDRESSED / PASS | Release ordering/fail-closed semantics, MCP shape, OpenAPI, parser contract, and public docs passed at `abcc1ddac`.          |
+| Constitution validator    | ADDRESSED / PASS | Removed hidden ceilings/truncation/weights and duplicated defaults; Principle XI review passed at `839267430`.               |
+| Test engineer             | ADDRESSED / PASS | Real route/SQLite reuse and provision slices plus exact failure/timeout persistence passed at `26ac0c615`.                   |
+| Task-completion validator | PENDING          | Runs last against the final task file and full branch diff before the draft PR.                                              |
 
 ## Acceptance Criteria
 
