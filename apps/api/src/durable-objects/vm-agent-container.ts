@@ -3,6 +3,7 @@ import { Container, switchPort } from '@cloudflare/containers';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
 import {
   ACTIVE_WORK_KEY,
@@ -628,8 +629,9 @@ export class VmAgentContainer extends Container<Env> {
       }
       let restoreStatus = '';
       try {
-        const parsed = JSON.parse(restoreBody) as { status?: unknown };
-        restoreStatus = typeof parsed.status === 'string' ? parsed.status : '';
+        const parsedRaw = JSON.parse(restoreBody) as unknown;
+        const parsed = maybeJsonRecord(parsedRaw);
+        restoreStatus = parsed && typeof parsed.status === 'string' ? parsed.status : '';
       } catch {
         // An explicit restored status is required before D1 can become running.
       }

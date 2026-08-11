@@ -197,6 +197,27 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     );
   });
 
+  it('treats a malformed sessions-probe body as a transport interruption and still recovers', async () => {
+    // probeLiveRuntimeSession replaced a blind
+    // `(await response.json()) as { sessions?: Array<...> }` cast with a
+    // validated readResponseJson() parse. Both the pre-fix blind cast (via
+    // `"not-an-array".some is not a function`) and the post-fix schema
+    // validation throw for this shape — proving resumeRuntime's existing
+    // catch (kind: 'transport_interrupted') still recovers gracefully rather
+    // than surfacing an uncaught exception.
+    const { fake } = makeRecoveryFake({ lifecycle: 'running' });
+    fake.containerFetch
+      .mockResolvedValueOnce(new Response('{"sessions": "not-an-array"}', { status: 200 }))
+      .mockResolvedValueOnce(
+        Response.json({ status: 'restored', degradation: 'none', skipped: [] })
+      );
+
+    const result = await callResumeRuntime(fake);
+
+    expect(result).toEqual({ ok: true, status: 'running' });
+    expect(fake.startRuntime).toHaveBeenCalledTimes(1);
+  });
+
   it('restores instead of falsely resuming when D1 says recovery but SessionHost is missing', async () => {
     const { fake, values } = makeRecoveryFake({ lifecycle: 'running' });
     fake.containerFetch
@@ -306,6 +327,31 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
   it('treats a corrupt successful restore body as degraded, never as true resume', async () => {
     const { fake, values } = makeRecoveryFake({
       restoreResponse: new Response('{not-json', { status: 200 }),
+    });
+
+    const result = await callEnsureAwake(fake);
+
+    expect(result).toMatchObject({ ok: false, status: 'degraded' });
+    expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
+    expect(recoveryMocks.persistFailed).not.toHaveBeenCalled();
+    expect(values.get('runtimeRecovery')).toMatchObject({
+      phase: 'degraded',
+      lastFailure: { kind: 'restore_status' },
+    });
+  });
+
+  // Companion to the "corrupt" case above: this body is syntactically VALID
+  // JSON (JSON.parse succeeds) but is not an object, so the blind
+  // `as { status?: unknown }` cast this replaced would have read `.status`
+  // off a non-object value. maybeJsonRecord degrades it the same way as
+  // invalid JSON — never a true resume — without throwing.
+  it.each([
+    ['a JSON array', '[]'],
+    ['a JSON null', 'null'],
+    ['a bare JSON number', '200'],
+  ])('treats a syntactically valid but non-object restore body (%s) as degraded', async (_label, body) => {
+    const { fake, values } = makeRecoveryFake({
+      restoreResponse: new Response(body, { status: 200 }),
     });
 
     const result = await callEnsureAwake(fake);

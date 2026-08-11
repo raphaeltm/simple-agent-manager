@@ -1516,6 +1516,80 @@ describe('CodexRefreshLock', () => {
     expect(json.error).toBe('upstream_error');
   });
 
+  // The upstream error-body parser replaced a blind
+  // `JSON.parse(rawBody) as Record<string, unknown>` cast with `as unknown` +
+  // `maybeJsonRecord` (.claude/rules/51). These bodies are syntactically valid
+  // JSON but not the expected object shape, so JSON.parse itself does not
+  // throw — the old blind cast relied on property access on the wrong shape
+  // (e.g. `null.error`) throwing and being swallowed by the surrounding
+  // try/catch to reach the same generic-error outcome. Prove the new
+  // maybeJsonRecord guard reaches the identical response without relying on
+  // that incidental exception, for every non-object JSON shape upstream could
+  // plausibly send.
+  it.each([
+    ['a bare JSON array', JSON.stringify(['unexpected', 'array'])],
+    ['a bare JSON null', 'null'],
+    ['a bare JSON number', '500'],
+    ['a bare JSON string', '"oops"'],
+    ['a bare JSON boolean', 'false'],
+  ])('returns the generic safe error for a garbage-but-valid-JSON upstream body (%s)', async (_label, body) => {
+    const { do: doInstance, env } = createDO();
+    setupCredentialFound(env);
+    mockLogWarn.mockClear();
+
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(body, {
+        status: 503,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+    );
+
+    expect(res.status).toBe(503);
+    const json = await res.json();
+    expect(json).toEqual({ error: 'upstream_error' });
+    expect(json.error_description).toBeUndefined();
+
+    // The rejection is still logged with no error code/message extracted —
+    // confirms the garbage body reached the diagnostic path without throwing
+    // an unhandled error out of runRefresh (which would have surfaced as a
+    // 500 internal_error instead of the upstream's own 503 status).
+    const warnCall = mockLogWarn.mock.calls.find(
+      ([event]) => event === 'codex_refresh.upstream_rejected',
+    );
+    expect(warnCall).toBeDefined();
+    const fields = warnCall?.[1] as Record<string, unknown>;
+    expect(fields.upstreamErrorCode).toBeNull();
+    expect(fields.upstreamErrorMessage).toBeNull();
+    expect(fields.status).toBe(503);
+  });
+
+  it('does not surface an existingFile-style nested-array error field as a code/message', async () => {
+    // parsed.error being an array (not a string, not a plain object) hits the
+    // nested-form branch; maybeJsonRecord converts it to an index-keyed
+    // object with no .code/.message, so neither is extracted — matching the
+    // pre-fix blind-cast behavior for this shape.
+    const { do: doInstance, env } = createDO();
+    setupCredentialFound(env);
+
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ error: ['nested', 'array'] }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    );
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+    );
+    expect(res.status).toBe(401);
+    const json = await res.json();
+    expect(json).toEqual({ error: 'upstream_error' });
+  });
+
   // -----------------------------------------------------------------------
   // Configurable upstream URL + client_id
   // -----------------------------------------------------------------------

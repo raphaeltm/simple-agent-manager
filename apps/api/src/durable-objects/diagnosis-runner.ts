@@ -1,6 +1,7 @@
 import { DurableObject } from 'cloudflare:workers';
 
 import type { Env } from '../env';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import { consumeFeatureTokenBudget, releaseFeatureTokenBudget } from '../services/ai-token-budget';
 import {
@@ -50,9 +51,12 @@ function safeMessage(error: unknown): string {
   return safeDiagnosisMessage(error);
 }
 
-function resultCount(result: string): number | null {
+/** Exported for direct unit testing — see tests/unit/durable-objects/diagnosis-runner.test.ts. */
+export function resultCount(result: string): number | null {
   try {
-    const value = JSON.parse(result) as Record<string, unknown>;
+    const parsedRaw = JSON.parse(result) as unknown;
+    const value = maybeJsonRecord(parsedRaw);
+    if (!value) return null;
     if (typeof value.total === 'number') return value.total;
     const arrays = Object.values(value).filter(Array.isArray);
     return arrays.length ? arrays.reduce((count, items) => count + items.length, 0) : null;
@@ -295,9 +299,10 @@ export class DiagnosisRunner extends DurableObject<Env> {
     state.attempt = 0;
     state.completedStepKeys.push(stepKey);
     state.inFlightStepKey = null;
-    const parsed = (() => {
+    const parsed: Record<string, unknown> = (() => {
       try {
-        return JSON.parse(result) as { error?: string; cause?: string };
+        const parsedRaw = JSON.parse(result) as unknown;
+        return maybeJsonRecord(parsedRaw) ?? {};
       } catch {
         return {};
       }

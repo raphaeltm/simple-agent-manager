@@ -34,7 +34,7 @@ import { DurableObject } from 'cloudflare:workers';
 import * as v from 'valibot';
 
 import { log } from '../lib/logger';
-import { readResponseJson } from '../lib/runtime-validation';
+import { maybeJsonRecord, readResponseJson } from '../lib/runtime-validation';
 import { getCredentialEncryptionKey } from '../lib/secrets';
 import { syncActiveAgentCredentialSecret } from '../services/composable-credentials/agent-sync';
 import { decrypt, encrypt } from '../services/encryption';
@@ -323,8 +323,9 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
         // Body unreadable — leave rawBody empty.
       }
       try {
-        const parsed = JSON.parse(rawBody) as Record<string, unknown>;
-        if (typeof parsed.error === 'string') {
+        const parsedRaw = JSON.parse(rawBody) as unknown;
+        const parsed = maybeJsonRecord(parsedRaw);
+        if (parsed && typeof parsed.error === 'string') {
           // Flat OAuth2 form.
           safeError.error = parsed.error;
           upstreamErrorCode = parsed.error;
@@ -332,16 +333,18 @@ export class CodexRefreshLock extends DurableObject<CodexRefreshEnv> {
             safeError.error_description = parsed.error_description;
             upstreamErrorMessage = parsed.error_description;
           }
-        } else if (parsed.error && typeof parsed.error === 'object') {
+        } else if (parsed && parsed.error && typeof parsed.error === 'object') {
           // OpenAI nested form: { error: { code, message, type } }.
-          const nested = parsed.error as Record<string, unknown>;
-          if (typeof nested.code === 'string') {
-            safeError.error = nested.code;
-            upstreamErrorCode = nested.code;
-          }
-          if (typeof nested.message === 'string') {
-            safeError.error_description = nested.message;
-            upstreamErrorMessage = nested.message;
+          const nested = maybeJsonRecord(parsed.error);
+          if (nested) {
+            if (typeof nested.code === 'string') {
+              safeError.error = nested.code;
+              upstreamErrorCode = nested.code;
+            }
+            if (typeof nested.message === 'string') {
+              safeError.error_description = nested.message;
+              upstreamErrorMessage = nested.message;
+            }
           }
         }
       } catch {
