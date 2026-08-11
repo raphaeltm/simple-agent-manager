@@ -276,6 +276,11 @@ record contains only bounded metric snapshots, identifiers, and typed outcomes;
 it deliberately excludes raw agent versions, raw metrics, provider errors,
 credentials, prompts, repositories, and environment values.
 
+The selected node ID remains visible because it is already part of the workspace
+contract. Every rejected or otherwise unselected candidate is persisted as a stable
+`candidate-N` alias, so one tenant's placement evidence cannot reveal another trial's
+or project's host identifiers.
+
 ## ACP Session Lifecycle
 
 Agent sessions are managed by the ProjectData DO with this state machine:

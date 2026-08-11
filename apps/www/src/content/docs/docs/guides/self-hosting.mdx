@@ -241,10 +241,19 @@ The workflow:
 
 1. Validates configuration
 2. Provisions infrastructure via Pulumi (D1, KV, R2, DNS), including prefix-scoped R2 retention for session snapshots, private VM diagnostic evidence, one-day temporary uploads, and thirty-day TTS cache objects (`infra/resources/storage.ts:r2BucketLifecycle`)
-3. Deploys API Worker and Web UI
-4. Runs database migrations
-5. Builds and uploads VM Agent binaries
-6. Runs health check
+3. Resolves the reusable-VM agent release from a deterministic fingerprint of `packages/vm-agent/**` plus the explicit compatibility marker
+4. Builds and uploads VM Agent binaries only when those inputs changed or compatibility was explicitly advanced
+5. Runs database migrations
+6. Deploys the API Worker and Web UI with the exact published VM-agent requirement
+7. Runs health checks
+
+Unrelated application deploys carry forward the last actually published VM-agent
+version and skip the binary build/upload. A change to VM-agent build inputs—or to
+`scripts/deploy/vm-agent-compatibility-version.txt` when a protocol change requires a
+new exact build—publishes the binaries before the Worker begins enforcing that version.
+The workflow fails closed if it cannot prove the prior release or publish a required
+change. `VM_AGENT_REQUIRED_VERSION` and `VM_AGENT_BUILD_FINGERPRINT` are generated
+release metadata; self-hosters should not set or rotate them manually.
 
 Before deploying the API Worker, the workflow reads its applied Durable Object migration tag. A fresh installation creates every namespace with SQLite storage; an existing installation retains its already-applied namespace history and storage backends. This is automatic—do not edit historical migration entries or create namespaces manually.
 

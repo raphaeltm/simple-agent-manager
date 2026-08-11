@@ -193,6 +193,7 @@ Running agents have access to project-aware MCP tools:
 | `search_messages`      | Search messages by keyword — uses FTS5 full-text search for completed sessions; keyword matching for active sessions |
 | `update_task_status`   | Report progress                                                                                                      |
 | `get_task_details`     | Inspect task state, persisted output fields, PR/error details, session id, and bounded recent assistant diagnostics  |
+| `get_workspace_info`   | Read VM-local workspace metadata plus the D1-backed, non-sensitive node-placement summary and typed detail           |
 | `complete_task`        | Mark current work as done, optionally with structured completion evidence                                            |
 | `request_human_input`  | Record a user decision request and notify the user; the tool call itself is non-blocking                             |
 

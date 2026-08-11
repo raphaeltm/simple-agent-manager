@@ -34,6 +34,9 @@ for implementation with these safety-preserving refinements:
 4. Placement evidence is built only from allowlisted identifiers, enums, booleans, and
    bounded numeric snapshots. Raw metrics JSON, agent versions, provider errors,
    prompts, repository data, environment values, and secrets are never copied.
+5. Only the selected node retains its real identifier. Rejected and
+   eligible-but-unselected candidates are persisted as stable `candidate-N` aliases so
+   trial and cross-project host IDs cannot leak through placement evidence.
 
 The normal `/do` task-file push to `main` is intentionally not used: pushing `main` can
 trigger a production deployment, while this task explicitly prohibits every deployment.

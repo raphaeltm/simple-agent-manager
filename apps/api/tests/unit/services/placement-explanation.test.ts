@@ -5,6 +5,7 @@ import {
   createPlacementExplanation,
   evaluatePlacementNode,
   resolvePlacementRequest,
+  sanitizePlacementExplanation,
 } from '../../../src/services/placement-explanation';
 
 const nowMs = Date.parse('2026-08-11T12:00:00.000Z');
@@ -130,6 +131,43 @@ describe('typed placement evaluation', () => {
       selectedNodeId: 'node-new',
       provisioningAttempts: [{ failureReason: 'provider-failed' }],
     });
+  });
+
+  it('preserves configured positive limits without hidden ceilings', () => {
+    const configured = resolvePlacementRequest(
+      {
+        MAX_WORKSPACES_PER_NODE: '20000',
+        NODE_HEARTBEAT_STALE_SECONDS: '172800',
+      },
+      'large',
+      'us-central1-a'
+    );
+
+    expect(configured).toMatchObject({
+      maxWorkspacesPerNode: 20000,
+      heartbeatStaleSeconds: 172800,
+    });
+  });
+
+  it('keeps every candidate evaluation while aliasing non-selected node identifiers', () => {
+    const explanation = createPlacementExplanation(request, 'capacity');
+    explanation.selectedNodeId = 'node-300';
+    explanation.evaluatedNodes = Array.from({ length: 300 }, (_, index) => ({
+      ...evaluatePlacementNode(
+        node({ id: `node-${index + 1}` }),
+        request,
+        'capacity',
+        requiredVersion,
+        nowMs
+      ),
+      accepted: index === 299,
+    }));
+
+    const sanitized = sanitizePlacementExplanation(explanation);
+
+    expect(sanitized.evaluatedNodes).toHaveLength(300);
+    expect(sanitized.evaluatedNodes[0]?.nodeId).toBe('candidate-1');
+    expect(sanitized.evaluatedNodes[299]?.nodeId).toBe('node-300');
   });
 
   it('clears a rejected provisional node before trying a fallback size', () => {

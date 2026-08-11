@@ -113,6 +113,7 @@ export type PlacementProvisioningFailureReason =
   | 'quota-exceeded'
   | 'credentials-unavailable'
   | 'provider-failed'
+  | 'provisioning-timeout'
   | 'readiness-timeout'
   | 'node-unavailable';
 

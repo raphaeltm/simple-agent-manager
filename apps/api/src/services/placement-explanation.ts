@@ -14,8 +14,6 @@ import {
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
   isSafeVmLocationId,
-  PLACEMENT_MAX_EVALUATED_NODES,
-  PLACEMENT_MAX_PROVISIONING_ATTEMPTS,
 } from '@simple-agent-manager/shared';
 
 import { isNodeAgentVersionCompatible } from './node-agent-compatibility';
@@ -50,9 +48,28 @@ export interface PlacementNodeInput {
   warmSince: string | null;
 }
 
-function envInt(value: string | undefined, fallback: number, min: number, max: number): number {
+function envInt(
+  value: string | undefined,
+  fallback: number,
+  min: number,
+  max = Number.MAX_SAFE_INTEGER
+): number {
   const parsed = Number.parseInt(value ?? '', 10);
-  return Number.isFinite(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
+  return Number.isSafeInteger(parsed) && parsed >= min && parsed <= max ? parsed : fallback;
+}
+
+function overrideInt(
+  value: number | undefined,
+  fallback: number,
+  min: number,
+  max?: number
+): number {
+  return value === undefined ||
+    !Number.isSafeInteger(value) ||
+    value < min ||
+    (max !== undefined && value > max)
+    ? fallback
+    : value;
 }
 
 function bounded(value: unknown, min: number, max: number): number | null {
@@ -101,28 +118,38 @@ export function resolvePlacementRequest(
     runtime: 'vm',
     vmSize,
     vmLocation: safeLocation(vmLocation),
-    maxWorkspacesPerNode:
-      override.maxWorkspacesPerNode ??
-      envInt(env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE, 1, 10_000),
-    cpuThresholdPercent:
-      override.cpuThresholdPercent ??
+    maxWorkspacesPerNode: overrideInt(
+      override.maxWorkspacesPerNode,
+      envInt(env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE, 1),
+      1
+    ),
+    cpuThresholdPercent: overrideInt(
+      override.cpuThresholdPercent,
       envInt(
         env.TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
         DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
         0,
         100
       ),
-    memoryThresholdPercent:
-      override.memoryThresholdPercent ??
+      0,
+      100
+    ),
+    memoryThresholdPercent: overrideInt(
+      override.memoryThresholdPercent,
       envInt(
         env.TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
         DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
         0,
         100
       ),
-    heartbeatStaleSeconds:
-      override.heartbeatStaleSeconds ??
-      envInt(env.NODE_HEARTBEAT_STALE_SECONDS, DEFAULT_NODE_HEARTBEAT_STALE_SECONDS, 1, 86_400),
+      0,
+      100
+    ),
+    heartbeatStaleSeconds: overrideInt(
+      override.heartbeatStaleSeconds,
+      envInt(env.NODE_HEARTBEAT_STALE_SECONDS, DEFAULT_NODE_HEARTBEAT_STALE_SECONDS, 1),
+      1
+    ),
   };
 }
 
@@ -156,7 +183,7 @@ export function evaluatePlacementNode(
   const metrics = parseMetricSnapshot(node.lastMetrics);
   const heartbeatMs = node.lastHeartbeatAt ? Date.parse(node.lastHeartbeatAt) : Number.NaN;
   const heartbeatAgeSeconds = Number.isFinite(heartbeatMs)
-    ? bounded(Math.max(0, (nowMs - heartbeatMs) / 1000), 0, 86_400 * 365)
+    ? bounded(Math.max(0, (nowMs - heartbeatMs) / 1000), 0, Number.MAX_SAFE_INTEGER)
     : null;
   const agentVersionCompatible = isNodeAgentVersionCompatible(
     node.agentVersion,
@@ -197,7 +224,10 @@ export function evaluatePlacementNode(
       healthStatus,
       agentVersionCompatible,
       heartbeatAgeSeconds,
-      activeWorkspaceCount: Math.max(0, Math.min(node.activeWorkspaceCount, 10_000)),
+      activeWorkspaceCount: Math.max(
+        0,
+        Math.min(node.activeWorkspaceCount, Number.MAX_SAFE_INTEGER)
+      ),
       cpuLoadAvg1: metrics.cpuLoadAvg1,
       memoryPercent: metrics.memoryPercent,
     },
@@ -228,17 +258,15 @@ export function sanitizePlacementExplanation(
   explanation: PlacementExplanation
 ): PlacementExplanation {
   const aliases = new Map<string, string>();
-  const evaluatedNodes = explanation.evaluatedNodes
-    .slice(0, PLACEMENT_MAX_EVALUATED_NODES)
-    .map((evaluation) => {
-      if (evaluation.nodeId === explanation.selectedNodeId) return evaluation;
-      let alias = aliases.get(evaluation.nodeId);
-      if (!alias) {
-        alias = `candidate-${aliases.size + 1}`;
-        aliases.set(evaluation.nodeId, alias);
-      }
-      return { ...evaluation, nodeId: alias };
-    });
+  const evaluatedNodes = explanation.evaluatedNodes.map((evaluation) => {
+    if (evaluation.nodeId === explanation.selectedNodeId) return evaluation;
+    let alias = aliases.get(evaluation.nodeId);
+    if (!alias) {
+      alias = `candidate-${aliases.size + 1}`;
+      aliases.set(evaluation.nodeId, alias);
+    }
+    return { ...evaluation, nodeId: alias };
+  });
   return {
     ...explanation,
     request: {
@@ -246,9 +274,10 @@ export function sanitizePlacementExplanation(
       vmLocation: safeLocation(explanation.request.vmLocation),
     },
     evaluatedNodes,
-    provisioningAttempts: explanation.provisioningAttempts
-      .slice(0, PLACEMENT_MAX_PROVISIONING_ATTEMPTS)
-      .map((attempt) => ({ ...attempt, vmLocation: safeLocation(attempt.vmLocation) })),
+    provisioningAttempts: explanation.provisioningAttempts.map((attempt) => ({
+      ...attempt,
+      vmLocation: safeLocation(attempt.vmLocation),
+    })),
   };
 }
 
@@ -287,7 +316,7 @@ export function appendProvisioningAttempt(
     provisioningAttempts: [
       ...explanation.provisioningAttempts,
       { ...attempt, vmLocation: safeLocation(attempt.vmLocation) },
-    ].slice(0, PLACEMENT_MAX_PROVISIONING_ATTEMPTS),
+    ],
     updatedAt: now,
   };
 }
@@ -310,5 +339,5 @@ export function failPlacement(
 export function placementLoadScore(evaluation: PlacementNodeEvaluation): number | null {
   const { cpuLoadAvg1, memoryPercent } = evaluation.snapshot;
   if (cpuLoadAvg1 === null && memoryPercent === null) return null;
-  return (cpuLoadAvg1 ?? 0) * 0.4 + (memoryPercent ?? 0) * 0.6;
+  return Math.max(cpuLoadAvg1 ?? 0, memoryPercent ?? 0);
 }

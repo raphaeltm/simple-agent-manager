@@ -1,7 +1,3 @@
-import {
-  PLACEMENT_MAX_EVALUATED_NODES,
-  PLACEMENT_MAX_PROVISIONING_ATTEMPTS,
-} from './constants/placement';
 import type {
   LegacyPlacementExplanation,
   PlacementExplanation,
@@ -52,6 +48,7 @@ const PROVISIONING_FAILURES = new Set<NonNullable<PlacementProvisioningAttempt['
   'quota-exceeded',
   'credentials-unavailable',
   'provider-failed',
+  'provisioning-timeout',
   'readiness-timeout',
   'node-unavailable',
 ]);
@@ -90,10 +87,10 @@ function parseRequest(value: unknown): PlacementRequestSnapshot | null {
   const raw = record(value);
   const size = vmSize(raw?.vmSize);
   const location = stringValue(raw?.vmLocation, 64);
-  const maxWorkspaces = finiteNumber(raw?.maxWorkspacesPerNode, 1, 10_000);
+  const maxWorkspaces = finiteNumber(raw?.maxWorkspacesPerNode, 1);
   const cpu = finiteNumber(raw?.cpuThresholdPercent, 0, 100);
   const memory = finiteNumber(raw?.memoryThresholdPercent, 0, 100);
-  const stale = finiteNumber(raw?.heartbeatStaleSeconds, 1, 86_400);
+  const stale = finiteNumber(raw?.heartbeatStaleSeconds, 1);
   if (
     raw?.runtime !== 'vm' ||
     !size ||
@@ -120,11 +117,9 @@ function parseSnapshot(value: unknown): PlacementNodeSnapshot | null {
   const raw = record(value);
   const size = stringValue(raw?.vmSize, 32);
   const location = stringValue(raw?.vmLocation, 64);
-  const active = finiteNumber(raw?.activeWorkspaceCount, 0, 10_000);
+  const active = finiteNumber(raw?.activeWorkspaceCount);
   const heartbeat =
-    raw?.heartbeatAgeSeconds === null
-      ? null
-      : finiteNumber(raw?.heartbeatAgeSeconds, 0, 86_400 * 365);
+    raw?.heartbeatAgeSeconds === null ? null : finiteNumber(raw?.heartbeatAgeSeconds);
   const cpu = raw?.cpuLoadAvg1 === null ? null : finiteNumber(raw?.cpuLoadAvg1, 0, 100);
   const memory = raw?.memoryPercent === null ? null : finiteNumber(raw?.memoryPercent, 0, 100);
   if (
@@ -228,8 +223,6 @@ function parseV2(value: unknown): PlacementExplanation | null {
     !request ||
     !Array.isArray(raw?.evaluatedNodes) ||
     !Array.isArray(raw?.provisioningAttempts) ||
-    raw.evaluatedNodes.length > PLACEMENT_MAX_EVALUATED_NODES ||
-    raw.provisioningAttempts.length > PLACEMENT_MAX_PROVISIONING_ATTEMPTS ||
     !decidedAt ||
     !updatedAt
   ) {

@@ -2,6 +2,7 @@ import { safeParse } from 'valibot';
 import { describe, expect, it } from 'vitest';
 
 import { RunTaskSchema, SubmitTaskSchema } from '../../../src/schemas/tasks';
+import { UpdateProjectSchema } from '../../../src/schemas/projects';
 import { CreateWorkspaceSchema } from '../../../src/schemas/workspaces';
 
 const validNodeId = '01KZR2JAP92AK3SKW951E4H21M';
@@ -52,4 +53,23 @@ describe('placement request boundaries', () => {
       ).toBe(false);
     }
   );
+
+  it('accepts large positive project limits without undocumented ceilings', () => {
+    expect(
+      safeParse(UpdateProjectSchema, {
+        maxWorkspacesPerNode: 20000,
+        nodeCpuThresholdPercent: 100,
+        nodeMemoryThresholdPercent: 0,
+      }).success
+    ).toBe(true);
+  });
+
+  it.each([
+    { maxWorkspacesPerNode: 0 },
+    { maxWorkspacesPerNode: 1.5 },
+    { nodeCpuThresholdPercent: -1 },
+    { nodeMemoryThresholdPercent: 101 },
+  ])('rejects invalid project placement limit %j', (input) => {
+    expect(safeParse(UpdateProjectSchema, input).success).toBe(false);
+  });
 });

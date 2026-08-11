@@ -24,8 +24,8 @@ const taskRunnerSource = readFileSync(
 );
 
 describe('canonical node selector flow', () => {
-  it('keeps the weighted load helpers stable', () => {
-    expect(scoreNodeLoad({ cpuLoadAvg1: 25, memoryPercent: 50 })).toBe(40);
+  it('ranks by the most saturated resource without hardcoded weights', () => {
+    expect(scoreNodeLoad({ cpuLoadAvg1: 25, memoryPercent: 50 })).toBe(50);
     expect(nodeHasCapacity({ cpuLoadAvg1: 49, memoryPercent: 49 }, 50, 50)).toBe(true);
     expect(nodeHasCapacity({ cpuLoadAvg1: 50, memoryPercent: 10 }, 50, 50)).toBe(false);
   });

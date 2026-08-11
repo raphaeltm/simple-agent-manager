@@ -11,11 +11,20 @@
  * Bug 2 (Suspenders): updateD1ExecutionStep refreshed updated_at on every poll cycle
  * even when the step hadn't changed, defeating the stuck-tasks cron's staleness detection.
  */
-import { DEFAULT_TASK_RUNNER_PROVISION_TIMEOUT_MS } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_TASK_RUNNER_PROVISION_TIMEOUT_MS,
+  type PlacementExplanation,
+} from '@simple-agent-manager/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { handleNodeAgentReady, handleNodeProvisioning } from '../../src/durable-objects/task-runner/node-steps';
-import type { TaskRunnerContext, TaskRunnerState } from '../../src/durable-objects/task-runner/types';
+import {
+  handleNodeAgentReady,
+  handleNodeProvisioning,
+} from '../../src/durable-objects/task-runner/node-steps';
+import type {
+  TaskRunnerContext,
+  TaskRunnerState,
+} from '../../src/durable-objects/task-runner/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -79,6 +88,30 @@ function makeState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState {
   };
 }
 
+function makeProvisioningExplanation(): PlacementExplanation {
+  const now = new Date().toISOString();
+  return {
+    schemaVersion: 2,
+    outcome: 'provisioning',
+    selectionPath: 'provisioning',
+    selectedNodeId: null,
+    summary: 'No reusable node was eligible; provisioning is required.',
+    request: {
+      runtime: 'vm',
+      vmSize: 'small',
+      vmLocation: 'fsn1',
+      maxWorkspacesPerNode: 5,
+      cpuThresholdPercent: 80,
+      memoryThresholdPercent: 85,
+      heartbeatStaleSeconds: 120,
+    },
+    evaluatedNodes: [],
+    provisioningAttempts: [{ vmSize: 'small', vmLocation: 'fsn1', outcome: 'started' }],
+    decidedAt: now,
+    updatedAt: now,
+  };
+}
+
 function makeContext(overrides: Partial<TaskRunnerContext> = {}): TaskRunnerContext {
   return {
     env: {
@@ -119,6 +152,7 @@ describe('handleNodeProvisioning — timeout', () => {
   it('classifies a missing claimed node before the generic provisioning timeout', async () => {
     const state = makeState({
       provisioningStartedAt: Date.now() - DEFAULT_TASK_RUNNER_PROVISION_TIMEOUT_MS - 1_000,
+      placementExplanation: makeProvisioningExplanation(),
       stepResults: {
         ...makeState().stepResults,
         nodeId: 'node-deleted-during-provisioning',
@@ -132,6 +166,10 @@ describe('handleNodeProvisioning — timeout', () => {
       permanent: true,
     });
     expect(state.stepResults.autoProvisioned).toBe(false);
+    expect(state.placementExplanation?.provisioningAttempts.at(-1)).toMatchObject({
+      outcome: 'failed',
+      failureReason: 'node-unavailable',
+    });
     expect(rc.ctx.storage.put).toHaveBeenCalledWith('state', state);
     expect(rc.ctx.storage.setAlarm).not.toHaveBeenCalled();
   });
@@ -178,6 +216,7 @@ describe('handleNodeProvisioning — timeout', () => {
     const timeoutMs = 900_000; // 15 minutes
     const state = makeState({
       provisioningStartedAt: Date.now() - timeoutMs - 1000, // past timeout
+      placementExplanation: makeProvisioningExplanation(),
       stepResults: { ...makeState().stepResults, nodeId: 'node-1' },
     });
 
@@ -192,6 +231,10 @@ describe('handleNodeProvisioning — timeout', () => {
     await expect(handleNodeProvisioning(state, rc)).rejects.toThrow(
       /Node provisioning timed out after 15 minutes/
     );
+    expect(state.placementExplanation?.provisioningAttempts.at(-1)).toMatchObject({
+      outcome: 'failed',
+      failureReason: 'provisioning-timeout',
+    });
   });
 
   it('timeout is configurable via context', async () => {
@@ -264,7 +307,11 @@ describe('handleNodeProvisioning — timeout', () => {
     const rc = makeContext();
     (rc.env.DATABASE.prepare as ReturnType<typeof vi.fn>).mockReturnValue({
       bind: vi.fn().mockReturnValue({
-        first: vi.fn().mockResolvedValue({ id: 'node-1', status: 'error', error_message: 'Server creation failed' }),
+        first: vi.fn().mockResolvedValue({
+          id: 'node-1',
+          status: 'error',
+          error_message: 'Server creation failed',
+        }),
         run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
       }),
     });
@@ -281,7 +328,11 @@ describe('handleNodeProvisioning — timeout', () => {
     const rc = makeContext();
     (rc.env.DATABASE.prepare as ReturnType<typeof vi.fn>).mockReturnValue({
       bind: vi.fn().mockReturnValue({
-        first: vi.fn().mockResolvedValue({ id: 'node-1', status: 'error', error_message: 'Server creation failed' }),
+        first: vi.fn().mockResolvedValue({
+          id: 'node-1',
+          status: 'error',
+          error_message: 'Server creation failed',
+        }),
         run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
       }),
     });
@@ -326,6 +377,7 @@ describe('timeout parity — node_agent_ready vs node_provisioning', () => {
     const state = makeState({
       currentStep: 'node_agent_ready',
       agentReadyStartedAt: Date.now() - 1_000_000,
+      placementExplanation: makeProvisioningExplanation(),
       stepResults: {
         ...makeState().stepResults,
         nodeId: 'node-deleted-during-readiness',
@@ -342,6 +394,7 @@ describe('timeout parity — node_agent_ready vs node_provisioning', () => {
           agent_version: null,
           status: 'deleted',
         }),
+        run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
       }),
     });
 
@@ -350,6 +403,10 @@ describe('timeout parity — node_agent_ready vs node_provisioning', () => {
       permanent: true,
     });
     expect(state.stepResults.autoProvisioned).toBe(false);
+    expect(state.placementExplanation?.provisioningAttempts.at(-1)).toMatchObject({
+      outcome: 'failed',
+      failureReason: 'node-unavailable',
+    });
     expect(rc.ctx.storage.put).toHaveBeenCalledWith('state', state);
     expect(rc.ctx.storage.setAlarm).not.toHaveBeenCalled();
   });

@@ -128,32 +128,24 @@ describe('scoreNodeLoad', () => {
     expect(scoreNodeLoad({ cpuLoadAvg1: 100, memoryPercent: 100 })).toBe(100);
   });
 
-  it('applies 40% CPU + 60% memory weighting', () => {
-    // 50% CPU * 0.4 = 20, 80% mem * 0.6 = 48, total = 68
-    expect(scoreNodeLoad({ cpuLoadAvg1: 50, memoryPercent: 80 })).toBe(68);
+  it('uses the most saturated resource', () => {
+    expect(scoreNodeLoad({ cpuLoadAvg1: 50, memoryPercent: 80 })).toBe(80);
   });
 
-  it('weights memory higher than CPU', () => {
-    // High CPU, low memory
+  it('treats CPU and memory saturation symmetrically', () => {
     const cpuHeavy = scoreNodeLoad({ cpuLoadAvg1: 90, memoryPercent: 10 });
-    // Low CPU, high memory
     const memHeavy = scoreNodeLoad({ cpuLoadAvg1: 10, memoryPercent: 90 });
 
-    // 90*0.4 + 10*0.6 = 36+6 = 42
-    expect(cpuHeavy).toBe(42);
-    // 10*0.4 + 90*0.6 = 4+54 = 58
-    expect(memHeavy).toBe(58);
-
-    // Memory-heavy node should score higher (more loaded)
-    expect(memHeavy).toBeGreaterThan(cpuHeavy!);
+    expect(cpuHeavy).toBe(90);
+    expect(memHeavy).toBe(90);
   });
 
   it('treats missing cpuLoadAvg1 as 0', () => {
-    expect(scoreNodeLoad({ memoryPercent: 50 })).toBe(30); // 0*0.4 + 50*0.6
+    expect(scoreNodeLoad({ memoryPercent: 50 })).toBe(50);
   });
 
   it('treats missing memoryPercent as 0', () => {
-    expect(scoreNodeLoad({ cpuLoadAvg1: 50 })).toBe(20); // 50*0.4 + 0*0.6
+    expect(scoreNodeLoad({ cpuLoadAvg1: 50 })).toBe(50);
   });
 
   it('treats both missing as 0', () => {
@@ -163,15 +155,13 @@ describe('scoreNodeLoad', () => {
 
   it('handles fractional values', () => {
     const score = scoreNodeLoad({ cpuLoadAvg1: 33.5, memoryPercent: 67.2 });
-    // 33.5*0.4 + 67.2*0.6 = 13.4 + 40.32 = 53.72
-    expect(score).toBeCloseTo(53.72, 2);
+    expect(score).toBeCloseTo(67.2, 2);
   });
 
   it('handles values above 100 (overloaded node)', () => {
     // CPU load average can exceed 100% on multi-core systems
     const score = scoreNodeLoad({ cpuLoadAvg1: 200, memoryPercent: 95 });
-    // 200*0.4 + 95*0.6 = 80 + 57 = 137
-    expect(score).toBe(137);
+    expect(score).toBe(200);
   });
 });
 
@@ -453,13 +443,25 @@ describe('selectNodeForTaskRun VM size minimum behavior', () => {
   });
 
   it.each([
-    ['status', { status: 'stopped' }, undefined, 'not-running'],
-    ['heartbeat', { lastHeartbeatAt: new Date(0).toISOString() }, undefined, 'heartbeat-stale'],
-    ['agent version', { agentVersion: 'b'.repeat(40) }, undefined, 'agent-version-mismatch'],
-    ['workspace count', {}, 5, 'workspace-limit'],
+    ['status', { status: 'stopped' }, undefined, 'not-running', {}],
+    [
+      'heartbeat',
+      { lastHeartbeatAt: new Date(0).toISOString() },
+      undefined,
+      'heartbeat-stale',
+      { heartbeatAgeSeconds: expect.any(Number) },
+    ],
+    [
+      'agent version',
+      { agentVersion: 'b'.repeat(40) },
+      undefined,
+      'agent-version-mismatch',
+      { agentVersionCompatible: false },
+    ],
+    ['workspace count', {}, 5, 'workspace-limit', { activeWorkspaceCount: 5 }],
   ] as const)(
     'does not consume the warm claim when the fresh %s check rejects the node',
-    async (_change, freshOverrides, freshWorkspaceCount, expectedReason) => {
+    async (_change, freshOverrides, freshWorkspaceCount, expectedReason, expectedSnapshot) => {
       const requiredVersion = 'a'.repeat(40);
       const initialNode = node({
         id: 'warm-changed',
@@ -493,6 +495,7 @@ describe('selectNodeForTaskRun VM size minimum behavior', () => {
       expect(result.explanation.evaluatedNodes[0]?.rejectionReasons).not.toContain(
         'warm-claim-lost'
       );
+      expect(result.explanation.evaluatedNodes[0]?.snapshot).toMatchObject(expectedSnapshot);
     }
   );
 

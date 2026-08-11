@@ -13,7 +13,11 @@ import * as schema from '../../db/schema';
 import { log } from '../../lib/logger';
 import { selectNodeWithExplanation } from '../../services/node-selector';
 import { assertClaimedNodeAvailable } from './claimed-node-availability';
-import { persistTaskPlacement, recordProvisioningAttempt } from './placement';
+import {
+  persistTaskPlacement,
+  recordPlacementFailure,
+  recordProvisioningAttempt,
+} from './placement';
 import { assertTaskNodeProvisioningAllowed } from './provisioning-guards';
 import { isNodeAgentReadyForWorkspaceDispatch } from './readiness';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
@@ -61,9 +65,9 @@ export async function handleNodeSelection(
     return;
   }
   if (state.config.preferredNodeId) {
-    const reasons = placement.explanation.evaluatedNodes.find(
-      (evaluation) => evaluation.nodeId === state.config.preferredNodeId
-    )?.rejectionReasons;
+    // Preferred placement evaluates exactly one candidate. Its persisted ID is
+    // intentionally aliased when rejected, so inspect that single typed result.
+    const reasons = placement.explanation.evaluatedNodes[0]?.rejectionReasons;
     const message = reasons?.includes('undersized')
       ? 'Specified node is smaller than the requested VM size'
       : reasons?.includes('agent-version-mismatch')
@@ -162,6 +166,7 @@ export async function handleNodeProvisioning(
     const elapsed = Date.now() - state.provisioningStartedAt;
     if (elapsed > timeoutMs) {
       const minutes = Math.round(timeoutMs / 60_000);
+      await recordPlacementFailure(state, rc, 'provisioning-timeout');
       throw Object.assign(
         new Error(`Node provisioning timed out after ${minutes} minute${minutes === 1 ? '' : 's'}`),
         { permanent: true }
@@ -440,6 +445,7 @@ export async function handleNodeAgentReady(
   const timeoutMs = rc.getAgentReadyTimeoutMs();
   const elapsed = Date.now() - agentReadyStartedAt;
   if (elapsed > timeoutMs) {
+    await recordPlacementFailure(state, rc, 'readiness-timeout');
     throw Object.assign(new Error(`Node agent not ready within ${timeoutMs}ms`), {
       permanent: true,
     });

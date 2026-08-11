@@ -57,6 +57,7 @@ const PROVISIONING_FAILURE_LABELS: Record<
   'quota-exceeded': 'Compute quota exceeded',
   'credentials-unavailable': 'Cloud credentials unavailable',
   'provider-failed': 'Cloud provider failed',
+  'provisioning-timeout': 'VM provisioning timed out',
   'readiness-timeout': 'VM agent readiness timed out',
   'node-unavailable': 'Provisioned node unavailable',
 };

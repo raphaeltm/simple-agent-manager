@@ -53,7 +53,11 @@ import {
   resolveAnonymousUserId,
   safeEmitTrialEvent,
 } from './helpers';
-import { persistTrialPlacement, recordTrialProvisioningAttempt } from './placement';
+import {
+  persistTrialPlacement,
+  recordTrialPlacementFailure,
+  recordTrialProvisioningAttempt,
+} from './placement';
 import type { TrialOrchestratorContext, TrialOrchestratorState } from './types';
 
 /** Default trial workspace profile when TRIAL_DEFAULT_WORKSPACE_PROFILE is unset. */
@@ -362,6 +366,7 @@ export async function handleNodeProvisioning(
       return;
     }
     if (node?.status === 'error' || node?.status === 'stopped') {
+      await recordTrialPlacementFailure(state, rc, 'provider-failed');
       throw Object.assign(new Error(node.error_message || 'Trial node provisioning failed'), {
         permanent: true,
       });
@@ -435,6 +440,7 @@ export async function handleNodeAgentReady(
   const timeoutMs = rc.getNodeReadyTimeoutMs();
   const elapsed = Date.now() - state.nodeAgentReadyStartedAt;
   if (elapsed > timeoutMs) {
+    await recordTrialPlacementFailure(state, rc, 'readiness-timeout');
     throw Object.assign(new Error(`Trial node agent not ready within ${timeoutMs}ms`), {
       permanent: true,
     });
@@ -460,6 +466,19 @@ export async function handleNodeAgentReady(
       rc.env.VM_AGENT_REQUIRED_VERSION
     )
   ) {
+    const latestAttempt = state.placementExplanation?.provisioningAttempts.at(-1);
+    if (latestAttempt?.outcome === 'started') {
+      await recordTrialProvisioningAttempt(
+        state,
+        rc,
+        {
+          vmSize: latestAttempt.vmSize,
+          vmLocation: latestAttempt.vmLocation,
+          outcome: 'succeeded',
+        },
+        state.nodeId
+      );
+    }
     await rc.advanceToStep(state, 'workspace_creation');
     return;
   }

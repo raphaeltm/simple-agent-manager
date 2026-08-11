@@ -1,7 +1,13 @@
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it, vi } from 'vitest';
 
 import {
   computeVmAgentBuildFingerprint,
+  createGitBuildInputReader,
   type DeployedVmAgentRelease,
   getDeployedVmAgentRelease,
   LEGACY_VM_AGENT_COMPATIBILITY_VERSION,
@@ -55,6 +61,65 @@ describe('computeVmAgentBuildFingerprint', () => {
     expect(() => computeVmAgentBuildFingerprint('target', reader('tree-a', null))).toThrow(
       'Missing VM-agent compatibility marker'
     );
+  });
+
+  it('tracks the real VM-agent git tree and marker while ignoring unrelated files', () => {
+    const repositoryRoot = mkdtempSync(join(tmpdir(), 'sam-vm-agent-release-'));
+    const git = (...args: string[]) =>
+      execFileSync('git', args, {
+        cwd: repositoryRoot,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'pipe'],
+      }).trim();
+    const commit = (message: string) => {
+      git('add', '.');
+      git('commit', '-m', message);
+      return git('rev-parse', 'HEAD');
+    };
+
+    try {
+      git('init');
+      git('config', 'user.name', 'SAM test');
+      git('config', 'user.email', 'sam-test@example.invalid');
+      mkdirSync(join(repositoryRoot, 'packages/vm-agent'), { recursive: true });
+      mkdirSync(join(repositoryRoot, 'scripts/deploy'), { recursive: true });
+      mkdirSync(join(repositoryRoot, 'apps/api'), { recursive: true });
+      const vmAgentFiles = ['main.go', 'go.mod', 'go.sum', 'Makefile'];
+      for (const filename of vmAgentFiles) {
+        writeFileSync(join(repositoryRoot, 'packages/vm-agent', filename), `${filename} v1\n`);
+      }
+      writeFileSync(
+        join(repositoryRoot, 'scripts/deploy/vm-agent-compatibility-version.txt'),
+        '1\n'
+      );
+      writeFileSync(join(repositoryRoot, 'apps/api/index.ts'), 'unrelated v1\n');
+
+      const reader = createGitBuildInputReader(repositoryRoot);
+      const baselineRef = commit('baseline');
+      const baseline = computeVmAgentBuildFingerprint(baselineRef, reader);
+
+      writeFileSync(join(repositoryRoot, 'apps/api/index.ts'), 'unrelated v2\n');
+      const unrelatedRef = commit('unrelated API change');
+      expect(computeVmAgentBuildFingerprint(unrelatedRef, reader)).toBe(baseline);
+
+      let previous = baseline;
+      for (const filename of vmAgentFiles) {
+        writeFileSync(join(repositoryRoot, 'packages/vm-agent', filename), `${filename} v2\n`);
+        const ref = commit(`change ${filename}`);
+        const fingerprint = computeVmAgentBuildFingerprint(ref, reader);
+        expect(fingerprint).not.toBe(previous);
+        previous = fingerprint;
+      }
+
+      writeFileSync(
+        join(repositoryRoot, 'scripts/deploy/vm-agent-compatibility-version.txt'),
+        '2\n'
+      );
+      const markerRef = commit('change compatibility marker');
+      expect(computeVmAgentBuildFingerprint(markerRef, reader)).not.toBe(previous);
+    } finally {
+      rmSync(repositoryRoot, { recursive: true, force: true });
+    }
   });
 });
 

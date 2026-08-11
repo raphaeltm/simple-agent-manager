@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  PLACEMENT_MAX_EVALUATED_NODES,
-  PLACEMENT_MAX_PROVISIONING_ATTEMPTS,
-} from '../src/constants/placement';
 import { isPlacementExplanationV2, parsePlacementExplanationJson } from '../src/placement';
 
 const validV2 = {
@@ -32,6 +28,27 @@ describe('parsePlacementExplanationJson', () => {
     const parsed = parsePlacementExplanationJson(JSON.stringify(validV2));
     expect(parsed && isPlacementExplanationV2(parsed)).toBe(true);
     expect(parsed).toEqual(validV2);
+  });
+
+  it('round-trips high configured limits and typed provisioning timeouts', () => {
+    const configured = {
+      ...validV2,
+      request: {
+        ...validV2.request,
+        maxWorkspacesPerNode: 20000,
+        heartbeatStaleSeconds: 172800,
+      },
+      provisioningAttempts: [
+        {
+          vmSize: 'medium',
+          vmLocation: 'hel1',
+          outcome: 'failed',
+          failureReason: 'provisioning-timeout',
+        },
+      ],
+    };
+
+    expect(parsePlacementExplanationJson(JSON.stringify(configured))).toEqual(configured);
   });
 
   it('parses a legacy placement record', () => {
@@ -70,27 +87,5 @@ describe('parsePlacementExplanationJson', () => {
     JSON.stringify({ ...validV2, evaluatedNodes: [{ raw: 'unvalidated' }] }),
   ])('rejects absent or malformed data safely', (raw) => {
     expect(parsePlacementExplanationJson(raw)).toBeNull();
-  });
-
-  it('rejects placement arrays beyond the structural persistence limits', () => {
-    expect(
-      parsePlacementExplanationJson(
-        JSON.stringify({
-          ...validV2,
-          evaluatedNodes: Array.from({ length: PLACEMENT_MAX_EVALUATED_NODES + 1 }, () => ({})),
-        })
-      )
-    ).toBeNull();
-    expect(
-      parsePlacementExplanationJson(
-        JSON.stringify({
-          ...validV2,
-          provisioningAttempts: Array.from(
-            { length: PLACEMENT_MAX_PROVISIONING_ATTEMPTS + 1 },
-            () => ({})
-          ),
-        })
-      )
-    ).toBeNull();
   });
 });

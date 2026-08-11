@@ -5,6 +5,7 @@ import type {
   PlacementSelectionPath,
   VMSize,
 } from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE } from '@simple-agent-manager/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
 
@@ -88,7 +89,7 @@ function parseMetrics(raw: string | null): NodeMetrics | null {
 
 export function scoreNodeLoad(metrics: NodeMetrics | null): number | null {
   if (!metrics) return null;
-  return (metrics.cpuLoadAvg1 ?? 0) * 0.4 + (metrics.memoryPercent ?? 0) * 0.6;
+  return Math.max(metrics.cpuLoadAvg1 ?? 0, metrics.memoryPercent ?? 0);
 }
 
 export function nodeHasCapacity(
@@ -255,14 +256,13 @@ export async function selectNodeWithExplanation(
       const freshEvaluation = freshNode
         ? evaluatePlacementNode(freshNode, request, 'warm', env.VM_AGENT_REQUIRED_VERSION, nowMs)
         : missingNodeEvaluation(evaluation.nodeId, 'warm');
+      evaluation.snapshot = freshEvaluation.snapshot;
       if (!freshNode || !freshEvaluation.accepted) {
         evaluation.accepted = false;
         evaluation.rejectionReasons = freshEvaluation.rejectionReasons;
         warmExclusions.set(evaluation.nodeId, evaluation.rejectionReasons);
         continue;
       }
-      evaluation.snapshot = freshEvaluation.snapshot;
-
       try {
         const claimed = await nodeLifecycle.tryClaim(
           env as unknown as import('../env').Env,
@@ -344,13 +344,13 @@ export async function selectNodeForTaskRun(
   db: PlacementDb,
   userId: string,
   env: NodeSelectorEnv,
-  preferredLocation = 'nbg1',
-  preferredSize: string = 'medium',
+  preferredLocation = DEFAULT_VM_LOCATION,
+  preferredSize: string = DEFAULT_VM_SIZE,
   taskId?: string
 ): Promise<NodeCandidate | null> {
   const vmSize = ['small', 'medium', 'large'].includes(preferredSize)
     ? (preferredSize as VMSize)
-    : 'medium';
+    : DEFAULT_VM_SIZE;
   return (
     await selectNodeWithExplanation(db, userId, env, {
       vmSize,

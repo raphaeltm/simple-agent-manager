@@ -18,5 +18,6 @@ Required pattern:
 12. A state machine waiting on a claimed node must distinguish missing/deleted state from "still booting" and terminalize promptly without returning the gone node to a reusable pool.
 13. Persist the versioned, allowlisted placement explanation immediately after reusable selection, append typed provisioning/readiness failures, and copy the final record to the workspace. Trials must persist before workspace creation because they have no task row.
 14. Placement APIs, MCP tools, logs, and UI may expose only the shared explanation contract. Never copy raw agent versions, raw metrics JSON, provider errors, credentials, prompts, repository data, environment values, or secrets into placement evidence.
+15. Preserve a real node identifier only for the selected node. Persist every rejected or eligible-but-unselected candidate as a stable `candidate-N` alias so placement evidence cannot disclose another tenant's host identifiers.
 
 Tests for scheduling-affecting VM-agent changes should include a stale-but-otherwise-better candidate losing to a compatible node, preferred/warm stale-node rejection, current fresh-node readiness, active stale-node preservation, idle stale-node retirement, and the pre-heartbeat interleaving where an active task owns an unversioned node before any workspace exists.
