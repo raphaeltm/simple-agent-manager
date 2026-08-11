@@ -32,30 +32,30 @@ export async function assertTaskNodeProvisioningAllowed(
     state.config.credentialAttributionSource === 'project'
       ? state.config.credentialAttributionProjectId
       : null;
-  const credential = await resolveCredentialSource(
+  const credResult = await resolveCredentialSource(
     db,
     state.config.credentialAttributionUserId,
     state.config.cloudProvider ?? undefined,
     attributionProjectId
   );
 
-  if (!credential) {
+  if (!credResult) {
     await recordPlacementFailure(state, rc, 'credentials-unavailable');
     throw Object.assign(new Error('No cloud provider credentials available for provisioning.'), {
       permanent: true,
     });
   }
-  if (credential.credentialSource !== 'platform') return;
-
-  const quota = await checkQuotaForUser(db, state.userId);
-  if (!quota.allowed) {
-    await recordPlacementFailure(state, rc, 'quota-exceeded');
-    throw Object.assign(
-      new Error(
-        `Monthly compute quota exceeded: ${quota.used} of ${quota.limit} vCPU-hours used. ` +
-          'Add your own cloud provider credentials or contact your admin.'
-      ),
-      { permanent: true }
-    );
+  if (credResult.credentialSource === 'platform') {
+    const quotaCheck = await checkQuotaForUser(db, state.userId);
+    if (!quotaCheck.allowed) {
+      await recordPlacementFailure(state, rc, 'quota-exceeded');
+      throw Object.assign(
+        new Error(
+          `Monthly compute quota exceeded: ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours used. ` +
+            'Add your own cloud provider credentials or contact your admin.'
+        ),
+        { permanent: true }
+      );
+    }
   }
 }

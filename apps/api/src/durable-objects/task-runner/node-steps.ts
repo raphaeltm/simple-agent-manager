@@ -61,9 +61,21 @@ export async function handleNodeSelection(
     return;
   }
   if (state.config.preferredNodeId) {
-    throw Object.assign(new Error('Specified node is not eligible for workspace placement'), {
-      permanent: true,
-    });
+    const reasons = placement.explanation.evaluatedNodes.find(
+      (evaluation) => evaluation.nodeId === state.config.preferredNodeId
+    )?.rejectionReasons;
+    const message = reasons?.includes('undersized')
+      ? 'Specified node is smaller than the requested VM size'
+      : reasons?.includes('agent-version-mismatch')
+        ? 'Specified node is running an incompatible VM agent build'
+        : reasons?.some((reason) =>
+              ['unhealthy', 'heartbeat-missing', 'heartbeat-stale', 'agent-not-ready'].includes(
+                reason
+              )
+            )
+          ? 'Specified node is not reachable'
+          : 'Specified node is not available';
+    throw Object.assign(new Error(message), { permanent: true });
   }
 
   await rc.advanceToStep(state, 'node_provisioning');

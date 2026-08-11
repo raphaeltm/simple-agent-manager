@@ -4,8 +4,8 @@ import type {
   PlacementNodeEvaluation,
   PlacementNodeSnapshot,
   PlacementProvisioningAttempt,
-  PlacementRequestSnapshot,
   PlacementRejectionReason,
+  PlacementRequestSnapshot,
   PlacementSelectionPath,
   ResourceRequirementsSource,
 } from './types/resource';

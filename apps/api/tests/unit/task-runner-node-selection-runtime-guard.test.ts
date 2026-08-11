@@ -1,54 +1,60 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
-import { handleNodeSelection } from '../../src/durable-objects/task-runner/node-steps';
-import type { TaskRunnerContext, TaskRunnerState } from '../../src/durable-objects/task-runner/types';
+import * as schema from '../../src/db/schema';
+import { selectNodeWithExplanation } from '../../src/services/node-selector';
 
 // Task-runner node reuse must never select cf-container (instant-session)
 // nodes: the standalone vm-agent hosts exactly one lightweight workspace and
 // rejects task-runner re-dispatch (no `lightweight` flag) with a 409 profile
-// conflict — the same class node-lifecycle.ts already guards against. These
-// tests capture the SQL the selection step actually issues to D1 and assert
-// both reuse queries carry the runtime exclusion.
+// conflict. The canonical evaluator records this as a typed rejection on
+// every reuse path, even if the row is present in the candidate query.
 
-function makeCapturingDb(issuedSql: string[]) {
+function makeDb() {
+  const now = new Date().toISOString();
+  const cfContainerNode = {
+    id: 'instant-node',
+    status: 'running',
+    runtime: 'cf-container',
+    vmSize: 'small',
+    vmLocation: 'fsn1',
+    healthStatus: 'healthy',
+    lastHeartbeatAt: now,
+    agentReadyAt: now,
+    agentVersion: null,
+    lastMetrics: JSON.stringify({ cpuLoadAvg1: 1, memoryPercent: 1 }),
+    warmSince: now,
+  };
   return {
-    prepare: (sql: string) => {
-      issuedSql.push(sql);
-      return {
-        bind: () => ({
-          all: async () => ({ results: [] }),
-          first: async () => null,
-        }),
-      };
-    },
+    select: () => ({
+      from: (table: unknown) => ({
+        where: async () => (table === schema.nodes ? [cfContainerNode] : []),
+      }),
+    }),
   };
 }
 
-describe('handleNodeSelection runtime guards', () => {
-  it('excludes cf-container nodes from both warm-pool and capacity reuse queries', async () => {
-    const issuedSql: string[] = [];
-    const rc = {
-      env: { DATABASE: makeCapturingDb(issuedSql), NODE_LIFECYCLE: {} },
-      updateD1ExecutionStep: vi.fn().mockResolvedValue(undefined),
-      advanceToStep: vi.fn().mockResolvedValue(undefined),
-    } as unknown as TaskRunnerContext;
-    const state = {
-      taskId: 'task-1',
-      userId: 'user-1',
-      config: { vmSize: 'small', vmLocation: 'fsn1' },
-      stepResults: {},
-    } as unknown as TaskRunnerState;
+describe('TaskRunner runtime guards', () => {
+  it('rejects cf-container nodes on both warm and capacity reuse paths', async () => {
+    const result = await selectNodeWithExplanation(
+      makeDb() as never,
+      'user-1',
+      { NODE_LIFECYCLE: {} as DurableObjectNamespace },
+      { vmSize: 'small', vmLocation: 'fsn1', taskId: 'task-1' }
+    );
 
-    await handleNodeSelection(state, rc);
-
-    const warmSql = issuedSql.find((sql) => sql.includes('warm_since IS NOT NULL'));
-    const capacitySql = issuedSql.find((sql) => sql.includes("health_status != 'unhealthy'"));
-    expect(warmSql, 'warm-pool query was not issued').toBeDefined();
-    expect(capacitySql, 'capacity reuse query was not issued').toBeDefined();
-    expect(warmSql).toContain("runtime IS NULL OR runtime != 'cf-container'");
-    expect(capacitySql).toContain("runtime IS NULL OR runtime != 'cf-container'");
-
-    // With no eligible nodes the step falls through to provisioning.
-    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'node_provisioning');
+    expect(result.node).toBeNull();
+    expect(result.explanation.outcome).toBe('provisioned');
+    expect(result.explanation.evaluatedNodes).toEqual([
+      expect.objectContaining({
+        path: 'warm',
+        accepted: false,
+        rejectionReasons: expect.arrayContaining(['wrong-runtime']),
+      }),
+      expect.objectContaining({
+        path: 'capacity',
+        accepted: false,
+        rejectionReasons: expect.arrayContaining(['wrong-runtime']),
+      }),
+    ]);
   });
 });

@@ -171,12 +171,26 @@ will be reviewed in one draft PR.
 - [x] Add mapper/MCP/UI tests and run local Playwright visual/accessibility audits with
       normal, long, empty/legacy, many-rejection, error, and special-character scenarios
       at mobile and desktop widths with no horizontal overflow.
-- [ ] Run focused suites, `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
+- [x] Run focused suites, `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
 - [ ] Run required task-completion, Cloudflare, environment, security, UI/UX,
       documentation, constitution, and test-engineering specialist reviews; address all
       findings.
 - [ ] Push the output branch, open a draft PR explicitly stating “not deployed to
       staging” and “do not merge”, wait for applicable CI, and leave it open/unmerged.
+
+## Local Validation Evidence
+
+- `pnpm lint` — passed with only the repository's existing warnings.
+- `pnpm typecheck` — passed; the WWW package reported its expected baseline-only note.
+- `pnpm build` — passed with the existing CSS minification and chunk-size warnings.
+- `pnpm test` — passed all 21 Turbo tasks; API 535 files / 7,077 tests and Web 255
+  files / 3,069 tests passed.
+- `pnpm format:check` — passed the repository format ratchet.
+- Release-resolution focused suites — 92/92 passed.
+- Placement/parser/persistence/API/MCP/UI focused suites — 200+ API tests, 7 shared
+  parser tests, and 3 UI unit tests passed.
+- Local Playwright UI audit — 16/16 dark/light mobile/desktop scenarios passed with
+  explicit horizontal-overflow and accessibility checks. No environment was deployed.
 
 ## Acceptance Criteria
 

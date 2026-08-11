@@ -18,17 +18,37 @@ import { describe, expect, it } from 'vitest';
 
 describe('compute quota pipeline', () => {
   const schemaFile = readFileSync(resolve(process.cwd(), 'src/db/schema.ts'), 'utf8');
-  const serviceFile = readFileSync(resolve(process.cwd(), 'src/services/compute-quotas.ts'), 'utf8');
-  const providerCredsFile = readFileSync(resolve(process.cwd(), 'src/services/provider-credentials.ts'), 'utf8');
+  const serviceFile = readFileSync(
+    resolve(process.cwd(), 'src/services/compute-quotas.ts'),
+    'utf8'
+  );
+  const providerCredsFile = readFileSync(
+    resolve(process.cwd(), 'src/services/provider-credentials.ts'),
+    'utf8'
+  );
   const indexFile = readFileSync(resolve(process.cwd(), 'src/index.ts'), 'utf8');
   const envFile = readFileSync(resolve(process.cwd(), 'src/env.ts'), 'utf8');
-  const adminQuotaRoute = readFileSync(resolve(process.cwd(), 'src/routes/admin-quotas.ts'), 'utf8');
+  const adminQuotaRoute = readFileSync(
+    resolve(process.cwd(), 'src/routes/admin-quotas.ts'),
+    'utf8'
+  );
   const usageRoute = readFileSync(resolve(process.cwd(), 'src/routes/usage.ts'), 'utf8');
   const submitRoute = readFileSync(resolve(process.cwd(), 'src/routes/tasks/submit.ts'), 'utf8');
-  const nodeStepsFile = readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner/node-steps.ts'), 'utf8');
+  const nodeStepsFile = [
+    'src/durable-objects/task-runner/node-steps.ts',
+    'src/durable-objects/task-runner/provisioning-guards.ts',
+  ]
+    .map((file) => readFileSync(resolve(process.cwd(), file), 'utf8'))
+    .join('\n');
   const nodesRoute = readFileSync(resolve(process.cwd(), 'src/routes/nodes.ts'), 'utf8');
-  const migrationFile = readFileSync(resolve(process.cwd(), 'src/db/migrations/0039_compute_quotas.sql'), 'utf8');
-  const dispatchToolFile = readFileSync(resolve(process.cwd(), 'src/routes/mcp/dispatch-tool.ts'), 'utf8');
+  const migrationFile = readFileSync(
+    resolve(process.cwd(), 'src/db/migrations/0039_compute_quotas.sql'),
+    'utf8'
+  );
+  const dispatchToolFile = readFileSync(
+    resolve(process.cwd(), 'src/routes/mcp/dispatch-tool.ts'),
+    'utf8'
+  );
 
   // ===========================================================================
   // Migration
@@ -47,7 +67,9 @@ describe('compute quota pipeline', () => {
     });
 
     it('creates index on user_quotas', () => {
-      expect(migrationFile).toContain('CREATE INDEX idx_user_quotas_user_id ON user_quotas(user_id)');
+      expect(migrationFile).toContain(
+        'CREATE INDEX idx_user_quotas_user_id ON user_quotas(user_id)'
+      );
     });
   });
 
@@ -139,13 +161,17 @@ describe('compute quota pipeline', () => {
     });
 
     it('checks user credentials for the target provider first', () => {
-      expect(providerCredsFile).toContain("eq(schema.credentials.credentialType, 'cloud-provider')");
+      expect(providerCredsFile).toContain(
+        "eq(schema.credentials.credentialType, 'cloud-provider')"
+      );
       // When targetProvider is passed, it filters by provider
       expect(providerCredsFile).toContain('eq(schema.credentials.provider, targetProvider)');
     });
 
     it('falls back to platform credentials', () => {
-      expect(providerCredsFile).toContain("eq(schema.platformCredentials.credentialType, 'cloud-provider')");
+      expect(providerCredsFile).toContain(
+        "eq(schema.platformCredentials.credentialType, 'cloud-provider')"
+      );
       expect(providerCredsFile).toContain('eq(schema.platformCredentials.isEnabled, true)');
     });
 
@@ -168,7 +194,7 @@ describe('compute quota pipeline', () => {
   // ===========================================================================
   describe('admin quota routes', () => {
     it('routes are mounted at /api/admin/quotas', () => {
-      expect(indexFile).toContain("adminQuotaRoutes");
+      expect(indexFile).toContain('adminQuotaRoutes');
       expect(indexFile).toContain("'/api/admin/quotas'");
     });
 
@@ -398,7 +424,9 @@ describe('compute quota pipeline', () => {
     });
 
     it('MCP dispatch does NOT use raw credential existence check in Promise.all', () => {
-      expect(dispatchToolFile).not.toContain("eq(schema.credentials.credentialType, 'cloud-provider')");
+      expect(dispatchToolFile).not.toContain(
+        "eq(schema.credentials.credentialType, 'cloud-provider')"
+      );
     });
 
     it('all four enforcement points use resolveCredentialSource', () => {
