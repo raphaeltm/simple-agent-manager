@@ -20,10 +20,13 @@ different matcher logic in workflow YAML; see `.github/workflows/ci.yml` and
   of the 2026-08-11 ai-slop debt burn-down, once production sites reached zero. Their ownership,
   stages, and baselines live in `packages/eslint-plugin-sam/rules.manifest.json`; fixtures run
   with ESLint 9 `RuleTester`.
-- `pnpm quality:type-boundaries` is the blocking net-count ratchet. Existing debt in
-  `scripts/quality/type-boundary-baseline.json` passes, while net-new debt fails with
+- `pnpm quality:type-boundaries` is the blocking net-count ratchet. The baseline in
+  `scripts/quality/type-boundary-baseline.json` was driven to zero blocking-class debt (0/0/0/0
+  across `as-any`, `hono-req-json-generic`, `typed-json-parse`, `local-record-guard`) by the
+  2026-08-11 ai-slop debt burn-down, so any single new occurrence now fails the ratchet with
   deterministic `file:line` output. `JSON.parse(...) as unknown` is allowed. Broad
-  `Record<string, unknown>` and `as unknown as` populations are report-only.
+  `Record<string, unknown>` and `as unknown as` populations remain report-only — recorded for
+  visibility at 66 and 114 respectively, and never failing the run.
 - `pnpm quality:runtime-boundary-semantics` runs the two bounded ts-morph checks for unvalidated
   DO/D1 row narrowing and blind external-payload narrowing. It is not a whole-repo type-aware gate.
   Blocking is driven by `scripts/quality/runtime-boundary-semantic-evidence.json`: when
@@ -66,7 +69,7 @@ secret material in logs, PR text, or public issues.
 Each layer is independently reversible:
 
 - keep or restore ESLint as the complete authoritative layer and leave Oxlint report-only;
-- disable the advisory `sam/*` rules without changing the independent boundary ratchet;
+- disable the blocking `sam/*` rules without changing the independent type-boundary ratchet;
 - remove a leaf invocation from CI or `check:fast` without changing application runtime;
 - disable an individual supply-chain job without publishing or accepting its findings as a new
   baseline.
