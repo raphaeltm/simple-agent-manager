@@ -177,7 +177,7 @@ will be reviewed in one draft PR.
 - [x] Run focused suites, `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
 - [x] Run Cloudflare, environment, security, UI/UX, documentation, constitution, and
       test-engineering specialist reviews; address all findings.
-- [ ] Run the mandatory task-completion validator after this final task/evidence update.
+- [x] Run the mandatory task-completion validator after this final task/evidence update.
 - [ ] Push the output branch, open a draft PR explicitly stating “not deployed to
       staging” and “do not merge”, wait for applicable CI, and leave it open/unmerged.
 
@@ -210,7 +210,7 @@ will be reviewed in one draft PR.
 | Documentation validator   | ADDRESSED / PASS | Release ordering/fail-closed semantics, MCP shape, OpenAPI, parser contract, and public docs passed at `abcc1ddac`.          |
 | Constitution validator    | ADDRESSED / PASS | Removed hidden ceilings/truncation/weights and duplicated defaults; Principle XI review passed at `839267430`.               |
 | Test engineer             | ADDRESSED / PASS | Real route/SQLite reuse and provision slices plus exact failure/timeout persistence passed at `26ac0c615`.                   |
-| Task-completion validator | PENDING          | Runs last against the final task file and full branch diff before the draft PR.                                              |
+| Task-completion validator | PASS             | Full branch/task review passed at `ff0b7cd69`; the production TaskRunner vertical slice resolved the sole prior gap.         |
 
 ## Acceptance Criteria
 
