@@ -22,19 +22,19 @@ This matches the repo's progressive quality-tool rollout policy.
 
 ## Known offenders (from the 2026-08-11 sweep)
 
-| Spec | Clipped element | Note |
-| --- | --- | --- |
-| `settings-vultr-credential-audit` | `<main class="sam-main-content …overflow-x-hidden">` | Settings breadcrumb/content |
-| `settings-upcloud-credential-audit` | same | |
-| `settings-infomaniak-credential-audit` | same | |
-| `settings-digitalocean-credential-audit` | same | |
-| `project-settings-subpages-audit` | `<div class="min-h-screen min-w-0 overflow-x-hidden…">` | Project.tsx wrapper — same shape as the triggers bug, with a long project name |
-| `deployment-control-surface-audit` | same | |
-| `slice-e-theme-audit` | same | Agent Context page |
-| `skills-ui-audit` | `<p class="…line-clamp-2 text-xs…">` | Same `line-clamp` + unbreakable-token bug fixed in `TriggerCard` — needs `break-words` |
-| `project-chat-composer-audit` | `<div class="mb-3 overflow-hidden rounded-lg…">` | Composer wizard step container; check whether it is an intentional slide |
-| `credential-health-audit` | `<nav class="flex-1 overflow-hidden relative">` | Should be covered by the `data-intentional-clip` tag on MobileNavDrawer — re-verify |
-| `portal-overlay-audit` | react-flow + nav | Should be covered by the new tags — re-verify |
+| Spec                                     | Clipped element                                         | Note                                                                                   |
+| ---------------------------------------- | ------------------------------------------------------- | -------------------------------------------------------------------------------------- |
+| `settings-vultr-credential-audit`        | `<main class="sam-main-content …overflow-x-hidden">`    | Settings breadcrumb/content                                                            |
+| `settings-upcloud-credential-audit`      | same                                                    |                                                                                        |
+| `settings-infomaniak-credential-audit`   | same                                                    |                                                                                        |
+| `settings-digitalocean-credential-audit` | same                                                    |                                                                                        |
+| `project-settings-subpages-audit`        | `<div class="min-h-screen min-w-0 overflow-x-hidden…">` | Project.tsx wrapper — same shape as the triggers bug, with a long project name         |
+| `deployment-control-surface-audit`       | same                                                    |                                                                                        |
+| `slice-e-theme-audit`                    | same                                                    | Agent Context page                                                                     |
+| `skills-ui-audit`                        | `<p class="…line-clamp-2 text-xs…">`                    | Same `line-clamp` + unbreakable-token bug fixed in `TriggerCard` — needs `break-words` |
+| `project-chat-composer-audit`            | `<div class="mb-3 overflow-hidden rounded-lg…">`        | Composer wizard step container; check whether it is an intentional slide               |
+| `credential-health-audit`                | `<nav class="flex-1 overflow-hidden relative">`         | Should be covered by the `data-intentional-clip` tag on MobileNavDrawer — re-verify    |
+| `portal-overlay-audit`                   | react-flow + nav                                        | Should be covered by the new tags — re-verify                                          |
 
 Reproduce the current list:
 

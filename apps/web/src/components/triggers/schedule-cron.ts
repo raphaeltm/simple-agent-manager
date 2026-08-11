@@ -91,10 +91,24 @@ export function parseCronToMode(cron: string): ParsedSchedule {
       .filter((n) => !isNaN(n));
 
     if (isWeekdaySet(days)) {
-      return { ...SCHEDULE_DEFAULTS, mode: 'daily', hour, minute, dailyVariant: 'weekday', weeklyDays: days };
+      return {
+        ...SCHEDULE_DEFAULTS,
+        mode: 'daily',
+        hour,
+        minute,
+        dailyVariant: 'weekday',
+        weeklyDays: days,
+      };
     }
     if (isWeekendSet(days)) {
-      return { ...SCHEDULE_DEFAULTS, mode: 'daily', hour, minute, dailyVariant: 'weekend', weeklyDays: days };
+      return {
+        ...SCHEDULE_DEFAULTS,
+        mode: 'daily',
+        hour,
+        minute,
+        dailyVariant: 'weekend',
+        weeklyDays: days,
+      };
     }
     return { ...SCHEDULE_DEFAULTS, mode: 'weekly', hour, minute, weeklyDays: days };
   }

@@ -15,7 +15,7 @@ with no way to scroll to them.
 whole time. The helper only checked:
 
 ```ts
-document.documentElement.scrollWidth > window.innerWidth
+document.documentElement.scrollWidth > window.innerWidth;
 ```
 
 `AppShell` sets `overflow-x-hidden` on `<main>` and `Project.tsx` repeats it on
@@ -28,8 +28,8 @@ thing. ~40 audit specs shared that blind spot.
 
 **A guard that cannot observe the failure it claims to prevent.** The test is
 green, CI is green, and the feature is visibly broken. It is the layout twin of
-the source-contract test ban in rule 02: proving code is *present* rather than
-that it *works*.
+the source-contract test ban in rule 02: proving code is _present_ rather than
+that it _works_.
 
 The specific layout trap that produced it is worth knowing on its own:
 
