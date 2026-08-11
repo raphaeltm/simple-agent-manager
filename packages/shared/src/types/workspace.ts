@@ -239,6 +239,11 @@ export interface WorkspaceResponse {
   status: WorkspaceStatus;
   vmSize: VMSize;
   vmLocation: VMLocation;
+  /** Safely parsed reusable-node placement audit record. */
+  placementExplanation?:
+    | import('./resource').PlacementExplanation
+    | import('./resource').LegacyPlacementExplanation
+    | null;
   workspaceProfile?: WorkspaceProfile | null;
   /** Selected devcontainer config name (subdirectory under .devcontainer/). null = auto-discover default. */
   devcontainerConfigName?: string | null;

@@ -24,6 +24,7 @@ import {
   DEFAULT_WORKSPACE_PROFILE,
   isTaskExecutionStep,
   parseCompletionEvidenceJson,
+  parsePlacementExplanationJson,
   VALID_PERMISSION_MODES,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
@@ -90,6 +91,7 @@ export function toWorkspaceResponse(ws: schema.Workspace, baseDomain: string): W
     updatedAt: ws.updatedAt,
     url: getWorkspaceUrl(ws.id, baseDomain),
     chatSessionId: ws.chatSessionId ?? null,
+    placementExplanation: parsePlacementExplanationJson(ws.placementExplanationJson),
   };
 }
 
@@ -199,6 +201,7 @@ export function toTaskResponse(
       (task.resourceRequirementsSource as Task['resourceRequirementsSource']) ?? null,
     resolvedReservationJson: task.resolvedReservationJson ?? null,
     placementExplanationJson: task.placementExplanationJson ?? null,
+    placementExplanation: parsePlacementExplanationJson(task.placementExplanationJson),
     startedAt: task.startedAt,
     completedAt: task.completedAt,
     errorMessage: task.errorMessage,

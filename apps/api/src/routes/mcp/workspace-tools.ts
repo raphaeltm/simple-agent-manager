@@ -8,6 +8,10 @@
  * Category A (direct D1/API) and Category C (Worker-side DNS) handlers are in
  * workspace-tools-direct.ts.
  */
+import {
+  isPlacementExplanationV2,
+  parsePlacementExplanationJson,
+} from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -54,6 +58,7 @@ export interface WorkspaceForVmAgent {
   status: string;
   nodeId: string;
   projectId: string;
+  placementExplanationJson: string | null;
 }
 
 export async function lookupWorkspaceForVmAgent(
@@ -70,6 +75,7 @@ export async function lookupWorkspaceForVmAgent(
       status: schema.workspaces.status,
       nodeId: schema.workspaces.nodeId,
       projectId: schema.workspaces.projectId,
+      placementExplanationJson: schema.workspaces.placementExplanationJson,
     })
     .from(schema.workspaces)
     .where(and(eq(schema.workspaces.id, workspaceId), eq(schema.workspaces.projectId, projectId)))
@@ -90,6 +96,7 @@ export async function lookupWorkspaceForVmAgent(
     status: workspace.status,
     nodeId: workspace.nodeId,
     projectId: workspace.projectId ?? projectId,
+    placementExplanationJson: workspace.placementExplanationJson,
   };
 }
 
@@ -154,9 +161,11 @@ export async function proxyToVmAgent(
   toolPath: VmAgentToolPath,
   method: 'GET' | 'POST' = 'GET',
   body?: unknown,
-  timeoutOverrideMs?: number
+  timeoutOverrideMs?: number,
+  workspaceOverride?: WorkspaceForVmAgent
 ): Promise<unknown> {
-  const workspace = await lookupWorkspaceForVmAgent(env, workspaceId, projectId);
+  const workspace =
+    workspaceOverride ?? (await lookupWorkspaceForVmAgent(env, workspaceId, projectId));
 
   // Generate workspace token for VM agent auth
   const { token } = await signTerminalToken(userId, workspaceId, env);
@@ -250,6 +259,22 @@ export function requireWorkspace(
   return null;
 }
 
+export function enrichWorkspaceInfoWithPlacement(
+  result: unknown,
+  placementExplanationJson: string | null
+): Record<string, unknown> {
+  const explanation = parsePlacementExplanationJson(placementExplanationJson);
+  const placement = explanation
+    ? {
+        summary: isPlacementExplanationV2(explanation) ? explanation.summary : explanation.reason,
+        detail: explanation,
+      }
+    : null;
+  return typeof result === 'object' && result !== null && !Array.isArray(result)
+    ? { ...result, placement }
+    : { workspaceInfo: result, placement };
+}
+
 // ─── Category B: Proxied to VM agent ────────────────────────────────────────
 
 export async function handleGetWorkspaceInfo(
@@ -260,15 +285,25 @@ export async function handleGetWorkspaceInfo(
   const err = requireWorkspace(requestId, tokenData);
   if (err) return err;
   try {
+    const workspace = await lookupWorkspaceForVmAgent(
+      env,
+      tokenData.workspaceId,
+      tokenData.projectId
+    );
     const result = await proxyToVmAgent(
       env,
       tokenData.workspaceId,
       tokenData.userId,
       tokenData.projectId,
-      'workspace-info'
+      'workspace-info',
+      'GET',
+      undefined,
+      undefined,
+      workspace
     );
+    const enriched = enrichWorkspaceInfoWithPlacement(result, workspace.placementExplanationJson);
     return jsonRpcSuccess(requestId, {
-      content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+      content: [{ type: 'text', text: JSON.stringify(enriched, null, 2) }],
     });
   } catch (e) {
     return jsonRpcError(

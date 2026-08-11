@@ -17,6 +17,7 @@ import {
   nodeHasCapacity,
   scoreNodeLoad,
   selectNodeForTaskRun,
+  selectNodeWithExplanation,
 } from '../../../src/services/node-selector';
 
 vi.mock('../../../src/services/node-lifecycle', () => ({
@@ -31,7 +32,11 @@ type MockNode = {
   vmSize: string;
   vmLocation: string;
   lastMetrics: string | null;
-  warmSince?: number | null;
+  runtime: string;
+  lastHeartbeatAt: string;
+  agentReadyAt: string;
+  agentVersion: string | null;
+  warmSince: string | null;
 };
 
 function createMockDb({
@@ -44,29 +49,22 @@ function createMockDb({
   workspaceCount?: number;
 }) {
   return {
-    select(selection?: Record<string, unknown>) {
+    select(_selection?: Record<string, unknown>) {
       return {
         from(table: unknown) {
           return {
             where() {
               if (table === schema.workspaces) {
-                return Promise.resolve([{ count: workspaceCount }]);
+                return Promise.resolve(
+                  Array.from({ length: workspaceCount }, (_, index) => ({
+                    id: `workspace-${index}`,
+                    nodeId: (nodes[0] ?? warmNodes[0])?.id ?? null,
+                  }))
+                );
               }
 
               if (table === schema.nodes) {
-                if (selection && 'warmSince' in selection && 'id' in selection) {
-                  return Promise.resolve(warmNodes);
-                }
-
-                if (selection && 'warmSince' in selection && 'status' in selection) {
-                  return {
-                    limit() {
-                      return Promise.resolve([{ status: 'running', warmSince: Date.now() }]);
-                    },
-                  };
-                }
-
-                return Promise.resolve(nodes);
+                return Promise.resolve(nodes.length > 0 ? nodes : warmNodes);
               }
 
               return Promise.resolve([]);
@@ -87,6 +85,10 @@ function node(overrides: Partial<MockNode>): MockNode {
     vmSize: 'medium',
     vmLocation: 'fsn1',
     lastMetrics: JSON.stringify({ cpuLoadAvg1: 5, memoryPercent: 10 }),
+    runtime: 'vm',
+    lastHeartbeatAt: new Date().toISOString(),
+    agentReadyAt: new Date().toISOString(),
+    agentVersion: null,
     warmSince: null,
     ...overrides,
   };
@@ -362,6 +364,46 @@ describe('parseMetrics via selectNodeForTaskRun.lastMetrics', () => {
 // =============================================================================
 
 describe('selectNodeForTaskRun VM size minimum behavior', () => {
+  it('reuses a healthy compatible medium hel1 node with 2 of 5 workspaces and low load', async () => {
+    const requiredVersion = '2'.repeat(40);
+    const db = createMockDb({
+      nodes: [
+        node({
+          id: '01KZR2JAP92AK3SKW951E4H21M',
+          vmSize: 'medium',
+          vmLocation: 'hel1',
+          agentVersion: requiredVersion,
+          lastMetrics: JSON.stringify({ cpuLoadAvg1: 3, memoryPercent: 18 }),
+        }),
+      ],
+      workspaceCount: 2,
+    });
+
+    const result = await selectNodeWithExplanation(
+      db as never,
+      'user-1',
+      { VM_AGENT_REQUIRED_VERSION: requiredVersion },
+      {
+        vmSize: 'medium',
+        vmLocation: 'hel1',
+        limits: { maxWorkspacesPerNode: 5 },
+      }
+    );
+
+    expect(result.node?.id).toBe('01KZR2JAP92AK3SKW951E4H21M');
+    expect(result.explanation).toMatchObject({
+      outcome: 'reused',
+      selectionPath: 'capacity',
+      selectedNodeId: '01KZR2JAP92AK3SKW951E4H21M',
+      evaluatedNodes: [
+        {
+          accepted: true,
+          snapshot: { activeWorkspaceCount: 2, agentVersionCompatible: true },
+        },
+      ],
+    });
+  });
+
   it('rejects smaller regular nodes for larger requested sizes', async () => {
     const db = createMockDb({
       nodes: [
@@ -373,6 +415,125 @@ describe('selectNodeForTaskRun VM size minimum behavior', () => {
     const selected = await selectNodeForTaskRun(db as never, 'user-1', {}, undefined, 'large');
 
     expect(selected).toBeNull();
+  });
+
+  it('records and excludes a warm node after a concurrent claim loss', async () => {
+    vi.mocked(nodeLifecycle.tryClaim).mockResolvedValue({ claimed: false } as never);
+    const db = createMockDb({
+      nodes: [node({ id: 'warm-lost', warmSince: new Date().toISOString() })],
+    });
+
+    const result = await selectNodeWithExplanation(
+      db as never,
+      'user-1',
+      { NODE_LIFECYCLE: {} as DurableObjectNamespace },
+      { vmSize: 'medium', vmLocation: 'fsn1', taskId: 'task-1' }
+    );
+
+    expect(result.node).toBeNull();
+    expect(result.explanation.outcome).toBe('provisioned');
+    expect(
+      result.explanation.evaluatedNodes.filter((evaluation) =>
+        evaluation.rejectionReasons.includes('warm-claim-lost')
+      )
+    ).toHaveLength(2);
+  });
+
+  it('selects a compatible node over a lower-load incompatible node', async () => {
+    const requiredVersion = 'a'.repeat(40);
+    const db = createMockDb({
+      nodes: [
+        node({
+          id: 'incompatible-idle',
+          agentVersion: 'b'.repeat(40),
+          lastMetrics: JSON.stringify({ cpuLoadAvg1: 0, memoryPercent: 0 }),
+        }),
+        node({
+          id: 'compatible-busier',
+          agentVersion: requiredVersion,
+          lastMetrics: JSON.stringify({ cpuLoadAvg1: 30, memoryPercent: 30 }),
+        }),
+      ],
+    });
+
+    const result = await selectNodeWithExplanation(
+      db as never,
+      'user-1',
+      { VM_AGENT_REQUIRED_VERSION: requiredVersion },
+      { vmSize: 'medium', vmLocation: 'fsn1' }
+    );
+
+    expect(result.node?.id).toBe('compatible-busier');
+    expect(
+      result.explanation.evaluatedNodes.find(
+        (evaluation) => evaluation.nodeId === 'incompatible-idle'
+      )?.rejectionReasons
+    ).toContain('agent-version-mismatch');
+  });
+
+  it.each([
+    ['preferred', { preferredNodeId: 'incompatible-node' }],
+    [
+      'manual',
+      { preferredNodeId: 'incompatible-node', preferredOnly: true, selectionPath: 'manual' },
+    ],
+    ['trial', { selectionPath: 'trial' }],
+  ] as const)('records exact incompatibility on the %s selection path', async (path, options) => {
+    const requiredVersion = 'c'.repeat(40);
+    const db = createMockDb({
+      nodes: [node({ id: 'incompatible-node', agentVersion: 'd'.repeat(40) })],
+    });
+
+    const result = await selectNodeWithExplanation(
+      db as never,
+      'user-1',
+      { VM_AGENT_REQUIRED_VERSION: requiredVersion },
+      { vmSize: 'medium', vmLocation: 'hel1', ...options }
+    );
+
+    expect(result.node).toBeNull();
+    expect(result.explanation.evaluatedNodes).toEqual([
+      expect.objectContaining({
+        path,
+        accepted: false,
+        rejectionReasons: expect.arrayContaining(['agent-version-mismatch']),
+      }),
+    ]);
+  });
+
+  it('records exact incompatibility on both warm and capacity evaluations', async () => {
+    const requiredVersion = 'e'.repeat(40);
+    const db = createMockDb({
+      nodes: [
+        node({
+          id: 'incompatible-warm',
+          agentVersion: 'f'.repeat(40),
+          warmSince: new Date().toISOString(),
+        }),
+      ],
+    });
+
+    const result = await selectNodeWithExplanation(
+      db as never,
+      'user-1',
+      {
+        VM_AGENT_REQUIRED_VERSION: requiredVersion,
+        NODE_LIFECYCLE: {} as DurableObjectNamespace,
+      },
+      { vmSize: 'medium', vmLocation: 'hel1', taskId: 'task-incompatible' }
+    );
+
+    expect(nodeLifecycle.tryClaim).not.toHaveBeenCalled();
+    expect(result.explanation.evaluatedNodes).toEqual([
+      expect.objectContaining({
+        path: 'warm',
+        rejectionReasons: expect.arrayContaining(['agent-version-mismatch']),
+      }),
+      expect.objectContaining({
+        path: 'capacity',
+        rejectionReasons: expect.arrayContaining(['agent-version-mismatch']),
+      }),
+    ]);
   });
 
   it('allows larger regular nodes to satisfy smaller requested sizes', async () => {
@@ -418,8 +579,8 @@ describe('selectNodeForTaskRun VM size minimum behavior', () => {
     const db = createMockDb({
       nodes: [],
       warmNodes: [
-        node({ id: 'warm-small', vmSize: 'small', warmSince: Date.now() }),
-        node({ id: 'warm-medium', vmSize: 'medium', warmSince: Date.now() }),
+        node({ id: 'warm-small', vmSize: 'small', warmSince: new Date().toISOString() }),
+        node({ id: 'warm-medium', vmSize: 'medium', warmSince: new Date().toISOString() }),
       ],
     });
 
@@ -440,7 +601,7 @@ describe('selectNodeForTaskRun VM size minimum behavior', () => {
     vi.mocked(nodeLifecycle.tryClaim).mockResolvedValue({ claimed: true });
     const db = createMockDb({
       nodes: [],
-      warmNodes: [node({ id: 'warm-large', vmSize: 'large', warmSince: Date.now() })],
+      warmNodes: [node({ id: 'warm-large', vmSize: 'large', warmSince: new Date().toISOString() })],
     });
 
     const selected = await selectNodeForTaskRun(

@@ -1552,6 +1552,13 @@
             "additionalProperties": true,
             "nullable": true
           },
+          "placementExplanation": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": true,
+            "nullable": true
+          },
           "errorMessage": {
             "type": "string",
             "nullable": true
@@ -1637,6 +1644,13 @@
             "nullable": true
           },
           "completionEvidence": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": true,
+            "nullable": true
+          },
+          "placementExplanation": {
             "type": "object",
             "properties": {},
             "required": [],
@@ -2347,6 +2361,13 @@
           },
           "branch": {
             "type": "string"
+          },
+          "placementExplanation": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": true,
+            "nullable": true
           },
           "createdAt": {
             "type": "string",

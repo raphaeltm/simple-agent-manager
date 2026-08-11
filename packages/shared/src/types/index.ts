@@ -629,7 +629,16 @@ export type {
 
 // Resource Requirements & Reservations
 export type {
+  LegacyPlacementExplanation,
   PlacementExplanation,
+  PlacementNodeEvaluation,
+  PlacementNodeSnapshot,
+  PlacementOutcome,
+  PlacementProvisioningAttempt,
+  PlacementProvisioningFailureReason,
+  PlacementRejectionReason,
+  PlacementRequestSnapshot,
+  PlacementSelectionPath,
   ResolvedResourceReservation,
   ResourceRequirements,
   ResourceRequirementsSource,

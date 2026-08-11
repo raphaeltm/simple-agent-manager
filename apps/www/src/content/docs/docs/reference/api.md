@@ -47,7 +47,12 @@ List all workspaces for the authenticated user.
 
 ### `GET /api/workspaces/:id`
 
-Get workspace details including status, node info, and URLs.
+Get workspace details including status, node info, URLs, and a safely parsed
+`placementExplanation` when placement evidence was recorded. Version 2 records
+describe whether SAM reused or provisioned a node, the selection path, typed
+candidate rejection reasons, bounded request/metric snapshots, and
+provisioning attempts. Historical workspaces may return a legacy placement
+shape or `null`.
 
 ### `POST /api/workspaces/:id/stop`
 
@@ -160,6 +165,11 @@ Create a task record.
   "title": "Fix the login button"
 }
 ```
+
+Task responses retain `placementExplanationJson` for compatibility and also
+return its validated `placementExplanation` form. Invalid or unknown stored
+shapes are returned as `null` in the parsed field instead of being reflected to
+clients.
 
 ## Deployment Releases
 

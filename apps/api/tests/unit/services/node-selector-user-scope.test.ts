@@ -72,11 +72,18 @@ function seedHealthyNode(id: string, userId: string): void {
   sqlite
     ?.prepare(
       `
-      INSERT INTO nodes (id, user_id, name, status, vm_size, vm_location, health_status, last_metrics, node_role, runtime, node_class)
-      VALUES (?, ?, ?, 'running', 'medium', 'nbg1', 'healthy', ?, 'workspace', 'vm', 'managed')
+      INSERT INTO nodes (id, user_id, name, status, vm_size, vm_location, health_status, last_metrics, last_heartbeat_at, agent_ready_at, node_role, runtime, node_class)
+      VALUES (?, ?, ?, 'running', 'medium', 'nbg1', 'healthy', ?, ?, ?, 'workspace', 'vm', 'managed')
     `
     )
-    .run(id, userId, `node-${id}`, JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10 }));
+    .run(
+      id,
+      userId,
+      `node-${id}`,
+      JSON.stringify({ cpuLoadAvg1: 0.1, memoryPercent: 10 }),
+      new Date().toISOString(),
+      new Date().toISOString()
+    );
 }
 
 // No warm-pool path: taskId omitted so step 0 is skipped and NODE_LIFECYCLE is never touched.

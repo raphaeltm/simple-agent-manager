@@ -2256,6 +2256,8 @@ export const trials = sqliteTable(
     claimedAt: integer('claimed_at'), // epoch ms, nullable
     errorCode: text('error_code'),
     errorMessage: text('error_message'),
+    /** Versioned, non-sensitive node placement audit record. */
+    placementExplanationJson: text('placement_explanation_json'),
   },
   (table) => ({
     fingerprintIdx: index('idx_trials_fingerprint').on(table.fingerprint, table.createdAt),

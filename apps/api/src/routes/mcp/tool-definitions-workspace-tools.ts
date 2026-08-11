@@ -7,7 +7,7 @@ export const WORKSPACE_TOOLS = [
   {
     name: 'get_workspace_info',
     description:
-      'Get consolidated workspace metadata: ID, node, project, branch, mode, VM size, URL, uptime. Use this for orientation at the start of a session.',
+      'Get consolidated workspace metadata: ID, node, project, branch, mode, VM size, URL, uptime, and the non-sensitive node-placement explanation. Use this for orientation at the start of a session.',
     inputSchema: {
       type: 'object' as const,
       properties: {},

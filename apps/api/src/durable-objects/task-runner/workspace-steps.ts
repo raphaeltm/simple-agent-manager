@@ -158,6 +158,9 @@ async function createAndProvisionWorkspace(
     workspaceProfile: state.config.workspaceProfile ?? DEFAULT_WORKSPACE_PROFILE,
     devcontainerConfigName: state.config.devcontainerConfigName ?? null,
     agentProfileHint: state.config.agentProfileHint ?? null,
+    placementExplanationJson: state.placementExplanation
+      ? JSON.stringify(state.placementExplanation)
+      : null,
     createdAt: now,
     updatedAt: now,
   });

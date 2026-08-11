@@ -95,6 +95,11 @@ will be reviewed in one draft PR.
     tests. Refactoring must replace brittle contracts that encode duplication with
     behavioral coverage of typed decisions and persisted vertical slices. Addressed by
     checklist D.
+13. The deterministic historical fingerprint is identical for production SHAs
+    `23e7adc23954d2b3a231b942edbb3195a6442301` and
+    `fc1e394217248c3bd004b2e6619cf2344eade7e3`
+    (`af2265ffb952310437913fbaae702cec303d5c1dbb2016bec2ee63c7d870609a`), proving
+    the resolver classifies that incident's controller-only deploy as unchanged.
 
 ## Implementation Checklist
 
@@ -120,32 +125,32 @@ will be reviewed in one draft PR.
 
 ### B. Typed placement evaluation and persistence
 
-- [ ] Evolve the shared placement model to a versioned v2 shape with outcome, selection
+- [x] Evolve the shared placement model to a versioned v2 shape with outcome, selection
       path, request/limit snapshot, evaluated candidates, typed rejection reasons,
       provisioning attempts, timestamps, and concise summary.
-- [ ] Add safe parsing for v2 and the legacy unversioned shape.
-- [ ] Centralize reusable-node evaluation for preferred, warm, capacity, trial, manual,
+- [x] Add safe parsing for v2 and the legacy unversioned shape.
+- [x] Centralize reusable-node evaluation for preferred, warm, capacity, trial, manual,
       and compatibility-wrapper paths while retaining exact agent-version comparison.
-- [ ] Record deterministic typed reasons including agent mismatch, unhealthy, stale
+- [x] Record deterministic typed reasons including agent mismatch, unhealthy, stale
       heartbeat, wrong runtime, undersized VM, workspace limit, CPU/memory thresholds,
       and lost warm claim.
-- [ ] Persist TaskRunner selection immediately, update provisioning/fallback attempts,
+- [x] Persist TaskRunner selection immediately, update provisioning/fallback attempts,
       preserve selection/provisioning failures, and copy/finalize the explanation on
       workspace creation.
-- [ ] Add a safe migration and schema field for trial placement, and persist trial reuse,
+- [x] Add a safe migration and schema field for trial placement, and persist trial reuse,
       provisioning, and failure decisions.
-- [ ] Persist manual selected-node and provision-new decisions on its conversation task
+- [x] Persist manual selected-node and provision-new decisions on its conversation task
       and workspace.
-- [ ] Emit structured placement log events with only the allowlisted explanation.
+- [x] Emit structured placement log events with only the allowlisted explanation.
 
 ### C. API, MCP, and compact UI exposure
 
-- [ ] Return parsed placement data from task and workspace mappers while retaining the
+- [x] Return parsed placement data from task and workspace mappers while retaining the
       legacy raw task JSON field for compatibility.
-- [ ] Enrich `get_workspace_info` with a concise D1-backed placement summary/detail.
-- [ ] Add a default-collapsed placement section to the existing workspace sidebar,
+- [x] Enrich `get_workspace_info` with a concise D1-backed placement summary/detail.
+- [x] Add a default-collapsed placement section to the existing workspace sidebar,
       including concise outcome text and typed rejection/attempt detail.
-- [ ] Update public configuration/architecture documentation, env references, and
+- [x] Update public configuration/architecture documentation, env references, and
       `.claude/rules/54-vm-agent-rollout-compatibility.md` with release carry-forward
       semantics and explicit compatibility bump guidance.
 
@@ -156,14 +161,14 @@ will be reviewed in one draft PR.
       changed/unchanged `skip_agent`, invalid metadata, and no empty enforcement.
 - [x] Update workflow/sync safety tests for release outputs, step ordering, and
       conditional R2 build/upload.
-- [ ] Add behavioral selector tests covering reuse, exact incompatibility on every path,
+- [x] Add behavioral selector tests covering reuse, exact incompatibility on every path,
       deterministic reasons/metrics, healthy-versus-better-incompatible ranking, and
       concurrent warm claim loss.
-- [ ] Add TaskRunner/trial/manual vertical slices proving reused, provisioned, and failed
+- [x] Add TaskRunner/trial/manual vertical slices proving reused, provisioned, and failed
       decisions persist and copy to workspaces.
-- [ ] Seed canary secrets in raw metrics, agent version/provider errors, and unrelated DB
+- [x] Seed canary secrets in raw metrics, agent version/provider errors, and unrelated DB
       fields; prove stored, REST, log, and MCP placement payloads exclude them.
-- [ ] Add mapper/MCP/UI tests and run local Playwright visual/accessibility audits with
+- [x] Add mapper/MCP/UI tests and run local Playwright visual/accessibility audits with
       normal, long, empty/legacy, many-rejection, error, and special-character scenarios
       at mobile and desktop widths with no horizontal overflow.
 - [ ] Run focused suites, `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.

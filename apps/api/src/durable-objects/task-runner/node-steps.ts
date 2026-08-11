@@ -6,13 +6,15 @@
  */
 import { isTransientCapacityError, ProviderError } from '@simple-agent-manager/providers';
 import type { VMSize } from '@simple-agent-manager/shared';
-import { canSatisfyVmSize, vmSizeFallbackChain } from '@simple-agent-manager/shared';
+import { vmSizeFallbackChain } from '@simple-agent-manager/shared';
+import { drizzle } from 'drizzle-orm/d1';
 
+import * as schema from '../../db/schema';
 import { log } from '../../lib/logger';
-import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
+import { selectNodeWithExplanation } from '../../services/node-selector';
 import { assertClaimedNodeAvailable } from './claimed-node-availability';
-import { parseEnvInt } from './helpers';
-import { findNodeWithCapacity, tryClaimWarmNode, verifyNodeAgentHealthy } from './node-selection';
+import { persistTaskPlacement, recordProvisioningAttempt } from './placement';
+import { assertTaskNodeProvisioningAllowed } from './provisioning-guards';
 import { isNodeAgentReadyForWorkspaceDispatch } from './readiness';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -33,72 +35,37 @@ export async function handleNodeSelection(
     preferredNodeId: state.config.preferredNodeId,
   });
 
+  const scaling = state.config.projectScaling;
+  const placement = await selectNodeWithExplanation(
+    drizzle(rc.env.DATABASE, { schema }),
+    state.userId,
+    rc.env,
+    {
+      vmSize: state.config.vmSize,
+      vmLocation: state.config.vmLocation,
+      taskId: state.taskId,
+      preferredNodeId: state.config.preferredNodeId ?? undefined,
+      preferredOnly: Boolean(state.config.preferredNodeId),
+      limits: {
+        maxWorkspacesPerNode: scaling?.maxWorkspacesPerNode ?? undefined,
+        cpuThresholdPercent: scaling?.nodeCpuThresholdPercent ?? undefined,
+        memoryThresholdPercent: scaling?.nodeMemoryThresholdPercent ?? undefined,
+      },
+    }
+  );
+  await persistTaskPlacement(state, rc, placement.explanation);
+
+  if (placement.node) {
+    state.stepResults.nodeId = placement.node.id;
+    await rc.advanceToStep(state, 'workspace_creation');
+    return;
+  }
   if (state.config.preferredNodeId) {
-    // Validate the preferred node
-    const node = await rc.env.DATABASE.prepare(
-      `SELECT id, status, vm_size, agent_version FROM nodes WHERE id = ? AND user_id = ?`
-    )
-      .bind(state.config.preferredNodeId, state.userId)
-      .first<{ id: string; status: string; vm_size: string; agent_version: string | null }>();
-
-    if (!node || node.status !== 'running') {
-      throw Object.assign(new Error('Specified node is not available'), { permanent: true });
-    }
-    if (!canSatisfyVmSize(node.vm_size, state.config.vmSize)) {
-      throw Object.assign(new Error('Specified node is smaller than the requested VM size'), {
-        permanent: true,
-      });
-    }
-    if (!isNodeAgentVersionCompatible(node.agent_version, rc.env.VM_AGENT_REQUIRED_VERSION)) {
-      throw Object.assign(new Error('Specified node is running an incompatible VM agent build'), {
-        permanent: true,
-      });
-    }
-
-    // Verify the VM agent is actually reachable before reusing
-    if (await verifyNodeAgentHealthy(node.id, rc)) {
-      state.stepResults.nodeId = node.id;
-      await rc.advanceToStep(state, 'workspace_creation');
-      return;
-    }
-    log.warn('task_runner_do.preferred_node_unhealthy', {
-      taskId: state.taskId,
-      nodeId: node.id,
-    });
-    throw Object.assign(new Error('Specified node is not reachable'), { permanent: true });
-  }
-
-  // Try warm pool first
-  const nodeId = await tryClaimWarmNode(state, rc);
-  if (nodeId) {
-    if (await verifyNodeAgentHealthy(nodeId, rc)) {
-      state.stepResults.nodeId = nodeId;
-      await rc.advanceToStep(state, 'workspace_creation');
-      return;
-    }
-    // Warm node agent not healthy — fall through to try other options
-    log.warn('task_runner_do.warm_node_unhealthy', {
-      taskId: state.taskId,
-      nodeId,
+    throw Object.assign(new Error('Specified node is not eligible for workspace placement'), {
+      permanent: true,
     });
   }
 
-  // Try existing running nodes with capacity
-  const existingNodeId = await findNodeWithCapacity(state, rc);
-  if (existingNodeId) {
-    if (await verifyNodeAgentHealthy(existingNodeId, rc)) {
-      state.stepResults.nodeId = existingNodeId;
-      await rc.advanceToStep(state, 'workspace_creation');
-      return;
-    }
-    // Existing node agent not healthy — fall through to provision
-    log.warn('task_runner_do.existing_node_unhealthy', {
-      taskId: state.taskId,
-      nodeId: existingNodeId,
-    });
-  }
-
-  // No node found — need to provision
   await rc.advanceToStep(state, 'node_provisioning');
 }
 
@@ -190,6 +157,19 @@ export async function handleNodeProvisioning(
     }
 
     if (node?.status === 'running') {
+      const latestAttempt = state.placementExplanation?.provisioningAttempts.at(-1);
+      if (latestAttempt?.outcome === 'started') {
+        await recordProvisioningAttempt(
+          state,
+          rc,
+          {
+            vmSize: state.config.vmSize,
+            vmLocation: state.config.vmLocation,
+            outcome: 'succeeded',
+          },
+          state.stepResults.nodeId
+        );
+      }
       // Already provisioned — advance
       await rc.advanceToStep(state, 'node_agent_ready');
       return;
@@ -204,64 +184,7 @@ export async function handleNodeProvisioning(
     return;
   }
 
-  // Check user node limit. User-owned (BYO) nodes are excluded — they cost SAM nothing to run, so
-  // they must not consume an auto-provisioning slot or block cloud provisioning (critique #8).
-  const maxNodes = parseEnvInt(rc.env.MAX_NODES_PER_USER, 10);
-  const countResult = await rc.env.DATABASE.prepare(
-    `SELECT COUNT(*) as c FROM nodes WHERE user_id = ? AND status IN ('running', 'creating', 'recovery') AND node_role = 'workspace' AND node_class != 'user-owned'`
-  )
-    .bind(state.userId)
-    .first<{ c: number }>();
-
-  if ((countResult?.c ?? 0) >= maxNodes) {
-    throw Object.assign(new Error(`Maximum ${maxNodes} nodes allowed. Cannot auto-provision.`), {
-      permanent: true,
-    });
-  }
-
-  // Re-check quota before provisioning (hard gate for platform compute).
-  // Resolves credential source for the target provider — not just whether the user
-  // has ANY cloud credential. A user with a Hetzner credential who provisions on
-  // Scaleway (platform) must still be quota-enforced.
-  const quotaEnforcementEnabled = rc.env.COMPUTE_QUOTA_ENFORCEMENT_ENABLED !== 'false';
-  if (quotaEnforcementEnabled) {
-    const { drizzle } = await import('drizzle-orm/d1');
-    const drizzleSchema = await import('../../db/schema');
-    const db = drizzle(rc.env.DATABASE, { schema: drizzleSchema });
-    const { resolveCredentialSource } = await import('../../services/provider-credentials');
-    const attributionProjectId =
-      state.config.credentialAttributionSource === 'project'
-        ? state.config.credentialAttributionProjectId
-        : null;
-    const credResult = await resolveCredentialSource(
-      db,
-      state.config.credentialAttributionUserId,
-      (state.config.cloudProvider as import('@simple-agent-manager/shared').CredentialProvider) ??
-        undefined,
-      attributionProjectId
-    );
-
-    if (!credResult) {
-      throw Object.assign(new Error('No cloud provider credentials available for provisioning.'), {
-        permanent: true,
-      });
-    }
-
-    if (credResult.credentialSource === 'platform') {
-      const { checkQuotaForUser } = await import('../../services/compute-quotas');
-      const quotaCheck = await checkQuotaForUser(db, state.userId);
-
-      if (!quotaCheck.allowed) {
-        throw Object.assign(
-          new Error(
-            `Monthly compute quota exceeded: ${quotaCheck.used} of ${quotaCheck.limit} vCPU-hours used. ` +
-              'Add your own cloud provider credentials or contact your admin.'
-          ),
-          { permanent: true }
-        );
-      }
-    }
-  }
+  await assertTaskNodeProvisioningAllowed(state, rc);
 
   // Import and call node creation services
   // We import dynamically to avoid circular dependency issues and
@@ -305,6 +228,17 @@ export async function handleNodeProvisioning(
       .bind(createdNode.id, new Date().toISOString(), state.taskId)
       .run();
 
+    await recordProvisioningAttempt(
+      state,
+      rc,
+      {
+        vmSize: size,
+        vmLocation: state.config.vmLocation,
+        outcome: 'started',
+      },
+      createdNode.id
+    );
+
     log.info('task_runner_do.step.node_provisioning', {
       taskId: state.taskId,
       nodeId: createdNode.id,
@@ -336,6 +270,17 @@ export async function handleNodeProvisioning(
       // Any non-capacity provider failure fails fast — never descend on
       // invalid_config / quota_exceeded / auth_error / rate_limited / unknown.
       if (!isCapacityFailure) {
+        await recordProvisioningAttempt(
+          state,
+          rc,
+          {
+            vmSize: size,
+            vmLocation: state.config.vmLocation,
+            outcome: 'failed',
+            failureReason: 'provider-failed',
+          },
+          createdNode.id
+        );
         const message = err instanceof Error ? err.message : 'Node provisioning failed';
         throw Object.assign(new Error(message), { permanent: true });
       }
@@ -343,6 +288,17 @@ export async function handleNodeProvisioning(
       // transient_capacity: descend to the next-smaller size if one remains.
       // The failed node row was already deleted inside provisionNode (decision #1).
       if (!isLastSize) {
+        await recordProvisioningAttempt(
+          state,
+          rc,
+          {
+            vmSize: size,
+            vmLocation: state.config.vmLocation,
+            outcome: 'capacity-rejected',
+            failureReason: 'capacity-unavailable',
+          },
+          null
+        );
         const nextSize = chain[i + 1];
         if (nextSize === undefined) {
           throw Object.assign(
@@ -365,6 +321,17 @@ export async function handleNodeProvisioning(
         chain.length === 1
           ? `There were no ${requestedSize} machines available.`
           : `No capacity for any available VM size (tried ${chain.join(', ')}).`;
+      await recordProvisioningAttempt(
+        state,
+        rc,
+        {
+          vmSize: size,
+          vmLocation: state.config.vmLocation,
+          outcome: 'failed',
+          failureReason: 'capacity-unavailable',
+        },
+        null
+      );
       throw Object.assign(new Error(terminalMessage), { permanent: true });
     }
 
@@ -376,6 +343,16 @@ export async function handleNodeProvisioning(
     // provisioned (relevant when we descended below the requested size).
     state.config.vmSize = size;
     await rc.ctx.storage.put('state', state);
+    await recordProvisioningAttempt(
+      state,
+      rc,
+      {
+        vmSize: size,
+        vmLocation: state.config.vmLocation,
+        outcome: 'succeeded',
+      },
+      createdNode.id
+    );
 
     if (size !== requestedSize) {
       // Persist the downgraded size on the task so the UI can surface it.

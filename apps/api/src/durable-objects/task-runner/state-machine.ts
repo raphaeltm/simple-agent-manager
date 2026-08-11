@@ -7,6 +7,7 @@
 import { log } from '../../lib/logger';
 import { persistError, redactSensitiveData } from '../../services/observability';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
+import { recordPlacementFailure } from './placement';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 // =========================================================================
@@ -207,6 +208,12 @@ export async function failTask(
   rc: TaskRunnerContext
 ): Promise<void> {
   const now = new Date().toISOString();
+
+  if (state.currentStep === 'node_provisioning') {
+    await recordPlacementFailure(state, rc, 'provider-failed');
+  } else if (state.currentStep === 'node_agent_ready') {
+    await recordPlacementFailure(state, rc, 'readiness-timeout');
+  }
 
   log.error('task_runner_do.task_failed', {
     taskId: state.taskId,
