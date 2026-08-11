@@ -69,7 +69,7 @@ Full design/research context is in SAM idea `01KZPTT49W10FC1P9G9RQEK8M1`.
       follow-up prompt, assistant notifications, cancellation, and request shapes.
 - [x] Run proportional syntax/smoke validation, targeted reviewers, and local PR
       evidence checks. Do not deploy to staging.
-- [ ] Push the assigned branch and open a draft PR. Do not merge.
+- [x] Push the assigned branch and open draft PR #1805. Do not merge.
 
 ## Acceptance Criteria
 
