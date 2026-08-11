@@ -26,13 +26,52 @@ import {
   resolveOrchestratorConfig,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
+import * as v from 'valibot';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
+import { mapRows, parseRowOrNull } from '../row-validation';
 import { logDecision, pruneDecisionLog } from './decision-log';
 import { runOrchestratorMigrations } from './migrations';
 import { runSchedulingCycle } from './scheduling';
+
+// =============================================================================
+// DO-SQLite row schemas — orchestrator-specific (see ../row-validation for the
+// generic mapRows/parseRowOrNull helpers). Field sets mirror the CREATE TABLE
+// statements in ./migrations.ts exactly, so a plain (non-strict) v.object()
+// validates every column a `SELECT *` can return.
+// =============================================================================
+
+const OrchestratorMissionRowSchema = v.object({
+  mission_id: v.string(),
+  status: v.string(),
+  last_checked_at: v.number(),
+  last_dispatch_at: v.nullable(v.number()),
+  registered_at: v.number(),
+});
+
+const SchedulingQueueRowSchema = v.object({
+  id: v.string(),
+  mission_id: v.string(),
+  task_id: v.string(),
+  scheduled_at: v.number(),
+  dispatched_at: v.nullable(v.number()),
+  reason: v.string(),
+});
+
+const DecisionLogRowSchema = v.object({
+  id: v.string(),
+  mission_id: v.string(),
+  task_id: v.nullable(v.string()),
+  action: v.string(),
+  reason: v.string(),
+  metadata: v.nullable(v.string()),
+  created_at: v.number(),
+});
+
+/** `SELECT mission_id FROM orchestrator_missions LIMIT 1` shape. */
+const MissionIdRowSchema = v.object({ mission_id: v.string() });
 
 export class ProjectOrchestrator extends DurableObject<Env> {
   private projectId: string | null = null;
@@ -260,39 +299,29 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     const sql = this.ctx.storage.sql;
     const config = resolveOrchestratorConfig(this.env);
 
-    const missions = sql.exec(
-      'SELECT * FROM orchestrator_missions ORDER BY registered_at DESC',
-    ).toArray() as unknown as Array<{
-      mission_id: string;
-      status: string;
-      last_checked_at: number;
-      last_dispatch_at: number | null;
-      registered_at: number;
-    }>;
+    const missions = mapRows(
+      sql.exec('SELECT * FROM orchestrator_missions ORDER BY registered_at DESC').toArray(),
+      OrchestratorMissionRowSchema,
+      'orchestrator.missions_list',
+      'mission_id'
+    );
 
-    const queue = sql.exec(
-      'SELECT * FROM scheduling_queue WHERE dispatched_at IS NULL ORDER BY scheduled_at ASC',
-    ).toArray() as unknown as Array<{
-      id: string;
-      mission_id: string;
-      task_id: string;
-      scheduled_at: number;
-      dispatched_at: number | null;
-      reason: string;
-    }>;
+    const queue = mapRows(
+      sql.exec(
+        'SELECT * FROM scheduling_queue WHERE dispatched_at IS NULL ORDER BY scheduled_at ASC',
+      ).toArray(),
+      SchedulingQueueRowSchema,
+      'orchestrator.queue_list'
+    );
 
-    const decisions = sql.exec(
-      'SELECT * FROM decision_log ORDER BY created_at DESC LIMIT ?',
-      config.recentDecisionsLimit,
-    ).toArray() as unknown as Array<{
-      id: string;
-      mission_id: string;
-      task_id: string | null;
-      action: string;
-      reason: string;
-      metadata: string | null;
-      created_at: number;
-    }>;
+    const decisions = mapRows(
+      sql.exec(
+        'SELECT * FROM decision_log ORDER BY created_at DESC LIMIT ?',
+        config.recentDecisionsLimit,
+      ).toArray(),
+      DecisionLogRowSchema,
+      'orchestrator.decisions_list'
+    );
 
     const alarm = await this.ctx.storage.getAlarm();
 
@@ -334,16 +363,13 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     this.projectId = projectId;
     const sql = this.ctx.storage.sql;
 
-    const queue = sql.exec(
-      'SELECT * FROM scheduling_queue WHERE dispatched_at IS NULL ORDER BY scheduled_at ASC',
-    ).toArray() as unknown as Array<{
-      id: string;
-      mission_id: string;
-      task_id: string;
-      scheduled_at: number;
-      dispatched_at: number | null;
-      reason: string;
-    }>;
+    const queue = mapRows(
+      sql.exec(
+        'SELECT * FROM scheduling_queue WHERE dispatched_at IS NULL ORDER BY scheduled_at ASC',
+      ).toArray(),
+      SchedulingQueueRowSchema,
+      'orchestrator.queue_list'
+    );
 
     return queue.map((q) => ({
       id: q.id,
@@ -414,13 +440,15 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     }
 
     // Fallback: resolve from the first mission via D1
-    const missions = this.ctx.storage.sql.exec(
-      'SELECT mission_id FROM orchestrator_missions LIMIT 1',
-    ).toArray() as unknown as Array<{ mission_id: string }>;
+    const firstMission = parseRowOrNull(
+      this.ctx.storage.sql.exec('SELECT mission_id FROM orchestrator_missions LIMIT 1').toArray()[0],
+      MissionIdRowSchema,
+      'orchestrator.resolve_project_id',
+      'mission_id'
+    );
 
-    if (missions.length === 0) return null;
+    if (!firstMission) return null;
 
-    const firstMission = missions[0]!;
     const result = await this.env.DATABASE.prepare(
       'SELECT project_id FROM missions WHERE id = ?',
     ).bind(firstMission.mission_id).first<{ project_id: string }>();

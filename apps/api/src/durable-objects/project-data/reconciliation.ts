@@ -22,10 +22,12 @@ import {
   DEFAULT_TASK_RECONCILIATION_PROMPT_SOFT_STALL_MS,
   DEFAULT_TASK_RECONCILIATION_RESPONSE_DEADLINE_MS,
 } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
 
 import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { cancelAgentSessionOnNode, sendPromptToAgentOnNode } from '../../services/node-agent';
+import { parseRowOrNull } from '../row-validation';
 import { recordActivityEventInternal } from './activity';
 import { createAttentionMarker } from './attention';
 import { persistMessage } from './messages';
@@ -61,11 +63,12 @@ export interface ReconciliationCandidate {
   promptAgeMs: number | null;
 }
 
-interface SessionStateRow {
-  activity: string | null;
-  activity_at: number | null;
-  prompt_started_at: number | null;
-}
+/** `SELECT activity, activity_at, prompt_started_at FROM session_state ...` shape. */
+const SessionStateRowSchema = v.object({
+  activity: v.nullable(v.string()),
+  activity_at: v.nullable(v.number()),
+  prompt_started_at: v.nullable(v.number()),
+});
 
 interface WorkspaceDeliveryTarget {
   nodeId: string;
@@ -239,10 +242,14 @@ export async function getReconciliationCandidates(
     }
 
     const acpSessionId = acpRow.id as string;
-    const stateRow = sql.exec(
-      `SELECT activity, activity_at, prompt_started_at FROM session_state WHERE session_id = ?`,
-      acpSessionId,
-    ).toArray()[0] as SessionStateRow | undefined;
+    const stateRow = parseRowOrNull(
+      sql.exec(
+        `SELECT activity, activity_at, prompt_started_at FROM session_state WHERE session_id = ?`,
+        acpSessionId,
+      ).toArray()[0],
+      SessionStateRowSchema,
+      'reconciliation.session_state'
+    );
 
     let action: ReconciliationCandidate['action'] = 'checkin';
     let promptStartedAt: number | null = null;

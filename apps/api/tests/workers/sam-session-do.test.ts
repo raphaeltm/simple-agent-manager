@@ -10,7 +10,7 @@
  * - Rate limiting enforcement
  * - Chat route relay (POST /chat, GET /conversations, GET /conversations/:id/messages)
  */
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 function getSamSession(userId: string) {
@@ -329,6 +329,100 @@ describe('SamSession DO — Type Filter and Message Limit', () => {
     const allResp = await stub.fetch(`https://sam-session/conversations/${convId}/messages`);
     const allData = await allResp.json() as { messages: Array<{ content: string }> };
     expect(allData.messages.length).toBeGreaterThan(2);
+  });
+});
+
+describe('SamSession DO — Row Fault Isolation', () => {
+  // REGRESSION (rule 50): `messages` rows were narrowed with a blind
+  // `as unknown as MessageRow[]` cast. `sequence` has INTEGER affinity but no
+  // STRICT typing, so real SQLite accepts and stores a non-numeric TEXT value
+  // as-is — the application itself never writes this; it's injected directly
+  // to simulate a legacy/corrupted row. A single malformed message must not
+  // 500 the whole conversation — it is skipped while the good messages either
+  // side of it still return.
+  it('skips a malformed message row (non-numeric sequence) and still returns the good messages', async () => {
+    const stub = getSamSession('test-user-row-fault-messages');
+
+    const first = await stub.fetch('https://sam-session/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Good message one', userId: 'test-user-row-fault-messages' }),
+    });
+    const text1 = await first.text();
+    const convId = text1.match(/"conversationId":"([^"]+)"/)?.[1];
+    expect(convId).toBeTruthy();
+
+    const second = await stub.fetch('https://sam-session/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        conversationId: convId,
+        message: 'Good message two',
+        userId: 'test-user-row-fault-messages',
+      }),
+    });
+    await second.text();
+
+    // Inject a malformed message directly — real embedded SQLite, bypassing
+    // the app layer entirely.
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO messages (id, conversation_id, role, content, sequence, created_at)
+         VALUES (?, ?, 'user', 'corrupted sequence', 'not-a-number', datetime('now'))`,
+        'msg-malformed-row-fault-001',
+        convId
+      );
+    });
+
+    const msgResp = await stub.fetch(`https://sam-session/conversations/${convId}/messages`);
+    expect(msgResp.status).toBe(200);
+    const msgData = await msgResp.json() as { messages: Array<{ id: string; content: string }> };
+
+    const contents = msgData.messages.map((m) => m.content);
+    expect(contents).toContain('Good message one');
+    expect(contents).toContain('Good message two');
+    expect(msgData.messages.find((m) => m.id === 'msg-malformed-row-fault-001')).toBeUndefined();
+  });
+
+  // REGRESSION (rule 50 — single-row degrade): `rate_limits` was narrowed with
+  // a blind `as {...} | undefined` cast. `window_start` has INTEGER affinity;
+  // a corrupted value must degrade the rate limiter to "row missing" (which
+  // self-heals via `INSERT OR REPLACE`) rather than silently computing NaN
+  // comparisons forever. This is the discriminating assertion: the pre-fix
+  // blind cast feeds the corrupted string straight into `Number(row.window_start)`
+  // (=NaN); `NaN > windowMs` is always false, so the reset branch never fires
+  // and the corrupted value is never repaired. The fix treats the unparsable
+  // row as absent and re-seeds it with a valid numeric window_start.
+  it('self-heals a corrupted rate_limits row instead of leaving it permanently NaN', async () => {
+    const stub = getSamSession('test-user-row-fault-ratelimit');
+
+    // Seed the singleton row via a real request, then corrupt it directly.
+    const seed = await stub.fetch('https://sam-session/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'seed rate limit row', userId: 'test-user-row-fault-ratelimit' }),
+    });
+    await seed.text();
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(`UPDATE rate_limits SET window_start = 'not-a-timestamp' WHERE id = 1`);
+    });
+
+    const resp = await stub.fetch('https://sam-session/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'after corruption', userId: 'test-user-row-fault-ratelimit' }),
+    });
+    expect(resp.status).toBe(200);
+    await resp.text();
+
+    const windowStart = await runInDurableObject(stub, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec('SELECT window_start FROM rate_limits WHERE id = 1')
+        .toArray()[0] as { window_start: unknown } | undefined;
+      return row?.window_start;
+    });
+    expect(typeof windowStart).toBe('number');
   });
 });
 

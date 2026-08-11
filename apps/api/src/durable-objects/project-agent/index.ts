@@ -20,9 +20,18 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env as AppEnv } from '../../env';
 import { createModuleLogger } from '../../lib/logger';
 import { readRequestJsonRecord } from '../../lib/runtime-validation';
+import {
+  type ConversationSummaryRow,
+  ConversationSummaryRowSchema,
+  mapRows,
+  MessageRowSchema,
+  parseRowOrNull,
+  RateLimitRowSchema,
+  RowidRowSchema,
+} from '../row-validation';
 import { buildFtsQuery, extractSnippet } from '../sam-session';
 import { runAgentLoop } from '../sam-session/agent-loop';
-import type { ConversationRow, MessageRow, SamSseEvent } from '../sam-session/types';
+import type { MessageRow, SamSseEvent } from '../sam-session/types';
 import { PROJECT_AGENT_SYSTEM_PROMPT } from './system-prompt';
 import { executeProjectTool,PROJECT_AGENT_TOOLS } from './tools';
 
@@ -269,10 +278,15 @@ export class ProjectAgent extends DurableObject<AppEnv> {
   /** Handle GET /conversations — list conversations. */
   private handleListConversations(): Response {
     const maxConversations = Number(this.env.SAM_MAX_CONVERSATIONS) || DEFAULT_SAM_MAX_CONVERSATIONS;
-    const rows = this.sql.exec(
+    const rawRows = this.sql.exec(
       'SELECT id, title, created_at, updated_at FROM conversations ORDER BY updated_at DESC LIMIT ?',
       maxConversations
-    ).toArray() as unknown as ConversationRow[];
+    ).toArray();
+    const rows: ConversationSummaryRow[] = mapRows(
+      rawRows,
+      ConversationSummaryRowSchema,
+      'project_agent.conversations_list'
+    );
 
     return new Response(JSON.stringify({ conversations: rows }), {
       headers: { 'content-type': 'application/json' },
@@ -285,12 +299,13 @@ export class ProjectAgent extends DurableObject<AppEnv> {
     const maxMessages = requestedLimit
       ? Math.min(requestedLimit, Number(this.env.SAM_MAX_MESSAGES_PER_CONVERSATION) || DEFAULT_SAM_MAX_MESSAGES_PER_CONVERSATION)
       : historyLimit;
-    const rows = this.sql.exec(
+    const rawRows = this.sql.exec(
       `SELECT id, conversation_id, role, content, tool_calls_json, tool_call_id, sequence, created_at
        FROM messages WHERE conversation_id = ? ORDER BY sequence ASC LIMIT ?`,
       conversationId,
       maxMessages
-    ).toArray() as unknown as MessageRow[];
+    ).toArray();
+    const rows: MessageRow[] = mapRows(rawRows, MessageRowSchema, 'project_agent.messages_list');
 
     return new Response(JSON.stringify({ messages: rows }), {
       headers: { 'content-type': 'application/json' },
@@ -359,13 +374,14 @@ export class ProjectAgent extends DurableObject<AppEnv> {
 
       if (content) {
         try {
-          const rowid = this.sql.exec(
+          const rowidRow = this.sql.exec(
             'SELECT rowid FROM messages WHERE id = ?', id
-          ).toArray()[0]?.rowid;
-          if (rowid != null) {
+          ).toArray()[0];
+          const parsedRowid = parseRowOrNull(rowidRow, RowidRowSchema, 'project_agent.message_rowid');
+          if (parsedRowid !== null) {
             this.sql.exec(
               'INSERT INTO messages_fts(rowid, content) VALUES (?, ?)',
-              rowid as number,
+              parsedRowid.rowid,
               content
             );
           }
@@ -386,9 +402,11 @@ export class ProjectAgent extends DurableObject<AppEnv> {
     const nowMs = Date.now();
     const windowMs = windowSeconds * 1000;
 
-    const row = this.sql.exec(
-      'SELECT window_start, request_count FROM rate_limits WHERE id = 1'
-    ).toArray()[0] as { window_start: number; request_count: number } | undefined;
+    const row = parseRowOrNull(
+      this.sql.exec('SELECT window_start, request_count FROM rate_limits WHERE id = 1').toArray()[0],
+      RateLimitRowSchema,
+      'project_agent.rate_limit'
+    );
 
     if (!row) {
       this.sql.exec(
@@ -522,13 +540,14 @@ export class ProjectAgent extends DurableObject<AppEnv> {
 
   /** Load conversation history for the agent loop. */
   private loadHistory(conversationId: string, contextWindow: number): MessageRow[] {
-    const rows = this.sql.exec(
+    const rawRows = this.sql.exec(
       `SELECT id, conversation_id, role, content, tool_calls_json, tool_call_id, sequence, created_at
        FROM messages WHERE conversation_id = ?
        ORDER BY sequence DESC LIMIT ?`,
       conversationId,
       contextWindow + 1
-    ).toArray() as unknown as MessageRow[];
+    ).toArray();
+    const rows: MessageRow[] = mapRows(rawRows, MessageRowSchema, 'project_agent.messages_history');
 
     // Strip the extra row only if we fetched more than contextWindow items
     // (the extra row is to avoid double-counting the just-persisted user message)

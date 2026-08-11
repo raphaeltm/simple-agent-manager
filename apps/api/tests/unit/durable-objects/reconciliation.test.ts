@@ -363,6 +363,34 @@ describe('Task Reconciliation Module', () => {
         promptStartedAt: now - TWO_HOURS - 1000,
       });
     });
+
+    // REGRESSION (rule 50): session_state.activity_at has INTEGER affinity but
+    // no STRICT typing, so a non-numeric value can land there (legacy row,
+    // future migration bug, manual repair). Before the fix this was blindly
+    // cast (`as SessionStateRow | undefined`) — the malformed string flowed
+    // straight into `promptStartedAt`/`promptAgeMs` untyped, producing
+    // `action: 'observe_prompt'` with a garbage (NaN-producing) promptStartedAt
+    // instead of degrading safely. Seeded directly via SQL (real better-sqlite3
+    // engine) because the application itself never writes a non-numeric
+    // activity_at.
+    it('treats a malformed session_state row as absent (degrades to checkin) instead of using a corrupted prompt state', async () => {
+      setupTaskSession({ lastActivityAt: now - FIVE_MINUTES - 1000 });
+      db.prepare(
+        `INSERT INTO session_state (session_id, activity, activity_at, prompt_started_at, restart_count)
+         VALUES (?, 'prompting', 'not-a-timestamp', NULL, 0)`,
+      ).run('acp-1');
+
+      const candidates = await getReconciliationCandidates(sql, envWithRows({
+        'task-1': { task_mode: 'task', status: 'in_progress' },
+      }));
+
+      expect(candidates).toHaveLength(1);
+      expect(candidates[0]).toMatchObject({
+        action: 'checkin',
+        promptStartedAt: null,
+        promptAgeMs: null,
+      });
+    });
   });
 
   describe('processReconciliationCandidates', () => {
