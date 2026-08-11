@@ -705,4 +705,64 @@ volumes:
     expect(discovery?.publicRoutes).toHaveLength(1);
     expect(discovery?.publicRoutes[0]).toMatchObject({ service: 'web', containerPort: 8000 });
   });
+
+  // Security regression (nested smuggling, defense-in-depth for the
+  // top-level routes-smuggling fix above): a compromised/misbehaving VM
+  // agent could instead smuggle a foreign field one level deeper — directly
+  // on a `services[]` entry, or nested inside that entry's `platform` object
+  // — rather than at the submission's top level. Both nesting levels are
+  // protected today by TWO independent layers: (1) Valibot's
+  // `composePublishServiceSchema` / `composePublishPlatformSchema` are plain
+  // `v.object(...)` schemas, which build a fresh output object and copy only
+  // declared keys — an unrecognized key is never assigned into the parsed
+  // output; and (2) the manifest reconstruction lists each service's fields
+  // explicitly (`services.map((svc) => ({ serviceName: svc.serviceName, ... }))`)
+  // rather than spreading `svc`. This test guards against a future `...svc`
+  // spread silently replacing that explicit field list — a regression that
+  // would only be caught here, via Valibot's own key-stripping (layer 1),
+  // once layer 2's protection was gone.
+  it('strips foreign fields smuggled inside a service entry and its nested platform object from the stored manifest', async () => {
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      services: [
+        {
+          serviceName: 'web',
+          sourceRef: 'a',
+          pushedRef: 'b',
+          digest: 'sha256:abc',
+          // Foreign field smuggled directly on the service entry.
+          routes: [{ service: 'evil-service', port: 9999, mode: 'public' }],
+          platform: {
+            architecture: 'amd64',
+            os: 'linux',
+            // Foreign field smuggled one level deeper, inside `platform`.
+            routes: [{ service: 'evil-platform', port: 8888, mode: 'public' }],
+          },
+        },
+      ],
+    });
+
+    // The legitimate parts of the submission still succeed — unknown nested
+    // fields are stripped, not used to reject the whole publish.
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(inserted).toHaveLength(1);
+
+    const storedManifest = JSON.parse(inserted[0].manifest as string);
+    const storedService = storedManifest.services[0];
+    // The field smuggled directly on the service entry never reaches storage.
+    expect(storedService).not.toHaveProperty('routes');
+    // The field smuggled inside `platform` never reaches storage either.
+    expect(storedService.platform).not.toHaveProperty('routes');
+    // Every legitimate field at both levels survived intact, and nothing
+    // else did — proving the stripping isn't accidentally over-broad either.
+    expect(storedService).toEqual({
+      serviceName: 'web',
+      sourceRef: 'a',
+      pushedRef: 'b',
+      digest: 'sha256:abc',
+      platform: { architecture: 'amd64', os: 'linux' },
+    });
+  });
 });

@@ -8,6 +8,10 @@ Use the current Valibot helpers for API JSON and external service responses:
 - `parseOptionalBody(req, schema, fallback)` for optional request bodies where every schema field is optional.
 - `parseWithSchema(schema, value, context)`, `expectJsonRecord`, `maybeJsonRecord`, `parseJsonRecord`, `readRequestJsonRecord`, and `readResponseJson` in `apps/api/src/lib/runtime-validation.ts` for non-Hono runtime JSON boundaries.
 
+## Valibot error messages must never carry secrets or cross-tenant data
+
+Valibot's default issue messages interpolate the offending value (e.g. `Invalid type: Expected string but received "..."`), and `formatIssues`/`jsonValidator` (`apps/api/src/schemas/_validator.ts`) echo that text verbatim into the 400 response body. Only run `jsonValidator`/`formatIssues` against the immediate caller's own request body — never against another tenant's data, a decrypted secret, or server-computed state, since a validation failure would hand the value straight back in the response. For secret-adjacent parsing, use the non-throwing `maybeJsonRecord` plus sanitized logging instead — see `apps/api/src/durable-objects/codex-refresh-lock.ts` and `apps/api/src/services/composable-credentials/snapshot.ts` for the pattern.
+
 Sanctioned bounded patterns:
 
 - Env access may use a narrow local env interface or a guard-then-cast when a Durable Object receives a structural subset/superset of the Worker env. Keep the cast local to the boundary and document why the fields exist.
