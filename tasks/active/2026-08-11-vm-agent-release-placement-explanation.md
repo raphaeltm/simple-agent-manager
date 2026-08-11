@@ -178,7 +178,7 @@ will be reviewed in one draft PR.
 - [x] Run Cloudflare, environment, security, UI/UX, documentation, constitution, and
       test-engineering specialist reviews; address all findings.
 - [x] Run the mandatory task-completion validator after this final task/evidence update.
-- [ ] Push the output branch, open a draft PR explicitly stating “not deployed to
+- [x] Push the output branch, open a draft PR explicitly stating “not deployed to
       staging” and “do not merge”, wait for applicable CI, and leave it open/unmerged.
 
 ## Local Validation Evidence
@@ -199,6 +199,10 @@ will be reviewed in one draft PR.
   write-before-advance ordering, and a typed terminal provisioning timeout.
 - Local Playwright UI audit — 16/16 dark/light mobile/desktop scenarios passed with
   explicit horizontal-overflow and accessibility checks. No environment was deployed.
+- Draft PR #1808 is open and unmerged with the required “not deployed to staging” and
+  “do not merge” notices. All applicable CI passed on implementation commit `7798a3fef`,
+  including Playwright Visual Tests, SonarCloud, the full test/build/lint/typecheck jobs,
+  deploy-script validation, smoke tests, benchmarks, and specialist evidence checks.
 
 ## Specialist Review Evidence
 
@@ -206,12 +210,12 @@ will be reviewed in one draft PR.
 | ------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | Cloudflare specialist     | PASS             | Release metadata, Worker settings, migration ordering, and R2 publication behavior verified after fixes through `935379670`. |
 | Environment validator     | PASS             | Generated deployment-owned bindings and documentation remain consistent; no new manual secret prerequisite.                  |
-| Security auditor          | ADDRESSED / PASS | Tenant-safe placement passed; strict SHA/argv/option guards justify the documented Sonar sink suppression.              |
+| Security auditor          | ADDRESSED / PASS | Tenant-safe placement passed; strict SHA/argv/option guards justify the documented Sonar sink suppression.                   |
 | UI/UX specialist          | PASS             | Default-collapsed sidebar, accessibility, responsive behavior, and 16 local Playwright scenarios passed.                     |
 | Documentation validator   | ADDRESSED / PASS | Release ordering/fail-closed semantics, MCP shape, OpenAPI, parser contract, and public docs passed at `abcc1ddac`.          |
 | Constitution validator    | ADDRESSED / PASS | Removed hidden ceilings/truncation/weights and duplicated defaults; Principle XI review passed at `839267430`.               |
 | Test engineer             | ADDRESSED / PASS | Real route/SQLite reuse and provision slices plus exact failure/timeout persistence passed at `26ac0c615`.                   |
-| Task-completion validator | PASS             | Full branch/task review passed at `ff0b7cd69`; the production TaskRunner vertical slice resolved the sole prior gap.         |
+| Task-completion validator | PASS             | Final branch/task review passed at `7798a3fef`; every implementation, test, privacy, and documentation criterion is covered. |
 
 ## Acceptance Criteria
 
