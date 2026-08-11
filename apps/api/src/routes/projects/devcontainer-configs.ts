@@ -4,6 +4,7 @@ import {
 } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
@@ -47,6 +48,28 @@ interface GitTreeResponse {
 interface GitHubContentsEntry {
   name: string;
   type: string;
+}
+
+// Structural contract for a single entry in the external GitHub Contents API
+// response. Only the two fields this module actually reads are validated;
+// entries that don't match (e.g. missing/non-string name or type) are skipped
+// rather than rejecting the whole listing, so one malformed entry from GitHub
+// can't hide every valid devcontainer config in the response.
+const GitHubContentsEntrySchema = v.object({
+  name: v.string(),
+  type: v.string(),
+});
+
+function parseGitHubContentsEntries(raw: unknown): GitHubContentsEntry[] {
+  if (!Array.isArray(raw)) return [];
+  const entries: GitHubContentsEntry[] = [];
+  for (const item of raw) {
+    const result = v.safeParse(GitHubContentsEntrySchema, item);
+    if (result.success) {
+      entries.push(result.output);
+    }
+  }
+  return entries;
 }
 
 const GITHUB_API_HEADERS = {
@@ -134,8 +157,7 @@ async function fetchDevcontainerDirectory(
   const response = await fetch(makeContentsUrl(owner, repo, '.devcontainer', branch), { headers });
   if (!response.ok) return [];
 
-  const entries = await response.json() as GitHubContentsEntry[];
-  return Array.isArray(entries) ? entries : [];
+  return parseGitHubContentsEntries(await response.json());
 }
 
 async function findFallbackNamedConfigs(

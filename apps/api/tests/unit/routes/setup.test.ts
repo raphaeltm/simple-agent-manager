@@ -117,6 +117,42 @@ describe('setup routes', () => {
     await expect(res.json()).resolves.toMatchObject({ ok: true });
   });
 
+  it('rejects a literal null JSON body without crashing', async () => {
+    const res = await createApp().request(
+      '/api/setup/verify',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.20' },
+        body: 'null',
+      },
+      createEnv(),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'BAD_REQUEST',
+      message: 'Setup token is required',
+    });
+  });
+
+  it('rejects a non-object config value without crashing', async () => {
+    const res = await createApp().request(
+      '/api/setup/complete',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.21' },
+        body: JSON.stringify({ token: 'setup-token', config: null }),
+      },
+      createEnv(),
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'BAD_REQUEST',
+      message: 'config must be an object',
+    });
+  });
+
   it('returns 410 once setup.completed is true', async () => {
     const env = createEnv();
     await env.DATABASE.prepare(

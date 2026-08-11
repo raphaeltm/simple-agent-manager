@@ -6,6 +6,7 @@ import { Hono } from 'hono';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log, serializeError } from '../../lib/logger';
+import { expectJsonRecord } from '../../lib/runtime-validation';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import {
@@ -60,6 +61,27 @@ function parseLocalAuthority(value: unknown): string {
   return `${parsed.hostname}:${port}`;
 }
 
+/**
+ * Reads and loosely narrows the forward-request JSON body to a plain record.
+ * Malformed JSON, a non-object body (including a literal `null`), or an array
+ * all fall back to `{}` — matching the pre-existing tolerant-body behavior —
+ * so the authoritative `parsePort`/`parseLocalAuthority` checks below remain
+ * the single source of truth for field-level validation and error messages.
+ */
+async function readForwardRequestBody(c: Context<{ Bindings: Env }>): Promise<Record<string, unknown>> {
+  let raw: unknown;
+  try {
+    raw = await c.req.json();
+  } catch {
+    return {};
+  }
+  try {
+    return expectJsonRecord(raw, 'workspace.forwards.request');
+  } catch {
+    return {};
+  }
+}
+
 function deleteConnectionListedHeaders(headers: Headers): void {
   const connection = headers.get('Connection');
   if (!connection) {
@@ -111,10 +133,10 @@ async function requireRoutedWorkspace(c: Context<{ Bindings: Env }>, workspaceId
 localForwardRoutes.post('/:id/forwards', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
-  const body = await c.req.json().catch(() => ({}));
-  const remotePort = parsePort((body as Record<string, unknown>).remotePort, 'remotePort');
-  const localAuthority = parseLocalAuthority((body as Record<string, unknown>).localAuthority);
-  const mode = (body as Record<string, unknown>).mode ?? 'http';
+  const body = await readForwardRequestBody(c);
+  const remotePort = parsePort(body.remotePort, 'remotePort');
+  const localAuthority = parseLocalAuthority(body.localAuthority);
+  const mode = body.mode ?? 'http';
   if (mode !== 'http') {
     throw errors.badRequest('only http local forwarding is supported');
   }

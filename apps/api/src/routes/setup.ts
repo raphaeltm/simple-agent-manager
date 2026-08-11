@@ -1,8 +1,11 @@
 import type { Context } from 'hono';
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
 import { AppError, errors } from '../middleware/error';
+import { parseOptionalBody } from '../schemas/_validator';
 import {
   completeSetupWithConfig,
   getPlatformConfigStatus,
@@ -21,10 +24,14 @@ import {
 const setupRoutes = new Hono<{ Bindings: Env }>();
 type SetupContext = Context<{ Bindings: Env }>;
 
-interface SetupRequestBody {
-  token?: unknown;
-  config?: unknown;
-}
+// `token`/`config` are validated loosely here (presence + object shape only) —
+// parseSetupBody/parseIntegrationConfig below remain the authoritative,
+// message-producing validators, matching the existing behavior for
+// malformed/null/non-object bodies.
+const SetupRequestBodySchema = v.object({
+  token: v.optional(v.unknown()),
+  config: v.optional(v.unknown()),
+});
 
 function clientIdentifier(c: SetupContext): string {
   return c.req.header('CF-Connecting-IP')
@@ -37,23 +44,22 @@ function setupClosed(): AppError {
   return new AppError(410, 'SETUP_CLOSED', 'First-run setup has already been completed');
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
 function optionalString(value: unknown): string | undefined {
   return typeof value === 'string' ? value : undefined;
 }
 
 function parseIntegrationConfig(value: unknown): PlatformIntegrationInput {
   if (value === undefined) return {};
-  if (!isRecord(value)) {
+  let record: Record<string, unknown>;
+  try {
+    record = expectJsonRecord(value, 'setup.config');
+  } catch {
     throw errors.badRequest('config must be an object');
   }
 
-  const github = isRecord(value.github) ? value.github : {};
-  const google = isRecord(value.google) ? value.google : {};
-  const gitlab = isRecord(value.gitlab) ? value.gitlab : {};
+  const github = maybeJsonRecord(record.github) ?? {};
+  const google = maybeJsonRecord(record.google) ?? {};
+  const gitlab = maybeJsonRecord(record.gitlab) ?? {};
   return {
     github: {
       clientId: optionalString(github.clientId),
@@ -79,8 +85,8 @@ async function parseSetupBody(c: SetupContext): Promise<{
   token: string;
   config: PlatformIntegrationInput;
 }> {
-  const body = await c.req.json().catch(() => null) as SetupRequestBody | null;
-  if (!body || typeof body.token !== 'string') {
+  const body = await parseOptionalBody(c.req.raw, SetupRequestBodySchema, {});
+  if (typeof body.token !== 'string') {
     throw errors.badRequest('Setup token is required');
   }
   return {

@@ -2,10 +2,11 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context } from 'hono';
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
-import { expectJsonRecord } from '../../lib/runtime-validation';
+import { expectJsonRecord, parseWithSchema } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
 import {
   buildSessionSnapshotR2Key,
@@ -32,6 +33,40 @@ const DEGRADATIONS = new Set<SessionSnapshotDegradation>([
   'wip-only',
   'transcript-only',
 ]);
+
+// Full structural contract for a VM-agent-submitted snapshot manifest — mirrors
+// SessionSnapshotManifest in services/session-snapshots.ts field-for-field.
+// This replaces a blind `as unknown as SessionSnapshotManifest` cast; identity
+// (chatSessionId/workspaceId/agentSessionId match) and business-rule checks
+// (artifact size vs. R2 object size) remain as separate checks below.
+const SessionSnapshotArtifactEntrySchema = v.object({
+  sizeBytes: v.number(),
+  sha256: v.optional(v.string()),
+});
+
+const SessionSnapshotManifestSchema = v.object({
+  version: v.literal(1),
+  chatSessionId: v.string(),
+  workspaceId: v.string(),
+  agentSessionId: v.optional(v.string()),
+  acpSessionId: v.optional(v.string()),
+  agentType: v.optional(v.string()),
+  baseCommit: v.optional(v.string()),
+  status: v.picklist(['pending', 'available', 'degraded', 'failed', 'expired']),
+  degradation: v.picklist(['none', 'home-skipped', 'wip-only', 'transcript-only']),
+  skipped: v.array(
+    v.object({
+      path: v.string(),
+      reason: v.string(),
+      sizeBytes: v.optional(v.number()),
+    })
+  ),
+  artifacts: v.object({
+    home: v.optional(SessionSnapshotArtifactEntrySchema),
+    wip: v.optional(SessionSnapshotArtifactEntrySchema),
+  }),
+  createdAt: v.string(),
+});
 
 async function readJsonBody(c: SnapshotRouteContext) {
   const raw = await c.req.raw.text();
@@ -166,7 +201,12 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
   if (!COMPLETE_STATUSES.has(status)) throw errors.badRequest('Invalid snapshot status');
   if (!DEGRADATIONS.has(degradation)) throw errors.badRequest('Invalid snapshot degradation');
   const manifestRecord = expectJsonRecord(body.manifest, 'snapshot manifest');
-  const manifest = manifestRecord as unknown as SessionSnapshotManifest;
+  let manifest: SessionSnapshotManifest;
+  try {
+    manifest = parseWithSchema(SessionSnapshotManifestSchema, manifestRecord, 'session snapshot manifest');
+  } catch {
+    throw errors.badRequest('Snapshot manifest is invalid');
+  }
   if (
     manifest.version !== 1 ||
     manifest.chatSessionId !== chatSessionId ||

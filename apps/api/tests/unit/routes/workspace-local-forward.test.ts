@@ -187,6 +187,34 @@ describe('workspace local-forward routes', () => {
     expect(mockSignLocalForwardToken).not.toHaveBeenCalled();
   });
 
+  it('rejects a literal null JSON body without crashing', async () => {
+    const response = await worker.default.fetch(
+      new Request('https://api.workspaces.example.com/api/workspaces/ws-1/forwards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: 'null',
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    expect(mockSignLocalForwardToken).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-object JSON body without crashing', async () => {
+    const response = await worker.default.fetch(
+      new Request('https://api.workspaces.example.com/api/workspaces/ws-1/forwards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([1, 2, 3]),
+      }),
+      env,
+    );
+
+    expect(response.status).toBe(400);
+    expect(mockSignLocalForwardToken).not.toHaveBeenCalled();
+  });
+
   it('proxies with internal VM token and strips spoofable browser headers', async () => {
     const response = await worker.default.fetch(
       new Request('https://api.workspaces.example.com/api/workspaces/ws-1/local-forward/5173/path?x=1', {

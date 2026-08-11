@@ -196,6 +196,37 @@ describe('discoverGitHubDevcontainerConfigs', () => {
       truncated: true,
     });
   });
+
+  it('skips malformed contents-API entries but keeps valid ones', async () => {
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ tree: [], truncated: true }), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify([
+          { name: 'python', type: 'dir' },
+          { type: 'dir' }, // missing name — malformed, must be skipped
+          { name: 42, type: 'dir' }, // non-string name — malformed, must be skipped
+          null, // malformed entry entirely — must not crash the loop
+          { name: 'node', type: 'dir' },
+        ]), { status: 200 }),
+      )
+      .mockResolvedValueOnce(new Response('', { status: 200 })) // python exists probe
+      .mockResolvedValueOnce(new Response('', { status: 200 })); // node exists probe
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await discoverGitHubDevcontainerConfigs('owner', 'repo', 'main', 'ghs_test');
+
+    expect(result).toEqual({
+      defaultConfigExists: false,
+      configs: [
+        { name: 'node', path: '.devcontainer/node/devcontainer.json' },
+        { name: 'python', path: '.devcontainer/python/devcontainer.json' },
+      ],
+      truncated: true,
+    });
+  });
 });
 
 // =============================================================================

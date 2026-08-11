@@ -292,4 +292,43 @@ describe('workspaces session snapshot callback routes', () => {
     );
     expect(incompleteHarness.status).toBe(400);
   });
+
+  it('rejects a manifest missing a required field with a clean 400 before touching R2', async () => {
+    const body = {
+      chatSessionId: 'chat-1',
+      agentSessionId: 'agent-session-1',
+      runtime: 'cf-container',
+      status: 'available',
+      degradation: 'none',
+      baseCommit: 'abc123',
+      artifactSizes: { homeBytes: 999, wipBytes: 999 },
+      manifest: {
+        version: 1,
+        chatSessionId: 'chat-1',
+        workspaceId: 'WS_1',
+        agentSessionId: 'agent-session-1',
+        acpSessionId: 'acp-session-1',
+        agentType: 'openai-codex',
+        status: 'available',
+        degradation: 'none',
+        // `skipped` intentionally omitted — required by SessionSnapshotManifest
+        artifacts: { home: { sizeBytes: 4 }, wip: { sizeBytes: 3 } },
+        createdAt: '2026-07-11T00:00:00.000Z',
+      },
+    };
+
+    const res = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/complete',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      runtimeBindings
+    );
+
+    expect(res.status).toBe(400);
+    expect(r2.head).not.toHaveBeenCalled();
+    expect(mocks.completeSessionSnapshot).not.toHaveBeenCalled();
+  });
 });
