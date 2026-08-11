@@ -17,6 +17,7 @@ The public site remains available from the last successful deployment, but chang
 - `scripts/quality/deployment-workflow-hardening.test.ts` already enforces marketing workflow naming contracts, making it the appropriate place for a frozen-Wrangler source contract.
 - Cloudflare's current official Wrangler reference confirms `pages deploy [DIRECTORY] --project-name ...` and `pages project create [PROJECT-NAME] --production-branch ...` remain supported.
 - The retained Wrangler v4 incident lesson in `tasks/archive/2026-04-25-upgrade-wrangler-v4.md` demonstrates why deployment tooling version and invocation must be explicit and verified end to end.
+- Specialist review found that the existing provisioning command's blanket `|| echo` converted authentication, network, CLI, and missing-binary failures into false success. The touched step must distinguish an existing project from real failures.
 
 ## Preflight
 
@@ -48,6 +49,7 @@ The public site remains available from the last successful deployment, but chang
 - [x] Replace `npx wrangler` in the marketing deployment workflow with the marketing workspace's pinned executable.
 - [x] Replace `npx wrangler` in the marketing provisioning workflow with the same pinned executable.
 - [x] Add deterministic workflow contract tests covering dependency ownership, deployment, provisioning, and rejection of `npx wrangler`.
+- [x] Make Pages project provisioning skip only an existing project and fail on list/create/JSON errors.
 - [x] Reproduce the exact CLI resolution path after a frozen clean install.
 - [ ] Run the complete repository quality suite and specialist reviews.
 - [ ] Confirm the final candidate passes CI and the marketing Pages workflow deploys successfully.
@@ -59,6 +61,7 @@ The public site remains available from the last successful deployment, but chang
 - [x] Neither marketing workflow contains an `npx wrangler` invocation.
 - [x] Workflow contract tests fail if either invocation regresses to unpinned resolution or the direct dependency is removed.
 - [x] Existing marketing project naming, build output, Cloudflare credentials, permissions, and deployment flags remain unchanged.
+- [x] Pages provisioning fails closed for list, response-shape, authentication, network, CLI, and create errors.
 - [ ] The production marketing workflow succeeds and `https://www.simple-agent-manager.org/` serves the merged commit's deployment.
 
 ## Post-mortem
