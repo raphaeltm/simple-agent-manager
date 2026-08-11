@@ -33,14 +33,13 @@ vi.mock('../../src/components/MarkdownRenderer', () => ({
   SyntaxHighlightedCode: ({ content }: { content: string }) => <pre>{content}</pre>,
 }));
 
+import { ChatFilePanel } from '../../src/components/chat/ChatFilePanel';
 import {
   getSessionFileContent,
   getSessionFileList,
   getSessionGitDiff,
   getSessionGitStatus,
 } from '../../src/lib/api';
-
-import { ChatFilePanel } from '../../src/components/chat/ChatFilePanel';
 
 // ChatFilePanel renders via createPortal to document.body, so we query there
 const body = () => within(document.body);
