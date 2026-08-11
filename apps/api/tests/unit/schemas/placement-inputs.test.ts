@@ -1,8 +1,8 @@
 import { safeParse } from 'valibot';
 import { describe, expect, it } from 'vitest';
 
-import { RunTaskSchema, SubmitTaskSchema } from '../../../src/schemas/tasks';
 import { UpdateProjectSchema } from '../../../src/schemas/projects';
+import { RunTaskSchema, SubmitTaskSchema } from '../../../src/schemas/tasks';
 import { CreateWorkspaceSchema } from '../../../src/schemas/workspaces';
 
 const validNodeId = '01KZR2JAP92AK3SKW951E4H21M';
