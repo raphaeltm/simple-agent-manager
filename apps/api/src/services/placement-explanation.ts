@@ -10,8 +10,12 @@ import type {
 import {
   canSatisfyVmSize,
   DEFAULT_MAX_WORKSPACES_PER_NODE,
+  DEFAULT_NODE_HEARTBEAT_STALE_SECONDS,
   DEFAULT_TASK_RUN_NODE_CPU_THRESHOLD_PERCENT,
   DEFAULT_TASK_RUN_NODE_MEMORY_THRESHOLD_PERCENT,
+  isSafeVmLocationId,
+  PLACEMENT_MAX_EVALUATED_NODES,
+  PLACEMENT_MAX_PROVISIONING_ATTEMPTS,
 } from '@simple-agent-manager/shared';
 
 import { isNodeAgentVersionCompatible } from './node-agent-compatibility';
@@ -57,6 +61,11 @@ function bounded(value: unknown, min: number, max: number): number | null {
     : null;
 }
 
+function safeLocation(value: string): string {
+  const normalized = value.trim();
+  return isSafeVmLocationId(normalized) ? normalized : 'unknown';
+}
+
 function parseMetricSnapshot(raw: string | null): {
   cpuLoadAvg1: number | null;
   memoryPercent: number | null;
@@ -91,7 +100,7 @@ export function resolvePlacementRequest(
   return {
     runtime: 'vm',
     vmSize,
-    vmLocation,
+    vmLocation: safeLocation(vmLocation),
     maxWorkspacesPerNode:
       override.maxWorkspacesPerNode ??
       envInt(env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE, 1, 10_000),
@@ -112,7 +121,8 @@ export function resolvePlacementRequest(
         100
       ),
     heartbeatStaleSeconds:
-      override.heartbeatStaleSeconds ?? envInt(env.NODE_HEARTBEAT_STALE_SECONDS, 180, 1, 86_400),
+      override.heartbeatStaleSeconds ??
+      envInt(env.NODE_HEARTBEAT_STALE_SECONDS, DEFAULT_NODE_HEARTBEAT_STALE_SECONDS, 1, 86_400),
   };
 }
 
@@ -183,7 +193,7 @@ export function evaluatePlacementNode(
     snapshot: {
       runtime: node.runtime === 'cf-container' ? 'other' : 'vm',
       vmSize: node.vmSize,
-      vmLocation: node.vmLocation,
+      vmLocation: safeLocation(node.vmLocation),
       healthStatus,
       agentVersionCompatible,
       heartbeatAgeSeconds,
@@ -206,6 +216,39 @@ export function selectPlacementNode(
     selectedNodeId: evaluation.nodeId,
     summary: `Reused node ${evaluation.nodeId} through the ${evaluation.path} path.`,
     updatedAt: now,
+  };
+}
+
+/**
+ * Remove cross-project/trial host identifiers from rejected candidates before
+ * any placement explanation is persisted, logged, or exposed. The selected
+ * node remains visible because it is already part of the workspace contract.
+ */
+export function sanitizePlacementExplanation(
+  explanation: PlacementExplanation
+): PlacementExplanation {
+  const aliases = new Map<string, string>();
+  const evaluatedNodes = explanation.evaluatedNodes
+    .slice(0, PLACEMENT_MAX_EVALUATED_NODES)
+    .map((evaluation) => {
+      if (evaluation.accepted) return evaluation;
+      let alias = aliases.get(evaluation.nodeId);
+      if (!alias) {
+        alias = `candidate-${aliases.size + 1}`;
+        aliases.set(evaluation.nodeId, alias);
+      }
+      return { ...evaluation, nodeId: alias };
+    });
+  return {
+    ...explanation,
+    request: {
+      ...explanation.request,
+      vmLocation: safeLocation(explanation.request.vmLocation),
+    },
+    evaluatedNodes,
+    provisioningAttempts: explanation.provisioningAttempts
+      .slice(0, PLACEMENT_MAX_PROVISIONING_ATTEMPTS)
+      .map((attempt) => ({ ...attempt, vmLocation: safeLocation(attempt.vmLocation) })),
   };
 }
 
@@ -241,7 +284,10 @@ export function appendProvisioningAttempt(
         : attempt.outcome === 'failed'
           ? 'Node provisioning failed.'
           : 'Provisioning a new node.',
-    provisioningAttempts: [...explanation.provisioningAttempts, attempt],
+    provisioningAttempts: [
+      ...explanation.provisioningAttempts,
+      { ...attempt, vmLocation: safeLocation(attempt.vmLocation) },
+    ].slice(0, PLACEMENT_MAX_PROVISIONING_ATTEMPTS),
     updatedAt: now,
   };
 }

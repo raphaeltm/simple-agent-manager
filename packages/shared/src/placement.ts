@@ -1,3 +1,7 @@
+import {
+  PLACEMENT_MAX_EVALUATED_NODES,
+  PLACEMENT_MAX_PROVISIONING_ATTEMPTS,
+} from './constants/placement';
 import type {
   LegacyPlacementExplanation,
   PlacementExplanation,
@@ -224,6 +228,8 @@ function parseV2(value: unknown): PlacementExplanation | null {
     !request ||
     !Array.isArray(raw?.evaluatedNodes) ||
     !Array.isArray(raw?.provisioningAttempts) ||
+    raw.evaluatedNodes.length > PLACEMENT_MAX_EVALUATED_NODES ||
+    raw.provisioningAttempts.length > PLACEMENT_MAX_PROVISIONING_ATTEMPTS ||
     !decidedAt ||
     !updatedAt
   ) {

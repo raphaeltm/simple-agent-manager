@@ -19,6 +19,7 @@ import {
   type PlacementNodeInput,
   requireProvisioning,
   resolvePlacementRequest,
+  sanitizePlacementExplanation,
   selectPlacementNode,
 } from './placement-explanation';
 
@@ -172,9 +173,9 @@ function sortEvaluations(
   });
 }
 
-function missingPreferredEvaluation(
+function missingNodeEvaluation(
   nodeId: string,
-  path: 'preferred' | 'manual'
+  path: PlacementNodeEvaluation['path']
 ): PlacementNodeEvaluation {
   return {
     nodeId,
@@ -193,6 +194,13 @@ function missingPreferredEvaluation(
       memoryPercent: null,
     },
   };
+}
+
+function placementResult(
+  node: NodeCandidate | null,
+  explanation: PlacementExplanation
+): NodePlacementResult {
+  return { node, explanation: sanitizePlacementExplanation(explanation) };
 }
 
 export async function selectNodeWithExplanation(
@@ -217,17 +225,14 @@ export async function selectNodeWithExplanation(
     const path = initialPath as 'preferred' | 'manual';
     const evaluation = node
       ? evaluatePlacementNode(node, request, path, env.VM_AGENT_REQUIRED_VERSION, nowMs)
-      : missingPreferredEvaluation(options.preferredNodeId, path);
+      : missingNodeEvaluation(options.preferredNodeId, path);
     explanation.evaluatedNodes.push(evaluation);
     if (node && evaluation.accepted) {
-      return {
-        node: toCandidate(node),
-        explanation: selectPlacementNode(explanation, evaluation, now),
-      };
+      return placementResult(toCandidate(node), selectPlacementNode(explanation, evaluation, now));
     }
-    explanation.summary = `Preferred node ${options.preferredNodeId} was rejected.`;
+    explanation.summary = 'The preferred node was rejected.';
     explanation.outcome = 'failed';
-    return { node: null, explanation };
+    return placementResult(null, explanation);
   }
 
   if (options.taskId && env.NODE_LIFECYCLE && !options.selectionPath) {
@@ -241,7 +246,23 @@ export async function selectNodeWithExplanation(
     );
     explanation.evaluatedNodes.push(...warmEvaluations);
     for (const evaluation of warmEvaluations.filter((item) => item.accepted)) {
-      let claimLost = true;
+      // Refresh every eligibility input before taking the atomic lifecycle
+      // claim. If the node changed since the candidate read, exclude it without
+      // consuming its warm state or cancelling its teardown alarm.
+      const freshNode = (await loadPlacementNodes(db, userId)).find(
+        (candidate) => candidate.id === evaluation.nodeId
+      );
+      const freshEvaluation = freshNode
+        ? evaluatePlacementNode(freshNode, request, 'warm', env.VM_AGENT_REQUIRED_VERSION, nowMs)
+        : missingNodeEvaluation(evaluation.nodeId, 'warm');
+      if (!freshNode || !freshEvaluation.accepted) {
+        evaluation.accepted = false;
+        evaluation.rejectionReasons = freshEvaluation.rejectionReasons;
+        warmExclusions.set(evaluation.nodeId, evaluation.rejectionReasons);
+        continue;
+      }
+      evaluation.snapshot = freshEvaluation.snapshot;
+
       try {
         const claimed = await nodeLifecycle.tryClaim(
           env as unknown as import('../env').Env,
@@ -249,36 +270,16 @@ export async function selectNodeWithExplanation(
           options.taskId
         );
         if (claimed.claimed) {
-          claimLost = false;
-          // Re-read D1 after the atomic claim. A heartbeat, compatibility marker,
-          // or workspace count can change between the candidate read and claim.
-          const freshNode = (await loadPlacementNodes(db, userId)).find(
-            (candidate) => candidate.id === evaluation.nodeId
+          return placementResult(
+            toCandidate(freshNode),
+            selectPlacementNode(explanation, evaluation, now)
           );
-          const freshEvaluation = freshNode
-            ? evaluatePlacementNode(
-                freshNode,
-                request,
-                'capacity',
-                env.VM_AGENT_REQUIRED_VERSION,
-                nowMs
-              )
-            : missingPreferredEvaluation(evaluation.nodeId, 'preferred');
-          if (freshNode && freshEvaluation.accepted) {
-            evaluation.snapshot = freshEvaluation.snapshot;
-            return {
-              node: toCandidate(freshNode),
-              explanation: selectPlacementNode(explanation, evaluation, now),
-            };
-          }
-          evaluation.accepted = false;
-          evaluation.rejectionReasons = freshEvaluation.rejectionReasons;
         }
       } catch {
         // The typed reason below intentionally replaces raw DO/provider errors.
       }
       evaluation.accepted = false;
-      if (claimLost) evaluation.rejectionReasons.push('warm-claim-lost');
+      evaluation.rejectionReasons.push('warm-claim-lost');
       warmExclusions.set(evaluation.nodeId, evaluation.rejectionReasons);
     }
     const evaluations = sortEvaluations(
@@ -308,10 +309,10 @@ export async function selectNodeWithExplanation(
       ? (nodes.find((candidate) => candidate.id === selected.nodeId) ?? null)
       : null;
     if (selected && selectedNode) {
-      return {
-        node: toCandidate(selectedNode),
-        explanation: selectPlacementNode(explanation, selected, now),
-      };
+      return placementResult(
+        toCandidate(selectedNode),
+        selectPlacementNode(explanation, selected, now)
+      );
     }
   } else {
     const capacityPath = options.selectionPath ?? 'capacity';
@@ -328,14 +329,14 @@ export async function selectNodeWithExplanation(
       ? (nodes.find((candidate) => candidate.id === selected.nodeId) ?? null)
       : null;
     if (selected && selectedNode) {
-      return {
-        node: toCandidate(selectedNode),
-        explanation: selectPlacementNode(explanation, selected, now),
-      };
+      return placementResult(
+        toCandidate(selectedNode),
+        selectPlacementNode(explanation, selected, now)
+      );
     }
   }
   explanation = requireProvisioning(explanation, now);
-  return { node: null, explanation };
+  return placementResult(null, explanation);
 }
 
 /** Backward-compatible selector wrapper for callers that only need the selected node. */

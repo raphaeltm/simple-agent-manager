@@ -43,11 +43,17 @@ function createMockDb({
   nodes,
   warmNodes = [],
   workspaceCount = 0,
+  freshNodes,
+  freshWorkspaceCount,
 }: {
   nodes: MockNode[];
   warmNodes?: MockNode[];
   workspaceCount?: number;
+  freshNodes?: MockNode[];
+  freshWorkspaceCount?: number;
 }) {
+  let nodeReadCount = 0;
+  let workspaceReadCount = 0;
   return {
     select(_selection?: Record<string, unknown>) {
       return {
@@ -55,8 +61,12 @@ function createMockDb({
           return {
             where() {
               if (table === schema.workspaces) {
+                const count =
+                  workspaceReadCount++ > 0 && freshWorkspaceCount !== undefined
+                    ? freshWorkspaceCount
+                    : workspaceCount;
                 return Promise.resolve(
-                  Array.from({ length: workspaceCount }, (_, index) => ({
+                  Array.from({ length: count }, (_, index) => ({
                     id: `workspace-${index}`,
                     nodeId: (nodes[0] ?? warmNodes[0])?.id ?? null,
                   }))
@@ -64,7 +74,10 @@ function createMockDb({
               }
 
               if (table === schema.nodes) {
-                return Promise.resolve(nodes.length > 0 ? nodes : warmNodes);
+                const initialNodes = nodes.length > 0 ? nodes : warmNodes;
+                return Promise.resolve(
+                  nodeReadCount++ > 0 && freshNodes !== undefined ? freshNodes : initialNodes
+                );
               }
 
               return Promise.resolve([]);
@@ -439,6 +452,50 @@ describe('selectNodeForTaskRun VM size minimum behavior', () => {
     ).toHaveLength(2);
   });
 
+  it.each([
+    ['status', { status: 'stopped' }, undefined, 'not-running'],
+    ['heartbeat', { lastHeartbeatAt: new Date(0).toISOString() }, undefined, 'heartbeat-stale'],
+    ['agent version', { agentVersion: 'b'.repeat(40) }, undefined, 'agent-version-mismatch'],
+    ['workspace count', {}, 5, 'workspace-limit'],
+  ] as const)(
+    'does not consume the warm claim when the fresh %s check rejects the node',
+    async (_change, freshOverrides, freshWorkspaceCount, expectedReason) => {
+      const requiredVersion = 'a'.repeat(40);
+      const initialNode = node({
+        id: 'warm-changed',
+        warmSince: new Date().toISOString(),
+        agentVersion: requiredVersion,
+      });
+      const db = createMockDb({
+        nodes: [initialNode],
+        freshNodes: [node({ ...initialNode, ...freshOverrides })],
+        freshWorkspaceCount,
+      });
+
+      const result = await selectNodeWithExplanation(
+        db as never,
+        'user-1',
+        {
+          VM_AGENT_REQUIRED_VERSION: requiredVersion,
+          NODE_LIFECYCLE: {} as DurableObjectNamespace,
+        },
+        {
+          vmSize: 'medium',
+          vmLocation: 'fsn1',
+          taskId: 'task-1',
+          limits: { maxWorkspacesPerNode: 5 },
+        }
+      );
+
+      expect(nodeLifecycle.tryClaim).not.toHaveBeenCalled();
+      expect(result.node).toBeNull();
+      expect(result.explanation.evaluatedNodes[0]?.rejectionReasons).toContain(expectedReason);
+      expect(result.explanation.evaluatedNodes[0]?.rejectionReasons).not.toContain(
+        'warm-claim-lost'
+      );
+    }
+  );
+
   it('selects a compatible node over a lower-load incompatible node', async () => {
     const requiredVersion = 'a'.repeat(40);
     const db = createMockDb({
@@ -465,10 +522,34 @@ describe('selectNodeForTaskRun VM size minimum behavior', () => {
 
     expect(result.node?.id).toBe('compatible-busier');
     expect(
-      result.explanation.evaluatedNodes.find(
-        (evaluation) => evaluation.nodeId === 'incompatible-idle'
+      result.explanation.evaluatedNodes.find((evaluation) =>
+        evaluation.rejectionReasons.includes('agent-version-mismatch')
       )?.rejectionReasons
     ).toContain('agent-version-mismatch');
+    expect(JSON.stringify(result.explanation)).not.toContain('incompatible-idle');
+    expect(result.explanation.evaluatedNodes[0]?.nodeId).toBe('candidate-1');
+  });
+
+  it('never persists a rejected request node ID or unsafe location canary', async () => {
+    const canary = 'CANARY_SECRET\n'.repeat(20);
+    const result = await selectNodeWithExplanation(
+      createMockDb({ nodes: [] }) as never,
+      'user-1',
+      {},
+      {
+        vmSize: 'medium',
+        vmLocation: canary,
+        preferredNodeId: canary,
+        preferredOnly: true,
+      }
+    );
+
+    const serialized = JSON.stringify(result.explanation);
+    expect(result.node).toBeNull();
+    expect(result.explanation.summary).toBe('The preferred node was rejected.');
+    expect(result.explanation.request.vmLocation).toBe('unknown');
+    expect(result.explanation.evaluatedNodes[0]?.nodeId).toBe('candidate-1');
+    expect(serialized).not.toContain('CANARY_SECRET');
   });
 
   it.each([

@@ -26,6 +26,17 @@ export {
   VM_LOCATIONS,
 } from './providers';
 
+// Placement evidence and request boundaries
+export {
+  isSafeVmLocationId,
+  PLACEMENT_MAX_EVALUATED_NODES,
+  PLACEMENT_MAX_PROVISIONING_ATTEMPTS,
+  SAM_NODE_ID_LENGTH,
+  SAM_NODE_ID_REGEX,
+  VM_LOCATION_ID_MAX_LENGTH,
+  VM_LOCATION_ID_REGEX,
+} from './placement';
+
 // Status
 export { STATUS_COLORS, STATUS_LABELS } from './status';
 
