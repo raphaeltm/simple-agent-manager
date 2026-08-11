@@ -68,7 +68,7 @@ jobs:
           SITE_URL: https://${{ steps.names.outputs.www_domain }}
 
       - name: Deploy to Cloudflare Pages
-        run: npx wrangler pages deploy apps/www/dist --project-name=${{ steps.names.outputs.pages_project }} --commit-dirty=true
+        run: pnpm --filter @simple-agent-manager/www exec wrangler pages deploy dist --project-name=${{ steps.names.outputs.pages_project }} --commit-dirty=true
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}

@@ -43,6 +43,22 @@ describe('deployment workflow hardening', () => {
     }
   );
 
+  it('marketing Pages workflows use the marketing workspace lockfile-pinned Wrangler', () => {
+    const marketingPackage = repoFile('apps/www/package.json');
+    const deployBlock = stepBlock(workflow('deploy-www.yml'), 'Deploy to Cloudflare Pages');
+    const provisionBlock = stepBlock(workflow('provision-www.yml'), 'Create Pages Project');
+
+    expect(marketingPackage).toContain('"wrangler": "catalog:"');
+    expect(deployBlock).toContain(
+      'pnpm --filter @simple-agent-manager/www exec wrangler pages deploy dist'
+    );
+    expect(provisionBlock).toContain(
+      'pnpm --filter @simple-agent-manager/www exec wrangler pages project create'
+    );
+    expect(deployBlock).not.toContain('npx wrangler');
+    expect(provisionBlock).not.toContain('npx wrangler');
+  });
+
   it('AI Gateway setup requires explicit identity and fails on API errors', () => {
     const contents = repoFile('scripts/deploy/configure-ai-gateway.sh');
 

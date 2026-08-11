@@ -56,6 +56,10 @@
     "vitest": {
       "registryUrl": "https://www.npmjs.com/package/vitest",
       "necessity": "Runs local plugin and quality checker fixtures."
+    },
+    "wrangler": {
+      "registryUrl": "https://www.npmjs.com/package/wrangler",
+      "necessity": "Provides the lockfile-pinned Cloudflare Pages deployment executable for the marketing workspace."
     }
   },
   "go": {

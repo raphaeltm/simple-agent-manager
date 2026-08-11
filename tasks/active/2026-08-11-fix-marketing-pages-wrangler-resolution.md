@@ -43,11 +43,11 @@ The public site remains available from the last successful deployment, but chang
 
 ## Implementation checklist
 
-- [ ] Add catalog-pinned Wrangler to the marketing workspace's development dependencies.
-- [ ] Update the dependency evidence record for the new direct workspace dependency.
-- [ ] Replace `npx wrangler` in the marketing deployment workflow with the marketing workspace's pinned executable.
-- [ ] Replace `npx wrangler` in the marketing provisioning workflow with the same pinned executable.
-- [ ] Add deterministic workflow contract tests covering dependency ownership, deployment, provisioning, and rejection of `npx wrangler`.
+- [x] Add catalog-pinned Wrangler to the marketing workspace's development dependencies.
+- [x] Update the dependency evidence record for the new direct workspace dependency.
+- [x] Replace `npx wrangler` in the marketing deployment workflow with the marketing workspace's pinned executable.
+- [x] Replace `npx wrangler` in the marketing provisioning workflow with the same pinned executable.
+- [x] Add deterministic workflow contract tests covering dependency ownership, deployment, provisioning, and rejection of `npx wrangler`.
 - [ ] Reproduce the exact CLI resolution path after a frozen clean install.
 - [ ] Run the complete repository quality suite and specialist reviews.
 - [ ] Confirm the final candidate passes CI and the marketing Pages workflow deploys successfully.
