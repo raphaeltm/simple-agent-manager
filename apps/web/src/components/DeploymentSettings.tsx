@@ -95,8 +95,9 @@ export function DeploymentSettings({ projectId, compact = false }: DeploymentSet
         })
         .then((resp) => {
           setGcpProjects(resp.projects);
-          if (resp.projects.length > 0) {
-            setSelectedGcpProject(resp.projects[0]!.projectId);
+          const firstProject = resp.projects[0];
+          if (firstProject) {
+            setSelectedGcpProject(firstProject.projectId);
           }
           setPhase('project-select');
         })

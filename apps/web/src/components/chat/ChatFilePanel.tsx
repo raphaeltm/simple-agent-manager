@@ -469,10 +469,13 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                   setSearchActive(false);
                   setSearchQuery('');
                 }
-                if (e.key === 'Enter' && searchResults.length > 0) {
-                  openFile(searchResults[0]!.path);
-                  setSearchActive(false);
-                  setSearchQuery('');
+                if (e.key === 'Enter') {
+                  const firstResult = searchResults[0];
+                  if (firstResult) {
+                    openFile(firstResult.path);
+                    setSearchActive(false);
+                    setSearchQuery('');
+                  }
                 }
               }}
             />

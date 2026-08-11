@@ -207,8 +207,9 @@ export function Workspace() {
 
   const activeTabId = useMemo(() => {
     if (viewMode === 'terminal') {
-      return activeTerminalSessionId ? `terminal:${activeTerminalSessionId}`
-        : visibleTerminalTabs.length > 0 ? `terminal:${visibleTerminalTabs[0]!.id}` : null;
+      if (activeTerminalSessionId) return `terminal:${activeTerminalSessionId}`;
+      const firstTerminalTab = visibleTerminalTabs[0];
+      return firstTerminalTab ? `terminal:${firstTerminalTab.id}` : null;
     }
     return sessions.activeChatSessionId ? `chat:${sessions.activeChatSessionId}` : null;
   }, [sessions.activeChatSessionId, activeTerminalSessionId, viewMode, visibleTerminalTabs]);
@@ -217,7 +218,11 @@ export function Workspace() {
     if (activeTabId === tab.id) {
       const ci = workspaceTabs.findIndex((c) => c.id === tab.id);
       const remaining = workspaceTabs.filter((c) => c.id !== tab.id);
-      if (remaining.length > 0) handleSelectWorkspaceTab(remaining[Math.min(ci, remaining.length - 1)]!);
+      if (remaining.length > 0) {
+        const nextTab = remaining[Math.min(ci, remaining.length - 1)];
+        if (!nextTab) throw new Error('handleCloseWorkspaceTab: failed to resolve next tab after closing');
+        handleSelectWorkspaceTab(nextTab);
+      }
       else {
         setViewMode('terminal'); setActiveTerminalSessionId(null);
         const params = new URLSearchParams(searchParams);
@@ -278,12 +283,12 @@ export function Workspace() {
   const shortcutHandlers = {
     'toggle-file-browser': () => { if (core.isRunning && core.terminalToken) { filesParam ? nav.handleCloseFileBrowser() : nav.handleOpenFileBrowser(); } },
     'toggle-git-changes': () => { if (core.isRunning && core.terminalToken) { gitParam ? nav.handleCloseGitPanel() : nav.handleOpenGitChanges(); } },
-    'focus-chat': () => { if (sessions.activeChatSessionId) { if (viewMode !== 'conversation') sessions.handleAttachSession(sessions.activeChatSessionId); requestAnimationFrame(() => chatSessionRefs.current.get(sessions.activeChatSessionId!)?.focusInput()); } },
+    'focus-chat': () => { const activeChatSessionId = sessions.activeChatSessionId; if (activeChatSessionId) { if (viewMode !== 'conversation') sessions.handleAttachSession(activeChatSessionId); requestAnimationFrame(() => chatSessionRefs.current.get(activeChatSessionId)?.focusInput()); } },
     'focus-terminal': () => { if (viewMode !== 'terminal') { const ft = workspaceTabs.find((t) => t.kind === 'terminal'); if (ft) handleSelectWorkspaceTab(ft); } requestAnimationFrame(() => multiTerminalRef.current?.focus()); },
     'switch-worktree': () => { if (core.isRunning && nav.worktrees.length > 0) document.getElementById('worktree-selector-trigger')?.click(); },
-    'next-tab': () => { if (workspaceTabs.length > 1) { const ci = workspaceTabs.findIndex((t) => t.id === activeTabId); handleSelectWorkspaceTab(workspaceTabs[(ci + 1) % workspaceTabs.length]!); } },
-    'prev-tab': () => { if (workspaceTabs.length > 1) { const ci = workspaceTabs.findIndex((t) => t.id === activeTabId); handleSelectWorkspaceTab(workspaceTabs[ci <= 0 ? workspaceTabs.length - 1 : ci - 1]!); } },
-    ...Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`tab-${i + 1}`, () => { if (i < workspaceTabs.length) handleSelectWorkspaceTab(workspaceTabs[i]!); }])),
+    'next-tab': () => { if (workspaceTabs.length > 1) { const ci = workspaceTabs.findIndex((t) => t.id === activeTabId); const nextTab = workspaceTabs[(ci + 1) % workspaceTabs.length]; if (nextTab) handleSelectWorkspaceTab(nextTab); } },
+    'prev-tab': () => { if (workspaceTabs.length > 1) { const ci = workspaceTabs.findIndex((t) => t.id === activeTabId); const prevTab = workspaceTabs[ci <= 0 ? workspaceTabs.length - 1 : ci - 1]; if (prevTab) handleSelectWorkspaceTab(prevTab); } },
+    ...Object.fromEntries(Array.from({ length: 9 }, (_, i) => [`tab-${i + 1}`, () => { if (i < workspaceTabs.length) { const tab = workspaceTabs[i]; if (tab) handleSelectWorkspaceTab(tab); } }])),
     'new-chat': () => { if (core.isRunning) void sessions.handleCreateSession(sessions.defaultAgentId ?? undefined); },
     'new-terminal': () => { if (core.isRunning) handleCreateTerminalTab(); },
     'command-palette': () => { setShowCommandPalette((p) => !p); setShowShortcutsHelp(false); },
@@ -373,13 +378,19 @@ export function Workspace() {
                   </div>
                 ) : viewMode === 'conversation' && id && core.workspace?.url ? (
                   /* Fallback: workspace without a linked project session — use legacy ChatSession */
-                  sessions.runningChatSessions.map((session: AgentSession) => (
-                    <ChatSession key={session.id} ref={(h) => { if (h) chatSessionRefs.current.set(session.id, h); else chatSessionRefs.current.delete(session.id); }}
-                      workspaceId={id} workspaceUrl={core.workspace!.url!} sessionId={session.id} worktreePath={session.worktreePath}
-                      preferredAgentId={session.agentType || sessions.preferredAgentsBySession[session.id] || (sessions.configuredAgents.length > 0 ? sessions.configuredAgents[0]!.id : undefined)}
-                      configuredAgents={sessions.configuredAgents} active={sessions.activeChatSessionId === session.id}
-                      onActivity={handleTerminalActivity} onUsageChange={sessions.handleUsageChange} />
-                  ))
+                  (() => {
+                    // Narrowed local: `core.workspace?.url` above only narrows within this
+                    // synchronous JSX expression, not inside the .map() closure below.
+                    const workspaceUrl = core.workspace?.url;
+                    if (!workspaceUrl) return null;
+                    return sessions.runningChatSessions.map((session: AgentSession) => (
+                      <ChatSession key={session.id} ref={(h) => { if (h) chatSessionRefs.current.set(session.id, h); else chatSessionRefs.current.delete(session.id); }}
+                        workspaceId={id} workspaceUrl={workspaceUrl} sessionId={session.id} worktreePath={session.worktreePath}
+                        preferredAgentId={session.agentType || sessions.preferredAgentsBySession[session.id] || sessions.configuredAgents.at(0)?.id}
+                        configuredAgents={sessions.configuredAgents} active={sessions.activeChatSessionId === session.id}
+                        onActivity={handleTerminalActivity} onUsageChange={sessions.handleUsageChange} />
+                    ));
+                  })()
                 ) : null}
               </>
             ) : (

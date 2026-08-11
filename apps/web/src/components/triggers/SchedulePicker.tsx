@@ -87,28 +87,34 @@ function parseCronToMode(cron: string): {
   if (parts.length !== 5) return { mode: 'advanced', ...defaults };
 
   const [minStr, hourStr, domStr, , dowStr] = parts;
+  // parts.length === 5 (checked above) guarantees indices 0, 1, 2, and 4 are
+  // all present, but TS can't correlate a runtime length check to the
+  // destructure — fall back to 'advanced' like the length check above would.
+  if (minStr === undefined || hourStr === undefined || domStr === undefined || dowStr === undefined) {
+    return { mode: 'advanced', ...defaults };
+  }
 
-  const min = parseInt(minStr!, 10);
+  const min = parseInt(minStr, 10);
   const minute = isNaN(min) ? 0 : min;
 
   // Hourly: */N * * * * or 0 */N * * *
-  if (hourStr!.startsWith('*/') && domStr === '*' && dowStr === '*') {
-    const n = parseInt(hourStr!.slice(2), 10);
+  if (hourStr.startsWith('*/') && domStr === '*' && dowStr === '*') {
+    const n = parseInt(hourStr.slice(2), 10);
     return { mode: 'hourly', hour: 0, minute, everyNHours: isNaN(n) ? 1 : n, dailyVariant: 'every', weeklyDays: [1], monthDay: 1 };
   }
 
-  const hour = parseInt(hourStr!, 10);
+  const hour = parseInt(hourStr, 10);
   if (isNaN(hour)) return { mode: 'advanced', ...defaults };
 
   // Monthly: M H D * *
   if (domStr !== '*' && dowStr === '*') {
-    const dom = parseInt(domStr!, 10);
+    const dom = parseInt(domStr, 10);
     return { mode: 'monthly', hour, minute, everyNHours: 1, dailyVariant: 'every', weeklyDays: [1], monthDay: isNaN(dom) ? 1 : dom };
   }
 
   // Weekly: M H * * 1,3,5
   if (domStr === '*' && dowStr !== '*') {
-    const days = dowStr!.split(',').map(Number).filter((n) => !isNaN(n));
+    const days = dowStr.split(',').map(Number).filter((n) => !isNaN(n));
     // Check if weekday or weekend
     const isWeekday = days.length === 5 && [1, 2, 3, 4, 5].every((d) => days.includes(d));
     const isWeekend = days.length === 2 && [0, 6].every((d) => days.includes(d));
@@ -159,14 +165,20 @@ function describeCron(cron: string): string {
 
   try {
     const [minStr, hourStr, domStr, , dowStr] = parts;
-    const min = parseInt(minStr!, 10);
+    // parts.length === 5 (checked above) guarantees indices 0, 1, 2, and 4 are
+    // all present, but TS can't correlate a runtime length check to the
+    // destructure — treat it the same as the length check above.
+    if (minStr === undefined || hourStr === undefined || domStr === undefined || dowStr === undefined) {
+      return 'Invalid expression';
+    }
+    const min = parseInt(minStr, 10);
 
-    if (hourStr!.startsWith('*/')) {
-      const n = parseInt(hourStr!.slice(2), 10);
+    if (hourStr.startsWith('*/')) {
+      const n = parseInt(hourStr.slice(2), 10);
       return `Every ${n} hour(s) at minute ${min}`;
     }
 
-    const hour = parseInt(hourStr!, 10);
+    const hour = parseInt(hourStr, 10);
     if (isNaN(hour)) return cron;
 
     const timeStr = `${hour === 0 ? 12 : hour > 12 ? hour - 12 : hour}:${String(min).padStart(2, '0')} ${hour < 12 ? 'AM' : 'PM'}`;
@@ -177,7 +189,7 @@ function describeCron(cron: string): string {
 
     if (dowStr !== '*' && domStr === '*') {
       const dayNames = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-      const days = dowStr!.split(',').map(Number);
+      const days = dowStr.split(',').map(Number);
       const isWeekday = days.length === 5 && [1, 2, 3, 4, 5].every((d) => days.includes(d));
       const isWeekend = days.length === 2 && [0, 6].every((d) => days.includes(d));
       if (isWeekday) return `Weekdays at ${timeStr}`;

@@ -202,7 +202,7 @@ export function ProjectTriggerDetail() {
     );
   }
 
-  if (error || !trigger) {
+  if (error || !trigger || !triggerId) {
     return (
       <div className="text-center py-16">
         <p className="text-danger mb-4">{error ?? 'Trigger not found'}</p>
@@ -397,7 +397,7 @@ export function ProjectTriggerDetail() {
           hasMore={hasMore}
           onLoadMore={handleLoadMore}
           projectId={projectId}
-          triggerId={triggerId!}
+          triggerId={triggerId}
           onMutated={handleExecutionsMutated}
         />
       </div>

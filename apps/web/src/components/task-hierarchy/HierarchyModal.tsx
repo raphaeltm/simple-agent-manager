@@ -68,12 +68,17 @@ function AncestorBreadcrumbs({
   const display: (HierarchyNode | null)[] =
     ancestors.length <= 4
       ? ancestors.slice(0, -1)
-      : [
-          ancestors[0]!,
-          null,
-          ancestors[ancestors.length - 3]!,
-          ancestors[ancestors.length - 2]!,
-        ];
+      : (() => {
+          // Guaranteed present: this branch only runs when ancestors.length > 4,
+          // so index 0 and the last two indices before the final entry are in bounds.
+          const first = ancestors[0];
+          const nearEnd = ancestors[ancestors.length - 3];
+          const secondToLast = ancestors[ancestors.length - 2];
+          if (!first || !nearEnd || !secondToLast) {
+            throw new Error('AncestorBreadcrumbs: expected ancestors array to have at least 5 entries');
+          }
+          return [first, null, nearEnd, secondToLast];
+        })();
 
   return (
     <div
@@ -102,7 +107,7 @@ function AncestorBreadcrumbs({
             )}
             <button
               type="button"
-              onClick={() => hasSession && onNavigate(item.sessionId!)}
+              onClick={() => item.sessionId != null && onNavigate(item.sessionId)}
               disabled={!hasSession}
               className="rounded px-1 py-px transition-colors duration-150 truncate"
               style={{
