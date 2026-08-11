@@ -131,9 +131,10 @@ export class ProjectAgent extends DurableObject<AppEnv> {
       }
 
       const messagesMatch = path.match(/^\/conversations\/([^/]+)\/messages$/);
-      if (method === 'GET' && messagesMatch) {
+      const messagesConversationId = messagesMatch?.[1];
+      if (method === 'GET' && messagesConversationId) {
         const limit = parseInt(url.searchParams.get('limit') || '', 10) || undefined;
-        return this.handleGetMessages(messagesMatch[1]!, limit);
+        return this.handleGetMessages(messagesConversationId, limit);
       }
 
       return new Response(JSON.stringify({ error: 'Not found' }), {
@@ -229,7 +230,7 @@ export class ProjectAgent extends DurableObject<AppEnv> {
         try {
           await writer.write(encodeSseEvent({ type: 'conversation_started', conversationId }));
           await runAgentLoop(
-            conversationId!,
+            conversationId,
             historyRows,
             body.message,
             config,

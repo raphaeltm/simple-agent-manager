@@ -541,16 +541,17 @@ async function processOpenAIStream(
           const index = typeof dtc.index === 'number' ? dtc.index : 0;
           const fn = dtc.function ? expectJsonRecord(dtc.function, 'sam-session.openai_stream.tool_call.function') : undefined;
 
-          if (!toolCallBuilders.has(index)) {
+          let builder = toolCallBuilders.get(index);
+          if (!builder) {
             const id = typeof dtc.id === 'string' ? dtc.id : `call_${crypto.randomUUID().slice(0, 8)}`;
             const name = typeof fn?.name === 'string' ? fn.name : '';
-            toolCallBuilders.set(index, { id, name, args: '' });
+            builder = { id, name, args: '' };
+            toolCallBuilders.set(index, builder);
             if (name) {
               await writer.write(encodeSseEvent({ type: 'tool_start', tool: name, input: {} }));
             }
           }
 
-          const builder = toolCallBuilders.get(index)!;
           if (fn?.name && typeof fn.name === 'string' && !builder.name) {
             builder.name = fn.name;
             await writer.write(encodeSseEvent({ type: 'tool_start', tool: builder.name, input: {} }));

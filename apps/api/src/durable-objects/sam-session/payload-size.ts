@@ -65,7 +65,11 @@ export function trimMessagesToFit(
   const protectedTail = 6;
   const truncateLimit = Math.max(0, trimmed.length - protectedTail);
   for (let i = 0; i < truncateLimit; i++) {
-    const m = trimmed[i]!;
+    const m = trimmed[i];
+    if (!m) {
+      // truncateLimit is clamped to trimmed.length above — this should never happen.
+      throw new Error(`payload-size.trimMessagesToFit: message at index ${i} missing from trimmed array (length ${trimmed.length})`);
+    }
     if (m.role === 'tool' && m.content && m.content.length > 500) {
       m.content = m.content.slice(0, 500) + '\n\n[trimmed for context budget]';
     }
