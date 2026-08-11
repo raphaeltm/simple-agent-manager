@@ -186,6 +186,25 @@ describe('sync wrangler config', () => {
     });
   });
 
+  it('passes durable execution rollout configuration through only when explicitly set', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+
+    const unset = generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars;
+    expect(unset).not.toHaveProperty('DURABLE_PROMPT_DELIVERY_ENABLED');
+    expect(unset).not.toHaveProperty('PROMPT_DELIVERY_MAX_ATTEMPTS');
+    expect(unset).not.toHaveProperty('ACP_LONG_TURN_SUPERVISOR_ENABLED');
+
+    vi.stubEnv('DURABLE_PROMPT_DELIVERY_ENABLED', 'true');
+    vi.stubEnv('PROMPT_DELIVERY_MAX_ATTEMPTS', '7');
+    vi.stubEnv('ACP_LONG_TURN_SUPERVISOR_ENABLED', 'false');
+
+    expect(generateApiWorkerEnv({}, outputs, 'prod', false, false, null).vars).toMatchObject({
+      DURABLE_PROMPT_DELIVERY_ENABLED: 'true',
+      PROMPT_DELIVERY_MAX_ATTEMPTS: '7',
+      ACP_LONG_TURN_SUPERVISOR_ENABLED: 'false',
+    });
+  });
+
   it('generates Cloudflare container max_instances with unchanged safe defaults', () => {
     vi.stubEnv('RESOURCE_PREFIX', 's123abc');
     vi.stubEnv('VM_AGENT_REQUIRED_VERSION', 'deploy-sha');
