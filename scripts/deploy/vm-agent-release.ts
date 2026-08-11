@@ -47,22 +47,40 @@ function normalizeFingerprint(value: string | null | undefined): string | null {
   return normalized && FINGERPRINT_PATTERN.test(normalized) ? normalized : null;
 }
 
+function requireGitCommitSha(ref: string): string {
+  const commitSha = normalizeGitSha(ref);
+  if (!commitSha) {
+    throw new Error('VM-agent build inputs must be read from a valid 40-character commit SHA');
+  }
+  return commitSha;
+}
+
 export function createGitBuildInputReader(repositoryRoot: string): VmAgentBuildInputReader {
   return {
     listTrackedInputs(ref) {
-      return execFileSync('git', ['ls-tree', '-r', '-z', ref, '--', VM_AGENT_SOURCE_PATH], {
-        cwd: repositoryRoot,
-        encoding: 'utf8',
-        stdio: ['ignore', 'pipe', 'pipe'],
-      });
-    },
-    readCompatibilityVersion(ref) {
-      try {
-        return execFileSync('git', ['show', `${ref}:${VM_AGENT_COMPATIBILITY_MARKER_PATH}`], {
+      const commitSha = requireGitCommitSha(ref);
+      return execFileSync(
+        'git',
+        ['ls-tree', '-r', '-z', '--end-of-options', commitSha, '--', VM_AGENT_SOURCE_PATH],
+        {
           cwd: repositoryRoot,
           encoding: 'utf8',
           stdio: ['ignore', 'pipe', 'pipe'],
-        });
+        }
+      );
+    },
+    readCompatibilityVersion(ref) {
+      const commitSha = requireGitCommitSha(ref);
+      try {
+        return execFileSync(
+          'git',
+          ['show', '--end-of-options', `${commitSha}:${VM_AGENT_COMPATIBILITY_MARKER_PATH}`],
+          {
+            cwd: repositoryRoot,
+            encoding: 'utf8',
+            stdio: ['ignore', 'pipe', 'pipe'],
+          }
+        );
       } catch {
         return null;
       }

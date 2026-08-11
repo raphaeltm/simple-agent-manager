@@ -123,6 +123,19 @@ describe('computeVmAgentBuildFingerprint', () => {
   });
 });
 
+describe('createGitBuildInputReader', () => {
+  it('rejects non-commit refs before invoking Git build-input reads', () => {
+    const reader = createGitBuildInputReader(process.cwd());
+
+    expect(() => reader.listTrackedInputs('--help')).toThrow(
+      'VM-agent build inputs must be read from a valid 40-character commit SHA'
+    );
+    expect(() => reader.readCompatibilityVersion('HEAD^{tree}')).toThrow(
+      'VM-agent build inputs must be read from a valid 40-character commit SHA'
+    );
+  });
+});
+
 describe('resolveVmAgentRelease', () => {
   it('carries the last published version and skips build for unchanged inputs', () => {
     expect(

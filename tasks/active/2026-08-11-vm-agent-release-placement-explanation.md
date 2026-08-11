@@ -189,7 +189,8 @@ will be reviewed in one draft PR.
 - `pnpm test` — passed all 21 Turbo tasks; Web 255 files / 3,069 tests passed. The
   final post-review API suite separately passed 539 files / 7,114 tests.
 - `pnpm format:check` — passed the repository format ratchet.
-- Release-resolution and workflow focused suites — 93/93 passed.
+- Release-resolution and workflow focused suites — 94/94 passed, including rejection
+  of option/revision-shaped Git refs before either build-input subprocess executes.
 - Final manual-placement review suite — 41/41 API tests; shared placement parser —
   9/9; broader placement/persistence/API/MCP focused suites — 200+; UI placement unit
   tests — 3/3.
@@ -205,7 +206,7 @@ will be reviewed in one draft PR.
 | ------------------------- | ---------------- | ---------------------------------------------------------------------------------------------------------------------------- |
 | Cloudflare specialist     | PASS             | Release metadata, Worker settings, migration ordering, and R2 publication behavior verified after fixes through `935379670`. |
 | Environment validator     | PASS             | Generated deployment-owned bindings and documentation remain consistent; no new manual secret prerequisite.                  |
-| Security auditor          | ADDRESSED / PASS | Candidate identifiers and untrusted placement input were bounded/aliased; final tenant-safe review passed at `30fd67ea5`.    |
+| Security auditor          | ADDRESSED / PASS | Tenant-safe placement passed at `30fd67ea5`; follow-up Git argument-injection review passed after strict SHA/option guards. |
 | UI/UX specialist          | PASS             | Default-collapsed sidebar, accessibility, responsive behavior, and 16 local Playwright scenarios passed.                     |
 | Documentation validator   | ADDRESSED / PASS | Release ordering/fail-closed semantics, MCP shape, OpenAPI, parser contract, and public docs passed at `abcc1ddac`.          |
 | Constitution validator    | ADDRESSED / PASS | Removed hidden ceilings/truncation/weights and duplicated defaults; Principle XI review passed at `839267430`.               |
