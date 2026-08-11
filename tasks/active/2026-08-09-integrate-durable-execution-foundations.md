@@ -31,9 +31,9 @@ This task is SAM task `01KZM7QR5CW8T93FMS8X5CDF7A` on branch `sam/resume-ship-du
 - [x] Propagate durable-execution rollout configuration from GitHub Environment variables through the generated Worker configuration so staging can opt in without changing production defaults.
 - [x] Run focused contract, Go race, Miniflare/workerd, migration, and normal prompt/cancel regression suites.
 - [x] Run full repository lint, typecheck, test, build, and quality gates.
-- [ ] Run task-completion, Go, Cloudflare, constitution, documentation, and test specialist reviews; address all blocking findings.
-- [ ] Delete all staging nodes, deploy the final branch, provision a fresh VM, verify heartbeat/workspace/protocol behavior end to end, and delete all staging test resources so zero VMs remain.
-- [ ] Open/update the PR with evidence and obtain green CI. Per the current user constraint, leave the draft PR unmerged and do not deploy to production.
+- [x] Run task-completion, Go, Cloudflare, constitution, documentation, and test specialist reviews; address all blocking findings.
+- [x] Delete all staging nodes, deploy the branch, provision a fresh VM, verify heartbeat/workspace/protocol behavior end to end, and delete all staging test resources so zero VMs remain.
+- [x] Open/update the PR with evidence and obtain green CI. Per the current user constraint, leave the draft PR unmerged and do not deploy to production.
 
 ## Acceptance criteria
 
@@ -45,6 +45,14 @@ This task is SAM task `01KZM7QR5CW8T93FMS8X5CDF7A` on branch `sam/resume-ship-du
 - VM cancel, deadline, delayed process exit, and strict-resume failure each converge exactly once and cannot produce a later fresh `NewSession` or `Ready`.
 - Migrations 026 (mainline attention expiry), 027 (durable prompt delivery/checkpoints), and all prior ProjectData migrations pass clean-install, upgrade, safety, and workerd/Miniflare tests.
 - Full Go tests including `-race`, repository quality gates, specialist reviews, CI, fresh-VM staging verification, and cleanup complete successfully. Per the current user constraint, the draft remains unmerged and production is untouched.
+
+## Completion evidence (2026-08-11)
+
+- Draft PR #1785 was rebased onto current `main`, validated by the full GitHub CI matrix, and left unmerged. The final CI run `31543035378` is green, including full coverage, Durable Object workers, VM Agent unit/integration/E2E, migration safety, deployment scripts, and specialist-review evidence.
+- Staging deployment run `31541563188` passed. The deployed Worker reports `DURABLE_PROMPT_DELIVERY_ENABLED=true` and `CF_CONTAINER_ENABLED=false`, preserving production-default opt-in behavior while forcing the staging validation through a VM.
+- Authenticated browser regression checks passed for staging health, dashboard, and settings. A fresh medium VM node `01KZSGN8YJHG1TW6FY63QB5660` became healthy and ran workspace `01KZSGSE0N0MM6ZPPRFDT3N1QN`.
+- The live `POST /api/projects/:projectId/sessions/:sessionId/prompt` returned `202` with durable delivery `01KZSGV2WYQK9ZEFC16DTFMC9N`. The persisted durability snapshot reports one v1 attempt, matching VM runtime identity, and `deliveryState: acked` after receipt acceptance.
+- The exact staging node was deleted through the authenticated API; its workspace subsequently returned `404` and the staging node list was empty. No production deployment or merge occurred.
 
 ## References
 
