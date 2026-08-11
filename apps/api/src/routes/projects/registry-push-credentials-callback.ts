@@ -1,7 +1,10 @@
 import { Hono } from 'hono';
+import type { InferOutput } from 'valibot';
+import * as v from 'valibot';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { parseWithSchema, readRequestJsonRecord } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
 import { assertAgentDeploymentAllowedForProfile } from '../../services/deployment-control';
 import {
@@ -43,6 +46,11 @@ function cleanOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
 }
 
+const registryPushCredentialRequestSchema = v.object({
+  environment: v.optional(v.string()),
+  agentProfileId: v.optional(v.string()),
+});
+
 registryPushCredentialsCallbackRoute.post('/:id/registry-push-credentials', async (c) => {
   const { projectId, workspaceId, userId, db } = await verifyWorkspacePublishCallback(
     c,
@@ -50,11 +58,24 @@ registryPushCredentialsCallbackRoute.post('/:id/registry-push-credentials', asyn
     'Invalid token scope for registry push credentials'
   );
 
-  const requestBody = await c.req.json().catch(() => null);
-  if (!requestBody || typeof requestBody !== 'object') {
+  let requestBody: Record<string, unknown>;
+  try {
+    requestBody = await readRequestJsonRecord(c.req.raw, 'registry_push_cred.body');
+  } catch {
     throw errors.badRequest('Registry credential request body is required');
   }
-  const body = requestBody as Record<string, unknown>;
+
+  let body: InferOutput<typeof registryPushCredentialRequestSchema>;
+  try {
+    body = parseWithSchema(
+      registryPushCredentialRequestSchema,
+      requestBody,
+      'registry_push_cred.body'
+    );
+  } catch {
+    throw errors.badRequest('Registry credential request body is required');
+  }
+
   const environment = cleanOptionalString(body.environment);
   const agentProfileId = cleanOptionalString(body.agentProfileId);
   if (!environment || !agentProfileId) {

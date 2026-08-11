@@ -3,8 +3,12 @@ import {
   type ComposeRouteHint,
   type DeploymentManifest,
   parseComposeRouteHints,
+  validateManifest,
 } from '@simple-agent-manager/shared';
 import { parse as parseYaml } from 'yaml';
+
+import { log } from '../lib/logger';
+import { parseJsonRecord } from '../lib/runtime-validation';
 
 /** Default loopback port base for app routes published to node-local Caddy. */
 export const DEFAULT_DEPLOYMENT_ROUTE_PORT_BASE = 35_000;
@@ -320,26 +324,62 @@ function buildRouteDiscoveryFromHints(
  */
 export function buildReleaseRouteTargets(
   manifestJson: string,
-  opts: DeploymentRouteTargetOptions
+  opts: DeploymentRouteTargetOptions,
+  releaseId?: string
 ): DeploymentRouteTarget[] {
-  return buildReleaseRouteDiscovery(manifestJson, opts)?.publicRoutes.map(toRouteTarget) ?? [];
+  return (
+    buildReleaseRouteDiscovery(manifestJson, opts, releaseId)?.publicRoutes.map(toRouteTarget) ?? []
+  );
 }
 
+/**
+ * Parse a stored release manifest and derive its route discovery.
+ *
+ * A manifest whose top-level shape LOOKS like a normalized build-on-node
+ * manifest (a `routes` array is present) MUST validate against the shared
+ * `DeploymentManifestSchema` before its routes are trusted. Compose-publish
+ * submissions have no `routes` field of their own — the only legitimate way
+ * for `manifest.routes` to be an array is a genuine build-on-node manifest.
+ * Without this check, a compromised/misbehaving VM agent could smuggle a
+ * top-level `routes` array into a compose-publish submission and have it
+ * treated as authoritative route/hostname/port claims the agent's own
+ * compose file never declared (see .claude/rules/51-runtime-boundary-validation.md,
+ * .claude/rules/11-fail-fast-patterns.md). The write path
+ * (compose-publish-release-callback.ts) already allowlists what gets stored
+ * so this can no longer occur going forward; this check is defense-in-depth
+ * for that boundary and for any already-stored/legacy manifest.
+ *
+ * FAIL-SAFE DEGRADE: an invalid manifest never throws — it degrades to "no
+ * routes discovered" (`null`), matching the existing malformed-JSON/oversized
+ * -route-set behavior callers already tolerate (rule 50 spirit: one bad row
+ * degrades diagnosably, never a 500).
+ */
 export function buildReleaseRouteDiscovery(
   manifestJson: string,
-  opts: DeploymentRouteTargetOptions
+  opts: DeploymentRouteTargetOptions,
+  releaseId?: string
 ): DeploymentRouteDiscovery | null {
   let manifest: Record<string, unknown>;
   try {
-    manifest = JSON.parse(manifestJson) as Record<string, unknown>;
+    manifest = parseJsonRecord(manifestJson, 'deployment-routing.release_manifest');
   } catch {
     return null;
   }
 
   try {
-    return Array.isArray(manifest.routes)
-      ? buildDeploymentRouteDiscovery(manifest as unknown as DeploymentManifest, opts)
-      : buildComposePublishRouteDiscovery(manifest, opts);
+    if (Array.isArray(manifest.routes)) {
+      const validated = validateManifest(manifest);
+      if (!validated.success) {
+        log.warn('deployment_routing.release_manifest_invalid', {
+          releaseId: releaseId ?? null,
+          environmentId: opts.environmentId,
+          issues: validated.errors,
+        });
+        return null;
+      }
+      return buildDeploymentRouteDiscovery(validated.manifest, opts);
+    }
+    return buildComposePublishRouteDiscovery(manifest, opts);
   } catch {
     return null;
   }

@@ -1,8 +1,11 @@
 import { and, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
+import type { InferOutput } from 'valibot';
+import * as v from 'valibot';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
+import { parseWithSchema, readRequestJsonRecord } from '../../lib/runtime-validation';
 import { errors } from '../../middleware/error';
 import { appendDeploymentPublishJobEvent } from '../../services/deployment-publish-jobs';
 import { verifyWorkspacePublishCallback } from './_callback-auth';
@@ -16,6 +19,31 @@ function optionalString(value: unknown): string | null {
 function optionalNumber(value: unknown): number | null {
   return typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : null;
 }
+
+/**
+ * Allowlisted shape of a deployment publish job event callback body
+ * (internal/publish/events.go: Event). `detail` is intentionally left
+ * unvalidated here — it is a free-form diagnostic payload that
+ * appendDeploymentPublishJobEvent safely JSON-serializes (falling back to a
+ * placeholder note on non-serializable input), so it is read directly from
+ * the raw parsed body as `unknown`, matching its consumer's `detail?:
+ * unknown` parameter exactly.
+ */
+const publishJobEventSchema = v.object({
+  eventType: v.optional(v.string()),
+  message: v.optional(v.string()),
+  status: v.optional(v.string()),
+  currentStep: v.optional(v.string()),
+  step: v.optional(v.string()),
+  level: v.optional(v.string()),
+  terminal: v.optional(v.boolean()),
+  releaseId: v.optional(v.string()),
+  releaseVersion: v.optional(v.number()),
+  releaseStatus: v.optional(v.string()),
+  errorMessage: v.optional(v.string()),
+  errorCode: v.optional(v.string()),
+  retryable: v.optional(v.boolean()),
+});
 
 deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/events', async (c) => {
   const { projectId, workspaceId, userId, db } = await verifyWorkspacePublishCallback(
@@ -40,11 +68,24 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
     throw errors.notFound('Publish job');
   }
 
-  const body = await c.req.json().catch(() => null);
-  if (!body || typeof body !== 'object') {
+  let requestBody: Record<string, unknown>;
+  try {
+    requestBody = await readRequestJsonRecord(c.req.raw, 'deployment_publish_job_event.body');
+  } catch {
     throw errors.badRequest('Invalid publish job event body');
   }
-  const event = body as Record<string, unknown>;
+
+  let event: InferOutput<typeof publishJobEventSchema>;
+  try {
+    event = parseWithSchema(
+      publishJobEventSchema,
+      requestBody,
+      'deployment_publish_job_event.body'
+    );
+  } catch {
+    throw errors.badRequest('Invalid publish job event body');
+  }
+
   const eventType = optionalString(event.eventType);
   const message = optionalString(event.message);
   if (!eventType || !message) {
@@ -64,7 +105,7 @@ deploymentPublishJobCallbackRoute.post('/:id/deployment-publish-jobs/:jobId/even
     level: optionalString(event.level) ?? undefined,
     eventType,
     message,
-    detail: event.detail,
+    detail: requestBody.detail,
     terminal: event.terminal === true,
     releaseId: optionalString(event.releaseId),
     releaseVersion: optionalNumber(event.releaseVersion),
