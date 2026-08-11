@@ -1,6 +1,6 @@
 import type { TriggerResponse } from '@simple-agent-manager/shared';
 import { Card, DropdownMenu, type DropdownMenuItem, StatusBadge } from '@simple-agent-manager/ui';
-import { Calendar, History, Pause, Play, Trash2 } from 'lucide-react';
+import { Calendar, History, Play } from 'lucide-react';
 import { type FC, useMemo } from 'react';
 
 import { timeAgo } from '../../lib/time-utils';
@@ -33,19 +33,20 @@ export const TriggerCard: FC<TriggerCardProps> = ({
   const isDisabled = trigger.status === 'disabled';
   const isPaused = trigger.status === 'paused';
 
+  // No item icons: every other DropdownMenu in the app (WorkspaceCard, NodeCard,
+  // ProjectSummaryCard) is icon-less, and a partially-iconed menu also misaligns
+  // its own labels.
   const menuItems = useMemo<DropdownMenuItem[]>(() => {
     const items: DropdownMenuItem[] = [
       { id: 'edit', label: 'Edit', onClick: () => onEdit(trigger) },
       {
         id: 'pause',
         label: isPaused ? 'Resume' : 'Pause',
-        icon: <Pause size={14} aria-hidden="true" />,
         onClick: () => onTogglePause(trigger),
       },
       {
         id: 'history',
         label: 'View history',
-        icon: <History size={14} aria-hidden="true" />,
         onClick: () => onViewHistory(trigger),
       },
     ];
@@ -53,7 +54,6 @@ export const TriggerCard: FC<TriggerCardProps> = ({
       items.push({
         id: 'delete',
         label: 'Delete',
-        icon: <Trash2 size={14} aria-hidden="true" />,
         variant: 'danger',
         onClick: () => onDelete(trigger),
       });
@@ -89,15 +89,23 @@ export const TriggerCard: FC<TriggerCardProps> = ({
         </div>
 
         <div className="flex shrink-0 items-center gap-1">
+          {/*
+            The label is hidden only where space is genuinely scarce. Running a
+            trigger is this page's core action, and the desktop layout has room —
+            dropping the label everywhere would make it less discoverable than
+            the button it replaced, and inconsistent with the identical action on
+            the detail page (ProjectTriggerDetail.tsx).
+          */}
           <button
             type="button"
             onClick={() => onRunNow(trigger)}
             disabled={isDisabled}
             title={isDisabled ? 'Trigger is disabled' : 'Run now'}
             aria-label={`Run "${trigger.name}" now`}
-            className={`inline-flex h-8 w-8 items-center justify-center rounded-sm border border-border-default bg-transparent text-fg-muted hover:bg-surface-hover hover:text-fg-primary cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
+            className={`inline-flex h-8 items-center justify-center gap-1.5 rounded-sm border border-border-default bg-transparent px-2 text-xs font-medium text-fg-muted hover:bg-surface-hover hover:text-fg-primary cursor-pointer disabled:cursor-not-allowed disabled:opacity-50 ${FOCUS_RING}`}
           >
             <Play size={14} aria-hidden="true" />
+            <span className="hidden sm:inline">Run now</span>
           </button>
           <DropdownMenu items={menuItems} aria-label={`Actions for "${trigger.name}"`} />
         </div>

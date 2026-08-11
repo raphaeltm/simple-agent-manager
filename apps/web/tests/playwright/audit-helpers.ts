@@ -111,7 +111,10 @@ export async function findClippedOverflow(page: Page): Promise<string[]> {
       if (style.display === 'none' || style.visibility === 'hidden') continue;
       if (style.overflowX !== 'hidden' && style.overflowX !== 'clip') continue;
       if (style.textOverflow === 'ellipsis') continue;
-      if (el.clientWidth <= 4) continue;
+      // `sr-only` is exactly 1px wide. Keep the exemption that tight: a wider
+      // exemption would also hide a control squashed to near-zero by a flex bug,
+      // which is a worse defect than the one this detector looks for.
+      if (el.clientWidth <= 1) continue;
       if (el.closest('[data-intentional-clip]')) continue;
       // +1 absorbs sub-pixel layout rounding.
       if (el.scrollWidth <= el.clientWidth + 1) continue;

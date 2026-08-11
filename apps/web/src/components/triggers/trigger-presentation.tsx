@@ -43,8 +43,10 @@ export function formatTriggerSource(trigger: TriggerResponse): string {
     return commandPrefix ? `GitHub ${eventLabel}: ${commandPrefix}` : `GitHub ${eventLabel}`;
   }
   if (trigger.sourceType === 'webhook') {
-    // A blank sourceLabel stays blank by project policy — do not substitute the
-    // trigger name or a "Generic webhook" fallback.
+    // When there is no sourceLabel we name the SOURCE TYPE ("Webhook"), never a
+    // fabricated label. The previous "Generic webhook" read as if the user had
+    // configured a source called that; project policy is that a blank label is
+    // not substituted with an invented one.
     const label = trigger.webhookConfig?.sourceLabel ?? '';
     const suffix = trigger.webhookConfig?.tokenLastFour;
     if (label && suffix) return `${label} · token ••••${suffix}`;
@@ -68,27 +70,44 @@ export function formatNextRun(dateStr: string): string {
   return `in ${Math.floor(hours / 24)}d`;
 }
 
-/** Wall-clock duration between two ISO timestamps, e.g. "1m 5s". */
+/**
+ * Wall-clock duration between two ISO timestamps, e.g. "1m 5s".
+ *
+ * Output is deliberately identical to the two implementations this replaced
+ * (`<1s` below a second, bare `2m` on an exact minute). Deduplicating formatters
+ * must not silently restyle what users already read in execution history — the
+ * only behaviour added here is the NaN/negative guard.
+ */
 export function formatDuration(startedAt?: string | null, completedAt?: string | null): string {
   if (!startedAt || !completedAt) return '—';
   const ms = new Date(completedAt).getTime() - new Date(startedAt).getTime();
   if (Number.isNaN(ms) || ms < 0) return '—';
-  if (ms < 1000) return `${ms}ms`;
+  if (ms < 1000) return '<1s';
   const seconds = Math.floor(ms / 1000);
   if (seconds < 60) return `${seconds}s`;
-  return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return secs > 0 ? `${minutes}m ${secs}s` : `${minutes}m`;
 }
 
-/** Absolute timestamp for detail views, in the viewer's locale. */
+/**
+ * Absolute timestamp for detail views, in the viewer's locale.
+ *
+ * Keeps `timeZoneName` — this is a scheduling feature, and a run time without a
+ * zone is ambiguous for anyone whose triggers are not in their local zone.
+ * Field set matches the implementations this replaced; only the null/NaN guards
+ * are new.
+ */
 export function formatDateFull(dateStr?: string | null): string {
   if (!dateStr) return '—';
   const date = new Date(dateStr);
   if (Number.isNaN(date.getTime())) return '—';
   return date.toLocaleString(undefined, {
-    year: 'numeric',
+    weekday: 'short',
     month: 'short',
     day: 'numeric',
     hour: '2-digit',
     minute: '2-digit',
+    timeZoneName: 'short',
   });
 }

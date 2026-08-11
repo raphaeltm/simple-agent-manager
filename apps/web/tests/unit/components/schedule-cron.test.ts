@@ -7,10 +7,16 @@ import {
 } from '../../../src/components/triggers/schedule-cron';
 
 /**
- * These pure helpers previously lived inside `SchedulePicker` with ZERO test
- * coverage, which is how the "editing a trigger shows the wrong schedule" bug
- * shipped. The round-trip below is the property that matters: whatever a stored
- * cron means, the picker must read it back and rebuild the identical string.
+ * Unit coverage for the cron helpers extracted out of `SchedulePicker`, which
+ * previously had none. The round-trip below is the property that matters:
+ * whatever a stored cron means, the picker must read it back and rebuild the
+ * identical string.
+ *
+ * NOTE ON SCOPE: this file does NOT lock down the "editing a trigger shows the
+ * wrong schedule" bug. That bug was a missing prop reconciliation in the
+ * component — the parsing math here was already correct before the fix, so
+ * these tests pass on the pre-fix code. `TriggerFormSchedule.test.tsx` is the
+ * discriminating regression guard for it.
  */
 describe('schedule-cron', () => {
   describe('parse → build round-trip', () => {
@@ -103,11 +109,18 @@ describe('schedule-cron', () => {
       expect(describeCron('0 */4 * * *')).toBe('Every 4 hour(s) at minute 0');
     });
 
-    it('never renders the string "undefined" for out-of-range days', () => {
-      // A hand-typed advanced expression can contain day 9; the day-name lookup
-      // used to yield `undefined` and render it literally.
-      const result = describeCron('0 9 * * 9');
-      expect(result).not.toContain('undefined');
+    it('falls back to the raw expression when no day name resolves', () => {
+      // A hand-typed advanced expression can contain an out-of-range day. The
+      // lookup yields `undefined`, which `join` renders as an empty string — so
+      // this used to produce the dangling " at 9:00 AM" with no day at all.
+      // Asserting the exact fallback (rather than `not.toContain('undefined')`,
+      // which passed on the old code too) is what makes this discriminating.
+      expect(describeCron('0 9 * * 9')).toBe('0 9 * * 9');
+    });
+
+    it('drops only the unresolvable days when some are valid', () => {
+      // Previously rendered "Mon,  at 9:00 AM" — a trailing separator and a gap.
+      expect(describeCron('0 9 * * 1,9')).toBe('Mon at 9:00 AM');
     });
 
     it('reports a malformed expression instead of throwing', () => {

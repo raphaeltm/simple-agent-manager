@@ -3,7 +3,6 @@ import { Plus, Trash2 } from 'lucide-react';
 
 import { FOCUS_RING } from './trigger-presentation';
 
-
 type FilterValueType = 'string' | 'number' | 'boolean' | 'null';
 
 function getFilterValueType(value: WebhookTriggerFilter['value']): FilterValueType {

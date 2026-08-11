@@ -1,5 +1,5 @@
 import type { TriggerResponse } from '@simple-agent-manager/shared';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -72,6 +72,31 @@ describe('TriggerForm — modal interaction', () => {
     const outside = screen.getByRole('button', { name: 'outside control', hidden: true });
     expect(outside.closest('[inert], [aria-hidden="true"]')).not.toBeNull();
     expect(screen.queryByRole('button', { name: 'outside control' })).toBeNull();
+  });
+
+  it('cycles Tab within the drawer instead of escaping to the page behind', async () => {
+    renderForm();
+
+    const dialog = await screen.findByRole('dialog');
+    const focusable = Array.from(
+      dialog.querySelectorAll<HTMLElement>(
+        'a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])'
+      )
+    );
+    expect(focusable.length).toBeGreaterThan(1);
+
+    const first = focusable[0]!;
+    const last = focusable[focusable.length - 1]!;
+
+    // Forward from the last element must wrap to the first, not leave the dialog.
+    last.focus();
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(first).toHaveFocus();
+
+    // And backward from the first must wrap to the last.
+    first.focus();
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(last).toHaveFocus();
   });
 
   it('locks background scrolling while open', async () => {
