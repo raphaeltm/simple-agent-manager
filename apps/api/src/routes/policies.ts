@@ -4,7 +4,7 @@
  * Mounted at /api/projects/:projectId/policies
  * Provides CRUD for dynamic project policies (Phase 4: Policy Propagation).
  */
-import type { CreatePolicyRequest, UpdatePolicyRequest } from '@simple-agent-manager/shared';
+import type { UpdatePolicyRequest } from '@simple-agent-manager/shared';
 import { isPolicyCategory, isPolicySource, resolvePolicyLimits } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -14,6 +14,7 @@ import type { Env } from '../env';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
+import { CreatePolicySchema, jsonValidator, UpdatePolicySchema } from '../schemas';
 import * as projectDataService from '../services/project-data';
 import { sanitizeUserInput } from './mcp/_helpers';
 
@@ -70,14 +71,14 @@ policyRoutes.get('/:policyId', async (c) => {
 
 // ─── POST / — create policy ─────────────────────────────────────────────────
 
-policyRoutes.post('/', async (c) => {
+policyRoutes.post('/', jsonValidator(CreatePolicySchema), async (c) => {
   const auth = getAuth(c);
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
   const db = drizzle(c.env.DATABASE, { schema });
   await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
 
-  const body = await c.req.json<CreatePolicyRequest>();
+  const body = c.req.valid('json');
   const limits = resolvePolicyLimits(c.env);
 
   if (!body.category || !isPolicyCategory(body.category)) {
@@ -111,7 +112,7 @@ policyRoutes.post('/', async (c) => {
 
 // ─── PATCH /:policyId — update policy ───────────────────────────────────────
 
-policyRoutes.patch('/:policyId', async (c) => {
+policyRoutes.patch('/:policyId', jsonValidator(UpdatePolicySchema), async (c) => {
   const auth = getAuth(c);
   const projectId = c.req.param('projectId');
   const policyId = c.req.param('policyId');
@@ -120,7 +121,7 @@ policyRoutes.patch('/:policyId', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
 
-  const body = await c.req.json<UpdatePolicyRequest>();
+  const body = c.req.valid('json');
   const limits = resolvePolicyLimits(c.env);
 
   const updates: UpdatePolicyRequest = {};

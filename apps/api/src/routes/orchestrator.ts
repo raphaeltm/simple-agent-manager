@@ -16,6 +16,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { jsonValidator, OverrideTaskStateSchema } from '../schemas';
 import * as orchestratorService from '../services/project-orchestrator';
 import { requireProjectTaskRead, requireProjectTaskWrite } from './task-project-auth';
 
@@ -96,7 +97,7 @@ orchestratorRoutes.post('/missions/:missionId/cancel', async (c) => {
 
 // ─── POST /tasks/:taskId/override ───────────────────────────────────────────
 
-orchestratorRoutes.post('/tasks/:taskId/override', async (c) => {
+orchestratorRoutes.post('/tasks/:taskId/override', jsonValidator(OverrideTaskStateSchema), async (c) => {
   const auth = getAuth(c);
   const db = drizzle(c.env.DATABASE, { schema });
   const projectId = c.req.param('projectId');
@@ -104,7 +105,7 @@ orchestratorRoutes.post('/tasks/:taskId/override', async (c) => {
   if (!projectId || !taskId) throw errors.badRequest('Missing projectId or taskId');
   await requireProjectTaskWrite(db, projectId, auth.user.id);
 
-  const body = await c.req.json<{ missionId: string; newState: string; reason: string }>();
+  const body = c.req.valid('json');
   if (!body.missionId || !body.newState || !body.reason) {
     throw errors.badRequest('Missing missionId, newState, or reason');
   }

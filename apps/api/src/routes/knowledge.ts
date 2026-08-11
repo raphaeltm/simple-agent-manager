@@ -4,12 +4,7 @@
  * Mounted at /api/projects/:projectId/knowledge
  * Provides CRUD for entities, observations, and search for the UI.
  */
-import type {
-  AddObservationRequest,
-  CreateKnowledgeEntityRequest,
-  UpdateKnowledgeEntityRequest,
-  UpdateObservationRequest,
-} from '@simple-agent-manager/shared';
+import type { KnowledgeEntityType, UpdateKnowledgeEntityRequest } from '@simple-agent-manager/shared';
 import {
   KNOWLEDGE_DEFAULTS,
   KNOWLEDGE_ENTITY_TYPES,
@@ -23,6 +18,13 @@ import type { Env } from '../env';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
+import {
+  AddObservationSchema,
+  CreateKnowledgeEntitySchema,
+  jsonValidator,
+  UpdateKnowledgeEntitySchema,
+  UpdateObservationSchema,
+} from '../schemas';
 import * as projectDataService from '../services/project-data';
 
 const knowledgeRoutes = new Hono<{ Bindings: Env }>();
@@ -41,6 +43,12 @@ function getLimit(env: Env, key: string, defaultVal: number): number {
 function requireParam(value: string | undefined, name: string): string {
   if (!value) throw errors.badRequest(`Missing required parameter: ${name}`);
   return value;
+}
+
+/** Type-guard mirroring `isPolicyCategory`/`isPolicySource` in policies.ts — safe for
+ *  any string, lets TypeScript narrow `KNOWLEDGE_ENTITY_TYPES.includes()` checks. */
+function isKnowledgeEntityType(value: string): value is KnowledgeEntityType {
+  return (KNOWLEDGE_ENTITY_TYPES as readonly string[]).includes(value);
 }
 
 // ─── GET / — list entities ──────────────────────────────────────────────────
@@ -110,15 +118,15 @@ knowledgeRoutes.get('/:entityId', async (c) => {
 
 // ─── POST / — create entity ─────────────────────────────────────────────────
 
-knowledgeRoutes.post('/', async (c) => {
+knowledgeRoutes.post('/', jsonValidator(CreateKnowledgeEntitySchema), async (c) => {
   const auth = getAuth(c);
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const db = drizzle(c.env.DATABASE, { schema });
   await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
 
-  const body = await c.req.json<CreateKnowledgeEntityRequest>();
+  const body = c.req.valid('json');
   if (!body.name?.trim()) throw errors.badRequest('name is required');
-  if (!body.entityType || !KNOWLEDGE_ENTITY_TYPES.includes(body.entityType)) {
+  if (!body.entityType || !isKnowledgeEntityType(body.entityType)) {
     throw errors.badRequest(`Invalid entityType. Valid: ${KNOWLEDGE_ENTITY_TYPES.join(', ')}`);
   }
 
@@ -135,14 +143,14 @@ knowledgeRoutes.post('/', async (c) => {
 
 // ─── PATCH /:entityId — update entity ───────────────────────────────────────
 
-knowledgeRoutes.patch('/:entityId', async (c) => {
+knowledgeRoutes.patch('/:entityId', jsonValidator(UpdateKnowledgeEntitySchema), async (c) => {
   const auth = getAuth(c);
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const entityId = requireParam(c.req.param('entityId'), 'entityId');
   const db = drizzle(c.env.DATABASE, { schema });
   await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
 
-  const body = await c.req.json<UpdateKnowledgeEntityRequest>();
+  const body = c.req.valid('json');
   const updates: UpdateKnowledgeEntityRequest = {};
 
   if (body.name !== undefined) {
@@ -150,7 +158,7 @@ knowledgeRoutes.patch('/:entityId', async (c) => {
     updates.name = body.name.trim().slice(0, nameMaxLen);
   }
   if (body.entityType !== undefined) {
-    if (!KNOWLEDGE_ENTITY_TYPES.includes(body.entityType)) {
+    if (!isKnowledgeEntityType(body.entityType)) {
       throw errors.badRequest(`Invalid entityType. Valid: ${KNOWLEDGE_ENTITY_TYPES.join(', ')}`);
     }
     updates.entityType = body.entityType;
@@ -183,20 +191,23 @@ knowledgeRoutes.delete('/:entityId', async (c) => {
 
 // ─── POST /:entityId/observations — add observation ─────────────────────────
 
-knowledgeRoutes.post('/:entityId/observations', async (c) => {
+knowledgeRoutes.post('/:entityId/observations', jsonValidator(AddObservationSchema), async (c) => {
   const auth = getAuth(c);
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const entityId = requireParam(c.req.param('entityId'), 'entityId');
   const db = drizzle(c.env.DATABASE, { schema });
   await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
 
-  const body = await c.req.json<AddObservationRequest>();
+  const body = c.req.valid('json');
   if (!body.content?.trim()) throw errors.badRequest('content is required');
 
   const obsMaxLen = getLimit(c.env, 'KNOWLEDGE_OBSERVATION_MAX_LENGTH', KNOWLEDGE_DEFAULTS.observationMaxLength);
   const content = body.content.trim().slice(0, obsMaxLen);
   const confidence = typeof body.confidence === 'number' ? Math.min(Math.max(0, body.confidence), 1) : KNOWLEDGE_DEFAULTS.defaultConfidence;
-  const sourceType = body.sourceType && KNOWLEDGE_SOURCE_TYPES.includes(body.sourceType) ? body.sourceType : 'explicit';
+  const sourceType =
+    typeof body.sourceType === 'string' && (KNOWLEDGE_SOURCE_TYPES as readonly string[]).includes(body.sourceType)
+      ? body.sourceType
+      : 'explicit';
 
   try {
     const result = await projectDataService.addKnowledgeObservation(
@@ -210,14 +221,14 @@ knowledgeRoutes.post('/:entityId/observations', async (c) => {
 
 // ─── PATCH /observations/:observationId — update observation ────────────────
 
-knowledgeRoutes.patch('/observations/:observationId', async (c) => {
+knowledgeRoutes.patch('/observations/:observationId', jsonValidator(UpdateObservationSchema), async (c) => {
   const auth = getAuth(c);
   const projectId = requireParam(c.req.param('projectId'), 'projectId');
   const observationId = requireParam(c.req.param('observationId'), 'observationId');
   const db = drizzle(c.env.DATABASE, { schema });
   await requireProjectCapability(db, projectId, auth.user.id, 'project:update');
 
-  const body = await c.req.json<UpdateObservationRequest>();
+  const body = c.req.valid('json');
   if (body.content !== undefined && !body.content.trim()) {
     throw errors.badRequest('content cannot be empty');
   }
