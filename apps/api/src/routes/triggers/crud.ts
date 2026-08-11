@@ -2,7 +2,6 @@
 import type {
   CreateTriggerResponse,
   GitHubTriggerEventType,
-  GitHubTriggerFilters,
   ListTriggersResponse,
   TriggerResponse,
   TriggerStatus,
@@ -33,6 +32,7 @@ import {
   cronToNextFire,
   validateCronExpression,
 } from '../../services/cron-utils';
+import { parseGitHubTriggerFiltersJson } from '../../services/github-trigger-filter';
 import { getProjectMultiplayerState } from '../../services/project-multiplayer';
 import {
   getWebhookTriggerLimits,
@@ -124,9 +124,13 @@ async function enrichTrigger(
       .where(eq(schema.githubTriggerConfigs.triggerId, row.id))
       .get();
     if (config) {
+      const parsedFilters = parseGitHubTriggerFiltersJson(config.filtersJson);
+      if (!parsedFilters.valid) {
+        log.warn('trigger.github_filters_invalid', { triggerId: row.id });
+      }
       response.githubConfig = {
         eventType: config.eventType as GitHubTriggerEventType,
-        filters: JSON.parse(config.filtersJson) as GitHubTriggerFilters,
+        filters: parsedFilters.filters,
       };
     }
   }
@@ -340,9 +344,13 @@ crudRoutes.get('/', async (c) => {
     response.credentialAttribution = attributionById.get(row.id);
     const github = githubById.get(row.id);
     if (github) {
+      const parsedFilters = parseGitHubTriggerFiltersJson(github.filtersJson);
+      if (!parsedFilters.valid) {
+        log.warn('trigger.github_filters_invalid', { triggerId: row.id });
+      }
       response.githubConfig = {
         eventType: github.eventType as GitHubTriggerEventType,
-        filters: JSON.parse(github.filtersJson) as GitHubTriggerFilters,
+        filters: parsedFilters.filters,
       };
     }
     const webhook = webhookById.get(row.id);

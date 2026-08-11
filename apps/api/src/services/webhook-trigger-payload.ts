@@ -5,6 +5,7 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import { canonicalJson } from '../lib/canonical-json';
+import { expectJsonRecord, parseJsonRecord } from '../lib/runtime-validation';
 
 export { canonicalJson } from '../lib/canonical-json';
 
@@ -21,14 +22,9 @@ const FORBIDDEN_HEADERS = new Set([
   'x-webhook-signature',
 ]);
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
 export function parseWebhookJsonObject(rawBody: string): Record<string, unknown> | null {
   try {
-    const parsed: unknown = JSON.parse(rawBody);
-    return isRecord(parsed) ? parsed : null;
+    return parseJsonRecord(rawBody, 'webhook.body');
   } catch {
     return null;
   }
@@ -50,8 +46,14 @@ export function resolveWebhookPath(
 
   let current: unknown = body;
   for (const part of parts) {
-    if (!isRecord(current) || !Object.hasOwn(current, part)) return undefined;
-    current = current[part];
+    let record: Record<string, unknown>;
+    try {
+      record = expectJsonRecord(current, 'webhook.path-segment');
+    } catch {
+      return undefined;
+    }
+    if (!Object.hasOwn(record, part)) return undefined;
+    current = record[part];
   }
   return current;
 }

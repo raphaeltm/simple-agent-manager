@@ -157,6 +157,52 @@ describe('model catalog service', () => {
     );
   });
 
+  it('ignores a corrupted cached catalog (array in place of a model object) and re-fetches', async () => {
+    const corruptedCached = {
+      groups: [
+        {
+          label: 'OpenCode Zen',
+          // A model entry that is itself an array rather than a {id, name, group}
+          // object. `v.record()` does not reject arrays outright, so this proves
+          // the required-field checks (id/name) are what actually reject it.
+          models: [['not', 'an', 'object']],
+        },
+      ],
+      updatedAt: '2026-06-27T00:00:00.000Z',
+    };
+    const kv = makeKv(corruptedCached);
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(modelsDevCatalog()), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const catalog = await getModelCatalogForAgent(makeEnv({ KV: kv }), 'opencode');
+
+    expect(catalog.source).toBe('dynamic');
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it('ignores a corrupted cached catalog (non-object group) and re-fetches', async () => {
+    const corruptedCached = {
+      groups: ['not-a-group-object'],
+      updatedAt: '2026-06-27T00:00:00.000Z',
+    };
+    const kv = makeKv(corruptedCached);
+    fetchMock.mockResolvedValue(
+      new Response(JSON.stringify(modelsDevCatalog()), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const catalog = await getModelCatalogForAgent(makeEnv({ KV: kv }), 'opencode');
+
+    expect(catalog.source).toBe('dynamic');
+    expect(fetchMock).toHaveBeenCalled();
+  });
+
   it('uses default cache TTL when the configured value is outside bounds', async () => {
     const kv = makeKv();
     fetchMock.mockResolvedValue(

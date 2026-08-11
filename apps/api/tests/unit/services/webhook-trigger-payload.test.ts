@@ -20,6 +20,9 @@ describe('webhook trigger payload handling', () => {
     });
     expect(parseWebhookJsonObject('[]')).toBeNull();
     expect(parseWebhookJsonObject('null')).toBeNull();
+    expect(parseWebhookJsonObject('42')).toBeNull();
+    expect(parseWebhookJsonObject('"just a string"')).toBeNull();
+    expect(parseWebhookJsonObject('{not-valid-json')).toBeNull();
     expect(canonicalJson({ b: 1, a: { d: 2, c: 3 } })).toBe('{"a":{"c":3,"d":2},"b":1}');
   });
 
@@ -28,6 +31,19 @@ describe('webhook trigger payload handling', () => {
     expect(resolveWebhookPath(body, '__proto__.polluted', 4)).toBeUndefined();
     expect(resolveWebhookPath(body, 'event.constructor.name', 4)).toBeUndefined();
     expect(resolveWebhookPath(body, 'event.action.too.deep', 2)).toBeUndefined();
+  });
+
+  it('does not descend into an array by numeric-string index mid-path', () => {
+    // event.labels is an array; a path segment must not be able to reach
+    // into it as if it were a plain object with a "0" key.
+    expect(resolveWebhookPath(body, 'event.labels.0', 4)).toBeUndefined();
+    expect(resolveWebhookPath(body, 'event.labels', 4)).toEqual(['urgent', 'ops']);
+  });
+
+  it('rejects null and non-object leaves mid-path instead of throwing', () => {
+    const withNull = { event: null, text: 'hello' };
+    expect(resolveWebhookPath(withNull, 'event.action', 4)).toBeUndefined();
+    expect(resolveWebhookPath(withNull, 'text.length', 4)).toBeUndefined();
   });
 
   it('evaluates all and any filter modes deterministically', () => {
