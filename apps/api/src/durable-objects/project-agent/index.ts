@@ -580,9 +580,35 @@ export class ProjectAgent extends DurableObject<AppEnv> {
       .toArray();
     const rows: MessageRow[] = mapRows(rawRows, MessageRowSchema, 'project_agent.messages_history');
 
-    // Strip the extra row only if we fetched more than contextWindow items
-    // (the extra row is to avoid double-counting the just-persisted user message)
-    const filtered = rows.length > contextWindow ? rows.slice(1) : rows;
+    // Strip the extra row only if the RAW fetch exceeded contextWindow — NOT
+    // the post-validation `rows.length`. mapRows() can silently drop a
+    // malformed row (rule 50), which would shrink rows.length below the raw
+    // count and let the just-persisted user message (the newest row) survive
+    // into history, duplicating it when runAgentLoop appends it again as the
+    // final `user` message.
+    //
+    // Identify "newest" by the max numeric `sequence` across the RAW rows
+    // rather than assuming rawRows[0]: a malformed non-numeric `sequence`
+    // (TEXT storage class) sorts ahead of real integers under SQLite's
+    // `ORDER BY sequence DESC` type-ordering rules, so the raw array's first
+    // element is not reliably the newest row. Only remove the identified row
+    // from the validated array if it actually survived validation — if the
+    // newest row itself was the malformed one, it's already absent from
+    // `rows`, and stripping another entry would incorrectly drop a
+    // legitimate history row instead.
+    let filtered = rows;
+    if (rawRows.length > contextWindow) {
+      let newestId: string | null = null;
+      let newestSeq = -Infinity;
+      for (const raw of rawRows) {
+        const seq = Number(raw.sequence);
+        if (Number.isFinite(seq) && seq > newestSeq) {
+          newestSeq = seq;
+          newestId = String(raw.id);
+        }
+      }
+      filtered = newestId === null ? rows : rows.filter((row) => row.id !== newestId);
+    }
     return filtered.reverse();
   }
 }

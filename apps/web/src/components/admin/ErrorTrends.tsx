@@ -121,16 +121,19 @@ export const ErrorTrends: FC = () => {
         )}
 
         {/* Time axis labels */}
-        {data && data.buckets.length > 0 && firstBucketTimestamp && lastBucketTimestamp && (
-          <div className="flex justify-between pt-1">
-            <Body className="text-[0.65rem] text-fg-muted">
-              {formatTimestamp(firstBucketTimestamp, range)}
-            </Body>
-            <Body className="text-[0.65rem] text-fg-muted">
-              {formatTimestamp(lastBucketTimestamp, range)}
-            </Body>
-          </div>
-        )}
+        {data &&
+          data.buckets.length > 0 &&
+          firstBucketTimestamp != null &&
+          lastBucketTimestamp != null && (
+            <div className="flex justify-between pt-1">
+              <Body className="text-[0.65rem] text-fg-muted">
+                {formatTimestamp(firstBucketTimestamp, range)}
+              </Body>
+              <Body className="text-[0.65rem] text-fg-muted">
+                {formatTimestamp(lastBucketTimestamp, range)}
+              </Body>
+            </div>
+          )}
       </div>
     </Card>
   );

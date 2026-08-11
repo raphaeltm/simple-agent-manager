@@ -11,10 +11,12 @@
  * `messages` and `rate_limits` tables/queries are byte-identical to
  * SamSession's (see src/durable-objects/row-validation.ts).
  */
+import { DEFAULT_SAM_CONVERSATION_CONTEXT_WINDOW } from '@simple-agent-manager/shared';
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 const PROJECT_ID = 'proj-agent-do-test-001';
+const CONTEXT_WINDOW = DEFAULT_SAM_CONVERSATION_CONTEXT_WINDOW;
 
 function getProjectAgent(projectId: string) {
   const id = env.PROJECT_AGENT.idFromName(projectId);
@@ -159,5 +161,96 @@ describe('ProjectAgent DO — Row Fault Isolation', () => {
       return row?.window_start;
     });
     expect(typeof windowStart).toBe('number');
+  });
+});
+
+describe('ProjectAgent DO — loadHistory Duplicate Prevention', () => {
+  // REGRESSION: loadHistory() fetches contextWindow+1 rows (DESC by
+  // sequence) and is supposed to strip the newest row — the just-persisted
+  // user message — so runAgentLoop doesn't see it twice: once via the
+  // returned history, once via its own separately-appended `userMessage`
+  // param. Comparing the strip threshold against the POST-VALIDATION count
+  // (`rows.length`, after mapRows() drops malformed rows per rule 50)
+  // instead of the RAW fetch count (`rawRows.length`) lets a single
+  // malformed mid-window row silently shrink `rows.length` below
+  // `contextWindow`, so the newest row is never stripped and the
+  // just-persisted user message is duplicated in the agent loop's context.
+  //
+  // This also exercises the edge SQLite creates: a non-numeric TEXT
+  // `sequence` sorts AHEAD of all real INTEGER sequences under
+  // `ORDER BY sequence DESC` (SQLite's type-ordering: NULL < INTEGER/REAL <
+  // TEXT < BLOB), so the malformed row lands at rawRows[0] — not the
+  // just-persisted message — proving the fix cannot simply assume
+  // rawRows[0] is "the newest row".
+  it('does not duplicate the just-persisted user message when a mid-window row is malformed', async () => {
+    const projectId = 'proj-agent-do-loadhistory-dup-001';
+    const stub = getProjectAgent(projectId);
+    const convId = 'conv-loadhistory-dup-001';
+
+    // Seed the conversation directly plus CONTEXT_WINDOW-1 valid filler rows
+    // (sequence 1..49). Combined with the real "just persisted" message sent
+    // via sendChat below (sequence 50) and the malformed row inserted after
+    // it, the conversation has exactly CONTEXT_WINDOW+1 total rows — the
+    // boundary at which loadHistory's raw fetch (LIMIT contextWindow + 1)
+    // must strip exactly one row.
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(`INSERT INTO conversations (id, title) VALUES (?, ?)`, convId, 'x');
+      for (let seq = 1; seq <= CONTEXT_WINDOW - 1; seq++) {
+        state.storage.sql.exec(
+          `INSERT INTO messages (id, conversation_id, role, content, sequence, created_at)
+           VALUES (?, ?, 'user', ?, ?, datetime('now'))`,
+          `msg-loadhistory-dup-filler-${seq}`,
+          convId,
+          `Filler message ${seq}`,
+          seq
+        );
+      }
+    });
+
+    // The real, chat-path-persisted "just persisted" message — sequence 50,
+    // via the actual POST /chat -> persistMessage -> loadHistory code path.
+    const finalResp = await sendChat(stub, {
+      conversationId: convId,
+      message: 'Just persisted user message',
+      projectId,
+    });
+    expect(finalResp.status).toBe(200);
+    await finalResp.text();
+
+    // Inject the malformed row LAST, after the real sendChat call above, so
+    // it cannot corrupt persistMessage's `MAX(sequence) + 1` computation —
+    // SQLite's MAX() would otherwise return the TEXT value 'not-a-number'
+    // (greater than any INTEGER) and poison the next sequence number.
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO messages (id, conversation_id, role, content, sequence, created_at)
+         VALUES (?, ?, 'user', 'corrupted sequence', 'not-a-number', datetime('now'))`,
+        'msg-loadhistory-dup-malformed-001',
+        convId
+      );
+    });
+
+    // Reflectively invoke the exact private loadHistory() the /chat handler
+    // calls internally (TS `private` is compile-time only). DB state hasn't
+    // changed since the sendChat call above finished draining — the LLM call
+    // fails closed with no platform credential configured in this test env,
+    // so no further messages were persisted — so this reproduces exactly
+    // what the just-persisted message's own request computed.
+    const historyRows = await runInDurableObject(stub, async (instance) => {
+      const withLoadHistory = instance as unknown as {
+        loadHistory: (
+          conversationId: string,
+          contextWindow: number
+        ) => Array<{ id: string; role: string; content: string; sequence: number }>;
+      };
+      return withLoadHistory.loadHistory(convId, CONTEXT_WINDOW);
+    });
+
+    const historyContents = historyRows.map((r) => r.content);
+    expect(historyContents).not.toContain('Just persisted user message');
+    expect(historyRows.find((r) => r.id === 'msg-loadhistory-dup-malformed-001')).toBeUndefined();
+    expect(historyContents).toContain('Filler message 1');
+    expect(historyContents).toContain(`Filler message ${CONTEXT_WINDOW - 1}`);
+    expect(historyRows.length).toBe(CONTEXT_WINDOW - 1);
   });
 });
