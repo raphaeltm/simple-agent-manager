@@ -183,7 +183,12 @@ describe('useNotifications — malformed payload resilience', () => {
         taskId: null,
         sessionId: null,
         type: 'task_complete',
-        urgency: 'info',
+        // 'info' is not one of NOTIFICATION_URGENCIES ('high' | 'medium' |
+        // 'low') — this fixture previously used it and still passed, because
+        // the REST path only checked `Array.isArray(...)` and never validated
+        // individual items. Use a genuinely valid urgency so this test proves
+        // what its name claims.
+        urgency: 'low',
         title: 'Done',
         body: null,
         actionUrl: null,
@@ -203,6 +208,45 @@ describe('useNotifications — malformed payload resilience', () => {
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.notifications).toHaveLength(1);
+    expect(result.current.notifications[0]).toEqual(items[0]);
     expect(result.current.unreadCount).toBe(1);
+  });
+
+  it('drops malformed items from a REST response while keeping the valid ones', async () => {
+    const goodOne = {
+      id: 'n-good-1',
+      projectId: null,
+      taskId: null,
+      sessionId: null,
+      type: 'task_complete',
+      urgency: 'high',
+      title: 'First good notification',
+      body: null,
+      actionUrl: null,
+      metadata: null,
+      readAt: null,
+      dismissedAt: null,
+      createdAt: '2026-07-17T00:00:00.000Z',
+    };
+    // Same invalid-urgency shape the WS path rejects — proves the REST path
+    // now enforces the same contract instead of trusting `Array.isArray` alone.
+    const badOne = { ...goodOne, id: 'n-bad', urgency: 'info' };
+    const goodTwo = { ...goodOne, id: 'n-good-2', title: 'Second good notification' };
+
+    mockListNotifications.mockResolvedValue({
+      notifications: [goodOne, badOne, goodTwo],
+      unreadCount: 3,
+      nextCursor: null,
+    });
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { result } = renderHook(() => useNotifications());
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+
+    expect(result.current.notifications.map((n) => n.id)).toEqual(['n-good-1', 'n-good-2']);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0]?.[0]).toContain('1 malformed notification item');
+    warnSpy.mockRestore();
   });
 });

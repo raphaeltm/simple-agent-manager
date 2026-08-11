@@ -53,6 +53,47 @@ const notificationWsMessageSchema = v.variant('type', [
   v.object({ type: v.literal('pong') }),
 ]);
 
+/**
+ * Validates a REST `listNotifications()` response's `notifications` array
+ * against the SAME `notificationResponseSchema` the WebSocket path validates
+ * `notification.new` / `notification.updated` frames against (see
+ * `notificationWsMessageSchema` above), so the REST and WS entry points into
+ * `notifications` state agree on what "valid" means — an urgency/type/shape
+ * the WS path would reject can no longer sneak in via the initial fetch,
+ * refresh, or pagination.
+ *
+ * A non-array input degrades to an empty list (NotificationCenter renders in
+ * the app shell on every page and calls `.filter` on this state). Each item
+ * is validated individually: a malformed item is dropped and logged, but
+ * valid items around it are kept — one bad item must not blank the list.
+ */
+function parseNotificationListItems(items: unknown, context: string): NotificationResponse[] {
+  if (!Array.isArray(items)) return [];
+
+  const valid: NotificationResponse[] = [];
+  let droppedCount = 0;
+  let firstIssue: v.BaseIssue<unknown> | undefined;
+
+  for (const item of items) {
+    const result = v.safeParse(notificationResponseSchema, item);
+    if (result.success) {
+      valid.push(result.output);
+    } else {
+      droppedCount++;
+      firstIssue ??= result.issues[0];
+    }
+  }
+
+  if (droppedCount > 0) {
+    console.warn(
+      `Dropped ${droppedCount} malformed notification item(s) from ${context}`,
+      firstIssue
+    );
+  }
+
+  return valid;
+}
+
 export interface UseNotificationsReturn {
   notifications: NotificationResponse[];
   unreadCount: number;
@@ -90,8 +131,10 @@ export function useNotifications(): UseNotificationsReturn {
       if (!mountedRef.current) return;
       // Guard the shape: NotificationCenter renders in the app shell on every
       // page, so a malformed payload here must degrade to an empty list — not
-      // crash the whole app through the ErrorBoundary (undefined.filter).
-      setNotifications(Array.isArray(result.notifications) ? result.notifications : []);
+      // crash the whole app through the ErrorBoundary (undefined.filter). Each
+      // item is also schema-validated (parseNotificationListItems), so one
+      // malformed notification cannot poison the rest.
+      setNotifications(parseNotificationListItems(result.notifications, 'fetchNotifications'));
       setUnreadCount(typeof result.unreadCount === 'number' ? result.unreadCount : 0);
       setNextCursor(result.nextCursor ?? null);
     } catch (err) {
@@ -107,7 +150,7 @@ export function useNotifications(): UseNotificationsReturn {
     try {
       const result = await listNotifications({ cursor: nextCursor, limit: 50 });
       if (!mountedRef.current) return;
-      const more = Array.isArray(result.notifications) ? result.notifications : [];
+      const more = parseNotificationListItems(result.notifications, 'loadMore');
       setNotifications((prev) => [...prev, ...more]);
       setNextCursor(result.nextCursor ?? null);
     } catch (err) {
