@@ -51,7 +51,7 @@ describe('ESLint 8 to ESLint 9 flat-config parity', () => {
     );
   });
 
-  it('retains legacy jsx-a11y options when lowering severity', async () => {
+  it('retains audited jsx-a11y options at blocking severity', async () => {
     const messages = await lintText(
       `
         export function ParityFixture() {
@@ -72,7 +72,7 @@ describe('ESLint 8 to ESLint 9 flat-config parity', () => {
     expect(staticInteractionMessages).toHaveLength(1);
     expect(staticInteractionMessages[0]).toMatchObject({
       line: 6,
-      severity: 1,
+      severity: 2,
     });
   });
 });
