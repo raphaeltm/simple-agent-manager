@@ -28,11 +28,12 @@ This task is SAM task `01KZM7QR5CW8T93FMS8X5CDF7A` on branch `sam/resume-ship-du
 - [x] Align Worker capability discovery and receipt reconciliation with nested VM-authoritative runtime identity and epoch-millisecond timestamps.
 - [x] Prove replay occurs only after same-runtime positive `not_found`; changed or unproven runtime becomes terminal `ambiguous_delivery`.
 - [x] Preserve the latest main control-loop limits, alarm isolation, finite mailbox expiry, and operational stop controls.
+- [x] Propagate durable-execution rollout configuration from GitHub Environment variables through the generated Worker configuration so staging can opt in without changing production defaults.
 - [x] Run focused contract, Go race, Miniflare/workerd, migration, and normal prompt/cancel regression suites.
 - [x] Run full repository lint, typecheck, test, build, and quality gates.
 - [ ] Run task-completion, Go, Cloudflare, constitution, documentation, and test specialist reviews; address all blocking findings.
 - [ ] Delete all staging nodes, deploy the final branch, provision a fresh VM, verify heartbeat/workspace/protocol behavior end to end, and delete all staging test resources so zero VMs remain.
-- [ ] Open/update the PR with evidence, obtain green CI, merge, and monitor the matching production deployment to success.
+- [ ] Open/update the PR with evidence and obtain green CI. Per the current user constraint, leave the draft PR unmerged and do not deploy to production.
 
 ## Acceptance criteria
 
@@ -42,8 +43,8 @@ This task is SAM task `01KZM7QR5CW8T93FMS8X5CDF7A` on branch `sam/resume-ship-du
 - Canonical responses use nested capabilities, VM runtime identity, wrapped prompt responses, epoch-millisecond receipt timestamps, 202 new/200 duplicate, and specified 404/409 meanings end to end.
 - Automatic replay is permitted only with positive same-runtime `not_found`; runtime mismatch or inability to prove identity produces terminal ambiguity without invoking the prompt twice.
 - VM cancel, deadline, delayed process exit, and strict-resume failure each converge exactly once and cannot produce a later fresh `NewSession` or `Ready`.
-- Migration 026 and all ProjectData migrations pass clean-install, upgrade, safety, and workerd/Miniflare tests.
-- Full Go tests including `-race`, repository quality gates, specialist reviews, CI, fresh-VM staging verification, cleanup, merge, and production deployment complete successfully.
+- Migrations 026 (mainline attention expiry), 027 (durable prompt delivery/checkpoints), and all prior ProjectData migrations pass clean-install, upgrade, safety, and workerd/Miniflare tests.
+- Full Go tests including `-race`, repository quality gates, specialist reviews, CI, fresh-VM staging verification, and cleanup complete successfully. Per the current user constraint, the draft remains unmerged and production is untouched.
 
 ## References
 
