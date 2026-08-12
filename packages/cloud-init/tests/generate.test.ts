@@ -1005,7 +1005,6 @@ describe('validateCloudInitVariables', () => {
         deployAcmeCa: 'https://acme-staging-v02.api.letsencrypt.org/directory',
         deployComposeCmd: '/usr/local/bin/docker compose',
         deployHealthTimeout: '1m30s',
-        sessionSnapshotOperationTimeout: '12m30s',
       }))).not.toThrow();
     });
 
