@@ -104,7 +104,9 @@ export async function startTaskRunnerDO(
     resolvedReservation?: ResolvedResourceReservation | null;
     /** Where the VM size came from in the precedence chain. */
     vmSizeSource?: ResourceRequirementsSource | 'explicit' | null;
-  },
+    /** Existing sleeping chat whose snapshot is restored before queued prompt delivery. */
+    resumeSnapshotChatSessionId?: string | null;
+  }
 ): Promise<void> {
   const stub = getStub(env, input.taskId);
 
@@ -133,9 +135,10 @@ export async function startTaskRunnerDO(
       devcontainerConfigName: input.devcontainerConfigName ?? null,
       cloudProvider: input.cloudProvider ?? null,
       credentialAttributionUserId: input.credentialAttributionUserId ?? input.userId,
-      credentialAttributionProjectId: input.credentialAttributionSource === 'project'
-        ? (input.credentialAttributionProjectId ?? input.projectId)
-        : null,
+      credentialAttributionProjectId:
+        input.credentialAttributionSource === 'project'
+          ? (input.credentialAttributionProjectId ?? input.projectId)
+          : null,
       credentialAttributionSource: input.credentialAttributionSource ?? 'user',
       taskMode: input.taskMode ?? 'task',
       model: input.model ?? null,
@@ -150,6 +153,7 @@ export async function startTaskRunnerDO(
       resourceRequirements: input.resourceRequirements ?? null,
       resolvedReservation: input.resolvedReservation ?? null,
       vmSizeSource: input.vmSizeSource ?? null,
+      resumeSnapshotChatSessionId: input.resumeSnapshotChatSessionId ?? null,
     },
   };
 
@@ -169,7 +173,7 @@ export async function advanceTaskRunnerWorkspaceReady(
   env: Env,
   taskId: string,
   status: 'running' | 'recovery' | 'error',
-  errorMessage: string | null,
+  errorMessage: string | null
 ): Promise<void> {
   const stub = getStub(env, taskId);
 
@@ -184,10 +188,7 @@ export async function advanceTaskRunnerWorkspaceReady(
 /**
  * Get the current state of a TaskRunner DO (for debugging).
  */
-export async function getTaskRunnerStatus(
-  env: Env,
-  taskId: string,
-): Promise<unknown> {
+export async function getTaskRunnerStatus(env: Env, taskId: string): Promise<unknown> {
   const stub = getStub(env, taskId);
 
   return stub.getStatus();

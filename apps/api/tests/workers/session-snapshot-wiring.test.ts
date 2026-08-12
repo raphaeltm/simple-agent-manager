@@ -5,10 +5,13 @@ import { describe, expect, it } from 'vitest';
 import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import {
+  claimSessionSnapshotRecovery,
   completeSessionSnapshot,
   getRestorableSessionSnapshot,
+  markSessionSnapshotSleeping,
   prepareSessionSnapshot,
   type SessionSnapshotManifest,
+  verifyRestorableSessionSnapshotArtifacts,
 } from '../../src/services/session-snapshots';
 
 const TEST_PREFIX = `snapshot-${Date.now()}`;
@@ -62,9 +65,20 @@ describe('session snapshot D1/R2 worker wiring', () => {
       runtime: 'cf-container',
     });
 
-    expect(prepared.keys.home).toBe(`${TEST_PREFIX}/snapshots/${chatSessionId}/home.tar`);
+    expect(prepared.generation).toMatch(/^[0-9A-Z]{26}$/);
+    expect(prepared.keys.home).toBe(
+      `${TEST_PREFIX}/snapshots/${chatSessionId}/${prepared.generation}/home.tar`
+    );
     expect(prepared.config.ttlDays).toBe(7);
 
+    const homeSha256 = Array.from(
+      new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('home'))),
+      (byte) => byte.toString(16).padStart(2, '0')
+    ).join('');
+    const wipSha256 = Array.from(
+      new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode('wip'))),
+      (byte) => byte.toString(16).padStart(2, '0')
+    ).join('');
     const manifest: SessionSnapshotManifest = {
       version: 1,
       chatSessionId,
@@ -77,14 +91,14 @@ describe('session snapshot D1/R2 worker wiring', () => {
       degradation: 'none',
       skipped: [],
       artifacts: {
-        home: { sizeBytes: 4 },
-        wip: { sizeBytes: 3 },
+        home: { sizeBytes: 4, sha256: homeSha256 },
+        wip: { sizeBytes: 3, sha256: wipSha256 },
       },
       createdAt: new Date().toISOString(),
     };
 
-    await env.R2.put(prepared.keys.home, 'home');
-    await env.R2.put(prepared.keys.wip, 'wip');
+    await env.R2.put(prepared.keys.home, 'home', { sha256: homeSha256 });
+    await env.R2.put(prepared.keys.wip, 'wip', { sha256: wipSha256 });
     await completeSessionSnapshot(db, bindings, {
       workspaceId,
       chatSessionId,
@@ -93,11 +107,13 @@ describe('session snapshot D1/R2 worker wiring', () => {
       baseCommit: 'base-commit',
       status: 'available',
       degradation: 'none',
+      captureGeneration: prepared.generation,
       manifest,
       artifactSizes: {
         homeBytes: 4,
         wipBytes: 3,
       },
+      artifactSha256: { homeSha256, wipSha256 },
     });
 
     const restorable = await getRestorableSessionSnapshot(db, chatSessionId);
@@ -110,7 +126,15 @@ describe('session snapshot D1/R2 worker wiring', () => {
       wipR2Key: prepared.keys.wip,
       manifestR2Key: prepared.keys.manifest,
       baseCommit: 'base-commit',
+      snapshotGeneration: prepared.generation,
+      captureGeneration: null,
+      homeSha256,
+      wipSha256,
     });
+    if (!restorable) throw new Error('snapshot was not restorable');
+    await expect(verifyRestorableSessionSnapshotArtifacts(bindings, restorable)).resolves.toBe(
+      true
+    );
 
     const manifestObject = await env.R2.get(prepared.keys.manifest);
     expect(manifestObject).not.toBeNull();
@@ -124,6 +148,55 @@ describe('session snapshot D1/R2 worker wiring', () => {
         home: { sizeBytes: 4 },
         wip: { sizeBytes: 3 },
       },
+    });
+
+    const nextCapture = await prepareSessionSnapshot(db, bindings, {
+      workspaceId,
+      nodeId,
+      projectId: null,
+      userId,
+      chatSessionId,
+      agentSessionId,
+      runtime: 'cf-container',
+    });
+    const preserved = await getRestorableSessionSnapshot(db, chatSessionId);
+    expect(nextCapture.generation).not.toBe(prepared.generation);
+    expect(preserved).toMatchObject({
+      status: 'available',
+      snapshotGeneration: prepared.generation,
+      captureGeneration: nextCapture.generation,
+      homeR2Key: prepared.keys.home,
+      manifestR2Key: prepared.keys.manifest,
+      homeSha256,
+    });
+
+    expect(await markSessionSnapshotSleeping(db, bindings, chatSessionId)).toBe(true);
+    const [firstClaim, concurrentClaim] = await Promise.all([
+      claimSessionSnapshotRecovery(db, bindings, {
+        chatSessionId,
+        userId,
+        taskId: `${TEST_PREFIX}-wake-a`,
+      }),
+      claimSessionSnapshotRecovery(db, bindings, {
+        chatSessionId,
+        userId,
+        taskId: `${TEST_PREFIX}-wake-b`,
+      }),
+    ]);
+    const claimed = [firstClaim, concurrentClaim].find((claim) => claim.status === 'claimed');
+    const waking = [firstClaim, concurrentClaim].find((claim) => claim.status === 'waking');
+    expect(claimed?.status).toBe('claimed');
+    expect(waking).toEqual({ status: 'waking', taskId: claimed?.taskId });
+
+    const reclaimed = await claimSessionSnapshotRecovery(db, bindings, {
+      chatSessionId,
+      userId,
+      taskId: `${TEST_PREFIX}-wake-reclaimed`,
+      now: new Date(Date.now() + 11 * 60 * 1000),
+    });
+    expect(reclaimed).toEqual({
+      status: 'claimed',
+      taskId: `${TEST_PREFIX}-wake-reclaimed`,
     });
   });
 });

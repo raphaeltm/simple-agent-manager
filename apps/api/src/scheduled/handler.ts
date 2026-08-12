@@ -24,6 +24,7 @@ import {
   scheduleHourlyPlatformMaintenance,
 } from './platform-feedback-hourly';
 import { runProviderOrphanReconciliation } from './provider-orphan-reconciliation';
+import { runSessionSleepSweep } from './session-sleep';
 import { runSessionTaskReconciliation } from './session-task-reconciliation';
 import { runSetupSessionSweep } from './setup-session-sweep';
 import { recoverStuckTasks } from './stuck-tasks';
@@ -144,6 +145,7 @@ export async function scheduled(
   const sessionTaskRepair = await sweeps.isolate('session_task_reconciliation', () =>
     runSessionTaskReconciliation(env)
   );
+  const sessionSleep = await sweeps.isolate('session_sleep', () => runSessionSleepSweep(env));
   const setupSessionSweep = await sweeps.isolate('setup_session_sweep', () =>
     runSetupSessionSweep(env, ctx)
   );
@@ -151,7 +153,7 @@ export async function scheduled(
   const deploymentReleaseRetention = await sweeps.isolate('deployment_release_retention', () =>
     runScheduledDeploymentReleaseRetention(env)
   );
-  // R2 lifecycle owns snapshot object expiry; this bounds the corresponding D1 metadata.
+  // The D1 sweep owns exact snapshot expiry and deletes the matching R2 objects.
   const sessionSnapshotPurge = await sweeps.isolate('session_snapshot_purge', () =>
     runScheduledSessionSnapshotPurge(env)
   );
@@ -225,12 +227,19 @@ export async function scheduled(
     sessionTaskRepairReused: sessionTaskRepair?.reused,
     sessionTaskRepairErrors: sessionTaskRepair?.errors,
     sessionTaskRepairResidual: sessionTaskRepair?.residual,
+    sessionSleepSelected: sessionSleep?.selected,
+    sessionSleepClaimed: sessionSleep?.claimed,
+    sessionSleepCompleted: sessionSleep?.slept,
+    sessionSleepFailed: sessionSleep?.failed,
+    sessionSleepExhausted: sessionSleep?.exhausted,
     deploymentReleaseRetentionSkipped: deploymentReleaseRetention?.skipped,
     deploymentReleaseRetentionSkipReason: deploymentReleaseRetention?.skipReason,
     deploymentReleaseRetentionDeleted: deploymentReleaseRetention?.deletedReleases,
     sessionSnapshotPurgeSkipped: sessionSnapshotPurge?.skipped,
     sessionSnapshotPurgeSkipReason: sessionSnapshotPurge?.skipReason,
     sessionSnapshotPurgeDeleted: sessionSnapshotPurge?.deletedSnapshots,
+    sessionSnapshotObjectsDeleted: sessionSnapshotPurge?.deletedObjects,
+    sessionSnapshotPurgeErrors: sessionSnapshotPurge?.errors,
     composeArtifactCleanupSkipped: composeArtifactCleanup?.skipped,
     composeArtifactCleanupSkipReason: composeArtifactCleanup?.skipReason,
     composeArtifactCleanupScanned: composeArtifactCleanup?.scannedObjects,

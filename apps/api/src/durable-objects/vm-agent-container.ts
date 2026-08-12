@@ -291,6 +291,12 @@ export class VmAgentContainer extends Container<Env> {
     await this.stop();
   }
 
+  async sleepForUser(): Promise<void> {
+    await this.markActiveWorkEnded('user_sleep');
+    await this.ctx.storage.put('lifecycleStatus', 'sleeping' satisfies LifecycleStatus);
+    await this.stop();
+  }
+
   async destroyForUser(): Promise<void> {
     await this.markActiveWorkEnded('user_destroy');
     await this.withLifecycleLock(async () => {
@@ -373,7 +379,30 @@ export class VmAgentContainer extends Container<Env> {
       await this.renewActiveWorkKeepalive();
       return;
     }
-    await this.markRuntimeSleeping('Container idle timeout expired; container is sleeping.');
+    // Close the request gate before crossing D1/ProjectData boundaries. A
+    // follow-up accepted after this point remains in durable delivery instead
+    // of racing the final snapshot and being cut off by stop().
+    await this.ctx.storage.put('lifecycleStatus', 'sleep-preparing' satisfies LifecycleStatus);
+    let sleepResult: 'sleeping' | 'retry' | 'aborted' = 'retry';
+    try {
+      sleepResult = await this.markRuntimeSleeping(
+        'Container idle timeout expired; container is sleeping.'
+      );
+    } catch (error) {
+      log.warn('vm_agent_container_sleep_commit_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+    if (sleepResult !== 'sleeping') {
+      // Fail closed: the container remains physically live. Keep the request
+      // gate closed for a durable roll-forward, but reopen it when the attempt
+      // was cancelled before the point of no return (for example by a prompt).
+      if (sleepResult === 'aborted') {
+        await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus);
+      }
+      await this.renewActivityTimeout();
+      return;
+    }
     await this.ctx.storage.put('lifecycleStatus', 'sleeping' satisfies LifecycleStatus);
     await this.stop();
   }
@@ -406,6 +435,14 @@ export class VmAgentContainer extends Container<Env> {
     const status = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
     if (status === 'running' || status === 'launching') {
       return { ok: true, status: 'running' };
+    }
+    if (status === 'sleep-preparing') {
+      return {
+        ok: false,
+        status: 'recovering',
+        code: 'RUNTIME_RECOVERING',
+        message: RUNTIME_RECOVERING_MESSAGE,
+      };
     }
     if (status === 'stopping' || status === 'stopped') {
       return stoppedRecoveryResult();
@@ -831,16 +868,105 @@ export class VmAgentContainer extends Container<Env> {
     await this.deleteSchedules(KEEPALIVE_CALLBACK);
   }
 
-  private async markRuntimeSleeping(message: string): Promise<void> {
+  private async markRuntimeSleeping(message: string): Promise<'sleeping' | 'retry' | 'aborted'> {
     const config = await this.ctx.storage.get<VmAgentContainerLaunchConfig>('launchConfig');
-    if (!config) return;
-    await this.markActiveWorkEnded('container_idle_sleeping');
-    await persistRuntimeSleeping(this.env, config);
+    if (!config) return 'aborted';
+    const { drizzle } = await import('drizzle-orm/d1');
+    const schema = await import('../db/schema');
+    const {
+      beginSessionSnapshotStopping,
+      claimSessionSnapshotSleep,
+      deferSessionSnapshotStopping,
+      failSessionSnapshotSleepBeforeTeardown,
+      finalizeSessionSnapshotSleeping,
+      getRestorableSessionSnapshot,
+      verifyRestorableSessionSnapshotArtifacts,
+    } = await import('../services/session-snapshots');
+    const db = drizzle(this.env.DATABASE, { schema });
+    const snapshot = await getRestorableSessionSnapshot(db, config.chatSessionId);
+    if (snapshot?.status !== 'available' || snapshot.degradation !== 'none') {
+      log.warn('vm_agent_container_sleep_preserved_without_snapshot', {
+        nodeId: config.nodeId,
+        workspaceId: config.workspaceId,
+        snapshotStatus: snapshot?.status ?? null,
+        snapshotDegradation: snapshot?.degradation ?? null,
+      });
+      return 'aborted';
+    }
+    const claimId = crypto.randomUUID();
+    let pointOfNoReturn = snapshot.sleepStatus === 'sleeping' && Boolean(snapshot.sleepingAt);
+    if (!pointOfNoReturn) {
+      // Another owner (normally the scheduled VM-neutral sleep transaction) is
+      // already preparing/stopping this runtime. It will call sleepForUser()
+      // after its own verified commit; do not race or reuse its claim.
+      if (snapshot.sleepStatus === 'preparing' || snapshot.sleepStatus === 'stopping')
+        return 'retry';
+      const claim = await claimSessionSnapshotSleep(db, this.env, {
+        chatSessionId: config.chatSessionId,
+        claimId,
+        force: true,
+      });
+      if (claim.status !== 'claimed' || claim.phase !== 'preparing') {
+        const winner = await getRestorableSessionSnapshot(db, config.chatSessionId);
+        return winner?.sleepStatus === 'preparing' || winner?.sleepStatus === 'stopping'
+          ? 'retry'
+          : 'aborted';
+      }
+    }
+    try {
+      if (!pointOfNoReturn) {
+        if (!(await verifyRestorableSessionSnapshotArtifacts(this.env, snapshot))) {
+          throw new Error('Container snapshot artifacts failed durable R2 verification');
+        }
+        if (!(await beginSessionSnapshotStopping(db, config.chatSessionId, claimId))) {
+          throw new Error('Container sleep claim was cancelled before teardown');
+        }
+        pointOfNoReturn = true;
+      }
+      await this.markActiveWorkEnded('container_idle_sleeping');
+      const projectDataService = await import('../services/project-data');
+      // Each write is idempotent. Once `stopping` is durable, any interruption
+      // rolls forward from the scheduled sweeper; the request gate stays closed.
+      await projectDataService.sleepSession(this.env, config.projectId, config.chatSessionId);
+      await persistRuntimeSleeping(this.env, config);
+      if (!(snapshot.sleepStatus === 'sleeping' && snapshot.sleepingAt)) {
+        if (!(await finalizeSessionSnapshotSleeping(db, this.env, config.chatSessionId, claimId))) {
+          throw new Error('Container sleep finalization lost its durable claim');
+        }
+      }
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      let retryRequired = pointOfNoReturn;
+      if (pointOfNoReturn) {
+        await deferSessionSnapshotStopping(db, this.env, config.chatSessionId, claimId, detail);
+      } else {
+        await failSessionSnapshotSleepBeforeTeardown(
+          db,
+          this.env,
+          config.chatSessionId,
+          claimId,
+          detail
+        );
+        const winner = await getRestorableSessionSnapshot(db, config.chatSessionId);
+        retryRequired =
+          winner?.sleepStatus === 'preparing' ||
+          winner?.sleepStatus === 'stopping' ||
+          (winner?.sleepStatus === 'sleeping' && Boolean(winner.sleepingAt));
+      }
+      log.warn('vm_agent_container_sleep_transaction_deferred', {
+        nodeId: config.nodeId,
+        workspaceId: config.workspaceId,
+        pointOfNoReturn: retryRequired,
+        error: detail,
+      });
+      return retryRequired ? 'retry' : 'aborted';
+    }
     log.info('vm_agent_container_runtime_sleeping', {
       nodeId: config.nodeId,
       workspaceId: config.workspaceId,
       message,
     });
+    return 'sleeping';
   }
 
   private async markRuntimeEnded(status: 'stopped' | 'error', message: string): Promise<void> {

@@ -114,6 +114,11 @@ export async function stopVmAgentContainer(env: Env, nodeId: string): Promise<vo
   await container.stopForUser();
 }
 
+export async function sleepVmAgentContainer(env: Env, nodeId: string): Promise<void> {
+  const container = getVmAgentContainer(env, nodeId);
+  await container.sleepForUser();
+}
+
 async function isCfContainerNode(env: Env, nodeId: string): Promise<boolean> {
   if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
     return false;

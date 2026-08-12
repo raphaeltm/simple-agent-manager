@@ -23,9 +23,10 @@ user-invocable: false
 - `GET /api/workspaces` — List user's workspaces
 - `GET /api/workspaces/:id` — Get workspace details
 - `PATCH /api/workspaces/:id` — Rename workspace display name
-- `POST /api/workspaces/:id/stop` — Stop a running workspace
+- `POST /api/workspaces/:id/sleep` — Strictly checkpoint and sleep a persistent session; verified VM snapshots are resumable on a replacement workspace
+- `POST /api/workspaces/:id/stop` — Permanently stop a running workspace and delete retained session snapshot state
 - `POST /api/workspaces/:id/restart` — Restart a workspace
-- `DELETE /api/workspaces/:id` — Delete a workspace
+- `DELETE /api/workspaces/:id` — Permanently delete a workspace and retained session snapshot state
 
 ## Project Management
 
@@ -138,6 +139,11 @@ The MCP `create_trigger` tool intentionally creates cron triggers only. Generic 
 - `GET /api/workspaces/:id/runtime` — Workspace runtime metadata callback (repository/branch for recovery)
 - `POST /api/workspaces/:id/boot-log` — Workspace boot progress log callback
 - `POST /api/workspaces/:id/agent-settings` — Workspace agent settings callback (model, permissionMode)
+- `POST /api/workspaces/:id/session-snapshot/prepare` — Prepare deterministic R2 artifact uploads for the workspace-scoped chat snapshot
+- `PUT /api/workspaces/:id/session-snapshot/artifacts/:artifact` — Upload a bounded HOME tar or Git WIP bundle with a workspace callback token
+- `POST /api/workspaces/:id/session-snapshot/complete` — Verify artifact metadata and commit the snapshot manifest
+- `GET /api/workspaces/:id/session-snapshot/restore` — Fetch strict restore metadata and signed artifact paths
+- `POST /api/workspaces/:id/session-snapshot/restore-result` — Persist the VM Agent's strict restore result
 - `POST /api/bootstrap/:token` — Redeem one-time bootstrap token (credentials + git identity)
 - `POST /api/agent/ready` — VM agent ready callback
 - `POST /api/agent/activity` — VM agent activity report

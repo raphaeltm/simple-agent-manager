@@ -11,6 +11,7 @@ import {
 const mocks = vi.hoisted(() => ({
   nodeAgentRequest: vi.fn(),
   sendPromptToAgentOnNode: vi.fn(),
+  ensureSessionRecovery: vi.fn(),
   NodeAgentHttpError: class NodeAgentHttpError extends Error {
     constructor(
       public readonly statusCode: number,
@@ -25,6 +26,10 @@ vi.mock('../../../src/services/node-agent', () => ({
   nodeAgentRequest: mocks.nodeAgentRequest,
   sendPromptToAgentOnNode: mocks.sendPromptToAgentOnNode,
   NodeAgentHttpError: mocks.NodeAgentHttpError,
+}));
+
+vi.mock('../../../src/services/session-recovery', () => ({
+  ensureSessionRecovery: mocks.ensureSessionRecovery,
 }));
 
 const protocolFixture = JSON.parse(
@@ -50,6 +55,7 @@ const targetRow = {
   node_status: 'running',
   node_health_status: 'healthy',
   agent_version: 'v1',
+  node_runtime: 'vm',
   agent_session_id: 'acp-1',
   agent_session_status: 'running',
   agent_session_updated_at: '2026-08-09T00:00:00Z',
@@ -113,7 +119,13 @@ function input(allowLegacyVm: boolean): VmPromptDeliveryAdapterInput {
 }
 
 describe('VM prompt delivery adapter', () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.ensureSessionRecovery.mockResolvedValue({
+      status: 'unavailable',
+      reason: 'snapshot_missing',
+    });
+  });
 
   it('fails closed for an old VM unless compatibility is explicitly enabled', async () => {
     mocks.nodeAgentRequest.mockRejectedValue(new Error('Node Agent request failed: 404'));
@@ -171,6 +183,26 @@ describe('VM prompt delivery adapter', () => {
     const result = await adapter.reconcile(input(false));
 
     expect(result).toMatchObject({ kind: 'ambiguous', reason: 'receipt_unavailable' });
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+  });
+
+  it('starts one recovery task and retries delivery while a VM session wakes', async () => {
+    mocks.ensureSessionRecovery.mockResolvedValue({ status: 'waking', taskId: 'wake-task-1' });
+    const adapter = new DefaultVmPromptDeliveryAdapter(
+      envWithTarget({
+        ...targetRow,
+        workspace_status: 'sleeping',
+      })
+    );
+
+    const result = await adapter.submit(input(false));
+
+    expect(result).toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    expect(mocks.ensureSessionRecovery).toHaveBeenCalledWith(
+      expect.anything(),
+      'project-1',
+      'chat-1'
+    );
     expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
   });
 

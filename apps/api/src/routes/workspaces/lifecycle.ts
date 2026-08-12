@@ -21,6 +21,8 @@ import {
 } from '../../services/node-agent';
 import { stopNodeResources } from '../../services/nodes';
 import * as projectDataService from '../../services/project-data';
+import { sleepWorkspaceSession } from '../../services/session-sleep';
+import { deleteSessionSnapshotState } from '../../services/session-snapshots';
 import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import {
   assertNodeOperational,
@@ -68,6 +70,19 @@ async function requireWorkspaceRestartGitHubAccess(
 
 // --- User-authenticated lifecycle routes ---
 
+lifecycleRoutes.post('/:id/sleep', requireAuth(), requireApproved(), async (c) => {
+  const userId = getUserId(c);
+  const workspaceId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
+  await getOwnedWorkspace(db, workspaceId, userId);
+  const result = await sleepWorkspaceSession(c.env, {
+    workspaceId,
+    userId,
+    reason: 'Explicit workspace sleep API request',
+  });
+  return c.json(result);
+});
+
 lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
@@ -93,6 +108,10 @@ lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) =>
     }
   } else {
     assertNodeOperational(node, 'stop workspace');
+  }
+
+  if (workspace.chatSessionId) {
+    await deleteSessionSnapshotState(db, c.env, workspace.chatSessionId);
   }
 
   await db

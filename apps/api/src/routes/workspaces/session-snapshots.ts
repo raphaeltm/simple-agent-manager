@@ -30,9 +30,13 @@ const COMPLETE_STATUSES = new Set<SessionSnapshotStatus>(['available', 'degraded
 const DEGRADATIONS = new Set<SessionSnapshotDegradation>([
   'none',
   'home-skipped',
+  'wip-skipped',
+  'entries-skipped',
+  'agent-context-skipped',
   'wip-only',
   'transcript-only',
 ]);
+const SHA256_HEX = /^[a-f0-9]{64}$/;
 
 // Full structural contract for a VM-agent-submitted snapshot manifest — mirrors
 // SessionSnapshotManifest in services/session-snapshots.ts field-for-field.
@@ -53,7 +57,15 @@ const SessionSnapshotManifestSchema = v.object({
   agentType: v.optional(v.string()),
   baseCommit: v.optional(v.string()),
   status: v.picklist(['pending', 'available', 'degraded', 'failed', 'expired']),
-  degradation: v.picklist(['none', 'home-skipped', 'wip-only', 'transcript-only']),
+  degradation: v.picklist([
+    'none',
+    'home-skipped',
+    'wip-skipped',
+    'entries-skipped',
+    'agent-context-skipped',
+    'wip-only',
+    'transcript-only',
+  ]),
   skipped: v.array(
     v.object({
       path: v.string(),
@@ -107,6 +119,11 @@ function artifactFromParam(value: string): SessionSnapshotArtifact {
   return value as SessionSnapshotArtifact;
 }
 
+function checksumHex(value: ArrayBuffer | undefined): string | null {
+  if (!value) return null;
+  return Array.from(new Uint8Array(value), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
 async function requireWorkspace(c: SnapshotRouteContext, workspaceId: string) {
   const db = drizzle(c.env.DATABASE, { schema });
   const rows = await db
@@ -144,11 +161,12 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/prepare', async (c) => {
 
   return c.json({
     snapshotId: prepared.snapshotId,
+    generation: prepared.generation,
     expiresAt: prepared.expiresAt,
     config: prepared.config,
     upload: {
-      home: `/api/workspaces/${workspaceId}/session-snapshot/artifacts/home?chatSessionId=${encodeURIComponent(chatSessionId)}`,
-      wip: `/api/workspaces/${workspaceId}/session-snapshot/artifacts/wip?chatSessionId=${encodeURIComponent(chatSessionId)}`,
+      home: `/api/workspaces/${workspaceId}/session-snapshot/artifacts/home?chatSessionId=${encodeURIComponent(chatSessionId)}&generation=${encodeURIComponent(prepared.generation)}`,
+      wip: `/api/workspaces/${workspaceId}/session-snapshot/artifacts/wip?chatSessionId=${encodeURIComponent(chatSessionId)}&generation=${encodeURIComponent(prepared.generation)}`,
     },
   });
 });
@@ -162,7 +180,9 @@ sessionSnapshotRoutes.put('/:id/session-snapshot/artifacts/:artifact', async (c)
   }
   const chatSessionId = c.req.query('chatSessionId')?.trim();
   if (!chatSessionId) throw errors.badRequest('chatSessionId is required');
-  const { workspace } = await requireWorkspace(c, workspaceId);
+  const generation = c.req.query('generation')?.trim();
+  if (!generation) throw errors.badRequest('generation is required');
+  const { db, workspace } = await requireWorkspace(c, workspaceId);
   if (!workspace.chatSessionId || workspace.chatSessionId !== chatSessionId) {
     throw errors.forbidden('Snapshot chat session does not match workspace');
   }
@@ -177,11 +197,25 @@ sessionSnapshotRoutes.put('/:id/session-snapshot/artifacts/:artifact', async (c)
   }
   if (!c.req.raw.body) throw errors.badRequest('Snapshot artifact body is required');
 
-  const key = buildSessionSnapshotR2Key(c.env, chatSessionId, artifact);
+  const capture = await db
+    .select({ generation: schema.sessionSnapshots.captureGeneration })
+    .from(schema.sessionSnapshots)
+    .where(eq(schema.sessionSnapshots.chatSessionId, chatSessionId))
+    .get();
+  if (!capture || capture.generation !== generation) {
+    throw errors.conflict('Snapshot capture generation is no longer current');
+  }
+  const sha256 = c.req.header('x-sam-content-sha256')?.trim().toLowerCase();
+  if (!sha256 || !SHA256_HEX.test(sha256)) {
+    throw errors.badRequest('Snapshot artifact SHA-256 is required');
+  }
+
+  const key = buildSessionSnapshotR2Key(c.env, chatSessionId, generation, artifact);
   await c.env.R2.put(key, c.req.raw.body, {
     httpMetadata: {
       contentType: artifact === 'home' ? 'application/x-tar' : 'application/octet-stream',
     },
+    sha256,
   });
   return c.json({ key, artifact });
 });
@@ -198,6 +232,7 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
 
   const status = requiredStringField(body, 'status') as SessionSnapshotStatus;
   const degradation = requiredStringField(body, 'degradation') as SessionSnapshotDegradation;
+  const generation = requiredStringField(body, 'generation');
   if (!COMPLETE_STATUSES.has(status)) throw errors.badRequest('Invalid snapshot status');
   if (!DEGRADATIONS.has(degradation)) throw errors.badRequest('Invalid snapshot degradation');
   const manifestRecord = expectJsonRecord(body.manifest, 'snapshot manifest');
@@ -218,6 +253,15 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
   ) {
     throw errors.badRequest('Snapshot manifest identity does not match request');
   }
+  if (manifest.status !== status || manifest.degradation !== degradation) {
+    throw errors.badRequest('Snapshot manifest lifecycle does not match request');
+  }
+  if (
+    (status === 'available' && degradation !== 'none') ||
+    (status !== 'available' && degradation === 'none')
+  ) {
+    throw errors.badRequest('Snapshot lifecycle status and degradation are inconsistent');
+  }
   const agentSessionId = optionalStringField(body, 'agentSessionId');
   const manifestAgentSessionId = optionalStringField(manifestRecord, 'agentSessionId');
   if (manifestAgentSessionId !== agentSessionId) {
@@ -232,7 +276,17 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
     manifestRecord.artifacts ?? {},
     'snapshot manifest artifacts'
   );
+  if (
+    status === 'available' &&
+    (acpSessionId === null || agentType === null || manifest.skipped.length > 0)
+  ) {
+    throw errors.badRequest('Complete snapshots require harness identity and no skipped state');
+  }
+  if (status === 'available' && !('home' in manifestArtifacts)) {
+    throw errors.badRequest('Complete snapshots require the state archive');
+  }
   const artifactSizes: { homeBytes?: number; wipBytes?: number } = {};
+  const artifactSha256: { homeSha256?: string; wipSha256?: string } = {};
   for (const [artifact, sizeKey] of [
     ['home', 'homeBytes'],
     ['wip', 'wipBytes'],
@@ -246,11 +300,22 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
     if (typeof claimedSize !== 'number' || !Number.isSafeInteger(claimedSize) || claimedSize < 0) {
       throw errors.badRequest('Snapshot ' + artifact + ' size is invalid');
     }
-    const object = await c.env.R2.head(buildSessionSnapshotR2Key(c.env, chatSessionId, artifact));
+    const claimedSha256 =
+      typeof artifactRecord.sha256 === 'string' ? artifactRecord.sha256.toLowerCase() : '';
+    if (!SHA256_HEX.test(claimedSha256)) {
+      throw errors.badRequest('Snapshot ' + artifact + ' SHA-256 is invalid');
+    }
+    const object = await c.env.R2.head(
+      buildSessionSnapshotR2Key(c.env, chatSessionId, generation, artifact)
+    );
     if (!object) throw errors.badRequest('Snapshot ' + artifact + ' artifact is missing');
     if (object.size !== claimedSize)
       throw errors.badRequest('Snapshot ' + artifact + ' size does not match upload');
+    if (checksumHex(object.checksums.sha256) !== claimedSha256) {
+      throw errors.badRequest('Snapshot ' + artifact + ' SHA-256 does not match upload');
+    }
     artifactSizes[sizeKey] = object.size;
+    artifactSha256[artifact === 'home' ? 'homeSha256' : 'wipSha256'] = claimedSha256;
   }
   const totalArtifactBytes = (artifactSizes.homeBytes ?? 0) + (artifactSizes.wipBytes ?? 0);
   if (totalArtifactBytes > getSessionSnapshotConfig(c.env).totalBudgetBytes) {
@@ -263,10 +328,12 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
     agentSessionId,
     runtime: stringField(body, 'runtime', false) || 'runtime-neutral',
     baseCommit: stringField(body, 'baseCommit', false),
+    captureGeneration: generation,
     status,
     degradation,
     manifest,
     artifactSizes,
+    artifactSha256,
   });
 
   return c.json({ status, degradation });
@@ -312,11 +379,19 @@ sessionSnapshotRoutes.get('/:id/session-snapshot/artifacts/:artifact', async (c)
   const artifact = artifactFromParam(c.req.param('artifact'));
   const chatSessionId = c.req.query('chatSessionId')?.trim();
   if (!chatSessionId) throw errors.badRequest('chatSessionId is required');
-  const { workspace } = await requireWorkspace(c, workspaceId);
+  const { db, workspace } = await requireWorkspace(c, workspaceId);
   if (workspace.chatSessionId !== chatSessionId) {
     throw errors.forbidden('Snapshot chat session does not match workspace');
   }
-  const object = await c.env.R2.get(buildSessionSnapshotR2Key(c.env, chatSessionId, artifact));
+  const snapshot = await getRestorableSessionSnapshot(db, chatSessionId);
+  const key =
+    artifact === 'home'
+      ? snapshot?.homeR2Key
+      : artifact === 'wip'
+        ? snapshot?.wipR2Key
+        : snapshot?.manifestR2Key;
+  if (!key) throw errors.notFound('Snapshot artifact');
+  const object = await c.env.R2.get(key);
   if (!object) throw errors.notFound('Snapshot artifact');
   const headers = new Headers();
   object.writeHttpMetadata(headers);

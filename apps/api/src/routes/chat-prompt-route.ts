@@ -9,9 +9,10 @@ import { expectJsonRecord } from '../lib/runtime-validation';
 import { getUserId } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectCapability } from '../middleware/project-auth';
-import { parseOptionalBody,SendChatMessageSchema } from '../schemas';
+import { parseOptionalBody, SendChatMessageSchema } from '../schemas';
 import { enrichMessageWithMentions } from '../services/mention-enrichment';
 import * as projectDataService from '../services/project-data';
+import { cancelScheduledSessionSleep } from '../services/session-snapshots';
 import { forwardPromptToLiveAgent } from './chat-prompt-forward';
 import { requireSessionCreator } from './chat-session-ownership';
 
@@ -37,6 +38,9 @@ export function registerChatPromptRoute(chatRoutes: Hono<{ Bindings: Env }>): vo
       userId,
       c.env
     );
+    // A follow-up is an immediate keep-awake gesture. Cancel only an unclaimed
+    // idle sleep; durable delivery wakes a sleep that has already begun.
+    await cancelScheduledSessionSleep(db, sessionId);
     const durableConfig = resolveDurableExecutionConfig(c.env);
     if (durableConfig.deliveryEnabled) {
       const accepted = await projectDataService.acceptPromptDelivery(c.env, projectId, {

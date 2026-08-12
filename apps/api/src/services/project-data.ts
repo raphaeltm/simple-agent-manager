@@ -15,10 +15,7 @@ import type {
   DeliveryState,
   MessageClass,
 } from '@simple-agent-manager/shared';
-import {
-  resolveHandoffLimits,
-  resolveMissionStateLimits,
-} from '@simple-agent-manager/shared';
+import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-manager/shared';
 
 import type { ProjectData } from '../durable-objects/project-data';
 import type {
@@ -122,6 +119,26 @@ export async function linkSessionToWorkspace(
 export async function stopSession(env: Env, projectId: string, sessionId: string): Promise<void> {
   const stub = await getStub(env, projectId);
   return stub.stopSession(sessionId);
+}
+
+export async function sleepSession(
+  env: Env,
+  projectId: string,
+  sessionId: string
+): Promise<boolean> {
+  const stub = await getStub(env, projectId);
+  return stub.sleepSession(sessionId);
+}
+
+export async function wakeSession(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  workspaceId: string,
+  taskId: string
+): Promise<boolean> {
+  const stub = await getStub(env, projectId);
+  return stub.wakeSession(sessionId, workspaceId, taskId);
 }
 
 export async function failSession(
@@ -862,7 +879,7 @@ export {
 export async function acceptPromptDelivery(
   env: Env,
   projectId: string,
-  input: AcceptPromptDeliveryInput,
+  input: AcceptPromptDeliveryInput
 ): Promise<AcceptedPromptDelivery> {
   const stub = await getStub(env, projectId);
   return stub.acceptPromptDelivery(input);
@@ -960,7 +977,7 @@ export async function getMailboxStats(
 export async function createCheckpointEpisode(
   env: Env,
   projectId: string,
-  input: CreateCheckpointEpisodeInput,
+  input: CreateCheckpointEpisodeInput
 ): Promise<{ episode: CheckpointEpisode; created: boolean }> {
   const stub = await getStub(env, projectId);
   return stub.createCheckpointEpisode(input);
@@ -969,7 +986,7 @@ export async function createCheckpointEpisode(
 export async function getCheckpointEpisode(
   env: Env,
   projectId: string,
-  episodeId: string,
+  episodeId: string
 ): Promise<CheckpointEpisode | null> {
   const stub = await getStub(env, projectId);
   return stub.getCheckpointEpisode(episodeId);
@@ -979,17 +996,13 @@ export async function transitionCheckpointEpisode(
   env: Env,
   projectId: string,
   episodeId: string,
-  input: CheckpointEpisodeTransitionInput,
+  input: CheckpointEpisodeTransitionInput
 ): Promise<CheckpointEpisode | null> {
   const stub = await getStub(env, projectId);
   return stub.transitionCheckpointEpisode(episodeId, input);
 }
 
-export async function getDurableExecutionSnapshot(
-  env: Env,
-  projectId: string,
-  sessionId: string,
-) {
+export async function getDurableExecutionSnapshot(env: Env, projectId: string, sessionId: string) {
   const stub = await getStub(env, projectId);
   return stub.getDurableExecutionSnapshot(sessionId);
 }

@@ -422,7 +422,8 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     return <div className="p-4 text-danger text-sm">{lc.error}</div>;
   }
 
-  const isActive = lc.sessionState === 'active' || lc.sessionState === 'idle';
+  const isActive =
+    lc.sessionState === 'active' || lc.sessionState === 'idle' || lc.sessionState === 'sleeping';
 
   return (
     <div className="flex flex-col flex-1 min-h-0">
@@ -450,6 +451,17 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           <Spinner size="sm" />
           <span>Waking and restoring Instant session...</span>
           {lc.resumeStartedAt != null && <ElapsedTime startedAt={lc.resumeStartedAt} />}
+        </div>
+      )}
+
+      {lc.sessionState === 'sleeping' && lc.agentActivity !== 'idle' && (
+        <div
+          role="status"
+          aria-label="Sleeping session wake status"
+          className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-surface text-xs text-fg-muted"
+        >
+          <Spinner size="sm" />
+          <span>Waking and restoring session...</span>
         </div>
       )}
 
@@ -653,7 +665,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               ? 'Agent is working...'
               : lc.sessionState === 'idle'
                 ? 'Send a message to resume the agent...'
-                : 'Send a message...'
+                : lc.sessionState === 'sleeping'
+                  ? 'Send a message to wake the agent...'
+                  : 'Send a message...'
           }
           transcribeApiUrl={lc.transcribeApiUrl}
           agentProfiles={agentProfiles}

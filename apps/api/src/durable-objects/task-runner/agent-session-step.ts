@@ -68,48 +68,98 @@ export async function handleAgentSession(
     const { startSamAwareAgentSession } = await import('../../services/agent-session-bootstrap');
     const db = drizzle(rc.env.DATABASE, { schema });
     const agentType = state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'opencode';
-    const result = await startSamAwareAgentSession(db, rc.env, {
-      nodeId: state.stepResults.nodeId,
-      workspaceId: state.stepResults.workspaceId,
-      projectId: state.projectId,
-      userId: state.userId,
-      chatSessionId: state.stepResults.chatSessionId,
-      agentSessionId: sessionId,
-      label: buildTaskAgentSessionLabel(state.config.taskTitle),
-      agentType,
-      visibleInitialPrompt: buildVisibleTaskInitialPrompt(state),
-      promptKind: 'task',
-      taskContext: {
-        taskId: state.taskId,
-        taskMode: state.config.taskMode,
-        outputBranch: state.config.outputBranch,
-      },
-      overrides: {
-        model: state.config.model,
-        effort: state.config.effort,
-        permissionMode: state.config.permissionMode,
-        opencodeProvider: state.config.opencodeProvider,
-        opencodeBaseUrl: state.config.opencodeBaseUrl,
-      },
-      existingMcpToken: state.stepResults.mcpToken,
-      onAgentSessionId: async (agentSessionId) => {
-        state.stepResults.agentSessionId = agentSessionId;
-        await rc.ctx.storage.put('state', state);
-      },
-      onMcpToken: async (mcpToken) => {
-        state.stepResults.mcpToken = mcpToken;
-        await rc.ctx.storage.put('state', state);
-      },
-      actor: {
-        type: 'system',
-        id: 'task-runner',
-        reasonPrefix: 'Task runner agent session',
-      },
-    });
+    let result;
+    try {
+      result = await startSamAwareAgentSession(db, rc.env, {
+        nodeId: state.stepResults.nodeId,
+        workspaceId: state.stepResults.workspaceId,
+        projectId: state.projectId,
+        userId: state.userId,
+        chatSessionId: state.stepResults.chatSessionId,
+        agentSessionId: sessionId,
+        label: buildTaskAgentSessionLabel(state.config.taskTitle),
+        agentType,
+        visibleInitialPrompt: buildVisibleTaskInitialPrompt(state),
+        restoreSnapshotChatSessionId: state.config.resumeSnapshotChatSessionId,
+        promptKind: 'task',
+        taskContext: {
+          taskId: state.taskId,
+          taskMode: state.config.taskMode,
+          outputBranch: state.config.outputBranch,
+        },
+        overrides: {
+          model: state.config.model,
+          effort: state.config.effort,
+          permissionMode: state.config.permissionMode,
+          opencodeProvider: state.config.opencodeProvider,
+          opencodeBaseUrl: state.config.opencodeBaseUrl,
+        },
+        existingMcpToken: state.stepResults.mcpToken,
+        onAgentSessionId: async (agentSessionId) => {
+          state.stepResults.agentSessionId = agentSessionId;
+          await rc.ctx.storage.put('state', state);
+        },
+        onMcpToken: async (mcpToken) => {
+          state.stepResults.mcpToken = mcpToken;
+          await rc.ctx.storage.put('state', state);
+        },
+        actor: {
+          type: 'system',
+          id: 'task-runner',
+          reasonPrefix: 'Task runner agent session',
+        },
+      });
+    } catch (error) {
+      if (state.config.resumeSnapshotChatSessionId) {
+        const { failSessionSnapshotRecovery } = await import('../../services/session-snapshots');
+        await failSessionSnapshotRecovery(
+          db,
+          rc.env,
+          state.config.resumeSnapshotChatSessionId,
+          state.taskId,
+          error instanceof Error ? error.message : String(error)
+        );
+      }
+      throw error;
+    }
 
     state.stepResults.agentSessionId = result.agentSessionId;
     state.stepResults.mcpToken = result.mcpToken;
     state.stepResults.agentStarted = true;
+
+    if (state.config.resumeSnapshotChatSessionId) {
+      const { drizzle } = await import('drizzle-orm/d1');
+      const schema = await import('../../db/schema');
+      const { completeSessionSnapshotRecovery } = await import('../../services/session-snapshots');
+      const projectDataService = await import('../../services/project-data');
+      // Keep sleepingAt authoritative until the ProjectData lifecycle accepts the
+      // idempotent wake. If this RPC fails, the snapshot remains claimable and a
+      // later recovery attempt can safely converge instead of becoming stranded.
+      const sessionWoken = await projectDataService.wakeSession(
+        rc.env,
+        state.projectId,
+        state.config.resumeSnapshotChatSessionId,
+        state.stepResults.workspaceId,
+        state.taskId
+      );
+      if (!sessionWoken) {
+        throw new Error('Strict session restore succeeded but lifecycle recovery commit failed');
+      }
+      const recoveryCompleted = await completeSessionSnapshotRecovery(
+        drizzle(rc.env.DATABASE, { schema }),
+        state.config.resumeSnapshotChatSessionId,
+        state.taskId,
+        state.stepResults.workspaceId
+      );
+      if (!recoveryCompleted) {
+        throw new Error('Strict session restore succeeded but lifecycle recovery commit failed');
+      }
+      // Recovery is now fully committed in both authoritative stores. Clear the
+      // marker before persisting TaskRunner state so later failures on the awake
+      // replacement follow ordinary task semantics instead of re-sleeping a
+      // snapshot whose sleepingAt claim has already been cleared.
+      state.config.resumeSnapshotChatSessionId = null;
+    }
     await rc.ctx.storage.put('state', state);
 
     log.info('task_runner_do.step.agent_session_started', {

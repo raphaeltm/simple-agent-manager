@@ -40,6 +40,19 @@ export async function ensureSessionLinked(
       .bind(state.stepResults.chatSessionId, now, workspaceId)
       .run();
 
+    if (state.config.resumeSnapshotChatSessionId) {
+      const { drizzle } = await import('drizzle-orm/d1');
+      const schema = await import('../../db/schema');
+      const { recordSessionSnapshotRecoveryWorkspace } =
+        await import('../../services/session-snapshots');
+      await recordSessionSnapshotRecoveryWorkspace(
+        drizzle(rc.env.DATABASE, { schema }),
+        state.config.resumeSnapshotChatSessionId,
+        state.taskId,
+        workspaceId
+      );
+    }
+
     log.info('task_runner_do.session_d1_linked', {
       taskId: state.taskId,
       sessionId: state.stepResults.chatSessionId,
@@ -218,7 +231,7 @@ export async function failTask(
 
   // Check current status before failing (idempotent)
   const task = await rc.env.DATABASE.prepare(
-    `SELECT status, mission_id, parent_task_id FROM tasks WHERE id = ?`,
+    `SELECT status, mission_id, parent_task_id FROM tasks WHERE id = ?`
   )
     .bind(state.taskId)
     .first<{ status: string; mission_id: string | null; parent_task_id: string | null }>();
@@ -319,10 +332,44 @@ export async function failTask(
     rc.env
   );
 
-  // Inject error into chat session and mark it as failed. The UI also
-  // cross-references task.status so even if this RPC fails the session will
-  // appear terminated, but we still attempt it for data consistency.
-  if (state.stepResults.chatSessionId && state.projectId) {
+  const recoverySessionId = state.config.resumeSnapshotChatSessionId ?? null;
+  if (recoverySessionId) {
+    try {
+      const { drizzle } = await import('drizzle-orm/d1');
+      const schema = await import('../../db/schema');
+      const { failSessionSnapshotRecovery } = await import('../../services/session-snapshots');
+      await failSessionSnapshotRecovery(
+        drizzle(rc.env.DATABASE, { schema }),
+        rc.env,
+        recoverySessionId,
+        state.taskId,
+        errorMessage
+      );
+    } catch (snapshotErr) {
+      log.warn('task_runner_do.session_recovery_fail_record_failed', {
+        taskId: state.taskId,
+        sessionId: recoverySessionId,
+        error: snapshotErr instanceof Error ? snapshotErr.message : String(snapshotErr),
+      });
+    }
+
+    // The failed task owns only the replacement runtime. Preserve the original
+    // conversation as sleeping so another bounded wake attempt can reuse the
+    // verified snapshot. This also compensates if ProjectData accepted the wake
+    // immediately before a later D1 recovery-commit failure.
+    try {
+      const { sleepSession } = await import('../../services/project-data');
+      await sleepSession(rc.env, state.projectId, recoverySessionId);
+    } catch (chatErr) {
+      log.warn('task_runner_do.session_recovery_resleep_failed', {
+        taskId: state.taskId,
+        sessionId: recoverySessionId,
+        error: chatErr instanceof Error ? chatErr.message : String(chatErr),
+      });
+    }
+  } else if (state.stepResults.chatSessionId && state.projectId) {
+    // Ordinary task failures are terminal for their chat. The UI also
+    // cross-references task.status, but update ProjectData for consistency.
     const sessionId = state.stepResults.chatSessionId;
     const projectId = state.projectId;
     const maxAttempts = 2;

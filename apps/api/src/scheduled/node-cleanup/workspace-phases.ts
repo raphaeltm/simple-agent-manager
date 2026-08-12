@@ -44,7 +44,10 @@ export async function sweepOrphanedWorkspaces(
        AND EXISTS (
          SELECT 1 FROM tasks t
          WHERE t.workspace_id = w.id
-           AND t.status IN ('completed', 'failed', 'cancelled')
+           AND (
+             t.status IN ('failed', 'cancelled')
+             OR (t.status = 'completed' AND w.chat_session_id IS NULL)
+           )
        )
        AND NOT EXISTS (
          SELECT 1 FROM tasks t
@@ -116,20 +119,24 @@ export async function sweepOrphanedWorkspaces(
         });
       }
 
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'warn',
-        message: 'Orphaned workspace stopped: was running with no active task',
-        context: {
-          recoveryType: 'orphaned_workspace',
-          workspaceId: ws.id,
+      await persistError(
+        env.OBSERVABILITY_DATABASE,
+        {
+          source: 'api',
+          level: 'warn',
+          message: 'Orphaned workspace stopped: was running with no active task',
+          context: {
+            recoveryType: 'orphaned_workspace',
+            workspaceId: ws.id,
+            nodeId: ws.node_id,
+            createdAt: ws.created_at,
+          },
+          userId: ws.user_id,
           nodeId: ws.node_id,
-          createdAt: ws.created_at,
+          workspaceId: ws.id,
         },
-        userId: ws.user_id,
-        nodeId: ws.node_id,
-        workspaceId: ws.id,
-      }, env);
+        env
+      );
 
       result.orphanedWorkspacesFlagged++;
     } catch (e) {

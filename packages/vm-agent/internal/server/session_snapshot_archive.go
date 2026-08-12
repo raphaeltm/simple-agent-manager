@@ -11,6 +11,19 @@ import (
 	"strings"
 )
 
+const snapshotExternalRootsPrefix = ".sam-snapshot-roots"
+
+const (
+	snapshotRootCodex    = "codex"
+	snapshotRootClaude   = "claude"
+	snapshotRootOpenCode = "opencode"
+)
+
+type snapshotArchiveRoot struct {
+	logicalName string
+	path        string
+}
+
 func createWIPBundle(ctx context.Context, workDir string, entryThreshold int64) (string, string, []snapshotSkippedEntry, error) {
 	if ok, err := standaloneRepositoryPresent(workDir); err != nil || !ok {
 		if err != nil {
@@ -32,6 +45,14 @@ func createWIPBundle(ctx context.Context, workDir string, entryThreshold int64) 
 	if strings.TrimSpace(status) == "" {
 		return base, "", nil, nil
 	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return base, "", nil, fmt.Errorf("resolve HOME for snapshot WIP filtering: %w", err)
+	}
+	excludedPaths, err := snapshotWIPExcludedPaths(workDir, home, os.Getenv)
+	if err != nil {
+		return base, "", nil, fmt.Errorf("resolve snapshot WIP exclusions: %w", err)
+	}
 
 	indexFile, err := os.CreateTemp("", "sam-session-index-*")
 	if err != nil {
@@ -48,7 +69,10 @@ func createWIPBundle(ctx context.Context, workDir string, entryThreshold int64) 
 	if _, err := runStandaloneGitCommand(ctx, workDir, gitEnv, "add", "-A"); err != nil {
 		return base, "", nil, fmt.Errorf("stage snapshot index: %w", err)
 	}
-	skipped := skipOversizedUntracked(workDir, entryThreshold)
+	if err := resetStandaloneSnapshotIndexPaths(ctx, workDir, gitEnv, excludedPaths); err != nil {
+		return base, "", nil, fmt.Errorf("filter regenerated harness state from snapshot worktree: %w", err)
+	}
+	skipped := skipOversizedUntracked(workDir, entryThreshold, excludedPaths)
 	for _, entry := range skipped {
 		if entry.Path != "" {
 			_, _ = runStandaloneGitCommand(ctx, workDir, gitEnv, "reset", "--", entry.Path)
@@ -58,7 +82,7 @@ func createWIPBundle(ctx context.Context, workDir string, entryThreshold int64) 
 	if err != nil {
 		return base, "", skipped, fmt.Errorf("write snapshot tree: %w", err)
 	}
-	indexTree, indexSkipped, err := writeFilteredIndexTree(ctx, workDir, entryThreshold)
+	indexTree, indexSkipped, err := writeFilteredIndexTree(ctx, workDir, entryThreshold, excludedPaths)
 	skipped = append(skipped, indexSkipped...)
 	if err != nil {
 		return base, "", skipped, fmt.Errorf("write snapshot index tree: %w", err)
@@ -111,7 +135,8 @@ func gitOperationInProgress(workDir string) bool {
 	return false
 }
 
-func skipOversizedUntracked(workDir string, threshold int64) []snapshotSkippedEntry {
+func skipOversizedUntracked(workDir string, threshold int64, excludedPaths []string) []snapshotSkippedEntry {
+	excluded := snapshotPathSet(excludedPaths)
 	var skipped []snapshotSkippedEntry
 	_ = filepath.WalkDir(workDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil || path == workDir {
@@ -128,6 +153,10 @@ func skipOversizedUntracked(workDir string, threshold int64) []snapshotSkippedEn
 			return nil
 		}
 		rel, _ := filepath.Rel(workDir, path)
+		rel = filepath.ToSlash(filepath.Clean(rel))
+		if excluded[rel] {
+			return nil
+		}
 		if out, gitErr := runStandaloneGitCommand(context.Background(), workDir, nil, "check-ignore", "-q", rel); gitErr == nil && strings.TrimSpace(out) == "" {
 			return nil
 		}
@@ -145,9 +174,9 @@ func skipOversizedUntracked(workDir string, threshold int64) []snapshotSkippedEn
 // mutates the real index — it operates on a copy under GIT_INDEX_FILE. Skipped
 // staged entries are returned so the manifest records the degradation; their
 // staged-ness is lost on restore, mirroring the worktree oversized-skip.
-func writeFilteredIndexTree(ctx context.Context, workDir string, threshold int64) (string, []snapshotSkippedEntry, error) {
-	skipped := skipOversizedStagedIndexEntries(ctx, workDir, threshold)
-	if len(skipped) == 0 {
+func writeFilteredIndexTree(ctx context.Context, workDir string, threshold int64, excludedPaths []string) (string, []snapshotSkippedEntry, error) {
+	skipped := skipOversizedStagedIndexEntries(ctx, workDir, threshold, excludedPaths)
+	if len(skipped) == 0 && len(excludedPaths) == 0 {
 		tree, err := runStandaloneGitCommand(ctx, workDir, nil, "write-tree")
 		return tree, nil, err
 	}
@@ -162,6 +191,9 @@ func writeFilteredIndexTree(ctx context.Context, workDir string, threshold int64
 			_, _ = runStandaloneGitCommand(ctx, workDir, env, "reset", "--", entry.Path)
 		}
 	}
+	if err := resetStandaloneSnapshotIndexPaths(ctx, workDir, env, excludedPaths); err != nil {
+		return "", skipped, err
+	}
 	tree, err := runStandaloneGitCommand(ctx, workDir, env, "write-tree")
 	return tree, skipped, err
 }
@@ -170,7 +202,8 @@ func writeFilteredIndexTree(ctx context.Context, workDir string, threshold int64
 // exceeding threshold. It reads blob sizes from the object database
 // (git cat-file -s) rather than the worktree, so it catches staged content even
 // when the worktree copy is absent or a different size.
-func skipOversizedStagedIndexEntries(ctx context.Context, workDir string, threshold int64) []snapshotSkippedEntry {
+func skipOversizedStagedIndexEntries(ctx context.Context, workDir string, threshold int64, excludedPaths []string) []snapshotSkippedEntry {
+	excluded := snapshotPathSet(excludedPaths)
 	out, err := runStandaloneGitCommand(ctx, workDir, nil, "ls-files", "-s", "-z")
 	if err != nil || out == "" {
 		return nil
@@ -188,6 +221,10 @@ func skipOversizedStagedIndexEntries(ctx context.Context, workDir string, thresh
 		if !found || path == "" {
 			continue
 		}
+		path = filepath.ToSlash(filepath.Clean(path))
+		if excluded[path] {
+			continue
+		}
 		fields := strings.Fields(meta)
 		if len(fields) < 2 {
 			continue
@@ -203,6 +240,53 @@ func skipOversizedStagedIndexEntries(ctx context.Context, workDir string, thresh
 		skipped = append(skipped, snapshotSkippedEntry{Path: path, Reason: "staged entry exceeds size threshold", SizeBytes: size})
 	}
 	return skipped
+}
+
+func snapshotWIPExcludedPaths(workDir, home string, getenv func(string) string) ([]string, error) {
+	workDir = filepath.Clean(workDir)
+	if !filepath.IsAbs(workDir) || workDir == string(filepath.Separator) {
+		return nil, fmt.Errorf("unsafe snapshot WIP worktree %q", workDir)
+	}
+	candidates, err := externalSnapshotRootCandidates(filepath.Clean(home), getenv)
+	if err != nil {
+		return nil, err
+	}
+	excluded := make(map[string]bool)
+	for _, candidate := range candidates {
+		if candidate.path == "" || !pathWithinRoot(workDir, candidate.path) {
+			continue
+		}
+		rootRelative, relErr := filepath.Rel(workDir, candidate.path)
+		if relErr != nil {
+			return nil, relErr
+		}
+		for sensitivePath := range snapshotRootExcludeFiles[candidate.logicalName] {
+			relativePath := filepath.ToSlash(filepath.Clean(filepath.Join(rootRelative, filepath.FromSlash(sensitivePath))))
+			if relativePath == "." || relativePath == ".." || strings.HasPrefix(relativePath, "../") {
+				return nil, fmt.Errorf("unsafe snapshot WIP exclusion %q", relativePath)
+			}
+			excluded[relativePath] = true
+		}
+	}
+	paths := mapKeys(excluded)
+	return paths, nil
+}
+
+func resetStandaloneSnapshotIndexPaths(ctx context.Context, workDir string, env, paths []string) error {
+	for _, path := range paths {
+		if _, err := runStandaloneGitCommand(ctx, workDir, env, "reset", "--", path); err != nil {
+			return fmt.Errorf("reset %q in temporary snapshot index: %w", path, err)
+		}
+	}
+	return nil
+}
+
+func snapshotPathSet(paths []string) map[string]bool {
+	set := make(map[string]bool, len(paths))
+	for _, path := range paths {
+		set[filepath.ToSlash(filepath.Clean(path))] = true
+	}
+	return set
 }
 
 // copyRepositoryIndex copies the repository's index file to a temp path so a
@@ -238,11 +322,26 @@ func copyRepositoryIndex(ctx context.Context, workDir string) (string, error) {
 }
 
 func createHomeTar(homeDirFn func() (string, error), entryThreshold, totalBudget int64) (string, []snapshotSkippedEntry, error) {
+	return createSessionStateTar(homeDirFn, entryThreshold, totalBudget, false)
+}
+
+// createSessionStateTar archives HOME plus any harness state root configured
+// outside HOME. External source paths are never serialized: they are mapped to
+// a fixed logical namespace and resolved again from the fresh runtime on restore.
+func createSessionStateTar(homeDirFn func() (string, error), entryThreshold, totalBudget int64, includeExternalRoots bool) (string, []snapshotSkippedEntry, error) {
 	home, err := homeDirFn()
 	if err != nil {
 		return "", nil, err
 	}
 	home = filepath.Clean(home)
+	roots := []snapshotArchiveRoot{{path: home}}
+	if includeExternalRoots {
+		externalRoots, rootsErr := resolveLocalExternalSnapshotRoots(home)
+		if rootsErr != nil {
+			return "", nil, rootsErr
+		}
+		roots = append(roots, externalRoots...)
+	}
 	out, err := os.CreateTemp("", "sam-session-home-*.tar")
 	if err != nil {
 		return "", nil, err
@@ -250,59 +349,89 @@ func createHomeTar(homeDirFn func() (string, error), entryThreshold, totalBudget
 	path := out.Name()
 	tw := tar.NewWriter(out)
 	var written int64
+	var entryCount int
 	var skipped []snapshotSkippedEntry
-	walkErr := filepath.WalkDir(home, func(path string, d os.DirEntry, err error) error {
-		if err != nil || path == home {
-			return nil
+	var walkErr error
+	for _, root := range roots {
+		if walkErr != nil {
+			break
 		}
-		rel, _ := filepath.Rel(home, path)
-		if shouldExcludeHomePath(rel) {
-			if d.IsDir() {
-				return filepath.SkipDir
-			}
-			return nil
+		info, statErr := os.Lstat(root.path)
+		if os.IsNotExist(statErr) {
+			continue
 		}
-		info, statErr := d.Info()
 		if statErr != nil {
-			return nil
+			walkErr = statErr
+			break
 		}
-		if info.Size() > entryThreshold {
-			skipped = append(skipped, snapshotSkippedEntry{Path: "~/" + rel, Reason: "entry exceeds size threshold", SizeBytes: info.Size()})
-			if d.IsDir() {
-				return filepath.SkipDir
+		if !info.IsDir() {
+			walkErr = fmt.Errorf("snapshot state root %q is not a directory", root.logicalName)
+			break
+		}
+		walkErr = filepath.WalkDir(root.path, func(path string, d os.DirEntry, walkPathErr error) error {
+			if walkPathErr != nil || path == root.path {
+				return walkPathErr
 			}
-			return nil
-		}
-		if !info.Mode().IsRegular() && !info.IsDir() {
-			skipped = append(skipped, snapshotSkippedEntry{Path: "~/" + rel, Reason: "unsupported home entry type"})
-			return nil
-		}
-		if !info.IsDir() && written+info.Size() > totalBudget {
-			skipped = append(skipped, snapshotSkippedEntry{Path: "~/" + rel, Reason: "snapshot budget exhausted", SizeBytes: info.Size()})
-			return nil
-		}
-		header, headerErr := tar.FileInfoHeader(info, "")
-		if headerErr != nil {
-			return nil
-		}
-		header.Name = rel
-		if err := tw.WriteHeader(header); err != nil {
-			return err
-		}
-		if info.Mode().IsRegular() {
-			f, openErr := os.Open(path)
-			if openErr != nil {
+			rel, relErr := filepath.Rel(root.path, path)
+			if relErr != nil {
+				return relErr
+			}
+			if shouldExcludeSnapshotRootPath(root.logicalName, rel) {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
 				return nil
 			}
-			n, copyErr := io.Copy(tw, f)
-			_ = f.Close()
-			written += n
-			if copyErr != nil {
-				return copyErr
+			entryInfo, entryErr := d.Info()
+			if entryErr != nil {
+				return entryErr
 			}
-		}
-		return nil
-	})
+			displayPath := snapshotDisplayPath(root.logicalName, rel)
+			if entryInfo.Size() > entryThreshold {
+				skipped = append(skipped, snapshotSkippedEntry{Path: displayPath, Reason: "entry exceeds size threshold", SizeBytes: entryInfo.Size()})
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if !entryInfo.Mode().IsRegular() && !entryInfo.IsDir() {
+				skipped = append(skipped, snapshotSkippedEntry{Path: displayPath, Reason: "unsupported home entry type"})
+				return nil
+			}
+			if !entryInfo.IsDir() && written+entryInfo.Size() > totalBudget {
+				skipped = append(skipped, snapshotSkippedEntry{Path: displayPath, Reason: "snapshot budget exhausted", SizeBytes: entryInfo.Size()})
+				return nil
+			}
+			entryCount++
+			if entryCount > defaultSnapshotMaxArchiveEntries {
+				return fmt.Errorf("snapshot HOME archive exceeds entry limit")
+			}
+			header, headerErr := tar.FileInfoHeader(entryInfo, "")
+			if headerErr != nil {
+				return headerErr
+			}
+			header.Name = snapshotArchiveName(root.logicalName, rel)
+			if err := tw.WriteHeader(header); err != nil {
+				return err
+			}
+			if entryInfo.Mode().IsRegular() {
+				f, openErr := os.Open(path)
+				if openErr != nil {
+					return openErr
+				}
+				n, copyErr := io.Copy(tw, f)
+				closeErr := f.Close()
+				written += n
+				if copyErr != nil {
+					return copyErr
+				}
+				if closeErr != nil {
+					return closeErr
+				}
+			}
+			return nil
+		})
+	}
 	closeErr := tw.Close()
 	fileCloseErr := out.Close()
 	if walkErr != nil || closeErr != nil || fileCloseErr != nil {
@@ -315,7 +444,108 @@ func createHomeTar(homeDirFn func() (string, error), entryThreshold, totalBudget
 		}
 		return "", skipped, fileCloseErr
 	}
+	if _, err := validateSnapshotHomeTar(path, entryThreshold, totalBudget); err != nil {
+		_ = os.Remove(path)
+		return "", skipped, fmt.Errorf("validate generated HOME archive: %w", err)
+	}
 	return path, skipped, nil
+}
+
+func resolveLocalExternalSnapshotRoots(home string) ([]snapshotArchiveRoot, error) {
+	candidates, err := externalSnapshotRootCandidates(home, os.Getenv)
+	if err != nil {
+		return nil, err
+	}
+	var roots []snapshotArchiveRoot
+	for _, candidate := range candidates {
+		if candidate.path == "" {
+			continue
+		}
+		candidate.path = filepath.Clean(candidate.path)
+		if !filepath.IsAbs(candidate.path) || pathWithinRoot(home, candidate.path) {
+			continue
+		}
+		roots = append(roots, candidate)
+	}
+	return roots, nil
+}
+
+func externalSnapshotRootCandidates(home string, getenv func(string) string) ([]snapshotArchiveRoot, error) {
+	dataHome := strings.TrimSpace(getenv("XDG_DATA_HOME"))
+	if dataHome == "" {
+		dataHome = filepath.Join(home, ".local", "share")
+	}
+	candidates := []snapshotArchiveRoot{
+		{logicalName: snapshotRootCodex, path: strings.TrimSpace(getenv("CODEX_HOME"))},
+		{logicalName: snapshotRootClaude, path: strings.TrimSpace(getenv("CLAUDE_CONFIG_DIR"))},
+		{logicalName: snapshotRootOpenCode, path: filepath.Join(dataHome, "opencode")},
+	}
+	for index := range candidates {
+		candidate := &candidates[index]
+		if candidate.path == "" {
+			continue
+		}
+		candidate.path = filepath.Clean(candidate.path)
+		if !filepath.IsAbs(candidate.path) || candidate.path == string(filepath.Separator) {
+			return nil, fmt.Errorf("unsafe %s snapshot state root %q", candidate.logicalName, candidate.path)
+		}
+	}
+	return candidates, nil
+}
+
+func pathWithinRoot(root, candidate string) bool {
+	rel, err := filepath.Rel(filepath.Clean(root), filepath.Clean(candidate))
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+func snapshotArchiveName(logicalName, rel string) string {
+	rel = filepath.ToSlash(filepath.Clean(rel))
+	if logicalName == "" {
+		return rel
+	}
+	return snapshotExternalRootsPrefix + "/" + logicalName + "/" + rel
+}
+
+func snapshotDisplayPath(logicalName, rel string) string {
+	if logicalName == "" {
+		return "~/" + filepath.ToSlash(rel)
+	}
+	return "$" + strings.ToUpper(logicalName) + "_STATE/" + filepath.ToSlash(rel)
+}
+
+func shouldExcludeSnapshotRootPath(logicalName, rel string) bool {
+	clean := filepath.ToSlash(filepath.Clean(rel))
+	if logicalName == "" {
+		return shouldExcludeHomePath(clean)
+	}
+	for _, prefix := range snapshotRootExcludePrefixes[logicalName] {
+		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
+			return true
+		}
+	}
+	return snapshotRootExcludeFiles[logicalName][clean]
+}
+
+var snapshotRootExcludePrefixes = map[string][]string{
+	snapshotRootCodex:    {"tmp"},
+	snapshotRootClaude:   {"debug"},
+	snapshotRootOpenCode: {"cache"},
+}
+
+var snapshotRootExcludeFiles = map[string]map[string]bool{
+	snapshotRootCodex: {
+		"auth.json":   true,
+		"config.toml": true,
+	},
+	snapshotRootClaude: {
+		".credentials.json": true,
+		"credentials.json":  true,
+	},
+	snapshotRootOpenCode: {
+		"auth.json":        true,
+		"credentials.json": true,
+		"providers.json":   true,
+	},
 }
 
 // homeExcludePrefixes are HOME-relative path prefixes whose entire subtree is
@@ -327,9 +557,13 @@ func createHomeTar(homeDirFn func() (string, error), entryThreshold, totalBudget
 // but not ".sshfoo" or ".config/gh-other".
 var homeExcludePrefixes = []string{
 	// Caches — bulky, re-fetchable.
-	".cache", ".npm", ".cargo", ".rustup", ".local", "node_modules", ".docker",
+	".cache", ".npm", ".cargo", ".rustup", ".local/bin", ".local/lib", "node_modules", ".docker",
+	".codex/tmp", ".claude/debug", ".oh-my-zsh", ".vscode-server",
 	// Credential-bearing paths — plaintext secrets must never be uploaded.
-	".ssh", ".aws", ".netrc", ".npmrc", ".config/gh",
+	".ssh", ".aws", ".netrc", ".npmrc", ".config/gh", ".kube", ".azure", ".config/gcloud",
+	// Reserved snapshot namespace. HOME content must never be able to masquerade
+	// as a control-plane-selected external harness root.
+	snapshotExternalRootsPrefix,
 }
 
 // homeExcludeFiles are exact HOME-relative files excluded from the tar. Their
@@ -339,6 +573,13 @@ var homeExcludePrefixes = []string{
 var homeExcludeFiles = map[string]bool{
 	".claude/.credentials.json": true,
 	".codex/auth.json":          true,
+	// Generated runtime configuration can contain callback-token URLs (Codex)
+	// or literal MCP bearer tokens (Vibe). It is regenerated from fresh control-
+	// plane credentials before the restored harness is loaded.
+	".codex/config.toml": true,
+	".vibe/config.toml":  true,
+	".git-credentials":   true,
+	".pypirc":            true,
 }
 
 func shouldExcludeHomePath(rel string) bool {

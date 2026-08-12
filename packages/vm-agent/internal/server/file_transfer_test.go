@@ -56,6 +56,35 @@ func TestFileDownloadWorkspaceExecArgs_DashSeparator(t *testing.T) {
 	}
 }
 
+func TestWorkspaceExecCommandWithEnvPassesContainerEnvironmentBeforeIdentity(t *testing.T) {
+	s := &Server{config: &config.Config{ContainerMode: true}}
+	cmd, err := s.workspaceExecCommandWithEnv(
+		context.Background(),
+		"abc123",
+		"node",
+		"/workspaces/repo",
+		[]string{"GIT_INDEX_FILE=/tmp/snapshot-index", "GIT_AUTHOR_NAME=SAM Snapshot"},
+		"git",
+		"write-tree",
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		dockerBinaryPath, "exec", "-i",
+		"-e", "GIT_INDEX_FILE=/tmp/snapshot-index",
+		"-e", "GIT_AUTHOR_NAME=SAM Snapshot",
+		"-u", "node", "-w", "/workspaces/repo",
+		"abc123", "git", "write-tree",
+	}
+	if strings.Join(cmd.Args, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("args = %#v, want %#v", cmd.Args, want)
+	}
+	if len(cmd.Env) != 0 {
+		t.Fatalf("docker exec environment leaked to host process: %#v", cmd.Env)
+	}
+}
+
 func assertCatDashSeparator(t *testing.T, args []string, filePath string) {
 	t.Helper()
 

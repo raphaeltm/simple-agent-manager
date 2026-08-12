@@ -15,6 +15,9 @@ import type {
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
 import { NodeAgentHttpError, nodeAgentRequest, sendPromptToAgentOnNode } from './node-agent';
+import * as projectDataService from './project-data';
+import { ensureSessionRecovery } from './session-recovery';
+import { markSessionSnapshotAwakeInPlace } from './session-snapshots';
 
 const log = createModuleLogger('vm_prompt_delivery_adapter');
 
@@ -60,6 +63,7 @@ export interface VmPromptDeliveryTarget {
   agentSessionId: string;
   userId: string;
   runtimeIdentity: string;
+  runtime: string;
 }
 
 type TargetResolution =
@@ -142,6 +146,9 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         runtimeIdentity: null,
         capabilities: null,
       };
+    }
+    if (target.runtime === 'cf-container') {
+      await this.commitContainerWake(target);
     }
     if (!capabilities.promptReceipts.supported && !input.allowLegacyVm) {
       return {
@@ -343,6 +350,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
               n.status AS node_status,
               n.health_status AS node_health_status,
               n.agent_version AS agent_version,
+              n.runtime AS node_runtime,
               a.id AS agent_session_id,
               a.status AS agent_session_status,
               a.updated_at AS agent_session_updated_at
@@ -350,7 +358,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
        LEFT JOIN nodes n ON n.id = w.node_id
        LEFT JOIN agent_sessions a ON a.workspace_id = w.id
        WHERE w.project_id = ? AND w.chat_session_id = ?
-       ORDER BY a.created_at DESC
+       ORDER BY w.updated_at DESC, a.created_at DESC
        LIMIT 1`
     )
       .bind(projectId, chatSessionId)
@@ -362,16 +370,35 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         node_status: string | null;
         node_health_status: string | null;
         agent_version: string | null;
+        node_runtime: string | null;
         agent_session_id: string | null;
         agent_session_status: string | null;
         agent_session_updated_at: string | null;
       }>();
 
     if (!row) {
+      const recovery = await ensureSessionRecovery(this.env, projectId, chatSessionId);
+      if (recovery.status === 'waking') {
+        return { kind: 'retry', reason: `Session is waking (${recovery.taskId})` };
+      }
       return {
         kind: 'failed',
         reason: 'terminal_target',
-        error: 'Target workspace no longer exists',
+        error: `Target workspace no longer exists (${recovery.reason})`,
+      };
+    }
+    if (
+      row.node_runtime !== 'cf-container' &&
+      ['sleeping', 'stopping', 'stopped', 'deleted', 'error'].includes(row.workspace_status)
+    ) {
+      const recovery = await ensureSessionRecovery(this.env, projectId, chatSessionId);
+      if (recovery.status === 'waking') {
+        return { kind: 'retry', reason: `Session is waking (${recovery.taskId})` };
+      }
+      return {
+        kind: 'failed',
+        reason: 'terminal_target',
+        error: `Target workspace is ${row.workspace_status} (${recovery.reason})`,
       };
     }
     if (['stopping', 'stopped', 'deleted', 'error'].includes(row.workspace_status)) {
@@ -429,8 +456,28 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
           row.agent_version ?? 'legacy',
           row.agent_session_updated_at ?? 'unknown',
         ].join(':'),
+        runtime: row.node_runtime ?? 'vm',
       },
     };
+  }
+
+  private async commitContainerWake(target: VmPromptDeliveryTarget): Promise<void> {
+    const task = await this.env.DATABASE.prepare(
+      `SELECT id FROM tasks WHERE workspace_id = ? ORDER BY updated_at DESC LIMIT 1`
+    )
+      .bind(target.workspaceId)
+      .first<{ id: string }>();
+    if (!task) return;
+    await Promise.all([
+      projectDataService.wakeSession(
+        this.env,
+        target.projectId,
+        target.chatSessionId,
+        target.workspaceId,
+        task.id
+      ),
+      markSessionSnapshotAwakeInPlace(this.env, target.chatSessionId, task.id, target.workspaceId),
+    ]);
   }
 
   private async getCapabilities(

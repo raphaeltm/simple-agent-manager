@@ -173,13 +173,21 @@ describe('cf-container runtime spike contracts', () => {
     expect(containerDo).toContain('override async onStop');
     expect(containerDo).toContain('override async onError');
     expect(containerDo).toContain('override async onActivityExpired');
-    expect(containerDo).toContain(
-      "await this.markRuntimeSleeping('Container idle timeout expired; container is sleeping.')"
+    expect(containerDo).toMatch(
+      /sleepResult\s*=\s*await this\.markRuntimeSleeping\(\s*'Container idle timeout expired; container is sleeping\.'\s*\)/
     );
+    expect(containerDo).toContain("if (sleepResult !== 'sleeping')");
+    expect(containerDo).toContain("if (sleepResult === 'aborted')");
+    expect(containerDo).toContain('await this.renewActivityTimeout()');
+    expect(containerDo).toContain('verifyRestorableSessionSnapshotArtifacts(this.env, snapshot)');
     expect(containerDo).toContain(
       "await this.ctx.storage.put('lifecycleStatus', 'sleeping' satisfies LifecycleStatus)"
     );
+    expect(containerDo).toContain(
+      "await this.ctx.storage.put('lifecycleStatus', 'sleep-preparing' satisfies LifecycleStatus)"
+    );
     expect(containerLifecycle).toContain("| 'sleeping'");
+    expect(containerLifecycle).toContain("| 'sleep-preparing'");
     expect(containerDo).toContain("status === 'sleeping' ? 'idle' : 'error'");
     expect(containerDo).toContain(
       "await this.ctx.storage.put('lifecycleStatus', 'launching' satisfies LifecycleStatus)"

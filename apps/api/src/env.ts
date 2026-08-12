@@ -203,10 +203,16 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES?: string; // Max individual file/dir included by vm-agent scanner (default: 52428800)
   SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS?: string; // No-progress upload/download watchdog window (default: 30000)
   SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES?: string; // Max snapshot control-plane JSON request size (default: 262144)
+  SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS?: string; // Max replacement-runtime wake attempts (default: 3)
+  SESSION_SLEEP_AFTER_MS?: string; // Idle duration before verified snapshot teardown (default: 3600000)
+  SESSION_SLEEP_SWEEP_BATCH_SIZE?: string; // Max due sleeps claimed per cron sweep (default: 10)
+  SESSION_SLEEP_RETRY_DELAY_MS?: string; // Delay after a fail-closed sleep attempt (default: 300000)
+  SESSION_SLEEP_MAX_ATTEMPTS?: string; // Max automatic sleep attempts before preserving compute (default: 3)
+  SESSION_SLEEP_CLAIM_LEASE_MS?: string; // Reclaim timeout for interrupted automatic sleep claims (default: 600000)
+  SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS?: string; // Reclaim timeout for interrupted replacement-runtime wake claims (default: 600000)
+  SESSION_LIFECYCLE_ERROR_MAX_LENGTH?: string; // Stored sleep/recovery diagnostic cap (default: 2048)
   SESSION_SNAPSHOT_PURGE_ENABLED?: string; // Kill switch: "false" disables expired snapshot row purge (default: enabled)
   SESSION_SNAPSHOT_PURGE_BATCH_SIZE?: string; // Max expired snapshot rows deleted per run (default: 250)
-  SESSION_SNAPSHOT_PURGE_INTERVAL_HOURS?: string; // Minimum hours between snapshot row purge runs (default: 24)
-  SESSION_SNAPSHOT_PURGE_LAST_RUN_KV_KEY?: string; // KV key for snapshot purge interval gating
   LIBRARY_PROJECT_DELETE_CLEANUP_BATCH_SIZE?: string; // R2 objects listed/deleted per project cleanup page (default: 1000)
   DEPLOY_ACME_EMAIL?: string; // Contact email for deployment-node ACME certificates
   DEPLOY_ACME_CA?: string; // ACME CA directory override for deployment nodes
@@ -543,7 +549,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MAILBOX_DELIVERY_POLL_INTERVAL_MS?: string; // DO alarm sweep interval (default: 30000)
   MAILBOX_MAX_MESSAGES_PER_PROJECT?: string; // Max active messages per project (default: 1000)
   MAILBOX_MESSAGE_MAX_LENGTH?: string; // Max message content length (default: 32768)
-  // Durable prompt delivery / checkpoint foundation (all execution features inert by default)
+  // Durable prompt delivery / checkpoint execution
   DURABLE_PROMPT_DELIVERY_ENABLED?: string;
   PROMPT_DELIVERY_LEGACY_VM_COMPAT_ENABLED?: string;
   PROMPT_DELIVERY_MAX_CANDIDATES_PER_ALARM?: string;

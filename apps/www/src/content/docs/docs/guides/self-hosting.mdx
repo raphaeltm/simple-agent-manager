@@ -240,9 +240,9 @@ Go to Actions → Deploy Production → Run workflow. Choose the `main` branch a
 The workflow:
 
 1. Validates configuration
-2. Provisions infrastructure via Pulumi (D1, KV, R2, DNS), including prefix-scoped R2 retention for session snapshots, private VM diagnostic evidence, one-day temporary uploads, and thirty-day TTS cache objects (`infra/resources/storage.ts:r2BucketLifecycle`)
-3. Deploys API Worker and Web UI
-4. Runs database migrations
+2. Provisions infrastructure via Pulumi (D1, KV, R2, DNS), including private VM diagnostic evidence, one-day temporary uploads, and thirty-day TTS cache objects (`infra/resources/storage.ts:r2BucketLifecycle`)
+3. Runs database migrations
+4. Deploys API Worker and Web UI
 5. Builds and uploads VM Agent binaries
 6. Runs health check
 
@@ -251,7 +251,10 @@ Before deploying the API Worker, the workflow reads its applied Durable Object m
 Pulumi also creates or updates the assets bucket lifecycle resource on every deploy.
 The defaults are `sessionSnapshotTtlDays=7`, `diagnosticIncidentTtlDays=7`,
 `tempUploadTtlDays=1`, and `ttsTtlDays=30`; each accepts a positive-integer Pulumi
-config override. There is deliberately no age-only rule for durable `library/` data or
+config override. The scheduled Worker owns session expiry at seven days of actual sleep,
+including chat terminalization and R2 deletion. Session objects deliberately have no
+age-only R2 lifecycle because their object age begins before sleep and must never shorten
+the restore window. There is likewise no age-only rule for durable `library/` data or
 release-referenced `compose-image-artifacts/`.
 
 If migration state cannot be read or does not match the checked-in history, deployment stops before Wrangler runs rather than risking migration replay or namespace replacement.

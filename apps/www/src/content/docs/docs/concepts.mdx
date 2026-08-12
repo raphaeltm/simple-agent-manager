@@ -9,11 +9,11 @@ import { Aside } from '@astrojs/starlight/components';
 
 A **workspace** is the environment an AI coding agent runs in: your repository, cloned and ready. In everyday use SAM provisions a workspace for you automatically when you start working in a project chat — you don't create one by hand.
 
-Every workspace has one or more agent chat sessions and its own lifecycle: `pending` → `creating` → `running` → `stopping` → `stopped`, plus `sleeping` and `recovery` on the Instant runtime.
+Every workspace has one or more agent chat sessions and its own lifecycle: `pending` → `creating` → `running` → `sleeping` → `recovery`, plus terminal stop and delete states. Sleeping is resumable for seven days; archive is terminal.
 
 A **VM workspace** additionally gives the agent a full Linux toolchain, Docker, and your `.devcontainer`; a browser-based terminal for hands-on work; and automatic port detection for dev servers (see below). An **Instant** workspace trades all of that for a start measured in seconds.
 
-Workspaces are **ephemeral** — they exist for a session of work and are cleaned up when done, so always push anything you want to keep.
+Workspace compute is **ephemeral**. Persistent sessions preserve the home directory and uncommitted repository state while sleeping, but that snapshot expires after seven days, so push anything you need to keep longer.
 
 ### Runtimes: Instant vs VM
 
@@ -26,7 +26,7 @@ A workspace runs in one of two places:
 
 Which one you get is an [agent profile](#agent-profiles) setting: a profile whose runtime is **Instant container** starts chats on Instant; everything else runs as a task on a VM. Instant needs no cloud provider credential, so it's how you work before connecting a cloud account.
 
-Instant sessions sleep when idle and are restored from a snapshot when they wake or when their container is reclaimed. See [Instant Sessions](/docs/guides/instant-sessions/).
+Instant and VM sessions sleep when idle and restore from a runtime-neutral snapshot on wake. A VM wake provisions a replacement workspace after the original compute is removed. See [Instant Sessions and persistent sleep](/docs/guides/instant-sessions/).
 
 ### Workspace Profiles
 

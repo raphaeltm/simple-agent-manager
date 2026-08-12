@@ -16,6 +16,7 @@ import {
   callbackTokenMatchesWorkspace,
 } from '../../services/node-callback-auth';
 import * as projectDataService from '../../services/project-data';
+import { cancelScheduledSessionSleep } from '../../services/session-snapshots';
 import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../services/vm-agent-container';
 import {
   callbackTokenIssuedAtMs,
@@ -84,6 +85,12 @@ agentActivityCallbackRoute.post(
     const existing = await projectDataService.getAcpSession(c.env, projectId, sessionId);
     if (!existing) {
       throw errors.notFound('ACP session not found');
+    }
+    if (body.activity === 'prompting') {
+      await cancelScheduledSessionSleep(
+        drizzle(c.env.DATABASE, { schema }),
+        existing.chatSessionId
+      );
     }
 
     // Authoritative auth: bind the token's OWN identity (payload.workspace) to the session's
@@ -243,7 +250,7 @@ agentActivityCallbackRoute.post(
           .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
           .where(eq(schema.workspaces.id, existing.workspaceId))
           .get();
-        if (workspace?.runtime === 'cf-container' && workspace.chatSessionId) {
+        if (workspace?.runtime && workspace.chatSessionId) {
           await hibernateAgentSessionOnNode(
             existing.nodeId,
             existing.workspaceId,
@@ -252,7 +259,7 @@ agentActivityCallbackRoute.post(
             workspace.userId,
             {
               chatSessionId: workspace.chatSessionId,
-              runtime: 'cf-container',
+              runtime: workspace.runtime,
               agentType: body.agentType ?? existing.agentType ?? undefined,
             }
           ).catch((err) => {

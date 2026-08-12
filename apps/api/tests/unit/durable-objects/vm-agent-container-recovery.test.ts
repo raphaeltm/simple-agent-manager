@@ -618,6 +618,63 @@ describe('VmAgentContainer wake-path lifecycle status parity', () => {
 });
 
 describe('VmAgentContainer replacement classification', () => {
+  it('returns retryable recovery while an idle sleep commit is in flight', async () => {
+    const { fake } = makeRecoveryFake({ lifecycle: 'sleep-preparing' });
+
+    const result = (await privateContainer.prepareForRequest.call(fake)) as {
+      ok: boolean;
+      status: string;
+      code?: string;
+    };
+
+    expect(result).toEqual({
+      ok: false,
+      status: 'recovering',
+      code: 'RUNTIME_RECOVERING',
+      message: expect.any(String),
+    });
+    expect(fake.startRuntime).not.toHaveBeenCalled();
+  });
+
+  it('performs an explicit container sleep without recursively committing snapshot state', async () => {
+    const { fake, values } = makeRecoveryFake({ lifecycle: 'running' });
+    const sleepForUser = (
+      VmAgentContainer.prototype as unknown as {
+        sleepForUser: (this: unknown) => Promise<void>;
+      }
+    ).sleepForUser;
+
+    await sleepForUser.call(fake);
+
+    expect(fake.markActiveWorkEnded).toHaveBeenCalledWith('user_sleep');
+    expect(values.get('lifecycleStatus')).toBe('sleeping');
+    expect(fake.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['aborted', 'running'],
+    ['retry', 'sleep-preparing'],
+  ] as const)(
+    'keeps compute live after an idle sleep %s and leaves lifecycle %s',
+    async (sleepResult, expectedLifecycle) => {
+      const { fake, values } = makeRecoveryFake({ lifecycle: 'running' });
+      const markRuntimeSleeping = vi.fn().mockResolvedValue(sleepResult);
+      const renewActivityTimeout = vi.fn().mockResolvedValue(undefined);
+      Object.assign(fake, { markRuntimeSleeping, renewActivityTimeout });
+      const onActivityExpired = (
+        VmAgentContainer.prototype as unknown as {
+          onActivityExpired: (this: unknown) => Promise<void>;
+        }
+      ).onActivityExpired;
+
+      await onActivityExpired.call(fake);
+
+      expect(values.get('lifecycleStatus')).toBe(expectedLifecycle);
+      expect(renewActivityTimeout).toHaveBeenCalledTimes(1);
+      expect(fake.stop).not.toHaveBeenCalled();
+    }
+  );
+
   it('classifies duplicate runtime_signal callbacks once without calling them rollout', async () => {
     const { fake, values } = makeRecoveryFake({ lifecycle: 'running' });
     const onStop = (

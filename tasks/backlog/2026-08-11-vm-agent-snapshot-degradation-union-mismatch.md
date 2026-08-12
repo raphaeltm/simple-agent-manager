@@ -84,14 +84,14 @@ data problem.
 
 ## Acceptance Criteria
 
-- [ ] `SessionSnapshotDegradation` (`apps/api/src/services/session-snapshots.ts:20`)
+- [x] `SessionSnapshotDegradation` (`apps/api/src/services/session-snapshots.ts:20`)
       includes `'agent-context-skipped'`.
-- [ ] The route's `DEGRADATIONS` Set (`apps/api/src/routes/workspaces/session-snapshots.ts:30-35`)
+- [x] The route's `DEGRADATIONS` Set (`apps/api/src/routes/workspaces/session-snapshots.ts:30-35`)
       includes `'agent-context-skipped'`.
-- [ ] `SessionSnapshotManifestSchema`'s `degradation` picklist
+- [x] `SessionSnapshotManifestSchema`'s `degradation` picklist
       (`apps/api/src/routes/workspaces/session-snapshots.ts:56`) includes
       `'agent-context-skipped'`.
-- [ ] Regression test: POST `/session-snapshot/complete` with
+- [x] Regression test: POST `/session-snapshot/complete` with
       `degradation: 'agent-context-skipped'` (both at the top level and nested
       in `manifest.degradation`) returns 200, not 400, and the row persists
       with that degradation value.

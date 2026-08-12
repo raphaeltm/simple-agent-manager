@@ -38,7 +38,7 @@ import * as messagePersistence from './message-persistence';
 import * as messages from './messages';
 import * as missionState from './missions';
 import * as policies from './policies';
-import type { AcceptedPromptDelivery,AcceptPromptDeliveryInput } from './prompt-delivery';
+import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
 import * as reconciliation from './reconciliation';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
@@ -170,6 +170,28 @@ export class ProjectData extends DurableObject<Env> {
     this.broadcastEvent('session.stopped', { sessionId }, sessionId);
   }
 
+  async sleepSession(sessionId: string): Promise<boolean> {
+    const updated = sessions.sleepSession(this.sql, sessionId);
+    if (updated) {
+      this.scheduleSummarySync();
+      this.broadcastEvent('session.updated', { sessionId, status: 'sleeping' }, sessionId);
+    }
+    return updated;
+  }
+
+  async wakeSession(sessionId: string, workspaceId: string, taskId: string): Promise<boolean> {
+    const updated = sessions.wakeSession(this.sql, sessionId, workspaceId, taskId);
+    if (updated) {
+      this.scheduleSummarySync();
+      this.broadcastEvent(
+        'session.updated',
+        { sessionId, workspaceId, taskId, status: 'active' },
+        sessionId
+      );
+    }
+    return updated;
+  }
+
   async failSession(sessionId: string, errorMessage: string | null = null): Promise<void> {
     const result = sessions.failSession(this.sql, sessionId);
     if (result) {
@@ -233,9 +255,7 @@ export class ProjectData extends DurableObject<Env> {
     );
   }
 
-  async acceptPromptDelivery(
-    input: AcceptPromptDeliveryInput,
-  ): Promise<AcceptedPromptDelivery> {
+  async acceptPromptDelivery(input: AcceptPromptDeliveryInput): Promise<AcceptedPromptDelivery> {
     return durability.acceptPromptDelivery(this.sql, this.env, this.durabilityHooks(), input);
   }
 
@@ -640,12 +660,13 @@ export class ProjectData extends DurableObject<Env> {
     return durability.checkpointEpisodeReads.list(this.sql, sessionId, limit);
   }
 
-  transitionCheckpointEpisode(
-    episodeId: string,
-    input: CheckpointEpisodeTransitionInput,
-  ) {
+  transitionCheckpointEpisode(episodeId: string, input: CheckpointEpisodeTransitionInput) {
     return durability.transitionCheckpointEpisode(
-      this.sql, this.env, this.durabilityHooks(), episodeId, input,
+      this.sql,
+      this.env,
+      this.durabilityHooks(),
+      episodeId,
+      input
     );
   }
 

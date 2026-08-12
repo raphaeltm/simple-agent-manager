@@ -1,6 +1,6 @@
 ---
 title: Instant Sessions
-description: How SAM's container-backed Instant sessions start, sleep, wake, and recover — and when SAM uses them instead of a cloud VM.
+description: How SAM's container-backed Instant sessions work, and how persistent sleep, wake, and recovery behave on both Instant and VM runtimes.
 ---
 
 SAM can run an agent in one of two places:
@@ -10,7 +10,7 @@ SAM can run an agent in one of two places:
 | **Instant** (Cloudflare Container) | A container that runs on Cloudflare's network. No cloud account needed.  | Seconds            |
 | **VM workspace**                   | A full cloud VM on your own provider account, with your `.devcontainer`. | A minute or two    |
 
-This page covers the **Instant** runtime: when SAM chooses it, what it can and can't do, and — most importantly — what you see and what you should do when an Instant session sleeps, wakes, or is interrupted.
+This page covers the **Instant** runtime and the persistent-session lifecycle shared by Instant and VM-backed conversations: snapshots, sleep, wake, and recovery.
 
 For the VM path, see [Creating Workspaces](/docs/guides/creating-workspaces/).
 
@@ -31,17 +31,17 @@ The practical trade: an Instant session needs **no cloud provider credential**, 
 
 ## What you give up, and what you gain
 
-|                                   | Instant                                            | VM workspace                        |
-| --------------------------------- | -------------------------------------------------- | ----------------------------------- |
-| Your own cloud credential needed  | No                                                 | Yes                                 |
-| Start time                        | Seconds                                            | Minutes                             |
-| Repository clone                  | Yes — partial clone by default                     | Yes                                 |
-| SAM MCP tools                     | Yes                                                | Yes                                 |
-| Your `.devcontainer`              | Not built — always a lightweight environment       | Built with the `full` profile       |
-| Toolchain                         | `git`, `gh`, `curl`, `jq`, `uv`, Node + agent CLIs | Whatever your devcontainer installs |
-| Docker inside the workspace       | No                                                 | Yes                                 |
-| Automatic port detection/exposure | No                                                 | Yes                                 |
-| Survives a runtime restart        | Yes — via snapshot restore, see below              | Yes — the node stays up             |
+|                                   | Instant                                            | VM workspace                                  |
+| --------------------------------- | -------------------------------------------------- | --------------------------------------------- |
+| Your own cloud credential needed  | No                                                 | Yes                                           |
+| Start time                        | Seconds                                            | Minutes                                       |
+| Repository clone                  | Yes — partial clone by default                     | Yes                                           |
+| SAM MCP tools                     | Yes                                                | Yes                                           |
+| Your `.devcontainer`              | Not built — always a lightweight environment       | Built with the `full` profile                 |
+| Toolchain                         | `git`, `gh`, `curl`, `jq`, `uv`, Node + agent CLIs | Whatever your devcontainer installs           |
+| Docker inside the workspace       | No                                                 | Yes                                           |
+| Automatic port detection/exposure | No                                                 | Yes                                           |
+| Survives runtime teardown         | Yes — via snapshot restore, see below              | Yes — via snapshot and replacement VM restore |
 
 Instant is the right choice for conversation, planning, code reading, and focused edits. Reach for a VM when the agent has to build your stack, run your test suite, start services, or use Docker.
 
@@ -70,15 +70,19 @@ Two independent things decide this, and it's worth knowing which is which:
 - **The branch depends on how the work was started.** Only a composer chat on an Instant profile skips branch creation — a composer chat on any other profile is submitted as a task, and gets one. Anything submitted as a task — or dispatched with `dispatch_task`, on either runtime — gets an output branch, whichever mode it runs in.
 - **The push depends on task mode.** Conversation mode has no git lifecycle at all. Selecting the Instant runtime on a profile sets conversation mode, and so does choosing the **Lightweight** workspace profile — so a Lightweight submitted task gets a branch with nothing pushed to it.
 
-So if you want an Instant chat's work to survive, **ask the agent to commit and push it to a branch**, or run the work as a task in task mode. Don't assume a PR is coming.
+Persistent-session snapshots retain uncommitted work for the seven-day sleep window. If you need a durable record beyond that window, **ask the agent to commit and push it to a branch**, or run the work as a task in task mode. Don't assume a PR is coming.
 
 See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands) for the task-mode behavior.
 
 ## Sleep and wake
 
-An Instant session **sleeps** after a period of inactivity (`CF_CONTAINER_SLEEP_AFTER`, one hour by default) instead of being destroyed. The idle clock only counts genuine inactivity: while an agent turn is running, SAM keeps pushing the sleep deadline back so a long piece of work is never cut off mid-flight (bounded by `CF_CONTAINER_ACTIVE_WORK_MAX_MS`, two hours by default).
+After an agent turn becomes idle, SAM writes a best-effort checkpoint. After one hour of inactivity, it writes and verifies a final checkpoint and marks the session **sleeping**. Instant uses `CF_CONTAINER_SLEEP_AFTER`; VM sessions use `SESSION_SLEEP_AFTER_MS`. The idle clock only counts genuine inactivity, so an active turn is not intentionally cut off.
 
-Sending a message to a sleeping session wakes it. Waking is not instant: SAM has to start a fresh container and restore the session's saved state before your message can be delivered. During that window you'll see:
+Sending a message in the same chat wakes it. Waking is not instant: SAM has to start runtime compute, restore the saved home directory, repository work in progress, and exact harness session, and only then deliver the queued message. Instant starts a fresh container; a VM session provisions a replacement workspace because the original workspace may already have been deleted.
+
+SAM tears VM compute down only after it has re-read a complete, non-degraded snapshot from durable metadata. A failed or incomplete final snapshot leaves the workspace running and records a retryable error.
+
+During an Instant wake you may see:
 
 > **Waking and restoring the Instant session. Wait for restore to finish, then send your message.**
 
@@ -86,7 +90,7 @@ Wait for it to clear rather than resending — the wake has a bounded budget (`C
 
 ## What gets restored
 
-Containers are not permanent. Cloudflare can reclaim one at any time — during a platform rollout, on sleep, or on an unexpected failure. SAM handles this by keeping a **session snapshot** so the agent can pick up roughly where it left off rather than starting from zero.
+Runtime compute is not the durable session. Cloudflare can reclaim an Instant container, and SAM intentionally stops and later deletes sleeping VM workspaces. SAM keeps a **session snapshot** in R2 so either runtime can continue where it left off.
 
 A snapshot captures:
 
@@ -96,13 +100,13 @@ A snapshot captures:
 A snapshot deliberately **excludes**:
 
 - **Credential files** — `.ssh`, `.aws`, `.netrc`, `.npmrc`, `.config/gh`, `.claude/.credentials.json`, and `.codex/auth.json` are never uploaded. Snapshots live in object storage, so plaintext secrets must never enter them. Credentials are re-provisioned fresh from the control plane on restore, so nothing is lost by excluding them (`homeExcludePrefixes` and `homeExcludeFiles` in `packages/vm-agent/internal/server/session_snapshot_archive.go`).
-- **Re-fetchable caches and tool installs** — `.cache`, `.npm`, `.cargo`, `.rustup`, `.local`, `.docker`, and `node_modules`. Note that `.local` is where `pip install --user`, `pipx`, and many CLI installers put binaries, so **a tool the agent installed mid-session will not survive a wake**. If the agent needs a tool, expect it to reinstall after a restore — or use a VM workspace, where your `.devcontainer` installs it once.
-- **Files git ignores.** Work-in-progress capture is driven by git, so anything in `.gitignore` — a local `.env`, a virtualenv, build output — is not captured. Restoring gives you back tracked and untracked-but-not-ignored files only.
+- **Re-fetchable caches and tool installs** — `.cache`, `.npm`, `.cargo`, `.rustup`, `.local/bin`, `.local/lib`, `.docker`, `node_modules`, editor servers, and temporary agent debug data. Harness state under `.local/share`, `.claude`, and `.codex` remains eligible; generated agent configuration and credential files are recreated from the control plane on restore.
+- **Ordinary files git ignores.** Work-in-progress capture is driven by git, so a local `.env`, virtualenv, or build output is not captured. The exception is an agent harness data root such as `CODEX_HOME` when it sits outside your home directory: SAM captures its non-credential session state in a reserved snapshot namespace so the conversation can resume.
 
 :::caution
 Three limits are worth planning around, because SAM does not currently surface any of them in the UI:
 
-- **Snapshots expire after 7 days** (`SESSION_SNAPSHOT_TTL_DAYS`). Coming back to a two-week-old sleeping chat gets you the degraded path, not your work.
+- **Snapshots expire after 7 days of sleep** (`SESSION_SNAPSHOT_TTL_DAYS`). Expiry deletes the R2 artifacts and makes the chat terminal rather than silently starting a blank agent.
 - **Size is capped** at 100 MB, with any single file over 50 MB skipped (`SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`, `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`). The repository bundle is captured first and takes what it needs; your home directory gets whatever budget is left, so a large working tree can crowd out the agent's own state. Skipped content is recorded server-side but you are not told about it.
 - **A repository mid-merge is skipped entirely.** If a merge, rebase, cherry-pick, or revert is in progress when the runtime goes away, none of the repository work in progress is captured.
 
@@ -122,7 +126,7 @@ The chat itself is the reliable signal. Find what you're seeing in this table, t
 
 Anything else — including a message that delivery "could not be confirmed" — means SAM couldn't classify the failure. Treat it like the interrupted case: check before you resend.
 
-Don't read too much into the status badges on the **Nodes** and **Workspaces** pages while this is happening. A sleeping Instant session shows **Unknown** there rather than a "Sleeping" label, and a sleeping node also shows **Unhealthy** beside it. Both are cosmetic — sending a message still wakes the session.
+The chat lifecycle is authoritative while a wake is in progress. A VM wake can briefly show a deleted original workspace and a replacement workspace being provisioned; the accepted follow-up stays queued until strict restore succeeds.
 
 :::note
 The **Recovery** badge and the chat header's **Recovery container** label are shared with an unrelated VM failure mode: a `.devcontainer` build that failed and fell back to a plain container. The header's tooltip describes that case ("check Boot Logs for the devcontainer error output"), so on an Instant session it is misleading — there is no devcontainer and nothing in Boot Logs to find. Go by the chat banner instead.
@@ -180,9 +184,12 @@ Launching an Instant session takes several steps. SAM does the bookkeeping up fr
 | Behavior                                           | Default     | Setting                                    |
 | -------------------------------------------------- | ----------- | ------------------------------------------ |
 | Idle before sleeping                               | 1 hour      | `CF_CONTAINER_SLEEP_AFTER`                 |
+| VM idle before sleeping                            | 1 hour      | `SESSION_SLEEP_AFTER_MS`                   |
+| Completed task before sleeping                     | Immediate   | task-completion lifecycle                  |
 | How long active work can hold sleep off            | 2 hours     | `CF_CONTAINER_ACTIVE_WORK_MAX_MS`          |
 | Max wake + restore time                            | 2 minutes   | `CF_CONTAINER_WAKE_TIMEOUT_MS`             |
 | Snapshot restore attempts before the session fails | 2           | `CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`       |
+| Replacement-VM wake attempts                       | 3           | `SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS`   |
 | Start budget (includes repo clone)                 | 2 minutes   | `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` |
 | Repository clone filter                            | `blob:none` | `CF_CONTAINER_CLONE_FILTER`                |
 | Snapshot retention                                 | 7 days      | `SESSION_SNAPSHOT_TTL_DAYS`                |

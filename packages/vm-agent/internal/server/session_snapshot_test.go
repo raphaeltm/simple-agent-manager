@@ -4,12 +4,18 @@ import (
 	"archive/tar"
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -122,15 +128,16 @@ func TestSnapshotHarnessResumeIdentity(t *testing.T) {
 			wantErr:   true,
 		},
 		{
-			name: "rejects agent session mismatch",
+			name: "allows replacement control session while restoring saved harness",
 			manifest: &snapshotManifest{
 				AgentSessionID: "agent-session-other",
 				AcpSessionID:   "acp-session-1",
 				AgentType:      "openai-codex",
 			},
-			sessionID: "agent-session-1",
-			agentType: "openai-codex",
-			wantErr:   true,
+			sessionID:     "agent-session-1",
+			agentType:     "openai-codex",
+			wantACP:       "acp-session-1",
+			wantAgentType: "openai-codex",
 		},
 		{
 			name: "rejects agent type mismatch",
@@ -164,6 +171,328 @@ func TestSnapshotHarnessResumeIdentity(t *testing.T) {
 	}
 }
 
+func TestBuildContainerHomeArchiveList(t *testing.T) {
+	inventory := []byte(strings.Join([]string{
+		"d", "0", "700", ".codex",
+		"f", "7", "600", ".codex/session.jsonl",
+		"f", "8", "600", ".codex/auth.json",
+		"f", "8", "600", ".codex/config.toml",
+		"d", "0", "755", ".cache",
+		"f", "5", "600", ".cache/tool",
+		"f", "12", "600", "large.bin",
+		"l", "4", "777", "linked",
+		"f", "4", "600", "notes.txt",
+		"",
+	}, "\x00"))
+
+	fileList, skipped, selectedBytes, err := buildContainerHomeArchiveList(inventory, 10, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ".codex\x00.codex/session.jsonl\x00notes.txt\x00"
+	if string(fileList) != want {
+		t.Fatalf("archive list = %q, want %q", fileList, want)
+	}
+	if selectedBytes != 11 {
+		t.Fatalf("selected bytes = %d, want 11", selectedBytes)
+	}
+	if len(skipped) != 2 {
+		t.Fatalf("skipped = %#v, want large and symlink entries", skipped)
+	}
+	if skipped[0].Path != "~/large.bin" || skipped[1].Path != "~/linked" {
+		t.Fatalf("skipped = %#v", skipped)
+	}
+}
+
+func TestBuildContainerHomeArchiveListRejectsEntryFlood(t *testing.T) {
+	var inventory bytes.Buffer
+	for index := 0; index <= defaultSnapshotMaxArchiveEntries; index++ {
+		inventory.WriteString("f\x001\x00600\x00entry-")
+		inventory.WriteString(strconv.Itoa(index))
+		inventory.WriteByte(0)
+	}
+	if _, _, _, err := buildContainerHomeArchiveList(inventory.Bytes(), 10, 1<<30); err == nil || !strings.Contains(err.Error(), "entry limit") {
+		t.Fatalf("error = %v, want entry limit rejection", err)
+	}
+}
+
+func TestCappedSnapshotBuffersStopGrowth(t *testing.T) {
+	buffer := &cappedBuffer{maxBytes: 4}
+	if n, err := buffer.Write([]byte("overflow")); err != nil || n != len("overflow") {
+		t.Fatalf("buffer write = (%d, %v)", n, err)
+	}
+	if !buffer.exceeded || buffer.buffer.Len() != 4 {
+		t.Fatalf("buffer state = exceeded %v, bytes %d", buffer.exceeded, buffer.buffer.Len())
+	}
+	path := filepath.Join(t.TempDir(), "artifact")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := &cappedFileWriter{file: file, remaining: 4}
+	if _, err := writer.Write([]byte("overflow")); !errors.Is(err, errSnapshotArtifactLimit) {
+		t.Fatalf("file writer error = %v, want artifact limit", err)
+	}
+	_ = file.Close()
+	if info, err := os.Stat(path); err != nil || info.Size() != 4 {
+		t.Fatalf("bounded artifact size = %v, %v", info, err)
+	}
+}
+
+func TestValidateSnapshotHomeTarRejectsUnsafeEntries(t *testing.T) {
+	tests := []struct {
+		name           string
+		header         tar.Header
+		body           string
+		entryThreshold int64
+		totalBudget    int64
+	}{
+		{
+			name:           "path traversal",
+			header:         tar.Header{Name: "../outside", Mode: 0o600, Typeflag: tar.TypeReg, Size: 1},
+			body:           "x",
+			entryThreshold: 10,
+			totalBudget:    10,
+		},
+		{
+			name:           "credential file",
+			header:         tar.Header{Name: ".codex/auth.json", Mode: 0o600, Typeflag: tar.TypeReg, Size: 1},
+			body:           "x",
+			entryThreshold: 10,
+			totalBudget:    10,
+		},
+		{
+			name:           "generated runtime config",
+			header:         tar.Header{Name: ".vibe/config.toml", Mode: 0o600, Typeflag: tar.TypeReg, Size: 1},
+			body:           "x",
+			entryThreshold: 10,
+			totalBudget:    10,
+		},
+		{
+			name:           "symbolic link",
+			header:         tar.Header{Name: "link", Mode: 0o777, Typeflag: tar.TypeSymlink, Linkname: "/tmp"},
+			entryThreshold: 10,
+			totalBudget:    10,
+		},
+		{
+			name:           "hard link",
+			header:         tar.Header{Name: "hard", Mode: 0o600, Typeflag: tar.TypeLink, Linkname: "target"},
+			entryThreshold: 10,
+			totalBudget:    10,
+		},
+		{
+			name:           "entry threshold",
+			header:         tar.Header{Name: "large", Mode: 0o600, Typeflag: tar.TypeReg, Size: 2},
+			body:           "xx",
+			entryThreshold: 1,
+			totalBudget:    10,
+		},
+		{
+			name:           "total budget",
+			header:         tar.Header{Name: "large", Mode: 0o600, Typeflag: tar.TypeReg, Size: 2},
+			body:           "xx",
+			entryThreshold: 10,
+			totalBudget:    1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "home.tar")
+			file, err := os.Create(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writer := tar.NewWriter(file)
+			if err := writer.WriteHeader(&tt.header); err != nil {
+				t.Fatal(err)
+			}
+			if tt.body != "" {
+				if _, err := writer.Write([]byte(tt.body)); err != nil {
+					t.Fatal(err)
+				}
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := file.Close(); err != nil {
+				t.Fatal(err)
+			}
+
+			if _, err := validateSnapshotHomeTar(path, tt.entryThreshold, tt.totalBudget); err == nil {
+				t.Fatal("validateSnapshotHomeTar returned nil error")
+			}
+		})
+	}
+}
+
+func TestValidateSnapshotHomeTarAcceptsHarnessState(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "home.tar")
+	file, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	writer := tar.NewWriter(file)
+	writeTarFile(t, writer, ".codex/sessions/session.jsonl", "remember me")
+	writeTarFile(t, writer, ".local/share/opencode/session.json", "remember me too")
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if err := file.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	names, err := validateSnapshotHomeTar(path, 1024, 2048)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsString(names, ".codex/sessions/session.jsonl") ||
+		!containsString(names, ".local/share/opencode/session.json") {
+		t.Fatalf("validated names = %#v", names)
+	}
+}
+
+func TestValidateSnapshotHomeTarRejectsReservedRootAbuseAndConflicts(t *testing.T) {
+	tests := []struct {
+		name    string
+		headers []tar.Header
+	}{
+		{
+			name:    "unknown reserved root",
+			headers: []tar.Header{{Name: snapshotExternalRootsPrefix + "/unknown/state", Mode: 0o600, Typeflag: tar.TypeReg, Size: 1}},
+		},
+		{
+			name: "duplicate normalized path",
+			headers: []tar.Header{
+				{Name: "notes/../state", Mode: 0o600, Typeflag: tar.TypeReg, Size: 1},
+				{Name: "state", Mode: 0o600, Typeflag: tar.TypeReg, Size: 1},
+			},
+		},
+		{
+			name: "regular file conflicts with prior child",
+			headers: []tar.Header{
+				{Name: "parent/child", Mode: 0o600, Typeflag: tar.TypeReg, Size: 1},
+				{Name: "parent", Mode: 0o600, Typeflag: tar.TypeReg, Size: 1},
+			},
+		},
+		{
+			name:    "external credential",
+			headers: []tar.Header{{Name: snapshotExternalRootsPrefix + "/codex/auth.json", Mode: 0o600, Typeflag: tar.TypeReg, Size: 1}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "state.tar")
+			file, err := os.Create(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writer := tar.NewWriter(file)
+			for index := range test.headers {
+				header := test.headers[index]
+				if err := writer.WriteHeader(&header); err != nil {
+					t.Fatal(err)
+				}
+				if header.Size > 0 {
+					if _, err := writer.Write(bytes.Repeat([]byte{'x'}, int(header.Size))); err != nil {
+						t.Fatal(err)
+					}
+				}
+			}
+			if err := writer.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if err := file.Close(); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := validateSnapshotHomeTar(path, 1024, 4096); err == nil {
+				t.Fatal("validateSnapshotHomeTar returned nil error")
+			}
+		})
+	}
+}
+
+func TestContainerSnapshotTarDereferencesHardLinksAndNamespacesExternalRoot(t *testing.T) {
+	args := containerSnapshotTarArgs(
+		snapshotArchiveRoot{logicalName: snapshotRootCodex, path: "/workspace/project/.codex"},
+		"-rf",
+		"/tmp/state.tar",
+	)
+	joined := strings.Join(args, "\x00")
+	for _, required := range []string{
+		"--hard-dereference",
+		"--transform\x00s,^," + snapshotExternalRootsPrefix + "/codex/,",
+	} {
+		if !strings.Contains(joined, required) {
+			t.Fatalf("tar args = %#v, missing %q", args, required)
+		}
+	}
+}
+
+func TestUploadSnapshotFileSendsPrecomputedChecksum(t *testing.T) {
+	body := []byte("persistent session state")
+	expectedSum := sha256.Sum256(body)
+	expectedSHA := hex.EncodeToString(expectedSum[:])
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("X-SAM-Content-SHA256"); got != expectedSHA {
+			t.Errorf("X-SAM-Content-SHA256 = %q, want %q", got, expectedSHA)
+		}
+		got, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Error(err)
+		}
+		if !bytes.Equal(got, body) {
+			t.Errorf("uploaded body = %q, want %q", got, body)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+	path := filepath.Join(t.TempDir(), "state.tar")
+	if err := os.WriteFile(path, body, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{config: &config.Config{ControlPlaneURL: server.URL}}
+	size, digest, err := s.uploadSnapshotFile(context.Background(), server.URL, path, "token", time.Second)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if size != int64(len(body)) || digest != expectedSHA {
+		t.Fatalf("upload result = (%d, %q), want (%d, %q)", size, digest, len(body), expectedSHA)
+	}
+}
+
+func TestCompleteSnapshotSendsPreparedGeneration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/workspaces/workspace-1/session-snapshot/complete" {
+			t.Fatalf("request path = %q", r.URL.Path)
+		}
+		var payload map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if got := payload["generation"]; got != "generation-1" {
+			t.Errorf("generation = %#v, want generation-1", got)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"status":"available"}`))
+	}))
+	defer server.Close()
+	s := &Server{config: &config.Config{ControlPlaneURL: server.URL}}
+	manifest := snapshotManifest{
+		Version:       1,
+		ChatSessionID: "chat-1",
+		WorkspaceID:   "workspace-1",
+		Status:        "available",
+		Degradation:   "none",
+		Skipped:       []snapshotSkippedEntry{},
+		Artifacts:     map[string]snapshotArtifact{},
+		CreatedAt:     time.Now().UTC().Format(time.RFC3339),
+	}
+	if err := s.completeSnapshot(context.Background(), "workspace-1", "agent-1", "chat-1", "vm", "generation-1", "callback-token", manifest); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestDownloadAndExtractTarRejectsPathTraversal(t *testing.T) {
 	home := t.TempDir()
 	outside := filepath.Join(t.TempDir(), "outside.txt")
@@ -185,12 +514,12 @@ func TestDownloadAndExtractTarRejectsPathTraversal(t *testing.T) {
 	defer server.Close()
 
 	s := &Server{config: &config.Config{ControlPlaneURL: server.URL}}
-	if err := s.downloadAndExtractTar(context.Background(), "/artifact", "token", time.Second); err != nil {
-		t.Fatal(err)
+	if err := s.downloadAndExtractTar(context.Background(), "/artifact", "token", time.Second); err == nil {
+		t.Fatal("downloadAndExtractTar returned nil error for traversal archive")
 	}
 
-	if got, err := os.ReadFile(filepath.Join(home, "session.jsonl")); err != nil || string(got) != "inside" {
-		t.Fatalf("inside file = %q, %v; want inside", got, err)
+	if _, err := os.Stat(filepath.Join(home, "session.jsonl")); !os.IsNotExist(err) {
+		t.Fatalf("partial extraction occurred before validation: %v", err)
 	}
 	if _, err := os.Stat(outside); !os.IsNotExist(err) {
 		t.Fatalf("outside file stat err = %v, want not exist", err)

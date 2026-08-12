@@ -540,7 +540,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     // Update D1 workspace status to 'deleted'
     const now = new Date().toISOString();
     await this.env.DATABASE.prepare(
-      `UPDATE workspaces SET status = 'deleted', updated_at = ? WHERE id = ? AND status = 'stopped'`
+      `UPDATE workspaces SET status = 'deleted', updated_at = ? WHERE id = ? AND status IN ('stopped', 'sleeping')`
     )
       .bind(now, workspaceId)
       .run();

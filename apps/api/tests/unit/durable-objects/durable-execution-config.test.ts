@@ -6,26 +6,32 @@ import {
 } from '../../../src/durable-objects/project-data/durable-execution-config';
 
 describe('durable execution configuration', () => {
-  it('is inert and fail-closed by default', () => {
+  it('enables durable delivery by default while optional supervisor paths stay off', () => {
     const config = resolveDurableExecutionConfig({});
-    expect(config.deliveryEnabled).toBe(false);
+    expect(config.deliveryEnabled).toBe(true);
     expect(config.legacyVmCompatEnabled).toBe(false);
     expect(config.supervisorEnabled).toBe(false);
     expect(config.checkpointThresholdMs).toBe(5 * 60 * 60 * 1000);
   });
 
   it('rejects malformed booleans and unsafe timing relationships', () => {
-    expect(() => resolveDurableExecutionConfig({
-      DURABLE_PROMPT_DELIVERY_ENABLED: 'yes',
-    })).toThrow('Expected boolean');
-    expect(() => resolveDurableExecutionConfig({
-      PROMPT_DELIVERY_RETRY_BASE_MS: '10000',
-      PROMPT_DELIVERY_RETRY_MAX_MS: '5000',
-    })).toThrow('RETRY_BASE_MS must be <=');
-    expect(() => resolveDurableExecutionConfig({
-      PROMPT_DELIVERY_RECEIPT_TIMEOUT_MS: '60000',
-      PROMPT_DELIVERY_TTL_MS: '60000',
-    })).toThrow('RECEIPT_TIMEOUT_MS must be <');
+    expect(() =>
+      resolveDurableExecutionConfig({
+        DURABLE_PROMPT_DELIVERY_ENABLED: 'yes',
+      })
+    ).toThrow('Expected boolean');
+    expect(() =>
+      resolveDurableExecutionConfig({
+        PROMPT_DELIVERY_RETRY_BASE_MS: '10000',
+        PROMPT_DELIVERY_RETRY_MAX_MS: '5000',
+      })
+    ).toThrow('RETRY_BASE_MS must be <=');
+    expect(() =>
+      resolveDurableExecutionConfig({
+        PROMPT_DELIVERY_RECEIPT_TIMEOUT_MS: '60000',
+        PROMPT_DELIVERY_TTL_MS: '60000',
+      })
+    ).toThrow('RECEIPT_TIMEOUT_MS must be <');
   });
 
   it('bounds exponential retry delays', () => {

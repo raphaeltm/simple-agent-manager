@@ -31,14 +31,16 @@ describe('session snapshot config', () => {
   });
 
   it('uses positive env overrides and sanitizes the R2 prefix', () => {
-    const config = getSessionSnapshotConfig(env({
-      SESSION_SNAPSHOT_TTL_DAYS: '3',
-      SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES: '1234',
-      SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES: '567',
-      SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS: '890',
-      SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES: '1024',
-      SESSION_SNAPSHOT_R2_PREFIX: '/tenant snapshots/private/',
-    }));
+    const config = getSessionSnapshotConfig(
+      env({
+        SESSION_SNAPSHOT_TTL_DAYS: '3',
+        SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES: '1234',
+        SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES: '567',
+        SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS: '890',
+        SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES: '1024',
+        SESSION_SNAPSHOT_R2_PREFIX: '/tenant snapshots/private/',
+      })
+    );
 
     expect(config.ttlDays).toBe(3);
     expect(config.totalBudgetBytes).toBe(1234);
@@ -50,17 +52,18 @@ describe('session snapshot config', () => {
 });
 
 describe('session snapshot R2 keys', () => {
-  it('derives deterministic one-snapshot-per-session artifact keys', () => {
+  it('derives immutable generation-qualified artifact keys', () => {
     const input = env({ SESSION_SNAPSHOT_R2_PREFIX: 'snapshots' });
+    const generation = '01JGENERATION00000000000000';
 
-    expect(buildSessionSnapshotR2Key(input, 'chat/../session 1', 'home')).toBe(
-      'snapshots/chat-..-session-1/home.tar'
+    expect(buildSessionSnapshotR2Key(input, 'chat/../session 1', generation, 'home')).toBe(
+      `snapshots/chat-..-session-1/${generation}/home.tar`
     );
-    expect(buildSessionSnapshotR2Key(input, 'chat/../session 1', 'wip')).toBe(
-      'snapshots/chat-..-session-1/wip.bundle'
+    expect(buildSessionSnapshotR2Key(input, 'chat/../session 1', generation, 'wip')).toBe(
+      `snapshots/chat-..-session-1/${generation}/wip.bundle`
     );
-    expect(buildSessionSnapshotR2Key(input, 'chat/../session 1', 'manifest')).toBe(
-      'snapshots/chat-..-session-1/manifest.json'
+    expect(buildSessionSnapshotR2Key(input, 'chat/../session 1', generation, 'manifest')).toBe(
+      `snapshots/chat-..-session-1/${generation}/manifest.json`
     );
   });
 });

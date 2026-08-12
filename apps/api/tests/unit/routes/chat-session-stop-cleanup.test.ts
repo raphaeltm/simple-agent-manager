@@ -185,6 +185,7 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
     expect(mocks.cleanupTerminalTaskResources).toHaveBeenCalledWith(expect.anything(), 'task-1', {
       status: 'cancelled',
       errorMessage: 'Archived by user',
+      destructiveSessionEnd: true,
       logContext: {
         projectId: 'project-stop-1',
         sessionId: 'session-task-backed-1',

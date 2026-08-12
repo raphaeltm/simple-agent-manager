@@ -107,6 +107,10 @@ beforeEach(() => {
       id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT,
       auto_provisioned_node_id TEXT, updated_at TEXT
     );
+    CREATE TABLE session_snapshots (
+      chat_session_id TEXT PRIMARY KEY, status TEXT NOT NULL,
+      degradation TEXT NOT NULL, expires_at TEXT NOT NULL
+    );
   `);
 });
 

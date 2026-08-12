@@ -1,5 +1,5 @@
-/** Durable prompt delivery is feature-gated until the VM receipt protocol is deployed. */
-export const DEFAULT_DURABLE_PROMPT_DELIVERY_ENABLED = false;
+/** Stable receipts make follow-up delivery durable by default, including across sleep/wake. */
+export const DEFAULT_DURABLE_PROMPT_DELIVERY_ENABLED = true;
 
 /** Explicit opt-in for the pre-receipt VM request/202 compatibility path. */
 export const DEFAULT_PROMPT_DELIVERY_LEGACY_VM_COMPAT_ENABLED = false;
@@ -43,16 +43,14 @@ export const VM_PROMPT_DELIVERY_PROTOCOL_VERSION = 1;
 /** Capability token advertised by VM runtimes that persist stable prompt receipts. */
 export const VM_PROMPT_DELIVERY_RECEIPTS_CAPABILITY = 'prompt_delivery_receipts_v1';
 
-export function buildVmPromptDeliveryCapabilitiesPath(
-  workspaceId: string,
-): string {
+export function buildVmPromptDeliveryCapabilitiesPath(workspaceId: string): string {
   return `/workspaces/${encodeURIComponent(workspaceId)}/agent-capabilities`;
 }
 
 export function buildVmPromptDeliveryReceiptPath(
   workspaceId: string,
   acpSessionId: string,
-  deliveryId: string,
+  deliveryId: string
 ): string {
   return `/workspaces/${encodeURIComponent(workspaceId)}/agent-sessions/${encodeURIComponent(acpSessionId)}/prompt-receipts/${encodeURIComponent(deliveryId)}`;
 }

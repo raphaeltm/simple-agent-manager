@@ -16,6 +16,7 @@ import {
 import {
   type AgentSessionOverrides,
   createAgentSessionOnNode,
+  restoreAgentSessionOnNode,
   startAgentSessionOnNode,
 } from './node-agent';
 import * as projectDataService from './project-data';
@@ -34,6 +35,8 @@ export interface SamAwareAgentStartInput {
   agentProfileId?: string | null;
   skillId?: string | null;
   visibleInitialPrompt: string;
+  /** Strictly load the saved harness snapshot instead of creating a fresh session. */
+  restoreSnapshotChatSessionId?: string | null;
   promptKind: McpInstructionContextType;
   taskContext?: {
     taskId: string;
@@ -177,32 +180,56 @@ export async function startSamAwareAgentSession(
       });
     }
 
-    const injectedInstructions = buildSamBootstrapInstructions({ contextType: input.promptKind });
-
-    await runMaybePhased(input, 'start_acp_session', () =>
-      startAgentSessionOnNode(
-        input.nodeId,
-        input.workspaceId,
-        agentSessionId,
-        input.agentType,
-        input.visibleInitialPrompt,
-        env,
-        input.userId,
-        {
-          url: `https://api.${env.BASE_DOMAIN}/mcp`,
-          token: mcpToken,
-        },
-        input.overrides,
-        input.taskContext
-          ? {
-              projectId: input.projectId,
-              taskId: input.taskContext.taskId,
-              taskMode: input.taskContext.taskMode,
-            }
-          : undefined,
-        injectedInstructions
-      )
-    );
+    const restoreSnapshotChatSessionId = input.restoreSnapshotChatSessionId;
+    if (restoreSnapshotChatSessionId) {
+      const restored = await runMaybePhased(input, 'restore_acp_session', () =>
+        restoreAgentSessionOnNode(
+          input.nodeId,
+          input.workspaceId,
+          agentSessionId,
+          env,
+          input.userId,
+          {
+            chatSessionId: restoreSnapshotChatSessionId,
+            runtime: 'vm',
+            agentType: input.agentType,
+          }
+        )
+      );
+      const restoreRecord =
+        restored && typeof restored === 'object' ? (restored as Record<string, unknown>) : null;
+      if (restoreRecord?.status !== 'restored') {
+        throw new Error(
+          `Strict session restore failed (${String(restoreRecord?.status ?? 'unknown')})`
+        );
+      }
+    } else {
+      const injectedInstructions = buildSamBootstrapInstructions({ contextType: input.promptKind });
+      await runMaybePhased(input, 'start_acp_session', () =>
+        startAgentSessionOnNode(
+          input.nodeId,
+          input.workspaceId,
+          agentSessionId,
+          input.agentType,
+          input.visibleInitialPrompt,
+          env,
+          input.userId,
+          {
+            url: `https://api.${env.BASE_DOMAIN}/mcp`,
+            token: mcpToken,
+          },
+          input.overrides,
+          input.taskContext
+            ? {
+                projectId: input.projectId,
+                taskId: input.taskContext.taskId,
+                taskMode: input.taskContext.taskMode,
+              }
+            : undefined,
+          injectedInstructions
+        )
+      );
+    }
 
     const runningAcpSessionId = acpSessionId;
     if (runningAcpSessionId) {

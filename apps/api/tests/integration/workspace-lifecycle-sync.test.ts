@@ -50,13 +50,13 @@ describe('workspace lifecycle synchronization', () => {
 
     it('delete route calls projectDataService.stopSession', () => {
       expect(crudFile).toContain('cleanupWorkspaceForDeletion');
-      expect(workspaceCleanupFile).toContain('projectDataService.stopSession');
+      expect(workspaceCleanupFile).toMatch(/projectDataService\s*\.\s*stopSession/);
       expect(workspaceCleanupFile).toContain('workspace.delete_stop_session_failed');
     });
 
     it('delete route cleans up workspace activity', () => {
       expect(crudFile).toContain('cleanupWorkspaceForDeletion');
-      expect(workspaceCleanupFile).toContain('projectDataService.cleanupWorkspaceActivity');
+      expect(workspaceCleanupFile).toMatch(/projectDataService\s*\.\s*cleanupWorkspaceActivity/);
       expect(workspaceCleanupFile).toContain('workspace.delete_cleanup_activity_failed');
     });
   });

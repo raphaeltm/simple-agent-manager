@@ -11,21 +11,25 @@ import type {
 
 const {
   cleanupTaskRunMock,
+  failSessionSnapshotRecoveryMock,
   failSessionMock,
   notifyTaskEventMock,
   persistErrorMock,
   persistMessageMock,
   revokeMcpTokenMock,
+  sleepSessionMock,
   stopComputeTrackingMock,
   stopWorkspaceOnNodeMock,
   syncTriggerExecutionStatusMock,
 } = vi.hoisted(() => ({
   cleanupTaskRunMock: vi.fn(async () => undefined),
+  failSessionSnapshotRecoveryMock: vi.fn(async () => undefined),
   failSessionMock: vi.fn(async () => undefined),
   notifyTaskEventMock: vi.fn(async () => undefined),
   persistErrorMock: vi.fn(async () => undefined),
   persistMessageMock: vi.fn(async () => undefined),
   revokeMcpTokenMock: vi.fn(async () => undefined),
+  sleepSessionMock: vi.fn(async () => true),
   stopComputeTrackingMock: vi.fn(async () => undefined),
   stopWorkspaceOnNodeMock: vi.fn(async () => undefined),
   syncTriggerExecutionStatusMock: vi.fn(async () => undefined),
@@ -49,6 +53,11 @@ vi.mock('../../../src/services/observability', async () => {
 vi.mock('../../../src/services/project-data', () => ({
   failSession: failSessionMock,
   persistMessage: persistMessageMock,
+  sleepSession: sleepSessionMock,
+}));
+
+vi.mock('../../../src/services/session-snapshots', () => ({
+  failSessionSnapshotRecovery: failSessionSnapshotRecoveryMock,
 }));
 
 vi.mock('../../../src/services/project-orchestrator', () => ({
@@ -394,6 +403,7 @@ describe('failTask', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     stopWorkspaceOnNodeMock.mockResolvedValue(undefined);
+    sleepSessionMock.mockResolvedValue(true);
   });
 
   it('does not overwrite tasks that are already terminal', async () => {
@@ -499,5 +509,39 @@ describe('failTask', () => {
       status: 'failed',
       error_message: 'workspace cleanup should not mask task failure',
     });
+  });
+
+  it('fails only the replacement recovery task and returns the original chat to sleeping', async () => {
+    const { dbState, rc } = createContext();
+    seedTask(dbState, {
+      status: 'delegated',
+      execution_step: 'agent_session',
+    });
+    dbState.workspaces.set('workspace-1', { id: 'workspace-1', status: 'running' });
+    const state = makeState({
+      stepResults: { ...makeState().stepResults, chatSessionId: 'session-1' },
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'session-1',
+      },
+    });
+
+    await failTask(state, 'replacement restore failed', rc);
+
+    expect(dbState.tasks.get('task-1')).toMatchObject({
+      status: 'failed',
+      error_message: 'replacement restore failed',
+    });
+    expect(failSessionSnapshotRecoveryMock).toHaveBeenCalledWith(
+      expect.anything(),
+      rc.env,
+      'session-1',
+      'task-1',
+      'replacement restore failed'
+    );
+    expect(sleepSessionMock).toHaveBeenCalledWith(rc.env, 'project-1', 'session-1');
+    expect(failSessionMock).not.toHaveBeenCalled();
+    expect(persistMessageMock).not.toHaveBeenCalled();
+    expect(stopWorkspaceOnNodeMock).toHaveBeenCalledWith('node-1', 'workspace-1', rc.env, 'user-1');
   });
 });

@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getCfContainerWakeTimeoutMs: vi.fn(() => 120_000),
   enrichMessageWithMentions: vi.fn(),
   parseOptionalBody: vi.fn(),
+  cancelScheduledSessionSleep: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -26,7 +27,7 @@ vi.mock('@simple-agent-manager/shared', () => ({
   DEFAULT_CHAT_SESSION_MESSAGE_MAX: 50000,
   DEFAULT_CHAT_COMPACT_MODE: true,
   DEFAULT_WORKSPACE_PROFILE: 'full',
-  DEFAULT_DURABLE_PROMPT_DELIVERY_ENABLED: false,
+  DEFAULT_DURABLE_PROMPT_DELIVERY_ENABLED: true,
   DEFAULT_PROMPT_DELIVERY_LEGACY_VM_COMPAT_ENABLED: false,
   DEFAULT_ACP_LONG_TURN_SUPERVISOR_ENABLED: false,
   DEFAULT_ACP_LONG_TURN_CHECKPOINT_MS: 18_000_000,
@@ -108,6 +109,10 @@ vi.mock('../../../src/services/mention-enrichment', () => ({
   enrichMessageWithMentions: mocks.enrichMessageWithMentions,
 }));
 
+vi.mock('../../../src/services/session-snapshots', () => ({
+  cancelScheduledSessionSleep: (...args: unknown[]) => mocks.cancelScheduledSessionSleep(...args),
+}));
+
 /** Helper to build a drizzle mock that returns workspace + agent session rows. */
 function setupDrizzle(opts: {
   workspace?: {
@@ -158,6 +163,7 @@ beforeEach(() => {
   mocks.requireProjectAccess.mockResolvedValue({ id: 'proj-1', userId: 'user-1' });
   mocks.parseOptionalBody.mockResolvedValue({ content: 'hello agent' });
   mocks.enrichMessageWithMentions.mockResolvedValue({ enrichedMessage: 'hello agent' });
+  mocks.cancelScheduledSessionSleep.mockResolvedValue(undefined);
   vi.mocked(projectDataService.getSession).mockResolvedValue({
     id: 'chat-1',
     createdByUserId: 'user-1',
@@ -261,7 +267,11 @@ describe('POST /sessions/:sessionId/prompt', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: 'hello agent' }),
       },
-      { DATABASE: {} as D1Database, ...envOverrides } as Env
+      {
+        DATABASE: {} as D1Database,
+        DURABLE_PROMPT_DELIVERY_ENABLED: 'false',
+        ...envOverrides,
+      } as Env
     );
   }
 
@@ -309,7 +319,7 @@ describe('POST /sessions/:sessionId/prompt', () => {
         targetSessionId: 'chat-1',
         displayContent: 'hello agent',
         sourceKind: 'user_followup',
-      }),
+      })
     );
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
     expect(mocks.drizzle).toHaveBeenCalledTimes(1);

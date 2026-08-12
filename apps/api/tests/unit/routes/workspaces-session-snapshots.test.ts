@@ -42,10 +42,18 @@ function makeDb(workspace: Record<string, unknown>) {
       from: vi.fn(() => ({
         where: vi.fn(() => ({
           limit: vi.fn(async () => [workspace]),
+          get: vi.fn(async () => ({ generation: 'generation-1' })),
         })),
       })),
     })),
   };
+}
+
+const HOME_SHA256 = '4ea140588150773ce3aace786aeef7f4049ce100fa649c94fbbddb960f1da942';
+const WIP_SHA256 = '32e4caaf6344aea2380a7f150312f351897e2dc23de446b4e9c418298d1cbc97';
+
+function checksumBytes(hex: string): ArrayBuffer {
+  return Uint8Array.from(hex.match(/.{2}/g) ?? [], (byte) => Number.parseInt(byte, 16)).buffer;
 }
 
 describe('workspaces session snapshot callback routes', () => {
@@ -80,6 +88,7 @@ describe('workspaces session snapshot callback routes', () => {
     });
     mocks.prepareSessionSnapshot.mockResolvedValue({
       snapshotId: 'snapshot-1',
+      generation: 'generation-1',
       expiresAt: '2026-07-18T00:00:00.000Z',
       config: {
         ttlDays: 7,
@@ -90,9 +99,9 @@ describe('workspaces session snapshot callback routes', () => {
         r2Prefix: 'test-snapshots',
       },
       keys: {
-        home: 'test-snapshots/chat-1/home.tar',
-        wip: 'test-snapshots/chat-1/wip.bundle',
-        manifest: 'test-snapshots/chat-1/manifest.json',
+        home: 'test-snapshots/chat-1/generation-1/home.tar',
+        wip: 'test-snapshots/chat-1/generation-1/wip.bundle',
+        manifest: 'test-snapshots/chat-1/generation-1/manifest.json',
       },
     });
 
@@ -120,9 +129,10 @@ describe('workspaces session snapshot callback routes', () => {
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({
       snapshotId: 'snapshot-1',
+      generation: 'generation-1',
       upload: {
-        home: '/api/workspaces/WS_1/session-snapshot/artifacts/home?chatSessionId=chat-1',
-        wip: '/api/workspaces/WS_1/session-snapshot/artifacts/wip?chatSessionId=chat-1',
+        home: '/api/workspaces/WS_1/session-snapshot/artifacts/home?chatSessionId=chat-1&generation=generation-1',
+        wip: '/api/workspaces/WS_1/session-snapshot/artifacts/wip?chatSessionId=chat-1&generation=generation-1',
       },
     });
     expect(mocks.prepareSessionSnapshot).toHaveBeenCalledWith(expect.anything(), runtimeBindings, {
@@ -138,13 +148,14 @@ describe('workspaces session snapshot callback routes', () => {
 
   it('uploads artifacts to server-derived R2 keys and rejects oversized content-lengths', async () => {
     const ok = await app.request(
-      '/api/workspaces/WS_1/session-snapshot/artifacts/home?chatSessionId=chat-1',
+      '/api/workspaces/WS_1/session-snapshot/artifacts/home?chatSessionId=chat-1&generation=generation-1',
       {
         method: 'PUT',
         headers: {
           Authorization: 'Bearer callback-token',
           'Content-Type': 'application/octet-stream',
           'Content-Length': '4',
+          'X-SAM-Content-SHA256': HOME_SHA256,
         },
         body: 'home',
       },
@@ -153,24 +164,54 @@ describe('workspaces session snapshot callback routes', () => {
 
     expect(ok.status).toBe(200);
     expect(r2.put).toHaveBeenCalledWith(
-      'test-snapshots/chat-1/home.tar',
+      'test-snapshots/chat-1/generation-1/home.tar',
       expect.anything(),
-      expect.objectContaining({ httpMetadata: { contentType: 'application/x-tar' } })
+      expect.objectContaining({
+        httpMetadata: { contentType: 'application/x-tar' },
+        sha256: HOME_SHA256,
+      })
     );
 
     const tooLarge = await app.request(
-      '/api/workspaces/WS_1/session-snapshot/artifacts/wip?chatSessionId=chat-1',
+      '/api/workspaces/WS_1/session-snapshot/artifacts/wip?chatSessionId=chat-1&generation=generation-1',
       {
         method: 'PUT',
         headers: {
           Authorization: 'Bearer callback-token',
           'Content-Length': '1025',
+          'X-SAM-Content-SHA256': WIP_SHA256,
         },
         body: 'wip',
       },
       runtimeBindings
     );
     expect(tooLarge.status).toBe(400);
+
+    const staleGeneration = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/artifacts/home?chatSessionId=chat-1&generation=generation-old',
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: 'Bearer callback-token',
+          'Content-Length': '4',
+          'X-SAM-Content-SHA256': HOME_SHA256,
+        },
+        body: 'home',
+      },
+      runtimeBindings
+    );
+    expect(staleGeneration.status).toBe(409);
+
+    const missingHash = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/artifacts/home?chatSessionId=chat-1&generation=generation-1',
+      {
+        method: 'PUT',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Length': '4' },
+        body: 'home',
+      },
+      runtimeBindings
+    );
+    expect(missingHash.status).toBe(400);
   });
 
   it('rejects node-scoped callback tokens before snapshot service access', async () => {
@@ -199,7 +240,7 @@ describe('workspaces session snapshot callback routes', () => {
 
   it('rejects artifact uploads without an authoritative Content-Length', async () => {
     const res = await app.request(
-      '/api/workspaces/WS_1/session-snapshot/artifacts/home?chatSessionId=chat-1',
+      '/api/workspaces/WS_1/session-snapshot/artifacts/home?chatSessionId=chat-1&generation=generation-1',
       {
         method: 'PUT',
         headers: { Authorization: 'Bearer callback-token' },
@@ -213,11 +254,16 @@ describe('workspaces session snapshot callback routes', () => {
 
   it('derives completion sizes from R2 and rejects manifest identity mismatches', async () => {
     r2.head.mockImplementation(async (key: string) =>
-      key.endsWith('home.tar') ? { size: 4 } : key.endsWith('wip.bundle') ? { size: 3 } : null
+      key.endsWith('home.tar')
+        ? { size: 4, checksums: { sha256: checksumBytes(HOME_SHA256) } }
+        : key.endsWith('wip.bundle')
+          ? { size: 3, checksums: { sha256: checksumBytes(WIP_SHA256) } }
+          : null
     );
     const body = {
       chatSessionId: 'chat-1',
       agentSessionId: 'agent-session-1',
+      generation: 'generation-1',
       runtime: 'cf-container',
       status: 'available',
       degradation: 'none',
@@ -233,7 +279,10 @@ describe('workspaces session snapshot callback routes', () => {
         status: 'available',
         degradation: 'none',
         skipped: [],
-        artifacts: { home: { sizeBytes: 4 }, wip: { sizeBytes: 3 } },
+        artifacts: {
+          home: { sizeBytes: 4, sha256: HOME_SHA256 },
+          wip: { sizeBytes: 3, sha256: WIP_SHA256 },
+        },
         createdAt: '2026-07-11T00:00:00.000Z',
       },
     };
@@ -252,6 +301,28 @@ describe('workspaces session snapshot callback routes', () => {
       runtimeBindings,
       expect.objectContaining({ artifactSizes: { homeBytes: 4, wipBytes: 3 } })
     );
+
+    for (const degradation of [
+      'wip-skipped',
+      'entries-skipped',
+      'agent-context-skipped',
+    ] as const) {
+      const degraded = await app.request(
+        '/api/workspaces/WS_1/session-snapshot/complete',
+        {
+          method: 'POST',
+          headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...body,
+            status: 'degraded',
+            degradation,
+            manifest: { ...body.manifest, status: 'degraded', degradation },
+          }),
+        },
+        runtimeBindings
+      );
+      expect(degraded.status, degradation).toBe(200);
+    }
 
     const mismatch = await app.request(
       '/api/workspaces/WS_1/session-snapshot/complete',
@@ -291,12 +362,48 @@ describe('workspaces session snapshot callback routes', () => {
       runtimeBindings
     );
     expect(incompleteHarness.status).toBe(400);
+
+    const checksumMismatch = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/complete',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...body,
+          manifest: {
+            ...body.manifest,
+            artifacts: {
+              ...body.manifest.artifacts,
+              home: { sizeBytes: 4, sha256: WIP_SHA256 },
+            },
+          },
+        }),
+      },
+      runtimeBindings
+    );
+    expect(checksumMismatch.status).toBe(400);
+
+    const lifecycleMismatch = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/complete',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...body,
+          status: 'degraded',
+          degradation: 'entries-skipped',
+        }),
+      },
+      runtimeBindings
+    );
+    expect(lifecycleMismatch.status).toBe(400);
   });
 
   it('rejects a manifest missing a required field with a clean 400 before touching R2', async () => {
     const body = {
       chatSessionId: 'chat-1',
       agentSessionId: 'agent-session-1',
+      generation: 'generation-1',
       runtime: 'cf-container',
       status: 'available',
       degradation: 'none',
@@ -312,7 +419,10 @@ describe('workspaces session snapshot callback routes', () => {
         status: 'available',
         degradation: 'none',
         // `skipped` intentionally omitted — required by SessionSnapshotManifest
-        artifacts: { home: { sizeBytes: 4 }, wip: { sizeBytes: 3 } },
+        artifacts: {
+          home: { sizeBytes: 4, sha256: HOME_SHA256 },
+          wip: { sizeBytes: 3, sha256: WIP_SHA256 },
+        },
         createdAt: '2026-07-11T00:00:00.000Z',
       },
     };
