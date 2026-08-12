@@ -10,9 +10,23 @@ import { assertUserAllowedBySignupApproval, isSignupApprovalRequired } from '../
 import { errors } from './error';
 
 const persistedSuperadminSchema = v.object({
-  role: v.string(),
-  status: v.string(),
+  role: v.picklist(['user', 'admin', 'superadmin']),
+  status: v.picklist(['active', 'pending', 'suspended']),
+  active_superadmin_count: v.number(),
 });
+
+async function loadPersistedAuthorizationState(c: Context<{ Bindings: Env }>, userId: string) {
+  const persisted = await c.env.DATABASE.prepare(
+    `SELECT role, status,
+       (SELECT COUNT(*) FROM users
+        WHERE role = 'superadmin' AND status = 'active') AS active_superadmin_count
+     FROM users WHERE id = ? LIMIT 1`
+  )
+    .bind(userId)
+    .first();
+  const validated = v.safeParse(persistedSuperadminSchema, persisted);
+  return validated.success ? validated.output : null;
+}
 
 /**
  * Extended context with authenticated user.
@@ -150,13 +164,20 @@ export function requireApproved(): MiddlewareHandler<{ Bindings: Env }> {
       throw errors.unauthorized('Authentication required');
     }
 
-    // Admins and superadmins always pass through
-    if (auth.user.role === 'superadmin' || auth.user.role === 'admin') {
-      await next();
-      return;
+    // Cookie-cached role/status is identity context, not authorization state.
+    // Migration 0110 can normalize an in-flight legacy signup after Better Auth
+    // has built its response object, so approval decisions must use current D1.
+    const persisted = await loadPersistedAuthorizationState(c, auth.user.id);
+    if (!persisted) {
+      throw errors.forbidden('Account approval required');
     }
+    auth.user.role = persisted.role;
+    auth.user.status = persisted.status;
 
-    if (auth.user.status === 'active') {
+    if (
+      persisted.status === 'active' &&
+      (persisted.role !== 'superadmin' || persisted.active_superadmin_count === 1)
+    ) {
       await next();
       return;
     }
@@ -186,16 +207,12 @@ export function requireSuperadmin(): MiddlewareHandler<{ Bindings: Env }> {
     // authorize privileged routes from D1 so an old Worker response spanning a
     // migration cannot turn a trigger-normalized user into an effective
     // superadmin with stale cached data.
-    const persisted = await c.env.DATABASE.prepare(
-      `SELECT role, status FROM users WHERE id = ? LIMIT 1`
-    )
-      .bind(auth.user.id)
-      .first();
-    const validated = v.safeParse(persistedSuperadminSchema, persisted);
+    const persisted = await loadPersistedAuthorizationState(c, auth.user.id);
     if (
-      !validated.success ||
-      validated.output.role !== 'superadmin' ||
-      validated.output.status !== 'active'
+      !persisted ||
+      persisted.role !== 'superadmin' ||
+      persisted.status !== 'active' ||
+      persisted.active_superadmin_count !== 1
     ) {
       throw errors.forbidden('Superadmin access required');
     }

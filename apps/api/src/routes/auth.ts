@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import { createAuth } from '../auth';
 import type { Env } from '../env';
@@ -6,8 +7,21 @@ import { log, serializeError } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import { maybeAttachTrialClaimCookie } from '../services/trial/oauth-hook';
+import { isSignupApprovalRequired } from '../services/signup-approval';
 
 const authRoutes = new Hono<{ Bindings: Env }>();
+
+const bootstrapSchemaReadySchema = v.object({ ready: v.number() });
+
+async function isBootstrapSchemaReady(env: Env): Promise<boolean> {
+  const row = await env.DATABASE.prepare(
+    `SELECT COUNT(*) AS ready
+     FROM sqlite_schema
+     WHERE type = 'table' AND name = 'first_signup_superadmin_claim'`
+  ).first();
+  const validated = v.safeParse(bootstrapSchemaReadySchema, row);
+  return validated.success && validated.output.ready === 1;
+}
 
 /**
  * BetterAuth handler - handles all auth routes:
@@ -18,6 +32,17 @@ const authRoutes = new Hono<{ Bindings: Env }>();
  */
 authRoutes.on(['GET', 'POST'], '/*', async (c) => {
   try {
+    // Migration 0110 has a one-time, upgrade-only compatibility deployment.
+    // Quiesce Better Auth while that Worker is live against the old schema so
+    // no approval-enabled signup can cross the migration without its D1 claim.
+    if ((await isSignupApprovalRequired(c.env)) && !(await isBootstrapSchemaReady(c.env))) {
+      c.header('Retry-After', '10');
+      return c.json(
+        { error: 'AUTH_TEMPORARILY_UNAVAILABLE', message: 'Authentication is temporarily unavailable' },
+        503
+      );
+    }
+
     const auth = await createAuth(c.env);
     const response = await auth.handler(c.req.raw);
 
