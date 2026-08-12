@@ -1,7 +1,6 @@
 import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
 import { betterAuth } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { ne } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import * as v from 'valibot';
 
@@ -18,6 +17,87 @@ import {
 import { isSignupApprovalRequired } from './services/signup-approval';
 
 const log = createModuleLogger('auth');
+
+const bootstrapCreateResultSchema = v.object({
+  id: v.string(),
+  role: v.picklist(['user', 'superadmin']),
+  status: v.picklist(['active', 'pending']),
+});
+
+const accountCreateResultSchema = v.object({
+  userId: v.string(),
+});
+
+const persistedBootstrapUserSchema = v.object({
+  id: v.string(),
+  role: v.picklist(['user', 'admin', 'superadmin']),
+  status: v.picklist(['active', 'pending', 'suspended', 'system']),
+});
+
+/**
+ * SQLite RETURNING reports the top-level INSERT values, not changes made by an
+ * AFTER trigger. Track each pending user until its account link succeeds, then
+ * reload and update that same object so Better Auth builds its response/session
+ * cookie from the role/status D1 actually persisted.
+ */
+function withBootstrapUserReload(adapterFactory: ReturnType<typeof drizzleAdapter>) {
+  return (options: Parameters<typeof adapterFactory>[0]) => {
+    const adapter = adapterFactory(options);
+    const create = adapter.create.bind(adapter);
+    const pendingUsers = new Map<string, Record<string, unknown>>();
+
+    adapter.create = (async (input: Parameters<typeof create>[0]) => {
+      const created = await create(input);
+      if (!created) {
+        return created;
+      }
+
+      if (input.model === 'account') {
+        const account = v.safeParse(accountCreateResultSchema, created);
+        if (!account.success) {
+          return created;
+        }
+        const pendingUser = pendingUsers.get(account.output.userId);
+        if (!pendingUser) {
+          return created;
+        }
+        const persisted = await adapter.findOne({
+          model: 'user',
+          where: [{ field: 'id', value: account.output.userId }],
+        });
+        const validated = v.safeParse(persistedBootstrapUserSchema, persisted);
+        if (!validated.success || validated.output.id !== account.output.userId) {
+          throw new Error('Failed to reload persisted bootstrap user');
+        }
+        Object.assign(pendingUser, persisted);
+        pendingUsers.delete(account.output.userId);
+        return created;
+      }
+
+      if (input.model !== 'user') {
+        return created;
+      }
+      const candidate = v.safeParse(bootstrapCreateResultSchema, created);
+      if (!candidate.success) {
+        return created;
+      }
+      const persisted = await adapter.findOne({
+        model: 'user',
+        where: [{ field: 'id', value: candidate.output.id }],
+      });
+      const validated = v.safeParse(persistedBootstrapUserSchema, persisted);
+      if (!validated.success || validated.output.id !== candidate.output.id) {
+        throw new Error('Failed to reload persisted bootstrap user');
+      }
+      if (validated.output.role === 'user' && validated.output.status === 'pending') {
+        pendingUsers.set(validated.output.id, persisted as Record<string, unknown>);
+      }
+      return persisted;
+    }) as typeof adapter.create;
+
+    return adapter;
+  };
+}
 
 /**
  * Atomic, race-free login-time superadmin self-heal.
@@ -202,6 +282,12 @@ export function selectPrimaryGitHubEmail(
  */
 export async function createAuth(env: Env) {
   const db = drizzle(env.DATABASE, { schema });
+  const authAdapter = withBootstrapUserReload(
+    drizzleAdapter(db, {
+      provider: 'sqlite',
+      usePlural: true,
+    })
+  );
   // Sentinel id is env-overridable; fall back to the shared constant.
   const sentinelId = env.TRIAL_ANONYMOUS_USER_ID ?? TRIAL_ANONYMOUS_USER_ID;
   const githubOAuth = await getGitHubOAuthConfig(env);
@@ -320,10 +406,7 @@ export async function createAuth(env: Env) {
   }
 
   return betterAuth({
-    database: drizzleAdapter(db, {
-      provider: 'sqlite',
-      usePlural: true,
-    }),
+    database: authAdapter,
     basePath: '/api/auth',
     baseURL: `https://api.${env.BASE_DOMAIN}`,
     secret: getBetterAuthSecret(env),
@@ -375,22 +458,9 @@ export async function createAuth(env: Env) {
               return { data: user };
             }
 
-            // Check if this is the first user (auto-superadmin)
-            const hookDb = drizzle(env.DATABASE, { schema });
-            const existing = await hookDb
-              .select({ id: schema.users.id })
-              .from(schema.users)
-              .where(ne(schema.users.id, sentinelId))
-              .limit(1)
-              .all();
-
-            if (existing.length === 0) {
-              return {
-                data: { ...user, role: 'superadmin', status: 'active' },
-              };
-            }
-
-            // Subsequent users need approval
+            // Every gated signup enters D1 as an ordinary pending candidate.
+            // Migration 0110's account-link trigger performs the durable first-user
+            // election atomically when the authentication identity becomes usable.
             return {
               data: { ...user, role: 'user', status: 'pending' },
             };

@@ -85,43 +85,45 @@ Every finding above maps to an implementation or validation item below.
 
 ## Data Flow and Proposed Smallest Durable Election
 
-`signup/OAuth/token user creation` → `createAuth` → Better Auth
+`signup/OAuth user creation` → `createAuth` → Better Auth
 `user.create.before` assigns ordinary pending state when approval is enabled →
-Drizzle adapter inserts `users` row → additive SQLite `AFTER INSERT` trigger
-atomically promotes that row only if no active, non-system superadmin already
-exists → wrapped adapter reloads the persisted user → Better Auth builds the
-unchanged response/session from the final role and status.
+Drizzle adapter inserts the `users` row and then its usable `accounts` link → an
+additive SQLite `AFTER INSERT ON accounts` trigger atomically promotes that user
+only if no active superadmin already exists → wrapped adapter reloads the
+persisted user → Better Auth builds the unchanged response/session from the final
+role and status. A second insert trigger demotes duplicate superadmins created by
+legacy Worker code during the migration-before-code upgrade window.
 
-The `users.role/status` row is the durable claim. No process-memory lock, lease,
-eventual login ordering, or uniqueness-conflict 500 is involved. If an attempt
-fails before its insert, it leaves no claim; if the insert commits, the trigger's
-election commits in the same statement.
+The account-linked `users.role/status` row is the durable claim. No process-memory
+lock, lease, eventual login ordering, or uniqueness-conflict 500 is involved. If
+an attempt fails before its account link, it leaves no claim; if the link commits,
+the trigger's election commits in the same statement.
 
 ## Implementation Checklist
 
-- [ ] Add a failing real-D1 regression test that forces concurrent approval-enabled
+- [x] Add a failing real-D1 regression test that forces concurrent approval-enabled
       first-user hooks to observe the empty baseline before concurrent inserts and
       proves the vulnerable code creates multiple superadmins.
-- [ ] Add the next additive D1 migration with an idempotent `AFTER INSERT` trigger
+- [x] Add the next additive D1 migration with idempotent `AFTER INSERT` triggers
       that promotes exactly one eligible pending user and leaves later users
       pending, excluding system and suspended rows.
-- [ ] Replace the non-atomic create-before read with deterministic pending defaults
+- [x] Replace the non-atomic create-before read with deterministic pending defaults
       for approval-enabled creates while preserving open-registration defaults.
-- [ ] Wrap the Better Auth Drizzle adapter so trigger-eligible user creates reload
-      the persisted row after SQLite `RETURNING`; validate the reloaded identity and
-      privilege fields with Valibot before returning them to Better Auth.
-- [ ] Add real-Miniflare positive and negative controls for sequential first/later
+- [x] Wrap the Better Auth Drizzle adapter so trigger-eligible user creates reload
+      the persisted row after its account link; validate the reloaded identity and
+      privilege fields with Valibot before Better Auth builds its response.
+- [x] Add real-Miniflare positive and negative controls for sequential first/later
       users; two and three concurrent distinct users; duplicate/retried hooks;
       default and custom sentinels; suspended rows; an existing active superadmin;
       interrupted/failed pre-insert and post-insert attempts; approval enabled and
       disabled; clean migration replay and upgrade application; OAuth-style
       transactional creation; and login-time self-heal compatibility.
-- [ ] Preserve and update focused unit tests for runtime approval overrides and the
+- [x] Preserve and update focused unit tests for runtime approval overrides and the
       before-hook contract without relying on substring/source mocks.
-- [ ] Update the public self-hosting explanation to describe insert-time election,
+- [x] Update the public self-hosting explanation to describe account-link election,
       keep login-time self-heal semantics accurate, and make no operator workflow
       claim beyond actual behavior.
-- [ ] Add a process rule/checklist improvement requiring database-backed concurrent
+- [x] Add a process rule/checklist improvement requiring database-backed concurrent
       interleaving tests for first-row/empty-table privilege bootstrap decisions.
 - [ ] Run focused API unit and worker/D1 tests, full API tests, migration ordering
       and safety gates, clean-install/upgrade replay, lint, typecheck, build, full
