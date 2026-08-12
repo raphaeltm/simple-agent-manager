@@ -39,6 +39,31 @@ SELECT
   NULL
 ON CONFLICT(singleton) DO NOTHING;
 
+-- A legacy Worker request can finish its empty-table read before this migration
+-- commits and insert its already-decided privileged user afterward. Normalize
+-- that INSERT immediately. The account trigger below then performs the only
+-- durable promotion, so an interrupted request cannot consume the claim. Once
+-- claimed_user_id is set, later legacy INSERTs are still normalized; established
+-- installs have a closed claim with no claimed user and are untouched.
+CREATE TRIGGER IF NOT EXISTS users_normalize_legacy_first_signup_after_insert
+AFTER INSERT ON users
+WHEN NEW.role = 'superadmin'
+  AND NEW.status = 'active'
+  AND EXISTS (
+    SELECT 1
+    FROM first_signup_superadmin_claim AS claim
+    WHERE claim.singleton = 1
+      AND (claim.is_open = 1 OR claim.claimed_user_id IS NOT NULL)
+      AND (claim.claimed_user_id IS NULL OR claim.claimed_user_id != NEW.id)
+  )
+BEGIN
+  UPDATE users
+  SET role = 'user', status = 'pending'
+  WHERE id = NEW.id
+    AND role = 'superadmin'
+    AND status = 'active';
+END;
+
 -- Put the election in the successful account-link INSERT so SQLite's
 -- single-writer ordering serializes the privilege claim with a usable
 -- authentication identity. A request interrupted before account linking leaves

@@ -240,7 +240,7 @@ async function legacyApprovalDecision(
 }
 
 async function applyBootstrapMigration(): Promise<void> {
-  expect(BOOTSTRAP_SETUP_SQL).toHaveLength(5);
+  expect(BOOTSTRAP_SETUP_SQL).toHaveLength(6);
   for (const statement of BOOTSTRAP_SETUP_SQL) {
     await env.DATABASE.prepare(statement).run();
   }
@@ -249,6 +249,9 @@ async function applyBootstrapMigration(): Promise<void> {
 async function removeBootstrapMigrationArtifacts(): Promise<void> {
   await env.DATABASE.batch([
     env.DATABASE.prepare(`DROP TRIGGER IF EXISTS accounts_claim_first_superadmin_after_insert`),
+    env.DATABASE.prepare(
+      `DROP TRIGGER IF EXISTS users_normalize_legacy_first_signup_after_insert`
+    ),
     env.DATABASE.prepare(`DROP TRIGGER IF EXISTS users_close_first_superadmin_claim_after_update`),
     env.DATABASE.prepare(`DROP TABLE IF EXISTS first_signup_superadmin_claim`),
     env.DATABASE.prepare(`DELETE FROM users WHERE id = ?`).bind(BOOTSTRAP_ELECTION_GUARD_USER_ID),
@@ -542,12 +545,14 @@ describe('migration 0110 — atomic bootstrap trigger installation (real D1)', (
       `SELECT name FROM sqlite_schema
        WHERE type = 'trigger' AND name IN (
          'accounts_claim_first_superadmin_after_insert',
+         'users_normalize_legacy_first_signup_after_insert',
          'users_close_first_superadmin_claim_after_update'
        ) ORDER BY name`
     ).all<{ name: string }>();
     expect(before.results.map((row) => row.name)).toEqual([
       'accounts_claim_first_superadmin_after_insert',
       'users_close_first_superadmin_claim_after_update',
+      'users_normalize_legacy_first_signup_after_insert',
     ]);
 
     expect(await getUser(BOOTSTRAP_ELECTION_GUARD_USER_ID)).toMatchObject({
@@ -581,6 +586,52 @@ describe('migration 0110 — atomic bootstrap trigger installation (real D1)', (
         role: 'superadmin',
         status: 'active',
       });
+    } finally {
+      await applyBootstrapMigration();
+    }
+  });
+
+  it('normalizes legacy privileged decisions made before migration before electing one account', async () => {
+    await removeBootstrapMigrationArtifacts();
+
+    try {
+      await env.DATABASE.prepare(
+        `DELETE FROM users WHERE status = 'system' AND id != ?`
+      )
+        .bind(TRIAL_ANONYMOUS_USER_ID)
+        .run();
+
+      // This is the deployment-boundary race: both vulnerable before hooks have
+      // already observed the empty baseline before 0110 becomes visible.
+      const decisions = await Promise.all([
+        legacyApprovalDecision('legacy-pre-migration-1'),
+        legacyApprovalDecision('legacy-pre-migration-2'),
+      ]);
+      expect(decisions).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ role: 'superadmin', status: 'active' }),
+          expect.objectContaining({ role: 'superadmin', status: 'active' }),
+        ])
+      );
+
+      await applyBootstrapMigration();
+      await Promise.all(decisions.map(insertHookUser));
+
+      // The legacy INSERT's RETURNING value cannot be rewritten by SQLite, but
+      // the stored rows must already be least-privileged before account linking.
+      expect(await getRealUsers()).toEqual([
+        { id: 'legacy-pre-migration-1', role: 'user', status: 'pending' },
+        { id: 'legacy-pre-migration-2', role: 'user', status: 'pending' },
+      ]);
+
+      await Promise.all(decisions.map(insertHookAccount));
+      const users = await getRealUsers();
+      expect(
+        users.filter((user) => user.role === 'superadmin' && user.status === 'active')
+      ).toHaveLength(1);
+      expect(users.filter((user) => user.role === 'user' && user.status === 'pending')).toHaveLength(
+        1
+      );
     } finally {
       await applyBootstrapMigration();
     }

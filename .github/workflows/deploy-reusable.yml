@@ -604,26 +604,6 @@ jobs:
         env:
           DEPLOY_SHA: ${{ steps.deploy-sha.outputs.value }}
 
-      - name: Run Database Migrations With Safety Gates
-        if: ${{ inputs.dry_run != true }}
-        working-directory: infra
-        run: |
-          DB_NAME=$(pulumi stack output d1DatabaseName)
-          OBS_DB_NAME=$(pulumi stack output observabilityD1DatabaseName)
-          cd ../apps/api
-          pnpm tsx ../../scripts/deploy/d1-migration-safety.ts \
-            --env ${{ inputs.environment }} \
-            --database=DATABASE:$DB_NAME \
-            --database=OBSERVABILITY_DATABASE:$OBS_DB_NAME
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
-          D1_MIGRATION_CHURNING_TABLES: ${{ vars.D1_MIGRATION_CHURNING_TABLES }}
-          D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT: ${{ vars.D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT }}
-
       # Publish VM-agent binaries before deploying Worker code that may require
       # this exact build via VM_AGENT_REQUIRED_VERSION. When skip_agent is true,
       # the sync step leaves VM_AGENT_REQUIRED_VERSION empty so existing nodes are
@@ -652,6 +632,42 @@ jobs:
           PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+
+      # On upgrades, activate migration-compatible authorization and signup code
+      # at 100% before changing D1. This closes the stale signed-session path for
+      # legacy signup requests whose empty-table decision is already in flight.
+      # A first deploy has no previous Worker and still migrates before serving.
+      - name: Deploy Migration-Compatible API Worker
+        if: ${{ inputs.dry_run != true && steps.first_deploy.outputs.is_first != 'true' }}
+        run: |
+          OUTPUT=$(pnpm --filter @simple-agent-manager/api exec wrangler deploy --env "$DEPLOY_ENV" 2>&1) || {
+            echo "$OUTPUT"
+            exit 1
+          }
+          echo "$OUTPUT"
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          DEPLOY_ENV: ${{ inputs.environment }}
+
+      - name: Run Database Migrations With Safety Gates
+        if: ${{ inputs.dry_run != true }}
+        working-directory: infra
+        run: |
+          DB_NAME=$(pulumi stack output d1DatabaseName)
+          OBS_DB_NAME=$(pulumi stack output observabilityD1DatabaseName)
+          cd ../apps/api
+          pnpm tsx ../../scripts/deploy/d1-migration-safety.ts \
+            --env ${{ inputs.environment }} \
+            --database=DATABASE:$DB_NAME \
+            --database=OBSERVABILITY_DATABASE:$OBS_DB_NAME
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          PULUMI_CONFIG_PASSPHRASE: ${{ secrets.PULUMI_CONFIG_PASSPHRASE }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
+          D1_MIGRATION_CHURNING_TABLES: ${{ vars.D1_MIGRATION_CHURNING_TABLES }}
+          D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT: ${{ vars.D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT }}
 
       # Deploy API worker after D1 migrations so new code never serves against old schema.
       # On first deploy this still runs before the tail worker because the API service binding is required.

@@ -1,5 +1,6 @@
 import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
 import type { Context, MiddlewareHandler,Next } from 'hono';
+import * as v from 'valibot';
 
 import { createAuth } from '../auth';
 import type { Env } from '../env';
@@ -7,6 +8,11 @@ import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { assertUserAllowedBySignupApproval, isSignupApprovalRequired } from '../services/signup-approval';
 import { errors } from './error';
+
+const persistedSuperadminSchema = v.object({
+  role: v.string(),
+  status: v.string(),
+});
 
 /**
  * Extended context with authenticated user.
@@ -173,6 +179,24 @@ export function requireSuperadmin(): MiddlewareHandler<{ Bindings: Env }> {
     }
 
     if (auth.user.role !== 'superadmin') {
+      throw errors.forbidden('Superadmin access required');
+    }
+
+    // Better Auth can carry role/status in its signed cookie cache. Always
+    // authorize privileged routes from D1 so an old Worker response spanning a
+    // migration cannot turn a trigger-normalized user into an effective
+    // superadmin with stale cached data.
+    const persisted = await c.env.DATABASE.prepare(
+      `SELECT role, status FROM users WHERE id = ? LIMIT 1`
+    )
+      .bind(auth.user.id)
+      .first();
+    const validated = v.safeParse(persistedSuperadminSchema, persisted);
+    if (
+      !validated.success ||
+      validated.output.role !== 'superadmin' ||
+      validated.output.status !== 'active'
+    ) {
       throw errors.forbidden('Superadmin access required');
     }
 

@@ -44,7 +44,7 @@ vi.mock('../../../src/lib/logger', () => ({
   },
 }));
 
-import { optionalAuth, requireAuth } from '../../../src/middleware/auth';
+import { optionalAuth, requireAuth, requireSuperadmin } from '../../../src/middleware/auth';
 
 interface SessionUser {
   id: string;
@@ -81,6 +81,31 @@ function makeContext() {
     get: (key: string) => store[key],
   };
   return { c, store };
+}
+
+function makeSuperadminContext(persisted: { role: string; status: string } | null) {
+  const auth = {
+    user: {
+      id: 'bootstrap-user',
+      email: 'bootstrap@example.com',
+      name: null,
+      avatarUrl: null,
+      role: 'superadmin',
+      status: 'active',
+    },
+    session: { id: 'sess-bootstrap', expiresAt: new Date('2030-01-01T00:00:00Z') },
+  };
+  const first = vi.fn(async () => persisted);
+  const bind = vi.fn(() => ({ first }));
+  const prepare = vi.fn(() => ({ bind }));
+  return {
+    c: {
+      env: { DATABASE: { prepare } },
+      get: (key: string) => (key === 'auth' ? auth : undefined),
+    },
+    prepare,
+    bind,
+  };
 }
 
 describe('resolveSessionStatus via requireAuth', () => {
@@ -146,6 +171,29 @@ describe('resolveSessionStatus via optionalAuth', () => {
 
     expect((store.auth as CapturedAuth).user.status).toBe('pending');
     expect(mocks.warn).toHaveBeenCalledWith('auth.system_status_anomaly', { userId: 'sentinel-2' });
+    expect(next).toHaveBeenCalledOnce();
+  });
+});
+
+describe('requireSuperadmin persisted-role authorization', () => {
+  it('rejects a stale privileged cookie after D1 normalized the user to pending', async () => {
+    const { c, bind } = makeSuperadminContext({ role: 'user', status: 'pending' });
+    const next = vi.fn(async () => {});
+
+    await expect(requireSuperadmin()(c as never, next as never)).rejects.toThrow(
+      'Superadmin access required'
+    );
+
+    expect(bind).toHaveBeenCalledWith('bootstrap-user');
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('allows an active superadmin confirmed by D1', async () => {
+    const { c } = makeSuperadminContext({ role: 'superadmin', status: 'active' });
+    const next = vi.fn(async () => {});
+
+    await requireSuperadmin()(c as never, next as never);
+
     expect(next).toHaveBeenCalledOnce();
   });
 });

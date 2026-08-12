@@ -181,16 +181,27 @@ describe('deploy reusable workflow', () => {
     }
   });
 
-  it('runs D1 migrations and integrity checks before serving new API Worker code', () => {
+  it('activates migration-compatible auth before D1 changes, then deploys the final Worker', () => {
+    const compatibilityIndex = workflow.indexOf(
+      '- name: Deploy Migration-Compatible API Worker'
+    );
     const migrationsIndex = workflow.indexOf('- name: Run Database Migrations With Safety Gates');
     const deployApiIndex = workflow.indexOf('- name: Deploy API Worker');
     const redeployAfterSecretsIndex = workflow.indexOf(
       '- name: Re-deploy API Worker (after secrets)'
     );
 
+    expect(compatibilityIndex).toBeGreaterThan(-1);
+    expect(migrationsIndex).toBeGreaterThan(compatibilityIndex);
     expect(migrationsIndex).toBeGreaterThan(-1);
     expect(deployApiIndex).toBeGreaterThan(migrationsIndex);
     expect(redeployAfterSecretsIndex).toBeGreaterThan(deployApiIndex);
+
+    const compatibility = stepBlock('Deploy Migration-Compatible API Worker');
+    expect(compatibility).toContain(
+      "steps.first_deploy.outputs.is_first != 'true'"
+    );
+    expect(compatibility).toContain('wrangler deploy --env "$DEPLOY_ENV"');
   });
 
   it('uses the shared D1 migration safety script for main and observability before deploy', () => {
@@ -325,9 +336,13 @@ describe('deploy reusable workflow', () => {
     const buildIndex = workflow.indexOf('- name: Build VM Agent');
     const uploadIndex = workflow.indexOf('- name: Upload VM Agent Binaries');
     const deployIndex = workflow.indexOf('- name: Deploy API Worker');
+    const compatibilityIndex = workflow.indexOf(
+      '- name: Deploy Migration-Compatible API Worker'
+    );
 
     expect(buildIndex).toBeGreaterThan(-1);
     expect(uploadIndex).toBeGreaterThan(buildIndex);
+    expect(uploadIndex).toBeLessThan(compatibilityIndex);
     expect(uploadIndex).toBeLessThan(deployIndex);
   });
 
