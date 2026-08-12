@@ -146,4 +146,49 @@ describe('stopNodeResources exclusive cf-container cleanup boundary', () => {
     };
     expect(node.status).toBe('error');
   });
+
+  it('ATTACK: failed destroy cannot restore stale status after a post-claim node change', async () => {
+    await seedCfContainerClaimedWorkspace();
+    const baseD1 = env.DATABASE;
+    env = {
+      ...env,
+      DATABASE: {
+        ...baseD1,
+        prepare: (sql: string) => {
+          if (
+            sql.includes('SELECT') &&
+            sql.includes('FROM nodes') &&
+            sql.includes('WHERE id = ?')
+          ) {
+            return {
+              bind: (...params: unknown[]) => ({
+                ...baseD1.prepare(sql).bind(...params),
+                first: async () => {
+                  const row = await baseD1.prepare(sql).bind(...params).first();
+                  sqlite.prepare(`UPDATE nodes SET status = 'error' WHERE id = ?`).run('node-exclusive');
+                  return row;
+                },
+              }),
+            } as unknown as D1PreparedStatement;
+          }
+          return baseD1.prepare(sql);
+        },
+      } as D1Database,
+    } as Env;
+    mocks.destroyVmAgentContainer.mockImplementationOnce(async () => {
+      sqlite.prepare(`UPDATE nodes SET status = 'error' WHERE id = ?`).run('node-exclusive');
+      throw new Error('container unavailable');
+    });
+
+    await expect(
+      stopNodeResources('node-exclusive', 'user-owner', env, {
+        exclusiveWorkspaceId: 'ws-claimed',
+      })
+    ).rejects.toThrow(/container unavailable/);
+
+    const node = sqlite.prepare(`SELECT status FROM nodes WHERE id = ?`).get('node-exclusive') as {
+      status: string;
+    };
+    expect(node.status).toBe('error');
+  });
 });

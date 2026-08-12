@@ -540,7 +540,13 @@ export async function stopNodeResources(
         await db
           .update(schema.nodes)
           .set({ status: claimedExclusiveNodeStatus, updatedAt: new Date().toISOString() })
-          .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)));
+          .where(
+            and(
+              eq(schema.nodes.id, nodeId),
+              eq(schema.nodes.userId, userId),
+              eq(schema.nodes.status, 'stopping')
+            )
+          );
       }
       log.error('node_stop.cf_container_destroy_failed', { nodeId, ...serializeError(err) });
       throw err;
