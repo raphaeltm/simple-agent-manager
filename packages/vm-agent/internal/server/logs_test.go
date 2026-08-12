@@ -1,12 +1,17 @@
 package server
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/gorilla/websocket"
 	"github.com/workspace/vm-agent/internal/auth"
 	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/logreader"
@@ -37,11 +42,64 @@ func TestLogStreamRejectsPreviewOriginBeforeAuthentication(t *testing.T) {
 	}
 }
 
+func TestLogStreamAcceptsAuthorizedExactAndNoOriginWebSockets(t *testing.T) {
+	sm := auth.NewSessionManager("session", false, time.Hour)
+	defer sm.Stop()
+	session, err := sm.CreateSession(&auth.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{Subject: "user-1"},
+		Workspace:        "WS001",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := logreader.NewReaderWithExecutor(func(ctx context.Context, _ string, _ ...string) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", "sleep 30")
+	})
+	s := &Server{
+		config: &config.Config{
+			AllowedOrigins:            []string{"https://app.example.com"},
+			WSReadBufferSize:          4096,
+			WSWriteBufferSize:         4096,
+			LogStreamPingInterval:     time.Minute,
+			LogStreamPongTimeout:      time.Minute,
+			LogStreamPingWriteTimeout: time.Second,
+		},
+		sessionManager: sm,
+		logReader:      reader,
+	}
+	testServer := httptest.NewServer(http.HandlerFunc(s.handleLogStream))
+	defer testServer.Close()
+
+	for _, test := range []struct {
+		name   string
+		origin string
+	}{
+		{name: "exact app", origin: "https://app.example.com"},
+		{name: "no origin"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			header := http.Header{}
+			header.Set("Cookie", "session="+session.ID)
+			if test.origin != "" {
+				header.Set("Origin", test.origin)
+			}
+			connection, _, err := websocket.DefaultDialer.Dial(
+				"ws"+strings.TrimPrefix(testServer.URL, "http")+"?source=agent",
+				header,
+			)
+			if err != nil {
+				t.Fatalf("authorized log WebSocket failed to connect: %v", err)
+			}
+			_ = connection.Close()
+		})
+	}
+}
+
 func TestParseLogFilter(t *testing.T) {
 	tests := []struct {
-		name   string
-		query  string
-		want   logreader.LogFilter
+		name  string
+		query string
+		want  logreader.LogFilter
 	}{
 		{
 			name:  "defaults",

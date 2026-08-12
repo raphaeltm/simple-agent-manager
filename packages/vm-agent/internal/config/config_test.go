@@ -946,6 +946,20 @@ func TestValidateValidConfig(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsWildcardAllowedOrigins(t *testing.T) {
+	t.Parallel()
+	for _, origin := range []string{"*", "https://*.example.com", "https://app.*.example.com"} {
+		t.Run(origin, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.AllowedOrigins = []string{"https://app.example.com", origin}
+			err := cfg.Validate()
+			if err == nil || !strings.Contains(err.Error(), "ALLOWED_ORIGINS") {
+				t.Fatalf("Validate() error = %v, want ALLOWED_ORIGINS wildcard rejection", err)
+			}
+		})
+	}
+}
+
 func TestValidateValidPortBoundary(t *testing.T) {
 	t.Parallel()
 	cfg := validConfig()

@@ -144,19 +144,19 @@ func (s *Server) checkWorkspaceRequestAuth(r *http.Request, workspaceID string) 
 		}
 	}
 
-	// Try Authorization: Bearer header first, then fall back to ?token= query param.
-	token := ""
-	if authHeader := r.Header.Get("Authorization"); strings.HasPrefix(authHeader, "Bearer ") {
-		token = strings.TrimSpace(strings.TrimPrefix(authHeader, "Bearer "))
+	// An application-owned Bearer header is not a failed SAM credential. Accept a
+	// valid SAM bearer when present, otherwise independently try the Worker's
+	// workspace-scoped query token so preview application auth remains intact.
+	if fields := strings.Fields(r.Header.Get("Authorization")); len(fields) == 2 && strings.EqualFold(fields[0], "Bearer") {
+		if _, err := s.jwtValidator.ValidateWorkspaceToken(fields[1], workspaceID); err == nil {
+			return true
+		}
 	}
-	if token == "" {
-		token = strings.TrimSpace(r.URL.Query().Get("token"))
-	}
-	if token == "" {
+	queryToken := strings.TrimSpace(r.URL.Query().Get("token"))
+	if queryToken == "" {
 		return false
 	}
-
-	_, err := s.jwtValidator.ValidateWorkspaceToken(token, workspaceID)
+	_, err := s.jwtValidator.ValidateWorkspaceToken(queryToken, workspaceID)
 	return err == nil
 }
 

@@ -145,7 +145,7 @@ func (s *Server) servePortProxy(w http.ResponseWriter, r *http.Request, workspac
 		q.Del("port_token")
 		req.URL.RawQuery = q.Encode()
 		stripSAMReservedRequestCookies(req.Header, s.config.CookieName)
-		s.stripSAMWorkspaceAuthorization(req.Header, workspaceID)
+		s.stripSAMWorkspaceAuthorization(req.Header)
 	}
 	proxy.ModifyResponse = func(response *http.Response) error {
 		return sanitizePreviewResponseCookies(response, s.config.CookieName)
@@ -161,7 +161,7 @@ func (s *Server) servePortProxy(w http.ResponseWriter, r *http.Request, workspac
 	proxy.ServeHTTP(w, r)
 }
 
-func (s *Server) stripSAMWorkspaceAuthorization(headers http.Header, workspaceID string) {
+func (s *Server) stripSAMWorkspaceAuthorization(headers http.Header) {
 	if s.jwtValidator == nil {
 		return
 	}
@@ -170,7 +170,7 @@ func (s *Server) stripSAMWorkspaceAuthorization(headers http.Header, workspaceID
 	if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
 		return
 	}
-	if _, err := s.jwtValidator.ValidateWorkspaceToken(fields[1], workspaceID); err == nil {
+	if _, err := s.jwtValidator.ValidateWorkspaceToken(fields[1], ""); err == nil {
 		headers.Del("Authorization")
 	}
 }
@@ -201,11 +201,11 @@ func (s *Server) handleListWorkspacePorts(w http.ResponseWriter, r *http.Request
 
 	// Build diagnostic info to help debug port scanning issues.
 	diag := map[string]interface{}{
-		"scannerActive":    scanner != nil,
-		"discoveryActive":  wsDiscovery != nil,
-		"portScanEnabled":  s.config.PortScanEnabled,
-		"containerMode":    s.config.ContainerMode,
-		"version":          "v2-pathrw",
+		"scannerActive":   scanner != nil,
+		"discoveryActive": wsDiscovery != nil,
+		"portScanEnabled": s.config.PortScanEnabled,
+		"containerMode":   s.config.ContainerMode,
+		"version":         "v2-pathrw",
 	}
 	if wsDiscovery != nil {
 		if containerID, err := wsDiscovery.GetContainerID(); err == nil {

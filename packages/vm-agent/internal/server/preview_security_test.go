@@ -3,8 +3,10 @@ package server
 import (
 	"crypto/rsa"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -113,7 +115,118 @@ func TestPortProxyPreservesApplicationAuthorization(t *testing.T) {
 	}
 }
 
+func TestWorkspacePortHandlerUsesInternalTokenWithoutConsumingApplicationAuthorization(t *testing.T) {
+	const workspaceID = "01KR1000000000000000000001"
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	samToken := signPreviewWorkspaceToken(t, privateKey, workspaceID)
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "Bearer app-token" {
+			t.Errorf("Authorization = %q, want application bearer", got)
+		}
+		if got := r.Header.Get("Cookie"); got != "preview_theme=dark" {
+			t.Errorf("Cookie = %q, want application cookie", got)
+		}
+		if got := r.URL.RawQuery; got != "channel=app" {
+			t.Errorf("query = %q, want application query", got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+	backendURL, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, portValue, err := net.SplitHostPort(backendURL.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sm := auth.NewSessionManager("vm_session", false, time.Hour)
+	defer sm.Stop()
+	s := &Server{
+		config:         &config.Config{ControlPlaneURL: "https://api.example.com", CookieName: "vm_session"},
+		jwtValidator:   validator,
+		sessionManager: sm,
+	}
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/workspaces/"+workspaceID+"/ports/"+portValue+"?token="+samToken+"&port_token=access-token&channel=app",
+		nil,
+	)
+	req.SetPathValue("workspaceId", workspaceID)
+	req.SetPathValue("port", portValue)
+	req.Header.Set("Authorization", "Bearer app-token")
+	req.Header.Set("Cookie", "vm_session=shared-session; preview_theme=dark")
+
+	s.handleWorkspacePortProxy(recorder, req)
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204: %s", recorder.Code, recorder.Body.String())
+	}
+}
+
+func TestWorkspacePortHandlerRejectsLegacySessionCookieAsPreviewAuthorization(t *testing.T) {
+	const workspaceID = "01KR1000000000000000000001"
+	validator, _ := newWorkspaceCreateJWTValidator(t, "node-1")
+	sm := auth.NewSessionManager("vm_session", false, time.Hour)
+	defer sm.Stop()
+	session, err := sm.CreateSession(&auth.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{Subject: "user-1"},
+		Workspace:        workspaceID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		config:         &config.Config{ControlPlaneURL: "https://api.example.com", CookieName: "vm_session"},
+		jwtValidator:   validator,
+		sessionManager: sm,
+	}
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/workspaces/"+workspaceID+"/ports/3000", nil)
+	req.SetPathValue("workspaceId", workspaceID)
+	req.SetPathValue("port", "3000")
+	req.Header.Set("Cookie", "vm_session="+session.ID)
+
+	s.handleWorkspacePortProxy(recorder, req)
+
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("legacy session cookie authorized preview: status = %d, want 401", recorder.Code)
+	}
+}
+
+func TestPortProxyStripsSAMAuthorizationForAnotherWorkspace(t *testing.T) {
+	const tokenWorkspaceID = "01KR2000000000000000000002"
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	samToken := signPreviewWorkspaceToken(t, privateKey, tokenWorkspaceID)
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("cross-workspace SAM Authorization reached preview app: %q", got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+
+	s := &Server{
+		config:       &config.Config{ControlPlaneURL: "https://api.example.com", CookieName: "vm_session"},
+		jwtValidator: validator,
+	}
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, backend.URL, nil)
+	req.Header.Set("Authorization", "Bearer "+samToken)
+	s.servePortProxy(recorder, req, "01KR1000000000000000000001", 3000, backend.URL, "/")
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", recorder.Code)
+	}
+}
+
 func TestPortProxyPreservesApplicationWebSocketUpgrade(t *testing.T) {
+	const workspaceID = "01KR1000000000000000000001"
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	samToken := signPreviewWorkspaceToken(t, privateKey, workspaceID)
 	backendUpgrader := websocket.Upgrader{CheckOrigin: func(_ *http.Request) bool { return true }}
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer app-token" {
@@ -136,10 +249,26 @@ func TestPortProxyPreservesApplicationWebSocketUpgrade(t *testing.T) {
 		_ = connection.WriteMessage(websocket.TextMessage, []byte("connected"))
 	}))
 	defer backend.Close()
+	backendURL, err := url.Parse(backend.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, portValue, err := net.SplitHostPort(backendURL.Host)
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	s := &Server{config: &config.Config{ControlPlaneURL: "https://api.example.com", CookieName: "vm_session"}}
+	sm := auth.NewSessionManager("vm_session", false, time.Hour)
+	defer sm.Stop()
+	s := &Server{
+		config:         &config.Config{ControlPlaneURL: "https://api.example.com", CookieName: "vm_session"},
+		jwtValidator:   validator,
+		sessionManager: sm,
+	}
 	proxy := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		s.servePortProxy(w, r, "WS001", 3000, backend.URL, "/")
+		r.SetPathValue("workspaceId", workspaceID)
+		r.SetPathValue("port", portValue)
+		s.handleWorkspacePortProxy(w, r)
 	}))
 	defer proxy.Close()
 
@@ -147,7 +276,7 @@ func TestPortProxyPreservesApplicationWebSocketUpgrade(t *testing.T) {
 	header.Set("Authorization", "Bearer app-token")
 	header.Set("Cookie", "vm_session=shared-session; preview_theme=dark")
 	connection, response, err := websocket.DefaultDialer.Dial(
-		"ws"+strings.TrimPrefix(proxy.URL, "http")+"/?token=sam-token&port_token=access-token&channel=app",
+		"ws"+strings.TrimPrefix(proxy.URL, "http")+"/?token="+samToken+"&port_token=access-token&channel=app",
 		header,
 	)
 	if err != nil {

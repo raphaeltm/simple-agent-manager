@@ -452,7 +452,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     headers.set('X-Forwarded-Proto', 'https');
     if (targetPort !== null) {
       stripSamReservedRequestCookies(headers);
-      await stripSamWorkspaceAuthorization(headers, workspaceId, c.env);
+      await stripSamWorkspaceAuthorization(headers, c.env);
     }
 
     log.info('ws_proxy_cf_container_route', {
@@ -560,7 +560,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   headers.set('X-Forwarded-Proto', 'https');
   if (targetPort !== null) {
     stripSamReservedRequestCookies(headers);
-    await stripSamWorkspaceAuthorization(headers, workspaceId, c.env);
+    await stripSamWorkspaceAuthorization(headers, c.env);
   }
 
   const response = await fetch(vmUrl.toString(), {
@@ -580,17 +580,13 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   return response;
 });
 
-async function stripSamWorkspaceAuthorization(
-  headers: Headers,
-  workspaceId: string,
-  env: Env
-): Promise<void> {
+async function stripSamWorkspaceAuthorization(headers: Headers, env: Env): Promise<void> {
   const authorization = headers.get('authorization');
   const match = authorization?.match(/^\s*Bearer\s+(.+?)\s*$/i);
   if (!match?.[1]) return;
   try {
-    const payload = await verifyTerminalToken(match[1], env);
-    if (payload.workspace === workspaceId) headers.delete('authorization');
+    await verifyTerminalToken(match[1], env);
+    headers.delete('authorization');
   } catch {
     // Application-owned bearer tokens are intentionally preserved.
   }

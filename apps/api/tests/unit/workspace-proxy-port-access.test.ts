@@ -23,6 +23,7 @@ const mockVerifyPortAccessToken = vi.fn();
 let workspaceResult: {
   nodeId: string;
   status: string;
+  runtime?: string;
   userId?: string;
   portsPublicEnabled?: boolean;
 } | null = null;
@@ -359,6 +360,34 @@ describe('workspace proxy port-access auth', () => {
     expect(headers.get('authorization')).toBeNull();
   });
 
+  it('strips a valid SAM bearer scoped to a different workspace', async () => {
+    mockVerifyPortAccessToken.mockResolvedValue({
+      workspace: WORKSPACE_ID,
+      port: 3000,
+      subject: 'user-1',
+    });
+    mockVerifyTerminalToken.mockResolvedValue({
+      workspace: '01KR2000000000000000000002',
+      subject: 'user-1',
+    });
+
+    const fetch = vi.fn(async () => new Response('proxied', { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+
+    await worker.default.fetch(
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`, {
+        headers: {
+          cookie: 'sam_port_access=valid-jwt',
+          authorization: 'Bearer sam-other-workspace-jwt',
+        },
+      }),
+      env
+    );
+
+    const headers = new Headers(fetch.mock.calls[0]?.[1]?.headers);
+    expect(headers.get('authorization')).toBeNull();
+  });
+
   it('preserves an arbitrary application Authorization bearer', async () => {
     mockVerifyPortAccessToken.mockResolvedValue({
       workspace: WORKSPACE_ID,
@@ -381,6 +410,86 @@ describe('workspace proxy port-access auth', () => {
 
     const headers = new Headers(fetch.mock.calls[0]?.[1]?.headers);
     expect(headers.get('authorization')).toBe('Bearer app-owned-token');
+  });
+
+  it('isolates credentials on the cf-container path while preserving application contracts', async () => {
+    workspaceResult = {
+      nodeId: 'node-1',
+      status: 'running',
+      runtime: 'cf-container',
+      userId: 'user-1',
+      portsPublicEnabled: false,
+    };
+    mockVerifyPortAccessToken.mockResolvedValue({
+      workspace: WORKSPACE_ID,
+      port: 3000,
+      subject: 'user-1',
+    });
+    const responseHeaders = new Headers();
+    responseHeaders.append('set-cookie', 'sam_port_access=evil; Path=/');
+    responseHeaders.append(
+      'set-cookie',
+      'preview_session=ordinary; Domain=.workspaces.example.com; Path=/'
+    );
+    responseHeaders.set('clear-site-data', '"cache", "cookies"');
+    const proxyHttp = vi.fn(
+      async () => new Response('container page', { status: 200, headers: responseHeaders })
+    );
+    const containerFetch = vi.fn(
+      async () => new Response('container websocket boundary', { status: 200 })
+    );
+    const cfEnv = {
+      ...env,
+      CF_CONTAINER_ENABLED: 'true',
+      VM_AGENT_CONTAINER: {
+        idFromName: vi.fn((name: string) => name),
+        get: vi.fn(() => ({ proxyHttp, fetch: containerFetch })),
+      },
+    };
+
+    const response = await worker.default.fetch(
+      new Request(
+        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/socket?port_token=valid-jwt&token=client-sam-token&channel=app`,
+        {
+          headers: {
+            cookie: 'sam_port_access=valid-jwt; vm_session=shared-session; preview_theme=dark',
+            authorization: 'Bearer app-owned-token',
+          },
+        }
+      ),
+      cfEnv
+    );
+
+    expect(response.status).toBe(200);
+    expect(proxyHttp).toHaveBeenCalledOnce();
+    const request = proxyHttp.mock.calls[0]?.[0] as Request;
+    expect(request.url).toContain('/workspaces/' + WORKSPACE_ID + '/ports/3000/socket');
+    expect(new URL(request.url).searchParams.get('channel')).toBe('app');
+    expect(new URL(request.url).searchParams.get('port_token')).toBeNull();
+    expect(new URL(request.url).searchParams.get('token')).toBe('backend-port-token');
+    expect(request.headers.get('authorization')).toBe('Bearer app-owned-token');
+    expect(request.headers.get('cookie')).toBe('preview_theme=dark');
+    expect(response.headers.get('set-cookie')).toContain('preview_session=ordinary');
+    expect(response.headers.get('set-cookie')).not.toMatch(/Domain=/i);
+    expect(response.headers.get('set-cookie')).not.toContain('sam_port_access=');
+    expect(response.headers.get('clear-site-data')).toBe('"cache"');
+
+    const upgradeResponse = await worker.default.fetch(
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/socket`, {
+        headers: {
+          cookie: 'sam_port_access=valid-jwt; vm_session=shared-session; preview_theme=dark',
+          authorization: 'Bearer app-owned-token',
+          connection: 'Upgrade',
+          upgrade: 'websocket',
+        },
+      }),
+      cfEnv
+    );
+    expect(upgradeResponse.status).toBe(200);
+    expect(containerFetch).toHaveBeenCalledOnce();
+    const upgradeRequest = containerFetch.mock.calls[0]?.[0] as Request;
+    expect(upgradeRequest.headers.get('authorization')).toBe('Bearer app-owned-token');
+    expect(upgradeRequest.headers.get('cookie')).toBe('preview_theme=dark');
   });
 
   it('preserves ordinary response cookies as host-only and blocks reserved cookies', async () => {

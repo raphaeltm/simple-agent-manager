@@ -228,6 +228,12 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	for _, origin := range c.AllowedOrigins {
+		if strings.Contains(origin, "*") {
+			errs = append(errs, fmt.Errorf("ALLOWED_ORIGINS must contain exact origins only, got %q", origin))
+		}
+	}
+
 	if c.ErrorReportEventLimit < 0 {
 		errs = append(errs, fmt.Errorf(
 			"ERROR_REPORT_EVENT_LIMIT must be non-negative, got %d",

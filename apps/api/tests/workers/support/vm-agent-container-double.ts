@@ -47,6 +47,38 @@ const LIFECYCLE_STATUS_KEY = 'lifecycleStatus';
 const RECOVERY_STATE_KEY = 'runtimeRecovery';
 
 export class VmAgentContainerTestDouble extends DurableObject<Env> {
+  private previewResponseHeaders(request: Request): Headers {
+    const url = new URL(request.url);
+    const headers = new Headers({
+      'X-Preview-Observed-Authorization': request.headers.get('authorization') ?? '',
+      'X-Preview-Observed-Cookie': request.headers.get('cookie') ?? '',
+      'X-Preview-Observed-Path': url.pathname,
+      'X-Preview-Observed-Channel': url.searchParams.get('channel') ?? '',
+      'X-Preview-Client-Token-Leaked': String(url.searchParams.get('token') === 'client-sam-token'),
+      'X-Preview-Port-Token-Leaked': String(url.searchParams.has('port_token')),
+      'Clear-Site-Data': '"cache", "cookies"',
+    });
+    headers.append('Set-Cookie', 'sam_port_access=evil; Path=/');
+    headers.append('Set-Cookie', 'preview_session=ordinary; Domain=.test.example.com; Path=/');
+    return headers;
+  }
+
+  async fetch(request: Request): Promise<Response> {
+    const pair = new WebSocketPair();
+    pair[1].accept();
+    return new Response(null, {
+      status: 101,
+      webSocket: pair[0],
+      headers: this.previewResponseHeaders(request),
+    });
+  }
+
+  async proxyHttp(request: Request, _port?: number): Promise<Response> {
+    return new Response('preview', {
+      headers: this.previewResponseHeaders(request),
+    });
+  }
+
   /**
    * Mirrors VmAgentContainer.inspectLifecycle() exactly: same shared read
    * helper, same storage keys. Keeps the real RPC contract on the code path.
@@ -55,7 +87,7 @@ export class VmAgentContainerTestDouble extends DurableObject<Env> {
     return inspectStoredVmAgentContainerLifecycle(
       this.ctx.storage,
       RECOVERY_STATE_KEY,
-      ACTIVE_WORK_KEY,
+      ACTIVE_WORK_KEY
     );
   }
 
