@@ -94,6 +94,14 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function isMissingActiveAgentSession(error: unknown): boolean {
+  return (
+    error instanceof NodeAgentHttpError &&
+    error.statusCode === 404 &&
+    error.responseBody.toLowerCase().includes('no active agent session found')
+  );
+}
+
 function legacyCapabilities(runtimeIdentity: string): VmPromptDeliveryCapabilities {
   return {
     protocolVersion: 0,
@@ -255,6 +263,20 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
           kind: 'failed',
           reason: 'delivery_conflict',
           error: 'deliveryId already belongs to a different prompt intent',
+          runtimeIdentity: capabilities.runtimeIdentity,
+          capabilities,
+        };
+      }
+      // During cold restore, D1 can expose the replacement agent-session row
+      // just before the VM has registered its in-memory SessionHost. The VM's
+      // narrow 404 means "not ready yet", not that this durable chat target is
+      // permanently gone. Keep retrying until the delivery TTL; other 404s and
+      // 410s still fail closed below.
+      if (isMissingActiveAgentSession(error)) {
+        return {
+          kind: 'retry',
+          reason: 'not_ready',
+          error: errorMessage(error),
           runtimeIdentity: capabilities.runtimeIdentity,
           capabilities,
         };

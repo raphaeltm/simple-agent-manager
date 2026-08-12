@@ -322,6 +322,35 @@ describe('VM prompt delivery adapter', () => {
     expect(result).toMatchObject({ kind: 'retry', reason: 'busy' });
   });
 
+  it('retries while a cold-restored agent session is not registered in the VM yet', async () => {
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    mocks.sendPromptToAgentOnNode.mockRejectedValue(
+      new mocks.NodeAgentHttpError(404, JSON.stringify({ error: 'no active agent session found' }))
+    );
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.submit(input(false));
+
+    expect(result).toMatchObject({
+      kind: 'retry',
+      reason: 'not_ready',
+      runtimeIdentity: 'runtime-vm-01',
+    });
+  });
+
+  it.each([
+    [404, JSON.stringify({ error: 'workspace not found' })],
+    [410, JSON.stringify({ error: 'agent session stopped' })],
+  ])('keeps terminal VM HTTP %s responses terminal', async (status, body) => {
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    mocks.sendPromptToAgentOnNode.mockRejectedValue(new mocks.NodeAgentHttpError(status, body));
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+
+    const result = await adapter.submit(input(false));
+
+    expect(result).toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+  });
+
   it('replays only after a positive same-runtime 404 not_found receipt', async () => {
     mocks.nodeAgentRequest
       .mockResolvedValueOnce(protocolFixture.capabilities)
