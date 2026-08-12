@@ -164,7 +164,7 @@ async function seedTask(input: {
   id: string;
   projectId: string;
   userId: string;
-  sessionId: string;
+  sessionId: string | null;
   workspaceId: string | null;
   status?: string;
 }): Promise<void> {
@@ -744,6 +744,35 @@ describe('terminal cleanup service — internal defence in depth', () => {
     expect(mocks.stopSession).not.toHaveBeenCalled();
     expect(mocks.stopNodeResources).toHaveBeenCalledWith(
       'node-internal-null-backlink',
+      CALLER,
+      env
+    );
+  });
+
+  it('CONTROL: a legacy task without a session backlink still cleans its authorized workspace compute', async () => {
+    await seedNode('node-legacy-task-backlink', CALLER);
+    await seedWorkspace({
+      id: 'ws-legacy-task-backlink',
+      projectId: PROJECT,
+      userId: CALLER,
+      nodeId: 'node-legacy-task-backlink',
+      chatSessionId: 'workspace-session-not-owned-by-task',
+    });
+    await seedTask({
+      id: 'task-legacy-task-backlink',
+      projectId: PROJECT,
+      userId: CALLER,
+      sessionId: null,
+      workspaceId: 'ws-legacy-task-backlink',
+    });
+
+    await cleanupTerminalTaskResources(env, 'task-legacy-task-backlink', {
+      status: 'completed',
+    });
+
+    expect(mocks.stopSession).not.toHaveBeenCalled();
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith(
+      'node-legacy-task-backlink',
       CALLER,
       env
     );

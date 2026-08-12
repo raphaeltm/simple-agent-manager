@@ -100,7 +100,9 @@ export async function cleanupTerminalTaskResources(
     workspace.id !== task.workspaceId ||
     workspace.projectId !== task.projectId ||
     (options.requiredUserId && workspace.userId !== options.requiredUserId) ||
-    (workspace.chatSessionId !== null && workspace.chatSessionId !== task.chatSessionId)
+    (workspace.chatSessionId !== null &&
+      task.chatSessionId !== null &&
+      workspace.chatSessionId !== task.chatSessionId)
   ) {
     log.info('task.terminal_cleanup.workspace_scope_rejected', {
       taskId,
@@ -116,7 +118,7 @@ export async function cleanupTerminalTaskResources(
     return;
   }
 
-  if (workspace.chatSessionId) {
+  if (workspace.chatSessionId && workspace.chatSessionId === task.chatSessionId) {
     try {
       if (options.status === 'failed') {
         await projectDataService.failSession(
