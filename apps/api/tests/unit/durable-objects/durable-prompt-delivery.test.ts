@@ -182,6 +182,42 @@ describe('ProjectData durable prompt delivery', () => {
     expect(claimDuePromptDeliveries(sql, config, 40_000)).toHaveLength(0);
   });
 
+  it('keeps a cold-start busy delivery retryable at the attempt cap until TTL', () => {
+    accept();
+    let now = 10_000;
+
+    for (let attempt = 0; attempt < config.maxAttempts + 2; attempt += 1) {
+      const [claim] = claimDuePromptDeliveries(sql, config, now);
+      expect(claim?.mode).toBe('submit');
+      expect(
+        applyPromptDeliveryResult(
+          sql,
+          claim!,
+          {
+            kind: 'retry',
+            reason: 'not_ready',
+            error: 'replacement agent is still starting',
+            runtimeIdentity: 'runtime-1',
+            capabilities,
+          },
+          config,
+          now
+        )
+      ).toBe(true);
+
+      const pending = mailbox.getMessage(sql, 'delivery-1');
+      expect(pending?.deliveryState).toBe('retry_wait');
+      expect(pending?.terminalReason).toBeNull();
+      expect(pending?.deliveryAttempts).toBeLessThan(config.maxAttempts);
+      now = pending!.nextAttemptAt!;
+    }
+
+    expect(expireDuePromptDeliveries(sql, config, 69_999)).toEqual({ expired: 0, failed: 0 });
+    expect(mailbox.getMessage(sql, 'delivery-1')?.deliveryState).toBe('retry_wait');
+    expect(expireDuePromptDeliveries(sql, config, 70_000)).toEqual({ expired: 1, failed: 0 });
+    expect(mailbox.getMessage(sql, 'delivery-1')?.terminalReason).toBe('ttl_expired');
+  });
+
   it('reconciles a stale in-flight attempt without replaying it', () => {
     accept();
     const [claim] = claimDuePromptDeliveries(sql, config, 10_000);

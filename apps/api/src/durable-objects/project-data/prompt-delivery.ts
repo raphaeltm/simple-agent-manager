@@ -335,16 +335,25 @@ export function applyPromptDeliveryResult(
   if (result.kind === 'retry') {
     const nextAttemptAt =
       now + promptDeliveryBackoffMs(Math.max(1, claim.message.deliveryAttempts), config);
+    // A retry result means the target is alive but temporarily unavailable
+    // (for example, a replacement VM is still installing/loading its agent).
+    // Do not let that readiness wait become a permanent max-attempts failure:
+    // retain the capped attempt ordinal for backoff, while the delivery TTL
+    // remains the hard bound. Rows stranded at the cap without an applied
+    // result are still failed by expireDuePromptDeliveries above.
+    const retryAttemptOrdinal = Math.max(0, config.maxAttempts - 1);
     return (
       sql.exec(
         `UPDATE session_inbox
        SET delivery_state = 'retry_wait',
+           delivery_attempts = MIN(delivery_attempts, ?),
            next_attempt_at = ?,
            last_error = ?,
            runtime_identity = COALESCE(?, runtime_identity),
            adapter_protocol_version = ?,
            receipt_supported = ?
        WHERE id = ? AND delivery_state = 'delivering' AND attempt_id = ?`,
+        retryAttemptOrdinal,
         nextAttemptAt,
         boundedError(result.error),
         result.runtimeIdentity,
