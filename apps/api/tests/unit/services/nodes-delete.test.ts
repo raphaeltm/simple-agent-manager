@@ -187,6 +187,28 @@ describe('node resource deletion services', () => {
     expect(destroyVmAgentContainer).toHaveBeenCalledWith(ENV, 'cf-1');
   });
 
+  it('stopNodeResources rejects managed cf-container destruction without an exclusive workspace claim', async () => {
+    nodeRows.push({
+      id: 'cf-1',
+      userId: 'user-1',
+      name: 'cf node',
+      status: 'running',
+      nodeClass: 'managed',
+      runtime: 'cf-container',
+      providerInstanceId: null,
+      cloudProvider: null,
+      backendDnsRecordId: null,
+      credentialAttributionUserId: null,
+      credentialAttributionSource: 'user',
+      credentialAttributionProjectId: null,
+    });
+
+    await expect(stopNodeResources('cf-1', 'user-1', ENV)).rejects.toThrow(
+      /requires an exclusive workspace claim/
+    );
+    expect(destroyVmAgentContainer).not.toHaveBeenCalled();
+  });
+
   it('deleteNodeResources does NOT destroy a container for a user-owned node', async () => {
     // BYO nodes are never cf-container; the explicit guard proves it (even if runtime leaked in).
     nodeRows.push(userOwnedNode({ runtime: 'cf-container' }));

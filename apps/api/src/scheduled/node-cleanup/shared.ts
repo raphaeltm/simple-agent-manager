@@ -34,6 +34,8 @@ import { deleteNodeResources } from '../../services/nodes';
 import { persistError } from '../../services/observability';
 
 export const DEFAULT_CF_CONTAINER_TERMINAL_TASK_SWEEP_LIMIT = 25;
+export const NODE_DESTRUCTIVE_ACTIVE_WORKSPACE_STATUSES_SQL =
+  "'running', 'creating', 'pending', 'recovery', 'sleeping'";
 
 export type CleanupDb = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -274,7 +276,7 @@ export async function destroyNodeForCleanup(
        AND NOT EXISTS (
          SELECT 1 FROM workspaces active_ws
          WHERE active_ws.node_id = nodes.id
-           AND active_ws.status IN ('running', 'creating', 'pending', 'recovery')
+           AND active_ws.status IN (${NODE_DESTRUCTIVE_ACTIVE_WORKSPACE_STATUSES_SQL})
        )
        AND NOT EXISTS (
          SELECT 1 FROM tasks active_task

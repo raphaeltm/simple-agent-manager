@@ -43,6 +43,7 @@ function logWorkspaceNodeCleanupFailure(
 }
 
 async function cleanupWorkspaceNode(options: {
+  db: Db;
   env: Env;
   workspace: schema.Workspace;
   userId: string;
@@ -54,7 +55,13 @@ async function cleanupWorkspaceNode(options: {
 
   try {
     if (node.runtime === 'cf-container' && node.status !== 'deleted') {
-      await stopNodeResources(workspace.nodeId, userId, env);
+      await options.db
+        .update(schema.workspaces)
+        .set({ status: 'stopping', updatedAt: new Date().toISOString() })
+        .where(and(eq(schema.workspaces.id, workspace.id), eq(schema.workspaces.userId, userId)));
+      await stopNodeResources(workspace.nodeId, userId, env, {
+        exclusiveWorkspaceId: workspace.id,
+      });
       return;
     }
     if (node.status === 'running' && node.healthStatus !== 'unhealthy') {
@@ -80,7 +87,7 @@ export async function cleanupWorkspaceForDeletion(options: WorkspaceDeletionClea
       .limit(1);
 
     if (node) {
-      await cleanupWorkspaceNode({ env, workspace, userId, node, logContext });
+      await cleanupWorkspaceNode({ db, env, workspace, userId, node, logContext });
     }
   }
 

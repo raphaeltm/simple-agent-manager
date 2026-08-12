@@ -128,4 +128,52 @@ describe('destroyNodeForCleanup claim protocol', () => {
       .get('node-active-sibling') as { status: string };
     expect(node.status).toBe('running');
   });
+
+  it('does not call the provider when a resumable sleeping workspace is attached', async () => {
+    const db = drizzle(env.DATABASE, { schema });
+    await db.insert(schema.nodes).values({
+      id: 'node-sleeping-sibling',
+      userId: 'user-sleeping-sibling',
+      name: 'node-sleeping-sibling',
+      status: 'running',
+      nodeRole: 'workspace',
+      nodeClass: 'managed',
+      runtime: 'vm',
+    } as typeof schema.nodes.$inferInsert);
+    await db.insert(schema.workspaces).values({
+      id: 'ws-sleeping-sibling',
+      nodeId: 'node-sleeping-sibling',
+      userId: 'user-sleeping-sibling',
+      projectId: 'project-sleeping-sibling',
+      name: 'ws-sleeping-sibling',
+      repository: 'org/repo',
+      vmSize: 'small',
+      vmLocation: 'nbg1',
+      status: 'sleeping',
+    } as typeof schema.workspaces.$inferInsert);
+
+    const destroyed = await destroyNodeForCleanup(
+      db,
+      env,
+      '2026-08-12T12:00:00.000Z',
+      { id: 'node-sleeping-sibling', user_id: 'user-sleeping-sibling', status: 'running' },
+      {
+        logEvent: 'test.destroying_sleeping_sibling',
+        failureLogEvent: 'test.sleeping_sibling_destroy_failed',
+        successMessage: 'destroyed test node',
+        failureMessagePrefix: 'failed test node',
+        recoveryType: 'test_node_cleanup',
+        failureRecoveryType: 'test_node_cleanup_failure',
+        failureBackoffMs: 60_000,
+        context: {},
+      }
+    );
+
+    expect(destroyed).toBe(false);
+    expect(mocks.deleteNodeResources).not.toHaveBeenCalled();
+    const node = sqlite
+      .prepare(`SELECT status FROM nodes WHERE id = ?`)
+      .get('node-sleeping-sibling') as { status: string };
+    expect(node.status).toBe('running');
+  });
 });

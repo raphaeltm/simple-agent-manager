@@ -114,7 +114,9 @@ lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) =>
               });
             });
           }
-          await stopNodeResources(nodeId, userId, c.env);
+          await stopNodeResources(nodeId, userId, c.env, {
+            exclusiveWorkspaceId: workspace.id,
+          });
           await innerDb
             .update(schema.agentSessions)
             .set({

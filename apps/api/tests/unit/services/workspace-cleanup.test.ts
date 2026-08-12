@@ -45,8 +45,13 @@ function buildDb(nodeRows: unknown[]) {
       where: vi.fn(() => Promise.resolve()),
     };
   });
+  const update = vi.fn(() => ({
+    set: vi.fn(() => ({
+      where: vi.fn(() => Promise.resolve()),
+    })),
+  }));
 
-  return { db: { select, delete: deleteFn }, deletedTables };
+  return { db: { select, delete: deleteFn, update }, deletedTables };
 }
 
 function workspace(overrides: Partial<Workspace> = {}): Workspace {
@@ -134,7 +139,9 @@ describe('cleanupWorkspaceForDeletion', () => {
       userId: 'user-cleanup-1',
     });
 
-    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-cleanup-1', 'user-cleanup-1', env);
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-cleanup-1', 'user-cleanup-1', env, {
+      exclusiveWorkspaceId: 'ws-cleanup-1',
+    });
     expect(mocks.deleteWorkspaceOnNode).not.toHaveBeenCalled();
     expect(deletedTables).toEqual(['agent_sessions', 'workspaces']);
   });
@@ -154,7 +161,9 @@ describe('cleanupWorkspaceForDeletion', () => {
       userId: 'user-cleanup-1',
     });
 
-    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-cleanup-1', 'user-cleanup-1', env);
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-cleanup-1', 'user-cleanup-1', env, {
+      exclusiveWorkspaceId: 'ws-cleanup-1',
+    });
     expect(mocks.deleteWorkspaceOnNode).not.toHaveBeenCalled();
   });
 

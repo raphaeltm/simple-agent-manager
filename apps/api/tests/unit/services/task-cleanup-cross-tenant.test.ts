@@ -140,6 +140,28 @@ async function readWorkspaceStatus(workspaceId = 'ws-victim'): Promise<string | 
   return row?.status;
 }
 
+async function seedOpenComputeUsage(workspaceId = 'ws-victim', nodeId = 'node-victim'): Promise<void> {
+  const db = drizzle(env.DATABASE, { schema });
+  await db.insert(schema.computeUsage).values({
+    id: `usage-${workspaceId}`,
+    userId: VICTIM,
+    workspaceId,
+    nodeId,
+    serverType: 'cf-container',
+    vcpuCount: 2,
+    credentialSource: 'platform',
+    startedAt: '2026-08-12T11:00:00.000Z',
+    endedAt: null,
+  } as typeof schema.computeUsage.$inferInsert);
+}
+
+function readComputeUsageEndedAt(workspaceId = 'ws-victim'): string | null | undefined {
+  const row = sqlite
+    .prepare(`SELECT ended_at FROM compute_usage WHERE workspace_id = ?`)
+    .get(workspaceId) as { ended_at: string | null } | undefined;
+  return row?.ended_at;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.stopWorkspaceOnNode.mockResolvedValue(undefined);
@@ -209,12 +231,14 @@ describe('cleanupTaskRun — cross-tenant compute teardown (real SQLite)', () =>
 
   it('CONTROL (cf-container): the owner still destroys their own container node', async () => {
     await seedVictimTaskRun('cf-container');
+    await seedOpenComputeUsage();
 
     await cleanupTaskRun('task-victim', env, undefined, VICTIM);
 
     expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-victim', VICTIM, env, {
       exclusiveWorkspaceId: 'ws-victim',
     });
+    expect(readComputeUsageEndedAt()).toEqual(expect.any(String));
   });
 
   it('CONTROL (internal caller): omitting requiredUserId still cleans up as the task owner', async () => {

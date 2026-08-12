@@ -480,6 +480,14 @@ export async function stopNodeResources(
   }
 
   let claimedExclusiveNodeStatus: string | null = null;
+  if (node.runtime === 'cf-container' && !options.exclusiveWorkspaceId) {
+    log.warn('node_stop.cf_container_missing_exclusive_workspace', {
+      nodeId,
+      action: 'rejected',
+    });
+    throw new Error('cf-container node stop requires an exclusive workspace claim');
+  }
+
   if (node.runtime === 'cf-container' && options.exclusiveWorkspaceId) {
     const claim = await env.DATABASE.prepare(
       `UPDATE nodes

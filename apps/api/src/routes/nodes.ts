@@ -319,6 +319,16 @@ nodesRoutes.post('/:id/stop', async (c) => {
     .select({ id: schema.workspaces.id, status: schema.workspaces.status })
     .from(schema.workspaces)
     .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
+  const cfContainerExclusiveWorkspace =
+    node.runtime === 'cf-container'
+      ? workspaceRows.length === 1
+        ? workspaceRows[0]
+        : null
+      : null;
+
+  if (node.runtime === 'cf-container' && !cfContainerExclusiveWorkspace) {
+    throw errors.conflict('Cannot stop cf-container node without exactly one workspace');
+  }
 
   if (node.status === 'running' && node.healthStatus !== 'unhealthy') {
     for (const workspace of workspaceRows) {
@@ -340,9 +350,27 @@ nodesRoutes.post('/:id/stop', async (c) => {
     }
   }
 
-  await stopNodeResources(nodeId, userId, c.env);
-
   const now = new Date().toISOString();
+  if (cfContainerExclusiveWorkspace) {
+    await db
+      .update(schema.workspaces)
+      .set({ status: 'stopping', updatedAt: now })
+      .where(
+        and(
+          eq(schema.workspaces.id, cfContainerExclusiveWorkspace.id),
+          eq(schema.workspaces.userId, userId)
+        )
+      );
+  }
+
+  if (cfContainerExclusiveWorkspace) {
+    await stopNodeResources(nodeId, userId, c.env, {
+      exclusiveWorkspaceId: cfContainerExclusiveWorkspace.id,
+    });
+  } else {
+    await stopNodeResources(nodeId, userId, c.env);
+  }
+
   const workspaceIds = workspaceRows.map((workspace) => workspace.id);
   if (workspaceIds.length > 0) {
     await db

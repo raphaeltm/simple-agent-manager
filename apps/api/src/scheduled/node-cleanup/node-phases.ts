@@ -28,6 +28,7 @@ import {
   destroyNodeForCleanup,
   LAST_WORKSPACE_ACTIVITY_SQL,
   markNodeCleanupBackoff,
+  NODE_DESTRUCTIVE_ACTIVE_WORKSPACE_STATUSES_SQL,
   type NodeCleanupResult,
 } from './shared';
 
@@ -194,7 +195,7 @@ export async function sweepStaleWarmNodes(
   const staleThreshold = new Date(now.getTime() - config.gracePeriodMs).toISOString();
   const candidates = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.warm_since,
-            COUNT(CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN 1 END) as active_ws_count
+            COUNT(CASE WHEN w.status IN (${NODE_DESTRUCTIVE_ACTIVE_WORKSPACE_STATUSES_SQL}) THEN 1 END) as active_ws_count
      FROM nodes n
      LEFT JOIN workspaces w ON w.node_id = n.id
      WHERE n.warm_since IS NOT NULL
@@ -202,6 +203,7 @@ export async function sweepStaleWarmNodes(
        AND n.status = 'running'
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
+       AND (n.runtime IS NULL OR n.runtime != 'cf-container')
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
      GROUP BY n.id, n.user_id, n.warm_since
      ORDER BY n.warm_since ASC
@@ -252,15 +254,10 @@ export async function sweepStaleWarmNodes(
  * Two ceilings, both keyed on workspace ACTIVITY rather than nominal status:
  *
  *  - `maxLifetimeMs` (4h): node is older than the limit AND holds no active workspaces.
- *  - `absoluteMaxLifetimeMs` (24h): node is older than the hard ceiling AND no workspace
- *    has reported activity within the idle window — even if a workspace row still claims
- *    to be `running`.
  *
- * The second ceiling exists because the first one skips any node with an active
- * workspace, so a workspace row wedged in `running` made a node immortal. Two
- * production nodes survived 1932h and 2135h that way and were only cleared by a
- * manual bulk delete. Gating on activity distinguishes a genuinely busy node from
- * one holding a stuck row, so the backstop cannot destroy live work.
+ * Nodes with active or resumable workspaces are always skipped. Workspace-level
+ * cleanup handles stale rows first; node-level deletion must never cascade a
+ * resumable workspace to deleted.
  */
 export async function sweepMaxLifetimeNodes(
   db: CleanupDb,
@@ -270,12 +267,10 @@ export async function sweepMaxLifetimeNodes(
   result: NodeCleanupResult
 ): Promise<void> {
   const lifetimeThreshold = new Date(now.getTime() - config.maxLifetimeMs).toISOString();
-  const absoluteThreshold = new Date(now.getTime() - config.absoluteMaxLifetimeMs).toISOString();
-  const idleThreshold = new Date(now.getTime() - config.orphanIdleTimeoutMs).toISOString();
 
   const candidates = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.status, n.created_at,
-            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
+            COUNT(DISTINCT CASE WHEN w.status IN (${NODE_DESTRUCTIVE_ACTIVE_WORKSPACE_STATUSES_SQL}) THEN w.id END) as active_ws_count,
             ${LAST_WORKSPACE_ACTIVITY_SQL} as last_activity
      FROM nodes n
      INNER JOIN tasks t ON t.auto_provisioned_node_id = n.id
@@ -284,6 +279,7 @@ export async function sweepMaxLifetimeNodes(
        AND n.status NOT IN ('stopped', 'deleted')
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
+       AND (n.runtime IS NULL OR n.runtime != 'cf-container')
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        AND n.created_at < ?
      GROUP BY n.id, n.user_id, n.status, n.created_at
@@ -301,12 +297,9 @@ export async function sweepMaxLifetimeNodes(
     }>();
 
   for (const node of candidates.results) {
-    const pastAbsoluteCeiling = node.created_at < absoluteThreshold;
-    const workspacesIdle = node.last_activity < idleThreshold;
-
-    if (node.active_ws_count > 0 && !(pastAbsoluteCeiling && workspacesIdle)) {
-      // Genuinely busy, or not yet at the hard ceiling — workspace-level idle
-      // detection handles cleanup at a finer granularity.
+    if (node.active_ws_count > 0) {
+      // Genuinely busy or resumable — workspace-level cleanup handles stale rows
+      // at a finer granularity before any node-level deletion.
       log.info('node_cleanup.max_lifetime_skipped_active_workspaces', {
         nodeId: node.id,
         userId: node.user_id,
@@ -320,27 +313,19 @@ export async function sweepMaxLifetimeNodes(
       continue;
     }
 
-    const viaAbsoluteCeiling = node.active_ws_count > 0;
-
     const destroyed = await destroyNodeForCleanup(db, env, now.toISOString(), node, {
-      logEvent: viaAbsoluteCeiling
-        ? 'node_cleanup.destroying_absolute_max_lifetime'
-        : 'node_cleanup.destroying_max_lifetime',
+      logEvent: 'node_cleanup.destroying_max_lifetime',
       failureLogEvent: 'node_cleanup.max_lifetime_destroy_failed',
-      successMessage: viaAbsoluteCeiling
-        ? 'Destroyed node past absolute lifetime ceiling with only stale workspaces'
-        : 'Destroyed auto-provisioned node exceeding max lifetime (no active workspaces)',
+      successMessage: 'Destroyed auto-provisioned node exceeding max lifetime (no active workspaces)',
       failureMessagePrefix: 'Failed to destroy max-lifetime node',
-      recoveryType: viaAbsoluteCeiling
-        ? 'absolute_max_lifetime_node_cleanup'
-        : 'max_lifetime_node_cleanup',
+      recoveryType: 'max_lifetime_node_cleanup',
       failureRecoveryType: 'max_lifetime_node_cleanup_failure',
       failureBackoffMs: config.failureBackoffMs,
       context: {
         createdAt: node.created_at,
         lastWorkspaceActivity: node.last_activity,
-        staleActiveWorkspaces: viaAbsoluteCeiling ? node.active_ws_count : 0,
-        maxLifetimeMs: viaAbsoluteCeiling ? config.absoluteMaxLifetimeMs : config.maxLifetimeMs,
+        staleActiveWorkspaces: 0,
+        maxLifetimeMs: config.maxLifetimeMs,
       },
     });
 
@@ -368,13 +353,14 @@ export async function sweepStoppedHandoffNodes(
   const threshold = new Date(now.getTime() - config.orphanGracePeriodMs).toISOString();
   const candidates = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.status, n.created_at, n.updated_at,
-            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count
+            COUNT(DISTINCT CASE WHEN w.status IN (${NODE_DESTRUCTIVE_ACTIVE_WORKSPACE_STATUSES_SQL}) THEN w.id END) as active_ws_count
      FROM nodes n
      INNER JOIN tasks t ON t.auto_provisioned_node_id = n.id
      LEFT JOIN workspaces w ON w.node_id = n.id
      WHERE n.status = 'stopped'
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
+       AND (n.runtime IS NULL OR n.runtime != 'cf-container')
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        AND n.created_at < ?
      GROUP BY n.id, n.user_id, n.status, n.created_at, n.updated_at
@@ -452,7 +438,7 @@ export async function sweepIncompatibleVmAgentNodes(
 
   const candidates = await env.DATABASE.prepare(
     `SELECT n.id, n.user_id, n.status, n.created_at, n.agent_version,
-            COUNT(DISTINCT CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN w.id END) as active_ws_count,
+            COUNT(DISTINCT CASE WHEN w.status IN (${NODE_DESTRUCTIVE_ACTIVE_WORKSPACE_STATUSES_SQL}) THEN w.id END) as active_ws_count,
             EXISTS (
               SELECT 1 FROM tasks active
               WHERE active.auto_provisioned_node_id = n.id
@@ -463,6 +449,7 @@ export async function sweepIncompatibleVmAgentNodes(
      WHERE n.status = 'running'
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
+       AND (n.runtime IS NULL OR n.runtime != 'cf-container')
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        AND (n.runtime IS NULL OR n.runtime = 'vm')
        AND (n.agent_version IS NULL OR n.agent_version != ?)
@@ -582,7 +569,7 @@ export async function sweepIdleOrphanNodes(
        AND NOT EXISTS (
          SELECT 1 FROM workspaces aw
          WHERE aw.node_id = n.id
-           AND aw.status IN ('running', 'creating', 'recovery')
+           AND aw.status IN (${NODE_DESTRUCTIVE_ACTIVE_WORKSPACE_STATUSES_SQL})
        )
      GROUP BY n.id, n.user_id, n.status, n.created_at, n.warm_since
      HAVING ${LAST_WORKSPACE_ACTIVITY_SQL} < ?
