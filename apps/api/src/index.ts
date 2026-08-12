@@ -33,6 +33,11 @@ import type { Env } from './env';
 import { resolveCredentialedCorsOrigin } from './lib/cors-origin';
 import { log, serializeError } from './lib/logger';
 import { resolvePagesProxyTarget } from './lib/pages-proxy';
+import {
+  isolatePreviewResponse,
+  isTrustedWorkspaceWebSocketOrigin,
+  stripSamReservedRequestCookies,
+} from './lib/workspace-preview-security';
 import { parseWorkspaceSubdomain } from './lib/workspace-subdomain';
 import { analyticsMiddleware } from './middleware/analytics';
 import { handleAppError } from './middleware/app-error-handler';
@@ -217,6 +222,14 @@ app.use('*', async (c, next) => {
     return c.json({ error: 'INVALID_WORKSPACE', message: 'Invalid workspace subdomain' }, 400);
   }
   const { workspaceId, targetPort } = parsed;
+
+  if (
+    targetPort === null &&
+    c.req.raw.headers.get('upgrade')?.toLowerCase() === 'websocket' &&
+    !isTrustedWorkspaceWebSocketOrigin(c.req.raw.headers.get('origin'), baseDomain)
+  ) {
+    return c.json({ error: 'FORBIDDEN', message: 'Untrusted WebSocket origin' }, 403);
+  }
 
   // --- Port-access authentication (cookie + token handshake) ---
   // For port-specific subdomains (ws-{id}--{port}), check the port-access cookie
@@ -413,6 +426,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
       const subPath = url.pathname === '/' ? '' : url.pathname;
       containerUrl.pathname = `/workspaces/${workspaceId}/ports/${targetPort}${subPath}`;
       containerUrl.searchParams.delete('port_token');
+      containerUrl.searchParams.delete('token');
       try {
         const { token } = await signTerminalToken('port-proxy', workspaceId, c.env);
         containerUrl.searchParams.set('token', token);
@@ -436,6 +450,10 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     headers.set('X-SAM-Workspace-Id', workspaceId);
     headers.set('X-Forwarded-Host', hostname);
     headers.set('X-Forwarded-Proto', 'https');
+    if (targetPort !== null) {
+      stripSamReservedRequestCookies(headers);
+      await stripSamWorkspaceAuthorization(headers, workspaceId, c.env);
+    }
 
     log.info('ws_proxy_cf_container_route', {
       workspaceId,
@@ -466,13 +484,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     const response = await fetchVmAgentContainer(c.env, containerId, containerRequest, vmAgentPort);
 
     if (targetPort !== null) {
-      const responseHeaders = new Headers(response.headers);
-      responseHeaders.delete('set-cookie');
-      return new Response(response.body, {
-        status: response.status,
-        statusText: response.statusText,
-        headers: responseHeaders,
-      });
+      return isolatePreviewResponse(response);
     }
     return response;
   }
@@ -514,6 +526,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
 
     // Strip port_token from the proxied URL (it was already validated above).
     vmUrl.searchParams.delete('port_token');
+    vmUrl.searchParams.delete('token');
 
     // Inject a workspace-scoped JWT so the VM agent can authenticate this request.
     // Port-forwarded URLs are accessed directly by browsers which have no pre-existing
@@ -545,6 +558,10 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   // the original. X-Forwarded-Proto is always https since clients connect via CF edge.
   headers.set('X-Forwarded-Host', hostname);
   headers.set('X-Forwarded-Proto', 'https');
+  if (targetPort !== null) {
+    stripSamReservedRequestCookies(headers);
+    await stripSamWorkspaceAuthorization(headers, workspaceId, c.env);
+  }
 
   const response = await fetch(vmUrl.toString(), {
     method: c.req.raw.method,
@@ -554,20 +571,30 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     duplex: c.req.raw.body ? 'half' : undefined,
   });
 
-  // 5e: Strip Set-Cookie headers from container responses on port-proxy path.
-  // Prevents a malicious container app from overwriting the sam_port_access cookie.
+  // Keep application cookies host-only while blocking reserved SAM cookies and
+  // cookie-clearing response directives from the untrusted preview boundary.
   if (targetPort !== null) {
-    const headers = new Headers(response.headers);
-    headers.delete('set-cookie');
-    return new Response(response.body, {
-      status: response.status,
-      statusText: response.statusText,
-      headers,
-    });
+    return isolatePreviewResponse(response);
   }
 
   return response;
 });
+
+async function stripSamWorkspaceAuthorization(
+  headers: Headers,
+  workspaceId: string,
+  env: Env
+): Promise<void> {
+  const authorization = headers.get('authorization');
+  const match = authorization?.match(/^\s*Bearer\s+(.+?)\s*$/i);
+  if (!match?.[1]) return;
+  try {
+    const payload = await verifyTerminalToken(match[1], env);
+    if (payload.workspace === workspaceId) headers.delete('authorization');
+  } catch {
+    // Application-owned bearer tokens are intentionally preserved.
+  }
+}
 
 app.use('*', requestLoggingMiddleware());
 

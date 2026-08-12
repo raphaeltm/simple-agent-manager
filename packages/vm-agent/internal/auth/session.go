@@ -30,7 +30,7 @@ type SessionManager struct {
 	ttl             time.Duration
 	cleanupInterval time.Duration
 	maxSessions     int
-	cookieDomain    string // Domain for cookie sharing across subdomains (e.g., ".example.com")
+	cookieDomain    string // Legacy parent domain used only to expire old shared cookies.
 	stopCleanup     chan struct{}
 	cleanupDone     chan struct{}
 	stopOnce        sync.Once
@@ -43,7 +43,7 @@ type SessionManagerConfig struct {
 	TTL             time.Duration
 	CleanupInterval time.Duration
 	MaxSessions     int
-	CookieDomain    string // Domain for cookie sharing (e.g., ".example.com"); empty = exact hostname
+	CookieDomain    string // Legacy parent domain used only for migration cleanup; empty disables cleanup.
 }
 
 // NewSessionManager creates a new session manager.
@@ -181,26 +181,34 @@ func (sm *SessionManager) ClearCookieForWorkspace(w http.ResponseWriter, workspa
 }
 
 func (sm *SessionManager) setCookieWithName(w http.ResponseWriter, name string, session *Session) {
-	sameSite := http.SameSiteStrictMode
-	if sm.cookieDomain != "" {
-		sameSite = http.SameSiteLaxMode
-	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     name,
 		Value:    session.ID,
 		Path:     "/",
-		Domain:   sm.cookieDomain,
 		Expires:  session.ExpiresAt,
 		HttpOnly: true,
 		Secure:   sm.secure,
-		SameSite: sameSite,
+		SameSite: http.SameSiteStrictMode,
 	})
+	sm.expireLegacyDomainCookie(w, name)
 }
 
 func (sm *SessionManager) clearCookieWithName(w http.ResponseWriter, name string) {
-	sameSite := http.SameSiteStrictMode
-	if sm.cookieDomain != "" {
-		sameSite = http.SameSiteLaxMode
+	http.SetCookie(w, &http.Cookie{
+		Name:     name,
+		Value:    "",
+		Path:     "/",
+		Expires:  time.Unix(0, 0),
+		HttpOnly: true,
+		Secure:   sm.secure,
+		SameSite: http.SameSiteStrictMode,
+	})
+	sm.expireLegacyDomainCookie(w, name)
+}
+
+func (sm *SessionManager) expireLegacyDomainCookie(w http.ResponseWriter, name string) {
+	if sm.cookieDomain == "" {
+		return
 	}
 	http.SetCookie(w, &http.Cookie{
 		Name:     name,
@@ -210,7 +218,7 @@ func (sm *SessionManager) clearCookieWithName(w http.ResponseWriter, name string
 		Expires:  time.Unix(0, 0),
 		HttpOnly: true,
 		Secure:   sm.secure,
-		SameSite: sameSite,
+		SameSite: http.SameSiteLaxMode,
 	})
 }
 
@@ -222,43 +230,15 @@ func (sm *SessionManager) DeleteSession(sessionID string) {
 }
 
 // SetCookie sets the session cookie on the response.
-// When CookieDomain is configured, the cookie is shared across all subdomains
-// (e.g., ws-ABC123.example.com and ws-ABC123--3000.example.com).
-// Uses SameSite=Lax when domain is set (required for cross-subdomain cookies)
-// and SameSite=Strict otherwise.
+// New cookies are host-only. If CookieDomain is configured, a narrowly scoped
+// expiry is also emitted to remove the legacy parent-domain copy during rollout.
 func (sm *SessionManager) SetCookie(w http.ResponseWriter, session *Session) {
-	sameSite := http.SameSiteStrictMode
-	if sm.cookieDomain != "" {
-		sameSite = http.SameSiteLaxMode
-	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sm.cookieName,
-		Value:    session.ID,
-		Path:     "/",
-		Domain:   sm.cookieDomain,
-		Expires:  session.ExpiresAt,
-		HttpOnly: true,
-		Secure:   sm.secure,
-		SameSite: sameSite,
-	})
+	sm.setCookieWithName(w, sm.cookieName, session)
 }
 
 // ClearCookie clears the session cookie.
 func (sm *SessionManager) ClearCookie(w http.ResponseWriter) {
-	sameSite := http.SameSiteStrictMode
-	if sm.cookieDomain != "" {
-		sameSite = http.SameSiteLaxMode
-	}
-	http.SetCookie(w, &http.Cookie{
-		Name:     sm.cookieName,
-		Value:    "",
-		Path:     "/",
-		Domain:   sm.cookieDomain,
-		Expires:  time.Unix(0, 0),
-		HttpOnly: true,
-		Secure:   sm.secure,
-		SameSite: sameSite,
-	})
+	sm.clearCookieWithName(w, sm.cookieName)
 }
 
 // cleanup periodically removes expired sessions.

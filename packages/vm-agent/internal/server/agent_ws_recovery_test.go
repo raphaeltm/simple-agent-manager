@@ -19,7 +19,7 @@ func newAgentWSTestServer(t *testing.T) (*Server, *httptest.Server, string) {
 	t.Helper()
 
 	cfg := &config.Config{
-		AllowedOrigins:    []string{"*"},
+		AllowedOrigins:    []string{"https://app.example.com"},
 		WSReadBufferSize:  4096,
 		WSWriteBufferSize: 4096,
 		ContainerMode:     false,
@@ -48,6 +48,21 @@ func newAgentWSTestServer(t *testing.T) (*Server, *httptest.Server, string) {
 	t.Cleanup(ts.Close)
 
 	return s, ts, session.ID
+}
+
+func TestHandleAgentWSAcceptsExactAppOrigin(t *testing.T) {
+	_, ts, cookieSessionID := newAgentWSTestServer(t)
+	url := "ws" + strings.TrimPrefix(ts.URL, "http") + "?sessionId=sess-exact-origin"
+	header := http.Header{}
+	header.Set("Cookie", "session="+cookieSessionID)
+	header.Set("X-SAM-Workspace-Id", "WS_TEST")
+	header.Set("Origin", "https://app.example.com")
+
+	conn, _, err := websocket.DefaultDialer.Dial(url, header)
+	if err != nil {
+		t.Fatalf("exact app origin failed to connect: %v", err)
+	}
+	_ = conn.Close()
 }
 
 func dialAgentWS(t *testing.T, ts *httptest.Server, cookieSessionID, workspaceID, sessionID string) *websocket.Conn {

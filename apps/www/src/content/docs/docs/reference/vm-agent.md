@@ -23,6 +23,7 @@ WebSocket /terminal/ws/multi
 ```
 
 Opens a PTY terminal session inside the workspace container. Supports:
+
 - Binary and text frames
 - Terminal resize events
 - Ring buffer replay on reconnect (catches up missed output)
@@ -105,7 +106,22 @@ GET /workspaces/{workspaceId}/ports
     /workspaces/{workspaceId}/local-forward/{port}/{path...}
 ```
 
-List detected listening ports and proxy HTTP traffic to a service running inside the container (powers exposed-port preview URLs).
+List detected listening ports and proxy HTTP or WebSocket traffic to a service running inside
+the container (powers exposed-port preview URLs). Port services are untrusted application
+origins. Before forwarding, the VM Agent removes SAM-reserved cookies, `token` and
+`port_token` query credentials, and bearer tokens only when they validate as SAM workspace
+JWTs. Arbitrary application `Authorization` headers and application cookies are preserved.
+
+On responses, SAM-reserved `Set-Cookie` values and cookie-clearing `Clear-Site-Data`
+directives are removed. Supported application cookies are preserved with any `Domain`
+attribute removed, keeping them host-only to the exact port-preview hostname. The enforcing
+functions are `stripSAMReservedRequestCookies`, `stripSAMWorkspaceAuthorization`, and
+`sanitizePreviewResponseCookies` in `internal/server`.
+
+Privileged terminal, ACP, boot-log, and log-stream WebSockets use exact configured
+control-plane origins. Wildcard origin configuration is ignored, preview sibling origins are
+rejected before authentication or state mutation, and no-origin non-browser clients retain
+their existing token-authenticated flow.
 
 ### Diagnostics & Observability
 
@@ -127,6 +143,7 @@ The `/debug-package` endpoint bundles cloud-init logs, journald, Docker logs, sy
 ### PTY Manager
 
 Manages terminal sessions with:
+
 - **Session multiplexing** — multiple terminals per workspace
 - **Ring buffer** — stores recent output for replay on reconnect
 - **Lifecycle management** — automatic cleanup on disconnect
@@ -134,6 +151,7 @@ Manages terminal sessions with:
 ### Container Manager
 
 Handles Docker operations:
+
 - `devcontainer up` — build and start devcontainer from repo config
 - `docker exec` — execute commands inside containers
 - Git credential injection — injects GitHub tokens for push access
@@ -142,6 +160,7 @@ Handles Docker operations:
 ### ACP Gateway
 
 Implements the Agent Communication Protocol for AI coding agents:
+
 1. **Initialize** — establish protocol version and capabilities
 2. **NewSession** — create a session with working directory and MCP servers
 3. **Prompt** — send user prompts, receive streaming responses
@@ -151,6 +170,7 @@ Responses are serialized via `orderedPipe` to prevent token reordering from conc
 ### JWT Validator
 
 Validates workspace JWTs using the API's JWKS endpoint:
+
 - Fetches public keys from `/.well-known/jwks.json`
 - Caches keys with periodic refresh
 - Extracts workspace ID and user ID from claims
@@ -159,42 +179,42 @@ Validates workspace JWTs using the API's JWKS endpoint:
 
 Environment variables set by the cloud-init template:
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `NODE_ID` | — | Unique node identifier |
-| `CONTROL_PLANE_URL` | — | API Worker URL for callbacks |
-| `CALLBACK_TOKEN_FILE` | `/etc/sam/callback-token` on cloud-init nodes | Root-only file containing the callback JWT for authenticating callbacks. `CALLBACK_TOKEN` remains a legacy fallback for already-provisioned nodes/manual runs. |
-| `LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `LOG_FORMAT` | `json` | Output format: `json` or `text` |
-| `ACP_PROMPT_RETRY_MAX_RETRIES` | `2` | Max transient provider prompt retries after the initial attempt |
-| `ACP_PROMPT_RETRY_INITIAL_BACKOFF` | `15s` | Initial backoff before retrying transient provider prompt errors |
-| `ACP_PROMPT_RETRY_MAX_BACKOFF` | `2m` | Max exponential backoff for transient provider prompt retries |
-| `ACP_NOTIF_SERIALIZE_TIMEOUT` | `5s` | Timeout for ACP notification serialization |
-| `STANDALONE_CLONE_FILTER` | `blob:none` | Git partial-clone filter for standalone (Cloudflare Container) workspace clones, which run synchronously inside the control plane's create-workspace request (`cloneStandaloneRepository` in `internal/server/standalone_workspace.go`). Set `off` to force full clones. The control plane forwards `CF_CONTAINER_CLONE_FILTER` here. |
-| `GRACEFUL_SHUTDOWN_TIMEOUT` | `30s` | Max time to wait for VM-agent HTTP server shutdown after SIGTERM |
-| `SYSTEM_PROVISIONING_TIMEOUT` | `15m` | Max time for workspace host provisioning before bootstrap |
-| `CF_IP_FETCH_TIMEOUT` | `10s` | Timeout for fetching Cloudflare IP ranges during firewall provisioning |
-| `BOOT_LOG_HTTP_TIMEOUT` | `10s` | Timeout for boot-log callbacks to the control plane |
-| `MCP_SHORT_COMMAND_TIMEOUT` | `10s` | Timeout for short MCP workspace probes such as branch and credential checks |
-| `MCP_DIFF_COMMAND_TIMEOUT` | `30s` | Timeout for MCP diff-summary git commands |
-| `MCP_BUILD_PREPARE_TIMEOUT` | `30s` | Timeout for MCP build/publish preparation probes |
-| `JWKS_FETCH_TIMEOUT` | `10s` | Timeout for VM-agent startup JWKS fetches |
-| `ACP_CREDENTIAL_SYNC_TIMEOUT` | `10s` | Timeout for ACP auth-file sync-back during shutdown |
-| `ACP_ACTIVITY_REPORT_TIMEOUT` | `10s` | Timeout for each ACP activity callback attempt |
-| `DEVCONTAINER_CACHE_PUSH_TIMEOUT` | `10m` | Timeout for best-effort devcontainer cache image pushes |
-| `DEPLOY_PREFLIGHT_COMMAND_TIMEOUT` | `15s` | Timeout for deployment preflight diagnostic commands |
-| `LOG_STREAM_PING_WRITE_TIMEOUT` | `10s` | Write deadline for log-stream WebSocket ping frames |
+| Variable                           | Default                                       | Description                                                                                                                                                                                                                                                                                                                           |
+| ---------------------------------- | --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `NODE_ID`                          | —                                             | Unique node identifier                                                                                                                                                                                                                                                                                                                |
+| `CONTROL_PLANE_URL`                | —                                             | API Worker URL for callbacks                                                                                                                                                                                                                                                                                                          |
+| `CALLBACK_TOKEN_FILE`              | `/etc/sam/callback-token` on cloud-init nodes | Root-only file containing the callback JWT for authenticating callbacks. `CALLBACK_TOKEN` remains a legacy fallback for already-provisioned nodes/manual runs.                                                                                                                                                                        |
+| `LOG_LEVEL`                        | `info`                                        | Log level: `debug`, `info`, `warn`, `error`                                                                                                                                                                                                                                                                                           |
+| `LOG_FORMAT`                       | `json`                                        | Output format: `json` or `text`                                                                                                                                                                                                                                                                                                       |
+| `ACP_PROMPT_RETRY_MAX_RETRIES`     | `2`                                           | Max transient provider prompt retries after the initial attempt                                                                                                                                                                                                                                                                       |
+| `ACP_PROMPT_RETRY_INITIAL_BACKOFF` | `15s`                                         | Initial backoff before retrying transient provider prompt errors                                                                                                                                                                                                                                                                      |
+| `ACP_PROMPT_RETRY_MAX_BACKOFF`     | `2m`                                          | Max exponential backoff for transient provider prompt retries                                                                                                                                                                                                                                                                         |
+| `ACP_NOTIF_SERIALIZE_TIMEOUT`      | `5s`                                          | Timeout for ACP notification serialization                                                                                                                                                                                                                                                                                            |
+| `STANDALONE_CLONE_FILTER`          | `blob:none`                                   | Git partial-clone filter for standalone (Cloudflare Container) workspace clones, which run synchronously inside the control plane's create-workspace request (`cloneStandaloneRepository` in `internal/server/standalone_workspace.go`). Set `off` to force full clones. The control plane forwards `CF_CONTAINER_CLONE_FILTER` here. |
+| `GRACEFUL_SHUTDOWN_TIMEOUT`        | `30s`                                         | Max time to wait for VM-agent HTTP server shutdown after SIGTERM                                                                                                                                                                                                                                                                      |
+| `SYSTEM_PROVISIONING_TIMEOUT`      | `15m`                                         | Max time for workspace host provisioning before bootstrap                                                                                                                                                                                                                                                                             |
+| `CF_IP_FETCH_TIMEOUT`              | `10s`                                         | Timeout for fetching Cloudflare IP ranges during firewall provisioning                                                                                                                                                                                                                                                                |
+| `BOOT_LOG_HTTP_TIMEOUT`            | `10s`                                         | Timeout for boot-log callbacks to the control plane                                                                                                                                                                                                                                                                                   |
+| `MCP_SHORT_COMMAND_TIMEOUT`        | `10s`                                         | Timeout for short MCP workspace probes such as branch and credential checks                                                                                                                                                                                                                                                           |
+| `MCP_DIFF_COMMAND_TIMEOUT`         | `30s`                                         | Timeout for MCP diff-summary git commands                                                                                                                                                                                                                                                                                             |
+| `MCP_BUILD_PREPARE_TIMEOUT`        | `30s`                                         | Timeout for MCP build/publish preparation probes                                                                                                                                                                                                                                                                                      |
+| `JWKS_FETCH_TIMEOUT`               | `10s`                                         | Timeout for VM-agent startup JWKS fetches                                                                                                                                                                                                                                                                                             |
+| `ACP_CREDENTIAL_SYNC_TIMEOUT`      | `10s`                                         | Timeout for ACP auth-file sync-back during shutdown                                                                                                                                                                                                                                                                                   |
+| `ACP_ACTIVITY_REPORT_TIMEOUT`      | `10s`                                         | Timeout for each ACP activity callback attempt                                                                                                                                                                                                                                                                                        |
+| `DEVCONTAINER_CACHE_PUSH_TIMEOUT`  | `10m`                                         | Timeout for best-effort devcontainer cache image pushes                                                                                                                                                                                                                                                                               |
+| `DEPLOY_PREFLIGHT_COMMAND_TIMEOUT` | `15s`                                         | Timeout for deployment preflight diagnostic commands                                                                                                                                                                                                                                                                                  |
+| `LOG_STREAM_PING_WRITE_TIMEOUT`    | `10s`                                         | Write deadline for log-stream WebSocket ping frames                                                                                                                                                                                                                                                                                   |
 
 ### Log Retrieval Settings
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `LOG_RETRIEVAL_DEFAULT_LIMIT` | `200` | Default entries per log page |
-| `LOG_RETRIEVAL_MAX_LIMIT` | `1000` | Max entries per log page |
-| `LOG_STREAM_BUFFER_SIZE` | `100` | Catch-up entries on stream connect |
-| `LOG_READER_TIMEOUT` | `30s` | Timeout for journalctl reads |
-| `LOG_STREAM_PING_INTERVAL` | `30s` | WebSocket ping interval |
-| `LOG_STREAM_PONG_TIMEOUT` | `90s` | WebSocket pong deadline |
+| Variable                      | Default | Description                        |
+| ----------------------------- | ------- | ---------------------------------- |
+| `LOG_RETRIEVAL_DEFAULT_LIMIT` | `200`   | Default entries per log page       |
+| `LOG_RETRIEVAL_MAX_LIMIT`     | `1000`  | Max entries per log page           |
+| `LOG_STREAM_BUFFER_SIZE`      | `100`   | Catch-up entries on stream connect |
+| `LOG_READER_TIMEOUT`          | `30s`   | Timeout for journalctl reads       |
+| `LOG_STREAM_PING_INTERVAL`    | `30s`   | WebSocket ping interval            |
+| `LOG_STREAM_PONG_TIMEOUT`     | `90s`   | WebSocket pong deadline            |
 
 ## Building
 
@@ -209,6 +229,7 @@ GOOS=linux GOARCH=amd64 go build -o bin/vm-agent-linux-amd64 .
 ```
 
 Output binaries:
+
 - `vm-agent-linux-amd64` — production (x86)
 - `vm-agent-linux-arm64` — production (ARM)
 - `vm-agent-darwin-amd64` — local testing (Intel Mac)

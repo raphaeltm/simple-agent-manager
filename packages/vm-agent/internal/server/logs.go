@@ -55,6 +55,9 @@ func (s *Server) handleContainers(w http.ResponseWriter, r *http.Request) {
 
 // handleLogStream serves GET /logs/stream — real-time log streaming via WebSocket.
 func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
+	if s.rejectUntrustedWebSocketOrigin(w, r) {
+		return
+	}
 	if !s.requireNodeEventAuth(w, r) {
 		return
 	}
@@ -66,13 +69,7 @@ func (s *Server) handleLogStream(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	upgrader := websocket.Upgrader{
-		ReadBufferSize:  s.config.WSReadBufferSize,
-		WriteBufferSize: s.config.WSWriteBufferSize,
-		CheckOrigin: func(r *http.Request) bool {
-			return true // Auth is handled by requireNodeEventAuth
-		},
-	}
+	upgrader := s.createUpgrader()
 
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {

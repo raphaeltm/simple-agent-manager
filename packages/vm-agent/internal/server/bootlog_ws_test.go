@@ -1,8 +1,61 @@
 package server
 
 import (
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/gorilla/websocket"
+	"github.com/workspace/vm-agent/internal/auth"
+	"github.com/workspace/vm-agent/internal/config"
 )
+
+func TestBootLogWSOriginPolicy(t *testing.T) {
+	sm := auth.NewSessionManager("session", false, time.Hour)
+	defer sm.Stop()
+	session, err := sm.CreateSession(&auth.Claims{
+		RegisteredClaims: jwt.RegisteredClaims{Subject: "user-1"},
+		Workspace:        "WS_TEST",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{
+		config: &config.Config{
+			AllowedOrigins:    []string{"https://app.example.com"},
+			WorkspaceID:       "WS_TEST",
+			WSReadBufferSize:  4096,
+			WSWriteBufferSize: 4096,
+		},
+		sessionManager:      sm,
+		bootLogBroadcasters: NewBootLogBroadcasterManager(),
+	}
+
+	previewRecorder := httptest.NewRecorder()
+	previewRequest := httptest.NewRequest(http.MethodGet, "/boot-log/ws", nil)
+	previewRequest.Header.Set("Origin", "https://ws-ws-test--3000.example.com")
+	s.handleBootLogWS(previewRecorder, previewRequest)
+	if previewRecorder.Code != http.StatusForbidden {
+		t.Fatalf("preview origin status = %d, want 403", previewRecorder.Code)
+	}
+
+	testServer := httptest.NewServer(http.HandlerFunc(s.handleBootLogWS))
+	defer testServer.Close()
+	header := http.Header{}
+	header.Set("Cookie", "session="+session.ID)
+	header.Set("Origin", "https://app.example.com")
+	conn, _, err := websocket.DefaultDialer.Dial(
+		"ws"+strings.TrimPrefix(testServer.URL, "http"),
+		header,
+	)
+	if err != nil {
+		t.Fatalf("exact app origin failed to connect: %v", err)
+	}
+	_ = conn.Close()
+}
 
 // TestNilBootLogBroadcasterBroadcast verifies that calling Broadcast on a nil
 // *BootLogBroadcaster does not panic. This is the exact crash scenario from

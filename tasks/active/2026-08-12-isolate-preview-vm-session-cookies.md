@@ -19,13 +19,13 @@ This remediation must preserve every valid authenticated terminal, ACP, boot-log
 
 ## Implementation Checklist
 
-- [ ] Add adversarial Worker tests that capture the proxied request and prove SAM-reserved cookies are consumed/removed while intentionally supported ordinary preview cookies remain isolated to the preview path.
-- [ ] Add Go proxy tests proving reserved inbound Cookie values and reserved upstream `Set-Cookie` values cannot cross into/out of preview applications, while ordinary host-only application cookies and WebSocket upgrades remain functional.
-- [ ] Add exact-origin tests for terminal, ACP, boot-log, and reconnect success plus malicious preview, wildcard, malformed, and unrelated origin rejection.
-- [ ] Make VM-agent session cookies host-only for new sessions while safely expiring legacy parent-domain cookies.
-- [ ] Apply shared reserved-cookie filtering at both Cloudflare and VM-agent proxy boundaries.
-- [ ] Replace wildcard privileged CORS/WebSocket trust with explicit trusted control-plane origins, without restricting port-preview application traffic.
-- [ ] Update the public security architecture with the port-preview trust boundary, reserved-cookie behavior, and exact-origin policy.
+- [x] Add adversarial Worker tests that capture the proxied request and prove SAM-reserved cookies are consumed/removed while intentionally supported ordinary preview cookies remain isolated to the preview path.
+- [x] Add Go proxy tests proving reserved inbound Cookie values and reserved upstream `Set-Cookie` values cannot cross into/out of preview applications, while ordinary host-only application cookies and WebSocket upgrades remain functional.
+- [x] Add exact-origin tests for terminal, ACP, boot-log, and reconnect success plus malicious preview, wildcard, malformed, and unrelated origin rejection.
+- [x] Make VM-agent session cookies host-only for new sessions while safely expiring legacy parent-domain cookies.
+- [x] Apply shared reserved-cookie filtering at both Cloudflare and VM-agent proxy boundaries.
+- [x] Replace wildcard privileged CORS/WebSocket trust with explicit trusted control-plane origins, without restricting port-preview application traffic.
+- [x] Update the public security architecture with the port-preview trust boundary, reserved-cookie behavior, and exact-origin policy.
 - [ ] Run focused tests, Go race/coverage/static checks, API checks, repository fast/full gates, specialist review, and a fresh adversarial review.
 - [ ] Open exactly one non-draft PR, skip staging by explicit instruction, do not merge, and monitor/fix all applicable CI to green.
 
@@ -50,3 +50,25 @@ This remediation must preserve every valid authenticated terminal, ACP, boot-log
 - `.claude/rules/20-cross-origin-cors.md`
 - `.claude/rules/34-vm-agent-callback-auth.md`
 - `apps/www/src/content/docs/docs/architecture/security.md`
+
+## Incident Postmortem
+
+- **What broke:** Arbitrary applications served on `ws-{workspaceId}--{port}` could receive
+  reusable SAM cookies through the two proxy hops and could originate credentialed
+  same-site WebSocket requests toward privileged VM-agent endpoints.
+- **Root cause:** VM-agent sessions were deliberately issued on the parent domain to make
+  sibling workspace hosts convenient, privileged origin configuration trusted wildcard
+  siblings, and neither reverse proxy treated the application port as a credential boundary.
+- **Timeline:** Runtime audit H2 identified the class on 2026-08-12. The original remediation
+  task produced a reviewed local candidate, but its node stopped during reconciliation and
+  only the task scaffold reached the remote branch. This recovery reconstructed the change
+  from the audit and session evidence against unchanged `origin/main`.
+- **Why tests missed it:** Existing port tests verified the access handshake and blanket
+  response-cookie deletion, but did not assert inbound cookie/query/header isolation,
+  positive SAM-vs-application bearer discrimination, response cookie-clearing directives,
+  or real privileged WebSocket upgrades from a malicious sibling origin.
+- **Bug class:** Credential-scope collapse across a same-site, user-controlled reverse-proxy
+  origin.
+- **Process fix:** `.claude/rules/20-cross-origin-cors.md` now requires explicit sibling-origin
+  trust classification, pre-mutation WebSocket origin checks, bidirectional filtering at
+  every hop, positive bearer identification, and production-real upgrade tests.

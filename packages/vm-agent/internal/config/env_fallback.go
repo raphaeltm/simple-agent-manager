@@ -60,11 +60,12 @@ func (c *Config) BuildSAMEnvFallback() []string {
 }
 
 // deriveAllowedOrigins extracts allowed origins from the control plane URL.
-// This allows the control plane domain and workspace subdomains.
+// Privileged browser traffic comes only from the exact control-plane origins.
+// Port-preview WebSockets are reverse-proxied separately and do not use this list.
 func deriveAllowedOrigins(controlPlaneURL string) []string {
 	baseDomain := DeriveBaseDomain(controlPlaneURL)
 	return []string{
 		controlPlaneURL,
-		"https://*." + baseDomain, // Allow workspace subdomains
+		"https://app." + baseDomain,
 	}
 }

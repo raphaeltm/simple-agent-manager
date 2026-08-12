@@ -32,7 +32,11 @@ func (s *Server) handleWorkspacePortProxy(w http.ResponseWriter, r *http.Request
 	// Debug header to verify which binary version is running.
 	w.Header().Set("X-SAM-Port-Proxy", "v2-pathrw")
 
-	if !s.requireWorkspaceRequestAuth(w, r, workspaceID) {
+	// Parent-domain VM and control-plane cookies must never authorize or reach a
+	// user-controlled preview. The Worker-provided workspace JWT remains available.
+	stripSAMReservedRequestCookies(r.Header, s.config.CookieName)
+	if !s.checkWorkspaceRequestAuth(r, workspaceID) {
+		writeError(w, http.StatusUnauthorized, "invalid workspace authorization")
 		slog.Warn("Port proxy auth failed",
 			"workspaceId", workspaceID,
 			"port", r.PathValue("port"))
@@ -138,7 +142,13 @@ func (s *Server) servePortProxy(w http.ResponseWriter, r *http.Request, workspac
 		// and must not leak to the container app running on the forwarded port.
 		q := req.URL.Query()
 		q.Del("token")
+		q.Del("port_token")
 		req.URL.RawQuery = q.Encode()
+		stripSAMReservedRequestCookies(req.Header, s.config.CookieName)
+		s.stripSAMWorkspaceAuthorization(req.Header, workspaceID)
+	}
+	proxy.ModifyResponse = func(response *http.Response) error {
+		return sanitizePreviewResponseCookies(response, s.config.CookieName)
 	}
 	proxy.ErrorHandler = func(rw http.ResponseWriter, req *http.Request, proxyErr error) {
 		slog.Error("Port proxy upstream error",
@@ -149,6 +159,20 @@ func (s *Server) servePortProxy(w http.ResponseWriter, r *http.Request, workspac
 		writeError(rw, http.StatusBadGateway, fmt.Sprintf("port proxy error: %v", proxyErr))
 	}
 	proxy.ServeHTTP(w, r)
+}
+
+func (s *Server) stripSAMWorkspaceAuthorization(headers http.Header, workspaceID string) {
+	if s.jwtValidator == nil {
+		return
+	}
+	authorization := strings.TrimSpace(headers.Get("Authorization"))
+	fields := strings.Fields(authorization)
+	if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
+		return
+	}
+	if _, err := s.jwtValidator.ValidateWorkspaceToken(fields[1], workspaceID); err == nil {
+		headers.Del("Authorization")
+	}
 }
 
 // handleListWorkspacePorts returns the list of detected ports for a workspace.

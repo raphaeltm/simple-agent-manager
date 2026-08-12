@@ -2,11 +2,40 @@ package server
 
 import (
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
+	"time"
 
+	"github.com/workspace/vm-agent/internal/auth"
+	"github.com/workspace/vm-agent/internal/config"
 	"github.com/workspace/vm-agent/internal/logreader"
 )
+
+func TestLogStreamRejectsPreviewOriginBeforeAuthentication(t *testing.T) {
+	sm := auth.NewSessionManager("session", false, time.Hour)
+	defer sm.Stop()
+	s := &Server{
+		config:         &config.Config{AllowedOrigins: []string{"https://app.example.com"}},
+		sessionManager: sm,
+	}
+
+	previewRecorder := httptest.NewRecorder()
+	previewRequest := httptest.NewRequest(http.MethodGet, "/logs/stream", nil)
+	previewRequest.Header.Set("Origin", "https://ws-ws001--3000.example.com")
+	s.handleLogStream(previewRecorder, previewRequest)
+	if previewRecorder.Code != http.StatusForbidden {
+		t.Fatalf("preview origin status = %d, want 403", previewRecorder.Code)
+	}
+
+	trustedRecorder := httptest.NewRecorder()
+	trustedRequest := httptest.NewRequest(http.MethodGet, "/logs/stream", nil)
+	trustedRequest.Header.Set("Origin", "https://app.example.com")
+	s.handleLogStream(trustedRecorder, trustedRequest)
+	if trustedRecorder.Code != http.StatusUnauthorized {
+		t.Fatalf("trusted unauthenticated status = %d, want 401", trustedRecorder.Code)
+	}
+}
 
 func TestParseLogFilter(t *testing.T) {
 	tests := []struct {

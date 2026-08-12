@@ -120,6 +120,45 @@ func TestSetCookieForWorkspace_SetsBothCookies(t *testing.T) {
 	}
 }
 
+func TestSetCookieForWorkspaceUsesHostOnlyCookiesAndExpiresLegacyDomainCookies(t *testing.T) {
+	sm := newTestSessionManager()
+	defer sm.Stop()
+
+	session, err := sm.CreateSession(&Claims{Workspace: "ws-AAA"})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	recorder := httptest.NewRecorder()
+	sm.SetCookieForWorkspace(recorder, session, "ws-AAA")
+
+	active := map[string]bool{}
+	legacyExpired := map[string]bool{}
+	for _, cookie := range recorder.Result().Cookies() {
+		switch cookie.Domain {
+		case "":
+			if cookie.Value == session.ID {
+				active[cookie.Name] = true
+			}
+		case "example.com":
+			if cookie.Value == "" && cookie.Expires.Before(time.Now()) {
+				legacyExpired[cookie.Name] = true
+			}
+		default:
+			t.Fatalf("unexpected cookie domain %q for %q", cookie.Domain, cookie.Name)
+		}
+	}
+
+	for _, name := range []string{"vm_session_ws-AAA", "vm_session"} {
+		if !active[name] {
+			t.Errorf("missing active host-only cookie %q", name)
+		}
+		if !legacyExpired[name] {
+			t.Errorf("missing parent-domain expiry for legacy cookie %q", name)
+		}
+	}
+}
+
 func TestClearCookieForWorkspace(t *testing.T) {
 	sm := newTestSessionManager()
 	defer sm.Stop()

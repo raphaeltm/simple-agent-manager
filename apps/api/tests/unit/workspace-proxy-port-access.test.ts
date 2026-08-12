@@ -7,7 +7,11 @@
  * - Token for port 3000 rejected on port 8080 subdomain
  * - Token for workspace A rejected on workspace B subdomain
  * - Expired/invalid token → HTML error page (not JSON)
- * - Container Set-Cookie headers stripped from port-proxy responses
+ * - Reserved Set-Cookie headers stripped and application cookies forced host-only
+ * - SAM-reserved cookies stripped before the VM-agent proxy
+ * - SAM bearer credentials stripped without breaking application bearer auth
+ * - Preview responses cannot clear control-plane cookies
+ * - Privileged WebSocket upgrades reject sibling preview origins
  * - Existing terminal token auth still works for non-port workspace requests
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -16,7 +20,12 @@ const mockGetSession = vi.fn();
 const mockVerifyTerminalToken = vi.fn();
 const mockSignTerminalToken = vi.fn();
 const mockVerifyPortAccessToken = vi.fn();
-let workspaceResult: { nodeId: string; status: string; userId?: string; portsPublicEnabled?: boolean } | null = null;
+let workspaceResult: {
+  nodeId: string;
+  status: string;
+  userId?: string;
+  portsPublicEnabled?: boolean;
+} | null = null;
 
 vi.mock('../../src/auth', () => ({
   createAuth: vi.fn(() => ({
@@ -32,9 +41,13 @@ vi.mock('../../src/services/jwt', () => ({
   verifyPortAccessToken: mockVerifyPortAccessToken,
 }));
 
-vi.mock('cloudflare:workers', () => ({
-  DurableObject: class {},
-}), { virtual: true });
+vi.mock(
+  'cloudflare:workers',
+  () => ({
+    DurableObject: class {},
+  }),
+  { virtual: true }
+);
 
 vi.mock('@cloudflare/sandbox', () => ({
   Sandbox: class {},
@@ -73,7 +86,12 @@ const env = {
 describe('workspace proxy port-access auth', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    workspaceResult = { nodeId: 'node-1', status: 'running', userId: 'user-1', portsPublicEnabled: false };
+    workspaceResult = {
+      nodeId: 'node-1',
+      status: 'running',
+      userId: 'user-1',
+      portsPublicEnabled: false,
+    };
     mockGetSession.mockResolvedValue(null); // No session cookie on port subdomains
     mockVerifyTerminalToken.mockRejectedValue(new Error('Invalid token'));
     mockSignTerminalToken.mockResolvedValue({
@@ -82,7 +100,7 @@ describe('workspace proxy port-access auth', () => {
     });
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response('proxied', { status: 200 })),
+      vi.fn(async () => new Response('proxied', { status: 200 }))
     );
   });
 
@@ -94,10 +112,8 @@ describe('workspace proxy port-access auth', () => {
     });
 
     const response = await worker.default.fetch(
-      new Request(
-        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/?port_token=valid-jwt`,
-      ),
-      env,
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/?port_token=valid-jwt`),
+      env
     );
 
     expect(response.status).toBe(302);
@@ -122,7 +138,7 @@ describe('workspace proxy port-access auth', () => {
       new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`, {
         headers: { cookie: 'sam_port_access=valid-jwt' },
       }),
-      env,
+      env
     );
 
     // Should proxy through (not 302, not 401)
@@ -141,7 +157,7 @@ describe('workspace proxy port-access auth', () => {
       new Request(`https://ws-${WORKSPACE_ID}--8080.workspaces.example.com/`, {
         headers: { cookie: 'sam_port_access=wrong-port-cookie-jwt' },
       }),
-      env,
+      env
     );
 
     // Cookie port (3000) !== subdomain port (8080) → HTML 401
@@ -160,9 +176,9 @@ describe('workspace proxy port-access auth', () => {
 
     const response = await worker.default.fetch(
       new Request(
-        `https://ws-${WORKSPACE_ID}--8080.workspaces.example.com/?port_token=wrong-port-jwt`,
+        `https://ws-${WORKSPACE_ID}--8080.workspaces.example.com/?port_token=wrong-port-jwt`
       ),
-      env,
+      env
     );
 
     // Port mismatch: token.port (3000) !== targetPort (8080) → HTML 401
@@ -182,9 +198,9 @@ describe('workspace proxy port-access auth', () => {
 
     const response = await worker.default.fetch(
       new Request(
-        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/?port_token=wrong-ws-jwt`,
+        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/?port_token=wrong-ws-jwt`
       ),
-      env,
+      env
     );
 
     // Workspace mismatch → HTML 401
@@ -198,9 +214,9 @@ describe('workspace proxy port-access auth', () => {
 
     const response = await worker.default.fetch(
       new Request(
-        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/?port_token=expired-jwt`,
+        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/?port_token=expired-jwt`
       ),
-      env,
+      env
     );
 
     expect(response.status).toBe(401);
@@ -214,10 +230,8 @@ describe('workspace proxy port-access auth', () => {
 
   it('returns HTML error for port request with no auth at all', async () => {
     const response = await worker.default.fetch(
-      new Request(
-        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`,
-      ),
-      env,
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`),
+      env
     );
 
     expect(response.status).toBe(401);
@@ -227,13 +241,16 @@ describe('workspace proxy port-access auth', () => {
   });
 
   it('proxies a port request without browser auth when workspace ports are public', async () => {
-    workspaceResult = { nodeId: 'node-1', status: 'running', userId: 'user-1', portsPublicEnabled: true };
+    workspaceResult = {
+      nodeId: 'node-1',
+      status: 'running',
+      userId: 'user-1',
+      portsPublicEnabled: true,
+    };
 
     const response = await worker.default.fetch(
-      new Request(
-        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`,
-      ),
-      env,
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`),
+      env
     );
 
     expect(response.status).toBe(200);
@@ -242,7 +259,7 @@ describe('workspace proxy port-access auth', () => {
     expect(mockVerifyTerminalToken).not.toHaveBeenCalled();
   });
 
-  it('strips Set-Cookie from container responses on port-proxy path', async () => {
+  it('strips reserved Set-Cookie from container responses on port-proxy path', async () => {
     mockVerifyPortAccessToken.mockResolvedValue({
       workspace: WORKSPACE_ID,
       port: 3000,
@@ -252,22 +269,23 @@ describe('workspace proxy port-access auth', () => {
     // Simulate container response with a Set-Cookie header
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response('container page', {
-          status: 200,
-          headers: {
-            'set-cookie': 'malicious_cookie=evil; Path=/',
-            'content-type': 'text/html',
-          },
-        }),
-      ),
+      vi.fn(
+        async () =>
+          new Response('container page', {
+            status: 200,
+            headers: {
+              'set-cookie': 'sam_port_access=evil; Path=/',
+              'content-type': 'text/html',
+            },
+          })
+      )
     );
 
     const response = await worker.default.fetch(
       new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`, {
         headers: { cookie: 'sam_port_access=valid-jwt' },
       }),
-      env,
+      env
     );
 
     expect(response.status).toBe(200);
@@ -277,6 +295,196 @@ describe('workspace proxy port-access auth', () => {
     expect(await response.text()).toBe('container page');
   });
 
+  it('strips SAM-reserved cookies before the VM request and preserves ordinary preview cookies', async () => {
+    mockVerifyPortAccessToken.mockResolvedValue({
+      workspace: WORKSPACE_ID,
+      port: 3000,
+      subject: 'user-1',
+    });
+
+    const fetch = vi.fn(async () => new Response('proxied', { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+
+    const response = await worker.default.fetch(
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`, {
+        headers: {
+          cookie: [
+            'sam_port_access=valid-jwt',
+            'vm_session=shared-session',
+            `vm_session_${WORKSPACE_ID}=workspace-session`,
+            '__Secure-better-auth.session_token=control-plane-session',
+            'vm_session_extension=ordinary-extension',
+            'better-auth.session_extension=ordinary-extension',
+            'preview_theme=dark',
+          ].join('; '),
+        },
+      }),
+      env
+    );
+
+    expect(response.status).toBe(200);
+    const headers = new Headers(fetch.mock.calls[0]?.[1]?.headers);
+    expect(headers.get('cookie')).toBe(
+      'vm_session_extension=ordinary-extension; better-auth.session_extension=ordinary-extension; preview_theme=dark'
+    );
+  });
+
+  it('strips a positively identified SAM bearer before the preview app', async () => {
+    mockVerifyPortAccessToken.mockResolvedValue({
+      workspace: WORKSPACE_ID,
+      port: 3000,
+      subject: 'user-1',
+    });
+    mockVerifyTerminalToken.mockImplementation(async (token: string) => {
+      if (token === 'sam-workspace-jwt') {
+        return { workspace: WORKSPACE_ID, subject: 'user-1' };
+      }
+      throw new Error('not a SAM token');
+    });
+
+    const fetch = vi.fn(async () => new Response('proxied', { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+
+    await worker.default.fetch(
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`, {
+        headers: {
+          cookie: 'sam_port_access=valid-jwt',
+          authorization: 'bEaReR sam-workspace-jwt',
+        },
+      }),
+      env
+    );
+
+    const headers = new Headers(fetch.mock.calls[0]?.[1]?.headers);
+    expect(headers.get('authorization')).toBeNull();
+  });
+
+  it('preserves an arbitrary application Authorization bearer', async () => {
+    mockVerifyPortAccessToken.mockResolvedValue({
+      workspace: WORKSPACE_ID,
+      port: 3000,
+      subject: 'user-1',
+    });
+
+    const fetch = vi.fn(async () => new Response('proxied', { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+
+    await worker.default.fetch(
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`, {
+        headers: {
+          cookie: 'sam_port_access=valid-jwt',
+          authorization: 'Bearer app-owned-token',
+        },
+      }),
+      env
+    );
+
+    const headers = new Headers(fetch.mock.calls[0]?.[1]?.headers);
+    expect(headers.get('authorization')).toBe('Bearer app-owned-token');
+  });
+
+  it('preserves ordinary response cookies as host-only and blocks reserved cookies', async () => {
+    mockVerifyPortAccessToken.mockResolvedValue({
+      workspace: WORKSPACE_ID,
+      port: 3000,
+      subject: 'user-1',
+    });
+    const responseHeaders = new Headers({ 'content-type': 'text/html' });
+    responseHeaders.append('set-cookie', 'sam_port_access=evil; Path=/');
+    responseHeaders.append('set-cookie', 'vm_session=evil; Path=/');
+    responseHeaders.append('set-cookie', '__Secure-better-auth.session_token=evil; Path=/; Secure');
+    responseHeaders.append('set-cookie', 'vm_session_extension=ordinary; Path=/');
+    responseHeaders.append('set-cookie', 'better-auth.session_extension=ordinary; Path=/');
+    responseHeaders.append('set-cookie', 'preview_session=ordinary; Path=/; HttpOnly');
+    responseHeaders.append(
+      'set-cookie',
+      'preview_parent=ordinary; Domain=.workspaces.example.com; Path=/'
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('container page', { status: 200, headers: responseHeaders }))
+    );
+
+    const response = await worker.default.fetch(
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`, {
+        headers: { cookie: 'sam_port_access=valid-jwt' },
+      }),
+      env
+    );
+
+    const getSetCookie = (response.headers as Headers & { getSetCookie?: () => string[] })
+      .getSetCookie;
+    const setCookies = getSetCookie
+      ? getSetCookie.call(response.headers)
+      : [response.headers.get('set-cookie') ?? ''];
+    expect(setCookies.join('\n')).toContain('preview_session=ordinary');
+    expect(setCookies.join('\n')).toContain('preview_parent=ordinary');
+    expect(setCookies.join('\n')).toContain('vm_session_extension=ordinary');
+    expect(setCookies.join('\n')).toContain('better-auth.session_extension=ordinary');
+    expect(setCookies.join('\n')).not.toMatch(/Domain=/i);
+    expect(setCookies.join('\n')).not.toContain('sam_port_access=');
+    expect(setCookies.join('\n')).not.toContain('vm_session=');
+    expect(setCookies.join('\n')).not.toContain('better-auth.session_token=');
+  });
+
+  it('removes cookie-clearing Clear-Site-Data directives from preview responses', async () => {
+    mockVerifyPortAccessToken.mockResolvedValue({
+      workspace: WORKSPACE_ID,
+      port: 3000,
+      subject: 'user-1',
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        async () =>
+          new Response('container page', {
+            status: 200,
+            headers: { 'Clear-Site-Data': '"cache", "cookies", "storage"' },
+          })
+      )
+    );
+
+    const response = await worker.default.fetch(
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`, {
+        headers: { cookie: 'sam_port_access=valid-jwt' },
+      }),
+      env
+    );
+
+    expect(response.headers.get('clear-site-data')).toBe('"cache", "storage"');
+  });
+
+  it('rejects a preview sibling Origin on privileged workspace WebSockets', async () => {
+    mockGetSession.mockResolvedValue({ user: { id: 'user-1' } });
+
+    const response = await worker.default.fetch(
+      new Request(`https://ws-${WORKSPACE_ID}.workspaces.example.com/agent/ws`, {
+        headers: {
+          upgrade: 'websocket',
+          origin: `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com`,
+        },
+      }),
+      env
+    );
+
+    expect(response.status).toBe(403);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('preserves exact app-origin and no-Origin privileged WebSocket flows', async () => {
+    mockGetSession.mockResolvedValue({ user: { id: 'user-1' } });
+
+    for (const origin of ['https://app.workspaces.example.com', null]) {
+      const headers = new Headers({ upgrade: 'websocket' });
+      if (origin) headers.set('origin', origin);
+      const response = await worker.default.fetch(
+        new Request(`https://ws-${WORKSPACE_ID}.workspaces.example.com/agent/ws`, { headers }),
+        env
+      );
+      expect(response.status).toBe(200);
+    }
+  });
+
   it('preserves terminal token auth for non-port workspace requests', async () => {
     mockVerifyTerminalToken.mockResolvedValue({
       workspace: WORKSPACE_ID,
@@ -284,10 +492,8 @@ describe('workspace proxy port-access auth', () => {
     });
 
     const response = await worker.default.fetch(
-      new Request(
-        `https://ws-${WORKSPACE_ID}.workspaces.example.com/terminal?token=terminal-jwt`,
-      ),
-      env,
+      new Request(`https://ws-${WORKSPACE_ID}.workspaces.example.com/terminal?token=terminal-jwt`),
+      env
     );
 
     // Non-port workspace request should still work with terminal token

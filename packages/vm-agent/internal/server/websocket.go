@@ -19,39 +19,34 @@ func (s *Server) createUpgrader() websocket.Upgrader {
 		ReadBufferSize:  s.config.WSReadBufferSize,
 		WriteBufferSize: s.config.WSWriteBufferSize,
 		CheckOrigin: func(r *http.Request) bool {
-			origin := r.Header.Get("Origin")
-			if origin == "" {
-				return true
-			}
-			return s.isOriginAllowed(origin)
+			return s.isWebSocketOriginAllowed(r)
 		},
 	}
 }
 
 func (s *Server) isOriginAllowed(origin string) bool {
 	for _, allowed := range s.config.AllowedOrigins {
-		if allowed == "*" || allowed == origin {
-			return true
+		if strings.Contains(allowed, "*") {
+			continue
 		}
-		if strings.Contains(allowed, "*") && matchWildcardOrigin(origin, allowed) {
+		if allowed == origin {
 			return true
 		}
 	}
 	return false
 }
 
-func matchWildcardOrigin(origin, pattern string) bool {
-	parts := strings.SplitN(pattern, "*", 2)
-	if len(parts) != 2 {
+func (s *Server) isWebSocketOriginAllowed(r *http.Request) bool {
+	origin := r.Header.Get("Origin")
+	return origin == "" || s.isOriginAllowed(origin)
+}
+
+func (s *Server) rejectUntrustedWebSocketOrigin(w http.ResponseWriter, r *http.Request) bool {
+	if s.isWebSocketOriginAllowed(r) {
 		return false
 	}
-	prefix := parts[0]
-	suffix := parts[1]
-	if !strings.HasPrefix(origin, prefix) || !strings.HasSuffix(origin, suffix) {
-		return false
-	}
-	middle := origin[len(prefix) : len(origin)-len(suffix)]
-	return !strings.Contains(middle, "/")
+	http.Error(w, "Forbidden", http.StatusForbidden)
+	return true
 }
 
 type wsMessage struct {
@@ -182,6 +177,9 @@ func (s *Server) resolveWorkspaceIDForWebsocket(r *http.Request) string {
 }
 
 func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
+	if s.rejectUntrustedWebSocketOrigin(w, r) {
+		return
+	}
 	workspaceID := s.resolveWorkspaceIDForWebsocket(r)
 	if workspaceID == "" {
 		http.Error(w, "Missing workspace route", http.StatusBadRequest)
@@ -323,6 +321,9 @@ func (s *Server) handleTerminalWS(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleMultiTerminalWS(w http.ResponseWriter, r *http.Request) {
+	if s.rejectUntrustedWebSocketOrigin(w, r) {
+		return
+	}
 	workspaceID := s.resolveWorkspaceIDForWebsocket(r)
 	if workspaceID == "" {
 		http.Error(w, "Missing workspace route", http.StatusBadRequest)

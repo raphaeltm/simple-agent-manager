@@ -578,6 +578,22 @@ func TestDeriveBaseDomain(t *testing.T) {
 	}
 }
 
+func TestDeriveAllowedOriginsUsesOnlyExactControlPlaneOrigins(t *testing.T) {
+	origins := deriveAllowedOrigins("https://api.example.com")
+	want := []string{"https://api.example.com", "https://app.example.com"}
+	if len(origins) != len(want) {
+		t.Fatalf("origins = %#v, want %#v", origins, want)
+	}
+	for index := range want {
+		if origins[index] != want[index] {
+			t.Fatalf("origins = %#v, want %#v", origins, want)
+		}
+		if strings.Contains(origins[index], "*") {
+			t.Fatalf("origin %q must not contain a wildcard", origins[index])
+		}
+	}
+}
+
 func TestBuildSAMEnvFallback(t *testing.T) {
 	t.Parallel()
 

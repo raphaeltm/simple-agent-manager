@@ -138,6 +138,40 @@ The certificate hostnames remain wildcard-scoped (`*.BASE_DOMAIN`, `*.vm.BASE_DO
 
 Deployments created before the per-node CSR model may have running nodes that still hold a broadly distributed wildcard `ORIGIN_CA_KEY`. Rotate that legacy material by draining or deleting old nodes, deploying the per-node certificate model, revoking the old wildcard Origin CA certificate in Cloudflare SSL/TLS → Origin Server, and removing any manually configured `ORIGIN_CA_CERT`/`ORIGIN_CA_KEY` Worker secrets. New nodes do not require those Worker secrets.
 
+## Workspace Port Preview Isolation
+
+Services exposed from a workspace run arbitrary user-controlled code on hosts such as
+`ws-{workspaceId}--{port}.BASE_DOMAIN`. Those preview hosts are application origins, not
+trusted SAM control-plane origins, even though they are same-site siblings of the workspace
+host.
+
+SAM enforces that boundary at both reverse proxies:
+
+1. The API Worker consumes the port-access credential, removes client `port_token` and
+   `token` query parameters, strips SAM-reserved cookies, and removes only a bearer token
+   that validates as a SAM workspace JWT. Application `Authorization` headers and
+   application cookies are preserved (`stripSamReservedRequestCookies`,
+   `stripSamWorkspaceAuthorization`, and `isolatePreviewResponse` in
+   `apps/api/src/index.ts`).
+2. The VM Agent repeats the cookie, query-credential, and positive SAM-JWT filtering before
+   forwarding to the application (`stripSAMReservedRequestCookies`,
+   `stripSAMWorkspaceAuthorization`, and `sanitizePreviewResponseCookies` in
+   `packages/vm-agent/internal/server/`). This defense remains effective if either proxy is
+   called without the other.
+3. Preview responses cannot create SAM-reserved cookies or use `Clear-Site-Data` to clear
+   SAM cookies. Ordinary application cookies remain supported, but any `Domain` attribute is
+   removed so the cookie stays on its exact preview host.
+4. New VM-agent session cookies are host-only. During upgrades, session responses also
+   expire the former parent-domain copies by their exact legacy names.
+5. Privileged terminal, ACP, boot-log, and log-stream WebSockets accept only configured
+   exact control-plane origins. Browser requests from preview, wildcard, `null`, malformed,
+   or unrelated origins are rejected before authentication or workspace/session state is
+   mutated. No-origin clients retain the existing non-browser token flow.
+
+Preview HTTP and WebSocket upgrades still pass through with their application-owned cookies,
+bearer tokens, headers, paths, queries, and host-routing contract intact after the reserved
+SAM material is removed.
+
 ## Interactive HTML Preview Isolation
 
 Interactive previews are a no-network execution tier for single-file HTML library artifacts:

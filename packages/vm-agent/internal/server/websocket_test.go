@@ -80,6 +80,41 @@ func dialWS(t *testing.T, ts *httptest.Server, sessionID string) *websocket.Conn
 	return conn
 }
 
+func TestMultiTerminalWSOriginPolicyPreservesExactAndNoOriginClients(t *testing.T) {
+	s, ts, authSessionID := newTestServer(t)
+	s.config.AllowedOrigins = []string{"https://app.example.com"}
+
+	url := "ws" + strings.TrimPrefix(ts.URL, "http")
+	previewHeaders := http.Header{}
+	previewHeaders.Set("Cookie", "session="+authSessionID)
+	previewHeaders.Set("Origin", "https://ws-ws001--3000.example.com")
+	conn, response, err := websocket.DefaultDialer.Dial(url, previewHeaders)
+	if conn != nil {
+		_ = conn.Close()
+	}
+	if err == nil {
+		t.Fatal("preview sibling origin unexpectedly connected")
+	}
+	if response == nil || response.StatusCode != http.StatusForbidden {
+		t.Fatalf("preview origin status = %#v, want 403", response)
+	}
+	if runtime := s.workspaceRuntimeForTest("default"); runtime != nil {
+		t.Fatal("untrusted terminal origin created workspace runtime state")
+	}
+
+	trustedHeaders := http.Header{}
+	trustedHeaders.Set("Cookie", "session="+authSessionID)
+	trustedHeaders.Set("Origin", "https://app.example.com")
+	trusted, _, err := websocket.DefaultDialer.Dial(url, trustedHeaders)
+	if err != nil {
+		t.Fatalf("exact app origin failed to connect: %v", err)
+	}
+	_ = trusted.Close()
+
+	noOrigin := dialWS(t, ts, authSessionID)
+	_ = noOrigin.Close()
+}
+
 // sendJSON writes a JSON message to the WebSocket.
 func sendJSON(t *testing.T, conn *websocket.Conn, v interface{}) {
 	t.Helper()

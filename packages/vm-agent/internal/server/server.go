@@ -289,9 +289,9 @@ func New(cfg *config.Config) (*Server, error) {
 		return nil, fmt.Errorf("failed to create JWT validator: %w", err)
 	}
 
-	// Derive cookie domain from control plane URL for cross-subdomain sharing.
-	// This allows session cookies set on ws-ABC123.example.com to also be sent
-	// to ws-ABC123--3000.example.com (port proxy subdomains).
+	// Derive the former shared cookie domain solely so host-only session writes can
+	// expire the legacy parent-domain copies during rollout. Active session cookies
+	// never use this domain.
 	baseDomain := config.DeriveBaseDomain(cfg.ControlPlaneURL)
 	cookieDomain := ""
 	if baseDomain != "" {
@@ -1135,21 +1135,12 @@ func corsMiddleware(next http.Handler, allowedOrigins []string) http.Handler {
 		allowed := false
 
 		for _, o := range allowedOrigins {
-			if o == "*" || o == origin {
+			if strings.Contains(o, "*") {
+				continue
+			}
+			if o == origin {
 				allowed = true
 				break
-			}
-			// Support wildcard subdomain patterns like "https://*.example.com"
-			if strings.Contains(o, "*.") {
-				// Split pattern into scheme + wildcard domain
-				// e.g. "https://*.example.com" → prefix="https://", suffix=".example.com"
-				wildcardIdx := strings.Index(o, "*.")
-				prefix := o[:wildcardIdx]
-				suffix := o[wildcardIdx+1:] // includes the dot
-				if strings.HasPrefix(origin, prefix) && strings.HasSuffix(origin, suffix) {
-					allowed = true
-					break
-				}
 			}
 		}
 

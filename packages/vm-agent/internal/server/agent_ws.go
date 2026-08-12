@@ -58,6 +58,9 @@ func writeSessionError(w http.ResponseWriter, statusCode int, code, message stri
 // The agent process lives in a SessionHost which persists independently of
 // any browser connection — it is only stopped via an explicit Stop API call.
 func (s *Server) handleAgentWS(w http.ResponseWriter, r *http.Request) {
+	if s.rejectUntrustedWebSocketOrigin(w, r) {
+		return
+	}
 	workspaceID := s.resolveWorkspaceIDForWebsocket(r)
 	if workspaceID == "" {
 		writeSessionError(w, http.StatusBadRequest, "workspace_required", "Missing workspace route")

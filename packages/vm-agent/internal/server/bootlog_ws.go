@@ -207,6 +207,9 @@ func (m *BootLogBroadcasterManager) Remove(workspaceID string) {
 // The workspace ID is determined from the ?workspace query parameter, falling back
 // to the server's configured default workspace ID (boot-time bootstrap path).
 func (s *Server) handleBootLogWS(w http.ResponseWriter, r *http.Request) {
+	if s.rejectUntrustedWebSocketOrigin(w, r) {
+		return
+	}
 	if s.bootLogBroadcasters == nil {
 		http.Error(w, "boot log streaming not available", http.StatusServiceUnavailable)
 		return
@@ -232,11 +235,7 @@ func (s *Server) handleBootLogWS(w http.ResponseWriter, r *http.Request) {
 	broadcaster := s.bootLogBroadcasters.GetOrCreate(workspaceID)
 
 	// Upgrade to WebSocket.
-	upgrader := websocket.Upgrader{
-		ReadBufferSize:  s.config.WSReadBufferSize,
-		WriteBufferSize: s.config.WSWriteBufferSize,
-		CheckOrigin:     func(_ *http.Request) bool { return true },
-	}
+	upgrader := s.createUpgrader()
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Error("bootlog-ws: upgrade failed", "error", err)
