@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   getSessionState: vi.fn(),
   getAcpSession: vi.fn(),
   transitionAcpSession: vi.fn(),
+  scheduleWorkspaceDeletion: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1', () => ({ drizzle: (...args: unknown[]) => mocks.drizzle(...args) }));
@@ -58,7 +59,7 @@ vi.mock('../../../src/services/project-data', () => ({
   transitionAcpSession: (...args: unknown[]) => mocks.transitionAcpSession(...args),
 }));
 
-function buildDb(nodeRuntime = 'vm') {
+function buildDb(nodeRuntime = 'vm', workspaceStatus = 'running') {
   const selectRows = [
     [
       {
@@ -66,7 +67,7 @@ function buildDb(nodeRuntime = 'vm') {
         userId: 'user-1',
         projectId: 'project-1',
         chatSessionId: 'chat-1',
-        status: 'running',
+        status: workspaceStatus,
         nodeId: 'node-1',
         nodeRuntime,
       },
@@ -101,7 +102,7 @@ function buildEnv(): Env {
     SESSION_SNAPSHOT_POLL_INTERVAL_MS: '1',
     NODE_LIFECYCLE: {
       idFromName: vi.fn(() => 'node-do-id'),
-      get: vi.fn(() => ({ scheduleWorkspaceDeletion: vi.fn(async () => undefined) })),
+      get: vi.fn(() => ({ scheduleWorkspaceDeletion: mocks.scheduleWorkspaceDeletion })),
     },
   } as unknown as Env;
 }
@@ -141,6 +142,7 @@ describe('sleepWorkspaceSession', () => {
     mocks.getSession.mockResolvedValue({ status: 'active' });
     mocks.getSessionState.mockResolvedValue({ activity: 'idle', activityAt: 100 });
     mocks.getAcpSession.mockResolvedValue(null);
+    mocks.scheduleWorkspaceDeletion.mockResolvedValue(undefined);
   });
 
   it('preserves compute when the required final snapshot is degraded', async () => {
@@ -285,6 +287,31 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
     expect(mocks.finalizeSessionSnapshotSleeping).toHaveBeenCalledTimes(1);
     expect(mocks.sleepSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1');
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'workspace-1', 'user-1');
+  });
+
+  it('re-arms deletion when an already sleeping VM is slept idempotently', async () => {
+    mocks.drizzle.mockReturnValue(buildDb('vm', 'sleeping'));
+    mocks.getRestorableSessionSnapshot.mockResolvedValue({
+      status: 'available',
+      degradation: 'none',
+      sleepingAt: '2026-08-12T00:00:00.000Z',
+      sleepStatus: 'sleeping',
+      expiresAt: '2026-08-19T00:00:00.000Z',
+    });
+    const env = buildEnv();
+    const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
+
+    await expect(
+      sleepWorkspaceSession(env, {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'retry',
+      })
+    ).resolves.toMatchObject({ status: 'sleeping', workspaceId: 'workspace-1' });
+
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'workspace-1', 'user-1');
   });
 
   it('acknowledges a Cloudflare Container stop and commits node sleep in the same D1 batch', async () => {

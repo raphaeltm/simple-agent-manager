@@ -159,7 +159,7 @@ lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) =>
             const stub = c.env.NODE_LIFECYCLE.get(doId);
             await (
               stub as unknown as import('../../durable-objects/node-lifecycle').NodeLifecycle
-            ).scheduleWorkspaceDeletion(workspace.id, userId);
+            ).scheduleWorkspaceDeletion(nodeId, workspace.id, userId);
           } catch (e) {
             log.warn('workspace.schedule_deletion_failed', {
               workspaceId: workspace.id,

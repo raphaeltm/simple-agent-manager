@@ -145,6 +145,18 @@ export async function sleepWorkspaceSession(
     snapshot.sleepingAt
   ) {
     await projectDataService.sleepSession(env, workspace.projectId, workspace.chatSessionId);
+    if (workspace.nodeRuntime !== 'cf-container') {
+      const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(workspace.nodeId));
+      await (stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle)
+        .scheduleWorkspaceDeletion(workspace.nodeId, workspace.id, workspace.userId)
+        .catch((error) => {
+          log.warn('session_sleep.workspace_deletion_reschedule_failed', {
+            workspaceId: workspace.id,
+            nodeId: workspace.nodeId,
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+    }
     return {
       status: 'sleeping',
       workspaceId: workspace.id,
@@ -357,7 +369,7 @@ export async function sleepWorkspaceSession(
   if (workspace.nodeRuntime !== 'cf-container') {
     const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(workspace.nodeId));
     await (stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle)
-      .scheduleWorkspaceDeletion(workspace.id, workspace.userId)
+      .scheduleWorkspaceDeletion(workspace.nodeId, workspace.id, workspace.userId)
       .catch((error) => {
         log.warn('session_sleep.workspace_deletion_schedule_failed', {
           workspaceId: workspace.id,

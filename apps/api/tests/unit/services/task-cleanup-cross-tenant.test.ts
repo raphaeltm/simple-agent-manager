@@ -194,7 +194,11 @@ describe('cleanupTaskRun — cross-tenant compute teardown (real SQLite)', () =>
 
     expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledWith('node-victim', 'ws-victim', env, VICTIM);
     expect(mocks.markIdle).toHaveBeenCalledWith(env, 'node-victim', VICTIM, undefined);
-    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('ws-victim', VICTIM);
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith(
+      'node-victim',
+      'ws-victim',
+      VICTIM
+    );
     expect(await readWorkspaceStatus()).toBe('stopped');
   });
 
@@ -261,13 +265,23 @@ describe('cleanupTaskRun — task creator differs from workspace owner (real SQL
 
     expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledWith('node-runner', 'ws-runner', env, RUNNER);
     expect(mocks.markIdle).toHaveBeenCalledWith(env, 'node-runner', RUNNER, undefined);
-    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('ws-runner', RUNNER);
+    expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith(
+      'node-runner',
+      'ws-runner',
+      RUNNER
+    );
     // The task creator must never be used as the compute identity.
     expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalledWith(
-      expect.anything(), expect.anything(), expect.anything(), CREATOR
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      CREATOR
     );
     expect(mocks.markIdle).not.toHaveBeenCalledWith(
-      expect.anything(), expect.anything(), CREATOR, expect.anything()
+      expect.anything(),
+      expect.anything(),
+      CREATOR,
+      expect.anything()
     );
   });
 

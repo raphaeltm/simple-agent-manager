@@ -502,7 +502,11 @@ export async function cleanupOnFailure(
       const stub = rc.env.NODE_LIFECYCLE.get(doId);
       await (
         stub as unknown as import('../node-lifecycle').NodeLifecycle
-      ).scheduleWorkspaceDeletion(state.stepResults.workspaceId, state.userId);
+      ).scheduleWorkspaceDeletion(
+        state.stepResults.nodeId,
+        state.stepResults.workspaceId,
+        state.userId
+      );
     } catch (err) {
       log.warn('task_runner_do.cleanup.schedule_deletion_failed', {
         taskId: state.taskId,

@@ -186,7 +186,7 @@ export async function cleanupTaskRun(
       const stub = env.NODE_LIFECYCLE.get(doId);
       await (
         stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle
-      ).scheduleWorkspaceDeletion(workspace.id, cleanupUserId);
+      ).scheduleWorkspaceDeletion(workspace.nodeId, workspace.id, cleanupUserId);
     } catch (e) {
       log.warn('task_run.cleanup.schedule_deletion_failed', {
         taskId,

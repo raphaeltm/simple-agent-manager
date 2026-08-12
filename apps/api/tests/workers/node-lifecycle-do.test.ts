@@ -441,7 +441,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     await stub.markIdle(nodeId, TEST_USER_ID);
 
     // Schedule a workspace deletion
-    await stub.scheduleWorkspaceDeletion(wsId, TEST_USER_ID);
+    await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID);
 
     // Cancel it
     await stub.cancelWorkspaceDeletion(wsId);
@@ -458,7 +458,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
 
     const stub = getStub(nodeId);
     await stub.markIdle(nodeId, TEST_USER_ID);
-    await stub.scheduleWorkspaceDeletion(wsId, TEST_USER_ID);
+    await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID);
     const deletionAlarm = await getAlarm(stub);
     expect(deletionAlarm).toBeGreaterThan(Date.now());
 
@@ -475,7 +475,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
 
     const stub = getStub(nodeId);
     await stub.markIdle(nodeId, TEST_USER_ID);
-    await stub.scheduleWorkspaceDeletion(wsId, TEST_USER_ID);
+    await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID);
     const deletionAlarm = await getAlarm(stub);
     expect(deletionAlarm).toBeGreaterThan(Date.now());
 
@@ -505,6 +505,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
         claimedByTask: null,
       } satisfies StoredNodeLifecycleState);
       await instance.ctx.storage.put(`ws-delete:${wsId}`, {
+        nodeId,
         workspaceId: wsId,
         userId: TEST_USER_ID,
         deleteAt: Date.now() - 1_000,
@@ -516,6 +517,45 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     });
 
     expect(await stub.getStatus()).toMatchObject({ status: 'active' });
+    const workspace = await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
+      .bind(wsId)
+      .first<{ status: string }>();
+    expect(workspace?.status).toBe('deleted');
+    expect(fetchMock).toHaveBeenCalledOnce();
+    expect(await getAlarm(stub)).toBeNull();
+  });
+
+  it('alarm deletes a due sleeping workspace before warm-pool state exists', async () => {
+    const nodeId = 'nl-test-uninitialized-ws-delete-001';
+    const wsId = 'ws-due-delete-uninitialized-001';
+    await seedTestNode(nodeId);
+    await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'sleeping' });
+
+    const fetchMock = vi.fn(async () => new Response(null, { status: 204 }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const stub = getStub(nodeId);
+    await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID);
+    await runInDurableObject(stub, async (instance) => {
+      expect(await instance.ctx.storage.get('state')).toBeUndefined();
+      const deletion = await instance.ctx.storage.get<{
+        nodeId: string;
+        workspaceId: string;
+        userId: string;
+        deleteAt: number;
+      }>(`ws-delete:${wsId}`);
+      if (!deletion) throw new Error('expected scheduled workspace deletion');
+      expect(deletion).toMatchObject({ nodeId, workspaceId: wsId, userId: TEST_USER_ID });
+      await instance.ctx.storage.put(`ws-delete:${wsId}`, {
+        ...deletion,
+        deleteAt: Date.now() - 1_000,
+      });
+    });
+
+    await runInDurableObject(stub, async (instance) => {
+      await instance.alarm();
+    });
+
     const workspace = await env.DATABASE.prepare('SELECT status FROM workspaces WHERE id = ?')
       .bind(wsId)
       .first<{ status: string }>();

@@ -757,7 +757,7 @@ export class ProjectData extends DurableObject<Env> {
             const stub = workerEnv.NODE_LIFECYCLE.get(doId);
             await (
               stub as unknown as import('../node-lifecycle').NodeLifecycle
-            ).scheduleWorkspaceDeletion(workspaceId, wsRow.user_id);
+            ).scheduleWorkspaceDeletion(wsRow.node_id, workspaceId, wsRow.user_id);
           }
         } catch {
           // Best-effort — cron safety-net will catch it
