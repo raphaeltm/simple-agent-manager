@@ -258,6 +258,55 @@ describe('DELETE /api/nodes/:id', () => {
     expect(mockDeleteWhere).toHaveBeenCalled();
   });
 
+  it('deletes a cf-container node only through an exclusive workspace stop claim', async () => {
+    mocks.requireNodeOwnership.mockResolvedValue({
+      id: 'node-cf-1',
+      status: 'running',
+      healthStatus: 'healthy',
+      userId: 'user-123',
+      nodeRole: 'workspace',
+      runtime: 'cf-container',
+    });
+    const selectResults = [[{ id: 'ws-cf-1' }], [], [{ id: 'ws-cf-1' }]];
+    const mockSelect = vi.fn(() => {
+      const result = selectResults.shift() ?? [];
+      const chain: any = {};
+      chain.from = vi.fn(() => chain);
+      chain.where = vi.fn(() => Promise.resolve(result));
+      return chain;
+    });
+    (drizzle as any).mockReturnValue({
+      select: mockSelect,
+      update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn(() => Promise.resolve()) })) })),
+      delete: vi.fn(() => ({ where: mockDeleteWhere })),
+    });
+
+    const response = await app.request('/api/nodes/node-cf-1', { method: 'DELETE' }, env);
+
+    expect(response.status).toBe(200);
+    expect(mocks.deleteNodeResources).not.toHaveBeenCalled();
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-cf-1', 'user-123', env, {
+      exclusiveWorkspaceId: 'ws-cf-1',
+    });
+  });
+
+  it('rejects cf-container node deletion without exactly one workspace', async () => {
+    mocks.requireNodeOwnership.mockResolvedValue({
+      id: 'node-cf-1',
+      status: 'running',
+      healthStatus: 'healthy',
+      userId: 'user-123',
+      nodeRole: 'workspace',
+      runtime: 'cf-container',
+    });
+
+    const response = await app.request('/api/nodes/node-cf-1', { method: 'DELETE' }, env);
+
+    expect(response.status).toBe(409);
+    expect(mocks.deleteNodeResources).not.toHaveBeenCalled();
+    expect(mocks.stopNodeResources).not.toHaveBeenCalled();
+  });
+
   it('routes managed workspace deletion through the NodeLifecycle terminal boundary', async () => {
     const operations: string[] = [];
     const finalizeDeletion = vi.fn(async (nodeId: string, userId: string) => {

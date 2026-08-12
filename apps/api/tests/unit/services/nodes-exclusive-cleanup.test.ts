@@ -112,4 +112,38 @@ describe('stopNodeResources exclusive cf-container cleanup boundary', () => {
     expect(workspace.status).toBe('deleted');
     expect(node.status).toBe('deleted');
   });
+
+  it('ATTACK: node status changing before exclusive claim cannot be restored to stale status', async () => {
+    await seedCfContainerClaimedWorkspace();
+    const baseD1 = env.DATABASE;
+    env = {
+      ...env,
+      DATABASE: {
+        ...baseD1,
+        prepare: (sql: string) => {
+          if (sql.includes("UPDATE nodes") && sql.includes("SET status = 'stopping'")) {
+            return {
+              bind: (...params: unknown[]) => {
+                sqlite.prepare(`UPDATE nodes SET status = 'error' WHERE id = ?`).run('node-exclusive');
+                return baseD1.prepare(sql).bind(...params);
+              },
+            } as unknown as D1PreparedStatement;
+          }
+          return baseD1.prepare(sql);
+        },
+      } as D1Database,
+    } as Env;
+
+    await expect(
+      stopNodeResources('node-exclusive', 'user-owner', env, {
+        exclusiveWorkspaceId: 'ws-claimed',
+      })
+    ).rejects.toThrow(/not exclusive/);
+
+    expect(mocks.destroyVmAgentContainer).not.toHaveBeenCalled();
+    const node = sqlite.prepare(`SELECT status FROM nodes WHERE id = ?`).get('node-exclusive') as {
+      status: string;
+    };
+    expect(node.status).toBe('error');
+  });
 });

@@ -238,6 +238,14 @@ chatRoutes.post('/', async (c) => {
       )
       .returning({ id: schema.workspaces.id });
     if (linkResult.length === 0) {
+      await db
+        .update(schema.tasks)
+        .set({
+          status: 'cancelled',
+          errorMessage: 'Workspace attachment failed',
+          updatedAt: new Date().toISOString(),
+        })
+        .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.status, 'queued')));
       await projectDataService.stopSession(c.env, projectId, sessionId).catch((err) => {
         log.warn('chat.session_create_orphan_stop_failed', {
           projectId,

@@ -496,6 +496,7 @@ export async function stopNodeResources(
          AND user_id = ?
          AND runtime = 'cf-container'
          AND status NOT IN ('deleted', 'stopped', 'stopping')
+         AND status = ?
          AND EXISTS (
            SELECT 1 FROM workspaces claimed
            WHERE claimed.id = ?
@@ -509,8 +510,15 @@ export async function stopNodeResources(
              AND sibling.id != ?
              AND sibling.status != 'deleted'
          )`
-    )
-      .bind(now, nodeId, userId, options.exclusiveWorkspaceId, options.exclusiveWorkspaceId)
+  )
+      .bind(
+        now,
+        nodeId,
+        userId,
+        node.status,
+        options.exclusiveWorkspaceId,
+        options.exclusiveWorkspaceId
+      )
       .run();
 
     if (!claim.meta.changes || claim.meta.changes === 0) {
@@ -642,15 +650,15 @@ export async function deleteNodeResources(
   }
   result.nodeFound = true;
 
-  // Mirror stopNodeResources: cf-container nodes must destroy their Sandbox container here too.
-  // deleteNodeResources previously had no container branch, leaking the container on delete.
-  // User-owned (BYO) nodes are never cf-container — the explicit guard makes that invariant
-  // enforced rather than implicit. See architecture-critique #2 (cf-container asymmetry).
+  // cf-container destruction requires an exclusive workspace claim. This helper has no workspace
+  // context, so it must not bypass stopNodeResources(..., { exclusiveWorkspaceId }).
   if (!isUserOwnedNodeClass(node.nodeClass) && node.runtime === 'cf-container') {
-    await destroyVmAgentContainer(env, node.id).catch((err) => {
-      result.errors.push(err instanceof Error ? err.message : String(err));
-      log.error('node_delete.cf_container_destroy_failed', { nodeId, ...serializeError(err) });
+    result.errors.push('cf-container deletion requires an exclusive workspace claim');
+    log.warn('node_delete.cf_container_exclusive_claim_required', {
+      nodeId,
+      action: 'skipped',
     });
+    return result;
   }
 
   // User-owned (BYO) machines have no SAM-provisioned cloud VM: "delete" = deregister the SAM

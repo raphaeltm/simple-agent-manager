@@ -396,7 +396,40 @@ nodesRoutes.delete('/:id', async (c) => {
     throw errors.notFound('Node');
   }
 
-  const cleanup = await deleteNodeResources(nodeId, userId, c.env);
+  let cleanup: Awaited<ReturnType<typeof deleteNodeResources>>;
+  if (node.runtime === 'cf-container') {
+    const workspaceRows = await db
+      .select({ id: schema.workspaces.id })
+      .from(schema.workspaces)
+      .where(
+        and(
+          eq(schema.workspaces.nodeId, nodeId),
+          eq(schema.workspaces.userId, userId),
+          ne(schema.workspaces.status, 'deleted')
+        )
+      );
+    const workspace = workspaceRows[0];
+    if (workspaceRows.length !== 1 || !workspace) {
+      throw errors.conflict('Cannot delete cf-container node without exactly one workspace');
+    }
+    const now = new Date().toISOString();
+    await db
+      .update(schema.workspaces)
+      .set({ status: 'stopping', updatedAt: now })
+      .where(and(eq(schema.workspaces.id, workspace.id), eq(schema.workspaces.userId, userId)));
+    await stopNodeResources(nodeId, userId, c.env, {
+      exclusiveWorkspaceId: workspace.id,
+    });
+    cleanup = {
+      nodeFound: true,
+      providerVmDeleted: false,
+      providerVmDeleteSkippedReason: null,
+      backendDnsDeleted: false,
+      errors: [],
+    };
+  } else {
+    cleanup = await deleteNodeResources(nodeId, userId, c.env);
+  }
   if ((node.nodeRole ?? 'workspace') === 'deployment' && cleanup.errors.length > 0) {
     throw errors.conflict(
       `Deployment node could not be fully deprovisioned: ${cleanup.errors.join('; ')}`

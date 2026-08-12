@@ -63,14 +63,24 @@ function seedNode(row: {
   nodeRole: 'workspace' | 'deployment';
   status: string;
   warmSince?: string | null;
+  runtime?: 'vm' | 'cf-container';
 }): void {
   sqlite
     ?.prepare(
       `INSERT INTO nodes (id, user_id, name, status, warm_since, node_role, node_class, runtime,
                           health_status, created_at, updated_at)
-       VALUES (?, 'user-1', ?, ?, ?, ?, 'managed', 'vm', 'healthy', ?, ?)`
+       VALUES (?, 'user-1', ?, ?, ?, ?, 'managed', ?, 'healthy', ?, ?)`
     )
-    .run(row.id, `node-${row.id}`, row.status, row.warmSince ?? null, row.nodeRole, OLD, OLD);
+    .run(
+      row.id,
+      `node-${row.id}`,
+      row.status,
+      row.warmSince ?? null,
+      row.nodeRole,
+      row.runtime ?? 'vm',
+      OLD,
+      OLD
+    );
 }
 
 function seedAutoProvisionedTask(taskId: string, nodeId: string): void {
@@ -207,5 +217,23 @@ describe('node-cleanup sweep never destroys deployment nodes', () => {
       | { status: string }
       | undefined;
     expect(row?.status).toBe('running');
+  });
+
+  it('idle orphan phase never destroys a cf-container without an exclusive workspace claim', async () => {
+    seedNode({ id: 'workspace-idle', nodeRole: 'workspace', status: 'running' });
+    seedNode({
+      id: 'cf-container-idle',
+      nodeRole: 'workspace',
+      status: 'running',
+      runtime: 'cf-container',
+    });
+    const env = makeEnv();
+
+    const result = await runNodeCleanupSweep(env);
+
+    expect(deleteCalls).toContain('workspace-idle');
+    expect(result.orphanedNodesDestroyed).toBe(1);
+    expect(deleteCalls).not.toContain('cf-container-idle');
+    expect(stopCalls).not.toContain('cf-container-idle');
   });
 });

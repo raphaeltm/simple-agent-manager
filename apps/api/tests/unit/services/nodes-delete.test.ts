@@ -165,8 +165,7 @@ describe('node resource deletion services', () => {
     expect(deleteDNSRecord).not.toHaveBeenCalled();
   });
 
-  it('deleteNodeResources destroys the cf-container for a managed cf-container node (asymmetry fix)', async () => {
-    // Pre-fix, deleteNodeResources had no container branch and leaked the Sandbox container.
+  it('deleteNodeResources refuses managed cf-container deletion without an exclusive workspace claim', async () => {
     nodeRows.push({
       id: 'cf-1',
       userId: 'user-1',
@@ -182,9 +181,11 @@ describe('node resource deletion services', () => {
       credentialAttributionProjectId: null,
     });
 
-    await deleteNodeResources('cf-1', 'user-1', ENV);
+    const result = await deleteNodeResources('cf-1', 'user-1', ENV);
 
-    expect(destroyVmAgentContainer).toHaveBeenCalledWith(ENV, 'cf-1');
+    expect(result.errors).toContain('cf-container deletion requires an exclusive workspace claim');
+    expect(destroyVmAgentContainer).not.toHaveBeenCalled();
+    expect(updateCalls).toHaveLength(0);
   });
 
   it('stopNodeResources rejects managed cf-container destruction without an exclusive workspace claim', async () => {

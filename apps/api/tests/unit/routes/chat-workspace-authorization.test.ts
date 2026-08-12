@@ -431,6 +431,13 @@ describe('POST /sessions — workspace attachment authorization', () => {
       .prepare(`SELECT chat_session_id FROM workspaces WHERE id = ?`)
       .get('ws-claim-after-validation') as { chat_session_id: string | null };
     expect(workspace.chat_session_id).toBeNull();
+    const [task] = await taskRows();
+    expect(task).toMatchObject({
+      status: 'cancelled',
+      workspaceId: null,
+      chatSessionId: null,
+      errorMessage: 'Workspace attachment failed',
+    });
   });
 });
 

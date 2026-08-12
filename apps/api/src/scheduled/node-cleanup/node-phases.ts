@@ -563,6 +563,7 @@ export async function sweepIdleOrphanNodes(
      WHERE n.status = 'running'
        AND n.node_role = 'workspace'
        AND n.node_class != 'user-owned'
+       AND (n.runtime IS NULL OR n.runtime != 'cf-container')
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        AND n.warm_since IS NULL
        AND n.created_at < ?
