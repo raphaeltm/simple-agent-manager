@@ -229,7 +229,12 @@ func (c *Config) Validate() error {
 	}
 
 	for _, origin := range c.AllowedOrigins {
-		if strings.Contains(origin, "*") {
+		parsedOrigin, err := url.Parse(origin)
+		if err != nil ||
+			(parsedOrigin.Scheme != "http" && parsedOrigin.Scheme != "https") ||
+			parsedOrigin.Host == "" || parsedOrigin.User != nil || parsedOrigin.Path != "" ||
+			parsedOrigin.RawQuery != "" || parsedOrigin.Fragment != "" || parsedOrigin.Opaque != "" ||
+			strings.Contains(origin, "*") {
 			errs = append(errs, fmt.Errorf("ALLOWED_ORIGINS must contain exact origins only, got %q", origin))
 		}
 	}

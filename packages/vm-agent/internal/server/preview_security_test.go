@@ -264,6 +264,33 @@ func TestPortProxyStripsSAMAuthorizationForAnotherWorkspace(t *testing.T) {
 	}
 }
 
+func TestPortProxyStripsCombinedAuthorizationContainingSAMBearer(t *testing.T) {
+	const workspaceID = "01KR1000000000000000000001"
+	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
+	samToken := signPreviewWorkspaceToken(t, privateKey, workspaceID)
+
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "" {
+			t.Errorf("combined Authorization containing SAM bearer reached preview app: %q", got)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer backend.Close()
+
+	s := &Server{
+		config:       &config.Config{ControlPlaneURL: "https://api.example.com", CookieName: "vm_session"},
+		jwtValidator: validator,
+	}
+	recorder := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, backend.URL, nil)
+	req.Header.Set("Authorization", "Bearer app-token, Bearer "+samToken)
+	s.servePortProxy(recorder, req, workspaceID, 3000, backend.URL, "/")
+
+	if recorder.Code != http.StatusNoContent {
+		t.Fatalf("status = %d, want 204", recorder.Code)
+	}
+}
+
 func TestPortProxyPreservesApplicationWebSocketUpgrade(t *testing.T) {
 	const workspaceID = "01KR1000000000000000000001"
 	validator, privateKey := newWorkspaceCreateJWTValidator(t, "node-1")
@@ -342,6 +369,7 @@ func TestPrivilegedWebSocketOriginPolicyRejectsWildcardAndPreviewOrigins(t *test
 	s := &Server{config: &config.Config{AllowedOrigins: []string{
 		"*",
 		"https://*.example.com",
+		"null",
 		"https://app.example.com",
 	}}}
 

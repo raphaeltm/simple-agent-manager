@@ -25,8 +25,11 @@ func (s *Server) createUpgrader() websocket.Upgrader {
 }
 
 func (s *Server) isOriginAllowed(origin string) bool {
+	if strings.EqualFold(strings.TrimSpace(origin), "null") {
+		return false
+	}
 	for _, allowed := range s.config.AllowedOrigins {
-		if strings.Contains(allowed, "*") {
+		if strings.Contains(allowed, "*") || strings.EqualFold(strings.TrimSpace(allowed), "null") {
 			continue
 		}
 		if allowed == origin {

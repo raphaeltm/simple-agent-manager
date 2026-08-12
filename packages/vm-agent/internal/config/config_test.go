@@ -961,6 +961,27 @@ func TestValidateRejectsWildcardAllowedOrigins(t *testing.T) {
 	}
 }
 
+func TestValidateRejectsNonHTTPSerializedAllowedOrigins(t *testing.T) {
+	t.Parallel()
+	for _, origin := range []string{
+		"null",
+		"file://local/path",
+		"https://user@example.com",
+		"https://app.example.com/",
+		"https://app.example.com/path",
+		"https://app.example.com?query=value",
+		"https://app.example.com#fragment",
+	} {
+		t.Run(origin, func(t *testing.T) {
+			cfg := validConfig()
+			cfg.AllowedOrigins = []string{origin}
+			if err := cfg.Validate(); err == nil || !strings.Contains(err.Error(), "ALLOWED_ORIGINS") {
+				t.Fatalf("Validate() error = %v, want invalid serialized-origin rejection", err)
+			}
+		})
+	}
+}
+
 func TestValidateValidPortBoundary(t *testing.T) {
 	t.Parallel()
 	cfg := validConfig()

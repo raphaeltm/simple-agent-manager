@@ -165,13 +165,17 @@ func (s *Server) stripSAMWorkspaceAuthorization(headers http.Header) {
 	if s.jwtValidator == nil {
 		return
 	}
-	authorization := strings.TrimSpace(headers.Get("Authorization"))
-	fields := strings.Fields(authorization)
-	if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
-		return
-	}
-	if _, err := s.jwtValidator.ValidateWorkspaceToken(fields[1], ""); err == nil {
-		headers.Del("Authorization")
+	for _, authorization := range headers.Values("Authorization") {
+		for _, credential := range strings.Split(authorization, ",") {
+			fields := strings.Fields(credential)
+			if len(fields) != 2 || !strings.EqualFold(fields[0], "Bearer") {
+				continue
+			}
+			if _, err := s.jwtValidator.ValidateWorkspaceToken(fields[1], ""); err == nil {
+				headers.Del("Authorization")
+				return
+			}
+		}
 	}
 }
 

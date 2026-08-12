@@ -25,6 +25,7 @@ This remediation must preserve every valid authenticated terminal, ACP, boot-log
 - [x] Make VM-agent session cookies host-only for new sessions while safely expiring legacy parent-domain cookies.
 - [x] Apply shared reserved-cookie filtering at both Cloudflare and VM-agent proxy boundaries.
 - [x] Replace wildcard privileged CORS/WebSocket trust with explicit trusted control-plane origins, without restricting port-preview application traffic.
+- [x] Run compatibility regressions for the port-token/cookie handshake, public ports, forwarded Host contract, and terminal/ACP initial connection and reconnection flows.
 - [x] Update the public security architecture with the port-preview trust boundary, reserved-cookie behavior, and exact-origin policy.
 - [ ] Run focused tests, Go race/coverage/static checks, API checks, repository fast/full gates, specialist review, and a fresh adversarial review.
 - [ ] Open exactly one non-draft PR, skip staging by explicit instruction, do not merge, and monitor/fix all applicable CI to green.

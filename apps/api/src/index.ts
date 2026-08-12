@@ -609,19 +609,28 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
 
 async function stripSamWorkspaceAuthorization(headers: Headers, env: Env): Promise<void> {
   const authorization = headers.get('authorization');
-  const match = authorization?.match(/^\s*Bearer\s+(.+?)\s*$/i);
-  if (!match?.[1]) return;
-  try {
-    await verifyTerminalToken(match[1], env);
-    headers.delete('authorization');
-  } catch (error) {
-    // Application-owned bearer tokens are intentionally preserved.
-    if (error instanceof joseErrors.JOSEError) return;
-    log.error('ws_proxy_authorization_verification_error', {
-      ...serializeError(error),
-      action: 'rejected',
-    });
-    throw error;
+  if (!authorization) return;
+  const bearerTokens = authorization
+    .split(',')
+    .map((credential) => credential.match(/^\s*Bearer\s+([^\s,]+)\s*$/i)?.[1])
+    .filter((token): token is string => Boolean(token));
+
+  for (const token of bearerTokens) {
+    try {
+      await verifyTerminalToken(token, env);
+      // A combined field containing any SAM credential is tainted. Remove the
+      // whole field instead of forwarding its SAM and application components.
+      headers.delete('authorization');
+      return;
+    } catch (error) {
+      // Application-owned bearer tokens are intentionally preserved.
+      if (error instanceof joseErrors.JOSEError) continue;
+      log.error('ws_proxy_authorization_verification_error', {
+        ...serializeError(error),
+        action: 'rejected',
+      });
+      throw error;
+    }
   }
 }
 

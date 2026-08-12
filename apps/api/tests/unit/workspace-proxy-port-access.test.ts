@@ -460,6 +460,37 @@ describe('workspace proxy port-access auth', () => {
     expect(headers.get('authorization')).toBeNull();
   });
 
+  it('strips a combined Authorization field containing any valid SAM bearer', async () => {
+    mockVerifyPortAccessToken.mockResolvedValue({
+      workspace: WORKSPACE_ID,
+      port: 3000,
+      subject: 'user-1',
+    });
+    mockVerifyTerminalToken.mockImplementation(async (token: string) => {
+      if (token === 'sam-workspace-jwt') {
+        return { workspace: WORKSPACE_ID, subject: 'user-1' };
+      }
+      throw new joseErrors.JWSInvalid('not a SAM token');
+    });
+    const fetch = vi.fn(async () => new Response('proxied', { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+
+    await worker.default.fetch(
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`, {
+        headers: {
+          cookie: 'sam_port_access=valid-jwt',
+          authorization: 'Bearer app-owned-token, Bearer sam-workspace-jwt',
+        },
+      }),
+      env
+    );
+
+    const headers = new Headers(fetch.mock.calls[0]?.[1]?.headers);
+    expect(headers.get('authorization')).toBeNull();
+    expect(mockVerifyTerminalToken).toHaveBeenCalledWith('app-owned-token', env);
+    expect(mockVerifyTerminalToken).toHaveBeenCalledWith('sam-workspace-jwt', env);
+  });
+
   it('preserves an arbitrary application Authorization bearer', async () => {
     mockVerifyPortAccessToken.mockResolvedValue({
       workspace: WORKSPACE_ID,
