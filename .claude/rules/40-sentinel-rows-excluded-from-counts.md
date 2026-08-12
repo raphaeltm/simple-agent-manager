@@ -31,6 +31,12 @@ commits the election write. It must also cover interruption before the usable
 identity is committed and verify the value returned to the auth layer matches the
 persisted role after any trigger or database-side election.
 
+The election must be a one-time durable claim initialized from migration-time
+state, not a reusable `NOT EXISTS (active superadmin)` check. Upgrade tests must
+also exercise the migration-before-Worker window: old code must never receive a
+privileged `RETURNING` value that the database later demotes, because that stale
+value can enter a response or signed session cache.
+
 ## Quick Compliance Check
 
 Before committing count-based or existence-based logic over `users` (or any sentinel-bearing table):
@@ -40,4 +46,6 @@ Before committing count-based or existence-based logic over `users` (or any sent
 - [ ] The sentinel id is referenced via a shared constant (env-overridable), not hardcoded inline
 - [ ] A test asserts the check returns the correct result when a sentinel row co-exists with real rows
 - [ ] First-row privilege bootstrap uses a database-backed election, not read-then-insert logic
+- [ ] The durable claim cannot reopen merely because the elected operator is later absent or suspended
 - [ ] Real-D1 tests force concurrent pre-create interleaving and interrupted-attempt recovery
+- [ ] Migration tests cover the previous Worker serving during migration-before-code deployment

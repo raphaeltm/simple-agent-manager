@@ -65,13 +65,18 @@ This is audit finding BA-01 from backend audit task
 5. The `system_anonymous_trials` row and custom sentinels are reliably excluded by
    `status='system'`; `.claude/rules/40-sentinel-rows-excluded-from-counts.md`
    requires this exclusion at the database predicate.
-6. D1 migrations run before the API Worker is deployed, so both upgrades and clean
-   installs receive the trigger before code starts relying on it. The retained
-   migration-order task is
+6. D1 migrations run before the API Worker is deployed, so the previous Worker can
+   continue serving after the migration. An `AFTER INSERT` demotion is unsafe in
+   that window because SQLite `RETURNING` can still hand old code a stale privileged
+   object that enters its signed session cache. The migration must first seed a
+   second system row that the legacy empty-table read cannot exclude, ensuring old
+   code only returns ordinary pending users until the new Worker is live. The
+   retained migration-order task is
    `tasks/archive/2026-07-18-safe-d1-migration-deploy-order.md`.
 7. The migration must be additive and retry-safe. `users` is a foreign-key parent,
    so no table recreation or destructive constraint/index retrofit is acceptable.
-   `CREATE TRIGGER IF NOT EXISTS` is append-only and does not rewrite user data.
+   A singleton claim table, an internal `status='system'` guard row, and
+   `CREATE TRIGGER IF NOT EXISTS` are append-only and do not rewrite real users.
 8. The existing worker harness applies the genuine migration chain to real
    Miniflare D1. `apps/api/tests/workers/superadmin-self-heal.test.ts` is the right
    place for concurrency, clean-install, upgrade, sentinel, suspension, and
@@ -85,28 +90,33 @@ Every finding above maps to an implementation or validation item below.
 
 ## Data Flow and Proposed Smallest Durable Election
 
+Migration 0110 atomically seeds an internal `status='system'` compatibility guard
+and opens a singleton claim only when no non-system user exists. Then
 `signup/OAuth user creation` → `createAuth` → Better Auth
 `user.create.before` assigns ordinary pending state when approval is enabled →
 Drizzle adapter inserts the `users` row and then its usable `accounts` link → an
-additive SQLite `AFTER INSERT ON accounts` trigger atomically promotes that user
-only if no active superadmin already exists → wrapped adapter reloads the
+additive SQLite `AFTER INSERT ON accounts` trigger atomically consumes the open
+claim and promotes that user → wrapped adapter reloads the
 persisted user → Better Auth builds the unchanged response/session from the final
-role and status. A second insert trigger demotes duplicate superadmins created by
-legacy Worker code during the migration-before-code upgrade window.
+role and status. During the migration-before-code upgrade window, the old Worker
+sees the extra system guard as an existing row and therefore returns pending—not
+privileged—values before the same account trigger performs the database election.
 
-The account-linked `users.role/status` row is the durable claim. No process-memory
-lock, lease, eventual login ordering, or uniqueness-conflict 500 is involved. If
-an attempt fails before its account link, it leaves no claim; if the link commits,
-the trigger's election commits in the same statement.
+The singleton row is the durable one-time claim. It never reopens merely because
+an established deployment later has no active superadmin. No process-memory lock,
+lease, eventual login ordering, or uniqueness-conflict 500 is involved. If an
+attempt fails before its account link, the claim stays open; if the link commits,
+the claim and promotion commit in the same statement.
 
 ## Implementation Checklist
 
 - [x] Add a failing real-D1 regression test that forces concurrent approval-enabled
       first-user hooks to observe the empty baseline before concurrent inserts and
       proves the vulnerable code creates multiple superadmins.
-- [x] Add the next additive D1 migration with idempotent `AFTER INSERT` triggers
-      that promotes exactly one eligible pending user and leaves later users
-      pending, excluding system and suspended rows.
+- [x] Add the next additive D1 migration with an idempotent one-time claim,
+      mixed-version system guard, and `AFTER INSERT` trigger that promotes exactly
+      one eligible pending user and leaves later users pending, excluding system
+      and suspended rows.
 - [x] Replace the non-atomic create-before read with deterministic pending defaults
       for approval-enabled creates while preserving open-registration defaults.
 - [x] Wrap the Better Auth Drizzle adapter so trigger-eligible user creates reload
@@ -116,8 +126,9 @@ the trigger's election commits in the same statement.
       users; two and three concurrent distinct users; duplicate/retried hooks;
       default and custom sentinels; suspended rows; an existing active superadmin;
       interrupted/failed pre-insert and post-insert attempts; approval enabled and
-      disabled; clean migration replay and upgrade application; OAuth-style
-      transactional creation; and login-time self-heal compatibility.
+      disabled; clean migration replay and upgrade application (including the
+      previous Worker serving after migration); OAuth-style transactional
+      creation; durable-claim non-reopening; and login-time self-heal compatibility.
 - [x] Preserve and update focused unit tests for runtime approval overrides and the
       before-hook contract without relying on substring/source mocks.
 - [x] Update the public self-hosting explanation to describe account-link election,
@@ -150,6 +161,8 @@ the trigger's election commits in the same statement.
   active operator; an existing active non-system superadmin prevents bootstrap.
 - Retried hooks/elections are idempotent, and interrupted attempts cannot leave a
   completed set of later signups permanently without an active operator.
+- The clean-install claim is one-time and does not reopen on an established
+  deployment merely because its original operator becomes absent or suspended.
 - The new migration is append-only, idempotent under replay, safe on upgrade, and
   replayable from an empty database with the full chain.
 - Existing OAuth, token, device, approval, sentinel, and login self-heal contracts

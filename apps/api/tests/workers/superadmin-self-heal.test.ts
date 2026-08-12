@@ -10,8 +10,9 @@
  *      instance and invoked against real D1.
  *
  * The sentinel user `system_anonymous_trials` (status='system', seeded by
- * migration 0043) is the orphan that broke first-user promotion; every scenario
- * asserts it is never mutated and never counted as a "real" user.
+ * migration 0043) is the orphan that broke first-user promotion. Migration 0110
+ * adds a second system row to make the legacy Worker safe during rollout; neither
+ * row is ever counted as a "real" user.
  */
 import { TRIAL_ANONYMOUS_USER_ID } from '@simple-agent-manager/shared';
 import { env } from 'cloudflare:test';
@@ -34,8 +35,29 @@ const MIGRATION_UPDATE_SQL = migrationSql
   .filter((line) => !line.trim().startsWith('--'))
   .join(' ');
 
-const BOOTSTRAP_TRIGGER_SQL =
-  bootstrapMigrationSql.match(/CREATE TRIGGER IF NOT EXISTS[\s\S]*?\nEND;/g) ?? [];
+function requiredBootstrapSql(pattern: RegExp, description: string): string {
+  const statement = bootstrapMigrationSql.match(pattern)?.[0];
+  if (!statement) {
+    throw new Error(`Migration 0110 is missing ${description}`);
+  }
+  return statement;
+}
+
+const BOOTSTRAP_SETUP_SQL = [
+  requiredBootstrapSql(
+    /INSERT INTO users \(id, email, email_verified, role, status\)[\s\S]*?ON CONFLICT\(id\) DO NOTHING;/,
+    'the mixed-version guard row'
+  ),
+  requiredBootstrapSql(
+    /CREATE TABLE IF NOT EXISTS first_signup_superadmin_claim[\s\S]*?\n\);/,
+    'the durable claim table'
+  ),
+  requiredBootstrapSql(
+    /INSERT INTO first_signup_superadmin_claim[\s\S]*?ON CONFLICT\(singleton\) DO NOTHING;/,
+    'the one-time claim initializer'
+  ),
+  ...(bootstrapMigrationSql.match(/CREATE TRIGGER IF NOT EXISTS[\s\S]*?\nEND;/g) ?? []),
+];
 const BOOTSTRAP_ELECTION_GUARD_USER_ID = 'system_first_signup_election_guard';
 
 interface UserRow {
@@ -44,8 +66,13 @@ interface UserRow {
   status: string;
 }
 
+interface BootstrapClaimRow {
+  is_open: number;
+  claimed_user_id: string | null;
+}
+
 /**
- * Reset the users table to a known baseline: only the system sentinel exists.
+ * Reset the users table to a known baseline: only the two system rows exist.
  * The Miniflare harness auto-applies all migrations (including 0043 which seeds
  * the sentinel and 0062 which is a no-op against the sentinel-only baseline), so
  * we clear any real users left over from prior tests and re-assert the sentinel.
@@ -59,6 +86,18 @@ async function resetUsers(): Promise<void> {
   )
     .bind(TRIAL_ANONYMOUS_USER_ID)
     .run();
+  await env.DATABASE.prepare(
+    `INSERT INTO users (id, email, email_verified, role, status)
+     VALUES (?, 'first-signup-election@simple-agent-manager.internal', 0, 'user', 'system')
+     ON CONFLICT(id) DO UPDATE SET role = 'user', status = 'system'`
+  )
+    .bind(BOOTSTRAP_ELECTION_GUARD_USER_ID)
+    .run();
+  await env.DATABASE.prepare(
+    `UPDATE first_signup_superadmin_claim
+     SET is_open = 1, claimed_user_id = NULL
+     WHERE singleton = 1`
+  ).run();
 }
 
 async function insertUser(id: string, opts?: { role?: string; status?: string }): Promise<void> {
@@ -90,6 +129,13 @@ async function getRealUsers(): Promise<UserRow[]> {
     `SELECT id, role, status FROM users WHERE status != 'system' ORDER BY id`
   ).all<UserRow>();
   return rows.results;
+}
+
+async function getBootstrapClaim(): Promise<BootstrapClaimRow | null> {
+  return env.DATABASE.prepare(
+    `SELECT is_open, claimed_user_id
+     FROM first_signup_superadmin_claim WHERE singleton = 1`
+  ).first<BootstrapClaimRow>();
 }
 
 /**
@@ -194,10 +240,19 @@ async function legacyApprovalDecision(
 }
 
 async function applyBootstrapMigration(): Promise<void> {
-  expect(BOOTSTRAP_TRIGGER_SQL).toHaveLength(2);
-  for (const statement of BOOTSTRAP_TRIGGER_SQL) {
+  expect(BOOTSTRAP_SETUP_SQL).toHaveLength(5);
+  for (const statement of BOOTSTRAP_SETUP_SQL) {
     await env.DATABASE.prepare(statement).run();
   }
+}
+
+async function removeBootstrapMigrationArtifacts(): Promise<void> {
+  await env.DATABASE.batch([
+    env.DATABASE.prepare(`DROP TRIGGER IF EXISTS accounts_claim_first_superadmin_after_insert`),
+    env.DATABASE.prepare(`DROP TRIGGER IF EXISTS users_close_first_superadmin_claim_after_update`),
+    env.DATABASE.prepare(`DROP TABLE IF EXISTS first_signup_superadmin_claim`),
+    env.DATABASE.prepare(`DELETE FROM users WHERE id = ?`).bind(BOOTSTRAP_ELECTION_GUARD_USER_ID),
+  ]);
 }
 
 describe('first-signup bootstrap election (real D1)', () => {
@@ -293,10 +348,17 @@ describe('first-signup bootstrap election (real D1)', () => {
       status: 'system',
     });
 
-    await env.DATABASE.prepare(`DELETE FROM users`).run();
+    await env.DATABASE.prepare(`DELETE FROM users WHERE id != ?`)
+      .bind(BOOTSTRAP_ELECTION_GUARD_USER_ID)
+      .run();
     await env.DATABASE.prepare(
       `INSERT INTO users (id, email, email_verified, role, status)
        VALUES ('custom_sentinel', 'custom@internal.test', 0, 'user', 'system')`
+    ).run();
+    await env.DATABASE.prepare(
+      `UPDATE first_signup_superadmin_claim
+       SET is_open = 1, claimed_user_id = NULL
+       WHERE singleton = 1`
     ).run();
 
     expect(
@@ -394,6 +456,24 @@ describe('first-signup bootstrap election (real D1)', () => {
     });
   });
 
+  it('does not reopen a completed one-time claim after the operator is suspended', async () => {
+    const winner = await createOAuthUser('one-time-winner');
+    await env.DATABASE.prepare(
+      `UPDATE users SET role = 'superadmin', status = 'suspended' WHERE id = ?`
+    )
+      .bind(winner.id)
+      .run();
+
+    expect(await createOAuthUser('later-after-suspension')).toMatchObject({
+      role: 'user',
+      status: 'pending',
+    });
+    expect(await getBootstrapClaim()).toEqual({
+      is_open: 0,
+      claimed_user_id: winner.id,
+    });
+  });
+
   it('makes migration-window legacy decisions safely pending before account election', async () => {
     const candidates = await Promise.all(
       ['legacy-window-1', 'legacy-window-2', 'legacy-window-3'].map((id) =>
@@ -412,10 +492,12 @@ describe('first-signup bootstrap election (real D1)', () => {
     await Promise.all(candidates.map(insertHookAccount));
 
     const users = await getRealUsers();
-    expect(users.filter((user) => user.role === 'superadmin' && user.status === 'active')).toHaveLength(
-      1
+    expect(
+      users.filter((user) => user.role === 'superadmin' && user.status === 'active')
+    ).toHaveLength(1);
+    expect(users.filter((user) => user.role === 'user' && user.status === 'pending')).toHaveLength(
+      2
     );
-    expect(users.filter((user) => user.role === 'user' && user.status === 'pending')).toHaveLength(2);
   });
 
   it('does not let an interrupted migration-window legacy attempt claim bootstrap', async () => {
@@ -445,6 +527,10 @@ describe('first-signup bootstrap election (real D1)', () => {
     const loginHook = await getSessionAfterHook({ REQUIRE_APPROVAL: 'false' });
     await loginHook({ userId: openUser.id });
     expect(await getUser(openUser.id)).toMatchObject({ role: 'superadmin', status: 'active' });
+    expect(await getBootstrapClaim()).toEqual({
+      is_open: 0,
+      claimed_user_id: openUser.id,
+    });
   });
 });
 
@@ -455,13 +541,13 @@ describe('migration 0110 — atomic bootstrap trigger installation (real D1)', (
     const before = await env.DATABASE.prepare(
       `SELECT name FROM sqlite_schema
        WHERE type = 'trigger' AND name IN (
-         'users_guard_legacy_first_superadmin_after_insert',
-         'accounts_elect_first_superadmin_after_insert'
+         'accounts_claim_first_superadmin_after_insert',
+         'users_close_first_superadmin_claim_after_update'
        ) ORDER BY name`
     ).all<{ name: string }>();
     expect(before.results.map((row) => row.name)).toEqual([
-      'accounts_elect_first_superadmin_after_insert',
-      'users_guard_legacy_first_superadmin_after_insert',
+      'accounts_claim_first_superadmin_after_insert',
+      'users_close_first_superadmin_claim_after_update',
     ]);
 
     expect(await getUser(BOOTSTRAP_ELECTION_GUARD_USER_ID)).toMatchObject({
@@ -476,34 +562,52 @@ describe('migration 0110 — atomic bootstrap trigger installation (real D1)', (
       role: 'user',
       status: 'system',
     });
+    expect(await getBootstrapClaim()).toEqual({ is_open: 1, claimed_user_id: null });
   });
 
-  it('installs safely on upgrade and guards legacy concurrent superadmin inserts', async () => {
-    await env.DATABASE.prepare(
-      `DROP TRIGGER users_guard_legacy_first_superadmin_after_insert`
-    ).run();
-    await env.DATABASE.prepare(`DROP TRIGGER accounts_elect_first_superadmin_after_insert`).run();
+  it('opens exactly once on a clean install while legacy code remains live', async () => {
+    await removeBootstrapMigrationArtifacts();
 
     try {
-      const legacyCandidates = ['legacy-1', 'legacy-2', 'legacy-3'].map((id) => ({
-        id,
-        email: `${id}@example.com`,
+      await applyBootstrapMigration();
+      expect(await getBootstrapClaim()).toEqual({ is_open: 1, claimed_user_id: null });
+
+      const legacyCandidate = await legacyApprovalDecision('clean-legacy-winner');
+      expect(legacyCandidate).toMatchObject({ role: 'user', status: 'pending' });
+      await insertHookUser(legacyCandidate);
+      await insertHookAccount(legacyCandidate);
+
+      expect(await getUser('clean-legacy-winner')).toMatchObject({
         role: 'superadmin',
         status: 'active',
-      }));
-
-      await applyBootstrapMigration();
-      await Promise.all(legacyCandidates.map((candidate) => insertHookUser(candidate)));
-      await Promise.all(legacyCandidates.map((candidate) => insertHookAccount(candidate)));
-
-      const upgradedUsers = await getRealUsers();
-      expect(
-        upgradedUsers.filter((user) => user.role === 'superadmin' && user.status === 'active')
-      ).toHaveLength(1);
-      expect(
-        upgradedUsers.filter((user) => user.role === 'user' && user.status === 'pending')
-      ).toHaveLength(2);
+      });
     } finally {
+      await applyBootstrapMigration();
+    }
+  });
+
+  it('closes bootstrap on upgrade and never elevates a later pending newcomer', async () => {
+    await removeBootstrapMigrationArtifacts();
+    await insertUser('established-ordinary-user', { role: 'user', status: 'active' });
+
+    try {
+      await applyBootstrapMigration();
+      expect(await getBootstrapClaim()).toEqual({ is_open: 0, claimed_user_id: null });
+
+      const newcomer = await legacyApprovalDecision('established-later-newcomer');
+      await insertHookUser(newcomer);
+      await insertHookAccount(newcomer);
+
+      expect(await getUser('established-later-newcomer')).toMatchObject({
+        role: 'user',
+        status: 'pending',
+      });
+      expect(await getUser('established-ordinary-user')).toMatchObject({
+        role: 'user',
+        status: 'active',
+      });
+    } finally {
+      await env.DATABASE.prepare(`DELETE FROM users WHERE id = 'established-ordinary-user'`).run();
       await applyBootstrapMigration();
     }
   });
