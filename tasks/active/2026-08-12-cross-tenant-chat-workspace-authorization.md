@@ -107,4 +107,5 @@ attacks, zero destructive-boundary assertions, and legitimate owner/shared-proje
 vertical suite demonstrated discrimination before the implementation: 7 attacks failed on current
 main while 6 compatibility controls passed. After independent review added cross-store backlink,
 pre-repair mutation, and `stop_subtask` boundary cases, a guard-removal run failed all 5 added attacks
-while 16 controls/previous cases passed. With every guard restored, all 21 vertical scenarios pass.
+while 16 controls/previous cases passed. With every guard restored and the reviewer-requested legacy
+task compatibility control added, all 22 vertical scenarios pass.
