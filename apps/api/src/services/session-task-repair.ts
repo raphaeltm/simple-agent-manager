@@ -6,6 +6,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
+import { errors } from '../middleware/error';
 import * as projectDataService from './project-data';
 import { truncateTitle } from './task-title';
 
@@ -28,13 +29,43 @@ function repairedTaskStatus(sessionStatus: string | null): 'in_progress' | 'comp
   return 'in_progress';
 }
 
-async function findTaskBySession(db: Db, sessionId: string): Promise<schema.Task | null> {
+async function findTaskBySession(
+  db: Db,
+  projectId: string,
+  sessionId: string
+): Promise<schema.Task | null> {
   const rows = await db
     .select()
     .from(schema.tasks)
-    .where(eq(schema.tasks.chatSessionId, sessionId))
+    .where(and(eq(schema.tasks.chatSessionId, sessionId), eq(schema.tasks.projectId, projectId)))
     .limit(1);
   return rows[0] ?? null;
+}
+
+async function findTaskProjectBySession(db: Db, sessionId: string): Promise<string | null> {
+  const rows = await db
+    .select({ projectId: schema.tasks.projectId })
+    .from(schema.tasks)
+    .where(eq(schema.tasks.chatSessionId, sessionId))
+    .limit(1);
+  return rows[0]?.projectId ?? null;
+}
+
+async function rejectCrossProjectSessionCollision(
+  db: Db,
+  projectId: string,
+  sessionId: string
+): Promise<void> {
+  const existingProjectId = await findTaskProjectBySession(db, sessionId);
+  if (!existingProjectId || existingProjectId === projectId) return;
+
+  log.warn('session_task_repair.project_scope_rejected', {
+    projectId,
+    sessionId,
+    existingProjectId,
+    action: 'rejected',
+  });
+  throw errors.notFound('Chat session');
 }
 
 /**
@@ -71,11 +102,13 @@ export async function ensureSessionTaskBacked(
     }
   }
 
-  const existing = await findTaskBySession(db, input.sessionId);
+  const existing = await findTaskBySession(db, input.projectId, input.sessionId);
   if (existing) {
     await projectDataService.linkSessionToTask(env, input.projectId, input.sessionId, existing.id);
     return existing;
   }
+
+  await rejectCrossProjectSessionCollision(db, input.projectId, input.sessionId);
 
   const taskId = ulid();
   const createdAt = stringField(session, 'createdAt') ?? new Date().toISOString();
@@ -105,8 +138,11 @@ export async function ensureSessionTaskBacked(
       updatedAt: new Date().toISOString(),
     });
   } catch (err) {
-    const winner = await findTaskBySession(db, input.sessionId);
-    if (!winner) throw err;
+    const winner = await findTaskBySession(db, input.projectId, input.sessionId);
+    if (!winner) {
+      await rejectCrossProjectSessionCollision(db, input.projectId, input.sessionId);
+      throw err;
+    }
     await projectDataService.linkSessionToTask(env, input.projectId, input.sessionId, winner.id);
     log.info('session_task_repair.conflict_reused', {
       projectId: input.projectId,
@@ -133,7 +169,7 @@ export async function ensureSessionTaskBacked(
     taskId,
   });
 
-  const created = await findTaskBySession(db, input.sessionId);
+  const created = await findTaskBySession(db, input.projectId, input.sessionId);
   if (!created) throw new Error('Repaired task could not be reloaded');
   return created;
 }

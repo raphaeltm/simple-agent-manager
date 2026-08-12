@@ -66,12 +66,15 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
   it('stops the chat session then invokes cleanupTaskRun for completed tasks', async () => {
     const order: string[] = [];
     const db = buildDb([
-      [{
-        id: 'task-1',
-        projectId: 'proj-1',
-        workspaceId: 'ws-1',
-        errorMessage: null,
-      }],
+      [
+        {
+          id: 'task-1',
+          projectId: 'proj-1',
+          chatSessionId: 'session-1',
+          workspaceId: 'ws-1',
+          errorMessage: null,
+        },
+      ],
       [
         {
           id: 'ws-1',
@@ -82,10 +85,15 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
       ],
     ]);
     mocks.drizzle.mockReturnValue(db);
-    mocks.stopSession.mockImplementation(async () => { order.push('stopSession'); });
-    mocks.cleanupTaskRun.mockImplementation(async () => { order.push('cleanupTaskRun'); });
+    mocks.stopSession.mockImplementation(async () => {
+      order.push('stopSession');
+    });
+    mocks.cleanupTaskRun.mockImplementation(async () => {
+      order.push('cleanupTaskRun');
+    });
 
-    const { cleanupTerminalTaskResources } = await import('../../src/services/task-terminal-cleanup');
+    const { cleanupTerminalTaskResources } =
+      await import('../../src/services/task-terminal-cleanup');
     const env = { DATABASE: {} } as Env;
 
     await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
@@ -103,12 +111,15 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
 
   it('fails the chat session for failed tasks and propagates error message', async () => {
     const db = buildDb([
-      [{
-        id: 'task-2',
-        projectId: 'proj-2',
-        workspaceId: 'ws-2',
-        errorMessage: 'agent crashed',
-      }],
+      [
+        {
+          id: 'task-2',
+          projectId: 'proj-2',
+          chatSessionId: 'session-2',
+          workspaceId: 'ws-2',
+          errorMessage: 'agent crashed',
+        },
+      ],
       [
         {
           id: 'ws-2',
@@ -120,7 +131,8 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
     ]);
     mocks.drizzle.mockReturnValue(db);
 
-    const { cleanupTerminalTaskResources } = await import('../../src/services/task-terminal-cleanup');
+    const { cleanupTerminalTaskResources } =
+      await import('../../src/services/task-terminal-cleanup');
     const env = { DATABASE: {} } as Env;
 
     await cleanupTerminalTaskResources(env, 'task-2', { status: 'failed' });
@@ -137,12 +149,15 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
 
   it('threads requiredUserId through to cleanupTaskRun for caller-scoped cleanup', async () => {
     const db = buildDb([
-      [{
-        id: 'task-3',
-        projectId: 'proj-3',
-        workspaceId: 'ws-3',
-        errorMessage: null,
-      }],
+      [
+        {
+          id: 'task-3',
+          projectId: 'proj-3',
+          chatSessionId: 'session-3',
+          workspaceId: 'ws-3',
+          errorMessage: null,
+        },
+      ],
       [
         {
           id: 'ws-3',
@@ -154,7 +169,8 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
     ]);
     mocks.drizzle.mockReturnValue(db);
 
-    const { cleanupTerminalTaskResources } = await import('../../src/services/task-terminal-cleanup');
+    const { cleanupTerminalTaskResources } =
+      await import('../../src/services/task-terminal-cleanup');
     const env = { DATABASE: {} } as Env;
 
     await cleanupTerminalTaskResources(env, 'task-3', {
@@ -173,16 +189,19 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
 
   it('skips cleanup when task has no workspace', async () => {
     const db = buildDb([
-      [{
-        id: 'task-4',
-        projectId: null,
-        workspaceId: null,
-        errorMessage: null,
-      }],
+      [
+        {
+          id: 'task-4',
+          projectId: null,
+          workspaceId: null,
+          errorMessage: null,
+        },
+      ],
     ]);
     mocks.drizzle.mockReturnValue(db);
 
-    const { cleanupTerminalTaskResources } = await import('../../src/services/task-terminal-cleanup');
+    const { cleanupTerminalTaskResources } =
+      await import('../../src/services/task-terminal-cleanup');
     const env = { DATABASE: {} } as Env;
 
     await cleanupTerminalTaskResources(env, 'task-4', { status: 'completed' });

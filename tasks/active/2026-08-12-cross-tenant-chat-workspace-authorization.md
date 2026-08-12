@@ -36,7 +36,7 @@ Scope is audit finding CT-01 only. Preserve every valid API response and shared-
 - [x] Revalidate task, project, workspace, and caller scope before ProjectData session mutation or compute teardown.
 - [x] Preserve trusted internal cleanup semantics with explicit identity consistency checks.
 - [x] Add a process-rule improvement covering caller-controlled relationship attachment plus destructive-use revalidation.
-- [ ] Run focused tests, API checks, repository fast/full gates, and prove new tests are discriminating against the pre-fix code.
+- [x] Run focused tests, API checks, repository fast/full gates, and prove new tests are discriminating against the pre-fix code.
 - [ ] Run task-completion, Cloudflare, security, constitution, documentation-sync, and test specialist reviews plus a fresh independent adversarial bypass review; resolve credible findings.
 - [ ] Open exactly one non-draft PR against `main`, do not deploy to staging, do not merge, and monitor all applicable CI checks to green.
 
@@ -105,4 +105,6 @@ also a mock-hidden integration failure across D1, ProjectData, and runtime clean
 relationship attachment and destructive use, real-SQLite scoping tests, stale/cross-store mismatch
 attacks, zero destructive-boundary assertions, and legitimate owner/shared-project controls. The new
 vertical suite demonstrated discrimination before the implementation: 7 attacks failed on current
-main while 6 compatibility controls passed; after the guard, all 15 attack/control scenarios pass.
+main while 6 compatibility controls passed. After independent review added cross-store backlink,
+pre-repair mutation, and `stop_subtask` boundary cases, a guard-removal run failed all 5 added attacks
+while 16 controls/previous cases passed. With every guard restored, all 21 vertical scenarios pass.

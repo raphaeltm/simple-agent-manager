@@ -28,6 +28,7 @@ const mocks = vi.hoisted(() => ({
   stopSession: vi.fn(),
   failSession: vi.fn(),
   stopWorkspaceOnNode: vi.fn(),
+  stopAgentSessionOnNode: vi.fn(),
   stopNodeResources: vi.fn(),
   markIdle: vi.fn(),
   scheduleWorkspaceDeletion: vi.fn(),
@@ -53,7 +54,7 @@ vi.mock('../../../src/services/project-data', () => ({
 
 vi.mock('../../../src/services/node-agent', () => ({
   stopWorkspaceOnNode: (...args: unknown[]) => mocks.stopWorkspaceOnNode(...args),
-  stopAgentSessionOnNode: vi.fn(),
+  stopAgentSessionOnNode: (...args: unknown[]) => mocks.stopAgentSessionOnNode(...args),
   cancelAgentPromptOnNode: vi.fn(),
 }));
 
@@ -65,6 +66,7 @@ vi.mock('../../../src/services/node-lifecycle', () => ({
   markIdle: (...args: unknown[]) => mocks.markIdle(...args),
 }));
 
+import { stopSubtask } from '../../../src/durable-objects/sam-session/tools/stop-subtask';
 import { chatRoutes } from '../../../src/routes/chat';
 import { cleanupTaskRun } from '../../../src/services/task-runner';
 import { cleanupTerminalTaskResources } from '../../../src/services/task-terminal-cleanup';
@@ -164,6 +166,7 @@ async function seedTask(input: {
   userId: string;
   sessionId: string;
   workspaceId: string | null;
+  status?: string;
 }): Promise<void> {
   await db()
     .insert(schema.tasks)
@@ -174,7 +177,7 @@ async function seedTask(input: {
       chatSessionId: input.sessionId,
       workspaceId: input.workspaceId,
       title: input.id,
-      status: 'in_progress',
+      status: input.status ?? 'in_progress',
       taskMode: 'conversation',
       createdBy: input.userId,
     } as typeof schema.tasks.$inferInsert);
@@ -271,6 +274,7 @@ beforeEach(async () => {
   });
   mocks.failSession.mockResolvedValue(undefined);
   mocks.stopWorkspaceOnNode.mockResolvedValue(undefined);
+  mocks.stopAgentSessionOnNode.mockResolvedValue(undefined);
   mocks.stopNodeResources.mockResolvedValue(undefined);
   mocks.markIdle.mockResolvedValue(undefined);
   mocks.scheduleWorkspaceDeletion.mockResolvedValue(undefined);
@@ -462,20 +466,48 @@ describe('POST /sessions/:sessionId/stop — destructive-use revalidation', () =
     expect((await taskRows())[0].status).toBe('in_progress');
   });
 
+  it('ATTACK: a stale workspace-to-session backlink returns 404 before lifecycle mutation', async () => {
+    await seedWorkspace({
+      id: 'ws-stale-backlink',
+      projectId: PROJECT,
+      userId: CALLER,
+      chatSessionId: 'different-session',
+    });
+    await seedTask({
+      id: 'task-stale-backlink',
+      projectId: PROJECT,
+      userId: CALLER,
+      sessionId: 'session-stale-backlink',
+      workspaceId: 'ws-stale-backlink',
+    });
+    storeSession({
+      id: 'session-stale-backlink',
+      projectId: PROJECT,
+      taskId: 'task-stale-backlink',
+      workspaceId: 'ws-stale-backlink',
+      createdByUserId: CALLER,
+    });
+
+    const response = await stopSession(PROJECT, 'session-stale-backlink');
+
+    expect(response.status).toBe(404);
+    expectNoDestructiveBoundaryCalls();
+    expect((await taskRows())[0].status).toBe('in_progress');
+  });
+
   it('ATTACK: a globally colliding foreign-project task record cannot be repaired into this session', async () => {
-    await seedWorkspace({ id: 'ws-foreign-task', projectId: OTHER_PROJECT, userId: CALLER });
     await seedTask({
       id: 'task-foreign-project',
       projectId: OTHER_PROJECT,
       userId: CALLER,
       sessionId: 'session-colliding-task',
-      workspaceId: 'ws-foreign-task',
+      workspaceId: null,
     });
     storeSession({
       id: 'session-colliding-task',
       projectId: PROJECT,
-      taskId: 'task-foreign-project',
-      workspaceId: 'ws-foreign-task',
+      taskId: null,
+      workspaceId: null,
       createdByUserId: CALLER,
     });
 
@@ -483,7 +515,27 @@ describe('POST /sessions/:sessionId/stop — destructive-use revalidation', () =
 
     expect(response.status).toBe(404);
     expectNoDestructiveBoundaryCalls();
+    expect(mocks.linkSessionToTask).not.toHaveBeenCalled();
+    expect(await taskRows()).toHaveLength(1);
     expect((await taskRows())[0].status).toBe('in_progress');
+  });
+
+  it('ATTACK: taskless repair rejects a stale foreign-user workspace before any cross-store write', async () => {
+    await seedWorkspace({ id: 'ws-foreign-repair', projectId: PROJECT, userId: OTHER_USER });
+    storeSession({
+      id: 'session-foreign-repair',
+      projectId: PROJECT,
+      taskId: null,
+      workspaceId: 'ws-foreign-repair',
+      createdByUserId: CALLER,
+    });
+
+    const response = await stopSession(PROJECT, 'session-foreign-repair');
+
+    expect(response.status).toBe(404);
+    expectNoDestructiveBoundaryCalls();
+    expect(mocks.linkSessionToTask).not.toHaveBeenCalled();
+    expect(await taskRows()).toHaveLength(0);
   });
 
   it('CONTROL: same-project caller-owned cleanup preserves normal archive semantics', async () => {
@@ -619,6 +671,30 @@ describe('terminal cleanup service — internal defence in depth', () => {
     expectNoDestructiveBoundaryCalls();
   });
 
+  it('ATTACK: internal cleanup rejects a same-project workspace backlink to a different session', async () => {
+    await seedNode('node-internal-backlink', CALLER);
+    await seedWorkspace({
+      id: 'ws-internal-backlink',
+      projectId: PROJECT,
+      userId: CALLER,
+      nodeId: 'node-internal-backlink',
+      chatSessionId: 'session-other-backlink',
+    });
+    await seedTask({
+      id: 'task-internal-backlink',
+      projectId: PROJECT,
+      userId: CALLER,
+      sessionId: 'session-task-backlink',
+      workspaceId: 'ws-internal-backlink',
+    });
+
+    await cleanupTerminalTaskResources(env, 'task-internal-backlink', {
+      status: 'completed',
+    });
+
+    expectNoDestructiveBoundaryCalls();
+  });
+
   it('CONTROL: trusted internal completion still cleans a consistent same-project workspace', async () => {
     await seedNode('node-internal-valid', OTHER_USER);
     await seedWorkspace({
@@ -642,5 +718,103 @@ describe('terminal cleanup service — internal defence in depth', () => {
 
     expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT, 'session-internal-valid');
     expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-internal-valid', OTHER_USER, env);
+  });
+
+  it('CONTROL: trusted internal completion still cleans compute when the workspace backlink is null', async () => {
+    await seedNode('node-internal-null-backlink', CALLER);
+    await seedWorkspace({
+      id: 'ws-internal-null-backlink',
+      projectId: PROJECT,
+      userId: CALLER,
+      nodeId: 'node-internal-null-backlink',
+      chatSessionId: null,
+    });
+    await seedTask({
+      id: 'task-internal-null-backlink',
+      projectId: PROJECT,
+      userId: CALLER,
+      sessionId: 'session-internal-null-backlink',
+      workspaceId: 'ws-internal-null-backlink',
+    });
+
+    await cleanupTerminalTaskResources(env, 'task-internal-null-backlink', {
+      status: 'completed',
+    });
+
+    expect(mocks.stopSession).not.toHaveBeenCalled();
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith(
+      'node-internal-null-backlink',
+      CALLER,
+      env
+    );
+  });
+});
+
+describe('SAM stop_subtask — workspace runtime boundary authorization', () => {
+  async function seedStopSubtaskFixture(input: {
+    suffix: string;
+    workspaceUserId: string;
+  }): Promise<{ projectId: string; taskId: string; workspaceId: string; nodeId: string }> {
+    const projectId = `project-stop-tool-${input.suffix}`;
+    const taskId = `task-stop-tool-${input.suffix}`;
+    const workspaceId = `ws-stop-tool-${input.suffix}`;
+    const nodeId = `node-stop-tool-${input.suffix}`;
+    await seedProject(projectId, CALLER);
+    await seedNode(nodeId, input.workspaceUserId);
+    await seedWorkspace({
+      id: workspaceId,
+      projectId,
+      userId: input.workspaceUserId,
+      nodeId,
+    });
+    await seedTask({
+      id: taskId,
+      projectId,
+      userId: CALLER,
+      sessionId: `session-stop-tool-${input.suffix}`,
+      workspaceId,
+      status: 'running',
+    });
+    await db()
+      .insert(schema.agentSessions)
+      .values({
+        id: `agent-stop-tool-${input.suffix}`,
+        workspaceId,
+        userId: input.workspaceUserId,
+        status: 'running',
+      } as typeof schema.agentSessions.$inferInsert);
+    return { projectId, taskId, workspaceId, nodeId };
+  }
+
+  it('ATTACK: does not stop an agent session or runtime through another user workspace', async () => {
+    const fixture = await seedStopSubtaskFixture({
+      suffix: 'foreign-owner',
+      workspaceUserId: OTHER_USER,
+    });
+
+    const result = await stopSubtask({ taskId: fixture.taskId }, { env, userId: CALLER } as never);
+
+    expect(result).toMatchObject({ stopped: true, taskId: fixture.taskId });
+    expect(mocks.stopAgentSessionOnNode).not.toHaveBeenCalled();
+    expectNoDestructiveBoundaryCalls();
+  });
+
+  it('CONTROL: stops the caller-owned same-project agent session and runtime', async () => {
+    const fixture = await seedStopSubtaskFixture({
+      suffix: 'owner',
+      workspaceUserId: CALLER,
+    });
+
+    const result = await stopSubtask({ taskId: fixture.taskId }, { env, userId: CALLER } as never);
+
+    expect(result).toMatchObject({ stopped: true, taskId: fixture.taskId });
+    expect(mocks.stopAgentSessionOnNode).toHaveBeenCalledWith(
+      fixture.nodeId,
+      fixture.workspaceId,
+      'agent-stop-tool-owner',
+      env,
+      CALLER
+    );
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith(fixture.nodeId, CALLER, env);
   });
 });

@@ -68,7 +68,7 @@ describe('ensureSessionTaskBacked', () => {
       taskMode: 'conversation',
       triggeredBy: 'legacy-session-repair',
     };
-    const { db, inserted } = makeDb([[], [createdTask]]);
+    const { db, inserted } = makeDb([[], [], [createdTask]]);
 
     const result = await ensureSessionTaskBacked(db as never, env, {
       projectId: 'project-1',
@@ -102,7 +102,7 @@ describe('ensureSessionTaskBacked', () => {
       title: 'Legacy instant conversation',
       taskMode: 'conversation',
     };
-    const { db } = makeDb([[], [winner]], true);
+    const { db } = makeDb([[], [], [winner]], true);
 
     const result = await ensureSessionTaskBacked(db as never, env, {
       projectId: 'project-1',
@@ -130,7 +130,7 @@ describe('ensureSessionTaskBacked', () => {
       createdAt: '2026-07-01T00:00:00.000Z',
       endedAt: '2026-07-01T01:00:00.000Z',
     });
-    const { db, inserted } = makeDb([[], [{ id: 'task-repair-1' }]]);
+    const { db, inserted } = makeDb([[], [], [{ id: 'task-repair-1' }]]);
 
     await ensureSessionTaskBacked(db as never, env, {
       projectId: 'project-1',

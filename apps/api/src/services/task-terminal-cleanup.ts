@@ -59,6 +59,7 @@ export async function cleanupTerminalTaskResources(
     .select({
       id: schema.tasks.id,
       projectId: schema.tasks.projectId,
+      chatSessionId: schema.tasks.chatSessionId,
       workspaceId: schema.tasks.workspaceId,
       errorMessage: schema.tasks.errorMessage,
     })
@@ -98,12 +99,15 @@ export async function cleanupTerminalTaskResources(
     !workspace ||
     workspace.id !== task.workspaceId ||
     workspace.projectId !== task.projectId ||
-    (options.requiredUserId && workspace.userId !== options.requiredUserId)
+    (options.requiredUserId && workspace.userId !== options.requiredUserId) ||
+    (workspace.chatSessionId !== null && workspace.chatSessionId !== task.chatSessionId)
   ) {
     log.info('task.terminal_cleanup.workspace_scope_rejected', {
       taskId,
       taskProjectId: task.projectId,
       workspaceId: task.workspaceId,
+      taskSessionId: task.chatSessionId,
+      workspaceSessionId: workspace?.chatSessionId ?? null,
       requiredProjectId: options.projectId ?? null,
       requiredUserId: options.requiredUserId ?? null,
       action: 'skipped',

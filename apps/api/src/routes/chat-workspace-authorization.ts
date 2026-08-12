@@ -19,6 +19,38 @@ function optionalString(row: Record<string, unknown>, key: string): string | nul
   return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+export async function requireSessionWorkspaceScope(
+  db: ChatDb,
+  input: {
+    projectId: string;
+    userId: string;
+    sessionId: string;
+    session: Record<string, unknown>;
+  }
+): Promise<void> {
+  const sessionWorkspaceId = optionalString(input.session, 'workspaceId');
+  if (!sessionWorkspaceId) return;
+
+  const workspace = await requireChatWorkspaceScope(db, {
+    projectId: input.projectId,
+    userId: input.userId,
+    workspaceId: sessionWorkspaceId,
+    source: 'session_stop',
+  });
+
+  if (workspace.chatSessionId && workspace.chatSessionId !== input.sessionId) {
+    log.warn('chat.session_workspace_backlink_mismatch', {
+      projectId: input.projectId,
+      userId: input.userId,
+      sessionId: input.sessionId,
+      workspaceId: sessionWorkspaceId,
+      workspaceSessionId: workspace.chatSessionId,
+      action: 'rejected',
+    });
+    throw errors.notFound('Chat session');
+  }
+}
+
 /**
  * Resolve a caller-supplied workspace only when both its project and owner match
  * the authenticated chat scope. The post-query checks are deliberate defence in
@@ -97,10 +129,23 @@ export async function requireSessionTaskWorkspaceScope(
 
   if (!taskWorkspaceId) return;
 
-  await requireChatWorkspaceScope(db, {
+  const workspace = await requireChatWorkspaceScope(db, {
     projectId: input.projectId,
     userId: input.userId,
     workspaceId: taskWorkspaceId,
     source: 'session_stop',
   });
+
+  if (workspace.chatSessionId && workspace.chatSessionId !== input.sessionId) {
+    log.warn('chat.session_workspace_backlink_mismatch', {
+      projectId: input.projectId,
+      userId: input.userId,
+      sessionId: input.sessionId,
+      taskId: input.task.id,
+      workspaceId: taskWorkspaceId,
+      workspaceSessionId: workspace.chatSessionId,
+      action: 'rejected',
+    });
+    throw errors.notFound('Chat session');
+  }
 }

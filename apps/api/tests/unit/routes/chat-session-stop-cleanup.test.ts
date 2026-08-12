@@ -114,7 +114,7 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
       projectId: 'project-stop-1',
       userId: 'user-stop-1',
     };
-    const db = buildDb([[workspace], [task]]);
+    const db = buildDb([[workspace], [workspace], [task]]);
     mocks.ensureSessionTaskBacked.mockResolvedValue(task);
     vi.mocked(drizzle).mockReturnValue(db as never);
     mocks.getSession.mockResolvedValue({
@@ -170,7 +170,7 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
       projectId: 'project-stop-1',
       userId: 'user-stop-1',
     };
-    const db = buildDb([[workspace], [task]]);
+    const db = buildDb([[workspace], [workspace], [task]]);
     vi.mocked(drizzle).mockReturnValue(db as never);
     mocks.ensureSessionTaskBacked.mockResolvedValue(task);
     mocks.getSession.mockResolvedValue({

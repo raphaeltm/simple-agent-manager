@@ -16,7 +16,10 @@ import {
   type TerminalTaskCleanupStatus,
 } from '../services/task-terminal-cleanup';
 import { requireSessionCreator } from './chat-session-ownership';
-import { requireSessionTaskWorkspaceScope } from './chat-workspace-authorization';
+import {
+  requireSessionTaskWorkspaceScope,
+  requireSessionWorkspaceScope,
+} from './chat-workspace-authorization';
 
 type Database = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -138,6 +141,7 @@ export function registerChatStopRoute(chatRoutes: Hono<{ Bindings: Env }>): void
     const session = await requireSessionCreator(c.env, projectId, sessionId, userId);
 
     const context = { projectId, sessionId, userId };
+    await requireSessionWorkspaceScope(db, { ...context, session });
     const backingTask = await ensureSessionTaskBacked(db, c.env, {
       projectId,
       sessionId,

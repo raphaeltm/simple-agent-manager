@@ -92,6 +92,7 @@ describe('cleanupTerminalTaskResources', () => {
         {
           id: 'task-terminal-1',
           projectId: 'project-terminal-1',
+          chatSessionId: 'session-terminal-1',
           workspaceId: 'workspace-terminal-1',
           errorMessage: null,
         },
@@ -133,6 +134,7 @@ describe('cleanupTerminalTaskResources', () => {
         {
           id: 'task-terminal-failed',
           projectId: 'project-terminal-1',
+          chatSessionId: 'session-terminal-1',
           workspaceId: 'workspace-terminal-1',
           errorMessage: 'runner failed',
         },
