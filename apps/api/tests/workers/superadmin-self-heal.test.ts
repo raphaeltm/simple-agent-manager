@@ -36,6 +36,7 @@ const MIGRATION_UPDATE_SQL = migrationSql
 
 const BOOTSTRAP_TRIGGER_SQL =
   bootstrapMigrationSql.match(/CREATE TRIGGER IF NOT EXISTS[\s\S]*?\nEND;/g) ?? [];
+const BOOTSTRAP_ELECTION_GUARD_USER_ID = 'system_first_signup_election_guard';
 
 interface UserRow {
   id: string;
@@ -175,6 +176,21 @@ async function createOAuthUser(id: string, overrides?: Record<string, unknown>):
     } as never
   );
   return result.user as UserRow;
+}
+
+async function legacyApprovalDecision(
+  id: string,
+  sentinelId = TRIAL_ANONYMOUS_USER_ID
+): Promise<Record<string, unknown>> {
+  const existing = await env.DATABASE.prepare(`SELECT id FROM users WHERE id != ? LIMIT 1`)
+    .bind(sentinelId)
+    .all();
+  return {
+    id,
+    email: `${id}@example.com`,
+    role: existing.results.length === 0 ? 'superadmin' : 'user',
+    status: existing.results.length === 0 ? 'active' : 'pending',
+  };
 }
 
 async function applyBootstrapMigration(): Promise<void> {
@@ -378,6 +394,48 @@ describe('first-signup bootstrap election (real D1)', () => {
     });
   });
 
+  it('makes migration-window legacy decisions safely pending before account election', async () => {
+    const candidates = await Promise.all(
+      ['legacy-window-1', 'legacy-window-2', 'legacy-window-3'].map((id) =>
+        legacyApprovalDecision(id)
+      )
+    );
+
+    expect(candidates).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ role: 'user', status: 'pending' }),
+        expect.objectContaining({ role: 'user', status: 'pending' }),
+        expect.objectContaining({ role: 'user', status: 'pending' }),
+      ])
+    );
+    await Promise.all(candidates.map(insertHookUser));
+    await Promise.all(candidates.map(insertHookAccount));
+
+    const users = await getRealUsers();
+    expect(users.filter((user) => user.role === 'superadmin' && user.status === 'active')).toHaveLength(
+      1
+    );
+    expect(users.filter((user) => user.role === 'user' && user.status === 'pending')).toHaveLength(2);
+  });
+
+  it('does not let an interrupted migration-window legacy attempt claim bootstrap', async () => {
+    const abandoned = await legacyApprovalDecision('legacy-abandoned-before-account');
+    await insertHookUser(abandoned);
+
+    const completed = await legacyApprovalDecision('legacy-completed-later');
+    await insertHookUser(completed);
+    await insertHookAccount(completed);
+
+    expect(await getUser('legacy-abandoned-before-account')).toMatchObject({
+      role: 'user',
+      status: 'pending',
+    });
+    expect(await getUser('legacy-completed-later')).toMatchObject({
+      role: 'superadmin',
+      status: 'active',
+    });
+  });
+
   it('preserves open registration until login-time self-heal runs', async () => {
     const openUser = await createOAuthUser('open-registration', { REQUIRE_APPROVAL: 'false' });
 
@@ -405,6 +463,11 @@ describe('migration 0110 — atomic bootstrap trigger installation (real D1)', (
       'accounts_elect_first_superadmin_after_insert',
       'users_guard_legacy_first_superadmin_after_insert',
     ]);
+
+    expect(await getUser(BOOTSTRAP_ELECTION_GUARD_USER_ID)).toMatchObject({
+      role: 'user',
+      status: 'system',
+    });
 
     await applyBootstrapMigration();
     await applyBootstrapMigration();
@@ -526,6 +589,20 @@ describe('session.create.after — login-time self-heal (real D1)', () => {
     expect(await getUser(TRIAL_ANONYMOUS_USER_ID)).toMatchObject({
       role: 'user',
       status: 'system',
+    });
+  });
+
+  it('runs self-heal through the real Better Auth session adapter path', async () => {
+    await insertUser('real-session-path', { role: 'user', status: 'active' });
+    const auth = await createAuth(authEnv() as never);
+    const context = await auth.$context;
+
+    const session = await context.internalAdapter.createSession('real-session-path', false);
+
+    expect(session).toMatchObject({ userId: 'real-session-path' });
+    expect(await getUser('real-session-path')).toMatchObject({
+      role: 'superadmin',
+      status: 'active',
     });
   });
 
