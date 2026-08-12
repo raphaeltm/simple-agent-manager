@@ -717,8 +717,7 @@ func Load() (*Config, error) {
 
 	// Derive allowed origins from control plane URL if not explicitly set
 	if len(cfg.AllowedOrigins) == 0 {
-		// Extract base domain from control plane URL to allow workspace subdomains
-		// e.g., https://api.example.com -> allow *.example.com
+		// Derive only the exact API and application control-plane origins.
 		cfg.AllowedOrigins = deriveAllowedOrigins(cfg.ControlPlaneURL)
 	}
 

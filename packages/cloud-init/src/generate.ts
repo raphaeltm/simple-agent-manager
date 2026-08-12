@@ -39,6 +39,9 @@ const GO_DURATION_RE = /^(?:[0-9]+(?:ns|us|ms|s|m|h))+$/;
 /** Absolute Linux path without whitespace or shell metacharacters. */
 const SAFE_ABSOLUTE_PATH_RE = /^\/[a-zA-Z0-9._/-]+$/;
 
+/** RFC 6265 cookie-name token subset accepted by VM-agent configuration. */
+const SAFE_COOKIE_NAME_RE = /^[a-zA-Z0-9._-]+$/;
+
 function isSafeAbsolutePath(value: string): boolean {
   if (!SAFE_ABSOLUTE_PATH_RE.test(value) || value.includes('//')) {
     return false;
@@ -82,6 +85,13 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
     if (!NUMERIC_RE.test(variables.vmAgentPort) || port < 1 || port > 65535) {
       errors.push(
         `vmAgentPort: must be numeric 1-65535 (got ${JSON.stringify(variables.vmAgentPort)})`
+      );
+    }
+  }
+  if (variables.vmAgentCookieName !== undefined && variables.vmAgentCookieName !== '') {
+    if (!SAFE_COOKIE_NAME_RE.test(variables.vmAgentCookieName)) {
+      errors.push(
+        `vmAgentCookieName: must match ${SAFE_COOKIE_NAME_RE} (got ${JSON.stringify(variables.vmAgentCookieName)})`
       );
     }
   }
@@ -334,6 +344,8 @@ export interface CloudInitVariables {
   originCaCertificateUrl?: string;
   /** VM agent port override (default: 8443 with TLS, 8080 without) */
   vmAgentPort?: string;
+  /** VM agent session cookie name (default: vm_session) */
+  vmAgentCookieName?: string;
   /** Timeout in seconds for fetching Cloudflare IP ranges at boot (default: 10) */
   cfIpFetchTimeout?: string;
   /** Enable opportunistic devcontainer image caching via GHCR (default: false) */
@@ -419,6 +431,7 @@ export function generateCloudInit(
     '{{ docker_dns_servers }}': variables.dockerDnsServers ?? '"1.1.1.1", "8.8.8.8"',
     '{{ vm_agent_port }}':
       variables.vmAgentPort ?? (variables.originCaCertificateUrl ? '8443' : '8080'),
+    '{{ vm_agent_cookie_name }}': variables.vmAgentCookieName ?? 'vm_session',
     '{{ tls_cert_path }}': variables.originCaCertificateUrl ? '/etc/sam/tls/origin-ca.pem' : '',
     '{{ tls_key_path }}': variables.originCaCertificateUrl ? '/etc/sam/tls/origin-ca-key.pem' : '',
     '{{ origin_ca_certificate_url }}': variables.originCaCertificateUrl ?? '',

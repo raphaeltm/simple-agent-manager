@@ -14,6 +14,7 @@
  * - Privileged WebSocket upgrades reject sibling preview origins
  * - Existing terminal token auth still works for non-port workspace requests
  */
+import { errors as joseErrors } from 'jose';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mockGetSession = vi.fn();
@@ -94,7 +95,7 @@ describe('workspace proxy port-access auth', () => {
       portsPublicEnabled: false,
     };
     mockGetSession.mockResolvedValue(null); // No session cookie on port subdomains
-    mockVerifyTerminalToken.mockRejectedValue(new Error('Invalid token'));
+    mockVerifyTerminalToken.mockRejectedValue(new joseErrors.JWSInvalid('Invalid token'));
     mockSignTerminalToken.mockResolvedValue({
       token: 'backend-port-token',
       expiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -126,6 +127,77 @@ describe('workspace proxy port-access auth', () => {
     expect(setCookie).toContain('HttpOnly');
     expect(setCookie).toContain('Secure');
     expect(setCookie).toContain('SameSite=Strict');
+  });
+
+  it('removes both reserved credential names from a valid port-token redirect', async () => {
+    mockVerifyPortAccessToken.mockResolvedValue({
+      workspace: WORKSPACE_ID,
+      port: 3000,
+      subject: 'user-1',
+    });
+
+    const response = await worker.default.fetch(
+      new Request(
+        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/path?port_token=valid-jwt&token=terminal-jwt&theme=dark`
+      ),
+      env
+    );
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get('location') ?? '');
+    expect(location.searchParams.get('port_token')).toBeNull();
+    expect(location.searchParams.get('token')).toBeNull();
+    expect(location.searchParams.get('theme')).toBe('dark');
+    expect(response.headers.get('set-cookie')).toContain('sam_port_access=valid-jwt');
+  });
+
+  it('cleans reserved credentials from an already-authorized browser URL before proxying', async () => {
+    mockVerifyPortAccessToken.mockResolvedValue({
+      workspace: WORKSPACE_ID,
+      port: 3000,
+      subject: 'user-1',
+    });
+    const fetch = vi.fn(async () => new Response('proxied', { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+
+    const response = await worker.default.fetch(
+      new Request(
+        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/app?token=sam-jwt&port_token=stale&theme=dark`,
+        { headers: { cookie: 'sam_port_access=valid-jwt' } }
+      ),
+      env
+    );
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get('location') ?? '');
+    expect(location.searchParams.get('token')).toBeNull();
+    expect(location.searchParams.get('port_token')).toBeNull();
+    expect(location.searchParams.get('theme')).toBe('dark');
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('cleans reserved credentials from a public preview URL before proxying', async () => {
+    workspaceResult = {
+      nodeId: 'node-1',
+      status: 'running',
+      userId: 'user-1',
+      portsPublicEnabled: true,
+    };
+    const fetch = vi.fn(async () => new Response('proxied', { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+
+    const response = await worker.default.fetch(
+      new Request(
+        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/public?token=sam-jwt&view=full`
+      ),
+      env
+    );
+
+    expect(response.status).toBe(302);
+    const location = new URL(response.headers.get('location') ?? '');
+    expect(location.searchParams.get('token')).toBeNull();
+    expect(location.searchParams.get('view')).toBe('full');
+    expect(fetch).not.toHaveBeenCalled();
   });
 
   it('accepts sam_port_access cookie and proxies request', async () => {
@@ -340,7 +412,7 @@ describe('workspace proxy port-access auth', () => {
       if (token === 'sam-workspace-jwt') {
         return { workspace: WORKSPACE_ID, subject: 'user-1' };
       }
-      throw new Error('not a SAM token');
+      throw new joseErrors.JWSInvalid('not a SAM token');
     });
 
     const fetch = vi.fn(async () => new Response('proxied', { status: 200 }));
@@ -412,6 +484,30 @@ describe('workspace proxy port-access auth', () => {
     expect(headers.get('authorization')).toBe('Bearer app-owned-token');
   });
 
+  it('fails closed when SAM bearer verification cannot operate', async () => {
+    mockVerifyPortAccessToken.mockResolvedValue({
+      workspace: WORKSPACE_ID,
+      port: 3000,
+      subject: 'user-1',
+    });
+    mockVerifyTerminalToken.mockRejectedValue(new Error('key service unavailable'));
+    const fetch = vi.fn(async () => new Response('proxied', { status: 200 }));
+    vi.stubGlobal('fetch', fetch);
+
+    const response = await worker.default.fetch(
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`, {
+        headers: {
+          cookie: 'sam_port_access=valid-jwt',
+          authorization: 'Bearer unclassified-token',
+        },
+      }),
+      env
+    );
+
+    expect(response.status).toBe(500);
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it('isolates credentials on the cf-container path while preserving application contracts', async () => {
     workspaceResult = {
       nodeId: 'node-1',
@@ -448,15 +544,12 @@ describe('workspace proxy port-access auth', () => {
     };
 
     const response = await worker.default.fetch(
-      new Request(
-        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/socket?port_token=valid-jwt&token=client-sam-token&channel=app`,
-        {
-          headers: {
-            cookie: 'sam_port_access=valid-jwt; vm_session=shared-session; preview_theme=dark',
-            authorization: 'Bearer app-owned-token',
-          },
-        }
-      ),
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/socket?channel=app`, {
+        headers: {
+          cookie: 'sam_port_access=valid-jwt; vm_session=shared-session; preview_theme=dark',
+          authorization: 'Bearer app-owned-token',
+        },
+      }),
       cfEnv
     );
 
@@ -536,6 +629,38 @@ describe('workspace proxy port-access auth', () => {
     expect(setCookies.join('\n')).not.toContain('better-auth.session_token=');
   });
 
+  it('applies a configured VM session cookie name at Worker ingress and egress', async () => {
+    mockVerifyPortAccessToken.mockResolvedValue({
+      workspace: WORKSPACE_ID,
+      port: 3000,
+      subject: 'user-1',
+    });
+    const responseHeaders = new Headers();
+    responseHeaders.append('set-cookie', 'custom_vm_session=evil; Path=/');
+    responseHeaders.append('set-cookie', `custom_vm_session_${WORKSPACE_ID}=evil; Path=/`);
+    responseHeaders.append('set-cookie', 'custom_vm_session_extension=ordinary; Path=/');
+    const fetch = vi.fn(
+      async () => new Response('proxied', { status: 200, headers: responseHeaders })
+    );
+    vi.stubGlobal('fetch', fetch);
+
+    const response = await worker.default.fetch(
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`, {
+        headers: {
+          cookie: `sam_port_access=valid-jwt; vm_session=legacy; custom_vm_session=current; custom_vm_session_${WORKSPACE_ID}=scoped; custom_vm_session_extension=ordinary`,
+        },
+      }),
+      { ...env, VM_AGENT_COOKIE_NAME: 'custom_vm_session' }
+    );
+
+    const upstreamHeaders = new Headers(fetch.mock.calls[0]?.[1]?.headers);
+    expect(upstreamHeaders.get('cookie')).toBe('custom_vm_session_extension=ordinary');
+    const setCookies = response.headers.getSetCookie().join('\n');
+    expect(setCookies).not.toContain('custom_vm_session=');
+    expect(setCookies).not.toContain(`custom_vm_session_${WORKSPACE_ID}=`);
+    expect(setCookies).toContain('custom_vm_session_extension=ordinary');
+  });
+
   it('removes cookie-clearing Clear-Site-Data directives from preview responses', async () => {
     mockVerifyPortAccessToken.mockResolvedValue({
       workspace: WORKSPACE_ID,
@@ -583,7 +708,11 @@ describe('workspace proxy port-access auth', () => {
   it('preserves exact app-origin and no-Origin privileged WebSocket flows', async () => {
     mockGetSession.mockResolvedValue({ user: { id: 'user-1' } });
 
-    for (const origin of ['https://app.workspaces.example.com', null]) {
+    for (const origin of [
+      'https://app.workspaces.example.com',
+      'https://api.workspaces.example.com',
+      null,
+    ]) {
       const headers = new Headers({ upgrade: 'websocket' });
       if (origin) headers.set('origin', origin);
       const response = await worker.default.fetch(

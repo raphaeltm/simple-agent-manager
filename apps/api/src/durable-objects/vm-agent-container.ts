@@ -777,6 +777,7 @@ export class VmAgentContainer extends Container<Env> {
           PORT_SCAN_ENABLED: 'false',
           VM_AGENT_PORT: String(config.vmAgentPort),
           VM_AGENT_PROTOCOL: 'http',
+          COOKIE_NAME: this.env.VM_AGENT_COOKIE_NAME ?? 'vm_session',
           COOKIE_SECURE: 'true',
           ...(this.env.CF_CONTAINER_CLONE_FILTER
             ? { STANDALONE_CLONE_FILTER: this.env.CF_CONTAINER_CLONE_FILTER }

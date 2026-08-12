@@ -157,6 +157,7 @@ describe('generateCloudInit', () => {
       expect(config).toContain('Environment=JWKS_ENDPOINT=https://api.test.example.com/.well-known/jwks.json');
       expect(config).toContain('Environment=CALLBACK_TOKEN_FILE=/etc/sam/callback-token');
       expect(config).not.toContain('Environment=CALLBACK_TOKEN=cb-token-abc');
+      expect(config).toContain('Environment=COOKIE_NAME=vm_session');
       expect(config).toContain('hostname: sam-test-node');
     });
 
@@ -205,6 +206,11 @@ describe('generateCloudInit', () => {
       }));
       expect(config).toContain('"dns": ["10.0.0.1", "10.0.0.2"]');
       expect(config).not.toContain('1.1.1.1');
+    });
+
+    it('propagates a custom VM-agent cookie name', () => {
+      const config = generateCloudInit(baseVariables({ vmAgentCookieName: 'sam_vm_auth' }));
+      expect(config).toContain('Environment=COOKIE_NAME=sam_vm_auth');
     });
   });
 
@@ -995,6 +1001,7 @@ describe('validateCloudInitVariables', () => {
         taskId: 'task-ghi-789',
         taskMode: 'conversation',
         vmAgentPort: '8443',
+        vmAgentCookieName: 'sam_vm_auth',
         cfIpFetchTimeout: '30',
         logJournalMaxUse: '1G',
         logJournalKeepFree: '2G',
@@ -1025,6 +1032,12 @@ describe('validateCloudInitVariables', () => {
       expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '65535' }))).not.toThrow();
       expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '8080' }))).not.toThrow();
       expect(() => validateCloudInitVariables(baseVariables({ vmAgentPort: '8443' }))).not.toThrow();
+    });
+
+    it('rejects unsafe VM-agent cookie names', () => {
+      expect(() => validateCloudInitVariables(baseVariables({
+        vmAgentCookieName: 'vm session; injected',
+      }))).toThrow('vmAgentCookieName');
     });
 
     it('accepts all valid journald time units', () => {

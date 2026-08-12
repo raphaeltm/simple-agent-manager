@@ -632,6 +632,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // VM agent TLS configuration
   VM_AGENT_PROTOCOL?: string; // "https" (default) or "http"
   VM_AGENT_PORT?: string; // "8443" (default) or custom port
+  VM_AGENT_COOKIE_NAME?: string; // VM session cookie name shared with VM-agent (default: "vm_session")
   // Devcontainer image caching
   DEVCONTAINER_CACHE_ENABLED?: string; // "true" to enable managed registry caching (default: disabled)
   DEVCONTAINER_CACHE_CLOUDFLARE_ACCOUNT_ID?: string; // Cloudflare account for managed registry credentials

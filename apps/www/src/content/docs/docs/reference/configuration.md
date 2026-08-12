@@ -702,11 +702,12 @@ Webhook damping uses Cloudflare KV's eventually consistent read-update-write beh
 
 ## VM TLS
 
-| Variable                       | Default | Description                                                           |
-| ------------------------------ | ------- | --------------------------------------------------------------------- |
-| `VM_AGENT_PROTOCOL`            | `https` | Protocol for VM agent communication                                   |
-| `VM_AGENT_PORT`                | `8443`  | VM agent listening port                                               |
-| `ORIGIN_CA_CERT_VALIDITY_DAYS` | `7`     | Validity for per-node Origin CA certificates signed by the API Worker |
+| Variable                       | Default      | Description                                                                                                                                                                                                                                               |
+| ------------------------------ | ------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `VM_AGENT_PROTOCOL`            | `https`      | Protocol for VM agent communication                                                                                                                                                                                                                       |
+| `VM_AGENT_PORT`                | `8443`       | VM agent listening port                                                                                                                                                                                                                                   |
+| `VM_AGENT_COOKIE_NAME`         | `vm_session` | VM session cookie name used by Worker preview isolation and propagated as `COOKIE_NAME` to new cloud VMs and Instant containers. Existing default-name nodes remain compatible during upgrades; re-provision nodes after intentionally changing the name. |
+| `ORIGIN_CA_CERT_VALIDITY_DAYS` | `7`          | Validity for per-node Origin CA certificates signed by the API Worker                                                                                                                                                                                     |
 
 New nodes generate `/etc/sam/tls/origin-ca-key.pem` locally in cloud-init and fetch only the signed certificate from `POST /api/nodes/:id/origin-ca-certificate` (`packages/cloud-init/src/template.ts`, `apps/api/src/routes/node-lifecycle.ts`). Legacy `ORIGIN_CA_CERT` and `ORIGIN_CA_KEY` Worker secrets are not required for new node provisioning.
 

@@ -45,6 +45,7 @@ func (s *Server) rejectUntrustedWebSocketOrigin(w http.ResponseWriter, r *http.R
 	if s.isWebSocketOriginAllowed(r) {
 		return false
 	}
+	slog.Warn("WebSocket origin rejected", "origin", r.Header.Get("Origin"), "path", r.URL.Path, "action", "rejected")
 	http.Error(w, "Forbidden", http.StatusForbidden)
 	return true
 }

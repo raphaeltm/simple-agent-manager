@@ -20,7 +20,7 @@ When implementing a browser-to-external-service direct request:
 
 4. **Scope CORS rules tightly** — allow only the specific origin, methods, and headers needed. Never use wildcard `*` for origins when the request carries credentials or sensitive data.
 
-5. **Test the cross-origin request on staging** — unit tests cannot exercise CORS. The staging verification for any cross-origin feature MUST include a real browser making the actual cross-origin request (via Playwright or manual testing).
+5. **Test the cross-origin request on staging** — unit tests cannot exercise CORS. The staging verification for any cross-origin feature MUST include a real browser making the actual cross-origin request (via Playwright or manual testing). When the task explicitly forbids staging, do not mutate staging; require equivalent runtime-real local boundary tests plus CI evidence and record the explicit exception.
 
 6. **Treat sibling origins as separate trust boundaries** — a host under the same registrable domain is not trusted merely because it is same-site. Parent-domain cookies, credentialed CORS, and WebSocket origin rules can collapse that boundary.
 

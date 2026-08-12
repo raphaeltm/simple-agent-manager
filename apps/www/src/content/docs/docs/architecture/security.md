@@ -148,25 +148,38 @@ host.
 SAM enforces that boundary at both reverse proxies:
 
 1. The API Worker consumes the port-access credential, removes client `port_token` and
-   `token` query parameters, strips SAM-reserved cookies, and removes only a bearer token
+   `token` query parameters from both the browser URL and upstream request, strips
+   SAM-reserved cookies, and removes only a bearer token
    that validates as a SAM workspace JWT. Application `Authorization` headers and
-   application cookies are preserved (`stripSamReservedRequestCookies`,
-   `stripSamWorkspaceAuthorization`, and `isolatePreviewResponse` in
-   `apps/api/src/index.ts`).
+   application cookies are preserved (`stripSamReservedRequestCookies` and
+   `isolatePreviewResponse` in `apps/api/src/lib/workspace-preview-security.ts`, and
+   `stripSamWorkspaceAuthorization` in `apps/api/src/index.ts`). The same Worker boundary
+   is used for remote VM and Instant-container fetches; both then pass through the VM
+   Agent's `/ports` proxy.
 2. The VM Agent repeats the cookie, query-credential, and positive SAM-JWT filtering before
    forwarding to the application (`stripSAMReservedRequestCookies`,
    `stripSAMWorkspaceAuthorization`, and `sanitizePreviewResponseCookies` in
    `packages/vm-agent/internal/server/`). This defense remains effective if either proxy is
    called without the other.
 3. Preview responses cannot create SAM-reserved cookies or use `Clear-Site-Data` to clear
-   SAM cookies. Ordinary application cookies remain supported, but any `Domain` attribute is
-   removed so the cookie stays on its exact preview host.
+   SAM cookies. Reserved names are every `sam_*` cookie; the configured VM session base
+   name (default `vm_session`) and its exact `${COOKIE_NAME}_${workspaceULID}` form; and
+   `better-auth.session_token`, `__Secure-better-auth.session_token`, and
+   `__Host-better-auth.session_token`. Similarly named extension cookies remain
+   application-owned. Ordinary application cookies remain supported, but any `Domain`
+   attribute is removed so the cookie stays on its exact preview host.
 4. New VM-agent session cookies are host-only. During upgrades, session responses also
-   expire the former parent-domain copies by their exact legacy names.
+   expire the former parent-domain copies by their exact legacy names
+   (`packages/vm-agent/internal/auth/session.go`). `VM_AGENT_COOKIE_NAME` is propagated as
+   VM-agent `COOKIE_NAME` for new cloud VMs and Instant containers; both proxies also retain
+   the default name in their reserved set so existing nodes and cookies remain isolated
+   during an upgrade.
 5. Privileged terminal, ACP, boot-log, and log-stream WebSockets accept only configured
    exact control-plane origins. Browser requests from preview, wildcard, `null`, malformed,
    or unrelated origins are rejected before authentication or workspace/session state is
-   mutated. No-origin clients retain the existing non-browser token flow.
+   mutated. No-origin clients retain the existing non-browser token flow. Worker enforcement
+   is in `isTrustedWorkspaceWebSocketOrigin`; VM-agent enforcement is in
+   `rejectUntrustedWebSocketOrigin` and `isWebSocketOriginAllowed`.
 
 Preview HTTP and WebSocket upgrades still pass through with their application-owned cookies,
 bearer tokens, headers, paths, queries, and host-routing contract intact after the reserved

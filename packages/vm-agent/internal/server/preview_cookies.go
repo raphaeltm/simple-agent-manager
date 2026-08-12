@@ -20,11 +20,14 @@ func isSAMReservedCookieName(name, vmSessionCookieName string) bool {
 	if strings.HasPrefix(normalized, "sam_") {
 		return true
 	}
-	if vmSessionCookieName != "" {
-		if normalized == vmSessionCookieName {
+	for _, baseName := range []string{"vm_session", vmSessionCookieName} {
+		if baseName == "" {
+			continue
+		}
+		if normalized == baseName {
 			return true
 		}
-		if suffix, found := strings.CutPrefix(normalized, vmSessionCookieName+"_"); found && workspaceCookieSuffixPattern.MatchString(suffix) {
+		if suffix, found := strings.CutPrefix(normalized, baseName+"_"); found && workspaceCookieSuffixPattern.MatchString(suffix) {
 			return true
 		}
 	}

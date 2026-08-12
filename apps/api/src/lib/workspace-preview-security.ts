@@ -1,20 +1,30 @@
 const SAM_COOKIE_PREFIX = 'sam_';
-const VM_SESSION_COOKIE = 'vm_session';
+const DEFAULT_VM_SESSION_COOKIE = 'vm_session';
 const BETTER_AUTH_SESSION_COOKIES = new Set([
   'better-auth.session_token',
   '__secure-better-auth.session_token',
   '__host-better-auth.session_token',
 ]);
 
-function isSamReservedCookieName(name: string): boolean {
+function isVmSessionCookieName(name: string, vmSessionCookieName: string): boolean {
+  for (const baseName of new Set([DEFAULT_VM_SESSION_COOKIE, vmSessionCookieName.toLowerCase()])) {
+    if (name === baseName) return true;
+    if (name.startsWith(`${baseName}_`)) {
+      const workspaceCookieSuffix = name.slice(baseName.length + 1);
+      if (/^[0-9a-hjkmnp-tv-z]{26}$/.test(workspaceCookieSuffix)) return true;
+    }
+  }
+  return false;
+}
+
+function isSamReservedCookieName(
+  name: string,
+  vmSessionCookieName = DEFAULT_VM_SESSION_COOKIE
+): boolean {
   const normalized = name.trim().toLowerCase();
-  const workspaceCookieSuffix = normalized.startsWith(`${VM_SESSION_COOKIE}_`)
-    ? normalized.slice(VM_SESSION_COOKIE.length + 1)
-    : '';
   return (
     normalized.startsWith(SAM_COOKIE_PREFIX) ||
-    normalized === VM_SESSION_COOKIE ||
-    /^[0-9a-hjkmnp-tv-z]{26}$/.test(workspaceCookieSuffix) ||
+    isVmSessionCookieName(normalized, vmSessionCookieName) ||
     BETTER_AUTH_SESSION_COOKIES.has(normalized)
   );
 }
@@ -47,7 +57,10 @@ function sanitizeClearSiteData(headers: Headers): void {
   else headers.set('clear-site-data', safeDirectives.join(', '));
 }
 
-export function stripSamReservedRequestCookies(headers: Headers): void {
+export function stripSamReservedRequestCookies(
+  headers: Headers,
+  vmSessionCookieName = DEFAULT_VM_SESSION_COOKIE
+): void {
   const value = headers.get('cookie');
   if (!value) return;
   const applicationCookies = value
@@ -56,7 +69,7 @@ export function stripSamReservedRequestCookies(headers: Headers): void {
     .filter((cookie) => {
       const separator = cookie.indexOf('=');
       const name = separator === -1 ? cookie : cookie.slice(0, separator);
-      return !isSamReservedCookieName(name);
+      return !isSamReservedCookieName(name, vmSessionCookieName);
     });
   if (applicationCookies.length === 0) headers.delete('cookie');
   else headers.set('cookie', applicationCookies.join('; '));
@@ -68,17 +81,24 @@ export function isTrustedWorkspaceWebSocketOrigin(
 ): boolean {
   if (!origin) return true;
   if (!baseDomain) return false;
-  return origin === `https://app.${baseDomain.toLowerCase()}`;
+  const normalizedBaseDomain = baseDomain.toLowerCase();
+  return (
+    origin === `https://app.${normalizedBaseDomain}` ||
+    origin === `https://api.${normalizedBaseDomain}`
+  );
 }
 
-export function isolatePreviewResponse(response: Response): Response {
+export function isolatePreviewResponse(
+  response: Response,
+  vmSessionCookieName = DEFAULT_VM_SESSION_COOKIE
+): Response {
   const headers = new Headers(response.headers);
   const setCookies = readSetCookieHeaders(response.headers);
   headers.delete('set-cookie');
   for (const setCookie of setCookies) {
     const separator = setCookie.indexOf('=');
     const name = (separator === -1 ? setCookie : setCookie.slice(0, separator)).trim();
-    if (!isSamReservedCookieName(name)) {
+    if (!isSamReservedCookieName(name, vmSessionCookieName)) {
       headers.append('set-cookie', makeHostOnlySetCookie(setCookie));
     }
   }

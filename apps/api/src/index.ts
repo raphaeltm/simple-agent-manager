@@ -26,6 +26,7 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
+import { errors as joseErrors } from 'jose';
 
 import { createAuth } from './auth';
 import * as schema from './db/schema';
@@ -228,6 +229,12 @@ app.use('*', async (c, next) => {
     c.req.raw.headers.get('upgrade')?.toLowerCase() === 'websocket' &&
     !isTrustedWorkspaceWebSocketOrigin(c.req.raw.headers.get('origin'), baseDomain)
   ) {
+    log.warn('ws_proxy_websocket_origin_rejected', {
+      workspaceId,
+      origin: c.req.raw.headers.get('origin'),
+      path: url.pathname,
+      action: 'rejected',
+    });
     return c.json({ error: 'FORBIDDEN', message: 'Untrusted WebSocket origin' }, 403);
   }
 
@@ -268,6 +275,7 @@ app.use('*', async (c, next) => {
               : 14400;
             const redirectUrl = new URL(url.toString());
             redirectUrl.searchParams.delete('port_token');
+            redirectUrl.searchParams.delete('token');
             portAccessRedirect = new Response(null, {
               status: 302,
               headers: {
@@ -401,6 +409,25 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     return portAccessRedirect;
   }
 
+  // Never serve untrusted preview code at a browser URL containing SAM's reserved
+  // query credential names. The VM-facing URL is sanitized independently below.
+  if (
+    targetPort !== null &&
+    (url.searchParams.has('port_token') || url.searchParams.has('token'))
+  ) {
+    const redirectUrl = new URL(url.toString());
+    redirectUrl.searchParams.delete('port_token');
+    redirectUrl.searchParams.delete('token');
+    return new Response(null, {
+      status: 302,
+      headers: {
+        Location: redirectUrl.toString(),
+        'Cache-Control': 'no-store',
+        'Referrer-Policy': 'no-referrer',
+      },
+    });
+  }
+
   if (nodeRuntime === 'cf-container') {
     const containerConfig = getVmAgentContainerConfig(c.env);
     if (!containerConfig.enabled) {
@@ -451,7 +478,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     headers.set('X-Forwarded-Host', hostname);
     headers.set('X-Forwarded-Proto', 'https');
     if (targetPort !== null) {
-      stripSamReservedRequestCookies(headers);
+      stripSamReservedRequestCookies(headers, c.env.VM_AGENT_COOKIE_NAME);
       await stripSamWorkspaceAuthorization(headers, c.env);
     }
 
@@ -484,7 +511,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
     const response = await fetchVmAgentContainer(c.env, containerId, containerRequest, vmAgentPort);
 
     if (targetPort !== null) {
-      return isolatePreviewResponse(response);
+      return isolatePreviewResponse(response, c.env.VM_AGENT_COOKIE_NAME);
     }
     return response;
   }
@@ -559,7 +586,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   headers.set('X-Forwarded-Host', hostname);
   headers.set('X-Forwarded-Proto', 'https');
   if (targetPort !== null) {
-    stripSamReservedRequestCookies(headers);
+    stripSamReservedRequestCookies(headers, c.env.VM_AGENT_COOKIE_NAME);
     await stripSamWorkspaceAuthorization(headers, c.env);
   }
 
@@ -574,7 +601,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   // Keep application cookies host-only while blocking reserved SAM cookies and
   // cookie-clearing response directives from the untrusted preview boundary.
   if (targetPort !== null) {
-    return isolatePreviewResponse(response);
+    return isolatePreviewResponse(response, c.env.VM_AGENT_COOKIE_NAME);
   }
 
   return response;
@@ -587,8 +614,14 @@ async function stripSamWorkspaceAuthorization(headers: Headers, env: Env): Promi
   try {
     await verifyTerminalToken(match[1], env);
     headers.delete('authorization');
-  } catch {
+  } catch (error) {
     // Application-owned bearer tokens are intentionally preserved.
+    if (error instanceof joseErrors.JOSEError) return;
+    log.error('ws_proxy_authorization_verification_error', {
+      ...serializeError(error),
+      action: 'rejected',
+    });
+    throw error;
   }
 }
 

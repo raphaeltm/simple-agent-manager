@@ -235,6 +235,7 @@ export async function provisionNode(
       dockerDnsServers: env.DOCKER_DNS_SERVERS,
       originCaCertificateUrl: `https://api.${env.BASE_DOMAIN}/api/nodes/${node.id}/origin-ca-certificate`,
       vmAgentPort: env.VM_AGENT_PORT,
+      vmAgentCookieName: env.VM_AGENT_COOKIE_NAME,
       devcontainerCacheEnabled: env.DEVCONTAINER_CACHE_ENABLED,
       swapSizeMb: env.SWAP_SIZE_MB,
       swapSwappiness: env.SWAP_SWAPPINESS,

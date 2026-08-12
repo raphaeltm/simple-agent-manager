@@ -41,17 +41,29 @@ describe('workspace preview WebSocket response isolation', () => {
       .bind(workspaceId)
       .run();
 
-    const response = await SELF.fetch(
-      `https://ws-${workspaceId}--3000.test.example.com/socket?token=client-sam-token&port_token=client-port-token&channel=app`,
-      {
-        headers: {
-          authorization: 'Bearer app-owned-token',
-          connection: 'Upgrade',
-          cookie: 'sam_port_access=invalid; vm_session=shared-session; preview_theme=dark',
-          upgrade: 'websocket',
-        },
-      }
-    );
+    const credentialUrl = `https://ws-${workspaceId}--3000.test.example.com/socket?token=client-sam-token&port_token=client-port-token&channel=app`;
+    const dirtyResponse = await SELF.fetch(credentialUrl, {
+      redirect: 'manual',
+      headers: {
+        authorization: 'Bearer app-owned-token',
+        cookie: 'sam_port_access=invalid; vm_session=shared-session; preview_theme=dark',
+      },
+    });
+    expect(dirtyResponse.status).toBe(302);
+    expect(dirtyResponse.webSocket).toBeNull();
+    const cleanUrl = new URL(dirtyResponse.headers.get('location') ?? '');
+    expect(cleanUrl.searchParams.get('token')).toBeNull();
+    expect(cleanUrl.searchParams.get('port_token')).toBeNull();
+    expect(cleanUrl.searchParams.get('channel')).toBe('app');
+
+    const response = await SELF.fetch(cleanUrl, {
+      headers: {
+        authorization: 'Bearer app-owned-token',
+        connection: 'Upgrade',
+        cookie: 'sam_port_access=invalid; vm_session=shared-session; preview_theme=dark',
+        upgrade: 'websocket',
+      },
+    });
 
     expect(response.status).toBe(101);
     expect(response.webSocket).toBeDefined();

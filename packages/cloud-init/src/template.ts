@@ -172,6 +172,7 @@ write_files:
       Environment=TASK_ID={{ task_id }}
       Environment=TASK_MODE={{ task_mode }}
       Environment=VM_AGENT_PORT={{ vm_agent_port }}
+      Environment=COOKIE_NAME={{ vm_agent_cookie_name }}
       Environment=TLS_CERT_PATH={{ tls_cert_path }}
       Environment=TLS_KEY_PATH={{ tls_key_path }}
       Environment=PROVIDER={{ provider }}

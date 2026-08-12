@@ -95,6 +95,47 @@ func TestPortProxyIsolatesCredentialsAndResponseCookies(t *testing.T) {
 	}
 }
 
+func TestPreviewCookieIsolationReservesConfiguredAndLegacySessionNames(t *testing.T) {
+	const workspaceID = "01KR1000000000000000000001"
+	headers := http.Header{}
+	headers.Set("Cookie", strings.Join([]string{
+		"vm_session=legacy",
+		"vm_session_" + workspaceID + "=legacy-scoped",
+		"custom_session=current",
+		"custom_session_" + workspaceID + "=current-scoped",
+		"custom_session_extension=ordinary",
+		"preview_theme=dark",
+	}, "; "))
+
+	stripSAMReservedRequestCookies(headers, "custom_session")
+	if got := headers.Get("Cookie"); got != "custom_session_extension=ordinary; preview_theme=dark" {
+		t.Fatalf("Cookie = %q, want only application cookies", got)
+	}
+
+	response := &http.Response{Header: http.Header{}}
+	for _, cookie := range []string{
+		"vm_session=legacy; Path=/",
+		"vm_session_" + workspaceID + "=legacy-scoped; Path=/",
+		"custom_session=current; Path=/",
+		"custom_session_" + workspaceID + "=current-scoped; Path=/",
+		"custom_session_extension=ordinary; Domain=.example.com; Path=/",
+	} {
+		response.Header.Add("Set-Cookie", cookie)
+	}
+	if err := sanitizePreviewResponseCookies(response, "custom_session"); err != nil {
+		t.Fatal(err)
+	}
+	setCookies := strings.Join(response.Header.Values("Set-Cookie"), "\n")
+	for _, blocked := range []string{"vm_session=", "vm_session_" + workspaceID + "=", "custom_session=", "custom_session_" + workspaceID + "="} {
+		if strings.Contains(setCookies, blocked) {
+			t.Errorf("reserved cookie %q was preserved: %s", blocked, setCookies)
+		}
+	}
+	if !strings.Contains(setCookies, "custom_session_extension=ordinary") || strings.Contains(strings.ToLower(setCookies), "domain=") {
+		t.Fatalf("application extension cookie was not preserved host-only: %s", setCookies)
+	}
+}
+
 func TestPortProxyPreservesApplicationAuthorization(t *testing.T) {
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if got := r.Header.Get("Authorization"); got != "Bearer app-token" {

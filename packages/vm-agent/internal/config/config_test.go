@@ -851,6 +851,7 @@ func validConfig() *Config {
 		Port:                          8080,
 		ControlPlaneURL:               "https://api.example.com",
 		NodeID:                        "node-1",
+		CookieName:                    "vm_session",
 		SessionMaxCount:               100,
 		DefaultRows:                   24,
 		DefaultCols:                   80,
