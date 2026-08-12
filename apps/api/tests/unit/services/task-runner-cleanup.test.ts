@@ -88,13 +88,22 @@ describe('cleanupTerminalTaskResources', () => {
   it('stops the chat session before invoking task runtime cleanup', async () => {
     const order: string[] = [];
     const db = buildDb([
-      [{
-        id: 'task-terminal-1',
-        projectId: 'project-terminal-1',
-        workspaceId: 'workspace-terminal-1',
-        errorMessage: null,
-      }],
-      [{ chatSessionId: 'session-terminal-1' }],
+      [
+        {
+          id: 'task-terminal-1',
+          projectId: 'project-terminal-1',
+          workspaceId: 'workspace-terminal-1',
+          errorMessage: null,
+        },
+      ],
+      [
+        {
+          id: 'workspace-terminal-1',
+          projectId: 'project-terminal-1',
+          userId: 'user-terminal-1',
+          chatSessionId: 'session-terminal-1',
+        },
+      ],
     ]);
     mocks.drizzle.mockReturnValue(db);
     mocks.stopSession.mockImplementation(async () => {
@@ -107,29 +116,35 @@ describe('cleanupTerminalTaskResources', () => {
       },
     }));
 
-    const { cleanupTerminalTaskResources } = await import('../../../src/services/task-terminal-cleanup');
+    const { cleanupTerminalTaskResources } =
+      await import('../../../src/services/task-terminal-cleanup');
     const env = { DATABASE: {} } as Env;
 
     await cleanupTerminalTaskResources(env, 'task-terminal-1', { status: 'completed' });
 
-    expect(mocks.stopSession).toHaveBeenCalledWith(
-      env,
-      'project-terminal-1',
-      'session-terminal-1'
-    );
+    expect(mocks.stopSession).toHaveBeenCalledWith(env, 'project-terminal-1', 'session-terminal-1');
     expect(order).toEqual(['stopSession', 'cleanupTaskRun']);
   });
 
   it('fails the chat session before cleanup when task status is failed', async () => {
     const order: string[] = [];
     const db = buildDb([
-      [{
-        id: 'task-terminal-failed',
-        projectId: 'project-terminal-1',
-        workspaceId: 'workspace-terminal-1',
-        errorMessage: 'runner failed',
-      }],
-      [{ chatSessionId: 'session-terminal-1' }],
+      [
+        {
+          id: 'task-terminal-failed',
+          projectId: 'project-terminal-1',
+          workspaceId: 'workspace-terminal-1',
+          errorMessage: 'runner failed',
+        },
+      ],
+      [
+        {
+          id: 'workspace-terminal-1',
+          projectId: 'project-terminal-1',
+          userId: 'user-terminal-1',
+          chatSessionId: 'session-terminal-1',
+        },
+      ],
     ]);
     mocks.drizzle.mockReturnValue(db);
     mocks.failSession.mockImplementation(async () => {
@@ -142,7 +157,8 @@ describe('cleanupTerminalTaskResources', () => {
       },
     }));
 
-    const { cleanupTerminalTaskResources } = await import('../../../src/services/task-terminal-cleanup');
+    const { cleanupTerminalTaskResources } =
+      await import('../../../src/services/task-terminal-cleanup');
     const env = { DATABASE: {} } as Env;
 
     await cleanupTerminalTaskResources(env, 'task-terminal-failed', { status: 'failed' });

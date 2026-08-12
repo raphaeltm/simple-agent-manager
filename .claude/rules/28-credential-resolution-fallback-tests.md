@@ -17,6 +17,23 @@ The class of bug is **silent acceptance at credential trust boundaries.** Every 
 
 ## Required Behavioral Tests
 
+### Caller-Controlled Resource Relationships
+
+Whenever an API accepts an identifier that links one resource to another (for example, a chat
+session to a workspace), authorization MUST be checked at both trust transitions:
+
+1. **Attachment:** before persisting the relationship, resolve the referenced row with the
+   authenticated caller and route scope (such as both `userId` and `projectId`).
+2. **Destructive use:** before stop, delete, archive, or terminal cleanup follows the stored
+   relationship, re-resolve every linked identity and verify that the task/session/resource records
+   still agree. Stale or corrupt persisted links must fail closed before any lifecycle mutation or
+   external cleanup call.
+
+Tests MUST use a real SQL engine for the scoping predicates and include foreign-user,
+foreign-project, missing/stale, and cross-store mismatch attacks. Each attack must assert that no
+destructive system-boundary call occurs and be paired with controls for the legitimate owner and
+any valid shared-project policy.
+
 ### 0. Provider / Dialect Identity Consistency
 
 When a resolved consumer and the decrypted credential secret both name a
@@ -38,12 +55,12 @@ logging the secret value.
 
 For any function that returns a stored credential based on a scoping tuple, there MUST be a behavioral test for EACH of these branches:
 
-| Branch | State | Expected outcome |
-|--------|-------|------------------|
-| Active scoped row exists | `(userId, projectId)` row found with `is_active=1` | Use the scoped row; do not query higher tiers |
-| Scoped row exists but inactive | `(userId, projectId)` row found with `is_active=0` | **Reject the lookup.** Do NOT fall back to higher tier. |
-| No scoped row, active user-tier row | No project row; user row exists and active | Fall back to user-tier row |
-| No row at any tier | Nothing matches | Return null / reject |
+| Branch                              | State                                              | Expected outcome                                        |
+| ----------------------------------- | -------------------------------------------------- | ------------------------------------------------------- |
+| Active scoped row exists            | `(userId, projectId)` row found with `is_active=1` | Use the scoped row; do not query higher tiers           |
+| Scoped row exists but inactive      | `(userId, projectId)` row found with `is_active=0` | **Reject the lookup.** Do NOT fall back to higher tier. |
+| No scoped row, active user-tier row | No project row; user row exists and active         | Fall back to user-tier row                              |
+| No row at any tier                  | Nothing matches                                    | Return null / reject                                    |
 
 The "inactive scoped row blocks fallback" branch is the most commonly missed and the most dangerous. An inactive row represents an explicit user deactivation; falling back to a higher-tier row silently rotates a credential the user did not intend to rotate.
 
@@ -76,7 +93,7 @@ Credential rotation endpoints (OAuth refresh, key rotation) MUST have:
 
 1. **Warn-only rotation validation.** `log.warn('unexpected scope') ; storeNewTokens(...)` silently accepts escalations. Either block or don't validate.
 
-2. **Source-contract tests on credential middleware.** `expect(file.toContain('requireOwnedProject'))` proves code is *present*, not that it *enforces identity*. Rule 02 already bans this — call it out explicitly for auth code.
+2. **Source-contract tests on credential middleware.** `expect(file.toContain('requireOwnedProject'))` proves code is _present_, not that it _enforces identity_. Rule 02 already bans this — call it out explicitly for auth code.
 
 3. **Tautological IDOR tests.** Mocking `getUserId` to always return the same value and then asserting "cross-user writes rejected" tests "row-not-found handling," not "cross-user identity check." Tests MUST construct scenarios where the DB returns a row whose `userId` does NOT match the caller's.
 
@@ -86,7 +103,7 @@ Credential rotation endpoints (OAuth refresh, key rotation) MUST have:
    protection under test IS a query predicate (`AND user_id = ?`, `AND project_id = ?`), a chainable
    stub like `where: vi.fn(() => chain)` returning canned rows evaluates nothing — the test passes
    identically with the predicate deleted. This is the query-layer twin of the source-contract ban:
-   it asserts the code was *written*, not that it *filters*.
+   it asserts the code was _written_, not that it _filters_.
 
    Ownership/scoping guards expressed as SQL predicates MUST be tested against a real SQL engine —
    use `createSqliteD1` + `createSchemaTables` (`apps/api/tests/helpers/sqlite-d1.ts`), which builds
@@ -97,6 +114,11 @@ Credential rotation endpoints (OAuth refresh, key rotation) MUST have:
    torn down" is also satisfied by teardown being broken outright, so the same fixture must prove the
    legitimate owner DOES get the action. Then verify the pair is discriminating by temporarily
    deleting the guard: the attack case must fail and the control must still pass.
+
+6. **One-time relationship authorization.** Validating a caller-controlled resource ID only when it
+   is first stored is insufficient for destructive workflows. Stored relationships can predate the
+   guard, become stale, or be corrupted. Revalidate caller, route, and linked-record scope immediately
+   before the first lifecycle mutation or destructive boundary call.
 
 ## Quick Compliance Check
 
@@ -112,6 +134,8 @@ Before merging any PR that touches credential resolution, rotation, or compariso
 - [ ] No source-contract tests on auth middleware
 - [ ] Guards that are SQL predicates are tested against a real SQL engine, not a `.where()`-ignoring mock
 - [ ] Every attack case has an owner-path control, and the pair was verified discriminating by deleting the guard
+- [ ] Caller-controlled resource links are authorized both when attached and before destructive use
+- [ ] Destructive-link tests cover stale/cross-store mismatch and assert zero boundary calls on rejection
 
 ## References
 

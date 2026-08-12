@@ -29,13 +29,13 @@ Scope is audit finding CT-01 only. Preserve every valid API response and shared-
 
 ## Implementation Checklist
 
-- [ ] Add discriminating tests that fail on current `main` for foreign-user, foreign-project, missing/stale, and mismatched workspace attachment.
-- [ ] Add valid compatibility controls for no-workspace creation and same-project caller-owned workspace attachment.
-- [ ] Validate caller-supplied workspace attachment against both caller and route project before any task or ProjectData session write.
-- [ ] Add terminal-cleanup tests for foreign user/project workspace links, stale/mismatched task records, legitimate same-project cleanup, and zero destructive boundary calls on rejection.
-- [ ] Revalidate task, project, workspace, and caller scope before ProjectData session mutation or compute teardown.
-- [ ] Preserve trusted internal cleanup semantics with explicit identity consistency checks.
-- [ ] Add a process-rule improvement covering caller-controlled relationship attachment plus destructive-use revalidation.
+- [x] Add discriminating tests that fail on current `main` for foreign-user, foreign-project, missing/stale, and mismatched workspace attachment.
+- [x] Add valid compatibility controls for no-workspace creation and same-project caller-owned workspace attachment.
+- [x] Validate caller-supplied workspace attachment against both caller and route project before any task or ProjectData session write.
+- [x] Add terminal-cleanup tests for foreign user/project workspace links, stale/mismatched task records, legitimate same-project cleanup, and zero destructive boundary calls on rejection.
+- [x] Revalidate task, project, workspace, and caller scope before ProjectData session mutation or compute teardown.
+- [x] Preserve trusted internal cleanup semantics with explicit identity consistency checks.
+- [x] Add a process-rule improvement covering caller-controlled relationship attachment plus destructive-use revalidation.
 - [ ] Run focused tests, API checks, repository fast/full gates, and prove new tests are discriminating against the pre-fix code.
 - [ ] Run task-completion, Cloudflare, security, constitution, documentation-sync, and test specialist reviews plus a fresh independent adversarial bypass review; resolve credible findings.
 - [ ] Open exactly one non-draft PR against `main`, do not deploy to staging, do not merge, and monitor all applicable CI checks to green.
@@ -61,4 +61,48 @@ Scope is audit finding CT-01 only. Preserve every valid API response and shared-
 
 ## Post-Mortem
 
-To be completed with the final root-cause timeline, discriminating-test evidence, and process fix before archive.
+### What broke
+
+An authenticated project member could supply another tenant's `workspaceId` while creating a chat.
+The ID was persisted on the task and ProjectData session, and archiving that attacker-owned session
+could follow the stale link into container/node teardown under the victim workspace owner's identity.
+
+### Root cause
+
+Commit `8766f976a3` (2026-02-22, project-first architecture) introduced the caller-controlled chat
+workspace attachment without resolving the workspace against caller and route-project scope. Commit
+`56cb8ba9d5` (2026-07-11, teardown leak fix) later connected chat archival to terminal runtime cleanup
+without threading the caller identity. Commit `d590ec5626` (2026-07-16, task-backed chat) persisted the
+same unverified relationship on D1 tasks. Cleanup correctly used the workspace owner for trusted
+internal completion, but the archive path accidentally entered that trusted mode because it omitted
+caller scope. The vulnerability was the interaction of those individually useful changes.
+
+### Timeline
+
+- 2026-02-22: arbitrary workspace attachment became possible.
+- 2026-07-11: archive began destructive runtime cleanup, completing the exploit chain.
+- 2026-07-16: task-backed chat duplicated the unverified relationship across D1 and ProjectData.
+- 2026-08-12: strict CTO audit CT-01 identified the chain; independent verification reproduced it on
+  `origin/main` at `fc1e394217248c3bd004b2e6619cf2344eade7e3`.
+
+### Why it was not caught
+
+Existing tests covered route-level project authorization and cleanup behavior independently. They did
+not build the complete creation-to-archive lifecycle with a foreign workspace, and several cleanup
+tests used chainable database mocks whose `where()` implementation did not evaluate ownership or
+project predicates. No test asserted both non-disclosing rejection and zero calls at every destructive
+system boundary while retaining a valid owner/shared-project control.
+
+### Class of bug
+
+This was a caller-controlled relationship confused with a trusted persisted relationship: scope was
+not checked when the link was attached and was not revalidated before destructive dereference. It was
+also a mock-hidden integration failure across D1, ProjectData, and runtime cleanup boundaries.
+
+### Process fix
+
+`.claude/rules/28-credential-resolution-fallback-tests.md` now requires authorization at both
+relationship attachment and destructive use, real-SQLite scoping tests, stale/cross-store mismatch
+attacks, zero destructive-boundary assertions, and legitimate owner/shared-project controls. The new
+vertical suite demonstrated discrimination before the implementation: 7 attacks failed on current
+main while 6 compatibility controls passed; after the guard, all 15 attack/control scenarios pass.

@@ -100,8 +100,22 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
   });
 
   it('repairs a taskless instant session before unified task cleanup', async () => {
-    const db = buildDb([[{ id: 'task-repaired-1', status: 'in_progress', errorMessage: null }]]);
-    mocks.ensureSessionTaskBacked.mockResolvedValue({ id: 'task-repaired-1' });
+    const task = {
+      id: 'task-repaired-1',
+      projectId: 'project-stop-1',
+      userId: 'user-stop-1',
+      chatSessionId: 'session-stop-1',
+      workspaceId: 'workspace-stop-1',
+      status: 'in_progress',
+      errorMessage: null,
+    };
+    const workspace = {
+      id: 'workspace-stop-1',
+      projectId: 'project-stop-1',
+      userId: 'user-stop-1',
+    };
+    const db = buildDb([[workspace], [task]]);
+    mocks.ensureSessionTaskBacked.mockResolvedValue(task);
     vi.mocked(drizzle).mockReturnValue(db as never);
     mocks.getSession.mockResolvedValue({
       id: 'session-stop-1',
@@ -142,17 +156,23 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
   });
 
   it('tears down task-backed session runtime resources', async () => {
-    const db = buildDb([
-      [
-        {
-          id: 'task-1',
-          status: 'in_progress',
-          errorMessage: null,
-        },
-      ],
-    ]);
+    const task = {
+      id: 'task-1',
+      projectId: 'project-stop-1',
+      userId: 'user-stop-1',
+      chatSessionId: 'session-task-backed-1',
+      workspaceId: 'workspace-task-backed-1',
+      status: 'in_progress',
+      errorMessage: null,
+    };
+    const workspace = {
+      id: 'workspace-task-backed-1',
+      projectId: 'project-stop-1',
+      userId: 'user-stop-1',
+    };
+    const db = buildDb([[workspace], [task]]);
     vi.mocked(drizzle).mockReturnValue(db as never);
-    mocks.ensureSessionTaskBacked.mockResolvedValue({ id: 'task-1' });
+    mocks.ensureSessionTaskBacked.mockResolvedValue(task);
     mocks.getSession.mockResolvedValue({
       id: 'session-task-backed-1',
       workspaceId: 'workspace-task-backed-1',
@@ -185,6 +205,8 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
     expect(mocks.cleanupTerminalTaskResources).toHaveBeenCalledWith(expect.anything(), 'task-1', {
       status: 'cancelled',
       errorMessage: 'Archived by user',
+      requiredUserId: 'user-stop-1',
+      projectId: 'project-stop-1',
       logContext: {
         projectId: 'project-stop-1',
         sessionId: 'session-task-backed-1',

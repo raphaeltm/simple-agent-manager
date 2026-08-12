@@ -54,6 +54,7 @@ import {
 } from './chat-session-ownership';
 import { chatStateRoutes } from './chat-state';
 import { registerChatStopRoute } from './chat-stop';
+import { requireChatWorkspaceScope } from './chat-workspace-authorization';
 import { resolveLiveAgentSessionForChat } from './chat-workspace-resolver';
 
 const chatRoutes = new Hono<{ Bindings: Env }>();
@@ -179,6 +180,15 @@ chatRoutes.post('/', async (c) => {
   const body = await parseOptionalBody(c.req.raw, CreateChatSessionSchema, {});
   const workspaceId = body.workspaceId?.trim() || null;
   const topic = body.topic?.trim() || null;
+
+  if (workspaceId) {
+    await requireChatWorkspaceScope(db, {
+      projectId,
+      userId,
+      workspaceId,
+      source: 'session_create',
+    });
+  }
 
   const taskId = ulid();
   const now = new Date().toISOString();

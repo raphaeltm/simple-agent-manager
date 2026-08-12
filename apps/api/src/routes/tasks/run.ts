@@ -338,7 +338,7 @@ runRoutes.post('/:taskId/run/cleanup', requireAuth(), requireApproved(), async (
     );
   }
 
-  c.executionCtx.waitUntil(cleanupTaskRun(task.id, c.env, undefined, userId));
+  c.executionCtx.waitUntil(cleanupTaskRun(task.id, c.env, undefined, userId, projectId));
 
   return c.json({ success: true, message: 'Cleanup initiated' });
 });

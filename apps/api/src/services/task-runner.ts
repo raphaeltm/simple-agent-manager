@@ -49,7 +49,8 @@ export async function cleanupTaskRun(
   taskId: string,
   env: Env,
   warmTimeoutOverrideMs?: number | null,
-  requiredUserId?: string
+  requiredUserId?: string,
+  requiredProjectId?: string
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   const cleanupDelay = getCleanupDelayMs(env);
@@ -59,17 +60,25 @@ export async function cleanupTaskRun(
     await new Promise((resolve) => setTimeout(resolve, cleanupDelay));
   }
 
+  const taskConditions = [eq(schema.tasks.id, taskId)];
+  if (requiredProjectId) {
+    taskConditions.push(eq(schema.tasks.projectId, requiredProjectId));
+  }
+
   const [task] = await db
     .select()
     .from(schema.tasks)
-    .where(eq(schema.tasks.id, taskId))
+    .where(and(...taskConditions))
     .limit(1);
 
-  if (!task || !task.workspaceId) {
+  if (!task || (requiredProjectId && task.projectId !== requiredProjectId) || !task.workspaceId) {
     return;
   }
 
-  const workspaceConditions = [eq(schema.workspaces.id, task.workspaceId)];
+  const workspaceConditions = [
+    eq(schema.workspaces.id, task.workspaceId),
+    eq(schema.workspaces.projectId, task.projectId),
+  ];
   if (requiredUserId) {
     workspaceConditions.push(eq(schema.workspaces.userId, requiredUserId));
   }
@@ -80,15 +89,32 @@ export async function cleanupTaskRun(
     .where(and(...workspaceConditions))
     .limit(1);
 
-  if (!workspace || !workspace.nodeId) {
+  if (
+    !workspace ||
+    workspace.id !== task.workspaceId ||
+    workspace.projectId !== task.projectId ||
+    (requiredUserId && workspace.userId !== requiredUserId)
+  ) {
     if (requiredUserId) {
       log.info('task_run.cleanup.skipped_owner_mismatch', {
         taskId,
         workspaceId: task.workspaceId,
+        requiredProjectId: task.projectId,
         requiredUserId,
         action: 'skipped',
       });
+    } else {
+      log.info('task_run.cleanup.skipped_workspace_scope_mismatch', {
+        taskId,
+        workspaceId: task.workspaceId,
+        requiredProjectId: task.projectId,
+        action: 'skipped',
+      });
     }
+    return;
+  }
+
+  if (!workspace.nodeId) {
     return;
   }
 
@@ -102,7 +128,11 @@ export async function cleanupTaskRun(
   // workspace.userId === requiredUserId, so this is a no-op for the caller-scoped paths.
   const cleanupUserId = requiredUserId ?? workspace.userId;
 
-  log.info('task_run.cleanup.started', { taskId, workspaceId: task.workspaceId, nodeId: workspace.nodeId });
+  log.info('task_run.cleanup.started', {
+    taskId,
+    workspaceId: task.workspaceId,
+    nodeId: workspace.nodeId,
+  });
 
   const [node] = await db
     .select({
@@ -149,12 +179,18 @@ export async function cleanupTaskRun(
   }
 
   // Schedule automatic deletion after TTL (best-effort)
-  if (workspace.nodeId && (workspace.status === 'running' || workspace.status === 'recovery' || workspace.status === 'stopped')) {
+  if (
+    workspace.nodeId &&
+    (workspace.status === 'running' ||
+      workspace.status === 'recovery' ||
+      workspace.status === 'stopped')
+  ) {
     try {
       const doId = env.NODE_LIFECYCLE.idFromName(workspace.nodeId);
       const stub = env.NODE_LIFECYCLE.get(doId);
-      await (stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle)
-        .scheduleWorkspaceDeletion(workspace.id, cleanupUserId);
+      await (
+        stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle
+      ).scheduleWorkspaceDeletion(workspace.id, cleanupUserId);
     } catch (e) {
       log.warn('task_run.cleanup.schedule_deletion_failed', {
         taskId,
@@ -222,12 +258,7 @@ async function cleanupAutoProvisionedNode(
   const workspaces = await db
     .select({ id: schema.workspaces.id, status: schema.workspaces.status })
     .from(schema.workspaces)
-    .where(
-      and(
-        eq(schema.workspaces.nodeId, nodeId),
-        eq(schema.workspaces.userId, userId)
-      )
-    );
+    .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
 
   const activeWorkspaces = workspaces.filter(
     (ws) =>

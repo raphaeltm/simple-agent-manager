@@ -16,6 +16,7 @@ import {
   type TerminalTaskCleanupStatus,
 } from '../services/task-terminal-cleanup';
 import { requireSessionCreator } from './chat-session-ownership';
+import { requireSessionTaskWorkspaceScope } from './chat-workspace-authorization';
 
 type Database = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -112,6 +113,8 @@ async function stopTaskBackedSession(
   await cleanupTerminalTaskResources(env, taskId, {
     status: cleanupStatus,
     errorMessage: cleanupStatus === 'failed' ? (task?.errorMessage ?? null) : 'Archived by user',
+    requiredUserId: context.userId,
+    projectId: context.projectId,
     logContext: {
       projectId: context.projectId,
       sessionId: context.sessionId,
@@ -132,15 +135,22 @@ export function registerChatStopRoute(chatRoutes: Hono<{ Bindings: Env }>): void
     const db = drizzle(c.env.DATABASE, { schema });
 
     await requireProjectCapability(db, projectId, userId, 'task:write');
-    await requireSessionCreator(c.env, projectId, sessionId, userId);
+    const session = await requireSessionCreator(c.env, projectId, sessionId, userId);
 
     const context = { projectId, sessionId, userId };
     const backingTask = await ensureSessionTaskBacked(db, c.env, {
-      projectId, sessionId, fallbackUserId: userId,
+      projectId,
+      sessionId,
+      fallbackUserId: userId,
+    });
+    await requireSessionTaskWorkspaceScope(db, {
+      ...context,
+      session,
+      task: backingTask,
     });
     await stopTaskBackedSession(c.env, db, backingTask.id, context);
     await chatPersistence.stopChatSession(c.env, projectId, sessionId);
 
-    return c.json({ status: "stopped", workspaceDeleted: true });
+    return c.json({ status: 'stopped', workspaceDeleted: true });
   });
 }

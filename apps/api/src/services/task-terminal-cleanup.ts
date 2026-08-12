@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -13,6 +13,7 @@ export interface TerminalTaskCleanupOptions {
   status: TerminalTaskCleanupStatus;
   errorMessage?: string | null;
   requiredUserId?: string;
+  projectId?: string;
   logContext?: Record<string, unknown>;
 }
 
@@ -49,6 +50,11 @@ export async function cleanupTerminalTaskResources(
   options: TerminalTaskCleanupOptions
 ): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
+  const taskConditions = [eq(schema.tasks.id, taskId)];
+  if (options.projectId) {
+    taskConditions.push(eq(schema.tasks.projectId, options.projectId));
+  }
+
   const [task] = await db
     .select({
       id: schema.tasks.id,
@@ -57,20 +63,56 @@ export async function cleanupTerminalTaskResources(
       errorMessage: schema.tasks.errorMessage,
     })
     .from(schema.tasks)
-    .where(eq(schema.tasks.id, taskId))
+    .where(and(...taskConditions))
     .limit(1);
 
-  if (!task?.workspaceId || !task.projectId) {
+  if (
+    !task ||
+    (options.projectId && task.projectId !== options.projectId) ||
+    !task.workspaceId ||
+    !task.projectId
+  ) {
     return;
   }
 
+  const workspaceConditions = [
+    eq(schema.workspaces.id, task.workspaceId),
+    eq(schema.workspaces.projectId, task.projectId),
+  ];
+  if (options.requiredUserId) {
+    workspaceConditions.push(eq(schema.workspaces.userId, options.requiredUserId));
+  }
+
   const [workspace] = await db
-    .select({ chatSessionId: schema.workspaces.chatSessionId })
+    .select({
+      id: schema.workspaces.id,
+      projectId: schema.workspaces.projectId,
+      userId: schema.workspaces.userId,
+      chatSessionId: schema.workspaces.chatSessionId,
+    })
     .from(schema.workspaces)
-    .where(eq(schema.workspaces.id, task.workspaceId))
+    .where(and(...workspaceConditions))
     .limit(1);
 
-  if (workspace?.chatSessionId) {
+  if (
+    !workspace ||
+    workspace.id !== task.workspaceId ||
+    workspace.projectId !== task.projectId ||
+    (options.requiredUserId && workspace.userId !== options.requiredUserId)
+  ) {
+    log.info('task.terminal_cleanup.workspace_scope_rejected', {
+      taskId,
+      taskProjectId: task.projectId,
+      workspaceId: task.workspaceId,
+      requiredProjectId: options.projectId ?? null,
+      requiredUserId: options.requiredUserId ?? null,
+      action: 'skipped',
+      ...options.logContext,
+    });
+    return;
+  }
+
+  if (workspace.chatSessionId) {
     try {
       if (options.status === 'failed') {
         await projectDataService.failSession(
@@ -95,5 +137,11 @@ export async function cleanupTerminalTaskResources(
     }
   }
 
-  await cleanupTaskRun(taskId, env, undefined, options.requiredUserId);
+  await cleanupTaskRun(
+    taskId,
+    env,
+    undefined,
+    options.requiredUserId,
+    options.projectId ?? task.projectId
+  );
 }

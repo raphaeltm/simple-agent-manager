@@ -224,7 +224,13 @@ describe('shared-project task lifecycle — positive paths for a non-creator mem
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env, undefined, MEMBER);
+    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith(
+      'task-1',
+      env,
+      undefined,
+      MEMBER,
+      PROJECT
+    );
   });
 
   it('POST /:taskId/delegate: a member can delegate another member ready task to their own workspace', async () => {

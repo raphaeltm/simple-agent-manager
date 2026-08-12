@@ -528,6 +528,8 @@ export async function handleCompleteTask(
   try {
     await cleanupTerminalTaskResources(env, tokenData.taskId, {
       status: 'completed',
+      requiredUserId: tokenData.userId,
+      projectId: tokenData.projectId,
       logContext: { source: 'mcp.complete_task', workspaceId: tokenData.workspaceId },
     });
   } catch (err) {

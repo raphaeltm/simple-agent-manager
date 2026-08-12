@@ -17,7 +17,10 @@ import { resumeMission } from '../../../src/durable-objects/sam-session/tools/re
 import { retrySubtask } from '../../../src/durable-objects/sam-session/tools/retry-subtask';
 import { sendMessageToSubtask } from '../../../src/durable-objects/sam-session/tools/send-message-to-subtask';
 import { stopSubtask } from '../../../src/durable-objects/sam-session/tools/stop-subtask';
-import type { CollectedToolCall, ToolContext } from '../../../src/durable-objects/sam-session/types';
+import type {
+  CollectedToolCall,
+  ToolContext,
+} from '../../../src/durable-objects/sam-session/types';
 
 // Mock cloudflare:workers
 vi.mock('cloudflare:workers', () => ({
@@ -77,7 +80,9 @@ vi.mock('../../../src/services/branch-name', () => ({
 }));
 
 vi.mock('../../../src/services/provider-credentials', () => ({
-  resolveCredentialSource: vi.fn().mockResolvedValue({ credentialId: 'cred-1', provider: 'hetzner' }),
+  resolveCredentialSource: vi
+    .fn()
+    .mockResolvedValue({ credentialId: 'cred-1', provider: 'hetzner' }),
 }));
 
 vi.mock('../../../src/services/project-agent-defaults', () => ({
@@ -86,11 +91,13 @@ vi.mock('../../../src/services/project-agent-defaults', () => ({
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function mockD1(options: {
-  firstResult?: Record<string, unknown> | null;
-  allResults?: Record<string, unknown>[];
-  runChanges?: number;
-} = {}) {
+function mockD1(
+  options: {
+    firstResult?: Record<string, unknown> | null;
+    allResults?: Record<string, unknown>[];
+    runChanges?: number;
+  } = {}
+) {
   const mockStatement = {
     bind: vi.fn().mockReturnThis(),
     first: vi.fn().mockResolvedValue(options.firstResult ?? null),
@@ -119,7 +126,7 @@ function mockD1(options: {
  */
 function queueD1Result(
   stmt: ReturnType<typeof mockD1>['_statement'],
-  rows: Record<string, unknown>[],
+  rows: Record<string, unknown>[]
 ) {
   // .all() path (for queries without field mapping)
   stmt.all.mockResolvedValueOnce({ results: rows, success: true });
@@ -128,12 +135,14 @@ function queueD1Result(
   stmt.raw.mockResolvedValueOnce(rawRows);
 }
 
-function buildCtx(overrides: {
-  dbFirstResult?: Record<string, unknown> | null;
-  dbAllResults?: Record<string, unknown>[];
-  dbRunChanges?: number;
-  userId?: string;
-} = {}): ToolContext & { _db: ReturnType<typeof mockD1> } {
+function buildCtx(
+  overrides: {
+    dbFirstResult?: Record<string, unknown> | null;
+    dbAllResults?: Record<string, unknown>[];
+    dbRunChanges?: number;
+    userId?: string;
+  } = {}
+): ToolContext & { _db: ReturnType<typeof mockD1> } {
   const db = mockD1({
     firstResult: overrides.dbFirstResult,
     allResults: overrides.dbAllResults,
@@ -200,7 +209,13 @@ describe('stop_subtask', () => {
     const ctx = buildCtx();
     // Task found but in completed status — should reject
     queueD1Result(ctx._db._statement, [
-      { id: 'task-1', status: 'completed', workspace_id: null, project_id: 'proj-1', title: 'Done Task' },
+      {
+        id: 'task-1',
+        status: 'completed',
+        workspace_id: null,
+        project_id: 'proj-1',
+        title: 'Done Task',
+      },
     ]);
     const result = await stopSubtask({ taskId: 'task-1' }, ctx);
     const r = result as { error?: string };
@@ -209,26 +224,31 @@ describe('stop_subtask', () => {
   });
 
   it('stops an owned running task without workspace', async () => {
-    const { cleanupTerminalTaskResources } = await import('../../../src/services/task-terminal-cleanup');
+    const { cleanupTerminalTaskResources } =
+      await import('../../../src/services/task-terminal-cleanup');
     const ctx = buildCtx();
     // Task found, running, no workspace — should stop successfully
     queueD1Result(ctx._db._statement, [
-      { id: 'task-1', status: 'running', workspace_id: null, project_id: 'proj-1', title: 'Test Task' },
+      {
+        id: 'task-1',
+        status: 'running',
+        workspace_id: null,
+        project_id: 'proj-1',
+        title: 'Test Task',
+      },
     ]);
     const result = await stopSubtask({ taskId: 'task-1' }, ctx);
     const r = result as Record<string, unknown>;
     expect(r.stopped).toBe(true);
     expect(r.taskId).toBe('task-1');
     expect(r.previousStatus).toBe('running');
-    expect(cleanupTerminalTaskResources).toHaveBeenCalledWith(
-      ctx.env,
-      'task-1',
-      {
-        status: 'cancelled',
-        errorMessage: 'Stopped by user via SAM',
-        logContext: { projectId: 'proj-1', source: 'sam.stop_subtask' },
-      }
-    );
+    expect(cleanupTerminalTaskResources).toHaveBeenCalledWith(ctx.env, 'task-1', {
+      status: 'cancelled',
+      errorMessage: 'Stopped by user via SAM',
+      requiredUserId: 'user-123',
+      projectId: 'proj-1',
+      logContext: { projectId: 'proj-1', source: 'sam.stop_subtask' },
+    });
   });
 });
 
@@ -257,7 +277,30 @@ describe('retry_subtask', () => {
   it('rejects non-retryable task status', async () => {
     const ctx = buildCtx();
     queueD1Result(ctx._db._statement, [
-      { id: 'task-1', status: 'running', description: 'Test', project_id: 'proj-1', mission_id: null, task_mode: 'task', agent_profile_hint: null, name: 'Proj', repository: 'owner/repo', installation_id: 'inst-1', default_branch: 'main', default_vm_size: null, default_provider: null, default_location: null, default_workspace_profile: null, default_agent_type: null, agent_defaults: null, task_execution_timeout_ms: null, max_workspaces_per_node: null, node_cpu_threshold_percent: null, node_memory_threshold_percent: null, warm_node_timeout_ms: null },
+      {
+        id: 'task-1',
+        status: 'running',
+        description: 'Test',
+        project_id: 'proj-1',
+        mission_id: null,
+        task_mode: 'task',
+        agent_profile_hint: null,
+        name: 'Proj',
+        repository: 'owner/repo',
+        installation_id: 'inst-1',
+        default_branch: 'main',
+        default_vm_size: null,
+        default_provider: null,
+        default_location: null,
+        default_workspace_profile: null,
+        default_agent_type: null,
+        agent_defaults: null,
+        task_execution_timeout_ms: null,
+        max_workspaces_per_node: null,
+        node_cpu_threshold_percent: null,
+        node_memory_threshold_percent: null,
+        warm_node_timeout_ms: null,
+      },
     ]);
     const result = await retrySubtask({ taskId: 'task-1' }, ctx);
     const r = result as { error?: string };
@@ -298,7 +341,13 @@ describe('send_message_to_subtask', () => {
     const ctx = buildCtx();
     // Task found but completed — values order: id, status, workspaceId, projectId, title
     queueD1Result(ctx._db._statement, [
-      { id: 'task-1', status: 'completed', workspace_id: 'ws-1', project_id: 'proj-1', title: 'Done' },
+      {
+        id: 'task-1',
+        status: 'completed',
+        workspace_id: 'ws-1',
+        project_id: 'proj-1',
+        title: 'Done',
+      },
     ]);
     const result = await sendMessageToSubtask({ taskId: 'task-1', message: 'hello' }, ctx);
     const r = result as { error?: string };
@@ -310,7 +359,13 @@ describe('send_message_to_subtask', () => {
     const ctx = buildCtx();
     // Active task but no workspace yet — values order: id, status, workspaceId, projectId, title
     queueD1Result(ctx._db._statement, [
-      { id: 'task-1', status: 'running', workspace_id: null, project_id: 'proj-1', title: 'Running' },
+      {
+        id: 'task-1',
+        status: 'running',
+        workspace_id: null,
+        project_id: 'proj-1',
+        title: 'Running',
+      },
     ]);
     const result = await sendMessageToSubtask({ taskId: 'task-1', message: 'hello' }, ctx);
     const r = result as { error?: string };
@@ -468,7 +523,12 @@ describe('Phase B tool registration', () => {
   });
 
   it('original observation tools still work', async () => {
-    const originals = ['list_projects', 'get_project_status', 'search_tasks', 'search_conversation_history'];
+    const originals = [
+      'list_projects',
+      'get_project_status',
+      'search_tasks',
+      'search_conversation_history',
+    ];
     for (const toolName of originals) {
       const toolCall: CollectedToolCall = {
         id: `orig-${toolName}`,

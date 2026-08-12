@@ -257,6 +257,7 @@ describe('shared project task authorization — behavioral IDOR tests', () => {
         mockEnv,
         undefined,
         'caller-user',
+        'project-A',
       );
     });
   });

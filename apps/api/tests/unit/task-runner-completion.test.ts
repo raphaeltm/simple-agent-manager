@@ -72,7 +72,14 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
         workspaceId: 'ws-1',
         errorMessage: null,
       }],
-      [{ chatSessionId: 'session-1' }],
+      [
+        {
+          id: 'ws-1',
+          projectId: 'proj-1',
+          userId: 'runner-1',
+          chatSessionId: 'session-1',
+        },
+      ],
     ]);
     mocks.drizzle.mockReturnValue(db);
     mocks.stopSession.mockImplementation(async () => { order.push('stopSession'); });
@@ -84,7 +91,13 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
     await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
 
     expect(mocks.stopSession).toHaveBeenCalledWith(env, 'proj-1', 'session-1');
-    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env, undefined, undefined);
+    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith(
+      'task-1',
+      env,
+      undefined,
+      undefined,
+      'proj-1'
+    );
     expect(order).toEqual(['stopSession', 'cleanupTaskRun']);
   });
 
@@ -96,7 +109,14 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
         workspaceId: 'ws-2',
         errorMessage: 'agent crashed',
       }],
-      [{ chatSessionId: 'session-2' }],
+      [
+        {
+          id: 'ws-2',
+          projectId: 'proj-2',
+          userId: 'runner-2',
+          chatSessionId: 'session-2',
+        },
+      ],
     ]);
     mocks.drizzle.mockReturnValue(db);
 
@@ -106,7 +126,13 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
     await cleanupTerminalTaskResources(env, 'task-2', { status: 'failed' });
 
     expect(mocks.failSession).toHaveBeenCalledWith(env, 'proj-2', 'session-2', 'agent crashed');
-    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-2', env, undefined, undefined);
+    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith(
+      'task-2',
+      env,
+      undefined,
+      undefined,
+      'proj-2'
+    );
   });
 
   it('threads requiredUserId through to cleanupTaskRun for caller-scoped cleanup', async () => {
@@ -117,7 +143,14 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
         workspaceId: 'ws-3',
         errorMessage: null,
       }],
-      [{ chatSessionId: 'session-3' }],
+      [
+        {
+          id: 'ws-3',
+          projectId: 'proj-3',
+          userId: 'cancelling-user',
+          chatSessionId: 'session-3',
+        },
+      ],
     ]);
     mocks.drizzle.mockReturnValue(db);
 
@@ -129,7 +162,13 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
       requiredUserId: 'cancelling-user',
     });
 
-    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-3', env, undefined, 'cancelling-user');
+    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith(
+      'task-3',
+      env,
+      undefined,
+      'cancelling-user',
+      'proj-3'
+    );
   });
 
   it('skips cleanup when task has no workspace', async () => {
