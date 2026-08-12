@@ -236,23 +236,8 @@ describe('BetterAuth configuration', () => {
     expect(capturedOptions?.socialProviders).not.toHaveProperty('google');
   });
 
-  it('promotes the first real user when only the trial sentinel exists', async () => {
+  it('marks an approval-enabled create as pending without an empty-table read', async () => {
     const query = installExistingUsersQuery([]);
-    const beforeCreate = await getBeforeCreateHook();
-
-    const result = await beforeCreate(newUser);
-
-    expect(result.data).toMatchObject({
-      id: newUser.id,
-      role: 'superadmin',
-      status: 'active',
-    });
-    expect(query.where).toHaveBeenCalledOnce();
-    expect(query.all).toHaveBeenCalledOnce();
-  });
-
-  it('keeps later real users pending when the sentinel and a real user exist', async () => {
-    installExistingUsersQuery([{ id: 'real-user-1' }]);
     const beforeCreate = await getBeforeCreateHook();
 
     const result = await beforeCreate(newUser);
@@ -262,6 +247,22 @@ describe('BetterAuth configuration', () => {
       role: 'user',
       status: 'pending',
     });
+    expect(query.get).toHaveBeenCalledOnce();
+    expect(query.all).not.toHaveBeenCalled();
+  });
+
+  it('does not branch on whether real users already exist', async () => {
+    const query = installExistingUsersQuery([{ id: 'real-user-1' }]);
+    const beforeCreate = await getBeforeCreateHook();
+
+    const result = await beforeCreate(newUser);
+
+    expect(result.data).toMatchObject({
+      id: newUser.id,
+      role: 'user',
+      status: 'pending',
+    });
+    expect(query.all).not.toHaveBeenCalled();
   });
 
   it('uses the shared trial sentinel user id in tests', () => {
