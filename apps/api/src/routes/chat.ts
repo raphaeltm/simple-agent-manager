@@ -14,7 +14,7 @@ import {
   isTaskExecutionStep,
   isTaskMode,
 } from '@simple-agent-manager/shared';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, sql } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
 
@@ -215,10 +215,44 @@ chatRoutes.post('/', async (c) => {
     taskId,
     userId
   );
+
+  if (workspaceId) {
+    const linkResult = await db
+      .update(schema.workspaces)
+      .set({ chatSessionId: sessionId, updatedAt: new Date().toISOString() })
+      .where(
+        and(
+          eq(schema.workspaces.id, workspaceId),
+          eq(schema.workspaces.projectId, projectId),
+          eq(schema.workspaces.userId, userId),
+          inArray(schema.workspaces.status, [
+            'running',
+            'creating',
+            'pending',
+            'recovery',
+            'sleeping',
+          ]),
+          sql`(${schema.workspaces.chatSessionId} IS NULL OR ${schema.workspaces.chatSessionId} = ${sessionId})`
+        )
+      )
+      .returning({ id: schema.workspaces.id });
+    if (linkResult.length === 0) {
+      await projectDataService.stopSession(c.env, projectId, sessionId).catch((err) => {
+        log.warn('chat.session_create_orphan_stop_failed', {
+          projectId,
+          sessionId,
+          workspaceId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+      throw errors.notFound('Workspace');
+    }
+  }
+
   await db
     .update(schema.tasks)
     .set({ chatSessionId: sessionId, workspaceId, updatedAt: now })
-    .where(eq(schema.tasks.id, taskId));
+    .where(and(eq(schema.tasks.id, taskId), eq(schema.tasks.status, 'queued')));
 
   return c.json({ id: sessionId, sessionId, taskId }, 201);
 });

@@ -524,6 +524,29 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     expect(await getAlarm(stub)).toBeNull();
   });
 
+  it('warm alarm keeps the node active when a workspace attached after markIdle', async () => {
+    const nodeId = 'nl-test-warm-post-attach-001';
+    const wsId = 'ws-post-mark-idle-attach-001';
+    await seedTestNode(nodeId);
+
+    const stub = getStub(nodeId);
+    await stub.markIdle(nodeId, TEST_USER_ID);
+    await seedWorkspace(wsId, nodeId, TEST_USER_ID, { status: 'pending' });
+
+    await runInDurableObject(stub, async (instance) => {
+      const state = await instance.ctx.storage.get<StoredNodeLifecycleState>('state');
+      if (!state) throw new Error('expected stored NodeLifecycle state');
+      state.warmSince = Date.now() - 60_000;
+      await instance.ctx.storage.put('state', state);
+      await instance.alarm();
+    });
+
+    expect(await stub.getStatus()).toMatchObject({ status: 'active', warmSince: null });
+    const dbNode = await getNodeFromD1(nodeId);
+    expect(dbNode).toMatchObject({ status: 'running', warm_since: null });
+    expect(await getAlarm(stub)).toBeNull();
+  });
+
   it('tryClaim on destroying node returns false', async () => {
     const nodeId = 'nl-test-claim-destroying-001';
     await seedTestNode(nodeId);

@@ -251,10 +251,20 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
   }
 
   // Clear previous error state and boot logs before starting new provisioning
-  await db
+  const restartClaim = await db
     .update(schema.workspaces)
     .set({ status: 'creating', errorMessage: null, updatedAt: new Date().toISOString() })
-    .where(eq(schema.workspaces.id, workspace.id));
+    .where(
+      and(
+        eq(schema.workspaces.id, workspace.id),
+        eq(schema.workspaces.userId, userId),
+        eq(schema.workspaces.status, workspace.status)
+      )
+    )
+    .returning({ id: schema.workspaces.id });
+  if (restartClaim.length === 0) {
+    throw errors.conflict('Workspace state changed before restart could begin');
+  }
   await writeBootLogs(c.env.KV, workspace.id, [], c.env);
 
   c.executionCtx.waitUntil(
@@ -323,10 +333,20 @@ lifecycleRoutes.post('/:id/rebuild', requireAuth(), requireApproved(), async (c)
   await requireWorkspaceRestartGitHubAccess(c.env, db, workspace, userId, 'workspace-rebuild');
 
   // Clear previous error state and boot logs before starting new provisioning
-  await db
+  const rebuildClaim = await db
     .update(schema.workspaces)
     .set({ status: 'creating', errorMessage: null, updatedAt: new Date().toISOString() })
-    .where(eq(schema.workspaces.id, workspace.id));
+    .where(
+      and(
+        eq(schema.workspaces.id, workspace.id),
+        eq(schema.workspaces.userId, userId),
+        eq(schema.workspaces.status, workspace.status)
+      )
+    )
+    .returning({ id: schema.workspaces.id });
+  if (rebuildClaim.length === 0) {
+    throw errors.conflict('Workspace state changed before rebuild could begin');
+  }
   await writeBootLogs(c.env.KV, workspace.id, [], c.env);
 
   c.executionCtx.waitUntil(

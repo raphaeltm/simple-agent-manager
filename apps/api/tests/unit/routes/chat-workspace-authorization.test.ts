@@ -124,7 +124,7 @@ async function seedProject(projectId: string, ownerId: string, callerRole?: stri
   }
 }
 
-async function seedNode(nodeId: string, userId: string): Promise<void> {
+async function seedNode(nodeId: string, userId: string, runtime = 'cf-container'): Promise<void> {
   await db()
     .insert(schema.nodes)
     .values({
@@ -132,7 +132,7 @@ async function seedNode(nodeId: string, userId: string): Promise<void> {
       userId,
       name: nodeId,
       status: 'running',
-      runtime: 'cf-container',
+      runtime,
     } as typeof schema.nodes.$inferInsert);
 }
 
@@ -143,6 +143,7 @@ async function seedWorkspace(input: {
   nodeId?: string;
   chatSessionId?: string | null;
   status?: string;
+  taskMode?: string;
 }): Promise<void> {
   await db()
     .insert(schema.workspaces)
@@ -167,6 +168,7 @@ async function seedTask(input: {
   sessionId: string | null;
   workspaceId: string | null;
   status?: string;
+  taskMode?: string;
 }): Promise<void> {
   await db()
     .insert(schema.tasks)
@@ -178,7 +180,7 @@ async function seedTask(input: {
       workspaceId: input.workspaceId,
       title: input.id,
       status: input.status ?? 'in_progress',
-      taskMode: 'conversation',
+      taskMode: input.taskMode ?? 'conversation',
       createdBy: input.userId,
     } as typeof schema.tasks.$inferInsert);
 }
@@ -232,6 +234,7 @@ beforeEach(async () => {
     schema.tasks,
     schema.taskStatusEvents,
     schema.agentSessions,
+    schema.computeUsage,
   ]);
   env = {
     DATABASE: createSqliteD1(sqlite),
@@ -350,12 +353,28 @@ describe('POST /sessions — workspace attachment authorization', () => {
     });
   });
 
-  it('CONTROL: a project member can attach their own same-project workspace in any lifecycle state', async () => {
+  it('ATTACK: rejects attachment after cleanup has claimed the workspace', async () => {
+    await seedWorkspace({
+      id: 'ws-stopping',
+      projectId: PROJECT,
+      userId: CALLER,
+      status: 'stopping',
+    });
+
+    const response = await postSession(PROJECT, { workspaceId: 'ws-stopping' });
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({ error: 'NOT_FOUND' });
+    expect(await taskRows()).toHaveLength(0);
+    expect(mocks.createSession).not.toHaveBeenCalled();
+  });
+
+  it('CONTROL: a project member can attach their own pending same-project workspace', async () => {
     await seedWorkspace({
       id: 'ws-caller',
       projectId: PROJECT,
       userId: CALLER,
-      status: 'stopped',
+      status: 'pending',
     });
 
     const response = await postSession(PROJECT, { workspaceId: '  ws-caller  ' });
@@ -377,6 +396,41 @@ describe('POST /sessions — workspace attachment authorization', () => {
       body.taskId,
       CALLER
     );
+  });
+
+  it('ATTACK: post-validation cleanup claim prevents ProjectData session attachment', async () => {
+    await seedWorkspace({
+      id: 'ws-claim-after-validation',
+      projectId: PROJECT,
+      userId: CALLER,
+      status: 'running',
+    });
+    mocks.createSession.mockImplementationOnce(
+      async (
+        _env: Env,
+        projectId: string,
+        workspaceId: string | null,
+        topic: string | null,
+        taskId: string,
+        createdByUserId: string
+      ) => {
+        const id = 'session-raced-claim';
+        storeSession({ id, projectId, workspaceId, topic, taskId, createdByUserId });
+        sqlite
+          .prepare(`UPDATE workspaces SET status = 'stopping' WHERE id = ?`)
+          .run('ws-claim-after-validation');
+        return id;
+      }
+    );
+
+    const response = await postSession(PROJECT, { workspaceId: 'ws-claim-after-validation' });
+
+    expect(response.status).toBe(404);
+    expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT, 'session-raced-claim');
+    const workspace = sqlite
+      .prepare(`SELECT chat_session_id FROM workspaces WHERE id = ?`)
+      .get('ws-claim-after-validation') as { chat_session_id: string | null };
+    expect(workspace.chat_session_id).toBeNull();
   });
 });
 
@@ -588,6 +642,7 @@ describe('POST /sessions/:sessionId/stop — destructive-use revalidation', () =
       userId: OTHER_USER,
       sessionId: 'session-shared-runner',
       workspaceId: 'ws-shared-runner',
+      taskMode: 'task',
     });
     storeSession({
       id: 'session-shared-runner',
@@ -712,6 +767,7 @@ describe('terminal cleanup service — internal defence in depth', () => {
       userId: CALLER,
       sessionId: 'session-internal-valid',
       workspaceId: 'ws-internal-valid',
+      taskMode: 'task',
     });
 
     await cleanupTerminalTaskResources(env, 'task-internal-valid', {
@@ -722,7 +778,7 @@ describe('terminal cleanup service — internal defence in depth', () => {
     expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-internal-valid', OTHER_USER, env);
   });
 
-  it('CONTROL: trusted internal completion still cleans compute when the workspace backlink is null', async () => {
+  it('ATTACK: internal completion rejects a modern chat task when the workspace backlink is null', async () => {
     await seedNode('node-internal-null-backlink', CALLER);
     await seedWorkspace({
       id: 'ws-internal-null-backlink',
@@ -743,12 +799,7 @@ describe('terminal cleanup service — internal defence in depth', () => {
       status: 'completed',
     });
 
-    expect(mocks.stopSession).not.toHaveBeenCalled();
-    expect(mocks.stopNodeResources).toHaveBeenCalledWith(
-      'node-internal-null-backlink',
-      CALLER,
-      env
-    );
+    expectNoDestructiveBoundaryCalls();
   });
 
   it('CONTROL: a legacy task without a session backlink still cleans its authorized workspace compute', async () => {
@@ -773,11 +824,113 @@ describe('terminal cleanup service — internal defence in depth', () => {
     });
 
     expect(mocks.stopSession).not.toHaveBeenCalled();
-    expect(mocks.stopNodeResources).toHaveBeenCalledWith(
-      'node-legacy-task-backlink',
-      CALLER,
-      env
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-legacy-task-backlink', CALLER, env);
+  });
+
+  it('ATTACK: active linked task blocks cleanup before any destructive boundary call', async () => {
+    await seedNode('node-active-linked', CALLER);
+    await seedWorkspace({
+      id: 'ws-active-linked',
+      projectId: PROJECT,
+      userId: CALLER,
+      nodeId: 'node-active-linked',
+      chatSessionId: 'session-active-linked',
+    });
+    await seedTask({
+      id: 'task-terminal-active-linked',
+      projectId: PROJECT,
+      userId: CALLER,
+      sessionId: 'session-active-linked',
+      workspaceId: 'ws-active-linked',
+      status: 'completed',
+    });
+    await seedTask({
+      id: 'task-active-linked',
+      projectId: PROJECT,
+      userId: CALLER,
+      sessionId: 'session-active-linked',
+      workspaceId: 'ws-active-linked',
+      status: 'queued',
+    });
+
+    await cleanupTaskRun('task-terminal-active-linked', env);
+
+    expectNoDestructiveBoundaryCalls();
+    const workspace = sqlite
+      .prepare(`SELECT status FROM workspaces WHERE id = ?`)
+      .get('ws-active-linked') as { status: string };
+    expect(workspace.status).toBe('running');
+  });
+
+  it('ATTACK: post-claim sibling insertion blocks whole cf-container deletion', async () => {
+    await seedNode('node-sibling-race', CALLER);
+    await seedWorkspace({
+      id: 'ws-sibling-race',
+      projectId: PROJECT,
+      userId: CALLER,
+      nodeId: 'node-sibling-race',
+      chatSessionId: 'session-sibling-race',
+    });
+    await seedTask({
+      id: 'task-sibling-race',
+      projectId: PROJECT,
+      userId: CALLER,
+      sessionId: 'session-sibling-race',
+      workspaceId: 'ws-sibling-race',
+      status: 'completed',
+    });
+    sqlite.exec(`
+      CREATE TRIGGER insert_sibling_after_cleanup_claim
+      AFTER UPDATE OF status ON workspaces
+      WHEN NEW.id = 'ws-sibling-race' AND NEW.status = 'stopping'
+      BEGIN
+        INSERT INTO workspaces (id, project_id, user_id, node_id, name, repository, vm_size, vm_location, status)
+        VALUES ('ws-post-claim-sibling', '${PROJECT}', '${CALLER}', 'node-sibling-race', 'sibling', 'org/repo', 'small', 'nbg1', 'running');
+      END;
+    `);
+
+    await cleanupTaskRun('task-sibling-race', env);
+
+    expect(mocks.stopNodeResources).not.toHaveBeenCalled();
+    const workspace = sqlite
+      .prepare(`SELECT status FROM workspaces WHERE id = ?`)
+      .get('ws-sibling-race') as { status: string };
+    expect(workspace.status).toBe('running');
+  });
+
+  it('ATTACK: failed VM workspace stop restores the claimed workspace status', async () => {
+    await seedNode('node-vm-failure', CALLER, 'vm');
+    await seedWorkspace({
+      id: 'ws-vm-failure',
+      projectId: PROJECT,
+      userId: CALLER,
+      nodeId: 'node-vm-failure',
+      chatSessionId: 'session-vm-failure',
+    });
+    await seedTask({
+      id: 'task-vm-failure',
+      projectId: PROJECT,
+      userId: CALLER,
+      sessionId: 'session-vm-failure',
+      workspaceId: 'ws-vm-failure',
+      status: 'completed',
+    });
+    mocks.stopWorkspaceOnNode.mockRejectedValueOnce(new Error('node unreachable'));
+
+    await cleanupTaskRun('task-vm-failure', env);
+
+    expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledWith(
+      'node-vm-failure',
+      'ws-vm-failure',
+      env,
+      CALLER
     );
+    expect(mocks.markIdle).not.toHaveBeenCalled();
+    const workspace = sqlite
+      .prepare(`SELECT status, error_message FROM workspaces WHERE id = ?`)
+      .get('ws-vm-failure') as { status: string; error_message: string | null };
+    expect(workspace.status).toBe('running');
+    expect(workspace.error_message).toBe('node unreachable');
   });
 });
 
@@ -790,6 +943,7 @@ describe('SAM stop_subtask — workspace runtime boundary authorization', () => 
     const taskId = `task-stop-tool-${input.suffix}`;
     const workspaceId = `ws-stop-tool-${input.suffix}`;
     const nodeId = `node-stop-tool-${input.suffix}`;
+    const sessionId = `session-stop-tool-${input.suffix}`;
     await seedProject(projectId, CALLER);
     await seedNode(nodeId, input.workspaceUserId);
     await seedWorkspace({
@@ -797,12 +951,13 @@ describe('SAM stop_subtask — workspace runtime boundary authorization', () => 
       projectId,
       userId: input.workspaceUserId,
       nodeId,
+      chatSessionId: sessionId,
     });
     await seedTask({
       id: taskId,
       projectId,
       userId: CALLER,
-      sessionId: `session-stop-tool-${input.suffix}`,
+      sessionId,
       workspaceId,
       status: 'running',
     });

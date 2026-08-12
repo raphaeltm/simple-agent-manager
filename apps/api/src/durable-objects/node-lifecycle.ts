@@ -40,6 +40,11 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { deleteWorkspaceOnNode } from '../services/node-agent';
 import { deferAlarmWhenDisabled } from '../services/operational-kill-switch';
+import {
+  claimWorkspaceForCleanup,
+  completeWorkspaceCleanupClaim,
+  restoreWorkspaceCleanupClaim,
+} from '../services/workspace-cleanup-authorization';
 
 type NodeLifecycleEnv = {
   DATABASE: D1Database;
@@ -315,6 +320,29 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     }
 
     // Warm timeout expired → transition to destroying
+    const activeAttachment = await this.env.DATABASE.prepare(
+      `SELECT id FROM workspaces
+       WHERE node_id = ? AND user_id = ? AND status IN ('running', 'creating', 'pending', 'recovery')
+       LIMIT 1`
+    )
+      .bind(state.nodeId, state.userId)
+      .first<{ id: string }>();
+    if (activeAttachment) {
+      log.info('node_lifecycle.alarm.warm_teardown_aborted_active_workspace', {
+        nodeId: state.nodeId,
+        userId: state.userId,
+        workspaceId: activeAttachment.id,
+        action: 'kept_active',
+      });
+      state.status = 'active';
+      state.warmSince = null;
+      state.claimedByTask = null;
+      await this.ctx.storage.put('state', state);
+      await this.updateD1WarmSince(state.nodeId, null);
+      await this.recalculateAlarm(null);
+      return;
+    }
+
     state.status = 'destroying';
     state.destroyingSince = Date.now();
     await this.ctx.storage.put('state', state);
@@ -524,26 +552,35 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     workspaceId: string,
     userId: string
   ): Promise<void> {
-    // Call VM agent DELETE endpoint via shared helper (handles JWT auth, proper URL routing)
+    const claim = await claimWorkspaceForCleanup(this.env as unknown as Env, {
+      workspaceId,
+      nodeId,
+      userId,
+      allowedStatuses: ['stopped'],
+      source: 'node_lifecycle.workspace_deletion',
+    });
+    if (!claim) {
+      return;
+    }
+
     try {
       await deleteWorkspaceOnNode(nodeId, workspaceId, this.env as unknown as Env, userId);
     } catch (err) {
-      // If the node is unreachable (already destroyed), log but don't fail
-      // The D1 status update below still marks the workspace as deleted
       log.warn('node_lifecycle.workspace_delete_vm_agent_failed', {
         workspaceId,
         nodeId,
         error: err instanceof Error ? err.message : String(err),
       });
+      await restoreWorkspaceCleanupClaim(
+        this.env as unknown as Env,
+        claim,
+        err instanceof Error ? err.message : String(err)
+      );
+      throw err;
     }
 
-    // Update D1 workspace status to 'deleted'
     const now = new Date().toISOString();
-    await this.env.DATABASE.prepare(
-      `UPDATE workspaces SET status = 'deleted', updated_at = ? WHERE id = ? AND status = 'stopped'`
-    )
-      .bind(now, workspaceId)
-      .run();
+    await completeWorkspaceCleanupClaim(this.env as unknown as Env, claim, 'deleted');
 
     // Clean up any agent_sessions referencing this workspace (best-effort)
     try {

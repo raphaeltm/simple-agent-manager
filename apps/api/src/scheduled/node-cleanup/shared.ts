@@ -163,7 +163,10 @@ function buildCleanupConfig(env: Env): CleanupConfig {
       DEFAULT_NODE_ORPHAN_IDLE_TIMEOUT_MS
     ),
     stoppedTtlMs: parseMs(env.WORKSPACE_STOPPED_TTL_MS, DEFAULT_WORKSPACE_STOPPED_TTL_MS),
-    nodeSweepLimit: parsePositiveInt(env.NODE_CLEANUP_SWEEP_LIMIT, DEFAULT_NODE_CLEANUP_SWEEP_LIMIT),
+    nodeSweepLimit: parsePositiveInt(
+      env.NODE_CLEANUP_SWEEP_LIMIT,
+      DEFAULT_NODE_CLEANUP_SWEEP_LIMIT
+    ),
     workspaceSweepLimit: parsePositiveInt(
       env.WORKSPACE_CLEANUP_SWEEP_LIMIT,
       DEFAULT_WORKSPACE_CLEANUP_SWEEP_LIMIT
@@ -222,14 +225,13 @@ export async function markNodeCleanupBackoff(
  * stale-stopped-workspace phase deletes a row. That delays reaping by at most one
  * phase-6 window and cannot repeat, since a workspace is deleted only once.
  */
-export const LAST_WORKSPACE_ACTIVITY_SQL =
-  "COALESCE(MAX(w.updated_at), n.created_at)";
+export const LAST_WORKSPACE_ACTIVITY_SQL = 'COALESCE(MAX(w.updated_at), n.created_at)';
 
 export async function destroyNodeForCleanup(
   db: CleanupDb,
   env: Env,
   nowIso: string,
-  node: { id: string; user_id: string },
+  node: { id: string; user_id: string; status?: string | null },
   options: {
     logEvent: string;
     failureLogEvent: string;
@@ -242,6 +244,58 @@ export async function destroyNodeForCleanup(
     context: CleanupContext;
   }
 ): Promise<boolean> {
+  const observedNode = await env.DATABASE.prepare(
+    `SELECT status
+     FROM nodes
+     WHERE id = ? AND user_id = ? AND node_role = 'workspace' AND node_class != 'user-owned'
+     LIMIT 1`
+  )
+    .bind(node.id, node.user_id)
+    .first<{ status: string }>();
+  const previousStatus = node.status ?? observedNode?.status ?? null;
+  if (!previousStatus) {
+    log.warn('node_cleanup.claim_rejected_missing_node', {
+      nodeId: node.id,
+      userId: node.user_id,
+      recoveryType: options.recoveryType,
+      action: 'skipped',
+    });
+    return false;
+  }
+
+  const claim = await env.DATABASE.prepare(
+    `UPDATE nodes
+     SET status = 'destroying', updated_at = ?
+     WHERE id = ?
+       AND user_id = ?
+       AND status = ?
+       AND node_role = 'workspace'
+       AND node_class != 'user-owned'
+       AND NOT EXISTS (
+         SELECT 1 FROM workspaces active_ws
+         WHERE active_ws.node_id = nodes.id
+           AND active_ws.status IN ('running', 'creating', 'pending', 'recovery')
+       )
+       AND NOT EXISTS (
+         SELECT 1 FROM tasks active_task
+         WHERE active_task.auto_provisioned_node_id = nodes.id
+           AND active_task.status IN ('queued', 'delegated', 'in_progress')
+       )`
+  )
+    .bind(nowIso, node.id, node.user_id, previousStatus)
+    .run();
+
+  if (!claim.meta.changes || claim.meta.changes === 0) {
+    log.warn('node_cleanup.claim_conflict', {
+      nodeId: node.id,
+      userId: node.user_id,
+      previousStatus,
+      recoveryType: options.recoveryType,
+      action: 'skipped',
+    });
+    return false;
+  }
+
   try {
     log.info(options.logEvent, {
       nodeId: node.id,
@@ -251,18 +305,22 @@ export async function destroyNodeForCleanup(
 
     await deleteNodeResources(node.id, node.user_id, env);
 
-    await persistError(env.OBSERVABILITY_DATABASE, {
-      source: 'api',
-      level: options.level ?? 'warn',
-      message: options.successMessage,
-      context: {
-        recoveryType: options.recoveryType,
+    await persistError(
+      env.OBSERVABILITY_DATABASE,
+      {
+        source: 'api',
+        level: options.level ?? 'warn',
+        message: options.successMessage,
+        context: {
+          recoveryType: options.recoveryType,
+          nodeId: node.id,
+          ...options.context,
+        },
+        userId: node.user_id,
         nodeId: node.id,
-        ...options.context,
       },
-      userId: node.user_id,
-      nodeId: node.id,
-    }, env);
+      env
+    );
 
     await db
       .update(schema.nodes)
@@ -286,24 +344,46 @@ export async function destroyNodeForCleanup(
     const backoffUntil = new Date(
       new Date(nowIso).getTime() + options.failureBackoffMs
     ).toISOString();
+    try {
+      await env.DATABASE.prepare(
+        `UPDATE nodes
+         SET status = ?, updated_at = ?
+         WHERE id = ? AND user_id = ? AND status = 'destroying'`
+      )
+        .bind(previousStatus, nowIso, node.id, node.user_id)
+        .run();
+    } catch (restoreErr) {
+      log.error('node_cleanup.claim_restore_failed', {
+        nodeId: node.id,
+        userId: node.user_id,
+        previousStatus,
+        error: restoreErr instanceof Error ? restoreErr.message : String(restoreErr),
+      });
+    }
     await markNodeCleanupBackoff(env, node.id, backoffUntil);
 
     try {
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'error',
-        message:
-          options.failureMessagePrefix + ': ' + (err instanceof Error ? err.message : String(err)),
-        stack: err instanceof Error ? err.stack : undefined,
-        context: {
-          recoveryType: options.failureRecoveryType,
+      await persistError(
+        env.OBSERVABILITY_DATABASE,
+        {
+          source: 'api',
+          level: 'error',
+          message:
+            options.failureMessagePrefix +
+            ': ' +
+            (err instanceof Error ? err.message : String(err)),
+          stack: err instanceof Error ? err.stack : undefined,
+          context: {
+            recoveryType: options.failureRecoveryType,
+            nodeId: node.id,
+            backoffUntil,
+            ...options.context,
+          },
+          userId: node.user_id,
           nodeId: node.id,
-          backoffUntil,
-          ...options.context,
         },
-        userId: node.user_id,
-        nodeId: node.id,
-      }, env);
+        env
+      );
     } catch (persistErr) {
       log.error('node_cleanup.failure_observability_write_failed', {
         nodeId: node.id,

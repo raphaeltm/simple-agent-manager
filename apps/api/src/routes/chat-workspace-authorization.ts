@@ -4,6 +4,10 @@ import type { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
+import {
+  ACTIVE_WORKSPACE_STATUSES,
+  hasAuthorizedWorkspaceSessionLink,
+} from '../services/workspace-cleanup-authorization';
 
 type ChatDb = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -76,13 +80,15 @@ export async function requireChatWorkspaceScope(
     !workspace ||
     workspace.id !== scope.workspaceId ||
     workspace.projectId !== scope.projectId ||
-    workspace.userId !== scope.userId
+    workspace.userId !== scope.userId ||
+    !ACTIVE_WORKSPACE_STATUSES.has(workspace.status)
   ) {
     log.warn('chat.workspace_scope_rejected', {
       projectId: scope.projectId,
       userId: scope.userId,
       workspaceId: scope.workspaceId,
       source: scope.source,
+      workspaceStatus: workspace?.status ?? null,
       action: 'rejected',
     });
     throw errors.notFound('Workspace');
@@ -138,6 +144,28 @@ export async function requireSessionTaskWorkspaceScope(
 
   if (workspace.chatSessionId && workspace.chatSessionId !== input.sessionId) {
     log.warn('chat.session_workspace_backlink_mismatch', {
+      projectId: input.projectId,
+      userId: input.userId,
+      sessionId: input.sessionId,
+      taskId: input.task.id,
+      workspaceId: taskWorkspaceId,
+      workspaceSessionId: workspace.chatSessionId,
+      action: 'rejected',
+    });
+    throw errors.notFound('Chat session');
+  }
+
+  if (
+    !hasAuthorizedWorkspaceSessionLink(
+      input.task.chatSessionId,
+      workspace.chatSessionId,
+      input.task.taskMode,
+      input.task.userId,
+      workspace.userId,
+      true
+    )
+  ) {
+    log.warn('chat.session_workspace_link_rejected', {
       projectId: input.projectId,
       userId: input.userId,
       sessionId: input.sessionId,

@@ -33,11 +33,31 @@ export async function ensureSessionLinked(
   // Step 1: Update D1 workspace record (critical — used by idle cleanup, task hooks)
   // This is idempotent: setting chat_session_id to the same value is fine.
   try {
-    await rc.env.DATABASE.prepare(
-      `UPDATE workspaces SET chat_session_id = ?, updated_at = ? WHERE id = ?`
+    const linkResult = await rc.env.DATABASE.prepare(
+      `UPDATE workspaces
+       SET chat_session_id = ?, updated_at = ?
+       WHERE id = ?
+         AND project_id = ?
+         AND user_id = ?
+         AND status IN ('running', 'creating', 'pending', 'recovery', 'sleeping')
+         AND (chat_session_id IS NULL OR chat_session_id = ?)`
     )
-      .bind(state.stepResults.chatSessionId, now, workspaceId)
+      .bind(
+        state.stepResults.chatSessionId,
+        now,
+        workspaceId,
+        state.projectId,
+        state.userId,
+        state.stepResults.chatSessionId
+      )
       .run();
+    if (!linkResult.meta.changes || linkResult.meta.changes === 0) {
+      const permanentError = new Error(
+        `Workspace ${workspaceId} is not in an attachable state for session linking`
+      );
+      (permanentError as Error & { permanent: boolean }).permanent = true;
+      throw permanentError;
+    }
 
     log.info('task_runner_do.session_d1_linked', {
       taskId: state.taskId,
@@ -367,8 +387,6 @@ export async function cleanupOnFailure(
   state: TaskRunnerState,
   rc: TaskRunnerContext
 ): Promise<void> {
-  const now = new Date().toISOString();
-
   if (state.stepResults.workspaceId && state.stepResults.nodeId) {
     const node = await rc.env.DATABASE.prepare(
       `SELECT runtime FROM nodes WHERE id = ? AND user_id = ?`
@@ -395,50 +413,10 @@ export async function cleanupOnFailure(
   // Stop workspace if one was created
   if (state.stepResults.workspaceId && state.stepResults.nodeId) {
     try {
-      const { stopWorkspaceOnNode } = await import('../../services/node-agent');
-      await stopWorkspaceOnNode(
-        state.stepResults.nodeId,
-        state.stepResults.workspaceId,
-        rc.env,
-        state.userId
-      );
+      const { cleanupTaskRun } = await import('../../services/task-runner');
+      await cleanupTaskRun(state.taskId, rc.env, state.config.projectScaling?.warmNodeTimeoutMs);
     } catch (err) {
-      log.error('task_runner_do.cleanup.workspace_stop_failed', {
-        taskId: state.taskId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    await rc.env.DATABASE.prepare(
-      `UPDATE workspaces SET status = 'stopped', updated_at = ? WHERE id = ?`
-    )
-      .bind(now, state.stepResults.workspaceId)
-      .run();
-
-    // Stop compute usage metering (best-effort)
-    try {
-      const { drizzle } = await import('drizzle-orm/d1');
-      const dbSchema = await import('../../db/schema');
-      const { stopComputeTracking } = await import('../../services/compute-usage');
-      const db = drizzle(rc.env.DATABASE, { schema: dbSchema });
-      await stopComputeTracking(db, state.stepResults.workspaceId);
-    } catch (err) {
-      log.error('task_runner_do.cleanup.compute_tracking_stop_failed', {
-        taskId: state.taskId,
-        workspaceId: state.stepResults.workspaceId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-
-    // Schedule automatic deletion after TTL (best-effort)
-    try {
-      const doId = rc.env.NODE_LIFECYCLE.idFromName(state.stepResults.nodeId);
-      const stub = rc.env.NODE_LIFECYCLE.get(doId);
-      await (
-        stub as unknown as import('../node-lifecycle').NodeLifecycle
-      ).scheduleWorkspaceDeletion(state.stepResults.workspaceId, state.userId);
-    } catch (err) {
-      log.warn('task_runner_do.cleanup.schedule_deletion_failed', {
+      log.error('task_runner_do.cleanup.workspace_cleanup_failed', {
         taskId: state.taskId,
         workspaceId: state.stepResults.workspaceId,
         error: err instanceof Error ? err.message : String(err),
@@ -446,23 +424,12 @@ export async function cleanupOnFailure(
     }
   }
 
-  // Clean up auto-provisioned node. If a workspace exists, cleanupTaskRun
-  // handles checking for other workspaces and marking the node warm.
+  // Clean up auto-provisioned node. If a workspace exists, the guarded cleanup
+  // above handles checking for other workspaces and marking the node warm.
   // If no workspace was created (failure during provisioning), we still need
   // to mark the auto-provisioned node as warm directly via NodeLifecycle DO.
   if (state.stepResults.autoProvisioned && state.stepResults.nodeId) {
-    if (state.stepResults.workspaceId) {
-      try {
-        const { cleanupTaskRun } = await import('../../services/task-runner');
-        await cleanupTaskRun(state.taskId, rc.env, state.config.projectScaling?.warmNodeTimeoutMs);
-      } catch (err) {
-        log.error('task_runner_do.cleanup.node_cleanup_failed', {
-          taskId: state.taskId,
-          nodeId: state.stepResults.nodeId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    } else {
+    if (!state.stepResults.workspaceId) {
       // No workspace — mark node warm directly since cleanupTaskRun
       // expects a workspace_id on the task to work properly.
       // Use markIdle(nodeId, userId) which transitions to warm state.

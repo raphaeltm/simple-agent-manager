@@ -25,9 +25,16 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { stopComputeTracking } from './compute-usage';
 import { stopWorkspaceOnNode } from './node-agent';
 import * as nodeLifecycleService from './node-lifecycle';
 import { stopNodeResources } from './nodes';
+import {
+  claimWorkspaceForCleanup,
+  completeWorkspaceCleanupClaim,
+  hasAuthorizedWorkspaceSessionLink,
+  restoreWorkspaceCleanupClaim,
+} from './workspace-cleanup-authorization';
 
 function getCleanupDelayMs(env: Env): number {
   const value = env.TASK_RUN_CLEANUP_DELAY_MS;
@@ -66,7 +73,15 @@ export async function cleanupTaskRun(
   }
 
   const [task] = await db
-    .select()
+    .select({
+      id: schema.tasks.id,
+      projectId: schema.tasks.projectId,
+      userId: schema.tasks.userId,
+      chatSessionId: schema.tasks.chatSessionId,
+      workspaceId: schema.tasks.workspaceId,
+      taskMode: schema.tasks.taskMode,
+      autoProvisionedNodeId: schema.tasks.autoProvisionedNodeId,
+    })
     .from(schema.tasks)
     .where(and(...taskConditions))
     .limit(1);
@@ -84,7 +99,14 @@ export async function cleanupTaskRun(
   }
 
   const [workspace] = await db
-    .select()
+    .select({
+      id: schema.workspaces.id,
+      nodeId: schema.workspaces.nodeId,
+      userId: schema.workspaces.userId,
+      projectId: schema.workspaces.projectId,
+      chatSessionId: schema.workspaces.chatSessionId,
+      status: schema.workspaces.status,
+    })
     .from(schema.workspaces)
     .where(and(...workspaceConditions))
     .limit(1);
@@ -93,7 +115,15 @@ export async function cleanupTaskRun(
     !workspace ||
     workspace.id !== task.workspaceId ||
     workspace.projectId !== task.projectId ||
-    (requiredUserId && workspace.userId !== requiredUserId)
+    (requiredUserId && workspace.userId !== requiredUserId) ||
+    !hasAuthorizedWorkspaceSessionLink(
+      task.chatSessionId,
+      workspace.chatSessionId,
+      task.taskMode,
+      task.userId,
+      workspace.userId,
+      requiredUserId !== undefined
+    )
   ) {
     if (requiredUserId) {
       log.info('task_run.cleanup.skipped_owner_mismatch', {
@@ -138,66 +168,114 @@ export async function cleanupTaskRun(
     .select({
       id: schema.nodes.id,
       runtime: schema.nodes.runtime,
+      userId: schema.nodes.userId,
     })
     .from(schema.nodes)
     .where(and(eq(schema.nodes.id, workspace.nodeId), eq(schema.nodes.userId, cleanupUserId)))
     .limit(1);
 
-  if (node?.runtime === 'cf-container') {
-    await stopNodeResources(workspace.nodeId, cleanupUserId, env);
-    log.info('task_run.cleanup.cf_container_destroyed', {
+  if (!node || node.userId !== cleanupUserId) {
+    log.warn('task_run.cleanup.node_scope_rejected', {
       taskId,
       workspaceId: workspace.id,
       nodeId: workspace.nodeId,
+      cleanupUserId,
+      action: 'skipped',
     });
     return;
   }
 
-  // Stop the workspace (idempotent: only if still running/recovery)
-  if (workspace.status === 'running' || workspace.status === 'recovery') {
+  const allowedClaimStatuses =
+    node.runtime === 'cf-container'
+      ? ['running', 'creating', 'pending', 'recovery', 'sleeping', 'stopped']
+      : ['running', 'creating', 'pending', 'recovery'];
+  const claim = await claimWorkspaceForCleanup(env, {
+    workspaceId: workspace.id,
+    nodeId: workspace.nodeId,
+    userId: cleanupUserId,
+    projectId: workspace.projectId,
+    allowedStatuses: allowedClaimStatuses,
+    taskId,
+    source: 'task_run.cleanup',
+  });
+
+  if (!claim) {
+    return;
+  }
+
+  if (node?.runtime === 'cf-container') {
     try {
-      await stopWorkspaceOnNode(workspace.nodeId, workspace.id, env, cleanupUserId);
-    } catch (err) {
-      log.error('task_run.cleanup.workspace_stop_failed', {
+      const sibling = await env.DATABASE.prepare(
+        `SELECT id FROM workspaces
+         WHERE node_id = ? AND id != ? AND status != 'deleted'
+         LIMIT 1`
+      )
+        .bind(workspace.nodeId, workspace.id)
+        .first<{ id: string }>();
+      if (sibling) {
+        await restoreWorkspaceCleanupClaim(env, claim);
+        log.warn('task_run.cleanup.cf_container_sibling_workspace_rejected', {
+          taskId,
+          workspaceId: workspace.id,
+          nodeId: workspace.nodeId,
+          siblingWorkspaceId: sibling.id,
+          action: 'skipped',
+        });
+        return;
+      }
+
+      await stopNodeResources(workspace.nodeId, cleanupUserId, env);
+      await completeWorkspaceCleanupClaim(env, claim, 'deleted');
+      await stopComputeTracking(db, workspace.id);
+      log.info('task_run.cleanup.cf_container_destroyed', {
         taskId,
         workspaceId: workspace.id,
         nodeId: workspace.nodeId,
-        error: err instanceof Error ? err.message : String(err),
       });
+      return;
+    } catch (err) {
+      await restoreWorkspaceCleanupClaim(
+        env,
+        claim,
+        err instanceof Error ? err.message : String(err)
+      );
+      throw err;
     }
+  }
 
-    await db
-      .update(schema.workspaces)
-      .set({ status: 'stopped', updatedAt: new Date().toISOString() })
-      .where(eq(schema.workspaces.id, workspace.id));
-  } else {
-    log.info('task_run.cleanup.workspace_already_stopped', {
+  // Stop the workspace (idempotent: only if still running/recovery)
+  try {
+    await stopWorkspaceOnNode(workspace.nodeId, workspace.id, env, cleanupUserId);
+    await completeWorkspaceCleanupClaim(env, claim, 'stopped');
+    await stopComputeTracking(db, workspace.id);
+  } catch (err) {
+    log.error('task_run.cleanup.workspace_stop_failed', {
       taskId,
       workspaceId: workspace.id,
-      currentStatus: workspace.status,
+      nodeId: workspace.nodeId,
+      error: err instanceof Error ? err.message : String(err),
     });
+    await restoreWorkspaceCleanupClaim(
+      env,
+      claim,
+      err instanceof Error ? err.message : String(err)
+    );
+    return;
   }
 
   // Schedule automatic deletion after TTL (best-effort)
-  if (
-    workspace.nodeId &&
-    (workspace.status === 'running' ||
-      workspace.status === 'recovery' ||
-      workspace.status === 'stopped')
-  ) {
-    try {
-      const doId = env.NODE_LIFECYCLE.idFromName(workspace.nodeId);
-      const stub = env.NODE_LIFECYCLE.get(doId);
-      await (
-        stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle
-      ).scheduleWorkspaceDeletion(workspace.id, cleanupUserId);
-    } catch (e) {
-      log.warn('task_run.cleanup.schedule_deletion_failed', {
-        taskId,
-        workspaceId: workspace.id,
-        error: e instanceof Error ? e.message : String(e),
-      });
-    }
+  try {
+    const doId = env.NODE_LIFECYCLE.idFromName(workspace.nodeId);
+    const stub = env.NODE_LIFECYCLE.get(doId);
+    await (
+      stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle
+    ).scheduleWorkspaceDeletion(workspace.id, cleanupUserId);
+  } catch (e) {
+    log.warn('task_run.cleanup.schedule_deletion_failed', {
+      taskId,
+      workspaceId: workspace.id,
+      error: e instanceof Error ? e.message : String(e),
+    });
   }
 
   // If node was auto-provisioned for this task, check if it can be cleaned up
@@ -282,20 +360,6 @@ async function cleanupAutoProvisionedNode(
       userId,
       error: err instanceof Error ? err.message : String(err),
     });
-    // Fallback: stop node directly if DO fails
-    try {
-      const { stopNodeResources } = await import('./nodes');
-      await stopNodeResources(nodeId, userId, env);
-      log.info('task_run.cleanup.node_stopped_fallback', { nodeId, userId });
-    } catch (stopErr) {
-      // Both markIdle and fallback stop failed — log for cron sweep to catch
-      log.error('task_run.cleanup.node_cleanup_total_failure', {
-        nodeId,
-        userId,
-        markIdleError: err instanceof Error ? err.message : String(err),
-        stopError: stopErr instanceof Error ? stopErr.message : String(stopErr),
-      });
-    }
   }
 }
 

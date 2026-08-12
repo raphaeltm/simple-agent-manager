@@ -50,6 +50,7 @@ export async function stopSubtask(input: { taskId: string }, ctx: ToolContext): 
       status: schema.tasks.status,
       workspaceId: schema.tasks.workspaceId,
       projectId: schema.tasks.projectId,
+      chatSessionId: schema.tasks.chatSessionId,
       title: schema.tasks.title,
     })
     .from(schema.tasks)
@@ -75,8 +76,13 @@ export async function stopSubtask(input: { taskId: string }, ctx: ToolContext): 
         .select({
           id: schema.workspaces.id,
           nodeId: schema.workspaces.nodeId,
+          status: schema.workspaces.status,
+          chatSessionId: schema.workspaces.chatSessionId,
+          nodeUserId: schema.nodes.userId,
+          nodeStatus: schema.nodes.status,
         })
         .from(schema.workspaces)
+        .leftJoin(schema.nodes, eq(schema.workspaces.nodeId, schema.nodes.id))
         .where(
           and(
             eq(schema.workspaces.id, task.workspaceId),
@@ -86,7 +92,17 @@ export async function stopSubtask(input: { taskId: string }, ctx: ToolContext): 
         )
         .limit(1);
 
-      if (workspace?.nodeId) {
+      if (
+        workspace?.nodeId &&
+        workspace.nodeUserId === ctx.userId &&
+        workspace.nodeStatus === 'running' &&
+        ['running', 'creating', 'pending', 'recovery'].includes(workspace.status) &&
+        !(
+          workspace.chatSessionId !== null &&
+          task.chatSessionId !== null &&
+          workspace.chatSessionId !== task.chatSessionId
+        )
+      ) {
         const [agentSession] = await db
           .select({ id: schema.agentSessions.id })
           .from(schema.agentSessions)
@@ -108,6 +124,15 @@ export async function stopSubtask(input: { taskId: string }, ctx: ToolContext): 
             ctx.userId
           );
         }
+      } else {
+        log.warn('sam.stop_subtask.workspace_scope_rejected', {
+          taskId,
+          projectId: task.projectId,
+          workspaceId: task.workspaceId,
+          requiredUserId: ctx.userId,
+          workspaceStatus: workspace?.status ?? null,
+          action: 'skipped',
+        });
       }
     } catch (err) {
       // Best-effort — we still mark the task as cancelled even if session stop fails

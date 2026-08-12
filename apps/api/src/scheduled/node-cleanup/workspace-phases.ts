@@ -20,6 +20,11 @@ import { log } from '../../lib/logger';
 import { deleteWorkspaceOnNode, stopWorkspaceOnNode } from '../../services/node-agent';
 import { persistError } from '../../services/observability';
 import * as projectDataService from '../../services/project-data';
+import {
+  claimWorkspaceForCleanup,
+  completeWorkspaceCleanupClaim,
+  restoreWorkspaceCleanupClaim,
+} from '../../services/workspace-cleanup-authorization';
 import type { CleanupConfig, CleanupDb, NodeCleanupResult } from './shared';
 
 /**
@@ -70,6 +75,20 @@ export async function sweepOrphanedWorkspaces(
     }>();
 
   for (const ws of candidates.results) {
+    const claim = ws.node_id
+      ? await claimWorkspaceForCleanup(env, {
+          workspaceId: ws.id,
+          nodeId: ws.node_id,
+          userId: ws.user_id,
+          projectId: ws.project_id,
+          allowedStatuses: ['running', 'creating', 'pending', 'recovery'],
+          source: 'node_cleanup.orphaned_workspace',
+        })
+      : null;
+    if (ws.node_id && !claim) {
+      continue;
+    }
+
     log.warn('node_cleanup.orphaned_workspace_stopping', {
       workspaceId: ws.id,
       nodeId: ws.node_id,
@@ -84,11 +103,6 @@ export async function sweepOrphanedWorkspaces(
       if (ws.node_id) {
         await stopWorkspaceOnNode(ws.node_id, ws.id, env, ws.user_id, {
           requestTimeoutMs: config.agentTimeoutMs,
-        }).catch((e) => {
-          log.warn('node_cleanup.orphan_stop_on_node_failed', {
-            workspaceId: ws.id,
-            error: String(e),
-          });
         });
       }
 
@@ -96,10 +110,14 @@ export async function sweepOrphanedWorkspaces(
       // longer matches the `status IN ('running','creating','recovery')` predicate,
       // so a workspace whose VM agent is permanently unreachable is not retried
       // on every subsequent sweep.
-      await db
-        .update(schema.workspaces)
-        .set({ status: 'stopped', updatedAt: new Date().toISOString() })
-        .where(eq(schema.workspaces.id, ws.id));
+      if (claim) {
+        await completeWorkspaceCleanupClaim(env, claim, 'stopped');
+      } else {
+        await db
+          .update(schema.workspaces)
+          .set({ status: 'stopped', updatedAt: new Date().toISOString() })
+          .where(eq(schema.workspaces.id, ws.id));
+      }
 
       if (ws.project_id && ws.chat_session_id) {
         await projectDataService.stopSession(env, ws.project_id, ws.chat_session_id).catch((e) => {
@@ -116,23 +134,30 @@ export async function sweepOrphanedWorkspaces(
         });
       }
 
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'warn',
-        message: 'Orphaned workspace stopped: was running with no active task',
-        context: {
-          recoveryType: 'orphaned_workspace',
-          workspaceId: ws.id,
+      await persistError(
+        env.OBSERVABILITY_DATABASE,
+        {
+          source: 'api',
+          level: 'warn',
+          message: 'Orphaned workspace stopped: was running with no active task',
+          context: {
+            recoveryType: 'orphaned_workspace',
+            workspaceId: ws.id,
+            nodeId: ws.node_id,
+            createdAt: ws.created_at,
+          },
+          userId: ws.user_id,
           nodeId: ws.node_id,
-          createdAt: ws.created_at,
+          workspaceId: ws.id,
         },
-        userId: ws.user_id,
-        nodeId: ws.node_id,
-        workspaceId: ws.id,
-      }, env);
+        env
+      );
 
       result.orphanedWorkspacesFlagged++;
     } catch (e) {
+      if (claim) {
+        await restoreWorkspaceCleanupClaim(env, claim, e instanceof Error ? e.message : String(e));
+      }
       log.error('node_cleanup.orphan_workspace_stop_failed', {
         workspaceId: ws.id,
         error: String(e),
@@ -173,27 +198,36 @@ export async function sweepStaleStoppedWorkspaces(
     }>();
 
   for (const ws of candidates.results) {
-    try {
-      if (ws.node_id) {
-        await deleteWorkspaceOnNode(ws.node_id, ws.id, env, ws.user_id, {
-          requestTimeoutMs: config.agentTimeoutMs,
-        }).catch((e) => {
-          log.warn('node_cleanup.stale_stopped_delete_on_node_failed', {
-            workspaceId: ws.id,
-            error: String(e),
-          });
-        });
-      }
-
-      // Status guard prevents a TOCTOU race if the workspace was restarted. Also
-      // the escape path: on success the row no longer matches `status='stopped'`.
+    if (!ws.node_id) {
       await db
         .update(schema.workspaces)
         .set({ status: 'deleted', updatedAt: new Date().toISOString() })
         .where(and(eq(schema.workspaces.id, ws.id), eq(schema.workspaces.status, 'stopped')));
+      result.stoppedWorkspacesDeleted++;
+      continue;
+    }
+
+    const claim = await claimWorkspaceForCleanup(env, {
+      workspaceId: ws.id,
+      nodeId: ws.node_id,
+      userId: ws.user_id,
+      allowedStatuses: ['stopped'],
+      source: 'node_cleanup.stale_stopped_workspace',
+    });
+    if (!claim) {
+      continue;
+    }
+
+    try {
+      await deleteWorkspaceOnNode(ws.node_id, ws.id, env, ws.user_id, {
+        requestTimeoutMs: config.agentTimeoutMs,
+      });
+
+      await completeWorkspaceCleanupClaim(env, claim, 'deleted');
 
       result.stoppedWorkspacesDeleted++;
     } catch (e) {
+      await restoreWorkspaceCleanupClaim(env, claim, e instanceof Error ? e.message : String(e));
       log.error('node_cleanup.stale_stopped_workspace_delete_failed', {
         workspaceId: ws.id,
         error: String(e),

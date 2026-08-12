@@ -148,7 +148,7 @@ beforeEach(() => {
   mocks.scheduleWorkspaceDeletion.mockResolvedValue(undefined);
 
   sqlite = new Database(':memory:');
-  createSchemaTables(sqlite, [schema.nodes, schema.workspaces, schema.tasks]);
+  createSchemaTables(sqlite, [schema.nodes, schema.workspaces, schema.tasks, schema.computeUsage]);
 
   env = {
     DATABASE: createSqliteD1(sqlite),
@@ -251,7 +251,7 @@ describe('cleanupTaskRun — task creator differs from workspace owner (real SQL
     expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-runner', RUNNER, env);
     // The cf-container branch returns early — it must NOT fall through to the VM stop path.
     expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
-    expect(await readWorkspaceStatus('ws-runner')).toBe('running');
+    expect(await readWorkspaceStatus('ws-runner')).toBe('deleted');
   });
 
   it('uses the workspace owner for VM teardown when the internal caller omits requiredUserId', async () => {
@@ -264,10 +264,16 @@ describe('cleanupTaskRun — task creator differs from workspace owner (real SQL
     expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('ws-runner', RUNNER);
     // The task creator must never be used as the compute identity.
     expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalledWith(
-      expect.anything(), expect.anything(), expect.anything(), CREATOR
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      CREATOR
     );
     expect(mocks.markIdle).not.toHaveBeenCalledWith(
-      expect.anything(), expect.anything(), CREATOR, expect.anything()
+      expect.anything(),
+      expect.anything(),
+      CREATOR,
+      expect.anything()
     );
   });
 
@@ -279,5 +285,55 @@ describe('cleanupTaskRun — task creator differs from workspace owner (real SQL
     expect(mocks.stopNodeResources).not.toHaveBeenCalled();
     expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
     expect(await readWorkspaceStatus('ws-runner')).toBe('running');
+  });
+
+  it('blocks cleanup when a different active task is linked to the workspace', async () => {
+    await seedVictimTaskRun('vm');
+    const db = drizzle(env.DATABASE, { schema });
+    await db.insert(schema.tasks).values({
+      id: 'task-active-sibling',
+      projectId: PROJECT,
+      userId: VICTIM,
+      workspaceId: 'ws-victim',
+      autoProvisionedNodeId: 'node-victim',
+      title: 'Active sibling task',
+      status: 'queued',
+    } as typeof schema.tasks.$inferInsert);
+
+    await cleanupTaskRun('task-victim', env, undefined, VICTIM);
+
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(mocks.stopNodeResources).not.toHaveBeenCalled();
+    expect(await readWorkspaceStatus()).toBe('running');
+  });
+
+  it('restores the previous workspace status when VM stop fails after claim', async () => {
+    await seedVictimTaskRun('vm');
+    mocks.stopWorkspaceOnNode.mockRejectedValueOnce(new Error('agent unavailable'));
+
+    await cleanupTaskRun('task-victim', env, undefined, VICTIM);
+
+    expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledWith('node-victim', 'ws-victim', env, VICTIM);
+    expect(mocks.markIdle).not.toHaveBeenCalled();
+    expect(mocks.scheduleWorkspaceDeletion).not.toHaveBeenCalled();
+    expect(await readWorkspaceStatus()).toBe('running');
+  });
+
+  it('blocks whole-container deletion when a sibling workspace appears after the claim', async () => {
+    await seedVictimTaskRun('cf-container');
+    sqlite.exec(`
+      CREATE TRIGGER insert_sibling_after_cleanup_claim
+      AFTER UPDATE OF status ON workspaces
+      WHEN NEW.id = 'ws-victim' AND NEW.status = 'stopping'
+      BEGIN
+        INSERT INTO workspaces (id, node_id, project_id, user_id, name, repository, vm_size, vm_location, status)
+        VALUES ('ws-post-claim-sibling', 'node-victim', '${PROJECT}', '${VICTIM}', 'sibling', 'org/repo', 'small', 'nbg1', 'running');
+      END;
+    `);
+
+    await cleanupTaskRun('task-victim', env, undefined, VICTIM);
+
+    expect(mocks.stopNodeResources).not.toHaveBeenCalled();
+    expect(await readWorkspaceStatus()).toBe('running');
   });
 });

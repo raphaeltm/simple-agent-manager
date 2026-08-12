@@ -6,6 +6,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
 import { cleanupTaskRun } from './task-runner';
+import { hasAuthorizedWorkspaceSessionLink } from './workspace-cleanup-authorization';
 
 export type TerminalTaskCleanupStatus = 'completed' | 'failed' | 'cancelled';
 
@@ -59,9 +60,11 @@ export async function cleanupTerminalTaskResources(
     .select({
       id: schema.tasks.id,
       projectId: schema.tasks.projectId,
+      userId: schema.tasks.userId,
       chatSessionId: schema.tasks.chatSessionId,
       workspaceId: schema.tasks.workspaceId,
       errorMessage: schema.tasks.errorMessage,
+      taskMode: schema.tasks.taskMode,
     })
     .from(schema.tasks)
     .where(and(...taskConditions))
@@ -100,9 +103,14 @@ export async function cleanupTerminalTaskResources(
     workspace.id !== task.workspaceId ||
     workspace.projectId !== task.projectId ||
     (options.requiredUserId && workspace.userId !== options.requiredUserId) ||
-    (workspace.chatSessionId !== null &&
-      task.chatSessionId !== null &&
-      workspace.chatSessionId !== task.chatSessionId)
+    !hasAuthorizedWorkspaceSessionLink(
+      task.chatSessionId,
+      workspace.chatSessionId,
+      task.taskMode,
+      task.userId,
+      workspace.userId,
+      options.requiredUserId !== undefined
+    )
   ) {
     log.info('task.terminal_cleanup.workspace_scope_rejected', {
       taskId,

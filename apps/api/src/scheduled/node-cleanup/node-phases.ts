@@ -18,6 +18,11 @@ import { log } from '../../lib/logger';
 import { stopNodeResources } from '../../services/nodes';
 import { persistError } from '../../services/observability';
 import {
+  claimWorkspaceForCleanup,
+  completeWorkspaceCleanupClaim,
+  restoreWorkspaceCleanupClaim,
+} from '../../services/workspace-cleanup-authorization';
+import {
   type CleanupConfig,
   type CleanupDb,
   destroyNodeForCleanup,
@@ -70,6 +75,7 @@ export async function sweepTerminalCfContainers(
     }>();
 
   for (const candidate of candidates.results) {
+    let claim: Awaited<ReturnType<typeof claimWorkspaceForCleanup>> = null;
     try {
       log.warn('node_cleanup.cf_container_terminal_task_destroying', {
         nodeId: candidate.node_id,
@@ -78,27 +84,70 @@ export async function sweepTerminalCfContainers(
         taskStatus: candidate.task_status,
       });
 
-      await stopNodeResources(candidate.node_id, candidate.user_id, env);
+      claim = await claimWorkspaceForCleanup(env, {
+        workspaceId: candidate.workspace_id,
+        nodeId: candidate.node_id,
+        userId: candidate.user_id,
+        allowedStatuses: ['running', 'creating', 'pending', 'recovery', 'sleeping', 'stopped'],
+        taskId: candidate.task_id,
+        source: 'node_cleanup.cf_container_terminal_task',
+      });
+      if (!claim) {
+        continue;
+      }
 
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'warn',
-        message: 'Destroyed cf-container node left behind after terminal task',
-        context: {
-          recoveryType: 'cf_container_terminal_task_cleanup',
+      const sibling = await env.DATABASE.prepare(
+        `SELECT id FROM workspaces
+         WHERE node_id = ? AND id != ? AND status != 'deleted'
+         LIMIT 1`
+      )
+        .bind(candidate.node_id, candidate.workspace_id)
+        .first<{ id: string }>();
+      if (sibling) {
+        await restoreWorkspaceCleanupClaim(env, claim);
+        log.warn('node_cleanup.cf_container_sibling_workspace_rejected', {
           nodeId: candidate.node_id,
           workspaceId: candidate.workspace_id,
+          siblingWorkspaceId: sibling.id,
           taskId: candidate.task_id,
-          taskStatus: candidate.task_status,
-          gracePeriodMs: config.orphanGracePeriodMs,
+          action: 'skipped',
+        });
+        continue;
+      }
+
+      await stopNodeResources(candidate.node_id, candidate.user_id, env);
+      await completeWorkspaceCleanupClaim(env, claim, 'deleted');
+
+      await persistError(
+        env.OBSERVABILITY_DATABASE,
+        {
+          source: 'api',
+          level: 'warn',
+          message: 'Destroyed cf-container node left behind after terminal task',
+          context: {
+            recoveryType: 'cf_container_terminal_task_cleanup',
+            nodeId: candidate.node_id,
+            workspaceId: candidate.workspace_id,
+            taskId: candidate.task_id,
+            taskStatus: candidate.task_status,
+            gracePeriodMs: config.orphanGracePeriodMs,
+          },
+          userId: candidate.user_id,
+          nodeId: candidate.node_id,
+          workspaceId: candidate.workspace_id,
         },
-        userId: candidate.user_id,
-        nodeId: candidate.node_id,
-        workspaceId: candidate.workspace_id,
-      }, env);
+        env
+      );
 
       result.cfContainersDestroyed++;
     } catch (err) {
+      if (claim) {
+        await restoreWorkspaceCleanupClaim(
+          env,
+          claim,
+          err instanceof Error ? err.message : String(err)
+        );
+      }
       await markNodeCleanupBackoff(
         env,
         candidate.node_id,

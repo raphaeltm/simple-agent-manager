@@ -8,6 +8,7 @@ import { type CredentialSource, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-
 import { log } from '../../lib/logger';
 import type { DevcontainerCacheCredentials } from '../../services/devcontainer-cache';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
+import { ACTIVE_WORKSPACE_STATUSES } from '../../services/workspace-cleanup-authorization';
 import { computeBackoffMs, isTransientError } from './helpers';
 import { ensureSessionLinked } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
@@ -95,16 +96,60 @@ async function recoverWorkspaceFromD1(
   }
 
   const existingTask = await rc.env.DATABASE.prepare(
-    `SELECT workspace_id, status FROM tasks WHERE id = ?`
+    `SELECT workspace_id, status, project_id, user_id, chat_session_id FROM tasks WHERE id = ?`
   )
     .bind(state.taskId)
-    .first<{ workspace_id: string | null; status: string }>();
+    .first<{
+      workspace_id: string | null;
+      status: string;
+      project_id: string;
+      user_id: string;
+      chat_session_id: string | null;
+    }>();
 
   if (!existingTask?.workspace_id) {
     return;
   }
 
-  // D1 has a workspace — recover it into DO state (crash recovery)
+  const workspace = await rc.env.DATABASE.prepare(
+    `SELECT id, project_id, user_id, status, chat_session_id
+     FROM workspaces
+     WHERE id = ? AND project_id = ? AND user_id = ?
+     LIMIT 1`
+  )
+    .bind(existingTask.workspace_id, existingTask.project_id, existingTask.user_id)
+    .first<{
+      id: string;
+      project_id: string | null;
+      user_id: string;
+      status: string;
+      chat_session_id: string | null;
+    }>();
+
+  if (
+    !workspace ||
+    workspace.id !== existingTask.workspace_id ||
+    workspace.project_id !== existingTask.project_id ||
+    workspace.user_id !== existingTask.user_id ||
+    !ACTIVE_WORKSPACE_STATUSES.has(workspace.status) ||
+    (workspace.chat_session_id !== null &&
+      existingTask.chat_session_id !== null &&
+      workspace.chat_session_id !== existingTask.chat_session_id)
+  ) {
+    log.warn('task_runner_do.workspace_recovery_scope_rejected', {
+      taskId: state.taskId,
+      workspaceId: existingTask.workspace_id,
+      projectId: state.projectId,
+      userId: state.userId,
+      workspaceStatus: workspace?.status ?? null,
+      action: 'rejected',
+    });
+    throw Object.assign(new Error('Recovered workspace link is not authorized for this task'), {
+      permanent: true,
+    });
+  }
+
+  // D1 has a scoped workspace — recover it into DO state (crash recovery)
   state.stepResults.workspaceId = existingTask.workspace_id;
   await rc.ctx.storage.put('state', state);
 

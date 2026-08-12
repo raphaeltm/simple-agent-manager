@@ -73,15 +73,42 @@ async function stopActiveChildAgentForRetry(
     .select({
       id: schema.workspaces.id,
       nodeId: schema.workspaces.nodeId,
+      projectId: schema.workspaces.projectId,
+      userId: schema.workspaces.userId,
+      status: schema.workspaces.status,
       nodeStatus: schema.nodes.status,
+      nodeUserId: schema.nodes.userId,
       chatSessionId: schema.workspaces.chatSessionId,
     })
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.workspaces.nodeId, schema.nodes.id))
-    .where(eq(schema.workspaces.id, childTask.workspaceId))
+    .where(
+      and(
+        eq(schema.workspaces.id, childTask.workspaceId),
+        eq(schema.workspaces.projectId, tokenData.projectId),
+        eq(schema.workspaces.userId, tokenData.userId)
+      )
+    )
     .limit(1);
 
-  if (!workspace?.nodeId) {
+  if (
+    !workspace?.nodeId ||
+    workspace.projectId !== tokenData.projectId ||
+    workspace.userId !== tokenData.userId ||
+    workspace.nodeUserId !== tokenData.userId ||
+    !['running', 'creating', 'pending', 'recovery'].includes(workspace.status) ||
+    (workspace.chatSessionId !== null &&
+      childTask.chatSessionId !== null &&
+      workspace.chatSessionId !== childTask.chatSessionId)
+  ) {
+    log.warn('orchestration.retry_workspace_scope_rejected', {
+      childTaskId: childTask.id,
+      workspaceId: childTask.workspaceId,
+      projectId: tokenData.projectId,
+      userId: tokenData.userId,
+      workspaceStatus: workspace?.status ?? null,
+      action: 'rejected',
+    });
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
