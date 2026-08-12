@@ -5,9 +5,12 @@ import type { Env } from '../../../src/env';
 const mocks = vi.hoisted(() => ({
   drizzle: vi.fn(),
   hibernateAgentSessionOnNode: vi.fn(),
+  ensureSessionSnapshotForSleep: vi.fn(),
   stopWorkspaceOnNode: vi.fn(),
   sleepVmAgentContainer: vi.fn(),
+  markVmAgentContainerActiveWorkStarted: vi.fn(),
   getRestorableSessionSnapshot: vi.fn(),
+  getSessionSnapshotCaptureState: vi.fn(),
   claimSessionSnapshotSleep: vi.fn(),
   beginSessionSnapshotStopping: vi.fn(),
   finalizeSessionSnapshotSleeping: vi.fn(),
@@ -28,9 +31,15 @@ vi.mock('../../../src/services/node-agent', () => ({
 }));
 vi.mock('../../../src/services/vm-agent-container', () => ({
   sleepVmAgentContainer: (...args: unknown[]) => mocks.sleepVmAgentContainer(...args),
+  markVmAgentContainerActiveWorkStarted: (...args: unknown[]) =>
+    mocks.markVmAgentContainerActiveWorkStarted(...args),
 }));
 vi.mock('../../../src/services/session-snapshots', () => ({
+  ensureSessionSnapshotForSleep: (...args: unknown[]) =>
+    mocks.ensureSessionSnapshotForSleep(...args),
   getRestorableSessionSnapshot: (...args: unknown[]) => mocks.getRestorableSessionSnapshot(...args),
+  getSessionSnapshotCaptureState: (...args: unknown[]) =>
+    mocks.getSessionSnapshotCaptureState(...args),
   claimSessionSnapshotSleep: (...args: unknown[]) => mocks.claimSessionSnapshotSleep(...args),
   beginSessionSnapshotStopping: (...args: unknown[]) => mocks.beginSessionSnapshotStopping(...args),
   finalizeSessionSnapshotSleeping: (...args: unknown[]) =>
@@ -88,6 +97,8 @@ function buildDb(nodeRuntime = 'vm') {
 function buildEnv(): Env {
   return {
     DATABASE: {},
+    SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS: '200',
+    SESSION_SNAPSHOT_POLL_INTERVAL_MS: '1',
     NODE_LIFECYCLE: {
       idFromName: vi.fn(() => 'node-do-id'),
       get: vi.fn(() => ({ scheduleWorkspaceDeletion: vi.fn(async () => undefined) })),
@@ -100,6 +111,22 @@ describe('sleepWorkspaceSession', () => {
     vi.clearAllMocks();
     mocks.drizzle.mockReturnValue(buildDb());
     mocks.stopWorkspaceOnNode.mockResolvedValue(undefined);
+    mocks.ensureSessionSnapshotForSleep.mockResolvedValue(undefined);
+    mocks.markVmAgentContainerActiveWorkStarted.mockResolvedValue(undefined);
+    mocks.hibernateAgentSessionOnNode.mockResolvedValue({ status: 'pending', accepted: true });
+    mocks.getSessionSnapshotCaptureState
+      .mockResolvedValueOnce({
+        status: 'pending',
+        degradation: 'none',
+        snapshotGeneration: null,
+        captureGeneration: null,
+      })
+      .mockResolvedValue({
+        status: 'available',
+        degradation: 'none',
+        snapshotGeneration: 'generation-final',
+        captureGeneration: null,
+      });
     mocks.claimSessionSnapshotSleep.mockResolvedValue({
       status: 'claimed',
       claimId: 'claim-1',
@@ -118,10 +145,20 @@ describe('sleepWorkspaceSession', () => {
 
   it('preserves compute when the required final snapshot is degraded', async () => {
     mocks.getRestorableSessionSnapshot.mockResolvedValue(null);
-    mocks.hibernateAgentSessionOnNode.mockResolvedValue({
-      status: 'degraded',
-      degradation: 'entries-skipped',
-    });
+    mocks.getSessionSnapshotCaptureState.mockReset();
+    mocks.getSessionSnapshotCaptureState
+      .mockResolvedValueOnce({
+        status: 'pending',
+        degradation: 'none',
+        snapshotGeneration: null,
+        captureGeneration: null,
+      })
+      .mockResolvedValue({
+        status: 'degraded',
+        degradation: 'entries-skipped',
+        snapshotGeneration: 'generation-degraded',
+        captureGeneration: null,
+      });
     const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
 
     await expect(
@@ -140,10 +177,6 @@ describe('sleepWorkspaceSession', () => {
 
   it('preserves compute when snapshot completion cannot be re-read durably', async () => {
     mocks.getRestorableSessionSnapshot.mockResolvedValue(null);
-    mocks.hibernateAgentSessionOnNode.mockResolvedValue({
-      status: 'available',
-      degradation: 'none',
-    });
     const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
 
     await expect(
@@ -164,10 +197,6 @@ describe('sleepWorkspaceSession', () => {
       degradation: 'none',
       expiresAt: '2026-08-19T00:00:00.000Z',
     });
-    mocks.hibernateAgentSessionOnNode.mockResolvedValue({
-      status: 'available',
-      degradation: 'none',
-    });
     mocks.verifyRestorableSessionSnapshotArtifacts.mockResolvedValue(false);
     const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
 
@@ -185,6 +214,29 @@ describe('sleepWorkspaceSession', () => {
   });
 
   it('stops a VM only after a verified complete snapshot', async () => {
+    mocks.getSessionSnapshotCaptureState.mockReset();
+    mocks.getSessionSnapshotCaptureState
+      .mockResolvedValueOnce({
+        status: 'pending',
+        degradation: 'none',
+        snapshotGeneration: null,
+        captureGeneration: 'idle-checkpoint-in-progress',
+      })
+      .mockResolvedValueOnce({
+        status: 'pending',
+        degradation: 'none',
+        snapshotGeneration: null,
+        captureGeneration: 'idle-checkpoint-in-progress',
+      })
+      .mockResolvedValue({
+        status: 'available',
+        degradation: 'none',
+        snapshotGeneration: 'generation-final',
+        captureGeneration: null,
+      });
+    mocks.hibernateAgentSessionOnNode
+      .mockResolvedValueOnce({ status: 'pending', accepted: false })
+      .mockResolvedValue({ status: 'pending', accepted: true });
     mocks.getRestorableSessionSnapshot
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
@@ -199,10 +251,6 @@ describe('sleepWorkspaceSession', () => {
         sleepStatus: 'sleeping',
         expiresAt: '2026-08-19T00:00:00.000Z',
       });
-    mocks.hibernateAgentSessionOnNode.mockResolvedValue({
-      status: 'available',
-      degradation: 'none',
-    });
     const env = buildEnv();
     const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
 
@@ -216,6 +264,23 @@ describe('sleepWorkspaceSession', () => {
 
     expect(mocks.hibernateAgentSessionOnNode.mock.invocationCallOrder[0]).toBeLessThan(
       mocks.stopWorkspaceOnNode.mock.invocationCallOrder[0]
+    );
+    expect(mocks.hibernateAgentSessionOnNode).toHaveBeenCalledTimes(2);
+    expect(mocks.ensureSessionSnapshotForSleep).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      {
+        workspaceId: 'workspace-1',
+        nodeId: 'node-1',
+        projectId: 'project-1',
+        userId: 'user-1',
+        chatSessionId: 'chat-1',
+        agentSessionId: 'agent-session-1',
+        runtime: 'vm',
+      }
+    );
+    expect(mocks.ensureSessionSnapshotForSleep.mock.invocationCallOrder[0]).toBeLessThan(
+      mocks.claimSessionSnapshotSleep.mock.invocationCallOrder[0]
     );
     expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
     expect(mocks.finalizeSessionSnapshotSleeping).toHaveBeenCalledTimes(1);
@@ -239,10 +304,6 @@ describe('sleepWorkspaceSession', () => {
         sleepStatus: 'sleeping',
         expiresAt: '2026-08-19T00:00:00.000Z',
       });
-    mocks.hibernateAgentSessionOnNode.mockResolvedValue({
-      status: 'available',
-      degradation: 'none',
-    });
     mocks.sleepVmAgentContainer.mockResolvedValue(undefined);
     const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
 
@@ -266,10 +327,6 @@ describe('sleepWorkspaceSession', () => {
       status: 'available',
       degradation: 'none',
       expiresAt: '2026-08-19T00:00:00.000Z',
-    });
-    mocks.hibernateAgentSessionOnNode.mockResolvedValue({
-      status: 'available',
-      degradation: 'none',
     });
     const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
 

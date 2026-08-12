@@ -69,6 +69,18 @@ export async function claimSessionSnapshotSleep(
         inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed']),
         lte(schema.sessionSnapshots.sleepAfter, nowIso)
       );
+  const completeSnapshotCondition = input.force
+    ? inArray(schema.sessionSnapshots.status, [
+        'pending',
+        'available',
+        'degraded',
+        'failed',
+        'expired',
+      ])
+    : and(
+        eq(schema.sessionSnapshots.status, 'available'),
+        eq(schema.sessionSnapshots.degradation, 'none')
+      );
   const result = await db
     .update(schema.sessionSnapshots)
     .set({
@@ -83,8 +95,7 @@ export async function claimSessionSnapshotSleep(
     .where(
       and(
         eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId),
-        eq(schema.sessionSnapshots.status, 'available'),
-        eq(schema.sessionSnapshots.degradation, 'none'),
+        completeSnapshotCondition,
         isNull(schema.sessionSnapshots.sleepingAt),
         lt(schema.sessionSnapshots.sleepAttempts, maxAttempts),
         or(

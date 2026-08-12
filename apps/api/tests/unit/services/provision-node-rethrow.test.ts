@@ -91,6 +91,7 @@ const ENV = {
   ERROR_REPORT_RESPONSE_MAX_BYTES: '2048',
   ERROR_REPORT_STORED_ERROR_MAX_BYTES: '256',
   ERROR_REPORT_COLLECTOR_CONCURRENCY: '2',
+  SESSION_SNAPSHOT_OPERATION_TIMEOUT: '12m30s',
 } as unknown as Parameters<typeof provisionNode>[1];
 
 beforeEach(() => {
@@ -121,6 +122,7 @@ describe('provisionNode backend DNS records', () => {
         errorReportResponseMaxBytes: '2048',
         errorReportStoredErrorMaxBytes: '256',
         errorReportCollectorConcurrency: '2',
+        sessionSnapshotOperationTimeout: '12m30s',
       }),
     );
   });

@@ -6,7 +6,9 @@ import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import {
   claimSessionSnapshotRecovery,
+  claimSessionSnapshotSleep,
   completeSessionSnapshot,
+  ensureSessionSnapshotForSleep,
   getRestorableSessionSnapshot,
   markSessionSnapshotSleeping,
   prepareSessionSnapshot,
@@ -17,6 +19,79 @@ import {
 const TEST_PREFIX = `snapshot-${Date.now()}`;
 
 describe('session snapshot D1/R2 worker wiring', () => {
+  it('creates a pending lifecycle row that an explicit sleep can claim before the first checkpoint completes', async () => {
+    const userId = `${TEST_PREFIX}-sleep-user`;
+    const nodeId = `${TEST_PREFIX}-sleep-node`;
+    const workspaceId = `${TEST_PREFIX}-sleep-workspace`;
+    const chatSessionId = `${TEST_PREFIX}-sleep-chat`;
+    const agentSessionId = `${TEST_PREFIX}-sleep-agent-session`;
+    const bindings = {
+      ...env,
+      SESSION_SNAPSHOT_R2_PREFIX: `${TEST_PREFIX}/sleep-snapshots`,
+    } as unknown as Env;
+    const db = drizzle(env.DATABASE, { schema });
+
+    await env.DATABASE.prepare(
+      `INSERT INTO users (id, email, name, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?)`
+    )
+      .bind(userId, `${userId}@example.com`, 'Sleep User', Date.now(), Date.now())
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO nodes (id, user_id, name, status, vm_size, vm_location, runtime, created_at, updated_at)
+       VALUES (?, ?, ?, 'running', 'small', 'local', 'vm', datetime('now'), datetime('now'))`
+    )
+      .bind(nodeId, userId, 'sleep-node')
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO workspaces (id, node_id, user_id, name, repository, branch, status, vm_size, vm_location, chat_session_id, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, 'main', 'running', 'small', 'local', ?, datetime('now'), datetime('now'))`
+    )
+      .bind(workspaceId, nodeId, userId, 'sleep-workspace', 'owner/repo', chatSessionId)
+      .run();
+    await env.DATABASE.prepare(
+      `INSERT INTO agent_sessions (id, workspace_id, user_id, status, created_at, updated_at)
+       VALUES (?, ?, ?, 'running', datetime('now'), datetime('now'))`
+    )
+      .bind(agentSessionId, workspaceId, userId)
+      .run();
+
+    await ensureSessionSnapshotForSleep(db, bindings, {
+      workspaceId,
+      nodeId,
+      projectId: null,
+      userId,
+      chatSessionId,
+      agentSessionId,
+      runtime: 'vm',
+    });
+
+    const pending = await env.DATABASE.prepare(
+      `SELECT status, degradation, sleep_status, capture_generation
+       FROM session_snapshots WHERE chat_session_id = ?`
+    )
+      .bind(chatSessionId)
+      .first<Record<string, unknown>>();
+    expect(pending).toMatchObject({
+      status: 'pending',
+      degradation: 'none',
+      sleep_status: null,
+      capture_generation: null,
+    });
+
+    await expect(
+      claimSessionSnapshotSleep(db, bindings, {
+        chatSessionId,
+        claimId: `${TEST_PREFIX}-sleep-claim`,
+        force: true,
+      })
+    ).resolves.toEqual({
+      status: 'claimed',
+      claimId: `${TEST_PREFIX}-sleep-claim`,
+      phase: 'preparing',
+    });
+  });
+
   it('creates one restorable snapshot per chat session and writes the manifest to R2', async () => {
     const userId = `${TEST_PREFIX}-user`;
     const nodeId = `${TEST_PREFIX}-node`;

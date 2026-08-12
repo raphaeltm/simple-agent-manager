@@ -20,6 +20,7 @@ import {
   type SessionSnapshotManifest,
   type SessionSnapshotStatus,
 } from '../../services/session-snapshots';
+import { markVmAgentContainerActiveWorkEndedBestEffort } from '../../services/vm-agent-container';
 import { verifyWorkspaceCallbackAuth } from './_helpers';
 
 const sessionSnapshotRoutes = new Hono<{ Bindings: Env }>();
@@ -335,6 +336,12 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
     artifactSizes,
     artifactSha256,
   });
+
+  await markVmAgentContainerActiveWorkEndedBestEffort(
+    c.env,
+    workspace.nodeId,
+    'session_snapshot_complete'
+  );
 
   return c.json({ status, degradation });
 });

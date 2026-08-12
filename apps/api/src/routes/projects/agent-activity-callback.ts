@@ -232,6 +232,7 @@ agentActivityCallbackRoute.post(
         });
     }
     if (body.activity === 'idle' || body.activity === 'error') {
+      let idleSnapshotQueued = false;
       if (
         body.activity === 'idle' &&
         existing.workspaceId &&
@@ -261,23 +262,30 @@ agentActivityCallbackRoute.post(
               chatSessionId: workspace.chatSessionId,
               runtime: workspace.runtime,
               agentType: body.agentType ?? existing.agentType ?? undefined,
+              background: true,
             }
-          ).catch((err) => {
-            log.warn('acp_activity.session_snapshot_failed', {
-              projectId,
-              sessionId,
-              workspaceId: existing.workspaceId,
-              nodeId: existing.nodeId,
-              error: err instanceof Error ? err.message : String(err),
+          )
+            .then(() => {
+              idleSnapshotQueued = true;
+            })
+            .catch((err) => {
+              log.warn('acp_activity.session_snapshot_failed', {
+                projectId,
+                sessionId,
+                workspaceId: existing.workspaceId,
+                nodeId: existing.nodeId,
+                error: err instanceof Error ? err.message : String(err),
+              });
             });
-          });
         }
       }
-      await markVmAgentContainerActiveWorkEndedBestEffort(
-        c.env,
-        existing.nodeId,
-        `agent_activity_${body.activity}`
-      );
+      if (!idleSnapshotQueued) {
+        await markVmAgentContainerActiveWorkEndedBestEffort(
+          c.env,
+          existing.nodeId,
+          `agent_activity_${body.activity}`
+        );
+      }
     }
     return c.body(null, 204);
   }

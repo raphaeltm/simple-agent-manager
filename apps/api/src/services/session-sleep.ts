@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
 import { hibernateAgentSessionOnNode, stopWorkspaceOnNode } from './node-agent';
 import * as projectDataService from './project-data';
@@ -11,14 +12,92 @@ import {
   beginSessionSnapshotStopping,
   claimSessionSnapshotSleep,
   deferSessionSnapshotStopping,
+  ensureSessionSnapshotForSleep,
   failSessionSnapshotSleepBeforeTeardown,
   finalizeSessionSnapshotSleeping,
   getRestorableSessionSnapshot,
+  getSessionSnapshotCaptureState,
   verifyRestorableSessionSnapshotArtifacts,
 } from './session-snapshots';
-import { sleepVmAgentContainer } from './vm-agent-container';
+import { markVmAgentContainerActiveWorkStarted, sleepVmAgentContainer } from './vm-agent-container';
 
 type SnapshotResult = { status?: unknown; degradation?: unknown };
+
+const DEFAULT_SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_SESSION_SNAPSHOT_POLL_INTERVAL_MS = 1000;
+
+async function waitForFinalSessionSnapshot(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  env: Env,
+  input: {
+    nodeId: string;
+    workspaceId: string;
+    agentSessionId: string;
+    chatSessionId: string;
+    runtime: string;
+    agentType?: string;
+    userId: string;
+  }
+): Promise<void> {
+  const timeoutMs = parsePositiveInt(
+    env.SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS,
+    DEFAULT_SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS
+  );
+  const pollIntervalMs = parsePositiveInt(
+    env.SESSION_SNAPSHOT_POLL_INTERVAL_MS,
+    DEFAULT_SESSION_SNAPSHOT_POLL_INTERVAL_MS
+  );
+  const deadline = Date.now() + timeoutMs;
+  let baselineGeneration: string | null = null;
+
+  while (Date.now() < deadline) {
+    const current = await getSessionSnapshotCaptureState(db, input.chatSessionId);
+    if (input.runtime === 'cf-container') {
+      await markVmAgentContainerActiveWorkStarted(env, input.nodeId, {
+        workspaceId: input.workspaceId,
+        agentSessionId: input.agentSessionId,
+        reason: 'session_snapshot_final_capture',
+      });
+    }
+    const result = (await hibernateAgentSessionOnNode(
+      input.nodeId,
+      input.workspaceId,
+      input.agentSessionId,
+      env,
+      input.userId,
+      {
+        chatSessionId: input.chatSessionId,
+        runtime: input.runtime,
+        agentType: input.agentType,
+        background: true,
+      }
+    )) as SnapshotResult & { accepted?: unknown };
+    if (result.status !== 'pending') {
+      throw new Error(`Workspace snapshot request was not accepted (${String(result.status)})`);
+    }
+    if (result.accepted === true) {
+      baselineGeneration = current?.snapshotGeneration ?? null;
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+
+  while (Date.now() < deadline) {
+    const current = await getSessionSnapshotCaptureState(db, input.chatSessionId);
+    if (
+      current &&
+      !current.captureGeneration &&
+      current.snapshotGeneration !== baselineGeneration
+    ) {
+      if (current.status === 'available' && current.degradation === 'none') return;
+      throw new Error(
+        `Workspace snapshot is not complete (${current.status}/${current.degradation})`
+      );
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+  }
+  throw new Error(`Workspace snapshot did not complete within ${timeoutMs}ms`);
+}
 
 export interface SleepWorkspaceSessionResult {
   status: 'sleeping';
@@ -92,6 +171,16 @@ export async function sleepWorkspaceSession(
     throw new Error('Workspace has no resumable agent session');
   }
 
+  await ensureSessionSnapshotForSleep(db, env, {
+    workspaceId: workspace.id,
+    nodeId: workspace.nodeId,
+    projectId: workspace.projectId,
+    userId: workspace.userId,
+    chatSessionId: workspace.chatSessionId,
+    agentSessionId: agentSession.id,
+    runtime: workspace.nodeRuntime,
+  });
+
   const claimId = input.sleepClaimId ?? ulid();
   const claim = await claimSessionSnapshotSleep(db, env, {
     chatSessionId: workspace.chatSessionId,
@@ -115,23 +204,15 @@ export async function sleepWorkspaceSession(
         throw new Error(`Workspace agent is not idle (${stateBefore?.activity ?? 'unknown'})`);
       }
 
-      const result = (await hibernateAgentSessionOnNode(
-        workspace.nodeId,
-        workspace.id,
-        agentSession.id,
-        env,
-        workspace.userId,
-        {
-          chatSessionId: workspace.chatSessionId,
-          runtime: workspace.nodeRuntime,
-          agentType: agentSession.agentType ?? undefined,
-        }
-      )) as SnapshotResult;
-      if (result.status !== 'available' || result.degradation !== 'none') {
-        throw new Error(
-          `Workspace snapshot is not complete (${String(result.status)}/${String(result.degradation)})`
-        );
-      }
+      await waitForFinalSessionSnapshot(db, env, {
+        nodeId: workspace.nodeId,
+        workspaceId: workspace.id,
+        agentSessionId: agentSession.id,
+        chatSessionId: workspace.chatSessionId,
+        runtime: workspace.nodeRuntime,
+        agentType: agentSession.agentType ?? undefined,
+        userId: workspace.userId,
+      });
 
       verified = await getRestorableSessionSnapshot(db, workspace.chatSessionId);
       if (verified?.status !== 'available' || verified.degradation !== 'none') {

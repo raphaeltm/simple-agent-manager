@@ -167,11 +167,12 @@ type Config struct {
 	StandaloneCloneFilter string
 
 	// Session settings
-	SessionTTL             time.Duration
-	SessionCleanupInterval time.Duration
-	SessionMaxCount        int
-	CookieName             string
-	CookieSecure           bool
+	SessionTTL                      time.Duration
+	SessionCleanupInterval          time.Duration
+	SessionMaxCount                 int
+	SessionSnapshotOperationTimeout time.Duration // Overall background/final snapshot deadline (env: SESSION_SNAPSHOT_OPERATION_TIMEOUT, default: 15m)
+	CookieName                      string
+	CookieSecure                    bool
 
 	// Node health reporter interval
 	HeartbeatInterval time.Duration
@@ -479,11 +480,12 @@ func Load() (*Config, error) {
 
 		StandaloneCloneFilter: ResolveStandaloneCloneFilter(getEnv("STANDALONE_CLONE_FILTER", DefaultStandaloneCloneFilter)),
 
-		SessionTTL:             getEnvDuration("SESSION_TTL", 24*time.Hour),
-		SessionCleanupInterval: getEnvDuration("SESSION_CLEANUP_INTERVAL", 1*time.Minute),
-		SessionMaxCount:        getEnvInt("SESSION_MAX_COUNT", 100),
-		CookieName:             getEnv("COOKIE_NAME", "vm_session"),
-		CookieSecure:           getEnvBool("COOKIE_SECURE", true),
+		SessionTTL:                      getEnvDuration("SESSION_TTL", 24*time.Hour),
+		SessionCleanupInterval:          getEnvDuration("SESSION_CLEANUP_INTERVAL", 1*time.Minute),
+		SessionMaxCount:                 getEnvInt("SESSION_MAX_COUNT", 100),
+		SessionSnapshotOperationTimeout: getEnvDuration("SESSION_SNAPSHOT_OPERATION_TIMEOUT", 15*time.Minute),
+		CookieName:                      getEnv("COOKIE_NAME", "vm_session"),
+		CookieSecure:                    getEnvBool("COOKIE_SECURE", true),
 
 		HeartbeatInterval: getEnvDuration("HEARTBEAT_INTERVAL", 60*time.Second),
 

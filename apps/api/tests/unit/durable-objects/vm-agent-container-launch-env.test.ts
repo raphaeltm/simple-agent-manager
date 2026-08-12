@@ -93,6 +93,26 @@ describe('VmAgentContainer.launch env passthrough', () => {
     expect(envVars).not.toHaveProperty('STANDALONE_CLONE_FILTER');
     expect(envVars.NODE_ROLE).toBe('standalone');
   });
+
+  it('forwards the session snapshot operation timeout to the container', async () => {
+    const { fake, startAndWaitForPorts } = makeFake({
+      SESSION_SNAPSHOT_OPERATION_TIMEOUT: '12m30s',
+    });
+
+    await callLaunch(fake);
+
+    expect(launchedEnvVars(startAndWaitForPorts).SESSION_SNAPSHOT_OPERATION_TIMEOUT).toBe('12m30s');
+  });
+
+  it('omits the session snapshot operation timeout when unset so the vm-agent default applies', async () => {
+    const { fake, startAndWaitForPorts } = makeFake({});
+
+    await callLaunch(fake);
+
+    expect(launchedEnvVars(startAndWaitForPorts)).not.toHaveProperty(
+      'SESSION_SNAPSHOT_OPERATION_TIMEOUT'
+    );
+  });
 });
 
 function storagePutMock(fake: unknown): ReturnType<typeof vi.fn> {

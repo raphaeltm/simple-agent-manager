@@ -320,6 +320,33 @@ func TestBootstrapTimeoutOverride(t *testing.T) {
 	}
 }
 
+func TestSessionSnapshotOperationTimeoutDefault(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.SessionSnapshotOperationTimeout != 15*time.Minute {
+		t.Fatalf("SessionSnapshotOperationTimeout=%v, want %v", cfg.SessionSnapshotOperationTimeout, 15*time.Minute)
+	}
+}
+
+func TestSessionSnapshotOperationTimeoutOverride(t *testing.T) {
+	t.Setenv("CONTROL_PLANE_URL", "https://api.example.com")
+	t.Setenv("WORKSPACE_ID", "ws-123")
+	t.Setenv("SESSION_SNAPSHOT_OPERATION_TIMEOUT", "7m")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load returned error: %v", err)
+	}
+	if cfg.SessionSnapshotOperationTimeout != 7*time.Minute {
+		t.Fatalf("SessionSnapshotOperationTimeout=%v, want %v", cfg.SessionSnapshotOperationTimeout, 7*time.Minute)
+	}
+}
+
 func legacyOperationalTimeoutChecks(cfg *Config) []struct {
 	name      string
 	got, want time.Duration

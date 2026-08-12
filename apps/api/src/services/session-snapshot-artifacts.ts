@@ -117,6 +117,31 @@ export interface CompleteSessionSnapshotInput {
   };
 }
 
+export interface SessionSnapshotCaptureState {
+  status: string;
+  degradation: string;
+  snapshotGeneration: string | null;
+  captureGeneration: string | null;
+}
+
+export async function getSessionSnapshotCaptureState(
+  db: Db,
+  chatSessionId: string
+): Promise<SessionSnapshotCaptureState | null> {
+  return (
+    (await db
+      .select({
+        status: schema.sessionSnapshots.status,
+        degradation: schema.sessionSnapshots.degradation,
+        snapshotGeneration: schema.sessionSnapshots.snapshotGeneration,
+        captureGeneration: schema.sessionSnapshots.captureGeneration,
+      })
+      .from(schema.sessionSnapshots)
+      .where(eq(schema.sessionSnapshots.chatSessionId, chatSessionId))
+      .get()) ?? null
+  );
+}
+
 export function getSessionSnapshotConfig(env: Env): SessionSnapshotConfig {
   return {
     ttlDays: parsePositiveInt(env.SESSION_SNAPSHOT_TTL_DAYS, DEFAULT_SESSION_SNAPSHOT_TTL_DAYS),
@@ -349,4 +374,43 @@ export async function prepareSessionSnapshot(
   }
 
   return { snapshotId, generation, expiresAt, keys, config };
+}
+
+/**
+ * Establishes the D1 lifecycle lock row before a first checkpoint exists.
+ * Explicit/task-completion sleep can therefore claim the session while an
+ * idle checkpoint is still running (or before the idle callback arrives).
+ * The placeholder generation is never restorable and writes no R2 objects.
+ */
+export async function ensureSessionSnapshotForSleep(
+  db: Db,
+  env: Env,
+  input: PrepareSessionSnapshotInput
+): Promise<void> {
+  const now = new Date();
+  const placeholderGeneration = ulid();
+  await db
+    .insert(schema.sessionSnapshots)
+    .values({
+      id: ulid(),
+      projectId: input.projectId,
+      workspaceId: input.workspaceId,
+      nodeId: input.nodeId,
+      userId: input.userId,
+      chatSessionId: input.chatSessionId,
+      agentSessionId: input.agentSessionId,
+      runtime: input.runtime,
+      status: 'pending',
+      degradation: 'none',
+      manifestR2Key: buildSessionSnapshotR2Key(
+        env,
+        input.chatSessionId,
+        placeholderGeneration,
+        'manifest'
+      ),
+      expiresAt: snapshotExpiry(now, getSessionSnapshotConfig(env).ttlDays),
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    })
+    .onConflictDoNothing({ target: schema.sessionSnapshots.chatSessionId });
 }

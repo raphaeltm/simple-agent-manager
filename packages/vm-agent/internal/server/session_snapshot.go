@@ -113,6 +113,7 @@ type sessionSnapshotHandlerInput struct {
 	runtime       *WorkspaceRuntime
 	callbackToken string
 	agentType     string
+	background    bool
 }
 
 func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Request) (*sessionSnapshotHandlerInput, bool) {
@@ -130,6 +131,7 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 		Runtime                string `json:"runtime"`
 		AgentType              string `json:"agentType"`
 		WorkspaceCallbackToken string `json:"workspaceCallbackToken"`
+		Background             bool   `json:"background"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -166,6 +168,7 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 		runtime:       runtime,
 		callbackToken: callbackToken,
 		agentType:     strings.TrimSpace(body.AgentType),
+		background:    body.Background,
 	}, true
 }
 
@@ -174,7 +177,15 @@ func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	result, err := s.hibernateSessionSnapshot(r.Context(), input.runtime, input.sessionID, input.chatSessionID, input.runtimeName, input.agentType, input.callbackToken)
+	if input.background {
+		accepted := s.startBackgroundSessionSnapshot(input)
+		writeJSON(w, http.StatusAccepted, map[string]interface{}{
+			"status":   "pending",
+			"accepted": accepted,
+		})
+		return
+	}
+	result, err := s.captureSessionSnapshot(r.Context(), input)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return

@@ -245,6 +245,7 @@ export async function provisionNode(
       deployAcmeCa: isDeploymentNode ? env.DEPLOY_ACME_CA : undefined,
       deployComposeCmd: isDeploymentNode ? env.DEPLOY_COMPOSE_CMD : undefined,
       deployHealthTimeout: isDeploymentNode ? env.DEPLOY_HEALTH_TIMEOUT : undefined,
+      sessionSnapshotOperationTimeout: env.SESSION_SNAPSHOT_OPERATION_TIMEOUT,
       errorReportFlushInterval: env.ERROR_REPORT_FLUSH_INTERVAL,
       errorReportMaxBatchSize: env.ERROR_REPORT_MAX_BATCH_SIZE,
       errorReportMaxBatchBytes: env.ERROR_REPORT_MAX_BATCH_BYTES,

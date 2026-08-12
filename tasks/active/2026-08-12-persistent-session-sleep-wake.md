@@ -14,6 +14,8 @@ The product lifecycle must distinguish **sleeping** from explicit **archive**. S
 - Existing R2 snapshot objects and D1 metadata expire after seven days. Expiry currently removes metadata but does not terminalize a sleeping chat.
 - The durable prompt mailbox can retain a same-chat wake prompt, but VM target resolution currently treats stopped/deleted runtime rows as terminal rather than initiating or waiting for recovery.
 - Exact-head staging deployment is blocked by Wrangler appending non-JSON text to otherwise valid `--json` output; the migration-safety runner currently calls `JSON.parse` on the entire stdout string.
+- The first exact-head destructive staging attempt exposed a real callback deadline race: the idle activity endpoint synchronously waited for the full archive/upload, so the VM reporter timed out and retried four times. Each retry superseded the prior capture generation, leaving D1 permanently `pending`; the explicit sleep correctly failed closed and preserved compute.
+- Idle checkpoints now acknowledge immediately and run as one serialized VM-side background capture. Explicit/task-completion sleep first owns a D1 lifecycle claim, asks for a fresh serialized generation (superseding a stale pending capture), and polls durable completion before teardown.
 
 ## Implementation checklist
 
@@ -29,6 +31,7 @@ The product lifecycle must distinguish **sleeping** from explicit **archive**. S
 - [x] Repair migration-safety parsing for Wrangler JSON plus trailing diagnostics, with regression coverage and a process-rule update.
 - [x] Update architecture, lifecycle, API, environment, and self-hosting documentation.
 - [x] Run focused, integration, cross-boundary, race, migration, full-repository, and specialist-review gates.
+- [x] Add regression coverage for short idle-callback deadlines, duplicate background capture suppression, a final capture queued behind an idle capture, first-snapshot lifecycle claims, and stale pending capture supersession.
 - [ ] Deploy the exact PR head to staging and prove a remembered phrase plus an uncommitted reordered-word file survive stop/delete/reprovision/strict restore; clean staging to zero VMs after each attempt.
 - [ ] Update draft PR #1785 with proof, leaving it unmerged and production untouched.
 
