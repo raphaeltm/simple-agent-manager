@@ -298,6 +298,7 @@ describe('POST /sessions — workspace attachment authorization', () => {
     const response = await postSession(PROJECT, { workspaceId: 'ws-other-user', topic: 'attack' });
 
     expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({ error: 'NOT_FOUND' });
     expect(await taskRows()).toHaveLength(0);
     expect(mocks.createSession).not.toHaveBeenCalled();
   });
@@ -308,6 +309,7 @@ describe('POST /sessions — workspace attachment authorization', () => {
     const response = await postSession(PROJECT, { workspaceId: 'ws-other-project' });
 
     expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toMatchObject({ error: 'NOT_FOUND' });
     expect(await taskRows()).toHaveLength(0);
     expect(mocks.createSession).not.toHaveBeenCalled();
   });
