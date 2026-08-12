@@ -256,7 +256,7 @@ describe('node-cleanup OBSERVABILITY_DATABASE recording (TDF-7)', () => {
       nodeCleanupSource.indexOf('return true;')
     );
     const deleteIdx = helper.indexOf('deleteNodeResources');
-    const recordIdx = helper.indexOf('persistError(env.OBSERVABILITY_DATABASE');
+    const recordIdx = helper.indexOf('persistError(\n      env.OBSERVABILITY_DATABASE');
     expect(deleteIdx).toBeGreaterThan(-1);
     expect(recordIdx).toBeGreaterThan(deleteIdx);
   });
@@ -420,8 +420,9 @@ describe('cleanup idempotency (TDF-7)', () => {
     expect(taskRunnerSource).toContain('task_run.cleanup.node_not_found');
   });
 
-  it('logs when workspace is already stopped', () => {
-    expect(taskRunnerSource).toContain('task_run.cleanup.workspace_already_stopped');
+  it('uses an atomic cleanup claim instead of stale workspace-status branching', () => {
+    expect(taskRunnerSource).toContain('claimWorkspaceForCleanup');
+    expect(taskRunnerSource).toContain("source: 'task_run.cleanup'");
   });
 
   it('queries node from D1 before deciding cleanup action', () => {

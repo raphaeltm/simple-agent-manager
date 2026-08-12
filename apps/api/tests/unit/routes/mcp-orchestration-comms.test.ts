@@ -103,21 +103,36 @@ describe('MCP Orchestration Communication Tools', () => {
   describe('send_message_to_subtask', () => {
     it('should reject when caller has no taskId (not a task agent)', async () => {
       const tokenData = { ...parentTokenData, taskId: '' };
-      const result = await handleSendMessageToSubtask(1, { taskId: 'child-001', message: 'hello' }, tokenData, mockEnv as Env);
+      const result = await handleSendMessageToSubtask(
+        1,
+        { taskId: 'child-001', message: 'hello' },
+        tokenData,
+        mockEnv as Env
+      );
 
       expect(result.error).toBeDefined();
       expect(result.error?.message).toContain('Only task agents');
     });
 
     it('should reject when taskId param is missing', async () => {
-      const result = await handleSendMessageToSubtask(1, { message: 'hello' }, parentTokenData, mockEnv as Env);
+      const result = await handleSendMessageToSubtask(
+        1,
+        { message: 'hello' },
+        parentTokenData,
+        mockEnv as Env
+      );
 
       expect(result.error).toBeDefined();
       expect(result.error?.message).toContain('taskId is required');
     });
 
     it('should reject when message param is missing', async () => {
-      const result = await handleSendMessageToSubtask(1, { taskId: 'child-001' }, parentTokenData, mockEnv as Env);
+      const result = await handleSendMessageToSubtask(
+        1,
+        { taskId: 'child-001' },
+        parentTokenData,
+        mockEnv as Env
+      );
 
       expect(result.error).toBeDefined();
       expect(result.error?.message).toContain('message is required');
@@ -130,7 +145,7 @@ describe('MCP Orchestration Communication Tools', () => {
         1,
         { taskId: 'nonexistent', message: 'hello' },
         parentTokenData,
-        mockEnv as Env,
+        mockEnv as Env
       );
 
       expect(result.error).toBeDefined();
@@ -139,20 +154,23 @@ describe('MCP Orchestration Communication Tools', () => {
 
     it('should reject when caller is not the direct parent', async () => {
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'in_progress',
-          workspace_id: 'ws-child-001',
-          project_id: 'proj-001',
-          parent_task_id: 'some-other-task',
-        }],
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspaceId: 'ws-child-001',
+            projectId: 'proj-001',
+            chatSessionId: 'chat-child-001',
+            parentTaskId: 'some-other-task',
+          },
+        ],
       ]);
 
       const result = await handleSendMessageToSubtask(
         1,
         { taskId: 'child-001', message: 'hello' },
         parentTokenData,
-        mockEnv as Env,
+        mockEnv as Env
       );
 
       expect(result.error).toBeDefined();
@@ -161,20 +179,23 @@ describe('MCP Orchestration Communication Tools', () => {
 
     it('should reject when child task is in a terminal status', async () => {
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'completed',
-          workspace_id: 'ws-child-001',
-          project_id: 'proj-001',
-          parent_task_id: 'parent-task-001',
-        }],
+        [
+          {
+            id: 'child-001',
+            status: 'completed',
+            workspaceId: 'ws-child-001',
+            projectId: 'proj-001',
+            chatSessionId: 'chat-child-001',
+            parentTaskId: 'parent-task-001',
+          },
+        ],
       ]);
 
       const result = await handleSendMessageToSubtask(
         1,
         { taskId: 'child-001', message: 'hello' },
         parentTokenData,
-        mockEnv as Env,
+        mockEnv as Env
       );
 
       expect(result.error).toBeDefined();
@@ -183,20 +204,23 @@ describe('MCP Orchestration Communication Tools', () => {
 
     it('should reject when child has no workspace assigned', async () => {
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'queued',
-          workspace_id: null,
-          project_id: 'proj-001',
-          parent_task_id: 'parent-task-001',
-        }],
+        [
+          {
+            id: 'child-001',
+            status: 'queued',
+            workspaceId: null,
+            projectId: 'proj-001',
+            chatSessionId: 'chat-child-001',
+            parentTaskId: 'parent-task-001',
+          },
+        ],
       ]);
 
       const result = await handleSendMessageToSubtask(
         1,
         { taskId: 'child-001', message: 'hello' },
         parentTokenData,
-        mockEnv as Env,
+        mockEnv as Env
       );
 
       expect(result.error).toBeDefined();
@@ -205,36 +229,51 @@ describe('MCP Orchestration Communication Tools', () => {
 
     it('should deliver message successfully (happy path)', async () => {
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'in_progress',
-          workspace_id: 'ws-child-001',
-          project_id: 'proj-001',
-          parent_task_id: 'parent-task-001',
-        }],
-        [{
-          id: 'ws-child-001',
-          node_id: 'node-001',
-          chat_session_id: 'chat-child-001',
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspaceId: 'ws-child-001',
+            projectId: 'proj-001',
+            chatSessionId: 'chat-child-001',
+            parentTaskId: 'parent-task-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+          nodeId: 'node-001',
+          projectId: 'proj-001',
+          userId: 'user-001',
           status: 'running',
-        }],
-        [{
-          id: 'agent-session-001',
-        }],
-        [{
-          chat_session_id: 'chat-child-001',
-        }],
+          chatSessionId: 'chat-child-001',
+          nodeStatus: 'running',
+          nodeUserId: 'user-001',
+          },
+        ],
+        [
+          {
+            id: 'agent-session-001',
+          },
+        ],
+        [
+          {
+            chatSessionId: 'chat-child-001',
+          },
+        ],
       ]);
 
       const result = await handleSendMessageToSubtask(
         1,
         { taskId: 'child-001', message: 'Please focus on the auth module' },
         parentTokenData,
-        mockEnv as Env,
+        mockEnv as Env
       );
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.delivered).toBe(true);
 
       expect(mockSendPromptToAgentOnNode).toHaveBeenCalledWith(
@@ -244,7 +283,7 @@ describe('MCP Orchestration Communication Tools', () => {
         'Please focus on the auth module',
         mockEnv,
         'user-001',
-        'persisted-msg-001',
+        'persisted-msg-001'
       );
       expect(mockPersistOrchestrationPrompt).toHaveBeenCalledWith({
         env: mockEnv,
@@ -258,51 +297,66 @@ describe('MCP Orchestration Communication Tools', () => {
         senderId: 'ws-parent-001',
       });
       expect(mockPersistOrchestrationPrompt.mock.invocationCallOrder[0]).toBeLessThan(
-        mockSendPromptToAgentOnNode.mock.invocationCallOrder[0],
+        mockSendPromptToAgentOnNode.mock.invocationCallOrder[0]
       );
     });
 
     it('should return agent_busy when child responds with 409', async () => {
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'in_progress',
-          workspace_id: 'ws-child-001',
-          project_id: 'proj-001',
-          parent_task_id: 'parent-task-001',
-        }],
-        [{
-          id: 'ws-child-001',
-          node_id: 'node-001',
-          chat_session_id: 'chat-child-001',
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspaceId: 'ws-child-001',
+            projectId: 'proj-001',
+            chatSessionId: 'chat-child-001',
+            parentTaskId: 'parent-task-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+          nodeId: 'node-001',
+          projectId: 'proj-001',
+          userId: 'user-001',
           status: 'running',
-        }],
-        [{
-          id: 'agent-session-001',
-        }],
-        [{
-          chat_session_id: 'chat-child-001',
-        }],
+          chatSessionId: 'chat-child-001',
+          nodeStatus: 'running',
+          nodeUserId: 'user-001',
+          },
+        ],
+        [
+          {
+            id: 'agent-session-001',
+          },
+        ],
+        [
+          {
+            chatSessionId: 'chat-child-001',
+          },
+        ],
       ]);
 
       mockSendPromptToAgentOnNode.mockRejectedValue(
-        new Error('Node Agent request failed: 409 Agent is busy'),
+        new Error('Node Agent request failed: 409 Agent is busy')
       );
 
       const result = await handleSendMessageToSubtask(
         1,
         { taskId: 'child-001', message: 'hello' },
         parentTokenData,
-        mockEnv as Env,
+        mockEnv as Env
       );
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.delivered).toBe(false);
       expect(content.queued).toBe(true);
       expect(content.reason).toBe('agent_busy');
       expect(mockPersistOrchestrationPrompt.mock.invocationCallOrder[0]).toBeLessThan(
-        mockSendPromptToAgentOnNode.mock.invocationCallOrder[0],
+        mockSendPromptToAgentOnNode.mock.invocationCallOrder[0]
       );
       expect(mockEnqueueMailboxMessage).toHaveBeenCalledWith(
         mockEnv,
@@ -311,28 +365,39 @@ describe('MCP Orchestration Communication Tools', () => {
           targetSessionId: 'chat-child-001',
           sourceTaskId: 'parent-task-001',
           content: 'hello',
-        }),
+        })
       );
     });
 
     it('should return internal error for non-409 delivery failures', async () => {
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'in_progress',
-          workspace_id: 'ws-child-001',
-          project_id: 'proj-001',
-          parent_task_id: 'parent-task-001',
-        }],
-        [{
-          id: 'ws-child-001',
-          node_id: 'node-001',
-          chat_session_id: 'chat-child-001',
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspaceId: 'ws-child-001',
+            projectId: 'proj-001',
+            chatSessionId: 'chat-child-001',
+            parentTaskId: 'parent-task-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+          nodeId: 'node-001',
+          projectId: 'proj-001',
+          userId: 'user-001',
           status: 'running',
-        }],
-        [{
-          id: 'agent-session-001',
-        }],
+          chatSessionId: 'chat-child-001',
+          nodeStatus: 'running',
+          nodeUserId: 'user-001',
+          },
+        ],
+        [
+          {
+            id: 'agent-session-001',
+          },
+        ],
       ]);
 
       mockSendPromptToAgentOnNode.mockRejectedValue(new Error('Network timeout'));
@@ -341,7 +406,7 @@ describe('MCP Orchestration Communication Tools', () => {
         1,
         { taskId: 'child-001', message: 'hello' },
         parentTokenData,
-        mockEnv as Env,
+        mockEnv as Env
       );
 
       expect(result.error).toBeDefined();
@@ -351,19 +416,28 @@ describe('MCP Orchestration Communication Tools', () => {
 
     it('should reject when no running agent session exists', async () => {
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'in_progress',
-          workspace_id: 'ws-child-001',
-          project_id: 'proj-001',
-          parent_task_id: 'parent-task-001',
-        }],
-        [{
-          id: 'ws-child-001',
-          node_id: 'node-001',
-          chat_session_id: 'chat-child-001',
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspaceId: 'ws-child-001',
+            projectId: 'proj-001',
+            chatSessionId: 'chat-child-001',
+            parentTaskId: 'parent-task-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+          nodeId: 'node-001',
+          projectId: 'proj-001',
+          userId: 'user-001',
           status: 'running',
-        }],
+          chatSessionId: 'chat-child-001',
+          nodeStatus: 'running',
+          nodeUserId: 'user-001',
+          },
+        ],
         [],
       ]);
 
@@ -371,7 +445,7 @@ describe('MCP Orchestration Communication Tools', () => {
         1,
         { taskId: 'child-001', message: 'hello' },
         parentTokenData,
-        mockEnv as Env,
+        mockEnv as Env
       );
 
       expect(result.error).toBeDefined();
@@ -380,22 +454,33 @@ describe('MCP Orchestration Communication Tools', () => {
 
     it('should truncate message to max length', async () => {
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'in_progress',
-          workspace_id: 'ws-child-001',
-          project_id: 'proj-001',
-          parent_task_id: 'parent-task-001',
-        }],
-        [{
-          id: 'ws-child-001',
-          node_id: 'node-001',
-          chat_session_id: 'chat-child-001',
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspaceId: 'ws-child-001',
+            projectId: 'proj-001',
+            chatSessionId: 'chat-child-001',
+            parentTaskId: 'parent-task-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+          nodeId: 'node-001',
+          projectId: 'proj-001',
+          userId: 'user-001',
           status: 'running',
-        }],
-        [{
-          id: 'agent-session-001',
-        }],
+          chatSessionId: 'chat-child-001',
+          nodeStatus: 'running',
+          nodeUserId: 'user-001',
+          },
+        ],
+        [
+          {
+            id: 'agent-session-001',
+          },
+        ],
       ]);
 
       const longMessage = 'A'.repeat(40_000);
@@ -404,7 +489,7 @@ describe('MCP Orchestration Communication Tools', () => {
         1,
         { taskId: 'child-001', message: longMessage },
         parentTokenData,
-        mockEnv as Env,
+        mockEnv as Env
       );
 
       const sentMessage = mockSendPromptToAgentOnNode.mock.calls[0][3] as string;
@@ -424,20 +509,23 @@ describe('MCP Orchestration Communication Tools', () => {
 
     it('should reject when caller is not direct parent', async () => {
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'in_progress',
-          workspace_id: 'ws-child-001',
-          project_id: 'proj-001',
-          parent_task_id: 'not-my-parent',
-        }],
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspaceId: 'ws-child-001',
+            projectId: 'proj-001',
+            chatSessionId: 'chat-child-001',
+            parentTaskId: 'not-my-parent',
+          },
+        ],
       ]);
 
       const result = await handleStopSubtask(
         1,
         { taskId: 'child-001' },
         parentTokenData,
-        mockEnv as Env,
+        mockEnv as Env
       );
 
       expect(result.error).toBeDefined();
@@ -446,33 +534,46 @@ describe('MCP Orchestration Communication Tools', () => {
 
     it('should stop child without warning when no reason provided', async () => {
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'in_progress',
-          workspace_id: 'ws-child-001',
-          project_id: 'proj-001',
-          parent_task_id: 'parent-task-001',
-        }],
-        [{
-          id: 'ws-child-001',
-          node_id: 'node-001',
-          chat_session_id: 'chat-child-001',
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspaceId: 'ws-child-001',
+            projectId: 'proj-001',
+            chatSessionId: 'chat-child-001',
+            parentTaskId: 'parent-task-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+          nodeId: 'node-001',
+          projectId: 'proj-001',
+          userId: 'user-001',
           status: 'running',
-        }],
-        [{
-          id: 'agent-session-001',
-        }],
+          chatSessionId: 'chat-child-001',
+          nodeStatus: 'running',
+          nodeUserId: 'user-001',
+          },
+        ],
+        [
+          {
+            id: 'agent-session-001',
+          },
+        ],
       ]);
 
       const result = await handleStopSubtask(
         1,
         { taskId: 'child-001' },
         parentTokenData,
-        mockEnv as Env,
+        mockEnv as Env
       );
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.stopped).toBe(true);
       expect(content.taskId).toBe('child-001');
 
@@ -483,7 +584,7 @@ describe('MCP Orchestration Communication Tools', () => {
         'ws-child-001',
         'agent-session-001',
         mockEnv,
-        'user-001',
+        'user-001'
       );
     });
 
@@ -491,29 +592,40 @@ describe('MCP Orchestration Communication Tools', () => {
       const envWithShortGrace = { ...mockEnv, ORCHESTRATOR_STOP_GRACE_MS: '10' };
 
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'in_progress',
-          workspace_id: 'ws-child-001',
-          project_id: 'proj-001',
-          parent_task_id: 'parent-task-001',
-        }],
-        [{
-          id: 'ws-child-001',
-          node_id: 'node-001',
-          chat_session_id: 'chat-child-001',
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspaceId: 'ws-child-001',
+            projectId: 'proj-001',
+            chatSessionId: 'chat-child-001',
+            parentTaskId: 'parent-task-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+          nodeId: 'node-001',
+          projectId: 'proj-001',
+          userId: 'user-001',
           status: 'running',
-        }],
-        [{
-          id: 'agent-session-001',
-        }],
+          chatSessionId: 'chat-child-001',
+          nodeStatus: 'running',
+          nodeUserId: 'user-001',
+          },
+        ],
+        [
+          {
+            id: 'agent-session-001',
+          },
+        ],
       ]);
 
       const result = await handleStopSubtask(
         1,
         { taskId: 'child-001', reason: 'Task is no longer needed' },
         parentTokenData,
-        envWithShortGrace as unknown as Env,
+        envWithShortGrace as unknown as Env
       );
 
       expect(result.error).toBeUndefined();
@@ -524,7 +636,7 @@ describe('MCP Orchestration Communication Tools', () => {
         'agent-session-001',
         '[STOP REQUESTED BY PARENT] Task is no longer needed',
         envWithShortGrace,
-        'user-001',
+        'user-001'
       );
 
       expect(mockStopAgentSessionOnNode).toHaveBeenCalledWith(
@@ -532,7 +644,7 @@ describe('MCP Orchestration Communication Tools', () => {
         'ws-child-001',
         'agent-session-001',
         envWithShortGrace,
-        'user-001',
+        'user-001'
       );
     });
 
@@ -540,37 +652,50 @@ describe('MCP Orchestration Communication Tools', () => {
       const envWithShortGrace = { ...mockEnv, ORCHESTRATOR_STOP_GRACE_MS: '10' };
 
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'in_progress',
-          workspace_id: 'ws-child-001',
-          project_id: 'proj-001',
-          parent_task_id: 'parent-task-001',
-        }],
-        [{
-          id: 'ws-child-001',
-          node_id: 'node-001',
-          chat_session_id: 'chat-child-001',
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspaceId: 'ws-child-001',
+            projectId: 'proj-001',
+            chatSessionId: 'chat-child-001',
+            parentTaskId: 'parent-task-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+          nodeId: 'node-001',
+          projectId: 'proj-001',
+          userId: 'user-001',
           status: 'running',
-        }],
-        [{
-          id: 'agent-session-001',
-        }],
+          chatSessionId: 'chat-child-001',
+          nodeStatus: 'running',
+          nodeUserId: 'user-001',
+          },
+        ],
+        [
+          {
+            id: 'agent-session-001',
+          },
+        ],
       ]);
 
       mockSendPromptToAgentOnNode.mockRejectedValue(
-        new Error('Node Agent request failed: 409 Agent is busy'),
+        new Error('Node Agent request failed: 409 Agent is busy')
       );
 
       const result = await handleStopSubtask(
         1,
         { taskId: 'child-001', reason: 'stopping anyway' },
         parentTokenData,
-        envWithShortGrace as unknown as Env,
+        envWithShortGrace as unknown as Env
       );
 
       expect(result.error).toBeUndefined();
-      const content = JSON.parse((result.result as { content: Array<{ text: string }> }).content[0].text);
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
       expect(content.stopped).toBe(true);
 
       expect(mockStopAgentSessionOnNode).toHaveBeenCalled();
@@ -578,22 +703,33 @@ describe('MCP Orchestration Communication Tools', () => {
 
     it('should return internal error when hard stop fails', async () => {
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'in_progress',
-          workspace_id: 'ws-child-001',
-          project_id: 'proj-001',
-          parent_task_id: 'parent-task-001',
-        }],
-        [{
-          id: 'ws-child-001',
-          node_id: 'node-001',
-          chat_session_id: 'chat-child-001',
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspaceId: 'ws-child-001',
+            projectId: 'proj-001',
+            chatSessionId: 'chat-child-001',
+            parentTaskId: 'parent-task-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+          nodeId: 'node-001',
+          projectId: 'proj-001',
+          userId: 'user-001',
           status: 'running',
-        }],
-        [{
-          id: 'agent-session-001',
-        }],
+          chatSessionId: 'chat-child-001',
+          nodeStatus: 'running',
+          nodeUserId: 'user-001',
+          },
+        ],
+        [
+          {
+            id: 'agent-session-001',
+          },
+        ],
       ]);
 
       mockStopAgentSessionOnNode.mockRejectedValue(new Error('VM agent unreachable'));
@@ -602,7 +738,7 @@ describe('MCP Orchestration Communication Tools', () => {
         1,
         { taskId: 'child-001' },
         parentTokenData,
-        mockEnv as Env,
+        mockEnv as Env
       );
 
       expect(result.error).toBeDefined();
@@ -612,20 +748,23 @@ describe('MCP Orchestration Communication Tools', () => {
 
     it('should reject when child task is completed', async () => {
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'completed',
-          workspace_id: 'ws-child-001',
-          project_id: 'proj-001',
-          parent_task_id: 'parent-task-001',
-        }],
+        [
+          {
+            id: 'child-001',
+            status: 'completed',
+            workspaceId: 'ws-child-001',
+            projectId: 'proj-001',
+            chatSessionId: 'chat-child-001',
+            parentTaskId: 'parent-task-001',
+          },
+        ],
       ]);
 
       const result = await handleStopSubtask(
         1,
         { taskId: 'child-001' },
         parentTokenData,
-        mockEnv as Env,
+        mockEnv as Env
       );
 
       expect(result.error).toBeDefined();
@@ -634,30 +773,36 @@ describe('MCP Orchestration Communication Tools', () => {
 
     it('should update task status to failed with stop reason', async () => {
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'in_progress',
-          workspace_id: 'ws-child-001',
-          project_id: 'proj-001',
-          parent_task_id: 'parent-task-001',
-        }],
-        [{
-          id: 'ws-child-001',
-          node_id: 'node-001',
-          chat_session_id: 'chat-child-001',
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspaceId: 'ws-child-001',
+            projectId: 'proj-001',
+            chatSessionId: 'chat-child-001',
+            parentTaskId: 'parent-task-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+          nodeId: 'node-001',
+          projectId: 'proj-001',
+          userId: 'user-001',
           status: 'running',
-        }],
-        [{
-          id: 'agent-session-001',
-        }],
+          chatSessionId: 'chat-child-001',
+          nodeStatus: 'running',
+          nodeUserId: 'user-001',
+          },
+        ],
+        [
+          {
+            id: 'agent-session-001',
+          },
+        ],
       ]);
 
-      await handleStopSubtask(
-        1,
-        { taskId: 'child-001' },
-        parentTokenData,
-        mockEnv as Env,
-      );
+      await handleStopSubtask(1, { taskId: 'child-001' }, parentTokenData, mockEnv as Env);
 
       expect(mockD1.prepare.mock.calls.length).toBeGreaterThanOrEqual(4);
       expect(mockStopAgentSessionOnNode).toHaveBeenCalled();
@@ -665,26 +810,35 @@ describe('MCP Orchestration Communication Tools', () => {
 
     it('should reject when node is in destroyed state', async () => {
       mockD1ResultSequence([
-        [{
-          id: 'child-001',
-          status: 'in_progress',
-          workspace_id: 'ws-child-001',
-          project_id: 'proj-001',
-          parent_task_id: 'parent-task-001',
-        }],
-        [{
-          id: 'ws-child-001',
-          node_id: 'node-001',
-          chat_session_id: 'chat-child-001',
-          status: 'destroying',
-        }],
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspaceId: 'ws-child-001',
+            projectId: 'proj-001',
+            chatSessionId: 'chat-child-001',
+            parentTaskId: 'parent-task-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+          nodeId: 'node-001',
+          projectId: 'proj-001',
+          userId: 'user-001',
+          status: 'running',
+          chatSessionId: 'chat-child-001',
+          nodeStatus: 'destroyed',
+          nodeUserId: 'user-001',
+          },
+        ],
       ]);
 
       const result = await handleStopSubtask(
         1,
         { taskId: 'child-001' },
         parentTokenData,
-        mockEnv as Env,
+        mockEnv as Env
       );
 
       expect(result.error).toBeDefined();

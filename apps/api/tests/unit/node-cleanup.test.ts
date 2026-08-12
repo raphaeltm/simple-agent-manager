@@ -5,15 +5,12 @@
  * 1. Layer 3 max lifetime skips nodes with active workspaces (no absolute ceiling)
  * 2. Nodes without active workspaces are destroyed normally
  */
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
 import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/node-phases';
-import {
-  emptyResult,
-  resolveCleanupConfig,
-} from '../../src/scheduled/node-cleanup/shared';
+import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
 
 // Mock deleteNodeResources
 vi.mock('../../src/services/nodes', () => ({
@@ -67,15 +64,61 @@ function mockPreparedStatement(results: unknown[] = []) {
  */
 function createMockEnv(
   prepareResponses: Map<string, unknown[]> = new Map(),
-  overrides: Partial<Env> = {},
+  overrides: Partial<Env> = {}
 ): Env {
+  function findWorkspace(workspaceId: string) {
+    for (const rows of prepareResponses.values()) {
+      for (const row of rows as Array<Record<string, unknown>>) {
+        const id = row.id ?? row.workspace_id;
+        if (id === workspaceId) {
+          return {
+            id: workspaceId,
+            node_id: row.node_id,
+            user_id: row.user_id,
+            project_id: row.project_id ?? null,
+            status: row.status ?? 'running',
+          };
+        }
+      }
+    }
+    return null;
+  }
+
   const mockDb = {
     prepare: vi.fn((sql: string) => {
+      if (sql.includes('SELECT id, node_id, user_id, project_id, status')) {
+        return {
+          bind: vi.fn((workspaceId: string) => ({
+            first: vi.fn().mockResolvedValue(findWorkspace(workspaceId)),
+          })),
+        };
+      }
+      if (sql.includes("SET status = 'stopping'")) {
+        return {
+          bind: vi.fn().mockReturnValue({
+            run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
+          }),
+        };
+      }
+      if (sql.includes('SET status = ?') || sql.includes("SET status = 'deleted'")) {
+        return {
+          bind: vi.fn().mockReturnValue({
+            run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
+          }),
+        };
+      }
+      if (sql.includes('WHERE node_id = ? AND id != ?')) {
+        return {
+          bind: vi.fn().mockReturnValue({
+            first: vi.fn().mockResolvedValue(null),
+          }),
+        };
+      }
       if (sql.includes("WHERE n.status = 'stopped'")) {
         return mockPreparedStatement(prepareResponses.get("WHERE n.status = 'stopped'") ?? []);
       }
       const orderedResponses = Array.from(prepareResponses.entries()).sort(
-        ([left], [right]) => right.length - left.length,
+        ([left], [right]) => right.length - left.length
       );
       for (const [substring, results] of orderedResponses) {
         if (sql.includes(substring)) {
@@ -127,7 +170,7 @@ describe('runNodeCleanupSweep', () => {
         },
       ]);
       // Orphan checks: empty
-      responses.set('w.status = \'running\'', []);
+      responses.set("w.status = 'running'", []);
       responses.set('n.warm_since IS NULL', []);
 
       const env = createMockEnv(responses);
@@ -154,7 +197,7 @@ describe('runNodeCleanupSweep', () => {
           active_ws_count: 0,
         },
       ]);
-      responses.set('w.status = \'running\'', []);
+      responses.set("w.status = 'running'", []);
       responses.set('n.warm_since IS NULL', []);
 
       const env = createMockEnv(responses);
@@ -183,7 +226,7 @@ describe('runNodeCleanupSweep', () => {
           active_ws_count: 2,
         },
       ]);
-      responses.set('w.status = \'running\'', []);
+      responses.set("w.status = 'running'", []);
       responses.set('n.warm_since IS NULL', []);
 
       const env = createMockEnv(responses);
@@ -199,8 +242,9 @@ describe('runNodeCleanupSweep', () => {
 
     await runNodeCleanupSweep(env);
 
-    const nodeCandidateQueries = vi.mocked(env.DATABASE.prepare).mock.calls
-      .map(([sql]) => sql)
+    const nodeCandidateQueries = vi
+      .mocked(env.DATABASE.prepare)
+      .mock.calls.map(([sql]) => sql)
       .filter((sql) => sql.includes('FROM nodes n'));
     expect(nodeCandidateQueries).toHaveLength(6);
     expect(nodeCandidateQueries.every((sql) => sql.includes('cleanup_backoff_until'))).toBe(true);
@@ -218,8 +262,9 @@ describe('runNodeCleanupSweep', () => {
         {
           id: 'node-warm',
           user_id: 'user-1',
+          status: 'running',
           warm_since: warmSince,
-          running_ws_count: 0,
+          active_ws_count: 0,
         },
       ]);
       // Layer 3: no auto-provisioned nodes past lifetime
@@ -354,7 +399,7 @@ describe('runNodeCleanupSweep', () => {
         'ws-recovery-orphan',
         env,
         'user-1',
-        { requestTimeoutMs: 5_000 },
+        { requestTimeoutMs: 5_000 }
       );
     });
   });
@@ -407,7 +452,7 @@ describe('runNodeCleanupSweep', () => {
 
       const prepare = env.DATABASE.prepare as unknown as ReturnType<typeof vi.fn>;
       const cfQueryIndex = prepare.mock.calls.findIndex(([sql]) =>
-        String(sql).includes("n.runtime = 'cf-container'"),
+        String(sql).includes("n.runtime = 'cf-container'")
       );
       expect(cfQueryIndex).toBeGreaterThanOrEqual(0);
       const cfStatement = prepare.mock.results[cfQueryIndex]?.value as {
@@ -467,6 +512,25 @@ describe('node cleanup permanent-failure escape', () => {
                   .slice(0, limit),
               };
             }),
+            first: vi.fn(async () => {
+              if (sql.includes('SELECT id, node_id, user_id, project_id, status')) {
+                const workspaceId = args[0] as string;
+                const candidate = candidates.find((item) => item.workspace_id === workspaceId);
+                return candidate
+                  ? {
+                      id: candidate.workspace_id,
+                      node_id: candidate.node_id,
+                      user_id: candidate.user_id,
+                      project_id: null,
+                      status: 'running',
+                    }
+                  : null;
+              }
+              if (sql.includes('WHERE node_id = ? AND id != ?')) {
+                return null;
+              }
+              return null;
+            }),
             run: vi.fn(async () => {
               if (sql.includes('cleanup_backoff_until')) {
                 cleanupBackoffUntil.set(args[2] as string, args[0] as string);
@@ -482,9 +546,7 @@ describe('node cleanup permanent-failure escape', () => {
 
     const firstResult = emptyResult();
     await sweepTerminalCfContainers(env, now, config, firstResult);
-    expect(cleanupBackoffUntil.get('node-permanent-403')).toBe(
-      '2026-08-09T01:00:00.000Z',
-    );
+    expect(cleanupBackoffUntil.get('node-permanent-403')).toBe('2026-08-09T01:00:00.000Z');
     expect(firstResult).toMatchObject({ cfContainersDestroyed: 0, errors: 1 });
 
     const secondResult = emptyResult();
@@ -495,8 +557,9 @@ describe('node cleanup permanent-failure escape', () => {
       'node-healthy',
     ]);
     expect(secondResult).toMatchObject({ cfContainersDestroyed: 1, errors: 0 });
-    const candidateQuery = vi.mocked(env.DATABASE.prepare).mock.calls
-      .map(([sql]) => sql)
+    const candidateQuery = vi
+      .mocked(env.DATABASE.prepare)
+      .mock.calls.map(([sql]) => sql)
       .find((sql) => sql.includes('SELECT DISTINCT n.id'));
     expect(candidateQuery).toContain('cleanup_backoff_until');
   });

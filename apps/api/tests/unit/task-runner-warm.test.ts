@@ -10,7 +10,10 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('task runner warm node marking source contract', () => {
-  const taskRunnerFile = readFileSync(resolve(process.cwd(), 'src/services/task-runner.ts'), 'utf8');
+  const taskRunnerFile = readFileSync(
+    resolve(process.cwd(), 'src/services/task-runner.ts'),
+    'utf8'
+  );
 
   describe('warm pooling integration', () => {
     it('imports nodeLifecycleService', () => {
@@ -22,20 +25,24 @@ describe('task runner warm node marking source contract', () => {
       const cleanupSection = taskRunnerFile.slice(
         taskRunnerFile.indexOf('cleanupAutoProvisionedNode')
       );
-      expect(cleanupSection).toContain('nodeLifecycleService.markIdle(env, nodeId, userId, warmTimeoutOverrideMs)');
+      expect(cleanupSection).toContain(
+        'nodeLifecycleService.markIdle(env, nodeId, userId, warmTimeoutOverrideMs)'
+      );
     });
 
     it('still checks for active workspaces before marking idle', () => {
       expect(taskRunnerFile).toContain('activeWorkspaces.length > 0');
     });
 
-    it('falls back to stopNodeResources on markIdle failure', () => {
-      // If DO fails, fallback to direct stop
+    it('does not fall back to direct node destruction on markIdle failure', () => {
+      // CT-01: if the warm-state DO call fails, do not destroy the whole node.
+      // The scheduled cleanup sweep can retry from D1 state without crossing a
+      // stale workspace/container ownership boundary.
       const cleanupSection = taskRunnerFile.slice(
         taskRunnerFile.indexOf('function cleanupAutoProvisionedNode')
       );
       expect(cleanupSection).toContain('task_run.cleanup.mark_idle_failed');
-      expect(cleanupSection).toContain('stopNodeResources(nodeId, userId, env)');
+      expect(cleanupSection).not.toContain('stopNodeResources(nodeId, userId, env)');
     });
 
     it('markIdle failure does not propagate (best-effort with logging)', () => {
@@ -44,8 +51,7 @@ describe('task runner warm node marking source contract', () => {
       );
       // Outer catch catches markIdle errors
       expect(cleanupSection).toContain('catch (err)');
-      // Inner catch logs both failures for cron sweep to catch
-      expect(cleanupSection).toContain('task_run.cleanup.node_cleanup_total_failure');
+      expect(cleanupSection).not.toContain('task_run.cleanup.node_cleanup_total_failure');
     });
   });
 

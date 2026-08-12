@@ -108,11 +108,14 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
       workspaceId: 'workspace-stop-1',
       status: 'in_progress',
       errorMessage: null,
+      taskMode: 'conversation',
     };
     const workspace = {
       id: 'workspace-stop-1',
       projectId: 'project-stop-1',
       userId: 'user-stop-1',
+      status: 'running',
+      chatSessionId: 'session-stop-1',
     };
     const db = buildDb([[workspace], [workspace], [task]]);
     mocks.ensureSessionTaskBacked.mockResolvedValue(task);
@@ -164,11 +167,14 @@ describe('POST /api/projects/:projectId/sessions/:sessionId/stop cleanup', () =>
       workspaceId: 'workspace-task-backed-1',
       status: 'in_progress',
       errorMessage: null,
+      taskMode: 'conversation',
     };
     const workspace = {
       id: 'workspace-task-backed-1',
       projectId: 'project-stop-1',
       userId: 'user-stop-1',
+      status: 'running',
+      chatSessionId: 'session-task-backed-1',
     };
     const db = buildDb([[workspace], [workspace], [task]]);
     vi.mocked(drizzle).mockReturnValue(db as never);

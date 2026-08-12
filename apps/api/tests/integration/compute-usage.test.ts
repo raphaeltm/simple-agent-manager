@@ -30,6 +30,10 @@ describe('compute usage metering pipeline', () => {
     resolve(process.cwd(), 'src/durable-objects/task-runner/state-machine.ts'),
     'utf8'
   );
+  const taskRunnerServiceFile = readFileSync(
+    resolve(process.cwd(), 'src/services/task-runner.ts'),
+    'utf8'
+  );
   const workspaceStepsFile = readFileSync(
     resolve(process.cwd(), 'src/durable-objects/task-runner/workspace-steps.ts'),
     'utf8'
@@ -178,7 +182,8 @@ describe('compute usage metering pipeline', () => {
     });
 
     it('task-runner cleanup calls stopComputeTracking', () => {
-      expect(stateMachineFile).toContain('stopComputeTracking');
+      expect(stateMachineFile).toContain('cleanupTaskRun');
+      expect(taskRunnerServiceFile).toContain('stopComputeTracking');
     });
   });
 

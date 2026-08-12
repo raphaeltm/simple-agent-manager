@@ -12,14 +12,8 @@ import { resolve } from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
-const taskSubmitSource = readFileSync(
-  resolve(process.cwd(), 'src/routes/tasks/submit.ts'),
-  'utf8'
-);
-const taskRunsSource = readFileSync(
-  resolve(process.cwd(), 'src/routes/tasks/run.ts'),
-  'utf8'
-);
+const taskSubmitSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/submit.ts'), 'utf8');
+const taskRunsSource = readFileSync(resolve(process.cwd(), 'src/routes/tasks/run.ts'), 'utf8');
 const taskRunnerDoSource = [
   'index.ts',
   'types.ts',
@@ -28,7 +22,9 @@ const taskRunnerDoSource = [
   'agent-session-step.ts',
   'state-machine.ts',
   'helpers.ts',
-].map(f => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8')).join('\n');
+]
+  .map((f) => readFileSync(resolve(process.cwd(), 'src/durable-objects/task-runner', f), 'utf8'))
+  .join('\n');
 const projectDataDoSource = [
   readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/sessions.ts'), 'utf8'),
   readFileSync(resolve(process.cwd(), 'src/durable-objects/project-data/messages.ts'), 'utf8'),
@@ -93,9 +89,7 @@ describe('TDF-6 Fix 1: Single session creation point', () => {
   });
 
   it('TaskRunner DO initializes stepResults.chatSessionId from config', () => {
-    expect(taskRunnerDoSource).toContain(
-      'chatSessionId: input.config.chatSessionId ?? null'
-    );
+    expect(taskRunnerDoSource).toContain('chatSessionId: input.config.chatSessionId ?? null');
   });
 });
 
@@ -146,9 +140,7 @@ describe('TDF-6 Fix 2: No fallback session IDs', () => {
 
 describe('TDF-6 Fix 3: Workspace-session linking', () => {
   it('ProjectData DO has linkSessionToWorkspace method', () => {
-    expect(projectDataDoSource).toContain(
-      'async linkSessionToWorkspace('
-    );
+    expect(projectDataDoSource).toContain('async linkSessionToWorkspace(');
   });
 
   it('linkSessionToWorkspace accepts sessionId and workspaceId', () => {
@@ -170,9 +162,7 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
   });
 
   it('project-data service exports linkSessionToWorkspace wrapper', () => {
-    expect(projectDataServiceSource).toContain(
-      'export async function linkSessionToWorkspace('
-    );
+    expect(projectDataServiceSource).toContain('export async function linkSessionToWorkspace(');
   });
 
   it('service wrapper calls DO stub.linkSessionToWorkspace', () => {
@@ -183,7 +173,7 @@ describe('TDF-6 Fix 3: Workspace-session linking', () => {
 
   it('TaskRunner DO updates workspace.chatSessionId via ensureSessionLinked', () => {
     // The D1 update is in ensureSessionLinked (called from handleWorkspaceCreation)
-    expect(taskRunnerDoSource).toContain('UPDATE workspaces SET chat_session_id = ?');
+    expect(taskRunnerDoSource).toContain('SET chat_session_id = ?, updated_at = ?');
     expect(taskRunnerDoSource).toContain('state.stepResults.chatSessionId');
 
     // handleWorkspaceCreation calls ensureSessionLinked
@@ -250,7 +240,9 @@ describe('TDF-6 Fix 4: Required session and message persistence', () => {
 
 describe('TDF-6 Fix 5: task-runs route creates session (no regression)', () => {
   it('task-runs imports projectDataService', () => {
-    expect(taskRunsSource).toContain("import * as projectDataService from '../../services/project-data'");
+    expect(taskRunsSource).toContain(
+      "import * as projectDataService from '../../services/project-data'"
+    );
   });
 
   it('task-runs creates a session via projectDataService.createSession', () => {
@@ -292,9 +284,7 @@ describe('TDF-6: TaskRunner DO service chatSessionId passthrough', () => {
   });
 
   it('startTaskRunnerDO passes chatSessionId in config', () => {
-    expect(taskRunnerDoServiceSource).toContain(
-      'chatSessionId: input.chatSessionId ?? null'
-    );
+    expect(taskRunnerDoServiceSource).toContain('chatSessionId: input.chatSessionId ?? null');
   });
 
   it('TaskRunConfig interface includes chatSessionId field', () => {

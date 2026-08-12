@@ -474,17 +474,17 @@ describe('failTask', () => {
     expect(storageWrites.at(-1)?.stepResults.mcpToken).toBeNull();
   });
 
-  it('updates workspace status when VM cleanup fails and does not mask task failure', async () => {
+  it('delegates workspace cleanup and does not mask task failure when cleanup fails', async () => {
     const { dbState, rc } = createContext();
     seedTask(dbState);
     dbState.workspaces.set('workspace-1', { id: 'workspace-1', status: 'running' });
-    stopWorkspaceOnNodeMock.mockRejectedValueOnce(new Error('VM agent unreachable'));
+    cleanupTaskRunMock.mockRejectedValueOnce(new Error('VM agent unreachable'));
     const state = makeState();
 
     await failTask(state, 'workspace cleanup should not mask task failure', rc);
 
-    expect(stopWorkspaceOnNodeMock).toHaveBeenCalledWith('node-1', 'workspace-1', rc.env, 'user-1');
-    expect(dbState.workspaces.get('workspace-1')?.status).toBe('stopped');
+    expect(cleanupTaskRunMock).toHaveBeenCalledWith('task-1', rc.env, undefined);
+    expect(stopWorkspaceOnNodeMock).not.toHaveBeenCalled();
     expect(dbState.tasks.get('task-1')).toMatchObject({
       status: 'failed',
       error_message: 'workspace cleanup should not mask task failure',

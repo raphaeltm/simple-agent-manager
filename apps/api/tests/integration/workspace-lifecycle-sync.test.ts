@@ -77,7 +77,7 @@ describe('workspace lifecycle synchronization', () => {
   describe('orphaned workspace cleanup (not just flagging)', () => {
     it('cron sweep stops orphaned workspaces on VM agent', () => {
       expect(cleanupFile).toContain('stopWorkspaceOnNode');
-      expect(cleanupFile).toContain('node_cleanup.orphan_stop_on_node_failed');
+      expect(cleanupFile).toContain('node_cleanup.orphan_workspace_stop_failed');
     });
 
     it('cron sweep updates orphaned workspace status to stopped in D1', () => {
