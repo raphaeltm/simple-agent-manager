@@ -41,7 +41,7 @@ export async function sweepTerminalCfContainers(
   result: NodeCleanupResult
 ): Promise<void> {
   const candidates = await env.DATABASE.prepare(
-    `SELECT DISTINCT n.id as node_id, n.user_id, w.id as workspace_id, t.id as task_id, t.status as task_status
+    `SELECT DISTINCT n.id as node_id, n.user_id, w.id as workspace_id, w.project_id, t.id as task_id, t.status as task_status
      FROM nodes n
      INNER JOIN workspaces w ON w.node_id = n.id
      INNER JOIN tasks t ON t.workspace_id = w.id
@@ -51,6 +51,19 @@ export async function sweepTerminalCfContainers(
        AND n.node_class != 'user-owned'
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        AND w.status IN ('running', 'creating', 'recovery', 'sleeping', 'stopped')
+       AND t.project_id IS w.project_id
+       AND (
+         t.chat_session_id IS NULL
+         OR (
+           t.task_mode = 'conversation'
+           AND w.chat_session_id = t.chat_session_id
+           AND w.user_id = t.user_id
+         )
+         OR (
+           t.task_mode != 'conversation'
+           AND (w.chat_session_id IS NULL OR w.chat_session_id = t.chat_session_id)
+         )
+       )
        AND t.status IN ('completed', 'failed', 'cancelled')
        AND NOT EXISTS (
          SELECT 1 FROM tasks active
@@ -70,6 +83,7 @@ export async function sweepTerminalCfContainers(
       node_id: string;
       user_id: string;
       workspace_id: string;
+      project_id: string | null;
       task_id: string;
       task_status: string;
     }>();
@@ -88,6 +102,7 @@ export async function sweepTerminalCfContainers(
         workspaceId: candidate.workspace_id,
         nodeId: candidate.node_id,
         userId: candidate.user_id,
+        projectId: candidate.project_id,
         allowedStatuses: ['running', 'creating', 'pending', 'recovery', 'sleeping', 'stopped'],
         taskId: candidate.task_id,
         source: 'node_cleanup.cf_container_terminal_task',
@@ -115,7 +130,9 @@ export async function sweepTerminalCfContainers(
         continue;
       }
 
-      await stopNodeResources(candidate.node_id, candidate.user_id, env);
+      await stopNodeResources(candidate.node_id, candidate.user_id, env, {
+        exclusiveWorkspaceId: candidate.workspace_id,
+      });
       await completeWorkspaceCleanupClaim(env, claim, 'deleted');
 
       await persistError(

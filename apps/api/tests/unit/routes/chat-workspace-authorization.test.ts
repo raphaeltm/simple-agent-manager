@@ -622,7 +622,9 @@ describe('POST /sessions/:sessionId/stop — destructive-use revalidation', () =
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({ status: 'stopped', workspaceDeleted: true });
-    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-caller', CALLER, env);
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-caller', CALLER, env, {
+      exclusiveWorkspaceId: 'ws-caller-active',
+    });
     expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT, 'session-valid');
     expect((await taskRows())[0].status).toBe('cancelled');
   });
@@ -655,7 +657,9 @@ describe('POST /sessions/:sessionId/stop — destructive-use revalidation', () =
     const response = await stopSession(PROJECT, 'session-shared-runner');
 
     expect(response.status).toBe(200);
-    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-shared-runner', CALLER, env);
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-shared-runner', CALLER, env, {
+      exclusiveWorkspaceId: 'ws-shared-runner',
+    });
   });
 
   it('CONTROL: an unbound session remains archivable', async () => {
@@ -775,7 +779,9 @@ describe('terminal cleanup service — internal defence in depth', () => {
     });
 
     expect(mocks.stopSession).toHaveBeenCalledWith(env, PROJECT, 'session-internal-valid');
-    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-internal-valid', OTHER_USER, env);
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-internal-valid', OTHER_USER, env, {
+      exclusiveWorkspaceId: 'ws-internal-valid',
+    });
   });
 
   it('ATTACK: internal completion rejects a modern chat task when the workspace backlink is null', async () => {
@@ -824,7 +830,9 @@ describe('terminal cleanup service — internal defence in depth', () => {
     });
 
     expect(mocks.stopSession).not.toHaveBeenCalled();
-    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-legacy-task-backlink', CALLER, env);
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-legacy-task-backlink', CALLER, env, {
+      exclusiveWorkspaceId: 'ws-legacy-task-backlink',
+    });
   });
 
   it('ATTACK: active linked task blocks cleanup before any destructive boundary call', async () => {
@@ -1001,6 +1009,8 @@ describe('SAM stop_subtask — workspace runtime boundary authorization', () => 
       env,
       CALLER
     );
-    expect(mocks.stopNodeResources).toHaveBeenCalledWith(fixture.nodeId, CALLER, env);
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith(fixture.nodeId, CALLER, env, {
+      exclusiveWorkspaceId: fixture.workspaceId,
+    });
   });
 });

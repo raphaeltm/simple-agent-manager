@@ -89,7 +89,7 @@ function seedNode(row: {
 function seedAutoProvisionedTask(taskId: string, nodeId: string): void {
   sqlite
     ?.prepare(
-      `INSERT INTO tasks (id, project_id, workspace_id, status, auto_provisioned_node_id, updated_at) VALUES (?, NULL, NULL, 'completed', ?, ?)`
+      `INSERT INTO tasks (id, project_id, user_id, workspace_id, status, auto_provisioned_node_id, updated_at) VALUES (?, NULL, 'user-1', NULL, 'completed', ?, ?)`
     )
     .run(taskId, nodeId, OLD);
 }
@@ -103,7 +103,7 @@ function seedWorkspaceWithTerminalTask(wsId: string, nodeId: string, taskId: str
     .run(wsId, nodeId, OLD, OLD);
   sqlite
     ?.prepare(
-      `INSERT INTO tasks (id, project_id, workspace_id, status, auto_provisioned_node_id, updated_at) VALUES (?, NULL, ?, 'completed', NULL, ?)`
+      `INSERT INTO tasks (id, project_id, user_id, chat_session_id, task_mode, workspace_id, status, auto_provisioned_node_id, updated_at) VALUES (?, NULL, 'user-1', NULL, 'task', ?, 'completed', NULL, ?)`
     )
     .run(taskId, wsId, OLD);
 }
@@ -134,7 +134,7 @@ beforeEach(() => {
       project_id TEXT, chat_session_id TEXT, created_at TEXT, updated_at TEXT
     );
     CREATE TABLE tasks (
-      id TEXT PRIMARY KEY, project_id TEXT, workspace_id TEXT, status TEXT, auto_provisioned_node_id TEXT, updated_at TEXT
+      id TEXT PRIMARY KEY, project_id TEXT, user_id TEXT, chat_session_id TEXT, task_mode TEXT, workspace_id TEXT, status TEXT, auto_provisioned_node_id TEXT, updated_at TEXT
     );
   `);
 });

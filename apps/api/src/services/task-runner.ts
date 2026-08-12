@@ -224,7 +224,9 @@ export async function cleanupTaskRun(
         return;
       }
 
-      await stopNodeResources(workspace.nodeId, cleanupUserId, env);
+      await stopNodeResources(workspace.nodeId, cleanupUserId, env, {
+        exclusiveWorkspaceId: workspace.id,
+      });
       await completeWorkspaceCleanupClaim(env, claim, 'deleted');
       await stopComputeTracking(db, workspace.id);
       log.info('task_run.cleanup.cf_container_destroyed', {

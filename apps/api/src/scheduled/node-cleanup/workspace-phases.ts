@@ -49,6 +49,19 @@ export async function sweepOrphanedWorkspaces(
        AND EXISTS (
          SELECT 1 FROM tasks t
          WHERE t.workspace_id = w.id
+           AND t.project_id IS w.project_id
+           AND (
+             t.chat_session_id IS NULL
+             OR (
+               t.task_mode = 'conversation'
+               AND w.chat_session_id = t.chat_session_id
+               AND w.user_id = t.user_id
+             )
+             OR (
+               t.task_mode != 'conversation'
+               AND (w.chat_session_id IS NULL OR w.chat_session_id = t.chat_session_id)
+             )
+           )
            AND t.status IN ('completed', 'failed', 'cancelled')
        )
        AND NOT EXISTS (

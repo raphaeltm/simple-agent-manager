@@ -139,7 +139,6 @@ export async function claimWorkspaceForCleanup(
        AND NOT EXISTS (
          SELECT 1 FROM tasks active
          WHERE active.workspace_id = workspaces.id
-           AND active.project_id IS workspaces.project_id
            AND active.status IN (${ACTIVE_TASK_STATUSES_SQL})
            ${taskExclusion}
        )`

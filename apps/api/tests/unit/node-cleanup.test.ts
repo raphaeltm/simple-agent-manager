@@ -447,7 +447,9 @@ describe('runNodeCleanupSweep', () => {
 
       const result = await runNodeCleanupSweep(env);
 
-      expect(stopNodeResources).toHaveBeenCalledWith('node-cf-1', 'user-cf-1', env);
+      expect(stopNodeResources).toHaveBeenCalledWith('node-cf-1', 'user-cf-1', env, {
+        exclusiveWorkspaceId: 'workspace-cf-1',
+      });
       expect(result.cfContainersDestroyed).toBe(1);
 
       const prepare = env.DATABASE.prepare as unknown as ReturnType<typeof vi.fn>;

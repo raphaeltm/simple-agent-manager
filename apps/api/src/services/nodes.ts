@@ -432,7 +432,21 @@ export async function provisionNode(
   }
 }
 
-export async function stopNodeResources(nodeId: string, userId: string, env: Env): Promise<void> {
+export interface StopNodeResourcesOptions {
+  /**
+   * CT-01 cleanup mode for cf-container nodes. The caller has claimed this
+   * workspace for deletion and the node may be destroyed only if no sibling
+   * workspace is attached at the final destructive boundary.
+   */
+  exclusiveWorkspaceId?: string | null;
+}
+
+export async function stopNodeResources(
+  nodeId: string,
+  userId: string,
+  env: Env,
+  options: StopNodeResourcesOptions = {}
+): Promise<void> {
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date().toISOString();
 
@@ -465,11 +479,56 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
     return;
   }
 
+  let claimedExclusiveNodeStatus: string | null = null;
+  if (node.runtime === 'cf-container' && options.exclusiveWorkspaceId) {
+    const claim = await env.DATABASE.prepare(
+      `UPDATE nodes
+       SET status = 'stopping', updated_at = ?
+       WHERE id = ?
+         AND user_id = ?
+         AND runtime = 'cf-container'
+         AND status NOT IN ('deleted', 'stopped', 'stopping')
+         AND EXISTS (
+           SELECT 1 FROM workspaces claimed
+           WHERE claimed.id = ?
+             AND claimed.node_id = nodes.id
+             AND claimed.user_id = nodes.user_id
+             AND claimed.status = 'stopping'
+         )
+         AND NOT EXISTS (
+           SELECT 1 FROM workspaces sibling
+           WHERE sibling.node_id = nodes.id
+             AND sibling.id != ?
+             AND sibling.status != 'deleted'
+         )`
+    )
+      .bind(now, nodeId, userId, options.exclusiveWorkspaceId, options.exclusiveWorkspaceId)
+      .run();
+
+    if (!claim.meta.changes || claim.meta.changes === 0) {
+      log.warn('node_stop.cf_container_exclusive_claim_rejected', {
+        nodeId,
+        workspaceId: options.exclusiveWorkspaceId,
+        action: 'skipped',
+      });
+      throw new Error('cf-container node is not exclusive to the claimed workspace');
+    }
+    claimedExclusiveNodeStatus = node.status;
+  }
+
   if (node.runtime === 'cf-container') {
-    await destroyVmAgentContainer(env, node.id).catch((err) => {
+    try {
+      await destroyVmAgentContainer(env, node.id);
+    } catch (err) {
+      if (claimedExclusiveNodeStatus) {
+        await db
+          .update(schema.nodes)
+          .set({ status: claimedExclusiveNodeStatus, updatedAt: new Date().toISOString() })
+          .where(and(eq(schema.nodes.id, nodeId), eq(schema.nodes.userId, userId)));
+      }
       log.error('node_stop.cf_container_destroy_failed', { nodeId, ...serializeError(err) });
       throw err;
-    });
+    }
   }
 
   // Delete the cloud provider server since stopped nodes cannot be restarted
@@ -507,13 +566,29 @@ export async function stopNodeResources(nodeId: string, userId: string, env: Env
   }
 
   // Mark node and workspaces as deleted since stopped nodes are non-recoverable
-  await db
-    .update(schema.workspaces)
-    .set({
-      status: 'deleted',
-      updatedAt: now,
-    })
-    .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
+  if (options.exclusiveWorkspaceId) {
+    await db
+      .update(schema.workspaces)
+      .set({
+        status: 'deleted',
+        updatedAt: now,
+      })
+      .where(
+        and(
+          eq(schema.workspaces.id, options.exclusiveWorkspaceId),
+          eq(schema.workspaces.nodeId, nodeId),
+          eq(schema.workspaces.userId, userId)
+        )
+      );
+  } else {
+    await db
+      .update(schema.workspaces)
+      .set({
+        status: 'deleted',
+        updatedAt: now,
+      })
+      .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
+  }
 
   await db
     .update(schema.nodes)

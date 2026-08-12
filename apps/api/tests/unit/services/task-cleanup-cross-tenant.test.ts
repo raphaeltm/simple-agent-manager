@@ -212,7 +212,9 @@ describe('cleanupTaskRun — cross-tenant compute teardown (real SQLite)', () =>
 
     await cleanupTaskRun('task-victim', env, undefined, VICTIM);
 
-    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-victim', VICTIM, env);
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-victim', VICTIM, env, {
+      exclusiveWorkspaceId: 'ws-victim',
+    });
   });
 
   it('CONTROL (internal caller): omitting requiredUserId still cleans up as the task owner', async () => {
@@ -248,7 +250,9 @@ describe('cleanupTaskRun — task creator differs from workspace owner (real SQL
     // Exactly how routes/tasks/callback.ts (the normal VM-agent completion path) calls it.
     await cleanupTaskRun('task-divergent', env);
 
-    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-runner', RUNNER, env);
+    expect(mocks.stopNodeResources).toHaveBeenCalledWith('node-runner', RUNNER, env, {
+      exclusiveWorkspaceId: 'ws-runner',
+    });
     // The cf-container branch returns early — it must NOT fall through to the VM stop path.
     expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
     expect(await readWorkspaceStatus('ws-runner')).toBe('deleted');
@@ -297,6 +301,26 @@ describe('cleanupTaskRun — task creator differs from workspace owner (real SQL
       workspaceId: 'ws-victim',
       autoProvisionedNodeId: 'node-victim',
       title: 'Active sibling task',
+      status: 'queued',
+    } as typeof schema.tasks.$inferInsert);
+
+    await cleanupTaskRun('task-victim', env, undefined, VICTIM);
+
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(mocks.stopNodeResources).not.toHaveBeenCalled();
+    expect(await readWorkspaceStatus()).toBe('running');
+  });
+
+  it('ATTACK: active foreign-project task linked to the workspace fails closed', async () => {
+    await seedVictimTaskRun('vm');
+    const db = drizzle(env.DATABASE, { schema });
+    await db.insert(schema.tasks).values({
+      id: 'task-active-foreign-project',
+      projectId: 'project-foreign',
+      userId: ATTACKER,
+      workspaceId: 'ws-victim',
+      autoProvisionedNodeId: 'node-victim',
+      title: 'Corrupted active task link',
       status: 'queued',
     } as typeof schema.tasks.$inferInsert);
 
