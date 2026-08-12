@@ -535,6 +535,10 @@ func (s *Server) downloadAndExtractSessionStateTar(ctx context.Context, download
 		return err
 	}
 	defer os.Remove(path)
+	// Security boundary: validate the complete immutable temp archive before the
+	// first filesystem mutation. The validator rejects absolute/traversing and
+	// duplicate paths, links, special entries, file/child conflicts, excluded
+	// credential paths, and entries outside the configured size budgets.
 	if _, err := validateSnapshotHomeTar(path, entryThreshold, totalBudget); err != nil {
 		return err
 	}
@@ -590,15 +594,15 @@ func (s *Server) downloadAndExtractSessionStateTar(ctx context.Context, download
 			return err
 		}
 		if header.FileInfo().IsDir() {
-			if err := os.MkdirAll(target, header.FileInfo().Mode().Perm()); err != nil {
+			if err := os.MkdirAll(target, header.FileInfo().Mode().Perm()); err != nil { // NOSONAR gosecurity:S6096 -- the full archive and this root-confined, non-symlink target are validated above
 				return err
 			}
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil { // NOSONAR gosecurity:S6096 -- target passed archive validation, root confinement, and symlink rejection above
 			return err
 		}
-		f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, header.FileInfo().Mode().Perm())
+		f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, header.FileInfo().Mode().Perm()) // NOSONAR gosecurity:S6096 -- target passed archive validation, root confinement, and symlink rejection above
 		if err != nil {
 			return err
 		}

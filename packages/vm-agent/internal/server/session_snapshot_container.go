@@ -498,7 +498,7 @@ func (s *Server) downloadAndExtractContainerHome(ctx context.Context, target *co
 			continue
 		}
 		extractErr := s.extractContainerSnapshotSubset(ctx, target, destination, subsetPath, subsetNames)
-		_ = os.Remove(subsetPath)
+		_ = os.Remove(subsetPath) // NOSONAR gosecurity:S6096 -- subsetPath is generated exclusively by os.CreateTemp, never from an archive entry
 		if extractErr != nil {
 			return extractErr
 		}
@@ -597,7 +597,7 @@ func writeSnapshotArchiveSubset(sourcePath, logicalName string) (string, []strin
 		err = closeErr
 	}
 	if err != nil || len(names) == 0 {
-		_ = os.Remove(tmpPath)
+		_ = os.Remove(tmpPath) // NOSONAR gosecurity:S6096 -- tmpPath is generated exclusively by os.CreateTemp, never from an archive entry
 		return "", names, err
 	}
 	return tmpPath, names, nil
@@ -614,7 +614,7 @@ func (s *Server) extractContainerSnapshotSubset(ctx context.Context, target *con
 	if snapshotTargetTraversesSymlink(names, symlinks) {
 		return fmt.Errorf("snapshot target traverses an existing symlink")
 	}
-	file, err := os.Open(subsetPath)
+	file, err := os.Open(subsetPath) // NOSONAR gosecurity:S6096 -- subsetPath is generated exclusively by os.CreateTemp after full archive validation
 	if err != nil {
 		return err
 	}
