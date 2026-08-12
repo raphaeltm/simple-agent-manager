@@ -6,6 +6,7 @@
  *
  * See: specs/018-project-first-architecture/tasks.md (T027)
  */
+// FILE SIZE EXCEPTION: CT-01 adds cross-tenant cleanup claims; split after remediation lands.
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
 import {
   DEFAULT_CHAT_COMPACT_MODE,

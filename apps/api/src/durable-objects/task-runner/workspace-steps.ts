@@ -3,6 +3,7 @@
  *
  * Handles workspace_creation, workspace_dispatch, workspace_ready, and attachment_transfer steps.
  */
+// FILE SIZE EXCEPTION: CT-01 adds workspace ownership recovery checks; split after remediation lands.
 import { type CredentialSource, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
