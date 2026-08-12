@@ -125,7 +125,7 @@ the trigger's election commits in the same statement.
       claim beyond actual behavior.
 - [x] Add a process rule/checklist improvement requiring database-backed concurrent
       interleaving tests for first-row/empty-table privilege bootstrap decisions.
-- [ ] Run focused API unit and worker/D1 tests, full API tests, migration ordering
+- [x] Run focused API unit and worker/D1 tests, full API tests, migration ordering
       and safety gates, clean-install/upgrade replay, lint, typecheck, build, full
       repository tests, security scans, and PR evidence validators.
 - [ ] Run and reconcile local `security-auditor`, `test-engineer`,
