@@ -105,6 +105,7 @@ beforeEach(() => {
     );
     CREATE TABLE tasks (
       id TEXT PRIMARY KEY, workspace_id TEXT, status TEXT,
+      project_id TEXT, user_id TEXT, chat_session_id TEXT, task_mode TEXT,
       auto_provisioned_node_id TEXT, updated_at TEXT
     );
   `);
