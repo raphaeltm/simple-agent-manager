@@ -117,7 +117,7 @@ The requested end state is broader than this first PR: humans should eventually 
 - [x] E3. Add browser interaction/visual coverage at 375×667 and 1280×800 for drill-down, lenses, source navigation, comment creation/reply, long text, empty/many/error states, and overflow/clipping assertions.
 - [x] E4. Run package checks and the complete repository lint, typecheck, test, and build suite.
 - [x] E5. Run task-completion, test, documentation-sync, constitution, UI/UX, and security reviews; address every blocking finding.
-- [ ] E6. Deploy the final branch to staging as required by the repository workflow and confirm the unrelated deployed SAM application remains healthy; feature behavior itself is validated through the package's real local server because the prototype is not mounted in the production app.
+- [x] E6. Deploy the final branch to staging as required by the repository workflow and confirm the unrelated deployed SAM application remains healthy; feature behavior itself is validated through the package's real local server because the prototype is not mounted in the production app.
 
 ## Acceptance Criteria
 
@@ -143,6 +143,7 @@ The requested end state is broader than this first PR: humans should eventually 
 - Architecture package: 42 unit/integration tests passed with 89.11% line coverage and 73.63% branch coverage. Six real-server Playwright scenarios passed at 375x667 and 1280x800, with an additional 320px overflow audit and screenshots for Structure, Flow, State, the open mobile inspector/backdrop, empty, invalid, many-record, long-content, special-character, and API-error states.
 - Workspace commands: validate reported no diagnostics; summary compiled 19 elements, 21 relationships, three flows, one state machine, and three views; show, inbox, and impact queries returned bounded results successfully.
 - Repository policy: `pnpm quality:file-sizes` passed with no file over 800 lines.
+- Staging: [Deploy Staging run 31722867891](https://github.com/raphaeltm/simple-agent-manager/actions/runs/31722867891) passed for reviewed commit `d44c8ebc6b0fd1dd39a1e1191ff6c007127c0c06`, including the workflow health check and all 12 smoke tests. A separate authenticated Playwright regression pass against `app.sammy.party` verified API health, the loaded dashboard and project list, click-through to a real project chat, loaded settings data, and zero console or uncaught page errors; evidence screenshots are in `.codex/tmp/playwright-screenshots/architecture-regression-{dashboard,project,settings}.png`. The package viewer is intentionally local-only in this prototype, so its feature behavior was verified through the real loopback server and six-scenario package browser suite rather than a deployed SAM route. `pnpm quality:observability-noise` also exited successfully; the environment lacked `OBSERVABILITY_DB_ID` and the Workers telemetry API returned 403, so those two optional data-source probes were reported as skipped.
 
 ## References
 
