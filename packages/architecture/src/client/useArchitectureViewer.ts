@@ -100,11 +100,13 @@ function useLoadModel(
           const eventRevision = eventRevisionRef.current;
           const model = await api.loadModel();
           lastError = undefined;
-          setViewer((current) =>
-            commitModel(current, model, eventRevision !== eventRevisionRef.current)
-          );
-          setFocusId((current) => keepId(model, current));
-          setSelection((current) => keepSelection(model, current));
+          if (!queuedRef.current) {
+            setViewer((current) =>
+              commitModel(current, model, eventRevision !== eventRevisionRef.current)
+            );
+            setFocusId((current) => keepId(model, current));
+            setSelection((current) => keepSelection(model, current));
+          }
         } catch (error) {
           lastError = error;
         }
@@ -146,12 +148,16 @@ function useInitialLoad(
 ): void {
   useEffect(() => {
     void loadModel().catch((error: unknown) => {
-      setViewer({
+      setViewer((current) => ({
+        ...current,
         loading: false,
         error: errorMessage(error),
-        status: 'Failed to load model.',
-        offline: false,
-      });
+        status: current.status.includes('Invalid')
+          ? current.status
+          : current.offline
+            ? 'Failed to load model; live updates are reconnecting…'
+            : 'Failed to load model.',
+      }));
     });
   }, [loadModel, setViewer]);
 }
@@ -175,6 +181,7 @@ function useEventStream(
             ? 'Live updates connected.'
             : current.status,
       }));
+      void reloadAfterSse(loadModel, setViewer);
     };
     source.addEventListener('architecture:model', reload);
     source.addEventListener('architecture:invalid', () => {

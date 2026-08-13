@@ -22,7 +22,8 @@ describe('viewer projection index', () => {
     const flows = flowSlice(model, 'element-0', index);
 
     expect(index.elementsById.size).toBe(depth);
-    expect(structure.breadcrumbs).toHaveLength(depth);
+    expect(structure.breadcrumbs).toHaveLength(model.limits.breadcrumbs);
+    expect(structure.omittedBreadcrumbs).toBe(depth - model.limits.breadcrumbs);
     expect(structure.breadcrumbs[0]?.id).toBe('element-0');
     expect(structure.breadcrumbs.at(-1)?.id).toBe(`element-${depth - 1}`);
     expect(flows.flows.map((flow) => flow.id)).toEqual(['deep-flow']);
@@ -43,6 +44,7 @@ function makeProjectionModel(
       zoomStep: 0.125,
     },
     limits: {
+      breadcrumbs: 7,
       children: 80,
       flowSteps: 50,
       flows: 30,

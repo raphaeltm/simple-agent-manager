@@ -40,7 +40,7 @@ describe('architecture viewer', () => {
     expect(window.location.search).toContain('lens=flow');
     expect(screen.getByText('Call API')).toBeVisible();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Open in structure' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Open API component in structure' }));
     expect(window.location.search).toContain('focus=api');
     fireEvent.click(screen.getByRole('button', { name: 'Root system' }));
     expect(window.location.search).toContain('focus=root');
@@ -258,6 +258,44 @@ describe('architecture viewer', () => {
     ).toBeVisible();
   });
 
+  it('reloads the model on SSE reconnect so missed file edits converge', async () => {
+    const initial = makeModel();
+    const reconnected = makeModel();
+    reconnected.workspace.name = 'Agent reply received';
+    reconnected.summary.name = 'Agent reply received';
+    const responses = [jsonResponse(initial), jsonResponse(reconnected)];
+    const fetchMock = vi.fn(() => responses.shift() ?? jsonResponse(reconnected));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: initial.summary.name })).toBeVisible();
+    act(() => MockEventSource.latest?.onerror?.());
+    act(() => MockEventSource.latest?.onopen?.());
+
+    expect(await screen.findByRole('heading', { name: 'Agent reply received' })).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('alert')).toBeNull();
+  });
+
+  it('preserves reconnecting state when the initial model request fails', async () => {
+    let rejectInitial: ((reason?: unknown) => void) | undefined;
+    const initial = new Promise<Response>((_resolve, reject) => {
+      rejectInitial = reject;
+    });
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => initial)
+    );
+
+    render(<App />);
+    act(() => MockEventSource.latest?.onerror?.());
+    rejectInitial?.(new Error('Initial model failed'));
+
+    expect(await screen.findByRole('heading', { name: 'Invalid workspace' })).toBeVisible();
+    expect(screen.getByText(/live updates are reconnecting/, { selector: '[role="status"]' }))
+      .toBeVisible;
+  });
+
   it('shows bounded empty scoped lenses, hides inapplicable zoom, and exposes SSE status', async () => {
     const model = makeModel();
     model.workspace.elements.push({
@@ -277,8 +315,12 @@ describe('architecture viewer', () => {
     act(() => MockEventSource.latest?.onerror?.());
     expect(await screen.findByRole('alert')).toHaveTextContent('Offline/reconnecting');
     act(() => MockEventSource.latest?.onopen?.());
-    expect(screen.queryByRole('alert')).toBeNull();
-    expect(screen.getByRole('status')).toHaveTextContent('Live updates connected');
+    await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
+    await waitFor(() =>
+      expect(
+        screen.getByText('Architecture model loaded.', { selector: '[role="status"]' })
+      ).toBeVisible()
+    );
   });
 
   it('renders empty and many-node states without interpreting special-character text as HTML', async () => {
@@ -289,6 +331,28 @@ describe('architecture viewer', () => {
     expect(
       screen.getByText('Node 29 with very long https://example.com/path/'.repeat(2))
     ).toBeVisible();
+  });
+
+  it('collapses deeply nested breadcrumbs to a bounded focusable window', async () => {
+    const model = makeModel();
+    model.workspace.elements = Array.from({ length: 50 }, (_, index) => ({
+      id: `depth-${index}`,
+      kind: 'component' as const,
+      parent: index === 0 ? undefined : `depth-${index - 1}`,
+      title: `Depth ${index}`,
+    }));
+    model.summary.roots = model.workspace.elements.slice(0, 1);
+    model.summary.counts.elements = model.workspace.elements.length;
+    window.history.replaceState(null, '', '/?lens=structure&focus=depth-49');
+    mockFetch(model);
+
+    render(<App />);
+    const breadcrumbs = await screen.findByRole('navigation', { name: 'Breadcrumbs' });
+
+    expect(within(breadcrumbs).getAllByRole('button')).toHaveLength(model.limits.breadcrumbs);
+    expect(within(breadcrumbs).getByRole('button', { name: 'Depth 0' })).toBeVisible();
+    expect(within(breadcrumbs).getByRole('button', { name: 'Depth 49' })).toBeVisible();
+    expect(within(breadcrumbs).getByLabelText('43 intermediate scopes omitted')).toBeVisible();
   });
 
   it('inspects and authors a thread on a relationship target', async () => {
@@ -404,6 +468,7 @@ function makeModel(
     failReloadAfterThread: options.failReloadAfterThread,
     diagnostics: [],
     limits: {
+      breadcrumbs: 7,
       children: 80,
       flowSteps: 50,
       flows: 30,

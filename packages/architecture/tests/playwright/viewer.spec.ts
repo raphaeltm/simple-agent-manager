@@ -67,9 +67,14 @@ test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
 
   await page.getByRole('button', { name: 'Flow' }).click();
   await expect(page.getByText('Select API')).toBeVisible();
+  await expect(page.locator('.flow-step-index')).toHaveText(['01', '02']);
+  await expect(page.getByRole('button', { name: 'Open API component in structure' })).toBeVisible();
+  await page.getByRole('button', { name: 'Inspect relationship API calls Worker' }).click();
+  await expect(inspector).toContainText('api → worker');
+  if (testInfo.project.name.startsWith('mobile')) await page.keyboard.press('Escape');
   await expect(page.getByRole('button', { name: 'Zoom in' })).toHaveCount(0);
   await screenshot(page, `viewer-flow-${testInfo.project.name}`);
-  await page.getByRole('button', { name: 'Open in structure' }).first().click();
+  await page.getByRole('button', { name: 'Open API component in structure' }).click();
   await expect(page).toHaveURL(/lens=structure/);
 
   await page.getByRole('button', { name: 'State' }).click();
@@ -179,7 +184,7 @@ test('renders a bounded API error state', async ({ page }, testInfo) => {
   });
   await page.goto('/');
   await expect(page.getByRole('heading', { name: 'Invalid workspace' })).toBeVisible();
-  await expect(page.getByText('Simulated model API failure')).toBeVisible();
+  await expect(page.getByText('Simulated model API failure', { exact: true })).toBeVisible();
   await assertNoOverflow(page);
   await screenshot(page, `viewer-api-error-${testInfo.project.name}`);
 });

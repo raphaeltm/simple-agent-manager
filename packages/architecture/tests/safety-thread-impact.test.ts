@@ -1,4 +1,4 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
@@ -232,6 +232,34 @@ elements:
         body: '\n\t ',
       })
     ).rejects.toThrow('reply body');
+  });
+
+  it('never follows or time-reclaims a planted non-regular thread lock', async () => {
+    const fixture = await makeFixture();
+    const outside = await makeFixture();
+    const thread = await createThread({
+      workspaceRoot: fixture.workspaceRoot,
+      target: 'api',
+      title: 'Lock safety',
+      body: 'Question',
+      id: 'thread-lock-safety',
+    });
+    const canary = path.join(outside.root, 'lock-canary');
+    await writeFile(canary, 'unchanged');
+    await symlink(
+      canary,
+      path.join(fixture.workspaceRoot, 'threads', '.thread-lock-safety.thread.md.lock')
+    );
+
+    await expect(
+      appendThreadReply({
+        workspaceRoot: fixture.workspaceRoot,
+        threadId: thread.id,
+        body: 'Must not escape',
+        lock: { retryMs: 1, timeoutMs: 5 },
+      })
+    ).rejects.toThrow('Timed out waiting for thread mutation lock');
+    await expect(readFile(canary, 'utf8')).resolves.toBe('unchanged');
   });
 
   it('rejects replies to message IDs outside the selected thread', async () => {

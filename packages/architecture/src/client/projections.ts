@@ -60,14 +60,27 @@ export function structureSlice(
   const children = allChildren.slice(0, model.limits.children);
   const scopedIds = new Set([parentId, ...children.map((child) => child.id)].filter(Boolean));
   const allRelationships = portalRelationships(index, scopedIds);
+  const allBreadcrumbs = focus ? breadcrumbs(index.elementsById, focus) : [];
+  const visibleBreadcrumbs = boundBreadcrumbs(allBreadcrumbs, model.limits.breadcrumbs);
   return {
     focus,
-    breadcrumbs: focus ? breadcrumbs(index.elementsById, focus) : [],
+    breadcrumbs: visibleBreadcrumbs,
+    omittedBreadcrumbs: allBreadcrumbs.length - visibleBreadcrumbs.length,
     children,
     relationships: allRelationships.slice(0, model.limits.relationships),
     omittedChildren: Math.max(0, allChildren.length - children.length),
     omittedRelationships: Math.max(0, allRelationships.length - model.limits.relationships),
   };
+}
+
+function boundBreadcrumbs(
+  breadcrumbs: ArchitectureElement[],
+  limit: number
+): ArchitectureElement[] {
+  if (breadcrumbs.length <= limit) return breadcrumbs;
+  if (limit <= 1) return breadcrumbs.slice(-1);
+  const root = breadcrumbs[0];
+  return root ? [root, ...breadcrumbs.slice(-(limit - 1))] : [];
 }
 
 export function flowSlice(

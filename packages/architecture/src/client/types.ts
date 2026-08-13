@@ -68,6 +68,7 @@ export interface ThreadMutationResult {
 export interface StructureSlice {
   focus?: ArchitectureElement;
   breadcrumbs: ArchitectureElement[];
+  omittedBreadcrumbs: number;
   children: ArchitectureElement[];
   relationships: ArchitectureRelationship[];
   omittedChildren: number;

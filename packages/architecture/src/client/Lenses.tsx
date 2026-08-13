@@ -1,6 +1,6 @@
 import type { CSSProperties } from 'react';
 
-import type { ArchitectureElement, ArchitectureRelationship } from '../schemas';
+import type { ArchitectureElement, ArchitectureRelationship, FlowStep } from '../schemas';
 import type { ViewerModel } from '../server/payloads';
 import { flowSlice, type ProjectionIndex, stateSlice, structureSlice } from './projections';
 import type { Lens, Selection } from './types';
@@ -161,22 +161,33 @@ export function FlowLens({
   return (
     <div className="flow-list">
       {slice.flows.map((flow) => (
-        <section className="flow-card" key={flow.id}>
-          <button
-            type="button"
-            className={flow.id === selection?.id ? 'selected text-row' : 'text-row'}
-            aria-pressed={selection?.kind === 'flow' && selection.id === flow.id}
-            onClick={() => onSelect({ kind: 'flow', id: flow.id })}
-          >
-            {flow.title}
-          </button>
-          <ol>
-            {flow.steps.map((step) => (
+        <section
+          className={`flow-card ${selection?.kind === 'flow' && selection.id === flow.id ? 'selected' : ''}`}
+          key={flow.id}
+        >
+          <header className="flow-card-head">
+            <div>
+              <p className="eyebrow">Flow</p>
+              <h2>
+                <button
+                  type="button"
+                  className="flow-title-action"
+                  aria-pressed={selection?.kind === 'flow' && selection.id === flow.id}
+                  onClick={() => onSelect({ kind: 'flow', id: flow.id })}
+                >
+                  {flow.title}
+                </button>
+              </h2>
+            </div>
+            <span className="flow-step-count">{flow.steps.length} steps</span>
+          </header>
+          <ol className="flow-sequence">
+            {flow.steps.map((step, index) => (
               <FlowStepItem
                 key={step.id}
-                flowId={flow.id}
-                title={step.title}
-                element={step.element}
+                index={index}
+                step={step}
+                projectionIndex={projectionIndex}
                 onSelect={onSelect}
                 onDrill={onDrill}
               />
@@ -195,28 +206,55 @@ export function FlowLens({
 }
 
 function FlowStepItem({
-  flowId,
-  title,
-  element,
+  index,
+  step,
+  projectionIndex,
   onSelect,
   onDrill,
 }: {
-  flowId: string;
-  title: string;
-  element?: string;
+  index: number;
+  step: FlowStep;
+  projectionIndex: ProjectionIndex;
   onSelect: (selection: Selection) => void;
   onDrill: (id: string) => void;
 }) {
+  const element = step.element ? projectionIndex.elementsById.get(step.element) : undefined;
+  const relationship = step.relationship
+    ? projectionIndex.relationshipsById.get(step.relationship)
+    : undefined;
   return (
-    <li>
-      <button type="button" onClick={() => onSelect({ kind: 'flow', id: flowId })}>
-        {title}
-      </button>
-      {element && (
-        <button type="button" className="secondary" onClick={() => onDrill(element)}>
-          Open in structure
-        </button>
-      )}
+    <li className="flow-step">
+      <span className="flow-step-index" aria-hidden="true">
+        {String(index + 1).padStart(2, '0')}
+      </span>
+      <div className="flow-step-copy">
+        <span className="sr-only">Step {index + 1}: </span>
+        <p className="flow-step-title">{step.title}</p>
+        {(element || relationship) && (
+          <div className="flow-step-actions">
+            {element && (
+              <button
+                type="button"
+                className="flow-element-action"
+                aria-label={`Open ${element.title} in structure`}
+                onClick={() => onDrill(element.id)}
+              >
+                {element.title} <span aria-hidden="true">↗</span>
+              </button>
+            )}
+            {relationship && (
+              <button
+                type="button"
+                className="flow-relationship-action"
+                aria-label={`Inspect relationship ${relationship.title ?? relationship.id}`}
+                onClick={() => onSelect({ kind: 'relationship', id: relationship.id })}
+              >
+                via {relationship.title ?? relationship.id}
+              </button>
+            )}
+          </div>
+        )}
+      </div>
     </li>
   );
 }

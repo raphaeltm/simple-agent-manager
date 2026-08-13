@@ -1,16 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
-import {
-  link,
-  mkdir,
-  open,
-  readFile,
-  rename,
-  rmdir,
-  stat,
-  unlink,
-  writeFile,
-} from 'node:fs/promises';
+import { link, lstat, mkdir, open, readFile, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import * as v from 'valibot';
@@ -23,7 +13,6 @@ import {
   DEFAULT_THREAD_AUTHOR_LIMIT,
   DEFAULT_THREAD_BODY_LIMIT,
   DEFAULT_THREAD_LOCK_RETRY_MS,
-  DEFAULT_THREAD_LOCK_STALE_MS,
   DEFAULT_THREAD_LOCK_TIMEOUT_MS,
   DEFAULT_THREAD_TITLE_LIMIT,
   DEFAULT_THREADS_DIR,
@@ -79,13 +68,11 @@ export interface ThreadContentLimits {
 
 export interface ThreadLockOptions {
   retryMs: number;
-  staleMs: number;
   timeoutMs: number;
 }
 
 export const DEFAULT_THREAD_LOCK_OPTIONS: ThreadLockOptions = {
   retryMs: DEFAULT_THREAD_LOCK_RETRY_MS,
-  staleMs: DEFAULT_THREAD_LOCK_STALE_MS,
   timeoutMs: DEFAULT_THREAD_LOCK_TIMEOUT_MS,
 };
 
@@ -374,23 +361,31 @@ async function withThreadLock<T>(
   const options = { ...DEFAULT_THREAD_LOCK_OPTIONS, ...overrides };
   const lockPath = path.join(path.dirname(threadPath), `.${path.basename(threadPath)}.lock`);
   const deadline = Date.now() + options.timeoutMs;
+  let lockHandle: Awaited<ReturnType<typeof open>>;
+  let lockInode: bigint;
   while (true) {
     try {
-      await mkdir(lockPath);
+      lockHandle = await open(
+        lockPath,
+        fsConstants.O_CREAT | fsConstants.O_EXCL | fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW,
+        0o600
+      );
       try {
-        await writeFile(path.join(lockPath, 'owner'), `${process.pid}:${randomUUID()}\n`, {
-          flag: 'wx',
-        });
+        await lockHandle.writeFile(`${process.pid}:${randomUUID()}\n`);
+        lockInode = (await lockHandle.stat({ bigint: true })).ino;
       } catch (error) {
-        await releaseLock(lockPath);
+        await lockHandle.close();
+        await unlink(lockPath).catch(() => undefined);
         throw error;
       }
       break;
     } catch (error) {
       if (!isAlreadyExistsError(error)) throw error;
-      await reclaimStaleLock(lockPath, options.staleMs);
       if (Date.now() >= deadline) {
-        throw new Error(`Timed out waiting for thread mutation lock: ${path.basename(threadPath)}`);
+        throw new Error(
+          `Timed out waiting for thread mutation lock: ${path.basename(threadPath)}. ` +
+            `If no architecture process is running, remove ${path.basename(lockPath)} manually.`
+        );
       }
       await delay(options.retryMs);
     }
@@ -398,30 +393,18 @@ async function withThreadLock<T>(
   try {
     return await operation();
   } finally {
-    await releaseLock(lockPath);
+    await lockHandle.close();
+    await releaseOwnedLock(lockPath, lockInode);
   }
 }
 
-async function reclaimStaleLock(lockPath: string, staleMs: number): Promise<void> {
+async function releaseOwnedLock(lockPath: string, expectedInode: bigint): Promise<void> {
   try {
-    const lockStats = await stat(lockPath);
-    if (Date.now() - lockStats.mtimeMs < staleMs) return;
-    const stalePath = `${lockPath}.stale-${randomUUID()}`;
-    await rename(lockPath, stalePath);
-    await releaseLock(stalePath);
-  } catch (error) {
-    if (!isNotFoundError(error)) throw error;
-  }
-}
-
-async function releaseLock(lockPath: string): Promise<void> {
-  try {
-    await unlink(path.join(lockPath, 'owner'));
-  } catch (error) {
-    if (!isNotFoundError(error)) throw error;
-  }
-  try {
-    await rmdir(lockPath);
+    const lockStats = await lstat(lockPath, { bigint: true });
+    if (!lockStats.isFile() || lockStats.ino !== expectedInode) {
+      throw new Error(`Thread mutation lock ownership changed: ${path.basename(lockPath)}`);
+    }
+    await unlink(lockPath);
   } catch (error) {
     if (!isNotFoundError(error)) throw error;
   }

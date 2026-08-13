@@ -1,4 +1,5 @@
 import {
+  DEFAULT_VIEWER_BREADCRUMB_LIMIT,
   DEFAULT_VIEWER_CHILD_LIMIT,
   DEFAULT_VIEWER_FLOW_LIMIT,
   DEFAULT_VIEWER_FLOW_STEP_LIMIT,
@@ -27,6 +28,7 @@ import type { CompiledWorkspace } from '../types';
 export type LensName = 'structure' | 'flow' | 'state';
 
 export interface ViewerLimits {
+  breadcrumbs: number;
   children: number;
   flowSteps: number;
   flows: number;
@@ -37,6 +39,7 @@ export interface ViewerLimits {
 }
 
 export const DEFAULT_VIEWER_LIMITS: ViewerLimits = {
+  breadcrumbs: DEFAULT_VIEWER_BREADCRUMB_LIMIT,
   children: DEFAULT_VIEWER_CHILD_LIMIT,
   flowSteps: DEFAULT_VIEWER_FLOW_STEP_LIMIT,
   flows: DEFAULT_VIEWER_FLOW_LIMIT,

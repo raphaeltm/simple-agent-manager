@@ -119,7 +119,7 @@ function CanvasColumn({
   model: ViewerModel;
   projectionIndex: ProjectionIndex;
 }) {
-  const breadcrumbs = structureSlice(model, controller.focusId, projectionIndex).breadcrumbs;
+  const structure = structureSlice(model, controller.focusId, projectionIndex);
   return (
     <section
       className="canvas-column"
@@ -128,7 +128,8 @@ function CanvasColumn({
     >
       <CanvasContext
         controller={controller}
-        breadcrumbs={breadcrumbs}
+        breadcrumbs={structure.breadcrumbs}
+        omittedBreadcrumbs={structure.omittedBreadcrumbs}
         interaction={model.interaction}
       />
       {controller.lens === 'structure' && (
@@ -147,24 +148,35 @@ function CanvasColumn({
 function CanvasContext({
   controller,
   breadcrumbs,
+  omittedBreadcrumbs,
   interaction,
 }: {
   controller: ArchitectureViewerController;
   breadcrumbs: Array<{ id: string; title: string }>;
+  omittedBreadcrumbs: number;
   interaction: ViewerInteraction;
 }) {
   return (
     <div className="context-row">
       <nav aria-label="Breadcrumbs">
-        {breadcrumbs.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            className="breadcrumb-action"
-            onClick={() => controller.drill(item.id)}
-          >
-            {item.title}
-          </button>
+        {breadcrumbs.map((item, index) => (
+          <span className="breadcrumb-item" key={item.id}>
+            {index === 1 && omittedBreadcrumbs > 0 && (
+              <span
+                className="breadcrumb-omitted"
+                aria-label={`${omittedBreadcrumbs} intermediate scopes omitted`}
+              >
+                … {omittedBreadcrumbs}
+              </span>
+            )}
+            <button
+              type="button"
+              className="breadcrumb-action"
+              onClick={() => controller.drill(item.id)}
+            >
+              {item.title}
+            </button>
+          </span>
         ))}
       </nav>
       {controller.lens === 'structure' && (
