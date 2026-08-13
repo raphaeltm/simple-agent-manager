@@ -361,6 +361,33 @@ describe('architecture local HTTP server', () => {
       await running.close();
     }
   });
+
+  it('cleans up state after a listen collision so the port can be reused', async () => {
+    const fixture = await makeServerFixture();
+    const first = await startArchitectureServer({
+      workspaceRoot: fixture.workspaceRoot,
+      repoRoot: fixture.root,
+      port: 0,
+    });
+    const port = Number(new URL(first.url).port);
+    try {
+      await expect(
+        startArchitectureServer({
+          workspaceRoot: fixture.workspaceRoot,
+          repoRoot: fixture.root,
+          port,
+        })
+      ).rejects.toMatchObject({ code: 'EADDRINUSE' });
+    } finally {
+      await first.close();
+    }
+    const replacement = await startArchitectureServer({
+      workspaceRoot: fixture.workspaceRoot,
+      repoRoot: fixture.root,
+      port,
+    });
+    await replacement.close();
+  });
 });
 
 async function makeServerFixture() {

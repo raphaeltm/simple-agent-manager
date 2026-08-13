@@ -23,12 +23,13 @@ export function WorkspaceView({
   if (!model || !projectionIndex) return null;
   const showStatus =
     controller.viewer.offline ||
+    controller.viewer.refreshError !== undefined ||
     controller.viewer.status.includes('Invalid') ||
     controller.viewer.status.includes('failed');
   return (
     <Shell
       mobile={controller.mobileViewport}
-      status={`${controller.viewer.status}${controller.viewer.offline ? ' Offline/reconnecting.' : ''}`}
+      status={controller.viewer.status}
       showStatus={showStatus}
     >
       <WorkspaceHeader controller={controller} model={model} />
@@ -62,7 +63,7 @@ function WorkspaceHeader({
             type="button"
             className="lens-tab"
             aria-current={controller.lens === lens ? 'page' : undefined}
-            onClick={() => controller.setLens(lens)}
+            onClick={() => controller.navigateLens(lens)}
           >
             {lens[0]?.toUpperCase()}
             {lens.slice(1)}
@@ -271,7 +272,7 @@ function renderLens(
     zoom: controller.zoom,
     onSelect: controller.select,
     onDrill: controller.drill,
-    onLens: controller.setLens as (lens: Lens) => void,
+    onLens: controller.navigateLens,
     projectionIndex,
   };
   if (lens === 'flow') return <FlowLens {...props} />;

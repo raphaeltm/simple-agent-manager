@@ -94,12 +94,44 @@ describe('architecture viewer', () => {
     expect(apiButton).toHaveFocus();
 
     fireEvent.click(screen.getByRole('button', { name: 'State' }));
-    expect(screen.getByLabelText('Task state transition list')).toHaveTextContent(
-      'queued → running when start'
-    );
+    expect(screen.getByLabelText('Task state transition list')).toHaveTextContent('Queued');
+    expect(screen.getByLabelText('Queued when start goes to Running')).toBeVisible();
   });
 
-  it('clears target-specific drafts and ignores a stale source response after selection changes', async () => {
+  it('renders State as a human-titled route atlas across branches, cycles, and missing data', async () => {
+    const model = makeModel();
+    model.workspace.stateMachines = [
+      {
+        element: 'api',
+        id: 'route-atlas',
+        title: 'Route atlas',
+        states: [
+          { id: 'first-state', title: 'First state' },
+          { id: 'second-state', title: 'Second state' },
+          { id: 'quiet-state', title: 'Quiet state' },
+        ],
+        transitions: [
+          { from: 'first-state', to: 'second-state' },
+          { from: 'first-state', to: 'missing-state', event: 'branch_to_missing' },
+          { from: 'second-state', to: 'first-state', event: 'cycle-back' },
+        ],
+      },
+    ];
+    mockFetch(model);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: 'State' }));
+
+    expect(
+      screen.getByLabelText('First state when no event specified goes to Second state')
+    ).toBeVisible();
+    expect(
+      screen.getByLabelText('First state when branch to missing goes to missing-state')
+    ).toBeVisible();
+    expect(screen.getByLabelText('Second state when cycle back goes to First state')).toBeVisible();
+    expect(screen.getByText('No outgoing transitions in this view.')).toBeVisible();
+  });
+
+  it('preserves target-specific drafts and ignores a stale source response after selection changes', async () => {
     let resolveSource: ((value: Response) => void) | undefined;
     const sourceResponse = new Promise<Response>((resolve) => {
       resolveSource = resolve;
@@ -124,9 +156,11 @@ describe('architecture viewer', () => {
     );
     await Promise.resolve();
     expect(screen.queryByText('stale preview')).toBeNull();
-    fireEvent.click(screen.getByText('API component').closest('button')!);
     expect(screen.getByLabelText('Question title')).toHaveValue('');
     expect(screen.getByLabelText('Question')).toHaveValue('');
+    fireEvent.click(screen.getByText('API component').closest('button')!);
+    expect(screen.getByLabelText('Question title')).toHaveValue('Stale title');
+    expect(screen.getByLabelText('Question')).toHaveValue('Stale body');
   });
 
   it('keeps the newest source preview when same-target requests resolve out of order', async () => {
@@ -252,7 +286,7 @@ describe('architecture viewer', () => {
     act(() => MockEventSource.latest?.onerror?.());
     resolveStaleRefresh?.(jsonResponse(initial));
 
-    expect(await screen.findByRole('alert')).toHaveTextContent('Offline/reconnecting');
+    expect(await screen.findByRole('alert')).toHaveTextContent('live updates are reconnecting');
     expect(
       screen.getByText(/live updates are reconnecting/, { selector: '[role="status"]' })
     ).toBeVisible();
@@ -292,8 +326,38 @@ describe('architecture viewer', () => {
     rejectInitial?.(new Error('Initial model failed'));
 
     expect(await screen.findByRole('heading', { name: 'Invalid workspace' })).toBeVisible();
-    expect(screen.getByText(/live updates are reconnecting/, { selector: '[role="status"]' }))
-      .toBeVisible;
+    expect(
+      screen.getByText(/live updates are reconnecting/, { selector: '[role="status"]' })
+    ).toBeVisible();
+  });
+
+  it('does not duplicate the model request on initial SSE connection', async () => {
+    const fetchMock = mockFetch(makeModel());
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: /Architecture/ })).toBeVisible();
+
+    act(() => MockEventSource.latest?.onopen?.());
+    await Promise.resolve();
+
+    expect(
+      fetchMock.mock.calls.filter((call) => String(call[0]).endsWith('/api/model'))
+    ).toHaveLength(1);
+  });
+
+  it('restores lens, focus, and selection from browser history', async () => {
+    mockFetch(makeModel());
+    render(<App />);
+    expect(await screen.findByText('API component')).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Flow' }));
+    const flowUrl = window.location.href;
+    fireEvent.click(screen.getByRole('button', { name: 'Open API component in structure' }));
+    expect(window.location.search).toContain('focus=api');
+
+    window.history.replaceState(null, '', flowUrl);
+    act(() => window.dispatchEvent(new PopStateEvent('popstate')));
+
+    expect(screen.getByRole('button', { name: 'Flow' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByText('Call API')).toBeVisible();
   });
 
   it('shows bounded empty scoped lenses, hides inapplicable zoom, and exposes SSE status', async () => {
@@ -313,7 +377,7 @@ describe('architecture viewer', () => {
     act(() => MockEventSource.latest?.dispatchEvent(new Event('architecture:invalid')));
     expect(await screen.findByRole('alert')).toHaveTextContent('Invalid workspace edit detected');
     act(() => MockEventSource.latest?.onerror?.());
-    expect(await screen.findByRole('alert')).toHaveTextContent('Offline/reconnecting');
+    expect(await screen.findByRole('alert')).toHaveTextContent('SSE reconnecting');
     act(() => MockEventSource.latest?.onopen?.());
     await waitFor(() => expect(screen.queryByRole('alert')).toBeNull());
     await waitFor(() =>

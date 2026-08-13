@@ -179,7 +179,9 @@ export function FlowLens({
                 </button>
               </h2>
             </div>
-            <span className="flow-step-count">{flow.steps.length} steps</span>
+            <span className="flow-step-count">
+              {flow.steps.length} {flow.steps.length === 1 ? 'step' : 'steps'}
+            </span>
           </header>
           <ol className="flow-sequence">
             {flow.steps.map((step, index) => (
@@ -264,31 +266,83 @@ export function StateLens({ model, focusId, selection, onSelect, projectionIndex
   if (slice.machines.length === 0) return <EmptyLens title="No state machines in this scope" />;
   return (
     <div className="state-list">
-      {slice.machines.map((machine) => (
-        <section className="state-card" key={machine.id}>
-          <button
-            type="button"
-            className={machine.id === selection?.id ? 'selected text-row' : 'text-row'}
-            aria-pressed={selection?.kind === 'stateMachine' && selection.id === machine.id}
-            onClick={() => onSelect({ kind: 'stateMachine', id: machine.id })}
+      {slice.machines.map((machine) => {
+        const statesById = new Map(machine.states.map((state) => [state.id, state]));
+        const routesByOrigin = new Map<string, typeof machine.transitions>();
+        for (const transition of machine.transitions) {
+          const routes = routesByOrigin.get(transition.from) ?? [];
+          routes.push(transition);
+          routesByOrigin.set(transition.from, routes);
+        }
+        return (
+          <section
+            className={`state-card ${selection?.kind === 'stateMachine' && selection.id === machine.id ? 'selected' : ''}`}
+            key={machine.id}
           >
-            {machine.title}
-          </button>
-          <div className="state-rail">
-            {machine.states.map((state) => (
-              <span key={state.id}>{state.title}</span>
-            ))}
-          </div>
-          <ul aria-label={`${machine.title} transition list`}>
-            {machine.transitions.map((transition, index) => (
-              <li key={`${transition.from}-${transition.to}-${index}`}>
-                {transition.from} → {transition.to}
-                {transition.event ? ` when ${transition.event}` : ''}
-              </li>
-            ))}
-          </ul>
-        </section>
-      ))}
+            <header className="state-card-head">
+              <div>
+                <p className="eyebrow">State machine</p>
+                <h2>
+                  <button
+                    type="button"
+                    className="state-title-action"
+                    aria-pressed={selection?.kind === 'stateMachine' && selection.id === machine.id}
+                    onClick={() => onSelect({ kind: 'stateMachine', id: machine.id })}
+                  >
+                    {machine.title}
+                  </button>
+                </h2>
+              </div>
+              <span className="state-counts">
+                {machine.states.length} states · {machine.transitions.length} transitions
+              </span>
+            </header>
+            <ol className="state-atlas" aria-label={`${machine.title} transition list`}>
+              {machine.states.map((state, index) => {
+                const routes = routesByOrigin.get(state.id) ?? [];
+                return (
+                  <li className="state-origin" key={state.id}>
+                    <span className="state-index" aria-hidden="true">
+                      {String(index + 1).padStart(2, '0')}
+                    </span>
+                    <div className="state-origin-copy">
+                      <h3>{state.title}</h3>
+                      {routes.length === 0 ? (
+                        <p className="muted state-empty-route">
+                          No outgoing transitions in this view.
+                        </p>
+                      ) : (
+                        <ul className="state-routes">
+                          {routes.map((transition, routeIndex) => (
+                            <li
+                              key={`${transition.from}-${transition.to}-${routeIndex}`}
+                              aria-label={`${state.title} when ${transition.event ? humanizeToken(transition.event) : 'no event specified'} goes to ${statesById.get(transition.to)?.title ?? transition.to}`}
+                            >
+                              <span className="state-event-label">When</span>
+                              <span className="state-event">
+                                {transition.event
+                                  ? humanizeToken(transition.event)
+                                  : 'No event specified'}
+                              </span>
+                              <span className="state-arrow" aria-hidden="true">
+                                →
+                              </span>
+                              <span className="sr-only">goes to </span>
+                              <span className="state-destination">
+                                {statesById.get(transition.to)?.title ?? transition.to}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ol>
+          </section>
+        );
+      })}
       {(slice.omittedMachines > 0 || slice.omittedStates > 0 || slice.omittedTransitions > 0) && (
         <p className="bounded-note">
           {slice.omittedMachines} machines, {slice.omittedStates} states, and{' '}
@@ -297,6 +351,10 @@ export function StateLens({ model, focusId, selection, onSelect, projectionIndex
       )}
     </div>
   );
+}
+
+function humanizeToken(value: string): string {
+  return value.replaceAll(/[-_]+/g, ' ');
 }
 
 function EmptyLens({ title }: { title: string }) {

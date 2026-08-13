@@ -78,11 +78,15 @@ test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
   await expect(page).toHaveURL(/lens=structure/);
 
   await page.getByRole('button', { name: 'State' }).click();
-  await expect(page.getByLabel('Task state transition list')).toContainText(
-    'queued → running when start'
-  );
+  await expect(page.getByLabel('Task state transition list')).toContainText('Queued');
+  await expect(page.getByLabel('Queued when start goes to Running')).toBeVisible();
   await expect(page.getByRole('button', { name: 'Zoom in' })).toHaveCount(0);
   await screenshot(page, `viewer-state-${testInfo.project.name}`);
+  if (testInfo.project.name.startsWith('mobile')) {
+    await page.setViewportSize({ width: 320, height: 700 });
+    await assertNoOverflow(page);
+    await page.setViewportSize({ width: 375, height: 667 });
+  }
   await page.getByRole('button', { name: 'Structure' }).click();
 
   await page.getByRole('button', { name: 'Zoom in' }).click();

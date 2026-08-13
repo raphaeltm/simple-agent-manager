@@ -22,9 +22,9 @@ export interface ArchitectureViewerController {
   loadModel: () => Promise<void>;
   mobileInspector: boolean;
   mobileViewport: boolean;
+  navigateLens: (lens: Lens) => void;
   select: (selection: Selection) => void;
   selection?: Selection;
-  setLens: Dispatch<SetStateAction<Lens>>;
   setZoom: Dispatch<SetStateAction<number>>;
   viewer: ViewerState;
   zoom: number;
@@ -40,22 +40,26 @@ export function useArchitectureViewer(api: ApiClient): ArchitectureViewerControl
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const eventRevisionRef = useRef(0);
+  const historyModeRef = useRef<'push' | 'replace'>('replace');
   const loadModel = useLoadModel(api, setViewer, setFocusId, setSelection, eventRevisionRef);
   const mobileViewport = useMobileViewport(
     viewer.model?.interaction.mobileBreakpointPx ?? DEFAULT_VIEWER_MOBILE_BREAKPOINT_PX
   );
   useInitialLoad(loadModel, setViewer);
   useEventStream(loadModel, setViewer, eventRevisionRef);
-  useUrlState(lens, focusId, selection);
+  useUrlState(lens, focusId, selection, historyModeRef);
+  usePopState(setLens, setFocusId, setSelection, setMobileInspector, mobileViewport);
   useEscapeClose(setMobileInspector);
   useDesktopModalReset(mobileViewport, setMobileInspector);
   useFocusReturn(mobileInspector, returnFocusRef);
   const select = (next: Selection) => {
+    historyModeRef.current = 'push';
     returnFocusRef.current = activeElement();
     setSelection(next);
     setMobileInspector(mobileViewport);
   };
   const drill = (id: string) => {
+    historyModeRef.current = 'push';
     setLens('structure');
     setFocusId(id);
     setSelection({ kind: 'element', id });
@@ -69,9 +73,12 @@ export function useArchitectureViewer(api: ApiClient): ArchitectureViewerControl
     loadModel,
     mobileInspector,
     mobileViewport,
+    navigateLens: (next) => {
+      historyModeRef.current = 'push';
+      setLens(next);
+    },
     select,
     selection,
-    setLens,
     setZoom,
     viewer,
     zoom,
@@ -133,6 +140,7 @@ function commitModel(
     ...current,
     loading: false,
     error: undefined,
+    refreshError: undefined,
     model,
     status: invalid
       ? 'Invalid workspace edit detected; keeping last valid model.'
@@ -169,6 +177,7 @@ function useEventStream(
 ): void {
   useEffect(() => {
     const source = new EventSource('/api/events');
+    let needsReconnectSync = false;
     const reload = () => void reloadAfterSse(loadModel, setViewer);
     source.onopen = () => {
       eventRevisionRef.current += 1;
@@ -181,7 +190,10 @@ function useEventStream(
             ? 'Live updates connected.'
             : current.status,
       }));
-      void reloadAfterSse(loadModel, setViewer);
+      if (needsReconnectSync) {
+        needsReconnectSync = false;
+        void reloadAfterSse(loadModel, setViewer);
+      }
     };
     source.addEventListener('architecture:model', reload);
     source.addEventListener('architecture:invalid', () => {
@@ -193,20 +205,50 @@ function useEventStream(
     });
     source.onerror = () => {
       eventRevisionRef.current += 1;
+      needsReconnectSync = true;
       setViewer((current) => ({ ...current, offline: true, status: 'SSE reconnecting…' }));
     };
     return () => source.close();
   }, [eventRevisionRef, loadModel, setViewer]);
 }
 
-function useUrlState(lens: Lens, focusId?: string, selection?: Selection): void {
+function useUrlState(
+  lens: Lens,
+  focusId: string | undefined,
+  selection: Selection | undefined,
+  historyModeRef: MutableRefObject<'push' | 'replace'>
+): void {
   useEffect(() => {
     const params = new URLSearchParams();
     params.set('lens', lens);
     if (focusId) params.set('focus', focusId);
     if (selection) params.set('selected', `${selection.kind}:${selection.id}`);
-    window.history.replaceState(null, '', `${window.location.pathname}?${params.toString()}`);
-  }, [focusId, lens, selection]);
+    const nextUrl = `${window.location.pathname}?${params.toString()}`;
+    const mode = historyModeRef.current;
+    historyModeRef.current = 'replace';
+    if (`${window.location.pathname}${window.location.search}` === nextUrl) return;
+    window.history[mode === 'push' ? 'pushState' : 'replaceState'](null, '', nextUrl);
+  }, [focusId, historyModeRef, lens, selection]);
+}
+
+function usePopState(
+  setLens: Dispatch<SetStateAction<Lens>>,
+  setFocusId: Dispatch<SetStateAction<string | undefined>>,
+  setSelection: Dispatch<SetStateAction<Selection | undefined>>,
+  setMobileInspector: Dispatch<SetStateAction<boolean>>,
+  mobileViewport: boolean
+): void {
+  useEffect(() => {
+    const restore = () => {
+      const selection = readSelection();
+      setLens(readLens());
+      setFocusId(readParam('focus'));
+      setSelection(selection);
+      setMobileInspector(mobileViewport && selection !== undefined);
+    };
+    window.addEventListener('popstate', restore);
+    return () => window.removeEventListener('popstate', restore);
+  }, [mobileViewport, setFocusId, setLens, setMobileInspector, setSelection]);
 }
 
 function useEscapeClose(setOpen: Dispatch<SetStateAction<boolean>>): void {
@@ -236,13 +278,13 @@ async function reloadAfterSse(
   loadModel: () => Promise<void>,
   setViewer: Dispatch<SetStateAction<ViewerState>>
 ): Promise<void> {
-  setViewer((current) => ({ ...current, status: 'Reloading architecture model…', offline: false }));
+  setViewer((current) => ({ ...current, status: 'Reloading architecture model…' }));
   try {
     await loadModel();
   } catch (error) {
     setViewer((current) => ({
       ...current,
-      offline: true,
+      refreshError: errorMessage(error),
       status: `Reload failed: ${errorMessage(error)}`,
     }));
   }

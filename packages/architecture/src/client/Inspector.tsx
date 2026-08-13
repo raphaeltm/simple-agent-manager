@@ -4,6 +4,7 @@ import {
   type MutableRefObject,
   type RefObject,
   type SetStateAction,
+  useCallback,
   useEffect,
   useMemo,
   useRef,
@@ -98,28 +99,49 @@ function useInspectorController({
   const targetId = selection?.id ?? focusId ?? model.summary.roots[0]?.id;
   const target = useMemo(() => describeTarget(model, targetId), [model, targetId]);
   const threads = model.workspace.threads.filter((thread) => thread.target === targetId);
-  const state = useInspectorState();
-  useResetOnTarget(
-    targetId,
-    state.targetRevisionRef,
-    state.setPreview,
-    state.setQuestion,
-    state.setReplyDrafts,
-    state.setMutation
-  );
+  const state = useInspectorState(targetId);
+  useResetOnTarget(targetId, state.targetRevisionRef, state.setPreview, state.setMutation);
   useMobileDialog(mobileOpen, targetId, state.inspectorRef);
   useInspectorScrollReset(targetId, state.inspectorRef);
   return useInspectorActions(api, onReload, targetId, target, threads, state);
 }
 
-function useInspectorState() {
+function useInspectorState(targetId: string | undefined) {
   const [preview, setPreview] = useState<PreviewState>({ loading: false });
-  const [question, setQuestion] = useState({ title: '', body: '' });
-  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const [draftsByTarget, setDraftsByTarget] = useState<
+    Record<string, { question: { title: string; body: string }; replies: Record<string, string> }>
+  >({});
   const [mutation, setMutation] = useState<MutationState>({ saving: false });
   const inspectorRef = useRef<HTMLElement | null>(null);
   const targetRevisionRef = useRef(0);
   const sourceRevisionRef = useRef(0);
+  const latestTargetRef = useRef(targetId);
+  latestTargetRef.current = targetId;
+  const draft = targetId ? draftsByTarget[targetId] : undefined;
+  const question = draft?.question ?? EMPTY_QUESTION;
+  const replyDrafts = draft?.replies ?? {};
+  const setQuestion = useCallback<Dispatch<SetStateAction<typeof EMPTY_QUESTION>>>(
+    (action) => {
+      if (!targetId) return;
+      setDraftsByTarget((current) => {
+        const previous = current[targetId] ?? { question: EMPTY_QUESTION, replies: {} };
+        const question = typeof action === 'function' ? action(previous.question) : action;
+        return { ...current, [targetId]: { ...previous, question } };
+      });
+    },
+    [targetId]
+  );
+  const setReplyDrafts = useCallback<Dispatch<SetStateAction<Record<string, string>>>>(
+    (action) => {
+      if (!targetId) return;
+      setDraftsByTarget((current) => {
+        const previous = current[targetId] ?? { question: EMPTY_QUESTION, replies: {} };
+        const replies = typeof action === 'function' ? action(previous.replies) : action;
+        return { ...current, [targetId]: { ...previous, replies } };
+      });
+    },
+    [targetId]
+  );
   return {
     inspectorRef,
     mutation,
@@ -130,6 +152,7 @@ function useInspectorState() {
     setPreview,
     setQuestion,
     setReplyDrafts,
+    latestTargetRef,
     sourceRevisionRef,
     targetRevisionRef,
   };
@@ -147,6 +170,7 @@ function useInspectorActions(
     api,
     targetId,
     state.targetRevisionRef,
+    state.latestTargetRef,
     state.sourceRevisionRef,
     state.setPreview
   );
@@ -176,17 +200,13 @@ function useResetOnTarget(
   targetId: string | undefined,
   revision: MutableRefObject<number>,
   setPreview: Dispatch<SetStateAction<PreviewState>>,
-  setQuestion: Dispatch<SetStateAction<{ title: string; body: string }>>,
-  setDrafts: Dispatch<SetStateAction<Record<string, string>>>,
   setMutation: Dispatch<SetStateAction<MutationState>>
 ): void {
   useEffect(() => {
     revision.current += 1;
     setPreview({ loading: false });
-    setQuestion({ title: '', body: '' });
-    setDrafts({});
     setMutation({ saving: false });
-  }, [targetId, revision, setDrafts, setMutation, setPreview, setQuestion]);
+  }, [targetId, revision, setMutation, setPreview]);
 }
 
 function useMobileDialog(
@@ -242,6 +262,7 @@ function useSourceLoader(
   api: ApiClient,
   targetId: string | undefined,
   targetRevisionRef: MutableRefObject<number>,
+  latestTargetRef: MutableRefObject<string | undefined>,
   sourceRevisionRef: MutableRefObject<number>,
   setPreview: Dispatch<SetStateAction<PreviewState>>
 ) {
@@ -253,6 +274,7 @@ function useSourceLoader(
     try {
       const loaded = await api.loadSource(targetId, source, sourceIndex);
       if (
+        targetId === latestTargetRef.current &&
         targetRevision === targetRevisionRef.current &&
         sourceRevision === sourceRevisionRef.current
       ) {
@@ -260,6 +282,7 @@ function useSourceLoader(
       }
     } catch (error) {
       if (
+        targetId === latestTargetRef.current &&
         targetRevision === targetRevisionRef.current &&
         sourceRevision === sourceRevisionRef.current
       ) {
@@ -268,6 +291,8 @@ function useSourceLoader(
     }
   };
 }
+
+const EMPTY_QUESTION = { title: '', body: '' };
 
 function useQuestionCreator(
   api: ApiClient,

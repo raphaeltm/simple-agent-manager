@@ -16,12 +16,13 @@ export interface ViewerState {
   model?: ViewerModel;
   loading: boolean;
   error?: string;
+  refreshError?: string;
   status: string;
   offline: boolean;
 }
 
 export interface Selection {
-  kind: 'element' | 'flow' | 'stateMachine' | 'relationship' | 'thread';
+  kind: 'element' | 'flow' | 'stateMachine' | 'relationship';
   id: string;
 }
 

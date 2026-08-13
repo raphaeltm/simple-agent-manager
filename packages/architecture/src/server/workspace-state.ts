@@ -28,6 +28,7 @@ export class WorkspaceState {
   private timer?: ReturnType<typeof setTimeout>;
   private stopped = false;
   private operationTail: Promise<void> = Promise.resolve();
+  private watchPromise?: Promise<void>;
 
   constructor(
     private readonly options: WorkspaceStateOptions,
@@ -63,6 +64,7 @@ export class WorkspaceState {
   }
 
   reload(reason: string): Promise<boolean> {
+    if (this.stopped) return Promise.reject(new Error('Architecture workspace state is stopped.'));
     return this.runExclusive(() => this.performReload(reason));
   }
 
@@ -70,8 +72,11 @@ export class WorkspaceState {
     reason: string,
     mutation: (loaded: LoadedWorkspace) => Promise<T>
   ): Promise<WorkspaceMutationResult<T>> {
+    if (this.stopped) {
+      return Promise.reject(new Error('Architecture workspace state is stopped.'));
+    }
     return this.runExclusive(async () => {
-      if (!(await this.performReload(`pre-${reason}`))) return { status: 'invalid' };
+      if (!(await this.refreshIfChanged(`pre-${reason}`))) return { status: 'invalid' };
       const value = await mutation(this.current());
       return (await this.performReload(reason))
         ? { status: 'applied', value }
@@ -83,6 +88,7 @@ export class WorkspaceState {
     this.stopped = true;
     if (this.timer) clearTimeout(this.timer);
     this.timer = undefined;
+    await this.watchPromise?.catch(() => undefined);
     await this.operationTail.catch(() => undefined);
   }
 
@@ -92,7 +98,7 @@ export class WorkspaceState {
     if (hasErrors(next.diagnostics)) {
       this.invalid = next;
       this.fingerprint = fingerprint;
-      if (changed) {
+      if (changed && !this.stopped) {
         this.events.publish('architecture:invalid', { reason, diagnostics: next.diagnostics });
       }
       return false;
@@ -101,7 +107,7 @@ export class WorkspaceState {
     this.loaded = next;
     this.invalid = undefined;
     this.fingerprint = fingerprint;
-    if (changed) {
+    if (changed && !this.stopped) {
       this.events.publish('architecture:model', { reason, summary: next.workspace.manifest.name });
       if (previousThreads !== threadFingerprint(next.workspace.threads)) {
         this.events.publish('architecture:threads', {
@@ -130,7 +136,13 @@ export class WorkspaceState {
   private async checkForChanges(): Promise<void> {
     const nextFingerprint = await fingerprintDirectory(this.current().workspace.workspaceRoot);
     if (nextFingerprint === this.fingerprint) return;
-    await this.reload('file-change');
+    await this.performReload('file-change');
+  }
+
+  private async refreshIfChanged(reason: string): Promise<boolean> {
+    const nextFingerprint = await fingerprintDirectory(this.current().workspace.workspaceRoot);
+    if (nextFingerprint === this.fingerprint && this.isLatestValid()) return true;
+    return this.performReload(reason);
   }
 
   private runExclusive<T>(operation: () => Promise<T>): Promise<T> {
@@ -145,8 +157,9 @@ export class WorkspaceState {
   private scheduleWatch(): void {
     if (this.stopped) return;
     this.timer = setTimeout(() => {
-      void this.checkForChanges()
+      this.watchPromise = this.runExclusive(() => this.checkForChanges())
         .catch((error: unknown) => {
+          if (this.stopped) return;
           this.events.publish('architecture:invalid', {
             reason: 'watch-error',
             diagnostics: [
@@ -158,7 +171,10 @@ export class WorkspaceState {
             ],
           });
         })
-        .finally(() => this.scheduleWatch());
+        .finally(() => {
+          this.watchPromise = undefined;
+          this.scheduleWatch();
+        });
     }, this.options.watchIntervalMs ?? DEFAULT_SERVER_WATCH_INTERVAL_MS);
   }
 }
@@ -186,8 +202,8 @@ async function collectEntries(root: string): Promise<string[]> {
       continue;
     }
     if (!entry.isFile()) continue;
-    const stats = await stat(absolute);
-    values.push(`${absolute}:${stats.mtimeMs}:${stats.size}`);
+    const stats = await stat(absolute, { bigint: true });
+    values.push(`${absolute}:${stats.ino}:${stats.size}:${stats.mtimeNs}:${stats.ctimeNs}`);
   }
   return values.sort(compareCanonicalStrings);
 }

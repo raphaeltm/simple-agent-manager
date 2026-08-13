@@ -93,9 +93,10 @@ export async function startArchitectureServer(
     url: `http://${formatAuthority(host, addressPort(server))}`,
     server,
     close: async () => {
-      await state.stop();
+      const closing = closeServer(server);
       events.close();
-      await closeServer(server);
+      await state.stop();
+      await closing;
     },
   };
 }
