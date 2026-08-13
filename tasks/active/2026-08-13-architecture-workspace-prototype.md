@@ -1,5 +1,7 @@
 # Architecture Workspace Prototype
 
+**Status:** Active
+
 ## Problem
 
 SAM has grown into a multi-client, multi-runtime system whose important behavior spans the web UI, API Worker, CLI, Durable Objects, shared packages, VM agent, deployment infrastructure, and external providers. Static dependency graphs and prose documents expose pieces of that system, but neither humans nor coding agents have one navigable, versioned mental model that captures intent, non-obvious cross-system flows, source evidence, and open questions.
