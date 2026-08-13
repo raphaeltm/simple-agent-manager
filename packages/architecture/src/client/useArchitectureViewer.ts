@@ -1,5 +1,6 @@
 import {
   type Dispatch,
+  type MutableRefObject,
   type RefObject,
   type SetStateAction,
   useCallback,
@@ -38,12 +39,13 @@ export function useArchitectureViewer(api: ApiClient): ArchitectureViewerControl
   const [mobileInspector, setMobileInspector] = useState(false);
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
-  const loadModel = useLoadModel(api, setViewer, setFocusId, setSelection);
+  const eventRevisionRef = useRef(0);
+  const loadModel = useLoadModel(api, setViewer, setFocusId, setSelection, eventRevisionRef);
   const mobileViewport = useMobileViewport(
     viewer.model?.interaction.mobileBreakpointPx ?? DEFAULT_VIEWER_MOBILE_BREAKPOINT_PX
   );
   useInitialLoad(loadModel, setViewer);
-  useEventStream(loadModel, setViewer);
+  useEventStream(loadModel, setViewer, eventRevisionRef);
   useUrlState(lens, focusId, selection);
   useEscapeClose(setMobileInspector);
   useDesktopModalReset(mobileViewport, setMobileInspector);
@@ -80,7 +82,8 @@ function useLoadModel(
   api: ApiClient,
   setViewer: Dispatch<SetStateAction<ViewerState>>,
   setFocusId: Dispatch<SetStateAction<string | undefined>>,
-  setSelection: Dispatch<SetStateAction<Selection | undefined>>
+  setSelection: Dispatch<SetStateAction<Selection | undefined>>,
+  eventRevisionRef: MutableRefObject<number>
 ) {
   const runningRef = useRef<Promise<void> | undefined>(undefined);
   const queuedRef = useRef(false);
@@ -90,20 +93,51 @@ function useLoadModel(
       return runningRef.current;
     }
     const run = async () => {
+      let lastError: unknown;
       do {
         queuedRef.current = false;
-        const model = await api.loadModel();
-        setViewer({ loading: false, model, status: 'Architecture model loaded.', offline: false });
-        setFocusId((current) => keepId(model, current));
-        setSelection((current) => keepSelection(model, current));
+        try {
+          const eventRevision = eventRevisionRef.current;
+          const model = await api.loadModel();
+          lastError = undefined;
+          setViewer((current) =>
+            commitModel(current, model, eventRevision !== eventRevisionRef.current)
+          );
+          setFocusId((current) => keepId(model, current));
+          setSelection((current) => keepSelection(model, current));
+        } catch (error) {
+          lastError = error;
+        }
       } while (queuedRef.current);
+      if (lastError) throw lastError;
     };
     const running = run().finally(() => {
       runningRef.current = undefined;
     });
     runningRef.current = running;
     return running;
-  }, [api, setFocusId, setSelection, setViewer]);
+  }, [api, eventRevisionRef, setFocusId, setSelection, setViewer]);
+}
+
+function commitModel(
+  current: ViewerState,
+  model: ViewerModel,
+  preserveNewerEventState: boolean
+): ViewerState {
+  const invalid =
+    model.diagnostics.some((diagnostic) => diagnostic.severity === 'error') ||
+    (preserveNewerEventState && current.status.includes('Invalid workspace edit'));
+  return {
+    ...current,
+    loading: false,
+    error: undefined,
+    model,
+    status: invalid
+      ? 'Invalid workspace edit detected; keeping last valid model.'
+      : current.offline
+        ? 'Model refreshed; live updates are reconnecting…'
+        : 'Architecture model loaded.',
+  };
 }
 
 function useInitialLoad(
@@ -124,12 +158,14 @@ function useInitialLoad(
 
 function useEventStream(
   loadModel: () => Promise<void>,
-  setViewer: Dispatch<SetStateAction<ViewerState>>
+  setViewer: Dispatch<SetStateAction<ViewerState>>,
+  eventRevisionRef: MutableRefObject<number>
 ): void {
   useEffect(() => {
     const source = new EventSource('/api/events');
     const reload = () => void reloadAfterSse(loadModel, setViewer);
-    source.onopen = () =>
+    source.onopen = () => {
+      eventRevisionRef.current += 1;
       setViewer((current) => ({
         ...current,
         offline: false,
@@ -139,17 +175,21 @@ function useEventStream(
             ? 'Live updates connected.'
             : current.status,
       }));
+    };
     source.addEventListener('architecture:model', reload);
-    source.addEventListener('architecture:invalid', () =>
+    source.addEventListener('architecture:invalid', () => {
+      eventRevisionRef.current += 1;
       setViewer((current) => ({
         ...current,
         status: 'Invalid workspace edit detected; keeping last valid model.',
-      }))
-    );
-    source.onerror = () =>
+      }));
+    });
+    source.onerror = () => {
+      eventRevisionRef.current += 1;
       setViewer((current) => ({ ...current, offline: true, status: 'SSE reconnecting…' }));
+    };
     return () => source.close();
-  }, [loadModel, setViewer]);
+  }, [eventRevisionRef, loadModel, setViewer]);
 }
 
 function useUrlState(lens: Lens, focusId?: string, selection?: Selection): void {

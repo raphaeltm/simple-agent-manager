@@ -1,5 +1,16 @@
+import { randomUUID } from 'node:crypto';
 import { constants as fsConstants } from 'node:fs';
-import { link, mkdir, open, readFile, unlink, writeFile } from 'node:fs/promises';
+import {
+  link,
+  mkdir,
+  open,
+  readFile,
+  rename,
+  rmdir,
+  stat,
+  unlink,
+  writeFile,
+} from 'node:fs/promises';
 import path from 'node:path';
 
 import * as v from 'valibot';
@@ -11,6 +22,9 @@ import {
   DEFAULT_THREAD_AUTHOR,
   DEFAULT_THREAD_AUTHOR_LIMIT,
   DEFAULT_THREAD_BODY_LIMIT,
+  DEFAULT_THREAD_LOCK_RETRY_MS,
+  DEFAULT_THREAD_LOCK_STALE_MS,
+  DEFAULT_THREAD_LOCK_TIMEOUT_MS,
   DEFAULT_THREAD_TITLE_LIMIT,
   DEFAULT_THREADS_DIR,
   THREAD_FILE_EXTENSION,
@@ -54,6 +68,7 @@ export interface ReplyWriteOptions {
   replyTo?: string;
   threadsDir?: string;
   limits?: Partial<ThreadContentLimits>;
+  lock?: Partial<ThreadLockOptions>;
 }
 
 export interface ThreadContentLimits {
@@ -61,6 +76,18 @@ export interface ThreadContentLimits {
   bodyChars: number;
   titleChars: number;
 }
+
+export interface ThreadLockOptions {
+  retryMs: number;
+  staleMs: number;
+  timeoutMs: number;
+}
+
+export const DEFAULT_THREAD_LOCK_OPTIONS: ThreadLockOptions = {
+  retryMs: DEFAULT_THREAD_LOCK_RETRY_MS,
+  staleMs: DEFAULT_THREAD_LOCK_STALE_MS,
+  timeoutMs: DEFAULT_THREAD_LOCK_TIMEOUT_MS,
+};
 
 export const DEFAULT_THREAD_CONTENT_LIMITS: ThreadContentLimits = {
   authorChars: DEFAULT_THREAD_AUTHOR_LIMIT,
@@ -104,8 +131,7 @@ export async function loadThreads(
 export async function createThread(options: ThreadWriteOptions): Promise<ArchitectureThread> {
   validateThreadContent(options);
   const now = (options.now ?? new Date()).toISOString();
-  const threadId =
-    options.id ?? makeStableId('thread', `${options.target}-${now}-${options.title}`);
+  const threadId = options.id ?? `thread-${randomUUID()}`;
   assertSafeIdentifier(threadId, 'thread id');
   const message = makeMessage({
     body: options.body,
@@ -151,31 +177,36 @@ export async function appendThreadReply(options: ReplyWriteOptions): Promise<Thr
     relativePath: relativeThreadPath,
     mustExist: true,
   });
-  const existing = await parseThreadFile(absoluteThreadPath);
-  if (options.replyTo && !existing.messages.some((message) => message.id === options.replyTo)) {
-    throw new Error(`Reply target was not found in thread ${options.threadId}: ${options.replyTo}`);
-  }
-  const now = (options.now ?? new Date()).toISOString();
-  const message = makeMessage({
-    body: options.body,
-    author: options.author,
-    now,
-    replyTo: options.replyTo,
-    seed: `${options.threadId}-${existing.messages.length}-${options.body}-${now}`,
+  return withThreadLock(absoluteThreadPath, options.lock, async () => {
+    const existing = await parseThreadFile(absoluteThreadPath);
+    if (options.replyTo && !existing.messages.some((message) => message.id === options.replyTo)) {
+      throw new Error(
+        `Reply target was not found in thread ${options.threadId}: ${options.replyTo}`
+      );
+    }
+    const now = (options.now ?? new Date()).toISOString();
+    const message = makeMessage({
+      body: options.body,
+      author: options.author,
+      now,
+      replyTo: options.replyTo,
+      id: `msg-${randomUUID()}`,
+    });
+    assertValidMessage(message);
+    const handle = await open(
+      absoluteThreadPath,
+      fsConstants.O_APPEND | fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW
+    );
+    try {
+      const stats = await handle.stat();
+      if (!stats.isFile())
+        throw new Error(`Thread path is not a regular file: ${options.threadId}`);
+      await handle.appendFile(`\n${serializeMessage(message)}`);
+    } finally {
+      await handle.close();
+    }
+    return message;
   });
-  assertValidMessage(message);
-  const handle = await open(
-    absoluteThreadPath,
-    fsConstants.O_APPEND | fsConstants.O_WRONLY | fsConstants.O_NOFOLLOW
-  );
-  try {
-    const stats = await handle.stat();
-    if (!stats.isFile()) throw new Error(`Thread path is not a regular file: ${options.threadId}`);
-    await handle.appendFile(`\n${serializeMessage(message)}`);
-  } finally {
-    await handle.close();
-  }
-  return message;
 }
 
 /** Parse and validate one thread Markdown file. */
@@ -253,12 +284,13 @@ function makeMessage(input: {
   author?: string;
   now: string;
   replyTo?: string;
-  seed: string;
+  id?: string;
+  seed?: string;
 }): ThreadMessage {
   return {
-    id: makeStableId('msg', input.seed),
-    author: input.author ?? DEFAULT_THREAD_AUTHOR,
-    body: input.body,
+    id: input.id ?? makeStableId('msg', input.seed ?? randomUUID()),
+    author: (input.author ?? DEFAULT_THREAD_AUTHOR).trim(),
+    body: input.body.trim(),
     createdAt: input.now,
     replyTo: input.replyTo,
   };
@@ -330,8 +362,81 @@ function assertNoReservedMessageSyntax(value: string, label: string): void {
 }
 
 function assertContentLength(value: string, limit: number, label: string): void {
-  if (value.length > 0 && value.length <= limit) return;
+  if (value.trim().length > 0 && value.length <= limit) return;
   throw new Error(`${label} must contain between 1 and ${limit} characters.`);
+}
+
+async function withThreadLock<T>(
+  threadPath: string,
+  overrides: Partial<ThreadLockOptions> | undefined,
+  operation: () => Promise<T>
+): Promise<T> {
+  const options = { ...DEFAULT_THREAD_LOCK_OPTIONS, ...overrides };
+  const lockPath = path.join(path.dirname(threadPath), `.${path.basename(threadPath)}.lock`);
+  const deadline = Date.now() + options.timeoutMs;
+  while (true) {
+    try {
+      await mkdir(lockPath);
+      try {
+        await writeFile(path.join(lockPath, 'owner'), `${process.pid}:${randomUUID()}\n`, {
+          flag: 'wx',
+        });
+      } catch (error) {
+        await releaseLock(lockPath);
+        throw error;
+      }
+      break;
+    } catch (error) {
+      if (!isAlreadyExistsError(error)) throw error;
+      await reclaimStaleLock(lockPath, options.staleMs);
+      if (Date.now() >= deadline) {
+        throw new Error(`Timed out waiting for thread mutation lock: ${path.basename(threadPath)}`);
+      }
+      await delay(options.retryMs);
+    }
+  }
+  try {
+    return await operation();
+  } finally {
+    await releaseLock(lockPath);
+  }
+}
+
+async function reclaimStaleLock(lockPath: string, staleMs: number): Promise<void> {
+  try {
+    const lockStats = await stat(lockPath);
+    if (Date.now() - lockStats.mtimeMs < staleMs) return;
+    const stalePath = `${lockPath}.stale-${randomUUID()}`;
+    await rename(lockPath, stalePath);
+    await releaseLock(stalePath);
+  } catch (error) {
+    if (!isNotFoundError(error)) throw error;
+  }
+}
+
+async function releaseLock(lockPath: string): Promise<void> {
+  try {
+    await unlink(path.join(lockPath, 'owner'));
+  } catch (error) {
+    if (!isNotFoundError(error)) throw error;
+  }
+  try {
+    await rmdir(lockPath);
+  } catch (error) {
+    if (!isNotFoundError(error)) throw error;
+  }
+}
+
+function delay(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function isAlreadyExistsError(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'EEXIST';
+}
+
+function isNotFoundError(error: unknown): boolean {
+  return error instanceof Error && 'code' in error && error.code === 'ENOENT';
 }
 
 async function collectThreadFiles(root: string, workspaceRoot: string): Promise<string[]> {

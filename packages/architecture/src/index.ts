@@ -7,12 +7,16 @@ export {
   DEFAULT_SERVER_PORT,
   DEFAULT_SERVER_SOURCE_BYTES,
   DEFAULT_SERVER_SSE_CLIENT_LIMIT,
+  DEFAULT_SERVER_STABLE_LOAD_ATTEMPTS,
   DEFAULT_SERVER_WATCH_INTERVAL_MS,
   DEFAULT_SOURCE_CONTEXT_LINES,
   DEFAULT_SOURCE_PATH_LIMIT,
   DEFAULT_THREAD_AUTHOR,
   DEFAULT_THREAD_AUTHOR_LIMIT,
   DEFAULT_THREAD_BODY_LIMIT,
+  DEFAULT_THREAD_LOCK_RETRY_MS,
+  DEFAULT_THREAD_LOCK_STALE_MS,
+  DEFAULT_THREAD_LOCK_TIMEOUT_MS,
   DEFAULT_THREAD_TITLE_LIMIT,
   DEFAULT_THREADS_DIR,
   DEFAULT_VALIDATION_ISSUE_LIMIT,
@@ -94,11 +98,17 @@ export { DEFAULT_VIEWER_INTERACTION, DEFAULT_VIEWER_LIMITS } from './server/payl
 export { readSourceReference } from './source';
 export type { ArchitectureTarget, ArchitectureTargetKind } from './targets';
 export { hasArchitectureTarget, resolveArchitectureTarget } from './targets';
-export type { ReplyWriteOptions, ThreadContentLimits, ThreadWriteOptions } from './threads';
+export type {
+  ReplyWriteOptions,
+  ThreadContentLimits,
+  ThreadLockOptions,
+  ThreadWriteOptions,
+} from './threads';
 export {
   appendThreadReply,
   createThread,
   DEFAULT_THREAD_CONTENT_LIMITS,
+  DEFAULT_THREAD_LOCK_OPTIONS,
   loadThreads,
 } from './threads';
 export type {

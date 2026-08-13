@@ -25,10 +25,20 @@ export const DEFAULT_REQUEST_LIMITS: ArchitectureRequestLimits = {
 
 export function makeRequestSchemas(limits: ArchitectureRequestLimits = DEFAULT_REQUEST_LIMITS) {
   const optionalAuthorSchema = v.optional(
-    v.pipe(v.string(), v.minLength(1), v.maxLength(limits.threadAuthorChars))
+    v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(limits.threadAuthorChars))
   );
-  const bodySchema = v.pipe(v.string(), v.minLength(1), v.maxLength(limits.threadBodyChars));
-  const titleSchema = v.pipe(v.string(), v.minLength(1), v.maxLength(limits.threadTitleChars));
+  const bodySchema = v.pipe(
+    v.string(),
+    v.trim(),
+    v.minLength(1),
+    v.maxLength(limits.threadBodyChars)
+  );
+  const titleSchema = v.pipe(
+    v.string(),
+    v.trim(),
+    v.minLength(1),
+    v.maxLength(limits.threadTitleChars)
+  );
   return {
     sourcePreview: v.strictObject({
       target: idSchema,

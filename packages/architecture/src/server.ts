@@ -29,7 +29,7 @@ import {
 } from './server/payloads';
 import { serveViewerAsset } from './server/static-assets';
 import { makeRequestSchemas } from './server/validation';
-import { WorkspaceState } from './server/workspace-state';
+import { type WorkspaceMutationResult, WorkspaceState } from './server/workspace-state';
 import { readSourceReference } from './source';
 import { resolveArchitectureTarget } from './targets';
 import {
@@ -82,7 +82,13 @@ export async function startArchitectureServer(
     });
   });
   const port = options.port ?? DEFAULT_SERVER_PORT;
-  await listen(server, port, host);
+  try {
+    await listen(server, port, host);
+  } catch (error) {
+    await state.stop();
+    events.close();
+    throw error;
+  }
   return {
     url: `http://${formatAuthority(host, addressPort(server))}`,
     server,
@@ -196,7 +202,10 @@ function handleSummary(
 }
 
 function isMutationRoute(pathname: string): boolean {
-  return pathname === '/api/threads' || (pathname.startsWith('/api/threads/') && pathname.endsWith('/replies'));
+  return (
+    pathname === '/api/threads' ||
+    (pathname.startsWith('/api/threads/') && pathname.endsWith('/replies'))
+  );
 }
 
 function handleElement(
@@ -261,16 +270,22 @@ async function handleCreateThread(
     options.maxBodyBytes ?? DEFAULT_SERVER_BODY_BYTES,
     options.validationIssueLimit ?? DEFAULT_VALIDATION_ISSUE_LIMIT
   );
-  if (!resolveArchitectureTarget(state.current().workspace, body.target)) {
-    throw new HttpError(404, `Thread target not found: ${body.target}`, 'thread-target-not-found');
-  }
-  const thread = await createThread({
-    workspaceRoot: state.current().workspace.workspaceRoot,
-    threadsDir: state.current().workspace.manifest.threadsDir,
-    limits: options.threadLimits,
-    ...body,
+  const result = await state.mutateLatest('thread-create', async (loaded) => {
+    if (!resolveArchitectureTarget(loaded.workspace, body.target)) {
+      throw new HttpError(
+        404,
+        `Thread target not found: ${body.target}`,
+        'thread-target-not-found'
+      );
+    }
+    return createThread({
+      workspaceRoot: loaded.workspace.workspaceRoot,
+      threadsDir: loaded.workspace.manifest.threadsDir,
+      limits: options.threadLimits,
+      ...body,
+    });
   });
-  await state.reload('thread-create');
+  const thread = requireAppliedMutation(result);
   sendJson(response, 201, { thread, artifactPath: await threadArtifactPath(state, thread.id) });
 }
 
@@ -291,18 +306,38 @@ async function handleReply(
     options.maxBodyBytes ?? DEFAULT_SERVER_BODY_BYTES,
     options.validationIssueLimit ?? DEFAULT_VALIDATION_ISSUE_LIMIT
   );
-  if (!state.current().workspace.indexes.threadsById.has(threadId)) {
-    throw new HttpError(404, `Thread not found: ${threadId}`, 'thread-not-found');
-  }
-  const message = await appendThreadReply({
-    workspaceRoot: state.current().workspace.workspaceRoot,
-    threadsDir: state.current().workspace.manifest.threadsDir,
-    limits: options.threadLimits,
-    threadId,
-    ...body,
+  const result = await state.mutateLatest('thread-reply', async (loaded) => {
+    if (!loaded.workspace.indexes.threadsById.has(threadId)) {
+      throw new HttpError(404, `Thread not found: ${threadId}`, 'thread-not-found');
+    }
+    return appendThreadReply({
+      workspaceRoot: loaded.workspace.workspaceRoot,
+      threadsDir: loaded.workspace.manifest.threadsDir,
+      limits: options.threadLimits,
+      threadId,
+      ...body,
+    });
   });
-  await state.reload('thread-reply');
+  const message = requireAppliedMutation(result);
   sendJson(response, 201, { message, artifactPath: await threadArtifactPath(state, threadId) });
+}
+
+function requireAppliedMutation<T>(result: WorkspaceMutationResult<T>): T {
+  if (result.status === 'invalid') {
+    throw new HttpError(
+      503,
+      'Architecture workspace has an invalid pending edit; fix diagnostics before mutating it.',
+      'workspace-invalid'
+    );
+  }
+  if (result.status === 'persisted-invalid') {
+    throw new HttpError(
+      500,
+      'The artifact was written but the architecture workspace failed post-write validation.',
+      'workspace-post-write-invalid'
+    );
+  }
+  return result.value;
 }
 
 function handleEvents(request: IncomingMessage, response: ServerResponse, events: EventHub): void {

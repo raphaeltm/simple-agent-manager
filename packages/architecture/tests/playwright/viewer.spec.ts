@@ -21,6 +21,16 @@ test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
   await page.goto('/?lens=structure');
   await expect(page.getByRole('heading', { name: 'Playwright Architecture' })).toBeVisible();
   await assertNoOverflow(page);
+  await assertViewportScrollOwnership(page);
+
+  if (testInfo.project.name.startsWith('mobile')) {
+    const controlTops = await page
+      .locator('.zoom-controls > *')
+      .evaluateAll((controls) =>
+        controls.map((control) => Math.round(control.getBoundingClientRect().top))
+      );
+    expect(new Set(controlTops).size).toBe(1);
+  }
 
   const apiButton = page.locator('.node-select', { hasText: 'API component' });
   await apiButton.focus();
@@ -80,6 +90,8 @@ test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
   await expect(sourceButton).toBeInViewport();
   await sourceButton.click();
   await expect(page.getByLabel('Source preview')).toContainText('export const hello');
+  await assertViewportScrollOwnership(page);
+  await expect(page.locator('.topbar')).toBeInViewport();
 
   await page.getByLabel('Question title').fill('Browser question');
   await page.getByLabel('Question', { exact: true }).fill('Question body');
@@ -105,9 +117,7 @@ Reply added by direct file edit
   if (testInfo.project.name.startsWith('mobile')) await page.keyboard.press('Escape');
 
   await writeModel(normalModel('API renamed by file edit'));
-  await expect(
-    page.locator('.node-title', { hasText: 'API renamed by file edit' })
-  ).toBeVisible();
+  await expect(page.locator('.node-title', { hasText: 'API renamed by file edit' })).toBeVisible();
   await screenshot(page, `viewer-main-${testInfo.project.name}`);
   await assertControlBounds(page);
 });
@@ -207,6 +217,25 @@ async function assertNoOverflow(page: Page): Promise<void> {
   });
   expect(overflow.rootOverflow, JSON.stringify(overflow)).toBe(false);
   expect(overflow.clipped, JSON.stringify(overflow)).toEqual([]);
+}
+
+async function assertViewportScrollOwnership(page: Page): Promise<void> {
+  const metrics = await page.evaluate(() => {
+    const app = document.querySelector('.architecture-app')?.getBoundingClientRect();
+    return {
+      appBottom: app?.bottom,
+      appTop: app?.top,
+      bodyHeight: document.body.scrollHeight,
+      documentHeight: document.documentElement.scrollHeight,
+      viewportHeight: window.innerHeight,
+      windowScrollY: window.scrollY,
+    };
+  });
+  expect(metrics.windowScrollY).toBe(0);
+  expect(metrics.appTop).toBe(0);
+  expect(metrics.appBottom).toBe(metrics.viewportHeight);
+  expect(metrics.bodyHeight).toBe(metrics.viewportHeight);
+  expect(metrics.documentHeight).toBe(metrics.viewportHeight);
 }
 
 async function assertControlBounds(page: Page): Promise<void> {

@@ -1,8 +1,12 @@
+import { execFile } from 'node:child_process';
 import { access } from 'node:fs/promises';
+import path from 'node:path';
+import { promisify } from 'node:util';
 
 import { describe, expect, it, vi } from 'vitest';
 
 import { runCli } from '../src/cli';
+import { loadArchitectureWorkspace } from '../src/loader';
 import { makeFixture, writeFixtureFile } from './helpers';
 
 describe('architecture CLI', () => {
@@ -135,4 +139,72 @@ elements:
       log.mockRestore();
     }
   });
+
+  it('serializes replies made by separate CLI processes', async () => {
+    const fixture = await makeFixture();
+    await writeFixtureFile(
+      fixture.workspaceRoot,
+      'model.yaml',
+      'version: 1\nname: Concurrent CLI\nelements:\n  - id: api\n    kind: system\n    title: API\n'
+    );
+    const log = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    try {
+      await expect(
+        runCli([
+          'reply',
+          '--workspace',
+          fixture.workspaceRoot,
+          '--repo',
+          fixture.root,
+          '--target',
+          'api',
+          '--title',
+          'Concurrent question',
+          '--body',
+          'Initial body',
+          '--json',
+        ])
+      ).resolves.toBe(0);
+      const created = JSON.parse(String(log.mock.calls.at(-1)?.[0])) as {
+        thread: { id: string };
+      };
+      const args = [
+        '--import',
+        'tsx',
+        path.resolve(process.cwd(), 'src/cli.ts'),
+        'reply',
+        '--workspace',
+        fixture.workspaceRoot,
+        '--repo',
+        fixture.root,
+        '--thread',
+        created.thread.id,
+        '--body',
+        'Concurrent answer',
+        '--json',
+      ];
+
+      await Promise.all([runProcess(args), runProcess(args)]);
+
+      const loaded = await loadArchitectureWorkspace({
+        workspaceRoot: fixture.workspaceRoot,
+        repoRoot: fixture.root,
+      });
+      expect(loaded.diagnostics).toEqual([]);
+      const messages = loaded.workspace.threads[0]?.messages ?? [];
+      expect(messages).toHaveLength(3);
+      expect(new Set(messages.map((message) => message.id)).size).toBe(3);
+    } finally {
+      log.mockRestore();
+    }
+  });
 });
+
+const execFileAsync = promisify(execFile);
+
+async function runProcess(args: string[]): Promise<void> {
+  const result = await execFileAsync(process.execPath, args, {
+    cwd: process.cwd(),
+  });
+  expect(JSON.parse(result.stdout)).toHaveProperty('message.id');
+}

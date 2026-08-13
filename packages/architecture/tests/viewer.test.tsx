@@ -184,6 +184,80 @@ describe('architecture viewer', () => {
     expect(await screen.findByText(/Saved, but the view could not refresh/)).toBeVisible();
   });
 
+  it('runs a queued refresh after the active refresh fails', async () => {
+    const initial = makeModel();
+    const recovered = makeModel();
+    recovered.workspace.name = 'Recovered architecture';
+    recovered.summary.name = 'Recovered architecture';
+    let resolveFailedRefresh: ((value: Response) => void) | undefined;
+    const failedRefresh = new Promise<Response>((resolve) => {
+      resolveFailedRefresh = resolve;
+    });
+    const responses = [jsonResponse(initial), failedRefresh, jsonResponse(recovered)];
+    const fetchMock = vi.fn(() => responses.shift() ?? jsonResponse(recovered));
+    vi.stubGlobal('fetch', fetchMock);
+
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: initial.summary.name })).toBeVisible();
+    act(() => MockEventSource.latest?.dispatchEvent(new Event('architecture:model')));
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2));
+    act(() => MockEventSource.latest?.dispatchEvent(new Event('architecture:model')));
+    resolveFailedRefresh?.(jsonResponse({ error: { message: 'Transient reload failure' } }, 500));
+
+    expect(await screen.findByRole('heading', { name: 'Recovered architecture' })).toBeVisible();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(screen.queryByText(/Transient reload failure/)).toBeNull();
+  });
+
+  it('does not let an older model response erase a newer invalid-workspace event', async () => {
+    const initial = makeModel();
+    const stale = makeModel();
+    stale.workspace.name = 'Stale response';
+    stale.summary.name = 'Stale response';
+    let resolveStaleRefresh: ((value: Response) => void) | undefined;
+    const staleRefresh = new Promise<Response>((resolve) => {
+      resolveStaleRefresh = resolve;
+    });
+    const responses = [jsonResponse(initial), staleRefresh];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => responses.shift() ?? jsonResponse(stale))
+    );
+
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: initial.summary.name })).toBeVisible();
+    act(() => MockEventSource.latest?.dispatchEvent(new Event('architecture:model')));
+    act(() => MockEventSource.latest?.dispatchEvent(new Event('architecture:invalid')));
+    resolveStaleRefresh?.(jsonResponse(stale));
+
+    expect(await screen.findByRole('heading', { name: 'Stale response' })).toBeVisible();
+    expect(screen.getByRole('alert')).toHaveTextContent('Invalid workspace edit detected');
+  });
+
+  it('does not let an older model response erase a newer reconnecting state', async () => {
+    const initial = makeModel();
+    let resolveStaleRefresh: ((value: Response) => void) | undefined;
+    const staleRefresh = new Promise<Response>((resolve) => {
+      resolveStaleRefresh = resolve;
+    });
+    const responses = [jsonResponse(initial), staleRefresh];
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => responses.shift() ?? jsonResponse(initial))
+    );
+
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: initial.summary.name })).toBeVisible();
+    act(() => MockEventSource.latest?.dispatchEvent(new Event('architecture:model')));
+    act(() => MockEventSource.latest?.onerror?.());
+    resolveStaleRefresh?.(jsonResponse(initial));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Offline/reconnecting');
+    expect(
+      screen.getByText(/live updates are reconnecting/, { selector: '[role="status"]' })
+    ).toBeVisible();
+  });
+
   it('shows bounded empty scoped lenses, hides inapplicable zoom, and exposes SSE status', async () => {
     const model = makeModel();
     model.workspace.elements.push({

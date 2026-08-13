@@ -122,7 +122,7 @@ The requested end state is broader than this first PR: humans should eventually 
 ### F. Five-pass refinement requested after initial review
 
 - [x] F1. Complete UI round 1: desktop/mobile screenshots, local specialist critique with multiple design directions, implementation, browser verification, commit, and push.
-- [ ] F2. Complete UI round 2: refreshed screenshots, local specialist critique, implementation, browser verification, commit, and push.
+- [x] F2. Complete UI round 2: refreshed screenshots, local specialist critique, implementation, browser verification, commit, and push.
 - [ ] F3. Complete UI round 3: refreshed screenshots, local specialist critique, implementation, browser verification, commit, and push.
 - [ ] F4. Complete UI round 4: refreshed screenshots, local specialist critique, implementation, browser verification, commit, and push.
 - [ ] F5. Complete UI round 5: refreshed screenshots, local specialist critique, implementation, browser verification, commit, and push.
@@ -156,6 +156,7 @@ The requested end state is broader than this first PR: humans should eventually 
 - Workspace commands: validate reported no diagnostics; summary compiled 19 elements, 21 relationships, three flows, one state machine, and three views; show, inbox, and impact queries returned bounded results successfully.
 - Repository policy: `pnpm quality:file-sizes` passed with no file over 800 lines.
 - Staging: [Deploy Staging run 31722867891](https://github.com/raphaeltm/simple-agent-manager/actions/runs/31722867891) passed for reviewed commit `d44c8ebc6b0fd1dd39a1e1191ff6c007127c0c06`, including the workflow health check and all 12 smoke tests. A separate authenticated Playwright regression pass against `app.sammy.party` verified API health, the loaded dashboard and project list, click-through to a real project chat, loaded settings data, and zero console or uncaught page errors; evidence screenshots are in `.codex/tmp/playwright-screenshots/architecture-regression-{dashboard,project,settings}.png`. The package viewer is intentionally local-only in this prototype, so its feature behavior was verified through the real loopback server and six-scenario package browser suite rather than a deployed SAM route. `pnpm quality:observability-noise` also exited successfully; the environment lacked `OBSERVABILITY_DB_ID` and the Workers telemetry API returned 403, so those two optional data-source probes were reported as skipped.
+- Refinement round 2: 52 package tests plus all six real-server Playwright scenarios passed. The added evidence covers stale SSE/model ordering, failed-refresh queue recovery, a 10,000-element reverse hierarchy, two-process CLI reply concurrency, whitespace-only request rejection, document/canvas/inspector scroll ownership, and single-row mobile zoom controls. Six updated screenshots are stored under `.codex/tmp/architecture-review/round-02/`.
 
 ## References
 

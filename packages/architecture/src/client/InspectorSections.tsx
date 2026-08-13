@@ -53,7 +53,9 @@ function RelationshipList({
 }) {
   return (
     <div>
-      <h3>{title}</h3>
+      <h3 className="relationship-heading">
+        {title} <span>{relationships.length}</span>
+      </h3>
       {relationships.length === 0 ? (
         <p className="muted">None.</p>
       ) : (

@@ -1,10 +1,10 @@
 /* eslint-disable jsx-a11y/no-noninteractive-tabindex, jsx-a11y/no-noninteractive-element-interactions -- The scrollable architecture canvas must accept keyboard focus and key events for arrow-key panning. */
-import { type KeyboardEvent, type ReactNode } from 'react';
+import { type KeyboardEvent, type ReactNode, useMemo } from 'react';
 
 import type { ViewerInteraction, ViewerModel } from '../server/payloads';
 import { Inspector } from './Inspector';
 import { FlowLens, StateLens, StructureLens } from './Lenses';
-import { structureSlice } from './projections';
+import { createProjectionIndex, type ProjectionIndex, structureSlice } from './projections';
 import type { ApiClient, Lens } from './types';
 import type { ArchitectureViewerController } from './useArchitectureViewer';
 
@@ -16,7 +16,11 @@ export function WorkspaceView({
   controller: ArchitectureViewerController;
 }) {
   const model = controller.viewer.model;
-  if (!model) return null;
+  const projectionIndex = useMemo(
+    () => (model ? createProjectionIndex(model) : undefined),
+    [model]
+  );
+  if (!model || !projectionIndex) return null;
   const showStatus =
     controller.viewer.offline ||
     controller.viewer.status.includes('Invalid') ||
@@ -28,7 +32,12 @@ export function WorkspaceView({
       showStatus={showStatus}
     >
       <WorkspaceHeader controller={controller} model={model} />
-      <WorkspaceMain api={api} controller={controller} model={model} />
+      <WorkspaceMain
+        api={api}
+        controller={controller}
+        model={model}
+        projectionIndex={projectionIndex}
+      />
     </Shell>
   );
 }
@@ -68,14 +77,16 @@ function WorkspaceMain({
   api,
   controller,
   model,
+  projectionIndex,
 }: {
   api: ApiClient;
   controller: ArchitectureViewerController;
   model: ViewerModel;
+  projectionIndex: ProjectionIndex;
 }) {
   return (
     <main className="workspace-root">
-      <CanvasColumn controller={controller} model={model} />
+      <CanvasColumn controller={controller} model={model} projectionIndex={projectionIndex} />
       {controller.mobileInspector && (
         <button
           type="button"
@@ -102,11 +113,13 @@ function WorkspaceMain({
 function CanvasColumn({
   controller,
   model,
+  projectionIndex,
 }: {
   controller: ArchitectureViewerController;
   model: ViewerModel;
+  projectionIndex: ProjectionIndex;
 }) {
-  const breadcrumbs = structureSlice(model, controller.focusId).breadcrumbs;
+  const breadcrumbs = structureSlice(model, controller.focusId, projectionIndex).breadcrumbs;
   return (
     <section
       className="canvas-column"
@@ -120,10 +133,13 @@ function CanvasColumn({
       />
       {controller.lens === 'structure' && (
         <p className="canvas-help" id="canvas-help">
-          Zoom with the controls, then pan the focused canvas by scrolling or using arrow keys.
+          <span className="desktop-help">
+            Zoom with the controls, then pan the focused canvas by scrolling or using arrow keys.
+          </span>
+          <span className="mobile-help">Scroll or use arrows to pan.</span>
         </p>
       )}
-      <LensCanvas controller={controller} model={model} />
+      <LensCanvas controller={controller} model={model} projectionIndex={projectionIndex} />
     </section>
   );
 }
@@ -156,28 +172,44 @@ function CanvasContext({
           <button
             type="button"
             className="toolbar-action"
+            aria-label="Zoom out"
             onClick={() =>
               controller.setZoom((value) =>
                 Math.max(interaction.minZoom, value - interaction.zoomStep)
               )
             }
           >
-            Zoom out
+            <span className="desktop-control">Zoom out</span>
+            <span className="mobile-control" aria-hidden="true">
+              −
+            </span>
           </button>
           <output aria-label="Canvas zoom">{Math.round(controller.zoom * 100)}%</output>
           <button
             type="button"
             className="toolbar-action"
+            aria-label="Zoom in"
             onClick={() =>
               controller.setZoom((value) =>
                 Math.min(interaction.maxZoom, value + interaction.zoomStep)
               )
             }
           >
-            Zoom in
+            <span className="desktop-control">Zoom in</span>
+            <span className="mobile-control" aria-hidden="true">
+              +
+            </span>
           </button>
-          <button type="button" className="toolbar-action" onClick={() => resetCanvas(controller)}>
-            Reset view
+          <button
+            type="button"
+            className="toolbar-action"
+            aria-label="Reset view"
+            onClick={() => resetCanvas(controller)}
+          >
+            <span className="desktop-control">Reset view</span>
+            <span className="mobile-control" aria-hidden="true">
+              Reset
+            </span>
           </button>
         </div>
       )}
@@ -188,9 +220,11 @@ function CanvasContext({
 function LensCanvas({
   controller,
   model,
+  projectionIndex,
 }: {
   controller: ArchitectureViewerController;
   model: ViewerModel;
+  projectionIndex: ProjectionIndex;
 }) {
   return (
     <div
@@ -206,13 +240,18 @@ function LensCanvas({
       {model.workspace.elements.length === 0 ? (
         <StateMessage title="Empty architecture workspace" detail="No elements are defined yet." />
       ) : (
-        renderLens(controller.lens, controller, model)
+        renderLens(controller.lens, controller, model, projectionIndex)
       )}
     </div>
   );
 }
 
-function renderLens(lens: Lens, controller: ArchitectureViewerController, model: ViewerModel) {
+function renderLens(
+  lens: Lens,
+  controller: ArchitectureViewerController,
+  model: ViewerModel,
+  projectionIndex: ProjectionIndex
+) {
   const props = {
     model,
     focusId: controller.focusId,
@@ -221,6 +260,7 @@ function renderLens(lens: Lens, controller: ArchitectureViewerController, model:
     onSelect: controller.select,
     onDrill: controller.drill,
     onLens: controller.setLens as (lens: Lens) => void,
+    projectionIndex,
   };
   if (lens === 'flow') return <FlowLens {...props} />;
   if (lens === 'state') return <StateLens {...props} />;

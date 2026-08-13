@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react';
 
 import type { ArchitectureElement, ArchitectureRelationship } from '../schemas';
 import type { ViewerModel } from '../server/payloads';
-import { flowSlice, stateSlice, structureSlice } from './projections';
+import { flowSlice, type ProjectionIndex, stateSlice, structureSlice } from './projections';
 import type { Lens, Selection } from './types';
 
 interface LensProps {
@@ -13,10 +13,19 @@ interface LensProps {
   onSelect: (selection: Selection) => void;
   onDrill: (id: string) => void;
   onLens: (lens: Lens) => void;
+  projectionIndex: ProjectionIndex;
 }
 
-export function StructureLens({ model, focusId, selection, zoom, onSelect, onDrill }: LensProps) {
-  const slice = structureSlice(model, focusId);
+export function StructureLens({
+  model,
+  focusId,
+  selection,
+  zoom,
+  onSelect,
+  onDrill,
+  projectionIndex,
+}: LensProps) {
+  const slice = structureSlice(model, focusId, projectionIndex);
   const { children: childElements, focus, relationships: portals } = slice;
   if (!focus) return <EmptyLens title="No structure" />;
   const style: CSSProperties & Record<'--aw-zoom', string> = { '--aw-zoom': String(zoom) };
@@ -139,8 +148,15 @@ function PortalList({
   );
 }
 
-export function FlowLens({ model, focusId, selection, onSelect, onDrill }: LensProps) {
-  const slice = flowSlice(model, focusId);
+export function FlowLens({
+  model,
+  focusId,
+  selection,
+  onSelect,
+  onDrill,
+  projectionIndex,
+}: LensProps) {
+  const slice = flowSlice(model, focusId, projectionIndex);
   if (slice.flows.length === 0) return <EmptyLens title="No flows in this scope" />;
   return (
     <div className="flow-list">
@@ -205,8 +221,8 @@ function FlowStepItem({
   );
 }
 
-export function StateLens({ model, focusId, selection, onSelect }: LensProps) {
-  const slice = stateSlice(model, focusId);
+export function StateLens({ model, focusId, selection, onSelect, projectionIndex }: LensProps) {
+  const slice = stateSlice(model, focusId, projectionIndex);
   if (slice.machines.length === 0) return <EmptyLens title="No state machines in this scope" />;
   return (
     <div className="state-list">

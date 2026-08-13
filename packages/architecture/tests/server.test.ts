@@ -79,9 +79,7 @@ describe('architecture local HTTP server', () => {
       const model = await readJson<{
         diagnostics: Array<{ code: string }>;
         workspace: { elements: Array<{ id: string }> };
-      }>(
-        `${running.url}/api/model`
-      );
+      }>(`${running.url}/api/model`);
       expect(model.workspace.elements.map((element) => element.id)).toContain('api');
       expect(model.diagnostics.length).toBeGreaterThan(0);
       const mutation = await fetch(`${running.url}/api/threads`, {
@@ -239,6 +237,12 @@ describe('architecture local HTTP server', () => {
         method: 'POST',
       });
       expect(invalidSchema.status).toBe(400);
+      const whitespaceOnly = await fetch(`${running.url}/api/threads`, {
+        body: JSON.stringify({ target: 'api-self', title: 'Question', body: ' \n\t ' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      expect(whitespaceOnly.status).toBe(400);
       await expect(readFile(canaryPath, 'utf8')).resolves.toBe('unchanged');
     } finally {
       await running.close();

@@ -24,6 +24,7 @@
     BlinkMacSystemFont,
     'Segoe UI',
     sans-serif;
+  height: 100%;
 }
 
 * {
@@ -31,8 +32,10 @@
 }
 
 body {
+  height: 100%;
   margin: 0;
   min-width: 0;
+  overflow: hidden;
   overflow-x: hidden;
 }
 
@@ -85,9 +88,12 @@ textarea {
 }
 
 .architecture-app {
-  min-height: 100dvh;
+  display: flex;
+  height: 100dvh;
   min-width: 0;
+  overflow: hidden;
   padding: 1rem;
+  flex-direction: column;
 }
 
 .status-banner {
@@ -110,6 +116,7 @@ textarea {
 }
 
 .topbar {
+  flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
   margin: 0 auto 1rem;
@@ -197,8 +204,11 @@ textarea {
 
 .workspace-root {
   align-items: stretch;
+  flex: 1 1 auto;
   margin: 0 auto;
   max-width: 1180px;
+  min-height: 0;
+  overflow: hidden;
   width: 100%;
 }
 
@@ -207,6 +217,7 @@ textarea {
   flex: 1 1 auto;
   flex-direction: column;
   gap: 0.75rem;
+  min-height: 0;
   min-width: 0;
 }
 
@@ -216,8 +227,9 @@ textarea {
 }
 
 .canvas {
-  height: min(64dvh, 42rem);
-  min-height: 32rem;
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
   min-width: 0;
   overflow: auto;
   border: 1px solid var(--aw-border);
@@ -225,9 +237,12 @@ textarea {
   background:
     linear-gradient(rgba(99, 217, 221, 0.035) 1px, transparent 1px),
     linear-gradient(90deg, rgba(99, 217, 221, 0.035) 1px, transparent 1px),
-    radial-gradient(circle at top left, rgba(99, 217, 221, 0.1), transparent 25rem),
-    var(--aw-panel);
-  background-size: 28px 28px, 28px 28px, auto, auto;
+    radial-gradient(circle at top left, rgba(99, 217, 221, 0.1), transparent 25rem), var(--aw-panel);
+  background-size:
+    28px 28px,
+    28px 28px,
+    auto,
+    auto;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.015);
   padding: 1rem;
 }
@@ -391,12 +406,13 @@ textarea {
 }
 
 .architecture-inspector {
-  position: sticky;
-  top: 1rem;
+  position: relative;
+  top: 0;
   align-self: flex-start;
   flex: 0 0 372px;
+  height: 100%;
   min-width: 0;
-  max-height: calc(100dvh - 6rem);
+  max-height: none;
   overflow: auto;
   border: 1px solid var(--aw-border);
   border-radius: 0.55rem;
@@ -489,6 +505,19 @@ textarea {
 .relationship-grid > div {
   min-width: 0;
   flex: 1 1 0;
+}
+
+.relationship-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.relationship-heading span {
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.72rem;
+  font-weight: 400;
 }
 
 .source-link,
@@ -605,6 +634,11 @@ textarea {
   white-space: nowrap;
 }
 
+.mobile-control,
+.mobile-help {
+  display: none;
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,
@@ -626,8 +660,8 @@ textarea {
 }
 
 .architecture-app.is-mobile .canvas {
-  height: min(62dvh, 34rem);
-  min-height: 24rem;
+  height: auto;
+  min-height: 0;
 }
 
 .architecture-app.is-mobile .flow-card li,
@@ -648,6 +682,9 @@ textarea {
   transition: transform 160ms ease-out;
   visibility: hidden;
   pointer-events: none;
+  box-shadow:
+    inset 0 -1.5rem 1.5rem -1.7rem rgba(99, 217, 221, 0.32),
+    0 1.5rem 4rem rgba(0, 0, 0, 0.48);
 }
 
 .architecture-app.is-mobile .inspector-backdrop {
@@ -677,6 +714,29 @@ textarea {
 .architecture-app.is-mobile .mobile-close {
   display: inline-flex;
   align-items: center;
+}
+
+.architecture-app.is-mobile .desktop-control,
+.architecture-app.is-mobile .desktop-help {
+  display: none;
+}
+
+.architecture-app.is-mobile .mobile-control,
+.architecture-app.is-mobile .mobile-help {
+  display: inline;
+}
+
+.architecture-app.is-mobile .context-row {
+  gap: 0.35rem;
+}
+
+.architecture-app.is-mobile .canvas-help {
+  line-height: 1.2;
+}
+
+.architecture-app.is-mobile .scope-action {
+  color: var(--aw-accent);
+  font-size: 0.75rem;
 }
 
 .architecture-app.is-mobile .sheet-grip {
@@ -719,10 +779,19 @@ textarea {
 
   .architecture-app.is-mobile .zoom-controls {
     display: grid;
-    grid-template-columns: 1fr auto 1fr;
+    grid-template-columns: 2.4rem auto 2.4rem 1fr;
+    width: 100%;
   }
 
-  .architecture-app.is-mobile .zoom-controls .toolbar-action:last-child {
-    grid-column: 1 / -1;
+  .architecture-app.is-mobile .zoom-controls .toolbar-action {
+    min-height: 2.1rem;
+    padding: 0.3rem 0.4rem;
+  }
+
+  .architecture-app.is-mobile .zoom-controls output {
+    display: grid;
+    align-self: stretch;
+    min-width: 3rem;
+    place-items: center;
   }
 }

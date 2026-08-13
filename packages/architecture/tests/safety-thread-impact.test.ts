@@ -169,6 +169,71 @@ elements:
     expect(loaded.workspace.threads[0]?.updatedAt).toBe('2026-08-13T00:01:00.000Z');
   });
 
+  it('serializes concurrent replies and gives each message a collision-resistant id', async () => {
+    const fixture = await makeFixture();
+    await writeFixtureFile(
+      fixture.workspaceRoot,
+      'model.yaml',
+      'version: 1\nname: Concurrent review\nelements:\n  - id: api\n    kind: system\n    title: API\n'
+    );
+    const thread = await createThread({
+      workspaceRoot: fixture.workspaceRoot,
+      target: 'api',
+      title: 'Concurrent review',
+      body: 'Initial question',
+      id: 'thread-concurrent',
+    });
+    const now = new Date('2026-08-13T00:01:00.000Z');
+    const replies = await Promise.all([
+      appendThreadReply({
+        workspaceRoot: fixture.workspaceRoot,
+        threadId: thread.id,
+        body: 'Same answer',
+        now,
+      }),
+      appendThreadReply({
+        workspaceRoot: fixture.workspaceRoot,
+        threadId: thread.id,
+        body: 'Same answer',
+        now,
+      }),
+    ]);
+
+    expect(new Set(replies.map((reply) => reply.id)).size).toBe(2);
+    const loaded = await loadArchitectureWorkspace({
+      workspaceRoot: fixture.workspaceRoot,
+      repoRoot: fixture.root,
+    });
+    expect(loaded.diagnostics).toEqual([]);
+    expect(loaded.workspace.threads[0]?.messages).toHaveLength(3);
+  });
+
+  it('rejects whitespace-only thread and reply content before writing', async () => {
+    const fixture = await makeFixture();
+    await expect(
+      createThread({
+        workspaceRoot: fixture.workspaceRoot,
+        target: 'api',
+        title: 'Whitespace',
+        body: '   ',
+      })
+    ).rejects.toThrow('thread body');
+    const thread = await createThread({
+      workspaceRoot: fixture.workspaceRoot,
+      target: 'api',
+      title: 'Valid',
+      body: 'Question',
+      id: 'thread-whitespace',
+    });
+    await expect(
+      appendThreadReply({
+        workspaceRoot: fixture.workspaceRoot,
+        threadId: thread.id,
+        body: '\n\t ',
+      })
+    ).rejects.toThrow('reply body');
+  });
+
   it('rejects replies to message IDs outside the selected thread', async () => {
     const fixture = await makeFixture();
     const thread = await createThread({
