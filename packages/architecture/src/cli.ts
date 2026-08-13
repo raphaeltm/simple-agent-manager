@@ -98,7 +98,7 @@ async function validateCommand(options: CliOptions): Promise<number> {
 
 async function summaryCommand(options: CliOptions): Promise<number> {
   const loaded = await loadOrFail(options);
-  printResult(getWorkspaceSummary(loaded.workspace), options.json);
+  printResult(getWorkspaceSummary(loaded.workspace));
   return 0;
 }
 
@@ -108,13 +108,13 @@ async function showCommand(positional: string[], options: CliOptions): Promise<n
   const loaded = await loadOrFail(options);
   const details = showElement(loaded.workspace, elementId);
   if (!details) throw new Error(`Element not found: ${elementId}`);
-  printResult(details, options.json);
+  printResult(details);
   return 0;
 }
 
 async function inboxCommand(options: CliOptions): Promise<number> {
   const loaded = await loadOrFail(options);
-  printResult(listUnresolvedInbox(loaded.workspace), options.json);
+  printResult(listUnresolvedInbox(loaded.workspace));
   return 0;
 }
 
@@ -131,7 +131,7 @@ async function replyCommand(options: CliOptions): Promise<number> {
       body: options.body,
       author: options.author,
     });
-    printResult({ message, artifactPath }, options.json);
+    printResult({ message, artifactPath });
     return 0;
   }
   if (!options.target) throw new Error('reply without --thread requires --target.');
@@ -146,10 +146,7 @@ async function replyCommand(options: CliOptions): Promise<number> {
     body: options.body,
     author: options.author,
   });
-  printResult(
-    { thread, artifactPath: threadArtifactPath(loaded.workspace, thread.id) },
-    options.json
-  );
+  printResult({ thread, artifactPath: threadArtifactPath(loaded.workspace, thread.id) });
   return 0;
 }
 
@@ -168,7 +165,7 @@ async function impactCommand(positional: string[], options: CliOptions): Promise
     throw new Error('impact requires at least one repo-relative changed path.');
   const loaded = await loadOrFail(options);
   const report = await mapChangedPathsToArchitecture(loaded.workspace, positional);
-  printResult(report, options.json);
+  printResult(report);
   return report.brokenSourceRefs.length > 0 ? 1 : 0;
 }
 
@@ -197,12 +194,8 @@ async function loadOrFail(options: CliOptions): ReturnType<typeof loadArchitectu
   return loaded;
 }
 
-function printResult(value: unknown, json: boolean): void {
-  if (json) {
-    console.log(JSON.stringify(value, null, 2));
-  } else {
-    console.log(JSON.stringify(value, null, 2));
-  }
+function printResult(value: unknown): void {
+  console.log(JSON.stringify(value, null, 2));
 }
 
 function parseArgs(argv: string[]): { command: string; positional: string[]; options: CliOptions } {
