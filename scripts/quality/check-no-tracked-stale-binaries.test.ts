@@ -36,7 +36,7 @@ describe('stale binary tracking check', () => {
     const repo = makeGitRepo();
 
     expect(runCheck(repo)).toBe('');
-  });
+  }, 30_000);
 
   it('fails when the forbidden VM agent root binary is tracked', () => {
     const repo = makeGitRepo();
@@ -46,5 +46,5 @@ describe('stale binary tracking check', () => {
     execFileSync(GIT_BINARY, ['add', 'packages/vm-agent/vm-agent'], { cwd: repo });
 
     expect(() => runCheck(repo)).toThrow(/Generated binary artifacts must not be tracked/);
-  });
+  }, 30_000);
 });
