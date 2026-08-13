@@ -106,6 +106,7 @@ function WorkspaceMain({
         onClose={controller.closeInspector}
         onOpenStructure={controller.drill}
         onReload={controller.loadModel}
+        projectionIndex={projectionIndex}
       />
     </main>
   );

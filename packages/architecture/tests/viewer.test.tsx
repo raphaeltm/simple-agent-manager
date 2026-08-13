@@ -77,8 +77,111 @@ describe('architecture viewer', () => {
     fireEvent.change(screen.getByLabelText(/Reply to Existing/), {
       target: { value: 'Reply draft' },
     });
-    fireEvent.click(screen.getByRole('button', { name: 'Reply' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Reply in thread' }));
     await waitFor(() => expect(screen.getByText(/Saved to architecture\/threads/)).toBeVisible());
+  });
+
+  it('presents agent discussion identity and focuses Discussion from the sticky Ask action', async () => {
+    const model = makeModel();
+    model.workspace.threads[0]!.messages.unshift({
+      author: 'user',
+      body: 'What owns this boundary?',
+      createdAt: '2026-08-13T01:02:00.000Z',
+      id: 'msg-user',
+    });
+    mockFetch(model);
+    render(<App />);
+    fireEvent.click((await screen.findByText('API component')).closest('button')!);
+
+    const messages = screen.getByRole('list', { name: 'Existing messages' });
+    expect(within(messages).getByLabelText('Author: user')).toHaveTextContent('User');
+    expect(within(messages).getByLabelText('Author: agent')).toHaveTextContent('Agent');
+    expect(within(messages).getByText('2026-08-13 01:02 UTC').closest('time')).toHaveAttribute(
+      'datetime',
+      '2026-08-13T01:02:00.000Z'
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Ask about API component' }));
+    expect(screen.getByRole('heading', { name: 'Discussion' })).toHaveFocus();
+  });
+
+  it('clears a successfully submitted target draft after navigating away before completion', async () => {
+    const model = makeModel();
+    let resolveCreate!: (response: Response) => void;
+    const createResponse = new Promise<Response>((resolve) => {
+      resolveCreate = resolve;
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith('/api/model')) return Promise.resolve(jsonResponse(model));
+      if (url.endsWith('/api/threads') && init?.method === 'POST') return createResponse;
+      return Promise.resolve(jsonResponse({ error: { message: 'Unexpected request' } }, 404));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+    fireEvent.click((await screen.findByText('API component')).closest('button')!);
+    fireEvent.change(screen.getByLabelText('Question title'), { target: { value: 'Race' } });
+    fireEvent.change(screen.getByLabelText('Question'), {
+      target: { value: 'Cleared once saved' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Create question' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Root system' }));
+    await act(async () => {
+      resolveCreate(
+        jsonResponse(
+          {
+            artifactPath: 'architecture/threads/race.thread.md',
+            thread: model.workspace.threads[0],
+          },
+          201
+        )
+      );
+      await createResponse;
+    });
+    fireEvent.click((await screen.findByText('API component')).closest('button')!);
+    expect(screen.getByLabelText('Question title')).toHaveValue('');
+    expect(screen.getByLabelText('Question')).toHaveValue('');
+    expect(
+      fetchMock.mock.calls.filter((call) => String(call[0]).endsWith('/api/threads'))
+    ).toHaveLength(1);
+  });
+
+  it('clears a successfully submitted reply draft after navigating away before completion', async () => {
+    const model = makeModel();
+    let resolveReply!: (response: Response) => void;
+    const replyResponse = new Promise<Response>((resolve) => {
+      resolveReply = resolve;
+    });
+    const fetchMock = vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith('/api/model')) return Promise.resolve(jsonResponse(model));
+      if (url.includes('/replies')) return replyResponse;
+      return Promise.resolve(jsonResponse({ error: { message: 'Unexpected request' } }, 404));
+    });
+    vi.stubGlobal('fetch', fetchMock);
+    render(<App />);
+    fireEvent.click((await screen.findByText('API component')).closest('button')!);
+    fireEvent.change(screen.getByLabelText('Reply to Existing'), {
+      target: { value: 'Reply clears after save' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Reply in thread' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Root system' }));
+    await act(async () => {
+      resolveReply(
+        jsonResponse(
+          {
+            artifactPath: 'architecture/threads/thread-api.thread.md',
+            message: model.workspace.threads[0]!.messages[0],
+          },
+          201
+        )
+      );
+      await replyResponse;
+    });
+    fireEvent.click((await screen.findByText('API component')).closest('button')!);
+    expect(screen.getByLabelText('Reply to Existing')).toHaveValue('');
+    expect(
+      fetchMock.mock.calls.filter((call) => String(call[0]).includes('/replies'))
+    ).toHaveLength(1);
   });
 
   it('supports state lens textual transitions and Escape focus return on mobile inspector', async () => {

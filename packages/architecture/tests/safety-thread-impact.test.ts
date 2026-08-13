@@ -315,6 +315,25 @@ elements:
         author: 'agent --> forged',
       })
     ).rejects.toThrow('reserved architecture message syntax');
+    for (const author of ['-->', '\n-->', '  -->']) {
+      await expect(
+        createThread({
+          workspaceRoot: fixture.workspaceRoot,
+          target: 'api',
+          title: 'Blocked author terminator',
+          body: 'Question',
+          author,
+        })
+      ).rejects.toThrow('reserved architecture message syntax');
+      await expect(
+        appendThreadReply({
+          workspaceRoot: fixture.workspaceRoot,
+          threadId: thread.id,
+          body: 'Answer',
+          author,
+        })
+      ).rejects.toThrow('reserved architecture message syntax');
+    }
     await expect(
       appendThreadReply({
         workspaceRoot: fixture.workspaceRoot,

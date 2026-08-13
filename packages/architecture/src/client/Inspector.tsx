@@ -14,6 +14,7 @@ import {
 import type { ArchitectureThread, SourceRef } from '../schemas';
 import type { ViewerModel } from '../server/payloads';
 import { Relationships, SourceAnchors, SourcePreview, ThreadList } from './InspectorSections';
+import type { ProjectionIndex } from './projections';
 import type { ApiClient, MutationState, PreviewState, Selection } from './types';
 
 interface TargetDescription {
@@ -34,6 +35,7 @@ interface InspectorProps {
   onClose: () => void;
   onOpenStructure: (id: string) => void;
   onReload: () => Promise<void>;
+  projectionIndex: ProjectionIndex;
 }
 
 export function Inspector({
@@ -45,6 +47,7 @@ export function Inspector({
   onClose,
   onOpenStructure,
   onReload,
+  projectionIndex,
 }: InspectorProps) {
   const controller = useInspectorController({
     api,
@@ -52,6 +55,7 @@ export function Inspector({
     mobileOpen,
     model,
     onReload,
+    projectionIndex,
     selection,
   });
   return (
@@ -64,13 +68,20 @@ export function Inspector({
       tabIndex={-1}
     >
       <InspectorHeader controller={controller} model={model} onClose={onClose} />
-      <InspectorTarget controller={controller} model={model} onOpenStructure={onOpenStructure} />
+      <InspectorTarget
+        controller={controller}
+        model={model}
+        onOpenStructure={onOpenStructure}
+        projectionIndex={projectionIndex}
+      />
     </aside>
   );
 }
 
 interface InspectorController {
+  askQuestion: () => void;
   createQuestion: (event: FormEvent) => Promise<void>;
+  discussionHeadingRef: RefObject<HTMLHeadingElement | null>;
   inspectorRef: RefObject<HTMLElement | null>;
   loadSource: (source: SourceRef, sourceIndex: number) => Promise<void>;
   mutation: MutationState;
@@ -92,13 +103,17 @@ function useInspectorController({
   focusId,
   mobileOpen,
   onReload,
+  projectionIndex,
 }: Pick<
   InspectorProps,
-  'api' | 'model' | 'selection' | 'focusId' | 'mobileOpen' | 'onReload'
+  'api' | 'model' | 'selection' | 'focusId' | 'mobileOpen' | 'onReload' | 'projectionIndex'
 >): InspectorController {
   const targetId = selection?.id ?? focusId ?? model.summary.roots[0]?.id;
-  const target = useMemo(() => describeTarget(model, targetId), [model, targetId]);
-  const threads = model.workspace.threads.filter((thread) => thread.target === targetId);
+  const target = useMemo(
+    () => describeTarget(projectionIndex, targetId),
+    [projectionIndex, targetId]
+  );
+  const threads = targetId ? (projectionIndex.threadsByTarget.get(targetId) ?? []) : [];
   const state = useInspectorState(targetId);
   useResetOnTarget(targetId, state.targetRevisionRef, state.setPreview, state.setMutation);
   useMobileDialog(mobileOpen, targetId, state.inspectorRef);
@@ -112,6 +127,7 @@ function useInspectorState(targetId: string | undefined) {
     Record<string, { question: { title: string; body: string }; replies: Record<string, string> }>
   >({});
   const [mutation, setMutation] = useState<MutationState>({ saving: false });
+  const discussionHeadingRef = useRef<HTMLHeadingElement | null>(null);
   const inspectorRef = useRef<HTMLElement | null>(null);
   const targetRevisionRef = useRef(0);
   const sourceRevisionRef = useRef(0);
@@ -143,6 +159,7 @@ function useInspectorState(targetId: string | undefined) {
     [targetId]
   );
   return {
+    discussionHeadingRef,
     inspectorRef,
     mutation,
     preview,
@@ -193,7 +210,19 @@ function useInspectorActions(
     state.setMutation,
     onReload
   );
-  return { ...state, createQuestion, loadSource, reply, target, targetId, threads };
+  const askQuestion = () => {
+    const inspector = state.inspectorRef.current;
+    const heading = state.discussionHeadingRef.current;
+    if (!inspector || !heading) return;
+    const stickyHeader = inspector.querySelector<HTMLElement>('.inspector-head');
+    const delta = heading.getBoundingClientRect().top - inspector.getBoundingClientRect().top;
+    inspector.scrollTop = Math.max(
+      0,
+      inspector.scrollTop + delta - (stickyHeader?.offsetHeight ?? 0) - 12
+    );
+    heading.focus({ preventScroll: true });
+  };
+  return { ...state, askQuestion, createQuestion, loadSource, reply, target, targetId, threads };
 }
 
 function useResetOnTarget(
@@ -314,12 +343,14 @@ function useQuestionCreator(
         target: targetId,
         title: question.title,
         body: question.body,
+        author: 'user',
       });
-      if (revision !== revisionRef.current) return;
       setQuestion({ title: '', body: '' });
-      setMutation({ saving: false, artifactPath: result.artifactPath });
       try {
         await onReload();
+        if (revision === revisionRef.current) {
+          setMutation({ saving: false, artifactPath: result.artifactPath });
+        }
       } catch (error) {
         if (revision === revisionRef.current) {
           setMutation({
@@ -351,12 +382,13 @@ function useThreadReply(
     const revision = revisionRef.current;
     setMutation({ saving: true });
     try {
-      const result = await api.replyToThread(thread.id, { body });
-      if (revision !== revisionRef.current) return;
+      const result = await api.replyToThread(thread.id, { body, author: 'user' });
       setDrafts((all) => ({ ...all, [thread.id]: '' }));
-      setMutation({ saving: false, artifactPath: result.artifactPath });
       try {
         await onReload();
+        if (revision === revisionRef.current) {
+          setMutation({ saving: false, artifactPath: result.artifactPath });
+        }
       } catch (error) {
         if (revision === revisionRef.current) {
           setMutation({
@@ -389,9 +421,19 @@ function InspectorHeader({
         <p className="eyebrow">{controller.target?.kind ?? 'Overview'}</p>
         <h2>{controller.target?.title ?? model.summary.name}</h2>
       </div>
-      <button type="button" className="mobile-close ghost-action" onClick={onClose}>
-        Close
-      </button>
+      <div className="inspector-head-actions">
+        <button
+          type="button"
+          className="ask-action"
+          aria-label={`Ask about ${controller.target?.title ?? model.summary.name}`}
+          onClick={controller.askQuestion}
+        >
+          Ask
+        </button>
+        <button type="button" className="mobile-close ghost-action" onClick={onClose}>
+          Close
+        </button>
+      </div>
     </div>
   );
 }
@@ -400,10 +442,12 @@ function InspectorTarget({
   controller,
   model,
   onOpenStructure,
+  projectionIndex,
 }: {
   controller: InspectorController;
   model: ViewerModel;
   onOpenStructure: (id: string) => void;
+  projectionIndex: ProjectionIndex;
 }) {
   return (
     <>
@@ -420,7 +464,7 @@ function InspectorTarget({
         <section className="inspector-section">
           <h3>Connections</h3>
           <Relationships
-            model={model}
+            projectionIndex={projectionIndex}
             targetId={controller.targetId}
             onOpenStructure={onOpenStructure}
           />
@@ -447,7 +491,9 @@ function ThreadSection({ controller }: { controller: InspectorController }) {
       <div className="section-heading">
         <div>
           <p className="eyebrow">File-backed Q&amp;A</p>
-          <h3>Discussion</h3>
+          <h3 ref={controller.discussionHeadingRef} tabIndex={-1}>
+            Discussion
+          </h3>
         </div>
         <span className="section-count">{controller.threads.length}</span>
       </div>
@@ -503,14 +549,17 @@ function ThreadSection({ controller }: { controller: InspectorController }) {
   );
 }
 
-function describeTarget(model: ViewerModel, id?: string): TargetDescription | undefined {
-  const element = model.workspace.elements.find((item) => item.id === id);
+function describeTarget(
+  projectionIndex: ProjectionIndex,
+  id?: string
+): TargetDescription | undefined {
+  const element = id ? projectionIndex.elementsById.get(id) : undefined;
   if (element) return { ...element, sources: element.sourceRefs ?? [] };
-  const flow = model.workspace.flows.find((item) => item.id === id);
+  const flow = id ? projectionIndex.flowsById.get(id) : undefined;
   if (flow) return { ...flow, kind: 'flow', sources: flow.sourceRefs ?? [] };
-  const machine = model.workspace.stateMachines.find((item) => item.id === id);
+  const machine = id ? projectionIndex.machinesById.get(id) : undefined;
   if (machine) return { ...machine, kind: 'state machine', sources: machine.sourceRefs ?? [] };
-  const relationship = model.workspace.relationships.find((item) => item.id === id);
+  const relationship = id ? projectionIndex.relationshipsById.get(id) : undefined;
   if (relationship) {
     return {
       id: relationship.id,

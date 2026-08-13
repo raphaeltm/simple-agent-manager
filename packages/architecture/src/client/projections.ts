@@ -3,6 +3,7 @@ import type {
   ArchitectureFlow,
   ArchitectureRelationship,
   ArchitectureStateMachine,
+  ArchitectureThread,
 } from '../schemas';
 import type { ViewerModel } from '../server/payloads';
 import type { FlowSlice, StateSlice, StructureSlice } from './types';
@@ -15,11 +16,13 @@ export interface ProjectionIndex {
   relationshipsByElement: Map<string, ArchitectureRelationship[]>;
   relationshipsById: Map<string, ArchitectureRelationship>;
   relationshipOrder: Map<string, number>;
+  threadsByTarget: Map<string, ArchitectureThread[]>;
 }
 
 export function createProjectionIndex(model: ViewerModel): ProjectionIndex {
   const childrenByParent = new Map<string, ArchitectureElement[]>();
   const relationshipsByElement = new Map<string, ArchitectureRelationship[]>();
+  const threadsByTarget = new Map<string, ArchitectureThread[]>();
   for (const element of model.workspace.elements) {
     if (!element.parent) continue;
     const children = childrenByParent.get(element.parent) ?? [];
@@ -33,6 +36,11 @@ export function createProjectionIndex(model: ViewerModel): ProjectionIndex {
       relationshipsByElement.set(elementId, relationships);
     }
   }
+  for (const thread of model.workspace.threads) {
+    const threads = threadsByTarget.get(thread.target) ?? [];
+    threads.push(thread);
+    threadsByTarget.set(thread.target, threads);
+  }
   return {
     childrenByParent,
     elementsById: new Map(model.workspace.elements.map((element) => [element.id, element])),
@@ -45,6 +53,7 @@ export function createProjectionIndex(model: ViewerModel): ProjectionIndex {
     relationshipOrder: new Map(
       model.workspace.relationships.map((relationship, index) => [relationship.id, index])
     ),
+    threadsByTarget,
   };
 }
 

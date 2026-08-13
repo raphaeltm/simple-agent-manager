@@ -36,7 +36,9 @@ export function useArchitectureViewer(api: ApiClient): ArchitectureViewerControl
   const [focusId, setFocusId] = useState<string | undefined>(() => readParam('focus'));
   const [selection, setSelection] = useState<Selection | undefined>(readSelection);
   const [zoom, setZoom] = useState(1);
-  const [mobileInspector, setMobileInspector] = useState(false);
+  const [mobileInspector, setMobileInspector] = useState(
+    () => readSelection() !== undefined && mediaQuery(DEFAULT_VIEWER_MOBILE_BREAKPOINT_PX).matches
+  );
   const returnFocusRef = useRef<HTMLElement | null>(null);
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const eventRevisionRef = useRef(0);
@@ -48,11 +50,15 @@ export function useArchitectureViewer(api: ApiClient): ArchitectureViewerControl
   useInitialLoad(loadModel, setViewer);
   useEventStream(loadModel, setViewer, eventRevisionRef);
   useUrlState(lens, focusId, selection, historyModeRef);
-  usePopState(setLens, setFocusId, setSelection, setMobileInspector, mobileViewport);
+  usePopState(viewer.model, setLens, setFocusId, setSelection, setMobileInspector, mobileViewport);
   useEscapeClose(setMobileInspector);
   useDesktopModalReset(mobileViewport, setMobileInspector);
   useFocusReturn(mobileInspector, returnFocusRef);
   const select = (next: Selection) => {
+    if (selection?.kind === next.kind && selection.id === next.id) {
+      setMobileInspector(mobileViewport);
+      return;
+    }
     historyModeRef.current = 'push';
     returnFocusRef.current = activeElement();
     setSelection(next);
@@ -74,6 +80,7 @@ export function useArchitectureViewer(api: ApiClient): ArchitectureViewerControl
     mobileInspector,
     mobileViewport,
     navigateLens: (next) => {
+      if (next === lens) return;
       historyModeRef.current = 'push';
       setLens(next);
     },
@@ -232,6 +239,7 @@ function useUrlState(
 }
 
 function usePopState(
+  model: ViewerModel | undefined,
   setLens: Dispatch<SetStateAction<Lens>>,
   setFocusId: Dispatch<SetStateAction<string | undefined>>,
   setSelection: Dispatch<SetStateAction<Selection | undefined>>,
@@ -240,15 +248,16 @@ function usePopState(
 ): void {
   useEffect(() => {
     const restore = () => {
-      const selection = readSelection();
+      const rawSelection = readSelection();
+      const selection = model ? keepSelection(model, rawSelection) : rawSelection;
       setLens(readLens());
-      setFocusId(readParam('focus'));
+      setFocusId(model ? keepId(model, readParam('focus')) : readParam('focus'));
       setSelection(selection);
       setMobileInspector(mobileViewport && selection !== undefined);
     };
     window.addEventListener('popstate', restore);
     return () => window.removeEventListener('popstate', restore);
-  }, [mobileViewport, setFocusId, setLens, setMobileInspector, setSelection]);
+  }, [mobileViewport, model, setFocusId, setLens, setMobileInspector, setSelection]);
 }
 
 function useEscapeClose(setOpen: Dispatch<SetStateAction<boolean>>): void {
@@ -359,7 +368,6 @@ function keepSelection(model: ViewerModel, selection?: Selection): Selection | u
     flow: model.workspace.flows,
     relationship: model.workspace.relationships,
     stateMachine: model.workspace.stateMachines,
-    thread: model.workspace.threads,
   };
   return records[selection.kind].some((record) => record.id === selection.id)
     ? selection

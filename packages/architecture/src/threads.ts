@@ -344,7 +344,7 @@ function assertNoReservedMessageDelimiter(value: string, label: string): void {
 }
 
 function assertNoReservedMessageSyntax(value: string, label: string): void {
-  if (!value.includes(RESERVED_MESSAGE_DELIMITER) && !value.includes(MESSAGE_MARKER_END)) return;
+  if (!value.includes(RESERVED_MESSAGE_DELIMITER) && !value.includes('-->')) return;
   throw new PathSafetyError(`${label} must not contain reserved architecture message syntax.`);
 }
 

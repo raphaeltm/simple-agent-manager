@@ -102,26 +102,53 @@ test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
   await assertViewportScrollOwnership(page);
   await expect(page.locator('.topbar')).toBeInViewport();
 
+  const windowScrollBeforeAsk = await page.evaluate(() => window.scrollY);
+  await page.getByRole('button', { name: 'Ask about API component' }).click();
+  await expect(page.getByRole('heading', { name: 'Discussion' })).toBeFocused();
+  await expect.poll(() => inspector.evaluate((element) => element.scrollTop)).toBeGreaterThan(0);
+  expect(await page.evaluate(() => window.scrollY)).toBe(windowScrollBeforeAsk);
+  await assertNoOverflow(page);
+
   await page.getByLabel('Question title').fill('Browser question');
   await page.getByLabel('Question', { exact: true }).fill('Question body');
   await page.getByRole('button', { name: 'Create question' }).click();
   await expect(page.getByText(/Saved to architecture\/threads/)).toBeVisible();
   await page.getByLabel(/Reply to Browser question/).fill('Browser reply');
-  await page.getByRole('button', { name: 'Reply' }).last().click();
+  await page.getByRole('button', { name: 'Reply in thread' }).last().click();
   await expect(page.getByText(/Browser reply/)).toBeVisible();
 
   const threadFiles = await readdir(path.join(FIXTURE_ROOT, 'architecture/threads'));
   const threadFile = threadFiles.find((file) => file.endsWith('.thread.md'));
   expect(threadFile).toBeDefined();
+  const directAgentReply = `Reply added by direct file edit — Δ <safe> & Unicode. ${'A'.repeat(500)}`;
   await appendFile(
     path.join(FIXTURE_ROOT, 'architecture/threads', threadFile!),
     `\n<!-- arch-message id: msg-direct-edit
 author: agent
 createdAt: '2026-08-13T00:02:00.000Z' -->
-Reply added by direct file edit
+${directAgentReply}
 `
   );
-  await expect(page.getByText('Reply added by direct file edit')).toBeVisible();
+  await expect(page.getByText(directAgentReply)).toBeVisible();
+  const browserThread = page.getByRole('list', { name: 'Browser question messages' });
+  await expect(browserThread.getByLabel('Author: user').first()).toContainText('User');
+  await expect(browserThread.getByLabel('Author: agent')).toContainText('Agent');
+  await expect(browserThread.locator('time').last()).toHaveAttribute(
+    'datetime',
+    '2026-08-13T00:02:00.000Z'
+  );
+
+  if (testInfo.project.name.startsWith('mobile')) {
+    await page.setViewportSize({ width: 320, height: 700 });
+    await inspector.evaluate((element) => {
+      element.scrollTop = 0;
+    });
+    await page.getByRole('button', { name: 'Ask about API component' }).click();
+    await expect(page.getByRole('heading', { name: 'Discussion' })).toBeFocused();
+    await assertNoOverflow(page);
+    await screenshot(page, `viewer-qa-320-${testInfo.project.name}`);
+    await page.setViewportSize({ width: 375, height: 667 });
+  }
 
   if (testInfo.project.name.startsWith('mobile')) await page.keyboard.press('Escape');
 

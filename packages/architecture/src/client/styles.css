@@ -663,6 +663,22 @@ textarea {
   line-height: 1.1;
 }
 
+.inspector-head > div:first-of-type {
+  min-width: 0;
+}
+
+.inspector-head-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.45rem;
+}
+
+.ask-action {
+  border-color: color-mix(in srgb, var(--aw-accent) 65%, var(--aw-border));
+  color: var(--aw-accent);
+  padding: 0.4rem 0.65rem;
+}
+
 .mobile-close {
   display: none;
 }
@@ -684,6 +700,12 @@ textarea {
 .section-heading h3,
 .question-form h4 {
   margin: 0 0 0.65rem;
+}
+
+.section-heading h3:focus-visible {
+  border-radius: 0.2rem;
+  outline: 2px solid var(--aw-accent);
+  outline-offset: 0.25rem;
 }
 
 .inspector-section > h3 {
@@ -821,6 +843,57 @@ textarea {
 
 .question-form h4 {
   font-size: 0.95rem;
+}
+
+.thread {
+  margin: 0.8rem 0;
+}
+
+.thread-head,
+.message-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.thread-head h4 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.thread-messages {
+  display: grid;
+  gap: 0;
+  margin: 0.85rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.thread-message {
+  border-top: 1px solid var(--aw-border-subtle);
+  padding: 0.75rem 0;
+}
+
+.thread-message.is-agent {
+  border-left: 2px solid var(--aw-accent);
+  padding-left: 0.75rem;
+}
+
+.message-meta {
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.thread-message.is-agent .message-meta strong {
+  color: var(--aw-accent);
+}
+
+.thread-message .message {
+  margin: 0.45rem 0 0;
 }
 
 .question-form button[type='submit'],

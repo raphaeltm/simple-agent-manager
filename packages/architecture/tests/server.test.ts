@@ -174,6 +174,19 @@ describe('architecture local HTTP server', () => {
         method: 'POST',
       });
       expect(forgedAuthor.status).toBe(400);
+      for (const author of ['-->', '\n-->']) {
+        const forgedTerminator = await fetch(`${running.url}/api/threads`, {
+          body: JSON.stringify({
+            target: 'api',
+            title: 'Blocked',
+            body: 'Question',
+            author,
+          }),
+          headers: { 'content-type': 'application/json' },
+          method: 'POST',
+        });
+        expect(forgedTerminator.status).toBe(400);
+      }
       const afterForgery = await readJson<{ workspace: { threads: unknown[] } }>(
         `${running.url}/api/model`
       );

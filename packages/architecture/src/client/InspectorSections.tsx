@@ -1,24 +1,21 @@
-import type { Dispatch, SetStateAction } from 'react';
+import { type Dispatch, memo, type SetStateAction } from 'react';
 
 import type { ArchitectureRelationship, ArchitectureThread, SourceRef } from '../schemas';
-import type { ViewerModel } from '../server/payloads';
+import type { ProjectionIndex } from './projections';
 import type { PreviewState } from './types';
 
 export function Relationships({
-  model,
+  projectionIndex,
   targetId,
   onOpenStructure,
 }: {
-  model: ViewerModel;
+  projectionIndex: ProjectionIndex;
   targetId: string;
   onOpenStructure: (id: string) => void;
 }) {
-  const incoming = model.workspace.relationships.filter(
-    (relationship) => relationship.to === targetId
-  );
-  const outgoing = model.workspace.relationships.filter(
-    (relationship) => relationship.from === targetId
-  );
+  const relationships = projectionIndex.relationshipsByElement.get(targetId) ?? [];
+  const incoming = relationships.filter((relationship) => relationship.to === targetId);
+  const outgoing = relationships.filter((relationship) => relationship.from === targetId);
   if (incoming.length === 0 && outgoing.length === 0) {
     return <p className="muted empty-connection">No connected relationships in this scope.</p>;
   }
@@ -136,16 +133,19 @@ export function ThreadList({
   onDraft: Dispatch<SetStateAction<Record<string, string>>>;
   onReply: (thread: ArchitectureThread) => void;
 }) {
-  if (threads.length === 0) return <p className="muted">No threads for this item.</p>;
+  if (threads.length === 0)
+    return (
+      <p className="muted">
+        No discussion yet. Ask a question here; agents can reply from the workspace inbox.
+      </p>
+    );
   return threads.map((thread) => (
     <article className="thread" key={thread.id}>
-      <h4>{thread.title}</h4>
-      <p className={`pill ${thread.status}`}>{thread.status}</p>
-      {thread.messages.map((message) => (
-        <p className="message break-text" key={message.id}>
-          {message.body}
-        </p>
-      ))}
+      <header className="thread-head">
+        <h4>{thread.title}</h4>
+        <span className={`pill ${thread.status}`}>{thread.status}</span>
+      </header>
+      <ThreadConversation thread={thread} />
       <label>
         Reply to {thread.title}
         <textarea
@@ -154,8 +154,44 @@ export function ThreadList({
         />
       </label>
       <button type="button" disabled={saving} onClick={() => onReply(thread)}>
-        Reply
+        Reply in thread
       </button>
     </article>
   ));
+}
+
+const ThreadConversation = memo(function ThreadConversation({
+  thread,
+}: {
+  thread: ArchitectureThread;
+}) {
+  return (
+    <ol className="thread-messages" aria-label={`${thread.title} messages`}>
+      {thread.messages.map((message) => (
+        <li
+          className={`thread-message ${message.author.toLowerCase() === 'agent' ? 'is-agent' : ''}`}
+          key={message.id}
+        >
+          <div className="message-meta">
+            <strong aria-label={`Author: ${message.author}`}>{authorLabel(message.author)}</strong>
+            <time dateTime={message.createdAt}>{utcTimestamp(message.createdAt)}</time>
+          </div>
+          <p className="message break-text">{message.body}</p>
+        </li>
+      ))}
+    </ol>
+  );
+});
+
+function authorLabel(author: string): string {
+  const normalized = author.trim().toLowerCase();
+  if (normalized === 'agent') return 'Agent';
+  if (normalized === 'user') return 'User';
+  return author.trim();
+}
+
+function utcTimestamp(createdAt: string): string {
+  const date = new Date(createdAt);
+  if (Number.isNaN(date.getTime())) return createdAt;
+  return `${date.toISOString().slice(0, 16).replace('T', ' ')} UTC`;
 }
