@@ -71,6 +71,14 @@ The requested end state is broader than this first PR: humans should eventually 
 - Threads are separate append-oriented artifacts so questions and replies do not create merge churn in model files.
 - Live deployment and telemetry data will be an overlay keyed by stable element labels in a later phase; it is not part of this prototype.
 
+### Viewer interaction decision
+
+- Use a bounded focus canvas with explicit semantic drill-down, not one infinitely nested graph. Pan/zoom changes visual density inside the current slice; a named drill action or breadcrumb changes architectural scope.
+- Use URL-addressable Structure, Flow, and State lenses. Structure shows a focused hierarchy slice and cross-scope portals; Flow presents ordered steps; State presents states, guarded transitions, and an accessible transition list.
+- Keep a persistent inspector on desktop and a focus-managed bottom sheet on mobile for overview, relationships, source previews, and file-backed threads. Graph edges remain reachable through textual relationship lists.
+- Preserve lens, focus, selection, and physical viewport across live reload by stable ID. Retain the last valid model when SSE reconnects, and keep mutation drafts after errors.
+- Cap direct canvas projection with a named configurable budget and deterministic overflow affordance; bounded search and agent queries still reach omitted elements.
+
 ## Implementation Checklist
 
 ### A. Package and schema foundation
