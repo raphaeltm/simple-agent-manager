@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import * as v from 'valibot';
 
+import { compareCanonicalStrings } from './canonical-order';
 import { validateWorkspace } from './compiler-validation';
 import type { ArchitectureDiagnostic } from './diagnostics';
 import { parseWorkspaceDocument } from './document';
@@ -281,11 +282,11 @@ function groupRelationships(
 function canonicalValues<T extends { id: string }>(values: Located<T>[], key: keyof T): T[] {
   return values
     .map((entry) => entry.value)
-    .sort((left, right) => String(left[key]).localeCompare(String(right[key])));
+    .sort((left, right) => compareCanonicalStrings(String(left[key]), String(right[key])));
 }
 
 function compareById(left: { id: string }, right: { id: string }): number {
-  return left.id.localeCompare(right.id);
+  return compareCanonicalStrings(left.id, right.id);
 }
 
 function summarizeIssues(issues: readonly v.BaseIssue<unknown>[]): string {

@@ -13,9 +13,19 @@ import {
   readSourceReference,
   resolveContainedPath,
 } from '../src';
+import { compareCanonicalStrings } from '../src/canonical-order';
 import { makeEscapingSymlink, makeFixture, writeFixtureFile } from './helpers';
 
 describe('architecture source, mutation, thread, and impact safety', () => {
+  it('uses a fixed locale and a total-order fallback for canonical paths', () => {
+    expect(['z.yaml', 'ä.yaml', 'a.yaml'].sort(compareCanonicalStrings)).toEqual([
+      'a.yaml',
+      'ä.yaml',
+      'z.yaml',
+    ]);
+    expect(compareCanonicalStrings('same', 'same')).toBe(0);
+  });
+
   it('rejects absolute paths, traversal, and symlink escapes', async () => {
     const fixture = await makeFixture();
     await mkdir(path.join(fixture.root, 'outside'), { recursive: true });

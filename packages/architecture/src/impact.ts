@@ -1,5 +1,6 @@
 import { access } from 'node:fs/promises';
 
+import { compareCanonicalStrings } from './canonical-order';
 import { normalizeRepoRelativePath, resolveContainedPath } from './path-safety';
 import type { SourceRef } from './schemas';
 import type { CompiledWorkspace, SourceBackedRecord } from './types';
@@ -30,7 +31,7 @@ export async function mapChangedPathsToArchitecture(
 ): Promise<ImpactReport> {
   const normalizedChangedPaths = changedPaths
     .map(normalizeRepoRelativePath)
-    .sort((left, right) => left.localeCompare(right));
+    .sort(compareCanonicalStrings);
   const changedSet = new Set(normalizedChangedPaths);
   const records = collectSourceBackedRecords(workspace);
   const impacted = records
@@ -46,7 +47,7 @@ export async function mapChangedPathsToArchitecture(
   return {
     changedPaths: normalizedChangedPaths,
     impacted: impacted.sort((left, right) =>
-      `${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`)
+      compareCanonicalStrings(`${left.kind}:${left.id}`, `${right.kind}:${right.id}`)
     ),
     brokenSourceRefs: await findBrokenSourceRefs(workspace, records),
   };
@@ -118,7 +119,8 @@ async function findBrokenSourceRefs(
     }
   }
   return broken.sort((left, right) =>
-    `${left.ownerKind}:${left.ownerId}:${left.path}`.localeCompare(
+    compareCanonicalStrings(
+      `${left.ownerKind}:${left.ownerId}:${left.path}`,
       `${right.ownerKind}:${right.ownerId}:${right.path}`
     )
   );

@@ -5,6 +5,7 @@ import path from 'node:path';
 import * as v from 'valibot';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
+import { compareCanonicalStrings } from './canonical-order';
 import {
   ARCHITECTURE_SCHEMA_VERSION,
   DEFAULT_THREAD_AUTHOR,
@@ -185,7 +186,8 @@ export async function parseThreadFile(filePath: string): Promise<ArchitectureThr
     throw new Error(metadataResult.issues.map((issue) => issue.message).join('; '));
   const messages = parseMessages(parsed.body ?? (await readFile(filePath, 'utf8')));
   const updatedAt = messages.reduce(
-    (latest, message) => (message.createdAt.localeCompare(latest) > 0 ? message.createdAt : latest),
+    (latest, message) =>
+      compareCanonicalStrings(message.createdAt, latest) > 0 ? message.createdAt : latest,
     metadataResult.output.updatedAt
   );
   return { ...metadataResult.output, updatedAt, messages };
@@ -341,7 +343,7 @@ async function collectThreadFiles(root: string, workspaceRoot: string): Promise<
       if (entry.isDirectory()) files.push(...(await collectThreadFiles(absolute, workspaceRoot)));
       if (entry.isFile() && entry.name.endsWith(THREAD_FILE_EXTENSION)) files.push(absolute);
     }
-    return files.sort((left, right) => left.localeCompare(right));
+    return files.sort(compareCanonicalStrings);
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return [];
     throw error;

@@ -1,3 +1,4 @@
+import { compareCanonicalStrings } from './canonical-order';
 import { DEFAULT_QUERY_LIMITS } from './constants';
 import type { ArchitectureDiagnostic } from './diagnostics';
 import type {
@@ -185,7 +186,8 @@ export function listUnresolvedInbox(
     .filter((thread) => thread.status === 'unresolved')
     .sort(
       (left, right) =>
-        left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id)
+        compareCanonicalStrings(left.updatedAt, right.updatedAt) ||
+        compareCanonicalStrings(left.id, right.id)
     )
     .slice(0, limit)
     .map((thread) => {

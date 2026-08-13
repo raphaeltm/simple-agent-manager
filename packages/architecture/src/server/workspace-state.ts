@@ -1,6 +1,7 @@
 import { readdir, stat } from 'node:fs/promises';
 import path from 'node:path';
 
+import { compareCanonicalStrings } from '../canonical-order';
 import { DEFAULT_SERVER_WATCH_INTERVAL_MS } from '../constants';
 import { hasErrors } from '../diagnostics';
 import { loadArchitectureWorkspace } from '../loader';
@@ -114,5 +115,5 @@ async function collectEntries(root: string): Promise<string[]> {
     const stats = await stat(absolute);
     values.push(`${absolute}:${stats.mtimeMs}:${stats.size}`);
   }
-  return values.sort((left, right) => left.localeCompare(right));
+  return values.sort(compareCanonicalStrings);
 }

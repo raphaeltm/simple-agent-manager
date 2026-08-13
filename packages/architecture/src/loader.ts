@@ -1,6 +1,7 @@
 import { readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
+import { compareCanonicalStrings } from './canonical-order';
 import { compileWorkspace } from './compiler';
 import { DEFAULT_THREADS_DIR, DEFAULT_WORKSPACE_DIR, THREAD_FILE_EXTENSION } from './constants';
 import type { ArchitectureDiagnostic } from './diagnostics';
@@ -53,7 +54,9 @@ export async function validateArchitectureWorkspace(
 async function collectWorkspaceFiles(root: string, workspaceRoot: string): Promise<string[]> {
   const entries = await readdir(root, { withFileTypes: true });
   const files: string[] = [];
-  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+  for (const entry of entries.sort((left, right) =>
+    compareCanonicalStrings(left.name, right.name)
+  )) {
     if (entry.name.startsWith('.')) continue;
     const absolute = path.join(root, entry.name);
     if (entry.isSymbolicLink()) continue;
@@ -65,7 +68,7 @@ async function collectWorkspaceFiles(root: string, workspaceRoot: string): Promi
   }
   return files
     .map((file) => path.relative(workspaceRoot, file).replaceAll(path.sep, '/'))
-    .sort((left, right) => left.localeCompare(right))
+    .sort(compareCanonicalStrings)
     .map((relative) => path.join(workspaceRoot, relative));
 }
 
