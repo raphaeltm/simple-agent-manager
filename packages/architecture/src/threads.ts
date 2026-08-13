@@ -341,7 +341,7 @@ async function collectThreadFiles(root: string, workspaceRoot: string): Promise<
       if (entry.isDirectory()) files.push(...(await collectThreadFiles(absolute, workspaceRoot)));
       if (entry.isFile() && entry.name.endsWith(THREAD_FILE_EXTENSION)) files.push(absolute);
     }
-    return files.sort();
+    return files.sort((left, right) => left.localeCompare(right));
   } catch (error) {
     if (error instanceof Error && 'code' in error && error.code === 'ENOENT') return [];
     throw error;

@@ -65,7 +65,7 @@ async function collectWorkspaceFiles(root: string, workspaceRoot: string): Promi
   }
   return files
     .map((file) => path.relative(workspaceRoot, file).replaceAll(path.sep, '/'))
-    .sort()
+    .sort((left, right) => left.localeCompare(right))
     .map((relative) => path.join(workspaceRoot, relative));
 }
 

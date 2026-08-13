@@ -114,5 +114,5 @@ async function collectEntries(root: string): Promise<string[]> {
     const stats = await stat(absolute);
     values.push(`${absolute}:${stats.mtimeMs}:${stats.size}`);
   }
-  return values.sort();
+  return values.sort((left, right) => left.localeCompare(right));
 }

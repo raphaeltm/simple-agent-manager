@@ -285,13 +285,39 @@ function validateViewReferences(
       expectElement(id, view.location, `${label} include`, indexes, diagnostics);
     for (const id of view.value.relationships ?? [])
       expectRelationship(id, view.location, `${label} relationship`, indexes, diagnostics);
-    for (const id of view.value.flows ?? []) {
-      if (!indexes.flowsById.has(id)) addDangling(`${label} flow`, id, view.location, diagnostics);
-    }
-    for (const id of view.value.stateMachines ?? []) {
-      if (!indexes.stateMachinesById.has(id))
-        addDangling(`${label} state machine`, id, view.location, diagnostics);
-    }
+    validateViewFlowReferences(view.value.flows, label, view.location, indexes, diagnostics);
+    validateViewStateMachineReferences(
+      view.value.stateMachines,
+      label,
+      view.location,
+      indexes,
+      diagnostics
+    );
+  }
+}
+
+function validateViewFlowReferences(
+  flowIds: readonly string[] | undefined,
+  label: string,
+  location: SourceLocation,
+  indexes: WorkspaceIndexes,
+  diagnostics: ArchitectureDiagnostic[]
+): void {
+  for (const id of flowIds ?? []) {
+    if (!indexes.flowsById.has(id)) addDangling(`${label} flow`, id, location, diagnostics);
+  }
+}
+
+function validateViewStateMachineReferences(
+  stateMachineIds: readonly string[] | undefined,
+  label: string,
+  location: SourceLocation,
+  indexes: WorkspaceIndexes,
+  diagnostics: ArchitectureDiagnostic[]
+): void {
+  for (const id of stateMachineIds ?? []) {
+    if (!indexes.stateMachinesById.has(id))
+      addDangling(`${label} state machine`, id, location, diagnostics);
   }
 }
 

@@ -23,6 +23,38 @@ interface CliOptions {
   port?: number;
 }
 
+type ValueOptionHandler = (options: CliOptions, value: string) => void;
+
+const VALUE_OPTION_HANDLERS: Readonly<Record<string, ValueOptionHandler>> = {
+  '--workspace': (options, value) => {
+    options.workspaceRoot = value;
+  },
+  '--repo': (options, value) => {
+    options.repoRoot = value;
+  },
+  '--body': (options, value) => {
+    options.body = value;
+  },
+  '--target': (options, value) => {
+    options.target = value;
+  },
+  '--title': (options, value) => {
+    options.title = value;
+  },
+  '--thread': (options, value) => {
+    options.thread = value;
+  },
+  '--author': (options, value) => {
+    options.author = value;
+  },
+  '--host': (options, value) => {
+    options.host = value;
+  },
+  '--port': (options, value) => {
+    options.port = parsePort(value);
+  },
+};
+
 export async function runCli(argv = process.argv.slice(2)): Promise<number> {
   try {
     const { command, positional, options } = parseArgs(argv);
@@ -186,48 +218,9 @@ function parseArgs(argv: string[]): { command: string; positional: string[]; opt
       continue;
     }
     if (arg === '--') continue;
-    if (arg === '--workspace') {
-      options.workspaceRoot = readOptionValue(rest, index, arg);
-      index += 1;
-      continue;
-    }
-    if (arg === '--repo') {
-      options.repoRoot = readOptionValue(rest, index, arg);
-      index += 1;
-      continue;
-    }
-    if (arg === '--body') {
-      options.body = readOptionValue(rest, index, arg);
-      index += 1;
-      continue;
-    }
-    if (arg === '--target') {
-      options.target = readOptionValue(rest, index, arg);
-      index += 1;
-      continue;
-    }
-    if (arg === '--title') {
-      options.title = readOptionValue(rest, index, arg);
-      index += 1;
-      continue;
-    }
-    if (arg === '--thread') {
-      options.thread = readOptionValue(rest, index, arg);
-      index += 1;
-      continue;
-    }
-    if (arg === '--author') {
-      options.author = readOptionValue(rest, index, arg);
-      index += 1;
-      continue;
-    }
-    if (arg === '--host') {
-      options.host = readOptionValue(rest, index, arg);
-      index += 1;
-      continue;
-    }
-    if (arg === '--port') {
-      options.port = parsePort(readOptionValue(rest, index, arg));
+    const valueOptionHandler = VALUE_OPTION_HANDLERS[arg];
+    if (valueOptionHandler) {
+      valueOptionHandler(options, readOptionValue(rest, index, arg));
       index += 1;
       continue;
     }

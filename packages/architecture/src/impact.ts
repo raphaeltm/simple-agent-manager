@@ -28,7 +28,9 @@ export async function mapChangedPathsToArchitecture(
   workspace: CompiledWorkspace,
   changedPaths: readonly string[]
 ): Promise<ImpactReport> {
-  const normalizedChangedPaths = changedPaths.map(normalizeRepoRelativePath).sort();
+  const normalizedChangedPaths = changedPaths
+    .map(normalizeRepoRelativePath)
+    .sort((left, right) => left.localeCompare(right));
   const changedSet = new Set(normalizedChangedPaths);
   const records = collectSourceBackedRecords(workspace);
   const impacted = records
