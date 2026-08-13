@@ -19,6 +19,31 @@ The requested end state is broader than this first PR: humans should eventually 
 - Keep the package internally cohesive and repository-agnostic enough to split out later.
 - Bind the local server to loopback by default; any source-reading or file-writing endpoint must prevent path traversal and writes outside the architecture workspace.
 
+## Preflight Evidence
+
+### Classification
+
+- `cross-component-change`: the package connects repository files, a Node.js server, a browser client, and root developer commands.
+- `business-logic-change`: versioned model validation, graph queries, impact mapping, and append-oriented review threads are new domain behavior.
+- `public-surface-change`: the package exports a file format, TypeScript API, CLI, and loopback HTTP/SSE contract intended for eventual extraction.
+- `docs-sync-change`: the file format, maintenance contract, and SAM dogfood model require documentation in this PR.
+- `security-sensitive-change`: the server previews repository source and writes thread artifacts from browser input.
+- `ui-change`: the package adds an interactive browser surface, although it is not mounted in SAM's deployed web application.
+
+### Assumptions verified before implementation
+
+- The monorepo discovers `packages/*` through pnpm workspaces and runs package-local build, lint, typecheck, and test tasks through Turborepo; verified with the root workspace/package configuration and a clean baseline run.
+- React Flow and Dagre already support SAM's existing account-map interaction patterns; verified in `apps/web/src/components/account-map/`. The new viewer remains a separate architecture product surface.
+- Mermaid rendering is already available for portable documentation exports in `packages/acp-client/src/components/MermaidDiagram.tsx`; it is not suitable as the canonical editable model or collaboration server.
+- SAM's CLI device login genuinely spans Go CLI, API/KV, browser approval, polling, and local config; source anchors were traced through `packages/cli/internal/cli/run.go`, `packages/cli/internal/cli/client.go`, and `apps/api/src/routes/device-flow.ts`.
+- Task startup genuinely has a multi-step Durable Object lifecycle rather than one dependency edge; source anchors were traced through `apps/api/src/durable-objects/task-runner/index.ts`, its node/workspace step modules, `agent-session-step.ts`, and `state-machine.ts`.
+
+### Impact and constitution check
+
+- Primary paths: new `packages/architecture/`, repo-owned `architecture/`, root scripts/lockfile, and task/docs records. No existing deployed route or UI is modified.
+- Principle III requires the public format and workflows to be documented; Principle VIII motivates compact agent queries and predictable files; Principle IX requires the package to avoid app imports; Principle X favors a small neutral model over an adapter framework; Principle XI requires named/configurable server limits; Principle XIII requires validation at file, HTTP, source-preview, and mutation boundaries.
+- Main risks are unsafe local file access, an unbounded graph/API that overwhelms smaller agents, schema churn, visually impressive but semantically weak diagrams, and duplicated documentation. The acceptance tests explicitly cover confinement, bounded output, deterministic compilation, real collaboration flow, and source-backed dogfood examples.
+
 ## Research Findings
 
 ### Prior art
