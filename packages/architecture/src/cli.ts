@@ -3,6 +3,7 @@ import { formatDiagnostics, hasErrors } from './diagnostics';
 import { mapChangedPathsToArchitecture } from './impact';
 import { loadArchitectureWorkspace } from './loader';
 import { getWorkspaceSummary, listUnresolvedInbox, showElement } from './queries';
+import { startArchitectureServer } from './server';
 import { appendThreadReply, createThread } from './threads';
 
 interface CliOptions {
@@ -14,11 +15,13 @@ interface CliOptions {
   title?: string;
   thread?: string;
   author?: string;
+  host?: string;
+  port?: number;
 }
 
 export async function runCli(argv = process.argv.slice(2)): Promise<number> {
-  const { command, positional, options } = parseArgs(argv);
   try {
+    const { command, positional, options } = parseArgs(argv);
     switch (command) {
       case 'validate':
         return await validateCommand(options);
@@ -33,7 +36,7 @@ export async function runCli(argv = process.argv.slice(2)): Promise<number> {
       case 'impact':
         return await impactCommand(positional, options);
       case 'serve':
-        return serveCommand();
+        return await serveCommand(options);
       default:
         printUsage();
         return command ? 1 : 0;
@@ -111,9 +114,20 @@ async function impactCommand(positional: string[], options: CliOptions): Promise
   return report.brokenSourceRefs.length > 0 ? 1 : 0;
 }
 
-function serveCommand(): number {
-  console.error('architecture serve is delegated to the later local server/browser slice; this core package only provides the load/query/thread APIs.');
-  return 2;
+async function serveCommand(options: CliOptions): Promise<number> {
+  const running = await startArchitectureServer({
+    workspaceRoot: options.workspaceRoot,
+    repoRoot: options.repoRoot,
+    host: options.host,
+    port: options.port,
+  });
+  console.log(`Architecture workspace viewer: ${running.url}`);
+  await new Promise<void>((resolve) => {
+    process.once('SIGINT', resolve);
+    process.once('SIGTERM', resolve);
+  });
+  await running.close();
+  return 0;
 }
 
 async function loadOrFail(options: CliOptions): ReturnType<typeof loadArchitectureWorkspace> {
@@ -181,6 +195,16 @@ function parseArgs(argv: string[]): { command: string; positional: string[]; opt
       index += 1;
       continue;
     }
+    if (arg === '--host') {
+      options.host = readOptionValue(rest, index, arg);
+      index += 1;
+      continue;
+    }
+    if (arg === '--port') {
+      options.port = parsePort(readOptionValue(rest, index, arg));
+      index += 1;
+      continue;
+    }
     positional.push(arg);
   }
   return { command, positional, options };
@@ -190,6 +214,14 @@ function readOptionValue(args: string[], index: number, option: string): string 
   const value = args[index + 1];
   if (!value) throw new Error(`${option} requires a value.`);
   return value;
+}
+
+function parsePort(value: string): number {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 0 || port > 65535) {
+    throw new Error('--port must be an integer from 0 to 65535.');
+  }
+  return port;
 }
 
 function printUsage(): void {
@@ -207,6 +239,8 @@ Commands:
 Options:
   --workspace <path>    Architecture workspace root (default: architecture)
   --repo <path>         Repository root for source refs (default: cwd)
+  --host <host>         Loopback host for serve (default: 127.0.0.1)
+  --port <port>         Port for serve (default: named package default)
   --json               Emit JSON
 `);
 }

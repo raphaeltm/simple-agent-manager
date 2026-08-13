@@ -32,10 +32,10 @@ elements:
     log.mockRestore();
   });
 
-  it('returns a clear placeholder for serve', async () => {
+  it('validates serve port input', async () => {
     const error = vi.spyOn(console, 'error').mockImplementation(() => undefined);
-    await expect(runCli(['serve'])).resolves.toBe(2);
-    expect(error).toHaveBeenCalledWith(expect.stringContaining('delegated to the later local server/browser slice'));
+    await expect(runCli(['serve', '--port', 'not-a-port'])).resolves.toBe(1);
+    expect(error).toHaveBeenCalledWith(expect.stringContaining('--port must be an integer'));
     error.mockRestore();
   });
 });
