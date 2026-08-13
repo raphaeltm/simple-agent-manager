@@ -62,6 +62,38 @@ elements:
     expect(snippet).toMatchObject({ startLine: 2, endLine: 4, content: 'two\nthree\nfour' });
   });
 
+  it('truncates source snippets at UTF-8 byte boundaries without reading full content into memory', async () => {
+    const fixture = await makeFixture();
+    await writeFixtureFile(fixture.root, 'src/unicode.ts', `const value = "😀😀😀";\nconst later = true;\n`);
+    await writeFixtureFile(
+      fixture.workspaceRoot,
+      'model.yaml',
+      `
+version: 1
+name: Source
+elements:
+  - id: api
+    kind: system
+    title: API
+    sourceRefs:
+      - path: src/unicode.ts
+        startLine: 1
+`
+    );
+    const loaded = await loadArchitectureWorkspace({
+      workspaceRoot: fixture.workspaceRoot,
+      repoRoot: fixture.root,
+    });
+    const ref = loaded.workspace.elements[0]?.sourceRefs?.[0];
+    expect(ref).toBeDefined();
+
+    const snippet = await readSourceReference(loaded.workspace, ref!, { contextLines: 0, maxBytes: 20 });
+
+    expect(Buffer.byteLength(snippet.content, 'utf8')).toBeLessThanOrEqual(20);
+    expect(snippet.content).not.toContain('\uFFFD');
+    expect(snippet.truncated).toBe(true);
+  });
+
   it('creates thread files and appends replies inside the workspace', async () => {
     const fixture = await makeFixture();
     const thread = await createThread({

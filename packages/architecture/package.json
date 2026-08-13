@@ -20,23 +20,34 @@
     }
   },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && vite build --config vite.viewer.config.ts",
     "test": "vitest run",
+    "browser-test": "playwright test --config playwright.config.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
-    "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'",
+    "lint": "eslint 'src/**/*.{ts,tsx}' 'tests/**/*.{ts,tsx}' 'playwright.config.ts' 'vite.viewer.config.ts'",
     "cli": "tsx src/cli.ts"
   },
   "dependencies": {
+    "@vitejs/plugin-react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
     "valibot": "catalog:",
+    "vite": "catalog:",
     "yaml": "2.9.0"
   },
   "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
     "@typescript-eslint/eslint-plugin": "catalog:",
     "@typescript-eslint/parser": "catalog:",
     "@vitest/coverage-v8": "catalog:",
     "eslint": "catalog:",
+    "jsdom": "catalog:",
     "tsx": "catalog:",
     "typescript": "catalog:",
     "vitest": "catalog:"

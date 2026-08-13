@@ -5,8 +5,9 @@ import { coverageConfig } from '../../vitest.coverage';
 export default defineConfig({
   test: {
     globals: true,
-    include: ['tests/**/*.test.ts'],
-    coverage: coverageConfig(['src/**/*.ts'], {
+    environment: 'jsdom',
+    include: ['tests/**/*.test.{ts,tsx}'],
+    coverage: coverageConfig(['src/**/*.{ts,tsx}'], {
       statements: 70,
       branches: 50,
       functions: 70,
