@@ -1,0 +1,44 @@
+{
+  "name": "@simple-agent-manager/architecture",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Filesystem-native architecture workspace compiler, query API, and CLI",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "sam-architecture": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./cli": {
+      "import": "./dist/cli.js",
+      "types": "./dist/cli.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts'",
+    "cli": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "valibot": "catalog:",
+    "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "@typescript-eslint/eslint-plugin": "catalog:",
+    "@typescript-eslint/parser": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "eslint": "catalog:",
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
