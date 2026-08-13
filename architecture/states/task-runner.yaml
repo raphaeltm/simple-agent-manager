@@ -1,0 +1,135 @@
+stateMachines:
+  - id: task-runner-lifecycle
+    title: VM TaskRunner execution lifecycle
+    element: sam.task-runner
+    sourceRefs:
+      - path: apps/api/src/durable-objects/task-runner/index.ts
+        startLine: 197
+      - path: apps/api/src/durable-objects/task-runner/types.ts
+        startLine: 110
+    states:
+      - id: node-selection
+        title: Node selection
+        element: sam.task-runner
+        description: Find compatible capacity or decide that provisioning is needed.
+        sourceRefs:
+          - path: apps/api/src/durable-objects/task-runner/node-selection.ts
+      - id: node-provisioning
+        title: Node provisioning
+        element: sam.task-runner
+        description: Provision provider capacity and wait for the node record.
+        sourceRefs:
+          - path: apps/api/src/durable-objects/task-runner/node-steps.ts
+      - id: node-agent-ready
+        title: Node agent ready
+        element: sam.task-runner
+        description: Wait for a healthy VM-agent heartbeat.
+        sourceRefs:
+          - path: apps/api/src/durable-objects/task-runner/node-steps.ts
+      - id: workspace-creation
+        title: Workspace creation
+        element: sam.task-runner
+        description: Create or recover durable workspace bookkeeping.
+        sourceRefs:
+          - path: apps/api/src/durable-objects/task-runner/workspace-steps.ts
+            startLine: 19
+      - id: workspace-dispatch
+        title: Workspace dispatch
+        element: sam.task-runner
+        description: Send an idempotent create request and persist VM-agent acknowledgement.
+        sourceRefs:
+          - path: apps/api/src/durable-objects/task-runner/workspace-steps.ts
+            startLine: 446
+      - id: workspace-ready
+        title: Workspace ready
+        element: sam.task-runner
+        description: Accept callback or D1 evidence, with timeout-backed polling.
+        sourceRefs:
+          - path: apps/api/src/durable-objects/task-runner/workspace-steps.ts
+            startLine: 572
+      - id: attachment-transfer
+        title: Attachment transfer
+        element: sam.task-runner
+        description: Copy task attachments from R2 into the workspace when present.
+        sourceRefs:
+          - path: apps/api/src/durable-objects/task-runner/workspace-steps.ts
+            startLine: 674
+      - id: agent-session
+        title: Agent session
+        element: sam.agent-bootstrap
+        description: Create and start the SAM-aware coding-agent session.
+        sourceRefs:
+          - path: apps/api/src/durable-objects/task-runner/agent-session-step.ts
+            startLine: 36
+      - id: running
+        title: Running
+        element: sam.agent-process
+        description: Agent owns task progress through callbacks and MCP updates.
+        sourceRefs:
+          - path: apps/api/src/durable-objects/task-runner/state-machine.ts
+            startLine: 126
+      - id: failed
+        title: Failed
+        element: sam.task-runner
+        description: A permanent or exhausted error terminalizes the task and cleans up safely.
+        sourceRefs:
+          - path: apps/api/src/durable-objects/task-runner/state-machine.ts
+            startLine: 219
+    transitions:
+      - from: node-selection
+        to: node-provisioning
+        event: no-compatible-node
+        description: Guarded by capacity and compatibility checks.
+      - from: node-selection
+        to: node-agent-ready
+        event: compatible-node-selected
+      - from: node-provisioning
+        to: node-agent-ready
+        event: node-provisioned
+      - from: node-agent-ready
+        to: workspace-creation
+        event: heartbeat-ready
+      - from: workspace-creation
+        to: workspace-dispatch
+        event: bookkeeping-committed
+      - from: workspace-dispatch
+        to: workspace-ready
+        event: dispatch-acknowledged
+      - from: workspace-ready
+        to: attachment-transfer
+        event: workspace-ready-with-attachments
+        description: Guarded by a non-empty task attachment list.
+      - from: workspace-ready
+        to: agent-session
+        event: workspace-ready-without-attachments
+        description: Guarded by an empty task attachment list.
+      - from: attachment-transfer
+        to: agent-session
+        event: attachments-copied
+      - from: agent-session
+        to: running
+        event: agent-started
+      - from: node-selection
+        to: failed
+        event: permanent-or-exhausted-error
+      - from: node-provisioning
+        to: failed
+        event: permanent-or-exhausted-error
+      - from: node-agent-ready
+        to: failed
+        event: permanent-or-exhausted-error
+      - from: workspace-creation
+        to: failed
+        event: permanent-or-exhausted-error
+      - from: workspace-dispatch
+        to: failed
+        event: permanent-or-exhausted-error
+      - from: workspace-ready
+        to: failed
+        event: permanent-or-exhausted-error
+      - from: attachment-transfer
+        to: failed
+        event: permanent-or-exhausted-error
+      - from: agent-session
+        to: failed
+        event: permanent-or-exhausted-error

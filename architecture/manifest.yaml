@@ -1,0 +1,33 @@
+version: 1
+name: Simple Agent Manager
+description: >-
+  Source-backed map of SAM's clients, Cloudflare control plane, durable state,
+  workspace runtimes, and coding-agent execution boundaries.
+threadsDir: threads
+elements:
+  - id: sam
+    kind: workspace
+    title: Simple Agent Manager
+    summary: Multi-client control plane for durable coding-agent workspaces.
+    sourceRefs:
+      - path: README.md
+  - id: actor.developer
+    kind: person
+    title: Developer
+    summary: Uses SAM through the browser or CLI and reviews agent work.
+  - id: external.git-provider
+    kind: external
+    title: Git provider
+    summary: Hosts source repositories and accepts agent-created branches and pull requests.
+  - id: external.cloud-provider
+    kind: external
+    title: Cloud compute provider
+    summary: Supplies VM capacity for full workspace runtimes.
+    sourceRefs:
+      - path: packages/providers/src/index.ts
+  - id: external.cloudflare
+    kind: external
+    title: Cloudflare platform
+    summary: Runs the API Worker, Durable Objects, D1, KV, R2, and Instant containers.
+    sourceRefs:
+      - path: apps/api/wrangler.toml

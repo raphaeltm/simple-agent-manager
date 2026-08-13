@@ -1,0 +1,61 @@
+elements:
+  - id: sam.instant-runtime
+    kind: runtime
+    title: Instant container runtime
+    parent: sam
+    summary: Cloudflare Container hosting a standalone VM-agent process for fast-start work.
+    tags: [cf-container, lightweight]
+    sourceRefs:
+      - path: apps/api/src/durable-objects/vm-agent-container.ts
+      - path: apps/api/src/durable-objects/vm-agent-container-runtime.ts
+  - id: sam.vm-runtime
+    kind: runtime
+    title: VM workspace runtime
+    parent: sam
+    summary: Cloud-provider VM with a host VM agent and optional devcontainer workspace.
+    tags: [vm, full-workspace]
+    sourceRefs:
+      - path: packages/vm-agent/main.go
+      - path: packages/vm-agent/internal/server/workspaces.go
+  - id: sam.vm-agent
+    kind: container
+    title: VM agent
+    parent: sam.vm-runtime
+    summary: Go service that creates workspaces and starts agent sessions.
+    tags: [go, runtime-boundary]
+    sourceRefs:
+      - path: packages/vm-agent/main.go
+      - path: packages/vm-agent/internal/server/workspaces.go
+  - id: sam.agent-process
+    kind: runtime
+    title: Coding agent process
+    parent: sam.vm-agent
+    summary: Claude Code, Codex, or another ACP-backed agent working inside a repository checkout.
+    tags: [agent, acp]
+    sourceRefs:
+      - path: packages/vm-agent/internal/acp/session_host.go
+      - path: packages/vm-agent/internal/acp/gateway.go
+  - id: sam.d1
+    kind: database
+    title: D1 control-plane database
+    parent: sam
+    summary: Cross-project relational metadata, task status, workspaces, nodes, and identities.
+    tags: [cloudflare, durable-state]
+    sourceRefs:
+      - path: apps/api/src/db/schema.ts
+  - id: sam.kv
+    kind: data-store
+    title: KV coordination store
+    parent: sam
+    summary: Tokens, device-flow records, rate limits, and coordination metadata.
+    tags: [cloudflare, coordination]
+    sourceRefs:
+      - path: apps/api/src/env.ts
+  - id: sam.r2
+    kind: data-store
+    title: R2 artifact store
+    parent: sam
+    summary: Attachments, agent binaries, snapshots, and other durable artifacts.
+    tags: [cloudflare, artifacts]
+    sourceRefs:
+      - path: apps/api/src/env.ts
