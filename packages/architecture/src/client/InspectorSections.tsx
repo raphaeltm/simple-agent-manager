@@ -19,8 +19,11 @@ export function Relationships({
   const outgoing = model.workspace.relationships.filter(
     (relationship) => relationship.from === targetId
   );
+  if (incoming.length === 0 && outgoing.length === 0) {
+    return <p className="muted empty-connection">No connected relationships in this scope.</p>;
+  }
   return (
-    <section className="relationship-grid">
+    <div className="relationship-grid">
       <RelationshipList
         title="Incoming"
         relationships={incoming}
@@ -33,7 +36,7 @@ export function Relationships({
         edge="to"
         onOpenStructure={onOpenStructure}
       />
-    </section>
+    </div>
   );
 }
 
@@ -90,13 +93,31 @@ export function SourceAnchors({
 }
 
 export function SourcePreview({ preview }: { preview: PreviewState }) {
-  if (preview.loading) return <p className="muted">Loading source preview…</p>;
-  if (preview.error) return <p className="error">{preview.error}</p>;
+  if (preview.loading)
+    return (
+      <p className="muted" role="status">
+        Loading source preview…
+      </p>
+    );
+  if (preview.error)
+    return (
+      <p className="error" role="alert">
+        {preview.error}
+      </p>
+    );
   if (!preview.preview) return null;
   return (
-    <pre className="source-preview" aria-label="Source preview">
-      <code>{preview.preview.content}</code>
-    </pre>
+    <div className="source-frame">
+      <div className="source-meta">
+        <span>{preview.preview.path}</span>
+        <span>
+          L{preview.preview.startLine}–{preview.preview.endLine}
+        </span>
+      </div>
+      <pre className="source-preview" aria-label="Source preview">
+        <code>{preview.preview.content}</code>
+      </pre>
+    </div>
   );
 }
 

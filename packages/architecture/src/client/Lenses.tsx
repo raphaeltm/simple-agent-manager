@@ -56,12 +56,12 @@ function FocusNode({
   return (
     <button
       type="button"
-      className={nodeClass(selection, focus.id)}
+      className={`${nodeClass(selection, focus.id)} focus-node`}
       aria-pressed={selection?.kind === 'element' && selection.id === focus.id}
       onClick={() => onSelect({ kind: 'element', id: focus.id })}
     >
-      <span>{focus.title}</span>
-      <small>{focus.kind}</small>
+      <small className="kind-label">Current scope · {focus.kind}</small>
+      <span className="node-title">{focus.title}</span>
     </button>
   );
 }
@@ -86,14 +86,20 @@ function ChildNodes({
           <article className={nodeClass(selection, child.id)} key={child.id}>
             <button
               type="button"
+              className="node-select"
               aria-pressed={selection?.kind === 'element' && selection.id === child.id}
               onClick={() => onSelect({ kind: 'element', id: child.id })}
             >
-              <span>{child.title}</span>
-              <small>{child.kind}</small>
+              <small className="kind-label">{child.kind}</small>
+              <span className="node-title">{child.title}</span>
             </button>
-            <button type="button" className="secondary" onClick={() => onDrill(child.id)}>
-              Drill into
+            <button
+              type="button"
+              className="scope-action"
+              aria-label={`Open ${child.title} scope`}
+              onClick={() => onDrill(child.id)}
+            >
+              Open scope <span aria-hidden="true">↗</span>
             </button>
           </article>
         ))
@@ -121,6 +127,7 @@ function PortalList({
           <button
             key={relationship.id}
             type="button"
+            className="portal-action"
             aria-pressed={selection?.kind === 'relationship' && selection.id === relationship.id}
             onClick={() => onSelect({ kind: 'relationship', id: relationship.id })}
           >

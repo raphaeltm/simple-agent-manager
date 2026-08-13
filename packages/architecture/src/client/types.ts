@@ -35,6 +35,7 @@ export interface MutationState {
   saving: boolean;
   error?: string;
   artifactPath?: string;
+  refreshWarning?: string;
 }
 
 export interface ApiClient {

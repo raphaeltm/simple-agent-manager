@@ -56,6 +56,10 @@ export class WorkspaceState {
     return this.loaded !== undefined;
   }
 
+  isLatestValid(): boolean {
+    return this.loaded !== undefined && this.invalid === undefined;
+  }
+
   diagnostics(): LoadedWorkspace['diagnostics'] {
     return this.invalid?.diagnostics ?? this.current().diagnostics;
   }

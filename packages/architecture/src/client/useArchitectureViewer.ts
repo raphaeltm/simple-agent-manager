@@ -82,11 +82,27 @@ function useLoadModel(
   setFocusId: Dispatch<SetStateAction<string | undefined>>,
   setSelection: Dispatch<SetStateAction<Selection | undefined>>
 ) {
-  return useCallback(async () => {
-    const model = await api.loadModel();
-    setViewer({ loading: false, model, status: 'Architecture model loaded.', offline: false });
-    setFocusId((current) => keepId(model, current));
-    setSelection((current) => keepSelection(model, current));
+  const runningRef = useRef<Promise<void> | undefined>(undefined);
+  const queuedRef = useRef(false);
+  return useCallback(() => {
+    if (runningRef.current) {
+      queuedRef.current = true;
+      return runningRef.current;
+    }
+    const run = async () => {
+      do {
+        queuedRef.current = false;
+        const model = await api.loadModel();
+        setViewer({ loading: false, model, status: 'Architecture model loaded.', offline: false });
+        setFocusId((current) => keepId(model, current));
+        setSelection((current) => keepSelection(model, current));
+      } while (queuedRef.current);
+    };
+    const running = run().finally(() => {
+      runningRef.current = undefined;
+    });
+    runningRef.current = running;
+    return running;
   }, [api, setFocusId, setSelection, setViewer]);
 }
 
@@ -113,9 +129,17 @@ function useEventStream(
   useEffect(() => {
     const source = new EventSource('/api/events');
     const reload = () => void reloadAfterSse(loadModel, setViewer);
-    source.onmessage = reload;
+    source.onopen = () =>
+      setViewer((current) => ({
+        ...current,
+        offline: false,
+        status: current.status.includes('Invalid')
+          ? current.status
+          : current.model
+            ? 'Live updates connected.'
+            : current.status,
+      }));
     source.addEventListener('architecture:model', reload);
-    source.addEventListener('architecture:threads', reload);
     source.addEventListener('architecture:invalid', () =>
       setViewer((current) => ({
         ...current,

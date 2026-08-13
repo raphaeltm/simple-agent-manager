@@ -51,6 +51,7 @@ function WorkspaceHeader({
           <button
             key={lens}
             type="button"
+            className="lens-tab"
             aria-current={controller.lens === lens ? 'page' : undefined}
             onClick={() => controller.setLens(lens)}
           >
@@ -140,7 +141,12 @@ function CanvasContext({
     <div className="context-row">
       <nav aria-label="Breadcrumbs">
         {breadcrumbs.map((item) => (
-          <button key={item.id} type="button" onClick={() => controller.drill(item.id)}>
+          <button
+            key={item.id}
+            type="button"
+            className="breadcrumb-action"
+            onClick={() => controller.drill(item.id)}
+          >
             {item.title}
           </button>
         ))}
@@ -149,6 +155,7 @@ function CanvasContext({
         <div className="zoom-controls">
           <button
             type="button"
+            className="toolbar-action"
             onClick={() =>
               controller.setZoom((value) =>
                 Math.max(interaction.minZoom, value - interaction.zoomStep)
@@ -160,6 +167,7 @@ function CanvasContext({
           <output aria-label="Canvas zoom">{Math.round(controller.zoom * 100)}%</output>
           <button
             type="button"
+            className="toolbar-action"
             onClick={() =>
               controller.setZoom((value) =>
                 Math.min(interaction.maxZoom, value + interaction.zoomStep)
@@ -168,7 +176,7 @@ function CanvasContext({
           >
             Zoom in
           </button>
-          <button type="button" onClick={() => resetCanvas(controller)}>
+          <button type="button" className="toolbar-action" onClick={() => resetCanvas(controller)}>
             Reset view
           </button>
         </div>

@@ -66,11 +66,9 @@ async function ensureExistingParentInsideRoot(realRoot: string, candidate: strin
   let parent = path.dirname(candidate);
   while (parent !== path.dirname(parent)) {
     try {
-      const stats = await lstat(parent);
-      if (stats.isSymbolicLink()) {
-        const realParent = await realpath(parent);
-        ensurePathInsideRoot(realRoot, realParent, candidate);
-      }
+      await lstat(parent);
+      const realParent = await realpath(parent);
+      ensurePathInsideRoot(realRoot, realParent, candidate);
       return;
     } catch (error) {
       if (!isNotFoundError(error)) throw error;

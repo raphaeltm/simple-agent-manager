@@ -22,7 +22,7 @@ test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
   await expect(page.getByRole('heading', { name: 'Playwright Architecture' })).toBeVisible();
   await assertNoOverflow(page);
 
-  const apiButton = page.getByRole('button', { name: /API component/ }).first();
+  const apiButton = page.locator('.node-select', { hasText: 'API component' });
   await apiButton.focus();
   await apiButton.press('Enter');
   const inspector = page.locator('aside[aria-label="Architecture inspector"]');
@@ -50,7 +50,7 @@ test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
   await page.keyboard.press('Escape');
   await expect(apiButton).toBeFocused();
 
-  await page.getByRole('button', { name: 'Drill into' }).first().click();
+  await page.getByRole('button', { name: 'Open API component scope' }).click();
   await expect(page).toHaveURL(/focus=api/);
   await page.getByRole('button', { name: 'Root system' }).click();
   await expect(page).toHaveURL(/focus=root/);
@@ -74,7 +74,7 @@ test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
   await expect(page.getByLabel('Canvas zoom')).toHaveText('113%');
 
   const structureCanvas = page.getByRole('region', { name: 'structure architecture canvas' });
-  await structureCanvas.getByRole('button', { name: /API component/ }).click();
+  await structureCanvas.locator('.focus-node', { hasText: 'API component' }).click();
   const sourceButton = page.getByRole('button', { name: /src\/api.ts:1/ });
   await sourceButton.evaluate((element) => element.scrollIntoView({ block: 'center' }));
   await expect(sourceButton).toBeInViewport();
@@ -106,7 +106,7 @@ Reply added by direct file edit
 
   await writeModel(normalModel('API renamed by file edit'));
   await expect(
-    page.getByRole('button', { name: /API renamed by file edit/ }).first()
+    page.locator('.node-title', { hasText: 'API renamed by file edit' })
   ).toBeVisible();
   await screenshot(page, `viewer-main-${testInfo.project.name}`);
   await assertControlBounds(page);

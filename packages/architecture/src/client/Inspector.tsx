@@ -58,7 +58,6 @@ export function Inspector({
       ref={controller.inspectorRef}
       className={`architecture-inspector ${mobileOpen ? 'is-open' : ''}`}
       aria-label="Architecture inspector"
-      aria-live="polite"
       aria-modal={mobileOpen || undefined}
       role={mobileOpen ? 'dialog' : 'complementary'}
       tabIndex={-1}
@@ -109,6 +108,7 @@ function useInspectorController({
     state.setMutation
   );
   useMobileDialog(mobileOpen, targetId, state.inspectorRef);
+  useInspectorScrollReset(targetId, state.inspectorRef);
   return useInspectorActions(api, onReload, targetId, target, threads, state);
 }
 
@@ -119,6 +119,7 @@ function useInspectorState() {
   const [mutation, setMutation] = useState<MutationState>({ saving: false });
   const inspectorRef = useRef<HTMLElement | null>(null);
   const targetRevisionRef = useRef(0);
+  const sourceRevisionRef = useRef(0);
   return {
     inspectorRef,
     mutation,
@@ -129,6 +130,7 @@ function useInspectorState() {
     setPreview,
     setQuestion,
     setReplyDrafts,
+    sourceRevisionRef,
     targetRevisionRef,
   };
 }
@@ -141,7 +143,13 @@ function useInspectorActions(
   threads: ArchitectureThread[],
   state: ReturnType<typeof useInspectorState>
 ): InspectorController {
-  const loadSource = useSourceLoader(api, targetId, state.targetRevisionRef, state.setPreview);
+  const loadSource = useSourceLoader(
+    api,
+    targetId,
+    state.targetRevisionRef,
+    state.sourceRevisionRef,
+    state.setPreview
+  );
   const createQuestion = useQuestionCreator(
     api,
     targetId,
@@ -220,22 +228,43 @@ function trapDialogFocus(event: KeyboardEvent, inspector: HTMLElement, selector:
   }
 }
 
+function useInspectorScrollReset(
+  targetId: string | undefined,
+  inspectorRef: RefObject<HTMLElement | null>
+): void {
+  useEffect(() => {
+    const inspector = inspectorRef.current;
+    if (inspector) inspector.scrollTop = 0;
+  }, [inspectorRef, targetId]);
+}
+
 function useSourceLoader(
   api: ApiClient,
   targetId: string | undefined,
-  revisionRef: MutableRefObject<number>,
+  targetRevisionRef: MutableRefObject<number>,
+  sourceRevisionRef: MutableRefObject<number>,
   setPreview: Dispatch<SetStateAction<PreviewState>>
 ) {
   return async (source: SourceRef, sourceIndex: number) => {
     if (!targetId) return;
-    const revision = revisionRef.current;
+    const targetRevision = targetRevisionRef.current;
+    const sourceRevision = ++sourceRevisionRef.current;
     setPreview({ loading: true });
     try {
       const loaded = await api.loadSource(targetId, source, sourceIndex);
-      if (revision === revisionRef.current) setPreview({ loading: false, preview: loaded });
+      if (
+        targetRevision === targetRevisionRef.current &&
+        sourceRevision === sourceRevisionRef.current
+      ) {
+        setPreview({ loading: false, preview: loaded });
+      }
     } catch (error) {
-      if (revision === revisionRef.current)
+      if (
+        targetRevision === targetRevisionRef.current &&
+        sourceRevision === sourceRevisionRef.current
+      ) {
         setPreview({ loading: false, error: errorMessage(error) });
+      }
     }
   };
 }
@@ -264,7 +293,17 @@ function useQuestionCreator(
       if (revision !== revisionRef.current) return;
       setQuestion({ title: '', body: '' });
       setMutation({ saving: false, artifactPath: result.artifactPath });
-      await onReload();
+      try {
+        await onReload();
+      } catch (error) {
+        if (revision === revisionRef.current) {
+          setMutation({
+            saving: false,
+            artifactPath: result.artifactPath,
+            refreshWarning: `Saved, but the view could not refresh: ${errorMessage(error)}`,
+          });
+        }
+      }
     } catch (error) {
       if (revision === revisionRef.current)
         setMutation({ saving: false, error: errorMessage(error) });
@@ -291,7 +330,17 @@ function useThreadReply(
       if (revision !== revisionRef.current) return;
       setDrafts((all) => ({ ...all, [thread.id]: '' }));
       setMutation({ saving: false, artifactPath: result.artifactPath });
-      await onReload();
+      try {
+        await onReload();
+      } catch (error) {
+        if (revision === revisionRef.current) {
+          setMutation({
+            saving: false,
+            artifactPath: result.artifactPath,
+            refreshWarning: `Saved, but the view could not refresh: ${errorMessage(error)}`,
+          });
+        }
+      }
     } catch (error) {
       if (revision === revisionRef.current)
         setMutation({ saving: false, error: errorMessage(error) });
@@ -310,11 +359,12 @@ function InspectorHeader({
 }) {
   return (
     <div className="inspector-head">
+      <span className="sheet-grip" aria-hidden="true" />
       <div>
         <p className="eyebrow">{controller.target?.kind ?? 'Overview'}</p>
         <h2>{controller.target?.title ?? model.summary.name}</h2>
       </div>
-      <button type="button" className="mobile-close" onClick={onClose}>
+      <button type="button" className="mobile-close ghost-action" onClick={onClose}>
         Close
       </button>
     </div>
@@ -332,22 +382,28 @@ function InspectorTarget({
 }) {
   return (
     <>
-      <p className="muted break-text">
-        {controller.target?.summary ??
-          controller.target?.description ??
-          model.summary.description ??
-          'No description yet.'}
-      </p>
+      <section className="inspector-section inspector-overview">
+        <h3>Overview</h3>
+        <p className="muted break-text">
+          {controller.target?.summary ??
+            controller.target?.description ??
+            model.summary.description ??
+            'No description yet.'}
+        </p>
+      </section>
       {controller.targetId && (
-        <Relationships
-          model={model}
-          targetId={controller.targetId}
-          onOpenStructure={onOpenStructure}
-        />
+        <section className="inspector-section">
+          <h3>Connections</h3>
+          <Relationships
+            model={model}
+            targetId={controller.targetId}
+            onOpenStructure={onOpenStructure}
+          />
+        </section>
       )}
       {controller.targetId && (
-        <section>
-          <h3>Source anchors</h3>
+        <section className="inspector-section">
+          <h3>Source</h3>
           <SourceAnchors
             sources={controller.target?.sources ?? []}
             onLoad={controller.loadSource}
@@ -362,8 +418,14 @@ function InspectorTarget({
 
 function ThreadSection({ controller }: { controller: InspectorController }) {
   return (
-    <section>
-      <h3>Threads</h3>
+    <section className="inspector-section discussion-section">
+      <div className="section-heading">
+        <div>
+          <p className="eyebrow">File-backed Q&amp;A</p>
+          <h3>Discussion</h3>
+        </div>
+        <span className="section-count">{controller.threads.length}</span>
+      </div>
       <ThreadList
         threads={controller.threads}
         drafts={controller.replyDrafts}
@@ -371,7 +433,8 @@ function ThreadSection({ controller }: { controller: InspectorController }) {
         onDraft={controller.setReplyDrafts}
         onReply={controller.reply}
       />
-      <form className="stack" onSubmit={controller.createQuestion}>
+      <form className="stack question-form" onSubmit={controller.createQuestion}>
+        <h4>Ask about this item</h4>
         <label>
           Question title
           <input
@@ -397,9 +460,20 @@ function ThreadSection({ controller }: { controller: InspectorController }) {
         </button>
       </form>
       {controller.mutation.artifactPath && (
-        <p className="success">Saved to {controller.mutation.artifactPath}</p>
+        <p className="success" role="status">
+          Saved to {controller.mutation.artifactPath}
+        </p>
       )}
-      {controller.mutation.error && <p className="error">{controller.mutation.error}</p>}
+      {controller.mutation.refreshWarning && (
+        <p className="warning" role="status">
+          {controller.mutation.refreshWarning}
+        </p>
+      )}
+      {controller.mutation.error && (
+        <p className="error" role="alert">
+          {controller.mutation.error}
+        </p>
+      )}
     </section>
   );
 }

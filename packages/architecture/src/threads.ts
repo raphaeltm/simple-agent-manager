@@ -303,14 +303,18 @@ function validateThreadContent(options: ThreadWriteOptions): void {
   assertContentLength(options.title, limits.titleChars, 'thread title');
   assertContentLength(options.body, limits.bodyChars, 'thread body');
   assertNoReservedMessageDelimiter(options.body, 'thread body');
-  assertContentLength(options.author ?? DEFAULT_THREAD_AUTHOR, limits.authorChars, 'thread author');
+  const author = options.author ?? DEFAULT_THREAD_AUTHOR;
+  assertContentLength(author, limits.authorChars, 'thread author');
+  assertNoReservedMessageSyntax(author, 'thread author');
 }
 
 function validateReplyContent(options: ReplyWriteOptions): void {
   const limits = { ...DEFAULT_THREAD_CONTENT_LIMITS, ...options.limits };
   assertContentLength(options.body, limits.bodyChars, 'reply body');
   assertNoReservedMessageDelimiter(options.body, 'reply body');
-  assertContentLength(options.author ?? DEFAULT_THREAD_AUTHOR, limits.authorChars, 'reply author');
+  const author = options.author ?? DEFAULT_THREAD_AUTHOR;
+  assertContentLength(author, limits.authorChars, 'reply author');
+  assertNoReservedMessageSyntax(author, 'reply author');
 }
 
 function assertNoReservedMessageDelimiter(value: string, label: string): void {
@@ -318,6 +322,11 @@ function assertNoReservedMessageDelimiter(value: string, label: string): void {
   throw new PathSafetyError(
     `${label} must not contain the reserved architecture message delimiter.`
   );
+}
+
+function assertNoReservedMessageSyntax(value: string, label: string): void {
+  if (!value.includes(RESERVED_MESSAGE_DELIMITER) && !value.includes(MESSAGE_MARKER_END)) return;
+  throw new PathSafetyError(`${label} must not contain reserved architecture message syntax.`);
 }
 
 function assertContentLength(value: string, limit: number, label: string): void {

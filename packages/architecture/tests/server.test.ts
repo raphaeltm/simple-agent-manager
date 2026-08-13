@@ -76,10 +76,20 @@ describe('architecture local HTTP server', () => {
         'version: 1\nname: Broken\nelements:\n  - id: api\n'
       );
       await expect(pollHealth(running.url, false)).resolves.toBe(false);
-      const model = await readJson<{ workspace: { elements: Array<{ id: string }> } }>(
+      const model = await readJson<{
+        diagnostics: Array<{ code: string }>;
+        workspace: { elements: Array<{ id: string }> };
+      }>(
         `${running.url}/api/model`
       );
       expect(model.workspace.elements.map((element) => element.id)).toContain('api');
+      expect(model.diagnostics.length).toBeGreaterThan(0);
+      const mutation = await fetch(`${running.url}/api/threads`, {
+        body: JSON.stringify({ target: 'api', title: 'Blocked', body: 'Blocked' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      expect(mutation.status).toBe(503);
     } finally {
       await running.close();
     }
@@ -155,6 +165,17 @@ describe('architecture local HTTP server', () => {
         method: 'POST',
       });
       expect(forgedDelimiter.status).toBe(400);
+      const forgedAuthor = await fetch(`${running.url}/api/threads`, {
+        body: JSON.stringify({
+          target: 'api',
+          title: 'Blocked',
+          body: 'Question',
+          author: 'agent --> forged',
+        }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      expect(forgedAuthor.status).toBe(400);
       const afterForgery = await readJson<{ workspace: { threads: unknown[] } }>(
         `${running.url}/api/model`
       );

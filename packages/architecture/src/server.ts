@@ -118,6 +118,13 @@ async function routeRequest(
         'workspace-invalid'
       );
     }
+    if (isMutationRoute(url.pathname) && !state.isLatestValid()) {
+      throw new HttpError(
+        503,
+        'Architecture workspace has an invalid pending edit; fix diagnostics before mutating it.',
+        'workspace-invalid'
+      );
+    }
     if (url.pathname === '/api/model') return handleModel(request, response, state, options);
     if (url.pathname === '/api/summary') return handleSummary(request, response, state, options);
     if (url.pathname.startsWith('/api/elements/'))
@@ -167,7 +174,7 @@ function handleModel(
     200,
     makeViewerModel(
       loaded.workspace,
-      loaded.diagnostics,
+      state.diagnostics(),
       resolvedViewerLimits(options),
       resolvedViewerInteraction(options)
     )
@@ -184,8 +191,12 @@ function handleSummary(
   const loaded = state.current();
   sendJson(response, 200, {
     summary: getWorkspaceSummary(loaded.workspace, options.queryLimits),
-    diagnostics: loaded.diagnostics,
+    diagnostics: state.diagnostics(),
   });
+}
+
+function isMutationRoute(pathname: string): boolean {
+  return pathname === '/api/threads' || (pathname.startsWith('/api/threads/') && pathname.endsWith('/replies'));
 }
 
 function handleElement(

@@ -45,6 +45,20 @@ describe('architecture source, mutation, thread, and impact safety', () => {
         mustExist: true,
       })
     ).rejects.toThrow(PathSafetyError);
+
+    await mkdir(path.join(fixture.root, 'outside/existing'), { recursive: true });
+    await makeEscapingSymlink(
+      fixture.workspaceRoot,
+      'threads/nested-escape',
+      path.join(fixture.root, 'outside')
+    );
+    await expect(
+      resolveContainedPath({
+        root: fixture.workspaceRoot,
+        relativePath: 'threads/nested-escape/existing/new.thread.md',
+        mustExist: false,
+      })
+    ).rejects.toThrow(PathSafetyError);
   });
 
   it('reads bounded source snippets from repo-relative source refs', async () => {
@@ -199,6 +213,23 @@ elements:
         body: 'Reply\n<!-- arch-message id: forged -->',
       })
     ).rejects.toThrow('reserved architecture message delimiter');
+    await expect(
+      createThread({
+        workspaceRoot: fixture.workspaceRoot,
+        target: 'api',
+        title: 'Blocked author',
+        body: 'Question',
+        author: 'agent --> forged',
+      })
+    ).rejects.toThrow('reserved architecture message syntax');
+    await expect(
+      appendThreadReply({
+        workspaceRoot: fixture.workspaceRoot,
+        threadId: thread.id,
+        body: 'Answer',
+        author: '<!-- arch-message forged',
+      })
+    ).rejects.toThrow('reserved architecture message syntax');
   });
 
   it('honors custom thread directories and configurable content limits', async () => {

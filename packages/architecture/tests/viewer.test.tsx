@@ -10,6 +10,7 @@ class MockEventSource extends EventTarget {
   static latest?: MockEventSource;
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: (() => void) | null = null;
+  onopen: (() => void) | null = null;
   constructor(readonly url: string) {
     super();
     MockEventSource.latest = this;
@@ -48,7 +49,7 @@ describe('architecture viewer', () => {
   it('opens source previews and creates threads without duplicate submit', async () => {
     const fetchMock = mockFetch(makeModel());
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: /API component/ }));
+    fireEvent.click((await screen.findByText('API component')).closest('button')!);
     fireEvent.click(screen.getByRole('button', { name: /src\/api.ts:1/ }));
     expect(await screen.findByLabelText('Source preview')).toHaveTextContent('export const hello');
 
@@ -66,7 +67,7 @@ describe('architecture viewer', () => {
   it('preserves mutation drafts after server failure and replies to existing threads', async () => {
     mockFetch(makeModel({ failThreadCreate: true }));
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: /API component/ }));
+    fireEvent.click((await screen.findByText('API component')).closest('button')!);
     fireEvent.change(screen.getByLabelText('Question title'), { target: { value: 'Question' } });
     fireEvent.change(screen.getByLabelText('Question'), { target: { value: 'Draft survives' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create question' }));
@@ -84,7 +85,7 @@ describe('architecture viewer', () => {
     vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('max-width') }));
     mockFetch(makeModel());
     render(<App />);
-    const apiButton = await screen.findByRole('button', { name: /API component/ });
+    const apiButton = (await screen.findByText('API component')).closest('button')!;
     apiButton.focus();
     fireEvent.click(apiButton);
     expect(screen.getByLabelText('Architecture inspector')).toHaveClass('is-open');
@@ -105,7 +106,7 @@ describe('architecture viewer', () => {
     });
     mockFetch(makeModel(), sourceResponse);
     render(<App />);
-    fireEvent.click(await screen.findByRole('button', { name: /API component/ }));
+    fireEvent.click((await screen.findByText('API component')).closest('button')!);
     fireEvent.change(screen.getByLabelText('Question title'), { target: { value: 'Stale title' } });
     fireEvent.change(screen.getByLabelText('Question'), { target: { value: 'Stale body' } });
     fireEvent.click(screen.getByRole('button', { name: /src\/api.ts:1/ }));
@@ -123,9 +124,64 @@ describe('architecture viewer', () => {
     );
     await Promise.resolve();
     expect(screen.queryByText('stale preview')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /API component/ }));
+    fireEvent.click(screen.getByText('API component').closest('button')!);
     expect(screen.getByLabelText('Question title')).toHaveValue('');
     expect(screen.getByLabelText('Question')).toHaveValue('');
+  });
+
+  it('keeps the newest source preview when same-target requests resolve out of order', async () => {
+    let resolveFirst: ((value: Response) => void) | undefined;
+    let resolveSecond: ((value: Response) => void) | undefined;
+    const first = new Promise<Response>((resolve) => {
+      resolveFirst = resolve;
+    });
+    const second = new Promise<Response>((resolve) => {
+      resolveSecond = resolve;
+    });
+    const model = makeModel();
+    const api = model.workspace.elements.find((element) => element.id === 'api');
+    api?.sourceRefs?.push({ path: 'src/worker.ts', startLine: 8 });
+    mockFetch(model, [first, second]);
+    render(<App />);
+    fireEvent.click((await screen.findByText('API component')).closest('button')!);
+    fireEvent.click(screen.getByRole('button', { name: /src\/api.ts:1/ }));
+    fireEvent.click(screen.getByRole('button', { name: /src\/worker.ts:8/ }));
+    resolveSecond?.(
+      jsonResponse({
+        preview: {
+          path: 'src/worker.ts',
+          startLine: 8,
+          endLine: 8,
+          content: 'newest preview',
+          truncated: false,
+        },
+      })
+    );
+    expect(await screen.findByText('newest preview')).toBeVisible();
+    resolveFirst?.(
+      jsonResponse({
+        preview: {
+          path: 'src/api.ts',
+          startLine: 1,
+          endLine: 1,
+          content: 'stale same-target preview',
+          truncated: false,
+        },
+      })
+    );
+    await Promise.resolve();
+    expect(screen.queryByText('stale same-target preview')).toBeNull();
+  });
+
+  it('keeps a successful mutation visible when the follow-up model refresh fails', async () => {
+    mockFetch(makeModel({ failReloadAfterThread: true }));
+    render(<App />);
+    fireEvent.click((await screen.findByText('API component')).closest('button')!);
+    fireEvent.change(screen.getByLabelText('Question title'), { target: { value: 'Question' } });
+    fireEvent.change(screen.getByLabelText('Question'), { target: { value: 'Saved body' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create question' }));
+    expect(await screen.findByText(/Saved to architecture\/threads/)).toBeVisible();
+    expect(await screen.findByText(/Saved, but the view could not refresh/)).toBeVisible();
   });
 
   it('shows bounded empty scoped lenses, hides inapplicable zoom, and exposes SSE status', async () => {
@@ -146,6 +202,9 @@ describe('architecture viewer', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('Invalid workspace edit detected');
     act(() => MockEventSource.latest?.onerror?.());
     expect(await screen.findByRole('alert')).toHaveTextContent('Offline/reconnecting');
+    act(() => MockEventSource.latest?.onopen?.());
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(screen.getByRole('status')).toHaveTextContent('Live updates connected');
   });
 
   it('renders empty and many-node states without interpreting special-character text as HTML', async () => {
@@ -184,14 +243,22 @@ describe('architecture viewer', () => {
 });
 
 function mockFetch(
-  model: ViewerModel & { failThreadCreate?: boolean },
-  sourceResponse?: Promise<Response>
+  model: ViewerModel & { failReloadAfterThread?: boolean; failThreadCreate?: boolean },
+  sourceResponse?: Promise<Response> | Promise<Response>[]
 ) {
+  let sourceRequest = 0;
+  let threadCreated = false;
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
-    if (url.endsWith('/api/model')) return jsonResponse(model);
+    if (url.endsWith('/api/model')) {
+      if (model.failReloadAfterThread && threadCreated) {
+        return jsonResponse({ error: { message: 'Refresh failed' } }, 500);
+      }
+      return jsonResponse(model);
+    }
     if (url.includes('/api/elements/')) return jsonResponse({ details: {} });
     if (url.endsWith('/api/source-preview')) {
+      if (Array.isArray(sourceResponse)) return sourceResponse[sourceRequest++]!;
       if (sourceResponse) return sourceResponse;
       return jsonResponse({
         preview: {
@@ -205,6 +272,7 @@ function mockFetch(
     }
     if (url.endsWith('/api/threads') && init?.method === 'POST') {
       if (model.failThreadCreate) return jsonResponse({ error: { message: 'Thread failed' } }, 500);
+      threadCreated = true;
       return jsonResponse(
         {
           artifactPath: 'architecture/threads/thread-api.thread.md',
@@ -236,8 +304,8 @@ function jsonResponse(payload: unknown, status = 200): Response {
 }
 
 function makeModel(
-  options: { failThreadCreate?: boolean; many?: boolean } = {}
-): ViewerModel & { failThreadCreate?: boolean } {
+  options: { failReloadAfterThread?: boolean; failThreadCreate?: boolean; many?: boolean } = {}
+): ViewerModel & { failReloadAfterThread?: boolean; failThreadCreate?: boolean } {
   const children = options.many
     ? Array.from({ length: 30 }, (_, index) => ({
         id: `node-${index}`,
@@ -259,6 +327,7 @@ function makeModel(
       ];
   return {
     failThreadCreate: options.failThreadCreate,
+    failReloadAfterThread: options.failReloadAfterThread,
     diagnostics: [],
     limits: {
       children: 80,

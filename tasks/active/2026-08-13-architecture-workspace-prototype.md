@@ -119,6 +119,18 @@ The requested end state is broader than this first PR: humans should eventually 
 - [x] E5. Run task-completion, test, documentation-sync, constitution, UI/UX, and security reviews; address every blocking finding.
 - [x] E6. Deploy the final branch to staging as required by the repository workflow and confirm the unrelated deployed SAM application remains healthy; feature behavior itself is validated through the package's real local server because the prototype is not mounted in the production app.
 
+### F. Five-pass refinement requested after initial review
+
+- [x] F1. Complete UI round 1: desktop/mobile screenshots, local specialist critique with multiple design directions, implementation, browser verification, commit, and push.
+- [ ] F2. Complete UI round 2: refreshed screenshots, local specialist critique, implementation, browser verification, commit, and push.
+- [ ] F3. Complete UI round 3: refreshed screenshots, local specialist critique, implementation, browser verification, commit, and push.
+- [ ] F4. Complete UI round 4: refreshed screenshots, local specialist critique, implementation, browser verification, commit, and push.
+- [ ] F5. Complete UI round 5: refreshed screenshots, local specialist critique, implementation, browser verification, commit, and push.
+- [ ] F6. Complete five local frontend reviews focused on state ownership, effect interactions, rendering cost, accessibility behavior, and maintainable component boundaries; resolve blocking findings each round.
+- [ ] F7. Complete five local backend reviews focused on API boundaries, filesystem concurrency, watcher/SSE behavior, security, performance, and maintainable module boundaries; resolve blocking findings each round.
+- [ ] F8. Exercise the complete browser-to-file-to-agent-to-reply-to-SSE loop with a local subagent responding to a UI-created question, including mobile and desktop evidence.
+- [ ] F9. Re-run full package/repository checks and final specialist audits, refresh the draft PR evidence, and keep the PR unmerged pending user authorization.
+
 ## Acceptance Criteria
 
 1. `pnpm architecture:validate` validates the checked-in SAM architecture workspace and produces actionable errors for invalid copies.
