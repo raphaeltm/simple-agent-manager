@@ -1,3 +1,4 @@
+import { DEFAULT_VIEWER_CHILD_LIMIT, DEFAULT_VIEWER_RELATIONSHIP_LIMIT } from '../constants';
 import type {
   ArchitectureElement,
   ArchitectureFlow,
@@ -11,29 +12,40 @@ export function structureSlice(model: ViewerModel, focusId?: string): StructureS
   const elements = model.workspace.elements;
   const focus = focusId ? elements.find((element) => element.id === focusId) : firstRoot(elements);
   const parentId = focus?.id;
-  const children = elements.filter((element) => element.parent === parentId);
+  const allChildren = elements.filter((element) => element.parent === parentId);
+  const children = allChildren.slice(0, DEFAULT_VIEWER_CHILD_LIMIT);
   const scopedIds = new Set([parentId, ...children.map((child) => child.id)].filter(Boolean));
+  const allRelationships = portalRelationships(model.workspace.relationships, scopedIds);
   return {
     focus,
     breadcrumbs: focus ? breadcrumbs(elements, focus) : [],
     children,
-    relationships: portalRelationships(model.workspace.relationships, scopedIds),
+    relationships: allRelationships.slice(0, DEFAULT_VIEWER_RELATIONSHIP_LIMIT),
+    omittedChildren: Math.max(0, allChildren.length - children.length),
+    omittedRelationships: Math.max(0, allRelationships.length - DEFAULT_VIEWER_RELATIONSHIP_LIMIT),
   };
 }
 
 export function flowSlice(model: ViewerModel, focusId?: string): FlowSlice {
-  const flows = model.workspace.flows.filter((flow) =>
-    !focusId || flow.steps.some((step) => step.element === focusId || relationshipTouches(model, step.relationship, focusId))
+  const flows = model.workspace.flows.filter(
+    (flow) =>
+      !focusId ||
+      flow.steps.some(
+        (step) => step.element === focusId || relationshipTouches(model, step.relationship, focusId)
+      )
   );
   return { flows: flows.length > 0 ? flows : model.workspace.flows };
 }
 
 export function stateSlice(model: ViewerModel, focusId?: string): StateSlice {
-  const machines = model.workspace.stateMachines.filter((machine) =>
-    !focusId ||
-    machine.element === focusId ||
-    machine.states.some((state) => state.element === focusId) ||
-    machine.transitions.some((transition) => relationshipTouches(model, transition.relationship, focusId))
+  const machines = model.workspace.stateMachines.filter(
+    (machine) =>
+      !focusId ||
+      machine.element === focusId ||
+      machine.states.some((state) => state.element === focusId) ||
+      machine.transitions.some((transition) =>
+        relationshipTouches(model, transition.relationship, focusId)
+      )
   );
   return { machines: machines.length > 0 ? machines : model.workspace.stateMachines };
 }
@@ -50,7 +62,10 @@ export function getMachine(model: ViewerModel, id?: string): ArchitectureStateMa
   return model.workspace.stateMachines.find((machine) => machine.id === id);
 }
 
-export function getRelationship(model: ViewerModel, id?: string): ArchitectureRelationship | undefined {
+export function getRelationship(
+  model: ViewerModel,
+  id?: string
+): ArchitectureRelationship | undefined {
   return model.workspace.relationships.find((relationship) => relationship.id === id);
 }
 
@@ -58,7 +73,10 @@ function firstRoot(elements: ArchitectureElement[]): ArchitectureElement | undef
   return elements.find((element) => !element.parent) ?? elements[0];
 }
 
-function breadcrumbs(elements: ArchitectureElement[], focus: ArchitectureElement): ArchitectureElement[] {
+function breadcrumbs(
+  elements: ArchitectureElement[],
+  focus: ArchitectureElement
+): ArchitectureElement[] {
   const byId = new Map(elements.map((element) => [element.id, element]));
   const trail: ArchitectureElement[] = [focus];
   let current = focus.parent ? byId.get(focus.parent) : undefined;
@@ -73,10 +91,16 @@ function portalRelationships(
   relationships: ArchitectureRelationship[],
   scopedIds: Set<string | undefined>
 ): ArchitectureRelationship[] {
-  return relationships.filter((relationship) => scopedIds.has(relationship.from) || scopedIds.has(relationship.to));
+  return relationships.filter(
+    (relationship) => scopedIds.has(relationship.from) || scopedIds.has(relationship.to)
+  );
 }
 
-function relationshipTouches(model: ViewerModel, relationshipId: string | undefined, elementId: string): boolean {
+function relationshipTouches(
+  model: ViewerModel,
+  relationshipId: string | undefined,
+  elementId: string
+): boolean {
   const relationship = getRelationship(model, relationshipId);
   return relationship?.from === elementId || relationship?.to === elementId;
 }

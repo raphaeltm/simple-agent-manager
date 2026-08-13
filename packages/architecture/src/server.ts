@@ -2,11 +2,7 @@ import { realpath } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import path from 'node:path';
 
-import {
-  DEFAULT_SERVER_HOST,
-  DEFAULT_SERVER_PORT,
-  DEFAULT_SERVER_SOURCE_BYTES,
-} from './constants';
+import { DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT, DEFAULT_SERVER_SOURCE_BYTES } from './constants';
 import { hasErrors } from './diagnostics';
 import { PathSafetyError } from './path-safety';
 import { getWorkspaceSummary } from './queries';
@@ -21,6 +17,7 @@ import {
 } from './server/validation';
 import { WorkspaceState } from './server/workspace-state';
 import { readSourceReference } from './source';
+import { resolveArchitectureTarget } from './targets';
 import { appendThreadReply, createThread } from './threads';
 import type { LoadWorkspaceOptions } from './types';
 
@@ -72,12 +69,17 @@ async function routeRequest(
   options: ArchitectureServerOptions
 ): Promise<void> {
   try {
-    const url = new URL(request.url ?? '/', `http://${request.headers.host ?? DEFAULT_SERVER_HOST}`);
+    const url = new URL(
+      request.url ?? '/',
+      `http://${request.headers.host ?? DEFAULT_SERVER_HOST}`
+    );
     if (url.pathname === '/health') return handleHealth(request, response, state);
     if (url.pathname === '/api/model') return handleModel(request, response, state);
     if (url.pathname === '/api/summary') return handleSummary(request, response, state);
-    if (url.pathname.startsWith('/api/elements/')) return handleElement(request, response, state, url);
-    if (url.pathname === '/api/source-preview') return await handleSource(request, response, state, options);
+    if (url.pathname.startsWith('/api/elements/'))
+      return handleElement(request, response, state, url);
+    if (url.pathname === '/api/source-preview')
+      return await handleSource(request, response, state, options);
     if (url.pathname === '/api/threads') return await handleCreateThread(request, response, state);
     if (url.pathname.startsWith('/api/threads/') && url.pathname.endsWith('/replies')) {
       return await handleReply(request, response, state, url);
@@ -93,25 +95,40 @@ async function routeRequest(
   }
 }
 
-function handleHealth(request: IncomingMessage, response: ServerResponse, state: WorkspaceState): void {
+function handleHealth(
+  request: IncomingMessage,
+  response: ServerResponse,
+  state: WorkspaceState
+): void {
   requireMethod(request.method, 'GET');
-  const loaded = state.current();
-  sendJson(response, hasErrors(loaded.diagnostics) ? 503 : 200, {
-    ok: !hasErrors(loaded.diagnostics),
-    diagnostics: loaded.diagnostics,
+  const diagnostics = state.diagnostics();
+  sendJson(response, hasErrors(diagnostics) ? 503 : 200, {
+    ok: !hasErrors(diagnostics),
+    diagnostics,
   });
 }
 
-function handleModel(request: IncomingMessage, response: ServerResponse, state: WorkspaceState): void {
+function handleModel(
+  request: IncomingMessage,
+  response: ServerResponse,
+  state: WorkspaceState
+): void {
   requireMethod(request.method, 'GET');
   const loaded = state.current();
   sendJson(response, 200, makeViewerModel(loaded.workspace, loaded.diagnostics));
 }
 
-function handleSummary(request: IncomingMessage, response: ServerResponse, state: WorkspaceState): void {
+function handleSummary(
+  request: IncomingMessage,
+  response: ServerResponse,
+  state: WorkspaceState
+): void {
   requireMethod(request.method, 'GET');
   const loaded = state.current();
-  sendJson(response, 200, { summary: getWorkspaceSummary(loaded.workspace), diagnostics: loaded.diagnostics });
+  sendJson(response, 200, {
+    summary: getWorkspaceSummary(loaded.workspace),
+    diagnostics: loaded.diagnostics,
+  });
 }
 
 function handleElement(
@@ -137,9 +154,14 @@ async function handleSource(
   const body = await readJsonBody(request, sourcePreviewRequestSchema);
   const refs = sourceRefsForTarget(state.current().workspace, body.target);
   const sourceRef = refs?.[body.sourceIndex];
-  if (!sourceRef) throw new HttpError(404, 'Source reference target was not found.', 'source-not-found');
+  if (!sourceRef)
+    throw new HttpError(404, 'Source reference target was not found.', 'source-not-found');
   if (body.path !== undefined && body.path !== sourceRef.path) {
-    throw new HttpError(400, 'Requested source path is not anchored on the selected target.', 'source-path-invalid');
+    throw new HttpError(
+      400,
+      'Requested source path is not anchored on the selected target.',
+      'source-path-invalid'
+    );
   }
   const preview = await readSourceReference(state.current().workspace, sourceRef, {
     maxBytes: options.maxSourceBytes ?? DEFAULT_SERVER_SOURCE_BYTES,
@@ -154,10 +176,13 @@ async function handleCreateThread(
 ): Promise<void> {
   requireMethod(request.method, 'POST');
   const body = await readJsonBody(request, createThreadRequestSchema);
-  if (!state.current().workspace.indexes.elementsById.has(body.target)) {
+  if (!resolveArchitectureTarget(state.current().workspace, body.target)) {
     throw new HttpError(404, `Thread target not found: ${body.target}`, 'thread-target-not-found');
   }
-  const thread = await createThread({ workspaceRoot: state.current().workspace.workspaceRoot, ...body });
+  const thread = await createThread({
+    workspaceRoot: state.current().workspace.workspaceRoot,
+    ...body,
+  });
   await state.reload('thread-create');
   sendJson(response, 201, { thread, artifactPath: await threadArtifactPath(state, thread.id) });
 }
@@ -169,21 +194,23 @@ async function handleReply(
   url: URL
 ): Promise<void> {
   requireMethod(request.method, 'POST');
-  const threadId = decodeURIComponent(url.pathname.slice('/api/threads/'.length, -'/replies'.length));
+  const threadId = decodeURIComponent(
+    url.pathname.slice('/api/threads/'.length, -'/replies'.length)
+  );
   const body = await readJsonBody(request, replyRequestSchema);
   if (!state.current().workspace.indexes.threadsById.has(threadId)) {
     throw new HttpError(404, `Thread not found: ${threadId}`, 'thread-not-found');
   }
-  const message = await appendThreadReply({ workspaceRoot: state.current().workspace.workspaceRoot, threadId, ...body });
+  const message = await appendThreadReply({
+    workspaceRoot: state.current().workspace.workspaceRoot,
+    threadId,
+    ...body,
+  });
   await state.reload('thread-reply');
   sendJson(response, 201, { message, artifactPath: await threadArtifactPath(state, threadId) });
 }
 
-function handleEvents(
-  request: IncomingMessage,
-  response: ServerResponse,
-  events: EventHub
-): void {
+function handleEvents(request: IncomingMessage, response: ServerResponse, events: EventHub): void {
   requireMethod(request.method, 'GET');
   const disconnect = events.connect(response);
   request.on('close', disconnect);
@@ -192,7 +219,10 @@ function handleEvents(
 async function threadArtifactPath(state: WorkspaceState, threadId: string): Promise<string> {
   const location = state.current().workspace.indexes.threadsById.get(threadId)?.location.file;
   if (!location) return `threads/${threadId}.thread.md`;
-  return path.relative(await realpath(state.current().workspace.repoRoot), path.join(state.current().workspace.workspaceRoot, location));
+  return path.relative(
+    await realpath(state.current().workspace.repoRoot),
+    path.join(state.current().workspace.workspaceRoot, location)
+  );
 }
 
 function isLoopbackHost(host: string): boolean {

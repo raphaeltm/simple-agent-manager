@@ -1,3 +1,4 @@
+/* eslint-disable jsx-a11y/no-noninteractive-tabindex -- The scrollable architecture canvas must accept keyboard focus for arrow-key panning. */
 import {
   type Dispatch,
   type ReactNode,
@@ -22,13 +23,18 @@ const ZOOM_STEP = 0.125;
 
 export function App() {
   const api = useMemo(() => createApiClient(), []);
-  const [viewer, setViewer] = useState<ViewerState>({ loading: true, status: 'Loading…', offline: false });
+  const [viewer, setViewer] = useState<ViewerState>({
+    loading: true,
+    status: 'Loading…',
+    offline: false,
+  });
   const [lens, setLens] = useState<Lens>(() => readLens());
   const [focusId, setFocusId] = useState<string | undefined>(() => readParam('focus'));
   const [selection, setSelection] = useState<Selection | undefined>(() => readSelection());
   const [zoom, setZoom] = useState(1);
   const [mobileInspector, setMobileInspector] = useState(false);
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const canvasRef = useRef<HTMLDivElement | null>(null);
 
   const loadModel = useCallback(async () => {
     const model = await api.loadModel();
@@ -39,7 +45,12 @@ export function App() {
 
   useEffect(() => {
     void loadModel().catch((error: unknown) => {
-      setViewer({ loading: false, error: message(error), status: 'Failed to load model.', offline: false });
+      setViewer({
+        loading: false,
+        error: message(error),
+        status: 'Failed to load model.',
+        offline: false,
+      });
     });
   }, [loadModel]);
 
@@ -47,9 +58,15 @@ export function App() {
     const source = new EventSource('/api/events');
     source.onmessage = () => void reloadAfterSse(loadModel, setViewer);
     source.addEventListener('architecture:model', () => void reloadAfterSse(loadModel, setViewer));
-    source.addEventListener('architecture:threads', () => void reloadAfterSse(loadModel, setViewer));
+    source.addEventListener(
+      'architecture:threads',
+      () => void reloadAfterSse(loadModel, setViewer)
+    );
     source.addEventListener('architecture:invalid', () => {
-      setViewer((current) => ({ ...current, status: 'Invalid workspace edit detected; keeping last valid model.' }));
+      setViewer((current) => ({
+        ...current,
+        status: 'Invalid workspace edit detected; keeping last valid model.',
+      }));
     });
     source.onerror = () => {
       setViewer((current) => ({ ...current, offline: true, status: 'SSE reconnecting…' }));
@@ -77,9 +94,14 @@ export function App() {
 
   const breadcrumbs = viewer.model ? structureSlice(viewer.model, focusId).breadcrumbs : [];
   const select = (next: Selection) => {
-    returnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    returnFocusRef.current =
+      document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setSelection(next);
     setMobileInspector(true);
+  };
+  const closeInspector = () => {
+    setMobileInspector(false);
+    returnFocusRef.current?.focus();
   };
   const drill = (id: string) => {
     setLens('structure');
@@ -87,8 +109,18 @@ export function App() {
     setSelection({ kind: 'element', id });
   };
 
-  if (viewer.loading) return <Shell status={viewer.status}><StateMessage title="Loading architecture workspace" /></Shell>;
-  if (viewer.error || !viewer.model) return <Shell status={viewer.status}><StateMessage title="Invalid workspace" detail={viewer.error} /></Shell>;
+  if (viewer.loading)
+    return (
+      <Shell status={viewer.status}>
+        <StateMessage title="Loading architecture workspace" />
+      </Shell>
+    );
+  if (viewer.error || !viewer.model)
+    return (
+      <Shell status={viewer.status}>
+        <StateMessage title="Invalid workspace" detail={viewer.error} />
+      </Shell>
+    );
   const model = viewer.model;
   const empty = model.workspace.elements.length === 0;
 
@@ -101,8 +133,14 @@ export function App() {
         </div>
         <nav aria-label="Architecture lenses" className="lens-tabs">
           {(['structure', 'flow', 'state'] as const).map((item) => (
-            <button key={item} type="button" aria-current={lens === item ? 'page' : undefined} onClick={() => setLens(item)}>
-              {item[0]?.toUpperCase()}{item.slice(1)}
+            <button
+              key={item}
+              type="button"
+              aria-current={lens === item ? 'page' : undefined}
+              onClick={() => setLens(item)}
+            >
+              {item[0]?.toUpperCase()}
+              {item.slice(1)}
             </button>
           ))}
         </nav>
@@ -111,15 +149,57 @@ export function App() {
         <section className="canvas-column">
           <div className="context-row">
             <nav aria-label="Breadcrumbs">
-              {breadcrumbs.map((item) => <button key={item.id} type="button" onClick={() => drill(item.id)}>{item.title}</button>)}
+              {breadcrumbs.map((item) => (
+                <button key={item.id} type="button" onClick={() => drill(item.id)}>
+                  {item.title}
+                </button>
+              ))}
             </nav>
             <div className="zoom-controls">
-              <button type="button" onClick={() => setZoom((value) => Math.max(MIN_ZOOM, value - ZOOM_STEP))}>Zoom out</button>
-              <button type="button" onClick={() => setZoom((value) => Math.min(MAX_ZOOM, value + ZOOM_STEP))}>Zoom in</button>
+              <button
+                type="button"
+                onClick={() => setZoom((value) => Math.max(MIN_ZOOM, value - ZOOM_STEP))}
+              >
+                Zoom out
+              </button>
+              <output aria-label="Canvas zoom">{Math.round(zoom * 100)}%</output>
+              <button
+                type="button"
+                onClick={() => setZoom((value) => Math.min(MAX_ZOOM, value + ZOOM_STEP))}
+              >
+                Zoom in
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setZoom(1);
+                  canvasRef.current?.scrollTo({ left: 0, top: 0 });
+                }}
+              >
+                Reset view
+              </button>
             </div>
           </div>
-          <div className="canvas" data-intentional-clip aria-label={`${lens} architecture canvas`}>
-            {empty ? <StateMessage title="Empty architecture workspace" detail="No elements are defined yet." /> : renderLens(lens, model, focusId, selection, zoom, select, drill, setLens)}
+          <p className="canvas-help" id="canvas-help">
+            Zoom with the controls, then pan the focused canvas by scrolling or using arrow keys.
+          </p>
+          <div
+            ref={canvasRef}
+            className="canvas"
+            data-intentional-clip
+            aria-describedby="canvas-help"
+            aria-label={`${lens} architecture canvas`}
+            role="region"
+            tabIndex={0}
+          >
+            {empty ? (
+              <StateMessage
+                title="Empty architecture workspace"
+                detail="No elements are defined yet."
+              />
+            ) : (
+              renderLens(lens, model, focusId, selection, zoom, select, drill, setLens)
+            )}
           </div>
         </section>
         <Inspector
@@ -128,7 +208,7 @@ export function App() {
           selection={selection}
           focusId={focusId}
           mobileOpen={mobileInspector}
-          onClose={() => setMobileInspector(false)}
+          onClose={closeInspector}
           onOpenStructure={drill}
           onReload={loadModel}
         />
@@ -140,14 +220,21 @@ export function App() {
 function Shell({ status, children }: { status: string; children: ReactNode }) {
   return (
     <div className="architecture-app">
-      <p className="sr-only" role="status" aria-live="polite">{status}</p>
+      <p className="sr-only" role="status" aria-live="polite">
+        {status}
+      </p>
       {children}
     </div>
   );
 }
 
 function StateMessage({ title, detail }: { title: string; detail?: string }) {
-  return <div className="state-message"><h2>{title}</h2>{detail && <p>{detail}</p>}</div>;
+  return (
+    <div className="state-message">
+      <h2>{title}</h2>
+      {detail && <p>{detail}</p>}
+    </div>
+  );
 }
 
 function renderLens(
@@ -166,7 +253,10 @@ function renderLens(
   return <StructureLens {...props} />;
 }
 
-async function reloadAfterSse(loadModel: () => Promise<void>, setViewer: Dispatch<SetStateAction<ViewerState>>) {
+async function reloadAfterSse(
+  loadModel: () => Promise<void>,
+  setViewer: Dispatch<SetStateAction<ViewerState>>
+) {
   setViewer((current) => ({ ...current, status: 'Reloading architecture model…', offline: false }));
   await loadModel();
 }
@@ -178,8 +268,14 @@ function readLens(): Lens {
 
 function readSelection(): Selection | undefined {
   const value = readParam('selected');
-  const [kind, id] = value?.split(':') ?? [];
-  if (!id || (kind !== 'element' && kind !== 'flow' && kind !== 'stateMachine' && kind !== 'relationship')) return undefined;
+  const separator = value?.indexOf(':') ?? -1;
+  const kind = separator > 0 ? value?.slice(0, separator) : undefined;
+  const id = separator > 0 ? value?.slice(separator + 1) : undefined;
+  if (
+    !id ||
+    (kind !== 'element' && kind !== 'flow' && kind !== 'stateMachine' && kind !== 'relationship')
+  )
+    return undefined;
   return { kind, id };
 }
 
@@ -188,12 +284,20 @@ function readParam(name: string): string | undefined {
   return value ?? undefined;
 }
 
-function keepId(model: NonNullable<ViewerState['model']>, id: string | undefined): string | undefined {
+function keepId(
+  model: NonNullable<ViewerState['model']>,
+  id: string | undefined
+): string | undefined {
   if (!id) return model.summary.roots[0]?.id;
-  return model.workspace.elements.some((element) => element.id === id) ? id : model.summary.roots[0]?.id;
+  return model.workspace.elements.some((element) => element.id === id)
+    ? id
+    : model.summary.roots[0]?.id;
 }
 
-function keepSelection(model: NonNullable<ViewerState['model']>, selection: Selection | undefined): Selection | undefined {
+function keepSelection(
+  model: NonNullable<ViewerState['model']>,
+  selection: Selection | undefined
+): Selection | undefined {
   if (!selection) return undefined;
   const records = {
     element: model.workspace.elements,
@@ -202,7 +306,9 @@ function keepSelection(model: NonNullable<ViewerState['model']>, selection: Sele
     stateMachine: model.workspace.stateMachines,
     thread: model.workspace.threads,
   };
-  return records[selection.kind].some((record) => record.id === selection.id) ? selection : undefined;
+  return records[selection.kind].some((record) => record.id === selection.id)
+    ? selection
+    : undefined;
 }
 
 function message(error: unknown): string {

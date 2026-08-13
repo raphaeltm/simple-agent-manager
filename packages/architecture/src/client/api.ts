@@ -8,20 +8,29 @@ export function createApiClient(baseUrl = ''): ApiClient {
   return {
     loadModel: () => readJson<ViewerModel>(`${baseUrl}/api/model`),
     loadElement: async (id: string) => {
-      const payload = await readJson<{ details: ElementDetails }>(`${baseUrl}/api/elements/${encodeURIComponent(id)}`);
+      const payload = await readJson<{ details: ElementDetails }>(
+        `${baseUrl}/api/elements/${encodeURIComponent(id)}`
+      );
       return payload.details;
     },
     loadSource: async (target: string, source: SourceRef, sourceIndex: number) => {
-      const payload = await postJson<{ preview: SourceReadResult }>(`${baseUrl}/api/source-preview`, {
-        target,
-        sourceIndex,
-        path: source.path,
-      });
+      const payload = await postJson<{ preview: SourceReadResult }>(
+        `${baseUrl}/api/source-preview`,
+        {
+          target,
+          sourceIndex,
+          path: source.path,
+        }
+      );
       return payload.preview;
     },
-    createThread: (input: ThreadInput) => postJson<ThreadMutationResult>(`${baseUrl}/api/threads`, input),
+    createThread: (input: ThreadInput) =>
+      postJson<ThreadMutationResult>(`${baseUrl}/api/threads`, input),
     replyToThread: (threadId: string, input: ReplyInput) =>
-      postJson<ThreadMutationResult>(`${baseUrl}/api/threads/${encodeURIComponent(threadId)}/replies`, input),
+      postJson<ThreadMutationResult>(
+        `${baseUrl}/api/threads/${encodeURIComponent(threadId)}/replies`,
+        input
+      ),
   };
 }
 

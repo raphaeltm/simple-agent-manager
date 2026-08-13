@@ -18,20 +18,28 @@ describe('architecture local HTTP server', () => {
     try {
       const events = eventReader(`${running.url}/api/events`);
       await expect(readJson(`${running.url}/health`)).resolves.toMatchObject({ ok: true });
-      const model = await readJson<{ workspace: { elements: Array<{ id: string }> } }>(`${running.url}/api/model`);
+      const model = await readJson<{ workspace: { elements: Array<{ id: string }> } }>(
+        `${running.url}/api/model`
+      );
       expect(model.workspace.elements.map((element) => element.id)).toContain('api');
 
-      const source = await postJson<{ preview: { content: string } }>(`${running.url}/api/source-preview`, {
-        target: 'api',
-        path: 'src/api.ts',
-      });
+      const source = await postJson<{ preview: { content: string } }>(
+        `${running.url}/api/source-preview`,
+        {
+          target: 'api',
+          path: 'src/api.ts',
+        }
+      );
       expect(source.preview.content).toContain('hello');
 
-      const thread = await postJson<{ artifactPath: string; thread: { id: string } }>(`${running.url}/api/threads`, {
-        target: 'api',
-        title: 'Clarify <script>alert(1)</script>',
-        body: 'Question with emoji 🚀',
-      });
+      const thread = await postJson<{ artifactPath: string; thread: { id: string } }>(
+        `${running.url}/api/threads`,
+        {
+          target: 'api-self',
+          title: 'Clarify <script>alert(1)</script>',
+          body: 'Question with emoji 🚀',
+        }
+      );
       expect(thread.artifactPath).toMatch(/architecture\/threads\/thread-/);
 
       const reply = await postJson<{ artifactPath: string }>(
@@ -44,8 +52,33 @@ describe('architecture local HTTP server', () => {
         path.join(fixture.workspaceRoot, 'model.yaml'),
         fixture.modelText.replace('title: API', 'title: API updated')
       );
-      await expect(events).resolves.toContain('architecture:model');
+      const eventText = await events;
+      expect(eventText).toContain('architecture:model');
+      expect(eventText.match(/^event:/gm)).toHaveLength(eventText.match(/^data:/gm)?.length ?? 0);
       await expect(pollModelTitle(running.url)).resolves.toBe('API updated');
+    } finally {
+      await running.close();
+    }
+  });
+
+  it('reports invalid edits while continuing to serve the last valid model', async () => {
+    const fixture = await makeServerFixture();
+    const running = await startArchitectureServer({
+      workspaceRoot: fixture.workspaceRoot,
+      repoRoot: fixture.root,
+      port: 0,
+      watchIntervalMs: 50,
+    });
+    try {
+      await writeFile(
+        path.join(fixture.workspaceRoot, 'model.yaml'),
+        'version: 1\nname: Broken\nelements:\n  - id: api\n'
+      );
+      await expect(pollHealth(running.url, false)).resolves.toBe(false);
+      const model = await readJson<{ workspace: { elements: Array<{ id: string }> } }>(
+        `${running.url}/api/model`
+      );
+      expect(model.workspace.elements.map((element) => element.id)).toContain('api');
     } finally {
       await running.close();
     }
@@ -54,9 +87,18 @@ describe('architecture local HTTP server', () => {
   it('rejects unsafe binds, unsupported JSON boundaries, and invalid source targets', async () => {
     const fixture = await makeServerFixture();
     await expect(
-      startArchitectureServer({ workspaceRoot: fixture.workspaceRoot, repoRoot: fixture.root, host: '0.0.0.0', port: 0 })
+      startArchitectureServer({
+        workspaceRoot: fixture.workspaceRoot,
+        repoRoot: fixture.root,
+        host: '0.0.0.0',
+        port: 0,
+      })
     ).rejects.toThrow('Refusing non-loopback');
-    const running = await startArchitectureServer({ workspaceRoot: fixture.workspaceRoot, repoRoot: fixture.root, port: 0 });
+    const running = await startArchitectureServer({
+      workspaceRoot: fixture.workspaceRoot,
+      repoRoot: fixture.root,
+      port: 0,
+    });
     try {
       await expect(
         postJson(`${running.url}/api/source-preview`, { target: 'api', path: '/tmp/secret' })
@@ -164,10 +206,22 @@ async function eventReader(url: string): Promise<string> {
 
 async function pollModelTitle(url: string): Promise<string> {
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    const model = await readJson<{ workspace: { elements: Array<{ id: string; title: string }> } }>(`${url}/api/model`);
+    const model = await readJson<{ workspace: { elements: Array<{ id: string; title: string }> } }>(
+      `${url}/api/model`
+    );
     const title = model.workspace.elements.find((element) => element.id === 'api')?.title;
     if (title === 'API updated') return title;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error('Model did not reload.');
+}
+
+async function pollHealth(url: string, expected: boolean): Promise<boolean> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const response = await fetch(`${url}/health`);
+    const health = (await response.json()) as { ok: boolean };
+    if (health.ok === expected) return health.ok;
+    await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+  throw new Error(`Health did not become ${expected}.`);
 }

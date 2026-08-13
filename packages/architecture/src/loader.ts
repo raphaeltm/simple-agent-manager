@@ -9,8 +9,12 @@ import type { LoadedWorkspace, LoadWorkspaceOptions } from './types';
 
 const WORKSPACE_FILE_EXTENSIONS = ['.yaml', '.yml', '.md'] as const;
 
-export async function loadArchitectureWorkspace(options: LoadWorkspaceOptions = {}): Promise<LoadedWorkspace> {
-  const workspaceRoot = await realpath(path.resolve(options.workspaceRoot ?? DEFAULT_WORKSPACE_DIR));
+export async function loadArchitectureWorkspace(
+  options: LoadWorkspaceOptions = {}
+): Promise<LoadedWorkspace> {
+  const workspaceRoot = await realpath(
+    path.resolve(options.workspaceRoot ?? DEFAULT_WORKSPACE_DIR)
+  );
   const repoRoot = await realpath(path.resolve(options.repoRoot ?? process.cwd()));
   const files = await collectWorkspaceFiles(workspaceRoot, workspaceRoot);
   const threadLoad = await loadThreads(workspaceRoot, DEFAULT_THREADS_DIR);
@@ -25,7 +29,10 @@ export async function loadArchitectureWorkspace(options: LoadWorkspaceOptions = 
     files: modelFiles,
     threads: threadLoad.threads,
   });
-  const diagnostics: ArchitectureDiagnostic[] = [...threadLoad.diagnostics, ...compiled.diagnostics];
+  const diagnostics: ArchitectureDiagnostic[] = [
+    ...threadLoad.diagnostics,
+    ...compiled.diagnostics,
+  ];
   return { workspace: compiled.workspace, diagnostics };
 }
 

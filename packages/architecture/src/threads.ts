@@ -5,7 +5,12 @@ import path from 'node:path';
 import * as v from 'valibot';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 
-import { ARCHITECTURE_SCHEMA_VERSION, DEFAULT_THREAD_AUTHOR, DEFAULT_THREADS_DIR, THREAD_FILE_EXTENSION } from './constants';
+import {
+  ARCHITECTURE_SCHEMA_VERSION,
+  DEFAULT_THREAD_AUTHOR,
+  DEFAULT_THREADS_DIR,
+  THREAD_FILE_EXTENSION,
+} from './constants';
 import type { ArchitectureDiagnostic } from './diagnostics';
 import { parseWorkspaceDocument } from './document';
 import { PathSafetyError, resolveContainedPath } from './path-safety';
@@ -48,7 +53,11 @@ export async function loadThreads(
 ): Promise<{ threads: Located<ArchitectureThread>[]; diagnostics: ArchitectureDiagnostic[] }> {
   const diagnostics: ArchitectureDiagnostic[] = [];
   const threads: Located<ArchitectureThread>[] = [];
-  const root = await resolveContainedPath({ root: workspaceRoot, relativePath: threadsDir, mustExist: false });
+  const root = await resolveContainedPath({
+    root: workspaceRoot,
+    relativePath: threadsDir,
+    mustExist: false,
+  });
   const files = await collectThreadFiles(root, workspaceRoot);
   for (const file of files) {
     try {
@@ -71,7 +80,8 @@ export async function loadThreads(
 
 export async function createThread(options: ThreadWriteOptions): Promise<ArchitectureThread> {
   const now = (options.now ?? new Date()).toISOString();
-  const threadId = options.id ?? makeStableId('thread', `${options.target}-${now}-${options.title}`);
+  const threadId =
+    options.id ?? makeStableId('thread', `${options.target}-${now}-${options.title}`);
   assertSafeIdentifier(threadId, 'thread id');
   const message = makeMessage({
     body: options.body,
@@ -90,7 +100,10 @@ export async function createThread(options: ThreadWriteOptions): Promise<Archite
     messages: [message],
   };
   assertValidThread(thread);
-  const relativeThreadPath = path.posix.join(DEFAULT_THREADS_DIR, `${threadId}${THREAD_FILE_EXTENSION}`);
+  const relativeThreadPath = path.posix.join(
+    DEFAULT_THREADS_DIR,
+    `${threadId}${THREAD_FILE_EXTENSION}`
+  );
   const absoluteThreadPath = await resolveContainedPath({
     root: options.workspaceRoot,
     relativePath: relativeThreadPath,
@@ -103,13 +116,19 @@ export async function createThread(options: ThreadWriteOptions): Promise<Archite
 
 export async function appendThreadReply(options: ReplyWriteOptions): Promise<ThreadMessage> {
   assertSafeIdentifier(options.threadId, 'thread id');
-  const relativeThreadPath = path.posix.join(DEFAULT_THREADS_DIR, `${options.threadId}${THREAD_FILE_EXTENSION}`);
+  const relativeThreadPath = path.posix.join(
+    DEFAULT_THREADS_DIR,
+    `${options.threadId}${THREAD_FILE_EXTENSION}`
+  );
   const absoluteThreadPath = await resolveContainedPath({
     root: options.workspaceRoot,
     relativePath: relativeThreadPath,
     mustExist: true,
   });
   const existing = await parseThreadFile(absoluteThreadPath);
+  if (options.replyTo && !existing.messages.some((message) => message.id === options.replyTo)) {
+    throw new Error(`Reply target was not found in thread ${options.threadId}: ${options.replyTo}`);
+  }
   const now = (options.now ?? new Date()).toISOString();
   const message = makeMessage({
     body: options.body,
@@ -136,9 +155,14 @@ export async function appendThreadReply(options: ReplyWriteOptions): Promise<Thr
 export async function parseThreadFile(filePath: string): Promise<ArchitectureThread> {
   const parsed = await parseWorkspaceDocument(filePath);
   const metadataResult = v.safeParse(threadMetadataSchema, parsed.data);
-  if (!metadataResult.success) throw new Error(metadataResult.issues.map((issue) => issue.message).join('; '));
+  if (!metadataResult.success)
+    throw new Error(metadataResult.issues.map((issue) => issue.message).join('; '));
   const messages = parseMessages(parsed.body ?? (await readFile(filePath, 'utf8')));
-  return { ...metadataResult.output, messages };
+  const updatedAt = messages.reduce(
+    (latest, message) => (message.createdAt.localeCompare(latest) > 0 ? message.createdAt : latest),
+    metadataResult.output.updatedAt
+  );
+  return { ...metadataResult.output, updatedAt, messages };
 }
 
 function parseMessages(body: string): ThreadMessage[] {
@@ -150,7 +174,9 @@ function parseMessages(body: string): ThreadMessage[] {
     const metadataRaw = part.slice(0, markerEnd);
     const bodyStart = markerEnd + MESSAGE_MARKER_END.length;
     const nextMarker = part.indexOf(MESSAGE_MARKER, bodyStart);
-    const messageBody = (nextMarker === -1 ? part.slice(bodyStart) : part.slice(bodyStart, nextMarker)).trim();
+    const messageBody = (
+      nextMarker === -1 ? part.slice(bodyStart) : part.slice(bodyStart, nextMarker)
+    ).trim();
     const metadataResult = parseMessageMetadata(metadataRaw);
     if (!metadataResult) continue;
     messages.push({ ...metadataResult, body: messageBody });
@@ -237,8 +263,15 @@ async function collectThreadFiles(root: string, workspaceRoot: string): Promise<
     const entries = await readdir(root, { withFileTypes: true });
     const files: string[] = [];
     for (const entry of entries) {
-      const relative = path.posix.join(path.relative(workspaceRoot, root).replaceAll(path.sep, '/'), entry.name);
-      const absolute = await resolveContainedPath({ root: workspaceRoot, relativePath: relative, mustExist: true });
+      const relative = path.posix.join(
+        path.relative(workspaceRoot, root).replaceAll(path.sep, '/'),
+        entry.name
+      );
+      const absolute = await resolveContainedPath({
+        root: workspaceRoot,
+        relativePath: relative,
+        mustExist: true,
+      });
       if (entry.isDirectory()) files.push(...(await collectThreadFiles(absolute, workspaceRoot)));
       if (entry.isFile() && entry.name.endsWith(THREAD_FILE_EXTENSION)) files.push(absolute);
     }

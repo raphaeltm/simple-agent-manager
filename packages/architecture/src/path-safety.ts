@@ -52,7 +52,11 @@ export async function resolveContainedPath({
   return realCandidate;
 }
 
-export function ensurePathInsideRoot(root: string, candidate: string, originalPath = candidate): void {
+export function ensurePathInsideRoot(
+  root: string,
+  candidate: string,
+  originalPath = candidate
+): void {
   const relative = path.relative(root, candidate);
   if (relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative))) return;
   throw new PathSafetyError(`Path escapes the allowed root: ${originalPath}`);

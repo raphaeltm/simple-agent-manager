@@ -1,17 +1,23 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
-import { expect, type Page,test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 
-const FIXTURE_ROOT = path.resolve(process.cwd(), '../../.codex/tmp/architecture-playwright-fixture');
+const FIXTURE_ROOT = path.resolve(
+  process.cwd(),
+  '../../.codex/tmp/architecture-playwright-fixture'
+);
 const SCREENSHOT_DIR = path.resolve(process.cwd(), '../../.codex/tmp/playwright-screenshots');
 
 test.beforeEach(async () => {
   await mkdir(SCREENSHOT_DIR, { recursive: true });
+  await rm(path.join(FIXTURE_ROOT, 'architecture/threads'), { force: true, recursive: true });
   await writeModel(normalModel('API component'));
 });
 
-test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({ page }, testInfo) => {
+test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
+  page,
+}, testInfo) => {
   await page.goto('/?lens=structure');
   await expect(page.getByRole('heading', { name: 'Playwright Architecture' })).toBeVisible();
   await assertNoOverflow(page);
@@ -34,15 +40,21 @@ test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
   await expect(page).toHaveURL(/lens=structure/);
 
   await page.getByRole('button', { name: 'State' }).click();
-  await expect(page.getByLabel('Task state transition list')).toContainText('queued → running when start');
+  await expect(page.getByLabel('Task state transition list')).toContainText(
+    'queued → running when start'
+  );
   await page.getByRole('button', { name: 'Structure' }).click();
 
-  await page.getByRole('button', { name: /API component/ }).first().click();
-  await page.getByRole('button', { name: /src\/api.ts:1/ }).click();
+  const structureCanvas = page.getByRole('region', { name: 'structure architecture canvas' });
+  await structureCanvas.getByRole('button', { name: /API component/ }).click();
+  const sourceButton = page.getByRole('button', { name: /src\/api.ts:1/ });
+  await sourceButton.evaluate((element) => element.scrollIntoView({ block: 'center' }));
+  await expect(sourceButton).toBeInViewport();
+  await sourceButton.click();
   await expect(page.getByLabel('Source preview')).toContainText('export const hello');
 
   await page.getByLabel('Question title').fill('Browser question');
-  await page.getByLabel('Question').fill('Question body');
+  await page.getByLabel('Question', { exact: true }).fill('Question body');
   await page.getByRole('button', { name: 'Create question' }).click();
   await expect(page.getByText(/Saved to architecture\/threads/)).toBeVisible();
   await page.getByLabel(/Reply to Browser question/).fill('Browser reply');
@@ -50,12 +62,16 @@ test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
   await expect(page.getByText(/Browser reply/)).toBeVisible();
 
   await writeModel(normalModel('API renamed by file edit'));
-  await expect(page.getByRole('button', { name: /API renamed by file edit/ }).first()).toBeVisible();
+  await expect(
+    page.getByRole('button', { name: /API renamed by file edit/ }).first()
+  ).toBeVisible();
   await screenshot(page, `viewer-main-${testInfo.project.name}`);
   await assertControlBounds(page);
 });
 
-test('responsive normal, long, empty, invalid, many, and special-character states', async ({ page }, testInfo) => {
+test('responsive normal, long, empty, invalid, many, and special-character states', async ({
+  page,
+}, testInfo) => {
   await page.goto('/');
   await assertNoOverflow(page);
   await screenshot(page, `viewer-normal-${testInfo.project.name}`);
@@ -95,14 +111,21 @@ async function writeModel(content: string): Promise<void> {
 async function assertNoOverflow(page: Page): Promise<void> {
   const overflow = await page.evaluate(() => {
     const viewportWidth = window.innerWidth;
-    const rootOverflow = document.documentElement.scrollWidth > viewportWidth || document.body.scrollWidth > viewportWidth;
+    const rootOverflow =
+      document.documentElement.scrollWidth > viewportWidth ||
+      document.body.scrollWidth > viewportWidth;
     const clipped = Array.from(document.querySelectorAll<HTMLElement>('*'))
       .filter((element) => !element.closest('[data-intentional-clip]'))
+      .filter((element) => !element.classList.contains('sr-only'))
       .filter((element) => {
         const style = window.getComputedStyle(element);
         if (style.overflowX === 'auto' || style.overflowX === 'scroll') return false;
-        if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) return false;
-        return (style.overflowX === 'hidden' || style.overflowX === 'clip') && element.scrollWidth > element.clientWidth + 1;
+        if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement)
+          return false;
+        return (
+          (style.overflowX === 'hidden' || style.overflowX === 'clip') &&
+          element.scrollWidth > element.clientWidth + 1
+        );
       })
       .map((element) => ({ className: element.className, tag: element.tagName }));
     return { clipped, rootOverflow };
@@ -181,14 +204,19 @@ function emptyModel(): string {
 }
 
 function longModel(): string {
-  return normalModel(`API with very-long-token-${'x'.repeat(180)} and https://example.com/${'y'.repeat(160)}`);
+  return normalModel(
+    `API with very-long-token-${'x'.repeat(180)} and https://example.com/${'y'.repeat(160)}`
+  );
 }
 
 function manyModel(): string {
-  const nodes = Array.from({ length: 35 }, (_, index) => `  - id: node-${index}
+  const nodes = Array.from(
+    { length: 35 },
+    (_, index) => `  - id: node-${index}
     parent: root
     kind: component
-    title: Node ${index}`).join('\n');
+    title: Node ${index}`
+  ).join('\n');
   return `version: 1
 name: Many
 elements:

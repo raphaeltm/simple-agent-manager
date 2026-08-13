@@ -6,7 +6,10 @@ import { ARCHITECTURE_SCHEMA_VERSION } from './constants';
 const idSchema = v.pipe(
   v.string(),
   v.minLength(1, 'IDs must not be empty.'),
-  v.regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/, 'IDs may contain letters, numbers, dot, colon, underscore, and dash.')
+  v.regex(
+    /^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/,
+    'IDs may contain letters, numbers, dot, colon, underscore, and dash.'
+  )
 );
 
 const nonEmptyStringSchema = v.pipe(v.string(), v.minLength(1));

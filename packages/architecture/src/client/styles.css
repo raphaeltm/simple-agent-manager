@@ -10,7 +10,14 @@
   --aw-success: var(--architecture-success, #86efac);
   color: var(--aw-text);
   background: var(--aw-bg);
-  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
 }
 
 * {
@@ -115,7 +122,17 @@ textarea {
   gap: 0.5rem;
 }
 
-.lens-tabs [aria-current="page"] {
+.zoom-controls {
+  align-items: center;
+}
+
+.zoom-controls output {
+  min-width: 3.5rem;
+  color: var(--aw-muted);
+  text-align: center;
+}
+
+.lens-tabs [aria-current='page'] {
   background: var(--aw-accent);
   color: #07101f;
 }
@@ -143,7 +160,7 @@ textarea {
 .canvas {
   min-height: 32rem;
   min-width: 0;
-  overflow: hidden;
+  overflow: auto;
   border: 1px solid var(--aw-border);
   border-radius: 1rem;
   background:
@@ -152,9 +169,19 @@ textarea {
   padding: 1rem;
 }
 
+.canvas-help,
+.bounded-note {
+  margin: 0;
+  color: var(--aw-muted);
+  font-size: 0.85rem;
+}
+
 .structure-lens {
   display: grid;
   gap: calc(1rem * var(--aw-zoom));
+  min-width: 100%;
+  transform-origin: top left;
+  zoom: var(--aw-zoom);
 }
 
 .node-grid {
@@ -349,10 +376,23 @@ textarea {
     z-index: 10;
     max-height: min(85dvh, 34rem);
     transform: translateY(calc(100% + 1rem));
+    transition: transform 160ms ease-out;
+    visibility: hidden;
+    pointer-events: none;
   }
 
   .architecture-inspector.is-open {
     transform: translateY(0);
+    visibility: visible;
+    pointer-events: auto;
+  }
+
+  .architecture-inspector .inspector-head {
+    position: sticky;
+    top: -1rem;
+    z-index: 1;
+    background: var(--aw-panel);
+    padding: 1rem 0 0.75rem;
   }
 
   .mobile-close {

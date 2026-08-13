@@ -43,7 +43,9 @@ export async function mapChangedPathsToArchitecture(
     }));
   return {
     changedPaths: normalizedChangedPaths,
-    impacted: impacted.sort((left, right) => `${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`)),
+    impacted: impacted.sort((left, right) =>
+      `${left.kind}:${left.id}`.localeCompare(`${right.kind}:${right.id}`)
+    ),
     brokenSourceRefs: await findBrokenSourceRefs(workspace, records),
   };
 }
@@ -84,7 +86,11 @@ async function findBrokenSourceRefs(
       }
     }
   }
-  return broken.sort((left, right) => `${left.ownerKind}:${left.ownerId}:${left.path}`.localeCompare(`${right.ownerKind}:${right.ownerId}:${right.path}`));
+  return broken.sort((left, right) =>
+    `${left.ownerKind}:${left.ownerId}:${left.path}`.localeCompare(
+      `${right.ownerKind}:${right.ownerId}:${right.path}`
+    )
+  );
 }
 
 function pathMatches(sourcePath: string, changedSet: Set<string>): boolean {

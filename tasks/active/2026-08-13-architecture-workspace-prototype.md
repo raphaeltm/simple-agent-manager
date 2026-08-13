@@ -83,38 +83,38 @@ The requested end state is broader than this first PR: humans should eventually 
 
 ### A. Package and schema foundation
 
-- [ ] A1. Create `packages/architecture` as an ESM TypeScript package with build, lint, typecheck, unit-test, and browser-test commands wired into the monorepo.
-- [ ] A2. Define versioned Valibot schemas and public TypeScript types for the manifest, hierarchical elements, relationships, source references, flows/steps, state machines/transitions, views, and file-backed threads/messages.
-- [ ] A3. Implement deterministic recursive workspace loading, canonical ordering, duplicate/dangling-reference validation, actionable diagnostics, and a neutral compiled graph.
-- [ ] A4. Implement bounded graph queries for workspace summary, element details, children/ancestors, incoming/outgoing relationships, flow membership, state-machine membership, and unresolved-thread inbox.
+- [x] A1. Create `packages/architecture` as an ESM TypeScript package with build, lint, typecheck, unit-test, and browser-test commands wired into the monorepo.
+- [x] A2. Define versioned Valibot schemas and public TypeScript types for the manifest, hierarchical elements, relationships, source references, flows/steps, state machines/transitions, views, and file-backed threads/messages.
+- [x] A3. Implement deterministic recursive workspace loading, canonical ordering, duplicate/dangling-reference validation, actionable diagnostics, and a neutral compiled graph.
+- [x] A4. Implement bounded graph queries for workspace summary, element details, children/ancestors, incoming/outgoing relationships, flow membership, state-machine membership, and unresolved-thread inbox.
 
 ### B. CLI and maintenance workflow
 
-- [ ] B1. Add a CLI with `validate`, `summary`, `show`, `inbox`, `reply`, and `serve` commands; read-oriented commands support compact machine-readable JSON.
-- [ ] B2. Add safe helpers for creating threads and append-only replies using stable IDs, atomic writes, validated targets, and paths confined to the architecture workspace.
-- [ ] B3. Add an initial architecture-impact command/check that maps changed source paths to referenced elements and reports affected slices plus broken references without requiring every PR to touch architecture files.
-- [ ] B4. Add root scripts so developers and agents can validate/query/serve SAM's architecture workspace without remembering package internals.
+- [x] B1. Add a CLI with `validate`, `summary`, `show`, `inbox`, `reply`, and `serve` commands; read-oriented commands support compact machine-readable JSON.
+- [x] B2. Add safe helpers for creating threads and append-only replies using stable IDs, atomic writes, validated targets, and paths confined to the architecture workspace.
+- [x] B3. Add an initial architecture-impact command/check that maps changed source paths to referenced elements and reports affected slices plus broken references without requiring every PR to touch architecture files.
+- [x] B4. Add root scripts so developers and agents can validate/query/serve SAM's architecture workspace without remembering package internals.
 
 ### C. Local server and interactive viewer
 
-- [ ] C1. Implement a configurable loopback-only HTTP server exposing the compiled workspace, bounded element/source queries, thread/reply mutations, and an SSE event stream.
-- [ ] C2. Watch architecture files and publish model/thread changes so direct agent file writes update the open browser without restart.
-- [ ] C3. Implement a responsive interactive viewer with semantic hierarchy drill-down, breadcrumbs, pan/zoom, relationship inspection, and structure/flow/state lenses.
-- [ ] C4. Add a details panel that explains selected entities and relationships, opens validated repository source previews, displays unresolved/resolved threads, and lets a human create a question or reply.
-- [ ] C5. Treat loading, invalid workspace, empty, long-content, many-node/thread, and server-error states deliberately; satisfy keyboard and accessible-name basics.
+- [x] C1. Implement a configurable loopback-only HTTP server exposing the compiled workspace, bounded element/source queries, thread/reply mutations, and an SSE event stream.
+- [x] C2. Watch architecture files and publish model/thread changes so direct agent file writes update the open browser without restart.
+- [x] C3. Implement a responsive interactive viewer with semantic hierarchy drill-down, breadcrumbs, pan/zoom, relationship inspection, and structure/flow/state lenses.
+- [x] C4. Add a details panel that explains selected entities and relationships, opens validated repository source previews, displays unresolved/resolved threads, and lets a human create a question or reply.
+- [x] C5. Treat loading, invalid workspace, empty, long-content, many-node/thread, and server-error states deliberately; satisfy keyboard and accessible-name basics.
 
 ### D. SAM dogfood workspace and documentation
 
-- [ ] D1. Add an `architecture/` workspace with a discoverable README and enough high-level SAM elements/relationships to demonstrate multi-package and multi-runtime navigation.
-- [ ] D2. Model at least two non-obvious end-to-end flows, including CLI browser-mediated authentication and session startup across Instant-container/VM paths, with source references.
-- [ ] D3. Model at least one lifecycle state machine with guarded transitions and source references.
-- [ ] D4. Document file formats, CLI usage, local collaboration workflow, generated-evidence boundary, design tradeoffs, and the intended extraction path for the package.
+- [x] D1. Add an `architecture/` workspace with a discoverable README and enough high-level SAM elements/relationships to demonstrate multi-package and multi-runtime navigation.
+- [x] D2. Model at least two non-obvious end-to-end flows, including CLI browser-mediated authentication and session startup across Instant-container/VM paths, with source references.
+- [x] D3. Model at least one lifecycle state machine with guarded transitions and source references.
+- [x] D4. Document file formats, CLI usage, local collaboration workflow, generated-evidence boundary, design tradeoffs, and the intended extraction path for the package.
 
 ### E. Verification
 
-- [ ] E1. Add unit tests for valid/invalid schemas, deterministic loading, duplicate/dangling IDs, bounded queries, source confinement, atomic thread/reply writes, inbox behavior, and diff impact mapping.
-- [ ] E2. Add an integration test that starts the real server, exercises the model/source/thread APIs, observes an SSE update after a direct file write, and verifies the new thread/reply files reload into the compiled model.
-- [ ] E3. Add browser interaction/visual coverage at 375×667 and 1280×800 for drill-down, lenses, source navigation, comment creation/reply, long text, empty/many/error states, and overflow/clipping assertions.
+- [x] E1. Add unit tests for valid/invalid schemas, deterministic loading, duplicate/dangling IDs, bounded queries, source confinement, atomic thread/reply writes, inbox behavior, and diff impact mapping.
+- [x] E2. Add an integration test that starts the real server, exercises the model/source/thread APIs, observes an SSE update after a direct file write, and verifies the new thread/reply files reload into the compiled model.
+- [x] E3. Add browser interaction/visual coverage at 375×667 and 1280×800 for drill-down, lenses, source navigation, comment creation/reply, long text, empty/many/error states, and overflow/clipping assertions.
 - [ ] E4. Run package checks and the complete repository lint, typecheck, test, and build suite.
 - [ ] E5. Run task-completion, test, documentation-sync, constitution, UI/UX, and security reviews; address every blocking finding.
 - [ ] E6. Deploy the final branch to staging as required by the repository workflow and confirm the unrelated deployed SAM application remains healthy; feature behavior itself is validated through the package's real local server because the prototype is not mounted in the production app.

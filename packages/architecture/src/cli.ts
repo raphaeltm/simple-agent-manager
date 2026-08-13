@@ -4,6 +4,7 @@ import { mapChangedPathsToArchitecture } from './impact';
 import { loadArchitectureWorkspace } from './loader';
 import { getWorkspaceSummary, listUnresolvedInbox, showElement } from './queries';
 import { startArchitectureServer } from './server';
+import { resolveArchitectureTarget } from './targets';
 import { appendThreadReply, createThread } from './threads';
 
 interface CliOptions {
@@ -95,6 +96,10 @@ async function replyCommand(options: CliOptions): Promise<number> {
     return 0;
   }
   if (!options.target) throw new Error('reply without --thread requires --target.');
+  const loaded = await loadOrFail(options);
+  if (!resolveArchitectureTarget(loaded.workspace, options.target)) {
+    throw new Error(`Thread target not found: ${options.target}`);
+  }
   const thread = await createThread({
     workspaceRoot: options.workspaceRoot ?? 'architecture',
     target: options.target,
@@ -107,7 +112,8 @@ async function replyCommand(options: CliOptions): Promise<number> {
 }
 
 async function impactCommand(positional: string[], options: CliOptions): Promise<number> {
-  if (positional.length === 0) throw new Error('impact requires at least one repo-relative changed path.');
+  if (positional.length === 0)
+    throw new Error('impact requires at least one repo-relative changed path.');
   const loaded = await loadOrFail(options);
   const report = await mapChangedPathsToArchitecture(loaded.workspace, positional);
   printResult(report, options.json);
@@ -234,7 +240,7 @@ Commands:
   inbox                 List unresolved threads
   reply                 Create a thread or append a reply
   impact <paths...>     Map changed repo-relative paths to architecture records
-  serve                 Placeholder for delegated server/browser slice
+  serve                 Start the loopback server and interactive viewer
 
 Options:
   --workspace <path>    Architecture workspace root (default: architecture)

@@ -37,7 +37,6 @@ export class EventHub {
     for (const client of this.clients.values()) {
       client.response.write(`event: ${name}\n`);
       client.response.write(`data: ${payload}\n\n`);
-      client.response.write(`data: ${payload}\n\n`);
     }
   }
 

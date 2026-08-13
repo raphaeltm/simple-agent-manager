@@ -69,6 +69,8 @@ export interface StructureSlice {
   breadcrumbs: ArchitectureElement[];
   children: ArchitectureElement[];
   relationships: ArchitectureRelationship[];
+  omittedChildren: number;
+  omittedRelationships: number;
 }
 
 export interface FlowSlice {

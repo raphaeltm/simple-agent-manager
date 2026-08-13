@@ -1,7 +1,4 @@
-import {
-  DEFAULT_VIEWER_CHILD_LIMIT,
-  DEFAULT_VIEWER_RELATIONSHIP_LIMIT,
-} from '../constants';
+import { DEFAULT_VIEWER_CHILD_LIMIT, DEFAULT_VIEWER_RELATIONSHIP_LIMIT } from '../constants';
 import type { ArchitectureDiagnostic } from '../diagnostics';
 import { getWorkspaceSummary, showElement } from '../queries';
 import type {

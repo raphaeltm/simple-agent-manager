@@ -70,12 +70,10 @@ export {
 export type { ArchitectureServerOptions, RunningArchitectureServer } from './server';
 export { startArchitectureServer } from './server';
 export { readSourceReference } from './source';
+export type { ArchitectureTarget, ArchitectureTargetKind } from './targets';
+export { hasArchitectureTarget, resolveArchitectureTarget } from './targets';
 export type { ReplyWriteOptions, ThreadWriteOptions } from './threads';
-export {
-  appendThreadReply,
-  createThread,
-  loadThreads,
-} from './threads';
+export { appendThreadReply, createThread, loadThreads } from './threads';
 export type {
   CompiledWorkspace,
   LoadedWorkspace,

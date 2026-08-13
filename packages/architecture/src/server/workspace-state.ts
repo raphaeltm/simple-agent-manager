@@ -24,8 +24,20 @@ export class WorkspaceState {
 
   async start(): Promise<void> {
     await this.reload('initial');
+    this.fingerprint = await fingerprintDirectory(this.current().workspace.workspaceRoot);
     this.timer = setInterval(() => {
-      void this.checkForChanges();
+      void this.checkForChanges().catch((error: unknown) => {
+        this.events.publish('architecture:invalid', {
+          reason: 'watch-error',
+          diagnostics: [
+            {
+              severity: 'error',
+              code: 'watch-error',
+              message: error instanceof Error ? error.message : String(error),
+            },
+          ],
+        });
+      });
     }, this.options.watchIntervalMs ?? DEFAULT_SERVER_WATCH_INTERVAL_MS);
   }
 
@@ -39,6 +51,10 @@ export class WorkspaceState {
     return this.invalid;
   }
 
+  diagnostics(): LoadedWorkspace['diagnostics'] {
+    return this.invalid?.diagnostics ?? this.current().diagnostics;
+  }
+
   async reload(reason: string): Promise<void> {
     const next = await loadArchitectureWorkspace(this.options);
     if (hasErrors(next.diagnostics)) {
@@ -46,11 +62,11 @@ export class WorkspaceState {
       this.events.publish('architecture:invalid', { reason, diagnostics: next.diagnostics });
       return;
     }
-    const threadCount = this.loaded?.workspace.threads.length ?? 0;
+    const previousThreads = threadFingerprint(this.loaded?.workspace.threads ?? []);
     this.loaded = next;
     this.invalid = undefined;
     this.events.publish('architecture:model', { reason, summary: next.workspace.manifest.name });
-    if (threadCount !== next.workspace.threads.length) {
+    if (previousThreads !== threadFingerprint(next.workspace.threads)) {
       this.events.publish('architecture:threads', { reason, count: next.workspace.threads.length });
     }
   }
@@ -66,6 +82,12 @@ export class WorkspaceState {
     this.fingerprint = nextFingerprint;
     await this.reload('file-change');
   }
+}
+
+function threadFingerprint(threads: LoadedWorkspace['workspace']['threads']): string {
+  return threads
+    .map((thread) => `${thread.id}:${thread.status}:${thread.updatedAt}:${thread.messages.length}`)
+    .join('|');
 }
 
 async function fingerprintDirectory(root: string): Promise<string> {

@@ -7,13 +7,11 @@ import {
   DEFAULT_THREAD_TITLE_LIMIT,
 } from '../constants';
 
-const idSchema = v.pipe(
-  v.string(),
-  v.minLength(1),
-  v.regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/)
-);
+const idSchema = v.pipe(v.string(), v.minLength(1), v.regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/));
 
-const optionalAuthorSchema = v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(DEFAULT_THREAD_AUTHOR_LIMIT)));
+const optionalAuthorSchema = v.optional(
+  v.pipe(v.string(), v.minLength(1), v.maxLength(DEFAULT_THREAD_AUTHOR_LIMIT))
+);
 const bodySchema = v.pipe(v.string(), v.minLength(1), v.maxLength(DEFAULT_THREAD_BODY_LIMIT));
 const titleSchema = v.pipe(v.string(), v.minLength(1), v.maxLength(DEFAULT_THREAD_TITLE_LIMIT));
 

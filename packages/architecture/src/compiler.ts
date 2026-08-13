@@ -15,6 +15,7 @@ import {
   manifestSchema,
   workspaceDocumentSchema,
 } from './schemas';
+import { hasArchitectureTarget } from './targets';
 import type { CompiledWorkspace, Located, SourceLocation, WorkspaceIndexes } from './types';
 
 interface DocumentAccumulator {
@@ -221,44 +222,133 @@ function validateReferences(
 ): void {
   for (const element of accumulator.elements) {
     if (element.value.parent) {
-      expectElement(element.value.parent, element.location, `Element "${element.value.id}" parent`, indexes, diagnostics);
+      expectElement(
+        element.value.parent,
+        element.location,
+        `Element "${element.value.id}" parent`,
+        indexes,
+        diagnostics
+      );
     }
   }
   for (const relationship of accumulator.relationships) {
-    expectElement(relationship.value.from, relationship.location, `Relationship "${relationship.value.id}" from`, indexes, diagnostics);
-    expectElement(relationship.value.to, relationship.location, `Relationship "${relationship.value.id}" to`, indexes, diagnostics);
+    expectElement(
+      relationship.value.from,
+      relationship.location,
+      `Relationship "${relationship.value.id}" from`,
+      indexes,
+      diagnostics
+    );
+    expectElement(
+      relationship.value.to,
+      relationship.location,
+      `Relationship "${relationship.value.id}" to`,
+      indexes,
+      diagnostics
+    );
   }
   for (const flow of accumulator.flows) {
     for (const step of flow.value.steps) {
-      if (step.element) expectElement(step.element, flow.location, `Flow "${flow.value.id}" step "${step.id}" element`, indexes, diagnostics);
-      if (step.relationship) expectRelationship(step.relationship, flow.location, `Flow "${flow.value.id}" step "${step.id}" relationship`, indexes, diagnostics);
+      if (step.element)
+        expectElement(
+          step.element,
+          flow.location,
+          `Flow "${flow.value.id}" step "${step.id}" element`,
+          indexes,
+          diagnostics
+        );
+      if (step.relationship)
+        expectRelationship(
+          step.relationship,
+          flow.location,
+          `Flow "${flow.value.id}" step "${step.id}" relationship`,
+          indexes,
+          diagnostics
+        );
     }
   }
   for (const machine of accumulator.stateMachines) {
     const stateIds = new Set(machine.value.states.map((state) => state.id));
-    if (machine.value.element) expectElement(machine.value.element, machine.location, `State machine "${machine.value.id}" element`, indexes, diagnostics);
+    if (machine.value.element)
+      expectElement(
+        machine.value.element,
+        machine.location,
+        `State machine "${machine.value.id}" element`,
+        indexes,
+        diagnostics
+      );
     for (const state of machine.value.states) {
-      if (state.element) expectElement(state.element, machine.location, `State machine "${machine.value.id}" state "${state.id}" element`, indexes, diagnostics);
+      if (state.element)
+        expectElement(
+          state.element,
+          machine.location,
+          `State machine "${machine.value.id}" state "${state.id}" element`,
+          indexes,
+          diagnostics
+        );
     }
     for (const transition of machine.value.transitions) {
-      if (!stateIds.has(transition.from)) addDangling(`State machine "${machine.value.id}" transition from`, transition.from, machine.location, diagnostics);
-      if (!stateIds.has(transition.to)) addDangling(`State machine "${machine.value.id}" transition to`, transition.to, machine.location, diagnostics);
-      if (transition.relationship) expectRelationship(transition.relationship, machine.location, `State machine "${machine.value.id}" transition relationship`, indexes, diagnostics);
+      if (!stateIds.has(transition.from))
+        addDangling(
+          `State machine "${machine.value.id}" transition from`,
+          transition.from,
+          machine.location,
+          diagnostics
+        );
+      if (!stateIds.has(transition.to))
+        addDangling(
+          `State machine "${machine.value.id}" transition to`,
+          transition.to,
+          machine.location,
+          diagnostics
+        );
+      if (transition.relationship)
+        expectRelationship(
+          transition.relationship,
+          machine.location,
+          `State machine "${machine.value.id}" transition relationship`,
+          indexes,
+          diagnostics
+        );
     }
   }
   for (const view of accumulator.views) {
-    if (view.value.root) expectElement(view.value.root, view.location, `View "${view.value.id}" root`, indexes, diagnostics);
-    for (const id of view.value.include ?? []) expectElement(id, view.location, `View "${view.value.id}" include`, indexes, diagnostics);
-    for (const id of view.value.relationships ?? []) expectRelationship(id, view.location, `View "${view.value.id}" relationship`, indexes, diagnostics);
+    if (view.value.root)
+      expectElement(
+        view.value.root,
+        view.location,
+        `View "${view.value.id}" root`,
+        indexes,
+        diagnostics
+      );
+    for (const id of view.value.include ?? [])
+      expectElement(id, view.location, `View "${view.value.id}" include`, indexes, diagnostics);
+    for (const id of view.value.relationships ?? [])
+      expectRelationship(
+        id,
+        view.location,
+        `View "${view.value.id}" relationship`,
+        indexes,
+        diagnostics
+      );
     for (const id of view.value.flows ?? []) {
-      if (!indexes.flowsById.has(id)) addDangling(`View "${view.value.id}" flow`, id, view.location, diagnostics);
+      if (!indexes.flowsById.has(id))
+        addDangling(`View "${view.value.id}" flow`, id, view.location, diagnostics);
     }
     for (const id of view.value.stateMachines ?? []) {
-      if (!indexes.stateMachinesById.has(id)) addDangling(`View "${view.value.id}" state machine`, id, view.location, diagnostics);
+      if (!indexes.stateMachinesById.has(id))
+        addDangling(`View "${view.value.id}" state machine`, id, view.location, diagnostics);
     }
   }
   for (const thread of accumulator.threads) {
-    expectElement(thread.value.target, thread.location, `Thread "${thread.value.id}" target`, indexes, diagnostics);
+    if (!hasArchitectureTarget(indexes, thread.value.target)) {
+      addDangling(
+        `Thread "${thread.value.id}" target`,
+        thread.value.target,
+        thread.location,
+        diagnostics
+      );
+    }
   }
 }
 
@@ -297,7 +387,9 @@ function addDangling(
   });
 }
 
-function buildChildren(elements: readonly ArchitectureElement[]): Map<string, ArchitectureElement[]> {
+function buildChildren(
+  elements: readonly ArchitectureElement[]
+): Map<string, ArchitectureElement[]> {
   const childrenByParent = new Map<string, ArchitectureElement[]>();
   for (const element of elements) {
     if (!element.parent) continue;
@@ -324,7 +416,9 @@ function groupRelationships(
 }
 
 function canonicalValues<T extends { id: string }>(values: Located<T>[], key: keyof T): T[] {
-  return values.map((entry) => entry.value).sort((left, right) => String(left[key]).localeCompare(String(right[key])));
+  return values
+    .map((entry) => entry.value)
+    .sort((left, right) => String(left[key]).localeCompare(String(right[key])));
 }
 
 function compareById(left: { id: string }, right: { id: string }): number {

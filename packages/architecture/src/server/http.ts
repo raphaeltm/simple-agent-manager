@@ -16,7 +16,9 @@ export class HttpError extends Error {
   }
 }
 
-export async function readJsonBody<TSchema extends v.BaseSchema<unknown, unknown, v.BaseIssue<unknown>>>(
+export async function readJsonBody<
+  TSchema extends v.BaseSchema<unknown, unknown, v.BaseIssue<unknown>>,
+>(
   request: IncomingMessage,
   schema: TSchema,
   maxBytes = DEFAULT_SERVER_BODY_BYTES
@@ -40,6 +42,7 @@ export function sendJson(response: ServerResponse, status: number, value: unknow
   response.writeHead(status, {
     'cache-control': 'no-store',
     'content-type': 'application/json; charset=utf-8',
+    'x-content-type-options': 'nosniff',
   });
   response.end(JSON.stringify(value));
 }
@@ -88,6 +91,11 @@ function summarizeIssues(issues: readonly v.BaseIssue<unknown>[]): string {
 
 function normalizeError(error: unknown): HttpError {
   if (error instanceof HttpError) return error;
-  if (error instanceof PathSafetyError) return new HttpError(400, error.message, 'path-safety-error');
-  return new HttpError(500, 'The architecture server failed to handle the request.', 'server-error');
+  if (error instanceof PathSafetyError)
+    return new HttpError(400, error.message, 'path-safety-error');
+  return new HttpError(
+    500,
+    'The architecture server failed to handle the request.',
+    'server-error'
+  );
 }

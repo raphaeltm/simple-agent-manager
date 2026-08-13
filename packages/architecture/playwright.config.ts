@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
 const PLAYWRIGHT_PORT = Number(process.env.ARCHITECTURE_PLAYWRIGHT_PORT ?? 49173);
+const BROWSER_EXECUTABLE = process.env.ARCHITECTURE_BROWSER_EXECUTABLE;
 
 export default defineConfig({
   expect: { timeout: 5_000 },
@@ -8,8 +9,10 @@ export default defineConfig({
   reporter: [['list']],
   testDir: './tests/playwright',
   timeout: 30_000,
+  workers: 1,
   use: {
     baseURL: `http://127.0.0.1:${PLAYWRIGHT_PORT}`,
+    launchOptions: BROWSER_EXECUTABLE ? { executablePath: BROWSER_EXECUTABLE } : undefined,
     trace: 'retain-on-failure',
   },
   webServer: {
@@ -19,7 +22,13 @@ export default defineConfig({
     url: `http://127.0.0.1:${PLAYWRIGHT_PORT}/health`,
   },
   projects: [
-    { name: 'mobile-375', use: { browserName: 'chromium', isMobile: true, viewport: { width: 375, height: 667 } } },
-    { name: 'desktop-1280', use: { browserName: 'chromium', viewport: { width: 1280, height: 800 } } },
+    {
+      name: 'mobile-375',
+      use: { browserName: 'chromium', isMobile: true, viewport: { width: 375, height: 667 } },
+    },
+    {
+      name: 'desktop-1280',
+      use: { browserName: 'chromium', viewport: { width: 1280, height: 800 } },
+    },
   ],
 });

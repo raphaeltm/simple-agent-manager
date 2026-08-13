@@ -8,6 +8,7 @@ import type {
   ArchitectureThread,
   SourceRef,
 } from './schemas';
+import { type ArchitectureTarget, resolveArchitectureTarget } from './targets';
 import type { CompiledWorkspace } from './types';
 
 export interface QueryLimits {
@@ -48,7 +49,7 @@ export interface ElementDetails {
 
 export interface InboxItem {
   thread: ArchitectureThread;
-  target?: ArchitectureElement;
+  target?: ArchitectureTarget;
 }
 
 export function getWorkspaceSummary(workspace: CompiledWorkspace): WorkspaceSummary {
@@ -61,7 +62,8 @@ export function getWorkspaceSummary(workspace: CompiledWorkspace): WorkspaceSumm
       flows: workspace.flows.length,
       stateMachines: workspace.stateMachines.length,
       views: workspace.views.length,
-      unresolvedThreads: workspace.threads.filter((thread) => thread.status === 'unresolved').length,
+      unresolvedThreads: workspace.threads.filter((thread) => thread.status === 'unresolved')
+        .length,
     },
     roots: workspace.elements.filter((element) => !element.parent),
   };
@@ -78,11 +80,23 @@ export function showElement(
   return {
     element,
     ancestors: getAncestors(workspace, element).slice(0, resolvedLimits.ancestors),
-    children: (workspace.indexes.childrenByParent.get(element.id) ?? []).slice(0, resolvedLimits.children),
-    incoming: (workspace.indexes.incomingByElement.get(element.id) ?? []).slice(0, resolvedLimits.incoming),
-    outgoing: (workspace.indexes.outgoingByElement.get(element.id) ?? []).slice(0, resolvedLimits.outgoing),
+    children: (workspace.indexes.childrenByParent.get(element.id) ?? []).slice(
+      0,
+      resolvedLimits.children
+    ),
+    incoming: (workspace.indexes.incomingByElement.get(element.id) ?? []).slice(
+      0,
+      resolvedLimits.incoming
+    ),
+    outgoing: (workspace.indexes.outgoingByElement.get(element.id) ?? []).slice(
+      0,
+      resolvedLimits.outgoing
+    ),
     flows: flowsForElement(workspace, element.id).slice(0, resolvedLimits.memberships),
-    stateMachines: stateMachinesForElement(workspace, element.id).slice(0, resolvedLimits.memberships),
+    stateMachines: stateMachinesForElement(workspace, element.id).slice(
+      0,
+      resolvedLimits.memberships
+    ),
     unresolvedThreads: workspace.threads
       .filter((thread) => thread.status === 'unresolved' && thread.target === element.id)
       .slice(0, resolvedLimits.threads),
@@ -90,20 +104,26 @@ export function showElement(
   };
 }
 
-export function listUnresolvedInbox(workspace: CompiledWorkspace, limit = DEFAULT_QUERY_LIMITS.threads): InboxItem[] {
+export function listUnresolvedInbox(
+  workspace: CompiledWorkspace,
+  limit = DEFAULT_QUERY_LIMITS.threads
+): InboxItem[] {
   return workspace.threads
     .filter((thread) => thread.status === 'unresolved')
-    .sort((left, right) => left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id))
+    .sort(
+      (left, right) =>
+        left.updatedAt.localeCompare(right.updatedAt) || left.id.localeCompare(right.id)
+    )
     .slice(0, limit)
     .map((thread) => ({
       thread,
-      target: workspace.indexes.elementsById.get(thread.target)?.value,
+      target: resolveArchitectureTarget(workspace, thread.target),
     }));
 }
 
 export function diagnosticsForQueries(workspace: CompiledWorkspace): ArchitectureDiagnostic[] {
   return workspace.threads
-    .filter((thread) => !workspace.indexes.elementsById.has(thread.target))
+    .filter((thread) => !resolveArchitectureTarget(workspace, thread.target))
     .map((thread) => ({
       severity: 'error',
       code: 'dangling-thread-target',
@@ -111,7 +131,10 @@ export function diagnosticsForQueries(workspace: CompiledWorkspace): Architectur
     }));
 }
 
-function getAncestors(workspace: CompiledWorkspace, element: ArchitectureElement): ArchitectureElement[] {
+function getAncestors(
+  workspace: CompiledWorkspace,
+  element: ArchitectureElement
+): ArchitectureElement[] {
   const ancestors: ArchitectureElement[] = [];
   let current = element.parent;
   while (current) {
@@ -125,7 +148,11 @@ function getAncestors(workspace: CompiledWorkspace, element: ArchitectureElement
 
 function flowsForElement(workspace: CompiledWorkspace, elementId: string): ArchitectureFlow[] {
   return workspace.flows.filter((flow) =>
-    flow.steps.some((step) => step.element === elementId || relationshipTouchesElement(workspace, step.relationship, elementId))
+    flow.steps.some(
+      (step) =>
+        step.element === elementId ||
+        relationshipTouchesElement(workspace, step.relationship, elementId)
+    )
   );
 }
 
@@ -137,7 +164,9 @@ function stateMachinesForElement(
     (machine) =>
       machine.element === elementId ||
       machine.states.some((state) => state.element === elementId) ||
-      machine.transitions.some((transition) => relationshipTouchesElement(workspace, transition.relationship, elementId))
+      machine.transitions.some((transition) =>
+        relationshipTouchesElement(workspace, transition.relationship, elementId)
+      )
   );
 }
 

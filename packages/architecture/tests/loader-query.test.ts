@@ -121,7 +121,10 @@ relationships:
     expect(loaded.diagnostics).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ code: 'duplicate-id', message: expect.stringContaining('api') }),
-        expect.objectContaining({ code: 'dangling-reference', message: expect.stringContaining('web') }),
+        expect.objectContaining({
+          code: 'dangling-reference',
+          message: expect.stringContaining('web'),
+        }),
       ])
     );
   });
@@ -167,6 +170,73 @@ Question
     expect(loaded.diagnostics).toEqual([]);
     expect(listUnresolvedInbox(loaded.workspace)).toHaveLength(1);
     expect(listUnresolvedInbox(loaded.workspace)[0]?.target?.id).toBe('api');
+    expect(listUnresolvedInbox(loaded.workspace)[0]?.target?.kind).toBe('element');
     expect(path.isAbsolute(loaded.workspace.workspaceRoot)).toBe(true);
+  });
+
+  it('accepts threads on relationships, flows, and state machines', async () => {
+    const fixture = await makeFixture();
+    await writeFixtureFile(
+      fixture.workspaceRoot,
+      'model.yaml',
+      `
+version: 1
+name: Review targets
+elements:
+  - id: api
+    kind: system
+    title: API
+relationships:
+  - id: api-self
+    from: api
+    to: api
+    title: API loop
+flows:
+  - id: request
+    title: Request
+    steps:
+      - id: call
+        title: Call
+        relationship: api-self
+stateMachines:
+  - id: lifecycle
+    title: Lifecycle
+    states:
+      - id: ready
+        title: Ready
+`
+    );
+    for (const target of ['api-self', 'request', 'lifecycle']) {
+      await writeFixtureFile(
+        fixture.workspaceRoot,
+        `threads/thread-${target}.thread.md`,
+        `---
+version: 1
+id: thread-${target}
+target: ${target}
+title: Review ${target}
+status: unresolved
+createdAt: '2026-08-13T00:00:00.000Z'
+updatedAt: '2026-08-13T00:00:00.000Z'
+---
+<!-- arch-message id: msg-${target}
+author: agent
+createdAt: '2026-08-13T00:00:00.000Z' -->
+Question
+`
+      );
+    }
+
+    const loaded = await loadArchitectureWorkspace({
+      workspaceRoot: fixture.workspaceRoot,
+      repoRoot: fixture.root,
+    });
+
+    expect(loaded.diagnostics).toEqual([]);
+    expect(listUnresolvedInbox(loaded.workspace).map((item) => item.target?.kind)).toEqual([
+      'relationship',
+      'stateMachine',
+      'flow',
+    ]);
   });
 });
