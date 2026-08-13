@@ -8,6 +8,7 @@ import { describe, expect, it } from 'vitest';
 import { makeFixture, writeFixtureFile } from './helpers';
 
 const execFileAsync = promisify(execFile);
+const DISTRIBUTION_COMMAND_TIMEOUT_MS = 20_000;
 
 describe('built architecture distribution', () => {
   it('imports the packaged entry point and executes the packaged CLI', async () => {
@@ -39,13 +40,17 @@ describe('built architecture distribution', () => {
     expect(JSON.parse(result.stdout)).toMatchObject({ name: 'Distribution fixture' });
   });
 
-  it('emits parseable JSON through the documented silent root command', async () => {
-    const repoRoot = path.resolve(process.cwd(), '../..');
-    const result = await execFileAsync(
-      'corepack',
-      ['pnpm', '--silent', 'architecture:summary', '--', '--json'],
-      { cwd: repoRoot }
-    );
-    expect(JSON.parse(result.stdout)).toMatchObject({ name: 'Simple Agent Manager' });
-  });
+  it(
+    'emits parseable JSON through the documented silent root command',
+    async () => {
+      const repoRoot = path.resolve(process.cwd(), '../..');
+      const result = await execFileAsync(
+        'corepack',
+        ['pnpm', '--silent', 'architecture:summary', '--', '--json'],
+        { cwd: repoRoot }
+      );
+      expect(JSON.parse(result.stdout)).toMatchObject({ name: 'Simple Agent Manager' });
+    },
+    DISTRIBUTION_COMMAND_TIMEOUT_MS
+  );
 });
