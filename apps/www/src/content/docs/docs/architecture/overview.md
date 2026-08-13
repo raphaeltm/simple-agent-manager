@@ -19,8 +19,8 @@ From a checkout, use the compact CLI or local viewer:
 
 ```bash
 pnpm architecture:validate
-pnpm architecture:summary -- --json
-pnpm architecture:show -- sam.api --json
+pnpm --silent architecture:summary -- --json
+pnpm --silent architecture:show -- sam.api --json
 pnpm architecture:impact -- apps/api/src/routes/device-flow.ts
 pnpm architecture:serve
 ```
@@ -281,11 +281,15 @@ as `task-runner-lifecycle` in the repository architecture workspace.
 
 ```mermaid
 graph LR
-    NS["node_selection"] --> NP["node_provisioning"]
+    NS["node_selection"] -->|No compatible healthy node| NP["node_provisioning"]
+    NS -->|Reuse compatible healthy node| WC["workspace_creation"]
     NP --> NAR["node_agent_ready"]
     NAR --> WC["workspace_creation"]
-    WC --> WR["workspace_ready"]
-    WR --> AS["agent_session"]
+    WC --> WD["workspace_dispatch"]
+    WD --> WR["workspace_ready"]
+    WR -->|No attachments| AS["agent_session"]
+    WR -->|Has attachments| AT["attachment_transfer"]
+    AT --> AS
     AS --> R["running"]
 ```
 

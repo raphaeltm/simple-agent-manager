@@ -8,6 +8,9 @@ import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import {
   ARCHITECTURE_SCHEMA_VERSION,
   DEFAULT_THREAD_AUTHOR,
+  DEFAULT_THREAD_AUTHOR_LIMIT,
+  DEFAULT_THREAD_BODY_LIMIT,
+  DEFAULT_THREAD_TITLE_LIMIT,
   DEFAULT_THREADS_DIR,
   THREAD_FILE_EXTENSION,
 } from './constants';
@@ -27,6 +30,7 @@ import type { Located } from './types';
 
 const MESSAGE_MARKER = '<!-- arch-message ';
 const MESSAGE_MARKER_END = ' -->';
+const RESERVED_MESSAGE_DELIMITER = '<!-- arch-message';
 
 export interface ThreadWriteOptions {
   workspaceRoot: string;
@@ -36,6 +40,8 @@ export interface ThreadWriteOptions {
   author?: string;
   now?: Date;
   id?: string;
+  threadsDir?: string;
+  limits?: Partial<ThreadContentLimits>;
 }
 
 export interface ReplyWriteOptions {
@@ -45,8 +51,23 @@ export interface ReplyWriteOptions {
   author?: string;
   now?: Date;
   replyTo?: string;
+  threadsDir?: string;
+  limits?: Partial<ThreadContentLimits>;
 }
 
+export interface ThreadContentLimits {
+  authorChars: number;
+  bodyChars: number;
+  titleChars: number;
+}
+
+export const DEFAULT_THREAD_CONTENT_LIMITS: ThreadContentLimits = {
+  authorChars: DEFAULT_THREAD_AUTHOR_LIMIT,
+  bodyChars: DEFAULT_THREAD_BODY_LIMIT,
+  titleChars: DEFAULT_THREAD_TITLE_LIMIT,
+};
+
+/** Load and validate all thread artifacts under the configured directory. */
 export async function loadThreads(
   workspaceRoot: string,
   threadsDir = DEFAULT_THREADS_DIR
@@ -78,7 +99,9 @@ export async function loadThreads(
   return { threads, diagnostics };
 }
 
+/** Atomically create a confined, validated thread file. */
 export async function createThread(options: ThreadWriteOptions): Promise<ArchitectureThread> {
+  validateThreadContent(options);
   const now = (options.now ?? new Date()).toISOString();
   const threadId =
     options.id ?? makeStableId('thread', `${options.target}-${now}-${options.title}`);
@@ -101,7 +124,7 @@ export async function createThread(options: ThreadWriteOptions): Promise<Archite
   };
   assertValidThread(thread);
   const relativeThreadPath = path.posix.join(
-    DEFAULT_THREADS_DIR,
+    options.threadsDir ?? DEFAULT_THREADS_DIR,
     `${threadId}${THREAD_FILE_EXTENSION}`
   );
   const absoluteThreadPath = await resolveContainedPath({
@@ -114,10 +137,12 @@ export async function createThread(options: ThreadWriteOptions): Promise<Archite
   return thread;
 }
 
+/** Append a confined, validated reply to an existing thread file. */
 export async function appendThreadReply(options: ReplyWriteOptions): Promise<ThreadMessage> {
+  validateReplyContent(options);
   assertSafeIdentifier(options.threadId, 'thread id');
   const relativeThreadPath = path.posix.join(
-    DEFAULT_THREADS_DIR,
+    options.threadsDir ?? DEFAULT_THREADS_DIR,
     `${options.threadId}${THREAD_FILE_EXTENSION}`
   );
   const absoluteThreadPath = await resolveContainedPath({
@@ -152,6 +177,7 @@ export async function appendThreadReply(options: ReplyWriteOptions): Promise<Thr
   return message;
 }
 
+/** Parse and validate one thread Markdown file. */
 export async function parseThreadFile(filePath: string): Promise<ArchitectureThread> {
   const parsed = await parseWorkspaceDocument(filePath);
   const metadataResult = v.safeParse(threadMetadataSchema, parsed.data);
@@ -167,30 +193,43 @@ export async function parseThreadFile(filePath: string): Promise<ArchitectureThr
 
 function parseMessages(body: string): ThreadMessage[] {
   const messages: ThreadMessage[] = [];
+  const messageIds = new Set<string>();
   const parts = body.split(MESSAGE_MARKER);
   for (const part of parts.slice(1)) {
     const markerEnd = part.indexOf(MESSAGE_MARKER_END);
-    if (markerEnd === -1) continue;
+    if (markerEnd === -1)
+      throw new Error('Thread message marker is missing its closing delimiter.');
     const metadataRaw = part.slice(0, markerEnd);
     const bodyStart = markerEnd + MESSAGE_MARKER_END.length;
     const nextMarker = part.indexOf(MESSAGE_MARKER, bodyStart);
     const messageBody = (
       nextMarker === -1 ? part.slice(bodyStart) : part.slice(bodyStart, nextMarker)
     ).trim();
-    const metadataResult = parseMessageMetadata(metadataRaw);
-    if (!metadataResult) continue;
-    messages.push({ ...metadataResult, body: messageBody });
+    const metadata = parseMessageMetadata(metadataRaw);
+    const message = { ...metadata, body: messageBody };
+    assertValidMessage(message);
+    if (messageIds.has(message.id)) throw new Error(`Duplicate thread message id: ${message.id}`);
+    messageIds.add(message.id);
+    messages.push(message);
+  }
+  for (const message of messages) {
+    if (message.replyTo && !messageIds.has(message.replyTo)) {
+      throw new Error(`Thread reply target was not found: ${message.replyTo}`);
+    }
   }
   return messages;
 }
 
-function parseMessageMetadata(raw: string): ThreadMessageMetadata | undefined {
+function parseMessageMetadata(raw: string): ThreadMessageMetadata {
   try {
     const parsed = parseYaml(raw) as unknown;
     const parsedResult = v.safeParse(threadMessageMetadataSchema, parsed);
-    return parsedResult.success ? parsedResult.output : undefined;
-  } catch {
-    return undefined;
+    if (parsedResult.success) return parsedResult.output;
+    throw new Error(parsedResult.issues.map((issue) => issue.message).join('; '));
+  } catch (error) {
+    throw new Error(
+      `Invalid thread message metadata: ${error instanceof Error ? error.message : String(error)}`
+    );
   }
 }
 
@@ -255,6 +294,33 @@ function assertValidMessage(message: ThreadMessage): void {
 function assertSafeIdentifier(value: string, label: string): void {
   if (/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/.test(value)) return;
   throw new PathSafetyError(`Invalid ${label}: ${value}`);
+}
+
+function validateThreadContent(options: ThreadWriteOptions): void {
+  const limits = { ...DEFAULT_THREAD_CONTENT_LIMITS, ...options.limits };
+  assertContentLength(options.title, limits.titleChars, 'thread title');
+  assertContentLength(options.body, limits.bodyChars, 'thread body');
+  assertNoReservedMessageDelimiter(options.body, 'thread body');
+  assertContentLength(options.author ?? DEFAULT_THREAD_AUTHOR, limits.authorChars, 'thread author');
+}
+
+function validateReplyContent(options: ReplyWriteOptions): void {
+  const limits = { ...DEFAULT_THREAD_CONTENT_LIMITS, ...options.limits };
+  assertContentLength(options.body, limits.bodyChars, 'reply body');
+  assertNoReservedMessageDelimiter(options.body, 'reply body');
+  assertContentLength(options.author ?? DEFAULT_THREAD_AUTHOR, limits.authorChars, 'reply author');
+}
+
+function assertNoReservedMessageDelimiter(value: string, label: string): void {
+  if (!value.includes(RESERVED_MESSAGE_DELIMITER)) return;
+  throw new PathSafetyError(
+    `${label} must not contain the reserved architecture message delimiter.`
+  );
+}
+
+function assertContentLength(value: string, limit: number, label: string): void {
+  if (value.length > 0 && value.length <= limit) return;
+  throw new Error(`${label} must contain between 1 and ${limit} characters.`);
 }
 
 async function collectThreadFiles(root: string, workspaceRoot: string): Promise<string[]> {

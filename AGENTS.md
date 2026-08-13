@@ -95,8 +95,8 @@ Per-project data (chat sessions, messages, activity events) is stored in a `Proj
 ## Curated Architecture Workspace
 
 The source-backed model in `architecture/` is the compact system map shared by
-humans and agents. Use `pnpm architecture:summary -- --json` and
-`pnpm architecture:show -- <element-id> --json` before broad cross-component
+humans and agents. Use `pnpm --silent architecture:summary -- --json` and
+`pnpm --silent architecture:show -- <element-id> --json` before broad cross-component
 work. Run `pnpm architecture:impact -- <changed-paths>` and update the model when
 a PR changes a documented boundary, flow, lifecycle, or source anchor; do not
 create noise for ordinary internal edits. Validate changes with

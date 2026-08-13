@@ -95,9 +95,9 @@ workspace runtimes.
 
 ```bash
 pnpm architecture:validate                  # Check model and thread files
-pnpm architecture:summary -- --json         # Compact overview for agents
-pnpm architecture:show -- sam.api --json    # Bounded element context
-pnpm architecture:inbox -- --json           # Open review questions
+pnpm --silent architecture:summary -- --json         # Compact overview for agents
+pnpm --silent architecture:show -- sam.api --json    # Bounded element context
+pnpm --silent architecture:inbox -- --json           # Open review questions
 pnpm architecture:serve                     # Loopback interactive viewer
 ```
 

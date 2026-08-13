@@ -1,6 +1,8 @@
 import {
   type Dispatch,
   type FormEvent,
+  type MutableRefObject,
+  type RefObject,
   type SetStateAction,
   useEffect,
   useMemo,
@@ -8,8 +10,9 @@ import {
   useState,
 } from 'react';
 
-import type { ArchitectureRelationship, ArchitectureThread, SourceRef } from '../schemas';
+import type { ArchitectureThread, SourceRef } from '../schemas';
 import type { ViewerModel } from '../server/payloads';
+import { Relationships, SourceAnchors, SourcePreview, ThreadList } from './InspectorSections';
 import type { ApiClient, MutationState, PreviewState, Selection } from './types';
 
 interface TargetDescription {
@@ -42,36 +45,215 @@ export function Inspector({
   onOpenStructure,
   onReload,
 }: InspectorProps) {
+  const controller = useInspectorController({
+    api,
+    focusId,
+    mobileOpen,
+    model,
+    onReload,
+    selection,
+  });
+  return (
+    <aside
+      ref={controller.inspectorRef}
+      className={`architecture-inspector ${mobileOpen ? 'is-open' : ''}`}
+      aria-label="Architecture inspector"
+      aria-live="polite"
+      aria-modal={mobileOpen || undefined}
+      role={mobileOpen ? 'dialog' : 'complementary'}
+      tabIndex={-1}
+    >
+      <InspectorHeader controller={controller} model={model} onClose={onClose} />
+      <InspectorTarget controller={controller} model={model} onOpenStructure={onOpenStructure} />
+    </aside>
+  );
+}
+
+interface InspectorController {
+  createQuestion: (event: FormEvent) => Promise<void>;
+  inspectorRef: RefObject<HTMLElement | null>;
+  loadSource: (source: SourceRef, sourceIndex: number) => Promise<void>;
+  mutation: MutationState;
+  preview: PreviewState;
+  question: { title: string; body: string };
+  reply: (thread: ArchitectureThread) => Promise<void>;
+  replyDrafts: Record<string, string>;
+  setQuestion: Dispatch<SetStateAction<{ title: string; body: string }>>;
+  setReplyDrafts: Dispatch<SetStateAction<Record<string, string>>>;
+  target?: TargetDescription;
+  targetId?: string;
+  threads: ArchitectureThread[];
+}
+
+function useInspectorController({
+  api,
+  model,
+  selection,
+  focusId,
+  mobileOpen,
+  onReload,
+}: Pick<
+  InspectorProps,
+  'api' | 'model' | 'selection' | 'focusId' | 'mobileOpen' | 'onReload'
+>): InspectorController {
   const targetId = selection?.id ?? focusId ?? model.summary.roots[0]?.id;
   const target = useMemo(() => describeTarget(model, targetId), [model, targetId]);
   const threads = model.workspace.threads.filter((thread) => thread.target === targetId);
+  const state = useInspectorState();
+  useResetOnTarget(
+    targetId,
+    state.targetRevisionRef,
+    state.setPreview,
+    state.setQuestion,
+    state.setReplyDrafts,
+    state.setMutation
+  );
+  useMobileDialog(mobileOpen, targetId, state.inspectorRef);
+  return useInspectorActions(api, onReload, targetId, target, threads, state);
+}
+
+function useInspectorState() {
   const [preview, setPreview] = useState<PreviewState>({ loading: false });
   const [question, setQuestion] = useState({ title: '', body: '' });
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const [mutation, setMutation] = useState<MutationState>({ saving: false });
   const inspectorRef = useRef<HTMLElement | null>(null);
+  const targetRevisionRef = useRef(0);
+  return {
+    inspectorRef,
+    mutation,
+    preview,
+    question,
+    replyDrafts,
+    setMutation,
+    setPreview,
+    setQuestion,
+    setReplyDrafts,
+    targetRevisionRef,
+  };
+}
 
-  useEffect(() => setPreview({ loading: false }), [targetId]);
+function useInspectorActions(
+  api: ApiClient,
+  onReload: () => Promise<void>,
+  targetId: string | undefined,
+  target: TargetDescription | undefined,
+  threads: ArchitectureThread[],
+  state: ReturnType<typeof useInspectorState>
+): InspectorController {
+  const loadSource = useSourceLoader(api, targetId, state.targetRevisionRef, state.setPreview);
+  const createQuestion = useQuestionCreator(
+    api,
+    targetId,
+    state.targetRevisionRef,
+    state.question,
+    state.mutation.saving,
+    state.setQuestion,
+    state.setMutation,
+    onReload
+  );
+  const reply = useThreadReply(
+    api,
+    state.targetRevisionRef,
+    state.replyDrafts,
+    state.mutation.saving,
+    state.setReplyDrafts,
+    state.setMutation,
+    onReload
+  );
+  return { ...state, createQuestion, loadSource, reply, target, targetId, threads };
+}
 
+function useResetOnTarget(
+  targetId: string | undefined,
+  revision: MutableRefObject<number>,
+  setPreview: Dispatch<SetStateAction<PreviewState>>,
+  setQuestion: Dispatch<SetStateAction<{ title: string; body: string }>>,
+  setDrafts: Dispatch<SetStateAction<Record<string, string>>>,
+  setMutation: Dispatch<SetStateAction<MutationState>>
+): void {
   useEffect(() => {
-    if (!mobileOpen || typeof window.matchMedia !== 'function') return;
-    if (!window.matchMedia('(max-width: 760px)').matches) return;
-    inspectorRef.current?.focus();
-  }, [mobileOpen]);
+    revision.current += 1;
+    setPreview({ loading: false });
+    setQuestion({ title: '', body: '' });
+    setDrafts({});
+    setMutation({ saving: false });
+  }, [targetId, revision, setDrafts, setMutation, setPreview, setQuestion]);
+}
 
-  async function loadSource(source: SourceRef, sourceIndex: number) {
+function useMobileDialog(
+  open: boolean,
+  targetId: string | undefined,
+  inspectorRef: RefObject<HTMLElement | null>
+): void {
+  useEffect(() => {
+    const inspector = inspectorRef.current;
+    if (!open || !inspector) return;
+    const overflow = document.body.style.overflow;
+    const selector =
+      'button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])';
+    document.body.style.overflow = 'hidden';
+    inspector.querySelector<HTMLElement>(selector)?.focus();
+    const trap = (event: KeyboardEvent) => trapDialogFocus(event, inspector, selector);
+    document.addEventListener('keydown', trap);
+    return () => {
+      document.removeEventListener('keydown', trap);
+      document.body.style.overflow = overflow;
+    };
+  }, [inspectorRef, open, targetId]);
+}
+
+function trapDialogFocus(event: KeyboardEvent, inspector: HTMLElement, selector: string): void {
+  if (event.key !== 'Tab') return;
+  const focusable = Array.from(inspector.querySelectorAll<HTMLElement>(selector));
+  if (focusable.length === 0) return;
+  const first = focusable[0];
+  const last = focusable.at(-1);
+  const activeInside =
+    document.activeElement instanceof Node && inspector.contains(document.activeElement);
+  if (event.shiftKey && (!activeInside || document.activeElement === first)) {
+    event.preventDefault();
+    last?.focus();
+  } else if (!event.shiftKey && (!activeInside || document.activeElement === last)) {
+    event.preventDefault();
+    first?.focus();
+  }
+}
+
+function useSourceLoader(
+  api: ApiClient,
+  targetId: string | undefined,
+  revisionRef: MutableRefObject<number>,
+  setPreview: Dispatch<SetStateAction<PreviewState>>
+) {
+  return async (source: SourceRef, sourceIndex: number) => {
     if (!targetId) return;
+    const revision = revisionRef.current;
     setPreview({ loading: true });
     try {
-      setPreview({ loading: false, preview: await api.loadSource(targetId, source, sourceIndex) });
+      const loaded = await api.loadSource(targetId, source, sourceIndex);
+      if (revision === revisionRef.current) setPreview({ loading: false, preview: loaded });
     } catch (error) {
-      setPreview({ loading: false, error: errorMessage(error) });
+      if (revision === revisionRef.current)
+        setPreview({ loading: false, error: errorMessage(error) });
     }
-  }
+  };
+}
 
-  async function createQuestion(event: FormEvent) {
+function useQuestionCreator(
+  api: ApiClient,
+  targetId: string | undefined,
+  revisionRef: MutableRefObject<number>,
+  question: { title: string; body: string },
+  saving: boolean,
+  setQuestion: Dispatch<SetStateAction<{ title: string; body: string }>>,
+  setMutation: Dispatch<SetStateAction<MutationState>>,
+  onReload: () => Promise<void>
+) {
+  return async (event: FormEvent) => {
     event.preventDefault();
-    if (!targetId || mutation.saving) return;
+    if (!targetId || saving) return;
+    const revision = revisionRef.current;
     setMutation({ saving: true });
     try {
       const result = await api.createThread({
@@ -79,231 +261,147 @@ export function Inspector({
         title: question.title,
         body: question.body,
       });
+      if (revision !== revisionRef.current) return;
       setQuestion({ title: '', body: '' });
       setMutation({ saving: false, artifactPath: result.artifactPath });
       await onReload();
     } catch (error) {
-      setMutation({ saving: false, error: errorMessage(error) });
+      if (revision === revisionRef.current)
+        setMutation({ saving: false, error: errorMessage(error) });
     }
-  }
+  };
+}
 
-  async function reply(thread: ArchitectureThread) {
-    const body = replyDrafts[thread.id] ?? '';
-    if (!body.trim() || mutation.saving) return;
+function useThreadReply(
+  api: ApiClient,
+  revisionRef: MutableRefObject<number>,
+  drafts: Record<string, string>,
+  saving: boolean,
+  setDrafts: Dispatch<SetStateAction<Record<string, string>>>,
+  setMutation: Dispatch<SetStateAction<MutationState>>,
+  onReload: () => Promise<void>
+) {
+  return async (thread: ArchitectureThread) => {
+    const body = drafts[thread.id] ?? '';
+    if (!body.trim() || saving) return;
+    const revision = revisionRef.current;
     setMutation({ saving: true });
     try {
       const result = await api.replyToThread(thread.id, { body });
-      setReplyDrafts((drafts) => ({ ...drafts, [thread.id]: '' }));
+      if (revision !== revisionRef.current) return;
+      setDrafts((all) => ({ ...all, [thread.id]: '' }));
       setMutation({ saving: false, artifactPath: result.artifactPath });
       await onReload();
     } catch (error) {
-      setMutation({ saving: false, error: errorMessage(error) });
+      if (revision === revisionRef.current)
+        setMutation({ saving: false, error: errorMessage(error) });
     }
-  }
-
-  return (
-    <aside
-      ref={inspectorRef}
-      className={`architecture-inspector ${mobileOpen ? 'is-open' : ''}`}
-      aria-label="Architecture inspector"
-      aria-live="polite"
-      tabIndex={-1}
-    >
-      <div className="inspector-head">
-        <div>
-          <p className="eyebrow">{target?.kind ?? 'Overview'}</p>
-          <h2>{target?.title ?? model.summary.name}</h2>
-        </div>
-        <button type="button" className="mobile-close" onClick={onClose}>
-          Close
-        </button>
-      </div>
-      <p className="muted break-text">
-        {target?.summary ??
-          target?.description ??
-          model.summary.description ??
-          'No description yet.'}
-      </p>
-      {targetId && (
-        <Relationships model={model} targetId={targetId} onOpenStructure={onOpenStructure} />
-      )}
-      {targetId && (
-        <section>
-          <h3>Source anchors</h3>
-          <SourceAnchors sources={target?.sources ?? []} onLoad={loadSource} />
-          <SourcePreview preview={preview} />
-        </section>
-      )}
-      {targetId && (
-        <section>
-          <h3>Threads</h3>
-          <ThreadList
-            threads={threads}
-            drafts={replyDrafts}
-            saving={mutation.saving}
-            onDraft={setReplyDrafts}
-            onReply={reply}
-          />
-          <form className="stack" onSubmit={createQuestion}>
-            <label>
-              Question title
-              <input
-                value={question.title}
-                onChange={(event) => setQuestion({ ...question, title: event.target.value })}
-                required
-              />
-            </label>
-            <label>
-              Question
-              <textarea
-                value={question.body}
-                onChange={(event) => setQuestion({ ...question, body: event.target.value })}
-                required
-              />
-            </label>
-            <button type="submit" disabled={mutation.saving}>
-              Create question
-            </button>
-          </form>
-          {mutation.artifactPath && <p className="success">Saved to {mutation.artifactPath}</p>}
-          {mutation.error && <p className="error">{mutation.error}</p>}
-        </section>
-      )}
-    </aside>
-  );
+  };
 }
 
-function Relationships({
+function InspectorHeader({
+  controller,
   model,
-  targetId,
-  onOpenStructure,
+  onClose,
 }: {
+  controller: InspectorController;
   model: ViewerModel;
-  targetId: string;
-  onOpenStructure: (id: string) => void;
-}) {
-  const incoming = model.workspace.relationships.filter(
-    (relationship) => relationship.to === targetId
-  );
-  const outgoing = model.workspace.relationships.filter(
-    (relationship) => relationship.from === targetId
-  );
-  return (
-    <section className="relationship-grid">
-      <RelationshipList
-        title="Incoming"
-        relationships={incoming}
-        edge="from"
-        onOpenStructure={onOpenStructure}
-      />
-      <RelationshipList
-        title="Outgoing"
-        relationships={outgoing}
-        edge="to"
-        onOpenStructure={onOpenStructure}
-      />
-    </section>
-  );
-}
-
-function RelationshipList({
-  title,
-  relationships,
-  edge,
-  onOpenStructure,
-}: {
-  title: string;
-  relationships: ArchitectureRelationship[];
-  edge: 'from' | 'to';
-  onOpenStructure: (id: string) => void;
+  onClose: () => void;
 }) {
   return (
-    <div>
-      <h3>{title}</h3>
-      {relationships.length === 0 ? (
-        <p className="muted">None.</p>
-      ) : (
-        relationships.map((relationship) => (
-          <button
-            key={relationship.id}
-            type="button"
-            className="text-row"
-            onClick={() => onOpenStructure(relationship[edge])}
-          >
-            {relationship.title ?? relationship.id}
-          </button>
-        ))
-      )}
+    <div className="inspector-head">
+      <div>
+        <p className="eyebrow">{controller.target?.kind ?? 'Overview'}</p>
+        <h2>{controller.target?.title ?? model.summary.name}</h2>
+      </div>
+      <button type="button" className="mobile-close" onClick={onClose}>
+        Close
+      </button>
     </div>
   );
 }
 
-function SourceAnchors({
-  sources,
-  onLoad,
+function InspectorTarget({
+  controller,
+  model,
+  onOpenStructure,
 }: {
-  sources: SourceRef[];
-  onLoad: (source: SourceRef, index: number) => void;
+  controller: InspectorController;
+  model: ViewerModel;
+  onOpenStructure: (id: string) => void;
 }) {
-  if (sources.length === 0) return <p className="muted">No source anchors.</p>;
-  return sources.map((source, index) => (
-    <button
-      key={`${source.path}:${index}`}
-      type="button"
-      className="source-link"
-      onClick={() => onLoad(source, index)}
-    >
-      {source.label ?? source.path}:{source.startLine ?? 1}
-    </button>
-  ));
-}
-
-function SourcePreview({ preview }: { preview: PreviewState }) {
-  if (preview.loading) return <p className="muted">Loading source preview…</p>;
-  if (preview.error) return <p className="error">{preview.error}</p>;
-  if (!preview.preview) return null;
   return (
-    <pre className="source-preview" aria-label="Source preview">
-      <code>{preview.preview.content}</code>
-    </pre>
+    <>
+      <p className="muted break-text">
+        {controller.target?.summary ??
+          controller.target?.description ??
+          model.summary.description ??
+          'No description yet.'}
+      </p>
+      {controller.targetId && (
+        <Relationships
+          model={model}
+          targetId={controller.targetId}
+          onOpenStructure={onOpenStructure}
+        />
+      )}
+      {controller.targetId && (
+        <section>
+          <h3>Source anchors</h3>
+          <SourceAnchors
+            sources={controller.target?.sources ?? []}
+            onLoad={controller.loadSource}
+          />
+          <SourcePreview preview={controller.preview} />
+        </section>
+      )}
+      {controller.targetId && <ThreadSection controller={controller} />}
+    </>
   );
 }
 
-function ThreadList({
-  threads,
-  drafts,
-  saving,
-  onDraft,
-  onReply,
-}: {
-  threads: ArchitectureThread[];
-  drafts: Record<string, string>;
-  saving: boolean;
-  onDraft: Dispatch<SetStateAction<Record<string, string>>>;
-  onReply: (thread: ArchitectureThread) => void;
-}) {
-  if (threads.length === 0) return <p className="muted">No threads for this item.</p>;
-  return threads.map((thread) => (
-    <article className="thread" key={thread.id}>
-      <h4>{thread.title}</h4>
-      <p className={`pill ${thread.status}`}>{thread.status}</p>
-      {thread.messages.map((message) => (
-        <p className="message break-text" key={message.id}>
-          {message.body}
-        </p>
-      ))}
-      <label>
-        Reply to {thread.title}
-        <textarea
-          value={drafts[thread.id] ?? ''}
-          onChange={(event) => onDraft((all) => ({ ...all, [thread.id]: event.target.value }))}
-        />
-      </label>
-      <button type="button" disabled={saving} onClick={() => onReply(thread)}>
-        Reply
-      </button>
-    </article>
-  ));
+function ThreadSection({ controller }: { controller: InspectorController }) {
+  return (
+    <section>
+      <h3>Threads</h3>
+      <ThreadList
+        threads={controller.threads}
+        drafts={controller.replyDrafts}
+        saving={controller.mutation.saving}
+        onDraft={controller.setReplyDrafts}
+        onReply={controller.reply}
+      />
+      <form className="stack" onSubmit={controller.createQuestion}>
+        <label>
+          Question title
+          <input
+            value={controller.question.title}
+            onChange={(event) =>
+              controller.setQuestion({ ...controller.question, title: event.target.value })
+            }
+            required
+          />
+        </label>
+        <label>
+          Question
+          <textarea
+            value={controller.question.body}
+            onChange={(event) =>
+              controller.setQuestion({ ...controller.question, body: event.target.value })
+            }
+            required
+          />
+        </label>
+        <button type="submit" disabled={controller.mutation.saving}>
+          Create question
+        </button>
+      </form>
+      {controller.mutation.artifactPath && (
+        <p className="success">Saved to {controller.mutation.artifactPath}</p>
+      )}
+      {controller.mutation.error && <p className="error">{controller.mutation.error}</p>}
+    </section>
+  );
 }
 
 function describeTarget(model: ViewerModel, id?: string): TargetDescription | undefined {

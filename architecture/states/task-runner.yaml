@@ -81,8 +81,13 @@ stateMachines:
         event: no-compatible-node
         description: Guarded by capacity and compatibility checks.
       - from: node-selection
-        to: node-agent-ready
-        event: compatible-node-selected
+        to: workspace-creation
+        event: compatible-node-selected-and-healthy
+        description: Reused preferred, warm, or capacity-selected nodes skip provisioning and readiness polling after their current heartbeat and agent version are verified.
+        sourceRefs:
+          - path: apps/api/src/durable-objects/task-runner/node-steps.ts
+            startLine: 40
+            endLine: 95
       - from: node-provisioning
         to: node-agent-ready
         event: node-provisioned

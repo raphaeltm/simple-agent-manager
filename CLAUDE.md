@@ -36,7 +36,7 @@ pnpm typecheck        # Type check
 pnpm lint             # Lint
 pnpm format           # Format
 pnpm check:fast       # Deterministic local quality contract used by CI leaf commands
-pnpm architecture:summary -- --json # Compact agent-readable architecture overview
+pnpm --silent architecture:summary -- --json # Compact agent-readable architecture overview
 pnpm architecture:serve             # Local interactive architecture viewer
 ```
 

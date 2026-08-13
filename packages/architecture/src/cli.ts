@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import path from 'node:path';
+
+import { DEFAULT_THREADS_DIR } from './constants';
 import { formatDiagnostics, hasErrors } from './diagnostics';
 import { mapChangedPathsToArchitecture } from './impact';
 import { loadArchitectureWorkspace } from './loader';
@@ -85,30 +88,47 @@ async function inboxCommand(options: CliOptions): Promise<number> {
 
 async function replyCommand(options: CliOptions): Promise<number> {
   if (!options.body) throw new Error('reply requires --body.');
+  const loaded = await loadOrFail(options);
+  const threadsDir = loaded.workspace.manifest.threadsDir;
   if (options.thread) {
+    const artifactPath = threadArtifactPath(loaded.workspace, options.thread);
     const message = await appendThreadReply({
       workspaceRoot: options.workspaceRoot ?? 'architecture',
+      threadsDir,
       threadId: options.thread,
       body: options.body,
       author: options.author,
     });
-    printResult({ message }, options.json);
+    printResult({ message, artifactPath }, options.json);
     return 0;
   }
   if (!options.target) throw new Error('reply without --thread requires --target.');
-  const loaded = await loadOrFail(options);
   if (!resolveArchitectureTarget(loaded.workspace, options.target)) {
     throw new Error(`Thread target not found: ${options.target}`);
   }
   const thread = await createThread({
     workspaceRoot: options.workspaceRoot ?? 'architecture',
+    threadsDir,
     target: options.target,
     title: options.title ?? `Question for ${options.target}`,
     body: options.body,
     author: options.author,
   });
-  printResult({ thread }, options.json);
+  printResult(
+    { thread, artifactPath: threadArtifactPath(loaded.workspace, thread.id) },
+    options.json
+  );
   return 0;
+}
+
+function threadArtifactPath(
+  workspace: Awaited<ReturnType<typeof loadArchitectureWorkspace>>['workspace'],
+  threadId: string
+): string {
+  const location = workspace.indexes.threadsById.get(threadId)?.location.file;
+  const workspaceRelative =
+    location ?? `${workspace.manifest.threadsDir ?? DEFAULT_THREADS_DIR}/${threadId}.thread.md`;
+  return path.relative(workspace.repoRoot, path.join(workspace.workspaceRoot, workspaceRelative));
 }
 
 async function impactCommand(positional: string[], options: CliOptions): Promise<number> {

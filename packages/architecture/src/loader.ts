@@ -2,13 +2,14 @@ import { readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 
 import { compileWorkspace } from './compiler';
-import { DEFAULT_THREADS_DIR, DEFAULT_WORKSPACE_DIR } from './constants';
+import { DEFAULT_THREADS_DIR, DEFAULT_WORKSPACE_DIR, THREAD_FILE_EXTENSION } from './constants';
 import type { ArchitectureDiagnostic } from './diagnostics';
 import { loadThreads } from './threads';
 import type { LoadedWorkspace, LoadWorkspaceOptions } from './types';
 
 const WORKSPACE_FILE_EXTENSIONS = ['.yaml', '.yml', '.md'] as const;
 
+/** Compile one filesystem workspace into its canonical graph and indexes. */
 export async function loadArchitectureWorkspace(
   options: LoadWorkspaceOptions = {}
 ): Promise<LoadedWorkspace> {
@@ -17,12 +18,18 @@ export async function loadArchitectureWorkspace(
   );
   const repoRoot = await realpath(path.resolve(options.repoRoot ?? process.cwd()));
   const files = await collectWorkspaceFiles(workspaceRoot, workspaceRoot);
-  const threadLoad = await loadThreads(workspaceRoot, DEFAULT_THREADS_DIR);
-  const threadsDirPrefix = `${DEFAULT_THREADS_DIR}/`;
   const modelFiles = files.filter((file) => {
     const relative = path.relative(workspaceRoot, file).replaceAll(path.sep, '/');
-    return !relative.startsWith(threadsDirPrefix);
+    return !relative.endsWith(THREAD_FILE_EXTENSION);
   });
+  const manifestPass = await compileWorkspace({
+    workspaceRoot,
+    repoRoot,
+    files: modelFiles,
+    threads: [],
+  });
+  const threadsDir = manifestPass.workspace.manifest.threadsDir ?? DEFAULT_THREADS_DIR;
+  const threadLoad = await loadThreads(workspaceRoot, threadsDir);
   const compiled = await compileWorkspace({
     workspaceRoot,
     repoRoot,
@@ -36,6 +43,7 @@ export async function loadArchitectureWorkspace(
   return { workspace: compiled.workspace, diagnostics };
 }
 
+/** Validate a workspace and return all deterministic compiler diagnostics. */
 export async function validateArchitectureWorkspace(
   options: LoadWorkspaceOptions = {}
 ): Promise<ArchitectureDiagnostic[]> {

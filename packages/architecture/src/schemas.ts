@@ -2,6 +2,7 @@ import type { InferOutput } from 'valibot';
 import * as v from 'valibot';
 
 import { ARCHITECTURE_SCHEMA_VERSION } from './constants';
+import { normalizeRepoRelativePath } from './path-safety';
 
 const idSchema = v.pipe(
   v.string(),
@@ -15,9 +16,20 @@ const idSchema = v.pipe(
 const nonEmptyStringSchema = v.pipe(v.string(), v.minLength(1));
 const optionalStringArraySchema = v.optional(v.array(nonEmptyStringSchema));
 const metadataSchema = v.optional(v.record(v.string(), v.unknown()));
+const repoRelativePathSchema = v.pipe(
+  nonEmptyStringSchema,
+  v.check((value) => {
+    try {
+      normalizeRepoRelativePath(value);
+      return true;
+    } catch {
+      return false;
+    }
+  }, 'Source paths must be safe repository-relative paths.')
+);
 
-export const sourceRefSchema = v.object({
-  path: nonEmptyStringSchema,
+export const sourceRefSchema = v.strictObject({
+  path: repoRelativePathSchema,
   label: v.optional(nonEmptyStringSchema),
   startLine: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
   endLine: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
@@ -41,7 +53,7 @@ export const elementKindSchema = v.picklist([
   'person',
 ]);
 
-export const elementSchema = v.object({
+export const elementSchema = v.strictObject({
   id: idSchema,
   kind: elementKindSchema,
   title: nonEmptyStringSchema,
@@ -53,7 +65,7 @@ export const elementSchema = v.object({
   metadata: metadataSchema,
 });
 
-export const relationshipSchema = v.object({
+export const relationshipSchema = v.strictObject({
   id: idSchema,
   from: idSchema,
   to: idSchema,
@@ -65,7 +77,7 @@ export const relationshipSchema = v.object({
   metadata: metadataSchema,
 });
 
-export const flowStepSchema = v.object({
+export const flowStepSchema = v.strictObject({
   id: idSchema,
   title: nonEmptyStringSchema,
   element: v.optional(idSchema),
@@ -74,7 +86,7 @@ export const flowStepSchema = v.object({
   sourceRefs: sourceRefsSchema,
 });
 
-export const flowSchema = v.object({
+export const flowSchema = v.strictObject({
   id: idSchema,
   title: nonEmptyStringSchema,
   summary: v.optional(nonEmptyStringSchema),
@@ -84,7 +96,7 @@ export const flowSchema = v.object({
   metadata: metadataSchema,
 });
 
-export const stateSchema = v.object({
+export const stateSchema = v.strictObject({
   id: idSchema,
   title: nonEmptyStringSchema,
   element: v.optional(idSchema),
@@ -92,7 +104,7 @@ export const stateSchema = v.object({
   sourceRefs: sourceRefsSchema,
 });
 
-export const transitionSchema = v.object({
+export const transitionSchema = v.strictObject({
   from: idSchema,
   to: idSchema,
   event: v.optional(nonEmptyStringSchema),
@@ -101,7 +113,7 @@ export const transitionSchema = v.object({
   sourceRefs: sourceRefsSchema,
 });
 
-export const stateMachineSchema = v.object({
+export const stateMachineSchema = v.strictObject({
   id: idSchema,
   title: nonEmptyStringSchema,
   element: v.optional(idSchema),
@@ -111,7 +123,7 @@ export const stateMachineSchema = v.object({
   metadata: metadataSchema,
 });
 
-export const viewSchema = v.object({
+export const viewSchema = v.strictObject({
   id: idSchema,
   title: nonEmptyStringSchema,
   root: v.optional(idSchema),
@@ -124,11 +136,11 @@ export const viewSchema = v.object({
   metadata: metadataSchema,
 });
 
-export const manifestSchema = v.object({
+export const manifestSchema = v.strictObject({
   version: v.literal(ARCHITECTURE_SCHEMA_VERSION),
   name: nonEmptyStringSchema,
   description: v.optional(nonEmptyStringSchema),
-  threadsDir: v.optional(nonEmptyStringSchema),
+  threadsDir: v.optional(repoRelativePathSchema),
   elements: v.optional(v.array(elementSchema), []),
   relationships: v.optional(v.array(relationshipSchema), []),
   flows: v.optional(v.array(flowSchema), []),
@@ -137,11 +149,11 @@ export const manifestSchema = v.object({
 });
 
 export const workspaceDocumentSchema = v.partial(
-  v.object({
+  v.strictObject({
     version: v.literal(ARCHITECTURE_SCHEMA_VERSION),
     name: nonEmptyStringSchema,
     description: v.optional(nonEmptyStringSchema),
-    threadsDir: v.optional(nonEmptyStringSchema),
+    threadsDir: v.optional(repoRelativePathSchema),
     elements: v.optional(v.array(elementSchema)),
     relationships: v.optional(v.array(relationshipSchema)),
     flows: v.optional(v.array(flowSchema)),
@@ -152,14 +164,14 @@ export const workspaceDocumentSchema = v.partial(
 
 export const threadStatusSchema = v.picklist(['unresolved', 'resolved']);
 
-export const threadMessageMetadataSchema = v.object({
+export const threadMessageMetadataSchema = v.strictObject({
   id: idSchema,
   author: nonEmptyStringSchema,
   createdAt: nonEmptyStringSchema,
   replyTo: v.optional(idSchema),
 });
 
-export const threadMetadataSchema = v.object({
+export const threadMetadataSchema = v.strictObject({
   version: v.literal(ARCHITECTURE_SCHEMA_VERSION),
   id: idSchema,
   target: idSchema,
@@ -170,7 +182,7 @@ export const threadMetadataSchema = v.object({
   sourceRefs: sourceRefsSchema,
 });
 
-export const threadMessageSchema = v.object({
+export const threadMessageSchema = v.strictObject({
   id: idSchema,
   author: nonEmptyStringSchema,
   body: nonEmptyStringSchema,
@@ -178,7 +190,7 @@ export const threadMessageSchema = v.object({
   replyTo: v.optional(idSchema),
 });
 
-export const threadSchema = v.object({
+export const threadSchema = v.strictObject({
   ...threadMetadataSchema.entries,
   messages: v.array(threadMessageSchema),
 });

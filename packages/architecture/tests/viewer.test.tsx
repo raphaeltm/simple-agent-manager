@@ -1,16 +1,18 @@
 import '@testing-library/jest-dom/vitest';
 
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { App } from '../src/client/App';
 import type { ViewerModel } from '../src/server/payloads';
 
 class MockEventSource extends EventTarget {
+  static latest?: MockEventSource;
   onmessage: ((event: MessageEvent) => void) | null = null;
   onerror: (() => void) | null = null;
   constructor(readonly url: string) {
     super();
+    MockEventSource.latest = this;
   }
   close() {}
 }
@@ -79,6 +81,7 @@ describe('architecture viewer', () => {
   });
 
   it('supports state lens textual transitions and Escape focus return on mobile inspector', async () => {
+    vi.stubGlobal('matchMedia', (query: string) => ({ matches: query.includes('max-width') }));
     mockFetch(makeModel());
     render(<App />);
     const apiButton = await screen.findByRole('button', { name: /API component/ });
@@ -93,6 +96,56 @@ describe('architecture viewer', () => {
     expect(screen.getByLabelText('Task state transition list')).toHaveTextContent(
       'queued → running when start'
     );
+  });
+
+  it('clears target-specific drafts and ignores a stale source response after selection changes', async () => {
+    let resolveSource: ((value: Response) => void) | undefined;
+    const sourceResponse = new Promise<Response>((resolve) => {
+      resolveSource = resolve;
+    });
+    mockFetch(makeModel(), sourceResponse);
+    render(<App />);
+    fireEvent.click(await screen.findByRole('button', { name: /API component/ }));
+    fireEvent.change(screen.getByLabelText('Question title'), { target: { value: 'Stale title' } });
+    fireEvent.change(screen.getByLabelText('Question'), { target: { value: 'Stale body' } });
+    fireEvent.click(screen.getByRole('button', { name: /src\/api.ts:1/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'Root system' }));
+    resolveSource?.(
+      jsonResponse({
+        preview: {
+          path: 'src/api.ts',
+          startLine: 1,
+          endLine: 1,
+          content: 'stale preview',
+          truncated: false,
+        },
+      })
+    );
+    await Promise.resolve();
+    expect(screen.queryByText('stale preview')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: /API component/ }));
+    expect(screen.getByLabelText('Question title')).toHaveValue('');
+    expect(screen.getByLabelText('Question')).toHaveValue('');
+  });
+
+  it('shows bounded empty scoped lenses, hides inapplicable zoom, and exposes SSE status', async () => {
+    const model = makeModel();
+    model.workspace.elements.push({
+      id: 'isolated',
+      kind: 'component',
+      parent: 'root',
+      title: 'Isolated',
+    });
+    window.history.replaceState(null, '', '/?lens=flow&focus=isolated');
+    mockFetch(model);
+    render(<App />);
+    expect(await screen.findByRole('heading', { name: 'No flows in this scope' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Zoom in' })).toBeNull();
+
+    act(() => MockEventSource.latest?.dispatchEvent(new Event('architecture:invalid')));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Invalid workspace edit detected');
+    act(() => MockEventSource.latest?.onerror?.());
+    expect(await screen.findByRole('alert')).toHaveTextContent('Offline/reconnecting');
   });
 
   it('renders empty and many-node states without interpreting special-character text as HTML', async () => {
@@ -130,12 +183,16 @@ describe('architecture viewer', () => {
   });
 });
 
-function mockFetch(model: ViewerModel & { failThreadCreate?: boolean }) {
+function mockFetch(
+  model: ViewerModel & { failThreadCreate?: boolean },
+  sourceResponse?: Promise<Response>
+) {
   const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     if (url.endsWith('/api/model')) return jsonResponse(model);
     if (url.includes('/api/elements/')) return jsonResponse({ details: {} });
     if (url.endsWith('/api/source-preview')) {
+      if (sourceResponse) return sourceResponse;
       return jsonResponse({
         preview: {
           path: 'src/api.ts',
@@ -203,6 +260,22 @@ function makeModel(
   return {
     failThreadCreate: options.failThreadCreate,
     diagnostics: [],
+    limits: {
+      children: 80,
+      flowSteps: 50,
+      flows: 30,
+      relationships: 120,
+      stateMachines: 30,
+      states: 50,
+      transitions: 80,
+    },
+    interaction: {
+      maxZoom: 1.5,
+      minZoom: 0.75,
+      mobileBreakpointPx: 760,
+      panPixels: 48,
+      zoomStep: 0.125,
+    },
     summary: {
       counts: {
         elements: children.length + 1,
@@ -214,6 +287,7 @@ function makeModel(
       },
       name: 'Architecture <script>alert(1)</script>',
       roots: [{ id: 'root', kind: 'system', title: 'Root system' }],
+      truncated: { roots: 0 },
     },
     workspace: {
       elements: [{ id: 'root', kind: 'system', title: 'Root system' }, ...children],

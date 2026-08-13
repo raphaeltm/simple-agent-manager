@@ -8,10 +8,10 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['tests/**/*.test.{ts,tsx}'],
     coverage: coverageConfig(['src/**/*.{ts,tsx}'], {
-      statements: 70,
-      branches: 50,
-      functions: 70,
-      lines: 75,
+      statements: 75,
+      branches: 60,
+      functions: 75,
+      lines: 80,
     }),
   },
 });

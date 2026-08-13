@@ -4,7 +4,10 @@ import path from 'node:path';
 import { startArchitectureServer } from '../src';
 
 const PLAYWRIGHT_PORT = Number(process.env.ARCHITECTURE_PLAYWRIGHT_PORT ?? 49173);
-const FIXTURE_ROOT = path.resolve(process.cwd(), '../../.codex/tmp/architecture-playwright-fixture');
+const FIXTURE_ROOT = path.resolve(
+  process.cwd(),
+  '../../.codex/tmp/architecture-playwright-fixture'
+);
 
 await resetFixture();
 const running = await startArchitectureServer({
@@ -20,7 +23,10 @@ async function resetFixture(): Promise<void> {
   await rm(FIXTURE_ROOT, { force: true, recursive: true });
   await mkdir(path.join(FIXTURE_ROOT, 'architecture'), { recursive: true });
   await mkdir(path.join(FIXTURE_ROOT, 'src'), { recursive: true });
-  await writeFile(path.join(FIXTURE_ROOT, 'src/api.ts'), 'export const hello = "world";\nexport const long = true;\n');
+  await writeFile(
+    path.join(FIXTURE_ROOT, 'src/api.ts'),
+    'export const hello = "world";\nexport const long = true;\n'
+  );
   await writeFile(path.join(FIXTURE_ROOT, 'architecture/model.yaml'), normalModel('API component'));
 }
 

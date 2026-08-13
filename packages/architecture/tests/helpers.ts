@@ -16,13 +16,21 @@ export async function makeFixture(): Promise<{ root: string; workspaceRoot: stri
   return { root, workspaceRoot };
 }
 
-export async function writeFixtureFile(root: string, relativePath: string, content: string): Promise<void> {
+export async function writeFixtureFile(
+  root: string,
+  relativePath: string,
+  content: string
+): Promise<void> {
   const filePath = path.join(root, relativePath);
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, content);
 }
 
-export async function makeEscapingSymlink(root: string, relativePath: string, target: string): Promise<void> {
+export async function makeEscapingSymlink(
+  root: string,
+  relativePath: string,
+  target: string
+): Promise<void> {
   const linkPath = path.join(root, relativePath);
   await mkdir(path.dirname(linkPath), { recursive: true });
   await symlink(target, linkPath);

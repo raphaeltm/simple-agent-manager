@@ -2,30 +2,59 @@ import { realpath } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import path from 'node:path';
 
-import { DEFAULT_SERVER_HOST, DEFAULT_SERVER_PORT, DEFAULT_SERVER_SOURCE_BYTES } from './constants';
+import {
+  DEFAULT_SERVER_BODY_BYTES,
+  DEFAULT_SERVER_HOST,
+  DEFAULT_SERVER_PORT,
+  DEFAULT_SERVER_SOURCE_BYTES,
+  DEFAULT_SERVER_SSE_CLIENT_LIMIT,
+  DEFAULT_SOURCE_CONTEXT_LINES,
+  DEFAULT_SOURCE_PATH_LIMIT,
+  DEFAULT_THREADS_DIR,
+  DEFAULT_VALIDATION_ISSUE_LIMIT,
+} from './constants';
 import { hasErrors } from './diagnostics';
 import { PathSafetyError } from './path-safety';
-import { getWorkspaceSummary } from './queries';
+import { getWorkspaceSummary, type QueryLimits } from './queries';
 import { EventHub } from './server/events';
 import { HttpError, readJsonBody, requireMethod, sendError, sendJson } from './server/http';
-import { makeElementDetails, makeViewerModel, sourceRefsForTarget } from './server/payloads';
-import { serveViewerAsset } from './server/static-assets';
 import {
-  createThreadRequestSchema,
-  replyRequestSchema,
-  sourcePreviewRequestSchema,
-} from './server/validation';
+  DEFAULT_VIEWER_INTERACTION,
+  DEFAULT_VIEWER_LIMITS,
+  makeElementDetails,
+  makeViewerModel,
+  sourceRefsForTarget,
+  type ViewerInteraction,
+  type ViewerLimits,
+} from './server/payloads';
+import { serveViewerAsset } from './server/static-assets';
+import { makeRequestSchemas } from './server/validation';
 import { WorkspaceState } from './server/workspace-state';
 import { readSourceReference } from './source';
 import { resolveArchitectureTarget } from './targets';
-import { appendThreadReply, createThread } from './threads';
+import {
+  appendThreadReply,
+  createThread,
+  DEFAULT_THREAD_CONTENT_LIMITS,
+  type ThreadContentLimits,
+} from './threads';
 import type { LoadWorkspaceOptions } from './types';
 
+/** Options for the single-user local architecture viewer and HTTP API. */
 export interface ArchitectureServerOptions extends LoadWorkspaceOptions {
   host?: string;
   port?: number;
   allowNonLoopback?: boolean;
   maxSourceBytes?: number;
+  sourceContextLines?: number;
+  maxBodyBytes?: number;
+  maxSourcePathChars?: number;
+  maxSseClients?: number;
+  validationIssueLimit?: number;
+  queryLimits?: QueryLimits;
+  threadLimits?: Partial<ThreadContentLimits>;
+  viewerLimits?: Partial<ViewerLimits>;
+  viewerInteraction?: Partial<ViewerInteraction>;
   watchIntervalMs?: number;
 }
 
@@ -35,6 +64,7 @@ export interface RunningArchitectureServer {
   close: () => Promise<void>;
 }
 
+/** Start the local server after compiling a valid workspace. */
 export async function startArchitectureServer(
   options: ArchitectureServerOptions = {}
 ): Promise<RunningArchitectureServer> {
@@ -42,16 +72,19 @@ export async function startArchitectureServer(
   if (!options.allowNonLoopback && !isLoopbackHost(host)) {
     throw new PathSafetyError(`Refusing non-loopback architecture server host: ${host}`);
   }
-  const events = new EventHub();
+  const events = new EventHub(options.maxSseClients ?? DEFAULT_SERVER_SSE_CLIENT_LIMIT);
   const state = new WorkspaceState(options, events);
   await state.start();
   const server = createServer((request, response) => {
-    void routeRequest(request, response, state, events, options);
+    void routeRequest(request, response, state, events, options, {
+      host,
+      port: addressPort(server),
+    });
   });
   const port = options.port ?? DEFAULT_SERVER_PORT;
   await listen(server, port, host);
   return {
-    url: `http://${host}:${addressPort(server)}`,
+    url: `http://${formatAuthority(host, addressPort(server))}`,
     server,
     close: async () => {
       await state.stop();
@@ -66,23 +99,36 @@ async function routeRequest(
   response: ServerResponse,
   state: WorkspaceState,
   events: EventHub,
-  options: ArchitectureServerOptions
+  options: ArchitectureServerOptions,
+  authority: { host: string; port: number }
 ): Promise<void> {
   try {
-    const url = new URL(
-      request.url ?? '/',
-      `http://${request.headers.host ?? DEFAULT_SERVER_HOST}`
-    );
+    const expectedAuthority = formatAuthority(authority.host, authority.port);
+    validateRequestAuthority(request, expectedAuthority);
+    const url = new URL(request.url ?? '/', `http://${expectedAuthority}`);
     if (url.pathname === '/health') return handleHealth(request, response, state);
-    if (url.pathname === '/api/model') return handleModel(request, response, state);
-    if (url.pathname === '/api/summary') return handleSummary(request, response, state);
+    if (
+      url.pathname.startsWith('/api/') &&
+      url.pathname !== '/api/events' &&
+      !state.hasValidModel()
+    ) {
+      throw new HttpError(
+        503,
+        'Architecture workspace is invalid; fix diagnostics before querying or mutating it.',
+        'workspace-invalid'
+      );
+    }
+    if (url.pathname === '/api/model') return handleModel(request, response, state, options);
+    if (url.pathname === '/api/summary') return handleSummary(request, response, state, options);
     if (url.pathname.startsWith('/api/elements/'))
-      return handleElement(request, response, state, url);
+      return handleElement(request, response, state, url, options);
     if (url.pathname === '/api/source-preview')
       return await handleSource(request, response, state, options);
-    if (url.pathname === '/api/threads') return await handleCreateThread(request, response, state);
+    if (url.pathname === '/api/threads') {
+      return await handleCreateThread(request, response, state, options);
+    }
     if (url.pathname.startsWith('/api/threads/') && url.pathname.endsWith('/replies')) {
-      return await handleReply(request, response, state, url);
+      return await handleReply(request, response, state, url, options);
     }
     if (url.pathname === '/api/events') return handleEvents(request, response, events);
     if (request.method === 'GET' || request.method === 'HEAD') {
@@ -111,22 +157,33 @@ function handleHealth(
 function handleModel(
   request: IncomingMessage,
   response: ServerResponse,
-  state: WorkspaceState
+  state: WorkspaceState,
+  options: ArchitectureServerOptions
 ): void {
   requireMethod(request.method, 'GET');
   const loaded = state.current();
-  sendJson(response, 200, makeViewerModel(loaded.workspace, loaded.diagnostics));
+  sendJson(
+    response,
+    200,
+    makeViewerModel(
+      loaded.workspace,
+      loaded.diagnostics,
+      resolvedViewerLimits(options),
+      resolvedViewerInteraction(options)
+    )
+  );
 }
 
 function handleSummary(
   request: IncomingMessage,
   response: ServerResponse,
-  state: WorkspaceState
+  state: WorkspaceState,
+  options: ArchitectureServerOptions
 ): void {
   requireMethod(request.method, 'GET');
   const loaded = state.current();
   sendJson(response, 200, {
-    summary: getWorkspaceSummary(loaded.workspace),
+    summary: getWorkspaceSummary(loaded.workspace, options.queryLimits),
     diagnostics: loaded.diagnostics,
   });
 }
@@ -135,11 +192,16 @@ function handleElement(
   request: IncomingMessage,
   response: ServerResponse,
   state: WorkspaceState,
-  url: URL
+  url: URL,
+  options: ArchitectureServerOptions
 ): void {
   requireMethod(request.method, 'GET');
   const elementId = decodeURIComponent(url.pathname.slice('/api/elements/'.length));
-  const details = makeElementDetails(state.current().workspace, elementId);
+  const details = makeElementDetails(
+    state.current().workspace,
+    elementId,
+    resolvedViewerLimits(options)
+  );
   if (!details) throw new HttpError(404, `Element not found: ${elementId}`, 'element-not-found');
   sendJson(response, 200, { details });
 }
@@ -151,7 +213,12 @@ async function handleSource(
   options: ArchitectureServerOptions
 ): Promise<void> {
   requireMethod(request.method, 'POST');
-  const body = await readJsonBody(request, sourcePreviewRequestSchema);
+  const body = await readJsonBody(
+    request,
+    requestSchemas(options).sourcePreview,
+    options.maxBodyBytes ?? DEFAULT_SERVER_BODY_BYTES,
+    options.validationIssueLimit ?? DEFAULT_VALIDATION_ISSUE_LIMIT
+  );
   const refs = sourceRefsForTarget(state.current().workspace, body.target);
   const sourceRef = refs?.[body.sourceIndex];
   if (!sourceRef)
@@ -164,6 +231,7 @@ async function handleSource(
     );
   }
   const preview = await readSourceReference(state.current().workspace, sourceRef, {
+    contextLines: options.sourceContextLines ?? DEFAULT_SOURCE_CONTEXT_LINES,
     maxBytes: options.maxSourceBytes ?? DEFAULT_SERVER_SOURCE_BYTES,
   });
   sendJson(response, 200, { preview });
@@ -172,15 +240,23 @@ async function handleSource(
 async function handleCreateThread(
   request: IncomingMessage,
   response: ServerResponse,
-  state: WorkspaceState
+  state: WorkspaceState,
+  options: ArchitectureServerOptions = {}
 ): Promise<void> {
   requireMethod(request.method, 'POST');
-  const body = await readJsonBody(request, createThreadRequestSchema);
+  const body = await readJsonBody(
+    request,
+    requestSchemas(options).createThread,
+    options.maxBodyBytes ?? DEFAULT_SERVER_BODY_BYTES,
+    options.validationIssueLimit ?? DEFAULT_VALIDATION_ISSUE_LIMIT
+  );
   if (!resolveArchitectureTarget(state.current().workspace, body.target)) {
     throw new HttpError(404, `Thread target not found: ${body.target}`, 'thread-target-not-found');
   }
   const thread = await createThread({
     workspaceRoot: state.current().workspace.workspaceRoot,
+    threadsDir: state.current().workspace.manifest.threadsDir,
+    limits: options.threadLimits,
     ...body,
   });
   await state.reload('thread-create');
@@ -191,18 +267,26 @@ async function handleReply(
   request: IncomingMessage,
   response: ServerResponse,
   state: WorkspaceState,
-  url: URL
+  url: URL,
+  options: ArchitectureServerOptions = {}
 ): Promise<void> {
   requireMethod(request.method, 'POST');
   const threadId = decodeURIComponent(
     url.pathname.slice('/api/threads/'.length, -'/replies'.length)
   );
-  const body = await readJsonBody(request, replyRequestSchema);
+  const body = await readJsonBody(
+    request,
+    requestSchemas(options).reply,
+    options.maxBodyBytes ?? DEFAULT_SERVER_BODY_BYTES,
+    options.validationIssueLimit ?? DEFAULT_VALIDATION_ISSUE_LIMIT
+  );
   if (!state.current().workspace.indexes.threadsById.has(threadId)) {
     throw new HttpError(404, `Thread not found: ${threadId}`, 'thread-not-found');
   }
   const message = await appendThreadReply({
     workspaceRoot: state.current().workspace.workspaceRoot,
+    threadsDir: state.current().workspace.manifest.threadsDir,
+    limits: options.threadLimits,
     threadId,
     ...body,
   });
@@ -218,7 +302,9 @@ function handleEvents(request: IncomingMessage, response: ServerResponse, events
 
 async function threadArtifactPath(state: WorkspaceState, threadId: string): Promise<string> {
   const location = state.current().workspace.indexes.threadsById.get(threadId)?.location.file;
-  if (!location) return `threads/${threadId}.thread.md`;
+  if (!location) {
+    return `${state.current().workspace.manifest.threadsDir ?? DEFAULT_THREADS_DIR}/${threadId}.thread.md`;
+  }
   return path.relative(
     await realpath(state.current().workspace.repoRoot),
     path.join(state.current().workspace.workspaceRoot, location)
@@ -227,6 +313,48 @@ async function threadArtifactPath(state: WorkspaceState, threadId: string): Prom
 
 function isLoopbackHost(host: string): boolean {
   return host === '127.0.0.1' || host === 'localhost' || host === '::1';
+}
+
+function requestSchemas(options: ArchitectureServerOptions) {
+  const threadLimits = { ...DEFAULT_THREAD_CONTENT_LIMITS, ...options.threadLimits };
+  return makeRequestSchemas({
+    threadAuthorChars: threadLimits.authorChars,
+    threadBodyChars: threadLimits.bodyChars,
+    threadTitleChars: threadLimits.titleChars,
+    sourcePathChars: options.maxSourcePathChars ?? DEFAULT_SOURCE_PATH_LIMIT,
+  });
+}
+
+function resolvedViewerLimits(options: ArchitectureServerOptions): ViewerLimits {
+  return { ...DEFAULT_VIEWER_LIMITS, ...options.viewerLimits };
+}
+
+function resolvedViewerInteraction(options: ArchitectureServerOptions): ViewerInteraction {
+  return { ...DEFAULT_VIEWER_INTERACTION, ...options.viewerInteraction };
+}
+
+function validateRequestAuthority(request: IncomingMessage, expectedAuthority: string): void {
+  const requestHost = request.headers.host;
+  if (requestHost !== expectedAuthority) {
+    throw new HttpError(
+      403,
+      'Request host is not allowed by this architecture server.',
+      'host-forbidden'
+    );
+  }
+  const origin = request.headers.origin;
+  if (Array.isArray(origin) || (origin !== undefined && origin !== `http://${expectedAuthority}`)) {
+    throw new HttpError(
+      403,
+      'Cross-origin requests are not allowed by this architecture server.',
+      'origin-forbidden'
+    );
+  }
+}
+
+function formatAuthority(host: string, port: number): string {
+  const formattedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  return `${formattedHost}:${port}`;
 }
 
 function listen(server: Server, port: number, host: string): Promise<void> {

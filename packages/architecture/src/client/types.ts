@@ -75,8 +75,13 @@ export interface StructureSlice {
 
 export interface FlowSlice {
   flows: ArchitectureFlow[];
+  omittedFlows: number;
+  omittedSteps: number;
 }
 
 export interface StateSlice {
   machines: ArchitectureStateMachine[];
+  omittedMachines: number;
+  omittedStates: number;
+  omittedTransitions: number;
 }

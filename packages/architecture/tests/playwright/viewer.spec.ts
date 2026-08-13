@@ -1,4 +1,4 @@
-import { mkdir, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 import { expect, type Page, test } from '@playwright/test';
@@ -25,7 +25,28 @@ test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
   const apiButton = page.getByRole('button', { name: /API component/ }).first();
   await apiButton.focus();
   await apiButton.press('Enter');
-  await expect(page.getByLabel('Architecture inspector')).toContainText('API component');
+  const inspector = page.locator('aside[aria-label="Architecture inspector"]');
+  await expect(inspector).toContainText('API component');
+  if (testInfo.project.name.startsWith('mobile')) {
+    await expect(inspector).toHaveAttribute('role', 'dialog');
+    const focusable = inspector.locator(
+      'button:not([disabled]), input:not([disabled]), textarea:not([disabled])'
+    );
+    await expect(focusable.first()).toBeFocused();
+    await screenshot(page, `viewer-inspector-open-${testInfo.project.name}`);
+    await page.keyboard.press('Shift+Tab');
+    await expect(focusable.last()).toBeFocused();
+    await focusable.last().focus();
+    await page.keyboard.press('Tab');
+    await expect(focusable.first()).toBeFocused();
+    await page.setViewportSize({ width: 900, height: 667 });
+    await expect(inspector).toHaveAttribute('role', 'complementary');
+    await expect(page.getByRole('button', { name: 'Close architecture inspector' })).toHaveCount(0);
+    await expect(page.locator('.topbar')).not.toHaveAttribute('inert', '');
+    await page.setViewportSize({ width: 375, height: 667 });
+    await apiButton.click();
+    await expect(inspector).toHaveAttribute('role', 'dialog');
+  }
   await page.keyboard.press('Escape');
   await expect(apiButton).toBeFocused();
 
@@ -36,6 +57,8 @@ test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
 
   await page.getByRole('button', { name: 'Flow' }).click();
   await expect(page.getByText('Select API')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Zoom in' })).toHaveCount(0);
+  await screenshot(page, `viewer-flow-${testInfo.project.name}`);
   await page.getByRole('button', { name: 'Open in structure' }).first().click();
   await expect(page).toHaveURL(/lens=structure/);
 
@@ -43,7 +66,12 @@ test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
   await expect(page.getByLabel('Task state transition list')).toContainText(
     'queued → running when start'
   );
+  await expect(page.getByRole('button', { name: 'Zoom in' })).toHaveCount(0);
+  await screenshot(page, `viewer-state-${testInfo.project.name}`);
   await page.getByRole('button', { name: 'Structure' }).click();
+
+  await page.getByRole('button', { name: 'Zoom in' }).click();
+  await expect(page.getByLabel('Canvas zoom')).toHaveText('113%');
 
   const structureCanvas = page.getByRole('region', { name: 'structure architecture canvas' });
   await structureCanvas.getByRole('button', { name: /API component/ }).click();
@@ -60,6 +88,21 @@ test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
   await page.getByLabel(/Reply to Browser question/).fill('Browser reply');
   await page.getByRole('button', { name: 'Reply' }).last().click();
   await expect(page.getByText(/Browser reply/)).toBeVisible();
+
+  const threadFiles = await readdir(path.join(FIXTURE_ROOT, 'architecture/threads'));
+  const threadFile = threadFiles.find((file) => file.endsWith('.thread.md'));
+  expect(threadFile).toBeDefined();
+  await appendFile(
+    path.join(FIXTURE_ROOT, 'architecture/threads', threadFile!),
+    `\n<!-- arch-message id: msg-direct-edit
+author: agent
+createdAt: '2026-08-13T00:02:00.000Z' -->
+Reply added by direct file edit
+`
+  );
+  await expect(page.getByText('Reply added by direct file edit')).toBeVisible();
+
+  if (testInfo.project.name.startsWith('mobile')) await page.keyboard.press('Escape');
 
   await writeModel(normalModel('API renamed by file edit'));
   await expect(
@@ -84,19 +127,51 @@ test('responsive normal, long, empty, invalid, many, and special-character state
   await writeModel(emptyModel());
   await expect(page.getByText('Empty architecture workspace')).toBeVisible();
   await assertNoOverflow(page);
+  await screenshot(page, `viewer-empty-${testInfo.project.name}`);
 
   await writeModel('version: 1\nname: Broken\nelements:\n  - id: api\n');
-  await expect(page.getByText(/Invalid workspace edit detected/)).toBeAttached();
+  await expect(page.getByRole('alert')).toContainText('Invalid workspace edit detected');
+  await screenshot(page, `viewer-invalid-${testInfo.project.name}`);
 
   await writeModel(manyModel());
   await expect(page.getByText('Node 34')).toBeVisible();
   await assertNoOverflow(page);
+  const canvas = page.getByRole('region', { name: 'structure architecture canvas' });
+  await canvas.focus();
+  const beforePan = await canvas.evaluate((element) => element.scrollTop);
+  await page.keyboard.press('ArrowDown');
+  await expect
+    .poll(() => canvas.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(beforePan);
+  await screenshot(page, `viewer-many-${testInfo.project.name}`);
+  await page.getByRole('button', { name: 'Reset view' }).click();
 
   await writeModel(specialModel());
   await expect(page.getByText('Literal <script>alert(1)</script>')).toBeVisible();
   expect(await page.locator('script', { hasText: 'alert(1)' }).count()).toBe(0);
   await assertNoOverflow(page);
   await screenshot(page, `viewer-special-${testInfo.project.name}`);
+
+  if (testInfo.project.name.startsWith('mobile')) {
+    await page.setViewportSize({ width: 320, height: 700 });
+    await assertNoOverflow(page);
+    await screenshot(page, `viewer-320-${testInfo.project.name}`);
+  }
+});
+
+test('renders a bounded API error state', async ({ page }, testInfo) => {
+  await page.route('**/api/model', async (route) => {
+    await route.fulfill({
+      body: JSON.stringify({ error: { message: 'Simulated model API failure' } }),
+      contentType: 'application/json',
+      status: 500,
+    });
+  });
+  await page.goto('/');
+  await expect(page.getByRole('heading', { name: 'Invalid workspace' })).toBeVisible();
+  await expect(page.getByText('Simulated model API failure')).toBeVisible();
+  await assertNoOverflow(page);
+  await screenshot(page, `viewer-api-error-${testInfo.project.name}`);
 });
 
 async function screenshot(page: Page, name: string): Promise<void> {
@@ -138,14 +213,29 @@ async function assertControlBounds(page: Page): Promise<void> {
   const bounds = await page.evaluate(() => {
     const selectors = ['.architecture-app', '.lens-tabs', '.architecture-inspector'];
     const width = window.innerWidth;
+    const height = window.innerHeight;
     return selectors.map((selector) => {
       const rect = document.querySelector(selector)?.getBoundingClientRect();
-      return { selector, left: rect?.left ?? 0, right: rect?.right ?? 0, width };
+      return {
+        selector,
+        bottom: rect?.bottom ?? 0,
+        visibleInspector:
+          selector !== '.architecture-inspector' ||
+          width > 760 ||
+          document.querySelector(selector)?.classList.contains('is-open') === true,
+        left: rect?.left ?? 0,
+        right: rect?.right ?? 0,
+        width,
+        height,
+      };
     });
   });
   for (const bound of bounds) {
     expect(bound.left, bound.selector).toBeGreaterThanOrEqual(0);
     expect(bound.right, bound.selector).toBeLessThanOrEqual(bound.width);
+    if (bound.selector === '.architecture-inspector' && bound.visibleInspector) {
+      expect(bound.bottom, bound.selector).toBeLessThanOrEqual(bound.height);
+    }
   }
 }
 

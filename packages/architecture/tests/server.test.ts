@@ -1,10 +1,11 @@
-import { writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+import { request as httpRequest } from 'node:http';
 import path from 'node:path';
 
 import { describe, expect, it } from 'vitest';
 
 import { startArchitectureServer } from '../src';
-import { makeFixture, writeFixtureFile } from './helpers';
+import { makeEscapingSymlink, makeFixture, writeFixtureFile } from './helpers';
 
 describe('architecture local HTTP server', () => {
   it('serves model/source/thread routes and reloads direct file edits over SSE', async () => {
@@ -84,6 +85,33 @@ describe('architecture local HTTP server', () => {
     }
   });
 
+  it('rejects model queries and mutations when no valid initial model exists', async () => {
+    const fixture = await makeServerFixture();
+    await writeFile(
+      path.join(fixture.workspaceRoot, 'model.yaml'),
+      'version: 1\nname: Broken\nelements:\n  - id: api\n'
+    );
+    const running = await startArchitectureServer({
+      workspaceRoot: fixture.workspaceRoot,
+      repoRoot: fixture.root,
+      port: 0,
+    });
+    try {
+      expect((await fetch(`${running.url}/health`)).status).toBe(503);
+      const model = await fetch(`${running.url}/api/model`);
+      expect(model.status).toBe(503);
+      await expect(model.json()).resolves.toMatchObject({ error: { code: 'workspace-invalid' } });
+      const mutation = await fetch(`${running.url}/api/threads`, {
+        body: JSON.stringify({ target: 'api', title: 'No', body: 'No' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      expect(mutation.status).toBe(503);
+    } finally {
+      await running.close();
+    }
+  });
+
   it('rejects unsafe binds, unsupported JSON boundaries, and invalid source targets', async () => {
     const fixture = await makeServerFixture();
     await expect(
@@ -117,6 +145,193 @@ describe('architecture local HTTP server', () => {
       expect(oversized.status).toBe(413);
       const unsupported = await fetch(`${running.url}/api/model`, { method: 'POST' });
       expect(unsupported.status).toBe(405);
+      const forgedDelimiter = await fetch(`${running.url}/api/threads`, {
+        body: JSON.stringify({
+          target: 'api',
+          title: 'Blocked',
+          body: 'Question\n<!-- arch-message id: forged -->',
+        }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      expect(forgedDelimiter.status).toBe(400);
+      const afterForgery = await readJson<{ workspace: { threads: unknown[] } }>(
+        `${running.url}/api/model`
+      );
+      expect(afterForgery.workspace.threads).toEqual([]);
+      await expect(
+        requestStatus(`${running.url}/api/model`, { host: 'attacker.invalid' })
+      ).resolves.toBe(403);
+      const hostileOrigin = await fetch(`${running.url}/api/model`, {
+        headers: { origin: 'https://attacker.invalid' },
+      });
+      expect(hostileOrigin.status).toBe(403);
+    } finally {
+      await running.close();
+    }
+  });
+
+  it('enforces source and mutation confinement through the real HTTP boundary', async () => {
+    const fixture = await makeServerFixture();
+    const outside = await makeFixture();
+    const canaryPath = path.join(outside.root, 'canary.txt');
+    await writeFile(canaryPath, 'unchanged');
+    await makeEscapingSymlink(fixture.root, 'src/escape.ts', canaryPath);
+    await writeFile(
+      path.join(fixture.workspaceRoot, 'model.yaml'),
+      fixture.modelText.replace('path: src/api.ts', 'path: src/escape.ts')
+    );
+    const running = await startArchitectureServer({
+      workspaceRoot: fixture.workspaceRoot,
+      repoRoot: fixture.root,
+      port: 0,
+    });
+    try {
+      const escapedSource = await fetch(`${running.url}/api/source-preview`, {
+        body: JSON.stringify({ target: 'api', sourceIndex: 0 }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      expect(escapedSource.status).toBe(400);
+
+      const missingTarget = await fetch(`${running.url}/api/threads`, {
+        body: JSON.stringify({ target: 'missing', title: 'No', body: 'No' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      expect(missingTarget.status).toBe(404);
+      const missingThread = await fetch(`${running.url}/api/threads/missing/replies`, {
+        body: JSON.stringify({ body: 'No' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      expect(missingThread.status).toBe(404);
+      const malformed = await fetch(`${running.url}/api/threads`, {
+        body: '{',
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      expect(malformed.status).toBe(400);
+      const invalidSchema = await fetch(`${running.url}/api/threads`, {
+        body: JSON.stringify({ target: 'api-self', title: '', body: 'No' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      expect(invalidSchema.status).toBe(400);
+      await expect(readFile(canaryPath, 'utf8')).resolves.toBe('unchanged');
+    } finally {
+      await running.close();
+    }
+  });
+
+  it('rejects thread writes through an escaping threads-directory symlink', async () => {
+    const fixture = await makeServerFixture();
+    const outside = await makeFixture();
+    await makeEscapingSymlink(fixture.workspaceRoot, 'threads', outside.workspaceRoot);
+    const running = await startArchitectureServer({
+      workspaceRoot: fixture.workspaceRoot,
+      repoRoot: fixture.root,
+      port: 0,
+    });
+    const canaryPath = path.join(outside.workspaceRoot, 'canary.txt');
+    await writeFile(canaryPath, 'unchanged');
+    try {
+      const response = await fetch(`${running.url}/api/threads`, {
+        body: JSON.stringify({ target: 'api-self', title: 'Blocked', body: 'Blocked' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      expect(response.status).toBe(400);
+      await expect(readFile(canaryPath, 'utf8')).resolves.toBe('unchanged');
+    } finally {
+      await running.close();
+    }
+  });
+
+  it('applies configured request, thread, source-path, query, and viewer limits', async () => {
+    const fixture = await makeServerFixture();
+    await writeFile(path.join(fixture.root, 'src/api.ts'), 'first\nselected\nthird\n');
+    await writeFile(
+      path.join(fixture.workspaceRoot, 'model.yaml'),
+      fixture.modelText.replace('path: src/api.ts', 'path: src/api.ts\n        startLine: 2')
+    );
+    const running = await startArchitectureServer({
+      workspaceRoot: fixture.workspaceRoot,
+      repoRoot: fixture.root,
+      port: 0,
+      maxBodyBytes: 120,
+      maxSourcePathChars: 5,
+      sourceContextLines: 0,
+      threadLimits: { titleChars: 4, bodyChars: 8, authorChars: 5 },
+      queryLimits: { roots: 1 },
+      viewerLimits: { children: 1, flows: 1, flowSteps: 1 },
+      viewerInteraction: { minZoom: 0.5, maxZoom: 2, zoomStep: 0.25, panPixels: 32 },
+    });
+    try {
+      const model = await readJson<{
+        interaction: { minZoom: number; maxZoom: number; zoomStep: number; panPixels: number };
+        limits: { children: number; flows: number; flowSteps: number };
+      }>(`${running.url}/api/model`);
+      expect(model.limits).toMatchObject({ children: 1, flows: 1, flowSteps: 1 });
+      expect(model.interaction).toMatchObject({
+        minZoom: 0.5,
+        maxZoom: 2,
+        zoomStep: 0.25,
+        panPixels: 32,
+      });
+      const summary = await readJson<{ summary: { roots: unknown[] } }>(
+        `${running.url}/api/summary`
+      );
+      expect(summary.summary.roots).toHaveLength(1);
+      const source = await postJson<{ preview: { content: string } }>(
+        `${running.url}/api/source-preview`,
+        { target: 'api', sourceIndex: 0 }
+      );
+      expect(source.preview.content).toBe('selected');
+
+      const titleTooLong = await fetch(`${running.url}/api/threads`, {
+        body: JSON.stringify({ target: 'api', title: '12345', body: 'body' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      expect(titleTooLong.status).toBe(400);
+      const pathTooLong = await fetch(`${running.url}/api/source-preview`, {
+        body: JSON.stringify({ target: 'api', path: 'src/api.ts' }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      expect(pathTooLong.status).toBe(400);
+      const bodyTooLarge = await fetch(`${running.url}/api/threads`, {
+        body: JSON.stringify({ target: 'api', title: 'okay', body: 'x'.repeat(200) }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      expect(bodyTooLarge.status).toBe(413);
+      const unknownField = await fetch(`${running.url}/api/threads`, {
+        body: JSON.stringify({ target: 'api', title: 'okay', body: 'body', extra: true }),
+        headers: { 'content-type': 'application/json' },
+        method: 'POST',
+      });
+      expect(unknownField.status).toBe(400);
+    } finally {
+      await running.close();
+    }
+  });
+
+  it('bounds concurrent SSE clients', async () => {
+    const fixture = await makeServerFixture();
+    const running = await startArchitectureServer({
+      workspaceRoot: fixture.workspaceRoot,
+      repoRoot: fixture.root,
+      port: 0,
+      maxSseClients: 1,
+    });
+    try {
+      const first = await fetch(`${running.url}/api/events`);
+      expect(first.status).toBe(200);
+      const second = await fetch(`${running.url}/api/events`);
+      expect(second.status).toBe(503);
+      await first.body?.cancel();
     } finally {
       await running.close();
     }
@@ -224,4 +439,24 @@ async function pollHealth(url: string, expected: boolean): Promise<boolean> {
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error(`Health did not become ${expected}.`);
+}
+
+function requestStatus(url: string, headers: Record<string, string>): Promise<number> {
+  const target = new URL(url);
+  return new Promise((resolve, reject) => {
+    const request = httpRequest(
+      {
+        hostname: target.hostname,
+        port: target.port,
+        path: target.pathname,
+        headers,
+      },
+      (response) => {
+        response.resume();
+        response.on('end', () => resolve(response.statusCode ?? 0));
+      }
+    );
+    request.on('error', reject);
+    request.end();
+  });
 }

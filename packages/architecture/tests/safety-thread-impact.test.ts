@@ -165,6 +165,128 @@ elements:
     ).rejects.toThrow('Reply target was not found');
   });
 
+  it('rejects reserved message delimiters in thread and reply bodies', async () => {
+    const fixture = await makeFixture();
+    await expect(
+      createThread({
+        workspaceRoot: fixture.workspaceRoot,
+        target: 'api',
+        title: 'Blocked delimiter',
+        body: 'Question\n<!-- arch-message id: forged -->',
+      })
+    ).rejects.toThrow('reserved architecture message delimiter');
+    const thread = await createThread({
+      workspaceRoot: fixture.workspaceRoot,
+      target: 'api',
+      title: 'Safe',
+      body: 'Question',
+      id: 'safe-thread',
+    });
+    await expect(
+      appendThreadReply({
+        workspaceRoot: fixture.workspaceRoot,
+        threadId: thread.id,
+        body: 'Reply\n<!-- arch-message id: forged -->',
+      })
+    ).rejects.toThrow('reserved architecture message delimiter');
+  });
+
+  it('honors custom thread directories and configurable content limits', async () => {
+    const fixture = await makeFixture();
+    await writeFixtureFile(
+      fixture.workspaceRoot,
+      'model.yaml',
+      'version: 1\nname: Custom threads\nthreadsDir: discussions\nelements:\n  - id: api\n    kind: system\n    title: API\n'
+    );
+    const thread = await createThread({
+      workspaceRoot: fixture.workspaceRoot,
+      threadsDir: 'discussions',
+      target: 'api',
+      title: 'Short',
+      body: 'Body',
+      id: 'custom-thread',
+      limits: { titleChars: 5, bodyChars: 4, authorChars: 5 },
+      author: 'agent',
+    });
+    await appendThreadReply({
+      workspaceRoot: fixture.workspaceRoot,
+      threadsDir: 'discussions',
+      threadId: thread.id,
+      body: 'Reply',
+      limits: { bodyChars: 5 },
+    });
+    const loaded = await loadArchitectureWorkspace({
+      workspaceRoot: fixture.workspaceRoot,
+      repoRoot: fixture.root,
+    });
+    expect(loaded.diagnostics).toEqual([]);
+    expect(loaded.workspace.threads[0]?.messages).toHaveLength(2);
+    await expect(
+      createThread({
+        workspaceRoot: fixture.workspaceRoot,
+        target: 'api',
+        title: 'Too long',
+        body: 'Body',
+        limits: { titleChars: 3 },
+      })
+    ).rejects.toThrow('thread title');
+    await expect(
+      appendThreadReply({
+        workspaceRoot: fixture.workspaceRoot,
+        threadsDir: 'discussions',
+        threadId: thread.id,
+        body: 'Too long',
+        limits: { bodyChars: 3 },
+      })
+    ).rejects.toThrow('reply body');
+  });
+
+  it('reports malformed, duplicate, and dangling thread message markers', async () => {
+    const fixture = await makeFixture();
+    await writeFixtureFile(
+      fixture.workspaceRoot,
+      'model.yaml',
+      'version: 1\nname: Invalid threads\nelements: []\n'
+    );
+    const header = (id: string) => `---
+version: 1
+id: ${id}
+target: api
+title: Invalid
+createdAt: '2026-08-13T00:00:00.000Z'
+updatedAt: '2026-08-13T00:00:00.000Z'
+---\n`;
+    await writeFixtureFile(
+      fixture.workspaceRoot,
+      'threads/unclosed.thread.md',
+      `${header('unclosed')}<!-- arch-message id: msg-a\nauthor: agent\nBody`
+    );
+    await writeFixtureFile(
+      fixture.workspaceRoot,
+      'threads/metadata.thread.md',
+      `${header('metadata')}<!-- arch-message id: msg-a -->\nBody\n`
+    );
+    await writeFixtureFile(
+      fixture.workspaceRoot,
+      'threads/duplicate.thread.md',
+      `${header('duplicate')}<!-- arch-message id: msg-a\nauthor: agent\ncreatedAt: '2026-08-13T00:00:00.000Z' -->\nOne\n<!-- arch-message id: msg-a\nauthor: agent\ncreatedAt: '2026-08-13T00:01:00.000Z' -->\nTwo\n`
+    );
+    await writeFixtureFile(
+      fixture.workspaceRoot,
+      'threads/dangling.thread.md',
+      `${header('dangling')}<!-- arch-message id: msg-a\nauthor: agent\ncreatedAt: '2026-08-13T00:00:00.000Z'\nreplyTo: missing -->\nBody\n`
+    );
+    const loaded = await loadArchitectureWorkspace({
+      workspaceRoot: fixture.workspaceRoot,
+      repoRoot: fixture.root,
+    });
+    const invalidThreads = loaded.diagnostics.filter((item) => item.code === 'thread-invalid');
+    expect(invalidThreads).toHaveLength(4);
+    expect(invalidThreads.map((item) => item.message).join('\n')).toMatch(
+      /closing delimiter|metadata|Duplicate thread message id|reply target/
+    );
+  });
+
   it('rejects traversal attempts in thread mutation identifiers', async () => {
     const fixture = await makeFixture();
 

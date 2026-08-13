@@ -3,7 +3,7 @@ import { defineConfig } from 'vite';
 
 export default defineConfig({
   build: {
-    emptyOutDir: true,
+    emptyOutDir: false,
     outDir: 'dist/viewer',
     rollupOptions: {
       input: 'viewer.html',

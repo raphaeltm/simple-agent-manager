@@ -115,14 +115,14 @@ The requested end state is broader than this first PR: humans should eventually 
 - [x] E1. Add unit tests for valid/invalid schemas, deterministic loading, duplicate/dangling IDs, bounded queries, source confinement, atomic thread/reply writes, inbox behavior, and diff impact mapping.
 - [x] E2. Add an integration test that starts the real server, exercises the model/source/thread APIs, observes an SSE update after a direct file write, and verifies the new thread/reply files reload into the compiled model.
 - [x] E3. Add browser interaction/visual coverage at 375×667 and 1280×800 for drill-down, lenses, source navigation, comment creation/reply, long text, empty/many/error states, and overflow/clipping assertions.
-- [ ] E4. Run package checks and the complete repository lint, typecheck, test, and build suite.
-- [ ] E5. Run task-completion, test, documentation-sync, constitution, UI/UX, and security reviews; address every blocking finding.
+- [x] E4. Run package checks and the complete repository lint, typecheck, test, and build suite.
+- [x] E5. Run task-completion, test, documentation-sync, constitution, UI/UX, and security reviews; address every blocking finding.
 - [ ] E6. Deploy the final branch to staging as required by the repository workflow and confirm the unrelated deployed SAM application remains healthy; feature behavior itself is validated through the package's real local server because the prototype is not mounted in the production app.
 
 ## Acceptance Criteria
 
 1. `pnpm architecture:validate` validates the checked-in SAM architecture workspace and produces actionable errors for invalid copies.
-2. `pnpm architecture:summary -- --json` and `show` give an agent bounded, layout-free architectural context with stable IDs and source references.
+2. `pnpm --silent architecture:summary -- --json` and `show` give an agent bounded, layout-free architectural context with stable IDs and source references.
 3. `pnpm architecture:serve` starts a configurable loopback local server and displays a semantic drill-down viewer for the checked-in workspace.
 4. A human can select a modeled item, inspect its relationships and validated source snippet, create a question, and reply; the resulting reviewable files appear under `architecture/threads/`.
 5. A direct architecture/thread file edit made by an agent is reflected in the browser through SSE without restarting the server.
@@ -136,6 +136,13 @@ The requested end state is broader than this first PR: humans should eventually 
 - Automatic AST/LSP architecture extraction is deferred; this PR only establishes source references and impact hooks that future extractors can feed.
 - Multi-user remote hosting, authentication, and cloud synchronization are deferred; the prototype is a local loopback developer tool.
 - Import/export adapters for LikeC4, Rivière, Mermaid, and Structurizr are deferred until the neutral model and collaboration loop have been dogfooded.
+
+## Verification Evidence
+
+- Full repository: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` passed on 2026-08-13. The test suite completed 23 Turborepo tasks, including 7,193 API tests and 3,077 web tests.
+- Architecture package: 42 unit/integration tests passed with 89.11% line coverage and 73.63% branch coverage. Six real-server Playwright scenarios passed at 375x667 and 1280x800, with an additional 320px overflow audit and screenshots for Structure, Flow, State, the open mobile inspector/backdrop, empty, invalid, many-record, long-content, special-character, and API-error states.
+- Workspace commands: validate reported no diagnostics; summary compiled 19 elements, 21 relationships, three flows, one state machine, and three views; show, inbox, and impact queries returned bounded results successfully.
+- Repository policy: `pnpm quality:file-sizes` passed with no file over 800 lines.
 
 ## References
 

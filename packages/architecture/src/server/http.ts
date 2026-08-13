@@ -21,7 +21,8 @@ export async function readJsonBody<
 >(
   request: IncomingMessage,
   schema: TSchema,
-  maxBytes = DEFAULT_SERVER_BODY_BYTES
+  maxBytes = DEFAULT_SERVER_BODY_BYTES,
+  validationIssueLimit = DEFAULT_VALIDATION_ISSUE_LIMIT
 ): Promise<v.InferOutput<TSchema>> {
   expectJsonContentType(request);
   const raw = await readBody(request, maxBytes);
@@ -33,7 +34,11 @@ export async function readJsonBody<
   }
   const result = v.safeParse(schema, parsed);
   if (!result.success) {
-    throw new HttpError(400, summarizeIssues(result.issues), 'json-schema-invalid');
+    throw new HttpError(
+      400,
+      summarizeIssues(result.issues, validationIssueLimit),
+      'json-schema-invalid'
+    );
   }
   return result.output;
 }
@@ -80,11 +85,11 @@ async function readBody(request: IncomingMessage, maxBytes: number): Promise<str
   return Buffer.concat(chunks).toString('utf8');
 }
 
-function summarizeIssues(issues: readonly v.BaseIssue<unknown>[]): string {
+function summarizeIssues(issues: readonly v.BaseIssue<unknown>[], limit: number): string {
   const paths = issues
     .map((issue) => issue.path?.map((item) => String(item.key)).join('.'))
     .filter((path): path is string => Boolean(path));
-  const visiblePaths = paths.slice(0, DEFAULT_VALIDATION_ISSUE_LIMIT);
+  const visiblePaths = paths.slice(0, limit);
   const suffix = paths.length > 0 ? ` Invalid fields: ${visiblePaths.join(', ')}.` : '';
   return `Request JSON does not match the expected shape.${suffix}`;
 }

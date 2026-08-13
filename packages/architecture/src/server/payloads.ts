@@ -1,4 +1,17 @@
-import { DEFAULT_VIEWER_CHILD_LIMIT, DEFAULT_VIEWER_RELATIONSHIP_LIMIT } from '../constants';
+import {
+  DEFAULT_VIEWER_CHILD_LIMIT,
+  DEFAULT_VIEWER_FLOW_LIMIT,
+  DEFAULT_VIEWER_FLOW_STEP_LIMIT,
+  DEFAULT_VIEWER_MAX_ZOOM,
+  DEFAULT_VIEWER_MIN_ZOOM,
+  DEFAULT_VIEWER_MOBILE_BREAKPOINT_PX,
+  DEFAULT_VIEWER_PAN_PIXELS,
+  DEFAULT_VIEWER_RELATIONSHIP_LIMIT,
+  DEFAULT_VIEWER_STATE_LIMIT,
+  DEFAULT_VIEWER_STATE_MACHINE_LIMIT,
+  DEFAULT_VIEWER_TRANSITION_LIMIT,
+  DEFAULT_VIEWER_ZOOM_STEP,
+} from '../constants';
 import type { ArchitectureDiagnostic } from '../diagnostics';
 import { getWorkspaceSummary, showElement } from '../queries';
 import type {
@@ -13,9 +26,47 @@ import type { CompiledWorkspace } from '../types';
 
 export type LensName = 'structure' | 'flow' | 'state';
 
+export interface ViewerLimits {
+  children: number;
+  flowSteps: number;
+  flows: number;
+  relationships: number;
+  stateMachines: number;
+  states: number;
+  transitions: number;
+}
+
+export const DEFAULT_VIEWER_LIMITS: ViewerLimits = {
+  children: DEFAULT_VIEWER_CHILD_LIMIT,
+  flowSteps: DEFAULT_VIEWER_FLOW_STEP_LIMIT,
+  flows: DEFAULT_VIEWER_FLOW_LIMIT,
+  relationships: DEFAULT_VIEWER_RELATIONSHIP_LIMIT,
+  stateMachines: DEFAULT_VIEWER_STATE_MACHINE_LIMIT,
+  states: DEFAULT_VIEWER_STATE_LIMIT,
+  transitions: DEFAULT_VIEWER_TRANSITION_LIMIT,
+};
+
+export interface ViewerInteraction {
+  maxZoom: number;
+  minZoom: number;
+  mobileBreakpointPx: number;
+  panPixels: number;
+  zoomStep: number;
+}
+
+export const DEFAULT_VIEWER_INTERACTION: ViewerInteraction = {
+  maxZoom: DEFAULT_VIEWER_MAX_ZOOM,
+  minZoom: DEFAULT_VIEWER_MIN_ZOOM,
+  mobileBreakpointPx: DEFAULT_VIEWER_MOBILE_BREAKPOINT_PX,
+  panPixels: DEFAULT_VIEWER_PAN_PIXELS,
+  zoomStep: DEFAULT_VIEWER_ZOOM_STEP,
+};
+
 export interface ViewerModel {
   summary: ReturnType<typeof getWorkspaceSummary>;
   diagnostics: ArchitectureDiagnostic[];
+  interaction: ViewerInteraction;
+  limits: ViewerLimits;
   workspace: {
     name: string;
     description?: string;
@@ -29,11 +80,15 @@ export interface ViewerModel {
 
 export function makeViewerModel(
   workspace: CompiledWorkspace,
-  diagnostics: ArchitectureDiagnostic[]
+  diagnostics: ArchitectureDiagnostic[],
+  limits: ViewerLimits = DEFAULT_VIEWER_LIMITS,
+  interaction: ViewerInteraction = DEFAULT_VIEWER_INTERACTION
 ): ViewerModel {
   return {
     summary: getWorkspaceSummary(workspace),
     diagnostics,
+    interaction,
+    limits,
     workspace: {
       name: workspace.manifest.name,
       description: workspace.manifest.description,
@@ -46,11 +101,15 @@ export function makeViewerModel(
   };
 }
 
-export function makeElementDetails(workspace: CompiledWorkspace, elementId: string) {
+export function makeElementDetails(
+  workspace: CompiledWorkspace,
+  elementId: string,
+  limits = DEFAULT_VIEWER_LIMITS
+) {
   return showElement(workspace, elementId, {
-    children: DEFAULT_VIEWER_CHILD_LIMIT,
-    incoming: DEFAULT_VIEWER_RELATIONSHIP_LIMIT,
-    outgoing: DEFAULT_VIEWER_RELATIONSHIP_LIMIT,
+    children: limits.children,
+    incoming: limits.relationships,
+    outgoing: limits.relationships,
   });
 }
 

@@ -15,16 +15,19 @@ From the repository root:
 
 ```bash
 pnpm architecture:validate
-pnpm architecture:summary -- --json
-pnpm architecture:show -- sam.api --json
-pnpm architecture:inbox -- --json
+pnpm --silent architecture:summary -- --json
+pnpm --silent architecture:show -- sam.api --json
+pnpm --silent architecture:inbox -- --json
 pnpm architecture:impact -- apps/api/src/routes/device-flow.ts
 pnpm architecture:serve
 ```
 
 `architecture:serve` binds to loopback by default and prints the viewer URL.
 The browser and CLI consume the same compiled model. Source previews are limited
-to validated repository-relative references.
+to validated repository-relative references. Compact `summary`, `show`, and
+`inbox` output caps list, nested-record, text, and source-reference sizes so
+agents can request focused context without loading the full graph. `summary`
+and `show` also report omitted counts.
 
 ## Files
 
@@ -37,8 +40,10 @@ to validated repository-relative references.
 - `threads/` contains append-oriented review questions and replies created by
   the viewer or CLI. Each thread is independently diffable.
 
-Every record has a stable ID. Source references use repository-relative paths
-and optional one-based line ranges. Model descriptions state implemented
+Elements, relationships, flows/steps, state machines/states, views, threads,
+and messages have stable IDs; transitions use their owning machine plus
+from/to/event identity. Source references use repository-relative paths and
+optional one-based inclusive line ranges. Model descriptions state implemented
 behavior only when a concrete source path supports the claim.
 
 ## Maintain it

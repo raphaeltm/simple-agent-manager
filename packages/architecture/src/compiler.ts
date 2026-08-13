@@ -2,6 +2,7 @@ import path from 'node:path';
 
 import * as v from 'valibot';
 
+import { validateWorkspace } from './compiler-validation';
 import type { ArchitectureDiagnostic } from './diagnostics';
 import { parseWorkspaceDocument } from './document';
 import {
@@ -15,10 +16,9 @@ import {
   manifestSchema,
   workspaceDocumentSchema,
 } from './schemas';
-import { hasArchitectureTarget } from './targets';
 import type { CompiledWorkspace, Located, SourceLocation, WorkspaceIndexes } from './types';
 
-interface DocumentAccumulator {
+export interface DocumentAccumulator {
   manifest?: ArchitectureManifest;
   manifestLocation?: SourceLocation;
   elements: Located<ArchitectureElement>[];
@@ -41,38 +41,41 @@ export async function compileWorkspace(input: CompileInput): Promise<{
   diagnostics: ArchitectureDiagnostic[];
 }> {
   const diagnostics: ArchitectureDiagnostic[] = [];
-  const accumulator: DocumentAccumulator = {
-    elements: [],
-    relationships: [],
-    flows: [],
-    stateMachines: [],
-    views: [],
-    threads: [...input.threads],
-  };
+  const accumulator = createAccumulator(input.threads);
 
   for (const file of input.files) {
     await mergeDocument(input.workspaceRoot, file, accumulator, diagnostics);
   }
 
-  const manifest = accumulator.manifest ?? {
-    version: 1,
-    name: path.basename(input.workspaceRoot),
+  const indexes = buildIndexes(accumulator, diagnostics);
+  validateWorkspace(accumulator, indexes, diagnostics);
+  const workspace = buildCompiledWorkspace(input, accumulator, indexes, diagnostics);
+  return { workspace, diagnostics };
+}
+
+function createAccumulator(threads: Located<ArchitectureThread>[]): DocumentAccumulator {
+  return {
     elements: [],
     relationships: [],
     flows: [],
     stateMachines: [],
     views: [],
+    threads: [...threads],
   };
+}
 
-  const indexes = buildIndexes(accumulator, diagnostics);
-  validateReferences(accumulator, indexes, diagnostics);
-
+function buildCompiledWorkspace(
+  input: CompileInput,
+  accumulator: DocumentAccumulator,
+  indexes: WorkspaceIndexes,
+  diagnostics: ArchitectureDiagnostic[]
+): CompiledWorkspace {
+  const manifest = resolveManifest(input.workspaceRoot, accumulator, diagnostics);
   const elements = canonicalValues(accumulator.elements, 'id');
   const relationships = canonicalValues(accumulator.relationships, 'id');
   const flows = canonicalValues(accumulator.flows, 'id');
   const stateMachines = canonicalValues(accumulator.stateMachines, 'id');
   const views = canonicalValues(accumulator.views, 'id');
-  const threads = canonicalValues(accumulator.threads, 'id');
   const workspace: CompiledWorkspace = {
     workspaceRoot: input.workspaceRoot,
     repoRoot: input.repoRoot,
@@ -82,15 +85,35 @@ export async function compileWorkspace(input: CompileInput): Promise<{
     flows,
     stateMachines,
     views,
-    threads,
+    threads: canonicalValues(accumulator.threads, 'id'),
     indexes,
   };
-
   indexes.childrenByParent = buildChildren(workspace.elements);
   indexes.incomingByElement = groupRelationships(workspace.relationships, 'to');
   indexes.outgoingByElement = groupRelationships(workspace.relationships, 'from');
+  return workspace;
+}
 
-  return { workspace, diagnostics };
+function resolveManifest(
+  workspaceRoot: string,
+  accumulator: DocumentAccumulator,
+  diagnostics: ArchitectureDiagnostic[]
+): ArchitectureManifest {
+  if (accumulator.manifest) return accumulator.manifest;
+  diagnostics.push({
+    severity: 'error',
+    code: 'manifest-missing',
+    message: 'Architecture workspace must declare exactly one versioned manifest.',
+  });
+  return {
+    version: 1,
+    name: path.basename(workspaceRoot),
+    elements: [],
+    relationships: [],
+    flows: [],
+    stateMachines: [],
+    views: [],
+  };
 }
 
 async function mergeDocument(
@@ -99,6 +122,23 @@ async function mergeDocument(
   accumulator: DocumentAccumulator,
   diagnostics: ArchitectureDiagnostic[]
 ): Promise<void> {
+  const relativeFile = path.relative(workspaceRoot, file);
+  const document = await parseAndValidateDocument(file, relativeFile, diagnostics);
+  if (!document) return;
+  const location = { file: relativeFile, documentPath: '$' };
+  mergeManifest(document, location, accumulator, diagnostics);
+  pushLocated(accumulator.elements, document.elements, location, 'elements');
+  pushLocated(accumulator.relationships, document.relationships, location, 'relationships');
+  pushLocated(accumulator.flows, document.flows, location, 'flows');
+  pushLocated(accumulator.stateMachines, document.stateMachines, location, 'stateMachines');
+  pushLocated(accumulator.views, document.views, location, 'views');
+}
+
+async function parseAndValidateDocument(
+  file: string,
+  relativeFile: string,
+  diagnostics: ArchitectureDiagnostic[]
+) {
   let parsed: unknown;
   try {
     parsed = (await parseWorkspaceDocument(file)).data;
@@ -106,15 +146,14 @@ async function mergeDocument(
     diagnostics.push({
       severity: 'error',
       code: 'parse-error',
-      file: path.relative(workspaceRoot, file),
+      file: relativeFile,
       message: error instanceof Error ? error.message : String(error),
     });
-    return;
+    return undefined;
   }
-  if (parsed === undefined || parsed === null) return;
+  if (parsed === undefined || parsed === null) return undefined;
 
   const result = v.safeParse(workspaceDocumentSchema, parsed);
-  const relativeFile = path.relative(workspaceRoot, file);
   if (!result.success) {
     diagnostics.push({
       severity: 'error',
@@ -122,48 +161,44 @@ async function mergeDocument(
       file: relativeFile,
       message: summarizeIssues(result.issues),
     });
-    return;
+    return undefined;
   }
+  return result.output;
+}
 
-  const document = result.output;
-  const location = { file: relativeFile, documentPath: '$' };
-  if (document.version !== undefined || document.name !== undefined) {
-    const manifestResult = v.safeParse(manifestSchema, {
-      version: document.version,
-      name: document.name,
-      description: document.description,
-      threadsDir: document.threadsDir,
-      elements: [],
-      relationships: [],
-      flows: [],
-      stateMachines: [],
-      views: [],
+function mergeManifest(
+  document: v.InferOutput<typeof workspaceDocumentSchema>,
+  location: SourceLocation,
+  accumulator: DocumentAccumulator,
+  diagnostics: ArchitectureDiagnostic[]
+): void {
+  if (document.version === undefined && document.name === undefined) return;
+  const manifestResult = v.safeParse(manifestSchema, {
+    ...document,
+    elements: [],
+    relationships: [],
+    flows: [],
+    stateMachines: [],
+    views: [],
+  });
+  if (!manifestResult.success) {
+    diagnostics.push({
+      severity: 'error',
+      code: 'manifest-invalid',
+      file: location.file,
+      message: summarizeIssues(manifestResult.issues),
     });
-    if (!manifestResult.success) {
-      diagnostics.push({
-        severity: 'error',
-        code: 'manifest-invalid',
-        file: relativeFile,
-        message: summarizeIssues(manifestResult.issues),
-      });
-    } else if (accumulator.manifest !== undefined) {
-      diagnostics.push({
-        severity: 'error',
-        code: 'duplicate-manifest',
-        file: relativeFile,
-        message: `Manifest already declared in ${accumulator.manifestLocation?.file ?? '(unknown)'}.`,
-      });
-    } else {
-      accumulator.manifest = manifestResult.output;
-      accumulator.manifestLocation = location;
-    }
+  } else if (accumulator.manifest !== undefined) {
+    diagnostics.push({
+      severity: 'error',
+      code: 'duplicate-manifest',
+      file: location.file,
+      message: `Manifest already declared in ${accumulator.manifestLocation?.file ?? '(unknown)'}.`,
+    });
+  } else {
+    accumulator.manifest = manifestResult.output;
+    accumulator.manifestLocation = location;
   }
-
-  pushLocated(accumulator.elements, document.elements, location, 'elements');
-  pushLocated(accumulator.relationships, document.relationships, location, 'relationships');
-  pushLocated(accumulator.flows, document.flows, location, 'flows');
-  pushLocated(accumulator.stateMachines, document.stateMachines, location, 'stateMachines');
-  pushLocated(accumulator.views, document.views, location, 'views');
 }
 
 function pushLocated<T>(
@@ -213,178 +248,6 @@ function uniqueIndex<T extends { id: string }>(
     index.set(located.value.id, located);
   }
   return index;
-}
-
-function validateReferences(
-  accumulator: DocumentAccumulator,
-  indexes: WorkspaceIndexes,
-  diagnostics: ArchitectureDiagnostic[]
-): void {
-  for (const element of accumulator.elements) {
-    if (element.value.parent) {
-      expectElement(
-        element.value.parent,
-        element.location,
-        `Element "${element.value.id}" parent`,
-        indexes,
-        diagnostics
-      );
-    }
-  }
-  for (const relationship of accumulator.relationships) {
-    expectElement(
-      relationship.value.from,
-      relationship.location,
-      `Relationship "${relationship.value.id}" from`,
-      indexes,
-      diagnostics
-    );
-    expectElement(
-      relationship.value.to,
-      relationship.location,
-      `Relationship "${relationship.value.id}" to`,
-      indexes,
-      diagnostics
-    );
-  }
-  for (const flow of accumulator.flows) {
-    for (const step of flow.value.steps) {
-      if (step.element)
-        expectElement(
-          step.element,
-          flow.location,
-          `Flow "${flow.value.id}" step "${step.id}" element`,
-          indexes,
-          diagnostics
-        );
-      if (step.relationship)
-        expectRelationship(
-          step.relationship,
-          flow.location,
-          `Flow "${flow.value.id}" step "${step.id}" relationship`,
-          indexes,
-          diagnostics
-        );
-    }
-  }
-  for (const machine of accumulator.stateMachines) {
-    const stateIds = new Set(machine.value.states.map((state) => state.id));
-    if (machine.value.element)
-      expectElement(
-        machine.value.element,
-        machine.location,
-        `State machine "${machine.value.id}" element`,
-        indexes,
-        diagnostics
-      );
-    for (const state of machine.value.states) {
-      if (state.element)
-        expectElement(
-          state.element,
-          machine.location,
-          `State machine "${machine.value.id}" state "${state.id}" element`,
-          indexes,
-          diagnostics
-        );
-    }
-    for (const transition of machine.value.transitions) {
-      if (!stateIds.has(transition.from))
-        addDangling(
-          `State machine "${machine.value.id}" transition from`,
-          transition.from,
-          machine.location,
-          diagnostics
-        );
-      if (!stateIds.has(transition.to))
-        addDangling(
-          `State machine "${machine.value.id}" transition to`,
-          transition.to,
-          machine.location,
-          diagnostics
-        );
-      if (transition.relationship)
-        expectRelationship(
-          transition.relationship,
-          machine.location,
-          `State machine "${machine.value.id}" transition relationship`,
-          indexes,
-          diagnostics
-        );
-    }
-  }
-  for (const view of accumulator.views) {
-    if (view.value.root)
-      expectElement(
-        view.value.root,
-        view.location,
-        `View "${view.value.id}" root`,
-        indexes,
-        diagnostics
-      );
-    for (const id of view.value.include ?? [])
-      expectElement(id, view.location, `View "${view.value.id}" include`, indexes, diagnostics);
-    for (const id of view.value.relationships ?? [])
-      expectRelationship(
-        id,
-        view.location,
-        `View "${view.value.id}" relationship`,
-        indexes,
-        diagnostics
-      );
-    for (const id of view.value.flows ?? []) {
-      if (!indexes.flowsById.has(id))
-        addDangling(`View "${view.value.id}" flow`, id, view.location, diagnostics);
-    }
-    for (const id of view.value.stateMachines ?? []) {
-      if (!indexes.stateMachinesById.has(id))
-        addDangling(`View "${view.value.id}" state machine`, id, view.location, diagnostics);
-    }
-  }
-  for (const thread of accumulator.threads) {
-    if (!hasArchitectureTarget(indexes, thread.value.target)) {
-      addDangling(
-        `Thread "${thread.value.id}" target`,
-        thread.value.target,
-        thread.location,
-        diagnostics
-      );
-    }
-  }
-}
-
-function expectElement(
-  id: string,
-  location: SourceLocation,
-  label: string,
-  indexes: WorkspaceIndexes,
-  diagnostics: ArchitectureDiagnostic[]
-): void {
-  if (!indexes.elementsById.has(id)) addDangling(label, id, location, diagnostics);
-}
-
-function expectRelationship(
-  id: string,
-  location: SourceLocation,
-  label: string,
-  indexes: WorkspaceIndexes,
-  diagnostics: ArchitectureDiagnostic[]
-): void {
-  if (!indexes.relationshipsById.has(id)) addDangling(label, id, location, diagnostics);
-}
-
-function addDangling(
-  label: string,
-  id: string,
-  location: SourceLocation,
-  diagnostics: ArchitectureDiagnostic[]
-): void {
-  diagnostics.push({
-    severity: 'error',
-    code: 'dangling-reference',
-    file: location.file,
-    path: location.documentPath,
-    message: `${label} references missing id "${id}".`,
-  });
 }
 
 function buildChildren(

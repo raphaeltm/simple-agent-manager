@@ -1,7 +1,8 @@
 import type { CSSProperties } from 'react';
 
+import type { ArchitectureElement, ArchitectureRelationship } from '../schemas';
 import type { ViewerModel } from '../server/payloads';
-import { structureSlice } from './projections';
+import { flowSlice, stateSlice, structureSlice } from './projections';
 import type { Lens, Selection } from './types';
 
 interface LensProps {
@@ -16,57 +17,24 @@ interface LensProps {
 
 export function StructureLens({ model, focusId, selection, zoom, onSelect, onDrill }: LensProps) {
   const slice = structureSlice(model, focusId);
-  const { children, focus, relationships: portals } = slice;
+  const { children: childElements, focus, relationships: portals } = slice;
   if (!focus) return <EmptyLens title="No structure" />;
   const style: CSSProperties & Record<'--aw-zoom', string> = { '--aw-zoom': String(zoom) };
   return (
     <div className="structure-lens" style={style}>
-      <button
-        type="button"
-        className={nodeClass(selection, focus.id)}
-        onClick={() => onSelect({ kind: 'element', id: focus.id })}
-      >
-        <span>{focus.title}</span>
-        <small>{focus.kind}</small>
-      </button>
-      <div className="node-grid">
-        {children.length === 0 ? (
-          <p className="muted">This scope has no direct children.</p>
-        ) : (
-          children.map((child) => (
-            <article className={nodeClass(selection, child.id)} key={child.id}>
-              <button type="button" onClick={() => onSelect({ kind: 'element', id: child.id })}>
-                <span>{child.title}</span>
-                <small>{child.kind}</small>
-              </button>
-              <button type="button" className="secondary" onClick={() => onDrill(child.id)}>
-                Drill into
-              </button>
-            </article>
-          ))
-        )}
-      </div>
+      <FocusNode focus={focus} selection={selection} onSelect={onSelect} />
+      <ChildNodes
+        elements={childElements}
+        selection={selection}
+        onSelect={onSelect}
+        onDrill={onDrill}
+      />
       {slice.omittedChildren > 0 && (
         <p className="bounded-note">
           {slice.omittedChildren} additional child records are omitted from this bounded canvas.
         </p>
       )}
-      <section className="portal-list" aria-label="Cross-scope portal relationships">
-        <h3>Portals</h3>
-        {portals.length === 0 ? (
-          <p className="muted">No cross-scope relationships.</p>
-        ) : (
-          portals.map((relationship) => (
-            <button
-              key={relationship.id}
-              type="button"
-              onClick={() => onSelect({ kind: 'relationship', id: relationship.id })}
-            >
-              {relationship.title ?? relationship.id}
-            </button>
-          ))
-        )}
-      </section>
+      <PortalList portals={portals} selection={selection} onSelect={onSelect} />
       {slice.omittedRelationships > 0 && (
         <p className="bounded-note">
           {slice.omittedRelationships} additional relationships are available through CLI queries.
@@ -76,23 +44,105 @@ export function StructureLens({ model, focusId, selection, zoom, onSelect, onDri
   );
 }
 
-export function FlowLens({ model, focusId, selection, onSelect, onDrill }: LensProps) {
-  const flows = model.workspace.flows.filter(
-    (flow) =>
-      !focusId ||
-      flow.steps.some(
-        (step) => step.element === focusId || relationshipTouches(model, step.relationship, focusId)
-      )
+function FocusNode({
+  focus,
+  selection,
+  onSelect,
+}: {
+  focus: ArchitectureElement;
+  selection?: Selection;
+  onSelect: LensProps['onSelect'];
+}) {
+  return (
+    <button
+      type="button"
+      className={nodeClass(selection, focus.id)}
+      aria-pressed={selection?.kind === 'element' && selection.id === focus.id}
+      onClick={() => onSelect({ kind: 'element', id: focus.id })}
+    >
+      <span>{focus.title}</span>
+      <small>{focus.kind}</small>
+    </button>
   );
-  const visibleFlows = flows.length > 0 ? flows : model.workspace.flows;
-  if (visibleFlows.length === 0) return <EmptyLens title="No flows in this scope" />;
+}
+
+function ChildNodes({
+  elements,
+  selection,
+  onSelect,
+  onDrill,
+}: {
+  elements: ArchitectureElement[];
+  selection?: Selection;
+  onSelect: LensProps['onSelect'];
+  onDrill: LensProps['onDrill'];
+}) {
+  return (
+    <div className="node-grid">
+      {elements.length === 0 ? (
+        <p className="muted">This scope has no direct children.</p>
+      ) : (
+        elements.map((child) => (
+          <article className={nodeClass(selection, child.id)} key={child.id}>
+            <button
+              type="button"
+              aria-pressed={selection?.kind === 'element' && selection.id === child.id}
+              onClick={() => onSelect({ kind: 'element', id: child.id })}
+            >
+              <span>{child.title}</span>
+              <small>{child.kind}</small>
+            </button>
+            <button type="button" className="secondary" onClick={() => onDrill(child.id)}>
+              Drill into
+            </button>
+          </article>
+        ))
+      )}
+    </div>
+  );
+}
+
+function PortalList({
+  portals,
+  selection,
+  onSelect,
+}: {
+  portals: ArchitectureRelationship[];
+  selection?: Selection;
+  onSelect: LensProps['onSelect'];
+}) {
+  return (
+    <section className="portal-list" aria-label="Cross-scope portal relationships">
+      <h3>Portals</h3>
+      {portals.length === 0 ? (
+        <p className="muted">No cross-scope relationships.</p>
+      ) : (
+        portals.map((relationship) => (
+          <button
+            key={relationship.id}
+            type="button"
+            aria-pressed={selection?.kind === 'relationship' && selection.id === relationship.id}
+            onClick={() => onSelect({ kind: 'relationship', id: relationship.id })}
+          >
+            {relationship.title ?? relationship.id}
+          </button>
+        ))
+      )}
+    </section>
+  );
+}
+
+export function FlowLens({ model, focusId, selection, onSelect, onDrill }: LensProps) {
+  const slice = flowSlice(model, focusId);
+  if (slice.flows.length === 0) return <EmptyLens title="No flows in this scope" />;
   return (
     <div className="flow-list">
-      {visibleFlows.map((flow) => (
+      {slice.flows.map((flow) => (
         <section className="flow-card" key={flow.id}>
           <button
             type="button"
             className={flow.id === selection?.id ? 'selected text-row' : 'text-row'}
+            aria-pressed={selection?.kind === 'flow' && selection.id === flow.id}
             onClick={() => onSelect({ kind: 'flow', id: flow.id })}
           >
             {flow.title}
@@ -111,6 +161,12 @@ export function FlowLens({ model, focusId, selection, onSelect, onDrill }: LensP
           </ol>
         </section>
       ))}
+      {(slice.omittedFlows > 0 || slice.omittedSteps > 0) && (
+        <p className="bounded-note">
+          {slice.omittedFlows} additional flows and {slice.omittedSteps} steps are omitted from this
+          bounded canvas.
+        </p>
+      )}
     </div>
   );
 }
@@ -143,24 +199,16 @@ function FlowStepItem({
 }
 
 export function StateLens({ model, focusId, selection, onSelect }: LensProps) {
-  const machines = model.workspace.stateMachines.filter(
-    (machine) =>
-      !focusId ||
-      machine.element === focusId ||
-      machine.states.some((state) => state.element === focusId) ||
-      machine.transitions.some((transition) =>
-        relationshipTouches(model, transition.relationship, focusId)
-      )
-  );
-  const visibleMachines = machines.length > 0 ? machines : model.workspace.stateMachines;
-  if (visibleMachines.length === 0) return <EmptyLens title="No state machines in this scope" />;
+  const slice = stateSlice(model, focusId);
+  if (slice.machines.length === 0) return <EmptyLens title="No state machines in this scope" />;
   return (
     <div className="state-list">
-      {visibleMachines.map((machine) => (
+      {slice.machines.map((machine) => (
         <section className="state-card" key={machine.id}>
           <button
             type="button"
             className={machine.id === selection?.id ? 'selected text-row' : 'text-row'}
+            aria-pressed={selection?.kind === 'stateMachine' && selection.id === machine.id}
             onClick={() => onSelect({ kind: 'stateMachine', id: machine.id })}
           >
             {machine.title}
@@ -180,6 +228,12 @@ export function StateLens({ model, focusId, selection, onSelect }: LensProps) {
           </ul>
         </section>
       ))}
+      {(slice.omittedMachines > 0 || slice.omittedStates > 0 || slice.omittedTransitions > 0) && (
+        <p className="bounded-note">
+          {slice.omittedMachines} machines, {slice.omittedStates} states, and{' '}
+          {slice.omittedTransitions} transitions are omitted from this bounded canvas.
+        </p>
+      )}
     </div>
   );
 }
@@ -195,13 +249,4 @@ function EmptyLens({ title }: { title: string }) {
 
 function nodeClass(selection: Selection | undefined, id: string): string {
   return selection?.kind === 'element' && selection.id === id ? 'arch-node selected' : 'arch-node';
-}
-
-function relationshipTouches(
-  model: ViewerModel,
-  relationshipId: string | undefined,
-  elementId: string
-): boolean {
-  const relationship = model.workspace.relationships.find((item) => item.id === relationshipId);
-  return relationship?.from === elementId || relationship?.to === elementId;
 }

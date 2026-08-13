@@ -20,8 +20,8 @@
     }
   },
   "scripts": {
-    "build": "tsc && vite build --config vite.viewer.config.ts",
-    "test": "vitest run",
+    "build": "tsup src/index.ts src/cli.ts --format esm --dts --clean && vite build --config vite.viewer.config.ts",
+    "test": "pnpm build && vitest run",
     "browser-test": "playwright test --config playwright.config.ts",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
@@ -49,6 +49,7 @@
     "eslint": "catalog:",
     "jsdom": "catalog:",
     "tsx": "catalog:",
+    "tsup": "8.5.1",
     "typescript": "catalog:",
     "vitest": "catalog:"
   }

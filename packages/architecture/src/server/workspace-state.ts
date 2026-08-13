@@ -51,6 +51,10 @@ export class WorkspaceState {
     return this.invalid;
   }
 
+  hasValidModel(): boolean {
+    return this.loaded !== undefined;
+  }
+
   diagnostics(): LoadedWorkspace['diagnostics'] {
     return this.invalid?.diagnostics ?? this.current().diagnostics;
   }

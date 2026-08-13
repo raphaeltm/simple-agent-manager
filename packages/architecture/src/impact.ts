@@ -57,9 +57,38 @@ function collectSourceBackedRecords(workspace: CompiledWorkspace): {
   return [
     ...workspace.elements.map((record) => ({ kind: 'element' as const, record })),
     ...workspace.relationships.map((record) => ({ kind: 'relationship' as const, record })),
-    ...workspace.flows.map((record) => ({ kind: 'flow' as const, record })),
-    ...workspace.stateMachines.map((record) => ({ kind: 'stateMachine' as const, record })),
+    ...workspace.flows.map((record) => ({
+      kind: 'flow' as const,
+      record: {
+        ...record,
+        sourceRefs: uniqueSourceRefs([
+          ...(record.sourceRefs ?? []),
+          ...record.steps.flatMap((step) => step.sourceRefs ?? []),
+        ]),
+      },
+    })),
+    ...workspace.stateMachines.map((record) => ({
+      kind: 'stateMachine' as const,
+      record: {
+        ...record,
+        sourceRefs: uniqueSourceRefs([
+          ...(record.sourceRefs ?? []),
+          ...record.states.flatMap((state) => state.sourceRefs ?? []),
+          ...record.transitions.flatMap((transition) => transition.sourceRefs ?? []),
+        ]),
+      },
+    })),
   ];
+}
+
+function uniqueSourceRefs(sourceRefs: SourceRef[]): SourceRef[] {
+  const seen = new Set<string>();
+  return sourceRefs.filter((sourceRef) => {
+    const key = `${sourceRef.path}:${sourceRef.startLine ?? ''}:${sourceRef.endLine ?? ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 async function findBrokenSourceRefs(

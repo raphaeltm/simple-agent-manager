@@ -16,9 +16,9 @@ an automatically generated import graph.
 Start with compact queries:
 
 ```bash
-pnpm architecture:summary -- --json
-pnpm architecture:show -- <element-id> --json
-pnpm architecture:inbox -- --json
+pnpm --silent architecture:summary -- --json
+pnpm --silent architecture:show -- <element-id> --json
+pnpm --silent architecture:inbox -- --json
 ```
 
 Use `pnpm architecture:serve` only when a human needs the interactive viewer or
