@@ -325,9 +325,15 @@ export async function checkAutomaticSessionSleepEligibility(
     : null;
   let reason: string;
   let retryAt: Date | undefined;
+  // Task completion is the authoritative terminal signal. Older sessions can
+  // retain a stale `prompting` activity after their final response has already
+  // completed; requiring a later idle transition strands their compute forever.
+  if (workspace.taskStatus === 'completed') {
+    return { eligible: true };
+  }
   if (!state || state.activity !== 'idle') {
     reason = `Workspace agent is not idle (${state?.activity ?? 'unknown'})`;
-  } else if (workspace.taskStatus !== 'completed') {
+  } else {
     const idleAfterMs = parsePositiveInt(
       env.SESSION_SLEEP_AFTER_MS,
       DEFAULT_SESSION_SLEEP_AFTER_MS
@@ -339,8 +345,6 @@ export async function checkAutomaticSessionSleepEligibility(
     } else {
       return { eligible: true };
     }
-  } else {
-    return { eligible: true };
   }
 
   await deferSessionSnapshotSleepBeforeClaim(
