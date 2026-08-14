@@ -1,9 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { enabledMock, isolateMock, logInfoMock } = vi.hoisted(() => ({
+const { enabledMock, isolateMock, logInfoMock, sessionSleepMock } = vi.hoisted(() => ({
   enabledMock: vi.fn(),
   isolateMock: vi.fn(async () => undefined),
   logInfoMock: vi.fn(),
+  sessionSleepMock: vi.fn(),
 }));
 
 vi.mock('../../../src/services/operational-kill-switch', () => ({
@@ -15,6 +16,9 @@ vi.mock('../../../src/scheduled/platform-feedback-hourly', () => ({
 }));
 vi.mock('../../../src/scheduled/sweep-isolation', () => ({
   createSweepIsolator: vi.fn(() => ({ isolate: isolateMock, failedSweeps: () => [] })),
+}));
+vi.mock('../../../src/scheduled/session-sleep', () => ({
+  runSessionSleepSweep: sessionSleepMock,
 }));
 vi.mock('drizzle-orm/d1', () => ({ drizzle: vi.fn(() => ({})) }));
 vi.mock('../../../src/lib/logger', async (importOriginal) => ({
@@ -57,6 +61,12 @@ describe('scheduled operational sweep kill switch', () => {
     expect(sweepNames.indexOf('deployment_release_retention')).toBeLessThan(
       sweepNames.indexOf('compose_artifact_cleanup')
     );
+    const sessionSleepCallback = isolateMock.mock.calls.find(
+      ([name]) => name === 'session_sleep'
+    )?.[1];
+    expect(sessionSleepCallback).toEqual(expect.any(Function));
+    await sessionSleepCallback?.();
+    expect(sessionSleepMock).toHaveBeenCalledWith(env, expect.any(Date), context);
     expect(logInfoMock).toHaveBeenCalledWith(
       'cron.completed',
       expect.objectContaining({ type: 'sweep', failedSweeps: [] })

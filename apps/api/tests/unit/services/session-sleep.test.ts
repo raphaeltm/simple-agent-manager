@@ -43,8 +43,7 @@ vi.mock('../../../src/services/vm-agent-container', () => ({
 vi.mock('../../../src/services/session-snapshots', () => ({
   ensureSessionSnapshotForSleep: (...args: unknown[]) =>
     mocks.ensureSessionSnapshotForSleep(...args),
-  scheduleSessionSnapshotSleep: (...args: unknown[]) =>
-    mocks.scheduleSessionSnapshotSleep(...args),
+  scheduleSessionSnapshotSleep: (...args: unknown[]) => mocks.scheduleSessionSnapshotSleep(...args),
   deferSessionSnapshotSleepBeforeClaim: (...args: unknown[]) =>
     mocks.deferSessionSnapshotSleepBeforeClaim(...args),
   DEFAULT_SESSION_SLEEP_AFTER_MS: 15 * 60 * 1000,
@@ -217,7 +216,10 @@ describe('sleepWorkspaceSession', () => {
         { workspaceId: 'workspace-1', userId: 'user-1' },
         new Date('2026-08-14T05:00:00.000Z')
       )
-    ).resolves.toMatchObject({ eligible: false, reason: 'Workspace agent is not idle (prompting)' });
+    ).resolves.toMatchObject({
+      eligible: false,
+      reason: 'Workspace agent is not idle (prompting)',
+    });
 
     expect(mocks.deferSessionSnapshotSleepBeforeClaim).toHaveBeenCalledTimes(1);
     expect(mocks.claimSessionSnapshotSleep).not.toHaveBeenCalled();
@@ -402,9 +404,9 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.finalizeSessionSnapshotSleeping).toHaveBeenCalledTimes(1);
     expect(mocks.sleepSession).toHaveBeenCalledWith(env, 'project-1', 'chat-1');
     expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'workspace-1', 'user-1');
-    expect(mocks.markIdle).toHaveBeenCalledWith('node-1', 'user-1');
+    expect(mocks.markIdle).toHaveBeenCalledWith('node-1', 'user-1', null);
     expect(mocks.stopComputeTracking).toHaveBeenCalledWith(expect.anything(), 'workspace-1');
-    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env);
+    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env, null);
   });
 
   it('keeps a shared VM node active while another workspace still runs on it', async () => {
@@ -485,7 +487,7 @@ describe('sleepWorkspaceSession', () => {
 
     expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
     expect(mocks.scheduleWorkspaceDeletion).toHaveBeenCalledWith('node-1', 'workspace-1', 'user-1');
-    expect(mocks.markIdle).toHaveBeenCalledWith('node-1', 'user-1');
+    expect(mocks.markIdle).toHaveBeenCalledWith('node-1', 'user-1', null);
   });
 
   it('acknowledges a Cloudflare Container stop and commits node sleep in the same D1 batch', async () => {

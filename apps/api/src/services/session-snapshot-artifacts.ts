@@ -414,5 +414,20 @@ export async function ensureSessionSnapshotForSleep(
       createdAt: now.toISOString(),
       updatedAt: now.toISOString(),
     })
-    .onConflictDoNothing({ target: schema.sessionSnapshots.chatSessionId });
+    .onConflictDoUpdate({
+      target: schema.sessionSnapshots.chatSessionId,
+      // Recovery can move a conversation to a replacement workspace. Refresh
+      // only ownership/routing metadata here: the last verified generation and
+      // all sleep/recovery lifecycle state remain authoritative until the final
+      // capture replaces them.
+      set: {
+        projectId: input.projectId,
+        workspaceId: input.workspaceId,
+        nodeId: input.nodeId,
+        userId: input.userId,
+        agentSessionId: input.agentSessionId,
+        runtime: input.runtime,
+        updatedAt: now.toISOString(),
+      },
+    });
 }

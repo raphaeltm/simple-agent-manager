@@ -27,7 +27,7 @@ describe('session sleep sweep', () => {
   let env: Env;
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     sqlite = new Database(':memory:');
     createSchemaTables(sqlite, [
       schema.nodes,
@@ -174,6 +174,34 @@ describe('session sleep sweep', () => {
     });
   });
 
+  it('keeps the Instant container idle window distinct from the VM sleep default', async () => {
+    addDueSnapshot('snapshot-instant');
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots
+         SET runtime = 'cf-container', sleep_status = NULL, sleep_after = NULL
+         WHERE id = 'snapshot-instant'`
+      )
+      .run();
+    const db = await import('drizzle-orm/d1').then(({ drizzle }) =>
+      drizzle(env.DATABASE, { schema })
+    );
+
+    await scheduleSessionSnapshotSleep(
+      db,
+      { ...env, CF_CONTAINER_SLEEP_AFTER: '1h', SESSION_SLEEP_AFTER_MS: '900000' },
+      'snapshot-instant-chat',
+      new Date('2026-08-12T01:00:00.000Z'),
+      { runtime: 'cf-container' }
+    );
+
+    expect(
+      sqlite
+        .prepare(`SELECT sleep_after FROM session_snapshots WHERE id = 'snapshot-instant'`)
+        .get()
+    ).toEqual({ sleep_after: '2026-08-12T02:00:00.000Z' });
+  });
+
   it.each([
     ['pending', 'none'],
     ['degraded', 'entries-skipped'],
@@ -218,16 +246,31 @@ describe('session sleep sweep', () => {
     const now = new Date('2026-08-12T01:00:00.000Z');
 
     const first = await runSessionSleepSweep(env, now);
-    const second = await runSessionSleepSweep(env, now);
-
-    expect(first.reconciled).toBe(1);
-    expect(second.reconciled).toBe(0);
-    expect(mocks.queueWorkspaceSessionSleep).toHaveBeenCalledTimes(1);
     expect(
       sqlite
         .prepare(`SELECT sleep_status, sleep_after FROM session_snapshots WHERE id = ?`)
         .get('missing-snapshot')
     ).toEqual({ sleep_status: 'scheduled', sleep_after: '2026-08-12T01:15:00.000Z' });
+
+    mocks.sleepWorkspaceSession.mockResolvedValue(undefined);
+    const second = await runSessionSleepSweep(env, new Date('2026-08-12T01:15:00.000Z'));
+
+    expect(first.reconciled).toBe(1);
+    expect(second.reconciled).toBe(0);
+    expect(second).toMatchObject({ selected: 1, claimed: 1, slept: 1 });
+    expect(mocks.queueWorkspaceSessionSleep).toHaveBeenCalledTimes(1);
+    expect(mocks.queueWorkspaceSessionSleep).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ sleepAfterMs: 0 })
+    );
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status, sleep_after, sleep_attempts
+           FROM session_snapshots WHERE id = ?`
+        )
+        .get('missing-snapshot')
+    ).toEqual({ sleep_status: 'preparing', sleep_after: null, sleep_attempts: 1 });
   });
 
   it('defers active work before claiming so the retry budget is unchanged', async () => {
@@ -267,6 +310,136 @@ describe('session sleep sweep', () => {
       env,
       expect.objectContaining({ workspaceId: 'snapshot-stale-workspace' })
     );
+  });
+
+  it('isolates eligibility failure so a later due candidate still sleeps', async () => {
+    addDueSnapshot('snapshot-a');
+    addDueSnapshot('snapshot-b');
+    mocks.checkAutomaticSessionSleepEligibility
+      .mockRejectedValueOnce(new Error('ProjectData unavailable'))
+      .mockResolvedValueOnce({ eligible: true });
+    mocks.sleepWorkspaceSession.mockResolvedValue(undefined);
+
+    const result = await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00.000Z'));
+
+    expect(result).toMatchObject({ selected: 2, claimed: 1, slept: 1, failed: 1 });
+    expect(mocks.sleepWorkspaceSession).toHaveBeenCalledWith(
+      env,
+      expect.objectContaining({ workspaceId: 'snapshot-b-workspace' })
+    );
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status, sleep_after, sleep_attempts
+           FROM session_snapshots WHERE id = 'snapshot-a'`
+        )
+        .get()
+    ).toEqual({
+      sleep_status: 'scheduled',
+      sleep_after: '2026-08-12T01:01:00.000Z',
+      sleep_attempts: 0,
+    });
+
+    const repeated = await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00.000Z'));
+    expect(repeated).toMatchObject({ selected: 0, claimed: 0, failed: 0 });
+  });
+
+  it('stops at the wall-time budget without claiming the remaining candidate', async () => {
+    addDueSnapshot('snapshot-budget-a');
+    addDueSnapshot('snapshot-budget-b');
+    env.SESSION_SLEEP_SWEEP_WALL_BUDGET_MS = '1';
+    mocks.sleepWorkspaceSession.mockResolvedValue(undefined);
+    const nowSpy = vi
+      .spyOn(Date, 'now')
+      .mockReturnValueOnce(1_000)
+      .mockReturnValueOnce(1_000)
+      .mockReturnValue(1_001);
+
+    try {
+      const result = await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00.000Z'));
+
+      expect(result).toMatchObject({
+        selected: 2,
+        claimed: 1,
+        slept: 1,
+        budgetExhausted: true,
+      });
+      expect(mocks.sleepWorkspaceSession).toHaveBeenCalledTimes(1);
+      expect(
+        sqlite
+          .prepare(
+            `SELECT sleep_status, sleep_after, sleep_attempts
+             FROM session_snapshots WHERE id = 'snapshot-budget-b'`
+          )
+          .get()
+      ).toEqual({
+        sleep_status: 'scheduled',
+        sleep_after: '2026-08-12T00:00:00.000Z',
+        sleep_attempts: 0,
+      });
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it('persists backoff when missing-intent reconciliation fails after row creation', async () => {
+    addUnscheduledWorkspace('reconcile-failure');
+    mocks.queueWorkspaceSessionSleep.mockImplementation(async (_env, input) => {
+      sqlite
+        .prepare(
+          `INSERT INTO session_snapshots
+             (id, workspace_id, user_id, chat_session_id, runtime, status, degradation,
+              manifest_r2_key, expires_at, sleep_attempts)
+           VALUES (?, ?, ?, ?, 'vm', 'pending', 'none', ?, ?, 0)`
+        )
+        .run(
+          'reconcile-failure-snapshot',
+          input.workspaceId,
+          input.userId,
+          'reconcile-failure-chat',
+          'reconcile-failure-manifest',
+          '2026-08-20T00:00:00.000Z'
+        );
+      throw new Error('schedule write failed');
+    });
+    const now = new Date('2026-08-12T01:00:00.000Z');
+
+    const first = await runSessionSleepSweep(env, now);
+    const second = await runSessionSleepSweep(env, now);
+
+    expect(first).toMatchObject({ reconciled: 0, selected: 0 });
+    expect(second).toMatchObject({ reconciled: 0, selected: 0 });
+    expect(mocks.queueWorkspaceSessionSleep).toHaveBeenCalledTimes(1);
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status, sleep_after, sleep_attempts
+           FROM session_snapshots WHERE id = 'reconcile-failure-snapshot'`
+        )
+        .get()
+    ).toEqual({
+      sleep_status: 'scheduled',
+      sleep_after: '2026-08-12T01:01:00.000Z',
+      sleep_attempts: 0,
+    });
+  });
+
+  it('dispatches claimed VM work through the scheduled event lifetime', async () => {
+    addDueSnapshot('snapshot-dispatch');
+    let finishSleep!: () => void;
+    mocks.sleepWorkspaceSession.mockImplementation(
+      () => new Promise<void>((resolve) => (finishSleep = resolve))
+    );
+    const waitUntil = vi.fn();
+
+    const result = await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00.000Z'), {
+      waitUntil,
+    });
+
+    expect(result).toMatchObject({ claimed: 1, dispatched: 1, slept: 0 });
+    expect(waitUntil).toHaveBeenCalledTimes(1);
+    finishSleep();
+    await waitUntil.mock.calls[0]?.[0];
   });
 
   it('cancels a preparing claim when new prompt activity arrives', async () => {

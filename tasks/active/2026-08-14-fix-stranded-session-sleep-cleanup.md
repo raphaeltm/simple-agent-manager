@@ -51,6 +51,17 @@ the warm-pool policy.
    `.claude/rules/47-control-loop-io-budget.md`,
    `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md`, and
    `.claude/rules/35-vertical-slice-testing.md`.
+9. Recovered conversations can move to replacement workspace/node/agent-session IDs. A missed idle
+   callback left the existing snapshot row bound to the old, deleted workspace unless sleep-intent
+   creation explicitly refreshed its ownership metadata.
+10. Serially awaiting up to ten five-minute final captures inside cron would give the widened sweep
+    a roughly 50-minute worst-case I/O path. Claims need a short configurable wall budget, followed
+    by durable scheduled-event work after the claim is persisted.
+11. Async sleep cleanup must reload and propagate `projects.warm_node_timeout_ms`; falling back to
+    the platform default would shorten a project's intentional warm retention window.
+12. The VM idle default cannot also become the Instant idle default. Snapshot-completion scheduling
+    must preserve Instant's separately configurable `CF_CONTAINER_SLEEP_AFTER` while explicit
+    completed-task intents remain immediate on either runtime.
 
 ## Implementation Checklist
 
@@ -70,6 +81,12 @@ the warm-pool policy.
 - [x] After verified sleep, stop workspace compute tracking, schedule workspace deletion, and run
       the existing idempotent task cleanup so an otherwise-empty managed node enters the unchanged
       warm-retention state.
+- [x] Rebind an existing snapshot's ownership metadata when recovery moved the conversation to a
+      replacement workspace, without overwriting its last verified artifacts.
+- [x] Bound synchronous cron claim work and dispatch claimed final capture/teardown through the
+      scheduled event lifetime; isolate every candidate and preserve project warm-timeout overrides.
+- [x] Persist pre-claim/reconciliation backoff so control-plane failures leave the hot candidate
+      set, and preserve Instant's separate idle duration when checkpoint completion schedules sleep.
 - [x] Add discriminating tests for terminal completion during a prompt, pending/degraded retry,
       missing-snapshot reconciliation, heartbeat-independent idle eligibility, attempt preservation,
       two-sweep candidate convergence, and post-sleep cleanup.
@@ -98,6 +115,12 @@ the warm-pool policy.
   existing warm-node retention configuration. No warm timeout constant or default changes.
 - The scheduled loop has bounded candidates, per-candidate isolation, persisted deadlines, and a
   two-sweep regression proving candidates converge or remain on an explicit bounded retry path.
+- Recovered sessions refresh snapshot routing to the current workspace before the sweep claims them.
+- Cron performs only bounded D1/ProjectData claim work synchronously; claimed runtime I/O runs from the
+  scheduled event after the durable claim, and project-specific warm retention reaches every warm
+  transition path.
+- Control-plane failures persist a future retry deadline without consuming a teardown attempt, and
+  ordinary Instant checkpoints retain `CF_CONTAINER_SLEEP_AFTER` rather than the VM idle default.
 - Local checks, specialist reviews, staging end-to-end verification, CI, production deployment, and
   production D1 verification are green.
 

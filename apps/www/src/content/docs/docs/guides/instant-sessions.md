@@ -76,7 +76,7 @@ See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands) fo
 
 ## Sleep and wake
 
-After an agent turn becomes idle, SAM writes a best-effort checkpoint. VM sessions write and verify a final checkpoint after 15 minutes of inactivity by default; Instant uses its separately configured one-hour `CF_CONTAINER_SLEEP_AFTER` window. Completed tasks queue sleep immediately and release compute as soon as their final prompt reaches idle. The idle clock only counts genuine ProjectData work activity—not runtime heartbeats—so an active turn is not intentionally cut off.
+After an agent turn becomes idle, SAM writes a best-effort checkpoint. VM sessions write and verify a final checkpoint after 15 minutes of inactivity by default; Instant uses its separately configured one-hour `CF_CONTAINER_SLEEP_AFTER` window. Completed tasks queue sleep immediately and release compute on the first scheduled sweep after their final prompt reaches idle. The idle clock only counts genuine ProjectData work activity—not runtime heartbeats—so an active turn is not intentionally cut off.
 
 Sending a message in the same chat wakes it. Waking is not instant: SAM has to start runtime compute, restore the saved home directory, repository work in progress, and exact harness session, and only then deliver the queued message. Instant starts a fresh container; a VM session provisions a replacement workspace because the original workspace may already have been deleted.
 
@@ -185,7 +185,7 @@ Launching an Instant session takes several steps. SAM does the bookkeeping up fr
 | -------------------------------------------------- | ----------- | ------------------------------------------ |
 | Idle before sleeping                               | 1 hour      | `CF_CONTAINER_SLEEP_AFTER`                 |
 | VM idle before sleeping                            | 15 minutes  | `SESSION_SLEEP_AFTER_MS`                   |
-| Completed task before sleeping                     | Immediate   | task-completion lifecycle                  |
+| Completed task sleep intent                        | Immediate   | task-completion lifecycle                  |
 | How long active work can hold sleep off            | 2 hours     | `CF_CONTAINER_ACTIVE_WORK_MAX_MS`          |
 | Max wake + restore time                            | 2 minutes   | `CF_CONTAINER_WAKE_TIMEOUT_MS`             |
 | Snapshot restore attempts before the session fails | 2           | `CF_CONTAINER_RECOVERY_MAX_ATTEMPTS`       |

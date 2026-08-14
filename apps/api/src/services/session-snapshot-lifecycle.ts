@@ -2,6 +2,7 @@ import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizz
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import { DEFAULT_CF_CONTAINER_SLEEP_AFTER } from '../durable-objects/vm-agent-container';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
 import {
@@ -32,6 +33,30 @@ type SnapshotLeaseEnv = Env & {
 
 function snapshotExpiry(now: Date, ttlDays: number): string {
   return new Date(now.getTime() + ttlDays * 24 * 60 * 60 * 1000).toISOString();
+}
+
+function parseContainerDurationMs(configured: string): number | null {
+  const units: Record<string, number> = { h: 3_600_000, m: 60_000, s: 1000, ms: 1 };
+  const parts = configured.matchAll(/(\d+(?:\.\d+)?)(ms|h|m|s)/g);
+  let consumed = '';
+  let total = 0;
+  for (const part of parts) {
+    const amount = part[1];
+    const unit = part[2];
+    if (!amount || !unit) continue;
+    consumed += part[0];
+    total += Number(amount) * (units[unit] ?? 0);
+  }
+  return consumed === configured && Number.isFinite(total) && total > 0 ? Math.floor(total) : null;
+}
+
+function containerSleepAfterMs(env: Env): number {
+  const configured =
+    env.CF_CONTAINER_SLEEP_AFTER || env.SANDBOX_SLEEP_AFTER || DEFAULT_CF_CONTAINER_SLEEP_AFTER;
+  return (
+    parseContainerDurationMs(configured) ??
+    (parseContainerDurationMs(DEFAULT_CF_CONTAINER_SLEEP_AFTER) as number)
+  );
 }
 
 function sessionSleepClaimLeaseMs(env: Env): number {
@@ -201,7 +226,7 @@ export async function deferSessionSnapshotStopping(
   db: Db,
   env: Env,
   chatSessionId: string,
-  claimId: string,
+  claimId: string | null,
   error: string,
   now = new Date()
 ): Promise<boolean> {
@@ -221,7 +246,9 @@ export async function deferSessionSnapshotStopping(
       and(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
         eq(schema.sessionSnapshots.sleepStatus, 'stopping'),
-        eq(schema.sessionSnapshots.sleepClaimId, claimId)
+        claimId === null
+          ? isNull(schema.sessionSnapshots.sleepClaimId)
+          : eq(schema.sessionSnapshots.sleepClaimId, claimId)
       )
     );
   return (result.meta.changes ?? 0) > 0;
@@ -275,7 +302,8 @@ export async function deferSessionSnapshotSleepBeforeClaim(
   chatSessionId: string,
   error: string,
   retryAt?: Date,
-  now = new Date()
+  now = new Date(),
+  options: { expectedPreparingClaimId?: string | null } = {}
 ): Promise<boolean> {
   const retryDelayMs = parsePositiveInt(
     (env as SnapshotLeaseEnv).SESSION_SLEEP_RETRY_DELAY_MS,
@@ -295,7 +323,19 @@ export async function deferSessionSnapshotSleepBeforeClaim(
     .where(
       and(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
-        inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed']),
+        or(
+          inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed']),
+          ...(options.expectedPreparingClaimId !== undefined
+            ? [
+                and(
+                  eq(schema.sessionSnapshots.sleepStatus, 'preparing'),
+                  options.expectedPreparingClaimId === null
+                    ? isNull(schema.sessionSnapshots.sleepClaimId)
+                    : eq(schema.sessionSnapshots.sleepClaimId, options.expectedPreparingClaimId)
+                ),
+              ]
+            : [])
+        ),
         isNull(schema.sessionSnapshots.sleepingAt)
       )
     );
@@ -379,11 +419,18 @@ export async function scheduleSessionSnapshotSleep(
   env: Env,
   chatSessionId: string,
   now = new Date(),
-  options: { sleepAfterMs?: number; allowIncomplete?: boolean; resetAttempts?: boolean } = {}
+  options: {
+    sleepAfterMs?: number;
+    allowIncomplete?: boolean;
+    resetAttempts?: boolean;
+    runtime?: string;
+  } = {}
 ): Promise<void> {
   const sleepAfterMs =
     options.sleepAfterMs === undefined
-      ? parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS)
+      ? options.runtime === 'cf-container'
+        ? containerSleepAfterMs(env)
+        : parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS)
       : Math.max(0, options.sleepAfterMs);
   const requestedSleepAfter = new Date(now.getTime() + sleepAfterMs).toISOString();
   const eligibleSnapshot = options.allowIncomplete
@@ -791,7 +838,9 @@ export async function completeSessionSnapshot(
   }
 
   if (input.status === 'available' && input.degradation === 'none') {
-    await scheduleSessionSnapshotSleep(db, env, input.chatSessionId);
+    await scheduleSessionSnapshotSleep(db, env, input.chatSessionId, completedAt, {
+      runtime: input.runtime,
+    });
   }
 }
 

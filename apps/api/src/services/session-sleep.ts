@@ -34,7 +34,11 @@ const DEFAULT_SESSION_SNAPSHOT_POLL_INTERVAL_MS = 1000;
 async function finishSleepingWorkspaceComputeCleanup(
   db: ReturnType<typeof drizzle<typeof schema>>,
   env: Env,
-  input: { workspaceId: string; taskId: string | null }
+  input: {
+    workspaceId: string;
+    taskId: string | null;
+    warmNodeTimeoutMs: number | null;
+  }
 ): Promise<void> {
   await stopComputeTracking(db, input.workspaceId).catch((error) => {
     log.warn('session_sleep.compute_tracking_stop_failed', {
@@ -43,7 +47,7 @@ async function finishSleepingWorkspaceComputeCleanup(
     });
   });
   if (input.taskId) {
-    await cleanupTaskRun(input.taskId, env).catch((error) => {
+    await cleanupTaskRun(input.taskId, env, input.warmNodeTimeoutMs).catch((error) => {
       log.warn('session_sleep.task_cleanup_failed', {
         workspaceId: input.workspaceId,
         taskId: input.taskId,
@@ -56,18 +60,24 @@ async function finishSleepingWorkspaceComputeCleanup(
 async function markWorkspaceNodeWarmIfEmpty(
   db: ReturnType<typeof drizzle<typeof schema>>,
   env: Env,
-  input: { nodeId: string; nodeRole: string; runtime: string; userId: string }
+  input: {
+    nodeId: string;
+    nodeRole: string;
+    runtime: string;
+    userId: string;
+    warmNodeTimeoutMs: number | null;
+  }
 ): Promise<void> {
   if (input.runtime === 'cf-container' || input.nodeRole !== 'workspace') return;
   try {
     // Generic task cleanup may already have transitioned the node using the
     // project's warm-retention override. In that case, do not reset its timer.
     const [node] = await db
-      .select({ warmSince: schema.nodes.warmSince })
+      .select({ status: schema.nodes.status, warmSince: schema.nodes.warmSince })
       .from(schema.nodes)
       .where(eq(schema.nodes.id, input.nodeId))
       .limit(1);
-    if (node?.warmSince) return;
+    if (!node || node.warmSince || ['stopped', 'deleted'].includes(node.status)) return;
 
     const active = await db
       .select({ id: schema.workspaces.id })
@@ -84,7 +94,8 @@ async function markWorkspaceNodeWarmIfEmpty(
     const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(input.nodeId));
     await (stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle).markIdle(
       input.nodeId,
-      input.userId
+      input.userId,
+      input.warmNodeTimeoutMs
     );
   } catch (error) {
     log.warn('session_sleep.node_warm_transition_failed', {
@@ -230,8 +241,11 @@ export async function queueWorkspaceSessionSleep(
     agentSessionId: agentSession.id,
     runtime: workspace.nodeRuntime,
   });
+  const sleepAfterMs =
+    input.sleepAfterMs ??
+    parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
   await scheduleSessionSnapshotSleep(db, env, workspace.chatSessionId, new Date(), {
-    sleepAfterMs: input.sleepAfterMs,
+    sleepAfterMs,
     allowIncomplete: true,
     resetAttempts: false,
   });
@@ -239,7 +253,7 @@ export async function queueWorkspaceSessionSleep(
     workspaceId: workspace.id,
     chatSessionId: workspace.chatSessionId,
     reason: input.reason,
-    sleepAfterMs: input.sleepAfterMs ?? DEFAULT_SESSION_SLEEP_AFTER_MS,
+    sleepAfterMs,
   });
 }
 
@@ -256,7 +270,12 @@ export interface AutomaticSessionSleepEligibility {
  */
 export async function checkAutomaticSessionSleepEligibility(
   env: Env,
-  input: { workspaceId: string; userId: string },
+  input: {
+    workspaceId: string;
+    userId: string;
+    sleepStatus?: string | null;
+    sleepClaimId?: string | null;
+  },
   now = new Date()
 ): Promise<AutomaticSessionSleepEligibility> {
   const db = drizzle(env.DATABASE, { schema });
@@ -317,7 +336,10 @@ export async function checkAutomaticSessionSleepEligibility(
     workspace.chatSessionId,
     reason,
     retryAt,
-    now
+    now,
+    input.sleepStatus === 'preparing'
+      ? { expectedPreparingClaimId: input.sleepClaimId ?? null }
+      : undefined
   );
   return { eligible: false, reason, retryAt: retryAt?.toISOString() };
 }
@@ -339,10 +361,12 @@ export async function sleepWorkspaceSession(
       nodeRole: schema.nodes.nodeRole,
       taskId: schema.tasks.id,
       taskStatus: schema.tasks.status,
+      warmNodeTimeoutMs: schema.projects.warmNodeTimeoutMs,
     })
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
     .leftJoin(schema.tasks, eq(schema.tasks.chatSessionId, schema.workspaces.chatSessionId))
+    .leftJoin(schema.projects, eq(schema.projects.id, schema.workspaces.projectId))
     .where(
       and(eq(schema.workspaces.id, input.workspaceId), eq(schema.workspaces.userId, input.userId))
     )
@@ -380,12 +404,14 @@ export async function sleepWorkspaceSession(
     await finishSleepingWorkspaceComputeCleanup(db, env, {
       workspaceId: workspace.id,
       taskId: workspace.taskId ?? null,
+      warmNodeTimeoutMs: workspace.warmNodeTimeoutMs ?? null,
     });
     await markWorkspaceNodeWarmIfEmpty(db, env, {
       nodeId: workspace.nodeId,
       nodeRole: workspace.nodeRole ?? '',
       runtime: workspace.nodeRuntime,
       userId: workspace.userId,
+      warmNodeTimeoutMs: workspace.warmNodeTimeoutMs ?? null,
     });
     return {
       status: 'sleeping',
@@ -612,12 +638,14 @@ export async function sleepWorkspaceSession(
   await finishSleepingWorkspaceComputeCleanup(db, env, {
     workspaceId: workspace.id,
     taskId: workspace.taskId ?? null,
+    warmNodeTimeoutMs: workspace.warmNodeTimeoutMs ?? null,
   });
   await markWorkspaceNodeWarmIfEmpty(db, env, {
     nodeId: workspace.nodeId,
     nodeRole: workspace.nodeRole ?? '',
     runtime: workspace.nodeRuntime,
     userId: workspace.userId,
+    warmNodeTimeoutMs: workspace.warmNodeTimeoutMs ?? null,
   });
 
   log.info('session_sleep.completed', {

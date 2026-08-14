@@ -145,7 +145,9 @@ export async function scheduled(
   const sessionTaskRepair = await sweeps.isolate('session_task_reconciliation', () =>
     runSessionTaskReconciliation(env)
   );
-  const sessionSleep = await sweeps.isolate('session_sleep', () => runSessionSleepSweep(env));
+  const sessionSleep = await sweeps.isolate('session_sleep', () =>
+    runSessionSleepSweep(env, new Date(), ctx)
+  );
   const setupSessionSweep = await sweeps.isolate('setup_session_sweep', () =>
     runSetupSessionSweep(env, ctx)
   );
@@ -230,10 +232,12 @@ export async function scheduled(
     sessionSleepSelected: sessionSleep?.selected,
     sessionSleepReconciled: sessionSleep?.reconciled,
     sessionSleepClaimed: sessionSleep?.claimed,
+    sessionSleepDispatched: sessionSleep?.dispatched,
     sessionSleepCompleted: sessionSleep?.slept,
     sessionSleepDeferred: sessionSleep?.deferred,
     sessionSleepFailed: sessionSleep?.failed,
     sessionSleepExhausted: sessionSleep?.exhausted,
+    sessionSleepBudgetExhausted: sessionSleep?.budgetExhausted,
     deploymentReleaseRetentionSkipped: deploymentReleaseRetention?.skipped,
     deploymentReleaseRetentionSkipReason: deploymentReleaseRetention?.skipReason,
     deploymentReleaseRetentionDeleted: deploymentReleaseRetention?.deletedReleases,
