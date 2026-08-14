@@ -558,7 +558,6 @@ var snapshotRootExcludeFiles = map[string]map[string]bool{
 var homeExcludePrefixes = []string{
 	// Caches — bulky, re-fetchable.
 	".cache", ".npm", ".cargo", ".rustup", ".local/bin", ".local/lib", "node_modules", ".docker",
-	".config/opencode/node_modules",
 	".codex/tmp", ".claude/debug", ".oh-my-zsh", ".vscode-server",
 	// Credential-bearing paths — plaintext secrets must never be uploaded.
 	".ssh", ".aws", ".netrc", ".npmrc", ".config/gh", ".kube", ".azure", ".config/gcloud",
