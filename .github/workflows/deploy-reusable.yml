@@ -111,6 +111,11 @@ jobs:
     runs-on: ubuntu-latest
     needs: validate
     environment: ${{ inputs.environment }}
+    env:
+      # Pulumi 3.256.0 regressed custom-endpoint S3 writes by sending
+      # UNSIGNED-PAYLOAD as a checksum. R2 accepts the SDK's supported checksum
+      # path; keep this explicit until pulumi/pulumi#24219 is fixed upstream.
+      AWS_REQUEST_CHECKSUM_CALCULATION: 'when_supported'
     outputs:
       api_url: ${{ steps.output.outputs.api_url }}
       app_url: ${{ steps.output.outputs.app_url }}

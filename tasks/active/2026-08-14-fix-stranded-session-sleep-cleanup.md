@@ -87,6 +87,8 @@ the warm-pool policy.
       scheduled event lifetime; isolate every candidate and preserve project warm-timeout overrides.
 - [x] Persist pre-claim/reconciliation backoff so control-plane failures leave the hot candidate
       set, and preserve Instant's separate idle duration when checkpoint completion schedules sleep.
+- [x] Unblock staging and production deploys from Pulumi 3.256.0's R2 checksum regression by using
+      the upstream-verified `when_supported` request-checksum mode for the reusable deploy job.
 - [x] Add discriminating tests for terminal completion during a prompt, pending/degraded retry,
       missing-snapshot reconciliation, heartbeat-independent idle eligibility, attempt preservation,
       two-sweep candidate convergence, and post-sleep cleanup.
