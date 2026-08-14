@@ -332,7 +332,9 @@ function initialViewer(): ViewerState {
 
 function readLens(): Lens {
   const value = readParam('lens');
-  return value === 'flow' || value === 'state' || value === 'structure' ? value : 'structure';
+  return value === 'flow' || value === 'state' || value === 'structure' || value === 'topology'
+    ? value
+    : 'structure';
 }
 
 function readSelection(): Selection | undefined {

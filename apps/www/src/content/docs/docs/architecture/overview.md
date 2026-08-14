@@ -25,11 +25,14 @@ pnpm architecture:impact -- apps/api/src/routes/device-flow.ts
 pnpm architecture:serve
 ```
 
-The viewer provides Structure, Flow, and State lenses, validated source
-previews, and file-backed review threads under `architecture/threads/`. It runs
-on loopback and does not add a hosted SAM service. Agents update the curated
-workspace in the same pull request when a modeled boundary, flow, lifecycle, or
-source anchor changes; ordinary internal edits do not require diagram churn.
+The viewer provides Structure, Topology, Flow, and State lenses. Topology renders
+the curated directed relationships as a horizontal system map on desktop and a
+vertical map on mobile; Flow remains the ordered execution-sequence view. The
+viewer also provides validated source previews and file-backed review threads
+under `architecture/threads/`. It runs on loopback and does not add a hosted SAM
+service. Agents update the curated workspace in the same pull request when a
+modeled boundary, flow, lifecycle, or source anchor changes; ordinary internal
+edits do not require diagram churn.
 
 ## High-Level Architecture
 

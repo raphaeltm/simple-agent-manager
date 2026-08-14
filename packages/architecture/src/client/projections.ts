@@ -6,7 +6,7 @@ import type {
   ArchitectureThread,
 } from '../schemas';
 import type { ViewerModel } from '../server/payloads';
-import type { FlowSlice, StateSlice, StructureSlice } from './types';
+import type { FlowSlice, StateSlice, StructureSlice, TopologySlice } from './types';
 
 export interface ProjectionIndex {
   childrenByParent: Map<string, ArchitectureElement[]>;
@@ -156,6 +156,44 @@ export function stateSlice(
   };
 }
 
+export function topologySlice(
+  model: ViewerModel,
+  focusId?: string,
+  index = createProjectionIndex(model)
+): TopologySlice {
+  const focus = focusId ? index.elementsById.get(focusId) : firstRoot(model.workspace.elements);
+  if (!focus) {
+    return { elements: [], relationships: [], omittedElements: 0, omittedRelationships: 0 };
+  }
+
+  const primaryElements = descendantsOf(focus, index);
+  const primaryIds = new Set(primaryElements.map((element) => element.id));
+  const scopedRelationships = model.workspace.relationships.filter(
+    (relationship) => primaryIds.has(relationship.from) || primaryIds.has(relationship.to)
+  );
+  const contextIds = new Set(
+    scopedRelationships.flatMap((relationship) => [relationship.from, relationship.to])
+  );
+  const scopedElements = [
+    ...primaryElements,
+    ...model.workspace.elements.filter(
+      (element) => contextIds.has(element.id) && !primaryIds.has(element.id)
+    ),
+  ];
+  const visibleElements = scopedElements.slice(0, model.limits.children + 1);
+  const visibleIds = new Set(visibleElements.map((element) => element.id));
+  const visibleRelationships = scopedRelationships
+    .filter((relationship) => visibleIds.has(relationship.from) && visibleIds.has(relationship.to))
+    .slice(0, model.limits.relationships);
+
+  return {
+    elements: visibleElements,
+    relationships: visibleRelationships,
+    omittedElements: Math.max(0, scopedElements.length - visibleElements.length),
+    omittedRelationships: Math.max(0, scopedRelationships.length - visibleRelationships.length),
+  };
+}
+
 export function getElement(model: ViewerModel, id?: string): ArchitectureElement | undefined {
   return model.workspace.elements.find((element) => element.id === id);
 }
@@ -235,6 +273,20 @@ function scopedElementIds(
     for (const element of index.childrenByParent.get(parentId) ?? []) {
       if (result.has(element.id)) continue;
       result.add(element.id);
+      queue.push(element.id);
+    }
+  }
+  return result;
+}
+
+function descendantsOf(focus: ArchitectureElement, index: ProjectionIndex): ArchitectureElement[] {
+  const result = [focus];
+  const queue = [focus.id];
+  while (queue.length > 0) {
+    const parentId = queue.shift();
+    if (!parentId) continue;
+    for (const element of index.childrenByParent.get(parentId) ?? []) {
+      result.push(element);
       queue.push(element.id);
     }
   }

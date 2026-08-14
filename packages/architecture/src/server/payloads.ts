@@ -25,7 +25,7 @@ import type {
 } from '../schemas';
 import type { CompiledWorkspace } from '../types';
 
-export type LensName = 'structure' | 'flow' | 'state';
+export type LensName = 'structure' | 'topology' | 'flow' | 'state';
 
 export interface ViewerLimits {
   breadcrumbs: number;

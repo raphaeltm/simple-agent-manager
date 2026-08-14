@@ -5,6 +5,7 @@ import type { ViewerInteraction, ViewerModel } from '../server/payloads';
 import { Inspector } from './Inspector';
 import { FlowLens, StateLens, StructureLens } from './Lenses';
 import { createProjectionIndex, type ProjectionIndex, structureSlice } from './projections';
+import { TopologyLens } from './TopologyLens';
 import type { ApiClient, Lens } from './types';
 import type { ArchitectureViewerController } from './useArchitectureViewer';
 
@@ -57,7 +58,7 @@ function WorkspaceHeader({
         <h1>{model.summary.name}</h1>
       </div>
       <nav aria-label="Architecture lenses" className="lens-tabs">
-        {(['structure', 'flow', 'state'] as const).map((lens) => (
+        {(['structure', 'topology', 'flow', 'state'] as const).map((lens) => (
           <button
             key={lens}
             type="button"
@@ -134,7 +135,7 @@ function CanvasColumn({
         omittedBreadcrumbs={structure.omittedBreadcrumbs}
         interaction={model.interaction}
       />
-      {controller.lens === 'structure' && (
+      {(controller.lens === 'structure' || controller.lens === 'topology') && (
         <p className="canvas-help" id="canvas-help">
           <span className="desktop-help">
             Zoom with the controls, then pan the focused canvas by scrolling or using arrow keys.
@@ -181,7 +182,7 @@ function CanvasContext({
           </span>
         ))}
       </nav>
-      {controller.lens === 'structure' && (
+      {(controller.lens === 'structure' || controller.lens === 'topology') && (
         <div className="zoom-controls">
           <button
             type="button"
@@ -245,7 +246,11 @@ function LensCanvas({
       ref={controller.canvasRef}
       className="canvas"
       data-intentional-clip
-      aria-describedby={controller.lens === 'structure' ? 'canvas-help' : undefined}
+      aria-describedby={
+        controller.lens === 'structure' || controller.lens === 'topology'
+          ? 'canvas-help'
+          : undefined
+      }
       aria-label={`${controller.lens} architecture canvas`}
       role="region"
       tabIndex={0}
@@ -271,6 +276,7 @@ function renderLens(
     focusId: controller.focusId,
     selection: controller.selection,
     zoom: controller.zoom,
+    mobile: controller.mobileViewport,
     onSelect: controller.select,
     onDrill: controller.drill,
     onLens: controller.navigateLens,
@@ -278,6 +284,7 @@ function renderLens(
   };
   if (lens === 'flow') return <FlowLens {...props} />;
   if (lens === 'state') return <StateLens {...props} />;
+  if (lens === 'topology') return <TopologyLens {...props} />;
   return <StructureLens {...props} />;
 }
 

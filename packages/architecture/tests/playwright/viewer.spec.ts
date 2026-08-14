@@ -77,6 +77,48 @@ test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
   await page.getByRole('button', { name: 'Open API component in structure' }).click();
   await expect(page).toHaveURL(/lens=structure/);
 
+  const topologyTab = page.getByRole('button', { name: 'Topology' });
+  await topologyTab.click();
+  await topologyTab.hover();
+  const activeTabColors = await topologyTab.evaluate((element) => {
+    const style = window.getComputedStyle(element);
+    return { background: style.backgroundColor, text: style.color };
+  });
+  expect(activeTabColors.text).not.toBe(activeTabColors.background);
+  await expect(page.getByRole('region', { name: 'Directed system topology' })).toBeVisible();
+  const topology = page.locator('.topology-lens');
+  const apiTopologyNode = topology.locator('.topology-node', { hasText: 'API component' });
+  await expect(apiTopologyNode).toBeVisible();
+  await expect(topology.getByRole('button', { name: 'Worker runtime' })).toBeVisible();
+  await screenshot(page, `viewer-topology-overview-${testInfo.project.name}`);
+  await apiTopologyNode.click();
+  await expect(apiTopologyNode).toHaveClass(/selected/);
+  await expect
+    .poll(() =>
+      apiTopologyNode.evaluate((element) => window.getComputedStyle(element).outlineWidth)
+    )
+    .toBe('5px');
+  if (testInfo.project.name.startsWith('mobile')) await page.keyboard.press('Escape');
+  await page.getByRole('button', { name: 'Inspect API calls Worker connection' }).click();
+  await expect(inspector).toContainText('api → worker');
+  if (testInfo.project.name.startsWith('mobile')) await page.keyboard.press('Escape');
+  await expect(page.getByRole('button', { name: 'Zoom in' })).toBeVisible();
+  const squaredSurfaces = await page
+    .locator('.canvas, .architecture-inspector, .topology-node, .lens-tab')
+    .evaluateAll((elements) =>
+      elements.map((element) => ({
+        className: element.className,
+        radius: window.getComputedStyle(element).borderRadius,
+      }))
+    );
+  expect(
+    squaredSurfaces.every((surface) => surface.radius === '0px'),
+    squaredSurfaces
+  ).toBe(true);
+  await assertNoOverflow(page);
+  await assertViewportScrollOwnership(page);
+  await screenshot(page, `viewer-topology-${testInfo.project.name}`);
+
   await page.getByRole('button', { name: 'State' }).click();
   await expect(page.getByLabel('Task state transition list')).toContainText('Queued');
   await expect(page.getByLabel('Queued when start goes to Running')).toBeVisible();
@@ -169,6 +211,12 @@ test('responsive normal, long, empty, invalid, many, and special-character state
   await expect(page.getByText(/very-long-token/)).toBeVisible();
   await assertNoOverflow(page);
   await screenshot(page, `viewer-long-${testInfo.project.name}`);
+  await page.getByRole('button', { name: 'Topology' }).click();
+  await expect(page.locator('.topology-node')).toHaveCount(3);
+  await assertNoOverflow(page);
+  await assertViewportScrollOwnership(page);
+  await screenshot(page, `viewer-topology-long-${testInfo.project.name}`);
+  await page.getByRole('button', { name: 'Structure' }).click();
 
   await writeModel(emptyModel());
   await expect(page.getByText('Empty architecture workspace')).toBeVisible();
@@ -191,12 +239,32 @@ test('responsive normal, long, empty, invalid, many, and special-character state
     .toBeGreaterThan(beforePan);
   await screenshot(page, `viewer-many-${testInfo.project.name}`);
   await page.getByRole('button', { name: 'Reset view' }).click();
+  await page.getByRole('button', { name: 'Topology' }).click();
+  await expect(page.locator('.topology-node')).toHaveCount(36);
+  await assertNoOverflow(page);
+  const topologyCanvas = page.getByRole('region', { name: 'topology architecture canvas' });
+  await topologyCanvas.focus();
+  const topologyPanBefore = await topologyCanvas.evaluate((element) => element.scrollTop);
+  await page.keyboard.press('ArrowDown');
+  await expect
+    .poll(() => topologyCanvas.evaluate((element) => element.scrollTop))
+    .toBeGreaterThan(topologyPanBefore);
+  await assertViewportScrollOwnership(page);
+  await screenshot(page, `viewer-topology-many-${testInfo.project.name}`);
+  await page.getByRole('button', { name: 'Structure' }).click();
 
   await writeModel(specialModel());
   await expect(page.getByText('Literal <script>alert(1)</script>')).toBeVisible();
   expect(await page.locator('script', { hasText: 'alert(1)' }).count()).toBe(0);
   await assertNoOverflow(page);
   await screenshot(page, `viewer-special-${testInfo.project.name}`);
+  await page.getByRole('button', { name: 'Topology' }).click();
+  await expect(
+    page.locator('.topology-node', { hasText: 'Literal <script>alert(1)</script>' })
+  ).toBeVisible();
+  await assertNoOverflow(page);
+  await assertViewportScrollOwnership(page);
+  await screenshot(page, `viewer-topology-special-${testInfo.project.name}`);
 
   if (testInfo.project.name.startsWith('mobile')) {
     await page.setViewportSize({ width: 320, height: 700 });

@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { createProjectionIndex, flowSlice, structureSlice } from '../src/client/projections';
+import {
+  createProjectionIndex,
+  flowSlice,
+  structureSlice,
+  topologySlice,
+} from '../src/client/projections';
 import type { ViewerModel } from '../src/server/payloads';
 
 describe('viewer projection index', () => {
@@ -27,6 +32,44 @@ describe('viewer projection index', () => {
     expect(structure.breadcrumbs[0]?.id).toBe('element-0');
     expect(structure.breadcrumbs.at(-1)?.id).toBe(`element-${depth - 1}`);
     expect(flows.flows.map((flow) => flow.id)).toEqual(['deep-flow']);
+  });
+
+  it('bounds a directed topology without dropping cyclic connections between visible nodes', () => {
+    const model = makeProjectionModel(
+      [
+        { id: 'root', kind: 'system', title: 'Root' },
+        { id: 'api', kind: 'component', parent: 'root', title: 'API' },
+        { id: 'worker', kind: 'runtime', parent: 'root', title: 'Worker' },
+        { id: 'database', kind: 'database', parent: 'root', title: 'Database' },
+      ],
+      'database'
+    );
+    model.limits.children = 2;
+    model.limits.relationships = 2;
+    model.workspace.relationships = [
+      { id: 'api-worker', from: 'api', to: 'worker', title: 'Dispatches work' },
+      { id: 'worker-api', from: 'worker', to: 'api', title: 'Reports status' },
+      { id: 'worker-database', from: 'worker', to: 'database', title: 'Persists state' },
+    ];
+
+    const topology = topologySlice(model, 'root', createProjectionIndex(model));
+
+    expect(topology.elements.map((element) => element.id)).toEqual(['root', 'api', 'worker']);
+    expect(topology.relationships.map((relationship) => relationship.id)).toEqual([
+      'api-worker',
+      'worker-api',
+    ]);
+    expect(topology.omittedElements).toBe(1);
+    expect(topology.omittedRelationships).toBe(1);
+
+    model.limits.children = 80;
+    model.limits.relationships = 120;
+    const focusedTopology = topologySlice(model, 'api', createProjectionIndex(model));
+    expect(focusedTopology.elements.map((element) => element.id)).toEqual(['api', 'worker']);
+    expect(focusedTopology.relationships.map((relationship) => relationship.id)).toEqual([
+      'api-worker',
+      'worker-api',
+    ]);
   });
 });
 

@@ -326,10 +326,16 @@ statuses are `400` malformed/unsafe input, `403` Host/Origin rejection, `404`
 unknown target, `405` wrong method, `413` oversized body, `415` non-JSON body,
 and `503` invalid initial workspace or exhausted SSE capacity.
 
-The client bounds Structure children/relationships, Flow records/steps, and
-State machines/states/transitions using `viewerLimits`. `/api/model` is the full
-local compiled model, not an agent query response; use the CLI compact queries
-for bounded agent context.
+The URL-addressable viewer lenses are `structure`, `topology`, `flow`, and
+`state`. The client bounds Structure children/relationships, Topology elements
+and directed relationships, Flow records/steps, and State
+machines/states/transitions using `viewerLimits`. Topology adds only one-hop
+connected context outside the focused hierarchy, so a selected component keeps
+its immediate system routes without recursively expanding the whole graph. It
+derives a horizontal desktop layout and vertical mobile layout at render time;
+canvas coordinates never enter the canonical workspace. `/api/model` is the
+full local compiled model, not an agent query response; use the CLI compact
+queries for bounded agent context.
 
 `ArchitectureServerOptions` extends `LoadWorkspaceOptions` and accepts:
 

@@ -74,7 +74,7 @@ The requested end state is broader than this first PR: humans should eventually 
 ### Viewer interaction decision
 
 - Use a bounded focus canvas with explicit semantic drill-down, not one infinitely nested graph. Pan/zoom changes visual density inside the current slice; a named drill action or breadcrumb changes architectural scope.
-- Use URL-addressable Structure, Flow, and State lenses. Structure shows a focused hierarchy slice and cross-scope portals; Flow presents ordered steps; State presents states, guarded transitions, and an accessible transition list.
+- Use URL-addressable Structure, Topology, Flow, and State lenses. Structure shows a focused hierarchy slice and cross-scope portals; Topology maps directed component connections; Flow presents ordered steps; State presents states, guarded transitions, and an accessible transition list.
 - Keep a persistent inspector on desktop and a focus-managed bottom sheet on mobile for overview, relationships, source previews, and file-backed threads. Graph edges remain reachable through textual relationship lists.
 - Preserve lens, focus, selection, and physical viewport across live reload by stable ID. Retain the last valid model when SSE reconnects, and keep mutation drafts after errors.
 - Cap direct canvas projection with a named configurable budget and deterministic overflow affordance; bounded search and agent queries still reach omitted elements.
@@ -99,7 +99,7 @@ The requested end state is broader than this first PR: humans should eventually 
 
 - [x] C1. Implement a configurable loopback-only HTTP server exposing the compiled workspace, bounded element/source queries, thread/reply mutations, and an SSE event stream.
 - [x] C2. Watch architecture files and publish model/thread changes so direct agent file writes update the open browser without restart.
-- [x] C3. Implement a responsive interactive viewer with semantic hierarchy drill-down, breadcrumbs, pan/zoom, relationship inspection, and structure/flow/state lenses.
+- [x] C3. Implement a responsive interactive viewer with semantic hierarchy drill-down, breadcrumbs, pan/zoom, relationship inspection, and structure/topology/flow/state lenses.
 - [x] C4. Add a details panel that explains selected entities and relationships, opens validated repository source previews, displays unresolved/resolved threads, and lets a human create a question or reply.
 - [x] C5. Treat loading, invalid workspace, empty, long-content, many-node/thread, and server-error states deliberately; satisfy keyboard and accessible-name basics.
 
@@ -131,6 +131,14 @@ The requested end state is broader than this first PR: humans should eventually 
 - [x] F8. Exercise the complete browser-to-file-to-agent-to-reply-to-SSE loop with a local subagent responding to a UI-created question, including mobile and desktop evidence.
 - [x] F9. Re-run full package/repository checks and final specialist audits, refresh the draft PR evidence, and keep the PR unmerged pending user authorization.
 
+### G. Post-review drafting-board and topology refinement
+
+- [x] G1. Replace rounded content surfaces with a square technical drafting-board language and reserve 5px cyan outlines for selection and keyboard focus.
+- [x] G2. Add a dedicated URL-addressable Topology lens for directed component relationships without changing the sequence-oriented Flow lens.
+- [x] G3. Keep one-hop connected context visible when a component is focused, handle cycles deterministically, and bound omitted elements/connections through the existing viewer limits.
+- [x] G4. Use horizontal layered layout on desktop and vertical scan order on mobile; keep derived positions out of the canonical model.
+- [x] G5. Extend unit and real-server Playwright coverage for deep links, relationship inspection, active-tab contrast, 5px highlights, zero-radius surfaces, long/dense/hostile data, 320px overflow, and outer-viewport scroll ownership.
+
 ## Acceptance Criteria
 
 1. `pnpm architecture:validate` validates the checked-in SAM architecture workspace and produces actionable errors for invalid copies.
@@ -151,8 +159,9 @@ The requested end state is broader than this first PR: humans should eventually 
 
 ## Verification Evidence
 
-- Full repository: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` passed on 2026-08-13. The test suite completed 23 Turborepo tasks, including 7,193 API tests and 3,077 web tests.
+- Full repository: `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build` passed on 2026-08-14. The test suite completed 23 Turborepo tasks, including 7,193 API tests and 3,077 web tests.
 - Architecture package: 42 unit/integration tests passed with 89.11% line coverage and 73.63% branch coverage. Six real-server Playwright scenarios passed at 375x667 and 1280x800, with an additional 320px overflow audit and screenshots for Structure, Flow, State, the open mobile inspector/backdrop, empty, invalid, many-record, long-content, special-character, and API-error states.
+- Drafting-board/topology refinement: 65 package tests passed with 89.8% line coverage and 71.57% branch coverage. All six real-server Playwright scenarios passed at 375x667 and 1280x800, with an additional 320px overflow audit and screenshot coverage for the normal, selected-connection, long-content, dense, and special-character Topology states. Package lint, typecheck, test, and build checks passed; the UI/UX, documentation-sync, and constitution audits reported no blocking findings.
 - Refinement round 4: 33 focused frontend/backend tests and all six real-server Playwright scenarios passed after the State lens became an origin-grouped route atlas, per-target drafts and browser history were hardened, connection state was separated from refresh errors, and watcher/server shutdown became drain-safe. Ten screenshots cover 1280px, 375px, and 320px layouts without horizontal overflow.
 - Refinement round 5: all three persistent local reviewers signed off with no blockers and the UI rubric reached 4/5 in every category. Q&A gained a sticky Ask action, inspector-local focus navigation, ordered User/Agent messages with UTC timestamps, indexed/memoized inspection, cross-target mutation race fixes, and complete reserved-marker author validation. The real browser created `thread-57631e3d-8b55-4dac-b331-fb1bc73e0276`; the local backend reviewer discovered it through `architecture:inbox`, replied through `architecture:reply`, and the open desktop/mobile browser observed `msg-64b8b5c3-570c-406d-8645-9dc275e96397` through watcher/SSE with zero browser errors. The generated proof thread was removed after capture.
 - Final validation: 63 package tests passed with 90.05% line and 72.87% branch coverage; six Playwright scenarios passed across 1280px and 375px with explicit 320px audits; repository lint (14/14 packages), typecheck (20/20 tasks), test (23/23 tasks), and build (10/10 tasks) passed. Nine final screenshots were replaced or uploaded in the SAM project library.

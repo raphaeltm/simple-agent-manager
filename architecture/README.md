@@ -27,7 +27,10 @@ The browser and CLI consume the same compiled model. Source previews are limited
 to validated repository-relative references. Compact `summary`, `show`, and
 `inbox` output caps list, nested-record, text, and source-reference sizes so
 agents can request focused context without loading the full graph. `summary`
-and `show` also report omitted counts.
+and `show` also report omitted counts. The viewer separates hierarchy
+(Structure), directed system connections (Topology), ordered behavior (Flow),
+and lifecycle transitions (State); all diagram placement is derived in the
+browser rather than stored here.
 
 ## Files
 

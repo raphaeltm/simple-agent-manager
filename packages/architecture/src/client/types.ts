@@ -10,7 +10,7 @@ import type {
 import type { ViewerModel } from '../server/payloads';
 import type { SourceReadResult } from '../types';
 
-export type Lens = 'structure' | 'flow' | 'state';
+export type Lens = 'structure' | 'topology' | 'flow' | 'state';
 
 export interface ViewerState {
   model?: ViewerModel;
@@ -87,4 +87,11 @@ export interface StateSlice {
   omittedMachines: number;
   omittedStates: number;
   omittedTransitions: number;
+}
+
+export interface TopologySlice {
+  elements: ArchitectureElement[];
+  relationships: ArchitectureRelationship[];
+  omittedElements: number;
+  omittedRelationships: number;
 }

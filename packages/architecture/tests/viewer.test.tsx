@@ -40,10 +40,31 @@ describe('architecture viewer', () => {
     expect(window.location.search).toContain('lens=flow');
     expect(screen.getByText('Call API')).toBeVisible();
 
+    fireEvent.click(screen.getByRole('button', { name: 'Topology' }));
+    expect(window.location.search).toContain('lens=topology');
+    expect(screen.getByRole('region', { name: 'Directed system topology' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Root calls API connection' }));
+    expect(window.location.search).toContain('selected=relationship%3Aroot-api');
+    expect(screen.getByRole('heading', { name: 'Root calls API' })).toBeVisible();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Flow' }));
     fireEvent.click(screen.getByRole('button', { name: 'Open API component in structure' }));
     expect(window.location.search).toContain('focus=api');
     fireEvent.click(screen.getByRole('button', { name: 'Root system' }));
     expect(window.location.search).toContain('focus=root');
+  });
+
+  it('loads a topology deep link without falling back to Structure', async () => {
+    window.history.replaceState(null, '', '/?lens=topology');
+    mockFetch(makeModel());
+
+    render(<App />);
+
+    expect(await screen.findByRole('button', { name: 'Topology' })).toHaveAttribute(
+      'aria-current',
+      'page'
+    );
+    expect(screen.getByRole('region', { name: 'topology architecture canvas' })).toBeVisible();
   });
 
   it('opens source previews and creates threads without duplicate submit', async () => {

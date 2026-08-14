@@ -47,7 +47,7 @@ textarea {
 
 button {
   border: 0;
-  border-radius: 0.35rem;
+  border-radius: 0;
   background: transparent;
   color: var(--aw-text);
   cursor: pointer;
@@ -62,8 +62,8 @@ button:hover:not(:disabled) {
 button:focus-visible,
 input:focus-visible,
 textarea:focus-visible {
-  outline: 3px solid var(--aw-accent);
-  outline-offset: 2px;
+  outline: 5px solid var(--aw-accent);
+  outline-offset: 1px;
 }
 
 button:disabled {
@@ -76,7 +76,7 @@ textarea {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--aw-border);
-  border-radius: 0.35rem;
+  border-radius: 0;
   background: #050d13;
   color: var(--aw-text);
   padding: 0.65rem;
@@ -100,7 +100,7 @@ textarea {
   max-width: 1180px;
   margin: 0 auto 1rem;
   border: 1px solid var(--aw-danger);
-  border-radius: 0.4rem;
+  border-radius: 0;
   background: rgba(253, 164, 175, 0.12);
   color: var(--aw-text);
   padding: 0.75rem 1rem;
@@ -167,6 +167,10 @@ textarea {
 
 .lens-tabs [aria-current='page'] {
   background: var(--aw-accent);
+  color: var(--aw-accent-ink);
+}
+
+.lens-tabs [aria-current='page']:hover:not(:disabled) {
   color: var(--aw-accent-ink);
 }
 
@@ -246,17 +250,14 @@ textarea {
   min-width: 0;
   overflow: auto;
   border: 1px solid var(--aw-border);
-  border-radius: 0.55rem;
+  border-radius: 0;
   background:
-    linear-gradient(rgba(99, 217, 221, 0.035) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(99, 217, 221, 0.035) 1px, transparent 1px),
-    radial-gradient(circle at top left, rgba(99, 217, 221, 0.1), transparent 25rem), var(--aw-panel);
+    linear-gradient(rgba(99, 217, 221, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 217, 221, 0.055) 1px, transparent 1px), var(--aw-panel);
   background-size:
     28px 28px,
     28px 28px,
-    auto,
     auto;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.015);
   padding: 1rem;
 }
 
@@ -287,7 +288,7 @@ textarea {
 .thread {
   min-width: 0;
   border: 1px solid var(--aw-border);
-  border-radius: 0.45rem;
+  border-radius: 0;
   background: color-mix(in srgb, var(--aw-panel-strong) 90%, transparent);
   padding: 0.75rem;
 }
@@ -356,7 +357,142 @@ textarea {
 
 .selected {
   border-color: var(--aw-accent);
-  box-shadow: 0 0 0 1px rgba(99, 217, 221, 0.28);
+  outline: 5px solid var(--aw-accent);
+  outline-offset: -1px;
+}
+
+.topology-lens {
+  display: grid;
+  width: max-content;
+  min-width: 100%;
+  gap: calc(1rem * var(--aw-zoom));
+  transform-origin: top left;
+  zoom: var(--aw-zoom);
+}
+
+.topology-stage {
+  position: relative;
+  min-width: 100%;
+  border-top: 1px solid var(--aw-border-subtle);
+  border-left: 1px solid var(--aw-border-subtle);
+  background:
+    linear-gradient(rgba(99, 217, 221, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 217, 221, 0.04) 1px, transparent 1px);
+  background-size: 14px 14px;
+}
+
+.topology-edges {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.topology-edges marker path {
+  fill: var(--aw-muted);
+}
+
+.topology-edge {
+  fill: none;
+  stroke: var(--aw-muted);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+}
+
+.topology-edge.selected {
+  border: 0;
+  outline: 0;
+  stroke: var(--aw-accent);
+  stroke-width: 5px;
+}
+
+.topology-node {
+  position: absolute;
+  z-index: 1;
+  display: grid;
+  align-content: center;
+  gap: 0.28rem;
+  border: 1px solid var(--aw-border);
+  background: var(--aw-panel-strong);
+  overflow-wrap: anywhere;
+  padding: 0.7rem 0.8rem;
+  text-align: left;
+}
+
+.topology-node:hover:not(:disabled) {
+  border-color: var(--aw-accent);
+  background: var(--aw-panel-raised);
+}
+
+.topology-node.is-scope {
+  border-style: dashed;
+}
+
+.topology-node small,
+.topology-node span {
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.topology-node strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--aw-text);
+  font-size: 0.9rem;
+  line-height: 1.2;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.topology-connections {
+  display: grid;
+  gap: 0.7rem;
+  border-top: 1px solid var(--aw-border-subtle);
+  padding-top: 0.8rem;
+}
+
+.topology-connections h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.topology-connection-grid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+}
+
+.topology-connection {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid var(--aw-border);
+  background: color-mix(in srgb, var(--aw-panel-strong) 72%, transparent);
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.topology-connection > span {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.topology-connection b {
+  color: var(--aw-accent);
+}
+
+.topology-connection small {
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.68rem;
+}
+
+.topology-bounded-note {
+  max-width: 42rem;
 }
 
 .secondary {
@@ -457,7 +593,7 @@ textarea {
   width: 2.3rem;
   height: 2.3rem;
   border: 1px solid var(--aw-accent);
-  border-radius: 50%;
+  border-radius: 0;
   background: var(--aw-panel-strong);
   color: var(--aw-accent);
   font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
@@ -497,7 +633,7 @@ textarea {
 
 .pill {
   border: 1px solid var(--aw-border);
-  border-radius: 0.3rem;
+  border-radius: 0;
   color: var(--aw-muted);
   padding: 0.25rem 0.55rem;
 }
@@ -559,7 +695,7 @@ textarea {
   width: 2.3rem;
   height: 2.3rem;
   border: 1px solid var(--aw-accent);
-  border-radius: 0.35rem;
+  border-radius: 0;
   color: var(--aw-accent);
   font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
   font-size: 0.72rem;
@@ -613,7 +749,7 @@ textarea {
 
 .state-destination {
   border: 1px solid var(--aw-border);
-  border-radius: 0.3rem;
+  border-radius: 0;
   background: rgba(20, 38, 51, 0.66);
   overflow-wrap: anywhere;
   padding: 0.35rem 0.5rem;
@@ -633,9 +769,8 @@ textarea {
   max-height: none;
   overflow: auto;
   border: 1px solid var(--aw-border);
-  border-radius: 0.55rem;
+  border-radius: 0;
   background: var(--aw-panel);
-  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.16);
   padding: 0 1rem 1rem;
 }
 
@@ -703,8 +838,8 @@ textarea {
 }
 
 .section-heading h3:focus-visible {
-  border-radius: 0.2rem;
-  outline: 2px solid var(--aw-accent);
+  border-radius: 0;
+  outline: 5px solid var(--aw-accent);
   outline-offset: 0.25rem;
 }
 
@@ -730,7 +865,7 @@ textarea {
   width: 1.75rem;
   height: 1.75rem;
   border: 1px solid var(--aw-border);
-  border-radius: 50%;
+  border-radius: 0;
   color: var(--aw-muted);
   font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
   place-items: center;
@@ -785,7 +920,7 @@ textarea {
   margin-top: 0.65rem;
   overflow: hidden;
   border: 1px solid var(--aw-border-subtle);
-  border-radius: 0.4rem;
+  border-radius: 0;
   background: #040b10;
 }
 
@@ -962,7 +1097,7 @@ textarea {
   left: 0.5rem;
   z-index: 10;
   max-height: min(92dvh, 42rem);
-  border-radius: 1rem 1rem 0.55rem 0.55rem;
+  border-radius: 0;
   padding-bottom: max(1rem, env(safe-area-inset-bottom));
   transform: translateY(calc(100% + 1rem));
   transition: transform 160ms ease-out;
@@ -1032,7 +1167,7 @@ textarea {
   display: block;
   width: 2.75rem;
   height: 0.25rem;
-  border-radius: 999px;
+  border-radius: 0;
   background: var(--aw-border);
   transform: translateX(-50%);
 }
@@ -1079,7 +1214,7 @@ textarea {
 @media (max-width: 390px) {
   .architecture-app.is-mobile .lens-tabs {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
   .architecture-app.is-mobile .lens-tab {
