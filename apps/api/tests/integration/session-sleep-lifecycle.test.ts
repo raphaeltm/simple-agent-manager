@@ -59,7 +59,7 @@ vi.mock('../../src/services/vm-agent-container', () => ({
 }));
 
 const START = new Date('2026-08-14T05:00:00.000Z');
-const RETRY_AT = new Date('2026-08-14T05:01:00.000Z');
+const RETRY_AT = new Date('2026-08-14T05:15:00.000Z');
 const HOME_SHA256 = 'ab'.repeat(32);
 
 function checksumBytes(hex: string): ArrayBuffer {

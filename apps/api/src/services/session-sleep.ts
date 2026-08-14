@@ -263,6 +263,22 @@ export interface AutomaticSessionSleepEligibility {
   retryAt?: string;
 }
 
+function isActivitySafeForSleep(
+  taskStatus: string | null,
+  state: { activity: string; activityAt: number } | null,
+  now: Date,
+  idleAfterMs: number
+): boolean {
+  if (state?.activity === 'idle') return true;
+  const activityAt = state?.activityAt;
+  return (
+    taskStatus === 'completed' &&
+    typeof activityAt === 'number' &&
+    activityAt > 0 &&
+    activityAt + idleAfterMs <= now.getTime()
+  );
+}
+
 /**
  * Check the authoritative ProjectData work-activity clock before the sweep
  * consumes a sleep attempt. Node/ACP heartbeats are deliberately absent: they
@@ -323,22 +339,24 @@ export async function checkAutomaticSessionSleepEligibility(
         .getSessionState(env, workspace.projectId, agentSession.id)
         .catch(() => null)
     : null;
+  const idleAfterMs = parsePositiveInt(
+    env.SESSION_SLEEP_AFTER_MS,
+    DEFAULT_SESSION_SLEEP_AFTER_MS
+  );
   let reason: string;
   let retryAt: Date | undefined;
-  // Task completion is the authoritative terminal signal. Older sessions can
-  // retain a stale `prompting` activity after their final response has already
-  // completed; requiring a later idle transition strands their compute forever.
-  if (workspace.taskStatus === 'completed') {
-    return { eligible: true };
-  }
-  if (!state || state.activity !== 'idle') {
+  // A terminal task can retain a stale `prompting` transition forever. Treat it
+  // as safe only after the normal idle interval has elapsed, preserving a live
+  // final response while preventing old terminal sessions from stranding compute.
+  if (!isActivitySafeForSleep(workspace.taskStatus, state, now, idleAfterMs)) {
     reason = `Workspace agent is not idle (${state?.activity ?? 'unknown'})`;
+    if (workspace.taskStatus === 'completed' && state?.activityAt) {
+      retryAt = new Date(state.activityAt + idleAfterMs);
+    }
+  } else if (workspace.taskStatus === 'completed') {
+    return { eligible: true };
   } else {
-    const idleAfterMs = parsePositiveInt(
-      env.SESSION_SLEEP_AFTER_MS,
-      DEFAULT_SESSION_SLEEP_AFTER_MS
-    );
-    const idleEligibleAt = state.activityAt ? state.activityAt + idleAfterMs : 0;
+    const idleEligibleAt = state?.activityAt ? state.activityAt + idleAfterMs : 0;
     if (!idleEligibleAt || idleEligibleAt > now.getTime()) {
       reason = 'Workspace idle interval has not elapsed';
       retryAt = idleEligibleAt ? new Date(idleEligibleAt) : undefined;
@@ -498,7 +516,14 @@ export async function sleepWorkspaceSession(
         workspace.projectId,
         agentSession.id
       );
-      if (!stateBefore || stateBefore.activity !== 'idle') {
+      const idleAfterMs = parsePositiveInt(
+        env.SESSION_SLEEP_AFTER_MS,
+        DEFAULT_SESSION_SLEEP_AFTER_MS
+      );
+      if (
+        !stateBefore ||
+        !isActivitySafeForSleep(workspace.taskStatus, stateBefore, new Date(), idleAfterMs)
+      ) {
         throw new Error(`Workspace agent is not idle (${stateBefore?.activity ?? 'unknown'})`);
       }
 
@@ -523,7 +548,8 @@ export async function sleepWorkspaceSession(
       );
       if (
         !stateAfter ||
-        stateAfter.activity !== 'idle' ||
+        !isActivitySafeForSleep(workspace.taskStatus, stateAfter, new Date(), idleAfterMs) ||
+        stateAfter.activity !== stateBefore.activity ||
         stateAfter.activityAt !== stateBefore.activityAt
       ) {
         throw new Error('Workspace activity changed while the final snapshot was captured');
