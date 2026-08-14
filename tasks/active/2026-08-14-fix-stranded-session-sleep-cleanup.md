@@ -179,7 +179,9 @@ prerequisite state—remains selectable or has a separate reconciler with a dura
 
 - `apps/api/src/services/task-terminal-cleanup.ts`
 - `apps/api/src/services/session-sleep.ts`
-- `apps/api/src/services/session-snapshot-lifecycle.ts`
+- `apps/api/src/services/session-snapshot-sleep-lifecycle.ts`
+- `apps/api/src/services/session-snapshot-recovery-lifecycle.ts`
+- `apps/api/src/services/session-snapshot-persistence.ts`
 - `apps/api/src/scheduled/session-sleep.ts`
 - `apps/api/src/routes/projects/agent-activity-callback.ts`
 - `apps/www/src/content/docs/docs/guides/instant-sessions.md`
