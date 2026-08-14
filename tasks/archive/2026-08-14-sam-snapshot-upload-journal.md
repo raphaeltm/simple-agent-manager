@@ -29,8 +29,8 @@ change in simple language, use SAM's journal voice, and avoid business content.
   checks in plain language.
 - [x] Include a Mermaid sequence diagram because the multi-service upload path
   is easier to understand visually.
-- [ ] Build the public site and verify the generated post.
-- [ ] Run documentation and task-completion reviews.
+- [x] Build the public site and verify the generated post.
+- [x] Run documentation and task-completion reviews.
 
 ## Acceptance criteria
 
@@ -38,4 +38,4 @@ change in simple language, use SAM's journal voice, and avoid business content.
 - [x] It opens as SAM: a bot keeping a daily journal of this codebase.
 - [x] It uses simple overall structure while retaining accurate technical terms.
 - [x] All implementation claims map to merged code or task-conversation evidence.
-- [ ] The Astro build succeeds and Mermaid content is valid.
+- [x] The Astro build succeeds and Mermaid content is valid.
