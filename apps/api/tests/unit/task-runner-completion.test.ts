@@ -14,7 +14,7 @@ const mocks = vi.hoisted(() => ({
   cleanupTaskRun: vi.fn(),
   stopSession: vi.fn(),
   failSession: vi.fn(),
-  sleepWorkspaceSession: vi.fn(),
+  queueWorkspaceSessionSleep: vi.fn(),
   log: {
     info: vi.fn(),
     warn: vi.fn(),
@@ -36,7 +36,7 @@ vi.mock('../../src/services/project-data', () => ({
 }));
 
 vi.mock('../../src/services/session-sleep', () => ({
-  sleepWorkspaceSession: (...args: unknown[]) => mocks.sleepWorkspaceSession(...args),
+  queueWorkspaceSessionSleep: (...args: unknown[]) => mocks.queueWorkspaceSessionSleep(...args),
 }));
 
 vi.mock('../../src/lib/logger', () => ({
@@ -66,10 +66,10 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
     mocks.stopSession.mockResolvedValue(undefined);
     mocks.failSession.mockResolvedValue(undefined);
     mocks.cleanupTaskRun.mockResolvedValue(undefined);
-    mocks.sleepWorkspaceSession.mockResolvedValue({ status: 'sleeping' });
+    mocks.queueWorkspaceSessionSleep.mockResolvedValue(undefined);
   });
 
-  it('sleeps the persisted session before invoking cleanupTaskRun for completed tasks', async () => {
+  it('queues terminal sleep without tearing down the still-running completing prompt', async () => {
     const order: string[] = [];
     const db = buildDb([
       [
@@ -83,9 +83,8 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
       [{ chatSessionId: 'session-1', userId: 'user-1' }],
     ]);
     mocks.drizzle.mockReturnValue(db);
-    mocks.sleepWorkspaceSession.mockImplementation(async () => {
-      order.push('sleepWorkspaceSession');
-      return { status: 'sleeping' };
+    mocks.queueWorkspaceSessionSleep.mockImplementation(async () => {
+      order.push('queueWorkspaceSessionSleep');
     });
     mocks.cleanupTaskRun.mockImplementation(async () => {
       order.push('cleanupTaskRun');
@@ -97,14 +96,15 @@ describe('cleanupTerminalTaskResources behavioral tests', () => {
 
     await cleanupTerminalTaskResources(env, 'task-1', { status: 'completed' });
 
-    expect(mocks.sleepWorkspaceSession).toHaveBeenCalledWith(env, {
+    expect(mocks.queueWorkspaceSessionSleep).toHaveBeenCalledWith(env, {
       workspaceId: 'ws-1',
       userId: 'user-1',
       reason: 'Task completed',
+      sleepAfterMs: 0,
     });
     expect(mocks.stopSession).not.toHaveBeenCalled();
-    expect(mocks.cleanupTaskRun).toHaveBeenCalledWith('task-1', env, undefined, undefined);
-    expect(order).toEqual(['sleepWorkspaceSession', 'cleanupTaskRun']);
+    expect(mocks.cleanupTaskRun).not.toHaveBeenCalled();
+    expect(order).toEqual(['queueWorkspaceSessionSleep']);
   });
 
   it('fails the chat session for failed tasks and propagates error message', async () => {

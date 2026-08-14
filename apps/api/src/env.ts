@@ -199,7 +199,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY?: string; // KV key for release retention interval gating
   SESSION_SNAPSHOT_TTL_DAYS?: string; // Runtime hibernate snapshot retention (default: 7)
   SESSION_SNAPSHOT_R2_PREFIX?: string; // R2 key prefix for runtime hibernate snapshots
-  SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES?: string; // Max combined home/WIP snapshot size (default: 104857600)
+  SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES?: string; // Max combined home/WIP snapshot size (default: 268435456)
   SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES?: string; // Max individual file/dir included by vm-agent scanner (default: 52428800)
   SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS?: string; // No-progress upload/download watchdog window (default: 30000)
   SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS?: string; // End-to-end final checkpoint request timeout (default: 300000)
@@ -207,7 +207,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_SNAPSHOT_OPERATION_TIMEOUT?: string; // VM-agent checkpoint operation deadline as a Go duration (default: 15m)
   SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES?: string; // Max snapshot control-plane JSON request size (default: 262144)
   SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS?: string; // Max replacement-runtime wake attempts (default: 3)
-  SESSION_SLEEP_AFTER_MS?: string; // Idle duration before verified snapshot teardown (default: 3600000)
+  SESSION_SLEEP_AFTER_MS?: string; // Idle duration before verified snapshot teardown (default: 900000)
   SESSION_SLEEP_SWEEP_BATCH_SIZE?: string; // Max due sleeps claimed per cron sweep (default: 10)
   SESSION_SLEEP_RETRY_DELAY_MS?: string; // Delay after a fail-closed sleep attempt (default: 300000)
   SESSION_SLEEP_MAX_ATTEMPTS?: string; // Max automatic sleep attempts before preserving compute (default: 3)

@@ -9,7 +9,7 @@ const mocks = vi.hoisted(() => ({
   stopNodeResources: vi.fn(),
   stopSession: vi.fn(),
   failSession: vi.fn(),
-  sleepWorkspaceSession: vi.fn(),
+  queueWorkspaceSessionSleep: vi.fn(),
   deleteSessionSnapshotState: vi.fn(),
   log: {
     info: vi.fn(),
@@ -40,7 +40,7 @@ vi.mock('../../../src/services/project-data', () => ({
 }));
 
 vi.mock('../../../src/services/session-sleep', () => ({
-  sleepWorkspaceSession: (...args: unknown[]) => mocks.sleepWorkspaceSession(...args),
+  queueWorkspaceSessionSleep: (...args: unknown[]) => mocks.queueWorkspaceSessionSleep(...args),
 }));
 
 vi.mock('../../../src/services/session-snapshots', () => ({
@@ -93,11 +93,11 @@ describe('cleanupTerminalTaskResources', () => {
     vi.clearAllMocks();
     mocks.stopSession.mockResolvedValue(undefined);
     mocks.failSession.mockResolvedValue(undefined);
-    mocks.sleepWorkspaceSession.mockResolvedValue(undefined);
+    mocks.queueWorkspaceSessionSleep.mockResolvedValue(undefined);
     mocks.deleteSessionSnapshotState.mockResolvedValue(true);
   });
 
-  it('sleeps a completed session before invoking task runtime cleanup', async () => {
+  it('queues completed-session sleep without cleaning up the current prompt runtime', async () => {
     const order: string[] = [];
     const db = buildDb([
       [
@@ -111,8 +111,8 @@ describe('cleanupTerminalTaskResources', () => {
       [{ chatSessionId: 'session-terminal-1', userId: 'workspace-owner-1' }],
     ]);
     mocks.drizzle.mockReturnValue(db);
-    mocks.sleepWorkspaceSession.mockImplementation(async () => {
-      order.push('sleepWorkspaceSession');
+    mocks.queueWorkspaceSessionSleep.mockImplementation(async () => {
+      order.push('queueWorkspaceSessionSleep');
     });
 
     vi.doMock('../../../src/services/task-runner', () => ({
@@ -127,15 +127,16 @@ describe('cleanupTerminalTaskResources', () => {
 
     await cleanupTerminalTaskResources(env, 'task-terminal-1', { status: 'completed' });
 
-    expect(mocks.sleepWorkspaceSession).toHaveBeenCalledWith(
+    expect(mocks.queueWorkspaceSessionSleep).toHaveBeenCalledWith(
       env,
       expect.objectContaining({
         workspaceId: 'workspace-terminal-1',
         userId: 'workspace-owner-1',
+        sleepAfterMs: 0,
       })
     );
     expect(mocks.stopSession).not.toHaveBeenCalled();
-    expect(order).toEqual(['sleepWorkspaceSession', 'cleanupTaskRun']);
+    expect(order).toEqual(['queueWorkspaceSessionSleep']);
   });
 
   it('fails the chat session before cleanup when task status is failed', async () => {
@@ -214,7 +215,7 @@ describe('cleanupTerminalTaskResources', () => {
       destructiveSessionEnd: true,
     });
 
-    expect(mocks.sleepWorkspaceSession).not.toHaveBeenCalled();
+    expect(mocks.queueWorkspaceSessionSleep).not.toHaveBeenCalled();
     expect(order).toEqual(['deleteSessionSnapshotState', 'stopSession', 'cleanupTaskRun']);
   });
 });

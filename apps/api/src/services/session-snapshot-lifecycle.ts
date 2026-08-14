@@ -9,6 +9,8 @@ import {
   type CompleteSessionSnapshotInput,
   DEFAULT_SESSION_SLEEP_AFTER_MS,
   DEFAULT_SESSION_SLEEP_CLAIM_LEASE_MS,
+  DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS,
+  DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS,
   DEFAULT_SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS,
   DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
   DEFAULT_SESSION_SNAPSHOT_TTL_DAYS,
@@ -59,7 +61,10 @@ export async function claimSessionSnapshotSleep(
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
   const staleBefore = new Date(now.getTime() - sessionSleepClaimLeaseMs(env)).toISOString();
-  const maxAttempts = parsePositiveInt((env as SnapshotLeaseEnv).SESSION_SLEEP_MAX_ATTEMPTS, 3);
+  const maxAttempts = parsePositiveInt(
+    (env as SnapshotLeaseEnv).SESSION_SLEEP_MAX_ATTEMPTS,
+    DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS
+  );
   const dueCondition = input.force
     ? or(
         isNull(schema.sessionSnapshots.sleepStatus),
@@ -69,18 +74,16 @@ export async function claimSessionSnapshotSleep(
         inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed']),
         lte(schema.sessionSnapshots.sleepAfter, nowIso)
       );
-  const completeSnapshotCondition = input.force
-    ? inArray(schema.sessionSnapshots.status, [
-        'pending',
-        'available',
-        'degraded',
-        'failed',
-        'expired',
-      ])
-    : and(
-        eq(schema.sessionSnapshots.status, 'available'),
-        eq(schema.sessionSnapshots.degradation, 'none')
-      );
+  // A final verified snapshot is produced inside sleepWorkspaceSession. Pending,
+  // degraded, and failed captures must therefore remain claimable; requiring an
+  // already-perfect snapshot here strands precisely the sessions the final
+  // capture is meant to repair. Explicit sleep may also replace expired state.
+  const claimableSnapshotCondition = inArray(
+    schema.sessionSnapshots.status,
+    input.force
+      ? ['pending', 'available', 'degraded', 'failed', 'expired']
+      : ['pending', 'available', 'degraded', 'failed']
+  );
   const result = await db
     .update(schema.sessionSnapshots)
     .set({
@@ -95,7 +98,7 @@ export async function claimSessionSnapshotSleep(
     .where(
       and(
         eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId),
-        completeSnapshotCondition,
+        claimableSnapshotCondition,
         isNull(schema.sessionSnapshots.sleepingAt),
         lt(schema.sessionSnapshots.sleepAttempts, maxAttempts),
         or(
@@ -204,7 +207,7 @@ export async function deferSessionSnapshotStopping(
 ): Promise<boolean> {
   const retryDelayMs = parsePositiveInt(
     (env as SnapshotLeaseEnv).SESSION_SLEEP_RETRY_DELAY_MS,
-    5 * 60 * 1000
+    DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS
   );
   const result = await db
     .update(schema.sessionSnapshots)
@@ -234,9 +237,12 @@ export async function failSessionSnapshotSleepBeforeTeardown(
 ): Promise<boolean> {
   const retryDelayMs = parsePositiveInt(
     (env as SnapshotLeaseEnv).SESSION_SLEEP_RETRY_DELAY_MS,
-    5 * 60 * 1000
+    DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS
   );
-  const maxAttempts = parsePositiveInt((env as SnapshotLeaseEnv).SESSION_SLEEP_MAX_ATTEMPTS, 3);
+  const maxAttempts = parsePositiveInt(
+    (env as SnapshotLeaseEnv).SESSION_SLEEP_MAX_ATTEMPTS,
+    DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS
+  );
   const retryAt = new Date(now.getTime() + retryDelayMs).toISOString();
   const result = await db
     .update(schema.sessionSnapshots)
@@ -253,6 +259,44 @@ export async function failSessionSnapshotSleepBeforeTeardown(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
         eq(schema.sessionSnapshots.sleepStatus, 'preparing'),
         eq(schema.sessionSnapshots.sleepClaimId, claimId)
+      )
+    );
+  return (result.meta.changes ?? 0) > 0;
+}
+
+/**
+ * Defer an automatic sleep before a claim is consumed. Activity/idle
+ * preconditions are expected to change and must not spend the bounded budget
+ * reserved for actual snapshot or teardown failures.
+ */
+export async function deferSessionSnapshotSleepBeforeClaim(
+  db: Db,
+  env: Env,
+  chatSessionId: string,
+  error: string,
+  retryAt?: Date,
+  now = new Date()
+): Promise<boolean> {
+  const retryDelayMs = parsePositiveInt(
+    (env as SnapshotLeaseEnv).SESSION_SLEEP_RETRY_DELAY_MS,
+    DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS
+  );
+  const dueAt = retryAt ?? new Date(now.getTime() + retryDelayMs);
+  const result = await db
+    .update(schema.sessionSnapshots)
+    .set({
+      sleepStatus: 'scheduled',
+      sleepAfter: dueAt.toISOString(),
+      sleepError: sessionLifecycleError(env, error),
+      sleepClaimId: null,
+      sleepClaimedAt: null,
+      updatedAt: now.toISOString(),
+    })
+    .where(
+      and(
+        eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
+        inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed']),
+        isNull(schema.sessionSnapshots.sleepingAt)
       )
     );
   return (result.meta.changes ?? 0) > 0;
@@ -334,15 +378,34 @@ export async function scheduleSessionSnapshotSleep(
   db: Db,
   env: Env,
   chatSessionId: string,
-  now = new Date()
+  now = new Date(),
+  options: { sleepAfterMs?: number; allowIncomplete?: boolean; resetAttempts?: boolean } = {}
 ): Promise<void> {
-  const sleepAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
+  const sleepAfterMs =
+    options.sleepAfterMs === undefined
+      ? parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS)
+      : Math.max(0, options.sleepAfterMs);
+  const requestedSleepAfter = new Date(now.getTime() + sleepAfterMs).toISOString();
+  const eligibleSnapshot = options.allowIncomplete
+    ? inArray(schema.sessionSnapshots.status, ['pending', 'available', 'degraded', 'failed'])
+    : and(
+        eq(schema.sessionSnapshots.status, 'available'),
+        eq(schema.sessionSnapshots.degradation, 'none')
+      );
+  const resetAttempts = options.resetAttempts ?? !options.allowIncomplete;
   await db
     .update(schema.sessionSnapshots)
     .set({
       sleepStatus: 'scheduled',
-      sleepAfter: new Date(now.getTime() + sleepAfterMs).toISOString(),
-      sleepAttempts: 0,
+      // Completion of a later checkpoint must not postpone an earlier terminal
+      // sleep intent that was queued while the final prompt was still running.
+      sleepAfter: sql`CASE
+        WHEN ${schema.sessionSnapshots.sleepAfter} IS NOT NULL
+         AND ${schema.sessionSnapshots.sleepAfter} < ${requestedSleepAfter}
+        THEN ${schema.sessionSnapshots.sleepAfter}
+        ELSE ${requestedSleepAfter}
+      END`,
+      ...(resetAttempts ? { sleepAttempts: 0 } : {}),
       sleepError: null,
       sleepClaimId: null,
       sleepClaimedAt: null,
@@ -351,8 +414,7 @@ export async function scheduleSessionSnapshotSleep(
     .where(
       and(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
-        eq(schema.sessionSnapshots.status, 'available'),
-        eq(schema.sessionSnapshots.degradation, 'none'),
+        eligibleSnapshot,
         isNull(schema.sessionSnapshots.sleepingAt),
         or(
           isNull(schema.sessionSnapshots.sleepStatus),

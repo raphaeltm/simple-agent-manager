@@ -76,7 +76,7 @@ See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands) fo
 
 ## Sleep and wake
 
-After an agent turn becomes idle, SAM writes a best-effort checkpoint. After one hour of inactivity, it writes and verifies a final checkpoint and marks the session **sleeping**. Instant uses `CF_CONTAINER_SLEEP_AFTER`; VM sessions use `SESSION_SLEEP_AFTER_MS`. The idle clock only counts genuine inactivity, so an active turn is not intentionally cut off.
+After an agent turn becomes idle, SAM writes a best-effort checkpoint. VM sessions write and verify a final checkpoint after 15 minutes of inactivity by default; Instant uses its separately configured one-hour `CF_CONTAINER_SLEEP_AFTER` window. Completed tasks queue sleep immediately and release compute as soon as their final prompt reaches idle. The idle clock only counts genuine ProjectData work activity—not runtime heartbeats—so an active turn is not intentionally cut off.
 
 Sending a message in the same chat wakes it. Waking is not instant: SAM has to start runtime compute, restore the saved home directory, repository work in progress, and exact harness session, and only then deliver the queued message. Instant starts a fresh container; a VM session provisions a replacement workspace because the original workspace may already have been deleted.
 
@@ -107,7 +107,7 @@ A snapshot deliberately **excludes**:
 Three limits are worth planning around, because SAM does not currently surface any of them in the UI:
 
 - **Snapshots expire after 7 days of sleep** (`SESSION_SNAPSHOT_TTL_DAYS`). Expiry deletes the R2 artifacts and makes the chat terminal rather than silently starting a blank agent.
-- **Size is capped** at 100 MB, with any single file over 50 MB skipped (`SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`, `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`). The repository bundle is captured first and takes what it needs; your home directory gets whatever budget is left, so a large working tree can crowd out the agent's own state. Skipped content is recorded server-side but you are not told about it.
+- **Size is capped** at 256 MiB, with any single file over 50 MB skipped (`SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`, `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`). The repository bundle is captured first and takes what it needs; your home directory gets whatever budget is left, so a large working tree can crowd out the agent's own state. Skipped content is recorded server-side but you are not told about it.
 - **A repository mid-merge is skipped entirely.** If a merge, rebase, cherry-pick, or revert is in progress when the runtime goes away, none of the repository work in progress is captured.
 
 Push anything you care about. A snapshot is a convenience for resuming a conversation, not a backup.
@@ -184,7 +184,7 @@ Launching an Instant session takes several steps. SAM does the bookkeeping up fr
 | Behavior                                           | Default     | Setting                                    |
 | -------------------------------------------------- | ----------- | ------------------------------------------ |
 | Idle before sleeping                               | 1 hour      | `CF_CONTAINER_SLEEP_AFTER`                 |
-| VM idle before sleeping                            | 1 hour      | `SESSION_SLEEP_AFTER_MS`                   |
+| VM idle before sleeping                            | 15 minutes  | `SESSION_SLEEP_AFTER_MS`                   |
 | Completed task before sleeping                     | Immediate   | task-completion lifecycle                  |
 | How long active work can hold sleep off            | 2 hours     | `CF_CONTAINER_ACTIVE_WORK_MAX_MS`          |
 | Max wake + restore time                            | 2 minutes   | `CF_CONTAINER_WAKE_TIMEOUT_MS`             |
@@ -193,7 +193,7 @@ Launching an Instant session takes several steps. SAM does the bookkeeping up fr
 | Start budget (includes repo clone)                 | 2 minutes   | `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` |
 | Repository clone filter                            | `blob:none` | `CF_CONTAINER_CLONE_FILTER`                |
 | Snapshot retention                                 | 7 days      | `SESSION_SNAPSHOT_TTL_DAYS`                |
-| Snapshot size cap (combined)                       | 100 MB      | `SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`      |
+| Snapshot size cap (combined)                       | 256 MiB     | `SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`      |
 | Largest single file captured                       | 50 MB       | `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`   |
 
 Instant sessions clone with `--filter=blob:none` by default so start time tracks the size of your working tree rather than the size of your repository's entire history. Self-hosters can set `CF_CONTAINER_CLONE_FILTER=off` to force full clones.

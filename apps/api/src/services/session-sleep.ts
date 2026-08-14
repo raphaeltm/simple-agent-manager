@@ -6,25 +6,94 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
 import { ulid } from '../lib/ulid';
+import { stopComputeTracking } from './compute-usage';
 import { hibernateAgentSessionOnNode, stopWorkspaceOnNode } from './node-agent';
 import * as projectDataService from './project-data';
 import {
   beginSessionSnapshotStopping,
   claimSessionSnapshotSleep,
+  DEFAULT_SESSION_SLEEP_AFTER_MS,
+  deferSessionSnapshotSleepBeforeClaim,
   deferSessionSnapshotStopping,
   ensureSessionSnapshotForSleep,
   failSessionSnapshotSleepBeforeTeardown,
   finalizeSessionSnapshotSleeping,
   getRestorableSessionSnapshot,
   getSessionSnapshotCaptureState,
+  scheduleSessionSnapshotSleep,
   verifyRestorableSessionSnapshotArtifacts,
 } from './session-snapshots';
+import { cleanupTaskRun } from './task-runner';
 import { markVmAgentContainerActiveWorkStarted, sleepVmAgentContainer } from './vm-agent-container';
 
 type SnapshotResult = { status?: unknown; degradation?: unknown };
 
 const DEFAULT_SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
 const DEFAULT_SESSION_SNAPSHOT_POLL_INTERVAL_MS = 1000;
+
+async function finishSleepingWorkspaceComputeCleanup(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  env: Env,
+  input: { workspaceId: string; taskId: string | null }
+): Promise<void> {
+  await stopComputeTracking(db, input.workspaceId).catch((error) => {
+    log.warn('session_sleep.compute_tracking_stop_failed', {
+      workspaceId: input.workspaceId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  });
+  if (input.taskId) {
+    await cleanupTaskRun(input.taskId, env).catch((error) => {
+      log.warn('session_sleep.task_cleanup_failed', {
+        workspaceId: input.workspaceId,
+        taskId: input.taskId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+}
+
+async function markWorkspaceNodeWarmIfEmpty(
+  db: ReturnType<typeof drizzle<typeof schema>>,
+  env: Env,
+  input: { nodeId: string; nodeRole: string; runtime: string; userId: string }
+): Promise<void> {
+  if (input.runtime === 'cf-container' || input.nodeRole !== 'workspace') return;
+  try {
+    // Generic task cleanup may already have transitioned the node using the
+    // project's warm-retention override. In that case, do not reset its timer.
+    const [node] = await db
+      .select({ warmSince: schema.nodes.warmSince })
+      .from(schema.nodes)
+      .where(eq(schema.nodes.id, input.nodeId))
+      .limit(1);
+    if (node?.warmSince) return;
+
+    const active = await db
+      .select({ id: schema.workspaces.id })
+      .from(schema.workspaces)
+      .where(
+        and(
+          eq(schema.workspaces.nodeId, input.nodeId),
+          inArray(schema.workspaces.status, ['running', 'creating', 'recovery'])
+        )
+      )
+      .limit(1);
+    if (active.length > 0) return;
+
+    const stub = env.NODE_LIFECYCLE.get(env.NODE_LIFECYCLE.idFromName(input.nodeId));
+    await (stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle).markIdle(
+      input.nodeId,
+      input.userId
+    );
+  } catch (error) {
+    log.warn('session_sleep.node_warm_transition_failed', {
+      nodeId: input.nodeId,
+      userId: input.userId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
 
 async function waitForFinalSessionSnapshot(
   db: ReturnType<typeof drizzle<typeof schema>>,
@@ -106,6 +175,153 @@ export interface SleepWorkspaceSessionResult {
   snapshotExpiresAt: string;
 }
 
+/**
+ * Persist a sleep intent without touching the live runtime. Terminal completion
+ * uses a zero delay while it is still inside the final ACP prompt; the scheduled
+ * sweep performs the snapshot and teardown after ProjectData reports idle.
+ */
+export async function queueWorkspaceSessionSleep(
+  env: Env,
+  input: { workspaceId: string; userId: string; reason: string; sleepAfterMs?: number }
+): Promise<void> {
+  const db = drizzle(env.DATABASE, { schema });
+  const [workspace] = await db
+    .select({
+      id: schema.workspaces.id,
+      userId: schema.workspaces.userId,
+      projectId: schema.workspaces.projectId,
+      chatSessionId: schema.workspaces.chatSessionId,
+      nodeId: schema.workspaces.nodeId,
+      nodeRuntime: schema.nodes.runtime,
+    })
+    .from(schema.workspaces)
+    .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+    .where(
+      and(eq(schema.workspaces.id, input.workspaceId), eq(schema.workspaces.userId, input.userId))
+    )
+    .limit(1);
+  if (
+    !workspace?.projectId ||
+    !workspace.chatSessionId ||
+    !workspace.nodeId ||
+    !workspace.nodeRuntime
+  ) {
+    throw new Error('Workspace is missing persistent-session ownership metadata');
+  }
+  const [agentSession] = await db
+    .select({ id: schema.agentSessions.id })
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.workspaceId, workspace.id),
+        inArray(schema.agentSessions.status, ['running', 'recovery', 'sleeping'])
+      )
+    )
+    .orderBy(desc(schema.agentSessions.createdAt))
+    .limit(1);
+  if (!agentSession) throw new Error('Workspace has no resumable agent session');
+
+  await ensureSessionSnapshotForSleep(db, env, {
+    workspaceId: workspace.id,
+    nodeId: workspace.nodeId,
+    projectId: workspace.projectId,
+    userId: workspace.userId,
+    chatSessionId: workspace.chatSessionId,
+    agentSessionId: agentSession.id,
+    runtime: workspace.nodeRuntime,
+  });
+  await scheduleSessionSnapshotSleep(db, env, workspace.chatSessionId, new Date(), {
+    sleepAfterMs: input.sleepAfterMs,
+    allowIncomplete: true,
+    resetAttempts: false,
+  });
+  log.info('session_sleep.queued', {
+    workspaceId: workspace.id,
+    chatSessionId: workspace.chatSessionId,
+    reason: input.reason,
+    sleepAfterMs: input.sleepAfterMs ?? DEFAULT_SESSION_SLEEP_AFTER_MS,
+  });
+}
+
+export interface AutomaticSessionSleepEligibility {
+  eligible: boolean;
+  reason?: string;
+  retryAt?: string;
+}
+
+/**
+ * Check the authoritative ProjectData work-activity clock before the sweep
+ * consumes a sleep attempt. Node/ACP heartbeats are deliberately absent: they
+ * establish runtime liveness, not whether the user is actively working.
+ */
+export async function checkAutomaticSessionSleepEligibility(
+  env: Env,
+  input: { workspaceId: string; userId: string },
+  now = new Date()
+): Promise<AutomaticSessionSleepEligibility> {
+  const db = drizzle(env.DATABASE, { schema });
+  const [workspace] = await db
+    .select({
+      projectId: schema.workspaces.projectId,
+      chatSessionId: schema.workspaces.chatSessionId,
+      taskStatus: schema.tasks.status,
+    })
+    .from(schema.workspaces)
+    .leftJoin(schema.tasks, eq(schema.tasks.chatSessionId, schema.workspaces.chatSessionId))
+    .where(
+      and(eq(schema.workspaces.id, input.workspaceId), eq(schema.workspaces.userId, input.userId))
+    )
+    .limit(1);
+  if (!workspace?.projectId || !workspace.chatSessionId) {
+    return { eligible: false, reason: 'workspace_metadata_missing' };
+  }
+  const [agentSession] = await db
+    .select({ id: schema.agentSessions.id })
+    .from(schema.agentSessions)
+    .where(
+      and(
+        eq(schema.agentSessions.workspaceId, input.workspaceId),
+        inArray(schema.agentSessions.status, ['running', 'recovery', 'sleeping'])
+      )
+    )
+    .orderBy(desc(schema.agentSessions.createdAt))
+    .limit(1);
+  const state = agentSession
+    ? await projectDataService
+        .getSessionState(env, workspace.projectId, agentSession.id)
+        .catch(() => null)
+    : null;
+  let reason: string;
+  let retryAt: Date | undefined;
+  if (!state || state.activity !== 'idle') {
+    reason = `Workspace agent is not idle (${state?.activity ?? 'unknown'})`;
+  } else if (workspace.taskStatus !== 'completed') {
+    const idleAfterMs = parsePositiveInt(
+      env.SESSION_SLEEP_AFTER_MS,
+      DEFAULT_SESSION_SLEEP_AFTER_MS
+    );
+    const idleEligibleAt = state.activityAt ? state.activityAt + idleAfterMs : 0;
+    if (!idleEligibleAt || idleEligibleAt > now.getTime()) {
+      reason = 'Workspace idle interval has not elapsed';
+      retryAt = idleEligibleAt ? new Date(idleEligibleAt) : undefined;
+    } else {
+      return { eligible: true };
+    }
+  } else {
+    return { eligible: true };
+  }
+
+  await deferSessionSnapshotSleepBeforeClaim(
+    db,
+    env,
+    workspace.chatSessionId,
+    reason,
+    retryAt,
+    now
+  );
+  return { eligible: false, reason, retryAt: retryAt?.toISOString() };
+}
+
 export async function sleepWorkspaceSession(
   env: Env,
   input: { workspaceId: string; userId: string; reason: string; sleepClaimId?: string }
@@ -120,9 +336,13 @@ export async function sleepWorkspaceSession(
       status: schema.workspaces.status,
       nodeId: schema.workspaces.nodeId,
       nodeRuntime: schema.nodes.runtime,
+      nodeRole: schema.nodes.nodeRole,
+      taskId: schema.tasks.id,
+      taskStatus: schema.tasks.status,
     })
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
+    .leftJoin(schema.tasks, eq(schema.tasks.chatSessionId, schema.workspaces.chatSessionId))
     .where(
       and(eq(schema.workspaces.id, input.workspaceId), eq(schema.workspaces.userId, input.userId))
     )
@@ -157,6 +377,16 @@ export async function sleepWorkspaceSession(
           });
         });
     }
+    await finishSleepingWorkspaceComputeCleanup(db, env, {
+      workspaceId: workspace.id,
+      taskId: workspace.taskId ?? null,
+    });
+    await markWorkspaceNodeWarmIfEmpty(db, env, {
+      nodeId: workspace.nodeId,
+      nodeRole: workspace.nodeRole ?? '',
+      runtime: workspace.nodeRuntime,
+      userId: workspace.userId,
+    });
     return {
       status: 'sleeping',
       workspaceId: workspace.id,
@@ -378,6 +608,17 @@ export async function sleepWorkspaceSession(
         });
       });
   }
+
+  await finishSleepingWorkspaceComputeCleanup(db, env, {
+    workspaceId: workspace.id,
+    taskId: workspace.taskId ?? null,
+  });
+  await markWorkspaceNodeWarmIfEmpty(db, env, {
+    nodeId: workspace.nodeId,
+    nodeRole: workspace.nodeRole ?? '',
+    runtime: workspace.nodeRuntime,
+    userId: workspace.userId,
+  });
 
   log.info('session_sleep.completed', {
     workspaceId: workspace.id,

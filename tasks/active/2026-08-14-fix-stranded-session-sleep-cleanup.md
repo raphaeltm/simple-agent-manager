@@ -54,26 +54,26 @@ the warm-pool policy.
 
 ## Implementation Checklist
 
-- [ ] Replace synchronous completed-task sleep with a durable immediate sleep intent that can be
+- [x] Replace synchronous completed-task sleep with a durable immediate sleep intent that can be
       queued while the current prompt is still running.
-- [ ] Preserve the earliest existing sleep deadline when a later idle checkpoint completes.
-- [ ] Make pending, available, degraded, and failed snapshots with due sleep intents claimable;
+- [x] Preserve the earliest existing sleep deadline when a later idle checkpoint completes.
+- [x] Make pending, available, degraded, and failed snapshots with due sleep intents claimable;
       retain final artifact verification before teardown.
-- [ ] Defer prompting/recent-idle/unknown activity without consuming a sleep attempt, using
+- [x] Defer prompting/recent-idle/unknown activity without consuming a sleep attempt, using
       ProjectData activity rather than ACP/node heartbeat timestamps.
-- [ ] Add a bounded reconciler for awake VM workspaces whose snapshot or sleep intent is missing;
+- [x] Add a bounded reconciler for awake VM workspaces whose snapshot or sleep intent is missing;
       ensure each candidate is isolated and gains a persisted sleep deadline.
-- [ ] Sleep completed sessions on the first idle observation after end-turn and ordinary idle VM
+- [x] Sleep completed sessions on the first idle observation after end-turn and ordinary idle VM
       sessions after 15 minutes by default.
-- [ ] Raise the default aggregate session-snapshot budget from 100 MiB to 256 MiB, keeping it
+- [x] Raise the default aggregate session-snapshot budget from 100 MiB to 256 MiB, keeping it
       environment-configurable and retaining fail-closed artifact verification.
-- [ ] After verified sleep, stop workspace compute tracking, schedule workspace deletion, and run
+- [x] After verified sleep, stop workspace compute tracking, schedule workspace deletion, and run
       the existing idempotent task cleanup so an otherwise-empty managed node enters the unchanged
       warm-retention state.
-- [ ] Add discriminating tests for terminal completion during a prompt, pending/degraded retry,
+- [x] Add discriminating tests for terminal completion during a prompt, pending/degraded retry,
       missing-snapshot reconciliation, heartbeat-independent idle eligibility, attempt preservation,
       two-sweep candidate convergence, and post-sleep cleanup.
-- [ ] Update public lifecycle/configuration documentation and add the process rule preventing
+- [x] Update public lifecycle/configuration documentation and add the process rule preventing
       precondition failures or incomplete snapshot states from becoming immortal sleep candidates.
 - [ ] Run full local quality, specialist review, staging lifecycle verification, CI, merge, and
       production verification against D1 state.

@@ -5,7 +5,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
-import { sleepWorkspaceSession } from './session-sleep';
+import { queueWorkspaceSessionSleep } from './session-sleep';
 import { deleteSessionSnapshotState } from './session-snapshots';
 import { cleanupTaskRun } from './task-runner';
 
@@ -79,12 +79,12 @@ export async function cleanupTerminalTaskResources(
     workspace?.chatSessionId &&
     !options.destructiveSessionEnd
   ) {
-    await sleepWorkspaceSession(env, {
+    await queueWorkspaceSessionSleep(env, {
       workspaceId: task.workspaceId,
       userId: workspace.userId,
       reason: 'Task completed',
+      sleepAfterMs: 0,
     });
-    await cleanupTaskRun(taskId, env, undefined, options.requiredUserId);
     return;
   }
 
