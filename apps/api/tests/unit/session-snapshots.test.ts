@@ -4,6 +4,7 @@ import type { Env } from '../../src/env';
 import {
   buildSessionSnapshotR2Key,
   DEFAULT_SESSION_SLEEP_AFTER_MS,
+  DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS,
   DEFAULT_SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES,
   DEFAULT_SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES,
   DEFAULT_SESSION_SNAPSHOT_R2_PREFIX,
@@ -30,7 +31,9 @@ describe('session snapshot config', () => {
       r2Prefix: DEFAULT_SESSION_SNAPSHOT_R2_PREFIX,
     });
     expect(DEFAULT_SESSION_SLEEP_AFTER_MS).toBe(15 * 60 * 1000);
+    expect(DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS).toBe(6);
     expect(DEFAULT_SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES).toBe(256 * 1024 * 1024);
+    expect(DEFAULT_SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES).toBe(256 * 1024 * 1024);
   });
 
   it('uses positive env overrides and sanitizes the R2 prefix', () => {

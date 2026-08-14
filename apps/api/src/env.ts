@@ -200,7 +200,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_SNAPSHOT_TTL_DAYS?: string; // Runtime hibernate snapshot retention (default: 7)
   SESSION_SNAPSHOT_R2_PREFIX?: string; // R2 key prefix for runtime hibernate snapshots
   SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES?: string; // Max combined home/WIP snapshot size (default: 268435456)
-  SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES?: string; // Max individual file/dir included by vm-agent scanner (default: 52428800)
+  SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES?: string; // Max individual file/dir included by vm-agent scanner (default: 268435456)
   SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS?: string; // No-progress upload/download watchdog window (default: 30000)
   SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS?: string; // End-to-end final checkpoint request timeout (default: 300000)
   SESSION_SNAPSHOT_POLL_INTERVAL_MS?: string; // D1 completion poll interval for final checkpoints (default: 1000)
@@ -211,7 +211,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_SLEEP_SWEEP_BATCH_SIZE?: string; // Max due sleeps claimed per cron sweep (default: 10)
   SESSION_SLEEP_SWEEP_WALL_BUDGET_MS?: string; // Soft D1/DO claim-loop wall budget before deferring remaining candidates (default: 20000)
   SESSION_SLEEP_RETRY_DELAY_MS?: string; // Delay after a fail-closed sleep attempt (default: 300000)
-  SESSION_SLEEP_MAX_ATTEMPTS?: string; // Max automatic sleep attempts before preserving compute (default: 3)
+  SESSION_SLEEP_MAX_ATTEMPTS?: string; // Max automatic sleep attempts before preserving compute (default: 6)
   SESSION_SLEEP_CLAIM_LEASE_MS?: string; // Reclaim timeout for interrupted automatic sleep claims (default: 600000)
   SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS?: string; // Reclaim timeout for interrupted replacement-runtime wake claims (default: 600000)
   SESSION_LIFECYCLE_ERROR_MAX_LENGTH?: string; // Stored sleep/recovery diagnostic cap (default: 2048)

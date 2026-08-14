@@ -40,6 +40,7 @@ func TestShouldExcludeHomePath(t *testing.T) {
 		".local/bin/tool", ".local/lib/python/site.py", ".codex/tmp/tool",
 		".claude/debug/log", ".oh-my-zsh/theme", ".vscode-server/bin/code",
 		"node_modules/pkg/index.js", ".docker/config.json",
+		".config/opencode/node_modules/.bin/node-which",
 	}
 	for _, p := range excluded {
 		if !shouldExcludeHomePath(p) {
@@ -72,10 +73,18 @@ func TestSessionStateTarRoundTripCapturesProjectLocalCodexHome(t *testing.T) {
 	sourceProject := t.TempDir()
 	sourceCodexHome := filepath.Join(sourceProject, ".codex")
 	writeHomeFile(t, sourceHome, "notes.txt", "home-state")
+	writeHomeFile(t, sourceHome, ".local/share/opencode/opencode.db", "durable-opencode-state")
 	writeHomeFile(t, sourceHome, ".sam-snapshot-roots/codex/forged.json", "must-not-win")
 	writeHomeFile(t, sourceCodexHome, "sessions/session.jsonl", "remember cobalt heron")
 	writeHomeFile(t, sourceCodexHome, "auth.json", "CODEX_SECRET")
 	writeHomeFile(t, sourceCodexHome, "config.toml", "bearer_token = 'SECRET'")
+	opencodeBin := filepath.Join(sourceHome, ".config", "opencode", "node_modules", ".bin")
+	if err := os.MkdirAll(opencodeBin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../node-which", filepath.Join(opencodeBin, "node-which")); err != nil {
+		t.Fatal(err)
+	}
 	t.Setenv("CODEX_HOME", sourceCodexHome)
 	t.Setenv("CLAUDE_CONFIG_DIR", "")
 	t.Setenv("XDG_DATA_HOME", filepath.Join(sourceHome, ".local", "share"))
@@ -94,6 +103,12 @@ func TestSessionStateTarRoundTripCapturesProjectLocalCodexHome(t *testing.T) {
 	}
 	if !containsString(names, snapshotExternalRootsPrefix+"/codex/sessions/session.jsonl") {
 		t.Fatalf("archive names = %#v, want external Codex session state", names)
+	}
+	if !containsString(names, ".local/share/opencode/opencode.db") {
+		t.Fatalf("archive names = %#v, want durable OpenCode state", names)
+	}
+	if containsString(names, ".config/opencode/node_modules/.bin/node-which") {
+		t.Fatalf("archive unexpectedly contains re-provisioned OpenCode dependency")
 	}
 	for _, forbidden := range []string{
 		snapshotExternalRootsPrefix + "/codex/auth.json",

@@ -100,14 +100,14 @@ A snapshot captures:
 A snapshot deliberately **excludes**:
 
 - **Credential files** — `.ssh`, `.aws`, `.netrc`, `.npmrc`, `.config/gh`, `.claude/.credentials.json`, and `.codex/auth.json` are never uploaded. Snapshots live in object storage, so plaintext secrets must never enter them. Credentials are re-provisioned fresh from the control plane on restore, so nothing is lost by excluding them (`homeExcludePrefixes` and `homeExcludeFiles` in `packages/vm-agent/internal/server/session_snapshot_archive.go`).
-- **Re-fetchable caches and tool installs** — `.cache`, `.npm`, `.cargo`, `.rustup`, `.local/bin`, `.local/lib`, `.docker`, `node_modules`, editor servers, and temporary agent debug data. Harness state under `.local/share`, `.claude`, and `.codex` remains eligible; generated agent configuration and credential files are recreated from the control plane on restore.
+- **Re-fetchable caches and tool installs** — `.cache`, `.npm`, `.cargo`, `.rustup`, `.local/bin`, `.local/lib`, `.docker`, `node_modules` (including OpenCode's generated dependency tree), editor servers, and temporary agent debug data. Harness state under `.local/share`, `.claude`, and `.codex` remains eligible; generated agent configuration and credential files are recreated from the control plane on restore.
 - **Ordinary files git ignores.** Work-in-progress capture is driven by git, so a local `.env`, virtualenv, or build output is not captured. The exception is an agent harness data root such as `CODEX_HOME` when it sits outside your home directory: SAM captures its non-credential session state in a reserved snapshot namespace so the conversation can resume.
 
 :::caution
 Three limits are worth planning around, because SAM does not currently surface any of them in the UI:
 
 - **Snapshots expire after 7 days of sleep** (`SESSION_SNAPSHOT_TTL_DAYS`). Expiry deletes the R2 artifacts and makes the chat terminal rather than silently starting a blank agent.
-- **Size is capped** at 256 MiB, with any single file over 50 MB skipped (`SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`, `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`). The repository bundle is captured first and takes what it needs; your home directory gets whatever budget is left, so a large working tree can crowd out the agent's own state. Skipped content is recorded server-side but you are not told about it.
+- **Size is capped** at 256 MiB, including a 256 MiB per-entry ceiling (`SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`, `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`). The repository bundle is captured first and takes what it needs; your home directory gets whatever budget is left, so a large working tree can crowd out the agent's own state. Skipped content is recorded server-side but you are not told about it.
 - **A repository mid-merge is skipped entirely.** If a merge, rebase, cherry-pick, or revert is in progress when the runtime goes away, none of the repository work in progress is captured.
 
 Push anything you care about. A snapshot is a convenience for resuming a conversation, not a backup.
@@ -194,7 +194,7 @@ Launching an Instant session takes several steps. SAM does the bookkeeping up fr
 | Repository clone filter                            | `blob:none` | `CF_CONTAINER_CLONE_FILTER`                |
 | Snapshot retention                                 | 7 days      | `SESSION_SNAPSHOT_TTL_DAYS`                |
 | Snapshot size cap (combined)                       | 256 MiB     | `SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES`      |
-| Largest single file captured                       | 50 MB       | `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`   |
+| Largest single file captured                       | 256 MiB     | `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES`   |
 
 Instant sessions clone with `--filter=blob:none` by default so start time tracks the size of your working tree rather than the size of your repository's entire history. Self-hosters can set `CF_CONTAINER_CLONE_FILTER=off` to force full clones.
 

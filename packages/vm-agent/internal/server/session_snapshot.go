@@ -19,8 +19,8 @@ import (
 )
 
 const (
-	defaultSnapshotTotalBudgetBytes    int64         = 100 * 1024 * 1024
-	defaultSnapshotEntryThresholdBytes int64         = 50 * 1024 * 1024
+	defaultSnapshotTotalBudgetBytes    int64         = 256 * 1024 * 1024
+	defaultSnapshotEntryThresholdBytes int64         = 256 * 1024 * 1024
 	defaultSnapshotTransferIdleTimeout time.Duration = 30 * time.Second
 	defaultSnapshotInventoryMaxBytes   int64         = 32 * 1024 * 1024
 	defaultSnapshotMaxArchiveEntries                 = 100_000

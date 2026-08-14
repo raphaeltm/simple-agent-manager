@@ -147,6 +147,32 @@ describe('session sleep sweep', () => {
     });
   });
 
+  it('re-arms an exhausted failure when the configured retry budget increases', async () => {
+    addDueSnapshot('snapshot-rearmed', 3);
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots
+         SET status = 'degraded', degradation = 'entries-skipped',
+             sleep_status = 'failed', sleep_after = NULL
+         WHERE id = 'snapshot-rearmed'`
+      )
+      .run();
+    env.SESSION_SLEEP_MAX_ATTEMPTS = '6';
+    mocks.sleepWorkspaceSession.mockResolvedValue(undefined);
+
+    const result = await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00.000Z'));
+
+    expect(result).toMatchObject({ selected: 1, claimed: 1, slept: 1 });
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status, sleep_after, sleep_attempts
+           FROM session_snapshots WHERE id = 'snapshot-rearmed'`
+        )
+        .get()
+    ).toEqual({ sleep_status: 'preparing', sleep_after: null, sleep_attempts: 4 });
+  });
+
   it('does not postpone an immediate terminal deadline when the idle checkpoint completes', async () => {
     addDueSnapshot('snapshot-terminal-deadline', 1);
     const db = await import('drizzle-orm/d1').then(({ drizzle }) =>

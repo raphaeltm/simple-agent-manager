@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNotNull, isNull, lte, or } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, lt, lte, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -241,6 +241,11 @@ export async function runSessionSleepSweep(
           and(
             inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed']),
             lte(schema.sessionSnapshots.sleepAfter, now.toISOString())
+          ),
+          and(
+            eq(schema.sessionSnapshots.sleepStatus, 'failed'),
+            isNull(schema.sessionSnapshots.sleepAfter),
+            lt(schema.sessionSnapshots.sleepAttempts, maxAttempts)
           ),
           and(
             eq(schema.sessionSnapshots.sleepStatus, 'preparing'),

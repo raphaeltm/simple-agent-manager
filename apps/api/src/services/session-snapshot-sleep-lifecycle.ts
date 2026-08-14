@@ -82,9 +82,16 @@ export async function claimSessionSnapshotSleep(
         isNull(schema.sessionSnapshots.sleepStatus),
         inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed'])
       )
-    : and(
-        inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed']),
-        lte(schema.sessionSnapshots.sleepAfter, nowIso)
+    : or(
+        and(
+          inArray(schema.sessionSnapshots.sleepStatus, ['scheduled', 'failed']),
+          lte(schema.sessionSnapshots.sleepAfter, nowIso)
+        ),
+        and(
+          eq(schema.sessionSnapshots.sleepStatus, 'failed'),
+          isNull(schema.sessionSnapshots.sleepAfter),
+          lt(schema.sessionSnapshots.sleepAttempts, maxAttempts)
+        )
       );
   // A final verified snapshot is produced inside sleepWorkspaceSession. Pending,
   // degraded, and failed captures must therefore remain claimable; requiring an

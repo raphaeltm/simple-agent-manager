@@ -204,6 +204,18 @@ func TestBuildContainerHomeArchiveList(t *testing.T) {
 	}
 }
 
+func TestSnapshotDefaultBudgetsStayAligned(t *testing.T) {
+	t.Parallel()
+
+	const expected = int64(256 * 1024 * 1024)
+	if defaultSnapshotTotalBudgetBytes != expected {
+		t.Fatalf("total budget = %d, want %d", defaultSnapshotTotalBudgetBytes, expected)
+	}
+	if defaultSnapshotEntryThresholdBytes != expected {
+		t.Fatalf("entry threshold = %d, want %d", defaultSnapshotEntryThresholdBytes, expected)
+	}
+}
+
 func TestBuildContainerHomeArchiveListRejectsEntryFlood(t *testing.T) {
 	var inventory bytes.Buffer
 	for index := 0; index <= defaultSnapshotMaxArchiveEntries; index++ {
