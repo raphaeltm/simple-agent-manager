@@ -40,14 +40,6 @@ describe('architecture viewer', () => {
     expect(window.location.search).toContain('lens=flow');
     expect(screen.getByText('Call API')).toBeVisible();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Topology' }));
-    expect(window.location.search).toContain('lens=topology');
-    expect(screen.getByRole('region', { name: 'Directed system topology' })).toBeVisible();
-    fireEvent.click(screen.getByRole('button', { name: 'Inspect Root calls API connection' }));
-    expect(window.location.search).toContain('selected=relationship%3Aroot-api');
-    expect(screen.getByRole('heading', { name: 'Root calls API' })).toBeVisible();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Flow' }));
     fireEvent.click(screen.getByRole('button', { name: 'Open API component in structure' }));
     expect(window.location.search).toContain('focus=api');
     fireEvent.click(screen.getByRole('button', { name: 'Root system' }));
@@ -65,6 +57,19 @@ describe('architecture viewer', () => {
       'page'
     );
     expect(screen.getByRole('region', { name: 'topology architecture canvas' })).toBeVisible();
+  });
+
+  it('navigates to topology and inspects a directed connection', async () => {
+    mockFetch(makeModel());
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Topology' }));
+
+    expect(window.location.search).toContain('lens=topology');
+    expect(screen.getByRole('region', { name: 'Directed system topology' })).toBeVisible();
+    fireEvent.click(screen.getByRole('button', { name: 'Inspect Root calls API connection' }));
+    expect(window.location.search).toContain('selected=relationship%3Aroot-api');
+    expect(screen.getByRole('heading', { name: 'Root calls API' })).toBeVisible();
   });
 
   it('opens source previews and creates threads without duplicate submit', async () => {
