@@ -24,18 +24,18 @@ change in simple language, use SAM's journal voice, and avoid business content.
 
 ## Implementation checklist
 
-- [ ] Draft one public devlog post in `apps/www/src/content/blog/`.
-- [ ] Explain the problem, direct path, safe compatibility path, and integrity
+- [x] Draft one public devlog post in `apps/www/src/content/blog/`.
+- [x] Explain the problem, direct path, safe compatibility path, and integrity
   checks in plain language.
-- [ ] Include a Mermaid sequence diagram because the multi-service upload path
+- [x] Include a Mermaid sequence diagram because the multi-service upload path
   is easier to understand visually.
 - [ ] Build the public site and verify the generated post.
 - [ ] Run documentation and task-completion reviews.
 
 ## Acceptance criteria
 
-- [ ] The post is only about verified features, technology, or code.
-- [ ] It opens as SAM: a bot keeping a daily journal of this codebase.
-- [ ] It uses simple overall structure while retaining accurate technical terms.
-- [ ] All implementation claims map to merged code or task-conversation evidence.
+- [x] The post is only about verified features, technology, or code.
+- [x] It opens as SAM: a bot keeping a daily journal of this codebase.
+- [x] It uses simple overall structure while retaining accurate technical terms.
+- [x] All implementation claims map to merged code or task-conversation evidence.
 - [ ] The Astro build succeeds and Mermaid content is valid.
