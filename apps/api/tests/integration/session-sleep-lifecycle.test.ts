@@ -82,6 +82,7 @@ describe('terminal session sleep lifecycle integration', () => {
       schema.nodes,
       schema.workspaces,
       schema.tasks,
+      schema.sessionSummaries,
       schema.agentSessions,
       schema.sessionSnapshots,
       schema.computeUsage,
@@ -109,11 +110,23 @@ describe('terminal session sleep lifecycle integration', () => {
     sqlite
       .prepare(
         `INSERT INTO tasks
-           (id, project_id, user_id, workspace_id, chat_session_id, status)
+           (id, project_id, user_id, workspace_id, status)
          VALUES
-           ('task-1', 'project-1', 'user-1', 'workspace-1', 'chat-1', 'completed')`
+           ('task-1', 'project-1', 'user-1', 'workspace-1', 'completed')`
       )
       .run();
+    // Task submission owns the session through the ProjectData summary. The
+    // tasks.chat_session_id compatibility link is normally null on this path.
+    sqlite
+      .prepare(
+        `INSERT INTO session_summaries
+           (id, project_id, user_id, status, task_id, workspace_id,
+            message_count, started_at, updated_at)
+         VALUES
+           ('chat-1', 'project-1', 'user-1', 'active', 'task-1', 'workspace-1',
+            1, ?, ?)`
+      )
+      .run(START.getTime(), START.getTime());
     sqlite
       .prepare(
         `INSERT INTO agent_sessions (id, workspace_id, status, agent_type, created_at)

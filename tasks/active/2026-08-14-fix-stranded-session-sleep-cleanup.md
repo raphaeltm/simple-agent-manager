@@ -62,6 +62,10 @@ the warm-pool policy.
 12. The VM idle default cannot also become the Instant idle default. Snapshot-completion scheduling
     must preserve Instant's separately configurable `CF_CONTAINER_SLEEP_AFTER` while explicit
     completed-task intents remain immediate on either runtime.
+13. Live staging showed that task submissions own their chat through
+    `session_summaries.task_id`; `tasks.chat_session_id` is normally null on this path. Eligibility
+    and teardown must resolve that authoritative link, with the task column retained only as a
+    compatibility fallback, or a completed task is misclassified as an ordinary idle conversation.
 
 ## Implementation Checklist
 
@@ -87,6 +91,8 @@ the warm-pool policy.
       scheduled event lifetime; isolate every candidate and preserve project warm-timeout overrides.
 - [x] Persist pre-claim/reconciliation backoff so control-plane failures leave the hot candidate
       set, and preserve Instant's separate idle duration when checkpoint completion schedules sleep.
+- [x] Resolve completed-task ownership through the session summary for both eligibility and
+      post-sleep task cleanup; cover the production submission shape where the task chat link is null.
 - [x] Unblock staging and production deploys from Pulumi 3.256.0's R2 checksum regression by using
       the upstream-verified `when_supported` request-checksum mode for the reusable deploy job.
 - [x] Add discriminating tests for terminal completion during a prompt, pending/degraded retry,

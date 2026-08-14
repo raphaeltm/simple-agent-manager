@@ -1,4 +1,4 @@
-import { and, desc, eq, inArray } from 'drizzle-orm';
+import { and, desc, eq, inArray, isNull, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -286,7 +286,20 @@ export async function checkAutomaticSessionSleepEligibility(
       taskStatus: schema.tasks.status,
     })
     .from(schema.workspaces)
-    .leftJoin(schema.tasks, eq(schema.tasks.chatSessionId, schema.workspaces.chatSessionId))
+    .leftJoin(
+      schema.sessionSummaries,
+      eq(schema.sessionSummaries.id, schema.workspaces.chatSessionId)
+    )
+    .leftJoin(
+      schema.tasks,
+      or(
+        eq(schema.tasks.id, schema.sessionSummaries.taskId),
+        and(
+          isNull(schema.sessionSummaries.taskId),
+          eq(schema.tasks.chatSessionId, schema.workspaces.chatSessionId)
+        )
+      )
+    )
     .where(
       and(eq(schema.workspaces.id, input.workspaceId), eq(schema.workspaces.userId, input.userId))
     )
@@ -365,7 +378,20 @@ export async function sleepWorkspaceSession(
     })
     .from(schema.workspaces)
     .leftJoin(schema.nodes, eq(schema.nodes.id, schema.workspaces.nodeId))
-    .leftJoin(schema.tasks, eq(schema.tasks.chatSessionId, schema.workspaces.chatSessionId))
+    .leftJoin(
+      schema.sessionSummaries,
+      eq(schema.sessionSummaries.id, schema.workspaces.chatSessionId)
+    )
+    .leftJoin(
+      schema.tasks,
+      or(
+        eq(schema.tasks.id, schema.sessionSummaries.taskId),
+        and(
+          isNull(schema.sessionSummaries.taskId),
+          eq(schema.tasks.chatSessionId, schema.workspaces.chatSessionId)
+        )
+      )
+    )
     .leftJoin(schema.projects, eq(schema.projects.id, schema.workspaces.projectId))
     .where(
       and(eq(schema.workspaces.id, input.workspaceId), eq(schema.workspaces.userId, input.userId))
