@@ -208,6 +208,29 @@ snapshot claim, and persists the cleared marker even when the agent was already 
 staging node/workspaces were deleted immediately after collecting evidence; staging returned to zero
 active nodes/workspaces.
 
+Staging verification of the TaskRunner idempotent-completion patch on commit
+`3a4b402636091044a5d2dc03abcaa65902de0684` proved the wake path is functionally resumable but
+exposed a ProjectData wake idempotency gap. Fresh node `01M036BBG5BEWMVV7WRXASSSFA` heartbeated
+`agent_version='3a4b402636091044a5d2dc03abcaa65902de0684'`; task
+`01M036B83XVBWJZQ3V32E3PV60`, session `dd6922f8-a912-473d-ad59-1d8d850dc3da`, workspace
+`01M036JB87BT78XMP2MCRXS4CK`, agent session `01M036KDFAZ2FQ02V9G0X9680S`, slept successfully with
+snapshot `01M036MHQ92AW35D9SR657MZEY`: `status='degraded'`,
+`degradation='transcript-only'`, `sleep_status='sleeping'`,
+`snapshot_generation='01M036Q0G9R533N4WTCM530DRQ'`, manifest present, workspace/agent `sleeping`.
+Wake delivery `01M036VQ4V2V33BQ2CPM8TXFK1` created recovery task
+`01M036VTYX3TQ22HAS85EG2WZ2`, workspace `01M036VY41MYTFBTTY3A8BTZ5A`, agent session
+`01M036WWGAGJAE7MEG3W7H3QAS`. The transcript contained `wake verified`, and the recovered
+workspace/agent were running with no ACP transition error. However the recovery task then failed
+with `Strict session restore succeeded but lifecycle recovery commit failed`; the snapshot row still
+had `sleep_status='sleeping'`, `recovery_status='waking'`, `recovery_error=NULL`, and `restored_at`
+set by the restore-result callback. The cross-boundary cause is that TaskRunner first links the
+original ProjectData chat session to the recovery workspace; if that session is already `active` on
+the same recovery workspace but still has the old task id, `wakeSession` rejected the otherwise-safe
+final commit because it required both workspace id and task id to match. The fix keeps the
+cross-workspace guard but lets `wakeSession` update `task_id` for an already-active session on the
+same recovery workspace. The staging node/workspaces were deleted immediately after collecting
+evidence; staging returned to zero active nodes/workspaces.
+
 ## Implementation checklist
 
 - [x] Make the final snapshot wait use an environment-configurable no-progress watchdog instead of
@@ -245,6 +268,8 @@ active nodes/workspaces.
 - [x] Make TaskRunner recovery completion idempotent when `agentStarted=true` but
       `resumeSnapshotChatSessionId` is still set, so a successful wake clears the sleeping snapshot
       claim on retry.
+- [x] Make ProjectData wake idempotent for an already-active session on the same recovery workspace
+      so the recovery task can update the session task id and complete the D1 snapshot finalizer.
 - [x] Reset the D1 `agent_sessions` row to `running` after degraded fresh fallback succeeds so a
       strict-restore error callback cannot leave the recovered session visibly failed.
 - [x] Use a wake-specific recovery prompt so degraded fresh fallback waits for the queued follow-up
@@ -345,6 +370,12 @@ active nodes/workspaces.
 - Recovery-completion idempotency patch full API suite passed:
   `pnpm --filter @simple-agent-manager/api test` (540 files, 7,245 tests).
 - Recovery-completion idempotency patch `pnpm format:check` and `git diff --check` passed.
+- ProjectData wake idempotency patch focused regressions passed:
+  `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-data-sessions-wake.test.ts tests/unit/durable-objects/task-runner-agent-session.test.ts`
+  (2 files, 16 tests), followed by API typecheck and API lint.
+- ProjectData wake idempotency patch full API suite passed:
+  `pnpm --filter @simple-agent-manager/api test` (541 files, 7,247 tests).
+- ProjectData wake idempotency patch `pnpm format:check` and `git diff --check` passed.
 - Added ProjectData worker regression coverage for the same-ID `failed → assigned → running`
   recovery primitive. Local `@cloudflare/vitest-pool-workers` execution for the single filtered test
   timed out after 180s without a test result in this container; staging Worker deploy and live
