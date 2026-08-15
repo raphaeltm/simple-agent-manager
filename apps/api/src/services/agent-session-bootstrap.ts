@@ -254,9 +254,12 @@ export async function startSamAwareAgentSession(
           workspaceId: input.workspaceId,
           agentSessionId,
         });
-        acpSessionId = acpSessionId
-          ? await prepareAcpSessionForFreshStart(env, input, agentSessionId)
-          : await createAcpSessionWithLogging(env, input, agentSessionId);
+        if (!acpSessionId) {
+          acpSessionId = await createAcpSessionWithLogging(env, input, agentSessionId);
+        }
+        if (acpSessionId) {
+          acpSessionId = await prepareAcpSessionForFreshStart(env, input, agentSessionId);
+        }
       }
     }
 

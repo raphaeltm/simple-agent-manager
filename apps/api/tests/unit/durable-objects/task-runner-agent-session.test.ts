@@ -555,6 +555,46 @@ describe('handleAgentSession', () => {
     expect(state.config.resumeSnapshotChatSessionId).toBeNull();
   });
 
+  it('prepares the ACP row when degraded fallback recovers it after an initial create failure', async () => {
+    createAcpSessionMock
+      .mockRejectedValueOnce(new Error('transient ProjectData create failure'))
+      .mockResolvedValueOnce({ id: 'agent-session-new' });
+    restoreAgentSessionOnNodeMock.mockResolvedValueOnce({
+      status: 'degraded',
+      message: 'The saved workspace was restored, but the agent context could not be resumed.',
+    });
+    const state = makeState({
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'chat-1',
+      },
+    });
+    const { rc } = makeContext();
+
+    await handleAgentSession(state, rc);
+
+    expect(createAcpSessionMock).toHaveBeenCalledTimes(2);
+    expect(prepareAcpSessionForFreshStartMock).toHaveBeenCalledWith(
+      rc.env,
+      'project-1',
+      'agent-session-new',
+      expect.objectContaining({
+        workspaceId: 'workspace-1',
+        nodeId: 'node-1',
+      })
+    );
+    expect(transitionAcpSessionMock).toHaveBeenCalledWith(
+      rc.env,
+      'project-1',
+      'agent-session-new',
+      'running',
+      expect.objectContaining({
+        acpSdkSessionId: 'agent-session-new',
+      })
+    );
+    expect(state.config.resumeSnapshotChatSessionId).toBeNull();
+  });
+
   it('does not clear sleepingAt when ProjectData refuses the wake transition', async () => {
     wakeSessionMock.mockResolvedValueOnce(false);
     const state = makeState({

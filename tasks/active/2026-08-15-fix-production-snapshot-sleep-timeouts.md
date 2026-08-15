@@ -147,6 +147,25 @@ to `assigned`, clears the strict-restore terminal fields, then lets the successf
 transition the same row to `running`. The staging node/workspaces were deleted immediately after
 collecting evidence; staging returned to zero active nodes/workspaces.
 
+Staging verification of the same-ID ProjectData ACP reset patch on commit
+`711b436705770fbd15022dc75f435fb501ed4a2a` proved sleep again on fresh node
+`01M030E2Z0TWMX1JMAS4F8H105` (agent version `711b436705770fbd15022dc75f435fb501ed4a2a`): task
+`01M030DZS2K44F3NCBATPVPX41`, session `1a82b978-b4b2-40bd-bfc0-d9fe03bc9b21`, workspace
+`01M030MD3V5AVV161YGYYH5NAJ`, agent session `01M030NCC9RM39SAGFVHZH5XK7`, slept successfully with
+snapshot `01M030PDHX4CR83FQN9D720S3X`: `status='degraded'`,
+`degradation='transcript-only'`, `sleep_status='sleeping'`, `capture_generation=NULL`,
+`snapshot_generation='01M030S3VNZX7RTE48NZSNVNFR'`, manifest present, workspace/agent `sleeping`.
+Wake delivery `01M030XY0R7Z6VEYR7N9A3XEGG` created recovery task
+`01M030Y1WTPVG1R1VCK384DXVV`, workspace `01M030Y5JZRB403HHZHN8YE38V`, agent session
+`01M030Z1WFZTKAYK9DK6M6GTX8`; recovery still failed with
+`Invalid ACP session transition: failed → running (session 01M030Z1WFZTKAYK9DK6M6GTX8)`. The
+remaining edge is that degraded fallback only prepared the ACP row when the first ACP create call
+returned a non-null ID. If that first call fails/returns null while strict restore still creates and
+fails the row, fallback can re-find the failed same-ID row but skip prepare before marking it
+`running`. The fix now ensures the row is prepared after the fallback create/re-fetch path as well.
+The staging node/workspaces were deleted immediately after collecting evidence; staging returned to
+zero active nodes/workspaces.
+
 ## Implementation checklist
 
 - [x] Make the final snapshot wait use an environment-configurable no-progress watchdog instead of
@@ -176,6 +195,8 @@ collecting evidence; staging returned to zero active nodes/workspaces.
 - [x] Reset the same ProjectData ACP row from strict-restore `failed` back to `assigned` during
       degraded fallback, preserving the vm-agent callback session ID and clearing stale terminal
       fields before marking the fresh session `running`.
+- [x] Prepare the same ProjectData ACP row even when the initial ACP create/reuse call returns null
+      and the degraded fallback has to create/re-fetch the row after strict restore.
 - [x] Reset the D1 `agent_sessions` row to `running` after degraded fresh fallback succeeds so a
       strict-restore error callback cannot leave the recovered session visibly failed.
 - [x] Use a wake-specific recovery prompt so degraded fresh fallback waits for the queued follow-up
@@ -249,6 +270,15 @@ collecting evidence; staging returned to zero active nodes/workspaces.
 - Same-ID ACP recovery patch full API suite passed:
   `pnpm --filter @simple-agent-manager/api test` (540 files, 7,242 tests).
 - Same-ID ACP recovery patch `pnpm format:check` and `git diff --check` passed.
+- Null-first-ACP-create edge patch focused unit passed:
+  `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/task-runner-agent-session.test.ts`
+  (1 file, 12 tests).
+- Null-first-ACP-create edge patch API typecheck and lint passed:
+  `pnpm --filter @simple-agent-manager/api typecheck` and
+  `pnpm --filter @simple-agent-manager/api lint`.
+- Null-first-ACP-create edge patch full API suite passed:
+  `pnpm --filter @simple-agent-manager/api test` (540 files, 7,243 tests).
+- Null-first-ACP-create edge patch `pnpm format:check` and `git diff --check` passed.
 - Added ProjectData worker regression coverage for the same-ID `failed → assigned → running`
   recovery primitive. Local `@cloudflare/vitest-pool-workers` execution for the single filtered test
   timed out after 180s without a test result in this container; staging Worker deploy and live
