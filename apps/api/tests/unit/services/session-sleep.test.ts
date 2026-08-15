@@ -495,7 +495,11 @@ describe('sleepWorkspaceSession', () => {
       SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS: '5',
       SESSION_SNAPSHOT_POLL_INTERVAL_MS: '1',
     } as Env;
-    mocks.completeActiveSessionSnapshotAsDegraded.mockResolvedValue(true);
+    let degradedPersisted = false;
+    mocks.completeActiveSessionSnapshotAsDegraded.mockImplementation(async () => {
+      degradedPersisted = true;
+      return true;
+    });
     mocks.getRestorableSessionSnapshot
       .mockResolvedValueOnce(null)
       .mockResolvedValueOnce({
@@ -511,21 +515,24 @@ describe('sleepWorkspaceSession', () => {
         expiresAt: '2026-08-19T00:00:00.000Z',
       });
     mocks.getSessionSnapshotCaptureState.mockReset();
-    mocks.getSessionSnapshotCaptureState
-      .mockResolvedValueOnce({
-        status: 'pending',
-        degradation: 'none',
-        snapshotGeneration: null,
-        captureGeneration: null,
-        updatedAt: '2026-08-15T00:00:00.000Z',
-      })
-      .mockResolvedValue({
+    mocks.getSessionSnapshotCaptureState.mockImplementation(async () => {
+      if (degradedPersisted) {
+        return {
+          status: 'degraded',
+          degradation: 'transcript-only',
+          snapshotGeneration: 'generation-stalled',
+          captureGeneration: null,
+          updatedAt: '2026-08-15T00:00:00.006Z',
+        };
+      }
+      return {
         status: 'pending',
         degradation: 'none',
         snapshotGeneration: null,
         captureGeneration: 'generation-stalled',
         updatedAt: '2026-08-15T00:00:00.000Z',
-      });
+      };
+    });
     const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
 
     await expect(

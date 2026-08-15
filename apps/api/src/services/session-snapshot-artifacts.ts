@@ -424,7 +424,12 @@ export async function prepareSessionSnapshot(
   };
 
   const existing = await db
-    .select({ id: schema.sessionSnapshots.id, status: schema.sessionSnapshots.status })
+    .select({
+      id: schema.sessionSnapshots.id,
+      status: schema.sessionSnapshots.status,
+      sleepStatus: schema.sessionSnapshots.sleepStatus,
+      sleepingAt: schema.sessionSnapshots.sleepingAt,
+    })
     .from(schema.sessionSnapshots)
     .where(eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId))
     .limit(1);
@@ -465,7 +470,12 @@ export async function prepareSessionSnapshot(
   } satisfies schema.NewSessionSnapshot;
 
   if (existing[0]) {
-    if (existing[0].status === 'available') {
+    const current = existing[0];
+    if (current.sleepingAt || current.sleepStatus === 'sleeping') {
+      // A background capture can outlive the sleep operation that requested it.
+      // Once the session is durably sleeping, a stale prepare must not overwrite
+      // the terminal restorable generation or re-open capture_generation.
+    } else if (current.status === 'available' || current.status === 'degraded') {
       // A checkpoint upload is not the current snapshot until completion
       // certifies it. Preserve the last complete generation and lifecycle state
       // so an interrupted capture cannot make a sleeping session unwakeable.

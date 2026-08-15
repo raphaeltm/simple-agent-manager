@@ -13,6 +13,27 @@ import {
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
+function restorableSnapshotCondition() {
+  return or(
+    and(
+      eq(schema.sessionSnapshots.status, 'available'),
+      eq(schema.sessionSnapshots.degradation, 'none')
+    ),
+    and(
+      eq(schema.sessionSnapshots.status, 'degraded'),
+      isNotNull(schema.sessionSnapshots.degradation),
+      sql`${schema.sessionSnapshots.degradation} != 'none'`
+    )
+  );
+}
+
+function isRestorableSnapshot(status: string | null, degradation: string | null): boolean {
+  return (
+    (status === 'available' && degradation === 'none') ||
+    (status === 'degraded' && Boolean(degradation) && degradation !== 'none')
+  );
+}
+
 function sessionRecoveryClaimLeaseMs(env: Env): number {
   return parsePositiveInt(
     env.SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS,
@@ -45,8 +66,7 @@ export async function claimSessionSnapshotRecovery(
       and(
         eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId),
         eq(schema.sessionSnapshots.userId, input.userId),
-        eq(schema.sessionSnapshots.status, 'available'),
-        eq(schema.sessionSnapshots.degradation, 'none'),
+        restorableSnapshotCondition(),
         isNotNull(schema.sessionSnapshots.sleepingAt),
         gt(schema.sessionSnapshots.expiresAt, now.toISOString()),
         lt(schema.sessionSnapshots.recoveryAttempts, maxAttempts),
@@ -141,7 +161,7 @@ export async function claimSessionSnapshotRecovery(
     ? 'snapshot_missing'
     : Date.parse(snapshot.expiresAt) <= now.getTime()
       ? 'snapshot_expired'
-      : snapshot.status !== 'available' || snapshot.degradation !== 'none'
+      : !isRestorableSnapshot(snapshot.status, snapshot.degradation)
         ? 'snapshot_not_complete'
         : snapshot.recoveryAttempts >= maxAttempts
           ? 'recovery_attempts_exhausted'
@@ -226,8 +246,7 @@ export async function markSessionSnapshotAwakeInPlace(
     .where(
       and(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
-        eq(schema.sessionSnapshots.status, 'available'),
-        eq(schema.sessionSnapshots.degradation, 'none')
+        restorableSnapshotCondition()
       )
     );
 }

@@ -237,13 +237,34 @@ async function waitForFinalSessionSnapshot(
           reason,
         });
         if (degraded) {
+          const terminal = await getSessionSnapshotCaptureState(db, input.chatSessionId);
+          if (
+            terminal?.status === 'degraded' &&
+            terminal.degradation !== 'none' &&
+            terminal.snapshotGeneration === activeCaptureGeneration &&
+            !terminal.captureGeneration
+          ) {
+            log.warn('session_sleep.snapshot_degraded_after_no_progress', {
+              workspaceId: input.workspaceId,
+              chatSessionId: input.chatSessionId,
+              generation: activeCaptureGeneration,
+              progressIdleTimeoutMs,
+            });
+            return;
+          }
           log.warn('session_sleep.snapshot_degraded_after_no_progress', {
             workspaceId: input.workspaceId,
             chatSessionId: input.chatSessionId,
             generation: activeCaptureGeneration,
             progressIdleTimeoutMs,
+            terminalStatus: terminal?.status,
+            terminalDegradation: terminal?.degradation,
+            terminalSnapshotGeneration: terminal?.snapshotGeneration,
+            terminalCaptureGeneration: terminal?.captureGeneration,
           });
-          return;
+          lastProgressToken = snapshotProgressToken(terminal);
+          lastProgressAt = now;
+          continue;
         }
       }
       throw new Error(reason);

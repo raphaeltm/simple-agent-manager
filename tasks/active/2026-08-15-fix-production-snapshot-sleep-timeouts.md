@@ -83,6 +83,17 @@ The stale-node relay TLS failure remains part of the evidence and must be covere
 contract: degraded relay outcomes must be durable, visible, retryable where appropriate, and must not
 permanently strand the workspace.
 
+Staging verification of the first fix attempt on 2026-08-15 exposed one additional race before PR:
+fresh VM node `01M02PETXYHTVCPV13QFW9WHCR` heartbeated the branch vm-agent
+`50c1c3fba82925f7bf29d8a5d25e1fff56e9b7b7`, task
+`01M02PEQRBHJ1HGCWA5DJM3VWE` reached idle, and explicit sleep returned 200. However the late
+background capture prepared a newer generation after sleep finalization and overwrote the D1 row
+back to `status='pending'`, `capture_generation='01M02PT8VZADS7M0037F3WS4A6'`, while preserving
+`sleep_status='sleeping'` and clearing no resumable `manifest_json`/`sleeping_at`. That proved the
+sleep path also needed generation-safe final-state re-read and stale prepare protection. The failed
+staging node/workspace were deleted immediately after collecting the D1 evidence; staging returned
+to zero active nodes/workspaces.
+
 ## Implementation checklist
 
 - [x] Make the final snapshot wait use an environment-configurable no-progress watchdog instead of
@@ -96,8 +107,15 @@ permanently strand the workspace.
 - [x] When a background capture stalls after `/prepare`, durably complete the generation as a
       degraded transcript-only snapshot (or another explicit degraded terminal state) so the
       workspace can sleep and stale late completions are rejected by generation matching.
+- [x] Prevent late snapshot `prepare` calls from reopening or corrupting a finalized sleeping
+      snapshot row, and preserve degraded checkpoints the same way available checkpoints are
+      preserved during replacement capture.
+- [x] Re-read D1 after synthetic degraded completion and proceed only when the same generation is
+      terminal and has no active `capture_generation`.
 - [x] Treat verified degraded snapshots as releasable for completed/idle sleep, while retaining
       visible degradation/sleep warning state.
+- [x] Make degraded sleeping snapshots claimable for the VM wake path so the release contract and
+      wake contract use the same restorable/degraded predicate.
 - [x] Verify degraded snapshot manifests and any artifacts they do contain before teardown.
 - [x] Preserve fail-visible retry behavior for true pre-teardown errors without permanently
       stranding an awake workspace.
@@ -130,7 +148,7 @@ permanently strand the workspace.
 
 - API lint passed: `pnpm --filter @simple-agent-manager/api lint`.
 - API typecheck passed: `pnpm --filter @simple-agent-manager/api typecheck`.
-- Full API unit suite passed: 539 files, 7,237 tests.
+- Full API unit suite passed: 539 files, 7,240 tests.
 - Focused API regressions passed: 7 files, 80 tests covering scheduled repair of exhausted rows,
   degraded sleep release, slow-progress vs no-progress final snapshot behavior, progress route
   contract, degraded artifact verification, Instant container env pass-through, provision-node
@@ -142,6 +160,11 @@ permanently strand the workspace.
   Docker-dependent tests failing with `exec: "docker": executable file not found in $PATH`
   (`internal/pty`, `internal/server`).
 - `pnpm format:check` passed.
+- After the first staging verifier found the late-prepare race, focused API regressions passed
+  again: `pnpm --filter @simple-agent-manager/api test -- tests/unit/session-snapshots.test.ts
+  tests/unit/services/session-sleep.test.ts tests/unit/scheduled/session-sleep.test.ts
+  tests/unit/routes/workspaces-session-snapshots.test.ts` (4 files, 59 tests), followed by API lint
+  and API typecheck.
 
 ## Coordination constraints
 
