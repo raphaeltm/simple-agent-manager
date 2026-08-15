@@ -32,7 +32,8 @@ vi.mock('../../../src/durable-objects/migrations', () => ({
 }));
 
 // Mock the shared package
-vi.mock('@simple-agent-manager/shared', () => ({
+vi.mock('@simple-agent-manager/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@simple-agent-manager/shared')>()),
   ACP_SESSION_VALID_TRANSITIONS: {},
   ACP_SESSION_TERMINAL_STATUSES: new Set(),
   ACP_SESSION_DEFAULTS: {

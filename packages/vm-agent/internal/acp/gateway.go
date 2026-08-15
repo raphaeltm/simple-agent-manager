@@ -100,6 +100,10 @@ type MessageReportEntry struct {
 
 // GatewayConfig holds configuration for the ACP gateway and SessionHost.
 type GatewayConfig struct {
+	// Now supplies wall-clock time for prompt epochs and lifecycle timestamps.
+	// Nil uses time.Now. It is injectable so deadline and epoch tests do not
+	// depend on wall-clock sleeps.
+	Now func() time.Time
 	// InitTimeoutMs is the fallback ACP initialization timeout in milliseconds.
 	// Used when per-phase timeouts below are not set (0).
 	InitTimeoutMs int

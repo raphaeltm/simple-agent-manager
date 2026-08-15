@@ -128,12 +128,19 @@ describe('library-cache', () => {
     expect(getCachedFiles('proj-1', '/docs/', 'createdAt')).toEqual(data2);
   });
 
-
   it('isolates file, directory, and index cache entries by authenticated user namespace', () => {
     const userA = buildLibraryCacheNamespace('user:a@example.com');
     const userB = buildLibraryCacheNamespace('user:b@example.com');
-    const filesA: ListFilesResponse = { files: [{ id: 'a', filename: 'a.txt' }] as ListFilesResponse['files'], cursor: null, total: 1 };
-    const filesB: ListFilesResponse = { files: [{ id: 'b', filename: 'b.txt' }] as ListFilesResponse['files'], cursor: null, total: 1 };
+    const filesA: ListFilesResponse = {
+      files: [{ id: 'a', filename: 'a.txt' }] as ListFilesResponse['files'],
+      cursor: null,
+      total: 1,
+    };
+    const filesB: ListFilesResponse = {
+      files: [{ id: 'b', filename: 'b.txt' }] as ListFilesResponse['files'],
+      cursor: null,
+      total: 1,
+    };
 
     setCachedFiles('same-project', '/', 'createdAt', filesA, userA);
     setCachedFiles('same-project', '/', 'createdAt', filesB, userB);
@@ -148,7 +155,11 @@ describe('library-cache', () => {
 
   it('does not read legacy project-only entries when a user namespace is supplied', () => {
     const userA = buildLibraryCacheNamespace('user-a');
-    const legacyFiles: ListFilesResponse = { files: [{ id: 'legacy', filename: 'old-user.txt' }] as ListFilesResponse['files'], cursor: null, total: 1 };
+    const legacyFiles: ListFilesResponse = {
+      files: [{ id: 'legacy', filename: 'old-user.txt' }] as ListFilesResponse['files'],
+      cursor: null,
+      total: 1,
+    };
 
     setCachedFiles('proj-1', '/', 'createdAt', legacyFiles);
     setCachedDirectories('proj-1', '/', [{ path: '/old/', name: 'old', fileCount: 1 }]);
@@ -248,6 +259,47 @@ describe('library-cache', () => {
       expect(getCachedIndex('proj-1')).toBeNull();
     });
 
+    it('treats a schema-invalid (but valid-JSON) index entry as a cache miss, not a throw', () => {
+      // Valid JSON, wrong shape — e.g. a version-drifted or hand-edited entry.
+      localStorage.setItem('sam-library:proj-1:global-index', JSON.stringify({ foo: 'bar' }));
+      expect(() => getCachedIndex('proj-1')).not.toThrow();
+      expect(getCachedIndex('proj-1')).toBeNull();
+    });
+
+    it('treats an array-shaped index entry as a cache miss', () => {
+      localStorage.setItem('sam-library:proj-1:global-index', JSON.stringify([1, 2, 3]));
+      expect(getCachedIndex('proj-1')).toBeNull();
+    });
+
+    it('treats an index entry with wrong field types as a cache miss', () => {
+      localStorage.setItem(
+        'sam-library:proj-1:global-index',
+        JSON.stringify({ files: 'not-an-array', count: 1, sweptAt: Date.now() })
+      );
+      expect(getCachedIndex('proj-1')).toBeNull();
+
+      localStorage.setItem(
+        'sam-library:proj-1:global-index',
+        JSON.stringify({ files: [], count: 'not-a-number', sweptAt: Date.now() })
+      );
+      expect(getCachedIndex('proj-1')).toBeNull();
+
+      localStorage.setItem(
+        'sam-library:proj-1:global-index',
+        JSON.stringify({ files: [], count: 0, sweptAt: 'not-a-number' })
+      );
+      expect(getCachedIndex('proj-1')).toBeNull();
+    });
+
+    it('returns a well-formed index entry unchanged', () => {
+      const files = [makeIndexFile('a')];
+      localStorage.setItem(
+        'sam-library:proj-1:global-index',
+        JSON.stringify({ files, count: 1, sweptAt: Date.now() })
+      );
+      expect(getCachedIndex('proj-1')).toEqual({ files, count: 1, sweptAt: Date.now() });
+    });
+
     it('clearLibraryCache removes the global index too', () => {
       setCachedIndex('proj-1', [makeIndexFile('a')]);
       clearLibraryCache();
@@ -282,16 +334,18 @@ describe('library-cache', () => {
 
       const realSetItem = Storage.prototype.setItem;
       let firstWrite = true;
-      const setSpy = vi
-        .spyOn(Storage.prototype, 'setItem')
-        .mockImplementation(function (this: Storage, key: string, value: string) {
-          // Fail only the FIRST index write to trigger one eviction + retry.
-          if (firstWrite && key.endsWith(':global-index')) {
-            firstWrite = false;
-            throw new DOMException('quota', 'QuotaExceededError');
-          }
-          return realSetItem.call(this, key, value);
-        } as typeof Storage.prototype.setItem);
+      const setSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+        this: Storage,
+        key: string,
+        value: string
+      ) {
+        // Fail only the FIRST index write to trigger one eviction + retry.
+        if (firstWrite && key.endsWith(':global-index')) {
+          firstWrite = false;
+          throw new DOMException('quota', 'QuotaExceededError');
+        }
+        return realSetItem.call(this, key, value);
+      } as typeof Storage.prototype.setItem);
 
       const ok = setCachedIndex('proj-1', [makeIndexFile('a')]);
 
@@ -300,6 +354,39 @@ describe('library-cache', () => {
       expect(getCachedDirectories('proj-1', '/old/')).toBeNull();
       // The retry succeeded and the index persisted.
       expect(getCachedIndex('proj-1')?.count).toBe(1);
+      setSpy.mockRestore();
+    });
+
+    it('treats a corrupted stored entry (non-numeric timestamp) as oldest during LRU eviction, without throwing', () => {
+      // A hand-edited or version-drifted entry with a non-numeric timestamp
+      // field must not break eviction ordering — it degrades to timestamp 0
+      // (i.e. "oldest") rather than poisoning the comparison.
+      localStorage.setItem(
+        'sam-library:proj-1:corrupted',
+        JSON.stringify({ timestamp: 'not-a-number', data: {} })
+      );
+      setCachedFiles('proj-1', '/valid/', 'createdAt', { files: [], cursor: null, total: 0 });
+
+      const realSetItem = Storage.prototype.setItem;
+      let firstWrite = true;
+      const setSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+        this: Storage,
+        key: string,
+        value: string
+      ) {
+        if (firstWrite && key.endsWith(':global-index')) {
+          firstWrite = false;
+          throw new DOMException('quota', 'QuotaExceededError');
+        }
+        return realSetItem.call(this, key, value);
+      } as typeof Storage.prototype.setItem);
+
+      expect(() => setCachedIndex('proj-1', [makeIndexFile('a')])).not.toThrow();
+      // The corrupted entry (timestamp 0) is evicted before the valid, newer one.
+      expect(localStorage.getItem('sam-library:proj-1:corrupted')).toBeNull();
+      expect(getCachedFiles('proj-1', '/valid/', 'createdAt')).not.toBeNull();
+      expect(getCachedIndex('proj-1')?.count).toBe(1);
+
       setSpy.mockRestore();
     });
 
@@ -312,15 +399,17 @@ describe('library-cache', () => {
       vi.setSystemTime(new Date('2026-04-24T12:00:00Z'));
 
       const realSetItem = Storage.prototype.setItem;
-      const setSpy = vi
-        .spyOn(Storage.prototype, 'setItem')
-        .mockImplementation(function (this: Storage, key: string, value: string) {
-          // Persistent quota failure for the index write — every attempt throws.
-          if (key.endsWith(':global-index')) {
-            throw new DOMException('quota', 'QuotaExceededError');
-          }
-          return realSetItem.call(this, key, value);
-        } as typeof Storage.prototype.setItem);
+      const setSpy = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(function (
+        this: Storage,
+        key: string,
+        value: string
+      ) {
+        // Persistent quota failure for the index write — every attempt throws.
+        if (key.endsWith(':global-index')) {
+          throw new DOMException('quota', 'QuotaExceededError');
+        }
+        return realSetItem.call(this, key, value);
+      } as typeof Storage.prototype.setItem);
 
       // Must return false (not throw, not loop forever).
       const ok = setCachedIndex('proj-1', [makeIndexFile('a')]);

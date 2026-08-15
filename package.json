@@ -22,10 +22,13 @@
     "test:coverage": "turbo run test:coverage",
     "lint": "turbo run lint",
     "lint:fix": "turbo run lint -- --fix",
+    "lint:oxlint": "tsx scripts/quality/run-oxlint-shadow.ts",
+    "lint:oxlint:sam-shadow": "tsx scripts/quality/run-oxlint-sam-shadow.ts",
     "typecheck": "turbo run typecheck",
     "typecheck:ui": "pnpm --filter @simple-agent-manager/ui typecheck",
     "format": "prettier --write \"**/*.{ts,tsx,js,jsx,json,md}\"",
-    "format:check": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
+    "format:check": "tsx scripts/quality/check-format.ts",
+    "format:check:strict": "prettier --check \"**/*.{ts,tsx,js,jsx,json,md}\"",
     "deploy": "turbo run deploy",
     "deploy:staging": "turbo run deploy:staging",
     "db:migrate": "tsx scripts/deploy/run-migrations.ts --env production",
@@ -50,9 +53,15 @@
     "quality:observability-noise": "tsx scripts/quality/check-observability-noise.ts",
     "quality:dependency-governance": "npx vitest run --config scripts/quality/vitest.config.ts scripts/quality/dependency-governance.test.ts",
     "test:infra": "pnpm --filter @simple-agent-manager/infra test",
-    "prepare": "husky",
     "quality:migration-ordering": "tsx scripts/quality/check-migration-ordering.ts",
-    "quality:repo-visibility": "tsx scripts/quality/check-repo-quality-visibility.ts"
+    "quality:repo-visibility": "tsx scripts/quality/check-repo-quality-visibility.ts",
+    "quality:type-boundaries": "tsx scripts/quality/check-type-boundaries.ts",
+    "quality:runtime-boundary-semantics": "tsx scripts/quality/check-runtime-boundary-semantics.ts",
+    "quality:direct-dependency-evidence": "tsx scripts/quality/check-direct-dependency-evidence.ts",
+    "quality:govulncheck-diff": "tsx scripts/quality/check-go-vulnerability-diff.ts",
+    "quality:gitleaks:current": "tsx scripts/quality/run-gitleaks.ts --mode=current-tree",
+    "quality:gitleaks:pr": "tsx scripts/quality/run-gitleaks.ts --mode=pr-range",
+    "check:fast": "pnpm format:check && pnpm lint:oxlint && pnpm lint && pnpm quality:type-boundaries"
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",
@@ -61,17 +70,25 @@
   "devDependencies": {
     "@commitlint/cli": "21.2.0",
     "@commitlint/config-conventional": "21.2.0",
+    "@eslint/js": "catalog:",
     "@types/iarna__toml": "2.0.5",
     "@types/node": "catalog:",
+    "@typescript-eslint/eslint-plugin": "catalog:",
+    "@typescript-eslint/parser": "catalog:",
+    "eslint": "catalog:",
+    "eslint-plugin-astro": "catalog:",
     "eslint-plugin-jsx-a11y": "6.10.2",
+    "eslint-plugin-react": "catalog:",
+    "eslint-plugin-react-hooks": "catalog:",
     "eslint-plugin-simple-import-sort": "13.0.0",
-    "husky": "9.1.7",
-    "lint-staged": "17.2.0",
+    "globals": "catalog:",
+    "oxlint": "catalog:",
     "prettier": "3.8.3",
     "ts-morph": "28.0.0",
     "tsx": "catalog:",
     "turbo": "2.9.9",
     "typescript": "catalog:",
+    "typescript-eslint": "catalog:",
     "valibot": "catalog:",
     "vitest": "catalog:",
     "zod": "catalog:"
@@ -80,14 +97,5 @@
   "engines": {
     "node": ">=20.0.0",
     "pnpm": ">=9.5.0"
-  },
-  "lint-staged": {
-    "*.{ts,tsx,js,jsx}": [
-      "eslint --fix",
-      "prettier --write"
-    ],
-    "*.{json,md,yaml,yml}": [
-      "prettier --write"
-    ]
   }
 }

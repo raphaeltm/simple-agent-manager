@@ -8,7 +8,9 @@ export type SessionEventType =
   | 'session.failed'
   | 'session.updated'
   | 'session.agent_completed'
-  | 'session.activity';
+  | 'session.activity'
+  | 'attention.created'
+  | 'attention.resolved';
 
 export interface RawSessionEvent {
   type: SessionEventType;
@@ -30,6 +32,8 @@ const SESSION_DELTA_EVENTS = new Set([
   'session.updated',
   'session.agent_completed',
   'session.activity',
+  'attention.created',
+  'attention.resolved',
 ]);
 
 interface UseProjectWebSocketOptions {
@@ -127,12 +131,16 @@ export function useProjectWebSocket({
         if (!mountedRef.current || wsRef.current !== ws) return;
 
         try {
-          const data = expectJsonRecord(JSON.parse(String(event.data)), 'project.websocket.message');
+          const data = expectJsonRecord(
+            JSON.parse(String(event.data)),
+            'project.websocket.message'
+          );
           const type = typeof data.type === 'string' ? data.type : '';
           if (SESSION_DELTA_EVENTS.has(type)) {
-            const payload = (typeof data.payload === 'object' && data.payload !== null)
-              ? data.payload as Record<string, unknown>
-              : {};
+            const payload =
+              typeof data.payload === 'object' && data.payload !== null
+                ? (data.payload as Record<string, unknown>)
+                : {};
             onSessionEventRef.current?.({ type: type as SessionEventType, payload });
           }
         } catch {

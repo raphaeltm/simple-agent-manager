@@ -1,7 +1,9 @@
 import { DEFAULT_GCP_API_TIMEOUT_MS } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { createModuleLogger } from '../lib/logger';
+import { parseWithSchema } from '../lib/runtime-validation';
 import { fetchWithTimeout, getTimeoutMs } from './fetch-timeout';
 import type { PlatformIntegrationInput, ResolvedPlatformConfig } from './platform-config';
 
@@ -9,6 +11,24 @@ const log = createModuleLogger('platform-config-validation');
 
 const GITHUB_TOKEN_URL = 'https://github.com/login/oauth/access_token';
 const GOOGLE_TOKEN_URL = 'https://oauth2.googleapis.com/token';
+
+// Best-effort read of the OAuth token error probe body. Both callers only
+// care about the `error` code; a non-object or unparseable body degrades to
+// `null` exactly like the previous `.catch(() => null)` did.
+const oauthErrorProbeSchema = v.object({ error: v.optional(v.string()) });
+
+async function readOAuthErrorProbe(response: Response): Promise<{ error?: string } | null> {
+  try {
+    const body: unknown = await response.json();
+    return parseWithSchema(
+      oauthErrorProbeSchema,
+      body,
+      'platform-config-validation.oauth_error_probe'
+    );
+  } catch {
+    return null;
+  }
+}
 
 export interface PlatformConfigValidationResult {
   ok: boolean;
@@ -38,13 +58,21 @@ function validatePem(value: string, errors: string[]): void {
   }
 }
 
-function validateOAuthClientId(value: string, provider: 'GitHub' | 'Google' | 'Google infrastructure' | 'GitLab', errors: string[]): void {
+function validateOAuthClientId(
+  value: string,
+  provider: 'GitHub' | 'Google' | 'Google infrastructure' | 'GitLab',
+  errors: string[]
+): void {
   if (value.trim().length < 6) {
     errors.push(`${provider} OAuth client id is too short`);
   }
 }
 
-function validateSecret(value: string, provider: 'GitHub' | 'Google' | 'Google infrastructure' | 'GitLab', errors: string[]): void {
+function validateSecret(
+  value: string,
+  provider: 'GitHub' | 'Google' | 'Google infrastructure' | 'GitLab',
+  errors: string[]
+): void {
   if (value.trim().length < 8) {
     errors.push(`${provider} OAuth client secret is too short`);
   }
@@ -64,7 +92,13 @@ function validateGitLabHost(value: string, errors: string[]): void {
   if (url.protocol !== 'https:' && !isLocalHttp) {
     errors.push('GitLab host must use HTTPS unless it points to localhost');
   }
-  if (url.username || url.password || url.search || url.hash || (url.pathname !== '/' && url.pathname !== '')) {
+  if (
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    (url.pathname !== '/' && url.pathname !== '')
+  ) {
     errors.push('GitLab host must not include credentials, a path, query string, or fragment');
   }
 }
@@ -83,7 +117,7 @@ async function pingGitHubOAuth(clientId: string, clientSecret: string): Promise<
       code: 'sam-setup-validation',
     }),
   });
-  const body = await response.json().catch(() => null) as { error?: string } | null;
+  const body = await readOAuthErrorProbe(response);
   if (body?.error === 'incorrect_client_credentials') {
     return 'GitHub OAuth client id/secret were rejected';
   }
@@ -94,20 +128,24 @@ async function pingGoogleOAuth(
   clientId: string,
   clientSecret: string,
   redirectUri: string,
-  timeoutMs: number,
+  timeoutMs: number
 ): Promise<string | null> {
-  const response = await fetchWithTimeout(GOOGLE_TOKEN_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      code: 'sam-setup-validation',
-      redirect_uri: redirectUri,
-      grant_type: 'authorization_code',
-    }),
-  }, timeoutMs);
-  const body = await response.json().catch(() => null) as { error?: string } | null;
+  const response = await fetchWithTimeout(
+    GOOGLE_TOKEN_URL,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: clientId,
+        client_secret: clientSecret,
+        code: 'sam-setup-validation',
+        redirect_uri: redirectUri,
+        grant_type: 'authorization_code',
+      }),
+    },
+    timeoutMs
+  );
+  const body = await readOAuthErrorProbe(response);
   if (body?.error === 'invalid_client' || body?.error === 'unauthorized_client') {
     return 'Google OAuth client id/secret were rejected';
   }
@@ -123,10 +161,7 @@ export async function validatePlatformIntegrationInput(
   const google = input.google ?? {};
   const googleInfrastructure = input.googleInfrastructure ?? {};
   const gitlab = input.gitlab ?? {};
-  const googleOAuthTimeoutMs = getTimeoutMs(
-    env.GCP_API_TIMEOUT_MS,
-    DEFAULT_GCP_API_TIMEOUT_MS,
-  );
+  const googleOAuthTimeoutMs = getTimeoutMs(env.GCP_API_TIMEOUT_MS, DEFAULT_GCP_API_TIMEOUT_MS);
 
   if (present(github.clientId)) validateOAuthClientId(github.clientId, 'GitHub', errors);
   if (present(github.clientSecret)) validateSecret(github.clientSecret, 'GitHub', errors);
@@ -150,7 +185,10 @@ export async function validatePlatformIntegrationInput(
   const hasInfrastructureClientSecret = infrastructureClientSecret !== null;
   if (googleInfrastructure.remove && (hasInfrastructureClientId || hasInfrastructureClientSecret)) {
     errors.push('Google infrastructure OAuth removal cannot include replacement values');
-  } else if (!googleInfrastructure.remove && hasInfrastructureClientId !== hasInfrastructureClientSecret) {
+  } else if (
+    !googleInfrastructure.remove &&
+    hasInfrastructureClientId !== hasInfrastructureClientSecret
+  ) {
     errors.push('Google infrastructure OAuth client id and secret must be provided together');
   }
   if (infrastructureClientId !== null) {
@@ -169,7 +207,9 @@ export async function validatePlatformIntegrationInput(
       const error = await pingGitHubOAuth(github.clientId, github.clientSecret);
       if (error) errors.push(error);
     } catch (err) {
-      log.warn('github_oauth_validation_ping_failed', { error: err instanceof Error ? err.message : String(err) });
+      log.warn('github_oauth_validation_ping_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -179,11 +219,13 @@ export async function validatePlatformIntegrationInput(
         google.clientId,
         google.clientSecret,
         `https://api.${env.BASE_DOMAIN}/api/auth/callback/google`,
-        googleOAuthTimeoutMs,
+        googleOAuthTimeoutMs
       );
       if (error) errors.push(error);
     } catch (err) {
-      log.warn('google_oauth_validation_ping_failed', { error: err instanceof Error ? err.message : String(err) });
+      log.warn('google_oauth_validation_ping_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -193,7 +235,7 @@ export async function validatePlatformIntegrationInput(
         infrastructureClientId,
         infrastructureClientSecret,
         `https://api.${env.BASE_DOMAIN}/auth/google/callback`,
-        googleOAuthTimeoutMs,
+        googleOAuthTimeoutMs
       );
       if (error) errors.push(error.replace('Google OAuth', 'Google infrastructure OAuth'));
     } catch (err) {
@@ -206,10 +248,14 @@ export async function validatePlatformIntegrationInput(
   return { ok: errors.length === 0, errors };
 }
 
-export function validateSetupCanComplete(config: ResolvedPlatformConfig): PlatformConfigValidationResult {
+export function validateSetupCanComplete(
+  config: ResolvedPlatformConfig
+): PlatformConfigValidationResult {
   const hasGitHub = Boolean(config.github.clientId.value && config.github.clientSecret.value);
   const hasGoogle = Boolean(config.google.clientId.value && config.google.clientSecret.value);
-  const hasGitLab = Boolean(config.gitlab.host.value && config.gitlab.clientId.value && config.gitlab.clientSecret.value);
+  const hasGitLab = Boolean(
+    config.gitlab.host.value && config.gitlab.clientId.value && config.gitlab.clientSecret.value
+  );
   if (!hasGitHub && !hasGoogle && !hasGitLab) {
     return {
       ok: false,

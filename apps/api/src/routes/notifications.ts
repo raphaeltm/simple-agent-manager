@@ -14,17 +14,21 @@
  * Auth: All endpoints require authenticated user (per-route middleware).
  */
 
-import type {
-  NotificationType,
-} from '@simple-agent-manager/shared';
+import type { NotificationType } from '@simple-agent-manager/shared';
 import { NOTIFICATION_TYPES } from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
 
 import type { NotificationService } from '../durable-objects/notification';
 import type { Env } from '../env';
-import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
+import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { jsonValidator, UpdateNotificationPreferenceSchema } from '../schemas';
+import { rateLimitPushSubscription } from '../middleware/rate-limit';
+import {
+  DeleteWebPushSubscriptionSchema,
+  jsonValidator,
+  UpdateNotificationPreferenceSchema,
+  WebPushSubscriptionSchema,
+} from '../schemas';
 
 const notificationRoutes = new Hono<{ Bindings: Env }>();
 const SESSION_ID_RE = /^[\w-]{1,64}$/;
@@ -104,6 +108,46 @@ notificationRoutes.post('/read-all', requireAuth(), requireApproved(), async (c)
   return c.json({ success: true });
 });
 
+// PushSubscription routes must remain static and precede parameterized routes.
+notificationRoutes.post(
+  '/push/subscriptions',
+  requireAuth(),
+  requireApproved(),
+  async (c, next) => rateLimitPushSubscription(c.env)(c, next),
+  jsonValidator(WebPushSubscriptionSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const subscription = await getNotificationStub(c.env, userId).addPushSubscription(
+      userId,
+      c.req.valid('json'),
+      c.req.header('User-Agent') ?? null
+    );
+    return c.json(subscription, 201);
+  }
+);
+
+notificationRoutes.get('/push/subscriptions', requireAuth(), requireApproved(), async (c) => {
+  const userId = getUserId(c);
+  const subscriptions = await getNotificationStub(c.env, userId).listPushSubscriptions(userId);
+  return c.json({ subscriptions });
+});
+
+notificationRoutes.delete(
+  '/push/subscriptions',
+  requireAuth(),
+  requireApproved(),
+  async (c, next) => rateLimitPushSubscription(c.env)(c, next),
+  jsonValidator(DeleteWebPushSubscriptionSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const removed = await getNotificationStub(c.env, userId).removePushSubscription(
+      userId,
+      c.req.valid('json').endpoint
+    );
+    return c.json({ success: true, removed });
+  }
+);
+
 // POST /api/notifications/:id/read
 notificationRoutes.post('/:id/read', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
@@ -135,20 +179,26 @@ notificationRoutes.get('/preferences', requireAuth(), requireApproved(), async (
 });
 
 // PUT /api/notifications/preferences
-notificationRoutes.put('/preferences', requireAuth(), requireApproved(), jsonValidator(UpdateNotificationPreferenceSchema), async (c) => {
-  const userId = getUserId(c);
-  const body = c.req.valid('json');
+notificationRoutes.put(
+  '/preferences',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(UpdateNotificationPreferenceSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const body = c.req.valid('json');
 
-  const stub = getNotificationStub(c.env, userId);
-  await stub.updatePreference(
-    userId,
-    body.notificationType,
-    body.channel,
-    body.enabled,
-    body.projectId
-  );
-  return c.json({ success: true });
-});
+    const stub = getNotificationStub(c.env, userId);
+    await stub.updatePreference(
+      userId,
+      body.notificationType,
+      body.channel,
+      body.enabled,
+      body.projectId
+    );
+    return c.json({ success: true });
+  }
+);
 
 // GET /api/notifications/ws — WebSocket upgrade
 notificationRoutes.get('/ws', requireAuth(), requireApproved(), async (c) => {

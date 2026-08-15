@@ -54,7 +54,11 @@ export {
 } from './workspaces';
 
 // Notification schemas
-export { UpdateNotificationPreferenceSchema } from './notifications';
+export {
+  DeleteWebPushSubscriptionSchema,
+  UpdateNotificationPreferenceSchema,
+  WebPushSubscriptionSchema,
+} from './notifications';
 
 // Agent profile schemas
 export {
@@ -65,6 +69,32 @@ export {
 
 // Skill schemas
 export { CreateSkillSchema, UpdateSkillSchema } from './skills';
+
+// Knowledge graph schemas
+export {
+  AddObservationSchema,
+  CreateKnowledgeEntitySchema,
+  UpdateKnowledgeEntitySchema,
+  UpdateObservationSchema,
+} from './knowledge';
+
+// Project file library schemas
+export { MoveFileSchema, UpdateTagsSchema } from './library';
+
+// Project policy schemas
+export { CreatePolicySchema, UpdatePolicySchema } from './policies';
+
+// Orchestrator schemas
+export { OverrideTaskStateSchema } from './orchestrator';
+
+// SAM / project agent chat schema (shared by routes/sam.ts and routes/project-agent.ts)
+export { AgentChatRequestSchema } from './agent-chat';
+
+// Guided agent-credential setup session schema
+export { CreateAgentCredentialSetupSessionSchema } from './agent-credential-setup';
+
+// MCP JSON-RPC envelope schema
+export { JsonRpcEnvelopeSchema } from './mcp';
 
 // Agent settings schemas
 export type { AgentSettingsValidationLimits } from './agent-settings';
@@ -124,6 +154,7 @@ export {
   NodeErrorBatchSchema,
   NodeHeartbeatSchema,
   ProjectDeploymentSetupSchema,
+  ResolveAttentionAnswerSchema,
   RunDebugDiagnosisSchema,
   SaveCachedCommandsSchema,
   SaveDebugDiagnosisIdeaSchema,

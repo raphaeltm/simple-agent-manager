@@ -6,7 +6,7 @@ import { expectJsonRecord } from '../lib/runtime-validation';
 import { bucketUserAgent } from '../middleware/analytics';
 import { optionalAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { getRateLimit,rateLimit } from '../middleware/rate-limit';
+import { getRateLimit, rateLimit } from '../middleware/rate-limit';
 
 /** Default max body size: 64 KB (configurable via MAX_ANALYTICS_INGEST_BODY_BYTES) */
 const DEFAULT_MAX_BODY_BYTES = 65_536;
@@ -36,14 +36,21 @@ function truncate(value: string, maxLength: number): string {
 }
 
 function getClientIp(c: { req: { header: (name: string) => string | undefined } }): string {
-  return c.req.header('CF-Connecting-IP') ?? c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ?? 'unknown';
+  return (
+    c.req.header('CF-Connecting-IP') ??
+    c.req.header('X-Forwarded-For')?.split(',')[0]?.trim() ??
+    'unknown'
+  );
 }
 
 /**
  * Validate and sanitize a single client-side analytics event.
  * Returns null for malformed events (dropped silently).
  */
-function validateEvent(raw: unknown, maxDurationMs: number = DEFAULT_MAX_DURATION_MS): {
+function validateEvent(
+  raw: unknown,
+  maxDurationMs: number = DEFAULT_MAX_DURATION_MS
+): {
   event: string;
   page: string;
   referrer: string;
@@ -69,15 +76,22 @@ function validateEvent(raw: unknown, maxDurationMs: number = DEFAULT_MAX_DURATIO
   return {
     event: truncate(e.event, DEFAULT_MAX_EVENT_NAME_LENGTH),
     page: typeof e.page === 'string' ? truncate(e.page, DEFAULT_MAX_PAGE_LENGTH) : '',
-    referrer: typeof e.referrer === 'string' ? truncate(e.referrer, DEFAULT_MAX_REFERRER_LENGTH) : '',
+    referrer:
+      typeof e.referrer === 'string' ? truncate(e.referrer, DEFAULT_MAX_REFERRER_LENGTH) : '',
     utmSource: typeof e.utmSource === 'string' ? truncate(e.utmSource, DEFAULT_MAX_UTM_LENGTH) : '',
     utmMedium: typeof e.utmMedium === 'string' ? truncate(e.utmMedium, DEFAULT_MAX_UTM_LENGTH) : '',
-    utmCampaign: typeof e.utmCampaign === 'string' ? truncate(e.utmCampaign, DEFAULT_MAX_UTM_LENGTH) : '',
-    sessionId: typeof e.sessionId === 'string' ? truncate(e.sessionId, DEFAULT_MAX_SESSION_ID_LENGTH) : '',
-    entityId: typeof e.entityId === 'string' ? truncate(e.entityId, DEFAULT_MAX_ENTITY_ID_LENGTH) : '',
-    durationMs: typeof e.durationMs === 'number' && isFinite(e.durationMs) && e.durationMs >= 0
-      ? Math.min(e.durationMs, maxDurationMs) : 0,
-    visitorId: typeof e.visitorId === 'string' ? truncate(e.visitorId, DEFAULT_MAX_SESSION_ID_LENGTH) : '',
+    utmCampaign:
+      typeof e.utmCampaign === 'string' ? truncate(e.utmCampaign, DEFAULT_MAX_UTM_LENGTH) : '',
+    sessionId:
+      typeof e.sessionId === 'string' ? truncate(e.sessionId, DEFAULT_MAX_SESSION_ID_LENGTH) : '',
+    entityId:
+      typeof e.entityId === 'string' ? truncate(e.entityId, DEFAULT_MAX_ENTITY_ID_LENGTH) : '',
+    durationMs:
+      typeof e.durationMs === 'number' && isFinite(e.durationMs) && e.durationMs >= 0
+        ? Math.min(e.durationMs, maxDurationMs)
+        : 0,
+    visitorId:
+      typeof e.visitorId === 'string' ? truncate(e.visitorId, DEFAULT_MAX_SESSION_ID_LENGTH) : '',
     host: typeof e.host === 'string' ? truncate(e.host, DEFAULT_MAX_HOST_LENGTH) : '',
   };
 }
@@ -115,6 +129,7 @@ analyticsIngestRoutes.post('/', async (c) => {
   if (!c.env.ANALYTICS) {
     return c.body(null, 204);
   }
+  const analytics = c.env.ANALYTICS;
 
   const maxBodyBytes = parseInt(
     c.env.MAX_ANALYTICS_INGEST_BODY_BYTES || String(DEFAULT_MAX_BODY_BYTES),
@@ -186,7 +201,9 @@ analyticsIngestRoutes.post('/', async (c) => {
   let serverHost = '';
   try {
     if (originHeader) serverHost = new URL(originHeader).hostname;
-  } catch { /* malformed origin — ignore */ }
+  } catch {
+    /* malformed origin — ignore */
+  }
 
   // Write each valid event to Analytics Engine (fire-and-forget via waitUntil)
   const writeAll = async () => {
@@ -203,35 +220,41 @@ analyticsIngestRoutes.post('/', async (c) => {
         // (browsers enforce Origin on cross-origin requests; client JSON body is untrusted)
         const host = serverHost || validated.host;
 
-        c.env.ANALYTICS!.writeDataPoint({
+        analytics.writeDataPoint({
           indexes: [index],
           blobs: [
-            validated.event,       // blob1: event name
-            host,                  // blob2: host (e.g. www.example.com, app.example.com)
-            validated.page,        // blob3: page/route
-            validated.referrer,    // blob4: referrer
-            validated.utmSource,   // blob5
-            validated.utmMedium,   // blob6
+            validated.event, // blob1: event name
+            host, // blob2: host (e.g. www.example.com, app.example.com)
+            validated.page, // blob3: page/route
+            validated.referrer, // blob4: referrer
+            validated.utmSource, // blob5
+            validated.utmMedium, // blob6
             validated.utmCampaign, // blob7
-            validated.sessionId,   // blob8: browser session ID
-            userAgentBucket,       // blob9: server-derived UA bucket
-            country,               // blob10: CF-provided country
-            validated.entityId,    // blob11: entity ID
+            validated.sessionId, // blob8: browser session ID
+            userAgentBucket, // blob9: server-derived UA bucket
+            country, // blob10: CF-provided country
+            validated.entityId, // blob11: entity ID
           ],
           doubles: [
-            validated.durationMs,  // double1: duration on page
-            0,                     // double2: status code (N/A for client events)
-            0,                     // double3: reserved
+            validated.durationMs, // double1: duration on page
+            0, // double2: status code (N/A for client events)
+            0, // double3: reserved
           ],
         });
       }
     } catch (err) {
-      log.warn('analytics_ingest.write_failed', { error: err instanceof Error ? err.message : String(err) });
+      log.warn('analytics_ingest.write_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   };
 
   const writePromise = writeAll();
-  try { c.executionCtx.waitUntil(writePromise); } catch { /* no exec ctx in tests */ }
+  try {
+    c.executionCtx.waitUntil(writePromise);
+  } catch {
+    /* no exec ctx in tests */
+  }
 
   return c.body(null, 204);
 });

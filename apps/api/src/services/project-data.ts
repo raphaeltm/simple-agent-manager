@@ -7,12 +7,21 @@
  *
  * See: specs/018-project-first-architecture/research.md (Decision 3)
  */
-import {
-  resolveHandoffLimits,
-  resolveMissionStateLimits,
+import type {
+  AgentMailboxMessage,
+  CheckpointEpisode,
+  CheckpointEpisodeTransitionInput,
+  CreateCheckpointEpisodeInput,
+  DeliveryState,
+  MessageClass,
 } from '@simple-agent-manager/shared';
+import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-manager/shared';
 
 import type { ProjectData } from '../durable-objects/project-data';
+import type {
+  AcceptedPromptDelivery,
+  AcceptPromptDeliveryInput,
+} from '../durable-objects/project-data/prompt-delivery';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import {
@@ -40,7 +49,7 @@ async function callProjectDataWithRetry<T>(
   env: Env,
   projectId: string,
   operation: string,
-  call: (stub: DurableObjectStub<ProjectData>) => Promise<T>,
+  call: (stub: DurableObjectStub<ProjectData>) => Promise<T>
 ): Promise<T> {
   const retryConfig = getDurableObjectRetryConfig(env);
   let lastError: unknown;
@@ -107,13 +116,29 @@ export async function linkSessionToWorkspace(
   );
 }
 
-export async function stopSession(
+export async function stopSession(env: Env, projectId: string, sessionId: string): Promise<void> {
+  const stub = await getStub(env, projectId);
+  return stub.stopSession(sessionId);
+}
+
+export async function sleepSession(
   env: Env,
   projectId: string,
   sessionId: string
-): Promise<void> {
+): Promise<boolean> {
   const stub = await getStub(env, projectId);
-  return stub.stopSession(sessionId);
+  return stub.sleepSession(sessionId);
+}
+
+export async function wakeSession(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  workspaceId: string,
+  taskId: string
+): Promise<boolean> {
+  const stub = await getStub(env, projectId);
+  return stub.wakeSession(sessionId, workspaceId, taskId);
 }
 
 export async function failSession(
@@ -143,7 +168,7 @@ export async function persistMessage(
   role: string,
   content: string,
   toolMetadata: Record<string, unknown> | null,
-  messageId?: string,
+  messageId?: string
 ): Promise<string> {
   const stub = await getStub(env, projectId);
   return stub.persistMessage(
@@ -151,7 +176,7 @@ export async function persistMessage(
     role,
     content,
     toolMetadata ? JSON.stringify(toolMetadata) : null,
-    messageId,
+    messageId
   );
 }
 
@@ -216,7 +241,10 @@ export async function getSessionsByTaskIds(
 }
 
 export async function linkSessionToTask(
-  env: Env, projectId: string, sessionId: string, taskId: string
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  taskId: string
 ): Promise<boolean> {
   return callProjectDataWithRetry(env, projectId, 'linkSessionToTask', (stub) =>
     stub.linkSessionToTask(sessionId, taskId)
@@ -276,16 +304,18 @@ export async function searchMessages(
   query: string,
   sessionId: string | null = null,
   roles: string[] | null = null,
-  limit: number = 10,
-): Promise<Array<{
-  id: string;
-  sessionId: string;
-  role: string;
-  snippet: string;
-  createdAt: number;
-  sessionTopic: string | null;
-  sessionTaskId: string | null;
-}>> {
+  limit: number = 10
+): Promise<
+  Array<{
+    id: string;
+    sessionId: string;
+    role: string;
+    snippet: string;
+    createdAt: number;
+    sessionTopic: string | null;
+    sessionTaskId: string | null;
+  }>
+> {
   const stub = await getStub(env, projectId);
   return stub.searchMessages(query, sessionId, roles, limit);
 }
@@ -294,7 +324,7 @@ export async function searchMessages(
 export async function materializeAllStopped(
   env: Env,
   projectId: string,
-  limit: number = 50,
+  limit: number = 50
 ): Promise<{ materialized: number; errors: number; remaining: number }> {
   const stub = await getStub(env, projectId);
   return stub.materializeAllStopped(limit);
@@ -356,13 +386,15 @@ export async function getSessionsForIdea(
   env: Env,
   projectId: string,
   taskId: string
-): Promise<Array<{
-  sessionId: string;
-  topic: string | null;
-  status: string;
-  context: string | null;
-  linkedAt: number;
-}>> {
+): Promise<
+  Array<{
+    sessionId: string;
+    topic: string | null;
+    status: string;
+    context: string | null;
+    linkedAt: number;
+  }>
+> {
   const stub = await getStub(env, projectId);
   return stub.getSessionsForIdea(taskId);
 }
@@ -517,6 +549,24 @@ export async function transitionAcpSession(
   );
 }
 
+export async function prepareAcpSessionForFreshStart(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  opts: {
+    actorType: AcpSessionEventActorType;
+    actorId?: string | null;
+    reason?: string | null;
+    metadata?: Record<string, unknown> | null;
+    workspaceId: string;
+    nodeId: string;
+  }
+): Promise<AcpSession> {
+  return callProjectDataWithRetry(env, projectId, 'prepareAcpSessionForFreshStart', (stub) =>
+    stub.prepareAcpSessionForFreshStart(sessionId, opts)
+  );
+}
+
 export async function updateAcpSessionHeartbeat(
   env: Env,
   projectId: string,
@@ -538,28 +588,20 @@ export async function reportAcpSessionActivity(
     agentType?: string | null;
     restartCount?: number | null;
     statusError?: string | null;
-  },
+  }
 ): Promise<void> {
   const stub = await getStub(env, projectId);
   await stub.reportActivity(sessionId, activity, extra);
 }
 
 /** Get the persisted session state snapshot (for page load catch-up). */
-export async function getSessionState(
-  env: Env,
-  projectId: string,
-  sessionId: string,
-) {
+export async function getSessionState(env: Env, projectId: string, sessionId: string) {
   const stub = await getStub(env, projectId);
   return stub.getSessionState(sessionId);
 }
 
 /** Get the latest durable plan message snapshot for a chat session. */
-export async function getLatestPersistedPlan(
-  env: Env,
-  projectId: string,
-  sessionId: string,
-) {
+export async function getLatestPersistedPlan(env: Env, projectId: string, sessionId: string) {
   const stub = await getStub(env, projectId);
   return stub.getLatestPersistedPlan(sessionId);
 }
@@ -657,7 +699,7 @@ export async function cacheCommands(
   env: Env,
   projectId: string,
   agentType: string,
-  cmds: Array<{ name: string; description: string }>,
+  cmds: Array<{ name: string; description: string }>
 ): Promise<void> {
   const stub = await getStub(env, projectId);
   await stub.cacheCommands(agentType, cmds);
@@ -666,7 +708,7 @@ export async function cacheCommands(
 export async function getCachedCommands(
   env: Env,
   projectId: string,
-  agentType?: string,
+  agentType?: string
 ): Promise<Array<{ agentType: string; name: string; description: string; updatedAt: number }>> {
   const stub = await getStub(env, projectId);
   return stub.getCachedCommands(agentType);
@@ -677,7 +719,11 @@ export async function getCachedCommands(
 // =========================================================================
 
 export async function createKnowledgeEntity(
-  env: Env, projectId: string, name: string, entityType: string, description: string | null,
+  env: Env,
+  projectId: string,
+  name: string,
+  entityType: string,
+  description: string | null
 ): Promise<{ id: string; createdAt: number }> {
   const stub = await getStub(env, projectId);
   return stub.createKnowledgeEntity(name, entityType, description);
@@ -694,14 +740,21 @@ export async function getKnowledgeEntityByName(env: Env, projectId: string, name
 }
 
 export async function listKnowledgeEntities(
-  env: Env, projectId: string, entityType: string | null, limit: number, offset: number,
+  env: Env,
+  projectId: string,
+  entityType: string | null,
+  limit: number,
+  offset: number
 ) {
   const stub = await getStub(env, projectId);
   return stub.listKnowledgeEntities(entityType, limit, offset);
 }
 
 export async function updateKnowledgeEntity(
-  env: Env, projectId: string, entityId: string, updates: { name?: string; entityType?: string; description?: string | null },
+  env: Env,
+  projectId: string,
+  entityId: string,
+  updates: { name?: string; entityType?: string; description?: string | null }
 ) {
   const stub = await getStub(env, projectId);
   return stub.updateKnowledgeEntity(entityId, updates);
@@ -713,79 +766,142 @@ export async function deleteKnowledgeEntity(env: Env, projectId: string, entityI
 }
 
 export async function addKnowledgeObservation(
-  env: Env, projectId: string, entityId: string,
-  content: string, confidence: number, sourceType: string, sourceSessionId: string | null,
+  env: Env,
+  projectId: string,
+  entityId: string,
+  content: string,
+  confidence: number,
+  sourceType: string,
+  sourceSessionId: string | null
 ): Promise<{ id: string; createdAt: number }> {
   const stub = await getStub(env, projectId);
   return stub.addKnowledgeObservation(entityId, content, confidence, sourceType, sourceSessionId);
 }
 
 export async function updateKnowledgeObservation(
-  env: Env, projectId: string, observationId: string, newContent: string, confidence: number | null,
+  env: Env,
+  projectId: string,
+  observationId: string,
+  newContent: string,
+  confidence: number | null
 ) {
   const stub = await getStub(env, projectId);
   return stub.updateKnowledgeObservation(observationId, newContent, confidence);
 }
 
-export async function removeKnowledgeObservation(env: Env, projectId: string, observationId: string) {
+export async function removeKnowledgeObservation(
+  env: Env,
+  projectId: string,
+  observationId: string
+) {
   const stub = await getStub(env, projectId);
   return stub.removeKnowledgeObservation(observationId);
 }
 
-export async function confirmKnowledgeObservation(env: Env, projectId: string, observationId: string) {
+export async function confirmKnowledgeObservation(
+  env: Env,
+  projectId: string,
+  observationId: string
+) {
   const stub = await getStub(env, projectId);
   return stub.confirmKnowledgeObservation(observationId);
 }
 
 export async function getKnowledgeObservationsForEntity(
-  env: Env, projectId: string, entityId: string, includeInactive: boolean,
+  env: Env,
+  projectId: string,
+  entityId: string,
+  includeInactive: boolean
 ) {
   const stub = await getStub(env, projectId);
   return stub.getKnowledgeObservationsForEntity(entityId, includeInactive);
 }
 
 export async function searchKnowledgeObservations(
-  env: Env, projectId: string, query: string, entityType: string | null, minConfidence: number | null, limit: number,
+  env: Env,
+  projectId: string,
+  query: string,
+  entityType: string | null,
+  minConfidence: number | null,
+  limit: number
 ) {
   const stub = await getStub(env, projectId);
   return stub.searchKnowledgeObservations(query, entityType, minConfidence, limit);
 }
 
-export async function getRelevantKnowledge(env: Env, projectId: string, context: string, limit: number) {
+export async function getRelevantKnowledge(
+  env: Env,
+  projectId: string,
+  context: string,
+  limit: number
+) {
   const stub = await getStub(env, projectId);
   return stub.getRelevantKnowledge(context, limit);
 }
 
-export async function getAllHighConfidenceKnowledge(env: Env, projectId: string, minConfidence: number, limit: number) {
+export async function getAllHighConfidenceKnowledge(
+  env: Env,
+  projectId: string,
+  minConfidence: number,
+  limit: number
+) {
   const stub = await getStub(env, projectId);
   return stub.getAllHighConfidenceKnowledge(minConfidence, limit);
 }
 
 export async function createKnowledgeRelation(
-  env: Env, projectId: string, sourceEntityId: string, targetEntityId: string, relationType: string, description: string | null,
+  env: Env,
+  projectId: string,
+  sourceEntityId: string,
+  targetEntityId: string,
+  relationType: string,
+  description: string | null
 ) {
   const stub = await getStub(env, projectId);
   return stub.createKnowledgeRelation(sourceEntityId, targetEntityId, relationType, description);
 }
 
-export async function getKnowledgeRelated(env: Env, projectId: string, entityId: string, relationType: string | null) {
+export async function getKnowledgeRelated(
+  env: Env,
+  projectId: string,
+  entityId: string,
+  relationType: string | null
+) {
   const stub = await getStub(env, projectId);
   return stub.getKnowledgeRelated(entityId, relationType);
 }
 
 export async function flagKnowledgeContradiction(
-  env: Env, projectId: string, existingObservationId: string, newObservation: string, sourceSessionId: string | null,
+  env: Env,
+  projectId: string,
+  existingObservationId: string,
+  newObservation: string,
+  sourceSessionId: string | null
 ) {
   const stub = await getStub(env, projectId);
   return stub.flagKnowledgeContradiction(existingObservationId, newObservation, sourceSessionId);
 }
 
 // ── Project Policies (Phase 4: Policy Propagation) ───────────────────────
-export { createPolicy, getActivePolicies, getPolicy, listPolicies, removePolicy, updatePolicy } from './project-data-policies';
+export {
+  createPolicy,
+  getActivePolicies,
+  getPolicy,
+  listPolicies,
+  removePolicy,
+  updatePolicy,
+} from './project-data-policies';
 
 // ── Agent Mailbox (Durable Messaging) ────────────────────────────────────
 
-import type { AgentMailboxMessage, DeliveryState, MessageClass } from '@simple-agent-manager/shared';
+export async function acceptPromptDelivery(
+  env: Env,
+  projectId: string,
+  input: AcceptPromptDeliveryInput
+): Promise<AcceptedPromptDelivery> {
+  const stub = await getStub(env, projectId);
+  return stub.acceptPromptDelivery(input);
+}
 
 export async function enqueueMailboxMessage(
   env: Env,
@@ -801,67 +917,124 @@ export async function enqueueMailboxMessage(
     ackTimeoutMs?: number | null;
     ttlMs?: number | null;
     maxMessages?: number;
-  },
+  }
 ): Promise<AgentMailboxMessage> {
   const stub = await getStub(env, projectId);
   return stub.enqueueMailboxMessage(opts);
 }
 
 export async function getPendingMailboxMessages(
-  env: Env, projectId: string, targetSessionId: string, limit?: number,
+  env: Env,
+  projectId: string,
+  targetSessionId: string,
+  limit?: number
 ): Promise<AgentMailboxMessage[]> {
   const stub = await getStub(env, projectId);
   return stub.getPendingMailboxMessages(targetSessionId, limit);
 }
 
 export async function getMailboxMessage(
-  env: Env, projectId: string, messageId: string,
+  env: Env,
+  projectId: string,
+  messageId: string
 ): Promise<AgentMailboxMessage | null> {
   const stub = await getStub(env, projectId);
   return stub.getMailboxMessage(messageId);
 }
 
 export async function markMailboxMessageDelivered(
-  env: Env, projectId: string, messageId: string,
+  env: Env,
+  projectId: string,
+  messageId: string
 ): Promise<boolean> {
   const stub = await getStub(env, projectId);
   return stub.markMailboxMessageDelivered(messageId);
 }
 
 export async function acknowledgeMailboxMessage(
-  env: Env, projectId: string, messageId: string,
+  env: Env,
+  projectId: string,
+  messageId: string
 ): Promise<boolean> {
   const stub = await getStub(env, projectId);
   return stub.acknowledgeMailboxMessage(messageId);
 }
 
 export async function listMailboxMessages(
-  env: Env, projectId: string,
-  opts?: { targetSessionId?: string; deliveryState?: DeliveryState; messageClass?: MessageClass; limit?: number; offset?: number },
+  env: Env,
+  projectId: string,
+  opts?: {
+    targetSessionId?: string;
+    deliveryState?: DeliveryState;
+    messageClass?: MessageClass;
+    limit?: number;
+    offset?: number;
+  }
 ): Promise<{ messages: AgentMailboxMessage[]; total: number }> {
   const stub = await getStub(env, projectId);
   return stub.listMailboxMessages(opts);
 }
 
 export async function cancelMailboxMessage(
-  env: Env, projectId: string, messageId: string,
+  env: Env,
+  projectId: string,
+  messageId: string
 ): Promise<boolean> {
   const stub = await getStub(env, projectId);
   return stub.cancelMailboxMessage(messageId);
 }
 
 export async function getMailboxStats(
-  env: Env, projectId: string,
+  env: Env,
+  projectId: string
 ): Promise<Record<string, number>> {
   const stub = await getStub(env, projectId);
   return stub.getMailboxStats();
 }
 
+export async function createCheckpointEpisode(
+  env: Env,
+  projectId: string,
+  input: CreateCheckpointEpisodeInput
+): Promise<{ episode: CheckpointEpisode; created: boolean }> {
+  const stub = await getStub(env, projectId);
+  return stub.createCheckpointEpisode(input);
+}
+
+export async function getCheckpointEpisode(
+  env: Env,
+  projectId: string,
+  episodeId: string
+): Promise<CheckpointEpisode | null> {
+  const stub = await getStub(env, projectId);
+  return stub.getCheckpointEpisode(episodeId);
+}
+
+export async function transitionCheckpointEpisode(
+  env: Env,
+  projectId: string,
+  episodeId: string,
+  input: CheckpointEpisodeTransitionInput
+): Promise<CheckpointEpisode | null> {
+  const stub = await getStub(env, projectId);
+  return stub.transitionCheckpointEpisode(episodeId, input);
+}
+
+export async function getDurableExecutionSnapshot(env: Env, projectId: string, sessionId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.getDurableExecutionSnapshot(sessionId);
+}
+
 // ── Mission State & Handoffs ──────────────────────────────────────────────
 
 export async function createMissionStateEntry(
-  env: Env, projectId: string, missionId: string, entryType: string,
-  title: string, content: string | null, sourceTaskId: string | null,
+  env: Env,
+  projectId: string,
+  missionId: string,
+  entryType: string,
+  title: string,
+  content: string | null,
+  sourceTaskId: string | null
 ) {
   const stub = await getStub(env, projectId);
   const limits = resolveMissionStateLimits(env);
@@ -869,7 +1042,10 @@ export async function createMissionStateEntry(
 }
 
 export async function getMissionStateEntries(
-  env: Env, projectId: string, missionId: string, entryType: string | null,
+  env: Env,
+  projectId: string,
+  missionId: string,
+  entryType: string | null
 ) {
   const stub = await getStub(env, projectId);
   return stub.getMissionStateEntries(missionId, entryType);
@@ -881,8 +1057,10 @@ export async function getMissionStateEntry(env: Env, projectId: string, entryId:
 }
 
 export async function updateMissionStateEntry(
-  env: Env, projectId: string, entryId: string,
-  updates: { title?: string; content?: string | null },
+  env: Env,
+  projectId: string,
+  entryId: string,
+  updates: { title?: string; content?: string | null }
 ) {
   const stub = await getStub(env, projectId);
   const limits = resolveMissionStateLimits(env);
@@ -895,12 +1073,30 @@ export async function deleteMissionStateEntry(env: Env, projectId: string, entry
 }
 
 export async function createHandoffPacket(
-  env: Env, projectId: string, missionId: string, fromTaskId: string, toTaskId: string | null,
-  summary: string, facts: unknown[], openQuestions: string[], artifactRefs: unknown[], suggestedActions: string[],
+  env: Env,
+  projectId: string,
+  missionId: string,
+  fromTaskId: string,
+  toTaskId: string | null,
+  summary: string,
+  facts: unknown[],
+  openQuestions: string[],
+  artifactRefs: unknown[],
+  suggestedActions: string[]
 ) {
   const stub = await getStub(env, projectId);
   const limits = resolveHandoffLimits(env);
-  return stub.createHandoffPacket(missionId, fromTaskId, toTaskId, summary, facts, openQuestions, artifactRefs, suggestedActions, limits);
+  return stub.createHandoffPacket(
+    missionId,
+    fromTaskId,
+    toTaskId,
+    summary,
+    facts,
+    openQuestions,
+    artifactRefs,
+    suggestedActions,
+    limits
+  );
 }
 
 export async function getHandoffPackets(env: Env, projectId: string, missionId: string) {
@@ -949,13 +1145,60 @@ export async function createAttentionMarker(
     kind: string;
     source: string;
     sourceNotificationId?: string | null;
+    notificationUserId?: string | null;
     reason?: string | null;
     metadata?: string | null;
     expiresAt?: number | null;
-  },
+    nextEscalationAt?: number | null;
+    maxExpiresAt?: number | null;
+  }
 ): Promise<{ id: string; createdAt: number; expiresAt: number | null }> {
   const stub = await getStub(env, projectId);
   return stub.createAttentionMarker(opts);
+}
+
+export async function linkAttentionNotification(
+  env: Env,
+  projectId: string,
+  markerId: string,
+  notificationUserId: string,
+  notificationId: string
+): Promise<boolean> {
+  const stub = await getStub(env, projectId);
+  return stub.linkAttentionNotification(markerId, notificationUserId, notificationId);
+}
+
+export async function prepareAttentionAnswer(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  markerId: string,
+  answer: string
+) {
+  const stub = await getStub(env, projectId);
+  return stub.prepareAttentionAnswer(sessionId, markerId, answer);
+}
+
+export async function completeAttentionAnswer(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  markerId: string,
+  answer: string
+): Promise<number> {
+  const stub = await getStub(env, projectId);
+  return stub.completeAttentionAnswer(sessionId, markerId, answer);
+}
+
+export async function releaseAttentionAnswer(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  markerId: string,
+  answer: string
+): Promise<number> {
+  const stub = await getStub(env, projectId);
+  return stub.releaseAttentionAnswer(sessionId, markerId, answer);
 }
 
 export async function resolveSessionAttentionMarkers(
@@ -964,7 +1207,7 @@ export async function resolveSessionAttentionMarkers(
   sessionId: string,
   resolvedByMessageId: string | null,
   actorType: string = 'human',
-  reason: string = 'human_message',
+  reason: string = 'human_message'
 ): Promise<number> {
   const stub = await getStub(env, projectId);
   return stub.resolveSessionAttentionMarkers(sessionId, resolvedByMessageId, actorType, reason);

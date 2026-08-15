@@ -196,6 +196,10 @@ export function ProgressRail({
 /** Mobile progress bar shown above the step body on small screens. */
 export function MobileProgress({ current }: Readonly<{ current: OnboardingStepId }>) {
   const currentIndex = stepIndex(current);
+  const currentStep = ONBOARDING_STEPS[currentIndex];
+  if (!currentStep) {
+    throw new Error(`MobileProgress: no onboarding step found for id "${current}"`);
+  }
   const progressPct = Math.round((currentIndex / (ONBOARDING_STEPS.length - 1)) * 100);
   return (
     <div className="grid gap-1.5 lg:hidden">
@@ -203,7 +207,7 @@ export function MobileProgress({ current }: Readonly<{ current: OnboardingStepId
         <span>
           Step {currentIndex + 1} of {ONBOARDING_STEPS.length}
         </span>
-        <span>{ONBOARDING_STEPS[currentIndex]!.label}</span>
+        <span>{currentStep.label}</span>
       </div>
       <div
         className="h-1.5 w-full overflow-hidden rounded-full bg-inset"
@@ -211,7 +215,7 @@ export function MobileProgress({ current }: Readonly<{ current: OnboardingStepId
         aria-valuemin={1}
         aria-valuemax={ONBOARDING_STEPS.length}
         aria-valuenow={currentIndex + 1}
-        aria-label={`Step ${currentIndex + 1} of ${ONBOARDING_STEPS.length}: ${ONBOARDING_STEPS[currentIndex]!.label}`}
+        aria-label={`Step ${currentIndex + 1} of ${ONBOARDING_STEPS.length}: ${currentStep.label}`}
       >
         <div
           className="h-full rounded-full bg-accent transition-all"

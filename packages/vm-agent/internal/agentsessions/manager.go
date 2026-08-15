@@ -251,6 +251,36 @@ func (m *Manager) UpdateAcpSessionID(workspaceID, sessionID, acpSessionID, agent
 	return nil
 }
 
+// PrepareDegradedRestoreFallback clears failed strict-restore state so the
+// existing control-plane routing session can start a fresh ACP session. This is
+// intentionally narrower than Resume: snapshot restore may have marked the
+// session error after LoadSession failed, but the control plane still needs the
+// same session ID to accept the queued wake prompt.
+func (m *Manager) PrepareDegradedRestoreFallback(workspaceID, sessionID string) (Session, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	workspaceMap, ok := m.workspaceSessions[workspaceID]
+	if !ok {
+		return Session{}, fmt.Errorf("workspace not found: %s", workspaceID)
+	}
+
+	session, ok := workspaceMap[sessionID]
+	if !ok {
+		return Session{}, fmt.Errorf("session not found: %s", sessionID)
+	}
+
+	session.Status = StatusRunning
+	session.AgentType = ""
+	session.AcpSessionID = ""
+	session.Error = ""
+	session.SuspendedAt = nil
+	session.StoppedAt = nil
+	session.UpdatedAt = time.Now().UTC()
+	workspaceMap[sessionID] = session
+	return session, nil
+}
+
 func (m *Manager) MarkError(workspaceID, sessionID, agentType, message string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

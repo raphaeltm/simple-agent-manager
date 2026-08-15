@@ -9,6 +9,7 @@ import type {
   AgentMailboxMessage,
   DeliveryState,
   MessageClass,
+  PromptDeliverySource,
   SenderType,
 } from '@simple-agent-manager/shared';
 import {
@@ -26,6 +27,7 @@ const log = createModuleLogger('mailbox');
 // ─── Core operations ───────────────────────────────────────────────────────
 
 export interface EnqueueOptions {
+  id?: string;
   targetSessionId: string;
   sourceTaskId: string | null;
   senderType: SenderType;
@@ -36,29 +38,35 @@ export interface EnqueueOptions {
   ackTimeoutMs?: number | null;
   ttlMs?: number | null;
   maxMessages?: number;
+  sourceKind?: PromptDeliverySource;
+  promptMessageId?: string;
+  now?: number;
+  ackRequired?: boolean;
+  /** Persisted ownership fence separating the durable engine from legacy mailbox sweeps. */
+  durableDelivery?: boolean;
 }
 
 /**
  * Insert a new message into the mailbox with delivery_state='queued'.
  * For 'notify' class, ack is not required. For durable classes, ack is required.
  */
-export function enqueueMessage(
-  sql: SqlStorage,
-  opts: EnqueueOptions,
-): AgentMailboxMessage {
-  const id = ulid();
-  const now = Date.now();
+export function enqueueMessage(sql: SqlStorage, opts: EnqueueOptions): AgentMailboxMessage {
+  const id = opts.id ?? ulid();
+  const now = opts.now ?? Date.now();
   const isDurable = (DURABLE_MESSAGE_CLASSES as readonly string[]).includes(opts.messageClass);
-  const ackRequired = isDurable ? 1 : 0;
-  const ttlMs = typeof opts.ttlMs === 'number' && opts.ttlMs > 0
-    ? opts.ttlMs
-    : MAILBOX_DEFAULTS.TTL_MS;
+  const ackRequired =
+    opts.ackRequired === undefined ? (isDurable ? 1 : 0) : opts.ackRequired ? 1 : 0;
+  const ttlMs =
+    typeof opts.ttlMs === 'number' && opts.ttlMs > 0 ? opts.ttlMs : MAILBOX_DEFAULTS.TTL_MS;
   const expiresAt = now + ttlMs;
 
   // Enforce per-project message cap
   if (opts.maxMessages) {
     const [countRow] = sql
-      .exec('SELECT COUNT(*) as cnt FROM session_inbox WHERE delivery_state NOT IN (?, ?)', 'acked', 'expired')
+      .exec(
+        `SELECT COUNT(*) as cnt FROM session_inbox
+         WHERE delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`
+      )
       .toArray();
     const count = (countRow as { cnt: number })?.cnt ?? 0;
     if (count >= opts.maxMessages) {
@@ -71,8 +79,9 @@ export function enqueueMessage(
       (id, target_session_id, source_task_id, message_type, content, priority,
        created_at, delivered_at, message_class, delivery_state, sender_type,
        sender_id, ack_required, acked_at, ack_timeout_ms, expires_at,
-       delivery_attempts, last_delivery_at, metadata)
-    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 0, NULL, ?)`,
+       delivery_attempts, last_delivery_at, metadata, source_kind,
+       prompt_message_id, next_attempt_at, durable_delivery)
+    VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 0, NULL, ?, ?, ?, ?, ?)`,
     id,
     opts.targetSessionId,
     opts.sourceTaskId,
@@ -88,6 +97,10 @@ export function enqueueMessage(
     opts.ackTimeoutMs ?? null,
     expiresAt,
     opts.metadata ? JSON.stringify(opts.metadata) : null,
+    opts.sourceKind ?? 'agent_mailbox',
+    opts.promptMessageId ?? id,
+    now,
+    opts.durableDelivery ? 1 : 0
   );
 
   log.info('mailbox.enqueued', {
@@ -115,6 +128,20 @@ export function enqueueMessage(
     createdAt: now,
     deliveredAt: null,
     ackedAt: null,
+    sourceKind: opts.sourceKind ?? 'agent_mailbox',
+    promptMessageId: opts.promptMessageId ?? id,
+    nextAttemptAt: now,
+    lastError: null,
+    terminalReason: null,
+    attemptId: null,
+    attemptStartedAt: null,
+    runtimeIdentity: null,
+    receiptState: null,
+    receiptRuntimeIdentity: null,
+    receiptCheckedAt: null,
+    acceptedAt: null,
+    adapterProtocolVersion: null,
+    receiptSupported: null,
   };
 }
 
@@ -124,13 +151,13 @@ export function enqueueMessage(
 export function getPendingMessages(
   sql: SqlStorage,
   targetSessionId: string,
-  limit = 50,
+  limit = 50
 ): AgentMailboxMessage[] {
   const rows = sql
     .exec(
       `SELECT * FROM session_inbox
        WHERE target_session_id = ?
-         AND delivery_state IN ('queued', 'delivered')
+         AND delivery_state IN ('queued', 'retry_wait', 'delivered')
        ORDER BY
          CASE message_class
            WHEN 'shutdown_with_final_prompt' THEN 5
@@ -143,7 +170,7 @@ export function getPendingMessages(
          created_at ASC
        LIMIT ?`,
       targetSessionId,
-      limit,
+      limit
     )
     .toArray();
   return rows.map(parseMailboxMessageRow);
@@ -152,10 +179,7 @@ export function getPendingMessages(
 /**
  * Get a single message by ID.
  */
-export function getMessage(
-  sql: SqlStorage,
-  messageId: string,
-): AgentMailboxMessage | null {
+export function getMessage(sql: SqlStorage, messageId: string): AgentMailboxMessage | null {
   const [row] = sql.exec('SELECT * FROM session_inbox WHERE id = ?', messageId).toArray();
   return row ? parseMailboxMessageRow(row) : null;
 }
@@ -163,11 +187,7 @@ export function getMessage(
 /**
  * Transition a message's delivery state. Validates the transition is legal.
  */
-function transitionState(
-  sql: SqlStorage,
-  messageId: string,
-  toState: DeliveryState,
-): boolean {
+function transitionState(sql: SqlStorage, messageId: string, toState: DeliveryState): boolean {
   const msg = getMessage(sql, messageId);
   if (!msg) return false;
 
@@ -190,21 +210,17 @@ function transitionState(
       now,
       msg.deliveryAttempts + 1,
       now,
-      messageId,
+      messageId
     );
   } else if (toState === 'acked') {
     sql.exec(
       `UPDATE session_inbox SET delivery_state = ?, acked_at = ? WHERE id = ?`,
       toState,
       now,
-      messageId,
+      messageId
     );
   } else {
-    sql.exec(
-      `UPDATE session_inbox SET delivery_state = ? WHERE id = ?`,
-      toState,
-      messageId,
-    );
+    sql.exec(`UPDATE session_inbox SET delivery_state = ? WHERE id = ?`, toState, messageId);
   }
 
   return true;
@@ -234,10 +250,7 @@ export function expireMessage(sql: SqlStorage, messageId: string): boolean {
 /**
  * Expire messages that have exceeded their TTL or max delivery attempts.
  */
-export function expireStaleMessages(
-  sql: SqlStorage,
-  maxAttempts: number,
-): number {
+export function expireStaleMessages(sql: SqlStorage, maxAttempts: number): number {
   const now = Date.now();
   let expired = 0;
 
@@ -247,8 +260,9 @@ export function expireStaleMessages(
       `SELECT id FROM session_inbox
        WHERE expires_at IS NOT NULL
          AND expires_at <= ?
-         AND delivery_state NOT IN ('acked', 'expired')`,
-      now,
+         AND durable_delivery = 0
+         AND delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`,
+      now
     )
     .toArray();
 
@@ -262,8 +276,9 @@ export function expireStaleMessages(
     .exec(
       `SELECT id FROM session_inbox
        WHERE delivery_attempts >= ?
-         AND delivery_state NOT IN ('acked', 'expired')`,
-      maxAttempts,
+         AND durable_delivery = 0
+         AND delivery_state NOT IN ('acked', 'failed', 'ambiguous', 'expired')`,
+      maxAttempts
     )
     .toArray();
 
@@ -284,7 +299,7 @@ export function expireStaleMessages(
  */
 export function getUnackedMessages(
   sql: SqlStorage,
-  defaultAckTimeoutMs: number,
+  defaultAckTimeoutMs: number
 ): AgentMailboxMessage[] {
   const now = Date.now();
   const rows = sql
@@ -298,7 +313,7 @@ export function getUnackedMessages(
          )`,
       now,
       defaultAckTimeoutMs,
-      now,
+      now
     )
     .toArray();
   return rows.map(parseMailboxMessageRow);
@@ -316,7 +331,7 @@ export function requeueForRedelivery(sql: SqlStorage, messageId: string): boolea
       `UPDATE session_inbox
        SET delivered_at = NULL, delivery_attempts = delivery_attempts + 1
        WHERE id = ?`,
-      messageId,
+      messageId
     );
   }
   return requeued;
@@ -333,7 +348,7 @@ export function listMessages(
     messageClass?: MessageClass;
     limit?: number;
     offset?: number;
-  } = {},
+  } = {}
 ): { messages: AgentMailboxMessage[]; total: number } {
   const limit = opts.limit ?? 50;
   const offset = opts.offset ?? 0;
@@ -356,7 +371,9 @@ export function listMessages(
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
-  const [countRow] = sql.exec(`SELECT COUNT(*) as cnt FROM session_inbox ${where}`, ...params).toArray();
+  const [countRow] = sql
+    .exec(`SELECT COUNT(*) as cnt FROM session_inbox ${where}`, ...params)
+    .toArray();
   const total = (countRow as { cnt: number })?.cnt ?? 0;
 
   const rows = sql
@@ -364,7 +381,7 @@ export function listMessages(
       `SELECT * FROM session_inbox ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
       ...params,
       limit,
-      offset,
+      offset
     )
     .toArray();
 
@@ -390,15 +407,17 @@ export function cancelMessage(sql: SqlStorage, messageId: string): boolean {
  */
 export function getMailboxStats(sql: SqlStorage): Record<string, number> {
   const rows = sql
-    .exec(
-      `SELECT delivery_state, COUNT(*) as cnt FROM session_inbox GROUP BY delivery_state`,
-    )
+    .exec(`SELECT delivery_state, COUNT(*) as cnt FROM session_inbox GROUP BY delivery_state`)
     .toArray();
 
   const stats: Record<string, number> = {
     queued: 0,
     delivered: 0,
     acked: 0,
+    delivering: 0,
+    retry_wait: 0,
+    failed: 0,
+    ambiguous: 0,
     expired: 0,
     total: 0,
   };
@@ -421,7 +440,7 @@ export function getMailboxStats(sql: SqlStorage): Record<string, number> {
 export function runDeliverySweep(
   sql: SqlStorage,
   defaultAckTimeoutMs: number,
-  maxAttempts: number,
+  maxAttempts: number
 ): { expired: number; requeued: number } {
   // 1. Expire stale messages (TTL exceeded or max attempts reached)
   const expired = expireStaleMessages(sql, maxAttempts);
@@ -444,15 +463,12 @@ export function runDeliverySweep(
  * Compute the next alarm time for the mailbox delivery sweep.
  * Returns null if no messages need attention.
  */
-export function computeMailboxAlarmTime(
-  sql: SqlStorage,
-  pollIntervalMs: number,
-): number | null {
+export function computeMailboxAlarmTime(sql: SqlStorage, pollIntervalMs: number): number | null {
   // Check if there are any queued or delivered messages that need attention
   const [row] = sql
     .exec(
       `SELECT COUNT(*) as cnt FROM session_inbox
-       WHERE delivery_state IN ('queued', 'delivered')`,
+       WHERE delivery_state IN ('queued', 'delivered')`
     )
     .toArray();
 

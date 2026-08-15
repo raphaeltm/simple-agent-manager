@@ -137,7 +137,7 @@ export class TaskRunner extends DurableObject<Env> {
    */
   async advanceWorkspaceReady(
     status: 'running' | 'recovery' | 'error',
-    errorMessage: string | null,
+    errorMessage: string | null
   ): Promise<void> {
     const state = await this.getState();
     if (!state || state.completed) return;
@@ -181,7 +181,9 @@ export class TaskRunner extends DurableObject<Env> {
 
   private async ensureAlarm(state: TaskRunnerState): Promise<void> {
     const isTerminal =
-      state.completed || state.currentStep === 'running' || state.currentStep === 'awaiting_followup';
+      state.completed ||
+      state.currentStep === 'running' ||
+      state.currentStep === 'awaiting_followup';
     if (!isTerminal && (await this.ctx.storage.getAlarm()) === null) {
       await this.ctx.storage.setAlarm(Date.now());
     }
@@ -231,7 +233,10 @@ export class TaskRunner extends DurableObject<Env> {
           // Terminal DO steps — agent manages from here via callbacks
           return;
         default:
-          log.error('task_runner_do.unknown_step', { taskId: state.taskId, step: state.currentStep });
+          log.error('task_runner_do.unknown_step', {
+            taskId: state.taskId,
+            step: state.currentStep,
+          });
           await failTask(state, `Unknown execution step: ${state.currentStep}`, rc);
           return;
       }
@@ -254,7 +259,7 @@ export class TaskRunner extends DurableObject<Env> {
         const backoff = computeBackoffMs(
           state.retryCount,
           this.getRetryBaseDelayMs(),
-          this.getRetryMaxDelayMs(),
+          this.getRetryMaxDelayMs()
         );
         await this.ctx.storage.setAlarm(Date.now() + backoff);
 
@@ -309,7 +314,9 @@ export class TaskRunner extends DurableObject<Env> {
         }
         await this.env.DATABASE.prepare(
           `UPDATE tasks SET execution_step = ?, updated_at = ? WHERE id = ?`
-        ).bind(step, new Date().toISOString(), taskId).run();
+        )
+          .bind(step, new Date().toISOString(), taskId)
+          .run();
       },
     };
   }
@@ -333,6 +340,7 @@ export class TaskRunner extends DurableObject<Env> {
     raw.workspaceDispatchLastAttemptAt ??= null;
     raw.workspaceDispatchLastError ??= null;
     raw.workspaceDispatchAckedAt ??= null;
+    raw.config.resumeSnapshotChatSessionId ??= null;
     raw.lastD1Step ??= null;
     return raw;
   }
@@ -342,86 +350,83 @@ export class TaskRunner extends DurableObject<Env> {
   // =========================================================================
 
   private getMaxRetries(): number {
-    return parseEnvInt(
-      this.env.TASK_RUNNER_STEP_MAX_RETRIES,
-      DEFAULT_TASK_RUNNER_STEP_MAX_RETRIES,
-    );
+    return parseEnvInt(this.env.TASK_RUNNER_STEP_MAX_RETRIES, DEFAULT_TASK_RUNNER_STEP_MAX_RETRIES);
   }
 
   private getRetryBaseDelayMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_RETRY_BASE_DELAY_MS,
-      DEFAULT_TASK_RUNNER_RETRY_BASE_DELAY_MS,
+      DEFAULT_TASK_RUNNER_RETRY_BASE_DELAY_MS
     );
   }
 
   private getRetryMaxDelayMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_RETRY_MAX_DELAY_MS,
-      DEFAULT_TASK_RUNNER_RETRY_MAX_DELAY_MS,
+      DEFAULT_TASK_RUNNER_RETRY_MAX_DELAY_MS
     );
   }
 
   private getAgentPollIntervalMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_AGENT_POLL_INTERVAL_MS,
-      DEFAULT_TASK_RUNNER_AGENT_POLL_INTERVAL_MS,
+      DEFAULT_TASK_RUNNER_AGENT_POLL_INTERVAL_MS
     );
   }
 
   private getAgentReadyTimeoutMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_AGENT_READY_TIMEOUT_MS,
-      DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS,
+      DEFAULT_TASK_RUNNER_AGENT_READY_TIMEOUT_MS
     );
   }
 
   private getWorkspaceDispatchTimeoutMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS,
-      DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS,
+      DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_TIMEOUT_MS
     );
   }
 
   private getWorkspaceDispatchBaseDelayMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS,
-      DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS,
+      DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_BASE_DELAY_MS
     );
   }
 
   private getWorkspaceDispatchMaxDelayMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS,
-      DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS,
+      DEFAULT_TASK_RUNNER_WORKSPACE_DISPATCH_MAX_DELAY_MS
     );
   }
 
   private getWorkspaceReadyTimeoutMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS,
-      DEFAULT_TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS,
+      DEFAULT_TASK_RUNNER_WORKSPACE_READY_TIMEOUT_MS
     );
   }
 
   private getWorkspaceReadyPollIntervalMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS,
-      DEFAULT_TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS,
+      DEFAULT_TASK_RUNNER_WORKSPACE_READY_POLL_INTERVAL_MS
     );
   }
 
   private getProvisionPollIntervalMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_PROVISION_POLL_INTERVAL_MS,
-      DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS,
+      DEFAULT_TASK_RUNNER_PROVISION_POLL_INTERVAL_MS
     );
   }
 
   private getProvisionTimeoutMs(): number {
     return parseEnvInt(
       this.env.TASK_RUNNER_PROVISION_TIMEOUT_MS,
-      DEFAULT_TASK_RUNNER_PROVISION_TIMEOUT_MS,
+      DEFAULT_TASK_RUNNER_PROVISION_TIMEOUT_MS
     );
   }
 }

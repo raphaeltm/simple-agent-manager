@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react';
+import { useCallback, useId, useState } from 'react';
 import { useNavigate } from 'react-router';
 
 import { useGlobalAudio } from '../contexts/GlobalAudioContext';
@@ -6,7 +6,8 @@ import { useIsMobile } from '../hooks/useIsMobile';
 
 const SKIP_SECONDS = 15;
 const SPEED_OPTIONS = [0.5, 0.75, 1, 1.25, 1.5, 2];
-const FOCUS_RING = 'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring,#34d399)]';
+const FOCUS_RING =
+  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring,#34d399)]';
 
 /** Format seconds as m:ss or h:mm:ss. */
 function formatTime(seconds: number): string {
@@ -32,6 +33,7 @@ export function GlobalAudioPlayer() {
   const isMobile = useIsMobile();
   const navigate = useNavigate();
   const [expanded, setExpanded] = useState(false);
+  const speedId = useId();
 
   const isVisible = audio.state !== 'idle';
   const isLoading = audio.state === 'loading';
@@ -42,7 +44,7 @@ export function GlobalAudioPlayer() {
     (e: React.ChangeEvent<HTMLInputElement>) => {
       audio.seekTo(parseFloat(e.target.value));
     },
-    [audio],
+    [audio]
   );
 
   const handleSkipBack = useCallback(() => audio.skipBackward(SKIP_SECONDS), [audio]);
@@ -52,7 +54,7 @@ export function GlobalAudioPlayer() {
     (e: React.ChangeEvent<HTMLSelectElement>) => {
       audio.setPlaybackRate(parseFloat(e.target.value));
     },
-    [audio],
+    [audio]
   );
 
   const handleGoToSource = useCallback(() => {
@@ -121,14 +123,17 @@ export function GlobalAudioPlayer() {
 
       {/* Screen reader state announcements */}
       <span className="sr-only" aria-live="polite" aria-atomic="true">
-        {isLoading ? 'Loading audio' : isPlaying ? 'Now playing' : audio.state === 'paused' ? 'Paused' : ''}
+        {isLoading
+          ? 'Loading audio'
+          : isPlaying
+            ? 'Now playing'
+            : audio.state === 'paused'
+              ? 'Paused'
+              : ''}
       </span>
 
       {/* Controls row */}
-      <div
-        className="flex items-center gap-1 px-2"
-        style={{ height: controlsHeight }}
-      >
+      <div className="flex items-center gap-1 px-2" style={{ height: controlsHeight }}>
         {/* Skip back */}
         <button
           type="button"
@@ -138,7 +143,17 @@ export function GlobalAudioPlayer() {
           style={{ color: 'var(--sam-color-fg-muted)' }}
           aria-label={`Skip back ${SKIP_SECONDS} seconds`}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
             <polygon points="11 19 2 12 11 5 11 19" />
             <polygon points="22 19 13 12 22 5 22 19" />
           </svg>
@@ -157,16 +172,39 @@ export function GlobalAudioPlayer() {
           aria-label={isLoading ? 'Cancel audio generation' : isPlaying ? 'Pause' : 'Play'}
         >
           {isLoading ? (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" className="animate-spin motion-reduce:animate-none">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              aria-hidden="true"
+              className="animate-spin motion-reduce:animate-none"
+            >
               <circle cx="12" cy="12" r="10" strokeDasharray="31.4 31.4" strokeLinecap="round" />
             </svg>
           ) : isPlaying ? (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              stroke="none"
+              aria-hidden="true"
+            >
               <rect x="6" y="4" width="4" height="16" rx="1" />
               <rect x="14" y="4" width="4" height="16" rx="1" />
             </svg>
           ) : (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="none" aria-hidden="true">
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+              stroke="none"
+              aria-hidden="true"
+            >
               <polygon points="5 3 19 12 5 21 5 3" />
             </svg>
           )}
@@ -181,7 +219,17 @@ export function GlobalAudioPlayer() {
           style={{ color: 'var(--sam-color-fg-muted)' }}
           aria-label={`Skip forward ${SKIP_SECONDS} seconds`}
         >
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg
+            width="16"
+            height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
             <polygon points="13 19 22 12 13 5 13 19" />
             <polygon points="2 19 11 12 2 5 2 19" />
           </svg>
@@ -213,7 +261,18 @@ export function GlobalAudioPlayer() {
           >
             <span className="truncate">{audio.sourceLabel}</span>
             {audio.sourceHref && (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
+              <svg
+                width="12"
+                height="12"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+                className="shrink-0"
+              >
                 <polyline points="9 18 15 12 9 6" />
               </svg>
             )}
@@ -224,7 +283,7 @@ export function GlobalAudioPlayer() {
         {!isMobile && (
           <button
             type="button"
-            onClick={() => setExpanded(prev => !prev)}
+            onClick={() => setExpanded((prev) => !prev)}
             className={`min-w-[44px] min-h-[44px] flex items-center justify-center rounded transition-colors ${FOCUS_RING}`}
             style={{ color: 'var(--sam-color-fg-muted)' }}
             aria-label={expanded ? 'Collapse player' : 'Expand player'}
@@ -240,7 +299,10 @@ export function GlobalAudioPlayer() {
               strokeLinecap="round"
               strokeLinejoin="round"
               aria-hidden="true"
-              style={{ transform: expanded ? 'rotate(180deg)' : undefined, transition: 'transform 200ms' }}
+              style={{
+                transform: expanded ? 'rotate(180deg)' : undefined,
+                transition: 'transform 200ms',
+              }}
             >
               <polyline points="18 15 12 9 6 15" />
             </svg>
@@ -255,7 +317,17 @@ export function GlobalAudioPlayer() {
           style={{ color: 'var(--sam-color-fg-muted)' }}
           aria-label="Close player"
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+          <svg
+            width="12"
+            height="12"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
@@ -266,7 +338,11 @@ export function GlobalAudioPlayer() {
       {!isMobile && expanded && (
         <div
           className="flex items-center gap-3 px-3 pb-1"
-          style={{ borderTopWidth: '1px', borderTopStyle: 'solid', borderTopColor: 'var(--sam-color-border-default)' }}
+          style={{
+            borderTopWidth: '1px',
+            borderTopStyle: 'solid',
+            borderTopColor: 'var(--sam-color-border-default)',
+          }}
         >
           {audio.sourceText && (
             <p
@@ -278,10 +354,15 @@ export function GlobalAudioPlayer() {
             </p>
           )}
           <div className="flex items-center gap-1.5 shrink-0">
-            <label className="text-[10px]" style={{ color: 'var(--sam-color-fg-muted)' }}>
+            <label
+              htmlFor={speedId}
+              className="text-[10px]"
+              style={{ color: 'var(--sam-color-fg-muted)' }}
+            >
               Speed
             </label>
             <select
+              id={speedId}
               value={audio.playbackRate}
               onChange={handleSpeedChange}
               className="text-[10px] rounded px-1 py-0.5 cursor-pointer"
@@ -295,7 +376,9 @@ export function GlobalAudioPlayer() {
               aria-label="Playback speed"
             >
               {SPEED_OPTIONS.map((speed) => (
-                <option key={speed} value={speed}>{speed}x</option>
+                <option key={speed} value={speed}>
+                  {speed}x
+                </option>
               ))}
             </select>
           </div>

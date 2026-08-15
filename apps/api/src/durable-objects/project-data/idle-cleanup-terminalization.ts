@@ -45,23 +45,110 @@ export async function listReporterScopedTaskCandidates(
 ): Promise<ReporterScopedTaskCandidates> {
   const result = await db
     .prepare(
-      `SELECT id
-     FROM tasks
-     WHERE project_id = ? AND workspace_id = ? AND chat_session_id = ?
-       AND status IN ('in_progress', 'delegated', 'awaiting_followup')
-     ORDER BY created_at ASC, id ASC
+      `SELECT t.id
+     FROM tasks t
+     LEFT JOIN workspaces w
+       ON w.id = t.workspace_id AND w.project_id = t.project_id
+     WHERE t.project_id = ? AND t.workspace_id = ?
+       AND t.status IN ('in_progress', 'delegated', 'awaiting_followup')
+       AND (
+         t.chat_session_id = ?
+         OR (
+           t.chat_session_id IS NULL
+           AND w.chat_session_id = ?
+           AND NOT EXISTS (
+             SELECT 1 FROM tasks same_workspace
+             WHERE same_workspace.id != t.id
+               AND same_workspace.project_id = t.project_id
+               AND same_workspace.workspace_id = t.workspace_id
+               AND same_workspace.chat_session_id IS NULL
+               AND same_workspace.status IN ('in_progress', 'delegated', 'awaiting_followup')
+           )
+           AND NOT EXISTS (
+             SELECT 1 FROM tasks existing_session_owner
+             WHERE existing_session_owner.id != t.id
+               AND existing_session_owner.chat_session_id = ?
+           )
+         )
+       )
+     ORDER BY t.created_at ASC, t.id ASC
      LIMIT ?`
     )
-    .bind(reporter.projectId, reporter.workspaceId, reporter.sessionId, limit + 1)
+    .bind(
+      reporter.projectId,
+      reporter.workspaceId,
+      reporter.sessionId,
+      reporter.sessionId,
+      reporter.sessionId,
+      limit + 1
+    )
     .all<{ id: string }>();
   const rows = result.results ?? [];
   return { tasks: rows.slice(0, limit), overflow: rows.length > limit };
 }
 
-function scopeMismatch(task: IdleTaskRow, reporter: IdleTaskReporter): string | null {
+async function scopeMismatch(
+  env: Env,
+  task: IdleTaskRow,
+  reporter: IdleTaskReporter
+): Promise<string | null> {
   if (task.project_id !== reporter.projectId) return 'project_id';
   if (task.workspace_id !== reporter.workspaceId) return 'workspace_id';
-  if (task.chat_session_id !== reporter.sessionId) return 'chat_session_id';
+  if (task.chat_session_id === reporter.sessionId) return null;
+  if (task.chat_session_id !== null) return 'chat_session_id';
+
+  const workspace = await env.DATABASE.prepare(
+    `SELECT chat_session_id
+     FROM workspaces
+     WHERE id = ? AND project_id = ?
+     LIMIT 1`
+  )
+    .bind(reporter.workspaceId, reporter.projectId)
+    .first<{ chat_session_id: string | null }>();
+  if (workspace?.chat_session_id !== reporter.sessionId) return 'chat_session_id';
+
+  try {
+    const updated = await env.DATABASE.prepare(
+      `UPDATE tasks
+       SET chat_session_id = ?, updated_at = ?
+       WHERE id = ? AND project_id = ? AND workspace_id = ? AND chat_session_id IS NULL`
+    )
+      .bind(
+        reporter.sessionId,
+        new Date().toISOString(),
+        task.id,
+        reporter.projectId,
+        reporter.workspaceId
+      )
+      .run();
+
+    if (!updated.meta.changes) {
+      const reread = await env.DATABASE.prepare(
+        `SELECT chat_session_id FROM tasks WHERE id = ? LIMIT 1`
+      )
+        .bind(task.id)
+        .first<{ chat_session_id: string | null }>();
+      if (reread?.chat_session_id !== reporter.sessionId) return 'chat_session_id';
+    }
+    task.chat_session_id = reporter.sessionId;
+    log.info('legacy_task_session_link_backfilled', {
+      taskId: task.id,
+      projectId: reporter.projectId,
+      workspaceId: reporter.workspaceId,
+      sessionId: reporter.sessionId,
+      sweep: reporter.sweep,
+    });
+  } catch (err) {
+    log.warn('legacy_task_session_link_backfill_failed', {
+      taskId: task.id,
+      projectId: reporter.projectId,
+      workspaceId: reporter.workspaceId,
+      sessionId: reporter.sessionId,
+      action: 'rejected',
+      ...serializeError(err),
+    });
+    return 'chat_session_id';
+  }
   return null;
 }
 
@@ -88,7 +175,7 @@ export async function terminalizeIdleTaskInD1(
     return { outcome: 'not_found', taskId: reporter.taskId, liveness: null, errorMessage: null };
   }
 
-  const mismatch = scopeMismatch(task, reporter);
+  const mismatch = await scopeMismatch(env, task, reporter);
   if (mismatch) {
     log.warn('scope_rejected', {
       taskId: task.id,

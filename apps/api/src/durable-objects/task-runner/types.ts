@@ -103,6 +103,8 @@ export interface TaskRunConfig {
   resolvedReservation?: ResolvedResourceReservation | null;
   /** Where the VM size came from in the precedence chain. */
   vmSizeSource?: ResourceRequirementsSource | 'explicit' | null;
+  /** Existing sleeping chat whose R2 snapshot must be strictly restored instead of starting fresh. */
+  resumeSnapshotChatSessionId?: string | null;
 }
 
 export interface TaskRunnerState {

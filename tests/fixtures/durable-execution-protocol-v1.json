@@ -1,0 +1,77 @@
+{
+  "capabilities": {
+    "protocolVersion": 1,
+    "runtimeIdentity": "runtime-vm-01",
+    "promptReceipts": {
+      "supported": true,
+      "lookup": true,
+      "states": ["accepted", "in_flight", "completed", "ambiguous"]
+    },
+    "checkpointRollover": {
+      "supported": true,
+      "automatic": false,
+      "states": ["accepted", "in_progress", "completed", "superseded", "failed"],
+      "defaultGraceMs": 30000,
+      "maxGraceMs": 120000,
+      "operationTimeoutMs": 120000
+    }
+  },
+  "newPrompt": {
+    "status": "accepted",
+    "sessionId": "session-01",
+    "receipt": {
+      "deliveryId": "delivery-01",
+      "state": "in_flight",
+      "runtimeIdentity": "runtime-vm-01",
+      "acceptedAt": 1786312800123,
+      "completedAt": null
+    }
+  },
+  "duplicatePrompt": {
+    "status": "duplicate",
+    "sessionId": "session-01",
+    "receipt": {
+      "deliveryId": "delivery-01",
+      "state": "in_flight",
+      "runtimeIdentity": "runtime-vm-01",
+      "acceptedAt": 1786312800123,
+      "completedAt": null
+    }
+  },
+  "notReadyPrompt": {
+    "status": "not_ready",
+    "sessionId": "session-01",
+    "receipt": {
+      "deliveryId": "delivery-01",
+      "state": "accepted",
+      "runtimeIdentity": "runtime-vm-01",
+      "acceptedAt": 1786312800123,
+      "completedAt": null
+    }
+  },
+  "conflictPrompt": {
+    "status": "conflict",
+    "sessionId": "session-01",
+    "receipt": {
+      "deliveryId": "delivery-01",
+      "state": "in_flight",
+      "runtimeIdentity": "runtime-vm-01",
+      "acceptedAt": 1786312800123,
+      "completedAt": null
+    }
+  },
+  "ambiguousReceipt": {
+    "deliveryId": "delivery-01",
+    "state": "ambiguous",
+    "runtimeIdentity": "runtime-vm-01",
+    "acceptedAt": 1786312800123,
+    "completedAt": 1786312801123
+  },
+  "notFoundReceipt": {
+    "deliveryId": "delivery-01",
+    "state": "not_found",
+    "runtimeIdentity": "runtime-vm-01",
+    "acceptedAt": null,
+    "completedAt": null
+  }
+}

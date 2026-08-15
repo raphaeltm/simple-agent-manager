@@ -5,10 +5,7 @@
  * agents about the SAM platform and instructs them to prepare the repository
  * for SAM-aware agent workflows.
  */
-import {
-  type JsonRpcResponse,
-  jsonRpcSuccess,
-} from './_helpers';
+import { type JsonRpcResponse, jsonRpcSuccess } from './_helpers';
 
 // ─── SAM Environment Briefing content ────────────────────────────────────────
 
@@ -62,7 +59,7 @@ This connects to the SAM control plane. It's how you interact with tasks, projec
 - \`update_task_status\` — Report progress at significant milestones. The human sees these in the SAM dashboard in real time. Use them liberally — a human monitoring a long-running task has no other visibility into what you're doing.
 - \`complete_task\` — Call when ALL work is done and pushed. Include a clear summary. Only used in task mode — in conversation mode, the human ends the session.
 - \`dispatch_task\` — Spawn a new task for another agent. Use this when you discover work that's adjacent but outside your current scope. Describe the task clearly — the receiving agent gets only what you write here.
-- \`request_human_input\` — When you're genuinely blocked and need a human decision. Provide rich context and, when possible, a set of options to choose from. The human gets a push notification.
+- \`request_human_input\` — When you're genuinely blocked and need a human decision. Provide rich context and, when possible, a set of options to choose from. SAM records the request so the human can answer it.
 
 **Knowledge & History:**
 - \`search_tasks\` / \`get_task_details\` — Find and inspect other tasks in the project. Useful for understanding what work has been done or is in progress.
@@ -187,14 +184,13 @@ After making all changes:
 
 List all files you created or modified for the human to review.`;
 
-export function handleGetRepoSetupGuide(
-  requestId: string | number | null,
-): JsonRpcResponse {
+export function handleGetRepoSetupGuide(requestId: string | number | null): JsonRpcResponse {
   return jsonRpcSuccess(requestId, {
     content: [
       {
         type: 'text',
-        text: 'Follow the instructions below to prepare this repository for SAM-aware agent workflows.\n\n' +
+        text:
+          'Follow the instructions below to prepare this repository for SAM-aware agent workflows.\n\n' +
           SAM_ENVIRONMENT_BRIEFING,
       },
     ],

@@ -93,16 +93,17 @@ describe('validatePlatformIntegrationInput — GitLab client credentials', () =>
   });
 });
 
-
 afterEach(() => {
   vi.unstubAllGlobals();
 });
 
 describe('validatePlatformIntegrationInput — Google infrastructure OAuth', () => {
   it('rejects half-configured and ambiguous removal payloads', async () => {
-    await expect(validatePlatformIntegrationInput(env, {
-      googleInfrastructure: { clientId: 'infra-client-id' },
-    })).resolves.toMatchObject({
+    await expect(
+      validatePlatformIntegrationInput(env, {
+        googleInfrastructure: { clientId: 'infra-client-id' },
+      })
+    ).resolves.toMatchObject({
       ok: false,
       errors: ['Google infrastructure OAuth client id and secret must be provided together'],
     });
@@ -116,26 +117,86 @@ describe('validatePlatformIntegrationInput — Google infrastructure OAuth', () 
     });
     expect(removal.ok).toBe(false);
     expect(removal.errors).toContain(
-      'Google infrastructure OAuth removal cannot include replacement values',
+      'Google infrastructure OAuth removal cannot include replacement values'
     );
   });
 
   it('validates the pair against the static infrastructure callback', async () => {
-    const fetchMock = vi.fn().mockResolvedValue(new Response(
-      JSON.stringify({ error: 'invalid_grant' }),
-      { status: 400, headers: { 'Content-Type': 'application/json' } },
-    ));
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'invalid_grant' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
     vi.stubGlobal('fetch', fetchMock);
 
-    await expect(validatePlatformIntegrationInput(env, {
-      googleInfrastructure: {
-        clientId: 'infra-client-id',
-        clientSecret: 'infra-client-secret',
-      },
-    })).resolves.toEqual({ ok: true, errors: [] });
+    await expect(
+      validatePlatformIntegrationInput(env, {
+        googleInfrastructure: {
+          clientId: 'infra-client-id',
+          clientSecret: 'infra-client-secret',
+        },
+      })
+    ).resolves.toEqual({ ok: true, errors: [] });
 
     const [, init] = fetchMock.mock.calls[0] as [string, RequestInit];
     const body = init.body as URLSearchParams;
     expect(body.get('redirect_uri')).toBe('https://api.example.com/auth/google/callback');
+  });
+});
+
+describe('validatePlatformIntegrationInput — OAuth ping error-probe resilience', () => {
+  it('does not crash and reports no rejection when GitHub returns a non-JSON error body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('<html>rate limited</html>', {
+        status: 429,
+        headers: { 'Content-Type': 'text/html' },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      validatePlatformIntegrationInput(env, {
+        github: { clientId: 'github-client-id', clientSecret: 'github-client-secret' },
+      })
+    ).resolves.toEqual({ ok: true, errors: [] });
+  });
+
+  it('does not crash and reports no rejection when Google returns a JSON body shaped as an array', async () => {
+    // Valid JSON, but not the { error?: string } object shape the probe
+    // reads — the old blind cast tolerated it silently; the schema-validated
+    // probe must degrade to the same non-error outcome, not throw.
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify(['unexpected', 'shape']), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      validatePlatformIntegrationInput(env, {
+        google: { clientId: 'google-client-id', clientSecret: 'google-client-secret' },
+      })
+    ).resolves.toEqual({ ok: true, errors: [] });
+  });
+
+  it('still detects a well-formed GitHub rejection body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ error: 'incorrect_client_credentials' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    await expect(
+      validatePlatformIntegrationInput(env, {
+        github: { clientId: 'github-client-id', clientSecret: 'github-client-secret' },
+      })
+    ).resolves.toEqual({
+      ok: false,
+      errors: ['GitHub OAuth client id/secret were rejected'],
+    });
   });
 });

@@ -19,11 +19,13 @@ export function getPreviewHostname(env: Pick<Env, 'BASE_DOMAIN' | 'PREVIEW_BASE_
   if (!baseDomain) throw new Error('BASE_DOMAIN is required for interactive previews');
   return `preview.${baseDomain}`;
 }
-export function getPreviewAppOrigin(env: Pick<Env, 'BASE_DOMAIN'>): string {
+export function getAppOrigin(env: Pick<Env, 'BASE_DOMAIN'>): string {
   const baseDomain = env.BASE_DOMAIN?.trim().toLowerCase();
-  if (!baseDomain) throw new Error('BASE_DOMAIN is required for interactive previews');
+  if (!baseDomain) throw new Error('BASE_DOMAIN is required to build the app origin');
   return `https://app.${baseDomain}`;
 }
+
+export const getPreviewAppOrigin = getAppOrigin;
 function base64UrlEncode(bytes: Uint8Array): string {
   let binary = '';
   for (const byte of bytes) binary += String.fromCharCode(byte);
@@ -79,11 +81,16 @@ export async function verifyPreviewPath(
 ): Promise<PreviewPathScope | null> {
   const match = pathname.match(/^\/p\/([^/]+)\/([^/]+)\/([^/]+)\/(\d+)\/([^/]+)\/index\.html$/);
   if (!match) return null;
-  const encodedProjectId = match[1]!;
-  const encodedFileId = match[2]!;
-  const encodedVersion = match[3]!;
-  const expiryRaw = match[4]!;
-  const signatureRaw = match[5]!;
+  const [, encodedProjectId, encodedFileId, encodedVersion, expiryRaw, signatureRaw] = match;
+  if (
+    encodedProjectId === undefined ||
+    encodedFileId === undefined ||
+    encodedVersion === undefined ||
+    expiryRaw === undefined ||
+    signatureRaw === undefined
+  ) {
+    return null;
+  }
   const projectId = decodePart(encodedProjectId);
   const fileId = decodePart(encodedFileId);
   const version = decodePart(encodedVersion);

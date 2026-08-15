@@ -9,9 +9,12 @@
  */
 import type {
   CreateNotificationRequest,
+  NotificationChannel,
   NotificationResponse,
   NotificationType,
   NotificationWsMessage,
+  WebPushSubscriptionInput,
+  WebPushSubscriptionResponse,
 } from '@simple-agent-manager/shared';
 import {
   DEFAULT_MAX_NOTIFICATIONS_PER_USER,
@@ -19,30 +22,50 @@ import {
   DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS,
   DEFAULT_NOTIFICATION_PAGE_SIZE,
   DEFAULT_NOTIFICATION_PROGRESS_BATCH_WINDOW_MS,
+  DEFAULT_WEB_PUSH_MAX_SUBSCRIPTIONS_PER_USER,
+  DEFAULT_WEB_PUSH_USER_AGENT_MAX_LENGTH,
   MAX_NOTIFICATION_PAGE_SIZE,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
-import { runNotificationMigrations } from './notification-migrations';
+import { createModuleLogger } from '../lib/logger';
+import { validateWebPushSubscription } from '../lib/web-push';
+import { getAppOrigin } from '../services/interactive-preview';
+import { runNotificationMigrationsAtomically } from './notification-migrations';
+import type { WebPushEnv } from './notification-push';
+import { deliverNotificationWebPush } from './notification-push';
 import {
   parseIdRow,
   parseNotificationPreferenceRow,
   parseNotificationRow,
+  parsePushSubscriptionRow,
+  parsePushSubscriptionRows,
   toStoredPreferenceProjectId,
 } from './notification-row-schemas';
 import { parseCountCnt, parseEnabled } from './project-data/row-schemas';
 
-type Env = {
+type Env = WebPushEnv & {
+  BASE_DOMAIN: string;
   MAX_NOTIFICATIONS_PER_USER?: string;
   NOTIFICATION_AUTO_DELETE_AGE_MS?: string;
   NOTIFICATION_PAGE_SIZE?: string;
   NOTIFICATION_PROGRESS_BATCH_WINDOW_MS?: string;
   NOTIFICATION_DEDUP_WINDOW_MS?: string;
+  WEB_PUSH_FAILURE_THRESHOLD?: string;
+  WEB_PUSH_MAX_SUBSCRIPTIONS_PER_USER?: string;
+  WEB_PUSH_USER_AGENT_MAX_LENGTH?: string;
 };
+
+function positiveInteger(value: string | undefined, fallback: number): number {
+  const parsed = Number(value);
+  return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
 
 function generateId(): string {
   return crypto.randomUUID();
 }
+
+const log = createModuleLogger('notification');
 
 export class NotificationService extends DurableObject<Env> {
   private sql: SqlStorage;
@@ -52,7 +75,7 @@ export class NotificationService extends DurableObject<Env> {
     this.sql = ctx.storage.sql;
 
     ctx.blockConcurrencyWhile(async () => {
-      runNotificationMigrations(this.sql);
+      runNotificationMigrationsAtomically(ctx.storage);
     });
   }
 
@@ -82,26 +105,36 @@ export class NotificationService extends DurableObject<Env> {
     userId: string,
     request: CreateNotificationRequest
   ): Promise<NotificationResponse> {
-    // Check if this notification type is enabled for the user
-    const enabled = await this.isNotificationEnabled(
-      userId,
-      request.type,
-      request.projectId
-    );
-    if (!enabled) {
+    const [inAppEnabled, webPushPreferenceEnabled] = await Promise.all([
+      this.isNotificationEnabled(userId, request.type, request.projectId, 'in_app'),
+      this.isNotificationEnabled(userId, request.type, request.projectId, 'web_push'),
+    ]);
+    const webPushEnabled = request.urgency !== 'low' && webPushPreferenceEnabled;
+    if (!inAppEnabled && !webPushEnabled) {
       return this.stubResponse(request, Date.now());
     }
 
-    // Validate actionUrl is a safe relative path
-    if (request.actionUrl && !request.actionUrl.startsWith('/')) {
-      request = { ...request, actionUrl: null };
+    // Validate actionUrl resolves within the app origin. A startsWith('/')
+    // check alone admits protocol-relative and backslash-normalized hostnames.
+    if (request.actionUrl) {
+      const validationOrigin = 'https://sam-action.invalid';
+      try {
+        const candidate = new URL(request.actionUrl, validationOrigin);
+        if (!request.actionUrl.startsWith('/') || candidate.origin !== validationOrigin) {
+          request = { ...request, actionUrl: null };
+        }
+      } catch {
+        request = { ...request, actionUrl: null };
+      }
     }
 
     const now = Date.now();
 
     // Suppression: batch progress notifications — update existing instead of creating new
     if (request.type === 'progress' && request.taskId) {
-      const batchWindow = parseInt(this.env.NOTIFICATION_PROGRESS_BATCH_WINDOW_MS || '') || DEFAULT_NOTIFICATION_PROGRESS_BATCH_WINDOW_MS;
+      const batchWindow =
+        parseInt(this.env.NOTIFICATION_PROGRESS_BATCH_WINDOW_MS || '') ||
+        DEFAULT_NOTIFICATION_PROGRESS_BATCH_WINDOW_MS;
       const cutoff = now - batchWindow;
       const existing = this.sql
         .exec(
@@ -113,16 +146,20 @@ export class NotificationService extends DurableObject<Env> {
         .toArray();
 
       if (existing.length > 0) {
-        const existingId = parseIdRow(existing[0]!, 'notification.progress_dedup');
+        const existingId = parseIdRow(existing[0], 'notification.progress_dedup');
         this.sql.exec(
-          `UPDATE notifications SET body = ?, title = ?, metadata = ?, read_at = NULL WHERE id = ?`,
+          `UPDATE notifications
+           SET body = ?, title = ?, metadata = ?, read_at = NULL,
+               in_app_visible = MAX(in_app_visible, ?)
+           WHERE id = ?`,
           request.body ?? null,
           request.title,
           request.metadata ? JSON.stringify(request.metadata) : null,
+          inAppEnabled ? 1 : 0,
           existingId
         );
         const updated = this.getNotificationById(existingId);
-        if (updated) {
+        if (updated && this.isInAppVisible(existingId)) {
           this.broadcast({ type: 'notification.updated', notification: updated });
           this.broadcast({ type: 'notification.unread_count', count: this.getUnreadCount(userId) });
         }
@@ -132,7 +169,9 @@ export class NotificationService extends DurableObject<Env> {
 
     // Suppression: deduplicate needs_input notifications for the same task (prevent notification spam)
     if (request.type === 'needs_input' && request.taskId) {
-      const dedupWindow = parseInt(this.env.NOTIFICATION_DEDUP_WINDOW_MS || '') || DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS;
+      const dedupWindow =
+        parseInt(this.env.NOTIFICATION_DEDUP_WINDOW_MS || '') ||
+        DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS;
       const cutoff = now - dedupWindow;
       const existing = this.sql
         .exec(
@@ -144,15 +183,19 @@ export class NotificationService extends DurableObject<Env> {
         .toArray();
       if (existing.length > 0) {
         // Update the existing unread needs_input notification instead of creating a new one
-        const existingId = parseIdRow(existing[0]!, 'notification.needs_input_dedup');
+        const existingId = parseIdRow(existing[0], 'notification.needs_input_dedup');
         this.sql.exec(
-          `UPDATE notifications SET body = ?, title = ?, read_at = NULL WHERE id = ?`,
+          `UPDATE notifications
+           SET body = ?, title = ?, read_at = NULL,
+               in_app_visible = MAX(in_app_visible, ?)
+           WHERE id = ?`,
           request.body ?? null,
           request.title,
+          inAppEnabled ? 1 : 0,
           existingId
         );
         const updated = this.getNotificationById(existingId);
-        if (updated) {
+        if (updated && this.isInAppVisible(existingId)) {
           this.broadcast({ type: 'notification.updated', notification: updated });
         }
         return updated ?? this.stubResponse(request, now);
@@ -161,7 +204,9 @@ export class NotificationService extends DurableObject<Env> {
 
     // Suppression: deduplicate task_complete notifications for the same task
     if (request.type === 'task_complete' && request.taskId) {
-      const dedupWindow = parseInt(this.env.NOTIFICATION_DEDUP_WINDOW_MS || '') || DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS;
+      const dedupWindow =
+        parseInt(this.env.NOTIFICATION_DEDUP_WINDOW_MS || '') ||
+        DEFAULT_NOTIFICATION_DEDUP_WINDOW_MS;
       const cutoff = now - dedupWindow;
       const existing = this.sql
         .exec(
@@ -179,8 +224,8 @@ export class NotificationService extends DurableObject<Env> {
     const id = generateId();
 
     this.sql.exec(
-      `INSERT INTO notifications (id, user_id, project_id, task_id, session_id, type, urgency, title, body, action_url, metadata, created_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO notifications (id, user_id, project_id, task_id, session_id, type, urgency, title, body, action_url, metadata, created_at, in_app_visible)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       id,
       userId,
       request.projectId ?? null,
@@ -192,7 +237,8 @@ export class NotificationService extends DurableObject<Env> {
       request.body ?? null,
       request.actionUrl ?? null,
       request.metadata ? JSON.stringify(request.metadata) : null,
-      now
+      now,
+      inAppEnabled ? 1 : 0
     );
 
     // Enforce max notifications limit
@@ -203,18 +249,18 @@ export class NotificationService extends DurableObject<Env> {
       throw new Error('Failed to read back created notification');
     }
 
-    // Broadcast to all connected WebSocket clients
-    this.broadcast({
-      type: 'notification.new',
-      notification,
-    });
+    if (inAppEnabled) {
+      this.broadcast({
+        type: 'notification.new',
+        notification,
+      });
+      this.broadcast({
+        type: 'notification.unread_count',
+        count: this.getUnreadCount(userId),
+      });
+    }
 
-    // Also broadcast updated unread count
-    const unreadCount = this.getUnreadCount(userId);
-    this.broadcast({
-      type: 'notification.unread_count',
-      count: unreadCount,
-    });
+    if (webPushEnabled) this.schedulePushDelivery(userId, notification.id);
 
     return notification;
   }
@@ -236,11 +282,13 @@ export class NotificationService extends DurableObject<Env> {
     nextCursor: string | null;
   }> {
     const pageSize = Math.min(
-      options.limit || parseInt(this.env.NOTIFICATION_PAGE_SIZE || '') || DEFAULT_NOTIFICATION_PAGE_SIZE,
+      options.limit ||
+        parseInt(this.env.NOTIFICATION_PAGE_SIZE || '') ||
+        DEFAULT_NOTIFICATION_PAGE_SIZE,
       MAX_NOTIFICATION_PAGE_SIZE
     );
 
-    let query = `SELECT * FROM notifications WHERE user_id = ? AND dismissed_at IS NULL`;
+    let query = `SELECT * FROM notifications WHERE user_id = ? AND dismissed_at IS NULL AND in_app_visible = 1`;
     const params: (string | number | null)[] = [userId];
 
     if (options.filter === 'unread') {
@@ -271,9 +319,9 @@ export class NotificationService extends DurableObject<Env> {
     const items = hasMore ? rows.slice(0, pageSize) : rows;
 
     const notifications = items.map((row) => parseNotificationRow(row));
-    const nextCursor = hasMore && notifications.length > 0
-      ? String(new Date(notifications[notifications.length - 1]!.createdAt).getTime())
-      : null;
+    const lastNotification = notifications.at(-1);
+    const nextCursor =
+      hasMore && lastNotification ? String(new Date(lastNotification.createdAt).getTime()) : null;
 
     const unreadCount = this.getUnreadCount(userId);
 
@@ -301,7 +349,9 @@ export class NotificationService extends DurableObject<Env> {
   async markAllRead(userId: string): Promise<void> {
     const now = Date.now();
     this.sql.exec(
-      `UPDATE notifications SET read_at = ? WHERE user_id = ? AND read_at IS NULL`,
+      `UPDATE notifications
+       SET read_at = ?
+       WHERE user_id = ? AND read_at IS NULL AND in_app_visible = 1`,
       now,
       userId
     );
@@ -374,7 +424,8 @@ export class NotificationService extends DurableObject<Env> {
   async isNotificationEnabled(
     userId: string,
     notificationType: NotificationType,
-    projectId?: string | null
+    projectId?: string | null,
+    channel: NotificationChannel = 'in_app'
   ): Promise<boolean> {
     const storedProjectId = toStoredPreferenceProjectId(projectId);
     const globalScope = toStoredPreferenceProjectId(null);
@@ -384,14 +435,15 @@ export class NotificationService extends DurableObject<Env> {
       const rows = this.sql
         .exec(
           `SELECT enabled FROM notification_preferences
-           WHERE user_id = ? AND notification_type = ? AND project_id = ? AND channel = 'in_app'`,
+           WHERE user_id = ? AND notification_type = ? AND project_id = ? AND channel = ?`,
           userId,
           notificationType,
-          storedProjectId
+          storedProjectId,
+          channel
         )
         .toArray();
       if (rows.length > 0) {
-        return parseEnabled(rows[0]!, 'notification.pref_project');
+        return parseEnabled(rows[0], 'notification.pref_project');
       }
     }
 
@@ -399,31 +451,155 @@ export class NotificationService extends DurableObject<Env> {
     const typeRows = this.sql
       .exec(
         `SELECT enabled FROM notification_preferences
-         WHERE user_id = ? AND notification_type = ? AND project_id = ? AND channel = 'in_app'`,
+         WHERE user_id = ? AND notification_type = ? AND project_id = ? AND channel = ?`,
         userId,
         notificationType,
-        globalScope
+        globalScope,
+        channel
       )
       .toArray();
     if (typeRows.length > 0) {
-      return parseEnabled(typeRows[0]!, 'notification.pref_type');
+      return parseEnabled(typeRows[0], 'notification.pref_type');
     }
 
     // Check wildcard global preference
     const globalRows = this.sql
       .exec(
         `SELECT enabled FROM notification_preferences
-         WHERE user_id = ? AND notification_type = '*' AND project_id = ? AND channel = 'in_app'`,
+         WHERE user_id = ? AND notification_type = '*' AND project_id = ? AND channel = ?`,
         userId,
-        globalScope
+        globalScope,
+        channel
       )
       .toArray();
     if (globalRows.length > 0) {
-      return parseEnabled(globalRows[0]!, 'notification.pref_global');
+      return parseEnabled(globalRows[0], 'notification.pref_global');
     }
 
     // Default: enabled
     return true;
+  }
+
+  /** Add or refresh a browser PushSubscription, keyed by its endpoint. */
+  async addPushSubscription(
+    userId: string,
+    subscription: WebPushSubscriptionInput,
+    userAgent?: string | null
+  ): Promise<WebPushSubscriptionResponse> {
+    validateWebPushSubscription({
+      endpoint: subscription.endpoint,
+      p256dh: subscription.keys.p256dh,
+      auth: subscription.keys.auth,
+    });
+    const now = Date.now();
+    this.sql.exec(
+      `INSERT INTO push_subscriptions
+         (endpoint, user_id, p256dh, auth, user_agent, disabled_at, failure_count,
+          last_success_at, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, NULL, 0, NULL, ?, ?)
+       ON CONFLICT (endpoint) DO UPDATE SET
+         user_id = excluded.user_id,
+         p256dh = excluded.p256dh,
+         auth = excluded.auth,
+         user_agent = excluded.user_agent,
+         disabled_at = NULL,
+         failure_count = 0,
+         updated_at = excluded.updated_at`,
+      subscription.endpoint,
+      userId,
+      subscription.keys.p256dh,
+      subscription.keys.auth,
+      userAgent?.slice(
+        0,
+        positiveInteger(
+          this.env.WEB_PUSH_USER_AGENT_MAX_LENGTH,
+          DEFAULT_WEB_PUSH_USER_AGENT_MAX_LENGTH
+        )
+      ) ?? null,
+      now,
+      now
+    );
+    const maximumSubscriptions = positiveInteger(
+      this.env.WEB_PUSH_MAX_SUBSCRIPTIONS_PER_USER,
+      DEFAULT_WEB_PUSH_MAX_SUBSCRIPTIONS_PER_USER
+    );
+    this.sql.exec(
+      `DELETE FROM push_subscriptions
+       WHERE endpoint IN (
+         SELECT endpoint FROM push_subscriptions
+         WHERE user_id = ?
+         ORDER BY updated_at DESC, endpoint DESC
+         LIMIT -1 OFFSET ?
+       )`,
+      userId,
+      maximumSubscriptions
+    );
+    const rows = this.sql
+      .exec(
+        'SELECT * FROM push_subscriptions WHERE endpoint = ? AND user_id = ?',
+        subscription.endpoint,
+        userId
+      )
+      .toArray();
+    const storedSubscription = rows[0];
+    if (!storedSubscription) throw new Error('Failed to read back Push subscription');
+    return parsePushSubscriptionRow(storedSubscription);
+  }
+
+  /** Remove only the authenticated user's matching endpoint. */
+  async removePushSubscription(userId: string, endpoint: string): Promise<boolean> {
+    const result = this.sql.exec(
+      'DELETE FROM push_subscriptions WHERE endpoint = ? AND user_id = ?',
+      endpoint,
+      userId
+    );
+    return result.rowsWritten > 0;
+  }
+
+  async listPushSubscriptions(userId: string): Promise<WebPushSubscriptionResponse[]> {
+    const rows = this.sql
+      .exec(
+        `SELECT * FROM push_subscriptions
+       WHERE user_id = ? ORDER BY updated_at DESC`,
+        userId
+      )
+      .toArray();
+    return parsePushSubscriptionRows(rows, (index, error) => {
+      log.warn('web_push.subscription_row_invalid', {
+        index,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
+  /** Durable receipt queried by the attention-expiry safety policy. */
+  async hasConfirmedPushDelivery(userId: string, notificationId: string): Promise<boolean> {
+    const rows = this.sql
+      .exec(
+        `SELECT CASE WHEN push_delivered_at IS NOT NULL THEN 1 ELSE 0 END AS enabled
+       FROM notifications WHERE id = ? AND user_id = ?`,
+        notificationId,
+        userId
+      )
+      .toArray();
+    const deliveryRow = rows[0];
+    return deliveryRow ? parseEnabled(deliveryRow, 'notification.push_delivery') : false;
+  }
+
+  /** Queue a repeat delivery without awaiting external push-service I/O. */
+  async resendPushNotification(userId: string, notificationId: string): Promise<void> {
+    const notification = this.getNotificationById(notificationId);
+    if (!notification || notification.urgency === 'low') return;
+    if (
+      !(await this.isNotificationEnabled(
+        userId,
+        notification.type,
+        notification.projectId,
+        'web_push'
+      ))
+    )
+      return;
+    this.schedulePushDelivery(userId, notificationId);
   }
 
   // ---------------------------------------------------------------------------
@@ -499,17 +675,17 @@ export class NotificationService extends DurableObject<Env> {
   }
 
   private getNotificationById(id: string): NotificationResponse | null {
-    const rows = this.sql
-      .exec(`SELECT * FROM notifications WHERE id = ?`, id)
-      .toArray();
+    const rows = this.sql.exec(`SELECT * FROM notifications WHERE id = ?`, id).toArray();
     if (rows.length === 0) return null;
-    return parseNotificationRow(rows[0]!);
+    return parseNotificationRow(rows[0]);
   }
 
   private getUnreadCount(userId: string): number {
     const row = this.sql
       .exec(
-        `SELECT COUNT(*) as cnt FROM notifications WHERE user_id = ? AND read_at IS NULL AND dismissed_at IS NULL`,
+        `SELECT COUNT(*) as cnt FROM notifications
+         WHERE user_id = ? AND read_at IS NULL AND dismissed_at IS NULL
+           AND in_app_visible = 1`,
         userId
       )
       .toArray()[0];
@@ -517,16 +693,15 @@ export class NotificationService extends DurableObject<Env> {
   }
 
   private enforceLimit(userId: string): void {
-    const maxNotifications = parseInt(this.env.MAX_NOTIFICATIONS_PER_USER || '') || DEFAULT_MAX_NOTIFICATIONS_PER_USER;
-    const autoDeleteAge = parseInt(this.env.NOTIFICATION_AUTO_DELETE_AGE_MS || '') || DEFAULT_NOTIFICATION_AUTO_DELETE_AGE_MS;
+    const maxNotifications =
+      parseInt(this.env.MAX_NOTIFICATIONS_PER_USER || '') || DEFAULT_MAX_NOTIFICATIONS_PER_USER;
+    const autoDeleteAge =
+      parseInt(this.env.NOTIFICATION_AUTO_DELETE_AGE_MS || '') ||
+      DEFAULT_NOTIFICATION_AUTO_DELETE_AGE_MS;
 
     // Delete old notifications
     const cutoff = Date.now() - autoDeleteAge;
-    this.sql.exec(
-      `DELETE FROM notifications WHERE user_id = ? AND created_at < ?`,
-      userId,
-      cutoff
-    );
+    this.sql.exec(`DELETE FROM notifications WHERE user_id = ? AND created_at < ?`, userId, cutoff);
 
     // Enforce max count (delete oldest dismissed first, then oldest read)
     const countRow = this.sql
@@ -548,6 +723,37 @@ export class NotificationService extends DurableObject<Env> {
         excess
       );
     }
+  }
+
+  private isInAppVisible(notificationId: string): boolean {
+    const rows = this.sql
+      .exec('SELECT in_app_visible AS enabled FROM notifications WHERE id = ?', notificationId)
+      .toArray();
+    const visibilityRow = rows[0];
+    return visibilityRow ? parseEnabled(visibilityRow, 'notification.in_app_visible') : false;
+  }
+
+  private schedulePushDelivery(userId: string, notificationId: string): void {
+    this.ctx.waitUntil(
+      this.deliverPushNotification(userId, notificationId).catch((error: unknown) => {
+        log.error('web_push.delivery_failed_before_state_update', {
+          notificationId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      })
+    );
+  }
+
+  private async deliverPushNotification(userId: string, notificationId: string): Promise<void> {
+    const notification = this.getNotificationById(notificationId);
+    if (!notification) return;
+    await deliverNotificationWebPush(
+      this.sql,
+      userId,
+      notification,
+      getAppOrigin(this.env),
+      this.env
+    );
   }
 
   private broadcast(message: NotificationWsMessage): void {

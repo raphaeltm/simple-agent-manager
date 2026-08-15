@@ -12,8 +12,9 @@ const EXPECTED_OPENCODE_MODELS = [
   'opencode/gpt-5.6-sol',
   'opencode/laguna-s-2.1-free',
   'opencode/kimi-k3',
+  'opencode/ling-3.0-tiny-free',
+  'opencode/longcat-2.0-free',
   'opencode/minimax-m3',
-  'opencode/qwen3.7-plus',
   'opencode-go/glm-5.2',
   'opencode-go/grok-4.5',
   'opencode-go/gpt-5.6-luna',
@@ -44,12 +45,10 @@ describe('OpenCode model catalog entries', () => {
       getModelsForAgent('opencode').map((model) => [model.id, model.name])
     );
 
-    expect(namesById.get('opencode/deepseek-v4-flash')).toBe('DeepSeek V4 Flash 0731');
-    expect(namesById.get('opencode/deepseek-v4-flash-free')).toBe(
-      'DeepSeek V4 Flash Free (New)'
-    );
+    expect(namesById.get('opencode/deepseek-v4-flash')).toBe('DeepSeek V4 Flash');
+    expect(namesById.get('opencode/deepseek-v4-flash-free')).toBe('DeepSeek V4 Flash Free');
     expect(namesById.get('opencode-go/deepseek-v4-flash')).toBe(
-      'DeepSeek V4 Flash (New)'
+      'DeepSeek V4 Flash (2x usage)'
     );
     expect(namesById.get('opencode-go/gpt-5.6-luna')).toBe('GPT-5.6 Luna (2x usage)');
     expect(namesById.get('opencode-go/kimi-k3')).toBe('Kimi K3');
@@ -83,7 +82,17 @@ describe('OpenCode model catalog entries', () => {
   });
 
   it('excludes inactive Models.dev records from the static fallback', () => {
-    expect(isKnownModel('opencode', 'opencode/hy3-free')).toBe(false);
+    for (const inactiveModelId of [
+      'opencode/claude-opus-4-1',
+      'opencode/hy3-free',
+      'opencode/ling-3.0-flash-free',
+      'opencode/qwen3.7-plus',
+    ]) {
+      expect(
+        isKnownModel('opencode', inactiveModelId),
+        inactiveModelId + ' should be inactive'
+      ).toBe(false);
+    }
   });
 
   it('does not duplicate model IDs within each OpenCode consumer catalog', () => {

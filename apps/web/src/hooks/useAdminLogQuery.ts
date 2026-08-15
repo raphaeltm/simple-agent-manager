@@ -109,7 +109,7 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
         }
       }
     },
-    [buildTimeRange, filter.levels, filter.search, filter.scriptName],
+    [buildTimeRange, filter.levels, filter.search, filter.scriptName]
   );
 
   // Only auto-fetch once on mount
@@ -120,7 +120,7 @@ export function useAdminLogQuery(): UseAdminLogQueryReturn {
       queryIdRef.current = undefined;
       fetchLogs(false);
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   const setLevels = useCallback((levels: LogLevel[]) => {
     setFilter((prev) => ({ ...prev, levels }));

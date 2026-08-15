@@ -66,6 +66,7 @@ export {
   jwtPublicKey,
   previewSigningKey,
   trialClaimTokenSecret,
+  vapidPrivateKeyPem,
 } from './resources/secrets';
 
 // Export Origin CA certificate (for TLS between Cloudflare edge and VM agents)

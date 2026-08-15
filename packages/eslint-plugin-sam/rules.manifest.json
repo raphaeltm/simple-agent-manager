@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "plugin": "@simple-agent-manager/eslint-plugin-sam",
+  "stage": "blocking",
+  "gateOwner": "deterministic-runtime-boundary-quality",
+  "baselineBacklogLink": "tasks/active/2026-08-09-deterministic-runtime-boundary-quality.md",
+  "promotionNote": "Promoted advisory -> blocking 2026-08-11 (ai-slop debt burn-down, tasks/archive/2026-08-10-ai-slop-debt-burndown.md) after production sites reached zero for all three rules. All three are 'error' in eslint.config.mjs for production source and 'off' for test files (idiomatic test-double typing).",
+  "rules": [
+    {
+      "name": "sam/no-unvalidated-request-json",
+      "owner": "runtime-boundary-quality",
+      "matcherVersion": "2026-08-09.1",
+      "advisoryStage": "blocking",
+      "gateOwner": "quality-program",
+      "evidenceIncident": "Typed Hono request JSON masks unvalidated request bodies at runtime.",
+      "baselineBacklogLink": "tasks/active/2026-08-09-deterministic-runtime-boundary-quality.md",
+      "addedDate": "2026-08-09",
+      "reviewDate": "2026-09-09",
+      "falsePositiveSamples": [
+        "Untyped c.req.json() calls are intentionally excluded for this syntax rule.",
+        "Route handlers already using jsonValidator(schema) are handled by integration wiring, not this isolated syntax matcher."
+      ]
+    },
+    {
+      "name": "sam/no-unsafe-json-parse-assertion",
+      "owner": "runtime-boundary-quality",
+      "matcherVersion": "2026-08-09.1",
+      "advisoryStage": "blocking",
+      "gateOwner": "quality-program",
+      "evidenceIncident": "Type assertions over JSON.parse were repeatedly mistaken for runtime validation.",
+      "baselineBacklogLink": "tasks/active/2026-08-09-deterministic-runtime-boundary-quality.md",
+      "addedDate": "2026-08-09",
+      "reviewDate": "2026-09-09",
+      "falsePositiveSamples": [
+        "JSON.parse(raw) as unknown is allowed as the neutral parse boundary.",
+        "Non-JSON.parse assertions are excluded even when their target type is structural."
+      ]
+    },
+    {
+      "name": "sam/no-local-record-guard",
+      "owner": "runtime-boundary-quality",
+      "matcherVersion": "2026-08-09.1",
+      "advisoryStage": "blocking",
+      "gateOwner": "quality-program",
+      "evidenceIncident": "Local record/object guards drift from established runtime-validation helpers.",
+      "baselineBacklogLink": "tasks/active/2026-08-09-deterministic-runtime-boundary-quality.md",
+      "addedDate": "2026-08-09",
+      "reviewDate": "2026-09-09",
+      "falsePositiveSamples": [
+        "Guards with different names are excluded.",
+        "Guards with extra semantic checks are excluded because automatic replacement is unsafe."
+      ]
+    }
+  ]
+}

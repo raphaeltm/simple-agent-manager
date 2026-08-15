@@ -95,7 +95,13 @@ async function objectId(type: string, content: Uint8Array): Promise<string> {
 
 async function deflate(data: Uint8Array): Promise<Uint8Array> {
   const cs = new CompressionStream('deflate');
-  const compressed = new Response(data as unknown as BodyInit).body!.pipeThrough(cs);
+  const body = new Response(data as unknown as BodyInit).body;
+  if (!body) {
+    // A Response constructed with a concrete (non-null) body always has a
+    // readable .body stream — should never happen.
+    throw new Error('Internal error: Response constructed with data has no body stream');
+  }
+  const compressed = body.pipeThrough(cs);
   return new Uint8Array(await new Response(compressed).arrayBuffer());
 }
 

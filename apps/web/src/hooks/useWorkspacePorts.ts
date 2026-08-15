@@ -1,5 +1,5 @@
 import type { DetectedPort } from '@simple-agent-manager/shared';
-import { useEffect, useRef,useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { listWorkspacePorts } from '../lib/api';
 
@@ -37,12 +37,19 @@ export function useWorkspacePorts(
       return;
     }
 
+    // Stable non-null bindings for use inside the fetchPorts closure below,
+    // where TypeScript does not consistently re-narrow all of the outer
+    // `workspaceUrl`/`workspaceId`/`token` locals captured from this compound guard.
+    const activeWorkspaceUrl = workspaceUrl;
+    const activeWorkspaceId = workspaceId;
+    const activeToken = token;
+
     let cancelled = false;
 
     async function fetchPorts() {
       try {
         setLoading(true);
-        const result = await listWorkspacePorts(workspaceUrl!, workspaceId!, token!);
+        const result = await listWorkspacePorts(activeWorkspaceUrl, activeWorkspaceId, activeToken);
         if (!cancelled && mountedRef.current) {
           consecutiveFailuresRef.current = 0;
           setPorts(result);
@@ -53,7 +60,7 @@ export function useWorkspacePorts(
         if (!cancelled && mountedRef.current) {
           consecutiveFailuresRef.current += 1;
           console.warn('useWorkspacePorts: fetch failed', {
-            workspaceId: workspaceId!,
+            workspaceId: activeWorkspaceId,
             consecutiveFailures: consecutiveFailuresRef.current,
             error: err instanceof Error ? err.message : String(err),
           });

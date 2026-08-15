@@ -1,4 +1,4 @@
-import { useCallback, useEffect,useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { readResponseJsonRecord, requireString } from '../runtime-validation';
 
@@ -134,48 +134,54 @@ export function useAudioPlayback({
   // Resume playback from current position
   const resumePlayback = useCallback(() => {
     if (audioRef.current) {
-      audioRef.current.play().then(() => {
-        setState('playing');
-        startTimeInterval();
-      }).catch(() => {
-        setState('idle');
-      });
+      audioRef.current
+        .play()
+        .then(() => {
+          setState('playing');
+          startTimeInterval();
+        })
+        .catch(() => {
+          setState('idle');
+        });
     }
   }, [startTimeInterval]);
 
   // Create and configure an Audio element from a blob URL
-  const createAudioElement = useCallback((blobUrl: string): HTMLAudioElement => {
-    const audio = new Audio(blobUrl);
-    audio.playbackRate = playbackRate;
+  const createAudioElement = useCallback(
+    (blobUrl: string): HTMLAudioElement => {
+      const audio = new Audio(blobUrl);
+      audio.playbackRate = playbackRate;
 
-    audio.onloadedmetadata = () => {
-      setDuration(audio.duration);
-    };
+      audio.onloadedmetadata = () => {
+        setDuration(audio.duration);
+      };
 
-    audio.onended = () => {
-      clearTimeInterval();
-      setState('idle');
-      setCurrentTime(0);
-      audioRef.current = null;
-      playbackLockRef.current = false;
-    };
+      audio.onended = () => {
+        clearTimeInterval();
+        setState('idle');
+        setCurrentTime(0);
+        audioRef.current = null;
+        playbackLockRef.current = false;
+      };
 
-    audio.onerror = () => {
-      clearTimeInterval();
-      setState('idle');
-      setCurrentTime(0);
-      audioRef.current = null;
-      playbackLockRef.current = false;
-      // Clean up blob URL on error
-      if (blobUrlRef.current) {
-        URL.revokeObjectURL(blobUrlRef.current);
-        blobUrlRef.current = null;
-        cachedStorageIdRef.current = null;
-      }
-    };
+      audio.onerror = () => {
+        clearTimeInterval();
+        setState('idle');
+        setCurrentTime(0);
+        audioRef.current = null;
+        playbackLockRef.current = false;
+        // Clean up blob URL on error
+        if (blobUrlRef.current) {
+          URL.revokeObjectURL(blobUrlRef.current);
+          blobUrlRef.current = null;
+          cachedStorageIdRef.current = null;
+        }
+      };
 
-    return audio;
-  }, [clearTimeInterval, playbackRate]);
+      return audio;
+    },
+    [clearTimeInterval, playbackRate]
+  );
 
   // Play using server-side TTS
   const playServerTTS = useCallback(async () => {
@@ -224,9 +230,13 @@ export function useAudioPlayback({
 
       if (!synthesizeRes.ok) {
         const errData = await synthesizeRes.json().catch(() => null);
-        const message = errData && typeof errData === 'object' && 'message' in errData && typeof errData.message === 'string'
-          ? errData.message
-          : null;
+        const message =
+          errData &&
+          typeof errData === 'object' &&
+          'message' in errData &&
+          typeof errData.message === 'string'
+            ? errData.message
+            : null;
         throw new Error(message || `Synthesis failed: ${synthesizeRes.status}`);
       }
 
@@ -388,18 +398,24 @@ export function useAudioPlayback({
   }, []);
 
   // Skip forward
-  const skipForward = useCallback((seconds: number) => {
-    if (audioRef.current) {
-      seekTo(audioRef.current.currentTime + seconds);
-    }
-  }, [seekTo]);
+  const skipForward = useCallback(
+    (seconds: number) => {
+      if (audioRef.current) {
+        seekTo(audioRef.current.currentTime + seconds);
+      }
+    },
+    [seekTo]
+  );
 
   // Skip backward
-  const skipBackward = useCallback((seconds: number) => {
-    if (audioRef.current) {
-      seekTo(audioRef.current.currentTime - seconds);
-    }
-  }, [seekTo]);
+  const skipBackward = useCallback(
+    (seconds: number) => {
+      if (audioRef.current) {
+        seekTo(audioRef.current.currentTime - seconds);
+      }
+    },
+    [seekTo]
+  );
 
   // Set playback rate
   const setPlaybackRate = useCallback((rate: number) => {
@@ -409,7 +425,8 @@ export function useAudioPlayback({
     }
   }, []);
 
-  // Cleanup on unmount
+  // Cleanup on unmount. abortFetches/clearTimeInterval are both
+  // useCallback([]) — stable for the component's lifetime.
   useEffect(() => {
     return () => {
       abortFetches();
@@ -427,8 +444,7 @@ export function useAudioPlayback({
       }
       playbackLockRef.current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [abortFetches, clearTimeInterval]);
 
   return {
     state,

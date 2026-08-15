@@ -1,4 +1,9 @@
-import type { KnowledgeEntity, KnowledgeEntityDetail, KnowledgeEntityType, KnowledgeObservation } from '@simple-agent-manager/shared';
+import type {
+  KnowledgeEntity,
+  KnowledgeEntityDetail,
+  KnowledgeEntityType,
+  KnowledgeObservation,
+} from '@simple-agent-manager/shared';
 import { KNOWLEDGE_ENTITY_TYPES } from '@simple-agent-manager/shared';
 import { ChevronDown, Pencil, Trash2 } from 'lucide-react';
 import type { ReactNode } from 'react';
@@ -33,13 +38,16 @@ function getTypeColor(type: string): string {
 }
 
 function formatDate(ts: number): string {
-  return new Date(ts).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(ts).toLocaleDateString(undefined, {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
 }
 
 function clampConfidence(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
-
 
 function IconButton({
   label,
@@ -57,7 +65,10 @@ function IconButton({
       type="button"
       aria-label={label}
       title={label}
-      onClick={(event) => { event.stopPropagation(); onClick(); }}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
       className={`inline-flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-[var(--sam-form-border)] bg-accent-tint text-fg-muted transition-colors hover:border-[var(--sam-form-border-hover)] hover:text-fg-primary ${FOCUS_RING} ${className}`}
     >
       {children}
@@ -65,7 +76,15 @@ function IconButton({
   );
 }
 
-function FormButton({ children, variant = 'default', disabled = false }: { children: ReactNode; variant?: 'default' | 'danger'; disabled?: boolean }) {
+function FormButton({
+  children,
+  variant = 'default',
+  disabled = false,
+}: {
+  children: ReactNode;
+  variant?: 'default' | 'danger';
+  disabled?: boolean;
+}) {
   return (
     <button
       type="submit"
@@ -81,11 +100,20 @@ function FormButton({ children, variant = 'default', disabled = false }: { child
   );
 }
 
-function CancelButton({ children = 'Cancel', onClick }: { children?: ReactNode; onClick: () => void }) {
+function CancelButton({
+  children = 'Cancel',
+  onClick,
+}: {
+  children?: ReactNode;
+  onClick: () => void;
+}) {
   return (
     <button
       type="button"
-      onClick={(event) => { event.stopPropagation(); onClick(); }}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
       className={`min-h-11 rounded-lg border border-[var(--sam-form-border)] bg-transparent px-3 text-sm font-medium text-fg-muted transition-colors hover:text-fg-primary ${FOCUS_RING}`}
     >
       {children}
@@ -93,10 +121,25 @@ function CancelButton({ children = 'Cancel', onClick }: { children?: ReactNode; 
   );
 }
 
-function DeleteDialog({ target, busy, onCancel, onConfirm }: { target: DeleteTarget; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+function DeleteDialog({
+  target,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  target: DeleteTarget;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="presentation">
-      <button type="button" aria-label="Cancel delete" className="absolute inset-0 bg-overlay backdrop-blur-md" onClick={onCancel} />
+      <button
+        type="button"
+        aria-label="Cancel delete"
+        className="absolute inset-0 bg-overlay backdrop-blur-md"
+        onClick={onCancel}
+      />
       <div
         role="alertdialog"
         aria-modal="true"
@@ -104,9 +147,15 @@ function DeleteDialog({ target, busy, onCancel, onConfirm }: { target: DeleteTar
         aria-describedby="memory-delete-description"
         className={`${GLASS_CARD} relative w-full max-w-md p-4 shadow-overlay`}
       >
-        <h3 id="memory-delete-title" className="m-0 text-base font-semibold text-fg-primary">Delete {target.kind}</h3>
-        <p id="memory-delete-description" className="m-0 mt-2 text-sm leading-relaxed text-fg-muted">
-          This will delete <span className="text-fg-primary">{target.label}</span>. This action cannot be undone.
+        <h3 id="memory-delete-title" className="m-0 text-base font-semibold text-fg-primary">
+          Delete {target.kind}
+        </h3>
+        <p
+          id="memory-delete-description"
+          className="m-0 mt-2 text-sm leading-relaxed text-fg-muted"
+        >
+          This will delete <span className="text-fg-primary">{target.label}</span>. This action
+          cannot be undone.
         </p>
         <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-end">
           <CancelButton onClick={onCancel} />
@@ -171,7 +220,10 @@ function ObservationRow({
     return (
       <form
         className={`${GLASS_CARD_MUTED} space-y-3 p-3`}
-        onSubmit={(event) => { event.preventDefault(); void handleSave(); }}
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleSave();
+        }}
       >
         <label className="block text-xs font-medium text-fg-muted">
           Observation
@@ -204,21 +256,36 @@ function ObservationRow({
   return (
     <div className={`${GLASS_CARD_MUTED} group/observation p-3`}>
       <div className="flex items-start justify-between gap-3">
-        <p className="m-0 min-w-0 flex-1 break-words text-[13px] leading-relaxed text-fg-primary">{observation.content}</p>
+        <p className="m-0 min-w-0 flex-1 break-words text-[13px] leading-relaxed text-fg-primary">
+          {observation.content}
+        </p>
         <div className="flex shrink-0 gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/observation:opacity-100 sm:group-focus-within/observation:opacity-100">
-          <IconButton label="Edit observation" onClick={() => setEditing(true)}><Pencil size={15} /></IconButton>
+          <IconButton label="Edit observation" onClick={() => setEditing(true)}>
+            <Pencil size={15} />
+          </IconButton>
           <IconButton
             label="Delete observation"
             className="hover:border-danger hover:text-danger-fg"
-            onClick={() => onRequestDelete({ kind: 'observation', id: observation.id, entityId: observation.entityId, label: observation.content.slice(0, 80) || 'observation' })}
+            onClick={() =>
+              onRequestDelete({
+                kind: 'observation',
+                id: observation.id,
+                entityId: observation.entityId,
+                label: observation.content.slice(0, 80) || 'observation',
+              })
+            }
           >
             <Trash2 size={15} />
           </IconButton>
         </div>
       </div>
       <div className="mt-2 flex flex-wrap items-center gap-1.5 text-xs text-fg-muted">
-        <Badge className="border-glass-border bg-accent-tint text-fg-muted">{Math.round(observation.confidence * 100)}%</Badge>
-        <Badge className="border-glass-border bg-accent-tint text-fg-muted">{observation.sourceType}</Badge>
+        <Badge className="border-glass-border bg-accent-tint text-fg-muted">
+          {Math.round(observation.confidence * 100)}%
+        </Badge>
+        <Badge className="border-glass-border bg-accent-tint text-fg-muted">
+          {observation.sourceType}
+        </Badge>
         <span className="text-accent/70">Confirmed {formatDate(observation.lastConfirmedAt)}</span>
       </div>
     </div>
@@ -264,7 +331,10 @@ function EntityEditForm({
   return (
     <form
       className="space-y-3"
-      onSubmit={(event) => { event.preventDefault(); void handleSave(); }}
+      onSubmit={(event) => {
+        event.preventDefault();
+        void handleSave();
+      }}
     >
       <div className="grid gap-3 md:grid-cols-[1fr_180px]">
         <label className="block text-xs font-medium text-fg-muted">
@@ -282,7 +352,11 @@ function EntityEditForm({
             onChange={(event) => setEntityType(event.target.value as KnowledgeEntityType)}
             className={`mt-1 w-full rounded-lg border border-glass-border bg-[color-mix(in_srgb,var(--sam-color-bg-overlay)_33%,transparent)] px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent/40 ${FOCUS_RING}`}
           >
-            {KNOWLEDGE_ENTITY_TYPES.map((type) => <option key={type} value={type}>{type}</option>)}
+            {KNOWLEDGE_ENTITY_TYPES.map((type) => (
+              <option key={type} value={type}>
+                {type}
+              </option>
+            ))}
           </select>
         </label>
       </div>
@@ -303,7 +377,15 @@ function EntityEditForm({
   );
 }
 
-function MemoryCard({ entity, projectId, onRefresh }: { entity: KnowledgeEntity; projectId: string; onRefresh: () => Promise<void> }) {
+function MemoryCard({
+  entity,
+  projectId,
+  onRefresh,
+}: {
+  entity: KnowledgeEntity;
+  projectId: string;
+  onRefresh: () => Promise<void>;
+}) {
   const toast = useToast();
   const [expanded, setExpanded] = useState(false);
   const [detail, setDetail] = useState<KnowledgeEntityDetail | null>(null);
@@ -326,16 +408,23 @@ function MemoryCard({ entity, projectId, onRefresh }: { entity: KnowledgeEntity;
     setDetailError(null);
     getKnowledgeEntity(projectId, entity.id)
       .then((result) => {
-        if (!cancelled) setDetail({ ...result.entity, observations: result.observations, relations: result.relations });
+        if (!cancelled)
+          setDetail({
+            ...result.entity,
+            observations: result.observations,
+            relations: result.relations,
+          });
       })
       .catch((error) => {
-        if (!cancelled) setDetailError(error instanceof Error ? error.message : 'Failed to load observations');
+        if (!cancelled)
+          setDetailError(error instanceof Error ? error.message : 'Failed to load observations');
       })
       .finally(() => {
         if (!cancelled) setLoadingDetail(false);
       });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
+    return () => {
+      cancelled = true;
+    };
   }, [detail, entity.id, expanded, projectId]);
 
   const handleSavedEntity = async () => {
@@ -371,43 +460,74 @@ function MemoryCard({ entity, projectId, onRefresh }: { entity: KnowledgeEntity;
 
   return (
     <>
-      <article className={`${GLASS_CARD} group p-3 transition-colors hover:border-[var(--sam-form-border-hover)]`}>
+      <article
+        className={`${GLASS_CARD} group p-3 transition-colors hover:border-[var(--sam-form-border-hover)]`}
+      >
         {editing ? (
-          <EntityEditForm entity={entity} projectId={projectId} onCancel={() => setEditing(false)} onSaved={handleSavedEntity} />
+          <EntityEditForm
+            entity={entity}
+            projectId={projectId}
+            onCancel={() => setEditing(false)}
+            onSaved={handleSavedEntity}
+          />
         ) : (
           <>
             <button
               type="button"
-              onClick={() => { setExpanded((value) => !value); setEditing(false); }}
+              onClick={() => {
+                setExpanded((value) => !value);
+                setEditing(false);
+              }}
               className={`block w-full cursor-pointer bg-transparent p-0 text-left ${FOCUS_RING}`}
             >
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-              <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <Badge className={getTypeColor(entity.entityType)}>{entity.entityType}</Badge>
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <Badge className={getTypeColor(entity.entityType)}>{entity.entityType}</Badge>
+                  </div>
+                  <h3 className="m-0 mt-2.5 text-sm font-medium leading-relaxed text-fg-primary break-words">
+                    {entity.name}
+                  </h3>
+                  {entity.description && (
+                    <p className="m-0 mt-1.5 text-[13px] leading-relaxed text-fg-muted break-words">
+                      {entity.description}
+                    </p>
+                  )}
                 </div>
-                <h3 className="m-0 mt-2.5 text-sm font-medium leading-relaxed text-fg-primary break-words">{entity.name}</h3>
-                {entity.description && (
-                  <p className="m-0 mt-1.5 text-[13px] leading-relaxed text-fg-muted break-words">{entity.description}</p>
-                )}
-              </div>
-              <div className="flex shrink-0 items-start gap-2">
-                <div className={`${GLASS_CARD_MUTED} min-w-[78px] p-2 text-center text-xs text-fg-muted`}>
-                  <div className="font-semibold text-accent">{entity.observationCount}</div>
-                  observations
+                <div className="flex shrink-0 items-start gap-2">
+                  <div
+                    className={`${GLASS_CARD_MUTED} min-w-[78px] p-2 text-center text-xs text-fg-muted`}
+                  >
+                    <div className="font-semibold text-accent">{entity.observationCount}</div>
+                    observations
+                  </div>
+                  <ChevronDown
+                    className={`mt-2 shrink-0 text-fg-muted transition-transform ${expanded ? 'rotate-180' : ''}`}
+                    size={16}
+                  />
                 </div>
-                <ChevronDown className={`mt-2 shrink-0 text-fg-muted transition-transform ${expanded ? 'rotate-180' : ''}`} size={16} />
               </div>
-            </div>
             </button>
             <div className="mt-3 flex items-center justify-between gap-2 border-t border-[color-mix(in_srgb,var(--sam-form-border)_80%,transparent)] pt-3 text-xs text-fg-muted">
-              <span className="shrink-0 text-accent/70">Updated {formatDate(entity.updatedAt)}</span>
+              <span className="shrink-0 text-accent/70">
+                Updated {formatDate(entity.updatedAt)}
+              </span>
               <div className="flex gap-1 opacity-100 transition-opacity sm:opacity-0 sm:group-hover:opacity-100 sm:group-focus-within:opacity-100">
-                <IconButton label="Edit memory entity" onClick={() => { setEditing(true); setExpanded(true); }}><Pencil size={15} /></IconButton>
+                <IconButton
+                  label="Edit memory entity"
+                  onClick={() => {
+                    setEditing(true);
+                    setExpanded(true);
+                  }}
+                >
+                  <Pencil size={15} />
+                </IconButton>
                 <IconButton
                   label="Delete memory entity"
                   className="hover:border-danger hover:text-danger-fg"
-                  onClick={() => setDeleteTarget({ kind: 'entity', id: entity.id, label: entity.name })}
+                  onClick={() =>
+                    setDeleteTarget({ kind: 'entity', id: entity.id, label: entity.name })
+                  }
                 >
                   <Trash2 size={15} />
                 </IconButton>
@@ -421,7 +541,9 @@ function MemoryCard({ entity, projectId, onRefresh }: { entity: KnowledgeEntity;
             {detailError && <p className="m-0 text-sm text-danger">{detailError}</p>}
             {loadingDetail && <p className="m-0 text-sm text-fg-muted">Loading observations...</p>}
             {!loadingDetail && !detailError && observations.length === 0 && (
-              <div className={`${GLASS_CARD_MUTED} p-3 text-sm text-fg-muted`}>No observations attached to this entity.</div>
+              <div className={`${GLASS_CARD_MUTED} p-3 text-sm text-fg-muted`}>
+                No observations attached to this entity.
+              </div>
             )}
             {observations.map((observation) => (
               <ObservationRow
@@ -440,7 +562,9 @@ function MemoryCard({ entity, projectId, onRefresh }: { entity: KnowledgeEntity;
           target={deleteTarget}
           busy={deleting}
           onCancel={() => setDeleteTarget(null)}
-          onConfirm={() => { void handleDelete(); }}
+          onConfirm={() => {
+            void handleDelete();
+          }}
         />
       )}
     </>
@@ -456,8 +580,13 @@ interface MemoryTabProps {
 export function MemoryTab({ entities, projectId, onRefresh }: MemoryTabProps) {
   return (
     <div className="space-y-2.5">
-      <SectionHeader title="Memory" description="Project knowledge that agents may receive or search before making decisions." />
-      {entities.map((entity) => <MemoryCard key={entity.id} entity={entity} projectId={projectId} onRefresh={onRefresh} />)}
+      <SectionHeader
+        title="Memory"
+        description="Project knowledge that agents may receive or search before making decisions."
+      />
+      {entities.map((entity) => (
+        <MemoryCard key={entity.id} entity={entity} projectId={projectId} onRefresh={onRefresh} />
+      ))}
     </div>
   );
 }

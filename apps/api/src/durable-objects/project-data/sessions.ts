@@ -21,9 +21,7 @@ export function createSession(
   createdByUserId: string | null = null
 ): { id: string; now: number } {
   const maxSessions = parseInt(env.MAX_SESSIONS_PER_PROJECT || '10000', 10);
-  const countRow = sql
-    .exec('SELECT COUNT(*) as cnt FROM chat_sessions')
-    .toArray()[0];
+  const countRow = sql.exec('SELECT COUNT(*) as cnt FROM chat_sessions').toArray()[0];
   if (countRow && parseCountCnt(countRow, 'sessions.create_count') >= maxSessions) {
     throw new Error(`Maximum ${maxSessions} sessions per project exceeded`);
   }
@@ -61,7 +59,10 @@ export function createSession(
 export function linkSessionToTask(sql: SqlStorage, sessionId: string, taskId: string): boolean {
   const cursor = sql.exec(
     'UPDATE chat_sessions SET task_id = ?, updated_at = ? WHERE id = ? AND (task_id IS NULL OR task_id = ?)',
-    taskId, Date.now(), sessionId, taskId
+    taskId,
+    Date.now(),
+    sessionId,
+    taskId
   );
   return cursor.rowsWritten > 0;
 }
@@ -69,11 +70,11 @@ export function linkSessionToTask(sql: SqlStorage, sessionId: string, taskId: st
 function terminateSession(
   sql: SqlStorage,
   sessionId: string,
-  terminalStatus: 'stopped' | 'failed',
+  terminalStatus: 'stopped' | 'failed'
 ): { workspaceId: string | null; messageCount: number; rowsWritten: number } | null {
   const now = Date.now();
   const cursor = sql.exec(
-    `UPDATE chat_sessions SET status = ?, ended_at = ?, updated_at = ? WHERE id = ? AND status = 'active'`,
+    `UPDATE chat_sessions SET status = ?, ended_at = ?, updated_at = ? WHERE id = ? AND status IN ('active', 'sleeping')`,
     terminalStatus,
     now,
     now,
@@ -86,6 +87,40 @@ function terminateSession(
 
   if (!row) return null;
   return { ...parseSessionStop(row), rowsWritten: cursor.rowsWritten };
+}
+
+export function sleepSession(sql: SqlStorage, sessionId: string): boolean {
+  const now = Date.now();
+  const cursor = sql.exec(
+    `UPDATE chat_sessions SET status = 'sleeping', ended_at = NULL, updated_at = ?
+     WHERE id = ? AND status = 'active'`,
+    now,
+    sessionId
+  );
+  return cursor.rowsWritten > 0;
+}
+
+export function wakeSession(
+  sql: SqlStorage,
+  sessionId: string,
+  workspaceId: string,
+  taskId: string
+): boolean {
+  const now = Date.now();
+  const cursor = sql.exec(
+    `UPDATE chat_sessions
+     SET status = 'active', workspace_id = ?, task_id = ?, ended_at = NULL,
+         agent_completed_at = NULL, updated_at = ?
+     WHERE id = ? AND (
+       status = 'sleeping' OR (status IN ('active', 'failed') AND workspace_id = ?)
+     )`,
+    workspaceId,
+    taskId,
+    now,
+    sessionId,
+    workspaceId
+  );
+  return cursor.rowsWritten > 0;
 }
 
 export function stopSession(
@@ -256,10 +291,7 @@ export function getSessionsByTaskIds(
   return enrichSessionRows(sql, rows, 'sessions.by_task_ids').sessions;
 }
 
-export function getSession(
-  sql: SqlStorage,
-  sessionId: string
-): Record<string, unknown> | null {
+export function getSession(sql: SqlStorage, sessionId: string): Record<string, unknown> | null {
   const rows = sql
     .exec(
       `SELECT cs.id, cs.workspace_id, cs.task_id, cs.topic, cs.status,
@@ -289,14 +321,8 @@ export function getSession(
   }
 }
 
-export function updateSessionTopic(
-  sql: SqlStorage,
-  sessionId: string,
-  topic: string
-): boolean {
-  const row = sql
-    .exec('SELECT id, status FROM chat_sessions WHERE id = ?', sessionId)
-    .toArray()[0];
+export function updateSessionTopic(sql: SqlStorage, sessionId: string, topic: string): boolean {
+  const row = sql.exec('SELECT id, status FROM chat_sessions WHERE id = ?', sessionId).toArray()[0];
 
   if (!row) return false;
   const session = parseSessionStatus(row);
@@ -332,7 +358,7 @@ export function mapSessionRow(
 
 function enrichWithAttention(
   sql: SqlStorage,
-  session: Record<string, unknown>,
+  session: Record<string, unknown>
 ): Record<string, unknown> {
   const sessionId = session.id as string;
   const summary = getAttentionSummary(sql, sessionId);

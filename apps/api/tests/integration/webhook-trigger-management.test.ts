@@ -46,6 +46,7 @@ vi.mock('../../src/lib/logger', () => ({
   log: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
 }));
 
+import { log } from '../../src/lib/logger';
 import { actionRoutes } from '../../src/routes/triggers/actions';
 import { crudRoutes } from '../../src/routes/triggers/crud';
 import { webhookRoutes } from '../../src/routes/triggers/webhooks';
@@ -111,6 +112,12 @@ CREATE TABLE github_trigger_configs (
   id TEXT PRIMARY KEY, trigger_id TEXT NOT NULL REFERENCES triggers(id) ON DELETE CASCADE,
   event_type TEXT NOT NULL, filters_json TEXT NOT NULL DEFAULT '{}',
   created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+CREATE TABLE trigger_executions (
+  id TEXT PRIMARY KEY, trigger_id TEXT NOT NULL REFERENCES triggers(id) ON DELETE CASCADE,
+  project_id TEXT NOT NULL, status TEXT NOT NULL, skip_reason TEXT, task_id TEXT,
+  event_type TEXT, rendered_prompt TEXT, error_message TEXT, scheduled_at TEXT,
+  started_at TEXT, completed_at TEXT, sequence_number INTEGER, created_at TEXT NOT NULL
 );
 `;
 
@@ -354,5 +361,94 @@ describe('webhook trigger management vertical slice', () => {
     expect(firstBody.deliveries.map((delivery) => delivery.id)).toEqual(['delivery-c']);
     expect(secondBody.deliveries.map((delivery) => delivery.id)).toEqual(['delivery-b']);
     expect((await app.request(`${path}?cursor=not-a-cursor`, undefined, env)).status).toBe(400);
+  });
+
+  describe('github trigger filters_json fault isolation', () => {
+    function insertGithubTrigger(id: string, filtersJson: string) {
+      const now = '2026-07-13T13:00:00.000Z';
+      sqlite
+        .prepare(
+          `INSERT INTO triggers
+            (id, project_id, user_id, name, status, source_type, prompt_template,
+             created_at, updated_at)
+           VALUES (?, ?, 'user-1', ?, 'active', 'github', 'Handle {{github.action}}', ?, ?)`
+        )
+        .run(id, project.id, id, now, now);
+      sqlite
+        .prepare(
+          `INSERT INTO github_trigger_configs (id, trigger_id, event_type, filters_json, created_at, updated_at)
+           VALUES (?, ?, 'issues', ?, ?, ?)`
+        )
+        .run(`${id}-config`, id, filtersJson, now, now);
+    }
+
+    beforeEach(() => {
+      insertGithubTrigger('trigger-gh-good-1', JSON.stringify({ actions: ['opened'] }));
+      insertGithubTrigger('trigger-gh-bad', '{not-valid-json');
+      insertGithubTrigger('trigger-gh-good-2', JSON.stringify({ labels: ['bug'] }));
+    });
+
+    it('does not let one malformed filters_json row break the trigger list (good/bad/good)', async () => {
+      const response = await app.request('/api/projects/project-1/triggers', undefined, env);
+
+      expect(response.status).toBe(200);
+      const body = await response.json<{
+        triggers: Array<{
+          id: string;
+          githubConfig?: { eventType: string; filters: Record<string, unknown> };
+        }>;
+      }>();
+      const byId = new Map(body.triggers.map((trigger) => [trigger.id, trigger]));
+
+      // Good rows keep their real filters.
+      expect(byId.get('trigger-gh-good-1')?.githubConfig).toEqual({
+        eventType: 'issues',
+        filters: { actions: ['opened'] },
+      });
+      expect(byId.get('trigger-gh-good-2')?.githubConfig).toEqual({
+        eventType: 'issues',
+        filters: { labels: ['bug'] },
+      });
+      // The malformed row is NOT dropped from the list and does NOT 500 the
+      // whole request — it degrades to a safe empty ("match everything") filter set.
+      expect(byId.get('trigger-gh-bad')?.githubConfig).toEqual({
+        eventType: 'issues',
+        filters: {},
+      });
+      expect(log.warn).toHaveBeenCalledWith('trigger.github_filters_invalid', {
+        triggerId: 'trigger-gh-bad',
+      });
+    });
+
+    it('returns the single malformed trigger with degraded filters instead of a 500', async () => {
+      const response = await app.request(
+        '/api/projects/project-1/triggers/trigger-gh-bad',
+        undefined,
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = await response.json<{
+        githubConfig?: { eventType: string; filters: Record<string, unknown> };
+      }>();
+      expect(body.githubConfig).toEqual({ eventType: 'issues', filters: {} });
+      expect(log.warn).toHaveBeenCalledWith('trigger.github_filters_invalid', {
+        triggerId: 'trigger-gh-bad',
+      });
+    });
+
+    it('returns the single well-formed trigger with its real filters', async () => {
+      const response = await app.request(
+        '/api/projects/project-1/triggers/trigger-gh-good-1',
+        undefined,
+        env
+      );
+
+      expect(response.status).toBe(200);
+      const body = await response.json<{
+        githubConfig?: { eventType: string; filters: Record<string, unknown> };
+      }>();
+      expect(body.githubConfig).toEqual({ eventType: 'issues', filters: { actions: ['opened'] } });
+    });
   });
 });

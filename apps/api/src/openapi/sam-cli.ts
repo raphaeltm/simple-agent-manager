@@ -1,3 +1,8 @@
+// FILE SIZE EXCEPTION: Hand-maintained OpenAPI document literal with a byte-exact
+// generated-artifact contract (openapi:check regenerates apps/api/openapi/sam-cli.openapi.json
+// from this file and diffs it byte-for-byte; apps/api/tests/unit/openapi/sam-cli-openapi.test.ts
+// asserts the same equality). Splitting the spec literal across modules adds import complexity
+// and artifact-drift risk without a reviewability benefit. See .claude/rules/18-file-size-limits.md
 type SchemaObject = {
   type?: string | string[];
   format?: string;
@@ -423,9 +428,32 @@ export const samCliOpenApiDocument: OpenApiDocument = {
         ]
       ),
       Project: objectSchema({ ...projectBaseFields }, ['id', 'name']),
+      // Mirrors packages/shared/src/types/project.ts's ProjectSummary — the
+      // actual shape GET /api/projects returns (toProjectSummaryResponse() in
+      // apps/api/src/routes/projects/crud.ts), NOT the full Project shape.
+      // See the regression test at
+      // apps/api/tests/unit/routes/projects-list-response-shape.test.ts.
+      ProjectSummary: objectSchema(
+        {
+          id: stringSchema(),
+          name: stringSchema(),
+          repository: stringSchema(),
+          githubRepoId: nullable(integerSchema()),
+          defaultBranch: stringSchema(),
+          repoProvider: stringSchema(),
+          status: stringSchema(),
+          activeWorkspaceCount: integerSchema(),
+          activeSessionCount: integerSchema(),
+          lastActivityAt: nullable(dateTimeSchema()),
+          createdAt: dateTimeSchema(),
+          taskCountsByStatus: objectSchema({}, [], true),
+          linkedWorkspaces: integerSchema(),
+        },
+        ['id', 'name', 'repository', 'defaultBranch', 'repoProvider', 'status', 'createdAt']
+      ),
       ListProjectsResponse: objectSchema(
         {
-          projects: arrayOf(ref('Project')),
+          projects: arrayOf(ref('ProjectSummary')),
           nextCursor: nullable(stringSchema()),
         },
         ['projects']

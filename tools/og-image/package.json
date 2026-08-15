@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "generate": "tsx generate.ts",
-    "generate:default": "tsx generate.ts --template default"
+    "generate:default": "tsx generate.ts --template default",
+    "typecheck": "tsc --project tsconfig.json --noEmit",
+    "lint": "eslint '*.ts' 'templates/**/*.ts' --rule 'simple-import-sort/imports: off' --rule 'simple-import-sort/exports: off'"
   },
   "dependencies": {
     "@resvg/resvg-js": "2.6.2",

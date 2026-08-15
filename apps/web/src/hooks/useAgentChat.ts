@@ -85,7 +85,7 @@ export function useAgentChat({ apiBase }: UseAgentChatOptions): UseAgentChatRetu
 
         const msgResp = await fetch(
           `${API_URL}${apiBase}/conversations/${conv.id}/messages?limit=200`,
-          { credentials: 'include' },
+          { credentials: 'include' }
         );
         if (!msgResp.ok || cancelled) {
           setIsLoadingHistory(false);
@@ -159,7 +159,9 @@ export function useAgentChat({ apiBase }: UseAgentChatOptions): UseAgentChatRetu
         if (!cancelled) setIsLoadingHistory(false);
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [apiBase]);
 
   /** Send a message and stream the response via SSE. */
@@ -243,10 +245,8 @@ export function useAgentChat({ apiBase }: UseAgentChatOptions): UseAgentChatRetu
           } else if (eventType === 'text_delta') {
             setMessages((prev) =>
               prev.map((m) =>
-                m.id === agentMsgId
-                  ? { ...m, content: m.content + (event.content as string) }
-                  : m,
-              ),
+                m.id === agentMsgId ? { ...m, content: m.content + (event.content as string) } : m
+              )
             );
           } else if (eventType === 'tool_start') {
             setMessages((prev) =>
@@ -256,8 +256,8 @@ export function useAgentChat({ apiBase }: UseAgentChatOptions): UseAgentChatRetu
                       ...m,
                       toolCalls: [...(m.toolCalls || []), { name: event.tool as string }],
                     }
-                  : m,
-              ),
+                  : m
+              )
             );
           } else if (eventType === 'tool_result') {
             setMessages((prev) =>
@@ -265,9 +265,10 @@ export function useAgentChat({ apiBase }: UseAgentChatOptions): UseAgentChatRetu
                 if (m.id !== agentMsgId) return m;
                 const calls = [...(m.toolCalls || [])];
                 const idx = calls.findIndex((tc) => tc.name === event.tool && !tc.result);
-                if (idx >= 0) calls[idx] = { name: calls[idx]!.name, result: event.result };
+                const existing = idx >= 0 ? calls[idx] : undefined;
+                if (existing) calls[idx] = { name: existing.name, result: event.result };
                 return { ...m, toolCalls: calls };
-              }),
+              })
             );
           } else if (eventType === 'error') {
             setMessages((prev) =>
@@ -278,19 +279,19 @@ export function useAgentChat({ apiBase }: UseAgentChatOptions): UseAgentChatRetu
                       content: m.content + `\n\n**Error:** ${event.message as string}`,
                       isStreaming: false,
                     }
-                  : m,
-              ),
+                  : m
+              )
             );
           } else if (eventType === 'done') {
             setMessages((prev) =>
-              prev.map((m) => (m.id === agentMsgId ? { ...m, isStreaming: false } : m)),
+              prev.map((m) => (m.id === agentMsgId ? { ...m, isStreaming: false } : m))
             );
           }
         }
       }
 
       setMessages((prev) =>
-        prev.map((m) => (m.id === agentMsgId ? { ...m, isStreaming: false } : m)),
+        prev.map((m) => (m.id === agentMsgId ? { ...m, isStreaming: false } : m))
       );
     } catch (err) {
       if ((err as Error).name === 'AbortError') return;
@@ -302,8 +303,8 @@ export function useAgentChat({ apiBase }: UseAgentChatOptions): UseAgentChatRetu
                 content: m.content || `Failed to get response: ${(err as Error).message}`,
                 isStreaming: false,
               }
-            : m,
-        ),
+            : m
+        )
       );
     } finally {
       setIsSending(false);

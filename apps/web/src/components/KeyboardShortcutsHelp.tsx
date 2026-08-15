@@ -2,7 +2,7 @@ import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 
 import type { ShortcutDefinition } from '../lib/keyboard-shortcuts';
-import { formatShortcut,getShortcutsByCategory } from '../lib/keyboard-shortcuts';
+import { formatShortcut, getShortcutsByCategory } from '../lib/keyboard-shortcuts';
 
 interface KeyboardShortcutsHelpProps {
   onClose: () => void;
@@ -42,6 +42,7 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
       {/* Backdrop */}
       <div
         onClick={onClose}
+        aria-hidden="true"
         className="fixed inset-0 glass-backdrop-dim z-dialog-backdrop"
       />
 
@@ -53,9 +54,7 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 border-b border-tn-border shrink-0">
-          <h2 className="m-0 text-base font-semibold text-tn-fg">
-            Keyboard Shortcuts
-          </h2>
+          <h2 className="m-0 text-base font-semibold text-tn-fg">Keyboard Shortcuts</h2>
           <button
             onClick={onClose}
             aria-label="Close"
@@ -79,14 +78,9 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
                   {category}
                 </h3>
                 {visible.map((shortcut) => (
-                  <div
-                    key={shortcut.id}
-                    className="flex justify-between items-center py-1.5"
-                  >
+                  <div key={shortcut.id} className="flex justify-between items-center py-1.5">
                     <span className="text-xs text-tn-fg">
-                      {shortcut.id === 'tab-1'
-                        ? 'Switch to tab 1\u20139'
-                        : shortcut.description}
+                      {shortcut.id === 'tab-1' ? 'Switch to tab 1\u20139' : shortcut.description}
                     </span>
                     <kbd className="font-mono text-xs text-tn-fg-bright bg-tn-selected border border-tn-border-highlight rounded-sm px-2 py-0.5 whitespace-nowrap">
                       {shortcut.id === 'tab-1'
@@ -101,6 +95,6 @@ export function KeyboardShortcutsHelp({ onClose }: KeyboardShortcutsHelpProps) {
         </div>
       </div>
     </>,
-    document.body,
+    document.body
   );
 }

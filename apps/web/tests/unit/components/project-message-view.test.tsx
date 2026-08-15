@@ -1598,7 +1598,7 @@ describe('ProjectMessageView — inline idle indicator', () => {
   });
 
 
-  it('keeps complete-and-delete behind confirmation and surfaces completion errors', async () => {
+  it('keeps non-destructive completion behind confirmation and surfaces completion errors', async () => {
     const session = {
       ...makeSession('sess-complete-error', 'active'),
       task: {
@@ -1642,12 +1642,19 @@ describe('ProjectMessageView — inline idle indicator', () => {
     expect(screen.getByRole('dialog', { name: 'Mark task as complete?' })).toBeTruthy();
     expect(mocks.updateProjectTaskStatus).not.toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Complete & Delete' }));
+    expect(
+      screen.getByText(
+        'SAM will preserve this session so you can continue it later. Use archive or delete only when you want to remove the saved workspace state.',
+      ),
+    ).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Mark Complete' }));
 
     await waitFor(() => {
       expect(screen.getByText('Task transition denied')).toBeTruthy();
     });
-    expect(mocks.updateProjectTaskStatus).toHaveBeenCalledWith('proj-1', 'task-complete-error', { toStatus: 'completed' });
+    expect(mocks.updateProjectTaskStatus).toHaveBeenCalledWith('proj-1', 'task-complete-error', {
+      toStatus: 'completed',
+    });
     expect(mocks.deleteWorkspace).not.toHaveBeenCalled();
     expect(onSessionMutated).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog', { name: 'Mark task as complete?' })).toBeNull();

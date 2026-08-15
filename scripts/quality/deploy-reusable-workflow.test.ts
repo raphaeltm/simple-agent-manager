@@ -109,6 +109,20 @@ function runWorkersDevSubdomainStep(httpCode: number): { output: string; status:
 }
 
 describe('deploy reusable workflow', () => {
+  it('uses the R2-compatible request checksum mode for every Pulumi state write', () => {
+    expect(workflow).toContain("AWS_REQUEST_CHECKSUM_CALCULATION: 'when_supported'");
+    expect(workflow).toContain('pulumi/pulumi#24219');
+  });
+
+  it('uses the lockfile-pinned Wrangler binary for the Pulumi state bucket preflight', () => {
+    const block = stepBlock('Create Pulumi State Bucket \\(if not exists\\)');
+
+    expect(block).toContain(
+      'pnpm --filter @simple-agent-manager/api exec wrangler r2 bucket create "$BUCKET_NAME"'
+    );
+    expect(block).not.toContain('npx wrangler');
+  });
+
   it('behaviorally verifies the checked-out SHA and skip-agent output', () => {
     const tmp = mkdtempSync(join(tmpdir(), 'sam-deploy-sha-'));
     const script = stepRunScript('Resolve and Verify Deployment SHA');

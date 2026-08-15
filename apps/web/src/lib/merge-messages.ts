@@ -38,11 +38,15 @@ function isOptimistic(msg: ChatMessageResponse): boolean {
  */
 function findMatchingOptimistic(
   map: Map<string, ChatMessageResponse>,
-  confirmed: ChatMessageResponse,
+  confirmed: ChatMessageResponse
 ): string | null {
   if (confirmed.role !== 'user') return null;
   for (const [id, existing] of map) {
-    if (isOptimistic(existing) && existing.role === confirmed.role && existing.content === confirmed.content) {
+    if (
+      isOptimistic(existing) &&
+      existing.role === confirmed.role &&
+      existing.content === confirmed.content
+    ) {
       return id;
     }
   }
@@ -58,7 +62,7 @@ function findMatchingOptimistic(
  */
 function hasConfirmedDuplicate(
   map: Map<string, ChatMessageResponse>,
-  msg: ChatMessageResponse,
+  msg: ChatMessageResponse
 ): boolean {
   if (msg.role !== 'user') return false;
   for (const existing of map.values()) {
@@ -86,7 +90,7 @@ function hasConfirmedDuplicate(
 export function mergeMessages(
   prev: ChatMessageResponse[],
   incoming: ChatMessageResponse[],
-  strategy: MergeStrategy,
+  strategy: MergeStrategy
 ): ChatMessageResponse[] {
   if (strategy === 'replace') {
     return mergeReplace(prev, incoming);
@@ -112,7 +116,7 @@ export function mergeMessages(
  */
 function mergeReplace(
   prev: ChatMessageResponse[],
-  incoming: ChatMessageResponse[],
+  incoming: ChatMessageResponse[]
 ): ChatMessageResponse[] {
   const map = new Map<string, ChatMessageResponse>();
 
@@ -131,7 +135,11 @@ function mergeReplace(
   // silent drops when the server returns only some messages at that timestamp.
   const incomingIds = new Set(incoming.map((m) => m.id));
   for (const msg of prev) {
-    if (!isOptimistic(msg) && (msg.createdAt < oldestIncoming || (msg.createdAt === oldestIncoming && !incomingIds.has(msg.id)))) {
+    if (
+      !isOptimistic(msg) &&
+      (msg.createdAt < oldestIncoming ||
+        (msg.createdAt === oldestIncoming && !incomingIds.has(msg.id)))
+    ) {
       map.set(msg.id, msg);
     }
   }
@@ -144,9 +152,7 @@ function mergeReplace(
   // Preserve optimistic messages that haven't been confirmed yet
   for (const msg of prev) {
     if (isOptimistic(msg)) {
-      const hasMatch = incoming.some(
-        (m) => m.role === msg.role && m.content === msg.content,
-      );
+      const hasMatch = incoming.some((m) => m.role === msg.role && m.content === msg.content);
       if (!hasMatch) {
         map.set(msg.id, msg);
       }
@@ -162,7 +168,7 @@ function mergeReplace(
  */
 function mergeAppend(
   prev: ChatMessageResponse[],
-  incoming: ChatMessageResponse[],
+  incoming: ChatMessageResponse[]
 ): ChatMessageResponse[] {
   const map = new Map<string, ChatMessageResponse>();
 
@@ -202,7 +208,7 @@ function mergeAppend(
  */
 function mergePrepend(
   prev: ChatMessageResponse[],
-  incoming: ChatMessageResponse[],
+  incoming: ChatMessageResponse[]
 ): ChatMessageResponse[] {
   const map = new Map<string, ChatMessageResponse>();
 
@@ -226,5 +232,5 @@ function mergePrepend(
  * Used by autoscroll to detect genuinely new messages (vs. dedup artifacts).
  */
 export function getLastMessageId(messages: ChatMessageResponse[]): string | null {
-  return messages.length > 0 ? messages[messages.length - 1]!.id : null;
+  return messages.at(-1)?.id ?? null;
 }

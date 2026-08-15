@@ -41,12 +41,19 @@ describe('Security Key Resources', () => {
     expect(jwtKey.options.protect).toBe(true);
   });
 
+  it('protects the P-256 Web Push VAPID key', () => {
+    const vapidKey = findRegisteredResource('vapid-key', 'tls:index/privateKey:PrivateKey');
+    expect(vapidKey.inputs).toMatchObject({ algorithm: 'ECDSA', ecdsaCurve: 'P256' });
+    expect(vapidKey.options.protect).toBe(true);
+  });
+
   it('exports generated security values as Pulumi secrets', async () => {
     await expect(getSecretStatus(secretsModule.encryptionKey)).resolves.toBe(true);
     await expect(getSecretStatus(secretsModule.jwtPrivateKey)).resolves.toBe(true);
     await expect(getSecretStatus(secretsModule.jwtPublicKey)).resolves.toBe(true);
     await expect(getSecretStatus(secretsModule.trialClaimTokenSecret)).resolves.toBe(true);
     await expect(getSecretStatus(secretsModule.deploySigningPrivateKey)).resolves.toBe(true);
+    await expect(getSecretStatus(secretsModule.vapidPrivateKeyPem)).resolves.toBe(true);
   });
 
   it('exports a 32-byte Ed25519 seed for deploy signing', async () => {

@@ -93,6 +93,32 @@ describe('VmAgentContainer.launch env passthrough', () => {
     expect(envVars).not.toHaveProperty('STANDALONE_CLONE_FILTER');
     expect(envVars.NODE_ROLE).toBe('standalone');
   });
+
+  it('forwards the session snapshot timings to the container', async () => {
+    const { fake, startAndWaitForPorts } = makeFake({
+      SESSION_SNAPSHOT_OPERATION_TIMEOUT: '12m30s',
+      SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL: '3s',
+      SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT: '750ms',
+    });
+
+    await callLaunch(fake);
+
+    const envVars = launchedEnvVars(startAndWaitForPorts);
+    expect(envVars.SESSION_SNAPSHOT_OPERATION_TIMEOUT).toBe('12m30s');
+    expect(envVars.SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL).toBe('3s');
+    expect(envVars.SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT).toBe('750ms');
+  });
+
+  it('omits session snapshot timing vars when unset so the vm-agent defaults apply', async () => {
+    const { fake, startAndWaitForPorts } = makeFake({});
+
+    await callLaunch(fake);
+
+    const envVars = launchedEnvVars(startAndWaitForPorts);
+    expect(envVars).not.toHaveProperty('SESSION_SNAPSHOT_OPERATION_TIMEOUT');
+    expect(envVars).not.toHaveProperty('SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL');
+    expect(envVars).not.toHaveProperty('SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT');
+  });
 });
 
 function storagePutMock(fake: unknown): ReturnType<typeof vi.fn> {

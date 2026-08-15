@@ -1,5 +1,7 @@
 import type { ToolCallItem } from '@simple-agent-manager/acp-client';
 
+import { isJsonRecord } from '../../../lib/runtime-validation';
+
 /**
  * Library tool names (base form, separator-agnostic — see normalizeToolName)
  * that render as a DocumentCard.
@@ -54,26 +56,27 @@ export interface DocumentCardData {
   caption?: string;
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 /**
  * Extract the tool result payload from rawOutput. The claude ACP adapter sets
  * rawOutput to the MCP content array `[{ type: 'text', text: '<json>' }]`; we
  * also tolerate a bare object or a JSON string for robustness across adapters.
+ *
+ * Every branch below rejects arrays (via isJsonRecord) as a valid payload —
+ * this is safe because the one place an array is a legitimate payload shape
+ * (the MCP content wrapper itself) is already dispatched by the Array.isArray
+ * check above, before isJsonRecord ever sees it.
  */
 function parseResultPayload(rawOutput: unknown): Record<string, unknown> | null {
   if (Array.isArray(rawOutput)) {
     for (const block of rawOutput) {
       if (
-        isRecord(block)
-        && (block.type === 'text' || block.type === 'content')
-        && typeof block.text === 'string'
+        isJsonRecord(block) &&
+        (block.type === 'text' || block.type === 'content') &&
+        typeof block.text === 'string'
       ) {
         try {
-          const parsed: unknown = JSON.parse(block.text);
-          if (isRecord(parsed)) return parsed;
+          const parsed = JSON.parse(block.text) as unknown;
+          if (isJsonRecord(parsed)) return parsed;
         } catch {
           // Not JSON — skip this block.
         }
@@ -83,13 +86,13 @@ function parseResultPayload(rawOutput: unknown): Record<string, unknown> | null 
   }
   if (typeof rawOutput === 'string') {
     try {
-      const parsed: unknown = JSON.parse(rawOutput);
-      return isRecord(parsed) ? parsed : null;
+      const parsed = JSON.parse(rawOutput) as unknown;
+      return isJsonRecord(parsed) ? parsed : null;
     } catch {
       return null;
     }
   }
-  return isRecord(rawOutput) ? rawOutput : null;
+  return isJsonRecord(rawOutput) ? rawOutput : null;
 }
 
 function str(value: unknown): string | undefined {
@@ -120,18 +123,18 @@ function basename(path: string | undefined): string | undefined {
  */
 export function extractDocumentCardData(item: ToolCallItem): DocumentCardData {
   const tool = normalizeToolName(item.toolName ?? item.title) ?? 'document';
-  const input = isRecord(item.rawInput) ? item.rawInput : {};
+  const input = isJsonRecord(item.rawInput) ? item.rawInput : {};
   const result = parseResultPayload(item.rawOutput ?? item.content);
 
   const error = result ? str(result.error) : undefined;
-  const existingFile = result && isRecord(result.existingFile) ? result.existingFile : undefined;
+  const existingFile =
+    result && isJsonRecord(result.existingFile) ? result.existingFile : undefined;
 
   // FILE_EXISTS surfaces the pre-existing file as the document to show.
   const source = existingFile ?? result ?? {};
 
   const fileId = str(source.id) ?? str(source.fileId) ?? str(input.fileId);
-  const fileName =
-    str(source.filename) ?? basename(str(input.filePath));
+  const fileName = str(source.filename) ?? basename(str(input.filePath));
   const mimeType = str(source.mimeType);
   const sizeBytes = num(source.sizeBytes);
   const caption = str(input.caption) ?? (result ? str(result.caption) : undefined);

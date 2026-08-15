@@ -1,0 +1,28 @@
+{
+  "metadata": {
+    "owner": "SAM quality program",
+    "backlog": "tasks/archive/2026-08-10-ai-slop-debt-burndown.md",
+    "review": "Local task-completion/test/constitution review before promotion to CI wiring",
+    "blockingClasses": [
+      "as-any",
+      "hono-req-json-generic",
+      "typed-json-parse",
+      "local-record-guard"
+    ],
+    "reportOnlyClasses": [
+      "record-string-unknown",
+      "unknown-double-assertion"
+    ],
+    "notes": "Blocking classes fail only on repository-wide net increases. Report-only classes are counted for visibility and never fail this ratchet. Blocking counts were driven to zero and the report-only counts were re-measured on 2026-08-11 by the ai-slop debt burn-down (tasks/archive/2026-08-10-ai-slop-debt-burndown.md); the new report-only floor represents the sanctioned non-boundary cast patterns documented in .claude/rules/51-runtime-boundary-validation.md (CSS-var-as-number casts, third-party generic container/lib-type-gap casts, self-constructed display/log payload widening), not unaddressed debt."
+  },
+  "counts": {
+    "as-any": 0,
+    "hono-req-json-generic": 0,
+    "typed-json-parse": 0,
+    "local-record-guard": 0
+  },
+  "reportOnlyCounts": {
+    "record-string-unknown": 66,
+    "unknown-double-assertion": 114
+  }
+}

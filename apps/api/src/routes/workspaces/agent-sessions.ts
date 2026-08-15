@@ -196,7 +196,12 @@ agentSessionRoutes.post(
       .where(eq(schema.agentSessions.id, sessionId))
       .limit(1);
 
-    return c.json(toAgentSessionResponse(rows[0]!), 201);
+    const createdSession = rows[0];
+    if (!createdSession) {
+      throw new Error(`Agent session ${sessionId} disappeared immediately after creation`);
+    }
+
+    return c.json(toAgentSessionResponse(createdSession), 201);
   }
 );
 

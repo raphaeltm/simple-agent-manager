@@ -1,5 +1,5 @@
 import type { Task } from '@simple-agent-manager/shared';
-import { act,fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -7,29 +7,33 @@ const mocks = vi.hoisted(() => ({
   listAgents: vi.fn(),
   listAgentProfiles: vi.fn(),
   listSkills: vi.fn().mockResolvedValue([]),
-  createAgentProfile: vi.fn().mockImplementation((_projectId: string, data: Record<string, unknown>) => Promise.resolve({
-    id: 'created-profile',
-    projectId: 'proj-1',
-    userId: 'user-1',
-    name: typeof data.name === 'string' ? data.name : 'Created Profile',
-    description: (data.description as string | null | undefined) ?? null,
-    agentType: typeof data.agentType === 'string' ? data.agentType : 'claude-code',
-    model: null,
-    permissionMode: (data.permissionMode as string | null | undefined) ?? null,
-    systemPromptAppend: null,
-    maxTurns: null,
-    timeoutMinutes: null,
-    vmSizeOverride: (data.vmSizeOverride as string | null | undefined) ?? null,
-    provider: null,
-    vmLocation: null,
-    workspaceProfile: (data.workspaceProfile as string | null | undefined) ?? null,
-    devcontainerConfigName: null,
-    taskMode: (data.taskMode as string | null | undefined) ?? null,
-    runtime: (data.runtime as string | null | undefined) ?? null,
-    isBuiltin: false,
-    createdAt: '2026-05-28T00:00:00.000Z',
-    updatedAt: '2026-05-28T00:00:00.000Z',
-  })),
+  createAgentProfile: vi
+    .fn()
+    .mockImplementation((_projectId: string, data: Record<string, unknown>) =>
+      Promise.resolve({
+        id: 'created-profile',
+        projectId: 'proj-1',
+        userId: 'user-1',
+        name: typeof data.name === 'string' ? data.name : 'Created Profile',
+        description: (data.description as string | null | undefined) ?? null,
+        agentType: typeof data.agentType === 'string' ? data.agentType : 'claude-code',
+        model: null,
+        permissionMode: (data.permissionMode as string | null | undefined) ?? null,
+        systemPromptAppend: null,
+        maxTurns: null,
+        timeoutMinutes: null,
+        vmSizeOverride: (data.vmSizeOverride as string | null | undefined) ?? null,
+        provider: null,
+        vmLocation: null,
+        workspaceProfile: (data.workspaceProfile as string | null | undefined) ?? null,
+        devcontainerConfigName: null,
+        taskMode: (data.taskMode as string | null | undefined) ?? null,
+        runtime: (data.runtime as string | null | undefined) ?? null,
+        isBuiltin: false,
+        createdAt: '2026-05-28T00:00:00.000Z',
+        updatedAt: '2026-05-28T00:00:00.000Z',
+      })
+    ),
   listChatSessions: vi.fn(),
   listCredentials: vi.fn(),
   getTrialStatus: vi.fn(),
@@ -43,9 +47,16 @@ const mocks = vi.hoisted(() => ({
   prepareForkSession: vi.fn(),
   getTranscribeApiUrl: vi.fn(() => 'https://api.test.com/api/transcribe'),
   closeConversationTask: vi.fn(),
-  availableCommands: [] as Array<{ name: string; description: string; source: 'client' | 'static' | 'cached' | 'agent' }>,
+  resolveAttentionAnswer: vi.fn(),
+  availableCommands: [] as Array<{
+    name: string;
+    description: string;
+    source: 'client' | 'static' | 'cached' | 'agent';
+  }>,
   /** Captures the onSessionEvent callback passed to useProjectWebSocket. */
-  capturedOnSessionEvent: null as ((event: { type: string; payload: Record<string, unknown> }) => void) | null,
+  capturedOnSessionEvent: null as
+    | ((event: { type: string; payload: Record<string, unknown> }) => void)
+    | null,
   /** Captures the onReconnected callback passed to useProjectWebSocket. */
   capturedOnReconnected: null as (() => void) | null,
 }));
@@ -69,6 +80,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   prepareForkSession: mocks.prepareForkSession,
   getTranscribeApiUrl: mocks.getTranscribeApiUrl,
   closeConversationTask: mocks.closeConversationTask,
+  resolveAttentionAnswer: mocks.resolveAttentionAnswer,
   linkSessionIdea: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -84,7 +96,7 @@ vi.mock('../../../src/components/task-hierarchy', async (importOriginal) => {
       isOpen: boolean;
       focusTaskId: string;
       onNavigate: (sessionId: string) => void;
-    }) => (
+    }) =>
       isOpen ? (
         <dialog open aria-label="Task hierarchy" data-focus-task-id={focusTaskId}>
           Task hierarchy for {focusTaskId}
@@ -92,8 +104,7 @@ vi.mock('../../../src/components/task-hierarchy', async (importOriginal) => {
             Open parent session
           </button>
         </dialog>
-      ) : null
-    ),
+      ) : null,
   };
 });
 
@@ -121,11 +132,18 @@ vi.mock('@simple-agent-manager/acp-client', () => ({
 }));
 
 vi.mock('../../../src/hooks/useAvailableCommands', () => ({
-  useAvailableCommands: () => ({ commands: mocks.availableCommands, isLoading: false, persistCommands: vi.fn() }),
+  useAvailableCommands: () => ({
+    commands: mocks.availableCommands,
+    isLoading: false,
+    persistCommands: vi.fn(),
+  }),
 }));
 
 vi.mock('../../../src/hooks/useProjectWebSocket', () => ({
-  useProjectWebSocket: ({ onSessionEvent, onReconnected }: {
+  useProjectWebSocket: ({
+    onSessionEvent,
+    onReconnected,
+  }: {
     onSessionEvent?: (event: { type: string; payload: Record<string, unknown> }) => void;
     onReconnected?: () => void;
   }) => {
@@ -144,8 +162,16 @@ vi.mock('../../../src/components/project-message-view', () => ({
     return (
       <div>
         <div data-testid="message-view">{String(props.sessionId)}</div>
-        {onFork && <button type="button" aria-label="Fork session" onClick={onFork}>Fork session</button>}
-        {onRetry && <button type="button" aria-label="Retry task" onClick={onRetry}>Retry task</button>}
+        {onFork && (
+          <button type="button" aria-label="Fork session" onClick={onFork}>
+            Fork session
+          </button>
+        )}
+        {onRetry && (
+          <button type="button" aria-label="Retry task" onClick={onRetry}>
+            Retry task
+          </button>
+        )}
       </div>
     );
   },
@@ -206,8 +232,14 @@ function renderProjectChat(path = `/projects/${PROJECT_ID}/chat`) {
         <Routes>
           <Route path="/projects/:id/chat" element={<ProjectChat />} />
           <Route path="/projects/:id/chat/:sessionId" element={<ProjectChat />} />
-          <Route path="/projects/:id/settings" element={<div data-testid="settings-page">Settings</div>} />
-          <Route path="/projects/:id/settings/agents" element={<div data-testid="settings-page">Settings</div>} />
+          <Route
+            path="/projects/:id/settings"
+            element={<div data-testid="settings-page">Settings</div>}
+          />
+          <Route
+            path="/projects/:id/settings/agents"
+            element={<div data-testid="settings-page">Settings</div>}
+          />
         </Routes>
       </ProjectContext.Provider>
     </MemoryRouter>
@@ -216,9 +248,7 @@ function renderProjectChat(path = `/projects/${PROJECT_ID}/chat`) {
 
 /** Single configured agent (most common case). */
 const AGENTS_SINGLE = {
-  agents: [
-    { id: 'claude-code', name: 'Claude Code', configured: true, supportsAcp: true },
-  ],
+  agents: [{ id: 'claude-code', name: 'Claude Code', configured: true, supportsAcp: true }],
 };
 /** Multiple configured agents — triggers the agent selector dropdown. */
 const AGENTS_MULTI = {
@@ -308,7 +338,7 @@ function makeAgentProfile(overrides: Record<string, unknown> = {}) {
 }
 
 function setupStaleHierarchyMocks() {
-  const staleLastMessageAt = Date.now() - (4 * 60 * 60 * 1000);
+  const staleLastMessageAt = Date.now() - 4 * 60 * 60 * 1000;
   const parentSession = {
     ...SESSION_2,
     id: 'stale-parent-session',
@@ -429,15 +459,24 @@ describe('ProjectChat new chat button', () => {
     mocks.availableCommands = [];
     mocks.listProjectTasks.mockResolvedValue({ tasks: [], nextCursor: null });
     mocks.prepareForkSession.mockResolvedValue({
-      parentTaskId: 'task-1', parentSessionId: 'session-with-task',
-      parentBranch: 'sam/fix-login-bug', sessionLabel: 'Fix the login bug',
-      summary: 'Summary of previous session', messageCount: 10, repaired: false,
+      parentTaskId: 'task-1',
+      parentSessionId: 'session-with-task',
+      parentBranch: 'sam/fix-login-bug',
+      sessionLabel: 'Fix the login bug',
+      summary: 'Summary of previous session',
+      messageCount: 10,
+      repaired: false,
     });
     mocks.summarizeSession.mockResolvedValue({
       summary: 'Summary of previous session',
       messageCount: 10,
       filteredCount: 5,
       method: 'ai',
+    });
+    mocks.resolveAttentionAnswer.mockResolvedValue({
+      resolved: true,
+      alreadyResolved: false,
+      answer: 'Approve',
     });
   });
 
@@ -528,6 +567,29 @@ describe('ProjectChat new chat button', () => {
     await waitFor(() => {
       expect(screen.getByTestId('message-view')).toHaveTextContent('session-2');
     });
+  });
+
+  it('consumes a fragment-scoped push answer and offers retry after transient failure', async () => {
+    mocks.listChatSessions.mockResolvedValue({ sessions: [SESSION_1], total: 1 });
+    mocks.resolveAttentionAnswer
+      .mockRejectedValueOnce(new Error('runtime unavailable'))
+      .mockResolvedValueOnce({ resolved: true, alreadyResolved: false, answer: 'Approve' });
+
+    renderProjectChat(
+      `/projects/${PROJECT_ID}/chat/${SESSION_1.id}#attentionMarker=marker-1&attentionAnswer=Approve`
+    );
+
+    const retry = await screen.findByRole('button', { name: 'Retry answer' });
+    expect(mocks.resolveAttentionAnswer).toHaveBeenCalledWith(
+      PROJECT_ID,
+      SESSION_1.id,
+      'marker-1',
+      'Approve'
+    );
+    fireEvent.click(retry);
+
+    expect(await screen.findByText('Answered: Approve')).toBeInTheDocument();
+    expect(mocks.resolveAttentionAnswer).toHaveBeenCalledTimes(2);
   });
 
   it('shows and opens hierarchy controls for stale sessions in the Older bucket', async () => {
@@ -648,10 +710,13 @@ describe('ProjectChat new chat button', () => {
     // Should submit the task with the selected explicit profile and navigate to the new session.
     await waitFor(() => {
       expect(mocks.createAgentProfile).not.toHaveBeenCalled();
-      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
-        message: 'Build a todo app',
-        agentProfileId: 'prof-1',
-      }));
+      expect(mocks.submitTask).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({
+          message: 'Build a todo app',
+          agentProfileId: 'prof-1',
+        })
+      );
     });
 
     // Should navigate to the new session's message view
@@ -698,9 +763,13 @@ describe('ProjectChat new chat button', () => {
 
     const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
     expect((textarea as HTMLTextAreaElement).value).toContain('SAM MCP tools');
-    expect((textarea as HTMLTextAreaElement).value).toContain('Previous session: "Fix the login bug"');
+    expect((textarea as HTMLTextAreaElement).value).toContain(
+      'Previous session: "Fix the login bug"'
+    );
     expect((textarea as HTMLTextAreaElement).value).toContain(`Parent project ID: ${PROJECT_ID}`);
-    expect((textarea as HTMLTextAreaElement).value).toContain(`Parent session ID: ${SESSION_WITH_TASK.id}`);
+    expect((textarea as HTMLTextAreaElement).value).toContain(
+      `Parent session ID: ${SESSION_WITH_TASK.id}`
+    );
     expect((textarea as HTMLTextAreaElement).value).toContain('Parent task ID: task-1');
 
     await waitFor(() => {
@@ -711,16 +780,25 @@ describe('ProjectChat new chat button', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
-        parentTaskId: 'task-1',
-        contextSummary: expect.stringContaining('Parent session ID: session-with-task'),
-      }));
-      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
-        contextSummary: expect.stringContaining('Parent task ID: task-1'),
-      }));
-      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
-        contextSummary: expect.stringContaining('Summary of previous session'),
-      }));
+      expect(mocks.submitTask).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({
+          parentTaskId: 'task-1',
+          contextSummary: expect.stringContaining('Parent session ID: session-with-task'),
+        })
+      );
+      expect(mocks.submitTask).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({
+          contextSummary: expect.stringContaining('Parent task ID: task-1'),
+        })
+      );
+      expect(mocks.submitTask).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({
+          contextSummary: expect.stringContaining('Summary of previous session'),
+        })
+      );
     });
   });
 
@@ -770,11 +848,14 @@ describe('ProjectChat new chat button', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
-        message: 'Original task description',
-        parentTaskId: 'task-1',
-        contextSummary: expect.stringContaining('Retry Context'),
-      }));
+      expect(mocks.submitTask).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({
+          message: 'Original task description',
+          parentTaskId: 'task-1',
+          contextSummary: expect.stringContaining('Retry Context'),
+        })
+      );
     });
   });
 
@@ -967,10 +1048,13 @@ describe('ProjectChat profile setup wizard', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
-        message: 'Build a profile-first chat',
-        agentProfileId: 'created-profile',
-      }));
+      expect(mocks.submitTask).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({
+          message: 'Build a profile-first chat',
+          agentProfileId: 'created-profile',
+        })
+      );
     });
   });
 
@@ -1066,8 +1150,12 @@ describe('ProjectChat profile setup wizard', () => {
 
     renderProjectChat();
 
-    await waitFor(() => expect(screen.getByText('Add an agent to start chatting')).toBeInTheDocument());
-    expect(screen.getByPlaceholderText('Add an agent in Settings to start chatting...')).toBeDisabled();
+    await waitFor(() =>
+      expect(screen.getByText('Add an agent to start chatting')).toBeInTheDocument()
+    );
+    expect(
+      screen.getByPlaceholderText('Add an agent in Settings to start chatting...')
+    ).toBeDisabled();
 
     fireEvent.click(screen.getByRole('button', { name: /Settings > Agents/i }));
     expect(screen.getByTestId('settings-page')).toBeInTheDocument();
@@ -1102,7 +1190,6 @@ describe('ProjectChat profile setup wizard', () => {
     expect(await screen.findByText('Profile "Codex Builder" already exists')).toBeInTheDocument();
     expect(mocks.createAgentProfile).not.toHaveBeenCalled();
   });
-
 });
 
 describe('ProjectChat close conversation button', () => {
@@ -1136,7 +1223,9 @@ describe('ProjectChat close conversation button', () => {
     mocks.listCredentials.mockResolvedValue([]);
     mocks.getTrialStatus.mockResolvedValue({ available: false });
     mocks.getProviderCatalog.mockResolvedValue({ catalogs: [] });
-    mocks.listAgents.mockResolvedValue({ agents: [{ agentType: 'claude-code', label: 'Claude Code' }] });
+    mocks.listAgents.mockResolvedValue({
+      agents: [{ agentType: 'claude-code', label: 'Claude Code' }],
+    });
     mocks.listAgentProfiles.mockResolvedValue([]);
     mocks.availableCommands = [];
     mocks.closeConversationTask.mockResolvedValue({});
@@ -1377,10 +1466,13 @@ describe('ProjectChat agent profile selection', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 
     await waitFor(() => {
-      expect(mocks.submitTask).toHaveBeenCalledWith(PROJECT_ID, expect.objectContaining({
-        message: 'Build a feature',
-        agentProfileId: 'prof-2',
-      }));
+      expect(mocks.submitTask).toHaveBeenCalledWith(
+        PROJECT_ID,
+        expect.objectContaining({
+          message: 'Build a feature',
+          agentProfileId: 'prof-2',
+        })
+      );
     });
   });
 
@@ -1395,17 +1487,17 @@ describe('ProjectChat agent profile selection', () => {
         taskMode: 'conversation',
       }),
     ]);
-    mocks.listChatSessions
-      .mockResolvedValueOnce({ sessions: [], total: 0 })
-      .mockResolvedValue({
-        sessions: [{
+    mocks.listChatSessions.mockResolvedValueOnce({ sessions: [], total: 0 }).mockResolvedValue({
+      sessions: [
+        {
           ...SESSION_1,
           id: 'session-instant',
           workspaceId: 'ws-instant',
           topic: 'Read the repo and summarize it',
-        }],
-        total: 1,
-      });
+        },
+      ],
+      total: 1,
+    });
     mocks.startInstantChatSession.mockResolvedValue({
       status: 'running',
       runtime: { runtime: 'cf-container', reason: 'explicit-cf-container' },

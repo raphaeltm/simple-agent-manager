@@ -1,6 +1,7 @@
 import type { GitHubCliPermissionLevel, GitHubCliPolicy } from '@simple-agent-manager/shared';
 import { and, eq, isNull, or } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
+import * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import { log } from '../lib/logger';
@@ -33,25 +34,70 @@ const permissionNames = {
   packages: 'packages',
 } as const;
 
+const GitHubCliPermissionLevelSchema = v.picklist(['none', 'read', 'write']);
+const GitHubCliContentsPermissionLevelSchema = v.picklist(['read', 'write']);
+
+/**
+ * Canonical shape of a stored `agent_profiles.github_cli_policy` JSON value.
+ * Mirrors the write-time `GitHubCliPolicySchema` in
+ * `apps/api/src/schemas/agent-profiles.ts` — the only writer of this column —
+ * so every row this application has ever written parses successfully here.
+ * This is the single parser shared by this file and `agent-profiles.ts`; each
+ * caller applies its own error-handling contract on top (see `parsePolicy`
+ * below and `parseGitHubCliPolicy` in `agent-profiles.ts`).
+ */
+export const GitHubCliPolicySchema = v.object({
+  mode: v.picklist(['inherit', 'custom']),
+  repositoryScope: v.literal('project'),
+  permissions: v.object({
+    contents: GitHubCliContentsPermissionLevelSchema,
+    pullRequests: GitHubCliPermissionLevelSchema,
+    issues: GitHubCliPermissionLevelSchema,
+    actions: GitHubCliPermissionLevelSchema,
+    packages: GitHubCliPermissionLevelSchema,
+  }),
+});
+
+export type GitHubCliPolicyParseResult =
+  | { kind: 'ok'; policy: GitHubCliPolicy }
+  | { kind: 'invalid_json'; error: string }
+  | { kind: 'invalid_shape' };
+
+/**
+ * Parse a stored `github_cli_policy` JSON column value (already known to be a
+ * non-null string). Never throws — the JSON-syntax-error and shape-mismatch
+ * cases are reported separately so callers can log/fail exactly as they did
+ * before this parser was shared.
+ */
+export function parseGitHubCliPolicyJson(raw: string): GitHubCliPolicyParseResult {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (err) {
+    return { kind: 'invalid_json', error: err instanceof Error ? err.message : String(err) };
+  }
+  const result = v.safeParse(GitHubCliPolicySchema, parsed);
+  return result.success ? { kind: 'ok', policy: result.output } : { kind: 'invalid_shape' };
+}
+
+/**
+ * Resolve the policy used for GitHub CLI token scoping. Fails closed: any
+ * non-null raw value that isn't a `mode: 'custom'` policy (bad JSON, wrong
+ * shape, or `mode: 'inherit'` — which is never actually stored, see
+ * `serializeGitHubCliPolicy` in `agent-profiles.ts`) throws rather than
+ * silently falling back to full installation-token access.
+ */
 function parsePolicy(raw: string | null): GitHubCliPolicy | null {
   if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as GitHubCliPolicy;
-    if (
-      parsed?.mode === 'custom' &&
-      parsed.repositoryScope === 'project' &&
-      parsed.permissions &&
-      (parsed.permissions.contents === 'read' || parsed.permissions.contents === 'write')
-    ) {
-      return parsed;
-    }
-  } catch (err) {
-    log.warn('github_cli_policy.parse_failed', {
-      error: err instanceof Error ? err.message : String(err),
-    });
+  const result = parseGitHubCliPolicyJson(raw);
+  if (result.kind === 'invalid_json') {
+    log.warn('github_cli_policy.parse_failed', { error: result.error });
     throw new GitHubCliPolicyError('Invalid GitHub CLI policy JSON');
   }
-  throw new GitHubCliPolicyError('Invalid GitHub CLI policy shape');
+  if (result.kind === 'invalid_shape' || result.policy.mode !== 'custom') {
+    throw new GitHubCliPolicyError('Invalid GitHub CLI policy shape');
+  }
+  return result.policy;
 }
 
 function includePermission(
@@ -114,10 +160,7 @@ export async function resolveWorkspaceGitHubTokenOptions(
       and(
         eq(schema.agentProfiles.id, profileId),
         eq(schema.agentProfiles.userId, input.userId),
-        or(
-          eq(schema.agentProfiles.projectId, projectId),
-          isNull(schema.agentProfiles.projectId)
-        )
+        or(eq(schema.agentProfiles.projectId, projectId), isNull(schema.agentProfiles.projectId))
       )
     )
     .limit(1);

@@ -66,10 +66,12 @@ export interface ChatSessionListItem {
   agentType?: string | null;
   /** Durable attention marker summary from backend (null = no active marker). */
   attention?: {
+    markerId: string;
     kind: string;
     createdAt: number;
     expiresAt: number | null;
     reason: string | null;
+    options: string[];
   } | null;
 }
 
@@ -415,6 +417,31 @@ export async function sendFollowUpPrompt(
     {
       method: 'POST',
       body: JSON.stringify({ content }),
+    }
+  );
+}
+
+export async function resolveAttentionAnswer(
+  projectId: string,
+  sessionId: string,
+  markerId: string,
+  answer: string
+): Promise<{
+  resolved: boolean;
+  alreadyResolved: boolean;
+  inFlight?: boolean;
+  answer: string;
+}> {
+  return request<{
+    resolved: boolean;
+    alreadyResolved: boolean;
+    inFlight?: boolean;
+    answer: string;
+  }>(
+    `/api/projects/${projectId}/sessions/${sessionId}/attention/${markerId}/resolve`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ answer }),
     }
   );
 }

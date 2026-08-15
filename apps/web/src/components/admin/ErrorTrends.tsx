@@ -1,6 +1,6 @@
-import type { ErrorTrendBucket,ErrorTrendResponse } from '@simple-agent-manager/shared';
-import { Body,Button, Card, Spinner } from '@simple-agent-manager/ui';
-import { type FC, useCallback,useEffect, useState } from 'react';
+import type { ErrorTrendBucket, ErrorTrendResponse } from '@simple-agent-manager/shared';
+import { Body, Button, Card, Spinner } from '@simple-agent-manager/ui';
+import { type FC, useCallback, useEffect, useState } from 'react';
 
 import { fetchAdminErrorTrends } from '../../lib/api';
 
@@ -46,9 +46,9 @@ export const ErrorTrends: FC = () => {
     setRange(r);
   };
 
-  const maxTotal = data
-    ? Math.max(1, ...data.buckets.map((b) => b.total))
-    : 1;
+  const maxTotal = data ? Math.max(1, ...data.buckets.map((b) => b.total)) : 1;
+  const firstBucketTimestamp = data?.buckets.at(0)?.timestamp;
+  const lastBucketTimestamp = data?.buckets.at(-1)?.timestamp;
 
   return (
     <Card>
@@ -81,9 +81,7 @@ export const ErrorTrends: FC = () => {
                 className="inline-block w-3 h-3 rounded-sm"
                 style={{ backgroundColor: SOURCE_COLORS[key] }}
               />
-              <Body className="text-xs text-fg-muted">
-                {label}
-              </Body>
+              <Body className="text-xs text-fg-muted">{label}</Body>
             </div>
           ))}
         </div>
@@ -123,16 +121,19 @@ export const ErrorTrends: FC = () => {
         )}
 
         {/* Time axis labels */}
-        {data && data.buckets.length > 0 && (
-          <div className="flex justify-between pt-1">
-            <Body className="text-[0.65rem] text-fg-muted">
-              {formatTimestamp(data.buckets[0]!.timestamp, range)}
-            </Body>
-            <Body className="text-[0.65rem] text-fg-muted">
-              {formatTimestamp(data.buckets[data.buckets.length - 1]!.timestamp, range)}
-            </Body>
-          </div>
-        )}
+        {data &&
+          data.buckets.length > 0 &&
+          firstBucketTimestamp != null &&
+          lastBucketTimestamp != null && (
+            <div className="flex justify-between pt-1">
+              <Body className="text-[0.65rem] text-fg-muted">
+                {formatTimestamp(firstBucketTimestamp, range)}
+              </Body>
+              <Body className="text-[0.65rem] text-fg-muted">
+                {formatTimestamp(lastBucketTimestamp, range)}
+              </Body>
+            </div>
+          )}
       </div>
     </Card>
   );
@@ -155,7 +156,10 @@ const TrendBar: FC<TrendBarProps> = ({ bucket, maxTotal }) => {
         className="flex-1 h-full flex items-end"
         style={{ minWidth: 2 }}
       >
-        <div className="w-full bg-border-default opacity-30" style={{ height: 2, borderRadius: 1 }} />
+        <div
+          className="w-full bg-border-default opacity-30"
+          style={{ height: 2, borderRadius: 1 }}
+        />
       </div>
     );
   }

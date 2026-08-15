@@ -211,7 +211,9 @@ export function useConnectionRecovery(
           setIsResuming(false);
           setResumeStartedAt(null);
           setSession((prev) =>
-            prev ? ({ ...prev, isIdle: false, agentCompletedAt: null } as ChatSessionResponse) : prev
+            prev
+              ? ({ ...prev, isIdle: false, agentCompletedAt: null } as ChatSessionResponse)
+              : prev
           );
 
           const pending = pendingFollowUpRef.current;
@@ -277,7 +279,7 @@ export function useConnectionRecovery(
     }, AUTO_RESUME_DELAY_MS);
 
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- beginResume is intentionally read via beginResumeRef (see comment above), not listed here
   }, [sessionState, isResuming, isProvisioning, workspaceId, agentSessionId]);
 
   // Debounced connection banner

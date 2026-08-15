@@ -13,9 +13,12 @@ interface Spec {
   postInstallHook?: 'amp-sdk-patch';
 }
 const root = process.cwd();
-const specs = JSON.parse(
-  readFileSync(join(root, 'packages/shared/src/agent-install-manifest.json'), 'utf8')
-) as Spec[];
+const manifestPath = join(root, 'packages/shared/src/agent-install-manifest.json');
+const parsedManifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown;
+if (!Array.isArray(parsedManifest)) {
+  throw new Error(`agent-install-manifest.json must be a JSON array (${manifestPath})`);
+}
+const specs = parsedManifest as Spec[];
 const goSource = readFileSync(join(root, 'packages/vm-agent/internal/acp/gateway.go'), 'utf8');
 const dockerfile = readFileSync(join(root, 'apps/api/Dockerfile.vm-agent-container'), 'utf8');
 const catalog = readFileSync(join(root, 'packages/shared/src/agents.ts'), 'utf8');

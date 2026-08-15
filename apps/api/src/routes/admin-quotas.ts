@@ -7,11 +7,13 @@
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { jsonValidator } from '../schemas';
 import {
   checkQuotaForUser,
   getDefaultQuota,
@@ -23,6 +25,16 @@ import {
 } from '../services/compute-quotas';
 import { getCurrentPeriodBounds } from '../services/compute-usage';
 import { calculateNodeVcpuHoursForPeriod } from '../services/node-usage';
+
+// Validated loosely (v.unknown()) so the handlers' existing manual range
+// check below — which produces a specific error message — stays in control
+// of the accepted domain (non-negative number, or null). Wrapped in
+// v.optional() so an entirely-missing key also reaches that handler check
+// (unwrapped v.unknown() still requires the key to be present) instead of
+// being rejected by Valibot's own generic "Invalid key" message.
+const UpdateQuotaLimitSchema = v.object({
+  monthlyVcpuHoursLimit: v.optional(v.unknown()),
+});
 
 const adminQuotaRoutes = new Hono<{ Bindings: Env }>();
 
@@ -40,18 +52,18 @@ adminQuotaRoutes.get('/default', async (c) => {
 });
 
 /** PUT /api/admin/quotas/default — set default quota. */
-adminQuotaRoutes.put('/default', async (c) => {
+adminQuotaRoutes.put('/default', jsonValidator(UpdateQuotaLimitSchema), async (c) => {
   const userId = getUserId(c);
   const db = drizzle(c.env.DATABASE, { schema });
-  const body = await c.req.json<{ monthlyVcpuHoursLimit: number | null }>();
+  const { monthlyVcpuHoursLimit } = c.req.valid('json');
 
-  if (body.monthlyVcpuHoursLimit !== null) {
-    if (typeof body.monthlyVcpuHoursLimit !== 'number' || body.monthlyVcpuHoursLimit < 0) {
+  if (monthlyVcpuHoursLimit !== null) {
+    if (typeof monthlyVcpuHoursLimit !== 'number' || monthlyVcpuHoursLimit < 0) {
       throw errors.badRequest('monthlyVcpuHoursLimit must be a non-negative number or null');
     }
   }
 
-  await setDefaultQuota(db, body.monthlyVcpuHoursLimit, userId);
+  await setDefaultQuota(db, monthlyVcpuHoursLimit, userId);
   const result = await getDefaultQuota(db);
   return c.json(result);
 });
@@ -95,12 +107,14 @@ adminQuotaRoutes.get('/users/:userId', async (c) => {
   );
 
   const rounded = Math.round(currentUsage * 100) / 100;
-  const remaining = quota.monthlyVcpuHoursLimit !== null
-    ? Math.round((quota.monthlyVcpuHoursLimit - currentUsage) * 100) / 100
-    : null;
-  const percentUsed = quota.monthlyVcpuHoursLimit !== null && quota.monthlyVcpuHoursLimit > 0
-    ? Math.round((rounded / quota.monthlyVcpuHoursLimit) * 100)
-    : null;
+  const remaining =
+    quota.monthlyVcpuHoursLimit !== null
+      ? Math.round((quota.monthlyVcpuHoursLimit - currentUsage) * 100) / 100
+      : null;
+  const percentUsed =
+    quota.monthlyVcpuHoursLimit !== null && quota.monthlyVcpuHoursLimit > 0
+      ? Math.round((rounded / quota.monthlyVcpuHoursLimit) * 100)
+      : null;
 
   return c.json({
     userId: targetUserId,
@@ -113,7 +127,7 @@ adminQuotaRoutes.get('/users/:userId', async (c) => {
 });
 
 /** PUT /api/admin/quotas/users/:userId — set user quota override. */
-adminQuotaRoutes.put('/users/:userId', async (c) => {
+adminQuotaRoutes.put('/users/:userId', jsonValidator(UpdateQuotaLimitSchema), async (c) => {
   const adminUserId = getUserId(c);
   const targetUserId = c.req.param('userId');
   const db = drizzle(c.env.DATABASE, { schema });
@@ -129,15 +143,15 @@ adminQuotaRoutes.put('/users/:userId', async (c) => {
     throw errors.notFound('User');
   }
 
-  const body = await c.req.json<{ monthlyVcpuHoursLimit: number | null }>();
+  const { monthlyVcpuHoursLimit } = c.req.valid('json');
 
-  if (body.monthlyVcpuHoursLimit !== null) {
-    if (typeof body.monthlyVcpuHoursLimit !== 'number' || body.monthlyVcpuHoursLimit < 0) {
+  if (monthlyVcpuHoursLimit !== null) {
+    if (typeof monthlyVcpuHoursLimit !== 'number' || monthlyVcpuHoursLimit < 0) {
       throw errors.badRequest('monthlyVcpuHoursLimit must be a non-negative number or null');
     }
   }
 
-  await setUserQuotaOverride(db, targetUserId, body.monthlyVcpuHoursLimit, adminUserId);
+  await setUserQuotaOverride(db, targetUserId, monthlyVcpuHoursLimit, adminUserId);
 
   // Return resolved quota
   const check = await checkQuotaForUser(db, targetUserId);

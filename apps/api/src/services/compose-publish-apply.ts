@@ -555,10 +555,16 @@ export function buildComposePublishApplyPayload(
     for (const deniedField of Object.keys(DENIED_SERVICE_FIELDS)) {
       if (deniedField === 'build') continue; // handled above
       if (deniedField in service) {
+        const message = DENIED_SERVICE_FIELDS[deniedField];
+        if (message === undefined) {
+          throw new Error(
+            `Internal error: no message configured for denied service field "${deniedField}"`
+          );
+        }
         warnings.push({
           service: name,
           field: deniedField,
-          message: DENIED_SERVICE_FIELDS[deniedField]!,
+          message,
         });
         delete service[deniedField];
       }
@@ -617,7 +623,13 @@ export function buildComposePublishApplyPayload(
   // Strip denied top-level fields (WARN). networks is replaced with SAM's bridge.
   for (const deniedField of Object.keys(DENIED_TOP_LEVEL_FIELDS)) {
     if (deniedField in doc) {
-      warnings.push({ field: deniedField, message: DENIED_TOP_LEVEL_FIELDS[deniedField]! });
+      const message = DENIED_TOP_LEVEL_FIELDS[deniedField];
+      if (message === undefined) {
+        throw new Error(
+          `Internal error: no message configured for denied top-level field "${deniedField}"`
+        );
+      }
+      warnings.push({ field: deniedField, message });
     }
   }
 

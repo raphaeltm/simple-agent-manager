@@ -14,6 +14,12 @@ const IdleCleanupScheduleSchema = v.object({
   cleanup_at: v.number(),
   created_at: v.number(),
   retry_count: v.number(),
+  terminal_state: v.optional(v.nullable(v.string()), null),
+  terminal_reason: v.optional(v.nullable(v.string()), null),
+  terminal_at: v.optional(v.nullable(v.number()), null),
+  last_error: v.optional(v.nullable(v.string()), null),
+  failure_notified_at: v.optional(v.nullable(v.number()), null),
+  attention_marker_id: v.optional(v.nullable(v.string()), null),
 });
 
 export function parseIdleCleanupSchedule(row: unknown): {
@@ -23,6 +29,12 @@ export function parseIdleCleanupSchedule(row: unknown): {
   cleanupAt: number;
   createdAt: number;
   retryCount: number;
+  terminalState: string | null;
+  terminalReason: string | null;
+  terminalAt: number | null;
+  lastError: string | null;
+  failureNotifiedAt: number | null;
+  attentionMarkerId: string | null;
 } {
   const r = parseRow(IdleCleanupScheduleSchema, row, 'idle_cleanup_schedule');
   return {
@@ -32,6 +44,12 @@ export function parseIdleCleanupSchedule(row: unknown): {
     cleanupAt: r.cleanup_at,
     createdAt: r.created_at,
     retryCount: r.retry_count,
+    terminalState: r.terminal_state,
+    terminalReason: r.terminal_reason,
+    terminalAt: r.terminal_at,
+    lastError: r.last_error,
+    failureNotifiedAt: r.failure_notified_at,
+    attentionMarkerId: r.attention_marker_id,
   };
 }
 

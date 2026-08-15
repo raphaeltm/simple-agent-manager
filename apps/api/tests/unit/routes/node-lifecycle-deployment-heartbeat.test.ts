@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { nodeLifecycleRoutes } from '../../../src/routes/node-lifecycle';
+
 type Condition = { op: 'eq'; col: string; val: unknown } | { op: 'and'; conds: Condition[] };
 
 const updates: Array<{ table: unknown; values: Record<string, unknown>; where: unknown }> = [];
@@ -198,7 +200,6 @@ async function postHeartbeat(
     DEPLOY_SIGNING_PUBLIC_KEY: 'pub-key',
   }
 ) {
-  const { nodeLifecycleRoutes } = await import('../../../src/routes/node-lifecycle');
   const app = new Hono();
   app.route('/api/nodes', nodeLifecycleRoutes);
   return app.request(

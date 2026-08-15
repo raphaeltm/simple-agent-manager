@@ -47,7 +47,7 @@ export class ImageResolveError extends Error {
     public readonly registry: string,
     public readonly repository: string,
     public readonly tag: string,
-    public readonly statusCode?: number,
+    public readonly statusCode?: number
   ) {
     super(message);
     this.name = 'ImageResolveError';
@@ -94,7 +94,7 @@ function registryBaseUrl(registry: string): string {
   // over an unencrypted channel.
   if (registry.startsWith('http://')) {
     throw new Error(
-      `Insecure registry URL rejected: ${registry}. Registry endpoints must use HTTPS.`,
+      `Insecure registry URL rejected: ${registry}. Registry endpoints must use HTTPS.`
     );
   }
   // If the registry already includes an https scheme, use as-is
@@ -116,10 +116,7 @@ function registryBaseUrl(registry: string): string {
  * This prevents minted SAM registry credentials from being forwarded to an
  * arbitrary, user-controlled registry named in a deployment manifest.
  */
-function authAppliesToRegistry(
-  registry: string,
-  authRegistryHost: string | undefined,
-): boolean {
+function authAppliesToRegistry(registry: string, authRegistryHost: string | undefined): boolean {
   if (!authRegistryHost) return true;
   try {
     const targetHost = new URL(registryBaseUrl(registry)).hostname.toLowerCase();
@@ -154,11 +151,14 @@ function realmHostIsTrusted(realmHost: string, registryHost: string): boolean {
 /**
  * Parse a WWW-Authenticate: Bearer realm="...",service="...",scope="..." header.
  */
-function parseBearerChallenge(header: string): { realm: string; service?: string; scope?: string } | null {
+function parseBearerChallenge(
+  header: string
+): { realm: string; service?: string; scope?: string } | null {
   const match = BEARER_CHALLENGE_RE.exec(header);
   if (!match) return null;
 
-  const params = match[1]!;
+  const [, params] = match;
+  if (params === undefined) return null;
   const realm = extractParam(params, 'realm');
   if (!realm) return null;
 
@@ -183,7 +183,7 @@ async function fetchBearerToken(
   auth: RegistryAuth | undefined,
   registryHost: string,
   fetchFn: typeof fetch,
-  timeoutMs: number,
+  timeoutMs: number
 ): Promise<string> {
   const url = new URL(challenge.realm);
 
@@ -194,13 +194,13 @@ async function fetchBearerToken(
   // an attacker-controlled host.
   if (url.protocol !== 'https:') {
     throw new Error(
-      `Insecure token realm rejected: ${challenge.realm}. Token endpoint must use HTTPS.`,
+      `Insecure token realm rejected: ${challenge.realm}. Token endpoint must use HTTPS.`
     );
   }
   if (auth && !realmHostIsTrusted(url.hostname, registryHost)) {
     throw new Error(
       `Refusing to send registry credentials to untrusted token realm host ${url.hostname} ` +
-        `(registry host ${registryHost}).`,
+        `(registry host ${registryHost}).`
     );
   }
 
@@ -223,7 +223,7 @@ async function fetchBearerToken(
     throw new Error(`Token exchange failed: ${resp.status} ${resp.statusText}`);
   }
 
-  const body = await resp.json() as { token?: string; access_token?: string };
+  const body = (await resp.json()) as { token?: string; access_token?: string };
   const token = body.token ?? body.access_token;
   if (!token) {
     throw new Error('Token exchange response missing token field');
@@ -247,7 +247,7 @@ async function resolveTagToDigest(
   registry: string,
   repository: string,
   tag: string,
-  opts: ImageResolverOptions,
+  opts: ImageResolverOptions
 ): Promise<string> {
   const fetchFn = opts.fetchFn ?? fetch;
   const timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -299,7 +299,7 @@ async function resolveTagToDigest(
       registry,
       repository,
       tag,
-      404,
+      404
     );
   }
 
@@ -309,7 +309,7 @@ async function resolveTagToDigest(
       registry,
       repository,
       tag,
-      resp.status,
+      resp.status
     );
   }
 
@@ -319,7 +319,7 @@ async function resolveTagToDigest(
       registry,
       repository,
       tag,
-      resp.status,
+      resp.status
     );
   }
 
@@ -336,7 +336,7 @@ async function resolveTagToDigest(
       `Registry returned unsupported digest format "${digest}" for ${registry}/${repository}:${tag}. Only sha256 digests are supported.`,
       registry,
       repository,
-      tag,
+      tag
     );
   }
 
@@ -354,7 +354,7 @@ async function resolveViaGet(
   repository: string,
   tag: string,
   fetchFn: typeof fetch,
-  timeoutMs: number,
+  timeoutMs: number
 ): Promise<string> {
   const resp = await fetchFn(manifestUrl, {
     method: 'GET',
@@ -368,7 +368,7 @@ async function resolveViaGet(
       registry,
       repository,
       tag,
-      resp.status,
+      resp.status
     );
   }
 
@@ -381,7 +381,7 @@ async function resolveViaGet(
     `Registry did not return a Docker-Content-Digest header for ${registry}/${repository}:${tag}. Cannot pin image to a digest.`,
     registry,
     repository,
-    tag,
+    tag
   );
 }
 

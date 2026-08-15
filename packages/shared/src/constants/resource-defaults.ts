@@ -37,7 +37,9 @@ export interface VmCapacity {
 }
 
 /** Full capacity per VM size per provider. */
-export const PROVIDER_VM_CAPACITY: Record<string, Record<VMSize, VmCapacity>> = {
+export const PROVIDER_VM_CAPACITY: Record<string, Record<VMSize, VmCapacity>> & {
+  hetzner: Record<VMSize, VmCapacity>;
+} = {
   hetzner: {
     small: { vcpu: 2, ramGb: 4, storageGb: 40 },
     medium: { vcpu: 4, ramGb: 8, storageGb: 80 },
@@ -76,7 +78,7 @@ export const PROVIDER_VM_CAPACITY: Record<string, Record<VMSize, VmCapacity>> = 
 };
 
 /** Default capacity when provider is unknown. Uses Hetzner as baseline. */
-export const DEFAULT_VM_CAPACITY: Record<VMSize, VmCapacity> = PROVIDER_VM_CAPACITY['hetzner']!;
+export const DEFAULT_VM_CAPACITY: Record<VMSize, VmCapacity> = PROVIDER_VM_CAPACITY.hetzner;
 
 // =============================================================================
 // VM Size Selection from Resource Requirements

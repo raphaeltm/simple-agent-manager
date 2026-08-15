@@ -21,6 +21,8 @@ import {
 } from '../../services/node-agent';
 import { stopNodeResources } from '../../services/nodes';
 import * as projectDataService from '../../services/project-data';
+import { sleepWorkspaceSession } from '../../services/session-sleep';
+import { deleteSessionSnapshotState } from '../../services/session-snapshots';
 import { requireRepositoryOwnerAccess } from '../projects/_helpers';
 import {
   assertNodeOperational,
@@ -68,6 +70,19 @@ async function requireWorkspaceRestartGitHubAccess(
 
 // --- User-authenticated lifecycle routes ---
 
+lifecycleRoutes.post('/:id/sleep', requireAuth(), requireApproved(), async (c) => {
+  const userId = getUserId(c);
+  const workspaceId = c.req.param('id');
+  const db = drizzle(c.env.DATABASE, { schema });
+  await getOwnedWorkspace(db, workspaceId, userId);
+  const result = await sleepWorkspaceSession(c.env, {
+    workspaceId,
+    userId,
+    reason: 'Explicit workspace sleep API request',
+  });
+  return c.json(result);
+});
+
 lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
@@ -77,8 +92,9 @@ lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) =>
   if (!workspace.nodeId) {
     throw errors.badRequest('Workspace is not attached to a node');
   }
+  const nodeId = workspace.nodeId;
 
-  const node = await getOwnedNode(db, workspace.nodeId, userId);
+  const node = await getOwnedNode(db, nodeId, userId);
   const isCfContainerNode = node.runtime === 'cf-container';
   const canStopWorkspace =
     isActiveWorkspaceStatus(workspace.status) ||
@@ -94,6 +110,10 @@ lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) =>
     assertNodeOperational(node, 'stop workspace');
   }
 
+  if (workspace.chatSessionId) {
+    await deleteSessionSnapshotState(db, c.env, workspace.chatSessionId);
+  }
+
   await db
     .update(schema.workspaces)
     .set({ status: 'stopping', updatedAt: new Date().toISOString() })
@@ -105,15 +125,15 @@ lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) =>
       try {
         if (isCfContainerNode) {
           if (node.status === 'running' && isActiveWorkspaceStatus(workspace.status)) {
-            await stopWorkspaceOnNode(workspace.nodeId!, workspace.id, c.env, userId).catch((e) => {
+            await stopWorkspaceOnNode(nodeId, workspace.id, c.env, userId).catch((e) => {
               log.warn('workspace.cf_container_agent_stop_failed', {
                 workspaceId: workspace.id,
-                nodeId: workspace.nodeId,
+                nodeId,
                 error: String(e),
               });
             });
           }
-          await stopNodeResources(workspace.nodeId!, userId, c.env);
+          await stopNodeResources(nodeId, userId, c.env);
           await innerDb
             .update(schema.agentSessions)
             .set({
@@ -123,7 +143,7 @@ lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) =>
             })
             .where(eq(schema.agentSessions.workspaceId, workspace.id));
         } else {
-          await stopWorkspaceOnNode(workspace.nodeId!, workspace.id, c.env, userId);
+          await stopWorkspaceOnNode(nodeId, workspace.id, c.env, userId);
           await innerDb
             .update(schema.workspaces)
             .set({
@@ -135,11 +155,11 @@ lifecycleRoutes.post('/:id/stop', requireAuth(), requireApproved(), async (c) =>
 
           // Schedule automatic deletion after TTL
           try {
-            const doId = c.env.NODE_LIFECYCLE.idFromName(workspace.nodeId!);
+            const doId = c.env.NODE_LIFECYCLE.idFromName(nodeId);
             const stub = c.env.NODE_LIFECYCLE.get(doId);
             await (
               stub as unknown as import('../../durable-objects/node-lifecycle').NodeLifecycle
-            ).scheduleWorkspaceDeletion(workspace.id, userId);
+            ).scheduleWorkspaceDeletion(nodeId, workspace.id, userId);
           } catch (e) {
             log.warn('workspace.schedule_deletion_failed', {
               workspaceId: workspace.id,
@@ -229,17 +249,18 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
   if (!workspace.nodeId) {
     throw errors.badRequest('Workspace is not attached to a node');
   }
+  const nodeId = workspace.nodeId;
   if (workspace.status !== 'stopped' && workspace.status !== 'error') {
     throw errors.badRequest(`Workspace is ${workspace.status}`);
   }
 
-  const node = await getOwnedNode(db, workspace.nodeId, userId);
+  const node = await getOwnedNode(db, nodeId, userId);
   assertNodeOperational(node, 'restart workspace');
   await requireWorkspaceRestartGitHubAccess(c.env, db, workspace, userId, 'workspace-restart');
 
   // Cancel any pending auto-deletion before restarting
   try {
-    const doId = c.env.NODE_LIFECYCLE.idFromName(workspace.nodeId!);
+    const doId = c.env.NODE_LIFECYCLE.idFromName(nodeId);
     const stub = c.env.NODE_LIFECYCLE.get(doId);
     await (
       stub as unknown as import('../../durable-objects/node-lifecycle').NodeLifecycle
@@ -259,7 +280,7 @@ lifecycleRoutes.post('/:id/restart', requireAuth(), requireApproved(), async (c)
     (async () => {
       const innerDb = drizzle(c.env.DATABASE, { schema });
       try {
-        await restartWorkspaceOnNode(workspace.nodeId!, workspace.id, c.env, userId);
+        await restartWorkspaceOnNode(nodeId, workspace.id, c.env, userId);
       } catch (err) {
         await innerDb
           .update(schema.workspaces)
@@ -309,13 +330,14 @@ lifecycleRoutes.post('/:id/rebuild', requireAuth(), requireApproved(), async (c)
   if (!workspace.nodeId) {
     throw errors.badRequest('Workspace is not attached to a node');
   }
+  const nodeId = workspace.nodeId;
   if (!isActiveWorkspaceStatus(workspace.status) && workspace.status !== 'error') {
     throw errors.badRequest(
       `Workspace must be running, recovery, or in error state to rebuild, currently ${workspace.status}`
     );
   }
 
-  const node = await getOwnedNode(db, workspace.nodeId, userId);
+  const node = await getOwnedNode(db, nodeId, userId);
   assertNodeOperational(node, 'rebuild workspace');
   await requireWorkspaceRestartGitHubAccess(c.env, db, workspace, userId, 'workspace-rebuild');
 
@@ -330,7 +352,7 @@ lifecycleRoutes.post('/:id/rebuild', requireAuth(), requireApproved(), async (c)
     (async () => {
       const innerDb = drizzle(c.env.DATABASE, { schema });
       try {
-        await rebuildWorkspaceOnNode(workspace.nodeId!, workspace.id, c.env, userId);
+        await rebuildWorkspaceOnNode(nodeId, workspace.id, c.env, userId);
       } catch (err) {
         await innerDb
           .update(schema.workspaces)

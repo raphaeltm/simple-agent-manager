@@ -26,21 +26,38 @@ import {
   WorkspaceReadyRequestSchema,
   WorkspaceReadyResponseSchema,
 } from '@simple-agent-manager/shared';
-import { exportPKCS8, exportSPKI,generateKeyPair } from 'jose';
-import { afterEach,beforeAll, describe, expect, it, vi } from 'vitest';
+import { exportPKCS8, exportSPKI, generateKeyPair } from 'jose';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // =============================================================================
 // Key generation for JWT tests
 // =============================================================================
 
-let testPrivateKey: string;
-let testPublicKey: string;
+const { privateKey, publicKey } = await generateKeyPair('RS256', { extractable: true });
+const [testPrivateKey, testPublicKey] = await Promise.all([
+  exportPKCS8(privateKey),
+  exportSPKI(publicKey),
+]);
 
-beforeAll(async () => {
-  const { privateKey, publicKey } = await generateKeyPair('RS256', { extractable: true });
-  testPrivateKey = await exportPKCS8(privateKey);
-  testPublicKey = await exportSPKI(publicKey);
-});
+const fetchWithTimeoutMock = vi.fn();
+vi.doMock('../../src/services/telemetry', () => ({
+  recordNodeRoutingMetric: vi.fn(),
+}));
+vi.doMock('../../src/services/fetch-timeout', () => ({
+  fetchWithTimeout: fetchWithTimeoutMock,
+  getTimeoutMs: vi.fn().mockReturnValue(30_000),
+}));
+const { createAgentSessionOnNode, createWorkspaceOnNode, deleteWorkspaceOnNode } =
+  await import('../../src/services/node-agent');
+
+function makeNodeAgentTestEnv() {
+  return {
+    BASE_DOMAIN: 'example.com',
+    JWT_PRIVATE_KEY: testPrivateKey,
+    JWT_PUBLIC_KEY: testPublicKey,
+    NODE_AGENT_REQUEST_TIMEOUT_MS: '30000',
+  } as any;
+}
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -833,47 +850,19 @@ describe('JWT Token Contract', () => {
 // =============================================================================
 
 describe('Node Agent client functions send correct payloads', () => {
+  beforeEach(() => {
+    fetchWithTimeoutMock.mockReset();
+  });
+
   it('createWorkspaceOnNode sends correct JSON body', async () => {
-    // Mock the JWT signing
-    vi.doMock('../../src/services/jwt', () => ({
-      signNodeManagementToken: vi.fn().mockResolvedValue({
-        token: 'mock-jwt',
-        expiresAt: new Date().toISOString(),
-      }),
-    }));
+    fetchWithTimeoutMock.mockResolvedValue(
+      new Response(JSON.stringify({ workspaceId: 'ws-test', status: 'creating' }), {
+        status: 202,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
 
-    vi.doMock('../../src/services/telemetry', () => ({
-      recordNodeRoutingMetric: vi.fn(),
-    }));
-
-    let capturedBody: string | null = null;
-    let capturedHeaders: Headers | null = null;
-    let capturedUrl: string | null = null;
-
-    vi.doMock('../../src/services/fetch-timeout', () => ({
-      fetchWithTimeout: vi.fn().mockImplementation((url: string, init: RequestInit) => {
-        capturedUrl = url;
-        capturedHeaders = new Headers(init.headers);
-        capturedBody = init.body as string;
-        return Promise.resolve(
-          new Response(JSON.stringify({ workspaceId: 'ws-test', status: 'creating' }), {
-            status: 202,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        );
-      }),
-      getTimeoutMs: vi.fn().mockReturnValue(30000),
-    }));
-
-    // Dynamic import to pick up mocks
-    const { createWorkspaceOnNode } = await import('../../src/services/node-agent');
-
-    const env = {
-      BASE_DOMAIN: 'example.com',
-      NODE_AGENT_REQUEST_TIMEOUT_MS: '30000',
-    } as any;
-
-    await createWorkspaceOnNode('node-abc', env, 'user-123', {
+    await createWorkspaceOnNode('node-abc', makeNodeAgentTestEnv(), 'user-123', {
       workspaceId: 'ws-test',
       repository: 'owner/repo',
       branch: 'main',
@@ -883,12 +872,15 @@ describe('Node Agent client functions send correct payloads', () => {
       githubId: '42',
     });
 
+    const [capturedUrl, capturedInit] = fetchWithTimeoutMock.mock.calls[0] as [string, RequestInit];
+    const capturedHeaders = new Headers(capturedInit.headers);
+
     // Verify URL
     expect(capturedUrl).toContain('/workspaces');
     expect(capturedUrl).toContain('node-abc.vm.example.com');
 
     // Verify body shape matches contract
-    const parsedBody = JSON.parse(capturedBody!);
+    const parsedBody = JSON.parse(capturedInit.body as string);
     const result = CreateWorkspaceAgentRequestSchema.safeParse(parsedBody);
     expect(result.success).toBe(true);
     expect(parsedBody.workspaceId).toBe('ws-test');
@@ -897,102 +889,56 @@ describe('Node Agent client functions send correct payloads', () => {
     expect(parsedBody.callbackToken).toBe('cb-token');
 
     // Verify auth header
-    expect(capturedHeaders!.get('Authorization')).toBe('Bearer mock-jwt');
-    expect(capturedHeaders!.get('Content-Type')).toBe('application/json');
+    expect(capturedHeaders.get('Authorization')).toMatch(/^Bearer ey/);
+    expect(capturedHeaders.get('Content-Type')).toBe('application/json');
   });
 
   it('deleteWorkspaceOnNode sends DELETE with correct path', async () => {
-    vi.resetModules();
+    fetchWithTimeoutMock.mockResolvedValue(
+      new Response(JSON.stringify({ success: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
 
-    vi.doMock('../../src/services/jwt', () => ({
-      signNodeManagementToken: vi.fn().mockResolvedValue({
-        token: 'mock-jwt',
-        expiresAt: new Date().toISOString(),
-      }),
-    }));
+    await deleteWorkspaceOnNode('node-abc', 'ws-delete-me', makeNodeAgentTestEnv(), 'user-123');
 
-    vi.doMock('../../src/services/telemetry', () => ({
-      recordNodeRoutingMetric: vi.fn(),
-    }));
-
-    let capturedMethod: string | null = null;
-    let capturedUrl: string | null = null;
-
-    vi.doMock('../../src/services/fetch-timeout', () => ({
-      fetchWithTimeout: vi.fn().mockImplementation((url: string, init: RequestInit) => {
-        capturedUrl = url;
-        capturedMethod = init.method ?? 'GET';
-        return Promise.resolve(
-          new Response(JSON.stringify({ success: true }), {
-            status: 200,
-            headers: { 'Content-Type': 'application/json' },
-          })
-        );
-      }),
-      getTimeoutMs: vi.fn().mockReturnValue(30000),
-    }));
-
-    const { deleteWorkspaceOnNode } = await import('../../src/services/node-agent');
-
-    await deleteWorkspaceOnNode('node-abc', 'ws-delete-me', {} as any, 'user-123');
-
-    expect(capturedMethod).toBe('DELETE');
+    const [capturedUrl, capturedInit] = fetchWithTimeoutMock.mock.calls[0] as [string, RequestInit];
+    expect(capturedInit.method).toBe('DELETE');
     expect(capturedUrl).toContain('/workspaces/ws-delete-me');
   });
 
   it('createAgentSessionOnNode sends correct JSON body', async () => {
-    vi.resetModules();
-
-    vi.doMock('../../src/services/jwt', () => ({
-      signNodeManagementToken: vi.fn().mockResolvedValue({
-        token: 'mock-jwt',
-        expiresAt: new Date().toISOString(),
-      }),
-    }));
-
-    vi.doMock('../../src/services/telemetry', () => ({
-      recordNodeRoutingMetric: vi.fn(),
-    }));
-
-    let capturedBody: string | null = null;
-
-    vi.doMock('../../src/services/fetch-timeout', () => ({
-      fetchWithTimeout: vi.fn().mockImplementation((_url: string, init: RequestInit) => {
-        capturedBody = init.body as string;
-        return Promise.resolve(
-          new Response(
-            JSON.stringify({
-              id: 'sess-new',
-              workspaceId: 'ws-test',
-              status: 'running',
-              createdAt: '2024-01-01T00:00:00Z',
-              updatedAt: '2024-01-01T00:00:00Z',
-            }),
-            {
-              status: 201,
-              headers: { 'Content-Type': 'application/json' },
-            }
-          )
-        );
-      }),
-      getTimeoutMs: vi.fn().mockReturnValue(30000),
-    }));
-
-    const { createAgentSessionOnNode } = await import('../../src/services/node-agent');
+    fetchWithTimeoutMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          id: 'sess-new',
+          workspaceId: 'ws-test',
+          status: 'running',
+          createdAt: '2024-01-01T00:00:00Z',
+          updatedAt: '2024-01-01T00:00:00Z',
+        }),
+        {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
+    );
 
     await createAgentSessionOnNode(
       'node-abc',
       'ws-test',
       'sess-new',
       'Test Session',
-      {} as any,
+      makeNodeAgentTestEnv(),
       'user-123',
       'chat-123',
       'proj-123',
-      { url: 'https://api.example.com/mcp', token: 'mcp-token' },
+      { url: 'https://api.example.com/mcp', token: 'mcp-token' }
     );
 
-    const parsedBody = JSON.parse(capturedBody!);
+    const [, capturedInit] = fetchWithTimeoutMock.mock.calls[0] as [string, RequestInit];
+    const parsedBody = JSON.parse(capturedInit.body as string);
     const result = CreateAgentSessionAgentRequestSchema.safeParse(parsedBody);
     expect(result.success).toBe(true);
     expect(parsedBody.sessionId).toBe('sess-new');
@@ -1005,93 +951,90 @@ describe('Node Agent client functions send correct payloads', () => {
   });
 
   it('node agent request throws on non-ok response', async () => {
-    vi.resetModules();
-
-    vi.doMock('../../src/services/jwt', () => ({
-      signNodeManagementToken: vi.fn().mockResolvedValue({
-        token: 'mock-jwt',
-        expiresAt: new Date().toISOString(),
-      }),
-    }));
-
-    vi.doMock('../../src/services/telemetry', () => ({
-      recordNodeRoutingMetric: vi.fn(),
-    }));
-
-    vi.doMock('../../src/services/fetch-timeout', () => ({
-      fetchWithTimeout: vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: 'workspace not found' }), {
-          status: 404,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      ),
-      getTimeoutMs: vi.fn().mockReturnValue(30000),
-    }));
-
-    const { deleteWorkspaceOnNode } = await import('../../src/services/node-agent');
+    fetchWithTimeoutMock.mockResolvedValue(
+      new Response(JSON.stringify({ error: 'workspace not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
 
     await expect(
-      deleteWorkspaceOnNode('node-abc', 'ws-missing', {} as any, 'user-123')
+      deleteWorkspaceOnNode('node-abc', 'ws-missing', makeNodeAgentTestEnv(), 'user-123')
     ).rejects.toThrow('Node Agent request failed: 404');
   });
 
   it('node agent request detects Worker loop-back 404 and provides clear error', async () => {
-    vi.resetModules();
-
-    vi.doMock('../../src/services/jwt', () => ({
-      signNodeManagementToken: vi.fn().mockResolvedValue({
-        token: 'mock-jwt',
-        expiresAt: new Date().toISOString(),
-      }),
-    }));
-
-    vi.doMock('../../src/services/telemetry', () => ({
-      recordNodeRoutingMetric: vi.fn(),
-    }));
-
     // Simulate the API Worker's own 404 response (loop-back via wildcard DNS)
-    vi.doMock('../../src/services/fetch-timeout', () => ({
-      fetchWithTimeout: vi.fn().mockResolvedValue(
-        new Response(JSON.stringify({ error: 'NOT_FOUND', message: 'Endpoint not found' }), {
-          status: 404,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      ),
-      getTimeoutMs: vi.fn().mockReturnValue(30000),
-    }));
-
-    const { deleteWorkspaceOnNode } = await import('../../src/services/node-agent');
+    fetchWithTimeoutMock.mockResolvedValue(
+      new Response(JSON.stringify({ error: 'NOT_FOUND', message: 'Endpoint not found' }), {
+        status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
 
     await expect(
-      deleteWorkspaceOnNode('node-abc', 'ws-test', {} as any, 'user-123')
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
     ).rejects.toThrow('Node Agent unreachable: DNS record for node-abc.vm may be missing');
   });
 
   it('node agent request throws on timeout', async () => {
-    vi.resetModules();
-
-    vi.doMock('../../src/services/jwt', () => ({
-      signNodeManagementToken: vi.fn().mockResolvedValue({
-        token: 'mock-jwt',
-        expiresAt: new Date().toISOString(),
-      }),
-    }));
-
-    vi.doMock('../../src/services/telemetry', () => ({
-      recordNodeRoutingMetric: vi.fn(),
-    }));
-
-    vi.doMock('../../src/services/fetch-timeout', () => ({
-      fetchWithTimeout: vi.fn().mockRejectedValue(
-        new Error('Request timed out after 30000ms: https://node-abc.vm.example.com:8443/workspaces/ws-test')
-      ),
-      getTimeoutMs: vi.fn().mockReturnValue(30000),
-    }));
-
-    const { deleteWorkspaceOnNode } = await import('../../src/services/node-agent');
+    fetchWithTimeoutMock.mockRejectedValue(
+      new Error(
+        'Request timed out after 30000ms: https://node-abc.vm.example.com:8443/workspaces/ws-test'
+      )
+    );
 
     await expect(
-      deleteWorkspaceOnNode('node-abc', 'ws-test', {} as any, 'user-123')
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
     ).rejects.toThrow('Request timed out');
+  });
+
+  it('classifies a runtime-recovery error body into a typed NodeAgentRequestError', async () => {
+    fetchWithTimeoutMock.mockResolvedValue(
+      new Response(JSON.stringify({ error: 'RUNTIME_RECOVERING' }), {
+        status: 409,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    await expect(
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
+    ).rejects.toMatchObject({
+      statusCode: 503,
+      error: 'RUNTIME_RECOVERING',
+      message: 'Instant session interrupted; restoring the last safe checkpoint.',
+    });
+  });
+
+  it('never throws while probing a non-JSON error body — falls back to the generic error', async () => {
+    // Regression guard for the recovery-payload probe: `JSON.parse(body)`
+    // used to be blindly cast (`as { error?: unknown; message?: unknown }`).
+    // A garbage body must still fall through to the existing generic
+    // "Node Agent request failed" handling, not throw from inside the probe.
+    fetchWithTimeoutMock.mockResolvedValue(
+      new Response('<html>upstream gateway error</html>', {
+        status: 502,
+        headers: { 'Content-Type': 'text/html' },
+      })
+    );
+
+    await expect(
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
+    ).rejects.toThrow('Node Agent request failed: 502');
+  });
+
+  it('never throws while probing a JSON array error body — falls back to the generic error', async () => {
+    // Arrays are typeof 'object' in JS; the probe must not mistake one for a
+    // valid { error, message } record and must still fall back cleanly.
+    fetchWithTimeoutMock.mockResolvedValue(
+      new Response(JSON.stringify(['unexpected', 'shape']), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    await expect(
+      deleteWorkspaceOnNode('node-abc', 'ws-test', makeNodeAgentTestEnv(), 'user-123')
+    ).rejects.toThrow('Node Agent request failed: 500');
   });
 });

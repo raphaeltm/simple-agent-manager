@@ -8,6 +8,7 @@
  * Empty/undefined filter fields mean "match all" for that dimension.
  */
 import type { GitHubTriggerFilters } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
 
 /** Parsed GitHub webhook event payload (the fields we care about for filtering). */
 export interface GitHubWebhookEvent {
@@ -53,7 +54,10 @@ export function evaluateFilters(
   // Action filter
   if (filters.actions && filters.actions.length > 0) {
     if (!event.action || !filters.actions.includes(event.action)) {
-      return { matched: false, reason: `action '${event.action ?? ''}' not in [${filters.actions.join(', ')}]` };
+      return {
+        matched: false,
+        reason: `action '${event.action ?? ''}' not in [${filters.actions.join(', ')}]`,
+      };
     }
   }
 
@@ -111,7 +115,10 @@ export function evaluateFilters(
     }
     const branchSet = new Set(filters.branches.map((b: string) => b.toLowerCase()));
     if (!branchSet.has(branch.toLowerCase())) {
-      return { matched: false, reason: `branch '${branch}' not in [${filters.branches.join(', ')}]` };
+      return {
+        matched: false,
+        reason: `branch '${branch}' not in [${filters.branches.join(', ')}]`,
+      };
     }
   }
 
@@ -143,60 +150,136 @@ function getEventBranch(event: GitHubWebhookEvent): string | undefined {
   return undefined;
 }
 
+// =============================================================================
+// parseWebhookPayload schema
+// =============================================================================
+//
+// Field-level building blocks matching the defensive coercions the schema
+// replaces: `String(x ?? '')` becomes "valid string, else fallback to ''";
+// `typeof x === 'T' ? x : undefined` becomes "valid T, else fallback to
+// undefined". `v.fallback` degrades independently per field (it does not
+// reject the enclosing object), so one malformed nested value can never fail
+// parsing of its siblings — matching the original per-field ternary coercions,
+// which also never threw regardless of payload shape.
+const RequiredStringSchema = v.fallback(v.string(), '');
+const OptionalStringSchema = v.fallback(v.optional(v.string()), undefined);
+const OptionalBooleanSchema = v.fallback(v.optional(v.boolean()), undefined);
+const RequiredNumberSchema = v.fallback(v.number(), 0);
+
+const GitHubWebhookLabelSchema = v.object({ name: RequiredStringSchema });
+const LabelsFieldSchema = v.fallback(
+  v.optional(v.array(v.fallback(GitHubWebhookLabelSchema, { name: '' }))),
+  undefined
+);
+
+const GitHubWebhookRefSchema = v.object({ ref: RequiredStringSchema });
+const RefFieldSchema = v.fallback(v.optional(GitHubWebhookRefSchema), undefined);
+
+const GitHubWebhookSenderSchema = v.object({
+  login: RequiredStringSchema,
+  type: OptionalStringSchema,
+});
+const GitHubWebhookRepositorySchema = v.object({
+  full_name: RequiredStringSchema,
+  default_branch: OptionalStringSchema,
+});
+const GitHubWebhookIssueSchema = v.object({
+  number: RequiredNumberSchema,
+  title: RequiredStringSchema,
+  body: OptionalStringSchema,
+  labels: LabelsFieldSchema,
+  draft: OptionalBooleanSchema,
+});
+const GitHubWebhookPullRequestSchema = v.object({
+  number: RequiredNumberSchema,
+  title: RequiredStringSchema,
+  body: OptionalStringSchema,
+  labels: LabelsFieldSchema,
+  draft: OptionalBooleanSchema,
+  head: RefFieldSchema,
+  base: RefFieldSchema,
+});
+const GitHubWebhookCommentSchema = v.object({ body: OptionalStringSchema });
+const GitHubWebhookHeadCommitSchema = v.object({
+  id: RequiredStringSchema,
+  message: OptionalStringSchema,
+});
+
+/**
+ * Shape of the parts of a raw GitHub webhook JSON payload that
+ * `parseWebhookPayload` consumes. Loose by design — only the fields the
+ * filter engine reads are declared, unknown keys (e.g. `installation`) are
+ * ignored, and every field falls back to a safe default rather than failing
+ * the parse, so this can never throw regardless of payload shape.
+ */
+const GitHubWebhookPayloadSchema = v.object({
+  action: OptionalStringSchema,
+  sender: v.fallback(v.optional(GitHubWebhookSenderSchema), undefined),
+  repository: v.fallback(v.optional(GitHubWebhookRepositorySchema), undefined),
+  issue: v.fallback(v.optional(GitHubWebhookIssueSchema), undefined),
+  pull_request: v.fallback(v.optional(GitHubWebhookPullRequestSchema), undefined),
+  comment: v.fallback(v.optional(GitHubWebhookCommentSchema), undefined),
+  ref: OptionalStringSchema,
+  head_commit: v.fallback(v.optional(GitHubWebhookHeadCommitSchema), undefined),
+});
+
 /**
  * Parse a raw GitHub webhook payload into our normalized event shape.
  * This extracts only the fields we need for filtering.
+ *
+ * Never throws: `payload` may be an arbitrary webhook body, and every field
+ * (including the top-level shape itself) degrades to a safe default via
+ * `safeParse` rather than raising, matching the pre-existing defensive
+ * behavior this replaces.
  */
 export function parseWebhookPayload(
   eventType: string,
   payload: Record<string, unknown>
 ): GitHubWebhookEvent {
-  const sender = payload.sender as Record<string, unknown> | undefined;
-  const repository = payload.repository as Record<string, unknown> | undefined;
-  const issue = payload.issue as Record<string, unknown> | undefined;
-  const pullRequest = payload.pull_request as Record<string, unknown> | undefined;
-  const comment = payload.comment as Record<string, unknown> | undefined;
+  const result = v.safeParse(GitHubWebhookPayloadSchema, payload);
+  return { event: eventType, ...(result.success ? result.output : {}) };
+}
 
-  return {
-    event: eventType,
-    action: typeof payload.action === 'string' ? payload.action : undefined,
-    sender: sender ? {
-      login: String(sender.login ?? ''),
-      type: typeof sender.type === 'string' ? sender.type : undefined,
-    } : undefined,
-    repository: repository ? {
-      full_name: String(repository.full_name ?? ''),
-      default_branch: typeof repository.default_branch === 'string' ? repository.default_branch : undefined,
-    } : undefined,
-    issue: issue ? {
-      number: typeof issue.number === 'number' ? issue.number : 0,
-      title: String(issue.title ?? ''),
-      body: typeof issue.body === 'string' ? issue.body : undefined,
-      labels: Array.isArray(issue.labels)
-        ? issue.labels.map((l: unknown) => ({ name: String((l as Record<string, unknown>)?.name ?? '') }))
-        : undefined,
-      draft: typeof issue.draft === 'boolean' ? issue.draft : undefined,
-    } : undefined,
-    pull_request: pullRequest ? {
-      number: typeof pullRequest.number === 'number' ? pullRequest.number : 0,
-      title: String(pullRequest.title ?? ''),
-      body: typeof pullRequest.body === 'string' ? pullRequest.body : undefined,
-      labels: Array.isArray(pullRequest.labels)
-        ? pullRequest.labels.map((l: unknown) => ({ name: String((l as Record<string, unknown>)?.name ?? '') }))
-        : undefined,
-      draft: typeof pullRequest.draft === 'boolean' ? pullRequest.draft : undefined,
-      head: pullRequest.head ? { ref: String((pullRequest.head as Record<string, unknown>).ref ?? '') } : undefined,
-      base: pullRequest.base ? { ref: String((pullRequest.base as Record<string, unknown>).ref ?? '') } : undefined,
-    } : undefined,
-    comment: comment ? {
-      body: typeof comment.body === 'string' ? comment.body : undefined,
-    } : undefined,
-    ref: typeof payload.ref === 'string' ? payload.ref : undefined,
-    head_commit: payload.head_commit ? {
-      id: String((payload.head_commit as Record<string, unknown>).id ?? ''),
-      message: typeof (payload.head_commit as Record<string, unknown>).message === 'string'
-        ? (payload.head_commit as Record<string, unknown>).message as string
-        : undefined,
-    } : undefined,
-  };
+// =============================================================================
+// Stored GitHubTriggerFilters (github_trigger_configs.filters_json) parsing
+// =============================================================================
+
+/** Validated shape of a stored `filters_json` column value. Every field is
+ * optional — an empty object is a valid, safe "match everything" default. */
+const GitHubTriggerFiltersSchema = v.object({
+  actions: v.optional(v.array(v.string())),
+  labels: v.optional(v.array(v.string())),
+  ignoreActors: v.optional(v.array(v.string())),
+  commandPrefix: v.optional(v.string()),
+  bodyContains: v.optional(v.string()),
+  branches: v.optional(v.array(v.string())),
+  ignoreDrafts: v.optional(v.boolean()),
+});
+
+export interface ParsedGitHubTriggerFilters {
+  filters: GitHubTriggerFilters;
+  /** False when `raw` was not valid JSON, or did not match the filters shape. */
+  valid: boolean;
+}
+
+/**
+ * Parse a stored `github_trigger_configs.filters_json` value.
+ *
+ * Never throws — malformed JSON or an unexpected shape returns
+ * `{ filters: {}, valid: false }` (every filter field is optional, so `{}` is
+ * itself a valid, safe "match everything" filter set). This function is pure
+ * (no logging) so it stays consistent with the rest of this module; callers
+ * decide whether an invalid row should be logged and whether it is safe to
+ * proceed with the `{}` fallback (a display/read path) or must be treated as
+ * untrusted and skipped (a path that would auto-fire a task).
+ */
+export function parseGitHubTriggerFiltersJson(raw: string): ParsedGitHubTriggerFilters {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { filters: {}, valid: false };
+  }
+  const result = v.safeParse(GitHubTriggerFiltersSchema, parsed);
+  return result.success ? { filters: result.output, valid: true } : { filters: {}, valid: false };
 }

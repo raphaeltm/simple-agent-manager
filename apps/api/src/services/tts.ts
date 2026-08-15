@@ -94,7 +94,10 @@ export function getTTSConfig(env: TTSEnvVars): TTSConfig {
     maxChunks: parsePositiveInt(env.TTS_MAX_CHUNKS, DEFAULT_TTS_MAX_CHUNKS),
     summaryThreshold: parsePositiveInt(env.TTS_SUMMARY_THRESHOLD, DEFAULT_TTS_SUMMARY_THRESHOLD),
     retryAttempts: parsePositiveInt(env.TTS_RETRY_ATTEMPTS, DEFAULT_TTS_RETRY_ATTEMPTS),
-    retryBaseDelayMs: parsePositiveInt(env.TTS_RETRY_BASE_DELAY_MS, DEFAULT_TTS_RETRY_BASE_DELAY_MS),
+    retryBaseDelayMs: parsePositiveInt(
+      env.TTS_RETRY_BASE_DELAY_MS,
+      DEFAULT_TTS_RETRY_BASE_DELAY_MS
+    ),
   };
 }
 
@@ -108,7 +111,7 @@ export async function retryWithBackoff<T>(
   fn: () => Promise<T>,
   maxAttempts: number,
   baseDelayMs: number,
-  label: string,
+  label: string
 ): Promise<T> {
   let lastError: Error | undefined;
 
@@ -183,7 +186,7 @@ Rules:
 export async function cleanTextForSpeech(
   text: string,
   ai: Ai,
-  config: TTSConfig = {},
+  config: TTSConfig = {}
 ): Promise<string> {
   const cleanupModel = config.cleanupModel ?? DEFAULT_TTS_CLEANUP_MODEL;
   const cleanupTimeoutMs = config.cleanupTimeoutMs ?? DEFAULT_TTS_CLEANUP_TIMEOUT_MS;
@@ -225,7 +228,7 @@ export async function cleanTextForSpeech(
       },
       retryAttempts,
       retryBaseDelayMs,
-      'cleanup',
+      'cleanup'
     );
 
     log.info('tts.cleanup_complete', {
@@ -254,7 +257,7 @@ export async function cleanTextForSpeech(
 export async function summarizeTextForSpeech(
   text: string,
   ai: Ai,
-  config: TTSConfig = {},
+  config: TTSConfig = {}
 ): Promise<string> {
   const cleanupModel = config.cleanupModel ?? DEFAULT_TTS_CLEANUP_MODEL;
   const cleanupTimeoutMs = config.cleanupTimeoutMs ?? DEFAULT_TTS_CLEANUP_TIMEOUT_MS;
@@ -291,7 +294,7 @@ export async function summarizeTextForSpeech(
       },
       retryAttempts,
       retryBaseDelayMs,
-      'summary',
+      'summary'
     );
 
     log.info('tts.summary_complete', {
@@ -321,20 +324,20 @@ function hasMarkdown(text: string): boolean {
 /** Regex-based markdown stripping fallback (less natural than LLM but works offline). */
 export function fallbackStripMarkdown(md: string): string {
   return md
-    .replace(/```[\s\S]*?```/g, '')           // fenced code blocks
-    .replace(/`([^`]+)`/g, '$1')              // inline code
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, '')     // images
-    .replace(/\[[^\]]*\]\(([^)]*)\)/g, '$1')  // links → URL text
-    .replace(/#{1,6}\s+/g, '')                // headings
-    .replace(/\*\*([^*]+)\*\*/g, '$1')        // bold
-    .replace(/__([^_]+)__/g, '$1')            // bold
-    .replace(/\*([^*]+)\*/g, '$1')            // italic
+    .replace(/```[\s\S]*?```/g, '') // fenced code blocks
+    .replace(/`([^`]+)`/g, '$1') // inline code
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, '') // images
+    .replace(/\[[^\]]*\]\(([^)]*)\)/g, '$1') // links → URL text
+    .replace(/#{1,6}\s+/g, '') // headings
+    .replace(/\*\*([^*]+)\*\*/g, '$1') // bold
+    .replace(/__([^_]+)__/g, '$1') // bold
+    .replace(/\*([^*]+)\*/g, '$1') // italic
     .replace(/(?<!\w)_([^_]+)_(?!\w)/g, '$1') // italic
-    .replace(/(^|\n)>\s?/g, '$1')             // blockquotes
-    .replace(/(^|\n)\s*[-*+]\s/g, '$1')       // unordered list markers
-    .replace(/(^|\n)\s*\d+\.\s/g, '$1')       // ordered list markers
+    .replace(/(^|\n)>\s?/g, '$1') // blockquotes
+    .replace(/(^|\n)\s*[-*+]\s/g, '$1') // unordered list markers
+    .replace(/(^|\n)\s*\d+\.\s/g, '$1') // ordered list markers
     .replace(/(^|\n)(---+|\*\*\*+|___+)\s*($|\n)/g, '$1') // horizontal rules
-    .replace(/\n{3,}/g, '\n\n')               // collapse excess newlines
+    .replace(/\n{3,}/g, '\n\n') // collapse excess newlines
     .trim();
 }
 
@@ -397,7 +400,7 @@ export function splitTextIntoChunks(text: string, maxChunkSize: number): string[
     remaining = remaining.slice(splitIndex).trim();
   }
 
-  return chunks.filter(c => c.length > 0);
+  return chunks.filter((c) => c.length > 0);
 }
 
 // ─── Audio Generation ────────────────────────────────────────────────────────
@@ -410,7 +413,7 @@ export function splitTextIntoChunks(text: string, maxChunkSize: number): string[
 export async function generateSpeechAudioChunk(
   text: string,
   ai: Ai,
-  config: TTSConfig = {},
+  config: TTSConfig = {}
 ): Promise<ArrayBuffer> {
   const model = config.model ?? DEFAULT_TTS_MODEL;
   const speaker = config.speaker ?? DEFAULT_TTS_SPEAKER;
@@ -429,16 +432,14 @@ export async function generateSpeechAudioChunk(
       const timeoutPromise = new Promise<never>((_, reject) => {
         timeoutHandle = setTimeout(
           () => reject(new Error(`TTS generation timed out after ${timeoutMs}ms`)),
-          timeoutMs,
+          timeoutMs
         );
       });
 
       const response = await Promise.race([
-        ai.run(
-          model as Parameters<typeof ai.run>[0],
-          { text, speaker, encoding } as never,
-          { returnRawResponse: true },
-        ),
+        ai.run(model as Parameters<typeof ai.run>[0], { text, speaker, encoding } as never, {
+          returnRawResponse: true,
+        }),
         timeoutPromise,
       ]);
       clearTimeout(timeoutHandle);
@@ -461,7 +462,7 @@ export async function generateSpeechAudioChunk(
     },
     retryAttempts,
     retryBaseDelayMs,
-    'tts_chunk',
+    'tts_chunk'
   );
 
   const durationMs = Date.now() - startTime;
@@ -490,14 +491,18 @@ export async function generateSpeechAudio(
   config: TTSConfig = {},
   r2?: R2Bucket,
   storageId?: string,
-  userId?: string,
+  userId?: string
 ): Promise<ArrayBuffer> {
   const chunkSize = config.chunkSize ?? DEFAULT_TTS_CHUNK_SIZE;
   const maxChunks = config.maxChunks ?? DEFAULT_TTS_MAX_CHUNKS;
   const chunks = splitTextIntoChunks(text, chunkSize);
 
   if (chunks.length === 1) {
-    return generateSpeechAudioChunk(chunks[0]!, ai, config);
+    const [chunk] = chunks;
+    if (chunk === undefined) {
+      throw new Error('Internal error: expected exactly one text chunk');
+    }
+    return generateSpeechAudioChunk(chunk, ai, config);
   }
 
   // Guard against CPU time exhaustion on Workers runtime
@@ -509,7 +514,7 @@ export async function generateSpeechAudio(
     });
     throw new Error(
       `Text produces ${chunks.length} chunks, exceeding limit of ${maxChunks}. ` +
-      `Use summary mode or reduce text length.`,
+        `Use summary mode or reduce text length.`
     );
   }
 
@@ -521,9 +526,7 @@ export async function generateSpeechAudio(
 
   // Generate audio for each chunk sequentially to avoid rate limiting
   const audioBuffers: ArrayBuffer[] = [];
-  for (let i = 0; i < chunks.length; i++) {
-    const chunkText = chunks[i]!;
-
+  for (const [i, chunkText] of chunks.entries()) {
     // Try per-chunk R2 cache first
     if (r2 && storageId && userId) {
       const chunkKey = buildChunkR2Key(storageId, userId, i, chunkText, config);
@@ -548,15 +551,17 @@ export async function generateSpeechAudio(
     if (r2 && storageId && userId) {
       const chunkKey = buildChunkR2Key(storageId, userId, i, chunkText, config);
       const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
-      await r2.put(chunkKey, buffer, {
-        httpMetadata: { contentType: audioContentType(encoding) },
-      }).catch((err) => {
-        // Non-fatal: chunk caching failure shouldn't abort generation
-        log.warn('tts.chunk_cache_store_failed', {
-          chunkKey,
-          error: err instanceof Error ? err.message : String(err),
+      await r2
+        .put(chunkKey, buffer, {
+          httpMetadata: { contentType: audioContentType(encoding) },
+        })
+        .catch((err) => {
+          // Non-fatal: chunk caching failure shouldn't abort generation
+          log.warn('tts.chunk_cache_store_failed', {
+            chunkKey,
+            error: err instanceof Error ? err.message : String(err),
+          });
         });
-      });
     }
 
     log.info('tts.chunk_progress', {
@@ -575,7 +580,7 @@ export async function generateSpeechAudio(
   // audio is what getAudioFromR2 serves.
   if (r2 && storageId && userId) {
     const chunkKeys = chunks.map((chunkText, i) =>
-      buildChunkR2Key(storageId, userId, i, chunkText, config),
+      buildChunkR2Key(storageId, userId, i, chunkText, config)
     );
     await Promise.allSettled(chunkKeys.map((key) => r2.delete(key))).catch(() => {
       // Non-fatal: cleanup failure doesn't affect the result
@@ -627,7 +632,7 @@ export function buildChunkR2Key(
   userId: string,
   chunkIndex: number,
   chunkText: string,
-  config: TTSConfig = {},
+  config: TTSConfig = {}
 ): string {
   const prefix = config.r2Prefix ?? DEFAULT_TTS_R2_PREFIX;
   const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
@@ -665,7 +670,7 @@ export async function getAudioFromR2(
   r2: R2Bucket,
   storageId: string,
   userId: string,
-  config: TTSConfig = {},
+  config: TTSConfig = {}
 ): Promise<R2ObjectBody | null> {
   const key = buildR2Key(storageId, userId, config);
   return r2.get(key);
@@ -677,7 +682,7 @@ export async function storeAudioInR2(
   storageId: string,
   userId: string,
   audio: ArrayBuffer,
-  config: TTSConfig = {},
+  config: TTSConfig = {}
 ): Promise<void> {
   const key = buildR2Key(storageId, userId, config);
   const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
@@ -718,7 +723,7 @@ export async function synthesizeSpeech(
   r2: R2Bucket,
   config: TTSConfig = {},
   userId: string = 'anonymous',
-  mode?: TTSMode,
+  mode?: TTSMode
 ): Promise<SynthesizeResult> {
   const encoding = config.encoding ?? DEFAULT_TTS_ENCODING;
   const maxTextLength = config.maxTextLength ?? DEFAULT_TTS_MAX_TEXT_LENGTH;

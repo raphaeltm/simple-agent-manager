@@ -152,6 +152,7 @@ func (s *Store) migrate() error {
 		migrateV8,
 		migrateV9,
 		migrateV10,
+		migrateV11,
 	}
 
 	for i := version; i < len(migrations); i++ {
@@ -165,6 +166,50 @@ func (s *Store) migrate() error {
 	}
 
 	return nil
+}
+
+// migrateV11 adds durable VM-side execution protocol state. Prompt text is
+// deliberately excluded: receipts retain only a request fingerprint and
+// lifecycle metadata needed for idempotency and reconciliation.
+func migrateV11(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS prompt_delivery_receipts (
+			workspace_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			delivery_id TEXT NOT NULL,
+			protocol_version INTEGER NOT NULL,
+			request_hash TEXT NOT NULL,
+			state TEXT NOT NULL,
+			runtime_id TEXT NOT NULL DEFAULT '',
+			stop_reason TEXT NOT NULL DEFAULT '',
+			error_code TEXT NOT NULL DEFAULT '',
+			accepted_at INTEGER NOT NULL,
+			completed_at INTEGER,
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (workspace_id, session_id, delivery_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_prompt_receipts_state
+			ON prompt_delivery_receipts(state, updated_at);
+		CREATE TABLE IF NOT EXISTS checkpoint_rollover_operations (
+			workspace_id TEXT NOT NULL,
+			session_id TEXT NOT NULL,
+			operation_id TEXT NOT NULL,
+			protocol_version INTEGER NOT NULL,
+			request_hash TEXT NOT NULL,
+			state TEXT NOT NULL,
+			runtime_id TEXT NOT NULL DEFAULT '',
+			forced INTEGER NOT NULL DEFAULT 0,
+			acp_session_id TEXT NOT NULL DEFAULT '',
+			error_code TEXT NOT NULL DEFAULT '',
+			error_message TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY (workspace_id, session_id, operation_id)
+		);
+		CREATE INDEX IF NOT EXISTS idx_rollover_operations_state
+			ON checkpoint_rollover_operations(state, updated_at);
+	`)
+	return err
 }
 
 // migrateV1 creates the initial tabs table.

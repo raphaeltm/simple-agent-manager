@@ -386,8 +386,7 @@ export function getMessages(
   // sees the most recent messages and can paginate backwards for older ones.
   let cumulativeBytes = 0;
   let safeCount = candidateRows.length;
-  for (let i = 0; i < candidateRows.length; i++) {
-    const row = candidateRows[i]!;
+  for (const [i, row] of candidateRows.entries()) {
     cumulativeBytes += estimateRowBytes(row);
     if (cumulativeBytes > RPC_SIZE_BUDGET_BYTES) {
       safeCount = i; // exclude this row and everything after

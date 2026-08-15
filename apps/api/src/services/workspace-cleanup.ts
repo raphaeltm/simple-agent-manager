@@ -8,6 +8,7 @@ import { stopComputeTracking } from './compute-usage';
 import { deleteWorkspaceOnNode } from './node-agent';
 import { stopNodeResources } from './nodes';
 import * as projectDataService from './project-data';
+import { deleteSessionSnapshotState } from './session-snapshots';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
 
@@ -65,8 +66,14 @@ async function cleanupWorkspaceNode(options: {
   }
 }
 
-export async function cleanupWorkspaceForDeletion(options: WorkspaceDeletionCleanupOptions): Promise<void> {
+export async function cleanupWorkspaceForDeletion(
+  options: WorkspaceDeletionCleanupOptions
+): Promise<void> {
   const { db, env, workspace, userId, waitUntil, logContext = {} } = options;
+
+  if (workspace.chatSessionId) {
+    await deleteSessionSnapshotState(db, env, workspace.chatSessionId);
+  }
 
   if (workspace.nodeId) {
     const [node] = await db
@@ -85,7 +92,8 @@ export async function cleanupWorkspaceForDeletion(options: WorkspaceDeletionClea
   }
 
   if (workspace.projectId && workspace.chatSessionId) {
-    const stopSession = projectDataService.stopSession(env, workspace.projectId, workspace.chatSessionId)
+    const stopSession = projectDataService
+      .stopSession(env, workspace.projectId, workspace.chatSessionId)
       .catch((e) => {
         log.warn('workspace.delete_stop_session_failed', {
           workspaceId: workspace.id,
@@ -94,7 +102,8 @@ export async function cleanupWorkspaceForDeletion(options: WorkspaceDeletionClea
           ...logContext,
         });
       });
-    const cleanupActivity = projectDataService.cleanupWorkspaceActivity(env, workspace.projectId, workspace.id)
+    const cleanupActivity = projectDataService
+      .cleanupWorkspaceActivity(env, workspace.projectId, workspace.id)
       .catch((e) => {
         log.warn('workspace.delete_cleanup_activity_failed', {
           workspaceId: workspace.id,

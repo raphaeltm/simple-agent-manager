@@ -15,7 +15,7 @@
  *                 → on `active`: no-op (was claimed between schedule and fire)
  *
  * Workspace auto-deletion:
- *   scheduleWorkspaceDeletion(workspaceId, userId) → stores pending deletion, recalculates alarm
+ *   scheduleWorkspaceDeletion(nodeId, workspaceId, userId) → stores pending deletion, recalculates alarm
  *   cancelWorkspaceDeletion(workspaceId) → removes pending deletion, recalculates alarm
  *   alarm() → also processes expired workspace deletions (calls VM agent, updates D1)
  *
@@ -65,6 +65,12 @@ interface StoredState {
 }
 
 interface PendingWorkspaceDeletion {
+  /**
+   * Stored with the deletion because newly provisioned conversation nodes have
+   * not necessarily entered the warm-pool state machine yet. Their DO can have
+   * no `state` record when the first workspace is put to sleep.
+   */
+  nodeId?: string;
   workspaceId: string;
   userId: string;
   deleteAt: number;
@@ -242,15 +248,20 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
    * Schedule a stopped workspace for automatic deletion after the configured TTL.
    * Called when a workspace transitions to 'stopped' status.
    */
-  async scheduleWorkspaceDeletion(workspaceId: string, userId: string): Promise<void> {
+  async scheduleWorkspaceDeletion(
+    nodeId: string,
+    workspaceId: string,
+    userId: string
+  ): Promise<void> {
     const ttl = this.getWorkspaceStoppedTtlMs();
     const deleteAt = Date.now() + ttl;
 
-    const entry: PendingWorkspaceDeletion = { workspaceId, userId, deleteAt };
+    const entry: PendingWorkspaceDeletion = { nodeId, workspaceId, userId, deleteAt };
     await this.ctx.storage.put(`ws-delete:${workspaceId}`, entry);
 
     log.info('node_lifecycle.workspace_deletion_scheduled', {
       workspaceId,
+      nodeId,
       userId,
       deleteAt: new Date(deleteAt).toISOString(),
       ttlMs: ttl,
@@ -285,16 +296,21 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
   async alarm(): Promise<void> {
     if (await deferAlarmWhenDisabled(this.env, this.ctx.storage, 'NodeLifecycle')) return;
 
+    // Workspace deletion is independent from warm-pool state. In particular,
+    // long-lived conversation workspaces can sleep before markIdle() has ever
+    // initialized the per-node state record.
+    await this.processExpiredDeletions();
+
     const state = await this.getStoredState();
-    if (!state) return;
+    if (!state) {
+      await this.recalculateAlarm(null);
+      return;
+    }
 
     if (state.status === 'destroying') {
       await this.handleDestroyingAlarm(state);
       return;
     }
-
-    // Process any expired workspace deletions
-    await this.processExpiredDeletions();
 
     // No-op if node was claimed (active)
     if (state.status === 'active') {
@@ -486,15 +502,27 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     const pending = await this.getPendingDeletions();
     const now = Date.now();
 
-    // Load state once to get nodeId — avoids N storage reads in the loop
+    // Legacy entries written before nodeId was embedded can still use warm-pool
+    // state when it exists. If neither source is available, retain and re-arm
+    // the entry rather than silently stranding it.
     const state = await this.getStoredState();
-    if (!state) return;
 
     for (const [key, entry] of pending) {
       if (entry.deleteAt > now) continue;
 
+      const nodeId = entry.nodeId ?? state?.nodeId;
+      if (!nodeId) {
+        log.error('node_lifecycle.workspace_deletion_missing_node_id', {
+          workspaceId: entry.workspaceId,
+          userId: entry.userId,
+        });
+        entry.deleteAt = now + DEFAULT_NODE_LIFECYCLE_ALARM_RETRY_MS;
+        await this.ctx.storage.put(key, entry);
+        continue;
+      }
+
       try {
-        await this.deleteWorkspace(state.nodeId, entry.workspaceId, entry.userId);
+        await this.deleteWorkspace(nodeId, entry.workspaceId, entry.userId);
         await this.ctx.storage.delete(key);
 
         log.info('node_lifecycle.workspace_auto_deleted', {
@@ -540,7 +568,7 @@ export class NodeLifecycle extends DurableObject<NodeLifecycleEnv> {
     // Update D1 workspace status to 'deleted'
     const now = new Date().toISOString();
     await this.env.DATABASE.prepare(
-      `UPDATE workspaces SET status = 'deleted', updated_at = ? WHERE id = ? AND status = 'stopped'`
+      `UPDATE workspaces SET status = 'deleted', updated_at = ? WHERE id = ? AND status IN ('stopped', 'sleeping')`
     )
       .bind(now, workspaceId)
       .run();

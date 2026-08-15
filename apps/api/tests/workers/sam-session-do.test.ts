@@ -10,7 +10,7 @@
  * - Rate limiting enforcement
  * - Chat route relay (POST /chat, GET /conversations, GET /conversations/:id/messages)
  */
-import { env } from 'cloudflare:test';
+import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 function getSamSession(userId: string) {
@@ -62,7 +62,9 @@ describe('SamSession DO — Message Persistence', () => {
           if (event.type === 'done' || event.type === 'error') {
             done = true;
           }
-        } catch { /* ignore parse errors */ }
+        } catch {
+          /* ignore parse errors */
+        }
       }
       buffer = lines[lines.length - 1] || '';
     }
@@ -73,16 +75,22 @@ describe('SamSession DO — Message Persistence', () => {
     // Verify conversation appears in list
     const listResp = await stub.fetch('https://sam-session/conversations');
     expect(listResp.status).toBe(200);
-    const listData = await listResp.json() as { conversations: Array<{ id: string; title: string }> };
+    const listData = (await listResp.json()) as {
+      conversations: Array<{ id: string; title: string }>;
+    };
     expect(listData.conversations.length).toBeGreaterThanOrEqual(1);
     const conv = listData.conversations.find((c) => c.id === conversationId);
     expect(conv).toBeTruthy();
     expect(conv!.title).toBe('Hello SAM');
 
     // Verify messages are persisted with correct sequence
-    const msgResp = await stub.fetch(`https://sam-session/conversations/${conversationId}/messages`);
+    const msgResp = await stub.fetch(
+      `https://sam-session/conversations/${conversationId}/messages`
+    );
     expect(msgResp.status).toBe(200);
-    const msgData = await msgResp.json() as { messages: Array<{ role: string; content: string; sequence: number }> };
+    const msgData = (await msgResp.json()) as {
+      messages: Array<{ role: string; content: string; sequence: number }>;
+    };
     expect(msgData.messages.length).toBeGreaterThanOrEqual(1);
 
     // First message should be user message with sequence 1
@@ -126,7 +134,9 @@ describe('SamSession DO — Message Persistence', () => {
 
     // Check messages have incrementing sequences
     const msgResp = await stub.fetch(`https://sam-session/conversations/${convId}/messages`);
-    const msgData = await msgResp.json() as { messages: Array<{ role: string; content: string; sequence: number }> };
+    const msgData = (await msgResp.json()) as {
+      messages: Array<{ role: string; content: string; sequence: number }>;
+    };
 
     const userMessages = msgData.messages.filter((m) => m.role === 'user');
     expect(userMessages.length).toBe(2);
@@ -178,7 +188,7 @@ describe('SamSession DO — Rate Limiting', () => {
       if (status === 200) await resp.text();
       else {
         if (status === 429) {
-          const body = await resp.json() as { error: string; retryAfter: number };
+          const body = (await resp.json()) as { error: string; retryAfter: number };
           expect(body.error).toBe('Rate limit exceeded');
           expect(body.retryAfter).toBeGreaterThan(0);
           expect(resp.headers.get('retry-after')).toBeTruthy();
@@ -197,7 +207,7 @@ describe('SamSession DO — Search', () => {
     const stub = getSamSession('test-user-search-empty');
     const resp = await stub.fetch('https://sam-session/search?query=');
     expect(resp.status).toBe(400);
-    const body = await resp.json() as { error: string };
+    const body = (await resp.json()) as { error: string };
     expect(body.error).toBe('Query is required');
   });
 
@@ -217,9 +227,11 @@ describe('SamSession DO — Search', () => {
     await chatResp.text(); // drain SSE
 
     // Search for the unique token
-    const searchResp = await stub.fetch('https://sam-session/search?query=XYZZY_UNIQUE_SEARCH_TOKEN');
+    const searchResp = await stub.fetch(
+      'https://sam-session/search?query=XYZZY_UNIQUE_SEARCH_TOKEN'
+    );
     expect(searchResp.status).toBe(200);
-    const body = await searchResp.json() as { results: Array<{ snippet: string; role: string }> };
+    const body = (await searchResp.json()) as { results: Array<{ snippet: string; role: string }> };
     expect(body.results.length).toBeGreaterThanOrEqual(1);
     expect(body.results[0]!.snippet).toContain('XYZZY_UNIQUE_SEARCH_TOKEN');
     expect(body.results[0]!.role).toBe('user');
@@ -241,9 +253,11 @@ describe('SamSession DO — Search', () => {
       await resp.text();
     }
 
-    const searchResp = await stub.fetch('https://sam-session/search?query=REPEATABLE_KEYWORD&limit=2');
+    const searchResp = await stub.fetch(
+      'https://sam-session/search?query=REPEATABLE_KEYWORD&limit=2'
+    );
     expect(searchResp.status).toBe(200);
-    const body = await searchResp.json() as { results: Array<{ snippet: string }> };
+    const body = (await searchResp.json()) as { results: Array<{ snippet: string }> };
     expect(body.results.length).toBeLessThanOrEqual(2);
   });
 });
@@ -265,7 +279,7 @@ describe('SamSession DO — Type Filter and Message Limit', () => {
 
     // List with type=human should return it
     const humanResp = await stub.fetch('https://sam-session/conversations?type=human');
-    const humanData = await humanResp.json() as { conversations: Array<{ type: string }> };
+    const humanData = (await humanResp.json()) as { conversations: Array<{ type: string }> };
     expect(humanData.conversations.length).toBeGreaterThanOrEqual(1);
     for (const c of humanData.conversations) {
       expect(c.type).toBe('human');
@@ -273,7 +287,7 @@ describe('SamSession DO — Type Filter and Message Limit', () => {
 
     // List with type=agent should return none (no agent conversations created)
     const agentResp = await stub.fetch('https://sam-session/conversations?type=agent');
-    const agentData = await agentResp.json() as { conversations: Array<{ type: string }> };
+    const agentData = (await agentResp.json()) as { conversations: Array<{ type: string }> };
     expect(agentData.conversations.length).toBe(0);
   });
 
@@ -291,7 +305,7 @@ describe('SamSession DO — Type Filter and Message Limit', () => {
     await chatResp.text();
 
     const listResp = await stub.fetch('https://sam-session/conversations');
-    const data = await listResp.json() as { conversations: Array<{ id: string; type: string }> };
+    const data = (await listResp.json()) as { conversations: Array<{ id: string; type: string }> };
     expect(data.conversations.length).toBeGreaterThanOrEqual(1);
     expect(data.conversations[0]!.type).toBe('human');
   });
@@ -315,20 +329,128 @@ describe('SamSession DO — Type Filter and Message Limit', () => {
       const r = await stub.fetch('https://sam-session/chat', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ conversationId: convId, message: msg, userId: 'test-user-msg-limit' }),
+        body: JSON.stringify({
+          conversationId: convId,
+          message: msg,
+          userId: 'test-user-msg-limit',
+        }),
       });
       await r.text();
     }
 
     // Request with limit=2
-    const limitResp = await stub.fetch(`https://sam-session/conversations/${convId}/messages?limit=2`);
-    const limitData = await limitResp.json() as { messages: Array<{ content: string }> };
+    const limitResp = await stub.fetch(
+      `https://sam-session/conversations/${convId}/messages?limit=2`
+    );
+    const limitData = (await limitResp.json()) as { messages: Array<{ content: string }> };
     expect(limitData.messages.length).toBe(2);
 
     // Request without limit should return more
     const allResp = await stub.fetch(`https://sam-session/conversations/${convId}/messages`);
-    const allData = await allResp.json() as { messages: Array<{ content: string }> };
+    const allData = (await allResp.json()) as { messages: Array<{ content: string }> };
     expect(allData.messages.length).toBeGreaterThan(2);
+  });
+});
+
+describe('SamSession DO — Row Fault Isolation', () => {
+  // REGRESSION (rule 50): `messages` rows were narrowed with a blind
+  // `as unknown as MessageRow[]` cast. `sequence` has INTEGER affinity but no
+  // STRICT typing, so real SQLite accepts and stores a non-numeric TEXT value
+  // as-is — the application itself never writes this; it's injected directly
+  // to simulate a legacy/corrupted row. A single malformed message must not
+  // 500 the whole conversation — it is skipped while the good messages either
+  // side of it still return.
+  it('skips a malformed message row (non-numeric sequence) and still returns the good messages', async () => {
+    const stub = getSamSession('test-user-row-fault-messages');
+
+    const first = await stub.fetch('https://sam-session/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message: 'Good message one', userId: 'test-user-row-fault-messages' }),
+    });
+    const text1 = await first.text();
+    const convId = text1.match(/"conversationId":"([^"]+)"/)?.[1];
+    expect(convId).toBeTruthy();
+
+    const second = await stub.fetch('https://sam-session/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        conversationId: convId,
+        message: 'Good message two',
+        userId: 'test-user-row-fault-messages',
+      }),
+    });
+    await second.text();
+
+    // Inject a malformed message directly — real embedded SQLite, bypassing
+    // the app layer entirely.
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `INSERT INTO messages (id, conversation_id, role, content, sequence, created_at)
+         VALUES (?, ?, 'user', 'corrupted sequence', 'not-a-number', datetime('now'))`,
+        'msg-malformed-row-fault-001',
+        convId
+      );
+    });
+
+    const msgResp = await stub.fetch(`https://sam-session/conversations/${convId}/messages`);
+    expect(msgResp.status).toBe(200);
+    const msgData = (await msgResp.json()) as { messages: Array<{ id: string; content: string }> };
+
+    const contents = msgData.messages.map((m) => m.content);
+    expect(contents).toContain('Good message one');
+    expect(contents).toContain('Good message two');
+    expect(msgData.messages.find((m) => m.id === 'msg-malformed-row-fault-001')).toBeUndefined();
+  });
+
+  // REGRESSION (rule 50 — single-row degrade): `rate_limits` was narrowed with
+  // a blind `as {...} | undefined` cast. `window_start` has INTEGER affinity;
+  // a corrupted value must degrade the rate limiter to "row missing" (which
+  // self-heals via `INSERT OR REPLACE`) rather than silently computing NaN
+  // comparisons forever. This is the discriminating assertion: the pre-fix
+  // blind cast feeds the corrupted string straight into `Number(row.window_start)`
+  // (=NaN); `NaN > windowMs` is always false, so the reset branch never fires
+  // and the corrupted value is never repaired. The fix treats the unparsable
+  // row as absent and re-seeds it with a valid numeric window_start.
+  it('self-heals a corrupted rate_limits row instead of leaving it permanently NaN', async () => {
+    const stub = getSamSession('test-user-row-fault-ratelimit');
+
+    // Seed the singleton row via a real request, then corrupt it directly.
+    const seed = await stub.fetch('https://sam-session/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        message: 'seed rate limit row',
+        userId: 'test-user-row-fault-ratelimit',
+      }),
+    });
+    await seed.text();
+
+    await runInDurableObject(stub, async (_instance, state) => {
+      state.storage.sql.exec(
+        `UPDATE rate_limits SET window_start = 'not-a-timestamp' WHERE id = 1`
+      );
+    });
+
+    const resp = await stub.fetch('https://sam-session/chat', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        message: 'after corruption',
+        userId: 'test-user-row-fault-ratelimit',
+      }),
+    });
+    expect(resp.status).toBe(200);
+    await resp.text();
+
+    const windowStart = await runInDurableObject(stub, async (_instance, state) => {
+      const row = state.storage.sql
+        .exec('SELECT window_start FROM rate_limits WHERE id = 1')
+        .toArray()[0] as { window_start: unknown } | undefined;
+      return row?.window_start;
+    });
+    expect(typeof windowStart).toBe('number');
   });
 });
 
@@ -342,7 +464,7 @@ describe('SamSession DO — Validation', () => {
       body: JSON.stringify({ message: '', userId: 'test-user-validation' }),
     });
     expect(resp.status).toBe(400);
-    const body = await resp.json() as { error: string };
+    const body = (await resp.json()) as { error: string };
     expect(body.error).toBe('Message is required');
   });
 
@@ -359,7 +481,7 @@ describe('SamSession DO — Validation', () => {
       }),
     });
     expect(resp.status).toBe(404);
-    const body = await resp.json() as { error: string };
+    const body = (await resp.json()) as { error: string };
     expect(body.error).toBe('Conversation not found');
   });
 

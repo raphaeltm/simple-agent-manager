@@ -207,8 +207,10 @@ func (h *SessionHost) reportActivity(activity string) {
 		RestartCount: restartCount,
 	}
 	if activity == "prompting" {
-		now := time.Now().UnixMilli()
-		payload.PromptStartedAt = &now
+		if startedAt, ok := h.activePromptStartedAt(); ok {
+			epoch := startedAt.UnixMilli()
+			payload.PromptStartedAt = &epoch
+		}
 	}
 	// Attach a redacted status error for prompting/error states so the control
 	// plane can persist a useful failure reason without leaking credentials.

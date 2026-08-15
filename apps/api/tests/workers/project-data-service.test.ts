@@ -102,6 +102,32 @@ describe('project-data service: session lifecycle', () => {
     expect(session!.endedAt).toBeTruthy();
   });
 
+  it('sleepSession is resumable and wakeSession atomically relinks runtime ownership', async () => {
+    const pid = 'svc-sleep-wake-session';
+    const sessionId = await svc.createSession(testEnv, pid, 'ws-old', 'Will sleep', 'task-old');
+
+    expect(await svc.sleepSession(testEnv, pid, sessionId)).toBe(true);
+    let session = await svc.getSession(testEnv, pid, sessionId);
+    expect(session).toMatchObject({
+      status: 'sleeping',
+      workspaceId: 'ws-old',
+      taskId: 'task-old',
+      endedAt: null,
+      isTerminated: false,
+    });
+
+    expect(await svc.wakeSession(testEnv, pid, sessionId, 'ws-new', 'task-new')).toBe(true);
+    session = await svc.getSession(testEnv, pid, sessionId);
+    expect(session).toMatchObject({
+      status: 'active',
+      workspaceId: 'ws-new',
+      taskId: 'task-new',
+      endedAt: null,
+      isTerminated: false,
+    });
+    expect(await svc.wakeSession(testEnv, pid, sessionId, 'ws-other', 'task-other')).toBe(false);
+  });
+
   it('failSession transitions to failed with error message', async () => {
     const pid = 'svc-fail-session';
     const sessionId = await svc.createSession(testEnv, pid, null, 'Will fail');

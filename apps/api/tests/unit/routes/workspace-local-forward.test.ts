@@ -3,7 +3,12 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mockGetSession = vi.fn();
 const mockSignLocalForwardToken = vi.fn();
 const mockVerifyLocalForwardToken = vi.fn();
-let workspaceResult: { id?: string; nodeId: string | null; status: string; userId?: string } | null = null;
+let workspaceResult: {
+  id?: string;
+  nodeId: string | null;
+  status: string;
+  userId?: string;
+} | null = null;
 
 class MockDurableObject {
   readonly __mock = true;
@@ -56,9 +61,13 @@ vi.mock('../../../src/services/jwt', () => ({
   verifyPortAccessToken: vi.fn(),
 }));
 
-vi.mock('cloudflare:workers', () => ({
-  DurableObject: MockDurableObject,
-}), { virtual: true });
+vi.mock(
+  'cloudflare:workers',
+  () => ({
+    DurableObject: MockDurableObject,
+  }),
+  { virtual: true }
+);
 
 vi.mock('@cloudflare/sandbox', () => ({
   Sandbox: MockSandbox,
@@ -105,12 +114,13 @@ describe('workspace local-forward routes', () => {
     });
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response('proxied', {
-          status: 200,
-          headers: [['Set-Cookie', 'app_session=next; Path=/']],
-        }),
-      ),
+      vi.fn(
+        async () =>
+          new Response('proxied', {
+            status: 200,
+            headers: [['Set-Cookie', 'app_session=next; Path=/']],
+          })
+      )
     );
   });
 
@@ -125,18 +135,21 @@ describe('workspace local-forward routes', () => {
           localAuthority: 'localhost:5173',
         }),
       }),
-      env,
+      env
     );
 
     expect(response.status).toBe(200);
-    expect(mockSignLocalForwardToken).toHaveBeenCalledWith({
-      userId: 'user-1',
-      workspaceId: 'ws-1',
-      nodeId: 'node-1',
-      remotePort: 5173,
-      mode: 'http',
-      localAuthority: 'localhost:5173',
-    }, env);
+    expect(mockSignLocalForwardToken).toHaveBeenCalledWith(
+      {
+        userId: 'user-1',
+        workspaceId: 'ws-1',
+        nodeId: 'node-1',
+        remotePort: 5173,
+        mode: 'http',
+        localAuthority: 'localhost:5173',
+      },
+      env
+    );
     expect(await response.json()).toMatchObject({
       token: 'forward-token',
       workspaceId: 'ws-1',
@@ -157,30 +170,56 @@ describe('workspace local-forward routes', () => {
           localAuthority: 'evil.example.com:5173',
         }),
       }),
-      env,
+      env
     );
 
     expect(response.status).toBe(400);
     expect(mockSignLocalForwardToken).not.toHaveBeenCalled();
   });
 
-  it.each([
-    'localhost:abc',
-    'localhost:5173/path',
-    'localhost:5173?x=1',
-    'user@localhost:5173',
-  ])('rejects malformed local authority %s during session creation', async (localAuthority) => {
+  it.each(['localhost:abc', 'localhost:5173/path', 'localhost:5173?x=1', 'user@localhost:5173'])(
+    'rejects malformed local authority %s during session creation',
+    async (localAuthority) => {
+      const response = await worker.default.fetch(
+        new Request('https://api.workspaces.example.com/api/workspaces/ws-1/forwards', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            remotePort: 5173,
+            mode: 'http',
+            localAuthority,
+          }),
+        }),
+        env
+      );
+
+      expect(response.status).toBe(400);
+      expect(mockSignLocalForwardToken).not.toHaveBeenCalled();
+    }
+  );
+
+  it('rejects a literal null JSON body without crashing', async () => {
     const response = await worker.default.fetch(
       new Request('https://api.workspaces.example.com/api/workspaces/ws-1/forwards', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          remotePort: 5173,
-          mode: 'http',
-          localAuthority,
-        }),
+        body: 'null',
       }),
-      env,
+      env
+    );
+
+    expect(response.status).toBe(400);
+    expect(mockSignLocalForwardToken).not.toHaveBeenCalled();
+  });
+
+  it('rejects a non-object JSON body without crashing', async () => {
+    const response = await worker.default.fetch(
+      new Request('https://api.workspaces.example.com/api/workspaces/ws-1/forwards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify([1, 2, 3]),
+      }),
+      env
     );
 
     expect(response.status).toBe(400);
@@ -189,27 +228,30 @@ describe('workspace local-forward routes', () => {
 
   it('proxies with internal VM token and strips spoofable browser headers', async () => {
     const response = await worker.default.fetch(
-      new Request('https://api.workspaces.example.com/api/workspaces/ws-1/local-forward/5173/path?x=1', {
-        headers: {
-          Authorization: 'Bearer app-token',
-          Cookie: 'app_cookie=abc',
-          Connection: 'X-App-Hop, X-Forwarded-For',
-          'X-App-Hop': 'must-strip',
-          'X-SAM-Forward-Token': 'forward-token',
-          'X-SAM-VM-Forward-Token': 'spoofed',
-          'X-Forwarded-For': 'spoofed',
-          'X-Forwarded-Host': 'evil.example.com',
-          Forwarded: 'for=evil',
-        },
-      }),
-      env,
+      new Request(
+        'https://api.workspaces.example.com/api/workspaces/ws-1/local-forward/5173/path?x=1',
+        {
+          headers: {
+            Authorization: 'Bearer app-token',
+            Cookie: 'app_cookie=abc',
+            Connection: 'X-App-Hop, X-Forwarded-For',
+            'X-App-Hop': 'must-strip',
+            'X-SAM-Forward-Token': 'forward-token',
+            'X-SAM-VM-Forward-Token': 'spoofed',
+            'X-Forwarded-For': 'spoofed',
+            'X-Forwarded-Host': 'evil.example.com',
+            Forwarded: 'for=evil',
+          },
+        }
+      ),
+      env
     );
 
     expect(response.status).toBe(200);
     expect(globalThis.fetch).toHaveBeenCalledOnce();
     const [proxiedUrl, init] = firstFetchCall();
     expect(new URL(String(proxiedUrl)).toString()).toBe(
-      'https://node-1.vm.workspaces.example.com:8443/workspaces/ws-1/local-forward/5173/path?x=1',
+      'https://node-1.vm.workspaces.example.com:8443/workspaces/ws-1/local-forward/5173/path?x=1'
     );
     const headers = init?.headers as Headers;
     expect(headers.get('Authorization')).toBe('Bearer app-token');
@@ -227,21 +269,25 @@ describe('workspace local-forward routes', () => {
   it('returns app redirects without following them with internal forwarding headers', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response(null, {
-          status: 302,
-          headers: { Location: 'http://localhost:5173/next' },
-        }),
-      ),
+      vi.fn(
+        async () =>
+          new Response(null, {
+            status: 302,
+            headers: { Location: 'http://localhost:5173/next' },
+          })
+      )
     );
 
     const response = await worker.default.fetch(
-      new Request('https://api.workspaces.example.com/api/workspaces/ws-1/local-forward/5173/login', {
-        headers: {
-          'X-SAM-Forward-Token': 'forward-token',
-        },
-      }),
-      env,
+      new Request(
+        'https://api.workspaces.example.com/api/workspaces/ws-1/local-forward/5173/login',
+        {
+          headers: {
+            'X-SAM-Forward-Token': 'forward-token',
+          },
+        }
+      ),
+      env
     );
 
     expect(response.status).toBe(302);
@@ -259,7 +305,7 @@ describe('workspace local-forward routes', () => {
           'X-SAM-Forward-Token': 'forward-token',
         },
       }),
-      env,
+      env
     );
 
     expect(response.status).toBe(501);

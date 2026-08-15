@@ -78,6 +78,16 @@ count is unbounded.
    A failed downstream observation must update cached demand to the safe idle
    state instead of leaving an open-loop retry condition.
 
+8. **Human-response deadlines require a delivery contract.** A control-plane
+   timeout MUST NOT fail work, stop a workspace, or delete recoverable state merely
+   because an internal notification or attention row exists. Before destructive
+   expiry, the system must have a persisted confirmation that at least one external
+   channel accepted delivery, or it must apply an env-configurable, bounded
+   escalation/grace policy with a hard maximum residence time. Keep human-response
+   timers and machine-liveness watchdogs as explicit, branch-specific classes; when
+   one loop handles both, add a discriminating regression test proving the
+   machine-liveness branch retains its intended terminal behavior.
+
 ## Required Tests
 
 For every new or changed sweep/reconcile candidate class, include a zombie
@@ -112,6 +122,10 @@ Before merging a PR that touches an alarm, cron, sweep, or reconcile loop:
 - [ ] Does every re-arming state have both a durable terminal condition and a
       bounded maximum age?
 - [ ] Can any log, tail, notification, or retry edge feed its own input?
+- [ ] If expiry assumes a human failed to respond, what persisted evidence proves a
+      channel accepted delivery, and what bounded grace applies when none did?
+- [ ] If the loop also handles machine-liveness markers, does a discriminating control
+      test prove that branch was not weakened?
 
 ## References
 

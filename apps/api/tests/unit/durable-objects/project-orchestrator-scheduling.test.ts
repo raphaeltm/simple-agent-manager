@@ -41,7 +41,7 @@ function makeSqlStorage(tables: Record<string, unknown[]> = {}) {
         if (tableName && data[tableName]) {
           const missionId = params[0];
           data[tableName] = data[tableName].filter(
-            (row) => (row as { mission_id?: unknown }).mission_id !== missionId,
+            (row) => (row as { mission_id?: unknown }).mission_id !== missionId
           );
         }
         return { rowsWritten: 1, toArray: () => [] };
@@ -98,15 +98,17 @@ interface MockProjectDataMessage {
   metadata?: Record<string, unknown> | null;
 }
 
-function makeMockEnv(overrides: {
-  tasks?: MockTaskRow[];
-  dependencies?: MockDependencyRow[];
-  handoffs?: unknown[];
-  sessions?: MockSessionRow[];
-  mission?: { budget_config: string | null };
-  project?: Record<string, unknown>;
-  user?: Record<string, unknown>;
-} = {}) {
+function makeMockEnv(
+  overrides: {
+    tasks?: MockTaskRow[];
+    dependencies?: MockDependencyRow[];
+    handoffs?: unknown[];
+    sessions?: MockSessionRow[];
+    mission?: { budget_config: string | null };
+    project?: Record<string, unknown>;
+    user?: Record<string, unknown>;
+  } = {}
+) {
   const {
     tasks = [],
     dependencies = [],
@@ -126,14 +128,16 @@ function makeMockEnv(overrides: {
 
   const projectDataStub = {
     ensureProjectId: vi.fn(),
-    createSession: vi.fn(async (_workspaceId: string | null, _topic: string | null, taskId: string | null) => {
-      const id = `session-${sessionsCreated.length}`;
-      sessionsCreated.push(id);
-      if (taskId) {
-        generatedSessions.set(taskId, { id, taskId, status: 'active' });
+    createSession: vi.fn(
+      async (_workspaceId: string | null, _topic: string | null, taskId: string | null) => {
+        const id = `session-${sessionsCreated.length}`;
+        sessionsCreated.push(id);
+        if (taskId) {
+          generatedSessions.set(taskId, { id, taskId, status: 'active' });
+        }
+        return id;
       }
-      return id;
-    }),
+    ),
     persistMessage: vi.fn(async (...args: unknown[]) => {
       messagesPersisted.push(args);
       return 'message-1';
@@ -180,8 +184,8 @@ function makeMockEnv(overrides: {
             // Schedulable tasks for auto-dispatch
             if (q.includes('SCHEDULER_STATE') && q.includes('SCHEDULABLE')) {
               return {
-                results: tasks.filter((task) =>
-                  task.scheduler_state === 'schedulable' && task.status === 'queued',
+                results: tasks.filter(
+                  (task) => task.scheduler_state === 'schedulable' && task.status === 'queued'
                 ),
               };
             }
@@ -196,7 +200,7 @@ function makeMockEnv(overrides: {
             // Active count
             if (q.includes('COUNT(*)')) {
               const active = tasks.filter((task) =>
-                ['in_progress', 'delegated', 'provisioning', 'running'].includes(task.status),
+                ['in_progress', 'delegated', 'provisioning', 'running'].includes(task.status)
               );
               return { cnt: active.length };
             }
@@ -206,22 +210,24 @@ function makeMockEnv(overrides: {
             }
             // Project info
             if (q.includes('FROM PROJECTS')) {
-              return project ?? {
-                repository: 'org/repo',
-                installation_id: 'inst-1',
-                default_branch: 'main',
-                default_vm_size: null,
-                default_provider: null,
-                default_location: null,
-                default_agent_type: null,
-                default_workspace_profile: null,
-                default_devcontainer_config_name: null,
-                task_execution_timeout_ms: null,
-                max_workspaces_per_node: null,
-                node_cpu_threshold_percent: null,
-                node_memory_threshold_percent: null,
-                warm_node_timeout_ms: null,
-              };
+              return (
+                project ?? {
+                  repository: 'org/repo',
+                  installation_id: 'inst-1',
+                  default_branch: 'main',
+                  default_vm_size: null,
+                  default_provider: null,
+                  default_location: null,
+                  default_agent_type: null,
+                  default_workspace_profile: null,
+                  default_devcontainer_config_name: null,
+                  task_execution_timeout_ms: null,
+                  max_workspaces_per_node: null,
+                  node_cpu_threshold_percent: null,
+                  node_memory_threshold_percent: null,
+                  warm_node_timeout_ms: null,
+                }
+              );
             }
             // User info
             if (q.includes('FROM USERS')) {
@@ -272,7 +278,8 @@ function makeTask(overrides: Partial<MockTaskRow> & { id: string }): MockTaskRow
 
 function getDecisionInserts(sql: SqlStorage) {
   return (sql.exec as ReturnType<typeof vi.fn>).mock.calls.filter(
-    (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).includes('INSERT INTO decision_log'),
+    (call: unknown[]) =>
+      typeof call[0] === 'string' && (call[0] as string).includes('INSERT INTO decision_log')
   );
 }
 
@@ -285,7 +292,9 @@ describe('Scheduling Cycle — Auto-Dispatch', () => {
 
   it('dispatches schedulable tasks via startTaskRunnerDO', async () => {
     const sql = makeSqlStorage({
-      orchestrator_missions: [{ mission_id: 'mission-1' }],
+      orchestrator_missions: [
+        { mission_id: 'mission-1', status: 'active', registered_at: Date.now() },
+      ],
     });
 
     const { env, startTaskRunnerCalls, messagesPersisted, sessionsCreated } = makeMockEnv({
@@ -328,7 +337,8 @@ describe('Scheduling Cycle — Auto-Dispatch', () => {
 
     // Verify the scheduling cycle updated orchestrator_missions
     const updateCalls = (sql.exec as ReturnType<typeof vi.fn>).mock.calls.filter(
-      (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).includes('UPDATE orchestrator_missions'),
+      (call: unknown[]) =>
+        typeof call[0] === 'string' && (call[0] as string).includes('UPDATE orchestrator_missions')
     );
     expect(updateCalls.length).toBeGreaterThan(0);
   });
@@ -347,18 +357,31 @@ describe('Scheduling Cycle — Auto-Dispatch', () => {
 
   it('logs decisions for concurrency limit hits', async () => {
     const sql = makeSqlStorage({
-      orchestrator_missions: [{ mission_id: 'mission-1' }],
+      orchestrator_missions: [
+        { mission_id: 'mission-1', status: 'active', registered_at: Date.now() },
+      ],
     });
 
     // 5 running tasks = at concurrency limit (default maxActiveTasksPerMission = 5)
     const tasks = [
-      ...Array.from({ length: 5 }, (_, i) => makeTask({
-        id: `running-${i}`, status: 'running', scheduler_state: 'running',
-      })),
+      ...Array.from({ length: 5 }, (_, i) =>
+        makeTask({
+          id: `running-${i}`,
+          status: 'running',
+          scheduler_state: 'running',
+        })
+      ),
       makeTask({
-        id: 'queued-1', status: 'queued', scheduler_state: 'schedulable',
-        title: 'Blocked', description: null, user_id: 'user-1', project_id: 'proj-1',
-        output_branch: null, dispatch_depth: 0, priority: 0,
+        id: 'queued-1',
+        status: 'queued',
+        scheduler_state: 'schedulable',
+        title: 'Blocked',
+        description: null,
+        user_id: 'user-1',
+        project_id: 'proj-1',
+        output_branch: null,
+        dispatch_depth: 0,
+        priority: 0,
       }),
     ];
 
@@ -368,8 +391,8 @@ describe('Scheduling Cycle — Auto-Dispatch', () => {
 
     // Should have logged a skip decision for concurrency limit
     const insertCalls = getDecisionInserts(sql);
-    const skipDecision = insertCalls.find(
-      (call: unknown[]) => (call as string[]).some(arg => typeof arg === 'string' && arg.includes('concurrency limit')),
+    const skipDecision = insertCalls.find((call: unknown[]) =>
+      (call as string[]).some((arg) => typeof arg === 'string' && arg.includes('concurrency limit'))
     );
     expect(skipDecision).toBeDefined();
   });
@@ -382,7 +405,9 @@ describe('Scheduling Cycle — Stall Detection', () => {
     });
 
     const sql = makeSqlStorage({
-      orchestrator_missions: [{ mission_id: 'mission-1' }],
+      orchestrator_missions: [
+        { mission_id: 'mission-1', status: 'active', registered_at: Date.now() },
+      ],
     });
 
     const stalledTime = new Date(Date.now() - 5000).toISOString(); // 5s ago
@@ -390,13 +415,13 @@ describe('Scheduling Cycle — Stall Detection', () => {
     const { env, mailboxMessages } = makeMockEnv({
       tasks: [
         makeTask({
-          id: 'stalled-task', status: 'running', scheduler_state: 'running',
+          id: 'stalled-task',
+          status: 'running',
+          scheduler_state: 'running',
           updated_at: stalledTime,
         }),
       ],
-      sessions: [
-        { id: 'session-stalled-task', taskId: 'stalled-task', status: 'active' },
-      ],
+      sessions: [{ id: 'session-stalled-task', taskId: 'stalled-task', status: 'active' }],
     });
 
     await runSchedulingCycle(sql, env, 'proj-1', stallConfig);
@@ -414,7 +439,7 @@ describe('Scheduling Cycle — Stall Detection', () => {
     expect(mailboxMessages[0]?.targetSessionId).not.toBe('stalled-task');
 
     const stallDecision = getDecisionInserts(sql).find((call: unknown[]) =>
-      call.includes('stall_detected'),
+      call.includes('stall_detected')
     );
     expect(stallDecision).toBeDefined();
     expect(stallDecision).toContain('Task stalled for 0min — interrupt sent');
@@ -425,7 +450,9 @@ describe('Scheduling Cycle — Stall Detection', () => {
       ORCHESTRATOR_STALL_TIMEOUT_MS: '1000',
     });
     const sql = makeSqlStorage({
-      orchestrator_missions: [{ mission_id: 'mission-1' }],
+      orchestrator_missions: [
+        { mission_id: 'mission-1', status: 'active', registered_at: Date.now() },
+      ],
     });
     const stalledTime = new Date(Date.now() - 5000).toISOString();
     const { env, mailboxMessages } = makeMockEnv({
@@ -443,7 +470,7 @@ describe('Scheduling Cycle — Stall Detection', () => {
 
     expect(mailboxMessages).toHaveLength(0);
     const missingSessionDecision = getDecisionInserts(sql).find((call: unknown[]) =>
-      call.includes('No active chat session found for stalled task; interrupt not enqueued'),
+      call.includes('No active chat session found for stalled task; interrupt not enqueued')
     );
     expect(missingSessionDecision).toBeDefined();
   });
@@ -454,7 +481,9 @@ describe('Scheduling Cycle — Handoff Routing', () => {
 
   it('enqueues handoff deliver message to the dependent task chat session id', async () => {
     const sql = makeSqlStorage({
-      orchestrator_missions: [{ mission_id: 'mission-1' }],
+      orchestrator_missions: [
+        { mission_id: 'mission-1', status: 'active', registered_at: Date.now() },
+      ],
     });
     const { env, mailboxMessages } = makeMockEnv({
       tasks: [
@@ -469,12 +498,8 @@ describe('Scheduling Cycle — Handoff Routing', () => {
           scheduler_state: 'blocked',
         }),
       ],
-      dependencies: [
-        { task_id: 'dependent-task', depends_on_task_id: 'source-task' },
-      ],
-      sessions: [
-        { id: 'session-dependent-task', taskId: 'dependent-task', status: 'active' },
-      ],
+      dependencies: [{ task_id: 'dependent-task', depends_on_task_id: 'source-task' }],
+      sessions: [{ id: 'session-dependent-task', taskId: 'dependent-task', status: 'active' }],
       handoffs: [
         {
           id: 'handoff-1',
@@ -512,7 +537,9 @@ describe('Scheduling Cycle — Handoff Routing', () => {
 
   it('logs and skips handoff routing when dependent task has no active session', async () => {
     const sql = makeSqlStorage({
-      orchestrator_missions: [{ mission_id: 'mission-1' }],
+      orchestrator_missions: [
+        { mission_id: 'mission-1', status: 'active', registered_at: Date.now() },
+      ],
     });
     const { env, mailboxMessages } = makeMockEnv({
       tasks: [
@@ -527,9 +554,7 @@ describe('Scheduling Cycle — Handoff Routing', () => {
           scheduler_state: 'blocked',
         }),
       ],
-      dependencies: [
-        { task_id: 'dependent-task', depends_on_task_id: 'source-task' },
-      ],
+      dependencies: [{ task_id: 'dependent-task', depends_on_task_id: 'source-task' }],
       handoffs: [
         {
           id: 'handoff-1',
@@ -545,15 +570,19 @@ describe('Scheduling Cycle — Handoff Routing', () => {
 
     expect(mailboxMessages).toHaveLength(0);
     const missingSessionDecision = getDecisionInserts(sql).find((call: unknown[]) =>
-      call.includes('No active chat session found for dependent task; handoff not enqueued'),
+      call.includes('No active chat session found for dependent task; handoff not enqueued')
     );
     expect(missingSessionDecision).toBeDefined();
-    const completedTaskRoutedDecision = getDecisionInserts(sql).find((call: unknown[]) =>
-      call.includes('source-task') && call.includes('handoff_routed'),
+    const completedTaskRoutedDecision = getDecisionInserts(sql).find(
+      (call: unknown[]) => call.includes('source-task') && call.includes('handoff_routed')
     );
     expect(completedTaskRoutedDecision).toBeUndefined();
-    const retryDecision = getDecisionInserts(sql).find((call: unknown[]) =>
-      call.includes('source-task') && call.includes('Handoff routing deferred: one or more dependent task sessions were unavailable'),
+    const retryDecision = getDecisionInserts(sql).find(
+      (call: unknown[]) =>
+        call.includes('source-task') &&
+        call.includes(
+          'Handoff routing deferred: one or more dependent task sessions were unavailable'
+        )
     );
     expect(retryDecision).toBeDefined();
   });
@@ -564,13 +593,27 @@ describe('Scheduling Cycle — Mission Completion', () => {
 
   it('marks mission as completed when all tasks are terminal', async () => {
     const sql = makeSqlStorage({
-      orchestrator_missions: [{ mission_id: 'mission-1' }],
+      orchestrator_missions: [
+        { mission_id: 'mission-1', status: 'active', registered_at: Date.now() },
+      ],
     });
 
     const { env } = makeMockEnv({
       tasks: [
-        { id: 'task-1', status: 'completed', scheduler_state: 'completed', mission_id: 'mission-1', updated_at: new Date().toISOString() },
-        { id: 'task-2', status: 'completed', scheduler_state: 'completed', mission_id: 'mission-1', updated_at: new Date().toISOString() },
+        {
+          id: 'task-1',
+          status: 'completed',
+          scheduler_state: 'completed',
+          mission_id: 'mission-1',
+          updated_at: new Date().toISOString(),
+        },
+        {
+          id: 'task-2',
+          status: 'completed',
+          scheduler_state: 'completed',
+          mission_id: 'mission-1',
+          updated_at: new Date().toISOString(),
+        },
       ],
     });
 
@@ -579,16 +622,18 @@ describe('Scheduling Cycle — Mission Completion', () => {
     // Should have updated mission status in D1
     const d1Calls = (env.DATABASE.prepare as ReturnType<typeof vi.fn>).mock.calls;
     const missionUpdate = d1Calls.find(
-      (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).includes('UPDATE missions SET status'),
+      (call: unknown[]) =>
+        typeof call[0] === 'string' && (call[0] as string).includes('UPDATE missions SET status')
     );
     expect(missionUpdate).toBeDefined();
 
     // Should have logged a completion decision
     const insertCalls = (sql.exec as ReturnType<typeof vi.fn>).mock.calls.filter(
-      (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).includes('INSERT INTO decision_log'),
+      (call: unknown[]) =>
+        typeof call[0] === 'string' && (call[0] as string).includes('INSERT INTO decision_log')
     );
-    const completionDecision = insertCalls.find(
-      (call: unknown[]) => (call as string[]).some(arg => typeof arg === 'string' && arg.includes('Mission completed')),
+    const completionDecision = insertCalls.find((call: unknown[]) =>
+      (call as string[]).some((arg) => typeof arg === 'string' && arg.includes('Mission completed'))
     );
     expect(completionDecision).toBeDefined();
   });
@@ -596,11 +641,13 @@ describe('Scheduling Cycle — Mission Completion', () => {
   it('terminalizes a zero-task mission after the configured grace period', async () => {
     const now = Date.now();
     const sql = makeSqlStorage({
-      orchestrator_missions: [{
-        mission_id: 'mission-1',
-        status: 'active',
-        registered_at: now - 11 * 60_000,
-      }],
+      orchestrator_missions: [
+        {
+          mission_id: 'mission-1',
+          status: 'active',
+          registered_at: now - 11 * 60_000,
+        },
+      ],
     });
     const { env, d1Runs } = makeMockEnv({ tasks: [] });
 
@@ -609,54 +656,65 @@ describe('Scheduling Cycle — Mission Completion', () => {
       zeroTaskGraceMs: 10 * 60_000,
     });
 
-    expect(d1Runs).toContainEqual(expect.objectContaining({
-      query: expect.stringContaining('UPDATE missions SET status'),
-      args: expect.arrayContaining(['completed', 'mission-1']),
-    }));
-    expect((sql as unknown as { _data: Record<string, unknown[]> })._data.orchestrator_missions)
-      .toEqual([]);
+    expect(d1Runs).toContainEqual(
+      expect.objectContaining({
+        query: expect.stringContaining('UPDATE missions SET status'),
+        args: expect.arrayContaining(['completed', 'mission-1']),
+      })
+    );
+    expect(
+      (sql as unknown as { _data: Record<string, unknown[]> })._data.orchestrator_missions
+    ).toEqual([]);
   });
 
   it('keeps a newly registered zero-task mission active during its grace period', async () => {
     const sql = makeSqlStorage({
-      orchestrator_missions: [{
-        mission_id: 'mission-1',
-        status: 'active',
-        registered_at: Date.now(),
-      }],
+      orchestrator_missions: [
+        {
+          mission_id: 'mission-1',
+          status: 'active',
+          registered_at: Date.now(),
+        },
+      ],
     });
     const { env, d1Runs } = makeMockEnv({ tasks: [] });
 
     await runSchedulingCycle(sql, env, 'proj-1', config);
 
     expect(d1Runs).toEqual([]);
-    expect((sql as unknown as { _data: Record<string, unknown[]> })._data.orchestrator_missions)
-      .toHaveLength(1);
+    expect(
+      (sql as unknown as { _data: Record<string, unknown[]> })._data.orchestrator_missions
+    ).toHaveLength(1);
   });
 
   it('removes legacy completing rows so they cannot keep an alarm chain alive', async () => {
     const sql = makeSqlStorage({
-      orchestrator_missions: [{
-        mission_id: 'mission-1',
-        status: 'completing',
-        registered_at: Date.now() - 60_000,
-      }],
+      orchestrator_missions: [
+        {
+          mission_id: 'mission-1',
+          status: 'completing',
+          registered_at: Date.now() - 60_000,
+        },
+      ],
     });
     const { env } = makeMockEnv();
 
     await runSchedulingCycle(sql, env, 'proj-1', config);
 
-    expect((sql as unknown as { _data: Record<string, unknown[]> })._data.orchestrator_missions)
-      .toEqual([]);
+    expect(
+      (sql as unknown as { _data: Record<string, unknown[]> })._data.orchestrator_missions
+    ).toEqual([]);
   });
 
   it('force-completes a mission after the maximum mission lifetime', async () => {
     const sql = makeSqlStorage({
-      orchestrator_missions: [{
-        mission_id: 'mission-1',
-        status: 'active',
-        registered_at: Date.now() - 25 * 60 * 60_000,
-      }],
+      orchestrator_missions: [
+        {
+          mission_id: 'mission-1',
+          status: 'active',
+          registered_at: Date.now() - 25 * 60 * 60_000,
+        },
+      ],
     });
     const { env, d1Runs } = makeMockEnv({
       tasks: [makeTask({ id: 'task-running', status: 'running', scheduler_state: 'running' })],
@@ -664,23 +722,40 @@ describe('Scheduling Cycle — Mission Completion', () => {
 
     await runSchedulingCycle(sql, env, 'proj-1', config);
 
-    expect(d1Runs).toContainEqual(expect.objectContaining({
-      query: expect.stringContaining('UPDATE missions SET status'),
-      args: expect.arrayContaining(['completed', 'mission-1']),
-    }));
-    expect((sql as unknown as { _data: Record<string, unknown[]> })._data.orchestrator_missions)
-      .toEqual([]);
+    expect(d1Runs).toContainEqual(
+      expect.objectContaining({
+        query: expect.stringContaining('UPDATE missions SET status'),
+        args: expect.arrayContaining(['completed', 'mission-1']),
+      })
+    );
+    expect(
+      (sql as unknown as { _data: Record<string, unknown[]> })._data.orchestrator_missions
+    ).toEqual([]);
   });
 
   it('marks mission as failed when any task failed', async () => {
     const sql = makeSqlStorage({
-      orchestrator_missions: [{ mission_id: 'mission-1' }],
+      orchestrator_missions: [
+        { mission_id: 'mission-1', status: 'active', registered_at: Date.now() },
+      ],
     });
 
     const { env } = makeMockEnv({
       tasks: [
-        { id: 'task-1', status: 'completed', scheduler_state: 'completed', mission_id: 'mission-1', updated_at: new Date().toISOString() },
-        { id: 'task-2', status: 'failed', scheduler_state: 'failed', mission_id: 'mission-1', updated_at: new Date().toISOString() },
+        {
+          id: 'task-1',
+          status: 'completed',
+          scheduler_state: 'completed',
+          mission_id: 'mission-1',
+          updated_at: new Date().toISOString(),
+        },
+        {
+          id: 'task-2',
+          status: 'failed',
+          scheduler_state: 'failed',
+          mission_id: 'mission-1',
+          updated_at: new Date().toISOString(),
+        },
       ],
     });
 
@@ -688,11 +763,59 @@ describe('Scheduling Cycle — Mission Completion', () => {
 
     // Should have logged a failed mission decision
     const insertCalls = (sql.exec as ReturnType<typeof vi.fn>).mock.calls.filter(
-      (call: unknown[]) => typeof call[0] === 'string' && (call[0] as string).includes('INSERT INTO decision_log'),
+      (call: unknown[]) =>
+        typeof call[0] === 'string' && (call[0] as string).includes('INSERT INTO decision_log')
     );
-    const failDecision = insertCalls.find(
-      (call: unknown[]) => (call as string[]).some(arg => typeof arg === 'string' && arg.includes('Mission failed')),
+    const failDecision = insertCalls.find((call: unknown[]) =>
+      (call as string[]).some((arg) => typeof arg === 'string' && arg.includes('Mission failed'))
     );
     expect(failDecision).toBeDefined();
+  });
+
+  // REGRESSION (rule 50): `orchestrator_missions` rows were previously narrowed
+  // with a blind `as unknown as Array<{...}>` cast — a malformed row (wrong
+  // type for a NOT-NULL column) would flow through the `?? fallback` logic
+  // untouched, since `??` only replaces null/undefined, not truthy garbage
+  // values. Now the row must fail schema validation and be skipped before it
+  // ever reaches the scheduling loop, while sibling good rows still process.
+  it('skips a malformed mission row (registered_at wrong type) and still processes the good one', async () => {
+    const sql = makeSqlStorage({
+      orchestrator_missions: [
+        { mission_id: 'mission-good', status: 'active', registered_at: Date.now() },
+        { mission_id: 'mission-bad', status: 'active', registered_at: 'not-a-number' },
+      ],
+    });
+    const { env } = makeMockEnv();
+
+    await runSchedulingCycle(sql, env, 'proj-1', config);
+
+    const updateCalls = (sql.exec as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (call: unknown[]) =>
+        typeof call[0] === 'string' &&
+        (call[0] as string).includes('UPDATE orchestrator_missions SET last_checked_at')
+    );
+    const updatedMissionIds = updateCalls.map((call) => call[call.length - 1]);
+    expect(updatedMissionIds).toContain('mission-good');
+    expect(updatedMissionIds).not.toContain('mission-bad');
+  });
+
+  it('does not throw and processes nothing when every mission row in the sweep is malformed', async () => {
+    const sql = makeSqlStorage({
+      orchestrator_missions: [
+        { mission_id: 'mission-bad-1', status: 'active', registered_at: 'nope' },
+        { mission_id: 'mission-bad-2', status: 123, registered_at: Date.now() },
+      ],
+    });
+    const { env } = makeMockEnv();
+
+    await runSchedulingCycle(sql, env, 'proj-1', config);
+
+    const updateCalls = (sql.exec as ReturnType<typeof vi.fn>).mock.calls.filter(
+      (call: unknown[]) =>
+        typeof call[0] === 'string' &&
+        (call[0] as string).includes('UPDATE orchestrator_missions SET last_checked_at')
+    );
+    expect(updateCalls).toHaveLength(0);
+    expect(env.DATABASE.prepare).not.toHaveBeenCalled();
   });
 });

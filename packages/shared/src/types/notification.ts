@@ -16,7 +16,7 @@ export type NotificationType = (typeof NOTIFICATION_TYPES)[number];
 export const NOTIFICATION_URGENCIES = ['high', 'medium', 'low'] as const;
 export type NotificationUrgency = (typeof NOTIFICATION_URGENCIES)[number];
 
-export const NOTIFICATION_CHANNELS = ['in_app'] as const;
+export const NOTIFICATION_CHANNELS = ['in_app', 'web_push'] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
 
 export interface NotificationResponse {
@@ -57,6 +57,29 @@ export interface UpdateNotificationPreferenceRequest {
   projectId?: string | null;
   channel: NotificationChannel;
   enabled: boolean;
+}
+
+export interface WebPushSubscriptionInput {
+  endpoint: string;
+  expirationTime?: number | null;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+}
+
+export interface WebPushSubscriptionResponse {
+  endpoint: string;
+  userAgent: string | null;
+  disabledAt: string | null;
+  failureCount: number;
+  lastSuccessAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WebPushSubscriptionsResponse {
+  subscriptions: WebPushSubscriptionResponse[];
 }
 
 export interface CreateNotificationRequest {

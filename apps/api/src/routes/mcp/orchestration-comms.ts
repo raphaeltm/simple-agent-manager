@@ -228,6 +228,43 @@ export async function handleSendMessageToSubtask(
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Child workspace has no chat session');
   }
 
+  const { resolveDurableExecutionConfig } = await import(
+    '../../durable-objects/project-data/durable-execution-config'
+  );
+  const durableConfig = resolveDurableExecutionConfig(env);
+  if (durableConfig.deliveryEnabled) {
+    const accepted = await projectDataService.acceptPromptDelivery(
+      env,
+      resolution.task.projectId,
+      {
+        targetSessionId: workspace.chatSessionId,
+        displayContent: message,
+        deliveryContent: message,
+        sourceTaskId: tokenData.taskId ?? null,
+        senderType: 'agent',
+        senderId: tokenData.workspaceId,
+        messageClass: 'deliver',
+        sourceKind: 'orchestration_handoff',
+        ttlMs: durableConfig.ttlMs,
+        metadata: {
+          parentTaskId: tokenData.taskId,
+          childTaskId: taskId,
+        },
+      },
+    );
+    return jsonRpcSuccess(requestId, {
+      content: [{
+        type: 'text',
+        text: JSON.stringify({
+          delivered: false,
+          queued: true,
+          accepted: true,
+          messageId: accepted.message.id,
+        }),
+      }],
+    });
+  }
+
   const messageId = await persistOrchestrationPrompt({
     env,
     projectId: resolution.task.projectId,

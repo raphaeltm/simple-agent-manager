@@ -19,6 +19,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
+import { parseGitHubCliPolicyJson } from './github-cli-policy';
 import {
   applyBaseProfileUpdates,
   baseProfileInsertValues,
@@ -30,23 +31,17 @@ type Db = ReturnType<typeof drizzle<typeof schema>>;
 /** Env vars used by agent profile service */
 type ProfileEnv = Pick<Env, 'DEFAULT_TASK_AGENT_TYPE'>;
 
+/**
+ * Parse a stored `github_cli_policy` column value for API response display.
+ * Unlike `resolveWorkspaceGitHubTokenOptions` (github-cli-policy.ts), this
+ * accepts either policy mode ('inherit' or 'custom') and never throws —
+ * malformed or missing data degrades to `null` so a corrupted row cannot
+ * break profile listing/resolution.
+ */
 function parseGitHubCliPolicy(raw: string | null): GitHubCliPolicy | null {
   if (!raw) return null;
-  try {
-    const parsed = JSON.parse(raw) as GitHubCliPolicy;
-    if (
-      parsed &&
-      (parsed.mode === 'inherit' || parsed.mode === 'custom') &&
-      parsed.repositoryScope === 'project' &&
-      parsed.permissions &&
-      (parsed.permissions.contents === 'read' || parsed.permissions.contents === 'write')
-    ) {
-      return parsed;
-    }
-  } catch {
-    return null;
-  }
-  return null;
+  const result = parseGitHubCliPolicyJson(raw);
+  return result.kind === 'ok' ? result.policy : null;
 }
 
 function serializeGitHubCliPolicy(policy: GitHubCliPolicy | null | undefined): string | null {

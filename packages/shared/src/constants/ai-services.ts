@@ -449,17 +449,6 @@ export const PLATFORM_AI_MODELS: PlatformAIModel[] = [
     intendedRole: 'workspace-agent',
     fallbackGroup: 'anthropic-premium',
   }),
-  anthropicModel({
-    id: 'claude-opus-4-1-20250805',
-    label: 'Claude Opus 4.1',
-    tier: 'premium',
-    costPer1kInputTokens: 0.015,
-    costPer1kOutputTokens: 0.075,
-    contextWindow: 200000,
-    toolCallSupport: 'excellent',
-    intendedRole: 'workspace-agent',
-    fallbackGroup: 'anthropic-premium',
-  }),
   // --- OpenAI (via AI Gateway) ---
   // GPT-5.6 preview series
   ...OPENAI_GPT56_PREVIEW_MODELS.map(

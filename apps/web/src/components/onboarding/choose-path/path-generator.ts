@@ -124,7 +124,11 @@ const STEP_CONTENT: Record<string, Omit<GeneratedStep, 'isOptional'>> = {
 export function generatePath(tags: string[]): GeneratedStep[] {
   const steps: GeneratedStep[] = [];
   const add = (key: string, isOptional: boolean) => {
-    steps.push({ ...STEP_CONTENT[key]!, isOptional });
+    const content = STEP_CONTENT[key];
+    if (!content) {
+      throw new Error(`generatePath: unknown step key "${key}"`);
+    }
+    steps.push({ ...content, isOptional });
   };
 
   // AI agent setup — always emitted; agent + connection method are chosen inline.

@@ -12,7 +12,14 @@ import {
 } from 'recharts';
 
 import type { AnalyticsFeatureAdoptionResponse } from '../../lib/api';
-import { adminChartSeries, chartCategoryTick, chartCursor, chartGridStroke, chartTick, chartTooltipStyle } from './chartTokens';
+import {
+  adminChartSeries,
+  chartCategoryTick,
+  chartCursor,
+  chartGridStroke,
+  chartTick,
+  chartTooltipStyle,
+} from './chartTokens';
 
 const EVENT_LABELS: Record<string, string> = {
   project_created: 'Create Project',
@@ -35,14 +42,23 @@ interface Props {
 }
 
 /** Custom tooltip for feature adoption chart. */
-function AdoptionTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: { label: string; count: number; unique_users: number } }> }) {
-  if (!active || !payload?.length) return null;
-  const d = payload[0]!.payload;
+function AdoptionTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload: { label: string; count: number; unique_users: number } }>;
+}) {
+  const point = payload?.[0];
+  if (!active || !point) return null;
+  const d = point.payload;
   return (
     <div className="rounded-md px-3 py-2 shadow-lg text-sm" style={chartTooltipStyle}>
       <div className="text-fg-primary font-medium">{d.label}</div>
       <div className="text-fg-secondary tabular-nums">{d.count.toLocaleString()} events</div>
-      <div className="text-fg-muted tabular-nums text-xs">{d.unique_users.toLocaleString()} unique users</div>
+      <div className="text-fg-muted tabular-nums text-xs">
+        {d.unique_users.toLocaleString()} unique users
+      </div>
     </div>
   );
 }
@@ -64,14 +80,18 @@ export const FeatureAdoptionChart: FC<Props> = ({ data }) => {
   return (
     <div className="w-full" style={{ height: chartHeight }}>
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 4, left: 0, bottom: 0 }}>
-          <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} strokeOpacity={0.3} horizontal={false} />
-          <XAxis
-            type="number"
-            tick={chartTick}
-            axisLine={false}
-            tickLine={false}
+        <BarChart
+          data={chartData}
+          layout="vertical"
+          margin={{ top: 0, right: 4, left: 0, bottom: 0 }}
+        >
+          <CartesianGrid
+            strokeDasharray="3 3"
+            stroke={chartGridStroke}
+            strokeOpacity={0.3}
+            horizontal={false}
           />
+          <XAxis type="number" tick={chartTick} axisLine={false} tickLine={false} />
           <YAxis
             dataKey="label"
             type="category"

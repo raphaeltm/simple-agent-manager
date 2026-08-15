@@ -1,50 +1,20 @@
-import {
-  AlertTriangle,
-  ArrowRight,
-  BarChart3,
-  Bell,
-  Bot,
-  Cloud,
-  Cpu,
-  DollarSign,
-  FolderKanban,
-  Gauge,
-  Github,
-  Home,
-  Key,
-  KeyRound,
-  LayoutDashboard,
-  LineChart,
-  ListChecks,
-  LogOut,
-  Map,
-  MessageSquare,
-  MessageSquarePlus,
-  Monitor,
-  Moon,
-  Plus,
-  Radio,
-  ScrollText,
-  Search,
-  Server,
-  Settings,
-  Shield,
-  Sun,
-  Users,
-  Wrench,
-} from 'lucide-react';
-import { useCallback,useEffect, useMemo, useRef, useState } from 'react';
+import { ArrowRight, FolderKanban, MessageSquare, Search, Server } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useLocation,useNavigate } from 'react-router';
+import { useLocation, useNavigate } from 'react-router';
 
 import { useTheme } from '../contexts/ThemeContext';
 import { useCommandPaletteContext } from '../hooks/useCommandPaletteContext';
 import type { SessionSummaryItem } from '../lib/api';
-import { getAllChats,listNodes, listProjects } from '../lib/api';
-import { signOut } from '../lib/auth';
-import { fuzzyMatch } from '../lib/fuzzy-match';
+import { getAllChats, listNodes, listProjects } from '../lib/api';
 import { isMacPlatform } from '../lib/keyboard-shortcuts';
 import { useAuth } from './AuthProvider';
+import { buildActionItems } from './global-command-palette-action-items';
+import { buildResultGroups } from './global-command-palette-groups';
+import { HighlightedText } from './global-command-palette-highlighted-text';
+import { buildNavigationItems } from './global-command-palette-navigation-items';
+import type { PaletteResult } from './global-command-palette-types';
+import { resultKey } from './global-command-palette-types';
 
 // ── Configurable limits ──
 
@@ -52,121 +22,17 @@ const DEFAULT_PROJECT_FETCH_LIMIT = 50;
 const DEFAULT_MAX_RESULTS_PER_CATEGORY = 10;
 
 const PROJECT_FETCH_LIMIT = parseInt(
-  import.meta.env.VITE_CMD_PALETTE_PROJECT_FETCH_LIMIT ||
-    String(DEFAULT_PROJECT_FETCH_LIMIT),
+  import.meta.env.VITE_CMD_PALETTE_PROJECT_FETCH_LIMIT || String(DEFAULT_PROJECT_FETCH_LIMIT)
 );
 const MAX_RESULTS_PER_CATEGORY = parseInt(
   import.meta.env.VITE_CMD_PALETTE_MAX_RESULTS_PER_CATEGORY ||
-    String(DEFAULT_MAX_RESULTS_PER_CATEGORY),
+    String(DEFAULT_MAX_RESULTS_PER_CATEGORY)
 );
-
-// ── Result types ──
-
-interface NavigationResult {
-  kind: 'navigation';
-  id: string;
-  label: string;
-  path: string;
-  icon: React.ReactNode;
-  score: number;
-  matches: number[];
-}
-
-interface ProjectResult {
-  kind: 'project';
-  id: string;
-  label: string;
-  path: string;
-  score: number;
-  matches: number[];
-}
-
-interface NodeResult {
-  kind: 'node';
-  id: string;
-  label: string;
-  path: string;
-  score: number;
-  matches: number[];
-}
-
-interface ChatResult {
-  kind: 'chat';
-  id: string;
-  label: string;
-  path: string;
-  projectName: string;
-  createdAt: number;
-  score: number;
-  matches: number[];
-}
-
-interface ActionResult {
-  kind: 'action';
-  id: string;
-  label: string;
-  action: () => void;
-  icon: React.ReactNode;
-  score: number;
-  matches: number[];
-}
-
-type PaletteResult = NavigationResult | ProjectResult | NodeResult | ChatResult | ActionResult;
-
-interface CategoryGroup {
-  category: string;
-  results: PaletteResult[];
-}
 
 // ── Props ──
 
 interface GlobalCommandPaletteProps {
   onClose: () => void;
-}
-
-// ── Helpers ──
-
-/** Render text with matched character indices highlighted. */
-function HighlightedText({ text, matches }: { text: string; matches: number[] }) {
-  if (matches.length === 0) return <>{text}</>;
-
-  const matchSet = new Set(matches);
-  const parts: Array<{ text: string; highlighted: boolean }> = [];
-  let current = '';
-  let currentHighlighted = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const isMatch = matchSet.has(i);
-    if (i === 0) {
-      currentHighlighted = isMatch;
-      current = text[i]!;
-    } else if (isMatch === currentHighlighted) {
-      current += text[i];
-    } else {
-      parts.push({ text: current, highlighted: currentHighlighted });
-      current = text[i]!;
-      currentHighlighted = isMatch;
-    }
-  }
-  if (current) parts.push({ text: current, highlighted: currentHighlighted });
-
-  return (
-    <>
-      {parts.map((part, i) =>
-        part.highlighted ? (
-          <span key={i} className="text-accent font-semibold">
-            {part.text}
-          </span>
-        ) : (
-          <span key={i}>{part.text}</span>
-        ),
-      )}
-    </>
-  );
-}
-
-function resultKey(result: PaletteResult): string {
-  return `${result.kind}:${result.id}`;
 }
 
 // ── Component ──
@@ -202,24 +68,30 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
     async function fetchData() {
       try {
         const [projectsRes, nodesRes] = await Promise.all([
-          listProjects(PROJECT_FETCH_LIMIT).catch(() => ({ projects: [] as Array<{ id: string; name: string }> })),
+          listProjects(PROJECT_FETCH_LIMIT).catch(() => ({
+            projects: [] as Array<{ id: string; name: string }>,
+          })),
           listNodes().catch(() => [] as Array<{ id: string; name: string }>),
         ]);
         if (cancelled) return;
 
         const projectList = 'projects' in projectsRes ? projectsRes.projects : [];
-        const mappedProjects = projectList.map((p: { id: string; name: string }) => ({ id: p.id, name: p.name }));
+        const mappedProjects = projectList.map((p: { id: string; name: string }) => ({
+          id: p.id,
+          name: p.name,
+        }));
         setProjects(mappedProjects);
 
         const nodeList = Array.isArray(nodesRes) ? nodesRes : [];
         setNodes(nodeList.map((n: { id: string; name: string }) => ({ id: n.id, name: n.name })));
 
         // Fetch chat sessions via single D1 query (no DO fan-out)
-        const chatsRes = await getAllChats({ limit: 100 }).catch(() => ({ sessions: [], total: 0 }));
+        const chatsRes = await getAllChats({ limit: 100 }).catch(() => ({
+          sessions: [],
+          total: 0,
+        }));
         if (!cancelled) {
-          setChatSessions(
-            chatsRes.sessions.map((s) => ({ ...s, createdAt: s.startedAt })),
-          );
+          setChatSessions(chatsRes.sessions.map((s) => ({ ...s, createdAt: s.startedAt })));
           setLoading(false);
         }
       } catch {
@@ -227,300 +99,46 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
       }
     }
     fetchData();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Build navigation items
-  const navigationItems = useMemo(() => {
-    const items: Array<{ id: string; label: string; path: string; icon: React.ReactNode }> = [
-      { id: 'nav-dashboard', label: 'Home', path: '/dashboard', icon: <Home size={14} /> },
-      { id: 'nav-chats', label: 'Chats', path: '/chats', icon: <MessageSquare size={14} /> },
-      { id: 'nav-projects', label: 'Projects', path: '/projects', icon: <FolderKanban size={14} /> },
-      { id: 'nav-nodes', label: 'Nodes', path: '/nodes', icon: <Server size={14} /> },
-      { id: 'nav-workspaces', label: 'Workspaces', path: '/workspaces', icon: <Monitor size={14} /> },
-      { id: 'nav-map', label: 'Map', path: '/account-map', icon: <Map size={14} /> },
-      { id: 'nav-tools', label: 'Tools', path: '/tools', icon: <Wrench size={14} /> },
-      { id: 'nav-settings', label: 'Settings', path: '/settings', icon: <Settings size={14} /> },
-      // Settings deep-links (always available)
-      { id: 'nav-settings-cloud-provider', label: 'Settings: Cloud Provider', path: '/settings/cloud-provider', icon: <Cloud size={14} /> },
-      { id: 'nav-settings-github', label: 'Settings: GitHub', path: '/settings/github', icon: <Github size={14} /> },
-      { id: 'nav-settings-agents', label: 'Settings: Agents', path: '/settings/agents', icon: <Bot size={14} /> },
-      { id: 'nav-settings-notifications', label: 'Settings: Notifications', path: '/settings/notifications', icon: <Bell size={14} /> },
-      { id: 'nav-settings-usage', label: 'Settings: Usage', path: '/settings/usage', icon: <BarChart3 size={14} /> },
-      { id: 'nav-settings-api-tokens', label: 'Settings: API Tokens', path: '/settings/api-tokens', icon: <Key size={14} /> },
-    ];
-    if (isSuperadmin) {
-      items.push(
-        { id: 'nav-admin', label: 'Admin', path: '/admin', icon: <Shield size={14} /> },
-        { id: 'nav-admin-users', label: 'Admin: Users', path: '/admin/users', icon: <Users size={14} /> },
-        { id: 'nav-admin-credentials', label: 'Admin: Credentials', path: '/admin/credentials', icon: <KeyRound size={14} /> },
-        { id: 'nav-admin-ai-proxy', label: 'Admin: AI Proxy', path: '/admin/ai-proxy', icon: <Cpu size={14} /> },
-        { id: 'nav-admin-trials', label: 'Admin: Trials', path: '/admin/trials', icon: <ListChecks size={14} /> },
-        { id: 'nav-admin-costs', label: 'Admin: Costs', path: '/admin/costs', icon: <DollarSign size={14} /> },
-        { id: 'nav-admin-usage', label: 'Admin: Usage', path: '/admin/usage', icon: <BarChart3 size={14} /> },
-        { id: 'nav-admin-quotas', label: 'Admin: Quotas', path: '/admin/quotas', icon: <Gauge size={14} /> },
-        { id: 'nav-admin-errors', label: 'Admin: Errors', path: '/admin/errors', icon: <AlertTriangle size={14} /> },
-        { id: 'nav-admin-overview', label: 'Admin: Overview', path: '/admin/overview', icon: <LayoutDashboard size={14} /> },
-        { id: 'nav-admin-logs', label: 'Admin: Logs', path: '/admin/logs', icon: <ScrollText size={14} /> },
-        { id: 'nav-admin-stream', label: 'Admin: Stream', path: '/admin/stream', icon: <Radio size={14} /> },
-        { id: 'nav-admin-analytics', label: 'Admin: Analytics', path: '/admin/analytics', icon: <LineChart size={14} /> },
-      );
-    }
-    return items;
-  }, [isSuperadmin]);
+  const navigationItems = useMemo(() => buildNavigationItems(isSuperadmin), [isSuperadmin]);
 
   // Build action items
-  const actionItems = useMemo(() => {
-    const items: Array<{ id: string; label: string; action: () => void; icon: React.ReactNode }> = [
-      {
-        id: 'action-new-project',
-        label: 'New Project',
-        action: () => navigate('/projects/new'),
-        icon: <Plus size={14} />,
-      },
-      {
-        id: 'action-create-node',
-        label: 'Go to Nodes',
-        action: () => navigate('/nodes'),
-        icon: <Server size={14} />,
-      },
-      {
-        id: 'action-toggle-theme',
-        label: 'Toggle Theme',
-        action: () => setTheme(isDark ? 'light' : 'dark'),
-        icon: isDark ? <Sun size={14} /> : <Moon size={14} />,
-      },
-      {
-        id: 'action-sign-out',
-        label: 'Sign Out',
-        action: () => {
-          void signOut();
-        },
-        icon: <LogOut size={14} />,
-      },
-    ];
-    return items;
-  }, [navigate, isDark, setTheme]);
+  const actionItems = useMemo(
+    () => buildActionItems({ navigate, isDark, setTheme }),
+    [navigate, isDark, setTheme]
+  );
 
   // Build results with fuzzy matching
-  const groups = useMemo(() => {
-    const result: CategoryGroup[] = [];
-    const currentProjectId = context.projectId;
-
-    // Context — URL-aware actions shown first
-    if (contextActions.length > 0) {
-      const ctxResults: ActionResult[] = [];
-      for (const ctxAction of contextActions) {
-        if (!query) {
-          ctxResults.push({
-            kind: 'action',
-            id: ctxAction.id,
-            label: ctxAction.label,
-            action: ctxAction.action,
-            icon: ctxAction.icon,
-            score: 0,
-            matches: [],
-          });
-        } else {
-          const m = fuzzyMatch(query, ctxAction.label);
-          if (m) {
-            ctxResults.push({
-              kind: 'action',
-              id: ctxAction.id,
-              label: ctxAction.label,
-              action: ctxAction.action,
-              icon: ctxAction.icon,
-              score: m.score,
-              matches: m.matches,
-            });
-          }
-        }
-      }
-      ctxResults.sort((a, b) => b.score - a.score);
-      if (ctxResults.length > 0) {
-        result.push({ category: 'Context', results: ctxResults });
-      }
-    }
-
-    // Navigation
-    const navResults: NavigationResult[] = [];
-    for (const item of navigationItems) {
-      if (!query) {
-        navResults.push({ kind: 'navigation', ...item, score: 0, matches: [] });
-      } else {
-        const m = fuzzyMatch(query, item.label);
-        if (m) {
-          navResults.push({ kind: 'navigation', ...item, score: m.score, matches: m.matches });
-        }
-      }
-    }
-    navResults.sort((a, b) => b.score - a.score);
-    if (navResults.length > 0) {
-      result.push({ category: 'Navigation', results: navResults });
-    }
-
-    // Projects (only if we have data)
-    if (projects.length > 0) {
-      const projectResults: ProjectResult[] = [];
-      for (const project of projects) {
-        if (!query) {
-          projectResults.push({
-            kind: 'project',
-            id: project.id,
-            label: project.name,
-            path: `/projects/${project.id}`,
-            score: 0,
-            matches: [],
-          });
-        } else {
-          const m = fuzzyMatch(query, project.name);
-          if (m) {
-            projectResults.push({
-              kind: 'project',
-              id: project.id,
-              label: project.name,
-              path: `/projects/${project.id}`,
-              score: m.score,
-              matches: m.matches,
-            });
-          }
-        }
-      }
-      projectResults.sort((a, b) => b.score - a.score);
-      const capped = projectResults.slice(0, MAX_RESULTS_PER_CATEGORY);
-      if (capped.length > 0) {
-        result.push({ category: 'Projects', results: capped });
-      }
-    }
-
-    // Chats (only if we have sessions)
-    if (chatSessions.length > 0) {
-      const chatResults: ChatResult[] = [];
-      for (const session of chatSessions) {
-        const displayLabel = session.topic || 'Untitled Chat';
-        if (!query) {
-          chatResults.push({
-            kind: 'chat',
-            id: session.id,
-            label: displayLabel,
-            path: `/projects/${session.projectId}/chat/${session.id}`,
-            projectName: session.projectName,
-            createdAt: session.createdAt,
-            score: 0,
-            matches: [],
-          });
-        } else {
-          const m = fuzzyMatch(query, displayLabel);
-          if (m) {
-            chatResults.push({
-              kind: 'chat',
-              id: session.id,
-              label: displayLabel,
-              path: `/projects/${session.projectId}/chat/${session.id}`,
-              projectName: session.projectName,
-              createdAt: session.createdAt,
-              score: m.score,
-              matches: m.matches,
-            });
-          }
-        }
-      }
-      // Sort: when inside a project, prioritize that project's chats.
-      // Within same-project group, sort by score then recency.
-      chatResults.sort((a, b) => {
-        if (currentProjectId) {
-          const aIsCurrentProject = chatSessions.find((s) => s.id === a.id)?.projectId === currentProjectId;
-          const bIsCurrentProject = chatSessions.find((s) => s.id === b.id)?.projectId === currentProjectId;
-          if (aIsCurrentProject && !bIsCurrentProject) return -1;
-          if (!aIsCurrentProject && bIsCurrentProject) return 1;
-        }
-        return b.score - a.score || b.createdAt - a.createdAt;
-      });
-      const cappedChats = chatResults.slice(0, MAX_RESULTS_PER_CATEGORY);
-      if (cappedChats.length > 0) {
-        result.push({ category: 'Chats', results: cappedChats });
-      }
-    }
-
-    // Quick Actions — per-project actions (only when searching)
-    if (projects.length > 0 && query) {
-      const quickActionResults: ActionResult[] = [];
-      for (const project of projects) {
-        const searchText = `${project.name} New Chat`;
-        const m = fuzzyMatch(query, searchText);
-        if (m) {
-          const projectId = project.id;
-          quickActionResults.push({
-            kind: 'action',
-            id: `quick-new-chat-${projectId}`,
-            label: searchText,
-            action: () => navigate(`/projects/${projectId}/chat`),
-            icon: <MessageSquarePlus size={14} />,
-            score: m.score,
-            matches: m.matches,
-          });
-        }
-      }
-      quickActionResults.sort((a, b) => b.score - a.score);
-      const cappedQuickActions = quickActionResults.slice(0, MAX_RESULTS_PER_CATEGORY);
-      if (cappedQuickActions.length > 0) {
-        result.push({ category: 'Quick Actions', results: cappedQuickActions });
-      }
-    }
-
-    // Nodes (only if we have data)
-    if (nodes.length > 0) {
-      const nodeResults: NodeResult[] = [];
-      for (const node of nodes) {
-        if (!query) {
-          nodeResults.push({
-            kind: 'node',
-            id: node.id,
-            label: node.name,
-            path: `/nodes/${node.id}`,
-            score: 0,
-            matches: [],
-          });
-        } else {
-          const m = fuzzyMatch(query, node.name);
-          if (m) {
-            nodeResults.push({
-              kind: 'node',
-              id: node.id,
-              label: node.name,
-              path: `/nodes/${node.id}`,
-              score: m.score,
-              matches: m.matches,
-            });
-          }
-        }
-      }
-      nodeResults.sort((a, b) => b.score - a.score);
-      const capped = nodeResults.slice(0, MAX_RESULTS_PER_CATEGORY);
-      if (capped.length > 0) {
-        result.push({ category: 'Nodes', results: capped });
-      }
-    }
-
-    // Actions
-    const actionResults: ActionResult[] = [];
-    for (const item of actionItems) {
-      if (!query) {
-        actionResults.push({ kind: 'action', ...item, score: 0, matches: [] });
-      } else {
-        const m = fuzzyMatch(query, item.label);
-        if (m) {
-          actionResults.push({ kind: 'action', ...item, score: m.score, matches: m.matches });
-        }
-      }
-    }
-    actionResults.sort((a, b) => b.score - a.score);
-    if (actionResults.length > 0) {
-      result.push({ category: 'Actions', results: actionResults });
-    }
-
-    return result;
-  }, [query, navigationItems, projects, nodes, chatSessions, actionItems, contextActions, context.projectId]);
+  const groups = useMemo(
+    () =>
+      buildResultGroups({
+        query,
+        navigationItems,
+        projects,
+        nodes,
+        chatSessions,
+        actionItems,
+        contextActions,
+        currentProjectId: context.projectId,
+        navigate,
+        maxResultsPerCategory: MAX_RESULTS_PER_CATEGORY,
+      }),
+    [
+      query,
+      navigationItems,
+      projects,
+      nodes,
+      chatSessions,
+      actionItems,
+      contextActions,
+      context.projectId,
+    ]
+  );
 
   // Flatten results for keyboard navigation
   const flatResults = useMemo(() => {
@@ -584,7 +202,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
       }
       onClose();
     },
-    [navigate, location.pathname, onClose],
+    [navigate, location.pathname, onClose]
   );
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
@@ -633,7 +251,11 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   return createPortal(
     <>
       {/* Backdrop */}
-      <div onClick={onClose} className="fixed inset-0 glass-backdrop-dim border-0 z-dialog-backdrop" />
+      <div
+        onClick={onClose}
+        aria-hidden="true"
+        className="fixed inset-0 glass-backdrop-dim border-0 z-dialog-backdrop"
+      />
 
       {/* Palette dialog */}
       <div
@@ -668,7 +290,12 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         </div>
 
         {/* Results */}
-        <div role="listbox" id="gcp-listbox" aria-label="Command palette results" className="max-h-[360px] overflow-y-auto py-1">
+        <div
+          role="listbox"
+          id="gcp-listbox"
+          aria-label="Command palette results"
+          className="max-h-[360px] overflow-y-auto py-1"
+        >
           {flatResults.length === 0 && !loading && (
             <div className="p-4 text-center text-fg-muted text-xs">No matching results</div>
           )}
@@ -678,7 +305,11 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
           )}
 
           {groups.map((group) => (
-            <div key={group.category} role="group" aria-labelledby={`gcp-category-${group.category}`}>
+            <div
+              key={group.category}
+              role="group"
+              aria-labelledby={`gcp-category-${group.category}`}
+            >
               <div
                 id={`gcp-category-${group.category}`}
                 className="px-4 pt-2 pb-1 text-[10px] font-semibold text-fg-muted uppercase tracking-wider select-none"
@@ -703,7 +334,11 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
                         ? `${result.label}, ${result.projectName}`
                         : result.label
                     }
+                    tabIndex={-1}
                     onClick={() => executeResult(result)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') executeResult(result);
+                    }}
                     onMouseEnter={() => setSelectedIndex(currentFlatIndex)}
                     className={`flex items-center gap-3 px-4 py-3 cursor-pointer transition-colors duration-100 ${
                       isSelected ? 'bg-[rgba(34,197,94,0.06)]' : 'bg-transparent'
@@ -718,9 +353,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
                         {result.projectName}
                       </span>
                     )}
-                    {isSelected && (
-                      <ArrowRight size={12} className="text-fg-muted shrink-0" />
-                    )}
+                    {isSelected && <ArrowRight size={12} className="text-fg-muted shrink-0" />}
                   </div>
                 );
               })}
@@ -732,12 +365,18 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         <div className="flex items-center justify-between px-4 py-2 border-t border-border-default text-[10px] text-fg-muted">
           <div className="flex items-center gap-3">
             <span className="flex items-center gap-1">
-              <kbd className="font-mono bg-inset border border-border-default rounded px-1 py-0.5">&uarr;</kbd>
-              <kbd className="font-mono bg-inset border border-border-default rounded px-1 py-0.5">&darr;</kbd>
+              <kbd className="font-mono bg-inset border border-border-default rounded px-1 py-0.5">
+                &uarr;
+              </kbd>
+              <kbd className="font-mono bg-inset border border-border-default rounded px-1 py-0.5">
+                &darr;
+              </kbd>
               <span>navigate</span>
             </span>
             <span className="flex items-center gap-1">
-              <kbd className="font-mono bg-inset border border-border-default rounded px-1 py-0.5">&crarr;</kbd>
+              <kbd className="font-mono bg-inset border border-border-default rounded px-1 py-0.5">
+                &crarr;
+              </kbd>
               <span>open</span>
             </span>
           </div>
@@ -747,6 +386,6 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         </div>
       </div>
     </>,
-    document.body,
+    document.body
   );
 }

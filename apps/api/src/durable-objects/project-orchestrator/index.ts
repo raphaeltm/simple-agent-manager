@@ -26,13 +26,52 @@ import {
   resolveOrchestratorConfig,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
+import * as v from 'valibot';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
+import { mapRows, parseRowOrNull } from '../row-validation';
 import { logDecision, pruneDecisionLog } from './decision-log';
 import { runOrchestratorMigrations } from './migrations';
 import { runSchedulingCycle } from './scheduling';
+
+// =============================================================================
+// DO-SQLite row schemas — orchestrator-specific (see ../row-validation for the
+// generic mapRows/parseRowOrNull helpers). Field sets mirror the CREATE TABLE
+// statements in ./migrations.ts exactly, so a plain (non-strict) v.object()
+// validates every column a `SELECT *` can return.
+// =============================================================================
+
+const OrchestratorMissionRowSchema = v.object({
+  mission_id: v.string(),
+  status: v.string(),
+  last_checked_at: v.number(),
+  last_dispatch_at: v.nullable(v.number()),
+  registered_at: v.number(),
+});
+
+const SchedulingQueueRowSchema = v.object({
+  id: v.string(),
+  mission_id: v.string(),
+  task_id: v.string(),
+  scheduled_at: v.number(),
+  dispatched_at: v.nullable(v.number()),
+  reason: v.string(),
+});
+
+const DecisionLogRowSchema = v.object({
+  id: v.string(),
+  mission_id: v.string(),
+  task_id: v.nullable(v.string()),
+  action: v.string(),
+  reason: v.string(),
+  metadata: v.nullable(v.string()),
+  created_at: v.number(),
+});
+
+/** `SELECT mission_id FROM orchestrator_missions LIMIT 1` shape. */
+const MissionIdRowSchema = v.object({ mission_id: v.string() });
 
 export class ProjectOrchestrator extends DurableObject<Env> {
   private projectId: string | null = null;
@@ -60,9 +99,9 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     const sql = this.ctx.storage.sql;
 
     // Idempotent: skip if already registered
-    const existing = sql.exec(
-      'SELECT 1 FROM orchestrator_missions WHERE mission_id = ?', missionId,
-    ).toArray();
+    const existing = sql
+      .exec('SELECT 1 FROM orchestrator_missions WHERE mission_id = ?', missionId)
+      .toArray();
     if (existing.length > 0) {
       await this.armAlarm();
       return;
@@ -71,7 +110,9 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     sql.exec(
       `INSERT INTO orchestrator_missions (mission_id, status, last_checked_at, last_dispatch_at, registered_at)
        VALUES (?, 'active', ?, NULL, ?)`,
-      missionId, now, now,
+      missionId,
+      now,
+      now
     );
 
     logDecision(sql, missionId, null, 'dispatch', 'Mission registered for orchestration', now);
@@ -89,16 +130,16 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     const sql = this.ctx.storage.sql;
     const result = sql.exec(
       `UPDATE orchestrator_missions SET status = 'paused' WHERE mission_id = ? AND status = 'active'`,
-      missionId,
+      missionId
     );
     if (result.rowsWritten === 0) return false;
 
     logDecision(sql, missionId, null, 'pause', 'Mission paused by user', Date.now());
 
     // Update D1 mission status
-    await this.env.DATABASE.prepare(
-      'UPDATE missions SET status = ?, updated_at = ? WHERE id = ?',
-    ).bind('paused', new Date().toISOString(), missionId).run();
+    await this.env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
+      .bind('paused', new Date().toISOString(), missionId)
+      .run();
 
     log.info('orchestrator.mission_paused', { projectId, missionId });
     return true;
@@ -112,16 +153,16 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     const sql = this.ctx.storage.sql;
     const result = sql.exec(
       `UPDATE orchestrator_missions SET status = 'active' WHERE mission_id = ? AND status = 'paused'`,
-      missionId,
+      missionId
     );
     if (result.rowsWritten === 0) return false;
 
     logDecision(sql, missionId, null, 'resume', 'Mission resumed by user', Date.now());
 
     // Update D1 mission status
-    await this.env.DATABASE.prepare(
-      'UPDATE missions SET status = ?, updated_at = ? WHERE id = ?',
-    ).bind('active', new Date().toISOString(), missionId).run();
+    await this.env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
+      .bind('active', new Date().toISOString(), missionId)
+      .run();
 
     log.info('orchestrator.mission_resumed', { projectId, missionId });
     await this.armAlarm();
@@ -136,21 +177,23 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     const sql = this.ctx.storage.sql;
 
     // Verify mission is tracked before proceeding
-    const tracked = sql.exec(
-      `SELECT 1 FROM orchestrator_missions WHERE mission_id = ?`, missionId,
-    ).toArray();
+    const tracked = sql
+      .exec(`SELECT 1 FROM orchestrator_missions WHERE mission_id = ?`, missionId)
+      .toArray();
     if (tracked.length === 0) return false;
 
     // Update D1 first (source of truth) — cancel tasks and mission
     const now = new Date().toISOString();
     await this.env.DATABASE.prepare(
       `UPDATE tasks SET status = 'cancelled', scheduler_state = 'cancelled', updated_at = ?
-       WHERE mission_id = ? AND status NOT IN ('completed', 'failed', 'cancelled')`,
-    ).bind(now, missionId).run();
+       WHERE mission_id = ? AND status NOT IN ('completed', 'failed', 'cancelled')`
+    )
+      .bind(now, missionId)
+      .run();
 
-    await this.env.DATABASE.prepare(
-      'UPDATE missions SET status = ?, updated_at = ? WHERE id = ?',
-    ).bind('cancelled', now, missionId).run();
+    await this.env.DATABASE.prepare('UPDATE missions SET status = ?, updated_at = ? WHERE id = ?')
+      .bind('cancelled', now, missionId)
+      .run();
 
     // Then remove from DO tracking
     sql.exec(`DELETE FROM orchestrator_missions WHERE mission_id = ?`, missionId);
@@ -170,7 +213,7 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     missionId: string,
     taskId: string,
     newState: SchedulerState,
-    reason: string,
+    reason: string
   ): Promise<boolean> {
     this.projectId = projectId;
 
@@ -179,17 +222,19 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     }
 
     const sql = this.ctx.storage.sql;
-    const tracked = sql.exec(
-      `SELECT 1 FROM orchestrator_missions WHERE mission_id = ?`, missionId,
-    ).toArray();
+    const tracked = sql
+      .exec(`SELECT 1 FROM orchestrator_missions WHERE mission_id = ?`, missionId)
+      .toArray();
     if (tracked.length === 0) return false;
 
     const targetTask = await this.env.DATABASE.prepare(
       `SELECT project_id AS projectId
        FROM tasks
        WHERE id = ? AND mission_id = ?
-       LIMIT 1`,
-    ).bind(taskId, missionId).first<{ projectId: string }>();
+       LIMIT 1`
+    )
+      .bind(taskId, missionId)
+      .first<{ projectId: string }>();
 
     if (!targetTask) return false;
 
@@ -209,13 +254,21 @@ export class ProjectOrchestrator extends DurableObject<Env> {
 
     const now = new Date().toISOString();
     const result = await this.env.DATABASE.prepare(
-      'UPDATE tasks SET scheduler_state = ?, updated_at = ? WHERE id = ? AND mission_id = ? AND project_id = ?',
-    ).bind(newState, now, taskId, missionId, projectId).run();
+      'UPDATE tasks SET scheduler_state = ?, updated_at = ? WHERE id = ? AND mission_id = ? AND project_id = ?'
+    )
+      .bind(newState, now, taskId, missionId, projectId)
+      .run();
 
     if (!result.meta.changes || result.meta.changes === 0) return false;
 
-    logDecision(this.ctx.storage.sql, missionId, taskId, 'override',
-      `Scheduler state overridden to '${newState}': ${reason}`, Date.now());
+    logDecision(
+      this.ctx.storage.sql,
+      missionId,
+      taskId,
+      'override',
+      `Scheduler state overridden to '${newState}': ${reason}`,
+      Date.now()
+    );
 
     log.info('orchestrator.task_state_overridden', { projectId, missionId, taskId, newState });
     return true;
@@ -230,10 +283,12 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     const sql = this.ctx.storage.sql;
 
     // Check if this mission is tracked
-    const mission = sql.exec(
-      `SELECT mission_id FROM orchestrator_missions WHERE mission_id = ? AND status = 'active'`,
-      notification.missionId,
-    ).toArray();
+    const mission = sql
+      .exec(
+        `SELECT mission_id FROM orchestrator_missions WHERE mission_id = ? AND status = 'active'`,
+        notification.missionId
+      )
+      .toArray();
 
     if (mission.length === 0) return; // Not orchestrated
 
@@ -260,39 +315,33 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     const sql = this.ctx.storage.sql;
     const config = resolveOrchestratorConfig(this.env);
 
-    const missions = sql.exec(
-      'SELECT * FROM orchestrator_missions ORDER BY registered_at DESC',
-    ).toArray() as unknown as Array<{
-      mission_id: string;
-      status: string;
-      last_checked_at: number;
-      last_dispatch_at: number | null;
-      registered_at: number;
-    }>;
+    const missions = mapRows(
+      sql.exec('SELECT * FROM orchestrator_missions ORDER BY registered_at DESC').toArray(),
+      OrchestratorMissionRowSchema,
+      'orchestrator.missions_list',
+      'mission_id'
+    );
 
-    const queue = sql.exec(
-      'SELECT * FROM scheduling_queue WHERE dispatched_at IS NULL ORDER BY scheduled_at ASC',
-    ).toArray() as unknown as Array<{
-      id: string;
-      mission_id: string;
-      task_id: string;
-      scheduled_at: number;
-      dispatched_at: number | null;
-      reason: string;
-    }>;
+    const queue = mapRows(
+      sql
+        .exec(
+          'SELECT * FROM scheduling_queue WHERE dispatched_at IS NULL ORDER BY scheduled_at ASC'
+        )
+        .toArray(),
+      SchedulingQueueRowSchema,
+      'orchestrator.queue_list'
+    );
 
-    const decisions = sql.exec(
-      'SELECT * FROM decision_log ORDER BY created_at DESC LIMIT ?',
-      config.recentDecisionsLimit,
-    ).toArray() as unknown as Array<{
-      id: string;
-      mission_id: string;
-      task_id: string | null;
-      action: string;
-      reason: string;
-      metadata: string | null;
-      created_at: number;
-    }>;
+    const decisions = mapRows(
+      sql
+        .exec(
+          'SELECT * FROM decision_log ORDER BY created_at DESC LIMIT ?',
+          config.recentDecisionsLimit
+        )
+        .toArray(),
+      DecisionLogRowSchema,
+      'orchestrator.decisions_list'
+    );
 
     const alarm = await this.ctx.storage.getAlarm();
 
@@ -334,16 +383,15 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     this.projectId = projectId;
     const sql = this.ctx.storage.sql;
 
-    const queue = sql.exec(
-      'SELECT * FROM scheduling_queue WHERE dispatched_at IS NULL ORDER BY scheduled_at ASC',
-    ).toArray() as unknown as Array<{
-      id: string;
-      mission_id: string;
-      task_id: string;
-      scheduled_at: number;
-      dispatched_at: number | null;
-      reason: string;
-    }>;
+    const queue = mapRows(
+      sql
+        .exec(
+          'SELECT * FROM scheduling_queue WHERE dispatched_at IS NULL ORDER BY scheduled_at ASC'
+        )
+        .toArray(),
+      SchedulingQueueRowSchema,
+      'orchestrator.queue_list'
+    );
 
     return queue.map((q) => ({
       id: q.id,
@@ -382,9 +430,9 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     pruneDecisionLog(this.ctx.storage.sql, config.decisionLogMaxEntries);
 
     // Re-arm while active or legacy completing missions still need work.
-    const activeMissions = this.ctx.storage.sql.exec(
-      `SELECT 1 FROM orchestrator_missions WHERE status IN ('active', 'completing') LIMIT 1`,
-    ).toArray();
+    const activeMissions = this.ctx.storage.sql
+      .exec(`SELECT 1 FROM orchestrator_missions WHERE status IN ('active', 'completing') LIMIT 1`)
+      .toArray();
 
     if (activeMissions.length > 0) {
       await this.ctx.storage.setAlarm(Date.now() + config.schedulingIntervalMs);
@@ -414,16 +462,20 @@ export class ProjectOrchestrator extends DurableObject<Env> {
     }
 
     // Fallback: resolve from the first mission via D1
-    const missions = this.ctx.storage.sql.exec(
-      'SELECT mission_id FROM orchestrator_missions LIMIT 1',
-    ).toArray() as unknown as Array<{ mission_id: string }>;
+    const firstMission = parseRowOrNull(
+      this.ctx.storage.sql
+        .exec('SELECT mission_id FROM orchestrator_missions LIMIT 1')
+        .toArray()[0],
+      MissionIdRowSchema,
+      'orchestrator.resolve_project_id',
+      'mission_id'
+    );
 
-    if (missions.length === 0) return null;
+    if (!firstMission) return null;
 
-    const firstMission = missions[0]!;
-    const result = await this.env.DATABASE.prepare(
-      'SELECT project_id FROM missions WHERE id = ?',
-    ).bind(firstMission.mission_id).first<{ project_id: string }>();
+    const result = await this.env.DATABASE.prepare('SELECT project_id FROM missions WHERE id = ?')
+      .bind(firstMission.mission_id)
+      .first<{ project_id: string }>();
 
     if (result) {
       this.projectId = result.project_id;

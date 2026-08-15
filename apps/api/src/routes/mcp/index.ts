@@ -8,16 +8,17 @@
  * Auth: task-scoped opaque token stored in KV, passed as Bearer token.
  */
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
+import { formatIssues, JsonRpcEnvelopeSchema } from '../../schemas';
 import {
   authenticateMcpRequest,
   checkMcpRateLimit,
   getMcpRateLimit,
   INTERNAL_ERROR,
   jsonRpcError,
-  type JsonRpcRequest,
   jsonRpcSuccess,
   MCP_PROTOCOL_VERSION,
   MCP_SERVER_NAME,
@@ -158,6 +159,16 @@ export const mcpRoutes = new Hono<{ Bindings: Env }>();
 
 // ─── MCP endpoint ────────────────────────────────────────────────────────────
 
+/**
+ * Narrow a parsed JSON-RPC `id` to the JSON-RPC-legal shapes (string | number
+ * | null). A spec-noncompliant id (wrong type) degrades to null for response
+ * correlation rather than rejecting the whole request — id is client-side
+ * correlation metadata, not something the server should enforce strictly.
+ */
+function normalizeRpcId(id: unknown): string | number | null {
+  return typeof id === 'string' || typeof id === 'number' ? id : null;
+}
+
 mcpRoutes.post('/', async (c) => {
   // NOSONAR - legacy MCP dispatcher switch is intentionally centralized.
   // Authenticate — returns parsed token data
@@ -167,20 +178,36 @@ mcpRoutes.post('/', async (c) => {
   }
 
   // Parse JSON-RPC body before rate limiting so notifications can exit early
-  let rpc: JsonRpcRequest;
+  let raw: unknown;
   try {
-    rpc = await c.req.json<JsonRpcRequest>();
+    raw = await c.req.json();
   } catch {
     return c.json(jsonRpcError(null, -32700, 'Parse error: invalid JSON'), 400);
   }
 
-  if (Array.isArray(rpc)) {
+  if (Array.isArray(raw)) {
     return c.json(jsonRpcError(null, -32600, 'Batch requests are not supported'), 400);
   }
 
+  // Structural validation only — replaces the previous unsafe generically-typed
+  // parse with a real check that the body is a JSON object (so a `null`/primitive
+  // body degrades to a normal 400 instead of crashing below). jsonrpc/method/params
+  // stay unknown in JsonRpcEnvelopeSchema on purpose: the checks below already
+  // enforce their exact accepted shapes with the JSON-RPC-shaped error responses
+  // MCP clients depend on, so this schema must not preempt them or change their
+  // error code/shape.
+  const parsedRpc = v.safeParse(JsonRpcEnvelopeSchema, raw);
+  if (!parsedRpc.success) {
+    return c.json(
+      jsonRpcError(null, -32600, `Invalid Request: ${formatIssues(parsedRpc.issues)}`),
+      400
+    );
+  }
+  const rpc = parsedRpc.output;
+
   if (rpc.jsonrpc !== '2.0') {
     return c.json(
-      jsonRpcError(rpc.id ?? null, -32600, 'Invalid Request: missing jsonrpc 2.0'),
+      jsonRpcError(normalizeRpcId(rpc.id), -32600, 'Invalid Request: missing jsonrpc 2.0'),
       400
     );
   }
@@ -207,9 +234,8 @@ mcpRoutes.post('/', async (c) => {
     );
   }
 
-  // After the notification guard above, rpc.id is always defined (string | number | null).
-  // The ?? null satisfies TypeScript since 'id' in rpc doesn't narrow the optional type.
-  const requestId = rpc.id ?? null;
+  // After the notification guard above, rpc.id is always present.
+  const requestId = normalizeRpcId(rpc.id);
 
   // Route by method
   switch (rpc.method) {

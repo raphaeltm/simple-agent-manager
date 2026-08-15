@@ -536,6 +536,35 @@ describe('Contract 4: Send Prompt to Agent (API Worker → VM Agent)', () => {
         messageId: 'msg-prepersisted-001',
       });
     });
+
+    it('sendPromptToAgentOnNode serializes the negotiated protocol and delivery identity', async () => {
+      vi.resetModules();
+      const capture = setupNodeAgentMocks();
+      const { sendPromptToAgentOnNode } = await import('../../src/services/node-agent');
+
+      const env = {
+        BASE_DOMAIN: 'example.com',
+        NODE_AGENT_REQUEST_TIMEOUT_MS: '30000',
+      } as any;
+
+      await sendPromptToAgentOnNode(
+        'node-abc',
+        'ws-test',
+        'sess-xyz',
+        'Continue durably',
+        env,
+        'user-123',
+        'msg-prepersisted-002',
+        { requestTimeoutMs: 1_234, protocolVersion: 1, deliveryId: 'delivery-002' },
+      );
+
+      expect(JSON.parse(capture.body!)).toEqual({
+        prompt: 'Continue durably',
+        messageId: 'msg-prepersisted-002',
+        protocolVersion: 1,
+        deliveryId: 'delivery-002',
+      });
+    });
   });
 
   describe('startAgentSessionOnNode payload structure', () => {

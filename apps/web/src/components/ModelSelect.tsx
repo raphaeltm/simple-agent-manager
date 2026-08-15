@@ -236,7 +236,8 @@ export const ModelSelect: FC<ModelSelectProps> = ({
         case 'Enter':
           e.preventDefault();
           if (activeIndex >= 0 && activeIndex < flatOptions.length) {
-            handleSelect(flatOptions[activeIndex]!.id);
+            const option = flatOptions[activeIndex];
+            if (option) handleSelect(option.id);
           } else if (filterText) {
             // Accept custom model text
             setIsOpen(false);
@@ -329,12 +330,12 @@ export const ModelSelect: FC<ModelSelectProps> = ({
             style={{
               position: 'fixed',
               zIndex: 50,
-              ...(containerRef.current
-                ? (() => {
-                    const r = containerRef.current!.getBoundingClientRect();
-                    return { top: r.bottom + 4, left: r.left, width: r.width };
-                  })()
-                : {}),
+              ...(() => {
+                const container = containerRef.current;
+                if (!container) return {};
+                const r = container.getBoundingClientRect();
+                return { top: r.bottom + 4, left: r.left, width: r.width };
+              })(),
             }}
             role="listbox"
           >

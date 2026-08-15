@@ -11,7 +11,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import ReactMarkdown from 'react-markdown';
+import ReactMarkdown, { type ExtraProps } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 const SAFE_MARKDOWN_URL_PROTOCOLS = new Set(['http:', 'https:']);
@@ -20,7 +20,12 @@ function sanitizeMarkdownHref(href: string | undefined): string {
   if (!href) return '#';
   const trimmed = href.trim();
   if (!trimmed) return '#';
-  if (trimmed.startsWith('#') || (trimmed.startsWith('/') && !trimmed.startsWith('//')) || trimmed.startsWith('./') || trimmed.startsWith('../')) {
+  if (
+    trimmed.startsWith('#') ||
+    (trimmed.startsWith('/') && !trimmed.startsWith('//')) ||
+    trimmed.startsWith('./') ||
+    trimmed.startsWith('../')
+  ) {
     return trimmed;
   }
   try {
@@ -111,21 +116,13 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
         className="mb-3 px-4 py-3 bg-danger-tint border border-border-default rounded-md font-mono text-fg-muted whitespace-pre-wrap"
         style={{ fontSize: '0.8125rem' }}
       >
-        <div className="mb-2 text-fg-primary">
-          Mermaid diagram error
-        </div>
+        <div className="mb-2 text-fg-primary">Mermaid diagram error</div>
         {error}
       </div>
     );
   }
 
-  return (
-    <div
-      ref={containerRef}
-      data-testid="mermaid-diagram"
-      className="mb-3 overflow-auto"
-    />
-  );
+  return <div ref={containerRef} data-testid="mermaid-diagram" className="mb-3 overflow-auto" />;
 };
 
 // ---------- Syntax Highlighted Code ----------
@@ -140,7 +137,10 @@ export const SyntaxHighlightedCode: FC<{ content: string; language: string }> = 
   return (
     <Highlight theme={themes.nightOwl} code={content} language={language || 'text'}>
       {({ style: themeStyle, tokens, getLineProps, getTokenProps }) => (
-        <pre className="m-0 py-3 font-mono" style={{ ...themeStyle, fontSize: '0.8125rem', lineHeight: '1.5', overflow: 'auto' }}>
+        <pre
+          className="m-0 py-3 font-mono"
+          style={{ ...themeStyle, fontSize: '0.8125rem', lineHeight: '1.5', overflow: 'auto' }}
+        >
           {tokens.map((line, lineIdx) => {
             const lineProps = getLineProps({ line });
             return (
@@ -155,7 +155,10 @@ export const SyntaxHighlightedCode: FC<{ content: string; language: string }> = 
                   minHeight: '1.5em',
                 }}
               >
-                <span className="inline-block w-12 text-right pr-3 text-fg-muted opacity-50 select-none shrink-0" aria-hidden="true">
+                <span
+                  className="inline-block w-12 text-right pr-3 text-fg-muted opacity-50 select-none shrink-0"
+                  aria-hidden="true"
+                >
                   {lineIdx + 1}
                 </span>
                 <span className="flex-1">
@@ -175,12 +178,22 @@ export const SyntaxHighlightedCode: FC<{ content: string; language: string }> = 
 
 // ---------- Markdown Rendering ----------
 
-export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inline?: boolean }> = ({ content, style, inline }) => {
+// One child of a HAST element's `children` array (as produced by react-markdown's
+// `node` prop) — a union of comment/element/text nodes, narrowed via `.type`.
+type MarkdownHastChild = NonNullable<ExtraProps['node']>['children'][number];
+
+export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inline?: boolean }> = ({
+  content,
+  style,
+  inline,
+}) => {
   return (
     <div
-      className={inline
-        ? 'text-fg-primary leading-relaxed text-base overflow-x-hidden min-w-0 w-full'
-        : 'max-w-[900px] mx-auto overflow-x-hidden p-4 text-fg-primary leading-relaxed text-base min-w-0 w-full'}
+      className={
+        inline
+          ? 'text-fg-primary leading-relaxed text-base overflow-x-hidden min-w-0 w-full'
+          : 'max-w-[900px] mx-auto overflow-x-hidden p-4 text-fg-primary leading-relaxed text-base min-w-0 w-full'
+      }
       style={{ ...style, overflowWrap: 'anywhere' }}
       data-testid="rendered-markdown"
     >
@@ -188,17 +201,35 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
         remarkPlugins={[remarkGfm]}
         components={{
           h1: ({ children }) => (
-            <h1 className="text-2xl mb-3 leading-tight" style={{ margin: '0 0 12px' }}>{children}</h1>
+            <h1 className="text-2xl mb-3 leading-tight" style={{ margin: '0 0 12px' }}>
+              {children}
+            </h1>
           ),
           h2: ({ children }) => (
-            <h2 className="text-2xl leading-snug" style={{ margin: '18px 0 10px' }}>{children}</h2>
+            <h2 className="text-2xl leading-snug" style={{ margin: '18px 0 10px' }}>
+              {children}
+            </h2>
           ),
           h3: ({ children }) => (
-            <h3 className="text-base leading-snug" style={{ margin: '16px 0 8px' }}>{children}</h3>
+            <h3 className="text-base leading-snug" style={{ margin: '16px 0 8px' }}>
+              {children}
+            </h3>
           ),
-          p: ({ children }) => <p className="mb-3" style={{ margin: '0 0 12px' }}>{children}</p>,
-          ul: ({ children }) => <ul className="mb-3" style={{ margin: '0 0 12px', paddingLeft: 22 }}>{children}</ul>,
-          ol: ({ children }) => <ol className="mb-3" style={{ margin: '0 0 12px', paddingLeft: 22 }}>{children}</ol>,
+          p: ({ children }) => (
+            <p className="mb-3" style={{ margin: '0 0 12px' }}>
+              {children}
+            </p>
+          ),
+          ul: ({ children }) => (
+            <ul className="mb-3" style={{ margin: '0 0 12px', paddingLeft: 22 }}>
+              {children}
+            </ul>
+          ),
+          ol: ({ children }) => (
+            <ol className="mb-3" style={{ margin: '0 0 12px', paddingLeft: 22 }}>
+              {children}
+            </ol>
+          ),
           li: ({ children }) => <li className="mb-1">{children}</li>,
           blockquote: ({ children }) => (
             <blockquote className="my-3 py-2 px-3 border-l-[3px] border-border-default bg-info-tint">
@@ -206,15 +237,19 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
             </blockquote>
           ),
           a: ({ href, children }) => (
-            <a href={sanitizeMarkdownHref(href)} target="_blank" rel="noreferrer noopener" className="text-tn-blue" style={{ overflowWrap: 'anywhere' }}>
+            <a
+              href={sanitizeMarkdownHref(href)}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="text-tn-blue"
+              style={{ overflowWrap: 'anywhere' }}
+            >
               {children}
             </a>
           ),
           table: ({ children }) => (
             <div className="overflow-x-auto mb-3 max-w-full">
-              <table className="border-collapse w-full min-w-80">
-                {children}
-              </table>
+              <table className="border-collapse w-full min-w-80">{children}</table>
             </div>
           ),
           // `overflow-wrap: anywhere` on the markdown root lets the table layout
@@ -222,12 +257,18 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
           // keeps whole words in min-content sizing so the overflow-x wrapper
           // scrolls instead, while still breaking truly unbreakable tokens.
           th: ({ children }) => (
-            <th className="border border-border-default px-2 py-1.5 text-left bg-info-tint" style={{ overflowWrap: 'break-word' }}>
+            <th
+              className="border border-border-default px-2 py-1.5 text-left bg-info-tint"
+              style={{ overflowWrap: 'break-word' }}
+            >
               {children}
             </th>
           ),
           td: ({ children }) => (
-            <td className="border border-border-default px-2 py-1.5" style={{ overflowWrap: 'break-word' }}>
+            <td
+              className="border border-border-default px-2 py-1.5"
+              style={{ overflowWrap: 'break-word' }}
+            >
               {children}
             </td>
           ),
@@ -238,7 +279,9 @@ export const RenderedMarkdown: FC<{ content: string; style?: CSSProperties; inli
           // We detect mermaid by inspecting the HAST node's code child className.
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           pre: ({ node, children }: { node?: any; children?: ReactNode }) => {
-            const codeChild = node?.children?.find((c: any) => c.tagName === 'code');
+            const codeChild = node?.children?.find(
+              (c: MarkdownHastChild) => c.type === 'element' && c.tagName === 'code'
+            );
             if (codeChild?.properties?.className?.includes('language-mermaid')) {
               return <>{children}</>;
             }

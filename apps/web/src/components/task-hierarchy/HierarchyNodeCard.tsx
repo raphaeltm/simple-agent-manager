@@ -29,7 +29,8 @@ export function HierarchyNodeCard({
       type="button"
       data-focus={isFocus ? 'true' : undefined}
       onClick={() => {
-        if (hasSession) onNavigate(node.sessionId!);
+        const { sessionId } = node;
+        if (sessionId != null) onNavigate(sessionId);
       }}
       disabled={isDisabled}
       title={isDisabled ? 'Task is queued — no session yet' : node.task.title}
@@ -40,12 +41,7 @@ export function HierarchyNodeCard({
       className={`
         flex items-center gap-2 w-full text-left transition-all duration-150 rounded-lg
         ${compact ? 'px-2.5 py-1.5' : 'px-3 py-2'}
-        ${isFocus
-          ? 'border-2 shadow-sm'
-          : isFilterMatch
-            ? 'border shadow-sm'
-            : 'border'
-        }
+        ${isFocus ? 'border-2 shadow-sm' : isFilterMatch ? 'border shadow-sm' : 'border'}
         ${isDisabled ? 'opacity-60 cursor-not-allowed' : 'cursor-pointer'}
       `}
       style={{
@@ -60,9 +56,7 @@ export function HierarchyNodeCard({
           : isFilterMatch
             ? 'var(--sam-color-info-tint)'
             : 'var(--sam-color-bg-inset)',
-        boxShadow: isFocus
-          ? '0 0 12px var(--sam-color-accent-primary-tint)'
-          : undefined,
+        boxShadow: isFocus ? '0 0 12px var(--sam-color-accent-primary-tint)' : undefined,
         color: 'var(--sam-color-fg-primary)',
         flexShrink: 0,
       }}
@@ -86,7 +80,11 @@ export function HierarchyNodeCard({
       <span style={{ color: statusCfg.colorVar }} className="flex shrink-0">
         <StatusIcon
           size={compact ? 14 : 16}
-          className={node.task.status === 'in_progress' || node.task.status === 'delegated' ? 'motion-safe:animate-spin' : ''}
+          className={
+            node.task.status === 'in_progress' || node.task.status === 'delegated'
+              ? 'motion-safe:animate-spin'
+              : ''
+          }
         />
       </span>
       <div className="flex-1 min-w-0">
@@ -125,9 +123,7 @@ export function HierarchyNodeCard({
               BLOCKED
             </span>
           )}
-          {node.startedAt && (
-            <span>{formatRelativeTime(node.startedAt)}</span>
-          )}
+          {node.startedAt && <span>{formatRelativeTime(node.startedAt)}</span>}
         </div>
       </div>
       {depthBadge != null && depthBadge > 0 && (

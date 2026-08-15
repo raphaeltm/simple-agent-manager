@@ -1,6 +1,11 @@
 import { expect, type Page, type Route, test, type TestInfo } from '@playwright/test';
 
-import { assertNoOverflow, jsonResponse, makeMockUser } from './audit-helpers';
+import {
+  assertNoClippedOverflow,
+  assertNoOverflow,
+  jsonResponse,
+  makeMockUser,
+} from './audit-helpers';
 
 // ---------------------------------------------------------------------------
 // Mock Data
@@ -595,6 +600,7 @@ async function verifyCleanupFailure(page: Page, screenshotName: string) {
   await page.waitForSelector('text=Cleanup unavailable');
   await screenshot(page, screenshotName);
   await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
 }
 
 async function verifyWebhookCreation(page: Page, screenshotName: string) {
@@ -616,6 +622,7 @@ async function verifyWebhookCreation(page: Page, screenshotName: string) {
   await expect(page.getByText(WEBHOOK_CREDENTIAL.token, { exact: true })).toBeVisible();
   await screenshot(page, screenshotName);
   await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
   await page.getByLabel(/I saved this token/i).check();
   await page.getByRole('button', { name: 'Done' }).click();
   await expect(page.getByRole('dialog', { name: /save your webhook credential/i })).toHaveCount(0);
@@ -632,11 +639,13 @@ async function verifyWebhookDetail(page: Page, screenshotPrefix: string) {
   await expect(page.getByText('accepted', { exact: true })).toBeVisible();
   await screenshot(page, `${screenshotPrefix}-normal`);
   await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
 
   await page.getByRole('button', { name: 'Load more' }).click();
   await expect(page.getByText('concurrent limit', { exact: true })).toBeVisible();
   await screenshot(page, `${screenshotPrefix}-deliveries`);
   await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
 
   await page
     .getByLabel('Sample webhook JSON')
@@ -645,12 +654,14 @@ async function verifyWebhookDetail(page: Page, screenshotPrefix: string) {
   await expect(page.getByText('Filters: matched')).toBeVisible();
   await screenshot(page, `${screenshotPrefix}-preview-filter`);
   await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
 
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: /Rotate token/ }).click();
   await expect(page.getByRole('dialog', { name: /save your webhook credential/i })).toBeVisible();
   await screenshot(page, `${screenshotPrefix}-rotation`);
   await assertNoOverflow(page);
+  await assertNoClippedOverflow(page);
 }
 
 // ---------------------------------------------------------------------------
@@ -667,6 +678,7 @@ test.describe('Triggers List — Mobile', () => {
     await expect(page.getByRole('dialog', { name: /create trigger/i })).toHaveCount(0);
     await screenshot(page, 'triggers-list-normal-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('long text wraps correctly', async ({ page }) => {
@@ -675,6 +687,41 @@ test.describe('Triggers List — Mobile', () => {
     await page.waitForSelector('text=Special chars');
     await screenshot(page, 'triggers-list-long-text-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
+  });
+
+  /**
+   * Regression guard for the reported mobile bug: a long trigger name made the
+   * page render 768px wide inside a 375px viewport, sheared off by the
+   * ancestors' `overflow-x-hidden`. This measures the page root directly —
+   * `document.documentElement.scrollWidth` never grew, which is why the
+   * document-level check stayed green while the page was visibly broken.
+   */
+  test('a long trigger name cannot widen the page past the viewport', async ({ page }) => {
+    await setupApiMocks(page, {
+      triggers: [
+        makeTrigger({
+          id: 'wide-1',
+          name: 'TTV weekly dependency and security maintenance with a deliberately long tail',
+          description: 'Weekly compatible dependency upgrades, security audit, full verification.',
+        }),
+      ],
+    });
+    await page.goto('/projects/proj-test-1/triggers');
+    await page.waitForSelector('text=TTV weekly dependency');
+
+    const { pageWidth, viewportWidth } = await page.evaluate(() => {
+      const root = document.querySelector('main [class*="max-w-3xl"]');
+      return {
+        pageWidth: Math.round(root?.getBoundingClientRect().width ?? 0),
+        viewportWidth: window.innerWidth,
+      };
+    });
+    expect(pageWidth).toBeGreaterThan(0);
+    expect(pageWidth).toBeLessThanOrEqual(viewportWidth);
+
+    await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('empty state', async ({ page }) => {
@@ -683,6 +730,7 @@ test.describe('Triggers List — Mobile', () => {
     await page.waitForSelector('text=No triggers yet');
     await screenshot(page, 'triggers-list-empty-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('many items', async ({ page }) => {
@@ -691,6 +739,7 @@ test.describe('Triggers List — Mobile', () => {
     await page.waitForSelector('text=Trigger 1');
     await screenshot(page, 'triggers-list-many-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('error state', async ({ page }) => {
@@ -699,30 +748,33 @@ test.describe('Triggers List — Mobile', () => {
     await page.waitForSelector('text=Retry');
     await screenshot(page, 'triggers-list-error-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('delete menu item in overflow menu', async ({ page }) => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
     await page.goto('/projects/proj-test-1/triggers');
     await page.waitForSelector('text=Daily Code Review');
-    const menuBtns = page.getByRole('button', { name: 'Trigger actions' });
+    const menuBtns = page.getByRole('button', { name: /^Actions for/ });
     await menuBtns.first().click();
     await page.waitForSelector('text=Delete');
     await screenshot(page, 'triggers-delete-menu-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('delete confirmation dialog', async ({ page }) => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
     await page.goto('/projects/proj-test-1/triggers');
     await page.waitForSelector('text=Daily Code Review');
-    const menuBtns = page.getByRole('button', { name: 'Trigger actions' });
+    const menuBtns = page.getByRole('button', { name: /^Actions for/ });
     await menuBtns.first().click();
     await page.waitForSelector('text=Delete');
-    await page.getByRole('button', { name: /delete/i }).click();
+    await page.getByRole('menuitem', { name: /delete/i }).click();
     await page.waitForSelector('role=alertdialog');
     await screenshot(page, 'triggers-delete-confirm-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 });
 
@@ -740,6 +792,7 @@ test.describe('Triggers List — Desktop', () => {
     await expect(page.getByRole('dialog', { name: /create trigger/i })).toHaveCount(0);
     await screenshot(page, 'triggers-list-normal-desktop');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('long text', async ({ page }) => {
@@ -748,6 +801,7 @@ test.describe('Triggers List — Desktop', () => {
     await page.waitForSelector('text=Special chars');
     await screenshot(page, 'triggers-list-long-text-desktop');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('empty state', async ({ page }) => {
@@ -756,30 +810,33 @@ test.describe('Triggers List — Desktop', () => {
     await page.waitForSelector('text=No triggers yet');
     await screenshot(page, 'triggers-list-empty-desktop');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('delete menu item in overflow menu', async ({ page }) => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
     await page.goto('/projects/proj-test-1/triggers');
     await page.waitForSelector('text=Daily Code Review');
-    const menuBtns = page.getByRole('button', { name: 'Trigger actions' });
+    const menuBtns = page.getByRole('button', { name: /^Actions for/ });
     await menuBtns.first().click();
     await page.waitForSelector('text=Delete');
     await screenshot(page, 'triggers-delete-menu-desktop');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('delete confirmation dialog', async ({ page }) => {
     await setupApiMocks(page, { triggers: NORMAL_TRIGGERS });
     await page.goto('/projects/proj-test-1/triggers');
     await page.waitForSelector('text=Daily Code Review');
-    const menuBtns = page.getByRole('button', { name: 'Trigger actions' });
+    const menuBtns = page.getByRole('button', { name: /^Actions for/ });
     await menuBtns.first().click();
     await page.waitForSelector('text=Delete');
-    await page.getByRole('button', { name: /delete/i }).click();
+    await page.getByRole('menuitem', { name: /delete/i }).click();
     await page.waitForSelector('role=alertdialog');
     await screenshot(page, 'triggers-delete-confirm-desktop');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 });
 
@@ -800,6 +857,7 @@ test.describe('Trigger Detail — Mobile', () => {
     await page.waitForSelector('text=Daily Code Review');
     await screenshot(page, 'trigger-detail-normal-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('no executions', async ({ page }) => {
@@ -812,6 +870,7 @@ test.describe('Trigger Detail — Mobile', () => {
     await page.waitForSelector('text=Weekly Report');
     await screenshot(page, 'trigger-detail-empty-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('cleanup failure feedback', async ({ page }) => {
@@ -833,6 +892,7 @@ test.describe('Trigger Detail — Mobile', () => {
     await expect(page.getByText('No webhook deliveries yet.')).toBeVisible();
     await screenshot(page, 'trigger-webhook-detail-empty-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 });
 
@@ -853,6 +913,7 @@ test.describe('Trigger Detail — Desktop', () => {
     await page.waitForSelector('text=Daily Code Review');
     await screenshot(page, 'trigger-detail-normal-desktop');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('cleanup failure feedback', async ({ page }) => {
@@ -879,6 +940,7 @@ test.describe('Trigger Form — Mobile', () => {
     await page.waitForSelector('text=New Trigger');
     await screenshot(page, 'trigger-form-new-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('GitHub event trigger form renders', async ({ page }) => {
@@ -890,6 +952,7 @@ test.describe('Trigger Form — Mobile', () => {
     await page.waitForSelector('text=Command prefix');
     await screenshot(page, 'trigger-form-github-mobile');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('webhook form creates one-time credential', async ({ page }) => {
@@ -931,6 +994,7 @@ test.describe('Trigger Form — Desktop', () => {
     await screenshot(page, 'trigger-form-advanced-desktop');
 
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('new GitHub event trigger form', async ({ page }) => {
@@ -942,6 +1006,7 @@ test.describe('Trigger Form — Desktop', () => {
     await page.waitForSelector('text=GitHub event');
     await screenshot(page, 'trigger-form-github-desktop');
     await assertNoOverflow(page);
+    await assertNoClippedOverflow(page);
   });
 
   test('webhook form creates one-time credential', async ({ page }) => {

@@ -62,6 +62,10 @@ const branchSchema = v.object({
   name: v.string(),
 });
 
+const githubOrgSchema = v.object({
+  login: v.string(),
+});
+
 async function readGitHubError(response: Response, fallback: string): Promise<string> {
   try {
     const error = await readResponseJson(response, githubErrorSchema, 'github.error');
@@ -80,7 +84,10 @@ async function githubRepositoryAccessError(response: Response): Promise<AppError
     );
   }
   if (response.status === 403) {
-    const message = await readGitHubError(response, 'GitHub denied access to this repository or installation');
+    const message = await readGitHubError(
+      response,
+      'GitHub denied access to this repository or installation'
+    );
     return new AppError(403, 'GITHUB_FORBIDDEN', message);
   }
   const message = await readGitHubError(response, `GitHub API request failed: ${response.status}`);
@@ -207,8 +214,7 @@ function convertPkcs1ToPkcs8(pem: string): string {
   // PKCS#8 header for RSA: SEQUENCE { AlgorithmIdentifier { OID rsaEncryption, NULL }, OCTET STRING { pkcs1Der } }
   // The RSA AlgorithmIdentifier is the fixed bytes: 30 0d 06 09 2a 86 48 86 f7 0d 01 01 01 05 00
   const algId = new Uint8Array([
-    0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01,
-    0x01, 0x05, 0x00,
+    0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00,
   ]);
 
   // Build the OCTET STRING wrapping the PKCS#1 key
@@ -269,7 +275,11 @@ function concatBytes(...arrays: Uint8Array[]): Uint8Array {
 export async function generateAppJWT(env: Env): Promise<string> {
   const config = await getGitHubAppConfig(env);
   if (!config) {
-    throw new AppError(500, 'GITHUB_APP_NOT_CONFIGURED', 'GitHub App credentials are not configured');
+    throw new AppError(
+      500,
+      'GITHUB_APP_NOT_CONFIGURED',
+      'GitHub App credentials are not configured'
+    );
   }
   const pemKey = decodePrivateKey(config.privateKey);
   const privateKey = await importPKCS8(pemKey, 'RS256');
@@ -290,11 +300,13 @@ export async function generateAppJWT(env: Env): Promise<string> {
 export async function getInstallationToken(
   installationId: string,
   env: Env,
-  options?: Record<string, string> | {
-    permissions?: Record<string, string>;
-    repositoryIds?: number[];
-    repositories?: string[];
-  },
+  options?:
+    | Record<string, string>
+    | {
+        permissions?: Record<string, string>;
+        repositoryIds?: number[];
+        repositories?: string[];
+      }
 ): Promise<{ token: string; expiresAt: string }> {
   const jwt = await generateAppJWT(env);
 
@@ -326,10 +338,16 @@ export async function getInstallationToken(
   );
 
   if (!response.ok) {
-    throw new Error(await readGitHubError(response, `Failed to get installation token: ${response.status}`));
+    throw new Error(
+      await readGitHubError(response, `Failed to get installation token: ${response.status}`)
+    );
   }
 
-  const data = await readResponseJson(response, installationTokenSchema, 'github.installation_token');
+  const data = await readResponseJson(
+    response,
+    installationTokenSchema,
+    'github.installation_token'
+  );
   return {
     token: data.token,
     expiresAt: data.expires_at,
@@ -365,17 +383,14 @@ export async function getInstallationAccount(
 ): Promise<InstallationAccount | null> {
   const jwt = appJwt ?? (await generateAppJWT(env));
 
-  const response = await fetch(
-    `https://api.github.com/app/installations/${installationId}`,
-    {
-      headers: {
-        Authorization: `Bearer ${jwt}`,
-        Accept: 'application/vnd.github+json',
-        'X-GitHub-Api-Version': '2022-11-28',
-        'User-Agent': 'Simple-Agent-Manager',
-      },
-    }
-  );
+  const response = await fetch(`https://api.github.com/app/installations/${installationId}`, {
+    headers: {
+      Authorization: `Bearer ${jwt}`,
+      Accept: 'application/vnd.github+json',
+      'X-GitHub-Api-Version': '2022-11-28',
+      'User-Agent': 'Simple-Agent-Manager',
+    },
+  });
 
   if (response.status === 404) {
     return null;
@@ -433,10 +448,16 @@ export async function getInstallationRepositories(
     );
 
     if (!response.ok) {
-      throw new Error(await readGitHubError(response, `Failed to get repositories: ${response.status}`));
+      throw new Error(
+        await readGitHubError(response, `Failed to get repositories: ${response.status}`)
+      );
     }
 
-    const data = await readResponseJson(response, installationRepositoriesSchema, 'github.installation_repositories');
+    const data = await readResponseJson(
+      response,
+      installationRepositoriesSchema,
+      'github.installation_repositories'
+    );
 
     const repos = data.repositories.map((repo) => ({
       id: repo.id,
@@ -454,7 +475,10 @@ export async function getInstallationRepositories(
 
     // Safety limit to prevent infinite loops (10,000 repos max)
     if (allRepos.length >= 10000) {
-      log.warn('github_app.repo_safety_limit_reached', { installationId, repoCount: allRepos.length });
+      log.warn('github_app.repo_safety_limit_reached', {
+        installationId,
+        repoCount: allRepos.length,
+      });
       break;
     }
   }
@@ -499,10 +523,16 @@ export async function getUserAccessibleInstallations(
         ok: false,
         installationCount: 0,
       });
-      throw new Error(await readGitHubError(response, `Failed to get user installations: ${response.status}`));
+      throw new Error(
+        await readGitHubError(response, `Failed to get user installations: ${response.status}`)
+      );
     }
 
-    const data = await readResponseJson(response, userInstallationsSchema, 'github.user_installations');
+    const data = await readResponseJson(
+      response,
+      userInstallationsSchema,
+      'github.user_installations'
+    );
 
     log.info('github.user_accessible_installations.response', {
       flow: diagnostics?.flow,
@@ -514,10 +544,12 @@ export async function getUserAccessibleInstallations(
       installationCount: data.installations.length,
     });
 
-    allInstallations.push(...data.installations.map((installation) => ({
-      id: installation.id,
-      account: installation.account,
-    })));
+    allInstallations.push(
+      ...data.installations.map((installation) => ({
+        id: installation.id,
+        account: installation.account,
+      }))
+    );
 
     hasMore = data.installations.length === perPage;
     page++;
@@ -568,14 +600,20 @@ export async function getUserInstallationRepositories(
       throw await githubRepositoryAccessError(response);
     }
 
-    const data = await readResponseJson(response, installationRepositoriesSchema, 'github.user_installation_repositories');
-    allRepos.push(...data.repositories.map((repo) => ({
-      id: repo.id,
-      nodeId: repo.node_id ?? null,
-      fullName: repo.full_name,
-      private: repo.private,
-      defaultBranch: repo.default_branch,
-    })));
+    const data = await readResponseJson(
+      response,
+      installationRepositoriesSchema,
+      'github.user_installation_repositories'
+    );
+    allRepos.push(
+      ...data.repositories.map((repo) => ({
+        id: repo.id,
+        nodeId: repo.node_id ?? null,
+        fullName: repo.full_name,
+        private: repo.private,
+        defaultBranch: repo.default_branch,
+      }))
+    );
 
     hasMore = data.repositories.length === perPage;
     page++;
@@ -623,7 +661,9 @@ export async function getAuthenticatedGitHubUser(
   }
 
   if (!response.ok) {
-    throw new Error(await readGitHubError(response, `Failed to get authenticated GitHub user: ${response.status}`));
+    throw new Error(
+      await readGitHubError(response, `Failed to get authenticated GitHub user: ${response.status}`)
+    );
   }
 
   return readResponseJson(response, authenticatedGitHubUserSchema, 'github.authenticated_user');
@@ -661,11 +701,24 @@ export async function getAuthenticatedUserOrganizations(
         ok: false,
         organizationCount: 0,
       });
-      const error = await response.json().catch(() => ({})) as { message?: string };
-      throw new Error(error.message || `Failed to get user organizations: ${response.status}`);
+      throw new Error(
+        await readGitHubError(response, `Failed to get user organizations: ${response.status}`)
+      );
     }
 
-    const data = await response.json() as Array<{ login: string }>;
+    let parsedBody: unknown;
+    try {
+      parsedBody = await response.json();
+    } catch (err) {
+      throw new Error(
+        err instanceof Error
+          ? `Failed to parse user organizations response: ${err.message}`
+          : 'Failed to parse user organizations response'
+      );
+    }
+    if (!Array.isArray(parsedBody)) {
+      throw new Error('Failed to get user organizations: response was not a JSON array');
+    }
 
     log.info('github.user_organizations.response', {
       flow: diagnostics.flow,
@@ -673,11 +726,26 @@ export async function getAuthenticatedUserOrganizations(
       page,
       status: response.status,
       ok: true,
-      organizationCount: data.length,
+      organizationCount: parsedBody.length,
     });
 
-    allOrganizations.push(...data.map((org) => ({ login: org.login })));
-    hasMore = data.length === perPage;
+    // Per-entry validation instead of a blind cast: a null/malformed entry
+    // previously either crashed (null.login) or silently produced
+    // `{ login: undefined }`. Skip and log instead, matching rule 50's
+    // list-read fault isolation — one bad entry no longer breaks the page.
+    for (const entry of parsedBody) {
+      const result = v.safeParse(githubOrgSchema, entry);
+      if (result.success) {
+        allOrganizations.push({ login: result.output.login });
+      } else {
+        log.warn('github.user_organizations.invalid_entry', {
+          flow: diagnostics.flow,
+          userId: diagnostics.userId,
+          page,
+        });
+      }
+    }
+    hasMore = parsedBody.length === perPage;
     page++;
   }
 
@@ -724,8 +792,9 @@ export async function verifyUserInstallationAccess(
     return false;
   }
 
-  const error = await response.json().catch(() => ({})) as { message?: string };
-  throw new Error(error.message || `Failed to verify user installation access: ${response.status}`);
+  throw new Error(
+    await readGitHubError(response, `Failed to verify user installation access: ${response.status}`)
+  );
 }
 
 function githubUserTokenHeaders(accessToken: string): HeadersInit {
@@ -764,7 +833,7 @@ export async function getRepositoryMetadata(
   owner: string,
   repo: string,
   env: Env,
-  installationToken?: string,
+  installationToken?: string
 ): Promise<GitHubRepositoryMetadata | null> {
   const token = installationToken ?? (await getInstallationToken(installationId, env)).token;
 
@@ -777,7 +846,7 @@ export async function getRepositoryMetadata(
         'X-GitHub-Api-Version': '2022-11-28',
         'User-Agent': 'Simple-Agent-Manager',
       },
-    },
+    }
   );
 
   if (response.status === 404 || response.status === 403) {
@@ -791,7 +860,9 @@ export async function getRepositoryMetadata(
   }
 
   if (!response.ok) {
-    throw new Error(await readGitHubError(response, `Failed to get repository metadata: ${response.status}`));
+    throw new Error(
+      await readGitHubError(response, `Failed to get repository metadata: ${response.status}`)
+    );
   }
 
   const data = await readResponseJson(response, repositorySchema, 'github.repository_metadata');
@@ -902,7 +973,7 @@ export async function getRepositoryGitmodules(
   repo: string,
   parentOwner: string,
   env: Env,
-  ref?: string,
+  ref?: string
 ): Promise<GitmoduleEntry[]> {
   const { token } = await getInstallationToken(installationId, env);
   const refQuery = ref ? `?ref=${encodeURIComponent(ref)}` : '';
@@ -915,14 +986,16 @@ export async function getRepositoryGitmodules(
         'X-GitHub-Api-Version': '2022-11-28',
         'User-Agent': 'Simple-Agent-Manager',
       },
-    },
+    }
   );
 
   if (response.status === 404) {
     return [];
   }
   if (!response.ok) {
-    throw new Error(await readGitHubError(response, `Failed to fetch .gitmodules: ${response.status}`));
+    throw new Error(
+      await readGitHubError(response, `Failed to fetch .gitmodules: ${response.status}`)
+    );
   }
 
   const content = await response.text();
@@ -942,7 +1015,8 @@ export async function getRepositoryBranches(
 ): Promise<Array<{ name: string }>> {
   const { token } = await getInstallationToken(installationId, env);
 
-  const maxBranches = parseInt(env.MAX_BRANCHES_PER_REPO || '', 10) || DEFAULT_MAX_BRANCHES_PER_REPO;
+  const maxBranches =
+    parseInt(env.MAX_BRANCHES_PER_REPO || '', 10) || DEFAULT_MAX_BRANCHES_PER_REPO;
   const allBranches: Array<{ name: string }> = [];
   let page = 1;
   const perPage = 100;
@@ -962,7 +1036,9 @@ export async function getRepositoryBranches(
     );
 
     if (!response.ok) {
-      throw new Error(await readGitHubError(response, `Failed to list branches: ${response.status}`));
+      throw new Error(
+        await readGitHubError(response, `Failed to list branches: ${response.status}`)
+      );
     }
 
     const data = await readResponseJson(response, v.array(branchSchema), 'github.branches');
@@ -972,7 +1048,12 @@ export async function getRepositoryBranches(
     page++;
 
     if (allBranches.length >= maxBranches) {
-      log.warn('github_app.branch_safety_limit_reached', { owner, repo, branchCount: allBranches.length, maxBranches });
+      log.warn('github_app.branch_safety_limit_reached', {
+        owner,
+        repo,
+        branchCount: allBranches.length,
+        maxBranches,
+      });
       break;
     }
   }
@@ -1007,7 +1088,7 @@ export async function ensureBranchExists(
   repo: string,
   branchName: string,
   defaultBranch: string,
-  env: Env,
+  env: Env
 ): Promise<boolean> {
   const { token } = await getInstallationToken(installationId, env);
   const headers: HeadersInit = {
@@ -1020,7 +1101,7 @@ export async function ensureBranchExists(
   // Check if the branch already exists
   const checkResp = await fetch(
     `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/branches/${encodeURIComponent(branchName)}`,
-    { headers },
+    { headers }
   );
 
   if (checkResp.ok) {
@@ -1030,7 +1111,9 @@ export async function ensureBranchExists(
   if (checkResp.status !== 404) {
     // Unexpected error — log and return false
     log.warn('github.ensure_branch.check_failed', {
-      owner, repo, branchName,
+      owner,
+      repo,
+      branchName,
       status: checkResp.status,
     });
     return false;
@@ -1039,18 +1122,20 @@ export async function ensureBranchExists(
   // Branch doesn't exist — get the SHA of the default branch
   const refResp = await fetch(
     `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/ref/heads/${encodeURIComponent(defaultBranch)}`,
-    { headers },
+    { headers }
   );
 
   if (!refResp.ok) {
     log.warn('github.ensure_branch.default_branch_ref_failed', {
-      owner, repo, defaultBranch,
+      owner,
+      repo,
+      defaultBranch,
       status: refResp.status,
     });
     return false;
   }
 
-  const refData = await refResp.json() as { object?: { sha?: string } };
+  const refData = (await refResp.json()) as { object?: { sha?: string } };
   const sha = refData.object?.sha;
   if (!sha) {
     log.warn('github.ensure_branch.no_sha', { owner, repo, defaultBranch });
@@ -1067,12 +1152,16 @@ export async function ensureBranchExists(
         ref: `refs/heads/${branchName}`,
         sha,
       }),
-    },
+    }
   );
 
   if (createResp.ok) {
     log.info('github.ensure_branch.created', {
-      owner, repo, branchName, fromBranch: defaultBranch, sha,
+      owner,
+      repo,
+      branchName,
+      fromBranch: defaultBranch,
+      sha,
     });
     return true;
   }
@@ -1085,7 +1174,9 @@ export async function ensureBranchExists(
 
   const errorText = await createResp.text().catch(() => '');
   log.warn('github.ensure_branch.create_failed', {
-    owner, repo, branchName,
+    owner,
+    repo,
+    branchName,
     status: createResp.status,
     message: errorText.slice(0, 200),
   });

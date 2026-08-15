@@ -1,7 +1,17 @@
-import type { NodeResponse, ProviderCatalog, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { PROVIDER_LABELS,VM_LOCATIONS, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
-import { Button, Card, DropdownMenu, type DropdownMenuItem,StatusBadge } from '@simple-agent-manager/ui';
-import { Plus,Rocket,Server } from 'lucide-react';
+import type {
+  NodeResponse,
+  ProviderCatalog,
+  WorkspaceResponse,
+} from '@simple-agent-manager/shared';
+import { PROVIDER_LABELS, VM_LOCATIONS, VM_SIZE_LABELS } from '@simple-agent-manager/shared';
+import {
+  Button,
+  Card,
+  DropdownMenu,
+  type DropdownMenuItem,
+  StatusBadge,
+} from '@simple-agent-manager/ui';
+import { Plus, Rocket, Server } from 'lucide-react';
 import type { FC } from 'react';
 import { useNavigate } from 'react-router';
 
@@ -23,7 +33,7 @@ interface NodeCardProps {
 
 function getNodeActions(
   node: NodeResponse,
-  handlers: { onStop: (id: string) => void; onDelete: (id: string) => void },
+  handlers: { onStop: (id: string) => void; onDelete: (id: string) => void }
 ): DropdownMenuItem[] {
   const items: DropdownMenuItem[] = [];
   const isTransitional = node.status === 'creating' || node.status === 'stopping';
@@ -62,13 +72,16 @@ export const NodeCard: FC<NodeCardProps> = ({
   const sizeInfo = lookupSizeInfo(catalogs, node.cloudProvider, node.vmSize);
   const locationConfig = VM_LOCATIONS[node.vmLocation];
   const metrics = node.lastMetrics;
-  const hasMetrics = metrics && (metrics.cpuLoadAvg1 != null || metrics.memoryPercent != null || metrics.diskPercent != null);
+  const hasMetrics =
+    metrics &&
+    (metrics.cpuLoadAvg1 != null || metrics.memoryPercent != null || metrics.diskPercent != null);
   const visibleWorkspaces = workspaces.slice(0, MAX_VISIBLE_WORKSPACES);
   const hiddenCount = workspaces.length - visibleWorkspaces.length;
   const isDeploymentNode = node.nodeRole === 'deployment';
   const deploymentEnvironments = node.deploymentEnvironments ?? [];
   const visibleDeploymentEnvironments = deploymentEnvironments.slice(0, MAX_VISIBLE_WORKSPACES);
-  const hiddenDeploymentCount = deploymentEnvironments.length - visibleDeploymentEnvironments.length;
+  const hiddenDeploymentCount =
+    deploymentEnvironments.length - visibleDeploymentEnvironments.length;
 
   const handleCardClick = () => {
     navigate(`/nodes/${node.id}`);
@@ -95,7 +108,11 @@ export const NodeCard: FC<NodeCardProps> = ({
       aria-label={`View node ${node.name}`}
       className="cursor-pointer"
     >
-      <Card variant="glass" className="flex flex-col gap-3" style={{ padding: 'clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }}>
+      <Card
+        variant="glass"
+        className="flex flex-col gap-3"
+        style={{ padding: 'clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }}
+      >
         {/* Header: icon + name + dropdown */}
         <div className="flex items-center gap-3">
           <div
@@ -117,7 +134,7 @@ export const NodeCard: FC<NodeCardProps> = ({
           </div>
 
           {overflowItems.length > 0 && (
-            <div onClick={(e) => e.stopPropagation()} className="shrink-0">
+            <div role="presentation" onClick={(e) => e.stopPropagation()} className="shrink-0">
               <DropdownMenu items={overflowItems} aria-label={`Actions for ${node.name}`} />
             </div>
           )}
@@ -136,15 +153,21 @@ export const NodeCard: FC<NodeCardProps> = ({
 
         {/* VM info */}
         <div className="sam-type-caption text-fg-muted flex flex-wrap gap-x-1">
-          <span aria-label={`Provider: ${node.cloudProvider ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider) : 'Unknown'}`}>
-            {node.cloudProvider ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider) : 'Unknown'}
+          <span
+            aria-label={`Provider: ${node.cloudProvider ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider) : 'Unknown'}`}
+          >
+            {node.cloudProvider
+              ? (PROVIDER_LABELS[node.cloudProvider] ?? node.cloudProvider)
+              : 'Unknown'}
           </span>
           <span aria-hidden="true">&middot;</span>
           {sizeInfo ? (
             <>
               <span className="font-medium text-fg-primary">{sizeInfo.type}</span>
               <span aria-hidden="true">&middot;</span>
-              <span>{sizeInfo.vcpu} vCPU, {sizeInfo.ramGb} GB RAM</span>
+              <span>
+                {sizeInfo.vcpu} vCPU, {sizeInfo.ramGb} GB RAM
+              </span>
               <span aria-hidden="true">&middot;</span>
               <span>{sizeInfo.storageGb} GB storage</span>
               <span aria-hidden="true">&middot;</span>
@@ -156,7 +179,9 @@ export const NodeCard: FC<NodeCardProps> = ({
             </span>
           )}
           <span aria-hidden="true">&middot;</span>
-          <span aria-label={`Location: ${locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}`}>
+          <span
+            aria-label={`Location: ${locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}`}
+          >
             {locationConfig ? `${locationConfig.name}, ${locationConfig.country}` : node.vmLocation}
           </span>
         </div>
@@ -175,9 +200,7 @@ export const NodeCard: FC<NodeCardProps> = ({
             )}
           </div>
         ) : (
-          <span className="sam-type-caption text-fg-muted italic">
-            No metrics yet
-          </span>
+          <span className="sam-type-caption text-fg-muted italic">No metrics yet</span>
         )}
 
         {/* Workspaces section */}
@@ -191,7 +214,10 @@ export const NodeCard: FC<NodeCardProps> = ({
           {isDeploymentNode && visibleDeploymentEnvironments.length > 0 ? (
             <>
               {visibleDeploymentEnvironments.map((env) => (
-                <span key={env.id} className="sam-type-caption text-fg-primary pl-3 overflow-hidden text-ellipsis whitespace-nowrap">
+                <span
+                  key={env.id}
+                  className="sam-type-caption text-fg-primary pl-3 overflow-hidden text-ellipsis whitespace-nowrap"
+                >
                   {env.name}
                 </span>
               ))}
@@ -204,14 +230,12 @@ export const NodeCard: FC<NodeCardProps> = ({
           ) : visibleWorkspaces.length > 0 ? (
             <>
               {visibleWorkspaces.map((ws) => (
-                <div key={ws.id} onClick={(e) => e.stopPropagation()}>
+                <div key={ws.id} role="presentation" onClick={(e) => e.stopPropagation()}>
                   <NodeWorkspaceMiniCard workspace={ws} />
                 </div>
               ))}
               {hiddenCount > 0 && (
-                <span className="sam-type-caption text-fg-muted pl-3">
-                  +{hiddenCount} more
-                </span>
+                <span className="sam-type-caption text-fg-muted pl-3">+{hiddenCount} more</span>
               )}
             </>
           ) : (
@@ -240,9 +264,7 @@ export const NodeCard: FC<NodeCardProps> = ({
         {/* Error message */}
         {node.errorMessage && (
           <div className="p-2 bg-danger-tint rounded-sm">
-            <span className="sam-type-caption text-danger">
-              {node.errorMessage}
-            </span>
+            <span className="sam-type-caption text-danger">{node.errorMessage}</span>
           </div>
         )}
       </Card>

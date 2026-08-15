@@ -1,4 +1,9 @@
-import type { Task, TaskSortOrder, TaskStatus, WorkspaceResponse } from '@simple-agent-manager/shared';
+import type {
+  Task,
+  TaskSortOrder,
+  TaskStatus,
+  WorkspaceResponse,
+} from '@simple-agent-manager/shared';
 import { Button, Dialog } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router';
@@ -20,7 +25,14 @@ import {
 import { useProjectContext } from './ProjectContext';
 
 const VALID_STATUSES: TaskStatus[] = [
-  'draft', 'ready', 'queued', 'delegated', 'in_progress', 'completed', 'failed', 'cancelled',
+  'draft',
+  'ready',
+  'queued',
+  'delegated',
+  'in_progress',
+  'completed',
+  'failed',
+  'cancelled',
 ];
 
 function isTaskStatus(value: string | null): value is TaskStatus {
@@ -56,15 +68,33 @@ export function ProjectTasks() {
     };
   }, [searchParams]);
 
-  const setFilters = useCallback((next: TaskFilterState) => {
-    setSearchParams((prev) => {
-      const params = new URLSearchParams(prev);
-      if (next.status) { params.set('status', next.status); } else { params.delete('status'); }
-      if (next.minPriority !== undefined) { params.set('minPriority', String(next.minPriority)); } else { params.delete('minPriority'); }
-      if (next.sort !== 'createdAtDesc') { params.set('sort', next.sort); } else { params.delete('sort'); }
-      return params;
-    }, { replace: true });
-  }, [setSearchParams]);
+  const setFilters = useCallback(
+    (next: TaskFilterState) => {
+      setSearchParams(
+        (prev) => {
+          const params = new URLSearchParams(prev);
+          if (next.status) {
+            params.set('status', next.status);
+          } else {
+            params.delete('status');
+          }
+          if (next.minPriority !== undefined) {
+            params.set('minPriority', String(next.minPriority));
+          } else {
+            params.delete('minPriority');
+          }
+          if (next.sort !== 'createdAtDesc') {
+            params.set('sort', next.sort);
+          } else {
+            params.delete('sort');
+          }
+          return params;
+        },
+        { replace: true }
+      );
+    },
+    [setSearchParams]
+  );
 
   const [loadError, setLoadError] = useState<string | null>(null);
   const [hasLoaded, setHasLoaded] = useState(false);
@@ -85,10 +115,12 @@ export function ProjectTasks() {
     } finally {
       setTasksLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule; hasLoaded is read for first-load guard only
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- hasLoaded is read only for the first-load guard; including it would change loadTasks's identity once hasLoaded flips true, re-triggering the `[loadTasks]` effect below for one extra fetch
   }, [projectId, filters.status, filters.minPriority, filters.sort]);
 
-  useEffect(() => { void loadTasks(); }, [loadTasks]);
+  useEffect(() => {
+    void loadTasks();
+  }, [loadTasks]);
 
   useEffect(() => {
     void listWorkspaces('running')
@@ -161,9 +193,7 @@ export function ProjectTasks() {
       {/* Toolbar */}
       <div className="flex justify-between items-start gap-2 flex-wrap">
         <TaskFilters value={filters} onChange={setFilters} />
-        <Button onClick={() => setShowTaskCreate(true)}>
-          New task
-        </Button>
+        <Button onClick={() => setShowTaskCreate(true)}>New task</Button>
       </div>
 
       {/* New task dialog */}

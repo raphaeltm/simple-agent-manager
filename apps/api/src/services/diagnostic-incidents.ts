@@ -4,8 +4,11 @@ import type {
   DiagnosticIncidentStatus,
   DiagnosticIncidentSummary,
 } from '@simple-agent-manager/shared';
+import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { log } from '../lib/logger';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
 import {
   acquireArtifactLease,
@@ -21,6 +24,36 @@ const SAFE_ARTIFACT_KIND = 'safe-vm-incident-v1';
 const SAFE_CONTENT_TYPE = 'application/gzip';
 const D1_MAX_BOUND_PARAMETERS = 100;
 const textEncoder = new TextEncoder();
+
+// Mirrors DiagnosticIncidentManifest / DiagnosticCollectorOutcome
+// (packages/shared/src/types/debug-agent.ts) exactly. The admin UI
+// (DiagnosticIncidentCard.tsx) reads `manifest.collectors.length` and maps
+// over each collector's name/status/bytes/redactions/truncated/error without
+// an array guard — a manifest_json row that doesn't decode to this shape must
+// degrade to `null` server-side rather than reach the client and crash on
+// `.collectors.length` of `undefined`.
+const diagnosticCollectorOutcomeSchema = v.object({
+  name: v.string(),
+  status: v.picklist(['available', 'failed']),
+  bytes: v.number(),
+  truncated: v.boolean(),
+  redactions: v.number(),
+  error: v.optional(v.string()),
+});
+
+const diagnosticIncidentManifestSchema = v.object({
+  version: v.number(),
+  incidentId: v.string(),
+  nodeId: v.string(),
+  workspaceId: v.optional(v.string()),
+  source: v.string(),
+  createdAt: v.string(),
+  collectors: v.array(diagnosticCollectorOutcomeSchema),
+  totalBytes: v.number(),
+  redactions: v.number(),
+  anyTruncated: v.boolean(),
+  unavailable: v.optional(v.boolean()),
+});
 
 function assertULID(value: string, label: string): void {
   if (!ULID_PATTERN.test(value)) throw errors.badRequest(`${label} must be a ULID`);
@@ -542,13 +575,34 @@ export async function uploadDiagnosticArtifact(
   }
 }
 
-function parseJson<T>(value: string | null): T | null {
+/** Parses a D1 text column to `unknown`. Never throws — malformed JSON degrades to `null`. */
+function parseJsonColumn(value: string | null): unknown {
   if (!value) return null;
   try {
-    return JSON.parse(value) as T;
+    return JSON.parse(value);
   } catch {
     return null;
   }
+}
+
+/**
+ * Validates a parsed manifest_json value against the shape the admin UI
+ * relies on. A row that doesn't decode to a well-formed manifest degrades to
+ * `null` (and is logged) instead of reaching callers with a blindly-cast,
+ * possibly-missing `collectors` array.
+ */
+function parseDiagnosticManifest(
+  value: string | null,
+  incidentId: string
+): DiagnosticIncidentManifest | null {
+  const parsed = parseJsonColumn(value);
+  if (parsed === null) return null;
+  const result = v.safeParse(diagnosticIncidentManifestSchema, parsed);
+  if (!result.success) {
+    log.warn('diagnostic_incidents.manifest_parse_skipped', { incidentId });
+    return null;
+  }
+  return result.output;
 }
 
 interface IncidentRow {
@@ -613,8 +667,8 @@ async function summarizeIncidentRows(
     status: row.status,
     artifactCount: row.artifact_count,
     totalBytes: row.total_bytes,
-    manifest: parseJson<DiagnosticIncidentManifest>(row.manifest_json),
-    preview: parseJson<Record<string, unknown>>(row.preview_json),
+    manifest: parseDiagnosticManifest(row.manifest_json, row.id),
+    preview: maybeJsonRecord(parseJsonColumn(row.preview_json)),
     failureReason: row.failure_reason,
     expiresAt: row.expires_at,
     createdAt: row.created_at,

@@ -1,10 +1,13 @@
 import { and, desc, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
+import type { InferOutput } from 'valibot';
+import * as v from 'valibot';
 import { parse as parseYaml } from 'yaml';
 
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log, serializeError } from '../../lib/logger';
+import { parseWithSchema, readRequestJsonRecord } from '../../lib/runtime-validation';
 import { ulid } from '../../lib/ulid';
 import { errors } from '../../middleware/error';
 import {
@@ -59,24 +62,62 @@ import { verifyWorkspacePublishCallback } from './_callback-auth';
  */
 const composePublishReleaseCallbackRoute = new Hono<{ Bindings: Env }>();
 
-interface ServiceReleaseInput {
-  serviceName?: unknown;
-  sourceRef?: unknown;
-  localImageRef?: unknown;
-  pushedRef?: unknown;
-  digest?: unknown;
-  r2Key?: unknown;
-  sizeBytes?: unknown;
-  archiveSha256?: unknown;
-  archiveType?: unknown;
-  mediaType?: unknown;
-  platform?: unknown;
-}
+const composePublishPlatformSchema = v.object({
+  architecture: v.optional(v.string()),
+  os: v.optional(v.string()),
+  variant: v.optional(v.string()),
+});
 
-interface SubmittedByInput {
-  taskId?: unknown;
-  agentProfileId?: unknown;
-}
+const composePublishServiceSchema = v.object({
+  serviceName: v.optional(v.string()),
+  registryServiceName: v.optional(v.string()),
+  sourceRef: v.optional(v.string()),
+  localImageRef: v.optional(v.string()),
+  pushedRef: v.optional(v.string()),
+  digest: v.optional(v.string()),
+  r2Key: v.optional(v.string()),
+  sizeBytes: v.optional(v.number()),
+  archiveSha256: v.optional(v.string()),
+  archiveType: v.optional(v.string()),
+  mediaType: v.optional(v.string()),
+  platform: v.optional(composePublishPlatformSchema),
+});
+
+const composePublishSubmittedBySchema = v.object({
+  taskId: v.optional(v.string()),
+  agentProfileId: v.optional(v.string()),
+});
+
+/**
+ * Allowlisted shape of the VM agent's compose-publish release submission
+ * (internal/publish/controlplane.go: SubmitRelease / ReleaseSubmission).
+ *
+ * This is intentionally NOT `DeploymentManifestSchema` (@simple-agent-manager/shared)
+ * — a compose-publish submission is the agent's captured `docker compose
+ * publish` topology (composeYaml + pushed service image refs), a completely
+ * different shape from the normalized build-on-node deployment manifest
+ * (version/services-map/routes/volumes/hooks). Only the fields declared here
+ * are ever read from the parsed body, and only these fields (plus
+ * server-recomputed identity) are ever persisted as the stored release
+ * manifest — see the explicit allowlist reconstruction below. This closes a
+ * route-claim-smuggling gap where a compromised/misbehaving VM agent could
+ * inject a foreign top-level field (notably `routes` — a real
+ * DeploymentManifest field this submission has no legitimate reason to
+ * carry) that `buildReleaseRouteDiscovery`
+ * (services/deployment-routing.ts) would otherwise treat as an authoritative
+ * build-on-node manifest. See .claude/rules/11-fail-fast-patterns.md and
+ * .claude/rules/51-runtime-boundary-validation.md.
+ */
+const composePublishReleaseSubmissionSchema = v.object({
+  environment: v.optional(v.string()),
+  environmentId: v.optional(v.string()),
+  reference: v.optional(v.string()),
+  composeYaml: v.optional(v.string()),
+  services: v.optional(v.array(composePublishServiceSchema)),
+  submittedBy: v.optional(composePublishSubmittedBySchema),
+});
+
+type ComposePublishServiceInput = InferOutput<typeof composePublishServiceSchema>;
 
 function cleanOptionalString(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : undefined;
@@ -113,25 +154,33 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     'Invalid token scope for compose-publish release'
   );
 
-  const submission = await c.req.json().catch(() => null);
-  if (!submission || typeof submission !== 'object') {
+  let submissionBody: Record<string, unknown>;
+  try {
+    submissionBody = await readRequestJsonRecord(c.req.raw, 'compose_publish_release.submission');
+  } catch {
     throw errors.badRequest('Invalid release submission body');
   }
-  const submissionBody = submission as Record<string, unknown>;
 
-  const environment = cleanOptionalString(submissionBody.environment);
-  const environmentId = cleanOptionalString(submissionBody.environmentId);
+  let submission: InferOutput<typeof composePublishReleaseSubmissionSchema>;
+  try {
+    submission = parseWithSchema(
+      composePublishReleaseSubmissionSchema,
+      submissionBody,
+      'compose_publish_release.submission'
+    );
+  } catch {
+    throw errors.badRequest('Invalid release submission body');
+  }
+
+  const environment = cleanOptionalString(submission.environment);
+  const environmentId = cleanOptionalString(submission.environmentId);
   if (!environment || !environmentId) {
     throw errors.badRequest('Release submission is missing target deployment environment');
   }
 
-  const submittedByRaw = submissionBody.submittedBy;
-  const submittedBy =
-    submittedByRaw && typeof submittedByRaw === 'object'
-      ? (submittedByRaw as SubmittedByInput)
-      : {};
-  const taskId = cleanOptionalString(submittedBy.taskId);
-  const agentProfileId = cleanOptionalString(submittedBy.agentProfileId);
+  const submittedByInput = submission.submittedBy ?? {};
+  const taskId = cleanOptionalString(submittedByInput.taskId);
+  const agentProfileId = cleanOptionalString(submittedByInput.agentProfileId);
   if (!agentProfileId) {
     throw errors.badRequest('Release submission is missing agentProfileId');
   }
@@ -180,7 +229,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     );
   }
 
-  const composeYaml = submissionBody.composeYaml;
+  const composeYaml = submission.composeYaml;
   if (typeof composeYaml !== 'string' || composeYaml.trim() === '') {
     throw errors.badRequest('Release submission is missing composeYaml');
   }
@@ -192,8 +241,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   }
   const requiresVolumes = Object.keys(volumeDeclarations).length > 0;
 
-  const servicesRaw = submissionBody.services;
-  const services: ServiceReleaseInput[] = Array.isArray(servicesRaw) ? servicesRaw : [];
+  const services: ComposePublishServiceInput[] = submission.services ?? [];
   if (services.length === 0) {
     throw errors.badRequest('Release submission must include at least one service');
   }
@@ -215,7 +263,9 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     }
   }
 
-  const placement = requiresVolumes ? await resolveDeploymentPlacement(userId, c.env, projectId) : null;
+  const placement = requiresVolumes
+    ? await resolveDeploymentPlacement(userId, c.env, projectId)
+    : null;
   if (requiresVolumes && !placement) {
     throw errors.badRequest(
       'No cloud provider credential found. Connect a cloud provider before deploying volumes.'
@@ -230,10 +280,30 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     });
   }
 
+  // SECURITY: explicit allowlist reconstruction, NOT a spread of the raw
+  // request body. See composePublishReleaseSubmissionSchema doc comment above
+  // — a foreign field like a top-level `routes` array must never survive into
+  // the stored manifest, or a downstream consumer that keys off field
+  // presence (buildReleaseRouteDiscovery) could treat it as authoritative.
   const manifestSubmission: Record<string, unknown> = {
-    ...submissionBody,
     environment,
     environmentId,
+    composeYaml,
+    reference: cleanOptionalString(submission.reference),
+    services: services.map((svc) => ({
+      serviceName: svc.serviceName,
+      registryServiceName: svc.registryServiceName,
+      sourceRef: svc.sourceRef,
+      localImageRef: svc.localImageRef,
+      pushedRef: svc.pushedRef,
+      digest: svc.digest,
+      r2Key: svc.r2Key,
+      sizeBytes: svc.sizeBytes,
+      archiveSha256: svc.archiveSha256,
+      archiveType: svc.archiveType,
+      mediaType: svc.mediaType,
+      platform: svc.platform,
+    })),
     submittedBy: {
       userId,
       workspaceId,
@@ -292,7 +362,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
     releaseId,
     version: nextVersion,
     serviceCount: services.length,
-    reference: submissionBody.reference ?? null,
+    reference: submission.reference ?? null,
   });
 
   // Provision a deployment node for this environment if one is not already

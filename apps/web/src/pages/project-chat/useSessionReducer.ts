@@ -44,13 +44,30 @@ export interface SessionActivityPayload {
   promptStartedAt?: number | null;
 }
 
+export interface AttentionCreatedPayload {
+  sessionId: string;
+  markerId: string;
+  kind: string;
+  createdAt: number;
+  expiresAt: number | null;
+  reason: string | null;
+  options: string[];
+}
+
+export interface AttentionResolvedPayload {
+  sessionId: string;
+  markerId?: string;
+}
+
 export type SessionEvent =
   | { type: 'session.created'; payload: SessionCreatedPayload }
   | { type: 'session.updated'; payload: SessionUpdatedPayload }
   | { type: 'session.stopped'; payload: SessionStoppedPayload }
   | { type: 'session.failed'; payload: SessionFailedPayload }
   | { type: 'session.agent_completed'; payload: SessionAgentCompletedPayload }
-  | { type: 'session.activity'; payload: SessionActivityPayload };
+  | { type: 'session.activity'; payload: SessionActivityPayload }
+  | { type: 'attention.created'; payload: AttentionCreatedPayload }
+  | { type: 'attention.resolved'; payload: AttentionResolvedPayload };
 
 // ---------------------------------------------------------------------------
 // Convert raw WebSocket payload to typed event
@@ -104,6 +121,29 @@ export function rawToSessionEvent(raw: RawSessionEvent): SessionEvent | null {
           promptStartedAt: p.promptStartedAt as number | null | undefined,
         },
       };
+    case 'attention.created':
+      return {
+        type: 'attention.created',
+        payload: {
+          sessionId: String(p.sessionId ?? ''),
+          markerId: String(p.markerId ?? ''),
+          kind: String(p.kind ?? ''),
+          createdAt: Number(p.createdAt ?? Date.now()),
+          expiresAt: p.expiresAt == null ? null : Number(p.expiresAt),
+          reason: p.reason == null ? null : String(p.reason),
+          options: Array.isArray(p.options)
+            ? p.options.filter((option): option is string => typeof option === 'string')
+            : [],
+        },
+      };
+    case 'attention.resolved':
+      return {
+        type: 'attention.resolved',
+        payload: {
+          sessionId: String(p.sessionId ?? ''),
+          ...(p.markerId == null ? {} : { markerId: String(p.markerId) }),
+        },
+      };
     default:
       return null;
   }
@@ -115,7 +155,7 @@ export function rawToSessionEvent(raw: RawSessionEvent): SessionEvent | null {
 
 export function applySessionEvent(
   sessions: ChatSessionListItem[],
-  event: SessionEvent,
+  event: SessionEvent
 ): ChatSessionListItem[] {
   switch (event.type) {
     case 'session.created': {
@@ -183,6 +223,19 @@ export function applySessionEvent(
       }));
     }
 
+    case 'attention.created': {
+      const { sessionId, ...attention } = event.payload;
+      return patchSession(sessions, sessionId, (s) => ({ ...s, attention }));
+    }
+
+    case 'attention.resolved': {
+      const { sessionId, markerId } = event.payload;
+      return patchSession(sessions, sessionId, (s) => {
+        if (markerId && s.attention?.markerId !== markerId) return s;
+        return { ...s, attention: null };
+      });
+    }
+
     default:
       return sessions;
   }
@@ -193,7 +246,7 @@ export function applySessionEvent(
  */
 export function applySessionEvents(
   sessions: ChatSessionListItem[],
-  events: SessionEvent[],
+  events: SessionEvent[]
 ): ChatSessionListItem[] {
   let result = sessions;
   for (const event of events) {
@@ -209,11 +262,12 @@ export function applySessionEvents(
 function patchSession(
   sessions: ChatSessionListItem[],
   sessionId: string,
-  updater: (s: ChatSessionListItem) => ChatSessionListItem,
+  updater: (s: ChatSessionListItem) => ChatSessionListItem
 ): ChatSessionListItem[] {
   const idx = sessions.findIndex((s) => s.id === sessionId);
   if (idx === -1) return sessions;
-  const existing = sessions[idx]!;
+  const existing = sessions[idx];
+  if (!existing) return sessions;
   const updated = updater(existing);
   if (updated === existing) return sessions;
   const next = sessions.slice();
@@ -228,7 +282,7 @@ function patchSession(
 const DEFAULT_SESSION_BATCH_DELAY_MS = 16; // ~1 animation frame
 const BATCH_DELAY_MS = parseInt(
   import.meta.env.VITE_SESSION_BATCH_DELAY_MS || String(DEFAULT_SESSION_BATCH_DELAY_MS),
-  10,
+  10
 );
 
 export function useSessionReducer() {
@@ -244,12 +298,15 @@ export function useSessionReducer() {
     setSessions((prev) => applySessionEvents(prev, events));
   }, []);
 
-  const dispatchEvent = useCallback((event: SessionEvent) => {
-    batchRef.current.push(event);
-    if (!batchTimerRef.current) {
-      batchTimerRef.current = setTimeout(flushBatch, BATCH_DELAY_MS);
-    }
-  }, [flushBatch]);
+  const dispatchEvent = useCallback(
+    (event: SessionEvent) => {
+      batchRef.current.push(event);
+      if (!batchTimerRef.current) {
+        batchTimerRef.current = setTimeout(flushBatch, BATCH_DELAY_MS);
+      }
+    },
+    [flushBatch]
+  );
 
   const resetSessions = useCallback((next: ChatSessionListItem[]) => {
     batchRef.current = [];

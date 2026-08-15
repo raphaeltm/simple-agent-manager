@@ -1,5 +1,6 @@
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 
 /**
  * Field-bounding helpers for observability error persistence: env-configurable
@@ -63,8 +64,9 @@ export function safeParseContext(
   rowId: string
 ): Record<string, unknown> | null {
   if (!context) return null;
+  let parsed: unknown;
   try {
-    return JSON.parse(context) as Record<string, unknown>;
+    parsed = JSON.parse(context);
   } catch (err) {
     log.warn('observability.context_parse_skipped', {
       rowId,
@@ -72,4 +74,16 @@ export function safeParseContext(
     });
     return null;
   }
+  // JSON.parse succeeding is not enough — the docstring promises malformed
+  // context degrades to null, but a syntactically valid non-object JSON value
+  // (a string, number, array, ...) previously slipped through as a blind
+  // cast. maybeJsonRecord closes that gap.
+  const record = maybeJsonRecord(parsed);
+  if (record === null) {
+    log.warn('observability.context_parse_skipped', {
+      rowId,
+      error: 'context JSON did not decode to an object',
+    });
+  }
+  return record;
 }

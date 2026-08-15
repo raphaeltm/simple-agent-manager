@@ -11,7 +11,7 @@ import type {
   WebhookCredential,
   WebhookTriggerFilter,
 } from '@simple-agent-manager/shared';
-import { Button, Spinner } from '@simple-agent-manager/ui';
+import { Button, Spinner, useModalInteraction } from '@simple-agent-manager/ui';
 import { X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -60,6 +60,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
   const { projectId } = useProjectContext();
   const templateRef = useRef<HTMLTextAreaElement>(null);
   const returnFocusRef = useRef<HTMLElement | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const shouldRestoreFocusRef = useRef(true);
   const isEdit = Boolean(editTrigger);
 
@@ -101,11 +102,43 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
     }
   }, [open, projectId]);
 
+  /*
+   * Focus restore is split around `useModalInteraction` deliberately, because
+   * effects run (and clean up) in definition order:
+   *
+   *  1. CAPTURE runs first, so it reads the genuinely-previous `activeElement`
+   *     before the focus trap pulls focus into the drawer.
+   *  2. `useModalInteraction` traps focus, isolates the background and locks
+   *     scrolling.
+   *  3. RESTORE's cleanup runs last, so by the time it calls `.focus()` the
+   *     hook has already un-inerted the background — focusing an element still
+   *     inside an `inert` subtree silently does nothing.
+   *
+   * `restoreFocus: false` on the hook because RESTORE below knows the one case
+   * where focus must NOT come back here: when saving returns a webhook
+   * credential, `WebhookCredentialDialog` takes over and must keep focus.
+   */
+  // 1. CAPTURE
   useEffect(() => {
     if (!open) return;
     shouldRestoreFocusRef.current = true;
     returnFocusRef.current =
       document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  }, [open]);
+
+  // 2. TRAP
+  useModalInteraction({
+    enabled: open,
+    modalRef: panelRef,
+    onEscape: onClose,
+    restoreFocus: false,
+    lockScroll: true,
+    isolateBackground: true,
+  });
+
+  // 3. RESTORE
+  useEffect(() => {
+    if (!open) return;
     return () => {
       if (shouldRestoreFocusRef.current) returnFocusRef.current?.focus();
       returnFocusRef.current = null;
@@ -341,7 +374,10 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
   if (!open) return null;
 
   return createPortal(
-    <>
+    /* `data-sam-modal-root` keeps the backdrop inside the modal root so
+       `isolateBackground` does not mark it `inert` — an inert backdrop swallows
+       the click that closes the drawer. */
+    <div data-sam-modal-root="">
       {/* Backdrop */}
       <div
         className="fixed inset-0 glass-backdrop-dim z-[var(--sam-z-drawer-backdrop)]"
@@ -351,6 +387,8 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
 
       {/* Drawer panel */}
       <div
+        ref={panelRef}
+        tabIndex={-1}
         className="fixed top-0 right-0 bottom-0 glass-modal glass-panel-container glass-composited shadow-lg z-[var(--sam-z-drawer)] overflow-y-auto transition-transform duration-300 ease-out motion-reduce:transition-none translate-x-0"
         style={{ width: 'min(560px, 95vw)' }}
         role="dialog"
@@ -493,7 +531,7 @@ export const TriggerForm: FC<TriggerFormProps> = ({ open, onClose, editTrigger, 
           </Button>
         </div>
       </div>
-    </>,
+    </div>,
     document.body
   );
 };

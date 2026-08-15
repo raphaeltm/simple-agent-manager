@@ -3,6 +3,9 @@ import type {
   NotificationPreferencesResponse,
   NotificationType,
   UpdateNotificationPreferenceRequest,
+  WebPushSubscriptionInput,
+  WebPushSubscriptionResponse,
+  WebPushSubscriptionsResponse,
 } from '@simple-agent-manager/shared';
 
 import { API_URL, request } from './client';
@@ -53,6 +56,30 @@ export async function updateNotificationPreference(
     method: 'PUT',
     body: JSON.stringify(pref),
   });
+}
+
+export async function getVapidPublicKey(): Promise<{ publicKey: string | null }> {
+  return request<{ publicKey: string | null }>('/api/config/vapid-public-key');
+}
+
+export async function subscribeWebPush(
+  subscription: WebPushSubscriptionInput
+): Promise<WebPushSubscriptionResponse> {
+  return request<WebPushSubscriptionResponse>('/api/notifications/push/subscriptions', {
+    method: 'POST',
+    body: JSON.stringify(subscription),
+  });
+}
+
+export async function unsubscribeWebPush(endpoint: string): Promise<void> {
+  await request('/api/notifications/push/subscriptions', {
+    method: 'DELETE',
+    body: JSON.stringify({ endpoint }),
+  });
+}
+
+export async function listWebPushSubscriptions(): Promise<WebPushSubscriptionsResponse> {
+  return request<WebPushSubscriptionsResponse>('/api/notifications/push/subscriptions');
 }
 
 /**

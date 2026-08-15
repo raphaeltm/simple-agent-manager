@@ -10,6 +10,8 @@
     "build:docs-mermaid": "pnpm exec esbuild src/scripts/docs-mermaid.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=public/scripts/docs-mermaid.js",
     "build:tracker": "npx tsx scripts/build-tracker.ts",
     "test": "vitest run --exclude tests/playwright/**",
+    "lint": "eslint 'astro.config.ts' 'playwright.config.ts' 'scripts/**/*.ts' 'src/**/*.{ts,astro}' 'tests/**/*.ts' --rule 'simple-import-sort/imports: off' --rule 'simple-import-sort/exports: off'",
+    "typecheck": "tsx ../../scripts/quality/check-astro-templates.ts",
     "build": "pnpm build:assets && astro build",
     "preview": "astro preview",
     "check:links": "python3 scripts/check-doc-links.py"
@@ -21,8 +23,11 @@
     "mermaid": "11.14.0"
   },
   "devDependencies": {
+    "@astrojs/check": "catalog:",
+    "@playwright/test": "1.62.1",
     "esbuild": "0.28.1",
+    "tsx": "catalog:",
     "typescript": "catalog:",
-    "@playwright/test": "1.62.1"
+    "wrangler": "catalog:"
   }
 }

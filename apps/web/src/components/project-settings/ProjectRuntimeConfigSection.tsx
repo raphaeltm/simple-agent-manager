@@ -1,6 +1,6 @@
 import type { ProjectRuntimeConfigResponse } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useId, useState } from 'react';
 
 import { useToast } from '../../hooks/useToast';
 import {
@@ -45,7 +45,6 @@ export function ProjectRuntimeConfigSection({ projectId }: ProjectRuntimeConfigS
     } finally {
       setRuntimeConfigLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
   }, [projectId]);
 
   useEffect(() => {
@@ -130,9 +129,7 @@ export function ProjectRuntimeConfigSection({ projectId }: ProjectRuntimeConfigS
     <section className="glass-surface rounded-lg p-4 grid gap-3">
       <h2 className="sam-type-section-heading m-0 text-fg-primary">Runtime Config</h2>
 
-      {loadError && !hasLoaded && (
-        <div className="text-xs text-danger">{loadError}</div>
-      )}
+      {loadError && !hasLoaded && <div className="text-xs text-danger">{loadError}</div>}
 
       {runtimeConfigLoading && !hasLoaded ? (
         <div className="flex items-center gap-2">
@@ -199,13 +196,18 @@ function RuntimeEnvVars({
   onSave,
   onDelete,
 }: RuntimeEnvVarsProps) {
+  const keyId = useId();
+  const valueId = useId();
   return (
     <div className="grid gap-2">
       <h3 className="sam-type-card-title m-0 text-fg-primary">Environment Variables</h3>
       <div className="flex gap-2 items-end flex-wrap">
         <div className="flex-[1_1_140px] min-w-0">
-          <label className="block text-xs text-fg-muted mb-0.5">Key</label>
+          <label htmlFor={keyId} className="block text-xs text-fg-muted mb-0.5">
+            Key
+          </label>
           <input
+            id={keyId}
             type="text"
             aria-label="Runtime env key"
             placeholder="API_TOKEN"
@@ -215,8 +217,11 @@ function RuntimeEnvVars({
           />
         </div>
         <div className="flex-[2_1_200px] min-w-0">
-          <label className="block text-xs text-fg-muted mb-0.5">Value</label>
+          <label htmlFor={valueId} className="block text-xs text-fg-muted mb-0.5">
+            Value
+          </label>
           <input
+            id={valueId}
             type="text"
             aria-label="Runtime env value"
             placeholder="Value"
@@ -293,13 +298,18 @@ function RuntimeFiles({
   onSave,
   onDelete,
 }: RuntimeFilesProps) {
+  const pathId = useId();
+  const contentId = useId();
   return (
     <div className="grid gap-2">
       <h3 className="sam-type-card-title m-0 text-fg-primary">Runtime Files</h3>
       <div className="grid gap-2">
         <div>
-          <label className="block text-xs text-fg-muted mb-0.5">File path</label>
+          <label htmlFor={pathId} className="block text-xs text-fg-muted mb-0.5">
+            File path
+          </label>
           <input
+            id={pathId}
             type="text"
             aria-label="Runtime file path"
             placeholder=".env.local"
@@ -309,8 +319,11 @@ function RuntimeFiles({
           />
         </div>
         <div>
-          <label className="block text-xs text-fg-muted mb-0.5">Content</label>
+          <label htmlFor={contentId} className="block text-xs text-fg-muted mb-0.5">
+            Content
+          </label>
           <textarea
+            id={contentId}
             aria-label="Runtime file content"
             placeholder="FOO=bar"
             rows={3}

@@ -18,6 +18,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
+import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/node-phases';
+import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
 import {
   seedInstallation,
   seedNode,
@@ -91,7 +93,7 @@ async function getObservabilityEvents(
 
 describe('runNodeCleanupSweep — vertical slice', () => {
   describe('orphaned workspace stopping (Phase 3)', () => {
-    it('destroys cf-container terminal task workspaces instead of leaving the container active', async () => {
+    it('destroys failed cf-container task workspaces instead of leaving the container active', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-cf-terminal';
       const wsId = 'ws-nc-cf-terminal';
@@ -114,7 +116,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         createdAt: oldDate,
       });
       await seedTask(taskId, PROJECT_ID, USER_ID, {
-        status: 'completed',
+        status: 'failed',
         workspaceId: wsId,
         updatedAt: oldDate,
       });
@@ -140,7 +142,106 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       });
     });
 
-    it('stops orphaned workspace (completed task, running workspace past grace period)', async () => {
+    it('preserves completed persistent chats when the final snapshot is absent or degraded', async () => {
+      await seedBaseData();
+      const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const destroyForUser = vi.fn().mockResolvedValue(undefined);
+
+      for (const suffix of ['missing', 'degraded']) {
+        const nodeId = `node-nc-cf-preserve-${suffix}`;
+        const wsId = `ws-nc-cf-preserve-${suffix}`;
+        const taskId = `task-nc-cf-preserve-${suffix}`;
+        const chatSessionId = `session-nc-cf-preserve-${suffix}`;
+        await seedNode(nodeId, USER_ID, {
+          status: 'running',
+          createdAt: oldDate,
+          updatedAt: oldDate,
+        });
+        await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
+          .bind(nodeId)
+          .run();
+        await seedWorkspace(wsId, nodeId, USER_ID, {
+          projectId: PROJECT_ID,
+          status: 'running',
+          chatSessionId,
+          createdAt: oldDate,
+        });
+        await seedTask(taskId, PROJECT_ID, USER_ID, {
+          status: 'completed',
+          workspaceId: wsId,
+          updatedAt: oldDate,
+        });
+
+        if (suffix === 'degraded') {
+          await env.DATABASE.prepare(
+            `INSERT INTO session_snapshots
+               (id, project_id, workspace_id, node_id, user_id, chat_session_id, runtime,
+                status, degradation, manifest_r2_key, expires_at, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, 'cf-container', 'degraded', 'entries-skipped', ?, ?, ?, ?)`
+          )
+            .bind(
+              `snapshot-nc-cf-${suffix}`,
+              PROJECT_ID,
+              wsId,
+              nodeId,
+              USER_ID,
+              chatSessionId,
+              `session-snapshots/${chatSessionId}/manifest.json`,
+              new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+              oldDate,
+              oldDate
+            )
+            .run();
+        }
+      }
+
+      const testEnv = {
+        ...env,
+        CF_CONTAINER_ENABLED: 'true',
+        VM_AGENT_CONTAINER: {
+          idFromName: (id: string) => id,
+          get: () => ({ destroyForUser }),
+        },
+        ORPHANED_WORKSPACE_GRACE_PERIOD_MS: '1000',
+      } as unknown as Env;
+      const result = emptyResult();
+
+      await sweepTerminalCfContainers(testEnv, new Date(), resolveCleanupConfig(testEnv), result);
+
+      expect(destroyForUser).not.toHaveBeenCalled();
+      expect(result.cfContainersDestroyed).toBe(0);
+      await expect(getWorkspaceStatus('ws-nc-cf-preserve-missing')).resolves.toMatchObject({
+        status: 'running',
+      });
+      await expect(getWorkspaceStatus('ws-nc-cf-preserve-degraded')).resolves.toMatchObject({
+        status: 'running',
+      });
+
+      const fullSweep = await runNodeCleanupSweep(testEnv);
+      expect(fullSweep.orphanedWorkspacesFlagged).toBe(0);
+      expect(destroyForUser).not.toHaveBeenCalled();
+      await expect(getWorkspaceStatus('ws-nc-cf-preserve-missing')).resolves.toMatchObject({
+        status: 'running',
+      });
+      await expect(getWorkspaceStatus('ws-nc-cf-preserve-degraded')).resolves.toMatchObject({
+        status: 'running',
+      });
+
+      await env.DATABASE.prepare(
+        `DELETE FROM tasks WHERE id IN ('task-nc-cf-preserve-missing', 'task-nc-cf-preserve-degraded')`
+      ).run();
+      await env.DATABASE.prepare(
+        `DELETE FROM session_snapshots WHERE id = 'snapshot-nc-cf-degraded'`
+      ).run();
+      await env.DATABASE.prepare(
+        `DELETE FROM workspaces WHERE id IN ('ws-nc-cf-preserve-missing', 'ws-nc-cf-preserve-degraded')`
+      ).run();
+      await env.DATABASE.prepare(
+        `DELETE FROM nodes WHERE id IN ('node-nc-cf-preserve-missing', 'node-nc-cf-preserve-degraded')`
+      ).run();
+    });
+
+    it('stops an orphaned workspace after a failed task', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-orphan-ws';
       const wsId = 'ws-nc-orphan';
@@ -155,7 +256,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         createdAt: oldDate,
       });
       await seedTask(taskId, PROJECT_ID, USER_ID, {
-        status: 'completed',
+        status: 'failed',
         workspaceId: wsId,
       });
 
@@ -182,7 +283,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
       await seedBaseData();
       const nodeId = 'node-nc-orphan-recovery-ws';
       const wsId = 'ws-nc-orphan-recovery';
-      const taskId = 'task-nc-orphan-recovery-completed';
+      const taskId = 'task-nc-orphan-recovery-failed';
       const oldDate = new Date(Date.now() - 60 * 60 * 1000).toISOString();
 
       await seedNode(nodeId, USER_ID);
@@ -193,7 +294,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
         createdAt: oldDate,
       });
       await seedTask(taskId, PROJECT_ID, USER_ID, {
-        status: 'completed',
+        status: 'failed',
         workspaceId: wsId,
       });
 

@@ -4,10 +4,7 @@
  * Mounted at /api/projects/:projectId/orchestrator
  * Provides status, queue, and mission lifecycle endpoints.
  */
-import {
-  OVERRIDABLE_SCHEDULER_STATES,
-  type SchedulerState,
-} from '@simple-agent-manager/shared';
+import { OVERRIDABLE_SCHEDULER_STATES, type SchedulerState } from '@simple-agent-manager/shared';
 import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -16,6 +13,7 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { jsonValidator, OverrideTaskStateSchema } from '../schemas';
 import * as orchestratorService from '../services/project-orchestrator';
 import { requireProjectTaskRead, requireProjectTaskWrite } from './task-project-auth';
 
@@ -96,41 +94,47 @@ orchestratorRoutes.post('/missions/:missionId/cancel', async (c) => {
 
 // ─── POST /tasks/:taskId/override ───────────────────────────────────────────
 
-orchestratorRoutes.post('/tasks/:taskId/override', async (c) => {
-  const auth = getAuth(c);
-  const db = drizzle(c.env.DATABASE, { schema });
-  const projectId = c.req.param('projectId');
-  const taskId = c.req.param('taskId');
-  if (!projectId || !taskId) throw errors.badRequest('Missing projectId or taskId');
-  await requireProjectTaskWrite(db, projectId, auth.user.id);
+orchestratorRoutes.post(
+  '/tasks/:taskId/override',
+  jsonValidator(OverrideTaskStateSchema),
+  async (c) => {
+    const auth = getAuth(c);
+    const db = drizzle(c.env.DATABASE, { schema });
+    const projectId = c.req.param('projectId');
+    const taskId = c.req.param('taskId');
+    if (!projectId || !taskId) throw errors.badRequest('Missing projectId or taskId');
+    await requireProjectTaskWrite(db, projectId, auth.user.id);
 
-  const body = await c.req.json<{ missionId: string; newState: string; reason: string }>();
-  if (!body.missionId || !body.newState || !body.reason) {
-    throw errors.badRequest('Missing missionId, newState, or reason');
+    const body = c.req.valid('json');
+    if (!body.missionId || !body.newState || !body.reason) {
+      throw errors.badRequest('Missing missionId, newState, or reason');
+    }
+
+    if (!OVERRIDABLE_SCHEDULER_STATES.includes(body.newState as SchedulerState)) {
+      throw errors.badRequest(
+        `Invalid state: ${body.newState}. Must be one of: ${OVERRIDABLE_SCHEDULER_STATES.join(', ')}`
+      );
+    }
+
+    // Verify mission belongs to this project (prevents cross-project probing)
+    const [mission] = await db
+      .select({ id: schema.missions.id })
+      .from(schema.missions)
+      .where(and(eq(schema.missions.id, body.missionId), eq(schema.missions.projectId, projectId)))
+      .limit(1);
+    if (!mission) throw errors.notFound('Mission not found in this project');
+
+    const ok = await orchestratorService.overrideTaskState(
+      c.env,
+      projectId,
+      body.missionId,
+      taskId,
+      body.newState as SchedulerState,
+      body.reason
+    );
+    if (!ok) throw errors.notFound('Task not found');
+    return c.json({ success: true });
   }
-
-  if (!OVERRIDABLE_SCHEDULER_STATES.includes(body.newState as SchedulerState)) {
-    throw errors.badRequest(`Invalid state: ${body.newState}. Must be one of: ${OVERRIDABLE_SCHEDULER_STATES.join(', ')}`);
-  }
-
-  // Verify mission belongs to this project (prevents cross-project probing)
-  const [mission] = await db
-    .select({ id: schema.missions.id })
-    .from(schema.missions)
-    .where(
-      and(
-        eq(schema.missions.id, body.missionId),
-        eq(schema.missions.projectId, projectId),
-      ),
-    )
-    .limit(1);
-  if (!mission) throw errors.notFound('Mission not found in this project');
-
-  const ok = await orchestratorService.overrideTaskState(
-    c.env, projectId, body.missionId, taskId, body.newState as SchedulerState, body.reason,
-  );
-  if (!ok) throw errors.notFound('Task not found');
-  return c.json({ success: true });
-});
+);
 
 export { orchestratorRoutes };

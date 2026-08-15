@@ -46,9 +46,7 @@ export function resolveWorkspaceTtlMs(env: Env): number {
     return DEFAULT_TRIAL_WORKSPACE_TTL_MS;
   }
   const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : DEFAULT_TRIAL_WORKSPACE_TTL_MS;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TRIAL_WORKSPACE_TTL_MS;
 }
 
 export function resolveRepoMaxKb(env: Env): number {
@@ -66,9 +64,7 @@ export function resolveGithubTimeoutMs(env: Env): number {
     return DEFAULT_TRIAL_GITHUB_TIMEOUT_MS;
   }
   const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : DEFAULT_TRIAL_GITHUB_TIMEOUT_MS;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TRIAL_GITHUB_TIMEOUT_MS;
 }
 
 export function resolveRetentionHours(env: Env): number {
@@ -77,9 +73,7 @@ export function resolveRetentionHours(env: Env): number {
     return DEFAULT_TRIAL_DATA_RETENTION_HOURS;
   }
   const parsed = Number(raw);
-  return Number.isFinite(parsed) && parsed > 0
-    ? parsed
-    : DEFAULT_TRIAL_DATA_RETENTION_HOURS;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_TRIAL_DATA_RETENTION_HOURS;
 }
 
 export function resolveCounterKeepMonths(env: Env): number {
@@ -158,14 +152,17 @@ export interface ParsedRepoUrl {
  * should already have validated the shape; this is a defense-in-depth parse.
  */
 export function parseGithubRepoUrl(url: string): ParsedRepoUrl | null {
-  const trimmed = url.trim().replace(/\/+$/, '').replace(/\.git$/, '');
+  const trimmed = url
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\.git$/, '');
   const match =
     /^https:\/\/github\.com\/([A-Za-z0-9](?:[A-Za-z0-9-]{0,37}[A-Za-z0-9])?)\/([A-Za-z0-9_.-]{1,100})$/.exec(
       trimmed
     );
   if (!match) return null;
-  const owner = match[1]!;
-  const name = match[2]!;
+  const [, owner, name] = match;
+  if (owner === undefined || name === undefined) return null;
   return { owner, name, canonical: `https://github.com/${owner}/${name}` };
 }
 

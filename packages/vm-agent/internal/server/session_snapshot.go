@@ -2,16 +2,12 @@ package server
 
 import (
 	"archive/tar"
-	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -24,11 +20,14 @@ const (
 	defaultSnapshotTotalBudgetBytes    int64         = 100 * 1024 * 1024
 	defaultSnapshotEntryThresholdBytes int64         = 50 * 1024 * 1024
 	defaultSnapshotTransferIdleTimeout time.Duration = 30 * time.Second
+	defaultSnapshotInventoryMaxBytes   int64         = 32 * 1024 * 1024
+	defaultSnapshotMaxArchiveEntries                 = 100_000
 )
 
 type snapshotPrepareResponse struct {
-	ExpiresAt string `json:"expiresAt"`
-	Config    struct {
+	ExpiresAt  string `json:"expiresAt"`
+	Generation string `json:"generation"`
+	Config     struct {
 		TotalBudgetBytes      int64 `json:"totalBudgetBytes"`
 		EntryThresholdBytes   int64 `json:"entryThresholdBytes"`
 		TransferIdleTimeoutMs int64 `json:"transferIdleTimeoutMs"`
@@ -37,6 +36,10 @@ type snapshotPrepareResponse struct {
 		Home string `json:"home"`
 		WIP  string `json:"wip"`
 	} `json:"upload"`
+	DirectUpload struct {
+		Home string `json:"home"`
+		WIP  string `json:"wip"`
+	} `json:"directUpload"`
 }
 
 type snapshotRestoreResponse struct {
@@ -47,6 +50,8 @@ type snapshotRestoreResponse struct {
 	BaseCommit  string            `json:"baseCommit,omitempty"`
 	Manifest    *snapshotManifest `json:"manifest,omitempty"`
 	Config      struct {
+		TotalBudgetBytes      int64 `json:"totalBudgetBytes"`
+		EntryThresholdBytes   int64 `json:"entryThresholdBytes"`
 		TransferIdleTimeoutMs int64 `json:"transferIdleTimeoutMs"`
 	} `json:"config"`
 	Download struct {
@@ -82,26 +87,6 @@ type snapshotArtifact struct {
 	SHA256    string `json:"sha256,omitempty"`
 }
 
-type countingReader struct {
-	r    io.Reader
-	n    int64
-	hash hashWriter
-}
-
-type hashWriter interface {
-	Write([]byte) (int, error)
-	Sum([]byte) []byte
-}
-
-func (r *countingReader) Read(p []byte) (int, error) {
-	n, err := r.r.Read(p)
-	if n > 0 {
-		r.n += int64(n)
-		_, _ = r.hash.Write(p[:n])
-	}
-	return n, err
-}
-
 type sessionSnapshotHandlerInput struct {
 	workspaceID   string
 	sessionID     string
@@ -110,6 +95,7 @@ type sessionSnapshotHandlerInput struct {
 	runtime       *WorkspaceRuntime
 	callbackToken string
 	agentType     string
+	background    bool
 }
 
 func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Request) (*sessionSnapshotHandlerInput, bool) {
@@ -127,6 +113,7 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 		Runtime                string `json:"runtime"`
 		AgentType              string `json:"agentType"`
 		WorkspaceCallbackToken string `json:"workspaceCallbackToken"`
+		Background             bool   `json:"background"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -163,6 +150,7 @@ func (s *Server) sessionSnapshotHandlerInput(w http.ResponseWriter, r *http.Requ
 		runtime:       runtime,
 		callbackToken: callbackToken,
 		agentType:     strings.TrimSpace(body.AgentType),
+		background:    body.Background,
 	}, true
 }
 
@@ -171,7 +159,15 @@ func (s *Server) handleHibernateAgentSession(w http.ResponseWriter, r *http.Requ
 	if !ok {
 		return
 	}
-	result, err := s.hibernateSessionSnapshot(r.Context(), input.runtime, input.sessionID, input.chatSessionID, input.runtimeName, input.agentType, input.callbackToken)
+	if input.background {
+		accepted := s.startBackgroundSessionSnapshot(input)
+		writeJSON(w, http.StatusAccepted, map[string]interface{}{
+			"status":   "pending",
+			"accepted": accepted,
+		})
+		return
+	}
+	result, err := s.captureSessionSnapshot(r.Context(), input)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -187,6 +183,7 @@ func (s *Server) handleRestoreAgentSession(w http.ResponseWriter, r *http.Reques
 	result, err := s.restoreSessionSnapshot(r.Context(), input.runtime, input.sessionID, input.chatSessionID, input.agentType, input.callbackToken)
 	if err != nil {
 		_ = s.reportSnapshotRestoreResult(context.Background(), input.workspaceID, input.chatSessionID, "degraded", err.Error(), input.callbackToken)
+		s.prepareFreshSessionAfterDegradedRestore(input.workspaceID, input.sessionID, err)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"status":  "degraded",
 			"message": "The saved workspace was restored, but the agent context could not be resumed.",
@@ -196,11 +193,41 @@ func (s *Server) handleRestoreAgentSession(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, result)
 }
 
+func (s *Server) prepareFreshSessionAfterDegradedRestore(workspaceID, sessionID string, restoreErr error) {
+	hostKey := workspaceID + ":" + sessionID
+	s.sessionHostMu.Lock()
+	host := s.sessionHosts[hostKey]
+	if host != nil {
+		delete(s.sessionHosts, hostKey)
+	}
+	s.sessionHostMu.Unlock()
+	if host != nil {
+		host.Stop()
+	}
+
+	if _, err := s.agentSessions.PrepareDegradedRestoreFallback(workspaceID, sessionID); err != nil {
+		slog.Warn("Failed to prepare agent session for degraded snapshot fresh fallback",
+			"workspace", workspaceID, "session", sessionID, "error", err)
+	}
+	if s.store != nil {
+		if err := s.store.UpdateTabAcpSessionID(sessionID, ""); err != nil {
+			slog.Warn("Failed to clear persisted tab ACP session identity after degraded snapshot restore",
+				"workspace", workspaceID, "session", sessionID, "error", err)
+		}
+	}
+	s.appendNodeEvent(workspaceID, "warn", "session_snapshot.restore_degraded_fresh_fallback", "Snapshot restore degraded; next start will create a fresh agent context", map[string]interface{}{
+		"sessionId": sessionID,
+		"error":     restoreErr.Error(),
+	})
+}
+
 func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *WorkspaceRuntime, sessionID, chatSessionID, runtimeName, agentType, callbackToken string) (map[string]interface{}, error) {
 	prepare, err := s.prepareSnapshot(ctx, runtime.ID, sessionID, chatSessionID, runtimeName, callbackToken)
 	if err != nil {
 		return nil, err
 	}
+	progress := newSnapshotProgressReporter(s, runtime.ID, chatSessionID, prepare.Generation, callbackToken)
+	progress.Report(ctx, "prepared")
 	totalBudget := choosePositiveInt64(prepare.Config.TotalBudgetBytes, defaultSnapshotTotalBudgetBytes)
 	entryThreshold := choosePositiveInt64(prepare.Config.EntryThresholdBytes, defaultSnapshotEntryThresholdBytes)
 	idleTimeout := choosePositiveDurationMs(prepare.Config.TransferIdleTimeoutMs, defaultSnapshotTransferIdleTimeout)
@@ -235,49 +262,77 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *Workspac
 		})
 	}
 	workDir := standaloneWorkspaceWorkDir(runtime, s.config.WorkspaceDir, s.config.ContainerWorkDir)
-	baseCommit, wipPath, wipSkipped, err := createWIPBundle(ctx, workDir, entryThreshold)
+	var snapshotTarget *containerSnapshotTarget
+	if !s.config.IsStandaloneMode() {
+		snapshotTarget, err = s.resolveContainerSnapshotTarget(runtime)
+		if err != nil {
+			return nil, fmt.Errorf("resolve snapshot devcontainer: %w", err)
+		}
+		workDir = snapshotTarget.workDir
+	}
+	var baseCommit, wipPath string
+	var wipSkipped []snapshotSkippedEntry
+	if snapshotTarget == nil {
+		baseCommit, wipPath, wipSkipped, err = createWIPBundle(ctx, workDir, entryThreshold)
+	} else {
+		baseCommit, wipPath, wipSkipped, err = s.createContainerWIPBundle(ctx, snapshotTarget, entryThreshold, totalBudget)
+	}
 	manifest.BaseCommit = baseCommit
 	manifest.Skipped = append(manifest.Skipped, wipSkipped...)
+	wipCaptureFailed := err != nil
 	if err != nil {
 		manifest.Skipped = append(manifest.Skipped, snapshotSkippedEntry{Path: workDir, Reason: err.Error()})
 	}
 
 	remaining := totalBudget
 	if wipPath != "" {
-		size, sha, uploadErr := s.uploadSnapshotFile(ctx, prepare.Upload.WIP, wipPath, callbackToken, idleTimeout)
+		size, sha, uploadErr := s.uploadSessionSnapshotArtifact(ctx, prepare.Upload.WIP, prepare.DirectUpload.WIP, wipPath, callbackToken, idleTimeout)
 		_ = os.Remove(wipPath)
 		if uploadErr != nil {
+			wipCaptureFailed = true
 			manifest.Skipped = append(manifest.Skipped, snapshotSkippedEntry{Path: workDir, Reason: uploadErr.Error()})
 		} else {
 			manifest.Artifacts["wip"] = snapshotArtifact{SizeBytes: size, SHA256: sha}
 			remaining -= size
 		}
+		progress.Report(ctx, "wip-upload")
 	}
-	homePath, homeSkipped, err := createHomeTar(os.UserHomeDir, entryThreshold, remaining)
+	var homePath string
+	var homeSkipped []snapshotSkippedEntry
+	if snapshotTarget == nil {
+		homePath, homeSkipped, err = createSessionStateTarWithContext(ctx, os.UserHomeDir, entryThreshold, remaining, true, progress.Report)
+	} else {
+		homePath, homeSkipped, err = s.createContainerHomeTar(ctx, snapshotTarget, entryThreshold, remaining)
+	}
+	progress.Report(ctx, "home-captured")
 	manifest.Skipped = append(manifest.Skipped, homeSkipped...)
+	homeCaptureFailed := err != nil
 	if err != nil {
 		manifest.Skipped = append(manifest.Skipped, snapshotSkippedEntry{Path: "$HOME", Reason: err.Error()})
 	}
 	if homePath != "" {
-		size, sha, uploadErr := s.uploadSnapshotFile(ctx, prepare.Upload.Home, homePath, callbackToken, idleTimeout)
+		size, sha, uploadErr := s.uploadSessionSnapshotArtifact(ctx, prepare.Upload.Home, prepare.DirectUpload.Home, homePath, callbackToken, idleTimeout)
 		_ = os.Remove(homePath)
 		if uploadErr != nil {
+			homeCaptureFailed = true
 			manifest.Skipped = append(manifest.Skipped, snapshotSkippedEntry{Path: "$HOME", Reason: uploadErr.Error()})
 		} else {
 			manifest.Artifacts["home"] = snapshotArtifact{SizeBytes: size, SHA256: sha}
 		}
+		progress.Report(ctx, "home-upload")
 	}
 	if _, ok := manifest.Artifacts["home"]; !ok {
-		manifest.Degradation = "wip-only"
+		homeCaptureFailed = true
 	}
-	if _, ok := manifest.Artifacts["wip"]; !ok {
-		if manifest.Degradation == "wip-only" {
-			manifest.Degradation = "transcript-only"
-			manifest.Status = "degraded"
-		} else {
-			manifest.Degradation = "home-skipped"
-			manifest.Status = "degraded"
-		}
+	if homeCaptureFailed && wipCaptureFailed {
+		manifest.Degradation = "transcript-only"
+		manifest.Status = "degraded"
+	} else if homeCaptureFailed {
+		manifest.Degradation = "home-skipped"
+		manifest.Status = "degraded"
+	} else if wipCaptureFailed {
+		manifest.Degradation = "wip-skipped"
+		manifest.Status = "degraded"
 	}
 	if agentContextSkipped && manifest.Degradation == "none" {
 		// Both artifacts were captured but the snapshot has no resumable harness
@@ -286,10 +341,13 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *Workspac
 		// severe artifact-based degradation, if set above, takes precedence.
 		manifest.Degradation = "agent-context-skipped"
 	}
+	if len(manifest.Skipped) > 0 && manifest.Degradation == "none" {
+		manifest.Degradation = "entries-skipped"
+	}
 	if len(manifest.Skipped) > 0 && manifest.Status == "available" {
 		manifest.Status = "degraded"
 	}
-	err = s.completeSnapshot(ctx, runtime.ID, sessionID, chatSessionID, runtimeName, callbackToken, manifest)
+	err = s.completeSnapshot(ctx, runtime.ID, sessionID, chatSessionID, runtimeName, prepare.Generation, callbackToken, manifest)
 	if err != nil {
 		return nil, err
 	}
@@ -306,16 +364,12 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 		return map[string]interface{}{"status": "transcript-replay", "reason": restore.Reason}, nil
 	}
 	idleTimeout := choosePositiveDurationMs(restore.Config.TransferIdleTimeoutMs, defaultSnapshotTransferIdleTimeout)
-	if restore.Download.Home != "" {
-		if err := s.downloadAndExtractTar(ctx, restore.Download.Home, callbackToken, idleTimeout); err != nil {
-			_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "home_failed", err.Error(), callbackToken)
-			return nil, err
-		}
-	}
-	// A freshly launched runtime has no repository yet. Provision it after HOME
-	// extraction so current runtime assets and credentials overwrite stale
-	// snapshot copies, but before applying the Git WIP bundle, which requires a
-	// materialized repository.
+	totalBudget := choosePositiveInt64(restore.Config.TotalBudgetBytes, defaultSnapshotTotalBudgetBytes)
+	entryThreshold := choosePositiveInt64(restore.Config.EntryThresholdBytes, defaultSnapshotEntryThresholdBytes)
+	// A freshly launched VM has no devcontainer to restore into. Provision the
+	// repository and container first; credential-bearing HOME paths are excluded
+	// from snapshots, so fresh control-plane credential injection remains
+	// authoritative even though the safe HOME archive is applied afterward.
 	var provisionErr error
 	if s.config.IsStandaloneMode() {
 		provisionErr = s.prepareStandaloneWorkspaceRuntime(ctx, runtime)
@@ -326,51 +380,63 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 		_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "fresh_injection_failed", provisionErr.Error(), callbackToken)
 		return nil, provisionErr
 	}
-	if restore.Download.WIP != "" {
+	if s.config.IsStandaloneMode() && restore.Download.Home != "" {
+		if err := s.downloadAndExtractSessionStateTar(ctx, restore.Download.Home, callbackToken, idleTimeout, entryThreshold, totalBudget); err != nil {
+			_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "home_failed", err.Error(), callbackToken)
+			return nil, err
+		}
+	}
+	if s.config.IsStandaloneMode() && restore.Download.WIP != "" {
 		workDir := standaloneWorkspaceWorkDir(runtime, s.config.WorkspaceDir, s.config.ContainerWorkDir)
 		if err := s.downloadAndRestoreWIP(ctx, restore.Download.WIP, callbackToken, idleTimeout, workDir, restore.BaseCommit); err != nil {
 			_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "wip_failed", err.Error(), callbackToken)
 			return nil, err
 		}
 	}
-	if s.config.IsStandaloneMode() {
-		acpSessionID, savedAgentType, identityErr := snapshotHarnessResumeIdentity(restore.Manifest, sessionID, agentType)
-		if identityErr != nil {
-			return nil, identityErr
+	if !s.config.IsStandaloneMode() {
+		target, targetErr := s.resolveContainerSnapshotTarget(runtime)
+		if targetErr != nil {
+			return nil, targetErr
 		}
-		// Prime the per-workspace message reporter before the agent starts.
-		// handleCreateAgentSession does this on the normal path; the restore path
-		// skipped it, so the restored agent's output had no reporter to enqueue
-		// to and chat replies were silently dropped after a wake.
-		s.primeRestoredMessageReporter(runtime, chatSessionID)
-		if _, _, createErr := s.agentSessions.Create(runtime.ID, sessionID, "Restored session", "restore:"+sessionID); createErr != nil {
-			// A concurrent path (e.g. a browser WebSocket reconnect in the freshly
-			// woken container) may have already registered this session under a
-			// different idempotency key, so Create reports "already exists". The
-			// session ID is the canonical identity, so an existing row IS the
-			// restore target: hydrate it below instead of failing a valid restore.
-			if _, exists := s.agentSessions.Get(runtime.ID, sessionID); !exists {
-				return nil, fmt.Errorf("recreate restored agent session: %w", createErr)
+		if restore.Download.Home != "" {
+			if err := s.downloadAndExtractContainerHome(ctx, target, restore.Download.Home, callbackToken, idleTimeout, entryThreshold, totalBudget); err != nil {
+				_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "home_failed", err.Error(), callbackToken)
+				return nil, err
 			}
 		}
-		if updateErr := s.agentSessions.UpdateAcpSessionID(runtime.ID, sessionID, acpSessionID, savedAgentType); updateErr != nil {
-			return nil, fmt.Errorf("hydrate restored agent session: %w", updateErr)
+		if restore.Download.WIP != "" {
+			if err := s.downloadAndRestoreContainerWIP(ctx, target, restore.Download.WIP, callbackToken, idleTimeout, totalBudget, restore.BaseCommit); err != nil {
+				_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "wip_failed", err.Error(), callbackToken)
+				return nil, err
+			}
 		}
-		session, exists := s.agentSessions.Get(runtime.ID, sessionID)
-		if !exists {
-			return nil, fmt.Errorf("restored agent session is unavailable")
+	}
+
+	acpSessionID, savedAgentType, identityErr := snapshotHarnessResumeIdentity(restore.Manifest, sessionID, agentType)
+	if identityErr != nil {
+		return nil, identityErr
+	}
+	// Prime the per-workspace message reporter before the agent starts.
+	s.primeRestoredMessageReporter(runtime, chatSessionID)
+	if _, _, createErr := s.agentSessions.Create(runtime.ID, sessionID, "Restored session", "restore:"+sessionID); createErr != nil {
+		if _, exists := s.agentSessions.Get(runtime.ID, sessionID); !exists {
+			return nil, fmt.Errorf("recreate restored agent session: %w", createErr)
 		}
-		hostKey := runtime.ID + ":" + sessionID
-		host := s.getOrCreateSessionHost(hostKey, runtime.ID, sessionID, session, runtime, "")
-		if restoreErr := host.RestoreAgent(ctx, savedAgentType); restoreErr != nil {
-			return nil, fmt.Errorf("resume saved agent context: %w", restoreErr)
-		}
-		if host.Status() != acp.HostReady {
-			return nil, fmt.Errorf("restored agent failed to become ready: %s", host.Status())
-		}
-	} else if session, exists := s.agentSessions.Get(runtime.ID, sessionID); exists {
-		hostKey := runtime.ID + ":" + sessionID
-		_ = s.getOrCreateSessionHost(hostKey, runtime.ID, sessionID, session, runtime, "")
+	}
+	if updateErr := s.agentSessions.UpdateAcpSessionID(runtime.ID, sessionID, acpSessionID, savedAgentType); updateErr != nil {
+		return nil, fmt.Errorf("hydrate restored agent session: %w", updateErr)
+	}
+	session, exists := s.agentSessions.Get(runtime.ID, sessionID)
+	if !exists {
+		return nil, fmt.Errorf("restored agent session is unavailable")
+	}
+	hostKey := runtime.ID + ":" + sessionID
+	host := s.getOrCreateSessionHost(hostKey, runtime.ID, sessionID, session, runtime, "")
+	if restoreErr := host.RestoreAgent(ctx, savedAgentType); restoreErr != nil {
+		return nil, fmt.Errorf("resume saved agent context: %w", restoreErr)
+	}
+	if host.Status() != acp.HostReady {
+		return nil, fmt.Errorf("restored agent failed to become ready: %s", host.Status())
 	}
 	_ = s.reportSnapshotRestoreResult(ctx, runtime.ID, chatSessionID, "restored", "", callbackToken)
 	return map[string]interface{}{"status": "restored", "degradation": restore.Degradation}, nil
@@ -380,10 +446,10 @@ func snapshotHarnessResumeIdentity(manifest *snapshotManifest, sessionID, reques
 	if manifest == nil {
 		return "", "", fmt.Errorf("snapshot manifest is unavailable")
 	}
-	savedSessionID := strings.TrimSpace(manifest.AgentSessionID)
-	if savedSessionID != "" && savedSessionID != strings.TrimSpace(sessionID) {
-		return "", "", fmt.Errorf("snapshot agent session does not match restore target")
-	}
+	// AgentSessionID is the old control-plane routing identity. A VM wake creates
+	// a replacement routing row, while AcpSessionID remains the authoritative
+	// harness identity that must be loaded. Chat/workspace ownership is validated
+	// by the authenticated snapshot endpoints before this point.
 	acpSessionID := strings.TrimSpace(manifest.AcpSessionID)
 	savedAgentType := strings.TrimSpace(manifest.AgentType)
 	if acpSessionID == "" || savedAgentType == "" {
@@ -431,126 +497,44 @@ func (s *Server) primeRestoredMessageReporter(runtime *WorkspaceRuntime, chatSes
 	}
 }
 
-func (s *Server) prepareSnapshot(ctx context.Context, workspaceID, sessionID, chatSessionID, runtimeName, token string) (*snapshotPrepareResponse, error) {
-	payload := map[string]string{"chatSessionId": chatSessionID, "agentSessionId": sessionID, "runtime": runtimeName}
-	var out snapshotPrepareResponse
-	err := s.doSnapshotJSON(ctx, http.MethodPost, workspaceID, "/session-snapshot/prepare", token, payload, &out)
-	return &out, err
-}
-
-func (s *Server) completeSnapshot(ctx context.Context, workspaceID, sessionID, chatSessionID, runtimeName, token string, manifest snapshotManifest) error {
-	artifactSizes := map[string]int64{}
-	if artifact, ok := manifest.Artifacts["home"]; ok {
-		artifactSizes["homeBytes"] = artifact.SizeBytes
-	}
-	if artifact, ok := manifest.Artifacts["wip"]; ok {
-		artifactSizes["wipBytes"] = artifact.SizeBytes
-	}
-	payload := map[string]interface{}{
-		"chatSessionId":  chatSessionID,
-		"agentSessionId": sessionID,
-		"runtime":        runtimeName,
-		"baseCommit":     manifest.BaseCommit,
-		"status":         manifest.Status,
-		"degradation":    manifest.Degradation,
-		"manifest":       manifest,
-		"artifactSizes":  artifactSizes,
-	}
-	var out map[string]interface{}
-	return s.doSnapshotJSON(ctx, http.MethodPost, workspaceID, "/session-snapshot/complete", token, payload, &out)
-}
-
-func (s *Server) fetchSnapshotRestore(ctx context.Context, workspaceID, chatSessionID, token string) (*snapshotRestoreResponse, error) {
-	path := "/session-snapshot/restore?chatSessionId=" + url.QueryEscape(chatSessionID)
-	var out snapshotRestoreResponse
-	err := s.doSnapshotJSON(ctx, http.MethodGet, workspaceID, path, token, nil, &out)
-	return &out, err
-}
-
-func (s *Server) reportSnapshotRestoreResult(ctx context.Context, workspaceID, chatSessionID, status, message, token string) error {
-	payload := map[string]string{"chatSessionId": chatSessionID, "status": status, "message": message}
-	var out map[string]interface{}
-	return s.doSnapshotJSON(ctx, http.MethodPost, workspaceID, "/session-snapshot/restore-result", token, payload, &out)
-}
-
-func (s *Server) doSnapshotJSON(ctx context.Context, method, workspaceID, path, token string, payload interface{}, out interface{}) error {
-	endpoint := strings.TrimRight(s.config.ControlPlaneURL, "/") + "/api/workspaces/" + url.PathEscape(workspaceID) + path
-	var body io.Reader
-	if payload != nil {
-		data, err := json.Marshal(payload)
-		if err != nil {
-			return err
-		}
-		body = bytes.NewReader(data)
-	}
-	req, err := http.NewRequestWithContext(ctx, method, endpoint, body)
-	if err != nil {
-		return err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	if payload != nil {
-		req.Header.Set("Content-Type", "application/json")
-	}
-	res, err := s.controlPlaneHTTPClient(0).Do(req)
-	if err != nil {
-		return err
-	}
-	defer res.Body.Close()
-	data, _ := io.ReadAll(io.LimitReader(res.Body, 1024*1024))
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return fmt.Errorf("snapshot control plane returned HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(data)))
-	}
-	if out != nil && len(data) > 0 {
-		if err := json.Unmarshal(data, out); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (s *Server) uploadSnapshotFile(ctx context.Context, uploadPath, filePath, token string, idleTimeout time.Duration) (int64, string, error) {
-	target := absoluteControlPlaneURL(s.config.ControlPlaneURL, uploadPath)
-	file, err := os.Open(filePath)
-	if err != nil {
-		return 0, "", err
-	}
-	defer file.Close()
-	fileInfo, err := file.Stat()
-	if err != nil {
-		return 0, "", err
-	}
-	h := sha256.New()
-	reader := &countingReader{r: file, hash: h}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPut, target, newIdleReader(reader, idleTimeout))
-	if err != nil {
-		return 0, "", err
-	}
-	req.Header.Set("Authorization", "Bearer "+token)
-	req.ContentLength = fileInfo.Size()
-	res, err := s.controlPlaneHTTPClient(0).Do(req)
-	if err != nil {
-		return 0, "", err
-	}
-	defer res.Body.Close()
-	body, _ := io.ReadAll(io.LimitReader(res.Body, 64*1024))
-	if res.StatusCode < 200 || res.StatusCode >= 300 {
-		return 0, "", fmt.Errorf("artifact upload failed HTTP %d: %s", res.StatusCode, strings.TrimSpace(string(body)))
-	}
-	return reader.n, hex.EncodeToString(h.Sum(nil)), nil
-}
-
 func (s *Server) downloadAndExtractTar(ctx context.Context, downloadPath, token string, idleTimeout time.Duration) error {
-	res, err := s.snapshotDownload(ctx, downloadPath, token)
+	return s.downloadAndExtractSessionStateTar(ctx, downloadPath, token, idleTimeout, defaultSnapshotEntryThresholdBytes, defaultSnapshotTotalBudgetBytes)
+}
+
+func (s *Server) downloadAndExtractSessionStateTar(ctx context.Context, downloadPath, token string, idleTimeout time.Duration, entryThreshold, totalBudget int64) error {
+	path, err := s.downloadSnapshotArtifactToTemp(ctx, downloadPath, token, idleTimeout, "sam-session-restore-home-*.tar", totalBudget)
 	if err != nil {
 		return err
 	}
-	defer res.Body.Close()
+	defer os.Remove(path)
+	// Security boundary: validate the complete immutable temp archive before the
+	// first filesystem mutation. The validator rejects absolute/traversing and
+	// duplicate paths, links, special entries, file/child conflicts, excluded
+	// credential paths, and entries outside the configured size budgets.
+	if _, err := validateSnapshotHomeTar(path, entryThreshold, totalBudget); err != nil {
+		return err
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
 	home = filepath.Clean(home)
-	tr := tar.NewReader(newIdleReader(res.Body, idleTimeout))
+	candidates, err := externalSnapshotRootCandidates(home, os.Getenv)
+	if err != nil {
+		return err
+	}
+	destinations := map[string]string{"": home}
+	for _, candidate := range candidates {
+		if candidate.path != "" {
+			destinations[candidate.logicalName] = candidate.path
+		}
+	}
+	file, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	tr := tar.NewReader(file)
 	for {
 		header, err := tr.Next()
 		if err == io.EOF {
@@ -559,31 +543,38 @@ func (s *Server) downloadAndExtractTar(ctx context.Context, downloadPath, token 
 		if err != nil {
 			return err
 		}
-		cleanName := filepath.Clean(header.Name)
-		if filepath.IsAbs(cleanName) || cleanName == "." || cleanName == ".." || strings.HasPrefix(cleanName, ".."+string(filepath.Separator)) {
+		cleanName := filepath.ToSlash(filepath.Clean(header.Name))
+		logicalName, relativeName, external, locationErr := snapshotArchiveLocation(cleanName)
+		if locationErr != nil {
+			return locationErr
+		}
+		destination, exists := destinations[logicalName]
+		if !external {
+			relativeName = cleanName
+		}
+		if !exists {
+			return fmt.Errorf("restored runtime does not define %s state destination", logicalName)
+		}
+		if relativeName == "." {
 			continue
 		}
-		target := filepath.Join(home, cleanName)
-		relTarget, relErr := filepath.Rel(home, target)
-		if relErr != nil || relTarget == ".." || strings.HasPrefix(relTarget, ".."+string(filepath.Separator)) {
-			continue
-		}
-		if err := rejectSymlinkPath(home, target); err != nil {
+		if err := ensureSafeLocalSnapshotDestination(destination); err != nil {
 			return err
 		}
-		if header.Typeflag != tar.TypeDir && header.Typeflag != tar.TypeReg && header.Typeflag != tar.TypeRegA {
-			continue
+		target := filepath.Join(destination, filepath.FromSlash(relativeName))
+		if err := rejectSymlinkPath(destination, target); err != nil {
+			return err
 		}
 		if header.FileInfo().IsDir() {
-			if err := os.MkdirAll(target, header.FileInfo().Mode()); err != nil {
+			if err := os.MkdirAll(target, header.FileInfo().Mode().Perm()); err != nil { // NOSONAR gosecurity:S6096 -- the full archive and this root-confined, non-symlink target are validated above
 				return err
 			}
 			continue
 		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil { // NOSONAR gosecurity:S6096 -- target passed archive validation, root confinement, and symlink rejection above
 			return err
 		}
-		f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, header.FileInfo().Mode())
+		f, err := os.OpenFile(target, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, header.FileInfo().Mode().Perm()) // NOSONAR gosecurity:S6096 -- target passed archive validation, root confinement, and symlink rejection above
 		if err != nil {
 			return err
 		}
@@ -596,6 +587,20 @@ func (s *Server) downloadAndExtractTar(ctx context.Context, downloadPath, token 
 			return closeErr
 		}
 	}
+}
+
+func ensureSafeLocalSnapshotDestination(destination string) error {
+	destination = filepath.Clean(destination)
+	if !filepath.IsAbs(destination) || destination == string(filepath.Separator) {
+		return fmt.Errorf("unsafe local snapshot destination %q", destination)
+	}
+	if err := rejectSymlinkPath(string(filepath.Separator), destination); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(destination, 0o700); err != nil {
+		return err
+	}
+	return rejectSymlinkPath(string(filepath.Separator), destination)
 }
 
 func (s *Server) downloadAndRestoreWIP(ctx context.Context, downloadPath, token string, idleTimeout time.Duration, workDir, baseCommit string) error {

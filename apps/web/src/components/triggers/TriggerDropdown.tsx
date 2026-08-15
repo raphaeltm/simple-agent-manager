@@ -11,12 +11,11 @@ import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router';
 
 import { listTriggers } from '../../lib/api/triggers';
+import { FOCUS_RING } from './trigger-presentation';
 
 const POPOVER_WIDTH = 288;
 const POPOVER_MARGIN = 8;
 const POPOVER_OFFSET = 4;
-const FOCUS_RING =
-  'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
 
 interface TriggerDropdownProps {
   projectId: string;

@@ -5,6 +5,8 @@ import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import * as projectDataService from './project-data';
+import { queueWorkspaceSessionSleep } from './session-sleep';
+import { deleteSessionSnapshotState } from './session-snapshots';
 import { cleanupTaskRun } from './task-runner';
 
 export type TerminalTaskCleanupStatus = 'completed' | 'failed' | 'cancelled';
@@ -14,6 +16,8 @@ export interface TerminalTaskCleanupOptions {
   errorMessage?: string | null;
   requiredUserId?: string;
   logContext?: Record<string, unknown>;
+  /** Archive/delete intent: discard the seven-day restore state. */
+  destructiveSessionEnd?: boolean;
 }
 
 export interface TerminalTaskCleanupOrThrowOptions extends TerminalTaskCleanupOptions {
@@ -65,10 +69,28 @@ export async function cleanupTerminalTaskResources(
   }
 
   const [workspace] = await db
-    .select({ chatSessionId: schema.workspaces.chatSessionId })
+    .select({ chatSessionId: schema.workspaces.chatSessionId, userId: schema.workspaces.userId })
     .from(schema.workspaces)
     .where(eq(schema.workspaces.id, task.workspaceId))
     .limit(1);
+
+  if (
+    options.status === 'completed' &&
+    workspace?.chatSessionId &&
+    !options.destructiveSessionEnd
+  ) {
+    await queueWorkspaceSessionSleep(env, {
+      workspaceId: task.workspaceId,
+      userId: workspace.userId,
+      reason: 'Task completed',
+      sleepAfterMs: 0,
+    });
+    return;
+  }
+
+  if (workspace?.chatSessionId && options.destructiveSessionEnd) {
+    await deleteSessionSnapshotState(db, env, workspace.chatSessionId);
+  }
 
   if (workspace?.chatSessionId) {
     try {

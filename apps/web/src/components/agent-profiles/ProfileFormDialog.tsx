@@ -31,7 +31,13 @@ import {
 import { ProfileRuntimeSection } from './ProfileRuntimeSection';
 
 /** Default agent type derived from the catalog — avoids hardcoding 'claude-code' */
-const DEFAULT_AGENT_TYPE = AGENT_CATALOG[0]!.id;
+const defaultAgentCatalogEntry = AGENT_CATALOG[0];
+if (!defaultAgentCatalogEntry) {
+  throw new Error(
+    'ProfileFormDialog: AGENT_CATALOG is empty — cannot resolve a default agent type'
+  );
+}
+const DEFAULT_AGENT_TYPE = defaultAgentCatalogEntry.id;
 
 interface ProfileFormDialogProps {
   isOpen: boolean;
@@ -184,7 +190,7 @@ function agentSettingsSummary(
   model: string,
   effort: AgentEffort,
   permissionMode: string,
-  timeoutMinutes: string,
+  timeoutMinutes: string
 ): string {
   const parts: string[] = [];
   const agentName = AGENT_CATALOG.find((a) => a.id === agentType)?.name ?? agentType;
@@ -198,7 +204,7 @@ function agentSettingsSummary(
   }
   if (permissionMode) {
     parts.push(
-      (AGENT_PERMISSION_MODE_LABELS as Record<string, string>)[permissionMode] ?? permissionMode,
+      (AGENT_PERMISSION_MODE_LABELS as Record<string, string>)[permissionMode] ?? permissionMode
     );
   }
   if (timeoutMinutes) parts.push(`${timeoutMinutes}m`);
@@ -229,7 +235,10 @@ function joinOrDefault(parts: (string | false | null | undefined)[], sep = ', ')
 }
 
 function executionSummary(maxTurns: string, systemPromptAppend: string): string {
-  return joinOrDefault([maxTurns && `${maxTurns} turns`, systemPromptAppend.trim() && 'custom prompt']);
+  return joinOrDefault([
+    maxTurns && `${maxTurns} turns`,
+    systemPromptAppend.trim() && 'custom prompt',
+  ]);
 }
 
 function runtimeSummary(runtime: string): string | false {
@@ -238,8 +247,16 @@ function runtimeSummary(runtime: string): string | false {
   return false;
 }
 
-function infraSummary(vmSize: string, workspaceProfile: string, taskMode: string, runtime: string): string {
-  return joinOrDefault([runtimeSummary(runtime), vmSize && `${vmSize} VM`, workspaceProfile, taskMode], ' · ');
+function infraSummary(
+  vmSize: string,
+  workspaceProfile: string,
+  taskMode: string,
+  runtime: string
+): string {
+  return joinOrDefault(
+    [runtimeSummary(runtime), vmSize && `${vmSize} VM`, workspaceProfile, taskMode],
+    ' · '
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -291,10 +308,14 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
       setMaxTurns(profile.maxTurns != null ? String(profile.maxTurns) : '');
       setTimeoutMinutes(profile.timeoutMinutes != null ? String(profile.timeoutMinutes) : '');
       setRuntime(profileRuntime);
-      setVmSizeOverride(profileRuntime === 'cf-container' ? '' : profile.vmSizeOverride ?? '');
-      setWorkspaceProfile(profileRuntime === 'cf-container' ? 'lightweight' : profile.workspaceProfile ?? '');
-      setDevcontainerConfigName(profileRuntime === 'cf-container' ? '' : profile.devcontainerConfigName ?? '');
-      setTaskMode(profileRuntime === 'cf-container' ? 'conversation' : profile.taskMode ?? '');
+      setVmSizeOverride(profileRuntime === 'cf-container' ? '' : (profile.vmSizeOverride ?? ''));
+      setWorkspaceProfile(
+        profileRuntime === 'cf-container' ? 'lightweight' : (profile.workspaceProfile ?? '')
+      );
+      setDevcontainerConfigName(
+        profileRuntime === 'cf-container' ? '' : (profile.devcontainerConfigName ?? '')
+      );
+      setTaskMode(profileRuntime === 'cf-container' ? 'conversation' : (profile.taskMode ?? ''));
       setGithubCliPolicy(profile.githubCliPolicy ?? DEFAULT_GITHUB_CLI_POLICY);
     } else if (isOpen) {
       setName('');
@@ -473,7 +494,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
                 setAgentType(v);
                 setModel('');
                 setEffort((current) =>
-                  isAgentEffortSupported(v, current) ? current : DEFAULT_AGENT_EFFORT,
+                  isAgentEffortSupported(v, current) ? current : DEFAULT_AGENT_EFFORT
                 );
               }}
               options={AGENT_CATALOG.map((a) => ({ value: a.id, label: a.name }))}
@@ -523,10 +544,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
           </div>
         </Section>
 
-        <Section
-          title="Platform Policy"
-          summary={policySummary(githubCliPolicy)}
-        >
+        <Section title="Platform Policy" summary={policySummary(githubCliPolicy)}>
           <div className="grid gap-3">
             <SelectField
               label="GitHub CLI access"
@@ -584,10 +602,7 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
           </div>
         </Section>
 
-        <Section
-          title="Execution"
-          summary={executionSummary(maxTurns, systemPromptAppend)}
-        >
+        <Section title="Execution" summary={executionSummary(maxTurns, systemPromptAppend)}>
           <label className="grid gap-1.5">
             <span className="text-sm text-fg-muted">Max Turns</span>
             <Input
@@ -626,13 +641,21 @@ export const ProfileFormDialog: FC<ProfileFormDialogProps> = ({
             />
 
             <SelectField
-              label={<>VM Size{providerContext && <span className="font-normal ml-1">({providerContext})</span>}</>}
+              label={
+                <>
+                  VM Size
+                  {providerContext && <span className="font-normal ml-1">({providerContext})</span>}
+                </>
+              }
               value={vmSizeOverride}
               onChange={setVmSizeOverride}
               options={VM_SIZES.map((vs) => ({
                 value: vs.value,
                 label: vs.value
-                  ? formatVmSizeOption(vs.value as VMSize, activeCatalog?.sizes[vs.value as VMSize] ?? null)
+                  ? formatVmSizeOption(
+                      vs.value as VMSize,
+                      activeCatalog?.sizes[vs.value as VMSize] ?? null
+                    )
                   : vs.label,
               }))}
               disabled={saving || isInstantRuntime}

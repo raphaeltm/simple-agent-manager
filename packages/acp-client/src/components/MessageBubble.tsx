@@ -35,10 +35,11 @@ interface MessageBubbleProps {
  * Detect whether a markdown link href looks like a file path rather than a URL.
  * File paths are routed to the file browser instead of opening a new window.
  */
-export function isFilePathHref(href: string | undefined): boolean {
+export function isFilePathHref(href: string | undefined): href is string {
   if (!href) return false;
   // URLs, anchors, and special protocols are not file paths
-  if (/^(https?:|ftp:|wss?:|file:|mailto:|#|javascript:|tel:|data:|blob:)/i.test(href)) return false;
+  if (/^(https?:|ftp:|wss?:|file:|mailto:|#|javascript:|tel:|data:|blob:)/i.test(href))
+    return false;
   // Bare hostnames without protocol (e.g., www.example.com, docs.example.com) are URLs, not file paths
   if (/^(www\.|([a-z0-9-]+\.)+?(com|org|net|io|dev|app|co|edu|gov)\b)/i.test(href)) return false;
   // Must contain a dot (extension) or a slash (path separator) to look like a file path
@@ -54,7 +55,13 @@ export function isFilePathHref(href: string | undefined): boolean {
 export function parseFilePathRef(ref: string): { path: string; line: number | null } {
   const match = ref.match(/^(.+?):(\d+)$/);
   if (match) {
-    return { path: match[1]!, line: parseInt(match[2]!, 10) };
+    const [, path, lineStr] = match;
+    if (path === undefined || lineStr === undefined) {
+      throw new Error(
+        `parseFilePathRef: regex match unexpectedly missing capture groups for "${ref}"`
+      );
+    }
+    return { path, line: parseInt(lineStr, 10) };
   }
   return { path: ref, line: null };
 }
@@ -66,7 +73,13 @@ function HighlightedCode({ code, language }: { code: string; language: string })
       {({ tokens, getLineProps, getTokenProps }) => (
         <pre
           className="p-3 rounded-md overflow-x-auto text-xs whitespace-pre"
-          style={{ margin: 0, background: NIGHT_OWL_CODE_BACKGROUND, color: NIGHT_OWL_CODE_FOREGROUND, fontFamily: 'monospace', lineHeight: '1.5' }}
+          style={{
+            margin: 0,
+            background: NIGHT_OWL_CODE_BACKGROUND,
+            color: NIGHT_OWL_CODE_FOREGROUND,
+            fontFamily: 'monospace',
+            lineHeight: '1.5',
+          }}
         >
           {tokens.map((line, lineIdx) => {
             const lineProps = getLineProps({ line });
@@ -139,7 +152,10 @@ function makeCodeComponent(
     const isBlock = !!match || code.includes('\n');
     if (!isBlock) {
       return (
-        <code className={`${inlineClassName} px-1 py-0.5 rounded text-xs font-mono break-all`} {...props}>
+        <code
+          className={`${inlineClassName} px-1 py-0.5 rounded text-xs font-mono break-all`}
+          {...props}
+        >
           {children}
         </code>
       );
@@ -218,7 +234,7 @@ function buildAgentMarkdownComponents(
     code: makeCodeComponent('bg-gray-100 text-gray-800', options),
     a: ({ href, children }) => {
       if (isFilePathHref(href)) {
-        const { path, line } = parseFilePathRef(href!);
+        const { path, line } = parseFilePathRef(href);
         return (
           <button
             type="button"
@@ -234,7 +250,12 @@ function buildAgentMarkdownComponents(
         );
       }
       return (
-        <a href={href} target="_blank" rel="noopener noreferrer" className="text-blue-400 underline">
+        <a
+          href={href}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="text-blue-400 underline"
+        >
           {children}
         </a>
       );
@@ -249,33 +270,42 @@ function buildAgentMarkdownComponents(
  * Wrapped in React.memo to prevent re-renders when parent state changes
  * (e.g., scroll position, input value) don't affect this component's props.
  */
-export const MessageBubble = React.memo(function MessageBubble({ text, role, streaming, animated, timestamp, ttsApiUrl, ttsStorageId, onPlayAudio, onFileClick, bubbleClassName }: MessageBubbleProps) {
+export const MessageBubble = React.memo(function MessageBubble({
+  text,
+  role,
+  streaming,
+  animated,
+  timestamp,
+  ttsApiUrl,
+  ttsStorageId,
+  onPlayAudio,
+  onFileClick,
+  bubbleClassName,
+}: MessageBubbleProps) {
   const isUser = role === 'user';
   const renderMermaid = !streaming && !animated;
   // When onFileClick is provided for agent messages, build components that intercept file-path links.
   // useMemo ensures stable references — react-markdown won't unmount/remount custom renderers.
-  const agentComponents = useMemo(
-    () => {
-      if (onFileClick) {
-        return buildAgentMarkdownComponents(onFileClick, { renderMermaid });
-      }
-      if (!renderMermaid) {
-        return {
-          ...AGENT_MARKDOWN_COMPONENTS,
-          code: makeCodeComponent('bg-gray-100 text-gray-800', { renderMermaid }),
-        };
-      }
-      return AGENT_MARKDOWN_COMPONENTS;
-    },
-    [onFileClick, renderMermaid]
-  );
+  const agentComponents = useMemo(() => {
+    if (onFileClick) {
+      return buildAgentMarkdownComponents(onFileClick, { renderMermaid });
+    }
+    if (!renderMermaid) {
+      return {
+        ...AGENT_MARKDOWN_COMPONENTS,
+        code: makeCodeComponent('bg-gray-100 text-gray-800', { renderMermaid }),
+      };
+    }
+    return AGENT_MARKDOWN_COMPONENTS;
+  }, [onFileClick, renderMermaid]);
   const userComponents = useMemo(
-    () => renderMermaid
-      ? USER_MARKDOWN_COMPONENTS
-      : {
-          ...USER_MARKDOWN_COMPONENTS,
-          code: makeCodeComponent('bg-blue-500 text-blue-50', { renderMermaid }),
-        },
+    () =>
+      renderMermaid
+        ? USER_MARKDOWN_COMPONENTS
+        : {
+            ...USER_MARKDOWN_COMPONENTS,
+            code: makeCodeComponent('bg-blue-500 text-blue-50', { renderMermaid }),
+          },
     [renderMermaid]
   );
   const components = isUser ? userComponents : agentComponents;
@@ -296,10 +326,7 @@ export const MessageBubble = React.memo(function MessageBubble({ text, role, str
           {animated && !isUser ? (
             <TypewriterText text={text} animated={true} markdownComponents={components} />
           ) : (
-            <Markdown
-              remarkPlugins={REMARK_PLUGINS}
-              components={components}
-            >
+            <Markdown remarkPlugins={REMARK_PLUGINS} components={components}>
               {text}
             </Markdown>
           )}

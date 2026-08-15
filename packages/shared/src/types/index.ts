@@ -211,6 +211,8 @@ export type {
   TaskSortOrder,
   TaskStatus,
   TaskStatusEvent,
+  TaskTerminalStatus,
+  TaskTerminalTransitionEvent,
   TaskTriggerExecutionInfo,
   TaskTriggerInfo,
   UpdateTaskRequest,
@@ -229,6 +231,7 @@ export {
   TASK_EXECUTION_STEPS,
   TASK_MODES,
   TASK_STATUSES,
+  TASK_TERMINAL_STATUSES,
   validateCompletionEvidence,
 } from './task';
 
@@ -295,6 +298,9 @@ export type {
   NotificationUrgency,
   NotificationWsMessage,
   UpdateNotificationPreferenceRequest,
+  WebPushSubscriptionInput,
+  WebPushSubscriptionResponse,
+  WebPushSubscriptionsResponse,
 } from './notification';
 export { NOTIFICATION_CHANNELS, NOTIFICATION_TYPES, NOTIFICATION_URGENCIES } from './notification';
 
@@ -506,9 +512,14 @@ export type {
   GetPendingMessagesResponse,
   ListMailboxResponse,
   MessageClass,
+  PromptDeliverySource,
   SendDurableMessageRequest,
   SendDurableMessageResponse,
   SenderType,
+  VmPromptDeliveryCapabilities,
+  VmPromptDeliveryReceipt,
+  VmPromptDeliveryResponse,
+  VmPromptReceiptState,
 } from './mailbox';
 export {
   DELIVERY_STATE_TRANSITIONS,
@@ -517,8 +528,23 @@ export {
   DURABLE_MESSAGE_CLASSES,
   MAILBOX_DEFAULTS,
   MESSAGE_CLASSES,
+  PROMPT_DELIVERY_SOURCES,
   SENDER_TYPES,
+  VM_PROMPT_RECEIPT_STATES,
 } from './mailbox';
+
+// Durable execution checkpoint foundation
+export type {
+  CheckpointEpisode,
+  CheckpointEpisodeState,
+  CheckpointEpisodeTransitionInput,
+  CheckpointProgressEnvelope,
+  CreateCheckpointEpisodeInput,
+} from './checkpoint';
+export {
+  CHECKPOINT_EPISODE_STATES,
+  CHECKPOINT_EPISODE_TRANSITIONS,
+} from './checkpoint';
 
 // Mission (Phase 2: Orchestration Primitives)
 export type {

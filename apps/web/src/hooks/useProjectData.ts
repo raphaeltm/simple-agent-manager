@@ -1,5 +1,5 @@
-import type { ProjectDetailResponse,ProjectSummary } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useRef,useState } from 'react';
+import type { ProjectDetailResponse, ProjectSummary } from '@simple-agent-manager/shared';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import * as api from '../lib/api';
 
@@ -32,8 +32,7 @@ export function useProjectList(options: UseProjectListOptions = {}): UseProjectL
     }
     try {
       const result = await api.listProjects(limit);
-      // The API now returns ProjectSummary objects via ListProjectsResponse
-      setProjects(result.projects as unknown as ProjectSummary[]);
+      setProjects(result.projects);
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load projects');
@@ -56,7 +55,9 @@ export function useProjectList(options: UseProjectListOptions = {}): UseProjectL
 }
 
 interface UseProjectDetailResult {
-  project: (ProjectDetailResponse & { recentSessions?: unknown[]; recentActivity?: unknown[] }) | null;
+  project:
+    | (ProjectDetailResponse & { recentSessions?: unknown[]; recentActivity?: unknown[] })
+    | null;
   loading: boolean;
   error: string | null;
   refresh: () => void;

@@ -31,7 +31,10 @@ const apiUrl = `https://api.${baseDomain}`;
         let stored = 'auto';
         try {
           stored = parse(localStorage.getItem('starlight-theme') || 'auto');
-        } catch {}
+        } catch {
+          // localStorage may be unavailable (private browsing, disabled
+          // storage) — fall back to the 'auto' default set above.
+        }
         const resolved =
           stored === 'auto'
             ? window.matchMedia('(prefers-color-scheme: light)').matches

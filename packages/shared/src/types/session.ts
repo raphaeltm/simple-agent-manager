@@ -4,7 +4,7 @@ import type { TaskExecutionStep, TaskMode, TaskStatus } from './task';
 // Chat Sessions
 // =============================================================================
 
-export type ChatSessionStatus = 'active' | 'stopped' | 'error';
+export type ChatSessionStatus = 'active' | 'sleeping' | 'stopped' | 'error';
 
 export interface ChatSession {
   id: string;

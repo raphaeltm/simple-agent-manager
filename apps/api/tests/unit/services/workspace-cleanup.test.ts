@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   stopComputeTracking: vi.fn(),
   stopSession: vi.fn(),
   cleanupWorkspaceActivity: vi.fn(),
+  deleteSessionSnapshotState: vi.fn(),
 }));
 
 vi.mock('../../../src/services/node-agent', () => ({
@@ -24,6 +25,9 @@ vi.mock('../../../src/services/compute-usage', () => ({
 vi.mock('../../../src/services/project-data', () => ({
   stopSession: (...args: unknown[]) => mocks.stopSession(...args),
   cleanupWorkspaceActivity: (...args: unknown[]) => mocks.cleanupWorkspaceActivity(...args),
+}));
+vi.mock('../../../src/services/session-snapshots', () => ({
+  deleteSessionSnapshotState: (...args: unknown[]) => mocks.deleteSessionSnapshotState(...args),
 }));
 vi.mock('../../../src/lib/logger', () => ({
   log: { error: vi.fn(), warn: vi.fn() },
@@ -92,6 +96,7 @@ describe('cleanupWorkspaceForDeletion', () => {
     mocks.stopComputeTracking.mockResolvedValue(undefined);
     mocks.stopSession.mockResolvedValue(undefined);
     mocks.cleanupWorkspaceActivity.mockResolvedValue(undefined);
+    mocks.deleteSessionSnapshotState.mockResolvedValue(true);
   });
 
   it('deletes the workspace row immediately after best-effort runtime cleanup', async () => {
@@ -111,20 +116,23 @@ describe('cleanupWorkspaceForDeletion', () => {
       'node-cleanup-1',
       'ws-cleanup-1',
       env,
-      'user-cleanup-1',
+      'user-cleanup-1'
     );
     expect(mocks.stopNodeResources).not.toHaveBeenCalled();
     expect(mocks.stopComputeTracking).toHaveBeenCalledWith(db, 'ws-cleanup-1');
+    expect(mocks.deleteSessionSnapshotState).toHaveBeenCalledWith(db, env, 'session-cleanup-1');
     expect(deletedTables).toEqual(['agent_sessions', 'workspaces']);
     expect(waitUntil).toHaveBeenCalledTimes(2);
   });
 
   it('destroys cf-container nodes instead of only deleting the workspace inside the container', async () => {
-    const { db, deletedTables } = buildDb([{
-      status: 'running',
-      healthStatus: 'healthy',
-      runtime: 'cf-container',
-    }]);
+    const { db, deletedTables } = buildDb([
+      {
+        status: 'running',
+        healthStatus: 'healthy',
+        runtime: 'cf-container',
+      },
+    ]);
     const env = {} as Env;
 
     await cleanupWorkspaceForDeletion({
@@ -140,11 +148,13 @@ describe('cleanupWorkspaceForDeletion', () => {
   });
 
   it('still requests cf-container destruction when the node heartbeat is unhealthy', async () => {
-    const { db } = buildDb([{
-      status: 'error',
-      healthStatus: 'unhealthy',
-      runtime: 'cf-container',
-    }]);
+    const { db } = buildDb([
+      {
+        status: 'error',
+        healthStatus: 'unhealthy',
+        runtime: 'cf-container',
+      },
+    ]);
     const env = {} as Env;
 
     await cleanupWorkspaceForDeletion({

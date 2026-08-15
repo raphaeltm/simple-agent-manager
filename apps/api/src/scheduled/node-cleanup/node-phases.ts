@@ -46,7 +46,10 @@ export async function sweepTerminalCfContainers(
        AND n.node_class != 'user-owned'
        AND (n.cleanup_backoff_until IS NULL OR n.cleanup_backoff_until <= ?)
        AND w.status IN ('running', 'creating', 'recovery', 'sleeping', 'stopped')
-       AND t.status IN ('completed', 'failed', 'cancelled')
+       AND (
+         t.status IN ('failed', 'cancelled')
+         OR (t.status = 'completed' AND w.chat_session_id IS NULL)
+       )
        AND NOT EXISTS (
          SELECT 1 FROM tasks active
          WHERE active.workspace_id = w.id
@@ -80,22 +83,26 @@ export async function sweepTerminalCfContainers(
 
       await stopNodeResources(candidate.node_id, candidate.user_id, env);
 
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'warn',
-        message: 'Destroyed cf-container node left behind after terminal task',
-        context: {
-          recoveryType: 'cf_container_terminal_task_cleanup',
+      await persistError(
+        env.OBSERVABILITY_DATABASE,
+        {
+          source: 'api',
+          level: 'warn',
+          message: 'Destroyed cf-container node left behind after terminal task',
+          context: {
+            recoveryType: 'cf_container_terminal_task_cleanup',
+            nodeId: candidate.node_id,
+            workspaceId: candidate.workspace_id,
+            taskId: candidate.task_id,
+            taskStatus: candidate.task_status,
+            gracePeriodMs: config.orphanGracePeriodMs,
+          },
+          userId: candidate.user_id,
           nodeId: candidate.node_id,
           workspaceId: candidate.workspace_id,
-          taskId: candidate.task_id,
-          taskStatus: candidate.task_status,
-          gracePeriodMs: config.orphanGracePeriodMs,
         },
-        userId: candidate.user_id,
-        nodeId: candidate.node_id,
-        workspaceId: candidate.workspace_id,
-      }, env);
+        env
+      );
 
       result.cfContainersDestroyed++;
     } catch (err) {

@@ -236,6 +236,23 @@ export function validateCloudInitVariables(variables: CloudInitVariables): void 
       );
     }
   }
+  if (
+    variables.sessionSnapshotOperationTimeout !== undefined &&
+    variables.sessionSnapshotOperationTimeout !== '' &&
+    !GO_DURATION_RE.test(variables.sessionSnapshotOperationTimeout)
+  ) {
+    errors.push(
+      `sessionSnapshotOperationTimeout: must be a Go duration using ns/us/ms/s/m/h units (got ${JSON.stringify(variables.sessionSnapshotOperationTimeout)})`
+    );
+  }
+  for (const [name, value] of [
+    ['sessionSnapshotProgressReportInterval', variables.sessionSnapshotProgressReportInterval],
+    ['sessionSnapshotProgressReportTimeout', variables.sessionSnapshotProgressReportTimeout],
+  ] as const) {
+    if (value !== undefined && value !== '' && !GO_DURATION_RE.test(value)) {
+      errors.push(`${name}: must be a Go duration (got ${JSON.stringify(value)})`);
+    }
+  }
   for (const [name, value] of [
     ['errorReportFlushInterval', variables.errorReportFlushInterval],
     ['errorReportHttpTimeout', variables.errorReportHttpTimeout],
@@ -356,6 +373,12 @@ export interface CloudInitVariables {
   deployComposeCmd?: string;
   /** Max time for deployment health checks, as Go duration string. */
   deployHealthTimeout?: string;
+  /** Overall VM-agent checkpoint deadline, as a Go duration string (default: 15m). */
+  sessionSnapshotOperationTimeout?: string;
+  /** Min interval between VM-agent snapshot progress callbacks (default: 15s). */
+  sessionSnapshotProgressReportInterval?: string;
+  /** Timeout for each VM-agent snapshot progress callback (default: 5s). */
+  sessionSnapshotProgressReportTimeout?: string;
   /** VM Agent durable error reporter tunables. */
   errorReportFlushInterval?: string;
   errorReportMaxBatchSize?: string;
@@ -434,6 +457,11 @@ export function generateCloudInit(
     '{{ deploy_acme_ca }}': variables.deployAcmeCa ?? '',
     '{{ deploy_compose_cmd }}': variables.deployComposeCmd ?? '',
     '{{ deploy_health_timeout }}': variables.deployHealthTimeout ?? '',
+    '{{ session_snapshot_operation_timeout }}': variables.sessionSnapshotOperationTimeout ?? '15m',
+    '{{ session_snapshot_progress_report_interval }}':
+      variables.sessionSnapshotProgressReportInterval ?? '15s',
+    '{{ session_snapshot_progress_report_timeout }}':
+      variables.sessionSnapshotProgressReportTimeout ?? '5s',
     '{{ error_report_flush_interval }}': variables.errorReportFlushInterval ?? '30s',
     '{{ error_report_max_batch_size }}': variables.errorReportMaxBatchSize ?? '10',
     '{{ error_report_max_batch_bytes }}': variables.errorReportMaxBatchBytes ?? '32768',

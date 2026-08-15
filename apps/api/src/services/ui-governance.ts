@@ -99,6 +99,22 @@ function serializeJsonStringArray(value: string[]): string {
   return JSON.stringify(value ?? []);
 }
 
+/**
+ * Unwrap the single row from a Drizzle `.returning()` result, throwing a
+ * descriptive error if the database did not return the expected row. An
+ * insert always returns its inserted row, and an update scoped to a known
+ * existing id always returns that row — this should never actually throw,
+ * but converts the invariant into a diagnosable failure instead of a
+ * silent `undefined`.
+ */
+function expectReturnedRow<T>(rows: T[], context: string): T {
+  const row = rows[0];
+  if (row === undefined) {
+    throw new Error(`Expected a row to be returned from ${context}`);
+  }
+  return row;
+}
+
 function toComponentDefinition(row: typeof schema.componentDefinitions.$inferSelect) {
   return {
     ...row,
@@ -149,7 +165,7 @@ export class UiGovernanceService {
         })
         .where(eq(schema.uiStandards.id, found.id))
         .returning();
-      return updated[0]!;
+      return expectReturnedRow(updated, 'UI standard update');
     }
 
     const inserted = await this.db
@@ -168,7 +184,7 @@ export class UiGovernanceService {
       })
       .returning();
 
-    return inserted[0]!;
+    return expectReturnedRow(inserted, 'UI standard insert');
   }
 
   async listThemeTokens(standardId: string) {
@@ -207,7 +223,7 @@ export class UiGovernanceService {
           })
           .where(eq(schema.themeTokens.id, found.id))
           .returning();
-        inserted.push(updated[0]!);
+        inserted.push(expectReturnedRow(updated, 'theme token update'));
       } else {
         const created = await this.db
           .insert(schema.themeTokens)
@@ -223,7 +239,7 @@ export class UiGovernanceService {
             createdAt: now,
           })
           .returning();
-        inserted.push(created[0]!);
+        inserted.push(expectReturnedRow(created, 'theme token insert'));
       }
     }
     return inserted;
@@ -259,7 +275,7 @@ export class UiGovernanceService {
       })
       .returning();
 
-    return toComponentDefinition(inserted[0]!);
+    return toComponentDefinition(expectReturnedRow(inserted, 'component definition insert'));
   }
 
   async getComponentDefinition(componentId: string) {
@@ -299,7 +315,7 @@ export class UiGovernanceService {
       .where(eq(schema.componentDefinitions.id, componentId))
       .returning();
 
-    return toComponentDefinition(updated[0]!);
+    return toComponentDefinition(expectReturnedRow(updated, 'component definition update'));
   }
 
   async createComplianceRun(input: ComplianceRunCreateInput) {
@@ -316,7 +332,7 @@ export class UiGovernanceService {
       })
       .returning();
 
-    return inserted[0]!;
+    return expectReturnedRow(inserted, 'compliance run insert');
   }
 
   async getComplianceRun(runId: string) {
@@ -346,7 +362,7 @@ export class UiGovernanceService {
       })
       .returning();
 
-    return inserted[0]!;
+    return expectReturnedRow(inserted, 'exception request insert');
   }
 
   async createMigrationWorkItem(input: MigrationWorkItemCreateInput) {
@@ -368,7 +384,7 @@ export class UiGovernanceService {
       })
       .returning();
 
-    return inserted[0]!;
+    return expectReturnedRow(inserted, 'migration work item insert');
   }
 
   async updateMigrationWorkItem(
@@ -443,7 +459,7 @@ export class UiGovernanceService {
       })
       .returning();
 
-    return inserted[0]!;
+    return expectReturnedRow(inserted, 'checklist insert');
   }
 
   async getChecklist(standardId: string, version: string) {

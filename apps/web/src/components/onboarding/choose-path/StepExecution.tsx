@@ -3,11 +3,7 @@ import { Alert, Card } from '@simple-agent-manager/ui';
 import { Check, ChevronDown } from 'lucide-react';
 import { useCallback, useRef, useState } from 'react';
 
-import {
-  getGitHubInstallUrl,
-  listGitHubInstallations,
-  listRepositories,
-} from '../../../lib/api';
+import { getGitHubInstallUrl, listGitHubInstallations, listRepositories } from '../../../lib/api';
 import { createProject } from '../../../lib/api/projects';
 import type { GeneratedStep } from './path-generator';
 import { executeStep, INITIAL_FORM, type StepFormState } from './step-actions';
@@ -49,7 +45,7 @@ export function StepExecution({ steps, onComplete }: StepExecutionProps) {
   // Focus step heading via ref callback — React re-invokes when currentStepIndex changes
   const stepHeadingRef = useCallback(
     (el: HTMLHeadingElement | null) => el?.focus(),
-    [currentStepIndex] // eslint-disable-line react-hooks/exhaustive-deps
+    [currentStepIndex] // eslint-disable-line react-hooks/exhaustive-deps -- currentStepIndex is intentionally unused in the body; it exists only to change this callback's identity so React detaches/reattaches the ref (and thus re-focuses) on every step transition
   );
 
   // Cleanup ref callback — abort in-flight requests and clear timers when root element unmounts
@@ -109,8 +105,14 @@ export function StepExecution({ steps, onComplete }: StepExecutionProps) {
   /* ─── GitHub App installation (opens tab, polls for completion) ─── */
 
   const clearGitHubTimers = useCallback(() => {
-    if (githubPollRef.current) { clearInterval(githubPollRef.current); githubPollRef.current = null; }
-    if (githubTimeoutRef.current) { clearTimeout(githubTimeoutRef.current); githubTimeoutRef.current = null; }
+    if (githubPollRef.current) {
+      clearInterval(githubPollRef.current);
+      githubPollRef.current = null;
+    }
+    if (githubTimeoutRef.current) {
+      clearTimeout(githubTimeoutRef.current);
+      githubTimeoutRef.current = null;
+    }
   }, []);
 
   const handleGitHubInstall = useCallback(async () => {
@@ -146,7 +148,9 @@ export function StepExecution({ steps, onComplete }: StepExecutionProps) {
       githubTimeoutRef.current = setTimeout(() => {
         clearGitHubTimers();
         setLoading(false);
-        setError('Installation not detected. If you completed the installation, click the button to try again.');
+        setError(
+          'Installation not detected. If you completed the installation, click the button to try again.'
+        );
       }, GITHUB_POLL_TIMEOUT_MS);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to get install URL');
@@ -196,7 +200,10 @@ export function StepExecution({ steps, onComplete }: StepExecutionProps) {
     try {
       const installations = await listGitHubInstallations();
       if (abortRef.current.signal.aborted) return;
-      if (installations.length === 0) { setRepos([]); return; }
+      if (installations.length === 0) {
+        setRepos([]);
+        return;
+      }
 
       const allRepos = await Promise.all(
         installations.map((inst) => listRepositories(inst.id).then((r) => r.repositories))
@@ -228,7 +235,11 @@ export function StepExecution({ steps, onComplete }: StepExecutionProps) {
           <div className="w-7 h-7 rounded-full bg-accent/20 flex items-center justify-center text-xs font-bold text-accent">
             {currentStepIndex + 1}
           </div>
-          <h3 ref={stepHeadingRef} tabIndex={-1} className="text-lg font-semibold text-fg-primary outline-none">
+          <h3
+            ref={stepHeadingRef}
+            tabIndex={-1}
+            className="text-lg font-semibold text-fg-primary outline-none"
+          >
             {step.title}
           </h3>
         </div>
@@ -236,7 +247,9 @@ export function StepExecution({ steps, onComplete }: StepExecutionProps) {
 
         {error && (
           <div className="mb-4 sm:ml-9">
-            <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
+            <Alert variant="error" onDismiss={() => setError(null)}>
+              {error}
+            </Alert>
           </div>
         )}
 
@@ -264,9 +277,7 @@ export function StepExecution({ steps, onComplete }: StepExecutionProps) {
         />
       </Card>
 
-      {!isLast && (
-        <UpcomingSteps steps={steps} currentStepIndex={currentStepIndex} />
-      )}
+      {!isLast && <UpcomingSteps steps={steps} currentStepIndex={currentStepIndex} />}
     </div>
   );
 }
@@ -372,7 +383,10 @@ function UpcomingSteps({
     <div className="flex flex-col gap-1.5">
       <p className="text-xs text-fg-muted uppercase tracking-wide font-medium">Coming up</p>
       {steps.slice(currentStepIndex + 1).map((s, i) => (
-        <div key={s.id} className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-fg-muted">
+        <div
+          key={s.id}
+          className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-fg-muted"
+        >
           <div className="w-5 h-5 rounded-full bg-accent/5 flex items-center justify-center text-xs">
             {currentStepIndex + 2 + i}
           </div>

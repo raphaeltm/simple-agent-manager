@@ -23,6 +23,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { readResponseJson } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import { buildWorkersAIGatewayUrl } from './ai-proxy-shared';
 import {
@@ -30,6 +31,7 @@ import {
   getFeatureTokenBudget,
   releaseFeatureTokenBudget,
 } from './ai-token-budget';
+import { completionSchema, parseDebugToolArgs } from './debug-agent-parsing';
 import { getDiagnosticIncidentByErrorId } from './diagnostic-incidents';
 import {
   getErrorTrends,
@@ -354,12 +356,7 @@ export async function executeTool(
       const hours = (window.endMs - window.startMs) / 3_600_000;
       result = await getErrorTrends(env.OBSERVABILITY_DATABASE, hours <= 1 ? '1h' : '24h');
     } else if (call.function.name === 'query_cloudflare_logs') {
-      let args: { search?: string; levels?: string[] } = {};
-      try {
-        args = JSON.parse(call.function.arguments) as typeof args;
-      } catch {
-        /* bounded defaults */
-      }
+      const args = parseDebugToolArgs(call.function.arguments);
       result = await queryCloudflareLogs({
         cfApiToken: env.CF_API_TOKEN,
         cfAccountId: env.CF_ACCOUNT_ID,
@@ -428,7 +425,7 @@ export async function complete(
     if (!response.ok) {
       throw new Error(`Debugging model request failed with HTTP ${response.status}`);
     }
-    return (await response.json()) as Completion;
+    return await readResponseJson(response, completionSchema, 'debug-agent.completion');
   } finally {
     clearTimeout(timer);
   }

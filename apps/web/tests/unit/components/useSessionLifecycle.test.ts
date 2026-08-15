@@ -20,6 +20,8 @@ const mocks = vi.hoisted(() => ({
   sendFollowUpPrompt: vi.fn(),
   cancelAgentPrompt: vi.fn(),
   uploadSessionFiles: vi.fn(),
+  startVerifyDecayTimer: vi.fn(),
+  stopVerifyDecayTimer: vi.fn(),
   connectionState: 'connected' as 'connected' | 'disconnected',
 }));
 
@@ -50,7 +52,10 @@ vi.mock('../../../src/hooks/useWorkspacePorts', () => ({
   useWorkspacePorts: () => ({ ports: [] }),
 }));
 vi.mock('../../../src/components/project-message-view/useActivityVerifyTimer', () => ({
-  useActivityVerifyTimer: () => ({ startVerifyDecayTimer: vi.fn(), stopVerifyDecayTimer: vi.fn() }),
+  useActivityVerifyTimer: () => ({
+    startVerifyDecayTimer: mocks.startVerifyDecayTimer,
+    stopVerifyDecayTimer: mocks.stopVerifyDecayTimer,
+  }),
 }));
 vi.mock('../../../src/components/project-message-view/useConnectionRecovery', () => ({
   useConnectionRecovery: () => ({
@@ -162,6 +167,52 @@ describe('useSessionLifecycle loading semantics', () => {
     await waitFor(() => expect(result.current.session?.status).toBe('active'));
 
     await waitFor(() => expect(result.current.currentPlan).toEqual(plan));
+  });
+
+  it('keeps the wake indicator active while sleeping polls still report stale idle state', async () => {
+    const sleeping = detail([msg('a', 1000)], false, 'sleeping');
+    mocks.getChatSession.mockResolvedValue(sleeping);
+    mocks.sendFollowUpPrompt.mockResolvedValue({ accepted: true, status: 'queued' });
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false));
+
+    await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
+    act(() => result.current.setFollowUp('Wake and continue'));
+    act(() => {
+      void result.current.handleSendFollowUp();
+    });
+
+    await waitFor(() => expect(mocks.sendFollowUpPrompt).toHaveBeenCalled());
+    await waitFor(() => expect(mocks.getChatSession.mock.calls.length).toBeGreaterThan(2));
+    expect(result.current.agentActivity).toBe('prompting');
+  });
+
+  it('returns a failed wake attempt to a retryable sleeping state', async () => {
+    const sleeping = detail([msg('a', 1000)], false, 'sleeping');
+    const failedWake = {
+      ...sleeping,
+      session: {
+        ...sleeping.session,
+        task: {
+          id: 'recovery-task-1',
+          status: 'failed' as const,
+        },
+      },
+    };
+    let recoveryFailed = false;
+    mocks.getChatSession.mockImplementation(async () => (recoveryFailed ? failedWake : sleeping));
+    mocks.sendFollowUpPrompt.mockResolvedValue({ accepted: true, status: 'queued' });
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false));
+
+    await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
+    act(() => result.current.setFollowUp('Wake and continue'));
+    act(() => {
+      void result.current.handleSendFollowUp();
+    });
+
+    await waitFor(() => expect(result.current.agentActivity).toBe('prompting'));
+    recoveryFailed = true;
+    await waitFor(() => expect(result.current.agentActivity).toBe('idle'));
+    expect(result.current.sessionState).toBe('sleeping');
   });
 
   describe('loadUntil', () => {

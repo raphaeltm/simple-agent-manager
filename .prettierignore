@@ -3,6 +3,11 @@ dist/
 build/
 coverage/
 .turbo/
+.cache/
+apps/www/.astro/
+apps/www/public/scripts/blog-mermaid.js
+apps/www/public/scripts/docs-mermaid.js
+apps/www/public/scripts/tracker.js
 package-lock.json
 yarn.lock
 pnpm-lock.yaml

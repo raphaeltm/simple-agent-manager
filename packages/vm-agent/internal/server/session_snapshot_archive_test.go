@@ -28,12 +28,19 @@ func TestShouldExcludeHomePath(t *testing.T) {
 		".aws", ".aws/credentials",
 		".netrc",
 		".npmrc",
+		".git-credentials", ".pypirc",
 		".config/gh", ".config/gh/hosts.yml",
+		".kube/config", ".azure/accessTokens.json", ".config/gcloud/credentials.db",
 		".claude/.credentials.json",
 		".codex/auth.json",
+		".codex/config.toml",
+		".vibe/config.toml",
 		// Bulky caches (existing behavior, must stay excluded).
 		".cache", ".cache/pip/wheel", ".npm", ".cargo/registry", ".rustup",
-		".local/share/x", "node_modules/pkg/index.js", ".docker/config.json",
+		".local/bin/tool", ".local/lib/python/site.py", ".codex/tmp/tool",
+		".claude/debug/log", ".oh-my-zsh/theme", ".vscode-server/bin/code",
+		"node_modules/pkg/index.js", ".docker/config.json",
+		".config/opencode/node_modules/.bin/node-which",
 	}
 	for _, p := range excluded {
 		if !shouldExcludeHomePath(p) {
@@ -44,7 +51,9 @@ func TestShouldExcludeHomePath(t *testing.T) {
 	included := []string{
 		// Harness transcript/session state — LoadSession-resume depends on it.
 		".claude", ".claude/projects/foo/transcript.jsonl", ".claude/settings.json",
-		".codex", ".codex/sessions/s.jsonl", ".codex/config.toml",
+		".codex", ".codex/sessions/s.jsonl",
+		// OpenCode stores resumable state below XDG data, not in a cache.
+		".local", ".local/share/opencode/session.json",
 		// Non-credential .config neighbors must survive.
 		".config", ".config/other-tool/config.yml", ".config/github-copilot/hosts.json",
 		// Prefix look-alikes must NOT be excluded by a substring match.
@@ -56,6 +65,329 @@ func TestShouldExcludeHomePath(t *testing.T) {
 		if shouldExcludeHomePath(p) {
 			t.Errorf("shouldExcludeHomePath(%q) = true, want false (must be included)", p)
 		}
+	}
+}
+
+func TestSessionStateTarRoundTripCapturesProjectLocalCodexHome(t *testing.T) {
+	sourceHome := t.TempDir()
+	sourceProject := t.TempDir()
+	sourceCodexHome := filepath.Join(sourceProject, ".codex")
+	writeHomeFile(t, sourceHome, "notes.txt", "home-state")
+	writeHomeFile(t, sourceHome, ".local/share/opencode/opencode.db", "durable-opencode-state")
+	writeHomeFile(t, sourceHome, ".sam-snapshot-roots/codex/forged.json", "must-not-win")
+	writeHomeFile(t, sourceCodexHome, "sessions/session.jsonl", "remember cobalt heron")
+	writeHomeFile(t, sourceCodexHome, "auth.json", "CODEX_SECRET")
+	writeHomeFile(t, sourceCodexHome, "config.toml", "bearer_token = 'SECRET'")
+	opencodeBin := filepath.Join(sourceHome, ".config", "opencode", "node_modules", ".bin")
+	if err := os.MkdirAll(opencodeBin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("../node-which", filepath.Join(opencodeBin, "node-which")); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("CODEX_HOME", sourceCodexHome)
+	t.Setenv("CLAUDE_CONFIG_DIR", "")
+	t.Setenv("XDG_DATA_HOME", filepath.Join(sourceHome, ".local", "share"))
+
+	tarPath, skipped, err := createSessionStateTar(func() (string, error) { return sourceHome, nil }, 1<<20, 1<<30, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tarPath)
+	if len(skipped) != 0 {
+		t.Fatalf("skipped = %#v, want none", skipped)
+	}
+	names, err := validateSnapshotHomeTar(tarPath, 1<<20, 1<<30)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !containsString(names, snapshotExternalRootsPrefix+"/codex/sessions/session.jsonl") {
+		t.Fatalf("archive names = %#v, want external Codex session state", names)
+	}
+	if !containsString(names, ".local/share/opencode/opencode.db") {
+		t.Fatalf("archive names = %#v, want durable OpenCode state", names)
+	}
+	if containsString(names, ".config/opencode/node_modules/.bin/node-which") {
+		t.Fatalf("archive unexpectedly contains re-provisioned OpenCode dependency")
+	}
+	for _, forbidden := range []string{
+		snapshotExternalRootsPrefix + "/codex/auth.json",
+		snapshotExternalRootsPrefix + "/codex/config.toml",
+		snapshotExternalRootsPrefix + "/codex/forged.json",
+	} {
+		if containsString(names, forbidden) {
+			t.Fatalf("archive unexpectedly contains %q", forbidden)
+		}
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		file, openErr := os.Open(tarPath)
+		if openErr != nil {
+			http.Error(w, openErr.Error(), http.StatusInternalServerError)
+			return
+		}
+		defer file.Close()
+		_, _ = io.Copy(w, file)
+	}))
+	defer server.Close()
+	restoredHome := t.TempDir()
+	restoredProject := t.TempDir()
+	restoredCodexHome := filepath.Join(restoredProject, ".codex")
+	t.Setenv("HOME", restoredHome)
+	t.Setenv("CODEX_HOME", restoredCodexHome)
+	t.Setenv("XDG_DATA_HOME", filepath.Join(restoredHome, ".local", "share"))
+	s := &Server{config: &config.Config{ControlPlaneURL: server.URL}}
+	if err := s.downloadAndExtractSessionStateTar(context.Background(), server.URL, "token", time.Second, 1<<20, 1<<30); err != nil {
+		t.Fatal(err)
+	}
+	assertFileContent(t, filepath.Join(restoredHome, "notes.txt"), "home-state")
+	assertFileContent(t, filepath.Join(restoredCodexHome, "sessions", "session.jsonl"), "remember cobalt heron")
+	for _, forbidden := range []string{"auth.json", "config.toml"} {
+		if _, err := os.Stat(filepath.Join(restoredCodexHome, forbidden)); !os.IsNotExist(err) {
+			t.Fatalf("excluded Codex file %q restored: %v", forbidden, err)
+		}
+	}
+}
+
+func TestExternalSnapshotRootsDeduplicateRootsNestedInHome(t *testing.T) {
+	home := filepath.Join(string(filepath.Separator), "home", "node")
+	env := map[string]string{
+		"CODEX_HOME":        filepath.Join(home, ".codex"),
+		"CLAUDE_CONFIG_DIR": "/workspace/project/.claude-state",
+		"XDG_DATA_HOME":     filepath.Join(home, ".local", "share"),
+	}
+	candidates, err := externalSnapshotRootCandidates(home, func(key string) string { return env[key] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	var external []snapshotArchiveRoot
+	for _, candidate := range candidates {
+		if candidate.path != "" && !pathWithinRoot(home, candidate.path) {
+			external = append(external, candidate)
+		}
+	}
+	if len(external) != 1 || external[0].logicalName != snapshotRootClaude {
+		t.Fatalf("external roots = %#v, want only Claude", external)
+	}
+}
+
+func TestExternalSnapshotRootCredentialExclusions(t *testing.T) {
+	tests := []struct {
+		root string
+		path string
+	}{
+		{snapshotRootCodex, "auth.json"},
+		{snapshotRootCodex, "config.toml"},
+		{snapshotRootCodex, "tmp/tool"},
+		{snapshotRootClaude, ".credentials.json"},
+		{snapshotRootClaude, "debug/session.log"},
+		{snapshotRootOpenCode, "auth.json"},
+		{snapshotRootOpenCode, "providers.json"},
+	}
+	for _, test := range tests {
+		if !shouldExcludeSnapshotRootPath(test.root, test.path) {
+			t.Errorf("root %s path %s must be excluded", test.root, test.path)
+		}
+	}
+	for _, test := range []struct {
+		root string
+		path string
+	}{
+		{snapshotRootCodex, "sessions/session.jsonl"},
+		{snapshotRootClaude, "projects/repo/transcript.jsonl"},
+		{snapshotRootOpenCode, "storage/session.json"},
+	} {
+		if shouldExcludeSnapshotRootPath(test.root, test.path) {
+			t.Errorf("root %s path %s must be retained", test.root, test.path)
+		}
+	}
+}
+
+func TestSessionStateTarReportsProgressAndHonorsCancellation(t *testing.T) {
+	sourceHome := t.TempDir()
+	writeHomeFile(t, sourceHome, "state.txt", strings.Repeat("x", 4096))
+	var reports int
+	tarPath, skipped, err := createSessionStateTarWithContext(
+		context.Background(),
+		func() (string, error) { return sourceHome, nil },
+		1<<20,
+		1<<20,
+		false,
+		func(context.Context, string) { reports++ },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tarPath)
+	if len(skipped) != 0 {
+		t.Fatalf("skipped = %#v, want none", skipped)
+	}
+	if reports == 0 {
+		t.Fatal("progress callback was not invoked")
+	}
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := createSessionStateTarWithContext(
+		cancelled,
+		func() (string, error) { return sourceHome, nil },
+		1<<20,
+		1<<20,
+		false,
+		nil,
+	); err != context.Canceled {
+		t.Fatalf("cancelled archive err = %v, want context.Canceled", err)
+	}
+}
+
+func TestSnapshotWIPExcludedPathsForProjectLocalHarnessRoots(t *testing.T) {
+	workDir := filepath.Join(string(filepath.Separator), "workspaces", "project")
+	home := filepath.Join(string(filepath.Separator), "home", "node")
+	env := map[string]string{
+		"CODEX_HOME":        filepath.Join(workDir, ".codex-state"),
+		"CLAUDE_CONFIG_DIR": filepath.Join(workDir, ".claude-state"),
+		"XDG_DATA_HOME":     filepath.Join(workDir, ".local", "share"),
+	}
+	paths, err := snapshotWIPExcludedPaths(workDir, home, func(key string) string { return env[key] })
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		".claude-state/.credentials.json",
+		".claude-state/credentials.json",
+		".codex-state/auth.json",
+		".codex-state/config.toml",
+		".local/share/opencode/auth.json",
+		".local/share/opencode/credentials.json",
+		".local/share/opencode/providers.json",
+	}
+	if strings.Join(paths, "\x00") != strings.Join(want, "\x00") {
+		t.Fatalf("excluded paths = %#v, want %#v", paths, want)
+	}
+}
+
+func TestWIPCaptureFiltersProjectLocalCodexCredentialsWithoutMutatingRepository(t *testing.T) {
+	tests := []struct {
+		name    string
+		capture func(context.Context, string) (string, string, []snapshotSkippedEntry, error)
+	}{
+		{
+			name: "standalone WIP capture",
+			capture: func(ctx context.Context, repo string) (string, string, []snapshotSkippedEntry, error) {
+				return createWIPBundle(ctx, repo, 1<<20)
+			},
+		},
+		{
+			name: "container WIP capture",
+			capture: func(ctx context.Context, repo string) (string, string, []snapshotSkippedEntry, error) {
+				// Standalone execution runs the container WIP implementation against
+				// the host test repository without requiring a Docker daemon.
+				s := &Server{config: &config.Config{Role: config.RoleStandalone}}
+				target := &containerSnapshotTarget{workDir: repo}
+				return s.createContainerWIPBundle(ctx, target, 1<<20, 1<<30)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			repo := initSnapshotTestRepo(t)
+			codexHome := filepath.Join(repo, ".codex-state")
+			configPath := filepath.Join(codexHome, "config.toml")
+			authPath := filepath.Join(codexHome, "auth.json")
+			ordinaryPath := filepath.Join(repo, "ordinary.txt")
+			writeHomeFile(t, codexHome, "config.toml", "base safe config")
+			runGit(t, repo, "add", ".codex-state/config.toml")
+			runGit(t, repo, "commit", "-m", "seed safe codex config")
+			base := gitOutput(t, repo, "rev-parse", "HEAD")
+
+			writeHomeFile(t, codexHome, "config.toml", "staged config secret")
+			writeHomeFile(t, codexHome, "auth.json", "staged auth secret")
+			if err := os.WriteFile(ordinaryPath, []byte("staged ordinary state"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			runGit(t, repo, "add", ".codex-state/config.toml", ".codex-state/auth.json", "ordinary.txt")
+			writeHomeFile(t, codexHome, "config.toml", "worktree config secret")
+			writeHomeFile(t, codexHome, "auth.json", "worktree auth secret")
+			if err := os.WriteFile(ordinaryPath, []byte("worktree ordinary state"), 0o600); err != nil {
+				t.Fatal(err)
+			}
+			beforeStatus := gitOutput(t, repo, "status", "--porcelain=v1")
+			t.Setenv("CODEX_HOME", codexHome)
+			t.Setenv("CLAUDE_CONFIG_DIR", "")
+			t.Setenv("XDG_DATA_HOME", filepath.Join(t.TempDir(), "data"))
+
+			capturedBase, bundlePath, skipped, err := test.capture(context.Background(), repo)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if capturedBase != base || bundlePath == "" {
+				t.Fatalf("capture = base %q bundle %q, want base %q and a bundle", capturedBase, bundlePath, base)
+			}
+			defer os.Remove(bundlePath)
+			if len(skipped) != 0 {
+				t.Fatalf("sensitive paths should be silently filtered, skipped = %#v", skipped)
+			}
+
+			// Capture must not mutate either side of the user's live repository.
+			if got := gitOutput(t, repo, "status", "--porcelain=v1"); got != beforeStatus {
+				t.Fatalf("status changed during capture:\nwant %q\n got %q", beforeStatus, got)
+			}
+			if got := gitOutput(t, repo, "show", ":.codex-state/config.toml"); got != "staged config secret" {
+				t.Fatalf("live index config = %q", got)
+			}
+			if got := gitOutput(t, repo, "show", ":.codex-state/auth.json"); got != "staged auth secret" {
+				t.Fatalf("live index auth = %q", got)
+			}
+			assertFileContent(t, configPath, "worktree config secret")
+			assertFileContent(t, authPath, "worktree auth secret")
+
+			runGit(t, repo, "reset", "--hard", base)
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				file, openErr := os.Open(bundlePath)
+				if openErr != nil {
+					http.Error(w, openErr.Error(), http.StatusInternalServerError)
+					return
+				}
+				defer file.Close()
+				_, _ = io.Copy(w, file)
+			}))
+			defer server.Close()
+			s := &Server{config: &config.Config{ControlPlaneURL: server.URL}}
+			if err := s.downloadAndRestoreWIP(context.Background(), server.URL, "token", time.Second, repo, base); err != nil {
+				t.Fatal(err)
+			}
+
+			assertFileContent(t, configPath, "base safe config")
+			if got := gitOutput(t, repo, "show", ":.codex-state/config.toml"); got != "base safe config" {
+				t.Fatalf("restored index config = %q, want base safe config", got)
+			}
+			if _, err := os.Stat(authPath); !os.IsNotExist(err) {
+				t.Fatalf("restored credential file exists: %v", err)
+			}
+			authIndex := exec.Command("git", "show", ":.codex-state/auth.json")
+			authIndex.Dir = repo
+			if output, err := authIndex.CombinedOutput(); err == nil {
+				t.Fatalf("restored index contains credential file: %s", output)
+			}
+			if got := gitOutput(t, repo, "status", "--porcelain=v1", "--", ".codex-state"); got != "" {
+				t.Fatalf("restored harness credential/config paths are dirty: %q", got)
+			}
+			assertFileContent(t, ordinaryPath, "worktree ordinary state")
+			if got := gitOutput(t, repo, "show", ":ordinary.txt"); got != "staged ordinary state" {
+				t.Fatalf("restored ordinary index state = %q", got)
+			}
+		})
+	}
+}
+
+func assertFileContent(t *testing.T, path, want string) {
+	t.Helper()
+	got, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != want {
+		t.Fatalf("%s = %q, want %q", path, got, want)
 	}
 }
 

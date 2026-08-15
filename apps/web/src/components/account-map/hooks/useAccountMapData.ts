@@ -1,7 +1,7 @@
-import type { Edge,Node } from '@xyflow/react';
-import { useCallback, useEffect, useMemo,useState } from 'react';
+import type { Edge, Node } from '@xyflow/react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
-import { type AccountMapResponse,getAccountMap } from '../../../lib/api';
+import { type AccountMapResponse, getAccountMap } from '../../../lib/api';
 import { applyDagreLayout } from '../layout/dagre-layout';
 
 /** Edge color mapping by relationship type */
@@ -32,7 +32,10 @@ interface UseAccountMapDataResult {
   reorganize: () => void;
 }
 
-export function useAccountMapData({ isMobile, activeOnly }: UseAccountMapDataOptions): UseAccountMapDataResult {
+export function useAccountMapData({
+  isMobile,
+  activeOnly,
+}: UseAccountMapDataOptions): UseAccountMapDataResult {
   const [rawData, setRawData] = useState<AccountMapResponse | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -210,7 +213,6 @@ export function useAccountMapData({ isMobile, activeOnly }: UseAccountMapDataOpt
       },
       isEmpty: totalEntities === 0,
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rawData, isMobile, layoutKey]);
 
   const reorganize = useCallback(() => {

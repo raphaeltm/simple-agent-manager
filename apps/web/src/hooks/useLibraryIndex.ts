@@ -67,7 +67,7 @@ function stripPreview(file: FileWithTags): CachedIndexFile {
 
 export function useLibraryIndex(
   projectId: string,
-  cacheNamespace?: string | null,
+  cacheNamespace?: string | null
 ): UseLibraryIndexResult {
   const cap = resolveCap();
   const maxSweepPages = resolveMaxSweepPages();
@@ -166,7 +166,6 @@ export function useLibraryIndex(
     };
     // Sweep ONLY on project change or explicit invalidation — never on
     // directory navigation, search, or sort.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, cacheNamespace, invalidationToken]);
 
   const index = useMemo(() => buildIndex(files), [files]);

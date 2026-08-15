@@ -10,7 +10,13 @@ import {
   YAxis,
 } from 'recharts';
 
-import { adminChartSeries, chartAxisStroke, chartGridStroke, chartTick, chartTooltipStyle } from './chartTokens';
+import {
+  adminChartSeries,
+  chartAxisStroke,
+  chartGridStroke,
+  chartTick,
+  chartTooltipStyle,
+} from './chartTokens';
 
 /** Format date for X-axis ticks — "Mar 5" style. */
 function formatDateTick(dateStr: string): string {
@@ -20,13 +26,22 @@ function formatDateTick(dateStr: string): string {
 }
 
 /** Custom tooltip for DAU chart. */
-function DauTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ value: number }>; label?: string }) {
-  if (!active || !payload?.length) return null;
+function DauTooltip({
+  active,
+  payload,
+  label,
+}: {
+  active?: boolean;
+  payload?: Array<{ value: number }>;
+  label?: string;
+}) {
+  const point = payload?.[0];
+  if (!active || !point) return null;
   return (
     <div className="rounded-md px-3 py-2 shadow-lg text-sm" style={chartTooltipStyle}>
       <div className="text-fg-muted text-xs">{label ? formatDateTick(label) : ''}</div>
       <div className="text-fg-primary font-semibold tabular-nums">
-        {payload[0]!.value.toLocaleString()} users
+        {point.value.toLocaleString()} users
       </div>
     </div>
   );
@@ -37,7 +52,11 @@ export const DauChart: FC<{ data: Array<{ date: string; unique_users: number }> 
   const safeGradientId = `dauGradient-${gradientId.replace(/:/g, '')}`;
 
   if (!data.length) {
-    return <Body className="text-fg-muted">No DAU data available yet. Data will appear after users sign in.</Body>;
+    return (
+      <Body className="text-fg-muted">
+        No DAU data available yet. Data will appear after users sign in.
+      </Body>
+    );
   }
 
   return (
@@ -60,12 +79,7 @@ export const DauChart: FC<{ data: Array<{ date: string; unique_users: number }> 
             interval="preserveStartEnd"
             minTickGap={50}
           />
-          <YAxis
-            tick={chartTick}
-            axisLine={false}
-            tickLine={false}
-            allowDecimals={false}
-          />
+          <YAxis tick={chartTick} axisLine={false} tickLine={false} allowDecimals={false} />
           <Tooltip content={<DauTooltip />} />
           <Area
             type="monotone"
@@ -74,7 +88,12 @@ export const DauChart: FC<{ data: Array<{ date: string; unique_users: number }> 
             strokeWidth={2}
             fill={`url(#${safeGradientId})`}
             dot={false}
-            activeDot={{ r: 4, stroke: adminChartSeries[0], strokeWidth: 2, fill: 'var(--sam-color-bg-surface)' }}
+            activeDot={{
+              r: 4,
+              stroke: adminChartSeries[0],
+              strokeWidth: 2,
+              fill: 'var(--sam-color-bg-surface)',
+            }}
           />
         </AreaChart>
       </ResponsiveContainer>

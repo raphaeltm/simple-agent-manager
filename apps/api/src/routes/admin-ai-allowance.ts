@@ -6,17 +6,34 @@
  *
  * Mounts at /api/admin/ai-allowance (registered in index.ts).
  */
-import type { AdminAiAllowance, AdminAiAllowanceResponse, UpdateAdminAiAllowanceRequest } from '@simple-agent-manager/shared';
+import type {
+  AdminAiAllowance,
+  AdminAiAllowanceResponse,
+  UpdateAdminAiAllowanceRequest,
+} from '@simple-agent-manager/shared';
 import { AI_ADMIN_ALLOWANCE_KV_PREFIX } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { getUserId, requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { jsonValidator } from '../schemas';
 import { getAiBudgetLimits } from '../services/ai-token-budget';
+
+// Fields are validated loosely (v.unknown()) so the handler's existing manual
+// checks below — which produce specific error messages — remain in control of
+// the accepted domain (e.g. "must be a non-negative number or null").
+const UpdateAdminAiAllowanceBodySchema = v.object({
+  maxDailyInputTokens: v.optional(v.unknown()),
+  maxDailyOutputTokens: v.optional(v.unknown()),
+  maxMonthlyCostCapUsd: v.optional(v.unknown()),
+  allowedModelTiers: v.optional(v.unknown()),
+});
+type UpdateAdminAiAllowanceBody = v.InferOutput<typeof UpdateAdminAiAllowanceBodySchema>;
 
 const adminAiAllowanceRoutes = new Hono<{ Bindings: Env }>();
 
@@ -35,7 +52,7 @@ async function getAllowance(kv: KVNamespace, userId: string): Promise<AdminAiAll
 /** Resolve effective ceilings: admin allowance → platform defaults. */
 function resolveEffectiveCeiling(
   allowance: AdminAiAllowance | null,
-  env: Env,
+  env: Env
 ): AdminAiAllowanceResponse['effectiveCeiling'] {
   const { maxDailyTokens, maxMonthlyCostCapUsd } = getAiBudgetLimits(env);
 
@@ -59,8 +76,8 @@ async function requireUserExists(db: ReturnType<typeof drizzle>, userId: string)
 }
 
 function validateNullableNumber(
-  body: UpdateAdminAiAllowanceRequest,
-  field: 'maxDailyInputTokens' | 'maxDailyOutputTokens' | 'maxMonthlyCostCapUsd',
+  body: UpdateAdminAiAllowanceBody,
+  field: 'maxDailyInputTokens' | 'maxDailyOutputTokens' | 'maxMonthlyCostCapUsd'
 ): void {
   const value = body[field];
   if (value === undefined || value === null) return;
@@ -69,7 +86,7 @@ function validateNullableNumber(
   }
 }
 
-function validateAllowanceBody(body: UpdateAdminAiAllowanceRequest): void {
+function validateAllowanceBody(body: UpdateAdminAiAllowanceBody): void {
   validateNullableNumber(body, 'maxDailyInputTokens');
   validateNullableNumber(body, 'maxDailyOutputTokens');
   validateNullableNumber(body, 'maxMonthlyCostCapUsd');
@@ -82,9 +99,9 @@ function validateAllowanceBody(body: UpdateAdminAiAllowanceRequest): void {
 }
 
 function pickAllowanceValue<T extends keyof UpdateAdminAiAllowanceRequest>(
-  body: UpdateAdminAiAllowanceRequest,
+  body: UpdateAdminAiAllowanceBody,
   existing: AdminAiAllowance | null,
-  field: T,
+  field: T
 ): AdminAiAllowance[T] {
   const incoming = body[field];
   if (incoming !== undefined) return (incoming ?? null) as AdminAiAllowance[T];
@@ -92,9 +109,9 @@ function pickAllowanceValue<T extends keyof UpdateAdminAiAllowanceRequest>(
 }
 
 function buildAllowance(
-  body: UpdateAdminAiAllowanceRequest,
+  body: UpdateAdminAiAllowanceBody,
   existing: AdminAiAllowance | null,
-  adminUserId: string,
+  adminUserId: string
 ): AdminAiAllowance {
   return {
     maxDailyInputTokens: pickAllowanceValue(body, existing, 'maxDailyInputTokens'),
@@ -109,7 +126,7 @@ function buildAllowance(
 function toResponse(
   userId: string,
   allowance: AdminAiAllowance | null,
-  env: Env,
+  env: Env
 ): AdminAiAllowanceResponse {
   return {
     userId,
@@ -135,21 +152,25 @@ adminAiAllowanceRoutes.get('/:userId', async (c) => {
  * PUT /api/admin/ai-allowance/:userId
  * Set or update admin-managed AI allowance for a user.
  */
-adminAiAllowanceRoutes.put('/:userId', async (c) => {
-  const adminUserId = getUserId(c);
-  const targetUserId = c.req.param('userId');
-  const db = drizzle(c.env.DATABASE, { schema });
-  await requireUserExists(db, targetUserId);
+adminAiAllowanceRoutes.put(
+  '/:userId',
+  jsonValidator(UpdateAdminAiAllowanceBodySchema),
+  async (c) => {
+    const adminUserId = getUserId(c);
+    const targetUserId = c.req.param('userId');
+    const db = drizzle(c.env.DATABASE, { schema });
+    await requireUserExists(db, targetUserId);
 
-  const body = await c.req.json<UpdateAdminAiAllowanceRequest>();
-  validateAllowanceBody(body);
+    const body = c.req.valid('json');
+    validateAllowanceBody(body);
 
-  const existing = await getAllowance(c.env.KV, targetUserId);
-  const allowance = buildAllowance(body, existing, adminUserId);
+    const existing = await getAllowance(c.env.KV, targetUserId);
+    const allowance = buildAllowance(body, existing, adminUserId);
 
-  await c.env.KV.put(buildAllowanceKey(targetUserId), JSON.stringify(allowance));
-  return c.json(toResponse(targetUserId, allowance, c.env));
-});
+    await c.env.KV.put(buildAllowanceKey(targetUserId), JSON.stringify(allowance));
+    return c.json(toResponse(targetUserId, allowance, c.env));
+  }
+);
 
 /**
  * DELETE /api/admin/ai-allowance/:userId

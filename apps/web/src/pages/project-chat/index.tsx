@@ -1,6 +1,6 @@
-import { Spinner } from '@simple-agent-manager/ui';
+import { Alert, Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown, ChevronRight, List, Search, Settings, X } from 'lucide-react';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 
 import { useAppShell } from '../../components/AppShell';
@@ -10,6 +10,7 @@ import { HierarchyModal } from '../../components/task-hierarchy';
 import { TriggerDropdown } from '../../components/triggers/TriggerDropdown';
 import { ZenPeekRail } from '../../components/ZenPeekRail';
 import { useIsMobile } from '../../hooks/useIsMobile';
+import { resolveAttentionAnswer } from '../../lib/api';
 import { sessionWidthForMode } from '../../lib/focus-mode';
 import { ChatInput } from './ChatInput';
 import { DerivedSessionBanner } from './DerivedSessionBanner';
@@ -28,6 +29,70 @@ export function ProjectChat() {
   const navigate = useNavigate();
   const state = useProjectChatState();
   const [triggerDropdownOpen, setTriggerDropdownOpen] = useState(false);
+  const [attentionAnswerStatus, setAttentionAnswerStatus] = useState<{
+    variant: 'success' | 'error';
+    message: string;
+  } | null>(null);
+  const [pendingAttentionAnswer, setPendingAttentionAnswer] = useState<{
+    markerId: string;
+    answer: string;
+  } | null>(null);
+  const processedAttentionAction = useRef<string | null>(null);
+  const { loadSessions, projectId, sessionId } = state;
+
+  const submitAttentionAnswer = useCallback(
+    async (markerId: string, answer: string) => {
+      if (!sessionId) return;
+      setAttentionAnswerStatus(null);
+      try {
+        const result = await resolveAttentionAnswer(projectId, sessionId, markerId, answer);
+        setPendingAttentionAnswer(null);
+        setAttentionAnswerStatus({
+          variant: 'success',
+          message: result.resolved ? `Answered: ${answer}` : `Answer is being sent: ${answer}`,
+        });
+        void loadSessions();
+      } catch (cause) {
+        setPendingAttentionAnswer({ markerId, answer });
+        setAttentionAnswerStatus({
+          variant: 'error',
+          message: cause instanceof Error ? cause.message : 'Could not send this answer',
+        });
+      }
+    },
+    [loadSessions, projectId, sessionId]
+  );
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const attentionHash = location.hash.startsWith('#attentionMarker=')
+      ? new URLSearchParams(location.hash.slice(1))
+      : null;
+    const markerId = attentionHash?.get('attentionMarker') ?? params.get('attentionMarker');
+    const answer = attentionHash?.get('attentionAnswer') ?? params.get('attentionAnswer');
+    if (!markerId || !answer || !sessionId) return;
+    const key = `${sessionId}:${markerId}:${answer}`;
+    if (processedAttentionAction.current === key) return;
+    processedAttentionAction.current = key;
+
+    params.delete('attentionMarker');
+    params.delete('attentionAnswer');
+    const nextSearch = params.toString();
+    const nextHash = attentionHash ? '' : location.hash;
+    navigate(`${location.pathname}${nextSearch ? `?${nextSearch}` : ''}${nextHash}`, {
+      replace: true,
+    });
+    void submitAttentionAnswer(markerId, answer).finally(() => {
+      processedAttentionAction.current = null;
+    });
+  }, [
+    location.hash,
+    location.pathname,
+    location.search,
+    navigate,
+    sessionId,
+    submitAttentionAnswer,
+  ]);
 
   // Derive hierarchy modal state from URL hash (#hierarchy-<taskId>)
   const hierarchyTaskId = useMemo(() => {
@@ -382,6 +447,31 @@ export function ProjectChat() {
         ) : (
           /* Active session view */
           <div className="flex-1 flex flex-col min-h-0">
+            {attentionAnswerStatus && (
+              <Alert
+                variant={attentionAnswerStatus.variant}
+                onDismiss={() => setAttentionAnswerStatus(null)}
+                className="m-3 mb-0"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <span>{attentionAnswerStatus.message}</span>
+                  {attentionAnswerStatus.variant === 'error' && pendingAttentionAnswer && (
+                    <button
+                      type="button"
+                      className="min-h-11 rounded-md border border-current px-3 py-2 text-sm font-medium"
+                      onClick={() =>
+                        void submitAttentionAnswer(
+                          pendingAttentionAnswer.markerId,
+                          pendingAttentionAnswer.answer
+                        )
+                      }
+                    >
+                      Retry answer
+                    </button>
+                  )}
+                </div>
+              </Alert>
+            )}
             {state.provisioning &&
               state.sessionId === state.provisioning.sessionId &&
               !isTerminal(state.provisioning.status) && (

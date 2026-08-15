@@ -48,8 +48,16 @@ export function ChoosePathWizard() {
 
   // H1 + H3: Escape closes the dialog; Tab is trapped within the overlay so
   // focus cannot escape to the hidden app UI behind it (WCAG 2.1.2 / 2.4.3).
+  // Attached at the document level (not a JSX onKeyDown prop) because this
+  // element's ARIA role is "dialog" — a non-interactive "window" role per
+  // aria-query — so jsx-a11y/no-noninteractive-element-interactions
+  // correctly rejects a keyboard handler on the element itself. Keydown
+  // events bubble to document from wherever the focus trap keeps focus (i.e.
+  // anywhere inside the overlay), so this is behaviorally identical to the
+  // previous onKeyDown prop. Same technique as ConfirmDialog's escape/tab-trap
+  // handler.
   const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLDivElement>) => {
+    (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         dismissOnboarding();
@@ -64,8 +72,9 @@ export function ChoosePathWizard() {
       ).filter((el) => el.offsetParent !== null);
       if (focusable.length === 0) return;
 
-      const first = focusable[0]!;
-      const last = focusable[focusable.length - 1]!;
+      const first = focusable.at(0);
+      const last = focusable.at(-1);
+      if (!first || !last) return;
       const active = document.activeElement;
 
       if (e.shiftKey) {
@@ -80,6 +89,12 @@ export function ChoosePathWizard() {
     },
     [dismissOnboarding]
   );
+
+  useEffect(() => {
+    if (!showOverlay) return;
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [showOverlay, handleKeyDown]);
 
   // Pre-populate tags from existing setup state
   useEffect(() => {
@@ -184,7 +199,6 @@ export function ChoosePathWizard() {
   return (
     <div
       ref={dialogRef}
-      onKeyDown={handleKeyDown}
       data-testid="onboarding-wizard"
       role="dialog"
       aria-label="Account setup"

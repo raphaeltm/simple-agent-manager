@@ -12,7 +12,6 @@
  * 5. Evaluate filters for each trigger
  * 6. For matching triggers, create execution records and submit tasks
  */
-import type { GitHubTriggerFilters } from '@simple-agent-manager/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
@@ -23,6 +22,7 @@ import { buildGitHubContext } from './github-trigger-context';
 import {
   evaluateFilters,
   type GitHubWebhookEvent,
+  parseGitHubTriggerFiltersJson,
   parseWebhookPayload,
 } from './github-trigger-filter';
 import { areGitHubTriggersConfigured } from './platform-config';
@@ -208,17 +208,19 @@ async function processTriggersForProject(
     // Check event type matches
     if (config.eventType !== event.event) continue;
 
-    // Parse filters
-    let filters: GitHubTriggerFilters;
-    try {
-      filters = JSON.parse(config.filtersJson) as GitHubTriggerFilters;
-    } catch {
+    // Parse filters. Untrusted (unparseable or wrong-shape) filters are treated
+    // as "cannot evaluate this trigger safely" rather than falling back to an
+    // empty "match everything" filter set — corrupted filter data must not
+    // cause a trigger to auto-fire that a valid config would have filtered out.
+    const parsedFilters = parseGitHubTriggerFiltersJson(config.filtersJson);
+    if (!parsedFilters.valid) {
       log.error('github_triggers.invalid_filters_json', {
         triggerId: trigger.id,
         filtersJson: config.filtersJson,
       });
       continue;
     }
+    const filters = parsedFilters.filters;
 
     // Evaluate filters
     const filterResult = evaluateFilters(event, filters);

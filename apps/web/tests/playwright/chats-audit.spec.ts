@@ -1,4 +1,4 @@
-import { expect, type Page, type Route,test } from '@playwright/test';
+import { expect, type Page, type Route, test } from '@playwright/test';
 
 // ---------------------------------------------------------------------------
 // Mock Data
@@ -60,16 +60,54 @@ function makeSession(overrides: SessionOverrides) {
 }
 
 const NORMAL_SESSIONS = [
-  makeSession({ id: 's1', topic: 'Fix authentication flow', status: 'active', lastMessageAt: NOW - 60000, projectId: 'proj-1', projectName: 'Backend API' }),
-  makeSession({ id: 's2', topic: 'Add user dashboard', status: 'active', agentCompletedAt: NOW - 300000, lastMessageAt: NOW - 300000, projectId: 'proj-1', projectName: 'Backend API' }),
-  makeSession({ id: 's3', topic: 'Refactor database layer', status: 'active', lastMessageAt: NOW - 600000, projectId: 'proj-2', projectName: 'Frontend App' }),
-  makeSession({ id: 's4', topic: null, status: 'active', lastMessageAt: NOW - 900000, projectId: 'proj-2', projectName: 'Frontend App' }),
+  makeSession({
+    id: 's1',
+    topic: 'Fix authentication flow',
+    status: 'active',
+    lastMessageAt: NOW - 60000,
+    projectId: 'proj-1',
+    projectName: 'Backend API',
+  }),
+  makeSession({
+    id: 's2',
+    topic: 'Add user dashboard',
+    status: 'active',
+    agentCompletedAt: NOW - 300000,
+    lastMessageAt: NOW - 300000,
+    projectId: 'proj-1',
+    projectName: 'Backend API',
+  }),
+  makeSession({
+    id: 's3',
+    topic: 'Refactor database layer',
+    status: 'active',
+    lastMessageAt: NOW - 600000,
+    projectId: 'proj-2',
+    projectName: 'Frontend App',
+  }),
+  makeSession({
+    id: 's4',
+    topic: null,
+    status: 'active',
+    lastMessageAt: NOW - 900000,
+    projectId: 'proj-2',
+    projectName: 'Frontend App',
+  }),
+  makeSession({
+    id: 's5',
+    topic: 'Sleeping session with retained state',
+    status: 'sleeping',
+    lastMessageAt: NOW - 6 * 24 * 60 * 60 * 1000,
+    projectId: 'proj-1',
+    projectName: 'Backend API',
+  }),
 ];
 
 const LONG_TEXT_SESSIONS = [
   makeSession({
     id: 'lt1',
-    topic: 'This is an extremely long chat topic that should definitely be truncated on mobile screens because it contains way too many words and characters to fit in a single line without breaking the layout or causing horizontal scroll issues on smaller viewports',
+    topic:
+      'This is an extremely long chat topic that should definitely be truncated on mobile screens because it contains way too many words and characters to fit in a single line without breaking the layout or causing horizontal scroll issues on smaller viewports',
     status: 'active',
     lastMessageAt: NOW - 60000,
     projectId: 'proj-1',
@@ -77,7 +115,8 @@ const LONG_TEXT_SESSIONS = [
   }),
   makeSession({
     id: 'lt2',
-    topic: 'Fix: handling of special characters like <script>alert("xss")</script> & "quotes" and 日本語テキスト',
+    topic:
+      'Fix: handling of special characters like <script>alert("xss")</script> & "quotes" and 日本語テキスト',
     status: 'active',
     agentCompletedAt: NOW - 120000,
     lastMessageAt: NOW - 120000,
@@ -115,7 +154,7 @@ async function setupApiMocks(
   options: {
     sessions?: ReturnType<typeof makeSession>[];
     error?: boolean;
-  },
+  }
 ) {
   await page.route('**/api/**', async (route: Route) => {
     const url = route.request().url();
@@ -170,7 +209,7 @@ async function screenshot(page: Page, name: string) {
 
 async function assertNoOverflow(page: Page) {
   const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth,
+    () => document.documentElement.scrollWidth > window.innerWidth
   );
   expect(overflow).toBe(false);
 }
@@ -184,6 +223,8 @@ test.describe('Chats Page — Mobile', () => {
     await setupApiMocks(page, { sessions: NORMAL_SESSIONS });
     await page.goto('/chats');
     await page.waitForSelector('text=Fix authentication flow');
+    await expect(page.getByText('Sleeping session with retained state')).toBeVisible();
+    await expect(page.getByText('Sleeping', { exact: true })).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'chats-normal-mobile');
   });
@@ -232,6 +273,8 @@ test.describe('Chats Page — Desktop', () => {
     await setupApiMocks(page, { sessions: NORMAL_SESSIONS });
     await page.goto('/chats');
     await page.waitForSelector('text=Fix authentication flow');
+    await expect(page.getByText('Sleeping session with retained state')).toBeVisible();
+    await expect(page.getByText('Sleeping', { exact: true })).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'chats-normal-desktop');
   });

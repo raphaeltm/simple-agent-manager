@@ -38,6 +38,7 @@ export function ZenPeekRail({
   return (
     <div style={{ gridRow, width: 0 }}>
       <div
+        role="presentation"
         className={`fixed left-0 z-40 h-1/2 w-3 ${isTop ? 'top-0' : 'bottom-0'}`}
         onMouseEnter={() => setOpen(true)}
         onMouseLeave={(e) => {
@@ -64,9 +65,7 @@ export function ZenPeekRail({
           title={`Expand ${label}`}
           className="group absolute inset-0 flex items-center justify-center bg-transparent border-none cursor-pointer p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-[var(--sam-color-focus-ring)]"
         >
-          <span
-            className="absolute inset-y-0 left-0 w-3 bg-[radial-gradient(ellipse_at_center,var(--sam-chrome-accent-glow,rgba(34,197,94,0.45))_0%,transparent_75%)] opacity-70 group-hover:opacity-100 transition-opacity motion-reduce:transition-none"
-          />
+          <span className="absolute inset-y-0 left-0 w-3 bg-[radial-gradient(ellipse_at_center,var(--sam-chrome-accent-glow,rgba(34,197,94,0.45))_0%,transparent_75%)] opacity-70 group-hover:opacity-100 transition-opacity motion-reduce:transition-none" />
           <span
             aria-hidden="true"
             className="relative z-10 text-[10px] font-medium uppercase tracking-wider text-accent select-none"

@@ -25,18 +25,31 @@ const statusConfig: Record<string, { label: string; bg: string; fg: string }> = 
   // ACP session statuses (spec 027)
   assigned: { label: 'Assigned', bg: 'var(--sam-status-indigo-bg)', fg: 'var(--sam-status-indigo-fg)' },
   interrupted: { label: 'Interrupted', bg: 'var(--sam-status-warning-bg)', fg: 'var(--sam-status-warning-fg)' },
+  // Trigger statuses. Without these, `<StatusBadge status="active"/>` rendered
+  // "Unknown" — and still pulsed, because the pulse keys off the raw status
+  // string rather than off a resolved config entry.
+  active: { label: 'Active', bg: 'var(--sam-status-success-bg)', fg: 'var(--sam-status-success-fg)' },
+  paused: { label: 'Paused', bg: 'var(--sam-status-warning-bg)', fg: 'var(--sam-status-warning-fg)' },
+  disabled: { label: 'Disabled', bg: 'var(--sam-status-muted-bg)', fg: 'var(--sam-status-muted-fg)' },
 };
 
 interface StatusBadgeProps {
   status: string;
   label?: string;
+  /**
+   * Overrides the default pulse for this status. Trigger lists opt out: an
+   * armed trigger is steady-state configuration, not live activity, and a page
+   * of glowing badges reads as noise rather than signal.
+   */
+  pulse?: boolean;
 }
 
 const pulsingStatuses = new Set(['active', 'connected', 'healthy', 'in_progress', 'running']);
 
-export function StatusBadge({ status, label }: StatusBadgeProps) {
+export function StatusBadge({ status, label, pulse }: StatusBadgeProps) {
   const config = statusConfig[status] ?? { label: 'Unknown', bg: 'var(--sam-status-unknown-bg)', fg: 'var(--sam-status-unknown-fg)' };
-  const pulseClass = pulsingStatuses.has(status) ? ' sam-status-pulse' : '';
+  const shouldPulse = pulse ?? pulsingStatuses.has(status);
+  const pulseClass = shouldPulse ? ' sam-status-pulse' : '';
 
   return (
     <span

@@ -41,11 +41,31 @@ const listNotifications = vi.fn().mockResolvedValue({
   unreadCount: 0,
   nextCursor: null,
 });
+const addPushSubscription = vi.fn().mockResolvedValue({
+  endpoint: 'https://push.example.test/subscription',
+  userAgent: 'Test Browser',
+  disabledAt: null,
+  failureCount: 0,
+  lastSuccessAt: null,
+  createdAt: '2026-08-11T00:00:00.000Z',
+  updatedAt: '2026-08-11T00:00:00.000Z',
+});
+const removePushSubscription = vi.fn().mockResolvedValue(true);
+const listPushSubscriptions = vi.fn().mockResolvedValue([]);
 
 const mockEnv = {
+  KV: {
+    get: vi.fn().mockResolvedValue(null),
+    put: vi.fn().mockResolvedValue(undefined),
+  },
   NOTIFICATION: {
     idFromName: vi.fn().mockReturnValue({ toString: () => 'do-id' }),
-    get: vi.fn().mockReturnValue({ listNotifications }),
+    get: vi.fn().mockReturnValue({
+      listNotifications,
+      addPushSubscription,
+      removePushSubscription,
+      listPushSubscriptions,
+    }),
   },
 } as unknown as Env;
 
@@ -101,5 +121,77 @@ describe('GET /notifications query validation', () => {
     const res = await app.request('/notifications', {}, mockEnv);
     expect(res.status).toBe(200);
     expect(listNotifications).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('Web Push subscription routes', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('validates and stores a browser subscription with its user agent', async () => {
+    const app = buildApp();
+    const subscription = {
+      endpoint: 'https://push.example.test/subscription',
+      expirationTime: null,
+      keys: { p256dh: 'B'.repeat(87), auth: 'A'.repeat(22) },
+    };
+    const response = await app.request(
+      '/notifications/push/subscriptions',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'User-Agent': 'Test Browser' },
+        body: JSON.stringify(subscription),
+      },
+      mockEnv
+    );
+
+    expect(response.status).toBe(201);
+    expect(addPushSubscription).toHaveBeenCalledWith('user-123', subscription, 'Test Browser');
+  });
+
+  it('rejects non-HTTPS subscription endpoints before the DO call', async () => {
+    const app = buildApp();
+    const response = await app.request(
+      '/notifications/push/subscriptions',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          endpoint: 'http://push.example.test/subscription',
+          keys: { p256dh: 'B'.repeat(87), auth: 'A'.repeat(22) },
+        }),
+      },
+      mockEnv
+    );
+
+    expect(response.status).toBe(400);
+    expect(addPushSubscription).not.toHaveBeenCalled();
+  });
+
+  it('lists subscription metadata without key material', async () => {
+    const app = buildApp();
+    const response = await app.request('/notifications/push/subscriptions', {}, mockEnv);
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({ subscriptions: [] });
+    expect(listPushSubscriptions).toHaveBeenCalledWith('user-123');
+  });
+
+  it('removes only the submitted endpoint', async () => {
+    const app = buildApp();
+    const endpoint = 'https://push.example.test/subscription';
+    const response = await app.request(
+      '/notifications/push/subscriptions',
+      {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ endpoint }),
+      },
+      mockEnv
+    );
+
+    expect(response.status).toBe(200);
+    expect(removePushSubscription).toHaveBeenCalledWith('user-123', endpoint);
   });
 });

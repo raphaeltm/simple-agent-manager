@@ -64,9 +64,20 @@ jobs:
       # ========================================
       - name: Create Pages Project
         run: |
+          set -euo pipefail
           echo "Creating Cloudflare Pages project: $PAGES_PROJECT"
-          # wrangler pages project create is idempotent-ish — errors if project exists, which is fine
-          npx wrangler pages project create "$PAGES_PROJECT" --production-branch main 2>&1 || echo "Pages project already exists (OK)"
+          PROJECTS_JSON=$(pnpm --filter @simple-agent-manager/www exec wrangler pages project list --json)
+
+          if ! printf '%s\n' "$PROJECTS_JSON" | jq -e 'type == "array"' > /dev/null; then
+            echo "::error::Wrangler returned an unexpected Pages project list response."
+            exit 1
+          fi
+
+          if printf '%s\n' "$PROJECTS_JSON" | jq -e --arg project_name "$PAGES_PROJECT" 'any(.[]; .["Project Name"] == $project_name)' > /dev/null; then
+            echo "Pages project already exists: $PAGES_PROJECT"
+          else
+            pnpm --filter @simple-agent-manager/www exec wrangler pages project create "$PAGES_PROJECT" --production-branch main
+          fi
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}

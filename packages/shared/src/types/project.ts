@@ -183,7 +183,7 @@ export interface ProjectRuntimeConfigResponse {
 }
 
 export interface ListProjectsResponse {
-  projects: Project[];
+  projects: ProjectSummary[];
   nextCursor?: string | null;
 }
 

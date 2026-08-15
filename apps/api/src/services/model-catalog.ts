@@ -8,7 +8,7 @@ import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { createModuleLogger, serializeError } from '../lib/logger';
-import { readResponseJson } from '../lib/runtime-validation';
+import { maybeJsonRecord, readResponseJson } from '../lib/runtime-validation';
 
 const log = createModuleLogger('model_catalog');
 
@@ -227,24 +227,24 @@ function resolveBoundedInteger(
 function isModelGroupArray(value: unknown): value is ModelGroup[] {
   return (
     Array.isArray(value) &&
-    value.every(
-      (group) =>
-        isRecord(group) &&
-        isNonEmptyString(group.label) &&
-        Array.isArray(group.models) &&
-        group.models.every(
-          (model) =>
-            isRecord(model) &&
-            isNonEmptyString(model.id) &&
-            isNonEmptyString(model.name) &&
-            model.group === group.label
-        )
-    )
+    value.every((group) => {
+      const groupRecord = maybeJsonRecord(group);
+      return (
+        groupRecord !== null &&
+        isNonEmptyString(groupRecord.label) &&
+        Array.isArray(groupRecord.models) &&
+        groupRecord.models.every((model) => {
+          const modelRecord = maybeJsonRecord(model);
+          return (
+            modelRecord !== null &&
+            isNonEmptyString(modelRecord.id) &&
+            isNonEmptyString(modelRecord.name) &&
+            modelRecord.group === groupRecord.label
+          );
+        })
+      );
+    })
   );
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
 function isNonEmptyString(value: unknown): value is string {

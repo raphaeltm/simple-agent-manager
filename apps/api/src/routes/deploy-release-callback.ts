@@ -173,11 +173,10 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     )
     .limit(1);
 
-  if (envRows.length === 0) {
+  const deployEnv = envRows[0];
+  if (!deployEnv) {
     throw errors.notFound('Deployment environment');
   }
-  // Safe: envRows.length is checked above (throws 404 if empty)
-  const deployEnv = envRows[0]!;
 
   // Volume-requiring environments need the node's providerInstanceId to build
   // volume mount descriptors (volumes are matched to the node by attachedServerId,

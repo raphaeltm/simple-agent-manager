@@ -26,6 +26,7 @@ describe('VM agent container lifecycle liveness', () => {
     null,
     'launching',
     'running',
+    'sleep-preparing',
     'sleeping',
     'recovering',
     'waking',
