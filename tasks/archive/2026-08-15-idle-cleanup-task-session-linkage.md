@@ -86,14 +86,14 @@ The major TaskRunner path receives the ProjectData chat session ID and writes it
 [{ "remaining_unambiguous_null_task_links": 0 }]
 ```
 
-- Current staging D1 resource counts re-read:
+- Current staging D1 resource counts re-read after browser smoke:
 
 ```json
 [
   {
-    "non_destroyed_nodes": 0,
+    "non_deleted_nodes": 0,
     "activeish_nodes": 0,
-    "non_terminal_workspaces": 0,
+    "non_deleted_workspaces": 0,
     "activeish_workspaces": 0
   }
 ]
