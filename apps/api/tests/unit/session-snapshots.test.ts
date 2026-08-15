@@ -8,6 +8,7 @@ import {
   buildSessionSnapshotR2Key,
   claimSessionSnapshotRecovery,
   completeActiveSessionSnapshotAsDegraded,
+  completeSessionSnapshotRecovery,
   DEFAULT_SESSION_SLEEP_AFTER_MS,
   DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS,
   DEFAULT_SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES,
@@ -418,6 +419,56 @@ describe('session snapshot recovery lifecycle', () => {
         recovery_task_id: 'wake-task-1',
         recovery_attempts: 1,
         recovery_error: null,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('clears the sleeping claim when snapshot recovery completes', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      sqlite
+        .prepare(
+          `INSERT INTO session_snapshots
+             (id, workspace_id, node_id, project_id, user_id, chat_session_id,
+              agent_session_id, runtime, status, degradation, manifest_r2_key,
+              manifest_json, snapshot_generation, expires_at, sleep_status,
+              sleeping_at, recovery_status, recovery_task_id, recovery_workspace_id,
+              recovery_attempts, updated_at)
+           VALUES ('snapshot-1', 'workspace-old', 'node-1', 'project-1', 'user-1',
+              'chat-1', 'agent-1', 'vm', 'degraded', 'transcript-only',
+              'snapshots/chat-1/generation-final/manifest.json', '{"status":"degraded"}',
+              'generation-final', '2026-08-20T00:00:00.000Z', 'sleeping',
+              '2026-08-15T00:00:00.000Z', 'waking', 'wake-task-1',
+              'workspace-new', 1, '2026-08-15T00:00:00.000Z')`
+        )
+        .run();
+      const testEnv = env({ DATABASE: createSqliteD1(sqlite) });
+      const db = drizzle(testEnv.DATABASE, { schema });
+
+      await expect(
+        completeSessionSnapshotRecovery(db, 'chat-1', 'wake-task-1', 'workspace-new')
+      ).resolves.toBe(true);
+
+      expect(
+        sqlite
+          .prepare(
+            `SELECT recovery_status, recovery_task_id, recovery_workspace_id,
+                    recovery_error, sleep_status, sleep_error, sleeping_at, restored_at
+               FROM session_snapshots WHERE id = 'snapshot-1'`
+          )
+          .get()
+      ).toEqual({
+        recovery_status: 'restored',
+        recovery_task_id: 'wake-task-1',
+        recovery_workspace_id: 'workspace-new',
+        recovery_error: null,
+        sleep_status: null,
+        sleep_error: null,
+        sleeping_at: null,
+        restored_at: expect.any(String),
       });
     } finally {
       sqlite.close();

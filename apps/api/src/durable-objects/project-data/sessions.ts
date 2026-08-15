@@ -112,7 +112,7 @@ export function wakeSession(
      SET status = 'active', workspace_id = ?, task_id = ?, ended_at = NULL,
          agent_completed_at = NULL, updated_at = ?
      WHERE id = ? AND (
-       status = 'sleeping' OR (status = 'active' AND workspace_id = ?)
+       status = 'sleeping' OR (status IN ('active', 'failed') AND workspace_id = ?)
      )`,
     workspaceId,
     taskId,

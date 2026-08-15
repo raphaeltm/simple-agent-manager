@@ -17,7 +17,7 @@ describe('ProjectData wakeSession', () => {
 
     expect(updated).toBe(true);
     expect(sql.exec).toHaveBeenCalledWith(
-      expect.stringContaining("status = 'active' AND workspace_id = ?"),
+      expect.stringContaining("status IN ('active', 'failed') AND workspace_id = ?"),
       'workspace-recovery',
       'task-recovery',
       expect.any(Number),
@@ -27,7 +27,16 @@ describe('ProjectData wakeSession', () => {
     expect(sql.exec.mock.calls[0][0]).not.toContain('workspace_id = ? AND task_id = ?');
   });
 
-  it('returns false when no sleeping or same-workspace active session is updated', () => {
+  it('revives a failed recovery session that is already linked to the same workspace', () => {
+    const sql = makeWakeSql(1);
+
+    const updated = wakeSession(sql, 'chat-1', 'workspace-recovery', 'task-recovery');
+
+    expect(updated).toBe(true);
+    expect(sql.exec.mock.calls[0][0]).toContain("status IN ('active', 'failed')");
+  });
+
+  it('returns false when no sleeping or same-workspace active/failed session is updated', () => {
     const sql = makeWakeSql(0);
 
     const updated = wakeSession(sql, 'chat-1', 'workspace-other', 'task-recovery');
