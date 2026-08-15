@@ -91,7 +91,9 @@
       "owner": "security",
       "reviewedAt": "2026-08-11T00:00:00.000Z",
       "expiresAt": "2026-11-09T00:00:00.000Z",
-      "digests": ["2e2c488b43d71d30946bb0cdec4390e8795c3debec5cd2a1ff0b93c9823abd4b"]
+      "digests": [
+        "2e2c488b43d71d30946bb0cdec4390e8795c3debec5cd2a1ff0b93c9823abd4b"
+      ]
     },
     {
       "classification": "synthetic-test-fixture",
@@ -105,6 +107,17 @@
         "79f6810f927733e7390adee75db901c182c7702f69a884f4d29b890fab25a6ea",
         "cbbeacf82046a0817af9b778e6219609dacfc042c9c56b16dff06b92e6ebf6e0",
         "ec5b29cf74fdbe649a4684e969fd39b019fd080b12db278ac37b9336241898d3"
+      ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Synthetic multiline PEM private key (REALISTIC_KEY) and JWT-format callbackToken literal added to cloud-init template round-trip tests; realistic multiline fixtures are mandated by the template-output-verification rule and contain no real key material.",
+      "owner": "security",
+      "reviewedAt": "2026-08-15T19:30:00.000Z",
+      "expiresAt": "2026-11-13T00:00:00.000Z",
+      "digests": [
+        "a53bf5ad49b7df6a6e187c73ace39cdadad6f51e8eb7a2d3927f38907881af0c",
+        "d375245952311c037411c21bfb6861e1b98c3cfb9336cce43d43c7eaa8433198"
       ]
     }
   ]
