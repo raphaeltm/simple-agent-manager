@@ -18,6 +18,7 @@ const {
   completeSessionSnapshotRecoveryMock,
   dbAgentSessionIds,
   failSessionSnapshotRecoveryMock,
+  getAcpSessionMock,
   insertedAgentSessions,
   prepareAcpSessionForFreshStartMock,
   revokeMcpTokenMock,
@@ -32,6 +33,7 @@ const {
   completeSessionSnapshotRecoveryMock: vi.fn(async () => true),
   dbAgentSessionIds: new Set<string>(),
   failSessionSnapshotRecoveryMock: vi.fn(async () => undefined),
+  getAcpSessionMock: vi.fn(async () => null),
   insertedAgentSessions: [] as Array<Record<string, unknown>>,
   prepareAcpSessionForFreshStartMock: vi.fn(async () => ({ id: 'agent-session-new' })),
   revokeMcpTokenMock: vi.fn(async () => undefined),
@@ -60,7 +62,7 @@ vi.mock('../../../src/services/node-agent', () => ({
 
 vi.mock('../../../src/services/project-data', () => ({
   createAcpSession: createAcpSessionMock,
-  getAcpSession: vi.fn(async () => null),
+  getAcpSession: getAcpSessionMock,
   persistMessage: vi.fn(async () => undefined),
   prepareAcpSessionForFreshStart: prepareAcpSessionForFreshStartMock,
   transitionAcpSession: transitionAcpSessionMock,
@@ -288,10 +290,12 @@ describe('handleAgentSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     dbAgentSessionIds.clear();
+    getAcpSessionMock.mockResolvedValue(null);
     insertedAgentSessions.length = 0;
     completeSessionSnapshotRecoveryMock.mockResolvedValue(true);
     prepareAcpSessionForFreshStartMock.mockResolvedValue({ id: 'agent-session-new' });
     restoreAgentSessionOnNodeMock.mockResolvedValue({ status: 'restored' });
+    transitionAcpSessionMock.mockResolvedValue(undefined);
     wakeSessionMock.mockResolvedValue(true);
   });
 
@@ -480,6 +484,51 @@ describe('handleAgentSession', () => {
     expect(wakeSessionMock.mock.invocationCallOrder[0]).toBeLessThan(
       completeSessionSnapshotRecoveryMock.mock.invocationCallOrder[0]
     );
+    expect(completeSessionSnapshotRecoveryMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'chat-1',
+      'task-1',
+      'workspace-1'
+    );
+    expect(state.config.resumeSnapshotChatSessionId).toBeNull();
+  });
+
+  it('repairs a failed ACP row when strict snapshot restore reports restored before marking running', async () => {
+    let rejectedRunning = false;
+    getAcpSessionMock
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ id: 'agent-session-new', status: 'failed' });
+    transitionAcpSessionMock.mockImplementation(async (...args: unknown[]) => {
+      if (args[3] === 'running' && !rejectedRunning) {
+        rejectedRunning = true;
+        throw new Error('Invalid ACP session transition: failed → running');
+      }
+      return undefined;
+    });
+    const state = makeState({
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'chat-1',
+      },
+    });
+    const { rc } = makeContext();
+
+    await handleAgentSession(state, rc);
+
+    expect(restoreAgentSessionOnNodeMock).toHaveBeenCalledOnce();
+    expect(startAgentSessionOnNodeMock).not.toHaveBeenCalled();
+    expect(prepareAcpSessionForFreshStartMock).toHaveBeenCalledWith(
+      rc.env,
+      'project-1',
+      'agent-session-new',
+      expect.objectContaining({
+        workspaceId: 'workspace-1',
+        nodeId: 'node-1',
+      })
+    );
+    expect(
+      transitionAcpSessionMock.mock.calls.filter((call) => call[3] === 'running')
+    ).toHaveLength(2);
     expect(completeSessionSnapshotRecoveryMock).toHaveBeenCalledWith(
       expect.anything(),
       'chat-1',

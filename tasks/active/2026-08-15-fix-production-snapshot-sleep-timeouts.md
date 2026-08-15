@@ -166,6 +166,27 @@ fails the row, fallback can re-find the failed same-ID row but skip prepare befo
 The staging node/workspaces were deleted immediately after collecting evidence; staging returned to
 zero active nodes/workspaces.
 
+Staging verification of the null-first-ACP-create edge patch on commit
+`31933823100341b707d7f85b3b23c9a8cac6a02a` proved the remaining failure is even later: strict
+restore can report `restored` to the Worker while the ProjectData ACP row has already been marked
+`failed` by the restore-side agent failure signal. Fresh node `01M0329JCZ0ZKSS2AKSAHEQGFZ`
+heartbeated `agent_version='31933823100341b707d7f85b3b23c9a8cac6a02a'`; task
+`01M0329EK6T19QYKBDH7JEG2BH`, session `6bfa8194-7848-4827-b27d-9737f9534821`, workspace
+`01M032J3EDX28DQ84H3QZ9WZ24`, agent session `01M032K9XMQ16FFXXRW9615P08`, slept successfully with
+snapshot `01M032MGWYMPJ2Y9EW1MXRS7Z4`: `status='degraded'`,
+`degradation='transcript-only'`, `sleep_status='sleeping'`, `capture_generation=NULL`,
+`snapshot_generation='01M032Q7Q8B0X26VW9SW816QG4'`, manifest present, workspace/agent `sleeping`.
+Wake delivery `01M032VZBYF6RXMVP2KDWKR7D5` created recovery task
+`01M032W36JSJDSFRK5CGH2VZVG`, workspace `01M032W6YAESGRFRMRV5P45HQE`, agent session
+`01M032X8YXN55W475YF0BPAJB9`; recovery failed with
+`Invalid ACP session transition: failed → running (session 01M032X8YXN55W475YF0BPAJB9)` despite
+no degraded-fallback error. The fix now makes the final ProjectData `running` transition
+snapshot-restore-aware: if ProjectData rejects `running` because the same row is `failed`, the
+control plane re-reads that row, resets it to `assigned`, and retries `running` on the same ID.
+This covers both explicit degraded fallback and strict-restore/reporting races. The staging
+node/workspaces were deleted immediately after collecting evidence; staging returned to zero active
+nodes/workspaces.
+
 ## Implementation checklist
 
 - [x] Make the final snapshot wait use an environment-configurable no-progress watchdog instead of
@@ -197,6 +218,9 @@ zero active nodes/workspaces.
       fields before marking the fresh session `running`.
 - [x] Prepare the same ProjectData ACP row even when the initial ACP create/reuse call returns null
       and the degraded fallback has to create/re-fetch the row after strict restore.
+- [x] Make the final ProjectData `running` transition snapshot-restore-aware: if the same ACP row
+      is already `failed`, reset it to `assigned` and retry `running` on the same callback session
+      ID.
 - [x] Reset the D1 `agent_sessions` row to `running` after degraded fresh fallback succeeds so a
       strict-restore error callback cannot leave the recovered session visibly failed.
 - [x] Use a wake-specific recovery prompt so degraded fresh fallback waits for the queued follow-up
@@ -279,6 +303,15 @@ zero active nodes/workspaces.
 - Null-first-ACP-create edge patch full API suite passed:
   `pnpm --filter @simple-agent-manager/api test` (540 files, 7,243 tests).
 - Null-first-ACP-create edge patch `pnpm format:check` and `git diff --check` passed.
+- Restore-aware running-transition patch focused unit passed:
+  `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/task-runner-agent-session.test.ts`
+  (1 file, 13 tests).
+- Restore-aware running-transition patch API typecheck and lint passed:
+  `pnpm --filter @simple-agent-manager/api typecheck` and
+  `pnpm --filter @simple-agent-manager/api lint`.
+- Restore-aware running-transition patch full API suite passed:
+  `pnpm --filter @simple-agent-manager/api test` (540 files, 7,244 tests).
+- Restore-aware running-transition patch `pnpm format:check` and `git diff --check` passed.
 - Added ProjectData worker regression coverage for the same-ID `failed → assigned → running`
   recovery primitive. Local `@cloudflare/vitest-pool-workers` execution for the single filtered test
   timed out after 180s without a test result in this container; staging Worker deploy and live
