@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/workspace/vm-agent/internal/acp"
+	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/config"
 )
 
@@ -184,6 +185,9 @@ func TestPrepareFreshSessionAfterDegradedRestoreClearsStrictRestoreState(t *test
 	if err := s.agentSessions.UpdateAcpSessionID(workspaceID, sessionID, "acp-session-old", "claude-code"); err != nil {
 		t.Fatal(err)
 	}
+	if err := s.agentSessions.MarkError(workspaceID, sessionID, "claude-code", "ACP LoadSession failed"); err != nil {
+		t.Fatal(err)
+	}
 	hostKey := workspaceID + ":" + sessionID
 	s.sessionHosts[hostKey] = acp.NewSessionHost(acp.SessionHostConfig{
 		GatewayConfig: acp.GatewayConfig{
@@ -204,8 +208,14 @@ func TestPrepareFreshSessionAfterDegradedRestoreClearsStrictRestoreState(t *test
 	if !ok {
 		t.Fatal("agent session was removed; fallback must keep the control-plane routing session")
 	}
+	if cleared.Status != agentsessions.StatusRunning {
+		t.Fatalf("session status = %s, want %s", cleared.Status, agentsessions.StatusRunning)
+	}
 	if cleared.AcpSessionID != "" || cleared.AgentType != "" {
 		t.Fatalf("ACP identity = (%q, %q), want cleared for fresh fallback", cleared.AcpSessionID, cleared.AgentType)
+	}
+	if cleared.Error != "" {
+		t.Fatalf("session error = %q, want cleared for fresh fallback", cleared.Error)
 	}
 }
 

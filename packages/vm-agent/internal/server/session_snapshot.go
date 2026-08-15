@@ -205,8 +205,8 @@ func (s *Server) prepareFreshSessionAfterDegradedRestore(workspaceID, sessionID 
 		host.Stop()
 	}
 
-	if err := s.agentSessions.UpdateAcpSessionID(workspaceID, sessionID, "", ""); err != nil {
-		slog.Warn("Failed to clear ACP session identity after degraded snapshot restore",
+	if _, err := s.agentSessions.PrepareDegradedRestoreFallback(workspaceID, sessionID); err != nil {
+		slog.Warn("Failed to prepare agent session for degraded snapshot fresh fallback",
 			"workspace", workspaceID, "session", sessionID, "error", err)
 	}
 	if s.store != nil {

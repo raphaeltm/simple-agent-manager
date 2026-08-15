@@ -113,6 +113,21 @@ fresh start could retry `LoadSession` instead of creating a new ACP session. The
 workspace were deleted immediately after collecting the D1 evidence; staging returned to zero active
 nodes/workspaces.
 
+Staging verification of the first degraded-wake fallback patch on commit
+`6e28023aaa498e44a83bed4f56fa0f0c37eea5d0` proved the sleep path again and exposed the final
+vm-agent routing-state gap. Task `01M02TQT2ZPNDMSTK8Z7HTXD1J`, session
+`6130673f-ce2b-4a5f-af07-d038f9e505ec`, workspace `01M02TWCEF0D90WM9D2W1VFX4J`, node
+`01M02TQXAMTM1WD3YNAFZ2GXGR`, slept successfully with snapshot
+`01M02TXW1VKMA581XRD8CVKZY2`: `status='degraded'`, `degradation='transcript-only'`,
+`sleep_status='sleeping'`, `capture_generation=NULL`, `snapshot_generation='01M02V0M50PPG193XJH8DA3VZK'`,
+manifest present, workspace/agent `sleeping`. Wake then failed with
+`recovery_error='Node Agent request failed: 409 {"error":"session is not running"}'`; the recovery
+agent-session row later showed `session already exists` on retry. That proved vm-agent strict restore
+failure marked the routing session `error`; cleanup must return the same routing session to
+`running`, clear the error, and clear stale ACP identity before control-plane fresh fallback calls
+`/start`. The staging node/workspaces were deleted immediately after collecting evidence; staging
+returned to zero active nodes/workspaces.
+
 ## Implementation checklist
 
 - [x] Make the final snapshot wait use an environment-configurable no-progress watchdog instead of
@@ -137,6 +152,8 @@ nodes/workspaces.
       wake contract use the same restorable/degraded predicate.
 - [x] On degraded restore, explicitly clear vm-agent strict-restore host/ACP identity and let the
       recovery TaskRunner start a fresh ACP session against the restored workspace.
+- [x] Reset the vm-agent routing session from strict-restore `error` back to `running` during
+      degraded fallback cleanup so the fresh `/start` request is accepted.
 - [x] Use a wake-specific recovery prompt so degraded fresh fallback waits for the queued follow-up
       instead of rerunning the source task title.
 - [x] Verify degraded snapshot manifests and any artifacts they do contain before teardown.
