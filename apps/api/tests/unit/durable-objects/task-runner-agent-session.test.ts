@@ -465,6 +465,7 @@ describe('handleAgentSession', () => {
       'user-1',
       expect.objectContaining({ chatSessionId: 'chat-1', agentType: 'openai-codex' })
     );
+    expect(startAgentSessionOnNodeMock).not.toHaveBeenCalled();
     expect(wakeSessionMock).toHaveBeenCalledWith(
       rc.env,
       'project-1',
@@ -474,6 +475,48 @@ describe('handleAgentSession', () => {
     );
     expect(wakeSessionMock.mock.invocationCallOrder[0]).toBeLessThan(
       completeSessionSnapshotRecoveryMock.mock.invocationCallOrder[0]
+    );
+    expect(completeSessionSnapshotRecoveryMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'chat-1',
+      'task-1',
+      'workspace-1'
+    );
+    expect(state.config.resumeSnapshotChatSessionId).toBeNull();
+  });
+
+  it('falls back to a fresh ACP session when snapshot restore is degraded', async () => {
+    restoreAgentSessionOnNodeMock.mockResolvedValueOnce({
+      status: 'degraded',
+      message: 'The saved workspace was restored, but the agent context could not be resumed.',
+    });
+    const state = makeState({
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'chat-1',
+      },
+    });
+    const { rc } = makeContext();
+
+    await handleAgentSession(state, rc);
+
+    expect(restoreAgentSessionOnNodeMock).toHaveBeenCalledOnce();
+    expect(startAgentSessionOnNodeMock).toHaveBeenCalledWith(
+      'node-1',
+      'workspace-1',
+      'agent-session-new',
+      'openai-codex',
+      expect.stringContaining('Exercise the TaskRunner agent-session path.'),
+      expect.objectContaining({ BASE_DOMAIN: 'example.test' }),
+      'user-1',
+      { url: 'https://api.example.test/mcp', token: 'mcp-token-new' },
+      expect.objectContaining({
+        model: 'gpt-5-codex',
+        effort: 'high',
+        permissionMode: 'auto-edit',
+      }),
+      { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' },
+      expect.stringContaining('get_instructions')
     );
     expect(completeSessionSnapshotRecoveryMock).toHaveBeenCalledWith(
       expect.anything(),

@@ -183,6 +183,7 @@ func (s *Server) handleRestoreAgentSession(w http.ResponseWriter, r *http.Reques
 	result, err := s.restoreSessionSnapshot(r.Context(), input.runtime, input.sessionID, input.chatSessionID, input.agentType, input.callbackToken)
 	if err != nil {
 		_ = s.reportSnapshotRestoreResult(context.Background(), input.workspaceID, input.chatSessionID, "degraded", err.Error(), input.callbackToken)
+		s.prepareFreshSessionAfterDegradedRestore(input.workspaceID, input.sessionID, err)
 		writeJSON(w, http.StatusOK, map[string]interface{}{
 			"status":  "degraded",
 			"message": "The saved workspace was restored, but the agent context could not be resumed.",
@@ -190,6 +191,34 @@ func (s *Server) handleRestoreAgentSession(w http.ResponseWriter, r *http.Reques
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) prepareFreshSessionAfterDegradedRestore(workspaceID, sessionID string, restoreErr error) {
+	hostKey := workspaceID + ":" + sessionID
+	s.sessionHostMu.Lock()
+	host := s.sessionHosts[hostKey]
+	if host != nil {
+		delete(s.sessionHosts, hostKey)
+	}
+	s.sessionHostMu.Unlock()
+	if host != nil {
+		host.Stop()
+	}
+
+	if err := s.agentSessions.UpdateAcpSessionID(workspaceID, sessionID, "", ""); err != nil {
+		slog.Warn("Failed to clear ACP session identity after degraded snapshot restore",
+			"workspace", workspaceID, "session", sessionID, "error", err)
+	}
+	if s.store != nil {
+		if err := s.store.UpdateTabAcpSessionID(sessionID, ""); err != nil {
+			slog.Warn("Failed to clear persisted tab ACP session identity after degraded snapshot restore",
+				"workspace", workspaceID, "session", sessionID, "error", err)
+		}
+	}
+	s.appendNodeEvent(workspaceID, "warn", "session_snapshot.restore_degraded_fresh_fallback", "Snapshot restore degraded; next start will create a fresh agent context", map[string]interface{}{
+		"sessionId": sessionID,
+		"error":     restoreErr.Error(),
+	})
 }
 
 func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *WorkspaceRuntime, sessionID, chatSessionID, runtimeName, agentType, callbackToken string) (map[string]interface{}, error) {

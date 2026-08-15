@@ -94,6 +94,25 @@ sleep path also needed generation-safe final-state re-read and stale prepare pro
 staging node/workspace were deleted immediately after collecting the D1 evidence; staging returned
 to zero active nodes/workspaces.
 
+Staging verification of the race fix on 2026-08-15 then proved the sleep side complete but exposed a
+wake-side contract gap. Fresh VM node `01M02RBPRESCV29VTACQ5NMCBY` heartbeated branch vm-agent
+`139dafc7f3ca868a6704a8572e9fec8cca8b5ec3`; task `01M02RBKBPC3YS3H9K7KTQSCQP`, session
+`b5035ca7-1374-44ce-81af-f0c80252b2c9`, workspace `01M02RK46QMGKB3HFBQTSTJG04`, slept
+successfully. D1 recorded a consistent degraded transcript-only snapshot:
+`status='degraded'`, `degradation='transcript-only'`, `sleep_status='sleeping'`,
+`capture_generation=NULL`, `snapshot_generation='01M02RNYPVSHB3X7BVKDZCGF4X'`, `manifest_json`
+present, `sleeping_at='2026-08-15T13:11:53.580Z'`, and the workspace/agent session were both
+`sleeping`. The manifest visibly skipped `workspace-snapshot` because snapshot capture made no
+progress for 120000ms.
+
+The subsequent prompt wake failed with `recovery_error='Strict session restore failed (degraded)'`.
+The vm-agent correctly returned `status='degraded'` when ACP `LoadSession` could not restore exact
+agent context, but the control-plane bootstrap treated that expected degraded result as fatal.
+Additionally, vm-agent retained the previous ACP identity after a failed strict restore so a naive
+fresh start could retry `LoadSession` instead of creating a new ACP session. The staging node and
+workspace were deleted immediately after collecting the D1 evidence; staging returned to zero active
+nodes/workspaces.
+
 ## Implementation checklist
 
 - [x] Make the final snapshot wait use an environment-configurable no-progress watchdog instead of
@@ -116,11 +135,17 @@ to zero active nodes/workspaces.
       visible degradation/sleep warning state.
 - [x] Make degraded sleeping snapshots claimable for the VM wake path so the release contract and
       wake contract use the same restorable/degraded predicate.
+- [x] On degraded restore, explicitly clear vm-agent strict-restore host/ACP identity and let the
+      recovery TaskRunner start a fresh ACP session against the restored workspace.
+- [x] Use a wake-specific recovery prompt so degraded fresh fallback waits for the queued follow-up
+      instead of rerunning the source task title.
 - [x] Verify degraded snapshot manifests and any artifacts they do contain before teardown.
 - [x] Preserve fail-visible retry behavior for true pre-teardown errors without permanently
       stranding an awake workspace.
 - [x] Add rule-02 regressions for slow-but-progressing snapshots and stalled/no-progress snapshots.
 - [x] Add cross-boundary contract coverage for snapshot progress and degraded completion handling.
+- [x] Add degraded-wake regression coverage for control-plane fallback and vm-agent strict-restore
+      cleanup.
 - [x] Update public lifecycle/API docs so they match the incident policy: complete/idle sessions may
       sleep on a verified degraded snapshot instead of keeping compute alive forever.
 - [ ] Verify on staging with fresh vm-agent nodes: a real session sleeps end-to-end, workspace
@@ -165,6 +190,18 @@ to zero active nodes/workspaces.
   tests/unit/services/session-sleep.test.ts tests/unit/scheduled/session-sleep.test.ts
   tests/unit/routes/workspaces-session-snapshots.test.ts` (4 files, 59 tests), followed by API lint
   and API typecheck.
+- After the second staging verifier found the degraded wake gap, focused API regressions passed:
+  `pnpm --dir apps/api test -- --run tests/unit/durable-objects/task-runner-agent-session.test.ts
+  tests/unit/services/session-recovery.test.ts tests/unit/services/session-sleep.test.ts
+  tests/unit/session-snapshots.test.ts` (4 files, 39 tests).
+- Post wake-fallback patch API lint passed: `pnpm --dir apps/api lint`.
+- Post wake-fallback patch API typecheck passed: `pnpm --dir apps/api typecheck`.
+- Post wake-fallback patch full API suite passed: 540 files, 7,242 tests.
+- Post wake-fallback patch `pnpm format:check` and `git diff --check` passed.
+- The current local container no longer has `go`/`gofmt` on PATH, so the new vm-agent cleanup test
+  is pending GitHub CI's Go 1.25 toolchain. The Go change is limited to
+  `packages/vm-agent/internal/server/session_snapshot.go` and
+  `packages/vm-agent/internal/server/session_snapshot_test.go`.
 
 ## Coordination constraints
 

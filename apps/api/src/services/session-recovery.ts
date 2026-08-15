@@ -34,6 +34,9 @@ type RecoveryContext = {
   sourceTask: schema.Task | null;
 };
 
+export const SESSION_RECOVERY_INITIAL_PROMPT =
+  'Resume this sleeping conversation from the persisted transcript. Do not repeat prior work; wait for and answer the latest queued follow-up message.';
+
 function asVmSize(value: string | null | undefined): VMSize {
   return value === 'small' || value === 'medium' || value === 'large' ? value : DEFAULT_VM_SIZE;
 }
@@ -134,7 +137,7 @@ async function createRecoveryTask(
         userId: context.snapshot.userId,
         chatSessionId,
         title: source?.title || 'Resume conversation',
-        description: null,
+        description: SESSION_RECOVERY_INITIAL_PROMPT,
         status: 'queued',
         executionStep: 'node_selection',
         priority: source?.priority ?? 0,
@@ -215,7 +218,7 @@ async function startRecoveryTask(
     userEmail: context.user.email,
     githubId: context.user.githubId,
     taskTitle: task.title,
-    taskDescription: null,
+    taskDescription: task.description ?? SESSION_RECOVERY_INITIAL_PROMPT,
     repository: context.project.repository,
     installationId: context.project.installationId,
     outputBranch: task.outputBranch,

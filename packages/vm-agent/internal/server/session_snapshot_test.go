@@ -20,6 +20,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/config"
 )
 
@@ -169,6 +170,42 @@ func TestSnapshotHarnessResumeIdentity(t *testing.T) {
 				t.Fatalf("identity = (%q, %q), want (%q, %q)", acpSessionID, agentType, tt.wantACP, tt.wantAgentType)
 			}
 		})
+	}
+}
+
+func TestPrepareFreshSessionAfterDegradedRestoreClearsStrictRestoreState(t *testing.T) {
+	s := newContractTestServer()
+	workspaceID := "ws-existing"
+	sessionID := "agent-session-1"
+	session, _, err := s.agentSessions.Create(workspaceID, sessionID, "Restored session", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := s.agentSessions.UpdateAcpSessionID(workspaceID, sessionID, "acp-session-old", "claude-code"); err != nil {
+		t.Fatal(err)
+	}
+	hostKey := workspaceID + ":" + sessionID
+	s.sessionHosts[hostKey] = acp.NewSessionHost(acp.SessionHostConfig{
+		GatewayConfig: acp.GatewayConfig{
+			WorkspaceID:            workspaceID,
+			SessionID:              session.ID,
+			PreviousAcpSessionID:   "acp-session-old",
+			PreviousAgentType:      "claude-code",
+			SessionManager:         s.agentSessions,
+		},
+	})
+
+	s.prepareFreshSessionAfterDegradedRestore(workspaceID, sessionID, errors.New("ACP LoadSession failed"))
+
+	if _, ok := s.sessionHosts[hostKey]; ok {
+		t.Fatal("degraded restore fallback left a cached SessionHost with stale LoadSession identity")
+	}
+	cleared, ok := s.agentSessions.Get(workspaceID, sessionID)
+	if !ok {
+		t.Fatal("agent session was removed; fallback must keep the control-plane routing session")
+	}
+	if cleared.AcpSessionID != "" || cleared.AgentType != "" {
+		t.Fatalf("ACP identity = (%q, %q), want cleared for fresh fallback", cleared.AcpSessionID, cleared.AgentType)
 	}
 }
 

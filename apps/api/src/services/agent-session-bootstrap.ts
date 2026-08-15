@@ -110,6 +110,15 @@ async function ensureAgentSessionRow(
   });
 }
 
+function shouldStartFreshAfterSnapshotRestore(restored: unknown): boolean {
+  const restoreRecord =
+    restored && typeof restored === 'object' ? (restored as Record<string, unknown>) : null;
+  const status = restoreRecord?.status;
+  if (status === 'restored') return false;
+  if (status === 'degraded') return true;
+  throw new Error(`Strict session restore failed (${String(status ?? 'unknown')})`);
+}
+
 export async function startSamAwareAgentSession(
   db: Db,
   env: Env,
@@ -180,6 +189,7 @@ export async function startSamAwareAgentSession(
       });
     }
 
+    let shouldStartFreshSession = true;
     const restoreSnapshotChatSessionId = input.restoreSnapshotChatSessionId;
     if (restoreSnapshotChatSessionId) {
       const restored = await runMaybePhased(input, 'restore_acp_session', () =>
@@ -196,14 +206,19 @@ export async function startSamAwareAgentSession(
           }
         )
       );
-      const restoreRecord =
-        restored && typeof restored === 'object' ? (restored as Record<string, unknown>) : null;
-      if (restoreRecord?.status !== 'restored') {
-        throw new Error(
-          `Strict session restore failed (${String(restoreRecord?.status ?? 'unknown')})`
-        );
+      shouldStartFreshSession = shouldStartFreshAfterSnapshotRestore(restored);
+      if (shouldStartFreshSession) {
+        log.warn('agent_session_bootstrap.snapshot_restore_degraded_starting_fresh', {
+          projectId: input.projectId,
+          chatSessionId: input.chatSessionId,
+          restoreSnapshotChatSessionId,
+          workspaceId: input.workspaceId,
+          agentSessionId,
+        });
       }
-    } else {
+    }
+
+    if (shouldStartFreshSession) {
       const injectedInstructions = buildSamBootstrapInstructions({ contextType: input.promptKind });
       await runMaybePhased(input, 'start_acp_session', () =>
         startAgentSessionOnNode(
