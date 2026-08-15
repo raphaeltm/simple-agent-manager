@@ -128,6 +128,25 @@ failure marked the routing session `error`; cleanup must return the same routing
 `/start`. The staging node/workspaces were deleted immediately after collecting evidence; staging
 returned to zero active nodes/workspaces.
 
+Staging verification of the vm-agent routing reset patch on commit
+`d23b81f55dff47db1dff084f7644ea6025949569` then proved the sleep path again and exposed the
+ProjectData ACP lifecycle half of the same degraded-wake problem. Task
+`01M02WKCG01G4B9JF6MHC9HH60`, session `3178c079-cb0c-43f5-8d43-e7093960970b`, workspace
+`01M02WVJS0RVG24QJZ25MT0JAB`, node `01M02WKFV0GX3DQP1VJMS70CPH`, slept successfully with
+snapshot `01M02WY953DA46DP3NV5GNJBWC`: `status='degraded'`,
+`degradation='transcript-only'`, `sleep_status='sleeping'`, `capture_generation=NULL`,
+manifest present, and workspace/agent `sleeping`. Wake created recovery task
+`01M02X57Y2BPYQ44K3T69FW89R`; strict restore degraded as expected, vm-agent accepted the fresh
+fallback, but ProjectData rejected the final control-plane transition with
+`recovery_error='Invalid ACP session transition: failed → running (session 01M02X6ADX0KKMPNG3YFGV5ES2)'`.
+That proved the strict-restore error path had already transitioned the ProjectData ACP row for the
+same vm-agent session ID to `failed`. A generated replacement ProjectData row is not a valid fix
+because vm-agent activity callbacks address `/acp-sessions/{sessionId}`, where `{sessionId}` is the
+vm-agent/control-plane agent session ID. The fix therefore resets that same ProjectData ACP row back
+to `assigned`, clears the strict-restore terminal fields, then lets the successful fresh fallback
+transition the same row to `running`. The staging node/workspaces were deleted immediately after
+collecting evidence; staging returned to zero active nodes/workspaces.
+
 ## Implementation checklist
 
 - [x] Make the final snapshot wait use an environment-configurable no-progress watchdog instead of
@@ -154,6 +173,11 @@ returned to zero active nodes/workspaces.
       recovery TaskRunner start a fresh ACP session against the restored workspace.
 - [x] Reset the vm-agent routing session from strict-restore `error` back to `running` during
       degraded fallback cleanup so the fresh `/start` request is accepted.
+- [x] Reset the same ProjectData ACP row from strict-restore `failed` back to `assigned` during
+      degraded fallback, preserving the vm-agent callback session ID and clearing stale terminal
+      fields before marking the fresh session `running`.
+- [x] Reset the D1 `agent_sessions` row to `running` after degraded fresh fallback succeeds so a
+      strict-restore error callback cannot leave the recovered session visibly failed.
 - [x] Use a wake-specific recovery prompt so degraded fresh fallback waits for the queued follow-up
       instead of rerunning the source task title.
 - [x] Verify degraded snapshot manifests and any artifacts they do contain before teardown.
@@ -215,6 +239,20 @@ returned to zero active nodes/workspaces.
 - Post wake-fallback patch API typecheck passed: `pnpm --dir apps/api typecheck`.
 - Post wake-fallback patch full API suite passed: 540 files, 7,242 tests.
 - Post wake-fallback patch `pnpm format:check` and `git diff --check` passed.
+- Same-ID ACP recovery patch focused unit passed:
+  `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/task-runner-agent-session.test.ts`
+  (1 file, 11 tests).
+- Same-ID ACP recovery patch API typecheck passed:
+  `pnpm --filter @simple-agent-manager/api typecheck`.
+- Same-ID ACP recovery patch API lint passed:
+  `pnpm --filter @simple-agent-manager/api lint`.
+- Same-ID ACP recovery patch full API suite passed:
+  `pnpm --filter @simple-agent-manager/api test` (540 files, 7,242 tests).
+- Same-ID ACP recovery patch `pnpm format:check` and `git diff --check` passed.
+- Added ProjectData worker regression coverage for the same-ID `failed → assigned → running`
+  recovery primitive. Local `@cloudflare/vitest-pool-workers` execution for the single filtered test
+  timed out after 180s without a test result in this container; staging Worker deploy and live
+  verification remain the authoritative validation for that DO RPC path.
 - The current local container no longer has `go`/`gofmt` on PATH, so the new vm-agent cleanup test
   is pending GitHub CI's Go 1.25 toolchain. The Go change is limited to
   `packages/vm-agent/internal/server/session_snapshot.go` and

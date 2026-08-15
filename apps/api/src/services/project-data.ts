@@ -549,6 +549,24 @@ export async function transitionAcpSession(
   );
 }
 
+export async function prepareAcpSessionForFreshStart(
+  env: Env,
+  projectId: string,
+  sessionId: string,
+  opts: {
+    actorType: AcpSessionEventActorType;
+    actorId?: string | null;
+    reason?: string | null;
+    metadata?: Record<string, unknown> | null;
+    workspaceId: string;
+    nodeId: string;
+  }
+): Promise<AcpSession> {
+  return callProjectDataWithRetry(env, projectId, 'prepareAcpSessionForFreshStart', (stub) =>
+    stub.prepareAcpSessionForFreshStart(sessionId, opts)
+  );
+}
+
 export async function updateAcpSessionHeartbeat(
   env: Env,
   projectId: string,

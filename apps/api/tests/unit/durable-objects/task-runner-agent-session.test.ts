@@ -19,6 +19,7 @@ const {
   dbAgentSessionIds,
   failSessionSnapshotRecoveryMock,
   insertedAgentSessions,
+  prepareAcpSessionForFreshStartMock,
   revokeMcpTokenMock,
   restoreAgentSessionOnNodeMock,
   startAgentSessionOnNodeMock,
@@ -32,6 +33,7 @@ const {
   dbAgentSessionIds: new Set<string>(),
   failSessionSnapshotRecoveryMock: vi.fn(async () => undefined),
   insertedAgentSessions: [] as Array<Record<string, unknown>>,
+  prepareAcpSessionForFreshStartMock: vi.fn(async () => ({ id: 'agent-session-new' })),
   revokeMcpTokenMock: vi.fn(async () => undefined),
   restoreAgentSessionOnNodeMock: vi.fn(async () => ({ status: 'restored' })),
   startAgentSessionOnNodeMock: vi.fn(async () => undefined),
@@ -60,6 +62,7 @@ vi.mock('../../../src/services/project-data', () => ({
   createAcpSession: createAcpSessionMock,
   getAcpSession: vi.fn(async () => null),
   persistMessage: vi.fn(async () => undefined),
+  prepareAcpSessionForFreshStart: prepareAcpSessionForFreshStartMock,
   transitionAcpSession: transitionAcpSessionMock,
   wakeSession: wakeSessionMock,
 }));
@@ -287,6 +290,7 @@ describe('handleAgentSession', () => {
     dbAgentSessionIds.clear();
     insertedAgentSessions.length = 0;
     completeSessionSnapshotRecoveryMock.mockResolvedValue(true);
+    prepareAcpSessionForFreshStartMock.mockResolvedValue({ id: 'agent-session-new' });
     restoreAgentSessionOnNodeMock.mockResolvedValue({ status: 'restored' });
     wakeSessionMock.mockResolvedValue(true);
   });
@@ -486,6 +490,7 @@ describe('handleAgentSession', () => {
   });
 
   it('falls back to a fresh ACP session when snapshot restore is degraded', async () => {
+    createAcpSessionMock.mockResolvedValueOnce({ id: 'agent-session-new' });
     restoreAgentSessionOnNodeMock.mockResolvedValueOnce({
       status: 'degraded',
       message: 'The saved workspace was restored, but the agent context could not be resumed.',
@@ -500,6 +505,19 @@ describe('handleAgentSession', () => {
 
     await handleAgentSession(state, rc);
 
+    expect(createAcpSessionMock).toHaveBeenCalledTimes(1);
+    expect(createAcpSessionMock.mock.calls[0][7]).toBe('agent-session-new');
+    expect(prepareAcpSessionForFreshStartMock).toHaveBeenCalledWith(
+      rc.env,
+      'project-1',
+      'agent-session-new',
+      expect.objectContaining({
+        actorType: 'system',
+        actorId: 'task-runner',
+        workspaceId: 'workspace-1',
+        nodeId: 'node-1',
+      })
+    );
     expect(restoreAgentSessionOnNodeMock).toHaveBeenCalledOnce();
     expect(startAgentSessionOnNodeMock).toHaveBeenCalledWith(
       'node-1',
@@ -517,6 +535,16 @@ describe('handleAgentSession', () => {
       }),
       { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' },
       expect.stringContaining('get_instructions')
+    );
+    expect(transitionAcpSessionMock).toHaveBeenCalledWith(
+      rc.env,
+      'project-1',
+      'agent-session-new',
+      'running',
+      expect.objectContaining({
+        acpSdkSessionId: 'agent-session-new',
+        reason: 'Task runner agent session started',
+      })
     );
     expect(completeSessionSnapshotRecoveryMock).toHaveBeenCalledWith(
       expect.anything(),

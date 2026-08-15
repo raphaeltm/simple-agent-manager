@@ -618,6 +618,27 @@ export class ProjectData extends DurableObject<Env> {
     return result.session;
   }
 
+  async prepareAcpSessionForFreshStart(
+    sessionId: string,
+    opts: {
+      actorType: AcpSessionEventActorType;
+      actorId?: string | null;
+      reason?: string | null;
+      metadata?: Record<string, unknown> | null;
+      workspaceId: string;
+      nodeId: string;
+    }
+  ) {
+    const session = acpSessions.prepareAcpSessionForFreshStart(
+      this.sql,
+      sessionId,
+      opts,
+      this.getProjectId()
+    );
+    await this.scheduleHeartbeatAlarm();
+    return session;
+  }
+
   async updateHeartbeat(sessionId: string, nodeId: string): Promise<void> {
     acpSessions.updateHeartbeat(this.sql, sessionId, nodeId, this.getProjectId());
     await this.scheduleHeartbeatAlarm();

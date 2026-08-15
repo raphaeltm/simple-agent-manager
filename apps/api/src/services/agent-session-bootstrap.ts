@@ -119,6 +119,57 @@ function shouldStartFreshAfterSnapshotRestore(restored: unknown): boolean {
   throw new Error(`Strict session restore failed (${String(status ?? 'unknown')})`);
 }
 
+async function createAcpSessionWithLogging(
+  env: Env,
+  input: SamAwareAgentStartInput,
+  agentSessionId: string
+): Promise<string | null> {
+  try {
+    return await runMaybePhased(input, 'create_acp_session', () =>
+      ensureAcpSessionWithEnv(env, input, agentSessionId)
+    );
+  } catch (err) {
+    log.error('agent_session_bootstrap.acp_session_create_failed', {
+      projectId: input.projectId,
+      chatSessionId: input.chatSessionId,
+      agentSessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+}
+
+async function prepareAcpSessionForFreshStart(
+  env: Env,
+  input: SamAwareAgentStartInput,
+  agentSessionId: string
+): Promise<string> {
+  try {
+    const session = await runMaybePhased(input, 'prepare_acp_session_fresh_start', () =>
+      projectDataService.prepareAcpSessionForFreshStart(env, input.projectId, agentSessionId, {
+        actorType: input.actor.type,
+        actorId: input.actor.id,
+        reason: `${input.actor.reasonPrefix} prepared fresh start after degraded snapshot restore`,
+        workspaceId: input.workspaceId,
+        nodeId: input.nodeId,
+        metadata: {
+          chatSessionId: input.chatSessionId ?? null,
+          restoreSnapshotChatSessionId: input.restoreSnapshotChatSessionId ?? null,
+        },
+      })
+    );
+    return session.id;
+  } catch (err) {
+    log.error('agent_session_bootstrap.acp_session_prepare_fresh_start_failed', {
+      projectId: input.projectId,
+      chatSessionId: input.chatSessionId,
+      agentSessionId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    throw err;
+  }
+}
+
 export async function startSamAwareAgentSession(
   db: Db,
   env: Env,
@@ -175,19 +226,7 @@ export async function startSamAwareAgentSession(
       )
     );
 
-    let acpSessionId: string | null = null;
-    try {
-      acpSessionId = await runMaybePhased(input, 'create_acp_session', () =>
-        ensureAcpSessionWithEnv(env, input, agentSessionId)
-      );
-    } catch (err) {
-      log.error('agent_session_bootstrap.acp_session_create_failed', {
-        projectId: input.projectId,
-        chatSessionId: input.chatSessionId,
-        agentSessionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    let acpSessionId = await createAcpSessionWithLogging(env, input, agentSessionId);
 
     let shouldStartFreshSession = true;
     const restoreSnapshotChatSessionId = input.restoreSnapshotChatSessionId;
@@ -215,6 +254,9 @@ export async function startSamAwareAgentSession(
           workspaceId: input.workspaceId,
           agentSessionId,
         });
+        acpSessionId = acpSessionId
+          ? await prepareAcpSessionForFreshStart(env, input, agentSessionId)
+          : await createAcpSessionWithLogging(env, input, agentSessionId);
       }
     }
 
@@ -244,6 +286,11 @@ export async function startSamAwareAgentSession(
           injectedInstructions
         )
       );
+      if (restoreSnapshotChatSessionId) {
+        await runMaybePhased(input, 'reset_agent_session_row_after_degraded_restore', () =>
+          ensureAgentSessionRow(db, input, agentSessionId)
+        );
+      }
     }
 
     const runningAcpSessionId = acpSessionId;

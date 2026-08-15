@@ -413,6 +413,57 @@ describe('ACP Session Lifecycle (Spec 027)', () => {
     });
   });
 
+  describe('prepareAcpSessionForFreshStart', () => {
+    it('recovers a failed strict-restore row under the same vm-agent callback session ID', async () => {
+      const stub = getStub('acp-prepare-fresh-start');
+      const { acpSession } = await createSessionPair(stub);
+
+      await stub.transitionAcpSession(acpSession.id, 'assigned', {
+        actorType: 'system',
+        workspaceId: 'ws-before',
+        nodeId: 'node-before',
+      });
+      await stub.transitionAcpSession(acpSession.id, 'running', {
+        actorType: 'vm-agent',
+        acpSdkSessionId: acpSession.id,
+      });
+      const failed = await stub.transitionAcpSession(acpSession.id, 'failed', {
+        actorType: 'vm-agent',
+        errorMessage: 'Strict restore failed',
+      });
+      expect(failed.status).toBe('failed');
+      expect(failed.errorMessage).toBe('Strict restore failed');
+      expect(failed.completedAt).toBeTruthy();
+
+      const prepared = await stub.prepareAcpSessionForFreshStart(acpSession.id, {
+        actorType: 'system',
+        actorId: 'task-runner',
+        reason: 'Degraded snapshot restore fallback',
+        workspaceId: 'ws-after',
+        nodeId: 'node-after',
+      });
+
+      expect(prepared.id).toBe(acpSession.id);
+      expect(prepared.status).toBe('assigned');
+      expect(prepared.workspaceId).toBe('ws-after');
+      expect(prepared.nodeId).toBe('node-after');
+      expect(prepared.acpSdkSessionId).toBeNull();
+      expect(prepared.errorMessage).toBeNull();
+      expect(prepared.completedAt).toBeNull();
+      expect(prepared.startedAt).toBeNull();
+      expect(prepared.lastHeartbeatAt).toBeTruthy();
+
+      const running = await stub.transitionAcpSession(acpSession.id, 'running', {
+        actorType: 'vm-agent',
+        actorId: 'node-after',
+        acpSdkSessionId: acpSession.id,
+      });
+      expect(running.id).toBe(acpSession.id);
+      expect(running.status).toBe('running');
+      expect(running.acpSdkSessionId).toBe(acpSession.id);
+    });
+  });
+
   // =========================================================================
   // Heartbeat
   // =========================================================================
