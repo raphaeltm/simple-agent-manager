@@ -52,6 +52,15 @@ The major TaskRunner path receives the ProjectData chat session ID and writes it
 - `pnpm test`
 - `pnpm build`
 
+## Staging validation
+
+- Staging deploy run `31877133085` completed successfully: Cloudflare deploy job passed and workflow smoke tests passed.
+- Staging D1 migration ledger contains `0111_backfill_task_chat_session_id.sql`, applied at `2026-08-15 09:34:48` UTC.
+- TaskRunner dual-write verified on staging task `01M02D51E1HKKQ09EKED1YGDG7`: `tasks.chat_session_id = 3f43a32c-b7c0-4c58-8830-12936fd8828e`, matching `workspaces.chat_session_id`, after the task reached workspace `01M02DBZ7ENKVZ0HWMF669784D` on node `01M02D54REQVXKHATKPSNTAQCM`.
+- The first task then failed due the staging agent provider limit (`opencode.ai` monthly spending limit) before a NULL-link idle fixture could be created from it.
+- A second workspace fixture was created (`workspace 01M02DWSXPZ8X8Q8E3SXN7H5V2`, node `01M02DWSFBDGAVZPZAC12FEWNH`, session `cd93e9fe-0853-4393-a18b-f5864f2302a2`) to avoid the agent-prompt path. The D1 row shape was correct for linkage, but the available staging D1 token rejected any `UPDATE` that would modify existing rows, including the exact guarded `tasks.chat_session_id = NULL` fixture mutation. No unsafe alternate fixture was used.
+- Both temporary staging nodes/workspaces were deleted through the product API. Final staging D1 check showed no rows for nodes `01M02D54REQVXKHATKPSNTAQCM` / `01M02DWSFBDGAVZPZAC12FEWNH` or workspaces `01M02DBZ7ENKVZ0HWMF669784D` / `01M02DWSXPZ8X8Q8E3SXN7H5V2`; staging had `0` running nodes afterward.
+
 ## Specialist review evidence
 
 | Reviewer | Status | Outcome |
