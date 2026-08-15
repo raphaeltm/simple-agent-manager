@@ -187,6 +187,27 @@ This covers both explicit degraded fallback and strict-restore/reporting races. 
 node/workspaces were deleted immediately after collecting evidence; staging returned to zero active
 nodes/workspaces.
 
+Staging verification of the restore-aware running-transition patch on commit
+`a80b8fe1c874a5550507423b3b742ed52ab3e584` proved the ACP transition repair works and exposed one
+last idempotency gap in TaskRunner recovery completion. Fresh node `01M034A074N6Y1F03TPC9NE5B6`
+heartbeated `agent_version='a80b8fe1c874a5550507423b3b742ed52ab3e584'`; task
+`01M0349W6NK0587C28R3B1W68X`, session `3c9b9203-3f22-4111-b86c-160393e173ed`, workspace
+`01M034ESPT1SQ47A6AWH82A1E0`, agent session `01M034FHR9XERCT0BF658PPCV1`, slept successfully with
+snapshot `01M034GG4EM5BPNGXEQ5JXJ61E`: `status='degraded'`,
+`degradation='transcript-only'`, `sleep_status='sleeping'`, `capture_generation=NULL`,
+`snapshot_generation='01M034K98949MKASJSV0CZ76FJ'`, manifest present, workspace/agent `sleeping`.
+Wake delivery `01M034R19C36V39PC7ZMTWRDP5` created recovery task
+`01M034R54Q8300R3TNA4R1MFM0`, workspace `01M034R89X42T1Q1EY1WQ4B9WA`, agent session
+`01M034RXZPXW7DA1BX6E1Q6C7A`; recovery had `recovery_error=NULL`, restored the session, and the
+transcript contained `wake verified`. However the snapshot row still had `sleep_status='sleeping'`
+and `sleeping_at` set while the recovery task remained `in_progress/running`. That means a
+TaskRunner retry can see `agentStarted=true` and skip the recovery completion block because it was
+inside the start-only branch. The fix makes recovery completion idempotent outside that branch:
+while `resumeSnapshotChatSessionId` remains set, TaskRunner wakes ProjectData, clears the D1
+snapshot claim, and persists the cleared marker even when the agent was already started. The
+staging node/workspaces were deleted immediately after collecting evidence; staging returned to zero
+active nodes/workspaces.
+
 ## Implementation checklist
 
 - [x] Make the final snapshot wait use an environment-configurable no-progress watchdog instead of
@@ -221,6 +242,9 @@ nodes/workspaces.
 - [x] Make the final ProjectData `running` transition snapshot-restore-aware: if the same ACP row
       is already `failed`, reset it to `assigned` and retry `running` on the same callback session
       ID.
+- [x] Make TaskRunner recovery completion idempotent when `agentStarted=true` but
+      `resumeSnapshotChatSessionId` is still set, so a successful wake clears the sleeping snapshot
+      claim on retry.
 - [x] Reset the D1 `agent_sessions` row to `running` after degraded fresh fallback succeeds so a
       strict-restore error callback cannot leave the recovered session visibly failed.
 - [x] Use a wake-specific recovery prompt so degraded fresh fallback waits for the queued follow-up
@@ -312,6 +336,15 @@ nodes/workspaces.
 - Restore-aware running-transition patch full API suite passed:
   `pnpm --filter @simple-agent-manager/api test` (540 files, 7,244 tests).
 - Restore-aware running-transition patch `pnpm format:check` and `git diff --check` passed.
+- Recovery-completion idempotency patch focused unit passed:
+  `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/task-runner-agent-session.test.ts`
+  (1 file, 14 tests).
+- Recovery-completion idempotency patch API typecheck and lint passed:
+  `pnpm --filter @simple-agent-manager/api typecheck` and
+  `pnpm --filter @simple-agent-manager/api lint`.
+- Recovery-completion idempotency patch full API suite passed:
+  `pnpm --filter @simple-agent-manager/api test` (540 files, 7,245 tests).
+- Recovery-completion idempotency patch `pnpm format:check` and `git diff --check` passed.
 - Added ProjectData worker regression coverage for the same-ID `failed → assigned → running`
   recovery primitive. Local `@cloudflare/vitest-pool-workers` execution for the single filtered test
   timed out after 180s without a test result in this container; staging Worker deploy and live

@@ -493,6 +493,44 @@ describe('handleAgentSession', () => {
     expect(state.config.resumeSnapshotChatSessionId).toBeNull();
   });
 
+  it('commits snapshot recovery when a retry sees the agent session already started', async () => {
+    const state = makeState({
+      stepResults: {
+        ...makeState().stepResults,
+        agentSessionId: 'agent-session-existing',
+        agentStarted: true,
+        mcpToken: 'mcp-token-existing',
+      },
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'chat-1',
+      },
+    });
+    const { rc } = makeContext({
+      existingAgentSessionIds: new Set(['agent-session-existing']),
+    });
+
+    await handleAgentSession(state, rc);
+
+    expect(createAgentSessionOnNodeMock).not.toHaveBeenCalled();
+    expect(startAgentSessionOnNodeMock).not.toHaveBeenCalled();
+    expect(wakeSessionMock).toHaveBeenCalledWith(
+      rc.env,
+      'project-1',
+      'chat-1',
+      'workspace-1',
+      'task-1'
+    );
+    expect(completeSessionSnapshotRecoveryMock).toHaveBeenCalledWith(
+      expect.anything(),
+      'chat-1',
+      'task-1',
+      'workspace-1'
+    );
+    expect(state.config.resumeSnapshotChatSessionId).toBeNull();
+    expect(state.currentStep).toBe('running');
+  });
+
   it('repairs a failed ACP row when strict snapshot restore reports restored before marking running', async () => {
     let rejectedRunning = false;
     getAcpSessionMock

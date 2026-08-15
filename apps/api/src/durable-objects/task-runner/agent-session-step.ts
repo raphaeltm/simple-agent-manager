@@ -62,6 +62,7 @@ export async function handleAgentSession(
   // Step 2: Start the SAM-aware agent session (skip if already started)
   // This two-step approach ensures that if create succeeds but start fails,
   // a retry will skip creation and retry only the start call.
+  let stateChanged = false;
   if (!state.stepResults.agentStarted) {
     const { drizzle } = await import('drizzle-orm/d1');
     const schema = await import('../../db/schema');
@@ -126,41 +127,7 @@ export async function handleAgentSession(
     state.stepResults.agentSessionId = result.agentSessionId;
     state.stepResults.mcpToken = result.mcpToken;
     state.stepResults.agentStarted = true;
-
-    if (state.config.resumeSnapshotChatSessionId) {
-      const { drizzle } = await import('drizzle-orm/d1');
-      const schema = await import('../../db/schema');
-      const { completeSessionSnapshotRecovery } = await import('../../services/session-snapshots');
-      const projectDataService = await import('../../services/project-data');
-      // Keep sleepingAt authoritative until the ProjectData lifecycle accepts the
-      // idempotent wake. If this RPC fails, the snapshot remains claimable and a
-      // later recovery attempt can safely converge instead of becoming stranded.
-      const sessionWoken = await projectDataService.wakeSession(
-        rc.env,
-        state.projectId,
-        state.config.resumeSnapshotChatSessionId,
-        state.stepResults.workspaceId,
-        state.taskId
-      );
-      if (!sessionWoken) {
-        throw new Error('Strict session restore succeeded but lifecycle recovery commit failed');
-      }
-      const recoveryCompleted = await completeSessionSnapshotRecovery(
-        drizzle(rc.env.DATABASE, { schema }),
-        state.config.resumeSnapshotChatSessionId,
-        state.taskId,
-        state.stepResults.workspaceId
-      );
-      if (!recoveryCompleted) {
-        throw new Error('Strict session restore succeeded but lifecycle recovery commit failed');
-      }
-      // Recovery is now fully committed in both authoritative stores. Clear the
-      // marker before persisting TaskRunner state so later failures on the awake
-      // replacement follow ordinary task semantics instead of re-sleeping a
-      // snapshot whose sleepingAt claim has already been cleared.
-      state.config.resumeSnapshotChatSessionId = null;
-    }
-    await rc.ctx.storage.put('state', state);
+    stateChanged = true;
 
     log.info('task_runner_do.step.agent_session_started', {
       taskId: state.taskId,
@@ -168,6 +135,45 @@ export async function handleAgentSession(
       agentType,
       mcpServerConfigured: true,
     });
+  }
+
+  if (state.config.resumeSnapshotChatSessionId) {
+    const { drizzle } = await import('drizzle-orm/d1');
+    const schema = await import('../../db/schema');
+    const { completeSessionSnapshotRecovery } = await import('../../services/session-snapshots');
+    const projectDataService = await import('../../services/project-data');
+    // Keep sleepingAt authoritative until the ProjectData lifecycle accepts the
+    // idempotent wake. If this RPC fails, the snapshot remains claimable and a
+    // later recovery attempt can safely converge instead of becoming stranded.
+    const sessionWoken = await projectDataService.wakeSession(
+      rc.env,
+      state.projectId,
+      state.config.resumeSnapshotChatSessionId,
+      state.stepResults.workspaceId,
+      state.taskId
+    );
+    if (!sessionWoken) {
+      throw new Error('Strict session restore succeeded but lifecycle recovery commit failed');
+    }
+    const recoveryCompleted = await completeSessionSnapshotRecovery(
+      drizzle(rc.env.DATABASE, { schema }),
+      state.config.resumeSnapshotChatSessionId,
+      state.taskId,
+      state.stepResults.workspaceId
+    );
+    if (!recoveryCompleted) {
+      throw new Error('Strict session restore succeeded but lifecycle recovery commit failed');
+    }
+    // Recovery is now fully committed in both authoritative stores. Clear the
+    // marker before persisting TaskRunner state so later failures on the awake
+    // replacement follow ordinary task semantics instead of re-sleeping a
+    // snapshot whose sleepingAt claim has already been cleared.
+    state.config.resumeSnapshotChatSessionId = null;
+    stateChanged = true;
+  }
+
+  if (stateChanged) {
+    await rc.ctx.storage.put('state', state);
   }
 
   await transitionToInProgress(state, rc);
