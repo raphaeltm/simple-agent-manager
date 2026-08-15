@@ -246,6 +246,8 @@ export async function provisionNode(
       deployComposeCmd: isDeploymentNode ? env.DEPLOY_COMPOSE_CMD : undefined,
       deployHealthTimeout: isDeploymentNode ? env.DEPLOY_HEALTH_TIMEOUT : undefined,
       sessionSnapshotOperationTimeout: env.SESSION_SNAPSHOT_OPERATION_TIMEOUT,
+      sessionSnapshotProgressReportInterval: env.SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL,
+      sessionSnapshotProgressReportTimeout: env.SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT,
       errorReportFlushInterval: env.ERROR_REPORT_FLUSH_INTERVAL,
       errorReportMaxBatchSize: env.ERROR_REPORT_MAX_BATCH_SIZE,
       errorReportMaxBatchBytes: env.ERROR_REPORT_MAX_BATCH_BYTES,
@@ -376,22 +378,26 @@ export async function provisionNode(
 
     // Persist detailed error to observability database
     try {
-      await persistError(env.OBSERVABILITY_DATABASE, {
-        source: 'api',
-        level: 'error',
-        message: `Node provisioning failed: ${errorMessage}`,
-        context: {
-          component: 'node-provisioning',
+      await persistError(
+        env.OBSERVABILITY_DATABASE,
+        {
+          source: 'api',
+          level: 'error',
+          message: `Node provisioning failed: ${errorMessage}`,
+          context: {
+            component: 'node-provisioning',
+            nodeId: node.id,
+            userId: node.userId,
+            provider: providerName,
+            vmSize: node.vmSize,
+            vmLocation: node.vmLocation,
+            statusCode,
+          },
           nodeId: node.id,
           userId: node.userId,
-          provider: providerName,
-          vmSize: node.vmSize,
-          vmLocation: node.vmLocation,
-          statusCode,
         },
-        nodeId: node.id,
-        userId: node.userId,
-      }, env);
+        env
+      );
     } catch (obsErr) {
       log.error('node_provisioning.observability_persist_failed', serializeError(obsErr));
     }

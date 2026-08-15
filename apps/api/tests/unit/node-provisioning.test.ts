@@ -14,7 +14,7 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
-import { describe, expect,it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import { parseEnvInt } from '../../src/durable-objects/task-runner/helpers';
 
@@ -30,10 +30,7 @@ const doSource = [
   readFileSync(resolve(doDir, 'state-machine.ts'), 'utf8'),
   readFileSync(resolve(doDir, 'helpers.ts'), 'utf8'),
 ].join('\n');
-const indexSource = readFileSync(
-  resolve(process.cwd(), 'src/env.ts'),
-  'utf8'
-);
+const indexSource = readFileSync(resolve(process.cwd(), 'src/env.ts'), 'utf8');
 
 // =============================================================================
 // Node Limit Enforcement
@@ -42,7 +39,7 @@ const indexSource = readFileSync(
 describe('node limit enforcement', () => {
   describe('MAX_NODES_PER_USER env var', () => {
     it('Env interface declares MAX_NODES_PER_USER as optional', () => {
-      expect(indexSource).toContain("MAX_NODES_PER_USER?: string");
+      expect(indexSource).toContain('MAX_NODES_PER_USER?: string');
     });
 
     it('handleNodeProvisioning reads MAX_NODES_PER_USER via parseEnvInt', () => {
@@ -99,7 +96,9 @@ describe('node limit enforcement', () => {
         doSource.indexOf('export async function handleNodeProvisioning('),
         doSource.indexOf('export async function handleNodeAgentReady(')
       );
-      expect(section).toContain("SELECT COUNT(*) as c FROM nodes WHERE user_id = ? AND status IN ('running', 'creating', 'recovery')");
+      expect(section).toContain(
+        "SELECT COUNT(*) as c FROM nodes WHERE user_id = ? AND status IN ('running', 'creating', 'recovery')"
+      );
     });
 
     it('only counts active nodes (excludes deleted/stopped) in limit check', () => {
@@ -162,7 +161,7 @@ describe('node provisioning success path', () => {
       doSource.indexOf('export async function handleNodeProvisioning('),
       doSource.indexOf('export async function handleNodeAgentReady(')
     );
-    expect(section).toContain("name: `Auto: ${state.config.taskTitle.slice(0, 40)}`");
+    expect(section).toContain('name: `Auto: ${state.config.taskTitle.slice(0, 40)}`');
   });
 
   it('sets autoProvisioned = true in step results', () => {
@@ -179,7 +178,7 @@ describe('node provisioning success path', () => {
       doSource.indexOf('export async function handleNodeAgentReady(')
     );
     expect(section).toContain('auto_provisioned_node_id');
-    expect(section).toContain("UPDATE tasks SET auto_provisioned_node_id = ?");
+    expect(section).toContain('UPDATE tasks SET auto_provisioned_node_id = ?');
   });
 
   it('persists state to DO storage after creating node', () => {
@@ -265,7 +264,7 @@ describe('retry for already-provisioned node', () => {
       doSource.indexOf('export async function handleNodeProvisioning('),
       doSource.indexOf('export async function handleNodeAgentReady(')
     );
-    expect(section).toContain("SELECT id, status, error_message FROM nodes WHERE id = ?");
+    expect(section).toContain('SELECT id, status, error_message FROM nodes WHERE id = ?');
   });
 
   it('advances immediately if node is already running on retry', () => {
@@ -426,10 +425,7 @@ describe('task context passed to provisionNode for cloud-init', () => {
 // =============================================================================
 
 describe('provider-aware node provisioning', () => {
-  const nodesSource = readFileSync(
-    resolve(process.cwd(), 'src/services/nodes.ts'),
-    'utf8'
-  );
+  const nodesSource = readFileSync(resolve(process.cwd(), 'src/services/nodes.ts'), 'utf8');
   const strictNodeDeletionSource = readFileSync(
     resolve(process.cwd(), 'src/services/strict-node-deletion.ts'),
     'utf8'
@@ -484,7 +480,7 @@ describe('provider-aware node provisioning', () => {
       nodesSource.indexOf('async function provisionNode'),
       nodesSource.indexOf('async function stopNodeResources')
     );
-    expect(section).toContain('persistError(env.OBSERVABILITY_DATABASE');
+    expect(section).toMatch(/persistError\(\s*env\.OBSERVABILITY_DATABASE/);
     expect(section).toContain("source: 'api'");
     expect(section).toContain("component: 'node-provisioning'");
   });
@@ -520,9 +516,7 @@ describe('provider-aware node provisioning', () => {
   });
 
   it('deleteNodeResources uses node cloudProvider for credential lookup', () => {
-    const section = nodesSource.slice(
-      nodesSource.indexOf('async function deleteNodeResources')
-    );
+    const section = nodesSource.slice(nodesSource.indexOf('async function deleteNodeResources'));
     expect(section).toContain('node.cloudProvider as CredentialProvider');
     expect(section).toMatch(
       /createProviderForUser\(\s*db,\s*attributionUserId,\s*getCredentialEncryptionKey\(env\),\s*env,\s*targetProvider,\s*attributionProjectId\s*\)/
@@ -546,7 +540,9 @@ describe('provider-aware node provisioning', () => {
     expect(verificationSection).toContain('candidate.provider.getVM(providerInstanceId)');
     expect(verificationSection).toContain('presentCandidates.length > 1');
     expect(verificationSection).toContain('throw new Error');
-    expect(deletionSection).toContain('await providerResult.provider.deleteVM(node.providerInstanceId)');
+    expect(deletionSection).toContain(
+      'await providerResult.provider.deleteVM(node.providerInstanceId)'
+    );
   });
 });
 
@@ -555,10 +551,7 @@ describe('provider-aware node provisioning', () => {
 // =============================================================================
 
 describe('provisionNode task context', () => {
-  const nodesSource = readFileSync(
-    resolve(process.cwd(), 'src/services/nodes.ts'),
-    'utf8'
-  );
+  const nodesSource = readFileSync(resolve(process.cwd(), 'src/services/nodes.ts'), 'utf8');
 
   it('defines ProvisionTaskContext interface with projectId, chatSessionId, taskId', () => {
     expect(nodesSource).toContain('export interface ProvisionTaskContext');
@@ -584,6 +577,8 @@ describe('provisionNode task context', () => {
   });
 
   it('passes deploy signing public key to deployment node cloud-init', () => {
-    expect(nodesSource).toContain('deploySigningPubKey: isDeploymentNode ? env.DEPLOY_SIGNING_PUBLIC_KEY : undefined');
+    expect(nodesSource).toContain(
+      'deploySigningPubKey: isDeploymentNode ? env.DEPLOY_SIGNING_PUBLIC_KEY : undefined'
+    );
   });
 });

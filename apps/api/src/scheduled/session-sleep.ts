@@ -231,6 +231,8 @@ export async function runSessionSleepSweep(
       sleepStatus: schema.sessionSnapshots.sleepStatus,
       sleepAfter: schema.sessionSnapshots.sleepAfter,
       sleepClaimId: schema.sessionSnapshots.sleepClaimId,
+      status: schema.sessionSnapshots.status,
+      captureGeneration: schema.sessionSnapshots.captureGeneration,
     })
     .from(schema.sessionSnapshots)
     .where(
@@ -246,6 +248,14 @@ export async function runSessionSleepSweep(
             eq(schema.sessionSnapshots.sleepStatus, 'failed'),
             isNull(schema.sessionSnapshots.sleepAfter),
             lt(schema.sessionSnapshots.sleepAttempts, maxAttempts)
+          ),
+          and(
+            eq(schema.sessionSnapshots.sleepStatus, 'failed'),
+            isNull(schema.sessionSnapshots.sleepAfter),
+            or(
+              eq(schema.sessionSnapshots.status, 'degraded'),
+              isNotNull(schema.sessionSnapshots.captureGeneration)
+            )
           ),
           and(
             eq(schema.sessionSnapshots.sleepStatus, 'preparing'),
@@ -298,7 +308,13 @@ export async function runSessionSleepSweep(
     try {
       if (
         !candidate.workspaceId ||
-        (candidate.sleepStatus !== 'stopping' && candidate.sleepAttempts >= maxAttempts)
+        (candidate.sleepStatus !== 'stopping' &&
+          candidate.sleepAttempts >= maxAttempts &&
+          !(
+            candidate.sleepStatus === 'failed' &&
+            candidate.sleepAfter === null &&
+            (candidate.status === 'degraded' || candidate.captureGeneration)
+          ))
       ) {
         await db
           .update(schema.sessionSnapshots)

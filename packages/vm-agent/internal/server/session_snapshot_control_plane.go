@@ -46,6 +46,16 @@ func (s *Server) completeSnapshot(ctx context.Context, workspaceID, sessionID, c
 	return s.doSnapshotJSON(ctx, http.MethodPost, workspaceID, "/session-snapshot/complete", token, payload, &out)
 }
 
+func (s *Server) reportSnapshotProgress(ctx context.Context, workspaceID, chatSessionID, generation, step, token string) error {
+	payload := map[string]string{
+		"chatSessionId": chatSessionID,
+		"generation":    generation,
+		"step":          step,
+	}
+	var out map[string]interface{}
+	return s.doSnapshotJSON(ctx, http.MethodPost, workspaceID, "/session-snapshot/progress", token, payload, &out)
+}
+
 func (s *Server) fetchSnapshotRestore(ctx context.Context, workspaceID, chatSessionID, token string) (*snapshotRestoreResponse, error) {
 	path := "/session-snapshot/restore?chatSessionId=" + url.QueryEscape(chatSessionID)
 	var out snapshotRestoreResponse

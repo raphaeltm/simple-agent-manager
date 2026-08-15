@@ -322,13 +322,23 @@ func copyRepositoryIndex(ctx context.Context, workDir string) (string, error) {
 }
 
 func createHomeTar(homeDirFn func() (string, error), entryThreshold, totalBudget int64) (string, []snapshotSkippedEntry, error) {
-	return createSessionStateTar(homeDirFn, entryThreshold, totalBudget, false)
+	return createSessionStateTarWithContext(context.Background(), homeDirFn, entryThreshold, totalBudget, false, nil)
 }
 
 // createSessionStateTar archives HOME plus any harness state root configured
 // outside HOME. External source paths are never serialized: they are mapped to
 // a fixed logical namespace and resolved again from the fresh runtime on restore.
 func createSessionStateTar(homeDirFn func() (string, error), entryThreshold, totalBudget int64, includeExternalRoots bool) (string, []snapshotSkippedEntry, error) {
+	return createSessionStateTarWithContext(context.Background(), homeDirFn, entryThreshold, totalBudget, includeExternalRoots, nil)
+}
+
+func createSessionStateTarWithContext(
+	ctx context.Context,
+	homeDirFn func() (string, error),
+	entryThreshold, totalBudget int64,
+	includeExternalRoots bool,
+	reportProgress func(context.Context, string),
+) (string, []snapshotSkippedEntry, error) {
 	home, err := homeDirFn()
 	if err != nil {
 		return "", nil, err
@@ -356,6 +366,10 @@ func createSessionStateTar(homeDirFn func() (string, error), entryThreshold, tot
 		if walkErr != nil {
 			break
 		}
+		if err := ctx.Err(); err != nil {
+			walkErr = err
+			break
+		}
 		info, statErr := os.Lstat(root.path)
 		if os.IsNotExist(statErr) {
 			continue
@@ -369,6 +383,12 @@ func createSessionStateTar(homeDirFn func() (string, error), entryThreshold, tot
 			break
 		}
 		walkErr = filepath.WalkDir(root.path, func(path string, d os.DirEntry, walkPathErr error) error {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			if reportProgress != nil {
+				reportProgress(ctx, "home-walk")
+			}
 			if walkPathErr != nil || path == root.path {
 				return walkPathErr
 			}
@@ -419,7 +439,11 @@ func createSessionStateTar(homeDirFn func() (string, error), entryThreshold, tot
 				if openErr != nil {
 					return openErr
 				}
-				n, copyErr := io.Copy(tw, f)
+				n, copyErr := copySnapshotFileWithContext(ctx, tw, f, func() {
+					if reportProgress != nil {
+						reportProgress(ctx, "home-copy")
+					}
+				})
 				closeErr := f.Close()
 				written += n
 				if copyErr != nil {
@@ -449,6 +473,36 @@ func createSessionStateTar(homeDirFn func() (string, error), entryThreshold, tot
 		return "", skipped, fmt.Errorf("validate generated HOME archive: %w", err)
 	}
 	return path, skipped, nil
+}
+
+func copySnapshotFileWithContext(ctx context.Context, dst io.Writer, src io.Reader, reportProgress func()) (int64, error) {
+	buf := make([]byte, 1024*1024)
+	var written int64
+	for {
+		if err := ctx.Err(); err != nil {
+			return written, err
+		}
+		nr, readErr := src.Read(buf)
+		if nr > 0 {
+			nw, writeErr := dst.Write(buf[:nr])
+			written += int64(nw)
+			if reportProgress != nil {
+				reportProgress()
+			}
+			if writeErr != nil {
+				return written, writeErr
+			}
+			if nw != nr {
+				return written, io.ErrShortWrite
+			}
+		}
+		if readErr == io.EOF {
+			return written, nil
+		}
+		if readErr != nil {
+			return written, readErr
+		}
+	}
 }
 
 func resolveLocalExternalSnapshotRoots(home string) ([]snapshotArchiveRoot, error) {

@@ -5,9 +5,9 @@ import (
 	"log/slog"
 	"sync"
 	"time"
-)
 
-const defaultSessionSnapshotOperationTimeout = 15 * time.Minute
+	"github.com/workspace/vm-agent/internal/config"
+)
 
 func (s *Server) sessionSnapshotLock(chatSessionID string) *sync.Mutex {
 	s.sessionSnapshotMu.Lock()
@@ -49,7 +49,7 @@ func (s *Server) sessionSnapshotOperationTimeout() time.Duration {
 	if s.config != nil && s.config.SessionSnapshotOperationTimeout > 0 {
 		return s.config.SessionSnapshotOperationTimeout
 	}
-	return defaultSessionSnapshotOperationTimeout
+	return config.DefaultSessionSnapshotOperationTimeout
 }
 
 func (s *Server) startBackgroundSessionSnapshot(input *sessionSnapshotHandlerInput) bool {

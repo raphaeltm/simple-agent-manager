@@ -7,6 +7,8 @@ import {
   buildSessionSnapshotR2Key,
   type CompleteSessionSnapshotInput,
   getSessionSnapshotConfig,
+  sessionLifecycleError,
+  type SessionSnapshotManifest,
 } from './session-snapshot-artifacts';
 import { scheduleSessionSnapshotSleep } from './session-snapshot-sleep-lifecycle';
 
@@ -128,6 +130,89 @@ export async function completeSessionSnapshot(
       runtime: input.runtime,
     });
   }
+}
+
+export async function recordSessionSnapshotProgress(
+  db: Db,
+  input: {
+    chatSessionId: string;
+    generation: string;
+    now?: Date;
+  }
+): Promise<boolean> {
+  const result = await db
+    .update(schema.sessionSnapshots)
+    .set({
+      updatedAt: (input.now ?? new Date()).toISOString(),
+    })
+    .where(
+      and(
+        eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId),
+        eq(schema.sessionSnapshots.captureGeneration, input.generation)
+      )
+    );
+  return (result.meta.changes ?? 0) > 0;
+}
+
+export async function completeActiveSessionSnapshotAsDegraded(
+  db: Db,
+  env: Env,
+  input: {
+    workspaceId: string;
+    chatSessionId: string;
+    agentSessionId: string | null;
+    runtime: string;
+    captureGeneration: string;
+    reason: string;
+    agentType?: string;
+    acpSessionId?: string;
+  }
+): Promise<boolean> {
+  const current = await db
+    .select({ captureGeneration: schema.sessionSnapshots.captureGeneration })
+    .from(schema.sessionSnapshots)
+    .where(
+      and(
+        eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId),
+        eq(schema.sessionSnapshots.captureGeneration, input.captureGeneration)
+      )
+    )
+    .get();
+  if (!current) return false;
+
+  const reason = sessionLifecycleError(env, input.reason);
+  const createdAt = new Date().toISOString();
+  const manifest: SessionSnapshotManifest = {
+    version: 1,
+    chatSessionId: input.chatSessionId,
+    workspaceId: input.workspaceId,
+    agentSessionId: input.agentSessionId ?? undefined,
+    status: 'degraded',
+    degradation: 'transcript-only',
+    skipped: [{ path: 'workspace-snapshot', reason }],
+    artifacts: {},
+    createdAt,
+  };
+  if (input.acpSessionId) {
+    manifest.acpSessionId = input.acpSessionId;
+  }
+  if (input.agentType) {
+    manifest.agentType = input.agentType;
+  }
+
+  await completeSessionSnapshot(db, env, {
+    workspaceId: input.workspaceId,
+    chatSessionId: input.chatSessionId,
+    agentSessionId: input.agentSessionId,
+    runtime: input.runtime,
+    baseCommit: null,
+    captureGeneration: input.captureGeneration,
+    status: 'degraded',
+    degradation: 'transcript-only',
+    manifest,
+    artifactSizes: {},
+  });
+  return true;
 }
 
 export async function getRestorableSessionSnapshot(

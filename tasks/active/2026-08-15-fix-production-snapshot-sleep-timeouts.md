@@ -61,13 +61,13 @@ Initial D1 inspection on 2026-08-15 found the failing class split into three con
 Cloudflare Worker log queries were inconclusive because production log sampling is enabled at 1%;
 absence of matching log events was not treated as evidence of absence.
 
-## Root cause to confirm and fix
+## Root cause
 
 The active production failures are not explained solely by stale binaries. Current vm-agent nodes can
 leave `session_snapshots.capture_generation` pending until the Worker-side 300s wait expires, and
 the control plane then burns the retry budget while leaving the workspace awake.
 
-The code path has two fail-closed gaps:
+The code path had two fail-closed gaps:
 
 1. A vm-agent background snapshot failure after `/session-snapshot/prepare` logs locally but never
    calls back to put the D1 row into a terminal `failed` or `degraded` state. The Worker only polls
@@ -76,8 +76,8 @@ The code path has two fail-closed gaps:
    compute. Production already has resumable degraded manifests (`home-skipped`,
    `transcript-only`) that should sleep per the updated incident policy instead of stranding VMs.
 
-There is also a rule-43 shape issue: snapshot capture scales with workspace contents, but the Worker
-wait currently uses a fixed 300s wall clock without an explicit progress/idle watchdog contract.
+There was also a rule-43 shape issue: snapshot capture scales with workspace contents, but the
+Worker wait used a fixed 300s wall clock without an explicit progress/idle watchdog contract.
 
 The stale-node relay TLS failure remains part of the evidence and must be covered by the release
 contract: degraded relay outcomes must be durable, visible, retryable where appropriate, and must not
@@ -85,23 +85,25 @@ permanently strand the workspace.
 
 ## Implementation checklist
 
-- [ ] Make the final snapshot wait use an environment-configurable no-progress watchdog instead of
+- [x] Make the final snapshot wait use an environment-configurable no-progress watchdog instead of
       an undersized fixed wall-clock for size-scaled capture.
-- [ ] Add durable snapshot progress reporting from current vm-agents so slow-but-progressing capture
+- [x] Add durable snapshot progress reporting from current vm-agents so slow-but-progressing capture
       extends the wait while stalled/no-progress capture is terminalized.
-- [ ] Ensure vm-agent archive/capture work observes context cancellation and reports progress during
+- [x] Make vm-agent progress callback interval/timeout explicit env-backed config and pass those
+      values through cloud-init and Instant container launch.
+- [x] Ensure vm-agent archive/capture work observes context cancellation and reports progress during
       long HOME walks or uploads.
-- [ ] When a background capture stalls after `/prepare`, durably complete the generation as a
+- [x] When a background capture stalls after `/prepare`, durably complete the generation as a
       degraded transcript-only snapshot (or another explicit degraded terminal state) so the
       workspace can sleep and stale late completions are rejected by generation matching.
-- [ ] Treat verified degraded snapshots as releasable for completed/idle sleep, while retaining
+- [x] Treat verified degraded snapshots as releasable for completed/idle sleep, while retaining
       visible degradation/sleep warning state.
-- [ ] Verify degraded snapshot manifests and any artifacts they do contain before teardown.
-- [ ] Preserve fail-visible retry behavior for true pre-teardown errors without permanently
+- [x] Verify degraded snapshot manifests and any artifacts they do contain before teardown.
+- [x] Preserve fail-visible retry behavior for true pre-teardown errors without permanently
       stranding an awake workspace.
-- [ ] Add rule-02 regressions for slow-but-progressing snapshots and stalled/no-progress snapshots.
-- [ ] Add cross-boundary contract coverage for snapshot progress and degraded completion handling.
-- [ ] Update public lifecycle/API docs so they match the incident policy: complete/idle sessions may
+- [x] Add rule-02 regressions for slow-but-progressing snapshots and stalled/no-progress snapshots.
+- [x] Add cross-boundary contract coverage for snapshot progress and degraded completion handling.
+- [x] Update public lifecycle/API docs so they match the incident policy: complete/idle sessions may
       sleep on a verified degraded snapshot instead of keeping compute alive forever.
 - [ ] Verify on staging with fresh vm-agent nodes: a real session sleeps end-to-end, workspace
       releases, and the session is resumable on wake.
@@ -123,6 +125,23 @@ permanently strand the workspace.
 - Staging proves real VM sleep/wake with zero residual staging VMs at rest.
 - CI is green, the PR is merged, production deploy completes, and production D1 shows the incident
   rows no longer progressing into new stranded `RUNNING` workspaces.
+
+## Local validation evidence
+
+- API lint passed: `pnpm --filter @simple-agent-manager/api lint`.
+- API typecheck passed: `pnpm --filter @simple-agent-manager/api typecheck`.
+- Full API unit suite passed: 539 files, 7,237 tests.
+- Focused API regressions passed: 7 files, 80 tests covering scheduled repair of exhausted rows,
+  degraded sleep release, slow-progress vs no-progress final snapshot behavior, progress route
+  contract, degraded artifact verification, Instant container env pass-through, provision-node
+  cloud-init env pass-through, and D1-backed active-generation terminalization.
+- Cloud-init validation passed: typecheck, build, full unit suite (193 tests).
+- Focused vm-agent snapshot tests passed with Go 1.25.0.
+- `go build ./...` and `go vet ./...` passed in `packages/vm-agent`.
+- Full `go test ./...` in `packages/vm-agent` is blocked in this local container by existing
+  Docker-dependent tests failing with `exec: "docker": executable file not found in $PATH`
+  (`internal/pty`, `internal/server`).
+- `pnpm format:check` passed.
 
 ## Coordination constraints
 

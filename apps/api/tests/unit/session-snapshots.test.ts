@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest';
+import Database from 'better-sqlite3';
+import { drizzle } from 'drizzle-orm/d1';
+import { describe, expect, it, vi } from 'vitest';
 
+import * as schema from '../../src/db/schema';
 import type { Env } from '../../src/env';
 import {
   buildSessionSnapshotR2Key,
+  completeActiveSessionSnapshotAsDegraded,
   DEFAULT_SESSION_SLEEP_AFTER_MS,
   DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS,
   DEFAULT_SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES,
@@ -12,7 +16,11 @@ import {
   DEFAULT_SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS,
   DEFAULT_SESSION_SNAPSHOT_TTL_DAYS,
   getSessionSnapshotConfig,
+  isSessionSnapshotSleepReleasable,
+  recordSessionSnapshotProgress,
+  verifySessionSnapshotArtifactsForSleep,
 } from '../../src/services/session-snapshots';
+import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 
 function env(overrides: Partial<Env> = {}): Env {
   return overrides as Env;
@@ -71,5 +79,178 @@ describe('session snapshot R2 keys', () => {
     expect(buildSessionSnapshotR2Key(input, 'chat/../session 1', generation, 'manifest')).toBe(
       `snapshots/chat-..-session-1/${generation}/manifest.json`
     );
+  });
+});
+
+describe('session snapshot sleep artifact verification', () => {
+  const generation = '01JGENERATION00000000000000';
+  const sha = '4ea140588150773ce3aace786aeef7f4049ce100fa649c94fbbddb960f1da942';
+
+  function checksum(hex: string): ArrayBuffer {
+    return Uint8Array.from(hex.match(/.{2}/g) ?? [], (byte) => Number.parseInt(byte, 16)).buffer;
+  }
+
+  it('allows a transcript-only degraded snapshot to release compute after manifest verification', async () => {
+    const testEnv = env({
+      SESSION_SNAPSHOT_R2_PREFIX: 'snapshots',
+      R2: {
+        head: async (key: string) =>
+          key.endsWith('/manifest.json') ? { size: 120, checksums: {} } : null,
+      } as unknown as Env['R2'],
+    });
+    const snapshot = {
+      workspaceId: 'workspace-1',
+      chatSessionId: 'chat-1',
+      status: 'degraded',
+      degradation: 'transcript-only',
+      snapshotGeneration: generation,
+      manifestR2Key: buildSessionSnapshotR2Key(testEnv, 'chat-1', generation, 'manifest'),
+      manifestJson: JSON.stringify({
+        version: 1,
+        chatSessionId: 'chat-1',
+        workspaceId: 'workspace-1',
+        status: 'degraded',
+        degradation: 'transcript-only',
+        skipped: [{ path: 'workspace-snapshot', reason: 'no progress' }],
+        artifacts: {},
+        createdAt: '2026-08-15T00:00:00.000Z',
+      }),
+      homeR2Key: null,
+      homeSha256: null,
+      wipR2Key: null,
+      wipSha256: null,
+    } as any;
+
+    expect(isSessionSnapshotSleepReleasable(snapshot)).toBe(true);
+    await expect(verifySessionSnapshotArtifactsForSleep(testEnv, snapshot)).resolves.toBe(true);
+    await expect(
+      verifySessionSnapshotArtifactsForSleep(testEnv, {
+        ...snapshot,
+        workspaceId: 'workspace-2',
+      })
+    ).resolves.toBe(false);
+  });
+
+  it('requires every artifact claimed by a degraded manifest to match R2', async () => {
+    const testEnv = env({
+      SESSION_SNAPSHOT_R2_PREFIX: 'snapshots',
+      R2: {
+        head: async (key: string) =>
+          key.endsWith('/manifest.json')
+            ? { size: 120, checksums: {} }
+            : key.endsWith('/wip.bundle')
+              ? { size: 42, checksums: { sha256: checksum(sha) } }
+              : null,
+      } as unknown as Env['R2'],
+    });
+    const snapshot = {
+      workspaceId: 'workspace-1',
+      chatSessionId: 'chat-1',
+      status: 'degraded',
+      degradation: 'home-skipped',
+      snapshotGeneration: generation,
+      manifestR2Key: buildSessionSnapshotR2Key(testEnv, 'chat-1', generation, 'manifest'),
+      manifestJson: JSON.stringify({
+        version: 1,
+        chatSessionId: 'chat-1',
+        workspaceId: 'workspace-1',
+        status: 'degraded',
+        degradation: 'home-skipped',
+        skipped: [{ path: '$HOME', reason: 'snapshot budget exhausted' }],
+        artifacts: { wip: { sizeBytes: 42, sha256: sha } },
+        createdAt: '2026-08-15T00:00:00.000Z',
+      }),
+      homeR2Key: null,
+      homeSha256: null,
+      wipR2Key: buildSessionSnapshotR2Key(testEnv, 'chat-1', generation, 'wip'),
+      wipSha256: sha,
+    } as any;
+
+    await expect(verifySessionSnapshotArtifactsForSleep(testEnv, snapshot)).resolves.toBe(true);
+    await expect(
+      verifySessionSnapshotArtifactsForSleep(testEnv, { ...snapshot, wipSha256: '0'.repeat(64) })
+    ).resolves.toBe(false);
+  });
+});
+
+describe('session snapshot progress persistence', () => {
+  it('records progress and terminalizes the active generation even when a previous snapshot is available', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      sqlite
+        .prepare(
+          `INSERT INTO session_snapshots
+             (id, workspace_id, user_id, chat_session_id, agent_session_id, runtime, status,
+              degradation, manifest_r2_key, snapshot_generation, capture_generation, expires_at,
+              updated_at)
+           VALUES ('snapshot-1', 'workspace-1', 'user-1', 'chat-1', 'agent-1', 'vm',
+              'available', 'none', 'snapshots/chat-1/previous/manifest.json', 'previous',
+              'capture-1', '2026-08-20T00:00:00.000Z', '2026-08-15T00:00:00.000Z')`
+        )
+        .run();
+      const r2 = { put: vi.fn(), delete: vi.fn(async () => undefined), head: vi.fn() };
+      const testEnv = env({
+        DATABASE: createSqliteD1(sqlite),
+        R2: r2 as unknown as Env['R2'],
+        SESSION_SNAPSHOT_R2_PREFIX: 'snapshots',
+      });
+      const db = drizzle(testEnv.DATABASE, { schema });
+
+      await expect(
+        recordSessionSnapshotProgress(db, {
+          chatSessionId: 'chat-1',
+          generation: 'capture-1',
+          now: new Date('2026-08-15T00:01:00.000Z'),
+        })
+      ).resolves.toBe(true);
+      expect(
+        sqlite.prepare(`SELECT updated_at FROM session_snapshots WHERE id = 'snapshot-1'`).get()
+      ).toEqual({ updated_at: '2026-08-15T00:01:00.000Z' });
+
+      await expect(
+        completeActiveSessionSnapshotAsDegraded(db, testEnv, {
+          workspaceId: 'workspace-1',
+          chatSessionId: 'chat-1',
+          agentSessionId: 'agent-1',
+          runtime: 'vm',
+          captureGeneration: 'capture-1',
+          acpSessionId: 'acp-1',
+          agentType: 'openai-codex',
+          reason: 'Workspace snapshot made no progress for 120000ms',
+        })
+      ).resolves.toBe(true);
+
+      const row = sqlite
+        .prepare(
+          `SELECT status, degradation, snapshot_generation, capture_generation, manifest_json
+           FROM session_snapshots WHERE id = 'snapshot-1'`
+        )
+        .get() as {
+        status: string;
+        degradation: string;
+        snapshot_generation: string;
+        capture_generation: string | null;
+        manifest_json: string;
+      };
+      expect(row.status).toBe('degraded');
+      expect(row.degradation).toBe('transcript-only');
+      expect(row.snapshot_generation).toBe('capture-1');
+      expect(row.capture_generation).toBeNull();
+      expect(JSON.parse(row.manifest_json)).toMatchObject({
+        status: 'degraded',
+        degradation: 'transcript-only',
+        acpSessionId: 'acp-1',
+        agentType: 'openai-codex',
+        artifacts: {},
+      });
+      expect(r2.put).toHaveBeenCalledWith(
+        'snapshots/chat-1/capture-1/manifest.json',
+        expect.stringContaining('Workspace snapshot made no progress'),
+        expect.objectContaining({ httpMetadata: { contentType: 'application/json' } })
+      );
+    } finally {
+      sqlite.close();
+    }
   });
 });

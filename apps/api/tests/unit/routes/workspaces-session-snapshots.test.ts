@@ -12,6 +12,7 @@ const mocks = vi.hoisted(() => ({
   generateSessionSnapshotDirectUploadUrl: vi.fn(),
   getRestorableSessionSnapshot: vi.fn(),
   prepareSessionSnapshot: vi.fn(),
+  recordSessionSnapshotProgress: vi.fn(),
   recordSessionSnapshotRestoreResult: vi.fn(),
   resolveSessionSnapshotUploadTargets: vi.fn(),
   sessionSnapshotDirectUploadAvailable: vi.fn(),
@@ -37,6 +38,7 @@ vi.mock('../../../src/services/session-snapshots', async (importOriginal) => {
     completeSessionSnapshot: mocks.completeSessionSnapshot,
     getRestorableSessionSnapshot: mocks.getRestorableSessionSnapshot,
     prepareSessionSnapshot: mocks.prepareSessionSnapshot,
+    recordSessionSnapshotProgress: mocks.recordSessionSnapshotProgress,
     recordSessionSnapshotRestoreResult: mocks.recordSessionSnapshotRestoreResult,
   };
 });
@@ -107,6 +109,7 @@ describe('workspaces session snapshot callback routes', () => {
       'https://account.r2.cloudflarestorage.com/test-snapshots/upload'
     );
     mocks.verifySessionSnapshotRelayAuthorization.mockResolvedValue(undefined);
+    mocks.recordSessionSnapshotProgress.mockResolvedValue(true);
     mocks.resolveSessionSnapshotUploadTargets.mockImplementation(
       async (_env: Env, input: { directUploadSupported: boolean }) => ({
         upload: input.directUploadSupported
@@ -226,6 +229,52 @@ describe('workspaces session snapshot callback routes', () => {
       expect.objectContaining({ directUploadSupported: true })
     );
     expect(mocks.ensureSessionSnapshotUploadRelay).not.toHaveBeenCalled();
+  });
+
+  it('records vm-agent snapshot progress for the current capture generation', async () => {
+    const res = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/progress',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer callback-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chatSessionId: 'chat-1',
+          generation: 'generation-1',
+          step: 'home-walk',
+        }),
+      },
+      runtimeBindings
+    );
+
+    expect(res.status).toBe(204);
+    expect(mocks.recordSessionSnapshotProgress).toHaveBeenCalledWith(expect.anything(), {
+      chatSessionId: 'chat-1',
+      generation: 'generation-1',
+    });
+  });
+
+  it('rejects snapshot progress for a stale capture generation', async () => {
+    mocks.recordSessionSnapshotProgress.mockResolvedValueOnce(false);
+    const res = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/progress',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer callback-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chatSessionId: 'chat-1',
+          generation: 'generation-old',
+        }),
+      },
+      runtimeBindings
+    );
+
+    expect(res.status).toBe(409);
   });
 
   it('offloads one relay replacement when a legacy node has no current peer', async () => {

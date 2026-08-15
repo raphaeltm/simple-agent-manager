@@ -1,4 +1,4 @@
-import { and, eq, inArray, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import { and, eq, inArray, isNotNull, isNull, lt, lte, ne, or, sql } from 'drizzle-orm';
 import type { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -77,6 +77,14 @@ export async function claimSessionSnapshotSleep(
     (env as SnapshotLeaseEnv).SESSION_SLEEP_MAX_ATTEMPTS,
     DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS
   );
+  const repairableStrandedFailure = and(
+    eq(schema.sessionSnapshots.sleepStatus, 'failed'),
+    isNull(schema.sessionSnapshots.sleepAfter),
+    or(
+      eq(schema.sessionSnapshots.status, 'degraded'),
+      isNotNull(schema.sessionSnapshots.captureGeneration)
+    )
+  );
   const dueCondition = input.force
     ? or(
         isNull(schema.sessionSnapshots.sleepStatus),
@@ -91,7 +99,8 @@ export async function claimSessionSnapshotSleep(
           eq(schema.sessionSnapshots.sleepStatus, 'failed'),
           isNull(schema.sessionSnapshots.sleepAfter),
           lt(schema.sessionSnapshots.sleepAttempts, maxAttempts)
-        )
+        ),
+        repairableStrandedFailure
       );
   // A final verified snapshot is produced inside sleepWorkspaceSession. Pending,
   // degraded, and failed captures must therefore remain claimable; requiring an
@@ -119,7 +128,7 @@ export async function claimSessionSnapshotSleep(
         eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId),
         claimableSnapshotCondition,
         isNull(schema.sessionSnapshots.sleepingAt),
-        lt(schema.sessionSnapshots.sleepAttempts, maxAttempts),
+        or(lt(schema.sessionSnapshots.sleepAttempts, maxAttempts), repairableStrandedFailure),
         or(
           dueCondition,
           and(
@@ -183,7 +192,7 @@ export async function claimSessionSnapshotSleep(
     ? 'snapshot_missing'
     : snapshot.sleepingAt
       ? 'already_sleeping'
-      : snapshot.status !== 'available' || snapshot.degradation !== 'none'
+      : snapshot.status !== 'available' && snapshot.status !== 'degraded'
         ? 'snapshot_not_complete'
         : snapshot.sleepAttempts >= maxAttempts
           ? 'sleep_attempts_exhausted'
@@ -365,9 +374,11 @@ async function markSessionSnapshotSleepingWithConfig(
   env: Env | undefined,
   chatSessionId: string,
   now: Date,
-  claimId?: string
+  claimId?: string,
+  sleepWarning?: string | null
 ): Promise<boolean> {
   const ttlDays = env ? getSessionSnapshotConfig(env).ttlDays : DEFAULT_SESSION_SNAPSHOT_TTL_DAYS;
+  const warning = sleepWarning && env ? sessionLifecycleError(env, sleepWarning) : null;
   const result = await db
     .update(schema.sessionSnapshots)
     .set({
@@ -377,7 +388,7 @@ async function markSessionSnapshotSleepingWithConfig(
       recoveryError: null,
       sleepStatus: 'sleeping',
       sleepAfter: null,
-      sleepError: null,
+      sleepError: warning,
       sleepClaimId: null,
       sleepClaimedAt: null,
       updatedAt: now.toISOString(),
@@ -385,8 +396,16 @@ async function markSessionSnapshotSleepingWithConfig(
     .where(
       and(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
-        eq(schema.sessionSnapshots.status, 'available'),
-        eq(schema.sessionSnapshots.degradation, 'none'),
+        or(
+          and(
+            eq(schema.sessionSnapshots.status, 'available'),
+            eq(schema.sessionSnapshots.degradation, 'none')
+          ),
+          and(
+            eq(schema.sessionSnapshots.status, 'degraded'),
+            ne(schema.sessionSnapshots.degradation, 'none')
+          )
+        ),
         ...(claimId
           ? [
               eq(schema.sessionSnapshots.sleepStatus, 'stopping'),
@@ -403,9 +422,17 @@ export async function finalizeSessionSnapshotSleeping(
   env: Env,
   chatSessionId: string,
   claimId: string,
-  now = new Date()
+  now = new Date(),
+  options: { sleepWarning?: string | null } = {}
 ): Promise<boolean> {
-  return markSessionSnapshotSleepingWithConfig(db, env, chatSessionId, now, claimId);
+  return markSessionSnapshotSleepingWithConfig(
+    db,
+    env,
+    chatSessionId,
+    now,
+    claimId,
+    options.sleepWarning
+  );
 }
 
 export async function scheduleSessionSnapshotSleep(

@@ -124,6 +124,7 @@ export interface SessionSnapshotCaptureState {
   degradation: string;
   snapshotGeneration: string | null;
   captureGeneration: string | null;
+  updatedAt: string;
 }
 
 export async function getSessionSnapshotCaptureState(
@@ -137,6 +138,7 @@ export async function getSessionSnapshotCaptureState(
         degradation: schema.sessionSnapshots.degradation,
         snapshotGeneration: schema.sessionSnapshots.snapshotGeneration,
         captureGeneration: schema.sessionSnapshots.captureGeneration,
+        updatedAt: schema.sessionSnapshots.updatedAt,
       })
       .from(schema.sessionSnapshots)
       .where(eq(schema.sessionSnapshots.chatSessionId, chatSessionId))
@@ -203,6 +205,33 @@ function manifestArtifactSize(
   }
 }
 
+function manifestArtifact(
+  manifestJson: string | null,
+  artifact: 'home' | 'wip'
+): { sizeBytes: number; sha256: string } | null {
+  if (!manifestJson) return null;
+  try {
+    const manifest = parseJsonRecord(manifestJson, 'session snapshot manifest');
+    const artifacts = maybeJsonRecord(manifest.artifacts);
+    const artifactEntry = maybeJsonRecord(artifacts?.[artifact]);
+    if (!artifactEntry) return null;
+    const sizeBytes = artifactEntry.sizeBytes;
+    const sha256 = artifactEntry.sha256;
+    if (
+      typeof sizeBytes !== 'number' ||
+      !Number.isSafeInteger(sizeBytes) ||
+      sizeBytes < 0 ||
+      typeof sha256 !== 'string' ||
+      !/^[a-f0-9]{64}$/i.test(sha256)
+    ) {
+      return null;
+    }
+    return { sizeBytes, sha256: sha256.toLowerCase() };
+  } catch {
+    return null;
+  }
+}
+
 export function buildSessionSnapshotR2Key(
   env: Env,
   chatSessionId: string,
@@ -215,6 +244,18 @@ export function buildSessionSnapshotR2Key(
   const suffix =
     artifact === 'home' ? 'home.tar' : artifact === 'wip' ? 'wip.bundle' : 'manifest.json';
   return `${r2Prefix}/${sessionKey}/${generationKey}/${suffix}`;
+}
+
+export function isSessionSnapshotSleepReleasable(
+  snapshot: schema.SessionSnapshot | null | undefined
+): snapshot is schema.SessionSnapshot {
+  if (!snapshot?.snapshotGeneration || !snapshot.manifestR2Key || !snapshot.manifestJson) {
+    return false;
+  }
+  if (snapshot.status === 'available') {
+    return snapshot.degradation === 'none' && Boolean(snapshot.homeR2Key && snapshot.homeSha256);
+  }
+  return snapshot.status === 'degraded' && snapshot.degradation !== 'none';
 }
 
 /** Re-certify the exact immutable generation before releasing live compute. */
@@ -279,6 +320,82 @@ export async function verifyRestorableSessionSnapshotArtifacts(
     wip?.size === wipSize &&
     checksumHex(wip.checksums.sha256) === snapshot.wipSha256.toLowerCase()
   );
+}
+
+/**
+ * Re-certify a snapshot generation that is safe to release compute for sleep.
+ *
+ * `available/none` keeps the stricter restorable contract: HOME must exist and
+ * match the manifest. Degraded snapshots can release compute only after the
+ * manifest is durable and every artifact still claimed by the manifest is
+ * present with the expected key, size, and checksum. Transcript-only degraded
+ * snapshots therefore verify the manifest and intentionally have no artifacts.
+ */
+export async function verifySessionSnapshotArtifactsForSleep(
+  env: Env,
+  snapshot: schema.SessionSnapshot
+): Promise<boolean> {
+  if (!isSessionSnapshotSleepReleasable(snapshot) || !snapshot.snapshotGeneration) return false;
+  if (snapshot.status === 'available' && snapshot.degradation === 'none') {
+    return verifyRestorableSessionSnapshotArtifacts(env, snapshot);
+  }
+
+  const expectedManifestKey = buildSessionSnapshotR2Key(
+    env,
+    snapshot.chatSessionId,
+    snapshot.snapshotGeneration,
+    'manifest'
+  );
+  if (snapshot.manifestR2Key !== expectedManifestKey) return false;
+
+  const manifestJson = snapshot.manifestJson;
+  if (!manifestJson) return false;
+  let manifest: Record<string, unknown>;
+  try {
+    manifest = parseJsonRecord(manifestJson, 'session snapshot manifest');
+  } catch {
+    return false;
+  }
+  if (
+    manifest.version !== 1 ||
+    manifest.chatSessionId !== snapshot.chatSessionId ||
+    manifest.workspaceId !== snapshot.workspaceId ||
+    manifest.status !== snapshot.status ||
+    manifest.degradation !== snapshot.degradation
+  ) {
+    return false;
+  }
+
+  const manifestHead = await env.R2.head(snapshot.manifestR2Key);
+  if (!manifestHead) return false;
+
+  for (const artifact of ['home', 'wip'] as const) {
+    const claimed = manifestArtifact(snapshot.manifestJson, artifact);
+    const key = artifact === 'home' ? snapshot.homeR2Key : snapshot.wipR2Key;
+    const sha256 = artifact === 'home' ? snapshot.homeSha256 : snapshot.wipSha256;
+    if (!claimed) {
+      if (key || sha256) return false;
+      continue;
+    }
+    if (!key || !sha256 || sha256.toLowerCase() !== claimed.sha256) return false;
+    const expectedKey = buildSessionSnapshotR2Key(
+      env,
+      snapshot.chatSessionId,
+      snapshot.snapshotGeneration,
+      artifact
+    );
+    if (key !== expectedKey) return false;
+    const object = await env.R2.head(key);
+    if (
+      !object ||
+      object.size !== claimed.sizeBytes ||
+      checksumHex(object.checksums.sha256) !== claimed.sha256
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function snapshotExpiry(now: Date, ttlDays: number): string {

@@ -820,6 +820,18 @@ export class VmAgentContainer extends Container<Env> {
                 SESSION_SNAPSHOT_OPERATION_TIMEOUT: this.env.SESSION_SNAPSHOT_OPERATION_TIMEOUT,
               }
             : {}),
+          ...(this.env.SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL
+            ? {
+                SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL:
+                  this.env.SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL,
+              }
+            : {}),
+          ...(this.env.SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT
+            ? {
+                SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT:
+                  this.env.SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT,
+              }
+            : {}),
           ...(this.env.CF_CONTAINER_CLONE_FILTER
             ? { STANDALONE_CLONE_FILTER: this.env.CF_CONTAINER_CLONE_FILTER }
             : {}),
@@ -885,16 +897,19 @@ export class VmAgentContainer extends Container<Env> {
       failSessionSnapshotSleepBeforeTeardown,
       finalizeSessionSnapshotSleeping,
       getRestorableSessionSnapshot,
-      verifyRestorableSessionSnapshotArtifacts,
+      isSessionSnapshotSleepReleasable,
+      verifySessionSnapshotArtifactsForSleep,
     } = await import('../services/session-snapshots');
     const db = drizzle(this.env.DATABASE, { schema });
     const snapshot = await getRestorableSessionSnapshot(db, config.chatSessionId);
-    if (snapshot?.status !== 'available' || snapshot.degradation !== 'none') {
+    const snapshotStatus = snapshot?.status ?? null;
+    const snapshotDegradation = snapshot?.degradation ?? null;
+    if (!isSessionSnapshotSleepReleasable(snapshot)) {
       log.warn('vm_agent_container_sleep_preserved_without_snapshot', {
         nodeId: config.nodeId,
         workspaceId: config.workspaceId,
-        snapshotStatus: snapshot?.status ?? null,
-        snapshotDegradation: snapshot?.degradation ?? null,
+        snapshotStatus,
+        snapshotDegradation,
       });
       return 'aborted';
     }
@@ -920,7 +935,7 @@ export class VmAgentContainer extends Container<Env> {
     }
     try {
       if (!pointOfNoReturn) {
-        if (!(await verifyRestorableSessionSnapshotArtifacts(this.env, snapshot))) {
+        if (!(await verifySessionSnapshotArtifactsForSleep(this.env, snapshot))) {
           throw new Error('Container snapshot artifacts failed durable R2 verification');
         }
         if (!(await beginSessionSnapshotStopping(db, config.chatSessionId, claimId))) {
@@ -935,7 +950,20 @@ export class VmAgentContainer extends Container<Env> {
       await projectDataService.sleepSession(this.env, config.projectId, config.chatSessionId);
       await persistRuntimeSleeping(this.env, config);
       if (!(snapshot.sleepStatus === 'sleeping' && snapshot.sleepingAt)) {
-        if (!(await finalizeSessionSnapshotSleeping(db, this.env, config.chatSessionId, claimId))) {
+        const sleepWarning =
+          snapshot.status === 'degraded'
+            ? `Workspace slept with degraded snapshot (${snapshot.degradation})`
+            : null;
+        if (
+          !(await finalizeSessionSnapshotSleeping(
+            db,
+            this.env,
+            config.chatSessionId,
+            claimId,
+            new Date(),
+            { sleepWarning }
+          ))
+        ) {
           throw new Error('Container sleep finalization lost its durable claim');
         }
       }

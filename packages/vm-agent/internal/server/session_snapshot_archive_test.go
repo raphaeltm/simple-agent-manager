@@ -203,6 +203,43 @@ func TestExternalSnapshotRootCredentialExclusions(t *testing.T) {
 	}
 }
 
+func TestSessionStateTarReportsProgressAndHonorsCancellation(t *testing.T) {
+	sourceHome := t.TempDir()
+	writeHomeFile(t, sourceHome, "state.txt", strings.Repeat("x", 4096))
+	var reports int
+	tarPath, skipped, err := createSessionStateTarWithContext(
+		context.Background(),
+		func() (string, error) { return sourceHome, nil },
+		1<<20,
+		1<<20,
+		false,
+		func(context.Context, string) { reports++ },
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.Remove(tarPath)
+	if len(skipped) != 0 {
+		t.Fatalf("skipped = %#v, want none", skipped)
+	}
+	if reports == 0 {
+		t.Fatal("progress callback was not invoked")
+	}
+
+	cancelled, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, _, err := createSessionStateTarWithContext(
+		cancelled,
+		func() (string, error) { return sourceHome, nil },
+		1<<20,
+		1<<20,
+		false,
+		nil,
+	); err != context.Canceled {
+		t.Fatalf("cancelled archive err = %v, want context.Canceled", err)
+	}
+}
+
 func TestSnapshotWIPExcludedPathsForProjectLocalHarnessRoots(t *testing.T) {
 	workDir := filepath.Join(string(filepath.Separator), "workspaces", "project")
 	home := filepath.Join(string(filepath.Separator), "home", "node")

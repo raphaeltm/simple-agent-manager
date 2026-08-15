@@ -78,6 +78,21 @@ const (
 	// create-workspace request deadline. Override via STANDALONE_CLONE_FILTER;
 	// set to "off" (or "none"/"false") to force a full clone.
 	DefaultStandaloneCloneFilter = "blob:none"
+
+	// DefaultSessionSnapshotOperationTimeout is the VM-agent deadline for one
+	// asynchronous snapshot checkpoint. Override via
+	// SESSION_SNAPSHOT_OPERATION_TIMEOUT.
+	DefaultSessionSnapshotOperationTimeout = 15 * time.Minute
+
+	// DefaultSessionSnapshotProgressReportInterval throttles control-plane
+	// progress callbacks while a data-scaled snapshot operation is still making
+	// progress. Override via SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL.
+	DefaultSessionSnapshotProgressReportInterval = 15 * time.Second
+
+	// DefaultSessionSnapshotProgressReportTimeout bounds each best-effort
+	// control-plane progress callback. Override via
+	// SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT.
+	DefaultSessionSnapshotProgressReportTimeout = 5 * time.Second
 )
 
 const (
@@ -167,12 +182,14 @@ type Config struct {
 	StandaloneCloneFilter string
 
 	// Session settings
-	SessionTTL                      time.Duration
-	SessionCleanupInterval          time.Duration
-	SessionMaxCount                 int
-	SessionSnapshotOperationTimeout time.Duration // Overall background/final snapshot deadline (env: SESSION_SNAPSHOT_OPERATION_TIMEOUT, default: 15m)
-	CookieName                      string
-	CookieSecure                    bool
+	SessionTTL                            time.Duration
+	SessionCleanupInterval                time.Duration
+	SessionMaxCount                       int
+	SessionSnapshotOperationTimeout       time.Duration // Overall background/final snapshot deadline (env: SESSION_SNAPSHOT_OPERATION_TIMEOUT, default: 15m)
+	SessionSnapshotProgressReportInterval time.Duration // Min interval between snapshot progress callbacks (env: SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL, default: 15s)
+	SessionSnapshotProgressReportTimeout  time.Duration // Timeout for each snapshot progress callback (env: SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT, default: 5s)
+	CookieName                            string
+	CookieSecure                          bool
 
 	// Node health reporter interval
 	HeartbeatInterval time.Duration
@@ -480,12 +497,14 @@ func Load() (*Config, error) {
 
 		StandaloneCloneFilter: ResolveStandaloneCloneFilter(getEnv("STANDALONE_CLONE_FILTER", DefaultStandaloneCloneFilter)),
 
-		SessionTTL:                      getEnvDuration("SESSION_TTL", 24*time.Hour),
-		SessionCleanupInterval:          getEnvDuration("SESSION_CLEANUP_INTERVAL", 1*time.Minute),
-		SessionMaxCount:                 getEnvInt("SESSION_MAX_COUNT", 100),
-		SessionSnapshotOperationTimeout: getEnvDuration("SESSION_SNAPSHOT_OPERATION_TIMEOUT", 15*time.Minute),
-		CookieName:                      getEnv("COOKIE_NAME", "vm_session"),
-		CookieSecure:                    getEnvBool("COOKIE_SECURE", true),
+		SessionTTL:                            getEnvDuration("SESSION_TTL", 24*time.Hour),
+		SessionCleanupInterval:                getEnvDuration("SESSION_CLEANUP_INTERVAL", 1*time.Minute),
+		SessionMaxCount:                       getEnvInt("SESSION_MAX_COUNT", 100),
+		SessionSnapshotOperationTimeout:       getEnvDuration("SESSION_SNAPSHOT_OPERATION_TIMEOUT", DefaultSessionSnapshotOperationTimeout),
+		SessionSnapshotProgressReportInterval: getEnvDuration("SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL", DefaultSessionSnapshotProgressReportInterval),
+		SessionSnapshotProgressReportTimeout:  getEnvDuration("SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT", DefaultSessionSnapshotProgressReportTimeout),
+		CookieName:                            getEnv("COOKIE_NAME", "vm_session"),
+		CookieSecure:                          getEnvBool("COOKIE_SECURE", true),
 
 		HeartbeatInterval: getEnvDuration("HEARTBEAT_INTERVAL", 60*time.Second),
 

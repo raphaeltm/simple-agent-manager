@@ -173,6 +173,39 @@ describe('session sleep sweep', () => {
     ).toEqual({ sleep_status: 'preparing', sleep_after: null, sleep_attempts: 4 });
   });
 
+  it.each([
+    ['degraded', "status = 'degraded', degradation = 'home-skipped'"],
+    [
+      'pending capture',
+      "status = 'available', degradation = 'none', capture_generation = 'capture-1'",
+    ],
+  ])(
+    'retries an exhausted failed %s row that is repairable by the sleep policy',
+    async (_, setClause) => {
+      addDueSnapshot('snapshot-exhausted-repairable', 3);
+      sqlite
+        .prepare(
+          `UPDATE session_snapshots
+         SET ${setClause}, sleep_status = 'failed', sleep_after = NULL
+         WHERE id = 'snapshot-exhausted-repairable'`
+        )
+        .run();
+      mocks.sleepWorkspaceSession.mockResolvedValue(undefined);
+
+      const result = await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00.000Z'));
+
+      expect(result).toMatchObject({ selected: 1, claimed: 1, slept: 1, exhausted: 0 });
+      expect(
+        sqlite
+          .prepare(
+            `SELECT sleep_status, sleep_after, sleep_attempts
+           FROM session_snapshots WHERE id = 'snapshot-exhausted-repairable'`
+          )
+          .get()
+      ).toEqual({ sleep_status: 'preparing', sleep_after: null, sleep_attempts: 4 });
+    }
+  );
+
   it('does not postpone an immediate terminal deadline when the idle checkpoint completes', async () => {
     addDueSnapshot('snapshot-terminal-deadline', 1);
     const db = await import('drizzle-orm/d1').then(({ drizzle }) =>

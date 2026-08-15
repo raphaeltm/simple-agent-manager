@@ -552,6 +552,31 @@ func TestPrepareSnapshotAdvertisesDirectUploadSupport(t *testing.T) {
 	}
 }
 
+func TestReportSnapshotProgressPostsGeneration(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/workspaces/workspace-1/session-snapshot/progress" {
+			t.Fatalf("request path = %q", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer callback-token" {
+			t.Fatalf("authorization = %q", got)
+		}
+		var payload map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		if payload["chatSessionId"] != "chat-1" || payload["generation"] != "generation-1" || payload["step"] != "home-walk" {
+			t.Fatalf("payload = %#v", payload)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	s := &Server{config: &config.Config{ControlPlaneURL: server.URL}}
+	if err := s.reportSnapshotProgress(context.Background(), "workspace-1", "chat-1", "generation-1", "home-walk", "callback-token"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestSessionSnapshotUploadRelayAuthorizesBeforeStreamingWithoutBearer(t *testing.T) {
 	body := []byte("legacy snapshot larger than the worker boundary")
 	expectedSum := sha256.Sum256(body)

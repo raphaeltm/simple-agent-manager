@@ -26,6 +26,7 @@ import {
   getRestorableSessionSnapshot,
   getSessionSnapshotConfig,
   prepareSessionSnapshot,
+  recordSessionSnapshotProgress,
   recordSessionSnapshotRestoreResult,
   type SessionSnapshotArtifact,
   type SessionSnapshotDegradation,
@@ -236,6 +237,23 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/prepare', async (c) => {
     upload: uploadTargets.upload,
     directUpload: uploadTargets.directUpload,
   });
+});
+
+sessionSnapshotRoutes.post('/:id/session-snapshot/progress', async (c) => {
+  const workspaceId = c.req.param('id');
+  await verifyWorkspaceCallbackAuth(c, workspaceId);
+  const { db, workspace } = await requireWorkspace(c, workspaceId);
+  const body = await readJsonBody(c);
+  const chatSessionId = requiredStringField(body, 'chatSessionId');
+  const generation = requiredStringField(body, 'generation');
+  if (!workspace.chatSessionId || workspace.chatSessionId !== chatSessionId) {
+    throw errors.forbidden('Snapshot chat session does not match workspace');
+  }
+  const recorded = await recordSessionSnapshotProgress(db, { chatSessionId, generation });
+  if (!recorded) {
+    throw errors.conflict('Snapshot capture generation is no longer current');
+  }
+  return c.body(null, 204);
 });
 
 sessionSnapshotRoutes.post('/:id/session-snapshot/artifacts/:artifact/upload-url', async (c) => {

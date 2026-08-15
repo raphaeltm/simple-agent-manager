@@ -85,6 +85,12 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES` — Per-file threshold before snapshot content is visibly skipped (default: `268435456`)
 - `SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS` — Progress-idle timeout for snapshot upload/download (default: `30000`)
 - `SESSION_SNAPSHOT_UPLOAD_URL_TTL_SECONDS` — Lifetime of direct R2 snapshot upload URLs (default: `900`)
+- `SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS` — Budget for vm-agent acceptance of the final checkpoint request (default: `300000`)
+- `SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS` — No-progress watchdog after a final checkpoint is accepted (default: `120000`)
+- `SESSION_SNAPSHOT_POLL_INTERVAL_MS` — D1 poll interval while waiting for final checkpoint progress/completion (default: `1000`)
+- `SESSION_SNAPSHOT_OPERATION_TIMEOUT` — VM-agent checkpoint operation deadline, passed to new VM nodes and Instant containers as a Go duration (default: `15m`)
+- `SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL` — VM-agent snapshot progress callback throttle, passed to new VM nodes and Instant containers as a Go duration (default: `15s`)
+- `SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT` — VM-agent snapshot progress callback timeout, passed to new VM nodes and Instant containers as a Go duration (default: `5s`)
 - `SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES` — Maximum snapshot coordination JSON body (default: `262144`)
 - `SESSION_SNAPSHOT_R2_PREFIX` — Private R2 object prefix for session snapshots (default: `session-snapshots`)
 - `SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS` — Maximum replacement-VM wake attempts before the sleeping session becomes unavailable (default: `3`)
@@ -332,6 +338,14 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 - `WORKTREE_CACHE_TTL` — Cache duration for parsed `git worktree list` results (default: 5s)
 - `MAX_WORKTREES_PER_WORKSPACE` — Max worktrees allowed per workspace (default: 5)
 - `GIT_FILE_MAX_SIZE` — Max file size for git/file endpoint (default: 1048576)
+
+### Session Snapshots
+
+Generated deployments validate and pass these values through cloud-init to newly provisioned VM Agent systemd services. Instant containers receive the same values at launch.
+
+- `SESSION_SNAPSHOT_OPERATION_TIMEOUT` — Deadline for one asynchronous checkpoint operation (default: `15m`)
+- `SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL` — Minimum interval between progress callbacks while a checkpoint continues making progress (default: `15s`)
+- `SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT` — Timeout for each best-effort progress callback to the control plane (default: `5s`)
 
 ### File Operations
 

@@ -12,6 +12,7 @@ import * as projectDataService from './project-data';
 import {
   beginSessionSnapshotStopping,
   claimSessionSnapshotSleep,
+  completeActiveSessionSnapshotAsDegraded,
   DEFAULT_SESSION_SLEEP_AFTER_MS,
   deferSessionSnapshotSleepBeforeClaim,
   deferSessionSnapshotStopping,
@@ -20,8 +21,9 @@ import {
   finalizeSessionSnapshotSleeping,
   getRestorableSessionSnapshot,
   getSessionSnapshotCaptureState,
+  isSessionSnapshotSleepReleasable,
   scheduleSessionSnapshotSleep,
-  verifyRestorableSessionSnapshotArtifacts,
+  verifySessionSnapshotArtifactsForSleep,
 } from './session-snapshots';
 import { cleanupTaskRun } from './task-runner';
 import { markVmAgentContainerActiveWorkStarted, sleepVmAgentContainer } from './vm-agent-container';
@@ -29,7 +31,25 @@ import { markVmAgentContainerActiveWorkStarted, sleepVmAgentContainer } from './
 type SnapshotResult = { status?: unknown; degradation?: unknown };
 
 const DEFAULT_SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS = 5 * 60 * 1000;
+const DEFAULT_SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS = 2 * 60 * 1000;
 const DEFAULT_SESSION_SNAPSHOT_POLL_INTERVAL_MS = 1000;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function snapshotProgressToken(
+  state: Awaited<ReturnType<typeof getSessionSnapshotCaptureState>> | null
+): string {
+  if (!state) return 'missing';
+  return [
+    state.status,
+    state.degradation,
+    state.snapshotGeneration ?? '',
+    state.captureGeneration ?? '',
+    state.updatedAt,
+  ].join(':');
+}
 
 async function finishSleepingWorkspaceComputeCleanup(
   db: ReturnType<typeof drizzle<typeof schema>>,
@@ -116,22 +136,33 @@ async function waitForFinalSessionSnapshot(
     chatSessionId: string;
     runtime: string;
     agentType?: string;
+    acpSessionId?: string;
     userId: string;
   }
 ): Promise<void> {
-  const timeoutMs = parsePositiveInt(
+  const requestTimeoutMs = parsePositiveInt(
     env.SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS,
     DEFAULT_SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS
+  );
+  const progressIdleTimeoutMs = parsePositiveInt(
+    env.SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS,
+    DEFAULT_SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS
   );
   const pollIntervalMs = parsePositiveInt(
     env.SESSION_SNAPSHOT_POLL_INTERVAL_MS,
     DEFAULT_SESSION_SNAPSHOT_POLL_INTERVAL_MS
   );
-  const deadline = Date.now() + timeoutMs;
+  const requestDeadline = Date.now() + requestTimeoutMs;
   let baselineGeneration: string | null = null;
+  let acceptedFinalCapture = false;
+  let activeCaptureGeneration: string | null = null;
+  let lastProgressAt = Date.now();
+  let lastProgressToken = '';
 
-  while (Date.now() < deadline) {
+  while (Date.now() < requestDeadline) {
     const current = await getSessionSnapshotCaptureState(db, input.chatSessionId);
+    activeCaptureGeneration = current?.captureGeneration ?? activeCaptureGeneration;
+    lastProgressToken = snapshotProgressToken(current);
     if (input.runtime === 'cf-container') {
       await markVmAgentContainerActiveWorkStarted(env, input.nodeId, {
         workspaceId: input.workspaceId,
@@ -157,26 +188,69 @@ async function waitForFinalSessionSnapshot(
     }
     if (result.accepted === true) {
       baselineGeneration = current?.snapshotGeneration ?? null;
+      acceptedFinalCapture = true;
+      lastProgressAt = Date.now();
       break;
     }
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+    await sleep(pollIntervalMs);
+  }
+  if (!acceptedFinalCapture) {
+    throw new Error(`Workspace snapshot request was not accepted within ${requestTimeoutMs}ms`);
   }
 
-  while (Date.now() < deadline) {
+  for (;;) {
     const current = await getSessionSnapshotCaptureState(db, input.chatSessionId);
+    const now = Date.now();
+    const progressToken = snapshotProgressToken(current);
+    if (progressToken !== lastProgressToken) {
+      lastProgressToken = progressToken;
+      lastProgressAt = now;
+    }
+    activeCaptureGeneration = current?.captureGeneration ?? activeCaptureGeneration;
     if (
       current &&
       !current.captureGeneration &&
       current.snapshotGeneration !== baselineGeneration
     ) {
-      if (current.status === 'available' && current.degradation === 'none') return;
+      if (
+        (current.status === 'available' && current.degradation === 'none') ||
+        (current.status === 'degraded' && current.degradation !== 'none')
+      ) {
+        return;
+      }
       throw new Error(
-        `Workspace snapshot is not complete (${current.status}/${current.degradation})`
+        `Workspace snapshot is not usable (${current.status}/${current.degradation})`
       );
     }
-    await new Promise((resolve) => setTimeout(resolve, pollIntervalMs));
+
+    if (now - lastProgressAt >= progressIdleTimeoutMs) {
+      const reason = `Workspace snapshot made no progress for ${progressIdleTimeoutMs}ms`;
+      if (activeCaptureGeneration) {
+        const degraded = await completeActiveSessionSnapshotAsDegraded(db, env, {
+          workspaceId: input.workspaceId,
+          chatSessionId: input.chatSessionId,
+          agentSessionId: input.agentSessionId,
+          runtime: input.runtime,
+          captureGeneration: activeCaptureGeneration,
+          agentType: input.agentType,
+          acpSessionId: input.acpSessionId,
+          reason,
+        });
+        if (degraded) {
+          log.warn('session_sleep.snapshot_degraded_after_no_progress', {
+            workspaceId: input.workspaceId,
+            chatSessionId: input.chatSessionId,
+            generation: activeCaptureGeneration,
+            progressIdleTimeoutMs,
+          });
+          return;
+        }
+      }
+      throw new Error(reason);
+    }
+
+    await sleep(pollIntervalMs);
   }
-  throw new Error(`Workspace snapshot did not complete within ${timeoutMs}ms`);
 }
 
 export interface SleepWorkspaceSessionResult {
@@ -339,10 +413,7 @@ export async function checkAutomaticSessionSleepEligibility(
         .getSessionState(env, workspace.projectId, agentSession.id)
         .catch(() => null)
     : null;
-  const idleAfterMs = parsePositiveInt(
-    env.SESSION_SLEEP_AFTER_MS,
-    DEFAULT_SESSION_SLEEP_AFTER_MS
-  );
+  const idleAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
   let reason: string;
   let retryAt: Date | undefined;
   // A terminal task can retain a stale `prompting` transition forever. Treat it
@@ -431,8 +502,7 @@ export async function sleepWorkspaceSession(
   let snapshot = await getRestorableSessionSnapshot(db, workspace.chatSessionId);
   if (
     workspace.status === 'sleeping' &&
-    snapshot?.status === 'available' &&
-    snapshot.degradation === 'none' &&
+    isSessionSnapshotSleepReleasable(snapshot) &&
     snapshot.sleepStatus === 'sleeping' &&
     snapshot.sleepingAt
   ) {
@@ -526,6 +596,9 @@ export async function sleepWorkspaceSession(
       ) {
         throw new Error(`Workspace agent is not idle (${stateBefore?.activity ?? 'unknown'})`);
       }
+      const acpSessionBefore = await projectDataService
+        .getAcpSession(env, workspace.projectId, agentSession.id)
+        .catch(() => null);
 
       await waitForFinalSessionSnapshot(db, env, {
         nodeId: workspace.nodeId,
@@ -534,11 +607,12 @@ export async function sleepWorkspaceSession(
         chatSessionId: workspace.chatSessionId,
         runtime: workspace.nodeRuntime,
         agentType: agentSession.agentType ?? undefined,
+        acpSessionId: typeof acpSessionBefore?.id === 'string' ? acpSessionBefore.id : undefined,
         userId: workspace.userId,
       });
 
       verified = await getRestorableSessionSnapshot(db, workspace.chatSessionId);
-      if (verified?.status !== 'available' || verified.degradation !== 'none') {
+      if (!isSessionSnapshotSleepReleasable(verified)) {
         throw new Error('Workspace snapshot completion was not durably verified');
       }
       const stateAfter = await projectDataService.getSessionState(
@@ -554,7 +628,7 @@ export async function sleepWorkspaceSession(
       ) {
         throw new Error('Workspace activity changed while the final snapshot was captured');
       }
-      if (!(await verifyRestorableSessionSnapshotArtifacts(env, verified))) {
+      if (!(await verifySessionSnapshotArtifactsForSleep(env, verified))) {
         throw new Error('Workspace snapshot artifacts failed durable R2 verification');
       }
       if (!(await beginSessionSnapshotStopping(db, workspace.chatSessionId, claimId))) {
@@ -627,11 +701,17 @@ export async function sleepWorkspaceSession(
     } else {
       await db.batch([workspaceSleeping, agentSleeping]);
     }
+    const sleepWarning =
+      verified?.status === 'degraded'
+        ? `Workspace slept with degraded snapshot (${verified.degradation})`
+        : null;
     const finalized = await finalizeSessionSnapshotSleeping(
       db,
       env,
       workspace.chatSessionId,
-      claimId
+      claimId,
+      new Date(),
+      { sleepWarning }
     );
     if (!finalized) {
       snapshot = await getRestorableSessionSnapshot(db, workspace.chatSessionId);
@@ -710,6 +790,8 @@ export async function sleepWorkspaceSession(
     nodeId: workspace.nodeId,
     runtime: workspace.nodeRuntime,
     expiresAt: verified.expiresAt,
+    snapshotStatus: verified.status,
+    snapshotDegradation: verified.degradation,
     reason: input.reason,
   });
   return {
