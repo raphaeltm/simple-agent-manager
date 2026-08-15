@@ -111,13 +111,14 @@
     },
     {
       "classification": "synthetic-test-fixture",
-      "reason": "Synthetic multiline PEM private key (REALISTIC_KEY) and JWT-format callbackToken literal added to cloud-init template round-trip tests; realistic multiline fixtures are mandated by the template-output-verification rule and contain no real key material.",
+      "reason": "Synthetic multiline PEM private key (REALISTIC_KEY) and JWT-format callbackToken literal added to cloud-init template round-trip tests; realistic multiline fixtures are mandated by the template-output-verification rule and contain no real key material. Also re-reviews the pre-existing synthetic activity-test token in session_host_activity_test.go at its shifted line after the rereport-test deflake (same fixture bytes, new StartLine digest).",
       "owner": "security",
       "reviewedAt": "2026-08-15T19:30:00.000Z",
       "expiresAt": "2026-11-13T00:00:00.000Z",
       "digests": [
         "a53bf5ad49b7df6a6e187c73ace39cdadad6f51e8eb7a2d3927f38907881af0c",
-        "d375245952311c037411c21bfb6861e1b98c3cfb9336cce43d43c7eaa8433198"
+        "d375245952311c037411c21bfb6861e1b98c3cfb9336cce43d43c7eaa8433198",
+        "1baa6f716547da91f09a12d0d8cba7e12a1fd05ba774a6e8a1cc9288e98feb5e"
       ]
     }
   ]

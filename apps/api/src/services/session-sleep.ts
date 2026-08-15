@@ -9,6 +9,7 @@ import { ulid } from '../lib/ulid';
 import { stopComputeTracking } from './compute-usage';
 import { stopWorkspaceOnNode } from './node-agent';
 import * as projectDataService from './project-data';
+import { waitForFinalSessionSnapshot } from './session-sleep-snapshot-wait';
 import {
   beginSessionSnapshotStopping,
   claimSessionSnapshotSleep,
@@ -23,7 +24,6 @@ import {
   scheduleSessionSnapshotSleep,
   verifySessionSnapshotArtifactsForSleep,
 } from './session-snapshots';
-import { waitForFinalSessionSnapshot } from './session-sleep-snapshot-wait';
 import { cleanupTaskRun } from './task-runner';
 import { sleepVmAgentContainer } from './vm-agent-container';
 
