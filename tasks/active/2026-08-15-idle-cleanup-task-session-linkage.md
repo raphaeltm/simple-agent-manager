@@ -35,7 +35,7 @@ The major TaskRunner path receives the ProjectData chat session ID and writes it
 - [x] Emit the user-visible idle cleanup failure system message/toast at most once per session.
 - [x] Add regression tests for null-link terminalization, true mismatch, backfill correctness, max-residence zombie prevention, and real SQL WHERE guards.
 - [x] Update `.claude/rules/44-dual-write-migration-enumerate-writers.md` for fail-closed identity gates reading linkage columns.
-- [ ] Record a follow-up SAM idea to calibrate PR #1824’s race-lab oracle against this linkage incident class after #1824 merges.
+- [x] Record a follow-up SAM idea to calibrate PR #1824’s race-lab oracle against this linkage incident class after #1824 merges (`01M02BZ7K53QRWNDPQZVNDYFQ8`).
 
 ## Local validation
 
@@ -47,6 +47,21 @@ The major TaskRunner path receives the ProjectData chat session ID and writes it
 - `pnpm quality:do-migration-safety`
 - `pnpm quality:migration-ordering`
 - `pnpm format:check`
+- `pnpm lint`
+- `pnpm typecheck`
+- `pnpm test`
+- `pnpm build`
+
+## Specialist review evidence
+
+| Reviewer | Status | Outcome |
+|---|---|---|
+| env-validator | PASS | `IDLE_CLEANUP_MAX_RESIDENCE_MS` is declared in Env and ProjectData Env, documented in `.env.example`, public configuration docs, and env-reference; no GH/GITHUB secret mapping applies. |
+| constitution-validator | PASS | Idle cleanup max residence uses shared `DEFAULT_IDLE_CLEANUP_MAX_RESIDENCE_MS` plus env override; no new hardcoded URLs or unconfigurable production identifiers. |
+| test-engineer | PASS | Regression coverage includes NULL-link task-mode terminalization/reap, true mismatch rejection, real-SQL backfill guards, max-residence zombie exit, retry toast de-duplication, and TaskRunner dual-write/fail-closed behavior. |
+| cloudflare-specialist | PASS | D1 migration is guarded/additive, DO migration only adds columns/indexes, migration safety checks pass, and no PR #1824 race-lab files were touched. |
+| doc-sync-validator | PASS | Environment docs and rule 44 were updated; task file includes writer/nuller inventory, post-mortem, and process fix. |
+| task-completion-validator | PENDING | Final planned-vs-actual validation will run after staging verification and the follow-up SAM idea are recorded. |
 
 ## Acceptance criteria
 
