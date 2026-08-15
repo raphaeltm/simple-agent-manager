@@ -123,6 +123,9 @@ function CanvasColumn({
   projectionIndex: ProjectionIndex;
 }) {
   const structure = structureSlice(model, controller.focusId, projectionIndex);
+  const relationshipCount = model.workspace.relationships.length;
+  const threadCount = model.workspace.threads.length;
+  const elementCount = model.workspace.elements.length;
   return (
     <section
       className="canvas-column"
@@ -135,15 +138,16 @@ function CanvasColumn({
         omittedBreadcrumbs={structure.omittedBreadcrumbs}
         interaction={model.interaction}
       />
-      {(controller.lens === 'structure' || controller.lens === 'topology') && (
-        <p className="canvas-help" id="canvas-help">
-          <span className="desktop-help">
-            Zoom with the controls, then pan the focused canvas by scrolling or using arrow keys.
-          </span>
-          <span className="mobile-help">Scroll or use arrows to pan.</span>
-        </p>
-      )}
       <LensCanvas controller={controller} model={model} projectionIndex={projectionIndex} />
+      <footer className="workbench-status" id="canvas-status">
+        <span>{controller.lens}</span>
+        <span>{elementCount} nodes</span>
+        <span>{relationshipCount} routes</span>
+        <span>{threadCount} threads</span>
+        {(controller.lens === 'structure' || controller.lens === 'topology') && (
+          <span>{Math.round(controller.zoom * 100)}%</span>
+        )}
+      </footer>
     </section>
   );
 }
@@ -248,7 +252,7 @@ function LensCanvas({
       data-intentional-clip
       aria-describedby={
         controller.lens === 'structure' || controller.lens === 'topology'
-          ? 'canvas-help'
+          ? 'canvas-status'
           : undefined
       }
       aria-label={`${controller.lens} architecture canvas`}

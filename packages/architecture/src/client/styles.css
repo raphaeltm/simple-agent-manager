@@ -92,7 +92,7 @@ textarea {
   height: 100dvh;
   min-width: 0;
   overflow: hidden;
-  padding: 1rem;
+  padding: 0.85rem 1rem 1rem;
   flex-direction: column;
 }
 
@@ -119,10 +119,10 @@ textarea {
   flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
-  margin: 0 auto 1rem;
+  margin: 0 auto 0.75rem;
   max-width: 1180px;
   border-bottom: 1px solid var(--aw-border-subtle);
-  padding-bottom: 0.85rem;
+  padding-bottom: 0.65rem;
   width: 100%;
 }
 
@@ -133,8 +133,8 @@ textarea {
 }
 
 .topbar h1 {
-  font-size: clamp(1.65rem, 3vw, 2.25rem);
-  letter-spacing: -0.035em;
+  font-size: clamp(1.45rem, 2.7vw, 2.2rem);
+  letter-spacing: 0;
   line-height: 1.05;
 }
 
@@ -233,7 +233,7 @@ textarea {
   display: flex;
   flex: 1 1 auto;
   flex-direction: column;
-  gap: 0.75rem;
+  gap: 0.55rem;
   min-height: 0;
   min-width: 0;
 }
@@ -252,9 +252,13 @@ textarea {
   border: 1px solid var(--aw-border);
   border-radius: 0;
   background:
+    radial-gradient(circle at 18% 14%, rgba(99, 217, 221, 0.08), transparent 28%),
+    linear-gradient(120deg, rgba(238, 180, 95, 0.035), transparent 34%),
     linear-gradient(rgba(99, 217, 221, 0.055) 1px, transparent 1px),
     linear-gradient(90deg, rgba(99, 217, 221, 0.055) 1px, transparent 1px), var(--aw-panel);
   background-size:
+    auto,
+    auto,
     28px 28px,
     28px 28px,
     auto;
@@ -262,10 +266,30 @@ textarea {
 }
 
 .canvas-help,
-.bounded-note {
+.bounded-note,
+.workbench-status {
   margin: 0;
   color: var(--aw-muted);
   font-size: 0.85rem;
+}
+
+.workbench-status {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.9rem;
+  align-items: center;
+  border: 1px solid var(--aw-border-subtle);
+  border-left: 2px solid var(--aw-accent);
+  background: color-mix(in srgb, var(--aw-panel) 72%, transparent);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.72rem;
+  padding: 0.45rem 0.65rem;
+  text-transform: uppercase;
+}
+
+.workbench-status span:first-child {
+  color: var(--aw-accent);
 }
 
 .structure-lens {
@@ -365,9 +389,57 @@ textarea {
   display: grid;
   width: max-content;
   min-width: 100%;
-  gap: calc(1rem * var(--aw-zoom));
+  gap: calc(0.75rem * var(--aw-zoom));
   transform-origin: top left;
   zoom: var(--aw-zoom);
+}
+
+.topology-summary {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  min-width: min(100%, 36rem);
+  border-left: 2px solid var(--aw-accent);
+  background: color-mix(in srgb, var(--aw-panel-strong) 62%, transparent);
+  padding: 0.75rem 0.9rem;
+}
+
+.topology-summary h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.topology-summary dl {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin: 0;
+}
+
+.topology-summary div {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 3.6rem;
+}
+
+.topology-summary dt,
+.topology-summary dd {
+  margin: 0;
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+}
+
+.topology-summary dt {
+  color: var(--aw-muted);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.topology-summary dd {
+  color: var(--aw-text);
+  font-size: 1rem;
 }
 
 .topology-stage {
@@ -376,9 +448,33 @@ textarea {
   border-top: 1px solid var(--aw-border-subtle);
   border-left: 1px solid var(--aw-border-subtle);
   background:
+    linear-gradient(90deg, rgba(99, 217, 221, 0.035), transparent 12rem),
     linear-gradient(rgba(99, 217, 221, 0.04) 1px, transparent 1px),
     linear-gradient(90deg, rgba(99, 217, 221, 0.04) 1px, transparent 1px);
-  background-size: 14px 14px;
+  background-size:
+    auto,
+    14px 14px,
+    14px 14px;
+}
+
+.topology-lanes {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.topology-lane {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  display: block;
+  border-left: 1px solid rgba(99, 217, 221, 0.16);
+  color: rgba(145, 168, 174, 0.56);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  padding: 0.45rem 0 0 0.4rem;
+  text-transform: uppercase;
 }
 
 .topology-edges {
@@ -414,6 +510,7 @@ textarea {
   gap: 0.28rem;
   border: 1px solid var(--aw-border);
   background: var(--aw-panel-strong);
+  border-left-width: 3px;
   overflow-wrap: anywhere;
   padding: 0.7rem 0.8rem;
   text-align: left;
@@ -428,8 +525,32 @@ textarea {
   border-style: dashed;
 }
 
-.topology-node small,
-.topology-node span {
+.topology-node--system,
+.topology-node--workspace {
+  border-left-color: var(--aw-accent);
+}
+
+.topology-node--runtime,
+.topology-node--service {
+  border-left-color: var(--aw-portal);
+}
+
+.topology-node--database,
+.topology-node--data-store,
+.topology-node--queue {
+  border-left-color: var(--aw-success);
+}
+
+.topology-node--external,
+.topology-node--person {
+  border-left-color: var(--aw-warning);
+}
+
+.topology-node.is-isolated {
+  opacity: 0.86;
+}
+
+.topology-node small {
   color: var(--aw-muted);
   font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
   font-size: 0.65rem;
@@ -445,6 +566,57 @@ textarea {
   line-height: 1.2;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
+}
+
+.topology-node-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  min-height: 0.9rem;
+}
+
+.topology-node-meta b {
+  border: 1px solid var(--aw-border-subtle);
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.58rem;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  padding: 0.14rem 0.24rem;
+  text-transform: uppercase;
+}
+
+.topology-minimap {
+  position: relative;
+  flex: 0 0 auto;
+  width: 6.7rem;
+  height: 4.2rem;
+  border: 1px solid var(--aw-border);
+  background: rgba(5, 13, 19, 0.72);
+  pointer-events: none;
+}
+
+.topology-minimap::before {
+  position: absolute;
+  inset: 0.35rem;
+  border: 1px solid rgba(99, 217, 221, 0.24);
+  content: '';
+}
+
+.topology-minimap-node {
+  position: absolute;
+  background: var(--aw-muted);
+}
+
+.topology-minimap-node--system,
+.topology-minimap-node--workspace {
+  background: var(--aw-accent);
+}
+
+.topology-minimap-node--runtime,
+.topology-minimap-node--service {
+  background: var(--aw-portal);
 }
 
 .topology-connections {
@@ -759,6 +931,65 @@ textarea {
   margin: 0;
 }
 
+.state-message {
+  display: grid;
+  width: min(100%, 32rem);
+  margin: 4rem auto 0;
+  border: 1px solid var(--aw-border);
+  border-left: 3px solid var(--aw-danger);
+  background:
+    linear-gradient(90deg, rgba(255, 155, 155, 0.08), transparent 48%),
+    color-mix(in srgb, var(--aw-panel) 78%, transparent);
+  padding: 1rem 1.1rem;
+}
+
+.state-message h2 {
+  margin: 0 0 0.55rem;
+  font-size: 1.15rem;
+}
+
+.state-message p {
+  margin: 0;
+  color: var(--aw-muted);
+}
+
+.invalid-workbench {
+  display: grid;
+  width: min(100%, 56rem);
+  margin: 4.5rem auto 0;
+  gap: 0.65rem;
+}
+
+.invalid-workbench .state-message {
+  width: 100%;
+  margin: 0;
+}
+
+.invalid-workbench-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid var(--aw-border);
+  border-left: 3px solid var(--aw-danger);
+  background: color-mix(in srgb, var(--aw-panel-strong) 68%, transparent);
+  padding: 0.85rem 1rem;
+}
+
+.invalid-workbench-head h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  letter-spacing: 0;
+}
+
+.invalid-workbench-head > span {
+  color: var(--aw-danger);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .architecture-inspector {
   position: relative;
   top: 0;
@@ -1043,7 +1274,6 @@ textarea {
   overflow-wrap: anywhere;
 }
 
-.state-message,
 .empty-lens {
   display: grid;
   min-height: 18rem;
@@ -1075,7 +1305,7 @@ textarea {
 }
 
 .architecture-app.is-mobile {
-  padding: 0.75rem;
+  padding: 0.65rem;
 }
 
 .architecture-app.is-mobile .topbar,
@@ -1088,6 +1318,57 @@ textarea {
 .architecture-app.is-mobile .canvas {
   height: auto;
   min-height: 0;
+}
+
+.architecture-app.is-mobile .topbar {
+  gap: 0.65rem;
+  margin-bottom: 0.55rem;
+  padding-bottom: 0.55rem;
+}
+
+.architecture-app.is-mobile .topbar h1 {
+  max-width: 17rem;
+  font-size: clamp(1.35rem, 8vw, 1.75rem);
+  line-height: 1.04;
+}
+
+.architecture-app.is-mobile .eyebrow {
+  margin-bottom: 0.18rem;
+}
+
+.architecture-app.is-mobile .lens-tabs {
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.architecture-app.is-mobile .lens-tab {
+  flex: 1 1 0;
+  min-height: 2.25rem;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.94rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.architecture-app.is-mobile .topology-summary {
+  align-items: start;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.architecture-app.is-mobile .topology-summary dl {
+  flex-wrap: wrap;
+}
+
+.architecture-app.is-mobile .topology-minimap {
+  display: none;
+}
+
+.architecture-app.is-mobile .workbench-status {
+  gap: 0.35rem 0.7rem;
+  font-size: 0.68rem;
+  padding: 0.4rem 0.55rem;
 }
 
 .architecture-app.is-mobile .architecture-inspector {
@@ -1218,7 +1499,8 @@ textarea {
   }
 
   .architecture-app.is-mobile .lens-tab {
-    padding-inline: 0.45rem;
+    font-size: 0.86rem;
+    padding-inline: 0.2rem;
   }
 
   .architecture-app.is-mobile .zoom-controls {

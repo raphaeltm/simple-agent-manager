@@ -17,7 +17,21 @@ export function App() {
   if (controller.viewer.error || !controller.viewer.model) {
     return (
       <Shell status={controller.viewer.status}>
-        <StateMessage title="Invalid workspace" detail={controller.viewer.error} />
+        <section className="invalid-workbench" aria-label="Architecture workspace error">
+          <header className="invalid-workbench-head">
+            <div>
+              <p className="eyebrow">Architecture workspace</p>
+              <h1>Workspace model unavailable</h1>
+            </div>
+            <span>model load failed</span>
+          </header>
+          <StateMessage title="Invalid workspace" detail={controller.viewer.error} />
+          <footer className="workbench-status">
+            <span>diagnostic</span>
+            <span>model unavailable</span>
+            <span>source preserved</span>
+          </footer>
+        </section>
       </Shell>
     );
   }

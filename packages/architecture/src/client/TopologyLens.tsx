@@ -10,6 +10,7 @@ const NODE_HEIGHT = 78;
 const COLUMN_GAP = 112;
 const ROW_GAP = 34;
 const STAGE_PADDING = 32;
+const DENSE_COLUMN_LIMIT = 6;
 
 interface TopologyLensProps {
   model: ViewerModel;
@@ -29,6 +30,7 @@ interface NodePosition {
 interface TopologyLayout {
   height: number;
   positions: Map<string, NodePosition>;
+  rankLabels: Array<{ label: string; x: number; width: number }>;
   vertical: boolean;
   width: number;
 }
@@ -54,11 +56,21 @@ export function TopologyLens({
 
   const layout = createTopologyLayout(slice.elements, slice.relationships, mobile);
   const elementsById = new Map(slice.elements.map((element) => [element.id, element]));
+  const relatedIds = connectedElementIds(slice.relationships);
   const style: CSSProperties & Record<'--aw-zoom', string> = { '--aw-zoom': String(zoom) };
 
   return (
     <section className="topology-lens" aria-label="Directed system topology" style={style}>
+      <TopologySummary
+        elements={slice.elements}
+        elementCount={slice.elements.length}
+        layout={layout}
+        relationshipCount={slice.relationships.length}
+        omittedElementCount={slice.omittedElements}
+        omittedRelationshipCount={slice.omittedRelationships}
+      />
       <div className="topology-stage" style={{ height: layout.height, width: layout.width }}>
+        <TopologyLanes layout={layout} />
         <TopologyEdges
           layout={layout}
           relationships={slice.relationships}
@@ -74,7 +86,7 @@ export function TopologyLens({
               type="button"
               aria-label={element.title}
               aria-pressed={selected}
-              className={`topology-node${selected ? ' selected' : ''}${element.id === focusId ? ' is-scope' : ''}`}
+              className={`topology-node topology-node--${element.kind}${selected ? ' selected' : ''}${element.id === focusId ? ' is-scope' : ''}${relatedIds.has(element.id) ? ' is-connected' : ' is-isolated'}`}
               style={{
                 height: NODE_HEIGHT,
                 left: position.x,
@@ -85,7 +97,12 @@ export function TopologyLens({
             >
               <small>{element.kind}</small>
               <strong>{element.title}</strong>
-              {element.id === focusId && <span>Current scope</span>}
+              <span className="topology-node-meta">
+                {element.id === focusId && <b>scope</b>}
+                {(element.sourceRefs?.length ?? 0) > 0 && <b>src</b>}
+                {(projectionIndex.threadsByTarget.get(element.id)?.length ?? 0) > 0 && <b>q&a</b>}
+                {!relatedIds.has(element.id) && <b>isolated</b>}
+              </span>
             </button>
           );
         })}
@@ -103,6 +120,95 @@ export function TopologyLens({
         </p>
       )}
     </section>
+  );
+}
+
+function TopologySummary({
+  elements,
+  elementCount,
+  layout,
+  relationshipCount,
+  omittedElementCount,
+  omittedRelationshipCount,
+}: {
+  elements: ArchitectureElement[];
+  elementCount: number;
+  layout: TopologyLayout;
+  relationshipCount: number;
+  omittedElementCount: number;
+  omittedRelationshipCount: number;
+}) {
+  return (
+    <header className="topology-summary">
+      <div>
+        <p className="eyebrow">Topology layer</p>
+        <h2>Runtime routes</h2>
+      </div>
+      <dl>
+        <div>
+          <dt>Nodes</dt>
+          <dd>{elementCount}</dd>
+        </div>
+        <div>
+          <dt>Routes</dt>
+          <dd>{relationshipCount}</dd>
+        </div>
+        {(omittedElementCount > 0 || omittedRelationshipCount > 0) && (
+          <div>
+            <dt>Bounded</dt>
+            <dd>{omittedElementCount + omittedRelationshipCount}</dd>
+          </div>
+        )}
+      </dl>
+      <TopologyMiniMap layout={layout} elements={elements} />
+    </header>
+  );
+}
+
+function TopologyLanes({ layout }: { layout: TopologyLayout }) {
+  return (
+    <div className="topology-lanes" aria-hidden="true">
+      {layout.rankLabels.map((rank) => (
+        <span
+          key={`${rank.label}-${rank.x}`}
+          className="topology-lane"
+          style={{ left: rank.x, width: rank.width }}
+        >
+          {rank.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function TopologyMiniMap({
+  elements,
+  layout,
+}: {
+  elements: ArchitectureElement[];
+  layout: TopologyLayout;
+}) {
+  const scaleX = 92 / Math.max(1, layout.width);
+  const scaleY = 52 / Math.max(1, layout.height);
+  return (
+    <div className="topology-minimap" aria-hidden="true">
+      {elements.map((element) => {
+        const position = layout.positions.get(element.id);
+        if (!position) return null;
+        return (
+          <span
+            key={element.id}
+            className={`topology-minimap-node topology-minimap-node--${element.kind}`}
+            style={{
+              height: Math.max(3, NODE_HEIGHT * scaleY),
+              left: position.x * scaleX,
+              top: position.y * scaleY,
+              width: Math.max(5, NODE_WIDTH * scaleX),
+            }}
+          />
+        );
+      })}
+    </div>
   );
 }
 
@@ -268,15 +374,17 @@ function createTopologyLayout(
     column.push(element.id);
     columns.set(rank, column);
   }
-  const rankValues = [...columns.keys()].sort((left, right) => left - right);
-  const maximumRows = Math.max(1, ...[...columns.values()].map((column) => column.length));
+  const packedColumns = packDenseColumns(columns);
+  const maximumRows = Math.max(1, ...packedColumns.map((column) => column.ids.length));
   const positions = new Map<string, NodePosition>();
-  for (const [columnIndex, rank] of rankValues.entries()) {
-    const column = columns.get(rank) ?? [];
-    const columnOffset = ((maximumRows - column.length) * (NODE_HEIGHT + ROW_GAP)) / 2;
-    for (const [rowIndex, id] of column.entries()) {
+  const rankLabels: TopologyLayout['rankLabels'] = [];
+  for (const [columnIndex, column] of packedColumns.entries()) {
+    const columnOffset = ((maximumRows - column.ids.length) * (NODE_HEIGHT + ROW_GAP)) / 2;
+    const x = STAGE_PADDING + columnIndex * (NODE_WIDTH + COLUMN_GAP);
+    rankLabels.push({ label: column.label, x, width: NODE_WIDTH });
+    for (const [rowIndex, id] of column.ids.entries()) {
       positions.set(id, {
-        x: STAGE_PADDING + columnIndex * (NODE_WIDTH + COLUMN_GAP),
+        x,
         y: STAGE_PADDING + columnOffset + rowIndex * (NODE_HEIGHT + ROW_GAP),
       });
     }
@@ -285,11 +393,12 @@ function createTopologyLayout(
   return {
     height: STAGE_PADDING * 2 + maximumRows * NODE_HEIGHT + Math.max(0, maximumRows - 1) * ROW_GAP,
     positions,
+    rankLabels,
     vertical: false,
     width:
       STAGE_PADDING * 2 +
-      rankValues.length * NODE_WIDTH +
-      Math.max(0, rankValues.length - 1) * COLUMN_GAP,
+      packedColumns.length * NODE_WIDTH +
+      Math.max(0, packedColumns.length - 1) * COLUMN_GAP,
   };
 }
 
@@ -305,9 +414,41 @@ function createVerticalTopologyLayout(elements: ArchitectureElement[]): Topology
         { x: STAGE_PADDING, y: STAGE_PADDING + index * (NODE_HEIGHT + ROW_GAP) },
       ])
     ),
+    rankLabels: [{ label: 'Stack', x: STAGE_PADDING, width: NODE_WIDTH }],
     vertical: true,
     width: STAGE_PADDING * 2 + NODE_WIDTH,
   };
+}
+
+function packDenseColumns(columns: Map<number, string[]>): Array<{ ids: string[]; label: string }> {
+  return [...columns.entries()]
+    .sort(([left], [right]) => left - right)
+    .flatMap(([rank, ids]) => {
+      if (ids.length <= DENSE_COLUMN_LIMIT) return [{ ids, label: rankLabel(rank) }];
+      const packed: Array<{ ids: string[]; label: string }> = [];
+      for (let index = 0; index < ids.length; index += DENSE_COLUMN_LIMIT) {
+        packed.push({
+          ids: ids.slice(index, index + DENSE_COLUMN_LIMIT),
+          label: `${rankLabel(rank)}.${packed.length + 1}`,
+        });
+      }
+      return packed;
+    });
+}
+
+function rankLabel(rank: number): string {
+  if (rank === 0) return 'Entry';
+  if (rank === 1) return 'Runtime';
+  return `Hop ${rank}`;
+}
+
+function connectedElementIds(relationships: ArchitectureRelationship[]): Set<string> {
+  const ids = new Set<string>();
+  for (const relationship of relationships) {
+    ids.add(relationship.from);
+    ids.add(relationship.to);
+  }
+  return ids;
 }
 
 function stronglyConnectedComponents(ids: string[], outgoing: Map<string, string[]>): string[][] {
