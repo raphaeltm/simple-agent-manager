@@ -117,6 +117,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `CRON_FAILURE_NOTIFICATION_KV_PREFIX` — KV prefix for failure-notification throttle markers (default: `cron-failure-notification`)
 - `NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS` — Maximum destroying-state residence before DO self-cleanup (default: `86400000`)
 - `NODE_CLEANUP_FAILURE_BACKOFF_MS` — Failed cleanup-candidate exclusion window (default: `3600000`)
+- `IDLE_CLEANUP_MAX_RESIDENCE_MS` — Maximum ProjectData idle-cleanup schedule residence before preserved/error outcomes stop re-arming and surface attention (default: `7200000`)
 - `DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS` — Minimum re-arm delay for completed diagnosis steps (default: `1000`)
 - `ORCHESTRATOR_ZERO_TASK_GRACE_MS` — Grace before a zero-task mission terminalizes (default: `600000`)
 - `ORCHESTRATOR_MAX_MISSION_LIFETIME_MS` — Mission lifetime backstop (default: `86400000`)

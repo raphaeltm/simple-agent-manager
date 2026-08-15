@@ -157,6 +157,19 @@ describe('DO Migrations', () => {
         }>;
         expect(inboxColumns.map((column) => column.name)).toContain('receipt_state');
         expect(inboxColumns.map((column) => column.name)).toContain('next_attempt_at');
+        const idleCleanupColumns = db
+          .prepare('PRAGMA table_info(idle_cleanup_schedule)')
+          .all() as Array<{ name: string }>;
+        expect(idleCleanupColumns.map((column) => column.name)).toEqual(
+          expect.arrayContaining([
+            'terminal_state',
+            'terminal_reason',
+            'terminal_at',
+            'last_error',
+            'failure_notified_at',
+            'attention_marker_id',
+          ])
+        );
       } finally {
         db.close();
       }
@@ -167,7 +180,11 @@ describe('DO Migrations', () => {
       try {
         const sql = createSqlStorage(db);
         sql.exec(`CREATE TABLE migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)`);
-        for (const migration of MIGRATIONS.slice(0, -1)) {
+        const promptDeliveryMigrationIndex = MIGRATIONS.findIndex(
+          (migration) => migration.name === '027-durable-prompt-delivery-checkpoints'
+        );
+        expect(promptDeliveryMigrationIndex).toBeGreaterThan(0);
+        for (const migration of MIGRATIONS.slice(0, promptDeliveryMigrationIndex)) {
           migration.run(sql);
           sql.exec('INSERT INTO migrations (name, applied_at) VALUES (?, ?)', migration.name, 1);
         }
@@ -305,7 +322,8 @@ describe('DO Migrations', () => {
       // delivery-aware attention expiry: 1 from migration 026
       // session_inbox: 2 (durable delivery due + claims) from migration 027
       // checkpoint_episodes: 2 (session + state) from migration 027
-      expect(indexes.length).toBe(46);
+      // idle_cleanup_schedule: 2 (active cleanup_at + terminal marker) from migration 028
+      expect(indexes.length).toBe(48);
     });
   });
 });

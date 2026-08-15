@@ -3,6 +3,7 @@
  */
 import {
   DEFAULT_IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP,
+  DEFAULT_IDLE_CLEANUP_MAX_RESIDENCE_MS,
   DEFAULT_IDLE_CLEANUP_MAX_RETRIES,
   DEFAULT_IDLE_CLEANUP_RETRY_DELAY_MS,
   DEFAULT_SESSION_IDLE_TIMEOUT_MINUTES,
@@ -13,6 +14,7 @@ import {
 
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { recordActivityEventInternal } from './activity';
+import { createAttentionMarker } from './attention';
 import {
   listReporterScopedTaskCandidates,
   terminalizeIdleTaskInD1,
@@ -32,10 +34,138 @@ import type { Env } from './types';
 export { deleteWorkspaceInD1, stopWorkspaceInD1 } from './idle-cleanup-workspace';
 
 const log = createModuleLogger('idle_cleanup');
+const IDLE_CLEANUP_ATTENTION_KIND = 'idle_cleanup_failed';
+const IDLE_CLEANUP_RETRY_EXHAUSTED_MESSAGE =
+  'Idle cleanup failed after retries. Your work has been preserved — please check the workspace manually.';
+const IDLE_CLEANUP_MAX_RESIDENCE_MESSAGE =
+  'Idle cleanup could not complete within its maximum residence time. Your work has been preserved — please check the workspace manually.';
 
 function positiveInt(value: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(value ?? '', 10);
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+type IdleCleanupEntry = ReturnType<typeof parseIdleCleanupSchedule>;
+
+function errorText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+function maxResidenceExceeded(entry: IdleCleanupEntry, now: number, maxResidenceMs: number): boolean {
+  return now - entry.createdAt >= maxResidenceMs;
+}
+
+function markIdleCleanupAttentionRequired(
+  sql: SqlStorage,
+  entry: IdleCleanupEntry,
+  terminalState: string,
+  reason: string,
+  message: string,
+  broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void
+): void {
+  const now = Date.now();
+  let attentionMarkerId = entry.attentionMarkerId;
+  if (!attentionMarkerId) {
+    try {
+      attentionMarkerId = createAttentionMarker(sql, {
+        sessionId: entry.sessionId,
+        taskId: entry.taskId,
+        workspaceId: entry.workspaceId,
+        kind: IDLE_CLEANUP_ATTENTION_KIND,
+        source: 'idle_cleanup',
+        reason,
+        metadata: JSON.stringify({ terminalState }),
+      }).id;
+    } catch (err) {
+      log.error('attention_marker_create_failed', {
+        sessionId: entry.sessionId,
+        workspaceId: entry.workspaceId,
+        taskId: entry.taskId,
+        terminalState,
+        ...serializeError(err),
+      });
+    }
+  }
+
+  const shouldNotify = entry.failureNotifiedAt === null;
+  let messageId: string | null = null;
+  let messageCreatedAt: number | null = null;
+  let messageSequence: number | null = null;
+  if (shouldNotify) {
+    const msgResult = persistSystemMessage(sql, entry.sessionId, message);
+    if (msgResult) {
+      messageId = msgResult.id;
+      messageCreatedAt = msgResult.now;
+      messageSequence = msgResult.sequence;
+    }
+  }
+
+  sql.exec(
+    `UPDATE idle_cleanup_schedule
+     SET terminal_state = ?,
+         terminal_reason = ?,
+         terminal_at = ?,
+         cleanup_at = ?,
+         last_error = ?,
+         failure_notified_at = COALESCE(failure_notified_at, ?),
+         attention_marker_id = COALESCE(attention_marker_id, ?)
+     WHERE session_id = ? AND terminal_state IS NULL`,
+    terminalState,
+    reason,
+    now,
+    now,
+    reason,
+    shouldNotify ? now : null,
+    attentionMarkerId,
+    entry.sessionId
+  );
+
+  recordActivityEventInternal(
+    sql,
+    'session.idle_cleanup_attention_required',
+    'system',
+    null,
+    entry.workspaceId,
+    entry.sessionId,
+    entry.taskId,
+    JSON.stringify({
+      terminalState,
+      reason,
+      retryCount: entry.retryCount,
+      attentionMarkerId,
+      notified: messageId !== null,
+    })
+  );
+
+  broadcastEvent(
+    'session.idle_cleanup_attention_required',
+    {
+      sessionId: entry.sessionId,
+      workspaceId: entry.workspaceId,
+      taskId: entry.taskId,
+      terminalState,
+      reason,
+      attentionMarkerId,
+      notified: messageId !== null,
+    },
+    entry.sessionId
+  );
+
+  if (messageId && messageCreatedAt !== null && messageSequence !== null) {
+    broadcastEvent(
+      'message.new',
+      {
+        sessionId: entry.sessionId,
+        messageId,
+        role: 'system',
+        content: message,
+        toolMetadata: null,
+        createdAt: messageCreatedAt,
+        sequence: messageSequence,
+      },
+      entry.sessionId
+    );
+  }
 }
 
 export function scheduleIdleCleanup(
@@ -80,7 +210,10 @@ export function resetIdleCleanup(
   const cleanupAt = Date.now() + timeoutMinutes * 60 * 1000;
 
   const existing = sql
-    .exec('SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ?', sessionId)
+    .exec(
+      'SELECT session_id FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL',
+      sessionId
+    )
     .toArray();
 
   if (existing.length === 0) {
@@ -88,7 +221,9 @@ export function resetIdleCleanup(
   }
 
   sql.exec(
-    'UPDATE idle_cleanup_schedule SET cleanup_at = ?, retry_count = 0 WHERE session_id = ?',
+    `UPDATE idle_cleanup_schedule
+     SET cleanup_at = ?, retry_count = 0, last_error = NULL
+     WHERE session_id = ? AND terminal_state IS NULL`,
     cleanupAt,
     sessionId
   );
@@ -98,7 +233,10 @@ export function resetIdleCleanup(
 
 export function getCleanupAt(sql: SqlStorage, sessionId: string): number | null {
   const row = sql
-    .exec('SELECT cleanup_at FROM idle_cleanup_schedule WHERE session_id = ?', sessionId)
+    .exec(
+      'SELECT cleanup_at FROM idle_cleanup_schedule WHERE session_id = ? AND terminal_state IS NULL',
+      sessionId
+    )
     .toArray()[0];
   return row ? parseCleanupAt(row, 'idle_cleanup.get_cleanup_at') : null;
 }
@@ -116,6 +254,10 @@ export async function processExpiredCleanups(
 ): Promise<void> {
   const now = Date.now();
   const maxRetries = positiveInt(env.IDLE_CLEANUP_MAX_RETRIES, DEFAULT_IDLE_CLEANUP_MAX_RETRIES);
+  const maxResidenceMs = positiveInt(
+    env.IDLE_CLEANUP_MAX_RESIDENCE_MS,
+    DEFAULT_IDLE_CLEANUP_MAX_RESIDENCE_MS
+  );
   const retryDelay = positiveInt(
     env.IDLE_CLEANUP_RETRY_DELAY_MS,
     DEFAULT_IDLE_CLEANUP_RETRY_DELAY_MS
@@ -129,9 +271,11 @@ export async function processExpiredCleanups(
 
   const expired = sql
     .exec(
-      `SELECT session_id, workspace_id, task_id, cleanup_at, created_at, retry_count
+      `SELECT session_id, workspace_id, task_id, cleanup_at, created_at, retry_count,
+              terminal_state, terminal_reason, terminal_at, last_error,
+              failure_notified_at, attention_marker_id
        FROM idle_cleanup_schedule
-       WHERE cleanup_at <= ?
+       WHERE cleanup_at <= ? AND terminal_state IS NULL
        ORDER BY cleanup_at ASC, session_id ASC
        LIMIT ?`,
       now,
@@ -150,9 +294,24 @@ export async function processExpiredCleanups(
           taskId: entry.taskId,
           action: 'preserved',
         });
+        if (maxResidenceExceeded(entry, now, maxResidenceMs)) {
+          markIdleCleanupAttentionRequired(
+            sql,
+            entry,
+            'reporter_identity_incomplete',
+            'Idle cleanup reporter identity stayed incomplete until max residence.',
+            IDLE_CLEANUP_MAX_RESIDENCE_MESSAGE,
+            broadcastEvent
+          );
+          continue;
+        }
         sql.exec(
-          'UPDATE idle_cleanup_schedule SET cleanup_at = ?, retry_count = 0 WHERE session_id = ?',
+          `UPDATE idle_cleanup_schedule
+           SET cleanup_at = ?,
+               last_error = ?
+           WHERE session_id = ? AND terminal_state IS NULL`,
           now + retryDelay,
+          'reporter_identity_incomplete',
           entry.sessionId
         );
         continue;
@@ -168,9 +327,25 @@ export async function processExpiredCleanups(
         timeoutMs,
       });
       if (transition.outcome === 'preserved') {
+        if (maxResidenceExceeded(entry, now, maxResidenceMs)) {
+          markIdleCleanupAttentionRequired(
+            sql,
+            entry,
+            'preserved_max_residence_exceeded',
+            transition.liveness?.reason ??
+              'Idle cleanup runtime liveness stayed inconclusive until max residence.',
+            IDLE_CLEANUP_MAX_RESIDENCE_MESSAGE,
+            broadcastEvent
+          );
+          continue;
+        }
         sql.exec(
-          'UPDATE idle_cleanup_schedule SET cleanup_at = ?, retry_count = 0 WHERE session_id = ?',
+          `UPDATE idle_cleanup_schedule
+           SET cleanup_at = ?,
+               last_error = ?
+           WHERE session_id = ? AND terminal_state IS NULL`,
           now + retryDelay,
+          transition.liveness?.reason ?? 'preserved',
           entry.sessionId
         );
         continue;
@@ -234,7 +409,6 @@ export async function processExpiredCleanups(
       log.error('cleanup_failed', { sessionId: entry.sessionId, ...serializeError(err) });
 
       if (entry.retryCount >= maxRetries) {
-        sql.exec('DELETE FROM idle_cleanup_schedule WHERE session_id = ?', entry.sessionId);
         recordActivityEventInternal(
           sql,
           'session.idle_cleanup_failed',
@@ -244,37 +418,29 @@ export async function processExpiredCleanups(
           entry.sessionId,
           entry.taskId,
           JSON.stringify({
-            error: err instanceof Error ? err.message : String(err),
+            error: errorText(err),
             retryCount: entry.retryCount,
           })
         );
-        const msgResult = persistSystemMessage(
+        markIdleCleanupAttentionRequired(
           sql,
-          entry.sessionId,
-          'Idle cleanup failed after retries. Your work has been preserved — please check the workspace manually.'
+          entry,
+          'retry_exhausted',
+          errorText(err),
+          IDLE_CLEANUP_RETRY_EXHAUSTED_MESSAGE,
+          broadcastEvent
         );
-        if (msgResult) {
-          broadcastEvent(
-            'message.new',
-            {
-              sessionId: entry.sessionId,
-              messageId: msgResult.id,
-              role: 'system',
-              content:
-                'Idle cleanup failed after retries. Your work has been preserved — please check the workspace manually.',
-              toolMetadata: null,
-              createdAt: msgResult.now,
-              sequence: msgResult.sequence,
-            },
-            entry.sessionId
-          );
-        }
       } else {
         sql.exec(
-          'UPDATE idle_cleanup_schedule SET cleanup_at = ?, retry_count = ? WHERE session_id = ?',
+          `UPDATE idle_cleanup_schedule
+           SET cleanup_at = ?,
+               retry_count = ?,
+               last_error = ?
+           WHERE session_id = ? AND terminal_state IS NULL`,
           now + retryDelay,
           entry.retryCount + 1,
-          entry.sessionId
+          errorText(err),
+          entry.sessionId,
         );
       }
     }
@@ -460,7 +626,9 @@ export function computeIdleAlarmTimes(sql: SqlStorage): {
   workspaceIdleCheckTime: number | null;
 } {
   const idleRow = sql
-    .exec('SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule')
+    .exec(
+      'SELECT MIN(cleanup_at) as earliest FROM idle_cleanup_schedule WHERE terminal_state IS NULL'
+    )
     .toArray()[0];
   const idleCleanupTime = idleRow ? parseMinEarliest(idleRow, 'idle_cleanup.min_cleanup_at') : null;
 

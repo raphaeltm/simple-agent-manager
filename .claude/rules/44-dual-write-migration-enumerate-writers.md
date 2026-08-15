@@ -80,6 +80,34 @@ Before merging any migration that introduces a synced second representation:
 - [ ] A vertical-slice test proves the downstream consumer sees the latest write
 - [ ] No decrypted/secret material is logged by the new sync path
 
+## Fail-Closed Identity Gates Reading Linkage Columns
+
+This rule also applies when a fail-closed identity/lifecycle gate reads a linkage
+column that is populated somewhere else, even if the PR is not introducing a new
+storage representation. The 2026-08-15 idle-cleanup incident had this shape:
+`terminalizeIdleTaskInD1()` rejected valid reporters because it required
+`tasks.chat_session_id` to equal the reporter session, while the dominant
+TaskRunner session path only populated `workspaces.chat_session_id` and the
+ProjectData DO session link.
+
+Before merging a gate that compares task/session/workspace/node/project linkage
+columns:
+
+- [ ] Enumerate every writer and nuller of every column the gate reads, including
+      route handlers, TaskRunner/ProjectData/other Durable Objects, trigger
+      submission paths, recovery/resume paths, repair jobs, and test/trial
+      runners.
+- [ ] For each writer/nuller, document one of: dual-write in the same operation,
+      read-only for the gate, or tracked out of scope with a SAM Idea/task ID.
+- [ ] Add a regression test where the primary writer omits the linkage column the
+      gate reads; the test must fail on the pre-fix code and pass only when the
+      writer/gate contract is complete.
+- [ ] Add a discriminating mismatch control proving a genuinely different
+      non-null linkage is still rejected.
+- [ ] If a legacy tolerance accepts `NULL`, it must be backed by another
+      server-written binding for the same resource and must backfill the missing
+      linkage before proceeding.
+
 ## References
 
 - Post-mortem: `tasks/archive/2026-06-30-fix-production-codex-oauth-refresh-429.md`

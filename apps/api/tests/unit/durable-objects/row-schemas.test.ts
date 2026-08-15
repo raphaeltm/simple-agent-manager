@@ -467,6 +467,12 @@ describe('parseIdleCleanupSchedule', () => {
       cleanupAt: 1234,
       createdAt: 1000,
       retryCount: 2,
+      terminalState: null,
+      terminalReason: null,
+      terminalAt: null,
+      lastError: null,
+      failureNotifiedAt: null,
+      attentionMarkerId: null,
     });
   });
 

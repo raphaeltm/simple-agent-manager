@@ -30,10 +30,28 @@ function createState(taskMode: 'task' | 'conversation' = 'task'): TaskRunnerStat
   } as TaskRunnerState;
 }
 
-function createContext() {
-  const run = vi.fn(async () => ({ meta: { changes: 1 } }));
-  const bind = vi.fn(() => ({ run }));
-  const prepare = vi.fn(() => ({ bind }));
+function createContext(
+  options: {
+    taskUpdateChanges?: number;
+    taskRow?: { chat_session_id: string | null; workspace_id: string | null } | null;
+  } = {}
+) {
+  const statements: Array<{ sql: string; params: unknown[] }> = [];
+  const prepare = vi.fn((sql: string) => ({
+    bind: vi.fn((...params: unknown[]) => {
+      statements.push({ sql, params });
+      return {
+        run: vi.fn(async () => ({
+          meta: {
+            changes: sql.includes('UPDATE tasks')
+              ? (options.taskUpdateChanges ?? 1)
+              : 1,
+          },
+        })),
+        first: vi.fn(async () => options.taskRow ?? null),
+      };
+    }),
+  }));
   const env = {
     DATABASE: { prepare },
   };
@@ -45,8 +63,7 @@ function createContext() {
     } as TaskRunnerContext,
     env,
     prepare,
-    bind,
-    run,
+    statements,
   };
 }
 
@@ -57,7 +74,7 @@ describe('ensureSessionLinked', () => {
 
   it('schedules idle cleanup for task-mode sessions after linking to the workspace', async () => {
     const state = createState('task');
-    const { rc, env } = createContext();
+    const { rc, env, statements } = createContext();
 
     await ensureSessionLinked(state, 'ws-1', rc);
 
@@ -74,6 +91,9 @@ describe('ensureSessionLinked', () => {
       'ws-1',
       'task-1',
     );
+    expect(
+      statements.find((statement) => statement.sql.includes('UPDATE tasks'))?.params
+    ).toEqual(['session-1', 'ws-1', expect.any(String), 'task-1', 'session-1', 'ws-1']);
   });
 
   it('does not schedule idle cleanup for conversation-mode sessions', async () => {
@@ -83,6 +103,20 @@ describe('ensureSessionLinked', () => {
     await ensureSessionLinked(state, 'ws-1', rc);
 
     expect(linkSessionToWorkspaceMock).toHaveBeenCalledOnce();
+    expect(scheduleIdleCleanupMock).not.toHaveBeenCalled();
+  });
+
+  it('fails closed when the task row is already linked to a different session', async () => {
+    const state = createState('task');
+    const { rc } = createContext({
+      taskUpdateChanges: 0,
+      taskRow: { chat_session_id: 'session-other', workspace_id: 'ws-1' },
+    });
+
+    await expect(ensureSessionLinked(state, 'ws-1', rc)).rejects.toThrow(
+      'conflicting session/workspace linkage'
+    );
+    expect(linkSessionToWorkspaceMock).not.toHaveBeenCalled();
     expect(scheduleIdleCleanupMock).not.toHaveBeenCalled();
   });
 });

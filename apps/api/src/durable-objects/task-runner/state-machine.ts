@@ -27,18 +27,44 @@ export async function ensureSessionLinked(
   workspaceId: string,
   rc: TaskRunnerContext
 ): Promise<void> {
-  if (!state.stepResults.chatSessionId) return;
+  const chatSessionId = state.stepResults.chatSessionId;
+  if (!chatSessionId) return;
 
   const now = new Date().toISOString();
 
-  // Step 1: Update D1 workspace record (critical — used by idle cleanup, task hooks)
-  // This is idempotent: setting chat_session_id to the same value is fine.
+  // Step 1: Update D1 workspace + task records (critical — used by idle cleanup, task hooks)
+  // This is idempotent for the same session/workspace and fails closed on mismatched links.
   try {
     await rc.env.DATABASE.prepare(
       `UPDATE workspaces SET chat_session_id = ?, updated_at = ? WHERE id = ?`
     )
-      .bind(state.stepResults.chatSessionId, now, workspaceId)
+      .bind(chatSessionId, now, workspaceId)
       .run();
+
+    const taskLink = await rc.env.DATABASE.prepare(
+      `UPDATE tasks
+       SET chat_session_id = ?, workspace_id = ?, updated_at = ?
+       WHERE id = ?
+         AND (chat_session_id IS NULL OR chat_session_id = ?)
+         AND (workspace_id IS NULL OR workspace_id = ?)`
+    )
+      .bind(chatSessionId, workspaceId, now, state.taskId, chatSessionId, workspaceId)
+      .run();
+
+    if (!taskLink.meta.changes) {
+      const task = await rc.env.DATABASE.prepare(
+        `SELECT chat_session_id, workspace_id FROM tasks WHERE id = ? LIMIT 1`
+      )
+        .bind(state.taskId)
+        .first<{ chat_session_id: string | null; workspace_id: string | null }>();
+      if (!task || task.chat_session_id !== chatSessionId || task.workspace_id !== workspaceId) {
+        throw new Error(
+          `Task ${state.taskId} has conflicting session/workspace linkage ` +
+            `(task.chat_session_id=${task?.chat_session_id ?? 'missing'}, ` +
+            `task.workspace_id=${task?.workspace_id ?? 'missing'})`
+        );
+      }
+    }
 
     if (state.config.resumeSnapshotChatSessionId) {
       const { drizzle } = await import('drizzle-orm/d1');
@@ -55,15 +81,15 @@ export async function ensureSessionLinked(
 
     log.info('task_runner_do.session_d1_linked', {
       taskId: state.taskId,
-      sessionId: state.stepResults.chatSessionId,
+      sessionId: chatSessionId,
       workspaceId,
     });
   } catch (err) {
-    // D1 link failure is blocking — without chatSessionId in D1, the message
-    // ingestion endpoint will reject all messages for this workspace.
+    // D1 link failure is blocking — without chatSessionId in D1, message ingestion
+    // and idle cleanup cannot bind the workspace/session/task identity safely.
     log.error('task_runner_do.session_d1_link_failed', {
       taskId: state.taskId,
-      sessionId: state.stepResults.chatSessionId,
+      sessionId: chatSessionId,
       workspaceId,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -83,7 +109,7 @@ export async function ensureSessionLinked(
     await projectDataService.linkSessionToWorkspace(
       rc.env,
       state.projectId,
-      state.stepResults.chatSessionId,
+      chatSessionId,
       workspaceId
     );
 
@@ -91,20 +117,20 @@ export async function ensureSessionLinked(
       await projectDataService.scheduleIdleCleanup(
         rc.env,
         state.projectId,
-        state.stepResults.chatSessionId,
+        chatSessionId,
         workspaceId,
         state.taskId
       );
       log.info('task_runner_do.session_idle_cleanup_scheduled', {
         taskId: state.taskId,
-        sessionId: state.stepResults.chatSessionId,
+        sessionId: chatSessionId,
         workspaceId,
       });
     }
 
     log.info('task_runner_do.session_linked_to_workspace', {
       taskId: state.taskId,
-      sessionId: state.stepResults.chatSessionId,
+      sessionId: chatSessionId,
       workspaceId,
     });
   } catch (err) {
@@ -112,7 +138,7 @@ export async function ensureSessionLinked(
     // in the DO's SQLite. The D1 link above handles downstream needs.
     log.error('task_runner_do.session_do_link_failed', {
       taskId: state.taskId,
-      sessionId: state.stepResults.chatSessionId,
+      sessionId: chatSessionId,
       workspaceId,
       error: err instanceof Error ? err.message : String(err),
     });

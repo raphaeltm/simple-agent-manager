@@ -816,7 +816,28 @@ export const MIGRATIONS: Migration[] = [
       sql.exec(`
         CREATE INDEX idx_checkpoint_episodes_state
         ON checkpoint_episodes(state, updated_at)
-        `);
+      `);
+    },
+  },
+  {
+    name: '028-idle-cleanup-attention-state',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN terminal_state TEXT`);
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN terminal_reason TEXT`);
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN terminal_at INTEGER`);
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN last_error TEXT`);
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN failure_notified_at INTEGER`);
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN attention_marker_id TEXT`);
+      sql.exec(`
+        CREATE INDEX idx_idle_cleanup_schedule_active_cleanup_at
+        ON idle_cleanup_schedule(cleanup_at)
+        WHERE terminal_state IS NULL
+      `);
+      sql.exec(`
+        CREATE INDEX idx_idle_cleanup_schedule_terminal
+        ON idle_cleanup_schedule(terminal_state, terminal_at)
+        WHERE terminal_state IS NOT NULL
+      `);
     },
   },
 ];

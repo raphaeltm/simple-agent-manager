@@ -94,10 +94,12 @@ interface SeedOptions {
   nodeStatus?: string;
   nodeHealthStatus?: string;
   nodeRuntime?: string;
+  taskChatSessionId?: string | null;
   acpStatus?: 'pending' | 'assigned' | 'running' | 'completed' | 'failed' | 'interrupted';
   withTrigger?: boolean;
   lastActivityAt?: number;
   scheduleExpired?: boolean;
+  scheduleRetryCount?: number;
 }
 
 describe('ProjectData idle cleanup runtime liveness contract', () => {
@@ -192,7 +194,7 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
         taskId,
         projectId,
         workspaceId,
-        sessionId,
+        options.taskChatSessionId === undefined ? sessionId : options.taskChatSessionId,
         new Date(NOW - TIMEOUT_MS).toISOString(),
         triggerId,
         new Date(NOW - TIMEOUT_MS).toISOString()
@@ -232,11 +234,18 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
     if (options.scheduleExpired) {
       projectDb
         .prepare(
-          `INSERT INTO idle_cleanup_schedule
+         `INSERT INTO idle_cleanup_schedule
          (session_id, workspace_id, task_id, cleanup_at, created_at, retry_count)
-         VALUES (?, ?, ?, ?, ?, 0)`
+         VALUES (?, ?, ?, ?, ?, ?)`
         )
-        .run(sessionId, workspaceId, taskId, NOW - 1, NOW - TIMEOUT_MS - 1);
+        .run(
+          sessionId,
+          workspaceId,
+          taskId,
+          NOW - 1,
+          NOW - TIMEOUT_MS - 1,
+          options.scheduleRetryCount ?? 0
+        );
     }
     return { taskId, workspaceId, sessionId, projectId };
   }
@@ -338,6 +347,29 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
     ).toBe(1);
   });
 
+  it('terminalizes and reaps a task-mode session whose task link is NULL but workspace binding matches', async () => {
+    const { taskId, workspaceId, sessionId, projectId } = seed({
+      nodeStatus: 'stopped',
+      scheduleExpired: true,
+      taskChatSessionId: null,
+    });
+    const stopWorkspace = vi.fn().mockResolvedValue(undefined);
+
+    await runPathA(stopWorkspace);
+
+    expect(task(taskId)).toMatchObject({
+      status: 'failed',
+      chat_session_id: sessionId,
+    });
+    expect(stopWorkspace).toHaveBeenCalledWith(workspaceId, projectId);
+    expect(
+      projectDb
+        .prepare('SELECT COUNT(*) FROM idle_cleanup_schedule WHERE session_id = ?')
+        .pluck()
+        .get(sessionId)
+    ).toBe(0);
+  });
+
   it('honors the configured candidate bound with deterministic Path A ordering', async () => {
     env.IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP = '1';
     const first = seed({
@@ -388,6 +420,24 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
     ]);
   });
 
+  it('Path B terminalizes a legacy NULL-linked reporter task through the workspace binding', async () => {
+    const reporter = seed({
+      taskId: 'task-null-link-reporter',
+      sessionId: 'session-null-link-reporter',
+      taskChatSessionId: null,
+      nodeStatus: 'stopped',
+    });
+    const deleteWorkspace = vi.fn().mockResolvedValue(undefined);
+
+    await checkWorkspaceIdleTimeouts(sql, env, PROJECT_ID, deleteWorkspace, vi.fn(), vi.fn());
+
+    expect(task(reporter.taskId)).toMatchObject({
+      status: 'failed',
+      chat_session_id: reporter.sessionId,
+    });
+    expect(deleteWorkspace).toHaveBeenCalledWith(reporter.workspaceId, PROJECT_ID);
+  });
+
   it('rejects a cross-project reporter with structured scope context and no mutation', async () => {
     const seeded = seed();
 
@@ -408,6 +458,123 @@ describe('ProjectData idle cleanup runtime liveness contract', () => {
       'scope_rejected',
       expect.objectContaining({ mismatch: 'project_id', action: 'rejected' })
     );
+  });
+
+  it('rejects a non-null task/session mismatch and leaves the pair discriminating', async () => {
+    const seeded = seed({ taskChatSessionId: 'session-other' });
+
+    const result = await terminalizeIdleTaskInD1(sql, env, {
+      sweep: 'session_idle_cleanup',
+      projectId: PROJECT_ID,
+      taskId: seeded.taskId,
+      workspaceId: seeded.workspaceId,
+      sessionId: seeded.sessionId,
+      idleDurationMs: 2 * TIMEOUT_MS,
+      timeoutMs: TIMEOUT_MS,
+    });
+
+    expect(result.outcome).toBe('rejected');
+    expect(task(seeded.taskId)).toMatchObject({
+      status: 'in_progress',
+      chat_session_id: 'session-other',
+    });
+    expect(d1Db.prepare('SELECT COUNT(*) FROM task_status_events').pluck().get()).toBe(0);
+  });
+
+  it('moves permanently preserved idle cleanup rows out of the active candidate set after max residence', async () => {
+    env.IDLE_CLEANUP_MAX_RESIDENCE_MS = '1';
+    const { taskId, sessionId } = seed({ scheduleExpired: true });
+    const stopWorkspace = vi.fn().mockResolvedValue(undefined);
+    const broadcast = vi.fn();
+
+    await processExpiredCleanups(sql, env, PROJECT_ID, stopWorkspace, broadcast, vi.fn());
+    await processExpiredCleanups(sql, env, PROJECT_ID, stopWorkspace, broadcast, vi.fn());
+
+    expect(task(taskId).status).toBe('in_progress');
+    expect(stopWorkspace).not.toHaveBeenCalled();
+    expect(
+      projectDb
+        .prepare(
+          `SELECT terminal_state, failure_notified_at
+           FROM idle_cleanup_schedule WHERE session_id = ?`
+        )
+        .get(sessionId)
+    ).toMatchObject({
+      terminal_state: 'preserved_max_residence_exceeded',
+      failure_notified_at: expect.any(Number),
+    });
+    expect(
+      projectDb
+        .prepare(
+          `SELECT COUNT(*) FROM idle_cleanup_schedule
+           WHERE cleanup_at <= ? AND terminal_state IS NULL`
+        )
+        .pluck()
+        .get(NOW)
+    ).toBe(0);
+    expect(
+      projectDb
+        .prepare(
+          `SELECT COUNT(*) FROM session_attention_markers
+           WHERE session_id = ? AND kind = 'idle_cleanup_failed' AND resolved_at IS NULL`
+        )
+        .pluck()
+        .get(sessionId)
+    ).toBe(1);
+    expect(
+      projectDb
+        .prepare(
+          `SELECT COUNT(*) FROM chat_messages
+           WHERE session_id = ? AND role = 'system'
+             AND content LIKE 'Idle cleanup could not complete%'`
+        )
+        .pluck()
+        .get(sessionId)
+    ).toBe(1);
+  });
+
+  it('keeps retry exhaustion visible without deleting the schedule or duplicating the toast', async () => {
+    const { sessionId } = seed({
+      scheduleExpired: true,
+      scheduleRetryCount: 1,
+      taskChatSessionId: 'session-other',
+    });
+    const broadcast = vi.fn();
+
+    await processExpiredCleanups(sql, env, PROJECT_ID, vi.fn(), broadcast, vi.fn());
+    await processExpiredCleanups(sql, env, PROJECT_ID, vi.fn(), broadcast, vi.fn());
+
+    expect(
+      projectDb
+        .prepare(
+          `SELECT terminal_state, terminal_reason, failure_notified_at
+           FROM idle_cleanup_schedule WHERE session_id = ?`
+        )
+        .get(sessionId)
+    ).toMatchObject({
+      terminal_state: 'retry_exhausted',
+      terminal_reason: 'Idle cleanup reporter scope did not match the task',
+      failure_notified_at: expect.any(Number),
+    });
+    expect(
+      projectDb
+        .prepare(
+          `SELECT COUNT(*) FROM chat_messages
+           WHERE session_id = ? AND role = 'system'
+             AND content = 'Idle cleanup failed after retries. Your work has been preserved — please check the workspace manually.'`
+        )
+        .pluck()
+        .get(sessionId)
+    ).toBe(1);
+    expect(
+      projectDb
+        .prepare(
+          `SELECT COUNT(*) FROM session_attention_markers
+           WHERE session_id = ? AND kind = 'idle_cleanup_failed' AND resolved_at IS NULL`
+        )
+        .pluck()
+        .get(sessionId)
+    ).toBe(1);
   });
 
   it('preserves the task when the D1 runtime snapshot probe errors', async () => {

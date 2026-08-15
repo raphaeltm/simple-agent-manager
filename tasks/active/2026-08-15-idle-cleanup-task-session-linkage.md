@@ -25,17 +25,28 @@ The major TaskRunner path receives the ProjectData chat session ID and writes it
 
 ## Implementation checklist
 
-- [ ] Add TaskRunner D1 task-row linkage write in the same critical step that writes `workspaces.chat_session_id`.
-- [ ] Ensure session-recovery replacement sessions are re-linked through the TaskRunner resume path.
-- [ ] Add a safe D1 backfill migration that copies `workspaces.chat_session_id` to exactly one unlinked task for the same project/workspace only when no conflicting task already owns that session.
-- [ ] Add bounded legacy tolerance in `terminalizeIdleTaskInD1()` for `NULL` task links when the server-written workspace row proves the reporter session binding, and backfill the task row before terminalization.
-- [ ] Keep non-null different task/session links rejected.
-- [ ] Make idle cleanup failure/preserved escape paths bounded with env-configurable max residence and a shared `DEFAULT_*` constant.
-- [ ] Keep retry-exhausted rows visible with durable marker/attention state; do not delete-and-leak silently.
-- [ ] Emit the user-visible idle cleanup failure system message/toast at most once per session.
-- [ ] Add regression tests for null-link terminalization, true mismatch, backfill correctness, max-residence zombie prevention, and real SQL WHERE guards.
-- [ ] Update `.claude/rules/44-dual-write-migration-enumerate-writers.md` for fail-closed identity gates reading linkage columns.
+- [x] Add TaskRunner D1 task-row linkage write in the same critical step that writes `workspaces.chat_session_id`.
+- [x] Ensure session-recovery replacement sessions are re-linked through the TaskRunner resume path.
+- [x] Add a safe D1 backfill migration that copies `workspaces.chat_session_id` to exactly one unlinked task for the same project/workspace only when no conflicting task already owns that session.
+- [x] Add bounded legacy tolerance in `terminalizeIdleTaskInD1()` for `NULL` task links when the server-written workspace row proves the reporter session binding, and backfill the task row before terminalization.
+- [x] Keep non-null different task/session links rejected.
+- [x] Make idle cleanup failure/preserved escape paths bounded with env-configurable max residence and a shared `DEFAULT_*` constant.
+- [x] Keep retry-exhausted rows visible with durable marker/attention state; do not delete-and-leak silently.
+- [x] Emit the user-visible idle cleanup failure system message/toast at most once per session.
+- [x] Add regression tests for null-link terminalization, true mismatch, backfill correctness, max-residence zombie prevention, and real SQL WHERE guards.
+- [x] Update `.claude/rules/44-dual-write-migration-enumerate-writers.md` for fail-closed identity gates reading linkage columns.
 - [ ] Record a follow-up SAM idea to calibrate PR #1824’s race-lab oracle against this linkage incident class after #1824 merges.
+
+## Local validation
+
+- `pnpm --filter @simple-agent-manager/shared build`
+- `pnpm --filter @simple-agent-manager/api typecheck`
+- `pnpm --filter @simple-agent-manager/api lint`
+- `cd apps/api && pnpm vitest run tests/unit/conversation-idle-timeout.test.ts tests/unit/db/task-chat-session-backfill-migration.test.ts tests/unit/durable-objects/task-runner-session-linking.test.ts tests/unit/durable-objects/migrations.test.ts tests/unit/durable-objects/row-schemas.test.ts`
+- `pnpm quality:migration-safety`
+- `pnpm quality:do-migration-safety`
+- `pnpm quality:migration-ordering`
+- `pnpm format:check`
 
 ## Acceptance criteria
 
