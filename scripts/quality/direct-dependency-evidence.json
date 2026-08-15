@@ -9,6 +9,26 @@
       "registryUrl": "https://www.npmjs.com/package/@eslint/js",
       "necessity": "Provides supported ESLint flat recommended configuration."
     },
+    "@playwright/test": {
+      "registryUrl": "https://www.npmjs.com/package/@playwright/test",
+      "necessity": "Exercises the real architecture viewer in Chromium."
+    },
+    "@testing-library/jest-dom": {
+      "registryUrl": "https://www.npmjs.com/package/@testing-library/jest-dom",
+      "necessity": "Adds accessible DOM assertions for viewer tests."
+    },
+    "@testing-library/react": {
+      "registryUrl": "https://www.npmjs.com/package/@testing-library/react",
+      "necessity": "Renders viewer components for interaction tests."
+    },
+    "@types/react": {
+      "registryUrl": "https://www.npmjs.com/package/@types/react",
+      "necessity": "Types the architecture viewer React components."
+    },
+    "@types/react-dom": {
+      "registryUrl": "https://www.npmjs.com/package/@types/react-dom",
+      "necessity": "Types the architecture viewer DOM entrypoint."
+    },
     "@typescript-eslint/eslint-plugin": {
       "registryUrl": "https://www.npmjs.com/package/@typescript-eslint/eslint-plugin",
       "necessity": "Hosts supported TypeScript lint rules."
@@ -16,6 +36,14 @@
     "@typescript-eslint/parser": {
       "registryUrl": "https://www.npmjs.com/package/@typescript-eslint/parser",
       "necessity": "Parses TypeScript for ESLint rules and fixtures."
+    },
+    "@vitejs/plugin-react": {
+      "registryUrl": "https://www.npmjs.com/package/@vitejs/plugin-react",
+      "necessity": "Compiles React for the standalone viewer bundle."
+    },
+    "@vitest/coverage-v8": {
+      "registryUrl": "https://www.npmjs.com/package/@vitest/coverage-v8",
+      "necessity": "Measures architecture package test coverage."
     },
     "eslint": {
       "registryUrl": "https://www.npmjs.com/package/eslint",
@@ -37,9 +65,25 @@
       "registryUrl": "https://www.npmjs.com/package/globals",
       "necessity": "Defines explicit flat-config runtime globals."
     },
+    "jsdom": {
+      "registryUrl": "https://www.npmjs.com/package/jsdom",
+      "necessity": "Provides the DOM environment for viewer tests."
+    },
     "oxlint": {
       "registryUrl": "https://www.npmjs.com/package/oxlint",
       "necessity": "Measures native lint findings in shadow mode."
+    },
+    "react": {
+      "registryUrl": "https://www.npmjs.com/package/react",
+      "necessity": "Implements the interactive architecture viewer components."
+    },
+    "react-dom": {
+      "registryUrl": "https://www.npmjs.com/package/react-dom",
+      "necessity": "Mounts the architecture viewer in the browser."
+    },
+    "tsup": {
+      "registryUrl": "https://www.npmjs.com/package/tsup",
+      "necessity": "Builds the extractable ESM library and CLI."
     },
     "typescript": {
       "registryUrl": "https://www.npmjs.com/package/typescript",
@@ -53,6 +97,14 @@
       "registryUrl": "https://www.npmjs.com/package/typescript-eslint",
       "necessity": "Provides supported ESLint flat TypeScript configuration."
     },
+    "valibot": {
+      "registryUrl": "https://www.npmjs.com/package/valibot",
+      "necessity": "Validates architecture documents and HTTP payloads."
+    },
+    "vite": {
+      "registryUrl": "https://www.npmjs.com/package/vite",
+      "necessity": "Builds the standalone architecture viewer assets."
+    },
     "vitest": {
       "registryUrl": "https://www.npmjs.com/package/vitest",
       "necessity": "Runs local plugin and quality checker fixtures."
@@ -60,6 +112,10 @@
     "wrangler": {
       "registryUrl": "https://www.npmjs.com/package/wrangler",
       "necessity": "Provides the lockfile-pinned Cloudflare Pages deployment executable for the marketing workspace."
+    },
+    "yaml": {
+      "registryUrl": "https://www.npmjs.com/package/yaml",
+      "necessity": "Parses repository-native architecture YAML documents."
     }
   },
   "go": {

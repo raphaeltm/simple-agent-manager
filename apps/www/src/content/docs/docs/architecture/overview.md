@@ -7,6 +7,33 @@ SAM is a serverless platform for ephemeral AI coding environments. The architect
 
 For instant sessions, SAM can also run one standalone vm-agent in a raw Cloudflare Container. The deployment workflow builds the Linux vm-agent from the deployment commit, records its version and SHA-256 digest, and bakes it into the container image before Wrangler deploys the Worker. Cloudflare Worker deployment versions therefore provide the matching image/Worker rollback boundary. The image contains only SAM runtime tooling: project, profile, and skill files, environment variables, and secrets remain outside the image and are fetched and applied when the ACP session starts.
 
+## Interactive, source-backed system map
+
+This page is the public narrative overview. Contributors and coding agents also
+share a versioned architecture workspace in the repository's `architecture/`
+directory. It records stable system elements, meaningful relationships, ordered
+cross-runtime flows, lifecycle state machines, and exact source references. It
+is curated intent rather than a generated import graph.
+
+From a checkout, use the compact CLI or local viewer:
+
+```bash
+pnpm architecture:validate
+pnpm --silent architecture:summary -- --json
+pnpm --silent architecture:show -- sam.api --json
+pnpm architecture:impact -- apps/api/src/routes/device-flow.ts
+pnpm architecture:serve
+```
+
+The viewer provides Structure, Topology, Flow, and State lenses. Topology renders
+the curated directed relationships as a horizontal system map on desktop and a
+vertical map on mobile; Flow remains the ordered execution-sequence view. The
+viewer also provides validated source previews and file-backed review threads
+under `architecture/threads/`. It runs on loopback and does not add a hosted SAM
+service. Agents update the curated workspace in the same pull request when a
+modeled boundary, flow, lifecycle, or source anchor changes; ordinary internal
+edits do not require diagram churn.
+
 ## High-Level Architecture
 
 ```mermaid
@@ -249,15 +276,23 @@ stateDiagram-v2
 
 Each idea execution gets one `TaskRunner` Durable Object, accessed via `env.TASK_RUNNER.idFromName(taskId)`.
 
+The complete guarded lifecycle, including workspace dispatch acknowledgement,
+optional attachment transfer, failure paths, and source anchors, is maintained
+as `task-runner-lifecycle` in the repository architecture workspace.
+
 **Orchestration steps** (each idempotent, alarm-driven):
 
 ```mermaid
 graph LR
-    NS["node_selection"] --> NP["node_provisioning"]
+    NS["node_selection"] -->|No compatible healthy node| NP["node_provisioning"]
+    NS -->|Reuse compatible healthy node| WC["workspace_creation"]
     NP --> NAR["node_agent_ready"]
     NAR --> WC["workspace_creation"]
-    WC --> WR["workspace_ready"]
-    WR --> AS["agent_session"]
+    WC --> WD["workspace_dispatch"]
+    WD --> WR["workspace_ready"]
+    WR -->|No attachments| AS["agent_session"]
+    WR -->|Has attachments| AT["attachment_transfer"]
+    AT --> AS
     AS --> R["running"]
 ```
 

@@ -1,0 +1,1603 @@
+:root {
+  --aw-bg: var(--architecture-bg, #071018);
+  --aw-panel: var(--architecture-panel, #0d1a24);
+  --aw-panel-strong: var(--architecture-panel-strong, #142633);
+  --aw-panel-raised: var(--architecture-panel-raised, #182d3a);
+  --aw-text: var(--architecture-text, #eef6f5);
+  --aw-muted: var(--architecture-muted, #91a8ae);
+  --aw-border: var(--architecture-border, #29434d);
+  --aw-border-subtle: var(--architecture-border-subtle, #19313b);
+  --aw-accent: var(--architecture-accent, #63d9dd);
+  --aw-accent-ink: #04282c;
+  --aw-portal: var(--architecture-portal, #eeb45f);
+  --aw-danger: var(--architecture-danger, #ff9b9b);
+  --aw-success: var(--architecture-success, #82d6a2);
+  --aw-warning: var(--architecture-warning, #f0c675);
+  color: var(--aw-text);
+  background: var(--aw-bg);
+  font-family:
+    'Segoe UI Variable',
+    Inter,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
+  height: 100%;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  height: 100%;
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  overflow-x: hidden;
+}
+
+button,
+input,
+textarea {
+  font: inherit;
+}
+
+button {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--aw-text);
+  cursor: pointer;
+  min-width: 0;
+  padding: 0.55rem 0.75rem;
+}
+
+button:hover:not(:disabled) {
+  color: var(--aw-accent);
+}
+
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 5px solid var(--aw-accent);
+  outline-offset: 1px;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+input,
+textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--aw-border);
+  border-radius: 0;
+  background: #050d13;
+  color: var(--aw-text);
+  padding: 0.65rem;
+}
+
+textarea {
+  min-height: 5.5rem;
+  resize: vertical;
+}
+
+.architecture-app {
+  display: flex;
+  height: 100dvh;
+  min-width: 0;
+  overflow: hidden;
+  padding: 0.85rem 1rem 1rem;
+  flex-direction: column;
+}
+
+.status-banner {
+  max-width: 1180px;
+  margin: 0 auto 1rem;
+  border: 1px solid var(--aw-danger);
+  border-radius: 0;
+  background: rgba(253, 164, 175, 0.12);
+  color: var(--aw-text);
+  padding: 0.75rem 1rem;
+}
+
+.topbar,
+.context-row,
+.workspace-root,
+.relationship-grid {
+  display: flex;
+  gap: 1rem;
+  min-width: 0;
+}
+
+.topbar {
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: space-between;
+  margin: 0 auto 0.5rem;
+  max-width: 1180px;
+  border-bottom: 1px solid var(--aw-border-subtle);
+  padding-bottom: 0.5rem;
+  width: 100%;
+}
+
+.topbar h1,
+.inspector-head h2 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.topbar h1 {
+  font-size: clamp(1.05rem, 1.5vw, 1.3rem);
+  letter-spacing: 0;
+  line-height: 1.18;
+}
+
+.workspace-identity {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.workspace-identity .eyebrow {
+  flex: 0 0 auto;
+  margin: 0;
+  opacity: 0.85;
+}
+
+.eyebrow {
+  color: var(--aw-accent);
+  font-size: 0.75rem;
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  letter-spacing: 0.12em;
+  margin: 0 0 0.25rem;
+  text-transform: uppercase;
+}
+
+.lens-tabs,
+.zoom-controls,
+.context-row nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.zoom-controls {
+  align-items: center;
+}
+
+.zoom-controls output {
+  min-width: 3.5rem;
+  color: var(--aw-muted);
+  text-align: center;
+}
+
+.lens-tabs [aria-current='page'] {
+  background: var(--aw-accent);
+  color: var(--aw-accent-ink);
+}
+
+.lens-tabs [aria-current='page']:hover:not(:disabled) {
+  color: var(--aw-accent-ink);
+}
+
+.lens-tab,
+.toolbar-action,
+.breadcrumb-action,
+.ghost-action,
+.secondary {
+  border: 1px solid var(--aw-border);
+  background: color-mix(in srgb, var(--aw-panel-strong) 72%, transparent);
+}
+
+.lens-tab {
+  min-height: 2.35rem;
+  padding-inline: 0.9rem;
+}
+
+.toolbar-action {
+  color: var(--aw-muted);
+  font-size: 0.88rem;
+  padding: 0.42rem 0.62rem;
+}
+
+.breadcrumb-action {
+  border-color: transparent;
+  background: transparent;
+  color: var(--aw-text);
+  padding-inline: 0;
+}
+
+.breadcrumb-action::before {
+  color: var(--aw-accent);
+  content: '/';
+  margin-right: 0.5rem;
+}
+
+.breadcrumb-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.breadcrumb-omitted {
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.72rem;
+}
+
+.workspace-root {
+  align-items: stretch;
+  flex: 1 1 auto;
+  margin: 0 auto;
+  max-width: 1180px;
+  min-height: 0;
+  overflow: hidden;
+  width: 100%;
+}
+
+.canvas-column {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-height: 0;
+  min-width: 0;
+}
+
+.context-row {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.canvas {
+  flex: 1 1 auto;
+  height: auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid var(--aw-border);
+  border-radius: 0;
+  background:
+    radial-gradient(circle at 18% 14%, rgba(99, 217, 221, 0.08), transparent 28%),
+    linear-gradient(120deg, rgba(238, 180, 95, 0.035), transparent 34%),
+    linear-gradient(rgba(99, 217, 221, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 217, 221, 0.055) 1px, transparent 1px), var(--aw-panel);
+  background-size:
+    auto,
+    auto,
+    28px 28px,
+    28px 28px,
+    auto;
+  padding: 1rem;
+}
+
+.canvas-help,
+.bounded-note,
+.workbench-status {
+  margin: 0;
+  color: var(--aw-muted);
+  font-size: 0.85rem;
+}
+
+.workbench-status {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.9rem;
+  align-items: center;
+  border: 1px solid var(--aw-border-subtle);
+  border-left: 2px solid var(--aw-accent);
+  background: color-mix(in srgb, var(--aw-panel) 72%, transparent);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.72rem;
+  padding: 0.45rem 0.65rem;
+  text-transform: uppercase;
+}
+
+.workbench-status span:first-child {
+  color: var(--aw-accent);
+}
+
+/* Qualifies the counts that follow as workspace-wide, distinct from the in-scope lens counts. */
+.status-scope {
+  opacity: 0.72;
+}
+
+.structure-lens {
+  display: grid;
+  gap: calc(1rem * var(--aw-zoom));
+  min-width: 100%;
+  transform-origin: top left;
+  zoom: var(--aw-zoom);
+}
+
+.node-grid {
+  display: grid;
+  gap: calc(0.75rem * var(--aw-zoom));
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 13rem), 1fr));
+}
+
+.arch-node,
+.flow-card,
+.state-card,
+.thread {
+  min-width: 0;
+  border: 1px solid var(--aw-border);
+  border-radius: 0;
+  background: color-mix(in srgb, var(--aw-panel-strong) 90%, transparent);
+  padding: 0.75rem;
+}
+
+.arch-node {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0.25rem 0.5rem;
+  overflow-wrap: anywhere;
+  border-left: 2px solid var(--aw-border);
+}
+
+.arch-node::before {
+  position: absolute;
+  top: -1px;
+  left: -1px;
+  width: 1.75rem;
+  border-top: 1px solid var(--aw-accent);
+  content: '';
+}
+
+.arch-node > .node-select {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 0.3rem;
+  padding: 0;
+  text-align: left;
+}
+
+.focus-node {
+  align-items: start;
+  grid-template-columns: 1fr;
+  min-height: 5rem;
+  border-style: dashed;
+  border-left-style: solid;
+  background: color-mix(in srgb, var(--aw-panel-raised) 86%, transparent);
+  padding: 1rem;
+  text-align: left;
+}
+
+.kind-label {
+  color: var(--aw-accent);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.node-title {
+  color: var(--aw-text);
+  font-size: 1.02rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  line-height: 1.22;
+}
+
+.scope-action {
+  grid-column: 2;
+  justify-self: end;
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.72rem;
+  padding: 0.25rem 0;
+}
+
+.selected {
+  border-color: var(--aw-accent);
+  outline: 5px solid var(--aw-accent);
+  outline-offset: -1px;
+}
+
+.topology-lens {
+  display: grid;
+  width: max-content;
+  min-width: 100%;
+  gap: calc(0.75rem * var(--aw-zoom));
+  transform-origin: top left;
+  zoom: var(--aw-zoom);
+}
+
+.topology-summary {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 1rem;
+  /* Capped and start-aligned so the counts/minimap stay reachable on a wide stage instead of
+     being pushed to the far right of a pannable canvas. Sticky on both axes because this is
+     chrome that explains the bands — panning the graph must not scroll the legend away. */
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  justify-self: start;
+  min-width: min(100%, 36rem);
+  max-width: 44rem;
+  border-left: 2px solid var(--aw-accent);
+  background: color-mix(in srgb, var(--aw-panel-strong) 94%, transparent);
+  padding: 0.75rem 0.9rem;
+}
+
+.topology-summary h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.topology-summary dl {
+  display: flex;
+  flex: 1 1 auto;
+  gap: 0.75rem;
+  justify-content: flex-end;
+  margin: 0;
+}
+
+/* Scoped to the count list so it cannot also constrain the title block. */
+.topology-summary dl div {
+  display: grid;
+  gap: 0.15rem;
+  min-width: 6rem;
+}
+
+.topology-summary dt {
+  white-space: nowrap;
+}
+
+.topology-summary-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.topology-summary dt,
+.topology-summary dd {
+  margin: 0;
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+}
+
+.topology-summary dt {
+  color: var(--aw-muted);
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.topology-summary dd {
+  color: var(--aw-text);
+  font-size: 1rem;
+}
+
+.topology-stage {
+  position: relative;
+  min-width: 100%;
+  border-top: 1px solid var(--aw-border-subtle);
+  border-left: 1px solid var(--aw-border-subtle);
+  background:
+    linear-gradient(90deg, rgba(99, 217, 221, 0.035), transparent 12rem),
+    linear-gradient(rgba(99, 217, 221, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(99, 217, 221, 0.04) 1px, transparent 1px);
+  background-size:
+    auto,
+    14px 14px,
+    14px 14px;
+}
+
+.topology-groups {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+/* A depth band. Bounded region rather than a full-height rule, so a wrapped group reads as one
+   region and the boundary between depths is unambiguous. */
+.topology-group {
+  position: absolute;
+  border: 1px solid rgba(99, 217, 221, 0.14);
+  background: rgba(99, 217, 221, 0.022);
+  padding: 0;
+}
+
+.topology-group-label {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: block;
+  background: var(--aw-bg);
+  border-right: 1px solid rgba(99, 217, 221, 0.14);
+  border-bottom: 1px solid rgba(99, 217, 221, 0.14);
+  color: rgba(145, 168, 174, 0.72);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.62rem;
+  letter-spacing: 0.08em;
+  padding: 0.3rem 0.55rem;
+  text-transform: uppercase;
+}
+
+/* Unconnected elements are a finding, not a stage — mark the band as inert rather than accent. */
+.topology-group.is-unconnected {
+  border-color: rgba(145, 168, 174, 0.18);
+  border-style: dashed;
+  background: transparent;
+}
+
+.topology-group.is-unconnected .topology-group-label {
+  border-color: rgba(145, 168, 174, 0.18);
+  color: rgba(145, 168, 174, 0.6);
+}
+
+.topology-legend {
+  margin: 0.3rem 0 0;
+  max-width: 34rem;
+  color: var(--aw-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.topology-edges {
+  position: absolute;
+  inset: 0;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.topology-edges marker path {
+  fill: var(--aw-muted);
+}
+
+.topology-edge {
+  fill: none;
+  stroke: var(--aw-muted);
+  stroke-width: 1.5px;
+  vector-effect: non-scaling-stroke;
+}
+
+.topology-edge.selected {
+  border: 0;
+  outline: 0;
+  stroke: var(--aw-accent);
+  stroke-width: 5px;
+}
+
+.topology-node {
+  position: absolute;
+  z-index: 1;
+  display: grid;
+  align-content: center;
+  gap: 0.28rem;
+  border: 1px solid var(--aw-border);
+  background: var(--aw-panel-strong);
+  border-left-width: 3px;
+  overflow-wrap: anywhere;
+  padding: 0.7rem 0.8rem;
+  text-align: left;
+}
+
+.topology-node:hover:not(:disabled) {
+  border-color: var(--aw-accent);
+  background: var(--aw-panel-raised);
+}
+
+.topology-node.is-scope {
+  border-style: dashed;
+}
+
+.topology-node--system,
+.topology-node--workspace {
+  border-left-color: var(--aw-accent);
+}
+
+.topology-node--runtime,
+.topology-node--service {
+  border-left-color: var(--aw-portal);
+}
+
+.topology-node--database,
+.topology-node--data-store,
+.topology-node--queue {
+  border-left-color: var(--aw-success);
+}
+
+.topology-node--external,
+.topology-node--person {
+  border-left-color: var(--aw-warning);
+}
+
+.topology-node.is-isolated {
+  opacity: 0.86;
+}
+
+.topology-node small {
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.topology-node strong {
+  display: -webkit-box;
+  overflow: hidden;
+  color: var(--aw-text);
+  font-size: 0.9rem;
+  line-height: 1.2;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.topology-node-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  min-height: 0.9rem;
+}
+
+.topology-node-meta b {
+  border: 1px solid var(--aw-border-subtle);
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.58rem;
+  font-weight: 500;
+  letter-spacing: 0.07em;
+  line-height: 1;
+  padding: 0.14rem 0.24rem;
+  text-transform: uppercase;
+}
+
+.topology-minimap {
+  position: relative;
+  flex: 0 0 auto;
+  width: 6.7rem;
+  height: 4.2rem;
+  border: 1px solid var(--aw-border);
+  background: rgba(5, 13, 19, 0.72);
+  pointer-events: none;
+}
+
+.topology-minimap::before {
+  position: absolute;
+  inset: 0.35rem;
+  border: 1px solid rgba(99, 217, 221, 0.24);
+  content: '';
+}
+
+.topology-minimap-node {
+  position: absolute;
+  background: var(--aw-muted);
+}
+
+.topology-minimap-node--system,
+.topology-minimap-node--workspace {
+  background: var(--aw-accent);
+}
+
+.topology-minimap-node--runtime,
+.topology-minimap-node--service {
+  background: var(--aw-portal);
+}
+
+.topology-connections {
+  display: grid;
+  gap: 0.7rem;
+  border-top: 1px solid var(--aw-border-subtle);
+  padding-top: 0.8rem;
+}
+
+.topology-connections h2 {
+  margin: 0;
+  font-size: 1rem;
+}
+
+.topology-connection-grid {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 15rem), 1fr));
+}
+
+.topology-connection {
+  display: grid;
+  gap: 0.35rem;
+  border: 1px solid var(--aw-border);
+  background: color-mix(in srgb, var(--aw-panel-strong) 72%, transparent);
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.topology-connection > span {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.topology-connection b {
+  color: var(--aw-accent);
+}
+
+.topology-connection small {
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.68rem;
+}
+
+.topology-bounded-note {
+  max-width: 42rem;
+}
+
+.secondary {
+  color: var(--aw-muted);
+  padding: 0.4rem 0.55rem;
+}
+
+.portal-list,
+.flow-list,
+.state-list,
+.stack {
+  display: grid;
+  gap: 0.75rem;
+}
+
+.portal-list {
+  border-top: 1px solid var(--aw-border-subtle);
+  padding-top: 0.75rem;
+}
+
+.portal-list h3 {
+  color: var(--aw-portal);
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  margin: 0;
+  text-transform: uppercase;
+}
+
+.portal-action {
+  border-left: 2px solid var(--aw-portal);
+  background: rgba(238, 180, 95, 0.06);
+  text-align: left;
+}
+
+.flow-card {
+  padding: 0;
+}
+
+.flow-card-head {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--aw-border-subtle);
+  padding: 0.9rem 1rem;
+}
+
+.flow-card-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.flow-title-action {
+  padding: 0;
+  color: var(--aw-accent);
+  font-weight: 650;
+  text-align: left;
+}
+
+.flow-step-count {
+  flex: 0 0 auto;
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.72rem;
+}
+
+.flow-sequence {
+  display: grid;
+  gap: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem 1rem 0.65rem;
+}
+
+.flow-step {
+  position: relative;
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+  gap: 0.75rem;
+  min-height: 4.2rem;
+  padding: 0.75rem 0;
+}
+
+.flow-step:not(:last-child)::after {
+  position: absolute;
+  top: 2.55rem;
+  bottom: -0.65rem;
+  left: 1.15rem;
+  width: 1px;
+  background: linear-gradient(var(--aw-accent), var(--aw-border));
+  content: '';
+}
+
+.flow-step-index {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  width: 2.3rem;
+  height: 2.3rem;
+  border: 1px solid var(--aw-accent);
+  border-radius: 0;
+  background: var(--aw-panel-strong);
+  color: var(--aw-accent);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.72rem;
+  place-items: center;
+}
+
+.flow-step-copy {
+  min-width: 0;
+}
+
+.flow-step-title {
+  margin: 0.25rem 0 0.45rem;
+  line-height: 1.3;
+}
+
+.flow-step-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.65rem;
+}
+
+.flow-step-actions button {
+  padding: 0;
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.72rem;
+  text-align: left;
+}
+
+.flow-element-action {
+  color: var(--aw-accent);
+}
+
+.flow-relationship-action {
+  color: var(--aw-portal);
+}
+
+.pill {
+  border: 1px solid var(--aw-border);
+  border-radius: 0;
+  color: var(--aw-muted);
+  padding: 0.25rem 0.55rem;
+}
+
+.state-card {
+  padding: 0;
+}
+
+.state-card-head {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--aw-border-subtle);
+  padding: 0.9rem 1rem;
+}
+
+.state-card-head h2 {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.state-title-action {
+  padding: 0;
+  color: var(--aw-accent);
+  font-weight: 650;
+  text-align: left;
+}
+
+.state-counts {
+  flex: 0 0 auto;
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.72rem;
+}
+
+.state-atlas {
+  display: grid;
+  gap: 0;
+  list-style: none;
+  margin: 0;
+  padding: 0.35rem 1rem 0.65rem;
+}
+
+.state-origin {
+  display: grid;
+  grid-template-columns: 2.5rem minmax(0, 1fr);
+  gap: 0.75rem;
+  border-bottom: 1px solid var(--aw-border-subtle);
+  padding: 0.85rem 0;
+}
+
+.state-origin:last-child {
+  border-bottom: 0;
+}
+
+.state-index {
+  display: grid;
+  width: 2.3rem;
+  height: 2.3rem;
+  border: 1px solid var(--aw-accent);
+  border-radius: 0;
+  color: var(--aw-accent);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.72rem;
+  place-items: center;
+}
+
+.state-origin-copy,
+.state-routes,
+.state-routes li {
+  min-width: 0;
+}
+
+.state-origin-copy h3 {
+  margin: 0.35rem 0 0.65rem;
+  font-size: 1rem;
+}
+
+.state-routes {
+  display: grid;
+  gap: 0.45rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.state-routes li {
+  display: grid;
+  grid-template-columns: auto minmax(8rem, 1fr) auto minmax(8rem, 0.8fr);
+  align-items: center;
+  gap: 0.45rem;
+  border-left: 1px solid var(--aw-border);
+  padding-left: 0.65rem;
+}
+
+.state-event-label {
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.state-event {
+  color: var(--aw-muted);
+  overflow-wrap: anywhere;
+}
+
+.state-arrow {
+  color: var(--aw-accent);
+}
+
+.state-destination {
+  border: 1px solid var(--aw-border);
+  border-radius: 0;
+  background: rgba(20, 38, 51, 0.66);
+  overflow-wrap: anywhere;
+  padding: 0.35rem 0.5rem;
+}
+
+.state-empty-route {
+  margin: 0;
+}
+
+.state-message {
+  display: grid;
+  width: min(100%, 32rem);
+  margin: 4rem auto 0;
+  border: 1px solid var(--aw-border);
+  border-left: 3px solid var(--aw-danger);
+  background:
+    linear-gradient(90deg, rgba(255, 155, 155, 0.08), transparent 48%),
+    color-mix(in srgb, var(--aw-panel) 78%, transparent);
+  padding: 1rem 1.1rem;
+}
+
+.state-message h2 {
+  margin: 0 0 0.55rem;
+  font-size: 1.15rem;
+}
+
+.state-message p {
+  margin: 0;
+  color: var(--aw-muted);
+}
+
+.invalid-workbench {
+  display: grid;
+  width: min(100%, 56rem);
+  margin: 4.5rem auto 0;
+  gap: 0.65rem;
+}
+
+.invalid-workbench .state-message {
+  width: 100%;
+  margin: 0;
+}
+
+.invalid-workbench-head {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  border: 1px solid var(--aw-border);
+  border-left: 3px solid var(--aw-danger);
+  background: color-mix(in srgb, var(--aw-panel-strong) 68%, transparent);
+  padding: 0.85rem 1rem;
+}
+
+.invalid-workbench-head h1 {
+  margin: 0;
+  font-size: 1.25rem;
+  letter-spacing: 0;
+}
+
+.invalid-workbench-head > span {
+  color: var(--aw-danger);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.architecture-inspector {
+  position: relative;
+  top: 0;
+  align-self: flex-start;
+  flex: 0 0 372px;
+  height: 100%;
+  min-width: 0;
+  max-height: none;
+  overflow: auto;
+  border: 1px solid var(--aw-border);
+  border-radius: 0;
+  background: var(--aw-panel);
+  padding: 0 1rem 1rem;
+}
+
+.inspector-backdrop {
+  display: none;
+}
+
+.inspector-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  justify-content: space-between;
+  margin: 0 -1rem;
+  border-bottom: 1px solid var(--aw-border-subtle);
+  background: linear-gradient(180deg, var(--aw-panel) 80%, rgba(13, 26, 36, 0.96));
+  padding: 1rem;
+}
+
+.inspector-head h2 {
+  font-size: 1.35rem;
+  letter-spacing: -0.025em;
+  line-height: 1.1;
+}
+
+.inspector-head > div:first-of-type {
+  min-width: 0;
+}
+
+.inspector-head-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 0.45rem;
+}
+
+.ask-action {
+  border-color: color-mix(in srgb, var(--aw-accent) 65%, var(--aw-border));
+  color: var(--aw-accent);
+  padding: 0.4rem 0.65rem;
+}
+
+.mobile-close {
+  display: none;
+}
+
+.sheet-grip {
+  display: none;
+}
+
+.inspector-section {
+  border-top: 1px solid var(--aw-border-subtle);
+  padding: 1rem 0 0.25rem;
+}
+
+.inspector-overview {
+  border-top: 0;
+}
+
+.inspector-section > h3,
+.section-heading h3,
+.question-form h4 {
+  margin: 0 0 0.65rem;
+}
+
+.section-heading h3:focus-visible {
+  border-radius: 0;
+  outline: 5px solid var(--aw-accent);
+  outline-offset: 0.25rem;
+}
+
+.inspector-section > h3 {
+  color: var(--aw-text);
+  font-size: 0.76rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.inspector-section p {
+  line-height: 1.45;
+}
+
+.section-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.section-count {
+  display: grid;
+  width: 1.75rem;
+  height: 1.75rem;
+  border: 1px solid var(--aw-border);
+  border-radius: 0;
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  place-items: center;
+}
+
+.empty-connection {
+  margin: 0.35rem 0 0.65rem;
+  border-left: 2px solid var(--aw-border);
+  padding-left: 0.7rem;
+}
+
+.relationship-grid > div {
+  min-width: 0;
+  flex: 1 1 0;
+}
+
+.relationship-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.relationship-heading span {
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.72rem;
+  font-weight: 400;
+}
+
+.source-link,
+.text-row {
+  display: block;
+  width: 100%;
+  margin: 0.35rem 0;
+  overflow-wrap: anywhere;
+  text-align: left;
+}
+
+.source-link,
+.text-row {
+  border: 1px solid var(--aw-border-subtle);
+  background: rgba(20, 38, 51, 0.6);
+}
+
+.source-link {
+  color: var(--aw-accent);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.78rem;
+}
+
+.source-frame {
+  margin-top: 0.65rem;
+  overflow: hidden;
+  border: 1px solid var(--aw-border-subtle);
+  border-radius: 0;
+  background: #040b10;
+}
+
+.source-meta {
+  display: flex;
+  gap: 0.75rem;
+  justify-content: space-between;
+  border-bottom: 1px solid var(--aw-border-subtle);
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.68rem;
+  padding: 0.55rem 0.7rem;
+}
+
+.source-preview {
+  max-height: 14rem;
+  overflow: auto;
+  margin: 0;
+  border-radius: 0;
+  background: #050914;
+  color: #d8e4ff;
+  padding: 0.75rem;
+  white-space: pre-wrap;
+}
+
+.message,
+.muted,
+.error,
+.success,
+.warning {
+  overflow-wrap: anywhere;
+}
+
+.muted {
+  color: var(--aw-muted);
+}
+
+.error {
+  color: var(--aw-danger);
+}
+
+.success {
+  color: var(--aw-success);
+}
+
+.warning {
+  color: var(--aw-warning);
+}
+
+.question-form {
+  margin-top: 1rem;
+  border-top: 1px dashed var(--aw-border);
+  padding-top: 1rem;
+}
+
+.question-form h4 {
+  font-size: 0.95rem;
+}
+
+.thread {
+  margin: 0.8rem 0;
+}
+
+.thread-head,
+.message-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  justify-content: space-between;
+}
+
+.thread-head h4 {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.thread-messages {
+  display: grid;
+  gap: 0;
+  margin: 0.85rem 0;
+  padding: 0;
+  list-style: none;
+}
+
+.thread-message {
+  border-top: 1px solid var(--aw-border-subtle);
+  padding: 0.75rem 0;
+}
+
+.thread-message.is-agent {
+  border-left: 2px solid var(--aw-accent);
+  padding-left: 0.75rem;
+}
+
+.message-meta {
+  color: var(--aw-muted);
+  font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.thread-message.is-agent .message-meta strong {
+  color: var(--aw-accent);
+}
+
+.thread-message .message {
+  margin: 0.45rem 0 0;
+}
+
+.question-form button[type='submit'],
+.thread > button {
+  border: 1px solid var(--aw-accent);
+  background: var(--aw-accent);
+  color: var(--aw-accent-ink);
+  font-weight: 650;
+}
+
+.break-text {
+  overflow-wrap: anywhere;
+}
+
+.empty-lens {
+  display: grid;
+  min-height: 18rem;
+  place-content: center;
+  text-align: center;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.mobile-control,
+.mobile-help {
+  display: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+  }
+}
+
+.architecture-app.is-mobile {
+  padding: 0.65rem;
+}
+
+.architecture-app.is-mobile .topbar,
+.architecture-app.is-mobile .context-row,
+.architecture-app.is-mobile .workspace-root {
+  align-items: stretch;
+  flex-direction: column;
+}
+
+.architecture-app.is-mobile .canvas {
+  height: auto;
+  min-height: 0;
+}
+
+.architecture-app.is-mobile .topbar {
+  gap: 0.45rem;
+  margin-bottom: 0.45rem;
+  padding-bottom: 0.45rem;
+}
+
+/* Mobile previously spent two ~1.6rem lines on the workspace name before any content. */
+.architecture-app.is-mobile .topbar h1 {
+  font-size: clamp(1rem, 4.4vw, 1.15rem);
+  line-height: 1.16;
+}
+
+.architecture-app.is-mobile .eyebrow {
+  margin-bottom: 0.18rem;
+}
+
+.architecture-app.is-mobile .workspace-identity .eyebrow {
+  margin-bottom: 0;
+}
+
+.architecture-app.is-mobile .lens-tabs {
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.architecture-app.is-mobile .lens-tab {
+  flex: 1 1 0;
+  min-height: 2.25rem;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 0.94rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The lens is width:max-content, so an unwrapped legend would widen the whole stage past the
+   canvas and get clipped. Cap it to the narrowest supported canvas so it wraps instead. */
+.architecture-app.is-mobile .topology-summary {
+  align-items: start;
+  flex-direction: column;
+  gap: 0.55rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.architecture-app.is-mobile .topology-legend {
+  max-width: 14rem;
+}
+
+.architecture-app.is-mobile .topology-summary dl {
+  flex-wrap: wrap;
+}
+
+.architecture-app.is-mobile .topology-minimap {
+  display: none;
+}
+
+.architecture-app.is-mobile .workbench-status {
+  gap: 0.35rem 0.7rem;
+  font-size: 0.68rem;
+  padding: 0.4rem 0.55rem;
+}
+
+.architecture-app.is-mobile .architecture-inspector {
+  position: fixed;
+  right: 0.5rem;
+  bottom: 0.5rem;
+  left: 0.5rem;
+  z-index: 10;
+  max-height: min(92dvh, 42rem);
+  border-radius: 0;
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+  transform: translateY(calc(100% + 1rem));
+  transition: transform 160ms ease-out;
+  visibility: hidden;
+  pointer-events: none;
+  box-shadow:
+    inset 0 -1.5rem 1.5rem -1.7rem rgba(99, 217, 221, 0.32),
+    0 1.5rem 4rem rgba(0, 0, 0, 0.48);
+}
+
+.architecture-app.is-mobile .inspector-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 9;
+  display: block;
+  width: 100%;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+  background: rgba(3, 7, 18, 0.72);
+  padding: 0;
+}
+
+.architecture-app.is-mobile .architecture-inspector.is-open {
+  transform: translateY(0);
+  visibility: visible;
+  pointer-events: auto;
+}
+
+.architecture-app.is-mobile .architecture-inspector .inspector-head {
+  top: 0;
+  padding-top: 1.5rem;
+}
+
+.architecture-app.is-mobile .mobile-close {
+  display: inline-flex;
+  align-items: center;
+}
+
+.architecture-app.is-mobile .desktop-control,
+.architecture-app.is-mobile .desktop-help {
+  display: none;
+}
+
+.architecture-app.is-mobile .mobile-control,
+.architecture-app.is-mobile .mobile-help {
+  display: inline;
+}
+
+.architecture-app.is-mobile .context-row {
+  gap: 0.35rem;
+}
+
+.architecture-app.is-mobile .canvas-help {
+  line-height: 1.2;
+}
+
+.architecture-app.is-mobile .scope-action {
+  color: var(--aw-accent);
+  font-size: 0.75rem;
+}
+
+.architecture-app.is-mobile .sheet-grip {
+  position: absolute;
+  top: 0.55rem;
+  left: 50%;
+  display: block;
+  width: 2.75rem;
+  height: 0.25rem;
+  border-radius: 0;
+  background: var(--aw-border);
+  transform: translateX(-50%);
+}
+
+.architecture-app.is-mobile .relationship-grid {
+  flex-direction: column;
+}
+
+.architecture-app.is-mobile .relationship-grid h3 {
+  margin-bottom: 0.4rem;
+}
+
+.architecture-app.is-mobile .state-card-head {
+  align-items: flex-start;
+}
+
+.architecture-app.is-mobile .state-counts {
+  max-width: 7rem;
+  line-height: 1.45;
+  text-align: right;
+}
+
+.architecture-app.is-mobile .state-routes li {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+}
+
+.architecture-app.is-mobile .state-arrow {
+  grid-column: 1;
+}
+
+.architecture-app.is-mobile .state-destination {
+  grid-column: 2;
+}
+
+.architecture-app.is-mobile .mobile-close {
+  flex: 0 0 auto;
+  border-color: transparent;
+  background: transparent;
+  color: var(--aw-muted);
+  padding: 0.35rem;
+}
+
+@media (max-width: 390px) {
+  .architecture-app.is-mobile .lens-tabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+
+  .architecture-app.is-mobile .lens-tab {
+    font-size: 0.86rem;
+    padding-inline: 0.2rem;
+  }
+
+  .architecture-app.is-mobile .zoom-controls {
+    display: grid;
+    grid-template-columns: 2.4rem auto 2.4rem 1fr;
+    width: 100%;
+  }
+
+  .architecture-app.is-mobile .zoom-controls .toolbar-action {
+    min-height: 2.1rem;
+    padding: 0.3rem 0.4rem;
+  }
+
+  .architecture-app.is-mobile .zoom-controls output {
+    display: grid;
+    align-self: stretch;
+    min-width: 3rem;
+    place-items: center;
+  }
+}

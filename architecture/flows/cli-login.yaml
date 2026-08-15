@@ -1,0 +1,66 @@
+flows:
+  - id: cli-browser-login
+    title: CLI browser-mediated login
+    summary: The CLI starts an OAuth-style device flow, the developer approves in the web app, and the CLI stores the returned session.
+    sourceRefs:
+      - path: packages/cli/internal/cli/run.go
+        startLine: 85
+      - path: apps/api/src/routes/device-flow.ts
+        startLine: 111
+    steps:
+      - id: invoke-login
+        title: Developer runs sam auth login
+        element: sam.cli
+        description: Token and stdin-cookie alternatives are checked before the browser device flow.
+        sourceRefs:
+          - path: packages/cli/internal/cli/run.go
+            startLine: 85
+      - id: create-device-code
+        title: CLI requests an expiring device and user code
+        element: sam.cli
+        relationship: cli-requests-device-code
+        sourceRefs:
+          - path: packages/cli/internal/cli/client.go
+            startLine: 47
+      - id: persist-pending-code
+        title: API stores the pending device record in KV
+        element: sam.api
+        relationship: api-stores-device-flow
+        sourceRefs:
+          - path: apps/api/src/routes/device-flow.ts
+            startLine: 111
+      - id: open-verification-page
+        title: CLI opens the browser verification URL
+        element: sam.cli
+        description: The user code is also printed so login remains possible when no browser opener exists.
+        sourceRefs:
+          - path: packages/cli/internal/cli/run.go
+            startLine: 124
+      - id: approve-code
+        title: Authenticated developer approves the user code
+        element: sam.web
+        relationship: web-approves-device-flow
+        sourceRefs:
+          - path: apps/web/src/pages/DeviceAuth.tsx
+            startLine: 16
+      - id: poll-pending
+        title: CLI polls while authorization is pending
+        element: sam.cli
+        relationship: api-returns-cli-session
+        description: Pending and slow-down responses adjust the loop until approval or expiry.
+        sourceRefs:
+          - path: packages/cli/internal/cli/run.go
+            startLine: 143
+      - id: exchange-approved-code
+        title: API consumes the approved code and builds a login session
+        element: sam.api
+        relationship: api-returns-cli-session
+        sourceRefs:
+          - path: apps/api/src/routes/device-flow.ts
+            startLine: 170
+      - id: save-cli-config
+        title: CLI writes the API URL and session cookie to local config
+        element: sam.cli
+        sourceRefs:
+          - path: packages/cli/internal/cli/run.go
+            startLine: 219

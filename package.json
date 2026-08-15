@@ -61,7 +61,14 @@
     "quality:govulncheck-diff": "tsx scripts/quality/check-go-vulnerability-diff.ts",
     "quality:gitleaks:current": "tsx scripts/quality/run-gitleaks.ts --mode=current-tree",
     "quality:gitleaks:pr": "tsx scripts/quality/run-gitleaks.ts --mode=pr-range",
-    "check:fast": "pnpm format:check && pnpm lint:oxlint && pnpm lint && pnpm quality:type-boundaries"
+    "check:fast": "pnpm format:check && pnpm lint:oxlint && pnpm lint && pnpm quality:type-boundaries",
+    "architecture:validate": "corepack pnpm --filter @simple-agent-manager/architecture cli validate --workspace ../../architecture --repo ../..",
+    "architecture:summary": "corepack pnpm --filter @simple-agent-manager/architecture cli summary --workspace ../../architecture --repo ../..",
+    "architecture:show": "corepack pnpm --filter @simple-agent-manager/architecture cli show --workspace ../../architecture --repo ../..",
+    "architecture:inbox": "corepack pnpm --filter @simple-agent-manager/architecture cli inbox --workspace ../../architecture --repo ../..",
+    "architecture:reply": "corepack pnpm --filter @simple-agent-manager/architecture cli reply --workspace ../../architecture --repo ../..",
+    "architecture:impact": "corepack pnpm --filter @simple-agent-manager/architecture cli impact --workspace ../../architecture --repo ../..",
+    "architecture:serve": "corepack pnpm --filter @simple-agent-manager/architecture build && corepack pnpm --filter @simple-agent-manager/architecture cli serve --workspace ../../architecture --repo ../.."
   },
   "dependencies": {
     "@iarna/toml": "2.2.5",

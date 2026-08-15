@@ -92,6 +92,17 @@ Per-project data (chat sessions, messages, activity events) is stored in a `Proj
 - **D1 sync**: `scheduleSummarySync()` debounces summary updates to D1
 - **Architecture docs**: `apps/www/src/content/docs/docs/architecture/overview.md`
 
+## Curated Architecture Workspace
+
+The source-backed model in `architecture/` is the compact system map shared by
+humans and agents. Use `pnpm --silent architecture:summary -- --json` and
+`pnpm --silent architecture:show -- <element-id> --json` before broad cross-component
+work. Run `pnpm architecture:impact -- <changed-paths>` and update the model when
+a PR changes a documented boundary, flow, lifecycle, or source anchor; do not
+create noise for ordinary internal edits. Validate changes with
+`pnpm architecture:validate`. The full contract is in
+`.claude/rules/57-architecture-workspace.md`.
+
 ## CLI Package Quality
 
 `packages/cli` is a user-facing Go package. Codex and Claude Code agents must follow `.claude/rules/36-cli-quality.md` for every CLI change: keep command parsing simple, inject external boundaries, address SonarCloud findings, generate Go coverage, and write scenario-driven tests that verify command behavior, API payloads, runner checks, and secret redaction.

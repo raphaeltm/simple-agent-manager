@@ -1,0 +1,121 @@
+flows:
+  - id: delegated-task-startup-vm
+    title: Delegated task startup on a VM
+    summary: Non-Instant work enters the alarm-driven TaskRunner and crosses the VM-agent boundary before the coding agent receives its prompt.
+    sourceRefs:
+      - path: apps/api/src/routes/mcp/dispatch-tool.ts
+        startLine: 543
+      - path: apps/api/src/durable-objects/task-runner/index.ts
+        startLine: 197
+    steps:
+      - id: select-vm-runtime
+        title: Dispatch resolves the task to the VM path
+        element: sam.api
+        description: Explicit or profile Instant selection is excluded before VM credentials and TaskRunner startup.
+        sourceRefs:
+          - path: apps/api/src/routes/mcp/dispatch-tool.ts
+            startLine: 341
+      - id: start-task-runner
+        title: API starts the task's TaskRunner Durable Object
+        element: sam.task-runner
+        sourceRefs:
+          - path: apps/api/src/routes/mcp/dispatch-tool.ts
+            startLine: 543
+          - path: apps/api/src/services/task-runner-do.ts
+            startLine: 39
+      - id: select-or-provision-node
+        title: TaskRunner selects or provisions compatible VM capacity
+        element: sam.task-runner
+        relationship: task-runner-provisions-vm
+        sourceRefs:
+          - path: apps/api/src/durable-objects/task-runner/node-selection.ts
+      - id: create-and-dispatch-workspace
+        title: TaskRunner records and dispatches the workspace
+        element: sam.task-runner
+        relationship: task-runner-dispatches-vm-agent
+        sourceRefs:
+          - path: apps/api/src/durable-objects/task-runner/workspace-steps.ts
+            startLine: 19
+          - path: apps/api/src/durable-objects/task-runner/workspace-steps.ts
+            startLine: 446
+      - id: await-ready-callback
+        title: TaskRunner waits for callback or D1 readiness evidence
+        element: sam.task-runner
+        description: Callback is primary; polling is a safety net for a lost Durable Object notification.
+        sourceRefs:
+          - path: apps/api/src/durable-objects/task-runner/workspace-steps.ts
+            startLine: 572
+      - id: bootstrap-vm-agent-session
+        title: TaskRunner invokes the shared SAM-aware bootstrap
+        element: sam.agent-bootstrap
+        relationship: task-runner-starts-agent
+        sourceRefs:
+          - path: apps/api/src/durable-objects/task-runner/agent-session-step.ts
+            startLine: 36
+      - id: start-vm-agent-process
+        title: VM agent starts the selected coding-agent process
+        element: sam.vm-agent
+        relationship: vm-agent-starts-process
+        sourceRefs:
+          - path: apps/api/src/services/agent-session-bootstrap.ts
+            startLine: 209
+      - id: mark-in-progress
+        title: Task status becomes in progress after agent handoff
+        element: sam.task-runner
+        sourceRefs:
+          - path: apps/api/src/durable-objects/task-runner/state-machine.ts
+            startLine: 126
+  - id: delegated-task-startup-instant
+    title: Delegated task startup on an Instant container
+    summary: Explicit cf-container work bypasses VM provisioning but converges on the same SAM-aware agent bootstrap.
+    sourceRefs:
+      - path: apps/api/src/routes/mcp/dispatch-instant.ts
+      - path: apps/api/src/services/instant-session.ts
+        startLine: 178
+    steps:
+      - id: select-instant-runtime
+        title: Dispatch resolves an explicit or profile cf-container runtime
+        element: sam.api
+        relationship: dispatch-selects-instant
+        sourceRefs:
+          - path: apps/api/src/routes/mcp/dispatch-tool.ts
+            startLine: 341
+      - id: launch-in-background
+        title: Dispatch schedules guarded Instant launch work
+        element: sam.instant-session
+        sourceRefs:
+          - path: apps/api/src/routes/mcp/dispatch-instant.ts
+            startLine: 65
+      - id: create-runtime-records
+        title: Launcher creates node, workspace, chat, and runtime records
+        element: sam.instant-session
+        sourceRefs:
+          - path: apps/api/src/services/instant-session.ts
+            startLine: 178
+      - id: start-container
+        title: Launcher starts the standalone container runtime
+        element: sam.instant-runtime
+        relationship: instant-launches-container
+        sourceRefs:
+          - path: apps/api/src/services/instant-session.ts
+            startLine: 330
+      - id: create-workspace
+        title: Standalone VM agent clones the lightweight workspace
+        element: sam.vm-agent
+        sourceRefs:
+          - path: apps/api/src/services/instant-session.ts
+            startLine: 350
+          - path: packages/vm-agent/internal/server/standalone_git.go
+      - id: bootstrap-instant-agent
+        title: Launcher invokes the shared SAM-aware bootstrap
+        element: sam.agent-bootstrap
+        relationship: instant-starts-agent
+        sourceRefs:
+          - path: apps/api/src/services/instant-session.ts
+            startLine: 379
+      - id: mark-instant-running
+        title: Launcher persists the workspace and task as running
+        element: sam.instant-session
+        sourceRefs:
+          - path: apps/api/src/services/instant-session.ts
+            startLine: 420

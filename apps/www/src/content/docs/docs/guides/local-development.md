@@ -87,6 +87,25 @@ pnpm lint        # Lint
 pnpm format      # Format
 ```
 
+## Explore the architecture workspace
+
+SAM keeps a curated, source-backed system model in `architecture/`. It is useful
+when a change crosses the CLI, web app, API Worker, Durable Objects, storage, or
+workspace runtimes.
+
+```bash
+pnpm architecture:validate                  # Check model and thread files
+pnpm --silent architecture:summary -- --json         # Compact overview for agents
+pnpm --silent architecture:show -- sam.api --json    # Bounded element context
+pnpm --silent architecture:inbox -- --json           # Open review questions
+pnpm architecture:serve                     # Loopback interactive viewer
+```
+
+Run `pnpm architecture:impact -- <changed-paths>` when a PR may alter a modeled
+boundary, flow, lifecycle, or source anchor. Update the relevant files in the
+same PR when semantics changed. The format and collaboration workflow are
+documented in `architecture/README.md`.
+
 ### Build Order
 
 Packages must be built in dependency order:
@@ -109,12 +128,15 @@ apps/
 └── tail-worker/  # Log aggregation worker
 
 packages/
+├── architecture/ # Architecture model compiler, CLI, and local viewer
 ├── shared/       # Shared types and utilities
 ├── providers/    # Cloud provider abstraction (Hetzner, Scaleway, GCP, Vultr, Infomaniak, DigitalOcean, UpCloud)
 ├── cloud-init/   # Cloud-init template generator
 ├── terminal/     # Shared terminal component (xterm.js)
 ├── ui/           # Design system components
 └── vm-agent/     # Go VM agent (PTY, WebSocket, ACP)
+
+architecture/     # Curated SAM system model and file-backed review threads
 ```
 
 ## Staging Deployment

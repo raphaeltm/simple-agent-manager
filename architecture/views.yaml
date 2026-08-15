@@ -1,0 +1,61 @@
+views:
+  - id: sam-landscape
+    title: SAM landscape
+    root: sam
+    description: Clients, control plane, durable stores, and execution runtimes.
+    include:
+      - actor.developer
+      - external.git-provider
+      - external.cloud-provider
+      - external.cloudflare
+      - sam.cli
+      - sam.web
+      - sam.api
+      - sam.instant-runtime
+      - sam.vm-runtime
+      - sam.d1
+      - sam.kv
+      - sam.r2
+    relationships:
+      - developer-uses-web
+      - developer-invokes-cli
+      - web-calls-api
+      - task-runner-provisions-vm
+      - instant-launches-container
+      - agent-reads-writes-git
+    flows:
+      - cli-browser-login
+      - delegated-task-startup-vm
+      - delegated-task-startup-instant
+    stateMachines:
+      - task-runner-lifecycle
+  - id: control-plane
+    title: Control plane internals
+    root: sam.api
+    description: Durable orchestration, project data, and shared agent bootstrap.
+    include:
+      - sam.project-data
+      - sam.task-runner
+      - sam.instant-session
+      - sam.agent-bootstrap
+      - sam.d1
+      - sam.kv
+      - sam.r2
+  - id: execution-runtimes
+    title: Coding-agent execution runtimes
+    root: sam
+    description: VM and Instant paths converge on a shared agent-session boundary.
+    include:
+      - sam.task-runner
+      - sam.instant-session
+      - sam.agent-bootstrap
+      - sam.instant-runtime
+      - sam.vm-runtime
+      - sam.vm-agent
+      - sam.agent-process
+    relationships:
+      - task-runner-starts-agent
+      - instant-starts-agent
+      - bootstrap-calls-vm-agent
+      - vm-agent-starts-process
+      - agent-calls-sam-mcp

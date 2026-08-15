@@ -1,0 +1,170 @@
+relationships:
+  - id: developer-uses-web
+    from: actor.developer
+    to: sam.web
+    type: browser
+    title: Uses the control plane
+  - id: developer-invokes-cli
+    from: actor.developer
+    to: sam.cli
+    type: local-process
+    title: Runs commands
+  - id: web-calls-api
+    from: sam.web
+    to: sam.api
+    type: https
+    title: Calls authenticated APIs
+    sourceRefs:
+      - path: apps/web/src/lib/api/client.ts
+      - path: apps/api/src/index.ts
+  - id: cli-requests-device-code
+    from: sam.cli
+    to: sam.api
+    type: https
+    title: Creates and polls a device login
+    sourceRefs:
+      - path: packages/cli/internal/cli/client.go
+        startLine: 47
+      - path: apps/api/src/routes/device-flow.ts
+        startLine: 111
+  - id: api-stores-device-flow
+    from: sam.api
+    to: sam.kv
+    type: kv
+    title: Persists expiring device codes
+    sourceRefs:
+      - path: apps/api/src/routes/device-flow.ts
+        startLine: 87
+  - id: web-approves-device-flow
+    from: sam.web
+    to: sam.api
+    type: https
+    title: Approves the CLI user code
+    sourceRefs:
+      - path: apps/web/src/pages/DeviceAuth.tsx
+        startLine: 16
+      - path: apps/web/src/lib/api/misc.ts
+        startLine: 94
+      - path: apps/api/src/routes/device-flow.ts
+        startLine: 137
+  - id: api-returns-cli-session
+    from: sam.api
+    to: sam.cli
+    type: https-poll
+    title: Exchanges approval for a session cookie
+    sourceRefs:
+      - path: apps/api/src/routes/device-flow.ts
+        startLine: 170
+      - path: packages/cli/internal/cli/run.go
+        startLine: 143
+  - id: api-owns-project-data
+    from: sam.api
+    to: sam.project-data
+    type: durable-object-rpc
+    title: Routes per-project durable operations
+    sourceRefs:
+      - path: apps/api/src/services/project-data.ts
+  - id: project-data-syncs-d1
+    from: sam.project-data
+    to: sam.d1
+    type: sql-summary-sync
+    title: Synchronizes queryable summaries
+    sourceRefs:
+      - path: apps/api/src/durable-objects/project-data/session-summary-sync.ts
+  - id: api-persists-control-plane
+    from: sam.api
+    to: sam.d1
+    type: sql
+    title: Persists global control-plane metadata
+    sourceRefs:
+      - path: apps/api/src/db/schema.ts
+  - id: api-stores-artifacts
+    from: sam.api
+    to: sam.r2
+    type: object-storage
+    title: Stores attachments, snapshots, and runtime artifacts
+    sourceRefs:
+      - path: apps/api/src/services/attachment-upload.ts
+      - path: apps/api/src/services/session-snapshot-artifacts.ts
+  - id: task-runner-provisions-vm
+    from: sam.task-runner
+    to: external.cloud-provider
+    type: provider-sdk
+    title: Selects or provisions VM capacity
+    sourceRefs:
+      - path: apps/api/src/durable-objects/task-runner/node-selection.ts
+      - path: apps/api/src/durable-objects/task-runner/node-steps.ts
+  - id: task-runner-dispatches-vm-agent
+    from: sam.task-runner
+    to: sam.vm-agent
+    type: https
+    title: Creates the VM workspace and agent session
+    sourceRefs:
+      - path: apps/api/src/durable-objects/task-runner/workspace-steps.ts
+        startLine: 446
+      - path: apps/api/src/durable-objects/task-runner/agent-session-step.ts
+        startLine: 36
+  - id: dispatch-selects-instant
+    from: sam.api
+    to: sam.instant-session
+    type: in-process
+    title: Routes explicit cf-container work to the Instant launcher
+    sourceRefs:
+      - path: apps/api/src/routes/mcp/dispatch-tool.ts
+        startLine: 341
+      - path: apps/api/src/routes/mcp/dispatch-tool.ts
+        startLine: 492
+  - id: instant-launches-container
+    from: sam.instant-session
+    to: sam.instant-runtime
+    type: durable-object-container
+    title: Starts the standalone runtime
+    sourceRefs:
+      - path: apps/api/src/services/instant-session.ts
+        startLine: 330
+  - id: instant-starts-agent
+    from: sam.instant-session
+    to: sam.agent-bootstrap
+    type: in-process
+    title: Uses the shared SAM-aware session bootstrap
+    sourceRefs:
+      - path: apps/api/src/services/instant-session.ts
+        startLine: 379
+  - id: task-runner-starts-agent
+    from: sam.task-runner
+    to: sam.agent-bootstrap
+    type: in-process
+    title: Uses the shared SAM-aware session bootstrap
+    sourceRefs:
+      - path: apps/api/src/durable-objects/task-runner/agent-session-step.ts
+        startLine: 68
+  - id: bootstrap-calls-vm-agent
+    from: sam.agent-bootstrap
+    to: sam.vm-agent
+    type: https
+    title: Creates and starts an agent session
+    sourceRefs:
+      - path: apps/api/src/services/agent-session-bootstrap.ts
+        startLine: 113
+  - id: vm-agent-starts-process
+    from: sam.vm-agent
+    to: sam.agent-process
+    type: acp-subprocess
+    title: Starts the selected coding agent
+    sourceRefs:
+      - path: packages/vm-agent/internal/acp/session_host.go
+  - id: agent-calls-sam-mcp
+    from: sam.agent-process
+    to: sam.api
+    type: mcp-https
+    title: Reads project context and reports progress
+    sourceRefs:
+      - path: apps/api/src/routes/mcp/index.ts
+      - path: apps/api/src/services/agent-bootstrap-prompt.ts
+  - id: agent-reads-writes-git
+    from: sam.agent-process
+    to: external.git-provider
+    type: git-https
+    title: Fetches source and publishes branches
+    sourceRefs:
+      - path: packages/vm-agent/internal/server/standalone_git.go

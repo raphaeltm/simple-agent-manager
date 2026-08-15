@@ -1,0 +1,60 @@
+elements:
+  - id: sam.cli
+    kind: container
+    title: SAM CLI
+    parent: sam
+    summary: Go command-line client for authentication, projects, tasks, and workspaces.
+    tags: [client, go]
+    sourceRefs:
+      - path: packages/cli/internal/cli/run.go
+  - id: sam.web
+    kind: container
+    title: Web application
+    parent: sam
+    summary: React control-plane client for developers and administrators.
+    tags: [client, react]
+    sourceRefs:
+      - path: apps/web/src/App.tsx
+  - id: sam.api
+    kind: container
+    title: API Worker
+    parent: sam
+    summary: Hono control plane that authenticates users and orchestrates durable work.
+    tags: [control-plane, cloudflare-worker]
+    sourceRefs:
+      - path: apps/api/src/index.ts
+  - id: sam.project-data
+    kind: component
+    title: ProjectData Durable Object
+    parent: sam.api
+    summary: Per-project durable owner for conversations, messages, activity, and agent context.
+    tags: [durable-object, sqlite]
+    sourceRefs:
+      - path: apps/api/src/durable-objects/project-data/index.ts
+      - path: apps/api/src/services/project-data.ts
+  - id: sam.task-runner
+    kind: component
+    title: TaskRunner Durable Object
+    parent: sam.api
+    summary: Alarm-driven, retryable VM task orchestration state machine.
+    tags: [durable-object, orchestration, vm]
+    sourceRefs:
+      - path: apps/api/src/durable-objects/task-runner/index.ts
+      - path: apps/api/src/services/task-runner-do.ts
+  - id: sam.instant-session
+    kind: component
+    title: Instant session launcher
+    parent: sam.api
+    summary: Creates a lightweight Cloudflare-container workspace without the VM TaskRunner path.
+    tags: [orchestration, cf-container]
+    sourceRefs:
+      - path: apps/api/src/services/instant-session.ts
+      - path: apps/api/src/routes/mcp/dispatch-instant.ts
+  - id: sam.agent-bootstrap
+    kind: component
+    title: SAM-aware agent bootstrap
+    parent: sam.api
+    summary: Shared session, MCP-token, and initial-prompt bootstrap used by VM and Instant runtimes.
+    tags: [agent, mcp]
+    sourceRefs:
+      - path: apps/api/src/services/agent-session-bootstrap.ts

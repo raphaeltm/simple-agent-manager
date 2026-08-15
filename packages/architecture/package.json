@@ -1,0 +1,56 @@
+{
+  "name": "@simple-agent-manager/architecture",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Filesystem-native architecture workspace compiler, query API, and CLI",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "sam-architecture": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./cli": {
+      "import": "./dist/cli.js",
+      "types": "./dist/cli.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts src/cli.ts --format esm --dts --clean && vite build --config vite.viewer.config.ts",
+    "test": "pnpm build && vitest run",
+    "browser-test": "playwright test --config playwright.config.ts",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.{ts,tsx}' 'tests/**/*.{ts,tsx}' 'playwright.config.ts' 'vite.viewer.config.ts'",
+    "cli": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@vitejs/plugin-react": "catalog:",
+    "react": "catalog:",
+    "react-dom": "catalog:",
+    "valibot": "catalog:",
+    "vite": "catalog:",
+    "yaml": "2.9.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@testing-library/jest-dom": "catalog:",
+    "@testing-library/react": "catalog:",
+    "@types/react": "catalog:",
+    "@types/react-dom": "catalog:",
+    "@typescript-eslint/eslint-plugin": "catalog:",
+    "@typescript-eslint/parser": "catalog:",
+    "@vitest/coverage-v8": "catalog:",
+    "eslint": "catalog:",
+    "jsdom": "catalog:",
+    "tsx": "catalog:",
+    "tsup": "8.5.1",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}
