@@ -119,7 +119,57 @@ The major TaskRunner path receives the ProjectData chat session ID and writes it
 | test-engineer | PASS | Regression coverage includes NULL-link task-mode terminalization/reap, true mismatch rejection, real-SQL backfill guards, max-residence zombie exit, retry toast de-duplication, and TaskRunner dual-write/fail-closed behavior. |
 | cloudflare-specialist | PASS | D1 migration is guarded/additive, DO migration only adds columns/indexes, migration safety checks pass, and no PR #1824 race-lab files were touched. |
 | doc-sync-validator | PASS | Environment docs and rule 44 were updated; task file includes writer/nuller inventory, post-mortem, and process fix. |
-| task-completion-validator | PENDING | Final planned-vs-actual validation will run after staging verification and the follow-up SAM idea are recorded. |
+| task-completion-validator | PASS | Planned-vs-actual validation found each research finding/checklist item represented in the diff, each acceptance criterion covered by local tests or documented Rule 10 staging gaps, no UI-to-backend propagation path in scope, and no multi-resource selector risk. |
+
+## Task completion validation report
+
+**Task**: `tasks/archive/2026-08-15-idle-cleanup-task-session-linkage.md`  
+**Branch**: `sam/fix-production-idle-cleanup-qs8r55`  
+**Date**: 2026-08-15
+
+### Verdict: PASS
+
+| Check | Status | Issues |
+| --- | --- | --- |
+| A: Research → Checklist | PASS | Root-cause findings map to TaskRunner dual-write, legacy NULL-link terminalization tolerance/backfill, bounded escape paths, retry notification durability, Rule 44 update, and follow-up idea. |
+| B: Checklist → Diff | PASS | Checked items are represented in the diff across TaskRunner, idle cleanup terminalization, D1 migration, DO migration, env/shared constants, docs/rule 44, and tests. |
+| C: Criteria → Tests | PASS | Acceptance criteria are covered by local real-SQL/Miniflare tests plus documented staging evidence/gaps for read-only-only fixtures. |
+| D: UI → Backend | N/A | No `apps/web/**` UI diff or new input propagation path. |
+| E: Multi-Resource | N/A | No provider/resource selector logic or `.limit(1)` selection path introduced. |
+| F: Vertical Slice | PASS | The branch crosses D1/DO/scheduler paths and includes real-SQL migration/terminalization tests, TaskRunner D1 writer tests, DO schema tests, and full local validation. |
+
+### Uncovered research findings
+
+| Finding | Task file line | Checklist item? | In diff? | Status |
+| --- | --- | --- | --- | --- |
+| TaskRunner writes workspace/session linkage but not `tasks.chat_session_id` | 9, 13 | Yes | Yes: `state-machine.ts` guarded task update and fail-closed reread | OK |
+| Idle cleanup rejects valid NULL-linked task rows | 9 | Yes | Yes: `idle-cleanup-terminalization.ts` workspace-bound NULL-link tolerance and guarded backfill | OK |
+| Retry exhaustion deletes schedule row and leaks durable visibility | 9 | Yes | Yes: `idle-cleanup.ts` terminal attention state and no delete-on-exhaustion | OK |
+| Backfill required only for unambiguous workspace-derived links | 30 | Yes | Yes: migration `0111_backfill_task_chat_session_id.sql` and migration test | OK |
+| Session recovery nulling path must re-link replacement session | 24, 29 | Yes | Yes: TaskRunner shared resume/link path now writes task/workspace/session identity | OK |
+| Rule/process gap for identity gates reading linkage columns | 37, 133-139 | Yes | Yes: `.claude/rules/44-dual-write-migration-enumerate-writers.md` update | OK |
+
+### Uncovered acceptance criteria
+
+| Criterion | Test / verification | Manual verification | Status |
+| --- | --- | --- | --- |
+| NULL-linked task with matching workspace binding terminalizes and cleans up | `conversation-idle-timeout.test.ts` NULL-link terminalization/reap cases | Rule 10 staging gap documented because staging D1 is read-only | COVERED |
+| Different non-null task/session link is rejected | `conversation-idle-timeout.test.ts`, `task-runner-session-linking.test.ts` | N/A | COVERED |
+| Migration backfills only unambiguous workspace-derived links | `task-chat-session-backfill-migration.test.ts`; staging invariant `remaining_unambiguous_null_task_links = 0` | Migration ledger row id `131` applied at `2026-08-15 09:34:48` | COVERED |
+| Preserved candidates leave active set after bounded max residence | `conversation-idle-timeout.test.ts` max-residence zombie prevention | N/A | COVERED |
+| Retry exhaustion keeps durable record and does not spam repeated toasts | `conversation-idle-timeout.test.ts` retry-toast de-duplication | Staging baseline requires zero new branch-caused idle-cleanup failed toasts | COVERED |
+| Newly started task-mode sessions write `tasks.chat_session_id` | `task-runner-session-linking.test.ts`; staging fixture rows persisted non-NULL task links | Current staging D1 re-read of tasks `01M02D51E1HKKQ09EKED1YGDG7`, `01M02EA4YTKHTH3APA002ZN7RS`, `01M02GFZZ2AHRB671S1MPRP3YR` | COVERED |
+
+### UI-to-backend data path audit
+
+| UI Element | State Variable | In API Call? | In Request Type? | Backend Reads It? | Status |
+| --- | --- | --- | --- | --- | --- |
+| N/A | N/A | N/A | N/A | N/A | OK |
+
+### Recommendations
+
+1. No additional implementation work required before archival.
+2. Preserve the two Rule 10 staging gaps and snapshot carve-out in the PR body so CI/preflight reviewers do not treat the unrelated snapshot failure as this branch’s blocker.
 
 ## Acceptance criteria
 
