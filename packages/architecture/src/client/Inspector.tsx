@@ -449,18 +449,28 @@ function InspectorTarget({
   onOpenStructure: (id: string) => void;
   projectionIndex: ProjectionIndex;
 }) {
+  // Sections that have nothing to report are omitted rather than rendered as a heading over
+  // "None." — empty scaffolding reads as density while carrying no information, and it pushes
+  // the sections that DO have content below the fold.
+  const description =
+    controller.target?.summary ?? controller.target?.description ?? model.summary.description;
+  const relationships = controller.targetId
+    ? (projectionIndex.relationshipsByElement.get(controller.targetId) ?? [])
+    : [];
+  const sources = controller.target?.sources ?? [];
+  const hasPreview =
+    controller.preview.loading ||
+    controller.preview.error !== undefined ||
+    controller.preview.preview !== undefined;
   return (
     <>
-      <section className="inspector-section inspector-overview">
-        <h3>Overview</h3>
-        <p className="muted break-text">
-          {controller.target?.summary ??
-            controller.target?.description ??
-            model.summary.description ??
-            'No description yet.'}
-        </p>
-      </section>
-      {controller.targetId && (
+      {description && (
+        <section className="inspector-section inspector-overview">
+          <h3>Overview</h3>
+          <p className="muted break-text">{description}</p>
+        </section>
+      )}
+      {controller.targetId && relationships.length > 0 && (
         <section className="inspector-section">
           <h3>Connections</h3>
           <Relationships
@@ -470,13 +480,10 @@ function InspectorTarget({
           />
         </section>
       )}
-      {controller.targetId && (
+      {controller.targetId && (sources.length > 0 || hasPreview) && (
         <section className="inspector-section">
           <h3>Source</h3>
-          <SourceAnchors
-            sources={controller.target?.sources ?? []}
-            onLoad={controller.loadSource}
-          />
+          <SourceAnchors sources={sources} onLoad={controller.loadSource} />
           <SourcePreview preview={controller.preview} />
         </section>
       )}

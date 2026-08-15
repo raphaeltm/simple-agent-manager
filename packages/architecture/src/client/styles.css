@@ -119,10 +119,10 @@ textarea {
   flex: 0 0 auto;
   align-items: center;
   justify-content: space-between;
-  margin: 0 auto 0.75rem;
+  margin: 0 auto 0.5rem;
   max-width: 1180px;
   border-bottom: 1px solid var(--aw-border-subtle);
-  padding-bottom: 0.65rem;
+  padding-bottom: 0.5rem;
   width: 100%;
 }
 
@@ -133,9 +133,22 @@ textarea {
 }
 
 .topbar h1 {
-  font-size: clamp(1.45rem, 2.7vw, 2.2rem);
+  font-size: clamp(1.05rem, 1.5vw, 1.3rem);
   letter-spacing: 0;
-  line-height: 1.05;
+  line-height: 1.18;
+}
+
+.workspace-identity {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+  min-width: 0;
+}
+
+.workspace-identity .eyebrow {
+  flex: 0 0 auto;
+  margin: 0;
+  opacity: 0.85;
 }
 
 .eyebrow {
@@ -292,6 +305,11 @@ textarea {
   color: var(--aw-accent);
 }
 
+/* Qualifies the counts that follow as workspace-wide, distinct from the in-scope lens counts. */
+.status-scope {
+  opacity: 0.72;
+}
+
 .structure-lens {
   display: grid;
   gap: calc(1rem * var(--aw-zoom));
@@ -396,12 +414,21 @@ textarea {
 
 .topology-summary {
   display: flex;
-  align-items: end;
+  align-items: start;
   justify-content: space-between;
   gap: 1rem;
+  /* Capped and start-aligned so the counts/minimap stay reachable on a wide stage instead of
+     being pushed to the far right of a pannable canvas. Sticky on both axes because this is
+     chrome that explains the bands — panning the graph must not scroll the legend away. */
+  position: sticky;
+  top: 0;
+  left: 0;
+  z-index: 2;
+  justify-self: start;
   min-width: min(100%, 36rem);
+  max-width: 44rem;
   border-left: 2px solid var(--aw-accent);
-  background: color-mix(in srgb, var(--aw-panel-strong) 62%, transparent);
+  background: color-mix(in srgb, var(--aw-panel-strong) 94%, transparent);
   padding: 0.75rem 0.9rem;
 }
 
@@ -418,10 +445,20 @@ textarea {
   margin: 0;
 }
 
-.topology-summary div {
+/* Scoped to the count list so it cannot also constrain the title block. */
+.topology-summary dl div {
   display: grid;
   gap: 0.15rem;
-  min-width: 3.6rem;
+  min-width: 6rem;
+}
+
+.topology-summary dt {
+  white-space: nowrap;
+}
+
+.topology-summary-title {
+  flex: 1 1 auto;
+  min-width: 0;
 }
 
 .topology-summary dt,
@@ -457,24 +494,55 @@ textarea {
     14px 14px;
 }
 
-.topology-lanes {
+.topology-groups {
   position: absolute;
   inset: 0;
   pointer-events: none;
 }
 
-.topology-lane {
+/* A depth band. Bounded region rather than a full-height rule, so a wrapped group reads as one
+   region and the boundary between depths is unambiguous. */
+.topology-group {
+  position: absolute;
+  border: 1px solid rgba(99, 217, 221, 0.14);
+  background: rgba(99, 217, 221, 0.022);
+  padding: 0;
+}
+
+.topology-group-label {
   position: absolute;
   top: 0;
-  bottom: 0;
+  left: 0;
   display: block;
-  border-left: 1px solid rgba(99, 217, 221, 0.16);
-  color: rgba(145, 168, 174, 0.56);
+  background: var(--aw-bg);
+  border-right: 1px solid rgba(99, 217, 221, 0.14);
+  border-bottom: 1px solid rgba(99, 217, 221, 0.14);
+  color: rgba(145, 168, 174, 0.72);
   font-family: ui-monospace, 'SFMono-Regular', Consolas, monospace;
   font-size: 0.62rem;
   letter-spacing: 0.08em;
-  padding: 0.45rem 0 0 0.4rem;
+  padding: 0.3rem 0.55rem;
   text-transform: uppercase;
+}
+
+/* Unconnected elements are a finding, not a stage — mark the band as inert rather than accent. */
+.topology-group.is-unconnected {
+  border-color: rgba(145, 168, 174, 0.18);
+  border-style: dashed;
+  background: transparent;
+}
+
+.topology-group.is-unconnected .topology-group-label {
+  border-color: rgba(145, 168, 174, 0.18);
+  color: rgba(145, 168, 174, 0.6);
+}
+
+.topology-legend {
+  margin: 0.3rem 0 0;
+  max-width: 34rem;
+  color: var(--aw-muted);
+  font-size: 0.72rem;
+  line-height: 1.45;
 }
 
 .topology-edges {
@@ -1321,19 +1389,23 @@ textarea {
 }
 
 .architecture-app.is-mobile .topbar {
-  gap: 0.65rem;
-  margin-bottom: 0.55rem;
-  padding-bottom: 0.55rem;
+  gap: 0.45rem;
+  margin-bottom: 0.45rem;
+  padding-bottom: 0.45rem;
 }
 
+/* Mobile previously spent two ~1.6rem lines on the workspace name before any content. */
 .architecture-app.is-mobile .topbar h1 {
-  max-width: 17rem;
-  font-size: clamp(1.35rem, 8vw, 1.75rem);
-  line-height: 1.04;
+  font-size: clamp(1rem, 4.4vw, 1.15rem);
+  line-height: 1.16;
 }
 
 .architecture-app.is-mobile .eyebrow {
   margin-bottom: 0.18rem;
+}
+
+.architecture-app.is-mobile .workspace-identity .eyebrow {
+  margin-bottom: 0;
 }
 
 .architecture-app.is-mobile .lens-tabs {
@@ -1351,10 +1423,18 @@ textarea {
   white-space: nowrap;
 }
 
+/* The lens is width:max-content, so an unwrapped legend would widen the whole stage past the
+   canvas and get clipped. Cap it to the narrowest supported canvas so it wraps instead. */
 .architecture-app.is-mobile .topology-summary {
   align-items: start;
   flex-direction: column;
   gap: 0.55rem;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.architecture-app.is-mobile .topology-legend {
+  max-width: 14rem;
 }
 
 .architecture-app.is-mobile .topology-summary dl {

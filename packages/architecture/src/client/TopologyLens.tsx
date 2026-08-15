@@ -10,7 +10,15 @@ const NODE_HEIGHT = 78;
 const COLUMN_GAP = 112;
 const ROW_GAP = 34;
 const STAGE_PADDING = 32;
-const DENSE_COLUMN_LIMIT = 6;
+/** Maximum nodes stacked along a group's cross axis before it wraps into another line. */
+const GROUP_WRAP_LIMIT = 6;
+/** Gap between wrapped lines of the SAME group — deliberately tighter than COLUMN_GAP so a
+ *  wrapped group still reads as one depth band rather than several. */
+const GROUP_INNER_GAP = 24;
+/** Vertical room reserved above a group for its label. */
+const GROUP_LABEL_SPACE = 30;
+/** A minimap of a handful of nodes is decoration, not navigation. */
+const MINIMAP_MIN_NODES = 8;
 
 interface TopologyLensProps {
   model: ViewerModel;
@@ -27,10 +35,25 @@ interface NodePosition {
   y: number;
 }
 
+/**
+ * A visual band of nodes that share one derived graph depth (or the trailing set of nodes that
+ * have no routes at all). One group === one truthful statement about the data; a group that has
+ * to wrap onto several lines is still ONE group with ONE label.
+ */
+interface TopologyGroup {
+  height: number;
+  label: string;
+  width: number;
+  x: number;
+  y: number;
+}
+
 interface TopologyLayout {
+  groups: TopologyGroup[];
   height: number;
   positions: Map<string, NodePosition>;
-  rankLabels: Array<{ label: string; x: number; width: number }>;
+  /** True when at least one in-scope route exists, so depth is actually derivable from the data. */
+  ranked: boolean;
   vertical: boolean;
   width: number;
 }
@@ -70,7 +93,7 @@ export function TopologyLens({
         omittedRelationshipCount={slice.omittedRelationships}
       />
       <div className="topology-stage" style={{ height: layout.height, width: layout.width }}>
-        <TopologyLanes layout={layout} />
+        <TopologyGroups layout={layout} />
         <TopologyEdges
           layout={layout}
           relationships={slice.relationships}
@@ -101,7 +124,9 @@ export function TopologyLens({
                 {element.id === focusId && <b>scope</b>}
                 {(element.sourceRefs?.length ?? 0) > 0 && <b>src</b>}
                 {(projectionIndex.threadsByTarget.get(element.id)?.length ?? 0) > 0 && <b>q&a</b>}
-                {!relatedIds.has(element.id) && <b>isolated</b>}
+                {/* Only worth flagging when the view is mixed — in an unranked view every node is
+                    unconnected, so a badge on all of them is noise, and the group already says it. */}
+                {layout.ranked && !relatedIds.has(element.id) && <b>isolated</b>}
               </span>
             </button>
           );
@@ -140,17 +165,24 @@ function TopologySummary({
 }) {
   return (
     <header className="topology-summary">
-      <div>
+      <div className="topology-summary-title">
         <p className="eyebrow">Topology layer</p>
-        <h2>Runtime routes</h2>
+        <h2>{layout.ranked ? 'Ranked by route direction' : 'No directed routes'}</h2>
+        <p className="topology-legend">
+          {layout.ranked
+            ? 'Bands are graph depth derived from route direction. “Unconnected” has no routes in this scope.'
+            : 'Nothing in this scope is connected, so no depth can be derived. Order is not meaningful.'}
+        </p>
       </div>
+      {/* Explicitly "in scope": the workbench status bar reports WORKSPACE totals, so unqualified
+          "Nodes"/"Routes" in both places showed two different numbers under the same label. */}
       <dl>
         <div>
-          <dt>Nodes</dt>
+          <dt>Scope nodes</dt>
           <dd>{elementCount}</dd>
         </div>
         <div>
-          <dt>Routes</dt>
+          <dt>Scope routes</dt>
           <dd>{relationshipCount}</dd>
         </div>
         {(omittedElementCount > 0 || omittedRelationshipCount > 0) && (
@@ -160,22 +192,24 @@ function TopologySummary({
           </div>
         )}
       </dl>
-      <TopologyMiniMap layout={layout} elements={elements} />
+      {elementCount >= MINIMAP_MIN_NODES && <TopologyMiniMap layout={layout} elements={elements} />}
     </header>
   );
 }
 
-function TopologyLanes({ layout }: { layout: TopologyLayout }) {
+function TopologyGroups({ layout }: { layout: TopologyLayout }) {
+  const labelled = layout.groups.filter((group) => group.label.length > 0);
+  if (labelled.length === 0) return null;
   return (
-    <div className="topology-lanes" aria-hidden="true">
-      {layout.rankLabels.map((rank) => (
-        <span
-          key={`${rank.label}-${rank.x}`}
-          className="topology-lane"
-          style={{ left: rank.x, width: rank.width }}
+    <div className="topology-groups" aria-hidden="true">
+      {labelled.map((group) => (
+        <div
+          key={`${group.label}-${group.x}-${group.y}`}
+          className={`topology-group${group.label === 'Unconnected' ? ' is-unconnected' : ''}`}
+          style={{ height: group.height, left: group.x, top: group.y, width: group.width }}
         >
-          {rank.label}
-        </span>
+          <span className="topology-group-label">{group.label}</span>
+        </div>
       ))}
     </div>
   );
@@ -309,14 +343,54 @@ function TopologyConnections({
   );
 }
 
-function createTopologyLayout(
+/**
+ * Splits the slice into depth-ranked groups.
+ *
+ * Only elements that actually participate in an in-scope route are ranked; everything else is
+ * reported as "Unconnected" rather than being silently folded into depth 1. When there are no
+ * in-scope routes at all, no depth exists in the data, so a single unlabelled group is returned
+ * and `ranked` is false — callers must not present that as a layered architecture.
+ */
+export function buildTopologyGroups(
+  elements: ArchitectureElement[],
+  relationships: ArchitectureRelationship[]
+): { groups: Array<{ ids: string[]; label: string }>; ranked: boolean } {
+  const elementOrder = new Map(elements.map((element, index) => [element.id, index]));
+  const inScope = relationships.filter(
+    (relationship) => elementOrder.has(relationship.from) && elementOrder.has(relationship.to)
+  );
+  const connectedIds = connectedElementIds(inScope);
+  const connected = elements.filter((element) => connectedIds.has(element.id));
+  const isolated = elements.filter((element) => !connectedIds.has(element.id));
+
+  if (connected.length === 0) {
+    return { groups: [{ ids: elements.map((element) => element.id), label: '' }], ranked: false };
+  }
+
+  const ranks = rankElements(connected, inScope, elementOrder);
+  const byRank = new Map<number, string[]>();
+  for (const element of connected) {
+    const rank = ranks.get(element.id) ?? 0;
+    const bucket = byRank.get(rank) ?? [];
+    bucket.push(element.id);
+    byRank.set(rank, bucket);
+  }
+
+  const groups = [...byRank.entries()]
+    .sort(([left], [right]) => left - right)
+    .map(([rank, ids]) => ({ ids, label: rank === 0 ? 'Sources' : `Depth ${rank + 1}` }));
+  if (isolated.length > 0) {
+    groups.push({ ids: isolated.map((element) => element.id), label: 'Unconnected' });
+  }
+  return { groups, ranked: true };
+}
+
+/** Condenses cycles into strongly connected components, then ranks those by longest path. */
+function rankElements(
   elements: ArchitectureElement[],
   relationships: ArchitectureRelationship[],
-  vertical: boolean
-): TopologyLayout {
-  if (vertical) return createVerticalTopologyLayout(elements);
-
-  const elementOrder = new Map(elements.map((element, index) => [element.id, index]));
+  elementOrder: Map<string, number>
+): Map<string, number> {
   const outgoing = new Map<string, string[]>();
   for (const element of elements) outgoing.set(element.id, []);
   for (const relationship of relationships) {
@@ -366,80 +440,123 @@ function createTopologyLayout(
     }
   }
 
-  const columns = new Map<number, string[]>();
+  const ranksById = new Map<string, number>();
   for (const element of elements) {
     const component = componentByElement.get(element.id) ?? 0;
-    const rank = ranks[component] ?? 0;
-    const column = columns.get(rank) ?? [];
-    column.push(element.id);
-    columns.set(rank, column);
+    ranksById.set(element.id, ranks[component] ?? 0);
   }
-  const packedColumns = packDenseColumns(columns);
-  const maximumRows = Math.max(1, ...packedColumns.map((column) => column.ids.length));
+  return ranksById;
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const lines: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    lines.push(items.slice(index, index + size));
+  }
+  return lines;
+}
+
+export function createTopologyLayout(
+  elements: ArchitectureElement[],
+  relationships: ArchitectureRelationship[],
+  vertical: boolean
+): TopologyLayout {
+  const { groups, ranked } = buildTopologyGroups(elements, relationships);
+  return vertical ? layoutVertical(groups, ranked) : layoutHorizontal(groups, ranked);
+}
+
+/**
+ * Desktop: groups run left to right, each group wrapping downward into extra lines when it
+ * exceeds GROUP_WRAP_LIMIT. Wrapped lines stay inside the group's own bounding box.
+ */
+function layoutHorizontal(
+  groups: Array<{ ids: string[]; label: string }>,
+  ranked: boolean
+): TopologyLayout {
   const positions = new Map<string, NodePosition>();
-  const rankLabels: TopologyLayout['rankLabels'] = [];
-  for (const [columnIndex, column] of packedColumns.entries()) {
-    const columnOffset = ((maximumRows - column.ids.length) * (NODE_HEIGHT + ROW_GAP)) / 2;
-    const x = STAGE_PADDING + columnIndex * (NODE_WIDTH + COLUMN_GAP);
-    rankLabels.push({ label: column.label, x, width: NODE_WIDTH });
-    for (const [rowIndex, id] of column.ids.entries()) {
-      positions.set(id, {
-        x,
-        y: STAGE_PADDING + columnOffset + rowIndex * (NODE_HEIGHT + ROW_GAP),
-      });
+  const placed: TopologyGroup[] = [];
+  const maximumRows = Math.max(
+    1,
+    ...groups.map((group) => Math.min(group.ids.length, GROUP_WRAP_LIMIT))
+  );
+  const contentTop = STAGE_PADDING + GROUP_LABEL_SPACE;
+  const contentHeight = maximumRows * NODE_HEIGHT + Math.max(0, maximumRows - 1) * ROW_GAP;
+
+  let cursorX = STAGE_PADDING;
+  for (const group of groups) {
+    const lines = chunk(group.ids, GROUP_WRAP_LIMIT);
+    const groupRows = Math.min(group.ids.length, GROUP_WRAP_LIMIT);
+    const groupHeight = groupRows * NODE_HEIGHT + Math.max(0, groupRows - 1) * ROW_GAP;
+    const centerOffset = (contentHeight - groupHeight) / 2;
+    const groupWidth = lines.length * NODE_WIDTH + Math.max(0, lines.length - 1) * GROUP_INNER_GAP;
+
+    for (const [lineIndex, line] of lines.entries()) {
+      const x = cursorX + lineIndex * (NODE_WIDTH + GROUP_INNER_GAP);
+      for (const [rowIndex, id] of line.entries()) {
+        positions.set(id, {
+          x,
+          y: contentTop + centerOffset + rowIndex * (NODE_HEIGHT + ROW_GAP),
+        });
+      }
     }
+    placed.push({
+      height: groupHeight + GROUP_LABEL_SPACE,
+      label: group.label,
+      width: groupWidth,
+      x: cursorX,
+      y: contentTop + centerOffset - GROUP_LABEL_SPACE,
+    });
+    cursorX += groupWidth + COLUMN_GAP;
   }
 
   return {
-    height: STAGE_PADDING * 2 + maximumRows * NODE_HEIGHT + Math.max(0, maximumRows - 1) * ROW_GAP,
+    groups: placed,
+    height: contentTop + contentHeight + STAGE_PADDING,
     positions,
-    rankLabels,
+    ranked,
     vertical: false,
-    width:
-      STAGE_PADDING * 2 +
-      packedColumns.length * NODE_WIDTH +
-      Math.max(0, packedColumns.length - 1) * COLUMN_GAP,
+    width: Math.max(STAGE_PADDING * 2 + NODE_WIDTH, cursorX - COLUMN_GAP + STAGE_PADDING),
   };
 }
 
-function createVerticalTopologyLayout(elements: ArchitectureElement[]): TopologyLayout {
+/**
+ * Mobile: the SAME derived groups, stacked top to bottom so routes read downward. This layout
+ * previously ignored relationships entirely and stacked elements in document order, which drew
+ * edges between arbitrary neighbours; depth is now real on mobile too.
+ */
+function layoutVertical(
+  groups: Array<{ ids: string[]; label: string }>,
+  ranked: boolean
+): TopologyLayout {
+  const positions = new Map<string, NodePosition>();
+  const placed: TopologyGroup[] = [];
+  let cursorY = STAGE_PADDING;
+
+  for (const group of groups) {
+    const contentTop = cursorY + GROUP_LABEL_SPACE;
+    for (const [index, id] of group.ids.entries()) {
+      positions.set(id, { x: STAGE_PADDING, y: contentTop + index * (NODE_HEIGHT + ROW_GAP) });
+    }
+    const groupHeight =
+      group.ids.length * NODE_HEIGHT + Math.max(0, group.ids.length - 1) * ROW_GAP;
+    placed.push({
+      height: groupHeight + GROUP_LABEL_SPACE,
+      label: group.label,
+      width: NODE_WIDTH,
+      x: STAGE_PADDING,
+      y: cursorY,
+    });
+    cursorY = contentTop + groupHeight + ROW_GAP * 2;
+  }
+
   return {
-    height:
-      STAGE_PADDING * 2 +
-      elements.length * NODE_HEIGHT +
-      Math.max(0, elements.length - 1) * ROW_GAP,
-    positions: new Map(
-      elements.map((element, index) => [
-        element.id,
-        { x: STAGE_PADDING, y: STAGE_PADDING + index * (NODE_HEIGHT + ROW_GAP) },
-      ])
-    ),
-    rankLabels: [{ label: 'Stack', x: STAGE_PADDING, width: NODE_WIDTH }],
+    groups: placed,
+    height: Math.max(STAGE_PADDING * 2 + NODE_HEIGHT, cursorY - ROW_GAP * 2 + STAGE_PADDING),
+    positions,
+    ranked,
     vertical: true,
     width: STAGE_PADDING * 2 + NODE_WIDTH,
   };
-}
-
-function packDenseColumns(columns: Map<number, string[]>): Array<{ ids: string[]; label: string }> {
-  return [...columns.entries()]
-    .sort(([left], [right]) => left - right)
-    .flatMap(([rank, ids]) => {
-      if (ids.length <= DENSE_COLUMN_LIMIT) return [{ ids, label: rankLabel(rank) }];
-      const packed: Array<{ ids: string[]; label: string }> = [];
-      for (let index = 0; index < ids.length; index += DENSE_COLUMN_LIMIT) {
-        packed.push({
-          ids: ids.slice(index, index + DENSE_COLUMN_LIMIT),
-          label: `${rankLabel(rank)}.${packed.length + 1}`,
-        });
-      }
-      return packed;
-    });
-}
-
-function rankLabel(rank: number): string {
-  if (rank === 0) return 'Entry';
-  if (rank === 1) return 'Runtime';
-  return `Hop ${rank}`;
 }
 
 function connectedElementIds(relationships: ArchitectureRelationship[]): Set<string> {

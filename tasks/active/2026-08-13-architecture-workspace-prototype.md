@@ -171,6 +171,29 @@ The requested end state is broader than this first PR: humans should eventually 
 - Refinement round 2: 52 package tests plus all six real-server Playwright scenarios passed. The added evidence covers stale SSE/model ordering, failed-refresh queue recovery, a 10,000-element reverse hierarchy, two-process CLI reply concurrency, whitespace-only request rejection, document/canvas/inspector scroll ownership, and single-row mobile zoom controls. Six updated screenshots are stored under `.codex/tmp/architecture-review/round-02/`.
 - Refinement round 3: the Flow lens became an eight-step numbered sequence spine with compact element and relationship actions at desktop, 375px, and 320px. Breadcrumb rendering is now bounded, successful refresh bursts skip intermediate commits, initial failures preserve newer SSE state, reconnects force convergence, and thread locks use owned no-follow regular files without unsafe age-based reclamation. All 56 package tests and six Playwright scenarios passed; eight current screenshots are stored under `.codex/tmp/architecture-review/round-03/`.
 
+- Refinement round 6 (topology honesty): the Topology lens no longer asserts meaning the model does
+  not carry. Three defects were fixed. (1) `rankLabel()` hardcoded rank 0/1 as `Entry`/`Runtime` and
+  2+ as `Hop N` — a domain claim invented by the view; bands are now labelled from graph position
+  (`Sources`, `Depth N`). (2) `packDenseColumns()` split any rank wider than the wrap limit into
+  `Entry.1 / Entry.2 / Entry.3`, so pagination rendered as architectural tiers — a rank that wraps is
+  now one band with one label spanning its lines. (3) `createVerticalTopologyLayout()` (mobile) never
+  read `relationships` at all; it stacked elements in document order under a lane called `Stack` and
+  drew edges between arbitrary neighbours — mobile now shares the desktop ranking and reads top to
+  bottom. Elements with no in-scope routes are separated into an `Unconnected` band instead of being
+  folded into depth 1, and a scope with zero routes now states that no depth is derivable rather than
+  inventing tiers. Nine new tests in `tests/topology-layout.test.ts` cover this; five of them were
+  verified to FAIL against the previous implementation before being relied upon.
+- Refinement round 6 (chrome and empty states): the page header became a single-line command bar
+  (identity inline with the workspace name, `clamp(1.05rem, 1.5vw, 1.3rem)` instead of
+  `clamp(1.45rem, 2.7vw, 2.2rem)`), reclaiming roughly 60px of canvas on mobile. The topology summary
+  is now sticky on both axes so the band legend cannot pan out of view, and is width-capped so its
+  counts and minimap stay reachable on a wide stage. Inspector sections with nothing to report
+  (`Overview`, `Connections`, `Source`) are omitted rather than rendered as a heading over `None.`.
+  The minimap is hidden below 8 nodes. Lens counts are labelled `Scope nodes`/`Scope routes` and the
+  status bar is labelled `workspace`, because the two were previously showing different numbers under
+  identical labels. All 75 package tests and all six Playwright scenarios pass at 1280px, 375px, and
+  320px with no horizontal overflow.
+
 ## References
 
 - SAM idea `01KZXA917XXNNFZP8CTSFB4ANM`

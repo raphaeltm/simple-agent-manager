@@ -53,8 +53,11 @@ function WorkspaceHeader({
 }) {
   return (
     <header className="topbar" inert={controller.mobileInspector || undefined}>
-      <div>
-        <p className="eyebrow">Architecture workspace</p>
+      {/* Identity sits on ONE line with the workspace name so the command bar stays shallow and
+          the canvas keeps the vertical budget. Deliberately wraps rather than truncating — an
+          ellipsised name is both unreadable and a clipped-overflow audit failure. */}
+      <div className="workspace-identity">
+        <p className="eyebrow">Arch</p>
         <h1>{model.summary.name}</h1>
       </div>
       <nav aria-label="Architecture lenses" className="lens-tabs">
@@ -141,6 +144,7 @@ function CanvasColumn({
       <LensCanvas controller={controller} model={model} projectionIndex={projectionIndex} />
       <footer className="workbench-status" id="canvas-status">
         <span>{controller.lens}</span>
+        <span className="status-scope">workspace</span>
         <span>{elementCount} nodes</span>
         <span>{relationshipCount} routes</span>
         <span>{threadCount} threads</span>
