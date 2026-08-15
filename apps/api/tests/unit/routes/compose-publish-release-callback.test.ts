@@ -261,7 +261,9 @@ describe('compose-publish-release callback (vertical slice)', () => {
     expect(row.status).toBe('created');
     expect(row.source).toBe('compose-publish');
     expect(row.createdBy).toBe('user-1');
-    // The full captured submission is stored verbatim in the manifest column.
+    // Only the allowlisted submission fields are persisted in the manifest
+    // column (see composePublishReleaseSubmissionSchema) — not a verbatim
+    // spread of the raw request body.
     expect(JSON.parse(row.manifest as string)).toMatchObject({
       environment: 'staging',
       environmentId: 'env-1',
@@ -616,5 +618,151 @@ volumes:
 
     expect(res.status).toBe(400);
     expect(inserted).toHaveLength(0);
+  });
+
+  it('rejects a malformed (non-JSON) release submission body', async () => {
+    const app = await buildApp();
+    const res = await app.request(
+      '/api/projects/proj-1/compose-publish-release',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer cb-token', 'Content-Type': 'application/json' },
+        body: '{not valid json',
+      },
+      { DATABASE: {} }
+    );
+
+    expect(res.status).toBe(400);
+    expect(inserted).toHaveLength(0);
+  });
+
+  // Security regression (idea: route-claim smuggling via compose-publish
+  // release ingestion). A compromised/misbehaving VM agent could previously
+  // inject a top-level `routes` array into an otherwise-valid submission. The
+  // raw request body was spread verbatim into the stored manifest, and
+  // services/deployment-routing.ts's buildReleaseRouteDiscovery decided
+  // "normalized build-on-node manifest vs. compose-publish submission" purely
+  // by checking `Array.isArray(manifest.routes)` — so the smuggled array was
+  // later treated as authoritative route/hostname/port claims, regardless of
+  // what the agent's own compose file actually declared.
+  it('strips an unauthorized top-level routes array from the stored manifest so route discovery never sees it', async () => {
+    const app = await buildApp();
+    // validSubmission.composeYaml declares no ports/routes at all, so a
+    // legitimate publish of this exact body would discover ZERO public
+    // routes. Any route discovered below can only have come from the
+    // smuggled field.
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      routes: [{ service: 'evil-service', port: 9999, mode: 'public' }],
+    });
+
+    // The legitimate parts of the submission still succeed — unknown fields
+    // are stripped, not used to reject the whole publish.
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(inserted).toHaveLength(1);
+
+    const storedManifest = JSON.parse(inserted[0].manifest as string);
+    // The smuggled field never reaches storage at all.
+    expect(storedManifest).not.toHaveProperty('routes');
+
+    // Defense-in-depth: even feeding the stored manifest through the REAL
+    // route-discovery function must never surface the smuggled route.
+    const { buildReleaseRouteDiscovery } = await import('../../../src/services/deployment-routing');
+    const discovery = buildReleaseRouteDiscovery(inserted[0].manifest as string, {
+      environmentId: 'env-1',
+      baseDomain: 'sammy.party',
+    });
+    expect(discovery?.publicRoutes ?? []).toEqual([]);
+  });
+
+  // Owner-path control for the regression above: a legitimate compose-publish
+  // release that DOES declare a real route (via standard compose `ports:`,
+  // the only supported mechanism — see extractComposeRouteHints) must still
+  // flow through to route discovery. This proves the fix strips unauthorized
+  // fields without breaking the real publish/route-discovery flow.
+  it('still discovers a legitimate compose-publish route declared via compose ports', async () => {
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      composeYaml: `services:
+  web:
+    image: example/web
+    ports:
+      - "8000:8000"
+`,
+    });
+
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(inserted).toHaveLength(1);
+
+    const { buildReleaseRouteDiscovery } = await import('../../../src/services/deployment-routing');
+    const discovery = buildReleaseRouteDiscovery(inserted[0].manifest as string, {
+      environmentId: 'env-1',
+      baseDomain: 'sammy.party',
+    });
+    expect(discovery?.publicRoutes).toHaveLength(1);
+    expect(discovery?.publicRoutes[0]).toMatchObject({ service: 'web', containerPort: 8000 });
+  });
+
+  // Security regression (nested smuggling, defense-in-depth for the
+  // top-level routes-smuggling fix above): a compromised/misbehaving VM
+  // agent could instead smuggle a foreign field one level deeper — directly
+  // on a `services[]` entry, or nested inside that entry's `platform` object
+  // — rather than at the submission's top level. Both nesting levels are
+  // protected today by TWO independent layers: (1) Valibot's
+  // `composePublishServiceSchema` / `composePublishPlatformSchema` are plain
+  // `v.object(...)` schemas, which build a fresh output object and copy only
+  // declared keys — an unrecognized key is never assigned into the parsed
+  // output; and (2) the manifest reconstruction lists each service's fields
+  // explicitly (`services.map((svc) => ({ serviceName: svc.serviceName, ... }))`)
+  // rather than spreading `svc`. This test guards against a future `...svc`
+  // spread silently replacing that explicit field list — a regression that
+  // would only be caught here, via Valibot's own key-stripping (layer 1),
+  // once layer 2's protection was gone.
+  it('strips foreign fields smuggled inside a service entry and its nested platform object from the stored manifest', async () => {
+    const app = await buildApp();
+    const res = await request(app, 'proj-1', {
+      ...validSubmission,
+      services: [
+        {
+          serviceName: 'web',
+          sourceRef: 'a',
+          pushedRef: 'b',
+          digest: 'sha256:abc',
+          // Foreign field smuggled directly on the service entry.
+          routes: [{ service: 'evil-service', port: 9999, mode: 'public' }],
+          platform: {
+            architecture: 'amd64',
+            os: 'linux',
+            // Foreign field smuggled one level deeper, inside `platform`.
+            routes: [{ service: 'evil-platform', port: 8888, mode: 'public' }],
+          },
+        },
+      ],
+    });
+
+    // The legitimate parts of the submission still succeed — unknown nested
+    // fields are stripped, not used to reject the whole publish.
+    const body = await res.json();
+    expect(res.status, JSON.stringify(body)).toBe(200);
+    expect(inserted).toHaveLength(1);
+
+    const storedManifest = JSON.parse(inserted[0].manifest as string);
+    const storedService = storedManifest.services[0];
+    // The field smuggled directly on the service entry never reaches storage.
+    expect(storedService).not.toHaveProperty('routes');
+    // The field smuggled inside `platform` never reaches storage either.
+    expect(storedService.platform).not.toHaveProperty('routes');
+    // Every legitimate field at both levels survived intact, and nothing
+    // else did — proving the stripping isn't accidentally over-broad either.
+    expect(storedService).toEqual({
+      serviceName: 'web',
+      sourceRef: 'a',
+      pushedRef: 'b',
+      digest: 'sha256:abc',
+      platform: { architecture: 'amd64', os: 'linux' },
+    });
   });
 });

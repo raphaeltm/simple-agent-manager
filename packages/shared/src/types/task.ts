@@ -1,3 +1,4 @@
+import { isJsonRecord } from '../runtime-validation';
 import type { ResourceRequirements, ResourceRequirementsSource } from './resource';
 import type { CredentialProvider } from './user';
 import type { VMLocation, VMSize, WorkspaceProfile } from './workspace';
@@ -18,6 +19,20 @@ export const TASK_STATUSES = [
 ] as const;
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
+
+export const TASK_TERMINAL_STATUSES = ['completed', 'failed', 'cancelled'] as const;
+export type TaskTerminalStatus = (typeof TASK_TERMINAL_STATUSES)[number];
+
+/** Stable event contract for subscribers that react after a task wins a terminal transition. */
+export interface TaskTerminalTransitionEvent {
+  taskId: string;
+  projectId: string;
+  parentTaskId: string | null;
+  status: TaskTerminalStatus;
+  reason: string | null;
+  occurredAt: string;
+  source: string;
+}
 
 /** Runtime type guard for TaskStatus values from untrusted sources (e.g. database rows). */
 export function isTaskStatus(value: unknown): value is TaskStatus {
@@ -130,13 +145,7 @@ type CompletionEvidenceValidationResult =
   | { ok: true; value: CompletionEvidence }
   | { ok: false; error: string };
 
-type OptionalStringValidationResult =
-  | { ok: true; value?: string }
-  | { ok: false; error: string };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
+type OptionalStringValidationResult = { ok: true; value?: string } | { ok: false; error: string };
 
 function optionalTrimmedString(
   value: unknown,
@@ -161,7 +170,10 @@ function validateEvidenceArray<T>(
   value: unknown,
   field: string,
   maxItems: number,
-  parseItem: (item: Record<string, unknown>, index: number) => { ok: true; value: T } | { ok: false; error: string }
+  parseItem: (
+    item: Record<string, unknown>,
+    index: number
+  ) => { ok: true; value: T } | { ok: false; error: string }
 ): { ok: true; value: T[] } | { ok: false; error: string } {
   if (!Array.isArray(value)) {
     return { ok: false, error: `${field} must be an array` };
@@ -172,7 +184,7 @@ function validateEvidenceArray<T>(
 
   const parsed: T[] = [];
   for (const [index, item] of value.entries()) {
-    if (!isRecord(item)) {
+    if (!isJsonRecord(item)) {
       return { ok: false, error: `${field}[${index}] must be an object` };
     }
     const result = parseItem(item, index);
@@ -266,7 +278,7 @@ function validateCompletionVerification(
 }
 
 export function validateCompletionEvidence(value: unknown): CompletionEvidenceValidationResult {
-  if (!isRecord(value)) {
+  if (!isJsonRecord(value)) {
     return { ok: false, error: 'evidence must be an object' };
   }
 

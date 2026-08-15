@@ -23,9 +23,10 @@ user-invocable: false
 - `GET /api/workspaces` — List user's workspaces
 - `GET /api/workspaces/:id` — Get workspace details
 - `PATCH /api/workspaces/:id` — Rename workspace display name
-- `POST /api/workspaces/:id/stop` — Stop a running workspace
+- `POST /api/workspaces/:id/sleep` — Strictly checkpoint and sleep a persistent session; verified VM snapshots are resumable on a replacement workspace
+- `POST /api/workspaces/:id/stop` — Permanently stop a running workspace and delete retained session snapshot state
 - `POST /api/workspaces/:id/restart` — Restart a workspace
-- `DELETE /api/workspaces/:id` — Delete a workspace
+- `DELETE /api/workspaces/:id` — Permanently delete a workspace and retained session snapshot state
 
 ## Project Management
 
@@ -43,6 +44,7 @@ user-invocable: false
 - `GET /api/projects/:projectId/sessions/:sessionId/messages` — List persisted session messages (supports `roles`, `before`, `limit`, `compact`, `order=asc|desc`)
 - `GET /api/projects/:projectId/sessions/:sessionId/messages/:messageId/tool-content` — Lazy-load stored tool content for compact messages
 - `POST /api/projects/:projectId/sessions/:sessionId/prompt` — Send a follow-up prompt to the active agent session
+- `POST /api/projects/:projectId/sessions/:sessionId/attention/:markerId/resolve` — Validate, forward, and record one structured human-input answer (`{ answer }`)
 - `POST /api/projects/:projectId/sessions/:sessionId/summarize` — Generate a session summary for conversation forking
 - `POST /api/projects/:projectId/sessions/:sessionId/stop` — Stop a chat session
 
@@ -76,6 +78,17 @@ user-invocable: false
 - `PATCH /api/workspaces/:id/agent-sessions/:sessionId` — Rename agent session label
 - `POST /api/workspaces/:id/agent-sessions/:sessionId/stop` — Stop agent session
 
+### VM Agent direct execution protocol (node-management JWT)
+
+- `GET /workspaces/:workspaceId/agent-capabilities` — Discover VM execution protocol version, durable receipt support, checkpoint-rollover support, and configured timing bounds
+- `POST /workspaces/:workspaceId/agent-sessions/:sessionId/start` — Start a session; optional protocol-v1 `deliveryId` durably guards the initial prompt
+- `POST /workspaces/:workspaceId/agent-sessions/:sessionId/prompt` — Send a follow-up; optional protocol-v1 `deliveryId` durably guards agent invocation
+- `GET /workspaces/:workspaceId/agent-sessions/:sessionId/prompt-receipts/:deliveryId` — Reconcile `accepted`, `in_flight`, `completed`, or cross-runtime `ambiguous` delivery state
+- `POST /workspaces/:workspaceId/agent-sessions/:sessionId/checkpoint-rollovers` — Submit an idempotent protocol-v1 graceful/forced strict same-session rollover operation
+- `GET /workspaces/:workspaceId/agent-sessions/:sessionId/checkpoint-rollovers/:operationId` — Reconcile rollover state
+
+All direct routes require the workspace-scoped node-management Bearer token. Omitting new version/delivery fields preserves the legacy start/prompt behavior. Automatic rollover remains disabled until a control-plane caller invokes it.
+
 ## Agent Settings
 
 - `GET /api/agent-settings/:agentType` — Get user's agent settings
@@ -91,7 +104,11 @@ user-invocable: false
 - `POST /api/notifications/:id/dismiss` — Dismiss a notification
 - `GET /api/notifications/preferences` — Get notification preferences
 - `PUT /api/notifications/preferences` — Update a notification preference
+- `POST /api/notifications/push/subscriptions` — Add or refresh the authenticated browser's PushSubscription
+- `GET /api/notifications/push/subscriptions` — List the authenticated user's PushSubscriptions
+- `DELETE /api/notifications/push/subscriptions` — Remove the authenticated user's matching endpoint (`{ endpoint }`)
 - `GET /api/notifications/ws` — WebSocket upgrade for real-time notification delivery
+- `GET /api/config/vapid-public-key` — Public runtime VAPID key used when creating a browser PushSubscription
 
 ## Automation Triggers (Project Scoped)
 
@@ -122,9 +139,19 @@ The MCP `create_trigger` tool intentionally creates cron triggers only. Generic 
 - `GET /api/workspaces/:id/runtime` — Workspace runtime metadata callback (repository/branch for recovery)
 - `POST /api/workspaces/:id/boot-log` — Workspace boot progress log callback
 - `POST /api/workspaces/:id/agent-settings` — Workspace agent settings callback (model, permissionMode)
+- `POST /api/workspaces/:id/session-snapshot/prepare` — Prepare deterministic R2 artifact uploads for the workspace-scoped chat snapshot
+- `POST /api/workspaces/:id/session-snapshot/artifacts/:artifact/upload-url` — Authorize a short-lived, exact-length/checksum-bound private-R2 PUT for `home` or `wip`. Requires the workspace callback bearer; current-agent relays additionally present their independent node-scoped callback identity.
+- `PUT /api/workspaces/:id/session-snapshot/artifacts/:artifact` — Upload a bounded HOME tar or Git WIP bundle with a workspace callback token
+- `POST /api/workspaces/:id/session-snapshot/complete` — Verify artifact metadata and commit the snapshot manifest
+- `GET /api/workspaces/:id/session-snapshot/restore` — Fetch strict restore metadata and signed artifact paths
+- `POST /api/workspaces/:id/session-snapshot/restore-result` — Persist the VM Agent's strict restore result
 - `POST /api/bootstrap/:token` — Redeem one-time bootstrap token (credentials + git identity)
 - `POST /api/agent/ready` — VM agent ready callback
 - `POST /api/agent/activity` — VM agent activity report
+
+### VM Agent snapshot relay (busy legacy node compatibility)
+
+- `PUT /session-snapshot-upload-relay?authorizationPath=...` — A current same-user managed VM streams a busy legacy agent's bounded snapshot to the checksum-bound R2 URL returned by the control plane. The relay supplies independent workspace- and node-scoped callback credentials, accepts only the exact relative snapshot authorization route, uses the configurable snapshot-operation deadline, and forwards neither bearer to R2.
 
 ## Terminal Access
 

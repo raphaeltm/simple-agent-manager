@@ -250,5 +250,10 @@ export async function findNodeWithCapacity(
     return a.score - b.score;
   });
 
-  return candidates[0]!.id;
+  const best = candidates[0];
+  if (!best) {
+    // candidates.length was already checked above — this should never happen.
+    return null;
+  }
+  return best.id;
 }

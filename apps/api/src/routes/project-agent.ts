@@ -16,6 +16,7 @@ import type { Env } from '../env';
 import { requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
+import { AgentChatRequestSchema, jsonValidator } from '../schemas';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -26,14 +27,14 @@ function getProjectAgent(env: Env, projectId: string): DurableObjectStub {
 }
 
 /** POST /chat — send a message and stream the response. */
-app.post('/chat', requireAuth(), async (c) => {
+app.post('/chat', requireAuth(), jsonValidator(AgentChatRequestSchema), async (c) => {
   const auth = c.get('auth');
   const projectId = c.req.param('projectId');
   if (!projectId) throw errors.badRequest('Missing projectId');
   const db = drizzle(c.env.DATABASE, { schema });
   await requireProjectCapability(db, projectId, auth.user.id, 'task:write');
 
-  const body = await c.req.json<{ conversationId?: string; message: string }>();
+  const body = c.req.valid('json');
 
   if (!body.message?.trim()) {
     return c.json({ error: 'Message is required' }, 400);
@@ -59,7 +60,7 @@ app.post('/chat', requireAuth(), async (c) => {
     headers: {
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
-      'connection': 'keep-alive',
+      connection: 'keep-alive',
     },
   });
 });

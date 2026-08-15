@@ -1,8 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
   buildDeploymentRouteTargets,
   buildReleaseRouteDiscovery,
+  buildReleaseRouteTargets,
   collectEnvironmentRouteHostnames,
   environmentPortOffset,
 } from '../../../src/services/deployment-routing';
@@ -333,5 +334,80 @@ describe('collectEnvironmentRouteHostnames', () => {
       routes: [{ service: 'api', port: 8080, mode: 'private' as const }],
     };
     expect(collectEnvironmentRouteHostnames([JSON.stringify(noPublic)], opts)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildReleaseRouteDiscovery — manifest validation (security regression)
+//
+// A release manifest whose top-level shape LOOKS like a normalized
+// build-on-node manifest (a `routes` array is present) must validate against
+// the shared DeploymentManifestSchema before its routes are trusted — a
+// compose-publish submission has no `routes` field of its own, so the only
+// legitimate way for `manifest.routes` to be an array is a genuine
+// build-on-node manifest. Without this check, ANY stored JSON with a
+// top-level `routes` array (e.g. a malformed/legacy row, or a
+// compose-publish submission that predates the write-path allowlist fix in
+// compose-publish-release-callback.ts) would be treated as authoritative
+// route/hostname/port claims.
+// ---------------------------------------------------------------------------
+
+describe('buildReleaseRouteDiscovery manifest validation (security)', () => {
+  const opts = { environmentId: 'env-1', baseDomain: 'example.com' };
+
+  it('degrades an invalid routes-bearing manifest to no routes (with a diagnosable warning), without disturbing valid manifests before or after (good/bad/good)', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    try {
+      // GOOD: a fully valid, schema-conformant manifest discovers its routes.
+      const good = buildReleaseRouteDiscovery(JSON.stringify(manifest()), opts);
+      expect(good?.publicRoutes.map((route) => route.service)).toEqual(['web', 'api']);
+
+      // BAD: `routes` is present (so it superficially looks like a
+      // build-on-node manifest) but the object is NOT a valid
+      // DeploymentManifest — it's missing `version`/`services` and carries a
+      // foreign `composeYaml` field a strict DeploymentManifest cannot have.
+      // This is exactly the shape a compromised/misbehaving VM agent could
+      // smuggle into a compose-publish submission's stored manifest.
+      const bad = {
+        composeYaml: 'services:\n  web:\n    build: .\n',
+        routes: [{ service: 'evil-service', port: 9999, mode: 'public' }],
+      };
+      const badResult = buildReleaseRouteDiscovery(JSON.stringify(bad), opts, 'release-bad-1');
+
+      // FAIL-SAFE DEGRADE: no throw, no routes discovered.
+      expect(badResult).toBeNull();
+
+      // Diagnosable: a structured warning names the release id.
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('deployment_routing.release_manifest_invalid')
+      );
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('release-bad-1'));
+
+      // GOOD again: the prior invalid manifest does not corrupt any shared
+      // state — a subsequent valid manifest still discovers its routes.
+      const goodAgain = buildReleaseRouteDiscovery(JSON.stringify(manifest()), opts);
+      expect(goodAgain?.publicRoutes.map((route) => route.service)).toEqual(['web', 'api']);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
+  it('never treats a routes-bearing-but-invalid manifest as containing the attacker-claimed route', () => {
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      const smuggled = {
+        environment: 'staging',
+        environmentId: 'env-1',
+        composeYaml: 'services:\n  web:\n    build: .\n',
+        services: [{ serviceName: 'web', sourceRef: 'a' }],
+        submittedBy: { userId: 'user-1', workspaceId: 'ws-1' },
+        routes: [{ service: 'evil-service', port: 9999, mode: 'public' }],
+      };
+      const targets = buildReleaseRouteTargets(JSON.stringify(smuggled), opts);
+      expect(targets).toEqual([]);
+    } finally {
+      warnSpy.mockRestore();
+    }
   });
 });

@@ -98,7 +98,7 @@ describe('setup routes', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 }),
+      new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 })
     );
   });
 
@@ -110,11 +110,47 @@ describe('setup routes', () => {
         headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.9' },
         body: JSON.stringify({ token: 'setup-token' }),
       },
-      createEnv(),
+      createEnv()
     );
 
     expect(res.status).toBe(200);
     await expect(res.json()).resolves.toMatchObject({ ok: true });
+  });
+
+  it('rejects a literal null JSON body without crashing', async () => {
+    const res = await createApp().request(
+      '/api/setup/verify',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.20' },
+        body: 'null',
+      },
+      createEnv()
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'BAD_REQUEST',
+      message: 'Setup token is required',
+    });
+  });
+
+  it('rejects a non-object config value without crashing', async () => {
+    const res = await createApp().request(
+      '/api/setup/complete',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.21' },
+        body: JSON.stringify({ token: 'setup-token', config: null }),
+      },
+      createEnv()
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      error: 'BAD_REQUEST',
+      message: 'config must be an object',
+    });
   });
 
   it('returns 410 once setup.completed is true', async () => {
@@ -131,7 +167,7 @@ describe('setup routes', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ token: 'setup-token' }),
       },
-      env,
+      env
     );
 
     expect(res.status).toBe(410);
@@ -177,7 +213,7 @@ describe('setup routes', () => {
         headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.10' },
         body: JSON.stringify({ token: 'setup-token', config: { github: { appId: '12345' } } }),
       },
-      createEnv(),
+      createEnv()
     );
 
     expect(res.status).toBe(400);
@@ -205,7 +241,7 @@ describe('setup routes', () => {
           },
         }),
       },
-      env,
+      env
     );
 
     expect(res.status).toBe(200);
@@ -235,7 +271,7 @@ describe('setup routes', () => {
           },
         }),
       },
-      env,
+      env
     );
 
     expect(res.status).toBe(200);
@@ -266,7 +302,7 @@ describe('setup routes', () => {
           },
         }),
       },
-      createEnv(),
+      createEnv()
     );
 
     expect(res.status).toBe(400);
@@ -290,10 +326,12 @@ describe('setup routes', () => {
         headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.14' },
         body: JSON.stringify({
           token: 'wrong-token',
-          config: { google: { clientId: 'google-client-id', clientSecret: 'google-client-secret' } },
+          config: {
+            google: { clientId: 'google-client-id', clientSecret: 'google-client-secret' },
+          },
         }),
       },
-      env,
+      env
     );
 
     expect(res.status).toBe(401);
@@ -313,7 +351,7 @@ describe('setup routes', () => {
         headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.15' },
         body: JSON.stringify({ token: 'setup-token', config: { github: { appId: '12345' } } }),
       },
-      env,
+      env
     );
 
     expect(res.status).toBe(400);
@@ -326,7 +364,6 @@ describe('setup routes', () => {
     expect(appId).toBeUndefined();
     expect(completed).toBeUndefined();
   });
-
 
   it('rolls back setup config when the transactional completion write fails', async () => {
     const env = createEnv();
@@ -355,10 +392,12 @@ describe('setup routes', () => {
         headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.17' },
         body: JSON.stringify({
           token: 'setup-token',
-          config: { google: { clientId: 'google-client-id', clientSecret: 'google-client-secret' } },
+          config: {
+            google: { clientId: 'google-client-id', clientSecret: 'google-client-secret' },
+          },
         }),
       },
-      env,
+      env
     );
 
     expect(res.status).toBe(500);
@@ -383,10 +422,12 @@ describe('setup routes', () => {
         headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.18' },
         body: JSON.stringify({
           token: 'setup-token',
-          config: { google: { clientId: 'google-client-id', clientSecret: 'google-client-secret-1' } },
+          config: {
+            google: { clientId: 'google-client-id', clientSecret: 'google-client-secret-1' },
+          },
         }),
       },
-      env,
+      env
     );
     expect(first.status).toBe(200);
 
@@ -397,10 +438,12 @@ describe('setup routes', () => {
         headers: { 'Content-Type': 'application/json', 'CF-Connecting-IP': '198.51.100.19' },
         body: JSON.stringify({
           token: 'setup-token',
-          config: { google: { clientId: 'google-client-id', clientSecret: 'google-client-secret-2' } },
+          config: {
+            google: { clientId: 'google-client-id', clientSecret: 'google-client-secret-2' },
+          },
         }),
       },
-      env,
+      env
     );
     expect(second.status).toBe(200);
 
@@ -412,11 +455,10 @@ describe('setup routes', () => {
     ).all<{ encryptedToken: string; iv: string }>();
 
     expect(rows.results).toHaveLength(1);
-    await expect(decrypt(rows.results[0].encryptedToken, rows.results[0].iv, env.ENCRYPTION_KEY)).resolves.toBe(
-      'google-client-secret-2'
-    );
+    await expect(
+      decrypt(rows.results[0].encryptedToken, rows.results[0].iv, env.ENCRYPTION_KEY)
+    ).resolves.toBe('google-client-secret-2');
   });
-
 
   it('treats replayed setup completion as closed without changing public response shape', async () => {
     const env = createEnv();
@@ -436,5 +478,4 @@ describe('setup routes', () => {
     expect(second.status).toBe(410);
     await expect(second.json()).resolves.toMatchObject({ error: 'SETUP_CLOSED' });
   });
-
 });

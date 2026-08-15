@@ -28,6 +28,17 @@ derive_deploy_signing_public_key() {
   DEPLOY_SIGNING_PRIVATE_KEY_INPUT="$private_key_b64" pnpm exec tsx scripts/deploy/deploy-signing-keys.ts derive-public
 }
 
+derive_vapid_public_key_from_raw() {
+  local private_key_b64url="$1"
+  VAPID_PRIVATE_KEY_INPUT="$private_key_b64url" pnpm exec tsx scripts/deploy/vapid-keys.ts derive-public-from-raw
+}
+
+derive_vapid_key_from_pem() {
+  local private_key_pem="$1"
+  local component="$2"
+  VAPID_PRIVATE_KEY_PEM_INPUT="$private_key_pem" pnpm exec tsx scripts/deploy/vapid-keys.ts "$component"
+}
+
 # Function to set a secret with proper error handling
 set_worker_secret() {
   local secret_name="$1"
@@ -80,6 +91,7 @@ PULUMI_JWT_PRIVATE_KEY="${PULUMI_JWT_PRIVATE_KEY:-}"
 PULUMI_JWT_PUBLIC_KEY="${PULUMI_JWT_PUBLIC_KEY:-}"
 PULUMI_DEPLOY_SIGNING_PRIVATE_KEY="${PULUMI_DEPLOY_SIGNING_PRIVATE_KEY:-}"
 PULUMI_PREVIEW_SIGNING_KEY="${PULUMI_PREVIEW_SIGNING_KEY:-}"
+PULUMI_VAPID_PRIVATE_KEY_PEM="${PULUMI_VAPID_PRIVATE_KEY_PEM:-}"
 SECRET_ENCRYPTION_KEY="${SECRET_ENCRYPTION_KEY:-}"
 SECRET_JWT_PRIVATE_KEY="${SECRET_JWT_PRIVATE_KEY:-}"
 SECRET_JWT_PUBLIC_KEY="${SECRET_JWT_PUBLIC_KEY:-}"
@@ -100,6 +112,9 @@ if [[ -n "${PULUMI_STACK:-}" ]]; then
   fi
   if [[ -z "$PULUMI_PREVIEW_SIGNING_KEY" ]]; then
     PULUMI_PREVIEW_SIGNING_KEY="$(read_pulumi_secret previewSigningKey)"
+  fi
+  if [[ -z "$PULUMI_VAPID_PRIVATE_KEY_PEM" ]]; then
+    PULUMI_VAPID_PRIVATE_KEY_PEM="$(read_pulumi_secret vapidPrivateKeyPem)"
   fi
 fi
 
@@ -149,6 +164,35 @@ else
 fi
 echo ""
 
+# Web Push VAPID uses a Pulumi-persisted P-256 PKCS#8 key on fresh installs.
+# Raw base64url values remain supported as an explicit operator override.
+if [[ -n "${VAPID_PRIVATE_KEY:-}" ]]; then
+  echo "Using Web Push VAPID key from explicit environment override"
+  DERIVED_VAPID_PUBLIC_KEY="$(derive_vapid_public_key_from_raw "$VAPID_PRIVATE_KEY")"
+  if [[ -z "${VAPID_PUBLIC_KEY:-}" ]]; then
+    VAPID_PUBLIC_KEY="$DERIVED_VAPID_PUBLIC_KEY"
+  elif [[ "$VAPID_PUBLIC_KEY" != "$DERIVED_VAPID_PUBLIC_KEY" ]]; then
+    echo -e "${RED}ERROR: VAPID_PUBLIC_KEY does not match VAPID_PRIVATE_KEY${NC}" >&2
+    exit 1
+  fi
+elif [[ -n "$PULUMI_VAPID_PRIVATE_KEY_PEM" ]]; then
+  echo "Using Web Push VAPID key from Pulumi state (auto-persisted)"
+  VAPID_PRIVATE_KEY="$(derive_vapid_key_from_pem "$PULUMI_VAPID_PRIVATE_KEY_PEM" derive-private-from-pem)"
+  VAPID_PUBLIC_KEY="$(derive_vapid_key_from_pem "$PULUMI_VAPID_PRIVATE_KEY_PEM" derive-public-from-pem)"
+else
+  echo -e "${RED}ERROR: No Web Push VAPID key available from an explicit override or Pulumi state${NC}" >&2
+  echo "This should not happen - Pulumi should have created the key." >&2
+  exit 1
+fi
+if [[ -z "${VAPID_SUBJECT:-}" ]]; then
+  if [[ -z "${BASE_DOMAIN:-}" ]]; then
+    echo -e "${RED}ERROR: BASE_DOMAIN is required to derive VAPID_SUBJECT${NC}" >&2
+    exit 1
+  fi
+  VAPID_SUBJECT="https://app.${BASE_DOMAIN}"
+fi
+echo ""
+
 # Track if any required secrets fail
 FAILED=false
 
@@ -157,6 +201,9 @@ set_worker_secret "ENCRYPTION_KEY" "$ENCRYPTION_KEY" "$ENVIRONMENT" "true" || FA
 set_worker_secret "JWT_PRIVATE_KEY" "$JWT_PRIVATE_KEY" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "JWT_PUBLIC_KEY" "$JWT_PUBLIC_KEY" "$ENVIRONMENT" "true" || FAILED=true
 set_worker_secret "PREVIEW_SIGNING_KEY" "$PULUMI_PREVIEW_SIGNING_KEY" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "VAPID_PRIVATE_KEY" "$VAPID_PRIVATE_KEY" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "VAPID_PUBLIC_KEY" "$VAPID_PUBLIC_KEY" "$ENVIRONMENT" "true" || FAILED=true
+set_worker_secret "VAPID_SUBJECT" "$VAPID_SUBJECT" "$ENVIRONMENT" "true" || FAILED=true
 
 # Configure purpose-specific secret overrides.
 # BETTER_AUTH_SECRET and CREDENTIAL_ENCRYPTION_KEY fall back to ENCRYPTION_KEY.

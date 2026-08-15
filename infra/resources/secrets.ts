@@ -47,6 +47,20 @@ const jwtKeyResource = new tls.PrivateKey(
 );
 
 /**
+ * P-256 key pair for RFC 8292 VAPID authorization.
+ * The deploy script converts the persisted PKCS#8 PEM into the raw base64url
+ * private/public values consumed by Web Push implementations.
+ */
+const vapidKeyResource = new tls.PrivateKey(
+  'vapid-key',
+  {
+    algorithm: 'ECDSA',
+    ecdsaCurve: 'P256',
+  },
+  { protect: true }
+);
+
+/**
  * HMAC-SHA256 secret for trial onboarding claim/fingerprint cookies.
  * 32 bytes (256 bits), base64-encoded.
  *
@@ -94,3 +108,4 @@ export const jwtPublicKey = pulumi.secret(jwtKeyResource.publicKeyPem);
 export const trialClaimTokenSecret = pulumi.secret(trialClaimTokenResource.b64Std);
 export const deploySigningPrivateKey = deploySigningPrivateKeySeed;
 export const previewSigningKey = pulumi.secret(previewSigningKeyResource.b64Std);
+export const vapidPrivateKeyPem = pulumi.secret(vapidKeyResource.privateKeyPemPkcs8);

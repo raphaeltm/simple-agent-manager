@@ -41,6 +41,7 @@ export const DEFAULT_RATE_LIMITS = {
   // maintainer feedback project. Keep normal user retries possible while
   // bounding abuse of the externally reachable POST endpoint.
   REPORT_ISSUE_POST: 20,
+  PUSH_SUBSCRIPTION: 30,
   // Tighter limit for anonymous trial creation: each call spawns a DO,
   // fires ~4 GitHub API calls, and consumes a monthly trial slot.
   TRIAL_CREATE: 10,
@@ -246,6 +247,14 @@ export function rateLimitCredentialUpdate(env: Env): MiddlewareHandler<{ Binding
   return rateLimit({
     limit: getRateLimit(env, 'CREDENTIAL_UPDATE'),
     keyPrefix: 'credential-update',
+  });
+}
+
+/** Limit authenticated browser subscription mutations per user. */
+export function rateLimitPushSubscription(env: Env): MiddlewareHandler<{ Bindings: Env }> {
+  return rateLimit({
+    limit: getRateLimit(env, 'PUSH_SUBSCRIPTION'),
+    keyPrefix: 'push-subscription',
   });
 }
 

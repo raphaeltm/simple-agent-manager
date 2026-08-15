@@ -7,10 +7,23 @@ import {
 } from '@simple-agent-manager/shared';
 import { and, count, eq, inArray, isNotNull } from 'drizzle-orm';
 import { type drizzle } from 'drizzle-orm/d1';
+import * as v from 'valibot';
 
 import * as schema from '../db/schema';
 import { isNodeAgentVersionCompatible } from './node-agent-compatibility';
 import * as nodeLifecycle from './node-lifecycle';
+
+// Mirrors NodeMetrics (packages/shared/src/types/workspace.ts) exactly: all
+// three fields are optional heartbeat samples. A present field with the wrong
+// type (e.g. a stringified number) previously slipped through the old
+// `typeof parsed.x === 'number'`-on-at-least-one-field check and got blindly
+// cast, so a single mistyped field poisoned scoreNodeLoad()/nodeHasCapacity()
+// with NaN instead of being treated as absent metrics.
+const nodeMetricsSchema = v.object({
+  cpuLoadAvg1: v.optional(v.number()),
+  memoryPercent: v.optional(v.number()),
+  diskPercent: v.optional(v.number()),
+});
 
 export interface NodeCandidate {
   id: string;
@@ -51,21 +64,25 @@ function parsePositiveInt(value: string | undefined, fallback: number): number {
 
 function parseMetrics(raw: string | null): NodeMetrics | null {
   if (!raw) return null;
+  let parsed: unknown;
   try {
-    const parsed = JSON.parse(raw);
-    if (
-      typeof parsed === 'object' &&
-      parsed !== null &&
-      (typeof parsed.cpuLoadAvg1 === 'number' ||
-        typeof parsed.memoryPercent === 'number' ||
-        typeof parsed.diskPercent === 'number')
-    ) {
-      return parsed as NodeMetrics;
-    }
-    return null;
+    parsed = JSON.parse(raw);
   } catch {
     return null;
   }
+  const result = v.safeParse(nodeMetricsSchema, parsed);
+  if (!result.success) return null;
+  const metrics = result.output;
+  // Preserve the existing "at least one recognized field present" gate — a
+  // technically-valid-but-empty metrics object is still treated as absent.
+  if (
+    metrics.cpuLoadAvg1 === undefined &&
+    metrics.memoryPercent === undefined &&
+    metrics.diskPercent === undefined
+  ) {
+    return null;
+  }
+  return metrics;
 }
 
 /**
@@ -325,5 +342,11 @@ export async function selectNodeForTaskRun(
     return aScore - bScore;
   });
 
-  return candidates[0]!;
+  const best = candidates[0];
+  if (!best) {
+    // candidates.length === 0 was already handled above, and sort() does not
+    // change the array length — this should never happen.
+    return null;
+  }
+  return best;
 }

@@ -13,9 +13,13 @@ vi.mock('better-auth/react', () => ({
 // Mock library-cache
 const mockClearLibraryCache = vi.fn();
 const mockClearLegacyLibraryCache = vi.fn();
+const mockUnsubscribeWebPush = vi.fn();
 vi.mock('../../../src/lib/library-cache', () => ({
   clearLibraryCache: mockClearLibraryCache,
   clearLegacyLibraryCache: mockClearLegacyLibraryCache,
+}));
+vi.mock('../../../src/lib/api/notifications', () => ({
+  unsubscribeWebPush: mockUnsubscribeWebPush,
 }));
 
 describe('signOut', () => {
@@ -30,6 +34,13 @@ describe('signOut', () => {
     Object.defineProperty(window, 'location', {
       value: { href: '' },
       writable: true,
+    });
+    mockUnsubscribeWebPush.mockResolvedValue(undefined);
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: {
+        getRegistration: vi.fn().mockResolvedValue(undefined),
+      },
     });
   });
 
@@ -46,7 +57,7 @@ describe('signOut', () => {
     expect(mockClearLegacyLibraryCache).toHaveBeenCalledOnce();
     expect(mockSignOut).toHaveBeenCalledOnce();
     expect(mockClearLibraryCache.mock.invocationCallOrder[0]).toBeLessThan(
-      mockSignOut.mock.invocationCallOrder[0]!,
+      mockSignOut.mock.invocationCallOrder[0]!
     );
   });
 
@@ -66,5 +77,31 @@ describe('signOut', () => {
 
     expect(mockClearLibraryCache).toHaveBeenCalledOnce();
     expect(mockClearLegacyLibraryCache).toHaveBeenCalledOnce();
+  });
+
+  it('revokes an active origin-level push endpoint before ending the account session', async () => {
+    const unsubscribe = vi.fn().mockResolvedValue(true);
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: {
+        getRegistration: vi.fn().mockResolvedValue({
+          pushManager: {
+            getSubscription: vi.fn().mockResolvedValue({
+              endpoint: 'https://push.example.test/account-a',
+              unsubscribe,
+            }),
+          },
+        }),
+      },
+    });
+    const { signOut } = await import('../../../src/lib/auth');
+
+    await signOut();
+
+    expect(mockUnsubscribeWebPush).toHaveBeenCalledWith('https://push.example.test/account-a');
+    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(mockUnsubscribeWebPush.mock.invocationCallOrder[0]).toBeLessThan(
+      mockSignOut.mock.invocationCallOrder[0]!
+    );
   });
 });

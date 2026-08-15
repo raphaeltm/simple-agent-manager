@@ -161,6 +161,55 @@ describe('applySessionEvent', () => {
     });
   });
 
+  describe('attention deltas', () => {
+    it('shows needs_input immediately when an attention marker is created', () => {
+      const existing = [makeSession({ id: 'sess-1', attention: null })];
+      const result = applySessionEvent(existing, {
+        type: 'attention.created',
+        payload: {
+          sessionId: 'sess-1',
+          markerId: 'marker-1',
+          kind: 'needs_input',
+          createdAt: 1234,
+          expiresAt: 5678,
+          reason: 'Choose a release strategy',
+          options: ['Ship', 'Wait'],
+        },
+      });
+
+      expect(result[0].attention).toEqual({
+        markerId: 'marker-1',
+        kind: 'needs_input',
+        createdAt: 1234,
+        expiresAt: 5678,
+        reason: 'Choose a release strategy',
+        options: ['Ship', 'Wait'],
+      });
+    });
+
+    it('clears needs_input immediately when its marker is resolved', () => {
+      const existing = [
+        makeSession({
+          id: 'sess-1',
+          attention: {
+            markerId: 'marker-1',
+            kind: 'needs_input',
+            createdAt: 1234,
+            expiresAt: 5678,
+            reason: null,
+            options: [],
+          },
+        }),
+      ];
+      const result = applySessionEvent(existing, {
+        type: 'attention.resolved',
+        payload: { sessionId: 'sess-1', markerId: 'marker-1' },
+      });
+
+      expect(result[0].attention).toBeNull();
+    });
+  });
+
   describe('reference stability', () => {
     it('preserves unchanged session references when a different session changes', () => {
       const sessions = [
@@ -211,8 +260,12 @@ describe('applySessionEvents (batch)', () => {
 });
 
 describe('useSessionReducer hook (batching)', () => {
-  beforeEach(() => { vi.useFakeTimers(); });
-  afterEach(() => { vi.useRealTimers(); });
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it('batches multiple rapid events into a single state update', async () => {
     const { result } = renderHook(() => useSessionReducer());
@@ -242,7 +295,9 @@ describe('useSessionReducer hook (batching)', () => {
     expect(result.current.sessions).toHaveLength(1);
 
     // Advance past batch delay — all 3 events applied in one update
-    await act(async () => { vi.advanceTimersByTime(20); });
+    await act(async () => {
+      vi.advanceTimersByTime(20);
+    });
 
     expect(result.current.sessions).toHaveLength(2);
     expect(result.current.sessions[0].id).toBe('sess-2');
@@ -274,7 +329,9 @@ describe('useSessionReducer hook (batching)', () => {
     });
 
     // Advance past batch delay — stale batch should NOT apply
-    await act(async () => { vi.advanceTimersByTime(20); });
+    await act(async () => {
+      vi.advanceTimersByTime(20);
+    });
 
     // Should have the reset data, not the stale batched event
     expect(result.current.sessions).toHaveLength(2);
@@ -290,7 +347,9 @@ describe('useSessionReducer hook (batching)', () => {
     const sessionsBefore = result.current.sessions;
 
     // Advance past many batch windows with no events
-    await act(async () => { vi.advanceTimersByTime(100); });
+    await act(async () => {
+      vi.advanceTimersByTime(100);
+    });
 
     // Sessions reference unchanged
     expect(result.current.sessions).toBe(sessionsBefore);

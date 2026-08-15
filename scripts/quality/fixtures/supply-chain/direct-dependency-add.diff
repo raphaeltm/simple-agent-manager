@@ -1,0 +1,7 @@
+diff --git a/apps/api/package.json b/apps/api/package.json
+--- a/apps/api/package.json
++++ b/apps/api/package.json
+@@ -4,0 +5,3 @@
++  "dependencies": {
++    "left-pad": "1.3.0"
++  }

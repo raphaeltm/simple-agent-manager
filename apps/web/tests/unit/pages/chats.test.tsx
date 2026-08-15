@@ -1,4 +1,4 @@
-import { fireEvent,render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -26,7 +26,7 @@ function renderChats() {
   return render(
     <MemoryRouter initialEntries={['/chats']}>
       <Chats />
-    </MemoryRouter>,
+    </MemoryRouter>
   );
 }
 
@@ -78,7 +78,9 @@ describe('Chats page', () => {
     });
     renderChats();
     expect(screen.getByText('No active chats')).toBeInTheDocument();
-    expect(screen.getByText('Start a conversation from any project to see it here.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Start a conversation from any project to see it here.')
+    ).toBeInTheDocument();
   });
 
   it('renders error state when fetch fails', () => {
@@ -92,11 +94,15 @@ describe('Chats page', () => {
     expect(screen.getByText('Failed to load chat sessions')).toBeInTheDocument();
   });
 
-
   it('keeps stale rows visible while surfacing a refresh error', () => {
     mocks.useAllChatSessions.mockReturnValue({
       sessions: [
-        makeSession({ id: 's-stale-good', topic: 'Known good chat', status: 'active', projectName: 'Backend' }),
+        makeSession({
+          id: 's-stale-good',
+          topic: 'Known good chat',
+          status: 'active',
+          projectName: 'Backend',
+        }),
       ],
       loading: false,
       isRefreshing: false,
@@ -111,14 +117,17 @@ describe('Chats page', () => {
   });
 
   it('renders long titles and many active chats without dropping rows', () => {
-    const longTitle = 'Investigate chat refresh behavior with a very long session title that should remain renderable in the active chat list without changing API contracts or blanking existing rows during revalidation';
+    const longTitle =
+      'Investigate chat refresh behavior with a very long session title that should remain renderable in the active chat list without changing API contracts or blanking existing rows during revalidation';
     mocks.useAllChatSessions.mockReturnValue({
-      sessions: Array.from({ length: 30 }, (_, index) => makeSession({
-        id: `s-${index}`,
-        topic: index === 0 ? longTitle : `Chat session ${index + 1}`,
-        projectName: index % 2 === 0 ? 'Backend' : 'Frontend',
-        lastMessageAt: NOW - index * 1000,
-      })),
+      sessions: Array.from({ length: 30 }, (_, index) =>
+        makeSession({
+          id: `s-${index}`,
+          topic: index === 0 ? longTitle : `Chat session ${index + 1}`,
+          projectName: index % 2 === 0 ? 'Backend' : 'Frontend',
+          lastMessageAt: NOW - index * 1000,
+        })
+      ),
       loading: false,
       isRefreshing: false,
       error: null,
@@ -128,14 +137,24 @@ describe('Chats page', () => {
 
     expect(screen.getByText(longTitle)).toBeInTheDocument();
     expect(screen.getByText('Chat session 30')).toBeInTheDocument();
-    expect(screen.getAllByRole('listitem')).toHaveLength(30);
+    // Each row is a native <button> (its real, correct role — a `role="listitem"`
+    // override on an interactive element was an accessibility bug, since fixed).
+    // Scope to the list container so this only counts session rows.
+    const list = screen.getByRole('list', { name: 'Active chat sessions' });
+    expect(within(list).getAllByRole('button')).toHaveLength(30);
   });
 
   it('renders session rows with topic, project name, and state badge', () => {
     mocks.useAllChatSessions.mockReturnValue({
       sessions: [
         makeSession({ id: 's1', topic: 'Fix auth bug', status: 'active', projectName: 'Backend' }),
-        makeSession({ id: 's2', topic: null, status: 'active', isIdle: true, projectName: 'Frontend' }),
+        makeSession({
+          id: 's2',
+          topic: null,
+          status: 'active',
+          isIdle: true,
+          projectName: 'Frontend',
+        }),
       ],
       loading: false,
       error: null,
@@ -153,9 +172,7 @@ describe('Chats page', () => {
 
   it('navigates to project chat on click', () => {
     mocks.useAllChatSessions.mockReturnValue({
-      sessions: [
-        makeSession({ id: 'sess-abc', projectId: 'proj-xyz', topic: 'Test Session' }),
-      ],
+      sessions: [makeSession({ id: 'sess-abc', projectId: 'proj-xyz', topic: 'Test Session' })],
       loading: false,
       error: null,
       refresh: vi.fn(),
@@ -185,9 +202,7 @@ describe('Chats page', () => {
 
   it('shows idle sessions with appropriate badge', () => {
     mocks.useAllChatSessions.mockReturnValue({
-      sessions: [
-        makeSession({ id: 's1', topic: 'Idle Session', isIdle: true }),
-      ],
+      sessions: [makeSession({ id: 's1', topic: 'Idle Session', isIdle: true })],
       loading: false,
       error: null,
       refresh: vi.fn(),

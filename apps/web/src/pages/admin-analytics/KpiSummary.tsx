@@ -23,15 +23,17 @@ export const KpiSummary: FC<Props> = ({ dau, funnel, events }) => {
 
   // DAU today (last data point)
   if (dau?.dau?.length) {
-    const latest = dau.dau[dau.dau.length - 1]!;
-    const prev = dau.dau.length > 1 ? dau.dau[dau.dau.length - 2]! : null;
-    const delta = prev ? latest.unique_users - prev.unique_users : 0;
-    const sign = delta > 0 ? '+' : '';
-    cards.push({
-      label: 'DAU (latest)',
-      value: latest.unique_users.toLocaleString(),
-      sub: prev ? `${sign}${delta} vs prev day` : undefined,
-    });
+    const latest = dau.dau.at(-1);
+    const prev = dau.dau.length > 1 ? dau.dau.at(-2) : undefined;
+    if (latest) {
+      const delta = prev ? latest.unique_users - prev.unique_users : 0;
+      const sign = delta > 0 ? '+' : '';
+      cards.push({
+        label: 'DAU (latest)',
+        value: latest.unique_users.toLocaleString(),
+        sub: prev ? `${sign}${delta} vs prev day` : undefined,
+      });
+    }
   }
 
   // MAU (sum unique across period if available, or approximate)
@@ -47,9 +49,9 @@ export const KpiSummary: FC<Props> = ({ dau, funnel, events }) => {
 
   // Funnel: top conversion (only show when there's meaningful data)
   if (funnel?.funnel?.length && funnel.funnel.length >= 2) {
-    const first = funnel.funnel[0]!;
-    const last = funnel.funnel[funnel.funnel.length - 1]!;
-    if (first.unique_users > 0) {
+    const first = funnel.funnel.at(0);
+    const last = funnel.funnel.at(-1);
+    if (first && last && first.unique_users > 0) {
       const rate = Math.round((last.unique_users / first.unique_users) * 100);
       cards.push({
         label: 'Funnel Conversion',
@@ -82,12 +84,8 @@ export const KpiSummary: FC<Props> = ({ dau, funnel, events }) => {
           <div className="text-xs font-medium text-fg-muted uppercase tracking-wide">
             {card.label}
           </div>
-          <div className="mt-1 text-2xl font-bold text-fg-primary tabular-nums">
-            {card.value}
-          </div>
-          {card.sub && (
-            <div className="mt-0.5 text-xs text-fg-muted">{card.sub}</div>
-          )}
+          <div className="mt-1 text-2xl font-bold text-fg-primary tabular-nums">{card.value}</div>
+          {card.sub && <div className="mt-0.5 text-xs text-fg-muted">{card.sub}</div>}
         </div>
       ))}
     </div>

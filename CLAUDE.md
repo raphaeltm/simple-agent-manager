@@ -18,6 +18,7 @@ packages/
 ├── terminal/     # Shared terminal component
 ├── cloud-init/   # Cloud-init template generator
 ├── acp-client/   # Shared ACP React components (MessageBubble, MessageActions, AudioPlayer)
+├── eslint-plugin-sam/ # Unpublished repository-specific ESLint boundary rules
 ├── ui/           # Design system tokens and shared UI components
 └── vm-agent/     # Go VM agent (PTY, WebSocket, ACP, MCP tool endpoints)
 tasks/            # Task tracking (backlog -> active -> archive)
@@ -33,7 +34,12 @@ pnpm test             # Run tests
 pnpm typecheck        # Type check
 pnpm lint             # Lint
 pnpm format           # Format
+pnpm check:fast       # Deterministic local quality contract used by CI leaf commands
 ```
+
+`pnpm check:fast` runs the formatting ratchet, report-only Oxlint shadow, authoritative
+ESLint workspace checks (including the SAM custom-rule tail), and the blocking type-boundary
+ratchet. Scanner and quality-policy commands are documented in `scripts/quality/README.md`.
 
 ## Build Order
 
@@ -78,7 +84,7 @@ Merging to `main` in the canonical repository automatically deploys to productio
 - **Deploy Production** (`deploy.yml`): full Pulumi + Wrangler deployment after successful canonical `main` CI, or manual `workflow_dispatch` for self-host forks that targets an exact commit SHA
 - **Production Environment branch policy**: GitHub's `production` Environment must allow deployments from the selected `main` branch only. This external secret boundary is required because a workflow dispatched from another ref could remove in-repository branch checks.
 - **Teardown** (`teardown.yml`): manual only — destroys all resources
-- **Generated platform secrets**: deployment-owned signing/encryption keys are generated and persisted by Pulumi when practical, then copied to Worker secrets. Do not add manual GitHub Environment prerequisites for values SAM can safely create itself; GitHub secrets for generated keys are override/rotation paths only.
+- **Generated platform secrets**: deployment-owned signing/encryption keys, including VAPID Web Push keys, are generated and persisted by Pulumi when practical, then copied to Worker secrets. Do not add manual GitHub Environment prerequisites for values SAM can safely create itself; GitHub secrets for generated keys are override/rotation paths only.
 
 ### Staging Deployment is a Merge Gate
 
@@ -152,7 +158,7 @@ Environment-specific `[env.*]` sections are NOT checked into the repository. The
 
 1. **BYOC (Bring-Your-Own-Cloud)**: Self-hosters and users may bring their own Hetzner tokens, encrypted per-user. This is the model for self-hosted deployments and BYO-key users. **However, SAM's own deployment (staging, and the platform-hosted / zero-config mode) DOES have an enabled platform-level cloud credential** (`platform_credentials`, `provider=hetzner`, `credential_type=cloud-provider`, `is_enabled=1`). Provider resolution falls back **user credential → platform credential**, so **a user does NOT need their own cloud credential for SAM to provision workspaces or deployment nodes.** NEVER treat a missing user cloud credential — e.g. a smoke/test user stuck at the cloud-onboarding wizard, or zero active workspaces — as a provisioning or staging-verification blocker. The platform Hetzner credential provisions VMs regardless. Verify before ever reporting such a blocker: D1 `SELECT id FROM platform_credentials WHERE credential_type='cloud-provider' AND is_enabled=1`.
 2. **User credentials encrypted per-user** in the database — NOT stored as env vars or Worker secrets. Public security architecture documentation lives in `apps/www/src/content/docs/docs/architecture/security.md`.
-3. **Platform secrets** (ENCRYPTION_KEY and purpose-specific overrides, JWT keys, deploy signing keys, CF_API_TOKEN) are Cloudflare Worker secrets set during deployment. SAM-owned generated keys should be Pulumi-managed by default, with GitHub secret overrides only when manual rotation is explicitly needed.
+3. **Platform secrets** (ENCRYPTION_KEY and purpose-specific overrides, JWT keys, deploy signing keys, VAPID Web Push keys, CF_API_TOKEN) are Cloudflare Worker secrets set during deployment. SAM-owned generated keys should be Pulumi-managed by default, with GitHub secret overrides only when manual rotation is explicitly needed.
 4. **Canonical IDs for identity** — use `workspaceId`, `nodeId`, `sessionId` for all machine-critical operations (storage, routing, lifecycle). Human-readable labels are for UX/logging only and MUST be treated as mutable and non-unique.
 5. **Hybrid D1 + Durable Object storage** — D1 for cross-project queries (dashboard, tasks, users); per-project DOs for write-heavy data (chat sessions, messages, activity events). See `apps/www/src/content/docs/docs/architecture/overview.md`.
 

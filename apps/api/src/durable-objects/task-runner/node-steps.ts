@@ -12,11 +12,7 @@ import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import { assertClaimedNodeAvailable } from './claimed-node-availability';
 import { parseEnvInt } from './helpers';
-import {
-  findNodeWithCapacity,
-  tryClaimWarmNode,
-  verifyNodeAgentHealthy,
-} from './node-selection';
+import { findNodeWithCapacity, tryClaimWarmNode, verifyNodeAgentHealthy } from './node-selection';
 import { isNodeAgentReadyForWorkspaceDispatch } from './readiness';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -287,8 +283,7 @@ export async function handleNodeProvisioning(
   const requestedSize: VMSize = state.config.vmSize;
   const chain: VMSize[] = fallbackAllowed ? vmSizeFallbackChain(requestedSize) : [requestedSize];
 
-  for (let i = 0; i < chain.length; i++) {
-    const size = chain[i]!;
+  for (const [i, size] of chain.entries()) {
     const isLastSize = i === chain.length - 1;
 
     const createdNode = await createNodeRecord(rc.env, {
@@ -348,10 +343,17 @@ export async function handleNodeProvisioning(
       // transient_capacity: descend to the next-smaller size if one remains.
       // The failed node row was already deleted inside provisionNode (decision #1).
       if (!isLastSize) {
+        const nextSize = chain[i + 1];
+        if (nextSize === undefined) {
+          throw Object.assign(
+            new Error('Internal error: VM size fallback chain index out of range'),
+            { permanent: true }
+          );
+        }
         log.info('task_runner_do.size_fallback', {
           taskId: state.taskId,
           fromVmSize: size,
-          toVmSize: chain[i + 1]!,
+          toVmSize: nextSize,
           requestedVmSize: requestedSize,
           providerCode: err instanceof ProviderError ? err.providerCode : undefined,
         });
@@ -417,6 +419,7 @@ export async function handleNodeAgentReady(
     state.agentReadyStartedAt = Date.now();
     await rc.ctx.storage.put('state', state);
   }
+  const agentReadyStartedAt = state.agentReadyStartedAt;
 
   // Check agent health via D1 heartbeat records.
   //
@@ -446,7 +449,7 @@ export async function handleNodeAgentReady(
   // As in provisioning, classify a missing/deleted node before the timeout so
   // failure cleanup cannot attempt to warm a resource that no longer exists.
   const timeoutMs = rc.getAgentReadyTimeoutMs();
-  const elapsed = Date.now() - state.agentReadyStartedAt;
+  const elapsed = Date.now() - agentReadyStartedAt;
   if (elapsed > timeoutMs) {
     throw Object.assign(new Error(`Node agent not ready within ${timeoutMs}ms`), {
       permanent: true,
@@ -456,7 +459,7 @@ export async function handleNodeAgentReady(
   if (
     isNodeAgentReadyForWorkspaceDispatch(
       node,
-      state.agentReadyStartedAt!,
+      agentReadyStartedAt,
       30_000,
       rc.env.VM_AGENT_REQUIRED_VERSION
     )
@@ -479,7 +482,7 @@ export async function handleNodeAgentReady(
       elapsedMs: elapsed,
       lastHeartbeatAt: node.last_heartbeat_at,
       agentReadyAt: node.agent_ready_at,
-      agentReadyStartedAt: new Date(state.agentReadyStartedAt!).toISOString(),
+      agentReadyStartedAt: new Date(agentReadyStartedAt).toISOString(),
       message: 'Node has heartbeat but no fresh /ready signal for this provisioning cycle',
     });
   }

@@ -34,7 +34,7 @@ const SetSecretSchema = v.object({
   value: v.pipe(
     v.string('value is required'),
     v.minLength(1, 'value must not be empty'),
-    v.maxLength(65_536, 'value must not exceed 64 KiB'),
+    v.maxLength(65_536, 'value must not exceed 64 KiB')
   ),
 });
 
@@ -49,7 +49,7 @@ const DEFAULT_MAX_SECRETS_PER_ENVIRONMENT = 100;
 async function requireOwnedEnvironment(
   db: ReturnType<typeof drizzle>,
   envId: string,
-  projectId: string,
+  projectId: string
 ) {
   const rows = await db
     .select()
@@ -57,8 +57,8 @@ async function requireOwnedEnvironment(
     .where(
       and(
         eq(schema.deploymentEnvironments.id, envId),
-        eq(schema.deploymentEnvironments.projectId, projectId),
-      ),
+        eq(schema.deploymentEnvironments.projectId, projectId)
+      )
     )
     .limit(1);
 
@@ -69,10 +69,7 @@ async function requireOwnedEnvironment(
 }
 
 /** Update the secrets_updated_at timestamp on the environment row. */
-async function touchSecretsTimestamp(
-  db: ReturnType<typeof drizzle>,
-  envId: string,
-) {
+async function touchSecretsTimestamp(db: ReturnType<typeof drizzle>, envId: string) {
   const now = new Date().toISOString();
   await db
     .update(schema.deploymentEnvironments)
@@ -112,14 +109,14 @@ deploymentSecretRoutes.put(
     // Validate secret name format
     if (!SECRET_NAME_RE.test(name)) {
       throw errors.badRequest(
-        'Secret name must be 1-128 alphanumeric, hyphen, or underscore characters',
+        'Secret name must be 1-128 alphanumeric, hyphen, or underscore characters'
       );
     }
 
     // Enforce max secrets per environment (only when creating, not updating)
-    const maxSecrets = Number.parseInt(
-      c.env.MAX_SECRETS_PER_ENVIRONMENT ?? '', 10,
-    ) || DEFAULT_MAX_SECRETS_PER_ENVIRONMENT;
+    const maxSecrets =
+      Number.parseInt(c.env.MAX_SECRETS_PER_ENVIRONMENT ?? '', 10) ||
+      DEFAULT_MAX_SECRETS_PER_ENVIRONMENT;
 
     const existingSecret = await db
       .select({ id: schema.deploymentSecrets.id })
@@ -127,8 +124,8 @@ deploymentSecretRoutes.put(
       .where(
         and(
           eq(schema.deploymentSecrets.environmentId, envId),
-          eq(schema.deploymentSecrets.name, name),
-        ),
+          eq(schema.deploymentSecrets.name, name)
+        )
       )
       .limit(1);
 
@@ -141,7 +138,7 @@ deploymentSecretRoutes.put(
 
       if ((row?.total ?? 0) >= maxSecrets) {
         throw errors.badRequest(
-          `Environment secret limit reached (${maxSecrets}). Delete unused secrets before adding new ones.`,
+          `Environment secret limit reached (${maxSecrets}). Delete unused secrets before adding new ones.`
         );
       }
     }
@@ -171,7 +168,10 @@ deploymentSecretRoutes.put(
           updatedAt: now,
         },
       })
-      .returning({ id: schema.deploymentSecrets.id, createdAt: schema.deploymentSecrets.createdAt });
+      .returning({
+        id: schema.deploymentSecrets.id,
+        createdAt: schema.deploymentSecrets.createdAt,
+      });
 
     const created = result[0]?.createdAt === now;
 
@@ -184,9 +184,9 @@ deploymentSecretRoutes.put(
         created,
         updatedAt: now,
       },
-      created ? 201 : 200,
+      created ? 201 : 200
     );
-  },
+  }
 );
 
 /**
@@ -212,24 +212,25 @@ deploymentSecretRoutes.delete(
       .where(
         and(
           eq(schema.deploymentSecrets.environmentId, envId),
-          eq(schema.deploymentSecrets.name, name),
-        ),
+          eq(schema.deploymentSecrets.name, name)
+        )
       )
       .limit(1);
 
-    if (existing.length === 0) {
+    const existingSecret = existing[0];
+    if (!existingSecret) {
       throw errors.notFound('Secret');
     }
 
     await db
       .delete(schema.deploymentSecrets)
-      .where(eq(schema.deploymentSecrets.id, existing[0]!.id));
+      .where(eq(schema.deploymentSecrets.id, existingSecret.id));
 
     // Mark environment as having updated secrets
     await touchSecretsTimestamp(db, envId);
 
     return c.json({ deleted: true });
-  },
+  }
 );
 
 /**
@@ -259,7 +260,7 @@ deploymentSecretRoutes.get(
       .orderBy(schema.deploymentSecrets.name);
 
     return c.json({ secrets: rows });
-  },
+  }
 );
 
 export { deploymentSecretRoutes };

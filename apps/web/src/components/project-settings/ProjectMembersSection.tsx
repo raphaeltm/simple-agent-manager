@@ -45,7 +45,10 @@ import {
   ProjectOffboardingModal,
 } from './ProjectOffboardingModal';
 
-const GITHUB_STATUS_META: Record<ProjectInviteGithubAccessStatus, { label: string; className: string }> = {
+const GITHUB_STATUS_META: Record<
+  ProjectInviteGithubAccessStatus,
+  { label: string; className: string }
+> = {
   unchecked: {
     label: 'unchecked',
     className: 'text-fg-muted bg-inset',
@@ -167,12 +170,7 @@ function MemberRow({
           </Button>
         )}
         {canLeave && (
-          <Button
-            size="sm"
-            variant="secondary"
-            disabled={disabled}
-            onClick={() => onLeave(member)}
-          >
+          <Button size="sm" variant="secondary" disabled={disabled} onClick={() => onLeave(member)}>
             <DoorOpen size={14} />
             Leave project
           </Button>
@@ -198,18 +196,21 @@ function CredentialTransitionWarning({
       <div className="min-w-0">
         <div className="font-semibold text-fg-primary">Credential checklist before sharing</div>
         <p className="m-0 mt-1">
-          {health.counts.personalResources} shared resource{health.counts.personalResources === 1 ? '' : 's'} still run on personal keys.
-          Invite and approval can continue.
+          {health.counts.personalResources} shared resource
+          {health.counts.personalResources === 1 ? '' : 's'} still run on personal keys. Invite and
+          approval can continue.
         </p>
         <div className="mt-2 grid gap-1">
           {resources.slice(0, 3).map((resource) => (
             <div key={resource.id} className="truncate">
-              {resource.title}: {resource.checks.filter((check) => check.source === 'personal').map((check) => check.consumerKind).join(', ')}
+              {resource.title}:{' '}
+              {resource.checks
+                .filter((check) => check.source === 'personal')
+                .map((check) => check.consumerKind)
+                .join(', ')}
             </div>
           ))}
-          {resources.length > 3 && (
-            <div>{resources.length - 3} more in credential health.</div>
-          )}
+          {resources.length > 3 && <div>{resources.length - 3} more in credential health.</div>}
         </div>
       </div>
     </div>
@@ -246,12 +247,7 @@ function RequestRow({
         </p>
       )}
       <div className="flex flex-wrap gap-2 justify-end">
-        <Button
-          size="sm"
-          variant="secondary"
-          disabled={disabled}
-          onClick={() => onDeny(request)}
-        >
+        <Button size="sm" variant="secondary" disabled={disabled} onClick={() => onDeny(request)}>
           <X size={14} />
           Deny
         </Button>
@@ -274,7 +270,9 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
   const [revokingId, setRevokingId] = useState<string | null>(null);
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
-  const [createdInviteLink, setCreatedInviteLink] = useState<ProjectInviteLinkResponse | null>(null);
+  const [createdInviteLink, setCreatedInviteLink] = useState<ProjectInviteLinkResponse | null>(
+    null
+  );
   const [credentialHealth, setCredentialHealth] =
     useState<ProjectCredentialAttributionHealthSummary | null>(null);
   const [transferTarget, setTransferTarget] = useState<ProjectMemberResponse | null>(null);
@@ -305,7 +303,7 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- `data` is read for first-load guard only; `toast` removed per stale-while-revalidate rule
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `data` is read only for the first-load guard; including it would change `load`'s identity on every setData() call (fresh object each time), re-triggering the `[load]` effect below in an infinite refetch loop
   }, [projectId]);
 
   useEffect(() => {
@@ -318,7 +316,8 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
   );
   const canManage = currentMember?.role === 'owner' || currentMember?.role === 'admin';
   const isOwner = currentMember?.role === 'owner';
-  const pendingRequests = data?.accessRequests.filter((request) => request.status === 'pending') ?? [];
+  const pendingRequests =
+    data?.accessRequests.filter((request) => request.status === 'pending') ?? [];
   const activeInvite =
     createdInviteLink ?? data?.inviteLinks.find((link) => link.status === 'active') ?? null;
   const multiplayerTransitionActive =
@@ -485,7 +484,8 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
         actions: offboardingPreview.resources.map((resource) => ({
           resourceKind: resource.resourceKind,
           resourceId: resource.resourceId,
-          action: selectedActions[offboardingResourceKey(resource)] ?? defaultOffboardingAction(resource),
+          action:
+            selectedActions[offboardingResourceKey(resource)] ?? defaultOffboardingAction(resource),
         })),
       });
       const successMessage =
@@ -529,9 +529,7 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
         </Button>
       </div>
 
-      {loadError && !data && (
-        <div className="text-xs text-danger">{loadError}</div>
-      )}
+      {loadError && !data && <div className="text-xs text-danger">{loadError}</div>}
 
       {loading && !data ? (
         <div className="flex items-center gap-2">
@@ -628,7 +626,12 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
                 )}
 
                 <div className="flex flex-wrap gap-2">
-                  <Button size="sm" loading={creating} disabled={creating} onClick={() => void handleCreate()}>
+                  <Button
+                    size="sm"
+                    loading={creating}
+                    disabled={creating}
+                    onClick={() => void handleCreate()}
+                  >
                     <UserPlus size={14} />
                     New Link
                   </Button>
@@ -648,7 +651,12 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
               <div className="grid gap-2">
                 <p className="m-0 text-xs text-fg-muted">No active invite link.</p>
                 <div>
-                  <Button size="sm" loading={creating} disabled={creating} onClick={() => void handleCreate()}>
+                  <Button
+                    size="sm"
+                    loading={creating}
+                    disabled={creating}
+                    onClick={() => void handleCreate()}
+                  >
                     <UserPlus size={14} />
                     Create Link
                   </Button>
@@ -673,7 +681,8 @@ export function ProjectMembersSection({ projectId }: { projectId: string }) {
             <div className="grid gap-2">
               <p className="m-0">
                 {userLabel(transferTarget)} will become the project owner. Your account becomes an
-                admin and keeps admin-level controls, but ownership-only actions move to the new owner.
+                admin and keeps admin-level controls, but ownership-only actions move to the new
+                owner.
               </p>
               <p className="m-0">
                 Existing personal credentials stay with their owners. This action does not copy or

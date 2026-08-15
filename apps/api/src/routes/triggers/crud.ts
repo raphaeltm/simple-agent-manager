@@ -2,7 +2,6 @@
 import type {
   CreateTriggerResponse,
   GitHubTriggerEventType,
-  GitHubTriggerFilters,
   ListTriggersResponse,
   TriggerResponse,
   TriggerStatus,
@@ -33,6 +32,7 @@ import {
   cronToNextFire,
   validateCronExpression,
 } from '../../services/cron-utils';
+import { parseGitHubTriggerFiltersJson } from '../../services/github-trigger-filter';
 import { getProjectMultiplayerState } from '../../services/project-multiplayer';
 import {
   getWebhookTriggerLimits,
@@ -124,9 +124,13 @@ async function enrichTrigger(
       .where(eq(schema.githubTriggerConfigs.triggerId, row.id))
       .get();
     if (config) {
+      const parsedFilters = parseGitHubTriggerFiltersJson(config.filtersJson);
+      if (!parsedFilters.valid) {
+        log.warn('trigger.github_filters_invalid', { triggerId: row.id });
+      }
       response.githubConfig = {
         eventType: config.eventType as GitHubTriggerEventType,
-        filters: JSON.parse(config.filtersJson) as GitHubTriggerFilters,
+        filters: parsedFilters.filters,
       };
     }
   }
@@ -244,6 +248,22 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
     throw errors.badRequest(`maxConcurrent must be between 1 and ${maxConcurrentLimit}`);
   }
 
+  // validateCron() above already throws when cronExpression is falsy for a
+  // 'cron' trigger, but that guarantee doesn't propagate back onto
+  // body.cronExpression's type here — re-check explicitly instead of
+  // asserting.
+  let cronExpression: string | null = null;
+  let cronTimezone: string | null = null;
+  let nextFireAt: string | null = null;
+  if (body.sourceType === 'cron') {
+    if (!body.cronExpression) {
+      throw errors.badRequest('cronExpression is required for cron triggers');
+    }
+    cronExpression = body.cronExpression;
+    cronTimezone = body.cronTimezone ?? 'UTC';
+    nextFireAt = cronToNextFire(cronExpression, cronTimezone);
+  }
+
   const id = ulid();
   const now = new Date().toISOString();
   const values: schema.NewTriggerRow = {
@@ -254,8 +274,8 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
     description: body.description?.trim() || null,
     status: 'active',
     sourceType: body.sourceType,
-    cronExpression: body.sourceType === 'cron' ? body.cronExpression! : null,
-    cronTimezone: body.sourceType === 'cron' ? (body.cronTimezone ?? 'UTC') : null,
+    cronExpression,
+    cronTimezone,
     skipIfRunning: body.skipIfRunning ?? true,
     promptTemplate,
     agentProfileId: body.agentProfileId ?? null,
@@ -263,10 +283,7 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
     taskMode: body.taskMode ?? 'task',
     vmSizeOverride: body.vmSizeOverride ?? null,
     maxConcurrent,
-    nextFireAt:
-      body.sourceType === 'cron'
-        ? cronToNextFire(body.cronExpression!, body.cronTimezone ?? 'UTC')
-        : null,
+    nextFireAt,
     createdAt: now,
     updatedAt: now,
   };
@@ -299,9 +316,7 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
   const attributionById = await attribution(db, c.env, project, [created]);
   const response: CreateTriggerResponse = {
     ...(await enrichTrigger(db, created, attributionById.get(id))),
-    webhookCredential: webhookToken
-      ? buildWebhookCredential(c.env, webhookToken.token)
-      : undefined,
+    webhookCredential: webhookToken ? buildWebhookCredential(c.env, webhookToken.token) : undefined,
   };
   log.info('trigger.created', { triggerId: id, projectId, sourceType: body.sourceType });
   if (webhookToken) c.header('Cache-Control', 'private, no-store');
@@ -340,9 +355,13 @@ crudRoutes.get('/', async (c) => {
     response.credentialAttribution = attributionById.get(row.id);
     const github = githubById.get(row.id);
     if (github) {
+      const parsedFilters = parseGitHubTriggerFiltersJson(github.filtersJson);
+      if (!parsedFilters.valid) {
+        log.warn('trigger.github_filters_invalid', { triggerId: row.id });
+      }
       response.githubConfig = {
         eventType: github.eventType as GitHubTriggerEventType,
-        filters: JSON.parse(github.filtersJson) as GitHubTriggerFilters,
+        filters: parsedFilters.filters,
       };
     }
     const webhook = webhookById.get(row.id);
@@ -439,10 +458,15 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
     const expression = body.cronExpression ?? trigger.cronExpression ?? undefined;
     const timezone = body.cronTimezone ?? trigger.cronTimezone ?? 'UTC';
     validateCron(c.env, expression, timezone);
+    if (!expression) {
+      // validateCron() above already throws when expression is falsy —
+      // should never happen.
+      throw errors.badRequest('cronExpression is required for cron triggers');
+    }
     updates.cronExpression = expression;
     updates.cronTimezone = timezone;
     if ((body.status ?? trigger.status) === 'active') {
-      updates.nextFireAt = cronToNextFire(expression!, timezone);
+      updates.nextFireAt = cronToNextFire(expression, timezone);
     }
   }
   if (body.status !== undefined) {

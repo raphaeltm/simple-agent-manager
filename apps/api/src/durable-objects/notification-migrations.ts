@@ -90,6 +90,31 @@ export const NOTIFICATION_MIGRATIONS: NotificationMigration[] = [
       );
     },
   },
+  {
+    name: '004-push-subscriptions',
+    run: (sql) => {
+      sql.exec(`
+        CREATE TABLE push_subscriptions (
+          endpoint TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          p256dh TEXT NOT NULL,
+          auth TEXT NOT NULL,
+          user_agent TEXT,
+          disabled_at INTEGER,
+          failure_count INTEGER NOT NULL DEFAULT 0,
+          last_success_at INTEGER,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+      sql.exec(
+        `CREATE INDEX idx_push_subscriptions_user_active
+         ON push_subscriptions(user_id, disabled_at, updated_at DESC)`
+      );
+      sql.exec('ALTER TABLE notifications ADD COLUMN push_delivered_at INTEGER');
+      sql.exec('ALTER TABLE notifications ADD COLUMN in_app_visible INTEGER NOT NULL DEFAULT 1');
+    },
+  },
 ];
 
 /**
@@ -120,4 +145,12 @@ export function runNotificationMigrations(sql: SqlStorage): void {
       );
     }
   }
+}
+
+/** Run the multi-statement migration set atomically for safe lazy DO upgrades. */
+export function runNotificationMigrationsAtomically(storage: {
+  sql: SqlStorage;
+  transactionSync<T>(callback: () => T): T;
+}): void {
+  storage.transactionSync(() => runNotificationMigrations(storage.sql));
 }

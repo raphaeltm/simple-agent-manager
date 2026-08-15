@@ -33,7 +33,7 @@ value from state/ref). Never an inline object/array literal, and never an
 unmemoized `const value = {...}` built during render.
 
 Enforced by ESLint: `react/jsx-no-constructed-context-values` is `error` for
-all `.tsx` files (see `.eslintrc.cjs`). Do not disable it inline; fix the
+all `.tsx` files (see `eslint.config.mjs`). Do not disable it inline; fix the
 provider instead.
 
 ```tsx
@@ -66,10 +66,14 @@ A refetch must never unmount already-rendered content:
 
 ```tsx
 // BAD — content unmounts on every refetch
-{loading ? <Spinner /> : <Content data={data} />}
+{
+  loading ? <Spinner /> : <Content data={data} />;
+}
 
 // GOOD — spinner only before first data; refetches keep content visible
-{data === null ? <Spinner /> : <Content data={data} />}
+{
+  data === null ? <Spinner /> : <Content data={data} />;
+}
 ```
 
 - Track "have we ever loaded" (`data !== null`, or a `hasLoadedRef`) separately
@@ -112,6 +116,7 @@ merge blocker.
 ## Quick Compliance Check
 
 Before committing UI data-fetching or context changes:
+
 - [ ] Every `Provider value=` is `useMemo`-stable (lint enforces this)
 - [ ] No loader `useCallback` lists a context object (e.g. `toast`) in deps
 - [ ] No loader `catch` sets state that can re-trigger the loader

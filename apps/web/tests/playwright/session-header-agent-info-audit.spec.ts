@@ -49,23 +49,23 @@ const MOCK_PROJECT = {
 
 function makeWorkspace(overrides: Partial<Record<string, unknown>> = {}) {
   return {
-  id: 'ws-1',
-  nodeId: 'node-1',
-  projectId: 'proj-agent-1',
-  name: 'ws-test-1',
-  displayName: 'Test Workspace',
-  repository: 'testuser/test-repo',
-  branch: 'main',
-  status: 'running',
-  vmSize: 'medium',
-  vmLocation: 'fsn1',
-  workspaceProfile: 'full',
-  vmIp: '10.0.0.1',
-  url: 'https://ws-ws-1.workspaces.example.com',
-  lastActivityAt: new Date(NOW - 30000).toISOString(),
-  errorMessage: null,
-  createdAt: new Date(NOW - 600000).toISOString(),
-  updatedAt: new Date(NOW - 30000).toISOString(),
+    id: 'ws-1',
+    nodeId: 'node-1',
+    projectId: 'proj-agent-1',
+    name: 'ws-test-1',
+    displayName: 'Test Workspace',
+    repository: 'testuser/test-repo',
+    branch: 'main',
+    status: 'running',
+    vmSize: 'medium',
+    vmLocation: 'fsn1',
+    workspaceProfile: 'full',
+    vmIp: '10.0.0.1',
+    url: 'https://ws-ws-1.workspaces.example.com',
+    lastActivityAt: new Date(NOW - 30000).toISOString(),
+    errorMessage: null,
+    createdAt: new Date(NOW - 600000).toISOString(),
+    updatedAt: new Date(NOW - 30000).toISOString(),
     ...overrides,
   };
 }
@@ -166,9 +166,13 @@ async function setupApiMocks(
 
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
     if (path === '/api/terminal/token') {
-      return respond(200, { token: 'terminal-token', expiresAt: new Date(NOW + 600000).toISOString() });
+      return respond(200, {
+        token: 'terminal-token',
+        expiresAt: new Date(NOW + 600000).toISOString(),
+      });
     }
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
     if (path.startsWith('/api/credentials')) return respond(200, []);
     if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
     if (path.startsWith('/api/github/installations')) return respond(200, []);
@@ -207,11 +211,15 @@ async function setupApiMocks(
       }
       if (subPath.match(/\/sessions\/[^/]+\/messages/)) {
         const roles = url.searchParams.get('roles')?.split(',').filter(Boolean);
-        const limit = Number.parseInt(url.searchParams.get('limit') ?? String(messageLookupMessages.length), 10);
+        const limit = Number.parseInt(
+          url.searchParams.get('limit') ?? String(messageLookupMessages.length),
+          10
+        );
         const order = url.searchParams.get('order') === 'asc' ? 'asc' : 'desc';
-        const filtered = roles && roles.length > 0
-          ? messageLookupMessages.filter((msg) => roles.includes(String(msg.role)))
-          : messageLookupMessages;
+        const filtered =
+          roles && roles.length > 0
+            ? messageLookupMessages.filter((msg) => roles.includes(String(msg.role)))
+            : messageLookupMessages;
         const sorted = filtered.slice().sort((a, b) => {
           const timeA = Number(a.createdAt ?? 0);
           const timeB = Number(b.createdAt ?? 0);
@@ -229,7 +237,8 @@ async function setupApiMocks(
       return respond(200, MOCK_PROJECT);
     }
 
-    if (path === '/api/projects') return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
+    if (path === '/api/projects')
+      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
     return respond(200, {});
   });
 }
@@ -264,7 +273,9 @@ const STRESS_TITLE =
   'Investigate a crowded mobile session header with a long conversation title, unicode Ω, HTML-looking text <script>alert(1)</script>, and a single-super-long-token-that-must-wrap-without-breaking-the-layout-abcdefghijklmnopqrstuvwxyz0123456789';
 
 const STRESS_INITIAL_PROMPT =
-  'Please review the production conversation header and make the full title plus initial prompt easy to inspect on mobile.\n\nInclude a very long sentence, unicode Ω, emoji-like text, escaped-looking HTML <script>alert(1)</script>, and enough detail to prove the prompt panel scrolls instead of pushing controls off screen. '.repeat(3);
+  'Please review the production conversation header and make the full title plus initial prompt easy to inspect on mobile.\n\nInclude a very long sentence, unicode Ω, emoji-like text, escaped-looking HTML <script>alert(1)</script>, and enough detail to prove the prompt panel scrolls instead of pushing controls off screen. '.repeat(
+    3
+  );
 
 function makeStressPorts() {
   return Array.from({ length: 50 }, (_, index) => {
@@ -290,7 +301,51 @@ function makeStressInitialMessage() {
   };
 }
 
+function makeSleepingSession() {
+  return makeSession({
+    topic: 'Persistent VM session with saved uncommitted work',
+    status: 'sleeping',
+    isIdle: true,
+    agentCompletedAt: NOW - 6 * 60 * 60 * 1000,
+    lastMessageAt: NOW - 6 * 60 * 60 * 1000,
+    task: {
+      id: 'task-1',
+      status: 'completed',
+      executionStep: null,
+      errorMessage: null,
+      outputBranch: 'sam/persistent-session',
+      outputPrUrl: null,
+      outputSummary: null,
+      finalizedAt: new Date(NOW - 6 * 60 * 60 * 1000).toISOString(),
+      taskMode: 'conversation',
+      agentProfileHint: 'codex-persistent',
+    },
+  });
+}
+
 test.describe('SessionHeader Agent Info — Mobile', () => {
+  test('sleeping VM session stays visible and the composer queues its wake', async ({ page }) => {
+    await setupApiMocks(page, {
+      session: makeSleepingSession(),
+      workspace: { status: 'deleted', url: null },
+    });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+
+    await expect(page.getByText('Sleeping', { exact: true }).first()).toBeVisible();
+    const composer = page.getByPlaceholder('Send a message to wake the agent...');
+    await expect(composer).toBeEnabled();
+    const promptRequest = page.waitForRequest(
+      (request) =>
+        request.method() === 'POST' && request.url().endsWith('/sessions/chat-session-1/prompt')
+    );
+    await composer.fill('Repeat the saved phrase and read the uncommitted file.');
+    await page.getByRole('button', { name: 'Send', exact: true }).click();
+    await promptRequest;
+    await expect(page.getByText('Waking and restoring session...')).toBeVisible();
+    await assertNoOverflow(page);
+    await screenshot(page, 'persistent-session-sleep-wake-mobile');
+  });
+
   test('claude-code agent with task mode', async ({ page }) => {
     await setupApiMocks(page);
     await page.goto('/projects/proj-agent-1/chat/chat-session-1');
@@ -421,7 +476,9 @@ test.describe('SessionHeader Agent Info — Mobile', () => {
     await screenshot(page, 'session-header-source-context-mobile');
 
     await expect(page.getByText('Source')).toBeVisible();
-    await expect(page.getByRole('link', { name: /Parent session title with a very long description/ })).toBeVisible();
+    await expect(
+      page.getByRole('link', { name: /Parent session title with a very long description/ })
+    ).toBeVisible();
     await expect(page.getByTitle(/Parent task:/)).toBeVisible();
     await expect(page.getByTitle(/Parent session:/)).toBeVisible();
     await assertNoOverflow(page);
@@ -463,6 +520,20 @@ test.describe('SessionHeader Agent Info — Mobile', () => {
 test.describe('SessionHeader Agent Info — Desktop', () => {
   test.use({ viewport: { width: 1280, height: 800 }, isMobile: false });
 
+  test('sleeping VM session exposes the same-chat wake gesture', async ({ page }) => {
+    await setupApiMocks(page, {
+      session: makeSleepingSession(),
+      workspace: { status: 'deleted', url: null },
+    });
+    await page.goto('/projects/proj-agent-1/chat/chat-session-1');
+
+    await expect(page.getByText('Sleeping', { exact: true }).first()).toBeVisible();
+    const composer = page.getByPlaceholder('Send a message to wake the agent...');
+    await expect(composer).toBeEnabled();
+    await assertNoOverflow(page);
+    await screenshot(page, 'persistent-session-sleep-wake-desktop');
+  });
+
   test('agent info displays on desktop', async ({ page }) => {
     await setupApiMocks(page);
     await page.goto('/projects/proj-agent-1/chat/chat-session-1');
@@ -491,7 +562,11 @@ test.describe('SessionHeader Agent Info — Desktop', () => {
       sessions: [parentSession, childSession],
       tasks: [
         makeTask({ id: 'parent-task-1', title: 'Parent implementation task' }),
-        makeTask({ id: 'task-1', title: 'Forked implementation task', parentTaskId: 'parent-task-1' }),
+        makeTask({
+          id: 'task-1',
+          title: 'Forked implementation task',
+          parentTaskId: 'parent-task-1',
+        }),
       ],
     });
 
@@ -552,8 +627,12 @@ test.describe('SessionHeader Public Ports', () => {
     await expect(toggle).toBeVisible();
     await expect(page.getByText('Forwarded port URLs require a SAM access token.')).toBeVisible();
     await toggle.click();
-    await expect(page.getByRole('switch', { name: 'Disable public forwarded ports' })).toBeVisible();
-    await expect(page.getByText('Forwarded port URLs are open to anyone with the link.')).toBeVisible();
+    await expect(
+      page.getByRole('switch', { name: 'Disable public forwarded ports' })
+    ).toBeVisible();
+    await expect(
+      page.getByText('Forwarded port URLs are open to anyone with the link.')
+    ).toBeVisible();
 
     await screenshot(page, 'session-header-public-ports-mobile');
     await assertNoOverflow(page);
@@ -563,8 +642,12 @@ test.describe('SessionHeader Public Ports', () => {
     await setupApiMocks(page, { ports, workspace: { portsPublicEnabled: true } });
     await page.goto('/projects/proj-agent-1/chat/chat-session-1');
 
-    await expect(page.getByRole('switch', { name: 'Disable public forwarded ports' })).toBeVisible();
-    await expect(page.getByText('Forwarded port URLs are open to anyone with the link.')).toBeVisible();
+    await expect(
+      page.getByRole('switch', { name: 'Disable public forwarded ports' })
+    ).toBeVisible();
+    await expect(
+      page.getByText('Forwarded port URLs are open to anyone with the link.')
+    ).toBeVisible();
     await screenshot(page, 'session-header-public-ports-desktop');
     await assertNoOverflow(page);
   });

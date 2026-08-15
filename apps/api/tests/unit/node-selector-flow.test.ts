@@ -242,7 +242,7 @@ describe('selectNodeForTaskRun capacity path', () => {
   it('sorts candidates by location match, then size match, then load score', () => {
     const sortSection = selectorSource.slice(
       selectorSource.indexOf('Sort candidates'),
-      selectorSource.indexOf('return candidates[0]')
+      selectorSource.indexOf('const best = candidates[0]')
     );
     // Location first
     expect(sortSection).toContain('aLocationMatch');
@@ -257,13 +257,14 @@ describe('selectNodeForTaskRun capacity path', () => {
   });
 
   it('returns the first candidate (lowest load, best match)', () => {
-    expect(selectorSource).toContain('return candidates[0]!');
+    expect(selectorSource).toContain('const best = candidates[0];');
+    expect(selectorSource).toContain('return best;');
   });
 
   it('nodes with null metrics are ranked lower than nodes with scores', () => {
     const sortSection = selectorSource.slice(
       selectorSource.indexOf('Sort candidates'),
-      selectorSource.indexOf('return candidates[0]')
+      selectorSource.indexOf('const best = candidates[0]')
     );
     // null scores go to end
     expect(sortSection).toContain('aScore === null');
@@ -314,15 +315,18 @@ describe('parseMetrics (internal)', () => {
     expect(selectorSource).toContain('return null');
   });
 
-  it('validates the parsed object has at least one metric field', () => {
-    expect(selectorSource).toContain("typeof parsed.cpuLoadAvg1 === 'number'");
-    expect(selectorSource).toContain("typeof parsed.memoryPercent === 'number'");
-    expect(selectorSource).toContain("typeof parsed.diskPercent === 'number'");
-  });
-
-  it('returns null for non-object parsed values', () => {
-    expect(selectorSource).toContain("typeof parsed === 'object'");
-    expect(selectorSource).toContain('parsed !== null');
+  it('validates the parsed object against the NodeMetrics schema', () => {
+    // parseMetrics now schema-validates via valibot (nodeMetricsSchema)
+    // instead of a manual `typeof parsed.x === 'number'` OR-chain followed by
+    // a blind cast — a mistyped field used to slip through this check and
+    // poison scoreNodeLoad()/nodeHasCapacity() with NaN. Behavioral coverage
+    // for the schema-validated cases (mistyped field, no recognized fields,
+    // array, invalid JSON, well-formed) lives in
+    // tests/unit/services/node-selector.test.ts, exercised through
+    // selectNodeForTaskRun()'s returned lastMetrics — parseMetrics itself is
+    // not exported.
+    expect(selectorSource).toContain('const nodeMetricsSchema = v.object({');
+    expect(selectorSource).toContain('v.safeParse(nodeMetricsSchema, parsed)');
   });
 });
 
@@ -349,7 +353,7 @@ describe('selectNodeForTaskRun edge cases', () => {
   it('handles preferred location and size being undefined in capacity sort', () => {
     const capacitySort = selectorSource.slice(
       selectorSource.indexOf('Sort candidates'),
-      selectorSource.indexOf('return candidates[0]')
+      selectorSource.indexOf('const best = candidates[0]')
     );
     expect(capacitySort).toContain('preferredLocation &&');
     expect(capacitySort).toContain('preferredSize &&');

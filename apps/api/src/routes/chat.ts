@@ -31,7 +31,7 @@ import {
   CreateChatSessionSchema,
   LinkTaskToChatSchema,
   parseOptionalBody,
-  SendChatMessageSchema,
+  ResolveAttentionAnswerSchema,
 } from '../schemas';
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as chatPersistence from '../services/chat-persistence';
@@ -40,6 +40,11 @@ import { isTaskStatus } from '../services/task-status';
 import { resolveChatAgentState } from './chat-agent-state';
 import { chatForkRoutes } from './chat-fork';
 import { recordChatSessionLoadFailure } from './chat-load-diagnostics';
+import {
+  preparePromptForLiveAgent,
+  sendPreparedPromptToLiveAgent,
+} from './chat-prompt-forward';
+import { registerChatPromptRoute } from './chat-prompt-route';
 import { getChatSessionRouteContext } from './chat-route-context';
 import {
   enrichSessionsWithCreators,
@@ -451,62 +456,91 @@ chatRoutes.post('/:sessionId/idle-reset', async (c) => {
 });
 
 /**
- * POST /api/projects/:projectId/sessions/:sessionId/prompt
- * Forward a follow-up prompt to the running agent session on the VM.
- * Looks up workspace + agent session from D1, then calls the VM agent.
+ * GET /api/projects/:projectId/sessions/:sessionId/durability
+ * Project-scoped debug snapshot for durable prompt/checkpoint state.
  */
-chatRoutes.post('/:sessionId/prompt', async (c) => {
+chatRoutes.get('/:sessionId/durability', async (c) => {
   const userId = getUserId(c);
   const projectId = requireRouteParam(c, 'projectId');
   const sessionId = requireRouteParam(c, 'sessionId');
   const db = drizzle(c.env.DATABASE, { schema });
 
+  await requireProjectCapability(db, projectId, userId, 'task:read');
+  await requireSessionCreator(c.env, projectId, sessionId, userId);
+
+  const snapshot = await projectDataService.getDurableExecutionSnapshot(
+    c.env,
+    projectId,
+    sessionId
+  );
+  return c.json(snapshot);
+});
+
+registerChatPromptRoute(chatRoutes);
+
+/**
+ * POST /api/projects/:projectId/sessions/:sessionId/attention/:markerId/resolve
+ * Validate, deliver, and record one of the agent-provided answer options.
+ */
+chatRoutes.post('/:sessionId/attention/:markerId/resolve', async (c) => {
+  const userId = getUserId(c);
+  const projectId = requireRouteParam(c, 'projectId');
+  const sessionId = requireRouteParam(c, 'sessionId');
+  const markerId = requireRouteParam(c, 'markerId');
+  const db = drizzle(c.env.DATABASE, { schema });
+
   await requireProjectCapability(db, projectId, userId, 'task:write');
   await requireSessionCreator(c.env, projectId, sessionId, userId);
 
-  const body = await parseOptionalBody(c.req.raw, SendChatMessageSchema, {});
-  const content = body.content?.trim();
-  if (!content) {
-    throw errors.badRequest('content is required');
-  }
+  const { answer } = await parseOptionalBody(c.req.raw, ResolveAttentionAnswerSchema, {
+    answer: '',
+  });
+  if (!answer) throw errors.badRequest('answer is required');
 
-  // Resolve the live workspace + running agent session, tenant-scoped and
-  // fail-fast (see resolveLiveAgentSessionForChat).
-  const { workspace, agentSession } = await resolveLiveAgentSessionForChat(db, {
+  const prepared = await projectDataService.prepareAttentionAnswer(
+    c.env,
     projectId,
     sessionId,
-    userId,
-  });
-
-  // Enrich @mentions with agent profile context before forwarding.
-  // The enriched message goes to the agent; the clean message was already
-  // persisted in chat by the VM agent message reporting flow.
-  const { enrichMessageWithMentions } = await import('../services/mention-enrichment');
-  const { enrichedMessage } = await enrichMessageWithMentions(
-    content,
-    db,
-    projectId,
-    userId,
-    c.env
+    markerId,
+    answer
   );
+  if (prepared.status === 'not_found') throw errors.notFound('Attention request');
+  if (prepared.status === 'invalid_option') {
+    throw errors.badRequest('answer must match one of the requested options');
+  }
+  if (prepared.status === 'already_resolved') {
+    if (prepared.answer !== answer) throw errors.conflict('Attention request is already resolved');
+    return c.json({ resolved: true, alreadyResolved: true, answer });
+  }
+  if (prepared.status === 'conflicting_answer') {
+    throw errors.conflict('A different answer is already being delivered');
+  }
+  if (prepared.status === 'in_flight') {
+    return c.json({ resolved: false, alreadyResolved: false, inFlight: true, answer }, 202);
+  }
 
-  // Forward the prompt to the VM agent
-  const { getCfContainerWakeTimeoutMs, sendPromptToAgentOnNode } =
-    await import('../services/node-agent');
-  const result = await sendPromptToAgentOnNode(
-    workspace.nodeId,
-    workspace.id,
-    agentSession.id,
-    enrichedMessage,
-    c.env,
-    userId,
-    undefined,
-    workspace.nodeRuntime === 'cf-container' && workspace.nodeStatus !== 'running'
-      ? { requestTimeoutMs: getCfContainerWakeTimeoutMs(c.env) }
-      : undefined
-  );
+  let preparedPrompt;
+  try {
+    preparedPrompt = await preparePromptForLiveAgent(c.env, db, {
+      projectId,
+      sessionId,
+      userId,
+      content: answer,
+    });
+  } catch (cause) {
+    // Resolution/enrichment failed before the mutating request began, so this
+    // claim is definitively safe to retry.
+    await projectDataService.releaseAttentionAnswer(c.env, projectId, sessionId, markerId, answer);
+    throw cause;
+  }
 
-  return c.json(expectJsonRecord(result, 'chat.agent_prompt_result'));
+  // Every transport/response error after this boundary is outcome-unknown: the
+  // VM agent dispatches asynchronously before responding. Preserve the claim so
+  // an approval is never replayed. The marker ID is also propagated as the
+  // stable downstream message ID for persistence-level deduplication.
+  await sendPreparedPromptToLiveAgent(c.env, preparedPrompt, markerId);
+  await projectDataService.completeAttentionAnswer(c.env, projectId, sessionId, markerId, answer);
+  return c.json({ resolved: true, alreadyResolved: false, answer });
 });
 
 /**

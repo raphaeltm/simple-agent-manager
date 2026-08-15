@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
   getCfContainerWakeTimeoutMs: vi.fn(() => 120_000),
   enrichMessageWithMentions: vi.fn(),
   parseOptionalBody: vi.fn(),
+  cancelScheduledSessionSleep: vi.fn(),
 }));
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -26,6 +27,19 @@ vi.mock('@simple-agent-manager/shared', () => ({
   DEFAULT_CHAT_SESSION_MESSAGE_MAX: 50000,
   DEFAULT_CHAT_COMPACT_MODE: true,
   DEFAULT_WORKSPACE_PROFILE: 'full',
+  DEFAULT_DURABLE_PROMPT_DELIVERY_ENABLED: true,
+  DEFAULT_PROMPT_DELIVERY_LEGACY_VM_COMPAT_ENABLED: false,
+  DEFAULT_ACP_LONG_TURN_SUPERVISOR_ENABLED: false,
+  DEFAULT_ACP_LONG_TURN_CHECKPOINT_MS: 18_000_000,
+  DEFAULT_ACP_CHECKPOINT_PREEMPT_GRACE_MS: 30_000,
+  DEFAULT_PROMPT_DELIVERY_MAX_CANDIDATES_PER_ALARM: 5,
+  DEFAULT_PROMPT_DELIVERY_MAX_ATTEMPTS: 5,
+  DEFAULT_PROMPT_DELIVERY_RETRY_BASE_MS: 5_000,
+  DEFAULT_PROMPT_DELIVERY_RETRY_MAX_MS: 300_000,
+  DEFAULT_PROMPT_DELIVERY_TTL_MS: 3_600_000,
+  DEFAULT_PROMPT_DELIVERY_RECEIPT_TIMEOUT_MS: 30_000,
+  DEFAULT_PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS: 5_000,
+  DEFAULT_PROMPT_DELIVERY_MIN_ALARM_DELAY_MS: 1_000,
   isTaskExecutionStep: () => true,
   isTaskMode: (v: unknown) => v === 'task' || v === 'conversation',
 }));
@@ -62,10 +76,15 @@ vi.mock('../../../src/services/project-data', () => ({
   getSession: vi.fn(),
   getMessages: vi.fn(),
   resetIdleCleanup: vi.fn(),
+  prepareAttentionAnswer: vi.fn(),
+  completeAttentionAnswer: vi.fn(),
+  releaseAttentionAnswer: vi.fn(),
   listAcpSessions: vi.fn(),
   stopSession: vi.fn(),
   linkSessionIdea: vi.fn(),
   unlinkSessionIdea: vi.fn(),
+  acceptPromptDelivery: vi.fn(),
+  getDurableExecutionSnapshot: vi.fn(),
 }));
 
 vi.mock('../../../src/services/observability', () => ({
@@ -75,6 +94,7 @@ vi.mock('../../../src/services/observability', () => ({
 vi.mock('../../../src/schemas', () => ({
   CreateChatSessionSchema: {},
   LinkTaskToChatSchema: {},
+  ResolveAttentionAnswerSchema: {},
   SendChatMessageSchema: {},
   parseOptionalBody: mocks.parseOptionalBody,
 }));
@@ -87,6 +107,10 @@ vi.mock('../../../src/services/node-agent', () => ({
 
 vi.mock('../../../src/services/mention-enrichment', () => ({
   enrichMessageWithMentions: mocks.enrichMessageWithMentions,
+}));
+
+vi.mock('../../../src/services/session-snapshots', () => ({
+  cancelScheduledSessionSleep: (...args: unknown[]) => mocks.cancelScheduledSessionSleep(...args),
 }));
 
 /** Helper to build a drizzle mock that returns workspace + agent session rows. */
@@ -139,6 +163,7 @@ beforeEach(() => {
   mocks.requireProjectAccess.mockResolvedValue({ id: 'proj-1', userId: 'user-1' });
   mocks.parseOptionalBody.mockResolvedValue({ content: 'hello agent' });
   mocks.enrichMessageWithMentions.mockResolvedValue({ enrichedMessage: 'hello agent' });
+  mocks.cancelScheduledSessionSleep.mockResolvedValue(undefined);
   vi.mocked(projectDataService.getSession).mockResolvedValue({
     id: 'chat-1',
     createdByUserId: 'user-1',
@@ -234,7 +259,7 @@ describe('GET /sessions', () => {
 });
 
 describe('POST /sessions/:sessionId/prompt', () => {
-  function postPrompt() {
+  function postPrompt(envOverrides: Partial<Env> = {}) {
     return app.request(
       '/api/projects/proj-1/sessions/chat-1/prompt',
       {
@@ -242,7 +267,11 @@ describe('POST /sessions/:sessionId/prompt', () => {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: 'hello agent' }),
       },
-      { DATABASE: {} as D1Database } as Env
+      {
+        DATABASE: {} as D1Database,
+        DURABLE_PROMPT_DELIVERY_ENABLED: 'false',
+        ...envOverrides,
+      } as Env
     );
   }
 
@@ -266,6 +295,34 @@ describe('POST /sessions/:sessionId/prompt', () => {
       undefined,
       undefined
     );
+  });
+
+  it('durably accepts a prompt before runtime resolution when the feature is enabled', async () => {
+    vi.mocked(projectDataService.acceptPromptDelivery).mockResolvedValue({
+      message: { id: 'delivery-1' },
+      transcriptMessageId: 'delivery-1',
+    } as Awaited<ReturnType<typeof projectDataService.acceptPromptDelivery>>);
+
+    const response = await postPrompt({ DURABLE_PROMPT_DELIVERY_ENABLED: 'true' });
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      accepted: true,
+      status: 'queued',
+      deliveryId: 'delivery-1',
+      messageId: 'delivery-1',
+    });
+    expect(projectDataService.acceptPromptDelivery).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      expect.objectContaining({
+        targetSessionId: 'chat-1',
+        displayContent: 'hello agent',
+        sourceKind: 'user_followup',
+      })
+    );
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+    expect(mocks.drizzle).toHaveBeenCalledTimes(1);
   });
 
   it('uses the extended wake budget for a sleeping session', async () => {
@@ -473,6 +530,166 @@ describe('POST /sessions/:sessionId/prompt', () => {
 
     expect(response.status).toBe(404);
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+});
+
+describe('POST /sessions/:sessionId/attention/:markerId/resolve', () => {
+  function postAnswer() {
+    return app.request(
+      '/api/projects/proj-1/sessions/chat-1/attention/marker-1/resolve',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ answer: 'Approve' }),
+      },
+      { DATABASE: {} as D1Database } as Env
+    );
+  }
+
+  beforeEach(() => {
+    mocks.parseOptionalBody.mockResolvedValue({ answer: 'Approve' });
+    vi.mocked(projectDataService.prepareAttentionAnswer).mockResolvedValue({ status: 'ready' });
+    vi.mocked(projectDataService.completeAttentionAnswer).mockResolvedValue(1);
+    vi.mocked(projectDataService.releaseAttentionAnswer).mockResolvedValue(1);
+    setupDrizzle({
+      workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running' },
+      agentSession: { id: 'agent-sess-1' },
+    });
+    mocks.enrichMessageWithMentions.mockResolvedValue({ enrichedMessage: 'Approve' });
+    mocks.sendPromptToAgentOnNode.mockResolvedValue({ ok: true });
+  });
+
+  it('forwards an allowed answer before finalizing the marker', async () => {
+    const response = await postAnswer();
+
+    expect(response.status).toBe(200);
+    expect(projectDataService.prepareAttentionAnswer).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1',
+      'marker-1',
+      'Approve'
+    );
+    expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledWith(
+      'node-1',
+      'ws-1',
+      'agent-sess-1',
+      'Approve',
+      expect.anything(),
+      'user-1',
+      'marker-1',
+      undefined
+    );
+    expect(projectDataService.completeAttentionAnswer).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1',
+      'marker-1',
+      'Approve'
+    );
+    await expect(response.json()).resolves.toEqual({
+      resolved: true,
+      alreadyResolved: false,
+      answer: 'Approve',
+    });
+  });
+
+  it('rejects an answer outside the stored options without contacting the agent', async () => {
+    vi.mocked(projectDataService.prepareAttentionAnswer).mockResolvedValue({
+      status: 'invalid_option',
+      options: ['Approve', 'Reject'],
+    });
+
+    const response = await postAnswer();
+
+    expect(response.status).toBe(400);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+    expect(projectDataService.completeAttentionAnswer).not.toHaveBeenCalled();
+  });
+
+  it('preserves the claim when delivery to the agent has an ambiguous generic failure', async () => {
+    mocks.sendPromptToAgentOnNode.mockRejectedValue(new Error('runtime unavailable'));
+
+    const response = await postAnswer();
+
+    expect(response.status).toBe(500);
+    expect(projectDataService.completeAttentionAnswer).not.toHaveBeenCalled();
+    expect(projectDataService.releaseAttentionAnswer).not.toHaveBeenCalled();
+  });
+
+  it('keeps the answer claimed when an interrupted runtime has an unknown delivery outcome', async () => {
+    mocks.sendPromptToAgentOnNode.mockRejectedValue(
+      new AppError(
+        409,
+        'RUNTIME_REQUEST_INTERRUPTED',
+        'The prompt outcome is unknown and must not be replayed automatically.'
+      )
+    );
+
+    const response = await postAnswer();
+
+    expect(response.status).toBe(409);
+    expect(projectDataService.completeAttentionAnswer).not.toHaveBeenCalled();
+    expect(projectDataService.releaseAttentionAnswer).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({
+      error: 'RUNTIME_REQUEST_INTERRUPTED',
+    });
+  });
+
+  it('releases the claim when preparation fails before any prompt dispatch', async () => {
+    mocks.enrichMessageWithMentions.mockRejectedValueOnce(new Error('mention lookup unavailable'));
+
+    const response = await postAnswer();
+
+    expect(response.status).toBe(500);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+    expect(projectDataService.completeAttentionAnswer).not.toHaveBeenCalled();
+    expect(projectDataService.releaseAttentionAnswer).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'chat-1',
+      'marker-1',
+      'Approve'
+    );
+  });
+
+  it('does not forward a same-answer replay while the first delivery is in flight', async () => {
+    vi.mocked(projectDataService.prepareAttentionAnswer).mockResolvedValue({
+      status: 'in_flight',
+      answer: 'Approve',
+    });
+
+    const response = await postAnswer();
+
+    expect(response.status).toBe(202);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({ resolved: false, inFlight: true });
+  });
+
+  it('rejects a conflicting staged answer without forwarding it', async () => {
+    vi.mocked(projectDataService.prepareAttentionAnswer).mockResolvedValue({
+      status: 'conflicting_answer',
+      answer: 'Reject',
+    });
+
+    const response = await postAnswer();
+
+    expect(response.status).toBe(409);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+
+  it('is idempotent after the same structured answer was already recorded', async () => {
+    vi.mocked(projectDataService.prepareAttentionAnswer).mockResolvedValue({
+      status: 'already_resolved',
+      answer: 'Approve',
+    });
+
+    const response = await postAnswer();
+
+    expect(response.status).toBe(200);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+    expect(projectDataService.completeAttentionAnswer).not.toHaveBeenCalled();
+    await expect(response.json()).resolves.toMatchObject({ alreadyResolved: true });
   });
 });
 

@@ -1,7 +1,14 @@
-import type { AgentProfile, AgentSkill, CredentialProvider, UpdateAgentProfileRequest,VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
+import type {
+  AgentProfile,
+  AgentSkill,
+  CredentialProvider,
+  UpdateAgentProfileRequest,
+  VMSize,
+  WorkspaceProfile,
+} from '@simple-agent-manager/shared';
 import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
 import { Paperclip, Settings, X } from 'lucide-react';
-import { type FC, useCallback, useEffect, useRef,useState } from 'react';
+import { type FC, useCallback, useEffect, useId, useRef, useState } from 'react';
 
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
 import type { TaskAttachmentRef } from '../../lib/api';
@@ -18,7 +25,11 @@ import { ProfileFormDialog } from '../agent-profiles/ProfileFormDialog';
 import { ProfileSelector } from '../agent-profiles/ProfileSelector';
 import { SkillSelector } from '../skills/SkillSelector';
 import { SplitButton } from '../ui/SplitButton';
-import { formatProviderCatalogContext, formatVmSizeOption, selectProviderCatalog } from '../vm/format-vm-size';
+import {
+  formatProviderCatalogContext,
+  formatVmSizeOption,
+  selectProviderCatalog,
+} from '../vm/format-vm-size';
 
 export interface TaskSubmitFormProps {
   projectId: string;
@@ -72,10 +83,13 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   const [editProfileOpen, setEditProfileOpen] = useState(false);
   const [attachments, setAttachments] = useState<AttachmentState[]>([]);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  // Base id for the advanced-options field labels below — each field appends
+  // its own suffix (React's recommended pattern for multiple related ids).
+  const fieldId = useId();
 
   const hasProfile = !!agentProfileId;
   const selectedProfile = hasProfile
-    ? profiles.find((p) => p.id === agentProfileId) ?? null
+    ? (profiles.find((p) => p.id === agentProfileId) ?? null)
     : null;
   const displayProvider = selectedProfile?.provider ?? projectProvider;
   const displayLocation = selectedProfile?.vmLocation ?? projectLocation;
@@ -83,13 +97,16 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   const providerContext = formatProviderCatalogContext(activeCatalog, displayLocation);
 
   const uploading = attachments.some((a) => a.status === 'uploading' || a.status === 'pending');
-  const allUploadsComplete = attachments.length === 0 || attachments.every((a) => a.status === 'complete');
+  const allUploadsComplete =
+    attachments.length === 0 || attachments.every((a) => a.status === 'complete');
 
   // Load profiles
   const loadProfiles = useCallback(() => {
     void listAgentProfiles(projectId)
       .then((data) => setProfiles(data))
-      .catch(() => { /* best-effort */ });
+      .catch(() => {
+        /* best-effort */
+      });
   }, [projectId]);
 
   useEffect(() => {
@@ -99,7 +116,9 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   useEffect(() => {
     void listSkills(projectId)
       .then(setSkills)
-      .catch(() => { /* best-effort */ });
+      .catch(() => {
+        /* best-effort */
+      });
   }, [projectId]);
 
   useEffect(() => {
@@ -115,118 +134,133 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
         setProjectProvider(null);
         setProjectLocation(null);
       });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, [projectId]);
 
-  const handleUpdateProfile = useCallback(async (_profileId: string, data: UpdateAgentProfileRequest) => {
-    await updateAgentProfile(projectId, _profileId, data);
-    loadProfiles();
-  }, [projectId, loadProfiles]);
+  const handleUpdateProfile = useCallback(
+    async (_profileId: string, data: UpdateAgentProfileRequest) => {
+      await updateAgentProfile(projectId, _profileId, data);
+      loadProfiles();
+    },
+    [projectId, loadProfiles]
+  );
 
   // Upload a single file: request presigned URL, then PUT to R2
-  const uploadFile = useCallback(async (file: File, index: number) => {
-    try {
-      // Request presigned URL
-      const presigned = await requestAttachmentUpload(
-        projectId,
-        file.name,
-        file.size,
-        file.type || 'application/octet-stream',
-      );
-
-      setAttachments((prev) =>
-        prev.map((a, i) =>
-          i === index ? { ...a, uploadId: presigned.uploadId, status: 'uploading' as const } : a,
-        ),
-      );
-
-      // Upload directly to R2
-      await uploadAttachmentToR2(presigned.uploadUrl, file, (loaded, total) => {
-        const progress = Math.round((loaded / total) * 100);
-        setAttachments((prev) =>
-          prev.map((a, i) => (i === index ? { ...a, progress } : a)),
+  const uploadFile = useCallback(
+    async (file: File, index: number) => {
+      try {
+        // Request presigned URL
+        const presigned = await requestAttachmentUpload(
+          projectId,
+          file.name,
+          file.size,
+          file.type || 'application/octet-stream'
         );
-      });
 
-      const ref: TaskAttachmentRef = {
-        uploadId: presigned.uploadId,
-        filename: file.name,
-        size: file.size,
-        contentType: file.type || 'application/octet-stream',
-      };
+        setAttachments((prev) =>
+          prev.map((a, i) =>
+            i === index ? { ...a, uploadId: presigned.uploadId, status: 'uploading' as const } : a
+          )
+        );
 
-      setAttachments((prev) =>
-        prev.map((a, i) =>
-          i === index ? { ...a, status: 'complete' as const, progress: 100, ref } : a,
-        ),
-      );
-    } catch (err) {
-      setAttachments((prev) =>
-        prev.map((a, i) =>
-          i === index
-            ? { ...a, status: 'error' as const, error: err instanceof Error ? err.message : 'Upload failed' }
-            : a,
-        ),
-      );
-    }
-  }, [projectId]);
+        // Upload directly to R2
+        await uploadAttachmentToR2(presigned.uploadUrl, file, (loaded, total) => {
+          const progress = Math.round((loaded / total) * 100);
+          setAttachments((prev) => prev.map((a, i) => (i === index ? { ...a, progress } : a)));
+        });
 
-  const handleFilesSelected = useCallback((files: FileList | null) => {
-    if (!files || files.length === 0) return;
+        const ref: TaskAttachmentRef = {
+          uploadId: presigned.uploadId,
+          filename: file.name,
+          size: file.size,
+          contentType: file.type || 'application/octet-stream',
+        };
 
-    const maxFiles = ATTACHMENT_DEFAULTS.MAX_FILES;
-    const maxBytes = ATTACHMENT_DEFAULTS.UPLOAD_MAX_BYTES;
-    const batchMax = ATTACHMENT_DEFAULTS.UPLOAD_BATCH_MAX_BYTES;
-
-    const newFiles: AttachmentState[] = [];
-    const currentTotal = attachments.reduce((sum, a) => sum + a.file.size, 0);
-    let runningTotal = currentTotal;
-
-    for (const file of Array.from(files)) {
-      if (attachments.length + newFiles.length >= maxFiles) {
-        setError(`Maximum ${maxFiles} files allowed`);
-        break;
+        setAttachments((prev) =>
+          prev.map((a, i) =>
+            i === index ? { ...a, status: 'complete' as const, progress: 100, ref } : a
+          )
+        );
+      } catch (err) {
+        setAttachments((prev) =>
+          prev.map((a, i) =>
+            i === index
+              ? {
+                  ...a,
+                  status: 'error' as const,
+                  error: err instanceof Error ? err.message : 'Upload failed',
+                }
+              : a
+          )
+        );
       }
-      if (file.size > maxBytes) {
-        setError(`${file.name} exceeds ${formatFileSize(maxBytes)} limit`);
-        continue;
-      }
-      if (!SAFE_FILENAME_REGEX.test(file.name)) {
-        setError(`${file.name} has invalid characters. Only letters, numbers, dots, dashes, underscores, and spaces allowed.`);
-        continue;
-      }
-      if (runningTotal + file.size > batchMax) {
-        setError(`Total size would exceed ${formatFileSize(batchMax)} limit`);
-        break;
-      }
-      runningTotal += file.size;
-      newFiles.push({
-        file,
-        uploadId: null,
-        progress: 0,
-        status: 'pending',
-      });
-    }
+    },
+    [projectId]
+  );
 
-    if (newFiles.length === 0) return;
+  const handleFilesSelected = useCallback(
+    (files: FileList | null) => {
+      if (!files || files.length === 0) return;
 
-    const startIndex = attachments.length;
-    setAttachments((prev) => [...prev, ...newFiles]);
+      const maxFiles = ATTACHMENT_DEFAULTS.MAX_FILES;
+      const maxBytes = ATTACHMENT_DEFAULTS.UPLOAD_MAX_BYTES;
+      const batchMax = ATTACHMENT_DEFAULTS.UPLOAD_BATCH_MAX_BYTES;
 
-    // Start uploads
-    for (let i = 0; i < newFiles.length; i++) {
-      void uploadFile(newFiles[i]!.file, startIndex + i);
-    }
-  }, [attachments, uploadFile]);
+      const newFiles: AttachmentState[] = [];
+      const currentTotal = attachments.reduce((sum, a) => sum + a.file.size, 0);
+      let runningTotal = currentTotal;
+
+      for (const file of Array.from(files)) {
+        if (attachments.length + newFiles.length >= maxFiles) {
+          setError(`Maximum ${maxFiles} files allowed`);
+          break;
+        }
+        if (file.size > maxBytes) {
+          setError(`${file.name} exceeds ${formatFileSize(maxBytes)} limit`);
+          continue;
+        }
+        if (!SAFE_FILENAME_REGEX.test(file.name)) {
+          setError(
+            `${file.name} has invalid characters. Only letters, numbers, dots, dashes, underscores, and spaces allowed.`
+          );
+          continue;
+        }
+        if (runningTotal + file.size > batchMax) {
+          setError(`Total size would exceed ${formatFileSize(batchMax)} limit`);
+          break;
+        }
+        runningTotal += file.size;
+        newFiles.push({
+          file,
+          uploadId: null,
+          progress: 0,
+          status: 'pending',
+        });
+      }
+
+      if (newFiles.length === 0) return;
+
+      const startIndex = attachments.length;
+      setAttachments((prev) => [...prev, ...newFiles]);
+
+      // Start uploads
+      for (const [i, newFile] of newFiles.entries()) {
+        void uploadFile(newFile.file, startIndex + i);
+      }
+    },
+    [attachments, uploadFile]
+  );
 
   const handleRemoveAttachment = useCallback((index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index));
   }, []);
 
   const buildOptions = (): TaskSubmitOptions => {
-    const completedAttachments = attachments
-      .filter((a) => a.status === 'complete' && a.ref)
-      .map((a) => a.ref!);
+    const completedAttachments = attachments.flatMap((a) =>
+      a.status === 'complete' && a.ref ? [a.ref] : []
+    );
 
     const base = hasProfile
       ? {
@@ -244,9 +278,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
           devcontainerConfigName: devcontainerConfigName.trim() || undefined,
         };
 
-    return completedAttachments.length > 0
-      ? { ...base, attachments: completedAttachments }
-      : base;
+    return completedAttachments.length > 0 ? { ...base, attachments: completedAttachments } : base;
   };
 
   const resetForm = () => {
@@ -271,7 +303,9 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
       return;
     }
     if (!hasCloudCredentials) {
-      setError('Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to enable platform trial.');
+      setError(
+        'Cloud credentials required. Connect a cloud provider in Settings, or ask your admin to enable platform trial.'
+      );
       return;
     }
     if (uploading) {
@@ -311,9 +345,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   return (
     <div className="border-t border-border-default py-3 px-4 bg-surface">
       {error && (
-        <div className="py-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">
-          {error}
-        </div>
+        <div className="py-2 px-3 mb-2 rounded-sm bg-danger-tint text-danger text-xs">{error}</div>
       )}
 
       {/* Attachment list */}
@@ -331,7 +363,9 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
                 {att.status === 'uploading' ? `${att.progress}%` : formatFileSize(att.file.size)}
               </span>
               {att.status === 'error' && (
-                <span className="text-danger shrink-0" title={att.error}>!</span>
+                <span className="text-danger shrink-0" title={att.error}>
+                  !
+                </span>
               )}
               <button
                 type="button"
@@ -342,7 +376,10 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
                 <X size={12} />
               </button>
               {att.status === 'uploading' && (
-                <div className="absolute bottom-0 left-0 h-0.5 bg-accent-emphasis rounded-full transition-all" style={{ width: `${att.progress}%` }} />
+                <div
+                  className="absolute bottom-0 left-0 h-0.5 bg-accent-emphasis rounded-full transition-all"
+                  style={{ width: `${att.progress}%` }}
+                />
               )}
             </div>
           ))}
@@ -373,7 +410,10 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
           <input
             type="text"
             value={title}
-            onChange={(e) => { setTitle(e.target.value); setError(null); }}
+            onChange={(e) => {
+              setTitle(e.target.value);
+              setError(null);
+            }}
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey && !submitting && allUploadsComplete) {
                 void handleRunNow();
@@ -388,9 +428,7 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
         <SplitButton
           primaryLabel="Run Now"
           onPrimaryAction={() => void handleRunNow()}
-          options={[
-            { label: 'Save to Backlog', onClick: () => void handleSaveToBacklog() },
-          ]}
+          options={[{ label: 'Save to Backlog', onClick: () => void handleSaveToBacklog() }]}
           disabled={submitting || !allUploadsComplete}
           loading={submitting}
         />
@@ -410,10 +448,11 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
       {showAdvanced && (
         <div className="grid gap-2 mt-2 p-3 bg-page rounded-md border border-border-default">
           <div>
-            <label className="text-xs text-fg-muted block mb-1">
+            <label htmlFor={`${fieldId}-description`} className="text-xs text-fg-muted block mb-1">
               Description (optional)
             </label>
             <textarea
+              id={`${fieldId}-description`}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               placeholder="Additional context for the agent..."
@@ -425,10 +464,11 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
           <div className="flex gap-3 flex-wrap items-end">
             {skills.length > 0 && (
               <div className="min-w-[180px]">
-                <label className="text-xs text-fg-muted block mb-1">
+                <label htmlFor={`${fieldId}-skill`} className="text-xs text-fg-muted block mb-1">
                   Skill
                 </label>
                 <SkillSelector
+                  id={`${fieldId}-skill`}
                   skills={skills}
                   selectedSkillId={skillId}
                   onChange={setSkillId}
@@ -441,10 +481,14 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
             {profiles.length > 0 && (
               <div className="flex items-end gap-1">
                 <div>
-                  <label className="text-xs text-fg-muted block mb-1">
+                  <label
+                    htmlFor={`${fieldId}-agent-profile`}
+                    className="text-xs text-fg-muted block mb-1"
+                  >
                     Agent Profile
                   </label>
                   <ProfileSelector
+                    id={`${fieldId}-agent-profile`}
                     profiles={profiles}
                     selectedProfileId={agentProfileId}
                     onChange={setAgentProfileId}
@@ -467,10 +511,11 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
             )}
 
             <div>
-              <label className="text-xs text-fg-muted block mb-1">
+              <label htmlFor={`${fieldId}-priority`} className="text-xs text-fg-muted block mb-1">
                 Priority
               </label>
               <select
+                id={`${fieldId}-priority`}
                 value={priority}
                 onChange={(e) => setPriority(Number(e.target.value))}
                 className="py-1 px-2 rounded-sm text-fg-primary text-sm"
@@ -485,15 +530,17 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
             {!hasProfile && (
               <>
                 <div>
-                  <label className="text-xs text-fg-muted block mb-1">
+                  <label
+                    htmlFor={`${fieldId}-vm-size`}
+                    className="text-xs text-fg-muted block mb-1"
+                  >
                     VM Size
                     {providerContext && (
-                      <span className="text-fg-muted font-normal ml-1">
-                        ({providerContext})
-                      </span>
+                      <span className="text-fg-muted font-normal ml-1">({providerContext})</span>
                     )}
                   </label>
                   <select
+                    id={`${fieldId}-vm-size`}
                     value={vmSize}
                     onChange={(e) => setVmSize(e.target.value as VMSize | '')}
                     className="py-1 px-2 rounded-sm text-fg-primary text-sm"
@@ -508,10 +555,14 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
                 </div>
 
                 <div>
-                  <label className="text-xs text-fg-muted block mb-1">
+                  <label
+                    htmlFor={`${fieldId}-workspace-profile`}
+                    className="text-xs text-fg-muted block mb-1"
+                  >
                     Workspace
                   </label>
                   <select
+                    id={`${fieldId}-workspace-profile`}
                     value={workspaceProfile}
                     onChange={(e) => setWorkspaceProfile(e.target.value as WorkspaceProfile | '')}
                     className="py-1 px-2 rounded-sm text-fg-primary text-sm"
@@ -524,10 +575,14 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
 
                 {workspaceProfile !== 'lightweight' && (
                   <div>
-                    <label className="text-xs text-fg-muted block mb-1">
+                    <label
+                      htmlFor={`${fieldId}-devcontainer-config`}
+                      className="text-xs text-fg-muted block mb-1"
+                    >
                       Devcontainer Config
                     </label>
                     <input
+                      id={`${fieldId}-devcontainer-config`}
                       type="text"
                       value={devcontainerConfigName}
                       onChange={(e) => setDevcontainerConfigName(e.target.value)}

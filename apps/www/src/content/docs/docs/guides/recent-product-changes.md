@@ -9,14 +9,14 @@ This page summarizes recent changes that affect how people use SAM. Use it as a 
 
 ### For everyone
 
-| Change                                | What users notice                                                                                                                                                             | Where to use it                   |
-| ------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
-| **Report an issue in-app**            | A **Report** button in the expanded chat session header, and a **Report this issue** link on the crash screen. You choose whether to attach technical context.                | Chat session header; crash screen |
-| **Instant sessions survive restarts** | A sleeping or reclaimed Instant session is woken and restored from a snapshot instead of being lost. SAM tells you in the chat whether it is waking, restoring, or unable to. | Project chat                      |
-| **Starting a chat is durable**        | Closing the tab while a chat is starting no longer strands it — the launch finishes server-side.                                                                              | Project chat                      |
-| **Work lands on its own branch**      | Task workspaces start checked out on the task's `sam/…` output branch, and SAM refuses to auto-push to your default branch.                                                   | Any task or chat-started work     |
-| **Codex has its tools on Instant**    | Codex sessions on the Instant runtime now get SAM's MCP tools instead of silently starting without them.                                                                      | Any Codex profile                 |
-| **Library cards always render**       | A document an agent shares renders as a rich card no matter which agent sent it.                                                                                              | Project chat timeline             |
+| Change                                | What users notice                                                                                                                                              | Where to use it                   |
+| ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------- |
+| **Report an issue in-app**            | A **Report** button in the expanded chat session header, and a **Report this issue** link on the crash screen. You choose whether to attach technical context. | Chat session header; crash screen |
+| **Sessions survive runtime teardown** | Sleeping Instant and VM sessions wake from a seven-day snapshot instead of losing harness context or uncommitted work.                                         | Project chat                      |
+| **Starting a chat is durable**        | Closing the tab while a chat is starting no longer strands it — the launch finishes server-side.                                                               | Project chat                      |
+| **Work lands on its own branch**      | Task workspaces start checked out on the task's `sam/…` output branch, and SAM refuses to auto-push to your default branch.                                    | Any task or chat-started work     |
+| **Codex has its tools on Instant**    | Codex sessions on the Instant runtime now get SAM's MCP tools instead of silently starting without them.                                                       | Any Codex profile                 |
+| **Library cards always render**       | A document an agent shares renders as a rich card no matter which agent sent it.                                                                               | Project chat timeline             |
 
 ### For self-hosters & admins
 
@@ -35,9 +35,11 @@ SAM never attaches technical context silently. A consent checkbox lists the exac
 
 Reports become draft Ideas in a project the deployment nominates. If you don't see a Report button, this deployment hasn't configured one. See [Reporting Issues](/docs/guides/reporting-issues/).
 
-## Instant sessions recover from runtime loss
+## Persistent sessions recover from runtime loss
 
-[Instant sessions](/docs/guides/instant-sessions/) run in containers, and containers get reclaimed — on sleep, during a platform rollout, or on an unexpected failure. SAM now keeps a **session snapshot** of the agent's home directory (including its own transcript state) and the repository work in progress, so a reclaimed session is rebuilt rather than lost. Credential files are deliberately excluded from snapshots and re-provisioned fresh on restore.
+[Persistent sessions](/docs/guides/instant-sessions/) now use the same snapshot contract on Instant containers and standard VM workspaces. SAM checkpoints after idle turns and requires a verified final checkpoint before sleep. The snapshot contains the agent's home directory (including harness session state) and repository work in progress, so a replacement runtime can resume instead of starting blank. Credential files are deliberately excluded and re-provisioned fresh on restore.
+
+VM compute is stopped after a successful sleep checkpoint and may be deleted normally. A same-chat follow-up atomically provisions one replacement workspace, restores the exact saved harness session, then delivers the queued message. Explicit archive remains destructive, and sleeping state expires after seven days.
 
 What you actually see:
 

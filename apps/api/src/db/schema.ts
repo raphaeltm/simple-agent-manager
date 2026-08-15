@@ -1198,6 +1198,25 @@ export const sessionSnapshots = sqliteTable(
     restoreStatus: text('restore_status'),
     restoreMessage: text('restore_message'),
     restoredAt: text('restored_at'),
+    sleepingAt: text('sleeping_at'),
+    recoveryStatus: text('recovery_status'),
+    recoveryTaskId: text('recovery_task_id'),
+    recoveryWorkspaceId: text('recovery_workspace_id').references(() => workspaces.id, {
+      onDelete: 'set null',
+    }),
+    recoveryAttempts: integer('recovery_attempts').notNull().default(0),
+    recoveryError: text('recovery_error'),
+    recoveryClaimedAt: text('recovery_claimed_at'),
+    sleepStatus: text('sleep_status'),
+    sleepAfter: text('sleep_after'),
+    sleepAttempts: integer('sleep_attempts').notNull().default(0),
+    sleepError: text('sleep_error'),
+    sleepClaimId: text('sleep_claim_id'),
+    sleepClaimedAt: text('sleep_claimed_at'),
+    snapshotGeneration: text('snapshot_generation'),
+    captureGeneration: text('capture_generation'),
+    homeSha256: text('home_sha256'),
+    wipSha256: text('wip_sha256'),
     createdAt: text('created_at')
       .notNull()
       .default(sql`CURRENT_TIMESTAMP`),
@@ -1211,6 +1230,23 @@ export const sessionSnapshots = sqliteTable(
     ),
     workspaceIdIdx: index('idx_session_snapshots_workspace_id').on(table.workspaceId),
     expiresAtIdx: index('idx_session_snapshots_expires_at').on(table.expiresAt),
+    recoveryStatusIdx: index('idx_session_snapshots_recovery_status').on(
+      table.recoveryStatus,
+      table.expiresAt
+    ),
+    recoveryClaimIdx: index('idx_session_snapshots_recovery_claim').on(
+      table.recoveryStatus,
+      table.recoveryClaimedAt
+    ),
+    sleepDueIdx: index('idx_session_snapshots_sleep_due').on(table.sleepStatus, table.sleepAfter),
+    sleepClaimIdx: index('idx_session_snapshots_sleep_claim').on(
+      table.sleepStatus,
+      table.sleepClaimedAt
+    ),
+    sleepExpiryIdx: index('idx_session_snapshots_sleep_expiry').on(
+      table.sleepStatus,
+      table.expiresAt
+    ),
   })
 );
 

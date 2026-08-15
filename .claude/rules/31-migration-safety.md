@@ -134,3 +134,16 @@ Prefer `RESTRICT` or `SET NULL` unless the child data is truly worthless without
 ## Pre-Deploy Backup
 
 The deployment pipeline creates a D1 backup before every migration run. If a migration causes data loss despite this rule, the backup enables point-in-time recovery. This is the last line of defense — it should never be needed if this rule is followed.
+
+## Wrangler JSON Is a Framed Output Contract
+
+Wrangler may append human-readable diagnostics after a valid `--json` document. Deployment safety
+code MUST parse exactly one complete leading JSON object or array, with string/escape-aware framing,
+and MUST continue to reject leading garbage, incomplete JSON, or structurally invalid JSON. Do not
+call `JSON.parse` on the entire stdout buffer and do not recover by searching for an arbitrary `[` or
+`{` later in the output. Add a regression fixture with valid multiline JSON plus trailing diagnostics
+whenever a deployment gate consumes Wrangler JSON.
+
+This rule was added after exact-head staging deployment `31558884950` was blocked before migrations:
+Wrangler 4.118 emitted a valid JSON response followed by a diagnostic, while the safety runner treated
+the whole stdout stream as one JSON value.

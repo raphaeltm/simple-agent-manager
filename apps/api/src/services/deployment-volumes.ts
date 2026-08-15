@@ -208,7 +208,13 @@ export async function createEnvironmentVolume(
   assertSafeVolumeName(opts.name);
 
   const projectId = await getEnvironmentProjectId(db, opts.environmentId);
-  const { provider, providerName } = await getProviderForUser(db, userId, env, opts.targetProvider, projectId);
+  const { provider, providerName } = await getProviderForUser(
+    db,
+    userId,
+    env,
+    opts.targetProvider,
+    projectId
+  );
 
   // Check volume capabilities
   const caps = provider.volumeCapabilities;
@@ -535,7 +541,11 @@ export async function attachEnvironmentVolumes(
   }
 
   // Use the provider from the first volume (all same environment = same provider)
-  const firstVolume = volumes[0]!;
+  const firstVolume = volumes[0];
+  if (!firstVolume) {
+    // volumes.length === 0 was already handled above — this should never happen.
+    throw new Error('Internal error: expected at least one volume after length check');
+  }
   const { provider } = await getProviderForUser(
     db,
     userId,
@@ -635,7 +645,11 @@ export async function detachEnvironmentVolumes(
     return [];
   }
 
-  const firstVolume = volumes[0]!;
+  const firstVolume = volumes[0];
+  if (!firstVolume) {
+    // volumes.length === 0 was already handled above — this should never happen.
+    throw new Error('Internal error: expected at least one volume after length check');
+  }
   const { provider } = await getProviderForUser(
     db,
     userId,

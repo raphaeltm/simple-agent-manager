@@ -1,7 +1,14 @@
 import { Spinner } from '@simple-agent-manager/ui';
 import {
-  ArrowLeft, ChevronRight, Download,
-  FileText, Folder, Image, RefreshCw, Search, X,
+  ArrowLeft,
+  ChevronRight,
+  Download,
+  FileText,
+  Folder,
+  Image,
+  RefreshCw,
+  Search,
+  X,
 } from 'lucide-react';
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -15,13 +22,14 @@ import {
   getSessionFileRawUrl,
   getSessionGitDiff,
   getSessionGitStatus,
-  type GitFileStatus,
   type GitStatusData,
 } from '../../lib/api';
 import { detectLanguage, formatFileSize, isImageFile } from '../../lib/file-utils';
-import { fileNameFromPath, fuzzyFilterFiles } from '../../lib/fuzzy-match';
+import { fuzzyFilterFiles } from '../../lib/fuzzy-match';
 import { CODE_THEME_BG, RenderedMarkdown, SyntaxHighlightedCode } from '../MarkdownRenderer';
 import { DiffRenderer, ImageViewer } from '../shared-file-viewer';
+import { GitStatusList, HighlightedFilePath } from './chat-file-panel-rows';
+import { buildBreadcrumbs, isMarkdownFile } from './chat-file-panel-utils';
 
 export type FilePanelMode = 'browse' | 'view' | 'diff' | 'git-status';
 
@@ -31,28 +39,6 @@ interface ChatFilePanelProps {
   initialMode: FilePanelMode;
   initialPath?: string;
   onClose: () => void;
-}
-
-function isMarkdownFile(filePath: string): boolean {
-  const lower = filePath.toLowerCase();
-  return lower.endsWith('.md') || lower.endsWith('.mdx');
-}
-
-interface BreadcrumbItem { label: string; path: string }
-
-function buildBreadcrumbs(dirPath: string): BreadcrumbItem[] {
-  const crumbs: BreadcrumbItem[] = [{ label: '/', path: '.' }];
-  if (dirPath === '.' || dirPath === '' || dirPath === '/') return crumbs;
-  let normalized = dirPath;
-  if (normalized.startsWith('./')) normalized = normalized.slice(2);
-  if (normalized.startsWith('/')) normalized = normalized.slice(1);
-  const parts = normalized.split('/').filter(Boolean);
-  let accumulated = '';
-  for (const part of parts) {
-    accumulated = accumulated ? `${accumulated}/${part}` : part;
-    crumbs.push({ label: part, path: accumulated });
-  }
-  return crumbs;
 }
 
 export const ChatFilePanel: FC<ChatFilePanelProps> = ({
@@ -68,7 +54,7 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
 
   // Track previous list mode so back returns to git-status when appropriate
   const previousModeRef = useRef<'browse' | 'git-status'>(
-    initialMode === 'git-status' ? 'git-status' : 'browse',
+    initialMode === 'git-status' ? 'git-status' : 'browse'
   );
 
   // File browser state
@@ -123,7 +109,11 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
         }
       }
       // Cmd+P / Ctrl+P opens search when in browse mode
-      if ((e.metaKey || e.ctrlKey) && e.key === 'p' && (mode === 'browse' || mode === 'git-status')) {
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.key === 'p' &&
+        (mode === 'browse' || mode === 'git-status')
+      ) {
         e.preventDefault();
         activateSearchRef.current();
       }
@@ -133,34 +123,40 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
   }, [onClose, searchActive, mode]);
 
   // Load file listing
-  const loadListing = useCallback(async (path: string) => {
-    setBrowseLoading(true);
-    setBrowseError(null);
-    try {
-      const result = await getSessionFileList(projectId, sessionId, path);
-      setEntries(result.entries);
-      setCurrentPath(result.path);
-    } catch (err) {
-      setBrowseError(err instanceof Error ? err.message : 'Failed to list directory');
-    } finally {
-      setBrowseLoading(false);
-    }
-  }, [projectId, sessionId]);
+  const loadListing = useCallback(
+    async (path: string) => {
+      setBrowseLoading(true);
+      setBrowseError(null);
+      try {
+        const result = await getSessionFileList(projectId, sessionId, path);
+        setEntries(result.entries);
+        setCurrentPath(result.path);
+      } catch (err) {
+        setBrowseError(err instanceof Error ? err.message : 'Failed to list directory');
+      } finally {
+        setBrowseLoading(false);
+      }
+    },
+    [projectId, sessionId]
+  );
 
   // Load file content
-  const loadFile = useCallback(async (path: string) => {
-    setFileLoading(true);
-    setFileError(null);
-    setFileContent(null);
-    try {
-      const result = await getSessionFileContent(projectId, sessionId, path);
-      setFileContent(result.content);
-    } catch (err) {
-      setFileError(err instanceof Error ? err.message : 'Failed to load file');
-    } finally {
-      setFileLoading(false);
-    }
-  }, [projectId, sessionId]);
+  const loadFile = useCallback(
+    async (path: string) => {
+      setFileLoading(true);
+      setFileError(null);
+      setFileContent(null);
+      try {
+        const result = await getSessionFileContent(projectId, sessionId, path);
+        setFileContent(result.content);
+      } catch (err) {
+        setFileError(err instanceof Error ? err.message : 'Failed to load file');
+      } finally {
+        setFileLoading(false);
+      }
+    },
+    [projectId, sessionId]
+  );
 
   // Load git status
   const loadGitStatus = useCallback(async () => {
@@ -177,19 +173,22 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
   }, [projectId, sessionId]);
 
   // Load diff
-  const loadDiff = useCallback(async (path: string, staged = false) => {
-    setDiffLoading(true);
-    setDiffError(null);
-    setDiffContent('');
-    try {
-      const result = await getSessionGitDiff(projectId, sessionId, path, staged);
-      setDiffContent(result.diff);
-    } catch (err) {
-      setDiffError(err instanceof Error ? err.message : 'Failed to load diff');
-    } finally {
-      setDiffLoading(false);
-    }
-  }, [projectId, sessionId]);
+  const loadDiff = useCallback(
+    async (path: string, staged = false) => {
+      setDiffLoading(true);
+      setDiffError(null);
+      setDiffContent('');
+      try {
+        const result = await getSessionGitDiff(projectId, sessionId, path, staged);
+        setDiffContent(result.diff);
+      } catch (err) {
+        setDiffError(err instanceof Error ? err.message : 'Failed to load diff');
+      } finally {
+        setDiffLoading(false);
+      }
+    },
+    [projectId, sessionId]
+  );
 
   // Load file index for search (cached — only fetched once per panel open)
   const loadFileIndex = useCallback(async () => {
@@ -219,18 +218,24 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
 
   // Compute search results from query and file index
   const searchResults = useMemo(
-    () => (fileIndex && searchQuery.trim()) ? fuzzyFilterFiles(fileIndex, searchQuery) : [],
+    () => (fileIndex && searchQuery.trim() ? fuzzyFilterFiles(fileIndex, searchQuery) : []),
     [fileIndex, searchQuery]
   );
 
-  // Initial load based on mode
+  // Initial load based on mode. Mount-only: every mode-changing handler below
+  // (navigateDir/openFile/openDiff/goBack, and the browse/git-status shortcuts
+  // in the header) already triggers its own load imperatively in the same
+  // tick that it calls setMode, so re-running this effect on mode/path
+  // changes would double-fetch every navigation (and races two overlapping
+  // requests toggling the same loading flag). This effect exists solely to
+  // cover the initial mount, before any handler has run.
   useEffect(() => {
     if (mode === 'browse') loadListing(currentPath);
     else if (mode === 'view' && filePath && !isImageFile(filePath)) loadFile(filePath);
     else if (mode === 'git-status') loadGitStatus();
     else if (mode === 'diff' && filePath) loadDiff(filePath);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional mount-only load; see comment above
+  }, []);
 
   const navigateDir = (path: string) => {
     setCurrentPath(path);
@@ -332,7 +337,11 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
               <button
                 type="button"
                 aria-pressed={mode === 'browse'}
-                onClick={() => { previousModeRef.current = 'browse'; setMode('browse'); loadListing(currentPath); }}
+                onClick={() => {
+                  previousModeRef.current = 'browse';
+                  setMode('browse');
+                  loadListing(currentPath);
+                }}
                 className={`text-xs px-2 py-1 rounded border-none cursor-pointer ${mode === 'browse' ? 'bg-accent-primary text-fg-on-accent' : 'bg-transparent text-fg-muted hover:text-fg-primary'}`}
               >
                 Files
@@ -340,7 +349,11 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
               <button
                 type="button"
                 aria-pressed={mode === 'git-status'}
-                onClick={() => { previousModeRef.current = 'git-status'; setMode('git-status'); loadGitStatus(); }}
+                onClick={() => {
+                  previousModeRef.current = 'git-status';
+                  setMode('git-status');
+                  loadGitStatus();
+                }}
                 className={`text-xs px-2 py-1 rounded border-none cursor-pointer ${mode === 'git-status' ? 'bg-accent-primary text-fg-on-accent' : 'bg-transparent text-fg-muted hover:text-fg-primary'}`}
               >
                 Git
@@ -397,7 +410,11 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
               type="button"
               onClick={async () => {
                 try {
-                  const { blob, fileName: dlName } = await downloadSessionFile(projectId, sessionId, filePath);
+                  const { blob, fileName: dlName } = await downloadSessionFile(
+                    projectId,
+                    sessionId,
+                    filePath
+                  );
                   const url = URL.createObjectURL(blob);
                   const a = document.createElement('a');
                   a.href = url;
@@ -463,10 +480,13 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                   setSearchActive(false);
                   setSearchQuery('');
                 }
-                if (e.key === 'Enter' && searchResults.length > 0) {
-                  openFile(searchResults[0]!.path);
-                  setSearchActive(false);
-                  setSearchQuery('');
+                if (e.key === 'Enter') {
+                  const firstResult = searchResults[0];
+                  if (firstResult) {
+                    openFile(firstResult.path);
+                    setSearchActive(false);
+                    setSearchQuery('');
+                  }
                 }
               }}
             />
@@ -474,7 +494,10 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
             {searchQuery && (
               <button
                 type="button"
-                onClick={() => { setSearchQuery(''); searchInputRef.current?.focus(); }}
+                onClick={() => {
+                  setSearchQuery('');
+                  searchInputRef.current?.focus();
+                }}
                 aria-label="Clear search"
                 className="p-2 bg-transparent border-none cursor-pointer text-fg-muted hover:text-fg-primary shrink-0"
               >
@@ -490,7 +513,10 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
           {mode === 'browse' && searchActive && searchQuery.trim() && (
             <>
               {fileIndexError && (
-                <div className="m-4 p-3 bg-danger-tint rounded-lg text-xs" style={{ color: 'var(--sam-color-tn-red)' }}>
+                <div
+                  className="m-4 p-3 bg-danger-tint rounded-lg text-xs"
+                  style={{ color: 'var(--sam-color-tn-red)' }}
+                >
                   {fileIndexError}
                 </div>
               )}
@@ -514,15 +540,17 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                       className="w-full flex items-center gap-2.5 px-4 py-2 min-h-[44px] text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover"
                     >
                       {isImageFile(result.path) ? (
-                        <Image size={14} className="shrink-0" style={{ color: 'var(--sam-color-info, #3b82f6)' }} />
+                        <Image
+                          size={14}
+                          className="shrink-0"
+                          style={{ color: 'var(--sam-color-info, #3b82f6)' }}
+                        />
                       ) : (
                         <FileText size={14} className="shrink-0 text-fg-muted" />
                       )}
                       <span className="flex flex-col min-w-0 flex-1">
                         <HighlightedFilePath path={result.path} matches={result.matches} />
-                        <span className="text-[10px] text-fg-muted truncate">
-                          {result.path}
-                        </span>
+                        <span className="text-[10px] text-fg-muted truncate">{result.path}</span>
                       </span>
                     </button>
                   ))}
@@ -535,10 +563,15 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
           {mode === 'browse' && !(searchActive && searchQuery.trim()) && (
             <>
               {browseLoading && entries.length === 0 && (
-                <div className="flex justify-center p-8"><Spinner size="md" /></div>
+                <div className="flex justify-center p-8">
+                  <Spinner size="md" />
+                </div>
               )}
               {browseError && (
-                <div className="m-4 p-3 bg-danger-tint rounded-lg text-xs" style={{ color: 'var(--sam-color-tn-red)' }}>
+                <div
+                  className="m-4 p-3 bg-danger-tint rounded-lg text-xs"
+                  style={{ color: 'var(--sam-color-tn-red)' }}
+                >
                   {browseError}
                 </div>
               )}
@@ -557,14 +590,23 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
                       className="w-full flex items-center gap-2.5 px-4 py-2 min-h-[44px] text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover"
                     >
                       {entry.type === 'dir' ? (
-                        <Folder size={14} className="shrink-0" style={{ color: 'var(--sam-color-accent-primary)' }} />
+                        <Folder
+                          size={14}
+                          className="shrink-0"
+                          style={{ color: 'var(--sam-color-accent-primary)' }}
+                        />
                       ) : isImageFile(entry.name) ? (
-                        <Image size={14} className="shrink-0" style={{ color: 'var(--sam-color-info, #3b82f6)' }} />
+                        <Image
+                          size={14}
+                          className="shrink-0"
+                          style={{ color: 'var(--sam-color-info, #3b82f6)' }}
+                        />
                       ) : (
                         <FileText size={14} className="shrink-0 text-fg-muted" />
                       )}
                       <span className="text-xs font-mono text-fg-primary truncate flex-1 min-w-0">
-                        {entry.name}{entry.type === 'dir' ? '/' : ''}
+                        {entry.name}
+                        {entry.type === 'dir' ? '/' : ''}
                       </span>
                       {entry.type !== 'dir' && entry.size > 0 && (
                         <span className="text-[11px] font-mono text-fg-muted shrink-0">
@@ -588,22 +630,28 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
           {mode === 'view' && !isImageFile(filePath) && (
             <>
               {fileLoading && (
-                <div className="flex justify-center p-8"><Spinner size="md" /></div>
+                <div className="flex justify-center p-8">
+                  <Spinner size="md" />
+                </div>
               )}
               {fileError && (
-                <div className="m-4 p-3 bg-danger-tint rounded-lg text-xs" style={{ color: 'var(--sam-color-tn-red)' }}>
+                <div
+                  className="m-4 p-3 bg-danger-tint rounded-lg text-xs"
+                  style={{ color: 'var(--sam-color-tn-red)' }}
+                >
                   {fileError}
                 </div>
               )}
-              {!fileLoading && !fileError && fileContent !== null && (
-                isMd && mdMode === 'rendered' ? (
+              {!fileLoading &&
+                !fileError &&
+                fileContent !== null &&
+                (isMd && mdMode === 'rendered' ? (
                   <RenderedMarkdown content={fileContent} />
                 ) : (
                   <div className="min-h-full" style={{ backgroundColor: CODE_THEME_BG }}>
                     <SyntaxHighlightedCode content={fileContent} language={language} />
                   </div>
-                )
-              )}
+                ))}
             </>
           )}
 
@@ -611,26 +659,31 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
           {mode === 'git-status' && (
             <>
               {gitLoading && (
-                <div className="flex justify-center p-8"><Spinner size="md" /></div>
+                <div className="flex justify-center p-8">
+                  <Spinner size="md" />
+                </div>
               )}
               {gitError && (
-                <div className="m-4 p-3 bg-danger-tint rounded-lg text-xs" style={{ color: 'var(--sam-color-tn-red)' }}>
+                <div
+                  className="m-4 p-3 bg-danger-tint rounded-lg text-xs"
+                  style={{ color: 'var(--sam-color-tn-red)' }}
+                >
                   {gitError}
                 </div>
               )}
               {!gitLoading && !gitError && gitStatus && (
-                <GitStatusList
-                  status={gitStatus}
-                  onViewDiff={openDiff}
-                  onViewFile={openFile}
-                />
+                <GitStatusList status={gitStatus} onViewDiff={openDiff} onViewFile={openFile} />
               )}
-              {!gitLoading && !gitError && gitStatus &&
-                gitStatus.staged.length === 0 && gitStatus.unstaged.length === 0 && gitStatus.untracked.length === 0 && (
-                <div className="flex justify-center p-12 text-fg-muted text-sm">
-                  No changes detected
-                </div>
-              )}
+              {!gitLoading &&
+                !gitError &&
+                gitStatus &&
+                gitStatus.staged.length === 0 &&
+                gitStatus.unstaged.length === 0 &&
+                gitStatus.untracked.length === 0 && (
+                  <div className="flex justify-center p-12 text-fg-muted text-sm">
+                    No changes detected
+                  </div>
+                )}
             </>
           )}
 
@@ -638,10 +691,15 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
           {mode === 'diff' && (
             <>
               {diffLoading && (
-                <div className="flex justify-center p-8"><Spinner size="md" /></div>
+                <div className="flex justify-center p-8">
+                  <Spinner size="md" />
+                </div>
               )}
               {diffError && (
-                <div className="m-4 p-3 bg-danger-tint rounded-lg text-xs" style={{ color: 'var(--sam-color-tn-red)' }}>
+                <div
+                  className="m-4 p-3 bg-danger-tint rounded-lg text-xs"
+                  style={{ color: 'var(--sam-color-tn-red)' }}
+                >
                   {diffError}
                 </div>
               )}
@@ -658,123 +716,6 @@ export const ChatFilePanel: FC<ChatFilePanelProps> = ({
         </div>
       </div>
     </>,
-    document.body,
+    document.body
   );
 };
-
-// ---------- Git Status List sub-component ----------
-
-function GitStatusList({
-  status,
-  onViewDiff,
-  onViewFile,
-}: {
-  status: GitStatusData;
-  onViewDiff: (path: string, staged: boolean) => void;
-  onViewFile: (path: string) => void;
-}) {
-  return (
-    <div className="divide-y divide-border-default">
-      {status.staged.length > 0 && (
-        <section className="py-2">
-          <h4 className="px-4 py-1 text-[10px] font-semibold uppercase tracking-wider text-fg-muted">
-            Staged ({status.staged.length})
-          </h4>
-          {status.staged.map((file) => (
-            <GitFileRow key={`staged-${file.path}`} file={file} onViewDiff={() => onViewDiff(file.path, true)} onViewFile={() => onViewFile(file.path)} />
-          ))}
-        </section>
-      )}
-      {status.unstaged.length > 0 && (
-        <section className="py-2">
-          <h4 className="px-4 py-1 text-[10px] font-semibold uppercase tracking-wider text-fg-muted">
-            Unstaged ({status.unstaged.length})
-          </h4>
-          {status.unstaged.map((file) => (
-            <GitFileRow key={`unstaged-${file.path}`} file={file} onViewDiff={() => onViewDiff(file.path, false)} onViewFile={() => onViewFile(file.path)} />
-          ))}
-        </section>
-      )}
-      {status.untracked.length > 0 && (
-        <section className="py-2">
-          <h4 className="px-4 py-1 text-[10px] font-semibold uppercase tracking-wider text-fg-muted">
-            Untracked ({status.untracked.length})
-          </h4>
-          {status.untracked.map((file) => (
-            <button
-              key={`untracked-${file.path}`}
-              type="button"
-              onClick={() => onViewFile(file.path)}
-              className="w-full flex items-center gap-2 px-4 py-1.5 min-h-[44px] text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover"
-            >
-              <span className="text-xs font-mono text-fg-muted">?</span>
-              <span className="text-xs font-mono text-fg-primary truncate">{file.path}</span>
-            </button>
-          ))}
-        </section>
-      )}
-    </div>
-  );
-}
-
-/** Renders a file name with fuzzy-matched characters highlighted. */
-function HighlightedFilePath({ path, matches }: { path: string; matches: number[] }) {
-  const name = fileNameFromPath(path);
-  const nameStart = path.length - name.length;
-  const matchSet = new Set(matches);
-
-  return (
-    <span className="text-xs font-mono text-fg-primary truncate" aria-label={name}>
-      {Array.from(name).map((char, i) => {
-        const globalIdx = nameStart + i;
-        const isMatch = matchSet.has(globalIdx);
-        return isMatch
-          ? <span key={i} aria-hidden="true" className="font-bold" style={{ color: 'var(--sam-color-accent-primary)' }}>{char}</span>
-          : <span key={i} aria-hidden="true">{char}</span>;
-      })}
-    </span>
-  );
-}
-
-function GitFileRow({
-  file,
-  onViewDiff,
-  onViewFile,
-}: {
-  file: GitFileStatus;
-  onViewDiff: () => void;
-  onViewFile: () => void;
-}) {
-  const statusColor =
-    file.status === 'added' || file.status === 'new file' ? 'var(--sam-color-tn-green)' :
-    file.status === 'deleted' ? 'var(--sam-color-tn-red)' :
-    'var(--sam-color-tn-yellow, var(--sam-color-warning, #f59e0b))';
-
-  const statusLabel = file.status.charAt(0).toUpperCase();
-
-  return (
-    <div className="flex items-center gap-2 px-4 py-2.5 hover:bg-surface-hover group min-h-[44px]">
-      <span
-        className="text-xs font-mono font-semibold w-4 text-center shrink-0"
-        style={{ color: statusColor }}
-        title={file.status}
-      >
-        {statusLabel}
-      </span>
-      <button
-        type="button"
-        onClick={onViewFile}
-        className="text-xs font-mono text-fg-primary truncate flex-1 min-w-0 bg-transparent border-none cursor-pointer text-left p-0 hover:underline"
-      >
-        {file.path}
-      </button>
-      <button
-        type="button"
-        onClick={onViewDiff}
-        className="text-[10px] font-semibold px-2 py-1 rounded border border-border-default bg-transparent cursor-pointer text-fg-muted hover:text-fg-primary md:opacity-0 md:group-hover:opacity-100 focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-[var(--sam-color-focus-ring,#3b82f6)] focus-visible:ring-offset-1 transition-opacity shrink-0"
-      >
-        Diff
-      </button>
-    </div>
-  );
-}

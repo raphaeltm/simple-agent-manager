@@ -9,6 +9,8 @@ tested in CI).
   `harness-eval/traces/` (gitignored except `.gitkeep`).
 - `ai-gateway-tool-call/` — probe for tool-call behavior through Cloudflare
   AI Gateway / Workers AI.
+- `buzz-sam-acp/` — throwaway stdio ACP bridge proving Buzz can drive a remote
+  SAM conversation through control-plane HTTP polling.
 
 Conventions:
 

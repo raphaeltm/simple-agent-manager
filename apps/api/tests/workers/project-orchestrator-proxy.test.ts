@@ -446,6 +446,79 @@ describe('project-orchestrator proxy — Worker→DO contract', () => {
     expect(queue).toHaveLength(0);
   });
 
+  // REGRESSION (rule 50): `orchestrator_missions` rows were narrowed with a
+  // blind `as unknown as Array<{...}>` cast in getStatus(). A single malformed
+  // row must not 500 the whole status read — it is skipped while sibling rows
+  // still return. `startOrchestration` always writes a well-formed row, so the
+  // malformed row is injected directly via real embedded SQLite (bypassing the
+  // app layer) to simulate a legacy/corrupted row; `last_checked_at` has
+  // INTEGER affinity but no STRICT typing, so SQLite accepts and stores a
+  // non-numeric TEXT value as-is.
+  it('getOrchestratorStatus skips a malformed orchestrator_missions row and still returns the good one', async () => {
+    const projectId = 'proj-po-malformed-missions-001';
+    const goodMissionId = 'mission-malformed-good-001';
+    const badMissionId = 'mission-malformed-bad-001';
+    await seedTestProject(projectId);
+    await seedMission(goodMissionId, projectId, TEST_USER_ID);
+    await startOrchestration(env, projectId, goodMissionId);
+
+    await runInDurableObject(getStub(projectId), async (instance) => {
+      instance.ctx.storage.sql.exec(
+        `INSERT INTO orchestrator_missions (mission_id, status, last_checked_at, last_dispatch_at, registered_at)
+         VALUES (?, 'active', ?, NULL, ?)`,
+        badMissionId,
+        'not-a-timestamp',
+        Date.now()
+      );
+    });
+
+    const status = await getOrchestratorStatus(env, projectId);
+
+    const missionIds = status.activeMissions.map((m) => m.missionId);
+    expect(missionIds).toContain(goodMissionId);
+    expect(missionIds).not.toContain(badMissionId);
+  });
+
+  // REGRESSION (rule 50): same class of bug as above, for the `scheduling_queue`
+  // read shared by getStatus() and getSchedulingQueue(). `scheduled_at` has
+  // INTEGER affinity; a non-numeric value is accepted by SQLite and must be
+  // skipped rather than crashing the read.
+  it('getSchedulingQueue skips a malformed scheduling_queue row and still returns the good one', async () => {
+    const projectId = 'proj-po-malformed-queue-001';
+    const missionId = 'mission-malformed-queue-001';
+    await seedTestProject(projectId);
+    await seedMission(missionId, projectId, TEST_USER_ID);
+    await startOrchestration(env, projectId, missionId);
+
+    await runInDurableObject(getStub(projectId), async (instance) => {
+      instance.ctx.storage.sql.exec(
+        `INSERT INTO scheduling_queue (id, mission_id, task_id, scheduled_at, dispatched_at, reason)
+         VALUES (?, ?, 'task-good', ?, NULL, 'good entry')`,
+        'queue-good-001',
+        missionId,
+        Date.now()
+      );
+      instance.ctx.storage.sql.exec(
+        `INSERT INTO scheduling_queue (id, mission_id, task_id, scheduled_at, dispatched_at, reason)
+         VALUES (?, ?, 'task-bad', ?, NULL, 'bad entry')`,
+        'queue-bad-001',
+        missionId,
+        'not-a-timestamp'
+      );
+    });
+
+    const queue = await getSchedulingQueue(env, projectId);
+    const queueIds = queue.map((q) => q.id);
+    expect(queueIds).toContain('queue-good-001');
+    expect(queueIds).not.toContain('queue-bad-001');
+
+    // getStatus() shares the same query/schema — verify it degrades identically.
+    const status = await getOrchestratorStatus(env, projectId);
+    const statusQueueIds = status.schedulingQueue.map((q) => q.id);
+    expect(statusQueueIds).toContain('queue-good-001');
+    expect(statusQueueIds).not.toContain('queue-bad-001');
+  });
+
   it('proxy uses idFromName for deterministic DO resolution', async () => {
     const projectId = 'proj-po-deterministic-001';
     const missionId = 'mission-deterministic-001';

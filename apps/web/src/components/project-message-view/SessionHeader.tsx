@@ -1,34 +1,62 @@
-import type { DetectedPort, NodeResponse, TaskDetailResponse, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { Button, Dialog, Spinner } from '@simple-agent-manager/ui';
-import { Bot, Box, CheckCircle2, ChevronDown, ChevronUp, Clock, Cloud, Cpu, ExternalLink, Flag, FolderOpen, GitBranch, GitCompare, GitFork, Globe, Hash, MapPin, MessageSquare, RotateCcw, Server, Tag, Timer, User2 } from 'lucide-react';
+import type {
+  DetectedPort,
+  NodeResponse,
+  TaskDetailResponse,
+  WorkspaceResponse,
+} from '@simple-agent-manager/shared';
+import { Button, Spinner } from '@simple-agent-manager/ui';
+import {
+  Bot,
+  CheckCircle2,
+  ChevronDown,
+  ChevronUp,
+  Clock,
+  Cpu,
+  ExternalLink,
+  Flag,
+  FolderOpen,
+  GitCompare,
+  GitFork,
+  Globe,
+  Hash,
+  MessageSquare,
+  RotateCcw,
+  Tag,
+  Timer,
+  User2,
+} from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 
 import type { ChatSessionResponse } from '../../lib/api';
-import { deleteWorkspace, getPortAccessUrl, getProjectTask, getReportIssueConfig, listChatMessages, updateProjectTaskStatus } from '../../lib/api';
+import {
+  getPortAccessUrl,
+  getProjectTask,
+  getReportIssueConfig,
+  listChatMessages,
+  updateProjectTaskStatus,
+} from '../../lib/api';
 import { stripMarkdown } from '../../lib/text-utils';
 import { sanitizeUrl } from '../../lib/url-utils';
 import type { SessionSourceContext } from '../../pages/project-chat/lineageUtils';
 import { ReportIssueDialog } from '../ReportIssueDialog';
 import { CopyableId } from './CopyableId';
 import { PublicPortsToggleRow } from './PublicPortsToggleRow';
-import { PortsContextItem, WorkspaceProfileBadge } from './SessionHeaderBadges';
-import { formatAgentType, formatDuration, formatExecutionStep, formatTaskMode, formatTime, formatVmSize, getCreatorLabel } from './SessionHeaderFormatters';
+import { WorkspaceProfileBadge } from './SessionHeaderBadges';
+import { SessionHeaderCompletionDialog } from './SessionHeaderCompletionDialog';
+import {
+  formatAgentType,
+  formatDuration,
+  formatExecutionStep,
+  formatTaskMode,
+  formatTime,
+  getCreatorLabel,
+} from './SessionHeaderFormatters';
+import { SessionHeaderInfrastructure } from './SessionHeaderInfrastructure';
 import { SessionSourceContextRow } from './SessionSourceContextRow';
 import type { SessionState } from './types';
 import { formatCountdown } from './types';
 import { usePublicPortsToggle } from './usePublicPortsToggle';
-
-/** Labeled value pill used in the session context panel. */
-function ContextItem({ icon, label, children }: { icon: React.ReactNode; label: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-center gap-1.5 text-xs text-fg-muted min-w-0">
-      <span className="shrink-0 opacity-60" aria-hidden="true">{icon}</span>
-      <span className="font-medium shrink-0">{label}:</span>
-      <span className="text-fg-primary truncate min-w-0">{children}</span>
-    </div>
-  );
-}
 
 /** Collapsible session header — shows title + state dot, with expandable details. */
 export function SessionHeader({
@@ -107,9 +135,13 @@ export function SessionHeader({
   useEffect(() => {
     if (!expanded || !session.taskId || triggerFetchedRef.current === session.taskId) return;
     triggerFetchedRef.current = session.taskId;
-    void getProjectTask(projectId, session.taskId).then((detail) => {
-      if (detail.trigger) setTriggerDetail(detail);
-    }).catch(() => { /* best-effort */ });
+    void getProjectTask(projectId, session.taskId)
+      .then((detail) => {
+        if (detail.trigger) setTriggerDetail(detail);
+      })
+      .catch(() => {
+        /* best-effort */
+      });
   }, [expanded, session.taskId, projectId]);
 
   useEffect(() => {
@@ -159,13 +191,9 @@ export function SessionHeader({
     setCompleting(true);
     setConfirmOpen(false);
     try {
-      // 1. Mark the task as completed (this also stops the chat session server-side)
+      // Task completion snapshots and sleeps resumable sessions server-side.
+      // Destructive workspace deletion belongs only to the explicit archive/delete flow.
       await updateProjectTaskStatus(projectId, taskEmbed.id, { toStatus: 'completed' });
-
-      // 2. Delete the workspace if one exists
-      if (session.workspaceId) {
-        await deleteWorkspace(session.workspaceId);
-      }
 
       // Refresh session list via callback instead of full page reload.
       // Reset completing before the callback so the button is not stuck in
@@ -177,14 +205,21 @@ export function SessionHeader({
       setCompleteError(err instanceof Error ? err.message : 'Failed to complete task');
       setCompleting(false);
     }
-  }, [projectId, taskEmbed?.id, session.workspaceId, completing, onSessionMutated]);
+  }, [projectId, taskEmbed?.id, completing, onSessionMutated]);
 
-  const getWorkspacePortHref = useCallback((port: DetectedPort) => {
-    if (!workspace) return sanitizeUrl(port.url);
-    return publicPorts.enabled ? sanitizeUrl(port.url) : getPortAccessUrl(workspace.id, port.port);
-  }, [publicPorts.enabled, workspace]);
+  const getWorkspacePortHref = useCallback(
+    (port: DetectedPort) => {
+      if (!workspace) return sanitizeUrl(port.url);
+      return publicPorts.enabled
+        ? sanitizeUrl(port.url)
+        : getPortAccessUrl(workspace.id, port.port);
+    },
+    [publicPorts.enabled, workspace]
+  );
 
-  const sessionTitle = session.topic ? stripMarkdown(session.topic) : `Chat ${session.id.slice(0, 8)}`;
+  const sessionTitle = session.topic
+    ? stripMarkdown(session.topic)
+    : `Chat ${session.id.slice(0, 8)}`;
   const creatorLabel = getCreatorLabel(session);
   const sortedPorts = detectedPorts.slice().sort((a, b) => a.port - b.port);
   const firstPort = sortedPorts[0];
@@ -192,8 +227,12 @@ export function SessionHeader({
 
   return (
     <div
-      className={`relative glass-chrome border-t-0 shrink-0${hasContentBelow ? '' : ' rounded-b-2xl after:content-[\'\'] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10'}`}
-      style={{ boxShadow: hasContentBelow ? '0 4px 24px rgba(0, 0, 0, 0.4)' : '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(34, 197, 94, 0.08)' }}
+      className={`relative glass-chrome border-t-0 shrink-0${hasContentBelow ? '' : " rounded-b-2xl after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(34,197,94,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"}`}
+      style={{
+        boxShadow: hasContentBelow
+          ? '0 4px 24px rgba(0, 0, 0, 0.4)'
+          : '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(34, 197, 94, 0.08)',
+      }}
     >
       {/* Opacity scrim: Chromium does not sample composited scroll-container
           content for backdrop-filter, so the glass blur silently no-ops over
@@ -202,7 +241,9 @@ export function SessionHeader({
       <div
         aria-hidden="true"
         className="absolute inset-0 rounded-[inherit] -z-10 pointer-events-none"
-        style={{ backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-canvas) 78%, transparent)' }}
+        style={{
+          backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-canvas) 78%, transparent)',
+        }}
       />
       <div className="px-4 py-2 min-h-[54px] space-y-1.5">
         <div className="flex items-start gap-2">
@@ -264,13 +305,24 @@ export function SessionHeader({
           <span
             className="inline-flex items-center gap-1 text-xs font-medium shrink-0"
             style={{
-              color: sessionState === 'active' ? 'var(--sam-color-success)'
-                : sessionState === 'idle' ? 'var(--sam-color-warning, #f59e0b)'
-                : 'var(--sam-color-fg-muted)',
+              color:
+                sessionState === 'active'
+                  ? 'var(--sam-color-success)'
+                  : sessionState === 'idle'
+                    ? 'var(--sam-color-warning, #f59e0b)'
+                    : sessionState === 'sleeping'
+                      ? 'var(--sam-color-info, #3b82f6)'
+                      : 'var(--sam-color-fg-muted)',
             }}
           >
             <span className="w-[6px] h-[6px] rounded-full bg-current" />
-            {sessionState === 'active' ? 'Active' : sessionState === 'idle' ? 'Idle' : 'Stopped'}
+            {sessionState === 'active'
+              ? 'Active'
+              : sessionState === 'idle'
+                ? 'Idle'
+                : sessionState === 'sleeping'
+                  ? 'Sleeping'
+                  : 'Stopped'}
           </span>
 
           {workspace && <WorkspaceProfileBadge workspace={workspace} />}
@@ -309,7 +361,10 @@ export function SessionHeader({
               type="button"
               onClick={() => setExpanded(true)}
               className="text-[10px] font-medium px-1.5 py-0.5 rounded shrink-0 bg-transparent border cursor-pointer whitespace-nowrap hover:bg-surface-hover focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-accent-primary"
-              style={{ color: 'var(--sam-color-fg-muted)', borderColor: 'var(--sam-color-border-default)' }}
+              style={{
+                color: 'var(--sam-color-fg-muted)',
+                borderColor: 'var(--sam-color-border-default)',
+              }}
               aria-label={`Show ${extraPortCount} more forwarded ${extraPortCount === 1 ? 'port' : 'ports'}`}
             >
               +{extraPortCount} more
@@ -327,7 +382,11 @@ export function SessionHeader({
           )}
 
           {loading && (
-            <span role="status" aria-label="Refreshing messages" className="inline-flex items-center shrink-0">
+            <span
+              role="status"
+              aria-label="Refreshing messages"
+              className="inline-flex items-center shrink-0"
+            >
               <Spinner size="sm" />
             </span>
           )}
@@ -395,12 +454,8 @@ export function SessionHeader({
                 <CopyableId label="Task" value={taskEmbed.id} icon={<Tag size={9} />} />
               )}
               <CopyableId label="Session" value={session.id} icon={<Hash size={9} />} />
-              {session.workspaceId && (
-                <CopyableId label="Workspace" value={session.workspaceId} />
-              )}
-              {session.agentSessionId && (
-                <CopyableId label="ACP" value={session.agentSessionId} />
-              )}
+              {session.workspaceId && <CopyableId label="Workspace" value={session.workspaceId} />}
+              {session.agentSessionId && <CopyableId label="ACP" value={session.agentSessionId} />}
             </div>
           </div>
 
@@ -409,15 +464,18 @@ export function SessionHeader({
               {session.agentType && (
                 <span className="inline-flex items-center gap-1">
                   <Bot size={11} className="opacity-60" aria-hidden="true" />
-                  <span className="font-medium text-fg-primary">{formatAgentType(session.agentType)}</span>
+                  <span className="font-medium text-fg-primary">
+                    {formatAgentType(session.agentType)}
+                  </span>
                 </span>
               )}
               {taskEmbed?.taskMode && (
                 <span className="inline-flex items-center gap-1">
-                  {taskEmbed.taskMode === 'conversation'
-                    ? <MessageSquare size={11} className="opacity-60" aria-hidden="true" />
-                    : <Cpu size={11} className="opacity-60" aria-hidden="true" />
-                  }
+                  {taskEmbed.taskMode === 'conversation' ? (
+                    <MessageSquare size={11} className="opacity-60" aria-hidden="true" />
+                  ) : (
+                    <Cpu size={11} className="opacity-60" aria-hidden="true" />
+                  )}
                   {formatTaskMode(taskEmbed.taskMode)}
                 </span>
               )}
@@ -435,7 +493,10 @@ export function SessionHeader({
               {taskEmbed?.executionStep && taskEmbed.status === 'in_progress' && (
                 <span className="inline-flex items-center gap-1">
                   <Spinner size="sm" />
-                  <span className="font-medium" style={{ color: 'var(--sam-color-accent-primary)' }}>
+                  <span
+                    className="font-medium"
+                    style={{ color: 'var(--sam-color-accent-primary)' }}
+                  >
                     {formatExecutionStep(taskEmbed.executionStep)}
                   </span>
                 </span>
@@ -444,18 +505,27 @@ export function SessionHeader({
                 <span
                   className="inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded"
                   style={{
-                    backgroundColor: taskEmbed.status === 'completed' ? 'var(--sam-color-success-tint)'
-                      : taskEmbed.status === 'failed' ? 'color-mix(in srgb, var(--sam-color-danger) 10%, transparent)'
-                      : taskEmbed.status === 'in_progress' ? 'var(--sam-color-accent-tint, rgba(59, 130, 246, 0.1))'
-                      : 'var(--sam-color-surface-hover)',
-                    color: taskEmbed.status === 'completed' ? 'var(--sam-color-success)'
-                      : taskEmbed.status === 'failed' ? 'var(--sam-color-danger)'
-                      : taskEmbed.status === 'in_progress' ? 'var(--sam-color-accent-primary)'
-                      : 'var(--sam-color-fg-muted)',
+                    backgroundColor:
+                      taskEmbed.status === 'completed'
+                        ? 'var(--sam-color-success-tint)'
+                        : taskEmbed.status === 'failed'
+                          ? 'color-mix(in srgb, var(--sam-color-danger) 10%, transparent)'
+                          : taskEmbed.status === 'in_progress'
+                            ? 'var(--sam-color-accent-tint, rgba(59, 130, 246, 0.1))'
+                            : 'var(--sam-color-surface-hover)',
+                    color:
+                      taskEmbed.status === 'completed'
+                        ? 'var(--sam-color-success)'
+                        : taskEmbed.status === 'failed'
+                          ? 'var(--sam-color-danger)'
+                          : taskEmbed.status === 'in_progress'
+                            ? 'var(--sam-color-accent-primary)'
+                            : 'var(--sam-color-fg-muted)',
                   }}
                 >
                   {taskEmbed.status === 'completed' && <CheckCircle2 size={10} />}
-                  {taskEmbed.status.charAt(0).toUpperCase() + taskEmbed.status.slice(1).replace(/_/g, ' ')}
+                  {taskEmbed.status.charAt(0).toUpperCase() +
+                    taskEmbed.status.slice(1).replace(/_/g, ' ')}
                 </span>
               )}
               {session.startedAt && (
@@ -469,8 +539,7 @@ export function SessionHeader({
                   <Timer size={11} className="opacity-60" />
                   {session.endedAt
                     ? formatDuration(session.endedAt - session.startedAt)
-                    : formatDuration(Date.now() - session.startedAt)
-                  }
+                    : formatDuration(Date.now() - session.startedAt)}
                   {!session.endedAt && <span className="text-[10px] opacity-50">(running)</span>}
                 </span>
               )}
@@ -485,9 +554,10 @@ export function SessionHeader({
                 <span
                   className="sam-type-caption font-mono"
                   style={{
-                    color: idleCountdownMs < 5 * 60 * 1000
-                      ? 'var(--sam-color-danger)'
-                      : 'var(--sam-color-warning, #f59e0b)',
+                    color:
+                      idleCountdownMs < 5 * 60 * 1000
+                        ? 'var(--sam-color-danger)'
+                        : 'var(--sam-color-warning, #f59e0b)',
                   }}
                 >
                   Cleanup in {formatCountdown(idleCountdownMs)}
@@ -513,9 +583,15 @@ export function SessionHeader({
           {triggerDetail?.trigger && (
             <div
               className="flex items-start gap-2 px-2 py-1.5 rounded text-xs"
-              style={{ background: 'color-mix(in srgb, var(--sam-color-info, #3b82f6) 8%, transparent)' }}
+              style={{
+                background: 'color-mix(in srgb, var(--sam-color-info, #3b82f6) 8%, transparent)',
+              }}
             >
-              <Clock size={12} className="shrink-0 mt-0.5" style={{ color: 'var(--sam-color-info, #3b82f6)' }} />
+              <Clock
+                size={12}
+                className="shrink-0 mt-0.5"
+                style={{ color: 'var(--sam-color-info, #3b82f6)' }}
+              />
               <div className="flex-1 min-w-0 space-y-0.5">
                 <div className="font-medium text-fg-primary">
                   Triggered by: {triggerDetail.trigger.name}
@@ -548,7 +624,13 @@ export function SessionHeader({
             </div>
           )}
 
-          {sourceContext && <SessionSourceContextRow projectId={projectId} sourceContext={sourceContext} onShowHierarchy={onShowHierarchy} />}
+          {sourceContext && (
+            <SessionSourceContextRow
+              projectId={projectId}
+              sourceContext={sourceContext}
+              onShowHierarchy={onShowHierarchy}
+            />
+          )}
 
           {/* Action buttons — wraps on narrow viewports */}
           <div className="flex flex-wrap items-center gap-1.5">
@@ -620,7 +702,9 @@ export function SessionHeader({
           {/* Inline error for mark-complete failures */}
           {completeError && (
             <div className="flex items-center gap-2 px-1 py-1">
-              <span className="text-xs" style={{ color: 'var(--sam-color-danger)' }}>{completeError}</span>
+              <span className="text-xs" style={{ color: 'var(--sam-color-danger)' }}>
+                {completeError}
+              </span>
               <button
                 type="button"
                 onClick={() => setCompleteError(null)}
@@ -632,114 +716,22 @@ export function SessionHeader({
             </div>
           )}
 
-          {/* Infrastructure context — workspace & node details */}
-          {session.workspaceId && (workspace || node) && (
-            <div className="flex flex-col gap-1.5 pt-1 border-t border-border-default">
-              {workspace && (
-                <>
-                  <ContextItem icon={<Box size={12} />} label="Workspace">
-                    <a
-                      href={`/workspaces/${workspace.id}`}
-                      className="no-underline hover:underline"
-                      style={{ color: 'var(--sam-color-accent-primary)' }}
-                    >
-                      {workspace.displayName || workspace.name}
-                    </a>
-                    <span className="text-fg-muted ml-1">({workspace.status})</span>
-                  </ContextItem>
-                  <ContextItem icon={<Cpu size={12} />} label="VM Size">
-                    {formatVmSize(workspace.vmSize)}
-                  </ContextItem>
-                </>
-              )}
-              {node && (
-                <>
-                  <ContextItem icon={<Server size={12} />} label="Node">
-                    <a
-                      href={`/nodes/${node.id}`}
-                      className="no-underline hover:underline"
-                      style={{ color: 'var(--sam-color-accent-primary)' }}
-                    >
-                      {node.name}
-                    </a>
-                    {node.healthStatus && (
-                      <span
-                        className="ml-1"
-                        style={{
-                          color: node.healthStatus === 'healthy' ? 'var(--sam-color-success)'
-                            : node.healthStatus === 'stale' ? 'var(--sam-color-warning, #f59e0b)'
-                            : 'var(--sam-color-danger)',
-                        }}
-                      >
-                        ({node.healthStatus})
-                      </span>
-                    )}
-                  </ContextItem>
-                  {node.cloudProvider && (
-                    <ContextItem icon={<Cloud size={12} />} label="Provider">
-                      {node.cloudProvider.charAt(0).toUpperCase() + node.cloudProvider.slice(1)}
-                      {workspace?.vmLocation && (
-                        <span className="text-fg-muted ml-1">— {workspace.vmLocation}</span>
-                      )}
-                    </ContextItem>
-                  )}
-                </>
-              )}
-              {!node && workspace?.vmLocation && (
-                <ContextItem icon={<MapPin size={12} />} label="Location">
-                  {workspace.vmLocation}
-                </ContextItem>
-              )}
-              {taskEmbed?.outputBranch && (
-                <ContextItem icon={<GitBranch size={12} />} label="Branch">
-                  <span className="font-mono text-[11px]">
-                    {taskEmbed.outputBranch}
-                  </span>
-                </ContextItem>
-              )}
-              {detectedPorts.length > 0 && (
-                <PortsContextItem ports={detectedPorts} getHref={getWorkspacePortHref} />
-              )}
-            </div>
-          )}
-          {/* Active ports section — shown when ports are detected and no infrastructure section is shown */}
-          {detectedPorts.length > 0 && !(session.workspaceId && (workspace || node)) && (
-            <div className="flex flex-col gap-1.5 pt-1 border-t border-border-default">
-              <PortsContextItem ports={detectedPorts} getHref={getWorkspacePortHref} />
-            </div>
-          )}
-          {/* Fallback when workspace data is still loading or failed */}
-          {session.workspaceId && !workspace && !node && (
-            <div className="pt-1 border-t border-border-default">
-              <span className="text-xs text-fg-muted">Loading infrastructure details...</span>
-            </div>
-          )}
+          <SessionHeaderInfrastructure
+            session={session}
+            workspace={workspace}
+            node={node}
+            taskEmbed={taskEmbed}
+            detectedPorts={detectedPorts}
+            getWorkspacePortHref={getWorkspacePortHref}
+          />
         </div>
       )}
 
-      {/* Confirmation dialog for mark-complete action */}
-      <Dialog
+      <SessionHeaderCompletionDialog
         isOpen={confirmOpen}
         onClose={() => setConfirmOpen(false)}
-        maxWidth="sm"
-        aria-labelledby="complete-task-title"
-        aria-describedby="complete-task-description"
-      >
-        <h3 id="complete-task-title" className="text-base font-semibold text-fg-primary mb-2">
-          Mark task as complete?
-        </h3>
-        <p id="complete-task-description" className="text-sm text-fg-muted mb-4">
-          This will archive the task and delete the workspace. This action cannot be undone.
-        </p>
-        <div className="flex justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={() => setConfirmOpen(false)}>
-            Cancel
-          </Button>
-          <Button variant="primary" size="sm" onClick={handleMarkComplete}>
-            Complete & Delete
-          </Button>
-        </div>
-      </Dialog>
+        onConfirm={handleMarkComplete}
+      />
     </div>
   );
 }

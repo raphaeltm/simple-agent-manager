@@ -1,6 +1,5 @@
 import type {
   ListProjectsResponse,
-  Project,
   ProjectDetailResponse,
   RepoProvider,
   TaskStatus,
@@ -36,7 +35,11 @@ import { getCredentialEncryptionKey } from '../../lib/secrets';
 import { ulid } from '../../lib/ulid';
 import { getUserId } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import { createOwnerProjectMembership, requireProjectAccess, requireProjectCapability } from '../../middleware/project-auth';
+import {
+  createOwnerProjectMembership,
+  requireProjectAccess,
+  requireProjectCapability,
+} from '../../middleware/project-auth';
 import {
   CreateProjectSchema,
   jsonValidator,
@@ -77,7 +80,10 @@ import {
 
 const crudRoutes = new Hono<{ Bindings: Env }>();
 
-async function cleanupArtifactsRepoOnProjectDelete(env: Env, project: schema.Project): Promise<void> {
+async function cleanupArtifactsRepoOnProjectDelete(
+  env: Env,
+  project: schema.Project
+): Promise<void> {
   if (project.repoProvider !== 'artifacts' || !project.artifactsRepoId) {
     return;
   }
@@ -142,10 +148,7 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
     .select({ id: schema.projects.id })
     .from(schema.projects)
     .where(
-      and(
-        eq(schema.projects.userId, userId),
-        eq(schema.projects.normalizedName, normalizedName)
-      )
+      and(eq(schema.projects.userId, userId), eq(schema.projects.normalizedName, normalizedName))
     )
     .limit(1);
   if (duplicateNameRows[0]) {
@@ -166,23 +169,23 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
     }
 
     // Check per-user Artifacts repo limit
-    const maxRepos = parseInt(c.env.ARTIFACTS_MAX_REPOS_PER_USER || '', 10) || ARTIFACTS_DEFAULTS.MAX_REPOS_PER_USER;
+    const maxRepos =
+      parseInt(c.env.ARTIFACTS_MAX_REPOS_PER_USER || '', 10) ||
+      ARTIFACTS_DEFAULTS.MAX_REPOS_PER_USER;
     const [artifactsCountRow] = await db
       .select({ count: count() })
       .from(schema.projects)
       .where(
-        and(
-          eq(schema.projects.userId, userId),
-          eq(schema.projects.repoProvider, 'artifacts')
-        )
+        and(eq(schema.projects.userId, userId), eq(schema.projects.repoProvider, 'artifacts'))
       );
     if ((artifactsCountRow?.count ?? 0) >= maxRepos) {
       throw errors.badRequest(`Maximum ${maxRepos} Artifacts-backed projects allowed`);
     }
 
-    const defaultBranch = body.defaultBranch?.trim()
-      || c.env.ARTIFACTS_DEFAULT_BRANCH
-      || ARTIFACTS_DEFAULTS.DEFAULT_BRANCH;
+    const defaultBranch =
+      body.defaultBranch?.trim() ||
+      c.env.ARTIFACTS_DEFAULT_BRANCH ||
+      ARTIFACTS_DEFAULTS.DEFAULT_BRANCH;
 
     // Validate the branch name before it is embedded verbatim in the git
     // receive-pack pkt-line frame during seeding. Reject shell/control/protocol
@@ -250,8 +253,7 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
         normalizedName,
         description,
         installationId:
-          c.env.TRIAL_ANONYMOUS_INSTALLATION_ID ??
-          'system_anonymous_trials_installation',
+          c.env.TRIAL_ANONYMOUS_INSTALLATION_ID ?? 'system_anonymous_trials_installation',
         repository,
         defaultBranch,
         repoProvider: 'artifacts',
@@ -318,8 +320,7 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
       normalizedName,
       description,
       installationId:
-        c.env.TRIAL_ANONYMOUS_INSTALLATION_ID ??
-        'system_anonymous_trials_installation',
+        c.env.TRIAL_ANONYMOUS_INSTALLATION_ID ?? 'system_anonymous_trials_installation',
       repository: metadata.pathWithNamespace,
       defaultBranch: selectedBranch,
       repoProvider: 'gitlab',
@@ -356,7 +357,9 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
     const githubRepoNodeId = body.githubRepoNodeId?.trim() || null;
 
     if (!installationId || !repository || !defaultBranch) {
-      throw errors.badRequest('installationId, repository, and defaultBranch are required for GitHub projects');
+      throw errors.badRequest(
+        'installationId, repository, and defaultBranch are required for GitHub projects'
+      );
     }
 
     if (!isValidRepositoryFormat(repository)) {
@@ -375,7 +378,11 @@ crudRoutes.post('/', jsonValidator(CreateProjectSchema), async (c) => {
     if (githubRepoId !== null && githubRepoId !== verifiedRepo.id) {
       throw errors.forbidden('GitHub repository ID does not match the selected repository');
     }
-    if (githubRepoNodeId !== null && verifiedRepo.nodeId !== null && githubRepoNodeId !== verifiedRepo.nodeId) {
+    if (
+      githubRepoNodeId !== null &&
+      verifiedRepo.nodeId !== null &&
+      githubRepoNodeId !== verifiedRepo.nodeId
+    ) {
       throw errors.forbidden('GitHub repository node ID does not match the selected repository');
     }
     const storedGitHubRepoId = verifiedRepo.id;
@@ -471,11 +478,12 @@ crudRoutes.get('/', async (c) => {
   }
 
   // Choose sort order
-  const orderBy = sortField === 'name'
-    ? desc(schema.projects.name)
-    : sortField === 'created_at'
-      ? desc(schema.projects.createdAt)
-      : desc(schema.projects.lastActivityAt);
+  const orderBy =
+    sortField === 'name'
+      ? desc(schema.projects.name)
+      : sortField === 'created_at'
+        ? desc(schema.projects.createdAt)
+        : desc(schema.projects.lastActivityAt);
 
   const rows = await db
     .select()
@@ -500,7 +508,10 @@ crudRoutes.get('/', async (c) => {
       .from(schema.workspaces)
       .where(
         and(
-          sql`${schema.workspaces.projectId} IN (${sql.join(projectIds.map((id) => sql`${id}`), sql`, `)})`,
+          sql`${schema.workspaces.projectId} IN (${sql.join(
+            projectIds.map((id) => sql`${id}`),
+            sql`, `
+          )})`,
           eq(schema.workspaces.status, 'running')
         )
       )
@@ -514,9 +525,7 @@ crudRoutes.get('/', async (c) => {
   }
 
   const response: ListProjectsResponse = {
-    projects: projects.map((p) =>
-      toProjectSummaryResponse(p, workspaceCountMap.get(p.id) ?? 0) as unknown as Project
-    ),
+    projects: projects.map((p) => toProjectSummaryResponse(p, workspaceCountMap.get(p.id) ?? 0)),
     nextCursor,
   };
 
@@ -551,10 +560,7 @@ crudRoutes.get('/:id', async (c) => {
     .select({ count: count() })
     .from(schema.workspaces)
     .where(
-      and(
-        eq(schema.workspaces.projectId, project.id),
-        eq(schema.workspaces.status, 'running')
-      )
+      and(eq(schema.workspaces.projectId, project.id), eq(schema.workspaces.status, 'running'))
     );
 
   const multiplayerState = await getProjectMultiplayerState(db, project.id);
@@ -571,7 +577,10 @@ crudRoutes.get('/:id', async (c) => {
     recentActivity = activityResult.events;
   } catch (err) {
     // DO may not exist yet for projects created before this feature
-    log.error('project.do_fetch_failed', { projectId: project.id, error: err instanceof Error ? err.message : String(err) });
+    log.error('project.do_fetch_failed', {
+      projectId: project.id,
+      error: err instanceof Error ? err.message : String(err),
+    });
   }
 
   const response: ProjectDetailResponse = {
@@ -601,89 +610,89 @@ crudRoutes.get('/:id/runtime-config', async (c) => {
   return c.json(response);
 });
 
-crudRoutes.post('/:id/runtime/env-vars', jsonValidator(UpsertProjectRuntimeEnvVarSchema), async (c) => {
-  const userId = getUserId(c);
-  const projectId = c.req.param('id');
-  const db = drizzle(c.env.DATABASE, { schema });
-  const body = c.req.valid('json');
-  const limits = getRuntimeLimits(c.env);
+crudRoutes.post(
+  '/:id/runtime/env-vars',
+  jsonValidator(UpsertProjectRuntimeEnvVarSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const projectId = c.req.param('id');
+    const db = drizzle(c.env.DATABASE, { schema });
+    const body = c.req.valid('json');
+    const limits = getRuntimeLimits(c.env);
 
-  const project = await requireProjectCapability(db, projectId, userId, 'secret:write');
-  const envKey = body.key?.trim();
-  if (!envKey || !PROJECT_ENV_KEY_PATTERN.test(envKey)) {
-    throw errors.badRequest('key must match [A-Za-z_][A-Za-z0-9_]*');
-  }
+    const project = await requireProjectCapability(db, projectId, userId, 'secret:write');
+    const envKey = body.key?.trim();
+    if (!envKey || !PROJECT_ENV_KEY_PATTERN.test(envKey)) {
+      throw errors.badRequest('key must match [A-Za-z_][A-Za-z0-9_]*');
+    }
 
-  if (typeof body.value !== 'string') {
-    throw errors.badRequest('value is required');
-  }
-  if (byteLength(body.value) > limits.maxProjectRuntimeEnvValueBytes) {
-    throw errors.badRequest(
-      `value exceeds max size of ${limits.maxProjectRuntimeEnvValueBytes} bytes`
-    );
-  }
+    if (typeof body.value !== 'string') {
+      throw errors.badRequest('value is required');
+    }
+    if (byteLength(body.value) > limits.maxProjectRuntimeEnvValueBytes) {
+      throw errors.badRequest(
+        `value exceeds max size of ${limits.maxProjectRuntimeEnvValueBytes} bytes`
+      );
+    }
 
-  const isSecret = Boolean(body.isSecret);
-  const existingRows = await db
-    .select({ id: schema.projectRuntimeEnvVars.id })
-    .from(schema.projectRuntimeEnvVars)
-    .where(
-      and(
-        eq(schema.projectRuntimeEnvVars.projectId, project.id),
-        eq(schema.projectRuntimeEnvVars.envKey, envKey)
-      )
-    )
-    .limit(1);
-
-  if (!existingRows[0]) {
-    const countRows = await db
-      .select({ count: count() })
+    const isSecret = Boolean(body.isSecret);
+    const existingRows = await db
+      .select({ id: schema.projectRuntimeEnvVars.id })
       .from(schema.projectRuntimeEnvVars)
       .where(
         and(
-          eq(schema.projectRuntimeEnvVars.projectId, project.id)
+          eq(schema.projectRuntimeEnvVars.projectId, project.id),
+          eq(schema.projectRuntimeEnvVars.envKey, envKey)
         )
-      );
+      )
+      .limit(1);
 
-    if ((countRows[0]?.count ?? 0) >= limits.maxProjectRuntimeEnvVarsPerProject) {
-      throw errors.badRequest(
-        `Maximum ${limits.maxProjectRuntimeEnvVarsPerProject} runtime env vars allowed per project`
-      );
+    if (!existingRows[0]) {
+      const countRows = await db
+        .select({ count: count() })
+        .from(schema.projectRuntimeEnvVars)
+        .where(and(eq(schema.projectRuntimeEnvVars.projectId, project.id)));
+
+      if ((countRows[0]?.count ?? 0) >= limits.maxProjectRuntimeEnvVarsPerProject) {
+        throw errors.badRequest(
+          `Maximum ${limits.maxProjectRuntimeEnvVarsPerProject} runtime env vars allowed per project`
+        );
+      }
     }
-  }
 
-  const stored = isSecret
-    ? await encrypt(body.value, getCredentialEncryptionKey(c.env))
-    : { ciphertext: body.value, iv: null };
+    const stored = isSecret
+      ? await encrypt(body.value, getCredentialEncryptionKey(c.env))
+      : { ciphertext: body.value, iv: null };
 
-  const now = new Date().toISOString();
-  if (existingRows[0]) {
-    await db
-      .update(schema.projectRuntimeEnvVars)
-      .set({
+    const now = new Date().toISOString();
+    if (existingRows[0]) {
+      await db
+        .update(schema.projectRuntimeEnvVars)
+        .set({
+          storedValue: stored.ciphertext,
+          valueIv: stored.iv,
+          isSecret,
+          updatedAt: now,
+        })
+        .where(eq(schema.projectRuntimeEnvVars.id, existingRows[0].id));
+    } else {
+      await db.insert(schema.projectRuntimeEnvVars).values({
+        id: ulid(),
+        projectId: project.id,
+        userId,
+        envKey,
         storedValue: stored.ciphertext,
         valueIv: stored.iv,
         isSecret,
+        createdAt: now,
         updatedAt: now,
-      })
-      .where(eq(schema.projectRuntimeEnvVars.id, existingRows[0].id));
-  } else {
-    await db.insert(schema.projectRuntimeEnvVars).values({
-      id: ulid(),
-      projectId: project.id,
-      userId,
-      envKey,
-      storedValue: stored.ciphertext,
-      valueIv: stored.iv,
-      isSecret,
-      createdAt: now,
-      updatedAt: now,
-    });
-  }
+      });
+    }
 
-  const response = await buildProjectRuntimeConfigResponse(db, project);
-  return c.json(response);
-});
+    const response = await buildProjectRuntimeConfigResponse(db, project);
+    return c.json(response);
+  }
+);
 
 crudRoutes.delete('/:id/runtime/env-vars/:envKey', async (c) => {
   const userId = getUserId(c);
@@ -750,11 +759,7 @@ crudRoutes.post('/:id/runtime/files', jsonValidator(UpsertProjectRuntimeFileSche
     const countRows = await db
       .select({ count: count() })
       .from(schema.projectRuntimeFiles)
-      .where(
-        and(
-          eq(schema.projectRuntimeFiles.projectId, project.id)
-        )
-      );
+      .where(and(eq(schema.projectRuntimeFiles.projectId, project.id)));
 
     if ((countRows[0]?.count ?? 0) >= limits.maxProjectRuntimeFilesPerProject) {
       throw errors.badRequest(
@@ -830,12 +835,26 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
   const existing = await requireProjectCapability(db, projectId, userId, 'project:update');
 
   const allFieldKeys: (keyof UpdateProjectRequest)[] = [
-    'name', 'description', 'defaultBranch', 'defaultVmSize', 'defaultAgentType',
-    'defaultWorkspaceProfile', 'defaultDevcontainerConfigName', 'defaultProvider', 'defaultLocation',
+    'name',
+    'description',
+    'defaultBranch',
+    'defaultVmSize',
+    'defaultAgentType',
+    'defaultWorkspaceProfile',
+    'defaultDevcontainerConfigName',
+    'defaultProvider',
+    'defaultLocation',
     'agentDefaults',
-    'workspaceIdleTimeoutMs', 'nodeIdleTimeoutMs',
-    'taskExecutionTimeoutMs', 'maxConcurrentTasks', 'maxDispatchDepth', 'maxSubTasksPerTask',
-    'warmNodeTimeoutMs', 'maxWorkspacesPerNode', 'nodeCpuThresholdPercent', 'nodeMemoryThresholdPercent',
+    'workspaceIdleTimeoutMs',
+    'nodeIdleTimeoutMs',
+    'taskExecutionTimeoutMs',
+    'maxConcurrentTasks',
+    'maxDispatchDepth',
+    'maxSubTasksPerTask',
+    'warmNodeTimeoutMs',
+    'maxWorkspacesPerNode',
+    'nodeCpuThresholdPercent',
+    'nodeMemoryThresholdPercent',
   ];
   if (allFieldKeys.every((k) => body[k] === undefined)) {
     throw errors.badRequest('At least one field is required');
@@ -853,35 +872,62 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
   }
 
   const validVmSizes = ['small', 'medium', 'large'];
-  if (body.defaultVmSize !== undefined && body.defaultVmSize !== null && !validVmSizes.includes(body.defaultVmSize)) {
+  if (
+    body.defaultVmSize !== undefined &&
+    body.defaultVmSize !== null &&
+    !validVmSizes.includes(body.defaultVmSize)
+  ) {
     throw errors.badRequest('defaultVmSize must be small, medium, or large');
   }
 
-  if (body.defaultAgentType !== undefined && body.defaultAgentType !== null && !isValidAgentType(body.defaultAgentType)) {
+  if (
+    body.defaultAgentType !== undefined &&
+    body.defaultAgentType !== null &&
+    !isValidAgentType(body.defaultAgentType)
+  ) {
     throw errors.badRequest('defaultAgentType must be a valid agent type');
   }
 
-  if (body.defaultWorkspaceProfile !== undefined && body.defaultWorkspaceProfile !== null && !VALID_WORKSPACE_PROFILES.includes(body.defaultWorkspaceProfile)) {
+  if (
+    body.defaultWorkspaceProfile !== undefined &&
+    body.defaultWorkspaceProfile !== null &&
+    !VALID_WORKSPACE_PROFILES.includes(body.defaultWorkspaceProfile)
+  ) {
     throw errors.badRequest('defaultWorkspaceProfile must be full or lightweight');
   }
 
-  if (body.defaultDevcontainerConfigName !== undefined && body.defaultDevcontainerConfigName !== null) {
-    if (!DEVCONTAINER_CONFIG_NAME_REGEX.test(body.defaultDevcontainerConfigName) || body.defaultDevcontainerConfigName.length > DEVCONTAINER_CONFIG_NAME_MAX_LENGTH) {
-      throw errors.badRequest('defaultDevcontainerConfigName must be alphanumeric with hyphens/underscores, max 128 chars');
+  if (
+    body.defaultDevcontainerConfigName !== undefined &&
+    body.defaultDevcontainerConfigName !== null
+  ) {
+    if (
+      !DEVCONTAINER_CONFIG_NAME_REGEX.test(body.defaultDevcontainerConfigName) ||
+      body.defaultDevcontainerConfigName.length > DEVCONTAINER_CONFIG_NAME_MAX_LENGTH
+    ) {
+      throw errors.badRequest(
+        'defaultDevcontainerConfigName must be alphanumeric with hyphens/underscores, max 128 chars'
+      );
     }
   }
 
-  if (body.defaultProvider !== undefined && body.defaultProvider !== null && !CREDENTIAL_PROVIDERS.includes(body.defaultProvider)) {
+  if (
+    body.defaultProvider !== undefined &&
+    body.defaultProvider !== null &&
+    !CREDENTIAL_PROVIDERS.includes(body.defaultProvider)
+  ) {
     throw errors.badRequest(`defaultProvider must be one of: ${CREDENTIAL_PROVIDERS.join(', ')}`);
   }
 
   // Determine the effective provider for location validation
-  const effectiveProvider = body.defaultProvider === undefined
-    ? existing.defaultProvider
-    : (body.defaultProvider ?? null);
+  const effectiveProvider =
+    body.defaultProvider === undefined ? existing.defaultProvider : (body.defaultProvider ?? null);
 
   // If defaultProvider changed, clear defaultLocation unless explicitly set in this request
-  if (body.defaultProvider !== undefined && body.defaultProvider !== existing.defaultProvider && body.defaultLocation === undefined) {
+  if (
+    body.defaultProvider !== undefined &&
+    body.defaultProvider !== existing.defaultProvider &&
+    body.defaultLocation === undefined
+  ) {
     body.defaultLocation = null;
   }
 
@@ -891,7 +937,9 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
       throw errors.badRequest('Cannot set defaultLocation without a valid defaultProvider');
     }
     if (!isValidLocationForProvider(effectiveProvider, body.defaultLocation)) {
-      throw errors.badRequest(`defaultLocation '${body.defaultLocation}' is not valid for provider '${effectiveProvider}'`);
+      throw errors.badRequest(
+        `defaultLocation '${body.defaultLocation}' is not valid for provider '${effectiveProvider}'`
+      );
     }
   }
 
@@ -932,14 +980,26 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
   }
 
   if (body.workspaceIdleTimeoutMs !== undefined && body.workspaceIdleTimeoutMs !== null) {
-    if (!Number.isFinite(body.workspaceIdleTimeoutMs) || body.workspaceIdleTimeoutMs < MIN_WORKSPACE_IDLE_TIMEOUT_MS || body.workspaceIdleTimeoutMs > MAX_WORKSPACE_IDLE_TIMEOUT_MS) {
-      throw errors.badRequest(`workspaceIdleTimeoutMs must be between ${MIN_WORKSPACE_IDLE_TIMEOUT_MS} and ${MAX_WORKSPACE_IDLE_TIMEOUT_MS}`);
+    if (
+      !Number.isFinite(body.workspaceIdleTimeoutMs) ||
+      body.workspaceIdleTimeoutMs < MIN_WORKSPACE_IDLE_TIMEOUT_MS ||
+      body.workspaceIdleTimeoutMs > MAX_WORKSPACE_IDLE_TIMEOUT_MS
+    ) {
+      throw errors.badRequest(
+        `workspaceIdleTimeoutMs must be between ${MIN_WORKSPACE_IDLE_TIMEOUT_MS} and ${MAX_WORKSPACE_IDLE_TIMEOUT_MS}`
+      );
     }
   }
 
   if (body.nodeIdleTimeoutMs !== undefined && body.nodeIdleTimeoutMs !== null) {
-    if (!Number.isFinite(body.nodeIdleTimeoutMs) || body.nodeIdleTimeoutMs < MIN_NODE_IDLE_TIMEOUT_MS || body.nodeIdleTimeoutMs > MAX_NODE_IDLE_TIMEOUT_MS) {
-      throw errors.badRequest(`nodeIdleTimeoutMs must be between ${MIN_NODE_IDLE_TIMEOUT_MS} and ${MAX_NODE_IDLE_TIMEOUT_MS}`);
+    if (
+      !Number.isFinite(body.nodeIdleTimeoutMs) ||
+      body.nodeIdleTimeoutMs < MIN_NODE_IDLE_TIMEOUT_MS ||
+      body.nodeIdleTimeoutMs > MAX_NODE_IDLE_TIMEOUT_MS
+    ) {
+      throw errors.badRequest(
+        `nodeIdleTimeoutMs must be between ${MIN_NODE_IDLE_TIMEOUT_MS} and ${MAX_NODE_IDLE_TIMEOUT_MS}`
+      );
     }
   }
 
@@ -993,25 +1053,73 @@ crudRoutes.patch('/:id', jsonValidator(UpdateProjectSchema), async (c) => {
     .set({
       name: nextName,
       normalizedName,
-      description: body.description === undefined ? existing.description : body.description?.trim() || null,
+      description:
+        body.description === undefined ? existing.description : body.description?.trim() || null,
       defaultBranch: nextDefaultBranch,
-      defaultVmSize: body.defaultVmSize === undefined ? existing.defaultVmSize : (body.defaultVmSize ?? null),
-      defaultAgentType: body.defaultAgentType === undefined ? existing.defaultAgentType : (body.defaultAgentType ?? null),
-      defaultWorkspaceProfile: body.defaultWorkspaceProfile === undefined ? existing.defaultWorkspaceProfile : (body.defaultWorkspaceProfile ?? null),
-      defaultDevcontainerConfigName: body.defaultDevcontainerConfigName === undefined ? existing.defaultDevcontainerConfigName : (body.defaultDevcontainerConfigName ?? null),
-      defaultProvider: body.defaultProvider === undefined ? existing.defaultProvider : (body.defaultProvider ?? null),
-      defaultLocation: body.defaultLocation === undefined ? existing.defaultLocation : (body.defaultLocation ?? null),
-      agentDefaults: agentDefaultsColumn === undefined ? existing.agentDefaults : agentDefaultsColumn,
-      workspaceIdleTimeoutMs: body.workspaceIdleTimeoutMs === undefined ? existing.workspaceIdleTimeoutMs : (body.workspaceIdleTimeoutMs ?? null),
-      nodeIdleTimeoutMs: body.nodeIdleTimeoutMs === undefined ? existing.nodeIdleTimeoutMs : (body.nodeIdleTimeoutMs ?? null),
-      taskExecutionTimeoutMs: body.taskExecutionTimeoutMs === undefined ? existing.taskExecutionTimeoutMs : (body.taskExecutionTimeoutMs ?? null),
-      maxConcurrentTasks: body.maxConcurrentTasks === undefined ? existing.maxConcurrentTasks : (body.maxConcurrentTasks ?? null),
-      maxDispatchDepth: body.maxDispatchDepth === undefined ? existing.maxDispatchDepth : (body.maxDispatchDepth ?? null),
-      maxSubTasksPerTask: body.maxSubTasksPerTask === undefined ? existing.maxSubTasksPerTask : (body.maxSubTasksPerTask ?? null),
-      warmNodeTimeoutMs: body.warmNodeTimeoutMs === undefined ? existing.warmNodeTimeoutMs : (body.warmNodeTimeoutMs ?? null),
-      maxWorkspacesPerNode: body.maxWorkspacesPerNode === undefined ? existing.maxWorkspacesPerNode : (body.maxWorkspacesPerNode ?? null),
-      nodeCpuThresholdPercent: body.nodeCpuThresholdPercent === undefined ? existing.nodeCpuThresholdPercent : (body.nodeCpuThresholdPercent ?? null),
-      nodeMemoryThresholdPercent: body.nodeMemoryThresholdPercent === undefined ? existing.nodeMemoryThresholdPercent : (body.nodeMemoryThresholdPercent ?? null),
+      defaultVmSize:
+        body.defaultVmSize === undefined ? existing.defaultVmSize : (body.defaultVmSize ?? null),
+      defaultAgentType:
+        body.defaultAgentType === undefined
+          ? existing.defaultAgentType
+          : (body.defaultAgentType ?? null),
+      defaultWorkspaceProfile:
+        body.defaultWorkspaceProfile === undefined
+          ? existing.defaultWorkspaceProfile
+          : (body.defaultWorkspaceProfile ?? null),
+      defaultDevcontainerConfigName:
+        body.defaultDevcontainerConfigName === undefined
+          ? existing.defaultDevcontainerConfigName
+          : (body.defaultDevcontainerConfigName ?? null),
+      defaultProvider:
+        body.defaultProvider === undefined
+          ? existing.defaultProvider
+          : (body.defaultProvider ?? null),
+      defaultLocation:
+        body.defaultLocation === undefined
+          ? existing.defaultLocation
+          : (body.defaultLocation ?? null),
+      agentDefaults:
+        agentDefaultsColumn === undefined ? existing.agentDefaults : agentDefaultsColumn,
+      workspaceIdleTimeoutMs:
+        body.workspaceIdleTimeoutMs === undefined
+          ? existing.workspaceIdleTimeoutMs
+          : (body.workspaceIdleTimeoutMs ?? null),
+      nodeIdleTimeoutMs:
+        body.nodeIdleTimeoutMs === undefined
+          ? existing.nodeIdleTimeoutMs
+          : (body.nodeIdleTimeoutMs ?? null),
+      taskExecutionTimeoutMs:
+        body.taskExecutionTimeoutMs === undefined
+          ? existing.taskExecutionTimeoutMs
+          : (body.taskExecutionTimeoutMs ?? null),
+      maxConcurrentTasks:
+        body.maxConcurrentTasks === undefined
+          ? existing.maxConcurrentTasks
+          : (body.maxConcurrentTasks ?? null),
+      maxDispatchDepth:
+        body.maxDispatchDepth === undefined
+          ? existing.maxDispatchDepth
+          : (body.maxDispatchDepth ?? null),
+      maxSubTasksPerTask:
+        body.maxSubTasksPerTask === undefined
+          ? existing.maxSubTasksPerTask
+          : (body.maxSubTasksPerTask ?? null),
+      warmNodeTimeoutMs:
+        body.warmNodeTimeoutMs === undefined
+          ? existing.warmNodeTimeoutMs
+          : (body.warmNodeTimeoutMs ?? null),
+      maxWorkspacesPerNode:
+        body.maxWorkspacesPerNode === undefined
+          ? existing.maxWorkspacesPerNode
+          : (body.maxWorkspacesPerNode ?? null),
+      nodeCpuThresholdPercent:
+        body.nodeCpuThresholdPercent === undefined
+          ? existing.nodeCpuThresholdPercent
+          : (body.nodeCpuThresholdPercent ?? null),
+      nodeMemoryThresholdPercent:
+        body.nodeMemoryThresholdPercent === undefined
+          ? existing.nodeMemoryThresholdPercent
+          : (body.nodeMemoryThresholdPercent ?? null),
       updatedAt: new Date().toISOString(),
     })
     .where(eq(schema.projects.id, projectId));
@@ -1062,16 +1170,16 @@ crudRoutes.delete('/:id', async (c) => {
     for (let i = 0; i < taskIds.length; i += D1_PARAM_LIMIT) {
       const chunk = taskIds.slice(i, i + D1_PARAM_LIMIT);
       statements.push(
-        db.delete(schema.taskStatusEvents).where(inArray(schema.taskStatusEvents.taskId, chunk)),
+        db.delete(schema.taskStatusEvents).where(inArray(schema.taskStatusEvents.taskId, chunk))
       );
       statements.push(
-        db.delete(schema.taskDependencies).where(inArray(schema.taskDependencies.taskId, chunk)),
+        db.delete(schema.taskDependencies).where(inArray(schema.taskDependencies.taskId, chunk))
       );
       // Also clean up dependencies referencing these tasks from other projects
       statements.push(
         db
           .delete(schema.taskDependencies)
-          .where(inArray(schema.taskDependencies.dependsOnTaskId, chunk)),
+          .where(inArray(schema.taskDependencies.dependsOnTaskId, chunk))
       );
     }
   }
@@ -1081,25 +1189,23 @@ crudRoutes.delete('/:id', async (c) => {
   statements.push(
     db
       .delete(schema.projectRuntimeEnvVars)
-      .where(eq(schema.projectRuntimeEnvVars.projectId, projectId)),
+      .where(eq(schema.projectRuntimeEnvVars.projectId, projectId))
   );
   statements.push(
-    db
-      .delete(schema.projectRuntimeFiles)
-      .where(eq(schema.projectRuntimeFiles.projectId, projectId)),
+    db.delete(schema.projectRuntimeFiles).where(eq(schema.projectRuntimeFiles.projectId, projectId))
   );
   statements.push(
-    db.delete(schema.agentProfiles).where(eq(schema.agentProfiles.projectId, projectId)),
+    db.delete(schema.agentProfiles).where(eq(schema.agentProfiles.projectId, projectId))
   );
   statements.push(
     db
       .delete(schema.projectGithubRepositories)
-      .where(eq(schema.projectGithubRepositories.projectId, projectId)),
+      .where(eq(schema.projectGithubRepositories.projectId, projectId))
   );
   statements.push(
     db
       .delete(schema.projectGitlabRepositories)
-      .where(eq(schema.projectGitlabRepositories.projectId, projectId)),
+      .where(eq(schema.projectGitlabRepositories.projectId, projectId))
   );
   statements.push(...buildProjectLibraryDeleteStatements(db, projectId));
 
@@ -1108,18 +1214,18 @@ crudRoutes.delete('/:id', async (c) => {
     db
       .update(schema.workspaces)
       .set({ projectId: null, updatedAt: new Date().toISOString() })
-      .where(eq(schema.workspaces.projectId, projectId)),
+      .where(eq(schema.workspaces.projectId, projectId))
   );
 
   // Delete the project itself
   statements.push(
     db
       .delete(schema.projects)
-      .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId))),
+      .where(and(eq(schema.projects.id, projectId), eq(schema.projects.userId, userId)))
   );
 
   // 3. Execute all mutations atomically via D1 batch.
-  await db.batch(statements as [typeof statements[0]]);
+  await db.batch(statements as [(typeof statements)[0]]);
 
   // R2 deletion can require paginated storage I/O, so keep it outside the D1 batch
   // and off the request's critical path. The helper derives and validates the exact

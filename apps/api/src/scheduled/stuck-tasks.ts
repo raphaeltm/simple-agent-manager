@@ -43,6 +43,7 @@ import * as schema from '../db/schema';
 import type { TaskRunner } from '../durable-objects/task-runner';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
@@ -207,8 +208,10 @@ function stuckTaskScanCursorKey(env: Env): string {
 function parseStuckTaskScanCursor(raw: string | null): StuckTaskScanCursor | null {
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as Partial<StuckTaskScanCursor>;
+    const parsedRaw = JSON.parse(raw) as unknown;
+    const parsed = maybeJsonRecord(parsedRaw);
     if (
+      !parsed ||
       typeof parsed.updatedAt !== 'string' ||
       !Number.isFinite(Date.parse(parsed.updatedAt)) ||
       typeof parsed.taskId !== 'string' ||

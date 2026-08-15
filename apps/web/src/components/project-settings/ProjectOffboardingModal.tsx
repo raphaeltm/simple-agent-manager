@@ -10,12 +10,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { ApiClientError } from '../../lib/api/client';
+import { isJsonRecord } from '../../lib/runtime-validation';
 
 export type OffboardingMode = 'remove' | 'leave';
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 function detailString(details: Record<string, unknown>, key: string): string | null {
   const value = details[key];
@@ -25,7 +22,7 @@ function detailString(details: Record<string, unknown>, key: string): string | n
 function hasRemainingProjectCoverage(resource: ProjectMemberOffboardingResourcePreview): boolean {
   const coverage = resource.details.remainingProjectCoverage;
   if (!coverage) return false;
-  if (isRecord(coverage)) {
+  if (isJsonRecord(coverage)) {
     return Object.values(coverage).some(Boolean);
   }
   return Boolean(coverage);
@@ -40,7 +37,7 @@ export function defaultOffboardingAction(
 ): ProjectMemberOffboardingAction {
   return resource.availableActions.includes('break_and_flag')
     ? 'break_and_flag'
-    : resource.availableActions[0] ?? 'defer_removal';
+    : (resource.availableActions[0] ?? 'defer_removal');
 }
 
 function resourceKindLabel(kind: ProjectMemberOffboardingResourceKind): string {
@@ -162,7 +159,9 @@ export function ProjectOffboardingModal({
   onRefresh: () => void;
   preview: ProjectMemberOffboardingPreviewResponse | null;
 }) {
-  const [selectedActions, setSelectedActions] = useState<Record<string, ProjectMemberOffboardingAction>>({});
+  const [selectedActions, setSelectedActions] = useState<
+    Record<string, ProjectMemberOffboardingAction>
+  >({});
 
   useEffect(() => {
     if (!preview) {
@@ -180,7 +179,10 @@ export function ProjectOffboardingModal({
   }, [preview]);
 
   const grouped = useMemo(() => {
-    const result = new Map<ProjectMemberOffboardingResourceKind, ProjectMemberOffboardingResourcePreview[]>();
+    const result = new Map<
+      ProjectMemberOffboardingResourceKind,
+      ProjectMemberOffboardingResourcePreview[]
+    >();
     for (const resource of preview?.resources ?? []) {
       const items = result.get(resource.resourceKind) ?? [];
       items.push(resource);
@@ -215,7 +217,8 @@ export function ProjectOffboardingModal({
                 {title}: {memberName}
               </h2>
               <p className="m-0 mt-1 text-xs text-fg-muted">
-                Review resources using this member&apos;s personal credentials before membership changes.
+                Review resources using this member&apos;s personal credentials before membership
+                changes.
               </p>
             </div>
             <button
@@ -251,22 +254,29 @@ export function ProjectOffboardingModal({
                   <>
                     <div className="grid gap-2 rounded-md border border-border-default bg-inset p-3 text-xs sm:grid-cols-3">
                       <div>
-                        <div className="font-semibold text-fg-primary">{preview.summary.breakAndFlag}</div>
+                        <div className="font-semibold text-fg-primary">
+                          {preview.summary.breakAndFlag}
+                        </div>
                         <div className="text-fg-muted">will be disabled or flagged</div>
                       </div>
                       <div>
-                        <div className="font-semibold text-fg-primary">{preview.summary.reattachAvailable}</div>
+                        <div className="font-semibold text-fg-primary">
+                          {preview.summary.reattachAvailable}
+                        </div>
                         <div className="text-fg-muted">can use existing project credentials</div>
                       </div>
                       <div>
-                        <div className="font-semibold text-fg-primary">{preview.summary.blockingTeardown}</div>
+                        <div className="font-semibold text-fg-primary">
+                          {preview.summary.blockingTeardown}
+                        </div>
                         <div className="text-fg-muted">need stop or replacement</div>
                       </div>
                     </div>
 
                     {resourceCount === 0 ? (
                       <div className="rounded-md border border-border-default bg-inset p-3 text-sm text-fg-muted">
-                        No live personal-backed resources were found. This member can be removed cleanly.
+                        No live personal-backed resources were found. This member can be removed
+                        cleanly.
                       </div>
                     ) : (
                       <div className="grid gap-3">
@@ -278,7 +288,8 @@ export function ProjectOffboardingModal({
                             <div className="grid gap-2">
                               {resources.map((resource) => {
                                 const key = offboardingResourceKey(resource);
-                                const selected = selectedActions[key] ?? defaultOffboardingAction(resource);
+                                const selected =
+                                  selectedActions[key] ?? defaultOffboardingAction(resource);
                                 const projectCoverage = hasRemainingProjectCoverage(resource);
                                 return (
                                   <div
@@ -298,7 +309,8 @@ export function ProjectOffboardingModal({
                                           onChange={(event) =>
                                             setSelectedActions((current) => ({
                                               ...current,
-                                              [key]: event.target.value as ProjectMemberOffboardingAction,
+                                              [key]: event.target
+                                                .value as ProjectMemberOffboardingAction,
                                             }))
                                           }
                                           className="min-h-9 rounded-sm border border-border-default bg-surface px-2 py-1 text-xs text-fg-primary"
@@ -312,7 +324,8 @@ export function ProjectOffboardingModal({
                                       </label>
                                     </div>
                                     <div className="mt-2 text-xs text-fg-muted break-words">
-                                      {resource.subtitle ?? resourceSingularLabel(resource.resourceKind)}
+                                      {resource.subtitle ??
+                                        resourceSingularLabel(resource.resourceKind)}
                                     </div>
                                     <p className="m-0 mt-2 text-xs text-fg-muted break-words">
                                       {resourceImpactCopy(resource, memberName)}

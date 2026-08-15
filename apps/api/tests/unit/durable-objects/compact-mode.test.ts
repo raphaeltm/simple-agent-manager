@@ -120,6 +120,55 @@ describe('stripToolMetadataContent', () => {
     expect(JSON.parse(rawOutput[0]?.text ?? '{}')).toEqual(payload);
   });
 
+  it('treats an array-valued existingFile as a valid document payload (array-accepting record-guard parity)', () => {
+    // findDocumentPayload/isDocumentResultPayload used a local `isRecord`
+    // guard that (unlike the array-rejecting expectJsonRecord) ACCEPTS
+    // arrays, matching JS's `typeof [] === 'object'`. It was replaced with
+    // the shared `maybeJsonRecord`, which — per valibot's record schema
+    // (numeric indices are valid string keys) — has the identical
+    // array-accepting behavior. This pins that parity: an `existingFile`
+    // that is a JSON array must still be recognized as present.
+    const payload = { existingFile: [1, 2, 3], caption: 'array existingFile edge case' };
+    const meta = {
+      toolCallId: 'tc-display-array',
+      title: 'sam-mcp/display_from_library',
+      kind: 'other',
+      status: 'completed',
+      content: [
+        {
+          type: 'content',
+          content: { type: 'text', text: JSON.stringify(payload) },
+        },
+      ],
+    };
+
+    const result = stripToolMetadataContent(meta) as Record<string, unknown>;
+
+    expect(result.content).toBeUndefined();
+    const rawOutput = result.rawOutput as Array<{ type: string; text: string }>;
+    expect(rawOutput).toHaveLength(1);
+    expect(JSON.parse(rawOutput[0]?.text ?? '{}')).toEqual(payload);
+  });
+
+  it('does not treat a bare top-level JSON array as a document payload (arrays never carry named fields)', () => {
+    // A top-level JSON array can never satisfy isDocumentResultPayload's
+    // named-key checks (fileId/id/existingFile/error), regardless of whether
+    // the record guard accepts or rejects arrays — proving the guard swap
+    // does not introduce a false-positive document-card match.
+    const meta = {
+      toolCallId: 'tc-shell-array',
+      title: 'sam-mcp/display_from_library',
+      kind: 'other',
+      status: 'completed',
+      content: [{ type: 'content', text: '[1,2,3]' }],
+    };
+
+    const result = stripToolMetadataContent(meta) as Record<string, unknown>;
+
+    expect(result.content).toBeUndefined();
+    expect(result.rawOutput).toBeUndefined();
+  });
+
   it('does not synthesize rawOutput for non-document tool content', () => {
     const meta = {
       toolCallId: 'tc-shell',
@@ -234,17 +283,21 @@ describe('getMessageToolContent', () => {
 
   it('returns content array for a valid message with tool_metadata', () => {
     const content = [{ type: 'content', text: 'hello' }];
-    const sql = makeSql([{ role: 'tool', tool_metadata: JSON.stringify({ toolCallId: 'tc-1', content }) }]);
+    const sql = makeSql([
+      { role: 'tool', tool_metadata: JSON.stringify({ toolCallId: 'tc-1', content }) },
+    ]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
     expect(result).toEqual(content);
   });
 
   it('round-trips normalized Codex output through compact metadata and lazy reload', () => {
-    const content = [{
-      type: 'terminal',
-      output: 'SAM_DURABLE_COMMAND_OUTPUT_112',
-      exitCode: 0,
-    }];
+    const content = [
+      {
+        type: 'terminal',
+        output: 'SAM_DURABLE_COMMAND_OUTPUT_112',
+        exitCode: 0,
+      },
+    ];
     const toolMetadata = {
       toolCallId: 'codex-command-1',
       title: 'Run shell command',
@@ -283,7 +336,12 @@ describe('getMessageToolContent', () => {
   });
 
   it('returns null when message is not a tool message', () => {
-    const sql = makeSql([{ role: 'assistant', tool_metadata: JSON.stringify({ content: [{ type: 'content', text: 'ignored' }] }) }]);
+    const sql = makeSql([
+      {
+        role: 'assistant',
+        tool_metadata: JSON.stringify({ content: [{ type: 'content', text: 'ignored' }] }),
+      },
+    ]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
     expect(result).toBeNull();
   });
@@ -295,7 +353,9 @@ describe('getMessageToolContent', () => {
   });
 
   it('returns empty content when tool_metadata has no content array', () => {
-    const sql = makeSql([{ role: 'tool', tool_metadata: JSON.stringify({ toolCallId: 'tc-1', title: 'Read' }) }]);
+    const sql = makeSql([
+      { role: 'tool', tool_metadata: JSON.stringify({ toolCallId: 'tc-1', title: 'Read' }) },
+    ]);
     const result = getMessageToolContent(sql, 'sess-1', 'msg-1');
     expect(result).toEqual([]);
   });

@@ -7,7 +7,7 @@ import ReactDOM from 'react-dom/client';
 import App from './App';
 import { applyThemeAttribute, readStoredTheme } from './contexts/ThemeContext';
 import { initAnalytics } from './lib/analytics';
-import { getAnalyticsApiUrl,getClientErrorsApiUrl } from './lib/api';
+import { getAnalyticsApiUrl, getClientErrorsApiUrl } from './lib/api';
 import { initErrorReporter } from './lib/error-reporter';
 import { startMobileViewportSync } from './lib/mobile-viewport';
 import { registerAppServiceWorker } from './lib/pwa';
@@ -29,7 +29,12 @@ if (import.meta.hot) {
   });
 }
 
-ReactDOM.createRoot(document.getElementById('root')!).render(
+const rootElement = document.getElementById('root');
+if (!rootElement) {
+  throw new Error('main.tsx: could not find #root element to mount the app');
+}
+
+ReactDOM.createRoot(rootElement).render(
   <React.StrictMode>
     <App />
   </React.StrictMode>

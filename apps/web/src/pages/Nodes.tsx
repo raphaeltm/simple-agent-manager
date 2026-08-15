@@ -1,6 +1,20 @@
-import type { CredentialProvider,NodeResponse, ProviderCatalog, VMSize, WorkspaceResponse } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION,PROVIDER_LABELS } from '@simple-agent-manager/shared';
-import { Alert, Button, EmptyState, PageLayout, Select, SkeletonCard, Spinner } from '@simple-agent-manager/ui';
+import type {
+  CredentialProvider,
+  NodeResponse,
+  ProviderCatalog,
+  VMSize,
+  WorkspaceResponse,
+} from '@simple-agent-manager/shared';
+import { DEFAULT_VM_LOCATION, PROVIDER_LABELS } from '@simple-agent-manager/shared';
+import {
+  Alert,
+  Button,
+  EmptyState,
+  PageLayout,
+  Select,
+  SkeletonCard,
+  Spinner,
+} from '@simple-agent-manager/ui';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Server } from 'lucide-react';
 import { useMemo, useState } from 'react';
@@ -8,7 +22,14 @@ import { useNavigate } from 'react-router';
 
 import { NodeCard } from '../components/node/NodeCard';
 import { VmSizeCard } from '../components/vm/VmSizeCard';
-import { createNode, deleteNode, getProviderCatalog, listNodes, listWorkspaces, stopNode } from '../lib/api';
+import {
+  createNode,
+  deleteNode,
+  getProviderCatalog,
+  listNodes,
+  listWorkspaces,
+  stopNode,
+} from '../lib/api';
 import { workspacesKeys } from './Workspaces';
 
 /** Stable query key factory for node-related queries. */
@@ -73,7 +94,7 @@ export function Nodes() {
 
   const workspacesByNode = useMemo(() => {
     const map = new Map<string, WorkspaceResponse[]>();
-    for (const ws of (workspaces ?? [])) {
+    for (const ws of workspaces ?? []) {
       if (ws.nodeId) {
         const existing = map.get(ws.nodeId) ?? [];
         existing.push(ws);
@@ -119,9 +140,10 @@ export function Nodes() {
     const targetNode = (nodes ?? []).find((n) => n.id === id);
     if (targetNode?.nodeRole === 'deployment') {
       const envs = targetNode.deploymentEnvironments ?? [];
-      const envSummary = envs.length > 0
-        ? `${envs.length} deployment environment${envs.length === 1 ? '' : 's'}: ${envs.map((env) => env.name).join(', ')}`
-        : 'deployment environments currently listed on this node';
+      const envSummary =
+        envs.length > 0
+          ? `${envs.length} deployment environment${envs.length === 1 ? '' : 's'}: ${envs.map((env) => env.name).join(', ')}`
+          : 'deployment environments currently listed on this node';
       const confirmed = window.confirm(
         `"${targetNode.name}" is a deployment node hosting ${envSummary}. Deleting it here destroys the node infrastructure and affects ALL hosted environments, but it does not perform each environment's volume teardown.\n\nFor full per-environment teardown, use Destroy on the project Deployments page.\n\nContinue with node-only deletion?`
       );
@@ -157,13 +179,23 @@ export function Nodes() {
         <div className="mb-4 glass-surface rounded-md p-4 grid gap-4">
           {catalogs.length > 1 && (
             <div>
-              <label htmlFor="node-provider" className="block text-fg-muted font-medium mb-1" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Cloud Provider</label>
-              <Select id="node-provider" value={effectiveProvider} onChange={(e) => {
-                const p = e.target.value;
-                setSelectedProvider(p);
-                const cat = catalogs.find((c) => c.provider === p);
-                if (cat) setNewNodeLocation(cat.defaultLocation);
-              }}>
+              <label
+                htmlFor="node-provider"
+                className="block text-fg-muted font-medium mb-1"
+                style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+              >
+                Cloud Provider
+              </label>
+              <Select
+                id="node-provider"
+                value={effectiveProvider}
+                onChange={(e) => {
+                  const p = e.target.value;
+                  setSelectedProvider(p);
+                  const cat = catalogs.find((c) => c.provider === p);
+                  if (cat) setNewNodeLocation(cat.defaultLocation);
+                }}
+              >
                 {catalogs.map((cat) => (
                   <option key={cat.provider} value={cat.provider}>
                     {PROVIDER_LABELS[cat.provider] ?? cat.provider}
@@ -173,7 +205,15 @@ export function Nodes() {
             </div>
           )}
           <div>
-            <label className="block text-fg-muted font-medium mb-2" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Node Size</label>
+            {/* Not a <label>: this text describes a group of selectable cards
+                (VmSizeCard), not a single form control, so there is nothing
+                for a <label> to associate with (jsx-a11y/label-has-associated-control). */}
+            <div
+              className="block text-fg-muted font-medium mb-2"
+              style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+            >
+              Node Size
+            </div>
             <div className="grid grid-cols-3 gap-3">
               {(['small', 'medium', 'large'] as VMSize[]).map((size) => (
                 <VmSizeCard
@@ -188,10 +228,22 @@ export function Nodes() {
           </div>
           {activeCatalog && (
             <div>
-              <label htmlFor="node-location" className="block text-fg-muted font-medium mb-1" style={{ fontSize: 'var(--sam-type-secondary-size)' }}>Location</label>
-              <Select id="node-location" value={newNodeLocation} onChange={(e) => setNewNodeLocation(e.target.value)}>
+              <label
+                htmlFor="node-location"
+                className="block text-fg-muted font-medium mb-1"
+                style={{ fontSize: 'var(--sam-type-secondary-size)' }}
+              >
+                Location
+              </label>
+              <Select
+                id="node-location"
+                value={newNodeLocation}
+                onChange={(e) => setNewNodeLocation(e.target.value)}
+              >
                 {activeCatalog.locations.map((loc) => (
-                  <option key={loc.id} value={loc.id}>{loc.name}, {loc.country}</option>
+                  <option key={loc.id} value={loc.id}>
+                    {loc.name}, {loc.country}
+                  </option>
                 ))}
               </Select>
             </div>

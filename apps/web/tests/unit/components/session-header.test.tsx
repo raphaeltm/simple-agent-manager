@@ -30,17 +30,48 @@ vi.mock('../../../src/lib/url-utils', () => ({
 }));
 
 vi.mock('react-router', () => ({
-  Link: ({ children, to, ...props }: { children: React.ReactNode; to: string; [key: string]: unknown }) => (
-    <a href={to} {...props}>{children}</a>
+  Link: ({
+    children,
+    to,
+    ...props
+  }: {
+    children: React.ReactNode;
+    to: string;
+    [key: string]: unknown;
+  }) => (
+    <a href={to} {...props}>
+      {children}
+    </a>
   ),
 }));
 
 vi.mock('@simple-agent-manager/ui', () => ({
-  Button: ({ children, onClick, disabled, ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => (
-    <button onClick={onClick} disabled={disabled} {...props}>{children}</button>
+  Button: ({
+    children,
+    onClick,
+    disabled,
+    ...props
+  }: React.ButtonHTMLAttributes<HTMLButtonElement> & { variant?: string; size?: string }) => (
+    <button onClick={onClick} disabled={disabled} {...props}>
+      {children}
+    </button>
   ),
-  Dialog: ({ isOpen, onClose, children }: { isOpen: boolean; onClose: () => void; maxWidth?: string; children: React.ReactNode }) =>
-    isOpen ? <div role="dialog" data-testid="dialog">{children}<button onClick={onClose}>CloseDialog</button></div> : null,
+  Dialog: ({
+    isOpen,
+    onClose,
+    children,
+  }: {
+    isOpen: boolean;
+    onClose: () => void;
+    maxWidth?: string;
+    children: React.ReactNode;
+  }) =>
+    isOpen ? (
+      <div role="dialog" data-testid="dialog">
+        {children}
+        <button onClick={onClose}>CloseDialog</button>
+      </div>
+    ) : null,
   Spinner: () => <span data-testid="spinner" />,
 }));
 
@@ -93,7 +124,9 @@ function makeSession(overrides: Partial<ChatSessionResponse> = {}): ChatSessionR
   } as ChatSessionResponse;
 }
 
-function makeTaskEmbed(overrides: Partial<NonNullable<ChatSessionResponse['task']>> = {}): NonNullable<ChatSessionResponse['task']> {
+function makeTaskEmbed(
+  overrides: Partial<NonNullable<ChatSessionResponse['task']>> = {}
+): NonNullable<ChatSessionResponse['task']> {
   return {
     id: 'task-1',
     title: 'Build feature',
@@ -194,29 +227,37 @@ describe('SessionHeader', () => {
 
   it('shows the full title and fallback initial prompt in expanded details', () => {
     renderHeader({
-      session: makeSession({ topic: 'A very long session title that should be inspectable in full' }),
+      session: makeSession({
+        topic: 'A very long session title that should be inspectable in full',
+      }),
       initialPromptFallback: 'Please build the thing from the original user prompt.',
     });
 
     fireEvent.click(screen.getByLabelText('Show session details'));
 
     expect(screen.getByText('Title')).toBeInTheDocument();
-    expect(screen.getAllByText('A very long session title that should be inspectable in full')).toHaveLength(2);
+    expect(
+      screen.getAllByText('A very long session title that should be inspectable in full')
+    ).toHaveLength(2);
     expect(screen.getByText('Initial prompt')).toBeInTheDocument();
-    expect(screen.getByText('Please build the thing from the original user prompt.')).toBeInTheDocument();
+    expect(
+      screen.getByText('Please build the thing from the original user prompt.')
+    ).toBeInTheDocument();
     expect(mocks.listChatMessages).not.toHaveBeenCalled();
   });
 
   it('fetches the oldest user message when no safe initial prompt fallback is available', async () => {
     mocks.listChatMessages.mockResolvedValueOnce({
-      messages: [{
-        id: 'msg-initial',
-        sessionId: 'sess-abc123',
-        role: 'user',
-        content: 'Initial prompt loaded from the server',
-        toolMetadata: null,
-        createdAt: 1000,
-      }],
+      messages: [
+        {
+          id: 'msg-initial',
+          sessionId: 'sess-abc123',
+          role: 'user',
+          content: 'Initial prompt loaded from the server',
+          toolMetadata: null,
+          createdAt: 1000,
+        },
+      ],
       hasMore: true,
     });
 
@@ -292,24 +333,29 @@ describe('SessionHeader', () => {
     fireEvent.click(screen.getByLabelText('Show session details'));
     fireEvent.click(screen.getByText('Complete'));
     expect(screen.getByText('Mark task as complete?')).toBeInTheDocument();
+    expect(
+      screen.getByText(/SAM will preserve this session so you can continue it later/)
+    ).toBeInTheDocument();
   });
 
-  it('calls updateProjectTaskStatus and deleteWorkspace on confirm', async () => {
+  it('completes the task without deleting its resumable workspace snapshot', async () => {
     renderHeader();
     fireEvent.click(screen.getByLabelText('Show session details'));
     fireEvent.click(screen.getByText('Complete'));
-    fireEvent.click(screen.getByText('Complete & Delete'));
+    fireEvent.click(screen.getByText('Mark Complete'));
     await waitFor(() => {
-      expect(mocks.updateProjectTaskStatus).toHaveBeenCalledWith('proj-1', 'task-1', { toStatus: 'completed' });
-      expect(mocks.deleteWorkspace).toHaveBeenCalledWith('ws-1');
+      expect(mocks.updateProjectTaskStatus).toHaveBeenCalledWith('proj-1', 'task-1', {
+        toStatus: 'completed',
+      });
     });
+    expect(mocks.deleteWorkspace).not.toHaveBeenCalled();
   });
 
   it('calls onSessionMutated after successful mark complete', async () => {
     const { props } = renderHeader();
     fireEvent.click(screen.getByLabelText('Show session details'));
     fireEvent.click(screen.getByText('Complete'));
-    fireEvent.click(screen.getByText('Complete & Delete'));
+    fireEvent.click(screen.getByText('Mark Complete'));
     await waitFor(() => {
       expect(props.onSessionMutated).toHaveBeenCalled();
     });
@@ -320,7 +366,7 @@ describe('SessionHeader', () => {
     renderHeader();
     fireEvent.click(screen.getByLabelText('Show session details'));
     fireEvent.click(screen.getByText('Complete'));
-    fireEvent.click(screen.getByText('Complete & Delete'));
+    fireEvent.click(screen.getByText('Mark Complete'));
     await waitFor(() => {
       expect(screen.getByText('API error')).toBeInTheDocument();
     });
@@ -331,7 +377,7 @@ describe('SessionHeader', () => {
     renderHeader();
     fireEvent.click(screen.getByLabelText('Show session details'));
     fireEvent.click(screen.getByText('Complete'));
-    fireEvent.click(screen.getByText('Complete & Delete'));
+    fireEvent.click(screen.getByText('Mark Complete'));
     await waitFor(() => {
       expect(screen.getByText('Dismiss')).toBeInTheDocument();
     });
@@ -391,7 +437,7 @@ describe('SessionHeader', () => {
     renderHeader();
     fireEvent.click(screen.getByLabelText('Show session details'));
     fireEvent.click(screen.getByText('Complete'));
-    fireEvent.click(screen.getByText('Complete & Delete'));
+    fireEvent.click(screen.getByText('Mark Complete'));
     await waitFor(() => {
       expect(screen.getByText('Completing...')).toBeInTheDocument();
     });
@@ -400,13 +446,15 @@ describe('SessionHeader', () => {
   it('shows the public ports switch when detected ports are present', () => {
     renderHeader({
       workspace: makeWorkspace({ portsPublicEnabled: false }),
-      detectedPorts: [{
-        port: 5173,
-        address: '127.0.0.1',
-        label: 'Vite',
-        url: 'https://ws-ws-1--5173.workspaces.example.com',
-        detectedAt: '2026-06-01T00:00:00Z',
-      }],
+      detectedPorts: [
+        {
+          port: 5173,
+          address: '127.0.0.1',
+          label: 'Vite',
+          url: 'https://ws-ws-1--5173.workspaces.example.com',
+          detectedAt: '2026-06-01T00:00:00Z',
+        },
+      ],
     });
 
     expect(screen.getByText('Public ports')).toBeInTheDocument();
@@ -418,13 +466,15 @@ describe('SessionHeader', () => {
   it('toggles public ports through the workspace API', async () => {
     const { props } = renderHeader({
       workspace: makeWorkspace({ portsPublicEnabled: false }),
-      detectedPorts: [{
-        port: 5173,
-        address: '127.0.0.1',
-        label: 'Vite',
-        url: 'https://ws-ws-1--5173.workspaces.example.com',
-        detectedAt: '2026-06-01T00:00:00Z',
-      }],
+      detectedPorts: [
+        {
+          port: 5173,
+          address: '127.0.0.1',
+          label: 'Vite',
+          url: 'https://ws-ws-1--5173.workspaces.example.com',
+          detectedAt: '2026-06-01T00:00:00Z',
+        },
+      ],
     });
 
     fireEvent.click(screen.getByRole('switch', { name: 'Enable public forwarded ports' }));
@@ -433,20 +483,25 @@ describe('SessionHeader', () => {
       expect(mocks.updateWorkspacePortsPublic).toHaveBeenCalledWith('ws-1', true);
       expect(props.onSessionMutated).toHaveBeenCalled();
     });
-    expect(screen.getByRole('switch', { name: 'Disable public forwarded ports' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('switch', { name: 'Disable public forwarded ports' })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
   });
 
   it('rolls back the public ports switch when the API fails', async () => {
     mocks.updateWorkspacePortsPublic.mockRejectedValueOnce(new Error('Nope'));
     renderHeader({
       workspace: makeWorkspace({ portsPublicEnabled: false }),
-      detectedPorts: [{
-        port: 5173,
-        address: '127.0.0.1',
-        label: 'Vite',
-        url: 'https://ws-ws-1--5173.workspaces.example.com',
-        detectedAt: '2026-06-01T00:00:00Z',
-      }],
+      detectedPorts: [
+        {
+          port: 5173,
+          address: '127.0.0.1',
+          label: 'Vite',
+          url: 'https://ws-ws-1--5173.workspaces.example.com',
+          detectedAt: '2026-06-01T00:00:00Z',
+        },
+      ],
     });
 
     fireEvent.click(screen.getByRole('switch', { name: 'Enable public forwarded ports' }));
@@ -454,7 +509,10 @@ describe('SessionHeader', () => {
     await waitFor(() => {
       expect(screen.getByText('Nope')).toBeInTheDocument();
     });
-    expect(screen.getByRole('switch', { name: 'Enable public forwarded ports' })).toHaveAttribute('aria-checked', 'false');
+    expect(screen.getByRole('switch', { name: 'Enable public forwarded ports' })).toHaveAttribute(
+      'aria-checked',
+      'false'
+    );
   });
 
   // --- CopyableId and Reference IDs ---
@@ -571,7 +629,9 @@ describe('SessionHeader', () => {
     const badge = screen.getByText('Completed');
     expect(badge).toBeInTheDocument();
     // Check icon is within the badge
-    expect(badge.closest('span')?.querySelector('[data-testid="icon-check-circle"]')).toBeInTheDocument();
+    expect(
+      badge.closest('span')?.querySelector('[data-testid="icon-check-circle"]')
+    ).toBeInTheDocument();
   });
 
   // --- Session timing ---

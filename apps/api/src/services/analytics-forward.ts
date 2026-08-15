@@ -89,14 +89,14 @@ function assertValidEventName(name: string): void {
 }
 
 /** Allowed URL prefixes for external API overrides — prevents SSRF via env var misconfiguration. */
-const ALLOWED_URL_PREFIXES: Record<string, string[]> = {
+const ALLOWED_URL_PREFIXES = {
   segment: ['https://api.segment.io/', 'https://api.segment.com/'],
   ga4: ['https://www.google-analytics.com/', 'https://analytics.google.com/'],
   analytics_sql: ['https://api.cloudflare.com/'],
-};
+} satisfies Record<string, string[]>;
 
 function assertAllowedUrl(url: string, service: keyof typeof ALLOWED_URL_PREFIXES): void {
-  const prefixes = ALLOWED_URL_PREFIXES[service]!;
+  const prefixes = ALLOWED_URL_PREFIXES[service];
   if (!prefixes.some((prefix) => url.startsWith(prefix))) {
     throw new Error(
       `Disallowed ${service} API URL: ${url}. Must start with one of: ${prefixes.join(', ')}`

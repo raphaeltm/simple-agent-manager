@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "matcherVersion": "gitleaks-finding-v2-unredacted",
+  "baseCommit": "8c689a6a7923f76a33d96d6272797090598d6c2d",
+  "groups": [
+    {
+      "classification": "code-identifier",
+      "reason": "Reviewed non-secret identifiers and protocol parser markers already present on audited main; exact findings only.",
+      "owner": "security",
+      "reviewedAt": "2026-08-09T00:00:00.000Z",
+      "expiresAt": "2026-11-07T00:00:00.000Z",
+      "digests": [
+        "029845211b8fd2883d867ba92e9ca71306ce3bb9a6fa82f39471df4a2702e3e1",
+        "1331d6c0435d788a6be558ecc57678d47746a20de0faffc4d19d384d4081acf7",
+        "43311ab05444a3deed84ddf803f7d4a523e4ab4a97d044200e84fedc73661f5f",
+        "59a04ed4110887b9251aace7ec061d099c85febe627099ab51f6da9eff130fa8",
+        "5df62a0d499038d1b76cc34e61c556cb7a0e8710c8845445576cb4e79b89be4b",
+        "6e71e0fbc4dc054f19b21e28442c6a4067d1451c5ea9fe53cb9c1db6f7f1f319",
+        "7d414918fd585b12d420ea310dad13448c945519b6ab62264f7a9c677e1bea77",
+        "8044309cbc66656e48be6c8002fbcd590d94402efc1cbe8e7a190fc37dbe6fbb",
+        "a19900751991f1af5512607c88ab689aa3b6ed723ab77d6f88b4afd7e5c34022"
+      ]
+    },
+    {
+      "classification": "documented-example",
+      "reason": "Reviewed non-live documentation examples already present on audited main; exact findings only.",
+      "owner": "security",
+      "reviewedAt": "2026-08-09T00:00:00.000Z",
+      "expiresAt": "2026-11-07T00:00:00.000Z",
+      "digests": [
+        "21b2baa363c78a8d2fbbf78ddd5eecca2b70b37963a71df4a550215d58b53259",
+        "8dd3a631fc752a17596f955300a74f538d73d9deea3588b16b5bfdd08ca562d8"
+      ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Reviewed synthetic fixtures already present on audited main; exact findings only.",
+      "owner": "security",
+      "reviewedAt": "2026-08-09T00:00:00.000Z",
+      "expiresAt": "2026-11-07T00:00:00.000Z",
+      "digests": [
+        "0446ae0d1d29d010939f1a51da7e9bdbdd985c7c9240e8593ec797bf6251a266",
+        "08b6973beb0309ed23f7288fa1a81b5e4d8186dd2259960aa8d2fff7710d105a",
+        "09c40905b818f288f2eb9c90edbe10cd8bf5061aadbb162a5ec0821d195338e8",
+        "110a101b7443fd2b7bdaeade081aeffd784ee639475a2f770ab53c3befb8ed17",
+        "1726f89f4c1c6f6115133fd63064839a0f6d2bb0463a2b0b926cf5f85a206d51",
+        "1890267ac0262af98886e14e4f70d5d8d5c9294deccb78d5d6ad686b8d9f3b68",
+        "20f6fd5918d54ffab3b9e77c5efb81ced69ee3bc06471e9cba29d008a4a1c137",
+        "28a56effde34ab107713ed618f3c9a27a53df8899e2490ebe3bc77aea41fafc8",
+        "2dab10b6f6404c0663b4b5a9d928738e7e435bcba4369b194522154456faf02b",
+        "2e6676622a4a6e94ba7bf6de164bfe502d67dca554c389a167ee9692ea19f6d0",
+        "3162e219d33177d8f3ab0498ebb68c5d68e5b485b92b6f63f0e99a06af4b5133",
+        "31c2cd3de478ba9be1d6f82b4c20fdfe086ab12e9ad1d99358edd6eb3102ab87",
+        "368a9bf4a2991fecfd51146398eb4f41fe2d23cccdfbb75f631c60de8f90f0cb",
+        "40a6b11e4101f404515b2fb8bfcdfa24ad5dea060dc792e59b34132771f2466c",
+        "4c9d69a7f1d0c2d6daa664a73d4afb0ca5172a57f60a0b7c22adabfc4ca18125",
+        "56829340ae1505987a940275bcce15f0af85b3d9cc75012c8afdf5961b0f5b9e",
+        "62856b14639eb5d80d6316e127f70a71fa6050e0ead1dc601ff8f4a179d11778",
+        "65065c32e9ba182668d746c2a1bbdd2af0a907fb63d7c7bc43c3ab1ca821da83",
+        "6c8f1b4eaf79f0bd732207f6ea5421b8e6a936b650ecc5e933b14a57619c6639",
+        "79903f8b1d301733295e3f1dc78c89eecb8e47444d8e4096c62a6ac05e4fccf4",
+        "7dbc5937804a972332e230a6d6d50eac993eb834d6fe61c5b403ee860c415a63",
+        "8009176958a550f96020124cae059ef1d34dee7131f3603cee39787a4ae38146",
+        "88698eceb54eb6fd1933a663b1842bd3e52e0766bafceffa5d2769df72cb45ae",
+        "8aac78085d75ef3930f5a144559771548aeda1b931a533b69bcc8e1655d77ca2",
+        "92cf3fb1b7d5fb6f86147210e39d520dc0f842071b40677e0adcafaf07194fa1",
+        "979f104248115742f8866eb8a3d35206073505d05311b729897506fe5744c396",
+        "9dacd69ffe422a84e76cd3958ccddc2b5fffa17a457bfb1abdc23b2efa07f7d1",
+        "9e7fb998333cc94b17aedf775be2e8d203d2e27a348feddc79427c19b0fe9ea2",
+        "a023ede2e719bc0fc7bfd82991494ded0d40ec34dcd511111476b0680000a90b",
+        "a3bfb2168fbf3c197263b1921502632fc3b1a6415a4c740efabe5bedd8eecc6d",
+        "b50f9b586a3498492c93826306367d25795cfba4d3852b2ec12a2650c19d56b4",
+        "b5d9392c52b396cc75af636a2cbefe9826ec585d1740d67ddd1ea6b06a7657e5",
+        "be5036a3b2760ebe664cec63bc56f255a3f5a6b82e8e53c55ee3e144a127437f",
+        "c4d8a64d82cf39d956a885a828d716ce960fd13c0cec8e359556b427200255b8",
+        "c8af0b81fba99345ba67dbbdf7b4415e4010e7b8206bdad7415eb1a6b371ea36",
+        "cc9d43d29f502f0570580b3ffacae0e262faeb9b2229fe5342a701078b9f06b2",
+        "cd372c5591f22da97528170ccaafdcaa070378522bfb8757a108d7935d335a68",
+        "df9e7feac78c7301cb8f872843632c12236ff1ca2bcad6637cb57f9c219a5916",
+        "eb874737e51d373527bec3648c9b802c5f2d5d00b108588fc62ba19dee2eedfb",
+        "ecdcad9fface944533ef84fe1d770a589df45d073b939a28cded19369ee82302",
+        "ee1e620aa06730c6e08f309ced2a3eb5a9a02e6c60bb4c19a86bec3c2afefaea",
+        "f2e7c7af178ea8c025dd158f595741b249a114e7052bf8df9237d927ee97db0d",
+        "fd14cfaa56cef04e0bad7a3d077367da7acd08675466315eb9731532e9c2f2b6",
+        "fff53b305e93dcecdf6104004ec42b985bcb7e1da8434b01afb39a2c25b335cf"
+      ]
+    },
+    {
+      "classification": "code-identifier",
+      "reason": "Reviewed VAPID Worker secret inventory identifier; the finding is the configuration key name, not secret material.",
+      "owner": "security",
+      "reviewedAt": "2026-08-11T00:00:00.000Z",
+      "expiresAt": "2026-11-09T00:00:00.000Z",
+      "digests": [
+        "2e2c488b43d71d30946bb0cdec4390e8795c3debec5cd2a1ff0b93c9823abd4b"
+      ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Reviewed published RFC 8291 known-answer vector values used only by deterministic unit/workerd protocol tests.",
+      "owner": "security",
+      "reviewedAt": "2026-08-11T00:00:00.000Z",
+      "expiresAt": "2026-11-09T00:00:00.000Z",
+      "digests": [
+        "0107cbaea77a574305b0138d8f7d0f0aaf940ba45e27dbeddb63cea14661bb82",
+        "4d39a4a10c93c3861b36ef6d32202b2507e30a1b222da531f370c8beb8532c26",
+        "79f6810f927733e7390adee75db901c182c7702f69a884f4d29b890fab25a6ea",
+        "cbbeacf82046a0817af9b778e6219609dacfc042c9c56b16dff06b92e6ebf6e0",
+        "ec5b29cf74fdbe649a4684e969fd39b019fd080b12db278ac37b9336241898d3"
+      ]
+    },
+    {
+      "classification": "synthetic-test-fixture",
+      "reason": "Synthetic multiline PEM private key (REALISTIC_KEY) and JWT-format callbackToken literal added to cloud-init template round-trip tests; realistic multiline fixtures are mandated by the template-output-verification rule and contain no real key material. Also re-reviews the pre-existing synthetic activity-test token in session_host_activity_test.go at its shifted line after the rereport-test deflake (same fixture bytes, new StartLine digest).",
+      "owner": "security",
+      "reviewedAt": "2026-08-15T19:30:00.000Z",
+      "expiresAt": "2026-11-13T00:00:00.000Z",
+      "digests": [
+        "a53bf5ad49b7df6a6e187c73ace39cdadad6f51e8eb7a2d3927f38907881af0c",
+        "d375245952311c037411c21bfb6861e1b98c3cfb9336cce43d43c7eaa8433198",
+        "1baa6f716547da91f09a12d0d8cba7e12a1fd05ba774a6e8a1cc9288e98feb5e"
+      ]
+    }
+  ]
+}

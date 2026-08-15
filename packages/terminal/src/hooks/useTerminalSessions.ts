@@ -1,10 +1,7 @@
-import { useCallback, useEffect,useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { expectJsonRecord, parseJsonRecord, requireArray } from '../runtime-validation';
-import type {
-  TerminalSession,
-  UseTerminalSessionsReturn
-} from '../types/multi-terminal';
+import type { TerminalSession, UseTerminalSessionsReturn } from '../types/multi-terminal';
 
 /** Serializable session metadata for sessionStorage persistence */
 interface PersistedSession {
@@ -27,7 +24,7 @@ interface PersistedState {
 export function useTerminalSessions(
   maxSessions: number = 10,
   persistenceKey?: string,
-  wsUrl?: string,
+  wsUrl?: string
 ): UseTerminalSessionsReturn {
   const [sessions, setSessions] = useState<Map<string, TerminalSession>>(new Map());
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
@@ -42,21 +39,24 @@ export function useTerminalSessions(
   // --- Persistence ---
 
   /** Save current session metadata to sessionStorage */
-  const persistSessions = useCallback((sessionsMap: Map<string, TerminalSession>) => {
-    if (!persistenceKey) return;
-    try {
-      const persisted: PersistedState = {
-        sessions: Array.from(sessionsMap.values())
-          .sort((a, b) => a.order - b.order)
-          .map((s) => ({ name: s.name, order: s.order, serverSessionId: s.serverSessionId })),
-        counter: sessionCounter.current,
-        wsUrl,
-      };
-      sessionStorage.setItem(persistenceKey, JSON.stringify(persisted));
-    } catch {
-      // sessionStorage may be unavailable (private browsing, quota exceeded)
-    }
-  }, [persistenceKey, wsUrl]);
+  const persistSessions = useCallback(
+    (sessionsMap: Map<string, TerminalSession>) => {
+      if (!persistenceKey) return;
+      try {
+        const persisted: PersistedState = {
+          sessions: Array.from(sessionsMap.values())
+            .sort((a, b) => a.order - b.order)
+            .map((s) => ({ name: s.name, order: s.order, serverSessionId: s.serverSessionId })),
+          counter: sessionCounter.current,
+          wsUrl,
+        };
+        sessionStorage.setItem(persistenceKey, JSON.stringify(persisted));
+      } catch {
+        // sessionStorage may be unavailable (private browsing, quota exceeded)
+      }
+    },
+    [persistenceKey, wsUrl]
+  );
 
   /** Load persisted session metadata. Returns null if nothing saved. */
   const loadPersistedSessions = useCallback((): PersistedState | null => {
@@ -71,16 +71,25 @@ export function useTerminalSessions(
       }
       // Reject persisted state if wsUrl doesn't match (scoping)
       if (wsUrl && typeof parsed.wsUrl === 'string' && parsed.wsUrl !== wsUrl) {
-        try { sessionStorage.removeItem(persistenceKey); } catch { /* ignore */ }
+        try {
+          sessionStorage.removeItem(persistenceKey);
+        } catch {
+          /* ignore */
+        }
         return null;
       }
       return {
         sessions: sessions.map((session, index) => {
-          const record = expectJsonRecord(session, `terminal.persisted_sessions.sessions[${index}]`);
+          const record = expectJsonRecord(
+            session,
+            `terminal.persisted_sessions.sessions[${index}]`
+          );
           return {
             name: typeof record.name === 'string' ? record.name : '',
             order: typeof record.order === 'number' ? record.order : index,
-            ...(typeof record.serverSessionId === 'string' ? { serverSessionId: record.serverSessionId } : {}),
+            ...(typeof record.serverSessionId === 'string'
+              ? { serverSessionId: record.serverSessionId }
+              : {}),
           };
         }),
         counter: typeof parsed.counter === 'number' ? parsed.counter : sessions.length,
@@ -88,7 +97,11 @@ export function useTerminalSessions(
     } catch {
       // Malformed storage — clear it to prevent repeated degradation
       if (persistenceKey) {
-        try { sessionStorage.removeItem(persistenceKey); } catch { /* ignore */ }
+        try {
+          sessionStorage.removeItem(persistenceKey);
+        } catch {
+          /* ignore */
+        }
       }
       return null;
     }
@@ -106,7 +119,6 @@ export function useTerminalSessions(
     if (state) {
       sessionCounter.current = state.counter;
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   /**
@@ -193,8 +205,9 @@ export function useTerminalSessions(
           const currentSession = currentSessions.get(sessionId);
           const currentOrder = currentSession?.order ?? 0;
 
-          const nextSession = remainingSessions.find((s) => s.order > currentOrder) ||
-                             remainingSessions.find((s) => s.order < currentOrder);
+          const nextSession =
+            remainingSessions.find((s) => s.order > currentOrder) ||
+            remainingSessions.find((s) => s.order < currentOrder);
 
           const fallback = nextSession ?? remainingSessions[0];
           if (fallback) {
@@ -211,28 +224,25 @@ export function useTerminalSessions(
   /**
    * Activate a terminal session
    */
-  const activateSession = useCallback(
-    (sessionId: string) => {
-      setSessions((prev) => {
-        const updated = new Map(prev);
+  const activateSession = useCallback((sessionId: string) => {
+    setSessions((prev) => {
+      const updated = new Map(prev);
 
-        // Deactivate all sessions, activate the selected one (immutable)
-        for (const [id, session] of updated) {
-          const shouldBeActive = id === sessionId;
-          if (shouldBeActive) {
-            updated.set(id, { ...session, isActive: true, lastActivityAt: new Date() });
-          } else if (session.isActive) {
-            updated.set(id, { ...session, isActive: false });
-          }
+      // Deactivate all sessions, activate the selected one (immutable)
+      for (const [id, session] of updated) {
+        const shouldBeActive = id === sessionId;
+        if (shouldBeActive) {
+          updated.set(id, { ...session, isActive: true, lastActivityAt: new Date() });
+        } else if (session.isActive) {
+          updated.set(id, { ...session, isActive: false });
         }
+      }
 
-        return updated;
-      });
+      return updated;
+    });
 
-      setActiveSessionId(sessionId);
-    },
-    []
-  );
+    setActiveSessionId(sessionId);
+  }, []);
 
   /**
    * Rename a terminal session
@@ -263,8 +273,12 @@ export function useTerminalSessions(
         const updated = new Map(prev);
         const sessionsArray = Array.from(updated.values()).sort((a, b) => a.order - b.order);
 
-        if (fromIndex < 0 || fromIndex >= sessionsArray.length ||
-            toIndex < 0 || toIndex >= sessionsArray.length) {
+        if (
+          fromIndex < 0 ||
+          fromIndex >= sessionsArray.length ||
+          toIndex < 0 ||
+          toIndex >= sessionsArray.length
+        ) {
           return prev;
         }
 

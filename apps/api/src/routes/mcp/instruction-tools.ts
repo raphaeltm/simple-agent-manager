@@ -13,7 +13,7 @@ import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../../db/schema';
-import { computeHumanInputExpiry } from '../../durable-objects/project-data/attention';
+import { computeHumanInputSchedule } from '../../durable-objects/project-data/attention';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import * as notificationService from '../../services/notification';
@@ -545,12 +545,13 @@ export async function handleRequestHumanInput(
 
   // Fetch task title (user_id verified against token below)
   const taskRow = await env.DATABASE.prepare(
-    `SELECT user_id, title FROM tasks WHERE id = ? AND project_id = ?`
+    `SELECT user_id, title, chat_session_id FROM tasks WHERE id = ? AND project_id = ?`
   )
     .bind(tokenData.taskId, tokenData.projectId)
     .first<{
       user_id: string;
       title: string;
+      chat_session_id: string | null;
     }>();
 
   if (!taskRow) {
@@ -567,14 +568,54 @@ export async function handleRequestHumanInput(
     return jsonRpcError(requestId, INTERNAL_ERROR, 'Task ownership mismatch');
   }
 
-  // Emit high-urgency notification (best-effort)
+  const sessionId =
+    tokenData.chatSessionId ??
+    taskRow.chat_session_id ??
+    (await notificationService.getChatSessionId(env, tokenData.workspaceId));
+  if (!sessionId) {
+    log.error('mcp.request_human_input.chat_session_missing', {
+      taskId: tokenData.taskId,
+      projectId: tokenData.projectId,
+      workspaceId: tokenData.workspaceId,
+    });
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      'Human input request could not be recorded because the chat session is missing'
+    );
+  }
+
+  const schedule = computeHumanInputSchedule(env);
+  let marker: Awaited<ReturnType<typeof projectDataService.createAttentionMarker>>;
+  try {
+    marker = await projectDataService.createAttentionMarker(env, tokenData.projectId, {
+      sessionId,
+      taskId: tokenData.taskId,
+      workspaceId: tokenData.workspaceId,
+      kind: 'needs_input',
+      source: 'request_human_input',
+      notificationUserId: tokenData.userId,
+      reason: sanitizedContext,
+      metadata: category || options ? JSON.stringify({ category, options }) : null,
+      ...schedule,
+    });
+  } catch (err) {
+    log.error('mcp.request_human_input.attention_marker_failed', {
+      taskId: tokenData.taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      'Human input request could not be recorded safely'
+    );
+  }
+
+  let notificationScheduled = false;
   if (env.NOTIFICATION) {
     try {
-      const [projectName, sessionId] = await Promise.all([
-        notificationService.getProjectName(env, tokenData.projectId),
-        notificationService.getChatSessionId(env, tokenData.workspaceId),
-      ]);
-      await notificationService.notifyNeedsInput(env, tokenData.userId, {
+      const projectName = await notificationService.getProjectName(env, tokenData.projectId);
+      const notification = await notificationService.notifyNeedsInput(env, tokenData.userId, {
         projectId: tokenData.projectId,
         projectName,
         taskId: tokenData.taskId,
@@ -583,36 +624,25 @@ export async function handleRequestHumanInput(
         category,
         options,
         sessionId,
+        attentionMarkerId: marker.id,
       });
+      notificationScheduled = notification.id !== 'suppressed';
+      if (notificationScheduled) {
+        await projectDataService.linkAttentionNotification(
+          env,
+          tokenData.projectId,
+          marker.id,
+          tokenData.userId,
+          notification.id
+        );
+      }
     } catch (err) {
       log.warn('mcp.request_human_input.notification_failed', {
         taskId: tokenData.taskId,
+        markerId: marker.id,
         error: err instanceof Error ? err.message : String(err),
       });
     }
-  }
-
-  // Create durable attention marker (best-effort, alongside notification)
-  try {
-    const sessionId = await notificationService.getChatSessionId(env, tokenData.workspaceId);
-    if (sessionId) {
-      const expiresAt = computeHumanInputExpiry(env.HUMAN_INPUT_TIMEOUT_MS);
-      await projectDataService.createAttentionMarker(env, tokenData.projectId, {
-        sessionId,
-        taskId: tokenData.taskId,
-        workspaceId: tokenData.workspaceId,
-        kind: 'needs_input',
-        source: 'request_human_input',
-        reason: sanitizedContext,
-        metadata: category || options ? JSON.stringify({ category, options }) : null,
-        expiresAt,
-      });
-    }
-  } catch (err) {
-    log.warn('mcp.request_human_input.attention_marker_failed', {
-      taskId: tokenData.taskId,
-      error: err instanceof Error ? err.message : String(err),
-    });
   }
 
   log.info('mcp.request_human_input', {
@@ -626,7 +656,9 @@ export async function handleRequestHumanInput(
     content: [
       {
         type: 'text',
-        text: 'Human input request sent. The user has been notified. You may continue working or end your turn.',
+        text: notificationScheduled
+          ? 'Human input request recorded. Notification delivery has been scheduled. You may continue working or end your turn.'
+          : 'Human input request recorded, but notification delivery was not scheduled. SAM will keep the task alive while waiting for delivery. You may continue working.',
       },
     ],
   });

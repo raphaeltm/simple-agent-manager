@@ -29,8 +29,8 @@ function encodeRandom(length: number): string {
   const bytes = new Uint8Array(length);
   crypto.getRandomValues(bytes);
   let str = '';
-  for (let i = 0; i < length; i++) {
-    str += CROCKFORD_BASE32[bytes[i]! % 32];
+  for (const byte of bytes) {
+    str += CROCKFORD_BASE32[byte % 32];
   }
   return str;
 }

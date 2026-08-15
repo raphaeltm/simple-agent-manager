@@ -5,11 +5,7 @@
  * Mounted at /api/projects/:projectId/library
  */
 
-import type {
-  ListFilesRequest,
-  MoveFileRequest,
-  UpdateTagsRequest,
-} from '@simple-agent-manager/shared';
+import type { ListFilesRequest } from '@simple-agent-manager/shared';
 import { LIBRARY_DEFAULTS, resolveEffectiveMimeType } from '@simple-agent-manager/shared';
 import { drizzle } from 'drizzle-orm/d1';
 import { Hono } from 'hono';
@@ -19,6 +15,7 @@ import type { Env } from '../env';
 import { getAuth, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
+import { jsonValidator, MoveFileSchema, UpdateTagsSchema } from '../schemas';
 import {
   deleteFile,
   downloadFile,
@@ -465,48 +462,60 @@ libraryRoutes.delete('/:fileId', requireAuth(), requireApproved(), async (c) => 
 // PATCH /:fileId/move — move file to a different directory/filename
 // ---------------------------------------------------------------------------
 
-libraryRoutes.patch('/:fileId/move', requireAuth(), requireApproved(), async (c) => {
-  const auth = getAuth(c);
-  const userId = auth.user.id;
-  const projectId = requireParam(c.req.param('projectId'), 'projectId');
-  const fileId = requireParam(c.req.param('fileId'), 'fileId');
-  const db = drizzle(c.env.DATABASE, { schema });
+libraryRoutes.patch(
+  '/:fileId/move',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(MoveFileSchema),
+  async (c) => {
+    const auth = getAuth(c);
+    const userId = auth.user.id;
+    const projectId = requireParam(c.req.param('projectId'), 'projectId');
+    const fileId = requireParam(c.req.param('fileId'), 'fileId');
+    const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireProjectCapability(db, projectId, userId, 'project:update');
+    await requireProjectCapability(db, projectId, userId, 'project:update');
 
-  const body = await c.req.json<MoveFileRequest>();
+    const body = c.req.valid('json');
 
-  if (!body.directory && !body.filename) {
-    throw errors.badRequest('Must provide "directory" or "filename" (or both)');
+    if (!body.directory && !body.filename) {
+      throw errors.badRequest('Must provide "directory" or "filename" (or both)');
+    }
+
+    const result = await moveFile(db, c.env, projectId, fileId, body);
+
+    return c.json(result, 200);
   }
-
-  const result = await moveFile(db, c.env, projectId, fileId, body);
-
-  return c.json(result, 200);
-});
+);
 
 // ---------------------------------------------------------------------------
 // POST /:fileId/tags — add/remove tags
 // ---------------------------------------------------------------------------
 
-libraryRoutes.post('/:fileId/tags', requireAuth(), requireApproved(), async (c) => {
-  const auth = getAuth(c);
-  const userId = auth.user.id;
-  const projectId = requireParam(c.req.param('projectId'), 'projectId');
-  const fileId = requireParam(c.req.param('fileId'), 'fileId');
-  const db = drizzle(c.env.DATABASE, { schema });
+libraryRoutes.post(
+  '/:fileId/tags',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(UpdateTagsSchema),
+  async (c) => {
+    const auth = getAuth(c);
+    const userId = auth.user.id;
+    const projectId = requireParam(c.req.param('projectId'), 'projectId');
+    const fileId = requireParam(c.req.param('fileId'), 'fileId');
+    const db = drizzle(c.env.DATABASE, { schema });
 
-  await requireProjectCapability(db, projectId, userId, 'project:update');
+    await requireProjectCapability(db, projectId, userId, 'project:update');
 
-  const body = await c.req.json<UpdateTagsRequest>();
+    const body = c.req.valid('json');
 
-  if (!body.add && !body.remove) {
-    throw errors.badRequest('Must provide "add" or "remove" arrays');
+    if (!body.add && !body.remove) {
+      throw errors.badRequest('Must provide "add" or "remove" arrays');
+    }
+
+    const tags = await updateTags(db, c.env, projectId, fileId, body);
+
+    return c.json({ tags }, 200);
   }
-
-  const tags = await updateTags(db, c.env, projectId, fileId, body);
-
-  return c.json({ tags }, 200);
-});
+);
 
 export { libraryRoutes };

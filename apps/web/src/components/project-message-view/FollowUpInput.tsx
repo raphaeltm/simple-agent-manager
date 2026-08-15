@@ -4,7 +4,7 @@ import type { AgentProfile } from '@simple-agent-manager/shared';
 import { useIsMobile } from '../../hooks/useIsMobile';
 import { ProjectChatComposer } from '../project-chat/ProjectChatComposer';
 
-/** Follow-up message input for active/idle sessions. */
+/** Follow-up message input for active, idle, or sleeping resumable sessions. */
 export function FollowUpInput({
   value,
   onChange,
@@ -42,9 +42,13 @@ export function FollowUpInput({
         transcribeApiUrl={transcribeApiUrl}
         slashCommands={slashCommands}
         agentProfiles={agentProfiles}
-        onFilesSelected={onUploadFiles ? (files) => {
-          if (files && files.length > 0) onUploadFiles(files);
-        } : undefined}
+        onFilesSelected={
+          onUploadFiles
+            ? (files) => {
+                if (files && files.length > 0) onUploadFiles(files);
+              }
+            : undefined
+        }
         showShortcutHint={!isMobile}
       />
     </div>

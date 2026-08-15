@@ -21,6 +21,7 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { CreateAgentCredentialSetupSessionSchema, parseOptionalBody } from '../schemas';
 import {
   ACTIVE_SETUP_STATUSES,
   getSetupSessionCapturePollMs,
@@ -111,9 +112,7 @@ agentCredentialSetupSessionsRoutes.post('/', requireAuth(), requireApproved(), a
   }
 
   const userId = getUserId(c);
-  const body = await c.req
-    .json<{ agentType?: string }>()
-    .catch(() => ({}) as { agentType?: string });
+  const body = await parseOptionalBody(c.req.raw, CreateAgentCredentialSetupSessionSchema, {});
   const requestedAgentType = body.agentType ?? DEFAULT_SETUP_AGENT_TYPE;
   if (!isValidAgentType(requestedAgentType) || !isSupportedSetupAgentType(requestedAgentType)) {
     throw errors.badRequest(

@@ -1,0 +1,71 @@
+{
+  "$schema": "./fixtures/supply-chain/direct-dependency-evidence.schema.json",
+  "npm": {
+    "@astrojs/check": {
+      "registryUrl": "https://www.npmjs.com/package/@astrojs/check",
+      "necessity": "Validates Astro templates and embedded TypeScript."
+    },
+    "@eslint/js": {
+      "registryUrl": "https://www.npmjs.com/package/@eslint/js",
+      "necessity": "Provides supported ESLint flat recommended configuration."
+    },
+    "@typescript-eslint/eslint-plugin": {
+      "registryUrl": "https://www.npmjs.com/package/@typescript-eslint/eslint-plugin",
+      "necessity": "Hosts supported TypeScript lint rules."
+    },
+    "@typescript-eslint/parser": {
+      "registryUrl": "https://www.npmjs.com/package/@typescript-eslint/parser",
+      "necessity": "Parses TypeScript for ESLint rules and fixtures."
+    },
+    "eslint": {
+      "registryUrl": "https://www.npmjs.com/package/eslint",
+      "necessity": "Runs authoritative lint and local rule fixtures."
+    },
+    "eslint-plugin-astro": {
+      "registryUrl": "https://www.npmjs.com/package/eslint-plugin-astro",
+      "necessity": "Parses and lints tracked Astro templates."
+    },
+    "eslint-plugin-react": {
+      "registryUrl": "https://www.npmjs.com/package/eslint-plugin-react",
+      "necessity": "Preserves existing React lint findings."
+    },
+    "eslint-plugin-react-hooks": {
+      "registryUrl": "https://www.npmjs.com/package/eslint-plugin-react-hooks",
+      "necessity": "Preserves existing React Hooks lint findings."
+    },
+    "globals": {
+      "registryUrl": "https://www.npmjs.com/package/globals",
+      "necessity": "Defines explicit flat-config runtime globals."
+    },
+    "oxlint": {
+      "registryUrl": "https://www.npmjs.com/package/oxlint",
+      "necessity": "Measures native lint findings in shadow mode."
+    },
+    "typescript": {
+      "registryUrl": "https://www.npmjs.com/package/typescript",
+      "necessity": "Checks local plugin JavaScript declarations."
+    },
+    "tsx": {
+      "registryUrl": "https://www.npmjs.com/package/tsx",
+      "necessity": "Runs the deterministic Astro validation wrapper."
+    },
+    "typescript-eslint": {
+      "registryUrl": "https://www.npmjs.com/package/typescript-eslint",
+      "necessity": "Provides supported ESLint flat TypeScript configuration."
+    },
+    "vitest": {
+      "registryUrl": "https://www.npmjs.com/package/vitest",
+      "necessity": "Runs local plugin and quality checker fixtures."
+    },
+    "wrangler": {
+      "registryUrl": "https://www.npmjs.com/package/wrangler",
+      "necessity": "Provides the lockfile-pinned Cloudflare Pages deployment executable for the marketing workspace."
+    }
+  },
+  "go": {
+    "golang.org/x/vuln/cmd/govulncheck": {
+      "registryUrl": "https://pkg.go.dev/golang.org/x/vuln/cmd/govulncheck",
+      "necessity": "Pins the official govulncheck CLI used by the diff-local Go vulnerability gate."
+    }
+  }
+}

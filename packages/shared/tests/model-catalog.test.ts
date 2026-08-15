@@ -38,13 +38,46 @@ describe('model-catalog', () => {
           'gpt-5.4',
         ])
       );
+
+      const namesById = new Map(
+        groups.flatMap((group) => group.models).map((model) => [model.id, model.name])
+      );
+      expect(
+        groups.find((group) => group.label === 'Codex (Current)')?.models.map((model) => model.id)
+      ).toEqual(['gpt-5.3-codex']);
+      expect(
+        groups.find((group) => group.label === 'Deprecated')?.models.map((model) => model.id)
+      ).toEqual(['gpt-5.2-codex', 'gpt-5.1-codex-max', 'gpt-5.1-codex-mini', 'o4-mini']);
+      expect(
+        groups.find((group) => group.label === 'GPT-5 (Previous)')?.models.map((model) => model.id)
+      ).toEqual(['gpt-5-mini']);
+      expect(namesById.get('gpt-5.3-codex')).toBe('GPT-5.3 Codex');
+      expect(namesById.get('gpt-5.2-codex')).toContain('Deprecated');
+      expect(namesById.get('gpt-5.1-codex-max')).toContain('Deprecated');
+      expect(namesById.get('gpt-5.1-codex-mini')).toContain('Deprecated');
+      expect(namesById.get('o4-mini')).toContain('Deprecated');
     });
 
     it('returns grouped models for mistral-vibe', () => {
       const groups = getModelGroupsForAgent('mistral-vibe');
       expect(groups.length).toBeGreaterThanOrEqual(2);
       const allModels = groups.flatMap((g) => g.models);
-      expect(allModels.some((m) => m.id === 'devstral-2-2512')).toBe(true);
+      expect(allModels.map((model) => model.id)).toEqual(
+        expect.arrayContaining([
+          'mistral-medium-3-5',
+          'mistral-small-2603',
+          'mistral-large-2512',
+          'codestral-2508',
+          'ministral-14b-2512',
+          'ministral-8b-2512',
+          'ministral-3b-2512',
+        ])
+      );
+      expect(allModels.some((model) => model.id === 'mistral-medium-3-5-2604')).toBe(false);
+      expect(allModels.some((model) => model.id === 'devstral-2-2512')).toBe(false);
+      expect(allModels.some((model) => model.id === 'mistral-medium-2508')).toBe(false);
+      expect(allModels.some((model) => model.id === 'magistral-medium-1-2-2509')).toBe(false);
+      expect(allModels.some((model) => model.id.startsWith('ministral-3-'))).toBe(false);
     });
 
     it('returns grouped models for google-gemini', () => {
@@ -59,6 +92,12 @@ describe('model-catalog', () => {
       expect(allModels.some((m) => m.id === 'gemini-3.1-flash-lite')).toBe(true);
       expect(allModels.some((m) => m.id === 'gemini-3.1-pro')).toBe(false);
       expect(allModels.some((m) => m.id === 'gemini-2.0-flash')).toBe(false);
+
+      const retiringGroup = groups.find((group) => group.label === 'Gemini 2.5 (Retires Oct 16)');
+      expect(retiringGroup?.models.map((model) => model.name)).toEqual([
+        'Gemini 2.5 Pro (retires Oct 16)',
+        'Gemini 2.5 Flash (retires Oct 16)',
+      ]);
     });
 
     it('returns empty array for unknown agent type', () => {
@@ -86,6 +125,7 @@ describe('model-catalog', () => {
       expect(models.some((m) => m.id === 'claude-sonnet-5')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-4-8')).toBe(true);
       expect(models.some((m) => m.id === 'claude-opus-4-7')).toBe(true);
+      expect(models.some((m) => m.id === 'claude-opus-4-1-20250805')).toBe(false);
       expect(models.some((m) => m.id === 'claude-sonnet-4-6')).toBe(true);
       expect(models.some((m) => m.id === 'claude-sonnet-4-20250514')).toBe(false);
     });

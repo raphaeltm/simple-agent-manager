@@ -47,7 +47,9 @@ export function Project() {
     }
   }, [projectId]);
 
-  useEffect(() => { void loadProject(); }, [loadProject]);
+  useEffect(() => {
+    void loadProject();
+  }, [loadProject]);
 
   useEffect(() => {
     void listGitHubInstallations()
@@ -61,9 +63,13 @@ export function Project() {
     return () => setProjectName(undefined);
   }, [project?.name, setProjectName]);
 
+  // Hooks must run unconditionally, so this memo is computed even on renders
+  // where projectId is still undefined (before the "Project ID is missing"
+  // guard below returns). The '' fallback is never actually consumed — every
+  // code path that reads contextValue.projectId runs after that guard.
   const contextValue = useMemo(
     () => ({
-      projectId: projectId!,
+      projectId: projectId ?? '',
       project,
       installations,
       reload: loadProject,
@@ -92,7 +98,9 @@ export function Project() {
           </div>
         ) : error ? (
           <div className="p-4">
-            <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
+            <Alert variant="error" onDismiss={() => setError(null)}>
+              {error}
+            </Alert>
           </div>
         ) : !project ? (
           <div className="p-4">
@@ -115,14 +123,17 @@ export function Project() {
       <main
         aria-label={project?.name ? `${project.name} — Project` : 'Project'}
         className={`max-w-[80rem] w-full mx-auto min-w-0 ${isMobile ? 'flex flex-col flex-1 min-h-0' : ''}`}
-        style={isMobile
-          ? { padding: 'var(--sam-space-3) var(--sam-space-3)' }
-          : { padding: 'var(--sam-space-8) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }
+        style={
+          isMobile
+            ? { padding: 'var(--sam-space-3) var(--sam-space-3)' }
+            : { padding: 'var(--sam-space-8) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }
         }
       >
         {error && (
           <div className="mt-3">
-            <Alert variant="error" onDismiss={() => setError(null)}>{error}</Alert>
+            <Alert variant="error" onDismiss={() => setError(null)}>
+              {error}
+            </Alert>
           </div>
         )}
 
@@ -136,7 +147,21 @@ export function Project() {
             <Alert variant="error">Project not found.</Alert>
           </div>
         ) : (
-          <div className={`flex flex-col flex-1 min-h-0 ${isMobile ? 'mt-2' : 'mt-3'}`}>
+          /*
+           * `min-w-0 [&>*]:max-w-full` is a structural guard, not cosmetic.
+           * This is a COLUMN flex container, so a page root that uses `mx-auto`
+           * (auto cross-axis margins) loses `align-items: stretch` and falls
+           * back to fit-content sizing, which `min-width: auto` then floors at
+           * the subtree's min-content width. A single `truncate`
+           * (white-space: nowrap) heading makes that min-content the FULL
+           * untruncated string, so one long name can push the page past the
+           * viewport — where the ancestors' `overflow-x-hidden` silently clips
+           * it instead of scrolling. Clamping children to this wrapper's width
+           * stops any project page from shearing off-screen.
+           */
+          <div
+            className={`flex flex-col flex-1 min-h-0 min-w-0 [&>*]:max-w-full ${isMobile ? 'mt-2' : 'mt-3'}`}
+          >
             <ProjectContext.Provider value={contextValue}>
               <Outlet />
             </ProjectContext.Provider>

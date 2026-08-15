@@ -1,5 +1,5 @@
-import { act,fireEvent, render, screen } from '@testing-library/react';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen } from '@testing-library/react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { CopyButton } from '../../../../../src/components/shared/log/CopyButton';
 
@@ -42,9 +42,9 @@ describe('CopyButton', () => {
   it('stops propagation on click', async () => {
     const parentHandler = vi.fn();
     render(
-      <div onClick={parentHandler}>
+      <div role="presentation" onClick={parentHandler}>
         <CopyButton getText={() => 'text'} label="Copy" />
-      </div>,
+      </div>
     );
 
     await act(async () => {

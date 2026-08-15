@@ -1,9 +1,11 @@
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { requireApproved, requireAuth, requireSuperadmin } from '../middleware/auth';
 import { errors } from '../middleware/error';
+import { jsonValidator } from '../schemas';
 import {
   isOperationalLoopEnabled,
   resolveDisabledAlarmRetryMs,
@@ -11,6 +13,13 @@ import {
   resolveOperationalLoopKvKey,
   setOperationalLoopEnabled,
 } from '../services/operational-kill-switch';
+
+// Both fields are validated loosely (v.unknown()) — the handler below
+// performs its own boolean-type checks with specific error messages.
+const UpdateRuntimeControlsSchema = v.object({
+  cronSweepsEnabled: v.optional(v.unknown()),
+  doAlarmsEnabled: v.optional(v.unknown()),
+});
 
 const adminRuntimeControlRoutes = new Hono<{ Bindings: Env }>();
 
@@ -34,11 +43,8 @@ async function readRuntimeControls(env: Env) {
 
 adminRuntimeControlRoutes.get('/', async (c) => c.json(await readRuntimeControls(c.env)));
 
-adminRuntimeControlRoutes.patch('/', async (c) => {
-  const body = await c.req.json<{
-    cronSweepsEnabled?: unknown;
-    doAlarmsEnabled?: unknown;
-  }>();
+adminRuntimeControlRoutes.patch('/', jsonValidator(UpdateRuntimeControlsSchema), async (c) => {
+  const body = c.req.valid('json');
   const cronPresent = body.cronSweepsEnabled !== undefined;
   const alarmsPresent = body.doAlarmsEnabled !== undefined;
   if (!cronPresent && !alarmsPresent) {

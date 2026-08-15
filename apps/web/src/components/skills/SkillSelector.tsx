@@ -2,6 +2,8 @@ import type { AgentSkill } from '@simple-agent-manager/shared';
 import { Zap } from 'lucide-react';
 import { type FC } from 'react';
 
+import { expectJsonRecord } from '../../lib/runtime-validation';
+
 interface SkillSelectorProps {
   skills: AgentSkill[];
   selectedSkillId: string | null;
@@ -14,12 +16,21 @@ interface SkillSelectorProps {
 function formatResourceSummary(skill: AgentSkill | null) {
   if (!skill?.resourceRequirementsJson) return null;
   try {
-    const req = JSON.parse(skill.resourceRequirementsJson) as Record<string, unknown>;
-    return [
-      typeof req.minVcpu === 'number' ? `${req.minVcpu} vCPU` : null,
-      typeof req.minMemoryGb === 'number' ? `${req.minMemoryGb} GB RAM` : null,
-      typeof req.minDiskGb === 'number' ? `${req.minDiskGb} GB disk` : null,
-    ].filter(Boolean).join(' · ') || null;
+    // expectJsonRecord throws for non-object JSON (arrays, primitives, null),
+    // which the catch below treats the same as invalid JSON — no summary.
+    const req = expectJsonRecord(
+      JSON.parse(skill.resourceRequirementsJson) as unknown,
+      'skill.resourceRequirementsJson'
+    );
+    return (
+      [
+        typeof req.minVcpu === 'number' ? `${req.minVcpu} vCPU` : null,
+        typeof req.minMemoryGb === 'number' ? `${req.minMemoryGb} GB RAM` : null,
+        typeof req.minDiskGb === 'number' ? `${req.minDiskGb} GB disk` : null,
+      ]
+        .filter(Boolean)
+        .join(' · ') || null
+    );
   } catch {
     return null;
   }
@@ -33,7 +44,9 @@ export const SkillSelector: FC<SkillSelectorProps> = ({
   compact = false,
   id,
 }) => {
-  const selected = selectedSkillId ? skills.find((skill) => skill.id === selectedSkillId) ?? null : null;
+  const selected = selectedSkillId
+    ? (skills.find((skill) => skill.id === selectedSkillId) ?? null)
+    : null;
   const summary = formatResourceSummary(selected);
   const classes = compact
     ? 'min-h-11 px-2 py-1.5 border border-border-default rounded-md bg-page text-fg-primary text-xs cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--sam-color-focus-ring)]'
@@ -69,7 +82,9 @@ export const SkillSelector: FC<SkillSelectorProps> = ({
           {summary ? ` · ${summary}` : ''}
         </div>
       ) : (
-        <div aria-hidden="true" className="text-xs text-transparent">No skill selected</div>
+        <div aria-hidden="true" className="text-xs text-transparent">
+          No skill selected
+        </div>
       )}
     </div>
   );

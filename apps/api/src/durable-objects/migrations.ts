@@ -1,3 +1,4 @@
+// FILE SIZE EXCEPTION: Append-only migration ledger must preserve one auditable execution order. See .claude/rules/18-file-size-limits.md
 /**
  * Durable Object SQLite migration runner and migration definitions.
  *
@@ -132,13 +133,17 @@ export const MIGRATIONS: Migration[] = [
           created_at INTEGER NOT NULL DEFAULT (unixepoch() * 1000)
         )
       `);
-      sql.exec(`CREATE INDEX idx_idle_cleanup_schedule_cleanup_at ON idle_cleanup_schedule(cleanup_at)`);
+      sql.exec(
+        `CREATE INDEX idx_idle_cleanup_schedule_cleanup_at ON idle_cleanup_schedule(cleanup_at)`
+      );
     },
   },
   {
     name: '006-idle-cleanup-retry-count',
     run: (sql) => {
-      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`);
+      sql.exec(
+        `ALTER TABLE idle_cleanup_schedule ADD COLUMN retry_count INTEGER NOT NULL DEFAULT 0`
+      );
     },
   },
   {
@@ -441,29 +446,79 @@ export const MIGRATIONS: Migration[] = [
       // Uses ALTER TABLE ADD COLUMN so existing mailbox rows are preserved.
 
       // message_class: escalating urgency (notify, deliver, interrupt, preempt_and_replan, shutdown_with_final_prompt)
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN message_class TEXT NOT NULL DEFAULT 'notify'`); } catch { /* already exists */ }
+      try {
+        sql.exec(
+          `ALTER TABLE session_inbox ADD COLUMN message_class TEXT NOT NULL DEFAULT 'notify'`
+        );
+      } catch {
+        /* already exists */
+      }
 
       // delivery_state: queued → delivered → acked → expired
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'queued'`); } catch { /* already exists */ }
+      try {
+        sql.exec(
+          `ALTER TABLE session_inbox ADD COLUMN delivery_state TEXT NOT NULL DEFAULT 'queued'`
+        );
+      } catch {
+        /* already exists */
+      }
 
       // Sender identity
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN sender_type TEXT NOT NULL DEFAULT 'system'`); } catch { /* already exists */ }
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN sender_id TEXT`); } catch { /* already exists */ }
+      try {
+        sql.exec(`ALTER TABLE session_inbox ADD COLUMN sender_type TEXT NOT NULL DEFAULT 'system'`);
+      } catch {
+        /* already exists */
+      }
+      try {
+        sql.exec(`ALTER TABLE session_inbox ADD COLUMN sender_id TEXT`);
+      } catch {
+        /* already exists */
+      }
 
       // Ack tracking
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN ack_required INTEGER NOT NULL DEFAULT 0`); } catch { /* already exists */ }
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN acked_at INTEGER`); } catch { /* already exists */ }
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN ack_timeout_ms INTEGER`); } catch { /* already exists */ }
+      try {
+        sql.exec(`ALTER TABLE session_inbox ADD COLUMN ack_required INTEGER NOT NULL DEFAULT 0`);
+      } catch {
+        /* already exists */
+      }
+      try {
+        sql.exec(`ALTER TABLE session_inbox ADD COLUMN acked_at INTEGER`);
+      } catch {
+        /* already exists */
+      }
+      try {
+        sql.exec(`ALTER TABLE session_inbox ADD COLUMN ack_timeout_ms INTEGER`);
+      } catch {
+        /* already exists */
+      }
 
       // Expiry
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN expires_at INTEGER`); } catch { /* already exists */ }
+      try {
+        sql.exec(`ALTER TABLE session_inbox ADD COLUMN expires_at INTEGER`);
+      } catch {
+        /* already exists */
+      }
 
       // Delivery tracking
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0`); } catch { /* already exists */ }
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN last_delivery_at INTEGER`); } catch { /* already exists */ }
+      try {
+        sql.exec(
+          `ALTER TABLE session_inbox ADD COLUMN delivery_attempts INTEGER NOT NULL DEFAULT 0`
+        );
+      } catch {
+        /* already exists */
+      }
+      try {
+        sql.exec(`ALTER TABLE session_inbox ADD COLUMN last_delivery_at INTEGER`);
+      } catch {
+        /* already exists */
+      }
 
       // Structured metadata (JSON)
-      try { sql.exec(`ALTER TABLE session_inbox ADD COLUMN metadata TEXT`); } catch { /* already exists */ }
+      try {
+        sql.exec(`ALTER TABLE session_inbox ADD COLUMN metadata TEXT`);
+      } catch {
+        /* already exists */
+      }
 
       // Indexes for efficient delivery sweep queries
       sql.exec(`
@@ -635,7 +690,9 @@ export const MIGRATIONS: Migration[] = [
     name: '023-session-creator',
     run: (sql) => {
       sql.exec(`ALTER TABLE chat_sessions ADD COLUMN created_by_user_id TEXT`);
-      sql.exec(`CREATE INDEX IF NOT EXISTS idx_chat_sessions_created_by ON chat_sessions(created_by_user_id)`);
+      sql.exec(
+        `CREATE INDEX IF NOT EXISTS idx_chat_sessions_created_by ON chat_sessions(created_by_user_id)`
+      );
     },
   },
   {
@@ -657,8 +714,130 @@ export const MIGRATIONS: Migration[] = [
         `UPDATE session_inbox
          SET expires_at = created_at + ?
          WHERE expires_at IS NULL`,
-        MAILBOX_DEFAULTS.TTL_MS,
+        MAILBOX_DEFAULTS.TTL_MS
       );
+    },
+  },
+  {
+    name: '026-delivery-aware-attention-expiry',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE session_attention_markers ADD COLUMN notification_user_id TEXT`);
+      sql.exec(`ALTER TABLE session_attention_markers ADD COLUMN next_escalation_at INTEGER`);
+      sql.exec(
+        `ALTER TABLE session_attention_markers ADD COLUMN escalation_count INTEGER NOT NULL DEFAULT 0`
+      );
+      sql.exec(`ALTER TABLE session_attention_markers ADD COLUMN max_expires_at INTEGER`);
+      sql.exec(`ALTER TABLE session_attention_markers ADD COLUMN resolved_answer TEXT`);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_attention_escalation
+          ON session_attention_markers(next_escalation_at)
+          WHERE resolved_at IS NULL AND next_escalation_at IS NOT NULL
+        `);
+      },
+    },
+  {
+    // Worker-owned durable prompt delivery and checkpoint episode foundation.
+    // session_inbox remains the only queue; these columns add attempt/receipt
+    // reconciliation without creating a competing delivery store.
+    name: '027-durable-prompt-delivery-checkpoints',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE session_state ADD COLUMN prompt_epoch INTEGER`);
+
+      sql.exec(
+        `ALTER TABLE session_inbox ADD COLUMN source_kind TEXT NOT NULL DEFAULT 'agent_mailbox'`
+      );
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN prompt_message_id TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN next_attempt_at INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN last_error TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN terminal_reason TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN attempt_id TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN attempt_started_at INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN runtime_identity TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN receipt_state TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN receipt_runtime_identity TEXT`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN receipt_checked_at INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN accepted_at INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN adapter_protocol_version INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN receipt_supported INTEGER`);
+      sql.exec(`ALTER TABLE session_inbox ADD COLUMN durable_delivery INTEGER NOT NULL DEFAULT 0`);
+
+      sql.exec(`
+        UPDATE session_inbox
+        SET prompt_message_id = id
+        WHERE prompt_message_id IS NULL
+      `);
+      sql.exec(`
+        UPDATE session_inbox
+        SET next_attempt_at = created_at
+        WHERE next_attempt_at IS NULL AND delivery_state = 'queued'
+      `);
+
+      sql.exec(`
+        CREATE INDEX idx_inbox_delivery_due
+        ON session_inbox(delivery_state, next_attempt_at, created_at)
+        WHERE delivery_state IN ('queued', 'retry_wait')
+      `);
+      sql.exec(`
+        CREATE INDEX idx_inbox_delivery_claims
+        ON session_inbox(delivery_state, attempt_started_at)
+        WHERE delivery_state = 'delivering'
+      `);
+
+      sql.exec(`
+        CREATE TABLE checkpoint_episodes (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          task_id TEXT,
+          workspace_id TEXT,
+          acp_session_id TEXT NOT NULL,
+          prompt_epoch INTEGER NOT NULL,
+          reason TEXT NOT NULL,
+          state TEXT NOT NULL,
+          progress_envelope_json TEXT,
+          mailbox_message_id TEXT,
+          prompt_delivery_id TEXT,
+          preempt_requested_at INTEGER,
+          preempt_accepted_at INTEGER,
+          ready_observed_at INTEGER,
+          resume_accepted_at INTEGER,
+          completed_at INTEGER,
+          failed_at INTEGER,
+          attempt_count INTEGER NOT NULL DEFAULT 0,
+          last_error TEXT,
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          UNIQUE(acp_session_id, prompt_epoch)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX idx_checkpoint_episodes_session
+        ON checkpoint_episodes(session_id, created_at DESC)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_checkpoint_episodes_state
+        ON checkpoint_episodes(state, updated_at)
+      `);
+    },
+  },
+  {
+    name: '028-idle-cleanup-attention-state',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN terminal_state TEXT`);
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN terminal_reason TEXT`);
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN terminal_at INTEGER`);
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN last_error TEXT`);
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN failure_notified_at INTEGER`);
+      sql.exec(`ALTER TABLE idle_cleanup_schedule ADD COLUMN attention_marker_id TEXT`);
+      sql.exec(`
+        CREATE INDEX idx_idle_cleanup_schedule_active_cleanup_at
+        ON idle_cleanup_schedule(cleanup_at)
+        WHERE terminal_state IS NULL
+      `);
+      sql.exec(`
+        CREATE INDEX idx_idle_cleanup_schedule_terminal
+        ON idle_cleanup_schedule(terminal_state, terminal_at)
+        WHERE terminal_state IS NOT NULL
+      `);
     },
   },
 ];

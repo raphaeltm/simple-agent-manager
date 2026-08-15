@@ -165,7 +165,10 @@ describe('agent activity callback', () => {
       chatSessionId: 'chat-session-1',
       runtime: 'cf-container',
     };
-    mocks.nodeAgent.hibernateAgentSessionOnNode.mockResolvedValueOnce({ status: 'available' });
+    mocks.nodeAgent.hibernateAgentSessionOnNode.mockResolvedValueOnce({
+      status: 'pending',
+      accepted: true,
+    });
     const app = await createTestApp();
 
     const response = await postActivity(app, {
@@ -185,13 +188,10 @@ describe('agent activity callback', () => {
         chatSessionId: 'chat-session-1',
         runtime: 'cf-container',
         agentType: 'openai-codex',
+        background: true,
       }
     );
-    expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).toHaveBeenCalledWith(
-      env,
-      'node-1',
-      'agent_activity_idle'
-    );
+    expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
   });
 
   it('turns VM-agent error activity into durable failed control-plane state', async () => {
@@ -366,9 +366,7 @@ describe('agent activity callback', () => {
       expect(mocks.projectData.transitionAcpSession).not.toHaveBeenCalled();
       expect(mocks.projectData.failSession).not.toHaveBeenCalled();
       expect(mocks.updateSets).toHaveLength(0);
-      expect(
-        mocks.container.markVmAgentContainerActiveWorkEndedBestEffort
-      ).not.toHaveBeenCalled();
+      expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
       expect(mocks.log.warn).toHaveBeenCalledWith(
         'acp_activity.rejected_stale_callback',
         expect.objectContaining({

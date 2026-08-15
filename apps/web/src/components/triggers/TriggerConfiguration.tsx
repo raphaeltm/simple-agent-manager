@@ -1,18 +1,9 @@
 import type { TriggerResponse } from '@simple-agent-manager/shared';
 
+import { formatDateFull } from './trigger-presentation';
+
 interface TriggerConfigurationProps {
   trigger: TriggerResponse;
-}
-
-function formatDateFull(date: string): string {
-  return new Date(date).toLocaleString(undefined, {
-    weekday: 'short',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZoneName: 'short',
-  });
 }
 
 function sourceRows(trigger: TriggerResponse): Array<[string, string]> {

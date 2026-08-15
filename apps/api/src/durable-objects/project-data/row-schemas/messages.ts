@@ -1,6 +1,6 @@
 import * as v from 'valibot';
 
-import { expectJsonRecord } from '../../../lib/runtime-validation';
+import { expectJsonRecord, maybeJsonRecord } from '../../../lib/runtime-validation';
 import { parseRow, safeParseJson } from './core';
 
 // =============================================================================
@@ -55,7 +55,10 @@ export type CompactMessageOptions = {
 
 export const DEFAULT_DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES = 16 * 1024;
 
-export function parseChatMessageRowCompact(row: unknown, options?: CompactMessageOptions): {
+export function parseChatMessageRowCompact(
+  row: unknown,
+  options?: CompactMessageOptions
+): {
   id: string;
   sessionId: string;
   role: string;
@@ -111,10 +114,6 @@ function isDocumentCardTool(meta: Record<string, unknown>): boolean {
   return Boolean(base && DOCUMENT_CARD_TOOLS.has(base));
 }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null;
-}
-
 function parseDocumentPayloadCandidate(
   value: string,
   maxBytes: number
@@ -134,8 +133,14 @@ function parseDocumentPayloadCandidate(
   for (const candidate of candidates) {
     try {
       const parsed: unknown = JSON.parse(candidate);
-      if (isRecord(parsed) && isDocumentResultPayload(parsed)) {
-        return parsed;
+      // maybeJsonRecord accepts arrays (valibot's record schema treats numeric
+      // indices as string keys) — same as the old `typeof value === 'object'`
+      // guard this replaces. isDocumentResultPayload only matches named keys
+      // (fileId/id/existingFile/error) that a JSON array can never carry at
+      // its top level, so this is not a behavior change.
+      const record = maybeJsonRecord(parsed);
+      if (record && isDocumentResultPayload(record)) {
+        return record;
       }
     } catch {
       // Try the next candidate.
@@ -147,7 +152,7 @@ function parseDocumentPayloadCandidate(
 
 function isDocumentResultPayload(payload: Record<string, unknown>): boolean {
   if (typeof payload.fileId === 'string' || typeof payload.id === 'string') return true;
-  if (isRecord(payload.existingFile)) return true;
+  if (maybeJsonRecord(payload.existingFile)) return true;
   return payload.error === 'FILE_NOT_FOUND' || payload.error === 'FILE_EXISTS';
 }
 
@@ -170,10 +175,11 @@ function findDocumentPayload(
     return undefined;
   }
 
-  if (!isRecord(value)) return undefined;
+  const record = maybeJsonRecord(value);
+  if (!record) return undefined;
 
   for (const key of ['text', 'output', 'content', 'result', 'message']) {
-    const found = findDocumentPayload(value[key], maxBytes, depth + 1);
+    const found = findDocumentPayload(record[key], maxBytes, depth + 1);
     if (found) return found;
   }
 

@@ -10,6 +10,17 @@ import { env, SELF } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
 describe('Worker smoke tests (workerd runtime)', () => {
+  it('exposes only the runtime VAPID public key', async () => {
+    const response = await SELF.fetch('https://api.test.example.com/api/config/vapid-public-key');
+    expect(response.status).toBe(200);
+    const body = await response.json<{ publicKey: string | null }>();
+    expect(body).toEqual({
+      publicKey:
+        'BP4z9KsN6nGRTbVYI_c7VJSPQTBtkgcy27mlmlMoZIIgDll6e3vCYLocInmYWAmS6TlzAC8wEqKK6PBru3jl7A8',
+    });
+    expect(JSON.stringify(body)).not.toContain('yfWPiYE');
+  });
+
   describe('health check', () => {
     it('returns healthy status', async () => {
       const response = await SELF.fetch('https://api.test.example.com/health');

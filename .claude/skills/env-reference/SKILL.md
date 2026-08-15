@@ -37,6 +37,9 @@ Uses `GH_*` prefix because GitHub Actions secret names cannot start with `GITHUB
 | Secret   | `JWT_PUBLIC_KEY`                                   | No (auto-generated)                                                |
 | Secret   | `DEPLOY_SIGNING_PRIVATE_KEY`                       | No (auto-generated; override only)                                 |
 | Secret   | `DEPLOY_SIGNING_PUBLIC_KEY`                        | No (derived during deploy; override only)                          |
+| Secret   | `VAPID_PRIVATE_KEY`                                | No (auto-generated; override only)                                 |
+| Secret   | `VAPID_PUBLIC_KEY`                                 | No (derived during deploy; override only)                          |
+| Secret   | `VAPID_SUBJECT`                                    | No (generated contact URI; override only)                          |
 | Secret   | `TRIAL_CLAIM_TOKEN_SECRET`                         | No (auto-generated)                                                |
 | Variable | `ORIGIN_CA_CERT_VALIDITY_DAYS`                     | No (default: 7)                                                    |
 
@@ -77,16 +80,29 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `INSTANT_STALE_CALLBACK_MARGIN_MS` — Freshness margin for rejecting destructive callbacks from superseded Instant containers (default: `60000`)
 - `CF_CONTAINER_CREATE_WORKSPACE_TIMEOUT_MS` — Synchronous workspace creation and clone budget (default: `120000`)
 - `CF_CONTAINER_CLONE_FILTER` — Git partial-clone filter (default: `blob:none`; `off` disables partial clone)
-- `SESSION_SNAPSHOT_TTL_DAYS` — Retention for hibernated session snapshots; deployment also provisions matching R2 prefix expiration (default: `7`)
-- `SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES` — Maximum bytes accepted for one snapshot artifact (default: `104857600`)
-- `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES` — Per-file threshold before snapshot content is visibly skipped (default: `52428800`)
+- `SESSION_SNAPSHOT_TTL_DAYS` — Retention from actual sleep; the scheduled Worker terminalizes the chat and deletes R2 state (default: `7`)
+- `SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES` — Maximum combined bytes accepted for snapshot artifacts (default: `268435456`)
+- `SESSION_SNAPSHOT_ENTRY_THRESHOLD_BYTES` — Per-file threshold before snapshot content is visibly skipped (default: `268435456`)
 - `SESSION_SNAPSHOT_TRANSFER_IDLE_TIMEOUT_MS` — Progress-idle timeout for snapshot upload/download (default: `30000`)
+- `SESSION_SNAPSHOT_UPLOAD_URL_TTL_SECONDS` — Lifetime of direct R2 snapshot upload URLs (default: `900`)
+- `SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS` — Budget for vm-agent acceptance of the final checkpoint request (default: `300000`)
+- `SESSION_SNAPSHOT_PROGRESS_IDLE_TIMEOUT_MS` — No-progress watchdog after a final checkpoint is accepted (default: `120000`)
+- `SESSION_SNAPSHOT_POLL_INTERVAL_MS` — D1 poll interval while waiting for final checkpoint progress/completion (default: `1000`)
+- `SESSION_SNAPSHOT_OPERATION_TIMEOUT` — VM-agent checkpoint operation deadline, passed to new VM nodes and Instant containers as a Go duration (default: `15m`)
+- `SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL` — VM-agent snapshot progress callback throttle, passed to new VM nodes and Instant containers as a Go duration (default: `15s`)
+- `SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT` — VM-agent snapshot progress callback timeout, passed to new VM nodes and Instant containers as a Go duration (default: `5s`)
 - `SESSION_SNAPSHOT_JSON_BODY_MAX_BYTES` — Maximum snapshot coordination JSON body (default: `262144`)
 - `SESSION_SNAPSHOT_R2_PREFIX` — Private R2 object prefix for session snapshots (default: `session-snapshots`)
-- `SESSION_SNAPSHOT_PURGE_ENABLED` — Kill switch for expired D1 snapshot metadata purge (default: enabled)
+- `SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS` — Maximum replacement-VM wake attempts before the sleeping session becomes unavailable (default: `3`)
+- `SESSION_SLEEP_AFTER_MS` — Runtime-neutral idle time before automatic VM-session sleep (default: `900000`)
+- `SESSION_SLEEP_SWEEP_BATCH_SIZE` — Maximum due VM sleeps atomically claimed by one scheduled sweep (default: `10`)
+- `SESSION_SLEEP_RETRY_DELAY_MS` — Delay after a fail-closed automatic sleep attempt (default: `300000`)
+- `SESSION_SLEEP_MAX_ATTEMPTS` — Maximum automatic sleep attempts; exhaustion preserves compute and records the error (default: `9`)
+- `SESSION_SLEEP_CLAIM_LEASE_MS` — Reclaim timeout for an interrupted automatic-sleep claim (default: `600000`)
+- `SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS` — Reclaim timeout for an interrupted replacement-runtime wake claim (default: `600000`)
+- `SESSION_LIFECYCLE_ERROR_MAX_LENGTH` — Maximum stored sleep/recovery diagnostic length (default: `2048`)
+- `SESSION_SNAPSHOT_PURGE_ENABLED` — Kill switch for expired snapshot cleanup in D1 and R2 (default: enabled)
 - `SESSION_SNAPSHOT_PURGE_BATCH_SIZE` — Maximum expired snapshot rows deleted per run (default: `250`)
-- `SESSION_SNAPSHOT_PURGE_INTERVAL_HOURS` — Minimum interval between snapshot row purges (default: `24`)
-- `SESSION_SNAPSHOT_PURGE_LAST_RUN_KV_KEY` — KV interval marker (default: `cleanup:session-snapshots:last-run`)
 
 ### Deployment Storage Retention
 
@@ -107,6 +123,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `CRON_FAILURE_NOTIFICATION_KV_PREFIX` — KV prefix for failure-notification throttle markers (default: `cron-failure-notification`)
 - `NODE_LIFECYCLE_MAX_DESTROYING_AGE_MS` — Maximum destroying-state residence before DO self-cleanup (default: `86400000`)
 - `NODE_CLEANUP_FAILURE_BACKOFF_MS` — Failed cleanup-candidate exclusion window (default: `3600000`)
+- `IDLE_CLEANUP_MAX_RESIDENCE_MS` — Maximum ProjectData idle-cleanup schedule residence before preserved/error outcomes stop re-arming and surface attention (default: `7200000`)
 - `DIAGNOSIS_COMPLETED_STEP_MIN_DELAY_MS` — Minimum re-arm delay for completed diagnosis steps (default: `1000`)
 - `ORCHESTRATOR_ZERO_TASK_GRACE_MS` — Grace before a zero-task mission terminalizes (default: `600000`)
 - `ORCHESTRATOR_MAX_MISSION_LIFETIME_MS` — Mission lifetime backstop (default: `86400000`)
@@ -127,6 +144,26 @@ The monitor's `CF_API_TOKEN` GitHub Environment secret must include the
 Cloudflare `Workers Observability Write` permission. Despite the permission
 name, Cloudflare documents it for the supported telemetry query endpoint used
 by the read-only cron-liveness check.
+
+### Human Input and Web Push
+
+- `HUMAN_INPUT_TIMEOUT_MS` — Initial needs-input response window (default: `7200000`)
+- `HUMAN_INPUT_ESCALATION_FRACTIONS` — Comma-separated reminder points within the initial window (default: `0.25,0.75`)
+- `HUMAN_INPUT_UNDELIVERED_GRACE_MS` — Extension when no push delivery was confirmed (default: `7200000`)
+- `HUMAN_INPUT_MAX_WAIT_MS` — Hard maximum needs-input marker lifetime (default: `86400000`)
+- `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT` — Deployment-generated Worker secrets for Web Push authentication and browser subscription
+- `WEB_PUSH_TTL_SECONDS` — Push-service message TTL (default: `86400`)
+- `WEB_PUSH_VAPID_TTL_SECONDS` — VAPID authorization-token lifetime (default: `43200`)
+- `WEB_PUSH_DELIVERY_TIMEOUT_MS` — Per-attempt delivery timeout (default: `10000`)
+- `WEB_PUSH_DELIVERY_BUDGET_MS` — Total delivery/fan-out budget kept below the Worker `waitUntil()` lifetime (default: `25000`)
+- `WEB_PUSH_FANOUT_CONCURRENCY` — Maximum endpoint deliveries processed concurrently (default: `8`)
+- `WEB_PUSH_MAX_ATTEMPTS` — Bounded transient delivery attempts (default: `3`)
+- `WEB_PUSH_MAX_RETRY_AFTER_SECONDS` — Maximum honored `Retry-After` delay (default: `30`)
+- `WEB_PUSH_MAX_PAYLOAD_BYTES` — Maximum unencrypted payload size (default: `3500`)
+- `WEB_PUSH_FAILURE_THRESHOLD` — Consecutive failures before disabling a subscription (default: `5`)
+- `WEB_PUSH_MAX_SUBSCRIPTIONS_PER_USER` — Maximum retained browser endpoints per user (default: `8`)
+- `WEB_PUSH_USER_AGENT_MAX_LENGTH` — Maximum stored browser description length (default: `512`)
+- `RATE_LIMIT_PUSH_SUBSCRIPTION` — Subscription mutations allowed per user per hour (default: `30`)
 
 ### Devcontainer Cache
 
@@ -302,6 +339,14 @@ Trial configuration is currently sourced from `apps/api/.env.example` and `apps/
 - `MAX_WORKTREES_PER_WORKSPACE` — Max worktrees allowed per workspace (default: 5)
 - `GIT_FILE_MAX_SIZE` — Max file size for git/file endpoint (default: 1048576)
 
+### Session Snapshots
+
+Generated deployments validate and pass these values through cloud-init to newly provisioned VM Agent systemd services. Instant containers receive the same values at launch.
+
+- `SESSION_SNAPSHOT_OPERATION_TIMEOUT` — Deadline for one asynchronous checkpoint operation (default: `15m`)
+- `SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL` — Minimum interval between progress callbacks while a checkpoint continues making progress (default: `15s`)
+- `SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT` — Timeout for each best-effort progress callback to the control plane (default: `5s`)
+
 ### File Operations
 
 - `FILE_LIST_TIMEOUT` — Timeout for file listing commands (default: 10s)
@@ -353,6 +398,9 @@ Generated deployments validate and pass these values through cloud-init to newly
 - `ACP_PROMPT_RETRY_INITIAL_BACKOFF` — Initial backoff before retrying transient provider prompt errors (default: 15s)
 - `ACP_PROMPT_RETRY_MAX_BACKOFF` — Max exponential backoff for transient provider prompt retries (default: 2m)
 - `ACTIVITY_REREPORT_INTERVAL` — Re-send `prompting` activity while a prompt is active (default: 60s)
+- `ACP_CHECKPOINT_PREEMPT_GRACE` — Graceful ACP cancel/close wait before harness force-stop (default: 30s)
+- `ACP_CHECKPOINT_PREEMPT_MAX_GRACE` — Maximum caller-selected checkpoint rollover grace (default: 2m)
+- `ACP_CHECKPOINT_ROLLOVER_TIMEOUT` — Full checkpoint restart and strict LoadSession deadline (default: 2m)
 - `ACTIVITY_TERMINAL_REPORT_ATTEMPTS` — Retry attempts for terminal activity reports (`idle`, `recovering`, `error`) (default: 5)
 - `ACTIVITY_TERMINAL_REPORT_BACKOFF` — Backoff between terminal activity report retries (default: 1s)
 - `ACP_IDLE_SUSPEND_TIMEOUT` — Idle timeout before auto-suspending agent session (default: 30m)

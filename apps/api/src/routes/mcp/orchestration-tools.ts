@@ -2,8 +2,20 @@
  * MCP orchestration tools — retry, dependency management, and task removal
  * for agent-to-agent communication.
  */
-import type { CredentialProvider, VMLocation, VMSize, WorkspaceProfile } from '@simple-agent-manager/shared';
-import { DEFAULT_VM_LOCATION, DEFAULT_VM_SIZE, DEFAULT_WORKSPACE_PROFILE, getDefaultLocationForProvider, isValidProvider, resolveResourceReservation } from '@simple-agent-manager/shared';
+import type {
+  CredentialProvider,
+  VMLocation,
+  VMSize,
+  WorkspaceProfile,
+} from '@simple-agent-manager/shared';
+import {
+  DEFAULT_VM_LOCATION,
+  DEFAULT_VM_SIZE,
+  DEFAULT_WORKSPACE_PROFILE,
+  getDefaultLocationForProvider,
+  isValidProvider,
+  resolveResourceReservation,
+} from '@simple-agent-manager/shared';
 import { and, desc, eq, inArray, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { drizzle } from 'drizzle-orm/d1';
@@ -35,7 +47,7 @@ async function stopActiveChildAgentForRetry(
   childTask: typeof schema.tasks.$inferSelect,
   tokenData: McpTokenData,
   env: Env,
-  db: DrizzleD1Database<typeof schema>,
+  db: DrizzleD1Database<typeof schema>
 ): Promise<{ chatSessionId: string | null } | JsonRpcResponse> {
   if (!childTask.workspaceId) {
     return { chatSessionId: null };
@@ -47,8 +59,8 @@ async function stopActiveChildAgentForRetry(
     .where(
       and(
         eq(schema.agentSessions.workspaceId, childTask.workspaceId),
-        eq(schema.agentSessions.status, 'running'),
-      ),
+        eq(schema.agentSessions.status, 'running')
+      )
     )
     .orderBy(desc(schema.agentSessions.createdAt))
     .limit(1);
@@ -73,7 +85,7 @@ async function stopActiveChildAgentForRetry(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Cannot retry active child task because its workspace or node was not found',
+      'Cannot retry active child task because its workspace or node was not found'
     );
   }
 
@@ -81,7 +93,7 @@ async function stopActiveChildAgentForRetry(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      `Cannot retry active child task because its node is not running (status: ${workspace.nodeStatus ?? 'unknown'})`,
+      `Cannot retry active child task because its node is not running (status: ${workspace.nodeStatus ?? 'unknown'})`
     );
   }
 
@@ -91,7 +103,7 @@ async function stopActiveChildAgentForRetry(
       workspace.id,
       agentSession.id,
       env,
-      tokenData.userId,
+      tokenData.userId
     );
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
@@ -105,7 +117,7 @@ async function stopActiveChildAgentForRetry(
     return jsonRpcError(
       requestId,
       INTERNAL_ERROR,
-      `Failed to stop active child agent before retry: ${errorMsg}`,
+      `Failed to stop active child agent before retry: ${errorMsg}`
     );
   }
 
@@ -129,7 +141,7 @@ export async function handleRetrySubtask(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const limits = getMcpLimits(env);
   const db = drizzle(env.DATABASE, { schema });
@@ -140,15 +152,16 @@ export async function handleRetrySubtask(
     return jsonRpcError(requestId, INVALID_PARAMS, 'taskId is required');
   }
 
-  const rawNewDescription = typeof params.newDescription === 'string'
-    ? sanitizeUserInput(params.newDescription.trim())
-    : undefined;
+  const rawNewDescription =
+    typeof params.newDescription === 'string'
+      ? sanitizeUserInput(params.newDescription.trim())
+      : undefined;
 
   if (rawNewDescription && rawNewDescription.length > limits.dispatchDescriptionMaxLength) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      `newDescription exceeds maximum length of ${limits.dispatchDescriptionMaxLength}`,
+      `newDescription exceeds maximum length of ${limits.dispatchDescriptionMaxLength}`
     );
   }
   const newDescription = rawNewDescription;
@@ -157,12 +170,7 @@ export async function handleRetrySubtask(
   const [childTask] = await db
     .select()
     .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.id, childTaskId),
-        eq(schema.tasks.projectId, tokenData.projectId),
-      ),
-    )
+    .where(and(eq(schema.tasks.id, childTaskId), eq(schema.tasks.projectId, tokenData.projectId)))
     .limit(1);
 
   if (!childTask) {
@@ -174,7 +182,7 @@ export async function handleRetrySubtask(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Only the direct parent task can retry a subtask',
+      'Only the direct parent task can retry a subtask'
     );
   }
 
@@ -187,8 +195,8 @@ export async function handleRetrySubtask(
     .where(
       and(
         eq(schema.tasks.parentTaskId, tokenData.taskId),
-        eq(schema.tasks.projectId, tokenData.projectId),
-      ),
+        eq(schema.tasks.projectId, tokenData.projectId)
+      )
     );
 
   const siblingCount = retryCountResult?.count ?? 0;
@@ -198,7 +206,7 @@ export async function handleRetrySubtask(
       requestId,
       INVALID_PARAMS,
       `Retry limit reached (${siblingCount - 1}/${limits.orchestratorMaxRetriesPerTask} retries). ` +
-      'Consider adjusting the task description or seeking human input.',
+        'Consider adjusting the task description or seeking human input.'
     );
   }
 
@@ -213,7 +221,8 @@ export async function handleRetrySubtask(
     stoppedChatSessionId = stopResult.chatSessionId;
 
     const now = new Date().toISOString();
-    await db.update(schema.tasks)
+    await db
+      .update(schema.tasks)
       .set({
         status: 'failed',
         errorMessage: 'Stopped by parent for retry',
@@ -238,7 +247,8 @@ export async function handleRetrySubtask(
     // Stop the durable chat session after the node agent is confirmed stopped.
     if (stoppedChatSessionId) {
       try {
-        await projectDataService.stopSession(env, tokenData.projectId, stoppedChatSessionId)
+        await projectDataService
+          .stopSession(env, tokenData.projectId, stoppedChatSessionId)
           .catch((e) => log.warn('orchestration.retry_stop_session_failed', { error: String(e) }));
       } catch {
         // Best-effort session stop
@@ -251,8 +261,9 @@ export async function handleRetrySubtask(
   const truncatedError = childTask.errorMessage
     ? sanitizeUserInput(childTask.errorMessage.slice(0, 500))
     : '';
-  const replacementDescription = newDescription
-    ?? `${originalDescription}\n\nNote: Previous attempt (${childTaskId}) ended with status '${stoppedStatus}'.${
+  const replacementDescription =
+    newDescription ??
+    `${originalDescription}\n\nNote: Previous attempt (${childTaskId}) ended with status '${stoppedStatus}'.${
       truncatedError ? ` Error: ${truncatedError}` : ''
     }${childTask.outputBranch ? ` Branch with partial work: ${childTask.outputBranch}` : ''}`;
 
@@ -282,21 +293,24 @@ export async function handleRetrySubtask(
   });
 
   // Resolve VM size from project defaults (not executionStep, which tracks runner state)
-  const vmSizeSource = project.defaultVmSize ? 'project' as const : 'platform' as const;
-  const resolvedVmSize: VMSize = (project.defaultVmSize as VMSize | null)
-    ?? DEFAULT_VM_SIZE;
+  const vmSizeSource = project.defaultVmSize ? ('project' as const) : ('platform' as const);
+  const resolvedVmSize: VMSize = (project.defaultVmSize as VMSize | null) ?? DEFAULT_VM_SIZE;
   const resolvedProvider: CredentialProvider | null =
     typeof project.defaultProvider === 'string' && isValidProvider(project.defaultProvider)
       ? project.defaultProvider
       : null;
-  const resolvedVmLocation: VMLocation = (project.defaultLocation as VMLocation | null)
-    ?? (resolvedProvider ? getDefaultLocationForProvider(resolvedProvider) as VMLocation | null : null)
-    ?? DEFAULT_VM_LOCATION;
-  const resolvedWorkspaceProfile: WorkspaceProfile = (project.defaultWorkspaceProfile as WorkspaceProfile | null)
-    ?? DEFAULT_WORKSPACE_PROFILE;
-  const resolvedDevcontainerConfigName: string | null = resolvedWorkspaceProfile === 'lightweight'
-    ? null
-    : (project.defaultDevcontainerConfigName ?? null);
+  const resolvedVmLocation: VMLocation =
+    (project.defaultLocation as VMLocation | null) ??
+    (resolvedProvider
+      ? (getDefaultLocationForProvider(resolvedProvider) as VMLocation | null)
+      : null) ??
+    DEFAULT_VM_LOCATION;
+  const resolvedWorkspaceProfile: WorkspaceProfile =
+    (project.defaultWorkspaceProfile as WorkspaceProfile | null) ?? DEFAULT_WORKSPACE_PROFILE;
+  const resolvedDevcontainerConfigName: string | null =
+    resolvedWorkspaceProfile === 'lightweight'
+      ? null
+      : (project.defaultDevcontainerConfigName ?? null);
 
   // Retried/replacement subtasks have their own output branch. Check that out
   // from the start so VM-agent completion pushes cannot land on the project
@@ -310,7 +324,7 @@ export async function handleRetrySubtask(
       taskId,
       projectId: tokenData.projectId,
       userId: tokenData.userId,
-    },
+    }
   );
 
   // Insert replacement task
@@ -356,7 +370,7 @@ export async function handleRetrySubtask(
       null,
       taskTitle,
       taskId,
-      tokenData.userId,
+      tokenData.userId
     );
 
     await projectDataService.persistMessage(
@@ -365,13 +379,18 @@ export async function handleRetrySubtask(
       sessionId,
       'user',
       replacementDescription,
-      null,
+      null
     );
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     const failedAt = new Date().toISOString();
-    await db.update(schema.tasks)
-      .set({ status: 'failed', errorMessage: `Session creation failed: ${errorMsg}`, updatedAt: failedAt })
+    await db
+      .update(schema.tasks)
+      .set({
+        status: 'failed',
+        errorMessage: `Session creation failed: ${errorMsg}`,
+        updatedAt: failedAt,
+      })
       .where(eq(schema.tasks.id, taskId));
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to create chat session: ${errorMsg}`);
   }
@@ -423,8 +442,13 @@ export async function handleRetrySubtask(
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
     const failedAt = new Date().toISOString();
-    await db.update(schema.tasks)
-      .set({ status: 'failed', errorMessage: `Task runner startup failed: ${errorMsg}`, updatedAt: failedAt })
+    await db
+      .update(schema.tasks)
+      .set({
+        status: 'failed',
+        errorMessage: `Task runner startup failed: ${errorMsg}`,
+        updatedAt: failedAt,
+      })
       .where(eq(schema.tasks.id, taskId));
     log.error('orchestration.retry.do_startup_failed', { taskId, error: errorMsg });
     return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to start task runner: ${errorMsg}`);
@@ -439,16 +463,22 @@ export async function handleRetrySubtask(
   });
 
   return jsonRpcSuccess(requestId, {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({
-        stoppedTaskId: childTaskId,
-        newTaskId: taskId,
-        newSessionId: sessionId,
-        newBranch: branchName,
-        message: `Task ${childTaskId} stopped and replacement task ${taskId} dispatched.`,
-      }, null, 2),
-    }],
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify(
+          {
+            stoppedTaskId: childTaskId,
+            newTaskId: taskId,
+            newSessionId: sessionId,
+            newBranch: branchName,
+            message: `Task ${childTaskId} stopped and replacement task ${taskId} dispatched.`,
+          },
+          null,
+          2
+        ),
+      },
+    ],
   });
 }
 
@@ -458,14 +488,15 @@ export async function handleAddDependency(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const limits = getMcpLimits(env);
   const db = drizzle(env.DATABASE, { schema });
 
   // Validate params
   const taskId = typeof params.taskId === 'string' ? params.taskId.trim() : '';
-  const dependsOnTaskId = typeof params.dependsOnTaskId === 'string' ? params.dependsOnTaskId.trim() : '';
+  const dependsOnTaskId =
+    typeof params.dependsOnTaskId === 'string' ? params.dependsOnTaskId.trim() : '';
 
   if (!taskId || !dependsOnTaskId) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'taskId and dependsOnTaskId are required');
@@ -486,8 +517,8 @@ export async function handleAddDependency(
     .where(
       and(
         inArray(schema.tasks.id, [taskId, dependsOnTaskId]),
-        eq(schema.tasks.projectId, tokenData.projectId),
-      ),
+        eq(schema.tasks.projectId, tokenData.projectId)
+      )
     );
 
   if (tasks.length !== 2) {
@@ -495,12 +526,21 @@ export async function handleAddDependency(
   }
 
   // Authorization: caller must be parent of both tasks, or caller is a sibling
-  const taskA = tasks.find((t) => t.id === taskId)!;
-  const taskB = tasks.find((t) => t.id === dependsOnTaskId)!;
+  const taskA = tasks.find((t) => t.id === taskId);
+  const taskB = tasks.find((t) => t.id === dependsOnTaskId);
+  if (!taskA || !taskB) {
+    // tasks.length === 2 with an inArray([taskId, dependsOnTaskId]) filter and
+    // distinct ids (checked above) guarantees both are present — this should
+    // never happen.
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      'Task lookup mismatch while checking dependency'
+    );
+  }
 
   const callerIsParentOfBoth =
-    taskA.parentTaskId === tokenData.taskId &&
-    taskB.parentTaskId === tokenData.taskId;
+    taskA.parentTaskId === tokenData.taskId && taskB.parentTaskId === tokenData.taskId;
 
   // Allow if caller IS the dependent task (taskId) and both share the same parent.
   // Restricting to taskId only prevents a task from declaring itself as a blocker
@@ -514,7 +554,7 @@ export async function handleAddDependency(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Caller must be the parent of both tasks, or both tasks must be siblings under the caller',
+      'Caller must be the parent of both tasks, or both tasks must be siblings under the caller'
     );
   }
 
@@ -522,15 +562,17 @@ export async function handleAddDependency(
   const projectEdgeCount = await env.DATABASE.prepare(
     `SELECT count(*) as count FROM task_dependencies td
      JOIN tasks t ON td.task_id = t.id
-     WHERE t.project_id = ?`,
-  ).bind(tokenData.projectId).first<{ count: number }>();
+     WHERE t.project_id = ?`
+  )
+    .bind(tokenData.projectId)
+    .first<{ count: number }>();
 
   if ((projectEdgeCount?.count ?? 0) >= limits.orchestratorDependencyMaxEdges) {
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
       `Dependency edge limit reached (${projectEdgeCount?.count}/${limits.orchestratorDependencyMaxEdges}). ` +
-      'Cannot add more dependency edges to this project.',
+        'Cannot add more dependency edges to this project.'
     );
   }
 
@@ -565,14 +607,22 @@ export async function handleAddDependency(
 
   while (queue.length > 0) {
     if (++bfsIterations > MAX_BFS_ITERATIONS) {
-      return jsonRpcError(requestId, INTERNAL_ERROR, 'Dependency graph too complex for cycle check');
+      return jsonRpcError(
+        requestId,
+        INTERNAL_ERROR,
+        'Dependency graph too complex for cycle check'
+      );
     }
-    const current = queue.shift()!;
+    const current = queue.shift();
+    if (current === undefined) {
+      // queue.length > 0 was just checked above, so this should never happen.
+      continue;
+    }
     if (current === taskId) {
       return jsonRpcError(
         requestId,
         INVALID_PARAMS,
-        'Adding this dependency would create a cycle in the task graph',
+        'Adding this dependency would create a cycle in the task graph'
       );
     }
     if (visited.has(current)) continue;
@@ -599,10 +649,15 @@ export async function handleAddDependency(
     const errorMsg = err instanceof Error ? err.message : String(err);
     if (errorMsg.includes('UNIQUE') || errorMsg.includes('PRIMARY KEY')) {
       return jsonRpcSuccess(requestId, {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({ added: true, message: 'Dependency already exists (idempotent)' }),
-        }],
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({
+              added: true,
+              message: 'Dependency already exists (idempotent)',
+            }),
+          },
+        ],
       });
     }
     throw err;
@@ -616,10 +671,12 @@ export async function handleAddDependency(
   });
 
   return jsonRpcSuccess(requestId, {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({ added: true }),
-    }],
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({ added: true }),
+      },
+    ],
   });
 }
 
@@ -629,7 +686,7 @@ export async function handleRemovePendingSubtask(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const db = drizzle(env.DATABASE, { schema });
 
@@ -648,12 +705,7 @@ export async function handleRemovePendingSubtask(
       projectId: schema.tasks.projectId,
     })
     .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.id, childTaskId),
-        eq(schema.tasks.projectId, tokenData.projectId),
-      ),
-    )
+    .where(and(eq(schema.tasks.id, childTaskId), eq(schema.tasks.projectId, tokenData.projectId)))
     .limit(1);
 
   if (!childTask) {
@@ -665,7 +717,7 @@ export async function handleRemovePendingSubtask(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Only the direct parent task can remove a pending subtask',
+      'Only the direct parent task can remove a pending subtask'
     );
   }
 
@@ -675,16 +727,17 @@ export async function handleRemovePendingSubtask(
       requestId,
       INVALID_PARAMS,
       `Cannot remove task in '${childTask.status}' status. Only 'queued' tasks can be removed. ` +
-      (ACTIVE_STATUSES.includes(childTask.status)
-        ? 'Use retry_subtask to stop and retry running tasks.'
-        : 'Task has already completed.'),
+        (ACTIVE_STATUSES.includes(childTask.status)
+          ? 'Use retry_subtask to stop and retry running tasks.'
+          : 'Task has already completed.')
     );
   }
 
   const now = new Date().toISOString();
 
   // Cancel the task
-  await db.update(schema.tasks)
+  await db
+    .update(schema.tasks)
     .set({
       status: 'cancelled',
       completedAt: now,
@@ -710,8 +763,10 @@ export async function handleRemovePendingSubtask(
 
   // Clean up dependency edges
   await env.DATABASE.prepare(
-    'DELETE FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?',
-  ).bind(childTaskId, childTaskId).run();
+    'DELETE FROM task_dependencies WHERE task_id = ? OR depends_on_task_id = ?'
+  )
+    .bind(childTaskId, childTaskId)
+    .run();
 
   log.info('orchestration.remove_pending_subtask.success', {
     taskId: childTaskId,
@@ -720,9 +775,11 @@ export async function handleRemovePendingSubtask(
   });
 
   return jsonRpcSuccess(requestId, {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({ removed: true, taskId: childTaskId }),
-    }],
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({ removed: true, taskId: childTaskId }),
+      },
+    ],
   });
 }

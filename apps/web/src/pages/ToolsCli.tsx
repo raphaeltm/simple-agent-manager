@@ -14,6 +14,12 @@ interface PlatformDownload {
   filename: string;
 }
 
+interface NavigatorWithUserAgentData extends Navigator {
+  userAgentData?: {
+    platform?: string;
+  };
+}
+
 const PLATFORMS: PlatformDownload[] = [
   { os: 'darwin', arch: 'arm64', label: 'macOS Apple Silicon', filename: 'sam-darwin-arm64' },
   { os: 'darwin', arch: 'amd64', label: 'macOS Intel', filename: 'sam-darwin-amd64' },
@@ -54,8 +60,7 @@ function detectPlatform(): { os: string; arch: string } {
   let arch = 'amd64';
 
   if (ua.includes('mac')) os = 'darwin';
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const uaData = (navigator as any).userAgentData;
+  const uaData = (navigator as NavigatorWithUserAgentData).userAgentData;
   if (uaData?.platform?.toLowerCase().includes('mac')) os = 'darwin';
 
   if (ua.includes('arm64') || ua.includes('aarch64')) arch = 'arm64';
@@ -117,7 +122,10 @@ export function ToolsCli() {
   // PLATFORMS is a non-empty const array — fallback to first entry if detection doesn't match
   const primaryMatch = PLATFORMS.find((p) => p.os === detected.os && p.arch === detected.arch);
   const primary: PlatformDownload = primaryMatch ?? {
-    os: 'darwin', arch: 'arm64', label: 'macOS Apple Silicon', filename: 'sam-darwin-arm64',
+    os: 'darwin',
+    arch: 'arm64',
+    label: 'macOS Apple Silicon',
+    filename: 'sam-darwin-arm64',
   };
   const others = PLATFORMS.filter((p) => p.os !== primary.os || p.arch !== primary.arch);
 
@@ -203,9 +211,7 @@ export function ToolsCli() {
       {/* ── Install via curl ── */}
       <section className="rounded-xl border border-border-default bg-bg-card p-6 mb-4">
         <h2 className="text-base font-semibold text-fg-primary m-0 mb-3">Install via curl</h2>
-        <p className="text-[13px] text-fg-muted m-0 mb-3">
-          One-liner for {primary.label}:
-        </p>
+        <p className="text-[13px] text-fg-muted m-0 mb-3">One-liner for {primary.label}:</p>
         <CodeBlock code={curlOneLiner} />
       </section>
 

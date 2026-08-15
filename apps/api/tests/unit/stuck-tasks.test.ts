@@ -6,6 +6,7 @@
  * 2. In-progress tasks with stale heartbeats ARE marked as stuck
  * 3. Tasks without a node are treated as stuck (no heartbeat to check)
  */
+import { DEFAULT_STUCK_TASK_SCAN_CURSOR_KV_KEY } from '@simple-agent-manager/shared';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
@@ -1356,6 +1357,100 @@ describe('recoverStuckTasks', () => {
       expect(String(prepare.mock.calls[1]?.[0])).toContain(
         '(updated_at < ? OR (updated_at = ? AND id <= ?))'
       );
+    });
+  });
+
+  describe('malformed KV scan cursor degrades to a fresh scan (never throws)', () => {
+    function freshScanCandidateResponses() {
+      return new Map<string, { results: unknown[]; changes?: number }>([
+        [
+          "status IN ('queued', 'delegated', 'in_progress')",
+          {
+            results: [
+              {
+                id: 'task-fresh-scan',
+                project_id: 'proj-1',
+                user_id: 'user-1',
+                status: 'in_progress',
+                execution_step: 'running',
+                updated_at: '2026-07-12T10:00:00.000Z',
+                started_at: '2026-07-12T09:00:00.000Z',
+                workspace_id: 'ws-live',
+                auto_provisioned_node_id: null,
+              },
+            ],
+          },
+        ],
+      ]);
+    }
+
+    it('treats a non-JSON cursor as absent and scans the newest page', async () => {
+      const env = createMockEnv(freshScanCandidateResponses());
+      await env.KV.put(DEFAULT_STUCK_TASK_SCAN_CURSOR_KV_KEY, '{not valid json');
+
+      const selection = await selectStuckTaskCandidates(env, 1);
+
+      expect(selection).toMatchObject({
+        cursorLoaded: false,
+        cursorErrors: 1,
+        wrapped: false,
+        tasks: [{ id: 'task-fresh-scan' }],
+      });
+      // Fresh-scan path (no cursor) orders by newest first — proves the
+      // malformed cursor was NOT threaded into the cursor-based query.
+      expect(String(vi.mocked(env.DATABASE.prepare).mock.calls[0]?.[0])).toContain(
+        'ORDER BY updated_at DESC, id DESC'
+      );
+    });
+
+    it.each([
+      ['a bare JSON array', JSON.stringify(['not', 'a', 'cursor'])],
+      ['a bare JSON number', '42'],
+      ['a bare JSON null', 'null'],
+      ['an object missing taskId', JSON.stringify({ updatedAt: '2026-07-12T10:00:00.000Z' })],
+      ['an object with a non-string updatedAt', JSON.stringify({ updatedAt: 123, taskId: 'x' })],
+      [
+        'an object with a non-string taskId',
+        JSON.stringify({ updatedAt: '2026-07-12T10:00:00.000Z', taskId: 7 }),
+      ],
+      [
+        'an object with an unparsable updatedAt',
+        JSON.stringify({ updatedAt: 'not-a-date', taskId: 'x' }),
+      ],
+    ])(
+      'treats a syntactically valid but structurally invalid cursor (%s) as absent',
+      async (_label, rawCursor) => {
+        const env = createMockEnv(freshScanCandidateResponses());
+        await env.KV.put(DEFAULT_STUCK_TASK_SCAN_CURSOR_KV_KEY, rawCursor);
+
+        const selection = await selectStuckTaskCandidates(env, 1);
+
+        expect(selection.cursorLoaded).toBe(false);
+        expect(selection.wrapped).toBe(false);
+        expect(selection.tasks).toMatchObject([{ id: 'task-fresh-scan' }]);
+        expect(String(vi.mocked(env.DATABASE.prepare).mock.calls[0]?.[0])).toContain(
+          'ORDER BY updated_at DESC, id DESC'
+        );
+      }
+    );
+
+    it('recovers on the sweep after a malformed cursor without ever throwing', async () => {
+      const env = createMockEnv(freshScanCandidateResponses());
+      await env.KV.put(DEFAULT_STUCK_TASK_SCAN_CURSOR_KV_KEY, '[]');
+
+      await expect(selectStuckTaskCandidates(env, 1)).resolves.toMatchObject({
+        cursorLoaded: false,
+      });
+      // A well-formed cursor persisted afterward is still honored normally —
+      // the earlier malformed read did not corrupt subsequent KV state.
+      expect(
+        await persistStuckTaskScanCursor(env, {
+          updatedAt: '2026-07-12T10:00:00.000Z',
+          taskId: 'task-fresh-scan',
+        })
+      ).toBe(true);
+      const second = await selectStuckTaskCandidates(env, 1);
+      expect(second.cursorLoaded).toBe(true);
     });
   });
 

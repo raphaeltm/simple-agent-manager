@@ -108,7 +108,7 @@ The API Worker (`apps/api/`) is a Hono application handling:
 | `/api/workspaces/*`     | Workspace CRUD, lifecycle, boot logs, agent sessions                           |
 | `/api/projects/*`       | Project CRUD, runtime config, ideas, chat sessions, file proxy                 |
 | `/api/credentials/*`    | Cloud provider + agent API key management                                      |
-| `/api/notifications/*`  | Notification list, read/dismiss, preferences, WebSocket                        |
+| `/api/notifications/*`  | Notification list, preferences, WebSocket, and Web Push subscriptions          |
 | `/api/tasks/*`          | Idea submission, lifecycle, status updates                                     |
 | `/api/github/*`         | GitHub App installations, repos                                                |
 | `/api/terminal/token`   | Workspace JWT for WebSocket auth                                               |
@@ -187,7 +187,11 @@ Agent behavior is assembled from several override layers rather than a single gl
 ### ProjectData DO
 
 Each project gets one `ProjectData` Durable Object instance, accessed via `env.PROJECT_DATA.idFromName(projectId)`.
-nEvery user-visible chat session has exactly one backing D1 Task. `taskMode` controls autonomous task versus human-controlled conversation lifecycle semantics; it never controls whether the Task exists. D1 `tasks.chat_session_id` and ProjectData `chat_sessions.task_id` form a bidirectional soft link. Because the stores cannot share a transaction, creation and legacy repair are idempotent and retain compatibility readers while reconciliation is in progress.
+Every user-visible chat session has exactly one backing D1 Task. `taskMode` controls autonomous task versus human-controlled conversation lifecycle semantics; it never controls whether the Task exists. D1 `tasks.chat_session_id` and ProjectData `chat_sessions.task_id` form a bidirectional soft link. Because the stores cannot share a transaction, creation and legacy repair are idempotent and retain compatibility readers while reconciliation is in progress.
+
+ProjectData also owns the single durable prompt-delivery queue used by browser followups and agent handoffs. Acceptance persists the visible transcript message and its stable delivery identity before runtime I/O. Alarm-driven attempts use bounded exponential backoff, a finite lifetime, compare-and-set attempt tokens, and stable VM receipts. A lost response is reconciled before retry; if receipt evidence is unavailable or belongs to another runtime, the delivery becomes explicitly ambiguous and is not replayed.
+
+Checkpoint episodes are stored idempotently by ACP session and prompt epoch, including state transitions, attempt/error metadata, and a progress envelope for inspection. Automatic long-turn selection, checkpoint preemption, parent park/wake, and subtask waiting are not enabled by this storage foundation. See [Configuration](/docs/reference/configuration/) for the capability and rollout flags, all of which default to disabled.
 
 **Embedded SQLite tables:**
 
@@ -198,6 +202,7 @@ nEvery user-visible chat session has exactly one backing D1 Task. `taskMode` con
 - `activity_events` — audit trail (workspace created, session stopped, etc.)
 - `chat_session_ideas` — many-to-many links between sessions and ideas
 - `task_status_events` — idea lifecycle transitions with actor tracking
+- `session_attention_markers` — active human-input and reconciliation waits, including bounded escalation/expiry state and correlated structured answers
 - `acp_sessions` — ACP session state machine with fork lineage
 - `acp_session_events` — ACP session state transition history
 
@@ -207,6 +212,20 @@ nEvery user-visible chat session has exactly one backing D1 Task. `taskMode` con
 - Heartbeat-based VM failure detection via DO alarms
 - Session forking with parent lineage tracking
 - Debounced D1 summary sync for dashboard data
+
+### Notification DO
+
+Each user gets one `Notification` Durable Object instance, accessed via
+`env.NOTIFICATION.idFromName(userId)`. Its embedded SQLite store owns notification rows,
+channel preferences, endpoint-keyed browser Push subscriptions, failure state, and durable
+push delivery receipts. Normal medium/high-urgency inserts schedule encrypted Declarative
+Web Push fan-out with `waitUntil()`; batching and deduplication early returns do not push.
+Live WebSocket presence never suppresses out-of-band delivery.
+
+For `needs_input`, ProjectData queries the linked Notification receipt before its original
+deadline can fail a task or stop a workspace. Missing delivery instead enters a bounded
+reminder/grace path. The `reconciliation_checkin` machine-liveness watchdog is separately
+classified and retains its immediate terminal behavior.
 
 ### NodeLifecycle DO
 

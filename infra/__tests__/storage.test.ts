@@ -41,17 +41,6 @@ describe('R2 Bucket Resource', () => {
       accountId: 'test-account-id-00000000000000000000',
       rules: [
         {
-          id: storageModule.SESSION_SNAPSHOT_LIFECYCLE_RULE_ID,
-          conditions: { prefix: storageModule.SESSION_SNAPSHOT_R2_PREFIX },
-          enabled: true,
-          deleteObjectsTransition: {
-            condition: {
-              maxAge: configModule.DEFAULT_SESSION_SNAPSHOT_TTL_DAYS * 24 * 60 * 60,
-              type: 'Age',
-            },
-          },
-        },
-        {
           id: storageModule.DIAGNOSTIC_INCIDENT_LIFECYCLE_RULE_ID,
           conditions: { prefix: storageModule.DIAGNOSTIC_INCIDENT_R2_PREFIX },
           enabled: true,
@@ -88,7 +77,7 @@ describe('R2 Bucket Resource', () => {
     });
   });
 
-  it('does not apply age-based expiry to durable library or compose artifacts', () => {
+  it('does not apply age-based expiry to durable or session-state artifacts', () => {
     const lifecycle = findRegisteredResource(
       `${configModule.prefix}-r2-lifecycle`,
       'cloudflare:index/r2BucketLifecycle:R2BucketLifecycle'
@@ -99,5 +88,6 @@ describe('R2 Bucket Resource', () => {
 
     expect(prefixes).not.toContain('library/');
     expect(prefixes).not.toContain('compose-image-artifacts/');
+    expect(prefixes).not.toContain('session-snapshots/');
   });
 });

@@ -77,6 +77,47 @@ export async function handleSendDurableMessage(
   const resolution = await resolveChildForMailbox(requestId, targetTaskId, tokenData, db);
   if ('jsonrpc' in resolution) return resolution;
 
+  const { resolveDurableExecutionConfig } = await import(
+    '../../durable-objects/project-data/durable-execution-config'
+  );
+  const durableConfig = resolveDurableExecutionConfig(env);
+  if (durableConfig.deliveryEnabled) {
+    try {
+      const accepted = await projectDataService.acceptPromptDelivery(env, resolution.projectId, {
+        targetSessionId: resolution.chatSessionId,
+        displayContent: message,
+        deliveryContent: message,
+        sourceTaskId: tokenData.taskId,
+        senderType: 'agent',
+        senderId: tokenData.workspaceId,
+        messageClass: messageClass as MessageClass,
+        sourceKind: 'agent_mailbox',
+        metadata,
+        ackTimeoutMs: limits.mailboxAckTimeoutMs,
+        ttlMs: durableConfig.ttlMs,
+        maxMessages: limits.mailboxMaxMessagesPerProject,
+      });
+      return jsonRpcSuccess(requestId, {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            messageId: accepted.message.id,
+            deliveryState: accepted.message.deliveryState,
+            delivered: false,
+            accepted: true,
+          }),
+        }],
+      });
+    } catch (err) {
+      log.error('mcp.send_durable_message.accept_failed', {
+        parentTaskId: tokenData.taskId,
+        targetTaskId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return jsonRpcError(requestId, INTERNAL_ERROR, 'Failed to durably accept message');
+    }
+  }
+
   // Enqueue the message in the target project's DO
   try {
     const msg = await projectDataService.enqueueMailboxMessage(env, resolution.projectId, {

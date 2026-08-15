@@ -100,9 +100,7 @@ describe('parseDevcontainerConfigs', () => {
   });
 
   it('ignores deeply nested devcontainer.json files', () => {
-    const tree = [
-      { path: '.devcontainer/deep/nested/devcontainer.json', type: 'blob' },
-    ];
+    const tree = [{ path: '.devcontainer/deep/nested/devcontainer.json', type: 'blob' }];
     const result = parseDevcontainerConfigs(tree);
     expect(result.configs).toEqual([]);
   });
@@ -139,10 +137,13 @@ describe('parseDevcontainerConfigs', () => {
 describe('discoverGitHubDevcontainerConfigs', () => {
   it('returns no configs when the repo has no devcontainer files', async () => {
     const mockFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        tree: [{ path: 'src/main.ts', type: 'blob' }],
-        truncated: false,
-      }), { status: 200 }),
+      new Response(
+        JSON.stringify({
+          tree: [{ path: 'src/main.ts', type: 'blob' }],
+          truncated: false,
+        }),
+        { status: 200 }
+      )
     );
     vi.stubGlobal('fetch', mockFetch);
 
@@ -157,10 +158,13 @@ describe('discoverGitHubDevcontainerConfigs', () => {
 
   it('returns discovered default and named configs from the GitHub tree', async () => {
     const mockFetch = vi.fn().mockResolvedValue(
-      new Response(JSON.stringify({
-        tree: MIXED_DEVCONTAINER_TREE,
-        truncated: false,
-      }), { status: 200 }),
+      new Response(
+        JSON.stringify({
+          tree: MIXED_DEVCONTAINER_TREE,
+          truncated: false,
+        }),
+        { status: 200 }
+      )
     );
     vi.stubGlobal('fetch', mockFetch);
 
@@ -174,16 +178,20 @@ describe('discoverGitHubDevcontainerConfigs', () => {
   });
 
   it('falls back to contents API when the recursive tree is truncated', async () => {
-    const mockFetch = vi.fn()
+    const mockFetch = vi
+      .fn()
       .mockResolvedValueOnce(
-        new Response(JSON.stringify({ tree: [], truncated: true }), { status: 200 }),
+        new Response(JSON.stringify({ tree: [], truncated: true }), { status: 200 })
       )
       .mockResolvedValueOnce(new Response('', { status: 404 }))
       .mockResolvedValueOnce(
-        new Response(JSON.stringify([
-          { name: 'python', type: 'dir' },
-          { name: 'notes.md', type: 'file' },
-        ]), { status: 200 }),
+        new Response(
+          JSON.stringify([
+            { name: 'python', type: 'dir' },
+            { name: 'notes.md', type: 'file' },
+          ]),
+          { status: 200 }
+        )
       )
       .mockResolvedValueOnce(new Response('', { status: 200 }));
     vi.stubGlobal('fetch', mockFetch);
@@ -193,6 +201,41 @@ describe('discoverGitHubDevcontainerConfigs', () => {
     expect(result).toEqual({
       defaultConfigExists: false,
       configs: [{ name: 'python', path: '.devcontainer/python/devcontainer.json' }],
+      truncated: true,
+    });
+  });
+
+  it('skips malformed contents-API entries but keeps valid ones', async () => {
+    const mockFetch = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(JSON.stringify({ tree: [], truncated: true }), { status: 200 })
+      )
+      .mockResolvedValueOnce(new Response('', { status: 404 }))
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify([
+            { name: 'python', type: 'dir' },
+            { type: 'dir' }, // missing name — malformed, must be skipped
+            { name: 42, type: 'dir' }, // non-string name — malformed, must be skipped
+            null, // malformed entry entirely — must not crash the loop
+            { name: 'node', type: 'dir' },
+          ]),
+          { status: 200 }
+        )
+      )
+      .mockResolvedValueOnce(new Response('', { status: 200 })) // python exists probe
+      .mockResolvedValueOnce(new Response('', { status: 200 })); // node exists probe
+    vi.stubGlobal('fetch', mockFetch);
+
+    const result = await discoverGitHubDevcontainerConfigs('owner', 'repo', 'main', 'ghs_test');
+
+    expect(result).toEqual({
+      defaultConfigExists: false,
+      configs: [
+        { name: 'node', path: '.devcontainer/node/devcontainer.json' },
+        { name: 'python', path: '.devcontainer/python/devcontainer.json' },
+      ],
       truncated: true,
     });
   });
@@ -248,10 +291,12 @@ function makeProject(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function setupGithubProject(options: {
-  token?: string;
-  project?: Record<string, unknown>;
-} = {}) {
+function setupGithubProject(
+  options: {
+    token?: string;
+    project?: Record<string, unknown>;
+  } = {}
+) {
   const token = options.token ?? 'ghs_test';
   mockRequireProjectAccess.mockResolvedValue(makeProject(options.project));
   mockRequireOwnedInstallation.mockResolvedValue({ installationId: '12345' });
@@ -263,9 +308,9 @@ function setupGithubProject(options: {
 }
 
 function stubTreeResponse(tree: Array<{ path: string; type: string }>) {
-  const mockFetch = vi.fn().mockResolvedValue(
-    new Response(JSON.stringify({ tree, truncated: false }), { status: 200 }),
-  );
+  const mockFetch = vi
+    .fn()
+    .mockResolvedValue(new Response(JSON.stringify({ tree, truncated: false }), { status: 200 }));
   vi.stubGlobal('fetch', mockFetch);
   return mockFetch;
 }
@@ -328,7 +373,7 @@ describe('GET /projects/:projectId/devcontainer-configs', () => {
 
   it('enforces project ownership', async () => {
     mockRequireProjectAccess.mockRejectedValue(
-      Object.assign(new Error('Project not found'), { statusCode: 404, error: 'NOT_FOUND' }),
+      Object.assign(new Error('Project not found'), { statusCode: 404, error: 'NOT_FOUND' })
     );
 
     const res = await requestConfigs(app);
@@ -338,9 +383,7 @@ describe('GET /projects/:projectId/devcontainer-configs', () => {
   it('returns 502 when GitHub API fails', async () => {
     const token = setupGithubProject();
 
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(
-      new Response('Not Found', { status: 404 }),
-    ));
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('Not Found', { status: 404 })));
 
     const res = await requestConfigs(app);
     expect(res.status).toBe(502);

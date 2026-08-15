@@ -163,8 +163,13 @@ export function ProjectTriggers() {
     }
   }, [confirmDeleteTarget, projectId, toast, loadTriggers]);
 
-  // Loading
-  if (loading) {
+  const retry = () => {
+    setLoading(true);
+    void loadTriggers();
+  };
+
+  // First load only. A refetch must never replace already-rendered content.
+  if (loading && triggers.length === 0) {
     return (
       <div className="flex justify-center items-center py-16">
         <Spinner size="lg" />
@@ -172,16 +177,16 @@ export function ProjectTriggers() {
     );
   }
 
-  // Error
-  if (error) {
+  // Fatal only when there is nothing to fall back to. `loadTriggers` re-runs
+  // after every mutation, so a transient failure there used to tear down the
+  // whole list — and any open dialog with it. With triggers in hand we keep the
+  // list mounted and report the failure as a banner (rule 48).
+  if (error && triggers.length === 0) {
     return (
       <div className="text-center py-16">
         <p className="text-danger mb-4">{error}</p>
         <button
-          onClick={() => {
-            setLoading(true);
-            void loadTriggers();
-          }}
+          onClick={retry}
           className={`px-4 py-2 text-sm font-medium text-accent bg-transparent border border-border-default rounded-md cursor-pointer ${FOCUS_RING}`}
         >
           Retry
@@ -191,10 +196,10 @@ export function ProjectTriggers() {
   }
 
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6">
+    <div className="w-full min-w-0 max-w-3xl mx-auto px-4 py-6">
       {/* Header */}
       <div className="flex items-center justify-between gap-3 flex-wrap mb-6">
-        <div>
+        <div className="min-w-0">
           <h1 className="sam-type-page-title m-0">Triggers</h1>
           <p className="sam-type-secondary text-fg-muted mt-1 mb-0">
             Run tasks from schedules, GitHub events, or authenticated webhooks
@@ -208,6 +213,21 @@ export function ProjectTriggers() {
           New Trigger
         </button>
       </div>
+
+      {error && triggers.length > 0 && (
+        <div
+          role="alert"
+          className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-md border border-danger/40 bg-danger/10 px-3 py-2 text-sm text-danger"
+        >
+          <span className="min-w-0 break-words">Could not refresh triggers — {error}</span>
+          <button
+            onClick={retry}
+            className={`shrink-0 rounded-md border border-danger/40 bg-transparent px-2 py-1 text-xs font-medium text-danger cursor-pointer hover:bg-danger/10 ${FOCUS_RING}`}
+          >
+            Retry
+          </button>
+        </div>
+      )}
 
       {/* Trigger list or empty state */}
       {triggers.length === 0 ? (

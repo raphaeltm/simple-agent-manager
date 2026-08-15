@@ -10,6 +10,7 @@ import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { maybeJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import { ensureTaskRunnerStarted } from './task-runner-do';
 import { getWebhookTriggerLimits } from './webhook-trigger-config';
@@ -594,17 +595,18 @@ function encodeDeliveryCursor(cursor: WebhookDeliveryCursor): string {
 }
 
 function decodeDeliveryCursor(value: string): WebhookDeliveryCursor | null {
+  let parsed: unknown;
   try {
     const base64 = value.replaceAll('-', '+').replaceAll('_', '/');
-    const parsed: unknown = JSON.parse(atob(base64));
-    if (!parsed || typeof parsed !== 'object') return null;
-    const record = parsed as Record<string, unknown>;
-    return typeof record.receivedAt === 'string' && typeof record.id === 'string'
-      ? { receivedAt: record.receivedAt, id: record.id }
-      : null;
+    parsed = JSON.parse(atob(base64));
   } catch {
     return null;
   }
+  const record = maybeJsonRecord(parsed);
+  if (!record) return null;
+  return typeof record.receivedAt === 'string' && typeof record.id === 'string'
+    ? { receivedAt: record.receivedAt, id: record.id }
+    : null;
 }
 
 export async function listWebhookDeliveries(

@@ -197,6 +197,27 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     );
   });
 
+  it('treats a malformed sessions-probe body as a transport interruption and still recovers', async () => {
+    // probeLiveRuntimeSession replaced a blind
+    // `(await response.json()) as { sessions?: Array<...> }` cast with a
+    // validated readResponseJson() parse. Both the pre-fix blind cast (via
+    // `"not-an-array".some is not a function`) and the post-fix schema
+    // validation throw for this shape — proving resumeRuntime's existing
+    // catch (kind: 'transport_interrupted') still recovers gracefully rather
+    // than surfacing an uncaught exception.
+    const { fake } = makeRecoveryFake({ lifecycle: 'running' });
+    fake.containerFetch
+      .mockResolvedValueOnce(new Response('{"sessions": "not-an-array"}', { status: 200 }))
+      .mockResolvedValueOnce(
+        Response.json({ status: 'restored', degradation: 'none', skipped: [] })
+      );
+
+    const result = await callResumeRuntime(fake);
+
+    expect(result).toEqual({ ok: true, status: 'running' });
+    expect(fake.startRuntime).toHaveBeenCalledTimes(1);
+  });
+
   it('restores instead of falsely resuming when D1 says recovery but SessionHost is missing', async () => {
     const { fake, values } = makeRecoveryFake({ lifecycle: 'running' });
     fake.containerFetch
@@ -318,6 +339,34 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
       lastFailure: { kind: 'restore_status' },
     });
   });
+
+  // Companion to the "corrupt" case above: this body is syntactically VALID
+  // JSON (JSON.parse succeeds) but is not an object, so the blind
+  // `as { status?: unknown }` cast this replaced would have read `.status`
+  // off a non-object value. maybeJsonRecord degrades it the same way as
+  // invalid JSON — never a true resume — without throwing.
+  it.each([
+    ['a JSON array', '[]'],
+    ['a JSON null', 'null'],
+    ['a bare JSON number', '200'],
+  ])(
+    'treats a syntactically valid but non-object restore body (%s) as degraded',
+    async (_label, body) => {
+      const { fake, values } = makeRecoveryFake({
+        restoreResponse: new Response(body, { status: 200 }),
+      });
+
+      const result = await callEnsureAwake(fake);
+
+      expect(result).toMatchObject({ ok: false, status: 'degraded' });
+      expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
+      expect(recoveryMocks.persistFailed).not.toHaveBeenCalled();
+      expect(values.get('runtimeRecovery')).toMatchObject({
+        phase: 'degraded',
+        lastFailure: { kind: 'restore_status' },
+      });
+    }
+  );
 
   it('keeps an explicit stop terminal when it crosses an active restore', async () => {
     let finishRestore!: (response: Response) => void;
@@ -466,7 +515,11 @@ describe('VmAgentContainer wake concurrency and persistence', () => {
     // Every later request hits an exhausted record. Pre-fix this re-ran
     // exhaustRecovery() (a full D1 batch + persistRuntimeRecoveryFailed) each time.
     const second = await callEnsureAwake(fake);
-    expect(second).toMatchObject({ ok: false, status: 'degraded', code: 'RUNTIME_RECOVERY_DEGRADED' });
+    expect(second).toMatchObject({
+      ok: false,
+      status: 'degraded',
+      code: 'RUNTIME_RECOVERY_DEGRADED',
+    });
     expect(recoveryMocks.persistFailed).toHaveBeenCalledTimes(1);
   });
 
@@ -565,6 +618,63 @@ describe('VmAgentContainer wake-path lifecycle status parity', () => {
 });
 
 describe('VmAgentContainer replacement classification', () => {
+  it('returns retryable recovery while an idle sleep commit is in flight', async () => {
+    const { fake } = makeRecoveryFake({ lifecycle: 'sleep-preparing' });
+
+    const result = (await privateContainer.prepareForRequest.call(fake)) as {
+      ok: boolean;
+      status: string;
+      code?: string;
+    };
+
+    expect(result).toEqual({
+      ok: false,
+      status: 'recovering',
+      code: 'RUNTIME_RECOVERING',
+      message: expect.any(String),
+    });
+    expect(fake.startRuntime).not.toHaveBeenCalled();
+  });
+
+  it('performs an explicit container sleep without recursively committing snapshot state', async () => {
+    const { fake, values } = makeRecoveryFake({ lifecycle: 'running' });
+    const sleepForUser = (
+      VmAgentContainer.prototype as unknown as {
+        sleepForUser: (this: unknown) => Promise<void>;
+      }
+    ).sleepForUser;
+
+    await sleepForUser.call(fake);
+
+    expect(fake.markActiveWorkEnded).toHaveBeenCalledWith('user_sleep');
+    expect(values.get('lifecycleStatus')).toBe('sleeping');
+    expect(fake.stop).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ['aborted', 'running'],
+    ['retry', 'sleep-preparing'],
+  ] as const)(
+    'keeps compute live after an idle sleep %s and leaves lifecycle %s',
+    async (sleepResult, expectedLifecycle) => {
+      const { fake, values } = makeRecoveryFake({ lifecycle: 'running' });
+      const markRuntimeSleeping = vi.fn().mockResolvedValue(sleepResult);
+      const renewActivityTimeout = vi.fn().mockResolvedValue(undefined);
+      Object.assign(fake, { markRuntimeSleeping, renewActivityTimeout });
+      const onActivityExpired = (
+        VmAgentContainer.prototype as unknown as {
+          onActivityExpired: (this: unknown) => Promise<void>;
+        }
+      ).onActivityExpired;
+
+      await onActivityExpired.call(fake);
+
+      expect(values.get('lifecycleStatus')).toBe(expectedLifecycle);
+      expect(renewActivityTimeout).toHaveBeenCalledTimes(1);
+      expect(fake.stop).not.toHaveBeenCalled();
+    }
+  );
+
   it('classifies duplicate runtime_signal callbacks once without calling them rollout', async () => {
     const { fake, values } = makeRecoveryFake({ lifecycle: 'running' });
     const onStop = (

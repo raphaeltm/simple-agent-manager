@@ -11,6 +11,7 @@
  *   - A load failure surfaces an accessible alert with a working Retry control.
  */
 import type { NotificationPreference } from '@simple-agent-manager/shared';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -26,6 +27,21 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 }));
 
 import { SettingsNotifications } from '../../../src/pages/SettingsNotifications';
+
+function renderSettingsNotifications() {
+  const queryClient = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  });
+  const view = render(
+    <QueryClientProvider client={queryClient}>
+      <SettingsNotifications />
+    </QueryClientProvider>
+  );
+  return { ...view, queryClient };
+}
 
 function globalPref(
   notificationType: NotificationPreference['notificationType'],
@@ -43,13 +59,13 @@ describe('SettingsNotifications', () => {
 
   it('announces loading state accessibly', () => {
     mocks.getNotificationPreferences.mockReturnValue(new Promise(() => {})); // never resolves
-    render(<SettingsNotifications />);
+    renderSettingsNotifications();
     const status = screen.getByRole('status');
     expect(status).toHaveTextContent('Loading preferences...');
   });
 
   it('defaults every type switch to enabled when no preferences exist', async () => {
-    render(<SettingsNotifications />);
+    renderSettingsNotifications();
     await waitFor(() => {
       expect(screen.getByText('Task Complete')).toBeInTheDocument();
     });
@@ -65,7 +81,7 @@ describe('SettingsNotifications', () => {
     mocks.getNotificationPreferences.mockResolvedValue({
       preferences: [globalPref('task_complete', false)],
     });
-    render(<SettingsNotifications />);
+    renderSettingsNotifications();
 
     const taskCompleteSwitch = await screen.findByRole('switch', {
       name: /Task Complete/i,
@@ -81,7 +97,7 @@ describe('SettingsNotifications', () => {
       enabled: false,
     };
     mocks.getNotificationPreferences.mockResolvedValue({ preferences: [projectScoped] });
-    render(<SettingsNotifications />);
+    renderSettingsNotifications();
 
     const taskCompleteSwitch = await screen.findByRole('switch', {
       name: /Task Complete/i,
@@ -91,7 +107,7 @@ describe('SettingsNotifications', () => {
   });
 
   it('commits the toggle only after the server confirms', async () => {
-    render(<SettingsNotifications />);
+    renderSettingsNotifications();
     const taskCompleteSwitch = await screen.findByRole('switch', {
       name: /Task Complete/i,
     });
@@ -107,15 +123,16 @@ describe('SettingsNotifications', () => {
       });
     });
     await waitFor(() => {
-      expect(
-        screen.getByRole('switch', { name: /Task Complete/i })
-      ).toHaveAttribute('aria-checked', 'false');
+      expect(screen.getByRole('switch', { name: /Task Complete/i })).toHaveAttribute(
+        'aria-checked',
+        'false'
+      );
     });
   });
 
   it('surfaces a save failure accessibly and does not flip the switch', async () => {
     mocks.updateNotificationPreference.mockRejectedValue(new Error('boom'));
-    render(<SettingsNotifications />);
+    renderSettingsNotifications();
     const taskCompleteSwitch = await screen.findByRole('switch', {
       name: /Task Complete/i,
     });
@@ -127,14 +144,15 @@ describe('SettingsNotifications', () => {
     expect(alert).toHaveTextContent(/Task Complete/);
 
     // Switch state did NOT optimistically change to the rejected value
-    expect(
-      screen.getByRole('switch', { name: /Task Complete/i })
-    ).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('switch', { name: /Task Complete/i })).toHaveAttribute(
+      'aria-checked',
+      'true'
+    );
   });
 
   it('surfaces a load failure with a working Retry control', async () => {
     mocks.getNotificationPreferences.mockRejectedValueOnce(new Error('network'));
-    render(<SettingsNotifications />);
+    renderSettingsNotifications();
 
     const alert = await screen.findByRole('alert');
     expect(alert).toHaveTextContent(/Could not load notification preferences/i);
@@ -147,5 +165,19 @@ describe('SettingsNotifications', () => {
 
     const errorSwitch = await screen.findByRole('switch', { name: /Error/i });
     expect(errorSwitch).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('keeps cached controls mounted when a background refetch fails', async () => {
+    const { queryClient } = renderSettingsNotifications();
+    const taskCompleteSwitch = await screen.findByRole('switch', {
+      name: /Task Complete/i,
+    });
+
+    mocks.getNotificationPreferences.mockRejectedValueOnce(new Error('refresh failed'));
+    await queryClient.refetchQueries({ queryKey: ['notification-preferences'] });
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(/Showing the last saved settings/i);
+    expect(taskCompleteSwitch).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: /Task Complete/i })).toBe(taskCompleteSwitch);
   });
 });

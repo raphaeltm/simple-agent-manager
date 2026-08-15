@@ -6,12 +6,10 @@ import { Hono } from 'hono';
 import * as schema from '../../db/schema';
 import type { Env } from '../../env';
 import { log, serializeError } from '../../lib/logger';
+import { expectJsonRecord } from '../../lib/runtime-validation';
 import { getUserId, requireApproved, requireAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
-import {
-  signLocalForwardToken,
-  verifyLocalForwardToken,
-} from '../../services/jwt';
+import { signLocalForwardToken, verifyLocalForwardToken } from '../../services/jwt';
 import { fetchNodeAgent, getNodeAgentRequestTimeoutMs } from '../../services/node-agent';
 import { getOwnedWorkspace, isActiveWorkspaceStatus } from './_helpers';
 
@@ -47,7 +45,13 @@ function parseLocalAuthority(value: unknown): string {
   } catch {
     throw errors.badRequest('localAuthority must be host:port using localhost or 127.0.0.1');
   }
-  if (parsed.username || parsed.password || parsed.pathname !== '/' || parsed.search || parsed.hash) {
+  if (
+    parsed.username ||
+    parsed.password ||
+    parsed.pathname !== '/' ||
+    parsed.search ||
+    parsed.hash
+  ) {
     throw errors.badRequest('localAuthority must be host:port only');
   }
   if (!LOOPBACK_HOSTS.has(parsed.hostname)) {
@@ -58,6 +62,29 @@ function parseLocalAuthority(value: unknown): string {
     throw errors.badRequest('localAuthority must include a valid port');
   }
   return `${parsed.hostname}:${port}`;
+}
+
+/**
+ * Reads and loosely narrows the forward-request JSON body to a plain record.
+ * Malformed JSON, a non-object body (including a literal `null`), or an array
+ * all fall back to `{}` — matching the pre-existing tolerant-body behavior —
+ * so the authoritative `parsePort`/`parseLocalAuthority` checks below remain
+ * the single source of truth for field-level validation and error messages.
+ */
+async function readForwardRequestBody(
+  c: Context<{ Bindings: Env }>
+): Promise<Record<string, unknown>> {
+  let raw: unknown;
+  try {
+    raw = await c.req.json();
+  } catch {
+    return {};
+  }
+  try {
+    return expectJsonRecord(raw, 'workspace.forwards.request');
+  } catch {
+    return {};
+  }
 }
 
 function deleteConnectionListedHeaders(headers: Headers): void {
@@ -96,7 +123,11 @@ function vmAgentBaseUrl(nodeId: string, env: Env): URL {
   return new URL(`${protocol}://${nodeId.toLowerCase()}.vm.${env.BASE_DOMAIN}:${port}`);
 }
 
-async function requireRoutedWorkspace(c: Context<{ Bindings: Env }>, workspaceId: string, userId: string) {
+async function requireRoutedWorkspace(
+  c: Context<{ Bindings: Env }>,
+  workspaceId: string,
+  userId: string
+) {
   const db = drizzle(c.env.DATABASE, { schema });
   const workspace = await getOwnedWorkspace(db, workspaceId, userId);
   if (!workspace.nodeId) {
@@ -111,10 +142,10 @@ async function requireRoutedWorkspace(c: Context<{ Bindings: Env }>, workspaceId
 localForwardRoutes.post('/:id/forwards', requireAuth(), requireApproved(), async (c) => {
   const userId = getUserId(c);
   const workspaceId = c.req.param('id');
-  const body = await c.req.json().catch(() => ({}));
-  const remotePort = parsePort((body as Record<string, unknown>).remotePort, 'remotePort');
-  const localAuthority = parseLocalAuthority((body as Record<string, unknown>).localAuthority);
-  const mode = (body as Record<string, unknown>).mode ?? 'http';
+  const body = await readForwardRequestBody(c);
+  const remotePort = parsePort(body.remotePort, 'remotePort');
+  const localAuthority = parseLocalAuthority(body.localAuthority);
+  const mode = body.mode ?? 'http';
   if (mode !== 'http') {
     throw errors.badRequest('only http local forwarding is supported');
   }
@@ -124,14 +155,17 @@ localForwardRoutes.post('/:id/forwards', requireAuth(), requireApproved(), async
   if (!nodeId) {
     throw errors.badRequest('Workspace has no node assigned');
   }
-  const { token, expiresAt } = await signLocalForwardToken({
-    userId,
-    workspaceId,
-    nodeId,
-    remotePort,
-    mode: 'http',
-    localAuthority,
-  }, c.env);
+  const { token, expiresAt } = await signLocalForwardToken(
+    {
+      userId,
+      workspaceId,
+      nodeId,
+      remotePort,
+      mode: 'http',
+      localAuthority,
+    },
+    c.env
+  );
 
   return c.json({
     token,
@@ -186,7 +220,13 @@ async function handleLocalForwardProxy(c: Context<{ Bindings: Env }>) {
   }
 
   if (c.req.header('Upgrade')) {
-    return c.json({ error: 'UNSUPPORTED_UPGRADE', message: 'WebSocket upgrades are not supported by CLI local forwarding yet' }, 501);
+    return c.json(
+      {
+        error: 'UNSUPPORTED_UPGRADE',
+        message: 'WebSocket upgrades are not supported by CLI local forwarding yet',
+      },
+      501
+    );
   }
 
   const sourceUrl = new URL(c.req.url);
@@ -205,14 +245,20 @@ async function handleLocalForwardProxy(c: Context<{ Bindings: Env }>) {
   headers.set('X-Forwarded-Proto', 'http');
   headers.set('X-Forwarded-For', c.req.header('CF-Connecting-IP') ?? '');
 
-  const response = await fetchNodeAgent(claims.nodeId, c.env, vmUrl.toString(), {
-    method: c.req.raw.method,
-    headers,
-    body: c.req.raw.body,
-    redirect: 'manual',
-    // @ts-expect-error Cloudflare Workers support streaming request bodies.
-    duplex: c.req.raw.body ? 'half' : undefined,
-  }, getNodeAgentRequestTimeoutMs(c.env));
+  const response = await fetchNodeAgent(
+    claims.nodeId,
+    c.env,
+    vmUrl.toString(),
+    {
+      method: c.req.raw.method,
+      headers,
+      body: c.req.raw.body,
+      redirect: 'manual',
+      // @ts-expect-error Cloudflare Workers support streaming request bodies.
+      duplex: c.req.raw.body ? 'half' : undefined,
+    },
+    getNodeAgentRequestTimeoutMs(c.env)
+  );
 
   return new Response(response.body, {
     status: response.status,

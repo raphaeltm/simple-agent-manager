@@ -2,8 +2,8 @@ import type {
   CredentialProvider,
   GitHubInstallation,
   NodeResponse,
-  Project,
   ProjectDetailResponse,
+  ProjectSummary,
   ProviderCatalog,
   VMSize,
 } from '@simple-agent-manager/shared';
@@ -124,7 +124,7 @@ export function CreateWorkspace() {
   const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
   const [nodes, setNodes] = useState<NodeResponse[]>([]);
   const [linkedProject, setLinkedProject] = useState<ProjectDetailResponse | null>(null);
-  const [allProjects, setAllProjects] = useState<Project[]>([]);
+  const [allProjects, setAllProjects] = useState<ProjectSummary[]>([]);
   const [selectedProjectId, setSelectedProjectId] = useState<string>(
     locationState?.projectId ?? ''
   );
@@ -309,12 +309,16 @@ export function CreateWorkspace() {
     [fetchBranches]
   );
 
-  // Load project context if navigated from a project
+  // Load project context if navigated from a project. loadProjectDetails is
+  // stable (its only dep, fetchBranches, is useCallback([])), and
+  // locationState?.projectId is a primitive that only changes on a genuine
+  // navigation to this route with new state — so including both here does
+  // not add extra runs under normal mount-once-per-navigation usage.
   useEffect(() => {
     const projectId = locationState?.projectId;
     if (!projectId) return;
     loadProjectDetails(projectId);
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [loadProjectDetails, locationState?.projectId]);
 
   // Handle project selection from dropdown
   const handleProjectSelect = useCallback(

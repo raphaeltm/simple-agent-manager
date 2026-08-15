@@ -503,16 +503,16 @@
   // --- Wizard logic (vanilla JS, runs in-browser) ---
   (function() {
     function generateWebhookSecret() {
-      var array = new Uint8Array(32);
+      const array = new Uint8Array(32);
       crypto.getRandomValues(array);
       return Array.from(array, function(b) { return b.toString(16).padStart(2, '0'); }).join('');
     }
 
     function buildGitHubAppUrl(domain, appName, org) {
-      var apiUrl = 'https://api.' + domain;
-      var appUrl = 'https://app.' + domain;
+      const apiUrl = 'https://api.' + domain;
+      const appUrl = 'https://app.' + domain;
 
-      var params = new URLSearchParams();
+      const params = new URLSearchParams();
       params.set('name', appName || 'SAM');
       params.set('url', appUrl);
       params.set('public', 'false');
@@ -528,55 +528,55 @@
       params.append('events[]', 'push');
       params.append('events[]', 'pull_request');
 
-      var base = org
-        ? 'https://github.com/organizations/' + encodeURIComponent(org) + '/settings/apps/new'
-        : 'https://github.com/settings/apps/new';
+      const base = org
+      ? 'https://github.com/organizations/' + encodeURIComponent(org) + '/settings/apps/new'
+      : 'https://github.com/settings/apps/new';
 
       return base + '?' + params.toString();
     }
 
     function base64Encode(str) {
-      var bytes = new TextEncoder().encode(str);
-      var binary = '';
-      for (var i = 0; i < bytes.length; i++) {
+      const bytes = new TextEncoder().encode(str);
+      let binary = '';
+      for (let i = 0; i < bytes.length; i++) {
         binary += String.fromCharCode(bytes[i]);
       }
       return btoa(binary);
     }
 
     // --- DOM setup ---
-    var wizard = document.getElementById('github-app-wizard');
-    var stepDomain = document.getElementById('step-domain');
-    var stepCreate = document.getElementById('step-create');
-    var stepCreds = document.getElementById('step-credentials');
-    var stepOutput = document.getElementById('step-output');
+    const wizard = document.getElementById('github-app-wizard');
+    const stepDomain = document.getElementById('step-domain');
+    const stepCreate = document.getElementById('step-create');
+    const stepCreds = document.getElementById('step-credentials');
+    const stepOutput = document.getElementById('step-output');
 
-    var domainInput = document.getElementById('domain-input');
-    var appNameInput = document.getElementById('app-name-input');
-    var orgInput = document.getElementById('org-input');
-    var orgField = document.getElementById('org-field');
-    var accountTypeRadios = document.querySelectorAll('input[name="account-type"]');
-    var btnGenerate = document.getElementById('btn-generate');
-    var btnCreated = document.getElementById('btn-created');
-    var btnGenerateSecrets = document.getElementById('btn-generate-secrets');
-    var btnRestart = document.getElementById('btn-restart');
+    const domainInput = document.getElementById('domain-input');
+    const appNameInput = document.getElementById('app-name-input');
+    const orgInput = document.getElementById('org-input');
+    const orgField = document.getElementById('org-field');
+    const accountTypeRadios = document.querySelectorAll('input[name="account-type"]');
+    const btnGenerate = document.getElementById('btn-generate');
+    const btnCreated = document.getElementById('btn-created');
+    const btnGenerateSecrets = document.getElementById('btn-generate-secrets');
+    const btnRestart = document.getElementById('btn-restart');
 
-    var createAppLink = document.getElementById('create-app-link');
-    var settingsPreview = document.getElementById('settings-preview');
-    var webhookSecretEl = document.getElementById('webhook-secret');
+    const createAppLink = document.getElementById('create-app-link');
+    const settingsPreview = document.getElementById('settings-preview');
+    const webhookSecretEl = document.getElementById('webhook-secret');
 
-    var credAppId = document.getElementById('cred-app-id');
-    var credClientId = document.getElementById('cred-client-id');
-    var credClientSecret = document.getElementById('cred-client-secret');
-    var credAppSlug = document.getElementById('cred-app-slug');
-    var credPrivateKey = document.getElementById('cred-private-key');
+    const credAppId = document.getElementById('cred-app-id');
+    const credClientId = document.getElementById('cred-client-id');
+    const credClientSecret = document.getElementById('cred-client-secret');
+    const credAppSlug = document.getElementById('cred-app-slug');
+    const credPrivateKey = document.getElementById('cred-private-key');
 
-    var secretsOutput = document.getElementById('secrets-output');
-    var ghCliCommands = document.getElementById('gh-cli-commands');
+    const secretsOutput = document.getElementById('secrets-output');
+    const ghCliCommands = document.getElementById('gh-cli-commands');
 
     if (!wizard || !domainInput || !btnGenerate) return;
 
-    var webhookSecret = '';
+    let webhookSecret = '';
 
     function showStep(step) {
       [stepDomain, stepCreate, stepCreds, stepOutput].forEach(function(s) { s.classList.add('hidden'); });
@@ -586,8 +586,8 @@
 
     // --- Step 1: Domain validation ---
     domainInput.addEventListener('input', function() {
-      var v = domainInput.value.trim();
-      var valid = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/.test(v);
+      const v = domainInput.value.trim();
+      const valid = /^[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?(\.[a-zA-Z0-9]([a-zA-Z0-9-]*[a-zA-Z0-9])?)+$/.test(v);
       btnGenerate.disabled = !valid;
     });
 
@@ -605,28 +605,28 @@
 
     // --- Step 1 -> Step 2 ---
     btnGenerate.addEventListener('click', function() {
-      var domain = domainInput.value.trim();
-      var appName = appNameInput.value.trim();
-      var isOrg = document.querySelector('input[name="account-type"]:checked').value === 'org';
-      var org = isOrg ? orgInput.value.trim() : '';
+      const domain = domainInput.value.trim();
+      const appName = appNameInput.value.trim();
+      const isOrg = document.querySelector('input[name="account-type"]:checked').value === 'org';
+      const org = isOrg ? orgInput.value.trim() : '';
 
-      var url = buildGitHubAppUrl(domain, appName, org);
+      const url = buildGitHubAppUrl(domain, appName, org);
       createAppLink.href = url;
 
       webhookSecret = generateWebhookSecret();
       webhookSecretEl.textContent = webhookSecret;
 
-      var apiUrl = 'https://api.' + domain;
-      var appUrl = 'https://app.' + domain;
-      var previewItems = [
-        ['Homepage', appUrl],
-        ['Callback', apiUrl + '/api/auth/callback/github'],
-        ['Setup URL', apiUrl + '/api/github/callback'],
-        ['Redirect on update', 'Enabled'],
-        ['Webhook', apiUrl + '/api/github/webhook'],
-        ['Permissions', 'Contents (write), Metadata (read), Email addresses (read), Pull requests (read)'],
-        ['Events', 'push, pull_request'],
-      ];
+      const apiUrl = 'https://api.' + domain;
+      const appUrl = 'https://app.' + domain;
+      const previewItems = [
+      ['Homepage', appUrl],
+      ['Callback', apiUrl + '/api/auth/callback/github'],
+      ['Setup URL', apiUrl + '/api/github/callback'],
+      ['Redirect on update', 'Enabled'],
+      ['Webhook', apiUrl + '/api/github/webhook'],
+      ['Permissions', 'Contents (write), Metadata (read), Email addresses (read), Pull requests (read)'],
+      ['Events', 'push, pull_request'],
+    ];
 
       settingsPreview.innerHTML = previewItems
         .map(function(item) { return '<dt>' + item[0] + '</dt><dd>' + item[1] + '</dd>'; })
@@ -642,11 +642,11 @@
 
     // --- Step 3: Credential validation ---
     function validateCredentials() {
-      var hasAppId = credAppId.value.trim().length > 0;
-      var hasClientId = credClientId.value.trim().length > 0;
-      var hasClientSecret = credClientSecret.value.trim().length > 0;
-      var hasAppSlug = credAppSlug.value.trim().length > 0;
-      var hasPrivateKey = credPrivateKey.value.trim().indexOf('-----BEGIN') !== -1;
+      const hasAppId = credAppId.value.trim().length > 0;
+      const hasClientId = credClientId.value.trim().length > 0;
+      const hasClientSecret = credClientSecret.value.trim().length > 0;
+      const hasAppSlug = credAppSlug.value.trim().length > 0;
+      const hasPrivateKey = credPrivateKey.value.trim().indexOf('-----BEGIN') !== -1;
       btnGenerateSecrets.disabled = !(hasAppId && hasClientId && hasClientSecret && hasAppSlug && hasPrivateKey);
     }
 
@@ -656,14 +656,14 @@
 
     // --- Step 3 -> Step 4 ---
     btnGenerateSecrets.addEventListener('click', function() {
-      var appId = credAppId.value.trim();
-      var clientId = credClientId.value.trim();
-      var clientSecret = credClientSecret.value.trim();
-      var appSlug = credAppSlug.value.trim();
-      var privateKeyRaw = credPrivateKey.value.trim();
-      var privateKeyB64 = base64Encode(privateKeyRaw);
+      const appId = credAppId.value.trim();
+      const clientId = credClientId.value.trim();
+      const clientSecret = credClientSecret.value.trim();
+      const appSlug = credAppSlug.value.trim();
+      const privateKeyRaw = credPrivateKey.value.trim();
+      const privateKeyB64 = base64Encode(privateKeyRaw);
 
-      var secrets = [
+      const secrets = [
         ['GH_APP_ID', appId, appId],
         ['GH_CLIENT_ID', clientId, clientId],
         ['GH_CLIENT_SECRET', clientSecret, clientSecret],
@@ -674,7 +674,7 @@
 
       secretsOutput.innerHTML = secrets
         .map(function(s) {
-          var name = s[0], display = s[1], full = s[2];
+          const name = s[0], display = s[1], full = s[2];
           return '<div class="secret-row">' +
             '<span class="secret-name">' + name + '</span>' +
             '<span class="secret-value">' + display + '</span>' +
@@ -684,15 +684,15 @@
         })
         .join('');
 
-      var cliLines = [
-        'gh secret set GH_APP_ID --env production --body "' + appId + '"',
-        'gh secret set GH_CLIENT_ID --env production --body "' + clientId + '"',
-        'gh secret set GH_CLIENT_SECRET --env production --body "' + clientSecret + '"',
-        appSlug ? 'gh secret set GH_APP_SLUG --env production --body "' + appSlug + '"' : '',
-        'gh secret set GH_WEBHOOK_SECRET --env production --body "' + webhookSecret + '"',
-        '# For the private key, pipe the .pem file:',
-        'cat your-key.pem | base64 -w0 | gh secret set GH_APP_PRIVATE_KEY --env production',
-      ].filter(Boolean).join('\n');
+      const cliLines = [
+      'gh secret set GH_APP_ID --env production --body "' + appId + '"',
+      'gh secret set GH_CLIENT_ID --env production --body "' + clientId + '"',
+      'gh secret set GH_CLIENT_SECRET --env production --body "' + clientSecret + '"',
+      appSlug ? 'gh secret set GH_APP_SLUG --env production --body "' + appSlug + '"' : '',
+      'gh secret set GH_WEBHOOK_SECRET --env production --body "' + webhookSecret + '"',
+      '# For the private key, pipe the .pem file:',
+      'cat your-key.pem | base64 -w0 | gh secret set GH_APP_PRIVATE_KEY --env production',
+    ].filter(Boolean).join('\n');
 
       ghCliCommands.textContent = cliLines;
 
@@ -718,16 +718,16 @@
 
     // --- Copy buttons ---
     wizard.addEventListener('click', function(e) {
-      var btn = e.target.closest('.copy-btn, .secret-copy');
+      const btn = e.target.closest('.copy-btn, .secret-copy');
       if (!btn) return;
 
-      var text = '';
+      let text = '';
       if (btn.classList.contains('secret-copy')) {
         text = btn.getAttribute('data-value') || '';
       } else {
-        var targetId = btn.getAttribute('data-copy');
+        const targetId = btn.getAttribute('data-copy');
         if (targetId) {
-          var el = document.getElementById(targetId);
+          const el = document.getElementById(targetId);
           text = el ? el.textContent : '';
         }
       }

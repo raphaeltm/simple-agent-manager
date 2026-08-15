@@ -10,7 +10,7 @@
  * the real DO class through a minimal mock that mirrors the SqlStorage API.
  * For full end-to-end DO behaviour see tests/workers/ (requires workerd runtime).
  */
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 // ---------------------------------------------------------------------------
 // MockSqlStorage — mirrors SqlStorage exec() semantics used by the DO
@@ -65,6 +65,8 @@ class MockSqlStorage {
         action_url: params[9] as string | null,
         metadata: params[10] as string | null,
         created_at: params[11] as number,
+        in_app_visible: (params[12] as number | undefined) ?? 1,
+        push_delivered_at: null,
         read_at: null,
         dismissed_at: null,
       };
@@ -125,25 +127,38 @@ class MockSqlStorage {
 
     // UPDATE notifications SET body = ?, title = ?, metadata = ?, read_at = NULL WHERE id = ?
     // Also handles: UPDATE notifications SET body = ?, title = ?, read_at = NULL WHERE id = ?
-    if (q.startsWith('UPDATE NOTIFICATIONS SET')) {
+    if (q.startsWith('UPDATE NOTIFICATIONS')) {
       const hasMetadata = q.includes('METADATA');
       if (hasMetadata) {
-        const [bodyParam, titleParam, metadataParam, idParam] = params as [string, string, string | null, string];
+        const [bodyParam, titleParam, metadataParam, inAppVisibleParam, idParam] = params as [
+          string,
+          string,
+          string | null,
+          number,
+          string,
+        ];
         for (const r of this.rows) {
           if (r.id === idParam) {
             r.body = bodyParam;
             r.title = titleParam;
             r.metadata = metadataParam;
             r.read_at = null;
+            r.in_app_visible = Math.max(Number(r.in_app_visible ?? 1), inAppVisibleParam);
           }
         }
       } else {
-        const [bodyParam, titleParam, idParam] = params as [string, string, string];
+        const [bodyParam, titleParam, inAppVisibleParam, idParam] = params as [
+          string,
+          string,
+          number,
+          string,
+        ];
         for (const r of this.rows) {
           if (r.id === idParam) {
             r.body = bodyParam;
             r.title = titleParam;
             r.read_at = null;
+            r.in_app_visible = Math.max(Number(r.in_app_visible ?? 1), inAppVisibleParam);
           }
         }
       }
@@ -184,7 +199,7 @@ vi.mock('cloudflare:workers', () => ({
   DurableObject: class {
     constructor(
       protected ctx: ReturnType<typeof createFakeDOState>,
-      protected env: Record<string, string>,
+      protected env: Record<string, string>
     ) {}
   },
   WebSocketPair: vi.fn(),
@@ -193,6 +208,7 @@ vi.mock('cloudflare:workers', () => ({
 // Also mock the migrations runner so the constructor side-effect is a no-op
 vi.mock('../../../src/durable-objects/notification-migrations', () => ({
   runNotificationMigrations: vi.fn(),
+  runNotificationMigrationsAtomically: vi.fn(),
 }));
 
 // Import AFTER mocks are set up
@@ -205,6 +221,10 @@ const { NotificationService } = await import('../../../src/durable-objects/notif
 function makeNotificationService(sql: MockSqlStorage, env: Record<string, string> = {}) {
   const state = createFakeDOState(sql, env);
   return new NotificationService(state as any, env);
+}
+
+function waitUntilSpy(service: InstanceType<typeof NotificationService>) {
+  return (service as unknown as { ctx: { waitUntil: ReturnType<typeof vi.fn> } }).ctx.waitUntil;
 }
 
 const BASE_REQUEST = {
@@ -255,7 +275,7 @@ describe('NotificationService suppression logic', () => {
         'Old body',
         null,
         null,
-        Date.now() - 10_000, // 10 seconds ago — within 5-min default window
+        Date.now() - 10_000 // 10 seconds ago — within 5-min default window
       );
 
       const result = await service.createNotification('user-1', {
@@ -273,6 +293,7 @@ describe('NotificationService suppression logic', () => {
 
       // The returned object must correspond to the updated notification
       expect(result.id).toBe('existing-id');
+      expect(waitUntilSpy(service)).not.toHaveBeenCalled();
     });
 
     it('creates a new notification when an existing one is beyond the batch window', async () => {
@@ -291,7 +312,7 @@ describe('NotificationService suppression logic', () => {
         'Old body',
         null,
         null,
-        Date.now() - batchWindowMs - 1000, // beyond default window
+        Date.now() - batchWindowMs - 1000 // beyond default window
       );
 
       await service.createNotification('user-1', BASE_REQUEST);
@@ -329,7 +350,9 @@ describe('NotificationService suppression logic', () => {
 
     it('uses NOTIFICATION_PROGRESS_BATCH_WINDOW_MS env override when set', async () => {
       // Use a very short window (100 ms)
-      const shortWindowService = makeNotificationService(sql, { NOTIFICATION_PROGRESS_BATCH_WINDOW_MS: '100' });
+      const shortWindowService = makeNotificationService(sql, {
+        NOTIFICATION_PROGRESS_BATCH_WINDOW_MS: '100',
+      });
 
       // Seed a progress notification 200 ms old — outside the 100 ms window
       sql.exec(
@@ -345,7 +368,7 @@ describe('NotificationService suppression logic', () => {
         null,
         null,
         null,
-        Date.now() - 200,
+        Date.now() - 200
       );
 
       await shortWindowService.createNotification('user-1', BASE_REQUEST);
@@ -353,6 +376,39 @@ describe('NotificationService suppression logic', () => {
       // Both rows should exist — the stale one is outside the 100 ms window
       const allRows = sql.getAllRows().filter((r) => r.type === 'progress');
       expect(allRows).toHaveLength(2);
+    });
+  });
+
+  describe('needs_input deduplication', () => {
+    it('updates a recent unread notification without scheduling push', async () => {
+      sql.exec(
+        `INSERT INTO notifications (id, user_id, project_id, task_id, session_id, type, urgency, title, body, action_url, metadata, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        'existing-input-id',
+        'user-1',
+        'proj-1',
+        'task-1',
+        'session-1',
+        'needs_input',
+        'high',
+        'Old question',
+        'Old context',
+        '/projects/proj-1/chat/session-1',
+        null,
+        Date.now() - 1000
+      );
+
+      const result = await service.createNotification('user-1', {
+        type: 'needs_input',
+        urgency: 'high',
+        title: 'Updated question',
+        body: 'Updated context',
+        projectId: 'proj-1',
+        taskId: 'task-1',
+        sessionId: 'session-1',
+      });
+
+      expect(result.id).toBe('existing-input-id');
+      expect(waitUntilSpy(service)).not.toHaveBeenCalled();
     });
   });
 
@@ -407,9 +463,14 @@ describe('NotificationService suppression logic', () => {
         limit: 10,
       });
 
-      expect(result.notifications.map((notification) => notification.id)).toEqual(['match-new', 'match-old']);
+      expect(result.notifications.map((notification) => notification.id)).toEqual([
+        'match-new',
+        'match-old',
+      ]);
       expect(result.notifications[0]?.sessionId).toBe('sess-1');
-      expect(result.notifications[0]?.metadata).toEqual({ fullMessage: 'Visible update with more detail' });
+      expect(result.notifications[0]?.metadata).toEqual({
+        fullMessage: 'Visible update with more detail',
+      });
     });
   });
 
@@ -446,7 +507,7 @@ describe('NotificationService suppression logic', () => {
         null,
         null,
         null,
-        Date.now() - 5_000, // 5 seconds ago — inside 60-second default window
+        Date.now() - 5_000 // 5 seconds ago — inside 60-second default window
       );
 
       const result = await service.createNotification('user-1', COMPLETE_REQUEST);
@@ -457,6 +518,7 @@ describe('NotificationService suppression logic', () => {
 
       // Returned stub must not have a real id
       expect(result.id).toBe('suppressed');
+      expect(waitUntilSpy(service)).not.toHaveBeenCalled();
     });
 
     it('allows a new task_complete after the dedup window expires', async () => {
@@ -474,7 +536,7 @@ describe('NotificationService suppression logic', () => {
         null,
         null,
         null,
-        Date.now() - dedupWindowMs - 1000, // beyond the 60-second window
+        Date.now() - dedupWindowMs - 1000 // beyond the 60-second window
       );
 
       await service.createNotification('user-1', COMPLETE_REQUEST);
@@ -484,7 +546,9 @@ describe('NotificationService suppression logic', () => {
     });
 
     it('uses NOTIFICATION_DEDUP_WINDOW_MS env override when set', async () => {
-      const shortDedupService = makeNotificationService(sql, { NOTIFICATION_DEDUP_WINDOW_MS: '100' });
+      const shortDedupService = makeNotificationService(sql, {
+        NOTIFICATION_DEDUP_WINDOW_MS: '100',
+      });
 
       // Seed a task_complete 200 ms old — outside the 100 ms window
       sql.exec(
@@ -500,7 +564,7 @@ describe('NotificationService suppression logic', () => {
         null,
         null,
         null,
-        Date.now() - 200,
+        Date.now() - 200
       );
 
       await shortDedupService.createNotification('user-1', COMPLETE_REQUEST);
@@ -524,7 +588,7 @@ describe('NotificationService suppression logic', () => {
         null,
         null,
         null,
-        Date.now() - 5_000,
+        Date.now() - 5_000
       );
 
       // Different task_id — should NOT be suppressed
@@ -549,7 +613,7 @@ describe('NotificationService suppression logic', () => {
         null,
         '/projects/proj-1',
         null,
-        Date.now() - 5_000,
+        Date.now() - 5_000
       );
 
       const result = await service.createNotification('user-1', {
@@ -571,5 +635,29 @@ describe('NotificationService suppression logic', () => {
       expect(result.dismissedAt).toBeNull();
       expect(result.createdAt).toBeTruthy(); // ISO string
     });
+  });
+
+  it('schedules push on the main insert path without consulting WebSockets', async () => {
+    const pushOnlyService = makeNotificationService(sql);
+    vi.spyOn(pushOnlyService, 'isNotificationEnabled').mockImplementation(
+      async (_userId, _type, _projectId, channel = 'in_app') => channel === 'web_push'
+    );
+
+    await pushOnlyService.createNotification('user-1', {
+      type: 'needs_input',
+      urgency: 'high',
+      title: 'Question',
+      projectId: 'proj-1',
+      taskId: 'task-new',
+    });
+
+    expect(waitUntilSpy(pushOnlyService)).toHaveBeenCalledOnce();
+    expect(
+      (
+        pushOnlyService as unknown as {
+          ctx: { getWebSockets: ReturnType<typeof vi.fn> };
+        }
+      ).ctx.getWebSockets
+    ).not.toHaveBeenCalled();
   });
 });

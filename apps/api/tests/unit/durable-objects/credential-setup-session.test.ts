@@ -502,6 +502,112 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
 });
 
 // ---------------------------------------------------------------------------
+// alarm() — device-auth-state.json schema validation
+//
+// readDeviceAuthState() replaced a blind `JSON.parse(...) as DeviceAuthState`
+// cast with a valibot schema parse (.claude/rules/51). These tests pin the
+// exact real-world shapes scripts/claude-setup-token.mjs and
+// scripts/codex-device-auth.mjs write to disk, and the malformed-input
+// degrade path (treated as "not ready yet" — same as the file not existing).
+// ---------------------------------------------------------------------------
+
+describe('CredentialSetupSession — device-auth-state.json validation', () => {
+  async function createAndAdmit(
+    id = 'setup-device-state',
+    paramOverrides: Partial<typeof BASE_PARAMS> = {}
+  ) {
+    const created = createDO();
+    await Promise.resolve();
+    const fakeSandbox = createFakeSandbox();
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+
+    await created.instance.create({
+      id,
+      setupHome: `/tmp/codex-setup-${id}`,
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+      ...paramOverrides,
+    });
+    await created.instance.alarm(); // provisioning -> admitting
+    fakeSandbox.exists.mockClear();
+    fakeSandbox.readFile.mockClear();
+    return { ...created, fakeSandbox };
+  }
+
+  it('accepts an explicit userCode: null (claude-setup-token.mjs shape) and transitions to waiting_for_user', async () => {
+    // requiresUserCode('claude-code') is false — unlike codex, Claude Code
+    // sign-in never blocks on userCode, so the null value written by
+    // claude-setup-token.mjs must still allow the transition to proceed.
+    const { instance, fakeSandbox } = await createAndAdmit('setup-device-state-claude', {
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      agentName: 'Claude Code',
+    });
+    fakeSandbox.exists.mockResolvedValue({ exists: true });
+    fakeSandbox.readFile.mockResolvedValue({
+      content: JSON.stringify({
+        status: 'waiting_for_user',
+        verificationUrl: 'https://claude.ai/oauth/device',
+        userCode: null,
+      }),
+    });
+
+    await instance.alarm(); // admitting -> waiting_for_user
+
+    const state = await instance.getState();
+    expect(state?.status).toBe('waiting_for_user');
+    expect(state?.verificationUrl).toBe('https://claude.ai/oauth/device');
+    expect(state?.userCode).toBeNull();
+  });
+
+  it('keeps polling (does not throw) on truncated/malformed device-auth-state.json', async () => {
+    const { instance, fakeSandbox } = await createAndAdmit();
+    fakeSandbox.exists.mockResolvedValue({ exists: true });
+    fakeSandbox.readFile.mockResolvedValue({ content: '{"status": "waiting_for' }); // truncated
+
+    await instance.alarm();
+
+    const state = await instance.getState();
+    expect(state?.status).toBe('admitting'); // unchanged — treated as not-ready-yet
+  });
+
+  it('keeps polling (does not throw) on an unrecognized status value', async () => {
+    const { instance, fakeSandbox } = await createAndAdmit();
+    fakeSandbox.exists.mockResolvedValue({ exists: true });
+    fakeSandbox.readFile.mockResolvedValue({
+      content: JSON.stringify({
+        status: 'not_a_real_status',
+        verificationUrl: 'https://example.com',
+      }),
+    });
+
+    await instance.alarm();
+
+    const state = await instance.getState();
+    expect(state?.status).toBe('admitting'); // unchanged — schema rejects, degrades to "absent"
+  });
+
+  it('accepts an explicit error: null alongside a completed status (codex-device-auth.mjs success shape)', async () => {
+    const { instance, fakeSandbox } = await createAndAdmit();
+    fakeSandbox.exists.mockResolvedValue({ exists: true });
+    fakeSandbox.readFile.mockImplementation(async (path: string) => ({
+      content: path.endsWith('device-auth-state.json')
+        ? JSON.stringify({ status: 'completed', error: null })
+        : validAuthJson(),
+    }));
+    vi.mocked(saveAgentCredentialForUser).mockResolvedValue({
+      created: true,
+      createdAt: '2026-07-01T00:00:00.000Z',
+      updatedAt: '2026-07-01T00:00:00.000Z',
+    });
+
+    await instance.alarm(); // admitting -> completed (fast-path capture)
+
+    expect((await instance.getState())?.status).toBe('completed');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // alarm() — capture polling
 // ---------------------------------------------------------------------------
 

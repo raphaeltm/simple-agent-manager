@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import {
   evaluateFilters,
   type GitHubWebhookEvent,
+  parseGitHubTriggerFiltersJson,
   parseWebhookPayload,
 } from '../../../src/services/github-trigger-filter';
 
@@ -354,5 +355,199 @@ describe('parseWebhookPayload', () => {
     expect(event.sender).toBeUndefined();
     expect(event.repository).toBeUndefined();
     expect(event.issue).toBeUndefined();
+  });
+
+  // ---------------------------------------------------------------------------
+  // Full-object snapshots: pin the exact GitHubWebhookEvent shape produced for
+  // realistic, fully-populated issues/pull_request/push payloads, and for a
+  // fully degenerate (all optional fields absent) payload. These lock in the
+  // per-field default values (title/full_name/login/ref/id -> '', body/type/
+  // default_branch/message/action/ref -> undefined, number -> 0, labels ->
+  // undefined when absent) that replaced the old `String(x ?? '')`/`typeof`
+  // coercions.
+  // ---------------------------------------------------------------------------
+  describe('full-object snapshots', () => {
+    it('produces the exact event shape for a fully-populated issues payload', () => {
+      const payload = {
+        action: 'labeled',
+        sender: { login: 'octocat', type: 'User' },
+        repository: { full_name: 'org/repo', default_branch: 'main' },
+        issue: {
+          number: 42,
+          title: 'Test issue',
+          body: 'This is the body',
+          labels: [{ name: 'bug' }, { name: 'help wanted' }],
+          draft: false,
+        },
+        installation: { id: 999 }, // unknown/unread key — must be ignored, not throw
+      };
+
+      expect(parseWebhookPayload('issues', payload)).toEqual({
+        event: 'issues',
+        action: 'labeled',
+        sender: { login: 'octocat', type: 'User' },
+        repository: { full_name: 'org/repo', default_branch: 'main' },
+        issue: {
+          number: 42,
+          title: 'Test issue',
+          body: 'This is the body',
+          labels: [{ name: 'bug' }, { name: 'help wanted' }],
+          draft: false,
+        },
+      });
+    });
+
+    it('produces the exact event shape for a fully-populated pull_request payload', () => {
+      const payload = {
+        action: 'opened',
+        sender: { login: 'contributor', type: 'User' },
+        repository: { full_name: 'org/repo', default_branch: 'main' },
+        pull_request: {
+          number: 5,
+          title: 'Add feature',
+          body: 'PR body',
+          draft: false,
+          labels: [{ name: 'enhancement' }],
+          head: { ref: 'feature/new' },
+          base: { ref: 'main' },
+        },
+      };
+
+      expect(parseWebhookPayload('pull_request', payload)).toEqual({
+        event: 'pull_request',
+        action: 'opened',
+        sender: { login: 'contributor', type: 'User' },
+        repository: { full_name: 'org/repo', default_branch: 'main' },
+        pull_request: {
+          number: 5,
+          title: 'Add feature',
+          body: 'PR body',
+          draft: false,
+          labels: [{ name: 'enhancement' }],
+          head: { ref: 'feature/new' },
+          base: { ref: 'main' },
+        },
+      });
+    });
+
+    it('produces the exact event shape for a fully-populated push payload', () => {
+      const payload = {
+        ref: 'refs/heads/main',
+        sender: { login: 'deployer' },
+        repository: { full_name: 'org/repo' },
+        head_commit: { id: 'abc123', message: 'Fix bug' },
+      };
+
+      expect(parseWebhookPayload('push', payload)).toEqual({
+        event: 'push',
+        ref: 'refs/heads/main',
+        sender: { login: 'deployer', type: undefined },
+        repository: { full_name: 'org/repo', default_branch: undefined },
+        head_commit: { id: 'abc123', message: 'Fix bug' },
+      });
+    });
+
+    it('produces the exact degenerate-default shape when every optional field is absent', () => {
+      expect(parseWebhookPayload('issues', {})).toEqual({ event: 'issues' });
+    });
+
+    it('degrades null nested fields to the same defaults as absent fields', () => {
+      // GitHub commonly sends explicit `null` for empty optional text fields
+      // rather than omitting the key (e.g. an issue with no body).
+      const event = parseWebhookPayload('issues', {
+        action: 'opened',
+        sender: null,
+        issue: { number: 1, title: 'T', body: null, labels: null, draft: null },
+      });
+      expect(event).toEqual({
+        event: 'issues',
+        action: 'opened',
+        issue: { number: 1, title: 'T' },
+      });
+      expect(event.sender).toBeUndefined();
+      expect(event.issue?.body).toBeUndefined();
+      expect(event.issue?.labels).toBeUndefined();
+      expect(event.issue?.draft).toBeUndefined();
+    });
+
+    it('degrades individual malformed label items to an empty name without dropping the entry', () => {
+      const event = parseWebhookPayload('issues', {
+        action: 'opened',
+        issue: { number: 1, title: 'T', labels: [null, { name: 'bug' }, {}, 'weird-string-item'] },
+      });
+      expect(event.issue?.labels).toEqual([
+        { name: '' },
+        { name: 'bug' },
+        { name: '' },
+        { name: '' },
+      ]);
+    });
+
+    it('drops a non-array labels value instead of throwing', () => {
+      const event = parseWebhookPayload('issues', {
+        issue: { number: 1, title: 'T', labels: 'not-an-array' },
+      });
+      expect(event.issue?.labels).toBeUndefined();
+    });
+
+    it('never throws for a completely non-object payload', () => {
+      // `payload` is typed as Record<string, unknown>, but the function must
+      // stay defensive against a caller passing something else at runtime.
+      expect(() => parseWebhookPayload('issues', null as never)).not.toThrow();
+      expect(parseWebhookPayload('issues', null as never)).toEqual({ event: 'issues' });
+    });
+  });
+});
+
+// =============================================================================
+// parseGitHubTriggerFiltersJson
+// =============================================================================
+
+describe('parseGitHubTriggerFiltersJson', () => {
+  it('parses a valid filters JSON blob', () => {
+    const filters: GitHubTriggerFilters = {
+      actions: ['opened', 'labeled'],
+      labels: ['bug'],
+      ignoreDrafts: false,
+    };
+    expect(parseGitHubTriggerFiltersJson(JSON.stringify(filters))).toEqual({
+      filters,
+      valid: true,
+    });
+  });
+
+  it('treats an empty object as a valid "match everything" filter set', () => {
+    expect(parseGitHubTriggerFiltersJson('{}')).toEqual({ filters: {}, valid: true });
+  });
+
+  it('treats an empty array as a valid "match everything" filter set (matches old duck-typed behavior)', () => {
+    // The pre-existing `JSON.parse(x) as GitHubTriggerFilters` cast never
+    // validated the parsed shape; `evaluateFilters`' optional-chained field
+    // reads treated ANY non-null value without a matching named property
+    // (including an array) as "no filter configured" for every dimension.
+    // `[]` has no `actions`/`labels`/etc. keys, so it produced identical
+    // "match everything" behavior to `{}` under the old code too.
+    expect(parseGitHubTriggerFiltersJson('[]')).toEqual({ filters: {}, valid: true });
+  });
+
+  it('degrades malformed JSON to an empty filter set and reports invalid', () => {
+    expect(parseGitHubTriggerFiltersJson('{not-valid-json')).toEqual({
+      filters: {},
+      valid: false,
+    });
+  });
+
+  it('degrades a wrong-shape (but syntactically valid) JSON value and reports invalid', () => {
+    expect(parseGitHubTriggerFiltersJson('42')).toEqual({ filters: {}, valid: false });
+    expect(parseGitHubTriggerFiltersJson('null')).toEqual({ filters: {}, valid: false });
+    expect(parseGitHubTriggerFiltersJson(JSON.stringify({ actions: 'not-an-array' }))).toEqual({
+      filters: {},
+      valid: false,
+    });
+  });
+
+  it('never throws regardless of input', () => {
+    expect(() => parseGitHubTriggerFiltersJson('{not-valid-json')).not.toThrow();
+    expect(() => parseGitHubTriggerFiltersJson('"just a string"')).not.toThrow();
   });
 });

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 
-import type { ToolCallContentItem,ToolCallItem } from '../hooks/useAcpMessages';
+import type { ToolCallContentItem, ToolCallItem } from '../hooks/useAcpMessages';
 import { isJsonRecord } from '../runtime-validation';
 import { FileDiffView } from './FileDiffView';
 import { normalizeRawToolOutput } from './raw-tool-output';
@@ -26,14 +26,24 @@ function StatusIcon({ status }: { status: ToolCallItem['status'] }) {
       );
     case 'completed':
       return (
-        <svg className="h-4 w-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg
+          className="h-4 w-4 text-green-500"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
         </svg>
       );
     case 'failed':
       return (
         <svg className="h-4 w-4 text-red-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M6 18L18 6M6 6l12 12"
+          />
         </svg>
       );
   }
@@ -46,7 +56,12 @@ function StatusIcon({ status }: { status: ToolCallItem['status'] }) {
  * Wrapped in React.memo to prevent re-renders when parent state changes
  * don't affect this component's props.
  */
-export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileClick, onLoadContent, className }: ToolCallCardProps) {
+export const ToolCallCard = React.memo(function ToolCallCard({
+  toolCall,
+  onFileClick,
+  onLoadContent,
+  className,
+}: ToolCallCardProps) {
   const [expanded, setExpanded] = useState(false);
   const [lazyContent, setLazyContent] = useState<ToolCallContentItem[] | null>(null);
   const [loading, setLoading] = useState(false);
@@ -54,7 +69,8 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
 
   const rawOutputFallback = normalizeRawToolOutput(toolCall.rawOutput);
   const needsLazyLoad = toolCall.contentLoaded === false && !!toolCall.messageId && !!onLoadContent;
-  const hasContent = needsLazyLoad || toolCall.content.some(hasRenderableContent) || rawOutputFallback !== null;
+  const hasContent =
+    needsLazyLoad || toolCall.content.some(hasRenderableContent) || rawOutputFallback !== null;
   let fallbackContent: ToolCallContentItem[] = [];
   if (rawOutputFallback) fallbackContent = [rawOutputFallback];
   const persistedOrFallback = toolCall.content.length > 0 ? toolCall.content : fallbackContent;
@@ -63,12 +79,13 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
   const handleToggle = async () => {
     if (!hasContent) return;
 
-    if (!expanded && needsLazyLoad && !lazyContent && !loadFailed) {
+    const { messageId } = toolCall;
+    if (!expanded && needsLazyLoad && !lazyContent && !loadFailed && onLoadContent && messageId) {
       setExpanded(true);
       setLoading(true);
       setLoadFailed(false);
       try {
-        const content = await onLoadContent!(toolCall.messageId!);
+        const content = await onLoadContent(messageId);
         setLazyContent(content);
       } catch {
         setLoadFailed(true);
@@ -87,20 +104,27 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
         role="button"
         tabIndex={0}
         onClick={handleToggle}
-        onKeyDown={(e) => { if ((e.key === 'Enter' || e.key === ' ') && hasContent) { e.preventDefault(); void handleToggle(); } }}
+        onKeyDown={(e) => {
+          if ((e.key === 'Enter' || e.key === ' ') && hasContent) {
+            e.preventDefault();
+            void handleToggle();
+          }
+        }}
         aria-expanded={hasContent ? expanded : undefined}
         className={`w-full flex items-center gap-2 px-3 py-2 bg-gray-50 text-left ${hasContent ? 'cursor-pointer hover:bg-gray-100' : 'cursor-default'}`}
       >
         <div className="flex items-center gap-2 min-w-0 flex-1">
-          <span className="shrink-0"><StatusIcon status={toolCall.status} /></span>
+          <span className="shrink-0">
+            <StatusIcon status={toolCall.status} />
+          </span>
           <span className="text-sm font-medium text-gray-700 truncate">{toolCall.title}</span>
           {toolCall.toolKind && (
             <span className="text-xs text-gray-400 bg-gray-200 px-1.5 py-0.5 rounded shrink-0">
               {toolCall.toolKind}
             </span>
           )}
-          {toolCall.locations.length > 0 && (
-            onFileClick ? (
+          {toolCall.locations.length > 0 &&
+            (onFileClick ? (
               <button
                 type="button"
                 className="text-xs text-blue-600 hover:text-blue-800 font-mono truncate min-w-0 bg-transparent border-none cursor-pointer p-0 text-left underline decoration-dotted"
@@ -111,17 +135,18 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
                   if (loc) onFileClick(loc.path, loc.line);
                 }}
               >
-                {toolCall.locations[0]?.path}{toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}
+                {toolCall.locations[0]?.path}
+                {toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}
               </button>
             ) : (
               <span
                 className="text-xs text-gray-500 font-mono truncate min-w-0"
                 title={`${toolCall.locations[0]?.path}${toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}`}
               >
-                {toolCall.locations[0]?.path}{toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}
+                {toolCall.locations[0]?.path}
+                {toolCall.locations[0]?.line ? `:${toolCall.locations[0].line}` : ''}
               </span>
-            )
-          )}
+            ))}
         </div>
         {needsLazyLoad && !lazyContent && toolCall.contentSize != null && (
           <span className="text-xs text-gray-400 shrink-0">
@@ -144,11 +169,33 @@ export const ToolCallCard = React.memo(function ToolCallCard({ toolCall, onFileC
       {expanded && hasContent && (
         <div className="border-t border-gray-200">
           {loading ? (
-            <div role="status" aria-live="polite" aria-label="Loading tool content" className="p-3 text-xs text-gray-500 animate-pulse">Loading content…</div>
+            <div
+              role="status"
+              aria-live="polite"
+              aria-label="Loading tool content"
+              className="p-3 text-xs text-gray-500 animate-pulse"
+            >
+              Loading content…
+            </div>
           ) : loadFailed ? (
-            <div role="alert" aria-live="assertive" className="p-3 text-xs text-red-600 flex items-center gap-1.5">
-              <svg className="h-3.5 w-3.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
+            <div
+              role="alert"
+              aria-live="assertive"
+              className="p-3 text-xs text-red-600 flex items-center gap-1.5"
+            >
+              <svg
+                className="h-3.5 w-3.5 shrink-0"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                aria-hidden="true"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={2}
+                  d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"
+                />
               </svg>
               Failed to load content.
             </div>
@@ -170,20 +217,18 @@ function ToolCallContentView({ content }: { content: ToolCallContentItem }) {
 
   switch (content.type) {
     case 'diff':
-      return content.text?.trim()
-        ? <FileDiffView diff={content.text} />
-        : fallbackJson;
+      return content.text?.trim() ? <FileDiffView diff={content.text} /> : fallbackJson;
     case 'terminal':
-      return content.text?.trim()
-        ? <TerminalBlock output={content.text} />
-        : fallbackJson;
+      return content.text?.trim() ? <TerminalBlock output={content.text} /> : fallbackJson;
     case 'content':
     default:
       return content.text?.trim() ? (
         <div className="p-3 text-gray-700 whitespace-pre-wrap font-mono text-xs break-words overflow-hidden">
           {content.text}
         </div>
-      ) : fallbackJson;
+      ) : (
+        fallbackJson
+      );
   }
 }
 

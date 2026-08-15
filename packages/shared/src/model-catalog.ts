@@ -99,7 +99,6 @@ const CLAUDE_MODELS: ModelGroup[] = [
   },
   modelGroup('Claude 4 (Legacy)', [
     { id: 'claude-opus-4-5-20251101', name: 'Claude Opus 4.5' },
-    { id: 'claude-opus-4-1-20250805', name: 'Claude Opus 4.1 (retires Aug 5)' },
     { id: 'claude-sonnet-4-5-20250929', name: 'Claude Sonnet 4.5' },
   ]),
 ];
@@ -120,23 +119,29 @@ const CODEX_MODELS: ModelGroup[] = [
     { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini' },
     { id: 'gpt-5.4-nano', name: 'GPT-5.4 Nano' },
   ]),
+  modelGroup('Codex (Current)', [{ id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex' }]),
   {
     label: 'Reasoning',
-    models: [
-      { id: 'o4-mini', name: 'O4 Mini', group: 'Reasoning' },
-      { id: 'o3', name: 'O3', group: 'Reasoning' },
-    ],
+    models: [{ id: 'o3', name: 'O3', group: 'Reasoning' }],
   },
   {
-    label: 'GPT-5 (Legacy)',
+    label: 'Deprecated',
     models: [
-      { id: 'gpt-5.3-codex', name: 'GPT-5.3 Codex (sunset)', group: 'GPT-5 (Legacy)' },
-      { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex (sunset)', group: 'GPT-5 (Legacy)' },
-      { id: 'gpt-5.1-codex-max', name: 'GPT-5.1 Codex Max', group: 'GPT-5 (Legacy)' },
-      { id: 'gpt-5.1-codex-mini', name: 'GPT-5.1 Codex Mini', group: 'GPT-5 (Legacy)' },
-      { id: 'gpt-5-mini', name: 'GPT-5 Mini', group: 'GPT-5 (Legacy)' },
+      { id: 'gpt-5.2-codex', name: 'GPT-5.2 Codex (Deprecated)', group: 'Deprecated' },
+      {
+        id: 'gpt-5.1-codex-max',
+        name: 'GPT-5.1 Codex Max (Deprecated)',
+        group: 'Deprecated',
+      },
+      {
+        id: 'gpt-5.1-codex-mini',
+        name: 'GPT-5.1 Codex Mini (Deprecated)',
+        group: 'Deprecated',
+      },
+      { id: 'o4-mini', name: 'O4 Mini (Deprecated)', group: 'Deprecated' },
     ],
   },
+  modelGroup('GPT-5 (Previous)', [{ id: 'gpt-5-mini', name: 'GPT-5 Mini' }]),
   {
     label: 'GPT-4.1 (Legacy)',
     models: [
@@ -155,7 +160,6 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode/big-pickle', name: 'Big Pickle' },
     { id: 'opencode/claude-fable-5', name: 'Claude Fable 5' },
     { id: 'opencode/claude-haiku-4-5', name: 'Claude Haiku 4.5' },
-    { id: 'opencode/claude-opus-4-1', name: 'Claude Opus 4.1' },
     { id: 'opencode/claude-opus-4-5', name: 'Claude Opus 4.5' },
     { id: 'opencode/claude-opus-4-6', name: 'Claude Opus 4.6' },
     { id: 'opencode/claude-opus-4-7', name: 'Claude Opus 4.7' },
@@ -165,8 +169,8 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode/claude-sonnet-4-5', name: 'Claude Sonnet 4.5' },
     { id: 'opencode/claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
     { id: 'opencode/claude-sonnet-5', name: 'Claude Sonnet 5' },
-    { id: 'opencode/deepseek-v4-flash', name: 'DeepSeek V4 Flash 0731' },
-    { id: 'opencode/deepseek-v4-flash-free', name: 'DeepSeek V4 Flash Free (New)' },
+    { id: 'opencode/deepseek-v4-flash', name: 'DeepSeek V4 Flash' },
+    { id: 'opencode/deepseek-v4-flash-free', name: 'DeepSeek V4 Flash Free' },
     { id: 'opencode/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
     { id: 'opencode/gemini-3-flash', name: 'Gemini 3 Flash' },
     { id: 'opencode/gemini-3.1-pro', name: 'Gemini 3.1 Pro Preview' },
@@ -203,7 +207,8 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode/kimi-k2.7-code', name: 'Kimi K2.7 Code' },
     { id: 'opencode/kimi-k3', name: 'Kimi K3' },
     { id: 'opencode/laguna-s-2.1-free', name: 'Laguna S 2.1 Free' },
-    { id: 'opencode/ling-3.0-flash-free', name: 'Ling-3.0-flash Free' },
+    { id: 'opencode/ling-3.0-tiny-free', name: 'Ling-3.0-tiny Free' },
+    { id: 'opencode/longcat-2.0-free', name: 'LongCat-2.0 Free' },
     { id: 'opencode/mimo-v2.5-free', name: 'MiMo V2.5 Free' },
     { id: 'opencode/minimax-m2.5', name: 'MiniMax-M2.5' },
     { id: 'opencode/minimax-m2.7', name: 'MiniMax-M2.7' },
@@ -212,10 +217,9 @@ const OPENCODE_MODELS: ModelGroup[] = [
     { id: 'opencode/north-mini-code-free', name: 'North Mini Code Free' },
     { id: 'opencode/qwen3.5-plus', name: 'Qwen3.5 Plus' },
     { id: 'opencode/qwen3.6-plus', name: 'Qwen3.6 Plus' },
-    { id: 'opencode/qwen3.7-plus', name: 'Qwen3.7 Plus' },
   ]),
   modelGroup('OpenCode Go', [
-    { id: 'opencode-go/deepseek-v4-flash', name: 'DeepSeek V4 Flash (New)' },
+    { id: 'opencode-go/deepseek-v4-flash', name: 'DeepSeek V4 Flash (2x usage)' },
     { id: 'opencode-go/deepseek-v4-pro', name: 'DeepSeek V4 Pro' },
     { id: 'opencode-go/glm-5.1', name: 'GLM-5.1' },
     { id: 'opencode-go/glm-5.2', name: 'GLM-5.2' },
@@ -244,29 +248,21 @@ const MISTRAL_MODELS: ModelGroup[] = [
   {
     label: 'Frontier (Latest)',
     models: [
-      { id: 'mistral-medium-3-5-2604', name: 'Mistral Medium 3.5', group: 'Frontier (Latest)' },
+      { id: 'mistral-medium-3-5', name: 'Mistral Medium 3.5', group: 'Frontier (Latest)' },
       { id: 'mistral-small-2603', name: 'Mistral Small 4', group: 'Frontier (Latest)' },
       { id: 'mistral-large-2512', name: 'Mistral Large 3', group: 'Frontier (Latest)' },
-      { id: 'mistral-medium-2508', name: 'Mistral Medium 3.1', group: 'Frontier (Latest)' },
     ],
   },
   {
     label: 'Coding (Recommended)',
-    models: [
-      { id: 'devstral-2-2512', name: 'Devstral 2', group: 'Coding (Recommended)' },
-      { id: 'codestral-2508', name: 'Codestral', group: 'Coding (Recommended)' },
-    ],
-  },
-  {
-    label: 'Reasoning',
-    models: [{ id: 'magistral-medium-1-2-2509', name: 'Magistral Medium 1.2', group: 'Reasoning' }],
+    models: [{ id: 'codestral-2508', name: 'Codestral', group: 'Coding (Recommended)' }],
   },
   {
     label: 'Edge / Efficient',
     models: [
-      { id: 'ministral-3-14b-2512', name: 'Ministral 3 14B', group: 'Edge / Efficient' },
-      { id: 'ministral-3-8b-2512', name: 'Ministral 3 8B', group: 'Edge / Efficient' },
-      { id: 'ministral-3-3b-2512', name: 'Ministral 3 3B', group: 'Edge / Efficient' },
+      { id: 'ministral-14b-2512', name: 'Ministral 3 14B', group: 'Edge / Efficient' },
+      { id: 'ministral-8b-2512', name: 'Ministral 3 8B', group: 'Edge / Efficient' },
+      { id: 'ministral-3b-2512', name: 'Ministral 3 3B', group: 'Edge / Efficient' },
     ],
   },
 ];
@@ -284,10 +280,18 @@ const GEMINI_MODELS: ModelGroup[] = [
     ['gemini-3.1-flash-lite', 'Gemini 3.1 Flash-Lite'],
   ]),
   {
-    label: 'Gemini 2.5',
+    label: 'Gemini 2.5 (Retires Oct 16)',
     models: [
-      { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro', group: 'Gemini 2.5' },
-      { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash', group: 'Gemini 2.5' },
+      {
+        id: 'gemini-2.5-pro',
+        name: 'Gemini 2.5 Pro (retires Oct 16)',
+        group: 'Gemini 2.5 (Retires Oct 16)',
+      },
+      {
+        id: 'gemini-2.5-flash',
+        name: 'Gemini 2.5 Flash (retires Oct 16)',
+        group: 'Gemini 2.5 (Retires Oct 16)',
+      },
     ],
   },
 ];

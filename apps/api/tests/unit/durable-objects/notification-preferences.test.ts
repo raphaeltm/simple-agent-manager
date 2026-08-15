@@ -173,6 +173,7 @@ vi.mock('cloudflare:workers', () => ({
 
 vi.mock('../../../src/durable-objects/notification-migrations', () => ({
   runNotificationMigrations: vi.fn(),
+  runNotificationMigrationsAtomically: vi.fn(),
 }));
 
 const { NotificationService } = await import('../../../src/durable-objects/notification');

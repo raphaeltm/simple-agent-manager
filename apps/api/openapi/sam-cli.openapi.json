@@ -1129,13 +1129,74 @@
         ],
         "additionalProperties": false
       },
+      "ProjectSummary": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "repository": {
+            "type": "string"
+          },
+          "githubRepoId": {
+            "type": "integer",
+            "nullable": true
+          },
+          "defaultBranch": {
+            "type": "string"
+          },
+          "repoProvider": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "activeWorkspaceCount": {
+            "type": "integer"
+          },
+          "activeSessionCount": {
+            "type": "integer"
+          },
+          "lastActivityAt": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "createdAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "taskCountsByStatus": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+            "additionalProperties": true
+          },
+          "linkedWorkspaces": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "repository",
+          "defaultBranch",
+          "repoProvider",
+          "status",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
       "ListProjectsResponse": {
         "type": "object",
         "properties": {
           "projects": {
             "type": "array",
             "items": {
-              "$ref": "#/components/schemas/Project"
+              "$ref": "#/components/schemas/ProjectSummary"
             }
           },
           "nextCursor": {

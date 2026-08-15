@@ -68,10 +68,7 @@ export async function stopComputeTracking(
     .update(schema.computeUsage)
     .set({ endedAt: now })
     .where(
-      and(
-        eq(schema.computeUsage.workspaceId, workspaceId),
-        isNull(schema.computeUsage.endedAt)
-      )
+      and(eq(schema.computeUsage.workspaceId, workspaceId), isNull(schema.computeUsage.endedAt))
     );
 
   // D1 does not expose rows_affected via Drizzle; log unconditionally on attempt.
@@ -142,9 +139,7 @@ export function calculateNodeVcpuHours(
       continue;
     }
 
-    for (let i = 1; i < nodeIntervals.length; i++) {
-      const next = nodeIntervals[i]!;
-
+    for (const next of nodeIntervals.slice(1)) {
       if (next.startMs <= current.endMs) {
         current.endMs = Math.max(current.endMs, next.endMs);
         current.vcpuCount = Math.max(current.vcpuCount, next.vcpuCount);
@@ -233,12 +228,7 @@ export async function getUserUsageSummary(
       credentialSource: schema.computeUsage.credentialSource,
     })
     .from(schema.computeUsage)
-    .where(
-      and(
-        eq(schema.computeUsage.userId, userId),
-        isNull(schema.computeUsage.endedAt)
-      )
-    );
+    .where(and(eq(schema.computeUsage.userId, userId), isNull(schema.computeUsage.endedAt)));
 
   const activeSessions: ActiveComputeSession[] = activeRows.map((r) => ({
     workspaceId: r.workspaceId,
@@ -294,7 +284,10 @@ export async function getAllUsersUsageSummary(
   const periodEnd = new Date(end);
   const nowIso = new Date().toISOString();
 
-  const userMap = new Map<string, { totalHours: number; platformHours: number; userHours: number; activeCount: number }>();
+  const userMap = new Map<
+    string,
+    { totalHours: number; platformHours: number; userHours: number; activeCount: number }
+  >();
   const rowsByUser = new Map<string, typeof rows>();
 
   for (const row of rows) {
@@ -339,9 +332,8 @@ export async function getAllUsersUsageSummary(
     .where(inArray(schema.users.id, userIds));
 
   const userLookup = new Map(users.map((u) => [u.id, u]));
-  const summaries: AdminUserUsageSummary[] = userIds
-    .map((userId) => {
-      const usage = userMap.get(userId)!;
+  const summaries: AdminUserUsageSummary[] = Array.from(userMap.entries())
+    .map(([userId, usage]) => {
       const user = userLookup.get(userId);
       return {
         userId,
@@ -419,10 +411,7 @@ export async function closeOrphanedComputeUsage(
       workspaceUpdatedAt: schema.workspaces.updatedAt,
     })
     .from(schema.computeUsage)
-    .leftJoin(
-      schema.workspaces,
-      eq(schema.computeUsage.workspaceId, schema.workspaces.id)
-    )
+    .leftJoin(schema.workspaces, eq(schema.computeUsage.workspaceId, schema.workspaces.id))
     .where(
       and(
         isNull(schema.computeUsage.endedAt),

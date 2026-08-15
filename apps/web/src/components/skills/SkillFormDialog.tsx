@@ -1,7 +1,13 @@
-import type { AgentProfile, AgentSkill, CreateSkillRequest, UpdateSkillRequest } from '@simple-agent-manager/shared';
+import type {
+  AgentProfile,
+  AgentSkill,
+  CreateSkillRequest,
+  UpdateSkillRequest,
+} from '@simple-agent-manager/shared';
 import { Button, Dialog, Input } from '@simple-agent-manager/ui';
 import { type FC, useEffect, useState } from 'react';
 
+import { expectJsonRecord } from '../../lib/runtime-validation';
 import { SkillRuntimeSection } from './SkillRuntimeSection';
 
 interface SkillFormDialogProps {
@@ -50,7 +56,12 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
     // Deserialize resource requirements JSON into individual fields
     if (skill?.resourceRequirementsJson) {
       try {
-        const req = JSON.parse(skill.resourceRequirementsJson) as Record<string, unknown>;
+        // expectJsonRecord throws for non-object JSON (arrays, primitives, null),
+        // which the catch below treats the same as invalid JSON — blank fields.
+        const req = expectJsonRecord(
+          JSON.parse(skill.resourceRequirementsJson) as unknown,
+          'skill.resourceRequirementsJson'
+        );
         setMinVcpu(typeof req.minVcpu === 'number' ? String(req.minVcpu) : '');
         setMinMemoryGb(typeof req.minMemoryGb === 'number' ? String(req.minMemoryGb) : '');
         setMinDiskGb(typeof req.minDiskGb === 'number' ? String(req.minDiskGb) : '');
@@ -110,7 +121,12 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
 
   return (
     <Dialog isOpen={isOpen} onClose={onClose} maxWidth="lg">
-      <form onSubmit={(event) => { event.preventDefault(); void handleSubmit(); }}>
+      <form
+        onSubmit={(event) => {
+          event.preventDefault();
+          void handleSubmit();
+        }}
+      >
         <h2 id="dialog-title" className="mb-1 text-lg font-semibold text-fg-primary">
           {isEdit ? 'Edit Skill' : 'Create Skill'}
         </h2>
@@ -119,7 +135,10 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
           values override the profile, project, and platform defaults.
         </p>
         {error && (
-          <div role="alert" className="mb-3 rounded-sm bg-danger-tint px-3 py-2 text-sm text-danger">
+          <div
+            role="alert"
+            className="mb-3 rounded-sm bg-danger-tint px-3 py-2 text-sm text-danger"
+          >
             {error}
           </div>
         )}
@@ -127,11 +146,21 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
         <div className="grid gap-3">
           <label htmlFor="skill-name" className="grid gap-1.5">
             <span className="text-sm text-fg-muted">Name</span>
-            <Input id="skill-name" value={name} onChange={(event) => setName(event.currentTarget.value)} disabled={saving} />
+            <Input
+              id="skill-name"
+              value={name}
+              onChange={(event) => setName(event.currentTarget.value)}
+              disabled={saving}
+            />
           </label>
           <label htmlFor="skill-description" className="grid gap-1.5">
             <span className="text-sm text-fg-muted">Description</span>
-            <Input id="skill-description" value={description} onChange={(event) => setDescription(event.currentTarget.value)} disabled={saving} />
+            <Input
+              id="skill-description"
+              value={description}
+              onChange={(event) => setDescription(event.currentTarget.value)}
+              disabled={saving}
+            />
           </label>
           <label htmlFor="skill-default-profile" className="grid gap-1.5">
             <span className="text-sm text-fg-muted">Default Profile</span>
@@ -144,11 +173,14 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
             >
               <option value="">No default profile</option>
               {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>{profile.name}</option>
+                <option key={profile.id} value={profile.id}>
+                  {profile.name}
+                </option>
               ))}
             </select>
             <span className="text-xs text-fg-muted">
-              Used as the base profile when this skill is selected, unless a profile is chosen explicitly at submit time.
+              Used as the base profile when this skill is selected, unless a profile is chosen
+              explicitly at submit time.
             </span>
           </label>
           <label htmlFor="skill-system-prompt" className="grid gap-1.5">
@@ -168,7 +200,13 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
           <div className="grid gap-3 sm:grid-cols-2">
             <label htmlFor="skill-vm-size" className="grid gap-1.5">
               <span className="text-sm text-fg-muted">VM Size</span>
-              <select id="skill-vm-size" value={vmSizeOverride} onChange={(event) => setVmSizeOverride(event.target.value)} disabled={saving} className={FIELD_CLASSES}>
+              <select
+                id="skill-vm-size"
+                value={vmSizeOverride}
+                onChange={(event) => setVmSizeOverride(event.target.value)}
+                disabled={saving}
+                className={FIELD_CLASSES}
+              >
                 <option value="">Default</option>
                 <option value="small">Small</option>
                 <option value="medium">Medium</option>
@@ -177,7 +215,13 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
             </label>
             <label htmlFor="skill-task-mode" className="grid gap-1.5">
               <span className="text-sm text-fg-muted">Task Mode</span>
-              <select id="skill-task-mode" value={taskMode} onChange={(event) => setTaskMode(event.target.value)} disabled={saving} className={FIELD_CLASSES}>
+              <select
+                id="skill-task-mode"
+                value={taskMode}
+                onChange={(event) => setTaskMode(event.target.value)}
+                disabled={saving}
+                className={FIELD_CLASSES}
+              >
                 <option value="task">Task</option>
                 <option value="conversation">Conversation</option>
               </select>
@@ -257,14 +301,17 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
               </label>
             </div>
             <span className="text-xs text-fg-muted">
-              Optional. Minimum resource constraints for VM selection. Leave blank to use the VM size above.
+              Optional. Minimum resource constraints for VM selection. Leave blank to use the VM
+              size above.
             </span>
           </fieldset>
         </div>
 
         {isEdit && skill ? (
           <div className="mt-4 border-t border-border-default pt-3">
-            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-fg-muted">Runtime Environment</div>
+            <div className="mb-2 text-xs font-medium uppercase tracking-wide text-fg-muted">
+              Runtime Environment
+            </div>
             <SkillRuntimeSection projectId={projectId} skillId={skill.id} />
           </div>
         ) : (
@@ -274,8 +321,12 @@ export const SkillFormDialog: FC<SkillFormDialogProps> = ({
         )}
 
         <div className="mt-6 flex justify-end gap-2">
-          <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>Cancel</Button>
-          <Button type="submit" loading={saving} disabled={saving}>{isEdit ? 'Save Changes' : 'Create Skill'}</Button>
+          <Button type="button" variant="secondary" onClick={onClose} disabled={saving}>
+            Cancel
+          </Button>
+          <Button type="submit" loading={saving} disabled={saving}>
+            {isEdit ? 'Save Changes' : 'Create Skill'}
+          </Button>
         </div>
       </form>
     </Dialog>

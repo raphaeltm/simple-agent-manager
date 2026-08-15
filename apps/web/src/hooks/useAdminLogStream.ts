@@ -1,5 +1,5 @@
 import type { LogStreamMessage } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useRef,useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { getAdminLogStreamUrl } from '../lib/api';
 
@@ -103,11 +103,13 @@ export function useAdminLogStream(bufferSize = DEFAULT_BUFFER_SIZE): UseAdminLog
 
         // Send current filter state to server
         if (filterRef.current.levels.length > 0 || filterRef.current.search) {
-          ws.send(JSON.stringify({
-            type: 'filter',
-            levels: filterRef.current.levels.length > 0 ? filterRef.current.levels : undefined,
-            search: filterRef.current.search || undefined,
-          }));
+          ws.send(
+            JSON.stringify({
+              type: 'filter',
+              levels: filterRef.current.levels.length > 0 ? filterRef.current.levels : undefined,
+              search: filterRef.current.search || undefined,
+            })
+          );
         }
 
         // If paused, send pause to server
@@ -129,8 +131,9 @@ export function useAdminLogStream(bufferSize = DEFAULT_BUFFER_SIZE): UseAdminLog
         switch (msg.type) {
           case 'log':
             if (msg.entry) {
+              const entry = msg.entry;
               setEntries((prev) => {
-                const next = [...prev, msg.entry!];
+                const next = [...prev, entry];
                 return next.length > bufferSize ? next.slice(next.length - bufferSize) : next;
               });
             }
@@ -205,11 +208,13 @@ export function useAdminLogStream(bufferSize = DEFAULT_BUFFER_SIZE): UseAdminLog
     setFilter((prev) => {
       const next = { ...prev, levels };
       if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({
-          type: 'filter',
-          levels: levels.length > 0 ? levels : undefined,
-          search: next.search || undefined,
-        }));
+        socketRef.current.send(
+          JSON.stringify({
+            type: 'filter',
+            levels: levels.length > 0 ? levels : undefined,
+            search: next.search || undefined,
+          })
+        );
       }
       return next;
     });
@@ -219,11 +224,13 @@ export function useAdminLogStream(bufferSize = DEFAULT_BUFFER_SIZE): UseAdminLog
     setFilter((prev) => {
       const next = { ...prev, search };
       if (socketRef.current?.readyState === WebSocket.OPEN) {
-        socketRef.current.send(JSON.stringify({
-          type: 'filter',
-          levels: next.levels.length > 0 ? next.levels : undefined,
-          search: search || undefined,
-        }));
+        socketRef.current.send(
+          JSON.stringify({
+            type: 'filter',
+            levels: next.levels.length > 0 ? next.levels : undefined,
+            search: search || undefined,
+          })
+        );
       }
       return next;
     });

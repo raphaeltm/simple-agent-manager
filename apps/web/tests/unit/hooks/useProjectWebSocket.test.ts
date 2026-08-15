@@ -90,20 +90,16 @@ describe('useProjectWebSocket', () => {
   const PROJECT_ID = 'proj-123';
 
   it('connects to the project-wide WebSocket endpoint without sessionId', () => {
-    renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID }),
-    );
+    renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID }));
 
     expect(globalThis.WebSocket).toHaveBeenCalledWith(
-      expect.stringContaining(`/api/projects/${PROJECT_ID}/sessions/ws`),
+      expect.stringContaining(`/api/projects/${PROJECT_ID}/sessions/ws`)
     );
     expect(latestWs().url).not.toContain('sessionId');
   });
 
   it('transitions to connected state on open', () => {
-    const { result } = renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID }),
-    );
+    const { result } = renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID }));
 
     expect(result.current.connectionState).toBe('connecting');
 
@@ -113,12 +109,12 @@ describe('useProjectWebSocket', () => {
 
   it('calls onSessionEvent with typed payload when a session lifecycle event arrives', () => {
     const onSessionEvent = vi.fn();
-    renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }),
-    );
+    renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }));
 
     act(() => simulateOpen());
-    act(() => simulateMessage({ type: 'session.created', payload: { id: 'sess-1', status: 'active' } }));
+    act(() =>
+      simulateMessage({ type: 'session.created', payload: { id: 'sess-1', status: 'active' } })
+    );
 
     expect(onSessionEvent).toHaveBeenCalledTimes(1);
     expect(onSessionEvent).toHaveBeenCalledWith({
@@ -129,9 +125,7 @@ describe('useProjectWebSocket', () => {
 
   it('forwards each rapid event individually (no debounce — batching is in reducer)', () => {
     const onSessionEvent = vi.fn();
-    renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }),
-    );
+    renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }));
 
     act(() => simulateOpen());
 
@@ -146,9 +140,7 @@ describe('useProjectWebSocket', () => {
 
   it('ignores non-lifecycle events like message.new', () => {
     const onSessionEvent = vi.fn();
-    renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }),
-    );
+    renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }));
 
     act(() => simulateOpen());
     act(() => simulateMessage({ type: 'message.new', payload: { content: 'hello' } }));
@@ -158,46 +150,61 @@ describe('useProjectWebSocket', () => {
 
   it('handles session.agent_completed as a lifecycle event', () => {
     const onSessionEvent = vi.fn();
-    renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }),
-    );
+    renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }));
 
     act(() => simulateOpen());
     act(() =>
       simulateMessage({
         type: 'session.agent_completed',
         payload: { sessionId: 'sess-1', agentCompletedAt: Date.now() },
-      }),
+      })
     );
 
     expect(onSessionEvent).toHaveBeenCalledTimes(1);
     expect(onSessionEvent).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'session.agent_completed' }),
+      expect.objectContaining({ type: 'session.agent_completed' })
     );
   });
 
   it('handles session.activity as a lifecycle event', () => {
     const onSessionEvent = vi.fn();
-    renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }),
-    );
+    renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }));
 
     act(() => simulateOpen());
     act(() =>
       simulateMessage({
         type: 'session.activity',
         payload: { sessionId: 'sess-1', activity: 'prompting' },
-      }),
+      })
     );
 
     expect(onSessionEvent).toHaveBeenCalledTimes(1);
   });
 
+  it.each(['attention.created', 'attention.resolved'] as const)(
+    'forwards %s immediately as a session delta',
+    (type) => {
+      const onSessionEvent = vi.fn();
+      renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }));
+
+      act(() => simulateOpen());
+      act(() =>
+        simulateMessage({
+          type,
+          payload: { sessionId: 'sess-1', markerId: 'marker-1', kind: 'needs_input' },
+        })
+      );
+
+      expect(onSessionEvent).toHaveBeenCalledWith({
+        type,
+        payload: { sessionId: 'sess-1', markerId: 'marker-1', kind: 'needs_input' },
+      });
+    }
+  );
+
   it('calls onReconnected after a successful reconnect', async () => {
     const onReconnected = vi.fn();
-    renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onReconnected }),
-    );
+    renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID, onReconnected }));
 
     act(() => simulateOpen());
     act(() => simulateClose(1006));
@@ -211,18 +218,14 @@ describe('useProjectWebSocket', () => {
 
   it('does not call onReconnected on initial connect', () => {
     const onReconnected = vi.fn();
-    renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onReconnected }),
-    );
+    renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID, onReconnected }));
 
     act(() => simulateOpen());
     expect(onReconnected).not.toHaveBeenCalled();
   });
 
   it('reconnects with exponential backoff on abnormal close', async () => {
-    renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID }),
-    );
+    renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID }));
 
     act(() => simulateOpen());
     expect(wsInstances).toHaveLength(1);
@@ -235,9 +238,7 @@ describe('useProjectWebSocket', () => {
   });
 
   it('does not reconnect on normal close (code 1000)', async () => {
-    const { result } = renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID }),
-    );
+    const { result } = renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID }));
 
     act(() => simulateOpen());
     act(() => simulateClose(1000));
@@ -249,9 +250,7 @@ describe('useProjectWebSocket', () => {
   });
 
   it('sends ping messages to keep connection alive', async () => {
-    renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID }),
-    );
+    renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID }));
 
     act(() => simulateOpen());
 
@@ -260,18 +259,14 @@ describe('useProjectWebSocket', () => {
   });
 
   it('does not send ping when socket is not open', async () => {
-    renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID }),
-    );
+    renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID }));
 
     await act(async () => await vi.advanceTimersByTimeAsync(30100));
     expect(latestWs().send).not.toHaveBeenCalled();
   });
 
   it('cleans up WebSocket on unmount', () => {
-    const { unmount } = renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID }),
-    );
+    const { unmount } = renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID }));
 
     act(() => simulateOpen());
 
@@ -281,9 +276,7 @@ describe('useProjectWebSocket', () => {
 
   it('ignores events from a stale (superseded) socket after reconnect', async () => {
     const onSessionEvent = vi.fn();
-    renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }),
-    );
+    renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }));
 
     act(() => simulateOpen());
     const oldWs = latestWs();
@@ -307,11 +300,9 @@ describe('useProjectWebSocket', () => {
   });
 
   it('reconnects to the new project URL when projectId changes', () => {
-    const { rerender } = renderHook(
-      ({ projectId }) =>
-        useProjectWebSocket({ projectId }),
-      { initialProps: { projectId: 'proj-A' } },
-    );
+    const { rerender } = renderHook(({ projectId }) => useProjectWebSocket({ projectId }), {
+      initialProps: { projectId: 'proj-A' },
+    });
 
     act(() => simulateOpen());
     const firstWs = latestWs();
@@ -329,9 +320,7 @@ describe('useProjectWebSocket', () => {
   });
 
   it('stops reconnecting after max retries are exhausted', async () => {
-    const { result } = renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID }),
-    );
+    const { result } = renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID }));
 
     for (let i = 0; i < 10; i++) {
       act(() => simulateClose(1006));
@@ -351,9 +340,7 @@ describe('useProjectWebSocket', () => {
 
   it('ignores malformed (non-JSON) messages without error', () => {
     const onSessionEvent = vi.fn();
-    renderHook(() =>
-      useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }),
-    );
+    renderHook(() => useProjectWebSocket({ projectId: PROJECT_ID, onSessionEvent }));
 
     act(() => simulateOpen());
 

@@ -12,6 +12,8 @@
     "test": "pnpm build:tracker && vitest run --exclude 'tests/playwright/**'",
     "test:coverage": "pnpm build:tracker && vitest run --coverage --exclude 'tests/playwright/**'",
     "test:browser": "playwright test",
+    "lint": "eslint 'astro.config.ts' 'playwright.config.ts' 'scripts/**/*.ts' 'src/**/*.{ts,astro}' 'tests/**/*.ts' --rule 'simple-import-sort/imports: off' --rule 'simple-import-sort/exports: off'",
+    "typecheck": "tsx ../../scripts/quality/check-astro-templates.ts",
     "build": "pnpm build:assets && astro build",
     "preview": "astro preview",
     "check:links": "python3 scripts/check-doc-links.py"
@@ -23,10 +25,13 @@
     "mermaid": "11.14.0"
   },
   "devDependencies": {
+    "@astrojs/check": "catalog:",
     "@axe-core/playwright": "4.12.1",
     "@playwright/test": "1.62.1",
     "@vitest/coverage-v8": "catalog:",
     "esbuild": "0.28.1",
-    "typescript": "catalog:"
+    "tsx": "catalog:",
+    "typescript": "catalog:",
+    "wrangler": "catalog:"
   }
 }

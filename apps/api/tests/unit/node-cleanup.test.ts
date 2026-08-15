@@ -5,15 +5,12 @@
  * 1. Layer 3 max lifetime skips nodes with active workspaces (no absolute ceiling)
  * 2. Nodes without active workspaces are destroyed normally
  */
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
 import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/node-phases';
-import {
-  emptyResult,
-  resolveCleanupConfig,
-} from '../../src/scheduled/node-cleanup/shared';
+import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
 
 // Mock deleteNodeResources
 vi.mock('../../src/services/nodes', () => ({
@@ -67,7 +64,7 @@ function mockPreparedStatement(results: unknown[] = []) {
  */
 function createMockEnv(
   prepareResponses: Map<string, unknown[]> = new Map(),
-  overrides: Partial<Env> = {},
+  overrides: Partial<Env> = {}
 ): Env {
   const mockDb = {
     prepare: vi.fn((sql: string) => {
@@ -75,7 +72,7 @@ function createMockEnv(
         return mockPreparedStatement(prepareResponses.get("WHERE n.status = 'stopped'") ?? []);
       }
       const orderedResponses = Array.from(prepareResponses.entries()).sort(
-        ([left], [right]) => right.length - left.length,
+        ([left], [right]) => right.length - left.length
       );
       for (const [substring, results] of orderedResponses) {
         if (sql.includes(substring)) {
@@ -127,7 +124,7 @@ describe('runNodeCleanupSweep', () => {
         },
       ]);
       // Orphan checks: empty
-      responses.set('w.status = \'running\'', []);
+      responses.set("w.status = 'running'", []);
       responses.set('n.warm_since IS NULL', []);
 
       const env = createMockEnv(responses);
@@ -154,7 +151,7 @@ describe('runNodeCleanupSweep', () => {
           active_ws_count: 0,
         },
       ]);
-      responses.set('w.status = \'running\'', []);
+      responses.set("w.status = 'running'", []);
       responses.set('n.warm_since IS NULL', []);
 
       const env = createMockEnv(responses);
@@ -183,7 +180,7 @@ describe('runNodeCleanupSweep', () => {
           active_ws_count: 2,
         },
       ]);
-      responses.set('w.status = \'running\'', []);
+      responses.set("w.status = 'running'", []);
       responses.set('n.warm_since IS NULL', []);
 
       const env = createMockEnv(responses);
@@ -199,8 +196,9 @@ describe('runNodeCleanupSweep', () => {
 
     await runNodeCleanupSweep(env);
 
-    const nodeCandidateQueries = vi.mocked(env.DATABASE.prepare).mock.calls
-      .map(([sql]) => sql)
+    const nodeCandidateQueries = vi
+      .mocked(env.DATABASE.prepare)
+      .mock.calls.map(([sql]) => sql)
       .filter((sql) => sql.includes('FROM nodes n'));
     expect(nodeCandidateQueries).toHaveLength(6);
     expect(nodeCandidateQueries.every((sql) => sql.includes('cleanup_backoff_until'))).toBe(true);
@@ -354,7 +352,7 @@ describe('runNodeCleanupSweep', () => {
         'ws-recovery-orphan',
         env,
         'user-1',
-        { requestTimeoutMs: 5_000 },
+        { requestTimeoutMs: 5_000 }
       );
     });
   });
@@ -407,13 +405,16 @@ describe('runNodeCleanupSweep', () => {
 
       const prepare = env.DATABASE.prepare as unknown as ReturnType<typeof vi.fn>;
       const cfQueryIndex = prepare.mock.calls.findIndex(([sql]) =>
-        String(sql).includes("n.runtime = 'cf-container'"),
+        String(sql).includes("n.runtime = 'cf-container'")
       );
       expect(cfQueryIndex).toBeGreaterThanOrEqual(0);
       const cfStatement = prepare.mock.results[cfQueryIndex]?.value as {
         bind: ReturnType<typeof vi.fn>;
       };
       expect(cfStatement.bind.mock.calls[0]?.[2]).toBe(3);
+      const terminalQuery = String(prepare.mock.calls[cfQueryIndex]?.[0]);
+      expect(terminalQuery).toContain("t.status IN ('failed', 'cancelled')");
+      expect(terminalQuery).toContain("t.status = 'completed' AND w.chat_session_id IS NULL");
     });
   });
 });
@@ -482,9 +483,7 @@ describe('node cleanup permanent-failure escape', () => {
 
     const firstResult = emptyResult();
     await sweepTerminalCfContainers(env, now, config, firstResult);
-    expect(cleanupBackoffUntil.get('node-permanent-403')).toBe(
-      '2026-08-09T01:00:00.000Z',
-    );
+    expect(cleanupBackoffUntil.get('node-permanent-403')).toBe('2026-08-09T01:00:00.000Z');
     expect(firstResult).toMatchObject({ cfContainersDestroyed: 0, errors: 1 });
 
     const secondResult = emptyResult();
@@ -495,8 +494,9 @@ describe('node cleanup permanent-failure escape', () => {
       'node-healthy',
     ]);
     expect(secondResult).toMatchObject({ cfContainersDestroyed: 1, errors: 0 });
-    const candidateQuery = vi.mocked(env.DATABASE.prepare).mock.calls
-      .map(([sql]) => sql)
+    const candidateQuery = vi
+      .mocked(env.DATABASE.prepare)
+      .mock.calls.map(([sql]) => sql)
       .find((sql) => sql.includes('SELECT DISTINCT n.id'));
     expect(candidateQuery).toContain('cleanup_backoff_until');
   });

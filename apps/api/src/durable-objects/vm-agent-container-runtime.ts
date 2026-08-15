@@ -1,5 +1,8 @@
+import * as v from 'valibot';
+
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { readResponseJson } from '../lib/runtime-validation';
 import { signNodeManagementToken } from '../services/jwt';
 import {
   RUNTIME_RECOVERING_MESSAGE,
@@ -63,6 +66,17 @@ export async function isMissingSessionHostResponse(response: Response): Promise<
 
 const LIVE_SESSION_HOST_STATUSES = new Set(['idle', 'starting', 'ready', 'prompting']);
 
+const sessionsProbeResponseSchema = v.object({
+  sessions: v.optional(
+    v.array(
+      v.object({
+        id: v.optional(v.unknown()),
+        hostStatus: v.optional(v.unknown()),
+      })
+    )
+  ),
+});
+
 export async function probeLiveRuntimeSession(input: {
   env: Env;
   userId: string;
@@ -100,9 +114,11 @@ export async function probeLiveRuntimeSession(input: {
     });
     throw new Error(`runtime_session_probe_http_${response.status}`);
   }
-  const body = (await response.json()) as {
-    sessions?: Array<{ id?: unknown; hostStatus?: unknown }>;
-  };
+  const body = await readResponseJson(
+    response,
+    sessionsProbeResponseSchema,
+    'vm_agent_container_runtime.session_probe'
+  );
   return Boolean(
     body.sessions?.some(
       (session) =>

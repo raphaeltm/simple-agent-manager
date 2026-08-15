@@ -1,4 +1,4 @@
-import { afterEach,beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ChatSessionResponse } from '../../../src/lib/api';
 import {
@@ -42,15 +42,45 @@ describe('getSessionState', () => {
     ['unknown status', { status: 'unknown' }, 'terminated'],
     ['idle session', { isIdle: true }, 'idle'],
     ['agentCompletedAt set', { agentCompletedAt: Date.now() }, 'idle'],
+    ['sleeping session', { status: 'sleeping' }, 'sleeping'],
+    [
+      'sleeping session with completed backing task',
+      { status: 'sleeping', task: { id: 't-1', status: 'completed' } },
+      'sleeping',
+    ],
     ['active session', { status: 'active' }, 'active'],
-    ['task failed + active session', { status: 'active', task: { id: 't-1', status: 'failed' } }, 'terminated'],
-    ['task completed + active session', { status: 'active', task: { id: 't-1', status: 'completed' } }, 'terminated'],
-    ['task cancelled + active session', { status: 'active', task: { id: 't-1', status: 'cancelled' } }, 'terminated'],
-    ['task in_progress + active session', { status: 'active', task: { id: 't-1', status: 'in_progress' } }, 'active'],
+    [
+      'task failed + active session',
+      { status: 'active', task: { id: 't-1', status: 'failed' } },
+      'terminated',
+    ],
+    [
+      'task completed + active session',
+      { status: 'active', task: { id: 't-1', status: 'completed' } },
+      'terminated',
+    ],
+    [
+      'task cancelled + active session',
+      { status: 'active', task: { id: 't-1', status: 'cancelled' } },
+      'terminated',
+    ],
+    [
+      'task in_progress + active session',
+      { status: 'active', task: { id: 't-1', status: 'in_progress' } },
+      'active',
+    ],
     ['task with no status', { status: 'active', task: { id: 't-1' } }, 'active'],
     ['no task embed', { status: 'active' }, 'active'],
-    ['task failed + idle (priority)', { status: 'active', isIdle: true, task: { id: 't-1', status: 'failed' } }, 'terminated'],
-    ['task completed + agentCompletedAt (priority)', { status: 'active', agentCompletedAt: Date.now(), task: { id: 't-1', status: 'completed' } }, 'terminated'],
+    [
+      'task failed + idle (priority)',
+      { status: 'active', isIdle: true, task: { id: 't-1', status: 'failed' } },
+      'terminated',
+    ],
+    [
+      'task completed + agentCompletedAt (priority)',
+      { status: 'active', agentCompletedAt: Date.now(), task: { id: 't-1', status: 'completed' } },
+      'terminated',
+    ],
   ] as const)('returns correct state for %s', (_label, overrides, expected) => {
     expect(getSessionState(makeSession(overrides as Partial<ChatSessionResponse>))).toBe(expected);
   });
@@ -83,11 +113,26 @@ describe('isStaleSession', () => {
   });
 
   it('returns true for session with activity beyond threshold', () => {
-    expect(isStaleSession(makeSession({ lastMessageAt: Date.now() - STALE_SESSION_THRESHOLD_MS - 1 }))).toBe(true);
+    expect(
+      isStaleSession(makeSession({ lastMessageAt: Date.now() - STALE_SESSION_THRESHOLD_MS - 1 }))
+    ).toBe(true);
   });
 
   it('returns false at exact threshold boundary', () => {
-    expect(isStaleSession(makeSession({ lastMessageAt: Date.now() - STALE_SESSION_THRESHOLD_MS }))).toBe(false);
+    expect(
+      isStaleSession(makeSession({ lastMessageAt: Date.now() - STALE_SESSION_THRESHOLD_MS }))
+    ).toBe(false);
+  });
+
+  it('keeps a sleeping session discoverable until server-side expiry', () => {
+    expect(
+      isStaleSession(
+        makeSession({
+          status: 'sleeping',
+          lastMessageAt: Date.now() - 6 * 24 * 60 * 60 * 1000,
+        })
+      )
+    ).toBe(false);
   });
 });
 
@@ -122,10 +167,27 @@ describe('isActiveSession', () => {
     ['stopped session', { status: 'stopped' }, false],
     ['failed session status', { status: 'failed' }, false],
     ['unknown status (non-terminal)', { status: 'pending' }, true],
+    [
+      'sleeping + completed task',
+      { status: 'sleeping', task: { id: 't-1', status: 'completed' } },
+      true,
+    ],
     ['task failed + active', { status: 'active', task: { id: 't-1', status: 'failed' } }, false],
-    ['task completed + active', { status: 'active', task: { id: 't-1', status: 'completed' } }, false],
-    ['task cancelled + active', { status: 'active', task: { id: 't-1', status: 'cancelled' } }, false],
-    ['task in_progress + active', { status: 'active', task: { id: 't-1', status: 'in_progress' } }, true],
+    [
+      'task completed + active',
+      { status: 'active', task: { id: 't-1', status: 'completed' } },
+      false,
+    ],
+    [
+      'task cancelled + active',
+      { status: 'active', task: { id: 't-1', status: 'cancelled' } },
+      false,
+    ],
+    [
+      'task in_progress + active',
+      { status: 'active', task: { id: 't-1', status: 'in_progress' } },
+      true,
+    ],
   ] as const)('returns %s → %s', (_label, overrides, expected) => {
     expect(isActiveSession(makeSession(overrides as Partial<ChatSessionResponse>))).toBe(expected);
   });
@@ -135,12 +197,15 @@ describe('STATE_COLORS, STATE_LABELS, and STATE_BADGE_BG', () => {
   it('maps all session states', () => {
     expect(STATE_COLORS).toHaveProperty('active');
     expect(STATE_COLORS).toHaveProperty('idle');
+    expect(STATE_COLORS).toHaveProperty('sleeping');
     expect(STATE_COLORS).toHaveProperty('terminated');
     expect(STATE_LABELS.active).toBe('Active');
     expect(STATE_LABELS.idle).toBe('Idle');
+    expect(STATE_LABELS.sleeping).toBe('Sleeping');
     expect(STATE_LABELS.terminated).toBe('Stopped');
     expect(STATE_BADGE_BG).toHaveProperty('active');
     expect(STATE_BADGE_BG).toHaveProperty('idle');
+    expect(STATE_BADGE_BG).toHaveProperty('sleeping');
     expect(STATE_BADGE_BG).toHaveProperty('terminated');
   });
 });
@@ -152,7 +217,11 @@ describe('STATE_COLORS, STATE_LABELS, and STATE_BADGE_BG', () => {
 describe('getSessionMode', () => {
   it.each([
     ['explicit task mode', { task: { id: 't-1', taskMode: 'task' as const } }, 'task'],
-    ['explicit conversation mode', { task: { id: 't-1', taskMode: 'conversation' as const } }, 'conversation'],
+    [
+      'explicit conversation mode',
+      { task: { id: 't-1', taskMode: 'conversation' as const } },
+      'conversation',
+    ],
     ['taskId present without taskMode', { taskId: 't-1' }, 'task'],
     ['no task association', {}, 'conversation'],
     ['null taskMode with taskId', { taskId: 't-1', task: { id: 't-1', taskMode: null } }, 'task'],
@@ -167,27 +236,39 @@ describe('getSessionMode', () => {
 
 describe('getAttentionState', () => {
   it('returns needs_input when attention marker is present', () => {
-    expect(getAttentionState(makeSession({
-      status: 'active',
-      attention: { kind: 'needs_input', createdAt: Date.now(), expiresAt: null, reason: null },
-    }))).toBe('needs_input');
+    expect(
+      getAttentionState(
+        makeSession({
+          status: 'active',
+          attention: { kind: 'needs_input', createdAt: Date.now(), expiresAt: null, reason: null },
+        })
+      )
+    ).toBe('needs_input');
   });
 
   it('needs_input attention marker takes precedence over idle state', () => {
-    expect(getAttentionState(makeSession({
-      status: 'active',
-      isIdle: true,
-      attention: { kind: 'needs_input', createdAt: Date.now(), expiresAt: null, reason: null },
-    }))).toBe('needs_input');
+    expect(
+      getAttentionState(
+        makeSession({
+          status: 'active',
+          isIdle: true,
+          attention: { kind: 'needs_input', createdAt: Date.now(), expiresAt: null, reason: null },
+        })
+      )
+    ).toBe('needs_input');
   });
 
   it('needs_input attention marker takes precedence over task completed', () => {
     // Edge case: marker from before completion, not yet resolved
-    expect(getAttentionState(makeSession({
-      status: 'active',
-      task: { id: 't-1', status: 'completed' },
-      attention: { kind: 'needs_input', createdAt: Date.now(), expiresAt: null, reason: null },
-    }))).toBe('needs_input');
+    expect(
+      getAttentionState(
+        makeSession({
+          status: 'active',
+          task: { id: 't-1', status: 'completed' },
+          attention: { kind: 'needs_input', createdAt: Date.now(), expiresAt: null, reason: null },
+        })
+      )
+    ).toBe('needs_input');
   });
 
   it.each([
@@ -197,41 +278,65 @@ describe('getAttentionState', () => {
     ['session failed', { status: 'failed' }, 'error'],
     ['session stopped', { status: 'stopped' }, 'stopped'],
     ['session idle', { isIdle: true }, 'idle'],
+    ['session sleeping', { status: 'sleeping' }, 'sleeping'],
+    [
+      'sleeping + completed task',
+      { status: 'sleeping', task: { id: 't-1', status: 'completed' } },
+      'sleeping',
+    ],
     ['agent completed', { agentCompletedAt: Date.now() }, 'idle'],
     ['session active', { status: 'active' }, 'active'],
     ['unknown status', { status: 'pending' }, 'stopped'],
   ] as const)('returns correct state for %s', (_label, overrides, expected) => {
-    expect(getAttentionState(makeSession(overrides as Partial<ChatSessionResponse>))).toBe(expected);
+    expect(getAttentionState(makeSession(overrides as Partial<ChatSessionResponse>))).toBe(
+      expected
+    );
   });
 
   it('returns active for in_progress task with active session', () => {
-    expect(getAttentionState(makeSession({
-      status: 'active',
-      task: { id: 't-1', status: 'in_progress' },
-    }))).toBe('active');
+    expect(
+      getAttentionState(
+        makeSession({
+          status: 'active',
+          task: { id: 't-1', status: 'in_progress' },
+        })
+      )
+    ).toBe('active');
   });
 
   it('returns stopped when no attention marker and null attention field', () => {
-    expect(getAttentionState(makeSession({
-      status: 'stopped',
-      attention: null,
-    }))).toBe('stopped');
+    expect(
+      getAttentionState(
+        makeSession({
+          status: 'stopped',
+          attention: null,
+        })
+      )
+    ).toBe('stopped');
   });
 
   it('non-needs_input attention marker falls through to lifecycle state', () => {
     // Backend only creates needs_input markers today. Other kinds (if added)
     // fall through to lifecycle-based derivation, not the marker kind.
-    expect(getAttentionState(makeSession({
-      status: 'active',
-      attention: { kind: 'error', createdAt: Date.now(), expiresAt: null, reason: null },
-    }))).toBe('active');
+    expect(
+      getAttentionState(
+        makeSession({
+          status: 'active',
+          attention: { kind: 'error', createdAt: Date.now(), expiresAt: null, reason: null },
+        })
+      )
+    ).toBe('active');
   });
 
   it('error attention state is derived from session.status, not attention marker', () => {
-    expect(getAttentionState(makeSession({
-      status: 'failed',
-      attention: null,
-    }))).toBe('error');
+    expect(
+      getAttentionState(
+        makeSession({
+          status: 'failed',
+          attention: null,
+        })
+      )
+    ).toBe('error');
   });
 });
 
@@ -245,6 +350,7 @@ describe('isHighPriorityAttention', () => {
     ['error', true],
     ['active', false],
     ['idle', false],
+    ['sleeping', false],
     ['completed', false],
     ['failed', false],
     ['stopped', false],

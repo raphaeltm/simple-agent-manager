@@ -115,6 +115,7 @@ export function WorkspaceCreateMenu({
         createPortal(
           <div
             ref={menuRef}
+            role="presentation"
             className="glass-surface"
             onMouseDown={(event) => event.stopPropagation()}
             style={menuStyle}

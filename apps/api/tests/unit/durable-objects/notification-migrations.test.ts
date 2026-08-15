@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { NOTIFICATION_MIGRATIONS, runNotificationMigrations } from '../../../src/durable-objects/notification-migrations';
+import {
+  NOTIFICATION_MIGRATIONS,
+  runNotificationMigrations,
+  runNotificationMigrationsAtomically,
+} from '../../../src/durable-objects/notification-migrations';
 
 /**
  * In-memory mock of SqlStorage for testing notification migration logic.
@@ -8,9 +12,14 @@ import { NOTIFICATION_MIGRATIONS, runNotificationMigrations } from '../../../src
 class MockSqlStorage {
   private tables = new Map<string, Record<string, unknown>[]>();
   private execLog: string[] = [];
+  failOn: string | null = null;
 
   exec(query: string, ...params: unknown[]): { toArray: () => Record<string, unknown>[] } {
     this.execLog.push(query.trim());
+
+    if (this.failOn && query.includes(this.failOn)) {
+      throw new Error('injected migration failure');
+    }
 
     const normalized = query.trim().toUpperCase();
 
@@ -50,6 +59,18 @@ class MockSqlStorage {
   getMigrationsTable(): Record<string, unknown>[] {
     return this.tables.get('migrations') || [];
   }
+
+  hasTable(name: string): boolean {
+    return this.tables.has(name);
+  }
+
+  snapshot(): Map<string, Record<string, unknown>[]> {
+    return structuredClone(this.tables);
+  }
+
+  restore(snapshot: Map<string, Record<string, unknown>[]>): void {
+    this.tables = snapshot;
+  }
 }
 
 describe('Notification DO Migrations', () => {
@@ -71,6 +92,7 @@ describe('Notification DO Migrations', () => {
     expect(applied[0]?.name).toBe('001-initial-schema');
     expect(applied[1]?.name).toBe('002-session-filter-index');
     expect(applied[2]?.name).toBe('003-notification-dedup-claims');
+    expect(applied[3]?.name).toBe('004-push-subscriptions');
   });
 
   it('should skip already-applied migrations', () => {
@@ -102,5 +124,40 @@ describe('Notification DO Migrations', () => {
     expect(log).toContain('CREATE INDEX idx_notifications_session_type');
     expect(log).toContain('notifications(user_id, project_id, session_id, type, created_at DESC)');
     expect(log).toContain('CREATE TABLE notification_dedup_claims');
+    expect(log).toContain('CREATE TABLE push_subscriptions');
+    expect(log).toContain('endpoint TEXT PRIMARY KEY');
+    expect(log).toContain('user_agent TEXT');
+    expect(log).toContain('ADD COLUMN push_delivered_at INTEGER');
+    expect(log).toContain('ADD COLUMN in_app_visible INTEGER NOT NULL DEFAULT 1');
+  });
+
+  it('rolls back a partially applied multi-statement upgrade before retry', () => {
+    const sql = new MockSqlStorage();
+    const storage = {
+      sql: sql as unknown as SqlStorage,
+      transactionSync<T>(callback: () => T): T {
+        const snapshot = sql.snapshot();
+        try {
+          return callback();
+        } catch (error) {
+          sql.restore(snapshot);
+          throw error;
+        }
+      },
+    };
+    sql.failOn = 'ADD COLUMN in_app_visible';
+
+    expect(() => runNotificationMigrationsAtomically(storage)).toThrow(
+      'injected migration failure'
+    );
+    expect(sql.getMigrationsTable().some((row) => row.name === '004-push-subscriptions')).toBe(
+      false
+    );
+    expect(sql.hasTable('push_subscriptions')).toBe(false);
+
+    sql.failOn = null;
+    expect(() => runNotificationMigrationsAtomically(storage)).not.toThrow();
+    expect(sql.getMigrationsTable().at(-1)?.name).toBe('004-push-subscriptions');
+    expect(sql.hasTable('push_subscriptions')).toBe(true);
   });
 });

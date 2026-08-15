@@ -2,6 +2,7 @@ package acp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -26,12 +27,17 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 	}
 	intentionalPromptCancel := h.intentionalPromptCancelProcessStop
 	h.intentionalPromptCancelProcessStop = false
+	rollover := h.checkpointRollover
+	rolloverForced := false
+	if rollover != nil {
+		rolloverForced = rollover.forced
+	}
 	previousAcpSessionID := string(h.sessionID)
 	crashRecovery := h.crashRecoverySnapshotLocked()
 	recoveryNotify := process.RecoveryNotify()
 	h.mu.Unlock()
 
-	if isRapidExit && !intentionalPromptCancel {
+	if isRapidExit && !intentionalPromptCancel && rollover == nil {
 		errMsg := rapidExitMessage(agentType, uptime, exitInfo, stderrOutput)
 		slog.Error("Agent rapid exit", "message", errMsg)
 		h.reportAgentError(agentType, "agent_crash", errMsg, stderrOutput)
@@ -49,8 +55,35 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		slog.Info("Agent process monitor: session stopped, skipping restart")
 		return
 	}
+	if rollover != nil && rollover.terminal.Load() {
+		h.clearCurrentAgentSessionLocked()
+		if h.statusErr == "" {
+			h.statusErr = "checkpoint rollover terminated before process restart"
+		}
+		h.status = HostError
+		if h.checkpointRollover == rollover {
+			h.checkpointRollover = nil
+		}
+		h.mu.Unlock()
+		slog.Info("Checkpoint terminal owner suppressed delayed process restart", "acpSessionId", rollover.sessionID)
+		return
+	}
+	h.promptMu.Lock()
+	promptActive := h.promptInFlight
+	h.promptMu.Unlock()
+	if promptActive && !crashRecovery.inProgress && !intentionalPromptCancel && rollover == nil {
+		h.clearCurrentAgentSessionLocked()
+		h.status = HostError
+		errMsg := fmt.Sprintf("Agent process exited during an active prompt (%s)", exitInfo)
+		h.statusErr = errMsg
+		h.mu.Unlock()
+		h.completeActivePromptFailure(errMsg)
+		h.broadcastAgentStatus(StatusError, agentType, errMsg)
+		h.reportActivity("error")
+		return
+	}
 
-	if isRapidExit && !intentionalPromptCancel {
+	if isRapidExit && !intentionalPromptCancel && rollover == nil {
 		h.clearCurrentAgentSessionLocked()
 		if crashRecovery.inProgress {
 			h.clearCrashRecoveryLocked()
@@ -60,15 +93,14 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		h.statusErr = errMsg
 		h.mu.Unlock()
 		h.finishCrashRecoveryFailure(crashRecovery, errMsg, fmt.Errorf("%s", errMsg), recoveryNotify)
+		h.completeActivePromptFailure(errMsg)
 		h.broadcastAgentStatus(StatusError, agentType, errMsg)
-		// Report idle so the browser status bar clears the "prompting" spinner.
-		// The error state is already broadcast via broadcastAgentStatus above.
-		h.reportActivity("idle")
+		h.reportActivity("error")
 		return
 	}
 
 	maxRestarts := h.maxRestartAttempts()
-	if !intentionalPromptCancel {
+	if !intentionalPromptCancel && rollover == nil {
 		h.applyRestartDecayLocked()
 		h.restartCount++
 		h.lastCrashTime = time.Now()
@@ -82,7 +114,9 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 	h.status = HostStarting
 	h.mu.Unlock()
 
-	if intentionalPromptCancel {
+	if rollover != nil {
+		slog.Info("Attempting strict agent restart for checkpoint rollover", "acpSessionId", rollover.sessionID, "forced", rolloverForced)
+	} else if intentionalPromptCancel {
 		slog.Info("Attempting agent restart after user prompt cancel", "restartCount", h.restartCount, "maxRestarts", maxRestarts)
 	} else {
 		slog.Info("Attempting agent restart", "attempt", h.restartCount, "maxRestarts", maxRestarts)
@@ -96,8 +130,22 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		h.mu.Unlock()
 		return
 	}
+	if rollover != nil && rollover.terminal.Load() {
+		if h.statusErr == "" {
+			h.statusErr = "checkpoint rollover terminated before strict resume"
+		}
+		h.status = HostError
+		if h.checkpointRollover == rollover {
+			h.checkpointRollover = nil
+		}
+		h.mu.Unlock()
+		slog.Info("Checkpoint terminal owner suppressed strict resume", "acpSessionId", rollover.sessionID)
+		return
+	}
 	loadSessionID := ""
-	if intentionalPromptCancel || crashRecovery.inProgress {
+	if rollover != nil {
+		loadSessionID = rollover.sessionID
+	} else if intentionalPromptCancel || crashRecovery.inProgress {
 		loadSessionID = previousAcpSessionID
 		// Fall back to the captured crash-recovery session ID only during an
 		// active crash-recovery episode. The captured ID is meaningful for
@@ -107,6 +155,70 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		if loadSessionID == "" && crashRecovery.inProgress {
 			loadSessionID = crashRecovery.sessionID
 		}
+	}
+	if rollover != nil {
+		err := h.startAgentForCrashRecovery(rollover.operationCtx, agentType, cred, settings, loadSessionID)
+		if rollover.terminal.Load() {
+			h.stopCurrentAgentLocked()
+			if h.statusErr == "" {
+				h.statusErr = "checkpoint rollover terminated during strict resume"
+			}
+			h.status = HostError
+			h.checkpointRollover = nil
+			h.mu.Unlock()
+			return
+		}
+		if err != nil {
+			message := fmt.Sprintf("strict same-session checkpoint resume failed: %s", redactAgentDiagnosticText(err.Error()))
+			h.stopCurrentAgentLocked()
+			h.status = HostError
+			h.statusErr = message
+			h.checkpointRollover = nil
+			result := CheckpointRolloverResult{State: "failed", Forced: rollover.forced,
+				ACPSessionID: rollover.sessionID, ErrorCode: "strict_resume_failed", ErrorMessage: message}
+			rollover.complete(result, true)
+			h.mu.Unlock()
+			rollover.attempt.completeCheckpoint(h, fatalErrorStopReason, errors.New(message))
+			h.broadcastAgentStatus(StatusError, agentType, message)
+			h.reportActivity("error")
+			return
+		}
+		if string(h.sessionID) != rollover.sessionID {
+			message := "strict checkpoint resume returned a different ACP session"
+			h.stopCurrentAgentLocked()
+			h.status = HostError
+			h.statusErr = message
+			h.checkpointRollover = nil
+			result := CheckpointRolloverResult{State: "failed", Forced: rollover.forced,
+				ACPSessionID: rollover.sessionID, ErrorCode: "session_identity_mismatch", ErrorMessage: message}
+			rollover.complete(result, true)
+			h.mu.Unlock()
+			rollover.attempt.completeCheckpoint(h, fatalErrorStopReason, errors.New(message))
+			h.broadcastAgentStatus(StatusError, agentType, message)
+			h.reportActivity("error")
+			return
+		}
+		result := CheckpointRolloverResult{State: "completed", Forced: rollover.forced, ACPSessionID: rollover.sessionID}
+		decided, promptWon := rollover.completeStrictResume(h, result)
+		if !promptWon && decided.State != "superseded" {
+			h.stopCurrentAgentLocked()
+			h.status = HostError
+			if h.statusErr == "" {
+				h.statusErr = "checkpoint rollover terminal owner won during strict resume"
+			}
+			h.checkpointRollover = nil
+			h.mu.Unlock()
+			return
+		}
+		h.status = HostReady
+		h.statusErr = ""
+		h.checkpointRollover = nil
+		h.mu.Unlock()
+		h.stopPromptActivityRereport()
+		h.broadcastControl(MsgSessionPromptDone, nil)
+		h.broadcastAgentStatus(StatusReady, agentType, "")
+		h.reportActivity("idle")
+		return
 	}
 	if !h.restartAgentLocked(ctx, agentType, cred, settings, loadSessionID, crashRecovery, recoveryNotify) {
 		return
@@ -188,6 +300,7 @@ func (h *SessionHost) handleMaxRestartsExceededLocked(agentType, stderrOutput st
 	h.statusErr = crashMsg
 	h.mu.Unlock()
 	h.finishCrashRecoveryFailure(crashRecovery, crashMsg, fmt.Errorf("%s", crashMsg), notify)
+	h.completeActivePromptFailure(crashMsg)
 	h.broadcastAgentStatus(StatusError, agentType, crashMsg)
 	h.reportAgentError(agentType, "agent_max_restarts", crashMsg, stderrOutput)
 }
@@ -208,6 +321,7 @@ func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, 
 		h.mu.Unlock()
 		slog.Error("Agent restart failed", "error", err)
 		h.finishCrashRecoveryFailure(crashRecovery, err.Error(), err, notify)
+		h.completeActivePromptFailure(err.Error())
 		h.broadcastAgentStatus(StatusError, agentType, err.Error())
 		h.reportAgentError(agentType, "agent_restart_failed", err.Error(), "")
 		return false
@@ -215,6 +329,17 @@ func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, 
 	h.status = HostReady
 	h.statusErr = ""
 	return true
+}
+
+func (h *SessionHost) completeActivePromptFailure(message string) {
+	h.promptMu.Lock()
+	attempt := h.promptAttempt
+	active := h.promptInFlight
+	h.promptMu.Unlock()
+	if active && attempt != nil {
+		attempt.complete(h, fatalErrorStopReason, errors.New(message))
+		h.stopPromptActivityRereport()
+	}
 }
 
 func (h *SessionHost) finishCrashRecoveryFailure(crashRecovery crashRecoverySnapshot, message string, err error, notify recoveryNotify) {

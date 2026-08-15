@@ -36,3 +36,6 @@ export * from './mime';
 
 // Failure classification (display-time taxonomy for task/session errors)
 export * from './failure-classification';
+
+// Runtime validation (dependency-free "is this a plain JSON object" predicate)
+export * from './runtime-validation';

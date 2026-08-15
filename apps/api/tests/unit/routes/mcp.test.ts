@@ -229,6 +229,12 @@ const mockDoStub = {
   updateSessionTopic: vi.fn().mockResolvedValue(true),
   getAllHighConfidenceKnowledge: vi.fn().mockResolvedValue([]),
   getActivePolicies: vi.fn().mockResolvedValue([]),
+  createAttentionMarker: vi.fn().mockResolvedValue({
+    id: 'marker-1',
+    createdAt: Date.now(),
+    expiresAt: Date.now() + 7200000,
+  }),
+  linkAttentionNotification: vi.fn().mockResolvedValue(true),
 };
 const mockProjectData = {
   idFromName: vi.fn().mockReturnValue('do-id'),
@@ -421,6 +427,20 @@ describe('MCP Routes', () => {
       expect(res.status).toBe(400);
       const body = await res.json();
       expect(body.error.code).toBe(-32700);
+    });
+
+    it('should return a JSON-RPC-shaped 400 (not crash) for a valid-JSON `null` body', async () => {
+      // Regression test for the jsonValidator migration: the previous unsafe
+      // `c.req.json<JsonRpcRequest>()` cast let a `null` body reach `rpc.jsonrpc`
+      // property access uncaught (a TypeError, not a JSON-RPC error response).
+      // JsonRpcEnvelopeSchema now rejects a non-object body before that happens.
+      const res = await mcpRequest(app, null);
+
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.jsonrpc).toBe('2.0');
+      expect(body.error).toBeDefined();
+      expect(body.error.code).toBe(-32600);
     });
 
     it('should preserve request ID in response', async () => {
@@ -1129,7 +1149,9 @@ describe('MCP Routes', () => {
         { id: 'msg-old', role: 'assistant', content: 'Earlier analysis', createdAt: 1710000001000 },
       ]);
       expect(data.recentAssistantMessages[0].content).toBe('Final detailed findings');
-      expect(data.recentAssistantMessages[0].createdAt).toBeGreaterThan(data.recentAssistantMessages[1].createdAt);
+      expect(data.recentAssistantMessages[0].createdAt).toBeGreaterThan(
+        data.recentAssistantMessages[1].createdAt
+      );
     });
 
     it('should still return task details if recent assistant messages cannot be read', async () => {
@@ -3711,9 +3733,8 @@ describe('MCP Routes', () => {
 
   describe('request_human_input', () => {
     beforeEach(() => {
-      mockKV.get.mockResolvedValue(validTokenData);
       vi.clearAllMocks();
-      mockKV.get.mockResolvedValue(validTokenData);
+      mockKV.get.mockResolvedValue({ ...validTokenData, chatSessionId: 'session-1' });
     });
 
     it('should send notification and return success', async () => {
@@ -3736,7 +3757,17 @@ describe('MCP Routes', () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      expect(body.result.content[0].text).toContain('Human input request sent');
+      expect(body.result.content[0].text).toContain('Human input request recorded');
+      expect(mockNotificationStub.createNotification).toHaveBeenCalledWith(
+        'user-789',
+        expect.objectContaining({
+          type: 'needs_input',
+          metadata: expect.objectContaining({
+            attentionMarkerId: 'marker-1',
+            options: ['Approach A', 'Approach B'],
+          }),
+        })
+      );
     });
 
     it('should reject empty context', async () => {
@@ -3801,7 +3832,7 @@ describe('MCP Routes', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       expect(body.result).toBeDefined();
-      expect(body.result.content[0].text).toContain('Human input request sent');
+      expect(body.result.content[0].text).toContain('Human input request recorded');
     });
 
     it('should return error when task not found', async () => {
@@ -3837,7 +3868,7 @@ describe('MCP Routes', () => {
       expect(body.error.message).toContain('options must be an array');
     });
 
-    it('should silently succeed even when notification DO throws', async () => {
+    it('should preserve the attention safety marker when notification delivery setup throws', async () => {
       mockD1._stmt.first.mockResolvedValueOnce({
         user_id: 'user-789',
         title: 'Fix the bug',
@@ -3855,8 +3886,32 @@ describe('MCP Routes', () => {
 
       expect(res.status).toBe(200);
       const body = await res.json();
-      // Handler must still return success — notification is best-effort
-      expect(body.result.content[0].text).toContain('Human input request sent');
+      expect(body.result.content[0].text).toContain('notification delivery was not scheduled');
+      expect(mockDoStub.createAttentionMarker).toHaveBeenCalledOnce();
+    });
+
+    it('returns an error instead of claiming safety when no chat session exists', async () => {
+      mockKV.get.mockResolvedValue(validTokenData);
+      mockD1._stmt.first
+        .mockResolvedValueOnce({
+          user_id: 'user-789',
+          title: 'Fix the bug',
+          chat_session_id: null,
+        })
+        .mockResolvedValueOnce(null);
+
+      const res = await mcpRequest(
+        app,
+        jsonRpcRequest('tools/call', {
+          name: 'request_human_input',
+          arguments: { context: 'I need a decision' },
+        })
+      );
+
+      const body = await res.json();
+      expect(body.error.message).toContain('chat session is missing');
+      expect(mockNotificationStub.createNotification).not.toHaveBeenCalled();
+      expect(mockDoStub.createAttentionMarker).not.toHaveBeenCalled();
     });
 
     it('should reject context that is only whitespace', async () => {
@@ -3879,7 +3934,7 @@ describe('MCP Routes', () => {
 
       for (const category of categories) {
         vi.clearAllMocks();
-        mockKV.get.mockResolvedValue(validTokenData);
+        mockKV.get.mockResolvedValue({ ...validTokenData, chatSessionId: 'session-1' });
         mockD1._stmt.first.mockResolvedValueOnce({
           user_id: 'user-789',
           title: 'My task',

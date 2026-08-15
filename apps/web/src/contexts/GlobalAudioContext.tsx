@@ -157,187 +157,207 @@ export function GlobalAudioProvider({ children }: { children: ReactNode }) {
 
   const resumePlayback = useCallback(() => {
     if (audioRef.current) {
-      audioRef.current.play().then(() => {
-        setState('playing');
-        startTimeInterval();
-      }).catch(() => {
-        setState('idle');
-      });
+      audioRef.current
+        .play()
+        .then(() => {
+          setState('playing');
+          startTimeInterval();
+        })
+        .catch(() => {
+          setState('idle');
+        });
     }
   }, [startTimeInterval]);
 
-  const createAudioElement = useCallback((blobUrl: string): HTMLAudioElement => {
-    const audio = new Audio(blobUrl);
-    audio.playbackRate = playbackRate;
+  const createAudioElement = useCallback(
+    (blobUrl: string): HTMLAudioElement => {
+      const audio = new Audio(blobUrl);
+      audio.playbackRate = playbackRate;
 
-    audio.onloadedmetadata = () => {
-      setDuration(audio.duration);
-    };
+      audio.onloadedmetadata = () => {
+        setDuration(audio.duration);
+      };
 
-    audio.onended = () => {
-      clearTimeInterval();
-      setState('idle');
-      setCurrentTime(0);
-      audioRef.current = null;
-      playbackLockRef.current = false;
-    };
-
-    audio.onerror = () => {
-      clearTimeInterval();
-      setState('idle');
-      setCurrentTime(0);
-      audioRef.current = null;
-      playbackLockRef.current = false;
-      if (blobUrlRef.current) {
-        URL.revokeObjectURL(blobUrlRef.current);
-        blobUrlRef.current = null;
-        cachedStorageIdRef.current = null;
-      }
-    };
-
-    return audio;
-  }, [clearTimeInterval, playbackRate]);
-
-  const startPlayback = useCallback((params: StartPlaybackParams) => {
-    // Stop any current playback first
-    abortFetches();
-    clearTimeInterval();
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current.currentTime = 0;
-      audioRef.current = null;
-    }
-    if (typeof window !== 'undefined' && window.speechSynthesis) {
-      window.speechSynthesis.cancel();
-    }
-    playbackLockRef.current = false;
-
-    // Set source metadata
-    setSourceLabel(params.label);
-    setSourceHref(params.sourceHref);
-    setSourceText(params.sourceText);
-    setError(null);
-    setCurrentTime(0);
-    setDuration(0);
-
-    const { text, ttsApiUrl, ttsStorageId } = params;
-
-    // Re-entrance guard
-    playbackLockRef.current = true;
-
-    // If we have a cached blob URL for this storageId, reuse it
-    if (blobUrlRef.current && cachedStorageIdRef.current === ttsStorageId) {
-      const audio = createAudioElement(blobUrlRef.current);
-      audioRef.current = audio;
-      audio.play().then(() => {
-        setState('playing');
-        startTimeInterval();
-      }).catch(() => {
+      audio.onended = () => {
+        clearTimeInterval();
         setState('idle');
+        setCurrentTime(0);
+        audioRef.current = null;
         playbackLockRef.current = false;
-      });
-      return;
-    }
+      };
 
-    setState('loading');
-
-    const controller = new AbortController();
-    abortControllerRef.current = controller;
-
-    (async () => {
-      try {
-        // Step 1: Trigger synthesis
-        const synthesizeRes = await fetch(`${ttsApiUrl}/synthesize`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          credentials: 'include',
-          body: JSON.stringify({ text, storageId: ttsStorageId }),
-          signal: controller.signal,
-        });
-
-        if (!synthesizeRes.ok) {
-          const errData = await synthesizeRes.json().catch(() => null);
-          const message = errData && typeof errData === 'object' && 'message' in errData && typeof errData.message === 'string'
-            ? errData.message
-            : null;
-          throw new Error(message || `Synthesis failed: ${synthesizeRes.status}`);
-        }
-
-        const { audioUrl } = await readResponseJson(synthesizeRes, 'tts.synthesize', (record) => ({
-          audioUrl: requireString(record, 'audioUrl', 'tts.synthesize'),
-        }));
-
-        // Step 2: Fetch the audio blob
-        const baseOrigin = new URL(ttsApiUrl).origin;
-        const fullAudioUrl = `${baseOrigin}${audioUrl}`;
-
-        const audioRes = await fetch(fullAudioUrl, {
-          credentials: 'include',
-          signal: controller.signal,
-        });
-
-        if (!audioRes.ok) {
-          throw new Error(`Audio fetch failed: ${audioRes.status}`);
-        }
-
-        const audioBlob = await audioRes.blob();
-
-        // Clean up previous blob URL if for a different storage ID
-        if (blobUrlRef.current && cachedStorageIdRef.current !== ttsStorageId) {
+      audio.onerror = () => {
+        clearTimeInterval();
+        setState('idle');
+        setCurrentTime(0);
+        audioRef.current = null;
+        playbackLockRef.current = false;
+        if (blobUrlRef.current) {
           URL.revokeObjectURL(blobUrlRef.current);
-        }
-
-        const blobUrl = URL.createObjectURL(audioBlob);
-        blobUrlRef.current = blobUrl;
-        cachedStorageIdRef.current = ttsStorageId;
-
-        if (controller.signal.aborted) {
-          URL.revokeObjectURL(blobUrl);
           blobUrlRef.current = null;
           cachedStorageIdRef.current = null;
-          playbackLockRef.current = false;
-          return;
         }
+      };
 
-        // Step 3: Play audio
-        const audio = createAudioElement(blobUrl);
+      return audio;
+    },
+    [clearTimeInterval, playbackRate]
+  );
+
+  const startPlayback = useCallback(
+    (params: StartPlaybackParams) => {
+      // Stop any current playback first
+      abortFetches();
+      clearTimeInterval();
+      if (audioRef.current) {
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+        audioRef.current = null;
+      }
+      if (typeof window !== 'undefined' && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
+      playbackLockRef.current = false;
+
+      // Set source metadata
+      setSourceLabel(params.label);
+      setSourceHref(params.sourceHref);
+      setSourceText(params.sourceText);
+      setError(null);
+      setCurrentTime(0);
+      setDuration(0);
+
+      const { text, ttsApiUrl, ttsStorageId } = params;
+
+      // Re-entrance guard
+      playbackLockRef.current = true;
+
+      // If we have a cached blob URL for this storageId, reuse it
+      if (blobUrlRef.current && cachedStorageIdRef.current === ttsStorageId) {
+        const audio = createAudioElement(blobUrlRef.current);
         audioRef.current = audio;
+        audio
+          .play()
+          .then(() => {
+            setState('playing');
+            startTimeInterval();
+          })
+          .catch(() => {
+            setState('idle');
+            playbackLockRef.current = false;
+          });
+        return;
+      }
 
-        await audio.play();
-        setState('playing');
-        startTimeInterval();
-      } catch (err) {
-        if (err instanceof DOMException && err.name === 'AbortError') {
+      setState('loading');
+
+      const controller = new AbortController();
+      abortControllerRef.current = controller;
+
+      (async () => {
+        try {
+          // Step 1: Trigger synthesis
+          const synthesizeRes = await fetch(`${ttsApiUrl}/synthesize`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({ text, storageId: ttsStorageId }),
+            signal: controller.signal,
+          });
+
+          if (!synthesizeRes.ok) {
+            const errData = await synthesizeRes.json().catch(() => null);
+            const message =
+              errData &&
+              typeof errData === 'object' &&
+              'message' in errData &&
+              typeof errData.message === 'string'
+                ? errData.message
+                : null;
+            throw new Error(message || `Synthesis failed: ${synthesizeRes.status}`);
+          }
+
+          const { audioUrl } = await readResponseJson(
+            synthesizeRes,
+            'tts.synthesize',
+            (record) => ({
+              audioUrl: requireString(record, 'audioUrl', 'tts.synthesize'),
+            })
+          );
+
+          // Step 2: Fetch the audio blob
+          const baseOrigin = new URL(ttsApiUrl).origin;
+          const fullAudioUrl = `${baseOrigin}${audioUrl}`;
+
+          const audioRes = await fetch(fullAudioUrl, {
+            credentials: 'include',
+            signal: controller.signal,
+          });
+
+          if (!audioRes.ok) {
+            throw new Error(`Audio fetch failed: ${audioRes.status}`);
+          }
+
+          const audioBlob = await audioRes.blob();
+
+          // Clean up previous blob URL if for a different storage ID
+          if (blobUrlRef.current && cachedStorageIdRef.current !== ttsStorageId) {
+            URL.revokeObjectURL(blobUrlRef.current);
+          }
+
+          const blobUrl = URL.createObjectURL(audioBlob);
+          blobUrlRef.current = blobUrl;
+          cachedStorageIdRef.current = ttsStorageId;
+
+          if (controller.signal.aborted) {
+            URL.revokeObjectURL(blobUrl);
+            blobUrlRef.current = null;
+            cachedStorageIdRef.current = null;
+            playbackLockRef.current = false;
+            return;
+          }
+
+          // Step 3: Play audio
+          const audio = createAudioElement(blobUrl);
+          audioRef.current = audio;
+
+          await audio.play();
+          setState('playing');
+          startTimeInterval();
+        } catch (err) {
+          if (err instanceof DOMException && err.name === 'AbortError') {
+            setState('idle');
+            playbackLockRef.current = false;
+            return;
+          }
+
+          const errorMessage = err instanceof Error ? err.message : String(err);
+          console.error('TTS playback error:', errorMessage);
+          setError(errorMessage);
           setState('idle');
           playbackLockRef.current = false;
-          return;
-        }
 
-        const errorMessage = err instanceof Error ? err.message : String(err);
-        console.error('TTS playback error:', errorMessage);
-        setError(errorMessage);
-        setState('idle');
-        playbackLockRef.current = false;
-
-        // Fall back to browser TTS on server failure
-        if (typeof window !== 'undefined' && window.speechSynthesis) {
-          window.speechSynthesis.cancel();
-          const plain = stripMarkdown(text);
-          const utterance = new SpeechSynthesisUtterance(plain);
-          utterance.onend = () => {
-            setState('idle');
-            playbackLockRef.current = false;
-          };
-          utterance.onerror = () => {
-            setState('idle');
-            playbackLockRef.current = false;
-          };
-          window.speechSynthesis.speak(utterance);
-          setState('playing');
+          // Fall back to browser TTS on server failure
+          if (typeof window !== 'undefined' && window.speechSynthesis) {
+            window.speechSynthesis.cancel();
+            const plain = stripMarkdown(text);
+            const utterance = new SpeechSynthesisUtterance(plain);
+            utterance.onend = () => {
+              setState('idle');
+              playbackLockRef.current = false;
+            };
+            utterance.onerror = () => {
+              setState('idle');
+              playbackLockRef.current = false;
+            };
+            window.speechSynthesis.speak(utterance);
+            setState('playing');
+          }
         }
-      }
-    })();
-  }, [abortFetches, clearTimeInterval, createAudioElement, startTimeInterval]);
+      })();
+    },
+    [abortFetches, clearTimeInterval, createAudioElement, startTimeInterval]
+  );
 
   const play = useCallback(() => {
     if (state === 'paused') {
@@ -366,17 +386,23 @@ export function GlobalAudioProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const skipForward = useCallback((seconds: number) => {
-    if (audioRef.current) {
-      seekTo(audioRef.current.currentTime + seconds);
-    }
-  }, [seekTo]);
+  const skipForward = useCallback(
+    (seconds: number) => {
+      if (audioRef.current) {
+        seekTo(audioRef.current.currentTime + seconds);
+      }
+    },
+    [seekTo]
+  );
 
-  const skipBackward = useCallback((seconds: number) => {
-    if (audioRef.current) {
-      seekTo(audioRef.current.currentTime - seconds);
-    }
-  }, [seekTo]);
+  const skipBackward = useCallback(
+    (seconds: number) => {
+      if (audioRef.current) {
+        seekTo(audioRef.current.currentTime - seconds);
+      }
+    },
+    [seekTo]
+  );
 
   const setPlaybackRate = useCallback((rate: number) => {
     setPlaybackRateState(rate);
@@ -385,7 +411,9 @@ export function GlobalAudioProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Cleanup on unmount (should rarely happen since this is at app root)
+  // Cleanup on unmount (should rarely happen since this is at app root).
+  // abortFetches/clearTimeInterval are both useCallback([]) — stable for the
+  // component's lifetime — so listing them does not cause this to re-run.
   useEffect(() => {
     return () => {
       abortFetches();
@@ -403,8 +431,7 @@ export function GlobalAudioProvider({ children }: { children: ReactNode }) {
       }
       playbackLockRef.current = false;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [abortFetches, clearTimeInterval]);
 
   // Memoized so consumers (and any useCallback/useEffect depending on this
   // context) do not churn identity on unrelated provider re-renders.
@@ -449,9 +476,5 @@ export function GlobalAudioProvider({ children }: { children: ReactNode }) {
     ]
   );
 
-  return (
-    <GlobalAudioContext.Provider value={value}>
-      {children}
-    </GlobalAudioContext.Provider>
-  );
+  return <GlobalAudioContext.Provider value={value}>{children}</GlobalAudioContext.Provider>;
 }

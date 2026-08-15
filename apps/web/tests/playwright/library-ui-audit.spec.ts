@@ -399,6 +399,20 @@ test.describe('Library — Mobile', () => {
     await screenshot(page, 'library-filters-open-mobile');
     await assertNoOverflow(page);
   });
+
+  // CreateDirectoryDialog's backdrop was restructured into a decorative
+  // sibling of the dialog card (jsx-a11y fix — see CreateDirectoryDialog.tsx)
+  // instead of the dialog wrapper itself carrying the dim background. This
+  // proves the dialog still renders centered, dimmed, and on top of the page.
+  test('new folder dialog opens centered with dimmed backdrop', async ({ page }) => {
+    await setupApiMocks(page);
+    await page.goto('/projects/proj-test-1/library');
+    await page.waitForSelector('h1:has-text("Library")');
+    await page.click('button[aria-label="New folder"]');
+    await page.waitForSelector('text=New Folder');
+    await screenshot(page, 'library-new-folder-dialog-mobile');
+    await assertNoOverflow(page);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -499,6 +513,28 @@ test.describe('Library — Desktop', () => {
     await screenshot(page, 'library-search-typing-desktop');
     await assertNoOverflow(page);
   });
+
+  // See the matching Mobile test above for why this dialog's DOM structure
+  // changed (jsx-a11y backdrop fix).
+  test('new folder dialog opens centered with dimmed backdrop', async ({ page }) => {
+    await setupApiMocks(page);
+    await page.goto('/projects/proj-test-1/library');
+    await page.waitForSelector('h1:has-text("Library")');
+    await page.click('button[aria-label="New folder"]');
+    await page.waitForSelector('text=New Folder');
+    await screenshot(page, 'library-new-folder-dialog-desktop');
+    await assertNoOverflow(page);
+
+    // Clicking inside the card must not close the dialog (the backdrop is a
+    // decorative sibling, not an ancestor of the card, so no stopPropagation
+    // is needed — see CreateDirectoryDialog.tsx).
+    await page.click('#dir-name-input');
+    await expect(page.getByText('New Folder')).toBeVisible();
+
+    // Clicking the backdrop must still close it.
+    await page.mouse.click(10, 10);
+    await expect(page.getByText('New Folder')).not.toBeVisible();
+  });
 });
 
 test.describe('Library interactive preview — visual audit', () => {
@@ -518,9 +554,7 @@ test.describe('Library interactive preview — visual audit', () => {
     // Isolation contract unchanged, and no confirmation dialog was shown.
     await expect(frame).toHaveAttribute('sandbox', 'allow-scripts');
     await expect(page.getByRole('alertdialog')).toHaveCount(0);
-    await expect(
-      page.getByRole('button', { name: 'Run interactive preview' })
-    ).toHaveCount(0);
+    await expect(page.getByRole('button', { name: 'Run interactive preview' })).toHaveCount(0);
     return frame;
   }
 

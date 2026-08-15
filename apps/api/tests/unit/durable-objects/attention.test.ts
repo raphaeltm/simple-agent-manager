@@ -9,12 +9,15 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 
 import { runMigrations } from '../../../src/durable-objects/migrations';
 import {
+  completeAttentionAnswer,
   computeAttentionAlarmTime,
   computeHumanInputExpiry,
   createAttentionMarker,
   getAttentionSummary,
   getExpiredMarkers,
   listActiveAttentionMarkers,
+  prepareAttentionAnswer,
+  releaseAttentionAnswer,
   resolveAttentionMarkerById,
   resolveAttentionMarkers,
 } from '../../../src/durable-objects/project-data/attention';
@@ -216,6 +219,105 @@ describe('Attention Markers Module', () => {
     });
   });
 
+  describe('structured answers', () => {
+    it('records and resolves an allowed option idempotently', () => {
+      const marker = createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: 'task-1',
+        workspaceId: 'ws-1',
+        kind: 'needs_input',
+        source: 'request_human_input',
+        metadata: JSON.stringify({ options: ['Approve', 'Reject'] }),
+      });
+
+      expect(prepareAttentionAnswer(sql, 'session-1', marker.id, 'Approve')).toEqual({
+        status: 'ready',
+      });
+      expect(prepareAttentionAnswer(sql, 'session-1', marker.id, 'Approve')).toEqual({
+        status: 'in_flight',
+        answer: 'Approve',
+      });
+      expect(prepareAttentionAnswer(sql, 'session-1', marker.id, 'Reject')).toEqual({
+        status: 'conflicting_answer',
+        answer: 'Approve',
+      });
+      expect(completeAttentionAnswer(sql, 'session-1', marker.id, 'Approve')).toBe(1);
+      expect(completeAttentionAnswer(sql, 'session-1', marker.id, 'Approve')).toBe(0);
+
+      const stored = db
+        .prepare(
+          'SELECT resolved_reason, resolved_answer FROM session_attention_markers WHERE id = ?'
+        )
+        .get(marker.id) as { resolved_reason: string; resolved_answer: string };
+      expect(stored).toEqual({ resolved_reason: 'structured_answer', resolved_answer: 'Approve' });
+      expect(prepareAttentionAnswer(sql, 'session-1', marker.id, 'Approve')).toEqual({
+        status: 'already_resolved',
+        answer: 'Approve',
+      });
+    });
+
+    it('releases only the matching staged answer after delivery failure', () => {
+      const marker = createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: 'task-1',
+        workspaceId: 'ws-1',
+        kind: 'needs_input',
+        source: 'request_human_input',
+        metadata: JSON.stringify({ options: ['Approve', 'Reject'] }),
+      });
+
+      expect(prepareAttentionAnswer(sql, 'session-1', marker.id, 'Approve')).toEqual({
+        status: 'ready',
+      });
+      expect(releaseAttentionAnswer(sql, 'session-1', marker.id, 'Reject')).toBe(0);
+      expect(releaseAttentionAnswer(sql, 'session-1', marker.id, 'Approve')).toBe(1);
+      expect(prepareAttentionAnswer(sql, 'session-1', marker.id, 'Reject')).toEqual({
+        status: 'ready',
+      });
+    });
+
+    it('rejects answers not present in marker options without resolving', () => {
+      const marker = createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: 'task-1',
+        workspaceId: 'ws-1',
+        kind: 'needs_input',
+        source: 'request_human_input',
+        metadata: JSON.stringify({ options: ['Approve', 'Reject'] }),
+      });
+
+      expect(prepareAttentionAnswer(sql, 'session-1', marker.id, 'Maybe')).toEqual({
+        status: 'invalid_option',
+        options: ['Approve', 'Reject'],
+      });
+      expect(listActiveAttentionMarkers(sql, 'session-1')).toHaveLength(1);
+    });
+
+    it('accepts a free-form answer when the marker has no stored options', () => {
+      const marker = createAttentionMarker(sql, {
+        sessionId: 'session-1',
+        taskId: 'task-1',
+        workspaceId: 'ws-1',
+        kind: 'needs_input',
+        source: 'request_human_input',
+        metadata: JSON.stringify({ category: 'clarification', options: null }),
+      });
+
+      expect(
+        prepareAttentionAnswer(sql, 'session-1', marker.id, 'Use the smaller release')
+      ).toEqual({
+        status: 'ready',
+      });
+      expect(completeAttentionAnswer(sql, 'session-1', marker.id, 'Use the smaller release')).toBe(
+        1
+      );
+      const stored = db
+        .prepare('SELECT resolved_answer FROM session_attention_markers WHERE id = ?')
+        .get(marker.id) as { resolved_answer: string };
+      expect(stored.resolved_answer).toBe('Use the smaller release');
+    });
+  });
+
   describe('getAttentionSummary', () => {
     it('returns null when no active markers exist', () => {
       const summary = getAttentionSummary(sql, 'session-1');
@@ -231,6 +333,7 @@ describe('Attention Markers Module', () => {
         kind: 'needs_input',
         source: 'test',
         reason: 'Please review',
+        metadata: JSON.stringify({ options: ['Approve', 'Reject'] }),
         expiresAt,
       });
 
@@ -239,6 +342,7 @@ describe('Attention Markers Module', () => {
       expect(summary!.kind).toBe('needs_input');
       expect(summary!.reason).toBe('Please review');
       expect(summary!.expiresAt).toBe(expiresAt);
+      expect(summary!.options).toEqual(['Approve', 'Reject']);
     });
 
     it('returns null after all markers are resolved', () => {

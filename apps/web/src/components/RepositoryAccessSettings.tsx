@@ -95,7 +95,6 @@ export function RepositoryAccessSettings({ project }: { project: Project }) {
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
   }, [githubBacked, projectId]);
 
   useEffect(() => {

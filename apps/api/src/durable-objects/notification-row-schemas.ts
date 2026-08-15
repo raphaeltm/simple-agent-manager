@@ -1,7 +1,12 @@
 /**
  * Valibot schemas and validated mappers for Notification DO SQLite row parsing.
  */
-import type { NotificationResponse, NotificationType, NotificationUrgency } from '@simple-agent-manager/shared';
+import type {
+  NotificationResponse,
+  NotificationType,
+  NotificationUrgency,
+  WebPushSubscriptionResponse,
+} from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
 import { parseRow } from './project-data/row-schemas';
@@ -113,4 +118,98 @@ const IdRowSchema = v.object({ id: v.string() });
 
 export function parseIdRow(row: unknown, context: string): string {
   return parseRow(IdRowSchema, row, context).id;
+}
+
+// =============================================================================
+// Web Push subscription rows
+// =============================================================================
+
+const PushSubscriptionRowSchema = v.object({
+  endpoint: v.string(),
+  user_id: v.string(),
+  p256dh: v.string(),
+  auth: v.string(),
+  user_agent: v.nullable(v.string()),
+  disabled_at: v.nullable(v.number()),
+  failure_count: v.number(),
+  last_success_at: v.nullable(v.number()),
+  created_at: v.number(),
+  updated_at: v.number(),
+});
+
+export interface StoredPushSubscription {
+  endpoint: string;
+  userId: string;
+  p256dh: string;
+  auth: string;
+  userAgent: string | null;
+  disabledAt: number | null;
+  failureCount: number;
+  lastSuccessAt: number | null;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export function parseStoredPushSubscriptionRow(row: unknown): StoredPushSubscription {
+  const r = parseRow(PushSubscriptionRowSchema, row, 'push_subscription');
+  return {
+    endpoint: r.endpoint,
+    userId: r.user_id,
+    p256dh: r.p256dh,
+    auth: r.auth,
+    userAgent: r.user_agent,
+    disabledAt: r.disabled_at,
+    failureCount: r.failure_count,
+    lastSuccessAt: r.last_success_at,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export function parsePushSubscriptionRow(row: unknown): WebPushSubscriptionResponse {
+  const subscription = parseStoredPushSubscriptionRow(row);
+  return {
+    endpoint: subscription.endpoint,
+    userAgent: subscription.userAgent,
+    disabledAt:
+      subscription.disabledAt === null ? null : new Date(subscription.disabledAt).toISOString(),
+    failureCount: subscription.failureCount,
+    lastSuccessAt:
+      subscription.lastSuccessAt === null
+        ? null
+        : new Date(subscription.lastSuccessAt).toISOString(),
+    createdAt: new Date(subscription.createdAt).toISOString(),
+    updatedAt: new Date(subscription.updatedAt).toISOString(),
+  };
+}
+
+/** Parse independent list rows without letting one corrupt record hide healthy devices. */
+export function parseStoredPushSubscriptionRows(
+  rows: unknown[],
+  onInvalid?: (index: number, error: unknown) => void
+): StoredPushSubscription[] {
+  const parsed: StoredPushSubscription[] = [];
+  rows.forEach((row, index) => {
+    try {
+      parsed.push(parseStoredPushSubscriptionRow(row));
+    } catch (error) {
+      onInvalid?.(index, error);
+    }
+  });
+  return parsed;
+}
+
+export function parsePushSubscriptionRows(
+  rows: unknown[],
+  onInvalid?: (index: number, error: unknown) => void
+): WebPushSubscriptionResponse[] {
+  const parsed: WebPushSubscriptionResponse[] = [];
+  rows.forEach((row, index) => {
+    try {
+      parsed.push(parsePushSubscriptionRow(row));
+    } catch (error) {
+      onInvalid?.(index, error);
+    }
+  });
+  return parsed;
 }

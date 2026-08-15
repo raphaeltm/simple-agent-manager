@@ -32,15 +32,19 @@ const ACTIVE_STATUSES = new Set(['queued', 'provisioning']);
  */
 export function computeSchedulerStates(
   tasks: TaskForScheduling[],
-  dependencies: DependencyEdge[],
+  dependencies: DependencyEdge[]
 ): Map<string, SchedulerState> {
   const result = new Map<string, SchedulerState>();
 
   // Build dependency lookup: taskId -> set of dependsOnTaskIds
   const depsOf = new Map<string, Set<string>>();
   for (const dep of dependencies) {
-    if (!depsOf.has(dep.taskId)) depsOf.set(dep.taskId, new Set());
-    depsOf.get(dep.taskId)!.add(dep.dependsOnTaskId);
+    let deps = depsOf.get(dep.taskId);
+    if (!deps) {
+      deps = new Set();
+      depsOf.set(dep.taskId, deps);
+    }
+    deps.add(dep.dependsOnTaskId);
   }
 
   // Build task status lookup
@@ -59,10 +63,11 @@ export function computeSchedulerStates(
 function computeSingleState(
   task: TaskForScheduling,
   deps: Set<string> | undefined,
-  taskStatus: Map<string, string>,
+  taskStatus: Map<string, string>
 ): SchedulerState {
   // Terminal states map directly
-  if (TERMINAL_STATUSES.has(task.status)) return task.status === 'completed' ? 'completed' : 'cancelled';
+  if (TERMINAL_STATUSES.has(task.status))
+    return task.status === 'completed' ? 'completed' : 'cancelled';
   if (FAILED_STATUSES.has(task.status)) return 'failed';
   if (RUNNING_STATUSES.has(task.status)) return 'running';
 

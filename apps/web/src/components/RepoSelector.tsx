@@ -1,6 +1,6 @@
 import type { Repository } from '@simple-agent-manager/shared';
 import { Alert, Input, Spinner } from '@simple-agent-manager/ui';
-import { useCallback,useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
 import { listRepositories } from '../lib/api';
@@ -10,7 +10,9 @@ interface RepoSelectorProps {
   value: string;
   onChange: (value: string) => void;
   /** Called when a repository is selected from the dropdown with its metadata */
-  onRepoSelect?: (repo: { fullName: string; defaultBranch: string; githubRepoId?: number } | null) => void;
+  onRepoSelect?: (
+    repo: { fullName: string; defaultBranch: string; githubRepoId?: number } | null
+  ) => void;
   /** When provided, only fetch repos for this installation (DB row ID) */
   installationId?: string;
   disabled?: boolean;
@@ -50,9 +52,7 @@ export function RepoSelector({
         const result = await listRepositories(installationId);
         setRepositories(result.repositories);
         if (result.failedInstallations && result.failedInstallations.length > 0) {
-          setFetchWarning(
-            `Could not load repos from: ${result.failedInstallations.join(', ')}`
-          );
+          setFetchWarning(`Could not load repos from: ${result.failedInstallations.join(', ')}`);
         }
       } catch (err) {
         // Silently fail if GitHub not connected - user can still paste URLs
@@ -80,8 +80,8 @@ export function RepoSelector({
     }
 
     const searchTerm = value.toLowerCase();
-    const filtered = repositories.filter(
-      (repo) => repo.fullName.toLowerCase().includes(searchTerm)
+    const filtered = repositories.filter((repo) =>
+      repo.fullName.toLowerCase().includes(searchTerm)
     );
 
     // Show more results (25) to help users with many repos find what they need
@@ -142,27 +142,34 @@ export function RepoSelector({
   }, []);
 
   // Check if manually entered repo exists and get its default branch
-  const checkManualRepo = useCallback((repoValue: string) => {
-    const repoName = extractRepoName(repoValue);
+  const checkManualRepo = useCallback(
+    (repoValue: string) => {
+      const repoName = extractRepoName(repoValue);
 
-    // Don't re-check the same repo
-    if (!repoName || repoName === lastCheckedRepo) {
-      return;
-    }
+      // Don't re-check the same repo
+      if (!repoName || repoName === lastCheckedRepo) {
+        return;
+      }
 
-    setLastCheckedRepo(repoName);
+      setLastCheckedRepo(repoName);
 
-    // Check if this repo exists in our fetched list
-    const foundRepo = repositories.find(r => r.fullName === repoName);
-    if (foundRepo) {
-      // We have metadata for this repo
-      onRepoSelect?.({ fullName: foundRepo.fullName, defaultBranch: foundRepo.defaultBranch, githubRepoId: foundRepo.id });
-    } else {
-      // For manually entered repos not in the list, default to 'main'
-      // The branch fetching will happen in CreateWorkspace component
-      onRepoSelect?.({ fullName: repoName, defaultBranch: 'main' });
-    }
-  }, [repositories, lastCheckedRepo, extractRepoName, onRepoSelect]);
+      // Check if this repo exists in our fetched list
+      const foundRepo = repositories.find((r) => r.fullName === repoName);
+      if (foundRepo) {
+        // We have metadata for this repo
+        onRepoSelect?.({
+          fullName: foundRepo.fullName,
+          defaultBranch: foundRepo.defaultBranch,
+          githubRepoId: foundRepo.id,
+        });
+      } else {
+        // For manually entered repos not in the list, default to 'main'
+        // The branch fetching will happen in CreateWorkspace component
+        onRepoSelect?.({ fullName: repoName, defaultBranch: 'main' });
+      }
+    },
+    [repositories, lastCheckedRepo, extractRepoName, onRepoSelect]
+  );
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const newValue = e.target.value;
@@ -180,7 +187,10 @@ export function RepoSelector({
       setShowDropdown(false);
 
       // For URLs, check after a delay to trigger branch fetching
-      if (newValue && (newValue.startsWith('http') || newValue.startsWith('git@') || newValue.includes('/'))) {
+      if (
+        newValue &&
+        (newValue.startsWith('http') || newValue.startsWith('git@') || newValue.includes('/'))
+      ) {
         debounceTimerRef.current = setTimeout(() => {
           checkManualRepo(newValue);
         }, 500); // Wait 500ms after user stops typing
@@ -190,7 +200,11 @@ export function RepoSelector({
 
   const handleRepoSelect = (repo: Repository) => {
     onChange(`https://github.com/${repo.fullName}`);
-    onRepoSelect?.({ fullName: repo.fullName, defaultBranch: repo.defaultBranch, githubRepoId: repo.id });
+    onRepoSelect?.({
+      fullName: repo.fullName,
+      defaultBranch: repo.defaultBranch,
+      githubRepoId: repo.id,
+    });
     setShowDropdown(false);
   };
 
@@ -215,69 +229,85 @@ export function RepoSelector({
           placeholder={placeholder}
         />
         {loading && (
-          <div style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }}>
+          <div
+            style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)' }}
+          >
             <Spinner size="sm" />
           </div>
         )}
       </div>
 
       {/* Dropdown with repository suggestions */}
-      {showDropdown && filteredRepos.length > 0 && createPortal(
-        <div
-          ref={dropdownRef}
-          className="glass-surface"
-          style={{
-            position: 'fixed',
-            zIndex: 'var(--sam-z-dropdown)' as unknown as number,
-            ...(containerRef.current ? (() => {
-              const r = containerRef.current!.getBoundingClientRect();
-              return { top: r.bottom + 4, left: r.left, width: r.width };
-            })() : {}),
-            borderRadius: 'var(--sam-radius-md)',
-            boxShadow: 'var(--sam-shadow-overlay)',
-            maxHeight: '15rem',
-            overflowY: 'auto',
-          }}
-        >
-          {filteredRepos.map((repo) => (
-            <button
-              key={repo.fullName}
-              type="button"
-              onClick={() => handleRepoSelect(repo)}
-              className="sam-hover-surface"
-              style={{
-                width: '100%',
-                padding: '0.5rem 0.75rem',
-                textAlign: 'left',
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: 'var(--sam-color-fg-primary)',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
-                <span style={{ fontWeight: 500, fontSize: 'var(--sam-type-secondary-size)' }}>{repo.fullName}</span>
-                {repo.private && (
-                  <span style={{
-                    padding: '1px 6px',
-                    fontSize: '0.7rem',
-                    backgroundColor: 'var(--sam-color-warning-tint)',
-                    color: 'var(--sam-color-warning-fg)',
-                    borderRadius: 'var(--sam-radius-sm)',
-                  }}>
-                    Private
+      {showDropdown &&
+        filteredRepos.length > 0 &&
+        createPortal(
+          <div
+            ref={dropdownRef}
+            className="glass-surface"
+            style={{
+              position: 'fixed',
+              zIndex: 'var(--sam-z-dropdown)' as unknown as number,
+              ...(() => {
+                const container = containerRef.current;
+                if (!container) return {};
+                const r = container.getBoundingClientRect();
+                return { top: r.bottom + 4, left: r.left, width: r.width };
+              })(),
+              borderRadius: 'var(--sam-radius-md)',
+              boxShadow: 'var(--sam-shadow-overlay)',
+              maxHeight: '15rem',
+              overflowY: 'auto',
+            }}
+          >
+            {filteredRepos.map((repo) => (
+              <button
+                key={repo.fullName}
+                type="button"
+                onClick={() => handleRepoSelect(repo)}
+                className="sam-hover-surface"
+                style={{
+                  width: '100%',
+                  padding: '0.5rem 0.75rem',
+                  textAlign: 'left',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--sam-color-fg-primary)',
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--sam-space-2)' }}>
+                  <span style={{ fontWeight: 500, fontSize: 'var(--sam-type-secondary-size)' }}>
+                    {repo.fullName}
                   </span>
-                )}
-              </div>
-            </button>
-          ))}
-        </div>,
-        document.body,
-      )}
+                  {repo.private && (
+                    <span
+                      style={{
+                        padding: '1px 6px',
+                        fontSize: '0.7rem',
+                        backgroundColor: 'var(--sam-color-warning-tint)',
+                        color: 'var(--sam-color-warning-fg)',
+                        borderRadius: 'var(--sam-radius-sm)',
+                      }}
+                    >
+                      Private
+                    </span>
+                  )}
+                </div>
+              </button>
+            ))}
+          </div>,
+          document.body
+        )}
 
       {/* Status messages */}
       {loading && repositories.length === 0 && (
-        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
+        <p
+          style={{
+            marginTop: 'var(--sam-space-1)',
+            fontSize: 'var(--sam-type-caption-size)',
+            color: 'var(--sam-color-fg-muted)',
+          }}
+        >
           Loading repositories...
         </p>
       )}
@@ -286,16 +316,37 @@ export function RepoSelector({
           {fetchWarning}
         </Alert>
       )}
-      {error && repositories.length === 0 && value && !value.startsWith('http') && !value.startsWith('git@') && (
-        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
-          Connect GitHub App for repository autocomplete
-        </p>
-      )}
-      {!loading && repositories.length > 0 && value && !value.startsWith('http') && !value.startsWith('git@') && filteredRepos.length === 0 && (
-        <p style={{ marginTop: 'var(--sam-space-1)', fontSize: 'var(--sam-type-caption-size)', color: 'var(--sam-color-fg-muted)' }}>
-          No matching repositories found
-        </p>
-      )}
+      {error &&
+        repositories.length === 0 &&
+        value &&
+        !value.startsWith('http') &&
+        !value.startsWith('git@') && (
+          <p
+            style={{
+              marginTop: 'var(--sam-space-1)',
+              fontSize: 'var(--sam-type-caption-size)',
+              color: 'var(--sam-color-fg-muted)',
+            }}
+          >
+            Connect GitHub App for repository autocomplete
+          </p>
+        )}
+      {!loading &&
+        repositories.length > 0 &&
+        value &&
+        !value.startsWith('http') &&
+        !value.startsWith('git@') &&
+        filteredRepos.length === 0 && (
+          <p
+            style={{
+              marginTop: 'var(--sam-space-1)',
+              fontSize: 'var(--sam-type-caption-size)',
+              color: 'var(--sam-color-fg-muted)',
+            }}
+          >
+            No matching repositories found
+          </p>
+        )}
     </div>
   );
 }

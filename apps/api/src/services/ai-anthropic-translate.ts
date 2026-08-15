@@ -90,7 +90,7 @@ const DEFAULT_MAX_TOKENS = 4096;
  */
 export function translateRequestToAnthropic(
   body: Record<string, unknown>,
-  modelId: string,
+  modelId: string
 ): AnthropicRequest {
   const messages = body.messages as OpenAIMessage[];
   const systemMessages: string[] = [];
@@ -99,9 +99,10 @@ export function translateRequestToAnthropic(
   for (const msg of messages) {
     if (msg.role === 'system') {
       // Anthropic uses a top-level `system` field, not a system message role
-      const text = typeof msg.content === 'string'
-        ? msg.content
-        : (msg.content as ContentPart[] | null)?.map((p) => p.text || '').join('') || '';
+      const text =
+        typeof msg.content === 'string'
+          ? msg.content
+          : (msg.content as ContentPart[] | null)?.map((p) => p.text || '').join('') || '';
       if (text) systemMessages.push(text);
       continue;
     }
@@ -115,9 +116,10 @@ export function translateRequestToAnthropic(
     if (msg.role === 'assistant') {
       const blocks: AnthropicContentBlock[] = [];
       // Text content
-      const text = typeof msg.content === 'string'
-        ? msg.content
-        : (msg.content as ContentPart[] | null)?.map((p) => p.text || '').join('') || '';
+      const text =
+        typeof msg.content === 'string'
+          ? msg.content
+          : (msg.content as ContentPart[] | null)?.map((p) => p.text || '').join('') || '';
       if (text) blocks.push({ type: 'text', text });
       // Tool calls
       if (msg.tool_calls) {
@@ -223,11 +225,13 @@ export function translateResponseToOpenAI(response: AnthropicResponse): Record<s
     object: 'chat.completion',
     created: Math.floor(Date.now() / 1000),
     model: response.model,
-    choices: [{
-      index: 0,
-      message,
-      finish_reason: mapStopReason(response.stop_reason),
-    }],
+    choices: [
+      {
+        index: 0,
+        message,
+        finish_reason: mapStopReason(response.stop_reason),
+      },
+    ],
     usage: {
       prompt_tokens: response.usage.input_tokens,
       completion_tokens: response.usage.output_tokens,
@@ -244,7 +248,9 @@ export function translateResponseToOpenAI(response: AnthropicResponse): Record<s
  * Create a TransformStream that converts Anthropic streaming events into
  * OpenAI-compatible SSE delta format.
  */
-export function createAnthropicToOpenAIStream(model: string): TransformStream<Uint8Array, Uint8Array> {
+export function createAnthropicToOpenAIStream(
+  model: string
+): TransformStream<Uint8Array, Uint8Array> {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -276,7 +282,8 @@ export function createAnthropicToOpenAIStream(model: string): TransformStream<Ui
         const openAIDelta = translateStreamEvent(event, model, messageId, currentToolCallIndex);
         if (openAIDelta) {
           if (openAIDelta.messageId) messageId = openAIDelta.messageId;
-          if (openAIDelta.toolCallIndex !== undefined) currentToolCallIndex = openAIDelta.toolCallIndex;
+          if (openAIDelta.toolCallIndex !== undefined)
+            currentToolCallIndex = openAIDelta.toolCallIndex;
           if (openAIDelta.chunk) {
             controller.enqueue(encoder.encode(`data: ${JSON.stringify(openAIDelta.chunk)}\n\n`));
           }
@@ -297,9 +304,9 @@ export function createAnthropicToOpenAIStream(model: string): TransformStream<Ui
 function normalizeContent(content: string | ContentPart[] | null): AnthropicContentBlock[] {
   if (!content) return [{ type: 'text', text: '' }];
   if (typeof content === 'string') return [{ type: 'text', text: content }];
-  return content
-    .filter((p) => p.type === 'text' && p.text)
-    .map((p) => ({ type: 'text' as const, text: p.text! }));
+  return content.flatMap((p) =>
+    p.type === 'text' && p.text ? [{ type: 'text' as const, text: p.text }] : []
+  );
 }
 
 function mergeConsecutiveMessages(messages: AnthropicMessage[]): AnthropicMessage[] {
@@ -325,11 +332,16 @@ function safeParseJson(str: string): unknown {
 
 function mapStopReason(reason: string | null): string {
   switch (reason) {
-    case 'end_turn': return 'stop';
-    case 'max_tokens': return 'length';
-    case 'tool_use': return 'tool_calls';
-    case 'stop_sequence': return 'stop';
-    default: return 'stop';
+    case 'end_turn':
+      return 'stop';
+    case 'max_tokens':
+      return 'length';
+    case 'tool_use':
+      return 'tool_calls';
+    case 'stop_sequence':
+      return 'stop';
+    default:
+      return 'stop';
   }
 }
 
@@ -343,7 +355,7 @@ function translateStreamEvent(
   event: Record<string, unknown>,
   model: string,
   messageId: string,
-  toolCallIndex: number,
+  toolCallIndex: number
 ): StreamDelta | null {
   const type = event.type as string;
 
@@ -358,11 +370,13 @@ function translateStreamEvent(
           object: 'chat.completion.chunk',
           created: Math.floor(Date.now() / 1000),
           model,
-          choices: [{
-            index: 0,
-            delta: { role: 'assistant', content: '' },
-            finish_reason: null,
-          }],
+          choices: [
+            {
+              index: 0,
+              delta: { role: 'assistant', content: '' },
+              finish_reason: null,
+            },
+          ],
         },
       };
     }
@@ -378,18 +392,28 @@ function translateStreamEvent(
             object: 'chat.completion.chunk',
             created: Math.floor(Date.now() / 1000),
             model,
-            choices: [{
-              index: 0,
-              delta: {
-                tool_calls: [{
-                  index: newIndex,
-                  id: typeof block.id === 'string' ? block.id : `call_${crypto.randomUUID().slice(0, 8)}`,
-                  type: 'function',
-                  function: { name: typeof block.name === 'string' ? block.name : '', arguments: '' },
-                }],
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [
+                    {
+                      index: newIndex,
+                      id:
+                        typeof block.id === 'string'
+                          ? block.id
+                          : `call_${crypto.randomUUID().slice(0, 8)}`,
+                      type: 'function',
+                      function: {
+                        name: typeof block.name === 'string' ? block.name : '',
+                        arguments: '',
+                      },
+                    },
+                  ],
+                },
+                finish_reason: null,
               },
-              finish_reason: null,
-            }],
+            ],
           },
         };
       }
@@ -407,11 +431,13 @@ function translateStreamEvent(
             object: 'chat.completion.chunk',
             created: Math.floor(Date.now() / 1000),
             model,
-            choices: [{
-              index: 0,
-              delta: { content: typeof delta.text === 'string' ? delta.text : '' },
-              finish_reason: null,
-            }],
+            choices: [
+              {
+                index: 0,
+                delta: { content: typeof delta.text === 'string' ? delta.text : '' },
+                finish_reason: null,
+              },
+            ],
           },
         };
       }
@@ -423,16 +449,22 @@ function translateStreamEvent(
             object: 'chat.completion.chunk',
             created: Math.floor(Date.now() / 1000),
             model,
-            choices: [{
-              index: 0,
-              delta: {
-                tool_calls: [{
-                  index: toolCallIndex - 1,
-                  function: { arguments: typeof delta.partial_json === 'string' ? delta.partial_json : '' },
-                }],
+            choices: [
+              {
+                index: 0,
+                delta: {
+                  tool_calls: [
+                    {
+                      index: toolCallIndex - 1,
+                      function: {
+                        arguments: typeof delta.partial_json === 'string' ? delta.partial_json : '',
+                      },
+                    },
+                  ],
+                },
+                finish_reason: null,
               },
-              finish_reason: null,
-            }],
+            ],
           },
         };
       }
@@ -449,11 +481,13 @@ function translateStreamEvent(
           object: 'chat.completion.chunk',
           created: Math.floor(Date.now() / 1000),
           model,
-          choices: [{
-            index: 0,
-            delta: {},
-            finish_reason: mapStopReason(stopReason),
-          }],
+          choices: [
+            {
+              index: 0,
+              delta: {},
+              finish_reason: mapStopReason(stopReason),
+            },
+          ],
           usage: maybeJsonRecord(event.usage) ?? undefined,
         },
       };

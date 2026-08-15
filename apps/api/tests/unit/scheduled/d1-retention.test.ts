@@ -5,7 +5,6 @@ import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import {
   DEFAULT_DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY,
-  DEFAULT_SESSION_SNAPSHOT_PURGE_LAST_RUN_KV_KEY,
   runDeploymentReleaseRetention,
   runScheduledDeploymentReleaseRetention,
   runScheduledSessionSnapshotPurge,
@@ -60,10 +59,19 @@ describe('D1 retention sweeps', () => {
       .map((row) => (row as { id: string }).id);
   }
 
-  function addSnapshot(id: string, expiresAt: string): void {
+  function addSnapshot(id: string, expiresAt: string, sleeping = true): void {
     sqlite
-      .prepare('INSERT INTO session_snapshots (id, expires_at) VALUES (?, ?)')
-      .run(id, expiresAt);
+      .prepare(
+        `INSERT INTO session_snapshots
+           (id, expires_at, status, degradation, sleeping_at, sleep_status)
+         VALUES (?, ?, 'available', 'none', ?, ?)`
+      )
+      .run(
+        id,
+        expiresAt,
+        sleeping ? '2026-08-01T00:00:00.000Z' : null,
+        sleeping ? 'sleeping' : null
+      );
   }
 
   function snapshotIds(): string[] {
@@ -183,7 +191,7 @@ describe('D1 retention sweeps', () => {
     expect(ran.deletedReleases).toBe(2);
   });
 
-  it('uses an independent KV marker for scheduled snapshot purging', async () => {
+  it('runs bounded snapshot expiry on every scheduled tick', async () => {
     addEnvironment('env-marker');
     for (let version = 1; version <= 4; version += 1) {
       addRelease('env-marker', version, 'applied');
@@ -201,9 +209,6 @@ describe('D1 retention sweeps', () => {
     expect(releaseResult).toMatchObject({ skipped: true, skipReason: 'interval-not-elapsed' });
     expect(snapshotResult.deletedSnapshots).toBe(1);
     expect(snapshotResult.skipped).toBe(false);
-    expect(await env.KV.get(DEFAULT_SESSION_SNAPSHOT_PURGE_LAST_RUN_KV_KEY)).toBe(
-      now.toISOString()
-    );
     expect(await env.KV.get(DEFAULT_DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY)).toBe(
       '2026-08-09T00:00:00.000Z'
     );
@@ -218,6 +223,49 @@ describe('D1 retention sweeps', () => {
 
     expect(result.deletedSnapshots).toBe(1);
     expect(snapshotIds()).toEqual(['exact-boundary', 'unexpired']);
+  });
+
+  it('never terminal-purges an active checkpoint even after its artifact expiry', async () => {
+    addSnapshot('active-expired', '2026-08-01T00:00:00.000Z', false);
+    addSnapshot('sleeping-expired', '2026-08-01T00:00:00.000Z');
+
+    const result = await runSessionSnapshotPurge(env, new Date('2026-08-10T00:00:00.000Z'));
+
+    expect(result.deletedSnapshots).toBe(1);
+    expect(snapshotIds()).toEqual(['active-expired']);
+  });
+
+  it('lets an in-flight wake win over terminal purge', async () => {
+    addSnapshot('waking-expired', '2026-08-01T00:00:00.000Z');
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots
+         SET recovery_status = 'waking', recovery_task_id = 'wake-task'
+         WHERE id = 'waking-expired'`
+      )
+      .run();
+
+    const result = await runSessionSnapshotPurge(env, new Date('2026-08-10T00:00:00.000Z'));
+
+    expect(result.deletedSnapshots).toBe(0);
+    expect(snapshotIds()).toEqual(['waking-expired']);
+  });
+
+  it('reclaims an interrupted terminal purge after its claim lease', async () => {
+    addSnapshot('stale-purge', '2026-08-01T00:00:00.000Z');
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots
+         SET status = 'expired', sleep_status = 'purging',
+             sleep_claim_id = 'dead-purger', sleep_claimed_at = '2026-08-09T23:00:00.000Z'
+         WHERE id = 'stale-purge'`
+      )
+      .run();
+
+    const result = await runSessionSnapshotPurge(env, new Date('2026-08-10T00:00:00.000Z'));
+
+    expect(result.deletedSnapshots).toBe(1);
+    expect(snapshotIds()).toEqual([]);
   });
 
   it('respects the snapshot purge batch bound', async () => {

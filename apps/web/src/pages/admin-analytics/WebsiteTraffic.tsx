@@ -12,7 +12,14 @@ import {
 } from 'recharts';
 
 import type { AnalyticsWebsiteTrafficResponse } from '../../lib/api';
-import { adminChartSeries, chartCategoryTick, chartCursor, chartGridStroke, chartTick, chartTooltipStyle } from './chartTokens';
+import {
+  adminChartSeries,
+  chartCategoryTick,
+  chartCursor,
+  chartGridStroke,
+  chartTick,
+  chartTooltipStyle,
+} from './chartTokens';
 
 const TOP_PAGES_DISPLAY_LIMIT = 10;
 
@@ -41,9 +48,16 @@ function formatNumber(n: number): string {
 }
 
 /** Custom tooltip for website traffic chart. */
-function TrafficTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload: { label: string; views: number; visitors: number } }> }) {
-  if (!active || !payload?.length) return null;
-  const d = payload[0]!.payload;
+function TrafficTooltip({
+  active,
+  payload,
+}: {
+  active?: boolean;
+  payload?: Array<{ payload: { label: string; views: number; visitors: number } }>;
+}) {
+  const point = payload?.[0];
+  if (!active || !point) return null;
+  const d = point.payload;
   return (
     <div className="rounded-md px-3 py-2 shadow-lg text-sm" style={chartTooltipStyle}>
       <div className="text-fg-primary font-medium">{d.label}</div>
@@ -86,14 +100,18 @@ export const WebsiteTraffic: FC<Props> = ({ data }) => {
             {chartData.length > 0 ? (
               <div className="w-full" style={{ height: Math.max(140, chartData.length * 36) }}>
                 <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={chartData} layout="vertical" margin={{ top: 0, right: 4, left: 0, bottom: 0 }}>
-                    <CartesianGrid strokeDasharray="3 3" stroke={chartGridStroke} strokeOpacity={0.3} horizontal={false} />
-                    <XAxis
-                      type="number"
-                      tick={chartTick}
-                      axisLine={false}
-                      tickLine={false}
+                  <BarChart
+                    data={chartData}
+                    layout="vertical"
+                    margin={{ top: 0, right: 4, left: 0, bottom: 0 }}
+                  >
+                    <CartesianGrid
+                      strokeDasharray="3 3"
+                      stroke={chartGridStroke}
+                      strokeOpacity={0.3}
+                      horizontal={false}
                     />
+                    <XAxis type="number" tick={chartTick} axisLine={false} tickLine={false} />
                     <YAxis
                       dataKey="label"
                       type="category"
@@ -105,7 +123,10 @@ export const WebsiteTraffic: FC<Props> = ({ data }) => {
                     <Tooltip content={<TrafficTooltip />} cursor={chartCursor} />
                     <Bar dataKey="views" radius={[0, 4, 4, 0]} maxBarSize={24}>
                       {chartData.map((entry) => (
-                        <Cell key={entry.name} fill={SECTION_COLORS[entry.name] ?? SECTION_COLORS.other} />
+                        <Cell
+                          key={entry.name}
+                          fill={SECTION_COLORS[entry.name] ?? SECTION_COLORS.other}
+                        />
                       ))}
                     </Bar>
                   </BarChart>
@@ -121,9 +142,15 @@ export const WebsiteTraffic: FC<Props> = ({ data }) => {
                 <table className="w-full text-xs">
                   <thead>
                     <tr className="border-b border-border-default text-left text-fg-muted">
-                      <th scope="col" className="py-1.5 pr-3 font-medium">Page</th>
-                      <th scope="col" className="py-1.5 pr-3 font-medium text-right">Views</th>
-                      <th scope="col" className="py-1.5 font-medium text-right">Visitors</th>
+                      <th scope="col" className="py-1.5 pr-3 font-medium">
+                        Page
+                      </th>
+                      <th scope="col" className="py-1.5 pr-3 font-medium text-right">
+                        Views
+                      </th>
+                      <th scope="col" className="py-1.5 font-medium text-right">
+                        Visitors
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
@@ -133,14 +160,20 @@ export const WebsiteTraffic: FC<Props> = ({ data }) => {
                           <td className="py-1.5 pr-3 truncate max-w-[250px]" title={p.page}>
                             <span
                               className="inline-block w-2 h-2 rounded-full mr-2 flex-shrink-0"
-                              style={{ backgroundColor: SECTION_COLORS[s.name] ?? SECTION_COLORS.other }}
+                              style={{
+                                backgroundColor: SECTION_COLORS[s.name] ?? SECTION_COLORS.other,
+                              }}
                             />
                             {p.page}
                           </td>
-                          <td className="py-1.5 pr-3 text-right tabular-nums text-fg-secondary">{formatNumber(p.views)}</td>
-                          <td className="py-1.5 text-right tabular-nums text-fg-muted">{formatNumber(p.unique_visitors)}</td>
+                          <td className="py-1.5 pr-3 text-right tabular-nums text-fg-secondary">
+                            {formatNumber(p.views)}
+                          </td>
+                          <td className="py-1.5 text-right tabular-nums text-fg-muted">
+                            {formatNumber(p.unique_visitors)}
+                          </td>
                         </tr>
-                      )),
+                      ))
                     )}
                   </tbody>
                 </table>

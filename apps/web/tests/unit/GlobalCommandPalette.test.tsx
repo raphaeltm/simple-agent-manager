@@ -1,6 +1,6 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
-import { beforeEach,describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GlobalCommandPalette } from '../../src/components/GlobalCommandPalette';
 
@@ -39,9 +39,54 @@ vi.mock('../../src/lib/api', async (importOriginal) => ({
   ]),
   getAllChats: vi.fn().mockResolvedValue({
     sessions: [
-      { id: 's1', topic: 'Fix auth bug', projectId: 'p1', projectName: 'My API Worker', userId: 'user-1', status: 'active', messageCount: 5, startedAt: 1000, lastMessageAt: 1000, agentCompletedAt: null, endedAt: null, updatedAt: 1000, workspaceId: null, taskId: null },
-      { id: 's2', topic: null, projectId: 'p1', projectName: 'My API Worker', userId: 'user-1', status: 'stopped', messageCount: 2, startedAt: 500, lastMessageAt: 600, agentCompletedAt: null, endedAt: 600, updatedAt: 600, workspaceId: null, taskId: null },
-      { id: 's3', topic: 'Refactor dashboard layout', projectId: 'p2', projectName: 'Frontend Dashboard', userId: 'user-1', status: 'active', messageCount: 10, startedAt: 2000, lastMessageAt: 2000, agentCompletedAt: null, endedAt: null, updatedAt: 2000, workspaceId: null, taskId: null },
+      {
+        id: 's1',
+        topic: 'Fix auth bug',
+        projectId: 'p1',
+        projectName: 'My API Worker',
+        userId: 'user-1',
+        status: 'active',
+        messageCount: 5,
+        startedAt: 1000,
+        lastMessageAt: 1000,
+        agentCompletedAt: null,
+        endedAt: null,
+        updatedAt: 1000,
+        workspaceId: null,
+        taskId: null,
+      },
+      {
+        id: 's2',
+        topic: null,
+        projectId: 'p1',
+        projectName: 'My API Worker',
+        userId: 'user-1',
+        status: 'stopped',
+        messageCount: 2,
+        startedAt: 500,
+        lastMessageAt: 600,
+        agentCompletedAt: null,
+        endedAt: 600,
+        updatedAt: 600,
+        workspaceId: null,
+        taskId: null,
+      },
+      {
+        id: 's3',
+        topic: 'Refactor dashboard layout',
+        projectId: 'p2',
+        projectName: 'Frontend Dashboard',
+        userId: 'user-1',
+        status: 'active',
+        messageCount: 10,
+        startedAt: 2000,
+        lastMessageAt: 2000,
+        agentCompletedAt: null,
+        endedAt: null,
+        updatedAt: 2000,
+        workspaceId: null,
+        taskId: null,
+      },
     ],
     total: 3,
   }),
@@ -53,7 +98,7 @@ function renderPalette(onClose = vi.fn()) {
     ...render(
       <MemoryRouter>
         <GlobalCommandPalette onClose={onClose} />
-      </MemoryRouter>,
+      </MemoryRouter>
     ),
   };
 }
@@ -72,7 +117,9 @@ describe('GlobalCommandPalette', () => {
 
   it('renders search input with correct placeholder', () => {
     renderPalette();
-    expect(screen.getByPlaceholderText('Search pages, projects, chats, nodes...')).toBeInTheDocument();
+    expect(
+      screen.getByPlaceholderText('Search pages, projects, chats, nodes...')
+    ).toBeInTheDocument();
   });
 
   it('auto-focuses the search input', () => {
@@ -213,6 +260,25 @@ describe('GlobalCommandPalette', () => {
 
     expect(mockNavigate).toHaveBeenCalledWith('/settings');
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  // Each option row has its own onKeyDown (in addition to the search input's
+  // arrow-key/Enter navigation tested below) so the "option" ARIA role is
+  // never left with an onClick and no keyboard equivalent at the element
+  // level (jsx-a11y/click-events-have-key-events).
+  it('navigates to page when Enter is pressed directly on the option row', async () => {
+    const onClose = vi.fn();
+    renderPalette(onClose);
+
+    await waitFor(() => {
+      expect(screen.getByText('Settings')).toBeInTheDocument();
+    });
+
+    const options = screen.getAllByRole('option');
+    const settingsOption = options.find((o) => o.textContent?.includes('Settings'));
+    fireEvent.keyDown(settingsOption!, { key: 'Enter' });
+
+    expect(mockNavigate).toHaveBeenCalledWith('/settings');
   });
 
   it('navigates to project when project result is clicked', async () => {
@@ -575,7 +641,7 @@ describe('GlobalCommandPalette', () => {
     expect(apiNewChat).toBeDefined();
     fireEvent.click(apiNewChat!);
 
-    expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/chat', );
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/p1/chat');
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -609,7 +675,7 @@ describe('GlobalCommandPalette', () => {
     // First matching result should be selected; press Enter
     fireEvent.keyDown(input, { key: 'Enter' });
 
-    expect(mockNavigate).toHaveBeenCalledWith('/projects/p3/chat', );
+    expect(mockNavigate).toHaveBeenCalledWith('/projects/p3/chat');
     expect(onClose).toHaveBeenCalledTimes(1);
   });
 
@@ -684,7 +750,9 @@ describe('GlobalCommandPalette', () => {
     const authBugOption = options.find((o) => o.textContent?.includes('Fix auth bug'));
     expect(authBugOption?.textContent).toContain('My API Worker');
 
-    const refactorOption = options.find((o) => o.textContent?.includes('Refactor dashboard layout'));
+    const refactorOption = options.find((o) =>
+      o.textContent?.includes('Refactor dashboard layout')
+    );
     expect(refactorOption?.textContent).toContain('Frontend Dashboard');
   });
 
@@ -700,7 +768,7 @@ describe('GlobalCommandPalette', () => {
       (o) =>
         o.textContent?.includes('Fix auth bug') ||
         o.textContent?.includes('Refactor dashboard layout') ||
-        o.textContent?.includes('Untitled Chat'),
+        o.textContent?.includes('Untitled Chat')
     );
 
     // Most recent (createdAt: 2000) should come first
@@ -724,7 +792,9 @@ describe('GlobalCommandPalette', () => {
     expect(authOption).toBeDefined();
 
     // "Refactor dashboard layout" should be filtered out
-    const refactorOption = options.find((o) => o.textContent?.includes('Refactor dashboard layout'));
+    const refactorOption = options.find((o) =>
+      o.textContent?.includes('Refactor dashboard layout')
+    );
     expect(refactorOption).toBeUndefined();
   });
 
@@ -778,8 +848,7 @@ describe('GlobalCommandPalette', () => {
   it('gracefully handles chat session fetch failure', async () => {
     const { getAllChats } = await import('../../src/lib/api');
     // Reject the single cross-project chat fetch
-    vi.mocked(getAllChats)
-      .mockRejectedValueOnce(new Error('Network error'));
+    vi.mocked(getAllChats).mockRejectedValueOnce(new Error('Network error'));
 
     renderPalette();
 

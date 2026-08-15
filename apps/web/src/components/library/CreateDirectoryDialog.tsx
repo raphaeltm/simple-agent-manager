@@ -33,7 +33,7 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
         onClose();
       }
     },
-    [onClose],
+    [onClose]
   );
 
   useEffect(() => {
@@ -61,22 +61,27 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
   };
 
   const truncatedPath =
-    currentDirectory.length > 40
-      ? '…' + currentDirectory.slice(-38)
-      : currentDirectory;
+    currentDirectory.length > 40 ? '…' + currentDirectory.slice(-38) : currentDirectory;
 
   return createPortal(
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center glass-backdrop-dim"
+      className="fixed inset-0 z-50 flex items-center justify-center"
       role="dialog"
       aria-modal="true"
       aria-labelledby="create-dir-title"
-      onClick={onClose}
     >
+      {/* Backdrop: a decorative sibling (not an ancestor) of the dialog card
+          below, so clicks inside the card never need to stopPropagation to
+          avoid closing the dialog — same pattern as ConfirmDialog. */}
+      <div
+        data-testid="create-directory-backdrop"
+        className="fixed inset-0 glass-backdrop-dim"
+        aria-hidden="true"
+        onClick={onClose}
+      />
       <div
         ref={dialogRef}
-        className="glass-modal glass-panel-container glass-composited rounded-xl p-5 w-full max-w-sm mx-4 shadow-overlay"
-        onClick={(e) => e.stopPropagation()}
+        className="relative glass-modal glass-panel-container glass-composited rounded-xl p-5 w-full max-w-sm mx-4 shadow-overlay"
       >
         <h3 id="create-dir-title" className="text-base font-semibold text-fg-primary m-0 mb-4">
           New Folder
@@ -84,7 +89,10 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
         <form onSubmit={handleSubmit}>
           <label htmlFor="dir-name-input" className="block text-sm text-fg-muted mb-1">
             Creating in:{' '}
-            <span className="font-mono text-fg-primary truncate inline-block max-w-[200px] align-bottom" title={currentDirectory}>
+            <span
+              className="font-mono text-fg-primary truncate inline-block max-w-[200px] align-bottom"
+              title={currentDirectory}
+            >
               {truncatedPath}
             </span>
           </label>
@@ -126,6 +134,6 @@ export const CreateDirectoryDialog: FC<CreateDirectoryDialogProps> = ({
         </form>
       </div>
     </div>,
-    document.body,
+    document.body
   );
 };

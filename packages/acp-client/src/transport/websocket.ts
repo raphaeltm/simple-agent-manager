@@ -106,11 +106,19 @@ export function createAcpWebSocketTransport(
   // Duck-type check: if wsOrOptions has addEventListener it's a WebSocket
   // (positional args form), otherwise it's an options object.
   let opts: AcpTransportOptions;
-  if ('addEventListener' in wsOrOptions && typeof (wsOrOptions as WebSocket).addEventListener === 'function') {
+  if (
+    'addEventListener' in wsOrOptions &&
+    typeof (wsOrOptions as WebSocket).addEventListener === 'function'
+  ) {
+    if (!onAgentStatus || !onAcpMessage) {
+      throw new Error(
+        'createAcpWebSocketTransport: onAgentStatus and onAcpMessage callbacks are required when calling with the positional-argument form'
+      );
+    }
     opts = {
       ws: wsOrOptions as WebSocket,
-      onAgentStatus: onAgentStatus!,
-      onAcpMessage: onAcpMessage!,
+      onAgentStatus,
+      onAcpMessage,
       onClose,
       onError,
       onLifecycleEvent,
@@ -154,14 +162,23 @@ export function createAcpWebSocketTransport(
   }
 
   function stopHeartbeat() {
-    if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
-    if (pongTimer) { clearTimeout(pongTimer); pongTimer = null; }
+    if (heartbeatTimer) {
+      clearInterval(heartbeatTimer);
+      heartbeatTimer = null;
+    }
+    if (pongTimer) {
+      clearTimeout(pongTimer);
+      pongTimer = null;
+    }
     waitingForPong = false;
   }
 
   function handlePong() {
     waitingForPong = false;
-    if (pongTimer) { clearTimeout(pongTimer); pongTimer = null; }
+    if (pongTimer) {
+      clearTimeout(pongTimer);
+      pongTimer = null;
+    }
   }
 
   ws.addEventListener('message', (event) => {

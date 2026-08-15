@@ -256,4 +256,60 @@ describe('handleGitHubEventForTriggers', () => {
     expect(renderedPrompt).not.toContain('&quot;');
     expect(renderedPrompt).not.toContain('[object Object]');
   });
+
+  // --- Malformed stored filters must NOT auto-fire the trigger ---
+  it('skips a trigger whose stored filters_json is malformed instead of treating it as match-all', async () => {
+    const { env, mockStmt } = createMockEnv();
+    const now = '2026-07-14T00:00:00.000Z';
+
+    mockStmt.raw
+      .mockResolvedValueOnce([['project-1', 'Project One']])
+      .mockResolvedValueOnce([
+        [
+          'trigger-1',
+          'project-1',
+          'user-1',
+          'GitHub issue trigger',
+          null,
+          'active',
+          'github',
+          null,
+          'UTC',
+          1,
+          'Body: {{github.body}}',
+          null,
+          null,
+          'task',
+          null,
+          1,
+          null,
+          0,
+          1,
+          null,
+          null,
+          null,
+          null,
+          now,
+          now,
+        ],
+      ])
+      // filters_json (4th column) is syntactically invalid JSON.
+      .mockResolvedValueOnce([['config-1', 'trigger-1', 'issues', '{not-valid-json', now, now]]);
+
+    const result = await handleGitHubEventForTriggers(env, {
+      deliveryId: 'delivery-malformed-filters',
+      eventType: 'issues',
+      payload: makeIssuesPayload('opened'),
+    });
+
+    // If malformed filters degraded to `{}` ("match everything") the trigger
+    // would fire here — it must not, because we cannot trust the filter
+    // configuration enough to auto-fire a task from it.
+    expect(result).toEqual({
+      processed: false,
+      deliveryId: 'delivery-malformed-filters',
+      matchedTriggers: 0,
+    });
+    expect(admitAndSubmitTriggerExecution).not.toHaveBeenCalled();
+  });
 });

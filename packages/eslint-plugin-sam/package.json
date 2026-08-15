@@ -1,0 +1,24 @@
+{
+  "name": "@simple-agent-manager/eslint-plugin-sam",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Unpublished SAM-specific ESLint rules for deterministic quality gates.",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "lint": "eslint 'src/**/*.js' 'tests/**/*.test.js'",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "eslint": "^9.0.0"
+  },
+  "devDependencies": {
+    "@typescript-eslint/parser": "catalog:",
+    "eslint": "catalog:",
+    "typescript": "catalog:",
+    "vitest": "catalog:"
+  }
+}

@@ -74,6 +74,14 @@ error.** Two distinct sub-classes, both present above:
    liveness — pick a different signal (last *work* activity, a dedicated
    `last_activity_at`, or a derived `MAX()` over child rows) and document why.
 
+6. **Precondition deferrals must not consume destructive retry budgets or leave immortal retry
+   states.** A lifecycle loop may discover work before a later runtime event makes it safe (for
+   example, task completion is recorded before the completing prompt reports idle, or a final
+   snapshot is still pending/degraded). Persist an intent/deadline, defer without incrementing the
+   bounded snapshot/teardown attempt counter, and ensure every persisted retry state remains in the
+   selector or has a separate bounded reconciler. Do not require a prerequisite that the attempted
+   operation itself is responsible for producing.
+
 ## Required Tests
 
 - **Isolation regression:** a throwing step must not prevent later steps from running.
@@ -84,6 +92,10 @@ error.** Two distinct sub-classes, both present above:
 - **Idleness-signal immunity:** seed a subject whose liveness column is CURRENT but
   whose real activity is old, and assert the guard fires. This test MUST fail against
   the liveness-based predicate — verify that once before relying on it.
+- **Deferred-prerequisite convergence:** start from pending, degraded, and missing prerequisite
+  state; run two sweeps; assert the first persists a due intent without spending an attempt and the
+  next eligible sweep claims it. A terminal or precondition-failed row must not disappear from all
+  candidate selectors.
 - Both tests must be proven discriminating: confirm they go red when the isolation or
   the corrected signal is removed.
 
@@ -95,6 +107,7 @@ Before merging a change to a scheduled handler or an idleness predicate:
 - [ ] The completion log names failed steps
 - [ ] The failure-recording path cannot itself abort the handler
 - [ ] No idleness predicate reads a column any keepalive path writes
+- [ ] Precondition deferrals preserve the destructive retry budget and remain durably selectable
 - [ ] Discriminating regression tests exist for both the isolation and the signal
 
 ## References

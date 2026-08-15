@@ -617,6 +617,13 @@ app.get('/api/config/artifacts-enabled', (c) => {
   return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS });
 });
 
+// The VAPID public key is runtime configuration: deploy-generated keys do not
+// exist when the web bundle is built. Never expose the corresponding private key.
+app.get('/api/config/vapid-public-key', (c) => {
+  const publicKey = c.env.VAPID_PUBLIC_KEY?.trim() || null;
+  return c.json({ publicKey });
+});
+
 // Public config — which login providers are configured, so the login surfaces
 // only render a provider button when that provider is actually usable. Google
 // here means the LOGIN client (getGoogleLoginOAuthConfig), never the infra/GCP one.

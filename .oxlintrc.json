@@ -1,0 +1,48 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "categories": {
+    "correctness": "warn"
+  },
+  "env": {
+    "browser": true,
+    "builtin": true,
+    "node": true,
+    "worker": true
+  },
+  "ignorePatterns": ["**/coverage/**", "**/dist/**", "**/node_modules/**", "**/*.cjs", "**/*.js"],
+  "options": {
+    "denyWarnings": false,
+    "reportUnusedDisableDirectives": "off",
+    "typeAware": false,
+    "typeCheck": false
+  },
+  "plugins": ["eslint", "jsx-a11y", "react", "typescript"],
+  "rules": {
+    "eslint/no-console": "off",
+    "typescript/consistent-type-imports": [
+      "warn",
+      {
+        "disallowTypeAnnotations": false,
+        "fixStyle": "inline-type-imports",
+        "prefer": "type-imports"
+      }
+    ],
+    "typescript/no-explicit-any": "warn",
+    "typescript/no-non-null-assertion": "warn",
+    "typescript/no-unused-vars": ["warn", { "argsIgnorePattern": "^_" }]
+  },
+  "overrides": [
+    {
+      "excludeFiles": ["apps/api/src/lib/logger.ts"],
+      "files": ["apps/api/src/**/*.ts"],
+      "rules": {
+        "eslint/no-console": "warn"
+      }
+    }
+  ],
+  "settings": {
+    "react": {
+      "version": "19.2.7"
+    }
+  }
+}

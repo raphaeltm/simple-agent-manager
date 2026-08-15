@@ -30,6 +30,7 @@ import { ulid } from '../../lib/ulid';
 import * as projectDataService from '../../services/project-data';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { startTaskRunnerDO } from '../../services/task-runner-do';
+import { mapRows } from '../row-validation';
 import { logDecision } from './decision-log';
 import { detectStalls, resolveActiveSessionIdsForTaskIds } from './stall-detection';
 
@@ -62,6 +63,18 @@ const routableHandoffSchema = v.object({
   suggestedActions: v.optional(v.array(v.string())),
 });
 
+/**
+ * `SELECT mission_id, status, registered_at FROM orchestrator_missions ...`
+ * shape used by the scheduling cycle. `status`/`registered_at` are NOT NULL
+ * columns (see ./migrations.ts) but stay required (not optional) here — a
+ * row missing them is malformed and should be skipped, not silently defaulted.
+ */
+const SchedulingMissionRowSchema = v.object({
+  mission_id: v.string(),
+  status: v.string(),
+  registered_at: v.number(),
+});
+
 // ── Scheduling Cycle ──────────────────────────────────────────────────────────
 
 /**
@@ -78,17 +91,18 @@ export async function runSchedulingCycle(
 
   // Include completing rows left by the old lifecycle so they receive a
   // terminal cleanup instead of pinning an alarm chain forever.
-  const missions = sql
-    .exec(
-      `SELECT mission_id, status, registered_at
+  const missions = mapRows(
+    sql
+      .exec(
+        `SELECT mission_id, status, registered_at
            FROM orchestrator_missions
            WHERE status IN ('active', 'completing')`
-    )
-    .toArray() as unknown as Array<{
-    mission_id: string;
-    status?: string;
-    registered_at?: number;
-  }>;
+      )
+      .toArray(),
+    SchedulingMissionRowSchema,
+    'orchestrator.scheduling_missions_list',
+    'mission_id'
+  );
 
   if (missions.length === 0) return;
 

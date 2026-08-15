@@ -1,4 +1,4 @@
-import { Alert,EmptyState, PageLayout, SkeletonList } from '@simple-agent-manager/ui';
+import { Alert, EmptyState, PageLayout, SkeletonList } from '@simple-agent-manager/ui';
 import { MessageSquare } from 'lucide-react';
 import { useNavigate } from 'react-router';
 
@@ -45,11 +45,7 @@ export function Chats() {
       )}
 
       {!loading && activeSessions.length > 0 && (
-        <div
-          className="flex flex-col gap-1"
-          role="list"
-          aria-label="Active chat sessions"
-        >
+        <div className="flex flex-col gap-1" role="list" aria-label="Active chat sessions">
           {activeSessions.map((session) => {
             const state = getSessionState(session);
             const dotColor = STATE_COLORS[state];
@@ -61,10 +57,7 @@ export function Chats() {
             return (
               <button
                 key={session.id}
-                role="listitem"
-                onClick={() =>
-                  navigate(`/projects/${session.projectId}/chat/${session.id}`)
-                }
+                onClick={() => navigate(`/projects/${session.projectId}/chat/${session.id}`)}
                 aria-label={`${topic}, ${session.projectName}, ${stateLabel}, ${formatRelativeTime(lastActivity)}`}
                 className="flex items-center gap-3 w-full px-4 py-3 bg-transparent border border-border-default rounded-md text-left cursor-pointer hover:bg-surface-hover transition-colors duration-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
               >
@@ -95,7 +88,10 @@ export function Chats() {
                 </span>
 
                 {/* Relative time — decorative; announced via aria-label */}
-                <span aria-hidden="true" className="shrink-0 text-xs text-fg-muted whitespace-nowrap">
+                <span
+                  aria-hidden="true"
+                  className="shrink-0 text-xs text-fg-muted whitespace-nowrap"
+                >
                   {formatRelativeTime(lastActivity)}
                 </span>
               </button>

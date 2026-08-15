@@ -52,9 +52,7 @@ vi.mock('../../../src/lib/logger', () => ({
   },
 }));
 
-const { CodexRefreshLock } = await import(
-  '../../../src/durable-objects/codex-refresh-lock'
-);
+const { CodexRefreshLock } = await import('../../../src/durable-objects/codex-refresh-lock');
 const { decrypt, encrypt } = await import('../../../src/services/encryption');
 
 // -----------------------------------------------------------------------
@@ -113,7 +111,7 @@ function createDO(
 async function createDOWithRotatedToken(
   token: string,
   ageMs: number,
-  envOverrides: Record<string, unknown> = {},
+  envOverrides: Record<string, unknown> = {}
 ) {
   const setup = createDO(envOverrides, await createRotatedTokenStorage(token, ageMs));
   setupCredentialFound(setup.env);
@@ -161,13 +159,13 @@ function mockSuccessfulRefreshResponse(
     access_token: 'new-access',
     refresh_token: 'new-refresh',
     id_token: 'new-id',
-  },
+  }
 ) {
   vi.mocked(fetch).mockResolvedValue(
     new Response(JSON.stringify(tokens), {
       status: 200,
       headers: { 'Content-Type': 'application/json' },
-    }),
+    })
   );
 }
 
@@ -201,7 +199,7 @@ function setupCredentialFound(env: ReturnType<typeof createMockEnv>) {
 
 function expectNoCredentialUpdate(env: ReturnType<typeof createMockEnv>) {
   expect(vi.mocked(env.DATABASE.prepare)).not.toHaveBeenCalledWith(
-    expect.stringContaining('UPDATE credentials'),
+    expect.stringContaining('UPDATE credentials')
   );
 }
 
@@ -239,9 +237,7 @@ describe('CodexRefreshLock', () => {
 
   it('returns 400 when userId is missing', async () => {
     const { do: doInstance } = createDO();
-    const res = await doInstance.fetch(
-      makeRequest({ refreshToken: 'rt_test' }),
-    );
+    const res = await doInstance.fetch(makeRequest({ refreshToken: 'rt_test' }));
     expect(res.status).toBe(400);
     const json = await res.json();
     expect(json.error).toBe('invalid_request');
@@ -253,9 +249,7 @@ describe('CodexRefreshLock', () => {
 
   it('returns 401 when no credential is found for user', async () => {
     const { do: doInstance } = createDO();
-    const res = await doInstance.fetch(
-      makeRequest({ refreshToken: 'rt_test', userId: 'user-1' }),
-    );
+    const res = await doInstance.fetch(makeRequest({ refreshToken: 'rt_test', userId: 'user-1' }));
     expect(res.status).toBe(401);
     const json = await res.json();
     expect(json.error).toBe('refresh_token_invalidated');
@@ -270,9 +264,7 @@ describe('CodexRefreshLock', () => {
     setupCredentialFound(env);
     vi.mocked(decrypt).mockRejectedValue(new Error('bad key'));
 
-    const res = await doInstance.fetch(
-      makeRequest({ refreshToken: 'rt_test', userId: 'user-1' }),
-    );
+    const res = await doInstance.fetch(makeRequest({ refreshToken: 'rt_test', userId: 'user-1' }));
     expect(res.status).toBe(500);
     const json = await res.json();
     expect(json.error).toBe('internal_error');
@@ -284,9 +276,7 @@ describe('CodexRefreshLock', () => {
     setupCredentialFound(env);
     vi.mocked(decrypt).mockResolvedValue('not-json{{{');
 
-    const res = await doInstance.fetch(
-      makeRequest({ refreshToken: 'rt_test', userId: 'user-1' }),
-    );
+    const res = await doInstance.fetch(makeRequest({ refreshToken: 'rt_test', userId: 'user-1' }));
     expect(res.status).toBe(500);
     const json = await res.json();
     expect(json.error).toBe('internal_error');
@@ -305,7 +295,7 @@ describe('CodexRefreshLock', () => {
       makeRequest({
         refreshToken: 'rt_stale_token', // does not match 'stored-refresh'
         userId: 'user-1',
-      }),
+      })
     );
     expect(res.status).toBe(200);
     const json = await res.json();
@@ -333,7 +323,7 @@ describe('CodexRefreshLock', () => {
         makeRequest({
           refreshToken: 'old-refresh', // stale, but recently rotated
           userId: 'user-1',
-        }),
+        })
       );
       expect(res.status).toBe(200);
       const json = await res.json();
@@ -348,7 +338,7 @@ describe('CodexRefreshLock', () => {
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
       expect(mockLogInfo).toHaveBeenCalledWith(
         'codex_refresh.grace_window_hit',
-        expect.objectContaining({ userId: 'user-1' }),
+        expect.objectContaining({ userId: 'user-1' })
       );
     });
 
@@ -370,11 +360,9 @@ describe('CodexRefreshLock', () => {
       {
         name: 'token is older than the configured custom grace window',
         setup: () =>
-          createDOWithRotatedToken(
-            'recently-rotated',
-            2_000,
-            { CODEX_REFRESH_GRACE_WINDOW_MS: '1000' },
-          ),
+          createDOWithRotatedToken('recently-rotated', 2_000, {
+            CODEX_REFRESH_GRACE_WINDOW_MS: '1000',
+          }),
         refreshToken: 'recently-rotated',
       },
     ])('returns stale tokens when $name', async ({ setup, refreshToken }) => {
@@ -384,7 +372,7 @@ describe('CodexRefreshLock', () => {
         makeRequest({
           refreshToken,
           userId: 'user-1',
-        }),
+        })
       );
       expect(res.status).toBe(200);
       const json = await res.json();
@@ -405,7 +393,7 @@ describe('CodexRefreshLock', () => {
         makeRequest({
           refreshToken: 'stored-refresh', // matches stored → fresh path
           userId: 'user-1',
-        }),
+        })
       );
 
       // The old 'stored-refresh' should be recorded in rotated-tokens.
@@ -434,14 +422,13 @@ describe('CodexRefreshLock', () => {
         makeRequest({
           refreshToken: 'stored-refresh',
           userId: 'user-1',
-        }),
+        })
       );
 
       // No rotation happened — rotated-tokens should not be written.
       const rotatedTokens = ctx.storage._store.get('rotated-tokens');
       expect(rotatedTokens).toBeUndefined();
     });
-
   });
 
   // -----------------------------------------------------------------------
@@ -459,15 +446,15 @@ describe('CodexRefreshLock', () => {
           refresh_token: 'new-refresh',
           id_token: 'new-id',
         }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      ),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
     );
 
     const res = await doInstance.fetch(
       makeRequest({
         refreshToken: 'stored-refresh',
         userId: 'user-1',
-      }),
+      })
     );
     expect(res.status).toBe(200);
     const json = await res.json();
@@ -483,7 +470,7 @@ describe('CodexRefreshLock', () => {
     // Credential re-encrypted and persisted.
     expect(vi.mocked(encrypt)).toHaveBeenCalledTimes(1);
     expect(env.DATABASE.prepare).toHaveBeenCalledWith(
-      expect.stringContaining('UPDATE credentials'),
+      expect.stringContaining('UPDATE credentials')
     );
   });
 
@@ -563,8 +550,8 @@ describe('CodexRefreshLock', () => {
             refresh_token: 'new-refresh',
             id_token: 'new-id',
           }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
       );
 
       const res = await doInstance.fetch(
@@ -572,7 +559,7 @@ describe('CodexRefreshLock', () => {
           refreshToken: 'stored-refresh',
           userId: 'user-1',
           projectId: 'proj-a',
-        }),
+        })
       );
 
       expect(res.status).toBe(200);
@@ -595,7 +582,7 @@ describe('CodexRefreshLock', () => {
           refreshToken: 'stored-refresh',
           userId: 'user-1',
           projectId: 'proj-a',
-        }),
+        })
       );
 
       // Inactive project row blocks — return 401, do not fall back.
@@ -611,7 +598,7 @@ describe('CodexRefreshLock', () => {
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
       expect(mockLogWarn).toHaveBeenCalledWith(
         'codex_refresh.inactive_project_credential_no_fallback',
-        expect.objectContaining({ userId: 'user-1', projectId: 'proj-a' }),
+        expect.objectContaining({ userId: 'user-1', projectId: 'proj-a' })
       );
     });
 
@@ -628,8 +615,8 @@ describe('CodexRefreshLock', () => {
             access_token: 'new-access',
             refresh_token: 'new-refresh',
           }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
       );
 
       const res = await doInstance.fetch(
@@ -637,7 +624,7 @@ describe('CodexRefreshLock', () => {
           refreshToken: 'stored-refresh',
           userId: 'user-1',
           projectId: 'proj-a',
-        }),
+        })
       );
 
       expect(res.status).toBe(200);
@@ -653,14 +640,14 @@ describe('CodexRefreshLock', () => {
       });
 
       vi.mocked(fetch).mockResolvedValue(
-        new Response(
-          JSON.stringify({ access_token: 'new', refresh_token: 'new-rt' }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+        new Response(JSON.stringify({ access_token: 'new', refresh_token: 'new-rt' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
       );
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
 
       expect(res.status).toBe(200);
@@ -702,9 +689,7 @@ describe('CodexRefreshLock', () => {
         iv: 'test-iv',
         is_active: 1,
       };
-      const projectFirst = vi
-        .fn()
-        .mockResolvedValue(opts.projectId ? credRow : null);
+      const projectFirst = vi.fn().mockResolvedValue(opts.projectId ? credRow : null);
       const userFirst = vi.fn().mockResolvedValue(credRow);
       const projectSelectBind = vi.fn().mockReturnValue({ first: projectFirst });
       const userSelectBind = vi.fn().mockReturnValue({ first: userFirst });
@@ -744,7 +729,7 @@ describe('CodexRefreshLock', () => {
       mockSuccessfulRefreshResponse();
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
 
       expect(res.status).toBe(200);
@@ -776,7 +761,7 @@ describe('CodexRefreshLock', () => {
           refreshToken: 'stored-refresh',
           userId: 'user-1',
           projectId: 'proj-a',
-        }),
+        })
       );
 
       expect(res.status).toBe(200);
@@ -796,7 +781,7 @@ describe('CodexRefreshLock', () => {
       mockSuccessfulRefreshResponse();
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
 
       expect(res.status).toBe(200);
@@ -816,7 +801,7 @@ describe('CodexRefreshLock', () => {
 
       const res = await doInstance.fetch(
         // Mismatched token, no grace entry → stale branch, no rotation.
-        makeRequest({ refreshToken: 'rt_stale_token', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'rt_stale_token', userId: 'user-1' })
       );
 
       expect(res.status).toBe(200);
@@ -835,7 +820,7 @@ describe('CodexRefreshLock', () => {
       mockSuccessfulRefreshResponse();
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
 
       // Legacy persist already succeeded — a cc mirror failure must not 500
@@ -845,7 +830,7 @@ describe('CodexRefreshLock', () => {
       expect(json.refresh_token).toBe('new-refresh');
       expect(mockLogError).toHaveBeenCalledWith(
         'codex_refresh.cc_sync_failed',
-        expect.objectContaining({ userId: 'user-1', credentialId: 'cred-1' }),
+        expect.objectContaining({ userId: 'user-1', credentialId: 'cred-1' })
       );
       // Invariant: the desync diagnostic must never carry token material —
       // not the encrypted ciphertext, the iv, or any decrypted secret.
@@ -855,13 +840,13 @@ describe('CodexRefreshLock', () => {
           encryptedToken: expect.anything(),
           ciphertext: expect.anything(),
           iv: expect.anything(),
-        }),
+        })
       );
       // Value-content check: even though the freshly-encrypted ciphertext/iv are
       // in lexical scope at the catch block, the serialized log payload must not
       // contain their VALUES under ANY key (e.g. echoed inside an error message).
       const syncFailCall = mockLogError.mock.calls.find(
-        (call) => call[0] === 'codex_refresh.cc_sync_failed',
+        (call) => call[0] === 'codex_refresh.cc_sync_failed'
       );
       expect(syncFailCall).toBeDefined();
       const syncFailPayload = JSON.stringify(syncFailCall?.[1] ?? {});
@@ -877,8 +862,7 @@ describe('CodexRefreshLock', () => {
       // must follow that same fallback and target the IS NULL (user) scope,
       // NOT the project equality predicate, or the rotated token lands on a row
       // that resolution never reads.
-      const { ccBind, getCcSql, projectFirst, userFirst } =
-        setupDualWriteCredentials(env);
+      const { ccBind, getCcSql, projectFirst, userFirst } = setupDualWriteCredentials(env);
       mockSuccessfulRefreshResponse();
 
       const res = await doInstance.fetch(
@@ -886,7 +870,7 @@ describe('CodexRefreshLock', () => {
           refreshToken: 'stored-refresh',
           userId: 'user-1',
           projectId: 'proj-a',
-        }),
+        })
       );
 
       expect(res.status).toBe(200);
@@ -911,7 +895,7 @@ describe('CodexRefreshLock', () => {
       mockSuccessfulRefreshResponse();
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
 
       // Still a successful refresh — the legacy persist already succeeded.
@@ -922,7 +906,7 @@ describe('CodexRefreshLock', () => {
           userId: 'user-1',
           credentialId: 'cred-1',
           scopeProjectId: null,
-        }),
+        })
       );
       // The desync diagnostic must never carry token material.
       expect(mockLogWarn).toHaveBeenCalledWith(
@@ -932,12 +916,12 @@ describe('CodexRefreshLock', () => {
           ciphertext: expect.anything(),
           iv: expect.anything(),
           refresh_token: expect.anything(),
-        }),
+        })
       );
       // Value-content check: the serialized payload must not contain the token
       // VALUES under any key, not just exclude the known key names.
       const noRowCall = mockLogWarn.mock.calls.find(
-        (call) => call[0] === 'codex_refresh.cc_sync_no_row',
+        (call) => call[0] === 'codex_refresh.cc_sync_no_row'
       );
       expect(noRowCall).toBeDefined();
       const noRowPayload = JSON.stringify(noRowCall?.[1] ?? {});
@@ -952,7 +936,7 @@ describe('CodexRefreshLock', () => {
       mockSuccessfulRefreshResponse();
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
 
       expect(res.status).toBe(200);
@@ -977,12 +961,12 @@ describe('CodexRefreshLock', () => {
         },
         {
           'rate-limit:cred-1': { windowStart: currentWindowStart, count: 3 },
-        },
+        }
       );
       const { legacyBind, ccBind } = setupDualWriteCredentials(env);
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
 
       expect(res.status).toBe(429);
@@ -1002,25 +986,27 @@ describe('CodexRefreshLock', () => {
 
   describe('MEDIUM #5 — rate limit', () => {
     it('counts successful refresh requests in ctx.storage', async () => {
-      const { do: doInstance, env, ctx } = createDO({
+      const {
+        do: doInstance,
+        env,
+        ctx,
+      } = createDO({
         RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '5',
       });
       setupCredentialFound(env);
       vi.mocked(fetch).mockResolvedValue(
-        new Response(
-          JSON.stringify({ access_token: 'a', refresh_token: 'r' }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+        new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
       );
 
-      await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
-      );
+      await doInstance.fetch(makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }));
 
       // Rate-limit state must have been written at least once, keyed per-credential.
       expect(ctx.storage.put).toHaveBeenCalledWith(
         'rate-limit:cred-1',
-        expect.objectContaining({ count: expect.any(Number) }),
+        expect.objectContaining({ count: expect.any(Number) })
       );
       const stored = ctx.storage._store.get('rate-limit:cred-1') as {
         count: number;
@@ -1034,7 +1020,11 @@ describe('CodexRefreshLock', () => {
       const now = Math.floor(Date.now() / 1000);
       const currentWindowStart = Math.floor(now / windowSeconds) * windowSeconds;
 
-      const { do: doInstance, env, ctx } = createDO(
+      const {
+        do: doInstance,
+        env,
+        ctx,
+      } = createDO(
         {
           RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '3',
           RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS: windowSeconds.toString(),
@@ -1046,7 +1036,7 @@ describe('CodexRefreshLock', () => {
       setupCredentialFound(env);
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
 
       expect(res.status).toBe(429);
@@ -1070,7 +1060,11 @@ describe('CodexRefreshLock', () => {
       const currentWindowStart = Math.floor(now / windowSeconds) * windowSeconds;
       const stalePastWindowStart = currentWindowStart - windowSeconds;
 
-      const { do: doInstance, env, ctx } = createDO(
+      const {
+        do: doInstance,
+        env,
+        ctx,
+      } = createDO(
         {
           RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '3',
           RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS: windowSeconds.toString(),
@@ -1081,14 +1075,14 @@ describe('CodexRefreshLock', () => {
       );
       setupCredentialFound(env);
       vi.mocked(fetch).mockResolvedValue(
-        new Response(
-          JSON.stringify({ access_token: 'a', refresh_token: 'r' }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+        new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
       );
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
 
       expect(res.status).toBe(200);
@@ -1107,7 +1101,11 @@ describe('CodexRefreshLock', () => {
       const currentWindowStart = Math.floor(now / windowSeconds) * windowSeconds;
 
       // A DIFFERENT credential is already at its limit. cred-1 has no entry.
-      const { do: doInstance, env, ctx } = createDO(
+      const {
+        do: doInstance,
+        env,
+        ctx,
+      } = createDO(
         {
           RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '3',
           RATE_LIMIT_CODEX_REFRESH_WINDOW_SECONDS: windowSeconds.toString(),
@@ -1118,14 +1116,14 @@ describe('CodexRefreshLock', () => {
       );
       setupCredentialFound(env);
       vi.mocked(fetch).mockResolvedValue(
-        new Response(
-          JSON.stringify({ access_token: 'a', refresh_token: 'r' }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+        new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
       );
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
 
       // cred-1 is unaffected by other-cred's exhausted bucket.
@@ -1140,13 +1138,17 @@ describe('CodexRefreshLock', () => {
     });
 
     it('stale-token branch does NOT consume rate-limit budget', async () => {
-      const { do: doInstance, env, ctx } = createDO({
+      const {
+        do: doInstance,
+        env,
+        ctx,
+      } = createDO({
         RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '5',
       });
       setupCredentialFound(env);
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'rt_stale_token', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'rt_stale_token', userId: 'user-1' })
       );
 
       expect(res.status).toBe(200);
@@ -1154,23 +1156,18 @@ describe('CodexRefreshLock', () => {
       expect(json.stale).toBe(true);
 
       // Cached/stale responses must not touch the rate-limit bucket.
-      expect(ctx.storage.put).not.toHaveBeenCalledWith(
-        'rate-limit:cred-1',
-        expect.anything(),
-      );
+      expect(ctx.storage.put).not.toHaveBeenCalledWith('rate-limit:cred-1', expect.anything());
       expect(ctx.storage._store.has('rate-limit:cred-1')).toBe(false);
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     });
 
     it('grace-window branch does NOT consume rate-limit budget', async () => {
-      const { do: doInstance, ctx } = await createDOWithRotatedToken(
-        'old-refresh',
-        60_000,
-        { RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '5' },
-      );
+      const { do: doInstance, ctx } = await createDOWithRotatedToken('old-refresh', 60_000, {
+        RATE_LIMIT_CODEX_REFRESH_PER_HOUR: '5',
+      });
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'old-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'old-refresh', userId: 'user-1' })
       );
 
       expect(res.status).toBe(200);
@@ -1178,10 +1175,7 @@ describe('CodexRefreshLock', () => {
       expect(json.refresh_token).toBe('stored-refresh');
 
       // Grace-window hits return stored tokens directly — no budget consumed.
-      expect(ctx.storage.put).not.toHaveBeenCalledWith(
-        'rate-limit:cred-1',
-        expect.anything(),
-      );
+      expect(ctx.storage.put).not.toHaveBeenCalledWith('rate-limit:cred-1', expect.anything());
       expect(ctx.storage._store.has('rate-limit:cred-1')).toBe(false);
       expect(vi.mocked(fetch)).not.toHaveBeenCalled();
     });
@@ -1206,12 +1200,12 @@ describe('CodexRefreshLock', () => {
             id_token: 'new-id',
             scope: 'openid offline_access admin:write',
           }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
       );
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
       expect(res.status).toBe(502);
       const json = await res.json();
@@ -1220,7 +1214,7 @@ describe('CodexRefreshLock', () => {
       expectNoCredentialUpdate(env);
       expect(mockLogWarn).toHaveBeenCalledWith(
         'codex_refresh.unexpected_scopes_blocked',
-        expect.objectContaining({ unexpectedScopes: 'admin:write' }),
+        expect.objectContaining({ unexpectedScopes: 'admin:write' })
       );
     });
 
@@ -1237,12 +1231,12 @@ describe('CodexRefreshLock', () => {
             refresh_token: 'new-refresh',
             scope: 'openid offline_access',
           }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
       );
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
       expect(res.status).toBe(200);
       expect(vi.mocked(encrypt)).toHaveBeenCalled();
@@ -1264,12 +1258,12 @@ describe('CodexRefreshLock', () => {
             refresh_token: 'new-refresh',
             scope: 'openid offline_access admin:write', // unexpected by default
           }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
       );
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
       expect(res.status).toBe(502);
       const json = await res.json();
@@ -1278,7 +1272,7 @@ describe('CodexRefreshLock', () => {
       expectNoCredentialUpdate(env);
       expect(mockLogWarn).toHaveBeenCalledWith(
         'codex_refresh.unexpected_scopes_blocked',
-        expect.objectContaining({ unexpectedScopes: 'admin:write' }),
+        expect.objectContaining({ unexpectedScopes: 'admin:write' })
       );
     });
 
@@ -1293,12 +1287,12 @@ describe('CodexRefreshLock', () => {
             refresh_token: 'new-refresh',
             scope: 'openid offline_access admin:write anything:goes',
           }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
       );
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
       expect(res.status).toBe(200);
       expect(vi.mocked(encrypt)).toHaveBeenCalled();
@@ -1317,17 +1311,17 @@ describe('CodexRefreshLock', () => {
             refresh_token: 'new-refresh',
             scope: 42, // non-string scope
           }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
       );
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
       expect(res.status).toBe(502);
       expect(mockLogWarn).toHaveBeenCalledWith(
         'codex_refresh.scope_validation_nonstring',
-        expect.objectContaining({ scopeType: 'number' }),
+        expect.objectContaining({ scopeType: 'number' })
       );
       expect(vi.mocked(encrypt)).not.toHaveBeenCalled();
       expectNoCredentialUpdate(env);
@@ -1347,17 +1341,17 @@ describe('CodexRefreshLock', () => {
             refresh_token: 'new-refresh',
             scope: 42, // non-string scope
           }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
       );
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
       expect(res.status).toBe(502);
       expect(mockLogWarn).toHaveBeenCalledWith(
         'codex_refresh.scope_validation_nonstring',
-        expect.objectContaining({ scopeType: 'number' }),
+        expect.objectContaining({ scopeType: 'number' })
       );
       expect(vi.mocked(encrypt)).not.toHaveBeenCalled();
       expectNoCredentialUpdate(env);
@@ -1375,12 +1369,12 @@ describe('CodexRefreshLock', () => {
             access_token: 'new-access',
             refresh_token: 'new-refresh',
           }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } },
-        ),
+          { status: 200, headers: { 'Content-Type': 'application/json' } }
+        )
       );
 
       const res = await doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
       );
       expect(res.status).toBe(200);
     });
@@ -1399,15 +1393,12 @@ describe('CodexRefreshLock', () => {
     vi.mocked(fetch).mockImplementation(
       () =>
         new Promise((_, reject) => {
-          setTimeout(
-            () => reject(new DOMException('Aborted', 'AbortError')),
-            5,
-          );
-        }),
+          setTimeout(() => reject(new DOMException('Aborted', 'AbortError')), 5);
+        })
     );
 
     const res = await doInstance.fetch(
-      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
     );
     expect(res.status).toBe(502);
     const json = await res.json();
@@ -1421,7 +1412,7 @@ describe('CodexRefreshLock', () => {
     vi.mocked(fetch).mockRejectedValue(new TypeError('Network error'));
 
     const res = await doInstance.fetch(
-      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
     );
     expect(res.status).toBe(502);
     const json = await res.json();
@@ -1433,18 +1424,21 @@ describe('CodexRefreshLock', () => {
     setupCredentialFound(env);
 
     vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({
-        error: 'invalid_grant',
-        error_description: 'Token has been revoked',
-        debug_info: 'sensitive-data-should-not-leak',
-      }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json; charset=utf-8' },
-      }),
+      new Response(
+        JSON.stringify({
+          error: 'invalid_grant',
+          error_description: 'Token has been revoked',
+          debug_info: 'sensitive-data-should-not-leak',
+        }),
+        {
+          status: 401,
+          headers: { 'Content-Type': 'application/json; charset=utf-8' },
+        }
+      )
     );
 
     const res = await doInstance.fetch(
-      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
     );
     expect(res.status).toBe(401);
     const json = await res.json();
@@ -1462,21 +1456,24 @@ describe('CodexRefreshLock', () => {
     // revoked/logged-out token produces in production:
     //   { error: { message, type, param, code } }
     vi.mocked(fetch).mockResolvedValue(
-      new Response(JSON.stringify({
-        error: {
-          message: 'Your session has ended. Please log in again.',
-          type: 'invalid_request_error',
-          param: null,
-          code: 'refresh_token_invalidated',
-        },
-      }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      }),
+      new Response(
+        JSON.stringify({
+          error: {
+            message: 'Your session has ended. Please log in again.',
+            type: 'invalid_request_error',
+            param: null,
+            code: 'refresh_token_invalidated',
+          },
+        }),
+        {
+          status: 401,
+          headers: { 'Content-Type': 'application/json' },
+        }
+      )
     );
 
     const res = await doInstance.fetch(
-      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
     );
     expect(res.status).toBe(401);
     const json = await res.json();
@@ -1486,7 +1483,7 @@ describe('CodexRefreshLock', () => {
 
     // Structured diagnostic captures the rejection reason — and NEVER the raw body.
     const warnCall = mockLogWarn.mock.calls.find(
-      ([event]) => event === 'codex_refresh.upstream_rejected',
+      ([event]) => event === 'codex_refresh.upstream_rejected'
     );
     expect(warnCall).toBeDefined();
     const fields = warnCall?.[1] as Record<string, unknown>;
@@ -1505,15 +1502,92 @@ describe('CodexRefreshLock', () => {
       new Response('<html>Server Error</html>', {
         status: 500,
         headers: { 'Content-Type': 'text/html' },
-      }),
+      })
     );
 
     const res = await doInstance.fetch(
-      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
     );
     expect(res.status).toBe(500);
     const json = await res.json();
     expect(json.error).toBe('upstream_error');
+  });
+
+  // The upstream error-body parser replaced a blind
+  // `JSON.parse(rawBody) as Record<string, unknown>` cast with `as unknown` +
+  // `maybeJsonRecord` (.claude/rules/51). These bodies are syntactically valid
+  // JSON but not the expected object shape, so JSON.parse itself does not
+  // throw — the old blind cast relied on property access on the wrong shape
+  // (e.g. `null.error`) throwing and being swallowed by the surrounding
+  // try/catch to reach the same generic-error outcome. Prove the new
+  // maybeJsonRecord guard reaches the identical response without relying on
+  // that incidental exception, for every non-object JSON shape upstream could
+  // plausibly send.
+  it.each([
+    ['a bare JSON array', JSON.stringify(['unexpected', 'array'])],
+    ['a bare JSON null', 'null'],
+    ['a bare JSON number', '500'],
+    ['a bare JSON string', '"oops"'],
+    ['a bare JSON boolean', 'false'],
+  ])(
+    'returns the generic safe error for a garbage-but-valid-JSON upstream body (%s)',
+    async (_label, body) => {
+      const { do: doInstance, env } = createDO();
+      setupCredentialFound(env);
+      mockLogWarn.mockClear();
+
+      vi.mocked(fetch).mockResolvedValue(
+        new Response(body, {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      );
+
+      const res = await doInstance.fetch(
+        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
+      );
+
+      expect(res.status).toBe(503);
+      const json = await res.json();
+      expect(json).toEqual({ error: 'upstream_error' });
+      expect(json.error_description).toBeUndefined();
+
+      // The rejection is still logged with no error code/message extracted —
+      // confirms the garbage body reached the diagnostic path without throwing
+      // an unhandled error out of runRefresh (which would have surfaced as a
+      // 500 internal_error instead of the upstream's own 503 status).
+      const warnCall = mockLogWarn.mock.calls.find(
+        ([event]) => event === 'codex_refresh.upstream_rejected'
+      );
+      expect(warnCall).toBeDefined();
+      const fields = warnCall?.[1] as Record<string, unknown>;
+      expect(fields.upstreamErrorCode).toBeNull();
+      expect(fields.upstreamErrorMessage).toBeNull();
+      expect(fields.status).toBe(503);
+    }
+  );
+
+  it('does not surface an existingFile-style nested-array error field as a code/message', async () => {
+    // parsed.error being an array (not a string, not a plain object) hits the
+    // nested-form branch; maybeJsonRecord converts it to an index-keyed
+    // object with no .code/.message, so neither is extracted — matching the
+    // pre-fix blind-cast behavior for this shape.
+    const { do: doInstance, env } = createDO();
+    setupCredentialFound(env);
+
+    vi.mocked(fetch).mockResolvedValue(
+      new Response(JSON.stringify({ error: ['nested', 'array'] }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    );
+
+    const res = await doInstance.fetch(
+      makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })
+    );
+    expect(res.status).toBe(401);
+    const json = await res.json();
+    expect(json).toEqual({ error: 'upstream_error' });
   });
 
   // -----------------------------------------------------------------------
@@ -1533,15 +1607,15 @@ describe('CodexRefreshLock', () => {
           access_token: 'new',
           refresh_token: 'new-rt',
         }),
-        { status: 200, headers: { 'Content-Type': 'application/json' } },
-      ),
+        { status: 200, headers: { 'Content-Type': 'application/json' } }
+      )
     );
 
     await doInstance.fetch(
       makeRequest({
         refreshToken: 'stored-refresh',
         userId: 'user-1',
-      }),
+      })
     );
 
     expect(vi.mocked(fetch)).toHaveBeenCalledTimes(1);
@@ -1581,7 +1655,7 @@ describe('CodexRefreshLock', () => {
           refresh_token: currentRefresh,
           id_token: 'stored-id',
         },
-      }),
+      })
     );
     vi.mocked(encrypt).mockImplementation(async () => {
       currentRefresh = 'new-refresh';
@@ -1599,12 +1673,8 @@ describe('CodexRefreshLock', () => {
     // Two overlapping refreshes for the same user, both presenting the
     // pre-rotation token.
     const [resA, resB] = await Promise.all([
-      doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
-      ),
-      doInstance.fetch(
-        makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' }),
-      ),
+      doInstance.fetch(makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })),
+      doInstance.fetch(makeRequest({ refreshToken: 'stored-refresh', userId: 'user-1' })),
     ]);
 
     // The consumed token must be presented to OpenAI exactly once.
@@ -1625,7 +1695,7 @@ describe('CodexRefreshLock', () => {
     // OpenAI again.
     expect(mockLogInfo).toHaveBeenCalledWith(
       'codex_refresh.grace_window_hit',
-      expect.objectContaining({ userId: 'user-1' }),
+      expect.objectContaining({ userId: 'user-1' })
     );
   });
 });

@@ -107,4 +107,49 @@ describe('origin CA certificate issuance', () => {
       'hostnames are invalid'
     );
   });
+
+  it('surfaces a clear error for a non-JSON Cloudflare response body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('<html>upstream error</html>', {
+        status: 502,
+        headers: { 'Content-Type': 'text/html' },
+      })
+    );
+
+    await expect(issueNodeOriginCertificate(env(), CSR, fetchMock)).rejects.toThrow(
+      'Cloudflare Origin CA returned non-JSON response (502)'
+    );
+  });
+
+  it('surfaces a clear error instead of crashing on a literal JSON null response', async () => {
+    // Regression: the previous blind cast (`as CloudflareOriginCaResponse`)
+    // let `payload` be `null`. `payload.result?.certificate` then threw an
+    // uncaught TypeError ("Cannot read properties of null") instead of the
+    // domain-specific "non-JSON response" error every other malformed-body
+    // path already produces.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response('null', { status: 200, headers: { 'Content-Type': 'application/json' } })
+      );
+
+    await expect(issueNodeOriginCertificate(env(), CSR, fetchMock)).rejects.toThrow(
+      'Cloudflare Origin CA returned non-JSON response (200)'
+    );
+  });
+
+  it('gracefully degrades a JSON array response to the issuance-failed error (does not crash)', async () => {
+    // Arrays are typeof 'object' in JS, so the old blind cast tolerated them
+    // too (property access just returned undefined). The schema-validated
+    // path preserves that tolerance rather than rejecting it as non-JSON.
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(
+        new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })
+      );
+
+    await expect(issueNodeOriginCertificate(env(), CSR, fetchMock)).rejects.toThrow(
+      'Cloudflare Origin CA certificate issuance failed (200)'
+    );
+  });
 });

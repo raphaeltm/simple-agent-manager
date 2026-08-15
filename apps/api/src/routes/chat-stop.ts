@@ -112,6 +112,7 @@ async function stopTaskBackedSession(
   await cleanupTerminalTaskResources(env, taskId, {
     status: cleanupStatus,
     errorMessage: cleanupStatus === 'failed' ? (task?.errorMessage ?? null) : 'Archived by user',
+    destructiveSessionEnd: true,
     logContext: {
       projectId: context.projectId,
       sessionId: context.sessionId,
@@ -136,11 +137,13 @@ export function registerChatStopRoute(chatRoutes: Hono<{ Bindings: Env }>): void
 
     const context = { projectId, sessionId, userId };
     const backingTask = await ensureSessionTaskBacked(db, c.env, {
-      projectId, sessionId, fallbackUserId: userId,
+      projectId,
+      sessionId,
+      fallbackUserId: userId,
     });
     await stopTaskBackedSession(c.env, db, backingTask.id, context);
     await chatPersistence.stopChatSession(c.env, projectId, sessionId);
 
-    return c.json({ status: "stopped", workspaceDeleted: true });
+    return c.json({ status: 'stopped', workspaceDeleted: true });
   });
 }

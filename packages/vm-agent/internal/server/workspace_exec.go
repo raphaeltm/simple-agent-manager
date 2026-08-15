@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -17,6 +18,8 @@ func standaloneWorkspaceCommandPath(command string) (string, error) {
 	switch command {
 	case "cat":
 		return "/usr/bin/cat", nil
+	case "cp":
+		return "/usr/bin/cp", nil
 	case "find":
 		return "/usr/bin/find", nil
 	case "gh":
@@ -31,6 +34,10 @@ func standaloneWorkspaceCommandPath(command string) (string, error) {
 		return "/usr/bin/pwd", nil
 	case "stat":
 		return "/usr/bin/stat", nil
+	case "rm":
+		return "/usr/bin/rm", nil
+	case "tar":
+		return "/usr/bin/tar", nil
 	case "tee":
 		return "/usr/bin/tee", nil
 	default:
@@ -60,8 +67,18 @@ func dockerWorkspaceExecCommand(ctx context.Context, dockerArgs []string) *exec.
 }
 
 func (s *Server) workspaceExecCommand(ctx context.Context, containerID, user, workDir string, args ...string) (*exec.Cmd, error) {
+	return s.workspaceExecCommandWithEnv(ctx, containerID, user, workDir, nil, args...)
+}
+
+func (s *Server) workspaceExecCommandWithEnv(ctx context.Context, containerID, user, workDir string, extraEnv []string, args ...string) (*exec.Cmd, error) {
 	if err := validateWorkspaceExecArgs(args); err != nil {
 		return nil, err
+	}
+	for _, entry := range extraEnv {
+		key, value, ok := strings.Cut(entry, "=")
+		if !ok || key == "" || strings.ContainsAny(key, "\x00\r\n") || strings.ContainsAny(value, "\x00\r\n") {
+			return nil, fmt.Errorf("invalid workspace exec environment entry")
+		}
 	}
 
 	if s.isStandaloneWorkspaceExec() {
@@ -73,10 +90,16 @@ func (s *Server) workspaceExecCommand(ctx context.Context, containerID, user, wo
 		if workDir != "" {
 			cmd.Dir = workDir
 		}
+		if len(extraEnv) > 0 {
+			cmd.Env = append(os.Environ(), extraEnv...)
+		}
 		return cmd, nil
 	}
 
 	dockerArgs := []string{"exec", "-i"}
+	for _, entry := range extraEnv {
+		dockerArgs = append(dockerArgs, "-e", entry)
+	}
 	if user != "" {
 		dockerArgs = append(dockerArgs, "-u", user)
 	}

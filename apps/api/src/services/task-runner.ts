@@ -59,11 +59,7 @@ export async function cleanupTaskRun(
     await new Promise((resolve) => setTimeout(resolve, cleanupDelay));
   }
 
-  const [task] = await db
-    .select()
-    .from(schema.tasks)
-    .where(eq(schema.tasks.id, taskId))
-    .limit(1);
+  const [task] = await db.select().from(schema.tasks).where(eq(schema.tasks.id, taskId)).limit(1);
 
   if (!task || !task.workspaceId) {
     return;
@@ -102,7 +98,11 @@ export async function cleanupTaskRun(
   // workspace.userId === requiredUserId, so this is a no-op for the caller-scoped paths.
   const cleanupUserId = requiredUserId ?? workspace.userId;
 
-  log.info('task_run.cleanup.started', { taskId, workspaceId: task.workspaceId, nodeId: workspace.nodeId });
+  log.info('task_run.cleanup.started', {
+    taskId,
+    workspaceId: task.workspaceId,
+    nodeId: workspace.nodeId,
+  });
 
   const [node] = await db
     .select({
@@ -114,6 +114,31 @@ export async function cleanupTaskRun(
     .limit(1);
 
   if (node?.runtime === 'cf-container') {
+    const [snapshot] = workspace.chatSessionId
+      ? await db
+          .select({
+            status: schema.sessionSnapshots.status,
+            degradation: schema.sessionSnapshots.degradation,
+            expiresAt: schema.sessionSnapshots.expiresAt,
+          })
+          .from(schema.sessionSnapshots)
+          .where(eq(schema.sessionSnapshots.chatSessionId, workspace.chatSessionId))
+          .limit(1)
+      : [];
+    const preserveSleepingSnapshot =
+      workspace.status === 'sleeping' &&
+      snapshot?.status === 'available' &&
+      snapshot.degradation === 'none' &&
+      Date.parse(snapshot.expiresAt) > Date.now();
+    if (preserveSleepingSnapshot) {
+      log.info('task_run.cleanup.cf_container_sleep_preserved', {
+        taskId,
+        workspaceId: workspace.id,
+        nodeId: workspace.nodeId,
+        snapshotExpiresAt: snapshot.expiresAt,
+      });
+      return;
+    }
     await stopNodeResources(workspace.nodeId, cleanupUserId, env);
     log.info('task_run.cleanup.cf_container_destroyed', {
       taskId,
@@ -149,12 +174,19 @@ export async function cleanupTaskRun(
   }
 
   // Schedule automatic deletion after TTL (best-effort)
-  if (workspace.nodeId && (workspace.status === 'running' || workspace.status === 'recovery' || workspace.status === 'stopped')) {
+  if (
+    workspace.nodeId &&
+    (workspace.status === 'running' ||
+      workspace.status === 'recovery' ||
+      workspace.status === 'sleeping' ||
+      workspace.status === 'stopped')
+  ) {
     try {
       const doId = env.NODE_LIFECYCLE.idFromName(workspace.nodeId);
       const stub = env.NODE_LIFECYCLE.get(doId);
-      await (stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle)
-        .scheduleWorkspaceDeletion(workspace.id, cleanupUserId);
+      await (
+        stub as unknown as import('../durable-objects/node-lifecycle').NodeLifecycle
+      ).scheduleWorkspaceDeletion(workspace.nodeId, workspace.id, cleanupUserId);
     } catch (e) {
       log.warn('task_run.cleanup.schedule_deletion_failed', {
         taskId,
@@ -222,12 +254,7 @@ async function cleanupAutoProvisionedNode(
   const workspaces = await db
     .select({ id: schema.workspaces.id, status: schema.workspaces.status })
     .from(schema.workspaces)
-    .where(
-      and(
-        eq(schema.workspaces.nodeId, nodeId),
-        eq(schema.workspaces.userId, userId)
-      )
-    );
+    .where(and(eq(schema.workspaces.nodeId, nodeId), eq(schema.workspaces.userId, userId)));
 
   const activeWorkspaces = workspaces.filter(
     (ws) =>

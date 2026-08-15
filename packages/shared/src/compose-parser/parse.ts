@@ -25,7 +25,13 @@ import {
   parseServiceVolumes,
   parseVolumes,
 } from './parse-fields';
-import type { ComposeParseError, ComposeParseResult, UnresolvedImage, UnresolvedManifest, UnresolvedService } from './types';
+import type {
+  ComposeParseError,
+  ComposeParseResult,
+  UnresolvedImage,
+  UnresolvedManifest,
+  UnresolvedService,
+} from './types';
 
 // =============================================================================
 // Main entry point
@@ -48,14 +54,21 @@ export function parseCompose(yamlString: string): ComposeParseResult {
   } catch (e) {
     return {
       success: false,
-      errors: [{ path: '(root)', message: `Invalid YAML: ${e instanceof Error ? e.message : String(e)}` }],
+      errors: [
+        { path: '(root)', message: `Invalid YAML: ${e instanceof Error ? e.message : String(e)}` },
+      ],
     };
   }
 
   if (typeof doc !== 'object' || doc === null || Array.isArray(doc)) {
     return {
       success: false,
-      errors: [{ path: '(root)', message: 'Compose file must be a YAML mapping (object), not a scalar or sequence.' }],
+      errors: [
+        {
+          path: '(root)',
+          message: 'Compose file must be a YAML mapping (object), not a scalar or sequence.',
+        },
+      ],
     };
   }
 
@@ -70,7 +83,13 @@ export function parseCompose(yamlString: string): ComposeParseResult {
   if (typeof rawServices !== 'object' || rawServices === null || Array.isArray(rawServices)) {
     return {
       success: false,
-      errors: [{ path: 'services', message: 'The "services" field must be a mapping of service names to service definitions.' }],
+      errors: [
+        {
+          path: 'services',
+          message:
+            'The "services" field must be a mapping of service names to service definitions.',
+        },
+      ],
     };
   }
 
@@ -139,7 +158,8 @@ export function parseCompose(yamlString: string): ComposeParseResult {
   if (routes.length === 0) {
     errors.push({
       path: 'x-sam-routes',
-      message: 'At least one route must be defined. Add an "x-sam-routes" entry to expose a service.',
+      message:
+        'At least one route must be defined. Add an "x-sam-routes" entry to expose a service.',
     });
   }
 
@@ -173,8 +193,9 @@ function validateTopLevelFields(root: Record<string, unknown>, errors: ComposePa
     if (TOP_LEVEL_ALLOWED.has(key)) continue;
 
     // Check denylist
-    if (key in DENIED_TOP_LEVEL_FIELDS) {
-      errors.push({ path: key, message: DENIED_TOP_LEVEL_FIELDS[key]! });
+    const deniedMessage = DENIED_TOP_LEVEL_FIELDS[key];
+    if (deniedMessage !== undefined) {
+      errors.push({ path: key, message: deniedMessage });
       continue;
     }
 
@@ -196,7 +217,7 @@ function validateTopLevelFields(root: Record<string, unknown>, errors: ComposePa
 function parseService(
   name: string,
   config: unknown,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): UnresolvedService | null {
   if (typeof config !== 'object' || config === null || Array.isArray(config)) {
     errors.push({
@@ -282,7 +303,7 @@ const SHA256_DIGEST_RE = /^sha256:[a-f0-9]{64}$/;
 function parseImage(
   value: unknown,
   prefix: string,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): UnresolvedImage | null {
   if (value === undefined || value === null) {
     errors.push({
@@ -295,7 +316,8 @@ function parseImage(
   if (typeof value !== 'string') {
     errors.push({
       path: `${prefix}.image`,
-      message: 'The "image" field must be a string (e.g., "ghcr.io/org/app:v1.0" or "ghcr.io/org/app@sha256:...").',
+      message:
+        'The "image" field must be a string (e.g., "ghcr.io/org/app:v1.0" or "ghcr.io/org/app@sha256:...").',
     });
     return null;
   }
@@ -327,11 +349,12 @@ function parseImageReference(ref: string): UnresolvedImage {
 
   // Check if the first part looks like a registry (contains a dot or colon, or is localhost)
   const parts = ref.split('/');
+  const [firstPart = ''] = parts;
   if (
     parts.length > 1 &&
-    (parts[0]!.includes('.') || parts[0]!.includes(':') || parts[0] === 'localhost')
+    (firstPart.includes('.') || firstPart.includes(':') || firstPart === 'localhost')
   ) {
-    registry = parts[0]!;
+    registry = firstPart;
     remainder = parts.slice(1).join('/');
   } else {
     registry = 'docker.io';
@@ -376,7 +399,7 @@ export function isDigestReference(ref: string): boolean {
 function parseStringOrArray(
   value: unknown,
   path: string,
-  errors: ComposeParseError[],
+  errors: ComposeParseError[]
 ): string[] | undefined {
   if (value === undefined || value === null) return undefined;
 

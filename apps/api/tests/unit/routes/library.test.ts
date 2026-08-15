@@ -708,6 +708,23 @@ describe('library routes', () => {
 
       expect(res.status).toBe(400);
     });
+
+    it('returns 400 with the standard shape for a malformed body (add is not an array of strings) before calling the service', async () => {
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/tags`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ add: 'not-an-array' }),
+        }),
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as Record<string, unknown>;
+      expect(json['error']).toBe('BAD_REQUEST');
+      expect(mockUpdateTags).not.toHaveBeenCalled();
+    });
   });
 
   describe('GET /directories', () => {
@@ -795,6 +812,23 @@ describe('library routes', () => {
       );
 
       expect(res.status).toBe(400);
+    });
+
+    it('returns 400 with the standard shape for a malformed body (directory is not a string) before calling the service', async () => {
+      const { app, env } = makeApp(makeEnv());
+      const res = await app.fetch(
+        new Request(`${BASE_URL}/projects/test-project-id/library/file-123/move`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ directory: 42 }),
+        }),
+        env
+      );
+
+      expect(res.status).toBe(400);
+      const json = (await res.json()) as Record<string, unknown>;
+      expect(json['error']).toBe('BAD_REQUEST');
+      expect(mockMoveFile).not.toHaveBeenCalled();
     });
 
     it('accepts filename-only move', async () => {

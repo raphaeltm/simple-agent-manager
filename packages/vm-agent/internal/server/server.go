@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/workspace/vm-agent/internal/acp"
 	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/auth"
@@ -70,52 +71,56 @@ var taskCallbackDiagnosticRedactionPatterns = []*regexp.Regexp{
 
 // Server is the HTTP server for the VM Agent.
 type Server struct {
-	config              *config.Config
-	httpServer          *http.Server
-	jwtValidator        *auth.JWTValidator
-	sessionManager      *auth.SessionManager
-	ptyManager          *pty.Manager
-	sysInfoCollector    *sysinfo.Collector
-	workspaceMu         sync.RWMutex
-	workspaces          map[string]*WorkspaceRuntime
-	readyRetryMu        sync.Mutex // guards retryPendingReadyCallbacks — only one run at a time
-	eventMu             sync.RWMutex
-	nodeEvents          []EventRecord
-	workspaceEvents     map[string][]EventRecord
-	eventStore          *eventstore.Store
-	resourceMonitor     *resourcemon.Monitor
-	agentSessions       *agentsessions.Manager
-	acpConfig           acp.GatewayConfig
-	sessionHostMu       sync.Mutex
-	sessionHosts        map[string]*acp.SessionHost
-	sessionMcpServers   map[string][]acp.McpServerEntry // hostKey → MCP servers for ACP injection
-	sessionProfileOvr   map[string]profileOverrides     // hostKey → model/permissionMode/effort overrides from agent profiles
-	sessionTaskCtx      map[string]taskCallbackContext  // hostKey → task callback ownership context
-	store               *persistence.Store
-	errorReporter       *errorreport.Reporter
-	messageReportersMu  sync.RWMutex
-	messageReporters    map[string]*messagereport.Reporter // keyed by workspaceID
-	worktreeCacheMu     sync.RWMutex
-	worktreeCache       map[string]cachedWorktreeList
-	logReader           *logreader.Reader
-	bootLogBroadcasters *BootLogBroadcasterManager
-	containerDiscovery  *container.Discovery
-	portScannerMu       sync.RWMutex
-	portScanners        map[string]*ports.Scanner
-	portDiscoveries     map[string]*container.Discovery // per-workspace container discovery
-	bootstrapComplete   atomic.Bool
-	callbackTokenMu     sync.RWMutex
-	callbackToken       string
-	httpClient          *http.Client // shared HTTP client with timeout for control-plane callbacks
-	done                chan struct{}
-	stopOnce            sync.Once
-	stopErrMu           sync.Mutex
-	stopErr             error
-	publishJobsMu       sync.Mutex
-	publishJobs         map[string]publishJobState
-	buildPublishRunner  func(context.Context, *preparedBuildPublish, publish.EventSink) (*publish.ReleaseResult, error)
-	applyWatchdogMu     sync.Mutex
-	applyWatchdogs      map[string]chan struct{}
+	config                *config.Config
+	httpServer            *http.Server
+	jwtValidator          *auth.JWTValidator
+	sessionManager        *auth.SessionManager
+	ptyManager            *pty.Manager
+	sysInfoCollector      *sysinfo.Collector
+	workspaceMu           sync.RWMutex
+	workspaces            map[string]*WorkspaceRuntime
+	readyRetryMu          sync.Mutex // guards retryPendingReadyCallbacks — only one run at a time
+	eventMu               sync.RWMutex
+	nodeEvents            []EventRecord
+	workspaceEvents       map[string][]EventRecord
+	eventStore            *eventstore.Store
+	resourceMonitor       *resourcemon.Monitor
+	agentSessions         *agentsessions.Manager
+	acpConfig             acp.GatewayConfig
+	sessionHostMu         sync.Mutex
+	sessionHosts          map[string]*acp.SessionHost
+	sessionMcpServers     map[string][]acp.McpServerEntry // hostKey → MCP servers for ACP injection
+	sessionProfileOvr     map[string]profileOverrides     // hostKey → model/permissionMode/effort overrides from agent profiles
+	sessionTaskCtx        map[string]taskCallbackContext  // hostKey → task callback ownership context
+	store                 *persistence.Store
+	executionRuntimeID    string
+	errorReporter         *errorreport.Reporter
+	messageReportersMu    sync.RWMutex
+	messageReporters      map[string]*messagereport.Reporter // keyed by workspaceID
+	worktreeCacheMu       sync.RWMutex
+	worktreeCache         map[string]cachedWorktreeList
+	logReader             *logreader.Reader
+	bootLogBroadcasters   *BootLogBroadcasterManager
+	containerDiscovery    *container.Discovery
+	portScannerMu         sync.RWMutex
+	portScanners          map[string]*ports.Scanner
+	portDiscoveries       map[string]*container.Discovery // per-workspace container discovery
+	bootstrapComplete     atomic.Bool
+	callbackTokenMu       sync.RWMutex
+	callbackToken         string
+	httpClient            *http.Client // shared HTTP client with timeout for control-plane callbacks
+	done                  chan struct{}
+	stopOnce              sync.Once
+	stopErrMu             sync.Mutex
+	stopErr               error
+	publishJobsMu         sync.Mutex
+	publishJobs           map[string]publishJobState
+	buildPublishRunner    func(context.Context, *preparedBuildPublish, publish.EventSink) (*publish.ReleaseResult, error)
+	applyWatchdogMu       sync.Mutex
+	applyWatchdogs        map[string]chan struct{}
+	sessionSnapshotMu     sync.Mutex
+	sessionSnapshotLocks  map[string]*sync.Mutex
+	sessionSnapshotRunner func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error)
 
 	// Deployment mode — one Engine per placed deployment environment.
 	deployMu       sync.Mutex
@@ -526,6 +531,7 @@ func New(cfg *config.Config) (*Server, error) {
 		sessionProfileOvr:   make(map[string]profileOverrides),
 		sessionTaskCtx:      make(map[string]taskCallbackContext),
 		store:               store,
+		executionRuntimeID:  uuid.NewString(),
 		errorReporter:       errorReporter,
 		messageReporters:    messageReporters,
 		worktreeCache:       make(map[string]cachedWorktreeList),
@@ -1077,8 +1083,13 @@ func (s *Server) setupRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/suspend", s.handleSuspendAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/resume", s.handleResumeAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt", s.handleSendPrompt)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions/{sessionId}/prompt-receipts/{deliveryId}", s.handleGetPromptReceipt)
+	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/checkpoint-rollovers", s.handleCheckpointRollover)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-sessions/{sessionId}/checkpoint-rollovers/{operationId}", s.handleGetCheckpointRollover)
+	mux.HandleFunc("GET /workspaces/{workspaceId}/agent-capabilities", s.handleAgentCapabilities)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/hibernate", s.handleHibernateAgentSession)
 	mux.HandleFunc("POST /workspaces/{workspaceId}/agent-sessions/{sessionId}/restore", s.handleRestoreAgentSession)
+	mux.HandleFunc("PUT /session-snapshot-upload-relay", s.handleSessionSnapshotUploadRelay)
 	mux.HandleFunc("GET /workspaces/{workspaceId}/tabs", s.handleListTabs)
 
 	// Git integration (browser-authenticated via workspace session/token)
@@ -1353,7 +1364,7 @@ func (s *Server) makeTaskCompletionCallback(
 			return
 		}
 
-		if stopReason == "recovered" {
+		if stopReason == "recovered" || stopReason == "checkpoint_preempted" {
 			s.postTaskCallback(
 				callbackURL,
 				taskID,

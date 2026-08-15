@@ -1,5 +1,5 @@
 import type { NotificationResponse, NotificationType } from '@simple-agent-manager/shared';
-import { NOTIFICATION_PREVIEW_LENGTH,NOTIFICATION_TYPES } from '@simple-agent-manager/shared';
+import { NOTIFICATION_PREVIEW_LENGTH, NOTIFICATION_TYPES } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import {
   Activity,
@@ -17,18 +17,17 @@ import {
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router';
 
-import {
-  dismissNotification,
-  listNotifications,
-  markNotificationRead,
-} from '../lib/api';
+import { dismissNotification, listNotifications, markNotificationRead } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
 
-const NOTIFICATION_TYPE_CONFIG: Record<NotificationType, {
-  icon: typeof CheckCircle2;
-  color: string;
-  label: string;
-}> = {
+const NOTIFICATION_TYPE_CONFIG: Record<
+  NotificationType,
+  {
+    icon: typeof CheckCircle2;
+    color: string;
+    label: string;
+  }
+> = {
   task_complete: { icon: CheckCircle2, color: 'text-success-fg', label: 'Task Complete' },
   needs_input: { icon: HelpCircle, color: 'text-warning-fg', label: 'Needs Input' },
   error: { icon: AlertCircle, color: 'text-danger-fg', label: 'Error' },
@@ -72,37 +71,48 @@ export function ProjectNotifications() {
 
   const nextCursorRef = useRef<string | null>(null);
 
-  const loadNotifications = useCallback(async (loadMore = false, filterType?: NotificationType | 'all') => {
-    try {
-      const isInitial = !loadMore && notifications.length === 0;
-      if (isInitial) {
-        setInitialLoading(true);
-      } else {
-        setIsRefreshing(true);
+  const loadNotifications = useCallback(
+    async (loadMore = false, filterType?: NotificationType | 'all') => {
+      try {
+        const isInitial = !loadMore && notifications.length === 0;
+        if (isInitial) {
+          setInitialLoading(true);
+        } else {
+          setIsRefreshing(true);
+        }
+        const activeFilter = filterType ?? typeFilter;
+        const result = await listNotifications({
+          projectId,
+          limit: 50,
+          cursor: loadMore ? (nextCursorRef.current ?? undefined) : undefined,
+          type: activeFilter === 'all' ? undefined : activeFilter,
+        });
+        if (loadMore) {
+          setNotifications((prev) => [...prev, ...result.notifications]);
+        } else {
+          setNotifications(result.notifications);
+        }
+        nextCursorRef.current = result.nextCursor;
+        setHasMore(result.nextCursor !== null);
+      } catch {
+        // Best-effort
+      } finally {
+        setInitialLoading(false);
+        setIsRefreshing(false);
       }
-      const activeFilter = filterType ?? typeFilter;
-      const result = await listNotifications({
-        projectId,
-        limit: 50,
-        cursor: loadMore ? nextCursorRef.current ?? undefined : undefined,
-        type: activeFilter === 'all' ? undefined : activeFilter,
-      });
-      if (loadMore) {
-        setNotifications((prev) => [...prev, ...result.notifications]);
-      } else {
-        setNotifications(result.notifications);
-      }
-      nextCursorRef.current = result.nextCursor;
-      setHasMore(result.nextCursor !== null);
-    } catch {
-      // Best-effort
-    } finally {
-      setInitialLoading(false);
-      setIsRefreshing(false);
-    }
-  }, [projectId, typeFilter, notifications.length]);
+    },
+    [projectId, typeFilter, notifications.length]
+  );
 
-  useEffect(() => { void loadNotifications(); }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // loadNotifications is intentionally omitted: its own deps include
+  // notifications.length, which changes as a RESULT of calling it, so
+  // depending on it here would create a self-triggering refetch loop.
+  // projectId is the actual "what to fetch" identifier; typeFilter changes
+  // are already handled by handleTypeFilterChange's explicit imperative call
+  // with a fresh argument (not read from this closure).
+  useEffect(() => {
+    void loadNotifications();
+  }, [projectId]); // eslint-disable-line react-hooks/exhaustive-deps -- see comment above; loadNotifications is unstable (deps include notifications.length) and must not be listed here
 
   const handleTypeFilterChange = (newFilter: NotificationType | 'all') => {
     setTypeFilter(newFilter);
@@ -113,7 +123,7 @@ export function ProjectNotifications() {
   const handleMarkRead = async (id: string) => {
     await markNotificationRead(id);
     setNotifications((prev) =>
-      prev.map((n) => n.id === id ? { ...n, readAt: new Date().toISOString() } : n)
+      prev.map((n) => (n.id === id ? { ...n, readAt: new Date().toISOString() } : n))
     );
   };
 
@@ -180,11 +190,13 @@ export function ProjectNotifications() {
               const Icon = config.icon;
               const isUnread = !notification.readAt;
               const fullMessage = getFullMessage(notification);
-              const isLong = fullMessage != null && fullMessage.length > NOTIFICATION_PREVIEW_LENGTH;
+              const isLong =
+                fullMessage != null && fullMessage.length > NOTIFICATION_PREVIEW_LENGTH;
               const isExpanded = expandedIds.has(notification.id);
-              const displayMessage = isLong && !isExpanded
-                ? fullMessage.slice(0, NOTIFICATION_PREVIEW_LENGTH) + '\u2026'
-                : fullMessage;
+              const displayMessage =
+                isLong && !isExpanded
+                  ? fullMessage.slice(0, NOTIFICATION_PREVIEW_LENGTH) + '\u2026'
+                  : fullMessage;
 
               return (
                 <div
@@ -212,7 +224,9 @@ export function ProjectNotifications() {
                     }}
                   >
                     <div className="flex items-start justify-between gap-2">
-                      <p className={`text-sm leading-tight ${isUnread ? 'font-medium text-fg-primary' : 'text-fg-secondary'}`}>
+                      <p
+                        className={`text-sm leading-tight ${isUnread ? 'font-medium text-fg-primary' : 'text-fg-secondary'}`}
+                      >
                         {notification.title}
                       </p>
                       {isUnread && (
@@ -226,18 +240,27 @@ export function ProjectNotifications() {
                     )}
                     {isLong && (
                       <button
-                        onClick={(e) => { e.stopPropagation(); toggleExpand(notification.id); }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleExpand(notification.id);
+                        }}
                         className="text-xs text-accent mt-1 bg-transparent border-none cursor-pointer hover:underline p-0 rounded focus-visible:outline focus-visible:outline-2 focus-visible:outline-accent"
                       >
                         {isExpanded ? (
-                          <span className="flex items-center gap-1"><ChevronDown size={12} /> Show less</span>
+                          <span className="flex items-center gap-1">
+                            <ChevronDown size={12} /> Show less
+                          </span>
                         ) : (
-                          <span className="flex items-center gap-1"><ChevronRight size={12} /> Show more</span>
+                          <span className="flex items-center gap-1">
+                            <ChevronRight size={12} /> Show more
+                          </span>
                         )}
                       </button>
                     )}
                     <div className="flex items-center gap-2 mt-1">
-                      <span className="text-[10px] text-fg-muted">{timeAgo(notification.createdAt)}</span>
+                      <span className="text-[10px] text-fg-muted">
+                        {timeAgo(notification.createdAt)}
+                      </span>
                       <span className="text-[10px] text-fg-muted">&middot;</span>
                       <span className="text-[10px] text-fg-muted">{config.label}</span>
                     </div>

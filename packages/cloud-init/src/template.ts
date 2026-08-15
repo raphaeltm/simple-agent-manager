@@ -184,6 +184,9 @@ write_files:
       Environment=DEPLOY_ACME_CA={{ deploy_acme_ca }}
       Environment="DEPLOY_COMPOSE_CMD={{ deploy_compose_cmd }}"
       Environment=DEPLOY_HEALTH_TIMEOUT={{ deploy_health_timeout }}
+      Environment=SESSION_SNAPSHOT_OPERATION_TIMEOUT={{ session_snapshot_operation_timeout }}
+      Environment=SESSION_SNAPSHOT_PROGRESS_REPORT_INTERVAL={{ session_snapshot_progress_report_interval }}
+      Environment=SESSION_SNAPSHOT_PROGRESS_REPORT_TIMEOUT={{ session_snapshot_progress_report_timeout }}
       Environment=ERROR_REPORT_FLUSH_INTERVAL={{ error_report_flush_interval }}
       Environment=ERROR_REPORT_MAX_BATCH_SIZE={{ error_report_max_batch_size }}
       Environment=ERROR_REPORT_MAX_BATCH_BYTES={{ error_report_max_batch_bytes }}

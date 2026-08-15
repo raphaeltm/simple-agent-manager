@@ -10,6 +10,7 @@ import { Hono } from 'hono';
 
 import type { Env } from '../env';
 import { requireAuth } from '../middleware/auth';
+import { AgentChatRequestSchema, jsonValidator } from '../schemas';
 
 const app = new Hono<{ Bindings: Env }>();
 
@@ -23,9 +24,9 @@ function getSamSession(env: Env, userId: string): DurableObjectStub {
 }
 
 /** POST /chat — send a message and stream the response. */
-app.post('/chat', async (c) => {
+app.post('/chat', jsonValidator(AgentChatRequestSchema), async (c) => {
   const userId = c.get('auth').user.id;
-  const body = await c.req.json<{ conversationId?: string; message: string }>();
+  const body = c.req.valid('json');
 
   if (!body.message?.trim()) {
     return c.json({ error: 'Message is required' }, 400);
@@ -51,7 +52,7 @@ app.post('/chat', async (c) => {
     headers: {
       'content-type': 'text/event-stream',
       'cache-control': 'no-cache',
-      'connection': 'keep-alive',
+      connection: 'keep-alive',
     },
   });
 });

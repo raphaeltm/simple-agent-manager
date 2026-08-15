@@ -18,6 +18,113 @@ function getStub(projectId: string): DurableObjectStub<ProjectDataTestDouble> {
 }
 
 describe('ProjectData Durable Object', () => {
+  describe('durability foundation', () => {
+    it('atomically persists and idempotently rereads accepted prompt intent', async () => {
+      const stub = getStub('project-durable-accept');
+      const sessionId = await stub.createSession('workspace-1', 'Durable prompt');
+
+      const first = await stub.acceptPromptDelivery({
+        deliveryId: 'delivery-stable-1',
+        targetSessionId: sessionId,
+        displayContent: 'visible prompt',
+        deliveryContent: 'enriched prompt',
+        senderType: 'human',
+        senderId: 'user-1',
+        messageClass: 'deliver',
+        sourceKind: 'user_followup',
+        ttlMs: 60_000,
+      });
+      const duplicate = await stub.acceptPromptDelivery({
+        deliveryId: 'delivery-stable-1',
+        targetSessionId: sessionId,
+        displayContent: 'visible prompt',
+        deliveryContent: 'enriched prompt',
+        senderType: 'human',
+        senderId: 'user-1',
+        messageClass: 'deliver',
+        sourceKind: 'user_followup',
+        ttlMs: 60_000,
+      });
+
+      expect(first.transcriptInserted).toBe(true);
+      expect(duplicate.transcriptInserted).toBe(false);
+      expect(first.message.id).toBe('delivery-stable-1');
+      const { messages } = await stub.getMessages(sessionId, 10);
+      expect(messages).toHaveLength(1);
+      expect(messages[0]).toMatchObject({ role: 'user', content: 'visible prompt' });
+      const snapshot = await stub.getDurableExecutionSnapshot(sessionId);
+      expect(snapshot.deliveries).toHaveLength(1);
+      expect(snapshot.deliveries[0]).toMatchObject({
+        id: 'delivery-stable-1',
+        deliveryState: 'queued',
+        promptMessageId: 'delivery-stable-1',
+      });
+    });
+
+    it('preserves prompt start rereports and stores checkpoint episodes by epoch', async () => {
+      const stub = getStub('project-durable-checkpoint');
+      const sessionId = await stub.createSession(null, 'Checkpoint');
+      await stub.reportActivity('acp-1', 'prompting', { promptStartedAt: 1_000 });
+      await stub.reportActivity('acp-1', 'recovering', { promptStartedAt: 5_000 });
+      expect((await stub.getSessionState('acp-1'))?.promptStartedAt).toBe(1_000);
+
+      const first = await stub.createCheckpointEpisode({
+        sessionId,
+        acpSessionId: 'acp-1',
+        promptEpoch: 1_000,
+        reason: 'long productive turn',
+      });
+      const duplicate = await stub.createCheckpointEpisode({
+        sessionId,
+        acpSessionId: 'acp-1',
+        promptEpoch: 1_000,
+        reason: 'duplicate alarm',
+      });
+      expect(first.created).toBe(true);
+      expect(duplicate.created).toBe(false);
+      expect(duplicate.episode.id).toBe(first.episode.id);
+      const transitioned = await stub.transitionCheckpointEpisode(first.episode.id, {
+        expectedState: 'planned',
+        toState: 'preempt_requested',
+        incrementAttempt: true,
+      });
+      expect(transitioned).toMatchObject({ state: 'preempt_requested', attemptCount: 1 });
+    });
+
+    it('lets the durable receipt alarm own terminal expiry instead of the legacy sweep', async () => {
+      const stub = getStub('project-durable-alarm-expiry');
+      const sessionId = await stub.createSession('workspace-1', 'Durable alarm expiry');
+      await stub.acceptPromptDelivery({
+        deliveryId: 'delivery-expired-1',
+        targetSessionId: sessionId,
+        displayContent: 'visible prompt',
+        deliveryContent: 'enriched prompt',
+        senderType: 'human',
+        senderId: 'user-1',
+        messageClass: 'deliver',
+        sourceKind: 'agent_mailbox',
+        ttlMs: 60_000,
+      });
+
+      await runInDurableObject(stub, async (instance, state) => {
+        state.storage.sql.exec(
+          `UPDATE session_inbox SET expires_at = 0 WHERE id = 'delivery-expired-1'`
+        );
+        await instance.alarmWithDurablePromptDelivery();
+      });
+
+      const snapshot = await stub.getDurableExecutionSnapshot(sessionId);
+      expect(snapshot.deliveries).toContainEqual(
+        expect.objectContaining({
+          id: 'delivery-expired-1',
+          deliveryState: 'expired',
+          terminalReason: 'ttl_expired',
+          lastError: 'Prompt delivery TTL expired',
+        })
+      );
+    });
+  });
+
   // =========================================================================
   // Session CRUD
   // =========================================================================

@@ -9,7 +9,8 @@
     "deploy:production": "wrangler deploy --env production",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint 'src/**/*.ts' 'tests/**/*.ts' 'vitest.config.ts' --rule 'simple-import-sort/imports: off' --rule 'simple-import-sort/exports: off'"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "catalog:",

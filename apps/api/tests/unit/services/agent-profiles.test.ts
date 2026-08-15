@@ -356,6 +356,73 @@ describe('Agent Profile Service', () => {
       expect(result.taskMode).toBeNull();
       expect(result.githubCliPolicy).toBeNull();
     });
+
+    it('preserves an "inherit" mode githubCliPolicy (unlike the workspace token-scoping path)', async () => {
+      const db = createMockDB();
+      const profile = makeProfileRow({
+        id: 'inherit-profile',
+        githubCliPolicy: JSON.stringify({
+          mode: 'inherit',
+          repositoryScope: 'project',
+          permissions: {
+            contents: 'write',
+            pullRequests: 'write',
+            issues: 'write',
+            actions: 'none',
+            packages: 'write',
+          },
+        }),
+      });
+      db._pushResult([profile]);
+
+      const result = await agentProfileService.resolveAgentProfile(
+        db,
+        'project-1',
+        'inherit-profile',
+        'user-1',
+        env
+      );
+
+      expect(result.githubCliPolicy?.mode).toBe('inherit');
+    });
+
+    it('degrades a malformed (invalid JSON) githubCliPolicy to null instead of throwing', async () => {
+      const db = createMockDB();
+      const profile = makeProfileRow({
+        id: 'bad-json-profile',
+        githubCliPolicy: '{not-valid-json',
+      });
+      db._pushResult([profile]);
+
+      const result = await agentProfileService.resolveAgentProfile(
+        db,
+        'project-1',
+        'bad-json-profile',
+        'user-1',
+        env
+      );
+
+      expect(result.githubCliPolicy).toBeNull();
+    });
+
+    it('degrades a malformed (wrong-shape) githubCliPolicy to null instead of throwing', async () => {
+      const db = createMockDB();
+      const profile = makeProfileRow({
+        id: 'bad-shape-profile',
+        githubCliPolicy: JSON.stringify({ mode: 'not-a-real-mode' }),
+      });
+      db._pushResult([profile]);
+
+      const result = await agentProfileService.resolveAgentProfile(
+        db,
+        'project-1',
+        'bad-shape-profile',
+        'user-1',
+        env
+      );
+
+      expect(result.githubCliPolicy).toBeNull();
+    });
   });
 
   describe('createProfile', () => {

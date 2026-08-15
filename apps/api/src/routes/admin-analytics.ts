@@ -388,14 +388,17 @@ adminAnalyticsRoutes.get('/retention', async (c) => {
 
     if (weekOffset < 0 || weekOffset > weeks) continue;
 
-    if (!cohorts.has(cw)) {
-      cohorts.set(cw, new Map());
+    let weekMap = cohorts.get(cw);
+    if (!weekMap) {
+      weekMap = new Map<number, Set<string>>();
+      cohorts.set(cw, weekMap);
     }
-    const weekMap = cohorts.get(cw)!;
-    if (!weekMap.has(weekOffset)) {
-      weekMap.set(weekOffset, new Set());
+    let userSet = weekMap.get(weekOffset);
+    if (!userSet) {
+      userSet = new Set<string>();
+      weekMap.set(weekOffset, userSet);
     }
-    weekMap.get(weekOffset)!.add(row.user_id);
+    userSet.add(row.user_id);
   }
 
   // Convert to serializable format, sorted by cohort week
@@ -529,14 +532,18 @@ adminAnalyticsRoutes.get('/website-traffic', async (c) => {
   >();
 
   for (const row of topPagesData) {
-    if (!hostSections.has(row.host)) hostSections.set(row.host, new Map());
-    const sections = hostSections.get(row.host)!;
+    let sections = hostSections.get(row.host);
+    if (!sections) {
+      sections = new Map();
+      hostSections.set(row.host, sections);
+    }
     const section = classifyPage(row.page);
 
-    if (!sections.has(section)) {
-      sections.set(section, { views: 0, unique_visitors: 0, pages: [] });
+    let s = sections.get(section);
+    if (!s) {
+      s = { views: 0, unique_visitors: 0, pages: [] };
+      sections.set(section, s);
     }
-    const s = sections.get(section)!;
     s.views += Number(row.views);
     s.unique_visitors += Number(row.unique_visitors);
     if (s.pages.length < topPagesLimit) {

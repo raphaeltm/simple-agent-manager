@@ -227,6 +227,87 @@ export function transitionAcpSession(
   };
 }
 
+/**
+ * Recovery-only reset used when a strict snapshot restore fails after the
+ * control plane has already created the ProjectData ACP row for that vm-agent
+ * session ID. The vm-agent reports activity to `/acp-sessions/{sessionId}`, so
+ * degraded fallback must keep the same ProjectData row ID while clearing the
+ * failed strict-restore terminal state before starting a fresh ACP session.
+ */
+export function prepareAcpSessionForFreshStart(
+  sql: SqlStorage,
+  sessionId: string,
+  opts: {
+    actorType: AcpSessionEventActorType;
+    actorId?: string | null;
+    reason?: string | null;
+    metadata?: Record<string, unknown> | null;
+    workspaceId: string;
+    nodeId: string;
+  },
+  projectId: string | null
+): AcpSession {
+  const rawRow = sql
+    .exec('SELECT * FROM acp_sessions WHERE id = ?', sessionId)
+    .toArray()[0];
+
+  if (!rawRow) {
+    throw new Error(`ACP session ${sessionId} not found`);
+  }
+
+  const current = parseAcpSessionRow(rawRow);
+  if (current.status === 'completed' || current.status === 'interrupted') {
+    throw new Error(
+      `Cannot prepare ACP session ${sessionId} for fresh start from ${current.status}`
+    );
+  }
+
+  const now = Date.now();
+  sql.exec(
+    `UPDATE acp_sessions
+     SET status = 'assigned',
+         workspace_id = ?,
+         node_id = ?,
+         acp_sdk_session_id = NULL,
+         error_message = NULL,
+         last_heartbeat_at = ?,
+         assigned_at = ?,
+         started_at = NULL,
+         completed_at = NULL,
+         interrupted_at = NULL,
+         updated_at = ?
+     WHERE id = ?`,
+    opts.workspaceId,
+    opts.nodeId,
+    now,
+    now,
+    now,
+    sessionId
+  );
+
+  recordAcpSessionEvent(
+    sql,
+    sessionId,
+    current.status,
+    'assigned',
+    opts.actorType,
+    opts.actorId ?? null,
+    opts.reason ?? 'Session prepared for fresh start after degraded snapshot restore',
+    opts.metadata ?? null
+  );
+
+  log.warn('acp_session.prepared_for_fresh_start', {
+    sessionId,
+    chatSessionId: current.chatSessionId,
+    projectId,
+    fromStatus: current.status,
+    workspaceId: opts.workspaceId,
+    nodeId: opts.nodeId,
+  });
+
+  return getAcpSessionOrThrow(sql, sessionId);
+}
+
 export function updateHeartbeat(
   sql: SqlStorage,
   sessionId: string,

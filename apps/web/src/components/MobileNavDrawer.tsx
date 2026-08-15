@@ -174,7 +174,11 @@ export function MobileNavDrawer({
         )}
 
         {/* Nav items with slide transition */}
+        {/* `data-intentional-clip`: two-panel carousel — both panels sit side by
+            side (2x width) and are translated into view, so the content is
+            deliberately wider than the box. See NavSidebar for the twin. */}
         <nav
+          data-intentional-clip
           aria-label={showGlobalNav ? 'Primary navigation' : 'Project navigation'}
           className="flex-1 overflow-hidden relative"
         >

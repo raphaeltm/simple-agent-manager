@@ -1,7 +1,4 @@
-import {
-  type ActiveWorkState,
-  type ActiveWorkStatus,
-} from './vm-agent-container-active-work';
+import { type ActiveWorkState, type ActiveWorkStatus } from './vm-agent-container-active-work';
 import type {
   RuntimeRecoveryPhase,
   RuntimeRecoveryState,
@@ -11,6 +8,7 @@ import type {
 export type VmAgentContainerLifecycleStatus =
   | 'launching'
   | 'running'
+  | 'sleep-preparing'
   | 'stopping'
   | 'stopped'
   | 'sleeping'

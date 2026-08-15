@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "formatter": "prettier@3.8.3",
+  "baseCommit": "8c689a6a7923f76a33d96d6272797090598d6c2d",
+  "extensions": [".ts", ".tsx", ".js", ".jsx", ".json", ".md"],
+  "unformattedFileCount": 2225,
+  "reviewedAt": "2026-08-11T00:00:00.000Z",
+  "reviewBy": "2026-11-07T00:00:00.000Z"
+}

@@ -8,6 +8,7 @@ import {
   parseAllowlist,
   parseChurningTableMaxDecreasePercent,
   parseChurningTableSelectors,
+  parseWranglerJsonOutput,
   runSafeRemoteMigrations,
   verifyNoUnexpectedProtectedTableDecrease,
 } from '../deploy/d1-migration-safety';
@@ -75,6 +76,33 @@ function count(database: string, binding: string, table: string, value: number):
 }
 
 describe('D1 migration safety gates', () => {
+  it('parses the first complete Wrangler JSON document when diagnostics follow it', () => {
+    const output = `[
+      {
+        "results": [{"value": "bracket ] and quote \\" stay inside the string"}],
+        "success": true
+      }
+    ]
+    Wrangler wrote a trailing diagnostic after the JSON response`;
+
+    expect(parseWranglerJsonOutput(output)).toEqual([
+      {
+        results: [{ value: 'bracket ] and quote " stay inside the string' }],
+        success: true,
+      },
+    ]);
+  });
+
+  it('rejects Wrangler output that does not begin with a JSON object or array', () => {
+    expect(() => parseWranglerJsonOutput('warning before output\n[{"results": []}]')).toThrow(
+      /did not begin with JSON/
+    );
+  });
+
+  it('rejects an incomplete Wrangler JSON document', () => {
+    expect(() => parseWranglerJsonOutput('[{"results": []}')).toThrow(/incomplete JSON/);
+  });
+
   it('dynamically discovers protected user tables and excludes SQLite/system tables', () => {
     const runner = new FakeRunner(
       { main: ['sqlite_sequence', 'users', 'd1_migrations', 'projects'] },

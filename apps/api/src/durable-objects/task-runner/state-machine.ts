@@ -6,6 +6,7 @@
  */
 import { log } from '../../lib/logger';
 import { persistError, redactSensitiveData } from '../../services/observability';
+import { runTaskTerminalTransitionHooks } from '../../services/task-terminal-transition-hooks';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -26,30 +27,69 @@ export async function ensureSessionLinked(
   workspaceId: string,
   rc: TaskRunnerContext
 ): Promise<void> {
-  if (!state.stepResults.chatSessionId) return;
+  const chatSessionId = state.stepResults.chatSessionId;
+  if (!chatSessionId) return;
 
   const now = new Date().toISOString();
 
-  // Step 1: Update D1 workspace record (critical — used by idle cleanup, task hooks)
-  // This is idempotent: setting chat_session_id to the same value is fine.
+  // Step 1: Update D1 workspace + task records (critical — used by idle cleanup, task hooks)
+  // This is idempotent for the same session/workspace and fails closed on mismatched links.
   try {
     await rc.env.DATABASE.prepare(
       `UPDATE workspaces SET chat_session_id = ?, updated_at = ? WHERE id = ?`
     )
-      .bind(state.stepResults.chatSessionId, now, workspaceId)
+      .bind(chatSessionId, now, workspaceId)
       .run();
+
+    const taskLink = await rc.env.DATABASE.prepare(
+      `UPDATE tasks
+       SET chat_session_id = ?, workspace_id = ?, updated_at = ?
+       WHERE id = ?
+         AND (chat_session_id IS NULL OR chat_session_id = ?)
+         AND (workspace_id IS NULL OR workspace_id = ?)`
+    )
+      .bind(chatSessionId, workspaceId, now, state.taskId, chatSessionId, workspaceId)
+      .run();
+
+    if (!taskLink.meta.changes) {
+      const task = await rc.env.DATABASE.prepare(
+        `SELECT chat_session_id, workspace_id FROM tasks WHERE id = ? LIMIT 1`
+      )
+        .bind(state.taskId)
+        .first<{ chat_session_id: string | null; workspace_id: string | null }>();
+      if (!task || task.chat_session_id !== chatSessionId || task.workspace_id !== workspaceId) {
+        throw new Error(
+          `Task ${state.taskId} has conflicting session/workspace linkage ` +
+            `(task.chat_session_id=${task?.chat_session_id ?? 'missing'}, ` +
+            `task.workspace_id=${task?.workspace_id ?? 'missing'})`
+        );
+      }
+    }
+
+    if (state.config.resumeSnapshotChatSessionId) {
+      const { drizzle } = await import('drizzle-orm/d1');
+      const schema = await import('../../db/schema');
+      const { recordSessionSnapshotRecoveryWorkspace } =
+        await import('../../services/session-snapshots');
+      await recordSessionSnapshotRecoveryWorkspace(
+        drizzle(rc.env.DATABASE, { schema }),
+        state.config.resumeSnapshotChatSessionId,
+        state.taskId,
+        workspaceId
+      );
+    }
 
     log.info('task_runner_do.session_d1_linked', {
       taskId: state.taskId,
-      sessionId: state.stepResults.chatSessionId,
+      sessionId: chatSessionId,
       workspaceId,
     });
   } catch (err) {
-    // D1 link failure is blocking — without chatSessionId in D1, the message
-    // ingestion endpoint will reject all messages for this workspace.
+    // D1 link failure is blocking — without chatSessionId in D1, message ingestion
+    // and idle cleanup cannot bind the workspace/session/task identity safely.
     log.error('task_runner_do.session_d1_link_failed', {
       taskId: state.taskId,
-      sessionId: state.stepResults.chatSessionId,
+      sessionId: chatSessionId,
       workspaceId,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -69,7 +109,7 @@ export async function ensureSessionLinked(
     await projectDataService.linkSessionToWorkspace(
       rc.env,
       state.projectId,
-      state.stepResults.chatSessionId,
+      chatSessionId,
       workspaceId
     );
 
@@ -77,20 +117,20 @@ export async function ensureSessionLinked(
       await projectDataService.scheduleIdleCleanup(
         rc.env,
         state.projectId,
-        state.stepResults.chatSessionId,
+        chatSessionId,
         workspaceId,
         state.taskId
       );
       log.info('task_runner_do.session_idle_cleanup_scheduled', {
         taskId: state.taskId,
-        sessionId: state.stepResults.chatSessionId,
+        sessionId: chatSessionId,
         workspaceId,
       });
     }
 
     log.info('task_runner_do.session_linked_to_workspace', {
       taskId: state.taskId,
-      sessionId: state.stepResults.chatSessionId,
+      sessionId: chatSessionId,
       workspaceId,
     });
   } catch (err) {
@@ -98,7 +138,7 @@ export async function ensureSessionLinked(
     // in the DO's SQLite. The D1 link above handles downstream needs.
     log.error('task_runner_do.session_do_link_failed', {
       taskId: state.taskId,
-      sessionId: state.stepResults.chatSessionId,
+      sessionId: chatSessionId,
       workspaceId,
       error: err instanceof Error ? err.message : String(err),
     });
@@ -216,9 +256,11 @@ export async function failTask(
   });
 
   // Check current status before failing (idempotent)
-  const task = await rc.env.DATABASE.prepare(`SELECT status, mission_id FROM tasks WHERE id = ?`)
+  const task = await rc.env.DATABASE.prepare(
+    `SELECT status, mission_id, parent_task_id FROM tasks WHERE id = ?`
+  )
     .bind(state.taskId)
-    .first<{ status: string; mission_id: string | null }>();
+    .first<{ status: string; mission_id: string | null; parent_task_id: string | null }>();
 
   const currentStatus = task?.status;
   if (
@@ -235,12 +277,18 @@ export async function failTask(
   // Fail the task. The status predicate makes this idempotent against a
   // concurrent terminal transition that lands between the check above and this
   // write — never clobber an already-terminal row (completed/failed/cancelled).
-  await rc.env.DATABASE.prepare(
+  const failureTransition = await rc.env.DATABASE.prepare(
     `UPDATE tasks SET status = 'failed', execution_step = NULL, error_message = ?, completed_at = ?, updated_at = ?
      WHERE id = ? AND status NOT IN ('completed', 'failed', 'cancelled')`
   )
     .bind(errorMessage, now, now, state.taskId)
     .run();
+
+  if (!failureTransition.meta.changes) {
+    state.completed = true;
+    await rc.ctx.storage.put('state', state);
+    return;
+  }
 
   // Sync trigger execution status (best-effort) — without this, cron triggers
   // with skipIfRunning=true permanently stop firing because the execution stays 'running'.
@@ -253,6 +301,16 @@ export async function failTask(
   )
     .bind(ulid(), state.taskId, currentStatus || 'queued', errorMessage, now)
     .run();
+
+  await runTaskTerminalTransitionHooks({
+    taskId: state.taskId,
+    projectId: state.projectId,
+    parentTaskId: task?.parent_task_id ?? null,
+    status: 'failed',
+    reason: errorMessage,
+    occurredAt: now,
+    source: 'task_runner.fail_task',
+  });
 
   // Notify orchestrator of task failure (best-effort) — triggers scheduling cycle
   // so dependent tasks can react to the failure (e.g., unblock blocked_dependency tasks)
@@ -300,10 +358,44 @@ export async function failTask(
     rc.env
   );
 
-  // Inject error into chat session and mark it as failed. The UI also
-  // cross-references task.status so even if this RPC fails the session will
-  // appear terminated, but we still attempt it for data consistency.
-  if (state.stepResults.chatSessionId && state.projectId) {
+  const recoverySessionId = state.config.resumeSnapshotChatSessionId ?? null;
+  if (recoverySessionId) {
+    try {
+      const { drizzle } = await import('drizzle-orm/d1');
+      const schema = await import('../../db/schema');
+      const { failSessionSnapshotRecovery } = await import('../../services/session-snapshots');
+      await failSessionSnapshotRecovery(
+        drizzle(rc.env.DATABASE, { schema }),
+        rc.env,
+        recoverySessionId,
+        state.taskId,
+        errorMessage
+      );
+    } catch (snapshotErr) {
+      log.warn('task_runner_do.session_recovery_fail_record_failed', {
+        taskId: state.taskId,
+        sessionId: recoverySessionId,
+        error: snapshotErr instanceof Error ? snapshotErr.message : String(snapshotErr),
+      });
+    }
+
+    // The failed task owns only the replacement runtime. Preserve the original
+    // conversation as sleeping so another bounded wake attempt can reuse the
+    // verified snapshot. This also compensates if ProjectData accepted the wake
+    // immediately before a later D1 recovery-commit failure.
+    try {
+      const { sleepSession } = await import('../../services/project-data');
+      await sleepSession(rc.env, state.projectId, recoverySessionId);
+    } catch (chatErr) {
+      log.warn('task_runner_do.session_recovery_resleep_failed', {
+        taskId: state.taskId,
+        sessionId: recoverySessionId,
+        error: chatErr instanceof Error ? chatErr.message : String(chatErr),
+      });
+    }
+  } else if (state.stepResults.chatSessionId && state.projectId) {
+    // Ordinary task failures are terminal for their chat. The UI also
+    // cross-references task.status, but update ProjectData for consistency.
     const sessionId = state.stepResults.chatSessionId;
     const projectId = state.projectId;
     const maxAttempts = 2;
@@ -436,7 +528,11 @@ export async function cleanupOnFailure(
       const stub = rc.env.NODE_LIFECYCLE.get(doId);
       await (
         stub as unknown as import('../node-lifecycle').NodeLifecycle
-      ).scheduleWorkspaceDeletion(state.stepResults.workspaceId, state.userId);
+      ).scheduleWorkspaceDeletion(
+        state.stepResults.nodeId,
+        state.stepResults.workspaceId,
+        state.userId
+      );
     } catch (err) {
       log.warn('task_runner_do.cleanup.schedule_deletion_failed', {
         taskId: state.taskId,

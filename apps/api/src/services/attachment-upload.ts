@@ -4,7 +4,7 @@
  * Generates S3-compatible presigned PUT URLs for direct browser → R2 uploads,
  * Validates attachment existence/integrity on task submission via HEAD checks.
  */
-import { PutObjectCommand,S3Client } from '@aws-sdk/client-s3';
+import { PutObjectCommand } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import type { TaskAttachment } from '@simple-agent-manager/shared';
 import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/shared';
@@ -12,13 +12,17 @@ import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { parsePositiveInt } from '../lib/route-helpers';
+import { getR2S3Client } from './r2-s3-client';
 
 function getMaxBytes(env: Env): number {
   return parsePositiveInt(env.ATTACHMENT_UPLOAD_MAX_BYTES, ATTACHMENT_DEFAULTS.UPLOAD_MAX_BYTES);
 }
 
 function getBatchMaxBytes(env: Env): number {
-  return parsePositiveInt(env.ATTACHMENT_UPLOAD_BATCH_MAX_BYTES, ATTACHMENT_DEFAULTS.UPLOAD_BATCH_MAX_BYTES);
+  return parsePositiveInt(
+    env.ATTACHMENT_UPLOAD_BATCH_MAX_BYTES,
+    ATTACHMENT_DEFAULTS.UPLOAD_BATCH_MAX_BYTES
+  );
 }
 
 function getMaxFiles(env: Env): number {
@@ -26,33 +30,10 @@ function getMaxFiles(env: Env): number {
 }
 
 function getPresignExpiry(env: Env): number {
-  return parsePositiveInt(env.ATTACHMENT_PRESIGN_EXPIRY_SECONDS, ATTACHMENT_DEFAULTS.PRESIGN_EXPIRY_SECONDS);
-}
-
-// ---------------------------------------------------------------------------
-// S3 Client (cached per credential set — Workers reuse isolates)
-// ---------------------------------------------------------------------------
-
-let _s3Client: S3Client | null = null;
-let _s3ClientKey = '';
-
-function getS3Client(env: Env): S3Client {
-  if (!env.R2_ACCESS_KEY_ID || !env.R2_SECRET_ACCESS_KEY || !env.CF_ACCOUNT_ID) {
-    throw new Error('R2 S3 credentials not configured (R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, CF_ACCOUNT_ID required)');
-  }
-  const key = `${env.CF_ACCOUNT_ID}:${env.R2_ACCESS_KEY_ID}`;
-  if (!_s3Client || _s3ClientKey !== key) {
-    _s3Client = new S3Client({
-      region: 'auto',
-      endpoint: `https://${env.CF_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      credentials: {
-        accessKeyId: env.R2_ACCESS_KEY_ID,
-        secretAccessKey: env.R2_SECRET_ACCESS_KEY,
-      },
-    });
-    _s3ClientKey = key;
-  }
-  return _s3Client;
+  return parsePositiveInt(
+    env.ATTACHMENT_PRESIGN_EXPIRY_SECONDS,
+    ATTACHMENT_DEFAULTS.PRESIGN_EXPIRY_SECONDS
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -82,7 +63,7 @@ export interface GeneratePresignedUploadOptions {
  */
 export async function generatePresignedUploadUrl(
   env: Env,
-  options: GeneratePresignedUploadOptions,
+  options: GeneratePresignedUploadOptions
 ): Promise<{ uploadUrl: string; r2Key: string; expiresIn: number }> {
   const { userId, uploadId, filename, size, contentType } = options;
 
@@ -107,7 +88,7 @@ export async function generatePresignedUploadUrl(
     throw new Error('R2_BUCKET_NAME not configured');
   }
 
-  const s3 = getS3Client(env);
+  const s3 = getR2S3Client(env);
   const expiresIn = getPresignExpiry(env);
 
   const command = new PutObjectCommand({
@@ -152,7 +133,7 @@ export interface ValidationResult {
 export async function validateAttachments(
   env: Env,
   userId: string,
-  attachments: TaskAttachment[],
+  attachments: TaskAttachment[]
 ): Promise<ValidationResult> {
   const errors: string[] = [];
 
@@ -179,16 +160,18 @@ export async function validateAttachments(
       // Use the R2 binding (not S3) for HEAD checks — faster, no credentials needed
       const object = await env.R2.head(r2Key);
       if (!object) {
-        throw new Error(`Attachment not found in R2: ${attachment.filename} (uploadId: ${attachment.uploadId})`);
+        throw new Error(
+          `Attachment not found in R2: ${attachment.filename} (uploadId: ${attachment.uploadId})`
+        );
       }
 
       // Verify size matches
       if (object.size !== attachment.size) {
         throw new Error(
-          `Size mismatch for ${attachment.filename}: declared ${attachment.size}, actual ${object.size}`,
+          `Size mismatch for ${attachment.filename}: declared ${attachment.size}, actual ${object.size}`
         );
       }
-    }),
+    })
   );
 
   for (const result of headResults) {
@@ -211,14 +194,14 @@ export async function validateAttachments(
 export async function cleanupAttachments(
   r2: R2Bucket,
   userId: string,
-  attachments: TaskAttachment[],
+  attachments: TaskAttachment[]
 ): Promise<void> {
   const results = await Promise.allSettled(
     attachments.map(async (attachment) => {
       const r2Key = buildAttachmentR2Key(userId, attachment.uploadId, attachment.filename);
       await r2.delete(r2Key);
       log.info('attachment_upload.cleaned_up', { r2Key });
-    }),
+    })
   );
 
   for (const result of results) {
@@ -237,7 +220,7 @@ export async function cleanupAttachments(
 export async function getAttachmentFromR2(
   r2: R2Bucket,
   userId: string,
-  attachment: TaskAttachment,
+  attachment: TaskAttachment
 ): Promise<{ body: ReadableStream; contentType: string; size: number }> {
   const r2Key = buildAttachmentR2Key(userId, attachment.uploadId, attachment.filename);
   const object = await r2.get(r2Key);

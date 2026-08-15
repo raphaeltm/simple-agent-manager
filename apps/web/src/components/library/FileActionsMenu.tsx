@@ -68,55 +68,58 @@ export function FileActionsMenu({
       >
         <MoreVertical size={16} />
       </button>
-      {open && createPortal(
-        <div
-          ref={portalRef}
-          className="min-w-[160px] rounded-lg glass-surface shadow-lg py-1"
-          style={{
-            position: 'fixed',
-            zIndex: 20,
-            ...(triggerRef.current ? (() => {
-              const r = triggerRef.current!.getBoundingClientRect();
-              return { top: r.bottom + 4, right: window.innerWidth - r.right };
-            })() : {}),
-          }}
-        >
-          {onPreview && isPreviewableMime(file.mimeType, file.filename) && (
+      {open &&
+        createPortal(
+          <div
+            ref={portalRef}
+            className="min-w-[160px] rounded-lg glass-surface shadow-lg py-1"
+            style={{
+              position: 'fixed',
+              zIndex: 20,
+              ...(() => {
+                const trigger = triggerRef.current;
+                if (!trigger) return {};
+                const r = trigger.getBoundingClientRect();
+                return { top: r.bottom + 4, right: window.innerWidth - r.right };
+              })(),
+            }}
+          >
+            {onPreview && isPreviewableMime(file.mimeType, file.filename) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  onPreview(file);
+                }}
+                className={`flex items-center gap-2 w-full px-3 py-2 text-sm text-fg-primary bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left ${FOCUS_RING}`}
+              >
+                <Eye size={14} /> Preview
+              </button>
+            )}
             <button
-              type="button"
+              onClick={handleDownload}
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-fg-primary bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left"
+            >
+              <Download size={14} /> Download
+            </button>
+            <button
               onClick={() => {
                 setOpen(false);
-                onPreview(file);
+                onEditTags(file);
               }}
-              className={`flex items-center gap-2 w-full px-3 py-2 text-sm text-fg-primary bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left ${FOCUS_RING}`}
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-fg-primary bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left"
             >
-              <Eye size={14} /> Preview
+              <Tag size={14} /> Edit Tags
             </button>
-          )}
-          <button
-            onClick={handleDownload}
-            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-fg-primary bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left"
-          >
-            <Download size={14} /> Download
-          </button>
-          <button
-            onClick={() => {
-              setOpen(false);
-              onEditTags(file);
-            }}
-            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-fg-primary bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left"
-          >
-            <Tag size={14} /> Edit Tags
-          </button>
-          <button
-            onClick={handleDelete}
-            className="flex items-center gap-2 w-full px-3 py-2 text-sm text-danger bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left"
-          >
-            <Trash2 size={14} /> Delete
-          </button>
-        </div>,
-        document.body,
-      )}
+            <button
+              onClick={handleDelete}
+              className="flex items-center gap-2 w-full px-3 py-2 text-sm text-danger bg-transparent border-none cursor-pointer hover:bg-surface-hover text-left"
+            >
+              <Trash2 size={14} /> Delete
+            </button>
+          </div>,
+          document.body
+        )}
     </div>
   );
 }

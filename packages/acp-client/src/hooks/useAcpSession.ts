@@ -3,7 +3,11 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AcpErrorCode } from '../errors';
 import { errorCodeFromCloseCode, errorCodeFromMessage, getErrorMeta } from '../errors';
 import { maybeJsonRecord } from '../runtime-validation';
-import type { AgentStatusMessage, LifecycleEventCallback, SessionStateMessage } from '../transport/types';
+import type {
+  AgentStatusMessage,
+  LifecycleEventCallback,
+  SessionStateMessage,
+} from '../transport/types';
 import type { AcpTransport } from '../transport/websocket';
 import { createAcpWebSocketTransport } from '../transport/websocket';
 import {
@@ -52,8 +56,10 @@ function isGatewayErrorMessage(data: unknown): data is GatewayErrorMessage {
   }
   const record = maybeJsonRecord(data);
   if (!record) return false;
-  return typeof record.error === 'string' &&
-    (typeof record.message === 'string' || record.message === undefined);
+  return (
+    typeof record.error === 'string' &&
+    (typeof record.message === 'string' || record.message === undefined)
+  );
 }
 
 /** Options for the useAcpSession hook */
@@ -158,15 +164,15 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
 
   const onPrepareForReplayRef = useRef(onPrepareForReplay);
   onPrepareForReplayRef.current = onPrepareForReplay;
-  
+
   const onFirstConnectRef = useRef(onFirstConnect);
   onFirstConnectRef.current = onFirstConnect;
-  
+
   const wsUrlRef = useRef(wsUrl);
   wsUrlRef.current = wsUrl;
   const resolveWsUrlRef = useRef(resolveWsUrl);
   resolveWsUrlRef.current = resolveWsUrl;
-  
+
   // Track whether we've called onFirstConnect for this connection
   const hasCalledFirstConnectRef = useRef(false);
 
@@ -200,139 +206,151 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
   const lastCloseErrorCodeRef = useRef<AcpErrorCode | null>(null);
 
   // Lifecycle logging helper
-  const logLifecycle = useCallback((
-    level: 'info' | 'warn' | 'error',
-    message: string,
-    context?: Record<string, unknown>
-  ) => {
-    onLifecycleEventRef.current?.({ source: 'acp-session', level, message, context });
-  }, []);
+  const logLifecycle = useCallback(
+    (level: 'info' | 'warn' | 'error', message: string, context?: Record<string, unknown>) => {
+      onLifecycleEventRef.current?.({ source: 'acp-session', level, message, context });
+    },
+    []
+  );
 
   // Map VM Agent status to session state
-  const handleAgentStatus = useCallback((msg: AgentStatusMessage) => {
-    const newState = mapAgentStatusToSessionState(msg.status);
-    setState(newState);
-    setAgentType(msg.agentType);
+  const handleAgentStatus = useCallback(
+    (msg: AgentStatusMessage) => {
+      const newState = mapAgentStatusToSessionState(msg.status);
+      setState(newState);
+      setAgentType(msg.agentType);
 
-    logLifecycle('info', `Agent status: ${msg.status}`, {
-      agentType: msg.agentType,
-      status: msg.status,
-      mappedState: newState,
-      ...(msg.error ? { error: msg.error } : {}),
-    });
+      logLifecycle('info', `Agent status: ${msg.status}`, {
+        agentType: msg.agentType,
+        status: msg.status,
+        mappedState: newState,
+        ...(msg.error ? { error: msg.error } : {}),
+      });
 
-    if (msg.error) {
-      const code = errorCodeFromMessage(msg.error);
-      setStructuredError(code, msg.error);
-    } else if (newState !== 'error') {
-      clearError();
-    }
-  }, [logLifecycle, setStructuredError, clearError]);
+      if (msg.error) {
+        const code = errorCodeFromMessage(msg.error);
+        setStructuredError(code, msg.error);
+      } else if (newState !== 'error') {
+        clearError();
+      }
+    },
+    [logLifecycle, setStructuredError, clearError]
+  );
 
   // Handle incoming ACP messages
-  const handleAcpMessage = useCallback((data: unknown) => {
-    if (isGatewayErrorMessage(data)) {
-      logLifecycle('error', 'Gateway error received', {
-        error: data.error,
-        message: data.message,
-      });
-      setState('error');
-      const errMsg = data.message || data.error;
-      setStructuredError(errorCodeFromMessage(errMsg), errMsg);
-      return;
-    }
-    onAcpMessageRef.current?.(data as AcpMessage);
-  }, [logLifecycle, setStructuredError]);
+  const handleAcpMessage = useCallback(
+    (data: unknown) => {
+      if (isGatewayErrorMessage(data)) {
+        logLifecycle('error', 'Gateway error received', {
+          error: data.error,
+          message: data.message,
+        });
+        setState('error');
+        const errMsg = data.message || data.error;
+        setStructuredError(errorCodeFromMessage(errMsg), errMsg);
+        return;
+      }
+      onAcpMessageRef.current?.(data as AcpMessage);
+    },
+    [logLifecycle, setStructuredError]
+  );
 
   // Handle session_state control message from SessionHost on viewer attach.
   // This tells us the current server-side state of the agent session.
-  const handleSessionState = useCallback((msg: SessionStateMessage) => {
-    logLifecycle('info', 'Session state received', {
-      status: msg.status,
-      agentType: msg.agentType,
-      replayCount: msg.replayCount,
-      error: msg.error,
-    });
+  const handleSessionState = useCallback(
+    (msg: SessionStateMessage) => {
+      logLifecycle('info', 'Session state received', {
+        status: msg.status,
+        agentType: msg.agentType,
+        replayCount: msg.replayCount,
+        error: msg.error,
+      });
 
-    // Map SessionHost status to our state machine
-    const status = msg.status;
-    // Remember the server-reported status so handleSessionReplayComplete
-    // can restore it (e.g., 'prompting') instead of defaulting to 'ready'.
-    serverStatusRef.current = status;
+      // Map SessionHost status to our state machine
+      const status = msg.status;
+      // Remember the server-reported status so handleSessionReplayComplete
+      // can restore it (e.g., 'prompting') instead of defaulting to 'ready'.
+      serverStatusRef.current = status;
 
-    // Always sync agentType from server state — clear to null when empty/idle
-    setAgentType(msg.agentType || null);
-    if (msg.error) {
-      setStructuredError(errorCodeFromMessage(msg.error), msg.error);
-    } else {
-      clearError();
-    }
-
-    // Clear the pending-restart flag for non-error states — the agent is
-    // already running (or idle), so no restart is needed.
-    if (status !== 'error') {
-      pendingAgentRestartRef.current = false;
-    }
-
-    // Call onFirstConnect exactly once when we receive the first session_state
-    // after a successful connection. This replaces the useEffect-based auto-select
-    // logic and prevents infinite loops by design.
-    if (!hasCalledFirstConnectRef.current && onFirstConnectRef.current) {
-      hasCalledFirstConnectRef.current = true;
-      onFirstConnectRef.current(msg);
-    }
-
-    if (status === 'idle') {
-      // No agent selected yet — equivalent to no_session
-      setState('no_session');
-      setReplaying(false);
-    } else if (status === 'starting') {
-      setState('initializing');
-      setReplaying(false);
-    } else if (status === 'ready' || status === 'prompting') {
-      // Agent is running — we'll receive buffered messages, then replay_complete
-      if (msg.replayCount > 0 && !replayCompletedRef.current) {
-        // Clear conversation items SYNCHRONOUSLY before replay messages arrive.
-        // This avoids the race where useEffect-based clear runs after replay
-        // messages have already been appended (causing jumbled/duplicate text).
-        // The replayCompletedRef guard prevents the post-replay authoritative
-        // session_state snapshot (which has stale replayCount > 0) from
-        // triggering a second clear that would wipe all just-replayed messages.
-        onPrepareForReplayRef.current?.();
-        replaySawPromptDoneRef.current = false;
-        setState('replaying');
-        setReplaying(true);
+      // Always sync agentType from server state — clear to null when empty/idle
+      setAgentType(msg.agentType || null);
+      if (msg.error) {
+        setStructuredError(errorCodeFromMessage(msg.error), msg.error);
       } else {
-        replaySawPromptDoneRef.current = false;
-        setState(status === 'prompting' ? 'prompting' : 'ready');
+        clearError();
+      }
+
+      // Clear the pending-restart flag for non-error states — the agent is
+      // already running (or idle), so no restart is needed.
+      if (status !== 'error') {
+        pendingAgentRestartRef.current = false;
+      }
+
+      // Call onFirstConnect exactly once when we receive the first session_state
+      // after a successful connection. This replaces the useEffect-based auto-select
+      // logic and prevents infinite loops by design.
+      if (!hasCalledFirstConnectRef.current && onFirstConnectRef.current) {
+        hasCalledFirstConnectRef.current = true;
+        onFirstConnectRef.current(msg);
+      }
+
+      if (status === 'idle') {
+        // No agent selected yet — equivalent to no_session
+        setState('no_session');
+        setReplaying(false);
+      } else if (status === 'starting') {
+        setState('initializing');
+        setReplaying(false);
+      } else if (status === 'ready' || status === 'prompting') {
+        // Agent is running — we'll receive buffered messages, then replay_complete
+        if (msg.replayCount > 0 && !replayCompletedRef.current) {
+          // Clear conversation items SYNCHRONOUSLY before replay messages arrive.
+          // This avoids the race where useEffect-based clear runs after replay
+          // messages have already been appended (causing jumbled/duplicate text).
+          // The replayCompletedRef guard prevents the post-replay authoritative
+          // session_state snapshot (which has stale replayCount > 0) from
+          // triggering a second clear that would wipe all just-replayed messages.
+          onPrepareForReplayRef.current?.();
+          replaySawPromptDoneRef.current = false;
+          setState('replaying');
+          setReplaying(true);
+        } else {
+          replaySawPromptDoneRef.current = false;
+          setState(status === 'prompting' ? 'prompting' : 'ready');
+          setReplaying(false);
+        }
+      } else if (status === 'error') {
+        if (pendingAgentRestartRef.current) {
+          // Manual reconnect landed on an errored session — treat as no_session
+          // so the auto-select logic in ChatSession re-selects the agent, which
+          // triggers SelectAgent on the SessionHost and restarts the process.
+          pendingAgentRestartRef.current = false;
+          logLifecycle(
+            'info',
+            'Pending agent restart: treating error as no_session for re-selection',
+            {
+              agentType: msg.agentType,
+              error: msg.error,
+            }
+          );
+          setAgentType(null);
+          clearError();
+          setState('no_session');
+        } else {
+          setState('error');
+        }
+        setReplaying(false);
+      } else if (status === 'stopped') {
+        setState('disconnected');
+        setReplaying(false);
+      } else {
+        // Unknown status — treat as no_session
+        setState('no_session');
         setReplaying(false);
       }
-    } else if (status === 'error') {
-      if (pendingAgentRestartRef.current) {
-        // Manual reconnect landed on an errored session — treat as no_session
-        // so the auto-select logic in ChatSession re-selects the agent, which
-        // triggers SelectAgent on the SessionHost and restarts the process.
-        pendingAgentRestartRef.current = false;
-        logLifecycle('info', 'Pending agent restart: treating error as no_session for re-selection', {
-          agentType: msg.agentType,
-          error: msg.error,
-        });
-        setAgentType(null);
-        clearError();
-        setState('no_session');
-      } else {
-        setState('error');
-      }
-      setReplaying(false);
-    } else if (status === 'stopped') {
-      setState('disconnected');
-      setReplaying(false);
-    } else {
-      // Unknown status — treat as no_session
-      setState('no_session');
-      setReplaying(false);
-    }
-  }, [logLifecycle, setStructuredError, clearError]);
+    },
+    [logLifecycle, setStructuredError, clearError]
+  );
 
   // Handle session_replay_complete — all buffered messages have been delivered
   const handleSessionReplayComplete = useCallback(() => {
@@ -359,125 +377,148 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
   }, [logLifecycle]);
 
   // Handle session prompting state changes
-  const handleSessionPrompting = useCallback((prompting: boolean) => {
-    logLifecycle('info', `Session prompting: ${prompting}`);
-    if (prompting) {
-      setState('prompting');
-    } else {
-      // Mark prompt completion immediately so replay_complete in the same
-      // event loop tick can observe it before React flushes state updates.
-      replaySawPromptDoneRef.current = true;
-      setState((prev) => {
-        return prev === 'prompting' ? 'ready' : prev;
-      });
-    }
-  }, [logLifecycle]);
+  const handleSessionPrompting = useCallback(
+    (prompting: boolean) => {
+      logLifecycle('info', `Session prompting: ${prompting}`);
+      if (prompting) {
+        setState('prompting');
+      } else {
+        // Mark prompt completion immediately so replay_complete in the same
+        // event loop tick can observe it before React flushes state updates.
+        replaySawPromptDoneRef.current = true;
+        setState((prev) => {
+          return prev === 'prompting' ? 'ready' : prev;
+        });
+      }
+    },
+    [logLifecycle]
+  );
 
   // Connect to the ACP WebSocket
-  const connect = useCallback((url: string) => {
-    // Close any stale transport before opening a new connection.
-    // This prevents duplicate connections when a reconnect fires while a
-    // previous WebSocket is still in CLOSING state.
-    if (transportRef.current) {
-      intentionalCloseRef.current = true;
-      transportRef.current.close();
-      transportRef.current = null;
-      intentionalCloseRef.current = false;
-    }
-
-    const host = safeHost(url);
-    const ws = new WebSocket(url);
-
-    ws.addEventListener('open', () => {
-      // Reset reconnection state on successful connect
-      const wasReconnect = wasConnectedRef.current;
-      reconnectAttemptRef.current = 0;
-      reconnectStartRef.current = 0;
-      wasConnectedRef.current = true;
-      // Reset the replay-completed guard so the new connection's first
-      // session_state with replayCount > 0 correctly enters replay mode.
-      replayCompletedRef.current = false;
-      // Reset the first-connect flag so onFirstConnect can fire again
-      hasCalledFirstConnectRef.current = false;
-      // Stay in 'connecting' until we receive session_state from the server.
-      // The server will send session_state immediately after the viewer
-      // attaches, telling us whether an agent is already running.
-      setState('connecting');
-      clearError();
-
-      logLifecycle('info', 'WebSocket connected, awaiting session_state', { host, wasReconnect });
-    });
-
-    const transport = createAcpWebSocketTransport({
-      ws,
-      onAgentStatus: handleAgentStatus,
-      onAcpMessage: handleAcpMessage,
-      onAgentCrashReport: handleAcpMessage,
-      onSessionState: handleSessionState,
-      onSessionReplayComplete: handleSessionReplayComplete,
-      onSessionPrompting: handleSessionPrompting,
-      onClose(code?: number, reason?: string) {
-        // WebSocket closed — attempt reconnection if not intentional
+  const connect = useCallback(
+    (url: string) => {
+      // Close any stale transport before opening a new connection.
+      // This prevents duplicate connections when a reconnect fires while a
+      // previous WebSocket is still in CLOSING state.
+      if (transportRef.current) {
+        intentionalCloseRef.current = true;
+        transportRef.current.close();
         transportRef.current = null;
+        intentionalCloseRef.current = false;
+      }
 
-        const strategy = classifyCloseCode(code);
+      const host = safeHost(url);
+      const ws = new WebSocket(url);
 
-        logLifecycle('info', 'WebSocket closed', {
-          host,
-          code,
-          reason,
-          strategy,
-          intentional: intentionalCloseRef.current,
-          wasConnected: wasConnectedRef.current,
-        });
+      ws.addEventListener('open', () => {
+        // Reset reconnection state on successful connect
+        const wasReconnect = wasConnectedRef.current;
+        reconnectAttemptRef.current = 0;
+        reconnectStartRef.current = 0;
+        wasConnectedRef.current = true;
+        // Reset the replay-completed guard so the new connection's first
+        // session_state with replayCount > 0 correctly enters replay mode.
+        replayCompletedRef.current = false;
+        // Reset the first-connect flag so onFirstConnect can fire again
+        hasCalledFirstConnectRef.current = false;
+        // Stay in 'connecting' until we receive session_state from the server.
+        // The server will send session_state immediately after the viewer
+        // attaches, telling us whether an agent is already running.
+        setState('connecting');
+        clearError();
 
-        if (intentionalCloseRef.current) {
-          setState('disconnected');
-          return;
-        }
+        logLifecycle('info', 'WebSocket connected, awaiting session_state', { host, wasReconnect });
+      });
 
-        // Server explicitly rejected us (auth failure, policy) — don't reconnect
-        if (strategy === 'no-reconnect') {
-          const errCode = errorCodeFromCloseCode(code);
-          logLifecycle('warn', 'Server closed connection cleanly — not reconnecting', { code, reason, errorCode: errCode });
-          setState('error');
-          setStructuredError(errCode);
-          return;
-        }
+      const transport = createAcpWebSocketTransport({
+        ws,
+        onAgentStatus: handleAgentStatus,
+        onAcpMessage: handleAcpMessage,
+        onAgentCrashReport: handleAcpMessage,
+        onSessionState: handleSessionState,
+        onSessionReplayComplete: handleSessionReplayComplete,
+        onSessionPrompting: handleSessionPrompting,
+        onClose(code?: number, reason?: string) {
+          // WebSocket closed — attempt reconnection if not intentional
+          transportRef.current = null;
 
-        // Only reconnect if we were previously connected
-        if (wasConnectedRef.current) {
-          // Stash the close-code-derived error code so the UI can show it
-          // during reconnection if it eventually times out.
-          lastCloseErrorCodeRef.current = errorCodeFromCloseCode(code);
-          attemptReconnectRef.current();
-        } else {
-          logLifecycle('error', 'WebSocket connection failed (never connected)', { host, code, reason });
+          const strategy = classifyCloseCode(code);
+
+          logLifecycle('info', 'WebSocket closed', {
+            host,
+            code,
+            reason,
+            strategy,
+            intentional: intentionalCloseRef.current,
+            wasConnected: wasConnectedRef.current,
+          });
+
+          if (intentionalCloseRef.current) {
+            setState('disconnected');
+            return;
+          }
+
+          // Server explicitly rejected us (auth failure, policy) — don't reconnect
+          if (strategy === 'no-reconnect') {
+            const errCode = errorCodeFromCloseCode(code);
+            logLifecycle('warn', 'Server closed connection cleanly — not reconnecting', {
+              code,
+              reason,
+              errorCode: errCode,
+            });
+            setState('error');
+            setStructuredError(errCode);
+            return;
+          }
+
+          // Only reconnect if we were previously connected
+          if (wasConnectedRef.current) {
+            // Stash the close-code-derived error code so the UI can show it
+            // during reconnection if it eventually times out.
+            lastCloseErrorCodeRef.current = errorCodeFromCloseCode(code);
+            attemptReconnectRef.current();
+          } else {
+            logLifecycle('error', 'WebSocket connection failed (never connected)', {
+              host,
+              code,
+              reason,
+            });
+            setState('error');
+            setStructuredError('CONNECTION_FAILED');
+          }
+        },
+        onError() {
+          // WebSocket error
+          logLifecycle('warn', 'WebSocket error event', {
+            host,
+            wasConnected: wasConnectedRef.current,
+            intentionalClose: intentionalCloseRef.current,
+          });
+
+          if (!intentionalCloseRef.current && wasConnectedRef.current) {
+            // Will be followed by close event which handles reconnection
+            return;
+          }
           setState('error');
           setStructuredError('CONNECTION_FAILED');
-        }
-      },
-      onError() {
-        // WebSocket error
-        logLifecycle('warn', 'WebSocket error event', {
-          host,
-          wasConnected: wasConnectedRef.current,
-          intentionalClose: intentionalCloseRef.current,
-        });
+        },
+        onLifecycleEvent: onLifecycleEventRef.current,
+      });
 
-        if (!intentionalCloseRef.current && wasConnectedRef.current) {
-          // Will be followed by close event which handles reconnection
-          return;
-        }
-        setState('error');
-        setStructuredError('CONNECTION_FAILED');
-      },
-      onLifecycleEvent: onLifecycleEventRef.current,
-    });
-
-    transportRef.current = transport;
-    return transport;
-  }, [handleAgentStatus, handleAcpMessage, handleSessionState, handleSessionReplayComplete, handleSessionPrompting, logLifecycle, clearError, setStructuredError]); // eslint-disable-line react-hooks/exhaustive-deps
+      transportRef.current = transport;
+      return transport;
+    },
+    [
+      handleAgentStatus,
+      handleAcpMessage,
+      handleSessionState,
+      handleSessionReplayComplete,
+      handleSessionPrompting,
+      logLifecycle,
+      clearError,
+      setStructuredError,
+    ]
+  );
 
   const resolveConnectUrl = useCallback((fallbackUrl?: string | null) => {
     if (resolveWsUrlRef.current) {
@@ -486,42 +527,45 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     return fallbackUrl ?? wsUrlRef.current;
   }, []);
 
-  const connectWithResolvedUrl = useCallback((fallbackUrl?: string | null): Promise<boolean> => {
-    const handleResolved = (resolved: string | null): boolean => {
-      if (!resolved) {
+  const connectWithResolvedUrl = useCallback(
+    (fallbackUrl?: string | null): Promise<boolean> => {
+      const handleResolved = (resolved: string | null): boolean => {
+        if (!resolved) {
+          setState('error');
+          setStructuredError('URL_UNAVAILABLE');
+          return false;
+        }
+        connectUrlRef.current = resolved;
+        connect(resolved);
+        return true;
+      };
+
+      const handleError = (err: unknown): boolean => {
+        const message = err instanceof Error ? err.message : 'Failed to resolve WebSocket URL';
+        logLifecycle('warn', 'Failed to resolve WebSocket URL', { error: message });
         setState('error');
-        setStructuredError('URL_UNAVAILABLE');
+        setStructuredError('URL_UNAVAILABLE', message);
         return false;
-      }
-      connectUrlRef.current = resolved;
-      connect(resolved);
-      return true;
-    };
+      };
 
-    const handleError = (err: unknown): boolean => {
-      const message = err instanceof Error ? err.message : 'Failed to resolve WebSocket URL';
-      logLifecycle('warn', 'Failed to resolve WebSocket URL', { error: message });
-      setState('error');
-      setStructuredError('URL_UNAVAILABLE', message);
-      return false;
-    };
-
-    try {
-      const resolvedOrPromise = resolveConnectUrl(fallbackUrl);
-      if (
-        resolvedOrPromise &&
-        typeof resolvedOrPromise === 'object' &&
-        'then' in resolvedOrPromise
-      ) {
-        return (resolvedOrPromise as Promise<string | null>)
-          .then((resolved) => handleResolved(resolved))
-          .catch((err) => handleError(err));
+      try {
+        const resolvedOrPromise = resolveConnectUrl(fallbackUrl);
+        if (
+          resolvedOrPromise &&
+          typeof resolvedOrPromise === 'object' &&
+          'then' in resolvedOrPromise
+        ) {
+          return (resolvedOrPromise as Promise<string | null>)
+            .then((resolved) => handleResolved(resolved))
+            .catch((err) => handleError(err));
+        }
+        return Promise.resolve(handleResolved(resolvedOrPromise as string | null));
+      } catch (err) {
+        return Promise.resolve(handleError(err));
       }
-      return Promise.resolve(handleResolved(resolvedOrPromise as string | null));
-    } catch (err) {
-      return Promise.resolve(handleError(err));
-    }
-  }, [connect, logLifecycle, resolveConnectUrl, setStructuredError]);
+    },
+    [connect, logLifecycle, resolveConnectUrl, setStructuredError]
+  );
 
   // Attempt reconnection with exponential backoff
   const attemptReconnect = useCallback(() => {
@@ -580,7 +624,14 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
         }
       });
     }, delay);
-  }, [reconnectDelayMs, reconnectTimeoutMs, reconnectMaxDelayMs, connectWithResolvedUrl, logLifecycle, setStructuredError]);
+  }, [
+    reconnectDelayMs,
+    reconnectTimeoutMs,
+    reconnectMaxDelayMs,
+    connectWithResolvedUrl,
+    logLifecycle,
+    setStructuredError,
+  ]);
   attemptReconnectRef.current = attemptReconnect;
 
   // Main connection effect
@@ -728,15 +779,18 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
   }, [wsUrl, connectWithResolvedUrl, logLifecycle, clearError]);
 
   // Switch to a different agent
-  const switchAgent = useCallback((newAgentType: string) => {
-    if (transportRef.current?.connected) {
-      logLifecycle('info', `Switching agent to ${newAgentType}`, { agentType: newAgentType });
-      transportRef.current.sendSelectAgent(newAgentType);
-      setState('initializing');
-      setAgentType(newAgentType);
-      clearError();
-    }
-  }, [logLifecycle, clearError]);
+  const switchAgent = useCallback(
+    (newAgentType: string) => {
+      if (transportRef.current?.connected) {
+        logLifecycle('info', `Switching agent to ${newAgentType}`, { agentType: newAgentType });
+        transportRef.current.sendSelectAgent(newAgentType);
+        setState('initializing');
+        setAgentType(newAgentType);
+        clearError();
+      }
+    },
+    [logLifecycle, clearError]
+  );
 
   // Send a raw ACP message
   const sendMessage = useCallback((message: unknown) => {

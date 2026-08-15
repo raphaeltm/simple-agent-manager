@@ -6,6 +6,8 @@ import {
   type ProjectFileTag,
 } from '@simple-agent-manager/shared';
 
+import { isJsonRecord } from './runtime-validation';
+
 const CACHE_PREFIX = 'sam-library:';
 const USER_NAMESPACE_PREFIX = 'user:';
 export const UNAUTHENTICATED_LIBRARY_CACHE_NAMESPACE = `${USER_NAMESPACE_PREFIX}unauthenticated`;
@@ -56,7 +58,7 @@ function buildKey(
   projectId: string,
   type: 'files' | 'dirs',
   params: string,
-  namespace?: LibraryCacheNamespace,
+  namespace?: LibraryCacheNamespace
 ): string {
   return `${buildProjectPrefix(projectId, namespace)}:${type}:${params}`;
 }
@@ -72,8 +74,11 @@ function isLegacyLibraryKey(key: string): boolean {
 /** Best-effort timestamp extraction for LRU eviction across mixed entry shapes. */
 function entryTimestamp(raw: string): number {
   try {
-    const parsed = JSON.parse(raw) as { timestamp?: number; sweptAt?: number };
-    return parsed.sweptAt ?? parsed.timestamp ?? 0;
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isJsonRecord(parsed)) return 0;
+    const sweptAt = typeof parsed.sweptAt === 'number' ? parsed.sweptAt : undefined;
+    const timestamp = typeof parsed.timestamp === 'number' ? parsed.timestamp : undefined;
+    return sweptAt ?? timestamp ?? 0;
   } catch {
     return 0;
   }
@@ -161,9 +166,11 @@ export function getCachedFiles(
   projectId: string,
   directory: string,
   sortBy: string,
-  namespace?: LibraryCacheNamespace,
+  namespace?: LibraryCacheNamespace
 ): ListFilesResponse | null {
-  return readCache<ListFilesResponse>(buildKey(projectId, 'files', `${directory}:${sortBy}`, namespace));
+  return readCache<ListFilesResponse>(
+    buildKey(projectId, 'files', `${directory}:${sortBy}`, namespace)
+  );
 }
 
 export function setCachedFiles(
@@ -171,7 +178,7 @@ export function setCachedFiles(
   directory: string,
   sortBy: string,
   data: ListFilesResponse,
-  namespace?: LibraryCacheNamespace,
+  namespace?: LibraryCacheNamespace
 ): void {
   writeCache(buildKey(projectId, 'files', `${directory}:${sortBy}`, namespace), data);
 }
@@ -179,7 +186,7 @@ export function setCachedFiles(
 export function getCachedDirectories(
   projectId: string,
   parentDirectory: string,
-  namespace?: LibraryCacheNamespace,
+  namespace?: LibraryCacheNamespace
 ): DirectoryEntry[] | null {
   return readCache<DirectoryEntry[]>(buildKey(projectId, 'dirs', parentDirectory, namespace));
 }
@@ -188,7 +195,7 @@ export function setCachedDirectories(
   projectId: string,
   parentDirectory: string,
   data: DirectoryEntry[],
-  namespace?: LibraryCacheNamespace,
+  namespace?: LibraryCacheNamespace
 ): void {
   writeCache(buildKey(projectId, 'dirs', parentDirectory, namespace), data);
 }
@@ -199,13 +206,29 @@ export function setCachedDirectories(
 
 export function getCachedIndex(
   projectId: string,
-  namespace?: LibraryCacheNamespace,
+  namespace?: LibraryCacheNamespace
 ): CachedLibraryIndex | null {
   try {
     const key = buildIndexKey(projectId, namespace);
     const raw = localStorage.getItem(key);
     if (!raw) return null;
-    const index = JSON.parse(raw) as CachedLibraryIndex;
+    const parsed = JSON.parse(raw) as unknown;
+    // Malformed or schema-drifted entries (localStorage is user-tamperable and
+    // survives across deploys) must degrade to a cache miss, never a lie about
+    // the shape via a blind cast.
+    if (
+      !isJsonRecord(parsed) ||
+      !Array.isArray(parsed.files) ||
+      typeof parsed.count !== 'number' ||
+      typeof parsed.sweptAt !== 'number'
+    ) {
+      return null;
+    }
+    const index: CachedLibraryIndex = {
+      files: parsed.files as CachedIndexFile[],
+      count: parsed.count,
+      sweptAt: parsed.sweptAt,
+    };
     if (Date.now() - index.sweptAt > CACHE_TTL_MS) {
       localStorage.removeItem(key);
       return null;
@@ -220,7 +243,7 @@ export function getCachedIndex(
 export function setCachedIndex(
   projectId: string,
   files: CachedIndexFile[],
-  namespace?: LibraryCacheNamespace,
+  namespace?: LibraryCacheNamespace
 ): boolean {
   const index: CachedLibraryIndex = { files, count: files.length, sweptAt: Date.now() };
   try {

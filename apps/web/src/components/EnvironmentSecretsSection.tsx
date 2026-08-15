@@ -44,7 +44,6 @@ export function EnvironmentSecretsSection({
     } finally {
       setLoading(false);
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- toast removed per stale-while-revalidate rule
   }, [projectId, environmentId]);
 
   useEffect(() => {
@@ -61,7 +60,9 @@ export function EnvironmentSecretsSection({
     setSaving(true);
     try {
       const result = await setDeploymentSecret(projectId, environmentId, trimmedName, newValue);
-      toast.success(result.created ? `Secret "${trimmedName}" created` : `Secret "${trimmedName}" updated`);
+      toast.success(
+        result.created ? `Secret "${trimmedName}" created` : `Secret "${trimmedName}" updated`
+      );
       setNewName('');
       setNewValue('');
       await loadSecrets();
@@ -127,11 +128,7 @@ export function EnvironmentSecretsSection({
                   updated {new Date(s.updatedAt).toLocaleDateString()}
                 </span>
               </div>
-              <Button
-                variant="danger"
-                size="sm"
-                onClick={() => setDeletingName(s.name)}
-              >
+              <Button variant="danger" size="sm" onClick={() => setDeletingName(s.name)}>
                 Delete
               </Button>
             </div>

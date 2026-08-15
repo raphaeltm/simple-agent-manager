@@ -26,6 +26,7 @@
  */
 import type { AgentType, CredentialKind } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
+import * as v from 'valibot';
 
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
@@ -115,9 +116,22 @@ function credentialFileName(agentType: string): string {
 interface DeviceAuthState {
   status: 'starting' | 'waiting_for_user' | 'completed' | 'failed';
   verificationUrl?: string;
-  userCode?: string;
+  userCode?: string | null;
   error?: string | null;
 }
+
+/**
+ * Validates the on-disk device-auth-state.json shape written by
+ * scripts/claude-setup-token.mjs and scripts/codex-device-auth.mjs. `userCode`
+ * is nullable because claude-setup-token.mjs writes `userCode: details.userCode
+ * ?? null` (Claude Code sign-in never requires a user code).
+ */
+const DeviceAuthStateSchema = v.object({
+  status: v.picklist(['starting', 'waiting_for_user', 'completed', 'failed']),
+  verificationUrl: v.optional(v.string()),
+  userCode: v.optional(v.nullable(v.string())),
+  error: v.optional(v.nullable(v.string())),
+});
 
 export class CredentialSetupSession extends DurableObject<Env> {
   private readonly sql: SqlStorage;
@@ -424,7 +438,12 @@ export class CredentialSetupSession extends DurableObject<Env> {
       const existence = await sandbox.exists(path);
       if (!existence.exists) return null;
       const file = await sandbox.readFile(path);
-      return JSON.parse(file.content ?? '') as DeviceAuthState;
+      const parsedRaw = JSON.parse(file.content ?? '') as unknown;
+      const result = v.safeParse(DeviceAuthStateSchema, parsedRaw);
+      // A partial/mid-flush write or an unrecognized status parses invalid —
+      // degrade to null (caller keeps polling), matching the pre-validation
+      // blind-cast behavior for any state that didn't drive a status branch.
+      return result.success ? result.output : null;
     } catch {
       return null;
     }
