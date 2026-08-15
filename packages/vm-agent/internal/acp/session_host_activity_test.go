@@ -53,10 +53,30 @@ func TestPromptActivityRereportStopsBeforeIdle(t *testing.T) {
 		return countActivity(&mu, &activities, "idle") >= 1
 	})
 
-	promptingAfterDone := countActivity(&mu, &activities, "prompting")
-	time.Sleep(40 * time.Millisecond)
-	if got := countActivity(&mu, &activities, "prompting"); got != promptingAfterDone {
-		t.Fatalf("prompting re-report fired after markPromptDone: before=%d after=%d activities=%v", promptingAfterDone, got, snapshotActivities(&mu, &activities))
+	// Each reportActivity dispatch runs in its own goroutine, so a prompting
+	// report launched just before markPromptDone may still be in flight when
+	// the idle report lands. The contract under test is that the re-report
+	// LOOP stops scheduling new prompting reports — so assert the prompting
+	// count stabilizes (stragglers drain, growth stops) rather than demanding
+	// zero deliveries after an arbitrary sample instant.
+	settle := 4 * host.config.ActivityRereportInterval
+	prompting := countActivity(&mu, &activities, "prompting")
+	stabilized := false
+	for range 3 {
+		time.Sleep(settle)
+		next := countActivity(&mu, &activities, "prompting")
+		if next == prompting {
+			stabilized = true
+			break
+		}
+		prompting = next
+	}
+	if !stabilized {
+		t.Fatalf("prompting re-reports kept firing after markPromptDone: activities=%v", snapshotActivities(&mu, &activities))
+	}
+	time.Sleep(settle)
+	if got := countActivity(&mu, &activities, "prompting"); got != prompting {
+		t.Fatalf("prompting re-report fired after stabilization: before=%d after=%d activities=%v", prompting, got, snapshotActivities(&mu, &activities))
 	}
 }
 
