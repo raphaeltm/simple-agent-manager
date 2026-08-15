@@ -61,8 +61,54 @@ The major TaskRunner path receives the ProjectData chat session ID and writes it
 - A second workspace fixture was created (`workspace 01M02DWSXPZ8X8Q8E3SXN7H5V2`, node `01M02DWSFBDGAVZPZAC12FEWNH`, session `cd93e9fe-0853-4393-a18b-f5864f2302a2`) to avoid the agent-prompt path. The D1 row shape was correct for linkage, but the available staging D1 token rejected any `UPDATE` that would modify existing rows, including the exact guarded `tasks.chat_session_id = NULL` fixture mutation. No unsafe alternate fixture was used.
 - Both temporary staging nodes/workspaces were deleted through the product API. Final staging D1 check showed no rows for nodes `01M02D54REQVXKHATKPSNTAQCM` / `01M02DWSFBDGAVZPZAC12FEWNH` or workspaces `01M02DBZ7ENKVZ0HWMF669784D` / `01M02DWSXPZ8X8Q8E3SXN7H5V2`; staging had `0` running nodes afterward.
 - Strengthened option-2 fixture: a fresh task-mode Claude Code session (`task 01M02EA4YTKHTH3APA002ZN7RS`, `session 67cc6b58-78ac-4e5f-9396-7405e6e70606`) reached workspace `01M02EHC47BT5RBFPSAFV1V5XF` on node `01M02EA8466HYG25CPJXEEM4VH` and verified the writer fix again: `tasks.chat_session_id` was non-NULL and matched `workspaces.chat_session_id`.
-- The same fixture completed at `2026-08-15T10:13:44.750Z`, queued the real session sleep cleanup path, and then failed the staging cleanup proof: `session_snapshots.sleep_status = 'failed'`, `sleep_error = 'Workspace snapshot did not complete within 300000ms'`, `updated_at = '2026-08-15T10:20:20.222Z'`. Per rule 30 and parent instruction, this blocks PR open/merge until addressed or explicitly waived.
+- The same fixture completed at `2026-08-15T10:13:44.750Z`, queued the real session sleep cleanup path, and then failed the staging cleanup proof: `session_snapshots.sleep_status = 'failed'`, `sleep_error = 'Workspace snapshot did not complete within 300000ms'`, `updated_at = '2026-08-15T10:20:20.222Z'`.
 - The strengthened fixture node/workspace was deleted through the product API after the failed proof. Final staging D1 check showed no rows for node `01M02EA8466HYG25CPJXEEM4VH` or workspace `01M02EHC47BT5RBFPSAFV1V5XF`; staging had `0` running nodes afterward.
+
+### Second-continuation read-only staging D1 evidence
+
+- Current D1 rows for prior staging fixtures still prove the fixed writer persisted non-NULL task links. The corresponding workspace rows have been deleted as part of required staging cleanup, so current joins cannot re-show the live-time equality without provisioning a new fixture:
+
+| task_id | task_status | task_mode | task_chat_session_id | workspace row |
+| --- | --- | --- | --- | --- |
+| `01M02D51E1HKKQ09EKED1YGDG7` | `failed` | `task` | `3f43a32c-b7c0-4c58-8830-12936fd8828e` | deleted |
+| `01M02EA4YTKHTH3APA002ZN7RS` | `completed` | `task` | `67cc6b58-78ac-4e5f-9396-7405e6e70606` | deleted |
+| `01M02GFZZ2AHRB671S1MPRP3YR` | `completed` | `task` | `b2df65e8-f39a-4477-a329-ea68aa2d1c93` | deleted |
+
+- Current staging D1 migration ledger re-read:
+
+```json
+[{ "id": 131, "name": "0111_backfill_task_chat_session_id.sql", "applied_at": "2026-08-15 09:34:48" }]
+```
+
+- Current staging D1 backfill invariant query re-read:
+
+```json
+[{ "remaining_unambiguous_null_task_links": 0 }]
+```
+
+- Current staging D1 resource counts re-read:
+
+```json
+[
+  {
+    "non_destroyed_nodes": 0,
+    "activeish_nodes": 0,
+    "non_terminal_workspaces": 0,
+    "activeish_workspaces": 0
+  }
+]
+```
+
+### Rule 10 documented staging gaps
+
+- Synthetic NULL-linkage staging fixture not creatable: staging D1 is read-only by design, out-of-band writes and temporary CI-credential workflows were explicitly rejected by parent decision. The NULL-link tolerance branch is covered by discriminating local real-SQL tests plus the staging backfill invariant above.
+- Conclusively-dead-runtime staging fixture not achievable read-only: forcing a real dead runtime would require mutating runtime/node state outside normal product paths. Terminalization-on-dead-runtime is covered by the local real-SQL/Miniflare tests, including the pre-fix-red NULL-linkage sweep case, different-session rejection control, and bounded escape-path cases.
+
+### Snapshot carve-out
+
+- Parent decision for the second continuation carves out the completed→sleep→snapshot leg from this PR. The failing path is a pre-existing production/staging snapshot bug owned by SAM task `01M02HNZPJ82CQGV07DG2BGFGQ`, not by this linkage branch.
+- Fresh production D1 aggregate on 2026-08-15 showed current `session_snapshots.sleep_status = 'failed'` rows with `sleep_error = 'Workspace snapshot did not complete within 300000ms'` at `2026-08-15T09:16:37Z` and `2026-08-15T09:56:38Z`, plus degraded/retry-budget snapshot failures around 2026-08-14/15 (`home-skipped` retry budget exhausted and `transcript-only` incomplete snapshot). The timeout is thrown from `apps/api/src/services/session-sleep.ts:179`.
+- The branch diff does not touch `apps/api/src/services/session-sleep.ts` or `apps/api/src/services/session-snapshot-*`, and does not touch the PR #1824 coordination files.
 
 ## Specialist review evidence
 
@@ -82,7 +128,7 @@ The major TaskRunner path receives the ProjectData chat session ID and writes it
 - The migration backfills only unambiguous workspace-derived links and leaves ambiguous/absent workspace linkage untouched.
 - Permanently preserved idle cleanup candidates leave the active candidate set after a bounded max residence.
 - Retry exhaustion does not delete the only durable cleanup record and does not spam repeated toasts.
-- Staging verifies a newly started task-mode session writes `tasks.chat_session_id` and a NULL-linkage fixture becomes terminalizable.
+- Staging verifies newly started task-mode sessions write `tasks.chat_session_id`; NULL-linkage and terminalization-on-dead-runtime staging fixtures are documented Rule 10 gaps and covered by discriminating local real-SQL/Miniflare tests.
 
 ## Post-mortem
 
