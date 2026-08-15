@@ -462,7 +462,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MESSAGE_SIZE_THRESHOLD?: string;
   ACTIVITY_RETENTION_DAYS?: string;
   SESSION_IDLE_TIMEOUT_MINUTES?: string;
-  IDLE_CLEANUP_MAX_RESIDENCE_MS?: string;
   SESSION_ACTIVITY_STALE_THRESHOLD_MS?: string;
   DO_SUMMARY_SYNC_DEBOUNCE_MS?: string;
   // ACP Session Lifecycle (spec 027)
@@ -493,6 +492,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   // Idle cleanup configuration
   IDLE_CLEANUP_RETRY_DELAY_MS?: string;
   IDLE_CLEANUP_MAX_RETRIES?: string;
+  IDLE_CLEANUP_MAX_RESIDENCE_MS?: string;
   // Heartbeat ACP sweep timeout (per-call timeout for DO heartbeat updates in waitUntil)
   HEARTBEAT_ACP_SWEEP_TIMEOUT_MS?: string;
   // Durable Object RPC retry configuration for transient reset/overload errors
