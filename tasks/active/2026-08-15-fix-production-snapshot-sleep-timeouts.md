@@ -254,6 +254,25 @@ restore before the fresh degraded fallback succeeds. The fix now lets `wakeSessi
 cross-workspace guard. The staging node/workspaces were deleted immediately after collecting
 evidence; staging returned to zero active nodes/workspaces.
 
+Final staging verification on commit `81d6a819daf7f5634e854dac020cce1afb757140` passed end-to-end
+after staging deploy run `31900348463` and smoke tests completed successfully. Fresh node
+`01M03AQVV2C66XNMFND5SY9P7W` heartbeated
+`agent_version='81d6a819daf7f5634e854dac020cce1afb757140'`; task
+`01M03AQRCDHDQT21JPW7KED7ZD`, session `e64cfc07-43c4-4a0e-894a-bc0a69c266a6`, workspace
+`01M03B03YF01NAYB62DJ0K1FFS`, agent session `01M03B19BRXJJMWV716BBNSRV5`, reached
+`awaiting_followup` and produced `staging snapshot sleep smoke done`. Explicit workspace sleep
+returned HTTP 200 with snapshot `01M03B2KPHC9R6Z3DABTAJZXCT` in a consistent releasable degraded
+state: `status='degraded'`, `degradation='transcript-only'`, `sleep_status='sleeping'`,
+`sleep_error='Workspace slept with degraded snapshot (transcript-only)'`, `capture_generation=NULL`,
+`snapshot_generation='01M03B6DTK5KPFQA0PZKPFNF57'`, manifest present, `sleeping_at` set, and the
+workspace/agent session both `sleeping`. Wake delivery `01M03BB1X8QPQYQMDSMRVRZHAE` created
+recovery task `01M03BB4P733JD85P9772NBSM5`, workspace `01M03BB7Y0V9PC7BANFJZPZ3BD`, agent session
+`01M03BC8225T4QATKSKAZTJ5HM`; the recovered transcript contained `wake verified`. The final D1
+snapshot row had `sleep_status=NULL`, `sleeping_at=NULL`, `recovery_status='restored'`,
+`recovery_error=NULL`, `restored_at='2026-08-15T18:37:13.241Z'`, and the recovery task was
+`in_progress`/`awaiting_followup` with no error. The staging node was deleted immediately after
+verification; staging returned to zero active nodes and zero active workspaces.
+
 ## Implementation checklist
 
 - [x] Make the final snapshot wait use an environment-configurable no-progress watchdog instead of
@@ -408,6 +427,9 @@ evidence; staging returned to zero active nodes/workspaces.
   `pnpm --filter @simple-agent-manager/api test` (541 files, 7,249 tests).
 - ProjectData wake idempotency patch `pnpm format:check` and `git diff --check` passed.
 - ProjectData failed-session wake patch `pnpm format:check` and `git diff --check` passed.
+- Staging deploy run `31900348463` passed for
+  `81d6a819daf7f5634e854dac020cce1afb757140`; final real VM sleep/wake verifier passed and staging
+  inventory was cleaned back to zero active nodes/workspaces.
 - Added ProjectData worker regression coverage for the same-ID `failed → assigned → running`
   recovery primitive. Local `@cloudflare/vitest-pool-workers` execution for the single filtered test
   timed out after 180s without a test result in this container; staging Worker deploy and live
