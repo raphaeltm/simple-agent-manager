@@ -218,7 +218,6 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT?: string; // Max active parent waits per project (default: 100)
   ORCHESTRATOR_WAIT_MAX_DURATION_MS?: string; // Finite safety deadline for parent waits (default: 86400000)
   ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM?: string; // Max parent waits reconciled per ProjectData alarm (default: 10)
-  ORCHESTRATOR_WAIT_MAX_SUMMARY_LENGTH?: string; // Max child output-summary chars in wake prompts (default: 2000)
   SESSION_SLEEP_SWEEP_BATCH_SIZE?: string; // Max due sleeps claimed per cron sweep (default: 10)
   SESSION_SLEEP_SWEEP_WALL_BUDGET_MS?: string; // Soft D1/DO claim-loop wall budget before deferring remaining candidates (default: 20000)
   SESSION_SLEEP_RETRY_DELAY_MS?: string; // Delay after a fail-closed sleep attempt (default: 300000)

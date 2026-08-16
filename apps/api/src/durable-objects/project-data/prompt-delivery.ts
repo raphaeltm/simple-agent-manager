@@ -159,6 +159,27 @@ export function expireDuePromptDeliveries(
   return { expired, failed };
 }
 
+export function failParentWakeDeliveries(
+  sql: SqlStorage,
+  parentTaskId: string,
+  now = Date.now()
+): number {
+  return sql.exec(
+    `UPDATE session_inbox
+     SET delivery_state = 'failed',
+         terminal_reason = 'terminal_target',
+         last_error = 'Parent task became terminal before wake delivery',
+         next_attempt_at = NULL,
+         attempt_started_at = NULL
+     WHERE source_kind = 'parent_wakeup'
+       AND source_task_id = ?
+       AND delivery_state IN ('queued', 'retry_wait', 'delivering', 'delivered')
+       AND created_at <= ?`,
+    parentTaskId,
+    now
+  ).rowsWritten;
+}
+
 export function claimDuePromptDeliveries(
   sql: SqlStorage,
   config: DurableExecutionConfig,

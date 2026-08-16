@@ -10,7 +10,6 @@ describe('task wait configuration', () => {
       maxActivePerProject: 100,
       maxDurationMs: 86_400_000,
       maxCandidatesPerAlarm: 10,
-      maxSummaryLength: 2000,
     });
   });
 

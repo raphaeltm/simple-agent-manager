@@ -614,7 +614,6 @@ Durable prompt delivery is enabled by default so a follow-up can remain queued w
 | `ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT`   | `100`             | Maximum active durable parent waits per project.                                                                |
 | `ORCHESTRATOR_WAIT_MAX_DURATION_MS`          | `86400000`        | Maximum finite wait deadline.                                                                                   |
 | `ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM` | `10`              | Maximum wait subscriptions reconciled by one ProjectData alarm.                                                 |
-| `ORCHESTRATOR_WAIT_MAX_SUMMARY_LENGTH`       | `2000`            | Per-child output/error field limit in the sanitized parent wake prompt.                                         |
 
 ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed by ACP session and prompt epoch. Sleeping-session prompts stay in that queue until strict restore succeeds, then use stable receipts for exactly-once acceptance. Task agents can register `wait_for_subtasks` for direct children; terminal hooks provide low-latency nudges, bounded alarms reconcile missed writers, and one stable delivery ID wakes the parent exactly once. Automatic checkpoint preemption remains disabled.
 

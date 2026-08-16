@@ -113,6 +113,10 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 	h.clearCurrentAgentSessionLocked()
 	h.status = HostStarting
 	h.mu.Unlock()
+	// Publish the detached process's inactive harness state immediately. The
+	// replacement may fail before ACP attachment, so waiting for a later ready
+	// report could leave the old active lease in the control plane until expiry.
+	h.reportActivity("recovering")
 
 	if rollover != nil {
 		slog.Info("Attempting strict agent restart for checkpoint rollover", "acpSessionId", rollover.sessionID, "forced", rolloverForced)
@@ -264,6 +268,10 @@ func rapidExitMessage(agentType string, uptime time.Duration, exitInfo, stderrOu
 }
 
 func (h *SessionHost) clearCurrentAgentSessionLocked() {
+	// Harness-owned work belongs to this exact ACP process/session. Cancel its
+	// heartbeat at the detach boundary so a crash whose restart never reaches
+	// attachACPConnection cannot renew an active lease forever.
+	h.clearHarnessWork()
 	h.process = nil
 	h.acpConn = nil
 	h.sessionID = ""
@@ -303,6 +311,7 @@ func (h *SessionHost) handleMaxRestartsExceededLocked(agentType, stderrOutput st
 	h.completeActivePromptFailure(crashMsg)
 	h.broadcastAgentStatus(StatusError, agentType, crashMsg)
 	h.reportAgentError(agentType, "agent_max_restarts", crashMsg, stderrOutput)
+	h.reportActivity("error")
 }
 
 func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, cred *agentCredential, settings *agentSettingsPayload, previousAcpSessionID string, crashRecovery crashRecoverySnapshot, notify recoveryNotify) bool {

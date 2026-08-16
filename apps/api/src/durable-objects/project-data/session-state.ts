@@ -77,11 +77,21 @@ export function upsertActivityState(
        agent_type = COALESCE(excluded.agent_type, session_state.agent_type),
        restart_count = COALESCE(excluded.restart_count, session_state.restart_count),
 		   status_error = excluded.status_error,
-		   runtime_work_state = CASE WHEN ? = 1 THEN excluded.runtime_work_state ELSE session_state.runtime_work_state END,
-		   runtime_work_count = CASE WHEN ? = 1 THEN excluded.runtime_work_count ELSE session_state.runtime_work_count END,
-		   runtime_work_source = CASE WHEN ? = 1 THEN excluded.runtime_work_source ELSE session_state.runtime_work_source END,
-		   runtime_work_updated_at = CASE WHEN ? = 1 THEN excluded.runtime_work_updated_at ELSE session_state.runtime_work_updated_at END,
-		   runtime_work_progress_at = CASE WHEN ? = 1 THEN excluded.runtime_work_progress_at ELSE session_state.runtime_work_progress_at END`,
+		   runtime_work_state = CASE
+		     WHEN ? = 1 AND (session_state.runtime_work_progress_at IS NULL OR excluded.runtime_work_progress_at >= session_state.runtime_work_progress_at)
+		       THEN excluded.runtime_work_state ELSE session_state.runtime_work_state END,
+		   runtime_work_count = CASE
+		     WHEN ? = 1 AND (session_state.runtime_work_progress_at IS NULL OR excluded.runtime_work_progress_at >= session_state.runtime_work_progress_at)
+		       THEN excluded.runtime_work_count ELSE session_state.runtime_work_count END,
+		   runtime_work_source = CASE
+		     WHEN ? = 1 AND (session_state.runtime_work_progress_at IS NULL OR excluded.runtime_work_progress_at >= session_state.runtime_work_progress_at)
+		       THEN excluded.runtime_work_source ELSE session_state.runtime_work_source END,
+		   runtime_work_updated_at = CASE
+		     WHEN ? = 1 AND (session_state.runtime_work_progress_at IS NULL OR excluded.runtime_work_progress_at >= session_state.runtime_work_progress_at)
+		       THEN excluded.runtime_work_updated_at ELSE session_state.runtime_work_updated_at END,
+		   runtime_work_progress_at = CASE
+		     WHEN ? = 1 AND (session_state.runtime_work_progress_at IS NULL OR excluded.runtime_work_progress_at >= session_state.runtime_work_progress_at)
+		       THEN excluded.runtime_work_progress_at ELSE session_state.runtime_work_progress_at END`,
     sessionId,
     update.activity,
     now,

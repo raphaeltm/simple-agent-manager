@@ -3,6 +3,7 @@ package acp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -113,6 +114,29 @@ func TestClaudeHarnessLifecycleRejectsWrongSessionAndMalformedPayload(t *testing
 	}
 }
 
+func TestClaudeHarnessLifecycleRejectsOversizedPayloadsAndIdentifiers(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{})
+	host.sessionID = "sdk-session"
+	host.resetHarnessWorkForAgent("claude-code")
+	client := &sessionHostClient{host: host}
+
+	oversized := json.RawMessage(`{"sessionId":"sdk-session","padding":"` +
+		strings.Repeat("x", maxClaudeLifecycleBytes) + `"}`)
+	if _, err := client.HandleExtensionMethod(context.Background(), claudeSDKMessageMethod, oversized); err == nil {
+		t.Fatal("oversized Claude lifecycle payload returned nil error")
+	}
+	longID := strings.Repeat("x", maxClaudeLifecycleIDBytes+1)
+	payload := json.RawMessage(`{"sessionId":"sdk-session","message":{"type":"system","subtype":"task_started","task_id":"` + longID + `"}}`)
+	if _, err := client.HandleExtensionMethod(context.Background(), claudeSDKMessageMethod, payload); err == nil {
+		t.Fatal("oversized Claude lifecycle task identifier returned nil error")
+	}
+	if got := host.harnessWorkSnapshot(); got.State != harnessWorkInactive || got.Count != 0 {
+		t.Fatalf("rejected lifecycle payload mutated state: %#v", got)
+	}
+}
+
 func TestHarnessActivityReportsOnlyNormalizedStateAndRereportsActiveWork(t *testing.T) {
 	t.Parallel()
 
@@ -205,6 +229,74 @@ func TestHarnessActivityReportsOnlyNormalizedStateAndRereportsActiveWork(t *test
 	defer mu.Unlock()
 	if len(payloads) != afterSettle {
 		t.Fatalf("settling work kept heartbeating: before=%d after=%d", afterSettle, len(payloads))
+	}
+}
+
+func TestHarnessActivityStopsWhenCrashRestartFailsBeforeAttach(t *testing.T) {
+	t.Parallel()
+
+	var mu sync.Mutex
+	reports := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		mu.Lock()
+		reports++
+		mu.Unlock()
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	process := newExitedAgentProcess(t, "claude-code")
+	host := NewSessionHost(SessionHostConfig{GatewayConfig: GatewayConfig{
+		ProjectID:                "project",
+		NodeID:                   "node",
+		SessionID:                "sam-session",
+		ControlPlaneURL:          server.URL,
+		CallbackToken:            "token",
+		HTTPClient:               server.Client(),
+		ActivityRereportInterval: 10 * time.Millisecond,
+		ContainerResolver:        func() (string, error) { return "", errors.New("container unavailable") },
+	}})
+	defer host.Stop()
+	host.mu.Lock()
+	host.process = process
+	host.agentType = "claude-code"
+	host.sessionID = "sdk-session"
+	host.status = HostReady
+	host.mu.Unlock()
+	host.resetHarnessWorkForAgent("claude-code")
+	client := &sessionHostClient{host: host}
+	notifyClaudeLifecycle(t, client, `{
+		"sessionId":"sdk-session",
+		"message":{"type":"system","subtype":"task_started","session_id":"sdk-session","task_id":"one"}}
+`)
+	waitFor(t, 300*time.Millisecond, func() bool {
+		mu.Lock()
+		defer mu.Unlock()
+		return reports >= 2
+	})
+
+	host.monitorProcessExit(context.Background(), process, "claude-code", nil, nil)
+	if got := host.harnessWorkSnapshot(); got.State != harnessWorkInactive || got.Count != 0 {
+		t.Fatalf("harness work after failed restart = %#v, want inactive", got)
+	}
+	host.harnessWorkMu.Lock()
+	if host.harnessActivityCancel != nil {
+		host.harnessWorkMu.Unlock()
+		t.Fatal("harness rereport ticker survived failed restart")
+	}
+	host.harnessWorkMu.Unlock()
+
+	// Let the final error activity request settle, then prove no ticker keeps
+	// renewing the old active lease.
+	time.Sleep(5 * host.config.ActivityRereportInterval)
+	mu.Lock()
+	afterFailure := reports
+	mu.Unlock()
+	time.Sleep(5 * host.config.ActivityRereportInterval)
+	mu.Lock()
+	defer mu.Unlock()
+	if reports != afterFailure {
+		t.Fatalf("failed-restart harness work kept heartbeating: before=%d after=%d", afterFailure, reports)
 	}
 }
 

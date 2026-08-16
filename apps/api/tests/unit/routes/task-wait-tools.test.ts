@@ -40,6 +40,7 @@ describe('wait_for_subtasks MCP handler', () => {
       created: true,
       subscription: {
         id: 'wait-1',
+        idempotencyKey: 'review-round-1',
         state: 'active',
         condition: 'all',
         wakeDeadline: Date.UTC(2026, 7, 17),
@@ -78,7 +79,12 @@ describe('wait_for_subtasks MCP handler', () => {
 
     const response = await handleWaitForSubtasks(
       1,
-      { taskIds: ['child-1', 'child-2'], condition: 'all', wakeAfterSeconds: 60 },
+      {
+        taskIds: ['child-1', 'child-2'],
+        waitKey: 'review-round-1',
+        condition: 'all',
+        wakeAfterSeconds: 60,
+      },
       tokenData,
       env
     );
@@ -90,6 +96,7 @@ describe('wait_for_subtasks MCP handler', () => {
       expect.objectContaining({
         parentTaskId: 'parent-1',
         parentSessionId: 'session-1',
+        idempotencyKey: 'review-round-1',
         condition: 'all',
         childTaskIds: ['child-1', 'child-2'],
       })
@@ -118,7 +125,12 @@ describe('wait_for_subtasks MCP handler', () => {
       },
     ]);
 
-    const response = await handleWaitForSubtasks(1, { taskIds: ['other-task'] }, tokenData, env);
+    const response = await handleWaitForSubtasks(
+      1,
+      { taskIds: ['other-task'], waitKey: 'review-round-1' },
+      tokenData,
+      env
+    );
 
     expect(errorMessage(response)).toContain('not a direct child');
     expect(registerTaskWait).not.toHaveBeenCalled();
@@ -129,7 +141,7 @@ describe('wait_for_subtasks MCP handler', () => {
 
     const duplicateResponse = await handleWaitForSubtasks(
       1,
-      { taskIds: ['child-1', 'child-1'] },
+      { taskIds: ['child-1', 'child-1'], waitKey: 'review-round-1' },
       tokenData,
       env
     );
@@ -137,10 +149,50 @@ describe('wait_for_subtasks MCP handler', () => {
 
     const overlongResponse = await handleWaitForSubtasks(
       2,
-      { taskIds: ['child-1'], wakeAfterSeconds: 24 * 60 * 60 + 1 },
+      {
+        taskIds: ['child-1'],
+        waitKey: 'review-round-1',
+        wakeAfterSeconds: 24 * 60 * 60 + 1,
+      },
       tokenData,
       env
     );
     expect(errorMessage(overlongResponse)).toContain('configured maximum');
+  });
+
+  it('rejects an unstable wait key and a token bound to another session', async () => {
+    const rows = [
+      {
+        id: 'parent-1',
+        status: 'in_progress',
+        parent_task_id: null,
+        chat_session_id: 'canonical-session',
+      },
+      {
+        id: 'child-1',
+        status: 'in_progress',
+        parent_task_id: 'parent-1',
+        chat_session_id: null,
+      },
+    ];
+    expect(
+      errorMessage(
+        await handleWaitForSubtasks(
+          1,
+          { taskIds: ['child-1'], waitKey: 'contains spaces' },
+          tokenData,
+          createEnv(rows)
+        )
+      )
+    ).toContain('waitKey');
+
+    const mismatch = await handleWaitForSubtasks(
+      2,
+      { taskIds: ['child-1'], waitKey: 'review-round-1' },
+      tokenData,
+      createEnv(rows)
+    );
+    expect(errorMessage(mismatch)).toContain('does not match');
+    expect(registerTaskWait).not.toHaveBeenCalled();
   });
 });

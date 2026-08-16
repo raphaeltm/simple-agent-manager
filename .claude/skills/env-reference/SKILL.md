@@ -133,7 +133,6 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT` — Maximum active durable parent waits per project (default: `100`)
 - `ORCHESTRATOR_WAIT_MAX_DURATION_MS` — Maximum finite durable wait deadline (default: `86400000`)
 - `ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM` — Maximum wait subscriptions reconciled by one ProjectData alarm (default: `10`)
-- `ORCHESTRATOR_WAIT_MAX_SUMMARY_LENGTH` — Maximum length of each child output/error field embedded in a parent wake prompt (default: `2000`)
 
 Absent operational brake keys and KV read errors mean enabled. This fail-open
 behavior preserves availability and intentionally differs from the fail-closed

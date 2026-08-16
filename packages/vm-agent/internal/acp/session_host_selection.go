@@ -30,6 +30,10 @@ func (h *SessionHost) selectAgent(ctx context.Context, agentType string, require
 	defer h.finishAgentSelection()
 
 	h.broadcastAgentStatus(StatusStarting, agentType, "")
+	// beginAgentSelection may have detached a prior ACP process and cleared its
+	// harness work. Publish that inactive state before credential/install I/O so
+	// a failed pre-attach selection cannot leave the prior lease fresh.
+	h.reportActivity("recovering")
 	h.reportLifecycle("info", "Agent selection started", map[string]interface{}{
 		"agentType":            agentType,
 		"previousAcpSessionID": previous.acpSessionID,

@@ -63,7 +63,7 @@ an ephemeral agent process instead of SAM-owned storage.
 ### Process fix
 
 This change updates `.claude/rules/14-do-workflow-persistence.md` so workflows
-must persist state, register `wait_for_subtasks`, and end the turn. Harness-owned
+must persist state plus a stable wait key, register `wait_for_subtasks`, and end the turn. Harness-owned
 polling is prohibited as the primary waiting mechanism; bounded foreground
 polling remains only an explicit compatibility fallback.
 
@@ -81,24 +81,28 @@ For Claude Code sessions, set filtered NewSession/LoadSession metadata that enab
 
 While state is active, the VM Agent re-reports this normalized snapshot using the existing configurable activity re-report interval. Settlement emits one finite lease without periodic renewal, so a missing final result cannot pin compute forever. Raw task IDs, descriptions, output paths, summaries, prompts, and results never cross the VM-to-control-plane boundary.
 
+Harness lifecycle versions are strictly monotonic within the session host. ProjectData accepts same-version active rereports as lease heartbeats but rejects older versions, so independently retrying HTTP reports cannot regress a newer active/inactive edge. Detaching an ACP process cancels its ticker and publishes inactive state before restart, credential, or install work continues.
+
 ProjectData persists the normalized snapshot additively. Automatic sleep is ineligible while a fresh active/settling lease exists. The lease is finite and configurable so a crashed or incompatible adapter cannot strand compute forever. Liveness refreshes the lease; only lifecycle edges/progress refresh the separate progress clock.
 
 ### Durable parent wait and wake
 
-Add `wait_for_subtasks` with direct-child IDs, `all`/`any` terminal condition, and an optional bounded wake deadline. ProjectData stores one active subscription per parent plus normalized child observations. Creation validates lineage and persists the wait before the tool tells the parent to end its turn.
+Add `wait_for_subtasks` with a required stable workflow-step `waitKey`, direct-child IDs, `all`/`any` terminal condition, and an optional bounded wake deadline. ProjectData stores one active subscription per parent plus normalized child observations. Creation validates the canonical parent session and lineage, persists the wait before the tool tells the parent to end its turn, and retains the idempotency record after resolution so a lost response cannot create another wake.
 
-Terminal hooks nudge ProjectData immediately. A bounded, configurable alarm reconciliation queries D1 as a backstop so every terminal writer—including legacy paths that do not yet invoke the hook—converges. When the condition or deadline is satisfied, ProjectData enqueues one deterministic parent wake prompt through the existing transactional durable prompt-delivery mailbox and then compare-and-sets the subscription to resolved. A crash between those steps retries the same delivery ID instead of duplicating the prompt. Parent terminalization cancels the subscription and cannot resurrect it.
+Terminal hooks nudge ProjectData immediately. A bounded, configurable alarm reconciliation queries D1 in bind-safe chunks as a backstop so every terminal writer—including legacy paths that do not yet invoke the hook—converges. When the condition or deadline is satisfied, ProjectData freezes an immutable wake payload containing only trusted task IDs/statuses, enqueues one deterministic prompt through the existing transactional durable prompt-delivery mailbox, and then compare-and-sets the subscription to resolved. Child-authored summaries, errors, and URLs never enter the automatic parent prompt. A crash between those steps retries the same delivery ID and content instead of duplicating or conflicting. Persisted exponential backoff and a finite attempt cap prevent failed wakes from hot-looping alarms. Parent status/session and child lineage are revalidated before enqueue and delivery; terminal hooks cancel queued wakes, and delivery claims fail before session recovery when the parent is terminal.
 
 Update `/workflow` to persist its state, call `wait_for_subtasks`, and end the current turn. Use bounded foreground polling only when the connected SAM server lacks the tool.
 
 ## Implementation checklist
 
 - [x] Add failing Go tests for filtered Claude session metadata, extension parsing, active-set replacement, progress-vs-heartbeat clocks, settlement, raw-payload redaction, and periodic out-of-turn reporting.
+- [x] Bound Claude extension bytes/task cardinality/identifiers, keep ordering credits exclusive to `session/update`, and stop/publish inactive harness state at every process-detach boundary.
 - [x] Implement a generic normalized harness-work tracker with a Claude `_claude/sdkMessage` adapter in the VM Agent.
 - [x] Add filtered lifecycle metadata to both NewSession and strict LoadSession requests without changing non-Claude requests.
 - [x] Extend the activity callback contract and ProjectData session-state mirror with runtime-work state, count, source, heartbeat time, and progress time.
 - [x] Add a finite configurable background-work lease and make both pre-claim and point-of-no-return sleep checks reject fresh active/settling work.
 - [x] Add failing ProjectData/MCP tests for wait lineage, `all`/`any`, already-terminal children, duplicate terminal callbacks, deadline wake, cancellation/no-resurrection, deterministic single delivery, and alarm reconciliation.
+- [x] Add adversarial coverage for D1 maximum batches, permanent delivery failure/backoff, lost-response registration retry, terminal overlap/claim cancellation, mutable replay windows, reparenting/session checks, child prompt-injection canaries, and sleep work beginning during R2 verification.
 - [x] Add append-only ProjectData wait-subscription migrations, row validation, bounded reconciliation, and alarm scheduling.
 - [x] Register the parent-wake terminal hook and keep D1 reconciliation as the legacy-writer backstop.
 - [x] Add the `wait_for_subtasks` MCP definition, dispatcher, handler, response contract, and API/reference documentation.

@@ -16,6 +16,7 @@ const mocks = vi.hoisted(() => ({
   projectData: {
     failSession: vi.fn(),
     getAcpSession: vi.fn(),
+    getSessionState: vi.fn(),
     reportAcpSessionActivity: vi.fn(),
     transitionAcpSession: vi.fn(),
   },
@@ -149,6 +150,7 @@ describe('agent activity callback', () => {
       scope: 'workspace',
     });
     mocks.projectData.getAcpSession.mockResolvedValue(assignedAcpSession());
+    mocks.projectData.getSessionState.mockResolvedValue({ runtimeWorkState: 'inactive' });
     mocks.projectData.reportAcpSessionActivity.mockResolvedValue(undefined);
     mocks.projectData.transitionAcpSession.mockResolvedValue({});
     mocks.projectData.failSession.mockResolvedValue(undefined);
@@ -195,6 +197,7 @@ describe('agent activity callback', () => {
   });
 
   it('persists normalized harness work and keeps an idle runtime active', async () => {
+    mocks.projectData.getSessionState.mockResolvedValueOnce({ runtimeWorkState: 'active' });
     const app = await createTestApp();
 
     const response = await postActivity(app, {
@@ -220,6 +223,28 @@ describe('agent activity callback', () => {
         runtimeWorkProgressAt: 1234,
       })
     );
+    expect(mocks.nodeAgent.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
+    expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
+    expect(mocks.updateSets).toContainEqual(
+      expect.objectContaining({ sleepStatus: null, sleepClaimId: null })
+    );
+  });
+
+  it('does not hand back runtime for a delayed inactive report when persisted work is active', async () => {
+    mocks.projectData.getSessionState.mockResolvedValueOnce({ runtimeWorkState: 'active' });
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'idle',
+      nodeId: 'node-1',
+      agentType: 'claude-code',
+      runtimeWorkState: 'inactive',
+      runtimeWorkCount: 0,
+      runtimeWorkSource: 'claude_sdk',
+      runtimeWorkProgressAt: 1000,
+    });
+
+    expect(response.status).toBe(204);
     expect(mocks.nodeAgent.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
     expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
   });

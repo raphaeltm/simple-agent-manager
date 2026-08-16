@@ -52,9 +52,6 @@ export const DEFAULT_ORCHESTRATOR_WAIT_MAX_DURATION_MS = 24 * 60 * 60 * 1000;
 /** Maximum subscriptions reconciled by one ProjectData alarm pass. */
 export const DEFAULT_ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM = 10;
 
-/** Maximum child output-summary characters included in a parent wake prompt. */
-export const DEFAULT_ORCHESTRATOR_WAIT_MAX_SUMMARY_LENGTH = 2000;
-
 /** Version of the stable VM prompt receipt contract published by this foundation. */
 export const VM_PROMPT_DELIVERY_PROTOCOL_VERSION = 1;
 
