@@ -88,6 +88,11 @@ async function resolveChatAgentState(
         promptStartedAt: state?.promptStartedAt ?? null,
         agentType: state?.agentType ?? null,
         lastStopReason: state?.lastStopReason ?? null,
+        runtimeWorkState: state?.runtimeWorkState ?? null,
+        runtimeWorkCount: state?.runtimeWorkCount ?? null,
+        runtimeWorkSource: state?.runtimeWorkSource ?? null,
+        runtimeWorkUpdatedAt: state?.runtimeWorkUpdatedAt ?? null,
+        runtimeWorkProgressAt: state?.runtimeWorkProgressAt ?? null,
         currentPlan: planSource.currentPlan,
         planUpdatedAt: planSource.planUpdatedAt,
       };

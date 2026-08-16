@@ -114,6 +114,11 @@ export interface SessionStateSnapshot {
   promptStartedAt: number | null;
   agentType: string | null;
   lastStopReason: string | null;
+  runtimeWorkState: 'inactive' | 'active' | 'settling' | null;
+  runtimeWorkCount: number | null;
+  runtimeWorkSource: string | null;
+  runtimeWorkUpdatedAt: number | null;
+  runtimeWorkProgressAt: number | null;
 }
 
 export interface ChatSessionDetailResponse {

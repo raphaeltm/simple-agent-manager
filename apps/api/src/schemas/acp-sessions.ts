@@ -34,6 +34,16 @@ export const AcpSessionActivityReportSchema = v.object({
   agentType: v.optional(v.string()),
   restartCount: v.optional(v.number()),
   statusError: v.optional(v.nullable(v.string())),
+  runtimeWorkState: v.optional(v.picklist(['inactive', 'active', 'settling'])),
+  runtimeWorkCount: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
+  runtimeWorkSource: v.optional(
+    v.pipe(
+      v.string(),
+      v.maxLength(64),
+      v.regex(/^[a-z0-9_-]+$/i, 'runtimeWorkSource must be a safe adapter identifier')
+    )
+  ),
+  runtimeWorkProgressAt: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0))),
 });
 
 export const AcpSessionForkSchema = v.object({

@@ -126,6 +126,7 @@ func (h *SessionHost) Suspend() (acpSessionID string, agentType string) {
 	h.syncCredentialOnStop(snap)
 
 	// Report idle to the control plane so the browser status bar clears.
+	h.clearHarnessWork()
 	h.reportActivity("idle")
 
 	h.cancel()

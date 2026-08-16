@@ -9,6 +9,10 @@ The SAM API runs on a Cloudflare Worker at `api.{domain}`. All authenticated end
 This reference covers the most commonly used endpoints. For the complete list of all API routes, see the [source code](https://github.com/raphaeltm/simple-agent-manager/tree/main/apps/api/src/routes).
 :::
 
+## MCP orchestration
+
+Task agents can call `wait_for_subtasks` with unique direct-child task IDs, an optional `condition` of `all` (the default) or `any`, and an optional bounded `wakeAfterSeconds`. The agent must persist workflow state before calling and end its turn after registration. ProjectData then reconciles child terminal state and durably wakes the same parent session exactly once, including after session sleep and runtime replacement. Servers without durable prompt delivery reject registration so clients can use bounded foreground polling as a compatibility fallback.
+
 ## Authentication
 
 ### `POST /api/auth/sign-in/social`

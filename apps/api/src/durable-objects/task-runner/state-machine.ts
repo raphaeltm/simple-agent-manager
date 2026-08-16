@@ -6,7 +6,10 @@
  */
 import { log } from '../../lib/logger';
 import { persistError, redactSensitiveData } from '../../services/observability';
-import { runTaskTerminalTransitionHooks } from '../../services/task-terminal-transition-hooks';
+import {
+  createTaskWaitTerminalTransitionHook,
+  runTaskTerminalTransitionHooks,
+} from '../../services/task-terminal-transition-hooks';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -302,15 +305,18 @@ export async function failTask(
     .bind(ulid(), state.taskId, currentStatus || 'queued', errorMessage, now)
     .run();
 
-  await runTaskTerminalTransitionHooks({
-    taskId: state.taskId,
-    projectId: state.projectId,
-    parentTaskId: task?.parent_task_id ?? null,
-    status: 'failed',
-    reason: errorMessage,
-    occurredAt: now,
-    source: 'task_runner.fail_task',
-  });
+  await runTaskTerminalTransitionHooks(
+    {
+      taskId: state.taskId,
+      projectId: state.projectId,
+      parentTaskId: task?.parent_task_id ?? null,
+      status: 'failed',
+      reason: errorMessage,
+      occurredAt: now,
+      source: 'task_runner.fail_task',
+    },
+    [createTaskWaitTerminalTransitionHook(rc.env)]
+  );
 
   // Notify orchestrator of task failure (best-effort) — triggers scheduling cycle
   // so dependent tasks can react to the failure (e.g., unblock blocked_dependency tasks)

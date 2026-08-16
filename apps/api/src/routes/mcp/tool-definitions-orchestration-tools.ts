@@ -3,6 +3,34 @@
  */
 
 export const ORCHESTRATION_TOOLS = [
+  {
+    name: 'wait_for_subtasks',
+    description:
+      'Register a durable wait on direct child tasks, then end the current turn. SAM wakes the parent session through durable prompt delivery when all or any selected children become terminal, or when the finite wake deadline is reached. Use this instead of background polling. Persist workflow state before calling.',
+    inputSchema: {
+      type: 'object' as const,
+      properties: {
+        taskIds: {
+          type: 'array',
+          items: { type: 'string' },
+          minItems: 1,
+          description: 'Unique direct-child task IDs to observe',
+        },
+        condition: {
+          type: 'string',
+          enum: ['all', 'any'],
+          description: 'Wake after all children are terminal (default) or after any child is terminal',
+        },
+        wakeAfterSeconds: {
+          type: 'integer',
+          minimum: 1,
+          description: 'Optional finite wake deadline in seconds; capped by server configuration',
+        },
+      },
+      required: ['taskIds'],
+      additionalProperties: false,
+    },
+  },
   // ─── Durable messaging tools ───────────────────────────────────────
   {
     name: 'send_durable_message',

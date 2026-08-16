@@ -86,6 +86,10 @@ export async function reportActivity(
     agentType?: string | null;
     restartCount?: number | null;
     statusError?: string | null;
+    runtimeWorkState?: 'inactive' | 'active' | 'settling';
+    runtimeWorkCount?: number;
+    runtimeWorkSource?: string;
+    runtimeWorkProgressAt?: number | null;
   },
 ): Promise<void> {
   sessionState.upsertActivityState(sql, sessionId, {
@@ -94,6 +98,10 @@ export async function reportActivity(
     agentType: extra?.agentType,
     restartCount: extra?.restartCount,
     statusError: extra?.statusError,
+    runtimeWorkState: extra?.runtimeWorkState,
+    runtimeWorkCount: extra?.runtimeWorkCount,
+    runtimeWorkSource: extra?.runtimeWorkSource,
+    runtimeWorkProgressAt: extra?.runtimeWorkProgressAt,
   });
   const acpRow = sql.exec(
     'SELECT chat_session_id FROM acp_sessions WHERE id = ?',

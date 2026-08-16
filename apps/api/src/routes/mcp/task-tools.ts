@@ -23,7 +23,10 @@ import * as orchestratorService from '../../services/project-orchestrator';
 import { recomputeMissionSchedulerStates } from '../../services/scheduler-state-sync';
 import { getLatestAssistantMessageForTask } from '../../services/task-final-assistant-message';
 import { cleanupTerminalTaskResources } from '../../services/task-terminal-cleanup';
-import { runTaskTerminalTransitionHooks } from '../../services/task-terminal-transition-hooks';
+import {
+  createTaskWaitTerminalTransitionHook,
+  runTaskTerminalTransitionHooks,
+} from '../../services/task-terminal-transition-hooks';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
   ACTIVE_STATUSES,
@@ -540,15 +543,18 @@ export async function handleCompleteTask(
     throw err;
   }
 
-  await runTaskTerminalTransitionHooks({
-    taskId: tokenData.taskId,
-    projectId: tokenData.projectId,
-    parentTaskId: taskRow?.parent_task_id ?? null,
-    status: 'completed',
-    reason: summary,
-    occurredAt: now,
-    source: 'mcp.complete_task',
-  });
+  await runTaskTerminalTransitionHooks(
+    {
+      taskId: tokenData.taskId,
+      projectId: tokenData.projectId,
+      parentTaskId: taskRow?.parent_task_id ?? null,
+      status: 'completed',
+      reason: summary,
+      occurredAt: now,
+      source: 'mcp.complete_task',
+    },
+    [createTaskWaitTerminalTransitionHook(env)]
+  );
 
   log.info('mcp.complete_task', {
     taskId: tokenData.taskId,

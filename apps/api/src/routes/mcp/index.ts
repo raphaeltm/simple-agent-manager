@@ -135,6 +135,7 @@ import {
   handleSearchTasks,
   handleUpdateTaskStatus,
 } from './task-tools';
+import { handleWaitForSubtasks } from './task-wait-tools';
 import { handleCreateTrigger, handleDeleteTrigger, handleUpdateTrigger } from './trigger-tools';
 import {
   handleExposePort,
@@ -290,6 +291,8 @@ mcpRoutes.post('/', async (c) => {
             }
             return c.json(await handleDispatchTask(requestId, toolArgs, tokenData, c.env, execCtx));
           }
+          case 'wait_for_subtasks':
+            return c.json(await handleWaitForSubtasks(requestId, toolArgs, tokenData, c.env));
           // ─── Durable messaging tools ──────────────────────────────────
           case 'send_durable_message':
             return c.json(await handleSendDurableMessage(requestId, toolArgs, tokenData, c.env));

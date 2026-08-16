@@ -7,6 +7,7 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { describe, expect, it } from 'vitest';
 
+import { seedInstallation, seedProject, seedTask, seedUser } from './helpers/seed-d1';
 import {
   captureProjectDataExpectedError,
   type ProjectDataTestDouble,
@@ -122,6 +123,129 @@ describe('ProjectData Durable Object', () => {
           lastError: 'Prompt delivery TTL expired',
         })
       );
+    });
+  });
+
+  describe('durable task waits', () => {
+    it('wakes a parent exactly once after every selected child becomes terminal', async () => {
+      const suffix = crypto.randomUUID();
+      const userId = `wait-user-${suffix}`;
+      const installationId = `wait-installation-${suffix}`;
+      const projectId = `wait-project-${suffix}`;
+      const parentTaskId = `wait-parent-${suffix}`;
+      const childOneId = `wait-child-one-${suffix}`;
+      const childTwoId = `wait-child-two-${suffix}`;
+
+      await seedUser(userId);
+      await seedInstallation(installationId, userId, {
+        installationIdValue: `wait-external-${suffix}`,
+      });
+      await seedProject(projectId, userId, installationId);
+      await seedTask(parentTaskId, projectId, userId, { status: 'in_progress' });
+      await seedTask(childOneId, projectId, userId, { status: 'in_progress' });
+      await seedTask(childTwoId, projectId, userId, { status: 'in_progress' });
+      await env.DATABASE.prepare(`UPDATE tasks SET parent_task_id = ? WHERE id IN (?, ?)`)
+        .bind(parentTaskId, childOneId, childTwoId)
+        .run();
+
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      const parentSessionId = await stub.createSession(null, 'Durable parent wait', parentTaskId);
+      const registered = await stub.registerTaskWait({
+        parentTaskId,
+        parentSessionId,
+        condition: 'all',
+        childTaskIds: [childOneId, childTwoId],
+        wakeDeadline: Date.now() + 60_000,
+      });
+      expect(registered).toMatchObject({
+        created: true,
+        subscription: { state: 'active', condition: 'all' },
+      });
+
+      await env.DATABASE.prepare(
+        `UPDATE tasks SET status = 'completed', output_summary = ? WHERE id = ?`
+      )
+        .bind('First child finished', childOneId)
+        .run();
+      const firstResult = await stub.reconcileTaskWaits(childOneId);
+      expect(firstResult).toMatchObject({ resolved: 0, pending: 1 });
+
+      await env.DATABASE.prepare(
+        `UPDATE tasks SET status = 'failed', error_message = ? WHERE id = ?`
+      )
+        .bind('Second child failed safely', childTwoId)
+        .run();
+      await runInDurableObject(stub, async (instance, state) => {
+        state.storage.sql.exec(
+          `UPDATE task_wait_subscriptions SET next_reconcile_at = 0 WHERE id = ?`,
+          registered.subscription!.id
+        );
+        await instance.alarmWithDurablePromptDelivery();
+      });
+
+      const wait = await stub.getTaskWait(registered.subscription!.id);
+      expect(wait).toMatchObject({ state: 'resolved', resolutionReason: 'condition_met' });
+      const { messages } = await stub.getMessages(parentSessionId, 10);
+      expect(messages).toHaveLength(1);
+      expect(messages[0]!.content).toContain('wait_for_subtasks subscription resolved');
+      expect(messages[0]!.content).toContain('First child finished');
+      expect(messages[0]!.content).toContain('Second child failed safely');
+      const snapshot = await stub.getDurableExecutionSnapshot(parentSessionId);
+      expect(snapshot.deliveries).toHaveLength(1);
+      expect(snapshot.deliveries[0]).toMatchObject({ sourceKind: 'parent_wakeup' });
+
+      await stub.reconcileTaskWaits(childTwoId);
+      expect((await stub.getMessages(parentSessionId, 10)).messages).toHaveLength(1);
+      expect((await stub.getDurableExecutionSnapshot(parentSessionId)).deliveries).toHaveLength(1);
+    });
+
+    it('cancels a terminal parent wait without waking or resurrecting its session', async () => {
+      const suffix = crypto.randomUUID();
+      const userId = `wait-cancel-user-${suffix}`;
+      const installationId = `wait-cancel-installation-${suffix}`;
+      const projectId = `wait-cancel-project-${suffix}`;
+      const parentTaskId = `wait-cancel-parent-${suffix}`;
+      const childTaskId = `wait-cancel-child-${suffix}`;
+
+      await seedUser(userId);
+      await seedInstallation(installationId, userId, {
+        installationIdValue: `wait-cancel-external-${suffix}`,
+      });
+      await seedProject(projectId, userId, installationId);
+      await seedTask(parentTaskId, projectId, userId, { status: 'in_progress' });
+      await seedTask(childTaskId, projectId, userId, { status: 'in_progress' });
+      await env.DATABASE.prepare(`UPDATE tasks SET parent_task_id = ? WHERE id = ?`)
+        .bind(parentTaskId, childTaskId)
+        .run();
+
+      const stub = getStub(projectId);
+      await stub.ensureProjectId(projectId);
+      const parentSessionId = await stub.createSession(null, 'Cancelled parent wait', parentTaskId);
+      const registered = await stub.registerTaskWait({
+        parentTaskId,
+        parentSessionId,
+        condition: 'all',
+        childTaskIds: [childTaskId],
+        wakeDeadline: Date.now() + 60_000,
+      });
+
+      await env.DATABASE.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`)
+        .bind(parentTaskId)
+        .run();
+      const cancellation = await stub.reconcileTaskWaits(parentTaskId);
+      expect(cancellation).toMatchObject({ cancelled: 1, resolved: 0 });
+      expect(await stub.getTaskWait(registered.subscription!.id)).toMatchObject({
+        state: 'cancelled',
+        resolutionReason: 'parent_completed',
+      });
+
+      await env.DATABASE.prepare(`UPDATE tasks SET status = 'completed' WHERE id = ?`)
+        .bind(childTaskId)
+        .run();
+      await stub.reconcileTaskWaits(childTaskId);
+      expect((await stub.getMessages(parentSessionId, 10)).messages).toHaveLength(0);
+      expect((await stub.getDurableExecutionSnapshot(parentSessionId)).deliveries).toHaveLength(0);
     });
   });
 

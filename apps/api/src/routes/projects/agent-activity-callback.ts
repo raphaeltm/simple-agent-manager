@@ -178,6 +178,10 @@ agentActivityCallbackRoute.post(
       agentType: body.agentType,
       restartCount: body.restartCount,
       statusError: body.statusError,
+      runtimeWorkState: body.runtimeWorkState,
+      runtimeWorkCount: body.runtimeWorkCount,
+      runtimeWorkSource: body.runtimeWorkSource,
+      runtimeWorkProgressAt: body.runtimeWorkProgressAt,
     });
     if (body.activity === 'error' && canTransitionAcpSessionToFailed(existing.status)) {
       const failureMessage = normalizeAgentErrorMessage(body.statusError);
@@ -231,7 +235,10 @@ agentActivityCallbackRoute.post(
           });
         });
     }
-    if (body.activity === 'idle' || body.activity === 'error') {
+    const harnessWorkKeepsRuntimeActive =
+      body.activity === 'idle' &&
+      (body.runtimeWorkState === 'active' || body.runtimeWorkState === 'settling');
+    if ((body.activity === 'idle' && !harnessWorkKeepsRuntimeActive) || body.activity === 'error') {
       let idleSnapshotQueued = false;
       if (
         body.activity === 'idle' &&

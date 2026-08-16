@@ -733,8 +733,8 @@ export const MIGRATIONS: Migration[] = [
           ON session_attention_markers(next_escalation_at)
           WHERE resolved_at IS NULL AND next_escalation_at IS NOT NULL
         `);
-      },
     },
+  },
   {
     // Worker-owned durable prompt delivery and checkpoint episode foundation.
     // session_inbox remains the only queue; these columns add attempt/receipt
@@ -838,6 +838,63 @@ export const MIGRATIONS: Migration[] = [
         ON idle_cleanup_schedule(terminal_state, terminal_at)
         WHERE terminal_state IS NOT NULL
       `);
+    },
+  },
+  {
+    // Normalize harness-owned work into bounded metadata. Raw harness payloads
+    // intentionally have no persistence column.
+    name: '029-harness-work-and-task-waits',
+    run: (sql) => {
+      sql.exec(
+        `ALTER TABLE session_state ADD COLUMN runtime_work_state TEXT CHECK (runtime_work_state IN ('inactive', 'active', 'settling'))`
+      );
+      sql.exec(
+        `ALTER TABLE session_state ADD COLUMN runtime_work_count INTEGER CHECK (runtime_work_count IS NULL OR runtime_work_count >= 0)`
+      );
+      sql.exec(`ALTER TABLE session_state ADD COLUMN runtime_work_source TEXT`);
+      sql.exec(`ALTER TABLE session_state ADD COLUMN runtime_work_updated_at INTEGER`);
+      sql.exec(`ALTER TABLE session_state ADD COLUMN runtime_work_progress_at INTEGER`);
+
+      sql.exec(`
+				CREATE TABLE task_wait_subscriptions (
+					id TEXT PRIMARY KEY,
+					parent_task_id TEXT NOT NULL,
+					parent_session_id TEXT NOT NULL,
+					wait_condition TEXT NOT NULL CHECK (wait_condition IN ('all', 'any')),
+					state TEXT NOT NULL CHECK (state IN ('active', 'resolved', 'cancelled')),
+					child_count INTEGER NOT NULL CHECK (child_count > 0),
+					wake_deadline INTEGER NOT NULL,
+					next_reconcile_at INTEGER NOT NULL,
+					wake_delivery_id TEXT NOT NULL UNIQUE,
+					resolution_reason TEXT,
+					created_at INTEGER NOT NULL,
+					updated_at INTEGER NOT NULL,
+					resolved_at INTEGER
+				)
+			`);
+      sql.exec(`
+				CREATE UNIQUE INDEX idx_task_wait_active_parent
+				ON task_wait_subscriptions(parent_task_id)
+				WHERE state = 'active'
+			`);
+      sql.exec(`
+				CREATE INDEX idx_task_wait_due
+				ON task_wait_subscriptions(next_reconcile_at, wake_deadline)
+				WHERE state = 'active'
+			`);
+      sql.exec(`
+				CREATE TABLE task_wait_children (
+					subscription_id TEXT NOT NULL REFERENCES task_wait_subscriptions(id) ON DELETE CASCADE,
+					child_task_id TEXT NOT NULL,
+					observed_status TEXT,
+					observed_at INTEGER,
+					PRIMARY KEY (subscription_id, child_task_id)
+				)
+			`);
+      sql.exec(`
+				CREATE INDEX idx_task_wait_child
+				ON task_wait_children(child_task_id, subscription_id)
+			`);
     },
   },
 ];
