@@ -12,6 +12,7 @@ import {
   runTaskTerminalTransitionHooks,
 } from '../../services/task-terminal-transition-hooks';
 import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
+import { releaseClaimedWarmNode } from './node-selection';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 // =========================================================================
@@ -524,6 +525,24 @@ export async function cleanupOnFailure(
 ): Promise<void> {
   const now = new Date().toISOString();
 
+  const persistedWarmClaim = await rc.env.DATABASE.prepare(
+    `SELECT claimed_warm_node_id FROM tasks WHERE id = ?`
+  )
+    .bind(state.taskId)
+    .first<{ claimed_warm_node_id: string | null }>()
+    .catch(() => null);
+  const claimedWarmNodeId =
+    state.stepResults.claimedWarmNodeId ?? persistedWarmClaim?.claimed_warm_node_id ?? null;
+  if (claimedWarmNodeId) {
+    await releaseClaimedWarmNode(state, rc, claimedWarmNodeId).catch((error) => {
+      log.error('task_runner_do.cleanup.warm_claim_release_failed', {
+        taskId: state.taskId,
+        nodeId: claimedWarmNodeId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+  }
+
   if (state.stepResults.workspaceId && state.stepResults.nodeId) {
     const node = await rc.env.DATABASE.prepare(
       `SELECT runtime FROM nodes WHERE id = ? AND user_id = ?`
@@ -610,6 +629,23 @@ export async function cleanupOnFailure(
   // If no workspace was created (failure during provisioning), we still need
   // to mark the auto-provisioned node as warm directly via NodeLifecycle DO.
   if (state.stepResults.autoProvisioned && state.stepResults.nodeId) {
+    if (state.config.resumeSnapshotChatSessionId && !state.stepResults.workspaceId) {
+      try {
+        const { deleteNodeResourcesStrict } = await import('../../services/nodes');
+        await deleteNodeResourcesStrict(state.stepResults.nodeId, state.userId, rc.env);
+        log.info('task_runner_do.cleanup.revoked_recovery_node_destroyed', {
+          taskId: state.taskId,
+          nodeId: state.stepResults.nodeId,
+        });
+      } catch (err) {
+        log.error('task_runner_do.cleanup.revoked_recovery_node_destroy_failed', {
+          taskId: state.taskId,
+          nodeId: state.stepResults.nodeId,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+      return;
+    }
     if (state.stepResults.workspaceId) {
       try {
         const { cleanupTaskRun } = await import('../../services/task-runner');

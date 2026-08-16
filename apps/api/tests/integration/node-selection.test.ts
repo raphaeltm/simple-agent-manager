@@ -146,12 +146,10 @@ describe('concurrent warm pool claiming safety', () => {
     });
 
     it('TaskRunner tryClaimWarmNode claims via NodeLifecycle DO stub', () => {
-      const section = taskRunnerSource.slice(
-        taskRunnerSource.indexOf('async function tryClaimWarmNode('),
-        taskRunnerSource.indexOf('async function findNodeWithCapacity(')
+      expect(taskRunnerSource).toContain('NODE_LIFECYCLE.idFromName(nodeId)');
+      expect(taskRunnerSource).toContain(
+        'stub.tryClaim(state.taskId, recoverySourceTaskGuard(state))'
       );
-      expect(section).toContain('NODE_LIFECYCLE.idFromName(warmNode.id)');
-      expect(section).toContain('stub.tryClaim(state.taskId)');
     });
 
     it('TaskRunner tryClaimWarmNode catches claim failures and tries next', () => {
@@ -159,7 +157,7 @@ describe('concurrent warm pool claiming safety', () => {
         taskRunnerSource.indexOf('async function tryClaimWarmNode('),
         taskRunnerSource.indexOf('async function findNodeWithCapacity(')
       );
-      expect(section).toContain('} catch {');
+      expect(section).toContain('} catch (error) {');
     });
 
     it('TaskRunner tryClaimWarmNode returns null if no warm node claimed', () => {

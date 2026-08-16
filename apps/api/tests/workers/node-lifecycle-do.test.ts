@@ -10,7 +10,14 @@
 import { env, runInDurableObject } from 'cloudflare:test';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { seedNode, seedUser, seedWorkspace } from './helpers/seed-d1';
+import {
+  seedInstallation,
+  seedNode,
+  seedProject,
+  seedTask,
+  seedUser,
+  seedWorkspace,
+} from './helpers/seed-d1';
 import {
   captureNodeLifecycleExpectedError,
   type NodeLifecycleTestDouble,
@@ -26,6 +33,15 @@ function getStub(nodeId: string): DurableObjectStub<NodeLifecycleTestDouble> {
 }
 
 const TEST_USER_ID = 'user-nl-test-001';
+const TEST_PROJECT_ID = 'project-nl-test-001';
+const TEST_INSTALLATION_ID = 'installation-nl-test-001';
+
+async function seedClaimTask(taskId: string): Promise<void> {
+  await seedUser(TEST_USER_ID);
+  await seedInstallation(TEST_INSTALLATION_ID, TEST_USER_ID);
+  await seedProject(TEST_PROJECT_ID, TEST_USER_ID, TEST_INSTALLATION_ID);
+  await seedTask(taskId, TEST_PROJECT_ID, TEST_USER_ID);
+}
 
 interface StoredNodeLifecycleState {
   nodeId: string;
@@ -140,6 +156,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     await seedTestNode(nodeId);
 
     const stub = getStub(nodeId);
+    await seedClaimTask('task-001');
     await stub.markIdle(nodeId, TEST_USER_ID);
 
     const { claimed, state } = await stub.tryClaim('task-001');
@@ -151,6 +168,84 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     // D1 warm_since should be cleared
     const dbNode = await getNodeFromD1(nodeId);
     expect(dbNode!.warm_since).toBeNull();
+  });
+
+  it('rejects a guarded claim atomically when source authority is not live', async () => {
+    const nodeId = 'nl-test-claim-revoked-001';
+    const taskId = 'task-claim-revoked-001';
+    await seedTestNode(nodeId);
+    await seedClaimTask(taskId);
+
+    const stub = getStub(nodeId);
+    await stub.markIdle(nodeId, TEST_USER_ID);
+    const alarmBefore = await getAlarm(stub);
+    const result = await stub.tryClaim(taskId, {
+      taskId: 'missing-source',
+      projectId: TEST_PROJECT_ID,
+      chatSessionId: 'missing-chat',
+    });
+
+    expect(result.claimed).toBe(false);
+    expect(result.reason).toBe('source_task_revoked');
+    expect(result.state.status).toBe('warm');
+    expect(await getAlarm(stub)).toBe(alarmBefore);
+    const task = await env.DATABASE.prepare(`SELECT claimed_warm_node_id FROM tasks WHERE id = ?`)
+      .bind(taskId)
+      .first<{ claimed_warm_node_id: string | null }>();
+    expect(task?.claimed_warm_node_id).toBeNull();
+  });
+
+  it('persists and conditionally releases a claim after the caller-side crash window', async () => {
+    const nodeId = 'nl-test-claim-release-001';
+    const taskId = 'task-claim-release-001';
+    await seedTestNode(nodeId);
+    await seedClaimTask(taskId);
+
+    const stub = getStub(nodeId);
+    await stub.markIdle(nodeId, TEST_USER_ID);
+    expect((await stub.tryClaim(taskId)).claimed).toBe(true);
+    const claimedTask = await env.DATABASE.prepare(
+      `SELECT claimed_warm_node_id FROM tasks WHERE id = ?`
+    )
+      .bind(taskId)
+      .first<{ claimed_warm_node_id: string | null }>();
+    expect(claimedTask?.claimed_warm_node_id).toBe(nodeId);
+
+    expect((await stub.releaseClaim('another-task')).released).toBe(false);
+    const released = await stub.releaseClaim(taskId);
+    expect(released.released).toBe(true);
+    expect(released.state.status).toBe('warm');
+    expect(await getAlarm(stub)).toBeGreaterThan(Date.now());
+    const releasedTask = await env.DATABASE.prepare(
+      `SELECT claimed_warm_node_id FROM tasks WHERE id = ?`
+    )
+      .bind(taskId)
+      .first<{ claimed_warm_node_id: string | null }>();
+    expect(releasedTask?.claimed_warm_node_id).toBeNull();
+  });
+
+  it('keeps a D1-persisted claimant exclusive across a pre-storage crash window', async () => {
+    const nodeId = 'nl-test-claim-exclusive-001';
+    const firstTaskId = 'task-claim-exclusive-first-001';
+    const secondTaskId = 'task-claim-exclusive-second-001';
+    await seedTestNode(nodeId);
+    await seedClaimTask(firstTaskId);
+    await seedClaimTask(secondTaskId);
+
+    const stub = getStub(nodeId);
+    await stub.markIdle(nodeId, TEST_USER_ID);
+    await env.DATABASE.prepare(`UPDATE tasks SET claimed_warm_node_id = ? WHERE id = ?`)
+      .bind(nodeId, firstTaskId)
+      .run();
+
+    const conflicting = await stub.tryClaim(secondTaskId);
+    expect(conflicting.claimed).toBe(false);
+    expect(conflicting.reason).toBeUndefined();
+    expect(conflicting.state.status).toBe('warm');
+
+    const recovered = await stub.tryClaim(firstTaskId);
+    expect(recovered.claimed).toBe(true);
+    expect(recovered.state.claimedByTask).toBe(firstTaskId);
   });
 
   it('tryClaim on active node returns false', async () => {
@@ -474,6 +569,7 @@ describe('NodeLifecycle DO — warm pool state machine', () => {
     await seedTestNode(nodeId);
 
     const stub = getStub(nodeId);
+    await seedClaimTask('task-preserve-delete-alarm');
     await stub.markIdle(nodeId, TEST_USER_ID);
     await stub.scheduleWorkspaceDeletion(nodeId, wsId, TEST_USER_ID);
     const deletionAlarm = await getAlarm(stub);

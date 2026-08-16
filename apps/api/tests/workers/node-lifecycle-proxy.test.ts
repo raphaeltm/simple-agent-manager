@@ -16,7 +16,7 @@ import {
   markIdle,
   tryClaim,
 } from '../../src/services/node-lifecycle';
-import { seedNode, seedUser } from './helpers/seed-d1';
+import { seedInstallation, seedNode, seedProject, seedTask, seedUser } from './helpers/seed-d1';
 import {
   captureNodeLifecycleExpectedError,
   type NodeLifecycleTestDouble,
@@ -45,6 +45,14 @@ function getStub(nodeId: string): DurableObjectStub<NodeLifecycleTestDouble> {
 async function seedTestNode(nodeId: string, userId: string = TEST_USER_ID): Promise<void> {
   await seedUser(userId);
   await seedNode(nodeId, userId);
+}
+
+async function seedTestTask(taskId: string): Promise<void> {
+  const installationId = 'installation-nlp-test-001';
+  const projectId = 'project-nlp-test-001';
+  await seedInstallation(installationId, TEST_USER_ID);
+  await seedProject(projectId, TEST_USER_ID, installationId);
+  await seedTask(taskId, projectId, TEST_USER_ID);
 }
 
 async function getStoredState(nodeId: string): Promise<StoredNodeLifecycleState | null> {
@@ -173,6 +181,7 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
   it('tryClaim on warm node succeeds', async () => {
     const nodeId = 'nlp-claim-warm-001';
     await seedTestNode(nodeId);
+    await seedTestTask('task-claim-001');
 
     await markIdle(env, nodeId, TEST_USER_ID);
 
@@ -285,6 +294,7 @@ describe('node-lifecycle proxy — Worker→DO contract', () => {
   it('full lifecycle: idle → claim → active → idle', async () => {
     const nodeId = 'nlp-lifecycle-001';
     await seedTestNode(nodeId);
+    await seedTestTask('task-lc-001');
 
     // 1. Mark idle
     const idle = await markIdle(env, nodeId, TEST_USER_ID);

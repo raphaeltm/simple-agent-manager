@@ -70,6 +70,14 @@ export async function handleAgentSession(
     const db = drizzle(rc.env.DATABASE, { schema });
     const agentType = state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'opencode';
     let result;
+    const sourceTaskGuard =
+      state.config.recoverySourceTaskId && state.config.resumeSnapshotChatSessionId
+        ? {
+            taskId: state.config.recoverySourceTaskId,
+            projectId: state.projectId,
+            chatSessionId: state.config.resumeSnapshotChatSessionId,
+          }
+        : undefined;
     try {
       result = await startSamAwareAgentSession(db, rc.env, {
         nodeId: state.stepResults.nodeId,
@@ -107,6 +115,7 @@ export async function handleAgentSession(
         beforeExternalMutation: async () => {
           await rc.assertRecoveryAuthority(state);
         },
+        sourceTaskGuard,
         actor: {
           type: 'system',
           id: 'task-runner',

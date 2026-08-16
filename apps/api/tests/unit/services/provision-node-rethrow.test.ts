@@ -405,6 +405,42 @@ describe('provisionNode rethrowProviderError', () => {
     expect(logError).not.toHaveBeenCalledWith('node_provisioning.failed', expect.anything());
   });
 
+  it('revalidates authority immediately before paid allocation', async () => {
+    const authority = vi.fn().mockRejectedValue(new Error('source revoked'));
+
+    await expect(
+      provisionNode('node-1', ENV, undefined, {
+        rethrowProviderError: true,
+        assertExternalMutationAuthority: authority,
+      })
+    ).rejects.toThrow('source revoked');
+
+    expect(authority).toHaveBeenCalledOnce();
+    expect(createVM).not.toHaveBeenCalled();
+  });
+
+  it('persists provider identity before detecting revocation after allocation', async () => {
+    const authority = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('source revoked'));
+
+    await expect(
+      provisionNode('node-1', ENV, undefined, {
+        rethrowProviderError: true,
+        assertExternalMutationAuthority: authority,
+      })
+    ).rejects.toThrow('source revoked');
+
+    expect(createVM).toHaveBeenCalledOnce();
+    expect(ops).toContainEqual(
+      expect.objectContaining({
+        kind: 'update',
+        set: expect.objectContaining({ providerInstanceId: 'provider-vm-1' }),
+      })
+    );
+  });
+
   it('deletes the failed node row and re-throws on transient capacity exhaustion', async () => {
     const err = capacityError();
     createVM.mockRejectedValue(err);

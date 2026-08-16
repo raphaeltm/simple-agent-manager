@@ -98,6 +98,7 @@ export class TaskRunner extends DurableObject<Env> {
       stepResults: {
         nodeId: null,
         autoProvisioned: false,
+        claimedWarmNodeId: null,
         workspaceId: null,
         chatSessionId: input.config.chatSessionId ?? null,
         agentSessionId: null,
@@ -356,6 +357,7 @@ export class TaskRunner extends DurableObject<Env> {
     raw.workspaceDispatchAckedAt ??= null;
     raw.config.resumeSnapshotChatSessionId ??= null;
     raw.config.recoverySourceTaskId ??= null;
+    raw.stepResults.claimedWarmNodeId ??= null;
     raw.lastD1Step ??= null;
     return raw;
   }
