@@ -5,9 +5,37 @@
       "registryUrl": "https://www.npmjs.com/package/@astrojs/check",
       "necessity": "Validates Astro templates and embedded TypeScript."
     },
+    "@axe-core/playwright": {
+      "registryUrl": "https://www.npmjs.com/package/@axe-core/playwright",
+      "necessity": "Runs accessibility assertions in browser evidence tests."
+    },
     "@eslint/js": {
       "registryUrl": "https://www.npmjs.com/package/@eslint/js",
       "necessity": "Provides supported ESLint flat recommended configuration."
+    },
+    "@playwright/test": {
+      "registryUrl": "https://www.npmjs.com/package/@playwright/test",
+      "necessity": "Executes browser evidence and screenshot checks."
+    },
+    "@storybook/addon-a11y": {
+      "registryUrl": "https://www.npmjs.com/package/@storybook/addon-a11y",
+      "necessity": "Adds Storybook accessibility testing integration."
+    },
+    "@storybook/addon-docs": {
+      "registryUrl": "https://www.npmjs.com/package/@storybook/addon-docs",
+      "necessity": "Builds Storybook documentation pages for components."
+    },
+    "@storybook/react": {
+      "registryUrl": "https://www.npmjs.com/package/@storybook/react",
+      "necessity": "Provides the React renderer for Storybook."
+    },
+    "@storybook/react-vite": {
+      "registryUrl": "https://www.npmjs.com/package/@storybook/react-vite",
+      "necessity": "Provides Vite integration for React Storybook."
+    },
+    "@tailwindcss/vite": {
+      "registryUrl": "https://www.npmjs.com/package/@tailwindcss/vite",
+      "necessity": "Compiles Tailwind CSS through Vite builds."
     },
     "@typescript-eslint/eslint-plugin": {
       "registryUrl": "https://www.npmjs.com/package/@typescript-eslint/eslint-plugin",
@@ -16,6 +44,10 @@
     "@typescript-eslint/parser": {
       "registryUrl": "https://www.npmjs.com/package/@typescript-eslint/parser",
       "necessity": "Parses TypeScript for ESLint rules and fixtures."
+    },
+    "@vitest/coverage-v8": {
+      "registryUrl": "https://www.npmjs.com/package/@vitest/coverage-v8",
+      "necessity": "Generates V8 coverage for workspace gates."
     },
     "eslint": {
       "registryUrl": "https://www.npmjs.com/package/eslint",
@@ -41,6 +73,14 @@
       "registryUrl": "https://www.npmjs.com/package/oxlint",
       "necessity": "Measures native lint findings in shadow mode."
     },
+    "storybook": {
+      "registryUrl": "https://www.npmjs.com/package/storybook",
+      "necessity": "Provides the Storybook build and test CLI."
+    },
+    "tailwindcss": {
+      "registryUrl": "https://www.npmjs.com/package/tailwindcss",
+      "necessity": "Provides Tailwind CSS styling primitives."
+    },
     "typescript": {
       "registryUrl": "https://www.npmjs.com/package/typescript",
       "necessity": "Checks local plugin JavaScript declarations."
@@ -52,6 +92,10 @@
     "typescript-eslint": {
       "registryUrl": "https://www.npmjs.com/package/typescript-eslint",
       "necessity": "Provides supported ESLint flat TypeScript configuration."
+    },
+    "vite": {
+      "registryUrl": "https://www.npmjs.com/package/vite",
+      "necessity": "Bundles browser-facing Storybook test assets."
     },
     "vitest": {
       "registryUrl": "https://www.npmjs.com/package/vitest",
