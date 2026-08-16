@@ -1,4 +1,4 @@
-import { eq } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import type { Context } from 'hono';
 import { Hono } from 'hono';
@@ -26,6 +26,8 @@ import {
   getRestorableSessionSnapshot,
   getSessionSnapshotConfig,
   prepareSessionSnapshot,
+  recordSessionSnapshotArtifactAuthorization,
+  recordSessionSnapshotCaptureFailure,
   recordSessionSnapshotProgress,
   recordSessionSnapshotRestoreResult,
   type SessionSnapshotArtifact,
@@ -256,6 +258,28 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/progress', async (c) => {
   return c.body(null, 204);
 });
 
+sessionSnapshotRoutes.post('/:id/session-snapshot/failure', async (c) => {
+  const workspaceId = c.req.param('id');
+  await verifyWorkspaceCallbackAuth(c, workspaceId);
+  const { db, workspace } = await requireWorkspace(c, workspaceId);
+  const body = await readJsonBody(c);
+  const chatSessionId = requiredStringField(body, 'chatSessionId');
+  const generation = requiredStringField(body, 'generation');
+  const error = requiredStringField(body, 'error');
+  if (!workspace.chatSessionId || workspace.chatSessionId !== chatSessionId) {
+    throw errors.forbidden('Snapshot chat session does not match workspace');
+  }
+  const recorded = await recordSessionSnapshotCaptureFailure(db, c.env, {
+    chatSessionId,
+    generation,
+    error,
+  });
+  if (!recorded) {
+    throw errors.conflict('Snapshot capture generation is no longer current');
+  }
+  return c.body(null, 204);
+});
+
 sessionSnapshotRoutes.post('/:id/session-snapshot/artifacts/:artifact/upload-url', async (c) => {
   const { artifact, chatSessionId, generation, db, workspace } =
     await requireSnapshotArtifactTarget(c);
@@ -293,7 +317,18 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/artifacts/:artifact/upload-url
     sizeBytes,
     sha256,
     contentType: artifact === 'home' ? 'application/x-tar' : 'application/octet-stream',
+    checksumHeader: body.checksumHeader === true,
   });
+  const recorded = await recordSessionSnapshotArtifactAuthorization(db, {
+    chatSessionId,
+    generation,
+    artifact,
+    sizeBytes,
+    sha256,
+  });
+  if (!recorded) {
+    throw errors.conflict('Snapshot capture generation is no longer current');
+  }
   return c.json({ uploadUrl });
 });
 
@@ -398,6 +433,24 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
   if (status === 'available' && !('home' in manifestArtifacts)) {
     throw errors.badRequest('Complete snapshots require the state archive');
   }
+  const authorization = await db
+    .select({
+      authorizedHomeBytes: schema.sessionSnapshots.authorizedHomeBytes,
+      authorizedHomeSha256: schema.sessionSnapshots.authorizedHomeSha256,
+      authorizedWipBytes: schema.sessionSnapshots.authorizedWipBytes,
+      authorizedWipSha256: schema.sessionSnapshots.authorizedWipSha256,
+    })
+    .from(schema.sessionSnapshots)
+    .where(
+      and(
+        eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
+        eq(schema.sessionSnapshots.captureGeneration, generation)
+      )
+    )
+    .get();
+  if (!authorization) {
+    throw errors.conflict('Snapshot capture generation is no longer current');
+  }
   const artifactSizes: { homeBytes?: number; wipBytes?: number } = {};
   const artifactSha256: { homeSha256?: string; wipSha256?: string } = {};
   for (const [artifact, sizeKey] of [
@@ -424,8 +477,33 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/complete', async (c) => {
     if (!object) throw errors.badRequest('Snapshot ' + artifact + ' artifact is missing');
     if (object.size !== claimedSize)
       throw errors.badRequest('Snapshot ' + artifact + ' size does not match upload');
-    if (checksumHex(object.checksums.sha256) !== claimedSha256) {
-      throw errors.badRequest('Snapshot ' + artifact + ' SHA-256 does not match upload');
+    const uploadedSha256 = checksumHex(object.checksums.sha256);
+    if (uploadedSha256 !== null) {
+      if (uploadedSha256 !== claimedSha256) {
+        throw errors.badRequest('Snapshot ' + artifact + ' SHA-256 does not match upload');
+      }
+    } else {
+      const authorizedSize =
+        artifact === 'home' ? authorization.authorizedHomeBytes : authorization.authorizedWipBytes;
+      const authorizedSha256 =
+        artifact === 'home'
+          ? authorization.authorizedHomeSha256
+          : authorization.authorizedWipSha256;
+      if (authorizedSize == null || authorizedSha256 == null) {
+        throw errors.badRequest(
+          'Snapshot ' +
+            artifact +
+            ' SHA-256 is absent from upload and no authorized checksum was recorded'
+        );
+      }
+      if (authorizedSize !== claimedSize) {
+        throw errors.badRequest('Snapshot ' + artifact + ' size does not match authorized upload');
+      }
+      if (authorizedSha256.toLowerCase() !== claimedSha256) {
+        throw errors.badRequest(
+          'Snapshot ' + artifact + ' SHA-256 does not match authorized upload'
+        );
+      }
     }
     artifactSizes[sizeKey] = object.size;
     artifactSha256[artifact === 'home' ? 'homeSha256' : 'wipSha256'] = claimedSha256;

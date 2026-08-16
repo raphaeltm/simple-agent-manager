@@ -147,6 +147,42 @@ describe('session sleep sweep', () => {
     });
   });
 
+  it('terminalizes stopped-workspace post-sleep capture failures so they are not retried forever', async () => {
+    addDueSnapshot('snapshot-stopped', 2);
+    sqlite
+      .prepare(
+        `UPDATE session_snapshots
+         SET status = 'degraded', degradation = 'transcript-only'
+         WHERE id = 'snapshot-stopped'`
+      )
+      .run();
+    mocks.sleepWorkspaceSession.mockRejectedValue(
+      new Error(
+        'resolve snapshot devcontainer: workspace is not running/recovery (status: stopped)'
+      )
+    );
+
+    const first = await runSessionSleepSweep(env, new Date('2026-08-12T01:00:00.000Z'));
+    const second = await runSessionSleepSweep(env, new Date('2026-08-12T01:05:00.000Z'));
+
+    expect(first).toMatchObject({ selected: 1, claimed: 1, failed: 1 });
+    expect(second).toMatchObject({ selected: 0, claimed: 0 });
+    expect(mocks.sleepWorkspaceSession).toHaveBeenCalledTimes(1);
+    expect(
+      sqlite
+        .prepare(
+          `SELECT sleep_status, sleep_after, sleep_error
+           FROM session_snapshots WHERE id = 'snapshot-stopped'`
+        )
+        .get()
+    ).toEqual({
+      sleep_status: 'terminal_failed',
+      sleep_after: null,
+      sleep_error:
+        'resolve snapshot devcontainer: workspace is not running/recovery (status: stopped)',
+    });
+  });
+
   it('re-arms an exhausted failure when the configured retry budget increases', async () => {
     addDueSnapshot('snapshot-rearmed', 3);
     sqlite

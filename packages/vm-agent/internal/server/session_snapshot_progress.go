@@ -64,6 +64,6 @@ func (r *snapshotProgressReporter) Report(ctx context.Context, step string) {
 	reportCtx, cancel := context.WithTimeout(ctx, r.server.sessionSnapshotProgressReportTimeout())
 	defer cancel()
 	if err := r.server.reportSnapshotProgress(reportCtx, r.workspaceID, r.chatSessionID, r.generation, step, r.token); err != nil {
-		slog.Debug("Session snapshot progress report failed", "chatSessionId", r.chatSessionID, "workspaceId", r.workspaceID, "step", step, "error", err)
+		slog.Warn("Session snapshot progress report failed", "chatSessionId", r.chatSessionID, "workspaceId", r.workspaceID, "step", step, "error", err)
 	}
 }

@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   generateSessionSnapshotDirectUploadUrl: vi.fn(),
   getRestorableSessionSnapshot: vi.fn(),
   prepareSessionSnapshot: vi.fn(),
+  recordSessionSnapshotArtifactAuthorization: vi.fn(),
+  recordSessionSnapshotCaptureFailure: vi.fn(),
   recordSessionSnapshotProgress: vi.fn(),
   recordSessionSnapshotRestoreResult: vi.fn(),
   resolveSessionSnapshotUploadTargets: vi.fn(),
@@ -38,6 +40,8 @@ vi.mock('../../../src/services/session-snapshots', async (importOriginal) => {
     completeSessionSnapshot: mocks.completeSessionSnapshot,
     getRestorableSessionSnapshot: mocks.getRestorableSessionSnapshot,
     prepareSessionSnapshot: mocks.prepareSessionSnapshot,
+    recordSessionSnapshotArtifactAuthorization: mocks.recordSessionSnapshotArtifactAuthorization,
+    recordSessionSnapshotCaptureFailure: mocks.recordSessionSnapshotCaptureFailure,
     recordSessionSnapshotProgress: mocks.recordSessionSnapshotProgress,
     recordSessionSnapshotRestoreResult: mocks.recordSessionSnapshotRestoreResult,
   };
@@ -54,13 +58,22 @@ vi.mock('../../../src/services/session-snapshot-upload-relay', () => ({
   verifySessionSnapshotRelayAuthorization: mocks.verifySessionSnapshotRelayAuthorization,
 }));
 
-function makeDb(workspace: Record<string, unknown>) {
+function makeDb(
+  workspace: Record<string, unknown>,
+  authorization: Record<string, unknown> | null = {
+    generation: 'generation-1',
+    authorizedHomeBytes: 4,
+    authorizedHomeSha256: HOME_SHA256,
+    authorizedWipBytes: 3,
+    authorizedWipSha256: WIP_SHA256,
+  }
+) {
   return {
     select: vi.fn(() => ({
       from: vi.fn(() => ({
         where: vi.fn(() => ({
           limit: vi.fn(async () => [workspace]),
-          get: vi.fn(async () => ({ generation: 'generation-1' })),
+          get: vi.fn(async () => authorization),
         })),
       })),
     })),
@@ -109,6 +122,8 @@ describe('workspaces session snapshot callback routes', () => {
       'https://account.r2.cloudflarestorage.com/test-snapshots/upload'
     );
     mocks.verifySessionSnapshotRelayAuthorization.mockResolvedValue(undefined);
+    mocks.recordSessionSnapshotArtifactAuthorization.mockResolvedValue(true);
+    mocks.recordSessionSnapshotCaptureFailure.mockResolvedValue(true);
     mocks.recordSessionSnapshotProgress.mockResolvedValue(true);
     mocks.resolveSessionSnapshotUploadTargets.mockImplementation(
       async (_env: Env, input: { directUploadSupported: boolean }) => ({
@@ -277,6 +292,58 @@ describe('workspaces session snapshot callback routes', () => {
     expect(res.status).toBe(409);
   });
 
+  it('records vm-agent snapshot failure for the current capture generation', async () => {
+    const res = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/failure',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer callback-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chatSessionId: 'chat-1',
+          generation: 'generation-1',
+          error: 'snapshot control plane returned HTTP 400: checksum mismatch',
+        }),
+      },
+      runtimeBindings
+    );
+
+    expect(res.status).toBe(204);
+    expect(mocks.recordSessionSnapshotCaptureFailure).toHaveBeenCalledWith(
+      expect.anything(),
+      runtimeBindings,
+      {
+        chatSessionId: 'chat-1',
+        generation: 'generation-1',
+        error: 'snapshot control plane returned HTTP 400: checksum mismatch',
+      }
+    );
+  });
+
+  it('rejects snapshot failure for a stale capture generation', async () => {
+    mocks.recordSessionSnapshotCaptureFailure.mockResolvedValueOnce(false);
+    const res = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/failure',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer callback-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chatSessionId: 'chat-1',
+          generation: 'generation-old',
+          error: 'capture failed',
+        }),
+      },
+      runtimeBindings
+    );
+
+    expect(res.status).toBe(409);
+  });
+
   it('offloads one relay replacement when a legacy node has no current peer', async () => {
     mocks.resolveSessionSnapshotUploadTargets.mockResolvedValueOnce({
       upload: {
@@ -327,7 +394,7 @@ describe('workspaces session snapshot callback routes', () => {
           Authorization: 'Bearer callback-token',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ sizeBytes: 777, sha256: HOME_SHA256 }),
+        body: JSON.stringify({ sizeBytes: 777, sha256: HOME_SHA256, checksumHeader: true }),
       },
       runtimeBindings
     );
@@ -341,7 +408,18 @@ describe('workspaces session snapshot callback routes', () => {
       sizeBytes: 777,
       sha256: HOME_SHA256,
       contentType: 'application/x-tar',
+      checksumHeader: true,
     });
+    expect(mocks.recordSessionSnapshotArtifactAuthorization).toHaveBeenCalledWith(
+      expect.anything(),
+      {
+        chatSessionId: 'chat-1',
+        generation: 'generation-1',
+        artifact: 'home',
+        sizeBytes: 777,
+        sha256: HOME_SHA256,
+      }
+    );
     expect(mocks.verifySessionSnapshotRelayAuthorization).toHaveBeenCalledWith(
       runtimeBindings,
       'user-1',
@@ -626,6 +704,106 @@ describe('workspaces session snapshot callback routes', () => {
       runtimeBindings
     );
     expect(lifecycleMismatch.status).toBe(400);
+  });
+
+  it('accepts direct-upload artifacts with absent R2 checksum when authorization matches', async () => {
+    r2.head.mockImplementation(async (key: string) =>
+      key.endsWith('home.tar') ? { size: 4, checksums: {} } : null
+    );
+    const body = {
+      chatSessionId: 'chat-1',
+      agentSessionId: 'agent-session-1',
+      generation: 'generation-1',
+      runtime: 'vm',
+      status: 'available',
+      degradation: 'none',
+      manifest: {
+        version: 1,
+        chatSessionId: 'chat-1',
+        workspaceId: 'WS_1',
+        agentSessionId: 'agent-session-1',
+        acpSessionId: 'acp-session-1',
+        agentType: 'openai-codex',
+        status: 'available',
+        degradation: 'none',
+        skipped: [],
+        artifacts: {
+          home: { sizeBytes: 4, sha256: HOME_SHA256 },
+        },
+        createdAt: '2026-08-16T00:00:00.000Z',
+      },
+    };
+
+    const res = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/complete',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+      runtimeBindings
+    );
+
+    expect(res.status).toBe(200);
+    expect(mocks.completeSessionSnapshot).toHaveBeenCalledWith(
+      expect.anything(),
+      runtimeBindings,
+      expect.objectContaining({
+        artifactSizes: { homeBytes: 4 },
+        artifactSha256: { homeSha256: HOME_SHA256 },
+      })
+    );
+  });
+
+  it('rejects absent R2 checksum distinctly when no authorization was recorded', async () => {
+    (drizzle as any).mockReturnValueOnce(
+      makeDb(workspace, {
+        generation: 'generation-1',
+        authorizedHomeBytes: null,
+        authorizedHomeSha256: null,
+      })
+    );
+    r2.head.mockImplementation(async (key: string) =>
+      key.endsWith('home.tar') ? { size: 4, checksums: {} } : null
+    );
+    const res = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/complete',
+      {
+        method: 'POST',
+        headers: { Authorization: 'Bearer callback-token', 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chatSessionId: 'chat-1',
+          agentSessionId: 'agent-session-1',
+          generation: 'generation-1',
+          runtime: 'vm',
+          status: 'available',
+          degradation: 'none',
+          manifest: {
+            version: 1,
+            chatSessionId: 'chat-1',
+            workspaceId: 'WS_1',
+            agentSessionId: 'agent-session-1',
+            acpSessionId: 'acp-session-1',
+            agentType: 'openai-codex',
+            status: 'available',
+            degradation: 'none',
+            skipped: [],
+            artifacts: {
+              home: { sizeBytes: 4, sha256: HOME_SHA256 },
+            },
+            createdAt: '2026-08-16T00:00:00.000Z',
+          },
+        }),
+      },
+      runtimeBindings
+    );
+
+    expect(res.status).toBe(400);
+    await expect(res.json()).resolves.toMatchObject({
+      message:
+        'Snapshot home SHA-256 is absent from upload and no authorized checksum was recorded',
+    });
+    expect(mocks.completeSessionSnapshot).not.toHaveBeenCalled();
   });
 
   it('normalizes only generated OpenCode symlink omissions after checksum verification', async () => {

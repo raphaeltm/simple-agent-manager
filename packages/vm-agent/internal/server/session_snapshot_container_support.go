@@ -47,6 +47,12 @@ type cappedFileWriter struct {
 	exceeded  bool
 }
 
+type containerSnapshotArchiveEntry struct {
+	kind string
+	size int64
+	rel  string
+}
+
 func (w *cappedFileWriter) Write(p []byte) (int, error) {
 	if w.remaining <= 0 {
 		w.exceeded = true
@@ -182,7 +188,7 @@ func buildContainerSnapshotArchiveList(inventory []byte, logicalName string, ent
 	if len(fields)/4 > defaultSnapshotMaxArchiveEntries {
 		return nil, nil, 0, fmt.Errorf("container HOME inventory exceeds entry limit")
 	}
-	var selected bytes.Buffer
+	entries := make([]containerSnapshotArchiveEntry, 0, len(fields)/4)
 	var skipped []snapshotSkippedEntry
 	var selectedBytes int64
 	for index := 0; index < len(fields); index += 4 {
@@ -198,28 +204,63 @@ func buildContainerSnapshotArchiveList(inventory []byte, logicalName string, ent
 		if shouldExcludeSnapshotRootPath(logicalName, rel) {
 			continue
 		}
+		entries = append(entries, containerSnapshotArchiveEntry{kind: kind, size: size, rel: rel})
+	}
 
-		switch kind {
+	var selected bytes.Buffer
+	selectedPaths := make(map[string]bool, len(entries))
+	selectEntry := func(entry containerSnapshotArchiveEntry) error {
+		if selectedPaths[entry.rel] {
+			return nil
+		}
+		switch entry.kind {
 		case "d":
 			// Directory entries preserve modes and empty harness directories.
 		case "f":
-			if size > entryThreshold {
-				skipped = append(skipped, snapshotSkippedEntry{Path: snapshotDisplayPath(logicalName, rel), Reason: "entry exceeds size threshold", SizeBytes: size})
-				continue
+			if entry.size > entryThreshold {
+				skipped = append(skipped, snapshotSkippedEntry{Path: snapshotDisplayPath(logicalName, entry.rel), Reason: "entry exceeds size threshold", SizeBytes: entry.size})
+				return nil
 			}
-			if selectedBytes+size > totalBudget {
-				skipped = append(skipped, snapshotSkippedEntry{Path: snapshotDisplayPath(logicalName, rel), Reason: "snapshot budget exhausted", SizeBytes: size})
-				continue
+			if selectedBytes+entry.size > totalBudget {
+				skipped = append(skipped, snapshotSkippedEntry{Path: snapshotDisplayPath(logicalName, entry.rel), Reason: "snapshot budget exhausted", SizeBytes: entry.size})
+				return nil
 			}
-			selectedBytes += size
+			selectedBytes += entry.size
 		default:
-			skipped = append(skipped, snapshotSkippedEntry{Path: snapshotDisplayPath(logicalName, rel), Reason: "unsupported home entry type", SizeBytes: size})
-			continue
+			skipped = append(skipped, snapshotSkippedEntry{Path: snapshotDisplayPath(logicalName, entry.rel), Reason: "unsupported home entry type", SizeBytes: entry.size})
+			return nil
 		}
-		selected.WriteString(rel)
+		selected.WriteString(entry.rel)
 		selected.WriteByte(0)
+		selectedPaths[entry.rel] = true
+		return nil
+	}
+	for _, entry := range entries {
+		if isHarnessSnapshotPath(logicalName, entry.rel) {
+			if err := selectEntry(entry); err != nil {
+				return nil, skipped, selectedBytes, err
+			}
+		}
+	}
+	for _, entry := range entries {
+		if err := selectEntry(entry); err != nil {
+			return nil, skipped, selectedBytes, err
+		}
 	}
 	return selected.Bytes(), skipped, selectedBytes, nil
+}
+
+func isHarnessSnapshotPath(logicalName, rel string) bool {
+	if logicalName != "" {
+		return true
+	}
+	clean := filepath.ToSlash(filepath.Clean(rel))
+	for _, prefix := range []string{".claude", ".codex", ".config/opencode", ".local/share/opencode", ".vibe"} {
+		if clean == prefix || strings.HasPrefix(clean, prefix+"/") {
+			return true
+		}
+	}
+	return false
 }
 
 func containerHomeInventoryArgs(home string) []string {

@@ -33,7 +33,7 @@ func (s *Server) resolveContainerSnapshotArchiveRoots(ctx context.Context, targe
 	if err != nil {
 		return nil, err
 	}
-	roots := []snapshotArchiveRoot{{path: home}}
+	var externalRoots []snapshotArchiveRoot
 	for _, candidate := range candidates {
 		if candidate.path == "" || pathWithinRoot(home, candidate.path) {
 			continue
@@ -48,12 +48,12 @@ func (s *Server) resolveContainerSnapshotArchiveRoots(ctx context.Context, targe
 		if strings.TrimSpace(string(kind)) != "directory" {
 			return nil, fmt.Errorf("container %s snapshot state root is not a directory", candidate.logicalName)
 		}
-		roots = append(roots, candidate)
+		externalRoots = append(externalRoots, candidate)
 	}
-	return roots, nil
+	return append(externalRoots, snapshotArchiveRoot{path: home}), nil
 }
 
-func (s *Server) createContainerHomeTar(ctx context.Context, target *containerSnapshotTarget, entryThreshold, totalBudget int64) (string, []snapshotSkippedEntry, error) {
+func (s *Server) createContainerHomeTar(ctx context.Context, target *containerSnapshotTarget, entryThreshold, totalBudget int64, reportProgress func(context.Context, string)) (string, []snapshotSkippedEntry, error) {
 	roots, err := s.resolveContainerSnapshotArchiveRoots(ctx, target)
 	if err != nil {
 		return "", nil, err
@@ -63,6 +63,9 @@ func (s *Server) createContainerHomeTar(ctx context.Context, target *containerSn
 	var skipped []snapshotSkippedEntry
 	var selectedBytes int64
 	for index, root := range roots {
+		if reportProgress != nil {
+			reportProgress(ctx, "home-walk")
+		}
 		inventory, inventoryErr := s.runSnapshotWorkspaceCommandBounded(ctx, target, defaultSnapshotInventoryMaxBytes, nil, containerSnapshotInventoryArgs(root.path, root.logicalName)...)
 		if inventoryErr != nil {
 			return "", skipped, fmt.Errorf("inventory container snapshot root %q: %w", root.logicalName, inventoryErr)
@@ -73,6 +76,9 @@ func (s *Server) createContainerHomeTar(ctx context.Context, target *containerSn
 			return "", skipped, listErr
 		}
 		selectedBytes += rootBytes
+		if reportProgress != nil {
+			reportProgress(ctx, "home-walk")
+		}
 		mode := "-rf"
 		if index == 0 {
 			mode = "-cf"
@@ -85,8 +91,14 @@ func (s *Server) createContainerHomeTar(ctx context.Context, target *containerSn
 		cmd.Stdin = bytes.NewReader(fileList)
 		stderr := &cappedBuffer{maxBytes: 64 * 1024}
 		cmd.Stderr = stderr
+		if reportProgress != nil {
+			reportProgress(ctx, "home-copy")
+		}
 		if commandErr := cmd.Run(); commandErr != nil {
 			return "", skipped, fmt.Errorf("archive container snapshot root %q: %w: %s", root.logicalName, commandErr, strings.TrimSpace(stderr.buffer.String()))
+		}
+		if reportProgress != nil {
+			reportProgress(ctx, "home-copy")
 		}
 	}
 	path, err := s.copyContainerSnapshotArtifact(ctx, target, containerPath, "sam-session-home-*.tar", totalBudget)
@@ -233,7 +245,7 @@ func (s *Server) resetContainerSnapshotIndexPaths(ctx context.Context, target *c
 	return nil
 }
 
-func (s *Server) createContainerWIPBundle(ctx context.Context, target *containerSnapshotTarget, entryThreshold, maxBytes int64) (string, string, []snapshotSkippedEntry, error) {
+func (s *Server) createContainerWIPBundle(ctx context.Context, target *containerSnapshotTarget, entryThreshold, maxBytes int64, reportProgress func(context.Context, string)) (string, string, []snapshotSkippedEntry, error) {
 	present, err := s.containerGit(ctx, target, nil, "rev-parse", "--is-inside-work-tree")
 	if err != nil || present != "true" {
 		return "", "", nil, nil
@@ -251,6 +263,9 @@ func (s *Server) createContainerWIPBundle(ctx context.Context, target *container
 	}
 	if status == "" {
 		return base, "", nil, nil
+	}
+	if reportProgress != nil {
+		reportProgress(ctx, "wip-capture")
 	}
 	excludedPaths, err := s.resolveContainerSnapshotWIPExcludedPaths(ctx, target)
 	if err != nil {
@@ -330,6 +345,9 @@ func (s *Server) createContainerWIPBundle(ctx context.Context, target *container
 	defer func() { _, _ = s.containerGit(context.Background(), target, nil, "update-ref", "-d", indexRef) }()
 	if _, err := s.containerGit(ctx, target, nil, "bundle", "create", containerBundle, worktreeRef, indexRef); err != nil {
 		return base, "", skipped, fmt.Errorf("create container git bundle: %w", err)
+	}
+	if reportProgress != nil {
+		reportProgress(ctx, "wip-capture")
 	}
 	localPath, err := s.copyContainerSnapshotArtifact(ctx, target, containerBundle, "sam-session-wip-*.bundle", maxBytes)
 	if err != nil {

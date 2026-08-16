@@ -124,6 +124,7 @@ export interface SessionSnapshotCaptureState {
   degradation: string;
   snapshotGeneration: string | null;
   captureGeneration: string | null;
+  captureError: string | null;
   updatedAt: string;
 }
 
@@ -138,6 +139,7 @@ export async function getSessionSnapshotCaptureState(
         degradation: schema.sessionSnapshots.degradation,
         snapshotGeneration: schema.sessionSnapshots.snapshotGeneration,
         captureGeneration: schema.sessionSnapshots.captureGeneration,
+        captureError: schema.sessionSnapshots.captureError,
         updatedAt: schema.sessionSnapshots.updatedAt,
       })
       .from(schema.sessionSnapshots)
@@ -186,6 +188,14 @@ function sanitizeKeySegment(value: string): string {
 function checksumHex(value: ArrayBuffer | undefined): string | null {
   if (!value) return null;
   return Array.from(new Uint8Array(value), (byte) => byte.toString(16).padStart(2, '0')).join('');
+}
+
+function objectChecksumMatchesOrIsAbsent(
+  object: { checksums: { sha256?: ArrayBuffer } },
+  expectedSha256: string
+): boolean {
+  const actualSha256 = checksumHex(object.checksums.sha256);
+  return actualSha256 === null || actualSha256 === expectedSha256.toLowerCase();
 }
 
 function manifestArtifactSize(
@@ -299,7 +309,7 @@ export async function verifyRestorableSessionSnapshotArtifacts(
     !home ||
     !manifest ||
     home.size !== homeSize ||
-    checksumHex(home.checksums.sha256) !== snapshot.homeSha256.toLowerCase()
+    !objectChecksumMatchesOrIsAbsent(home, snapshot.homeSha256)
   ) {
     return false;
   }
@@ -318,7 +328,7 @@ export async function verifyRestorableSessionSnapshotArtifacts(
   return (
     Boolean(wip) &&
     wip?.size === wipSize &&
-    checksumHex(wip.checksums.sha256) === snapshot.wipSha256.toLowerCase()
+    objectChecksumMatchesOrIsAbsent(wip, snapshot.wipSha256)
   );
 }
 
@@ -389,7 +399,7 @@ export async function verifySessionSnapshotArtifactsForSleep(
     if (
       !object ||
       object.size !== claimed.sizeBytes ||
-      checksumHex(object.checksums.sha256) !== claimed.sha256
+      !objectChecksumMatchesOrIsAbsent(object, claimed.sha256)
     ) {
       return false;
     }
@@ -464,6 +474,11 @@ export async function prepareSessionSnapshot(
     recoveryClaimedAt: null,
     snapshotGeneration: null,
     captureGeneration: generation,
+    captureError: null,
+    authorizedHomeBytes: null,
+    authorizedHomeSha256: null,
+    authorizedWipBytes: null,
+    authorizedWipSha256: null,
     homeSha256: null,
     wipSha256: null,
     updatedAt: now.toISOString(),
@@ -489,6 +504,11 @@ export async function prepareSessionSnapshot(
           agentSessionId: input.agentSessionId,
           runtime: input.runtime,
           captureGeneration: generation,
+          captureError: null,
+          authorizedHomeBytes: null,
+          authorizedHomeSha256: null,
+          authorizedWipBytes: null,
+          authorizedWipSha256: null,
           updatedAt: now.toISOString(),
         })
         .where(eq(schema.sessionSnapshots.id, snapshotId));

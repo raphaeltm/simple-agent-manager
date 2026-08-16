@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -95,6 +96,9 @@ func TestCreateWIPBundleDegradesDuringMerge(t *testing.T) {
 }
 
 func TestSnapshotHarnessResumeIdentity(t *testing.T) {
+	homeArtifact := map[string]snapshotArtifact{
+		"home": {SizeBytes: 42, SHA256: strings.Repeat("a", sha256.Size*2)},
+	}
 	tests := []struct {
 		name          string
 		manifest      *snapshotManifest
@@ -110,6 +114,7 @@ func TestSnapshotHarnessResumeIdentity(t *testing.T) {
 				AgentSessionID: "agent-session-1",
 				AcpSessionID:   "acp-session-1",
 				AgentType:      "openai-codex",
+				Artifacts:      homeArtifact,
 			},
 			sessionID:     "agent-session-1",
 			agentType:     "openai-codex",
@@ -125,9 +130,21 @@ func TestSnapshotHarnessResumeIdentity(t *testing.T) {
 		},
 		{
 			name:      "rejects legacy snapshot without harness identity",
-			manifest:  &snapshotManifest{AgentSessionID: "agent-session-1"},
+			manifest:  &snapshotManifest{AgentSessionID: "agent-session-1", Artifacts: homeArtifact},
 			sessionID: "agent-session-1",
 			agentType: "openai-codex",
+			wantErr:   true,
+		},
+		{
+			name: "rejects transcript-only manifest even with stale harness identity",
+			manifest: &snapshotManifest{
+				AgentSessionID: "agent-session-1",
+				AcpSessionID:   "01M03VPM6YHABMEGH4ZHA853DA",
+				AgentType:      "claude-code",
+				Artifacts:      map[string]snapshotArtifact{},
+			},
+			sessionID: "agent-session-1",
+			agentType: "claude-code",
 			wantErr:   true,
 		},
 		{
@@ -136,6 +153,7 @@ func TestSnapshotHarnessResumeIdentity(t *testing.T) {
 				AgentSessionID: "agent-session-other",
 				AcpSessionID:   "acp-session-1",
 				AgentType:      "openai-codex",
+				Artifacts:      homeArtifact,
 			},
 			sessionID:     "agent-session-1",
 			agentType:     "openai-codex",
@@ -148,6 +166,7 @@ func TestSnapshotHarnessResumeIdentity(t *testing.T) {
 				AgentSessionID: "agent-session-1",
 				AcpSessionID:   "acp-session-1",
 				AgentType:      "claude-code",
+				Artifacts:      homeArtifact,
 			},
 			sessionID: "agent-session-1",
 			agentType: "openai-codex",
@@ -191,11 +210,11 @@ func TestPrepareFreshSessionAfterDegradedRestoreClearsStrictRestoreState(t *test
 	hostKey := workspaceID + ":" + sessionID
 	s.sessionHosts[hostKey] = acp.NewSessionHost(acp.SessionHostConfig{
 		GatewayConfig: acp.GatewayConfig{
-			WorkspaceID:            workspaceID,
-			SessionID:              session.ID,
-			PreviousAcpSessionID:   "acp-session-old",
-			PreviousAgentType:      "claude-code",
-			SessionManager:         s.agentSessions,
+			WorkspaceID:          workspaceID,
+			SessionID:            session.ID,
+			PreviousAcpSessionID: "acp-session-old",
+			PreviousAgentType:    "claude-code",
+			SessionManager:       s.agentSessions,
 		},
 	})
 
@@ -249,6 +268,33 @@ func TestBuildContainerHomeArchiveList(t *testing.T) {
 	}
 	if skipped[0].Path != "~/large.bin" || skipped[1].Path != "~/linked" {
 		t.Fatalf("skipped = %#v", skipped)
+	}
+}
+
+func TestBuildContainerHomeArchiveListPrioritizesHarnessStateUnderBudgetPressure(t *testing.T) {
+	inventory := []byte(strings.Join([]string{
+		"f", "18", "600", "ordinary-first.log",
+		"d", "0", "700", ".claude",
+		"f", "7", "600", ".claude/session.jsonl",
+		"d", "0", "700", ".codex",
+		"f", "8", "600", ".codex/session.jsonl",
+		"f", "4", "600", "notes.txt",
+		"",
+	}, "\x00"))
+
+	fileList, skipped, selectedBytes, err := buildContainerHomeArchiveList(inventory, 50, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := ".claude\x00.claude/session.jsonl\x00.codex\x00.codex/session.jsonl\x00notes.txt\x00"
+	if string(fileList) != want {
+		t.Fatalf("archive list = %q, want %q", fileList, want)
+	}
+	if selectedBytes != 19 {
+		t.Fatalf("selected bytes = %d, want 19", selectedBytes)
+	}
+	if len(skipped) != 1 || skipped[0].Path != "~/ordinary-first.log" || skipped[0].Reason != "snapshot budget exhausted" {
+		t.Fatalf("skipped = %#v, want ordinary file skipped after harness selection", skipped)
 	}
 }
 
@@ -521,8 +567,9 @@ func TestUploadSessionSnapshotArtifactUsesAuthorizedDirectURL(t *testing.T) {
 				t.Errorf("authorization header = %q", got)
 			}
 			var payload struct {
-				SizeBytes int64  `json:"sizeBytes"`
-				SHA256    string `json:"sha256"`
+				SizeBytes      int64  `json:"sizeBytes"`
+				SHA256         string `json:"sha256"`
+				ChecksumHeader bool   `json:"checksumHeader"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				t.Error(err)
@@ -530,10 +577,16 @@ func TestUploadSessionSnapshotArtifactUsesAuthorizedDirectURL(t *testing.T) {
 			if payload.SizeBytes != int64(len(body)) || payload.SHA256 != expectedSHA {
 				t.Errorf("authorization payload = %#v", payload)
 			}
+			if !payload.ChecksumHeader {
+				t.Errorf("checksumHeader = false, want true")
+			}
 			writeJSON(w, http.StatusOK, map[string]string{"uploadUrl": server.URL + "/r2"})
 		case "/r2":
 			if got := r.Header.Get("Authorization"); got != "" {
 				t.Errorf("direct R2 request leaked authorization header %q", got)
+			}
+			if got := r.Header.Get("x-amz-checksum-sha256"); got != base64.StdEncoding.EncodeToString(expectedSum[:]) {
+				t.Errorf("x-amz-checksum-sha256 = %q", got)
 			}
 			if r.ContentLength != int64(len(body)) {
 				t.Errorf("content length = %d, want %d", r.ContentLength, len(body))
@@ -643,14 +696,18 @@ func TestSessionSnapshotUploadRelayAuthorizesBeforeStreamingWithoutBearer(t *tes
 				t.Errorf("relay authorization header = %q", got)
 			}
 			var payload struct {
-				SizeBytes int64  `json:"sizeBytes"`
-				SHA256    string `json:"sha256"`
+				SizeBytes      int64  `json:"sizeBytes"`
+				SHA256         string `json:"sha256"`
+				ChecksumHeader bool   `json:"checksumHeader"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				t.Error(err)
 			}
 			if payload.SizeBytes != int64(len(body)) || payload.SHA256 != expectedSHA {
 				t.Errorf("authorization payload = %#v", payload)
+			}
+			if !payload.ChecksumHeader {
+				t.Errorf("checksumHeader = false, want true")
 			}
 			writeJSON(w, http.StatusOK, map[string]string{"uploadUrl": server.URL + "/r2"})
 		case "/r2":
@@ -659,6 +716,9 @@ func TestSessionSnapshotUploadRelayAuthorizesBeforeStreamingWithoutBearer(t *tes
 			}
 			if got := r.Header.Get("X-SAM-Relay-Authorization"); got != "" {
 				t.Errorf("relay leaked node authorization header %q", got)
+			}
+			if got := r.Header.Get("x-amz-checksum-sha256"); got != base64.StdEncoding.EncodeToString(expectedSum[:]) {
+				t.Errorf("x-amz-checksum-sha256 = %q", got)
 			}
 			got, err := io.ReadAll(r.Body)
 			if err != nil {

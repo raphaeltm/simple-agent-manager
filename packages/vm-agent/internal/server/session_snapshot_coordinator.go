@@ -64,6 +64,21 @@ func (s *Server) startBackgroundSessionSnapshot(input *sessionSnapshotHandlerInp
 		result, err := s.runSessionSnapshot(ctx, input)
 		if err != nil {
 			slog.Warn("Background session snapshot failed", "chatSessionId", input.chatSessionID, "workspaceId", input.workspaceID, "error", err)
+			if generation := snapshotCaptureErrorGeneration(err); generation != "" {
+				reportCtx, reportCancel := context.WithTimeout(context.Background(), s.sessionSnapshotProgressReportTimeout())
+				if reportErr := s.reportSnapshotFailure(reportCtx, input.workspaceID, input.chatSessionID, generation, err.Error(), input.callbackToken); reportErr != nil {
+					slog.Warn("Session snapshot failure report failed", "chatSessionId", input.chatSessionID, "workspaceId", input.workspaceID, "generation", generation, "error", reportErr)
+				}
+				reportCancel()
+			}
+			if s.errorReporter != nil {
+				s.errorReporter.ReportError(err, "session_snapshot.background_capture", input.workspaceID, map[string]interface{}{
+					"chatSessionId": input.chatSessionID,
+					"sessionId":     input.sessionID,
+					"runtime":       input.runtimeName,
+					"agentType":     input.agentType,
+				})
+			}
 			return
 		}
 		slog.Info("Background session snapshot completed", "chatSessionId", input.chatSessionID, "workspaceId", input.workspaceID, "result", result)

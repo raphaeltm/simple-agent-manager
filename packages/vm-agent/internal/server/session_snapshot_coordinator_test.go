@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
@@ -165,5 +166,65 @@ func TestFinalSessionSnapshotWaitsForBackgroundCaptureThenRunsFreshCapture(t *te
 	}
 	if got := calls.Load(); got != 2 {
 		t.Fatalf("snapshot calls = %d, want 2", got)
+	}
+}
+
+func TestBackgroundSessionSnapshotReportsGenerationScopedFailure(t *testing.T) {
+	reported := make(chan map[string]string, 1)
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/workspaces/workspace-1/session-snapshot/failure" {
+			t.Fatalf("path = %q, want failure callback", r.URL.Path)
+		}
+		if got := r.Header.Get("Authorization"); got != "Bearer callback-token" {
+			t.Fatalf("authorization = %q, want callback bearer", got)
+		}
+		var payload map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatal(err)
+		}
+		reported <- payload
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer controlPlane.Close()
+	finished := make(chan struct{}, 1)
+	s := &Server{
+		config: &config.Config{
+			ControlPlaneURL:                      controlPlane.URL,
+			SessionSnapshotOperationTimeout:      time.Second,
+			SessionSnapshotProgressReportTimeout: time.Second,
+		},
+		sessionSnapshotRunner: func(context.Context, *sessionSnapshotHandlerInput) (map[string]interface{}, error) {
+			defer func() { finished <- struct{}{} }()
+			return nil, &sessionSnapshotCaptureError{
+				generation: "generation-1",
+				err:        errors.New("snapshot control plane returned HTTP 400: checksum mismatch"),
+			}
+		},
+	}
+	input := &sessionSnapshotHandlerInput{
+		workspaceID:   "workspace-1",
+		sessionID:     "agent-1",
+		chatSessionID: "chat-1",
+		callbackToken: "callback-token",
+	}
+
+	if !s.startBackgroundSessionSnapshot(input) {
+		t.Fatal("background snapshot was not accepted")
+	}
+	select {
+	case <-finished:
+	case <-time.After(time.Second):
+		t.Fatal("background snapshot did not finish")
+	}
+	select {
+	case payload := <-reported:
+		if payload["chatSessionId"] != "chat-1" || payload["generation"] != "generation-1" {
+			t.Fatalf("payload identity = %#v, want chat/generation", payload)
+		}
+		if payload["error"] != "snapshot control plane returned HTTP 400: checksum mismatch" {
+			t.Fatalf("payload error = %q", payload["error"])
+		}
+	case <-time.After(time.Second):
+		t.Fatal("failure callback was not sent")
 	}
 }

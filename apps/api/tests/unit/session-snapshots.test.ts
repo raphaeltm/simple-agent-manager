@@ -20,6 +20,8 @@ import {
   getSessionSnapshotConfig,
   isSessionSnapshotSleepReleasable,
   prepareSessionSnapshot,
+  recordSessionSnapshotArtifactAuthorization,
+  recordSessionSnapshotCaptureFailure,
   recordSessionSnapshotProgress,
   verifySessionSnapshotArtifactsForSleep,
 } from '../../src/services/session-snapshots';
@@ -172,6 +174,59 @@ describe('session snapshot sleep artifact verification', () => {
     await expect(verifySessionSnapshotArtifactsForSleep(testEnv, snapshot)).resolves.toBe(true);
     await expect(
       verifySessionSnapshotArtifactsForSleep(testEnv, { ...snapshot, wipSha256: '0'.repeat(64) })
+    ).resolves.toBe(false);
+  });
+
+  it('allows completed direct-upload artifacts whose R2 HEAD has no stored checksum', async () => {
+    const testEnv = env({
+      SESSION_SNAPSHOT_R2_PREFIX: 'snapshots',
+      R2: {
+        head: async (key: string) =>
+          key.endsWith('/manifest.json')
+            ? { size: 120, checksums: {} }
+            : key.endsWith('/home.tar')
+              ? { size: 42, checksums: {} }
+              : null,
+      } as unknown as Env['R2'],
+    });
+    const snapshot = {
+      workspaceId: 'workspace-1',
+      chatSessionId: 'chat-1',
+      status: 'available',
+      degradation: 'none',
+      snapshotGeneration: generation,
+      manifestR2Key: buildSessionSnapshotR2Key(testEnv, 'chat-1', generation, 'manifest'),
+      manifestJson: JSON.stringify({
+        version: 1,
+        chatSessionId: 'chat-1',
+        workspaceId: 'workspace-1',
+        status: 'available',
+        degradation: 'none',
+        skipped: [],
+        artifacts: { home: { sizeBytes: 42, sha256: sha } },
+        createdAt: '2026-08-15T00:00:00.000Z',
+      }),
+      homeR2Key: buildSessionSnapshotR2Key(testEnv, 'chat-1', generation, 'home'),
+      homeSha256: sha,
+      wipR2Key: null,
+      wipSha256: null,
+    } as any;
+
+    await expect(verifySessionSnapshotArtifactsForSleep(testEnv, snapshot)).resolves.toBe(true);
+    await expect(
+      verifySessionSnapshotArtifactsForSleep(testEnv, {
+        ...snapshot,
+        manifestJson: JSON.stringify({
+          version: 1,
+          chatSessionId: 'chat-1',
+          workspaceId: 'workspace-1',
+          status: 'available',
+          degradation: 'none',
+          skipped: [],
+          artifacts: { home: { sizeBytes: 41, sha256: sha } },
+          createdAt: '2026-08-15T00:00:00.000Z',
+        }),
+      })
     ).resolves.toBe(false);
   });
 });
@@ -357,15 +412,126 @@ describe('session snapshot progress persistence', () => {
       expect(JSON.parse(row.manifest_json)).toMatchObject({
         status: 'degraded',
         degradation: 'transcript-only',
-        acpSessionId: 'acp-1',
-        agentType: 'openai-codex',
         artifacts: {},
       });
+      expect(JSON.parse(row.manifest_json)).not.toHaveProperty('acpSessionId');
+      expect(JSON.parse(row.manifest_json)).not.toHaveProperty('agentType');
       expect(r2.put).toHaveBeenCalledWith(
         'snapshots/chat-1/capture-1/manifest.json',
         expect.stringContaining('Workspace snapshot made no progress'),
         expect.objectContaining({ httpMetadata: { contentType: 'application/json' } })
       );
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('records direct-upload authorization only for the active capture generation', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      const sha = '4ea140588150773ce3aace786aeef7f4049ce100fa649c94fbbddb960f1da942';
+      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      const r2 = { put: vi.fn(), delete: vi.fn(async () => undefined), head: vi.fn() };
+      const testEnv = env({
+        DATABASE: createSqliteD1(sqlite),
+        R2: r2 as unknown as Env['R2'],
+        SESSION_SNAPSHOT_R2_PREFIX: 'snapshots',
+      });
+      const db = drizzle(testEnv.DATABASE, { schema });
+      const prepared = await prepareSessionSnapshot(db, testEnv, {
+        workspaceId: 'workspace-1',
+        nodeId: 'node-1',
+        projectId: 'project-1',
+        userId: 'user-1',
+        chatSessionId: 'chat-1',
+        agentSessionId: 'agent-1',
+        runtime: 'vm',
+      });
+
+      await expect(
+        recordSessionSnapshotArtifactAuthorization(db, {
+          chatSessionId: 'chat-1',
+          generation: 'stale-generation',
+          artifact: 'home',
+          sizeBytes: 4,
+          sha256: sha,
+        })
+      ).resolves.toBe(false);
+      await expect(
+        recordSessionSnapshotArtifactAuthorization(db, {
+          chatSessionId: 'chat-1',
+          generation: prepared.generation,
+          artifact: 'home',
+          sizeBytes: 4,
+          sha256: sha.toUpperCase(),
+        })
+      ).resolves.toBe(true);
+
+      expect(
+        sqlite
+          .prepare(
+            `SELECT authorized_home_bytes, authorized_home_sha256,
+                    authorized_wip_bytes, authorized_wip_sha256
+             FROM session_snapshots WHERE chat_session_id = 'chat-1'`
+          )
+          .get()
+      ).toEqual({
+        authorized_home_bytes: 4,
+        authorized_home_sha256: sha,
+        authorized_wip_bytes: null,
+        authorized_wip_sha256: null,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('records capture failure only for the active capture generation', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      sqlite
+        .prepare(
+          `INSERT INTO session_snapshots
+             (id, workspace_id, user_id, chat_session_id, agent_session_id, runtime, status,
+              degradation, manifest_r2_key, snapshot_generation, capture_generation, expires_at,
+              updated_at)
+           VALUES ('snapshot-1', 'workspace-1', 'user-1', 'chat-1', 'agent-1', 'vm',
+              'available', 'none', 'snapshots/chat-1/previous/manifest.json', 'previous',
+              'capture-1', '2026-08-20T00:00:00.000Z', '2026-08-15T00:00:00.000Z')`
+        )
+        .run();
+      const testEnv = env({
+        DATABASE: createSqliteD1(sqlite),
+        SESSION_LIFECYCLE_ERROR_MAX_LENGTH: '24',
+      });
+      const db = drizzle(testEnv.DATABASE, { schema });
+
+      await expect(
+        recordSessionSnapshotCaptureFailure(db, testEnv, {
+          chatSessionId: 'chat-1',
+          generation: 'stale-capture',
+          error: 'this should not be recorded',
+        })
+      ).resolves.toBe(false);
+
+      await expect(
+        recordSessionSnapshotCaptureFailure(db, testEnv, {
+          chatSessionId: 'chat-1',
+          generation: 'capture-1',
+          error: 'real capture failure with sensitive tail',
+          now: new Date('2026-08-15T00:01:00.000Z'),
+        })
+      ).resolves.toBe(true);
+
+      expect(
+        sqlite
+          .prepare(`SELECT capture_error, updated_at FROM session_snapshots WHERE id = 'snapshot-1'`)
+          .get()
+      ).toEqual({
+        capture_error: 'real capture failure wit',
+        updated_at: '2026-08-15T00:01:00.000Z',
+      });
     } finally {
       sqlite.close();
     }
@@ -395,16 +561,12 @@ describe('session snapshot recovery lifecycle', () => {
       const db = drizzle(testEnv.DATABASE, { schema });
 
       await expect(
-        claimSessionSnapshotRecovery(
-          db,
-          testEnv,
-          {
-            chatSessionId: 'chat-1',
-            userId: 'user-1',
-            taskId: 'wake-task-1',
-            now: new Date('2026-08-15T00:05:00.000Z'),
-          }
-        )
+        claimSessionSnapshotRecovery(db, testEnv, {
+          chatSessionId: 'chat-1',
+          userId: 'user-1',
+          taskId: 'wake-task-1',
+          now: new Date('2026-08-15T00:05:00.000Z'),
+        })
       ).resolves.toEqual({ status: 'claimed', taskId: 'wake-task-1' });
 
       expect(

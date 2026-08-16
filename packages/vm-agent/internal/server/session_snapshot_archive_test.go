@@ -40,6 +40,12 @@ func TestShouldExcludeHomePath(t *testing.T) {
 		".local/bin/tool", ".local/lib/python/site.py", ".codex/tmp/tool",
 		".claude/debug/log", ".oh-my-zsh/theme", ".vscode-server/bin/code",
 		"node_modules/pkg/index.js", ".docker/config.json",
+		"go/pkg/mod/example.com/module/file.go",
+		".local/share/pnpm/store/v10/index",
+		".nvm/versions/node/v24/bin/node",
+		".bun/install/cache/pkg",
+		".gradle/caches/modules-2/files-2.1/lib",
+		".m2/repository/group/artifact/pom.xml",
 		".config/opencode/node_modules/.bin/node-which",
 	}
 	for _, p := range excluded {
@@ -284,7 +290,7 @@ func TestWIPCaptureFiltersProjectLocalCodexCredentialsWithoutMutatingRepository(
 				// the host test repository without requiring a Docker daemon.
 				s := &Server{config: &config.Config{Role: config.RoleStandalone}}
 				target := &containerSnapshotTarget{workDir: repo}
-				return s.createContainerWIPBundle(ctx, target, 1<<20, 1<<30)
+				return s.createContainerWIPBundle(ctx, target, 1<<20, 1<<30, nil)
 			},
 		},
 	}

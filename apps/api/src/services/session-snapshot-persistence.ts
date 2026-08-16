@@ -8,6 +8,7 @@ import {
   type CompleteSessionSnapshotInput,
   getSessionSnapshotConfig,
   sessionLifecycleError,
+  type SessionSnapshotArtifact,
   type SessionSnapshotManifest,
 } from './session-snapshot-artifacts';
 import { scheduleSessionSnapshotSleep } from './session-snapshot-sleep-lifecycle';
@@ -100,6 +101,11 @@ export async function completeSessionSnapshot(
       manifestR2Key,
       snapshotGeneration: captureGeneration,
       captureGeneration: null,
+      captureError: null,
+      authorizedHomeBytes: null,
+      authorizedHomeSha256: null,
+      authorizedWipBytes: null,
+      authorizedWipSha256: null,
       homeSha256: input.artifactSha256?.homeSha256 ?? null,
       wipSha256: input.artifactSha256?.wipSha256 ?? null,
       baseCommit: input.baseCommit,
@@ -130,6 +136,66 @@ export async function completeSessionSnapshot(
       runtime: input.runtime,
     });
   }
+}
+
+export async function recordSessionSnapshotArtifactAuthorization(
+  db: Db,
+  input: {
+    chatSessionId: string;
+    generation: string;
+    artifact: Exclude<SessionSnapshotArtifact, 'manifest'>;
+    sizeBytes: number;
+    sha256: string;
+  }
+): Promise<boolean> {
+  const values =
+    input.artifact === 'home'
+      ? {
+          authorizedHomeBytes: input.sizeBytes,
+          authorizedHomeSha256: input.sha256.toLowerCase(),
+        }
+      : {
+          authorizedWipBytes: input.sizeBytes,
+          authorizedWipSha256: input.sha256.toLowerCase(),
+        };
+  const result = await db
+    .update(schema.sessionSnapshots)
+    .set({
+      ...values,
+      updatedAt: new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId),
+        eq(schema.sessionSnapshots.captureGeneration, input.generation)
+      )
+    );
+  return (result.meta.changes ?? 0) > 0;
+}
+
+export async function recordSessionSnapshotCaptureFailure(
+  db: Db,
+  env: Env,
+  input: {
+    chatSessionId: string;
+    generation: string;
+    error: string;
+    now?: Date;
+  }
+): Promise<boolean> {
+  const result = await db
+    .update(schema.sessionSnapshots)
+    .set({
+      captureError: sessionLifecycleError(env, input.error),
+      updatedAt: (input.now ?? new Date()).toISOString(),
+    })
+    .where(
+      and(
+        eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId),
+        eq(schema.sessionSnapshots.captureGeneration, input.generation)
+      )
+    );
+  return (result.meta.changes ?? 0) > 0;
 }
 
 export async function recordSessionSnapshotProgress(
@@ -193,12 +259,6 @@ export async function completeActiveSessionSnapshotAsDegraded(
     artifacts: {},
     createdAt,
   };
-  if (input.acpSessionId) {
-    manifest.acpSessionId = input.acpSessionId;
-  }
-  if (input.agentType) {
-    manifest.agentType = input.agentType;
-  }
 
   await completeSessionSnapshot(db, env, {
     workspaceId: input.workspaceId,
