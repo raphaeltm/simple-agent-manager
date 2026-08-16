@@ -121,6 +121,30 @@ passes the same controls to child sessions or subagents. A runtime discriminator
 such as an empty container ID must have a regression test that would fail if an
 early return were moved back above the generated-config writer.
 
+### Runtime Exit and Diagnostic Correlation Boundaries
+
+Task lifecycle and diagnostic ingestion are also cross-service contracts. When a
+runtime-owned exit can end an agent prompt or session, tests MUST prove the real
+runtime path emits exactly one terminal callback and that the callback reaches
+the control-plane task transition. Clearing local prompt state alone is not a
+terminal outcome.
+
+Intentional lifecycle writers such as user, parent-agent, or orchestrator stops
+MUST use the canonical cancellation status, write the corresponding status
+event, synchronize linked trigger executions, and run terminal cleanup. Test the
+compare-and-set behavior so an intentional stop cannot overwrite a concurrent
+fatal failure and hide the original cause.
+
+When observability producers cannot supply task or session identifiers, start
+the contract test with that least-correlated producer payload. Exercise the real
+ingestion and enrichment boundary, then prove that:
+
+- one authoritative candidate is enriched with its task and session identifiers;
+- missing, cross-node, cross-session, stale, and ambiguous candidates remain
+  uncorrelated;
+- retries may add previously missing correlation but cannot rebind an incident
+  to a different task or session.
+
 ### Why This Rule Exists
 
 The R2 file upload feature shipped with two cross-boundary contract mismatches:

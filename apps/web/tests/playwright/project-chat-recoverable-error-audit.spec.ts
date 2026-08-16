@@ -103,7 +103,22 @@ const MOCK_MESSAGES = [
   },
 ];
 
-async function setupApiMocks(page: Page) {
+async function setupApiMocks(page: Page, task = MOCK_TASK) {
+  const isTerminalLifecycle =
+    task.status === 'failed' && task.executionStep === 'awaiting_human_input';
+  const session = {
+    ...MOCK_SESSION,
+    ...(isTerminalLifecycle
+      ? {
+          status: 'stopped',
+          endedAt: NOW - 20_000,
+          isIdle: false,
+          isTerminated: true,
+        }
+      : {}),
+    taskId: task.id,
+    task,
+  };
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -112,7 +127,8 @@ async function setupApiMocks(page: Page) {
       route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
     if (path.includes('/api/auth/')) return respond(200, MOCK_USER);
-    if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+    if (path.startsWith('/api/notifications'))
+      return respond(200, { notifications: [], unreadCount: 0 });
     if (path.startsWith('/api/credentials')) return respond(200, []);
     if (path.startsWith('/api/provider-catalog')) return respond(200, { catalogs: [] });
     if (path === '/api/trial/status') return respond(200, { available: false });
@@ -123,7 +139,7 @@ async function setupApiMocks(page: Page) {
       return respond(200, {
         id: 'workspace-recoverable-1',
         projectId: MOCK_PROJECT.id,
-        status: 'running',
+        status: isTerminalLifecycle ? 'stopped' : 'running',
         url: 'https://ws-recoverable.example.test',
         errorMessage: null,
       });
@@ -134,19 +150,20 @@ async function setupApiMocks(page: Page) {
       const subPath = projectMatch[2] || '';
 
       if (subPath === '/sessions') {
-        return respond(200, { sessions: [MOCK_SESSION], total: 1, hasMore: false });
+        return respond(200, { sessions: [session], total: 1, hasMore: false });
       }
 
       if (subPath === `/sessions/${MOCK_SESSION.id}`) {
-        return respond(200, { session: MOCK_SESSION, messages: MOCK_MESSAGES, hasMore: false });
+        return respond(200, { session, messages: MOCK_MESSAGES, hasMore: false });
       }
 
       if (subPath.match(/\/sessions\/[^/]+\/messages/)) {
         return respond(200, { messages: MOCK_MESSAGES, hasMore: false });
       }
 
-      if (subPath === '/tasks') return respond(200, { tasks: [MOCK_TASK], total: 1, nextCursor: null });
-      if (subPath === `/tasks/${MOCK_TASK.id}`) return respond(200, MOCK_TASK);
+      if (subPath === '/tasks') return respond(200, { tasks: [task], total: 1, nextCursor: null });
+      if (subPath === `/tasks/${task.id}/events`) return respond(200, { events: [] });
+      if (subPath === `/tasks/${task.id}`) return respond(200, task);
       if (subPath === '/agent-profiles') return respond(200, { items: [] });
       if (subPath.match(/\/commands/)) return respond(200, { commands: [] });
       if (subPath === '/activity') return respond(200, { events: [], total: 0 });
@@ -154,7 +171,8 @@ async function setupApiMocks(page: Page) {
       return respond(200, MOCK_PROJECT);
     }
 
-    if (path === '/api/projects') return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
+    if (path === '/api/projects')
+      return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
 
     return respond(200, {});
   });
@@ -162,29 +180,34 @@ async function setupApiMocks(page: Page) {
 
 async function screenshot(page: Page, name: string) {
   await page.waitForTimeout(600);
+  const viewport = page.viewportSize();
+  const suffix = viewport ? `${viewport.width}x${viewport.height}` : 'unknown';
   await page.screenshot({
-    path: `../../.codex/tmp/playwright-screenshots/${name}.png`,
+    path: `../../.codex/tmp/playwright-screenshots/${name}-${suffix}.png`,
     fullPage: true,
   });
 }
 
 async function assertNoHorizontalOverflow(page: Page) {
   const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth,
+    () => document.documentElement.scrollWidth > window.innerWidth
   );
   expect(overflow).toBe(false);
 }
 
 test.describe('Project chat recoverable error banner', () => {
-  test('renders recoverable error guidance and keeps the composer enabled', async ({ page }, testInfo) => {
+  test('renders recoverable error guidance and keeps the composer enabled', async ({
+    page,
+  }, testInfo) => {
     await setupApiMocks(page);
     await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
     await page.waitForTimeout(1200);
 
-    await expect(page.getByText('Agent error:')).toBeVisible();
-    await expect(page.getByText('You can send another message to retry')).toBeVisible();
+    const recoverableCard = page.locator('[data-failure-kind="diagnosable"]');
+    await expect(recoverableCard.getByText('Cloud capacity')).toBeVisible();
+    await expect(recoverableCard.getByText('Recoverable')).toBeVisible();
 
-    const composer = page.getByPlaceholder('Send a message to resume the agent...');
+    const composer = page.getByRole('combobox');
     await expect(composer).toBeVisible();
     await expect(composer).toBeEnabled();
 
@@ -193,7 +216,52 @@ test.describe('Project chat recoverable error banner', () => {
       page,
       testInfo.project.name.includes('Desktop')
         ? 'project-chat-recoverable-error-desktop'
-        : 'project-chat-recoverable-error-mobile',
+        : 'project-chat-recoverable-error-mobile'
+    );
+  });
+
+  test('renders input expiry as a neutral lifecycle outcome in the real chat shell', async ({
+    page,
+  }, testInfo) => {
+    await setupApiMocks(page, {
+      ...MOCK_TASK,
+      status: 'failed',
+      executionStep: 'awaiting_human_input',
+      errorMessage: 'Human input request expired after timeout',
+      taskMode: 'task',
+    });
+    await page.goto('/projects/proj-test-1/chat/session-recoverable-1');
+
+    const lifecycleCard = page.locator('[data-failure-kind="lifecycle"]');
+    await expect(lifecycleCard).toBeVisible();
+    await expect(lifecycleCard.getByText('Input request expired')).toBeVisible();
+    await expect(lifecycleCard.getByText('Retryable')).toHaveCount(0);
+    await expect(lifecycleCard.getByText('Recoverable')).toHaveCount(0);
+    await expect(
+      page.getByLabel('Conversation').getByText('Stopped', { exact: true })
+    ).toBeVisible();
+    if ((page.viewportSize()?.width ?? 0) >= 768) {
+      await expect(page.getByTitle('Stopped')).toBeVisible();
+      await expect(page.getByTitle('Failed')).toHaveCount(0);
+    }
+    await expect(page.getByTestId('failure-card-shell')).not.toHaveClass(/after:bg/);
+    await expect(page.getByTestId('failure-card-shell')).toHaveCSS(
+      'box-shadow',
+      'rgba(0, 0, 0, 0.4) 0px 4px 24px 0px'
+    );
+
+    await lifecycleCard.getByRole('button').click();
+    await expect(page.getByText(/No debugging is needed/i)).toBeVisible();
+    await expect(lifecycleCard.getByText('Reason')).toBeVisible();
+    await expect(lifecycleCard.getByText('Error', { exact: true })).toHaveCount(0);
+    await expect(lifecycleCard.getByText('Copy debug report')).toHaveCount(0);
+    await expect(lifecycleCard.getByText('View in admin errors')).toHaveCount(0);
+    await assertNoHorizontalOverflow(page);
+    await screenshot(
+      page,
+      testInfo.project.name.includes('Desktop')
+        ? 'project-chat-input-expired-desktop'
+        : 'project-chat-input-expired-mobile'
     );
   });
 });

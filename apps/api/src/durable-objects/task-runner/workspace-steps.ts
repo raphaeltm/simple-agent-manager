@@ -3,14 +3,21 @@
  *
  * Handles workspace_creation, workspace_dispatch, workspace_ready, and attachment_transfer steps.
  */
-import { type CredentialSource, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-manager/shared';
+import {
+  type CredentialSource,
+  DEFAULT_MAX_WORKSPACES_PER_NODE,
+  DEFAULT_WORKSPACE_PROFILE,
+} from '@simple-agent-manager/shared';
 
 import { log } from '../../lib/logger';
 import type { DevcontainerCacheCredentials } from '../../services/devcontainer-cache';
-import { getExternalInstallationId } from '../../services/github-installation-ids';
-import { computeBackoffMs, isTransientError } from './helpers';
+import { reserveWorkspacePlacement } from '../../services/workspace-placement';
+import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { ensureSessionLinked } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
+import { ensureBranchExistsOnRemote } from './workspace-branch';
+
+export { ensureBranchExistsOnRemote } from './workspace-branch';
 
 // =========================================================================
 // Step Handlers
@@ -43,7 +50,8 @@ export async function handleWorkspaceCreation(
     // proceeding with delegation and dispatch.
     await ensureWorkspaceBookkeeping(state, rc, state.stepResults.workspaceId);
   } else {
-    await createAndProvisionWorkspace(state, rc);
+    const created = await createAndProvisionWorkspace(state, rc);
+    if (!created) return;
   }
 
   // Transition task: queued → delegated (optimistic locking)
@@ -125,7 +133,7 @@ async function isTaskDelegated(state: TaskRunnerState, rc: TaskRunnerContext): P
 async function createAndProvisionWorkspace(
   state: TaskRunnerState,
   rc: TaskRunnerContext
-): Promise<void> {
+): Promise<boolean> {
   const { ulid } = await import('../../lib/ulid');
   const { resolveUniqueWorkspaceDisplayName } = await import('../../services/workspace-names');
   const { drizzle } = await import('drizzle-orm/d1');
@@ -141,26 +149,51 @@ async function createAndProvisionWorkspace(
   const uniqueName = await resolveUniqueWorkspaceDisplayName(db, nodeId, workspaceName);
   const now = new Date().toISOString();
 
-  await db.insert(schema.workspaces).values({
-    id: workspaceId,
-    nodeId,
-    projectId: state.projectId,
-    userId: state.userId,
-    installationId: state.config.installationId,
-    name: workspaceName,
-    displayName: uniqueName.displayName,
-    normalizedDisplayName: uniqueName.normalizedDisplayName,
-    repository: state.config.repository,
-    branch: state.config.branch,
-    status: 'creating',
-    vmSize: state.config.vmSize,
-    vmLocation: state.config.vmLocation,
-    workspaceProfile: state.config.workspaceProfile ?? DEFAULT_WORKSPACE_PROFILE,
-    devcontainerConfigName: state.config.devcontainerConfigName ?? null,
-    agentProfileHint: state.config.agentProfileHint ?? null,
-    createdAt: now,
-    updatedAt: now,
-  });
+  const maxWorkspaces =
+    state.config.projectScaling?.maxWorkspacesPerNode ??
+    parseEnvInt(rc.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE);
+  const placementReserved = await reserveWorkspacePlacement(
+    rc.env.DATABASE,
+    {
+      id: workspaceId,
+      nodeId,
+      projectId: state.projectId,
+      userId: state.userId,
+      installationId: state.config.installationId,
+      name: workspaceName,
+      displayName: uniqueName.displayName,
+      normalizedDisplayName: uniqueName.normalizedDisplayName,
+      repository: state.config.repository,
+      branch: state.config.branch,
+      vmSize: state.config.vmSize,
+      vmLocation: state.config.vmLocation,
+      workspaceProfile: state.config.workspaceProfile ?? DEFAULT_WORKSPACE_PROFILE,
+      devcontainerConfigName: state.config.devcontainerConfigName ?? null,
+      agentProfileHint: state.config.agentProfileHint ?? null,
+      createdAt: now,
+    },
+    maxWorkspaces
+  );
+
+  if (!placementReserved) {
+    log.warn('task_runner_do.workspace_placement_lost', {
+      taskId: state.taskId,
+      nodeId,
+      maxWorkspaces,
+      preferredNode: state.config.preferredNodeId === nodeId,
+    });
+    if (state.config.preferredNodeId === nodeId) {
+      throw Object.assign(
+        new Error('Specified node lost capacity or became unavailable before workspace creation'),
+        { permanent: true }
+      );
+    }
+    state.stepResults.nodeId = null;
+    state.stepResults.autoProvisioned = false;
+    state.stepResults.provisionedVmSize = null;
+    await rc.advanceToStep(state, 'node_selection');
+    return false;
+  }
 
   await rc.env.DATABASE.prepare(`UPDATE tasks SET workspace_id = ?, updated_at = ? WHERE id = ?`)
     .bind(workspaceId, now, state.taskId)
@@ -171,6 +204,7 @@ async function createAndProvisionWorkspace(
   await startComputeTrackingBestEffort(state, rc, db, workspaceId, nodeId);
   await ensureWorkspaceBookkeeping(state, rc, workspaceId, now);
   await rc.ctx.storage.put('state', state);
+  return true;
 }
 
 async function ensureWorkspaceBookkeeping(
@@ -230,89 +264,6 @@ async function setOutputBranch(
     .run();
 }
 
-/**
- * Ensure the checkout branch exists on the remote before cloning.
- * If the branch differs from the project's default branch and doesn't exist,
- * create it from the default branch via the GitHub API.
- *
- * Best-effort: failures are logged but do not block workspace creation.
- * The clone will fail with a clear error from the VM agent if the branch
- * truly doesn't exist.
- */
-export async function ensureBranchExistsOnRemote(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext
-): Promise<void> {
-  const defaultBranch = state.config.defaultBranch || 'main';
-
-  // If cloning the default branch, no need to check — it always exists
-  if (state.config.branch === defaultBranch) {
-    return;
-  }
-
-  const projectRepo = await loadTaskRunnerProjectRepo(state, rc);
-  if (projectRepo?.repoProvider === 'artifacts') {
-    return;
-  }
-  if (projectRepo?.repoProvider === 'gitlab') {
-    await ensureGitLabBranchExistsOnRemote(state, rc, defaultBranch);
-    return;
-  }
-
-  // Parse owner/repo from repository string (format: "owner/repo")
-  const repoParts = state.config.repository.split('/');
-  if (repoParts.length !== 2 || !repoParts[0] || !repoParts[1]) {
-    log.warn('task_runner_do.ensure_branch.invalid_repository', {
-      taskId: state.taskId,
-      repository: state.config.repository,
-    });
-    return;
-  }
-
-  const [owner, repo] = repoParts;
-
-  try {
-    const installation = await loadTaskRunnerGitHubInstallation(state, rc);
-    if (!installation) {
-      log.warn('task_runner_do.ensure_branch.installation_not_found', {
-        taskId: state.taskId,
-        installationId: state.config.installationId,
-      });
-      return;
-    }
-
-    const externalInstallationId = getExternalInstallationId(installation);
-    const { ensureBranchExists } = await import('../../services/github-app');
-    const created = await ensureBranchExists(
-      externalInstallationId,
-      owner,
-      repo,
-      state.config.branch,
-      defaultBranch,
-      rc.env
-    );
-
-    if (created) {
-      log.info('task_runner_do.ensure_branch.ok', {
-        taskId: state.taskId,
-        branch: state.config.branch,
-      });
-    } else {
-      log.warn('task_runner_do.ensure_branch.failed', {
-        taskId: state.taskId,
-        branch: state.config.branch,
-        defaultBranch,
-      });
-    }
-  } catch (err) {
-    log.warn('task_runner_do.ensure_branch.error', {
-      taskId: state.taskId,
-      branch: state.config.branch,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-}
-
 type TaskRunnerProjectRepo = {
   repoProvider: string | null;
 };
@@ -324,67 +275,6 @@ async function loadTaskRunnerProjectRepo(
   return rc.env.DATABASE.prepare(`SELECT repo_provider AS repoProvider FROM projects WHERE id = ?`)
     .bind(state.projectId)
     .first<TaskRunnerProjectRepo>();
-}
-
-async function ensureGitLabBranchExistsOnRemote(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext,
-  defaultBranch: string
-): Promise<void> {
-  try {
-    const { drizzle } = await import('drizzle-orm/d1');
-    const schema = await import('../../db/schema');
-    const { ensureGitLabBranchExists, getProjectGitLabRepository } =
-      await import('../../services/gitlab');
-    const metadata = await getProjectGitLabRepository(
-      drizzle(rc.env.DATABASE, { schema }),
-      state.projectId
-    );
-    if (!metadata) {
-      log.warn('task_runner_do.ensure_branch.gitlab_metadata_missing', {
-        taskId: state.taskId,
-        projectId: state.projectId,
-      });
-      return;
-    }
-    const created = await ensureGitLabBranchExists({
-      env: rc.env,
-      userId: state.userId,
-      projectId: metadata.gitlabProjectId,
-      branch: state.config.branch,
-      ref: defaultBranch,
-    });
-    if (created) {
-      log.info('task_runner_do.ensure_branch.gitlab_ok', {
-        taskId: state.taskId,
-        branch: state.config.branch,
-      });
-    }
-  } catch (err) {
-    log.warn('task_runner_do.ensure_branch.gitlab_error', {
-      taskId: state.taskId,
-      branch: state.config.branch,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-}
-
-type TaskRunnerGitHubInstallation = {
-  installationId: string;
-  externalInstallationId: string | null;
-};
-
-async function loadTaskRunnerGitHubInstallation(
-  state: TaskRunnerState,
-  rc: TaskRunnerContext
-): Promise<TaskRunnerGitHubInstallation | null> {
-  return rc.env.DATABASE.prepare(
-    `SELECT installation_id AS installationId, external_installation_id AS externalInstallationId
-     FROM github_installations
-     WHERE id = ? AND user_id = ?`
-  )
-    .bind(state.config.installationId, state.userId)
-    .first<TaskRunnerGitHubInstallation>();
 }
 
 async function createWorkspaceOnVmAgent(

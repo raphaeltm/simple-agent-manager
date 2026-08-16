@@ -196,6 +196,33 @@ describe('node resource deletion services', () => {
     expect(destroyVmAgentContainer).not.toHaveBeenCalled();
   });
 
+  it('deleteNodeResourcesStrict requires managed container teardown to succeed', async () => {
+    nodeRows.push({
+      id: 'cf-strict',
+      userId: 'user-1',
+      name: 'strict cf node',
+      status: 'destroying',
+      nodeClass: 'managed',
+      runtime: 'cf-container',
+      providerInstanceId: null,
+      cloudProvider: null,
+      backendDnsRecordId: null,
+      credentialAttributionUserId: null,
+      credentialAttributionSource: 'user',
+      credentialAttributionProjectId: null,
+    });
+
+    await expect(deleteNodeResourcesStrict('cf-strict', 'user-1', ENV)).resolves.toEqual({
+      providerVm: 'no-instance',
+    });
+    expect(destroyVmAgentContainer).toHaveBeenCalledWith(ENV, 'cf-strict');
+
+    destroyVmAgentContainer.mockRejectedValueOnce(new Error('container teardown unavailable'));
+    await expect(deleteNodeResourcesStrict('cf-strict', 'user-1', ENV)).rejects.toThrow(
+      /container teardown unavailable/
+    );
+  });
+
   it('deleteNodeResourcesStrict is a no-op for a user-owned node (nothing to delete, no throw)', async () => {
     nodeRows.push(
       userOwnedNode({ providerInstanceId: 'srv-should-not-touch', cloudProvider: 'hetzner' })

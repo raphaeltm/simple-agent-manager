@@ -249,6 +249,12 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 	cfg := s.acpConfig
 	cfg.WorkspaceID = workspaceID
 	cfg.SessionID = sessionID
+	// Activity is project-scoped. Never inherit the boot workspace's project on
+	// a shared node; bind every SessionHost to its owning workspace runtime.
+	cfg.ProjectID = ""
+	if runtime != nil {
+		cfg.ProjectID = strings.TrimSpace(runtime.ProjectID)
+	}
 	cfg.OnPromptComplete = nil
 
 	cfg.GitTokenFetcher = s.gitHubTokenFetcherForWorkspace(workspaceID)
@@ -305,6 +311,12 @@ func (s *Server) getOrCreateSessionHost(hostKey, workspaceID, sessionID string, 
 			TaskMode:    taskMode,
 		}
 		hasTaskCtx = true
+	}
+	if cfg.ProjectID == "" && hasTaskCtx {
+		cfg.ProjectID = strings.TrimSpace(taskCtx.ProjectID)
+	}
+	if cfg.ProjectID == "" && s.config != nil && workspaceID == strings.TrimSpace(s.config.WorkspaceID) {
+		cfg.ProjectID = strings.TrimSpace(s.config.ProjectID)
 	}
 	if hasTaskCtx && s.config != nil && taskCtx.ProjectID != "" && taskCtx.TaskID != "" && taskCtx.WorkspaceID != "" {
 		cfg.OnPromptComplete = s.makeTaskCompletionCallback(

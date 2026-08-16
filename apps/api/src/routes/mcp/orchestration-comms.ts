@@ -15,6 +15,8 @@ import { ulid } from '../../lib/ulid';
 import { sendPromptToAgentOnNode, stopAgentSessionOnNode } from '../../services/node-agent';
 import { persistOrchestrationPrompt } from '../../services/orchestration-prompts';
 import * as projectDataService from '../../services/project-data';
+import { cleanupTerminalTaskResources } from '../../services/task-terminal-cleanup';
+import { syncTriggerExecutionStatus } from '../../services/trigger-execution-sync';
 import {
   ACTIVE_STATUSES,
   getMcpLimits,
@@ -55,9 +57,8 @@ async function resolveChildAgent(
   requestId: string | number | null,
   childTaskId: string,
   tokenData: McpTokenData,
-  db: DrizzleD1Database<typeof schema>,
+  db: DrizzleD1Database<typeof schema>
 ): Promise<JsonRpcResponse | ResolvedChild> {
-
   // 1. Validate caller is a task agent
   if (!tokenData.taskId) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'Only task agents can use orchestration tools');
@@ -73,12 +74,7 @@ async function resolveChildAgent(
       parentTaskId: schema.tasks.parentTaskId,
     })
     .from(schema.tasks)
-    .where(
-      and(
-        eq(schema.tasks.id, childTaskId),
-        eq(schema.tasks.projectId, tokenData.projectId),
-      ),
-    )
+    .where(and(eq(schema.tasks.id, childTaskId), eq(schema.tasks.projectId, tokenData.projectId)))
     .limit(1);
 
   if (!childTask) {
@@ -96,7 +92,7 @@ async function resolveChildAgent(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Only the direct parent task can communicate with a child task',
+      'Only the direct parent task can communicate with a child task'
     );
   }
 
@@ -105,7 +101,7 @@ async function resolveChildAgent(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      `Child task is in '${childTask.status}' status — only active tasks can receive messages`,
+      `Child task is in '${childTask.status}' status — only active tasks can receive messages`
     );
   }
 
@@ -115,7 +111,7 @@ async function resolveChildAgent(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      'Child task has no workspace assigned yet (it may still be provisioning)',
+      'Child task has no workspace assigned yet (it may still be provisioning)'
     );
   }
 
@@ -147,7 +143,7 @@ async function resolveChildAgent(
     return jsonRpcError(
       requestId,
       INVALID_PARAMS,
-      `Child workspace node is not running (status: ${workspace.nodeStatus ?? 'unknown'})`,
+      `Child workspace node is not running (status: ${workspace.nodeStatus ?? 'unknown'})`
     );
   }
 
@@ -158,8 +154,8 @@ async function resolveChildAgent(
     .where(
       and(
         eq(schema.agentSessions.workspaceId, workspace.id),
-        eq(schema.agentSessions.status, 'running'),
-      ),
+        eq(schema.agentSessions.status, 'running')
+      )
     )
     .orderBy(desc(schema.agentSessions.createdAt))
     .limit(1);
@@ -198,7 +194,7 @@ export async function handleSendMessageToSubtask(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const limits = getMcpLimits(env);
 
@@ -286,7 +282,7 @@ export async function handleSendMessageToSubtask(
       message,
       env,
       tokenData.userId,
-      messageId,
+      messageId
     );
 
     log.info('mcp.send_message_to_subtask.delivered', {
@@ -299,10 +295,12 @@ export async function handleSendMessageToSubtask(
     });
 
     return jsonRpcSuccess(requestId, {
-      content: [{
-        type: 'text',
-        text: JSON.stringify({ delivered: true }),
-      }],
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({ delivered: true }),
+        },
+      ],
     });
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
@@ -325,21 +323,32 @@ export async function handleSendMessageToSubtask(
       const chatSessionId = ws?.chatSessionId;
       if (chatSessionId) {
         try {
-          const msg = await projectDataService.enqueueMailboxMessage(env, resolution.task.projectId, {
-            targetSessionId: chatSessionId,
-            sourceTaskId: tokenData.taskId ?? null,
-            senderType: 'agent',
-            senderId: tokenData.workspaceId,
-            messageClass: 'deliver',
-            content: message,
-            metadata: null,
-          });
+          const msg = await projectDataService.enqueueMailboxMessage(
+            env,
+            resolution.task.projectId,
+            {
+              targetSessionId: chatSessionId,
+              sourceTaskId: tokenData.taskId ?? null,
+              senderType: 'agent',
+              senderId: tokenData.workspaceId,
+              messageClass: 'deliver',
+              content: message,
+              metadata: null,
+            }
+          );
 
           return jsonRpcSuccess(requestId, {
-            content: [{
-              type: 'text',
-              text: JSON.stringify({ delivered: false, queued: true, messageId: msg.id, reason: 'agent_busy' }),
-            }],
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify({
+                  delivered: false,
+                  queued: true,
+                  messageId: msg.id,
+                  reason: 'agent_busy',
+                }),
+              },
+            ],
           });
         } catch (queueErr) {
           log.warn('mcp.send_message_to_subtask.queue_fallback_failed', {
@@ -352,10 +361,12 @@ export async function handleSendMessageToSubtask(
 
       // Fallback: return the old response shape if queuing fails
       return jsonRpcSuccess(requestId, {
-        content: [{
-          type: 'text',
-          text: JSON.stringify({ delivered: false, reason: 'agent_busy' }),
-        }],
+        content: [
+          {
+            type: 'text',
+            text: JSON.stringify({ delivered: false, reason: 'agent_busy' }),
+          },
+        ],
       });
     }
 
@@ -365,7 +376,11 @@ export async function handleSendMessageToSubtask(
       error: errorMessage,
     });
 
-    return jsonRpcError(requestId, INTERNAL_ERROR, `Failed to send message to child agent: ${errorMessage}`);
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      `Failed to send message to child agent: ${errorMessage}`
+    );
   }
 }
 
@@ -375,7 +390,7 @@ export async function handleStopSubtask(
   requestId: string | number | null,
   params: Record<string, unknown>,
   tokenData: McpTokenData,
-  env: Env,
+  env: Env
 ): Promise<JsonRpcResponse> {
   const limits = getMcpLimits(env);
 
@@ -385,9 +400,10 @@ export async function handleStopSubtask(
     return jsonRpcError(requestId, INVALID_PARAMS, 'taskId is required');
   }
 
-  const reason = typeof params.reason === 'string'
-    ? sanitizeUserInput(params.reason.trim()).slice(0, limits.orchestratorMessageMaxLength)
-    : undefined;
+  const reason =
+    typeof params.reason === 'string'
+      ? sanitizeUserInput(params.reason.trim()).slice(0, limits.orchestratorMessageMaxLength)
+      : undefined;
 
   // Resolve child agent
   const db = drizzle(env.DATABASE, { schema });
@@ -407,7 +423,7 @@ export async function handleStopSubtask(
         agentSession.id,
         `[STOP REQUESTED BY PARENT] ${reason}`,
         env,
-        tokenData.userId,
+        tokenData.userId
       );
     } catch (err) {
       // Best-effort — don't fail the stop if the message can't be delivered (e.g., 409 busy)
@@ -430,7 +446,7 @@ export async function handleStopSubtask(
       workspace.id,
       agentSession.id,
       env,
-      tokenData.userId,
+      tokenData.userId
     );
   } catch (err) {
     log.error('mcp.stop_subtask.stop_failed', {
@@ -442,43 +458,136 @@ export async function handleStopSubtask(
     return jsonRpcError(
       requestId,
       INTERNAL_ERROR,
-      `Failed to stop child agent session: ${err instanceof Error ? err.message : String(err)}`,
+      `Failed to stop child agent session: ${err instanceof Error ? err.message : String(err)}`
     );
   }
 
-  // Update task status to failed with parent-stop reason (atomic batch)
+  // An intentional parent stop is a cancellation, not a runtime failure. Use a
+  // compare-and-set transition so a concurrent fatal callback keeps the actual
+  // failure as the authoritative terminal story.
   const now = new Date().toISOString();
-  const failReason = reason
-    ? `stopped_by_parent: ${reason}`
-    : 'stopped_by_parent';
+  const stopReason = reason ? `Stopped by parent: ${reason}` : 'Stopped by parent';
 
+  let preservedTerminalStatus: string | null = null;
   try {
-    await db.batch([
-      db.update(schema.tasks)
-        .set({
-          status: 'failed',
-          errorMessage: failReason,
-          updatedAt: now,
-        })
-        .where(eq(schema.tasks.id, taskId)),
-      db.insert(schema.taskStatusEvents).values({
-        id: ulid(),
-        taskId,
-        fromStatus: task.status,
-        toStatus: 'failed',
-        actorType: 'agent',
-        actorId: tokenData.workspaceId,
-        reason: failReason,
-        createdAt: now,
-      }),
-    ]);
+    const cancelFromStatus = async (fromStatus: string): Promise<boolean> => {
+      const [transition] = await env.DATABASE.batch([
+        env.DATABASE.prepare(
+          `UPDATE tasks
+              SET status = 'cancelled', error_message = ?, completed_at = ?, updated_at = ?
+            WHERE id = ? AND status = ?`
+        ).bind(stopReason, now, now, taskId, fromStatus),
+        env.DATABASE.prepare(
+          `INSERT INTO task_status_events
+             (id, task_id, from_status, to_status, actor_type, actor_id, reason, created_at)
+           SELECT ?, ?, ?, 'cancelled', 'agent', ?, ?, ?
+            WHERE EXISTS (
+              SELECT 1 FROM tasks
+               WHERE id = ? AND status = 'cancelled' AND completed_at = ?
+            )`
+        ).bind(ulid(), taskId, fromStatus, tokenData.workspaceId, stopReason, now, taskId, now),
+      ]);
+      if (!transition) {
+        throw new Error('Task cancellation returned no transition result');
+      }
+      return Boolean(transition.meta.changes);
+    };
+
+    let cancelled = false;
+    let fromStatus = task.status;
+    for (let attempt = 1; attempt <= limits.orchestratorStopCasMaxAttempts; attempt += 1) {
+      cancelled = await cancelFromStatus(fromStatus);
+      if (cancelled) break;
+
+      const current = await env.DATABASE.prepare('SELECT status FROM tasks WHERE id = ?')
+        .bind(taskId)
+        .first<{ status: string }>();
+      if (!current) throw new Error('Child task disappeared during cancellation');
+      if (
+        current.status === 'completed' ||
+        current.status === 'failed' ||
+        current.status === 'cancelled'
+      ) {
+        log.info('mcp.stop_subtask.terminal_state_preserved', {
+          parentTaskId: tokenData.taskId,
+          childTaskId: taskId,
+          attemptedFromStatus: fromStatus,
+          currentStatus: current.status,
+        });
+        preservedTerminalStatus = current.status;
+        break;
+      }
+      if (!ACTIVE_STATUSES.includes(current.status)) {
+        throw new Error(
+          `Child task entered unexpected status '${current.status}' during cancellation`
+        );
+      }
+      if (attempt === limits.orchestratorStopCasMaxAttempts) {
+        throw new Error(
+          `Child task remained active after ${limits.orchestratorStopCasMaxAttempts} cancellation attempts`
+        );
+      }
+      log.warn('mcp.stop_subtask.status_cas_retry', {
+        parentTaskId: tokenData.taskId,
+        childTaskId: taskId,
+        attempt,
+        maxAttempts: limits.orchestratorStopCasMaxAttempts,
+        attemptedFromStatus: fromStatus,
+        currentStatus: current.status,
+      });
+      fromStatus = current.status;
+    }
+    if (!cancelled && !preservedTerminalStatus) {
+      throw new Error('Task cancellation did not reach a terminal state');
+    }
   } catch (err) {
-    // Status update failure is non-fatal — the agent session is already stopped
     log.error('mcp.stop_subtask.status_update_failed', {
       parentTaskId: tokenData.taskId,
       childTaskId: taskId,
       error: err instanceof Error ? err.message : String(err),
     });
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      'Child agent stopped, but task cancellation failed'
+    );
+  }
+
+  if (preservedTerminalStatus) {
+    return jsonRpcSuccess(requestId, {
+      content: [
+        {
+          type: 'text',
+          text: JSON.stringify({
+            stopped: true,
+            taskId,
+            terminalStatePreserved: true,
+            status: preservedTerminalStatus,
+          }),
+        },
+      ],
+    });
+  }
+
+  await syncTriggerExecutionStatus(env.DATABASE, taskId, 'cancelled');
+  try {
+    await cleanupTerminalTaskResources(env, taskId, {
+      status: 'cancelled',
+      errorMessage: stopReason,
+      requiredUserId: tokenData.userId,
+      logContext: { projectId: task.projectId, source: 'mcp.stop_subtask' },
+    });
+  } catch (err) {
+    log.error('mcp.stop_subtask.terminal_cleanup_failed', {
+      parentTaskId: tokenData.taskId,
+      childTaskId: taskId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return jsonRpcError(
+      requestId,
+      INTERNAL_ERROR,
+      'Task was cancelled, but runtime cleanup failed'
+    );
   }
 
   log.info('mcp.stop_subtask.completed', {
@@ -486,13 +595,15 @@ export async function handleStopSubtask(
     childTaskId: taskId,
     workspaceId: workspace.id,
     agentSessionId: agentSession.id,
-    reason: failReason,
+    reason: stopReason,
   });
 
   return jsonRpcSuccess(requestId, {
-    content: [{
-      type: 'text',
-      text: JSON.stringify({ stopped: true, taskId }),
-    }],
+    content: [
+      {
+        type: 'text',
+        text: JSON.stringify({ stopped: true, taskId }),
+      },
+    ],
   });
 }

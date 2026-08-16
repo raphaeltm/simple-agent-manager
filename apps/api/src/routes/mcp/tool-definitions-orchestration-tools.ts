@@ -7,7 +7,7 @@ export const ORCHESTRATION_TOOLS = [
   {
     name: 'send_durable_message',
     description:
-      'Send a durable message to a child task\'s agent. The message is persisted in the mailbox and will be delivered ' +
+      "Send a durable message to a child task's agent. The message is persisted in the mailbox and will be delivered " +
       'even if the child agent is busy. Message classes control urgency: "notify" (best-effort), "deliver" (durable, ack optional), ' +
       '"interrupt" (preempts current work), "preempt_and_replan" (requires ack + replanning), ' +
       '"shutdown_with_final_prompt" (delivers final message with highest urgency — session termination is a Phase 2 feature). ' +
@@ -25,7 +25,13 @@ export const ORCHESTRATION_TOOLS = [
         },
         messageClass: {
           type: 'string',
-          enum: ['notify', 'deliver', 'interrupt', 'preempt_and_replan', 'shutdown_with_final_prompt'],
+          enum: [
+            'notify',
+            'deliver',
+            'interrupt',
+            'preempt_and_replan',
+            'shutdown_with_final_prompt',
+          ],
           description: 'Message urgency class (default: "deliver")',
         },
         metadata: {
@@ -40,7 +46,7 @@ export const ORCHESTRATION_TOOLS = [
   {
     name: 'get_pending_messages',
     description:
-      'Get all unacknowledged messages for the calling agent\'s session, ordered by urgency ' +
+      "Get all unacknowledged messages for the calling agent's session, ordered by urgency " +
       '(shutdown_with_final_prompt first, then preempt_and_replan, interrupt, deliver, notify). ' +
       'Messages are automatically marked as "delivered" when retrieved. ' +
       'Call this at turn boundaries to check for orchestrator directives.',
@@ -72,7 +78,7 @@ export const ORCHESTRATION_TOOLS = [
   {
     name: 'send_message_to_subtask',
     description:
-      'Send a message to a running child task\'s agent. The message is injected as a user-role prompt into the child\'s ACP session. ' +
+      "Send a message to a running child task's agent. The message is injected as a user-role prompt into the child's ACP session. " +
       'Only the direct parent task can message a child — grandparents and siblings are rejected. ' +
       'Returns { delivered: true } on success, or { delivered: false, reason: "agent_busy" } if the child agent is currently processing.',
     inputSchema: {
@@ -84,7 +90,7 @@ export const ORCHESTRATION_TOOLS = [
         },
         message: {
           type: 'string',
-          description: 'The message to inject into the child agent\'s session (max 32768 chars)',
+          description: "The message to inject into the child agent's session (max 32768 chars)",
         },
       },
       required: ['taskId', 'message'],
@@ -94,8 +100,8 @@ export const ORCHESTRATION_TOOLS = [
   {
     name: 'stop_subtask',
     description:
-      'Gracefully stop a running child task\'s agent session. If a reason is provided, it is sent as a warning message ' +
-      'before the hard stop (with a configurable grace period). The task status is updated to "failed" with the stop reason. ' +
+      "Gracefully stop a running child task's agent session. If a reason is provided, it is sent as a warning message " +
+      'before the hard stop (with a configurable grace period). The task status is updated to "cancelled" with the stop reason. ' +
       'Only the direct parent task can stop a child.',
     inputSchema: {
       type: 'object' as const,
@@ -106,7 +112,8 @@ export const ORCHESTRATION_TOOLS = [
         },
         reason: {
           type: 'string',
-          description: 'Optional reason for stopping — sent as a warning message to the child before the hard stop',
+          description:
+            'Optional reason for stopping — sent as a warning message to the child before the hard stop',
         },
       },
       required: ['taskId'],
@@ -128,7 +135,8 @@ export const ORCHESTRATION_TOOLS = [
         },
         newDescription: {
           type: 'string',
-          description: 'Optional replacement description. If omitted, the original description is reused with failure context appended.',
+          description:
+            'Optional replacement description. If omitted, the original description is reused with failure context appended.',
         },
       },
       required: ['taskId'],

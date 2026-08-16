@@ -32,7 +32,7 @@ vi.mock('../../../src/hooks/useProjectData', () => ({
       projects: result?.projects ?? [],
       loading: false,
       isRefreshing: false,
-      error: null,
+      error: result?.error ?? null,
       refresh: vi.fn(),
     };
   },
@@ -94,6 +94,13 @@ describe('Dashboard page', () => {
   it('shows empty state when no projects', () => {
     renderDashboard();
     expect(screen.getByText('Import your first project')).toBeInTheDocument();
+  });
+
+  it('does not present a failed project request as an empty account', () => {
+    mocks.listProjects.mockReturnValue({ projects: [], error: 'Network error' });
+    renderDashboard();
+    expect(screen.getByText('Network error')).toBeInTheDocument();
+    expect(screen.queryByText('Import your first project')).not.toBeInTheDocument();
   });
 
   it('renders project cards when projects exist', () => {

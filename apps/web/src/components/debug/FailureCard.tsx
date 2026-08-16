@@ -36,12 +36,12 @@ interface FailureCardProps {
 
 function ClassificationIcon({ code }: { code: string }) {
   const size = 14;
-  if (code === 'cancelled') return <XCircle size={size} />;
+  if (code === 'cancelled' || code === 'input-expired') return <XCircle size={size} />;
   return <AlertTriangle size={size} />;
 }
 
 function getClassificationStyle(classification: FailureClassification) {
-  if (classification.code === 'cancelled') {
+  if (!classification.diagnosable) {
     return {
       border: 'var(--sam-color-fg-muted)',
       bg: 'color-mix(in srgb, var(--sam-color-fg-muted) 6%, transparent)',
@@ -128,17 +128,19 @@ export function FailureCard({
     setTimeout(() => setCopyState('idle'), 2000);
   }, [taskEmbed, sessionId, workspaceId, nodeId, projectId, classification.code, events]);
 
-  const adminErrorsUrl = isSuperadmin
-    ? `/admin/errors?${[
-        sessionId && `sessionId=${sessionId}`,
-        taskEmbed.id && `taskId=${taskEmbed.id}`,
-      ]
-        .filter(Boolean)
-        .join('&')}`
-    : null;
+  const adminErrorsUrl =
+    classification.diagnosable && isSuperadmin
+      ? `/admin/errors?${[
+          sessionId && `sessionId=${sessionId}`,
+          taskEmbed.id && `taskId=${taskEmbed.id}`,
+        ]
+          .filter(Boolean)
+          .join('&')}`
+      : null;
 
   return (
     <div
+      data-failure-kind={classification.diagnosable ? 'diagnosable' : 'lifecycle'}
       className="rounded-lg overflow-hidden"
       style={{
         border: `1px solid color-mix(in srgb, ${style.border} 30%, transparent)`,
@@ -167,16 +169,23 @@ export function FailureCard({
                 Recoverable
               </span>
             )}
-            {classification.retryable && !recoverable && classification.code !== 'cancelled' && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium" style={{
-                backgroundColor: 'color-mix(in srgb, var(--sam-color-accent-primary) 12%, transparent)',
-                color: 'var(--sam-color-accent-primary)',
-              }}>
+            {classification.retryable && !recoverable && classification.diagnosable && (
+              <span
+                className="text-[10px] px-1.5 py-0.5 rounded-full font-medium"
+                style={{
+                  backgroundColor:
+                    'color-mix(in srgb, var(--sam-color-accent-primary) 12%, transparent)',
+                  color: 'var(--sam-color-accent-primary)',
+                }}
+              >
                 Retryable
               </span>
             )}
           </div>
-          <p className="text-[11px] mt-0.5 m-0 leading-snug" style={{ color: 'var(--sam-color-fg-secondary)' }}>
+          <p
+            className="text-[11px] mt-0.5 m-0 leading-snug"
+            style={{ color: 'var(--sam-color-fg-secondary)' }}
+          >
             {classification.explanation}
           </p>
         </div>
@@ -196,20 +205,26 @@ export function FailureCard({
             <span className="text-[10px] font-medium text-fg-muted uppercase shrink-0 mt-px">
               Next step
             </span>
-            <p className="text-[11px] m-0 leading-snug" style={{ color: 'var(--sam-color-fg-primary)' }}>
+            <p
+              className="text-[11px] m-0 leading-snug"
+              style={{ color: 'var(--sam-color-fg-primary)' }}
+            >
               {classification.guidance}
             </p>
           </div>
 
-          {/* Error message */}
+          {/* Failure reason */}
           {taskEmbed.errorMessage && (
             <div className="flex flex-col gap-1">
-              <span className="text-[10px] font-medium text-fg-muted uppercase">Error</span>
+              <span className="text-[10px] font-medium text-fg-muted uppercase">
+                {classification.diagnosable ? 'Error' : 'Reason'}
+              </span>
               <pre
                 className="text-[11px] font-mono m-0 p-2 rounded-md break-words whitespace-pre-wrap leading-snug"
                 style={{
                   overflowWrap: 'anywhere',
-                  backgroundColor: 'color-mix(in srgb, var(--sam-color-bg-canvas) 60%, transparent)',
+                  backgroundColor:
+                    'color-mix(in srgb, var(--sam-color-bg-canvas) 60%, transparent)',
                   color: 'var(--sam-color-fg-secondary)',
                   border: '1px solid var(--sam-form-border)',
                 }}
@@ -244,53 +259,59 @@ export function FailureCard({
           </div>
 
           {/* Actions */}
-          <div className="flex items-center gap-2 flex-wrap">
-            <button
-              type="button"
-              onClick={() => void handleCopyReport()}
-              className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md border cursor-pointer transition-colors"
-              style={{
-                borderColor: 'var(--sam-form-border)',
-                backgroundColor: 'var(--sam-form-bg)',
-                color: copyState === 'copied' ? 'var(--sam-color-success)' : 'var(--sam-color-fg-primary)',
-              }}
-              aria-live="polite"
-            >
-              {copyState === 'copied' ? (
-                <>
-                  <CheckCircle2 size={12} /> Copied
-                </>
-              ) : copyState === 'failed' ? (
-                <>
-                  <ClipboardCopy size={12} /> Copy failed
-                </>
-              ) : (
-                <>
-                  <ClipboardCopy size={12} /> Copy debug report
-                </>
-              )}
-            </button>
-
-            {adminErrorsUrl && (
-              <a
-                href={adminErrorsUrl}
-                className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1.5 rounded-md border transition-colors no-underline"
+          {classification.diagnosable && (
+            <div className="flex items-center gap-2 flex-wrap">
+              <button
+                type="button"
+                onClick={() => void handleCopyReport()}
+                className="inline-flex items-center gap-1.5 text-[11px] font-medium px-2.5 py-1.5 rounded-md border cursor-pointer transition-colors"
                 style={{
                   borderColor: 'var(--sam-form-border)',
                   backgroundColor: 'var(--sam-form-bg)',
-                  color: 'var(--sam-color-accent-primary)',
+                  color:
+                    copyState === 'copied'
+                      ? 'var(--sam-color-success)'
+                      : 'var(--sam-color-fg-primary)',
                 }}
+                aria-live="polite"
               >
-                <ExternalLink size={12} />
-                View in admin errors
-              </a>
-            )}
-          </div>
+                {copyState === 'copied' ? (
+                  <>
+                    <CheckCircle2 size={12} /> Copied
+                  </>
+                ) : copyState === 'failed' ? (
+                  <>
+                    <ClipboardCopy size={12} /> Copy failed
+                  </>
+                ) : (
+                  <>
+                    <ClipboardCopy size={12} /> Copy debug report
+                  </>
+                )}
+              </button>
+
+              {adminErrorsUrl && (
+                <a
+                  href={adminErrorsUrl}
+                  className="inline-flex items-center gap-1 text-[11px] font-medium px-2.5 py-1.5 rounded-md border transition-colors no-underline"
+                  style={{
+                    borderColor: 'var(--sam-form-border)',
+                    backgroundColor: 'var(--sam-form-bg)',
+                    color: 'var(--sam-color-accent-primary)',
+                  }}
+                >
+                  <ExternalLink size={12} />
+                  View in admin errors
+                </a>
+              )}
+            </div>
+          )}
 
           {/* Recoverable guidance */}
           {recoverable && (
             <p className="text-[11px] m-0 leading-snug text-fg-muted italic">
-              This session is still active. Send another message to retry — your workspace is preserved.
+              This session is still active. Send another message to retry — your workspace is
+              preserved.
             </p>
           )}
         </div>

@@ -37,6 +37,7 @@ const MOCK_CLAUDE_AGENT = {
 const CLAUDE_VERIFICATION_URL =
   'https://claude.ai/oauth/device?client_id=sam-playwright&challenge=' + 'x'.repeat(180);
 const CLAUDE_USER_CODE = 'CLDE-PLAYWRIGHT-2026-LONG-CODE';
+const CLAUDE_SUBMITTED_CODE = 'abc123#state-playwright';
 const SETUP_SESSION = {
   id: 'setup-claude-guided-audit',
   status: 'waiting_for_user',
@@ -47,6 +48,12 @@ const SETUP_SESSION = {
   errorCode: null,
   errorMessage: null,
 };
+const COMPLETED_SETUP_SESSION = {
+  ...SETUP_SESSION,
+  status: 'completed',
+  verificationUrl: null,
+  userCode: null,
+};
 
 function respond(route: Route, status: number, body: unknown) {
   return route.fulfill({
@@ -56,7 +63,12 @@ function respond(route: Route, status: number, body: unknown) {
   });
 }
 
-async function setupApiMocks(page: Page, seenSetupAgentTypes: string[]) {
+async function setupApiMocks(
+  page: Page,
+  seenSetupAgentTypes: string[],
+  seenSubmittedCodes: string[],
+  submissionResponse: Record<string, unknown> = COMPLETED_SETUP_SESSION
+) {
   await page.route('**/api/**', async (route) => {
     const request = route.request();
     const url = new URL(request.url());
@@ -102,6 +114,14 @@ async function setupApiMocks(page: Page, seenSetupAgentTypes: string[]) {
     }
     if (path === `/api/agent-credential-setup-sessions/${SETUP_SESSION.id}`) {
       return respond(route, 200, SETUP_SESSION);
+    }
+    if (
+      path === `/api/agent-credential-setup-sessions/${SETUP_SESSION.id}/verification-code` &&
+      method === 'POST'
+    ) {
+      const body = request.postDataJSON() as { code?: string };
+      seenSubmittedCodes.push(body.code ?? '');
+      return respond(route, 200, submissionResponse);
     }
     if (path === `/api/agent-credential-setup-sessions/${SETUP_SESSION.id}/cancel`) {
       return respond(route, 200, { id: SETUP_SESSION.id, status: 'cancelled' });
@@ -166,7 +186,8 @@ test('Claude guided connect uses native URL/copy controls without terminal outpu
   page,
 }) => {
   const seenSetupAgentTypes: string[] = [];
-  await setupApiMocks(page, seenSetupAgentTypes);
+  const seenSubmittedCodes: string[] = [];
+  await setupApiMocks(page, seenSetupAgentTypes, seenSubmittedCodes);
   await navigateToAgentSettings(page);
 
   await page.getByRole('button', { name: 'OAuth Token (Pro/Max)' }).click();
@@ -182,6 +203,8 @@ test('Claude guided connect uses native URL/copy controls without terminal outpu
   await expect(open).toHaveAttribute('href', CLAUDE_VERIFICATION_URL);
   await expect(copy).toBeVisible();
   await expect(page.locator('code')).toHaveText(CLAUDE_USER_CODE);
+  await expect(page.getByLabel('Paste the code Claude shows you')).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Continue sign-in' })).toBeDisabled();
   await expect(page.getByTestId('codex-terminal')).toHaveCount(0);
   const modal = page.getByRole('dialog', { name: 'Connect with Claude Code' });
   await expect(modal.locator('pre, textarea, [data-testid*="terminal"]')).toHaveCount(0);
@@ -201,5 +224,34 @@ test('Claude guided connect uses native URL/copy controls without terminal outpu
   await screenshot(page, 'claude-guided-connect-modal');
   await assertNoOverflow(page);
 
-  await page.getByRole('button', { name: 'Cancel' }).click();
+  await page.getByLabel('Paste the code Claude shows you').fill(CLAUDE_SUBMITTED_CODE);
+  await page.getByRole('button', { name: 'Continue sign-in' }).click();
+  expect(seenSubmittedCodes).toEqual([CLAUDE_SUBMITTED_CODE]);
+  await expect(page.getByText('Claude Code connected')).toBeVisible();
+});
+
+test('Claude guided connect submits by keyboard and surfaces exchange failure', async ({
+  page,
+}) => {
+  const seenSetupAgentTypes: string[] = [];
+  const seenSubmittedCodes: string[] = [];
+  await setupApiMocks(page, seenSetupAgentTypes, seenSubmittedCodes, {
+    ...SETUP_SESSION,
+    status: 'failed',
+    errorCode: 'code_incomplete',
+    errorMessage:
+      'The pasted code was incomplete. Copy the entire code Claude shows — it has a # in the middle — then start again.',
+  });
+  await navigateToAgentSettings(page);
+
+  await page.getByRole('button', { name: 'OAuth Token (Pro/Max)' }).click();
+  await page.getByRole('button', { name: 'Connect with Claude Code' }).click();
+  const input = page.getByLabel('Paste the code Claude shows you');
+  await input.fill(CLAUDE_SUBMITTED_CODE);
+  await input.press('Enter');
+
+  expect(seenSubmittedCodes).toEqual([CLAUDE_SUBMITTED_CODE]);
+  await expect(page.getByRole('alert')).toContainText(/pasted code was incomplete/i);
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible();
+  await assertNoOverflow(page);
 });

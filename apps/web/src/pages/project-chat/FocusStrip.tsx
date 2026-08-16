@@ -30,13 +30,19 @@ const CLOSE_DELAY_MS = 140;
 
 function enrichSession(
   session: ChatSessionListItem,
-  taskInfoMap: Map<string, TaskInfo>,
+  taskInfoMap: Map<string, TaskInfo>
 ): ChatSessionResponse {
   const taskInfo = session.taskId ? taskInfoMap.get(session.taskId) : undefined;
   if (!taskInfo) return session;
   return {
     ...session,
-    task: { id: taskInfo.id, status: taskInfo.status, taskMode: taskInfo.taskMode },
+    task: {
+      id: taskInfo.id,
+      status: taskInfo.status,
+      errorMessage: taskInfo.errorMessage,
+      executionStep: taskInfo.executionStep,
+      taskMode: taskInfo.taskMode,
+    },
   };
 }
 
@@ -82,7 +88,7 @@ export function FocusStrip({
       const rect = el.getBoundingClientRect();
       setTooltip({ session, top: rect.top, left: rect.right + 6 });
     },
-    [cancelClose],
+    [cancelClose]
   );
 
   return (
@@ -108,9 +114,7 @@ export function FocusStrip({
             const config = ATTENTION_ICON[attention];
             const StatusIcon = config.icon;
             const isSelected = selectedSessionId === session.id;
-            const label = session.topic
-              ? session.topic
-              : `Chat ${session.id.slice(0, 8)}`;
+            const label = session.topic ? session.topic : `Chat ${session.id.slice(0, 8)}`;
             return (
               <button
                 key={session.id}
@@ -158,7 +162,7 @@ export function FocusStrip({
               onShowHierarchy={onShowHierarchy}
             />
           </div>,
-          document.body,
+          document.body
         )}
     </>
   );

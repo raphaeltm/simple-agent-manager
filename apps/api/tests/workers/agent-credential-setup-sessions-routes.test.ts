@@ -33,6 +33,7 @@ describe('agent-credential-setup-sessions REST routes reject unauthenticated req
     { method: 'GET', path: '/api/agent-credential-setup-sessions/config' },
     { method: 'POST', path: '/api/agent-credential-setup-sessions' },
     { method: 'GET', path: '/api/agent-credential-setup-sessions/fake-id' },
+    { method: 'POST', path: '/api/agent-credential-setup-sessions/fake-id/verification-code' },
     { method: 'POST', path: '/api/agent-credential-setup-sessions/fake-id/cancel' },
   ];
 

@@ -134,7 +134,7 @@ export async function sweepStaleWarmNodes(
 ): Promise<void> {
   const staleThreshold = new Date(now.getTime() - config.gracePeriodMs).toISOString();
   const candidates = await env.DATABASE.prepare(
-    `SELECT n.id, n.user_id, n.warm_since,
+    `SELECT n.id, n.user_id, n.status, n.warm_since,
             COUNT(CASE WHEN w.status IN ('running', 'creating', 'recovery') THEN 1 END) as active_ws_count
      FROM nodes n
      LEFT JOIN workspaces w ON w.node_id = n.id
@@ -152,6 +152,7 @@ export async function sweepStaleWarmNodes(
     .all<{
       id: string;
       user_id: string;
+      status: string;
       warm_since: string;
       active_ws_count: number;
     }>();
@@ -179,9 +180,9 @@ export async function sweepStaleWarmNodes(
       context: { warmSince: node.warm_since, gracePeriodMs: config.gracePeriodMs },
     });
 
-    if (destroyed) {
+    if (destroyed === 'destroyed') {
       result.staleDestroyed++;
-    } else {
+    } else if (destroyed === 'failed') {
       result.errors++;
     }
   }
@@ -277,6 +278,7 @@ export async function sweepMaxLifetimeNodes(
         : 'max_lifetime_node_cleanup',
       failureRecoveryType: 'max_lifetime_node_cleanup_failure',
       failureBackoffMs: config.failureBackoffMs,
+      allowActiveWorkspaces: viaAbsoluteCeiling,
       context: {
         createdAt: node.created_at,
         lastWorkspaceActivity: node.last_activity,
@@ -285,8 +287,10 @@ export async function sweepMaxLifetimeNodes(
       },
     });
 
-    if (destroyed) {
+    if (destroyed === 'destroyed') {
       result.lifetimeDestroyed++;
+    } else if (destroyed === 'skipped') {
+      result.lifetimeSkipped++;
     } else {
       result.errors++;
     }
@@ -359,8 +363,10 @@ export async function sweepStoppedHandoffNodes(
       },
     });
 
-    if (destroyed) {
+    if (destroyed === 'destroyed') {
       result.lifetimeDestroyed++;
+    } else if (destroyed === 'skipped') {
+      result.lifetimeSkipped++;
     } else {
       result.errors++;
     }
@@ -479,8 +485,10 @@ export async function sweepIncompatibleVmAgentNodes(
       },
     });
 
-    if (destroyed) {
+    if (destroyed === 'destroyed') {
       result.incompatibleDestroyed++;
+    } else if (destroyed === 'skipped') {
+      result.incompatibleSkipped++;
     } else {
       result.errors++;
     }
@@ -556,11 +564,11 @@ export async function sweepIdleOrphanNodes(
       },
     });
 
-    if (destroyed) {
+    if (destroyed === 'destroyed') {
       result.orphanedNodesDestroyed++;
     } else {
       result.orphanedNodesSkipped++;
-      result.errors++;
+      if (destroyed === 'failed') result.errors++;
     }
   }
 }

@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { CredentialValidator, validateAgentApiKeyCredentialWithProvider, validateHetznerCredentialWithProvider, validateOpenAICodexAuthJson, validateScalewayCredentialWithProvider } from '../../../src/services/validation';
+import {
+  CredentialValidator,
+  validateAgentApiKeyCredentialWithProvider,
+  validateHetznerCredentialWithProvider,
+  validateOpenAICodexAuthJson,
+  validateScalewayCredentialWithProvider,
+} from '../../../src/services/validation';
 
 describe('CredentialValidator', () => {
   describe('detectCredentialKind', () => {
@@ -39,10 +45,7 @@ describe('CredentialValidator', () => {
     });
 
     it('rejects obvious OAuth tokens in API key mode', () => {
-      const validation = CredentialValidator.validateCredential(
-        'sk-ant-oat01-abcdef',
-        'api-key'
-      );
+      const validation = CredentialValidator.validateCredential('sk-ant-oat01-abcdef', 'api-key');
       expect(validation.valid).toBe(false);
       expect(validation.error).toContain('OAuth token');
     });
@@ -60,6 +63,37 @@ describe('CredentialValidator', () => {
         'openai-codex'
       );
       expect(validation.valid).toBe(true);
+    });
+
+    it('rejects Claude OAuth tokens with invalid characters for Claude Code', () => {
+      const validation = CredentialValidator.validateCredential(
+        'sk-ant-oat01-valid-prefix-but-bad-char! ',
+        'oauth-token',
+        'claude-code'
+      );
+      expect(validation.valid).toBe(false);
+      expect(validation.error).toContain('invalid characters');
+    });
+
+    it('rejects overlong Claude OAuth tokens for Claude Code', () => {
+      const validation = CredentialValidator.validateCredential(
+        `sk-ant-oat${'A'.repeat(8193)}`,
+        'oauth-token',
+        'claude-code'
+      );
+      expect(validation.valid).toBe(false);
+      expect(validation.error).toContain('too long');
+    });
+
+    it('honors a configured Claude OAuth token length limit', () => {
+      const validation = CredentialValidator.validateCredential(
+        'sk-ant-oat01-abcdef',
+        'oauth-token',
+        'claude-code',
+        12
+      );
+      expect(validation.valid).toBe(false);
+      expect(validation.error).toContain('too long');
     });
   });
 
@@ -175,7 +209,11 @@ describe('CredentialValidator', () => {
 
   describe('getCredentialErrorMessage', () => {
     it('returns OpenAI-specific message for codex unauthorized', () => {
-      const msg = CredentialValidator.getCredentialErrorMessage('oauth-token', '401 unauthorized', 'openai-codex');
+      const msg = CredentialValidator.getCredentialErrorMessage(
+        'oauth-token',
+        '401 unauthorized',
+        'openai-codex'
+      );
       expect(msg).toContain('OpenAI');
       expect(msg).toContain('codex login');
     });
@@ -236,7 +274,7 @@ describe('validateOpenAICodexAuthJson', () => {
     expect(result.valid).toBe(true);
     expect(result.metadata?.isExpired).toBe(true);
     expect(result.warnings).toBeDefined();
-    expect(result.warnings!.some(w => w.includes('expired'))).toBe(true);
+    expect(result.warnings!.some((w) => w.includes('expired'))).toBe(true);
   });
 
   it('accepts auth.json with missing id_token (warns)', () => {
@@ -251,7 +289,7 @@ describe('validateOpenAICodexAuthJson', () => {
     const result = validateOpenAICodexAuthJson(json);
     expect(result.valid).toBe(true);
     expect(result.warnings).toBeDefined();
-    expect(result.warnings!.some(w => w.includes('id_token'))).toBe(true);
+    expect(result.warnings!.some((w) => w.includes('id_token'))).toBe(true);
   });
 
   it('rejects non-JSON input', () => {
@@ -277,7 +315,6 @@ describe('validateOpenAICodexAuthJson', () => {
   });
 });
 
-
 describe('provider credential validation helpers', () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -286,7 +323,9 @@ describe('provider credential validation helpers', () => {
   it('validates Hetzner credentials against the servers endpoint', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })));
 
-    const result = await validateHetznerCredentialWithProvider('hetzner-token', { timeoutMs: 1000 });
+    const result = await validateHetznerCredentialWithProvider('hetzner-token', {
+      timeoutMs: 1000,
+    });
 
     expect(result.valid).toBe(true);
     expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -313,7 +352,9 @@ describe('provider credential validation helpers', () => {
   it('validates Scaleway credentials against a project-scoped servers endpoint', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })));
 
-    const result = await validateScalewayCredentialWithProvider('scw-secret', 'project-id', { timeoutMs: 1000 });
+    const result = await validateScalewayCredentialWithProvider('scw-secret', 'project-id', {
+      timeoutMs: 1000,
+    });
 
     expect(result.valid).toBe(true);
     expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -327,7 +368,11 @@ describe('provider credential validation helpers', () => {
   it('validates Anthropic agent API keys with x-api-key', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })));
 
-    const result = await validateAgentApiKeyCredentialWithProvider('claude-code', 'sk-ant-api03-valid', { timeoutMs: 1000 });
+    const result = await validateAgentApiKeyCredentialWithProvider(
+      'claude-code',
+      'sk-ant-api03-valid',
+      { timeoutMs: 1000 }
+    );
 
     expect(result.valid).toBe(true);
     expect(globalThis.fetch).toHaveBeenCalledWith(
@@ -344,7 +389,9 @@ describe('provider credential validation helpers', () => {
   it('validates OpenAI agent API keys with bearer auth', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('{}', { status: 200 })));
 
-    const result = await validateAgentApiKeyCredentialWithProvider('openai-codex', 'openai-key', { timeoutMs: 1000 });
+    const result = await validateAgentApiKeyCredentialWithProvider('openai-codex', 'openai-key', {
+      timeoutMs: 1000,
+    });
 
     expect(result.valid).toBe(true);
     expect(globalThis.fetch).toHaveBeenCalledWith(

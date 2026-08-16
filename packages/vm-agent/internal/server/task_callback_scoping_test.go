@@ -8,9 +8,20 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/workspace/vm-agent/internal/acp"
+	"github.com/workspace/vm-agent/internal/agentsessions"
 	"github.com/workspace/vm-agent/internal/config"
 )
+
+func syntheticProviderSecretForRedactionTest() string {
+	return "sk-" + "secret1234567890"
+}
+
+func syntheticProviderAPIKeyError() string {
+	return "provider exhausted credits with api_" + "key=" + syntheticProviderSecretForRedactionTest()
+}
 
 func TestBootMessageReporterWorkspaceIDRequiresRealWorkspace(t *testing.T) {
 	t.Parallel()
@@ -111,7 +122,7 @@ func TestTaskCompletionCallbackTreatsConversationErrorStopReasonAsRecoverable(t 
 		t,
 		config.TaskModeConversation,
 		"error",
-		errors.New("provider exhausted credits with api_key=sk-secret1234567890"),
+		errors.New(syntheticProviderAPIKeyError()),
 	)
 
 	if body["toStatus"] != nil {
@@ -124,7 +135,7 @@ func TestTaskCompletionCallbackTreatsConversationErrorStopReasonAsRecoverable(t 
 	if !ok || errorMessage == "" {
 		t.Fatalf("errorMessage = %v, want non-empty string", body["errorMessage"])
 	}
-	if strings.Contains(errorMessage, "sk-secret1234567890") {
+	if strings.Contains(errorMessage, syntheticProviderSecretForRedactionTest()) {
 		t.Fatalf("errorMessage leaked secret: %q", errorMessage)
 	}
 }
@@ -139,6 +150,70 @@ func TestTaskCompletionCallbackTreatsFatalErrorStopReasonAsTerminalFailure(t *te
 	}
 	if body["executionStep"] != nil {
 		t.Fatalf("executionStep = %v, want terminal failure without awaiting_followup", body["executionStep"])
+	}
+}
+
+func TestTaskSessionHostBindsFatalCompletionToControlPlaneCallback(t *testing.T) {
+	t.Parallel()
+
+	type callbackRequest struct {
+		Path string
+		Body map[string]interface{}
+	}
+	received := make(chan callbackRequest, 1)
+	controlPlane := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]interface{}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Errorf("decode callback body: %v", err)
+		}
+		received <- callbackRequest{Path: r.URL.Path, Body: body}
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(controlPlane.Close)
+
+	const hostKey = "workspace-a/session-a"
+	s := &Server{
+		config: &config.Config{
+			ControlPlaneURL:     controlPlane.URL,
+			HTTPCallbackTimeout: 0,
+			CallbackToken:       "node-token",
+		},
+		sessionHosts:      make(map[string]*acp.SessionHost),
+		sessionTaskCtx:    map[string]taskCallbackContext{hostKey: {ProjectID: "project-1", TaskID: "task-a", WorkspaceID: "workspace-a", TaskMode: config.TaskModeConversation}},
+		sessionMcpServers: make(map[string][]acp.McpServerEntry),
+		sessionProfileOvr: make(map[string]profileOverrides),
+		agentSessions:     agentsessions.NewManager(),
+		workspaces:        make(map[string]*WorkspaceRuntime),
+	}
+	host := s.getOrCreateSessionHost(
+		hostKey,
+		"workspace-a",
+		"session-a",
+		agentsessions.Session{ID: "session-a", WorkspaceID: "workspace-a"},
+		nil,
+		"",
+	)
+	t.Cleanup(host.Stop)
+
+	callback := host.OnPromptCompleteCallback()
+	if callback == nil {
+		t.Fatal("task-owned SessionHost has no completion callback")
+	}
+	callback(acp.FatalErrorStopReason, errors.New("Prompt timed out after 6h0m0s"))
+
+	select {
+	case got := <-received:
+		if !strings.Contains(got.Path, "/tasks/task-a/status/callback") {
+			t.Fatalf("callback path = %q, want task-a status callback", got.Path)
+		}
+		if got.Body["toStatus"] != "failed" {
+			t.Fatalf("toStatus = %v, want failed", got.Body["toStatus"])
+		}
+		if got.Body["errorMessage"] != "Prompt timed out after 6h0m0s" {
+			t.Fatalf("errorMessage = %v, want exact timeout reason", got.Body["errorMessage"])
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for bound SessionHost callback")
 	}
 }
 

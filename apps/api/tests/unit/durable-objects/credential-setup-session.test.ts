@@ -259,14 +259,14 @@ function createFakeSandbox() {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function createDO(): {
+function createDO(envOverrides: Partial<Env> = {}): {
   instance: InstanceType<typeof CredentialSetupSession>;
   ctx: any;
   database: ReturnType<typeof createFakeDatabase>;
 } {
   const ctx = createFakeCtx();
   const database = createFakeDatabase();
-  const env = { DATABASE: database } as unknown as Env;
+  const env = { DATABASE: database, ...envOverrides } as unknown as Env;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const instance = new CredentialSetupSession(ctx as any, env);
   return { instance, ctx, database };
@@ -424,7 +424,17 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
   });
 
   it('provisions Claude Code with an isolated CLAUDE_CONFIG_DIR and optional code', async () => {
-    const { instance } = createDO();
+    const { instance } = createDO({
+      CLAUDE_SETUP_ENTER_DELAY_MS: '1100',
+      CLAUDE_SETUP_EXCHANGE_TIMEOUT_MS: '125000',
+      CLAUDE_SETUP_REJECTION_SETTLE_MS: '450',
+      CLAUDE_SETUP_VERIFICATION_POLL_MS: '550',
+      CLAUDE_SETUP_TTY_COLUMNS: '640',
+      CLAUDE_SETUP_OUTPUT_BUFFER_BYTES: '65536',
+      CLAUDE_VERIFICATION_CODE_MAX_LENGTH: '2048',
+      CLAUDE_SETUP_ERROR_DETAIL_MAX_LENGTH: '200',
+      CLAUDE_OAUTH_TOKEN_MAX_LENGTH: '16384',
+    });
     await Promise.resolve();
     const fakeSandbox = createFakeSandbox();
     fakeSandbox.readFile.mockImplementation(async (path: string) => ({
@@ -460,6 +470,12 @@ describe('CredentialSetupSession — alarm() provisioning step', () => {
     );
     expect(fakeSandbox.exec).toHaveBeenCalledWith(
       expect.stringContaining('sam-claude-setup-token.mjs'),
+      expect.objectContaining({ timeout: expect.any(Number) })
+    );
+    expect(fakeSandbox.exec).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "CLAUDE_SETUP_ENTER_DELAY_MS='1100' CLAUDE_SETUP_EXCHANGE_TIMEOUT_MS='125000' CLAUDE_SETUP_REJECTION_SETTLE_MS='450' CLAUDE_SETUP_VERIFICATION_POLL_MS='550' CLAUDE_SETUP_TTY_COLUMNS='640' CLAUDE_SETUP_OUTPUT_BUFFER_BYTES='65536' CLAUDE_VERIFICATION_CODE_MAX_LENGTH='2048' CLAUDE_SETUP_ERROR_DETAIL_MAX_LENGTH='200' CLAUDE_OAUTH_TOKEN_MAX_LENGTH='16384'"
+      ),
       expect.objectContaining({ timeout: expect.any(Number) })
     );
 
@@ -746,6 +762,250 @@ describe('CredentialSetupSession — alarm() capture polling', () => {
       })
     );
     expect((await created.instance.getState())?.status).toBe('completed');
+  });
+
+  it('normalizes and forwards a code#state value to the sandbox, then exchanges', async () => {
+    const created = createDO();
+    await Promise.resolve();
+    const fakeSandbox = createFakeSandbox();
+    fakeSandbox.readFile.mockImplementation(async (path: string) => ({
+      content: path.endsWith('device-auth-state.json')
+        ? JSON.stringify({
+            status: 'waiting_for_user',
+            verificationUrl: 'https://claude.ai/oauth/device',
+          })
+        : '',
+    }));
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+
+    await created.instance.create({
+      id: 'setup-claude-code',
+      setupHome: '/tmp/claude-setup-code',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      agentName: 'Claude Code',
+    });
+    await created.instance.alarm();
+    await created.instance.alarm();
+
+    const result = await created.instance.submitVerificationCode(' abc123 #state456\n');
+
+    expect(result.status).toBe('exchanging');
+    expect(fakeSandbox.writeFile).toHaveBeenCalledWith(
+      '/tmp/claude-setup-code/verification-code.txt',
+      'abc123#state456'
+    );
+    expect(saveAgentCredentialForUser).not.toHaveBeenCalled();
+    expect(JSON.stringify(created.database._calls)).not.toContain('abc123#state456');
+  });
+
+  it('guards verification-code agent, state, length, and charset', async () => {
+    const created = createDO();
+    await Promise.resolve();
+    const fakeSandbox = createFakeSandbox();
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+    await created.instance.create({
+      id: 'setup-guard',
+      setupHome: '/tmp/setup-guard',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+    });
+    await expect(created.instance.submitVerificationCode('abc#state')).rejects.toThrow(
+      /only supported/
+    );
+
+    const claude = createDO();
+    await Promise.resolve();
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+    await claude.instance.create({
+      id: 'setup-claude-guard',
+      setupHome: '/tmp/setup-claude-guard',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      agentName: 'Claude Code',
+    });
+    await expect(claude.instance.submitVerificationCode('abc#state')).rejects.toThrow(
+      /not waiting/
+    );
+    await claude.instance.alarm();
+    await claude.instance.alarm();
+    await expect(claude.instance.submitVerificationCode('bad code!')).rejects.toThrow(/Invalid/);
+    await expect(claude.instance.submitVerificationCode('x'.repeat(1025))).rejects.toThrow(
+      /Invalid/
+    );
+  });
+
+  it('honors the configured verification-code length limit', async () => {
+    const created = createDO({ CLAUDE_VERIFICATION_CODE_MAX_LENGTH: '12' });
+    await Promise.resolve();
+    const fakeSandbox = createFakeSandbox();
+    fakeSandbox.readFile.mockImplementation(async (path: string) => ({
+      content: path.endsWith('device-auth-state.json')
+        ? JSON.stringify({
+            status: 'waiting_for_user',
+            verificationUrl: 'https://claude.ai/oauth/device',
+          })
+        : '',
+    }));
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+    await created.instance.create({
+      id: 'setup-configured-code-limit',
+      setupHome: '/tmp/setup-configured-code-limit',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      agentName: 'Claude Code',
+    });
+    await created.instance.alarm();
+    await created.instance.alarm();
+
+    await expect(created.instance.submitVerificationCode('abc123#stateX')).rejects.toThrow(
+      /Invalid/
+    );
+    await expect(created.instance.submitVerificationCode('abc123#state')).resolves.toMatchObject({
+      status: 'exchanging',
+    });
+  });
+
+  it('fails fast with a sanitized error when Claude rejects the submitted code', async () => {
+    const created = createDO();
+    await Promise.resolve();
+    let driverStatus = 'waiting_for_user';
+    const fakeSandbox = createFakeSandbox();
+    fakeSandbox.readFile.mockImplementation(async (path: string) => ({
+      content: path.endsWith('device-auth-state.json')
+        ? JSON.stringify({
+            status: driverStatus,
+            verificationUrl: 'https://claude.ai/oauth/device',
+            error: 'secret provider detail',
+          })
+        : '',
+    }));
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+    await created.instance.create({
+      id: 'setup-rejected',
+      setupHome: '/tmp/setup-rejected',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      agentName: 'Claude Code',
+    });
+    await created.instance.alarm();
+    await created.instance.alarm();
+    await created.instance.submitVerificationCode('abc123#state456');
+    driverStatus = 'failed';
+    await created.instance.alarm();
+
+    const state = await created.instance.getState();
+    expect(state).toMatchObject({ status: 'failed', errorCode: 'code_rejected' });
+    expect(state?.errorMessage).not.toContain('secret provider detail');
+    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
+  });
+
+  it('reports a driver exchange timeout distinctly from a rejected code', async () => {
+    const created = createDO();
+    await Promise.resolve();
+    let driverState: Record<string, unknown> = {
+      status: 'waiting_for_user',
+      verificationUrl: 'https://claude.ai/oauth/device',
+    };
+    const fakeSandbox = createFakeSandbox();
+    fakeSandbox.readFile.mockImplementation(async (path: string) => ({
+      content: path.endsWith('device-auth-state.json') ? JSON.stringify(driverState) : '',
+    }));
+    vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+    await created.instance.create({
+      id: 'setup-exchange-timeout',
+      setupHome: '/tmp/setup-exchange-timeout',
+      ttlMs: 900_000,
+      ...BASE_PARAMS,
+      agentType: 'claude-code',
+      provider: 'anthropic',
+      agentName: 'Claude Code',
+    });
+    await created.instance.alarm();
+    await created.instance.alarm();
+    await created.instance.submitVerificationCode('abc123#state456');
+    driverState = {
+      status: 'failed',
+      error: 'Claude did not finish the verification code exchange in time',
+      code: 'exchange_timeout',
+    };
+    await created.instance.alarm();
+
+    const state = await created.instance.getState();
+    expect(state).toMatchObject({ status: 'failed', errorCode: 'exchange_timeout' });
+    expect(state?.errorMessage).toContain('did not complete in time');
+    expect(releaseSetupSlot).toHaveBeenCalledWith(expect.anything(), 'lease-abc');
+  });
+
+  it('maps incomplete-paste and network driver failures distinctly and surfaces sanitized CLI detail', async () => {
+    const scenarios = [
+      {
+        id: 'setup-incomplete',
+        driver: {
+          status: 'failed',
+          error: 'Claude reported the pasted verification code was incomplete',
+          code: 'code_incomplete',
+          detail: 'Invalidcode. Please makesure the fullcde wascopied',
+        },
+        expectCode: 'code_incomplete',
+        expectMessage: 'entire code',
+        expectDetail: '[CLI: Invalidcode. Please makesure the fullcde wascopied]',
+      },
+      {
+        id: 'setup-network',
+        driver: {
+          status: 'failed',
+          error: 'Claude sign-in failed with a network error during the code exchange',
+          code: 'exchange_network_error',
+          detail: `connctECONNREFUSED 10.0.0.1:443 sk-ant-oat${'A'.repeat(20)} junk`,
+        },
+        expectCode: 'exchange_network_error',
+        expectMessage: 'network error',
+        expectDetail: '[CLI: connctECONNREFUSED 10.0.0.1:443 [redacted] junk]',
+      },
+    ] as const;
+
+    for (const scenario of scenarios) {
+      const created = createDO();
+      await Promise.resolve();
+      let driverState: Record<string, unknown> = {
+        status: 'waiting_for_user',
+        verificationUrl: 'https://claude.ai/oauth/device',
+      };
+      const fakeSandbox = createFakeSandbox();
+      fakeSandbox.readFile.mockImplementation(async (path: string) => ({
+        content: path.endsWith('device-auth-state.json') ? JSON.stringify(driverState) : '',
+      }));
+      vi.mocked(getSandboxInstance).mockResolvedValue(fakeSandbox as never);
+      await created.instance.create({
+        id: scenario.id,
+        setupHome: `/tmp/${scenario.id}`,
+        ttlMs: 900_000,
+        ...BASE_PARAMS,
+        agentType: 'claude-code',
+        provider: 'anthropic',
+        agentName: 'Claude Code',
+      });
+      await created.instance.alarm();
+      await created.instance.alarm();
+      await created.instance.submitVerificationCode('abc123#state456');
+      driverState = scenario.driver;
+      await created.instance.alarm();
+
+      const state = await created.instance.getState();
+      expect(state).toMatchObject({ status: 'failed', errorCode: scenario.expectCode });
+      expect(state?.errorMessage).toContain(scenario.expectMessage);
+      expect(state?.errorMessage).toContain(scenario.expectDetail);
+      expect(state?.errorMessage).not.toContain('sk-ant');
+    }
   });
 
   it('tears down as failed when saveAgentCredentialForUser rejects', async () => {

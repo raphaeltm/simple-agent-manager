@@ -25,7 +25,7 @@ import { generateKeyPairSync } from 'node:crypto';
 import Database from 'better-sqlite3';
 import { Hono } from 'hono';
 import { importPKCS8, SignJWT } from 'jose';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../src/env';
 import { createInstrumentedLogger } from '../../src/lib/logger';
@@ -770,6 +770,8 @@ describe('observability error ingestion pipeline (behavioral)', () => {
   describe('VM agent errors route → D1', () => {
     const NODE_ID = 'node-obs-1';
     let authEnv: Env;
+    let mainSqlite: Database.Database;
+    let mainDb: D1Database;
 
     beforeEach(() => {
       const { publicKey, privateKey } = generateKeyPairSync('rsa', {
@@ -777,12 +779,45 @@ describe('observability error ingestion pipeline (behavioral)', () => {
         publicKeyEncoding: { type: 'spki', format: 'pem' },
         privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
       });
+      mainSqlite = new Database(':memory:');
+      mainSqlite.exec(`
+        CREATE TABLE workspaces (
+          id TEXT PRIMARY KEY,
+          node_id TEXT,
+          project_id TEXT,
+          chat_session_id TEXT
+        );
+        CREATE TABLE tasks (
+          id TEXT PRIMARY KEY,
+          workspace_id TEXT,
+          project_id TEXT,
+          chat_session_id TEXT,
+          created_at TEXT NOT NULL,
+          started_at TEXT,
+          completed_at TEXT
+        );
+        CREATE TABLE diagnostic_incidents (
+          id TEXT PRIMARY KEY,
+          platform_error_id TEXT NOT NULL,
+          node_id TEXT NOT NULL,
+          workspace_id TEXT,
+          status TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          delete_after TEXT NOT NULL
+        );
+      `);
+      mainDb = createTestD1(mainSqlite);
       authEnv = {
         BASE_DOMAIN: 'test.example.com',
         JWT_PUBLIC_KEY: publicKey,
         JWT_PRIVATE_KEY: privateKey,
+        DATABASE: mainDb,
         OBSERVABILITY_DATABASE: obsDb,
       } as unknown as Env;
+    });
+
+    afterEach(() => {
+      mainSqlite.close();
     });
 
     function buildNodeApp() {
@@ -833,6 +868,329 @@ describe('observability error ingestion pipeline (behavioral)', () => {
       expect(errors[0].message).toBe('vm agent crashed');
       expect(errors[0].nodeId).toBe(NODE_ID);
       expect(errors[0].workspaceId).toBe('ws-77');
+    });
+
+    it('correlates only authoritative node-workspace-session-task bindings', async () => {
+      const incidentTime = Date.UTC(2026, 7, 9, 6, 47, 29);
+      const workspaces = [
+        ['ws-match', NODE_ID, 'project-1', 'session-match'],
+        ['ws-other-node', 'node-other', 'project-1', 'session-other-node'],
+        ['ws-session-mismatch', NODE_ID, 'project-1', 'session-workspace'],
+        ['ws-future-task', NODE_ID, 'project-1', 'session-future'],
+        ['ws-stale-task', NODE_ID, 'project-1', 'session-stale'],
+        ['ws-ambiguous', NODE_ID, 'project-1', 'session-ambiguous'],
+      ];
+      const insertWorkspace = mainSqlite.prepare(
+        'INSERT INTO workspaces (id, node_id, project_id, chat_session_id) VALUES (?, ?, ?, ?)'
+      );
+      for (const workspace of workspaces) insertWorkspace.run(...workspace);
+
+      const insertTask = mainSqlite.prepare(
+        `INSERT INTO tasks
+           (id, workspace_id, project_id, chat_session_id, created_at, started_at, completed_at)
+         VALUES (?, ?, ?, ?, ?, ?, NULL)`
+      );
+      insertTask.run(
+        'task-match',
+        'ws-match',
+        'project-1',
+        'session-match',
+        '2026-08-09T06:00:00.000Z',
+        '2026-08-09T06:01:00.000Z'
+      );
+      insertTask.run(
+        'task-other-node',
+        'ws-other-node',
+        'project-1',
+        'session-other-node',
+        '2026-08-09T06:00:00.000Z',
+        '2026-08-09T06:01:00.000Z'
+      );
+      insertTask.run(
+        'task-session-mismatch',
+        'ws-session-mismatch',
+        'project-1',
+        'session-task',
+        '2026-08-09T06:00:00.000Z',
+        '2026-08-09T06:01:00.000Z'
+      );
+      insertTask.run(
+        'task-future',
+        'ws-future-task',
+        'project-1',
+        'session-future',
+        '2026-08-09T07:00:00.000Z',
+        '2026-08-09T07:01:00.000Z'
+      );
+      insertTask.run(
+        'task-stale',
+        'ws-stale-task',
+        'project-1',
+        'session-stale',
+        '2026-08-09T05:00:00.000Z',
+        '2026-08-09T05:01:00.000Z'
+      );
+      mainSqlite
+        .prepare(
+          `UPDATE tasks SET completed_at = '2026-08-09T06:30:00.000Z' WHERE id = 'task-stale'`
+        )
+        .run();
+      insertTask.run(
+        'task-ambiguous-1',
+        'ws-ambiguous',
+        'project-1',
+        'session-ambiguous',
+        '2026-08-09T06:00:00.000Z',
+        '2026-08-09T06:01:00.000Z'
+      );
+      insertTask.run(
+        'task-ambiguous-2',
+        'ws-ambiguous',
+        'project-1',
+        'session-ambiguous',
+        '2026-08-09T06:00:00.000Z',
+        '2026-08-09T06:01:00.000Z'
+      );
+
+      const token = await signNodeCallbackToken(NODE_ID, authEnv);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const res = await buildNodeApp().request(
+        `/api/nodes/${NODE_ID}/errors`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            errors: [...workspaces.map(([workspaceId]) => workspaceId), 'ws-missing'].map(
+              (workspaceId) => ({
+                message: `failure-${workspaceId}`,
+                source: 'session_host.go',
+                level: 'error',
+                workspaceId,
+                timestamp: new Date(incidentTime).toISOString(),
+              })
+            ),
+          }),
+        },
+        authEnv
+      );
+
+      expect(res.status).toBe(204);
+      const rows = sqlite
+        .prepare(
+          `SELECT workspace_id, task_id, session_id
+             FROM platform_errors
+            ORDER BY workspace_id`
+        )
+        .all();
+      expect(rows).toEqual([
+        { workspace_id: 'ws-ambiguous', task_id: null, session_id: null },
+        { workspace_id: 'ws-future-task', task_id: null, session_id: null },
+        { workspace_id: 'ws-match', task_id: 'task-match', session_id: 'session-match' },
+        { workspace_id: 'ws-missing', task_id: null, session_id: null },
+        { workspace_id: 'ws-other-node', task_id: null, session_id: null },
+        { workspace_id: 'ws-session-mismatch', task_id: null, session_id: null },
+        { workspace_id: 'ws-stale-task', task_id: null, session_id: null },
+      ]);
+      const rejectionByWorkspace = Object.fromEntries(
+        warnSpy.mock.calls
+          .map(([entry]) => JSON.parse(entry as string))
+          .filter((entry) => entry.event === 'observability.vm_error_correlation_rejected')
+          .map((entry) => [entry.workspaceId, entry.rejectionReason])
+      );
+      expect(rejectionByWorkspace).toEqual({
+        'ws-ambiguous': 'ambiguous_task_binding',
+        'ws-future-task': 'outside_task_lifetime',
+        'ws-missing': 'workspace_not_found',
+        'ws-other-node': 'node_mismatch',
+        'ws-session-mismatch': 'canonical_task_missing',
+        'ws-stale-task': 'outside_task_lifetime',
+      });
+      warnSpy.mockRestore();
+    });
+
+    it('persists receipt time but rejects missing, malformed, and non-finite producer timestamps', async () => {
+      mainSqlite
+        .prepare(
+          `INSERT INTO workspaces (id, node_id, project_id, chat_session_id)
+           VALUES ('ws-timestamp', ?, 'project-1', 'session-timestamp')`
+        )
+        .run(NODE_ID);
+      mainSqlite
+        .prepare(
+          `INSERT INTO tasks
+             (id, workspace_id, project_id, chat_session_id, created_at, started_at)
+           VALUES
+             ('task-timestamp', 'ws-timestamp', 'project-1', 'session-timestamp',
+              '2026-08-09T06:00:00.000Z', '2026-08-09T06:01:00.000Z')`
+        )
+        .run();
+      const token = await signNodeCallbackToken(NODE_ID, authEnv);
+      const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const beforeReceipt = Date.now();
+
+      const res = await buildNodeApp().request(
+        `/api/nodes/${NODE_ID}/errors`,
+        {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            errors: [
+              {
+                message: 'missing timestamp',
+                source: 'session_host.go',
+                level: 'warn',
+                workspaceId: 'ws-timestamp',
+              },
+              {
+                message: 'malformed timestamp',
+                source: 'session_host.go',
+                level: 'warn',
+                workspaceId: 'ws-timestamp',
+                timestamp: 'not-a-timestamp',
+              },
+              {
+                message: 'non-finite timestamp',
+                source: 'session_host.go',
+                level: 'warn',
+                workspaceId: 'ws-timestamp',
+                timestamp: 'Infinity',
+              },
+            ],
+          }),
+        },
+        authEnv
+      );
+      const afterReceipt = Date.now();
+
+      expect(res.status).toBe(204);
+      const rows = sqlite
+        .prepare(
+          `SELECT task_id, session_id, timestamp
+             FROM platform_errors
+            ORDER BY message`
+        )
+        .all() as Array<{ task_id: string | null; session_id: string | null; timestamp: number }>;
+      expect(rows).toHaveLength(3);
+      for (const row of rows) {
+        expect(row.task_id).toBeNull();
+        expect(row.session_id).toBeNull();
+        expect(row.timestamp).toBeGreaterThanOrEqual(beforeReceipt);
+        expect(row.timestamp).toBeLessThanOrEqual(afterReceipt);
+      }
+      const rejectionLogs = warnSpy.mock.calls
+        .map(([entry]) => JSON.parse(entry as string))
+        .filter((entry) => entry.event === 'observability.vm_error_correlation_rejected');
+      expect(rejectionLogs).toHaveLength(3);
+      expect(rejectionLogs).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            nodeId: NODE_ID,
+            workspaceId: 'ws-timestamp',
+            rejectionReason: 'invalid_incident_timestamp',
+            action: 'persisted_without_task_session_correlation',
+          }),
+        ])
+      );
+      warnSpy.mockRestore();
+    });
+
+    it('enriches a retried stable incident and rejects a later conflicting rebind', async () => {
+      const incidentId = '01KZJMDJT3ET7Z3BZ40TTX81Z5';
+      const incidentTimestamp = '2026-08-09T06:47:29.000Z';
+      const token = await signNodeCallbackToken(NODE_ID, authEnv);
+      const postStableIncident = () =>
+        buildNodeApp().request(
+          `/api/nodes/${NODE_ID}/errors`,
+          {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              errors: [
+                {
+                  incidentId,
+                  message: 'ACP prompt force-stopped',
+                  source: 'session_host.go',
+                  level: 'error',
+                  workspaceId: 'ws-retry',
+                  timestamp: incidentTimestamp,
+                },
+              ],
+            }),
+          },
+          authEnv
+        );
+
+      expect((await postStableIncident()).status).toBe(204);
+      expect(
+        sqlite
+          .prepare('SELECT task_id, session_id FROM platform_errors WHERE id = ?')
+          .get(incidentId)
+      ).toEqual({ task_id: null, session_id: null });
+
+      mainSqlite
+        .prepare(
+          `INSERT INTO workspaces (id, node_id, project_id, chat_session_id)
+					 VALUES ('ws-retry', ?, 'project-1', 'session-1')`
+        )
+        .run(NODE_ID);
+      mainSqlite
+        .prepare(
+          `INSERT INTO tasks
+					   (id, workspace_id, project_id, chat_session_id, created_at, started_at)
+					 VALUES
+					   ('task-1', 'ws-retry', 'project-1', 'session-1',
+					    '2026-08-09T06:00:00.000Z', '2026-08-09T06:01:00.000Z')`
+        )
+        .run();
+
+      expect((await postStableIncident()).status).toBe(204);
+      expect(
+        sqlite
+          .prepare('SELECT task_id, session_id FROM platform_errors WHERE id = ?')
+          .get(incidentId)
+      ).toEqual({ task_id: 'task-1', session_id: 'session-1' });
+
+      mainSqlite
+        .prepare(`UPDATE workspaces SET chat_session_id = 'session-2' WHERE id = 'ws-retry'`)
+        .run();
+      mainSqlite
+        .prepare(
+          `INSERT INTO tasks
+					   (id, workspace_id, project_id, chat_session_id, created_at, started_at)
+					 VALUES
+					   ('task-2', 'ws-retry', 'project-1', 'session-2',
+					    '2026-08-09T06:00:00.000Z', '2026-08-09T06:01:00.000Z')`
+        )
+        .run();
+
+      expect((await postStableIncident()).status).toBe(500);
+      expect(
+        sqlite
+          .prepare('SELECT task_id, session_id FROM platform_errors WHERE id = ?')
+          .get(incidentId)
+      ).toEqual({ task_id: 'task-1', session_id: 'session-1' });
+    });
+
+    it('persists uncorrelated evidence when the main D1 lookup fails', async () => {
+      const token = await signNodeCallbackToken(NODE_ID, authEnv);
+      authEnv.DATABASE = createBrokenD1();
+
+      const res = await postNodeErrors(token);
+
+      expect(res.status).toBe(204);
+      const row = sqlite
+        .prepare(`SELECT workspace_id, task_id, session_id FROM platform_errors`)
+        .get();
+      expect(row).toEqual({ workspace_id: 'ws-77', task_id: null, session_id: null });
     });
 
     it('rejects a legacy no-scope callback token even when its workspace matches the node', async () => {

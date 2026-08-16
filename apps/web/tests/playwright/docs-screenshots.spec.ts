@@ -74,8 +74,8 @@ const SETUP_SESSION = {
   status: 'waiting_for_user',
   agentType: 'claude-code',
   expiresAt: new Date(Date.now() + 1_200_000).toISOString(),
-  verificationUrl: 'https://claude.ai/oauth/device?client_id=sam-docs&code=' + 'x'.repeat(48),
-  userCode: 'SAMD-4821',
+  verificationUrl: 'https://claude.ai/oauth/device?client_id=sam-docs&challenge=' + 'x'.repeat(48),
+  userCode: null,
   errorCode: null,
   errorMessage: null,
 };
@@ -125,8 +125,8 @@ test('docs: guided subscription sign-in modal (Claude Code)', async ({ page }) =
 
   const dialog = page.getByRole('dialog', { name: 'Connect with Claude Code' });
   await expect(dialog.getByRole('link', { name: 'Open Claude sign-in' })).toBeVisible();
-  await expect(dialog.locator('code')).toHaveText(SETUP_SESSION.userCode);
-  await expect(dialog.getByRole('button', { name: 'Copy code' })).toBeVisible();
+  await expect(dialog.getByLabel('Paste the code Claude shows you')).toBeVisible();
+  await expect(dialog.getByRole('button', { name: 'Continue sign-in' })).toBeDisabled();
 
   // Make the backdrop fully opaque so the settings page behind the modal does not
   // bleed through the card's rounded corners in the docs screenshot.

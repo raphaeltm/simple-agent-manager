@@ -1,5 +1,7 @@
 import type { ProjectSummary } from '@simple-agent-manager/shared';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import { createElement, type ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -49,6 +51,23 @@ function deferred<T>() {
   return { promise, resolve, reject };
 }
 
+function createWrapper() {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: {
+        retry: false,
+        staleTime: 60_000,
+      },
+    },
+  });
+
+  function Wrapper({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, { client }, children);
+  }
+
+  return Wrapper;
+}
+
 describe('useProjectList', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -57,7 +76,9 @@ describe('useProjectList', () => {
   it('shows first-load loading before any data resolves', () => {
     mocks.listProjects.mockReturnValue(deferred().promise);
 
-    const { result } = renderHook(() => useProjectList({ pollInterval: 0 }));
+    const { result } = renderHook(() => useProjectList({ queryScope: 'user-1', pollInterval: 0 }), {
+      wrapper: createWrapper(),
+    });
 
     expect(result.current.projects).toEqual([]);
     expect(result.current.loading).toBe(true);
@@ -69,7 +90,9 @@ describe('useProjectList', () => {
     const summary = makeProjectSummary();
     mocks.listProjects.mockResolvedValue({ projects: [summary], nextCursor: null });
 
-    const { result } = renderHook(() => useProjectList({ pollInterval: 0 }));
+    const { result } = renderHook(() => useProjectList({ queryScope: 'user-1', pollInterval: 0 }), {
+      wrapper: createWrapper(),
+    });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -91,7 +114,9 @@ describe('useProjectList', () => {
   it('loads an empty successful response as an explicit empty state', async () => {
     mocks.listProjects.mockResolvedValue({ projects: [], nextCursor: null });
 
-    const { result } = renderHook(() => useProjectList({ pollInterval: 0 }));
+    const { result } = renderHook(() => useProjectList({ queryScope: 'user-1', pollInterval: 0 }), {
+      wrapper: createWrapper(),
+    });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -107,7 +132,9 @@ describe('useProjectList', () => {
       .mockResolvedValueOnce({ projects: [oldSummary], nextCursor: null })
       .mockReturnValueOnce(refresh.promise);
 
-    const { result } = renderHook(() => useProjectList({ pollInterval: 0 }));
+    const { result } = renderHook(() => useProjectList({ queryScope: 'user-1', pollInterval: 0 }), {
+      wrapper: createWrapper(),
+    });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.projects).toMatchObject([{ id: 'proj-old' }]);
@@ -129,14 +156,16 @@ describe('useProjectList', () => {
     expect(result.current.projects).toMatchObject([{ id: 'proj-new' }]);
   });
 
-  it('surfaces refresh failure without blanking stale data', async () => {
+  it('suppresses refresh failure errors without blanking stale data', async () => {
     const oldSummary = makeProjectSummary();
     const refresh = deferred<{ projects: ProjectSummary[]; nextCursor: string | null }>();
     mocks.listProjects
       .mockResolvedValueOnce({ projects: [oldSummary], nextCursor: null })
       .mockReturnValueOnce(refresh.promise);
 
-    const { result } = renderHook(() => useProjectList({ pollInterval: 0 }));
+    const { result } = renderHook(() => useProjectList({ queryScope: 'user-1', pollInterval: 0 }), {
+      wrapper: createWrapper(),
+    });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 
@@ -152,14 +181,16 @@ describe('useProjectList', () => {
     });
 
     await waitFor(() => expect(result.current.isRefreshing).toBe(false));
-    expect(result.current.error).toBe('network failed');
+    expect(result.current.error).toBeNull();
     expect(result.current.projects).toMatchObject([{ id: 'proj-1' }]);
   });
 
   it('surfaces first-load failure with no projects', async () => {
     mocks.listProjects.mockRejectedValue(new Error('network failed'));
 
-    const { result } = renderHook(() => useProjectList({ pollInterval: 0 }));
+    const { result } = renderHook(() => useProjectList({ queryScope: 'user-1', pollInterval: 0 }), {
+      wrapper: createWrapper(),
+    });
 
     await waitFor(() => expect(result.current.loading).toBe(false));
 

@@ -19,6 +19,12 @@ export const DEFAULT_SETUP_SESSION_SWEEP_MAX_CANDIDATES = 50;
  * session whose DO died without releasing (rule 47 escape path).
  */
 export const DEFAULT_POOL_LEASE_BUFFER_MS = 5 * 60_000;
+export const DEFAULT_CLAUDE_SETUP_VERIFICATION_POLL_MS = 500;
+export const DEFAULT_CLAUDE_SETUP_TTY_COLUMNS = 512;
+export const DEFAULT_CLAUDE_SETUP_OUTPUT_BUFFER_BYTES = 32_768;
+export const DEFAULT_CLAUDE_VERIFICATION_CODE_MAX_LENGTH = 1_024;
+export const DEFAULT_CLAUDE_SETUP_ERROR_DETAIL_MAX_LENGTH = 160;
+export const DEFAULT_CLAUDE_OAUTH_TOKEN_MAX_LENGTH = 8_192;
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {
   const parsed = Number.parseInt(raw ?? '', 10);
@@ -48,6 +54,42 @@ export function getPoolLeaseBufferMs(env: Env): number {
   return parsePositiveInt(env.POOL_LEASE_BUFFER_MS, DEFAULT_POOL_LEASE_BUFFER_MS);
 }
 
+export function getClaudeSetupVerificationPollMs(env: Env): number {
+  return parsePositiveInt(
+    env.CLAUDE_SETUP_VERIFICATION_POLL_MS,
+    DEFAULT_CLAUDE_SETUP_VERIFICATION_POLL_MS
+  );
+}
+
+export function getClaudeSetupTtyColumns(env: Env): number {
+  return parsePositiveInt(env.CLAUDE_SETUP_TTY_COLUMNS, DEFAULT_CLAUDE_SETUP_TTY_COLUMNS);
+}
+
+export function getClaudeSetupOutputBufferBytes(env: Env): number {
+  return parsePositiveInt(
+    env.CLAUDE_SETUP_OUTPUT_BUFFER_BYTES,
+    DEFAULT_CLAUDE_SETUP_OUTPUT_BUFFER_BYTES
+  );
+}
+
+export function getClaudeVerificationCodeMaxLength(env: Env): number {
+  return parsePositiveInt(
+    env.CLAUDE_VERIFICATION_CODE_MAX_LENGTH,
+    DEFAULT_CLAUDE_VERIFICATION_CODE_MAX_LENGTH
+  );
+}
+
+export function getClaudeSetupErrorDetailMaxLength(env: Env): number {
+  return parsePositiveInt(
+    env.CLAUDE_SETUP_ERROR_DETAIL_MAX_LENGTH,
+    DEFAULT_CLAUDE_SETUP_ERROR_DETAIL_MAX_LENGTH
+  );
+}
+
+export function getClaudeOauthTokenMaxLength(env: Env): number {
+  return parsePositiveInt(env.CLAUDE_OAUTH_TOKEN_MAX_LENGTH, DEFAULT_CLAUDE_OAUTH_TOKEN_MAX_LENGTH);
+}
+
 /** Lease age after which the pool self-prunes a leaked lease (TTL + buffer). */
 export function getPoolLeaseMaxAgeMs(env: Env): number {
   return getSetupSessionTtlMs(env) + getPoolLeaseBufferMs(env);
@@ -55,13 +97,14 @@ export function getPoolLeaseMaxAgeMs(env: Env): number {
 
 /**
  * Statuses that count as "active" (occupying the one-active-per-user slot and a
- * pool lease). Mirrors the partial unique index in migration 0097.
+ * pool lease). Mirrors the partial unique index updated in migration 0112.
  */
 export const ACTIVE_SETUP_STATUSES = [
   'creating',
   'admitting',
   'provisioning',
   'waiting_for_user',
+  'exchanging',
   'capturing',
   'saving',
 ] as const;

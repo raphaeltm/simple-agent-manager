@@ -12,6 +12,7 @@
 
 export type FailureCode =
   | 'cancelled'
+  | 'input-expired'
   | 'capacity'
   | 'provisioning'
   | 'agent-install'
@@ -34,6 +35,8 @@ export interface FailureClassification {
   guidance: string;
   /** Whether retrying the same task/session is likely to help. */
   retryable: boolean;
+  /** False for expected lifecycle outcomes that are not themselves bugs. */
+  diagnosable: boolean;
 }
 
 interface FailureRule {
@@ -42,6 +45,7 @@ interface FailureRule {
   explanation: string;
   guidance: string;
   retryable: boolean;
+  diagnosable: boolean;
   patterns: RegExp[];
 }
 
@@ -57,14 +61,32 @@ const FAILURE_RULES: FailureRule[] = [
     explanation: 'The task was stopped intentionally by a user or a parent agent.',
     guidance: 'No action needed. Start a new task or retry if this was unintended.',
     retryable: true,
-    patterns: [/\bcancell?ed\b/, /stopped by (the )?(user|parent|orchestrator)/, /stop_subtask/],
+    diagnosable: false,
+    patterns: [
+      /\bcancell?ed\b/,
+      /stopped[ _]by[ _](the[ _])?(user|parent|orchestrator)/,
+      /stop_subtask/,
+    ],
+  },
+  {
+    code: 'input-expired',
+    label: 'Input request expired',
+    explanation:
+      'No human reply arrived before the configured input window ended, so SAM closed the task.',
+    guidance: 'No debugging is needed. Retry the task if you still want to continue the work.',
+    retryable: true,
+    diagnosable: false,
+    patterns: [/human input request expired/, /input request expired after timeout/],
   },
   {
     code: 'capacity',
     label: 'Cloud capacity',
-    explanation: 'The cloud provider refused to create a VM because an account or datacenter limit was reached.',
-    guidance: 'Free unused nodes or wait for capacity, then retry. Admins can check provider limits.',
+    explanation:
+      'The cloud provider refused to create a VM because an account or datacenter limit was reached.',
+    guidance:
+      'Free unused nodes or wait for capacity, then retry. Admins can check provider limits.',
     retryable: true,
+    diagnosable: true,
     patterns: [
       /server limit reached/,
       /resource_unavailable/,
@@ -78,8 +100,10 @@ const FAILURE_RULES: FailureRule[] = [
     code: 'credentials',
     label: 'Credentials / billing',
     explanation: 'An API key, OAuth token, or account balance problem stopped the agent.',
-    guidance: 'Check the agent credential in Settings (API key validity, OAuth login, or provider credit balance), then retry.',
+    guidance:
+      'Check the agent credential in Settings (API key validity, OAuth login, or provider credit balance), then retry.',
     retryable: true,
+    diagnosable: true,
     patterns: [
       /credit balance/,
       /insufficient (credit|funds|quota)/,
@@ -98,6 +122,7 @@ const FAILURE_RULES: FailureRule[] = [
     explanation: 'The LLM provider was temporarily overloaded or rate-limited the request.',
     guidance: 'This is usually transient. Wait a few minutes and retry.',
     retryable: true,
+    diagnosable: true,
     patterns: [
       /\boverloaded\b/,
       /rate.?limit/,
@@ -112,8 +137,10 @@ const FAILURE_RULES: FailureRule[] = [
     code: 'agent-install',
     label: 'Agent install failed',
     explanation: 'The coding agent could not be installed inside the workspace.',
-    guidance: 'Retry the task. If it persists, check the node network/debug package or try a different agent type.',
+    guidance:
+      'Retry the task. If it persists, check the node network/debug package or try a different agent type.',
     retryable: true,
+    diagnosable: true,
     patterns: [
       /(install|installation).*(agent|claude|codex|gemini|opencode|amp)/,
       /(agent|claude|codex|gemini|opencode|amp).*(install|installation) (failed|error|timed out)/,
@@ -124,8 +151,10 @@ const FAILURE_RULES: FailureRule[] = [
     code: 'provisioning',
     label: 'Provisioning failed',
     explanation: 'The workspace or VM did not finish starting up.',
-    guidance: 'Retry the task — a fresh node will be provisioned. If it repeats, check the node debug package or provider status.',
+    guidance:
+      'Retry the task — a fresh node will be provisioned. If it repeats, check the node debug package or provider status.',
     retryable: true,
+    diagnosable: true,
     patterns: [
       /provision(ing)? (failed|error|timed? ?out)/,
       /node provisioning may have failed/,
@@ -141,16 +170,25 @@ const FAILURE_RULES: FailureRule[] = [
     code: 'prompt-timeout',
     label: 'Prompt timed out',
     explanation: 'The agent ran a single turn longer than the allowed time and was force-stopped.',
-    guidance: 'Break the work into smaller prompts, or retry. Long orchestration should report progress between turns.',
+    guidance:
+      'Break the work into smaller prompts, or retry. Long orchestration should report progress between turns.',
     retryable: true,
-    patterns: [/prompt.*(timed? ?out|force.?stopped)/, /force.?stopped.*prompt/, /acp_task_prompt_timeout/],
+    diagnosable: true,
+    patterns: [
+      /prompt.*(timed? ?out|force.?stopped)/,
+      /force.?stopped.*prompt/,
+      /acp_task_prompt_timeout/,
+    ],
   },
   {
     code: 'runtime-lost',
     label: 'Runtime lost',
-    explanation: 'The container or VM running the agent died and automatic recovery could not restore it.',
-    guidance: 'Your chat history is preserved. Send a follow-up message to resume on a fresh runtime, or retry the task.',
+    explanation:
+      'The container or VM running the agent died and automatic recovery could not restore it.',
+    guidance:
+      'Your chat history is preserved. Send a follow-up message to resume on a fresh runtime, or retry the task.',
     retryable: true,
+    diagnosable: true,
     patterns: [
       /runtime recovery exhausted/,
       /instant runtime recovery/,
@@ -167,8 +205,10 @@ const FAILURE_RULES: FailureRule[] = [
     code: 'agent-crash',
     label: 'Agent crashed',
     explanation: 'The agent process exited unexpectedly while working.',
-    guidance: 'SAM usually recovers crashed sessions automatically. If it did not, send a follow-up message or retry.',
+    guidance:
+      'SAM usually recovers crashed sessions automatically. If it did not, send a follow-up message or retry.',
     retryable: true,
+    diagnosable: true,
     patterns: [
       /peer disconnected/,
       /process (exited|crashed|terminated)/,
@@ -182,16 +222,25 @@ const FAILURE_RULES: FailureRule[] = [
     code: 'stalled',
     label: 'Stalled',
     explanation: 'The task stopped making progress and was terminated by the platform watchdog.',
-    guidance: 'Retry the task. If this repeats, check whether the agent was waiting on something (input, network, a long tool call).',
+    guidance:
+      'Retry the task. If this repeats, check whether the agent was waiting on something (input, network, a long tool call).',
     retryable: true,
-    patterns: [/task stuck in/, /\bstuck\b.*(threshold|timeout)/, /no (progress|activity|output) (for|since)/, /watchdog/],
+    diagnosable: true,
+    patterns: [
+      /task stuck in/,
+      /\bstuck\b.*(threshold|timeout)/,
+      /no (progress|activity|output) (for|since)/,
+      /watchdog/,
+    ],
   },
   {
     code: 'network',
     label: 'Network error',
-    explanation: 'A network problem interrupted communication between SAM and the workspace or provider.',
+    explanation:
+      'A network problem interrupted communication between SAM and the workspace or provider.',
     guidance: 'Usually transient — retry. If it persists, check the node status page.',
     retryable: true,
+    diagnosable: true,
     patterns: [
       /\betimedout\b|\beconnrefused\b|\benotfound\b/,
       /network (error|failure|unreachable)/,
@@ -207,8 +256,10 @@ const UNKNOWN_CLASSIFICATION: FailureClassification = {
   code: 'unknown',
   label: 'Failed',
   explanation: 'The task failed for a reason SAM could not automatically classify.',
-  guidance: 'Read the error details below. Copy the debug report and paste it to an agent to investigate.',
+  guidance:
+    'Read the error details below. Copy the debug report and paste it to an agent to investigate.',
   retryable: true,
+  diagnosable: true,
 };
 
 /**
@@ -231,6 +282,7 @@ export function classifyFailure(
         explanation: rule.explanation,
         guidance: rule.guidance,
         retryable: rule.retryable,
+        diagnosable: rule.diagnosable,
       };
     }
   }

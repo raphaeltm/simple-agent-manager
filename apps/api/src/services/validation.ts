@@ -7,6 +7,7 @@ import type {
 import { DEFAULT_SCALEWAY_ZONE, getAgentDefinition } from '@simple-agent-manager/shared';
 
 import { expectJsonRecord, maybeJsonRecord } from '../lib/runtime-validation';
+import { DEFAULT_CLAUDE_OAUTH_TOKEN_MAX_LENGTH } from './credential-setup-config';
 import { fetchWithTimeout } from './fetch-timeout';
 
 const ANTHROPIC_API_KEY_PREFIX = 'sk-ant-api';
@@ -300,7 +301,7 @@ export async function validateUpCloudCredentialWithProvider(
 
 export async function validateDigitalOceanCredentialWithProvider(
   token: string,
-  options?: CredentialValidationOptions,
+  options?: CredentialValidationOptions
 ): Promise<CredentialValidationStatus> {
   return runProviderCheck(
     {
@@ -309,7 +310,7 @@ export async function validateDigitalOceanCredentialWithProvider(
       init: { headers: { Authorization: `Bearer ${token}` } },
     },
     'DigitalOcean credential validated.',
-    options,
+    options
   );
 }
 
@@ -394,7 +395,8 @@ export class CredentialValidator {
   static validateCredential(
     credential: string,
     kind: CredentialKind,
-    agentType?: AgentType
+    agentType?: AgentType,
+    maxClaudeOauthTokenLength = DEFAULT_CLAUDE_OAUTH_TOKEN_MAX_LENGTH
   ): { valid: boolean; error?: string } {
     if (!credential || credential.trim().length === 0) {
       return { valid: false, error: 'Credential cannot be empty' };
@@ -452,6 +454,18 @@ export class CredentialValidator {
         return {
           valid: false,
           error: 'Claude OAuth token should start with "sk-ant-oat".',
+        };
+      }
+      if (agentType === 'claude-code' && credential.length > maxClaudeOauthTokenLength) {
+        return {
+          valid: false,
+          error: 'Claude OAuth token is too long.',
+        };
+      }
+      if (agentType === 'claude-code' && !/^[A-Za-z0-9._-]+$/.test(credential)) {
+        return {
+          valid: false,
+          error: 'Claude OAuth token contains invalid characters.',
         };
       }
     }

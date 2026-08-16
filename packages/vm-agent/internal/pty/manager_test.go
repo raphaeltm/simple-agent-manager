@@ -6,6 +6,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/workspace/vm-agent/internal/testutil/fakedocker"
 )
 
 func TestOrphanSession_SetsStateCorrectly(t *testing.T) {
@@ -495,6 +497,7 @@ func TestSetContainerUser_AffectsNewSessions(t *testing.T) {
 	// This test would have caught the regression in 6f08afe where
 	// server.New() was moved before bootstrap.Run() but the detected
 	// container user was never propagated to the PTY manager.
+	fakedocker.InstallExec(t)
 
 	m := NewManager(ManagerConfig{
 		DefaultShell: "/bin/sh",
@@ -534,6 +537,8 @@ func TestSetContainerUser_AffectsNewSessions(t *testing.T) {
 }
 
 func TestSetContainerUser_DoesNotAffectExistingSessions(t *testing.T) {
+	fakedocker.InstallExec(t)
+
 	m := NewManager(ManagerConfig{
 		DefaultShell: "/bin/sh",
 		DefaultRows:  24,

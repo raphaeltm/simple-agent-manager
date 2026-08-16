@@ -58,7 +58,7 @@ type taskCallbackContext struct {
 	TaskMode    string
 }
 
-const fatalErrorStopReason = "fatal_error"
+const fatalErrorStopReason = acp.FatalErrorStopReason
 
 var taskCallbackDiagnosticRedactionPatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{16,}`),

@@ -2,9 +2,10 @@
  * Guided agent-credential setup sessions (native provider login).
  *
  * User-facing flow for connecting subscription/OAuth-backed coding agents
- * without manual token/auth-file paste:
+ * without exposing terminal setup mechanics:
  *   POST   /                      create a setup session (leases a sandbox slot)
  *   GET    /:id                   poll lifecycle status
+ *   POST   /:id/verification-code forward Claude's browser code to its CLI
  *   POST   /:id/cancel            cancel + tear down
  *
  * AUTH: all routes use browser session-cookie auth (requireAuth/requireApproved)
@@ -15,22 +16,30 @@
  */
 import { type AgentType, getAgentDefinition, isValidAgentType } from '@simple-agent-manager/shared';
 import { Hono } from 'hono';
+import * as v from 'valibot';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { errors } from '../middleware/error';
-import { CreateAgentCredentialSetupSessionSchema, parseOptionalBody } from '../schemas';
+import {
+  CreateAgentCredentialSetupSessionSchema,
+  jsonValidator,
+  parseOptionalBody,
+} from '../schemas';
 import {
   ACTIVE_SETUP_STATUSES,
+  getClaudeVerificationCodeMaxLength,
   getSetupSessionCapturePollMs,
   getSetupSessionTtlMs,
+  isTerminalSetupStatus,
 } from '../services/credential-setup-config';
 import {
   cancelSetupSession,
   getSetupSessionState,
   startSetupSession,
+  submitSetupSessionVerificationCode,
 } from '../services/credential-setup-session';
 import { leaseSetupSlot, releaseSetupSlot } from '../services/setup-session-pool';
 
@@ -41,6 +50,9 @@ const SUPPORTED_SETUP_AGENT_TYPES = ['openai-codex', 'claude-code'] as const;
 type SupportedSetupAgentType = (typeof SUPPORTED_SETUP_AGENT_TYPES)[number];
 const SETUP_CREDENTIAL_KIND = 'oauth-token';
 const ACTIVE_STATUS_PLACEHOLDERS = ACTIVE_SETUP_STATUSES.map(() => '?').join(', ');
+const SubmitVerificationCodeSchema = v.object({
+  code: v.pipe(v.string(), v.trim(), v.minLength(1)),
+});
 
 function isSupportedSetupAgentType(agentType: AgentType): agentType is SupportedSetupAgentType {
   return SUPPORTED_SETUP_AGENT_TYPES.includes(agentType as SupportedSetupAgentType);
@@ -263,6 +275,42 @@ agentCredentialSetupSessionsRoutes.get('/:id', requireAuth(), requireApproved(),
     errorMessage: state?.errorMessage ?? row.error_message,
   });
 });
+
+// -----------------------------------------------------------------------------
+// POST /:id/verification-code — forward Claude's browser code to the CLI
+// -----------------------------------------------------------------------------
+agentCredentialSetupSessionsRoutes.post(
+  '/:id/verification-code',
+  requireAuth(),
+  requireApproved(),
+  jsonValidator(SubmitVerificationCodeSchema),
+  async (c) => {
+    const userId = getUserId(c);
+    const row = await loadOwnedSession(c.env, c.req.param('id'), userId);
+    if (row.agent_type !== 'claude-code') {
+      throw errors.badRequest('Verification codes are only available for Claude Code setup');
+    }
+    if (isTerminalSetupStatus(row.status)) {
+      throw errors.conflict('Setup session is no longer active');
+    }
+    const code = c.req.valid('json').code;
+    if (code.length > getClaudeVerificationCodeMaxLength(c.env)) {
+      throw errors.badRequest('Invalid Claude verification code');
+    }
+
+    const state = await submitSetupSessionVerificationCode(c.env, row.id, code);
+    return c.json({
+      id: row.id,
+      status: state.status,
+      agentType: row.agent_type,
+      expiresAt: row.expires_at,
+      verificationUrl: state.verificationUrl,
+      userCode: state.userCode,
+      errorCode: state.errorCode,
+      errorMessage: state.errorMessage,
+    });
+  }
+);
 
 // -----------------------------------------------------------------------------
 // POST /:id/cancel — cancel + tear down

@@ -16,7 +16,7 @@ SAM supports six AI coding agents. You connect the ones you want to use, then ch
 | **OAuth Support** | Yes (Claude Max/Pro subscriptions)                               |
 | **Get a Key**     | [Anthropic Console](https://console.anthropic.com/settings/keys) |
 
-Claude Code supports two authentication methods: an **API key** (pay-per-use) or your **Claude Max/Pro subscription**. To use a subscription, choose **Connect with Claude Code** for the [guided sign-in](#connecting-a-subscription-with-guided-sign-in) — SAM opens a Claude sign-in page and shows a copyable verification code, so you never run `claude setup-token` or paste a token by hand. Pasting a `claude setup-token` value manually is still available as a fallback.
+Claude Code supports two authentication methods: an **API key** (pay-per-use) or your **Claude Max/Pro subscription**. To use a subscription, choose **Connect with Claude Code** for the [guided sign-in](#connecting-a-subscription-with-guided-sign-in) — SAM opens a Claude sign-in page, then you paste Claude's browser-displayed `code#state` value back into SAM, so you never run `claude setup-token` or paste a token by hand. Pasting a `claude setup-token` value manually is still available as a fallback.
 
 ### OpenAI Codex
 
@@ -88,10 +88,10 @@ If you pay for **Claude Max/Pro** or a **ChatGPT** plan, you can connect that su
 
 1. Go to **Settings → Connections** (or **Settings → Agents**) and start the connect flow for Claude Code or OpenAI Codex.
 2. Choose the OAuth / subscription authentication method (rather than API key), then click **Connect with Claude Code** or **Connect with Codex**.
-3. SAM opens a secure sign-in page for the provider and shows a short **verification code**. Click the **Open sign-in** link, approve access on the provider's page, and enter the code when asked.
+3. Click the **Open sign-in** link and approve access on the provider's page. For Codex, enter the short code SAM displays when the provider asks. For Claude Code, copy the `code#state` value Claude displays, return to SAM, paste the complete value into the dialog, and click **Continue sign-in**.
 4. Leave the SAM window open — it updates on its own. When the provider confirms, the panel shows **Connected** and your subscription credential is saved, encrypted at rest.
 
-![The guided sign-in dialog for Claude Code: a status line reading "Waiting for sign-in", an "Open Claude sign-in" button, and a large copyable verification code with a "Copy code" button. No terminal is shown.](/images/docs/agent-guided-login.png)
+![The guided sign-in dialog for Claude Code: a status line reading "Waiting for sign-in", an "Open Claude sign-in" button, and a protected field for the complete browser-displayed code. No terminal is shown.](/images/docs/agent-guided-login.png)
 
 A few things worth knowing:
 
@@ -191,6 +191,7 @@ Running agents have access to project-aware MCP tools:
 | `list_sessions`        | View chat sessions                                                                                                   |
 | `get_session_messages` | Read conversation history (consecutive streaming tokens are concatenated into logical messages)                      |
 | `search_messages`      | Search messages by keyword — uses FTS5 full-text search for completed sessions; keyword matching for active sessions |
+| `list_triggers`        | List this project's automation triggers, optionally filtered by status or source type                                |
 | `update_task_status`   | Report progress                                                                                                      |
 | `get_task_details`     | Inspect task state, persisted output fields, PR/error details, session id, and bounded recent assistant diagnostics  |
 | `complete_task`        | Mark current work as done, optionally with structured completion evidence                                            |

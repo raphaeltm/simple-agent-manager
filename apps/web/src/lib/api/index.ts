@@ -156,6 +156,7 @@ export {
   isTerminalAgentCredentialSetupStatus,
   isTerminalCodexSetupStatus,
   setupConfigSupportsAgent,
+  submitAgentCredentialSetupVerificationCode,
 } from './codex-setup';
 export type {
   CCAttachmentListItem,

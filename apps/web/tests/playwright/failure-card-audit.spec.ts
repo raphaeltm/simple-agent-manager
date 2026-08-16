@@ -12,7 +12,7 @@ async function screenshot(page: Page, name: string) {
 
 async function assertNoOverflow(page: Page) {
   const overflow = await page.evaluate(
-    () => document.documentElement.scrollWidth > window.innerWidth,
+    () => document.documentElement.scrollWidth > window.innerWidth
   );
   expect(overflow).toBe(false);
 }
@@ -43,7 +43,7 @@ function makeFailureCardHtml(opts: {
         </div>
         ${ev.reason ? `<p style="font-size:11px;color:var(--sam-color-fg-muted);margin:2px 0 0;line-height:1.4;overflow-wrap:anywhere;">${ev.reason}</p>` : ''}
       </div>
-    </div>`,
+    </div>`
     )
     .join('');
 
@@ -53,7 +53,7 @@ function makeFailureCardHtml(opts: {
         `<button type="button" style="display:inline-flex;align-items:center;gap:4px;font-size:11px;font-family:monospace;padding:2px 6px;border-radius:4px;border:1px solid var(--sam-form-border);background:var(--sam-form-bg);color:var(--sam-color-fg-muted);cursor:pointer;">
           <span style="font-size:10px;font-family:sans-serif;font-weight:500;opacity:0.7;">${label}</span>
           <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${value.slice(0, 6)}...${value.slice(-4)}</span>
-        </button>`,
+        </button>`
     )
     .join('');
 
@@ -131,7 +131,12 @@ test.describe('Failure Card Visual Audit', () => {
           { toStatus: 'ready', actorType: 'system', time: '10m ago' },
           { toStatus: 'queued', actorType: 'system', time: '10m ago' },
           { toStatus: 'in progress', actorType: 'system', time: '9m ago' },
-          { toStatus: 'failed', actorType: 'system', reason: 'Agent process exited unexpectedly with code 137', time: '1m ago' },
+          {
+            toStatus: 'failed',
+            actorType: 'system',
+            reason: 'Agent process exited unexpectedly with code 137',
+            time: '1m ago',
+          },
         ],
         ids: {
           Task: '01KZF49HNP8HNJDGWB4KWXHEZR',
@@ -140,7 +145,7 @@ test.describe('Failure Card Visual Audit', () => {
           Node: '01KZFNODE1234567890',
         },
         showAdmin: true,
-      }),
+      })
     );
 
     await screenshot(page, 'failure-card-normal');
@@ -165,10 +170,15 @@ test.describe('Failure Card Visual Audit', () => {
         events: [
           { toStatus: 'ready', actorType: 'system', time: '30m ago' },
           { toStatus: 'in progress', actorType: 'agent', time: '28m ago' },
-          { toStatus: 'failed', actorType: 'system', reason: longError.slice(0, 200), time: 'Just now' },
+          {
+            toStatus: 'failed',
+            actorType: 'system',
+            reason: longError.slice(0, 200),
+            time: 'Just now',
+          },
         ],
         ids: { Task: '01KZF49HNP8HNJDGWB4KWXHEZR' },
-      }),
+      })
     );
 
     await screenshot(page, 'failure-card-long-error');
@@ -179,7 +189,12 @@ test.describe('Failure Card Visual Audit', () => {
     const events = Array.from({ length: 30 }, (_, i) => ({
       toStatus: i === 29 ? 'failed' : i < 5 ? 'queued' : 'in progress',
       actorType: i % 3 === 0 ? 'agent' : 'system',
-      reason: i === 29 ? 'Final failure after 30 transitions' : i % 5 === 0 ? `Checkpoint ${i}` : undefined,
+      reason:
+        i === 29
+          ? 'Final failure after 30 transitions'
+          : i % 5 === 0
+            ? `Checkpoint ${i}`
+            : undefined,
       time: `${30 - i}m ago`,
     }));
 
@@ -192,7 +207,7 @@ test.describe('Failure Card Visual Audit', () => {
         guidance: 'Review the error details and retry with adjusted parameters.',
         events,
         ids: { Task: '01ABC123', Session: '01DEF456', Workspace: '01GHI789', Node: '01JKL012' },
-      }),
+      })
     );
 
     await screenshot(page, 'failure-card-many-events');
@@ -209,7 +224,7 @@ test.describe('Failure Card Visual Audit', () => {
         guidance: 'Retry the task or contact support.',
         events: [],
         ids: { Task: '01ABC' },
-      }),
+      })
     );
 
     await screenshot(page, 'failure-card-empty');
@@ -234,7 +249,7 @@ test.describe('Failure Card Visual Audit', () => {
           },
         ],
         ids: { Task: '01ABC-<test>"inject"' },
-      }),
+      })
     );
 
     await screenshot(page, 'failure-card-special-chars');
@@ -252,7 +267,7 @@ test.describe('Failure Card Visual Audit', () => {
             <p style="font-size:11px;margin:2px 0 0;line-height:1.4;color:var(--sam-color-fg-secondary);">The task was stopped intentionally by a user or a parent agent.</p>
           </div>
         </div>
-      </div>`,
+      </div>`
     );
 
     await screenshot(page, 'failure-card-cancelled');

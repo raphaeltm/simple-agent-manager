@@ -30,6 +30,30 @@ func (w *bufferWriteCloser) Close() error {
 	return nil
 }
 
+func syntheticSecretForRedactionTest() string {
+	return "sk-" + "secret1234567890"
+}
+
+func syntheticOpenAIKeyEnvLine() string {
+	return "OPENAI_API_" + "KEY=" + syntheticSecretForRedactionTest()
+}
+
+func syntheticGitHubTokenForRedactionTest() string {
+	return "ghp_" + "secret1234567890"
+}
+
+func syntheticGitHubTokenEnvLine() string {
+	return "GH_" + "TOKEN=" + syntheticGitHubTokenForRedactionTest()
+}
+
+func syntheticSmokeTestTokenForRedactionTest() string {
+	return "sam_test_" + "secret-token-123456"
+}
+
+func syntheticSmokeTestTokenEnvLine() string {
+	return "SMOKE_TEST_" + "TOKEN=" + syntheticSmokeTestTokenForRedactionTest()
+}
+
 // testWSPair creates a connected client+server WebSocket pair using httptest.
 func testWSPair(t *testing.T) (serverConn *websocket.Conn, clientConn *websocket.Conn) {
 	t.Helper()
@@ -1057,18 +1081,18 @@ func TestRedactAgentDiagnosticText(t *testing.T) {
 
 	input := strings.Join([]string{
 		"Authorization: Bearer secret-bearer-token-123456",
-		"OPENAI_API_KEY=sk-secret1234567890",
-		"GH_TOKEN=ghp_secret1234567890",
-		"SMOKE_TEST_TOKEN=sam_test_secret-token-123456",
+		syntheticOpenAIKeyEnvLine(),
+		syntheticGitHubTokenEnvLine(),
+		syntheticSmokeTestTokenEnvLine(),
 		"safe diagnostic line",
 	}, "\n")
 	got := redactAgentDiagnosticText(input)
 
 	for _, leaked := range []string{
 		"secret-bearer-token-123456",
-		"sk-secret1234567890",
-		"ghp_secret1234567890",
-		"sam_test_secret-token-123456",
+		syntheticSecretForRedactionTest(),
+		syntheticGitHubTokenForRedactionTest(),
+		syntheticSmokeTestTokenForRedactionTest(),
 	} {
 		if strings.Contains(got, leaked) {
 			t.Fatalf("redacted text leaked %q: %s", leaked, got)
@@ -1257,7 +1281,7 @@ func TestSessionHost_FinishPromptWithUnrecoverablePeerDisconnectReportsActionabl
 	host.agentSupportsLoadSession = false
 	host.mu.Unlock()
 	host.stderrMu.Lock()
-	host.stderrBuf.WriteString("fatal: peer disconnected before response\nOPENAI_API_KEY=sk-secret1234567890")
+	host.stderrBuf.WriteString("fatal: peer disconnected before response\n" + syntheticOpenAIKeyEnvLine())
 	host.stderrMu.Unlock()
 
 	host.finishPromptWithError(
@@ -1290,7 +1314,7 @@ func TestSessionHost_FinishPromptWithUnrecoverablePeerDisconnectReportsActionabl
 			if report.Recovered {
 				t.Fatal("crash report recovered = true, want false")
 			}
-			if strings.Contains(report.Stderr, "sk-secret1234567890") {
+			if strings.Contains(report.Stderr, syntheticSecretForRedactionTest()) {
 				t.Fatalf("crash report leaked secret: %q", report.Stderr)
 			}
 			if report.RecoveryError != "LoadSession recovery is unavailable; missing prerequisites: loadSessionCapability" {
@@ -1475,6 +1499,123 @@ func TestSessionHost_FinishPromptDeadlineExceededReportsFatalWithoutCrashRecover
 	}
 }
 
+func TestSessionHost_ForceStoppedPromptReportsFatalCompletionExactlyOnce(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	type completion struct {
+		stopReason string
+		err        error
+	}
+	completed := make(chan completion, 2)
+	host.config.OnPromptComplete = func(stopReason string, err error) {
+		completed <- completion{stopReason: stopReason, err: err}
+	}
+
+	const promptID = uint64(42)
+	const timeoutReason = "Prompt timed out after 6h0m0s"
+	host.promptCancelMu.Lock()
+	host.activePromptID = promptID
+	host.promptCancelMu.Unlock()
+	host.promptMu.Lock()
+	host.promptInFlight = true
+	host.promptMu.Unlock()
+	if host.promptAttemptForID(promptID) == nil {
+		t.Fatal("promptAttemptForID returned nil for in-flight prompt")
+	}
+	host.mu.Lock()
+	host.status = HostPrompting
+	host.agentType = "openai-codex"
+	host.mu.Unlock()
+
+	host.triggerPromptForceStopIfStuck(promptID, timeoutReason)
+
+	select {
+	case got := <-completed:
+		if got.stopReason != fatalErrorStopReason {
+			t.Fatalf("stopReason = %q, want %q", got.stopReason, fatalErrorStopReason)
+		}
+		if got.err == nil || got.err.Error() != timeoutReason {
+			t.Fatalf("completion error = %v, want %q", got.err, timeoutReason)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for force-stop completion callback")
+	}
+
+	// A late watchdog/retry for the same prompt must not terminalize twice.
+	host.triggerPromptForceStopIfStuck(promptID, timeoutReason)
+	select {
+	case got := <-completed:
+		t.Fatalf("received duplicate force-stop completion: %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestSessionHost_CompetingPromptCompletionPathsClaimExactlyOnce(t *testing.T) {
+	t.Parallel()
+
+	host := newTestSessionHost(t)
+	defer host.Stop()
+
+	type completion struct {
+		stopReason string
+		err        error
+	}
+	completed := make(chan completion, 2)
+	host.config.OnPromptComplete = func(stopReason string, err error) {
+		completed <- completion{stopReason: stopReason, err: err}
+	}
+
+	const promptID = uint64(43)
+	const timeoutReason = "Prompt timed out after 6h0m0s"
+	host.promptCancelMu.Lock()
+	host.activePromptID = promptID
+	host.promptCancelMu.Unlock()
+	host.promptMu.Lock()
+	host.promptInFlight = true
+	host.promptMu.Unlock()
+	attempt := host.promptAttemptForID(promptID)
+	if attempt == nil {
+		t.Fatal("promptAttemptForID returned nil for in-flight prompt")
+	}
+	host.mu.Lock()
+	host.status = HostPrompting
+	host.agentType = "openai-codex"
+	host.mu.Unlock()
+
+	start := make(chan struct{})
+	var contenders sync.WaitGroup
+	contenders.Add(2)
+	go func() {
+		defer contenders.Done()
+		<-start
+		attempt.completeWith(host, "normal_return", nil, host.markPromptDone)
+	}()
+	go func() {
+		defer contenders.Done()
+		<-start
+		host.triggerPromptForceStopIfStuck(promptID, timeoutReason)
+	}()
+	close(start)
+	contenders.Wait()
+
+	select {
+	case got := <-completed:
+		if got.stopReason != "normal_return" && got.stopReason != fatalErrorStopReason {
+			t.Fatalf("unexpected completion owner: %+v", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for completion owner")
+	}
+	select {
+	case got := <-completed:
+		t.Fatalf("received duplicate competing completion: %+v", got)
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
 func TestSessionHost_BroadcastAgentCrashReport(t *testing.T) {
 	t.Parallel()
 
@@ -1482,7 +1623,7 @@ func TestSessionHost_BroadcastAgentCrashReport(t *testing.T) {
 	defer host.Stop()
 
 	report := host.crashReport(crashRecoverySnapshot{
-		stderr:      "write_stdin failed: stdin is closed\nOPENAI_API_KEY=sk-secret1234567890",
+		stderr:      "write_stdin failed: stdin is closed\n" + syntheticOpenAIKeyEnvLine(),
 		agentType:   "openai-codex",
 		promptReqID: json.RawMessage(`"req-1"`),
 	}, true, "")
@@ -1514,7 +1655,7 @@ func TestSessionHost_BroadcastAgentCrashReport(t *testing.T) {
 	if !strings.Contains(got.Stderr, "stdin is closed") {
 		t.Fatalf("stderr = %q, want captured stderr", got.Stderr)
 	}
-	if strings.Contains(got.Stderr, "sk-secret1234567890") {
+	if strings.Contains(got.Stderr, syntheticSecretForRedactionTest()) {
 		t.Fatalf("stderr leaked secret: %q", got.Stderr)
 	}
 	if !strings.Contains(got.Suggestion, "OpenAI") {
@@ -1560,7 +1701,7 @@ func TestSessionHost_MonitorRapidExitCrashRecoveryFailsWithReport(t *testing.T) 
 	host.sessionID = "acp-session-1"
 	host.crashRecoveryInProgress = true
 	host.crashAgentType = "openai-codex"
-	host.crashStderr = "write_stdin failed: stdin is closed\nOPENAI_API_KEY=sk-secret1234567890"
+	host.crashStderr = "write_stdin failed: stdin is closed\n" + syntheticOpenAIKeyEnvLine()
 	host.mu.Unlock()
 
 	host.monitorProcessExit(context.Background(), process, "openai-codex", nil, nil)
@@ -1593,7 +1734,7 @@ func TestSessionHost_MonitorRapidExitCrashRecoveryFailsWithReport(t *testing.T) 
 	if report.Recovered {
 		t.Fatal("recovered = true, want false for rapid exit")
 	}
-	if strings.Contains(report.Stderr, "sk-secret1234567890") {
+	if strings.Contains(report.Stderr, syntheticSecretForRedactionTest()) {
 		t.Fatalf("crash report leaked secret: %q", report.Stderr)
 	}
 }

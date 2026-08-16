@@ -87,6 +87,10 @@ const DEFAULT_MCP_SESSION_LIST_MAX = 50;
 const DEFAULT_MCP_MESSAGE_LIST_LIMIT = 50;
 const DEFAULT_MCP_MESSAGE_LIST_MAX = 200;
 const DEFAULT_MCP_MESSAGE_SEARCH_MAX = 20;
+/** Default page size for list_triggers. Override via MCP_TRIGGER_LIST_LIMIT env var. */
+const DEFAULT_MCP_TRIGGER_LIST_LIMIT = 20;
+/** Max page size for list_triggers. Override via MCP_TRIGGER_LIST_MAX env var. */
+const DEFAULT_MCP_TRIGGER_LIST_MAX = 100;
 /** Max length for task description in list/search results. Override via MCP_TASK_DESCRIPTION_SNIPPET_LENGTH env var. */
 const DEFAULT_MCP_TASK_DESCRIPTION_SNIPPET_LENGTH = 200;
 /** Max length for idea link context string. Override via MCP_IDEA_CONTEXT_MAX_LENGTH env var. */
@@ -109,6 +113,8 @@ const DEFAULT_ORCHESTRATOR_MAX_RETRIES_PER_TASK = 3;
 const DEFAULT_ORCHESTRATOR_DEPENDENCY_MAX_EDGES = 50;
 /** Grace period in ms before hard stop after warning message. Override via ORCHESTRATOR_STOP_GRACE_MS env var. */
 const DEFAULT_ORCHESTRATOR_STOP_GRACE_MS = 5000;
+/** Max task-status CAS attempts after a hard stop. Override via ORCHESTRATOR_STOP_CAS_MAX_ATTEMPTS env var. */
+const DEFAULT_ORCHESTRATOR_STOP_CAS_MAX_ATTEMPTS = 2;
 /** Max length for injected messages to child agents. Override via ORCHESTRATOR_MESSAGE_MAX_LENGTH env var. */
 const DEFAULT_ORCHESTRATOR_MESSAGE_MAX_LENGTH = 32_768;
 /** Agent mailbox defaults (durable messaging). Override via MAILBOX_* env vars. */
@@ -149,6 +155,8 @@ export function getMcpLimits(env: Env) {
     messageListLimit: parsePositiveInt(env.MCP_MESSAGE_LIST_LIMIT, DEFAULT_MCP_MESSAGE_LIST_LIMIT),
     messageListMax: parsePositiveInt(env.MCP_MESSAGE_LIST_MAX, DEFAULT_MCP_MESSAGE_LIST_MAX),
     messageSearchMax: parsePositiveInt(env.MCP_MESSAGE_SEARCH_MAX, DEFAULT_MCP_MESSAGE_SEARCH_MAX),
+    triggerListLimit: parsePositiveInt(env.MCP_TRIGGER_LIST_LIMIT, DEFAULT_MCP_TRIGGER_LIST_LIMIT),
+    triggerListMax: parsePositiveInt(env.MCP_TRIGGER_LIST_MAX, DEFAULT_MCP_TRIGGER_LIST_MAX),
     taskDescriptionSnippetLength: parsePositiveInt(
       env.MCP_TASK_DESCRIPTION_SNIPPET_LENGTH,
       DEFAULT_MCP_TASK_DESCRIPTION_SNIPPET_LENGTH
@@ -208,6 +216,10 @@ export function getMcpLimits(env: Env) {
     orchestratorStopGraceMs: parsePositiveInt(
       env.ORCHESTRATOR_STOP_GRACE_MS,
       DEFAULT_ORCHESTRATOR_STOP_GRACE_MS
+    ),
+    orchestratorStopCasMaxAttempts: parsePositiveInt(
+      env.ORCHESTRATOR_STOP_CAS_MAX_ATTEMPTS,
+      DEFAULT_ORCHESTRATOR_STOP_CAS_MAX_ATTEMPTS
     ),
     orchestratorMessageMaxLength: parsePositiveInt(
       env.ORCHESTRATOR_MESSAGE_MAX_LENGTH,

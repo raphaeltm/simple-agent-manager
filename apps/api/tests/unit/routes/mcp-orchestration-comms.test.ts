@@ -9,6 +9,8 @@ const mockSendPromptToAgentOnNode = vi.fn();
 const mockStopAgentSessionOnNode = vi.fn();
 const mockPersistOrchestrationPrompt = vi.fn();
 const mockEnqueueMailboxMessage = vi.fn();
+const mockCleanupTerminalTaskResources = vi.fn();
+const mockSyncTriggerExecutionStatus = vi.fn();
 const mockAcceptPromptDelivery = vi.fn();
 
 vi.mock('../../../src/services/node-agent', () => ({
@@ -23,6 +25,14 @@ vi.mock('../../../src/services/orchestration-prompts', () => ({
 vi.mock('../../../src/services/project-data', () => ({
   enqueueMailboxMessage: (...args: unknown[]) => mockEnqueueMailboxMessage(...args),
   acceptPromptDelivery: (...args: unknown[]) => mockAcceptPromptDelivery(...args),
+}));
+
+vi.mock('../../../src/services/task-terminal-cleanup', () => ({
+  cleanupTerminalTaskResources: (...args: unknown[]) => mockCleanupTerminalTaskResources(...args),
+}));
+
+vi.mock('../../../src/services/trigger-execution-sync', () => ({
+  syncTriggerExecutionStatus: (...args: unknown[]) => mockSyncTriggerExecutionStatus(...args),
 }));
 
 // Mock ulid for deterministic IDs
@@ -40,7 +50,10 @@ function createMockD1() {
   };
   return {
     prepare: vi.fn().mockReturnValue(stmt),
-    batch: vi.fn(),
+    batch: vi.fn().mockResolvedValue([
+      { success: true, meta: { changes: 1 } },
+      { success: true, meta: { changes: 1 } },
+    ]),
     _stmt: stmt,
   };
 }
@@ -97,6 +110,8 @@ describe('MCP Orchestration Communication Tools', () => {
     mockStopAgentSessionOnNode.mockResolvedValue(undefined);
     mockPersistOrchestrationPrompt.mockResolvedValue('persisted-msg-001');
     mockEnqueueMailboxMessage.mockResolvedValue({ id: 'mailbox-msg-001' });
+    mockCleanupTerminalTaskResources.mockResolvedValue(undefined);
+    mockSyncTriggerExecutionStatus.mockResolvedValue(undefined);
     mockAcceptPromptDelivery.mockResolvedValue({ message: { id: 'durable-message-001' } });
 
     const mod = await import('../../../src/routes/mcp/orchestration-comms');
@@ -782,7 +797,7 @@ describe('MCP Orchestration Communication Tools', () => {
       expect(result.error?.message).toContain("'completed' status");
     });
 
-    it('should update task status to failed with stop reason', async () => {
+    it('should stop the runtime before atomically cancelling and cleaning up the task', async () => {
       mockD1ResultSequence([
         [
           {
@@ -808,10 +823,237 @@ describe('MCP Orchestration Communication Tools', () => {
         ],
       ]);
 
-      await handleStopSubtask(1, { taskId: 'child-001' }, parentTokenData, mockEnv as Env);
+      await handleStopSubtask(
+        1,
+        { taskId: 'child-001', reason: 'No longer needed' },
+        parentTokenData,
+        { ...mockEnv, ORCHESTRATOR_STOP_GRACE_MS: '1' } as Env
+      );
 
-      expect(mockD1.prepare.mock.calls.length).toBeGreaterThanOrEqual(4);
       expect(mockStopAgentSessionOnNode).toHaveBeenCalled();
+      expect(mockStopAgentSessionOnNode.mock.invocationCallOrder[0]).toBeLessThan(
+        mockD1.batch.mock.invocationCallOrder[0]
+      );
+      const preparedSql = mockD1.prepare.mock.calls.map(([sql]) => String(sql));
+      expect(preparedSql).toEqual(
+        expect.arrayContaining([
+          expect.stringContaining("SET status = 'cancelled'"),
+          expect.stringContaining("'cancelled', 'agent'"),
+        ])
+      );
+      expect(mockSyncTriggerExecutionStatus).toHaveBeenCalledWith(
+        mockEnv.DATABASE,
+        'child-001',
+        'cancelled'
+      );
+      expect(mockCleanupTerminalTaskResources).toHaveBeenCalledWith(
+        expect.anything(),
+        'child-001',
+        expect.objectContaining({
+          status: 'cancelled',
+          errorMessage: 'Stopped by parent: No longer needed',
+          requiredUserId: 'user-001',
+        })
+      );
+    });
+
+    it('preserves a concurrent fatal terminal state instead of overwriting it with cancellation', async () => {
+      mockD1ResultSequence([
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspace_id: 'ws-child-001',
+            project_id: 'proj-001',
+            parent_task_id: 'parent-task-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+            node_id: 'node-001',
+            chat_session_id: 'chat-child-001',
+            status: 'running',
+          },
+        ],
+        [{ id: 'agent-session-001' }],
+      ]);
+      mockD1.batch.mockResolvedValueOnce([
+        { success: true, meta: { changes: 0 } },
+        { success: true, meta: { changes: 0 } },
+      ]);
+      mockD1._stmt.first.mockResolvedValueOnce({ status: 'failed' });
+
+      const result = await handleStopSubtask(
+        1,
+        { taskId: 'child-001' },
+        parentTokenData,
+        mockEnv as Env
+      );
+
+      const content = JSON.parse(
+        (result.result as { content: Array<{ text: string }> }).content[0].text
+      );
+      expect(content).toMatchObject({ stopped: true, terminalStatePreserved: true });
+      expect(mockStopAgentSessionOnNode).toHaveBeenCalled();
+      expect(mockCleanupTerminalTaskResources).not.toHaveBeenCalled();
+    });
+
+    it('retries cancellation when a concurrent transition keeps the child active', async () => {
+      mockD1ResultSequence([
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspace_id: 'ws-child-001',
+            project_id: 'proj-001',
+            parent_task_id: 'parent-task-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+            node_id: 'node-001',
+            chat_session_id: 'chat-child-001',
+            status: 'running',
+          },
+        ],
+        [{ id: 'agent-session-001' }],
+      ]);
+      mockD1.batch
+        .mockResolvedValueOnce([
+          { success: true, meta: { changes: 0 } },
+          { success: true, meta: { changes: 0 } },
+        ])
+        .mockResolvedValueOnce([
+          { success: true, meta: { changes: 1 } },
+          { success: true, meta: { changes: 1 } },
+        ]);
+      mockD1._stmt.first.mockResolvedValueOnce({ status: 'delegated' });
+
+      const result = await handleStopSubtask(
+        1,
+        { taskId: 'child-001' },
+        parentTokenData,
+        mockEnv as Env
+      );
+
+      expect(result.error).toBeUndefined();
+      expect(mockD1.batch).toHaveBeenCalledTimes(2);
+      expect(mockCleanupTerminalTaskResources).toHaveBeenCalledWith(
+        expect.anything(),
+        'child-001',
+        expect.objectContaining({ status: 'cancelled' })
+      );
+    });
+
+    it('honors the configured task-status CAS attempt bound', async () => {
+      mockD1ResultSequence([
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspace_id: 'ws-child-001',
+            project_id: 'proj-001',
+            parent_task_id: 'parent-task-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+            node_id: 'node-001',
+            chat_session_id: 'chat-child-001',
+            status: 'running',
+          },
+        ],
+        [{ id: 'agent-session-001' }],
+      ]);
+      mockD1.batch.mockResolvedValueOnce([
+        { success: true, meta: { changes: 0 } },
+        { success: true, meta: { changes: 0 } },
+      ]);
+      mockD1._stmt.first.mockResolvedValueOnce({ status: 'delegated' });
+
+      const result = await handleStopSubtask(1, { taskId: 'child-001' }, parentTokenData, {
+        ...mockEnv,
+        ORCHESTRATOR_STOP_CAS_MAX_ATTEMPTS: '1',
+      } as Env);
+
+      expect(result.error?.message).toContain('task cancellation failed');
+      expect(mockD1.batch).toHaveBeenCalledTimes(1);
+      expect(mockCleanupTerminalTaskResources).not.toHaveBeenCalled();
+    });
+
+    it('reports cancellation persistence failure when D1 returns no transition result', async () => {
+      mockD1ResultSequence([
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspace_id: 'ws-child-001',
+            project_id: 'proj-001',
+            parent_task_id: 'parent-task-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+            node_id: 'node-001',
+            chat_session_id: 'chat-child-001',
+            status: 'running',
+          },
+        ],
+        [{ id: 'agent-session-001' }],
+      ]);
+      mockD1.batch.mockResolvedValueOnce([]);
+
+      const result = await handleStopSubtask(
+        1,
+        { taskId: 'child-001' },
+        parentTokenData,
+        mockEnv as Env
+      );
+
+      expect(result.error?.message).toContain('task cancellation failed');
+      expect(mockCleanupTerminalTaskResources).not.toHaveBeenCalled();
+    });
+
+    it('reports cleanup failure after persisting cancellation', async () => {
+      mockD1ResultSequence([
+        [
+          {
+            id: 'child-001',
+            status: 'in_progress',
+            workspace_id: 'ws-child-001',
+            project_id: 'proj-001',
+            parent_task_id: 'parent-task-001',
+          },
+        ],
+        [
+          {
+            id: 'ws-child-001',
+            node_id: 'node-001',
+            chat_session_id: 'chat-child-001',
+            status: 'running',
+          },
+        ],
+        [{ id: 'agent-session-001' }],
+      ]);
+      mockCleanupTerminalTaskResources.mockRejectedValueOnce(new Error('cleanup unavailable'));
+
+      const result = await handleStopSubtask(
+        1,
+        { taskId: 'child-001' },
+        parentTokenData,
+        mockEnv as Env
+      );
+
+      expect(result.error?.message).toContain('runtime cleanup failed');
+      expect(mockSyncTriggerExecutionStatus).toHaveBeenCalledWith(
+        mockEnv.DATABASE,
+        'child-001',
+        'cancelled'
+      );
     });
 
     it('should reject when node is in destroyed state', async () => {

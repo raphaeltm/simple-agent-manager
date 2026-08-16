@@ -45,31 +45,30 @@ export const SessionTreeItem = memo(function SessionTreeItem({
       task: {
         id: taskInfo.id,
         status: taskInfo.status,
+        errorMessage: taskInfo.errorMessage,
+        executionStep: taskInfo.executionStep,
         taskMode: taskInfo.taskMode,
       },
     };
   }, [session, taskInfo]);
 
-  const blockedByTitle = taskInfo?.blocked
-    ? getBlockedByTitle(session, taskInfoMap)
-    : undefined;
+  const blockedByTitle = taskInfo?.blocked ? getBlockedByTitle(session, taskInfoMap) : undefined;
 
   const isSelected = selectedSessionId === session.id;
 
-  const badge = onShowHierarchy && session.taskId ? (
-    <HierarchyIndicator
-      taskId={session.taskId}
-      taskInfoMap={taskInfoMap}
-      onShowHierarchy={onShowHierarchy}
-    />
-  ) : null;
+  const badge =
+    onShowHierarchy && session.taskId ? (
+      <HierarchyIndicator
+        taskId={session.taskId}
+        taskInfoMap={taskInfoMap}
+        onShowHierarchy={onShowHierarchy}
+      />
+    ) : null;
 
   return (
     <div
       style={{
-        background: isSelected
-          ? 'var(--sam-color-bg-inset, #0d1816)'
-          : 'transparent',
+        background: isSelected ? 'var(--sam-color-bg-inset, #0d1816)' : 'transparent',
         borderBottom: '1px solid var(--sam-color-border-default, #29423b)',
       }}
       className={
@@ -95,7 +94,7 @@ export const SessionTreeItem = memo(function SessionTreeItem({
 
 function getBlockedByTitle(
   session: ChatSessionListItem,
-  taskInfoMap: Map<string, TaskInfo>,
+  taskInfoMap: Map<string, TaskInfo>
 ): string | undefined {
   if (!session.taskId) return undefined;
   const info = taskInfoMap.get(session.taskId);

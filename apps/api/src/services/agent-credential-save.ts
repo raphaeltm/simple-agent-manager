@@ -26,6 +26,7 @@ import { getCredentialEncryptionKey } from '../lib/secrets';
 import { ulid } from '../lib/ulid';
 import { errors } from '../middleware/error';
 import { syncAgentCredentialToCC } from './composable-credentials/agent-sync';
+import { getClaudeOauthTokenMaxLength } from './credential-setup-config';
 import { encrypt } from './encryption';
 import { CredentialValidator } from './validation';
 
@@ -64,7 +65,12 @@ export async function saveAgentCredentialForUser(
 
   // Defensive format validation (callers should validate too, but this class of
   // code must never write an unparseable credential).
-  const validation = CredentialValidator.validateCredential(credential, credentialKind, agentType);
+  const validation = CredentialValidator.validateCredential(
+    credential,
+    credentialKind,
+    agentType,
+    getClaudeOauthTokenMaxLength(env)
+  );
   if (!validation.valid) {
     throw errors.badRequest(validation.error || 'Invalid credential format');
   }

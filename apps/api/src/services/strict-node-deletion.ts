@@ -13,6 +13,7 @@ import { getCredentialEncryptionKey } from '../lib/secrets';
 import { deleteDNSRecord } from './dns';
 import { persistError } from './observability';
 import { createProviderForUser } from './provider-credentials';
+import { destroyVmAgentContainer } from './vm-agent-container';
 
 type NodeDb = ReturnType<typeof drizzle<typeof schema>>;
 type NodeRow = typeof schema.nodes.$inferSelect;
@@ -194,20 +195,24 @@ async function persistStrictDnsCleanupError(
     err: unknown;
   }
 ): Promise<void> {
-  await persistError(env.OBSERVABILITY_DATABASE, {
-    source: 'api',
-    level: 'error',
-    message: `Strict node DNS cleanup failed: ${input.err instanceof Error ? input.err.message : String(input.err)}`,
-    stack: input.err instanceof Error ? input.err.stack : undefined,
-    context: {
-      component: 'node-deletion',
-      recoveryType: 'strict_node_dns_cleanup_failure',
+  await persistError(
+    env.OBSERVABILITY_DATABASE,
+    {
+      source: 'api',
+      level: 'error',
+      message: `Strict node DNS cleanup failed: ${input.err instanceof Error ? input.err.message : String(input.err)}`,
+      stack: input.err instanceof Error ? input.err.stack : undefined,
+      context: {
+        component: 'node-deletion',
+        recoveryType: 'strict_node_dns_cleanup_failure',
+        nodeId: input.nodeId,
+        backendDnsRecordId: input.backendDnsRecordId,
+      },
       nodeId: input.nodeId,
-      backendDnsRecordId: input.backendDnsRecordId,
+      userId: input.userId,
     },
-    nodeId: input.nodeId,
-    userId: input.userId,
-  }, env);
+    env
+  );
 }
 
 async function deleteStrictNodeDnsRecord(node: NodeRow, userId: string, env: Env): Promise<void> {
@@ -252,6 +257,12 @@ export async function deleteNodeResourcesStrict(
   // against the user's hardware — even defensively if a providerInstanceId were somehow set.
   // The tunnel CNAME teardown lands in Phase 1. See architecture-critique #2.
   if (isUserOwnedNodeClass(node.nodeClass)) {
+    return { providerVm: 'no-instance' };
+  }
+
+  if (node.runtime === 'cf-container') {
+    await destroyVmAgentContainer(env, node.id);
+    await deleteStrictNodeDnsRecord(node, userId, env);
     return { providerVm: 'no-instance' };
   }
 

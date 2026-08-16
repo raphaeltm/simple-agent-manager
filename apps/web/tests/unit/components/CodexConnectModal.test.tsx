@@ -6,6 +6,7 @@ const h = vi.hoisted(() => ({
   getAgentCredentialSetupSession: vi.fn(),
   cancelAgentCredentialSetupSession: vi.fn(),
   getAgentCredentialSetupConfig: vi.fn(),
+  submitAgentCredentialSetupVerificationCode: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -14,6 +15,7 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   getAgentCredentialSetupSession: h.getAgentCredentialSetupSession,
   cancelAgentCredentialSetupSession: h.cancelAgentCredentialSetupSession,
   getAgentCredentialSetupConfig: h.getAgentCredentialSetupConfig,
+  submitAgentCredentialSetupVerificationCode: h.submitAgentCredentialSetupVerificationCode,
 }));
 
 import {
@@ -30,6 +32,7 @@ const SESSION_ID = 'sess_setup_01';
 const USER_CODE = 'ABCD-EFGH';
 const OPENAI_VERIFICATION_URL = 'https://auth.openai.com/device';
 const CLAUDE_VERIFICATION_URL = 'https://claude.ai/oauth/device';
+const CLAUDE_VERIFICATION_CODE = 'abc123#state456';
 
 function makeSession(
   status: AgentCredentialSetupStatus,
@@ -53,6 +56,7 @@ describe('AgentCredentialConnectModal', () => {
     h.getAgentCredentialSetupSession.mockReset();
     h.cancelAgentCredentialSetupSession.mockReset();
     h.getAgentCredentialSetupConfig.mockReset();
+    h.submitAgentCredentialSetupVerificationCode.mockReset();
     vi.stubEnv('VITE_CODEX_SETUP_POLL_MS', '20');
     vi.stubEnv('VITE_CODEX_SETUP_SUCCESS_CLOSE_MS', '10');
     h.cancelAgentCredentialSetupSession.mockResolvedValue({ id: SESSION_ID, status: 'cancelled' });
@@ -108,6 +112,125 @@ describe('AgentCredentialConnectModal', () => {
     expect(openLink).toHaveAttribute('href', CLAUDE_VERIFICATION_URL);
     expect(screen.queryByRole('button', { name: /copy code/i })).not.toBeInTheDocument();
     expect(screen.queryByTestId('codex-terminal')).not.toBeInTheDocument();
+  });
+
+  it('lets Claude users paste the browser verification code and complete setup', async () => {
+    const onConnected = vi.fn();
+    h.createAgentCredentialSetupSession.mockResolvedValue({
+      kind: 'created',
+      session: makeSession('provisioning', { agentType: 'claude-code' }),
+    });
+    h.getAgentCredentialSetupSession.mockResolvedValue(
+      makeSession('waiting_for_user', {
+        agentType: 'claude-code',
+        verificationUrl: CLAUDE_VERIFICATION_URL,
+        userCode: null,
+      })
+    );
+    h.submitAgentCredentialSetupVerificationCode.mockResolvedValue(
+      makeSession('completed', { agentType: 'claude-code' })
+    );
+
+    render(
+      <AgentCredentialConnectModal
+        agentType="claude-code"
+        isOpen
+        onClose={vi.fn()}
+        onConnected={onConnected}
+      />
+    );
+
+    await screen.findByRole('link', { name: /open claude sign-in/i });
+    const tokenInput = screen.getByLabelText(/paste the code claude shows you/i);
+    fireEvent.change(tokenInput, {
+      target: {
+        value: ` ${CLAUDE_VERIFICATION_CODE}
+`,
+      },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /continue sign-in/i }));
+
+    await waitFor(() =>
+      expect(h.submitAgentCredentialSetupVerificationCode).toHaveBeenCalledWith(
+        SESSION_ID,
+        CLAUDE_VERIFICATION_CODE
+      )
+    );
+    await waitFor(() => expect(onConnected).toHaveBeenCalledOnce());
+    expect(await screen.findByText(/Claude Code connected/)).toBeInTheDocument();
+  });
+
+  it('ignores an older poll result after Claude code submission completes', async () => {
+    let resolvePoll: ((session: AgentCredentialSetupSession) => void) | undefined;
+    h.createAgentCredentialSetupSession.mockResolvedValue({
+      kind: 'created',
+      session: makeSession('waiting_for_user', {
+        agentType: 'claude-code',
+        verificationUrl: CLAUDE_VERIFICATION_URL,
+        userCode: null,
+      }),
+    });
+    h.getAgentCredentialSetupSession.mockReturnValue(
+      new Promise((resolve) => {
+        resolvePoll = resolve;
+      })
+    );
+    h.submitAgentCredentialSetupVerificationCode.mockResolvedValue(
+      makeSession('completed', { agentType: 'claude-code' })
+    );
+
+    render(<AgentCredentialConnectModal agentType="claude-code" isOpen onClose={vi.fn()} />);
+    await screen.findByRole('link', { name: /open claude sign-in/i });
+    await waitFor(() => expect(h.getAgentCredentialSetupSession).toHaveBeenCalledOnce());
+
+    fireEvent.change(screen.getByLabelText(/paste the code claude shows you/i), {
+      target: { value: CLAUDE_VERIFICATION_CODE },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /continue sign-in/i }));
+    expect(await screen.findByText(/Claude Code connected/)).toBeInTheDocument();
+
+    resolvePoll?.(
+      makeSession('waiting_for_user', {
+        agentType: 'claude-code',
+        verificationUrl: CLAUDE_VERIFICATION_URL,
+      })
+    );
+    await Promise.resolve();
+    expect(screen.getByText(/Claude Code connected/)).toBeInTheDocument();
+  });
+
+  it('blocks a Claude code paste missing its #state half before any server round-trip', async () => {
+    // Claude's browser page shows `<code>#<state>`; copying only the code half
+    // is guaranteed to fail inside the CLI, so the modal must catch it with
+    // actionable guidance instead of burning the setup session.
+    h.createAgentCredentialSetupSession.mockResolvedValue({
+      kind: 'created',
+      session: makeSession('provisioning', { agentType: 'claude-code' }),
+    });
+    h.getAgentCredentialSetupSession.mockResolvedValue(
+      makeSession('waiting_for_user', {
+        agentType: 'claude-code',
+        verificationUrl: CLAUDE_VERIFICATION_URL,
+        userCode: null,
+      })
+    );
+
+    render(
+      <AgentCredentialConnectModal
+        agentType="claude-code"
+        isOpen
+        onClose={vi.fn()}
+        onConnected={vi.fn()}
+      />
+    );
+
+    await screen.findByRole('link', { name: /open claude sign-in/i });
+    const tokenInput = screen.getByLabelText(/paste the code claude shows you/i);
+    fireEvent.change(tokenInput, { target: { value: 'abc123-no-state-half' } });
+    fireEvent.click(screen.getByRole('button', { name: /continue sign-in/i }));
+
+    expect(await screen.findByText(/copy the entire code claude shows/i)).toBeInTheDocument();
+    expect(h.submitAgentCredentialSetupVerificationCode).not.toHaveBeenCalled();
   });
 
   it('reports completion without exposing a terminal surface', async () => {

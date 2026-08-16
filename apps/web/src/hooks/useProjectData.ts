@@ -1,11 +1,11 @@
 import type { ProjectDetailResponse, ProjectSummary } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
-import * as api from '../lib/api';
+import { PROJECT_POLL_INTERVAL_MS } from '../lib/project-query-config';
+import { projectDetailQueryOptions, projectListQueryOptions } from '../lib/query-options';
 
 interface UseProjectListOptions {
-  status?: string;
-  sort?: string;
+  queryScope: string;
   limit?: number;
   pollInterval?: number;
 }
@@ -18,40 +18,30 @@ interface UseProjectListResult {
   refresh: () => void;
 }
 
-export function useProjectList(options: UseProjectListOptions = {}): UseProjectListResult {
-  const { status, sort, limit, pollInterval = 30000 } = options;
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [isRefreshing, setIsRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const hasLoadedRef = useRef(false);
+export function useProjectList(options: UseProjectListOptions): UseProjectListResult {
+  const { queryScope, limit, pollInterval = PROJECT_POLL_INTERVAL_MS } = options;
+  const query = useQuery({
+    ...projectListQueryOptions(queryScope, limit),
+    enabled: Boolean(queryScope),
+    refetchInterval: pollInterval > 0 ? pollInterval : false,
+  });
 
-  const fetchProjects = useCallback(async () => {
-    if (hasLoadedRef.current) {
-      setIsRefreshing(true);
-    }
-    try {
-      const result = await api.listProjects(limit);
-      setProjects(result.projects);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load projects');
-    } finally {
-      hasLoadedRef.current = true;
-      setLoading(false);
-      setIsRefreshing(false);
-    }
-  }, [status, sort, limit]);
-
-  useEffect(() => {
-    fetchProjects();
-    if (pollInterval > 0) {
-      const interval = setInterval(fetchProjects, pollInterval);
-      return () => clearInterval(interval);
-    }
-  }, [fetchProjects, pollInterval]);
-
-  return { projects, loading, isRefreshing, error, refresh: fetchProjects };
+  return {
+    projects: query.data ?? [],
+    loading: query.isPending && query.data === undefined,
+    isRefreshing: query.isFetching && query.data !== undefined,
+    error:
+      query.data === undefined
+        ? query.error instanceof Error
+          ? query.error.message
+          : query.error
+            ? 'Failed to load projects'
+            : null
+        : null,
+    refresh: () => {
+      void query.refetch();
+    },
+  };
 }
 
 interface UseProjectDetailResult {
@@ -63,27 +53,28 @@ interface UseProjectDetailResult {
   refresh: () => void;
 }
 
-export function useProjectDetail(projectId: string | undefined): UseProjectDetailResult {
-  const [project, setProject] = useState<UseProjectDetailResult['project']>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+export function useProjectDetail(
+  projectId: string | undefined,
+  queryScope: string
+): UseProjectDetailResult {
+  const query = useQuery({
+    ...projectDetailQueryOptions(queryScope, projectId ?? ''),
+    enabled: Boolean(projectId && queryScope),
+  });
 
-  const fetchProject = useCallback(async () => {
-    if (!projectId) return;
-    try {
-      const result = await api.getProject(projectId);
-      setProject(result as UseProjectDetailResult['project']);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load project');
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    fetchProject();
-  }, [fetchProject]);
-
-  return { project, loading, error, refresh: fetchProject };
+  return {
+    project: (query.data ?? null) as UseProjectDetailResult['project'],
+    loading: Boolean(projectId) && query.isPending && query.data === undefined,
+    error:
+      query.data === undefined
+        ? query.error instanceof Error
+          ? query.error.message
+          : query.error
+            ? 'Failed to load project'
+            : null
+        : null,
+    refresh: () => {
+      void query.refetch();
+    },
+  };
 }

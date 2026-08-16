@@ -67,6 +67,100 @@ describe('strict observability persistence', () => {
     });
   });
 
+  it('monotonically enriches a stable VM incident with task and session correlation', async () => {
+    const base = {
+      id: '01KZ8V0GMXQ4ZCSERPRT2X2K6T',
+      source: 'vm-agent' as const,
+      level: 'error' as const,
+      message: 'prompt force-stopped',
+      nodeId: 'node-1',
+      workspaceId: 'workspace-1',
+      timestamp: 1_786_000_000_000,
+    };
+
+    await persistErrorBatchStrict(d1, [base]);
+    await persistErrorBatchStrict(d1, [{ ...base, taskId: 'task-1', sessionId: 'session-1' }]);
+    // A later retry whose main-D1 lookup is temporarily unavailable still
+    // acknowledges the durable VM report without clearing prior enrichment.
+    await persistErrorBatchStrict(d1, [base]);
+
+    expect(sqlite.prepare('SELECT task_id, session_id FROM platform_errors').get()).toEqual({
+      task_id: 'task-1',
+      session_id: 'session-1',
+    });
+  });
+
+  it('rejects rebinding an already-correlated stable incident', async () => {
+    const base = {
+      id: '01KZ8V0GMXQ4ZCSERPRT2X2K6U',
+      source: 'vm-agent' as const,
+      level: 'error' as const,
+      message: 'prompt force-stopped',
+      nodeId: 'node-1',
+      workspaceId: 'workspace-1',
+      taskId: 'task-1',
+      sessionId: 'session-1',
+      timestamp: 1_786_000_000_000,
+    };
+    await persistErrorBatchStrict(d1, [base]);
+    await expect(
+      persistErrorBatchStrict(d1, [{ ...base, taskId: 'task-2', sessionId: 'session-2' }])
+    ).rejects.toThrow('different metadata');
+  });
+
+  it.each([
+    ['task', { taskId: 'task-2', sessionId: 'session-1' }],
+    ['session', { taskId: 'task-1', sessionId: 'session-2' }],
+  ])('rejects an independent %s-only correlation conflict', async (_field, conflicting) => {
+    const base = {
+      id: '01KZ8V0GMXQ4ZCSERPRT2X2K6V',
+      source: 'vm-agent' as const,
+      level: 'error' as const,
+      message: 'prompt force-stopped',
+      nodeId: 'node-1',
+      workspaceId: 'workspace-1',
+      taskId: 'task-1',
+      sessionId: 'session-1',
+      timestamp: 1_786_000_000_000,
+    };
+    await persistErrorBatchStrict(d1, [base]);
+
+    await expect(persistErrorBatchStrict(d1, [{ ...base, ...conflicting }])).rejects.toThrow(
+      'different metadata'
+    );
+    expect(sqlite.prepare('SELECT task_id, session_id FROM platform_errors').get()).toEqual({
+      task_id: 'task-1',
+      session_id: 'session-1',
+    });
+  });
+
+  it('rejects timestamp-shifted replay before correlation enrichment', async () => {
+    const base = {
+      id: '01KZ8V0GMXQ4ZCSERPRT2X2K6W',
+      source: 'vm-agent' as const,
+      level: 'error' as const,
+      message: 'prompt force-stopped',
+      nodeId: 'node-1',
+      workspaceId: 'workspace-1',
+      timestamp: 1_786_000_000_000,
+    };
+    await persistErrorBatchStrict(d1, [base]);
+
+    await expect(
+      persistErrorBatchStrict(d1, [
+        {
+          ...base,
+          timestamp: base.timestamp + 3_600_000,
+          taskId: 'task-1',
+          sessionId: 'session-1',
+        },
+      ])
+    ).rejects.toThrow('different metadata');
+    expect(
+      sqlite.prepare('SELECT timestamp, task_id, session_id FROM platform_errors').get()
+    ).toEqual({ timestamp: base.timestamp, task_id: null, session_id: null });
+  });
+
   it('rejects an oversized strict batch instead of silently acknowledging a prefix', async () => {
     const inputs = ['Q', 'R'].map((suffix) => ({
       id: `01KZ8V0GMXQ4ZCSERPRT2X2K6${suffix}`,

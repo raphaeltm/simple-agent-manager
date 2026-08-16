@@ -5,6 +5,7 @@ import { classifyFailure } from '../../src/failure-classification';
 describe('classifyFailure', () => {
   it.each([
     ['cancelled', 'Task was cancelled by the user'],
+    ['input-expired', 'Human input request expired after timeout'],
     ['capacity', 'Cloud provider reported server limit reached'],
     ['credentials', 'Authentication failed: token expired'],
     ['provider-overload', 'Provider returned 529 overloaded'],
@@ -44,6 +45,14 @@ describe('classifyFailure', () => {
     );
   });
 
+  it.each([
+    ['stopped_by_parent: Session stalled', 'cancelled'],
+    ['Stopped by parent: No longer needed', 'cancelled'],
+    ['Human input request expired after timeout', 'input-expired'],
+  ] as const)('treats normal lifecycle outcome %s as non-diagnosable', (message, code) => {
+    expect(classifyFailure(message)).toMatchObject({ code, diagnosable: false });
+  });
+
   it.each([undefined, null, '', 'an entirely novel failure mode'])(
     'falls back to unknown for unclassified input %s',
     (message) => {
@@ -54,6 +63,7 @@ describe('classifyFailure', () => {
         guidance:
           'Read the error details below. Copy the debug report and paste it to an agent to investigate.',
         retryable: true,
+        diagnosable: true,
       });
     }
   );

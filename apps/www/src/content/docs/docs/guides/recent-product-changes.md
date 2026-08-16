@@ -101,7 +101,7 @@ Before anything reaches the model, SAM strips user IDs, IP addresses, user-agent
 
 ### Connect a subscription without a terminal
 
-Connecting Claude Code or OpenAI Codex to a paid subscription used to mean running `claude setup-token` or pasting the contents of `~/.codex/auth.json` — steps that are awkward on mobile and impossible without a local terminal. There's now a **guided sign-in**: choose **Connect with Claude Code** or **Connect with Codex**, open the provider's sign-in page, enter the short verification code SAM shows you, and the panel connects itself once the provider confirms.
+Connecting Claude Code or OpenAI Codex to a paid subscription used to mean running `claude setup-token` or pasting the contents of `~/.codex/auth.json` — steps that are awkward on mobile and impossible without a local terminal. There's now a **guided sign-in**: choose **Connect with Claude Code** or **Connect with Codex** and open the provider's sign-in page. Codex uses the short code SAM displays; Claude displays a `code#state` value that you paste back into SAM. The panel connects itself once the provider confirms.
 
 The manual token/`auth.json` fields are still there as a fallback, but you no longer need them for the common case. See [Connecting a subscription with guided sign-in](/docs/guides/agents/#connecting-a-subscription-with-guided-sign-in).
 

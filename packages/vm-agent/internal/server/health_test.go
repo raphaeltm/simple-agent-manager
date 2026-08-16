@@ -452,7 +452,9 @@ func TestDeploymentHeartbeatExplicitRetireEnvironment(t *testing.T) {
 
 	deadline := time.Now().Add(2 * time.Second)
 	for time.Now().Before(deadline) {
-		if _, err := os.Stat(filepath.Join(h.sitesDir, "env-a.caddy")); os.IsNotExist(err) {
+		_, enginePresent := h.server.deploymentEnginesSnapshot()["env-a"]
+		_, snippetErr := os.Stat(filepath.Join(h.sitesDir, "env-a.caddy"))
+		if os.IsNotExist(snippetErr) && !enginePresent {
 			break
 		}
 		time.Sleep(10 * time.Millisecond)

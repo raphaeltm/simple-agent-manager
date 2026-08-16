@@ -67,13 +67,7 @@ describe('FailureCard', () => {
   });
 
   it('renders classification label and explanation for agent crash', () => {
-    render(
-      <FailureCard
-        projectId="proj-1"
-        taskEmbed={makeTaskEmbed()}
-        recoverable={false}
-      />
-    );
+    render(<FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />);
 
     expect(screen.getByText('Agent crashed')).toBeInTheDocument();
     expect(screen.getByText(/exited unexpectedly/i)).toBeInTheDocument();
@@ -108,14 +102,33 @@ describe('FailureCard', () => {
     expect(screen.getByText('Cancelled')).toBeInTheDocument();
   });
 
-  it('shows Recoverable badge when recoverable', () => {
+  it('renders expected human-input expiry as a neutral lifecycle outcome', async () => {
+    mocks.useAuth.mockReturnValue({ isSuperadmin: true });
     render(
       <FailureCard
         projectId="proj-1"
-        taskEmbed={makeTaskEmbed()}
-        recoverable={true}
+        taskEmbed={makeTaskEmbed({
+          errorMessage: 'Human input request expired after timeout',
+          status: 'failed',
+        })}
+        recoverable={false}
       />
     );
+
+    expect(screen.getByText('Input request expired')).toBeInTheDocument();
+    expect(screen.queryByText('Retryable')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Input request expired/i }));
+    await waitFor(() => {
+      expect(screen.getByText(/No debugging is needed/i)).toBeInTheDocument();
+    });
+    expect(screen.getByText('Reason')).toBeInTheDocument();
+    expect(screen.queryByText('Error')).not.toBeInTheDocument();
+    expect(screen.queryByText('Copy debug report')).not.toBeInTheDocument();
+    expect(screen.queryByText('View in admin errors')).not.toBeInTheDocument();
+  });
+
+  it('shows Recoverable badge when recoverable', () => {
+    render(<FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={true} />);
 
     expect(screen.getByText('Recoverable')).toBeInTheDocument();
   });
@@ -147,13 +160,7 @@ describe('FailureCard', () => {
   });
 
   it('renders lifecycle timeline events from listTaskEvents', async () => {
-    render(
-      <FailureCard
-        projectId="proj-1"
-        taskEmbed={makeTaskEmbed()}
-        recoverable={false}
-      />
-    );
+    render(<FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />);
 
     fireEvent.click(screen.getByRole('button', { name: /Agent crashed/i }));
 
@@ -248,18 +255,16 @@ describe('FailureCard', () => {
       const link = screen.getByText('View in admin errors');
       expect(link).toBeInTheDocument();
       expect(link.closest('a')).toHaveAttribute('href', expect.stringContaining('/admin/errors'));
-      expect(link.closest('a')).toHaveAttribute('href', expect.stringContaining('sessionId=sess-1'));
+      expect(link.closest('a')).toHaveAttribute(
+        'href',
+        expect.stringContaining('sessionId=sess-1')
+      );
+      expect(link.closest('a')).toHaveAttribute('href', expect.stringContaining('taskId=task-001'));
     });
   });
 
   it('shows recoverable guidance when expanded', async () => {
-    render(
-      <FailureCard
-        projectId="proj-1"
-        taskEmbed={makeTaskEmbed()}
-        recoverable={true}
-      />
-    );
+    render(<FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={true} />);
 
     fireEvent.click(screen.getByRole('button', { name: /Agent crashed/i }));
 
@@ -287,13 +292,7 @@ describe('FailureCard', () => {
   it('handles empty events gracefully', async () => {
     mocks.listTaskEvents.mockResolvedValue({ events: [] });
 
-    render(
-      <FailureCard
-        projectId="proj-1"
-        taskEmbed={makeTaskEmbed()}
-        recoverable={false}
-      />
-    );
+    render(<FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />);
 
     fireEvent.click(screen.getByRole('button', { name: /Agent crashed/i }));
 
@@ -305,13 +304,7 @@ describe('FailureCard', () => {
   it('handles event loading error gracefully', async () => {
     mocks.listTaskEvents.mockRejectedValue(new Error('Network error'));
 
-    render(
-      <FailureCard
-        projectId="proj-1"
-        taskEmbed={makeTaskEmbed()}
-        recoverable={false}
-      />
-    );
+    render(<FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />);
 
     fireEvent.click(screen.getByRole('button', { name: /Agent crashed/i }));
 
@@ -328,13 +321,7 @@ describe('FailureCard', () => {
       configurable: true,
     });
 
-    render(
-      <FailureCard
-        projectId="proj-1"
-        taskEmbed={makeTaskEmbed()}
-        recoverable={false}
-      />
-    );
+    render(<FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />);
 
     fireEvent.click(screen.getByRole('button', { name: /Agent crashed/i }));
     await waitFor(() => {
@@ -355,13 +342,7 @@ describe('FailureCard', () => {
       configurable: true,
     });
 
-    render(
-      <FailureCard
-        projectId="proj-1"
-        taskEmbed={makeTaskEmbed()}
-        recoverable={false}
-      />
-    );
+    render(<FailureCard projectId="proj-1" taskEmbed={makeTaskEmbed()} recoverable={false} />);
 
     fireEvent.click(screen.getByRole('button', { name: /Agent crashed/i }));
     await waitFor(() => {

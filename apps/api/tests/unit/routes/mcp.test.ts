@@ -527,6 +527,7 @@ describe('MCP Routes', () => {
       expect(deploymentGuideTool.inputSchema.properties).toEqual({});
       expect(deploymentGuideTool.inputSchema.required).toBeUndefined();
       // Trigger tools
+      expect(toolNames).toContain('list_triggers');
       expect(toolNames).toContain('create_trigger');
       expect(toolNames).toContain('update_trigger');
       expect(toolNames).toContain('delete_trigger');
@@ -562,7 +563,7 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('list_deployment_routes');
       expect(toolNames).toContain('list_deployment_environment_config');
       expect(toolNames).toContain('set_deployment_environment_config');
-      expect(body.result.tools).toHaveLength(99);
+      expect(body.result.tools).toHaveLength(100);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {
@@ -583,6 +584,35 @@ describe('MCP Routes', () => {
         expect(tool.inputSchema).toBeDefined();
         expect(tool.inputSchema.type).toBe('object');
       }
+    });
+
+    it('should advertise list_triggers with only optional bounded filter inputs', async () => {
+      const res = await mcpRequest(app, jsonRpcRequest('tools/list'));
+
+      const body = await res.json();
+      const listTriggers = body.result.tools.find(
+        (tool: { name: string }) => tool.name === 'list_triggers'
+      );
+
+      expect(listTriggers.inputSchema.required).toBeUndefined();
+      expect(listTriggers.inputSchema.additionalProperties).toBe(false);
+      expect(Object.keys(listTriggers.inputSchema.properties)).toEqual([
+        'status',
+        'sourceType',
+        'limit',
+      ]);
+      expect(listTriggers.inputSchema.properties.status.enum).toEqual([
+        'active',
+        'paused',
+        'disabled',
+      ]);
+      expect(listTriggers.inputSchema.properties.sourceType.enum).toEqual([
+        'cron',
+        'webhook',
+        'github',
+      ]);
+      expect(listTriggers.inputSchema.properties.limit.type).toBe('number');
+      expect(listTriggers.inputSchema.properties.limit.minimum).toBe(1);
     });
 
     it('should require message parameter for update_task_status', async () => {

@@ -135,7 +135,12 @@ import {
   handleSearchTasks,
   handleUpdateTaskStatus,
 } from './task-tools';
-import { handleCreateTrigger, handleDeleteTrigger, handleUpdateTrigger } from './trigger-tools';
+import {
+  handleCreateTrigger,
+  handleDeleteTrigger,
+  handleListTriggers,
+  handleUpdateTrigger,
+} from './trigger-tools';
 import {
   handleExposePort,
   handleGetCredentialStatus,
@@ -405,6 +410,8 @@ mcpRoutes.post('/', async (c) => {
           case 'display_from_library':
             return c.json(await handleDisplayFromLibrary(requestId, toolArgs, tokenData, c.env));
           // ─── Trigger management tools ────────────────────────────────
+          case 'list_triggers':
+            return c.json(await handleListTriggers(requestId, toolArgs, tokenData, c.env));
           case 'create_trigger':
             return c.json(await handleCreateTrigger(requestId, toolArgs, tokenData, c.env));
           case 'update_trigger':

@@ -2,8 +2,11 @@ import type { ProjectSummary } from '@simple-agent-manager/shared';
 import { Card, DropdownMenu, type DropdownMenuItem, StatusBadge } from '@simple-agent-manager/ui';
 import { useNavigate } from 'react-router';
 
+import { useProjectIntentPrefetch } from '../hooks/useProjectIntentPrefetch';
+
 interface ProjectSummaryCardProps {
   project: ProjectSummary;
+  queryScope: string;
   onDelete?: (id: string) => void;
 }
 
@@ -20,8 +23,10 @@ function formatRelativeTime(dateStr: string | null): string {
   return new Date(dateStr).toLocaleDateString();
 }
 
-export function ProjectSummaryCard({ project, onDelete }: ProjectSummaryCardProps) {
+export function ProjectSummaryCard({ project, queryScope, onDelete }: ProjectSummaryCardProps) {
   const navigate = useNavigate();
+  const { cancelHoverPrefetch, prefetchProject, scheduleHoverPrefetch } =
+    useProjectIntentPrefetch(queryScope);
 
   const workspaceCount = project.activeWorkspaceCount ?? 0;
   const sessionCount = project.activeSessionCount ?? 0;
@@ -58,6 +63,10 @@ export function ProjectSummaryCard({ project, onDelete }: ProjectSummaryCardProp
       className="cursor-pointer"
       role="button"
       tabIndex={0}
+      onMouseEnter={() => scheduleHoverPrefetch(project.id)}
+      onMouseLeave={cancelHoverPrefetch}
+      onFocus={() => prefetchProject(project.id)}
+      onTouchStart={() => prefetchProject(project.id)}
       onKeyDown={(e) => {
         if (e.key === 'Enter' || e.key === ' ') {
           e.preventDefault();

@@ -276,12 +276,19 @@ describe('deploy reusable workflow', () => {
     }
   });
 
-  it('passes the bounded diagnosis event-page limit into the web build', () => {
+  it('passes documented frontend limits and timing overrides into the web build', () => {
     const build = stepBlock('Build Applications');
 
-    expect(build).toContain(
-      "VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES: ${{ vars.VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES || '100' }}"
-    );
+    for (const mapping of [
+      "VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES: ${{ vars.VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES || '100' }}",
+      "VITE_PROJECT_LIST_LIMIT: ${{ vars.VITE_PROJECT_LIST_LIMIT || '50' }}",
+      "VITE_PROJECT_POLL_INTERVAL_MS: ${{ vars.VITE_PROJECT_POLL_INTERVAL_MS || '30000' }}",
+      "VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS: ${{ vars.VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS || '60000' }}",
+      "VITE_PROJECT_PREFETCH_DELAY_MS: ${{ vars.VITE_PROJECT_PREFETCH_DELAY_MS || '120' }}",
+      "VITE_BACKGROUND_FETCH_DELAY_MS: ${{ vars.VITE_BACKGROUND_FETCH_DELAY_MS || '150' }}",
+    ]) {
+      expect(build).toContain(mapping);
+    }
   });
 
   it('does not fail preflight when GitHub integration secrets are missing', () => {

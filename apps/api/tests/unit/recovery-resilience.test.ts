@@ -256,7 +256,7 @@ describe('node-cleanup OBSERVABILITY_DATABASE recording (TDF-7)', () => {
       nodeCleanupSource.indexOf('return true;')
     );
     const deleteIdx = helper.indexOf('deleteNodeResources');
-    const recordIdx = helper.indexOf('persistError(env.OBSERVABILITY_DATABASE');
+    const recordIdx = helper.indexOf('await persistError(');
     expect(deleteIdx).toBeGreaterThan(-1);
     expect(recordIdx).toBeGreaterThan(deleteIdx);
   });

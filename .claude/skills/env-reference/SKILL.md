@@ -114,6 +114,24 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY` — KV interval marker (default: `cleanup:deployment-releases:last-run`)
 - `COMPOSE_IMAGE_ARTIFACT_CLEANUP_BATCH_SIZE` — Maximum abandoned compose archives deleted per daily run (default: `250`)
 
+### Guided Agent Credential Setup
+
+- `MAX_CONCURRENT_SETUP_SESSIONS` — Concurrent Cloudflare Sandbox setup-session cap (default: `2`)
+- `SETUP_SESSION_TTL_MS` — Setup-session lifetime before teardown (default: `900000`)
+- `SETUP_SESSION_CAPTURE_POLL_MS` — Device-login and credential-capture poll interval (default: `3000`)
+- `CODEX_DEVICE_AUTH_REQUEST_TIMEOUT_MS` — Codex app-server JSON-RPC request timeout (default: `30000`)
+- `CLAUDE_SETUP_ENTER_DELAY_MS` — Delay before sending Enter as a separate stdin write after Claude's browser-displayed code is pasted into the CLI (default: `1000`)
+- `CLAUDE_SETUP_EXCHANGE_TIMEOUT_MS` — Maximum wait for Claude's CLI exchange to finish after code submission (default: `120000`)
+- `CLAUDE_SETUP_REJECTION_SETTLE_MS` — Wait for Ink redraws to settle before classifying the Claude CLI OAuth error line (default: `400`)
+- `CLAUDE_SETUP_VERIFICATION_POLL_MS` — Poll interval for the browser-code handoff file inside the Claude setup sandbox (default: `500`)
+- `CLAUDE_SETUP_TTY_COLUMNS` — PTY width used for `claude setup-token` to reduce opaque-token wrapping (default: `512`)
+- `CLAUDE_SETUP_OUTPUT_BUFFER_BYTES` — Maximum in-memory Claude PTY output retained for parsing (default: `32768`)
+- `CLAUDE_VERIFICATION_CODE_MAX_LENGTH` — Maximum accepted browser-displayed `code#state` length (default: `1024`)
+- `CLAUDE_SETUP_ERROR_DETAIL_MAX_LENGTH` — Maximum sanitized Claude CLI diagnostic surfaced to the user (default: `160`)
+- `CLAUDE_OAUTH_TOKEN_MAX_LENGTH` — Maximum captured Claude OAuth token length (default: `8192`)
+- `SETUP_SESSION_SWEEP_MAX_CANDIDATES` — Maximum expired setup sessions torn down per sweep (default: `50`)
+- `POOL_LEASE_BUFFER_MS` — Grace after the session TTL before a leaked setup-pool lease self-prunes (default: `300000`)
+
 ### Operational Control Loops
 
 - `CRON_SWEEPS_ENABLED_KV_KEY` — Fail-open KV brake key for the five-minute operational sweep (default: `control-loops:cron-enabled`)
@@ -214,9 +232,12 @@ by the read-only cron-liveness check.
 - `TASK_LIST_MAX_PAGE_SIZE` — Maximum task/project list page size
 - `CHAT_SESSION_MESSAGE_LIMIT` — Default page size for chat session message REST responses when no limit is requested — used by the 3s poll and load-more (default: 500)
 - `CHAT_SESSION_MESSAGE_MAX` — Ceiling any chat session message request is clamped to; the initial full-conversation load requests up to this (default: 50000)
+- `MCP_TRIGGER_LIST_LIMIT` — Default result count for the `list_triggers` MCP tool (default: 20)
+- `MCP_TRIGGER_LIST_MAX` — Maximum result count accepted by the `list_triggers` MCP tool (default: 100)
 
 ### Timeouts
 
+- `ORCHESTRATOR_STOP_CAS_MAX_ATTEMPTS` — Maximum task-status compare-and-set attempts after a parent hard-stops a child runtime (default: 2)
 - `TASK_CALLBACK_TIMEOUT_MS` — Timeout budget for delegated-task callback processing
 - `TASK_CALLBACK_RETRY_MAX_ATTEMPTS` — Retry budget for delegated-task callback processing
 - `TASK_RECONCILIATION_IDLE_MS` — Idle threshold before a visible task reconciliation check-in (default: 300000)

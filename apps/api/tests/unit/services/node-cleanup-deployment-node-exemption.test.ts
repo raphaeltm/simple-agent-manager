@@ -30,8 +30,9 @@ const deleteCalls: string[] = [];
 const stopCalls: string[] = [];
 
 vi.mock('../../../src/services/nodes', () => ({
-  deleteNodeResources: vi.fn(async (nodeId: string) => {
+  deleteNodeResourcesStrict: vi.fn(async (nodeId: string) => {
     deleteCalls.push(nodeId);
+    return { providerVm: 'deleted' as const };
   }),
   stopNodeResources: vi.fn(async (nodeId: string) => {
     stopCalls.push(nodeId);

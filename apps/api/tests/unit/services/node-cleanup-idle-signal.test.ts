@@ -19,14 +19,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
 import { runNodeCleanupSweep } from '../../../src/scheduled/node-cleanup';
-import { deleteNodeResources } from '../../../src/services/nodes';
+import { deleteNodeResourcesStrict } from '../../../src/services/nodes';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const deleteCalls: string[] = [];
 
 vi.mock('../../../src/services/nodes', () => ({
-  deleteNodeResources: vi.fn(async (nodeId: string) => {
+  deleteNodeResourcesStrict: vi.fn(async (nodeId: string) => {
     deleteCalls.push(nodeId);
+    return { providerVm: 'deleted' as const };
   }),
   stopNodeResources: vi.fn().mockResolvedValue(undefined),
 }));
@@ -101,8 +102,9 @@ function makeEnv(): Env {
 
 beforeEach(() => {
   deleteCalls.length = 0;
-  vi.mocked(deleteNodeResources).mockImplementation(async (nodeId: string) => {
+  vi.mocked(deleteNodeResourcesStrict).mockImplementation(async (nodeId: string) => {
     deleteCalls.push(nodeId);
+    return { providerVm: 'deleted' };
   });
   sqlite = new Database(':memory:');
   sqlite.exec(`
@@ -234,8 +236,8 @@ describe('idle reaping is immune to heartbeat activity', () => {
   it('two-sweep zombie check: a permanently failing candidate is not retried forever', async () => {
     // rule 47 — a candidate that can never be destroyed must still leave the
     // candidate set, or every sweep re-attempts it and the loop never converges.
-    const { deleteNodeResources } = await import('../../../src/services/nodes');
-    vi.mocked(deleteNodeResources).mockRejectedValue(new Error('provider unreachable'));
+    const { deleteNodeResourcesStrict } = await import('../../../src/services/nodes');
+    vi.mocked(deleteNodeResourcesStrict).mockRejectedValue(new Error('provider unreachable'));
 
     seedNode({ id: 'doomed', createdAt: ago(10 * HOUR), updatedAt: ago(1000) });
     seedWorkspace({

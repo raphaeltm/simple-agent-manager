@@ -304,6 +304,21 @@ describe('getAttentionState', () => {
     ).toBe('active');
   });
 
+  it('renders a failed task with an expected lifecycle reason as stopped', () => {
+    expect(
+      getAttentionState(
+        makeSession({
+          status: 'stopped',
+          task: {
+            id: 't-1',
+            status: 'failed',
+            errorMessage: 'Human input request expired after timeout',
+          },
+        })
+      )
+    ).toBe('stopped');
+  });
+
   it('returns stopped when no attention marker and null attention field', () => {
     expect(
       getAttentionState(

@@ -9,7 +9,11 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
-import { parseMs, parsePositiveInt, resolveCleanupConfig } from '../../../src/scheduled/node-cleanup/shared';
+import {
+  parseMs,
+  parsePositiveInt,
+  resolveCleanupConfig,
+} from '../../../src/scheduled/node-cleanup/shared';
 
 const logWarn = vi.fn();
 
@@ -21,7 +25,7 @@ vi.mock('../../../src/services/node-agent', () => ({
   deleteWorkspaceOnNode: vi.fn(),
   stopWorkspaceOnNode: vi.fn(),
 }));
-vi.mock('../../../src/services/nodes', () => ({ deleteNodeResources: vi.fn() }));
+vi.mock('../../../src/services/nodes', () => ({ deleteNodeResourcesStrict: vi.fn() }));
 vi.mock('../../../src/services/observability', () => ({ persistError: vi.fn() }));
 
 describe('parseMs', () => {

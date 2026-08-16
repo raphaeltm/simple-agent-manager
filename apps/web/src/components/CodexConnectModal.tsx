@@ -10,6 +10,7 @@ import {
   getAgentCredentialSetupSession,
   type GuidedSetupAgentType,
   isTerminalAgentCredentialSetupStatus,
+  submitAgentCredentialSetupVerificationCode,
 } from '../lib/api';
 
 interface AgentCredentialConnectModalProps {
@@ -80,6 +81,8 @@ function statusLabel(status: AgentCredentialSetupStatus, shortName: string): str
     case 'waiting_for_user':
     case 'capturing':
       return 'Waiting for sign-in';
+    case 'exchanging':
+      return 'Completing sign-in…';
     case 'saving':
       return 'Saving…';
     case 'completed':
@@ -109,9 +112,15 @@ export function AgentCredentialConnectModal({
   const [session, setSession] = useState<AgentCredentialSetupSession | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [verificationCode, setVerificationCode] = useState('');
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [submittingCode, setSubmittingCode] = useState(false);
   const [retryNonce, setRetryNonce] = useState(0);
   const sessionIdRef = useRef<string | null>(null);
   const finishedRef = useRef(false);
+  const codeSubmitInFlightRef = useRef(false);
+  const sessionUpdateGenerationRef = useRef(0);
+  const manualCloseTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onConnectedRef = useRef(onConnected);
   const onCloseRef = useRef(onClose);
 
@@ -130,8 +139,15 @@ export function AgentCredentialConnectModal({
     setSession(null);
     setMessage(null);
     setCopied(false);
+    setVerificationCode('');
+    setSubmitError(null);
+    setSubmittingCode(false);
+    codeSubmitInFlightRef.current = false;
+    if (manualCloseTimerRef.current) clearTimeout(manualCloseTimerRef.current);
+    manualCloseTimerRef.current = null;
     sessionIdRef.current = null;
     finishedRef.current = false;
+    sessionUpdateGenerationRef.current += 1;
 
     const finish = (next: AgentCredentialSetupSession) => {
       if (finishedRef.current || !isTerminalAgentCredentialSetupStatus(next.status)) return;
@@ -146,11 +162,23 @@ export function AgentCredentialConnectModal({
     };
 
     const poll = async () => {
-      if (!sessionIdRef.current || pollInFlight || finishedRef.current) return;
+      if (
+        !sessionIdRef.current ||
+        pollInFlight ||
+        finishedRef.current ||
+        codeSubmitInFlightRef.current
+      )
+        return;
       pollInFlight = true;
+      const generation = sessionUpdateGenerationRef.current;
       try {
         const next = await getAgentCredentialSetupSession(sessionIdRef.current);
-        if (cancelled) return;
+        if (
+          cancelled ||
+          generation !== sessionUpdateGenerationRef.current ||
+          codeSubmitInFlightRef.current
+        )
+          return;
         setSession(next);
         finish(next);
       } catch {
@@ -188,6 +216,8 @@ export function AgentCredentialConnectModal({
       cancelled = true;
       if (pollTimer) clearInterval(pollTimer);
       if (closeTimer) clearTimeout(closeTimer);
+      if (manualCloseTimerRef.current) clearTimeout(manualCloseTimerRef.current);
+      manualCloseTimerRef.current = null;
       sessionIdRef.current = null;
     };
   }, [agentType, isOpen, retryNonce]);
@@ -199,6 +229,60 @@ export function AgentCredentialConnectModal({
       setCopied(true);
     } catch {
       setMessage('Could not copy the code. Press and hold the code to copy it.');
+    }
+  };
+
+  const handleSubmitVerificationCode = async () => {
+    const id = sessionIdRef.current;
+    const code = verificationCode.trim();
+    if (!id || !code) {
+      setSubmitError('Paste the code Claude shows you first.');
+      return;
+    }
+    // Claude's browser page shows the code as `<code>#<state>`. A paste without
+    // the `#` half is guaranteed to fail inside the CLI ("Invalid code. Please
+    // make sure the full code was copied"), so catch it before the round-trip.
+    if (agentType === 'claude-code' && !code.replace(/\s+/g, '').includes('#')) {
+      setSubmitError(
+        'That looks like only part of the code. Copy the entire code Claude shows — it includes a # in the middle.'
+      );
+      return;
+    }
+
+    sessionUpdateGenerationRef.current += 1;
+    codeSubmitInFlightRef.current = true;
+    setSubmittingCode(true);
+    setSubmitError(null);
+    setMessage(null);
+    setSession((current) => (current ? { ...current, status: 'exchanging' } : current));
+
+    try {
+      const next = await submitAgentCredentialSetupVerificationCode(id, code);
+      setSession(next);
+      setVerificationCode('');
+      if (isTerminalAgentCredentialSetupStatus(next.status)) {
+        finishedRef.current = true;
+        if (next.status === 'completed') {
+          onConnectedRef.current?.();
+          manualCloseTimerRef.current = setTimeout(() => {
+            onCloseRef.current();
+          }, getSuccessCloseDelayMs());
+        }
+      }
+    } catch (error) {
+      setSession((current) =>
+        current && current.status === 'exchanging'
+          ? { ...current, status: 'waiting_for_user' }
+          : current
+      );
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : 'Failed to submit the Claude verification code. Please try again.'
+      );
+    } finally {
+      codeSubmitInFlightRef.current = false;
+      setSubmittingCode(false);
     }
   };
 
@@ -216,6 +300,8 @@ export function AgentCredentialConnectModal({
     phase === 'created' && status !== null && !isTerminalAgentCredentialSetupStatus(status);
   const ready = isActive && !!session?.verificationUrl;
   const hasCode = ready && !!session?.userCode;
+  const canSubmitClaudeCode = ready && agentType === 'claude-code' && status === 'waiting_for_user';
+  const verificationCodeInputId = `${titleId}-credential`;
 
   const header = (
     <div className="flex items-center justify-between gap-3 px-5 sm:px-6 py-4 border-b border-border-default">
@@ -301,6 +387,53 @@ export function AgentCredentialConnectModal({
                     </div>
                   </div>
                 )}
+                {canSubmitClaudeCode && (
+                  <form
+                    className="rounded-lg border border-border-default bg-bg-secondary p-4 flex flex-col gap-3"
+                    onSubmit={(event) => {
+                      event.preventDefault();
+                      void handleSubmitVerificationCode();
+                    }}
+                  >
+                    <div className="flex flex-col gap-2">
+                      <label
+                        htmlFor={verificationCodeInputId}
+                        className="text-sm font-medium text-fg-primary"
+                      >
+                        Paste the code Claude shows you
+                      </label>
+                      <input
+                        id={verificationCodeInputId}
+                        type="password"
+                        autoComplete="off"
+                        spellCheck={false}
+                        inputMode="text"
+                        value={verificationCode}
+                        onChange={(event) => {
+                          setVerificationCode(event.currentTarget.value);
+                          setSubmitError(null);
+                        }}
+                        placeholder="code#state"
+                        className="min-h-11 w-full rounded-md border border-border-default bg-bg-primary px-3 py-2 text-sm text-fg-primary outline-none focus:border-accent focus:ring-2 focus:ring-accent/20"
+                      />
+                      <p className="text-xs text-fg-muted m-0">
+                        Approve access in the browser, then paste the code Claude shows you. It may
+                        be two parts joined with a #.
+                      </p>
+                    </div>
+                    {submitError && <Alert variant="error">{submitError}</Alert>}
+                    <Button
+                      type="submit"
+                      variant="primary"
+                      size="sm"
+                      loading={submittingCode}
+                      disabled={!verificationCode.trim()}
+                      className="self-start"
+                    >
+                      {submittingCode ? 'Completing sign-in…' : 'Continue sign-in'}
+                    </Button>
+                  </form>
+                )}
                 <p className="text-xs text-fg-muted m-0">{copy.manualReturnHint}</p>
               </div>
             )}
@@ -314,7 +447,7 @@ export function AgentCredentialConnectModal({
             {message && phase === 'created' && <Alert variant="info">{message}</Alert>}
 
             <div className="flex gap-2 justify-end">
-              {isActive && status !== 'saving' && (
+              {isActive && status !== 'saving' && status !== 'exchanging' && (
                 <Button variant="ghost" size="sm" onClick={() => void handleCancel()}>
                   Cancel
                 </Button>

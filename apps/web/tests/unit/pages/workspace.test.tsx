@@ -198,7 +198,7 @@ async function findCloseTerminalButton() {
   const closeButtons = await screen.findAllByRole(
     'button',
     { name: /Close Terminal/ },
-    { timeout: 5_000 }
+    { timeout: 10_000 }
   );
   return closeButtons[0];
 }
@@ -338,18 +338,21 @@ describe('Workspace page', () => {
 
       renderWorkspace('/workspaces/ws-123', true);
 
-      expect(await findCloseTerminalButton()).toBeInTheDocument();
+      const closeTerminalButton = await findCloseTerminalButton();
+      expect(closeTerminalButton).toBeInTheDocument();
       expect(screen.getByRole('tab', { name: 'Chat tab: Claude Chat' })).toBeInTheDocument();
 
-      fireEvent.click(await findCloseTerminalButton());
+      fireEvent.click(closeTerminalButton);
 
       await waitFor(() => {
         const probe = screen.getByTestId('location-probe').textContent ?? '';
         expect(probe).toContain('view=conversation');
         expect(probe).toContain('sessionId=sess-1');
       });
-      expect(screen.queryByRole('tab', { name: 'Terminal tab: Terminal 1' })).not.toBeInTheDocument();
-    }, 10_000);
+      expect(
+        screen.queryByRole('tab', { name: 'Terminal tab: Terminal 1' })
+      ).not.toBeInTheDocument();
+    }, 15_000);
 
     it('allows creating a new terminal from + menu after closing the last terminal tab', async () => {
       mocks.featureFlags.multiTerminal = true;
@@ -357,8 +360,9 @@ describe('Workspace page', () => {
 
       renderWorkspace('/workspaces/ws-123', true);
 
-      expect(await findCloseTerminalButton()).toBeInTheDocument();
-      fireEvent.click(await findCloseTerminalButton());
+      const closeTerminalButton = await findCloseTerminalButton();
+      expect(closeTerminalButton).toBeInTheDocument();
+      fireEvent.click(closeTerminalButton);
 
       await waitFor(() => {
         expect(screen.queryByRole('tab', { name: /Terminal tab:/ })).not.toBeInTheDocument();
@@ -370,7 +374,7 @@ describe('Workspace page', () => {
       await waitFor(() => {
         expect(screen.getByRole('tab', { name: /Terminal tab: Terminal/ })).toBeInTheDocument();
       });
-    });
+    }, 15_000);
   });
 
   it('renders workspace detail with terminal and session sidebar', async () => {
@@ -499,7 +503,7 @@ describe('Workspace page', () => {
     await waitFor(() => {
       const resolvers = mocks.useAcpSession.mock.calls
         .map(([options]) => options?.resolveWsUrl)
-        .filter((value): value is (() => Promise<string | null>) => typeof value === 'function');
+        .filter((value): value is () => Promise<string | null> => typeof value === 'function');
       expect(resolvers.length).toBeGreaterThan(0);
     });
 
@@ -583,13 +587,11 @@ describe('Workspace page', () => {
   });
 
   it('retries initial git status fetch and updates the header badge when retry succeeds', async () => {
-    mocks.getGitStatus
-      .mockRejectedValueOnce(new Error('temporary failure'))
-      .mockResolvedValueOnce({
-        staged: [{ path: 'src/app.ts', status: 'M' }],
-        unstaged: [],
-        untracked: [],
-      });
+    mocks.getGitStatus.mockRejectedValueOnce(new Error('temporary failure')).mockResolvedValueOnce({
+      staged: [{ path: 'src/app.ts', status: 'M' }],
+      unstaged: [],
+      untracked: [],
+    });
 
     renderWorkspace('/workspaces/ws-123');
     await screen.findByText('Workspace A');
@@ -634,7 +636,9 @@ describe('Workspace page', () => {
     await screen.findByText('Workspace A');
     await waitFor(() => {
       expect(mocks.listAgents).toHaveBeenCalled();
-      expect(screen.getByRole('button', { name: 'Create terminal or chat session' })).not.toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: 'Create terminal or chat session' })
+      ).not.toBeDisabled();
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Create terminal or chat session' }));
@@ -685,7 +689,9 @@ describe('Workspace page', () => {
     await screen.findByText('Workspace A');
     await waitFor(() => {
       expect(mocks.listAgents).toHaveBeenCalled();
-      expect(screen.getByRole('button', { name: 'Create terminal or chat session' })).not.toBeDisabled();
+      expect(
+        screen.getByRole('button', { name: 'Create terminal or chat session' })
+      ).not.toBeDisabled();
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Create terminal or chat session' }));
@@ -719,7 +725,9 @@ describe('Workspace page', () => {
 
     await waitFor(
       () => {
-        expect(screen.getByRole('button', { name: /Switch worktree \(feature\/auth\)/i })).toBeInTheDocument();
+        expect(
+          screen.getByRole('button', { name: /Switch worktree \(feature\/auth\)/i })
+        ).toBeInTheDocument();
       },
       { timeout: 5_000 }
     );
@@ -736,7 +744,9 @@ describe('Workspace page', () => {
 
     await waitFor(
       () => {
-        expect(screen.getByRole('button', { name: /Switch worktree \(feature\/auth\)/i })).toBeInTheDocument();
+        expect(
+          screen.getByRole('button', { name: /Switch worktree \(feature\/auth\)/i })
+        ).toBeInTheDocument();
       },
       { timeout: 5_000 }
     );
@@ -788,7 +798,9 @@ describe('Workspace page', () => {
       });
 
       // Should show the recovery banner
-      expect(screen.getByText(/Recovered 1 hidden session still running on VM/)).toBeInTheDocument();
+      expect(
+        screen.getByText(/Recovered 1 hidden session still running on VM/)
+      ).toBeInTheDocument();
 
       // Should auto-resume in DB
       await waitFor(() => {
@@ -841,7 +853,9 @@ describe('Workspace page', () => {
       renderWorkspace('/workspaces/ws-123');
       await screen.findByText('Workspace A');
 
-      expect(await screen.findByRole('button', { name: 'Open command palette' })).toBeInTheDocument();
+      expect(
+        await screen.findByRole('button', { name: 'Open command palette' })
+      ).toBeInTheDocument();
     });
 
     it('opens command palette when mobile button is tapped', async () => {

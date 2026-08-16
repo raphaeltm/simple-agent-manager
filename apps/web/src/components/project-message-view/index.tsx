@@ -13,7 +13,7 @@ import type {
   ToolCallContentItem,
 } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent, PlanModal } from '@simple-agent-manager/acp-client';
-import type { AgentProfile } from '@simple-agent-manager/shared';
+import { type AgentProfile,classifyFailure } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown } from 'lucide-react';
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -115,6 +115,15 @@ function FloatingHeader({
     taskStatus !== 'cancelled' &&
     taskStatus !== 'completed'
   );
+  const failureClassification = lc.taskEmbed?.errorMessage
+    ? classifyFailure(lc.taskEmbed.errorMessage, lc.taskEmbed.executionStep ?? undefined)
+    : null;
+  const failureShellClassName = failureClassification?.diagnosable
+    ? "glass-chrome px-3 py-2 rounded-b-2xl relative after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(239,68,68,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"
+    : 'glass-chrome px-3 py-2 rounded-b-2xl relative';
+  const failureShellBoxShadow = failureClassification?.diagnosable
+    ? '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(239, 68, 68, 0.08)'
+    : '0 4px 24px rgba(0, 0, 0, 0.4)';
 
   return (
     <div ref={containerRef} className="absolute top-0 left-0 right-0 z-10">
@@ -142,8 +151,9 @@ function FloatingHeader({
       />
       {lc.taskEmbed?.errorMessage && (
         <div
-          className="glass-chrome px-3 py-2 rounded-b-2xl relative after:content-[''] after:absolute after:bottom-0 after:left-[8%] after:right-[8%] after:h-[3px] after:bg-[radial-gradient(ellipse_at_center,rgba(239,68,68,0.55)_0%,transparent_70%)] after:blur-[2px] after:pointer-events-none after:z-10"
-          style={{ boxShadow: '0 4px 24px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(239, 68, 68, 0.08)' }}
+          data-testid="failure-card-shell"
+          className={failureShellClassName}
+          style={{ boxShadow: failureShellBoxShadow }}
         >
           <div
             aria-hidden="true"

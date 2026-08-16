@@ -7,6 +7,7 @@ import type {
 import * as v from 'valibot';
 
 import type { Env } from '../env';
+import { D1_MAX_BOUND_PARAMETERS } from '../lib/d1-limits';
 import { log } from '../lib/logger';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
@@ -22,7 +23,6 @@ const ULID_PATTERN = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const SAFE_ARTIFACT_KIND = 'safe-vm-incident-v1';
 const SAFE_CONTENT_TYPE = 'application/gzip';
-const D1_MAX_BOUND_PARAMETERS = 100;
 const textEncoder = new TextEncoder();
 
 // Mirrors DiagnosticIncidentManifest / DiagnosticCollectorOutcome

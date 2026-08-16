@@ -428,6 +428,41 @@ describe('runNodeCleanupSweep — vertical slice', () => {
   });
 
   describe('stale warm node cleanup (Phase 1)', () => {
+    it('releases a real D1 cleanup claim when container teardown fails', async () => {
+      await seedBaseData();
+      const nodeId = 'node-nc-stale-warm-container-failure';
+      const warmSince = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+      const destroyForUser = vi.fn().mockRejectedValue(new Error('container teardown unavailable'));
+
+      await seedNode(nodeId, USER_ID, { status: 'running', warmSince });
+      await env.DATABASE.prepare(`UPDATE nodes SET runtime = 'cf-container' WHERE id = ?`)
+        .bind(nodeId)
+        .run();
+
+      const testEnv = {
+        ...env,
+        CF_CONTAINER_ENABLED: 'true',
+        VM_AGENT_CONTAINER: {
+          idFromName: (id: string) => id,
+          get: () => ({ destroyForUser }),
+        },
+        NODE_WARM_GRACE_PERIOD_MS: '1000',
+      } as unknown as Env;
+
+      const result = await runNodeCleanupSweep(testEnv);
+      const node = await env.DATABASE.prepare(
+        'SELECT status, cleanup_backoff_until FROM nodes WHERE id = ?'
+      )
+        .bind(nodeId)
+        .first<{ status: string; cleanup_backoff_until: string | null }>();
+
+      expect(destroyForUser).toHaveBeenCalledTimes(1);
+      expect(result.staleDestroyed).toBe(0);
+      expect(result.errors).toBeGreaterThanOrEqual(1);
+      expect(node?.status).toBe('running');
+      expect(node?.cleanup_backoff_until).not.toBeNull();
+    });
+
     it('attempts to destroy stale warm node and counts error (no Hetzner in test)', async () => {
       await seedBaseData();
       const nodeId = 'node-nc-stale-warm';
@@ -446,8 +481,7 @@ describe('runNodeCleanupSweep — vertical slice', () => {
 
       const result = await runNodeCleanupSweep(testEnv);
 
-      // deleteNodeResources will fail (no Hetzner credentials in test env)
-      // but the error should be caught and counted
+      // A record with no provider instance is safe to finalize without credentials.
       expect(result.staleDestroyed + result.errors).toBeGreaterThanOrEqual(1);
     });
 

@@ -1,6 +1,7 @@
 /**
  * Shared chat session state helpers used by ProjectChat, Chats page, and other components.
  */
+import { classifyFailure } from '@simple-agent-manager/shared';
 import {
   AlertCircle,
   CheckCircle2,
@@ -135,7 +136,13 @@ export function getAttentionState(session: ChatSessionResponse): AttentionState 
 
   // 2. Task terminal states
   const taskStatus = session.task?.status;
-  if (taskStatus === 'failed') return 'failed';
+  if (taskStatus === 'failed') {
+    const classification = classifyFailure(
+      session.task?.errorMessage ?? '',
+      session.task?.executionStep ?? undefined
+    );
+    return classification.diagnosable ? 'failed' : 'stopped';
+  }
   if (taskStatus === 'completed') return 'completed';
   if (taskStatus === 'cancelled') return 'stopped';
 

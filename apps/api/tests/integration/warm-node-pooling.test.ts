@@ -14,14 +14,29 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('warm node pooling lifecycle integration', () => {
-  const taskRunnerFile = readFileSync(resolve(process.cwd(), 'src/services/task-runner.ts'), 'utf8');
-  const selectorFile = readFileSync(resolve(process.cwd(), 'src/services/node-selector.ts'), 'utf8');
-  const doFile = readFileSync(resolve(process.cwd(), 'src/durable-objects/node-lifecycle.ts'), 'utf8');
+  const taskRunnerFile = readFileSync(
+    resolve(process.cwd(), 'src/services/task-runner.ts'),
+    'utf8'
+  );
+  const selectorFile = readFileSync(
+    resolve(process.cwd(), 'src/services/node-selector.ts'),
+    'utf8'
+  );
+  const doFile = readFileSync(
+    resolve(process.cwd(), 'src/durable-objects/node-lifecycle.ts'),
+    'utf8'
+  );
   const cleanupFile = ['index.ts', 'shared.ts', 'node-phases.ts', 'workspace-phases.ts']
     .map((f) => readFileSync(resolve(process.cwd(), `src/scheduled/node-cleanup/${f}`), 'utf8'))
     .join('\n');
-  const serviceFile = readFileSync(resolve(process.cwd(), 'src/services/node-lifecycle.ts'), 'utf8');
-  const constantsFile = readFileSync(resolve(process.cwd(), '../../packages/shared/src/constants/node-pooling.ts'), 'utf8');
+  const serviceFile = readFileSync(
+    resolve(process.cwd(), 'src/services/node-lifecycle.ts'),
+    'utf8'
+  );
+  const constantsFile = readFileSync(
+    resolve(process.cwd(), '../../packages/shared/src/constants/node-pooling.ts'),
+    'utf8'
+  );
 
   describe('flow: task complete → workspace destroyed → node warm', () => {
     it('cleanupTaskRun calls cleanupAutoProvisionedNode', () => {
@@ -79,8 +94,8 @@ describe('warm node pooling lifecycle integration', () => {
       expect(doFile).toContain("SET status = 'stopped', warm_since = NULL");
     });
 
-    it('cron sweep finds stale warm nodes and calls deleteNodeResources', () => {
-      expect(cleanupFile).toContain('deleteNodeResources(node.id, node.user_id, env)');
+    it('cron sweep finds stale warm nodes and calls strict resource deletion', () => {
+      expect(cleanupFile).toContain('deleteNodeResourcesStrict(node.id, node.user_id, env)');
     });
 
     it('cron sweep also enforces max auto-provisioned node lifetime', () => {

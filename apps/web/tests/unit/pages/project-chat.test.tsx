@@ -1043,7 +1043,7 @@ describe('ProjectChat profile setup wizard', () => {
       },
     });
 
-    const textarea = screen.getByPlaceholderText('Describe what you want the agent to do...');
+    const textarea = await screen.findByPlaceholderText('Describe what you want the agent to do...');
     fireEvent.change(textarea, { target: { value: 'Build a profile-first chat' } });
     fireEvent.click(screen.getByRole('button', { name: 'Send' }));
 

@@ -1,11 +1,17 @@
 import type { GitHubInstallation, ProjectDetailResponse } from '@simple-agent-manager/shared';
 import { Alert, PageLayout, Spinner } from '@simple-agent-manager/ui';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo } from 'react';
 import { Outlet, useLocation, useParams } from 'react-router';
 
 import { useAppShell } from '../components/AppShell';
+import { useAuth } from '../components/AuthProvider';
 import { useIsMobile } from '../hooks/useIsMobile';
-import { getProject, listGitHubInstallations } from '../lib/api';
+import {
+  githubInstallationsQueryOptions,
+  projectDetailQueryOptions,
+  projectQueryKeys,
+} from '../lib/query-options';
 import { ProjectContext } from './ProjectContext';
 
 export function Project() {
@@ -13,49 +19,42 @@ export function Project() {
   const location = useLocation();
   const isMobile = useIsMobile();
   const { setProjectName } = useAppShell();
-
-  const [project, setProject] = useState<ProjectDetailResponse | null>(null);
-  const [installations, setInstallations] = useState<GitHubInstallation[]>([]);
-  const [projectLoading, setProjectLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { user } = useAuth();
+  const queryScope = user?.id ?? '';
+  const queryClient = useQueryClient();
+  const projectQuery = useQuery({
+    ...projectDetailQueryOptions(queryScope, projectId ?? ''),
+    enabled: Boolean(projectId && queryScope),
+  });
+  const installationsQuery = useQuery({
+    ...githubInstallationsQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
+  });
+  const project = (projectQuery.data ?? null) as ProjectDetailResponse | null;
+  const installations = useMemo(
+    () => (installationsQuery.data ?? []) as GitHubInstallation[],
+    [installationsQuery.data]
+  );
+  const refetchProject = projectQuery.refetch;
+  const projectLoading = Boolean(projectId) && projectQuery.isPending && project === null;
+  const error =
+    project === null
+      ? projectQuery.error instanceof Error
+        ? projectQuery.error.message
+        : projectQuery.error
+          ? 'Failed to load project'
+          : null
+      : null;
 
   // Chat routes get a full-bleed layout (no PageLayout wrapper)
   const isChatRoute = /\/(chat|agent)(\/|$)/.test(location.pathname);
 
-  // Track whether we have successfully loaded data at least once for the
-  // current projectId. After the first load, reloads (e.g. after saving
-  // settings) skip the loading spinner so the existing Outlet tree stays
-  // mounted (stale-while-revalidate).
-  const hasLoadedForIdRef = useRef<string | null>(null);
-
   const loadProject = useCallback(async () => {
-    if (!projectId) return;
-    try {
-      setError(null);
-      // Only show the full-screen spinner on the very first load for this
-      // projectId. Subsequent reloads keep existing content visible.
-      if (hasLoadedForIdRef.current !== projectId) {
-        setProjectLoading(true);
-      }
-      setProject(await getProject(projectId));
-      hasLoadedForIdRef.current = projectId;
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load project');
-      hasLoadedForIdRef.current = projectId;
-    } finally {
-      setProjectLoading(false);
-    }
-  }, [projectId]);
-
-  useEffect(() => {
-    void loadProject();
-  }, [loadProject]);
-
-  useEffect(() => {
-    void listGitHubInstallations()
-      .then((response) => setInstallations(response))
-      .catch(() => setInstallations([]));
-  }, []);
+    await Promise.all([
+      refetchProject(),
+      queryClient.invalidateQueries({ queryKey: projectQueryKeys.lists(queryScope) }),
+    ]);
+  }, [queryClient, queryScope, refetchProject]);
 
   // Push project name up to AppShell for sidebar display
   useEffect(() => {
@@ -96,20 +95,21 @@ export function Project() {
             <Spinner size="md" />
             <span className="text-fg-muted text-sm">Loading project...</span>
           </div>
-        ) : error ? (
-          <div className="p-4">
-            <Alert variant="error" onDismiss={() => setError(null)}>
-              {error}
-            </Alert>
-          </div>
         ) : !project ? (
           <div className="p-4">
-            <Alert variant="error">Project not found.</Alert>
+            <Alert variant="error">{error ?? 'Project not found.'}</Alert>
           </div>
         ) : (
-          <ProjectContext.Provider value={contextValue}>
-            <Outlet />
-          </ProjectContext.Provider>
+          <>
+            {error && (
+              <div className="p-4 pb-0">
+                <Alert variant="error">{error}</Alert>
+              </div>
+            )}
+            <ProjectContext.Provider value={contextValue}>
+              <Outlet />
+            </ProjectContext.Provider>
+          </>
         )}
       </div>
     );
@@ -129,14 +129,6 @@ export function Project() {
             : { padding: 'var(--sam-space-8) clamp(var(--sam-space-3), 3vw, var(--sam-space-4))' }
         }
       >
-        {error && (
-          <div className="mt-3">
-            <Alert variant="error" onDismiss={() => setError(null)}>
-              {error}
-            </Alert>
-          </div>
-        )}
-
         {projectLoading ? (
           <div className="flex items-center gap-2 mt-4">
             <Spinner size="md" />
@@ -144,7 +136,7 @@ export function Project() {
           </div>
         ) : !project ? (
           <div className="mt-4">
-            <Alert variant="error">Project not found.</Alert>
+            <Alert variant="error">{error ?? 'Project not found.'}</Alert>
           </div>
         ) : (
           /*

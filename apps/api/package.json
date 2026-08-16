@@ -9,6 +9,8 @@
     "build": "tsc",
     "dev": "wrangler dev --port ${WRANGLER_PORT:-8787}",
     "test": "vitest run",
+    "test:scheduler": "vitest run tests/simulation/scheduler-lifecycle-simulation.test.ts",
+    "test:scheduler:nightly": "SCHEDULER_SIM_PROFILE=nightly vitest run tests/simulation/scheduler-lifecycle-simulation.test.ts",
     "test:debugging-workers": "vitest run --config vitest.debugging.workers.config.ts",
     "test:workers": "vitest run --config vitest.workers.config.ts",
     "test:watch": "vitest",

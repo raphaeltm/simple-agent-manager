@@ -12,9 +12,10 @@ import { runNodeCleanupSweep } from '../../src/scheduled/node-cleanup';
 import { sweepTerminalCfContainers } from '../../src/scheduled/node-cleanup/node-phases';
 import { emptyResult, resolveCleanupConfig } from '../../src/scheduled/node-cleanup/shared';
 
-// Mock deleteNodeResources
+// Mock strict external teardown. Scheduled cleanup must fail closed when the
+// provider/container boundary cannot confirm deletion.
 vi.mock('../../src/services/nodes', () => ({
-  deleteNodeResources: vi.fn().mockResolvedValue(undefined),
+  deleteNodeResourcesStrict: vi.fn().mockResolvedValue({ providerVm: 'deleted' }),
   stopNodeResources: vi.fn().mockResolvedValue(undefined),
 }));
 
@@ -135,7 +136,7 @@ describe('runNodeCleanupSweep', () => {
     });
 
     it('destroys nodes without active workspaces past max lifetime', async () => {
-      const { deleteNodeResources } = await import('../../src/services/nodes');
+      const { deleteNodeResourcesStrict } = await import('../../src/services/nodes');
       const now = Date.now();
       const createdAt = new Date(now - 5 * 60 * 60 * 1000).toISOString();
 
@@ -159,7 +160,46 @@ describe('runNodeCleanupSweep', () => {
 
       expect(result.lifetimeDestroyed).toBe(1);
       expect(result.lifetimeSkipped).toBe(0);
-      expect(deleteNodeResources).toHaveBeenCalledWith('node-1', 'user-1', env);
+      expect(deleteNodeResourcesStrict).toHaveBeenCalledWith('node-1', 'user-1', env);
+    });
+
+    it('releases the cleanup claim with backoff when strict provider deletion fails', async () => {
+      const { deleteNodeResourcesStrict } = await import('../../src/services/nodes');
+      vi.mocked(deleteNodeResourcesStrict).mockRejectedValueOnce(new Error('provider unavailable'));
+      const createdAt = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString();
+      const responses = new Map<string, unknown[]>();
+      responses.set('n.warm_since IS NOT NULL', []);
+      responses.set('auto_provisioned_node_id', [
+        {
+          node_id: 'node-provider-failure',
+          id: 'node-provider-failure',
+          user_id: 'user-1',
+          status: 'running',
+          created_at: createdAt,
+          active_ws_count: 0,
+        },
+      ]);
+      responses.set("w.status = 'running'", []);
+      responses.set('n.warm_since IS NULL', []);
+
+      const env = createMockEnv(responses);
+      const result = await runNodeCleanupSweep(env);
+
+      expect(result.lifetimeDestroyed).toBe(0);
+      expect(result.errors).toBe(1);
+      expect(deleteNodeResourcesStrict).toHaveBeenCalledWith(
+        'node-provider-failure',
+        'user-1',
+        env
+      );
+      expect(
+        vi
+          .mocked(env.DATABASE.prepare)
+          .mock.calls.some(
+            ([sql]) =>
+              sql.includes('cleanup_backoff_until = ?') && sql.includes("status = 'destroying'")
+          )
+      ).toBe(true);
     });
 
     it('always skips nodes with active workspaces (no absolute ceiling)', async () => {
@@ -206,7 +246,7 @@ describe('runNodeCleanupSweep', () => {
 
   describe('Layer 1: stale warm node destruction', () => {
     it('destroys stale warm nodes with no active workspaces', async () => {
-      const { deleteNodeResources } = await import('../../src/services/nodes');
+      const { deleteNodeResourcesStrict } = await import('../../src/services/nodes');
       const now = Date.now();
       const warmSince = new Date(now - 40 * 60 * 1000).toISOString(); // 40 min ago (> 35 min grace)
 
@@ -230,7 +270,7 @@ describe('runNodeCleanupSweep', () => {
       const result = await runNodeCleanupSweep(env);
 
       expect(result.staleDestroyed).toBe(1);
-      expect(deleteNodeResources).toHaveBeenCalledWith('node-warm', 'user-1', env);
+      expect(deleteNodeResourcesStrict).toHaveBeenCalledWith('node-warm', 'user-1', env);
     });
 
     it('skips stale warm nodes that have active workspaces', async () => {
@@ -262,7 +302,7 @@ describe('runNodeCleanupSweep', () => {
 
   describe('DO alarm handoff cleanup', () => {
     it('destroys stopped auto-provisioned nodes left behind by the NodeLifecycle alarm', async () => {
-      const { deleteNodeResources } = await import('../../src/services/nodes');
+      const { deleteNodeResourcesStrict } = await import('../../src/services/nodes');
       const now = Date.now();
       const createdAt = new Date(now - 2 * 60 * 60 * 1000).toISOString();
       const updatedAt = new Date(now - 30 * 60 * 1000).toISOString();
@@ -287,11 +327,11 @@ describe('runNodeCleanupSweep', () => {
       const result = await runNodeCleanupSweep(env);
 
       expect(result.lifetimeDestroyed).toBe(1);
-      expect(deleteNodeResources).toHaveBeenCalledWith('node-stopped-handoff', 'user-1', env);
+      expect(deleteNodeResourcesStrict).toHaveBeenCalledWith('node-stopped-handoff', 'user-1', env);
     });
 
     it('does not destroy stopped handoff nodes with active workspaces', async () => {
-      const { deleteNodeResources } = await import('../../src/services/nodes');
+      const { deleteNodeResourcesStrict } = await import('../../src/services/nodes');
       const updatedAt = new Date(Date.now() - 30 * 60 * 1000).toISOString();
 
       const responses = new Map<string, unknown[]>();
@@ -314,7 +354,11 @@ describe('runNodeCleanupSweep', () => {
 
       expect(result.lifetimeDestroyed).toBe(0);
       expect(result.lifetimeSkipped).toBe(1);
-      expect(deleteNodeResources).not.toHaveBeenCalledWith('node-stopped-active', 'user-1', env);
+      expect(deleteNodeResourcesStrict).not.toHaveBeenCalledWith(
+        'node-stopped-active',
+        'user-1',
+        env
+      );
     });
   });
 
