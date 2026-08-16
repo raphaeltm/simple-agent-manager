@@ -1,4 +1,17 @@
-import { and, eq, gt, inArray, isNotNull, isNull, lt, lte, or, sql } from 'drizzle-orm';
+import {
+  and,
+  eq,
+  exists,
+  gt,
+  inArray,
+  isNotNull,
+  isNull,
+  lt,
+  lte,
+  notInArray,
+  or,
+  sql,
+} from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -12,6 +25,51 @@ import {
 } from './session-snapshot-artifacts';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
+
+export interface SessionRecoverySourceTaskGuard {
+  taskId: string;
+  projectId: string;
+  chatSessionId: string;
+}
+
+const TERMINAL_TASK_STATUSES = ['completed', 'failed', 'cancelled'];
+
+function sourceTaskGuardCondition(db: Db, guard: SessionRecoverySourceTaskGuard | undefined) {
+  if (!guard) return undefined;
+  return exists(
+    db
+      .select({ id: schema.tasks.id })
+      .from(schema.tasks)
+      .where(
+        and(
+          eq(schema.tasks.id, guard.taskId),
+          eq(schema.tasks.projectId, guard.projectId),
+          eq(schema.tasks.chatSessionId, guard.chatSessionId),
+          notInArray(schema.tasks.status, TERMINAL_TASK_STATUSES)
+        )
+      )
+  );
+}
+
+async function sourceTaskGuardIsValid(
+  db: Db,
+  guard: SessionRecoverySourceTaskGuard | undefined
+): Promise<boolean> {
+  if (!guard) return true;
+  const row = await db
+    .select({ id: schema.tasks.id })
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.id, guard.taskId),
+        eq(schema.tasks.projectId, guard.projectId),
+        eq(schema.tasks.chatSessionId, guard.chatSessionId),
+        notInArray(schema.tasks.status, TERMINAL_TASK_STATUSES)
+      )
+    )
+    .get();
+  return Boolean(row);
+}
 
 function restorableSnapshotCondition() {
   return or(
@@ -44,7 +102,13 @@ function sessionRecoveryClaimLeaseMs(env: Env): number {
 export async function claimSessionSnapshotRecovery(
   db: Db,
   env: Env,
-  input: { chatSessionId: string; userId: string; taskId: string; now?: Date }
+  input: {
+    chatSessionId: string;
+    userId: string;
+    taskId: string;
+    now?: Date;
+    sourceTaskGuard?: SessionRecoverySourceTaskGuard;
+  }
 ): Promise<SessionSnapshotRecoveryClaim> {
   const now = input.now ?? new Date();
   const nowIso = now.toISOString();
@@ -73,7 +137,8 @@ export async function claimSessionSnapshotRecovery(
         or(
           isNull(schema.sessionSnapshots.recoveryStatus),
           eq(schema.sessionSnapshots.recoveryStatus, 'failed')
-        )
+        ),
+        sourceTaskGuardCondition(db, input.sourceTaskGuard)
       )
     );
   if ((result.meta.changes ?? 0) > 0) {
@@ -99,6 +164,9 @@ export async function claimSessionSnapshotRecovery(
     )
     .limit(1);
   if (snapshot?.recoveryStatus === 'waking' && snapshot.recoveryTaskId) {
+    if (!(await sourceTaskGuardIsValid(db, input.sourceTaskGuard))) {
+      return { status: 'unavailable', reason: 'source_task_not_wakeable' };
+    }
     const staleBefore = new Date(now.getTime() - sessionRecoveryClaimLeaseMs(env)).toISOString();
     const claimIsStale = !snapshot.recoveryClaimedAt || snapshot.recoveryClaimedAt <= staleBefore;
     if (!claimIsStale) return { status: 'waking', taskId: snapshot.recoveryTaskId };
@@ -143,7 +211,8 @@ export async function claimSessionSnapshotRecovery(
               isNull(schema.sessionSnapshots.recoveryClaimedAt),
               lte(schema.sessionSnapshots.recoveryClaimedAt, staleBefore)
             ),
-            lt(schema.sessionSnapshots.recoveryAttempts, maxAttempts)
+            lt(schema.sessionSnapshots.recoveryAttempts, maxAttempts),
+            sourceTaskGuardCondition(db, input.sourceTaskGuard)
           )
         );
       if ((reclaimed.meta.changes ?? 0) > 0) {
@@ -165,7 +234,9 @@ export async function claimSessionSnapshotRecovery(
         ? 'snapshot_not_complete'
         : snapshot.recoveryAttempts >= maxAttempts
           ? 'recovery_attempts_exhausted'
-          : 'snapshot_not_wakeable';
+          : !(await sourceTaskGuardIsValid(db, input.sourceTaskGuard))
+            ? 'source_task_not_wakeable'
+            : 'snapshot_not_wakeable';
   return { status: 'unavailable', reason };
 }
 
@@ -244,10 +315,7 @@ export async function markSessionSnapshotAwakeInPlace(
       updatedAt: now,
     })
     .where(
-      and(
-        eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
-        restorableSnapshotCondition()
-      )
+      and(eq(schema.sessionSnapshots.chatSessionId, chatSessionId), restorableSnapshotCondition())
     );
 }
 

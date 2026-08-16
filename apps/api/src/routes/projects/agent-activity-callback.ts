@@ -86,15 +86,6 @@ agentActivityCallbackRoute.post(
     if (!existing) {
       throw errors.notFound('ACP session not found');
     }
-    const reportedHarnessWorkKeepsRuntimeActive =
-      body.activity === 'idle' &&
-      (body.runtimeWorkState === 'active' || body.runtimeWorkState === 'settling');
-    if (body.activity === 'prompting' || reportedHarnessWorkKeepsRuntimeActive) {
-      await cancelScheduledSessionSleep(
-        drizzle(c.env.DATABASE, { schema }),
-        existing.chatSessionId
-      );
-    }
 
     // Authoritative auth: bind the token's OWN identity (payload.workspace) to the session's
     // node/workspace — never authorize on the client-supplied body.nodeId. A node-scoped token
@@ -127,6 +118,19 @@ agentActivityCallbackRoute.post(
         action: 'rejected',
       });
       throw errors.forbidden('Node identity verification failed');
+    }
+
+    // Mutate sleep state only after the callback token and reported node are
+    // both bound to this exact session. A valid token for another tenant must
+    // not be able to keep a victim's runtime awake by cancelling its sleep.
+    const reportedHarnessWorkKeepsRuntimeActive =
+      body.activity === 'idle' &&
+      (body.runtimeWorkState === 'active' || body.runtimeWorkState === 'settling');
+    if (body.activity === 'prompting' || reportedHarnessWorkKeepsRuntimeActive) {
+      await cancelScheduledSessionSleep(
+        drizzle(c.env.DATABASE, { schema }),
+        existing.chatSessionId
+      );
     }
 
     // Staleness guard (S2): reject a DESTRUCTIVE `error` callback that provably

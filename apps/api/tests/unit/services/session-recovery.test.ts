@@ -172,4 +172,51 @@ describe('ensureSessionRecovery', () => {
       })
     );
   });
+
+  it('abandons a claimed wake when the source parent terminalizes before task creation', async () => {
+    selectQueue.push(
+      {
+        id: 'snapshot-1',
+        projectId: 'project-1',
+        workspaceId: 'workspace-sleeping',
+        userId: 'user-1',
+        runtime: 'vm',
+        sleepingAt: '2026-08-15T13:11:53.580Z',
+        manifestJson: '{}',
+      },
+      { id: 'project-1' },
+      { id: 'workspace-sleeping', userId: 'user-1' },
+      { id: 'user-1' },
+      { id: 'source-task-1', title: 'Parent' },
+      null
+    );
+    const guard = {
+      taskId: 'source-task-1',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+
+    await expect(
+      ensureSessionRecovery(
+        { DATABASE: {}, BASE_DOMAIN: 'example.test' } as never,
+        'project-1',
+        'chat-1',
+        guard
+      )
+    ).resolves.toEqual({ status: 'unavailable', reason: 'source_task_not_wakeable' });
+    expect(claimSessionSnapshotRecoveryMock).toHaveBeenCalledWith(
+      dbMock,
+      expect.anything(),
+      expect.objectContaining({ sourceTaskGuard: guard })
+    );
+    expect(failSessionSnapshotRecoveryMock).toHaveBeenCalledWith(
+      dbMock,
+      expect.anything(),
+      'chat-1',
+      'recovery-task-1',
+      'source task is no longer wakeable'
+    );
+    expect(insertedTasks).toHaveLength(0);
+    expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+  });
 });

@@ -43,6 +43,9 @@ export const DEFAULT_ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS = 30 * 1000;
 /** Maximum direct children tracked by one parent wait subscription. */
 export const DEFAULT_ORCHESTRATOR_WAIT_MAX_CHILDREN = 20;
 
+/** Hard ceiling that keeps one claim-time parent/child D1 read below 100 bindings. */
+export const MAX_ORCHESTRATOR_WAIT_CHILDREN = 90;
+
 /** Maximum simultaneously active wait subscriptions in one project. */
 export const DEFAULT_ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT = 100;
 

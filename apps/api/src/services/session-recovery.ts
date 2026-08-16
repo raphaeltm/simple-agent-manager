@@ -9,7 +9,7 @@ import {
   type VMSize,
   type WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq, inArray, or } from 'drizzle-orm';
+import { and, desc, eq, inArray, notInArray, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
@@ -17,7 +17,11 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
-import { claimSessionSnapshotRecovery, failSessionSnapshotRecovery } from './session-snapshots';
+import {
+  claimSessionSnapshotRecovery,
+  failSessionSnapshotRecovery,
+  type SessionRecoverySourceTaskGuard,
+} from './session-snapshots';
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
@@ -33,6 +37,26 @@ type RecoveryContext = {
   user: schema.User;
   sourceTask: schema.Task | null;
 };
+
+async function sourceTaskGuardIsWakeable(
+  db: Db,
+  guard: SessionRecoverySourceTaskGuard | undefined
+): Promise<boolean> {
+  if (!guard) return true;
+  const task = await db
+    .select({ id: schema.tasks.id })
+    .from(schema.tasks)
+    .where(
+      and(
+        eq(schema.tasks.id, guard.taskId),
+        eq(schema.tasks.projectId, guard.projectId),
+        eq(schema.tasks.chatSessionId, guard.chatSessionId),
+        notInArray(schema.tasks.status, ['completed', 'failed', 'cancelled'])
+      )
+    )
+    .get();
+  return Boolean(task);
+}
 
 export const SESSION_RECOVERY_INITIAL_PROMPT =
   'Resume this sleeping conversation from the persisted transcript. Do not repeat prior work; wait for and answer the latest queued follow-up message.';
@@ -266,7 +290,8 @@ async function startRecoveryTask(
 export async function ensureSessionRecovery(
   env: Env,
   projectId: string,
-  chatSessionId: string
+  chatSessionId: string,
+  sourceTaskGuard?: SessionRecoverySourceTaskGuard
 ): Promise<SessionRecoveryResult> {
   const db = drizzle(env.DATABASE, { schema });
   const context = await loadRecoveryContext(db, projectId, chatSessionId);
@@ -279,8 +304,25 @@ export async function ensureSessionRecovery(
     chatSessionId,
     userId: context.snapshot.userId,
     taskId: ulid(),
+    sourceTaskGuard,
   });
   if (claim.status === 'unavailable') return claim;
+  if (claim.status === 'waking') return claim;
+
+  // The snapshot claim itself is conditionally written against this guard.
+  // Repeat it after that await and immediately before task creation so a
+  // terminal transition cannot use an earlier successful preflight to create
+  // a replacement recovery task.
+  if (!(await sourceTaskGuardIsWakeable(db, sourceTaskGuard))) {
+    await failSessionSnapshotRecovery(
+      db,
+      env,
+      chatSessionId,
+      claim.taskId,
+      'source task is no longer wakeable'
+    );
+    return { status: 'unavailable', reason: 'source_task_not_wakeable' };
+  }
 
   try {
     const task = await createRecoveryTask(db, context, chatSessionId, claim.taskId);

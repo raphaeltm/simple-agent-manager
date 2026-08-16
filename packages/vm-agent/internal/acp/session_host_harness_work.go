@@ -187,20 +187,24 @@ func (h *SessionHost) applyClaudeHarnessLifecycle(message claudeSDKLifecycleMess
 		if message.TaskID == "" {
 			return false
 		}
-		h.harnessTaskIDs[message.TaskID] = struct{}{}
+		if !h.addClaudeHarnessTaskLocked(message.TaskID) {
+			return false
+		}
 	case message.Type == "system" && message.Subtype == "task_progress":
 		if message.TaskID == "" {
 			return false
 		}
-		h.harnessTaskIDs[message.TaskID] = struct{}{}
+		if !h.addClaudeHarnessTaskLocked(message.TaskID) {
+			return false
+		}
 	case message.Type == "system" && message.Subtype == "task_updated":
 		if message.TaskID == "" {
 			return false
 		}
 		if isTerminalClaudeTaskStatus(message.Patch.Status) {
 			delete(h.harnessTaskIDs, message.TaskID)
-		} else {
-			h.harnessTaskIDs[message.TaskID] = struct{}{}
+		} else if !h.addClaudeHarnessTaskLocked(message.TaskID) {
+			return false
 		}
 	case message.Type == "system" && message.Subtype == "task_notification":
 		if message.TaskID == "" {
@@ -232,6 +236,21 @@ func (h *SessionHost) applyClaudeHarnessLifecycle(message claudeSDKLifecycleMess
 	} else {
 		h.stopHarnessWorkRereportLocked()
 	}
+	return true
+}
+
+// addClaudeHarnessTaskLocked bounds cumulative edge messages as well as the
+// authoritative tasks array. Existing IDs still count as progress at the cap;
+// a new ID is ignored until an authoritative replacement or terminal edge
+// frees capacity.
+func (h *SessionHost) addClaudeHarnessTaskLocked(taskID string) bool {
+	if _, exists := h.harnessTaskIDs[taskID]; exists {
+		return true
+	}
+	if len(h.harnessTaskIDs) >= maxClaudeLifecycleTasks {
+		return false
+	}
+	h.harnessTaskIDs[taskID] = struct{}{}
 	return true
 }
 

@@ -20,5 +20,8 @@ describe('task wait configuration', () => {
     expect(() =>
       resolveTaskWaitConfig({ ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS: 'invalid' })
     ).toThrow('ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS must be a positive safe integer');
+    expect(() => resolveTaskWaitConfig({ ORCHESTRATOR_WAIT_MAX_CHILDREN: '91' })).toThrow(
+      'ORCHESTRATOR_WAIT_MAX_CHILDREN must be at most 90'
+    );
   });
 });

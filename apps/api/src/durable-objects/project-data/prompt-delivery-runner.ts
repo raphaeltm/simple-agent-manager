@@ -1,4 +1,7 @@
-import { TASK_TERMINAL_STATUSES } from '@simple-agent-manager/shared';
+import {
+  MAX_ORCHESTRATOR_WAIT_CHILDREN,
+  TASK_TERMINAL_STATUSES,
+} from '@simple-agent-manager/shared';
 
 import { createModuleLogger } from '../../lib/logger';
 import { recordDurableExecutionMetric } from '../../services/telemetry';
@@ -14,6 +17,7 @@ import * as sessionState from './session-state';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.prompt_delivery_runner');
+const MAX_TASK_ID_LENGTH = 128;
 
 export interface PromptDeliveryRunnerHooks {
   projectId: string | null;
@@ -21,7 +25,23 @@ export interface PromptDeliveryRunnerHooks {
   broadcastEvent: (type: string, payload: Record<string, unknown>, sessionId?: string) => void;
 }
 
-async function terminalParentWakeResult(
+function parentWakeChildTaskIds(claim: PromptDeliveryClaim): string[] | null {
+  const value = claim.message.metadata?.childTaskIds;
+  if (
+    !Array.isArray(value) ||
+    value.length === 0 ||
+    value.length > MAX_ORCHESTRATOR_WAIT_CHILDREN ||
+    value.some(
+      (taskId) => typeof taskId !== 'string' || !taskId || taskId.length > MAX_TASK_ID_LENGTH
+    )
+  ) {
+    return null;
+  }
+  const taskIds = value as string[];
+  return new Set(taskIds).size === taskIds.length ? taskIds : null;
+}
+
+async function invalidParentWakeTargetResult(
   env: Env,
   projectId: string | null,
   claim: PromptDeliveryClaim
@@ -36,14 +56,32 @@ async function terminalParentWakeResult(
       capabilities: null,
     };
   }
-  const parent = await env.DATABASE.prepare(
-    `SELECT status, chat_session_id
+  const childTaskIds = parentWakeChildTaskIds(claim);
+  if (!childTaskIds) {
+    return {
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'Parent wake has no valid child-lineage identity',
+      runtimeIdentity: claim.message.runtimeIdentity,
+      capabilities: null,
+    };
+  }
+  const taskIds = [claim.message.sourceTaskId, ...childTaskIds];
+  const placeholders = taskIds.map(() => '?').join(', ');
+  const response = await env.DATABASE.prepare(
+    `SELECT id, status, chat_session_id, parent_task_id
      FROM tasks
-     WHERE id = ? AND project_id = ?
-     LIMIT 1`
+     WHERE project_id = ? AND id IN (${placeholders})`
   )
-    .bind(claim.message.sourceTaskId, projectId)
-    .first<{ status: string; chat_session_id: string | null }>();
+    .bind(projectId, ...taskIds)
+    .all<{
+      id: string;
+      status: string;
+      chat_session_id: string | null;
+      parent_task_id: string | null;
+    }>();
+  const tasks = new Map((response.results ?? []).map((task) => [task.id, task]));
+  const parent = tasks.get(claim.message.sourceTaskId);
   if (
     !parent ||
     (TASK_TERMINAL_STATUSES as readonly string[]).includes(parent.status) ||
@@ -61,7 +99,43 @@ async function terminalParentWakeResult(
       capabilities: null,
     };
   }
+  const invalidChildId = childTaskIds.find(
+    (childTaskId) => tasks.get(childTaskId)?.parent_task_id !== claim.message.sourceTaskId
+  );
+  if (invalidChildId) {
+    return {
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: `Child task lineage changed before parent wake (${invalidChildId})`,
+      runtimeIdentity: claim.message.runtimeIdentity,
+      capabilities: null,
+    };
+  }
   return null;
+}
+
+function parentWakeValidationReadFailure(
+  claim: PromptDeliveryClaim,
+  error: unknown
+): PromptDeliveryResult {
+  const message = error instanceof Error ? error.message : String(error);
+  if (claim.mode === 'reconcile') {
+    return {
+      kind: 'ambiguous',
+      reason: 'receipt_unavailable',
+      error: `Parent wake target validation failed during receipt reconciliation: ${message}`,
+      runtimeIdentity: claim.message.runtimeIdentity,
+      capabilities: null,
+      receipt: null,
+    };
+  }
+  return {
+    kind: 'retry',
+    reason: 'not_ready',
+    error: `Parent wake target validation temporarily failed: ${message}`,
+    runtimeIdentity: claim.message.runtimeIdentity,
+    capabilities: null,
+  };
 }
 
 export async function runPromptDeliveryClaim(
@@ -86,14 +160,30 @@ export async function runPromptDeliveryClaim(
 
   let result: PromptDeliveryResult;
   try {
+    const validateParentWakeTarget = async (): Promise<PromptDeliveryResult | null> => {
+      try {
+        return await invalidParentWakeTargetResult(env, hooks.projectId, claim);
+      } catch (error) {
+        return parentWakeValidationReadFailure(claim, error);
+      }
+    };
     const input = {
       projectId: hooks.projectId ?? '',
       claim,
       allowLegacyVm: config.legacyVmCompatEnabled,
       requestTimeoutMs: config.backgroundTimeoutMs,
+      beforeSideEffect: validateParentWakeTarget,
+      sourceTaskGuard:
+        claim.message.sourceKind === 'parent_wakeup' && claim.message.sourceTaskId
+          ? {
+              taskId: claim.message.sourceTaskId,
+              projectId: hooks.projectId ?? '',
+              chatSessionId: claim.message.targetSessionId,
+            }
+          : undefined,
     };
     result =
-      (await terminalParentWakeResult(env, hooks.projectId, claim)) ??
+      (await validateParentWakeTarget()) ??
       (claim.mode === 'submit' ? await adapter.submit(input) : await adapter.reconcile(input));
   } catch (error) {
     result = {

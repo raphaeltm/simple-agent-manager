@@ -263,6 +263,52 @@ describe('DO Migrations', () => {
         db.close();
       }
     });
+
+    it('upgrades the originally recorded migration-029 task-wait shape additively', () => {
+      const db = new Database(':memory:');
+      try {
+        const sql = createSqlStorage(db);
+        sql.exec(`CREATE TABLE migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)`);
+        const hardeningIndex = MIGRATIONS.findIndex(
+          (migration) => migration.name === '030-task-wait-replay-hardening'
+        );
+        expect(hardeningIndex).toBeGreaterThan(0);
+        for (const migration of MIGRATIONS.slice(0, hardeningIndex)) {
+          migration.run(sql);
+          sql.exec('INSERT INTO migrations (name, applied_at) VALUES (?, ?)', migration.name, 1);
+        }
+        sql.exec(
+          `INSERT INTO task_wait_subscriptions
+           (id, parent_task_id, parent_session_id, wait_condition, state, child_count,
+            wake_deadline, next_reconcile_at, wake_delivery_id, created_at, updated_at)
+           VALUES ('wait-legacy', 'parent-1', 'chat-1', 'all', 'active', 1,
+                   10000, 9000, 'wake-legacy', 1, 1)`
+        );
+
+        runMigrations(sql);
+
+        const columns = db.prepare('PRAGMA table_info(task_wait_subscriptions)').all() as Array<{
+          name: string;
+        }>;
+        expect(columns.map((column) => column.name)).toEqual(
+          expect.arrayContaining(['idempotency_key', 'wake_content', 'wake_attempts'])
+        );
+        expect(
+          db
+            .prepare(
+              `SELECT idempotency_key, wake_content, wake_attempts
+               FROM task_wait_subscriptions WHERE id = 'wait-legacy'`
+            )
+            .get()
+        ).toEqual({
+          idempotency_key: 'legacy-wait-legacy',
+          wake_content: null,
+          wake_attempts: 0,
+        });
+      } finally {
+        db.close();
+      }
+    });
   });
 
   describe('001-initial-schema migration', () => {
