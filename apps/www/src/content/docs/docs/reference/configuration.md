@@ -610,7 +610,7 @@ Durable prompt delivery is enabled by default so a follow-up can remain queued w
 | `ACP_LONG_TURN_CHECKPOINT_MS`                | `18000000` (5 hr) | Reserved checkpoint eligibility threshold.                                                                      |
 | `ACP_CHECKPOINT_PREEMPT_GRACE_MS`            | `30000`           | Reserved graceful preemption window.                                                                            |
 | `ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS`    | `30000`           | D1 reconciliation backstop interval for active parent waits.                                                    |
-| `ORCHESTRATOR_WAIT_MAX_CHILDREN`             | `20`              | Maximum direct children selected by one durable wait.                                                           |
+| `ORCHESTRATOR_WAIT_MAX_CHILDREN`             | `20`              | Maximum direct children selected by one durable wait (hard ceiling: `90`, preserving D1 bind headroom).         |
 | `ORCHESTRATOR_WAIT_MAX_ACTIVE_PER_PROJECT`   | `100`             | Maximum active durable parent waits per project.                                                                |
 | `ORCHESTRATOR_WAIT_MAX_DURATION_MS`          | `86400000`        | Maximum finite wait deadline.                                                                                   |
 | `ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM` | `10`              | Maximum wait subscriptions reconciled by one ProjectData alarm.                                                 |

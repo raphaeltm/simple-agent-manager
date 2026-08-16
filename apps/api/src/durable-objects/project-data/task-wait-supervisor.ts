@@ -32,6 +32,41 @@ export interface TaskWaitProcessResult {
   failed: number;
 }
 
+function backoffTaskWaitCandidates(
+  sql: SqlStorage,
+  env: Env,
+  hooks: TaskWaitSupervisorHooks,
+  candidates: taskWaits.TaskWaitSubscription[],
+  now: number
+): number {
+  let cancelled = 0;
+  let deliveryConfig: ReturnType<typeof resolveDurableExecutionConfig> | undefined;
+  try {
+    deliveryConfig = resolveDurableExecutionConfig(env);
+  } catch {
+    // Invalid delivery configuration is a permanent failure for these waits.
+  }
+  for (const candidate of candidates) {
+    const failure = hooks.transactionSync(() => {
+      if (!deliveryConfig) {
+        return {
+          cancelled: taskWaits.cancelTaskWait(sql, candidate.id, 'wake_delivery_unavailable', now),
+        };
+      }
+      const nextAttempt = candidate.wakeAttempts + 1;
+      return taskWaits.recordTaskWaitWakeFailure(
+        sql,
+        candidate.id,
+        now,
+        now + promptDeliveryBackoffMs(nextAttempt, deliveryConfig),
+        deliveryConfig.maxAttempts
+      );
+    });
+    if (failure?.cancelled) cancelled++;
+  }
+  return cancelled;
+}
+
 function normalizeTaskRow(row: Record<string, unknown>): D1TaskObservation | null {
   if (typeof row.id !== 'string' || typeof row.status !== 'string') return null;
   return {
@@ -111,7 +146,31 @@ export async function processTaskWaits(
   const projectId = hooks.getProjectId();
   if (!projectId) return result;
   const now = options.now ?? Date.now();
-  const config = resolveTaskWaitConfig(env);
+  let config: ReturnType<typeof resolveTaskWaitConfig>;
+  try {
+    config = resolveTaskWaitConfig(env);
+  } catch (error) {
+    // Use only compile-time defaults to select a bounded batch, then persist
+    // backoff/cancellation. Leaving a past-due active row untouched would make
+    // the DO alarm hot-loop until an operator fixed the environment.
+    const fallbackConfig = resolveTaskWaitConfig({} as Env);
+    const candidates = taskWaits.listTaskWaitCandidates(
+      sql,
+      fallbackConfig,
+      now,
+      options.childTaskId
+    );
+    result.checked = candidates.length;
+    result.failed = candidates.length;
+    result.cancelled = backoffTaskWaitCandidates(sql, env, hooks, candidates, now);
+    log.error('task_wait.configuration_invalid', {
+      projectId,
+      candidateCount: candidates.length,
+      ...serializeError(error),
+    });
+    await hooks.recalculateAlarm();
+    return result;
+  }
   const candidates = taskWaits.listTaskWaitCandidates(sql, config, now, options.childTaskId);
   result.checked = candidates.length;
 
@@ -129,35 +188,7 @@ export async function processTaskWaits(
     observations = await loadTaskObservations(env, projectId, taskIds);
   } catch (error) {
     result.failed += candidates.length;
-    let deliveryConfig: ReturnType<typeof resolveDurableExecutionConfig> | undefined;
-    try {
-      deliveryConfig = resolveDurableExecutionConfig(env);
-    } catch {
-      // Invalid delivery configuration is handled as a permanent failure below.
-    }
-    for (const candidate of candidates) {
-      const failure = hooks.transactionSync(() => {
-        if (!deliveryConfig) {
-          return {
-            cancelled: taskWaits.cancelTaskWait(
-              sql,
-              candidate.id,
-              'wake_delivery_unavailable',
-              now
-            ),
-          };
-        }
-        const nextAttempt = candidate.wakeAttempts + 1;
-        return taskWaits.recordTaskWaitWakeFailure(
-          sql,
-          candidate.id,
-          now,
-          now + promptDeliveryBackoffMs(nextAttempt, deliveryConfig),
-          deliveryConfig.maxAttempts
-        );
-      });
-      if (failure?.cancelled) result.cancelled++;
-    }
+    result.cancelled += backoffTaskWaitCandidates(sql, env, hooks, candidates, now);
     log.error('task_wait.observation_query_failed', {
       projectId,
       candidateCount: candidates.length,
@@ -301,6 +332,7 @@ export async function processTaskWaits(
         metadata: {
           waitId: prepared.id,
           parentTaskId: prepared.parentTaskId,
+          childTaskIds: prepared.children.map((child) => child.childTaskId),
           resolutionReason: prepared.resolutionReason,
         },
       });

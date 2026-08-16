@@ -860,15 +860,12 @@ export const MIGRATIONS: Migration[] = [
 					id TEXT PRIMARY KEY,
 					parent_task_id TEXT NOT NULL,
 					parent_session_id TEXT NOT NULL,
-					idempotency_key TEXT NOT NULL,
 					wait_condition TEXT NOT NULL CHECK (wait_condition IN ('all', 'any')),
 					state TEXT NOT NULL CHECK (state IN ('active', 'resolved', 'cancelled')),
 					child_count INTEGER NOT NULL CHECK (child_count > 0),
 					wake_deadline INTEGER NOT NULL,
 					next_reconcile_at INTEGER NOT NULL,
 					wake_delivery_id TEXT NOT NULL UNIQUE,
-					wake_content TEXT,
-					wake_attempts INTEGER NOT NULL DEFAULT 0 CHECK (wake_attempts >= 0),
 					resolution_reason TEXT,
 					created_at INTEGER NOT NULL,
 					updated_at INTEGER NOT NULL,
@@ -876,11 +873,7 @@ export const MIGRATIONS: Migration[] = [
 				)
 			`);
       sql.exec(`
-				CREATE UNIQUE INDEX idx_task_wait_idempotency
-				ON task_wait_subscriptions(parent_task_id, idempotency_key)
-			`);
-      sql.exec(`
-				CREATE UNIQUE INDEX idx_task_wait_active_parent
+			CREATE UNIQUE INDEX idx_task_wait_active_parent
 				ON task_wait_subscriptions(parent_task_id)
 				WHERE state = 'active'
 			`);
@@ -901,7 +894,30 @@ export const MIGRATIONS: Migration[] = [
       sql.exec(`
 				CREATE INDEX idx_task_wait_child
 				ON task_wait_children(child_task_id, subscription_id)
-			`);
+      `);
+    },
+  },
+  {
+    // Keep hardening additive because development/staging Durable Objects may
+    // already have recorded migration 029 from an earlier branch build.
+    name: '030-task-wait-replay-hardening',
+    run: (sql) => {
+      sql.exec(
+        `ALTER TABLE task_wait_subscriptions ADD COLUMN idempotency_key TEXT NOT NULL DEFAULT ''`
+      );
+      sql.exec(`ALTER TABLE task_wait_subscriptions ADD COLUMN wake_content TEXT`);
+      sql.exec(
+        `ALTER TABLE task_wait_subscriptions ADD COLUMN wake_attempts INTEGER NOT NULL DEFAULT 0 CHECK (wake_attempts >= 0)`
+      );
+      sql.exec(`
+        UPDATE task_wait_subscriptions
+        SET idempotency_key = 'legacy-' || id
+        WHERE idempotency_key = ''
+      `);
+      sql.exec(`
+        CREATE UNIQUE INDEX idx_task_wait_idempotency
+        ON task_wait_subscriptions(parent_task_id, idempotency_key)
+      `);
     },
   },
 ];

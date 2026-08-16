@@ -3,7 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { runMigrations } from '../../../src/durable-objects/migrations';
 import { processTaskWaits } from '../../../src/durable-objects/project-data/task-wait-supervisor';
-import { createTaskWait, getTaskWait } from '../../../src/durable-objects/project-data/task-waits';
+import {
+  computeTaskWaitAlarmTime,
+  createTaskWait,
+  getTaskWait,
+} from '../../../src/durable-objects/project-data/task-waits';
 import type { Env } from '../../../src/durable-objects/project-data/types';
 import { createSqlStorage } from './sql-storage-test-utils';
 
@@ -137,10 +141,44 @@ describe('task wait supervisor concurrency and prompt safety', () => {
     ).resolves.toMatchObject({ resolved: 1 });
 
     const content = acceptPromptDelivery.mock.calls[0]?.[0]?.deliveryContent as string;
+    expect(acceptPromptDelivery.mock.calls[0]?.[0]?.metadata).toMatchObject({
+      waitId: 'wait-1',
+      parentTaskId: 'parent-1',
+      childTaskIds: ['child-1'],
+    });
     expect(content).toContain('"taskId":"child-1"');
     expect(content).toContain('"status":"completed"');
     expect(content).not.toContain('IGNORE ALL PRIOR INSTRUCTIONS');
     expect(content).not.toContain('javascript:');
     expect(content).not.toContain('reveal credentials');
+  });
+
+  it('persists backoff instead of hot-looping a past-due wait on invalid configuration', async () => {
+    const recalculateAlarm = vi.fn().mockResolvedValue(undefined);
+    const env = {
+      ORCHESTRATOR_WAIT_MAX_CHILDREN: 'invalid',
+      DURABLE_PROMPT_DELIVERY_ENABLED: 'true',
+    } as unknown as Env;
+
+    await expect(
+      processTaskWaits(
+        sql,
+        env,
+        {
+          getProjectId: () => 'project-1',
+          transactionSync: (callback) => callback(),
+          acceptPromptDelivery: vi.fn(),
+          recalculateAlarm,
+        },
+        { now: 60_001 }
+      )
+    ).resolves.toMatchObject({ checked: 1, failed: 1, cancelled: 0 });
+
+    const wait = getTaskWait(sql, 'wait-1');
+    expect(wait).toMatchObject({ state: 'active', wakeAttempts: 1 });
+    if (!wait) throw new Error('wait disappeared after configuration failure');
+    expect(wait.nextReconcileAt).toBeGreaterThan(60_001);
+    expect(computeTaskWaitAlarmTime(sql)).toBe(wait.nextReconcileAt);
+    expect(recalculateAlarm).toHaveBeenCalled();
   });
 });

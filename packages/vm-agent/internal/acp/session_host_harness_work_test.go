@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -134,6 +135,29 @@ func TestClaudeHarnessLifecycleRejectsOversizedPayloadsAndIdentifiers(t *testing
 	}
 	if got := host.harnessWorkSnapshot(); got.State != harnessWorkInactive || got.Count != 0 {
 		t.Fatalf("rejected lifecycle payload mutated state: %#v", got)
+	}
+}
+
+func TestClaudeHarnessLifecycleBoundsCumulativeEdgeTaskIDs(t *testing.T) {
+	t.Parallel()
+
+	host := NewSessionHost(SessionHostConfig{})
+	host.resetHarnessWorkForAgent("claude-code")
+	for index := 0; index < maxClaudeLifecycleTasks+25; index++ {
+		host.applyClaudeHarnessLifecycle(claudeSDKLifecycleMessage{
+			Type:    "system",
+			Subtype: "task_started",
+			TaskID:  fmt.Sprintf("task-%03d", index),
+		})
+	}
+
+	if got := host.harnessWorkSnapshot(); got.Count != maxClaudeLifecycleTasks {
+		t.Fatalf("cumulative task count = %d, want bounded %d", got.Count, maxClaudeLifecycleTasks)
+	}
+	host.harnessWorkMu.Lock()
+	defer host.harnessWorkMu.Unlock()
+	if len(host.harnessTaskIDs) != maxClaudeLifecycleTasks {
+		t.Fatalf("retained task IDs = %d, want %d", len(host.harnessTaskIDs), maxClaudeLifecycleTasks)
 	}
 }
 

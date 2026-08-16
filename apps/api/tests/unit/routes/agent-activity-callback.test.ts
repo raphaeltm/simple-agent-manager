@@ -327,6 +327,29 @@ describe('agent activity callback', () => {
     expect(mocks.projectData.failSession).not.toHaveBeenCalled();
   });
 
+  it('does not cancel victim sleep for an unauthorized active harness report', async () => {
+    mocks.jwt.verifyCallbackToken.mockResolvedValueOnce({
+      workspace: 'workspace-999',
+      type: 'callback',
+      scope: 'workspace',
+    });
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'idle',
+      nodeId: 'node-1',
+      agentType: 'claude-code',
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'claude_sdk',
+      runtimeWorkProgressAt: 1234,
+    });
+
+    expect(response.status).toBe(403);
+    expect(mocks.updateSets).toHaveLength(0);
+    expect(mocks.projectData.reportAcpSessionActivity).not.toHaveBeenCalled();
+  });
+
   it('rejects a node-scoped token bound to a DIFFERENT node (forgery)', async () => {
     // Attacker holds a valid node-scoped token for their own node-999, supplies the victim's node-1.
     mocks.jwt.verifyCallbackToken.mockResolvedValueOnce({
