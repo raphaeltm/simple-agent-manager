@@ -478,6 +478,56 @@ describe('session snapshot recovery lifecycle', () => {
     }
   });
 
+  it('keeps a guarded source wakeable after its recovery task takes the session binding', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createSchemaTables(sqlite, [schema.sessionSnapshots, schema.tasks]);
+      sqlite.exec(`
+        INSERT INTO tasks
+          (id, project_id, user_id, chat_session_id, recovery_source_task_id, title,
+           status, priority, task_mode, dispatch_depth, triggered_by, created_by,
+           created_at, updated_at)
+        VALUES
+          ('parent-1', 'project-1', 'user-1', NULL, NULL, 'Parent',
+           'awaiting_followup', 0, 'conversation', 0, 'mcp', 'user-1',
+           '2026-08-15T00:00:00.000Z', '2026-08-15T00:00:00.000Z'),
+          ('wake-task-1', 'project-1', 'user-1', 'chat-1', 'parent-1', 'Recovery',
+           'queued', 0, 'conversation', 0, 'session-recovery', 'user-1',
+           '2026-08-15T00:01:00.000Z', '2026-08-15T00:01:00.000Z');
+
+        INSERT INTO session_snapshots
+          (id, workspace_id, node_id, project_id, user_id, chat_session_id,
+           agent_session_id, runtime, status, degradation, manifest_r2_key,
+           manifest_json, snapshot_generation, expires_at, sleep_status, sleeping_at,
+           recovery_attempts, updated_at)
+        VALUES
+          ('snapshot-recovery-owner', 'workspace-1', 'node-1', 'project-1', 'user-1',
+           'chat-1', 'agent-1', 'vm', 'available', 'none',
+           'snapshots/chat-1/generation-final/manifest.json', '{"status":"available"}',
+           'generation-final', '2026-08-20T00:00:00.000Z', 'sleeping',
+           '2026-08-15T00:00:00.000Z', 0, '2026-08-15T00:00:00.000Z');
+      `);
+      const testEnv = env({ DATABASE: createSqliteD1(sqlite) });
+      const db = drizzle(testEnv.DATABASE, { schema });
+
+      await expect(
+        claimSessionSnapshotRecovery(db, testEnv, {
+          chatSessionId: 'chat-1',
+          userId: 'user-1',
+          taskId: 'wake-task-2',
+          now: new Date('2026-08-15T00:05:00.000Z'),
+          sourceTaskGuard: {
+            taskId: 'parent-1',
+            projectId: 'project-1',
+            chatSessionId: 'chat-1',
+          },
+        })
+      ).resolves.toEqual({ status: 'claimed', taskId: 'wake-task-2' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
   it('clears the sleeping claim when snapshot recovery completes', async () => {
     const sqlite = new Database(':memory:');
     try {

@@ -815,6 +815,8 @@ export const tasks = sqliteTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     /** Soft cross-store link to the ProjectData chat session backing this task. */
     chatSessionId: text('chat_session_id'),
+    /** Soft link from a sleeping-session recovery task to the live task whose conversation it resumes. */
+    recoverySourceTaskId: text('recovery_source_task_id'),
     /** Null for top-level tasks; set for agent-dispatched sub-tasks (dispatch depth > 0). No FK — parent may be in another project's scope. */
     parentTaskId: text('parent_task_id'),
     /** Null until a workspace is assigned during task execution. Set by TaskRunner DO. */
@@ -909,6 +911,9 @@ export const tasks = sqliteTable(
     chatSessionIdUnique: uniqueIndex('idx_tasks_chat_session_id_unique')
       .on(table.chatSessionId)
       .where(sql`chat_session_id IS NOT NULL`),
+    recoverySourceTaskIdx: index('idx_tasks_recovery_source_task_id')
+      .on(table.recoverySourceTaskId)
+      .where(sql`recovery_source_task_id IS NOT NULL`),
     // Supports the `WHERE workspace_id = ? AND status IN (...)` lookups on the
     // mass-outage recovery hot path (persistRuntimeRecoveryFailed) and other
     // workspace-scoped task queries. Partial: most tasks never bind a workspace.

@@ -236,6 +236,72 @@ describe('ProjectData durable prompt delivery', () => {
     });
   });
 
+  it('accepts the recovery task as session owner while preserving the live source parent', async () => {
+    acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId: 'parent-wake-recovery-owner',
+        targetSessionId: 'chat-1',
+        displayContent: 'trusted wake',
+        sourceTaskId: 'parent-task-1',
+        senderType: 'system',
+        sourceKind: 'parent_wakeup',
+        metadata: { waitId: 'wait-1', childTaskIds: ['child-task-1'] },
+      },
+      Date.now()
+    );
+    const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>().mockResolvedValue({
+      kind: 'retry',
+      reason: 'not_ready',
+      error: 'replacement runtime is starting',
+      runtimeIdentity: null,
+      capabilities: null,
+    });
+    const env = {
+      DATABASE: {
+        prepare: vi.fn(() => ({
+          bind: vi.fn(() => ({
+            all: vi.fn().mockResolvedValue({
+              results: [
+                {
+                  id: 'parent-task-1',
+                  status: 'awaiting_followup',
+                  chat_session_id: null,
+                  parent_task_id: null,
+                  recovery_source_task_id: null,
+                  triggered_by: 'mcp',
+                },
+                {
+                  id: 'child-task-1',
+                  status: 'completed',
+                  chat_session_id: 'child-chat-1',
+                  parent_task_id: 'parent-task-1',
+                  recovery_source_task_id: null,
+                  triggered_by: 'mcp',
+                },
+                {
+                  id: 'recovery-task-1',
+                  status: 'queued',
+                  chat_session_id: 'chat-1',
+                  parent_task_id: null,
+                  recovery_source_task_id: 'parent-task-1',
+                  triggered_by: 'session-recovery',
+                },
+              ],
+            }),
+          })),
+        })),
+      },
+    } as never;
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim!, { submit, reconcile: vi.fn() }, hooks)
+    ).resolves.toMatchObject({ kind: 'retry', reason: 'not_ready' });
+    expect(submit).toHaveBeenCalledTimes(1);
+  });
+
   it('retries a parent wake when target validation storage is temporarily unavailable', async () => {
     acceptPromptDelivery(
       sql,
