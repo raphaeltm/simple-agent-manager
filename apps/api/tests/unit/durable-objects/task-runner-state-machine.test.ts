@@ -53,6 +53,7 @@ vi.mock('../../../src/services/observability', async () => {
 vi.mock('../../../src/services/project-data', () => ({
   failSession: failSessionMock,
   persistMessage: persistMessageMock,
+  reconcileTaskWaits: vi.fn(async () => undefined),
   sleepSession: sleepSessionMock,
 }));
 

@@ -40,7 +40,7 @@ func (h *SessionHost) startAgentWithSessionMode(ctx context.Context, agentType s
 	}
 
 	h.process = process
-	h.attachACPConnection(process)
+	h.attachACPConnection(process, agentType)
 	go h.monitorStderr(process)
 	go h.monitorProcessExit(ctx, process, agentType, cred, startup.settings)
 
@@ -546,8 +546,10 @@ func (h *SessionHost) startAgentProcess(startup *agentStartup) (agentProcess, er
 	})
 }
 
-func (h *SessionHost) attachACPConnection(process agentProcess) {
-	h.resetHarnessWorkForAgent(h.AgentType())
+func (h *SessionHost) attachACPConnection(process agentProcess, agentType string) {
+	// startAgentWithSessionMode is called with h.mu held, so use the already
+	// resolved agent type instead of re-entering AgentType's RWMutex.
+	h.resetHarnessWorkForAgent(agentType)
 	processedCh := make(chan struct{}, 1)
 	client := &sessionHostClient{host: h, processedCh: processedCh}
 
