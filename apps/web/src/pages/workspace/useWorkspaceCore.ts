@@ -20,6 +20,7 @@ import {
   stopWorkspace,
   updateWorkspace,
 } from '../../lib/api';
+import { getAuthEpoch, isAuthRevoked, registerTerminalCleanup } from '../../lib/terminal-cleanup';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 
 export interface UseWorkspaceCoreResult {
@@ -103,6 +104,16 @@ export function useWorkspaceCore(
 
   // Boot log streaming
   const { logs: streamedBootLogs } = useBootLogStream(id, workspace?.url, workspace?.status);
+
+  // Register cleanup for the WS URL cache so logout clears any cached
+  // bearer-bearing URL and the derived wsUrl state.
+  useEffect(() => {
+    return registerTerminalCleanup(() => {
+      terminalWsUrlCacheRef.current = null;
+      setWsUrl(null);
+      wsUrlSetRef.current = false;
+    });
+  }, []);
 
   // Ref for terminalToken so loadWorkspaceState doesn't need it as a dependency.
   // This prevents token refreshes from invalidating the callback and cascading
@@ -218,14 +229,16 @@ export function useWorkspaceCore(
 
   // Resolve terminal WS URL (cached)
   const resolveTerminalWsUrl = useCallback(async (): Promise<string | null> => {
-    if (!id) return null;
+    if (!id || isAuthRevoked()) return null;
 
     const cached = terminalWsUrlCacheRef.current;
     if (cached && Date.now() - cached.resolvedAt < 15_000) {
       return cached.url;
     }
 
+    const epochAtStart = getAuthEpoch();
     const { token } = await getTerminalToken(id);
+    if (isAuthRevoked() || getAuthEpoch() !== epochAtStart) return null;
     const resolvedUrl = buildTerminalWsUrl(token);
     if (!resolvedUrl) {
       throw new Error('Invalid workspace URL');

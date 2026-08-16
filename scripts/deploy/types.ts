@@ -379,6 +379,7 @@ export interface PulumiOutputs {
   };
   cloudflareAccountId: string;
   pagesName: string;
+  installationId: string;
 }
 
 /**

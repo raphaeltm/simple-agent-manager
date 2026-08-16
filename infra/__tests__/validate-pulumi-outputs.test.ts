@@ -16,6 +16,7 @@ function makeValidOutputs(): PulumiOutputs {
     diagnosticIncidentTtlDays: 7,
     cloudflareAccountId: 'cf-account-abc',
     pagesName: 'sa379a6-web-prod',
+    installationId: '0123456789abcdef0123456789abcdef',
     dnsIds: { api: 'dns-1', app: 'dns-2', wildcard: 'dns-3' },
     hostnames: { api: 'api.example.com', app: 'app.example.com' },
     stackSummary: {
@@ -43,6 +44,21 @@ describe('validatePulumiOutputs', () => {
     outputs.r2Name = null;
     expect(() => validatePulumiOutputs(outputs)).toThrow(/KV Namespace ID.*R2 Bucket Name/s);
   });
+
+  it('requires a generated 128-bit installation identity', () => {
+    const outputs = makeValidOutputs();
+    outputs.installationId = '';
+    expect(() => validatePulumiOutputs(outputs)).toThrow(/Installation ID \(installationId\)/);
+  });
+
+  it.each(['not-a-generated-id', 'A'.repeat(32), 'a'.repeat(31), 'a'.repeat(33)])(
+    'rejects malformed nonempty installation identity %s',
+    (installationId) => {
+      const outputs = makeValidOutputs();
+      outputs.installationId = installationId;
+      expect(() => validatePulumiOutputs(outputs)).toThrow(/32 lowercase hex/);
+    }
+  );
 
   it('throws when stackSummary.baseDomain is missing', () => {
     const outputs = makeValidOutputs();

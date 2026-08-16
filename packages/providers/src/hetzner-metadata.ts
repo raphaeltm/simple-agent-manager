@@ -94,6 +94,9 @@ export interface HetznerProviderRuntimeOptions {
   logger?: ProviderLogger;
 }
 
+const UNSUPPORTED_LOCATION_CAPACITY_PATTERN =
+  /^(?:hetzner API error \(422\): )?unsupported location for server type$/i;
+
 /**
  * Fallback message patterns for transient capacity detection when the structured
  * `error.code` is unavailable. Secondary heuristic only — prefer `providerCode`.
@@ -105,13 +108,20 @@ const TRANSIENT_CAPACITY_PATTERNS: RegExp[] = [
   /not enough resources/i,
   /resource[s]?\s+(?:temporarily\s+)?unavailable/i,
   /could not (?:find|allocate)/i,
-  /unsupported location for server type/i,
+  UNSUPPORTED_LOCATION_CAPACITY_PATTERN,
 ];
+
+/**
+ * Hetzner has returned this capacity condition as `invalid_input` in production.
+ * Keep this override narrow: other `invalid_input` responses are permanent config errors.
+ */
+const INVALID_INPUT_CAPACITY_PATTERNS: RegExp[] = [UNSUPPORTED_LOCATION_CAPACITY_PATTERN];
 
 /**
  * Classify a Hetzner API error into a normalized ProviderErrorCategory.
  *
- * Primary signal: structured `error.code` from the JSON response.
+ * Primary signal: structured `error.code` from the JSON response, except for a
+ * narrow allowlist of production-observed conflicting signals.
  * Fallback: message regex patterns for cases where the code is missing.
  *
  * Hetzner error codes (from API docs):
@@ -130,6 +140,15 @@ export function classifyHetznerError(
   providerCode: string | undefined,
   message: string
 ): ProviderErrorCategory {
+  // The exact capacity message is more specific than Hetzner's generic invalid_input code.
+  if (
+    statusCode === 422 &&
+    providerCode === 'invalid_input' &&
+    INVALID_INPUT_CAPACITY_PATTERNS.some((pattern) => pattern.test(message))
+  ) {
+    return 'transient_capacity';
+  }
+
   if (providerCode) {
     switch (providerCode) {
       case 'resource_unavailable':

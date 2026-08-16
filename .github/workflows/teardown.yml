@@ -15,7 +15,7 @@ on:
         required: true
         type: string
       keep_data:
-        description: 'Preserve D1 databases during teardown'
+        description: 'Preserve D1 databases, installation identity, and generated keys during teardown'
         required: false
         type: boolean
         default: false
@@ -598,7 +598,8 @@ jobs:
 
           UNPROTECTED=0
 
-          # Unprotect RandomId (encryption key) and PrivateKey (JWT, Origin CA) resources
+          # Unprotect RandomId (installation identity and generated keys) and
+          # PrivateKey (JWT, Origin CA) resources only during a full teardown.
           for URN in $URNS; do
             if echo "$URN" | grep -qE 'RandomId|PrivateKey'; then
               if [ "$INPUT_KEEP_DATA" = "true" ]; then
@@ -638,7 +639,7 @@ jobs:
           fi
 
           if [ "$INPUT_KEEP_DATA" = "true" ]; then
-            echo "keep_data=true: Preserving D1 databases and security keys."
+            echo "keep_data=true: Preserving D1 databases, installation identity, and security keys."
 
             # Get all URNs via structured export, filter out preserved resources
             ALL_URNS=$(pulumi stack export 2>/dev/null | jq -r '.deployment.resources[].urn // empty' || true)
@@ -650,7 +651,7 @@ jobs:
                 echo "  Preserving: $URN"
                 continue
               fi
-              # Skip security keys (still protected)
+              # Skip installation identity and security keys (still protected)
               if echo "$URN" | grep -qE 'RandomId|PrivateKey'; then
                 echo "  Preserving: $URN"
                 continue

@@ -1,5 +1,20 @@
 import { readFileSync } from 'node:fs';
+
 import { describe, expect, it } from 'vitest';
+import { parse } from 'yaml';
+
+interface WorkflowStep {
+  name?: string;
+  if?: string;
+  run?: string;
+  env?: Record<string, unknown>;
+}
+
+interface ParsedWorkflow {
+  on?: { workflow_dispatch?: { inputs?: Record<string, unknown> } };
+  concurrency?: { group?: string; 'cancel-in-progress'?: boolean };
+  jobs?: Record<string, { environment?: string; steps?: WorkflowStep[] }>;
+}
 
 function workflow(path: string): string {
   return readFileSync(new URL(`../../.github/workflows/${path}`, import.meta.url), 'utf8');
@@ -7,6 +22,18 @@ function workflow(path: string): string {
 
 function repoFile(path: string): string {
   return readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8');
+}
+
+function parsedWorkflow(path: string): ParsedWorkflow {
+  return parse(workflow(path)) as ParsedWorkflow;
+}
+
+function namedStep(parsed: ParsedWorkflow, name: string): WorkflowStep {
+  const step = Object.values(parsed.jobs ?? {})
+    .flatMap((job) => job.steps ?? [])
+    .find((candidate) => candidate.name === name);
+  expect(step).toBeDefined();
+  return step!;
 }
 
 function stepBlock(contents: string, stepName: string): string {
@@ -20,6 +47,135 @@ function stepBlock(contents: string, stepName: string): string {
 }
 
 describe('deployment workflow hardening', () => {
+  it('keeps D1 restore dispatch values out of shell source', () => {
+    const steps = Object.values(parsedWorkflow('d1-restore.yml').jobs ?? {}).flatMap(
+      (job) => job.steps ?? []
+    );
+    const runBlocks = steps.flatMap((step) => (typeof step.run === 'string' ? [step.run] : []));
+
+    expect(runBlocks.length).toBeGreaterThan(0);
+    for (const block of runBlocks) {
+      expect(block).not.toContain('${{ inputs.');
+      expect(block).not.toContain('${{ github.event.inputs.');
+      expect(block).not.toMatch(/\$\{\{\s*steps\.restore_input\.outputs\./);
+    }
+  });
+
+  it('validates every D1 restore dispatch field before credential-bearing commands', () => {
+    const contents = workflow('d1-restore.yml');
+    const validation = stepBlock(contents, 'Validate restore input');
+    const firstCredentialStep = contents.indexOf('- name: Login to Pulumi R2 Backend');
+
+    expect(contents.indexOf('- name: Validate restore input')).toBeLessThan(firstCredentialStep);
+    expect(validation).toContain('id: restore_input');
+    expect(validation).toContain('pnpm exec tsx scripts/deploy/d1-restore-input.ts validate');
+    expect(validation).toContain('D1_RESTORE_POINT: ${{ inputs.timestamp }}');
+    expect(validation).toContain('D1_RESTORE_ENVIRONMENT: ${{ inputs.environment }}');
+    expect(validation).toContain('D1_RESTORE_DATABASE: ${{ inputs.database }}');
+    expect(validation).toContain('D1_RESTORE_DRY_RUN: ${{ inputs.dry_run }}');
+    expect(validation).not.toContain('secrets.');
+  });
+
+  it('passes only validated restore values through environment variables and safe argument arrays', () => {
+    const parsed = parsedWorkflow('d1-restore.yml');
+    const info = namedStep(parsed, 'Time Travel info');
+    const restoreMain = namedStep(parsed, 'Restore main database');
+    const restoreObservability = namedStep(parsed, 'Restore observability database');
+
+    for (const step of [info, restoreMain, restoreObservability]) {
+      expect(step.env).toMatchObject({
+        D1_RESTORE_KIND: '${{ steps.restore_input.outputs.kind }}',
+        D1_RESTORE_VALUE: '${{ steps.restore_input.outputs.value }}',
+      });
+      expect(step.run).not.toContain('${{ inputs.timestamp }}');
+    }
+    expect(info.run).toBe('pnpm exec tsx scripts/deploy/d1-restore-input.ts preflight');
+    expect(info.env).toMatchObject({
+      D1_RESTORE_DATABASE: '${{ steps.restore_input.outputs.database }}',
+      D1_MAIN_DATABASE_NAME: '${{ steps.db.outputs.db_name }}',
+      D1_OBSERVABILITY_DATABASE_NAME: '${{ steps.db.outputs.obs_db_name }}',
+    });
+    expect(restoreMain).toMatchObject({
+      if: "${{ inputs.dry_run != true && (inputs.database == 'main' || inputs.database == 'both') }}",
+      run: 'pnpm exec tsx scripts/deploy/d1-restore-input.ts restore',
+      env: {
+        D1_RESTORE_DATABASE: 'main',
+        D1_MAIN_DATABASE_NAME: '${{ steps.db.outputs.db_name }}',
+        D1_OBSERVABILITY_DATABASE_NAME: '${{ steps.db.outputs.obs_db_name }}',
+      },
+    });
+    expect(restoreObservability).toMatchObject({
+      if: "${{ inputs.dry_run != true && (inputs.database == 'observability' || inputs.database == 'both') }}",
+      run: 'pnpm exec tsx scripts/deploy/d1-restore-input.ts restore',
+      env: {
+        D1_RESTORE_DATABASE: 'observability',
+        D1_MAIN_DATABASE_NAME: '${{ steps.db.outputs.db_name }}',
+        D1_OBSERVABILITY_DATABASE_NAME: '${{ steps.db.outputs.obs_db_name }}',
+      },
+    });
+  });
+
+  it('preserves approvals, dispatch compatibility, exact targets, evidence, and dry-run isolation', () => {
+    const contents = workflow('d1-restore.yml');
+
+    expect(contents).toContain('environment: ${{ inputs.environment }}');
+    expect(contents).toContain('timestamp:');
+    expect(contents).toContain('database:');
+    expect(contents).toContain('default: main');
+    expect(contents).toContain('default: true');
+    expect(contents).toContain("inputs.database == 'main' || inputs.database == 'both'");
+    expect(contents).toContain("inputs.database == 'observability' || inputs.database == 'both'");
+    expect(contents).toContain('if: ${{ inputs.dry_run != true &&');
+    expect(contents).toContain('if: ${{ inputs.dry_run == true }}');
+    expect(contents).toContain('Pre-restore verification');
+    expect(contents).toContain('Post-restore verification');
+    expect(repoFile('scripts/deploy/d1-restore-input.ts')).toContain('previous_bookmark');
+  });
+
+  it('preserves the parsed D1 restore dispatch and approval contract', () => {
+    const parsed = parsedWorkflow('d1-restore.yml');
+    const inputs = parsed.on?.workflow_dispatch?.inputs;
+
+    expect(inputs).toMatchObject({
+      environment: {
+        required: true,
+        type: 'choice',
+        options: ['staging', 'production'],
+      },
+      timestamp: { required: true, type: 'string' },
+      database: {
+        required: true,
+        type: 'choice',
+        options: ['main', 'observability', 'both'],
+        default: 'main',
+      },
+      dry_run: { required: false, type: 'boolean', default: true },
+    });
+    expect(parsed.jobs?.restore?.environment).toBe('${{ inputs.environment }}');
+    expect(parsed.concurrency).toEqual({
+      group: 'd1-restore-${{ inputs.environment }}',
+      'cancel-in-progress': false,
+    });
+  });
+
+  it('runs validation before every secret-bearing D1 restore step', () => {
+    const steps = parsedWorkflow('d1-restore.yml').jobs?.restore?.steps ?? [];
+    const validationIndex = steps.findIndex((step) => step.name === 'Validate restore input');
+
+    expect(validationIndex).toBeGreaterThanOrEqual(0);
+    expect(JSON.stringify(steps[validationIndex]?.env ?? {})).not.toContain('secrets.');
+    steps.forEach((step, index) => {
+      const serializedEnv = JSON.stringify(step.env ?? {});
+      if (
+        serializedEnv.includes('secrets.') ||
+        step.run?.includes('secrets.') ||
+        step.run?.includes('time-travel')
+      ) {
+        expect(index).toBeGreaterThan(validationIndex);
+      }
+    });
+  });
+
   it.each(['d1-restore.yml', 'pulumi-state-repair.yml'])(
     '%s fails fast when neither RESOURCE_PREFIX nor BASE_DOMAIN can resolve identity',
     (path) => {
@@ -61,7 +217,7 @@ describe('deployment workflow hardening', () => {
       'pnpm --filter @simple-agent-manager/www exec wrangler pages project list --json'
     );
     expect(provisionBlock).toContain('set -euo pipefail');
-    expect(provisionBlock).toContain("jq -e 'type == \"array\"'");
+    expect(provisionBlock).toContain('jq -e \'type == "array"\'');
     expect(provisionBlock).toContain('.["Project Name"] == $project_name');
     expect(provisionBlock).not.toContain('|| echo');
     expect(deployWorkflow).not.toContain('npx wrangler');

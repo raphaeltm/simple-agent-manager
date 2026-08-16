@@ -15,7 +15,9 @@ vi.mock('../../../src/middleware/rate-limit', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../../../src/middleware/rate-limit')>();
   return {
     ...actual,
-    checkRateLimit: vi.fn(() => Promise.resolve({ allowed: true, remaining: 10, resetAt: 9999999999 })),
+    checkRateLimit: vi.fn(() =>
+      Promise.resolve({ allowed: true, remaining: 10, resetAt: 9999999999 })
+    ),
   };
 });
 
@@ -23,7 +25,15 @@ import { deviceFlowRoutes } from '../../../src/routes/device-flow';
 
 let currentMockDB: ReturnType<typeof createMockDB>;
 
-function createMockDB(user: unknown = { id: 'user-1', email: 'test@example.com', name: 'Test User', status: 'active', role: 'user' }) {
+function createMockDB(
+  user: unknown = {
+    id: 'user-1',
+    email: 'test@example.com',
+    name: 'Test User',
+    status: 'active',
+    role: 'user',
+  }
+) {
   return {
     select: vi.fn(() => {
       const chain = {
@@ -92,6 +102,49 @@ describe('device flow routes', () => {
     expect(res.status).toBe(401);
   });
 
+  it('rejects device-code approval from suspended browser sessions before mutating KV', async () => {
+    const kv = createKV();
+    const app = buildApp(kv);
+    mockGetSession.mockResolvedValue({
+      user: { id: 'user-1', status: 'suspended', role: 'admin' },
+    });
+
+    const codeRes = await app.request('/api/auth/device/code', { method: 'POST' });
+    const code = await codeRes.json();
+
+    const approveRes = await app.request('/api/auth/device/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userCode: code.userCode }),
+    });
+
+    expect(approveRes.status).toBe(403);
+    await expect(approveRes.json()).resolves.toMatchObject({ error: 'FORBIDDEN' });
+    const entry = await kv.get(`device:${code.deviceCode}`, 'json');
+    expect(entry).toMatchObject({ status: 'pending' });
+    expect(entry).not.toHaveProperty('userId');
+    await expect(kv.get(`device:user:${code.userCode}`)).resolves.toBe(code.deviceCode);
+  });
+
+  it('asks BetterAuth to bypass session cookie cache for device-code approval', async () => {
+    const kv = createKV();
+    const app = buildApp(kv);
+    mockGetSession.mockResolvedValue({ user: { id: 'user-1', status: 'active' } });
+
+    const codeRes = await app.request('/api/auth/device/code', { method: 'POST' });
+    const code = await codeRes.json();
+
+    await app.request('/api/auth/device/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userCode: code.userCode }),
+    });
+
+    expect(mockGetSession).toHaveBeenCalledWith(
+      expect.objectContaining({ query: { disableCookieCache: true } })
+    );
+  });
+
   it('approves a pending code and token exchange returns a session cookie once', async () => {
     const kv = createKV();
     const app = buildApp(kv);
@@ -123,6 +176,39 @@ describe('device flow routes', () => {
       body: JSON.stringify({ deviceCode: code.deviceCode }),
     });
     expect(consumedRes.status).toBe(410);
+  });
+
+  it('rejects device-token exchange for suspended approved users without creating a session when approval is disabled', async () => {
+    currentMockDB = createMockDB({
+      id: 'user-1',
+      email: 'test@example.com',
+      name: 'Test User',
+      status: 'suspended',
+      role: 'superadmin',
+    });
+    const kv = createKV();
+    const app = buildApp(kv, { REQUIRE_APPROVAL: 'false' });
+    mockGetSession.mockResolvedValue({ user: { id: 'user-1' } });
+
+    const codeRes = await app.request('/api/auth/device/code', { method: 'POST' });
+    const code = await codeRes.json();
+
+    const approveRes = await app.request('/api/auth/device/approve', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userCode: code.userCode }),
+    });
+    expect(approveRes.status).toBe(200);
+
+    const tokenRes = await app.request('/api/auth/device/token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ deviceCode: code.deviceCode }),
+    });
+
+    expect(tokenRes.status).toBe(403);
+    await expect(tokenRes.json()).resolves.toMatchObject({ error: 'FORBIDDEN' });
+    expect(mockCreateSession).not.toHaveBeenCalled();
   });
 
   it('returns authorization_pending while the code is pending', async () => {

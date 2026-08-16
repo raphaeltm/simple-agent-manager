@@ -170,6 +170,7 @@ installations must add this policy before their next production deployment.
 | `PREVIEW_URL_TTL_SECONDS`                          | Optional lifetime for signed interactive-preview URLs                                                                                               | `300`                                    |
 | `RESOURCE_PREFIX`                                  | Domain-derived Cloudflare resource prefix                                                                                                           | `sa379a6`                                |
 | `CF_CONTAINER_ENABLED`                             | Optional instant-session runtime toggle. Generated deploys set `true`; set `false` to force VM runtime.                                             | `false`                                  |
+| `D1_RESTORE_RECOVERY_WINDOW_DAYS`                  | Optional D1 restore window for accounts with narrower retention. Defaults to `30`; range `1`–`30`.                                                  | `7`                                      |
 | `D1_MIGRATION_CHURNING_TABLES`                     | Optional comma-separated `<binding>.<table>` subset of the reviewed retention/expiry table list. May narrow the built-in list but cannot expand it. | `OBSERVABILITY_DATABASE.platform_errors` |
 | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | Maximum allowed decrease for reviewed churning tables. Defaults to `50`; range `0`–`100`. A decrease exactly at the limit is accepted.              | `25`                                     |
 
@@ -221,6 +222,10 @@ GitHub App secrets use `GH_*` prefix because GitHub Actions secret names cannot 
 Security keys (`ENCRYPTION_KEY`, `JWT_PRIVATE_KEY`, `JWT_PUBLIC_KEY`, `DEPLOY_SIGNING_PRIVATE_KEY`, `DEPLOY_SIGNING_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_PUBLIC_KEY`, `VAPID_SUBJECT`) and `TRIAL_CLAIM_TOKEN_SECRET` are automatically generated during deployment. Pulumi persists the source key material, and the deployment workflow derives/copies the runtime Worker secrets. No manual setup required.
 :::
 
+:::note[Provider resource ownership]
+Pulumi also generates a non-secret, per-installation identity in stack state and injects it into the API Worker. New cloud VMs carry this marker so destructive orphan cleanup can prove they belong to this exact installation. Upgrades deliberately do not infer ownership of legacy unmarked VMs; those servers keep running and remain outside provider-side orphan deletion. Preserve Pulumi state when moving or restoring an installation so newly created VMs continue using the same identity.
+:::
+
 :::note[VM TLS certificates]
 New VM nodes do not receive a shared Origin CA private key in cloud-init. The cloud-init template generates a node-local RSA key and CSR, then calls the node-scoped callback endpoint `POST /api/nodes/:id/origin-ca-certificate` with its callback JWT. The API Worker signs that CSR through Cloudflare Origin CA using `CF_API_TOKEN` (`packages/cloud-init/src/template.ts`, `apps/api/src/routes/node-lifecycle.ts`, `apps/api/src/services/origin-ca-certificates.ts`).
 :::
@@ -263,7 +268,15 @@ The workflow also records D1 row counts before migrations. It compares a databas
 
 If deployment stops with `POST-MIGRATION DATA INTEGRITY CHECK FAILED`, it has blocked Worker deployment before serving against the suspect database state. The failed step prints the pre-migration RFC3339 recovery timestamp and an exact `wrangler d1 time-travel restore` command for each database. Preserve that output and inspect the reported table decreases before restoring.
 
-For guided recovery, run the **D1 Time Travel Restore** workflow (`d1-restore.yml`) with the printed timestamp. Always preview first with `dry_run=true`; select `main`, `observability`, or `both`, then repeat with `dry_run=false` only after confirming the target. For example:
+For guided recovery, run the **D1 Time Travel Restore** workflow (`d1-restore.yml`). The workflow keeps the existing `timestamp` input name for compatibility, but the value may be any Cloudflare D1 restore point:
+
+- Unix seconds, such as `1786083379`
+- An RFC3339/JavaScript date-time with an explicit timezone, such as `2026-08-07T06:16:19Z` or `2026-08-07T08:46:19.123+02:30`
+- A lowercase D1 bookmark in the `8-8-8-32` hexadecimal form printed by Wrangler, such as `00000085-0000024c-00004c6d-8e61117bf38d7adb71b934ebbf891683`
+
+The validator rejects malformed values, shell metacharacters, missing timezones, future timestamps, and timestamps outside the configured recovery window before the workflow exposes Pulumi or Cloudflare credentials. The default window is 30 days. If the account has a narrower retention policy, set the repository variable `D1_RESTORE_RECOVERY_WINDOW_DAYS` to a whole number from 1 through 30.
+
+Always preview first with `dry_run=true`; select `main`, `observability`, or `both`, then repeat the same command with `dry_run=false` only after confirming the target. The preview runs non-mutating Time Travel lookups for every selected Pulumi-resolved database and never calls the restore operation. For a bookmark, those lookups verify that it sorts between the target database's currently retrievable recovery-window minute and current bookmark. The boundary lookup stays one D1 minute inside the moving retention cutoff so process and service clock advancement cannot invalidate the lookup itself; consequently, the earliest boundary minute is intentionally excluded. Cloudflare remains authoritative about whether a bookmark belongs to that database. For example:
 
 ```bash
 gh workflow run d1-restore.yml --ref main \
@@ -272,6 +285,10 @@ gh workflow run d1-restore.yml --ref main \
   -f database=both \
   -f dry_run=true
 ```
+
+The GitHub Environment named by `environment` still controls the required approval and secrets. The `main` selection uses only the Pulumi `d1DatabaseName` output, `observability` uses only `observabilityD1DatabaseName`, and `both` preflights both before either restore step can run.
+
+After reviewing the preview, repeat the command with `-f dry_run=false`. Each successful restore prints JSON containing `bookmark` and `previousBookmark`. Preserve that output: `previousBookmark` is the undo point. To undo, run the workflow twice with that bookmark in the `timestamp` field—first with `dry_run=true`, then with `dry_run=false` after confirming the exact environment and database target. Do not copy the raw bookmark into an ad hoc shell command.
 
 If deployment stops with a Durable Object migration-state error:
 

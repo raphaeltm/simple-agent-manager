@@ -1,11 +1,15 @@
 import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
-import type { Context, MiddlewareHandler,Next } from 'hono';
+import type { Context, MiddlewareHandler, Next } from 'hono';
 
 import { createAuth } from '../auth';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
-import { assertUserAllowedBySignupApproval, isSignupApprovalRequired } from '../services/signup-approval';
+import {
+  assertUserAllowedBySignupApproval,
+  assertUserNotSuspended,
+  isSignupApprovalRequired,
+} from '../services/signup-approval';
 import { errors } from './error';
 
 /**
@@ -90,13 +94,16 @@ export function requireAuth(): MiddlewareHandler<{ Bindings: Env }> {
     const auth = await createAuth(c.env);
     const session = await auth.api.getSession({
       headers: c.req.raw.headers,
+      query: { disableCookieCache: true },
     });
 
     if (!session?.user) {
       throw errors.unauthorized('Authentication required');
     }
 
-    c.set('auth', buildAuthContext(session));
+    const authContext = buildAuthContext(session);
+    assertUserNotSuspended(authContext.user);
+    c.set('auth', authContext);
 
     await next();
   };
@@ -113,10 +120,13 @@ export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
       const auth = await createAuth(c.env);
       const session = await auth.api.getSession({
         headers: c.req.raw.headers,
+        query: { disableCookieCache: true },
       });
 
       if (session?.user) {
-        c.set('auth', buildAuthContext(session));
+        const authContext = buildAuthContext(session);
+        assertUserNotSuspended(authContext.user);
+        c.set('auth', authContext);
       }
     } catch (e) {
       log.warn('optional_auth.check_failed', { error: String(e) });
@@ -128,34 +138,18 @@ export function optionalAuth(): MiddlewareHandler<{ Bindings: Env }> {
 
 /**
  * Approval middleware.
- * When REQUIRE_APPROVAL is enabled, blocks users whose status is not 'active'.
- * Admins and superadmins always pass through.
+ * Suspended accounts are always blocked. When signup approval is enabled,
+ * pending non-admin users are blocked; admins and superadmins otherwise pass.
  * Must be used AFTER requireAuth().
  */
 export function requireApproved(): MiddlewareHandler<{ Bindings: Env }> {
   return async (c: Context<{ Bindings: Env }>, next: Next) => {
-    if (!(await isSignupApprovalRequired(c.env))) {
-      await next();
-      return;
-    }
-
     const auth = c.get('auth');
     if (!auth) {
       throw errors.unauthorized('Authentication required');
     }
 
-    // Admins and superadmins always pass through
-    if (auth.user.role === 'superadmin' || auth.user.role === 'admin') {
-      await next();
-      return;
-    }
-
-    if (auth.user.status === 'active') {
-      await next();
-      return;
-    }
-
-    assertUserAllowedBySignupApproval(true, auth.user);
+    assertUserAllowedBySignupApproval(await isSignupApprovalRequired(c.env), auth.user);
     await next();
   };
 }

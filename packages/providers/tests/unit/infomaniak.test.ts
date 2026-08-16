@@ -173,7 +173,11 @@ describe('InfomaniakProvider', () => {
       location: 'dc4-a',
       image: 'Ubuntu 24.04 noble',
       userData: '#cloud-config\nusers: []',
-      labels: { project: 'p1' },
+      labels: {
+        managed: 'simple-agent-manager',
+        env: 'production',
+        installation: '0123456789abcdef0123456789abcdef',
+      },
     });
     expect(result).toMatchObject({ id: 'server-1', ip: '203.0.113.10', status: 'running' });
     const createCall = fetchMock.mock.calls.find(
@@ -186,7 +190,11 @@ describe('InfomaniakProvider', () => {
         flavorRef: 'flavor-1',
         networks: [{ uuid: 'network-1' }],
         user_data: 'I2Nsb3VkLWNvbmZpZwp1c2VyczogW10=',
-        metadata: { project: 'p1' },
+        metadata: {
+          managed: 'simple-agent-manager',
+          env: 'production',
+          installation: '0123456789abcdef0123456789abcdef',
+        },
       },
     });
   });
@@ -249,6 +257,51 @@ describe('InfomaniakProvider', () => {
     expect(await outcome).toBe(reason);
     expect(serverReads).toBe(1);
     expect(fetchMock).toHaveBeenCalled();
+  });
+
+  it('lists only VMs carrying every exact ownership marker', async () => {
+    vi.spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce(auth())
+      .mockResolvedValueOnce(
+        json({
+          servers: [
+            {
+              id: 'owned',
+              name: 'node',
+              status: 'ACTIVE',
+              addresses: {},
+              flavor: { id: 'flavor-1' },
+              created: '2026-08-12T00:00:00Z',
+              metadata: {
+                managed: 'simple-agent-manager',
+                env: 'production',
+                installation: '0123456789abcdef0123456789abcdef',
+              },
+            },
+            {
+              id: 'foreign',
+              name: 'node',
+              status: 'ACTIVE',
+              addresses: {},
+              flavor: { id: 'flavor-1' },
+              created: '2026-08-12T00:00:00Z',
+              metadata: {
+                managed: 'simple-agent-manager',
+                env: 'production',
+                installation: 'fedcba9876543210fedcba9876543210',
+              },
+            },
+          ],
+        })
+      );
+    const provider = new InfomaniakProvider('id', 'secret', { authUrl: AUTH_URL });
+    await expect(
+      provider.listVMs({
+        managed: 'simple-agent-manager',
+        env: 'production',
+        installation: '0123456789abcdef0123456789abcdef',
+      })
+    ).resolves.toEqual([expect.objectContaining({ id: 'owned' })]);
   });
 
   it('attaches through Nova with the exact payload and returns stable device discovery data', async () => {

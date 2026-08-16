@@ -106,12 +106,17 @@ describe('HetznerProvider lifecycle', () => {
         new Response(JSON.stringify({ servers: [] }), { status: 200 }),
       );
 
-      await provider.listVMs({ 'managed-by': 'simple-agent-manager', node: 'n1' });
+      await provider.listVMs({
+        managed: 'simple-agent-manager',
+        env: 'production',
+        installation: '0123456789abcdef0123456789abcdef',
+      });
 
       const url = fetchCall(fetch as ReturnType<typeof vi.fn>, 0).url;
       expect(url).toContain('label_selector=');
-      expect(decodeURIComponent(url)).toContain('managed-by=simple-agent-manager');
-      expect(decodeURIComponent(url)).toContain('node=n1');
+      expect(decodeURIComponent(url)).toContain('managed=simple-agent-manager');
+      expect(decodeURIComponent(url)).toContain('env=production');
+      expect(decodeURIComponent(url)).toContain('installation=0123456789abcdef0123456789abcdef');
     });
 
 

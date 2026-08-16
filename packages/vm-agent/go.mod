@@ -2,6 +2,8 @@ module github.com/workspace/vm-agent
 
 go 1.25.0
 
+toolchain go1.26.6
+
 require (
 	github.com/MicahParks/keyfunc/v3 v3.8.1
 	github.com/coder/acp-go-sdk v0.13.5

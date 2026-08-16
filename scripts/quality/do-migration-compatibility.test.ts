@@ -42,6 +42,7 @@ const outputs: PulumiOutputs = {
   },
   cloudflareAccountId: 'account-id',
   pagesName: 'prefix-web-prod',
+  installationId: '0123456789abcdef0123456789abcdef',
 };
 
 function loadCheckedInMigrations(): MigrationEntry[] {

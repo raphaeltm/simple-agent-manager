@@ -1,6 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const settingRows = new Map<string, { value: string; updatedAt: string; updatedBy: string | null }>();
+const settingRows = new Map<
+  string,
+  { value: string; updatedAt: string; updatedBy: string | null }
+>();
 let existingUsers: Array<{ id: string }> = [];
 
 const mockDb = {
@@ -16,7 +19,9 @@ const mockDb = {
   })),
   insert: vi.fn(() => ({
     values: (values: { key: string; value: string; updatedAt: string; updatedBy: string }) => ({
-      onConflictDoUpdate: async (options: { set: { value: string; updatedAt: string; updatedBy: string } }) => {
+      onConflictDoUpdate: async (options: {
+        set: { value: string; updatedAt: string; updatedBy: string };
+      }) => {
         settingRows.set(values.key, {
           value: options.set.value,
           updatedAt: options.set.updatedAt,
@@ -32,7 +37,10 @@ vi.mock('drizzle-orm/d1', () => ({
 }));
 
 vi.mock('../../../src/services/platform-config', () => ({
-  getGitHubOAuthConfig: async (env: { GITHUB_CLIENT_ID?: string; GITHUB_CLIENT_SECRET?: string }) =>
+  getGitHubOAuthConfig: async (env: {
+    GITHUB_CLIENT_ID?: string;
+    GITHUB_CLIENT_SECRET?: string;
+  }) =>
     env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
       ? { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET }
       : null,
@@ -43,6 +51,7 @@ vi.mock('../../../src/services/platform-config', () => ({
 import { createAuth } from '../../../src/auth';
 import {
   assertSessionUserApproved,
+  assertUserAllowedBySignupApproval,
   getSignupApprovalConfig,
   setSignupApprovalConfig,
 } from '../../../src/services/signup-approval';
@@ -58,9 +67,13 @@ function testEnv(requireApproval: 'true' | 'false') {
   };
 }
 
-type UserCreateBeforeHook = (user: Record<string, unknown>) => Promise<{ data: Record<string, unknown> }>;
+type UserCreateBeforeHook = (
+  user: Record<string, unknown>
+) => Promise<{ data: Record<string, unknown> }>;
 
-async function getUserCreateBeforeHook(requireApproval: 'true' | 'false'): Promise<UserCreateBeforeHook> {
+async function getUserCreateBeforeHook(
+  requireApproval: 'true' | 'false'
+): Promise<UserCreateBeforeHook> {
   const auth = await createAuth(testEnv(requireApproval) as never);
   const hook = (
     auth.options as {
@@ -120,7 +133,7 @@ describe('signup approval runtime config', () => {
     });
 
     await expect(
-      assertSessionUserApproved(testEnv('true') as never, { role: 'user', status: 'pending' }),
+      assertSessionUserApproved(testEnv('true') as never, { role: 'user', status: 'pending' })
     ).resolves.toBeUndefined();
 
     await setSignupApprovalConfig(testEnv('false') as never, {
@@ -129,9 +142,99 @@ describe('signup approval runtime config', () => {
     });
 
     await expect(
-      assertSessionUserApproved(testEnv('false') as never, { role: 'user', status: 'pending' }),
+      assertSessionUserApproved(testEnv('false') as never, { role: 'user', status: 'pending' })
     ).rejects.toMatchObject({ statusCode: 403, error: 'APPROVAL_REQUIRED' });
   });
+
+  it.each([
+    {
+      requireApproval: false,
+      role: 'user',
+      status: 'active',
+      outcome: 'allow',
+    },
+    {
+      requireApproval: true,
+      role: 'user',
+      status: 'active',
+      outcome: 'allow',
+    },
+    {
+      requireApproval: false,
+      role: 'user',
+      status: 'pending',
+      outcome: 'allow',
+    },
+    {
+      requireApproval: true,
+      role: 'user',
+      status: 'pending',
+      outcome: 'approval-required',
+    },
+    {
+      requireApproval: false,
+      role: 'admin',
+      status: 'pending',
+      outcome: 'allow',
+    },
+    {
+      requireApproval: true,
+      role: 'admin',
+      status: 'pending',
+      outcome: 'allow',
+    },
+    {
+      requireApproval: false,
+      role: 'user',
+      status: 'suspended',
+      outcome: 'suspended',
+    },
+    {
+      requireApproval: true,
+      role: 'user',
+      status: 'suspended',
+      outcome: 'suspended',
+    },
+    {
+      requireApproval: false,
+      role: 'admin',
+      status: 'suspended',
+      outcome: 'suspended',
+    },
+    {
+      requireApproval: true,
+      role: 'admin',
+      status: 'suspended',
+      outcome: 'suspended',
+    },
+    {
+      requireApproval: false,
+      role: 'superadmin',
+      status: 'suspended',
+      outcome: 'suspended',
+    },
+    {
+      requireApproval: true,
+      role: 'superadmin',
+      status: 'suspended',
+      outcome: 'suspended',
+    },
+  ] as const)(
+    'enforces $status/$role with approval=$requireApproval as $outcome',
+    ({ requireApproval, role, status, outcome }) => {
+      const check = () => assertUserAllowedBySignupApproval(requireApproval, { role, status });
+
+      if (outcome === 'allow') {
+        expect(check).not.toThrow();
+      } else if (outcome === 'approval-required') {
+        expect(check).toThrow(
+          expect.objectContaining({ statusCode: 403, error: 'APPROVAL_REQUIRED' })
+        );
+      } else {
+        expect(check).toThrow(expect.objectContaining({ statusCode: 403, error: 'FORBIDDEN' }));
+      }
+    }
+  );
 
   it('uses the runtime override in the BetterAuth user creation hook', async () => {
     existingUsers = [{ id: 'existing-user' }];

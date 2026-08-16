@@ -60,6 +60,7 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
       persistenceKey,
       hideTabBar = false,
       onSessionsChange,
+      shouldSuppressReconnect,
     } = props;
     const terminalConfig: TerminalConfig = {
       maxSessions: config?.maxSessions || 10,
@@ -87,6 +88,8 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
     wsUrlRef.current = wsUrl;
     const resolveWsUrlRef = useRef(resolveWsUrl);
     resolveWsUrlRef.current = resolveWsUrl;
+    const shouldSuppressReconnectRef = useRef(shouldSuppressReconnect);
+    shouldSuppressReconnectRef.current = shouldSuppressReconnect;
     const terminalsRef = useRef<Map<string, TerminalInstance>>(new Map());
     const [wsConnected, setWsConnected] = useState(false);
     // Guard against duplicate list_sessions requests during rapid reconnect cycles
@@ -236,8 +239,10 @@ export const MultiTerminal = React.forwardRef<MultiTerminalHandle, MultiTerminal
 
       const scheduleReconnect = () => {
         if (disposed) return;
+        if (shouldSuppressReconnectRef.current?.()) return;
         clearTimeout(reconnectTimeout);
         reconnectTimeout = setTimeout(() => {
+          if (disposed || shouldSuppressReconnectRef.current?.()) return;
           void connect();
         }, RECONNECT_DELAY_MS);
       };

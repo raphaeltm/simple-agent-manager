@@ -215,6 +215,7 @@ export function validatePulumiOutputs(outputs: unknown): asserts outputs is Pulu
     { key: 'diagnosticIncidentTtlDays', label: 'Diagnostic Incident TTL Days' },
     { key: 'cloudflareAccountId', label: 'Cloudflare Account ID' },
     { key: 'pagesName', label: 'Pages Project Name' },
+    { key: 'installationId', label: 'Installation ID' },
   ];
 
   const missing = required.filter(({ key }) => {
@@ -228,6 +229,12 @@ export function validatePulumiOutputs(outputs: unknown): asserts outputs is Pulu
   if (missing.length > 0) {
     const labels = missing.map(({ label, key }) => `  - ${label} (${key})`).join('\n');
     throw new Error(`Pulumi outputs missing required fields:\n${labels}`);
+  }
+
+  if (!/^[0-9a-f]{32}$/.test(String(record.installationId))) {
+    throw new Error(
+      'Pulumi output Installation ID (installationId) must be exactly 32 lowercase hex characters'
+    );
   }
 
   const stackSummary = requireRecord(record.stackSummary, 'Pulumi outputs.stackSummary');
@@ -444,6 +451,7 @@ function getApiWorkerVars(
       : {}),
     VERSION: DEPLOYMENT_CONFIG.version,
     PAGES_PROJECT_NAME: outputs.pagesName,
+    SAM_INSTALLATION_ID: outputs.installationId,
     R2_BUCKET_NAME: outputs.r2Name,
     SESSION_SNAPSHOT_TTL_DAYS: String(outputs.sessionSnapshotTtlDays),
     VM_INCIDENT_R2_PREFIX: outputs.diagnosticIncidentPrefix,

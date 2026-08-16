@@ -18,9 +18,13 @@ vi.mock('../../src/services/jwt', () => ({
   signTerminalToken: mockSignTerminalToken,
 }));
 
-vi.mock('cloudflare:workers', () => ({
-  DurableObject: class {},
-}), { virtual: true });
+vi.mock(
+  'cloudflare:workers',
+  () => ({
+    DurableObject: class {},
+  }),
+  { virtual: true }
+);
 
 vi.mock('@cloudflare/sandbox', () => ({
   Sandbox: class {},
@@ -73,7 +77,7 @@ describe('workspace subdomain proxy ownership', () => {
     });
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response('proxied', { status: 200 })),
+      vi.fn(async () => new Response('proxied', { status: 200 }))
     );
   });
 
@@ -82,10 +86,28 @@ describe('workspace subdomain proxy ownership', () => {
 
     const response = await worker.default.fetch(
       new Request(`https://ws-${OWNER_WORKSPACE_ID.toLowerCase()}.workspaces.example.com/terminal`),
-      env,
+      env
     );
 
     expect(response.status).toBe(401);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects suspended browser-session workspace subdomain requests before proxying', async () => {
+    mockGetSession.mockResolvedValue({
+      user: { id: 'user-owner', status: 'suspended', role: 'admin' },
+      session: { id: 'session-owner', expiresAt: new Date() },
+    });
+
+    const response = await worker.default.fetch(
+      new Request(`https://ws-${OWNER_WORKSPACE_ID.toLowerCase()}.workspaces.example.com/terminal`),
+      env
+    );
+
+    expect(response.status).toBe(403);
+    expect(mockGetSession).toHaveBeenCalledWith(
+      expect.objectContaining({ query: { disableCookieCache: true } })
+    );
     expect(globalThis.fetch).not.toHaveBeenCalled();
   });
 
@@ -93,8 +115,10 @@ describe('workspace subdomain proxy ownership', () => {
     mockGetSession.mockResolvedValue(null);
 
     const response = await worker.default.fetch(
-      new Request(`https://ws-${OWNER_WORKSPACE_ID.toLowerCase()}.workspaces.example.com/agent/ws?token=valid-terminal-token`),
-      env,
+      new Request(
+        `https://ws-${OWNER_WORKSPACE_ID.toLowerCase()}.workspaces.example.com/agent/ws?token=valid-terminal-token`
+      ),
+      env
     );
 
     expect(response.status).toBe(200);
@@ -115,8 +139,10 @@ describe('workspace subdomain proxy ownership', () => {
     });
 
     const response = await worker.default.fetch(
-      new Request(`https://ws-${OWNER_WORKSPACE_ID.toLowerCase()}.workspaces.example.com/agent/ws?token=wrong-workspace-token`),
-      env,
+      new Request(
+        `https://ws-${OWNER_WORKSPACE_ID.toLowerCase()}.workspaces.example.com/agent/ws?token=wrong-workspace-token`
+      ),
+      env
     );
 
     expect(response.status).toBe(401);
@@ -132,8 +158,10 @@ describe('workspace subdomain proxy ownership', () => {
     workspaceResult = null;
 
     const response = await worker.default.fetch(
-      new Request(`https://ws-${OTHER_WORKSPACE_ID.toLowerCase()}.workspaces.example.com/agent/ws?token=other-user-token`),
-      env,
+      new Request(
+        `https://ws-${OTHER_WORKSPACE_ID.toLowerCase()}.workspaces.example.com/agent/ws?token=other-user-token`
+      ),
+      env
     );
 
     expect(response.status).toBe(404);
@@ -145,7 +173,7 @@ describe('workspace subdomain proxy ownership', () => {
 
     const response = await worker.default.fetch(
       new Request(`https://ws-${OTHER_WORKSPACE_ID.toLowerCase()}.workspaces.example.com/terminal`),
-      env,
+      env
     );
 
     expect(response.status).toBe(404);
@@ -155,7 +183,7 @@ describe('workspace subdomain proxy ownership', () => {
   it('proxies workspace subdomain requests owned by the authenticated user', async () => {
     const response = await worker.default.fetch(
       new Request(`https://ws-${OWNER_WORKSPACE_ID.toLowerCase()}.workspaces.example.com/terminal`),
-      env,
+      env
     );
 
     expect(response.status).toBe(200);

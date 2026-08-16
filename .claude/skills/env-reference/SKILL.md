@@ -69,6 +69,7 @@ See `apps/api/.env.example` for the full list. Key variables:
 
 - `WRANGLER_PORT` — Local dev port (default: 8787)
 - `BASE_DOMAIN` — Set automatically by sync scripts
+- `SAM_INSTALLATION_ID` — Pulumi-generated, non-secret exact installation identity injected by generated deployment config. Missing or malformed values disable destructive provider-side orphan reconciliation; operators do not set this manually.
 - `CF_CONTAINER_ENABLED` — Enables Cloudflare Container instant-session runtime in generated deployment envs (default: `true`; set `false` to force VM runtime)
 - `CF_CONTAINER_SLEEP_AFTER` — Container idle sleep duration for instant-session runtime (default: `1h`)
 - `CF_CONTAINER_ACTIVE_WORK_MAX_MS` — Defensive maximum active-work keepalive duration (default: `7200000`)

@@ -76,6 +76,8 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SANDBOX?: DurableObjectNamespace<Sandbox>;
   // Environment variables
   BASE_DOMAIN: string;
+  /** Pulumi-generated exact installation identity; absent disables destructive provider orphan discovery. */
+  SAM_INSTALLATION_ID?: string;
   PREVIEW_BASE_DOMAIN?: string;
   PREVIEW_URL_TTL_SECONDS?: string;
   PREVIEW_SIGNING_KEY?: string;

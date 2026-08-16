@@ -6,10 +6,18 @@ import { Hono } from 'hono';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { AppError, errors } from '../middleware/error';
-import { checkRateLimit, createRateLimitKey, getCurrentWindowStart } from '../middleware/rate-limit';
+import {
+  checkRateLimit,
+  createRateLimitKey,
+  getCurrentWindowStart,
+} from '../middleware/rate-limit';
 import { jsonValidator } from '../schemas';
 import { DeviceApproveSchema, DeviceTokenSchema } from '../schemas/misc';
-import { buildSessionLoginResponse, getAuthenticatedUser } from '../services/session-factory';
+import {
+  assertUserCanCreateSession,
+  buildSessionLoginResponse,
+  getAuthenticatedUser,
+} from '../services/session-factory';
 
 const DEFAULT_DEVICE_CODE_TTL_SECONDS = 15 * 60;
 const DEFAULT_DEVICE_POLL_INTERVAL_SECONDS = 5;
@@ -40,7 +48,11 @@ function getClientIp(headers: Headers): string {
   return 'unknown';
 }
 
-function rateLimitByIp(envKey: keyof Env, fallback: number, keyPrefix: string): MiddlewareHandler<{ Bindings: Env }> {
+function rateLimitByIp(
+  envKey: keyof Env,
+  fallback: number,
+  keyPrefix: string
+): MiddlewareHandler<{ Bindings: Env }> {
   return async (c, next) => {
     const limit = parsePositiveInt(c.env[envKey] as string | undefined, fallback);
     const windowStart = getCurrentWindowStart(RATE_LIMIT_WINDOW_SECONDS);
@@ -67,7 +79,9 @@ function rateLimitByIp(envKey: keyof Env, fallback: number, keyPrefix: string): 
 function randomHex(byteCount: number): string {
   const bytes = new Uint8Array(byteCount);
   crypto.getRandomValues(bytes);
-  return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
 }
 
 function randomUserCode(): string {
@@ -75,8 +89,12 @@ function randomUserCode(): string {
   const digits = '0123456789';
   const random = new Uint8Array(8);
   crypto.getRandomValues(random);
-  const prefix = Array.from(random.slice(0, 4)).map((value) => letters[value % letters.length]).join('');
-  const suffix = Array.from(random.slice(4)).map((value) => digits[value % digits.length]).join('');
+  const prefix = Array.from(random.slice(0, 4))
+    .map((value) => letters[value % letters.length])
+    .join('');
+  const suffix = Array.from(random.slice(4))
+    .map((value) => digits[value % digits.length])
+    .join('');
   return `${prefix}-${suffix}`;
 }
 
@@ -84,7 +102,12 @@ function normalizeUserCode(value: string | undefined): string {
   return (value || '').trim().toUpperCase();
 }
 
-async function storeDeviceCode(env: Env, deviceCode: string, entry: DeviceFlowEntry, ttlSeconds: number): Promise<void> {
+async function storeDeviceCode(
+  env: Env,
+  deviceCode: string,
+  entry: DeviceFlowEntry,
+  ttlSeconds: number
+): Promise<void> {
   await env.KV.put(`device:${deviceCode}`, JSON.stringify(entry), { expirationTtl: ttlSeconds });
   await env.KV.put(`device:user:${entry.userCode}`, deviceCode, { expirationTtl: ttlSeconds });
 }
@@ -106,11 +129,21 @@ const createCodeRateLimit = rateLimitByIp(
   DEFAULT_RATE_LIMIT_DEVICE_CODE_CREATE,
   'device-code-create'
 );
-const pollRateLimit = rateLimitByIp('RATE_LIMIT_DEVICE_POLL', DEFAULT_RATE_LIMIT_DEVICE_POLL, 'device-poll');
+const pollRateLimit = rateLimitByIp(
+  'RATE_LIMIT_DEVICE_POLL',
+  DEFAULT_RATE_LIMIT_DEVICE_POLL,
+  'device-poll'
+);
 
 deviceFlowRoutes.post('/device/code', createCodeRateLimit, async (c) => {
-  const ttlSeconds = parsePositiveInt(c.env.DEVICE_FLOW_CODE_TTL_SECONDS, DEFAULT_DEVICE_CODE_TTL_SECONDS);
-  const interval = parsePositiveInt(c.env.DEVICE_FLOW_POLL_INTERVAL_SECONDS, DEFAULT_DEVICE_POLL_INTERVAL_SECONDS);
+  const ttlSeconds = parsePositiveInt(
+    c.env.DEVICE_FLOW_CODE_TTL_SECONDS,
+    DEFAULT_DEVICE_CODE_TTL_SECONDS
+  );
+  const interval = parsePositiveInt(
+    c.env.DEVICE_FLOW_POLL_INTERVAL_SECONDS,
+    DEFAULT_DEVICE_POLL_INTERVAL_SECONDS
+  );
   const deviceCode = randomHex(32);
   const userCode = randomUserCode();
   const now = Date.now();
@@ -167,33 +200,44 @@ deviceFlowRoutes.post('/device/approve', jsonValidator(DeviceApproveSchema), asy
   return c.json({ success: true });
 });
 
-deviceFlowRoutes.post('/device/token', pollRateLimit, jsonValidator(DeviceTokenSchema), async (c) => {
-  const deviceCode = (c.req.valid('json').deviceCode || '').trim();
-  if (!deviceCode) {
-    throw errors.badRequest('Device code is required');
-  }
+deviceFlowRoutes.post(
+  '/device/token',
+  pollRateLimit,
+  jsonValidator(DeviceTokenSchema),
+  async (c) => {
+    const deviceCode = (c.req.valid('json').deviceCode || '').trim();
+    if (!deviceCode) {
+      throw errors.badRequest('Device code is required');
+    }
 
-  const entry = await getDeviceEntry(c.env, deviceCode);
-  if (!entry) {
-    throw new AppError(410, 'expired_token', 'Device code has expired');
-  }
-  assertNotExpired(entry);
-  if (entry.status === 'pending') {
-    throw new AppError(428, 'authorization_pending', 'Authorization is still pending');
-  }
-  if (!entry.userId) {
-    throw errors.badRequest('Approved device code is missing a user');
-  }
+    const entry = await getDeviceEntry(c.env, deviceCode);
+    if (!entry) {
+      throw new AppError(410, 'expired_token', 'Device code has expired');
+    }
+    assertNotExpired(entry);
+    if (entry.status === 'pending') {
+      throw new AppError(428, 'authorization_pending', 'Authorization is still pending');
+    }
+    if (!entry.userId) {
+      throw errors.badRequest('Approved device code is missing a user');
+    }
 
-  const db = drizzle(c.env.DATABASE, { schema });
-  const user = await db.select().from(schema.users).where(eq(schema.users.id, entry.userId)).get();
-  if (!user) {
-    throw errors.unauthorized('Device code owner not found');
+    const db = drizzle(c.env.DATABASE, { schema });
+    const user = await db
+      .select()
+      .from(schema.users)
+      .where(eq(schema.users.id, entry.userId))
+      .get();
+    if (!user) {
+      throw errors.unauthorized('Device code owner not found');
+    }
+
+    await assertUserCanCreateSession(c.env, user);
+
+    await c.env.KV.delete(`device:${deviceCode}`);
+
+    return buildSessionLoginResponse(c.env, user);
   }
-
-  await c.env.KV.delete(`device:${deviceCode}`);
-
-  return buildSessionLoginResponse(c.env, user);
-});
+);
 
 export { deviceFlowRoutes };

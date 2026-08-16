@@ -177,7 +177,7 @@ export class HetznerProvider implements Provider {
         `Capacity exhausted after ${attempt + 1} attempts for ` +
           `server type ${sizeConfig.type} in ${config.location || this.datacenter}: ` +
           error.message,
-        { cause: error, category: 'transient_capacity' }
+        { cause: error, providerCode: error.providerCode, category: 'transient_capacity' }
       );
     }
 

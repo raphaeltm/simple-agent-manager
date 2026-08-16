@@ -13,6 +13,16 @@ export function labelsToDelimitedTags(labels: Record<string, string>, separator:
   return Object.entries(labels).map(([key, value]) => `${key}${separator}${value}`);
 }
 
+export const AMBIGUOUS_LABEL_MARKER_PREFIX = '__sam_internal_ambiguous_label__';
+
+/**
+ * True when raw provider metadata carried more than one value for a semantic key.
+ * The marker never satisfies an ownership comparison.
+ */
+export function hasAmbiguousLabel(labels: Record<string, string>, key: string): boolean {
+  return labels[`${AMBIGUOUS_LABEL_MARKER_PREFIX}${key}`] === 'true';
+}
+
 /**
  * Decode `key<separator>value` tag strings back into a labels record.
  * Splits on the FIRST separator so values may themselves contain the separator.
@@ -20,10 +30,19 @@ export function labelsToDelimitedTags(labels: Record<string, string>, separator:
  */
 export function delimitedTagsToLabels(tags: string[], separator: string): Record<string, string> {
   const labels: Record<string, string> = {};
+  const ambiguousKeys = new Set<string>();
   for (const tag of tags) {
     const sepIndex = tag.indexOf(separator);
     if (sepIndex > 0) {
-      labels[tag.slice(0, sepIndex)] = tag.slice(sepIndex + separator.length);
+      const key = tag.slice(0, sepIndex);
+      if (ambiguousKeys.has(key)) continue;
+      if (Object.hasOwn(labels, key)) {
+        delete labels[key];
+        ambiguousKeys.add(key);
+        labels[`${AMBIGUOUS_LABEL_MARKER_PREFIX}${key}`] = 'true';
+        continue;
+      }
+      labels[key] = tag.slice(sepIndex + separator.length);
     }
   }
   return labels;

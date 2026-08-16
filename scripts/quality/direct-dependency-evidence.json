@@ -60,6 +60,10 @@
     "wrangler": {
       "registryUrl": "https://www.npmjs.com/package/wrangler",
       "necessity": "Provides the lockfile-pinned Cloudflare Pages deployment executable for the marketing workspace."
+    },
+    "yaml": {
+      "registryUrl": "https://www.npmjs.com/package/yaml",
+      "necessity": "Structurally parses GitHub workflow contracts in security regression tests."
     }
   },
   "go": {

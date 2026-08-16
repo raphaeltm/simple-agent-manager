@@ -5,12 +5,8 @@
  * deployment that owns it, so provider-side orphan reconciliation depends on them
  * entirely.
  *
- * The environment label matters because SAM deployments can share one cloud
- * account. SAM's own staging and production share a single Hetzner project with a
- * 10-server limit. Without an environment marker the servers are indistinguishable
- * at the provider, so a reconciler running in staging that destroyed "any server
- * with no matching D1 row" would happily delete production servers — every
- * production server looks unclaimed from staging's database.
+ * Environment is only a control-plane scope. Exact installation identity is what
+ * separates two production (or two staging) installations sharing one account.
  */
 
 /** Label marking a server as SAM-managed. Value is constant across deployments. */
@@ -31,6 +27,27 @@ export const SAM_ROLE_LABEL_KEY = 'role';
  * server — absence of a label must never authorize a destroy.
  */
 export const SAM_ENVIRONMENT_LABEL_KEY = 'env';
+
+/** Label carrying the exact owning SAM installation's generated 128-bit id. */
+export const SAM_INSTALLATION_LABEL_KEY = 'installation';
+
+const INSTALLATION_ID_PATTERN = /^[0-9a-f]{32}$/;
+
+/**
+ * Canonicalize only the generated 128-bit identity shape. Names and resource
+ * prefixes are deliberately rejected because they are neither unique nor proof of
+ * ownership.
+ */
+export function normalizeInstallationId(value: string): string | null {
+  const normalized = value.trim().toLowerCase();
+  return INSTALLATION_ID_PATTERN.test(normalized) ? normalized : null;
+}
+
+/** Resolve the current installation identity, failing closed when unavailable. */
+export function resolveInstallationId(env: { SAM_INSTALLATION_ID?: string }): string | null {
+  const raw = env.SAM_INSTALLATION_ID;
+  return raw ? normalizeInstallationId(raw) : null;
+}
 
 /**
  * Provider label values must be conservative: Hetzner allows alphanumerics, `-`,
@@ -72,6 +89,7 @@ export function buildNodeProviderLabels(params: {
   nodeId: string;
   isDeploymentNode: boolean;
   environmentLabel: string | null;
+  installationId: string | null;
 }): Record<string, string> {
   const labels: Record<string, string> = {
     [SAM_NODE_LABEL_KEY]: params.nodeId.toLowerCase(),
@@ -81,6 +99,9 @@ export function buildNodeProviderLabels(params: {
 
   if (params.environmentLabel) {
     labels[SAM_ENVIRONMENT_LABEL_KEY] = params.environmentLabel;
+  }
+  if (params.installationId) {
+    labels[SAM_INSTALLATION_LABEL_KEY] = params.installationId;
   }
 
   return labels;

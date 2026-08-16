@@ -22,7 +22,7 @@ on:
 
 env:
   NODE_VERSION: '22'
-  GO_VERSION: '1.25'
+  GO_VERSION: '1.26.6'
 
 jobs:
   validate:
@@ -623,6 +623,10 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: ${{ env.GO_VERSION }}
+
+      - name: Assert Go version
+        if: ${{ inputs.dry_run != true }}
+        run: go version | grep -E '^go version go1\.26\.6 '
 
       - name: Prepare Versioned VM Agent Container Artifact
         if: ${{ inputs.dry_run != true }}

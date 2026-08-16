@@ -28,6 +28,8 @@ import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const deleteVM = vi.fn().mockResolvedValue(undefined);
 const listVMs = vi.fn();
+const getVM = vi.fn();
+let listedServers: ReturnType<typeof serverFor>[] = [];
 
 vi.mock('../../../src/services/platform-credentials', () => ({
   getPlatformCloudCredential: vi
@@ -38,7 +40,16 @@ vi.mock('../../../src/services/provider-credentials', () => ({
   buildProviderConfig: vi.fn().mockReturnValue({ provider: 'hetzner', apiToken: 'test-token' }),
 }));
 vi.mock('@simple-agent-manager/providers', () => ({
-  createProvider: vi.fn(() => ({ listVMs, deleteVM })),
+  hasAmbiguousLabel: (labels: Record<string, string>, key: string) =>
+    labels[`__sam_internal_ambiguous_label__${key}`] === 'true',
+  createProvider: vi.fn(() => ({
+    listVMs: async (labels: Record<string, string>) => {
+      listedServers = await listVMs(labels);
+      return listedServers;
+    },
+    getVM,
+    deleteVM,
+  })),
 }));
 vi.mock('../../../src/lib/secrets', () => ({
   getCredentialEncryptionKey: vi.fn().mockReturnValue('key'),
@@ -59,6 +70,7 @@ const UNKNOWN_NODE_ID = '01KX84MCG1YN1TQVWR60B3G70A';
 
 const ago = (ms: number) => new Date(Date.now() - ms).toISOString();
 const HOUR = 60 * 60 * 1000;
+const INSTALLATION_ID = '0123456789abcdef0123456789abcdef';
 
 function serverFor(nodeId: string, serverId: string) {
   return {
@@ -74,6 +86,7 @@ function serverFor(nodeId: string, serverId: string) {
       node: nodeId.toLowerCase(),
       role: 'workspace',
       env: 'production',
+      installation: INSTALLATION_ID,
     },
   };
 }
@@ -81,6 +94,7 @@ function serverFor(nodeId: string, serverId: string) {
 function makeEnv(): Env {
   return {
     ENVIRONMENT: 'production',
+    SAM_INSTALLATION_ID: INSTALLATION_ID,
     KV: { get: vi.fn().mockResolvedValue(null), put: vi.fn().mockResolvedValue(undefined) },
     DATABASE: createSqliteD1(sqlite as Database.Database),
     OBSERVABILITY_DATABASE: createSqliteD1(sqlite as Database.Database),
@@ -90,20 +104,26 @@ function makeEnv(): Env {
 beforeEach(() => {
   deleteVM.mockClear();
   listVMs.mockReset();
+  listedServers = [];
+  getVM.mockReset();
+  getVM.mockImplementation(
+    async (id: string) => listedServers.find((item) => item.id === id) ?? null
+  );
   sqlite = new Database(':memory:');
   sqlite.exec(`
     CREATE TABLE nodes (
       id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL,
       node_role TEXT NOT NULL DEFAULT 'workspace', node_class TEXT NOT NULL DEFAULT 'managed',
+      provider_instance_id TEXT,
       created_at TEXT NOT NULL, updated_at TEXT NOT NULL
     );
   `);
   const insert = sqlite.prepare(
-    `INSERT INTO nodes (id, user_id, name, status, created_at, updated_at)
-     VALUES (?, 'user-1', ?, ?, ?, ?)`
+    `INSERT INTO nodes (id, user_id, name, status, provider_instance_id, created_at, updated_at)
+     VALUES (?, 'user-1', ?, ?, ?, ?, ?)`
   );
-  insert.run(LIVE_NODE_ID, 'live', 'running', ago(5 * HOUR), ago(1000));
-  insert.run(DELETED_NODE_ID, 'gone', 'deleted', ago(5 * HOUR), ago(1000));
+  insert.run(LIVE_NODE_ID, 'live', 'running', 'srv-live', ago(5 * HOUR), ago(1000));
+  insert.run(DELETED_NODE_ID, 'gone', 'deleted', 'srv-deleted', ago(5 * HOUR), ago(1000));
 });
 
 afterEach(() => {

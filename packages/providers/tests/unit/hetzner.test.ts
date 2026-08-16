@@ -158,7 +158,12 @@ describe('HetznerProvider', () => {
       size: 'medium',
       location: 'fsn1',
       userData: '#cloud-config\npackages:\n  - docker.io',
-      labels: { node: 'node-123', managed: 'simple-agent-manager' },
+      labels: {
+        node: 'node-123',
+        managed: 'simple-agent-manager',
+        env: 'production',
+        installation: '0123456789abcdef0123456789abcdef',
+      },
     };
 
     it('should call Hetzner API with correct parameters', async () => {

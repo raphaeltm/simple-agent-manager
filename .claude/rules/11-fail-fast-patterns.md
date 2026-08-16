@@ -50,6 +50,17 @@ Required pattern:
 4. Include `project_id = ?` in the `UPDATE`/`DELETE` predicate as a final defence-in-depth guard.
 5. When a Durable Object maintains project-local tracking state, verify the target is tracked in that project-local state before mutating global D1 rows.
 
+### Project-Scoped Read Requirements
+
+Every project-scoped read endpoint, MCP tool, service, or Durable Object RPC MUST bind the requested resource to the caller's authorized project before returning resource data or an existence signal.
+
+Required pattern:
+
+1. Authorizing the caller for a route-level `projectId` is necessary but not sufficient; include that project scope in the resource lookup itself.
+2. When both a child row and its parent carry project identity, require both stored relationships to agree with the authorized project. Treat inconsistent or stale relationships as not found.
+3. Return the same non-disclosing not-found contract for missing and cross-project resources; do not reveal which supplied identifier matched.
+4. When the protection is a SQL predicate, test it against a real SQL engine with a foreign-project attack fixture and a same-project owner control. Temporarily removing the project predicate must fail the attack test while the owner control still passes.
+
 ### Structured Logging Requirements
 
 Every validation failure MUST log:

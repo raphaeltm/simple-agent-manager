@@ -105,6 +105,7 @@ describe('UpCloud lifecycle edge cases', () => {
                 label: [
                   { key: 'managed-by', value: 'sam' },
                   { key: 'project', value: 'p1' },
+                  { key: 'installation', value: '0123456789abcdef0123456789abcdef' },
                 ],
               },
             }),
@@ -122,7 +123,40 @@ describe('UpCloud lifecycle edge cases', () => {
       })
     );
     await expect(
-      new UpCloudProvider('u', 'p').listVMs({ 'managed-by': 'sam', project: 'p1' })
+      new UpCloudProvider('u', 'p').listVMs({
+        'managed-by': 'sam',
+        project: 'p1',
+        installation: '0123456789abcdef0123456789abcdef',
+      })
     ).resolves.toEqual([expect.objectContaining({ id: 'match' })]);
+  });
+
+  it('does not match a server with duplicate installation labels', async () => {
+    useFetch(() =>
+      json({
+        servers: {
+          server: [
+            server({
+              uuid: 'ambiguous',
+              labels: {
+                label: [
+                  { key: 'managed', value: 'simple-agent-manager' },
+                  { key: 'env', value: 'production' },
+                  { key: 'installation', value: 'foreign' },
+                  { key: 'installation', value: '0123456789abcdef0123456789abcdef' },
+                ],
+              },
+            }),
+          ],
+        },
+      })
+    );
+    await expect(
+      new UpCloudProvider('u', 'p').listVMs({
+        managed: 'simple-agent-manager',
+        env: 'production',
+        installation: '0123456789abcdef0123456789abcdef',
+      })
+    ).resolves.toEqual([]);
   });
 });

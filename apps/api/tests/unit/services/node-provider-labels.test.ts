@@ -8,8 +8,12 @@ import { describe, expect, it } from 'vitest';
 import {
   buildNodeProviderLabels,
   normalizeEnvironmentLabelValue,
+  normalizeInstallationId,
   resolveEnvironmentLabel,
+  resolveInstallationId,
 } from '../../../src/services/node-provider-labels';
+
+const INSTALLATION_ID = '0123456789abcdef0123456789abcdef';
 
 describe('buildNodeProviderLabels', () => {
   it('preserves the pre-existing label contract', () => {
@@ -19,6 +23,7 @@ describe('buildNodeProviderLabels', () => {
       nodeId: '01KX84MCG1YN1TQVWR60B3G70A',
       isDeploymentNode: false,
       environmentLabel: 'production',
+      installationId: INSTALLATION_ID,
     });
 
     expect(labels).toEqual({
@@ -26,6 +31,7 @@ describe('buildNodeProviderLabels', () => {
       managed: 'simple-agent-manager',
       role: 'workspace',
       env: 'production',
+      installation: INSTALLATION_ID,
     });
   });
 
@@ -34,6 +40,7 @@ describe('buildNodeProviderLabels', () => {
       nodeId: '01KX84MCG1YN1TQVWR60B3G70A',
       isDeploymentNode: true,
       environmentLabel: 'production',
+      installationId: INSTALLATION_ID,
     });
 
     expect(labels.role).toBe('deployment');
@@ -47,10 +54,46 @@ describe('buildNodeProviderLabels', () => {
       nodeId: '01KX84MCG1YN1TQVWR60B3G70A',
       isDeploymentNode: false,
       environmentLabel: null,
+      installationId: INSTALLATION_ID,
     });
 
     expect(labels).not.toHaveProperty('env');
     expect(labels.managed).toBe('simple-agent-manager');
+  });
+
+  it('OMITS the installation label when exact installation identity is unavailable', () => {
+    const labels = buildNodeProviderLabels({
+      nodeId: '01KX84MCG1YN1TQVWR60B3G70A',
+      isDeploymentNode: false,
+      environmentLabel: 'production',
+      installationId: null,
+    });
+
+    expect(labels).not.toHaveProperty('installation');
+    expect(labels.env).toBe('production');
+  });
+});
+
+describe('resolveInstallationId', () => {
+  it('accepts and canonicalizes the generated 128-bit identifier', () => {
+    expect(resolveInstallationId({ SAM_INSTALLATION_ID: INSTALLATION_ID.toUpperCase() })).toBe(
+      INSTALLATION_ID
+    );
+  });
+
+  it('fails closed for missing, truncated, or non-hex identity', () => {
+    expect(resolveInstallationId({})).toBeNull();
+    expect(resolveInstallationId({ SAM_INSTALLATION_ID: INSTALLATION_ID.slice(1) })).toBeNull();
+    expect(
+      resolveInstallationId({ SAM_INSTALLATION_ID: `${INSTALLATION_ID.slice(0, 31)}z` })
+    ).toBeNull();
+  });
+});
+
+describe('normalizeInstallationId', () => {
+  it('does not derive identity from a name or resource prefix', () => {
+    expect(normalizeInstallationId('sam-production')).toBeNull();
+    expect(normalizeInstallationId('s123abc')).toBeNull();
   });
 });
 

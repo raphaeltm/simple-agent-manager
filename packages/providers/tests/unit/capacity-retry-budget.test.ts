@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import { HetznerProvider } from '../../src/hetzner';
+import { classifyHetznerError, HetznerProvider } from '../../src/hetzner';
 import type { ProviderLogger, VMConfig } from '../../src/types';
 import { ProviderError } from '../../src/types';
 import { createMockServer } from '../fixtures/hetzner-mocks';
@@ -88,6 +88,42 @@ describe('HetznerProvider time-bounded capacity retry', () => {
       'hetzner transient capacity error; retrying createVM',
       expect.objectContaining({
         providerCode: 'resource_unavailable',
+      }),
+    );
+  });
+
+  it('backs off before retrying the production-shaped invalid_input capacity response', async () => {
+    vi.useFakeTimers();
+    const logger = mockLogger();
+    const provider = new HetznerProvider('test-token', 'fsn1', undefined, true, 100, 1000, {
+      capacityRetryMaxAttempts: 5,
+      capacityRetryBudgetMs: 60_000,
+      logger,
+    });
+    const mockFetch = vi.fn()
+      .mockResolvedValueOnce(capacityErrorResponse('invalid_input', 'unsupported location for server type'))
+      .mockResolvedValueOnce(successResponse());
+
+    globalThis.fetch = mockFetch;
+
+    const promise = provider.createVM(vmConfig);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(99);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await vi.runAllTimersAsync();
+    const result = await promise;
+
+    expect(result.id).toBe('12345');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(logger.warn)).toHaveBeenCalledWith(
+      'hetzner transient capacity error; retrying createVM',
+      expect.objectContaining({
+        delayMs: 100,
+        providerCode: 'invalid_input',
       }),
     );
   });
@@ -212,7 +248,9 @@ describe('HetznerProvider time-bounded capacity retry', () => {
       capacityRetryBudgetMs: 60_000,
     });
 
-    globalThis.fetch = vi.fn().mockResolvedValue(capacityErrorResponse());
+    globalThis.fetch = vi.fn().mockResolvedValue(
+      capacityErrorResponse('invalid_input', 'unsupported location for server type'),
+    );
 
     const promise = provider.createVM(vmConfig).catch((e) => e);
     await vi.runAllTimersAsync();
@@ -220,6 +258,7 @@ describe('HetznerProvider time-bounded capacity retry', () => {
 
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.category).toBe('transient_capacity');
+    expect(err.providerCode).toBe('invalid_input');
     expect(err.cause).toBeInstanceOf(ProviderError);
   });
 
@@ -242,6 +281,40 @@ describe('HetznerProvider time-bounded capacity retry', () => {
     expect(err).toBeInstanceOf(ProviderError);
     expect(err.message).toContain('Capacity exhausted after 3 attempts');
     expect(fetch).toHaveBeenCalledTimes(3);
+  });
+});
+
+describe('classifyHetznerError production-shaped 422 responses', () => {
+  it('classifies invalid_input plus the observed capacity message as transient_capacity', () => {
+    expect(classifyHetznerError(
+      422,
+      'invalid_input',
+      'hetzner API error (422): unsupported location for server type',
+    )).toBe('transient_capacity');
+  });
+
+  it('keeps unrelated invalid_input responses classified as invalid_config', () => {
+    expect(classifyHetznerError(
+      422,
+      'invalid_input',
+      'hetzner API error (422): server_type is not valid',
+    )).toBe('invalid_config');
+  });
+
+  it('does not treat generic unavailable wording as a capacity override', () => {
+    expect(classifyHetznerError(
+      422,
+      'invalid_input',
+      'hetzner API error (422): primary IP is unavailable because it is already assigned',
+    )).toBe('invalid_config');
+  });
+
+  it('does not treat a longer invalid_input message containing the capacity phrase as an override', () => {
+    expect(classifyHetznerError(
+      422,
+      'invalid_input',
+      'hetzner API error (422): backup failed: unsupported location for server type',
+    )).toBe('invalid_config');
   });
 });
 

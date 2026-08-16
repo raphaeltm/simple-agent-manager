@@ -68,6 +68,7 @@ Set in GitHub Settings → Environments → production:
 | `RESOURCE_PREFIX`                                  | Domain-derived Cloudflare resource name prefix                                                                                                      | `sa379a6`                                |
 | `PULUMI_STATE_BUCKET`                              | R2 bucket for Pulumi state                                                                                                                          | `sa379a6-pulumi-state`                   |
 | `CF_CONTAINER_ENABLED`                             | Optional instant-session runtime toggle. Generated deploys default to `true`; set `false` to force VM runtime.                                      | `false`                                  |
+| `D1_RESTORE_RECOVERY_WINDOW_DAYS`                  | Optional D1 restore window for accounts with narrower retention. Defaults to `30`; range `1`–`30`.                                                  | `7`                                      |
 | `D1_MIGRATION_CHURNING_TABLES`                     | Optional comma-separated `<binding>.<table>` subset of the reviewed retention/expiry table list. May narrow the built-in list but cannot expand it. | `OBSERVABILITY_DATABASE.platform_errors` |
 | `D1_MIGRATION_CHURNING_TABLE_MAX_DECREASE_PERCENT` | Maximum allowed decrease for reviewed churning tables. Defaults to `50`; range `0`–`100`. A decrease exactly at the limit is accepted.              | `25`                                     |
 
@@ -417,11 +418,23 @@ claims — for example when a server was created but the control plane failed be
 recording its instance ID.
 
 Because this is the only path that destroys infrastructure on the basis of _absent_
-evidence, it fails closed at every step. It considers only servers carrying the
-current deployment's `env` label, so multiple SAM installations can safely share one
-cloud account. Servers created before that label existed carry no `env` value and are
-permanently out of scope. Any lookup failure aborts the run without destroying
-anything.
+evidence, it fails closed at every step. A server must carry both the current
+control-plane `env` value and the exact Pulumi-generated `installation` marker before
+SAM consults D1. SAM then re-reads and revalidates the same provider resource immediately
+before it calls the provider delete API. Provider-account membership, server
+names, resource prefixes, and absence from this installation's D1 are not ownership
+proof.
+
+Pulumi generates the non-secret installation identity automatically on first deploy,
+persists it in the stack state, and injects it into the Worker as
+`SAM_INSTALLATION_ID`; there is no manual GitHub Environment setting. An upgrade does
+not relabel existing servers. Legacy servers without the marker remain usable and are
+preserved indefinitely, while servers provisioned after the upgrade participate in
+normal orphan cleanup. If the Pulumi state is lost or recreated, the new identity
+safely leaves the old fleet unattributable instead of adopting it destructively. Any
+missing/malformed identity, ambiguous provider metadata, or failed/malformed D1 lookup
+skips deletion. Resources surfaced to reconciliation with non-owning metadata emit
+aggregate operator-visible counters.
 
 | Variable                                 | Default          | Description                                                                                                                                                                       |
 | ---------------------------------------- | ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

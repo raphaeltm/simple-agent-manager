@@ -90,6 +90,7 @@ Ask: "What test, if it existed before the breaking change was introduced, would 
 - **Trace the regression to its root cause commit.** Understand exactly what change broke the behavior.
 - **Write a test that exercises the contract that was violated.** Not just the symptom — the invariant that should always hold.
 - **If mocks hid the bug**, the right response is often an integration or E2E test that uses real (or more realistic) dependencies. Shallow unit tests with overly permissive mocks can give false confidence.
+- **If the bug involves external-provider error classification**, fixtures MUST preserve the complete production-shaped HTTP status, structured provider code, and exact sanitized message together. Include at least one conflicting-signal precedence case and a nearby negative counterexample; testing each signal independently is insufficient.
 - **If the bug was a missing propagation** (value set in A but never forwarded to B), write a test that constructs the real lifecycle (A then B) and asserts the value arrives.
 - **If the bug involves cancellation through a timeout, retry, poll, or multi-step resource boundary**, the regression must prove the caller signal is composed with (not replaced by) internal timeouts, the exact caller reason survives provider-specific error handling, listeners/timers are cleaned up, and no later retry, poll, cleanup, cache write, or resource mutation starts after cancellation. Include a cancellation reason shaped like an otherwise retryable or idempotent domain error so classification catches cannot swallow it.
 - **If the bug involves streamed UI data that is later reconstructed from durable storage**, write a parity regression test for the persisted representation, not only the live stream. The test MUST include a partial/status-only update event and assert omitted fields do not clear previously visible metadata. See the retained incident lesson in this rule.
@@ -100,6 +101,31 @@ Ask: "What test, if it existed before the breaking change was introduced, would 
 - **If the bug involves a utility LLM call through a provider-compatible API**, the regression test MUST assert the exact provider payload controls that make the response contract reliable, not just the returned parsed text. For reasoning-capable models, this includes any explicit thinking/reasoning-disable parameters or response-format controls required for the utility to receive text in the field it reads.
 - **For utility-model defaults and capability changes**, validate the exact production-shaped payload against the real provider before merge, record the accepted and rejected field matrix without prompts or credentials, and test omission of redundant nullable fields. Non-2xx handling must preserve bounded sanitized provider codes/parameter names so later schema drift is diagnosable without logging raw response bodies.
 - **If the bug involves a configuration-fed safety/cache writer for billing, quotas, auth, or rate limits**, the regression test MUST exercise invalid, below-minimum, and excessive configuration values at the write boundary. Reader-side fail-open tests are not enough; the test must prove invalid configuration cannot prevent the enforcement cache/state from being written.
+
+### GitHub Workflow Input Trust Boundaries
+
+Operator-controlled GitHub values (`inputs.*`, issue/PR fields, branch names, commit
+messages, or equivalent event data) MUST NOT be interpolated into a workflow
+`run:` scalar. GitHub expands expressions before the runner shell parses the
+generated script, so shell quotes around an expression do not prevent command
+substitution, newlines, or metacharacters from becoming shell source.
+
+For any operator input that reaches a credential-bearing, destructive, deploy, or
+recovery workflow:
+
+1. Pass the raw value to a dependency-minimal non-shell validator through step
+   `env:`, never through `run:` interpolation.
+2. Validate exact syntax, semantic range/window, and enum membership before the
+   first secret-bearing or mutating command. Errors must not echo rejected raw
+   values because newlines and workflow command syntax can forge log annotations.
+3. Emit only validated single-line outputs, pass those outputs through later step
+   `env:` entries, and use quoted variables or argument arrays at execution.
+   Interpolating a validated step output back into `run:` reopens the same bug.
+4. Add a structurally parsed workflow contract test that inspects every `run`
+   scalar, a real validator-CLI test, and an adversarial corpus covering shell
+   separators, substitutions, redirection, quotes, and CR/LF across every input.
+5. Preserve and test approval environments, dry-run gates, exact resource
+   targeting, and recovery/undo evidence separately from input validation.
 
 ### Destructive Cleanup State Gates
 
@@ -128,6 +154,10 @@ Before finalizing tests, ask:
 - Would a developer introducing the original regression have seen a red CI from these tests? If not, the tests aren't defensive enough.
 
 For exported helpers that return canonical domain types, include at least one direct malformed-domain test when the codebase separates structural validation from semantic validation. A resolver, converter, or parser success result must prove the canonical validation helper ran, not just the lower-level schema parser.
+
+### Unconditional Account-Denial Gates
+
+Account states that represent denial or revocation, including `suspended`, MUST be enforced before feature-flag, signup-approval, or role-based bypass logic. Regression tests for account-access changes MUST include active, pending, suspended, and admin/superadmin cases with each relevant gate enabled and disabled, plus at least one session-creation path that proves centralized checks are reused.
 
 ### External System Gate Diagnostics
 

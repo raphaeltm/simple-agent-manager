@@ -44,6 +44,7 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           TARGET_ENVIRONMENT: ${{ inputs.environment || 'production' }}
           RESOURCE_PREFIX: ${{ vars.RESOURCE_PREFIX }}
+          BASE_DOMAIN: ${{ vars.BASE_DOMAIN }}
           DO_WALL_TIME_SCRIPT_NAMES: ${{ vars.DO_WALL_TIME_SCRIPT_NAMES }}
           DO_WALL_TIME_NAMESPACE_IDS: ${{ vars.DO_WALL_TIME_NAMESPACE_IDS }}
           DO_WALL_TIME_OBJECT_NAMES: ${{ vars.DO_WALL_TIME_OBJECT_NAMES }}
@@ -67,8 +68,15 @@ jobs:
             *) echo "Unsupported target environment: $TARGET_ENVIRONMENT" >&2; exit 2 ;;
           esac
           if [ -z "$RESOURCE_PREFIX" ]; then
-            echo "RESOURCE_PREFIX GitHub Environment variable is required" >&2
-            exit 2
+            if [ -z "$BASE_DOMAIN" ]; then
+              echo "RESOURCE_PREFIX or BASE_DOMAIN GitHub Environment variable is required" >&2
+              exit 2
+            fi
+            # Derive from BASE_DOMAIN: 's' + first 6 hex chars of sha256.
+            # Must match infra/resources/config.ts derivePrefix() and the
+            # Compute Resource Prefix step in deploy-reusable.yml.
+            RESOURCE_PREFIX="s$(printf %s "$BASE_DOMAIN" | sha256sum | cut -c1-6)"
+            echo "Resource prefix (derived from $BASE_DOMAIN): $RESOURCE_PREFIX"
           fi
           if [ -z "$DO_WALL_TIME_SCRIPT_NAMES" ]; then
             export DO_WALL_TIME_SCRIPT_NAMES="${RESOURCE_PREFIX}-api-${TARGET_STACK}"

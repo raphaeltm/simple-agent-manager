@@ -1,5 +1,5 @@
 import { Hono } from 'hono';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { AppError } from '../../../src/middleware/error';
 
@@ -145,7 +145,9 @@ function makeNode(overrides: Partial<NodeRow> = {}): NodeRow {
   };
 }
 
-async function appRequest(path: string, body: unknown, isText = false): Promise<Response> {
+let nodeLifecycleApp: Hono | null = null;
+
+beforeAll(async () => {
   const { nodeLifecycleRoutes } = await import('../../../src/routes/node-lifecycle');
   const app = new Hono();
   app.route('/api/nodes', nodeLifecycleRoutes);
@@ -155,7 +157,18 @@ async function appRequest(path: string, body: unknown, isText = false): Promise<
     }
     return c.json({ error: 'INTERNAL_ERROR', message: String(err) }, 500);
   });
-  return app.request(
+  nodeLifecycleApp = app;
+}, 15000);
+
+function getNodeLifecycleApp(): Hono {
+  if (!nodeLifecycleApp) {
+    throw new Error('node lifecycle app was not initialized');
+  }
+  return nodeLifecycleApp;
+}
+
+async function appRequest(path: string, body: unknown, isText = false): Promise<Response> {
+  return getNodeLifecycleApp().request(
     path,
     {
       method: 'POST',
@@ -222,7 +235,9 @@ describe('node-lifecycle BYO gates', () => {
     it('stores agentVersion reported by /ready', async () => {
       const res = await appRequest('/api/nodes/node-1/ready', { agentVersion: 'build-sha-1' });
       expect(res.status).toBe(200);
-      expect(state.updates).toContainEqual(expect.objectContaining({ agentVersion: 'build-sha-1' }));
+      expect(state.updates).toContainEqual(
+        expect.objectContaining({ agentVersion: 'build-sha-1' })
+      );
     });
 
     it('stores agentVersion reported by heartbeat', async () => {
@@ -231,7 +246,9 @@ describe('node-lifecycle BYO gates', () => {
         agentVersion: 'build-sha-2',
       });
       expect(res.status).toBe(200);
-      expect(state.updates).toContainEqual(expect.objectContaining({ agentVersion: 'build-sha-2' }));
+      expect(state.updates).toContainEqual(
+        expect.objectContaining({ agentVersion: 'build-sha-2' })
+      );
     });
   });
 
@@ -253,10 +270,7 @@ describe('node-lifecycle BYO gates', () => {
     it('DOES backfill IP + A record for a managed node without a tunnel', async () => {
       state.node = makeNode({ tunnelId: null, ipAddress: null });
       // CF-Connecting-IP drives the backfill on a non-tunnel node.
-      const { nodeLifecycleRoutes } = await import('../../../src/routes/node-lifecycle');
-      const app = new Hono();
-      app.route('/api/nodes', nodeLifecycleRoutes);
-      const res = await app.request(
+      const res = await getNodeLifecycleApp().request(
         '/api/nodes/node-1/heartbeat',
         {
           method: 'POST',

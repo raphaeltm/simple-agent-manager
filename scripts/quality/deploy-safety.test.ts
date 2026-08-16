@@ -472,6 +472,7 @@ describe('deployment workflow safety wiring', () => {
       diagnosticIncidentTtlDays: 7,
       cloudflareAccountId: 'cf-account',
       pagesName: 'sam-web-prod',
+      installationId: '0123456789abcdef0123456789abcdef',
       dnsIds: {},
       hostnames: {},
       stackSummary: {

@@ -91,6 +91,7 @@
     "typescript-eslint": "catalog:",
     "valibot": "catalog:",
     "vitest": "catalog:",
+    "yaml": "2.9.0",
     "zod": "catalog:"
   },
   "packageManager": "pnpm@9.15.9",

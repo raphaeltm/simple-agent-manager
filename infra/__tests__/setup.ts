@@ -242,6 +242,7 @@ pulumi.runtime.setMocks({
             ...args.inputs,
             id,
             b64Std: bytes.toString('base64'),
+            hex: bytes.toString('hex'),
           },
         };
       }

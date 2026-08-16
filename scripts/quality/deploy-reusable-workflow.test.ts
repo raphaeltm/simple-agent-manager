@@ -198,6 +198,23 @@ describe('deploy reusable workflow', () => {
     expect(redeployAfterSecretsIndex).toBeGreaterThan(deployApiIndex);
   });
 
+  it('creates installation identity before config sync and skips mutation on dry runs', () => {
+    const pulumiIndex = workflow.indexOf('- name: Pulumi Up');
+    const syncIndex = workflow.indexOf('- name: Sync Wrangler Config (API + Tail Worker)');
+    const deployIndex = workflow.indexOf('- name: Deploy API Worker');
+
+    expect(pulumiIndex).toBeGreaterThan(-1);
+    expect(syncIndex).toBeGreaterThan(pulumiIndex);
+    expect(deployIndex).toBeGreaterThan(syncIndex);
+    for (const name of [
+      'Pulumi Up',
+      'Sync Wrangler Config \\(API \\+ Tail Worker\\)',
+      'Deploy API Worker',
+    ]) {
+      expect(stepBlock(name)).toContain('if: ${{ inputs.dry_run != true }}');
+    }
+  });
+
   it('uses the shared D1 migration safety script for main and observability before deploy', () => {
     const block = stepBlock('Run Database Migrations With Safety Gates');
 

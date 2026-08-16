@@ -9,7 +9,7 @@
     "build:blog-mermaid": "pnpm exec esbuild src/scripts/blog-mermaid.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=public/scripts/blog-mermaid.js",
     "build:docs-mermaid": "pnpm exec esbuild src/scripts/docs-mermaid.ts --bundle --format=esm --platform=browser --target=es2022 --outfile=public/scripts/docs-mermaid.js",
     "build:tracker": "npx tsx scripts/build-tracker.ts",
-    "test": "vitest run --exclude tests/playwright/**",
+    "test": "vitest run --exclude=tests/playwright/**",
     "lint": "eslint 'astro.config.ts' 'playwright.config.ts' 'scripts/**/*.ts' 'src/**/*.{ts,astro}' 'tests/**/*.ts' --rule 'simple-import-sort/imports: off' --rule 'simple-import-sort/exports: off'",
     "typecheck": "tsx ../../scripts/quality/check-astro-templates.ts",
     "build": "pnpm build:assets && astro build",

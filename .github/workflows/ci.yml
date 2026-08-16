@@ -10,6 +10,7 @@ on:
 env:
   DEVCONTAINERS_CLI_VERSION: 0.80.2
   GITLEAKS_VERSION: 8.30.1
+  GO_VERSION: '1.26.6'
 
 permissions:
   contents: read
@@ -464,7 +465,10 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Assert Go version
+        run: go version | grep -E '^go version go1\.26\.6 '
 
       - uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
@@ -552,8 +556,11 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
+          go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: packages/vm-agent/go.sum
+
+      - name: Assert Go version
+        run: go version | grep -E '^go version go1\.26\.6 '
 
       - name: Run VM Agent tests
         working-directory: packages/vm-agent
@@ -571,7 +578,10 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Assert Go version
+        run: go version | grep -E '^go version go1\.26\.6 '
 
       - name: Run CLI tests
         working-directory: packages/cli
@@ -604,8 +614,11 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
+          go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: packages/vm-agent/go.sum
+
+      - name: Assert Go version
+        run: go version | grep -E '^go version go1\.26\.6 '
 
       - name: Install devcontainers CLI
         run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"
@@ -629,8 +642,11 @@ jobs:
       - name: Setup Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.25'
+          go-version: ${{ env.GO_VERSION }}
           cache-dependency-path: packages/vm-agent/go.sum
+
+      - name: Assert Go version
+        run: go version | grep -E '^go version go1\.26\.6 '
 
       - name: Install devcontainers CLI
         run: npm install -g --ignore-scripts "@devcontainers/cli@${DEVCONTAINERS_CLI_VERSION}"

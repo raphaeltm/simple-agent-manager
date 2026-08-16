@@ -50,7 +50,11 @@ describe('DigitalOceanProvider droplets', () => {
       location: 'fra1',
       image: '',
       userData: '#cloud-config\nruncmd: []',
-      labels: { 'sam-project': '01ABC' },
+      labels: {
+        managed: 'simple-agent-manager',
+        env: 'production',
+        installation: '0123456789abcdef0123456789abcdef',
+      },
     });
     const call = findCall(mock, 'POST', /\/v2\/droplets$/);
     const body = JSON.parse(call?.[1].body as string);
@@ -61,7 +65,11 @@ describe('DigitalOceanProvider droplets', () => {
         size: 's-2vcpu-4gb',
         image: 'ubuntu-24-04-x64',
         user_data: '#cloud-config\nruncmd: []',
-        tags: ['sam-project:01ABC'],
+        tags: [
+          'managed:simple-agent-manager',
+          'env:production',
+          'installation:0123456789abcdef0123456789abcdef',
+        ],
         backups: false,
         ipv6: false,
         monitoring: false,
@@ -109,11 +117,27 @@ describe('DigitalOceanProvider droplets', () => {
   it('lists all pages then filters decoded labels', async () => {
     const mock = createDigitalOceanFetchMock({
       dropletPages: [
-        { items: [createMockDigitalOceanDroplet({ id: 1, tags: ['env:prod'] })], hasNext: true },
+        {
+          items: [
+            createMockDigitalOceanDroplet({
+              id: 1,
+              tags: [
+                'managed:simple-agent-manager',
+                'env:production',
+                'installation:0123456789abcdef0123456789abcdef',
+              ],
+            }),
+          ],
+          hasNext: true,
+        },
         { items: [createMockDigitalOceanDroplet({ id: 2, tags: ['env:dev'] })], hasNext: false },
       ],
     });
-    const vms = await provider(mock).listVMs({ env: 'prod' });
+    const vms = await provider(mock).listVMs({
+      managed: 'simple-agent-manager',
+      env: 'production',
+      installation: '0123456789abcdef0123456789abcdef',
+    });
     expect(vms.map((vm) => vm.id)).toEqual(['1']);
     expect(mock.mock.calls.filter(([url]) => String(url).includes('/v2/droplets?'))).toHaveLength(
       2

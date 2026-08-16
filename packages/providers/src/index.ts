@@ -49,6 +49,7 @@ export {
 } from './types';
 
 // Re-export utilities
+export { hasAmbiguousLabel } from './kv-tags';
 export {
   completeAbortableResponse,
   getMaxProviderErrorBodyChars,

@@ -5,6 +5,13 @@ import { setUserId } from '../lib/analytics';
 import { GITHUB_REAUTH_REQUIRED_EVENT } from '../lib/api/client';
 import { signOut, useSession } from '../lib/auth';
 import { buildLibraryCacheNamespace, clearLegacyLibraryCache, clearLibraryCache } from '../lib/library-cache';
+import {
+  broadcastAuthRevocation,
+  cleanupTerminalSecrets,
+  initAuthBroadcastListener,
+  resetAuthRevoked,
+  teardownAuthBroadcastListener,
+} from '../lib/terminal-cleanup';
 
 interface User {
   id: string;
@@ -75,6 +82,12 @@ export function AuthProvider({ children }: AuthProviderProps) {
     [user, role, status]
   );
 
+  // Initialize BroadcastChannel listener for cross-tab auth revocation
+  useEffect(() => {
+    initAuthBroadcastListener();
+    return () => teardownAuthBroadcastListener();
+  }, []);
+
   useEffect(() => {
     if (isPending) return;
 
@@ -84,15 +97,34 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (previousNamespace === undefined) {
       previousCacheNamespaceRef.current = nextNamespace;
       if (nextNamespace) clearLegacyLibraryCache();
+      if (nextNamespace) resetAuthRevoked();
       return;
     }
 
     if (previousNamespace !== nextNamespace) {
+      cleanupTerminalSecrets();
+      broadcastAuthRevocation();
       if (previousNamespace) clearLibraryCache(previousNamespace);
       clearLegacyLibraryCache();
       previousCacheNamespaceRef.current = nextNamespace;
+      if (nextNamespace) resetAuthRevoked();
     }
   }, [enrichedUser?.id, isPending]);
+
+  // Handle bfcache restoration: when the page is restored from cache,
+  // proactively clean up terminal state. cleanupTerminalSecrets() is
+  // idempotent, so calling it unconditionally on restore is safe — a
+  // still-authenticated user will resetAuthRevoked and re-fetch tokens.
+  useEffect(() => {
+    const handlePageShow = (event: PageTransitionEvent) => {
+      if (event.persisted) {
+        cleanupTerminalSecrets();
+        if (enrichedUser?.id) resetAuthRevoked();
+      }
+    };
+    window.addEventListener('pageshow', handlePageShow);
+    return () => window.removeEventListener('pageshow', handlePageShow);
+  }, [enrichedUser?.id]);
 
   // Sync authenticated userId to analytics tracker
   useEffect(() => {
