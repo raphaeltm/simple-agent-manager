@@ -323,7 +323,8 @@ describe('DO Migrations', () => {
       // session_inbox: 2 (durable delivery due + claims) from migration 027
       // checkpoint_episodes: 2 (session + state) from migration 027
       // idle_cleanup_schedule: 2 (active cleanup_at + terminal marker) from migration 028
-      expect(indexes.length).toBe(48);
+      // session_state: 1 (working-activity staleness scan) from migration 029
+      expect(indexes.length).toBe(49);
     });
   });
 });
