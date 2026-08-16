@@ -326,12 +326,15 @@ export function applyProbeOutcome(
     // every authoritative write. `recordTurnEnd`'s own CAS still stops the new
     // epoch being terminalized, so the blast radius is only a silently reduced
     // retry budget; the fix keeps the module's CAS discipline uniform.
-    const attemptPlaceholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
+    // Named `placeholders` deliberately: `scripts/quality/ast-checks.ts`
+    // allowlists that exact identifier for `.map(() => '?').join(', ')` IN-clause
+    // expansion, which is what this is (over a compile-time const array).
+    const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
     sql.exec(
       `UPDATE session_state
        SET activity_probe_attempts = ?, activity_probe_at = ?
        WHERE session_id = ?
-         AND activity IN (${attemptPlaceholders})
+         AND activity IN (${placeholders})
          AND activity_at <= ?`,
       attempts,
       now,
