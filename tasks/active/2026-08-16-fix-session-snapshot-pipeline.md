@@ -18,6 +18,8 @@ The failed completion then caused the sleep watchdog to fabricate transcript-onl
 - `packages/vm-agent/internal/server/session_snapshot_container_support.go:buildContainerSnapshotArchiveList` selects entries in find order; a large cache can consume the budget before `~/.claude`/`~/.codex` harness state.
 - Background capture errors in `session_snapshot_coordinator.go` are node-local only; progress reporting failures in `session_snapshot_progress.go` are Debug-level only.
 - Staging run `31953138714` against fresh node `01M05H3JZ8HJJ475A4XPJT9KSY` proved that adding `x-amz-checksum-sha256` to the existing query-hoisted presigned URL shape causes R2 `403 SignatureDoesNotMatch`; new VM agents must opt into header-signed checksum URLs while old VM agents keep the query-hoisted rollout-compatible URL.
+- Staging redeploy `31954795829` for commit `94c8ed95e53440f2395cae57f59d9e115e2b0142` passed deploy + smoke tests. A fresh VM session on project `01KWHD8XS7MQ7R6KWXJYRHDVH4` produced snapshot generation `01M05K20GH3PSBHW690X6EWAH2` with `status=available`, `degradation=none`, and R2 objects `home.tar` plus `manifest.json`.
+- Waking the same sleeping staging session via durable follow-up delivery created recovery task `01M05K83KE6RJZ17PNGE86KBWX`, recovered workspace `01M05K88DFJJN73ZFZETKWCEV8`, and reached `restore_status=restored`, `recovery_status=restored`, `sleep_status=NULL`, with the recovered workspace and agent session running.
 
 ## Checklist
 
@@ -35,8 +37,9 @@ The failed completion then caused the sleep watchdog to fabricate transcript-onl
 - [x] Add regression tests for checksum authorization fallback, no-checksum diagnostics, degraded wake LoadSession skipping, home-skipped control restore, harness-first budget ordering, and new excludes.
 - [x] Run local validation for impacted API and vm-agent tests.
 - [x] Run specialist reviews required by `/do`.
-- [ ] Validate presigned PUT checksum behavior against real R2 on staging and record the accepted/rejected header matrix.
-- [ ] Deploy to staging with fresh VM-agent nodes, run VM sleep→wake E2E, then create/merge PR and monitor production deploy.
+- [x] Validate presigned PUT checksum behavior against real R2 on staging and record the accepted/rejected header matrix.
+- [x] Deploy to staging with fresh VM-agent nodes and run VM sleep→wake E2E.
+- [ ] Create PR, monitor CI, merge, and monitor production deploy.
 
 ## Acceptance criteria
 
