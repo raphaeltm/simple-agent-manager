@@ -5,6 +5,7 @@ const recoveryMocks = vi.hoisted(() => ({
   persistRecovering: vi.fn(),
   persistRecovered: vi.fn(),
   persistFailed: vi.fn(),
+  persistSleepingAfterRevoked: vi.fn(),
   signNodeCallbackToken: vi.fn(),
   signCallbackToken: vi.fn(),
   signNodeManagementToken: vi.fn(),
@@ -29,6 +30,17 @@ vi.mock('../../../src/services/jwt', () => ({
   signCallbackToken: recoveryMocks.signCallbackToken,
   signNodeManagementToken: recoveryMocks.signNodeManagementToken,
 }));
+
+vi.mock('../../../src/durable-objects/vm-agent-container-runtime', async (importOriginal) => {
+  const actual =
+    await importOriginal<
+      typeof import('../../../src/durable-objects/vm-agent-container-runtime')
+    >();
+  return {
+    ...actual,
+    persistRuntimeSleepingAfterRevokedWake: recoveryMocks.persistSleepingAfterRevoked,
+  };
+});
 
 import { VmAgentContainer } from '../../../src/durable-objects/vm-agent-container';
 import {
@@ -65,7 +77,10 @@ type PrivateContainer = {
   exhaustRecovery: (this: unknown, ...args: unknown[]) => Promise<unknown>;
   withLifecycleLock: (this: unknown, operation: () => Promise<unknown>) => Promise<unknown>;
   prepareForRequest: (this: unknown) => Promise<unknown>;
-  abortRevokedSourceTaskWake: (this: unknown) => Promise<void>;
+  abortRevokedSourceTaskWake: (
+    this: unknown,
+    guard: { taskId: string; projectId: string; chatSessionId: string }
+  ) => Promise<void>;
 };
 
 const privateContainer = VmAgentContainer.prototype as unknown as PrivateContainer;
@@ -102,6 +117,7 @@ function makeRecoveryFake(input?: {
     lifecycleChain: Promise.resolve(),
     defaultPort: 8080,
     proxyHttpAuthorized: privateContainer.proxyHttpAuthorized,
+    clearSourceTaskWakeGuard: vi.fn().mockResolvedValue(undefined),
     assertSourceTaskGuard: vi.fn().mockResolvedValue(undefined),
     ensureAwake: privateContainer.ensureAwake,
     beginUnexpectedRecovery: privateContainer.beginUnexpectedRecovery,
@@ -165,6 +181,7 @@ beforeEach(() => {
   recoveryMocks.persistRecovering.mockResolvedValue(undefined);
   recoveryMocks.persistRecovered.mockResolvedValue(undefined);
   recoveryMocks.persistFailed.mockResolvedValue(undefined);
+  recoveryMocks.persistSleepingAfterRevoked.mockResolvedValue(undefined);
   recoveryMocks.signNodeCallbackToken.mockResolvedValue('fresh-node-token');
   recoveryMocks.signCallbackToken.mockResolvedValue('fresh-workspace-token');
   recoveryMocks.signNodeManagementToken.mockResolvedValue({ token: 'management-token' });
@@ -210,6 +227,85 @@ describe('VmAgentContainer snapshot recovery state machine', () => {
     expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
     expect(fake.stop).toHaveBeenCalledOnce();
     expect(values.get('lifecycleStatus')).toBe('sleeping');
+  });
+
+  it('compensates when authority is revoked after the recovered D1 commit', async () => {
+    const { fake, values } = makeRecoveryFake();
+    const sourceTaskGuard = {
+      taskId: 'parent-post-commit',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+    fake.assertSourceTaskGuard
+      .mockResolvedValueOnce(undefined) // before startRuntime
+      .mockResolvedValueOnce(undefined) // before restore fetch
+      .mockResolvedValueOnce(undefined) // after restore
+      .mockResolvedValueOnce(undefined) // inside lock, before D1 commit
+      .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError()); // after D1 commit
+    const recovery: RuntimeRecoveryState = {
+      version: 1,
+      phase: 'waking',
+      trigger: 'idle',
+      cause: { kind: 'idle_sleep' },
+      attempts: 1,
+      promptDisposition: 'none',
+      agentSessionId: 'agent-session-1',
+      startedAt: 1,
+      updatedAt: 1,
+    };
+
+    await expect(
+      (
+        privateContainer.wakeFromSnapshot as unknown as (
+          this: unknown,
+          recovery: RuntimeRecoveryState,
+          guard: typeof sourceTaskGuard
+        ) => Promise<unknown>
+      ).call(fake, recovery, sourceTaskGuard)
+    ).rejects.toBeInstanceOf(SessionRecoveryAuthorityRevokedError);
+
+    expect(recoveryMocks.persistRecovered).toHaveBeenCalledOnce();
+    expect(recoveryMocks.persistSleepingAfterRevoked).toHaveBeenCalledWith(fake.env, launchConfig);
+    expect(fake.stop).toHaveBeenCalledOnce();
+    expect(values.get('lifecycleStatus')).toBe('sleeping');
+  });
+
+  it('does not let revoked-wake compensation overwrite an explicit stopping state', async () => {
+    const { fake, values } = makeRecoveryFake({ lifecycle: 'stopping' });
+    const sourceTaskGuard = {
+      taskId: 'parent-stopping',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+    values.set('sourceTaskWakeGuard', sourceTaskGuard);
+
+    await privateContainer.abortRevokedSourceTaskWake.call(fake, sourceTaskGuard);
+
+    expect(values.get('lifecycleStatus')).toBe('stopping');
+    expect(recoveryMocks.persistSleepingAfterRevoked).not.toHaveBeenCalled();
+    expect(fake.stop).not.toHaveBeenCalled();
+    expect(fake.clearKeepaliveSchedule).not.toHaveBeenCalled();
+    expect(fake.markActiveWorkEnded).not.toHaveBeenCalled();
+  });
+
+  it('does not let a stale source guard stop a newer guarded wake owner', async () => {
+    const { fake, values } = makeRecoveryFake({ lifecycle: 'restoring' });
+    const staleGuard = {
+      taskId: 'parent-stale',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+    values.set('sourceTaskWakeGuard', {
+      taskId: 'parent-current',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    });
+
+    await privateContainer.abortRevokedSourceTaskWake.call(fake, staleGuard);
+
+    expect(values.get('lifecycleStatus')).toBe('restoring');
+    expect(recoveryMocks.persistSleepingAfterRevoked).not.toHaveBeenCalled();
+    expect(fake.stop).not.toHaveBeenCalled();
   });
 
   it('reconciles stale D1 state only after proving the target SessionHost is live', async () => {

@@ -177,6 +177,47 @@ function createState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState 
 }
 
 describe('TaskRunner node selection VM size minimum behavior', () => {
+  it('recovers a D1-persisted warm claim before discovering new candidates', async () => {
+    const now = new Date().toISOString();
+    const state = createState();
+    const tryClaim = vi.fn().mockResolvedValue({
+      claimed: true,
+      state: {
+        nodeId: 'warm-recovered',
+        status: 'active',
+        warmSince: null,
+        claimedByTask: state.taskId,
+      },
+    });
+    const rc = createContext({
+      persistedWarmClaim: 'warm-recovered',
+      warmNodes: [],
+      healthByNode: {
+        'warm-recovered': {
+          health_status: 'healthy',
+          last_heartbeat_at: now,
+          agent_ready_at: now,
+          agent_version: 'current-sha',
+        },
+      },
+    });
+    rc.env.NODE_LIFECYCLE = {
+      idFromName: vi.fn((id: string) => id),
+      get: vi.fn(() => ({ tryClaim, releaseClaim: vi.fn() })),
+    } as unknown as DurableObjectNamespace;
+
+    await handleNodeSelection(state, rc);
+
+    expect(tryClaim).toHaveBeenCalledWith(state.taskId, undefined);
+    expect(state.stepResults).toMatchObject({
+      nodeId: 'warm-recovered',
+      claimedWarmNodeId: 'warm-recovered',
+      autoProvisioned: false,
+    });
+    expect(rc.ctx.storage.put).toHaveBeenCalledWith('state', state);
+    expect(rc.advanceToStep).toHaveBeenCalledWith(state, 'workspace_creation');
+  });
+
   it('persists a warm claim locally and advances only after post-claim authority validation', async () => {
     const now = new Date().toISOString();
     const state = createState();

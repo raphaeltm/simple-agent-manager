@@ -9,6 +9,7 @@ import {
   buildSamBootstrapInstructions,
   buildVisibleInitialPrompt,
 } from '../../services/agent-bootstrap-prompt';
+import { getRecoverySourceTaskGuard } from './helpers';
 import { transitionToInProgress } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -70,14 +71,7 @@ export async function handleAgentSession(
     const db = drizzle(rc.env.DATABASE, { schema });
     const agentType = state.config.agentType || rc.env.DEFAULT_TASK_AGENT_TYPE || 'opencode';
     let result;
-    const sourceTaskGuard =
-      state.config.recoverySourceTaskId && state.config.resumeSnapshotChatSessionId
-        ? {
-            taskId: state.config.recoverySourceTaskId,
-            projectId: state.projectId,
-            chatSessionId: state.config.resumeSnapshotChatSessionId,
-          }
-        : undefined;
+    const sourceTaskGuard = getRecoverySourceTaskGuard(state);
     try {
       result = await startSamAwareAgentSession(db, rc.env, {
         nodeId: state.stepResults.nodeId,

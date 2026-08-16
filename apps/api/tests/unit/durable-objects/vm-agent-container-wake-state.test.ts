@@ -55,6 +55,7 @@ function makeProxyFake(input: {
     fake: {
       defaultPort: 8080,
       proxyHttpAuthorized: privateContainer.proxyHttpAuthorized,
+      clearSourceTaskWakeGuard: vi.fn().mockResolvedValue(undefined),
       assertSourceTaskGuard: vi.fn(async () => undefined),
       prepareForRequest: vi.fn().mockResolvedValue(input.ready),
       resultResponse: privateContainer.resultResponse,
@@ -81,6 +82,7 @@ describe('VmAgentContainer proxy recovery boundaries', () => {
       proxyHttp,
       proxyHttpAuthorized: privateContainer.proxyHttpAuthorized,
       assertSourceTaskGuard: privateContainer.assertSourceTaskGuard,
+      abortRevokedSourceTaskWake: vi.fn().mockResolvedValue(undefined),
     };
 
     const response = await callProxyHttpGuarded(
@@ -92,6 +94,7 @@ describe('VmAgentContainer proxy recovery boundaries', () => {
     expect(response.status).toBe(409);
     expect(proxyHttp).not.toHaveBeenCalled();
     expect(first).toHaveBeenCalledTimes(1);
+    expect(fake.abortRevokedSourceTaskWake).toHaveBeenCalledOnce();
   });
 
   it('rechecks after preparation and withholds the prompt when authority is revoked mid-wake', async () => {
@@ -117,6 +120,7 @@ describe('VmAgentContainer proxy recovery boundaries', () => {
       containerFetch,
       beginUnexpectedRecovery: vi.fn(),
       abortRevokedSourceTaskWake: vi.fn().mockResolvedValue(undefined),
+      clearSourceTaskWakeGuard: vi.fn().mockResolvedValue(undefined),
     };
     const ensureAwake = vi.fn(async (guard: unknown) => {
       await privateContainer.assertSourceTaskGuard.call(fake, guard);
@@ -151,6 +155,7 @@ describe('VmAgentContainer proxy recovery boundaries', () => {
         },
       },
       proxyHttpAuthorized: privateContainer.proxyHttpAuthorized,
+      clearSourceTaskWakeGuard: vi.fn().mockResolvedValue(undefined),
       assertSourceTaskGuard: privateContainer.assertSourceTaskGuard,
       prepareForRequest,
       getState: vi.fn().mockResolvedValue({ status: 'running' }),
@@ -265,6 +270,7 @@ describe('VmAgentContainer cold-wake serialization', () => {
     const fake = {
       defaultPort: 8080,
       proxyHttpAuthorized: privateContainer.proxyHttpAuthorized,
+      clearSourceTaskWakeGuard: vi.fn().mockResolvedValue(undefined),
       assertSourceTaskGuard: vi.fn(async () => undefined),
       wakeChain: Promise.resolve(),
       ctx: { storage },

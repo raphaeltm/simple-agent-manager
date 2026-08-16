@@ -11,6 +11,7 @@ import type {
 
 const {
   cleanupTaskRunMock,
+  deleteNodeResourcesStrictMock,
   failSessionSnapshotRecoveryMock,
   failSessionMock,
   notifyTaskEventMock,
@@ -24,6 +25,7 @@ const {
   syncTriggerExecutionStatusMock,
 } = vi.hoisted(() => ({
   cleanupTaskRunMock: vi.fn(async () => undefined),
+  deleteNodeResourcesStrictMock: vi.fn(async () => undefined),
   failSessionSnapshotRecoveryMock: vi.fn(async () => undefined),
   failSessionMock: vi.fn(async () => undefined),
   notifyTaskEventMock: vi.fn(async () => undefined),
@@ -77,6 +79,10 @@ vi.mock('../../../src/services/mcp-token', () => ({
 
 vi.mock('../../../src/services/node-agent', () => ({
   stopWorkspaceOnNode: stopWorkspaceOnNodeMock,
+}));
+
+vi.mock('../../../src/services/nodes', () => ({
+  deleteNodeResourcesStrict: deleteNodeResourcesStrictMock,
 }));
 
 vi.mock('../../../src/services/task-runner', () => ({
@@ -616,5 +622,32 @@ describe('failTask', () => {
     expect(failSessionMock).not.toHaveBeenCalled();
     expect(persistMessageMock).not.toHaveBeenCalled();
     expect(stopWorkspaceOnNodeMock).toHaveBeenCalledWith('node-1', 'workspace-1', rc.env, 'user-1');
+  });
+
+  it('strictly destroys an auto-provisioned recovery node when failure precedes workspace creation', async () => {
+    const { dbState, rc } = createContext();
+    seedTask(dbState, { status: 'delegated', execution_step: 'node_provisioning' });
+    const state = makeState({
+      currentStep: 'node_provisioning',
+      stepResults: {
+        ...makeState().stepResults,
+        nodeId: 'recovery-node-1',
+        autoProvisioned: true,
+        workspaceId: null,
+        agentSessionId: null,
+        agentStarted: false,
+      },
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'recovery-chat-1',
+        recoverySourceTaskId: 'source-task-1',
+      },
+    });
+
+    await failTask(state, 'recovery provisioning lost authority', rc);
+
+    expect(deleteNodeResourcesStrictMock).toHaveBeenCalledWith('recovery-node-1', 'user-1', rc.env);
+    expect(cleanupTaskRunMock).not.toHaveBeenCalled();
+    expect(rc.env.NODE_LIFECYCLE.get).not.toHaveBeenCalled();
   });
 });
