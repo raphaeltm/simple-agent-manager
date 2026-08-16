@@ -20,6 +20,53 @@ This task extends the durable execution foundation from PR #1785 and ready idea 
 - The current `/workflow` instructions mandate foreground polling. They should prefer a durable wait capability and retain polling only for older servers that do not advertise the tool.
 - The separate snapshot resume-identity mix-up observed during the incident is already addressed on current `main` by `snapshotHarnessResumeIdentity`, which restores `manifest.AcpSessionID` rather than the replacement control-plane session ID.
 
+## Incident post-mortem
+
+### What broke
+
+An overnight parent workflow created a Claude Code background poller and then
+completed its top-level ACP prompt. SAM observed the standard ACP idle signal,
+had no representation of the still-running harness work, and eventually slept
+the workspace. The poller therefore could not surface child-task completion or
+resume backlog triage.
+
+### Root cause
+
+ACP exposed the prompt lifecycle but not Claude's private background-task
+lifecycle. SAM treated `idle` as sufficient evidence that the runtime was safe
+to snapshot and sleep. At the orchestration layer, `/workflow` also prescribed
+foreground polling instead of registering a SAM-owned durable wait and ending
+the turn.
+
+### Timeline
+
+1. The parent dispatched PR-triage work and started a harness background poller.
+2. The top-level Claude ACP prompt returned while the background task remained active.
+3. The VM Agent emitted ordinary idle activity with no normalized background-work lease.
+4. SAM's idle policy slept the workspace.
+5. The intended overnight continuation never received a durable wake event.
+
+### Why existing controls missed it
+
+Prompt epochs, generic activity, snapshot recovery, and durable prompt delivery
+covered work SAM could see. None modeled useful work owned by a specific harness,
+and no durable parent subscription connected child terminal transitions to the
+sleeping parent. The workflow guidance reinforced the gap by treating an
+in-process poller as the waiting mechanism.
+
+### Defect class
+
+Cross-harness lifecycle observability and orchestration durability: private
+adapter work was mistaken for control-plane idleness, and waiting state lived in
+an ephemeral agent process instead of SAM-owned storage.
+
+### Process fix
+
+This change updates `.claude/rules/14-do-workflow-persistence.md` so workflows
+must persist state, register `wait_for_subtasks`, and end the turn. Harness-owned
+polling is prohibited as the primary waiting mechanism; bounded foreground
+polling remains only an explicit compatibility fallback.
+
 ## Architecture
 
 ### Normalized harness work state
@@ -58,8 +105,25 @@ Update `/workflow` to persist its state, call `wait_for_subtasks`, and end the c
 - [x] Update both Claude and Codex workflow instructions to prefer durable park/wake with a compatibility fallback.
 - [x] Add cross-boundary contract tests proving exact VM callback JSON and Worker runtime validation agree.
 - [x] Document new configuration defaults/overrides and the user-visible durable orchestration behavior.
-- [ ] Run focused Go race, ProjectData migration, workerd/Miniflare, MCP, sleep, and workflow tests.
-- [ ] Run full repository lint, typecheck, test, build, quality, specialist review, staging, CI, merge, and production deployment gates.
+- [x] Run focused Go race, ProjectData migration, workerd/Miniflare, MCP, sleep, and workflow tests.
+- [x] Run full repository lint, typecheck, test, build, and applicable local quality gates.
+
+## Pre-PR validation evidence
+
+- `pnpm lint`: passed with existing warnings only.
+- `pnpm typecheck`: passed across all 19 tasks, including the documented Astro baseline.
+- `pnpm test`: passed across all 21 packages; API reported 545 files and 7,272 tests green.
+- `pnpm build`: passed across all nine build tasks.
+- `pnpm --filter @simple-agent-manager/api test:workers`: 48 real workerd files and 627 tests passed.
+- `go test -race ./...`: passed with a test-only Docker command stand-in because this workspace has no Docker CLI; the complete ACP race package also passed directly in 15 seconds.
+- Format ratchet, Oxlint shadows, migration safety/order, DO migration safety, source-contract, type-boundary, runtime-boundary, file-size, stale-artifact, repo-visibility, dependency-governance, direct-dependency, deployment-script, Wrangler-binding, agent-manifest, and Gitleaks current-tree/PR-range gates passed.
+- Task-completion validator sections A-F: PASS. Research findings map to implementation items; every implementation item is present in the diff; acceptance behavior has focused and vertical-slice coverage; environment/API/workflow/process documentation matches the code; no implementation gap remains. Specialist, staging, CI, merge, and production checks are release gates in `/do` Phases 5-7 and remain tracked outside pre-PR task completion.
+
+## Release ledger
+
+- Specialist reviews: pending Phase 5.
+- Staging deployment and real VM/session verification: pending Phase 6.
+- PR CI, merge, and production deployment verification: pending Phase 7.
 
 ## Acceptance criteria
 

@@ -90,7 +90,7 @@ describe('DO migration safety — current migrations are non-destructive', () =>
     }
   });
 
-  it('all DO migrations use safe patterns (CREATE TABLE, ALTER TABLE, CREATE INDEX)', () => {
+  it('all DO migrations use safe patterns (CREATE TABLE, ALTER TABLE, CREATE [UNIQUE] INDEX)', () => {
     const { readFileSync } = require('node:fs');
     const migrations = readFileSync(
       join(
@@ -109,7 +109,7 @@ describe('DO migration safety — current migrations are non-destructive', () =>
     // Every SQL statement should be one of the safe patterns
     const safePatterns = [
       /CREATE\s+TABLE/i,
-      /CREATE\s+INDEX/i,
+      /CREATE\s+(?:UNIQUE\s+)?INDEX/i,
       /CREATE\s+VIRTUAL\s+TABLE/i,
       /ALTER\s+TABLE\s+\w+\s+ADD\s+COLUMN/i,
       /DROP\s+INDEX/i, // dropping indexes is safe

@@ -75,6 +75,19 @@ At the transition between Phase 3 (Implementation) and Phase 4 (Pre-PR Validatio
 
 This forces a deliberate pause that prevents the "rush to PR" failure mode.
 
+## Durable Subtask Waiting
+
+When a workflow is waiting for SAM-dispatched child tasks, the orchestrator MUST
+persist its workflow state, call `wait_for_subtasks`, and end the current turn.
+Do not rely on a harness-owned background task, timer, or polling loop: ACP can
+legitimately report the top-level prompt as complete while that work remains
+private to the harness, allowing SAM to sleep the runtime before the poller can
+surface its result.
+
+Foreground polling is a compatibility fallback only when the connected SAM
+server reports that `wait_for_subtasks` is unavailable or disabled. Keep that
+fallback bounded and record it in the workflow state file.
+
 ## What the State File Prevents
 
 | Failure Mode | How the State File Helps |
@@ -87,6 +100,7 @@ This forces a deliberate pause that prevents the "rush to PR" failure mode.
 | Jumping to PR creation early | Phase checklist enforces ordering |
 | Merging before reviewers finish | Review Tracker blocks Phase 5 completion until all reviewers report back |
 | Silently failing production deploy | Phase 7 checklist includes deploy monitoring — task is not complete until deploy succeeds or user is alerted |
+| Harness poller disappears after ACP prompt completion | Durable wait subscription wakes the parent through SAM-owned delivery |
 
 ## Cleanup
 
