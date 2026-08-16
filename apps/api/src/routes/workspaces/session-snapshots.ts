@@ -317,6 +317,7 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/artifacts/:artifact/upload-url
     sizeBytes,
     sha256,
     contentType: artifact === 'home' ? 'application/x-tar' : 'application/octet-stream',
+    checksumHeader: body.checksumHeader === true,
   });
   const recorded = await recordSessionSnapshotArtifactAuthorization(db, {
     chatSessionId,

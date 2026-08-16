@@ -17,6 +17,7 @@ The failed completion then caused the sleep watchdog to fabricate transcript-onl
 - `packages/vm-agent/internal/server/session_snapshot_archive.go` excludes many cache and credential paths but not observed large refetchable caches like `go/pkg` and `.local/share/pnpm`.
 - `packages/vm-agent/internal/server/session_snapshot_container_support.go:buildContainerSnapshotArchiveList` selects entries in find order; a large cache can consume the budget before `~/.claude`/`~/.codex` harness state.
 - Background capture errors in `session_snapshot_coordinator.go` are node-local only; progress reporting failures in `session_snapshot_progress.go` are Debug-level only.
+- Staging run `31953138714` against fresh node `01M05H3JZ8HJJ475A4XPJT9KSY` proved that adding `x-amz-checksum-sha256` to the existing query-hoisted presigned URL shape causes R2 `403 SignatureDoesNotMatch`; new VM agents must opt into header-signed checksum URLs while old VM agents keep the query-hoisted rollout-compatible URL.
 
 ## Checklist
 

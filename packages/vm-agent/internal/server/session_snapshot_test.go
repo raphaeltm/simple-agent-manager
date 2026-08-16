@@ -567,14 +567,18 @@ func TestUploadSessionSnapshotArtifactUsesAuthorizedDirectURL(t *testing.T) {
 				t.Errorf("authorization header = %q", got)
 			}
 			var payload struct {
-				SizeBytes int64  `json:"sizeBytes"`
-				SHA256    string `json:"sha256"`
+				SizeBytes      int64  `json:"sizeBytes"`
+				SHA256         string `json:"sha256"`
+				ChecksumHeader bool   `json:"checksumHeader"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				t.Error(err)
 			}
 			if payload.SizeBytes != int64(len(body)) || payload.SHA256 != expectedSHA {
 				t.Errorf("authorization payload = %#v", payload)
+			}
+			if !payload.ChecksumHeader {
+				t.Errorf("checksumHeader = false, want true")
 			}
 			writeJSON(w, http.StatusOK, map[string]string{"uploadUrl": server.URL + "/r2"})
 		case "/r2":
@@ -692,14 +696,18 @@ func TestSessionSnapshotUploadRelayAuthorizesBeforeStreamingWithoutBearer(t *tes
 				t.Errorf("relay authorization header = %q", got)
 			}
 			var payload struct {
-				SizeBytes int64  `json:"sizeBytes"`
-				SHA256    string `json:"sha256"`
+				SizeBytes      int64  `json:"sizeBytes"`
+				SHA256         string `json:"sha256"`
+				ChecksumHeader bool   `json:"checksumHeader"`
 			}
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				t.Error(err)
 			}
 			if payload.SizeBytes != int64(len(body)) || payload.SHA256 != expectedSHA {
 				t.Errorf("authorization payload = %#v", payload)
+			}
+			if !payload.ChecksumHeader {
+				t.Errorf("checksumHeader = false, want true")
 			}
 			writeJSON(w, http.StatusOK, map[string]string{"uploadUrl": server.URL + "/r2"})
 		case "/r2":

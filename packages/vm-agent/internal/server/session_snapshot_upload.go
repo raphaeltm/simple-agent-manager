@@ -78,7 +78,11 @@ func (s *Server) uploadSessionSnapshotArtifact(ctx context.Context, legacyPath, 
 }
 
 func (s *Server) authorizeSessionSnapshotDirectUpload(ctx context.Context, authorizationPath, token string, size int64, checksum, relayNodeID, relayToken string) (string, error) {
-	payload, err := json.Marshal(map[string]interface{}{"sizeBytes": size, "sha256": checksum})
+	payload, err := json.Marshal(map[string]interface{}{
+		"sizeBytes":      size,
+		"sha256":         checksum,
+		"checksumHeader": true,
+	})
 	if err != nil {
 		return "", err
 	}

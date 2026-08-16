@@ -394,7 +394,7 @@ describe('workspaces session snapshot callback routes', () => {
           Authorization: 'Bearer callback-token',
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ sizeBytes: 777, sha256: HOME_SHA256 }),
+        body: JSON.stringify({ sizeBytes: 777, sha256: HOME_SHA256, checksumHeader: true }),
       },
       runtimeBindings
     );
@@ -408,6 +408,7 @@ describe('workspaces session snapshot callback routes', () => {
       sizeBytes: 777,
       sha256: HOME_SHA256,
       contentType: 'application/x-tar',
+      checksumHeader: true,
     });
     expect(mocks.recordSessionSnapshotArtifactAuthorization).toHaveBeenCalledWith(
       expect.anything(),

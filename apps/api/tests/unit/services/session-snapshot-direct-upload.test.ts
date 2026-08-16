@@ -20,7 +20,7 @@ describe('session snapshot direct uploads', () => {
     expect(sessionSnapshotDirectUploadAvailable({ ...env, R2_BUCKET_NAME: undefined })).toBe(false);
   });
 
-  it('signs content length and the artifact SHA-256 for direct R2 PUT', async () => {
+  it('keeps checksum query-hoisted by default for old direct-upload agents', async () => {
     const uploadUrl = await generateSessionSnapshotDirectUploadUrl(env, {
       key: 'session-snapshots/chat/generation/home.tar',
       sizeBytes: 140_000_000,
@@ -38,5 +38,19 @@ describe('session snapshot direct uploads', () => {
     expect(url.searchParams.get('x-amz-checksum-sha256')).toBe(
       'TqFAWIFQdzzjqs54au739ASc4QD6ZJyU+73blg8dqUI='
     );
+  });
+
+  it('signs the checksum as an unhoisted header for agents that send the checksum header', async () => {
+    const uploadUrl = await generateSessionSnapshotDirectUploadUrl(env, {
+      key: 'session-snapshots/chat/generation/home.tar',
+      sizeBytes: 140_000_000,
+      sha256: '4ea140588150773ce3aace786aeef7f4049ce100fa649c94fbbddb960f1da942',
+      contentType: 'application/x-tar',
+      checksumHeader: true,
+    });
+    const url = new URL(uploadUrl);
+
+    expect(url.searchParams.has('x-amz-checksum-sha256')).toBe(false);
+    expect(url.searchParams.get('X-Amz-SignedHeaders')).toContain('x-amz-checksum-sha256');
   });
 });
