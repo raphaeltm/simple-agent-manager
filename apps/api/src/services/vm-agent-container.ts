@@ -8,6 +8,7 @@ import {
   type VmAgentContainerLaunchConfig,
   type VmAgentContainerLaunchSecrets,
   type VmAgentContainerRecoveryResult,
+  type VmAgentContainerRequestGuard,
 } from '../durable-objects/vm-agent-container';
 import type { VmAgentContainerLifecycleInspection } from '../durable-objects/vm-agent-container-lifecycle';
 import type { Env } from '../env';
@@ -67,14 +68,21 @@ export async function fetchVmAgentContainer(
   env: Env,
   nodeId: string,
   request: Request,
-  port?: number
+  port?: number,
+  sourceTaskGuard?: VmAgentContainerRequestGuard
 ): Promise<Response> {
   const container = getVmAgentContainer(env, nodeId);
   const isWebSocketUpgrade =
     request.headers.get('upgrade')?.toLowerCase() === 'websocket' &&
     request.headers.get('connection')?.toLowerCase().includes('upgrade');
   if (isWebSocketUpgrade) {
+    if (sourceTaskGuard) {
+      throw new Error('Guarded WebSocket container requests are unsupported');
+    }
     return container.fetch(request);
+  }
+  if (sourceTaskGuard) {
+    return container.proxyHttpGuarded(request, port, sourceTaskGuard);
   }
   return container.proxyHttp(request, port);
 }

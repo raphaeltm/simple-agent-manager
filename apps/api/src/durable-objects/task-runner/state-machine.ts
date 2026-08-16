@@ -6,6 +6,7 @@
  */
 import { log } from '../../lib/logger';
 import { persistError, redactSensitiveData } from '../../services/observability';
+import { restoreSessionRecoveryHandoff } from '../../services/session-recovery-authority';
 import {
   createTaskWaitTerminalTransitionHook,
   runTaskTerminalTransitionHooks,
@@ -271,6 +272,9 @@ export async function failTask(
     currentStatus === 'completed' ||
     currentStatus === 'cancelled'
   ) {
+    if (state.config.resumeSnapshotChatSessionId) {
+      await failRecoveryLifecycle(state, errorMessage, rc);
+    }
     // Already terminal — skip
     state.completed = true;
     await rc.ctx.storage.put('state', state);
@@ -366,39 +370,7 @@ export async function failTask(
 
   const recoverySessionId = state.config.resumeSnapshotChatSessionId ?? null;
   if (recoverySessionId) {
-    try {
-      const { drizzle } = await import('drizzle-orm/d1');
-      const schema = await import('../../db/schema');
-      const { failSessionSnapshotRecovery } = await import('../../services/session-snapshots');
-      await failSessionSnapshotRecovery(
-        drizzle(rc.env.DATABASE, { schema }),
-        rc.env,
-        recoverySessionId,
-        state.taskId,
-        errorMessage
-      );
-    } catch (snapshotErr) {
-      log.warn('task_runner_do.session_recovery_fail_record_failed', {
-        taskId: state.taskId,
-        sessionId: recoverySessionId,
-        error: snapshotErr instanceof Error ? snapshotErr.message : String(snapshotErr),
-      });
-    }
-
-    // The failed task owns only the replacement runtime. Preserve the original
-    // conversation as sleeping so another bounded wake attempt can reuse the
-    // verified snapshot. This also compensates if ProjectData accepted the wake
-    // immediately before a later D1 recovery-commit failure.
-    try {
-      const { sleepSession } = await import('../../services/project-data');
-      await sleepSession(rc.env, state.projectId, recoverySessionId);
-    } catch (chatErr) {
-      log.warn('task_runner_do.session_recovery_resleep_failed', {
-        taskId: state.taskId,
-        sessionId: recoverySessionId,
-        error: chatErr instanceof Error ? chatErr.message : String(chatErr),
-      });
-    }
+    await failRecoveryLifecycle(state, errorMessage, rc);
   } else if (state.stepResults.chatSessionId && state.projectId) {
     // Ordinary task failures are terminal for their chat. The UI also
     // cross-references task.status, but update ProjectData for consistency.
@@ -452,6 +424,45 @@ export async function failTask(
 
   state.completed = true;
   await rc.ctx.storage.put('state', state);
+}
+
+async function failRecoveryLifecycle(
+  state: TaskRunnerState,
+  errorMessage: string,
+  rc: TaskRunnerContext
+): Promise<void> {
+  const recoverySessionId = state.config.resumeSnapshotChatSessionId;
+  if (!recoverySessionId) return;
+
+  // Ownership restoration is a correctness boundary, not best-effort cleanup:
+  // if D1 is temporarily unavailable, let the DO alarm retry instead of
+  // completing with a terminal replacement still owning the durable chat.
+  await restoreSessionRecoveryHandoff(rc.env.DATABASE, state.taskId, recoverySessionId);
+  const { drizzle } = await import('drizzle-orm/d1');
+  const schema = await import('../../db/schema');
+  const { failSessionSnapshotRecovery } = await import('../../services/session-snapshots');
+  await failSessionSnapshotRecovery(
+    drizzle(rc.env.DATABASE, { schema }),
+    rc.env,
+    recoverySessionId,
+    state.taskId,
+    errorMessage
+  );
+
+  // The failed task owns only the replacement runtime. Preserve the original
+  // conversation as sleeping so another bounded wake attempt can reuse the
+  // verified snapshot. This also compensates if ProjectData accepted the wake
+  // immediately before a later D1 recovery-commit failure.
+  try {
+    const { sleepSession } = await import('../../services/project-data');
+    await sleepSession(rc.env, state.projectId, recoverySessionId);
+  } catch (chatErr) {
+    log.warn('task_runner_do.session_recovery_resleep_failed', {
+      taskId: state.taskId,
+      sessionId: recoverySessionId,
+      error: chatErr instanceof Error ? chatErr.message : String(chatErr),
+    });
+  }
 }
 
 // =========================================================================

@@ -9,7 +9,7 @@ import {
   type VMSize,
   type WorkspaceProfile,
 } from '@simple-agent-manager/shared';
-import { and, desc, eq, exists, inArray, notInArray, or } from 'drizzle-orm';
+import { and, desc, eq, exists, notInArray, or } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 import { alias } from 'drizzle-orm/sqlite-core';
 
@@ -19,8 +19,12 @@ import { log } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import {
+  failAndRestoreSessionRecoveryHandoff,
+} from './session-recovery-authority';
+import {
   claimSessionSnapshotRecovery,
   failSessionSnapshotRecovery,
+  sessionLifecycleError,
   type SessionRecoverySourceTaskGuard,
 } from './session-snapshots';
 import { ensureTaskRunnerStarted, startTaskRunnerDO } from './task-runner-do';
@@ -417,7 +421,11 @@ async function startRecoveryTask(
     throw new SourceTaskNotWakeableError();
   }
   if (task.status === 'in_progress') return;
-  if (await ensureTaskRunnerStarted(env, task.id)) return;
+  const alreadyStarted = await ensureTaskRunnerStarted(env, task.id);
+  if (sourceTaskGuard && !(await sourceTaskGuardIsWakeable(db, sourceTaskGuard))) {
+    throw new SourceTaskNotWakeableError();
+  }
+  if (alreadyStarted) return;
 
   const profile = task.agentProfileHint
     ? await db
@@ -426,6 +434,10 @@ async function startRecoveryTask(
         .where(eq(schema.agentProfiles.id, task.agentProfileHint))
         .get()
     : null;
+
+  if (sourceTaskGuard && !(await sourceTaskGuardIsWakeable(db, sourceTaskGuard))) {
+    throw new SourceTaskNotWakeableError();
+  }
 
   await startTaskRunnerDO(env, {
     taskId: task.id,
@@ -478,6 +490,7 @@ async function startRecoveryTask(
       warmNodeTimeoutMs: context.project.warmNodeTimeoutMs,
     },
     resumeSnapshotChatSessionId: chatSessionId,
+    recoverySourceTaskId: sourceTaskGuard?.taskId ?? null,
   });
 }
 
@@ -544,35 +557,13 @@ export async function ensureSessionRecovery(
       });
       return { status: 'waking', taskId: claim.taskId };
     }
-    const failedAt = new Date().toISOString();
-    const failedTask = await db
-      .update(schema.tasks)
-      .set({
-        status: 'failed',
-        executionStep: null,
-        errorMessage: `Session recovery failed: ${message}`.slice(0, 2048),
-        completedAt: failedAt,
-        updatedAt: failedAt,
-      })
-      .where(
-        and(
-          eq(schema.tasks.id, claim.taskId),
-          inArray(schema.tasks.status, ['queued', 'delegated', 'in_progress', 'awaiting_followup'])
-        )
-      );
-    if ((failedTask.meta.changes ?? 0) > 0) {
-      await db.insert(schema.taskStatusEvents).values({
-        id: ulid(),
-        taskId: claim.taskId,
-        fromStatus: 'queued',
-        toStatus: 'failed',
-        actorType: 'system',
-        actorId: null,
-        reason: `Session recovery failed: ${message}`.slice(0, 2048),
-        createdAt: failedAt,
-      });
-    }
-    await failSessionSnapshotRecovery(db, env, chatSessionId, claim.taskId, message);
+    const failure = sessionLifecycleError(env, `Session recovery failed: ${message}`);
+    await failAndRestoreSessionRecoveryHandoff(env.DATABASE, {
+      recoveryTaskId: claim.taskId,
+      chatSessionId,
+      error: failure,
+      statusEventId: ulid(),
+    });
     log.error('session_recovery.start_failed', {
       projectId,
       chatSessionId,

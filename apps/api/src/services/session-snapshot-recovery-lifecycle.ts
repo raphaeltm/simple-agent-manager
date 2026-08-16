@@ -18,6 +18,7 @@ import { alias } from 'drizzle-orm/sqlite-core';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { parsePositiveInt } from '../lib/route-helpers';
+import type { SessionRecoverySourceTaskGuard } from './session-recovery-authority';
 import {
   DEFAULT_SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS,
   DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
@@ -26,12 +27,6 @@ import {
 } from './session-snapshot-artifacts';
 
 type Db = ReturnType<typeof drizzle<typeof schema>>;
-
-export interface SessionRecoverySourceTaskGuard {
-  taskId: string;
-  projectId: string;
-  chatSessionId: string;
-}
 
 const TERMINAL_TASK_STATUSES = ['completed', 'failed', 'cancelled'];
 

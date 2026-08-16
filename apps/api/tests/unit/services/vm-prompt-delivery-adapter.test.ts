@@ -270,6 +270,75 @@ describe('VM prompt delivery adapter', () => {
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
+  it('revalidates a guarded parent before a reconciliation capability probe', async () => {
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+    const request = input(false);
+    request.beforeSideEffect = vi.fn().mockResolvedValue({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'parent completed before reconciliation probe',
+      runtimeIdentity: null,
+      capabilities: null,
+    });
+    request.sourceTaskGuard = {
+      taskId: 'parent-task-1',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+
+    await expect(adapter.reconcile(request)).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+    });
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+  });
+
+  it('carries the source guard through capability, prompt, and receipt requests', async () => {
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    mocks.sendPromptToAgentOnNode.mockRejectedValue(new Error('connection reset'));
+    mocks.nodeAgentRequest.mockResolvedValueOnce(protocolFixture.capabilities).mockResolvedValueOnce({
+      deliveryId: 'delivery-1',
+      state: 'accepted',
+      runtimeIdentity: 'runtime-vm-01',
+      acceptedAt: 500,
+      completedAt: null,
+    });
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+    const request = input(false);
+    request.sourceTaskGuard = {
+      taskId: 'parent-task-1',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+
+    await expect(adapter.submit(request)).resolves.toMatchObject({ kind: 'accepted' });
+    expect(mocks.nodeAgentRequest).toHaveBeenNthCalledWith(
+      1,
+      'node-1',
+      expect.anything(),
+      '/workspaces/workspace-1/agent-capabilities',
+      expect.objectContaining({ sourceTaskGuard: request.sourceTaskGuard })
+    );
+    expect(mocks.sendPromptToAgentOnNode).toHaveBeenCalledWith(
+      'node-1',
+      'workspace-1',
+      'acp-1',
+      'hello',
+      expect.anything(),
+      'user-1',
+      'delivery-1',
+      expect.objectContaining({ sourceTaskGuard: request.sourceTaskGuard })
+    );
+    expect(mocks.nodeAgentRequest).toHaveBeenNthCalledWith(
+      2,
+      'node-1',
+      expect.anything(),
+      '/workspaces/workspace-1/agent-sessions/acp-1/prompt-receipts/delivery-1',
+      expect.objectContaining({ sourceTaskGuard: request.sourceTaskGuard })
+    );
+  });
+
   it('revalidates again after capability I/O and before VM prompt submission', async () => {
     mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
     const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());

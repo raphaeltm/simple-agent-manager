@@ -20,6 +20,23 @@ function callProxyHttp(fake: unknown, request: Request): Promise<Response> {
   ).proxyHttp.call(fake, request);
 }
 
+function callProxyHttpGuarded(
+  fake: unknown,
+  request: Request,
+  guard: { taskId: string; projectId: string; chatSessionId: string }
+): Promise<Response> {
+  return (
+    VmAgentContainer.prototype as unknown as {
+      proxyHttpGuarded: (
+        this: unknown,
+        request: Request,
+        port: number | undefined,
+        sourceTaskGuard: typeof guard
+      ) => Promise<Response>;
+    }
+  ).proxyHttpGuarded.call(fake, request, undefined, guard);
+}
+
 function makeProxyFake(input: {
   ready: { ok: boolean; status: string; code?: string; message?: string };
   state: string;
@@ -43,6 +60,29 @@ function makeProxyFake(input: {
 }
 
 describe('VmAgentContainer proxy recovery boundaries', () => {
+  it('rejects a revoked source guard before proxy preparation can wake compute', async () => {
+    const proxyHttp = vi.fn();
+    const first = vi.fn().mockResolvedValue(null);
+    const fake = {
+      env: {
+        DATABASE: {
+          prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first })) })),
+        },
+      },
+      proxyHttp,
+    };
+
+    const response = await callProxyHttpGuarded(
+      fake,
+      new Request('http://container/prompt', { method: 'POST' }),
+      { taskId: 'parent-1', projectId: 'project-1', chatSessionId: 'chat-1' }
+    );
+
+    expect(response.status).toBe(409);
+    expect(proxyHttp).not.toHaveBeenCalled();
+    expect(first).toHaveBeenCalledTimes(1);
+  });
+
   it('forwards a prompt only after wake/restore reports running', async () => {
     const { fake, containerFetch } = makeProxyFake({
       ready: { ok: true, status: 'running' },

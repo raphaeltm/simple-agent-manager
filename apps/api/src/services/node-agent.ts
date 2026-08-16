@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
 
 import * as schema from '../db/schema';
+import type { VmAgentContainerRequestGuard } from '../durable-objects/vm-agent-container';
 import {
   getRuntimeRecoveryMessage,
   type RuntimeRecoveryCode,
@@ -45,6 +46,8 @@ interface NodeAgentRequestOptions extends RequestInit {
   userId: string;
   workspaceId?: string | null;
   requestTimeoutMs?: number;
+  /** Internal authorization checked inside a cf-container DO before cold wake. */
+  sourceTaskGuard?: VmAgentContainerRequestGuard;
 }
 
 const RUNTIME_RECOVERY_CODES: ReadonlySet<string> = new Set([
@@ -137,21 +140,28 @@ export async function nodeAgentRequest(
   path: string,
   options: NodeAgentRequestOptions
 ): Promise<unknown> {
+  const {
+    userId,
+    workspaceId = null,
+    requestTimeoutMs: configuredRequestTimeoutMs,
+    sourceTaskGuard,
+    ...requestOptions
+  } = options;
   const { token } = await signNodeManagementToken(
-    options.userId,
+    userId,
     nodeId,
-    options.workspaceId ?? null,
+    workspaceId,
     env
   );
 
   const url = `${getNodeBackendBaseUrl(nodeId, env)}${path}`;
-  const headers = new Headers(options.headers);
+  const headers = new Headers(requestOptions.headers);
   headers.set('Authorization', `Bearer ${token}`);
   headers.set('Content-Type', 'application/json');
   headers.set('X-SAM-Node-Id', nodeId);
 
-  if (options.workspaceId) {
-    headers.set('X-SAM-Workspace-Id', options.workspaceId);
+  if (workspaceId) {
+    headers.set('X-SAM-Workspace-Id', workspaceId);
   } else {
     headers.delete('X-SAM-Workspace-Id');
   }
@@ -161,25 +171,26 @@ export async function nodeAgentRequest(
     {
       metric: 'node_agent_request',
       nodeId,
-      workspaceId: options.workspaceId ?? null,
+      workspaceId,
     },
     env
   );
 
-  const requestTimeoutMs = options.requestTimeoutMs ?? getNodeAgentRequestTimeoutMs(env);
+  const requestTimeoutMs = configuredRequestTimeoutMs ?? getNodeAgentRequestTimeoutMs(env);
   const response = await fetchNodeAgent(
     nodeId,
     env,
     url,
-    { ...options, headers },
-    requestTimeoutMs
+    { ...requestOptions, headers },
+    requestTimeoutMs,
+    sourceTaskGuard
   );
 
   recordNodeRoutingMetric(
     {
       metric: 'node_agent_response',
       nodeId,
-      workspaceId: options.workspaceId ?? null,
+      workspaceId,
       statusCode: response.status,
       durationMs: Date.now() - startedAt,
     },
@@ -236,7 +247,8 @@ export async function fetchNodeAgent(
   env: Env,
   url: string,
   options: RequestInit,
-  requestTimeoutMs: number
+  requestTimeoutMs: number,
+  sourceTaskGuard?: VmAgentContainerRequestGuard
 ): Promise<Response> {
   if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
     return fetchWithTimeout(url, options, requestTimeoutMs);
@@ -286,7 +298,8 @@ export async function fetchNodeAgent(
         env,
         nodeId,
         new Request(containerUrl.toString(), requestInitWithoutSignal(options)),
-        vmAgentPort
+        vmAgentPort,
+        sourceTaskGuard
       ),
       new Promise<Response>((_resolve, reject) => {
         timeoutHandle = setTimeout(
@@ -570,6 +583,7 @@ export async function sendPromptToAgentOnNode(
     requestTimeoutMs?: number;
     protocolVersion?: number;
     deliveryId?: string;
+    sourceTaskGuard?: VmAgentContainerRequestGuard;
   }
 ): Promise<unknown> {
   const body: {
@@ -597,6 +611,7 @@ export async function sendPromptToAgentOnNode(
         userId,
         workspaceId,
         requestTimeoutMs: options?.requestTimeoutMs,
+        sourceTaskGuard: options?.sourceTaskGuard,
         body: JSON.stringify(body),
       }
     );

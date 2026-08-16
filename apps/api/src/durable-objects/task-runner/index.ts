@@ -43,6 +43,10 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env } from '../../env';
 import { log } from '../../lib/logger';
 import { deferAlarmWhenDisabled } from '../../services/operational-kill-switch';
+import {
+  isSessionRecoveryTaskAuthorized,
+  SessionRecoveryAuthorityRevokedError,
+} from '../../services/session-recovery-authority';
 import { handleAgentSession } from './agent-session-step';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
@@ -71,6 +75,7 @@ export class TaskRunner extends DurableObject<Env> {
   async start(input: StartTaskInput): Promise<void> {
     const existing = await this.getState();
     if (existing) {
+      await this.assertRecoveryAuthority(existing);
       // Idempotent: if already started, don't re-initialize.
       // This can happen if the route retries after a timeout.
       await this.ensureAlarm(existing);
@@ -80,6 +85,8 @@ export class TaskRunner extends DurableObject<Env> {
       });
       return;
     }
+
+    await this.assertRecoveryAuthority(input);
 
     const now = Date.now();
     const state: TaskRunnerState = {
@@ -203,6 +210,10 @@ export class TaskRunner extends DurableObject<Env> {
     const stepStartMs = Date.now();
 
     try {
+      if (!(await this.hasRecoveryAuthority(state))) {
+        await failTask(state, new SessionRecoveryAuthorityRevokedError().message, rc);
+        return;
+      }
       switch (state.currentStep) {
         case 'node_selection':
           await handleNodeSelection(state, rc);
@@ -341,8 +352,33 @@ export class TaskRunner extends DurableObject<Env> {
     raw.workspaceDispatchLastError ??= null;
     raw.workspaceDispatchAckedAt ??= null;
     raw.config.resumeSnapshotChatSessionId ??= null;
+    raw.config.recoverySourceTaskId ??= null;
     raw.lastD1Step ??= null;
     return raw;
+  }
+
+  private async hasRecoveryAuthority(
+    input: StartTaskInput | TaskRunnerState
+  ): Promise<boolean> {
+    const sourceTaskId = input.config.recoverySourceTaskId ?? null;
+    const chatSessionId = input.config.resumeSnapshotChatSessionId ?? null;
+    // A human follow-up may recover a completed conversation without a live
+    // parent guard. Only runners created for a guarded orchestration wake carry
+    // recoverySourceTaskId and require revocable authorization.
+    if (!sourceTaskId) return true;
+    if (!chatSessionId) return false;
+    return isSessionRecoveryTaskAuthorized(this.env.DATABASE, {
+      recoveryTaskId: input.taskId,
+      sourceTaskId,
+      projectId: input.projectId,
+      chatSessionId,
+    });
+  }
+
+  private async assertRecoveryAuthority(input: StartTaskInput | TaskRunnerState): Promise<void> {
+    if (!(await this.hasRecoveryAuthority(input))) {
+      throw new SessionRecoveryAuthorityRevokedError();
+    }
   }
 
   // =========================================================================

@@ -163,7 +163,11 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
     // before the later prompt/wake mutations.
     const guardedBeforeProbe = await this.runSideEffectGuard(input);
     if (guardedBeforeProbe) return guardedBeforeProbe;
-    const capabilities = await this.getCapabilities(target, input.requestTimeoutMs);
+    const capabilities = await this.getCapabilities(
+      target,
+      input.requestTimeoutMs,
+      input.sourceTaskGuard
+    );
     if (!capabilities) {
       return {
         kind: 'retry',
@@ -203,8 +207,12 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
               requestTimeoutMs: input.requestTimeoutMs,
               protocolVersion: VM_PROMPT_DELIVERY_PROTOCOL_VERSION,
               deliveryId: input.claim.message.id,
+              ...(input.sourceTaskGuard ? { sourceTaskGuard: input.sourceTaskGuard } : {}),
             }
-          : { requestTimeoutMs: input.requestTimeoutMs }
+          : {
+              requestTimeoutMs: input.requestTimeoutMs,
+              ...(input.sourceTaskGuard ? { sourceTaskGuard: input.sourceTaskGuard } : {}),
+            }
       );
       if (capabilities.protocolVersion === 0 && input.allowLegacyVm) {
         return {
@@ -220,10 +228,9 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       if (!parsed.success) {
         return this.reconcileAfterAmbiguousSubmit(
           target,
-          input.claim,
+          input,
           capabilities,
-          new Error('Target VM returned an invalid versioned prompt response'),
-          input.requestTimeoutMs
+          new Error('Target VM returned an invalid versioned prompt response')
         );
       }
       const response: VmPromptDeliveryResponse = parsed.output;
@@ -313,10 +320,9 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       }
       return this.reconcileAfterAmbiguousSubmit(
         target,
-        input.claim,
+        input,
         capabilities,
-        error,
-        input.requestTimeoutMs
+        error
       );
     }
   }
@@ -349,7 +355,13 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       };
     }
     const { target } = resolution;
-    const capabilities = await this.getCapabilities(target, input.requestTimeoutMs);
+    const guardedBeforeProbe = await this.runSideEffectGuard(input);
+    if (guardedBeforeProbe) return guardedBeforeProbe;
+    const capabilities = await this.getCapabilities(
+      target,
+      input.requestTimeoutMs,
+      input.sourceTaskGuard
+    );
     if (!capabilities) {
       return {
         kind: 'ambiguous',
@@ -383,7 +395,15 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         receipt: null,
       };
     }
-    return this.lookupReceiptResult(target, input.claim, capabilities, input.requestTimeoutMs);
+    const guardedBeforeReceipt = await this.runSideEffectGuard(input);
+    if (guardedBeforeReceipt) return guardedBeforeReceipt;
+    return this.lookupReceiptResult(
+      target,
+      input.claim,
+      capabilities,
+      input.requestTimeoutMs,
+      input.sourceTaskGuard
+    );
   }
 
   private async resolveTarget(
@@ -557,7 +577,8 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
 
   private async getCapabilities(
     target: VmPromptDeliveryTarget,
-    requestTimeoutMs: number
+    requestTimeoutMs: number,
+    sourceTaskGuard?: VmPromptDeliverySourceTaskGuard
   ): Promise<VmPromptDeliveryCapabilities | null> {
     try {
       const raw = await nodeAgentRequest(
@@ -569,6 +590,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
           userId: target.userId,
           workspaceId: target.workspaceId,
           requestTimeoutMs,
+          ...(sourceTaskGuard ? { sourceTaskGuard } : {}),
         }
       );
       const capabilities = v.parse(CapabilitiesSchema, raw);
@@ -596,10 +618,9 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
 
   private async reconcileAfterAmbiguousSubmit(
     target: VmPromptDeliveryTarget,
-    claim: PromptDeliveryClaim,
+    input: VmPromptDeliveryAdapterInput,
     capabilities: VmPromptDeliveryCapabilities,
-    submitError: unknown,
-    requestTimeoutMs: number
+    submitError: unknown
   ): Promise<PromptDeliveryResult> {
     if (!capabilities.promptReceipts.supported || !capabilities.promptReceipts.lookup) {
       return {
@@ -611,14 +632,23 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
         receipt: null,
       };
     }
-    return this.lookupReceiptResult(target, claim, capabilities, requestTimeoutMs);
+    const guarded = await this.runSideEffectGuard(input);
+    if (guarded) return guarded;
+    return this.lookupReceiptResult(
+      target,
+      input.claim,
+      capabilities,
+      input.requestTimeoutMs,
+      input.sourceTaskGuard
+    );
   }
 
   private async lookupReceiptResult(
     target: VmPromptDeliveryTarget,
     claim: PromptDeliveryClaim,
     capabilities: VmPromptDeliveryCapabilities,
-    requestTimeoutMs: number
+    requestTimeoutMs: number,
+    sourceTaskGuard?: VmPromptDeliverySourceTaskGuard
   ): Promise<PromptDeliveryResult> {
     try {
       const raw = await nodeAgentRequest(
@@ -634,6 +664,7 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
           userId: target.userId,
           workspaceId: target.workspaceId,
           requestTimeoutMs,
+          ...(sourceTaskGuard ? { sourceTaskGuard } : {}),
         }
       );
       const receipt: VmPromptDeliveryReceipt = v.parse(ReceiptSchema, raw);

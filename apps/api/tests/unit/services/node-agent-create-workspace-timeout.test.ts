@@ -216,4 +216,37 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
     expect(mocks.container.fetchVmAgentContainer).toHaveBeenCalledTimes(1);
     expect(mocks.container.markVmAgentContainerRequestInterrupted).not.toHaveBeenCalled();
   });
+
+  it('carries an internal source-task guard to the cf-container request boundary', async () => {
+    mocks.container.fetchVmAgentContainer.mockResolvedValue(
+      Response.json({ status: 'accepted' }, { status: 200 })
+    );
+    const sourceTaskGuard = {
+      taskId: 'parent-task-1',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+
+    await sendPromptToAgentOnNode(
+      'node-1',
+      'ws-1',
+      'agent-1',
+      'continue',
+      cfContainerEnv,
+      'user-1',
+      'message-1',
+      { sourceTaskGuard }
+    );
+
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenCalledWith(
+      cfContainerEnv,
+      'node-1',
+      expect.any(Request),
+      8080,
+      sourceTaskGuard
+    );
+    const proxiedRequest = mocks.container.fetchVmAgentContainer.mock.calls[0]?.[2] as Request;
+    expect(proxiedRequest).toBeInstanceOf(Request);
+    expect((proxiedRequest as unknown as Record<string, unknown>).sourceTaskGuard).toBeUndefined();
+  });
 });
