@@ -13,6 +13,7 @@ import {
   sql,
 } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
+import { alias } from 'drizzle-orm/sqlite-core';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
@@ -36,16 +37,34 @@ const TERMINAL_TASK_STATUSES = ['completed', 'failed', 'cancelled'];
 
 function sourceTaskGuardCondition(db: Db, guard: SessionRecoverySourceTaskGuard | undefined) {
   if (!guard) return undefined;
+  const sourceTask = alias(schema.tasks, 'recovery_source_task');
+  const recoveryOwner = alias(schema.tasks, 'recovery_session_owner');
   return exists(
     db
-      .select({ id: schema.tasks.id })
-      .from(schema.tasks)
+      .select({ id: sourceTask.id })
+      .from(sourceTask)
       .where(
         and(
-          eq(schema.tasks.id, guard.taskId),
-          eq(schema.tasks.projectId, guard.projectId),
-          eq(schema.tasks.chatSessionId, guard.chatSessionId),
-          notInArray(schema.tasks.status, TERMINAL_TASK_STATUSES)
+          eq(sourceTask.id, guard.taskId),
+          eq(sourceTask.projectId, guard.projectId),
+          notInArray(sourceTask.status, TERMINAL_TASK_STATUSES),
+          or(
+            eq(sourceTask.chatSessionId, guard.chatSessionId),
+            exists(
+              db
+                .select({ id: recoveryOwner.id })
+                .from(recoveryOwner)
+                .where(
+                  and(
+                    eq(recoveryOwner.recoverySourceTaskId, sourceTask.id),
+                    eq(recoveryOwner.projectId, guard.projectId),
+                    eq(recoveryOwner.chatSessionId, guard.chatSessionId),
+                    eq(recoveryOwner.triggeredBy, 'session-recovery'),
+                    notInArray(recoveryOwner.status, TERMINAL_TASK_STATUSES)
+                  )
+                )
+            )
+          )
         )
       )
   );
@@ -56,6 +75,7 @@ async function sourceTaskGuardIsValid(
   guard: SessionRecoverySourceTaskGuard | undefined
 ): Promise<boolean> {
   if (!guard) return true;
+  const recoveryOwner = alias(schema.tasks, 'recovery_session_owner');
   const row = await db
     .select({ id: schema.tasks.id })
     .from(schema.tasks)
@@ -63,8 +83,24 @@ async function sourceTaskGuardIsValid(
       and(
         eq(schema.tasks.id, guard.taskId),
         eq(schema.tasks.projectId, guard.projectId),
-        eq(schema.tasks.chatSessionId, guard.chatSessionId),
-        notInArray(schema.tasks.status, TERMINAL_TASK_STATUSES)
+        notInArray(schema.tasks.status, TERMINAL_TASK_STATUSES),
+        or(
+          eq(schema.tasks.chatSessionId, guard.chatSessionId),
+          exists(
+            db
+              .select({ id: recoveryOwner.id })
+              .from(recoveryOwner)
+              .where(
+                and(
+                  eq(recoveryOwner.recoverySourceTaskId, guard.taskId),
+                  eq(recoveryOwner.projectId, guard.projectId),
+                  eq(recoveryOwner.chatSessionId, guard.chatSessionId),
+                  eq(recoveryOwner.triggeredBy, 'session-recovery'),
+                  notInArray(recoveryOwner.status, TERMINAL_TASK_STATUSES)
+                )
+              )
+          )
+        )
       )
     )
     .get();

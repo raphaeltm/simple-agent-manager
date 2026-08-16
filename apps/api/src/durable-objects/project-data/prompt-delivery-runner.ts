@@ -69,23 +69,41 @@ async function invalidParentWakeTargetResult(
   const taskIds = [claim.message.sourceTaskId, ...childTaskIds];
   const placeholders = taskIds.map(() => '?').join(', ');
   const response = await env.DATABASE.prepare(
-    `SELECT id, status, chat_session_id, parent_task_id
+    `SELECT id, status, chat_session_id, parent_task_id,
+            recovery_source_task_id, triggered_by
      FROM tasks
-     WHERE project_id = ? AND id IN (${placeholders})`
+     WHERE project_id = ?
+       AND (
+         id IN (${placeholders})
+         OR (
+           recovery_source_task_id = ?
+           AND chat_session_id = ?
+           AND triggered_by = 'session-recovery'
+         )
+       )`
   )
-    .bind(projectId, ...taskIds)
+    .bind(projectId, ...taskIds, claim.message.sourceTaskId, claim.message.targetSessionId)
     .all<{
       id: string;
       status: string;
       chat_session_id: string | null;
       parent_task_id: string | null;
+      recovery_source_task_id: string | null;
+      triggered_by: string;
     }>();
   const tasks = new Map((response.results ?? []).map((task) => [task.id, task]));
   const parent = tasks.get(claim.message.sourceTaskId);
+  const liveRecoveryOwner = (response.results ?? []).find(
+    (task) =>
+      task.recovery_source_task_id === claim.message.sourceTaskId &&
+      task.chat_session_id === claim.message.targetSessionId &&
+      task.triggered_by === 'session-recovery' &&
+      !(TASK_TERMINAL_STATUSES as readonly string[]).includes(task.status)
+  );
   if (
     !parent ||
     (TASK_TERMINAL_STATUSES as readonly string[]).includes(parent.status) ||
-    parent.chat_session_id !== claim.message.targetSessionId
+    (parent.chat_session_id !== claim.message.targetSessionId && !liveRecoveryOwner)
   ) {
     return {
       kind: 'failed',

@@ -158,6 +158,11 @@ export class DefaultVmPromptDeliveryAdapter implements VmPromptDeliveryAdapter {
       };
     }
     const { target } = resolution;
+    // A Cloudflare Container capability request may wake the container while
+    // preparing the proxied request. Revalidate before the probe, not only
+    // before the later prompt/wake mutations.
+    const guardedBeforeProbe = await this.runSideEffectGuard(input);
+    if (guardedBeforeProbe) return guardedBeforeProbe;
     const capabilities = await this.getCapabilities(target, input.requestTimeoutMs);
     if (!capabilities) {
       return {

@@ -249,11 +249,32 @@ describe('VM prompt delivery adapter', () => {
     expect(mocks.ensureSessionRecovery).not.toHaveBeenCalled();
   });
 
-  it('revalidates a guarded parent after capability I/O and before VM prompt submission', async () => {
+  it('revalidates a guarded parent before a capability probe that may wake compute', async () => {
     mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
     const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
     const request = input(false);
     request.beforeSideEffect = vi.fn().mockResolvedValue({
+      kind: 'failed',
+      reason: 'terminal_target',
+      error: 'parent completed before capability probe',
+      runtimeIdentity: null,
+      capabilities: null,
+    });
+
+    await expect(adapter.submit(request)).resolves.toMatchObject({
+      kind: 'failed',
+      reason: 'terminal_target',
+    });
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
+    expect(request.beforeSideEffect).toHaveBeenCalledTimes(1);
+    expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
+  });
+
+  it('revalidates again after capability I/O and before VM prompt submission', async () => {
+    mocks.nodeAgentRequest.mockResolvedValue(protocolFixture.capabilities);
+    const adapter = new DefaultVmPromptDeliveryAdapter(envWithTarget());
+    const request = input(false);
+    request.beforeSideEffect = vi.fn().mockResolvedValueOnce(null).mockResolvedValueOnce({
       kind: 'failed',
       reason: 'terminal_target',
       error: 'parent completed during capability probe',
@@ -266,7 +287,7 @@ describe('VM prompt delivery adapter', () => {
       reason: 'terminal_target',
     });
     expect(mocks.nodeAgentRequest).toHaveBeenCalledTimes(1);
-    expect(request.beforeSideEffect).toHaveBeenCalledTimes(1);
+    expect(request.beforeSideEffect).toHaveBeenCalledTimes(2);
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
   });
 
@@ -296,6 +317,7 @@ describe('VM prompt delivery adapter', () => {
       reason: 'terminal_target',
     });
     expect(request.beforeSideEffect).toHaveBeenCalledTimes(1);
+    expect(mocks.nodeAgentRequest).not.toHaveBeenCalled();
     expect(mocks.wakeSession).not.toHaveBeenCalled();
     expect(mocks.markSessionSnapshotAwakeInPlace).not.toHaveBeenCalled();
     expect(mocks.sendPromptToAgentOnNode).not.toHaveBeenCalled();
