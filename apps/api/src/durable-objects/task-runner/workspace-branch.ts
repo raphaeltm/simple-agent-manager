@@ -1,5 +1,6 @@
 import { log } from '../../lib/logger';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
+import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
 /**
@@ -44,6 +45,7 @@ export async function ensureBranchExistsOnRemote(
 
     const externalInstallationId = getExternalInstallationId(installation);
     const { ensureBranchExists } = await import('../../services/github-app');
+    await rc.assertRecoveryAuthority(state);
     const created = await ensureBranchExists(
       externalInstallationId,
       owner,
@@ -66,6 +68,10 @@ export async function ensureBranchExistsOnRemote(
       });
     }
   } catch (err) {
+    // A revoked recovery authority is NOT a best-effort branch failure — it
+    // means the source parent terminalized and this replacement must abort
+    // rather than continue provisioning.
+    if (err instanceof SessionRecoveryAuthorityRevokedError) throw err;
     log.warn('task_runner_do.ensure_branch.error', {
       taskId: state.taskId,
       branch: state.config.branch,
@@ -104,6 +110,7 @@ async function ensureGitLabBranchExistsOnRemote(
       });
       return;
     }
+    await rc.assertRecoveryAuthority(state);
     const created = await ensureGitLabBranchExists({
       env: rc.env,
       userId: state.userId,
@@ -118,6 +125,7 @@ async function ensureGitLabBranchExistsOnRemote(
       });
     }
   } catch (err) {
+    if (err instanceof SessionRecoveryAuthorityRevokedError) throw err;
     log.warn('task_runner_do.ensure_branch.gitlab_error', {
       taskId: state.taskId,
       branch: state.config.branch,

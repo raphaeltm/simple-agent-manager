@@ -401,7 +401,10 @@ describe('TaskRunner DO — failure handling', () => {
       await instance.alarm();
     });
 
-    expect(await stub.getStatus()).toMatchObject({ completed: true, currentStep: 'node_selection' });
+    expect(await stub.getStatus()).toMatchObject({
+      completed: true,
+      currentStep: 'node_selection',
+    });
     expect(await getTaskFromD1(input.taskId)).toMatchObject({
       status: 'failed',
       error_message: expect.stringContaining('Session recovery authority was revoked'),
@@ -411,6 +414,64 @@ describe('TaskRunner DO — failure handling', () => {
         .bind(input.config.recoverySourceTaskId)
         .first()
     ).toEqual({ chat_session_id: input.config.chatSessionId });
+  });
+
+  it('revalidates again after alarm entry and before allocating a node', async () => {
+    await seedTestData();
+    const input = await seedRecoveryAuthorization({
+      sourceTaskId: 'tr-recovery-source-mid-step',
+      recoveryTaskId: 'tr-recovery-mid-step',
+      workspaceId: 'tr-recovery-workspace-mid-step',
+      chatSessionId: 'tr-recovery-chat-mid-step',
+    });
+    input.config.credentialAttributionUserId = TEST_USER_ID;
+    input.config.credentialAttributionProjectId = null;
+    input.config.credentialAttributionSource = 'user';
+    const stub = getStub(input.taskId);
+    await startWithoutAlarm(stub, input);
+    await runInDurableObject(stub, async (instance) => {
+      const state = await instance.ctx.storage.get<TaskRunnerState>('state');
+      if (!state) throw new Error('TaskRunner state was not initialized');
+      state.currentStep = 'node_provisioning';
+      state.provisioningStartedAt = Date.now();
+      await instance.ctx.storage.put('state', state);
+    });
+    await env.DATABASE.prepare(`UPDATE tasks SET execution_step = 'node_selection' WHERE id = ?`)
+      .bind(input.taskId)
+      .run();
+    // Deterministic adversarial barrier: alarm-entry authorization reads the
+    // live source first. The handler's first execution-step write then
+    // terminalizes that source in D1 before allocation-boundary validation.
+    await env.DATABASE.prepare(
+      `
+      CREATE TRIGGER revoke_source_during_node_provisioning
+      AFTER UPDATE OF execution_step ON tasks
+      WHEN NEW.id = '${input.taskId}' AND NEW.execution_step = 'node_provisioning'
+      BEGIN
+        UPDATE tasks
+           SET status = 'completed'
+         WHERE id = '${input.config.recoverySourceTaskId}';
+      END;
+    `
+    ).run();
+    const before = await env.DATABASE.prepare(
+      `SELECT COUNT(*) AS count FROM nodes WHERE user_id = ?`
+    )
+      .bind(TEST_USER_ID)
+      .first<{ count: number }>();
+
+    await runInDurableObject(stub, async (instance) => instance.alarm());
+
+    const after = await env.DATABASE.prepare(
+      `SELECT COUNT(*) AS count FROM nodes WHERE user_id = ?`
+    )
+      .bind(TEST_USER_ID)
+      .first<{ count: number }>();
+    expect(after?.count).toBe(before?.count);
+    expect(await getTaskFromD1(input.taskId)).toMatchObject({
+      status: 'failed',
+      error_message: expect.stringContaining('Session recovery authority was revoked'),
+    });
   });
 
   it('terminalizes a task whose claimed node was deleted without returning the node to warm reuse', async () => {
@@ -472,9 +533,7 @@ describe('TaskRunner DO — failure handling', () => {
       })
     );
 
-    const node = await env.DATABASE.prepare(
-      `SELECT status, warm_since FROM nodes WHERE id = ?`
-    )
+    const node = await env.DATABASE.prepare(`SELECT status, warm_since FROM nodes WHERE id = ?`)
       .bind(nodeId)
       .first<{ status: string; warm_since: string | null }>();
     expect(node).toEqual({ status: 'deleted', warm_since: null });

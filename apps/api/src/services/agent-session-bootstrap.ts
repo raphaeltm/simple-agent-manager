@@ -47,6 +47,8 @@ export interface SamAwareAgentStartInput {
   existingMcpToken?: string | null;
   onAgentSessionId?: (agentSessionId: string) => Promise<void>;
   onMcpToken?: (mcpToken: string) => Promise<void>;
+  /** Optional fail-closed gate run immediately before each durable/external mutation. */
+  beforeExternalMutation?: () => Promise<void>;
   actor: {
     type: 'system' | 'user';
     id: string | null;
@@ -67,6 +69,7 @@ async function runMaybePhased<T>(
   name: string,
   fn: () => Promise<T>
 ): Promise<T> {
+  await input.beforeExternalMutation?.();
   return input.runPhase ? input.runPhase(name, fn) : fn();
 }
 

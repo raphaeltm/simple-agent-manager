@@ -11,6 +11,8 @@ import {
 
 import { log } from '../../lib/logger';
 import type { DevcontainerCacheCredentials } from '../../services/devcontainer-cache';
+import { getExternalInstallationId } from '../../services/github-installation-ids';
+import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
 import { reserveWorkspacePlacement } from '../../services/workspace-placement';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { ensureSessionLinked } from './state-machine';
@@ -55,6 +57,7 @@ export async function handleWorkspaceCreation(
   }
 
   // Transition task: queued → delegated (optimistic locking)
+  await rc.assertRecoveryAuthority(state);
   const now = new Date().toISOString();
   const result = await rc.env.DATABASE.prepare(
     `UPDATE tasks SET status = 'delegated', updated_at = ? WHERE id = ? AND status = 'queued'`
@@ -149,6 +152,10 @@ async function createAndProvisionWorkspace(
   const uniqueName = await resolveUniqueWorkspaceDisplayName(db, nodeId, workspaceName);
   const now = new Date().toISOString();
 
+  // Recovery authority is revalidated immediately before the physical
+  // workspace-row allocation (.claude/rules/49): a parent that terminalized
+  // while we resolved the unique display name must not allocate compute.
+  await rc.assertRecoveryAuthority(state);
   const maxWorkspaces =
     state.config.projectScaling?.maxWorkspacesPerNode ??
     parseEnvInt(rc.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE);
@@ -213,6 +220,7 @@ async function ensureWorkspaceBookkeeping(
   workspaceId: string,
   now = new Date().toISOString()
 ): Promise<void> {
+  await rc.assertRecoveryAuthority(state);
   await ensureSessionLinked(state, workspaceId, rc);
   await setOutputBranch(state, rc, now);
   await ensureBranchExistsOnRemote(state, rc);
@@ -297,7 +305,9 @@ async function createWorkspaceOnVmAgent(
   const checkoutBranch = state.config.outputBranch || state.config.branch;
   const baseBranch =
     checkoutBranch === state.config.branch ? state.config.defaultBranch : state.config.branch;
+  const devcontainerCache = await getDevcontainerCacheForWorkspace(state, rc, workspaceId);
 
+  await rc.assertRecoveryAuthority(state);
   const response = await createWorkspaceOnNode(nodeId, rc.env, state.userId, {
     workspaceId,
     repository: state.config.repository,
@@ -314,7 +324,7 @@ async function createWorkspaceOnVmAgent(
     githubId: state.config.githubId,
     lightweight: state.config.workspaceProfile === 'lightweight',
     devcontainerConfigName: state.config.devcontainerConfigName ?? undefined,
-    devcontainerCache: await getDevcontainerCacheForWorkspace(state, rc, workspaceId),
+    devcontainerCache,
   });
 
   if (!isWorkspaceDispatchAck(response, workspaceId)) {
@@ -632,6 +642,7 @@ export async function handleAttachmentTransfer(
     let resp: Response;
     try {
       const uploadUrl = `${uploadBaseUrl}?token=${encodeURIComponent(token)}`;
+      await rc.assertRecoveryAuthority(state);
       resp = await fetch(uploadUrl, {
         method: 'POST',
         body: formData,

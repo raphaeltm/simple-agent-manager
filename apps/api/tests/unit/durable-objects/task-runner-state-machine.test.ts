@@ -122,7 +122,10 @@ function createD1State() {
   };
 }
 
-function createD1Database(state: ReturnType<typeof createD1State>) {
+function createD1Database(
+  state: ReturnType<typeof createD1State>,
+  options: { onFailureStatusRead?: (task: TaskRow) => void } = {}
+) {
   return {
     prepare: vi.fn((sql: string) => ({
       bind: (...params: unknown[]) => ({
@@ -133,18 +136,20 @@ function createD1Database(state: ReturnType<typeof createD1State>) {
           }
           if (sql.includes('SELECT status, mission_id, parent_task_id FROM tasks WHERE id = ?')) {
             const task = state.tasks.get(String(params[0]));
-            return task
+            const result = task
               ? {
                   status: task.status,
                   mission_id: task.mission_id,
                   parent_task_id: task.parent_task_id,
                 }
               : null;
+            if (task) options.onFailureStatusRead?.(task);
+            return result;
           }
           return null;
         },
         run: async () => {
-          if (sql.includes("UPDATE tasks SET status = 'in_progress'")) {
+          if (sql.includes("SET status = 'in_progress'")) {
             const taskId = String(params[2]);
             const task = state.tasks.get(taskId);
             if (!task || task.status !== 'delegated') {
@@ -262,9 +267,12 @@ function makeState(overrides: Partial<TaskRunnerState> = {}): TaskRunnerState {
   };
 }
 
-function createContext(dbState = createD1State()) {
+function createContext(
+  dbState = createD1State(),
+  options: { onFailureStatusRead?: (task: TaskRow) => void } = {}
+) {
   const storageWrites: TaskRunnerState[] = [];
-  const database = createD1Database(dbState);
+  const database = createD1Database(dbState, options);
   const rc = {
     env: {
       DATABASE: database,
@@ -285,6 +293,7 @@ function createContext(dbState = createD1State()) {
         }),
       },
     },
+    assertRecoveryAuthority: vi.fn(async () => undefined),
   } as unknown as TaskRunnerContext;
 
   return { dbState, rc, storageWrites };
@@ -404,6 +413,29 @@ describe('transitionToInProgress', () => {
     expect(state.completed).toBe(true);
     expect(storageWrites.at(-1)).toMatchObject({ currentStep: 'running', completed: true });
   });
+
+  it('restores snapshot ownership when a terminal task wins the final handoff race', async () => {
+    const { dbState, rc } = createContext();
+    seedTask(dbState, { status: 'completed', execution_step: null });
+    const state = makeState({
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'session-race',
+        recoverySourceTaskId: 'source-race',
+      },
+    });
+
+    await transitionToInProgress(state, rc);
+
+    expect(restoreSessionRecoveryHandoffMock).toHaveBeenCalledWith(
+      rc.env.DATABASE,
+      'task-1',
+      'session-race'
+    );
+    expect(failSessionSnapshotRecoveryMock).toHaveBeenCalled();
+    expect(state.currentStep).toBe('agent_session');
+    expect(state.completed).toBe(true);
+  });
 });
 
 describe('failTask', () => {
@@ -432,6 +464,35 @@ describe('failTask', () => {
     expect(dbState.statusEvents).toHaveLength(0);
     expect(syncTriggerExecutionStatusMock).not.toHaveBeenCalled();
     expect(storageWrites.at(-1)).toMatchObject({ completed: true });
+  });
+
+  it('restores snapshot ownership when another writer terminalizes between failure SELECT and UPDATE', async () => {
+    const dbState = createD1State();
+    const { rc } = createContext(dbState, {
+      onFailureStatusRead: (task) => {
+        task.status = 'completed';
+        task.execution_step = null;
+      },
+    });
+    seedTask(dbState, { status: 'delegated', execution_step: 'agent_session' });
+    const state = makeState({
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'session-select-update-race',
+        recoverySourceTaskId: 'source-select-update-race',
+      },
+    });
+
+    await failTask(state, 'revoked during failure transition', rc);
+
+    expect(dbState.tasks.get('task-1')?.status).toBe('completed');
+    expect(restoreSessionRecoveryHandoffMock).toHaveBeenCalledWith(
+      rc.env.DATABASE,
+      'task-1',
+      'session-select-update-race'
+    );
+    expect(failSessionSnapshotRecoveryMock).toHaveBeenCalled();
+    expect(state.completed).toBe(true);
   });
 
   it('marks active tasks failed with terminal fields and a status event', async () => {

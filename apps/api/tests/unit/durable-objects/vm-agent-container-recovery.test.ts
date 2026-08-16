@@ -56,6 +56,7 @@ const runtimeContext = {
 };
 
 type PrivateContainer = {
+  proxyHttpAuthorized: (this: unknown, request: Request, port?: number) => Promise<Response>;
   ensureAwake: (this: unknown) => Promise<unknown>;
   beginUnexpectedRecovery: (this: unknown, input: unknown) => Promise<unknown>;
   wakeFromSnapshot: (this: unknown, recovery: RuntimeRecoveryState) => Promise<unknown>;
@@ -98,6 +99,8 @@ function makeRecoveryFake(input?: {
     wakeChain: Promise.resolve(),
     lifecycleChain: Promise.resolve(),
     defaultPort: 8080,
+    proxyHttpAuthorized: privateContainer.proxyHttpAuthorized,
+    assertSourceTaskGuard: vi.fn().mockResolvedValue(undefined),
     ensureAwake: privateContainer.ensureAwake,
     beginUnexpectedRecovery: privateContainer.beginUnexpectedRecovery,
     wakeFromSnapshot: privateContainer.wakeFromSnapshot,

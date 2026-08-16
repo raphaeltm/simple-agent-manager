@@ -4,6 +4,13 @@ import { VmAgentContainer } from '../../../src/durable-objects/vm-agent-containe
 import type { RuntimeRecoveryState } from '../../../src/durable-objects/vm-agent-container-recovery';
 
 type PrivateContainer = {
+  proxyHttpAuthorized: (
+    this: unknown,
+    request: Request,
+    port?: number,
+    guard?: { taskId: string; projectId: string; chatSessionId: string }
+  ) => Promise<Response>;
+  assertSourceTaskGuard: (this: unknown, guard?: unknown) => Promise<void>;
   prepareForRequest: (this: unknown) => Promise<unknown>;
   ensureAwake: (this: unknown) => Promise<unknown>;
   resultResponse: (this: unknown, result: unknown) => Response;
@@ -47,6 +54,8 @@ function makeProxyFake(input: {
   return {
     fake: {
       defaultPort: 8080,
+      proxyHttpAuthorized: privateContainer.proxyHttpAuthorized,
+      assertSourceTaskGuard: vi.fn(async () => undefined),
       prepareForRequest: vi.fn().mockResolvedValue(input.ready),
       resultResponse: privateContainer.resultResponse,
       interruptedRequestResponse: privateContainer.interruptedRequestResponse,
@@ -70,6 +79,8 @@ describe('VmAgentContainer proxy recovery boundaries', () => {
         },
       },
       proxyHttp,
+      proxyHttpAuthorized: privateContainer.proxyHttpAuthorized,
+      assertSourceTaskGuard: privateContainer.assertSourceTaskGuard,
     };
 
     const response = await callProxyHttpGuarded(
@@ -81,6 +92,80 @@ describe('VmAgentContainer proxy recovery boundaries', () => {
     expect(response.status).toBe(409);
     expect(proxyHttp).not.toHaveBeenCalled();
     expect(first).toHaveBeenCalledTimes(1);
+  });
+
+  it('rechecks after preparation and withholds the prompt when authority is revoked mid-wake', async () => {
+    const first = vi.fn().mockResolvedValueOnce({ id: 'parent-1' }).mockResolvedValueOnce(null);
+    const startRuntime = vi.fn();
+    const containerFetch = vi.fn().mockResolvedValue(new Response('proxied'));
+    const fake: Record<string, unknown> = {
+      defaultPort: 8080,
+      env: {
+        DATABASE: {
+          prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first })) })),
+        },
+      },
+      proxyHttpAuthorized: privateContainer.proxyHttpAuthorized,
+      assertSourceTaskGuard: privateContainer.assertSourceTaskGuard,
+      prepareForRequest: privateContainer.prepareForRequest,
+      ctx: {
+        storage: {
+          get: vi.fn(async (key: string) => (key === 'lifecycleStatus' ? 'sleeping' : undefined)),
+        },
+      },
+      getState: vi.fn().mockResolvedValue({ status: 'running' }),
+      containerFetch,
+      beginUnexpectedRecovery: vi.fn(),
+    };
+    const ensureAwake = vi.fn(async (guard: unknown) => {
+      await privateContainer.assertSourceTaskGuard.call(fake, guard);
+      startRuntime();
+      return { ok: true, status: 'running' };
+    });
+    fake.ensureAwake = ensureAwake;
+
+    const response = await callProxyHttpGuarded(
+      fake,
+      new Request('http://container/prompt', { method: 'POST' }),
+      { taskId: 'parent-1', projectId: 'project-1', chatSessionId: 'chat-1' }
+    );
+
+    expect(response.status).toBe(409);
+    expect(first).toHaveBeenCalledTimes(2);
+    expect(ensureAwake).toHaveBeenCalledOnce();
+    expect(startRuntime).not.toHaveBeenCalled();
+    expect(containerFetch).not.toHaveBeenCalled();
+  });
+
+  it('allows a live source through both the preparation and prompt boundaries', async () => {
+    const first = vi.fn().mockResolvedValue({ id: 'parent-1' });
+    const prepareForRequest = vi.fn().mockResolvedValue({ ok: true, status: 'running' });
+    const containerFetch = vi.fn().mockResolvedValue(new Response('proxied'));
+    const fake = {
+      defaultPort: 8080,
+      env: {
+        DATABASE: {
+          prepare: vi.fn(() => ({ bind: vi.fn(() => ({ first })) })),
+        },
+      },
+      proxyHttpAuthorized: privateContainer.proxyHttpAuthorized,
+      assertSourceTaskGuard: privateContainer.assertSourceTaskGuard,
+      prepareForRequest,
+      getState: vi.fn().mockResolvedValue({ status: 'running' }),
+      containerFetch,
+      beginUnexpectedRecovery: vi.fn(),
+    };
+
+    const response = await callProxyHttpGuarded(
+      fake,
+      new Request('http://container/prompt', { method: 'POST' }),
+      { taskId: 'parent-1', projectId: 'project-1', chatSessionId: 'chat-1' }
+    );
+
+    expect(response.status).toBe(200);
+    expect(first).toHaveBeenCalledTimes(2);
+    expect(prepareForRequest).toHaveBeenCalledOnce();
+    expect(containerFetch).toHaveBeenCalledOnce();
   });
 
   it('forwards a prompt only after wake/restore reports running', async () => {
@@ -177,6 +262,8 @@ describe('VmAgentContainer cold-wake serialization', () => {
     const containerFetch = vi.fn().mockResolvedValue(new Response('proxied'));
     const fake = {
       defaultPort: 8080,
+      proxyHttpAuthorized: privateContainer.proxyHttpAuthorized,
+      assertSourceTaskGuard: vi.fn(async () => undefined),
       wakeChain: Promise.resolve(),
       ctx: { storage },
       prepareForRequest: privateContainer.prepareForRequest,

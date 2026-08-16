@@ -104,6 +104,9 @@ export async function handleAgentSession(
           state.stepResults.mcpToken = mcpToken;
           await rc.ctx.storage.put('state', state);
         },
+        beforeExternalMutation: async () => {
+          await rc.assertRecoveryAuthority(state);
+        },
         actor: {
           type: 'system',
           id: 'task-runner',
@@ -145,6 +148,7 @@ export async function handleAgentSession(
     // Keep sleepingAt authoritative until the ProjectData lifecycle accepts the
     // idempotent wake. If this RPC fails, the snapshot remains claimable and a
     // later recovery attempt can safely converge instead of becoming stranded.
+    await rc.assertRecoveryAuthority(state);
     const sessionWoken = await projectDataService.wakeSession(
       rc.env,
       state.projectId,
@@ -155,27 +159,40 @@ export async function handleAgentSession(
     if (!sessionWoken) {
       throw new Error('Strict session restore succeeded but lifecycle recovery commit failed');
     }
-    const recoveryCompleted = await completeSessionSnapshotRecovery(
-      drizzle(rc.env.DATABASE, { schema }),
-      state.config.resumeSnapshotChatSessionId,
-      state.taskId,
-      state.stepResults.workspaceId
-    );
+    await rc.assertRecoveryAuthority(state);
+    const snapshotDb = drizzle(rc.env.DATABASE, { schema });
+    const recoveryCompleted = state.config.recoverySourceTaskId
+      ? await completeSessionSnapshotRecovery(
+          snapshotDb,
+          state.config.resumeSnapshotChatSessionId,
+          state.taskId,
+          state.stepResults.workspaceId,
+          state.config.recoverySourceTaskId
+        )
+      : await completeSessionSnapshotRecovery(
+          snapshotDb,
+          state.config.resumeSnapshotChatSessionId,
+          state.taskId,
+          state.stepResults.workspaceId
+        );
     if (!recoveryCompleted) {
       throw new Error('Strict session restore succeeded but lifecycle recovery commit failed');
     }
-    // Recovery is now fully committed in both authoritative stores. Clear the
-    // marker before persisting TaskRunner state so later failures on the awake
-    // replacement follow ordinary task semantics instead of re-sleeping a
-    // snapshot whose sleepingAt claim has already been cleared.
-    state.config.resumeSnapshotChatSessionId = null;
-    state.config.recoverySourceTaskId = null;
-    stateChanged = true;
   }
 
   if (stateChanged) {
     await rc.ctx.storage.put('state', state);
   }
 
+  await rc.assertRecoveryAuthority(state);
   await transitionToInProgress(state, rc);
+
+  if (state.currentStep === 'running' && state.config.resumeSnapshotChatSessionId) {
+    // Keep the revocable marker through the source-authorized D1 transition.
+    // If the DO crashes after that transition, authorization treats the
+    // restored+in_progress pair as committed so a retry can converge here.
+    state.config.resumeSnapshotChatSessionId = null;
+    state.config.recoverySourceTaskId = null;
+    await rc.ctx.storage.put('state', state);
+  }
 }

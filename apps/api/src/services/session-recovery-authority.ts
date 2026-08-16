@@ -9,6 +9,8 @@ export interface SessionRecoverySourceTaskGuard {
 }
 
 export class SessionRecoveryAuthorityRevokedError extends Error {
+  readonly permanent = true;
+
   constructor() {
     super('Session recovery authority was revoked');
     this.name = 'SessionRecoveryAuthorityRevokedError';
@@ -82,16 +84,16 @@ export async function isSessionRecoveryTaskAuthorized(
           AND recovery.chat_session_id = ?
           AND recovery.triggered_by = 'session-recovery'
           AND recovery.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
-          AND source.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
-          AND snapshot.recovery_status IN ('waking', 'restored')
+          AND (
+            (recovery.status = 'in_progress' AND snapshot.recovery_status = 'restored')
+            OR (
+              source.status NOT IN (${TERMINAL_TASK_STATUSES_SQL})
+              AND snapshot.recovery_status IN ('waking', 'restored')
+            )
+          )
         LIMIT 1`
     )
-    .bind(
-      input.recoveryTaskId,
-      input.sourceTaskId,
-      input.projectId,
-      input.chatSessionId
-    )
+    .bind(input.recoveryTaskId, input.sourceTaskId, input.projectId, input.chatSessionId)
     .first<{ id: string }>();
   return Boolean(row);
 }
@@ -111,7 +113,7 @@ export async function restoreSessionRecoveryHandoff(
     SELECT 1 FROM session_snapshots snapshot
      WHERE snapshot.chat_session_id = ?
        AND snapshot.recovery_task_id = ?
-       AND snapshot.recovery_status IN ('waking', 'failed')
+       AND snapshot.recovery_status IN ('waking', 'failed', 'restored')
   )`;
   const results = await database.batch([
     database
@@ -135,14 +137,7 @@ export async function restoreSessionRecoveryHandoff(
               SELECT 1 FROM tasks owner WHERE owner.chat_session_id = ?
             )`
       )
-      .bind(
-        chatSessionId,
-        now,
-        recoveryTaskId,
-        chatSessionId,
-        recoveryTaskId,
-        chatSessionId
-      ),
+      .bind(chatSessionId, now, recoveryTaskId, chatSessionId, recoveryTaskId, chatSessionId),
     database
       .prepare(
         `UPDATE workspaces
@@ -205,14 +200,7 @@ export async function failAndRestoreSessionRecoveryHandoff(
                  AND snapshot.recovery_status = 'waking'
             )`
       )
-      .bind(
-        input.error,
-        now,
-        now,
-        input.recoveryTaskId,
-        input.chatSessionId,
-        input.recoveryTaskId
-      ),
+      .bind(input.error, now, now, input.recoveryTaskId, input.chatSessionId, input.recoveryTaskId),
     database
       .prepare(
         `UPDATE tasks
@@ -290,13 +278,7 @@ export async function failAndRestoreSessionRecoveryHandoff(
                  AND event.reason = ?
             )`
       )
-      .bind(
-        input.statusEventId,
-        input.error,
-        now,
-        input.recoveryTaskId,
-        input.error
-      ),
+      .bind(input.statusEventId, input.error, now, input.recoveryTaskId, input.error),
   ]);
   if ((results[0]?.meta.changes ?? 0) === 0) {
     throw new Error('Recovery start failure lost its authoritative snapshot claim');

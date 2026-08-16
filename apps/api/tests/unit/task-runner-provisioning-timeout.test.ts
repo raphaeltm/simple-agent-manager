@@ -14,8 +14,14 @@
 import { DEFAULT_TASK_RUNNER_PROVISION_TIMEOUT_MS } from '@simple-agent-manager/shared';
 import { describe, expect, it, vi } from 'vitest';
 
-import { handleNodeAgentReady, handleNodeProvisioning } from '../../src/durable-objects/task-runner/node-steps';
-import type { TaskRunnerContext, TaskRunnerState } from '../../src/durable-objects/task-runner/types';
+import {
+  handleNodeAgentReady,
+  handleNodeProvisioning,
+} from '../../src/durable-objects/task-runner/node-steps';
+import type {
+  TaskRunnerContext,
+  TaskRunnerState,
+} from '../../src/durable-objects/task-runner/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -99,6 +105,7 @@ function makeContext(overrides: Partial<TaskRunnerContext> = {}): TaskRunnerCont
         setAlarm: vi.fn().mockResolvedValue(undefined),
       },
     } as unknown as TaskRunnerContext['ctx'],
+    assertRecoveryAuthority: vi.fn().mockResolvedValue(undefined),
     advanceToStep: vi.fn().mockResolvedValue(undefined),
     getAgentPollIntervalMs: () => 5000,
     getAgentReadyTimeoutMs: () => 900_000,
@@ -264,7 +271,11 @@ describe('handleNodeProvisioning — timeout', () => {
     const rc = makeContext();
     (rc.env.DATABASE.prepare as ReturnType<typeof vi.fn>).mockReturnValue({
       bind: vi.fn().mockReturnValue({
-        first: vi.fn().mockResolvedValue({ id: 'node-1', status: 'error', error_message: 'Server creation failed' }),
+        first: vi.fn().mockResolvedValue({
+          id: 'node-1',
+          status: 'error',
+          error_message: 'Server creation failed',
+        }),
         run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
       }),
     });
@@ -281,7 +292,11 @@ describe('handleNodeProvisioning — timeout', () => {
     const rc = makeContext();
     (rc.env.DATABASE.prepare as ReturnType<typeof vi.fn>).mockReturnValue({
       bind: vi.fn().mockReturnValue({
-        first: vi.fn().mockResolvedValue({ id: 'node-1', status: 'error', error_message: 'Server creation failed' }),
+        first: vi.fn().mockResolvedValue({
+          id: 'node-1',
+          status: 'error',
+          error_message: 'Server creation failed',
+        }),
         run: vi.fn().mockResolvedValue({ meta: { changes: 1 } }),
       }),
     });

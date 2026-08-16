@@ -117,6 +117,7 @@ function createContext(
         setAlarm: vi.fn(),
       },
     },
+    assertRecoveryAuthority: vi.fn().mockResolvedValue(undefined),
     advanceToStep: vi.fn().mockResolvedValue(undefined),
     getProvisionPollIntervalMs: vi.fn(() => 1000),
     getProvisionTimeoutMs: vi.fn(() => 600_000),
@@ -172,7 +173,8 @@ function createState(
       agentProfileHint: null,
       attachments: null,
       projectScaling: null,
-      vmSizeSource: (overrides.vmSizeSource ?? 'project') as TaskRunnerState['config']['vmSizeSource'],
+      vmSizeSource: (overrides.vmSizeSource ??
+        'project') as TaskRunnerState['config']['vmSizeSource'],
     },
     retryCount: 0,
     workspaceReadyReceived: false,
@@ -202,6 +204,45 @@ beforeEach(() => {
 });
 
 describe('TaskRunner size-fallback descent', () => {
+  it('rechecks source authority after alarm entry and before creating a node record', async () => {
+    const { DATABASE } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const state = createState({ vmSize: 'medium', vmSizeSource: 'project' });
+    const revoked = Object.assign(new Error('Session recovery authority was revoked'), {
+      permanent: true,
+    });
+    vi.mocked(rc.assertRecoveryAuthority).mockRejectedValueOnce(revoked);
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toBe(revoked);
+
+    expect(createNodeRecord).not.toHaveBeenCalled();
+    expect(provisionNode).not.toHaveBeenCalled();
+  });
+
+  it('rechecks authority between the node record and paid provider provisioning', async () => {
+    const { DATABASE } = createDbMock({});
+    const rc = createContext(DATABASE);
+    const state = createState({ vmSize: 'medium', vmSizeSource: 'project' });
+    const revoked = Object.assign(new Error('Session recovery authority was revoked'), {
+      permanent: true,
+    });
+    vi.mocked(rc.assertRecoveryAuthority)
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(revoked);
+
+    await expect(handleNodeProvisioning(state, rc)).rejects.toMatchObject({
+      message: 'Session recovery authority was revoked',
+      permanent: true,
+    });
+
+    expect(createNodeRecord).toHaveBeenCalledOnce();
+    expect(provisionNode).not.toHaveBeenCalled();
+    expect(state.stepResults).toMatchObject({
+      nodeId: 'node-medium',
+      autoProvisioned: true,
+    });
+  });
+
   it.each([
     { start: 'large', exhausted: 'node-large', expected: 'medium' },
     { start: 'medium', exhausted: 'node-medium', expected: 'small' },

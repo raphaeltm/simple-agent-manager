@@ -295,6 +295,9 @@ export class TaskRunner extends DurableObject<Env> {
     return {
       env: this.env,
       ctx: this.ctx,
+      assertRecoveryAuthority: async (state: TaskRunnerState) => {
+        await this.assertRecoveryAuthority(state);
+      },
       advanceToStep: async (state: TaskRunnerState, nextStep: TaskExecutionStep) => {
         state.currentStep = nextStep;
         state.retryCount = 0;
@@ -357,9 +360,7 @@ export class TaskRunner extends DurableObject<Env> {
     return raw;
   }
 
-  private async hasRecoveryAuthority(
-    input: StartTaskInput | TaskRunnerState
-  ): Promise<boolean> {
+  private async hasRecoveryAuthority(input: StartTaskInput | TaskRunnerState): Promise<boolean> {
     const sourceTaskId = input.config.recoverySourceTaskId ?? null;
     const chatSessionId = input.config.resumeSnapshotChatSessionId ?? null;
     // A human follow-up may recover a completed conversation without a live

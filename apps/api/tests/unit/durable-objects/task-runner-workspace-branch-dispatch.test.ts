@@ -64,6 +64,7 @@ function makeContext(): TaskRunnerContext {
   return {
     env: { DATABASE: { prepare } },
     ctx: { storage: { put: vi.fn(), setAlarm: vi.fn() } },
+    assertRecoveryAuthority: vi.fn().mockResolvedValue(undefined),
     updateD1ExecutionStep: vi.fn(),
     advanceToStep: vi.fn(),
     getWorkspaceDispatchTimeoutMs: vi.fn(() => 30_000),
