@@ -39,7 +39,8 @@ The failed completion then caused the sleep watchdog to fabricate transcript-onl
 - [x] Run specialist reviews required by `/do`.
 - [x] Validate presigned PUT checksum behavior against real R2 on staging and record the accepted/rejected header matrix.
 - [x] Deploy to staging with fresh VM-agent nodes and run VM sleep→wake E2E.
-- [ ] Create PR, monitor CI, merge, and monitor production deploy.
+- [x] Create PR #1836 with validation and post-mortem evidence.
+- [ ] Monitor CI, merge, and monitor production deploy.
 
 ## Acceptance criteria
 
