@@ -204,6 +204,19 @@ screen, the sleep scheduler refused to sleep the session (leaking toward the 45-
 backstops), and — in the same session earlier that day — a durable message sat in
 `retry_wait` with "Target VM is currently processing a prompt" while nothing was in flight.
 
+**Timeline (2026-08-16, all times UTC).**
+
+| Time | Event |
+| --- | --- |
+| ~16:05Z | Preceding prompt turn ends via a user tool-call interruption — the historically lossy path for lifecycle accounting (rule 49 class). |
+| ~16:15Z | The agent's turn genuinely ends; the final assistant message is delivered to chat. The VM's `idle` activity report never lands. |
+| 16:15Z–20:21Z | The wedge persists for 4h06m. Red stop button stays visible; the sleep scheduler refuses to sleep the session so it gets no idle timer; earlier the same day durable message `01M04PF2K8VT50HBWX9748H75N` sat in `retry_wait` (deliveryAttempts=4) with "Target VM is currently processing a prompt". |
+| 20:21Z | User liveness ping is delivered as a normal prompt **without** tapping stop — proving the harness had returned control and the session was idle-and-receptive the whole time. Divergence confirmed. |
+| 20:27Z | Incident captured as SAM idea `01M0644866Q0000M4HP39WNCZW`. |
+| 21:11–21:36Z | While the fix was being implemented, production reaped two chat-quiet-but-working task workspaces — including this branch's own author (task `01M064TAJ7B0AX8G115CY85RXM`, terminalized 21:36:06Z, `workspace_deleted`). Captured as idea `01M069W82V937G67WGG1E93937`; this PR is the continuation. |
+
+The bug was not "introduced" by a single commit — the heal added in DO migration `021` was **never able to fire** for an awake session, so the gap existed from the moment the heal was written. It only became visible when a turn ended abnormally and the report was lost.
+
 **Root cause.** `session_state.activity` was write-only from the VM side. The staleness
 heal that existed (`session-state.ts:reconcileStaleActivity`, migration `021`) refused to
 heal while the ACP session was heartbeating — and a vm-agent heartbeats whether or not a

@@ -25,6 +25,12 @@ export const DEFAULT_SESSION_ACTIVITY_STALE_THRESHOLD_MS = 5 * 60 * 1000;
  *
  * These are the only states the reconciler may terminalize, and the only
  * states that suppress idle scheduling / delivery for their session.
+ *
+ * `error` is deliberately EXCLUDED: clearing it would erase user-visible error
+ * context, which is a product decision rather than a reliability fix. A wedged
+ * `error` activity therefore still suppresses idle scheduling. Tracked in
+ * `tasks/backlog/2026-08-16-probe-reconcile-wedged-error-activity.md`
+ * (`.claude/rules/42`).
  */
 export const WORKING_ACTIVITIES = ['prompting', 'recovering'] as const;
 
@@ -125,10 +131,19 @@ export interface TurnEndInput {
 /**
  * Record an explicit terminal transition out of a working state.
  *
- * This is the single write path for every turn ending — normal completion,
+ * The intended single write path for every turn ending — normal completion,
  * user cancel, force-stop, dead target, and probe-driven reconciliation — so
  * all three consumers (status UI, durable-message delivery, idle scheduling)
  * observe the same authoritative value regardless of which end noticed first.
+ *
+ * NOT YET UNIVERSAL: `reconciliation.ts:cancelStalledPrompt` (task-mode 409
+ * stale-mirror repair) still writes `idle` via `upsertActivityState` plus a
+ * manual broadcast, so it records no provenance and skips the delivery nudge
+ * and the idle re-arm. That is pre-existing behaviour rather than a regression
+ * from this change, and migrating it alters task-mode reconciliation semantics,
+ * so it is tracked separately in
+ * `tasks/backlog/2026-08-17-migrate-cancel-stalled-prompt-to-record-turn-end.md`
+ * (`.claude/rules/42`).
  *
  * Compare-and-set: only a row still in a working state whose activity is not
  * newer than the observation is flipped. Returns true when the row changed.

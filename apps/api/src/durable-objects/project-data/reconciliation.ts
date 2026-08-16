@@ -451,6 +451,15 @@ async function cancelStalledPrompt(
   if (!result.success && result.status === 409) {
     // The VM no longer has a prompt in flight; repair the stale mirror so the
     // next reconciliation pass can send the visible check-in normally.
+    //
+    // NOT ON the shared terminal-write path (`session-state.recordTurnEnd` +
+    // `session-activity-reconciliation.publishTurnEnd`), so this repair records
+    // no activity provenance and skips the delivery nudge / idle re-arm that
+    // `.claude/rules/57` requires of a terminal transition. Pre-existing
+    // behaviour; migrating it changes task-mode reconciliation semantics and is
+    // tracked in
+    // `tasks/backlog/2026-08-17-migrate-cancel-stalled-prompt-to-record-turn-end.md`
+    // (`.claude/rules/42`).
     upsertActivityState(sql, candidate.acpSessionId, { activity: 'idle' });
     broadcastEvent(
       'session.activity',
