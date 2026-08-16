@@ -267,6 +267,8 @@ export type {
   ProjectWebSocketEventType,
   RecentChatsResponse,
   RemoveWorktreeResponse,
+  SessionActivitySource,
+  SessionActivityTerminalReason,
   SessionIdeaLink,
   SessionStateSnapshot,
   SessionSummary,

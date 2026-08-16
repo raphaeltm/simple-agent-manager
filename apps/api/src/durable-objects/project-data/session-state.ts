@@ -7,13 +7,26 @@
  * - Plan button restoration in project chat
  * - Staleness auto-heal for stuck "prompting" states
  */
-import type { PlanEntry, SessionStateSnapshot } from '@simple-agent-manager/shared';
+import type {
+  PlanEntry,
+  SessionActivitySource,
+  SessionActivityTerminalReason,
+  SessionStateSnapshot,
+} from '@simple-agent-manager/shared';
 
 import { createModuleLogger } from '../../lib/logger';
 
 const log = createModuleLogger('project_data.session_state');
 
 export const DEFAULT_SESSION_ACTIVITY_STALE_THRESHOLD_MS = 5 * 60 * 1000;
+
+/**
+ * Activity values that mean "a prompt turn is believed to be in flight".
+ *
+ * These are the only states the reconciler may terminalize, and the only
+ * states that suppress idle scheduling / delivery for their session.
+ */
+export const WORKING_ACTIVITIES = ['prompting', 'recovering'] as const;
 
 export function parseActivityStaleThreshold(value: string | undefined): number {
   const parsed = Number.parseInt(value ?? '', 10);
@@ -31,6 +44,14 @@ export interface ActivityUpdate {
   restartCount?: number | null;
   statusError?: string | null;
   now?: number;
+  /** Which end produced this value. Defaults to the VM agent's own report. */
+  source?: SessionActivitySource;
+  /** Terminal-transition identity when this write ends a working state. */
+  reason?: SessionActivityTerminalReason | null;
+}
+
+function isWorkingActivity(activity: string): boolean {
+  return (WORKING_ACTIVITIES as readonly string[]).includes(activity);
 }
 
 export function upsertActivityState(
@@ -42,11 +63,21 @@ export function upsertActivityState(
   const promptStartedAt = update.activity === 'prompting' || update.activity === 'recovering'
     ? (update.promptStartedAt ?? now)
     : null;
+  const source: SessionActivitySource = update.source ?? 'vm_report';
+  // A fresh authoritative report is its own evidence — a session that just
+  // reported is no longer an unproven probe candidate.
+  const reason: SessionActivityTerminalReason | null = isWorkingActivity(update.activity)
+    ? null
+    : (update.reason ?? (update.activity === 'idle' ? 'completed' : null));
 
   sql.exec(
-    `INSERT INTO session_state (session_id, activity, activity_at, prompt_started_at, prompt_epoch, agent_type, restart_count, status_error)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    `INSERT INTO session_state (session_id, activity, activity_at, prompt_started_at, prompt_epoch, agent_type, restart_count, status_error, activity_source, activity_reason, activity_probe_attempts)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
      ON CONFLICT(session_id) DO UPDATE SET
+       activity_source = excluded.activity_source,
+       activity_reason = excluded.activity_reason,
+       activity_probe_attempts = 0,
+       activity_probe_at = NULL,
        activity = excluded.activity,
        activity_at = excluded.activity_at,
        prompt_started_at = CASE
@@ -74,7 +105,84 @@ export function upsertActivityState(
     update.agentType ?? null,
     update.restartCount ?? 0,
     update.statusError ?? null,
+    source,
+    reason,
   );
+}
+
+export interface TurnEndInput {
+  reason: SessionActivityTerminalReason;
+  source: SessionActivitySource;
+  /**
+   * When the turn-end evidence was OBSERVED, captured before any long async
+   * call (.claude/rules/49). A working state that started after this instant
+   * belongs to a newer prompt and is never stomped.
+   */
+  observedAt: number;
+  now?: number;
+}
+
+/**
+ * Record an explicit terminal transition out of a working state.
+ *
+ * This is the single write path for every turn ending — normal completion,
+ * user cancel, force-stop, dead target, and probe-driven reconciliation — so
+ * all three consumers (status UI, durable-message delivery, idle scheduling)
+ * observe the same authoritative value regardless of which end noticed first.
+ *
+ * Compare-and-set: only a row still in a working state whose activity is not
+ * newer than the observation is flipped. Returns true when the row changed.
+ */
+export function recordTurnEnd(
+  sql: SqlStorage,
+  sessionId: string,
+  input: TurnEndInput,
+): boolean {
+  const now = input.now ?? Date.now();
+  const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
+  const before = sql.exec(
+    `SELECT activity FROM session_state WHERE session_id = ?`,
+    sessionId,
+  ).toArray()[0];
+  if (!before || typeof before.activity !== 'string' || !isWorkingActivity(before.activity)) {
+    return false;
+  }
+
+  sql.exec(
+    `UPDATE session_state
+     SET activity = 'idle',
+         activity_at = ?,
+         activity_source = ?,
+         activity_reason = ?,
+         prompt_started_at = NULL,
+         prompt_epoch = NULL,
+         status_error = NULL,
+         activity_probe_attempts = 0,
+         activity_probe_at = NULL
+     WHERE session_id = ?
+       AND activity IN (${placeholders})
+       AND activity_at <= ?`,
+    now,
+    input.source,
+    input.reason,
+    sessionId,
+    ...WORKING_ACTIVITIES,
+    input.observedAt,
+  );
+
+  const after = sql.exec(
+    `SELECT activity FROM session_state WHERE session_id = ?`,
+    sessionId,
+  ).toArray()[0];
+  const changed = after?.activity === 'idle';
+  if (changed) {
+    log.info('session_state.turn_end_recorded', {
+      sessionId,
+      reason: input.reason,
+      source: input.source,
+    });
+  }
+  return changed;
 }
 
 /**
@@ -105,7 +213,11 @@ export function markPromptAccepted(
        activity_at = excluded.activity_at,
        prompt_started_at = excluded.prompt_started_at,
        prompt_epoch = excluded.prompt_epoch,
-       status_error = NULL`,
+       status_error = NULL,
+       activity_source = 'control_plane',
+       activity_reason = NULL,
+       activity_probe_attempts = 0,
+       activity_probe_at = NULL`,
     sessionId,
     now,
     promptEpoch,
@@ -208,7 +320,8 @@ export function getSessionState(
   const rows = sql
     .exec(
       `SELECT activity, activity_at, status_error, current_plan_json, plan_updated_at,
-              prompt_started_at, last_stop_reason, agent_type
+              prompt_started_at, last_stop_reason, agent_type,
+              activity_source, activity_reason
        FROM session_state WHERE session_id = ?`,
       sessionId,
     )
@@ -235,6 +348,8 @@ export function getSessionState(
     promptStartedAt: (row.prompt_started_at as number) || null,
     lastStopReason: (row.last_stop_reason as string) || null,
     agentType: (row.agent_type as string) || null,
+    activitySource: (row.activity_source as SessionActivitySource) || null,
+    activityReason: (row.activity_reason as SessionActivityTerminalReason) || null,
   };
 }
 
@@ -330,7 +445,10 @@ export function reconcileStaleActivity(
     sql.exec(
       `UPDATE session_state
        SET activity = 'idle', activity_at = ?,
-           prompt_started_at = NULL, prompt_epoch = NULL
+           prompt_started_at = NULL, prompt_epoch = NULL,
+           activity_source = 'control_plane',
+           activity_reason = 'stale_no_evidence',
+           activity_probe_attempts = 0, activity_probe_at = NULL
        WHERE session_id = ?`,
       now,
       sessionId,

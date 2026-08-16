@@ -468,6 +468,9 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   ACTIVITY_RETENTION_DAYS?: string;
   SESSION_IDLE_TIMEOUT_MINUTES?: string;
   SESSION_ACTIVITY_STALE_THRESHOLD_MS?: string;
+  SESSION_ACTIVITY_PROBE_TIMEOUT_MS?: string;
+  SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS?: string;
+  SESSION_ACTIVITY_PROBE_MAX_CANDIDATES?: string;
   DO_SUMMARY_SYNC_DEBOUNCE_MS?: string;
   // ACP Session Lifecycle (spec 027)
   ACP_SESSION_DETECTION_WINDOW_MS?: string;

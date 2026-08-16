@@ -9,6 +9,9 @@
  * prerequisite capture.
  */
 import {
+  DEFAULT_SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS,
+  DEFAULT_SESSION_ACTIVITY_PROBE_MAX_CANDIDATES,
+  DEFAULT_SESSION_ACTIVITY_PROBE_TIMEOUT_MS,
   DEFAULT_TASK_RECONCILIATION_IDLE_MS,
   DEFAULT_TASK_RECONCILIATION_MAX_CANDIDATES_PER_SWEEP,
   DEFAULT_TASK_RECONCILIATION_MIN_ALARM_DELAY_MS,
@@ -88,5 +91,35 @@ export function reconciliationNodeCallTimeoutMs(env: DOEnv): number {
     env,
     'TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS',
     DEFAULT_TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS
+  );
+}
+
+/**
+ * Timeout for the vm-agent session-activity probe. Background control-loop
+ * budget, deliberately far below the interactive node-agent timeout (rule 47).
+ */
+export function sessionActivityProbeTimeoutMs(env: DOEnv): number {
+  return envNumber(
+    env,
+    'SESSION_ACTIVITY_PROBE_TIMEOUT_MS',
+    DEFAULT_SESSION_ACTIVITY_PROBE_TIMEOUT_MS
+  );
+}
+
+/** Consecutive unreachable probes after which the target is treated as dead. */
+export function sessionActivityProbeMaxAttempts(env: DOEnv): number {
+  return envNumber(
+    env,
+    'SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS',
+    DEFAULT_SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS
+  );
+}
+
+/** Maximum stale-activity candidates probed in a single alarm pass. */
+export function sessionActivityProbeMaxCandidates(env: DOEnv): number {
+  return envNumber(
+    env,
+    'SESSION_ACTIVITY_PROBE_MAX_CANDIDATES',
+    DEFAULT_SESSION_ACTIVITY_PROBE_MAX_CANDIDATES
   );
 }

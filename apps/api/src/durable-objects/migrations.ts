@@ -840,6 +840,25 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // Reconciled session-activity state: provenance + terminal-transition
+    // reason on the authoritative row, plus bounded probe accounting so a
+    // stale working state can be reconciled against the vm-agent instead of
+    // trusted indefinitely. Additive columns only (.claude/rules/31).
+    name: '029-session-activity-reconciliation',
+    run: (sql) => {
+      sql.exec(`ALTER TABLE session_state ADD COLUMN activity_source TEXT`);
+      sql.exec(`ALTER TABLE session_state ADD COLUMN activity_reason TEXT`);
+      sql.exec(`ALTER TABLE session_state ADD COLUMN activity_probe_at INTEGER`);
+      sql.exec(
+        `ALTER TABLE session_state ADD COLUMN activity_probe_attempts INTEGER NOT NULL DEFAULT 0`
+      );
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_session_state_working_activity
+        ON session_state(activity, activity_at)
+      `);
+    },
+  },
 ];
 
 /**

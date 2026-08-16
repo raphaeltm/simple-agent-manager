@@ -719,12 +719,14 @@ export async function listAgentSessionsOnNode(
   nodeId: string,
   workspaceId: string,
   env: Env,
-  userId: string
+  userId: string,
+  options?: { requestTimeoutMs?: number }
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, `/workspaces/${workspaceId}/agent-sessions`, {
     method: 'GET',
     userId,
     workspaceId,
+    requestTimeoutMs: options?.requestTimeoutMs,
   });
 }
 

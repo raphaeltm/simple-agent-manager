@@ -85,6 +85,7 @@ vi.mock('../../../src/services/project-data', () => ({
   unlinkSessionIdea: vi.fn(),
   acceptPromptDelivery: vi.fn(),
   getDurableExecutionSnapshot: vi.fn(),
+  recordSessionTurnEnd: vi.fn(),
 }));
 
 vi.mock('../../../src/services/observability', () => ({
@@ -735,6 +736,82 @@ describe('POST /sessions/:sessionId/cancel', () => {
     const body = await response.json();
     expect(body.status).toBe('idle');
     expect(body.message).toBe('No prompt in flight to cancel');
+  });
+
+  it('records a terminal turn-end transition after a successful cancel', async () => {
+    // A cancel/interrupt is a turn ending. Pre-fix the route relied entirely on
+    // the VM's follow-up `idle` activity report — the report that goes missing
+    // on abnormal endings — so the state wedged and the stop button, message
+    // delivery, and idle scheduling all stayed stuck together.
+    setupDrizzle({
+      workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running' },
+      agentSession: { id: 'agent-sess-1' },
+    });
+    mocks.cancelAgentSessionOnNode.mockResolvedValue({ success: true, status: 200 });
+    vi.mocked(projectDataService.recordSessionTurnEnd).mockResolvedValue(true);
+
+    const before = Date.now();
+    const response = await postCancel();
+    const after = Date.now();
+
+    expect(response.status).toBe(200);
+    expect(projectDataService.recordSessionTurnEnd).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'agent-sess-1',
+      expect.objectContaining({ reason: 'cancelled' })
+    );
+    // rule 49: the observation instant is captured BEFORE the slow VM call, so
+    // a prompt accepted while the cancel was in flight is never stomped.
+    const call = vi.mocked(projectDataService.recordSessionTurnEnd).mock.calls[0];
+    const observedAt = (call?.[3] as { observedAt: number }).observedAt;
+    expect(observedAt).toBeGreaterThanOrEqual(before);
+    expect(observedAt).toBeLessThanOrEqual(after);
+  });
+
+  it('records the terminal transition even when the VM reports no prompt in flight', async () => {
+    setupDrizzle({
+      workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running' },
+      agentSession: { id: 'agent-sess-1' },
+    });
+    mocks.cancelAgentSessionOnNode.mockResolvedValue({ success: false, status: 409 });
+    vi.mocked(projectDataService.recordSessionTurnEnd).mockResolvedValue(false);
+
+    const response = await postCancel();
+
+    expect(response.status).toBe(200);
+    expect(projectDataService.recordSessionTurnEnd).toHaveBeenCalledWith(
+      expect.anything(),
+      'proj-1',
+      'agent-sess-1',
+      expect.objectContaining({ reason: 'cancelled' })
+    );
+  });
+
+  it('still returns success when recording the turn end fails', async () => {
+    setupDrizzle({
+      workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running' },
+      agentSession: { id: 'agent-sess-1' },
+    });
+    mocks.cancelAgentSessionOnNode.mockResolvedValue({ success: true, status: 200 });
+    vi.mocked(projectDataService.recordSessionTurnEnd).mockRejectedValue(new Error('do down'));
+
+    const response = await postCancel();
+
+    expect(response.status).toBe(200);
+  });
+
+  it('does not record a turn end when the cancel signal fails', async () => {
+    setupDrizzle({
+      workspace: { id: 'ws-1', nodeId: 'node-1', nodeStatus: 'running' },
+      agentSession: { id: 'agent-sess-1' },
+    });
+    mocks.cancelAgentSessionOnNode.mockResolvedValue({ success: false, status: 500 });
+
+    const response = await postCancel();
+
+    expect(response.status).toBe(500);
+    expect(projectDataService.recordSessionTurnEnd).not.toHaveBeenCalled();
   });
 
   it('returns 500 when the cancel signal fails for a non-idle reason', async () => {

@@ -14,6 +14,7 @@ import {
   type CheckpointEpisodeTransitionInput,
   type CreateCheckpointEpisodeInput,
   MAILBOX_DEFAULTS,
+  type SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
 
@@ -39,9 +40,11 @@ import * as messages from './messages';
 import * as missionState from './missions';
 import * as policies from './policies';
 import type { AcceptedPromptDelivery, AcceptPromptDeliveryInput } from './prompt-delivery';
+import * as promptDelivery from './prompt-delivery';
 import * as reconciliation from './reconciliation';
 import { parseCountCnt, parseMaxLatest, parseMetaValue } from './row-schemas';
 import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
+import * as sessionActivityReconciliation from './session-activity-reconciliation';
 import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
 import * as sessions from './sessions';
@@ -267,6 +270,23 @@ export class ProjectData extends DurableObject<Env> {
       recalculateAlarm: () => this.recalculateAlarm(),
       scheduleSummarySync: () => this.scheduleSummarySync(),
       broadcastEvent: (type, payload, sessionId) => this.broadcastEvent(type, payload, sessionId),
+    };
+  }
+
+  /**
+   * Fan-out for a reconciled terminal activity transition. Every consumer of
+   * "is this session mid-prompt" is served from this one place so a future
+   * consumer cannot be added without inheriting the reconciliation.
+   */
+  private sessionActivityHooks(): sessionActivityReconciliation.SessionActivityReconciliationHooks {
+    return {
+      broadcastEvent: (type, payload, sessionId) => this.broadcastEvent(type, payload, sessionId),
+      nudgeDeliveries: (chatSessionId) =>
+        promptDelivery.nudgePromptDeliveriesForTarget(this.sql, chatSessionId),
+      armIdleCleanup: (chatSessionId) => {
+        idleCleanup.resetIdleCleanup(this.sql, this.env, chatSessionId);
+      },
+      recalculateAlarm: () => this.recalculateAlarm(),
     };
   }
 
@@ -661,6 +681,26 @@ export class ProjectData extends DurableObject<Env> {
     return sessionState.getSessionState(this.sql, sessionId);
   }
 
+  /**
+   * Record a control-plane-observed turn ending (cancel, force-stop, dead
+   * target). Idempotent and compare-and-set: a working state that began after
+   * `observedAt` belongs to a newer prompt and is left alone.
+   */
+  async recordSessionTurnEnd(
+    sessionId: string,
+    input: { reason: SessionActivityTerminalReason; observedAt: number }
+  ): Promise<boolean> {
+    const changed = sessionState.recordTurnEnd(this.sql, sessionId, {
+      reason: input.reason,
+      source: 'control_plane',
+      observedAt: input.observedAt,
+    });
+    if (!changed) return false;
+    const chatSessionId = sessionState.resolveActivityChatSessionId(this.sql, sessionId);
+    await sessionActivityReconciliation.publishTurnEnd(this.sessionActivityHooks(), chatSessionId);
+    return true;
+  }
+
   getLatestPersistedPlan(sessionId: string) {
     return sessionState.getLatestPersistedPlan(this.sql, sessionId);
   }
@@ -809,16 +849,15 @@ export class ProjectData extends DurableObject<Env> {
     );
 
     // Session state staleness: auto-heal stuck "prompting" states
+    const staleThresholdMs = sessionState.parseActivityStaleThreshold(
+      this.env.SESSION_ACTIVITY_STALE_THRESHOLD_MS
+    );
     try {
-      const staleThresholdMs = sessionState.parseActivityStaleThreshold(
-        this.env.SESSION_ACTIVITY_STALE_THRESHOLD_MS
-      );
       const healedSessionIds = sessionState.reconcileStaleActivity(this.sql, staleThresholdMs);
       for (const healedId of healedSessionIds) {
         const healedChatId = sessionState.resolveActivityChatSessionId(this.sql, healedId);
-        this.broadcastEvent(
-          'session.activity',
-          { sessionId: healedChatId, activity: 'idle', promptStartedAt: null },
+        await sessionActivityReconciliation.publishTurnEnd(
+          this.sessionActivityHooks(),
           healedChatId
         );
       }
@@ -827,6 +866,22 @@ export class ProjectData extends DurableObject<Env> {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+
+    // Probe-backed reconciliation for stale working states the SQL-only heal
+    // cannot resolve (an awake, heartbeating agent that simply is not
+    // prompting). Network I/O stays OFF the alarm's critical path — rule 47.
+    this.ctx.waitUntil(
+      sessionActivityReconciliation
+        .probeStaleSessionActivity(this.sql, this.env, this.sessionActivityHooks(), {
+          thresholdMs: staleThresholdMs,
+          projectId: this.getProjectId(),
+        })
+        .catch((err) => {
+          log.error('alarm.session_activity_probe_failed', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        })
+    );
 
     // Mailbox delivery sweep: expire stale messages and re-queue unacked ones
     const ackTimeoutMs = parseInt(this.env.MAILBOX_ACK_TIMEOUT_MS ?? '300000', 10);

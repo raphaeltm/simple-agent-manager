@@ -345,7 +345,30 @@ export interface SessionStateSnapshot {
   promptStartedAt: number | null;
   agentType: string | null;
   lastStopReason: string | null;
+  /** Which end wrote the current activity value. */
+  activitySource?: SessionActivitySource | null;
+  /**
+   * Why the session left its last working state. Present on reconciled
+   * terminal transitions; null while a prompt is in flight.
+   */
+  activityReason?: SessionActivityTerminalReason | null;
 }
+
+/** Which end of the system produced the authoritative activity value. */
+export type SessionActivitySource = 'vm_report' | 'control_plane' | 'probe';
+
+/**
+ * Explicit terminal transitions out of a working ("prompting"/"recovering")
+ * state. The activity itself lands on `idle`; the reason carries the identity
+ * of the transition so divergence stays diagnosable after the fact.
+ */
+export type SessionActivityTerminalReason =
+  | 'completed'
+  | 'cancelled'
+  | 'force_stopped'
+  | 'dead'
+  | 'probe_reconciled'
+  | 'stale_no_evidence';
 
 export interface AcpSessionForkRequest {
   contextSummary: string;

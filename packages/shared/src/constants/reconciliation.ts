@@ -35,3 +35,26 @@ export const DEFAULT_TASK_RECONCILIATION_NODE_HEARTBEAT_STALE_MS = 5 * 60 * 1000
 
 /** Short timeout for reconciliation-originated cancel requests that remain on the alarm path. */
 export const DEFAULT_TASK_RECONCILIATION_NODE_CALL_TIMEOUT_MS = 5 * 1000; // 5 seconds
+
+// --- Session activity reconciliation (probe-backed staleness bound) ---
+
+/**
+ * Timeout for the vm-agent session-activity probe.
+ *
+ * This probe runs from a background control loop, never an interactive request,
+ * so it deliberately uses a short deadline rather than the interactive
+ * NODE_AGENT_REQUEST_TIMEOUT_MS (see .claude/rules/47). A healthy agent answers
+ * `GET /workspaces/{id}/agent-sessions` in milliseconds; silence past this
+ * window is treated as "did not answer", not "still thinking".
+ */
+export const DEFAULT_SESSION_ACTIVITY_PROBE_TIMEOUT_MS = 5 * 1000; // 5 seconds
+
+/**
+ * Consecutive unreachable probes after which a stale working-state session is
+ * terminalized as dead. Guarantees every candidate leaves the candidate set
+ * (.claude/rules/47 #3) instead of being re-probed forever.
+ */
+export const DEFAULT_SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS = 3;
+
+/** Maximum stale-activity candidates probed in a single alarm pass. */
+export const DEFAULT_SESSION_ACTIVITY_PROBE_MAX_CANDIDATES = 10;

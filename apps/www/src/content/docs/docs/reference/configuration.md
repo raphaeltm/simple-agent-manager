@@ -703,6 +703,9 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 | `ACTIVITY_RETENTION_DAYS`             | `90`             | Days to retain activity events                                         |
 | `SESSION_IDLE_TIMEOUT_MINUTES`        | `60`             | Idle session timeout                                                   |
 | `SESSION_ACTIVITY_STALE_THRESHOLD_MS` | `300000` (5 min) | Evidence threshold before stale working activity can be healed to idle |
+| `SESSION_ACTIVITY_PROBE_TIMEOUT_MS` | `5000` (5 s) | Timeout for the vm-agent session-activity probe. Background control-loop budget — deliberately far below the interactive node-agent timeout |
+| `SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS` | `3` | Consecutive unreachable probes after which a stale working state is terminalized as dead |
+| `SESSION_ACTIVITY_PROBE_MAX_CANDIDATES` | `10` | Stale-activity candidates probed per ProjectData alarm pass |
 | `DO_SUMMARY_SYNC_DEBOUNCE_MS`         | `5000`           | Debounce for DO-to-D1 summary sync                                     |
 
 ## Durable Object Retry

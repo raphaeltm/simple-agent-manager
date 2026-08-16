@@ -14,6 +14,7 @@ import type {
   CreateCheckpointEpisodeInput,
   DeliveryState,
   MessageClass,
+  SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
 import { resolveHandoffLimits, resolveMissionStateLimits } from '@simple-agent-manager/shared';
 
@@ -592,6 +593,22 @@ export async function reportAcpSessionActivity(
 ): Promise<void> {
   const stub = await getStub(env, projectId);
   await stub.reportActivity(sessionId, activity, extra);
+}
+
+/**
+ * Record a control-plane-observed turn ending on the authoritative activity
+ * state (cancel / force-stop / dead target). `observedAt` MUST be captured
+ * before the long VM-agent call that produced the evidence, so a prompt that
+ * started after the observation is never stomped (.claude/rules/49).
+ */
+export async function recordSessionTurnEnd(
+  env: Env,
+  projectId: string,
+  acpSessionId: string,
+  input: { reason: SessionActivityTerminalReason; observedAt: number }
+): Promise<boolean> {
+  const stub = await getStub(env, projectId);
+  return stub.recordSessionTurnEnd(acpSessionId, input);
 }
 
 /** Get the persisted session state snapshot (for page load catch-up). */
