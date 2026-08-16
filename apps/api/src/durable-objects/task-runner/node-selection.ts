@@ -13,9 +13,74 @@ import {
 
 import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
+import {
+  SessionRecoveryAuthorityRevokedError,
+  type SessionRecoverySourceTaskGuard,
+} from '../../services/session-recovery-authority';
 import type { NodeLifecycle } from '../node-lifecycle';
 import { parseEnvInt } from './helpers';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
+
+function recoverySourceTaskGuard(
+  state: TaskRunnerState
+): SessionRecoverySourceTaskGuard | undefined {
+  const taskId = state.config.recoverySourceTaskId ?? null;
+  const chatSessionId = state.config.resumeSnapshotChatSessionId ?? null;
+  return taskId && chatSessionId
+    ? { taskId, projectId: state.projectId, chatSessionId }
+    : undefined;
+}
+
+export async function releaseClaimedWarmNode(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+  nodeId: string | null = state.stepResults.claimedWarmNodeId ?? null
+): Promise<boolean> {
+  if (!nodeId || !rc.env.NODE_LIFECYCLE) return false;
+  const doId = rc.env.NODE_LIFECYCLE.idFromName(nodeId);
+  const stub = rc.env.NODE_LIFECYCLE.get(doId) as DurableObjectStub<NodeLifecycle>;
+  const result = await stub.releaseClaim(state.taskId);
+  if (result.released || result.state.claimedByTask !== state.taskId) {
+    if (state.stepResults.nodeId === nodeId && !state.stepResults.workspaceId) {
+      state.stepResults.nodeId = null;
+    }
+    if (state.stepResults.claimedWarmNodeId === nodeId) {
+      state.stepResults.claimedWarmNodeId = null;
+    }
+    await rc.ctx.storage.put('state', state);
+  }
+  return result.released;
+}
+
+async function claimWarmNodeCandidate(
+  state: TaskRunnerState,
+  rc: TaskRunnerContext,
+  nodeId: string
+): Promise<boolean> {
+  const doId = rc.env.NODE_LIFECYCLE.idFromName(nodeId);
+  const stub = rc.env.NODE_LIFECYCLE.get(doId) as DurableObjectStub<NodeLifecycle>;
+  await rc.assertRecoveryAuthority(state);
+  const result = await stub.tryClaim(state.taskId, recoverySourceTaskGuard(state));
+  if (result.reason === 'source_task_revoked') {
+    await stub.releaseClaim(state.taskId).catch(() => undefined);
+    throw new SessionRecoveryAuthorityRevokedError();
+  }
+  if (!result.claimed) return false;
+
+  // The DO persisted tasks.claimed_warm_node_id before cancelling its alarm.
+  // Mirror the claim into TaskRunner storage immediately for ordinary cleanup.
+  state.stepResults.nodeId = nodeId;
+  state.stepResults.claimedWarmNodeId = nodeId;
+  state.stepResults.autoProvisioned = false;
+  await rc.ctx.storage.put('state', state);
+  try {
+    await rc.assertRecoveryAuthority(state);
+  } catch (error) {
+    await releaseClaimedWarmNode(state, rc, nodeId).catch(() => undefined);
+    throw error;
+  }
+  return true;
+}
 
 /**
  * Verify that the VM agent on a node is actually healthy by checking D1
@@ -64,6 +129,25 @@ export async function tryClaimWarmNode(
 ): Promise<string | null> {
   if (!rc.env.NODE_LIFECYCLE) return null;
 
+  // Recover a claim persisted by NodeLifecycle if the TaskRunner crashed after
+  // the DO mutation but before its own storage.put.
+  const persistedClaim = await rc.env.DATABASE.prepare(
+    `SELECT claimed_warm_node_id FROM tasks WHERE id = ?`
+  )
+    .bind(state.taskId)
+    .first<{ claimed_warm_node_id: string | null }>();
+  if (persistedClaim?.claimed_warm_node_id) {
+    if (await claimWarmNodeCandidate(state, rc, persistedClaim.claimed_warm_node_id)) {
+      return persistedClaim.claimed_warm_node_id;
+    }
+    await rc.env.DATABASE.prepare(
+      `UPDATE tasks SET claimed_warm_node_id = NULL, updated_at = ?
+        WHERE id = ? AND claimed_warm_node_id = ?`
+    )
+      .bind(new Date().toISOString(), state.taskId, persistedClaim.claimed_warm_node_id)
+      .run();
+  }
+
   const warmNodes = await rc.env.DATABASE.prepare(
     `SELECT id, vm_size, vm_location, agent_version FROM nodes
      WHERE user_id = ? AND status = 'running' AND warm_since IS NOT NULL AND node_role = 'workspace'
@@ -105,12 +189,7 @@ export async function tryClaimWarmNode(
         continue;
       }
 
-      // Try to claim via NodeLifecycle DO
-      const doId = rc.env.NODE_LIFECYCLE.idFromName(warmNode.id);
-      const stub = rc.env.NODE_LIFECYCLE.get(doId) as DurableObjectStub<NodeLifecycle>;
-      const result = (await stub.tryClaim(state.taskId)) as { claimed: boolean };
-
-      if (result.claimed) {
+      if (await claimWarmNodeCandidate(state, rc, warmNode.id)) {
         // Defense-in-depth: verify workspace count even for warm nodes
         const wsCount = await rc.env.DATABASE.prepare(
           `SELECT COUNT(*) as c FROM workspaces WHERE node_id = ? AND status IN ('running', 'creating', 'recovery')`
@@ -121,6 +200,7 @@ export async function tryClaimWarmNode(
           state.config.projectScaling?.maxWorkspacesPerNode ??
           parseEnvInt(rc.env.MAX_WORKSPACES_PER_NODE, DEFAULT_MAX_WORKSPACES_PER_NODE);
         if ((wsCount?.c ?? 0) >= warmMaxWs) {
+          await releaseClaimedWarmNode(state, rc, warmNode.id);
           continue; // At capacity despite being warm — skip
         }
         log.info('task_runner_do.warm_node_claimed', {
@@ -129,7 +209,11 @@ export async function tryClaimWarmNode(
         });
         return warmNode.id;
       }
-    } catch {
+    } catch (error) {
+      if (error instanceof SessionRecoveryAuthorityRevokedError) throw error;
+      if (state.stepResults.claimedWarmNodeId === warmNode.id) {
+        await releaseClaimedWarmNode(state, rc, warmNode.id).catch(() => undefined);
+      }
       // Claim failed — try next
     }
   }

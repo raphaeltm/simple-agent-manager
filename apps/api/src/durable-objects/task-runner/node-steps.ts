@@ -12,7 +12,12 @@ import { log } from '../../lib/logger';
 import { isNodeAgentVersionCompatible } from '../../services/node-agent-compatibility';
 import { assertClaimedNodeAvailable } from './claimed-node-availability';
 import { parseEnvInt } from './helpers';
-import { findNodeWithCapacity, tryClaimWarmNode, verifyNodeAgentHealthy } from './node-selection';
+import {
+  findNodeWithCapacity,
+  releaseClaimedWarmNode,
+  tryClaimWarmNode,
+  verifyNodeAgentHealthy,
+} from './node-selection';
 import { isNodeAgentReadyForWorkspaceDispatch } from './readiness';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 
@@ -76,6 +81,7 @@ export async function handleNodeSelection(
       await rc.advanceToStep(state, 'workspace_creation');
       return;
     }
+    await releaseClaimedWarmNode(state, rc, nodeId);
     // Warm node agent not healthy — fall through to try other options
     log.warn('task_runner_do.warm_node_unhealthy', {
       taskId: state.taskId,
@@ -339,7 +345,12 @@ export async function handleNodeProvisioning(
           taskId: state.taskId,
           taskMode: state.config.taskMode,
         },
-        { rethrowProviderError: true }
+        {
+          rethrowProviderError: true,
+          assertExternalMutationAuthority: async () => {
+            await rc.assertRecoveryAuthority(state);
+          },
+        }
       );
       // Detect revocation that raced the provider request. The persisted node
       // identity above lets failTask tear the new compute down safely.

@@ -155,6 +155,8 @@ export interface ProvisionNodeOptions {
    * Legacy callers omit this and retain the original swallow-and-record behavior.
    */
   rethrowProviderError?: boolean;
+  /** Fail-closed recovery-authority check at the provider allocation boundary. */
+  assertExternalMutationAuthority?: () => Promise<void>;
 }
 
 export async function provisionNode(
@@ -285,6 +287,7 @@ export async function provisionNode(
       env.HETZNER_BASE_IMAGE
     );
 
+    await options?.assertExternalMutationAuthority?.();
     const vm = await provider.createVM({
       name: `node-${node.id.toLowerCase()}`,
       size: node.vmSize as 'small' | 'medium' | 'large',
@@ -297,6 +300,19 @@ export async function provisionNode(
         environmentLabel: resolveEnvironmentLabel(env),
       }),
     });
+
+    // Persist the provider identity before the post-request authority check so
+    // a revocation that races createVM can strictly destroy the paid resource.
+    await db
+      .update(schema.nodes)
+      .set({
+        providerInstanceId: vm.id,
+        ipAddress: vm.ip || null,
+        status: 'creating',
+        updatedAt: new Date().toISOString(),
+      })
+      .where(eq(schema.nodes.id, node.id));
+    await options?.assertExternalMutationAuthority?.();
 
     // Scaleway allocates IPs asynchronously after boot — vm.ip will be empty.
     // Store the provider instance ID and mark as pending-ip; heartbeat backfill

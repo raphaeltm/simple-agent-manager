@@ -35,6 +35,7 @@ import {
   RUNTIME_RECOVERY_DEGRADED_MESSAGE,
   type RuntimeRecoveryState,
 } from '../../../src/durable-objects/vm-agent-container-recovery';
+import { SessionRecoveryAuthorityRevokedError } from '../../../src/services/session-recovery-authority';
 
 const launchConfig = {
   nodeId: 'node-1',
@@ -64,6 +65,7 @@ type PrivateContainer = {
   exhaustRecovery: (this: unknown, ...args: unknown[]) => Promise<unknown>;
   withLifecycleLock: (this: unknown, operation: () => Promise<unknown>) => Promise<unknown>;
   prepareForRequest: (this: unknown) => Promise<unknown>;
+  abortRevokedSourceTaskWake: (this: unknown) => Promise<void>;
 };
 
 const privateContainer = VmAgentContainer.prototype as unknown as PrivateContainer;
@@ -108,6 +110,7 @@ function makeRecoveryFake(input?: {
     exhaustRecovery: privateContainer.exhaustRecovery,
     withLifecycleLock: privateContainer.withLifecycleLock,
     prepareForRequest: privateContainer.prepareForRequest,
+    abortRevokedSourceTaskWake: privateContainer.abortRevokedSourceTaskWake,
     getRuntimeSettings: () => ({
       portReadyTimeoutMs: 30_000,
       activeWorkMaxMs: 2 * 60 * 60 * 1000,
@@ -168,6 +171,47 @@ beforeEach(() => {
 });
 
 describe('VmAgentContainer snapshot recovery state machine', () => {
+  it('revalidates inside the lifecycle lock before committing a restored guarded wake', async () => {
+    const { fake, values } = makeRecoveryFake();
+    const sourceTaskGuard = {
+      taskId: 'parent-1',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+    fake.assertSourceTaskGuard
+      .mockResolvedValueOnce(undefined) // before startRuntime
+      .mockResolvedValueOnce(undefined) // before restore fetch
+      .mockResolvedValueOnce(undefined) // after restore
+      .mockRejectedValueOnce(new SessionRecoveryAuthorityRevokedError()); // inside lock
+    const recovery: RuntimeRecoveryState = {
+      version: 1,
+      phase: 'waking',
+      trigger: 'idle',
+      cause: { kind: 'idle_sleep' },
+      attempts: 1,
+      promptDisposition: 'none',
+      agentSessionId: 'agent-session-1',
+      startedAt: 1,
+      updatedAt: 1,
+    };
+
+    await expect(
+      (
+        privateContainer.wakeFromSnapshot as unknown as (
+          this: unknown,
+          recovery: RuntimeRecoveryState,
+          guard: typeof sourceTaskGuard
+        ) => Promise<unknown>
+      ).call(fake, recovery, sourceTaskGuard)
+    ).rejects.toBeInstanceOf(SessionRecoveryAuthorityRevokedError);
+
+    expect(fake.startRuntime).toHaveBeenCalledOnce();
+    expect(fake.containerFetch).toHaveBeenCalledOnce();
+    expect(recoveryMocks.persistRecovered).not.toHaveBeenCalled();
+    expect(fake.stop).toHaveBeenCalledOnce();
+    expect(values.get('lifecycleStatus')).toBe('sleeping');
+  });
+
   it('reconciles stale D1 state only after proving the target SessionHost is live', async () => {
     const { fake } = makeRecoveryFake({ lifecycle: 'running' });
     fake.containerFetch.mockResolvedValueOnce(

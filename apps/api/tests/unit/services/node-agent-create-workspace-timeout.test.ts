@@ -36,11 +36,14 @@ vi.mock('../../../src/services/vm-agent-container', () => mocks.container);
 vi.mock('drizzle-orm/d1', () => ({ drizzle: mocks.drizzle }));
 
 import {
+  createAgentSessionOnNode,
   createWorkspaceOnNode,
   getCfContainerCreateWorkspaceTimeoutMs,
   NodeAgentRequestError,
   sendPromptToAgentOnNode,
+  startAgentSessionOnNode,
 } from '../../../src/services/node-agent';
+import { restoreAgentSessionOnNode } from '../../../src/services/node-agent-session-snapshots';
 
 const cfContainerEnv = {
   BASE_DOMAIN: 'example.com',
@@ -218,7 +221,7 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
   });
 
   it('carries an internal source-task guard to the cf-container request boundary', async () => {
-    mocks.container.fetchVmAgentContainer.mockResolvedValue(
+    mocks.container.fetchVmAgentContainer.mockImplementation(async () =>
       Response.json({ status: 'accepted' }, { status: 200 })
     );
     const sourceTaskGuard = {
@@ -248,5 +251,79 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
     const proxiedRequest = mocks.container.fetchVmAgentContainer.mock.calls[0]?.[2] as Request;
     expect(proxiedRequest).toBeInstanceOf(Request);
     expect((proxiedRequest as unknown as Record<string, unknown>).sourceTaskGuard).toBeUndefined();
+  });
+
+  it('revalidates and carries the guard through agent create/start physical boundaries', async () => {
+    mocks.container.fetchVmAgentContainer.mockImplementation(async () =>
+      Response.json({ status: 'accepted' }, { status: 200 })
+    );
+    const sourceTaskGuard = {
+      taskId: 'parent-task-agent',
+      projectId: 'project-1',
+      chatSessionId: 'chat-1',
+    };
+    const beforeExternalMutation = vi.fn().mockResolvedValue(undefined);
+
+    await createAgentSessionOnNode(
+      'node-1',
+      'ws-1',
+      'agent-1',
+      'Recovered agent',
+      cfContainerEnv,
+      'user-1',
+      'chat-1',
+      'project-1',
+      undefined,
+      { sourceTaskGuard, beforeExternalMutation }
+    );
+    await startAgentSessionOnNode(
+      'node-1',
+      'ws-1',
+      'agent-1',
+      'claude-code',
+      'Continue recovered work',
+      cfContainerEnv,
+      'user-1',
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      { sourceTaskGuard, beforeExternalMutation }
+    );
+    await restoreAgentSessionOnNode(
+      'node-1',
+      'ws-1',
+      'agent-1',
+      cfContainerEnv,
+      'user-1',
+      { chatSessionId: 'chat-1', runtime: 'cf-container', agentType: 'claude-code' },
+      { sourceTaskGuard, beforeExternalMutation }
+    );
+
+    expect(beforeExternalMutation).toHaveBeenCalledTimes(4);
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenNthCalledWith(
+      1,
+      cfContainerEnv,
+      'node-1',
+      expect.any(Request),
+      8080,
+      sourceTaskGuard
+    );
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenNthCalledWith(
+      2,
+      cfContainerEnv,
+      'node-1',
+      expect.any(Request),
+      8080,
+      sourceTaskGuard
+    );
+    expect(mocks.container.fetchVmAgentContainer).toHaveBeenNthCalledWith(
+      3,
+      cfContainerEnv,
+      'node-1',
+      expect.any(Request),
+      8080,
+      sourceTaskGuard
+    );
   });
 });

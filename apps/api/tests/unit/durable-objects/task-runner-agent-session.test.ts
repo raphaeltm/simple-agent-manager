@@ -325,7 +325,11 @@ describe('handleAgentSession', () => {
       'user-1',
       'chat-1',
       'project-1',
-      { url: 'https://api.example.test/mcp', token: 'mcp-token-new' }
+      { url: 'https://api.example.test/mcp', token: 'mcp-token-new' },
+      expect.objectContaining({
+        beforeExternalMutation: expect.any(Function),
+        sourceTaskGuard: undefined,
+      })
     );
 
     expect(storeMcpTokenMock).toHaveBeenCalledWith(
@@ -357,7 +361,11 @@ describe('handleAgentSession', () => {
       { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' },
       // Injected system instructions (get_instructions reminder) sent as a
       // separate origin="system" prompt block.
-      expect.stringContaining('get_instructions')
+      expect.stringContaining('get_instructions'),
+      expect.objectContaining({
+        beforeExternalMutation: expect.any(Function),
+        sourceTaskGuard: undefined,
+      })
     );
 
     const startArgs = startAgentSessionOnNodeMock.mock.calls[0]!;
@@ -407,6 +415,14 @@ describe('handleAgentSession', () => {
     await expect(handleAgentSession(state, rc)).rejects.toBe(revoked);
 
     expect(restoreAgentSessionOnNodeMock).toHaveBeenCalledOnce();
+    expect(restoreAgentSessionOnNodeMock.mock.calls[0]?.at(-1)).toMatchObject({
+      sourceTaskGuard: {
+        taskId: 'parent-task-1',
+        projectId: 'project-1',
+        chatSessionId: 'chat-1',
+      },
+      beforeExternalMutation: expect.any(Function),
+    });
     expect(startAgentSessionOnNodeMock).not.toHaveBeenCalled();
     expect(completeSessionSnapshotRecoveryMock).not.toHaveBeenCalled();
   });
@@ -435,7 +451,11 @@ describe('handleAgentSession', () => {
       'user-1',
       'chat-1',
       'project-1',
-      { url: 'https://api.example.test/mcp', token: 'mcp-token-new' }
+      { url: 'https://api.example.test/mcp', token: 'mcp-token-new' },
+      expect.objectContaining({
+        beforeExternalMutation: expect.any(Function),
+        sourceTaskGuard: undefined,
+      })
     );
     expect(startAgentSessionOnNodeMock).toHaveBeenCalledOnce();
     expect(state.stepResults.agentSessionId).toBe('agent-session-existing');
@@ -499,7 +519,11 @@ describe('handleAgentSession', () => {
       'agent-session-new',
       expect.objectContaining({ BASE_DOMAIN: 'example.test' }),
       'user-1',
-      expect.objectContaining({ chatSessionId: 'chat-1', agentType: 'openai-codex' })
+      expect.objectContaining({ chatSessionId: 'chat-1', agentType: 'openai-codex' }),
+      expect.objectContaining({
+        beforeExternalMutation: expect.any(Function),
+        sourceTaskGuard: undefined,
+      })
     );
     expect(startAgentSessionOnNodeMock).not.toHaveBeenCalled();
     expect(wakeSessionMock).toHaveBeenCalledWith(
@@ -649,7 +673,11 @@ describe('handleAgentSession', () => {
         permissionMode: 'auto-edit',
       }),
       { projectId: 'project-1', taskId: 'task-1', taskMode: 'task' },
-      expect.stringContaining('get_instructions')
+      expect.stringContaining('get_instructions'),
+      expect.objectContaining({
+        beforeExternalMutation: expect.any(Function),
+        sourceTaskGuard: undefined,
+      })
     );
     expect(transitionAcpSessionMock).toHaveBeenCalledWith(
       rc.env,

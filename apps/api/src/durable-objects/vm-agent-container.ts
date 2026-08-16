@@ -157,6 +157,7 @@ export class VmAgentContainer extends Container<Env> {
       ready = await this.prepareForRequest(sourceTaskGuard);
     } catch (error) {
       if (error instanceof SessionRecoveryAuthorityRevokedError) {
+        if (sourceTaskGuard) await this.abortRevokedSourceTaskWake();
         return revokedSourceTaskResponse();
       }
       throw error;
@@ -192,6 +193,7 @@ export class VmAgentContainer extends Container<Env> {
       return response;
     } catch (error) {
       if (error instanceof SessionRecoveryAuthorityRevokedError) {
+        if (sourceTaskGuard) await this.abortRevokedSourceTaskWake();
         return revokedSourceTaskResponse();
       }
       await this.beginUnexpectedRecovery({
@@ -495,6 +497,15 @@ export class VmAgentContainer extends Container<Env> {
     }
   }
 
+  private async abortRevokedSourceTaskWake(): Promise<void> {
+    const config = await this.ctx.storage.get<VmAgentContainerLaunchConfig>('launchConfig');
+    await this.ctx.storage.put('lifecycleStatus', 'sleeping' satisfies LifecycleStatus);
+    await this.clearKeepaliveSchedule();
+    await this.markActiveWorkEnded('source_task_authority_revoked');
+    await this.stop().catch(() => undefined);
+    if (config) await persistRuntimeSleeping(this.env, config).catch(() => undefined);
+  }
+
   private async prepareForRequest(
     sourceTaskGuard?: VmAgentContainerRequestGuard
   ): Promise<VmAgentContainerRecoveryResult> {
@@ -756,7 +767,11 @@ export class VmAgentContainer extends Container<Env> {
       const completed = await this.withLifecycleLock(async () => {
         const lifecycle = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
         if (lifecycle === 'stopping' || lifecycle === 'stopped') return false;
+        // The lock may have been queued behind a stop or another lifecycle
+        // operation. Revalidate after entering it and after the D1 commit.
+        await this.assertSourceTaskGuard(sourceTaskGuard);
         await persistRuntimeRecovered(this.env, target, restoring.promptDisposition);
+        await this.assertSourceTaskGuard(sourceTaskGuard);
         await this.ctx.storage.delete(RECOVERY_STATE_KEY);
         await this.ctx.storage.put('lifecycleStatus', 'running' satisfies LifecycleStatus);
         return true;
@@ -779,7 +794,7 @@ export class VmAgentContainer extends Container<Env> {
       return { ok: true, status: 'running' };
     } catch (error) {
       if (error instanceof SessionRecoveryAuthorityRevokedError) {
-        await this.stop().catch(() => undefined);
+        await this.abortRevokedSourceTaskWake();
         throw error;
       }
       log.warn('vm_agent_container_recovery_restore_failed', {

@@ -48,6 +48,13 @@ interface NodeAgentRequestOptions extends RequestInit {
   requestTimeoutMs?: number;
   /** Internal authorization checked inside a cf-container DO before cold wake. */
   sourceTaskGuard?: VmAgentContainerRequestGuard;
+  /** Caller-side fail-closed check repeated at the physical fetch boundary. */
+  beforeExternalMutation?: () => Promise<void>;
+}
+
+export interface GuardedNodeAgentMutationOptions {
+  sourceTaskGuard?: VmAgentContainerRequestGuard;
+  beforeExternalMutation?: () => Promise<void>;
 }
 
 const RUNTIME_RECOVERY_CODES: ReadonlySet<string> = new Set([
@@ -77,7 +84,7 @@ export class NodeAgentRequestError extends AppError {
 export class NodeAgentHttpError extends Error {
   constructor(
     public readonly statusCode: number,
-    public readonly responseBody: string,
+    public readonly responseBody: string
   ) {
     super(`Node Agent request failed: ${statusCode} ${responseBody}`);
     this.name = 'NodeAgentHttpError';
@@ -145,14 +152,10 @@ export async function nodeAgentRequest(
     workspaceId = null,
     requestTimeoutMs: configuredRequestTimeoutMs,
     sourceTaskGuard,
+    beforeExternalMutation,
     ...requestOptions
   } = options;
-  const { token } = await signNodeManagementToken(
-    userId,
-    nodeId,
-    workspaceId,
-    env
-  );
+  const { token } = await signNodeManagementToken(userId, nodeId, workspaceId, env);
 
   const url = `${getNodeBackendBaseUrl(nodeId, env)}${path}`;
   const headers = new Headers(requestOptions.headers);
@@ -183,7 +186,8 @@ export async function nodeAgentRequest(
     url,
     { ...requestOptions, headers },
     requestTimeoutMs,
-    sourceTaskGuard
+    sourceTaskGuard,
+    beforeExternalMutation
   );
 
   recordNodeRoutingMetric(
@@ -248,9 +252,11 @@ export async function fetchNodeAgent(
   url: string,
   options: RequestInit,
   requestTimeoutMs: number,
-  sourceTaskGuard?: VmAgentContainerRequestGuard
+  sourceTaskGuard?: VmAgentContainerRequestGuard,
+  beforeExternalMutation?: () => Promise<void>
 ): Promise<Response> {
   if (!env.DATABASE || typeof env.DATABASE.prepare !== 'function') {
+    await beforeExternalMutation?.();
     return fetchWithTimeout(url, options, requestTimeoutMs);
   }
 
@@ -262,6 +268,7 @@ export async function fetchNodeAgent(
     .get();
 
   if (node?.runtime !== 'cf-container') {
+    await beforeExternalMutation?.();
     return fetchWithTimeout(url, options, requestTimeoutMs);
   }
 
@@ -293,6 +300,7 @@ export async function fetchNodeAgent(
   // fetchVmAgentContainer. Deferred to the tracked backlog task.
   let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
   try {
+    await beforeExternalMutation?.();
     const response = await Promise.race([
       fetchVmAgentContainer(
         env,
@@ -450,7 +458,8 @@ export async function createAgentSessionOnNode(
   userId: string,
   chatSessionId?: string | null,
   projectId?: string | null,
-  mcpServer?: McpServerConfig
+  mcpServer?: McpServerConfig,
+  options?: GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
   const body: Record<string, unknown> = {
     sessionId,
@@ -471,6 +480,8 @@ export async function createAgentSessionOnNode(
     method: 'POST',
     userId,
     workspaceId,
+    sourceTaskGuard: options?.sourceTaskGuard,
+    beforeExternalMutation: options?.beforeExternalMutation,
     body: JSON.stringify(body),
   });
 }
@@ -509,7 +520,8 @@ export async function startAgentSessionOnNode(
   mcpServer?: McpServerConfig,
   overrides?: AgentSessionOverrides,
   taskContext?: AgentSessionTaskContext,
-  injectedInstructions?: string
+  injectedInstructions?: string,
+  options?: GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
   const body: Record<string, unknown> = { agentType, initialPrompt };
   if (injectedInstructions != null && injectedInstructions !== '') {
@@ -548,6 +560,7 @@ export async function startAgentSessionOnNode(
       body.taskMode = taskContext.taskMode;
     }
   }
+  await options?.beforeExternalMutation?.();
   await markVmAgentContainerActiveWorkStarted(env, nodeId, {
     workspaceId,
     agentSessionId: sessionId,
@@ -562,6 +575,8 @@ export async function startAgentSessionOnNode(
         method: 'POST',
         userId,
         workspaceId,
+        sourceTaskGuard: options?.sourceTaskGuard,
+        beforeExternalMutation: options?.beforeExternalMutation,
         body: JSON.stringify(body),
       }
     );

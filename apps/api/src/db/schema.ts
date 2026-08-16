@@ -847,6 +847,10 @@ export const tasks = sqliteTable(
     autoProvisionedNodeId: text('auto_provisioned_node_id').references(() => nodes.id, {
       onDelete: 'set null',
     }),
+    /** Warm-pool node claimed by this task until workspace activation or release. */
+    claimedWarmNodeId: text('claimed_warm_node_id').references(() => nodes.id, {
+      onDelete: 'set null',
+    }),
     /** Source that created this task. 'user' = manual, 'cron'/'webhook'/'mcp' = automated. */
     triggeredBy: text('triggered_by').notNull().default('user'),
     /** Soft FK to triggers table (null for user-created tasks). No DB constraint — trigger may be deleted independently. */
@@ -914,6 +918,11 @@ export const tasks = sqliteTable(
     recoverySourceTaskIdx: index('idx_tasks_recovery_source_task_id')
       .on(table.recoverySourceTaskId)
       .where(sql`recovery_source_task_id IS NOT NULL`),
+    claimedWarmNodeUnique: uniqueIndex('idx_tasks_claimed_warm_node_unique')
+      .on(table.claimedWarmNodeId)
+      .where(
+        sql`claimed_warm_node_id IS NOT NULL AND status NOT IN ('completed', 'failed', 'cancelled')`
+      ),
     // Supports the `WHERE workspace_id = ? AND status IN (...)` lookups on the
     // mass-outage recovery hot path (persistRuntimeRecoveryFailed) and other
     // workspace-scoped task queries. Partial: most tasks never bind a workspace.

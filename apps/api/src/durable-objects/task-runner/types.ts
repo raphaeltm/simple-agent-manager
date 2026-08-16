@@ -27,6 +27,8 @@ import type { Env } from '../../env';
 export interface StepResults {
   nodeId: string | null;
   autoProvisioned: boolean;
+  /** Exact warm-pool claim owned by this task until workspace activation or release. */
+  claimedWarmNodeId?: string | null;
   workspaceId: string | null;
   chatSessionId: string | null;
   agentSessionId: string | null;

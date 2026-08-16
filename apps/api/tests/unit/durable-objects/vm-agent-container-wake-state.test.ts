@@ -116,6 +116,7 @@ describe('VmAgentContainer proxy recovery boundaries', () => {
       getState: vi.fn().mockResolvedValue({ status: 'running' }),
       containerFetch,
       beginUnexpectedRecovery: vi.fn(),
+      abortRevokedSourceTaskWake: vi.fn().mockResolvedValue(undefined),
     };
     const ensureAwake = vi.fn(async (guard: unknown) => {
       await privateContainer.assertSourceTaskGuard.call(fake, guard);
@@ -135,6 +136,7 @@ describe('VmAgentContainer proxy recovery boundaries', () => {
     expect(ensureAwake).toHaveBeenCalledOnce();
     expect(startRuntime).not.toHaveBeenCalled();
     expect(containerFetch).not.toHaveBeenCalled();
+    expect(fake.abortRevokedSourceTaskWake).toHaveBeenCalledOnce();
   });
 
   it('allows a live source through both the preparation and prompt boundaries', async () => {

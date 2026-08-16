@@ -143,13 +143,14 @@ Update `/workflow` to persist its state, call `wait_for_subtasks`, and end the c
 
 - `pnpm lint`: passed with existing warnings only.
 - `pnpm typecheck`: passed across all 19 tasks, including the documented Astro baseline.
-- `pnpm test`: the full API suite reported 550 files and 7,323 tests green after the final authority-boundary hardening.
+- `pnpm test`: the full API suite reported 551 files and 7,330 tests green after the final authority-boundary hardening.
 - `pnpm build`: passed across all nine build tasks.
-- `pnpm --filter @simple-agent-manager/api test:workers`: 49 real workerd files and 636 tests passed, including a deterministic D1 trigger that revokes the source after alarm-entry authorization but before allocation.
+- `pnpm --filter @simple-agent-manager/api test:workers`: 49 real workerd files and 639 tests passed, including deterministic D1 triggers that revoke the source at allocation and container lifecycle-commit boundaries plus an exclusive-claim crash simulation.
 - Focused runtime-work mirror coverage: 100% statements, lines, and functions; 92.39% branches.
 - `go test -race ./...`: passed with a test-only Docker command stand-in because this workspace has no Docker CLI; the complete ACP race package also passed directly in 15 seconds.
 - Format ratchet, Oxlint shadows, migration safety/order, DO migration safety, source-contract, type-boundary, runtime-boundary, file-size, stale-artifact, repo-visibility, dependency-governance, direct-dependency, deployment-script, Wrangler-binding, agent-manifest, and Gitleaks current-tree/PR-range gates passed.
 - Task-completion validator sections A-F: PASS. Research findings map to implementation items; every implementation item is present in the diff; acceptance behavior has focused and vertical-slice coverage; environment/API/workflow/process documentation matches the code; no implementation gap remains. Specialist, staging, CI, merge, and production checks are release gates in `/do` Phases 5-7 and remain tracked outside pre-PR task completion.
+- Final authority-boundary hardening persists warm-node claim ownership before the NodeLifecycle alarm mutation, validates guarded lineage in that same D1 write, conditionally releases only the exact claimant, and recovers claims after TaskRunner crashes. Provider allocation now checks immediately around `createVM` and preserves provider identity for strict compensating deletion. Agent create/restore/start carry guards to the physical VM/container request boundary, while container restore rechecks inside its lifecycle lock and stops/resleeps on a late revocation. Focused unit suites (95 tests), the real NodeLifecycle workerd suite (26 tests), API lint/typecheck, and migration/order/file-size gates passed before the final full regression run.
 
 ## Release ledger
 
