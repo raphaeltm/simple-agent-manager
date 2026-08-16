@@ -473,6 +473,40 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.failSessionSnapshotSleepBeforeTeardown).toHaveBeenCalledTimes(1);
   });
 
+  it('aborts when harness work begins across the artifact-verification barrier', async () => {
+    let harnessActive = false;
+    mocks.getSessionState.mockImplementation(async () => ({
+      activity: 'idle',
+      activityAt: 100,
+      runtimeWorkState: harnessActive ? 'active' : 'inactive',
+      runtimeWorkCount: harnessActive ? 1 : 0,
+      runtimeWorkUpdatedAt: harnessActive ? Date.now() : 90,
+      runtimeWorkProgressAt: harnessActive ? Date.now() : 90,
+    }));
+    mocks.getRestorableSessionSnapshot.mockResolvedValueOnce(null).mockResolvedValueOnce({
+      status: 'available',
+      degradation: 'none',
+      expiresAt: '2026-08-19T00:00:00.000Z',
+    });
+    mocks.verifySessionSnapshotArtifactsForSleep.mockImplementation(async () => {
+      harnessActive = true;
+      return true;
+    });
+    const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
+
+    await expect(
+      sleepWorkspaceSession(buildEnv(), {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'test',
+      })
+    ).rejects.toThrow('activity changed during snapshot artifact verification');
+
+    expect(mocks.beginSessionSnapshotStopping).not.toHaveBeenCalled();
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(mocks.failSessionSnapshotSleepBeforeTeardown).toHaveBeenCalledTimes(1);
+  });
+
   it('allows a slow but progressing final snapshot to exceed the request timeout budget', async () => {
     const env = {
       ...buildEnv(),

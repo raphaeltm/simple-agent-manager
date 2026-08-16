@@ -20,11 +20,12 @@ import (
 // Instead of writing to a single WebSocket, it broadcasts to all viewers.
 type sessionHostClient struct {
 	host        *SessionHost
-	processedCh chan struct{} // Signaled after each notification handler completes (used by orderedPipe).
+	processedCh chan struct{} // Signaled only after session/update completes (used by orderedPipe).
 }
 
-// signalProcessed signals the orderedPipe that this notification handler has
-// completed, allowing the next notification to be delivered to the SDK.
+// signalProcessed signals that a session/update handler completed, allowing
+// the next session/update notification to be delivered to the SDK. Extension
+// methods must not issue this credit.
 func (c *sessionHostClient) signalProcessed() {
 	if c.processedCh != nil {
 		select {

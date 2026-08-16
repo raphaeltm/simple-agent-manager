@@ -841,7 +841,6 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-<<<<<<< HEAD
     // Reconciled session-activity state: provenance + terminal-transition
     // reason on the authoritative row, plus bounded probe accounting so a
     // stale working state can be reconciled against the vm-agent instead of
@@ -888,17 +887,24 @@ export const MIGRATIONS: Migration[] = [
 					id TEXT PRIMARY KEY,
 					parent_task_id TEXT NOT NULL,
 					parent_session_id TEXT NOT NULL,
+					idempotency_key TEXT NOT NULL,
 					wait_condition TEXT NOT NULL CHECK (wait_condition IN ('all', 'any')),
 					state TEXT NOT NULL CHECK (state IN ('active', 'resolved', 'cancelled')),
 					child_count INTEGER NOT NULL CHECK (child_count > 0),
 					wake_deadline INTEGER NOT NULL,
 					next_reconcile_at INTEGER NOT NULL,
 					wake_delivery_id TEXT NOT NULL UNIQUE,
+					wake_content TEXT,
+					wake_attempts INTEGER NOT NULL DEFAULT 0 CHECK (wake_attempts >= 0),
 					resolution_reason TEXT,
 					created_at INTEGER NOT NULL,
 					updated_at INTEGER NOT NULL,
 					resolved_at INTEGER
 				)
+			`);
+      sql.exec(`
+				CREATE UNIQUE INDEX idx_task_wait_idempotency
+				ON task_wait_subscriptions(parent_task_id, idempotency_key)
 			`);
       sql.exec(`
 				CREATE UNIQUE INDEX idx_task_wait_active_parent

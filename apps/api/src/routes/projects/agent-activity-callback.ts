@@ -86,7 +86,10 @@ agentActivityCallbackRoute.post(
     if (!existing) {
       throw errors.notFound('ACP session not found');
     }
-    if (body.activity === 'prompting') {
+    const reportedHarnessWorkKeepsRuntimeActive =
+      body.activity === 'idle' &&
+      (body.runtimeWorkState === 'active' || body.runtimeWorkState === 'settling');
+    if (body.activity === 'prompting' || reportedHarnessWorkKeepsRuntimeActive) {
       await cancelScheduledSessionSleep(
         drizzle(c.env.DATABASE, { schema }),
         existing.chatSessionId
@@ -183,6 +186,13 @@ agentActivityCallbackRoute.post(
       runtimeWorkSource: body.runtimeWorkSource,
       runtimeWorkProgressAt: body.runtimeWorkProgressAt,
     });
+    const persistedActivity = body.runtimeWorkState
+      ? await projectDataService.getSessionState(c.env, projectId, sessionId)
+      : null;
+    const harnessWorkKeepsRuntimeActive =
+      body.activity === 'idle' &&
+      (persistedActivity?.runtimeWorkState === 'active' ||
+        persistedActivity?.runtimeWorkState === 'settling');
     if (body.activity === 'error' && canTransitionAcpSessionToFailed(existing.status)) {
       const failureMessage = normalizeAgentErrorMessage(body.statusError);
       const db = drizzle(c.env.DATABASE, { schema });
@@ -235,9 +245,6 @@ agentActivityCallbackRoute.post(
           });
         });
     }
-    const harnessWorkKeepsRuntimeActive =
-      body.activity === 'idle' &&
-      (body.runtimeWorkState === 'active' || body.runtimeWorkState === 'settling');
     if ((body.activity === 'idle' && !harnessWorkKeepsRuntimeActive) || body.activity === 'error') {
       let idleSnapshotQueued = false;
       if (

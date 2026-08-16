@@ -351,7 +351,8 @@ describe('DO Migrations', () => {
       // idle_cleanup_schedule: 2 (active cleanup_at + terminal marker) from migration 028
       // session_state: 1 (working-activity staleness scan) from migration 029
       // durable task waits: 2 (due + child) from migration 030; the
-      // active-parent index is UNIQUE and counted separately
+      // active-parent (030) and idempotency (031) indexes are CREATE UNIQUE
+      // INDEX and are counted separately
       expect(indexes.length).toBe(51);
     });
   });

@@ -11,7 +11,7 @@ Read the full workflow from `.claude/commands/workflow.md` and execute it.
 
 1. **Decompose** — break the user's request into discrete subtasks with dependencies
 2. **Dispatch** — send subtasks to other agents via `dispatch_task` (with `/do` instructions)
-3. **Wait** — persist state, register `wait_for_subtasks`, and end the turn
+3. **Wait** — persist state and a stable workflow-step `waitKey`, register `wait_for_subtasks`, and end the turn
 4. **React** — dispatch dependent tasks as predecessors complete, retry failures
 5. **Complete** — summarize results when all subtasks finish
 

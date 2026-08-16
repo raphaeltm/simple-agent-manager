@@ -16,10 +16,19 @@ export const ORCHESTRATION_TOOLS = [
           minItems: 1,
           description: 'Unique direct-child task IDs to observe',
         },
+        waitKey: {
+          type: 'string',
+          minLength: 1,
+          maxLength: 128,
+          pattern: '^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$',
+          description:
+            'Stable workflow-step idempotency key. Persist and reuse this exact value if registration is retried.',
+        },
         condition: {
           type: 'string',
           enum: ['all', 'any'],
-          description: 'Wake after all children are terminal (default) or after any child is terminal',
+          description:
+            'Wake after all children are terminal (default) or after any child is terminal',
         },
         wakeAfterSeconds: {
           type: 'integer',
@@ -27,7 +36,7 @@ export const ORCHESTRATION_TOOLS = [
           description: 'Optional finite wake deadline in seconds; capped by server configuration',
         },
       },
-      required: ['taskIds'],
+      required: ['taskIds', 'waitKey'],
       additionalProperties: false,
     },
   },

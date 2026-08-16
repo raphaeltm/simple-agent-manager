@@ -30,7 +30,7 @@ const DefaultNotifSerializeTimeout = 5 * time.Second
 // blocks on the pipe when empty. So we control exactly when the SDK sees each
 // line.
 type orderedPipe struct {
-	reader  io.Reader     // Real stdout from agent process
+	reader  io.Reader // Real stdout from agent process
 	pr      *io.PipeReader
 	pw      *io.PipeWriter
 	timeout time.Duration // Safety-net timeout for waiting on processedCh
@@ -44,9 +44,11 @@ type jsonRPCEnvelope struct {
 
 // newOrderedPipe creates a serializing wrapper around stdout.
 //
-// processedCh: each ACP Client method (e.g. SessionUpdate) must send to this
-// channel after completing its work. The orderedPipe waits on this channel
-// between consecutive notifications to guarantee ordering.
+// processedCh: SessionUpdate sends to this channel after completing its work.
+// Other ACP methods must not send credits: an intervening extension method
+// could otherwise release the next session/update before the prior update's
+// handler completes. The orderedPipe waits on this channel between consecutive
+// session/update notifications to guarantee ordering.
 //
 // done: closed when the session is shutting down (e.g. SessionHost.ctx.Done()).
 //

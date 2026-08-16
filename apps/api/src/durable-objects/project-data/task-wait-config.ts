@@ -3,7 +3,6 @@ import {
   DEFAULT_ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM,
   DEFAULT_ORCHESTRATOR_WAIT_MAX_CHILDREN,
   DEFAULT_ORCHESTRATOR_WAIT_MAX_DURATION_MS,
-  DEFAULT_ORCHESTRATOR_WAIT_MAX_SUMMARY_LENGTH,
   DEFAULT_ORCHESTRATOR_WAIT_RECONCILE_INTERVAL_MS,
 } from '@simple-agent-manager/shared';
 
@@ -15,7 +14,6 @@ export interface TaskWaitConfig {
   maxActivePerProject: number;
   maxDurationMs: number;
   maxCandidatesPerAlarm: number;
-  maxSummaryLength: number;
 }
 
 function parsePositive(value: string | undefined, fallback: number, name: string): number {
@@ -53,11 +51,6 @@ export function resolveTaskWaitConfig(env: Env): TaskWaitConfig {
       env.ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM,
       DEFAULT_ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM,
       'ORCHESTRATOR_WAIT_MAX_CANDIDATES_PER_ALARM'
-    ),
-    maxSummaryLength: parsePositive(
-      env.ORCHESTRATOR_WAIT_MAX_SUMMARY_LENGTH,
-      DEFAULT_ORCHESTRATOR_WAIT_MAX_SUMMARY_LENGTH,
-      'ORCHESTRATOR_WAIT_MAX_SUMMARY_LENGTH'
     ),
   };
 }

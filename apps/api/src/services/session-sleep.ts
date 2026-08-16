@@ -512,6 +512,26 @@ export async function sleepWorkspaceSession(
       if (!(await verifySessionSnapshotArtifactsForSleep(env, verified))) {
         throw new Error('Workspace snapshot artifacts failed durable R2 verification');
       }
+      // R2 verification is asynchronous. Re-read immediately before the
+      // stopping CAS; an active/settling callback also cancels the preparing
+      // claim, so either boundary prevents newly hidden harness work from
+      // crossing the point of no return.
+      const stateAtStop = await projectDataService.getSessionState(
+        env,
+        workspace.projectId,
+        agentSession.id
+      );
+      if (
+        !stateAtStop ||
+        getFreshHarnessWorkLeaseExpiry(stateAtStop, new Date(), harnessWorkLeaseMs) !== null ||
+        !isActivitySafeForSleep(workspace.taskStatus, stateAtStop, new Date(), idleAfterMs) ||
+        stateAtStop.activity !== stateAfter.activity ||
+        stateAtStop.activityAt !== stateAfter.activityAt ||
+        stateAtStop.runtimeWorkState !== stateAfter.runtimeWorkState ||
+        stateAtStop.runtimeWorkUpdatedAt !== stateAfter.runtimeWorkUpdatedAt
+      ) {
+        throw new Error('Workspace activity changed during snapshot artifact verification');
+      }
       if (!(await beginSessionSnapshotStopping(db, workspace.chatSessionId, claimId))) {
         throw new Error('Workspace sleep claim was cancelled before teardown');
       }

@@ -9,12 +9,15 @@ export interface TaskWaitSubscription {
   id: string;
   parentTaskId: string;
   parentSessionId: string;
+  idempotencyKey: string;
   condition: TaskWaitCondition;
   state: TaskWaitState;
   childCount: number;
   wakeDeadline: number;
   nextReconcileAt: number;
   wakeDeliveryId: string;
+  wakeContent: string | null;
+  wakeAttempts: number;
   resolutionReason: string | null;
   createdAt: number;
   updatedAt: number;
@@ -32,6 +35,7 @@ export interface CreateTaskWaitInput {
   id: string;
   parentTaskId: string;
   parentSessionId: string;
+  idempotencyKey?: string;
   condition: TaskWaitCondition;
   childTaskIds: string[];
   wakeDeadline: number;
@@ -43,9 +47,6 @@ export type RegisterTaskWaitInput = Omit<CreateTaskWaitInput, 'id' | 'wakeDelive
 export interface TaskObservation {
   taskId: string;
   status: string;
-  outputSummary: string | null;
-  outputPrUrl: string | null;
-  errorMessage: string | null;
 }
 
 export type TaskWaitDecision =
@@ -77,12 +78,15 @@ function parseSubscriptionRow(
     id: asString(row.id, 'id'),
     parentTaskId: asString(row.parent_task_id, 'parentTaskId'),
     parentSessionId: asString(row.parent_session_id, 'parentSessionId'),
+    idempotencyKey: asString(row.idempotency_key, 'idempotencyKey'),
     condition,
     state,
     childCount: asNumber(row.child_count, 'childCount'),
     wakeDeadline: asNumber(row.wake_deadline, 'wakeDeadline'),
     nextReconcileAt: asNumber(row.next_reconcile_at, 'nextReconcileAt'),
     wakeDeliveryId: asString(row.wake_delivery_id, 'wakeDeliveryId'),
+    wakeContent: typeof row.wake_content === 'string' ? row.wake_content : null,
+    wakeAttempts: asNumber(row.wake_attempts, 'wakeAttempts'),
     resolutionReason: typeof row.resolution_reason === 'string' ? row.resolution_reason : null,
     createdAt: asNumber(row.created_at, 'createdAt'),
     updatedAt: asNumber(row.updated_at, 'updatedAt'),
@@ -124,6 +128,30 @@ export function createTaskWait(
     throw new Error(`Task wait child limit reached (${config.maxChildren})`);
   }
 
+  const idempotencyKey =
+    input.idempotencyKey?.trim() || `${input.condition}:${childTaskIds.join(',')}`;
+  const idempotentRow = sql
+    .exec(
+      `SELECT * FROM task_wait_subscriptions
+			 WHERE parent_task_id = ? AND idempotency_key = ?
+			 LIMIT 1`,
+      input.parentTaskId,
+      idempotencyKey
+    )
+    .toArray()[0];
+  if (idempotentRow) {
+    const existing = hydrate(sql, idempotentRow);
+    const existingIds = existing.children.map((child) => child.childTaskId);
+    if (
+      existing.parentSessionId !== input.parentSessionId ||
+      existing.condition !== input.condition ||
+      JSON.stringify(existingIds) !== JSON.stringify(childTaskIds)
+    ) {
+      throw new Error('Task wait idempotency key belongs to a different wait intent');
+    }
+    return { created: false, subscription: existing };
+  }
+
   const existingRow = sql
     .exec(
       `SELECT * FROM task_wait_subscriptions
@@ -155,13 +183,14 @@ export function createTaskWait(
   sql.exec(
     `INSERT INTO task_wait_subscriptions (
 		   id, parent_task_id, parent_session_id, wait_condition, state,
-		   child_count, wake_deadline, next_reconcile_at, wake_delivery_id,
+		   idempotency_key, child_count, wake_deadline, next_reconcile_at, wake_delivery_id,
 		   created_at, updated_at
-		 ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?)`,
+		 ) VALUES (?, ?, ?, ?, 'active', ?, ?, ?, ?, ?, ?, ?)`,
     input.id,
     input.parentTaskId,
     input.parentSessionId,
     input.condition,
+    idempotencyKey,
     childTaskIds.length,
     input.wakeDeadline,
     now,
@@ -220,9 +249,16 @@ export function listTaskWaitCandidates(
         .exec(
           `SELECT * FROM task_wait_subscriptions
 					 WHERE state = 'active'
-					   AND (next_reconcile_at <= ? OR wake_deadline <= ?)
-					 ORDER BY MIN(next_reconcile_at, wake_deadline), created_at
+					   AND CASE
+					     WHEN wake_attempts > 0 THEN next_reconcile_at <= ?
+					     ELSE (next_reconcile_at <= ? OR wake_deadline <= ?)
+					   END
+					 ORDER BY CASE
+					   WHEN wake_attempts > 0 THEN next_reconcile_at
+					   ELSE MIN(next_reconcile_at, wake_deadline)
+					 END, created_at
 					 LIMIT ?`,
+          now,
           now,
           now,
           config.maxCandidatesPerAlarm
@@ -254,7 +290,9 @@ export function recordTaskWaitObservations(
   }
   sql.exec(
     `UPDATE task_wait_subscriptions
-		 SET next_reconcile_at = ?, updated_at = ?
+		 SET next_reconcile_at = ?,
+		     wake_attempts = CASE WHEN wake_content IS NULL THEN 0 ELSE wake_attempts END,
+		     updated_at = ?
 		 WHERE id = ? AND state = 'active'`,
     nextReconcileAt,
     now,
@@ -264,6 +302,13 @@ export function recordTaskWaitObservations(
 }
 
 export function decideTaskWait(subscription: TaskWaitSubscription, now: number): TaskWaitDecision {
+  if (
+    subscription.wakeContent !== null &&
+    (subscription.resolutionReason === 'condition_met' ||
+      subscription.resolutionReason === 'deadline_reached')
+  ) {
+    return { action: 'wake', reason: subscription.resolutionReason };
+  }
   const terminal = new Set<string>([...TASK_TERMINAL_STATUSES, 'missing']);
   const terminalCount = subscription.children.filter((child) =>
     terminal.has(child.observedStatus ?? '')
@@ -277,6 +322,56 @@ export function decideTaskWait(subscription: TaskWaitSubscription, now: number):
     return { action: 'wake', reason: 'deadline_reached' };
   }
   return { action: 'pending' };
+}
+
+export function prepareTaskWaitWake(
+  sql: SqlStorage,
+  subscriptionId: string,
+  reason: 'condition_met' | 'deadline_reached',
+  content: string,
+  now: number
+): TaskWaitSubscription | null {
+  sql.exec(
+    `UPDATE task_wait_subscriptions
+		 SET wake_content = ?, resolution_reason = ?, updated_at = ?
+		 WHERE id = ? AND state = 'active' AND wake_content IS NULL`,
+    content,
+    reason,
+    now,
+    subscriptionId
+  );
+  return getTaskWait(sql, subscriptionId);
+}
+
+export function recordTaskWaitWakeFailure(
+  sql: SqlStorage,
+  subscriptionId: string,
+  now: number,
+  nextAttemptAt: number,
+  maxAttempts: number
+): { cancelled: boolean; attempts: number } | null {
+  const current = getTaskWait(sql, subscriptionId);
+  if (!current || current.state !== 'active') return null;
+  const attempts = current.wakeAttempts + 1;
+  const cancelled = attempts >= maxAttempts;
+  sql.exec(
+    `UPDATE task_wait_subscriptions
+		 SET wake_attempts = ?, next_reconcile_at = ?,
+		     state = CASE WHEN ? = 1 THEN 'cancelled' ELSE state END,
+		     resolution_reason = CASE WHEN ? = 1 THEN 'wake_delivery_failed' ELSE resolution_reason END,
+		     resolved_at = CASE WHEN ? = 1 THEN ? ELSE resolved_at END,
+		     updated_at = ?
+		 WHERE id = ? AND state = 'active'`,
+    attempts,
+    nextAttemptAt,
+    cancelled ? 1 : 0,
+    cancelled ? 1 : 0,
+    cancelled ? 1 : 0,
+    now,
+    now,
+    subscriptionId
+  );
+  return { cancelled, attempts };
 }
 
 export function resolveTaskWait(
@@ -320,7 +415,10 @@ export function cancelTaskWait(
 export function computeTaskWaitAlarmTime(sql: SqlStorage): number | null {
   const row = sql
     .exec(
-      `SELECT MIN(MIN(next_reconcile_at, wake_deadline)) AS due_at
+      `SELECT MIN(CASE
+			   WHEN wake_attempts > 0 THEN next_reconcile_at
+			   ELSE MIN(next_reconcile_at, wake_deadline)
+			 END) AS due_at
 			 FROM task_wait_subscriptions
 			 WHERE state = 'active'`
     )

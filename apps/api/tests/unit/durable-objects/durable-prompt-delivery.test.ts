@@ -182,6 +182,47 @@ describe('ProjectData durable prompt delivery', () => {
     expect(claimDuePromptDeliveries(sql, config, 40_000)).toHaveLength(0);
   });
 
+  it('fails a parent wake claim before adapter recovery when the parent is terminal', async () => {
+    acceptPromptDelivery(
+      sql,
+      {},
+      {
+        deliveryId: 'parent-wake-1',
+        targetSessionId: 'chat-1',
+        displayContent: 'trusted wake',
+        deliveryContent: 'trusted wake',
+        sourceTaskId: 'parent-task-1',
+        senderType: 'system',
+        sourceKind: 'parent_wakeup',
+      },
+      Date.now()
+    );
+    const [claim] = claimDuePromptDeliveries(sql, config, Date.now());
+    const submit = vi.fn<VmPromptDeliveryAdapter['submit']>();
+    const adapter: VmPromptDeliveryAdapter = { submit, reconcile: vi.fn() };
+    const env = {
+      DATABASE: {
+        prepare: vi.fn(() => ({
+          bind: vi.fn(() => ({
+            first: vi.fn().mockResolvedValue({
+              status: 'completed',
+              chat_session_id: 'chat-1',
+            }),
+          })),
+        })),
+      },
+    } as never;
+
+    await expect(
+      runPromptDeliveryClaim(sql, env, config, claim!, adapter, hooks)
+    ).resolves.toMatchObject({ kind: 'failed', reason: 'terminal_target' });
+    expect(submit).not.toHaveBeenCalled();
+    expect(mailbox.getMessage(sql, 'parent-wake-1')).toMatchObject({
+      deliveryState: 'failed',
+      terminalReason: 'terminal_target',
+    });
+  });
+
   it('keeps a cold-start busy delivery retryable at the attempt cap until TTL', () => {
     accept();
     let now = 10_000;

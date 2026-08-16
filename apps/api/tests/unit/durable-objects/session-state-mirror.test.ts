@@ -123,6 +123,35 @@ describe('Session State Mirror — vertical slice', () => {
       });
     });
 
+    it('rejects a delayed older runtime-work snapshot without extending its lease', () => {
+      sessionState.upsertActivityState(sql, 'sess-runtime-ordered', {
+        activity: 'idle',
+        runtimeWorkState: 'inactive',
+        runtimeWorkCount: 0,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkProgressAt: 2_900,
+        now: 3_000,
+      });
+
+      // This active snapshot was captured before the inactive edge but its
+      // independent HTTP goroutine completed later.
+      sessionState.upsertActivityState(sql, 'sess-runtime-ordered', {
+        activity: 'idle',
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 1,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkProgressAt: 900,
+        now: 4_000,
+      });
+
+      expect(sessionState.getSessionState(sql, 'sess-runtime-ordered')).toMatchObject({
+        runtimeWorkState: 'inactive',
+        runtimeWorkCount: 0,
+        runtimeWorkUpdatedAt: 3_000,
+        runtimeWorkProgressAt: 2_900,
+      });
+    });
+
     it('returns null for sessions with no state row', () => {
       const state = sessionState.getSessionState(sql, 'nonexistent');
       expect(state).toBeNull();

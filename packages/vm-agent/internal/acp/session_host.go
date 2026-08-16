@@ -1064,6 +1064,9 @@ func truncateString(s string, maxLen int) string {
 
 // stopCurrentAgentLocked stops the current agent process. Must hold h.mu.
 func (h *SessionHost) stopCurrentAgentLocked() {
+	// Stop the process-scoped harness heartbeat before clearing the ACP
+	// connection. A replacement connection will establish fresh state.
+	h.clearHarnessWork()
 	if h.process != nil {
 		_ = h.process.Stop()
 		h.process = nil

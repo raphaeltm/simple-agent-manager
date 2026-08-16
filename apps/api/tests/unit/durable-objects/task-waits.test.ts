@@ -9,7 +9,9 @@ import {
   createTaskWait,
   decideTaskWait,
   getTaskWait,
+  prepareTaskWaitWake,
   recordTaskWaitObservations,
+  recordTaskWaitWakeFailure,
   resolveTaskWait,
 } from '../../../src/durable-objects/project-data/task-waits';
 import { createSqlStorage } from './sql-storage-test-utils';
@@ -20,7 +22,6 @@ const config: TaskWaitConfig = {
   maxActivePerProject: 2,
   maxDurationMs: 86_400_000,
   maxCandidatesPerAlarm: 10,
-  maxSummaryLength: 2000,
 };
 
 describe('durable task waits', () => {
@@ -65,6 +66,33 @@ describe('durable task waits', () => {
       'child-2',
     ]);
     expect(computeTaskWaitAlarmTime(sql)).toBe(1_000);
+  });
+
+  it('keeps registration idempotent after resolution and freezes wake content', () => {
+    const first = create({ idempotencyKey: 'review-round-1' });
+    const prepared = prepareTaskWaitWake(
+      sql,
+      first.subscription.id,
+      'deadline_reached',
+      'immutable wake A',
+      2_000
+    );
+    expect(prepared?.wakeContent).toBe('immutable wake A');
+    expect(
+      prepareTaskWaitWake(sql, first.subscription.id, 'condition_met', 'mutable wake B', 3_000)
+        ?.wakeContent
+    ).toBe('immutable wake A');
+    expect(resolveTaskWait(sql, first.subscription.id, 'deadline_reached', 4_000)).toBe(true);
+
+    const retry = create({
+      id: 'wait-retry',
+      idempotencyKey: 'review-round-1',
+      wakeDeliveryId: 'delivery-retry',
+      wakeDeadline: 200_000,
+    });
+    expect(retry.created).toBe(false);
+    expect(retry.subscription.id).toBe(first.subscription.id);
+    expect(retry.subscription.wakeDeliveryId).toBe('delivery-1');
   });
 
   it('rejects a conflicting active subscription and configured limit breaches', () => {
@@ -206,5 +234,26 @@ describe('durable task waits', () => {
     });
     expect(cancelTaskWait(sql, 'wait-cancel', 'parent_terminal', 101_000)).toBe(true);
     expect(getTaskWait(sql, 'wait-cancel')?.state).toBe('cancelled');
+  });
+
+  it('backs off failed expired wakes and cancels after the maximum attempts', () => {
+    create({ wakeDeadline: 500 });
+    prepareTaskWaitWake(sql, 'wait-1', 'deadline_reached', 'wake', 1_000);
+    expect(recordTaskWaitWakeFailure(sql, 'wait-1', 1_000, 6_000, 2)).toEqual({
+      cancelled: false,
+      attempts: 1,
+    });
+    expect(computeTaskWaitAlarmTime(sql)).toBe(6_000);
+
+    expect(recordTaskWaitWakeFailure(sql, 'wait-1', 6_000, 16_000, 2)).toEqual({
+      cancelled: true,
+      attempts: 2,
+    });
+    expect(getTaskWait(sql, 'wait-1')).toMatchObject({
+      state: 'cancelled',
+      resolutionReason: 'wake_delivery_failed',
+      wakeAttempts: 2,
+    });
+    expect(computeTaskWaitAlarmTime(sql)).toBeNull();
   });
 });

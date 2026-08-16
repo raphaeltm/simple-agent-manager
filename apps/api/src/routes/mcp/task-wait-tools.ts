@@ -19,6 +19,8 @@ interface TaskLineageRow {
   chat_session_id: string | null;
 }
 
+const WAIT_KEY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+
 function textResult(requestId: string | number | null, payload: Record<string, unknown>) {
   return jsonRpcSuccess(requestId, {
     content: [{ type: 'text', text: JSON.stringify(payload) }],
@@ -43,6 +45,14 @@ export async function handleWaitForSubtasks(
     );
   }
   const waitConfig = resolveTaskWaitConfig(env);
+  const waitKey = typeof params.waitKey === 'string' ? params.waitKey.trim() : '';
+  if (!WAIT_KEY_PATTERN.test(waitKey)) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'waitKey must be a stable 1-128 character workflow-step identifier'
+    );
+  }
   if (!Array.isArray(params.taskIds)) {
     return jsonRpcError(requestId, INVALID_PARAMS, 'taskIds must be a non-empty array');
   }
@@ -125,7 +135,7 @@ export async function handleWaitForSubtasks(
       );
     }
   }
-  const parentSessionId = tokenData.chatSessionId ?? parent.chat_session_id;
+  const parentSessionId = parent.chat_session_id;
   if (!parentSessionId) {
     return jsonRpcError(
       requestId,
@@ -133,11 +143,19 @@ export async function handleWaitForSubtasks(
       'Calling task has no durable chat session to wake'
     );
   }
+  if (tokenData.chatSessionId && tokenData.chatSessionId !== parentSessionId) {
+    return jsonRpcError(
+      requestId,
+      INVALID_PARAMS,
+      'Calling token session does not match the parent task durable session'
+    );
+  }
 
   const now = Date.now();
   const registered = await projectDataService.registerTaskWait(env, tokenData.projectId, {
     parentTaskId: tokenData.taskId,
     parentSessionId,
+    idempotencyKey: waitKey,
     condition,
     childTaskIds: taskIds,
     wakeDeadline: now + waitDurationMs,
@@ -149,6 +167,7 @@ export async function handleWaitForSubtasks(
     registered: true,
     created: registered.created,
     waitId: registered.subscription.id,
+    waitKey: registered.subscription.idempotencyKey,
     state: registered.subscription.state,
     condition: registered.subscription.condition,
     taskIds: registered.subscription.children.map(

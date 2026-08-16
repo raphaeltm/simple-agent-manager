@@ -13,6 +13,9 @@ const (
 	claudeSDKMessageMethod     = "_claude/sdkMessage"
 	claudeHarnessWorkSource    = "claude_sdk"
 	claudeBackgroundTasksLevel = "background_tasks_changed"
+	maxClaudeLifecycleBytes    = 64 * 1024
+	maxClaudeLifecycleTasks    = 256
+	maxClaudeLifecycleIDBytes  = 256
 )
 
 type harnessWorkState string
@@ -79,14 +82,19 @@ type claudeSDKLifecycleMessage struct {
 // extension methods follow ACP's method-not-found contract; notifications do
 // not receive an error response from the peer.
 func (c *sessionHostClient) HandleExtensionMethod(_ context.Context, method string, params json.RawMessage) (any, error) {
-	defer c.signalProcessed()
 	if method != claudeSDKMessageMethod {
 		return nil, acpsdk.NewMethodNotFound(method)
+	}
+	if len(params) > maxClaudeLifecycleBytes {
+		return nil, fmt.Errorf("Claude SDK lifecycle notification exceeds %d bytes", maxClaudeLifecycleBytes)
 	}
 
 	var notification claudeSDKMessageNotification
 	if err := json.Unmarshal(params, &notification); err != nil {
 		return nil, fmt.Errorf("decode Claude SDK lifecycle notification: %w", err)
+	}
+	if !validClaudeLifecycleShape(notification) {
+		return nil, fmt.Errorf("Claude SDK lifecycle notification exceeds bounded identifier/task limits")
 	}
 	if !c.host.matchesHarnessSession(notification.SessionID, notification.Message.SessionID) {
 		return nil, nil
@@ -95,6 +103,21 @@ func (c *sessionHostClient) HandleExtensionMethod(_ context.Context, method stri
 		c.host.reportActivity(c.host.activityForHarnessWork())
 	}
 	return nil, nil
+}
+
+func validClaudeLifecycleShape(notification claudeSDKMessageNotification) bool {
+	if len(notification.SessionID) > maxClaudeLifecycleIDBytes ||
+		len(notification.Message.SessionID) > maxClaudeLifecycleIDBytes ||
+		len(notification.Message.TaskID) > maxClaudeLifecycleIDBytes ||
+		len(notification.Message.Tasks) > maxClaudeLifecycleTasks {
+		return false
+	}
+	for _, task := range notification.Message.Tasks {
+		if len(task.TaskID) > maxClaudeLifecycleIDBytes {
+			return false
+		}
+	}
+	return true
 }
 
 func (h *SessionHost) matchesHarnessSession(outerSessionID, innerSessionID string) bool {
@@ -110,11 +133,13 @@ func (h *SessionHost) matchesHarnessSession(outerSessionID, innerSessionID strin
 func (h *SessionHost) resetHarnessWorkForAgent(agentType string) {
 	h.harnessWorkMu.Lock()
 	h.stopHarnessWorkRereportLocked()
+	progressAt := h.nextHarnessWorkProgressAtLocked()
 	h.harnessTaskIDs = nil
 	h.harnessWork = harnessWorkStatus{}
 	if agentType == "claude-code" {
 		h.harnessWork.State = harnessWorkInactive
 		h.harnessWork.Source = claudeHarnessWorkSource
+		h.harnessWork.ProgressAt = progressAt
 	}
 	h.harnessWorkMu.Unlock()
 }
@@ -126,7 +151,7 @@ func (h *SessionHost) clearHarnessWork() {
 	if h.harnessWork.Source != "" {
 		h.harnessWork.State = harnessWorkInactive
 		h.harnessWork.Count = 0
-		h.harnessWork.ProgressAt = h.now()
+		h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLocked()
 	}
 	h.harnessWorkMu.Unlock()
 }
@@ -201,13 +226,29 @@ func (h *SessionHost) applyClaudeHarnessLifecycle(message claudeSDKLifecycleMess
 		// Report one finite settling lease, but do not heartbeat it indefinitely.
 		h.harnessWork.State = harnessWorkSettling
 	}
-	h.harnessWork.ProgressAt = h.now()
+	h.harnessWork.ProgressAt = h.nextHarnessWorkProgressAtLocked()
 	if h.harnessWork.State == harnessWorkActive {
 		h.startHarnessWorkRereportLocked()
 	} else {
 		h.stopHarnessWorkRereportLocked()
 	}
 	return true
+}
+
+// nextHarnessWorkProgressAtLocked returns a process-local, strictly monotonic
+// lifecycle version that remains representable as Unix milliseconds. Activity
+// reports are sent concurrently and may arrive out of order; ProjectData uses
+// this value to reject an older runtime-work snapshot while accepting same-
+// version heartbeat rereports that refresh the finite lease.
+func (h *SessionHost) nextHarnessWorkProgressAtLocked() time.Time {
+	now := h.now()
+	if !h.harnessWork.ProgressAt.IsZero() && !now.After(h.harnessWork.ProgressAt) {
+		return h.harnessWork.ProgressAt.Add(time.Millisecond)
+	}
+	if !h.harnessWork.ProgressAt.IsZero() && now.UnixMilli() <= h.harnessWork.ProgressAt.UnixMilli() {
+		return time.UnixMilli(h.harnessWork.ProgressAt.UnixMilli() + 1)
+	}
+	return now
 }
 
 func isTerminalClaudeTaskStatus(status string) bool {
