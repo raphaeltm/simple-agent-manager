@@ -31,6 +31,7 @@ import { createModuleLogger, serializeError } from '../../lib/logger';
 import { listAgentSessionsOnNode } from '../../services/node-agent';
 import { recordActivityEventInternal } from './activity';
 import {
+  minReconciliationAlarmDelayMs,
   sessionActivityProbeMaxAttempts,
   sessionActivityProbeMaxCandidates,
   sessionActivityProbeTimeoutMs,
@@ -197,25 +198,40 @@ export function computeSessionActivityProbeAlarmTime(
     (env as unknown as Record<string, string | undefined>).SESSION_ACTIVITY_STALE_THRESHOLD_MS
   );
   const maxAttempts = sessionActivityProbeMaxAttempts(env);
+  const minDelayMs = minReconciliationAlarmDelayMs(env);
+  // Must mirror `probeStaleSessionActivity`'s lease derivation exactly, or the
+  // scheduler and the selector disagree about when a claimed row is due again.
+  const leaseMs = sessionActivityProbeMaxCandidates(env) * sessionActivityProbeTimeoutMs(env);
   const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
 
+  // A row is next selectable at the LATER of (a) its staleness bound and (b) its
+  // outstanding probe lease expiring. Scanning only (a) reports a claimed-but-
+  // unresolved candidate as due *now* on every tick — the SELECT then correctly
+  // returns nothing (the lease holds), but the alarm has already re-armed to
+  // `now`, so the whole handler busy-loops for the entire reconciliation episode
+  // with no log signal. See `.claude/rules/47`.
   const row = sql
     .exec(
-      `SELECT MIN(ss.activity_at) AS earliest
+      `SELECT MIN(MAX(ss.activity_at + ?, COALESCE(ss.activity_probe_at, 0) + ?)) AS earliest_due
        FROM session_state ss
        JOIN acp_sessions acp ON acp.id = ss.session_id
        WHERE ss.activity IN (${placeholders})
          AND COALESCE(ss.activity_probe_attempts, 0) < ?
          AND acp.workspace_id IS NOT NULL
          AND acp.node_id IS NOT NULL`,
+      thresholdMs,
+      leaseMs,
       ...WORKING_ACTIVITIES,
       maxAttempts
     )
     .toArray()[0];
 
-  const earliest = row?.earliest;
-  if (typeof earliest !== 'number') return null;
-  return Math.max(earliest + thresholdMs, now);
+  const earliestDue = row?.earliest_due;
+  if (typeof earliestDue !== 'number') return null;
+  // Floor the alarm into the future even when a candidate is already overdue,
+  // matching `computeReconciliationAlarmTime`'s `minAlarmDelayMs` clamp. Belt
+  // and braces against any future predicate drift reintroducing the tight loop.
+  return Math.max(earliestDue, now + minDelayMs);
 }
 
 /**
@@ -303,13 +319,25 @@ export function applyProbeOutcome(
 
   const attempts = candidate.probeAttempts + 1;
   if (attempts < options.maxAttempts) {
+    // Same compare-and-set discipline as the two branches above. Without it a
+    // stale `unreachable` outcome — one whose probe was still in flight while the
+    // turn ended and a brand-new prompt epoch began — would charge an attempt
+    // against that new epoch, which resets `activity_probe_attempts` to 0 on
+    // every authoritative write. `recordTurnEnd`'s own CAS still stops the new
+    // epoch being terminalized, so the blast radius is only a silently reduced
+    // retry budget; the fix keeps the module's CAS discipline uniform.
+    const attemptPlaceholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
     sql.exec(
       `UPDATE session_state
        SET activity_probe_attempts = ?, activity_probe_at = ?
-       WHERE session_id = ?`,
+       WHERE session_id = ?
+         AND activity IN (${attemptPlaceholders})
+         AND activity_at <= ?`,
       attempts,
       now,
-      candidate.acpSessionId
+      candidate.acpSessionId,
+      ...WORKING_ACTIVITIES,
+      candidate.activityAt
     );
     return false;
   }

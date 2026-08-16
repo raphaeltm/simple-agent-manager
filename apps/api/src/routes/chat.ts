@@ -20,7 +20,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { log } from '../lib/logger';
+import { log, serializeError } from '../lib/logger';
 import { requireRouteParam } from '../lib/route-helpers';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
@@ -600,7 +600,7 @@ chatRoutes.post('/:sessionId/cancel', async (c) => {
       projectId,
       sessionId,
       acpSessionId: agentSession.id,
-      error: err instanceof Error ? err.message : String(err),
+      ...serializeError(err),
     });
   }
 

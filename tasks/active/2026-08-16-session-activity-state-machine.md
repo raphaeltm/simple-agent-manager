@@ -141,6 +141,54 @@ Existing `SESSION_ACTIVITY_STALE_THRESHOLD_MS` is reused as the staleness bound.
   consecutive probes fail. A claim lease on `activity_probe_at` stops overlapping passes from
   double-probing or burning the attempt budget in one instant.
 
+## Continuation review round 2 (findings the first review missed)
+
+The first agent's workspace was destroyed before it opened a PR (see the anti-reap
+incident below). On re-running the specialist reviewers against the final tree, the
+cloudflare-specialist found two real defects the first round had missed. Both are
+fixed here, each with a regression test proven to fail on the pre-fix code.
+
+- **[HIGH] `computeSessionActivityProbeAlarmTime` ignored the probe lease → DO alarm
+  busy-loop.** The scheduler scanned only `MIN(activity_at)`, never `activity_probe_at`.
+  For a genuinely wedged session — the exact population this feature exists to fix —
+  `earliest + threshold` is always `<= now`, so the alarm re-armed to `now` on every
+  tick. The SELECT correctly returned zero candidates (the lease held), but the DO had
+  already re-armed, so the **entire** alarm handler (heartbeat timeouts, idle cleanup +
+  its D1/NodeLifecycle RPCs, reconciliation, attention expiry, mailbox sweep, prompt
+  delivery) re-ran in a tight loop for the whole reconciliation episode — silently,
+  because the 0-candidate fast path skips the sweep log. A `.claude/rules/47` / `55`
+  violation, and the `Math.max(next, now + minAlarmDelayMs)` clamp that prevents it
+  already existed twice in this codebase (`reconciliation.ts:729`,
+  `diagnosis-runner.ts:182`) but was not carried over.
+  → Fixed by scanning `MIN(MAX(activity_at + threshold, COALESCE(activity_probe_at,0) +
+  leaseMs))` — a row is next due at the LATER of its staleness bound and its lease
+  expiring — plus the same `minReconciliationAlarmDelayMs` floor (existing env knob;
+  no new configuration). Test: `respects an outstanding probe lease instead of
+  re-arming to now` (pre-fix returns exactly `now`).
+
+- **[MEDIUM] The `unreachable` attempts bump had no compare-and-set.** It was the only
+  write path in the module without one. A stale `unreachable` outcome — whose probe was
+  still in flight while the turn ended and a new prompt epoch began — charged an attempt
+  against that new epoch, which resets `activity_probe_attempts` to 0 on every
+  authoritative write. `recordTurnEnd`'s own CAS still prevented the live prompt being
+  terminalized, so the only effect was a silently reduced retry budget — invisible, but
+  a real break in the module's otherwise-uniform CAS discipline.
+  → Fixed by scoping the UPDATE with the same `activity IN (WORKING_ACTIVITIES) AND
+  activity_at <= observedAt` guard as the other two branches. Test: `does not charge an
+  attempt against a newer prompt epoch` (pre-fix records 1).
+
+- **[LOW] Cancel-path failure log bypassed the sanitizing helper.** `chat.ts` logged a
+  raw `err.message` instead of `serializeError(err)`, the only place in the file doing
+  so. Not exploitable (no credential flows through `recordSessionTurnEnd`, and it is a
+  server-side structured log never returned to the caller), but inconsistent with the
+  convention. → Fixed.
+
+- **[LOW, accepted] `recordTurnEnd`'s CAS uses `<=` not `<`.** Required for the common
+  no-change case where the row's own `activity_at` equals the captured observation
+  exactly. A same-millisecond collision would be unprotected, but `observedAt` is always
+  a server `Date.now()` or a DB-read `activity_at` — no client-controlled clock reaches
+  this path. Accepted as designed.
+
 ## References
 
 - `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md` (liveness ≠ idleness)

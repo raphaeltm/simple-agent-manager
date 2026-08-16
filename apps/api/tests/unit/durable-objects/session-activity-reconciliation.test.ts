@@ -230,6 +230,37 @@ describe('session activity reconciliation', () => {
       expect(candidates()).toEqual([]);
     });
 
+    it('does not charge an attempt against a newer prompt epoch', () => {
+      // Regression: the `unreachable` branch was the only write path in this
+      // module with no compare-and-set. If a probe was still in flight when the
+      // turn ended and a brand-new prompt started, applying the now-stale
+      // outcome charged an attempt against that new epoch — silently shrinking
+      // its retry budget (maxAttempts 3 effectively becoming 2), even though the
+      // new epoch was never itself probed. `recordTurnEnd`'s CAS still stopped
+      // the live prompt being terminalized, so the symptom was invisible.
+      seedLiveSession();
+      wedgePrompting(now - FIVE_MINUTES - 1000);
+
+      const candidate = candidates()[0]!;
+
+      // While that probe is conceptually in flight, the turn really ends and a
+      // brand-new prompt epoch begins. An authoritative write resets the counter.
+      upsertActivityState(sql, ACP_SESSION, { activity: 'idle', now: now + 1000 });
+      upsertActivityState(sql, ACP_SESSION, { activity: 'prompting', now: now + 2000 });
+      expect(readState()?.activity_probe_attempts).toBe(0);
+
+      // The stale outcome lands after the epoch flipped.
+      applyProbeOutcome(sql, candidate, { kind: 'unreachable', error: 'timeout' }, {
+        maxAttempts: 3,
+        now: now + 3000,
+      });
+
+      // Pre-fix this was 1 — budget stolen from an epoch that was never probed.
+      expect(readState()?.activity_probe_attempts).toBe(0);
+      // And the live prompt is untouched.
+      expect(readState()?.activity).toBe('prompting');
+    });
+
     it('drops a candidate from selection once its attempts are exhausted', () => {
       seedLiveSession();
       wedgePrompting(now - FIVE_MINUTES - 1000);
@@ -364,7 +395,32 @@ describe('session activity reconciliation', () => {
     it('never schedules in the past for an already-overdue session', () => {
       seedLiveSession();
       wedgePrompting(now - 4 * 60 * 60 * 1000);
-      expect(computeSessionActivityProbeAlarmTime(sql, {} as never, now)).toBe(now);
+      // Floored to `now + minAlarmDelayMs` (10s default) rather than `now`, so an
+      // overdue candidate cannot re-arm the alarm into the immediate present.
+      expect(computeSessionActivityProbeAlarmTime(sql, {} as never, now)).toBe(now + 10_000);
+    });
+
+    it('respects an outstanding probe lease instead of re-arming to now', () => {
+      // Regression: the scheduler scanned only `activity_at`, never the lease the
+      // selector sets when it claims a candidate. For a genuinely wedged session
+      // — the exact case this feature exists to fix — `earliest + threshold` is
+      // always <= now, so the alarm re-armed to `now` on every tick. The SELECT
+      // correctly returned no candidates (the lease held), but the DO still re-ran
+      // the ENTIRE alarm handler (idle cleanup, heartbeat timeouts, mailbox sweep,
+      // prompt delivery) in a tight loop for the whole reconciliation episode,
+      // with no log signal because the 0-candidate path skips the sweep log.
+      // `.claude/rules/47` — a control loop must not busy-loop on a leased row.
+      seedLiveSession();
+      wedgePrompting(now - 4 * 60 * 60 * 1000);
+
+      // Claiming sets activity_probe_at = now, leasing the row for
+      // maxCandidates * probeTimeout = 10 * 5s = 50s.
+      expect(candidates()).toHaveLength(1);
+
+      const next = computeSessionActivityProbeAlarmTime(sql, {} as never, now);
+      // Pre-fix this was exactly `now` (the tight loop).
+      expect(next).toBe(now + 50_000);
+      expect(next).toBeGreaterThan(now);
     });
 
     it('schedules nothing when no session is in a working state', () => {
