@@ -95,4 +95,3 @@ Update `/workflow` to persist its state, call `wait_for_subtasks`, and end the c
 - `acp-go-sdk` extension handler: https://github.com/coder/acp-go-sdk/blob/v0.13.5/extensions.go
 - Claude ACP raw lifecycle option: https://github.com/agentclientprotocol/claude-agent-acp/blob/v0.58.1/src/acp-agent.ts
 - Claude background-turn handling follow-up: https://github.com/agentclientprotocol/claude-agent-acp/pull/870
-
