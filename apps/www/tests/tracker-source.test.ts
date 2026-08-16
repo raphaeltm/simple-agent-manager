@@ -19,6 +19,7 @@ async function installTracker(url: string, referrer = '') {
   vi.spyOn(crypto, 'randomUUID').mockReturnValue('00000000-0000-4000-8000-000000000001');
 
   vi.resetModules();
+  // @ts-expect-error tracker.ts is intentionally compiled as a classic script, not an ES module.
   await import('../src/scripts/tracker');
   return { sendBeacon };
 }

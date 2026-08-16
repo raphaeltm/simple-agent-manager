@@ -36,6 +36,7 @@ interface AnalyticsEvent {
   } catch {
     return;
   }
+  const analyticsEndpoint = endpoint;
 
   const host = location.hostname;
   const redactedSegment = '[redacted]';
@@ -140,9 +141,9 @@ interface AnalyticsEvent {
     const body = JSON.stringify({ events });
     if (navigator.sendBeacon) {
       const blob = new Blob([body], { type: 'application/json' });
-      navigator.sendBeacon(endpoint, blob);
+      navigator.sendBeacon(analyticsEndpoint, blob);
     } else {
-      fetch(endpoint, {
+      fetch(analyticsEndpoint, {
         method: 'POST',
         body,
         headers: { 'Content-Type': 'application/json' },
