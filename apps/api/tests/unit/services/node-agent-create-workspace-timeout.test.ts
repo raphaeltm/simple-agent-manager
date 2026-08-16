@@ -104,6 +104,7 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllGlobals();
     vi.clearAllMocks();
   });
 
@@ -325,5 +326,75 @@ describe('createWorkspaceOnNode cf-container timeout plumbing', () => {
       8080,
       sourceTaskGuard
     );
+  });
+
+  it('withholds cf-container workspace creation when authority is revoked at the physical boundary', async () => {
+    const beforeExternalMutation = vi.fn().mockRejectedValue(new Error('source authority revoked'));
+
+    await expect(
+      createWorkspaceOnNode('node-1', cfContainerEnv, 'user-1', workspacePayload, {
+        sourceTaskGuard: {
+          taskId: 'source-task-workspace',
+          projectId: 'project-1',
+          chatSessionId: 'chat-1',
+        },
+        beforeExternalMutation,
+      })
+    ).rejects.toThrow('source authority revoked');
+
+    expect(beforeExternalMutation).toHaveBeenCalledOnce();
+    expect(mocks.container.fetchVmAgentContainer).not.toHaveBeenCalled();
+  });
+
+  it('withholds direct VM workspace creation when authority is revoked at the physical boundary', async () => {
+    mocks.drizzle.mockReturnValue({
+      select: () => ({
+        from: () => ({
+          where: () => ({ get: () => Promise.resolve({ runtime: 'vm' }) }),
+        }),
+      }),
+    });
+    const directFetch = vi.fn();
+    vi.stubGlobal('fetch', directFetch);
+    const beforeExternalMutation = vi.fn().mockRejectedValue(new Error('source authority revoked'));
+
+    await expect(
+      createWorkspaceOnNode('node-1', cfContainerEnv, 'user-1', workspacePayload, {
+        beforeExternalMutation,
+      })
+    ).rejects.toThrow('source authority revoked');
+
+    expect(beforeExternalMutation).toHaveBeenCalledOnce();
+    expect(directFetch).not.toHaveBeenCalled();
+    expect(mocks.container.fetchVmAgentContainer).not.toHaveBeenCalled();
+  });
+
+  it('ends active work and withholds agent start when the physical-boundary recheck revokes', async () => {
+    const beforeExternalMutation = vi
+      .fn()
+      .mockResolvedValueOnce(undefined)
+      .mockRejectedValueOnce(new Error('source authority revoked'));
+
+    await expect(
+      startAgentSessionOnNode(
+        'node-1',
+        'ws-1',
+        'agent-1',
+        'claude-code',
+        'Continue recovered work',
+        cfContainerEnv,
+        'user-1',
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        { beforeExternalMutation }
+      )
+    ).rejects.toThrow('source authority revoked');
+
+    expect(beforeExternalMutation).toHaveBeenCalledTimes(2);
+    expect(mocks.container.markVmAgentContainerActiveWorkStarted).toHaveBeenCalledOnce();
+    expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).toHaveBeenCalledOnce();
+    expect(mocks.container.fetchVmAgentContainer).not.toHaveBeenCalled();
   });
 });

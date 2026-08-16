@@ -14,7 +14,12 @@ import type { DevcontainerCacheCredentials } from '../../services/devcontainer-c
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
 import { reserveWorkspacePlacement } from '../../services/workspace-placement';
-import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
+import {
+  computeBackoffMs,
+  getRecoverySourceTaskGuard,
+  isTransientError,
+  parseEnvInt,
+} from './helpers';
 import { ensureSessionLinked } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
 import { ensureBranchExistsOnRemote } from './workspace-branch';
@@ -306,27 +311,38 @@ async function createWorkspaceOnVmAgent(
   const baseBranch =
     checkoutBranch === state.config.branch ? state.config.defaultBranch : state.config.branch;
   const devcontainerCache = await getDevcontainerCacheForWorkspace(state, rc, workspaceId);
-
+  const sourceTaskGuard = getRecoverySourceTaskGuard(state);
   await rc.assertRecoveryAuthority(state);
-  const response = await createWorkspaceOnNode(nodeId, rc.env, state.userId, {
-    workspaceId,
-    repository: state.config.repository,
-    branch: checkoutBranch,
-    baseBranch,
-    defaultBranch: state.config.defaultBranch || 'main',
-    repoProvider: gitSource.repoProvider,
-    cloneUrl: gitSource.cloneUrl,
-    repositoryHost: gitSource.repositoryHost,
-    repositoryPath: gitSource.repositoryPath,
-    callbackToken,
-    gitUserName: state.config.userName,
-    gitUserEmail: state.config.userEmail,
-    githubId: state.config.githubId,
-    lightweight: state.config.workspaceProfile === 'lightweight',
-    devcontainerConfigName: state.config.devcontainerConfigName ?? undefined,
-    devcontainerCache,
-  });
-
+  const response = await createWorkspaceOnNode(
+    nodeId,
+    rc.env,
+    state.userId,
+    {
+      workspaceId,
+      repository: state.config.repository,
+      branch: checkoutBranch,
+      baseBranch,
+      defaultBranch: state.config.defaultBranch || 'main',
+      repoProvider: gitSource.repoProvider,
+      cloneUrl: gitSource.cloneUrl,
+      repositoryHost: gitSource.repositoryHost,
+      repositoryPath: gitSource.repositoryPath,
+      callbackToken,
+      gitUserName: state.config.userName,
+      gitUserEmail: state.config.userEmail,
+      githubId: state.config.githubId,
+      lightweight: state.config.workspaceProfile === 'lightweight',
+      devcontainerConfigName: state.config.devcontainerConfigName ?? undefined,
+      devcontainerCache,
+    },
+    {
+      sourceTaskGuard,
+      beforeExternalMutation: async () => {
+        await rc.assertRecoveryAuthority(state);
+      },
+    }
+  );
+  await rc.assertRecoveryAuthority(state);
   if (!isWorkspaceDispatchAck(response, workspaceId)) {
     throw Object.assign(
       new Error(`Node Agent did not acknowledge workspace dispatch for ${workspaceId}`),
@@ -404,6 +420,7 @@ export async function handleWorkspaceDispatch(
     await rc.ctx.storage.put('state', state);
     await rc.advanceToStep(state, 'workspace_ready');
   } catch (err) {
+    if (err instanceof SessionRecoveryAuthorityRevokedError) throw err;
     const errorMessage = err instanceof Error ? err.message : String(err);
     state.workspaceDispatchLastError = errorMessage;
     await rc.ctx.storage.put('state', state);

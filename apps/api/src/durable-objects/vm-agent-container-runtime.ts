@@ -180,6 +180,53 @@ export async function persistRuntimeSleeping(env: Env, identity: RuntimeIdentity
   ]);
 }
 
+/**
+ * Compensate a guarded wake that lost its source authority without reviving a
+ * runtime that another lifecycle owner already stopped or deleted.
+ */
+export async function persistRuntimeSleepingAfterRevokedWake(
+  env: Env,
+  identity: RuntimeIdentity
+): Promise<void> {
+  const now = new Date().toISOString();
+  const liveNode = `EXISTS (
+    SELECT 1 FROM nodes live_node
+     WHERE live_node.id = ?
+       AND live_node.status NOT IN ('stopped', 'deleted', 'error')
+  )`;
+  const liveWorkspace = `EXISTS (
+    SELECT 1 FROM workspaces live_workspace
+     WHERE live_workspace.id = ?
+       AND live_workspace.node_id = ?
+       AND live_workspace.status NOT IN ('stopped', 'deleted', 'error')
+  )`;
+  await env.DATABASE.batch([
+    env.DATABASE.prepare(
+      `UPDATE nodes
+          SET status = 'sleeping', health_status = 'unhealthy', error_message = NULL, updated_at = ?
+        WHERE id = ?
+          AND status NOT IN ('stopped', 'deleted', 'error')
+          AND ${liveWorkspace}`
+    ).bind(now, identity.nodeId, identity.workspaceId, identity.nodeId),
+    env.DATABASE.prepare(
+      `UPDATE workspaces
+          SET status = 'sleeping', error_message = NULL, updated_at = ?
+        WHERE id = ?
+          AND node_id = ?
+          AND status NOT IN ('stopped', 'deleted', 'error')
+          AND ${liveNode}`
+    ).bind(now, identity.workspaceId, identity.nodeId, identity.nodeId),
+    env.DATABASE.prepare(
+      `UPDATE agent_sessions
+          SET status = 'sleeping', error_message = NULL, updated_at = ?
+        WHERE workspace_id = ?
+          AND status NOT IN ('stopped', 'deleted', 'error')
+          AND ${liveWorkspace}
+          AND ${liveNode}`
+    ).bind(now, identity.workspaceId, identity.workspaceId, identity.nodeId, identity.nodeId),
+  ]);
+}
+
 export async function persistRuntimeEnded(
   env: Env,
   identity: RuntimeIdentity,

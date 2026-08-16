@@ -378,7 +378,7 @@ export async function createWorkspaceOnNode(
      * is a fast 202 dispatch ack and keeps the interactive default.
      */
     requestTimeoutMs?: number;
-  }
+  } & GuardedNodeAgentMutationOptions
 ): Promise<unknown> {
   return nodeAgentRequest(nodeId, env, '/workspaces', {
     method: 'POST',
@@ -386,6 +386,8 @@ export async function createWorkspaceOnNode(
     workspaceId: workspace.workspaceId,
     body: JSON.stringify(workspace),
     requestTimeoutMs: options?.requestTimeoutMs,
+    sourceTaskGuard: options?.sourceTaskGuard,
+    beforeExternalMutation: options?.beforeExternalMutation,
   });
 }
 
