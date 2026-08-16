@@ -106,6 +106,14 @@ describe('reconcileStaleActivity', () => {
       const healed = reconcileStaleActivity(sql);
       expect(healed).toContain(id);
       expect(getActivity(id)).toBe('idle');
+      // The transition records WHY it happened, so a heal driven by absent
+      // evidence stays distinguishable from a probe-confirmed turn end.
+      const row = sql.exec(
+        'SELECT activity_source, activity_reason FROM session_state WHERE session_id = ?',
+        id,
+      ).toArray()[0];
+      expect(row?.activity_source).toBe('control_plane');
+      expect(row?.activity_reason).toBe('stale_no_evidence');
     },
   );
 

@@ -87,32 +87,59 @@ Existing `SESSION_ACTIVITY_STALE_THRESHOLD_MS` is reused as the staleness bound.
 
 ## Implementation checklist
 
-- [ ] Shared: add `DEFAULT_SESSION_ACTIVITY_PROBE_TIMEOUT_MS`, `_MAX_ATTEMPTS`, `_MAX_CANDIDATES`
-- [ ] DO migration `029-session-activity-reconciliation` (additive columns: `activity_source`,
+- [x] Shared: add `DEFAULT_SESSION_ACTIVITY_PROBE_TIMEOUT_MS`, `_MAX_ATTEMPTS`, `_MAX_CANDIDATES`
+- [x] DO migration `029-session-activity-reconciliation` (additive columns: `activity_source`,
       `activity_reason`, `activity_probe_at`, `activity_probe_attempts`)
-- [ ] `session-state.ts`: `recordTurnEnd` (compare-and-set), probe-counter reset on working-state
+- [x] `session-state.ts`: `recordTurnEnd` (compare-and-set), probe-counter reset on working-state
       entry and on `markPromptAccepted`, expose reason/source in `getSessionState`
-- [ ] New `session-activity-reconciliation.ts`: candidate selection (SQL only), probe classification,
+- [x] New `session-activity-reconciliation.ts`: candidate selection (SQL only), probe classification,
       outcome application, bounded attempts + dead-target escape
-- [ ] Wire probe into the ProjectData DO alarm via `ctx.waitUntil` (outside the critical path)
-- [ ] Terminal writes fan out to all three consumers: broadcast, delivery nudge, idle-cleanup re-arm
-- [ ] `reconcileStaleActivity` heal path also nudges deliveries + records `stale_no_evidence`
-- [ ] DO RPC + `services/project-data.ts` wrapper: `recordSessionTurnEnd`
-- [ ] `routes/chat.ts` cancel: capture `observedAt` before the VM call, record terminal transition
-- [ ] Env docs: `apps/api/.env.example`, configuration reference
-- [ ] Tests (each proven to fail pre-fix)
+- [x] Wire probe into the ProjectData DO alarm via `ctx.waitUntil` (outside the critical path)
+- [x] Terminal writes fan out to all three consumers: broadcast, delivery nudge, idle-cleanup re-arm
+- [x] `reconcileStaleActivity` heal path also nudges deliveries + records `stale_no_evidence`
+- [x] DO RPC + `services/project-data.ts` wrapper: `recordSessionTurnEnd`
+- [x] `routes/chat.ts` cancel: capture `observedAt` before the VM call, record terminal transition
+- [x] Env docs: `apps/api/.env.example`, configuration reference
+- [x] Tests (each proven to fail pre-fix)
 
 ## Acceptance criteria
 
-- [ ] A session whose `idle` report was lost after a turn end, with a live heartbeating ACP session,
+- [x] A session whose `idle` report was lost after a turn end, with a live heartbeating ACP session,
       is reconciled to idle by the probe, and its idle cleanup arms
-- [ ] A wedged-"prompting" session with a queued durable message delivers it after reconciliation
-- [ ] A genuinely prompting session (host reports `prompting`) is **not** flipped by the probe
+- [x] A wedged-"prompting" session with a queued durable message delivers it after reconciliation
+- [x] A genuinely prompting session (host reports `prompting`) is **not** flipped by the probe
       (control case)
-- [ ] The cancel path records a terminal transition even when the VM's `idle` report never arrives
-- [ ] Probe never runs in the alarm's synchronous critical path; uses a short background timeout
-- [ ] Every candidate leaves the candidate set (bounded attempts, dead-target terminalization)
-- [ ] No hardcoded timeouts/limits; #1826 identity gates unchanged
+- [x] The cancel path records a terminal transition even when the VM's `idle` report never arrives
+- [x] Probe never runs in the alarm's synchronous critical path; uses a short background timeout
+- [x] Every candidate leaves the candidate set (bounded attempts, dead-target terminalization)
+- [x] No hardcoded timeouts/limits; #1826 identity gates unchanged
+
+## Deliberate scope decisions
+
+- **`activity='error'` is NOT probe-reconciled.** `WORKING_ACTIVITIES` covers only
+  `prompting`/`recovering`. Clearing an `error` state erases user-visible error context, so it
+  is a product decision rather than a reliability fix. Tracked in
+  `tasks/backlog/2026-08-16-probe-reconcile-wedged-error-activity.md` (rule 42).
+- **Per-candidate D1 reads are sequential, not batched.** Each candidate costs one workspace
+  lookup plus one node-runtime lookup inside `fetchNodeAgent`. Bounded by
+  `SESSION_ACTIVITY_PROBE_MAX_CANDIDATES` (10) and matching the existing `reconciliation.ts`
+  pattern; parallelising was judged not worth the added concurrency surface here.
+
+## Control-loop load review (rule 47)
+
+- **Expected candidate volume:** near zero in steady state — a candidate requires a working
+  state older than `SESSION_ACTIVITY_STALE_THRESHOLD_MS` (5 min) with no message progress in
+  that window. Hard-capped at `SESSION_ACTIVITY_PROBE_MAX_CANDIDATES` (10) per pass.
+- **Worst-case per-candidate cost:** two D1 reads plus one vm-agent HTTP call bounded by
+  `SESSION_ACTIVITY_PROBE_TIMEOUT_MS` (5 s) — a background budget, not the interactive 30 s.
+  Worst case per pass ≈ 50 s, entirely inside `ctx.waitUntil`, never on the alarm's
+  synchronous critical path.
+- **Tiered timeout:** yes — dedicated `SESSION_ACTIVITY_PROBE_TIMEOUT_MS`, separate from
+  `NODE_AGENT_REQUEST_TIMEOUT_MS`.
+- **Candidate escape path:** every candidate exits — reconciled (`probe_reconciled`),
+  refreshed (`working`), or terminalized (`dead`) once `SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS`
+  consecutive probes fail. A claim lease on `activity_probe_at` stops overlapping passes from
+  double-probing or burning the attempt budget in one instant.
 
 ## References
 

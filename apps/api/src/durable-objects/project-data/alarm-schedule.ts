@@ -13,6 +13,7 @@ import * as idleCleanup from './idle-cleanup';
 import * as mailbox from './mailbox';
 import { computePromptDeliveryAlarmTime } from './prompt-delivery';
 import * as reconciliation from './reconciliation';
+import { computeSessionActivityProbeAlarmTime } from './session-activity-reconciliation';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.alarm_schedule');
@@ -42,6 +43,10 @@ export function computeProjectDataAlarmTime(sql: SqlStorage, env: Env): number |
   }
   const attentionTime = attention.computeAttentionAlarmTime(sql);
   const reconciliationTime = reconciliation.computeReconciliationAlarmTime(sql, env);
+  // Conversation-mode sessions contribute no reconciliation alarm (that query is
+  // task-scoped), so stale-activity probes need their own entry rather than
+  // relying on the ACP heartbeat alarm happening to fire on a similar cadence.
+  const activityProbeTime = computeSessionActivityProbeAlarmTime(sql, env);
 
   const candidates = [
     idleCleanupTime,
@@ -50,6 +55,7 @@ export function computeProjectDataAlarmTime(sql: SqlStorage, env: Env): number |
     mailboxTime,
     attentionTime,
     reconciliationTime,
+    activityProbeTime,
   ].filter((time): time is number => time !== null);
 
   return candidates.length > 0 ? Math.min(...candidates) : null;

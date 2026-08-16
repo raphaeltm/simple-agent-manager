@@ -35,7 +35,11 @@ import {
   sessionActivityProbeMaxCandidates,
   sessionActivityProbeTimeoutMs,
 } from './reconciliation-thresholds';
-import { recordTurnEnd, WORKING_ACTIVITIES } from './session-state';
+import {
+  parseActivityStaleThreshold,
+  recordTurnEnd,
+  WORKING_ACTIVITIES,
+} from './session-state';
 import type { Env as DOEnv } from './types';
 
 const log = createModuleLogger('session_activity_reconciliation');
@@ -70,12 +74,22 @@ export interface SessionActivityReconciliationHooks {
 }
 
 /**
- * Select working-state rows whose activity is older than the staleness bound
- * and that have no newer message progress. SQL only — no I/O.
+ * Select working-state rows that are stale and have no RECENT progress, then
+ * claim them so a concurrent pass cannot probe the same row twice. SQL only —
+ * no I/O.
  *
- * `activity_probe_attempts < maxAttempts` bounds the candidate set: a target
- * that never answers is terminalized as dead by `applyProbeOutcome` on its
- * final attempt, so no row can be re-probed forever.
+ * Two bounds keep the candidate set finite:
+ * - `activity_probe_attempts < maxAttempts` — a target that never answers is
+ *   terminalized as dead by `applyProbeOutcome` on its final attempt.
+ * - `activity_probe_at` acts as a lease: a row claimed by an in-flight pass is
+ *   skipped until the lease expires, so overlapping alarms do not double-probe.
+ *
+ * The progress guard deliberately measures message recency against the ROLLING
+ * staleness cutoff, not against the frozen `activity_at`. Anchoring it to
+ * `activity_at` means a single trailing message that lands after the last
+ * successful activity report disqualifies the row FOREVER — it can never age
+ * out, because `activity_at` never advances again once reporting dies. That
+ * would recreate the permanent wedge this whole module exists to break.
  */
 export function selectStaleActivityProbeCandidates(
   sql: SqlStorage,
@@ -83,14 +97,17 @@ export function selectStaleActivityProbeCandidates(
     thresholdMs: number;
     maxAttempts: number;
     maxCandidates: number;
+    /** Lease window for a claimed candidate. Defaults to the staleness bound. */
+    leaseMs?: number;
     now?: number;
   }
 ): StaleActivityCandidate[] {
   const now = options.now ?? Date.now();
   const cutoff = now - options.thresholdMs;
+  const leaseCutoff = now - (options.leaseMs ?? options.thresholdMs);
   const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
 
-  return sql
+  const candidates = sql
     .exec(
       `SELECT ss.session_id AS acp_session_id,
               acp.chat_session_id AS chat_session_id,
@@ -103,18 +120,21 @@ export function selectStaleActivityProbeCandidates(
        WHERE ss.activity IN (${placeholders})
          AND ss.activity_at < ?
          AND COALESCE(ss.activity_probe_attempts, 0) < ?
+         AND (ss.activity_probe_at IS NULL OR ss.activity_probe_at <= ?)
          AND acp.workspace_id IS NOT NULL
          AND acp.node_id IS NOT NULL
          AND NOT EXISTS (
            SELECT 1 FROM chat_messages msg
            WHERE msg.session_id = acp.chat_session_id
-             AND msg.created_at > ss.activity_at
+             AND msg.created_at > ?
          )
        ORDER BY ss.activity_at ASC
        LIMIT ?`,
       ...WORKING_ACTIVITIES,
       cutoff,
       options.maxAttempts,
+      leaseCutoff,
+      cutoff,
       options.maxCandidates
     )
     .toArray()
@@ -144,17 +164,77 @@ export function selectStaleActivityProbeCandidates(
         },
       ];
     });
+
+  // Claim the batch in the same synchronous block as the read, so a second
+  // alarm firing while this pass is awaiting the network cannot re-select the
+  // same rows (.claude/rules/45 — there is no `await` between read and claim,
+  // so this pair cannot be interleaved).
+  for (const candidate of candidates) {
+    sql.exec(
+      'UPDATE session_state SET activity_probe_at = ? WHERE session_id = ?',
+      now,
+      candidate.acpSessionId
+    );
+  }
+
+  return candidates;
 }
 
-/** Classify a vm-agent agent-session listing for one ACP session. */
-export function classifyProbeResponse(
-  payload: unknown,
-  acpSessionId: string
-): { kind: 'working' } | { kind: 'not_working'; hostStatus: string | null } {
-  const sessions =
-    payload && typeof payload === 'object' && Array.isArray((payload as { sessions?: unknown }).sessions)
-      ? ((payload as { sessions: unknown[] }).sessions as unknown[])
-      : [];
+/**
+ * When the next stale-activity probe becomes due.
+ *
+ * Without this, conversation-mode sessions would depend on some unrelated
+ * alarm source happening to fire — the task-mode reconciliation query is
+ * task-scoped and contributes nothing for them, so the probe's own staleness
+ * bound would not actually be honoured by the scheduler.
+ */
+export function computeSessionActivityProbeAlarmTime(
+  sql: SqlStorage,
+  env: DOEnv,
+  now = Date.now()
+): number | null {
+  const thresholdMs = parseActivityStaleThreshold(
+    (env as unknown as Record<string, string | undefined>).SESSION_ACTIVITY_STALE_THRESHOLD_MS
+  );
+  const maxAttempts = sessionActivityProbeMaxAttempts(env);
+  const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
+
+  const row = sql
+    .exec(
+      `SELECT MIN(ss.activity_at) AS earliest
+       FROM session_state ss
+       JOIN acp_sessions acp ON acp.id = ss.session_id
+       WHERE ss.activity IN (${placeholders})
+         AND COALESCE(ss.activity_probe_attempts, 0) < ?
+         AND acp.workspace_id IS NOT NULL
+         AND acp.node_id IS NOT NULL`,
+      ...WORKING_ACTIVITIES,
+      maxAttempts
+    )
+    .toArray()[0];
+
+  const earliest = row?.earliest;
+  if (typeof earliest !== 'number') return null;
+  return Math.max(earliest + thresholdMs, now);
+}
+
+/**
+ * Classify a vm-agent agent-session listing for one ACP session.
+ *
+ * A malformed payload is not evidence of anything. Only a well-formed listing
+ * may end a turn; anything else degrades to `unreachable` so it inherits the
+ * bounded-retry path instead of terminalizing a possibly live turn on the
+ * strength of a response we could not parse.
+ */
+export function classifyProbeResponse(payload: unknown, acpSessionId: string): ProbeOutcome {
+  const rawSessions =
+    payload && typeof payload === 'object'
+      ? (payload as { sessions?: unknown }).sessions
+      : undefined;
+  if (!Array.isArray(rawSessions)) {
+    return { kind: 'unreachable', error: 'malformed_agent_sessions_response' };
+  }
+  const sessions = rawSessions as unknown[];
 
   for (const entry of sessions) {
     if (!entry || typeof entry !== 'object') continue;
@@ -189,13 +269,25 @@ export function applyProbeOutcome(
   if (outcome.kind === 'working') {
     // Positive proof of an in-flight turn. Refresh the staleness clock and
     // clear probe accounting so a long legitimate turn is never flipped.
+    //
+    // Same compare-and-set as `recordTurnEnd`: the row may have legitimately
+    // left its working state while this probe was in flight (a real VM `idle`
+    // report, or a concurrent probe's `not_working` result winning the race).
+    // Bumping `activity_at` unconditionally would push the idle clock that
+    // `session-sleep.ts` reads forward on an already-idle session, delaying
+    // sleep — a regression in one of the three consumers this fixes.
+    const placeholders = WORKING_ACTIVITIES.map(() => '?').join(', ');
     sql.exec(
       `UPDATE session_state
        SET activity_at = ?, activity_probe_attempts = 0, activity_probe_at = ?
-       WHERE session_id = ?`,
+       WHERE session_id = ?
+         AND activity IN (${placeholders})
+         AND activity_at <= ?`,
       now,
       now,
-      candidate.acpSessionId
+      candidate.acpSessionId,
+      ...WORKING_ACTIVITIES,
+      candidate.activityAt
     );
     return false;
   }
@@ -300,15 +392,20 @@ export async function probeStaleSessionActivity(
   options: { thresholdMs: number; projectId: string | null }
 ): Promise<{ probed: number; reconciled: number }> {
   const maxAttempts = sessionActivityProbeMaxAttempts(env);
+  const requestTimeoutMs = sessionActivityProbeTimeoutMs(env);
+  const maxCandidates = sessionActivityProbeMaxCandidates(env);
   const candidates = selectStaleActivityProbeCandidates(sql, {
     thresholdMs: options.thresholdMs,
     maxAttempts,
-    maxCandidates: sessionActivityProbeMaxCandidates(env),
+    maxCandidates,
+    // Worst case this pass takes maxCandidates * requestTimeoutMs; hold the
+    // claim at least that long so an overlapping alarm cannot re-probe a row
+    // this pass has not reached yet.
+    leaseMs: maxCandidates * requestTimeoutMs,
   });
   if (candidates.length === 0) return { probed: 0, reconciled: 0 };
 
   const workerEnv = env as unknown as WorkerEnv;
-  const requestTimeoutMs = sessionActivityProbeTimeoutMs(env);
   let reconciled = 0;
 
   for (const candidate of candidates) {

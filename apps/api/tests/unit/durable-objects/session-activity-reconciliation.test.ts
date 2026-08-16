@@ -22,6 +22,7 @@ import { nudgePromptDeliveriesForTarget } from '../../../src/durable-objects/pro
 import {
   applyProbeOutcome,
   classifyProbeResponse,
+  computeSessionActivityProbeAlarmTime,
   probeStaleSessionActivity,
   publishTurnEnd,
   selectStaleActivityProbeCandidates,
@@ -212,6 +213,11 @@ describe('session activity reconciliation', () => {
       ).toBe(false);
       expect(readState()?.activity_probe_attempts).toBe(1);
 
+      // The claim lease holds the row out of the next immediate pass, so an
+      // overlapping alarm cannot burn the attempt budget in one instant.
+      expect(candidates()).toEqual([]);
+      vi.setSystemTime(now + FIVE_MINUTES + 1000);
+
       candidate = candidates()[0]!;
       expect(
         applyProbeOutcome(sql, candidate, { kind: 'unreachable', error: 'timeout' }, { maxAttempts: 2 })
@@ -238,6 +244,143 @@ describe('session activity reconciliation', () => {
           maxCandidates: 10,
         })
       ).toEqual([]);
+    });
+  });
+
+  describe('progress guard uses a rolling window, not the frozen activity_at', () => {
+    /**
+     * Message persistence and the vm-agent's activity re-report loop are
+     * independent paths, so a message can land just after the last successful
+     * report before reporting dies. Anchoring the progress guard to
+     * `activity_at` would disqualify that row FOREVER — `activity_at` never
+     * advances again once reporting is dead, so the trailing message can never
+     * age out. That is the permanent wedge this module exists to break.
+     */
+    it('still selects a long-wedged session whose trailing message is itself stale', () => {
+      seedLiveSession();
+      const wedgedAt = now - 4 * 60 * 60 * 1000;
+      wedgePrompting(wedgedAt);
+      sql.exec(
+        `INSERT INTO chat_messages (id, session_id, role, content, sequence, created_at)
+         VALUES ('m-late', ?, 'assistant', 'tool result', 1, ?)`,
+        CHAT_SESSION,
+        wedgedAt + 60 * 1000
+      );
+
+      const selected = candidates();
+      expect(selected).toHaveLength(1);
+      expect(selected[0]?.acpSessionId).toBe(ACP_SESSION);
+    });
+  });
+
+  describe('claim lease prevents overlapping passes from double-probing', () => {
+    it('hands a candidate to only one of two concurrent selections', () => {
+      seedLiveSession();
+      wedgePrompting(now - 4 * 60 * 60 * 1000);
+
+      const first = candidates();
+      const second = candidates();
+
+      expect(first).toHaveLength(1);
+      expect(second).toEqual([]);
+    });
+
+    it('releases the claim once the lease expires', () => {
+      seedLiveSession();
+      wedgePrompting(now - 4 * 60 * 60 * 1000);
+      expect(candidates()).toHaveLength(1);
+
+      vi.setSystemTime(now + FIVE_MINUTES + 1000);
+      expect(candidates()).toHaveLength(1);
+    });
+  });
+
+  describe('working outcome is compare-and-set', () => {
+    it('does not push the idle clock forward on a row that already went idle', () => {
+      // A stale/racy `working` classification must not bump `activity_at` on an
+      // already-idle row: session-sleep.ts reads that field as the "idle since"
+      // clock, so an unconditional write would delay sleep eligibility.
+      seedLiveSession();
+      wedgePrompting(now - 4 * 60 * 60 * 1000);
+      const [candidate] = candidates();
+
+      // The VM's real `idle` report lands while the probe is in flight.
+      upsertActivityState(sql, ACP_SESSION, { activity: 'idle', now: now - 60 * 1000 });
+
+      expect(applyProbeOutcome(sql, candidate!, { kind: 'working' }, { maxAttempts: 3 })).toBe(
+        false
+      );
+
+      const row = sql
+        .exec('SELECT activity, activity_at FROM session_state WHERE session_id = ?', ACP_SESSION)
+        .toArray()[0];
+      expect(row?.activity).toBe('idle');
+      expect(row?.activity_at).toBe(now - 60 * 1000);
+    });
+  });
+
+  describe('malformed probe responses are not evidence', () => {
+    it.each([
+      ['missing sessions key', {}],
+      ['sessions is not an array', { sessions: 'nope' }],
+      ['null payload', null],
+      ['non-object payload', 'unexpected'],
+    ])('treats %s as unreachable rather than not-working', (_label, payload) => {
+      expect(classifyProbeResponse(payload, ACP_SESSION)).toEqual({
+        kind: 'unreachable',
+        error: 'malformed_agent_sessions_response',
+      });
+    });
+
+    it('does not terminalize a turn on a malformed response', () => {
+      seedLiveSession();
+      wedgePrompting(now - 4 * 60 * 60 * 1000);
+      const [candidate] = candidates();
+
+      const outcome = classifyProbeResponse({ unexpected: true }, ACP_SESSION);
+      expect(applyProbeOutcome(sql, candidate!, outcome, { maxAttempts: 3 })).toBe(false);
+      expect(readState()?.activity).toBe('prompting');
+    });
+
+    it('still accepts a well-formed empty listing as proof the turn ended', () => {
+      expect(classifyProbeResponse({ sessions: [] }, ACP_SESSION)).toEqual({
+        kind: 'not_working',
+        hostStatus: null,
+      });
+    });
+  });
+
+  describe('probe alarm scheduling', () => {
+    it('schedules an alarm for a working session at its staleness deadline', () => {
+      seedLiveSession();
+      const startedAt = now - 60 * 1000;
+      wedgePrompting(startedAt);
+
+      expect(computeSessionActivityProbeAlarmTime(sql, {} as never, now)).toBe(
+        startedAt + FIVE_MINUTES
+      );
+    });
+
+    it('never schedules in the past for an already-overdue session', () => {
+      seedLiveSession();
+      wedgePrompting(now - 4 * 60 * 60 * 1000);
+      expect(computeSessionActivityProbeAlarmTime(sql, {} as never, now)).toBe(now);
+    });
+
+    it('schedules nothing when no session is in a working state', () => {
+      seedLiveSession();
+      upsertActivityState(sql, ACP_SESSION, { activity: 'idle', now });
+      expect(computeSessionActivityProbeAlarmTime(sql, {} as never, now)).toBeNull();
+    });
+
+    it('schedules nothing once the attempt budget is exhausted', () => {
+      seedLiveSession();
+      wedgePrompting(now - 4 * 60 * 60 * 1000);
+      sql.exec(
+        'UPDATE session_state SET activity_probe_attempts = 99 WHERE session_id = ?',
+        ACP_SESSION
+      );
+      expect(computeSessionActivityProbeAlarmTime(sql, {} as never, now)).toBeNull();
     });
   });
 
@@ -415,6 +558,43 @@ describe('session activity reconciliation', () => {
       expect(listAgentSessionsOnNode).not.toHaveBeenCalled();
       expect(result.reconciled).toBe(0);
       expect(readState()?.activity).toBe('prompting');
+    });
+
+    it('treats an unresolvable workspace owner as unreachable, never a free pass', async () => {
+      const result = await probeStaleSessionActivity(sql, makeEnv(null), hooks, {
+        thresholdMs: FIVE_MINUTES,
+        projectId: 'proj-1',
+      });
+
+      expect(listAgentSessionsOnNode).not.toHaveBeenCalled();
+      expect(result).toEqual({ probed: 1, reconciled: 0 });
+      expect(readState()?.activity).toBe('prompting');
+      expect(readState()?.activity_probe_attempts).toBe(1);
+    });
+
+    it('fans the reconciled transition out to every consumer', async () => {
+      const broadcasts: string[] = [];
+      const armed: string[] = [];
+      const nudged: string[] = [];
+      const result = await probeStaleSessionActivity(
+        sql,
+        makeEnv({ user_id: 'user-1', project_id: 'proj-1' }),
+        {
+          broadcastEvent: (type) => broadcasts.push(type),
+          nudgeDeliveries: (id) => {
+            nudged.push(id);
+            return 0;
+          },
+          armIdleCleanup: (id) => armed.push(id),
+          recalculateAlarm: async () => {},
+        },
+        { thresholdMs: FIVE_MINUTES, projectId: 'proj-1' }
+      );
+
+      expect(result.reconciled).toBe(1);
+      expect(broadcasts).toEqual(['session.activity']);
+      expect(armed).toEqual([CHAT_SESSION]);
+      expect(nudged).toEqual([CHAT_SESSION]);
     });
 
     it('treats a probe timeout as unreachable rather than proof of work', async () => {
