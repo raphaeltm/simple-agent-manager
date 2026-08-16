@@ -97,7 +97,7 @@ export function getPoolLeaseMaxAgeMs(env: Env): number {
 
 /**
  * Statuses that count as "active" (occupying the one-active-per-user slot and a
- * pool lease). Mirrors the partial unique index updated in migration 0112.
+ * pool lease). Mirrors the partial unique index updated in migration 0114.
  */
 export const ACTIVE_SETUP_STATUSES = [
   'creating',
