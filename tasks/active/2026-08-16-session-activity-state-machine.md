@@ -120,3 +120,34 @@ Existing `SESSION_ACTIVITY_STALE_THRESHOLD_MS` is reused as the staleness bound.
 - `.claude/rules/47-control-loop-io-budget.md` (tiered timeouts, candidate escape paths)
 - `.claude/rules/49-capture-prerequisites-before-async-completion.md` (`observedAt` capture)
 - `.claude/rules/31-migration-safety.md` (additive columns only)
+
+## Post-mortem
+
+**What broke.** Session `36a5bb77-2746-43c1-8669-030b51b8f36d` reported `prompting` for
+four hours after its turn ended at 16:15Z on 2026-08-16. The red stop button stayed on
+screen, the sleep scheduler refused to sleep the session (leaking toward the 45-min/24-h
+backstops), and — in the same session earlier that day — a durable message sat in
+`retry_wait` with "Target VM is currently processing a prompt" while nothing was in flight.
+
+**Root cause.** `session_state.activity` was write-only from the VM side. The staleness
+heal that existed (`session-state.ts:reconcileStaleActivity`, migration `021`) refused to
+heal while the ACP session was heartbeating — and a vm-agent heartbeats whether or not a
+prompt is in flight. For any awake session the heal predicate was unsatisfiable, so the
+only thing that could clear a working state was the VM's own `idle` report. When that
+report was lost (the suspected trigger here was a user tool-call interruption at ~16:05Z;
+these callbacks also 401'd silently for months per rule 34), the state wedged permanently.
+
+**Class of bug.** Write-only cross-boundary state with a fan-out of consumers and no
+reconciliation — compounded by the rule-53 trap of standing a liveness signal in for an
+idleness signal. Each component was individually correct; the system was still wrong, and
+one dropped report broke three consumers at once in opposite directions.
+
+**Why it wasn't caught.** The heal had tests, but all of them seeded a *dead* session —
+none seeded the live-but-idle population the guard was actually meant to catch, so the
+unsatisfiable predicate never showed up as a failure. No test covered a control-plane
+turn ending (cancel) recording anything at all, because the code recorded nothing.
+
+**Process fix.** `.claude/rules/57-write-only-cross-boundary-state.md` — requires both-ends
+writes, a staleness bound, probing the authority instead of a proxy, single-point consumer
+fan-out, pre-call observation capture with a CAS guard, and specifically requires a
+live-but-idle wedge test plus a genuinely-working control case.
