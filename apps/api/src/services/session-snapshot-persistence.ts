@@ -7,8 +7,8 @@ import {
   buildSessionSnapshotR2Key,
   type CompleteSessionSnapshotInput,
   getSessionSnapshotConfig,
-  type SessionSnapshotArtifact,
   sessionLifecycleError,
+  type SessionSnapshotArtifact,
   type SessionSnapshotManifest,
 } from './session-snapshot-artifacts';
 import { scheduleSessionSnapshotSleep } from './session-snapshot-sleep-lifecycle';
