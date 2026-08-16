@@ -116,7 +116,7 @@ Update `/workflow` to persist its state, call `wait_for_subtasks`, and end the c
 
 - `pnpm lint`: passed with existing warnings only.
 - `pnpm typecheck`: passed across all 19 tasks, including the documented Astro baseline.
-- `pnpm test`: passed across all 21 packages; API reported 545 files and 7,272 tests green.
+- `pnpm test`: passed across all 21 packages; API reported 546 files and 7,281 tests green after the lifecycle-race hardening.
 - `pnpm build`: passed across all nine build tasks.
 - `pnpm --filter @simple-agent-manager/api test:workers`: 48 real workerd files and 627 tests passed.
 - `go test -race ./...`: passed with a test-only Docker command stand-in because this workspace has no Docker CLI; the complete ACP race package also passed directly in 15 seconds.

@@ -171,10 +171,11 @@ export async function processTaskWaits(
   // Terminal hooks also cancel a wake that was already enqueued/resolved. This
   // prevents a delayed durable claim from restoring a completed parent.
   if (options.childTaskId) {
-    const related = observations.get(options.childTaskId);
+    const terminalTaskId = options.childTaskId;
+    const related = observations.get(terminalTaskId);
     if (!related || isTerminal(related.status)) {
       hooks.transactionSync(() => {
-        failParentWakeDeliveries(sql, options.childTaskId!, now);
+        failParentWakeDeliveries(sql, terminalTaskId, now);
       });
     }
   }
