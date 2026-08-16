@@ -27,6 +27,7 @@ import {
   getSessionSnapshotConfig,
   prepareSessionSnapshot,
   recordSessionSnapshotArtifactAuthorization,
+  recordSessionSnapshotCaptureFailure,
   recordSessionSnapshotProgress,
   recordSessionSnapshotRestoreResult,
   type SessionSnapshotArtifact,
@@ -251,6 +252,28 @@ sessionSnapshotRoutes.post('/:id/session-snapshot/progress', async (c) => {
     throw errors.forbidden('Snapshot chat session does not match workspace');
   }
   const recorded = await recordSessionSnapshotProgress(db, { chatSessionId, generation });
+  if (!recorded) {
+    throw errors.conflict('Snapshot capture generation is no longer current');
+  }
+  return c.body(null, 204);
+});
+
+sessionSnapshotRoutes.post('/:id/session-snapshot/failure', async (c) => {
+  const workspaceId = c.req.param('id');
+  await verifyWorkspaceCallbackAuth(c, workspaceId);
+  const { db, workspace } = await requireWorkspace(c, workspaceId);
+  const body = await readJsonBody(c);
+  const chatSessionId = requiredStringField(body, 'chatSessionId');
+  const generation = requiredStringField(body, 'generation');
+  const error = requiredStringField(body, 'error');
+  if (!workspace.chatSessionId || workspace.chatSessionId !== chatSessionId) {
+    throw errors.forbidden('Snapshot chat session does not match workspace');
+  }
+  const recorded = await recordSessionSnapshotCaptureFailure(db, c.env, {
+    chatSessionId,
+    generation,
+    error,
+  });
   if (!recorded) {
     throw errors.conflict('Snapshot capture generation is no longer current');
   }

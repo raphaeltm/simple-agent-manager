@@ -32,8 +32,8 @@ The failed completion then caused the sleep watchdog to fabricate transcript-onl
 - [x] Report background capture failures to the control plane and preserve the real failure reason in degraded completion.
 - [x] Add bounded retry escape for post-sleep capture retries against stopped workspaces.
 - [x] Add regression tests for checksum authorization fallback, no-checksum diagnostics, degraded wake LoadSession skipping, home-skipped control restore, harness-first budget ordering, and new excludes.
-- [ ] Run local validation for impacted API and vm-agent tests.
-- [ ] Run specialist reviews required by `/do`.
+- [x] Run local validation for impacted API and vm-agent tests.
+- [x] Run specialist reviews required by `/do`.
 - [ ] Validate presigned PUT checksum behavior against real R2 on staging and record the accepted/rejected header matrix.
 - [ ] Deploy to staging with fresh VM-agent nodes, run VM sleep→wake E2E, then create/merge PR and monitor production deploy.
 

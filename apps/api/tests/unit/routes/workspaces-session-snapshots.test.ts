@@ -13,6 +13,7 @@ const mocks = vi.hoisted(() => ({
   getRestorableSessionSnapshot: vi.fn(),
   prepareSessionSnapshot: vi.fn(),
   recordSessionSnapshotArtifactAuthorization: vi.fn(),
+  recordSessionSnapshotCaptureFailure: vi.fn(),
   recordSessionSnapshotProgress: vi.fn(),
   recordSessionSnapshotRestoreResult: vi.fn(),
   resolveSessionSnapshotUploadTargets: vi.fn(),
@@ -40,6 +41,7 @@ vi.mock('../../../src/services/session-snapshots', async (importOriginal) => {
     getRestorableSessionSnapshot: mocks.getRestorableSessionSnapshot,
     prepareSessionSnapshot: mocks.prepareSessionSnapshot,
     recordSessionSnapshotArtifactAuthorization: mocks.recordSessionSnapshotArtifactAuthorization,
+    recordSessionSnapshotCaptureFailure: mocks.recordSessionSnapshotCaptureFailure,
     recordSessionSnapshotProgress: mocks.recordSessionSnapshotProgress,
     recordSessionSnapshotRestoreResult: mocks.recordSessionSnapshotRestoreResult,
   };
@@ -121,6 +123,7 @@ describe('workspaces session snapshot callback routes', () => {
     );
     mocks.verifySessionSnapshotRelayAuthorization.mockResolvedValue(undefined);
     mocks.recordSessionSnapshotArtifactAuthorization.mockResolvedValue(true);
+    mocks.recordSessionSnapshotCaptureFailure.mockResolvedValue(true);
     mocks.recordSessionSnapshotProgress.mockResolvedValue(true);
     mocks.resolveSessionSnapshotUploadTargets.mockImplementation(
       async (_env: Env, input: { directUploadSupported: boolean }) => ({
@@ -281,6 +284,58 @@ describe('workspaces session snapshot callback routes', () => {
         body: JSON.stringify({
           chatSessionId: 'chat-1',
           generation: 'generation-old',
+        }),
+      },
+      runtimeBindings
+    );
+
+    expect(res.status).toBe(409);
+  });
+
+  it('records vm-agent snapshot failure for the current capture generation', async () => {
+    const res = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/failure',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer callback-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chatSessionId: 'chat-1',
+          generation: 'generation-1',
+          error: 'snapshot control plane returned HTTP 400: checksum mismatch',
+        }),
+      },
+      runtimeBindings
+    );
+
+    expect(res.status).toBe(204);
+    expect(mocks.recordSessionSnapshotCaptureFailure).toHaveBeenCalledWith(
+      expect.anything(),
+      runtimeBindings,
+      {
+        chatSessionId: 'chat-1',
+        generation: 'generation-1',
+        error: 'snapshot control plane returned HTTP 400: checksum mismatch',
+      }
+    );
+  });
+
+  it('rejects snapshot failure for a stale capture generation', async () => {
+    mocks.recordSessionSnapshotCaptureFailure.mockResolvedValueOnce(false);
+    const res = await app.request(
+      '/api/workspaces/WS_1/session-snapshot/failure',
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer callback-token',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          chatSessionId: 'chat-1',
+          generation: 'generation-old',
+          error: 'capture failed',
         }),
       },
       runtimeBindings

@@ -124,6 +124,7 @@ export interface SessionSnapshotCaptureState {
   degradation: string;
   snapshotGeneration: string | null;
   captureGeneration: string | null;
+  captureError: string | null;
   updatedAt: string;
 }
 
@@ -138,6 +139,7 @@ export async function getSessionSnapshotCaptureState(
         degradation: schema.sessionSnapshots.degradation,
         snapshotGeneration: schema.sessionSnapshots.snapshotGeneration,
         captureGeneration: schema.sessionSnapshots.captureGeneration,
+        captureError: schema.sessionSnapshots.captureError,
         updatedAt: schema.sessionSnapshots.updatedAt,
       })
       .from(schema.sessionSnapshots)
@@ -472,6 +474,7 @@ export async function prepareSessionSnapshot(
     recoveryClaimedAt: null,
     snapshotGeneration: null,
     captureGeneration: generation,
+    captureError: null,
     authorizedHomeBytes: null,
     authorizedHomeSha256: null,
     authorizedWipBytes: null,
@@ -501,6 +504,7 @@ export async function prepareSessionSnapshot(
           agentSessionId: input.agentSessionId,
           runtime: input.runtime,
           captureGeneration: generation,
+          captureError: null,
           authorizedHomeBytes: null,
           authorizedHomeSha256: null,
           authorizedWipBytes: null,

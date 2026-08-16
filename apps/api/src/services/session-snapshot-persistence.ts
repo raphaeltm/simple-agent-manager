@@ -101,6 +101,7 @@ export async function completeSessionSnapshot(
       manifestR2Key,
       snapshotGeneration: captureGeneration,
       captureGeneration: null,
+      captureError: null,
       authorizedHomeBytes: null,
       authorizedHomeSha256: null,
       authorizedWipBytes: null,
@@ -162,6 +163,31 @@ export async function recordSessionSnapshotArtifactAuthorization(
     .set({
       ...values,
       updatedAt: new Date().toISOString(),
+    })
+    .where(
+      and(
+        eq(schema.sessionSnapshots.chatSessionId, input.chatSessionId),
+        eq(schema.sessionSnapshots.captureGeneration, input.generation)
+      )
+    );
+  return (result.meta.changes ?? 0) > 0;
+}
+
+export async function recordSessionSnapshotCaptureFailure(
+  db: Db,
+  env: Env,
+  input: {
+    chatSessionId: string;
+    generation: string;
+    error: string;
+    now?: Date;
+  }
+): Promise<boolean> {
+  const result = await db
+    .update(schema.sessionSnapshots)
+    .set({
+      captureError: sessionLifecycleError(env, input.error),
+      updatedAt: (input.now ?? new Date()).toISOString(),
     })
     .where(
       and(

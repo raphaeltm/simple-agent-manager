@@ -30,6 +30,7 @@ function snapshotProgressToken(
     state.degradation,
     state.snapshotGeneration ?? '',
     state.captureGeneration ?? '',
+    state.captureError ?? '',
     state.updatedAt,
   ].join(':');
 }
@@ -115,6 +116,26 @@ export async function waitForFinalSessionSnapshot(
       lastProgressAt = now;
     }
     activeCaptureGeneration = current?.captureGeneration ?? activeCaptureGeneration;
+    if (current?.captureGeneration && current.captureError) {
+      const degraded = await completeActiveSessionSnapshotAsDegraded(db, env, {
+        workspaceId: input.workspaceId,
+        chatSessionId: input.chatSessionId,
+        agentSessionId: input.agentSessionId,
+        runtime: input.runtime,
+        captureGeneration: current.captureGeneration,
+        agentType: input.agentType,
+        acpSessionId: input.acpSessionId,
+        reason: current.captureError,
+      });
+      if (degraded) {
+        log.warn('session_sleep.snapshot_degraded_after_capture_failure', {
+          workspaceId: input.workspaceId,
+          chatSessionId: input.chatSessionId,
+          generation: current.captureGeneration,
+        });
+        return;
+      }
+    }
     if (
       current &&
       !current.captureGeneration &&

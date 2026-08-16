@@ -1215,6 +1215,7 @@ export const sessionSnapshots = sqliteTable(
     sleepClaimedAt: text('sleep_claimed_at'),
     snapshotGeneration: text('snapshot_generation'),
     captureGeneration: text('capture_generation'),
+    captureError: text('capture_error'),
     authorizedHomeBytes: integer('authorized_home_bytes'),
     authorizedHomeSha256: text('authorized_home_sha256'),
     authorizedWipBytes: integer('authorized_wip_bytes'),

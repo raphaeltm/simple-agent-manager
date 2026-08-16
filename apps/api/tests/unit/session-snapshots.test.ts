@@ -21,6 +21,7 @@ import {
   isSessionSnapshotSleepReleasable,
   prepareSessionSnapshot,
   recordSessionSnapshotArtifactAuthorization,
+  recordSessionSnapshotCaptureFailure,
   recordSessionSnapshotProgress,
   verifySessionSnapshotArtifactsForSleep,
 } from '../../src/services/session-snapshots';
@@ -479,6 +480,57 @@ describe('session snapshot progress persistence', () => {
         authorized_home_sha256: sha,
         authorized_wip_bytes: null,
         authorized_wip_sha256: null,
+      });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('records capture failure only for the active capture generation', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      sqlite
+        .prepare(
+          `INSERT INTO session_snapshots
+             (id, workspace_id, user_id, chat_session_id, agent_session_id, runtime, status,
+              degradation, manifest_r2_key, snapshot_generation, capture_generation, expires_at,
+              updated_at)
+           VALUES ('snapshot-1', 'workspace-1', 'user-1', 'chat-1', 'agent-1', 'vm',
+              'available', 'none', 'snapshots/chat-1/previous/manifest.json', 'previous',
+              'capture-1', '2026-08-20T00:00:00.000Z', '2026-08-15T00:00:00.000Z')`
+        )
+        .run();
+      const testEnv = env({
+        DATABASE: createSqliteD1(sqlite),
+        SESSION_LIFECYCLE_ERROR_MAX_LENGTH: '24',
+      });
+      const db = drizzle(testEnv.DATABASE, { schema });
+
+      await expect(
+        recordSessionSnapshotCaptureFailure(db, testEnv, {
+          chatSessionId: 'chat-1',
+          generation: 'stale-capture',
+          error: 'this should not be recorded',
+        })
+      ).resolves.toBe(false);
+
+      await expect(
+        recordSessionSnapshotCaptureFailure(db, testEnv, {
+          chatSessionId: 'chat-1',
+          generation: 'capture-1',
+          error: 'real capture failure with sensitive tail',
+          now: new Date('2026-08-15T00:01:00.000Z'),
+        })
+      ).resolves.toBe(true);
+
+      expect(
+        sqlite
+          .prepare(`SELECT capture_error, updated_at FROM session_snapshots WHERE id = 'snapshot-1'`)
+          .get()
+      ).toEqual({
+        capture_error: 'real capture failure wit',
+        updated_at: '2026-08-15T00:01:00.000Z',
       });
     } finally {
       sqlite.close();
