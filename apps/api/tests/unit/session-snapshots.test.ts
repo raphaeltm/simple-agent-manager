@@ -174,6 +174,59 @@ describe('session snapshot sleep artifact verification', () => {
       verifySessionSnapshotArtifactsForSleep(testEnv, { ...snapshot, wipSha256: '0'.repeat(64) })
     ).resolves.toBe(false);
   });
+
+  it('allows completed direct-upload artifacts whose R2 HEAD has no stored checksum', async () => {
+    const testEnv = env({
+      SESSION_SNAPSHOT_R2_PREFIX: 'snapshots',
+      R2: {
+        head: async (key: string) =>
+          key.endsWith('/manifest.json')
+            ? { size: 120, checksums: {} }
+            : key.endsWith('/home.tar')
+              ? { size: 42, checksums: {} }
+              : null,
+      } as unknown as Env['R2'],
+    });
+    const snapshot = {
+      workspaceId: 'workspace-1',
+      chatSessionId: 'chat-1',
+      status: 'available',
+      degradation: 'none',
+      snapshotGeneration: generation,
+      manifestR2Key: buildSessionSnapshotR2Key(testEnv, 'chat-1', generation, 'manifest'),
+      manifestJson: JSON.stringify({
+        version: 1,
+        chatSessionId: 'chat-1',
+        workspaceId: 'workspace-1',
+        status: 'available',
+        degradation: 'none',
+        skipped: [],
+        artifacts: { home: { sizeBytes: 42, sha256: sha } },
+        createdAt: '2026-08-15T00:00:00.000Z',
+      }),
+      homeR2Key: buildSessionSnapshotR2Key(testEnv, 'chat-1', generation, 'home'),
+      homeSha256: sha,
+      wipR2Key: null,
+      wipSha256: null,
+    } as any;
+
+    await expect(verifySessionSnapshotArtifactsForSleep(testEnv, snapshot)).resolves.toBe(true);
+    await expect(
+      verifySessionSnapshotArtifactsForSleep(testEnv, {
+        ...snapshot,
+        manifestJson: JSON.stringify({
+          version: 1,
+          chatSessionId: 'chat-1',
+          workspaceId: 'workspace-1',
+          status: 'available',
+          degradation: 'none',
+          skipped: [],
+          artifacts: { home: { sizeBytes: 41, sha256: sha } },
+          createdAt: '2026-08-15T00:00:00.000Z',
+        }),
+      })
+    ).resolves.toBe(false);
+  });
 });
 
 describe('session snapshot progress persistence', () => {
@@ -357,10 +410,10 @@ describe('session snapshot progress persistence', () => {
       expect(JSON.parse(row.manifest_json)).toMatchObject({
         status: 'degraded',
         degradation: 'transcript-only',
-        acpSessionId: 'acp-1',
-        agentType: 'openai-codex',
         artifacts: {},
       });
+      expect(JSON.parse(row.manifest_json)).not.toHaveProperty('acpSessionId');
+      expect(JSON.parse(row.manifest_json)).not.toHaveProperty('agentType');
       expect(r2.put).toHaveBeenCalledWith(
         'snapshots/chat-1/capture-1/manifest.json',
         expect.stringContaining('Workspace snapshot made no progress'),
@@ -395,16 +448,12 @@ describe('session snapshot recovery lifecycle', () => {
       const db = drizzle(testEnv.DATABASE, { schema });
 
       await expect(
-        claimSessionSnapshotRecovery(
-          db,
-          testEnv,
-          {
-            chatSessionId: 'chat-1',
-            userId: 'user-1',
-            taskId: 'wake-task-1',
-            now: new Date('2026-08-15T00:05:00.000Z'),
-          }
-        )
+        claimSessionSnapshotRecovery(db, testEnv, {
+          chatSessionId: 'chat-1',
+          userId: 'user-1',
+          taskId: 'wake-task-1',
+          now: new Date('2026-08-15T00:05:00.000Z'),
+        })
       ).resolves.toEqual({ status: 'claimed', taskId: 'wake-task-1' });
 
       expect(

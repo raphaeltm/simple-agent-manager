@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
@@ -51,6 +52,14 @@ func snapshotFileIdentity(filePath string) (int64, string, error) {
 		return 0, "", err
 	}
 	return fileInfo.Size(), hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func checksumBase64(checksum string) (string, error) {
+	bytes, err := hex.DecodeString(strings.TrimSpace(checksum))
+	if err != nil {
+		return "", err
+	}
+	return base64.StdEncoding.EncodeToString(bytes), nil
 }
 
 func (s *Server) uploadSessionSnapshotArtifact(ctx context.Context, legacyPath, directUploadPath, filePath, token string, idleTimeout time.Duration) (int64, string, error) {
@@ -129,6 +138,9 @@ func (s *Server) uploadPreparedSnapshotFile(ctx context.Context, uploadPath, fil
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 		req.Header.Set("X-SAM-Content-SHA256", checksum)
+	}
+	if checksumHeader, checksumErr := checksumBase64(checksum); checksumErr == nil {
+		req.Header.Set("x-amz-checksum-sha256", checksumHeader)
 	}
 	req.ContentLength = size
 	res, err := s.controlPlaneHTTPClient(s.sessionSnapshotOperationTimeout()).Do(req)
@@ -229,6 +241,9 @@ func (s *Server) handleSessionSnapshotUploadRelay(w http.ResponseWriter, r *http
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "could not create snapshot upload")
 		return
+	}
+	if checksumHeader, checksumErr := checksumBase64(checksum); checksumErr == nil {
+		uploadRequest.Header.Set("x-amz-checksum-sha256", checksumHeader)
 	}
 	uploadRequest.ContentLength = r.ContentLength
 	response, err := s.controlPlaneHTTPClient(s.sessionSnapshotOperationTimeout()).Do(uploadRequest)

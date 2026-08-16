@@ -64,6 +64,14 @@ func (s *Server) startBackgroundSessionSnapshot(input *sessionSnapshotHandlerInp
 		result, err := s.runSessionSnapshot(ctx, input)
 		if err != nil {
 			slog.Warn("Background session snapshot failed", "chatSessionId", input.chatSessionID, "workspaceId", input.workspaceID, "error", err)
+			if s.errorReporter != nil {
+				s.errorReporter.ReportError(err, "session_snapshot.background_capture", input.workspaceID, map[string]interface{}{
+					"chatSessionId": input.chatSessionID,
+					"sessionId":     input.sessionID,
+					"runtime":       input.runtimeName,
+					"agentType":     input.agentType,
+				})
+			}
 			return
 		}
 		slog.Info("Background session snapshot completed", "chatSessionId", input.chatSessionID, "workspaceId", input.workspaceID, "result", result)

@@ -23,6 +23,7 @@ import {
 
 export const DEFAULT_SESSION_SLEEP_SWEEP_BATCH_SIZE = 10;
 export const DEFAULT_SESSION_SLEEP_SWEEP_WALL_BUDGET_MS = 20_000;
+export const TERMINAL_SESSION_SLEEP_STATUS = 'terminal_failed';
 export { DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS, DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS };
 
 export interface SessionSleepSweepStats {
@@ -39,6 +40,14 @@ export interface SessionSleepSweepStats {
 
 export interface SessionSleepSweepContext {
   waitUntil(promise: Promise<unknown>): void;
+}
+
+function isTerminalPostSleepCaptureError(error: string): boolean {
+  return (
+    error.includes(
+      'resolve snapshot devcontainer: workspace is not running/recovery (status: stopped)'
+    ) || error.includes('Workspace cannot sleep from status stopped')
+  );
 }
 
 async function reconcileUnscheduledSessionSleeps(
@@ -172,6 +181,27 @@ async function sleepClaimedSession(
         error: sessionLifecycleError(env, persistenceError),
       });
     });
+    if (isTerminalPostSleepCaptureError(lifecycleError)) {
+      await db
+        .update(schema.sessionSnapshots)
+        .set({
+          sleepStatus: TERMINAL_SESSION_SLEEP_STATUS,
+          sleepAfter: null,
+          sleepError: lifecycleError,
+          sleepClaimId: null,
+          sleepClaimedAt: null,
+          updatedAt: new Date().toISOString(),
+        })
+        .where(eq(schema.sessionSnapshots.id, candidate.snapshotId))
+        .catch((persistenceError) => {
+          log.error('session_sleep_sweep.terminal_failure_persistence_failed', {
+            snapshotId: candidate.snapshotId,
+            workspaceId: candidate.workspaceId,
+            chatSessionId: candidate.chatSessionId,
+            error: sessionLifecycleError(env, persistenceError),
+          });
+        });
+    }
     log.warn('session_sleep_sweep.failed', {
       snapshotId: candidate.snapshotId,
       workspaceId: candidate.workspaceId,

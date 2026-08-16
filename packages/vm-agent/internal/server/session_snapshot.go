@@ -275,7 +275,7 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *Workspac
 	if snapshotTarget == nil {
 		baseCommit, wipPath, wipSkipped, err = createWIPBundle(ctx, workDir, entryThreshold)
 	} else {
-		baseCommit, wipPath, wipSkipped, err = s.createContainerWIPBundle(ctx, snapshotTarget, entryThreshold, totalBudget)
+		baseCommit, wipPath, wipSkipped, err = s.createContainerWIPBundle(ctx, snapshotTarget, entryThreshold, totalBudget, progress.Report)
 	}
 	manifest.BaseCommit = baseCommit
 	manifest.Skipped = append(manifest.Skipped, wipSkipped...)
@@ -302,7 +302,7 @@ func (s *Server) hibernateSessionSnapshot(ctx context.Context, runtime *Workspac
 	if snapshotTarget == nil {
 		homePath, homeSkipped, err = createSessionStateTarWithContext(ctx, os.UserHomeDir, entryThreshold, remaining, true, progress.Report)
 	} else {
-		homePath, homeSkipped, err = s.createContainerHomeTar(ctx, snapshotTarget, entryThreshold, remaining)
+		homePath, homeSkipped, err = s.createContainerHomeTar(ctx, snapshotTarget, entryThreshold, remaining, progress.Report)
 	}
 	progress.Report(ctx, "home-captured")
 	manifest.Skipped = append(manifest.Skipped, homeSkipped...)
@@ -445,6 +445,12 @@ func (s *Server) restoreSessionSnapshot(ctx context.Context, runtime *WorkspaceR
 func snapshotHarnessResumeIdentity(manifest *snapshotManifest, sessionID, requestedAgentType string) (string, string, error) {
 	if manifest == nil {
 		return "", "", fmt.Errorf("snapshot manifest is unavailable")
+	}
+	if manifest.Artifacts == nil {
+		return "", "", fmt.Errorf("snapshot does not contain restored home state")
+	}
+	if _, ok := manifest.Artifacts["home"]; !ok {
+		return "", "", fmt.Errorf("snapshot does not contain restored home state")
 	}
 	// AgentSessionID is the old control-plane routing identity. A VM wake creates
 	// a replacement routing row, while AcpSessionID remains the authoritative
