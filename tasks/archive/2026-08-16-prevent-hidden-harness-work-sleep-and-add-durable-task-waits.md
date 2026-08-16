@@ -94,7 +94,14 @@ Terminal hooks nudge ProjectData immediately. A bounded, configurable alarm reco
 The live parent is also carried into the replacement TaskRunner as revocable
 authority. The TaskRunner validates the exact recovery task, source parent,
 chat, project, and snapshot claim before storing its initial alarm and before
-every alarm-driven orchestration step. A definite start failure atomically
+every alarm-driven orchestration step. It revalidates again immediately before
+node/workspace allocation, provider provisioning, workspace dispatch,
+attachment upload, agent restore/start, snapshot wake, and the final task
+handoff. The delegated-to-in-progress D1 transition conditionally proves the
+same live source and snapshot claim, while an already-restored/in-progress
+pair remains retry-convergent across a DO crash. Every terminal/no-op race runs
+the same idempotent ownership finalizer, including the restored-snapshot crash
+window. A definite start failure atomically
 fails the replacement, restores the source task/workspace bindings, and marks
 the snapshot retryable; later TaskRunner failures restore those bindings before
 the DO can complete. Human follow-ups that recover an already-completed
@@ -103,7 +110,10 @@ conversation remain intentionally unguarded.
 For Cloudflare Containers, the same source guard is passed as internal RPC
 metadata rather than serialized into the VM request. Capability, prompt, and
 receipt calls select a guarded `VmAgentContainer` RPC that revalidates D1 inside
-the container DO immediately before `prepareForRequest()` can cold-wake compute.
+the container DO before request preparation, again at the physical
+`startRuntime()` boundary, before snapshot restore, and before the final
+`containerFetch()` prompt/request boundary. A revocation after a cold start
+tears the replacement container back down rather than leaving stale compute.
 
 Update `/workflow` to persist its state, call `wait_for_subtasks`, and end the current turn. Use bounded foreground polling only when the connected SAM server lacks the tool.
 
@@ -133,9 +143,10 @@ Update `/workflow` to persist its state, call `wait_for_subtasks`, and end the c
 
 - `pnpm lint`: passed with existing warnings only.
 - `pnpm typecheck`: passed across all 19 tasks, including the documented Astro baseline.
-- `pnpm test`: passed across all 21 packages; API reported 549 files and 7,309 tests green after the lifecycle-race hardening.
+- `pnpm test`: the full API suite reported 550 files and 7,323 tests green after the final authority-boundary hardening.
 - `pnpm build`: passed across all nine build tasks.
-- `pnpm --filter @simple-agent-manager/api test:workers`: 48 real workerd files and 632 tests passed.
+- `pnpm --filter @simple-agent-manager/api test:workers`: 49 real workerd files and 636 tests passed, including a deterministic D1 trigger that revokes the source after alarm-entry authorization but before allocation.
+- Focused runtime-work mirror coverage: 100% statements, lines, and functions; 92.39% branches.
 - `go test -race ./...`: passed with a test-only Docker command stand-in because this workspace has no Docker CLI; the complete ACP race package also passed directly in 15 seconds.
 - Format ratchet, Oxlint shadows, migration safety/order, DO migration safety, source-contract, type-boundary, runtime-boundary, file-size, stale-artifact, repo-visibility, dependency-governance, direct-dependency, deployment-script, Wrangler-binding, agent-manifest, and Gitleaks current-tree/PR-range gates passed.
 - Task-completion validator sections A-F: PASS. Research findings map to implementation items; every implementation item is present in the diff; acceptance behavior has focused and vertical-slice coverage; environment/API/workflow/process documentation matches the code; no implementation gap remains. Specialist, staging, CI, merge, and production checks are release gates in `/do` Phases 5-7 and remain tracked outside pre-PR task completion.

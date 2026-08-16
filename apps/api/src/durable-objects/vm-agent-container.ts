@@ -7,6 +7,7 @@ import { maybeJsonRecord } from '../lib/runtime-validation';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
 import {
   isSessionRecoverySourceTaskGuardValid,
+  SessionRecoveryAuthorityRevokedError,
   type SessionRecoverySourceTaskGuard,
 } from '../services/session-recovery-authority';
 import {
@@ -90,6 +91,16 @@ function stoppedRecoveryResult(): VmAgentContainerRecoveryResult {
   };
 }
 
+function revokedSourceTaskResponse(): Response {
+  return Response.json(
+    {
+      error: 'SOURCE_TASK_NOT_WAKEABLE',
+      message: 'The source task no longer authorizes this runtime request.',
+    },
+    { status: 409 }
+  );
+}
+
 export class VmAgentContainer extends Container<Env> {
   defaultPort = 8080;
   requiredPorts = [8080];
@@ -133,7 +144,23 @@ export class VmAgentContainer extends Container<Env> {
   }
 
   async proxyHttp(request: Request, port?: number): Promise<Response> {
-    const ready = await this.prepareForRequest();
+    return this.proxyHttpAuthorized(request, port);
+  }
+
+  private async proxyHttpAuthorized(
+    request: Request,
+    port?: number,
+    sourceTaskGuard?: VmAgentContainerRequestGuard
+  ): Promise<Response> {
+    let ready: VmAgentContainerRecoveryResult;
+    try {
+      ready = await this.prepareForRequest(sourceTaskGuard);
+    } catch (error) {
+      if (error instanceof SessionRecoveryAuthorityRevokedError) {
+        return revokedSourceTaskResponse();
+      }
+      throw error;
+    }
     if (!ready.ok) return resultResponse(ready);
 
     const state = await this.getState();
@@ -150,6 +177,9 @@ export class VmAgentContainer extends Container<Env> {
     }
 
     try {
+      // prepareForRequest may include a long restore. Revalidate again at the
+      // actual prompt/request boundary before bytes reach the runtime.
+      await this.assertSourceTaskGuard(sourceTaskGuard);
       const response = await this.containerFetch(request, port ?? this.defaultPort);
       if (await isMissingSessionHostResponse(response)) {
         await this.beginUnexpectedRecovery({
@@ -161,6 +191,9 @@ export class VmAgentContainer extends Container<Env> {
       }
       return response;
     } catch (error) {
+      if (error instanceof SessionRecoveryAuthorityRevokedError) {
+        return revokedSourceTaskResponse();
+      }
       await this.beginUnexpectedRecovery({
         trigger: 'request',
         cause: {
@@ -183,15 +216,9 @@ export class VmAgentContainer extends Container<Env> {
     // side check alone leaves a network-RPC window where a terminal parent can
     // still cold-start compute.
     if (!(await isSessionRecoverySourceTaskGuardValid(this.env.DATABASE, sourceTaskGuard))) {
-      return Response.json(
-        {
-          error: 'SOURCE_TASK_NOT_WAKEABLE',
-          message: 'The source task no longer authorizes this runtime request.',
-        },
-        { status: 409 }
-      );
+      return revokedSourceTaskResponse();
     }
-    return this.proxyHttp(request, port);
+    return this.proxyHttpAuthorized(request, port, sourceTaskGuard);
   }
 
   override async fetch(request: Request): Promise<Response> {
@@ -457,7 +484,20 @@ export class VmAgentContainer extends Container<Env> {
     });
   }
 
-  private async prepareForRequest(): Promise<VmAgentContainerRecoveryResult> {
+  private async assertSourceTaskGuard(
+    sourceTaskGuard?: VmAgentContainerRequestGuard
+  ): Promise<void> {
+    if (
+      sourceTaskGuard &&
+      !(await isSessionRecoverySourceTaskGuardValid(this.env.DATABASE, sourceTaskGuard))
+    ) {
+      throw new SessionRecoveryAuthorityRevokedError();
+    }
+  }
+
+  private async prepareForRequest(
+    sourceTaskGuard?: VmAgentContainerRequestGuard
+  ): Promise<VmAgentContainerRecoveryResult> {
     const status = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
     if (status === 'running' || status === 'launching') {
       return { ok: true, status: 'running' };
@@ -473,10 +513,12 @@ export class VmAgentContainer extends Container<Env> {
     if (status === 'stopping' || status === 'stopped') {
       return stoppedRecoveryResult();
     }
-    return this.ensureAwake();
+    return this.ensureAwake(sourceTaskGuard);
   }
 
-  private async ensureAwake(): Promise<VmAgentContainerRecoveryResult> {
+  private async ensureAwake(
+    sourceTaskGuard?: VmAgentContainerRequestGuard
+  ): Promise<VmAgentContainerRecoveryResult> {
     const run = this.wakeChain.then(async () => {
       let status = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
       if (status === 'running' || status === 'launching') {
@@ -545,7 +587,7 @@ export class VmAgentContainer extends Container<Env> {
       };
       await this.ctx.storage.put(RECOVERY_STATE_KEY, recovery);
       await this.ctx.storage.put('lifecycleStatus', 'waking' satisfies LifecycleStatus);
-      return this.wakeFromSnapshot(recovery);
+      return this.wakeFromSnapshot(recovery, sourceTaskGuard);
     });
     this.wakeChain = run.then(
       () => undefined,
@@ -620,7 +662,8 @@ export class VmAgentContainer extends Container<Env> {
   }
 
   private async wakeFromSnapshot(
-    recovery: RuntimeRecoveryState
+    recovery: RuntimeRecoveryState,
+    sourceTaskGuard?: VmAgentContainerRequestGuard
   ): Promise<VmAgentContainerRecoveryResult> {
     const config = await this.ctx.storage.get<VmAgentContainerLaunchConfig>('launchConfig');
     if (!config) return this.degradeRecovery(recovery, 'launch');
@@ -647,8 +690,10 @@ export class VmAgentContainer extends Container<Env> {
 
     try {
       const nodeCallbackToken = await signNodeCallbackToken(config.nodeId, this.env);
+      await this.assertSourceTaskGuard(sourceTaskGuard);
       await this.startRuntime(config, { nodeCallbackToken });
     } catch (error) {
+      if (error instanceof SessionRecoveryAuthorityRevokedError) throw error;
       log.warn('vm_agent_container_recovery_launch_failed', {
         nodeId: config.nodeId,
         workspaceId: config.workspaceId,
@@ -672,6 +717,7 @@ export class VmAgentContainer extends Container<Env> {
       const restoreUrl = new URL(
         `http://localhost:${config.vmAgentPort}/workspaces/${config.workspaceId}/agent-sessions/${context.agentSessionId}/restore`
       );
+      await this.assertSourceTaskGuard(sourceTaskGuard);
       const restoreResponse = await this.containerFetch(
         new Request(restoreUrl.toString(), {
           method: 'POST',
@@ -706,6 +752,7 @@ export class VmAgentContainer extends Container<Env> {
         return this.degradeRecovery(restoring, 'restore_status', target);
       }
 
+      await this.assertSourceTaskGuard(sourceTaskGuard);
       const completed = await this.withLifecycleLock(async () => {
         const lifecycle = await this.ctx.storage.get<LifecycleStatus>('lifecycleStatus');
         if (lifecycle === 'stopping' || lifecycle === 'stopped') return false;
@@ -731,6 +778,10 @@ export class VmAgentContainer extends Container<Env> {
       });
       return { ok: true, status: 'running' };
     } catch (error) {
+      if (error instanceof SessionRecoveryAuthorityRevokedError) {
+        await this.stop().catch(() => undefined);
+        throw error;
+      }
       log.warn('vm_agent_container_recovery_restore_failed', {
         nodeId: config.nodeId,
         workspaceId: config.workspaceId,

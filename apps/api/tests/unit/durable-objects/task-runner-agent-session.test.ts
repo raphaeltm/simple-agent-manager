@@ -234,6 +234,7 @@ function makeContext(
         }),
       },
     },
+    assertRecoveryAuthority: vi.fn(async () => undefined),
     updateD1ExecutionStep: vi.fn(async () => undefined),
   } as unknown as TaskRunnerContext;
 
@@ -381,6 +382,33 @@ describe('handleAgentSession', () => {
       true
     );
     expect(storageWrites.at(-1)?.completed).toBe(true);
+  });
+
+  it('rechecks source authority at the agent boundary and never sends a stale initial prompt', async () => {
+    restoreAgentSessionOnNodeMock.mockResolvedValueOnce({
+      status: 'degraded',
+      message: 'Restore requires a fresh session.',
+    });
+    const state = makeState({
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'chat-1',
+        recoverySourceTaskId: 'parent-task-1',
+      },
+    });
+    const { rc } = makeContext();
+    const revoked = Object.assign(new Error('Session recovery authority was revoked'), {
+      permanent: true,
+    });
+    vi.mocked(rc.assertRecoveryAuthority).mockImplementation(async () => {
+      if (restoreAgentSessionOnNodeMock.mock.calls.length > 0) throw revoked;
+    });
+
+    await expect(handleAgentSession(state, rc)).rejects.toBe(revoked);
+
+    expect(restoreAgentSessionOnNodeMock).toHaveBeenCalledOnce();
+    expect(startAgentSessionOnNodeMock).not.toHaveBeenCalled();
+    expect(completeSessionSnapshotRecoveryMock).not.toHaveBeenCalled();
   });
 
   it('is idempotent on retry when agentSessionId already exists in D1', async () => {

@@ -8,6 +8,7 @@ import { type CredentialSource, DEFAULT_WORKSPACE_PROFILE } from '@simple-agent-
 import { log } from '../../lib/logger';
 import type { DevcontainerCacheCredentials } from '../../services/devcontainer-cache';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
+import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
 import { computeBackoffMs, isTransientError } from './helpers';
 import { ensureSessionLinked } from './state-machine';
 import type { TaskRunnerContext, TaskRunnerState } from './types';
@@ -47,6 +48,7 @@ export async function handleWorkspaceCreation(
   }
 
   // Transition task: queued → delegated (optimistic locking)
+  await rc.assertRecoveryAuthority(state);
   const now = new Date().toISOString();
   const result = await rc.env.DATABASE.prepare(
     `UPDATE tasks SET status = 'delegated', updated_at = ? WHERE id = ? AND status = 'queued'`
@@ -141,6 +143,7 @@ async function createAndProvisionWorkspace(
   const uniqueName = await resolveUniqueWorkspaceDisplayName(db, nodeId, workspaceName);
   const now = new Date().toISOString();
 
+  await rc.assertRecoveryAuthority(state);
   await db.insert(schema.workspaces).values({
     id: workspaceId,
     nodeId,
@@ -179,6 +182,7 @@ async function ensureWorkspaceBookkeeping(
   workspaceId: string,
   now = new Date().toISOString()
 ): Promise<void> {
+  await rc.assertRecoveryAuthority(state);
   await ensureSessionLinked(state, workspaceId, rc);
   await setOutputBranch(state, rc, now);
   await ensureBranchExistsOnRemote(state, rc);
@@ -283,6 +287,7 @@ export async function ensureBranchExistsOnRemote(
 
     const externalInstallationId = getExternalInstallationId(installation);
     const { ensureBranchExists } = await import('../../services/github-app');
+    await rc.assertRecoveryAuthority(state);
     const created = await ensureBranchExists(
       externalInstallationId,
       owner,
@@ -305,6 +310,7 @@ export async function ensureBranchExistsOnRemote(
       });
     }
   } catch (err) {
+    if (err instanceof SessionRecoveryAuthorityRevokedError) throw err;
     log.warn('task_runner_do.ensure_branch.error', {
       taskId: state.taskId,
       branch: state.config.branch,
@@ -347,6 +353,7 @@ async function ensureGitLabBranchExistsOnRemote(
       });
       return;
     }
+    await rc.assertRecoveryAuthority(state);
     const created = await ensureGitLabBranchExists({
       env: rc.env,
       userId: state.userId,
@@ -361,6 +368,7 @@ async function ensureGitLabBranchExistsOnRemote(
       });
     }
   } catch (err) {
+    if (err instanceof SessionRecoveryAuthorityRevokedError) throw err;
     log.warn('task_runner_do.ensure_branch.gitlab_error', {
       taskId: state.taskId,
       branch: state.config.branch,
@@ -407,7 +415,9 @@ async function createWorkspaceOnVmAgent(
   const checkoutBranch = state.config.outputBranch || state.config.branch;
   const baseBranch =
     checkoutBranch === state.config.branch ? state.config.defaultBranch : state.config.branch;
+  const devcontainerCache = await getDevcontainerCacheForWorkspace(state, rc, workspaceId);
 
+  await rc.assertRecoveryAuthority(state);
   const response = await createWorkspaceOnNode(nodeId, rc.env, state.userId, {
     workspaceId,
     repository: state.config.repository,
@@ -424,7 +434,7 @@ async function createWorkspaceOnVmAgent(
     githubId: state.config.githubId,
     lightweight: state.config.workspaceProfile === 'lightweight',
     devcontainerConfigName: state.config.devcontainerConfigName ?? undefined,
-    devcontainerCache: await getDevcontainerCacheForWorkspace(state, rc, workspaceId),
+    devcontainerCache,
   });
 
   if (!isWorkspaceDispatchAck(response, workspaceId)) {
@@ -738,6 +748,7 @@ export async function handleAttachmentTransfer(
     let resp: Response;
     try {
       const uploadUrl = `${uploadBaseUrl}?token=${encodeURIComponent(token)}`;
+      await rc.assertRecoveryAuthority(state);
       resp = await fetch(uploadUrl, {
         method: 'POST',
         body: formData,

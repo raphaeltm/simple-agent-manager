@@ -286,6 +286,9 @@ export async function handleNodeProvisioning(
   for (const [i, size] of chain.entries()) {
     const isLastSize = i === chain.length - 1;
 
+    // Quota and credential resolution above can take long enough for the
+    // source parent to terminalize. Revalidate at the allocation boundary.
+    await rc.assertRecoveryAuthority(state);
     const createdNode = await createNodeRecord(rc.env, {
       userId: state.userId,
       credentialAttributionUserId: state.config.credentialAttributionUserId,
@@ -305,6 +308,13 @@ export async function handleNodeProvisioning(
       .bind(createdNode.id, new Date().toISOString(), state.taskId)
       .run();
 
+    // Persist ownership before the provider call so a revocation or crash
+    // after record creation still drives ordinary resource cleanup.
+    state.stepResults.nodeId = createdNode.id;
+    state.stepResults.autoProvisioned = true;
+    state.stepResults.provisionedVmSize = size;
+    await rc.ctx.storage.put('state', state);
+
     log.info('task_runner_do.step.node_provisioning', {
       taskId: state.taskId,
       nodeId: createdNode.id,
@@ -319,6 +329,7 @@ export async function handleNodeProvisioning(
       // the message reporter for chat persistence. rethrowProviderError makes
       // provisionNode surface the typed ProviderError (and delete the failed
       // node row on capacity exhaustion) so we can branch on the category.
+      await rc.assertRecoveryAuthority(state);
       await provisionNode(
         createdNode.id,
         rc.env,
@@ -330,6 +341,9 @@ export async function handleNodeProvisioning(
         },
         { rethrowProviderError: true }
       );
+      // Detect revocation that raced the provider request. The persisted node
+      // identity above lets failTask tear the new compute down safely.
+      await rc.assertRecoveryAuthority(state);
     } catch (err) {
       const isCapacityFailure = err instanceof ProviderError && isTransientCapacityError(err);
 
@@ -342,6 +356,10 @@ export async function handleNodeProvisioning(
 
       // transient_capacity: descend to the next-smaller size if one remains.
       // The failed node row was already deleted inside provisionNode (decision #1).
+      state.stepResults.nodeId = null;
+      state.stepResults.autoProvisioned = false;
+      state.stepResults.provisionedVmSize = null;
+      await rc.ctx.storage.put('state', state);
       if (!isLastSize) {
         const nextSize = chain[i + 1];
         if (nextSize === undefined) {
@@ -369,9 +387,6 @@ export async function handleNodeProvisioning(
     }
 
     // provisionNode returned without throwing — this size was accepted.
-    state.stepResults.nodeId = createdNode.id;
-    state.stepResults.autoProvisioned = true;
-    state.stepResults.provisionedVmSize = size;
     // Update the working size so downstream steps reference the size actually
     // provisioned (relevant when we descended below the requested size).
     state.config.vmSize = size;

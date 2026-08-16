@@ -160,6 +160,8 @@ export interface StartTaskInput {
 export interface TaskRunnerContext {
   env: Env;
   ctx: DurableObjectState;
+  /** Fail closed when a guarded snapshot recovery has lost its live source authority. */
+  assertRecoveryAuthority: (state: TaskRunnerState) => Promise<void>;
   /** Advance to next step: persist state, reset retries, schedule alarm */
   advanceToStep: (state: TaskRunnerState, nextStep: TaskExecutionStep) => Promise<void>;
   /** Get configurable timeout/interval values */

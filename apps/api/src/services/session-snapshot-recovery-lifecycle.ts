@@ -293,8 +293,36 @@ export async function completeSessionSnapshotRecovery(
   db: Db,
   chatSessionId: string,
   taskId: string,
-  workspaceId: string
+  workspaceId: string,
+  recoverySourceTaskId?: string | null
 ): Promise<boolean> {
+  const recoveryTask = alias(schema.tasks, 'snapshot_recovery_task');
+  const recoverySourceTask = alias(schema.tasks, 'snapshot_recovery_source_task');
+  const liveSourceCondition = recoverySourceTaskId
+    ? exists(
+        db
+          .select({ id: recoveryTask.id })
+          .from(recoveryTask)
+          .innerJoin(
+            recoverySourceTask,
+            and(
+              eq(recoverySourceTask.id, recoveryTask.recoverySourceTaskId),
+              eq(recoverySourceTask.projectId, recoveryTask.projectId)
+            )
+          )
+          .where(
+            and(
+              eq(recoveryTask.id, taskId),
+              eq(recoveryTask.recoverySourceTaskId, recoverySourceTaskId),
+              eq(recoveryTask.chatSessionId, chatSessionId),
+              eq(recoveryTask.triggeredBy, 'session-recovery'),
+              notInArray(recoveryTask.status, TERMINAL_TASK_STATUSES),
+              notInArray(recoverySourceTask.status, TERMINAL_TASK_STATUSES),
+              eq(recoveryTask.projectId, schema.sessionSnapshots.projectId)
+            )
+          )
+      )
+    : undefined;
   const result = await db
     .update(schema.sessionSnapshots)
     .set({
@@ -314,7 +342,8 @@ export async function completeSessionSnapshotRecovery(
       and(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
         eq(schema.sessionSnapshots.recoveryTaskId, taskId),
-        inArray(schema.sessionSnapshots.recoveryStatus, ['waking', 'restored'])
+        inArray(schema.sessionSnapshots.recoveryStatus, ['waking', 'restored']),
+        liveSourceCondition
       )
     );
   return (result.meta.changes ?? 0) > 0;
@@ -369,7 +398,7 @@ export async function failSessionSnapshotRecovery(
       and(
         eq(schema.sessionSnapshots.chatSessionId, chatSessionId),
         eq(schema.sessionSnapshots.recoveryTaskId, taskId),
-        eq(schema.sessionSnapshots.recoveryStatus, 'waking')
+        inArray(schema.sessionSnapshots.recoveryStatus, ['waking', 'restored'])
       )
     );
 }

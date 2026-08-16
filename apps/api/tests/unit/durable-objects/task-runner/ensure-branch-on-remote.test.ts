@@ -96,6 +96,7 @@ function makeContext(installation: InstallationRow | null = {
         prepare,
       },
     },
+    assertRecoveryAuthority: vi.fn().mockResolvedValue(undefined),
   } as unknown as TaskRunnerContext;
 }
 

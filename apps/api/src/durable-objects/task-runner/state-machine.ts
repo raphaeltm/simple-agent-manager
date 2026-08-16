@@ -161,12 +161,48 @@ export async function transitionToInProgress(
   rc: TaskRunnerContext
 ): Promise<void> {
   const now = new Date().toISOString();
+  const recoverySourceTaskId = state.config.recoverySourceTaskId ?? null;
+  const recoveryChatSessionId = state.config.resumeSnapshotChatSessionId ?? null;
 
-  // Optimistic lock: only transition if still delegated
+  // Optimistic lock: only transition if still delegated. Guarded snapshot
+  // recovery also proves the exact source and snapshot claim are live in the
+  // same D1 statement that commits the replacement to in_progress.
   const result = await rc.env.DATABASE.prepare(
-    `UPDATE tasks SET status = 'in_progress', started_at = ?, execution_step = 'running', updated_at = ? WHERE id = ? AND status = 'delegated'`
+    `UPDATE tasks
+        SET status = 'in_progress', started_at = ?, execution_step = 'running', updated_at = ?
+      WHERE id = ? AND status = 'delegated'
+        AND (
+          ? IS NULL
+          OR EXISTS (
+            SELECT 1
+              FROM tasks recovery
+              JOIN tasks source
+                ON source.id = recovery.recovery_source_task_id
+               AND source.project_id = recovery.project_id
+              JOIN session_snapshots snapshot
+                ON snapshot.chat_session_id = recovery.chat_session_id
+               AND snapshot.project_id = recovery.project_id
+               AND snapshot.recovery_task_id = recovery.id
+             WHERE recovery.id = ?
+               AND recovery.recovery_source_task_id = ?
+               AND recovery.project_id = ?
+               AND recovery.chat_session_id = ?
+               AND recovery.triggered_by = 'session-recovery'
+               AND source.status NOT IN ('completed', 'failed', 'cancelled')
+               AND snapshot.recovery_status IN ('waking', 'restored')
+          )
+        )`
   )
-    .bind(now, now, state.taskId)
+    .bind(
+      now,
+      now,
+      state.taskId,
+      recoverySourceTaskId,
+      state.taskId,
+      recoverySourceTaskId,
+      state.projectId,
+      recoveryChatSessionId
+    )
     .run();
 
   if (!result.meta.changes || result.meta.changes === 0) {
@@ -185,6 +221,13 @@ export async function transitionToInProgress(
       return;
     }
     if (!authoritative || ['completed', 'failed', 'cancelled'].includes(authoritative.status)) {
+      if (recoveryChatSessionId) {
+        await failRecoveryLifecycle(
+          state,
+          'Session recovery authority was revoked before agent handoff committed.',
+          rc
+        );
+      }
       state.completed = true;
       await rc.ctx.storage.put('state', state);
       return;
@@ -292,6 +335,9 @@ export async function failTask(
     .run();
 
   if (!failureTransition.meta.changes) {
+    if (state.config.resumeSnapshotChatSessionId) {
+      await failRecoveryLifecycle(state, errorMessage, rc);
+    }
     state.completed = true;
     await rc.ctx.storage.put('state', state);
     return;

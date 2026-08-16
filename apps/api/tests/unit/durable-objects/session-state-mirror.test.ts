@@ -28,6 +28,16 @@ describe('Session State Mirror — vertical slice', () => {
   });
 
   describe('Activity report → persistence → retrieval', () => {
+    it('parses positive stale thresholds and falls back for invalid values', () => {
+      expect(sessionState.parseActivityStaleThreshold('1234')).toBe(1234);
+      expect(sessionState.parseActivityStaleThreshold('0')).toBe(
+        sessionState.DEFAULT_SESSION_ACTIVITY_STALE_THRESHOLD_MS
+      );
+      expect(sessionState.parseActivityStaleThreshold(undefined)).toBe(
+        sessionState.DEFAULT_SESSION_ACTIVITY_STALE_THRESHOLD_MS
+      );
+    });
+
     it('persists prompting activity and returns it via getSessionState', () => {
       const promptTime = Date.now() - 5000;
 
@@ -152,6 +162,32 @@ describe('Session State Mirror — vertical slice', () => {
       });
     });
 
+    it('refreshes the finite lease for a same-progress active runtime-work rereport', () => {
+      sessionState.upsertActivityState(sql, 'sess-runtime-heartbeat', {
+        activity: 'idle',
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 1,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkProgressAt: 900,
+        now: 1_000,
+      });
+      sessionState.upsertActivityState(sql, 'sess-runtime-heartbeat', {
+        activity: 'idle',
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 1,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkProgressAt: 900,
+        now: 2_000,
+      });
+
+      expect(sessionState.getSessionState(sql, 'sess-runtime-heartbeat')).toMatchObject({
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 1,
+        runtimeWorkUpdatedAt: 2_000,
+        runtimeWorkProgressAt: 900,
+      });
+    });
+
     it('returns null for sessions with no state row', () => {
       const state = sessionState.getSessionState(sql, 'nonexistent');
       expect(state).toBeNull();
@@ -189,6 +225,22 @@ describe('Session State Mirror — vertical slice', () => {
       expect(sessionState.markPromptAccepted(sql, 'sess-new-epoch', 3_000, 3_100)).toBe(true);
       expect(sessionState.getSessionState(sql, 'sess-new-epoch')?.promptStartedAt).toBe(3_000);
       expect(sessionState.getPromptEpoch(sql, 'sess-new-epoch')).toBe(3_000);
+    });
+
+    it('resolves ACP activity IDs to their owning chat and falls back to the input ID', () => {
+      sql.exec(
+        `INSERT INTO chat_sessions
+           (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES ('chat-resolve', 'workspace-resolve', 'Resolve', 'active', 0, 1000, 1000, 1000);
+
+         INSERT INTO acp_sessions
+           (id, chat_session_id, workspace_id, status, agent_type, created_at, updated_at)
+         VALUES ('acp-resolve', 'chat-resolve', 'workspace-resolve', 'running',
+                 'claude_code', 1000, 1000)`
+      );
+
+      expect(sessionState.resolveActivityChatSessionId(sql, 'acp-resolve')).toBe('chat-resolve');
+      expect(sessionState.resolveActivityChatSessionId(sql, 'chat-direct')).toBe('chat-direct');
     });
   });
 
@@ -229,6 +281,33 @@ describe('Session State Mirror — vertical slice', () => {
       const state = sessionState.getSessionState(sql, 'sess-1');
       expect(state).not.toBeNull();
       expect(state!.currentPlan).toBeNull();
+    });
+
+    it('loads the latest persisted plan message and rejects missing or invalid snapshots', () => {
+      sql.exec(
+        `INSERT INTO chat_sessions
+           (id, workspace_id, topic, status, message_count, started_at, created_at, updated_at)
+         VALUES
+           ('chat-plan', 'workspace-plan', 'Plan', 'active', 0, 1000, 1000, 1000),
+           ('chat-invalid-plan', 'workspace-invalid', 'Invalid', 'active', 0, 1000, 1000, 1000),
+           ('chat-object-plan', 'workspace-object', 'Object', 'active', 0, 1000, 1000, 1000);
+
+         INSERT INTO chat_messages
+           (id, session_id, sequence, role, content, created_at)
+         VALUES
+           ('plan-old', 'chat-plan', 1, 'plan', '[{"content":"old","status":"pending"}]', 1000),
+           ('plan-new', 'chat-plan', 2, 'plan', '[{"content":"new","status":"in_progress"}]', 2000),
+           ('plan-invalid', 'chat-invalid-plan', 1, 'plan', '{not-json', 3000),
+           ('plan-object', 'chat-object-plan', 1, 'plan', '{"content":"not-an-array"}', 4000)`
+      );
+
+      expect(sessionState.getLatestPersistedPlan(sql, 'chat-plan')).toEqual({
+        currentPlan: [{ content: 'new', status: 'in_progress' }],
+        planUpdatedAt: 2000,
+      });
+      expect(sessionState.getLatestPersistedPlan(sql, 'chat-missing-plan')).toBeNull();
+      expect(sessionState.getLatestPersistedPlan(sql, 'chat-invalid-plan')).toBeNull();
+      expect(sessionState.getLatestPersistedPlan(sql, 'chat-object-plan')).toBeNull();
     });
   });
 
