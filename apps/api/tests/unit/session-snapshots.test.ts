@@ -20,6 +20,7 @@ import {
   getSessionSnapshotConfig,
   isSessionSnapshotSleepReleasable,
   prepareSessionSnapshot,
+  recordSessionSnapshotArtifactAuthorization,
   recordSessionSnapshotProgress,
   verifySessionSnapshotArtifactsForSleep,
 } from '../../src/services/session-snapshots';
@@ -419,6 +420,66 @@ describe('session snapshot progress persistence', () => {
         expect.stringContaining('Workspace snapshot made no progress'),
         expect.objectContaining({ httpMetadata: { contentType: 'application/json' } })
       );
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('records direct-upload authorization only for the active capture generation', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      const sha = '4ea140588150773ce3aace786aeef7f4049ce100fa649c94fbbddb960f1da942';
+      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      const r2 = { put: vi.fn(), delete: vi.fn(async () => undefined), head: vi.fn() };
+      const testEnv = env({
+        DATABASE: createSqliteD1(sqlite),
+        R2: r2 as unknown as Env['R2'],
+        SESSION_SNAPSHOT_R2_PREFIX: 'snapshots',
+      });
+      const db = drizzle(testEnv.DATABASE, { schema });
+      const prepared = await prepareSessionSnapshot(db, testEnv, {
+        workspaceId: 'workspace-1',
+        nodeId: 'node-1',
+        projectId: 'project-1',
+        userId: 'user-1',
+        chatSessionId: 'chat-1',
+        agentSessionId: 'agent-1',
+        runtime: 'vm',
+      });
+
+      await expect(
+        recordSessionSnapshotArtifactAuthorization(db, {
+          chatSessionId: 'chat-1',
+          generation: 'stale-generation',
+          artifact: 'home',
+          sizeBytes: 4,
+          sha256: sha,
+        })
+      ).resolves.toBe(false);
+      await expect(
+        recordSessionSnapshotArtifactAuthorization(db, {
+          chatSessionId: 'chat-1',
+          generation: prepared.generation,
+          artifact: 'home',
+          sizeBytes: 4,
+          sha256: sha.toUpperCase(),
+        })
+      ).resolves.toBe(true);
+
+      expect(
+        sqlite
+          .prepare(
+            `SELECT authorized_home_bytes, authorized_home_sha256,
+                    authorized_wip_bytes, authorized_wip_sha256
+             FROM session_snapshots WHERE chat_session_id = 'chat-1'`
+          )
+          .get()
+      ).toEqual({
+        authorized_home_bytes: 4,
+        authorized_home_sha256: sha,
+        authorized_wip_bytes: null,
+        authorized_wip_sha256: null,
+      });
     } finally {
       sqlite.close();
     }
