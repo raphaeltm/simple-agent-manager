@@ -14,6 +14,7 @@ import * as mailbox from './mailbox';
 import { computePromptDeliveryAlarmTime } from './prompt-delivery';
 import * as reconciliation from './reconciliation';
 import { computeSessionActivityProbeAlarmTime } from './session-activity-reconciliation';
+import { computeTaskWaitAlarmTime } from './task-waits';
 import type { Env } from './types';
 
 const log = createModuleLogger('project_data.alarm_schedule');
@@ -47,6 +48,7 @@ export function computeProjectDataAlarmTime(sql: SqlStorage, env: Env): number |
   // task-scoped), so stale-activity probes need their own entry rather than
   // relying on the ACP heartbeat alarm happening to fire on a similar cadence.
   const activityProbeTime = computeSessionActivityProbeAlarmTime(sql, env);
+  const taskWaitTime = computeTaskWaitAlarmTime(sql);
 
   const candidates = [
     idleCleanupTime,
@@ -56,6 +58,7 @@ export function computeProjectDataAlarmTime(sql: SqlStorage, env: Env): number |
     attentionTime,
     reconciliationTime,
     activityProbeTime,
+    taskWaitTime,
   ].filter((time): time is number => time !== null);
 
   return candidates.length > 0 ? Math.min(...candidates) : null;

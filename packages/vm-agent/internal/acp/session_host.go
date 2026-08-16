@@ -278,6 +278,14 @@ type SessionHost struct {
 	// promptActivityCancel stops the periodic prompting re-report loop.
 	// Protected by promptCancelMu.
 	promptActivityCancel context.CancelFunc
+
+	// Harness-owned background work is normalized from optional ACP extension
+	// notifications. It is isolated from the prompt lifecycle because it may
+	// continue after session/prompt has returned.
+	harnessWorkMu         sync.Mutex
+	harnessWork           harnessWorkStatus
+	harnessTaskIDs        map[string]struct{}
+	harnessActivityCancel context.CancelFunc
 	// activePromptID identifies the in-flight prompt associated with promptCancel.
 	// Protected by promptCancelMu.
 	activePromptID uint64
@@ -819,6 +827,7 @@ func (h *SessionHost) Stop() {
 
 	// Report idle to the control plane so the browser status bar clears.
 	h.stopPromptActivityRereport()
+	h.clearHarnessWork()
 	h.reportActivity("idle")
 
 	// Cancel any pending auto-suspend timer.

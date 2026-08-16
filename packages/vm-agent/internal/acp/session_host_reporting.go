@@ -164,12 +164,16 @@ func (h *SessionHost) fetchAgentSettings(ctx context.Context, agentType string) 
 
 // activityPayload is the enhanced JSON body sent to the control plane.
 type activityPayload struct {
-	Activity        string  `json:"activity"`
-	NodeID          string  `json:"nodeId"`
-	PromptStartedAt *int64  `json:"promptStartedAt,omitempty"`
-	AgentType       string  `json:"agentType,omitempty"`
-	RestartCount    int     `json:"restartCount"`
-	StatusError     *string `json:"statusError,omitempty"`
+	Activity              string  `json:"activity"`
+	NodeID                string  `json:"nodeId"`
+	PromptStartedAt       *int64  `json:"promptStartedAt,omitempty"`
+	AgentType             string  `json:"agentType,omitempty"`
+	RestartCount          int     `json:"restartCount"`
+	StatusError           *string `json:"statusError,omitempty"`
+	RuntimeWorkState      string  `json:"runtimeWorkState,omitempty"`
+	RuntimeWorkCount      *int    `json:"runtimeWorkCount,omitempty"`
+	RuntimeWorkSource     string  `json:"runtimeWorkSource,omitempty"`
+	RuntimeWorkProgressAt *int64  `json:"runtimeWorkProgressAt,omitempty"`
 }
 
 // reportActivity sends a durable activity signal to the control plane.
@@ -205,6 +209,17 @@ func (h *SessionHost) reportActivity(activity string) {
 		NodeID:       nodeID,
 		AgentType:    agentType,
 		RestartCount: restartCount,
+	}
+	runtimeWork := h.harnessWorkSnapshot()
+	if runtimeWork.Source != "" {
+		payload.RuntimeWorkState = string(runtimeWork.State)
+		payload.RuntimeWorkSource = runtimeWork.Source
+		count := runtimeWork.Count
+		payload.RuntimeWorkCount = &count
+		if !runtimeWork.ProgressAt.IsZero() {
+			progressAt := runtimeWork.ProgressAt.UnixMilli()
+			payload.RuntimeWorkProgressAt = &progressAt
+		}
 	}
 	if activity == "prompting" {
 		if startedAt, ok := h.activePromptStartedAt(); ok {

@@ -23,6 +23,7 @@ import type {
   AcceptedPromptDelivery,
   AcceptPromptDeliveryInput,
 } from '../durable-objects/project-data/prompt-delivery';
+import type { RegisterTaskWaitInput } from '../durable-objects/project-data/task-waits';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
 import {
@@ -589,6 +590,10 @@ export async function reportAcpSessionActivity(
     agentType?: string | null;
     restartCount?: number | null;
     statusError?: string | null;
+    runtimeWorkState?: 'inactive' | 'active' | 'settling';
+    runtimeWorkCount?: number;
+    runtimeWorkSource?: string;
+    runtimeWorkProgressAt?: number | null;
   }
 ): Promise<void> {
   const stub = await getStub(env, projectId);
@@ -615,6 +620,23 @@ export async function recordSessionTurnEnd(
 export async function getSessionState(env: Env, projectId: string, sessionId: string) {
   const stub = await getStub(env, projectId);
   return stub.getSessionState(sessionId);
+}
+
+export async function registerTaskWait(env: Env, projectId: string, input: RegisterTaskWaitInput) {
+  return callProjectDataWithRetry(env, projectId, 'registerTaskWait', (stub) =>
+    stub.registerTaskWait(input)
+  );
+}
+
+export async function getTaskWait(env: Env, projectId: string, subscriptionId: string) {
+  const stub = await getStub(env, projectId);
+  return stub.getTaskWait(subscriptionId);
+}
+
+export async function reconcileTaskWaits(env: Env, projectId: string, childTaskId?: string) {
+  return callProjectDataWithRetry(env, projectId, 'reconcileTaskWaits', (stub) =>
+    stub.reconcileTaskWaits(childTaskId)
+  );
 }
 
 /** Get the latest durable plan message snapshot for a chat session. */

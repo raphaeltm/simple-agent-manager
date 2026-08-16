@@ -194,6 +194,36 @@ describe('agent activity callback', () => {
     expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
   });
 
+  it('persists normalized harness work and keeps an idle runtime active', async () => {
+    const app = await createTestApp();
+
+    const response = await postActivity(app, {
+      activity: 'idle',
+      nodeId: 'node-1',
+      agentType: 'claude-code',
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'claude_sdk',
+      runtimeWorkProgressAt: 1234,
+    });
+
+    expect(response.status).toBe(204);
+    expect(mocks.projectData.reportAcpSessionActivity).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      'agent-session-1',
+      'idle',
+      expect.objectContaining({
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 1,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkProgressAt: 1234,
+      })
+    );
+    expect(mocks.nodeAgent.hibernateAgentSessionOnNode).not.toHaveBeenCalled();
+    expect(mocks.container.markVmAgentContainerActiveWorkEndedBestEffort).not.toHaveBeenCalled();
+  });
+
   it('turns VM-agent error activity into durable failed control-plane state', async () => {
     const app = await createTestApp();
 

@@ -170,6 +170,25 @@ describe('DO Migrations', () => {
             'attention_marker_id',
           ])
         );
+        const sessionStateColumns = db.prepare('PRAGMA table_info(session_state)').all() as Array<{
+          name: string;
+        }>;
+        expect(sessionStateColumns.map((column) => column.name)).toEqual(
+          expect.arrayContaining([
+            'runtime_work_state',
+            'runtime_work_count',
+            'runtime_work_source',
+            'runtime_work_updated_at',
+            'runtime_work_progress_at',
+          ])
+        );
+        expect(
+          db
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'task_wait_subscriptions'"
+            )
+            .get()
+        ).toEqual({ name: 'task_wait_subscriptions' });
       } finally {
         db.close();
       }
@@ -233,6 +252,13 @@ describe('DO Migrations', () => {
         expect(
           db.prepare("SELECT COUNT(*) AS count FROM chat_sessions WHERE id = 'chat-upgrade'").get()
         ).toEqual({ count: 1 });
+        expect(
+          db
+            .prepare(
+              "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'task_wait_children'"
+            )
+            .get()
+        ).toEqual({ name: 'task_wait_children' });
       } finally {
         db.close();
       }
@@ -324,7 +350,9 @@ describe('DO Migrations', () => {
       // checkpoint_episodes: 2 (session + state) from migration 027
       // idle_cleanup_schedule: 2 (active cleanup_at + terminal marker) from migration 028
       // session_state: 1 (working-activity staleness scan) from migration 029
-      expect(indexes.length).toBe(49);
+      // durable task waits: 2 (due + child) from migration 030; the
+      // active-parent index is UNIQUE and counted separately
+      expect(indexes.length).toBe(51);
     });
   });
 });

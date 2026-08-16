@@ -48,6 +48,9 @@ import * as sessionActivityReconciliation from './session-activity-reconciliatio
 import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
 import * as sessions from './sessions';
+import { resolveTaskWaitConfig } from './task-wait-config';
+import { processTaskWaits } from './task-wait-supervisor';
+import * as taskWaits from './task-waits';
 import type { Env, SummaryData } from './types';
 
 const log = createModuleLogger('project_data');
@@ -260,6 +263,41 @@ export class ProjectData extends DurableObject<Env> {
 
   async acceptPromptDelivery(input: AcceptPromptDeliveryInput): Promise<AcceptedPromptDelivery> {
     return durability.acceptPromptDelivery(this.sql, this.env, this.durabilityHooks(), input);
+  }
+
+  async registerTaskWait(input: taskWaits.RegisterTaskWaitInput) {
+    const config = resolveTaskWaitConfig(this.env);
+    const created = this.ctx.storage.transactionSync(() =>
+      taskWaits.createTaskWait(this.sql, config, {
+        ...input,
+        id: crypto.randomUUID(),
+        wakeDeliveryId: crypto.randomUUID(),
+      })
+    );
+    await this.reconcileTaskWaits();
+    return {
+      created: created.created,
+      subscription: taskWaits.getTaskWait(this.sql, created.subscription.id),
+    };
+  }
+
+  getTaskWait(subscriptionId: string) {
+    return taskWaits.getTaskWait(this.sql, subscriptionId);
+  }
+
+  async reconcileTaskWaits(childTaskId?: string) {
+    return processTaskWaits(
+      this.sql,
+      this.env,
+      {
+        getProjectId: () => this.getProjectId(),
+        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+        acceptPromptDelivery: (input) =>
+          durability.acceptPromptDelivery(this.sql, this.env, this.durabilityHooks(), input),
+        recalculateAlarm: () => this.recalculateAlarm(),
+      },
+      { childTaskId }
+    );
   }
 
   private durabilityHooks(): durability.DurabilityFoundationHooks {
@@ -672,6 +710,10 @@ export class ProjectData extends DurableObject<Env> {
       agentType?: string | null;
       restartCount?: number | null;
       statusError?: string | null;
+      runtimeWorkState?: 'inactive' | 'active' | 'settling';
+      runtimeWorkCount?: number;
+      runtimeWorkSource?: string;
+      runtimeWorkProgressAt?: number | null;
     }
   ): Promise<void> {
     return durability.reportActivity(this.sql, this.durabilityHooks(), sessionId, activity, extra);
@@ -887,6 +929,16 @@ export class ProjectData extends DurableObject<Env> {
     const ackTimeoutMs = parseInt(this.env.MAILBOX_ACK_TIMEOUT_MS ?? '300000', 10);
     const maxAttempts = parseInt(this.env.MAILBOX_REDELIVERY_MAX_ATTEMPTS ?? '5', 10);
     mailbox.runDeliverySweep(this.sql, ackTimeoutMs, maxAttempts);
+
+    // Resolve due waits before claiming prompt deliveries so a newly enqueued
+    // parent wake can be dispatched in this same alarm turn.
+    try {
+      await this.reconcileTaskWaits();
+    } catch (err) {
+      log.error('alarm.task_wait_reconciliation_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
     // Claims persist before bounded adapter I/O continues through waitUntil.
     durability.processPromptDeliveryAlarm(this.sql, this.env, this.durabilityHooks());

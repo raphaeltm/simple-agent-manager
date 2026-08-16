@@ -13,6 +13,7 @@ The reference covers:
 - Workspace Management (`/api/workspaces/*`)
 - Project Management (`/api/projects/*`)
 - Task Management (`/api/projects/:projectId/tasks/*`)
+- MCP orchestration (`wait_for_subtasks`, `dispatch_task`, task inspection)
 - Agent Sessions (`/api/workspaces/:id/agent-sessions/*`)
 - Agent Settings (`/api/agent-settings/*`)
 - Notifications (`/api/notifications/*`)

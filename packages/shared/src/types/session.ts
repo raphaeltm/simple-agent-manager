@@ -352,6 +352,14 @@ export interface SessionStateSnapshot {
    * terminal transitions; null while a prompt is in flight.
    */
   activityReason?: SessionActivityTerminalReason | null;
+  /** Normalized harness-owned work state. Raw harness lifecycle payloads are never persisted. */
+  runtimeWorkState: 'inactive' | 'active' | 'settling' | null;
+  runtimeWorkCount: number | null;
+  runtimeWorkSource: string | null;
+  /** Control-plane receipt time for the latest work-state report. */
+  runtimeWorkUpdatedAt: number | null;
+  /** Harness lifecycle progress time reported by the VM Agent. */
+  runtimeWorkProgressAt: number | null;
 }
 
 /** Which end of the system produced the authoritative activity value. */

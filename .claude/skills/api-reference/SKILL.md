@@ -62,6 +62,14 @@ user-invocable: false
 - `POST /api/projects/:projectId/tasks/:taskId/delegate` — Delegate ready+unblocked task to owned running workspace
 - `GET /api/projects/:projectId/tasks/:taskId/events` — List append-only task status events
 
+## MCP Orchestration
+
+- `wait_for_subtasks` — Task-agent-only tool that registers one durable wait for unique direct-child task IDs. `condition` is `all` (default) or `any`; optional `wakeAfterSeconds` is positive and server-capped. Persist workflow state before calling, then end the turn. ProjectData wakes the parent through exact-once durable prompt delivery when the condition or finite deadline resolves.
+- `dispatch_task` — Create a direct child task subject to project dispatch depth and concurrency limits.
+- `get_task_details` / `get_peer_agent_output` — Read authoritative child status and output after a durable wake.
+
+`wait_for_subtasks` rejects conversation/direct-workspace agents, non-child IDs, terminal parents, duplicate IDs, missing parent sessions, and installations where durable prompt delivery is disabled. Registering the same active parent/child set and condition again is idempotent; a different active set is rejected until the current wait resolves.
+
 ## Administration (Superadmin Only)
 
 - `GET /api/admin/tasks/stuck` — List tasks currently in transient states

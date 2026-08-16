@@ -63,6 +63,66 @@ describe('Session State Mirror — vertical slice', () => {
       expect(state!.activity).toBe('idle');
     });
 
+    it('persists normalized harness work without retaining raw lifecycle data', () => {
+      sessionState.upsertActivityState(sql, 'sess-runtime-work', {
+        activity: 'idle',
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 2,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkProgressAt: 900,
+        now: 1_000,
+      });
+
+      expect(sessionState.getSessionState(sql, 'sess-runtime-work')).toMatchObject({
+        activity: 'idle',
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 2,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkUpdatedAt: 1_000,
+        runtimeWorkProgressAt: 900,
+      });
+      const columns = sql
+        .exec('PRAGMA table_info(session_state)')
+        .toArray()
+        .map((row) => row.name);
+      expect(columns).not.toContain('runtime_work_payload');
+      expect(columns).not.toContain('runtime_work_description');
+    });
+
+    it('preserves runtime work across reports from older VM agents and clears it explicitly', () => {
+      sessionState.upsertActivityState(sql, 'sess-runtime-compatible', {
+        activity: 'idle',
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 1,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkProgressAt: 900,
+        now: 1_000,
+      });
+      sessionState.upsertActivityState(sql, 'sess-runtime-compatible', {
+        activity: 'idle',
+        now: 2_000,
+      });
+      expect(sessionState.getSessionState(sql, 'sess-runtime-compatible')).toMatchObject({
+        runtimeWorkState: 'active',
+        runtimeWorkUpdatedAt: 1_000,
+      });
+
+      sessionState.upsertActivityState(sql, 'sess-runtime-compatible', {
+        activity: 'idle',
+        runtimeWorkState: 'inactive',
+        runtimeWorkCount: 0,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkProgressAt: 2_900,
+        now: 3_000,
+      });
+      expect(sessionState.getSessionState(sql, 'sess-runtime-compatible')).toMatchObject({
+        runtimeWorkState: 'inactive',
+        runtimeWorkCount: 0,
+        runtimeWorkUpdatedAt: 3_000,
+        runtimeWorkProgressAt: 2_900,
+      });
+    });
+
     it('returns null for sessions with no state row', () => {
       const state = sessionState.getSessionState(sql, 'nonexistent');
       expect(state).toBeNull();
@@ -152,12 +212,16 @@ describe('Session State Mirror — vertical slice', () => {
       sql.exec(
         `INSERT INTO session_state (session_id, activity, activity_at, prompt_started_at, agent_type, restart_count)
          VALUES (?, 'prompting', ?, ?, 'claude-code', 0)`,
-        'stuck-sess', tenMinAgo, tenMinAgo,
+        'stuck-sess',
+        tenMinAgo,
+        tenMinAgo
       );
       sql.exec(
         `INSERT INTO session_state (session_id, activity, activity_at, prompt_started_at, agent_type, restart_count)
          VALUES (?, 'prompting', ?, ?, 'claude-code', 0)`,
-        'fresh-sess', oneMinAgo, oneMinAgo,
+        'fresh-sess',
+        oneMinAgo,
+        oneMinAgo
       );
 
       const healed = sessionState.reconcileStaleActivity(sql, 5 * 60 * 1000);
@@ -180,7 +244,8 @@ describe('Session State Mirror — vertical slice', () => {
       sql.exec(
         `INSERT INTO session_state (session_id, activity, activity_at, restart_count)
          VALUES (?, 'idle', ?, 0)`,
-        'idle-old', thirtyMinAgo,
+        'idle-old',
+        thirtyMinAgo
       );
 
       const healed = sessionState.reconcileStaleActivity(sql, 5 * 60 * 1000);
@@ -196,13 +261,13 @@ describe('Session State Mirror — vertical slice', () => {
          VALUES ('chat-1', 'ws-1', 'Topic', 'active', 0, ?, ?, ?)`,
         now,
         now,
-        now,
+        now
       );
       sql.exec(
         `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, status, agent_type, created_at, updated_at)
          VALUES ('acp-1', 'chat-1', 'ws-1', 'running', 'claude_code', ?, ?)`,
         now,
-        now,
+        now
       );
       sessionState.upsertActivityState(sql, 'acp-1', { activity: 'prompting' });
       const before = sessionState.getSessionState(sql, 'acp-1')!.activityAt;
@@ -219,7 +284,7 @@ describe('Session State Mirror — vertical slice', () => {
         'chat-1',
         'assistant',
         'progress',
-        null,
+        null
       );
 
       const after = sessionState.getSessionState(sql, 'acp-1')!.activityAt;
@@ -234,13 +299,13 @@ describe('Session State Mirror — vertical slice', () => {
          VALUES ('chat-old-prompt', 'ws-old-prompt', 'Topic', 'active', 0, ?, ?, ?)`,
         oldPromptAt,
         oldPromptAt,
-        oldPromptAt,
+        oldPromptAt
       );
       sql.exec(
         `INSERT INTO acp_sessions (id, chat_session_id, workspace_id, status, agent_type, created_at, updated_at)
          VALUES ('acp-old-prompt', 'chat-old-prompt', 'ws-old-prompt', 'running', 'claude_code', ?, ?)`,
         oldPromptAt,
-        oldPromptAt,
+        oldPromptAt
       );
       sessionState.upsertActivityState(sql, 'acp-old-prompt', {
         activity: 'prompting',
@@ -248,11 +313,7 @@ describe('Session State Mirror — vertical slice', () => {
         now: oldPromptAt,
       });
 
-      sessionState.refreshWorkingActivityForChatSession(
-        sql,
-        'chat-old-prompt',
-        recentActivityAt,
-      );
+      sessionState.refreshWorkingActivityForChatSession(sql, 'chat-old-prompt', recentActivityAt);
 
       const state = sessionState.getSessionState(sql, 'acp-old-prompt');
       expect(state?.activityAt).toBe(recentActivityAt);
@@ -280,6 +341,8 @@ describe('Session State Mirror — vertical slice', () => {
       expect(state!.activity).toBe('stopped');
       expect(state!.lastStopReason).toBe('user_requested');
       expect(state!.promptStartedAt).toBeNull();
+      expect(state!.runtimeWorkState).toBe('inactive');
+      expect(state!.runtimeWorkCount).toBe(0);
       expect(sessionState.getPromptEpoch(sql, 'sess-1')).toBeNull();
     });
 

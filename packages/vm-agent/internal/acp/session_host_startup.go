@@ -547,6 +547,7 @@ func (h *SessionHost) startAgentProcess(startup *agentStartup) (agentProcess, er
 }
 
 func (h *SessionHost) attachACPConnection(process agentProcess) {
+	h.resetHarnessWorkForAgent(h.AgentType())
 	processedCh := make(chan struct{}, 1)
 	client := &sessionHostClient{host: h, processedCh: processedCh}
 

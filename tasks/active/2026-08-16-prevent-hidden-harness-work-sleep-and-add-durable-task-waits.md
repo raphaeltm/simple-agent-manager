@@ -32,7 +32,7 @@ For Claude Code sessions, set filtered NewSession/LoadSession metadata that enab
 - last state/heartbeat timestamp
 - last meaningful lifecycle-progress timestamp
 
-While state is active or settling, the VM Agent re-reports this normalized snapshot using the existing configurable activity re-report interval. Raw task IDs, descriptions, output paths, summaries, prompts, and results never cross the VM-to-control-plane boundary.
+While state is active, the VM Agent re-reports this normalized snapshot using the existing configurable activity re-report interval. Settlement emits one finite lease without periodic renewal, so a missing final result cannot pin compute forever. Raw task IDs, descriptions, output paths, summaries, prompts, and results never cross the VM-to-control-plane boundary.
 
 ProjectData persists the normalized snapshot additively. Automatic sleep is ineligible while a fresh active/settling lease exists. The lease is finite and configurable so a crashed or incompatible adapter cannot strand compute forever. Liveness refreshes the lease; only lifecycle edges/progress refresh the separate progress clock.
 
@@ -40,24 +40,24 @@ ProjectData persists the normalized snapshot additively. Automatic sleep is inel
 
 Add `wait_for_subtasks` with direct-child IDs, `all`/`any` terminal condition, and an optional bounded wake deadline. ProjectData stores one active subscription per parent plus normalized child observations. Creation validates lineage and persists the wait before the tool tells the parent to end its turn.
 
-Terminal hooks nudge ProjectData immediately. A bounded, configurable alarm reconciliation queries D1 as a backstop so every terminal writer—including legacy paths that do not yet invoke the hook—converges. When the condition or deadline is satisfied, ProjectData atomically marks the subscription resolved and enqueues one deterministic parent wake prompt through the existing durable prompt-delivery mailbox. Parent terminalization cancels the subscription and cannot resurrect it.
+Terminal hooks nudge ProjectData immediately. A bounded, configurable alarm reconciliation queries D1 as a backstop so every terminal writer—including legacy paths that do not yet invoke the hook—converges. When the condition or deadline is satisfied, ProjectData enqueues one deterministic parent wake prompt through the existing transactional durable prompt-delivery mailbox and then compare-and-sets the subscription to resolved. A crash between those steps retries the same delivery ID instead of duplicating the prompt. Parent terminalization cancels the subscription and cannot resurrect it.
 
 Update `/workflow` to persist its state, call `wait_for_subtasks`, and end the current turn. Use bounded foreground polling only when the connected SAM server lacks the tool.
 
 ## Implementation checklist
 
-- [ ] Add failing Go tests for filtered Claude session metadata, extension parsing, active-set replacement, progress-vs-heartbeat clocks, settlement, raw-payload redaction, and periodic out-of-turn reporting.
-- [ ] Implement a generic normalized harness-work tracker with a Claude `_claude/sdkMessage` adapter in the VM Agent.
-- [ ] Add filtered lifecycle metadata to both NewSession and strict LoadSession requests without changing non-Claude requests.
-- [ ] Extend the activity callback contract and ProjectData session-state mirror with runtime-work state, count, source, heartbeat time, and progress time.
-- [ ] Add a finite configurable background-work lease and make both pre-claim and point-of-no-return sleep checks reject fresh active/settling work.
-- [ ] Add failing ProjectData/MCP tests for wait lineage, `all`/`any`, already-terminal children, duplicate terminal callbacks, deadline wake, cancellation/no-resurrection, deterministic single delivery, and alarm reconciliation.
-- [ ] Add append-only ProjectData wait-subscription migrations, row validation, bounded reconciliation, and alarm scheduling.
-- [ ] Register the parent-wake terminal hook and keep D1 reconciliation as the legacy-writer backstop.
-- [ ] Add the `wait_for_subtasks` MCP definition, dispatcher, handler, response contract, and API/reference documentation.
-- [ ] Update both Claude and Codex workflow instructions to prefer durable park/wake with a compatibility fallback.
-- [ ] Add cross-boundary contract tests proving exact VM callback JSON and Worker runtime validation agree.
-- [ ] Document new configuration defaults/overrides and the user-visible durable orchestration behavior.
+- [x] Add failing Go tests for filtered Claude session metadata, extension parsing, active-set replacement, progress-vs-heartbeat clocks, settlement, raw-payload redaction, and periodic out-of-turn reporting.
+- [x] Implement a generic normalized harness-work tracker with a Claude `_claude/sdkMessage` adapter in the VM Agent.
+- [x] Add filtered lifecycle metadata to both NewSession and strict LoadSession requests without changing non-Claude requests.
+- [x] Extend the activity callback contract and ProjectData session-state mirror with runtime-work state, count, source, heartbeat time, and progress time.
+- [x] Add a finite configurable background-work lease and make both pre-claim and point-of-no-return sleep checks reject fresh active/settling work.
+- [x] Add failing ProjectData/MCP tests for wait lineage, `all`/`any`, already-terminal children, duplicate terminal callbacks, deadline wake, cancellation/no-resurrection, deterministic single delivery, and alarm reconciliation.
+- [x] Add append-only ProjectData wait-subscription migrations, row validation, bounded reconciliation, and alarm scheduling.
+- [x] Register the parent-wake terminal hook and keep D1 reconciliation as the legacy-writer backstop.
+- [x] Add the `wait_for_subtasks` MCP definition, dispatcher, handler, response contract, and API/reference documentation.
+- [x] Update both Claude and Codex workflow instructions to prefer durable park/wake with a compatibility fallback.
+- [x] Add cross-boundary contract tests proving exact VM callback JSON and Worker runtime validation agree.
+- [x] Document new configuration defaults/overrides and the user-visible durable orchestration behavior.
 - [ ] Run focused Go race, ProjectData migration, workerd/Miniflare, MCP, sleep, and workflow tests.
 - [ ] Run full repository lint, typecheck, test, build, quality, specialist review, staging, CI, merge, and production deployment gates.
 

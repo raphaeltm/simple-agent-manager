@@ -1,0 +1,146 @@
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const registerTaskWait = vi.hoisted(() => vi.fn());
+
+vi.mock('../../../src/services/project-data', () => ({ registerTaskWait }));
+
+import type { Env } from '../../../src/env';
+import { handleWaitForSubtasks } from '../../../src/routes/mcp/task-wait-tools';
+import { ORCHESTRATION_TOOLS } from '../../../src/routes/mcp/tool-definitions-orchestration-tools';
+import type { McpTokenData } from '../../../src/services/mcp-token';
+
+const tokenData: McpTokenData = {
+  taskId: 'parent-1',
+  projectId: 'project-1',
+  userId: 'user-1',
+  workspaceId: 'workspace-1',
+  chatSessionId: 'session-1',
+  createdAt: '2026-08-16T00:00:00.000Z',
+};
+
+function createEnv(rows: Array<Record<string, unknown>>): Env {
+  const statement = {
+    bind: vi.fn().mockReturnThis(),
+    all: vi.fn().mockResolvedValue({ results: rows }),
+  };
+  return {
+    DATABASE: { prepare: vi.fn(() => statement) },
+    DURABLE_PROMPT_DELIVERY_ENABLED: 'true',
+  } as unknown as Env;
+}
+
+function errorMessage(response: Awaited<ReturnType<typeof handleWaitForSubtasks>>): string {
+  return response.error?.message ?? '';
+}
+
+describe('wait_for_subtasks MCP handler', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    registerTaskWait.mockResolvedValue({
+      created: true,
+      subscription: {
+        id: 'wait-1',
+        state: 'active',
+        condition: 'all',
+        wakeDeadline: Date.UTC(2026, 7, 17),
+        children: [{ childTaskId: 'child-1' }, { childTaskId: 'child-2' }],
+      },
+    });
+  });
+
+  it('is advertised with the required child task IDs', () => {
+    const definition = ORCHESTRATION_TOOLS.find((tool) => tool.name === 'wait_for_subtasks');
+    expect(definition).toBeDefined();
+    expect(definition!.inputSchema.required).toContain('taskIds');
+  });
+
+  it('registers a bounded durable wait for direct child tasks', async () => {
+    const env = createEnv([
+      {
+        id: 'parent-1',
+        status: 'in_progress',
+        parent_task_id: null,
+        chat_session_id: 'session-1',
+      },
+      {
+        id: 'child-1',
+        status: 'in_progress',
+        parent_task_id: 'parent-1',
+        chat_session_id: 'child-session-1',
+      },
+      {
+        id: 'child-2',
+        status: 'queued',
+        parent_task_id: 'parent-1',
+        chat_session_id: null,
+      },
+    ]);
+
+    const response = await handleWaitForSubtasks(
+      1,
+      { taskIds: ['child-1', 'child-2'], condition: 'all', wakeAfterSeconds: 60 },
+      tokenData,
+      env
+    );
+
+    expect(response.error).toBeUndefined();
+    expect(registerTaskWait).toHaveBeenCalledWith(
+      env,
+      'project-1',
+      expect.objectContaining({
+        parentTaskId: 'parent-1',
+        parentSessionId: 'session-1',
+        condition: 'all',
+        childTaskIds: ['child-1', 'child-2'],
+      })
+    );
+    const result = response.result as { content: Array<{ text: string }> };
+    expect(JSON.parse(result.content[0].text)).toMatchObject({
+      registered: true,
+      waitId: 'wait-1',
+      state: 'active',
+    });
+  });
+
+  it('rejects a task outside the direct child lineage', async () => {
+    const env = createEnv([
+      {
+        id: 'parent-1',
+        status: 'in_progress',
+        parent_task_id: null,
+        chat_session_id: 'session-1',
+      },
+      {
+        id: 'other-task',
+        status: 'in_progress',
+        parent_task_id: 'different-parent',
+        chat_session_id: null,
+      },
+    ]);
+
+    const response = await handleWaitForSubtasks(1, { taskIds: ['other-task'] }, tokenData, env);
+
+    expect(errorMessage(response)).toContain('not a direct child');
+    expect(registerTaskWait).not.toHaveBeenCalled();
+  });
+
+  it('rejects duplicates and waits beyond the configured maximum', async () => {
+    const env = createEnv([]);
+
+    const duplicateResponse = await handleWaitForSubtasks(
+      1,
+      { taskIds: ['child-1', 'child-1'] },
+      tokenData,
+      env
+    );
+    expect(errorMessage(duplicateResponse)).toContain('unique');
+
+    const overlongResponse = await handleWaitForSubtasks(
+      2,
+      { taskIds: ['child-1'], wakeAfterSeconds: 24 * 60 * 60 + 1 },
+      tokenData,
+      env
+    );
+    expect(errorMessage(overlongResponse)).toContain('configured maximum');
+  });
+});

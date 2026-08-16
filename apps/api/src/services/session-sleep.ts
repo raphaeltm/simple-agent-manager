@@ -27,6 +27,8 @@ import {
 import { cleanupTaskRun } from './task-runner';
 import { sleepVmAgentContainer } from './vm-agent-container';
 
+export const DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS = 5 * 60 * 1000;
+
 async function finishSleepingWorkspaceComputeCleanup(
   db: ReturnType<typeof drizzle<typeof schema>>,
   env: Env,
@@ -202,6 +204,20 @@ function isActivitySafeForSleep(
   );
 }
 
+function getFreshHarnessWorkLeaseExpiry(
+  state: {
+    runtimeWorkState?: string | null;
+    runtimeWorkUpdatedAt?: number | null;
+  } | null,
+  now: Date,
+  leaseMs: number
+): Date | null {
+  if (!state || !['active', 'settling'].includes(state.runtimeWorkState ?? '')) return null;
+  if (!state.runtimeWorkUpdatedAt || state.runtimeWorkUpdatedAt <= 0) return null;
+  const expiresAt = state.runtimeWorkUpdatedAt + leaseMs;
+  return expiresAt > now.getTime() ? new Date(expiresAt) : null;
+}
+
 /**
  * Check the authoritative ProjectData work-activity clock before the sweep
  * consumes a sleep attempt. Node/ACP heartbeats are deliberately absent: they
@@ -263,12 +279,20 @@ export async function checkAutomaticSessionSleepEligibility(
         .catch(() => null)
     : null;
   const idleAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
+  const harnessWorkLeaseMs = parsePositiveInt(
+    env.HARNESS_BACKGROUND_WORK_LEASE_MS,
+    DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS
+  );
   let reason: string;
   let retryAt: Date | undefined;
+  const harnessWorkLeaseExpiry = getFreshHarnessWorkLeaseExpiry(state, now, harnessWorkLeaseMs);
   // A terminal task can retain a stale `prompting` transition forever. Treat it
   // as safe only after the normal idle interval has elapsed, preserving a live
   // final response while preventing old terminal sessions from stranding compute.
-  if (!isActivitySafeForSleep(workspace.taskStatus, state, now, idleAfterMs)) {
+  if (harnessWorkLeaseExpiry) {
+    reason = 'Harness-owned background work is active';
+    retryAt = harnessWorkLeaseExpiry;
+  } else if (!isActivitySafeForSleep(workspace.taskStatus, state, now, idleAfterMs)) {
     reason = `Workspace agent is not idle (${state?.activity ?? 'unknown'})`;
     if (workspace.taskStatus === 'completed' && state?.activityAt) {
       retryAt = new Date(state.activityAt + idleAfterMs);
@@ -439,8 +463,13 @@ export async function sleepWorkspaceSession(
         env.SESSION_SLEEP_AFTER_MS,
         DEFAULT_SESSION_SLEEP_AFTER_MS
       );
+      const harnessWorkLeaseMs = parsePositiveInt(
+        env.HARNESS_BACKGROUND_WORK_LEASE_MS,
+        DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS
+      );
       if (
         !stateBefore ||
+        getFreshHarnessWorkLeaseExpiry(stateBefore, new Date(), harnessWorkLeaseMs) !== null ||
         !isActivitySafeForSleep(workspace.taskStatus, stateBefore, new Date(), idleAfterMs)
       ) {
         throw new Error(`Workspace agent is not idle (${stateBefore?.activity ?? 'unknown'})`);
@@ -471,9 +500,12 @@ export async function sleepWorkspaceSession(
       );
       if (
         !stateAfter ||
+        getFreshHarnessWorkLeaseExpiry(stateAfter, new Date(), harnessWorkLeaseMs) !== null ||
         !isActivitySafeForSleep(workspace.taskStatus, stateAfter, new Date(), idleAfterMs) ||
         stateAfter.activity !== stateBefore.activity ||
-        stateAfter.activityAt !== stateBefore.activityAt
+        stateAfter.activityAt !== stateBefore.activityAt ||
+        stateAfter.runtimeWorkState !== stateBefore.runtimeWorkState ||
+        stateAfter.runtimeWorkUpdatedAt !== stateBefore.runtimeWorkUpdatedAt
       ) {
         throw new Error('Workspace activity changed while the final snapshot was captured');
       }

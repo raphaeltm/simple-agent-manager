@@ -131,7 +131,7 @@ function buildDb(
   return { select, update, batch: vi.fn(async () => undefined) };
 }
 
-function buildEnv(): Env {
+function buildEnv(overrides: Partial<Env> = {}): Env {
   return {
     DATABASE: {},
     SESSION_SNAPSHOT_REQUEST_TIMEOUT_MS: '200',
@@ -144,6 +144,7 @@ function buildEnv(): Env {
         markIdle: mocks.markIdle,
       })),
     },
+    ...overrides,
   } as unknown as Env;
 }
 
@@ -263,6 +264,58 @@ describe('sleepWorkspaceSession', () => {
     ).resolves.toEqual({ eligible: true });
 
     expect(mocks.deferSessionSnapshotSleepBeforeClaim).not.toHaveBeenCalled();
+  });
+
+  it('defers an idle session while a fresh harness-work lease is active', async () => {
+    const now = new Date('2026-08-14T05:00:00.000Z');
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'idle',
+      activityAt: now.getTime() - 16 * 60 * 1000,
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'claude_sdk',
+      runtimeWorkUpdatedAt: now.getTime() - 30_000,
+      runtimeWorkProgressAt: now.getTime() - 60_000,
+    });
+    const { checkAutomaticSessionSleepEligibility } =
+      await import('../../../src/services/session-sleep');
+
+    await expect(
+      checkAutomaticSessionSleepEligibility(
+        buildEnv({ HARNESS_BACKGROUND_WORK_LEASE_MS: '120000' }),
+        { workspaceId: 'workspace-1', userId: 'user-1' },
+        now
+      )
+    ).resolves.toEqual({
+      eligible: false,
+      reason: 'Harness-owned background work is active',
+      retryAt: '2026-08-14T05:01:30.000Z',
+    });
+
+    expect(mocks.deferSessionSnapshotSleepBeforeClaim).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows sleep after a stale harness-work lease expires', async () => {
+    const now = new Date('2026-08-14T05:00:00.000Z');
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'idle',
+      activityAt: now.getTime() - 16 * 60 * 1000,
+      runtimeWorkState: 'settling',
+      runtimeWorkCount: 0,
+      runtimeWorkSource: 'claude_sdk',
+      runtimeWorkUpdatedAt: now.getTime() - 121_000,
+      runtimeWorkProgressAt: now.getTime() - 121_000,
+    });
+    const { checkAutomaticSessionSleepEligibility } =
+      await import('../../../src/services/session-sleep');
+
+    await expect(
+      checkAutomaticSessionSleepEligibility(
+        buildEnv({ HARNESS_BACKGROUND_WORK_LEASE_MS: '120000' }),
+        { workspaceId: 'workspace-1', userId: 'user-1' },
+        now
+      )
+    ).resolves.toEqual({ eligible: true });
   });
 
   it('lets a completed task sleep on its first idle observation', async () => {
