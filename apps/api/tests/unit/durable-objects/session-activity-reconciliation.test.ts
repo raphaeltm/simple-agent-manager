@@ -22,6 +22,7 @@ import { nudgePromptDeliveriesForTarget } from '../../../src/durable-objects/pro
 import {
   applyProbeOutcome,
   classifyProbeResponse,
+  probeStaleSessionActivity,
   publishTurnEnd,
   selectStaleActivityProbeCandidates,
   type StaleActivityCandidate,
@@ -31,7 +32,12 @@ import {
   recordTurnEnd,
   upsertActivityState,
 } from '../../../src/durable-objects/project-data/session-state';
+import { listAgentSessionsOnNode } from '../../../src/services/node-agent';
 import { createSqlStorage } from './sql-storage-test-utils';
+
+vi.mock('../../../src/services/node-agent', () => ({
+  listAgentSessionsOnNode: vi.fn(),
+}));
 
 const FIVE_MINUTES = 5 * 60 * 1000;
 const ACP_SESSION = 'acp-1';
@@ -324,6 +330,103 @@ describe('session activity reconciliation', () => {
       expect(armed).toEqual([CHAT_SESSION]);
       expect(nudged).toEqual([CHAT_SESSION]);
       expect(nextAttemptAt()).toBe(now);
+    });
+  });
+
+  describe('probe entry point (tenant boundary)', () => {
+    /**
+     * The probe mints a node-management token scoped to the workspace owner,
+     * so an ambiguous owner must fail CLOSED (.claude/rules/51) rather than
+     * fall through to the permissive path.
+     */
+    function makeEnv(workspaceRow: { user_id: string | null; project_id: string | null } | null) {
+      return {
+        DATABASE: {
+          prepare: () => ({
+            bind: () => ({ first: async () => workspaceRow }),
+          }),
+        },
+      } as unknown as Parameters<typeof probeStaleSessionActivity>[1];
+    }
+
+    const hooks = {
+      broadcastEvent: () => {},
+      nudgeDeliveries: () => 0,
+      armIdleCleanup: () => {},
+      recalculateAlarm: async () => {},
+    };
+
+    beforeEach(() => {
+      seedLiveSession();
+      wedgePrompting(now - 4 * 60 * 60 * 1000);
+      vi.mocked(listAgentSessionsOnNode).mockReset();
+      vi.mocked(listAgentSessionsOnNode).mockResolvedValue({
+        sessions: [{ id: ACP_SESSION, hostStatus: 'idle' }],
+      });
+    });
+
+    it('probes and reconciles a workspace owned by this project', async () => {
+      const result = await probeStaleSessionActivity(sql, makeEnv({ user_id: 'user-1', project_id: 'proj-1' }), hooks, {
+        thresholdMs: FIVE_MINUTES,
+        projectId: 'proj-1',
+      });
+
+      expect(listAgentSessionsOnNode).toHaveBeenCalledWith(
+        NODE,
+        WORKSPACE,
+        expect.anything(),
+        'user-1',
+        expect.objectContaining({ requestTimeoutMs: expect.any(Number) })
+      );
+      expect(result).toEqual({ probed: 1, reconciled: 1 });
+      expect(readState()?.activity).toBe('idle');
+    });
+
+    it('refuses to probe a workspace belonging to another project', async () => {
+      const result = await probeStaleSessionActivity(sql, makeEnv({ user_id: 'victim', project_id: 'proj-other' }), hooks, {
+        thresholdMs: FIVE_MINUTES,
+        projectId: 'proj-1',
+      });
+
+      expect(listAgentSessionsOnNode).not.toHaveBeenCalled();
+      expect(result.reconciled).toBe(0);
+      // Unresolvable owner counts as an unreachable probe, never a free pass.
+      expect(readState()?.activity).toBe('prompting');
+      expect(readState()?.activity_probe_attempts).toBe(1);
+    });
+
+    it('fails closed when this DO has no project identity yet', async () => {
+      const result = await probeStaleSessionActivity(sql, makeEnv({ user_id: 'user-1', project_id: 'proj-1' }), hooks, {
+        thresholdMs: FIVE_MINUTES,
+        projectId: null,
+      });
+
+      expect(listAgentSessionsOnNode).not.toHaveBeenCalled();
+      expect(result.reconciled).toBe(0);
+      expect(readState()?.activity).toBe('prompting');
+    });
+
+    it('fails closed when the workspace row has no project', async () => {
+      const result = await probeStaleSessionActivity(sql, makeEnv({ user_id: 'user-1', project_id: null }), hooks, {
+        thresholdMs: FIVE_MINUTES,
+        projectId: 'proj-1',
+      });
+
+      expect(listAgentSessionsOnNode).not.toHaveBeenCalled();
+      expect(result.reconciled).toBe(0);
+      expect(readState()?.activity).toBe('prompting');
+    });
+
+    it('treats a probe timeout as unreachable rather than proof of work', async () => {
+      vi.mocked(listAgentSessionsOnNode).mockRejectedValue(new Error('Request timed out after 5000ms'));
+
+      const result = await probeStaleSessionActivity(sql, makeEnv({ user_id: 'user-1', project_id: 'proj-1' }), hooks, {
+        thresholdMs: FIVE_MINUTES,
+        projectId: 'proj-1',
+      });
+
+      expect(result).toEqual({ probed: 1, reconciled: 0 });
+      expect(readState()?.activity_probe_attempts).toBe(1);
     });
   });
 

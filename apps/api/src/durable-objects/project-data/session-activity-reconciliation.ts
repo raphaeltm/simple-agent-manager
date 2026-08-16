@@ -272,8 +272,11 @@ async function resolveProbeUserId(
     .first<{ user_id: string | null; project_id: string | null }>();
 
   if (!row?.user_id) return null;
-  // Never probe across tenants: the workspace must belong to this DO's project.
-  if (projectId && row.project_id && row.project_id !== projectId) {
+  // Never probe across tenants. Fail CLOSED (.claude/rules/51): an absent
+  // project on either side leaves ownership ambiguous, and an ambiguous
+  // identity must reject rather than fall through to the permissive path —
+  // this probe mints a node-management token scoped to the workspace owner.
+  if (!projectId || row.project_id !== projectId) {
     log.error('session_activity.workspace_project_mismatch', {
       workspaceId,
       expectedProjectId: projectId,
