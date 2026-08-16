@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Page } from './fixtures';
 
 async function openWizard(page: Page) {
   await page.goto('/self-host/');
@@ -25,8 +25,40 @@ async function reachStep(page: Page, stepHeading: string) {
   await continueFrom(page);
 }
 
+async function reachCloudflareTokenStep(
+  page: Page,
+  domain = 'example.com',
+  account = '0123456789abcdef0123456789abcdef'
+) {
+  await openWizard(page);
+  await continueFrom(page, 'Get started');
+  await page.locator('#sh-domain').fill(domain);
+  await page.locator('#sh-cf-account').fill(account);
+  await continueFrom(page);
+  await continueFrom(page);
+  await expect(page.locator('#sh-cf-token')).toBeVisible();
+}
+
+async function fillCloudflareTokenStep(page: Page) {
+  await reachCloudflareTokenStep(page);
+  await page.locator('#sh-cf-token').fill('cf_test_token_value_abcdef123456');
+  await page.locator('#sh-cf-zone').fill('fedcba9876543210fedcba9876543210');
+  await page.locator('#sh-r2-key').fill('r2_access_key_value_000');
+  await page.locator('#sh-r2-secret').fill('r2_secret_key_value_000');
+  await continueFrom(page);
+  await expect(page.getByRole('heading', { name: 'Create your GitHub App' })).toBeVisible();
+}
+
+async function reachGeneratedGitHubAppStep(page: Page) {
+  await reachStep(page, 'Create your GitHub App');
+  await page.getByRole('button', { name: 'Generate setup link' }).click();
+  await expect(page.locator('#sh-app-id')).toBeVisible();
+}
+
 async function expectNoXssExecution(page: Page) {
-  const xssFired = await page.evaluate(() => (window as unknown as Record<string, unknown>).__xss_fired__);
+  const xssFired = await page.evaluate(
+    () => (window as unknown as Record<string, unknown>).__xss_fired__
+  );
   expect(xssFired).toBeFalsy();
 }
 
@@ -40,30 +72,55 @@ const XSS_PAYLOADS = [
   { name: 'iframe srcdoc', value: '<iframe srcdoc="<script>window.__xss_fired__=true</script>">' },
   { name: 'img onerror', value: '<img src=x onerror="window.__xss_fired__=true">' },
   { name: 'svg onload', value: '<svg onload="window.__xss_fired__=true">' },
-  { name: 'MathML', value: '<math><mtext><table><mglyph><style><!--</style><img src=x onerror="window.__xss_fired__=true">' },
-  { name: 'details ontoggle', value: '<details open ontoggle="window.__xss_fired__=true"><summary>x</summary></details>' },
+  {
+    name: 'MathML',
+    value:
+      '<math><mtext><table><mglyph><style><!--</style><img src=x onerror="window.__xss_fired__=true">',
+  },
+  {
+    name: 'details ontoggle',
+    value: '<details open ontoggle="window.__xss_fired__=true"><summary>x</summary></details>',
+  },
   { name: 'event handler attribute', value: '" onmouseover="window.__xss_fired__=true" data-x="' },
   { name: 'javascript URI', value: 'javascript:window.__xss_fired__=true' },
   { name: 'data URI', value: 'data:text/html,<script>window.__xss_fired__=true</script>' },
-  { name: 'input autofocus onfocus', value: '<input autofocus onfocus="window.__xss_fired__=true">' },
+  {
+    name: 'input autofocus onfocus',
+    value: '<input autofocus onfocus="window.__xss_fired__=true">',
+  },
   { name: 'null byte injection', value: 'abc\x00<img src=x onerror="window.__xss_fired__=true">' },
 ];
 
 const CREDENTIAL_PAYLOADS = [
   { name: 'img tag in token-shaped value', value: 'ghp_R8<img/src=x onerror=alert(1)>ABCDtoken' },
-  { name: 'script tag in PEM-shaped value', value: '-----BEGIN RSA PRIVATE KEY-----\n<script>alert(1)</script>\n-----END RSA PRIVATE KEY-----' },
+  {
+    name: 'script tag in PEM-shaped value',
+    value:
+      '-----BEGIN RSA PRIVATE KEY-----\n<script>alert(1)</script>\n-----END RSA PRIVATE KEY-----',
+  },
   { name: 'svg onload in secret value', value: 'secret_<svg onload="alert(1)">_value' },
-  { name: 'img onerror in hex-shaped value', value: 'abcdef0123456789<img src=x onerror=alert(1)>abcdef' },
+  {
+    name: 'img onerror in hex-shaped value',
+    value: 'abcdef0123456789<img src=x onerror=alert(1)>abcdef',
+  },
 ];
 
 async function expectNoInjectedElements(page: Page) {
   const injected = await page.evaluate(() => {
+    const root = document.querySelector('.sh');
+    if (!root) return 0;
     let count = 0;
     const dangerousTags = new Set(['script', 'iframe', 'object', 'embed', 'math', 'mglyph']);
-    document.querySelectorAll('*').forEach((el) => {
-      if (dangerousTags.has(el.tagName.toLowerCase())) { count++; return; }
+    root.querySelectorAll('*').forEach((el) => {
+      if (dangerousTags.has(el.tagName.toLowerCase())) {
+        count++;
+        return;
+      }
       for (const attr of el.attributes) {
-        if (attr.name.startsWith('on')) { count++; return; }
+        if (attr.name.startsWith('on')) {
+          count++;
+          return;
+        }
       }
     });
     return count;
@@ -110,15 +167,16 @@ test.describe('self-host wizard XSS resilience — credential fields', () => {
 test.describe('self-host wizard XSS resilience — env output step', () => {
   for (const payload of CREDENTIAL_PAYLOADS) {
     test(`credential value: ${payload.name} renders inertly in env output`, async ({ page }) => {
-      await reachStep(page, 'Create your GitHub App');
+      await reachGeneratedGitHubAppStep(page);
       await page.locator('#sh-app-id').fill('123456');
       await page.locator('#sh-client-id').fill('Iv1.abc123');
       await page.locator('#sh-client-secret').fill(payload.value);
       await page.locator('#sh-app-slug').fill('sam');
-      await page.getByRole('button', { name: 'Generate setup link' }).click();
       await continueFrom(page);
       await continueFrom(page);
-      await expect(page.getByRole('heading', { name: 'Configure the production environment' })).toBeVisible();
+      await expect(
+        page.getByRole('heading', { name: 'Configure the production environment' })
+      ).toBeVisible();
       await page.waitForTimeout(500);
       await expectNoXssExecution(page);
       await expectNoInjectedElements(page);
@@ -140,17 +198,18 @@ test.describe('self-host wizard — SVG icons are DOM-constructed, not innerHTML
 
 test.describe('self-host wizard — no secrets in DOM attributes', () => {
   test('generated secrets are not stored in data-* attributes', async ({ page }) => {
-    await reachStep(page, 'Create your GitHub App');
-    await page.locator('#sh-cf-token').fill('cf_test_token_value_abcdef123456');
+    await fillCloudflareTokenStep(page);
+    await page.getByRole('button', { name: 'Generate setup link' }).click();
+    await expect(page.locator('#sh-app-id')).toBeVisible();
     await page.locator('#sh-client-secret').fill('client_secret_value_xyz789');
-    await page.locator('#sh-r2-secret').fill('r2_secret_key_value_000');
     await page.locator('#sh-app-id').fill('123456');
     await page.locator('#sh-client-id').fill('Iv1.abc');
     await page.locator('#sh-app-slug').fill('sam');
-    await page.getByRole('button', { name: 'Generate setup link' }).click();
     await continueFrom(page);
     await continueFrom(page);
-    await expect(page.getByRole('heading', { name: 'Configure the production environment' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Configure the production environment' })
+    ).toBeVisible();
     await page.waitForTimeout(500);
 
     const dataAttrs = await page.evaluate(() => {
@@ -264,7 +323,9 @@ test.describe('self-host wizard XSS — visual audit', () => {
     await page.locator('#sh-client-secret').fill('<script>alert("xss")</script>');
     await continueFrom(page);
     await continueFrom(page);
-    await expect(page.getByRole('heading', { name: 'Configure the production environment' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Configure the production environment' })
+    ).toBeVisible();
     await page.waitForTimeout(500);
 
     await expectNoHorizontalOverflow(page);
@@ -280,25 +341,23 @@ test.describe('self-host wizard XSS — visual audit', () => {
 
 test.describe('self-host wizard — legitimate output preserved', () => {
   test('wizard flow from start to deploy step produces correct env vars', async ({ page }) => {
-    await openWizard(page);
-    await continueFrom(page, 'Get started');
-    await page.locator('#sh-domain').fill('mysite.org');
-    await page.locator('#sh-cf-account').fill('aabbccddee11223344556677889900ff');
-    await continueFrom(page);
-    await continueFrom(page);
+    await reachCloudflareTokenStep(page, 'mysite.org', 'aabbccddee11223344556677889900ff');
     await page.locator('#sh-cf-token').fill('test-token-value');
     await page.locator('#sh-cf-zone').fill('aabbccddee11223344556677889900ff');
     await page.locator('#sh-r2-key').fill('R2KEY123');
     await page.locator('#sh-r2-secret').fill('R2SECRET456');
     await continueFrom(page);
+    await page.getByRole('button', { name: 'Generate setup link' }).click();
+    await expect(page.locator('#sh-app-id')).toBeVisible();
     await page.locator('#sh-app-id').fill('999');
     await page.locator('#sh-client-id').fill('Iv1.testclient');
     await page.locator('#sh-client-secret').fill('ghsecretvalue');
     await page.locator('#sh-app-slug').fill('myapp');
-    await page.getByRole('button', { name: 'Generate setup link' }).click();
     await continueFrom(page);
     await continueFrom(page);
-    await expect(page.getByRole('heading', { name: 'Configure the production environment' })).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Configure the production environment' })
+    ).toBeVisible();
     await page.waitForTimeout(500);
 
     const varsSection = page.locator('#sh-vars-output');
