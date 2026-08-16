@@ -91,6 +91,20 @@ Add `wait_for_subtasks` with a required stable workflow-step `waitKey`, direct-c
 
 Terminal hooks nudge ProjectData immediately. A bounded, configurable alarm reconciliation queries D1 in bind-safe chunks as a backstop so every terminal writer—including legacy paths that do not yet invoke the hook—converges. When the condition or deadline is satisfied, ProjectData freezes an immutable wake payload containing only trusted task IDs/statuses, enqueues one deterministic prompt through the existing transactional durable prompt-delivery mailbox, and then compare-and-sets the subscription to resolved. Child-authored summaries, errors, and URLs never enter the automatic parent prompt. A crash between those steps retries the same delivery ID and content instead of duplicating or conflicting. Persisted exponential backoff and a finite attempt cap prevent failed wakes—including invalid configuration and transient claim-validation reads—from hot-looping alarms or being silently lost. Parent status/session and child lineage are revalidated before enqueue, at claim, and immediately before recovery/container/VM mutations; the snapshot recovery claim is itself conditionally written against the live parent. Sleeping-VM recovery then uses a transactional `INSERT ... SELECT` handoff that creates and links a replacement task only while that parent remains non-terminal. Later claims recognize the linked recovery task as the temporary session owner, and a parent transition before runner startup atomically cancels the handoff and restores the original bindings. Terminal hooks cancel queued wakes, and delivery claims fail before session recovery when the parent is terminal.
 
+The live parent is also carried into the replacement TaskRunner as revocable
+authority. The TaskRunner validates the exact recovery task, source parent,
+chat, project, and snapshot claim before storing its initial alarm and before
+every alarm-driven orchestration step. A definite start failure atomically
+fails the replacement, restores the source task/workspace bindings, and marks
+the snapshot retryable; later TaskRunner failures restore those bindings before
+the DO can complete. Human follow-ups that recover an already-completed
+conversation remain intentionally unguarded.
+
+For Cloudflare Containers, the same source guard is passed as internal RPC
+metadata rather than serialized into the VM request. Capability, prompt, and
+receipt calls select a guarded `VmAgentContainer` RPC that revalidates D1 inside
+the container DO immediately before `prepareForRequest()` can cold-wake compute.
+
 Update `/workflow` to persist its state, call `wait_for_subtasks`, and end the current turn. Use bounded foreground polling only when the connected SAM server lacks the tool.
 
 ## Implementation checklist
@@ -109,6 +123,8 @@ Update `/workflow` to persist its state, call `wait_for_subtasks`, and end the c
 - [x] Update both Claude and Codex workflow instructions to prefer durable park/wake with a compatibility fallback.
 - [x] Add cross-boundary contract tests proving exact VM callback JSON and Worker runtime validation agree.
 - [x] Make sleeping-session recovery creation and chat-binding transfer atomic with the live source-parent predicate, and revoke a handoff if the parent terminalizes before runner startup.
+- [x] Carry revocable recovery authority into TaskRunner start/alarms and atomically restore source ownership after definite start failure.
+- [x] Carry parent authority through capability/prompt/receipt calls and revalidate inside the Cloudflare Container DO before physical wake.
 - [x] Document new configuration defaults/overrides and the user-visible durable orchestration behavior.
 - [x] Run focused Go race, ProjectData migration, workerd/Miniflare, MCP, sleep, and workflow tests.
 - [x] Run full repository lint, typecheck, test, build, and applicable local quality gates.
@@ -117,9 +133,9 @@ Update `/workflow` to persist its state, call `wait_for_subtasks`, and end the c
 
 - `pnpm lint`: passed with existing warnings only.
 - `pnpm typecheck`: passed across all 19 tasks, including the documented Astro baseline.
-- `pnpm test`: passed across all 21 packages; API reported 546 files and 7,281 tests green after the lifecycle-race hardening.
+- `pnpm test`: passed across all 21 packages; API reported 549 files and 7,309 tests green after the lifecycle-race hardening.
 - `pnpm build`: passed across all nine build tasks.
-- `pnpm --filter @simple-agent-manager/api test:workers`: 48 real workerd files and 627 tests passed.
+- `pnpm --filter @simple-agent-manager/api test:workers`: 48 real workerd files and 632 tests passed.
 - `go test -race ./...`: passed with a test-only Docker command stand-in because this workspace has no Docker CLI; the complete ACP race package also passed directly in 15 seconds.
 - Format ratchet, Oxlint shadows, migration safety/order, DO migration safety, source-contract, type-boundary, runtime-boundary, file-size, stale-artifact, repo-visibility, dependency-governance, direct-dependency, deployment-script, Wrangler-binding, agent-manifest, and Gitleaks current-tree/PR-range gates passed.
 - Task-completion validator sections A-F: PASS. Research findings map to implementation items; every implementation item is present in the diff; acceptance behavior has focused and vertical-slice coverage; environment/API/workflow/process documentation matches the code; no implementation gap remains. Specialist, staging, CI, merge, and production checks are release gates in `/do` Phases 5-7 and remain tracked outside pre-PR task completion.

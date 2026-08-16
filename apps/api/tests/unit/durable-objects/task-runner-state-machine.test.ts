@@ -17,6 +17,7 @@ const {
   persistErrorMock,
   persistMessageMock,
   revokeMcpTokenMock,
+  restoreSessionRecoveryHandoffMock,
   sleepSessionMock,
   stopComputeTrackingMock,
   stopWorkspaceOnNodeMock,
@@ -29,6 +30,7 @@ const {
   persistErrorMock: vi.fn(async () => undefined),
   persistMessageMock: vi.fn(async () => undefined),
   revokeMcpTokenMock: vi.fn(async () => undefined),
+  restoreSessionRecoveryHandoffMock: vi.fn(async () => undefined),
   sleepSessionMock: vi.fn(async () => true),
   stopComputeTrackingMock: vi.fn(async () => undefined),
   stopWorkspaceOnNodeMock: vi.fn(async () => undefined),
@@ -59,6 +61,10 @@ vi.mock('../../../src/services/project-data', () => ({
 
 vi.mock('../../../src/services/session-snapshots', () => ({
   failSessionSnapshotRecovery: failSessionSnapshotRecoveryMock,
+}));
+
+vi.mock('../../../src/services/session-recovery-authority', () => ({
+  restoreSessionRecoveryHandoff: restoreSessionRecoveryHandoffMock,
 }));
 
 vi.mock('../../../src/services/project-orchestrator', () => ({
@@ -539,6 +545,11 @@ describe('failTask', () => {
       'session-1',
       'task-1',
       'replacement restore failed'
+    );
+    expect(restoreSessionRecoveryHandoffMock).toHaveBeenCalledWith(
+      rc.env.DATABASE,
+      'task-1',
+      'session-1'
     );
     expect(sleepSessionMock).toHaveBeenCalledWith(rc.env, 'project-1', 'session-1');
     expect(failSessionMock).not.toHaveBeenCalled();

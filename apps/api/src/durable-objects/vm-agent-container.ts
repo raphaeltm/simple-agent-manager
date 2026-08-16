@@ -6,6 +6,10 @@ import { log } from '../lib/logger';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
 import {
+  isSessionRecoverySourceTaskGuardValid,
+  type SessionRecoverySourceTaskGuard,
+} from '../services/session-recovery-authority';
+import {
   ACTIVE_WORK_KEY,
   type ActiveWorkRuntime,
   type ActiveWorkState,
@@ -72,6 +76,7 @@ export interface VmAgentContainerRecoveryResult {
   code?: RuntimeRecoveryCode;
   message?: string;
 }
+export type VmAgentContainerRequestGuard = SessionRecoverySourceTaskGuard;
 type LifecycleStatus = VmAgentContainerLifecycleStatus;
 
 const RECOVERY_STATE_KEY = 'runtimeRecovery';
@@ -166,6 +171,27 @@ export class VmAgentContainer extends Container<Env> {
       });
       return interruptedRequestResponse(request);
     }
+  }
+
+  async proxyHttpGuarded(
+    request: Request,
+    port: number | undefined,
+    sourceTaskGuard: VmAgentContainerRequestGuard
+  ): Promise<Response> {
+    // This check intentionally lives inside the container DO immediately
+    // before proxyHttp() reaches prepareForRequest()/ensureAwake(). A caller-
+    // side check alone leaves a network-RPC window where a terminal parent can
+    // still cold-start compute.
+    if (!(await isSessionRecoverySourceTaskGuardValid(this.env.DATABASE, sourceTaskGuard))) {
+      return Response.json(
+        {
+          error: 'SOURCE_TASK_NOT_WAKEABLE',
+          message: 'The source task no longer authorizes this runtime request.',
+        },
+        { status: 409 }
+      );
+    }
+    return this.proxyHttp(request, port);
   }
 
   override async fetch(request: Request): Promise<Response> {

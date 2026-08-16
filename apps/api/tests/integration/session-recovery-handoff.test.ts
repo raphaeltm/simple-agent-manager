@@ -77,6 +77,7 @@ describe('session recovery handoff', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     ensureTaskRunnerStartedMock.mockResolvedValue(false);
+    startTaskRunnerDOMock.mockResolvedValue(undefined);
   });
 
   it('atomically transfers the session binding to a recovery task linked to its source', async () => {
@@ -214,6 +215,105 @@ describe('session recovery handoff', () => {
         sqlite.prepare(`SELECT chat_session_id FROM workspaces WHERE id = 'workspace-1'`).get()
       ).toEqual({ chat_session_id: 'chat-1' });
       expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('restores ownership after a definite runner-start failure so a later wake can retry', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      const database = createSqliteD1(sqlite);
+      startTaskRunnerDOMock.mockRejectedValueOnce(new Error('runner start rejected'));
+
+      await expect(
+        ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1', guard())
+      ).resolves.toMatchObject({
+        status: 'unavailable',
+        reason: expect.stringContaining('recovery_start_failed'),
+      });
+
+      expect(
+        sqlite.prepare(`SELECT status, chat_session_id FROM tasks WHERE id = 'parent-1'`).get()
+      ).toEqual({ status: 'awaiting_followup', chat_session_id: 'chat-1' });
+      expect(
+        sqlite
+          .prepare(
+            `SELECT status, chat_session_id
+               FROM tasks WHERE triggered_by = 'session-recovery'
+               ORDER BY created_at ASC LIMIT 1`
+          )
+          .get()
+      ).toEqual({ status: 'failed', chat_session_id: null });
+      expect(
+        sqlite.prepare(`SELECT chat_session_id FROM workspaces WHERE id = 'workspace-1'`).get()
+      ).toEqual({ chat_session_id: 'chat-1' });
+
+      await expect(
+        ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1', guard())
+      ).resolves.toMatchObject({ status: 'waking' });
+      expect(startTaskRunnerDOMock).toHaveBeenCalledTimes(2);
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('rechecks the parent after runner inspection and before crossing the start boundary', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      const database = createSqliteD1(sqlite);
+      ensureTaskRunnerStartedMock.mockImplementationOnce(async () => {
+        sqlite.prepare(`UPDATE tasks SET status = 'completed' WHERE id = 'parent-1'`).run();
+        return false;
+      });
+
+      await expect(
+        ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1', guard())
+      ).resolves.toEqual({ status: 'unavailable', reason: 'source_task_not_wakeable' });
+
+      expect(startTaskRunnerDOMock).not.toHaveBeenCalled();
+      expect(
+        sqlite.prepare(`SELECT status, chat_session_id FROM tasks WHERE id = 'parent-1'`).get()
+      ).toEqual({ status: 'completed', chat_session_id: 'chat-1' });
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('restores the handoff when revocation is detected inside the runner start boundary', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      seedRecoveryFixture(sqlite);
+      const database = createSqliteD1(sqlite);
+      startTaskRunnerDOMock.mockImplementationOnce(async (_env, input) => {
+        expect(input).toMatchObject({ recoverySourceTaskId: 'parent-1' });
+        sqlite.prepare(`UPDATE tasks SET status = 'completed' WHERE id = 'parent-1'`).run();
+        throw new Error('Session recovery authority was revoked');
+      });
+
+      await expect(
+        ensureSessionRecovery({ DATABASE: database } as Env, 'project-1', 'chat-1', guard())
+      ).resolves.toMatchObject({
+        status: 'unavailable',
+        reason: expect.stringContaining('recovery_start_failed'),
+      });
+
+      expect(
+        sqlite.prepare(`SELECT status, chat_session_id FROM tasks WHERE id = 'parent-1'`).get()
+      ).toEqual({ status: 'completed', chat_session_id: 'chat-1' });
+      expect(
+        sqlite
+          .prepare(
+            `SELECT status, chat_session_id
+               FROM tasks WHERE triggered_by = 'session-recovery'`
+          )
+          .get()
+      ).toEqual({ status: 'failed', chat_session_id: null });
+      expect(
+        sqlite.prepare(`SELECT chat_session_id FROM workspaces WHERE id = 'workspace-1'`).get()
+      ).toEqual({ chat_session_id: 'chat-1' });
     } finally {
       sqlite.close();
     }

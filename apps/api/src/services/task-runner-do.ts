@@ -106,6 +106,8 @@ export async function startTaskRunnerDO(
     vmSizeSource?: ResourceRequirementsSource | 'explicit' | null;
     /** Existing sleeping chat whose snapshot is restored before queued prompt delivery. */
     resumeSnapshotChatSessionId?: string | null;
+    /** Original parent whose live status authorizes this snapshot-recovery runner. */
+    recoverySourceTaskId?: string | null;
   }
 ): Promise<void> {
   const stub = getStub(env, input.taskId);
@@ -154,6 +156,7 @@ export async function startTaskRunnerDO(
       resolvedReservation: input.resolvedReservation ?? null,
       vmSizeSource: input.vmSizeSource ?? null,
       resumeSnapshotChatSessionId: input.resumeSnapshotChatSessionId ?? null,
+      recoverySourceTaskId: input.recoverySourceTaskId ?? null,
     },
   };
 

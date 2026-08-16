@@ -169,6 +169,7 @@ export async function handleAgentSession(
     // replacement follow ordinary task semantics instead of re-sleeping a
     // snapshot whose sleepingAt claim has already been cleared.
     state.config.resumeSnapshotChatSessionId = null;
+    state.config.recoverySourceTaskId = null;
     stateChanged = true;
   }
 

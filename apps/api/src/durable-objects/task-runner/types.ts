@@ -105,6 +105,8 @@ export interface TaskRunConfig {
   vmSizeSource?: ResourceRequirementsSource | 'explicit' | null;
   /** Existing sleeping chat whose R2 snapshot must be strictly restored instead of starting fresh. */
   resumeSnapshotChatSessionId?: string | null;
+  /** Live source parent that revocably authorizes a snapshot-recovery TaskRunner. */
+  recoverySourceTaskId?: string | null;
 }
 
 export interface TaskRunnerState {
