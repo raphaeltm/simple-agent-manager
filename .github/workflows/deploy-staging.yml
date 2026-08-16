@@ -19,7 +19,8 @@ env:
 
 permissions:
   contents: read
-  pull-requests: write
+  deployments: none
+  id-token: none
 
 jobs:
   deploy:

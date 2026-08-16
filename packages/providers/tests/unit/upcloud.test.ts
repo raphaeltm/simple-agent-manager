@@ -76,7 +76,11 @@ describe('UpCloudProvider', () => {
       size: 'small',
       location: 'de-fra1',
       userData: '#cloud-config\n',
-      labels: { 'managed-by': 'sam' },
+      labels: {
+        managed: 'simple-agent-manager',
+        env: 'production',
+        installation: '0123456789abcdef0123456789abcdef',
+      },
     });
     expect(result.ip).toBe('203.0.113.10');
     const call = fetchMock.mock.calls.find(
@@ -93,7 +97,13 @@ describe('UpCloudProvider', () => {
         plan: '2xCPU-4GB',
         user_data: '#cloud-config\n',
         metadata: 'yes',
-        labels: { label: [{ key: 'managed-by', value: 'sam' }] },
+        labels: {
+          label: [
+            { key: 'managed', value: 'simple-agent-manager' },
+            { key: 'env', value: 'production' },
+            { key: 'installation', value: '0123456789abcdef0123456789abcdef' },
+          ],
+        },
         storage_devices: {
           storage_device: [
             {

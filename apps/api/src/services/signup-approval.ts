@@ -69,7 +69,7 @@ export async function getSignupApprovalConfig(env: Env): Promise<SignupApprovalC
 
 export async function setSignupApprovalConfig(
   env: Env,
-  input: { requireApproval: boolean; updatedBy: string },
+  input: { requireApproval: boolean; updatedBy: string }
 ): Promise<SignupApprovalConfig> {
   const db = drizzle(env.DATABASE, { schema });
   const now = new Date().toISOString();
@@ -106,24 +106,30 @@ export async function isSignupApprovalRequired(env: Env): Promise<boolean> {
 
 export async function assertSessionUserApproved(
   env: Env,
-  user: { role?: string | null; status?: string | null },
+  user: { role?: string | null; status?: string | null }
 ): Promise<void> {
+  assertUserNotSuspended(user);
   assertUserAllowedBySignupApproval(await isSignupApprovalRequired(env), user);
 }
 
 export function assertUserAllowedBySignupApproval(
   requireApproval: boolean,
-  user: { role?: string | null; status?: string | null },
+  user: { role?: string | null; status?: string | null }
 ): void {
+  assertUserNotSuspended(user);
+
   if (!requireApproval) {
     return;
   }
 
   const isAdmin = user.role === 'superadmin' || user.role === 'admin';
-  if (user.status === 'suspended') {
-    throw errors.forbidden('Your account has been suspended');
-  }
   if (user.status !== 'active' && !isAdmin) {
     throw new AppError(403, 'APPROVAL_REQUIRED', 'Your account is pending admin approval');
+  }
+}
+
+export function assertUserNotSuspended(user: { status?: string | null }): void {
+  if (user.status === 'suspended') {
+    throw errors.forbidden('Your account has been suspended');
   }
 }

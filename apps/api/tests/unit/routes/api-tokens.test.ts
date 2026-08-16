@@ -100,11 +100,58 @@ describe('API token routes', () => {
     expect(res.status).toBe(200);
   });
 
+  it.each([
+    {
+      method: 'GET',
+      path: '/api/auth/api-tokens',
+      body: undefined,
+    },
+    {
+      method: 'POST',
+      path: '/api/auth/api-tokens',
+      body: { name: 'blocked' },
+    },
+    {
+      method: 'DELETE',
+      path: '/api/auth/api-tokens/token-1',
+      body: undefined,
+    },
+  ] as const)(
+    '$method $path rejects suspended browser sessions before API-token management work',
+    async ({ method, path, body }) => {
+      currentMockDB = createMockDB({ selectAllResults: [[{ id: 'token-1', name: 'CLI' }]] });
+      mockGetSession.mockResolvedValue({
+        user: { id: 'user-1', status: 'suspended', role: 'superadmin' },
+      });
+
+      const res = await buildApp().request(path, {
+        method,
+        headers: body ? { 'Content-Type': 'application/json' } : undefined,
+        body: body ? JSON.stringify(body) : undefined,
+      });
+
+      expect(res.status).toBe(403);
+      await expect(res.json()).resolves.toMatchObject({ error: 'FORBIDDEN' });
+      expect(mockGetSession).toHaveBeenCalledWith(
+        expect.objectContaining({ query: { disableCookieCache: true } })
+      );
+      expect(currentMockDB.select).not.toHaveBeenCalled();
+      expect(currentMockDB.insert).not.toHaveBeenCalled();
+      expect(currentMockDB.update).not.toHaveBeenCalled();
+    }
+  );
+
   it('token-login accepts new sam_pat_ tokens and returns sessionCookie in JSON', async () => {
     currentMockDB = createMockDB({
       selectGetResults: [
         { id: 'token-1', userId: 'user-1', revokedAt: null },
-        { id: 'user-1', email: 'test@example.com', name: 'Test User', status: 'active', role: 'user' },
+        {
+          id: 'user-1',
+          email: 'test@example.com',
+          name: 'Test User',
+          status: 'active',
+          role: 'user',
+        },
       ],
     });
 
@@ -125,7 +172,13 @@ describe('API token routes', () => {
     currentMockDB = createMockDB({
       selectGetResults: [
         { id: 'token-1', userId: 'user-1', revokedAt: null },
-        { id: 'user-1', email: 'legacy@example.com', name: 'Legacy', status: 'active', role: 'user' },
+        {
+          id: 'user-1',
+          email: 'legacy@example.com',
+          name: 'Legacy',
+          status: 'active',
+          role: 'user',
+        },
       ],
     });
 
@@ -136,5 +189,31 @@ describe('API token routes', () => {
     });
 
     expect(res.status).toBe(200);
+  });
+
+  it('token-login rejects suspended token owners without creating a session when approval is disabled', async () => {
+    currentMockDB = createMockDB({
+      selectGetResults: [
+        { id: 'token-1', userId: 'user-1', revokedAt: null },
+        {
+          id: 'user-1',
+          email: 'test@example.com',
+          name: 'Test User',
+          status: 'suspended',
+          role: 'admin',
+        },
+      ],
+    });
+
+    const res = await buildApp({ REQUIRE_APPROVAL: 'false' }).request('/api/auth/token-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: 'sam_pat_validtoken123' }),
+    });
+
+    expect(res.status).toBe(403);
+    await expect(res.json()).resolves.toMatchObject({ error: 'FORBIDDEN' });
+    expect(mockCreateSession).not.toHaveBeenCalled();
+    expect(currentMockDB.update).not.toHaveBeenCalled();
   });
 });

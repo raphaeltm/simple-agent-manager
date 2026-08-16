@@ -304,14 +304,14 @@
     var url = buildGitHubAppUrl(domain, appName, org);
 
     var link = document.getElementById('sh-app-link');
-    if (link) link.href = url;
+    if (link) link.href = safeHttpsUrl([url]) || '#';
 
     var secretEl = document.getElementById('sh-webhook-secret');
     if (secretEl) secretEl.textContent = state.webhookSecret;
 
     var preview = document.getElementById('sh-app-preview');
     if (preview) {
-      preview.innerHTML = '';
+      preview.replaceChildren();
       addPreviewRow(preview, 'Name', appName);
       addPreviewRow(preview, 'Homepage URL', 'https://app.' + domain);
       addPreviewRow(preview, 'Callback URL', 'https://api.' + domain + '/api/auth/callback/github');
@@ -391,7 +391,7 @@
     if (varsOutput) varsOutput.textContent = 'Generating resource prefix...';
     if (secretsOutput) secretsOutput.textContent = '';
     if (ghOut) {
-      ghOut.setAttribute('data-script', '');
+      ghCliScriptCache = '';
       var code = ghOut.querySelector('code');
       if (code) code.textContent = '# Generating resource prefix...';
     }
@@ -420,7 +420,7 @@
 
   function renderRows(container, rows) {
     if (!container) return;
-    container.innerHTML = '';
+    container.replaceChildren();
     rows.forEach(function (row) {
       var hasValue = row.value && row.value.length > 0;
       var realVal;
@@ -478,12 +478,12 @@
         eye.className = 'sh-secret-act sh-secret-reveal';
         eye.setAttribute('aria-label', 'Reveal ' + row.key);
         eye.setAttribute('aria-pressed', 'false');
-        eye.innerHTML = eyeIcon();
+        setIcon(eye, eyeIconEl);
         eye.addEventListener('click', function () {
           revealed = !revealed;
           val.textContent = revealed ? realVal : maskValue(realVal);
           val.classList.toggle('is-masked', !revealed);
-          eye.innerHTML = revealed ? eyeOffIcon() : eyeIcon();
+          setIcon(eye, revealed ? eyeOffIconEl : eyeIconEl);
           eye.setAttribute('aria-pressed', revealed ? 'true' : 'false');
           eye.setAttribute('aria-label', (revealed ? 'Hide ' : 'Reveal ') + row.key);
         });
@@ -494,7 +494,7 @@
       btn.type = 'button';
       btn.className = 'sh-secret-act';
       btn.setAttribute('aria-label', 'Copy ' + row.key);
-      btn.innerHTML = copyIcon();
+      btn.appendChild(copyIconEl());
       if (missing) {
         btn.disabled = true;
       } else {
@@ -519,19 +519,90 @@
     return 6;
   }
 
-  function copyIcon() {
-    return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
+  // --- Safe SVG icon construction (no innerHTML) ---
+  var SVG_NS = 'http://www.w3.org/2000/svg';
+  var SVG_ATTRS = {
+    width: '15',
+    height: '15',
+    viewBox: '0 0 24 24',
+    fill: 'none',
+    stroke: 'currentColor',
+    'stroke-width': '2',
+    'stroke-linecap': 'round',
+    'stroke-linejoin': 'round',
+  };
+
+  function createSvg(children) {
+    var svg = document.createElementNS(SVG_NS, 'svg');
+    Object.keys(SVG_ATTRS).forEach(function (k) {
+      svg.setAttribute(k, SVG_ATTRS[k]);
+    });
+    children.forEach(function (child) {
+      svg.appendChild(child);
+    });
+    return svg;
   }
 
-  function eyeIcon() {
-    return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z"/><circle cx="12" cy="12" r="3"/></svg>';
+  function svgEl(tag, attrs) {
+    var el = document.createElementNS(SVG_NS, tag);
+    if (attrs) {
+      Object.keys(attrs).forEach(function (k) {
+        el.setAttribute(k, attrs[k]);
+      });
+    }
+    return el;
   }
 
-  function eyeOffIcon() {
-    return '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9.88 9.88a3 3 0 1 0 4.24 4.24"/><path d="M10.73 5.08A10.43 10.43 0 0 1 12 5c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68"/><path d="M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61"/><line x1="2" x2="22" y1="2" y2="22"/></svg>';
+  function copyIconEl() {
+    return createSvg([
+      svgEl('rect', { x: '9', y: '9', width: '13', height: '13', rx: '2', ry: '2' }),
+      svgEl('path', { d: 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1' }),
+    ]);
+  }
+
+  function eyeIconEl() {
+    return createSvg([
+      svgEl('path', { d: 'M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z' }),
+      svgEl('circle', { cx: '12', cy: '12', r: '3' }),
+    ]);
+  }
+
+  function eyeOffIconEl() {
+    return createSvg([
+      svgEl('path', { d: 'M9.88 9.88a3 3 0 1 0 4.24 4.24' }),
+      svgEl('path', {
+        d: 'M10.73 5.08A10.43 10.43 0 0 1 12 5c6.5 0 10 7 10 7a13.16 13.16 0 0 1-1.67 2.68',
+      }),
+      svgEl('path', {
+        d: 'M6.61 6.61A13.526 13.526 0 0 0 2 12s3.5 7 10 7a9.74 9.74 0 0 0 5.39-1.61',
+      }),
+      svgEl('line', { x1: '2', x2: '22', y1: '2', y2: '22' }),
+    ]);
+  }
+
+  function setIcon(el, iconFn) {
+    var existing = el.querySelector('svg');
+    if (existing) existing.remove();
+    el.appendChild(iconFn());
+  }
+
+  // Validates scheme only (blocks javascript:/data: injection). Does not check host.
+  function safeHttpsUrl(parts) {
+    var url = parts.join('');
+    try {
+      var parsed = new URL(url);
+      if (parsed.protocol !== 'https:') return null;
+      return parsed.href;
+    } catch (e) {
+      return null;
+    }
   }
 
   // --- Step 6: gh CLI one-shot script ---
+  // Closure variable for the unmasked gh CLI script. Avoids exposing secrets in
+  // the DOM (previously stored as a data-script attribute).
+  var ghCliScriptCache = '';
+
   // Single-quote escaping for POSIX shells: close the quote, emit an escaped
   // quote, reopen — '\'' — so arbitrary values (incl. base64 PEM) survive intact.
   function shellQuote(value) {
@@ -561,9 +632,7 @@
     if (!out) return;
 
     var script = buildGhScript(data, repo);
-    // Cache the real script so the copy button copies the unmasked text even
-    // while the on-screen lines are masked.
-    out.setAttribute('data-script', script);
+    ghCliScriptCache = script;
 
     var code = out.querySelector('code');
     if (code) {
@@ -591,34 +660,40 @@
   function renderDeploy() {
     var domain = getDomain();
     var d = isValidDomain(domain) ? domain : 'yourdomain.com';
+    var appUrl = safeHttpsUrl(['https://app.', d]) || 'https://app.yourdomain.com';
+    var apiUrl = safeHttpsUrl(['https://api.', d, '/health']) || 'https://api.yourdomain.com/health';
     var health = document.getElementById('sh-health-cmd');
-    if (health) health.textContent = 'curl https://api.' + d + '/health';
+    if (health) health.textContent = 'curl ' + apiUrl;
     var open = document.getElementById('sh-app-open');
     if (open) {
-      open.href = 'https://app.' + d;
-      open.textContent = 'https://app.' + d;
+      open.href = appUrl;
+      open.textContent = appUrl.replace(/\/$/, '');
     }
     var login = document.getElementById('sh-app-login');
-    if (login) login.href = 'https://app.' + d;
+    if (login) login.href = appUrl;
   }
 
   function renderCloudflareLinks() {
     var account = getCloudflareAccountId();
     var domain = getDomain();
     var hasAccount = isValidCloudflareAccountId(account);
+    var fallback = 'https://dash.cloudflare.com/';
     var cfApiLink = document.getElementById('sh-cf-api-link');
     var zoneLink = document.getElementById('sh-cf-zone-link');
 
     if (cfApiLink) {
-      cfApiLink.href = hasAccount
-        ? 'https://dash.cloudflare.com/' + account + '/api-tokens'
-        : 'https://dash.cloudflare.com/';
+      cfApiLink.href = (hasAccount &&
+        safeHttpsUrl(['https://dash.cloudflare.com/', encodeURIComponent(account), '/api-tokens'])) ||
+        fallback;
     }
     if (zoneLink) {
-      zoneLink.href =
-        hasAccount && isValidDomain(domain)
-          ? 'https://dash.cloudflare.com/' + account + '/' + domain
-          : 'https://dash.cloudflare.com/';
+      zoneLink.href = (hasAccount && isValidDomain(domain) &&
+        safeHttpsUrl([
+          'https://dash.cloudflare.com/',
+          encodeURIComponent(account),
+          '/',
+          encodeURIComponent(domain),
+        ])) || fallback;
     }
   }
 
@@ -804,32 +879,32 @@
     var ghReveal = document.getElementById('sh-gh-cli-reveal');
     var ghCopy = document.getElementById('sh-gh-cli-copy');
     var ghOut = document.getElementById('sh-gh-cli-output');
-    if (ghReveal) ghReveal.innerHTML = eyeIcon();
-    if (ghCopy) ghCopy.innerHTML = copyIcon();
+    if (ghReveal) setIcon(ghReveal, eyeIconEl);
+    if (ghCopy) setIcon(ghCopy, copyIconEl);
     if (ghReveal && ghOut) {
       ghReveal.addEventListener('click', function () {
         var revealed = ghOut.getAttribute('data-revealed') === 'true';
         revealed = !revealed;
         ghOut.setAttribute('data-revealed', revealed ? 'true' : 'false');
-        var script = ghOut.getAttribute('data-script') || '';
         var code = ghOut.querySelector('code');
         if (code) {
           if (revealed) {
-            code.textContent = script || '# Fill in the earlier steps to generate the command.';
+            code.textContent =
+              ghCliScriptCache || '# Fill in the earlier steps to generate the command.';
           } else {
             code.textContent =
-              renderMaskedGhScript(script) ||
+              renderMaskedGhScript(ghCliScriptCache) ||
               '# Fill in the earlier steps to generate the command.';
           }
         }
-        ghReveal.innerHTML = revealed ? eyeOffIcon() : eyeIcon();
+        setIcon(ghReveal, revealed ? eyeOffIconEl : eyeIconEl);
         ghReveal.setAttribute('aria-pressed', revealed ? 'true' : 'false');
         ghReveal.setAttribute('aria-label', (revealed ? 'Hide' : 'Reveal') + ' command values');
       });
     }
     if (ghCopy && ghOut) {
       ghCopy.addEventListener('click', function () {
-        copyText(ghOut.getAttribute('data-script') || '', ghCopy);
+        copyText(ghCliScriptCache || '', ghCopy);
       });
     }
 
@@ -897,9 +972,9 @@
           var el = document.getElementById(id);
           if (el) el.textContent = '';
         });
+        ghCliScriptCache = '';
         var ghOut = document.getElementById('sh-gh-cli-output');
         if (ghOut) {
-          ghOut.setAttribute('data-script', '');
           ghOut.setAttribute('data-revealed', 'false');
           var code = ghOut.querySelector('code');
           if (code) code.textContent = '# Fill in the earlier steps to generate the command.';

@@ -414,6 +414,7 @@ export class GcpProvider implements Provider {
           ],
         },
       ],
+      serviceAccounts: [],
       metadata: {
         items: [
           {

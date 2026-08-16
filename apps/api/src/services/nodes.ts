@@ -17,7 +17,11 @@ import { ulid } from '../lib/ulid';
 import { createNodeBackendDNSRecord, deleteDNSRecord } from './dns';
 import { GcpApiError, sanitizeGcpError } from './gcp-errors';
 import { signNodeCallbackToken } from './jwt';
-import { buildNodeProviderLabels, resolveEnvironmentLabel } from './node-provider-labels';
+import {
+  buildNodeProviderLabels,
+  resolveEnvironmentLabel,
+  resolveInstallationId,
+} from './node-provider-labels';
 import { persistError } from './observability';
 import { createProviderForUser } from './provider-credentials';
 import { destroyVmAgentContainer } from './vm-agent-container';
@@ -295,6 +299,7 @@ export async function provisionNode(
         nodeId: node.id,
         isDeploymentNode,
         environmentLabel: resolveEnvironmentLabel(env),
+        installationId: resolveInstallationId(env),
       }),
     });
 

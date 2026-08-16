@@ -140,6 +140,7 @@ import { usageRoutes } from './routes/usage';
 import { workspacesRoutes } from './routes/workspaces';
 import { scheduled } from './scheduled/handler';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
+import { assertUserNotSuspended } from './services/signup-approval';
 import { recordNodeRoutingMetric } from './services/telemetry';
 import { fetchVmAgentContainer, getVmAgentContainerConfig } from './services/vm-agent-container';
 
@@ -323,8 +324,14 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
   // --- Standard session/terminal-token authentication (non-port or fallback) ---
   if (!userId) {
     const auth = await createAuth(c.env);
-    const session = await auth.api.getSession({ headers: c.req.raw.headers });
-    userId = session?.user.id ?? null;
+    const session = await auth.api.getSession({
+      headers: c.req.raw.headers,
+      query: { disableCookieCache: true },
+    });
+    if (session?.user) {
+      assertUserNotSuspended(session.user);
+      userId = session.user.id;
+    }
   }
 
   if (!userId) {

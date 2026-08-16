@@ -237,7 +237,7 @@ Tasks tracked as markdown in `tasks/` (backlog -> active -> archive). See `tasks
 
 ## Active Technologies
 
-- TypeScript 5.x (Worker/Web), Go 1.24+ (VM Agent)
+- TypeScript 5.x (Worker/Web), Go 1.26.6+ (VM Agent + CLI toolchain)
 - Hono (API framework), Drizzle ORM (D1), React 19 + Vite (Web)
 - Cloudflare Workers SDK (Durable Objects, D1, KV, R2, Workers AI)
 - Tailwind CSS v4 (Web), Astro + Starlight (Marketing site)

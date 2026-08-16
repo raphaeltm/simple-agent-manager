@@ -112,6 +112,8 @@ export interface AcpSessionHandle {
   connected: boolean;
   /** Manually trigger a reconnection attempt */
   reconnect: () => void;
+  /** Force-close the WebSocket and cancel pending reconnect timers. */
+  disconnect: () => void;
 }
 
 /**
@@ -642,6 +644,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     }
 
     intentionalCloseRef.current = false;
+    permanentlyDisconnectedRef.current = false;
     wasConnectedRef.current = false;
     reconnectAttemptRef.current = 0;
     reconnectStartRef.current = 0;
@@ -675,8 +678,8 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
 
     const handleVisibilityChange = () => {
       if (document.visibilityState !== 'visible') return;
+      if (permanentlyDisconnectedRef.current) return;
 
-      // Only reconnect if we were previously connected and WebSocket is no longer open
       if (!wasConnectedRef.current) return;
       if (transportRef.current?.connected) return;
 
@@ -709,7 +712,7 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
 
     const handleOnline = () => {
       logLifecycle('info', 'Browser came online');
-      // Only auto-reconnect if we were in the NETWORK_OFFLINE error state
+      if (permanentlyDisconnectedRef.current) return;
       if (!wasConnectedRef.current) return;
       if (transportRef.current?.connected) return;
 
@@ -744,6 +747,23 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     };
   }, [connectWithResolvedUrl, logLifecycle, clearError, setStructuredError]);
 
+  const permanentlyDisconnectedRef = useRef(false);
+
+  const disconnect = useCallback(() => {
+    permanentlyDisconnectedRef.current = true;
+    intentionalCloseRef.current = true;
+    if (reconnectTimerRef.current) {
+      clearTimeout(reconnectTimerRef.current);
+      reconnectTimerRef.current = null;
+    }
+    if (transportRef.current) {
+      transportRef.current.close();
+      transportRef.current = null;
+    }
+    wasConnectedRef.current = false;
+    setState('disconnected');
+  }, []);
+
   // Manual reconnect (exposed to UI for "Reconnect" button)
   const reconnect = useCallback(() => {
     if (!wsUrl && !resolveWsUrlRef.current) return;
@@ -763,16 +783,13 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
       reconnectTimerRef.current = null;
     }
 
-    // If we're in an error state, signal that the next session_state with
-    // status=error should trigger agent re-selection instead of staying stuck.
-    // This lets the "Reconnect" button actually restart a crashed agent.
     pendingAgentRestartRef.current = true;
 
-    // Reset state and reconnect
     reconnectAttemptRef.current = 0;
     reconnectStartRef.current = 0;
     intentionalCloseRef.current = false;
-    wasConnectedRef.current = true; // We want to reconnect
+    permanentlyDisconnectedRef.current = false;
+    wasConnectedRef.current = true;
     clearError();
     setState('reconnecting');
     void connectWithResolvedUrl(connectUrlRef.current);
@@ -809,5 +826,6 @@ export function useAcpSession(options: UseAcpSessionOptions): AcpSessionHandle {
     sendMessage,
     connected: transportRef.current?.connected ?? false,
     reconnect,
+    disconnect,
   };
 }

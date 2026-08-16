@@ -42,7 +42,7 @@ node --version   # v20.x or higher
 pnpm --version   # 9.x or higher
 ```
 
-Go 1.25+ is only needed if you're working on the VM Agent (`packages/vm-agent/`).
+Go 1.26.6+ is needed if you're working on the VM Agent (`packages/vm-agent/`) or CLI (`packages/cli/`).
 
 ## Setup
 

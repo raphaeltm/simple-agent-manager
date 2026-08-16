@@ -15,6 +15,8 @@ export interface TerminalProps {
   onActivity?: () => void;
   /** Additional CSS class name */
   className?: string;
+  /** When provided, checked before each reconnect attempt. Returning true suppresses reconnection. */
+  shouldSuppressReconnect?: () => boolean;
 }
 
 /** Props for the StatusBar component */
@@ -53,6 +55,8 @@ export interface UseWebSocketOptions {
   maxDelay?: number;
   /** Callback when connection state changes */
   onStateChange?: (state: ConnectionState) => void;
+  /** When provided, checked before each reconnect attempt. Returning true suppresses reconnection. */
+  shouldSuppressReconnect?: () => boolean;
 }
 
 /** Return type for useWebSocket hook */

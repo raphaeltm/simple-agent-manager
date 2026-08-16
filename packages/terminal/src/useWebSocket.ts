@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef,useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ConnectionState, UseWebSocketOptions, UseWebSocketReturn } from './types';
 
@@ -14,6 +14,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
     baseDelay = 1000,
     maxDelay = 30000,
     onStateChange,
+    shouldSuppressReconnect,
   } = options;
 
   const [state, setState] = useState<ConnectionState>('connecting');
@@ -27,8 +28,10 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
   const connectRef = useRef<() => Promise<void>>(async () => {});
   const urlRef = useRef(url);
   const resolveUrlRef = useRef(resolveUrl);
+  const shouldSuppressReconnectRef = useRef(shouldSuppressReconnect);
   urlRef.current = url;
   resolveUrlRef.current = resolveUrl;
+  shouldSuppressReconnectRef.current = shouldSuppressReconnect;
 
   // Update state and notify callback
   const updateState = useCallback(
@@ -60,6 +63,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
 
   const scheduleReconnect = useCallback(() => {
     if (!mountedRef.current) return;
+    if (shouldSuppressReconnectRef.current?.()) return;
 
     if (retriesRef.current < maxRetries) {
       updateState('reconnecting');
@@ -68,7 +72,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
       setRetryCount(retriesRef.current);
 
       reconnectTimeoutRef.current = setTimeout(() => {
-        if (mountedRef.current) {
+        if (mountedRef.current && !shouldSuppressReconnectRef.current?.()) {
           void connectRef.current();
         }
       }, delay);
@@ -80,6 +84,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
   // Connect to WebSocket
   const connect = useCallback(async () => {
     if (!mountedRef.current) return;
+    if (retriesRef.current > 0 && shouldSuppressReconnectRef.current?.()) return;
 
     updateState(retriesRef.current === 0 ? 'connecting' : 'reconnecting');
 
@@ -143,6 +148,7 @@ export function useWebSocket(options: UseWebSocketOptions): UseWebSocketReturn {
 
   // Manual retry function
   const retry = useCallback(() => {
+    if (shouldSuppressReconnectRef.current?.()) return;
     retriesRef.current = 0;
     setRetryCount(0);
     clearTimeout(reconnectTimeoutRef.current);

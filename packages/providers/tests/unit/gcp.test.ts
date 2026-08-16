@@ -146,7 +146,12 @@ describe('GcpProvider', () => {
         size: 'medium',
         location: 'us-central1-a',
         userData: '#cloud-config\nruncmd: []',
-        labels: { node: 'test-node-id' },
+        labels: {
+          node: 'test-node-id',
+          managed: 'simple-agent-manager',
+          env: 'production',
+          installation: '0123456789abcdef0123456789abcdef',
+        },
       };
 
       const result = await provider.createVM(config);
@@ -161,9 +166,46 @@ describe('GcpProvider', () => {
       expect(body.machineType).toContain('e2-standard-2');
       expect(body.labels).toHaveProperty('sam-managed', 'true');
       expect(body.labels).toHaveProperty('node', 'test-node-id');
+      expect(body.labels).toHaveProperty('managed', 'simple-agent-manager');
+      expect(body.labels).toHaveProperty('env', 'production');
+      expect(body.labels).toHaveProperty('installation', '0123456789abcdef0123456789abcdef');
       expect(body.tags.items).toEqual(['sam-agent']);
+      expect(Object.hasOwn(body, 'serviceAccounts')).toBe(true);
+      expect(body.serviceAccounts).toEqual([]);
       expect(body.metadata.items[0].key).toBe('user-data');
       expect(body.metadata.items[0].value).toBe('#cloud-config\nruncmd: []');
+    });
+
+    it('explicitly requests no attached VM service account', async () => {
+      let capturedBody: string | undefined;
+      globalThis.fetch = vi.fn()
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ error: { code: 409 } }), { status: 409 }))
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ error: { code: 409 } }), { status: 409 }))
+        .mockImplementationOnce(async (_url: string, init: RequestInit) => {
+          capturedBody = init.body as string;
+          return new Response(JSON.stringify({ name: 'op-123', status: 'DONE' }));
+        })
+        .mockImplementationOnce(async () => new Response(JSON.stringify({ status: 'DONE' })))
+        .mockImplementationOnce(async () => new Response(JSON.stringify({
+          id: '1',
+          name: 'vm',
+          status: 'RUNNING',
+          machineType: 'zones/us-central1-a/machineTypes/e2-medium',
+          creationTimestamp: '2026-03-18T00:00:00Z',
+          networkInterfaces: [{ accessConfigs: [{ natIP: testIpv4(1, 2, 3, 4) }] }],
+        })));
+
+      await provider.createVM({
+        name: 'vm-without-sa',
+        size: 'small',
+        location: 'us-central1-a',
+        userData: '#cloud-config',
+      });
+
+      const body = JSON.parse(expectDefined(capturedBody));
+      expect(body.serviceAccounts).toEqual([]);
+      expect(JSON.stringify(body)).not.toContain('developer.gserviceaccount.com');
+      expect(JSON.stringify(body)).not.toContain('https://www.googleapis.com/auth/cloud-platform');
     });
 
     it('adds the public app-route network tag only to deployment-role VMs', async () => {
@@ -360,7 +402,8 @@ describe('GcpProvider', () => {
         if (url.includes('/zones/us-central1-a/instances')) {
           const parsed = new URL(url);
           expect(parsed.searchParams.get('filter')).toContain('labels.sam-managed=true');
-          expect(parsed.searchParams.get('filter')).toContain('labels.env=prod');
+          expect(parsed.searchParams.get('filter')).toContain('labels.env=production');
+          expect(parsed.searchParams.get('filter')).toContain('labels.installation=0123456789abcdef0123456789abcdef');
           if (!parsed.searchParams.has('pageToken')) {
             return new Response(JSON.stringify({
               items: [gcpInstance({ id: '1', name: 'page-1' })],
@@ -376,7 +419,10 @@ describe('GcpProvider', () => {
       });
       globalThis.fetch = mockFetch;
 
-      const result = await provider.listVMs({ env: 'prod' });
+      const result = await provider.listVMs({
+        env: 'production',
+        installation: '0123456789abcdef0123456789abcdef',
+      });
 
       expect(result.map((vm) => vm.id)).toEqual(['1', '2']);
       expect(mockFetch).toHaveBeenCalledTimes(9);

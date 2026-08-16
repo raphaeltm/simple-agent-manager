@@ -24,6 +24,7 @@ import {
   saveAgentSettings,
 } from '../lib/api';
 import { reportError } from '../lib/error-reporter';
+import { getAuthEpoch, isAuthRevoked, registerTerminalCleanup } from '../lib/terminal-cleanup';
 
 interface ChatSessionProps {
   /** Workspace ID for token fetching */
@@ -75,6 +76,13 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
     }));
     const wsUrlCacheRef = useRef<{ url: string; resolvedAt: number } | null>(null);
 
+    // Clear cached bearer URL on logout/account switch
+    useEffect(() => {
+      return registerTerminalCleanup(() => {
+        wsUrlCacheRef.current = null;
+      });
+    }, []);
+
     // Resolve transcription API URL once (stable across renders)
     const transcribeApiUrl = useMemo(() => getTranscribeApiUrl(), []);
 
@@ -119,12 +127,14 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
     }, [wsHostInfo, workspaceId, sessionId, worktreePath]);
 
     const resolveWsUrl = useCallback(async (): Promise<string | null> => {
-      if (!wsHostInfo) return null;
+      if (!wsHostInfo || isAuthRevoked()) return null;
 
       const cached = wsUrlCacheRef.current;
       if (cached && Date.now() - cached.resolvedAt < 15_000) {
         return cached.url;
       }
+
+      const epochAtStart = getAuthEpoch();
 
       reportError({
         level: 'info',
@@ -135,6 +145,7 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
 
       try {
         const { token } = await getTerminalToken(workspaceId);
+        if (isAuthRevoked() || getAuthEpoch() !== epochAtStart) return null;
         const sessionQuery = `&sessionId=${encodeURIComponent(sessionId)}`;
         const worktreeQuery = worktreePath ? `&worktree=${encodeURIComponent(worktreePath)}` : '';
         const url = `${wsHostInfo}/agent/ws?token=${encodeURIComponent(token)}${sessionQuery}${worktreeQuery}`;
@@ -205,9 +216,16 @@ export const ChatSession = React.forwardRef<ChatSessionHandle, ChatSessionProps>
       onFirstConnect: handleFirstConnect,
     });
 
-    const { agentType, state, switchAgent } = acpSession;
+    const { agentType, state, switchAgent, disconnect: acpDisconnect } = acpSession;
     switchAgentRef.current = switchAgent;
     const { clear: clearMessages } = acpMessages;
+
+    // Force-close ACP socket on logout/account switch
+    useEffect(() => {
+      return registerTerminalCleanup(() => {
+        acpDisconnect();
+      });
+    }, [acpDisconnect]);
 
     // Clear messages when no agent session exists (idle SessionHost).
     // Replay clearing is now handled synchronously by onPrepareForReplay

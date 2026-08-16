@@ -57,11 +57,11 @@ export const pagesName = pagesProjectName;
 export const dnsIds = dnsRecordIds;
 export const hostnames = dnsHostnames;
 
-// Export security keys (persisted in Pulumi state, encrypted in R2)
-// These are marked as secrets - use `pulumi stack output --show-secrets` to view
+// Export persisted keys plus the non-secret installation identity.
 export {
   deploySigningPrivateKey,
   encryptionKey,
+  installationId,
   jwtPrivateKey,
   jwtPublicKey,
   previewSigningKey,

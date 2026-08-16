@@ -2,6 +2,8 @@ module github.com/raphaeltm/simple-agent-manager/scripts/quality/govulncheck-too
 
 go 1.25.0
 
+toolchain go1.26.6
+
 tool golang.org/x/vuln/cmd/govulncheck
 
 require (

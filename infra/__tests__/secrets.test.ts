@@ -31,6 +31,17 @@ describe('Security Key Resources', () => {
     expect(deploySigningKey.options.protect).toBe(true);
   });
 
+  it('protects a stable 128-bit non-secret installation identity', async () => {
+    const installationIdentity = findRegisteredResource(
+      'installation-id',
+      'random:index/randomId:RandomId'
+    );
+    expect(installationIdentity.inputs).toMatchObject({ byteLength: 16 });
+    expect(installationIdentity.options.protect).toBe(true);
+    await expect(getSecretStatus(secretsModule.installationId)).resolves.toBe(false);
+    await expect(getOutputValue(secretsModule.installationId)).resolves.toMatch(/^[0-9a-f]{32}$/);
+  });
+
   it('protects the RSA-2048 JWT signing key', () => {
     const jwtKey = findRegisteredResource('jwt-signing-key', 'tls:index/privateKey:PrivateKey');
 

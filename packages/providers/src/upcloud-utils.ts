@@ -1,3 +1,4 @@
+import { AMBIGUOUS_LABEL_MARKER_PREFIX } from './kv-tags';
 import type { ProviderErrorCategory, VMInstance, VMStatus, VolumeInstance } from './types';
 import { ProviderError } from './types';
 import type { UpCloudLabel, UpCloudServer, UpCloudStorage } from './validation-upcloud';
@@ -58,7 +59,19 @@ export function toUpCloudLabels(labels?: Record<string, string>) {
 }
 
 export function fromUpCloudLabels(labels: UpCloudLabel[]) {
-  return Object.fromEntries(labels.map((label) => [label.key, label.value]));
+  const decoded: Record<string, string> = {};
+  const ambiguousKeys = new Set<string>();
+  for (const label of labels) {
+    if (ambiguousKeys.has(label.key)) continue;
+    if (Object.hasOwn(decoded, label.key)) {
+      delete decoded[label.key];
+      ambiguousKeys.add(label.key);
+      decoded[`${AMBIGUOUS_LABEL_MARKER_PREFIX}${label.key}`] = 'true';
+      continue;
+    }
+    decoded[label.key] = label.value;
+  }
+  return decoded;
 }
 
 export function matchesUpCloudLabels(actual: UpCloudLabel[], expected?: Record<string, string>) {

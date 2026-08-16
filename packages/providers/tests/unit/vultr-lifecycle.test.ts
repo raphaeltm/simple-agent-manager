@@ -43,7 +43,11 @@ describe('VultrProvider createVM', () => {
       size: 'small',
       location: 'fra',
       userData: '#cloud-config\nhostname: sam\n',
-      labels: { 'managed-by': 'sam', 'node-id': 'n1' },
+      labels: {
+        managed: 'simple-agent-manager',
+        env: 'production',
+        installation: '0123456789abcdef0123456789abcdef',
+      },
     });
 
     const createCall = findCall(fetchMock, 'POST', /\/v2\/instances$/);
@@ -56,7 +60,11 @@ describe('VultrProvider createVM', () => {
     expect(body.hostname).toBe('my-node'); // sanitized
     expect(body.backups).toBe('disabled');
     expect(body.activation_email).toBe(false);
-    expect(body.tags).toEqual(['managed-by=sam', 'node-id=n1']);
+    expect(body.tags).toEqual([
+      'managed=simple-agent-manager',
+      'env=production',
+      'installation=0123456789abcdef0123456789abcdef',
+    ]);
     expect(decodeBase64(body.user_data)).toBe('#cloud-config\nhostname: sam\n');
 
     // Auth header present
@@ -333,7 +341,14 @@ describe('VultrProvider lifecycle', () => {
   it('listVMs filters client-side by labels', async () => {
     const fetchMock = createVultrFetchMock({
       listInstances: [
-        createMockVultrInstance({ id: 'a', tags: ['managed-by=sam', 'env=prod'] }),
+        createMockVultrInstance({
+          id: 'a',
+          tags: [
+            'managed=simple-agent-manager',
+            'env=production',
+            'installation=0123456789abcdef0123456789abcdef',
+          ],
+        }),
         createMockVultrInstance({ id: 'b', tags: ['managed-by=other'] }),
         createMockVultrInstance({ id: 'c', tags: ['managed-by=sam', 'env=dev'] }),
       ],
@@ -341,7 +356,11 @@ describe('VultrProvider lifecycle', () => {
     const provider = newProvider(fetchMock);
     const all = await provider.listVMs();
     expect(all.map((v) => v.id)).toEqual(['a', 'b', 'c']);
-    const filtered = await provider.listVMs({ 'managed-by': 'sam', env: 'prod' });
+    const filtered = await provider.listVMs({
+      managed: 'simple-agent-manager',
+      env: 'production',
+      installation: '0123456789abcdef0123456789abcdef',
+    });
     expect(filtered.map((v) => v.id)).toEqual(['a']);
   });
 

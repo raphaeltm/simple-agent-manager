@@ -24,6 +24,7 @@ import { useIsMobile } from '../../hooks/useIsMobile';
 import { useTabOrder } from '../../hooks/useTabOrder';
 import { getFileIndex } from '../../lib/api';
 import { isSessionActive } from '../../lib/session-utils';
+import { isAuthRevoked, TERMINAL_SESSION_STORAGE_PREFIX } from '../../lib/terminal-cleanup';
 import { LegacyChatSessionsView } from './LegacyChatSessionsView';
 import { MobileErrorBanner } from './MobileErrorBanner';
 import type { ViewMode, WorkspaceTab } from './types';
@@ -413,12 +414,13 @@ export function Workspace() {
                         defaultWorkDir={nav.activeWorktree ?? undefined}
                         onActivity={handleTerminalActivity}
                         className="h-full"
-                        persistenceKey={id ? `sam-terminal-sessions-${id}` : undefined}
+                        persistenceKey={id ? `${TERMINAL_SESSION_STORAGE_PREFIX}${id}` : undefined}
                         hideTabBar
                         onSessionsChange={(s: MultiTerminalSessionSnapshot[], a: string | null) => {
                           setTerminalTabs(s);
                           setActiveTerminalSessionId(a);
                         }}
+                        shouldSuppressReconnect={isAuthRevoked}
                       />
                     ) : (
                       <Terminal
@@ -426,6 +428,7 @@ export function Workspace() {
                         resolveWsUrl={core.resolveTerminalWsUrl}
                         onActivity={handleTerminalActivity}
                         className="h-full"
+                        shouldSuppressReconnect={isAuthRevoked}
                       />
                     )
                   ) : core.terminalLoading ? (

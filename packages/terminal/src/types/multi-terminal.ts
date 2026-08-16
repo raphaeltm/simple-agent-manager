@@ -274,6 +274,9 @@ export interface MultiTerminalProps {
     sessions: MultiTerminalSessionSnapshot[],
     activeSessionId: string | null
   ) => void;
+
+  /** When provided, checked before each reconnect attempt. Returning true suppresses reconnection. */
+  shouldSuppressReconnect?: () => boolean;
 }
 
 /** Read-only terminal session snapshot for parent-level tab UIs. */

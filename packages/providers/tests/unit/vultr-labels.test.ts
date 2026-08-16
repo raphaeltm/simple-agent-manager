@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { kvTagsToLabels, labelsToKvTags } from '../../src/kv-tags';
+import { hasAmbiguousLabel, kvTagsToLabels, labelsToKvTags } from '../../src/kv-tags';
 import { labelsToScalewayTags, scalewayTagsToLabels } from '../../src/scaleway-tags';
 import { decodeVultrBlockLabel, encodeVultrBlockLabel } from '../../src/vultr-labels';
 
@@ -17,6 +17,17 @@ describe('kv-tags', () => {
 
   it('preserves = characters inside the value', () => {
     expect(kvTagsToLabels(['url=https://x/?a=b'])).toEqual({ url: 'https://x/?a=b' });
+  });
+
+  it('keeps duplicate keys ambiguous regardless of ordering', () => {
+    for (const tags of [
+      ['installation=foreign', 'installation=ours'],
+      ['installation=ours', 'installation=foreign'],
+    ]) {
+      const decoded = kvTagsToLabels(tags);
+      expect(decoded).not.toHaveProperty('installation');
+      expect(hasAmbiguousLabel(decoded, 'installation')).toBe(true);
+    }
   });
 });
 

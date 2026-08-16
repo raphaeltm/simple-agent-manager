@@ -91,13 +91,16 @@ describe('resolveSessionStatus via requireAuth', () => {
 
   it("downgrades a 'system' session status to 'pending' and logs an anomaly", async () => {
     mocks.getSession.mockResolvedValue(
-      makeSession({ id: 'sentinel-1', email: 's@x.internal', role: 'user', status: 'system' }),
+      makeSession({ id: 'sentinel-1', email: 's@x.internal', role: 'user', status: 'system' })
     );
     const { c, store } = makeContext();
     const next = vi.fn(async () => {});
 
     await requireAuth()(c as never, next as never);
 
+    expect(mocks.getSession).toHaveBeenCalledWith(
+      expect.objectContaining({ query: { disableCookieCache: true } })
+    );
     expect((store.auth as CapturedAuth).user.status).toBe('pending');
     expect(mocks.warn).toHaveBeenCalledWith('auth.system_status_anomaly', { userId: 'sentinel-1' });
     expect(next).toHaveBeenCalledOnce();
@@ -105,7 +108,7 @@ describe('resolveSessionStatus via requireAuth', () => {
 
   it("defaults a non-string status to 'active' without logging an anomaly", async () => {
     mocks.getSession.mockResolvedValue(
-      makeSession({ id: 'user-1', email: 'u@x.com', role: 'user', status: undefined }),
+      makeSession({ id: 'user-1', email: 'u@x.com', role: 'user', status: undefined })
     );
     const { c, store } = makeContext();
 
@@ -115,17 +118,33 @@ describe('resolveSessionStatus via requireAuth', () => {
     expect(mocks.warn).not.toHaveBeenCalled();
   });
 
-  it.each([
-    { id: 'user-2', email: 'a@x.com', status: 'active' },
-    { id: 'user-3', email: 'b@x.com', status: 'suspended' },
-  ])('passes through a $status status verbatim', async ({ id, email, status }) => {
-    mocks.getSession.mockResolvedValue(makeSession({ id, email, role: 'user', status }));
+  it('passes through an active status verbatim', async () => {
+    const status = 'active';
+    mocks.getSession.mockResolvedValue(
+      makeSession({ id: 'user-2', email: 'a@x.com', role: 'user', status })
+    );
     const { c, store } = makeContext();
 
     await requireAuth()(c as never, vi.fn(async () => {}) as never);
 
     expect((store.auth as CapturedAuth).user.status).toBe(status);
     expect(mocks.warn).not.toHaveBeenCalled();
+  });
+
+  it('rejects a suspended session before setting auth context', async () => {
+    mocks.getSession.mockResolvedValue(
+      makeSession({ id: 'user-3', email: 'b@x.com', role: 'admin', status: 'suspended' })
+    );
+    const { c, store } = makeContext();
+    const next = vi.fn(async () => {});
+
+    await expect(requireAuth()(c as never, next as never)).rejects.toMatchObject({
+      statusCode: 403,
+      error: 'FORBIDDEN',
+    });
+
+    expect(store.auth).toBeUndefined();
+    expect(next).not.toHaveBeenCalled();
   });
 });
 
@@ -137,15 +156,40 @@ describe('resolveSessionStatus via optionalAuth', () => {
 
   it("downgrades a 'system' status to 'pending' and logs an anomaly", async () => {
     mocks.getSession.mockResolvedValue(
-      makeSession({ id: 'sentinel-2', email: 's2@x.internal', role: 'user', status: 'system' }),
+      makeSession({ id: 'sentinel-2', email: 's2@x.internal', role: 'user', status: 'system' })
     );
     const { c, store } = makeContext();
     const next = vi.fn(async () => {});
 
     await optionalAuth()(c as never, next as never);
 
+    expect(mocks.getSession).toHaveBeenCalledWith(
+      expect.objectContaining({ query: { disableCookieCache: true } })
+    );
     expect((store.auth as CapturedAuth).user.status).toBe('pending');
     expect(mocks.warn).toHaveBeenCalledWith('auth.system_status_anomaly', { userId: 'sentinel-2' });
+    expect(next).toHaveBeenCalledOnce();
+  });
+
+  it('treats suspended optional auth as unauthenticated and continues', async () => {
+    mocks.getSession.mockResolvedValue(
+      makeSession({
+        id: 'user-4',
+        email: 'suspended@x.com',
+        role: 'superadmin',
+        status: 'suspended',
+      })
+    );
+    const { c, store } = makeContext();
+    const next = vi.fn(async () => {});
+
+    await optionalAuth()(c as never, next as never);
+
+    expect(store.auth).toBeUndefined();
+    expect(mocks.warn).toHaveBeenCalledWith(
+      'optional_auth.check_failed',
+      expect.objectContaining({ error: expect.stringContaining('Your account has been suspended') })
+    );
     expect(next).toHaveBeenCalledOnce();
   });
 });

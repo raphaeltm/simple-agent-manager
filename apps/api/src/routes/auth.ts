@@ -5,9 +5,38 @@ import type { Env } from '../env';
 import { log, serializeError } from '../lib/logger';
 import { expectJsonRecord } from '../lib/runtime-validation';
 import { errors } from '../middleware/error';
+import { assertUserNotSuspended } from '../services/signup-approval';
 import { maybeAttachTrialClaimCookie } from '../services/trial/oauth-hook';
 
 const authRoutes = new Hono<{ Bindings: Env }>();
+
+/**
+ * GET /api/auth/me - Get current authenticated user
+ * Returns user profile with GitHub info
+ */
+authRoutes.get('/me', async (c) => {
+  const auth = await createAuth(c.env);
+  const session = await auth.api.getSession({
+    headers: c.req.raw.headers,
+    query: { disableCookieCache: true },
+  });
+
+  if (!session?.user) {
+    throw errors.unauthorized('Not authenticated');
+  }
+
+  assertUserNotSuspended(session.user);
+  const user = expectJsonRecord(session.user, 'auth.me.session.user');
+  return c.json({
+    id: session.user.id,
+    email: session.user.email,
+    name: session.user.name,
+    avatarUrl: session.user.image,
+    role: typeof user.role === 'string' ? user.role : 'user',
+    status: typeof user.status === 'string' ? user.status : 'active',
+    createdAt: session.user.createdAt,
+  });
+});
 
 /**
  * BetterAuth handler - handles all auth routes:
@@ -38,32 +67,6 @@ authRoutes.on(['GET', 'POST'], '/*', async (c) => {
     log.error('auth.better_auth_exception', serializeError(err));
     return c.json({ error: 'AUTH_ERROR', message: 'Internal auth error' }, 500);
   }
-});
-
-/**
- * GET /api/auth/me - Get current authenticated user
- * Returns user profile with GitHub info
- */
-authRoutes.get('/me', async (c) => {
-  const auth = await createAuth(c.env);
-  const session = await auth.api.getSession({
-    headers: c.req.raw.headers,
-  });
-
-  if (!session?.user) {
-    throw errors.unauthorized('Not authenticated');
-  }
-
-  const user = expectJsonRecord(session.user, 'auth.me.session.user');
-  return c.json({
-    id: session.user.id,
-    email: session.user.email,
-    name: session.user.name,
-    avatarUrl: session.user.image,
-    role: typeof user.role === 'string' ? user.role : 'user',
-    status: typeof user.status === 'string' ? user.status : 'active',
-    createdAt: session.user.createdAt,
-  });
 });
 
 export { authRoutes };

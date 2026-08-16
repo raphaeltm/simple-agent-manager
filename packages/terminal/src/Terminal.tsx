@@ -27,6 +27,7 @@ export function Terminal({
   resolveWsUrl,
   onActivity,
   className = '',
+  shouldSuppressReconnect,
 }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<XTerm | null>(null);
@@ -38,6 +39,7 @@ export function Terminal({
     url: wsUrl,
     resolveUrl: resolveWsUrl,
     maxRetries: MAX_RETRIES,
+    shouldSuppressReconnect,
   });
 
   const connected = state === 'connected';

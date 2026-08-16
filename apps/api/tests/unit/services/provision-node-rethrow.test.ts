@@ -88,6 +88,8 @@ const ENV = {
   DATABASE: {},
   OBSERVABILITY_DATABASE: {},
   BASE_DOMAIN: 'example.com',
+  ENVIRONMENT: 'production',
+  SAM_INSTALLATION_ID: '0123456789abcdef0123456789abcdef',
   ERROR_REPORT_RESPONSE_MAX_BYTES: '2048',
   ERROR_REPORT_STORED_ERROR_MAX_BYTES: '256',
   ERROR_REPORT_COLLECTOR_CONCURRENCY: '2',
@@ -103,19 +105,58 @@ beforeEach(() => {
   nodeRows.push({
     id: 'node-1',
     userId: 'user-1',
+    name: 'workspace-node',
+    status: 'pending',
+    nodeRole: 'workspace',
+    nodeClass: 'managed',
     vmSize: 'large',
     vmLocation: 'fsn1',
     cloudProvider: 'hetzner',
   });
   createProviderForUser.mockResolvedValue({
     provider: { createVM },
+    providerName: 'hetzner',
     credentialSource: 'user',
   });
-  createVM.mockResolvedValue({ id: 'provider-vm-1', ip: '203.0.113.10' });
+  createVM.mockResolvedValue({
+    id: 'provider-vm-1',
+    name: 'workspace-node',
+    ip: '203.0.113.10',
+    status: 'running',
+    serverType: 'cx22',
+    createdAt: '2026-08-12T00:00:00.000Z',
+    labels: {},
+  });
   createNodeBackendDNSRecord.mockResolvedValue('dns-record-id');
 });
 
 describe('provisionNode backend DNS records', () => {
+  it('propagates exact installation ownership to the provider create boundary', async () => {
+    await provisionNode('node-1', ENV);
+
+    expect(createVM).toHaveBeenCalledWith(
+      expect.objectContaining({
+        labels: {
+          node: 'node-1',
+          managed: 'simple-agent-manager',
+          role: 'workspace',
+          env: 'production',
+          installation: '0123456789abcdef0123456789abcdef',
+        },
+      }),
+    );
+  });
+
+  it('keeps provisioning compatible but omits ownership when identity is unavailable', async () => {
+    await provisionNode('node-1', { ...ENV, SAM_INSTALLATION_ID: undefined });
+
+    expect(createVM).toHaveBeenCalledWith(
+      expect.objectContaining({
+        labels: expect.not.objectContaining({ installation: expect.anything() }),
+      }),
+    );
+  });
+
   it('passes configurable reporter bounds into generated cloud-init', async () => {
     await provisionNode('node-1', ENV);
 

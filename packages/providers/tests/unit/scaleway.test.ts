@@ -137,7 +137,12 @@ describe('ScalewayProvider', () => {
       size: 'medium',
       location: 'fr-par-1',
       userData: '#cloud-config\npackages:\n  - docker.io',
-      labels: { node: 'node-123', managed: 'simple-agent-manager' },
+      labels: {
+        node: 'node-123',
+        managed: 'simple-agent-manager',
+        env: 'production',
+        installation: '0123456789abcdef0123456789abcdef',
+      },
     };
 
     const createResponse = () => new Response(JSON.stringify({
@@ -197,6 +202,13 @@ describe('ScalewayProvider', () => {
       const { url: call2Url, init: call2Init } = fetchCall(mockFetch, 1);
       expect(call2Url).toContain('/servers');
       expect(call2Init.method).toBe('POST');
+      expect(jsonBody(call2Init).tags).toEqual(
+        expect.arrayContaining([
+          'managed=simple-agent-manager',
+          'env=production',
+          'installation=0123456789abcdef0123456789abcdef',
+        ]),
+      );
 
       // Call 3: PATCH cloud-init
       const { url: call3Url, init: call3Init } = fetchCall(mockFetch, 2);
@@ -224,7 +236,12 @@ describe('ScalewayProvider', () => {
       expect(body.image).toBe('img-uuid-1234');
       expect(body.project).toBe('test-project-id');
       expect(body.dynamic_ip_required).toBe(true);
-      expect(body.tags).toEqual(['node=node-123', 'managed=simple-agent-manager']);
+      expect(body.tags).toEqual([
+        'node=node-123',
+        'managed=simple-agent-manager',
+        'env=production',
+        'installation=0123456789abcdef0123456789abcdef',
+      ]);
     });
 
     it('should use X-Auth-Token header', async () => {

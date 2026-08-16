@@ -21,6 +21,17 @@ import * as random from '@pulumi/random';
 import * as tls from '@pulumi/tls';
 
 /**
+ * Stable exact-installation identity for ownership labels on external resources.
+ * It is intentionally non-secret, but protected because rotation would make an
+ * existing fleet safely unattributable to destructive reconciliation.
+ */
+const installationIdResource = new random.RandomId(
+  'installation-id',
+  { byteLength: 16 },
+  { protect: true }
+);
+
+/**
  * Encryption key for user credentials stored in D1.
  * 32 bytes (256 bits) for AES-256 encryption.
  * Output is base64-encoded.
@@ -101,8 +112,9 @@ const previewSigningKeyResource = new random.RandomId(
 
 const deploySigningPrivateKeySeed = pulumi.secret(deploySigningPrivateKeyResource.b64Std);
 
-// Export as secret outputs (Pulumi redacts secrets in logs and state output)
+// Export secret key material plus the deliberately non-secret installation id.
 export const encryptionKey = pulumi.secret(encryptionKeyResource.b64Std);
+export const installationId = installationIdResource.hex;
 export const jwtPrivateKey = pulumi.secret(jwtKeyResource.privateKeyPemPkcs8);
 export const jwtPublicKey = pulumi.secret(jwtKeyResource.publicKeyPem);
 export const trialClaimTokenSecret = pulumi.secret(trialClaimTokenResource.b64Std);

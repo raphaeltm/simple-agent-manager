@@ -32,7 +32,7 @@ on:
           - staging
           - production
       timestamp:
-        description: 'RFC3339 timestamp to restore to (e.g. 2026-04-25T12:30:00Z). Must be within last 30 days.'
+        description: 'Restore point: Unix seconds, RFC3339 date-time with timezone, or D1 bookmark. Must be within the configured recovery window.'
         required: true
         type: string
       database:
@@ -76,19 +76,30 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Validate restore input
+        id: restore_input
+        run: pnpm exec tsx scripts/deploy/d1-restore-input.ts validate
+        env:
+          D1_RESTORE_POINT: ${{ inputs.timestamp }}
+          D1_RESTORE_ENVIRONMENT: ${{ inputs.environment }}
+          D1_RESTORE_DATABASE: ${{ inputs.database }}
+          D1_RESTORE_DRY_RUN: ${{ inputs.dry_run }}
+          D1_RESTORE_RECOVERY_WINDOW_DAYS: ${{ vars.D1_RESTORE_RECOVERY_WINDOW_DAYS || '30' }}
+
       - name: Install Pulumi CLI
         uses: pulumi/actions@8e5e406f4007fca908480587cb9893c07090f58d # v7.0.0
 
       - name: Determine Stack Name
         id: stack
         run: |
-          case "${{ inputs.environment }}" in
+          case "$D1_RESTORE_ENVIRONMENT" in
             production) STACK="prod" ;;
             staging) STACK="staging" ;;
-            *) STACK="${{ inputs.environment }}" ;;
           esac
-          echo "name=$STACK" >> $GITHUB_OUTPUT
-          echo "Stack: $STACK for environment: ${{ inputs.environment }}"
+          echo "name=$STACK" >> "$GITHUB_OUTPUT"
+          echo "Stack: $STACK for environment: $D1_RESTORE_ENVIRONMENT"
+        env:
+          D1_RESTORE_ENVIRONMENT: ${{ steps.restore_input.outputs.environment }}
 
       - name: Compute Resource Prefix
         id: prefix
@@ -146,17 +157,18 @@ jobs:
         working-directory: apps/api
         run: |
           echo "=== Pre-Restore State ==="
-          echo "Environment: ${{ inputs.environment }}"
-          echo "Restore timestamp: ${{ inputs.timestamp }}"
-          echo "Target database(s): ${{ inputs.database }}"
-          echo "Dry run: ${{ inputs.dry_run }}"
+          echo "Environment: $D1_RESTORE_ENVIRONMENT"
+          echo "Restore point kind: $D1_RESTORE_KIND"
+          echo "Restore point: $D1_RESTORE_VALUE"
+          echo "Target database(s): $D1_RESTORE_DATABASE"
+          echo "Dry run: $D1_RESTORE_DRY_RUN"
           echo ""
 
-          if [[ "${{ inputs.database }}" == "main" || "${{ inputs.database }}" == "both" ]]; then
+          if [[ "$D1_RESTORE_DATABASE" == "main" || "$D1_RESTORE_DATABASE" == "both" ]]; then
             echo "--- Main DB row counts (BEFORE restore) ---"
             for table in projects users tasks triggers trigger_executions agent_profiles credentials nodes workspaces sessions project_deployment_credentials project_runtime_env_vars project_runtime_files; do
-              COUNT=$(pnpm exec wrangler d1 execute "${{ steps.db.outputs.db_name }}" \
-                --remote --env ${{ inputs.environment }} \
+              COUNT=$(pnpm exec wrangler d1 execute "$D1_MAIN_DATABASE_NAME" \
+                --remote --env "$D1_RESTORE_ENVIRONMENT" \
                 --command="SELECT COUNT(*) as count FROM $table" \
                 --json 2>/dev/null | node -e "
                   const data = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
@@ -166,50 +178,56 @@ jobs:
             done
           fi
         env:
+          D1_RESTORE_KIND: ${{ steps.restore_input.outputs.kind }}
+          D1_RESTORE_VALUE: ${{ steps.restore_input.outputs.value }}
+          D1_RESTORE_ENVIRONMENT: ${{ steps.restore_input.outputs.environment }}
+          D1_RESTORE_DATABASE: ${{ steps.restore_input.outputs.database }}
+          D1_RESTORE_DRY_RUN: ${{ steps.restore_input.outputs.dry_run }}
+          D1_MAIN_DATABASE_NAME: ${{ steps.db.outputs.db_name }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Time Travel info
-        working-directory: apps/api
-        run: |
-          echo "=== Time Travel Info ==="
-          if [[ "${{ inputs.database }}" == "main" || "${{ inputs.database }}" == "both" ]]; then
-            echo "--- Main DB ---"
-            pnpm exec wrangler d1 time-travel info "${{ steps.db.outputs.db_name }}" \
-              --timestamp="${{ inputs.timestamp }}" \
-              --json || echo "WARNING: Could not get time-travel info for main DB"
-          fi
-          if [[ "${{ inputs.database }}" == "observability" || "${{ inputs.database }}" == "both" ]]; then
-            echo "--- Observability DB ---"
-            pnpm exec wrangler d1 time-travel info "${{ steps.db.outputs.obs_db_name }}" \
-              --timestamp="${{ inputs.timestamp }}" \
-              --json || echo "WARNING: Could not get time-travel info for observability DB"
-          fi
+        run: pnpm exec tsx scripts/deploy/d1-restore-input.ts preflight
         env:
+          D1_RESTORE_KIND: ${{ steps.restore_input.outputs.kind }}
+          D1_RESTORE_VALUE: ${{ steps.restore_input.outputs.value }}
+          D1_RESTORE_ENVIRONMENT: ${{ steps.restore_input.outputs.environment }}
+          D1_RESTORE_DATABASE: ${{ steps.restore_input.outputs.database }}
+          D1_RESTORE_DRY_RUN: ${{ steps.restore_input.outputs.dry_run }}
+          D1_RESTORE_RECOVERY_WINDOW_DAYS: ${{ steps.restore_input.outputs.recovery_window_days }}
+          D1_MAIN_DATABASE_NAME: ${{ steps.db.outputs.db_name }}
+          D1_OBSERVABILITY_DATABASE_NAME: ${{ steps.db.outputs.obs_db_name }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Restore main database
         if: ${{ inputs.dry_run != true && (inputs.database == 'main' || inputs.database == 'both') }}
-        working-directory: apps/api
-        run: |
-          echo "RESTORING main database to ${{ inputs.timestamp }}..."
-          pnpm exec wrangler d1 time-travel restore "${{ steps.db.outputs.db_name }}" \
-            --timestamp="${{ inputs.timestamp }}"
-          echo "Main database restored."
+        run: pnpm exec tsx scripts/deploy/d1-restore-input.ts restore
         env:
+          D1_RESTORE_KIND: ${{ steps.restore_input.outputs.kind }}
+          D1_RESTORE_VALUE: ${{ steps.restore_input.outputs.value }}
+          D1_RESTORE_ENVIRONMENT: ${{ steps.restore_input.outputs.environment }}
+          D1_RESTORE_DATABASE: main
+          D1_RESTORE_DRY_RUN: ${{ steps.restore_input.outputs.dry_run }}
+          D1_RESTORE_RECOVERY_WINDOW_DAYS: ${{ steps.restore_input.outputs.recovery_window_days }}
+          D1_MAIN_DATABASE_NAME: ${{ steps.db.outputs.db_name }}
+          D1_OBSERVABILITY_DATABASE_NAME: ${{ steps.db.outputs.obs_db_name }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
       - name: Restore observability database
         if: ${{ inputs.dry_run != true && (inputs.database == 'observability' || inputs.database == 'both') }}
-        working-directory: apps/api
-        run: |
-          echo "RESTORING observability database to ${{ inputs.timestamp }}..."
-          pnpm exec wrangler d1 time-travel restore "${{ steps.db.outputs.obs_db_name }}" \
-            --timestamp="${{ inputs.timestamp }}"
-          echo "Observability database restored."
+        run: pnpm exec tsx scripts/deploy/d1-restore-input.ts restore
         env:
+          D1_RESTORE_KIND: ${{ steps.restore_input.outputs.kind }}
+          D1_RESTORE_VALUE: ${{ steps.restore_input.outputs.value }}
+          D1_RESTORE_ENVIRONMENT: ${{ steps.restore_input.outputs.environment }}
+          D1_RESTORE_DATABASE: observability
+          D1_RESTORE_DRY_RUN: ${{ steps.restore_input.outputs.dry_run }}
+          D1_RESTORE_RECOVERY_WINDOW_DAYS: ${{ steps.restore_input.outputs.recovery_window_days }}
+          D1_MAIN_DATABASE_NAME: ${{ steps.db.outputs.db_name }}
+          D1_OBSERVABILITY_DATABASE_NAME: ${{ steps.db.outputs.obs_db_name }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
@@ -218,11 +236,11 @@ jobs:
         working-directory: apps/api
         run: |
           echo "=== Post-Restore Verification ==="
-          if [[ "${{ inputs.database }}" == "main" || "${{ inputs.database }}" == "both" ]]; then
+          if [[ "$D1_RESTORE_DATABASE" == "main" || "$D1_RESTORE_DATABASE" == "both" ]]; then
             echo "--- Main DB row counts (AFTER restore) ---"
             for table in projects users tasks triggers trigger_executions agent_profiles credentials nodes workspaces sessions project_deployment_credentials project_runtime_env_vars project_runtime_files; do
-              COUNT=$(pnpm exec wrangler d1 execute "${{ steps.db.outputs.db_name }}" \
-                --remote --env ${{ inputs.environment }} \
+              COUNT=$(pnpm exec wrangler d1 execute "$D1_MAIN_DATABASE_NAME" \
+                --remote --env "$D1_RESTORE_ENVIRONMENT" \
                 --command="SELECT COUNT(*) as count FROM $table" \
                 --json 2>/dev/null | node -e "
                   const data = JSON.parse(require('fs').readFileSync('/dev/stdin','utf8'));
@@ -239,6 +257,9 @@ jobs:
           echo "  2. Re-deploy to apply any migrations that should run after the restore point"
           echo "  3. Verify the application works end-to-end"
         env:
+          D1_RESTORE_ENVIRONMENT: ${{ steps.restore_input.outputs.environment }}
+          D1_RESTORE_DATABASE: ${{ steps.restore_input.outputs.database }}
+          D1_MAIN_DATABASE_NAME: ${{ steps.db.outputs.db_name }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CF_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
 
@@ -250,6 +271,12 @@ jobs:
           echo ""
           echo "To perform the actual restore, re-run this workflow with dry_run=false."
           echo ""
-          echo "Target: ${{ inputs.environment }}"
-          echo "Timestamp: ${{ inputs.timestamp }}"
-          echo "Database: ${{ inputs.database }}"
+          echo "Target: $D1_RESTORE_ENVIRONMENT"
+          echo "Restore point kind: $D1_RESTORE_KIND"
+          echo "Restore point: $D1_RESTORE_VALUE"
+          echo "Database: $D1_RESTORE_DATABASE"
+        env:
+          D1_RESTORE_KIND: ${{ steps.restore_input.outputs.kind }}
+          D1_RESTORE_VALUE: ${{ steps.restore_input.outputs.value }}
+          D1_RESTORE_ENVIRONMENT: ${{ steps.restore_input.outputs.environment }}
+          D1_RESTORE_DATABASE: ${{ steps.restore_input.outputs.database }}

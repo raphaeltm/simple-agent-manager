@@ -48,6 +48,7 @@ export {
 } from './types';
 
 // Re-export utilities
+export { hasAmbiguousLabel } from './kv-tags';
 export { getMaxProviderErrorBodyChars, getTimeoutMs, providerFetch } from './provider-fetch';
 
 // Re-export providers and classification functions

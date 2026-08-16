@@ -37,6 +37,7 @@ const outputs: PulumiOutputs = {
   },
   cloudflareAccountId: 'account-id',
   pagesName: 'prefix-web-prod',
+  installationId: '0123456789abcdef0123456789abcdef',
 };
 
 afterEach(() => {
@@ -75,6 +76,7 @@ describe('sync wrangler config', () => {
       WWW_PAGES_PROJECT_NAME: 's123abc-www',
       BASE_DOMAIN: 'example.com',
       PAGES_PROJECT_NAME: 'prefix-web-prod',
+      SAM_INSTALLATION_ID: '0123456789abcdef0123456789abcdef',
     });
     expect(envConfig.analytics_engine_datasets).toEqual([
       { binding: 'ANALYTICS', dataset: 's123abc_analytics' },
@@ -98,6 +100,37 @@ describe('sync wrangler config', () => {
       ANALYTICS_DATASET: 'sa379a6_analytics',
       WWW_PAGES_PROJECT_NAME: 'sa379a6-www',
     });
+  });
+
+  it('keeps exact installation identity independent from shared or different resource prefixes', () => {
+    const installationA = { ...outputs, installationId: 'a'.repeat(32) };
+    const installationB = { ...outputs, installationId: 'b'.repeat(32) };
+
+    vi.stubEnv('RESOURCE_PREFIX', 'shared-prefix');
+    expect(generateApiWorkerEnv({}, installationA, 'prod', false, false, null).vars).toMatchObject({
+      SAM_INSTALLATION_ID: 'a'.repeat(32),
+    });
+    expect(generateApiWorkerEnv({}, installationB, 'prod', false, false, null).vars).toMatchObject({
+      SAM_INSTALLATION_ID: 'b'.repeat(32),
+    });
+
+    vi.stubEnv('RESOURCE_PREFIX', 'different-prefix');
+    expect(generateApiWorkerEnv({}, installationA, 'prod', false, false, null).vars).toMatchObject({
+      SAM_INSTALLATION_ID: 'a'.repeat(32),
+    });
+  });
+
+  it('overrides checked-in identity with the Pulumi-owned generated value', () => {
+    vi.stubEnv('RESOURCE_PREFIX', 's123abc');
+    const envConfig = generateApiWorkerEnv(
+      { vars: { SAM_INSTALLATION_ID: 'f'.repeat(32) } },
+      outputs,
+      'prod',
+      false,
+      false,
+      null
+    );
+    expect(envConfig.vars).toMatchObject({ SAM_INSTALLATION_ID: outputs.installationId });
   });
 
   it('enables Cloudflare Container runtime by default and allows explicit opt-out', () => {
