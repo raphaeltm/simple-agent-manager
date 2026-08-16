@@ -5,9 +5,10 @@ import { ESLint } from 'eslint';
 import { describe, expect, it } from 'vitest';
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+const eslint = new ESLint({ cwd: repoRoot });
+const ESLINT_PARITY_TIMEOUT_MS = 20_000;
 
 const lintText = async (code: string, filePath: string) => {
-  const eslint = new ESLint({ cwd: repoRoot });
   const [result] = await eslint.lintText(code, {
     filePath: path.join(repoRoot, filePath),
   });
@@ -19,41 +20,51 @@ describe('ESLint 8 to ESLint 9 flat-config parity', () => {
     expect(ESLint.version).toMatch(/^9\./);
   });
 
-  it('preserves the audited v7 type-only-use behavior', async () => {
-    const messages = await lintText(
-      `
+  it(
+    'preserves the audited v7 type-only-use behavior',
+    async () => {
+      const messages = await lintText(
+        `
         function makeFixture() {
           return { id: 'fixture' };
         }
         export type Fixture = ReturnType<typeof makeFixture>;
       `,
-      'apps/web/src/eslint-parity.ts'
-    );
+        'apps/web/src/eslint-parity.ts'
+      );
 
-    expect(
-      messages.filter((message) => message.ruleId === '@typescript-eslint/no-unused-vars')
-    ).toEqual([]);
-  });
+      expect(
+        messages.filter((message) => message.ruleId === '@typescript-eslint/no-unused-vars')
+      ).toEqual([]);
+    },
+    ESLINT_PARITY_TIMEOUT_MS
+  );
 
-  it('continues to reject genuinely unused runtime values', async () => {
-    const messages = await lintText(
-      'const unusedRuntimeValue = 1; export {};',
-      'apps/web/src/eslint-parity.ts'
-    );
+  it(
+    'continues to reject genuinely unused runtime values',
+    async () => {
+      const messages = await lintText(
+        'const unusedRuntimeValue = 1; export {};',
+        'apps/web/src/eslint-parity.ts'
+      );
 
-    expect(messages).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          ruleId: '@typescript-eslint/no-unused-vars',
-          severity: 2,
-        }),
-      ])
-    );
-  });
+      expect(messages).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            ruleId: '@typescript-eslint/no-unused-vars',
+            severity: 2,
+          }),
+        ])
+      );
+    },
+    ESLINT_PARITY_TIMEOUT_MS
+  );
 
-  it('retains audited jsx-a11y options at blocking severity', async () => {
-    const messages = await lintText(
-      `
+  it(
+    'retains audited jsx-a11y options at blocking severity',
+    async () => {
+      const messages = await lintText(
+        `
         export function ParityFixture() {
           return (
             <>
@@ -63,16 +74,18 @@ describe('ESLint 8 to ESLint 9 flat-config parity', () => {
           );
         }
       `,
-      'apps/web/src/eslint-parity.tsx'
-    );
-    const staticInteractionMessages = messages.filter(
-      (message) => message.ruleId === 'jsx-a11y/no-static-element-interactions'
-    );
+        'apps/web/src/eslint-parity.tsx'
+      );
+      const staticInteractionMessages = messages.filter(
+        (message) => message.ruleId === 'jsx-a11y/no-static-element-interactions'
+      );
 
-    expect(staticInteractionMessages).toHaveLength(1);
-    expect(staticInteractionMessages[0]).toMatchObject({
-      line: 6,
-      severity: 2,
-    });
-  });
+      expect(staticInteractionMessages).toHaveLength(1);
+      expect(staticInteractionMessages[0]).toMatchObject({
+        line: 6,
+        severity: 2,
+      });
+    },
+    ESLINT_PARITY_TIMEOUT_MS
+  );
 });

@@ -84,18 +84,26 @@ describe('ToolCallCard', () => {
   });
 
   it('renders Codex 1.1.2 MCP result and error rawOutput live', () => {
-    const { rerender } = render(<ToolCallCard toolCall={createToolCall({
-      content: [],
-      rawOutput: { result: [{ type: 'text', text: 'SAM_LIVE_MCP_OUTPUT_112' }] },
-    })} />);
+    const { rerender } = render(
+      <ToolCallCard
+        toolCall={createToolCall({
+          content: [],
+          rawOutput: { result: [{ type: 'text', text: 'SAM_LIVE_MCP_OUTPUT_112' }] },
+        })}
+      />
+    );
     fireEvent.click(screen.getByRole('button', { name: /terminal execute/i }));
     expect(screen.getByText('SAM_LIVE_MCP_OUTPUT_112')).toBeTruthy();
-    rerender(<ToolCallCard toolCall={createToolCall({
-      id: 'item-2',
-      toolCallId: 'tool-2',
-      content: [],
-      rawOutput: { error: { message: 'SAM_LIVE_MCP_ERROR_112' } },
-    })} />);
+    rerender(
+      <ToolCallCard
+        toolCall={createToolCall({
+          id: 'item-2',
+          toolCallId: 'tool-2',
+          content: [],
+          rawOutput: { error: { message: 'SAM_LIVE_MCP_ERROR_112' } },
+        })}
+      />
+    );
     expect(screen.getByText('Error: SAM_LIVE_MCP_ERROR_112')).toBeTruthy();
   });
 
@@ -132,8 +140,6 @@ describe('ToolCallCard', () => {
     expect(screen.queryByText(/secret/)).toBeNull();
   });
 
-
-
   it('lazy-loads empty tool content and keeps the card expandable', async () => {
     const onLoadContent = vi.fn().mockResolvedValue([]);
     const toolCall = createToolCall({
@@ -150,7 +156,7 @@ describe('ToolCallCard', () => {
     fireEvent.click(header);
 
     await waitFor(() => expect(onLoadContent).toHaveBeenCalledWith('msg-empty-tool'));
-    expect(screen.getByText('No output.')).toBeTruthy();
+    expect(await screen.findByText('No output.')).toBeTruthy();
   });
 
   describe('onFileClick behavior', () => {
@@ -235,7 +241,9 @@ describe('ToolCallCard', () => {
   describe('overflow protection', () => {
     it('header uses min-w-0 on flex children to allow truncation', () => {
       const toolCall = createToolCall({
-        locations: [{ path: '/very/long/deeply/nested/path/to/some/file/that/is/really/long.tsx', line: 42 }],
+        locations: [
+          { path: '/very/long/deeply/nested/path/to/some/file/that/is/really/long.tsx', line: 42 },
+        ],
       });
 
       const { container } = render(<ToolCallCard toolCall={toolCall} />);
@@ -267,7 +275,8 @@ describe('ToolCallCard', () => {
     });
 
     it('tool content text area has break-words and overflow-hidden', () => {
-      const longContent = 'a'.repeat(500) + '/very/long/unbreakable-file-path-that-goes-on-and-on.ts';
+      const longContent =
+        'a'.repeat(500) + '/very/long/unbreakable-file-path-that-goes-on-and-on.ts';
       const toolCall = createToolCall({
         content: [{ type: 'content', text: longContent, data: null }],
       });

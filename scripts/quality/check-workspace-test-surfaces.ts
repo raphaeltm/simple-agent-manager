@@ -43,6 +43,10 @@ const IGNORED_DIRECTORIES = new Set([
   'storybook-static',
 ]);
 
+function hasJsonObjectShape(value: unknown): value is { [key: string]: unknown } {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function isRunnableScript(command: string | undefined): boolean {
   const normalized = command?.trim();
   if (!normalized) return false;
@@ -114,11 +118,40 @@ function containsTestFile(directory: string, current = directory): boolean {
 }
 
 function readManifest(manifestPath: string): PackageManifest {
+  let parsed: unknown;
   try {
-    return JSON.parse(readFileSync(manifestPath, 'utf8')) as PackageManifest;
+    parsed = JSON.parse(readFileSync(manifestPath, 'utf8')) as unknown;
   } catch (error) {
     throw new Error(`invalid workspace manifest ${manifestPath}: ${String(error)}`);
   }
+
+  if (!hasJsonObjectShape(parsed)) {
+    throw new Error(`invalid workspace manifest ${manifestPath}: expected object`);
+  }
+
+  const name = Reflect.get(parsed, 'name');
+  if (name !== undefined && typeof name !== 'string') {
+    throw new Error(`invalid workspace manifest ${manifestPath}: name must be a string`);
+  }
+
+  const rawScripts = Reflect.get(parsed, 'scripts');
+  if (rawScripts !== undefined && !hasJsonObjectShape(rawScripts)) {
+    throw new Error(`invalid workspace manifest ${manifestPath}: scripts must be an object`);
+  }
+
+  const scripts: Record<string, string> | undefined = rawScripts ? {} : undefined;
+  if (scripts && hasJsonObjectShape(rawScripts)) {
+    for (const [scriptName, command] of Object.entries(rawScripts)) {
+      if (typeof command !== 'string') {
+        throw new Error(
+          `invalid workspace manifest ${manifestPath}: script ${scriptName} must be a string`
+        );
+      }
+      scripts[scriptName] = command;
+    }
+  }
+
+  return { name, scripts };
 }
 
 function findTestedWorkspaceFindings(

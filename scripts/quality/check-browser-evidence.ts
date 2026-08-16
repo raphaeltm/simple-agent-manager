@@ -9,13 +9,55 @@ type StorybookIndex = {
 const THEMES = ['sam', 'sam-light'] as const;
 const PROJECTS = ['desktop-chrome', 'mobile-chrome'] as const;
 
+function hasJsonObjectShape(value: unknown): value is { [key: string]: unknown } {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readStorybookIndex(indexPath: string): StorybookIndex {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(readFileSync(indexPath, 'utf8')) as unknown;
+  } catch (error) {
+    throw new Error(
+      `Browser evidence check failed: invalid Storybook index ${indexPath}: ${String(error)}`
+    );
+  }
+
+  if (!hasJsonObjectShape(parsed)) {
+    throw new Error(`Browser evidence check failed: Storybook index ${indexPath} is not an object`);
+  }
+
+  const rawEntries = Reflect.get(parsed, 'entries');
+  if (!hasJsonObjectShape(rawEntries)) {
+    throw new Error(
+      `Browser evidence check failed: Storybook index ${indexPath} has no entries object`
+    );
+  }
+
+  const entries: StorybookIndex['entries'] = {};
+  for (const [key, rawEntry] of Object.entries(rawEntries)) {
+    if (!hasJsonObjectShape(rawEntry)) {
+      throw new Error(`Browser evidence check failed: Storybook entry ${key} is not an object`);
+    }
+
+    const id = Reflect.get(rawEntry, 'id');
+    const type = Reflect.get(rawEntry, 'type');
+    if (typeof id !== 'string' || typeof type !== 'string') {
+      throw new Error(`Browser evidence check failed: Storybook entry ${key} has invalid id/type`);
+    }
+    entries[key] = { id, type };
+  }
+
+  return { entries };
+}
+
 export function expectedBrowserEvidence(root: string): string[] {
   const indexPath = resolve(root, 'packages/ui/storybook-static/index.json');
   if (!existsSync(indexPath)) {
     throw new Error(`Browser evidence check failed: missing Storybook index ${indexPath}`);
   }
 
-  const index = JSON.parse(readFileSync(indexPath, 'utf8')) as StorybookIndex;
+  const index = readStorybookIndex(indexPath);
   const stories = Object.values(index.entries)
     .filter((entry) => entry.type === 'story')
     .map((entry) => entry.id)

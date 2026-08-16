@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 
 import AxeBuilder from '@axe-core/playwright';
-import { expect, test } from '@playwright/test';
+import { expect, type Page, test } from '@playwright/test';
 
 type StorybookIndex = {
   entries: Record<string, { id: string; type: string }>;
@@ -19,6 +19,8 @@ if (stories.length === 0) throw new Error('Storybook index does not contain any 
 
 const themes = ['sam', 'sam-light'] as const;
 type Theme = (typeof themes)[number];
+const AXE_ALREADY_RUNNING_RETRIES = 5;
+const AXE_ALREADY_RUNNING_DELAY_MS = 250;
 
 // These existing dark-theme token pairs are below WCAG AA for normal-sized text. WP-065
 // cannot change runtime tokens, so keep the debt exact and visible: this test fails if an
@@ -46,6 +48,24 @@ const semanticButtonTokens: Partial<Record<string, { background: string; foregro
     foreground: '--sam-color-fg-primary',
   },
 };
+
+function isAxeAlreadyRunning(error: unknown): boolean {
+  return error instanceof Error && error.message.includes('Axe is already running');
+}
+
+async function analyzeStoryAccessibility(page: Page) {
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= AXE_ALREADY_RUNNING_RETRIES; attempt += 1) {
+    try {
+      return await new AxeBuilder({ page }).include('#storybook-root').analyze();
+    } catch (error) {
+      if (!isAxeAlreadyRunning(error)) throw error;
+      lastError = error;
+      await page.waitForTimeout(AXE_ALREADY_RUNNING_DELAY_MS * attempt);
+    }
+  }
+  throw lastError;
+}
 
 for (const theme of themes) {
   for (const story of stories) {
@@ -89,7 +109,7 @@ for (const theme of themes) {
       );
       expect(hasHorizontalOverflow).toBe(false);
 
-      const axeResults = await new AxeBuilder({ page }).include('#storybook-root').analyze();
+      const axeResults = await analyzeStoryAccessibility(page);
       const seriousViolations = axeResults.violations.filter(
         (violation) => violation.impact === 'critical' || violation.impact === 'serious'
       );
