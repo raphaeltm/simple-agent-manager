@@ -114,7 +114,7 @@ func (h *SessionHost) beginAgentSelection(agentType string) (previousAgentSelect
 		h.stopCurrentAgentLocked()
 	}
 	h.agentType = agentType
-	h.status = HostStarting
+	h.setStatusLocked(HostStarting)
 	h.statusErr = ""
 	h.selectionInProgress = true
 	h.resetStderrBuffer()
@@ -283,7 +283,7 @@ func (h *SessionHost) startSelectedAgent(ctx context.Context, agentType string, 
 		// monitorProcessExit goroutine sees a replaced process and skips restart
 		// once it re-acquires h.mu.
 		h.stopCurrentAgentLocked()
-		h.status = HostError
+		h.setStatusLocked(HostError)
 		h.statusErr = message
 		h.mu.Unlock()
 		slog.Error("Agent start failed", "error", err)
@@ -293,7 +293,7 @@ func (h *SessionHost) startSelectedAgent(ctx context.Context, agentType string, 
 		h.reportActivity("error")
 		return err
 	}
-	h.status = HostReady
+	h.setStatusLocked(HostReady)
 	h.statusErr = ""
 	h.mu.Unlock()
 	return nil

@@ -223,9 +223,9 @@ func TestCheckpointRolloverGracefulAndForcedStrictResume(t *testing.T) {
 			host.mu.Lock()
 			host.process = oldProc
 			host.acpConn = conn
-			host.status = HostPrompting
+			host.setStatusLocked(HostPrompting)
 			host.agentType = "openai-codex"
-			host.sessionID = "acp-session-1"
+			host.setSessionIDLocked("acp-session-1")
 			host.agentSupportsLoadSession = true
 			host.mu.Unlock()
 			go host.monitorProcessExit(context.Background(), oldProc, "openai-codex", &agentCredential{credentialKind: "api-key"}, nil)

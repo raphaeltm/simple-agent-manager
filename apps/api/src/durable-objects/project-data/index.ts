@@ -274,7 +274,20 @@ export class ProjectData extends DurableObject<Env> {
         wakeDeliveryId: crypto.randomUUID(),
       })
     );
-    await this.reconcileTaskWaits();
+    // Best-effort low-latency nudge; the periodic alarm remains the correctness
+    // backstop. The subscription is already committed above, so a reconcile
+    // failure caused by some OTHER subscription in this project must not fail
+    // this registration back to the caller. Note this sweep is also bounded by
+    // `maxCandidatesPerAlarm`, so a busy project may not process the new
+    // subscription until the next alarm tick.
+    try {
+      await this.reconcileTaskWaits();
+    } catch (error) {
+      log.warn('task_wait.register_reconcile_failed', {
+        subscriptionId: created.subscription.id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     return {
       created: created.created,
       subscription: taskWaits.getTaskWait(this.sql, created.subscription.id),

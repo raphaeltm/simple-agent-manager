@@ -145,7 +145,7 @@ func (h *SessionHost) tryLoadPreviousACPSession(
 		return false, fmt.Errorf("ACP LoadSession failed: %w", loadErr)
 	}
 
-	h.sessionID = acpsdk.SessionId(previousAcpSessionID)
+	h.setSessionIDLocked(acpsdk.SessionId(previousAcpSessionID))
 	h.configOptions = loadResp.ConfigOptions
 	slog.Info("ACP: LoadSession succeeded", "sessionID", previousAcpSessionID)
 	h.reportLifecycle("info", "ACP LoadSession succeeded", map[string]interface{}{
@@ -177,7 +177,7 @@ func (h *SessionHost) startNewACPSession(ctx context.Context, agentType string, 
 		return fmt.Errorf("ACP new session failed: %w", err)
 	}
 	cancel()
-	h.sessionID = sessResp.SessionId
+	h.setSessionIDLocked(sessResp.SessionId)
 	h.configOptions = sessResp.ConfigOptions
 	slog.Info("ACP: NewSession succeeded", "sessionID", string(h.sessionID))
 	h.reportLifecycle("info", "ACP NewSession succeeded", map[string]interface{}{

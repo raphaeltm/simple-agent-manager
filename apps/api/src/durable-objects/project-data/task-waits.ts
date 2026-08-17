@@ -1,6 +1,9 @@
 import { TASK_TERMINAL_STATUSES } from '@simple-agent-manager/shared';
 
+import { createModuleLogger } from '../../lib/logger';
 import type { TaskWaitConfig } from './task-wait-config';
+
+const log = createModuleLogger('project_data.task_waits');
 
 export type TaskWaitCondition = 'all' | 'any';
 export type TaskWaitState = 'active' | 'resolved' | 'cancelled';
@@ -264,7 +267,26 @@ export function listTaskWaitCandidates(
           config.maxCandidatesPerAlarm
         )
         .toArray();
-  return rows.map((row) => hydrate(sql, row));
+  // Per-row fault isolation (.claude/rules/50). `hydrate` -> `parseSubscriptionRow`
+  // throws on any unexpected row shape, so an unguarded `rows.map(hydrate)` would
+  // let ONE malformed subscription discard the whole due-candidate batch. That is
+  // worse here than for an ordinary list read: the throw happens before any
+  // mutation, so the bad row is never marked terminal and every subsequent alarm
+  // tick re-selects it — permanently blocking reconciliation for every OTHER wait
+  // in the project (the immortal-candidate failure rule 47 exists to prevent).
+  const candidates: TaskWaitSubscription[] = [];
+  for (const row of rows) {
+    try {
+      candidates.push(hydrate(sql, row));
+    } catch (error) {
+      log.warn('task_wait.candidate_row_skipped', {
+        subscriptionId: typeof row.id === 'string' ? row.id : null,
+        parentTaskId: typeof row.parent_task_id === 'string' ? row.parent_task_id : null,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+  return candidates;
 }
 
 export function recordTaskWaitObservations(

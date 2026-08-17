@@ -235,7 +235,7 @@ func TestTryLoadPreviousACPSession_SuppressesReplayThenResumes(t *testing.T) {
 	)
 	host.mu.Lock()
 	host.acpConn = acpConn
-	host.status = HostReady
+	host.setStatusLocked(HostReady)
 	host.mu.Unlock()
 
 	loaded, err := host.tryLoadPreviousACPSession(

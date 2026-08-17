@@ -358,8 +358,8 @@ func TestExtractMessages_ToolName_BareTitle(t *testing.T) {
 // every adapter separator convention plus the capture gate that keys on it.
 func TestNormalizeToolNameBase(t *testing.T) {
 	cases := []struct {
-		in            string
-		want          string
+		in             string
+		want           string
 		wantRawCapture bool
 	}{
 		{"mcp__sam-mcp__display_from_library", "display_from_library", true},
@@ -371,7 +371,7 @@ func TestNormalizeToolNameBase(t *testing.T) {
 		{"Read", "Read", false},
 		{"Bash", "Bash", false},
 		{"sam-mcp/list_library_files", "list_library_files", false},
-		{"sam-mcp/", "sam-mcp", false},     // trailing separator → server segment, not a card tool
+		{"sam-mcp/", "sam-mcp", false},       // trailing separator → server segment, not a card tool
 		{"mcp__sam-mcp__", "sam-mcp", false}, // trailing double-underscore
 		{"", "", false},
 	}

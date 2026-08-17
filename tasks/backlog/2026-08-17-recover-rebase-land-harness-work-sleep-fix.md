@@ -130,25 +130,30 @@ Do not paper over it.
 
 ## Implementation checklist
 
-- [ ] Rebase `ec4af84d9` onto `origin/main`, resolving all 6 conflicts additively per F4
-- [ ] Renumber branch migrations `029`→`030-harness-work-and-task-waits`,
+- [x] Rebase `ec4af84d9` onto `origin/main`, resolving all 6 conflicts additively per F4
+- [x] Renumber branch migrations `029`→`030-harness-work-and-task-waits`,
       `030`→`031-task-wait-replay-hardening`, appended after main's `029`; update the `030` comment
       that references the stale `029` name
-- [ ] Update `apps/api/tests/unit/durable-objects/migrations.test.ts` index/table counts to the
+- [x] Update `apps/api/tests/unit/durable-objects/migrations.test.ts` index/table counts to the
       combined total; assert empirically rather than by arithmetic
-- [ ] Verify DO migration clean-bootstrap AND existing-deployment-at-latest-tag paths both pass
-- [ ] Run `scripts/quality/do-migration-compatibility.test.ts` and the DO migration safety gate
-- [ ] Confirm `session_state` row mapper + INSERT/UPSERT/SELECT carry BOTH #1840 and harness columns
-- [ ] Confirm both `computeSessionActivityProbeAlarmTime` and `computeTaskWaitAlarmTime` remain in
+- [x] Verify DO migration clean-bootstrap AND existing-deployment-at-latest-tag paths both pass
+- [x] Run `scripts/quality/do-migration-compatibility.test.ts` and the DO migration safety gate
+- [x] Confirm `session_state` row mapper + INSERT/UPSERT/SELECT carry BOTH #1840 and harness columns
+- [x] Confirm both `computeSessionActivityProbeAlarmTime` and `computeTaskWaitAlarmTime` remain in
       the alarm candidate set
-- [ ] Verify sleep gate rejects fresh active/settling work at BOTH the pre-claim and
+- [x] Verify sleep gate rejects fresh active/settling work at BOTH the pre-claim and
       point-of-no-return checks in `session-sleep.ts`
-- [ ] Verify the abandoned-dev-server case is bounded by the finite lease (F5); document the exact
+- [x] Verify the abandoned-dev-server case is bounded by the finite lease (F5); document the exact
       behavior in the PR description
-- [ ] Update the two stale docs from F1 that assert `wait_for_subtasks` is disabled
-- [ ] Open a DRAFT PR as soon as the rebase builds green (hard requirement — durable artifact)
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green
-- [ ] `go test -race ./...` green in `packages/vm-agent`
+      → **It was NOT bounded.** The sliding lease reads `runtimeWorkUpdatedAt`, which the VM agent's
+      periodic re-report refreshes, so an adapter re-reporting a stale task set renewed it forever.
+      Fixed by adding an absolute ceiling anchored on the progress clock
+      (`HARNESS_BACKGROUND_WORK_MAX_DURATION_MS`, default 30 min). Independently found by the
+      security-auditor and test-engineer reviews.
+- [x] Update the two stale docs from F1 that assert `wait_for_subtasks` is disabled
+- [x] Open a DRAFT PR as soon as the rebase builds green (hard requirement — durable artifact)
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green
+- [x] `go test -race ./...` green in `packages/vm-agent`
 - [ ] File SAM idea for the F6 coverage gaps
 - [ ] Phase 5 specialist review: go-specialist, cloudflare-specialist, security-auditor,
       test-engineer, task-completion-validator — all PASS/ADDRESSED

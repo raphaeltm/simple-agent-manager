@@ -185,7 +185,7 @@ func TestSessionHost_WatchdogAfterMonitorSuccessDoesNotNilNewProcess(t *testing.
 	host.mu.Lock()
 	host.process = newProc
 	host.clearCrashRecoveryLocked()
-	host.status = HostReady
+	host.setStatusLocked(HostReady)
 	host.mu.Unlock()
 
 	time.Sleep(80 * time.Millisecond)
@@ -212,7 +212,7 @@ func TestSessionHost_AutoSuspendDefersDuringStartingRecovery(t *testing.T) {
 	defer host.Stop()
 
 	host.mu.Lock()
-	host.status = HostStarting
+	host.setStatusLocked(HostStarting)
 	host.crashRecoveryInProgress = true
 	host.mu.Unlock()
 
@@ -328,7 +328,7 @@ func TestSessionHost_CodexCrashRecovery_LoadsCapturedSessionAfterLivePrerequisit
 	oldProc, _, _ := armRecoverablePrompt(t, host, "openai-codex", 10*time.Second, true)
 	captured := host.captureCrashRecoveryPrerequisites()
 	host.mu.Lock()
-	host.sessionID = ""
+	host.setSessionIDLocked("")
 	host.agentSupportsLoadSession = false
 	host.mu.Unlock()
 
@@ -459,9 +459,9 @@ func armRecoverablePrompt(t *testing.T, host *SessionHost, agentType string, sta
 	}
 	host.mu.Lock()
 	host.process = proc
-	host.status = HostReady
+	host.setStatusLocked(HostReady)
 	host.agentType = agentType
-	host.sessionID = "acp-session-1"
+	host.setSessionIDLocked("acp-session-1")
 	host.agentSupportsLoadSession = true
 	host.mu.Unlock()
 	return proc, completed, errs

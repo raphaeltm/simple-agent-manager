@@ -374,8 +374,8 @@ func newPromptRetryTestHost(t *testing.T, script promptRetryScript) (*SessionHos
 
 	host.mu.Lock()
 	host.acpConn = acpConn
-	host.sessionID = "acp-session-retry"
-	host.status = HostReady
+	host.setSessionIDLocked("acp-session-retry")
+	host.setStatusLocked(HostReady)
 	host.mu.Unlock()
 
 	return host, server

@@ -60,7 +60,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		if h.statusErr == "" {
 			h.statusErr = "checkpoint rollover terminated before process restart"
 		}
-		h.status = HostError
+		h.setStatusLocked(HostError)
 		if h.checkpointRollover == rollover {
 			h.checkpointRollover = nil
 		}
@@ -73,7 +73,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 	h.promptMu.Unlock()
 	if promptActive && !crashRecovery.inProgress && !intentionalPromptCancel && rollover == nil {
 		h.clearCurrentAgentSessionLocked()
-		h.status = HostError
+		h.setStatusLocked(HostError)
 		errMsg := fmt.Sprintf("Agent process exited during an active prompt (%s)", exitInfo)
 		h.statusErr = errMsg
 		h.mu.Unlock()
@@ -88,7 +88,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		if crashRecovery.inProgress {
 			h.clearCrashRecoveryLocked()
 		}
-		h.status = HostError
+		h.setStatusLocked(HostError)
 		errMsg := rapidExitMessage(agentType, uptime, exitInfo, stderrOutput)
 		h.statusErr = errMsg
 		h.mu.Unlock()
@@ -111,7 +111,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 	}
 
 	h.clearCurrentAgentSessionLocked()
-	h.status = HostStarting
+	h.setStatusLocked(HostStarting)
 	h.mu.Unlock()
 	// Publish the detached process's inactive harness state immediately. The
 	// replacement may fail before ACP attachment, so waiting for a later ready
@@ -138,7 +138,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		if h.statusErr == "" {
 			h.statusErr = "checkpoint rollover terminated before strict resume"
 		}
-		h.status = HostError
+		h.setStatusLocked(HostError)
 		if h.checkpointRollover == rollover {
 			h.checkpointRollover = nil
 		}
@@ -167,7 +167,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 			if h.statusErr == "" {
 				h.statusErr = "checkpoint rollover terminated during strict resume"
 			}
-			h.status = HostError
+			h.setStatusLocked(HostError)
 			h.checkpointRollover = nil
 			h.mu.Unlock()
 			return
@@ -175,7 +175,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		if err != nil {
 			message := fmt.Sprintf("strict same-session checkpoint resume failed: %s", redactAgentDiagnosticText(err.Error()))
 			h.stopCurrentAgentLocked()
-			h.status = HostError
+			h.setStatusLocked(HostError)
 			h.statusErr = message
 			h.checkpointRollover = nil
 			result := CheckpointRolloverResult{State: "failed", Forced: rollover.forced,
@@ -190,7 +190,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		if string(h.sessionID) != rollover.sessionID {
 			message := "strict checkpoint resume returned a different ACP session"
 			h.stopCurrentAgentLocked()
-			h.status = HostError
+			h.setStatusLocked(HostError)
 			h.statusErr = message
 			h.checkpointRollover = nil
 			result := CheckpointRolloverResult{State: "failed", Forced: rollover.forced,
@@ -206,7 +206,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 		decided, promptWon := rollover.completeStrictResume(h, result)
 		if !promptWon && decided.State != "superseded" {
 			h.stopCurrentAgentLocked()
-			h.status = HostError
+			h.setStatusLocked(HostError)
 			if h.statusErr == "" {
 				h.statusErr = "checkpoint rollover terminal owner won during strict resume"
 			}
@@ -214,7 +214,7 @@ func (h *SessionHost) monitorProcessExit(ctx context.Context, process agentProce
 			h.mu.Unlock()
 			return
 		}
-		h.status = HostReady
+		h.setStatusLocked(HostReady)
 		h.statusErr = ""
 		h.checkpointRollover = nil
 		h.mu.Unlock()
@@ -274,7 +274,7 @@ func (h *SessionHost) clearCurrentAgentSessionLocked() {
 	h.clearHarnessWork()
 	h.process = nil
 	h.acpConn = nil
-	h.sessionID = ""
+	h.setSessionIDLocked("")
 	h.agentSupportsLoadSession = false
 }
 
@@ -300,7 +300,7 @@ func (h *SessionHost) handleMaxRestartsExceededLocked(agentType, stderrOutput st
 	if crashRecovery.inProgress {
 		h.clearCrashRecoveryLocked()
 	}
-	h.status = HostError
+	h.setStatusLocked(HostError)
 	crashMsg := "Agent crashed and could not be restarted"
 	if stderrOutput != "" {
 		crashMsg = fmt.Sprintf("%s: %s", crashMsg, truncate(stderrOutput, 500))
@@ -322,7 +322,7 @@ func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, 
 		err = h.startAgent(ctx, agentType, cred, settings, previousAcpSessionID)
 	}
 	if err != nil {
-		h.status = HostError
+		h.setStatusLocked(HostError)
 		h.statusErr = err.Error()
 		if crashRecovery.inProgress {
 			h.clearCrashRecoveryLocked()
@@ -335,7 +335,7 @@ func (h *SessionHost) restartAgentLocked(ctx context.Context, agentType string, 
 		h.reportAgentError(agentType, "agent_restart_failed", err.Error(), "")
 		return false
 	}
-	h.status = HostReady
+	h.setStatusLocked(HostReady)
 	h.statusErr = ""
 	return true
 }

@@ -1111,7 +1111,7 @@ func TestSessionHost_BeginCrashRecoveryRequiresLoadSession(t *testing.T) {
 
 	host.mu.Lock()
 	host.agentType = "openai-codex"
-	host.sessionID = "acp-session-1"
+	host.setSessionIDLocked("acp-session-1")
 	host.agentSupportsLoadSession = false
 	host.mu.Unlock()
 
@@ -1156,7 +1156,7 @@ func TestSessionHost_FinishPromptWithPeerDisconnectBeginsCrashRecovery(t *testin
 	}
 	host.mu.Lock()
 	host.agentType = "openai-codex"
-	host.sessionID = "acp-session-1"
+	host.setSessionIDLocked("acp-session-1")
 	host.agentSupportsLoadSession = true
 	host.mu.Unlock()
 
@@ -1190,7 +1190,7 @@ func TestSessionHost_FinishPromptWithPeerDisconnectUsesPromptStartPrerequisitesA
 	defer host.Stop()
 	host.mu.Lock()
 	host.agentType = "openai-codex"
-	host.sessionID = "acp-session-before-disconnect"
+	host.setSessionIDLocked("acp-session-before-disconnect")
 	host.agentSupportsLoadSession = true
 	host.mu.Unlock()
 
@@ -1231,7 +1231,7 @@ func TestSessionHost_FinishPromptRecoveryUsesCapturedAgentTypeWhenLiveAgentTypeC
 	defer host.Stop()
 	host.mu.Lock()
 	host.agentType = "openai-codex"
-	host.sessionID = "acp-session-live"
+	host.setSessionIDLocked("acp-session-live")
 	host.agentSupportsLoadSession = true
 	host.mu.Unlock()
 
@@ -1277,7 +1277,7 @@ func TestSessionHost_FinishPromptWithUnrecoverablePeerDisconnectReportsActionabl
 	}
 	host.mu.Lock()
 	host.agentType = "openai-codex"
-	host.sessionID = "acp-session-1"
+	host.setSessionIDLocked("acp-session-1")
 	host.agentSupportsLoadSession = false
 	host.mu.Unlock()
 	host.stderrMu.Lock()
@@ -1404,7 +1404,7 @@ func TestSessionHost_UnrecoverablePeerDisconnectNamesEachMissingPrerequisite(t *
 			host.config.OnPromptComplete = func(stopReason string, _ error) { completed <- stopReason }
 			host.mu.Lock()
 			host.agentType = tc.agentType
-			host.sessionID = acpsdk.SessionId(tc.sessionID)
+			host.setSessionIDLocked(acpsdk.SessionId(tc.sessionID))
 			host.agentSupportsLoadSession = tc.supportsLoadSession
 			host.mu.Unlock()
 
@@ -1469,7 +1469,7 @@ func TestSessionHost_FinishPromptDeadlineExceededReportsFatalWithoutCrashRecover
 	}
 	host.mu.Lock()
 	host.agentType = "openai-codex"
-	host.sessionID = "acp-session-1"
+	host.setSessionIDLocked("acp-session-1")
 	host.agentSupportsLoadSession = true
 	host.mu.Unlock()
 
@@ -1526,7 +1526,7 @@ func TestSessionHost_ForceStoppedPromptReportsFatalCompletionExactlyOnce(t *test
 		t.Fatal("promptAttemptForID returned nil for in-flight prompt")
 	}
 	host.mu.Lock()
-	host.status = HostPrompting
+	host.setStatusLocked(HostPrompting)
 	host.agentType = "openai-codex"
 	host.mu.Unlock()
 
@@ -1581,7 +1581,7 @@ func TestSessionHost_CompetingPromptCompletionPathsClaimExactlyOnce(t *testing.T
 		t.Fatal("promptAttemptForID returned nil for in-flight prompt")
 	}
 	host.mu.Lock()
-	host.status = HostPrompting
+	host.setStatusLocked(HostPrompting)
 	host.agentType = "openai-codex"
 	host.mu.Unlock()
 
@@ -1696,9 +1696,9 @@ func TestSessionHost_MonitorRapidExitCrashRecoveryFailsWithReport(t *testing.T) 
 
 	host.mu.Lock()
 	host.process = process
-	host.status = HostReady
+	host.setStatusLocked(HostReady)
 	host.agentType = "openai-codex"
-	host.sessionID = "acp-session-1"
+	host.setSessionIDLocked("acp-session-1")
 	host.crashRecoveryInProgress = true
 	host.crashAgentType = "openai-codex"
 	host.crashStderr = "write_stdin failed: stdin is closed\n" + syntheticOpenAIKeyEnvLine()
@@ -1889,9 +1889,9 @@ func TestSessionHost_MonitorIntentionalPromptCancelDoesNotConsumeRestartBudget(t
 
 	host.mu.Lock()
 	host.process = process
-	host.status = HostReady
+	host.setStatusLocked(HostReady)
 	host.agentType = "claude-code"
-	host.sessionID = "acp-session-1"
+	host.setSessionIDLocked("acp-session-1")
 	host.restartCount = 1
 	host.intentionalPromptCancelProcessStop = true
 	host.mu.Unlock()
@@ -1931,9 +1931,9 @@ func TestSessionHost_MonitorUnexpectedExitConsumesRestartBudget(t *testing.T) {
 
 	host.mu.Lock()
 	host.process = process
-	host.status = HostReady
+	host.setStatusLocked(HostReady)
 	host.agentType = "claude-code"
-	host.sessionID = "acp-session-1"
+	host.setSessionIDLocked("acp-session-1")
 	host.restartCount = 1
 	host.mu.Unlock()
 
@@ -2051,8 +2051,8 @@ func TestSessionHost_Suspend(t *testing.T) {
 	// Set up some state to verify it's preserved
 	host.mu.Lock()
 	host.agentType = "claude-code"
-	host.sessionID = "acp-session-xyz"
-	host.status = HostReady
+	host.setSessionIDLocked("acp-session-xyz")
+	host.setStatusLocked(HostReady)
 	host.mu.Unlock()
 
 	acpSessionID, agentType := host.Suspend()
@@ -2532,7 +2532,7 @@ func TestSessionHost_CancelPrompt_ForceStopsAfterGracePeriod(t *testing.T) {
 	defer host.Stop()
 
 	host.mu.Lock()
-	host.status = HostPrompting
+	host.setStatusLocked(HostPrompting)
 	host.agentType = "claude-code"
 	host.mu.Unlock()
 
@@ -2635,8 +2635,8 @@ func TestHandlePrompt_InjectsSyntheticUserMessage(t *testing.T) {
 	// Set up host state so HandlePrompt passes the nil checks.
 	host.mu.Lock()
 	host.acpConn = acpConn
-	host.sessionID = "acp-session-123"
-	host.status = HostReady
+	host.setSessionIDLocked("acp-session-123")
+	host.setStatusLocked(HostReady)
 	host.mu.Unlock()
 
 	// Build a prompt request payload
@@ -2743,8 +2743,8 @@ func TestHandlePrompt_OriginMarkerHonoredOnlyForTrustedSource(t *testing.T) {
 
 		host.mu.Lock()
 		host.acpConn = acpConn
-		host.sessionID = "acp-session-origin"
-		host.status = HostReady
+		host.setSessionIDLocked("acp-session-origin")
+		host.setStatusLocked(HostReady)
 		host.mu.Unlock()
 
 		// A prompt block carrying the SAM system-origin marker in _meta.
@@ -2803,8 +2803,8 @@ func TestHandlePrompt_MultiBlockPrompt_InjectsAllBlocks(t *testing.T) {
 
 	host.mu.Lock()
 	host.acpConn = acpConn
-	host.sessionID = "acp-session-456"
-	host.status = HostReady
+	host.setSessionIDLocked("acp-session-456")
+	host.setStatusLocked(HostReady)
 	host.mu.Unlock()
 
 	promptParams, _ := json.Marshal(map[string]interface{}{
@@ -2864,8 +2864,8 @@ func TestHandlePrompt_NoReporter_StillBuffers(t *testing.T) {
 
 	host.mu.Lock()
 	host.acpConn = acpConn
-	host.sessionID = "acp-session-789"
-	host.status = HostReady
+	host.setSessionIDLocked("acp-session-789")
+	host.setStatusLocked(HostReady)
 	host.mu.Unlock()
 
 	promptParams, _ := json.Marshal(map[string]interface{}{
@@ -3267,7 +3267,7 @@ func TestSessionHost_SelectAgent_SkipsRestartWhenSameAgentRunning(t *testing.T) 
 	// Simulate an agent that is already running with status Ready.
 	host.mu.Lock()
 	host.agentType = "mistral-vibe"
-	host.status = HostReady
+	host.setStatusLocked(HostReady)
 	host.process = &AgentProcess{agentType: "mistral-vibe"} // stub process
 	host.mu.Unlock()
 
@@ -3308,7 +3308,7 @@ func TestSessionHost_SelectAgent_SkipsRestartWhenSameAgentStarting(t *testing.T)
 	// Simulate an agent that is starting (HostStarting with process set).
 	host.mu.Lock()
 	host.agentType = "mistral-vibe"
-	host.status = HostStarting
+	host.setStatusLocked(HostStarting)
 	host.process = &AgentProcess{agentType: "mistral-vibe"}
 	host.mu.Unlock()
 
@@ -3343,7 +3343,7 @@ func TestSessionHost_SelectAgent_AllowsSwitchToDifferentAgent(t *testing.T) {
 
 	host.mu.Lock()
 	host.agentType = "claude-code"
-	host.status = HostReady
+	host.setStatusLocked(HostReady)
 	host.process = &AgentProcess{agentType: "claude-code", stopped: true} // pre-mark stopped to avoid nil deref
 	host.mu.Unlock()
 

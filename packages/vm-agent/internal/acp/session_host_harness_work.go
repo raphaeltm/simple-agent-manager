@@ -144,10 +144,12 @@ func validClaudeLifecycleShape(notification claudeSDKMessageNotification, maxTas
 	return true
 }
 
+// matchesHarnessSession runs on the ACP SDK's single notification-processing
+// goroutine, so it MUST NOT take h.mu: the handshake holds that lock while its
+// in-flight RPC waits on this very goroutine (see the mirror-field comment on
+// SessionHost). It reads the lock-free mirror instead.
 func (h *SessionHost) matchesHarnessSession(outerSessionID, innerSessionID string) bool {
-	h.mu.RLock()
-	expected := string(h.sessionID)
-	h.mu.RUnlock()
+	expected := h.loadMirroredSessionID()
 	if expected == "" {
 		return false
 	}
@@ -332,11 +334,11 @@ func (h *SessionHost) stopHarnessWorkRereportLocked() {
 	}
 }
 
+// activityForHarnessWork is reachable from the ACP notification goroutine, so it
+// reads the lock-free status mirror rather than taking h.mu. See
+// matchesHarnessSession for why.
 func (h *SessionHost) activityForHarnessWork() string {
-	h.mu.RLock()
-	status := h.status
-	h.mu.RUnlock()
-	switch status {
+	switch h.loadMirroredStatus() {
 	case HostPrompting:
 		return "prompting"
 	case HostError:

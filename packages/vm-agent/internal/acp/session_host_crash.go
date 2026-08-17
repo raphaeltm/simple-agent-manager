@@ -159,7 +159,7 @@ func (h *SessionHost) beginCrashRecoveryWithPrerequisites(reqID json.RawMessage,
 	h.crashSessionID = prerequisites.sessionID
 	h.crashPromptReqID = append(json.RawMessage(nil), reqID...)
 	h.crashPromptViewerID = viewerID
-	h.status = HostStarting
+	h.setStatusLocked(HostStarting)
 	h.statusErr = ""
 	h.armCrashRecoveryWatchdogLocked(notify)
 	return prerequisites.agentType, stderr, process, nil, notify, true
@@ -252,7 +252,7 @@ func (h *SessionHost) watchCrashRecovery(timeout time.Duration, notify recoveryN
 	process := h.process
 	h.clearCurrentAgentSessionLocked()
 	h.clearCrashRecoveryLocked()
-	h.status = HostError
+	h.setStatusLocked(HostError)
 	h.statusErr = message
 	h.mu.Unlock()
 

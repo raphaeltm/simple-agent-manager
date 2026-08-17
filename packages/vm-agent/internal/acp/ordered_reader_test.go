@@ -462,7 +462,7 @@ func TestOrderedPipe_ExtensionMethodCannotReleasePendingSessionUpdate(t *testing
 
 	host := NewSessionHost(SessionHostConfig{})
 	host.mu.Lock()
-	host.sessionID = "sdk-session"
+	host.setSessionIDLocked("sdk-session")
 	host.mu.Unlock()
 	host.resetHarnessWorkForAgent("claude-code")
 	client := &sessionHostClient{host: host, processedCh: processedCh}

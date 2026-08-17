@@ -47,7 +47,7 @@ func TestClaudeHarnessLifecycleNormalizesLevelProgressAndSettlement(t *testing.T
 
 	host := NewSessionHost(SessionHostConfig{})
 	host.agentType = "claude-code"
-	host.sessionID = "sdk-session"
+	host.setSessionIDLocked("sdk-session")
 	host.resetHarnessWorkForAgent("claude-code")
 	client := &sessionHostClient{host: host}
 
@@ -99,7 +99,7 @@ func TestClaudeHarnessLifecycleRejectsWrongSessionAndMalformedPayload(t *testing
 	t.Parallel()
 
 	host := NewSessionHost(SessionHostConfig{})
-	host.sessionID = "sdk-session"
+	host.setSessionIDLocked("sdk-session")
 	host.resetHarnessWorkForAgent("claude-code")
 	client := &sessionHostClient{host: host}
 
@@ -119,7 +119,7 @@ func TestClaudeHarnessLifecycleRejectsOversizedPayloadsAndIdentifiers(t *testing
 	t.Parallel()
 
 	host := NewSessionHost(SessionHostConfig{})
-	host.sessionID = "sdk-session"
+	host.setSessionIDLocked("sdk-session")
 	host.resetHarnessWorkForAgent("claude-code")
 	client := &sessionHostClient{host: host}
 
@@ -197,8 +197,8 @@ func TestHarnessActivityReportsOnlyNormalizedStateAndRereportsActiveWork(t *test
 	}})
 	host.mu.Lock()
 	host.agentType = "claude-code"
-	host.sessionID = "sdk-session"
-	host.status = HostReady
+	host.setSessionIDLocked("sdk-session")
+	host.setStatusLocked(HostReady)
 	host.mu.Unlock()
 	host.resetHarnessWorkForAgent("claude-code")
 	client := &sessionHostClient{host: host}
@@ -284,8 +284,8 @@ func TestHarnessActivityStopsWhenCrashRestartFailsBeforeAttach(t *testing.T) {
 	host.mu.Lock()
 	host.process = process
 	host.agentType = "claude-code"
-	host.sessionID = "sdk-session"
-	host.status = HostReady
+	host.setSessionIDLocked("sdk-session")
+	host.setStatusLocked(HostReady)
 	host.mu.Unlock()
 	host.resetHarnessWorkForAgent("claude-code")
 	client := &sessionHostClient{host: host}

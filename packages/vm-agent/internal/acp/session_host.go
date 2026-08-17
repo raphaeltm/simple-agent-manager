@@ -211,15 +211,32 @@ type SessionHost struct {
 	config SessionHostConfig
 
 	// Agent state (guarded by mu)
-	mu             sync.RWMutex
-	process        agentProcess
-	acpConn        *acpsdk.ClientSideConnection
-	agentType      string
-	sessionID      acpsdk.SessionId
-	configOptions  []acpsdk.SessionConfigOption
-	restartCount   int
-	lastCrashTime  time.Time
-	permissionMode string
+	mu        sync.RWMutex
+	process   agentProcess
+	acpConn   *acpsdk.ClientSideConnection
+	agentType string
+	sessionID acpsdk.SessionId
+
+	// Lock-free mirrors of sessionID/status, read ONLY by code reachable from
+	// the ACP SDK's single notification-processing goroutine
+	// (HandleExtensionMethod -> matchesHarnessSession / activityForHarnessWork).
+	//
+	// That goroutine must never block on `mu`: the ACP handshake
+	// (startAgent/applySessionSettings) holds `mu` for its whole duration while
+	// its in-flight RPC blocks in the SDK's waitNotificationsUpTo, which waits
+	// for this very notification worker. Taking mu.RLock() there is a genuine
+	// self-deadlock (reproduced: a _claude/sdkMessage notification arriving just
+	// before the session/new response turned a 5ms handshake into an 800ms
+	// timeout; with SetSessionMode's unbounded ctx it hangs indefinitely).
+	//
+	// Writers keep these in step with the mu-guarded fields via
+	// setSessionIDLocked/setStatusLocked. See .claude/rules/46.
+	mirrorSessionID atomic.Value // string
+	mirrorStatus    atomic.Value // SessionHostStatus
+	configOptions   []acpsdk.SessionConfigOption
+	restartCount    int
+	lastCrashTime   time.Time
+	permissionMode  string
 	// agentSupportsLoadSession is captured from ACP Initialize so prompt error
 	// handling can decide whether a process crash is recoverable.
 	agentSupportsLoadSession bool
@@ -809,7 +826,7 @@ func (h *SessionHost) Stop() {
 		h.mu.Unlock()
 		return
 	}
-	h.status = HostStopped
+	h.setStatusLocked(HostStopped)
 	h.statusErr = ""
 	h.stopCurrentAgentLocked()
 	// Snapshot credential metadata while still holding the lock.
@@ -874,6 +891,15 @@ func (h *SessionHost) applySessionSettings(ctx context.Context, settings *agentS
 	if settings == nil || h.acpConn == nil || h.sessionID == "" {
 		return
 	}
+
+	// These RPCs run while h.mu is held for write, and the ACP SDK blocks each
+	// response on its notification worker catching up (waitNotificationsUpTo).
+	// The caller's ctx is the WebSocket connection lifetime — effectively
+	// unbounded — so a stalled notification worker would hang the handshake (and
+	// every h.mu reader) forever. Bound it explicitly; both calls are non-fatal.
+	settingsCtx, cancel := context.WithTimeout(ctx, h.sessionSettingsTimeout())
+	defer cancel()
+	ctx = settingsCtx
 
 	if settings.Model != "" {
 		h.applySessionModelConfigOption(ctx, settings.Model)
@@ -1072,7 +1098,7 @@ func (h *SessionHost) stopCurrentAgentLocked() {
 		h.process = nil
 	}
 	h.acpConn = nil
-	h.sessionID = ""
+	h.setSessionIDLocked("")
 	h.agentSupportsLoadSession = false
 	// Clear credential metadata so stale values don't leak across agent switches.
 	h.credInjectionMode = ""
@@ -1148,4 +1174,50 @@ func (h *SessionHost) isPromptingOrRecovering() bool {
 // the control plane without going through HandlePrompt.
 func (h *SessionHost) OnPromptCompleteCallback() func(string, error) {
 	return h.config.OnPromptComplete
+}
+
+// setSessionIDLocked assigns the ACP session ID and its lock-free mirror.
+// Callers must hold h.mu for write.
+func (h *SessionHost) setSessionIDLocked(id acpsdk.SessionId) {
+	h.sessionID = id
+	h.mirrorSessionID.Store(string(id))
+}
+
+// setStatusLocked assigns the host status and its lock-free mirror.
+// Callers must hold h.mu for write.
+func (h *SessionHost) setStatusLocked(status SessionHostStatus) {
+	h.status = status
+	h.mirrorStatus.Store(status)
+}
+
+// loadMirroredSessionID reads the session ID WITHOUT taking h.mu. Safe to call
+// from the ACP notification-processing goroutine.
+func (h *SessionHost) loadMirroredSessionID() string {
+	if v, ok := h.mirrorSessionID.Load().(string); ok {
+		return v
+	}
+	return ""
+}
+
+// loadMirroredStatus reads the host status WITHOUT taking h.mu. Safe to call
+// from the ACP notification-processing goroutine.
+func (h *SessionHost) loadMirroredStatus() SessionHostStatus {
+	if v, ok := h.mirrorStatus.Load().(SessionHostStatus); ok {
+		return v
+	}
+	return HostIdle
+}
+
+// DefaultSessionSettingsTimeout bounds the post-handshake SetSessionMode /
+// SetSessionConfigOption RPCs. Override via the existing NewSessionTimeoutMs
+// gateway setting (ACP_NEW_SESSION_TIMEOUT_MS).
+const DefaultSessionSettingsTimeout = 30 * time.Second
+
+// sessionSettingsTimeout resolves the bound for applySessionSettings' RPCs,
+// reusing the configured NewSession timeout when one is set.
+func (h *SessionHost) sessionSettingsTimeout() time.Duration {
+	if h.config.NewSessionTimeoutMs > 0 {
+		return time.Duration(h.config.NewSessionTimeoutMs) * time.Millisecond
+	}
+	return DefaultSessionSettingsTimeout
 }
