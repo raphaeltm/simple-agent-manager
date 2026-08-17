@@ -50,9 +50,9 @@ import * as projectDataService from '../services/project-data';
 import { cleanupTaskRun } from '../services/task-runner';
 import {
   classifyTaskRuntimeLiveness,
+  loadRuntimeWorkspaceSnapshot,
   loadSessionResumabilitySnapshot,
   needsSessionResumabilityProbe,
-  loadRuntimeWorkspaceSnapshot,
   type RuntimeAcpSessionSnapshot,
   type TaskRuntimeLiveness,
   type TaskRuntimeLivenessSignals,
