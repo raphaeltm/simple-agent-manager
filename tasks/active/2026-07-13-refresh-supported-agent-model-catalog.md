@@ -46,6 +46,13 @@ SAM's shared static agent model catalog has drifted from current provider and ag
 - Focused tests cover the updated catalog and all touched contracts; lint, typecheck, tests, and build pass.
 - The PR is green, merged, and the production deployment succeeds.
 
+## PR and Staging Evidence
+
+- PR: https://github.com/raphaeltm/simple-agent-manager/pull/1843
+- Staging deploy: https://github.com/raphaeltm/simple-agent-manager/actions/runs/32016010091
+- Staging result: deploy, health check, and GitHub Playwright smoke tests passed; smoke-tests reported 12 passed.
+- Targeted staging catalog verification: authenticated API checks passed for Codex GPT-5.6 display labels, Codex GPT-5.4 retirement labels, Codex deprecated labels, Gemini 3.7 presence, OpenCode Gemini 3.7 presence, and removal of inactive OpenCode Ling tiny.
+
 ## References
 
 - Anthropic models overview: https://platform.claude.com/docs/en/about-claude/models/overview
