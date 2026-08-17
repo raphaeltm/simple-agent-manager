@@ -11,7 +11,6 @@ import {
 
 import { log } from '../../lib/logger';
 import type { DevcontainerCacheCredentials } from '../../services/devcontainer-cache';
-import { getExternalInstallationId } from '../../services/github-installation-ids';
 import { SessionRecoveryAuthorityRevokedError } from '../../services/session-recovery-authority';
 import { reserveWorkspacePlacement } from '../../services/workspace-placement';
 import {
