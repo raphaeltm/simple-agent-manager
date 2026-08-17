@@ -43,14 +43,18 @@ import * as schema from '../db/schema';
 import type { TaskRunner } from '../durable-objects/task-runner';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
+import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from '../services/session-snapshot-artifacts';
 import { cleanupTaskRun } from '../services/task-runner';
 import {
   classifyTaskRuntimeLiveness,
   loadRuntimeWorkspaceSnapshot,
+  loadSessionResumabilitySnapshot,
+  needsSessionResumabilityProbe,
   type RuntimeAcpSessionSnapshot,
   type TaskRuntimeLiveness,
   type TaskRuntimeLivenessSignals,
@@ -437,7 +441,33 @@ export async function getTaskRuntimeLiveness(
     }
   }
 
+  // Only probed for a workspace that would otherwise be declared conclusively
+  // dead, so the sweep pays one extra point lookup only when it is about to
+  // terminalize a task (`.claude/rules/47`).
+  let resumabilityProbeOutcome: TaskRuntimeLivenessSignals['resumabilityProbeOutcome'] = 'not_run';
+  let sessionResumability: TaskRuntimeLivenessSignals['sessionResumability'] = null;
+  if (needsSessionResumabilityProbe(workspace, workspaceProbeOutcome)) {
+    try {
+      sessionResumability = await loadSessionResumabilitySnapshot(
+        env.DATABASE,
+        task.project_id,
+        workspace.id,
+        workspace.chatSessionId
+      );
+      resumabilityProbeOutcome = 'ok';
+    } catch (err) {
+      resumabilityProbeOutcome = 'error';
+      log.warn('stuck_task.session_resumability_query_failed', {
+        workspaceId: task.workspace_id,
+        projectId: task.project_id,
+        action: 'preserved',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   const baseSignals: TaskRuntimeLivenessSignals = {
+    projectId: task.project_id,
     taskWorkspaceId: task.workspace_id,
     workspace,
     workspaceProbeOutcome,
@@ -447,6 +477,12 @@ export async function getTaskRuntimeLiveness(
     acpSessions: [],
     containerProbeOutcome: 'not_run',
     containerLifecycle: null,
+    resumabilityProbeOutcome,
+    sessionResumability,
+    resumabilityMaxRecoveryAttempts: parsePositiveInt(
+      env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
+      DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
+    ),
   };
   const initialClassification = classifyTaskRuntimeLiveness(baseSignals);
   if (

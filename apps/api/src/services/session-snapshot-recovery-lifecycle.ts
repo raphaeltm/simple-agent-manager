@@ -22,6 +22,7 @@ import type { SessionRecoverySourceTaskGuard } from './session-recovery-authorit
 import {
   DEFAULT_SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS,
   DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
+  isRestorableSnapshot,
   sessionLifecycleError,
   type SessionSnapshotRecoveryClaim,
 } from './session-snapshot-artifacts';
@@ -113,13 +114,6 @@ function restorableSnapshotCondition() {
       isNotNull(schema.sessionSnapshots.degradation),
       sql`${schema.sessionSnapshots.degradation} != 'none'`
     )
-  );
-}
-
-function isRestorableSnapshot(status: string | null, degradation: string | null): boolean {
-  return (
-    (status === 'available' && degradation === 'none') ||
-    (status === 'degraded' && Boolean(degradation) && degradation !== 'none')
   );
 }
 
