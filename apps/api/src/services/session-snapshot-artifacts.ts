@@ -22,6 +22,23 @@ export const DEFAULT_SESSION_SLEEP_RETRY_DELAY_MS = 5 * 60 * 1000;
 export const DEFAULT_SESSION_SLEEP_MAX_ATTEMPTS = 9;
 export const DEFAULT_SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS = 10 * 60 * 1000;
 
+/**
+ * Whether a snapshot's `status`/`degradation` pair still permits a restore.
+ * The in-memory twin of `restorableSnapshotCondition()` in
+ * `session-snapshot-recovery-lifecycle.ts`, which is the SQL predicate
+ * `claimSessionSnapshotRecovery` uses to authorize a wake.
+ *
+ * Lives here (rather than beside the SQL) so the task-runtime liveness
+ * classifier can mirror the real resume gate without duplicating the rule
+ * (`.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`).
+ */
+export function isRestorableSnapshot(status: string | null, degradation: string | null): boolean {
+  return (
+    (status === 'available' && degradation === 'none') ||
+    (status === 'degraded' && Boolean(degradation) && degradation !== 'none')
+  );
+}
+
 type SnapshotLeaseEnv = Env & {
   SESSION_SLEEP_CLAIM_LEASE_MS?: string;
   SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS?: string;

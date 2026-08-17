@@ -43,10 +43,12 @@ import * as schema from '../db/schema';
 import type { TaskRunner } from '../durable-objects/task-runner';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { ulid } from '../lib/ulid';
 import { persistError } from '../services/observability';
 import * as projectDataService from '../services/project-data';
+import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from '../services/session-snapshot-artifacts';
 import { cleanupTaskRun } from '../services/task-runner';
 import {
   classifyTaskRuntimeLiveness,
@@ -465,6 +467,7 @@ export async function getTaskRuntimeLiveness(
   }
 
   const baseSignals: TaskRuntimeLivenessSignals = {
+    projectId: task.project_id,
     taskWorkspaceId: task.workspace_id,
     workspace,
     workspaceProbeOutcome,
@@ -476,6 +479,10 @@ export async function getTaskRuntimeLiveness(
     containerLifecycle: null,
     resumabilityProbeOutcome,
     sessionResumability,
+    resumabilityMaxRecoveryAttempts: parsePositiveInt(
+      env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
+      DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
+    ),
   };
   const initialClassification = classifyTaskRuntimeLiveness(baseSignals);
   if (

@@ -6,6 +6,7 @@ import {
 
 import type { Env as WorkerEnv } from '../../env';
 import { createModuleLogger } from '../../lib/logger';
+import { DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS } from '../../services/session-snapshot-artifacts';
 import {
   classifyTaskRuntimeLiveness,
   loadRuntimeWorkspaceSnapshot,
@@ -82,6 +83,7 @@ export async function getLocalTaskRuntimeLiveness(
   }
 
   const baseSignals: TaskRuntimeLivenessSignals = {
+    projectId: task.projectId,
     taskWorkspaceId: task.workspaceId,
     workspace,
     workspaceProbeOutcome,
@@ -93,6 +95,10 @@ export async function getLocalTaskRuntimeLiveness(
     containerLifecycle: null,
     resumabilityProbeOutcome,
     sessionResumability,
+    resumabilityMaxRecoveryAttempts: positiveInt(
+      env.SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS,
+      DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS
+    ),
   };
   const initialClassification = classifyTaskRuntimeLiveness(baseSignals);
   if (

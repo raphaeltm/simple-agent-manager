@@ -9,9 +9,12 @@ import {
 
 const NOW = Date.parse('2026-08-06T12:00:00.000Z');
 const STALE_MS = 5 * 60 * 1000;
+/** Mirrors `DEFAULT_SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS`. */
+const MAX_RECOVERY_ATTEMPTS = 3;
 
 function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRuntimeLivenessSignals {
   return {
+    projectId: 'project-1',
     taskWorkspaceId: 'workspace-1',
     workspaceProbeOutcome: 'ok',
     workspace: {
@@ -44,6 +47,7 @@ function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRunti
     // unchanged, which is the back-compat proof for callers that cannot probe.
     resumabilityProbeOutcome: 'not_run',
     sessionResumability: null,
+    resumabilityMaxRecoveryAttempts: MAX_RECOVERY_ATTEMPTS,
     ...overrides,
   };
 }
@@ -207,10 +211,14 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
   function resumable(overrides: Partial<SessionResumabilitySnapshot> = {}) {
     return {
       chatSessionId: 'chat-1',
+      projectId: 'project-1',
       workspaceId: 'workspace-1',
       sleepingAt: SLEEPING_AT,
       sleepStatus: 'sleeping',
       expiresAtMs: EXPIRES_AT,
+      status: 'available',
+      degradation: 'none',
+      recoveryAttempts: 0,
       ...overrides,
     } satisfies SessionResumabilitySnapshot;
   }
@@ -240,17 +248,22 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
 
   it('treats a degraded-but-restorable snapshot as resumable (incident da90b7c4)', () => {
     // Real row: status='degraded', degradation='entries-skipped', home R2 key
-    // present. `loadRecoveryContext` restores it, so the classifier must agree.
+    // present. `restorableSnapshotCondition()` accepts that pair, so the
+    // classifier must too. These fields are genuinely read by
+    // `isRestorableSnapshot`, so this case is not a duplicate of the one above.
     const base = signals();
     expect(
       classifyTaskRuntimeLiveness(
         signals({
           workspace: sleptWorkspace(base),
           resumabilityProbeOutcome: 'ok',
-          sessionResumability: resumable(),
+          sessionResumability: resumable({
+            status: 'degraded',
+            degradation: 'entries-skipped',
+          }),
         })
       )
-    ).toMatchObject({ conclusive: false });
+    ).toMatchObject({ conclusive: false, reason: 'workspace_deleted_snapshot_resumable' });
   });
 
   it('still terminalizes a user-deleted workspace that has no snapshot row', () => {
@@ -278,8 +291,18 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
     ['expiry exactly now', { expiresAtMs: NOW }],
     ['unparseable/absent expiry', { expiresAtMs: null }],
     ['never slept', { sleepingAt: null }],
-    ['already woke', { sleepStatus: 'completed' }],
+    // Every real wake path clears BOTH fields; this guards the half-cleared
+    // shape defensively rather than reproducing an observed transition.
+    ['already woke (sleep_status cleared)', { sleepStatus: null }],
     ['snapshot for another workspace', { workspaceId: 'workspace-2' }],
+    ['snapshot for another project', { projectId: 'project-2' }],
+    // Parity with `claimSessionSnapshotRecovery`: the resumer refuses these, so
+    // preserving the task would strand it until the snapshot TTL.
+    ['unrestorable status/degradation pair', { status: 'failed', degradation: 'none' }],
+    ['degraded but degradation cleared', { status: 'degraded', degradation: 'none' }],
+    ['available but degradation set', { status: 'available', degradation: 'entries-skipped' }],
+    ['wake attempts exhausted', { recoveryAttempts: MAX_RECOVERY_ATTEMPTS }],
+    ['wake attempts over budget', { recoveryAttempts: MAX_RECOVERY_ATTEMPTS + 1 }],
   ])('terminalizes when the snapshot is not restorable: %s', (_label, overrides) => {
     // Bounded escape path (`.claude/rules/47`): a snapshot must never be able
     // to keep a task alive forever.
@@ -297,6 +320,21 @@ describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
       conclusive: true,
       reason: 'workspace_deleted',
     });
+  });
+
+  it('still preserves on the last remaining wake attempt', () => {
+    // Boundary control for the `recoveryAttempts` escape: one attempt left is
+    // still resumable, so the guard must be `>=`, not `>`.
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: sleptWorkspace(base),
+          resumabilityProbeOutcome: 'ok',
+          sessionResumability: resumable({ recoveryAttempts: MAX_RECOVERY_ATTEMPTS - 1 }),
+        })
+      )
+    ).toMatchObject({ conclusive: false, reason: 'workspace_deleted_snapshot_resumable' });
   });
 
   it('withholds a death verdict when the resumability probe failed', () => {

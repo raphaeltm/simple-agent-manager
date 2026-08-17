@@ -1,8 +1,8 @@
 # Fix: a slept (resumable) session is classified as conclusive runtime death
 
 **SAM task**: `01M074T96YJWVYCJWX6Z0T2E0E`
-**Branch**: `sam/fix-production-workspace-reaping-0t2e0e`
-**Status**: active
+**Branch**: `sam/fix-production-workspace-reaping-0t2e0e` (PR #1844)
+**Status**: archived (landed via PR #1844)
 
 ## Problem
 
@@ -253,6 +253,72 @@ cross-workspace test, because `isSessionResumable()` also enforces
 (rule 28), and `session_snapshots.chat_session_id` is uniquely indexed so only one row can
 match the session in the first place. Both layers are exercised; the in-memory guard is what
 the cross-workspace assertion discriminates on.
+
+## Specialist review round (2026-08-17)
+
+Three local reviewers ran against the rebased branch. **No CRITICAL or HIGH code findings.**
+Everything below was fixed in the branch rather than deferred.
+
+### cloudflare-specialist — ADDRESSED
+
+- **D1 query correctness, index coverage, I/O budget, error handling, DO concurrency: PASS.**
+  Independently confirmed `NodeLifecycle.deleteWorkspace` only rewrites `status` and never nulls
+  `chat_session_id`, so the probe genuinely engages for the real incident shape.
+- **[MEDIUM] The predicate mirrored only half the resumer.** `loadRecoveryContext` assembles
+  context, but the function that actually *authorizes* a wake is
+  `claimSessionSnapshotRecovery`, whose `WHERE` also requires a restorable
+  `status`/`degradation` pair and `recovery_attempts < max`. The original predicate checked
+  neither, making the classifier **looser** than the resumer: a snapshot with exhausted wake
+  attempts would be preserved for the full 7-day TTL waiting on a wake that can never happen.
+  **Fixed** — `isSessionResumable` now mirrors the claim exactly (shared
+  `isRestorableSnapshot` helper, plus an env-configurable
+  `SESSION_SNAPSHOT_RECOVERY_MAX_ATTEMPTS` ceiling threaded through both adapters). This adds a
+  second bounded escape alongside `expires_at`.
+
+### test-engineer — ADDRESSED
+
+- **[MEDIUM] The two "degraded snapshot" tests were non-discriminating duplicates** — they
+  seeded `status`/`degradation` that the code never read. **Fixed** by the parity change above:
+  those fields are now genuinely read by `isRestorableSnapshot`, and the test asserts the exact
+  resumable reason. Verified discriminating.
+- **[MEDIUM] `leaves a running workspace on the normal ACP-liveness path` proved nothing** — it
+  asserted only `workspaceStatus: 'running'`, which passes even if the resumability branch had
+  swallowed the request. **Fixed**: now asserts the reason is neither resumability reason and
+  directly asserts `needsSessionResumabilityProbe(...) === false` for a running workspace.
+- **[MEDIUM] The cron adapter's own resumability-error path was untested** (only the DO
+  adapter's was). **Fixed** — added
+  `withholds a death verdict when the cron adapter snapshot read fails`, sharing a
+  `brokenSnapshotDb()` helper with the DO test (rule 44 symmetry).
+- **[LOW] No in-memory `projectId` re-check** (asymmetric defence-in-depth vs `workspaceId`).
+  **Fixed** — `SessionResumabilitySnapshot` now carries `projectId` and `isSessionResumable`
+  re-checks it, so both scoping predicates have the SQL + in-memory pair rule 28 asks for.
+- **[LOW] Unparseable `expires_at` was only covered at the pure-function boundary.** **Fixed** —
+  added a vertical-slice case seeding a literally unparseable value through the real loader.
+- **Two-sweep zombie test (rule 47): agreed not required.** `loadSessionResumabilitySnapshot`
+  is read-only and mutates no counter, so repeated probing cannot exhaust a destructive budget;
+  the bounded escapes (`expires_at`, `recovery_attempts`) are proven directly.
+
+### task-completion-validator — ADDRESSED
+
+- Reproduced the discrimination proof independently (8 red / 39 green) and additionally showed
+  that deleting the in-memory `workspaceId` guard reddens the pure-unit case while the SQL
+  predicate still covers the vertical slice — confirming both defence layers are real and
+  independently load-bearing.
+- Confirmed scope boundary respected: no `session-sleep.ts`, no `isActivitySafeForSleep`, no
+  `packages/vm-agent/` paths in the diff.
+- **[LOW] The "already woke" fixture used `sleep_status='completed'`, a value never written.**
+  **Fixed** — the fixture now uses `null`, which is what every real wake path
+  (`markSessionSnapshotAwakeInPlace`, `completeSessionSnapshotRecovery`) actually writes, and
+  the comment marks the guard as defensive rather than an observed transition.
+- **[MEDIUM] Rule 58 referenced `tasks/archive/…` while the file was still in `tasks/active/`.**
+  Resolved by archiving the task file in this PR.
+
+### Rule 58 amended
+
+Added a "find the whole resumer before you mirror it" section: the function that reads as the
+resumer is often not the one that authorizes the restore, and mirroring only the first leaves
+the destroyer *looser* than the resumer — the inverse failure, where unwakeable work is
+preserved until its TTL instead of failing promptly.
 
 ---
 

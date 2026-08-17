@@ -6,6 +6,7 @@ import { getLocalTaskRuntimeLiveness } from '../../src/durable-objects/project-d
 import type { Env as ProjectDataEnv } from '../../src/durable-objects/project-data/types';
 import type { Env } from '../../src/env';
 import { getTaskRuntimeLiveness } from '../../src/scheduled/stuck-tasks';
+import { needsSessionResumabilityProbe } from '../../src/services/task-runtime-liveness';
 import { createSchemaTables, createSqliteD1 } from '../helpers/sqlite-d1';
 import { createSqlStorage } from './durable-objects/sql-storage-test-utils';
 
@@ -66,6 +67,7 @@ function seedSnapshot(
     expiresAt?: string;
     status?: string;
     degradation?: string;
+    recoveryAttempts?: number;
   } = {}
 ): void {
   sqlite
@@ -74,7 +76,7 @@ function seedSnapshot(
                                     runtime, status, degradation, manifest_r2_key, home_r2_key,
                                     expires_at, sleeping_at, sleep_status, recovery_attempts,
                                     sleep_attempts, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'user-1', ?, 'vm', ?, ?, 'manifest-key', 'home-key', ?, ?, ?, 0, 0, ?, ?)`
+     VALUES (?, ?, ?, ?, 'user-1', ?, 'vm', ?, ?, 'manifest-key', 'home-key', ?, ?, ?, ?, 0, ?, ?)`
     )
     .run(
       'snapshot-1',
@@ -87,9 +89,22 @@ function seedSnapshot(
       overrides.expiresAt ?? iso(7 * 24 * 60 * 60 * 1000),
       overrides.sleepingAt === undefined ? iso(-9 * 60 * 1000) : overrides.sleepingAt,
       overrides.sleepStatus === undefined ? 'sleeping' : overrides.sleepStatus,
+      overrides.recoveryAttempts ?? 0,
       iso(-3_600_000),
       iso(0)
     );
+}
+
+/** A D1 binding whose `session_snapshots` reads always throw. */
+function brokenSnapshotDb(): { DATABASE: unknown } {
+  return {
+    DATABASE: {
+      prepare: (query: string) =>
+        query.includes('session_snapshots')
+          ? { bind: () => ({ first: () => Promise.reject(new Error('D1 unavailable')) }) }
+          : createSqliteD1(sqlite).prepare(query),
+    },
+  };
 }
 
 beforeEach(() => {
@@ -146,12 +161,64 @@ describe('stuck-task liveness for a slept session', () => {
   });
 
   it('fails when the session already woke', async () => {
+    // Every real wake path (`markSessionSnapshotAwakeInPlace`,
+    // `completeSessionSnapshotRecovery`) clears sleep_status back to NULL.
     seedWorkspace('deleted');
-    seedSnapshot({ sleepStatus: 'completed' });
+    seedSnapshot({ sleepStatus: null });
 
     await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
       conclusive: true,
       reason: 'workspace_deleted',
+    });
+  });
+
+  it('fails when expires_at is stored unparseable', async () => {
+    // Exercises `parseTimestamp`'s NaN -> null path through the REAL loader,
+    // not just the pure classifier: a corrupt bound must terminalize, never
+    // pin the task open (`.claude/rules/47`).
+    seedWorkspace('deleted');
+    seedSnapshot({ expiresAt: 'not-a-timestamp' });
+
+    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+      conclusive: true,
+      reason: 'workspace_deleted',
+    });
+  });
+
+  it('fails once the snapshot has exhausted its wake attempts', async () => {
+    // Parity with `claimSessionSnapshotRecovery`, which refuses to claim once
+    // recovery_attempts reaches the max. Preserving here would strand the task
+    // for the full snapshot TTL waiting on a wake that can never happen.
+    seedWorkspace('deleted');
+    seedSnapshot({ recoveryAttempts: 3 });
+
+    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+      conclusive: true,
+      reason: 'workspace_deleted',
+    });
+  });
+
+  it('still preserves while a wake attempt remains', async () => {
+    seedWorkspace('deleted');
+    seedSnapshot({ recoveryAttempts: 2 });
+
+    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
+      conclusive: false,
+      reason: 'workspace_deleted_snapshot_resumable',
+    });
+  });
+
+  it('withholds a death verdict when the cron adapter snapshot read fails', async () => {
+    // Rule 44 symmetry: the cron adapter has its own try/catch, so it needs its
+    // own error-path proof rather than inheriting the DO adapter's.
+    seedWorkspace('deleted');
+
+    await expect(
+      getTaskRuntimeLiveness(brokenSnapshotDb() as unknown as Env, task)
+    ).resolves.toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'workspace_deleted_resumability_unknown',
     });
   });
 
@@ -189,14 +256,34 @@ describe('stuck-task liveness for a slept session', () => {
   });
 
   it('leaves a running workspace on the normal ACP-liveness path', async () => {
-    // Owner-path control: the resumability probe must not divert a healthy
-    // workspace, and must not be issued for one.
+    // Owner-path control: a healthy workspace must never be diverted onto the
+    // resumability branch, even with a live snapshot row present. Asserting the
+    // absence of the resumability reasons is the load-bearing part — asserting
+    // only `workspaceStatus` would pass even if the branch had swallowed it.
     seedWorkspace('running');
     seedSnapshot();
 
-    await expect(getTaskRuntimeLiveness(env, task)).resolves.toMatchObject({
-      workspaceStatus: 'running',
-    });
+    const result = await getTaskRuntimeLiveness(env, task);
+    expect(result.workspaceStatus).toBe('running');
+    expect(result.reason).not.toContain('snapshot_resumable');
+    expect(result.reason).not.toContain('resumability_unknown');
+    // Proves the gate itself refuses to probe a running workspace, independent
+    // of whatever the downstream ACP probe concludes in this harness.
+    expect(
+      needsSessionResumabilityProbe(
+        {
+          id: WORKSPACE_ID,
+          status: 'running',
+          chatSessionId: CHAT_SESSION_ID,
+          nodeId: NODE_ID,
+          nodeRuntime: 'vm',
+          nodeStatus: 'running',
+          nodeHealthStatus: 'healthy',
+          nodeHeartbeatAt: Date.now(),
+        },
+        'ok'
+      )
+    ).toBe(false);
   });
 });
 
@@ -240,18 +327,7 @@ describe('ProjectData idle-cleanup liveness for a slept session', () => {
   it('withholds a death verdict when the snapshot read fails', async () => {
     seedWorkspace('deleted');
     const sql = createSqlStorage(new Database(':memory:'));
-    const broken = {
-      DATABASE: {
-        prepare: (query: string) =>
-          query.includes('session_snapshots')
-            ? {
-                bind: () => ({
-                  first: () => Promise.reject(new Error('D1 unavailable')),
-                }),
-              }
-            : createSqliteD1(sqlite).prepare(query),
-      },
-    } as unknown as ProjectDataEnv;
+    const broken = brokenSnapshotDb() as unknown as ProjectDataEnv;
 
     await expect(getLocalTaskRuntimeLiveness(sql, broken, doTask)).resolves.toMatchObject({
       live: false,

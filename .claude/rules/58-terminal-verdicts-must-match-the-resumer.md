@@ -14,6 +14,17 @@ The canonical pair in this repo:
 | Destroyer | `classifyTaskRuntimeLiveness` (`apps/api/src/services/task-runtime-liveness.ts`) | `workspaces.status`             |
 | Resumer   | `loadRecoveryContext` (`apps/api/src/services/session-recovery.ts`)              | `session_snapshots.sleeping_at` |
 
+**Find the whole resumer before you mirror it.** The restore path is usually more than one
+function, and the one that reads most naturally as "the resumer" is often not the one that
+actually authorizes the restore. Here `loadRecoveryContext` merely assembles context; the real
+gate is `claimSessionSnapshotRecovery`
+(`apps/api/src/services/session-snapshot-recovery-lifecycle.ts`), whose `WHERE` clause adds a
+restorable `status`/`degradation` pair and `recovery_attempts < max`. Mirroring only the
+first function leaves the destroyer *looser* than the resumer — the opposite failure to the
+original bug, and just as real: work the resumer will never wake is preserved anyway, so the
+task hangs until the artifact's TTV expires instead of failing promptly. Enumerate every
+predicate on the path from "candidate" to "restored" and mirror the union.
+
 ## Why This Rule Exists
 
 On 2026-08-16, 31+ production tasks (`2026-08-06` onward, still firing on `2026-08-17`)
