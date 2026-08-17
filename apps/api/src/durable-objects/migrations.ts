@@ -925,9 +925,13 @@ export const MIGRATIONS: Migration[] = [
     },
   },
   {
-    // Keep hardening additive because development/staging Durable Objects may
-    // already have recorded migration 029 from an earlier branch build.
-    name: '030-task-wait-replay-hardening',
+    // Replay hardening for the task-wait tables created in 030. Kept as a
+    // separate additive migration (rather than folded into 030) so any
+    // Durable Object that recorded 030 still receives these columns.
+    //
+    // Numbered 031 for the same reason 030 was renumbered: PR #1840's
+    // `029-session-activity-reconciliation` claimed 029 on main first.
+    name: '031-task-wait-replay-hardening',
     run: (sql) => {
       sql.exec(
         `ALTER TABLE task_wait_subscriptions ADD COLUMN idempotency_key TEXT NOT NULL DEFAULT ''`

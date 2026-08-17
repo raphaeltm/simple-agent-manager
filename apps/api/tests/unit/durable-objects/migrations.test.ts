@@ -264,13 +264,13 @@ describe('DO Migrations', () => {
       }
     });
 
-    it('upgrades the originally recorded migration-029 task-wait shape additively', () => {
+    it('upgrades the originally recorded base task-wait shape additively', () => {
       const db = new Database(':memory:');
       try {
         const sql = createSqlStorage(db);
         sql.exec(`CREATE TABLE migrations (name TEXT PRIMARY KEY, applied_at INTEGER NOT NULL)`);
         const hardeningIndex = MIGRATIONS.findIndex(
-          (migration) => migration.name === '030-task-wait-replay-hardening'
+          (migration) => migration.name === '031-task-wait-replay-hardening'
         );
         expect(hardeningIndex).toBeGreaterThan(0);
         for (const migration of MIGRATIONS.slice(0, hardeningIndex)) {
