@@ -872,18 +872,27 @@ export const MIGRATIONS: Migration[] = [
     // and an existing deployment. See .claude/rules/07-env-and-urls.md.
     name: '030-harness-work-and-task-waits',
     run: (sql) => {
-      sql.exec(
-        `ALTER TABLE session_state ADD COLUMN runtime_work_state TEXT CHECK (runtime_work_state IN ('inactive', 'active', 'settling'))`
-      );
-      sql.exec(
-        `ALTER TABLE session_state ADD COLUMN runtime_work_count INTEGER CHECK (runtime_work_count IS NULL OR runtime_work_count >= 0)`
-      );
-      sql.exec(`ALTER TABLE session_state ADD COLUMN runtime_work_source TEXT`);
-      sql.exec(`ALTER TABLE session_state ADD COLUMN runtime_work_updated_at INTEGER`);
-      sql.exec(`ALTER TABLE session_state ADD COLUMN runtime_work_progress_at INTEGER`);
+      // Each ADD COLUMN is individually guarded so a partial previous run — or a
+      // Durable Object that somehow recorded this migration under its
+      // pre-renumber name — cannot wedge the DO constructor with a
+      // `duplicate column name` error on every subsequent RPC. Same pattern as
+      // migrations 011 and 017.
+      for (const statement of [
+        `ALTER TABLE session_state ADD COLUMN runtime_work_state TEXT CHECK (runtime_work_state IN ('inactive', 'active', 'settling'))`,
+        `ALTER TABLE session_state ADD COLUMN runtime_work_count INTEGER CHECK (runtime_work_count IS NULL OR runtime_work_count >= 0)`,
+        `ALTER TABLE session_state ADD COLUMN runtime_work_source TEXT`,
+        `ALTER TABLE session_state ADD COLUMN runtime_work_updated_at INTEGER`,
+        `ALTER TABLE session_state ADD COLUMN runtime_work_progress_at INTEGER`,
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Column already exists from a partial previous run — safe to ignore.
+        }
+      }
 
       sql.exec(`
-				CREATE TABLE task_wait_subscriptions (
+				CREATE TABLE IF NOT EXISTS task_wait_subscriptions (
 					id TEXT PRIMARY KEY,
 					parent_task_id TEXT NOT NULL,
 					parent_session_id TEXT NOT NULL,
@@ -900,17 +909,17 @@ export const MIGRATIONS: Migration[] = [
 				)
 			`);
       sql.exec(`
-			CREATE UNIQUE INDEX idx_task_wait_active_parent
+			CREATE UNIQUE INDEX IF NOT EXISTS idx_task_wait_active_parent
 				ON task_wait_subscriptions(parent_task_id)
 				WHERE state = 'active'
 			`);
       sql.exec(`
-				CREATE INDEX idx_task_wait_due
+				CREATE INDEX IF NOT EXISTS idx_task_wait_due
 				ON task_wait_subscriptions(next_reconcile_at, wake_deadline)
 				WHERE state = 'active'
 			`);
       sql.exec(`
-				CREATE TABLE task_wait_children (
+				CREATE TABLE IF NOT EXISTS task_wait_children (
 					subscription_id TEXT NOT NULL REFERENCES task_wait_subscriptions(id) ON DELETE CASCADE,
 					child_task_id TEXT NOT NULL,
 					observed_status TEXT,
@@ -919,7 +928,7 @@ export const MIGRATIONS: Migration[] = [
 				)
 			`);
       sql.exec(`
-				CREATE INDEX idx_task_wait_child
+				CREATE INDEX IF NOT EXISTS idx_task_wait_child
 				ON task_wait_children(child_task_id, subscription_id)
       `);
     },
@@ -933,20 +942,24 @@ export const MIGRATIONS: Migration[] = [
     // `029-session-activity-reconciliation` claimed 029 on main first.
     name: '031-task-wait-replay-hardening',
     run: (sql) => {
-      sql.exec(
-        `ALTER TABLE task_wait_subscriptions ADD COLUMN idempotency_key TEXT NOT NULL DEFAULT ''`
-      );
-      sql.exec(`ALTER TABLE task_wait_subscriptions ADD COLUMN wake_content TEXT`);
-      sql.exec(
-        `ALTER TABLE task_wait_subscriptions ADD COLUMN wake_attempts INTEGER NOT NULL DEFAULT 0 CHECK (wake_attempts >= 0)`
-      );
+      for (const statement of [
+        `ALTER TABLE task_wait_subscriptions ADD COLUMN idempotency_key TEXT NOT NULL DEFAULT ''`,
+        `ALTER TABLE task_wait_subscriptions ADD COLUMN wake_content TEXT`,
+        `ALTER TABLE task_wait_subscriptions ADD COLUMN wake_attempts INTEGER NOT NULL DEFAULT 0 CHECK (wake_attempts >= 0)`,
+      ]) {
+        try {
+          sql.exec(statement);
+        } catch {
+          // Column already exists from a partial previous run — safe to ignore.
+        }
+      }
       sql.exec(`
         UPDATE task_wait_subscriptions
         SET idempotency_key = 'legacy-' || id
         WHERE idempotency_key = ''
       `);
       sql.exec(`
-        CREATE UNIQUE INDEX idx_task_wait_idempotency
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_task_wait_idempotency
         ON task_wait_subscriptions(parent_task_id, idempotency_key)
       `);
     },
