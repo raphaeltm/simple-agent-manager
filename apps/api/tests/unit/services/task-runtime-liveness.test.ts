@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 
 import {
   classifyTaskRuntimeLiveness,
+  needsSessionResumabilityProbe,
+  type SessionResumabilitySnapshot,
   type TaskRuntimeLivenessSignals,
 } from '../../../src/services/task-runtime-liveness';
 
@@ -38,6 +40,10 @@ function signals(overrides: Partial<TaskRuntimeLivenessSignals> = {}): TaskRunti
     ],
     containerProbeOutcome: 'not_run',
     containerLifecycle: null,
+    // Default `not_run` keeps every pre-existing expectation in this file
+    // unchanged, which is the back-compat proof for callers that cannot probe.
+    resumabilityProbeOutcome: 'not_run',
+    sessionResumability: null,
     ...overrides,
   };
 }
@@ -180,5 +186,184 @@ describe('classifyTaskRuntimeLiveness', () => {
       conclusive: true,
       reason: 'cf_container_error',
     });
+  });
+});
+
+/**
+ * Regression suite for the 2026-08-16 production incident: two task sessions
+ * (`da90b7c4`, `8bd22a42`) were terminalized as
+ * "Task runtime is conclusively gone after reconciliation grace (workspace_deleted)"
+ * while their `session_snapshots` rows were asleep, unexpired and restorable.
+ *
+ * `NodeLifecycle` rewrites a slept workspace's `sleeping` status to `deleted`
+ * five minutes after sleep, so workspace status alone cannot tell "slept and
+ * restorable" apart from "destroyed". Fixture values below are the real
+ * production rows.
+ */
+describe('classifyTaskRuntimeLiveness — slept sessions are not dead', () => {
+  const SLEEPING_AT = NOW - 9 * 60 * 1000;
+  const EXPIRES_AT = NOW + 7 * 24 * 60 * 60 * 1000;
+
+  function resumable(overrides: Partial<SessionResumabilitySnapshot> = {}) {
+    return {
+      chatSessionId: 'chat-1',
+      workspaceId: 'workspace-1',
+      sleepingAt: SLEEPING_AT,
+      sleepStatus: 'sleeping',
+      expiresAtMs: EXPIRES_AT,
+      ...overrides,
+    } satisfies SessionResumabilitySnapshot;
+  }
+
+  /** Workspace as NodeLifecycle leaves it 5 min after an idle sleep. */
+  function sleptWorkspace(base: TaskRuntimeLivenessSignals) {
+    return { ...workspaceFrom(base), status: 'deleted' };
+  }
+
+  it('does not terminalize a slept session with a live snapshot (incident 8bd22a42)', () => {
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: sleptWorkspace(base),
+          resumabilityProbeOutcome: 'ok',
+          sessionResumability: resumable(),
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'workspace_deleted_snapshot_resumable',
+      workspaceStatus: 'deleted',
+    });
+  });
+
+  it('treats a degraded-but-restorable snapshot as resumable (incident da90b7c4)', () => {
+    // Real row: status='degraded', degradation='entries-skipped', home R2 key
+    // present. `loadRecoveryContext` restores it, so the classifier must agree.
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: sleptWorkspace(base),
+          resumabilityProbeOutcome: 'ok',
+          sessionResumability: resumable(),
+        })
+      )
+    ).toMatchObject({ conclusive: false });
+  });
+
+  it('still terminalizes a user-deleted workspace that has no snapshot row', () => {
+    // Discriminating control: a user delete destroys the snapshot row, so this
+    // must keep failing exactly as before. Without it, the test above would
+    // also pass if terminalization were disabled outright.
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: sleptWorkspace(base),
+          resumabilityProbeOutcome: 'ok',
+          sessionResumability: null,
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'workspace_deleted',
+    });
+  });
+
+  it.each([
+    ['expired snapshot', { expiresAtMs: NOW - 1 }],
+    ['expiry exactly now', { expiresAtMs: NOW }],
+    ['unparseable/absent expiry', { expiresAtMs: null }],
+    ['never slept', { sleepingAt: null }],
+    ['already woke', { sleepStatus: 'completed' }],
+    ['snapshot for another workspace', { workspaceId: 'workspace-2' }],
+  ])('terminalizes when the snapshot is not restorable: %s', (_label, overrides) => {
+    // Bounded escape path (`.claude/rules/47`): a snapshot must never be able
+    // to keep a task alive forever.
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: sleptWorkspace(base),
+          resumabilityProbeOutcome: 'ok',
+          sessionResumability: resumable(overrides),
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'workspace_deleted',
+    });
+  });
+
+  it('withholds a death verdict when the resumability probe failed', () => {
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: sleptWorkspace(base),
+          resumabilityProbeOutcome: 'error',
+          sessionResumability: null,
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: false,
+      reason: 'workspace_deleted_resumability_unknown',
+    });
+  });
+
+  it('keeps a missing workspace row conclusively dead even with a snapshot', () => {
+    // `loadRecoveryContext` requires the workspace row to exist, so a
+    // hard-deleted workspace genuinely cannot be resumed.
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: null,
+          resumabilityProbeOutcome: 'ok',
+          sessionResumability: resumable(),
+        })
+      )
+    ).toMatchObject({
+      live: false,
+      conclusive: true,
+      reason: 'workspace_missing',
+    });
+  });
+
+  it('leaves the already-inconclusive sleeping status untouched', () => {
+    const base = signals();
+    expect(
+      classifyTaskRuntimeLiveness(
+        signals({
+          workspace: { ...workspaceFrom(base), status: 'sleeping' },
+          resumabilityProbeOutcome: 'not_run',
+        })
+      )
+    ).toMatchObject({ conclusive: false, reason: 'workspace_sleeping_resumable' });
+  });
+
+  it('does not probe resumability for a workspace that is not about to be failed', () => {
+    expect(needsSessionResumabilityProbe(signals().workspace, 'ok')).toBe(false);
+  });
+
+  it.each(['deleted', 'stopped', 'error', 'pending'])(
+    'probes resumability before failing a %s workspace',
+    (status) => {
+      const base = signals();
+      expect(needsSessionResumabilityProbe({ ...workspaceFrom(base), status }, 'ok')).toBe(true);
+    }
+  );
+
+  it('skips the probe when workspace identity or the workspace read is unusable', () => {
+    const base = signals();
+    const deleted = { ...workspaceFrom(base), status: 'deleted' };
+    expect(needsSessionResumabilityProbe(deleted, 'error')).toBe(false);
+    expect(needsSessionResumabilityProbe({ ...deleted, chatSessionId: null }, 'ok')).toBe(false);
+    expect(needsSessionResumabilityProbe(null, 'ok')).toBe(false);
+    expect(needsSessionResumabilityProbe({ ...deleted, status: 'sleeping' }, 'ok')).toBe(false);
   });
 });

@@ -50,6 +50,8 @@ import * as projectDataService from '../services/project-data';
 import { cleanupTaskRun } from '../services/task-runner';
 import {
   classifyTaskRuntimeLiveness,
+  loadSessionResumabilitySnapshot,
+  needsSessionResumabilityProbe,
   loadRuntimeWorkspaceSnapshot,
   type RuntimeAcpSessionSnapshot,
   type TaskRuntimeLiveness,
@@ -437,6 +439,31 @@ export async function getTaskRuntimeLiveness(
     }
   }
 
+  // Only probed for a workspace that would otherwise be declared conclusively
+  // dead, so the sweep pays one extra point lookup only when it is about to
+  // terminalize a task (`.claude/rules/47`).
+  let resumabilityProbeOutcome: TaskRuntimeLivenessSignals['resumabilityProbeOutcome'] = 'not_run';
+  let sessionResumability: TaskRuntimeLivenessSignals['sessionResumability'] = null;
+  if (needsSessionResumabilityProbe(workspace, workspaceProbeOutcome)) {
+    try {
+      sessionResumability = await loadSessionResumabilitySnapshot(
+        env.DATABASE,
+        task.project_id,
+        workspace.id,
+        workspace.chatSessionId
+      );
+      resumabilityProbeOutcome = 'ok';
+    } catch (err) {
+      resumabilityProbeOutcome = 'error';
+      log.warn('stuck_task.session_resumability_query_failed', {
+        workspaceId: task.workspace_id,
+        projectId: task.project_id,
+        action: 'preserved',
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   const baseSignals: TaskRuntimeLivenessSignals = {
     taskWorkspaceId: task.workspace_id,
     workspace,
@@ -447,6 +474,8 @@ export async function getTaskRuntimeLiveness(
     acpSessions: [],
     containerProbeOutcome: 'not_run',
     containerLifecycle: null,
+    resumabilityProbeOutcome,
+    sessionResumability,
   };
   const initialClassification = classifyTaskRuntimeLiveness(baseSignals);
   if (
