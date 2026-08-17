@@ -125,7 +125,14 @@ export function createTaskWait(
   input: CreateTaskWaitInput,
   now = Date.now()
 ): { created: boolean; subscription: TaskWaitSubscription } {
-  const childTaskIds = [...new Set(input.childTaskIds)].sort();
+  // Explicit code-unit comparator, NOT the default sort and NOT localeCompare.
+  // This order feeds the derived idempotency key below, so it must be stable
+  // across isolates and runtime versions; localeCompare is locale-dependent and
+  // could reorder ids under a different default locale, silently producing a
+  // second "distinct" wait for the same child set.
+  const childTaskIds = [...new Set(input.childTaskIds)].sort((a, b) =>
+    a < b ? -1 : a > b ? 1 : 0
+  );
   if (childTaskIds.length === 0) throw new Error('At least one child task is required');
   if (childTaskIds.length > config.maxChildren) {
     throw new Error(`Task wait child limit reached (${config.maxChildren})`);
