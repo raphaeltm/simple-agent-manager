@@ -18,17 +18,17 @@ reason since 2026-08-06, and it is still occurring (1 on 2026-08-17).
 
 Account `e2eb9a8d5b560cce006fdd03ad6f2e49`, DB `sam-prod` / `sam-observability-prod`.
 
-| Session | Task | in_progress | ACP prompt ended | slept at | ws → `deleted` | task → `failed` |
-| --- | --- | --- | --- | --- | --- | --- |
-| `da90b7c4` | `01M064S8K7C13GRHCJJ13EJ6E7` | 20:48:02Z | 20:52:47Z (`end_turn`, 4m28s) | 21:11:57.499Z | 21:17:14.512Z | 21:21:05.825Z |
-| `8bd22a42` | `01M064TAJ7B0AX8G115CY85RXM` | 20:43:32Z | 21:09:57Z (`end_turn`, 26m11s) | 21:26:51.529Z | ~21:31:51Z | 21:36:06.166Z |
+| Session    | Task                         | in_progress | ACP prompt ended               | slept at      | ws → `deleted` | task → `failed` |
+| ---------- | ---------------------------- | ----------- | ------------------------------ | ------------- | -------------- | --------------- |
+| `da90b7c4` | `01M064S8K7C13GRHCJJ13EJ6E7` | 20:48:02Z   | 20:52:47Z (`end_turn`, 4m28s)  | 21:11:57.499Z | 21:17:14.512Z  | 21:21:05.825Z   |
+| `8bd22a42` | `01M064TAJ7B0AX8G115CY85RXM` | 20:43:32Z   | 21:09:57Z (`end_turn`, 26m11s) | 21:26:51.529Z | ~21:31:51Z     | 21:36:06.166Z   |
 
 `session_snapshots` state **at the moment each task was declared "conclusively gone"**:
 
-| Session | `status` | `degradation` | `sleep_status` | `sleeping_at` | `expires_at` | home R2 key |
-| --- | --- | --- | --- | --- | --- | --- |
-| `8bd22a42` | `available` | `none` | `sleeping` | 21:26:51.529Z | **2026-08-23** | present |
-| `da90b7c4` | `degraded` | `entries-skipped` | `sleeping` | 21:11:57.499Z | **2026-08-23** | present |
+| Session    | `status`    | `degradation`     | `sleep_status` | `sleeping_at` | `expires_at`   | home R2 key |
+| ---------- | ----------- | ----------------- | -------------- | ------------- | -------------- | ----------- |
+| `8bd22a42` | `available` | `none`            | `sleeping`     | 21:26:51.529Z | **2026-08-23** | present     |
+| `da90b7c4` | `degraded`  | `entries-skipped` | `sleeping`     | 21:11:57.499Z | **2026-08-23** | present     |
 
 Both sessions were resumable for another **7 days** when SAM wrote `failed`.
 
@@ -66,19 +66,20 @@ Both sessions were resumable for another **7 days** when SAM wrote `failed`.
 actually wakes a slept session — accepts a session as resumable when:
 
 ```ts
-snapshot.workspaceId && snapshot.projectId === projectId && snapshot.sleepingAt
+snapshot.workspaceId && snapshot.projectId === projectId && snapshot.sleepingAt;
 ```
 
 It **never reads `workspaces.status`**. A workspace row with `status='deleted'` is still
-fully wakeable. Meanwhile the classifier's only workspace signal *is* `workspaces.status`,
+fully wakeable. Meanwhile the classifier's only workspace signal _is_ `workspaces.status`,
 and it never reads `session_snapshots`. So the classifier declares conclusive death for
 sessions the recovery path would happily restore.
 
 This is precisely the contract in `.claude/rules/02-quality-gates.md`:
+
 > "sleep, wake, restore, replacement, probe failure, and unknown state are inconclusive"
 
-and the class of bug in `.claude/rules/53`: a *turn-level* signal (`activity='idle'`,
-meaning "the ACP prompt ended") and a *status* signal (`workspaces.status`) being used as
+and the class of bug in `.claude/rules/53`: a _turn-level_ signal (`activity='idle'`,
+meaning "the ACP prompt ended") and a _status_ signal (`workspaces.status`) being used as
 proxies for a question they cannot answer ("is this session's work unrecoverable?").
 
 ### Why the original brief's framing needed correcting
@@ -95,7 +96,7 @@ that as the proximate cause:
   shared classifier says conclusively dead. They did not kill these sessions.
 - The sleep cron is already activity-aware and will not sleep a `prompting` session.
 
-Every terminalization path — the stuck-task cron *and* both DO idle sweeps — funnels through
+Every terminalization path — the stuck-task cron _and_ both DO idle sweeps — funnels through
 the single shared `classifyTaskRuntimeLiveness`. Fixing it there fixes all three at once
 (DRY), instead of bolting separate guards into each sweep.
 
@@ -115,7 +116,7 @@ Resumability predicate (mirrors the resumer, plus a bound the resumer lacks):
 - `sleeping_at IS NOT NULL` — the session was genuinely slept. User deletes destroy the
   snapshot row entirely (`session-snapshot-persistence.ts:42`), so this discriminates
   idle-sleep from user deletion **without needing a new `deleted_reason` column**
-- `sleep_status = 'sleeping'` — asleep *now*, not a stale marker from a session that
+- `sleep_status = 'sleeping'` — asleep _now_, not a stale marker from a session that
   already woke
 - `expires_at` parses and is in the future — **the bounded escape** (rule 47). Once the
   snapshot expires the session is genuinely unrecoverable and the task fails normally.
@@ -133,35 +134,35 @@ destroying a possibly-recoverable session.
 
 Every finding below has a checklist item or an explicit deferral.
 
-| Finding | Disposition |
-| --- | --- |
-| Classifier reads only `workspaces.status`; never `session_snapshots` | Item 1, 2 |
-| `node-lifecycle.ts:571` predicate rewrites `sleeping` → `deleted` | Covered by items 1–2 (classifier no longer trusts status alone) |
-| `workspaces` has no deletion-cause column | Not needed — snapshot presence is the discriminator (documented above) |
-| Two adapters feed the classifier; both must supply the signal | Item 3 (rule 44 enumeration) |
-| `expires_at` is `NOT NULL` in schema and is the natural escape bound | Item 1 |
-| `loadRecoveryContext` ignores `expires_at` — an expired snapshot would still be "restored" | **Deferred** → SAM Idea (separate bug, out of scope) |
-| `cancelStalledPrompt` bypasses `recordTurnEnd`/`publishTurnEnd` | Already tracked in `tasks/backlog/2026-08-17-migrate-cancel-stalled-prompt-to-record-turn-end.md` |
-| Snapshot for `da90b7c4` was `degraded` (`entries-skipped`) | Not gated on — matches resumer; noted in tests |
+| Finding                                                                                    | Disposition                                                                                       |
+| ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------- |
+| Classifier reads only `workspaces.status`; never `session_snapshots`                       | Item 1, 2                                                                                         |
+| `node-lifecycle.ts:571` predicate rewrites `sleeping` → `deleted`                          | Covered by items 1–2 (classifier no longer trusts status alone)                                   |
+| `workspaces` has no deletion-cause column                                                  | Not needed — snapshot presence is the discriminator (documented above)                            |
+| Two adapters feed the classifier; both must supply the signal                              | Item 3 (rule 44 enumeration)                                                                      |
+| `expires_at` is `NOT NULL` in schema and is the natural escape bound                       | Item 1                                                                                            |
+| `loadRecoveryContext` ignores `expires_at` — an expired snapshot would still be "restored" | **Deferred** → SAM Idea `01M076660EE6YENQFDK40S4N9P`                                              |
+| `cancelStalledPrompt` bypasses `recordTurnEnd`/`publishTurnEnd`                            | Already tracked in `tasks/backlog/2026-08-17-migrate-cancel-stalled-prompt-to-record-turn-end.md` |
+| Snapshot for `da90b7c4` was `degraded` (`entries-skipped`)                                 | Not gated on — matches resumer; noted in tests                                                    |
 
 ## Implementation checklist
 
-- [ ] 1. `apps/api/src/services/task-runtime-liveness.ts`: add
-      `SessionResumabilitySnapshot`, `resumabilityProbeOutcome` +
-      `sessionResumability` to `TaskRuntimeLivenessSignals`, and an
-      `isSessionResumable()` helper enforcing the four-part predicate above.
-- [ ] 2. Insert the resumability branch into `classifyTaskRuntimeLiveness` between the
-      `INCONCLUSIVE_WORKSPACE_STATUSES` check and the `status !== 'running'` conclusive
-      branch. Keep `workspace_missing` conclusive.
-- [ ] 3. Add `loadSessionResumabilitySnapshot()` next to `loadRuntimeWorkspaceSnapshot()`
-      and wire **every** adapter (rule 44 — enumerate all callers of
-      `classifyTaskRuntimeLiveness`):
-      `apps/api/src/scheduled/stuck-tasks.ts` (`getTaskRuntimeLiveness`) and
-      `apps/api/src/durable-objects/project-data/task-runtime-liveness.ts`
-      (`getLocalTaskRuntimeLiveness`).
-- [ ] 4. Regression tests (see below).
-- [ ] 5. Post-mortem + process fix (rule 02 mandates both).
-- [ ] 6. File the deferred `loadRecoveryContext` expiry gap as a SAM Idea.
+- [x] 1. `apps/api/src/services/task-runtime-liveness.ts`: add
+     `SessionResumabilitySnapshot`, `resumabilityProbeOutcome` +
+     `sessionResumability` to `TaskRuntimeLivenessSignals`, and an
+     `isSessionResumable()` helper enforcing the four-part predicate above.
+- [x] 2. Insert the resumability branch into `classifyTaskRuntimeLiveness` between the
+     `INCONCLUSIVE_WORKSPACE_STATUSES` check and the `status !== 'running'` conclusive
+     branch. Keep `workspace_missing` conclusive.
+- [x] 3. Add `loadSessionResumabilitySnapshot()` next to `loadRuntimeWorkspaceSnapshot()`
+     and wire **every** adapter (rule 44 — enumerate all callers of
+     `classifyTaskRuntimeLiveness`):
+     `apps/api/src/scheduled/stuck-tasks.ts` (`getTaskRuntimeLiveness`) and
+     `apps/api/src/durable-objects/project-data/task-runtime-liveness.ts`
+     (`getLocalTaskRuntimeLiveness`).
+- [x] 4. Regression tests (see below).
+- [x] 5. Post-mortem + process fix (rule 02 mandates both).
+- [x] 6. File the deferred `loadRecoveryContext` expiry gap as a SAM Idea (`01M076660EE6YENQFDK40S4N9P`).
 
 ## Required tests (rule 02 — must be discriminating)
 
@@ -206,3 +207,75 @@ Every finding below has a checklist item or an explicit deferral.
 - `.claude/rules/47-control-loop-io-budget.md` — bounded escape path
 - `.claude/rules/44-dual-write-migration-enumerate-writers.md` — enumerate every adapter
 - `tasks/active/2026-08-16-session-activity-state-machine.md` — PR #1840 (ancestor)
+
+---
+
+## Post-mortem
+
+### What broke
+
+Task-mode sessions were terminalized as `failed` with
+`"Task runtime is conclusively gone after reconciliation grace (workspace_deleted)."`
+while their work was intact and restorable. Users saw a red "Task failed" on work that had
+merely gone to sleep. **31 tasks** since 2026-08-06, still firing on 2026-08-17.
+
+### Root cause
+
+`classifyTaskRuntimeLiveness` decided recoverability from `workspaces.status` alone, while
+`loadRecoveryContext` — the code that actually wakes a slept session — decides from
+`session_snapshots.sleeping_at` and never reads `workspaces.status` at all.
+
+`NodeLifecycle` rewrites a slept workspace's `sleeping` status to `deleted` five minutes
+after sleep (`node-lifecycle.ts:570-573`, predicate `status IN ('stopped','sleeping')`),
+collapsing the one inconclusive marker the classifier understood into a conclusive one.
+From that moment the classifier and the resumer disagreed, and the classifier won.
+
+### Timeline
+
+- **2026-08-06** — first occurrence in production `task_status_events`.
+- **2026-08-16 20:39–21:36Z** — the two reported kills. Both agents finished their ACP turn
+  normally (`end_turn`, 4m28s and 26m11s), slept 17–19 min later, and were failed ~9 min
+  after the workspace status flipped. `sleeping_at` + 5 min matches the workspace row's
+  `updated_at` in both cases.
+- **2026-08-17** — reported and fixed.
+
+### Why it was not caught
+
+- **Every component was individually correct.** The sleep cron is activity-aware and refused
+  to sleep a `prompting` session. Both DO idle sweeps route through the shared classifier
+  and preserve unless it says dead. The classifier's logic is sound given its inputs. There
+  was no single wrong line to find in review.
+- **The one shared classifier gave false confidence.** `.claude/rules/02` already required a
+  single shared lifecycle classifier, and SAM had one. That guaranteed the cleanup paths
+  agreed _with each other_ — and said nothing about whether they agreed with the resumer.
+- **Sleep-then-classify was never tested as a sequence.** Tests covered sleep, and covered
+  classification, but no test slept a session and then asked the classifier about it. The
+  existing `workspace_deleted` assertions all used no-snapshot fixtures, so they encoded the
+  buggy verdict as expected behaviour.
+- **The symptom read as a different bug.** "Agent was working and got reaped" points at the
+  idle detector. The idle detector was innocent; only the D1 audit trail
+  (`session_snapshots` rows still `sleeping`/unexpired at kill time) disproved that framing.
+
+### Class of bug
+
+**Destroyer/resumer signal divergence** — two subsystems answering "is this work still
+recoverable?" from different records, with a third path (a TTL sweep) mutating only the one
+the destroyer reads. Not covered by the existing rules, which addressed _cleanup paths
+disagreeing with each other_ rather than _cleanup disagreeing with recovery_.
+
+### Process fix
+
+New rule **`.claude/rules/58-terminal-verdicts-must-match-the-resumer.md`**: any verdict that
+work is unrecoverable must be derived from the record the resumer requires, must name that
+resumer function in a comment, must be bounded by the artifact's own env-configurable
+retention (absent bound → terminal, so nothing becomes immortal), must withhold the verdict
+when the lookup fails, and must ship both an incident reproduction _and_ a discriminating
+control proving terminalization still fires.
+
+`.claude/rules/02-quality-gates.md:98` amended to state that a shared lifecycle classifier is
+necessary but not sufficient, pointing at rule 58.
+
+### What this fix deliberately does NOT change
+
+Sleeping an idle session stays aggressive and unchanged — that behaviour is correct and is
+explicit project policy. The fix only stops SAM from mistaking its own sleep for death.
