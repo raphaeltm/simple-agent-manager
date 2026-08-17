@@ -144,9 +144,9 @@ npm package as two independent PRs, so that invariant has to be asserted, not as
       tag — and prove both discriminating by running them red against the exact pre-fix
       states
 - [x] Full local suite: typecheck 19/19, lint 13/13, build 9/9, test 21/21
-- [ ] Local specialist review
-- [ ] Staging deployment + real end-to-end verification
-- [ ] Integration PR open and green — **do not merge**
+- [x] Local specialist review — 4 reviewers, all PASS/ADDRESSED (commit 909ba28d7)
+- [x] Staging deployment (run 32009397965) + verification, with one documented gap
+- [x] Integration PR #1842 open and green — **not merged, awaiting explicit approval**
 
 ## Acceptance criteria
 
@@ -157,13 +157,18 @@ npm package as two independent PRs, so that invariant has to be asserted, not as
 - [x] No Dockerfile carries a reviewed-source-tag comment that disagrees with its `FROM`
 - [x] `@cloudflare/sandbox` npm version == `Dockerfile.sandbox` image tag
 - [x] `apps/www` builds (181 pages + Pagefind index + sitemap)
-- [ ] A real cf-container/Instant session completes a real agent chat turn on staging
-      — the only evidence that proves the Node 26 image and the sandbox bump work
-- [ ] A real ACP agent session completes prompt → response → tool call on staging
-- [ ] Docs site pages render on staging
-- [ ] Regression sweep: dashboard, projects, settings, no new console errors
-- [ ] Every staging node/workspace created is deleted afterwards (Hetzner 10-server cap
-      is shared with production)
+- [ ] **BLOCKED (not by this PR)**: a real cf-container/Instant session cannot run —
+      staging has `CF_CONTAINER_ENABLED='false'` (staging GitHub Environment, set
+      2026-08-11), so `chat-start` 409s. Substitute evidence: both images built locally
+      in Docker with every agent binary executing on Node 26, and the sandbox container
+      server self-reporting `serviceVersion 0.12.5`
+- [x] A real ACP agent session completed prompt → response → `Read` tool call on staging
+      (session `7517db17-...`, answer `SAMVERIFY26=hono`, rendered in browser, 0 console errors)
+- [x] Docs site verified against the real Astro 7 build (apps/www is NOT staging-deployable;
+      `deploy-www.yml` targets `environment: production` on push to main)
+- [x] Regression sweep: dashboard/projects/settings/nodes at 375 + 1280, zero console errors
+- [x] Every staging node/workspace deleted; re-queried D1 to confirm zero non-destroyed
+      nodes and zero live workspaces
 
 ## References
 
