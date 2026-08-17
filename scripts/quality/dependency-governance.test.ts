@@ -62,22 +62,60 @@ function npmGlobalInstallSpecs(files: string[], packageName: string): string[] {
   return specs;
 }
 
-/**
- * Extracts the human-declared "reviewed source tag" comment from a Dockerfile.
- * Two comment shapes exist in this repo:
- *   `# Reviewed source tag: docker.io/library/node:26-bookworm-slim`
- *   `# IMPORTANT: The reviewed source tag for this digest is cloudflare/sandbox:0.12.5 and MUST ...`
- * Returns the bare `image:tag` with any `docker.io/` registry prefix stripped,
- * so it is directly comparable to a normalised `FROM` ref.
- */
-function reviewedSourceTag(file: string): string | undefined {
-  const match = /reviewed source tag(?:\s+for this digest)?\s*(?::|is)\s*(\S+)/i.exec(read(file));
-  return match ? normaliseImageRef(match[1]!) : undefined;
-}
-
 /** Strips the `docker.io/` registry prefix and any `@sha256:...` digest suffix. */
 function normaliseImageRef(ref: string): string {
   return ref.replace(/^docker\.io\//, '').split('@')[0]!;
+}
+
+interface ReviewedSourcePair {
+  /** Normalised `image:tag` from the nearest preceding reviewed-source-tag comment. */
+  declared: string | undefined;
+  /** Normalised `image:tag` from the `FROM` line that comment governs. */
+  from: string;
+  line: number;
+}
+
+/**
+ * Pairs every `FROM` with the reviewed-source-tag comment that immediately
+ * precedes it. Two comment shapes exist in this repo:
+ *   `# Reviewed source tag: docker.io/library/node:26-bookworm-slim`
+ *   `# IMPORTANT: The reviewed source tag for this digest is cloudflare/sandbox:0.12.5 and MUST ...`
+ *
+ * Pairing by nearest-preceding comment (rather than searching the whole file for
+ * one comment) is what makes this correct for multi-stage builds: each
+ * `FROM ... AS stage` gets its own declaration, and a stale comment on stage 2
+ * cannot be masked by stage 1 still matching. Only real `#` comment lines are
+ * considered, and a pending declaration is consumed by the first `FROM` after
+ * it, so prose that merely mentions the phrase cannot bind to a distant `FROM`.
+ *
+ * Operates on text, not paths, so it covers Dockerfiles embedded in workflow
+ * heredocs as well as standalone Dockerfiles.
+ */
+function reviewedSourcePairs(contents: string): ReviewedSourcePair[] {
+  const declarationPattern = /reviewed source tag(?:\s+for this digest)?\s*(?::|is)\s*(\S+)/i;
+  const pairs: ReviewedSourcePair[] = [];
+  let pending: string | undefined;
+
+  contents.split('\n').forEach((rawLine, index) => {
+    const line = rawLine.trim();
+
+    if (line.startsWith('#')) {
+      const match = declarationPattern.exec(line);
+      if (match) pending = normaliseImageRef(match[1]!);
+      return;
+    }
+
+    if (/^FROM\s+\S+/i.test(line)) {
+      pairs.push({
+        declared: pending,
+        from: normaliseImageRef(line.split(/\s+/)[1]!),
+        line: index + 1,
+      });
+      pending = undefined;
+    }
+  });
+
+  return pairs;
 }
 
 function dockerFromRefs(files: string[]): string[] {
@@ -169,20 +207,42 @@ describe('dependency governance', () => {
   // actually reviewed, so a bumped image silently keeps a comment naming the
   // OLD version. Both #1790 (node 22 -> 26) and #1792 (sandbox 0.12.1 -> 0.12.5)
   // shipped that drift, and the digest-pin assertion above passes right through it.
+  // Covers workflow-embedded heredoc Dockerfiles too (e.g.
+  // .github/workflows/devcontainer-cache-experiments.yml), which use the same
+  // convention but are not files named `Dockerfile*`, so a path-based walk alone
+  // would miss them.
   it('keeps each Dockerfile reviewed-source-tag comment in sync with its FROM tag', () => {
-    const dockerfiles = walk('.', (path) => /(^|\/)Dockerfile(\.|$)/.test(path));
-    expect(dockerfiles.length).toBeGreaterThan(0);
+    const sources = [
+      ...walk('.', (path) => /(^|\/)Dockerfile(\.|$)/.test(path)),
+      ...walk('.github/workflows', (path) => path.endsWith('.yml') || path.endsWith('.yaml')),
+    ];
+    expect(sources.length).toBeGreaterThan(0);
 
-    for (const file of dockerfiles) {
-      const declared = reviewedSourceTag(file);
-      expect(declared, `${file} must declare a reviewed source tag comment`).toBeDefined();
+    const checked: string[] = [];
+    for (const file of sources) {
+      for (const pair of reviewedSourcePairs(read(file))) {
+        // Workflow files legitimately contain `FROM` lines with no reviewed-tag
+        // convention; only Dockerfiles are required to declare one. Inside a
+        // workflow, assert only on stanzas that opted into the convention.
+        const isDockerfile = /(^|\/)Dockerfile(\.|$)/.test(file);
+        if (!isDockerfile && pair.declared === undefined) continue;
 
-      const fromRefs = dockerFromRefs([file]).map(normaliseImageRef);
-      expect(
-        fromRefs,
-        `${file}: reviewed source tag "${declared}" does not match its FROM tag`
-      ).toContain(declared);
+        expect(
+          pair.declared,
+          `${file}:${pair.line} — every FROM in a Dockerfile must be preceded by a reviewed source tag comment`
+        ).toBeDefined();
+        expect(
+          pair.from,
+          `${file}:${pair.line} — reviewed source tag "${pair.declared}" does not match its FROM tag`
+        ).toBe(pair.declared);
+        checked.push(`${file}:${pair.line}`);
+      }
     }
+
+    // Guards the guard: if `walk()` or the parser silently stops finding
+    // stanzas, this test would vacuously pass. The three Dockerfiles plus the
+    // two workflow heredocs are the known floor.
+    expect(checked.length).toBeGreaterThanOrEqual(5);
   });
 
   // The sandbox container server binary and the @cloudflare/sandbox npm client
@@ -195,23 +255,49 @@ describe('dependency governance', () => {
       .map(normaliseImageRef)
       .find((ref) => ref.startsWith('cloudflare/sandbox:'))
       ?.split(':')[1];
-    expect(imageTag, 'apps/api/Dockerfile.sandbox must FROM cloudflare/sandbox:<tag>').toMatch(
-      /^\d+\.\d+\.\d+$/
-    );
 
-    const declared = (
-      JSON.parse(read('apps/api/package.json')) as { dependencies: Record<string, string> }
-    ).dependencies['@cloudflare/sandbox'];
-
-    // An exact pin (no ^ or ~) is required: a range lets the npm client drift
-    // away from the digest-pinned image on any unrelated `pnpm install`.
+    // Split from the format assertion below so a prerelease tag reports "not a
+    // plain x.y.z version" rather than being misreported as a missing FROM line.
     expect(
-      declared,
-      '@cloudflare/sandbox must be an exact version pin, not a semver range'
+      imageTag,
+      'apps/api/Dockerfile.sandbox must FROM cloudflare/sandbox:<tag>'
+    ).toBeDefined();
+    expect(
+      imageTag,
+      `Dockerfile.sandbox image tag "${imageTag}" is not a plain x.y.z version. Prereleases are rejected deliberately: they need a human to confirm the npm client ships the same prerelease before this pin is trusted.`
     ).toMatch(/^\d+\.\d+\.\d+$/);
+
+    // Every declaration, not just apps/api's. A second workspace declaring
+    // @cloudflare/sandbox (e.g. apps/web for the /xterm client) with a caret
+    // range would reintroduce exactly the drift this test exists to prevent.
+    const manifests = walk(
+      '.',
+      (path) => path.endsWith('package.json') && !path.includes('node_modules')
+    );
+    const declarations = manifests.flatMap((file) => {
+      const pkg = JSON.parse(read(file)) as Record<string, Record<string, string> | undefined>;
+      return (['dependencies', 'devDependencies', 'optionalDependencies'] as const)
+        .map((field) => pkg[field]?.['@cloudflare/sandbox'])
+        .filter((version): version is string => typeof version === 'string')
+        .map((version) => ({ file, version }));
+    });
+
     expect(
-      declared,
-      `@cloudflare/sandbox npm version must equal the Dockerfile.sandbox image tag ${imageTag}`
-    ).toBe(imageTag);
+      declarations.length,
+      'expected at least one @cloudflare/sandbox declaration; did the walk stop finding manifests?'
+    ).toBeGreaterThan(0);
+
+    for (const { file, version } of declarations) {
+      // An exact pin (no ^ or ~) is required: a range lets the npm client drift
+      // away from the digest-pinned image on any unrelated `pnpm install`.
+      expect(
+        version,
+        `${file}: @cloudflare/sandbox must be an exact version pin, not a semver range (found "${version}")`
+      ).toMatch(/^\d+\.\d+\.\d+$/);
+      expect(
+        version,
+        `${file}: @cloudflare/sandbox npm version must equal the Dockerfile.sandbox image tag ${imageTag}`
+      ).toBe(imageTag);
+    }
   });
 });
