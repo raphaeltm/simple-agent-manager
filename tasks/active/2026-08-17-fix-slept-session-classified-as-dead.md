@@ -166,38 +166,38 @@ Every finding below has a checklist item or an explicit deferral.
 
 ## Required tests (rule 02 — must be discriminating)
 
-- [ ] **Reproduces the incident**: workspace `status='deleted'` + snapshot
+- [x] **Reproduces the incident**: workspace `status='deleted'` + snapshot
       `sleep_status='sleeping'`, `sleeping_at` set, `expires_at` 7 days out
       → `conclusive === false`. Must FAIL on pre-fix code.
-- [ ] **Degraded snapshot still resumable** (the real `da90b7c4` shape:
+- [x] **Degraded snapshot still resumable** (the real `da90b7c4` shape:
       `status='degraded'`, `degradation='entries-skipped'`) → inconclusive.
-- [ ] **Discriminating control — user delete**: workspace `deleted`, **no** snapshot row
+- [x] **Discriminating control — user delete**: workspace `deleted`, **no** snapshot row
       → still `conclusive: true, reason:'workspace_deleted'`. Proves the fix does not
       blanket-disable terminalization.
-- [ ] **Bounded escape (rule 47)**: `expires_at` in the past → conclusive dead.
+- [x] **Bounded escape (rule 47)**: `expires_at` in the past → conclusive dead.
       Plus unparseable/absent expiry → conclusive dead (no immortal tasks).
-- [ ] **Already woke**: `sleeping_at` set but `sleep_status != 'sleeping'` → conclusive.
-- [ ] **`workspace_missing` unchanged**: row absent + snapshot present → conclusive
+- [x] **Already woke**: `sleeping_at` set but `sleep_status != 'sleeping'` → conclusive.
+- [x] **`workspace_missing` unchanged**: row absent + snapshot present → conclusive
       (matches `loadRecoveryContext`'s workspace-row requirement).
-- [ ] **Probe failure preserves**: `resumabilityProbeOutcome='error'` on a non-running
+- [x] **Probe failure preserves**: `resumabilityProbeOutcome='error'` on a non-running
       workspace → inconclusive.
-- [ ] **`not_run` back-compat**: existing signals shape → unchanged verdicts.
-- [ ] **Both adapters wired**: a vertical-slice test per adapter (rule 35) with realistic
+- [x] **`not_run` back-compat**: existing signals shape → unchanged verdicts.
+- [x] **Both adapters wired**: a vertical-slice test per adapter (rule 35) with realistic
       D1 rows proving the snapshot is actually queried and reaches the classifier.
-- [ ] **Existing pins updated**: `apps/api/tests/workers/scheduled-stuck-tasks.test.ts:160,198`
+- [x] **Existing pins updated**: `apps/api/tests/workers/scheduled-stuck-tasks.test.ts:160,198`
       and `apps/api/tests/unit/stuck-tasks.test.ts:1163,1207,1248` assert
       `workspace_deleted` failures — confirm they use no-snapshot fixtures (correct) or
       update them.
 
 ## Acceptance criteria
 
-- [ ] A slept, unexpired session is never terminalized as conclusive runtime death by any
+- [x] A slept, unexpired session is never terminalized as conclusive runtime death by any
       of the three paths (stuck-task cron, `processExpiredCleanups`, `checkWorkspaceIdleTimeouts`).
-- [ ] A user-deleted workspace still terminalizes exactly as before.
-- [ ] An expired snapshot terminalizes (bounded escape proven by test).
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green.
+- [x] A user-deleted workspace still terminalizes exactly as before.
+- [x] An expired snapshot terminalizes (bounded escape proven by test).
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green.
 - [ ] Staging deploy green + verified.
-- [ ] Post-mortem + process fix included in the PR.
+- [x] Post-mortem + process fix included in the PR.
 
 ## References
 
@@ -207,6 +207,52 @@ Every finding below has a checklist item or an explicit deferral.
 - `.claude/rules/47-control-loop-io-budget.md` — bounded escape path
 - `.claude/rules/44-dual-write-migration-enumerate-writers.md` — enumerate every adapter
 - `tasks/active/2026-08-16-session-activity-state-machine.md` — PR #1840 (ancestor)
+
+## Verification record (2026-08-17, landing run)
+
+Branch rebased onto `origin/main` (`1b89bf598`) — **clean, no conflicts**. PR #1840's
+ProjectData DO migration `029-session-activity-reconciliation` was neither renumbered nor
+altered.
+
+### Suite result
+
+`apps/api`: 93 passed across `tests/unit/services/task-runtime-liveness.test.ts`,
+`tests/unit/stuck-task-slept-session-liveness.test.ts`, and the pre-existing
+`tests/unit/stuck-tasks.test.ts` pins (which use no-snapshot fixtures and therefore still
+correctly assert `workspace_deleted` terminalization).
+
+### Discrimination proof (rule 58 requires verifying this once)
+
+Neutralizing the resumability branch in `classifyTaskRuntimeLiveness` reproduces the pre-fix
+verdicts. Result: **8 failed | 39 passed**. The 8 failures are exactly the incident and
+preserve assertions:
+
+- `does not terminalize a slept session with a live snapshot (incident 8bd22a42)`
+- `treats a degraded-but-restorable snapshot as resumable (incident da90b7c4)`
+- `withholds a death verdict when the resumability probe failed`
+- `does not declare a slept, restorable session conclusively dead`
+- `preserves a degraded snapshot the recovery path would still restore`
+- `applies the same protection to a stopped workspace`
+- `preserves a slept, restorable session instead of terminalizing it`
+- `withholds a death verdict when the snapshot read fails`
+
+All 39 controls stayed green — user-delete-no-snapshot, expired snapshot, already-woke,
+`workspace_missing`, cross-project, cross-workspace, and running-workspace. That proves the
+suite is not merely asserting "terminalization is disabled".
+
+### SQL scoping predicates (rule 28 / rule 58)
+
+Deleting `AND project_id = ?` from `loadSessionResumabilitySnapshot` turns
+`ignores a snapshot belonging to a different project` red — the predicate is proven
+discriminating against a real SQL engine (`better-sqlite3` + `createSqliteD1` +
+`createSchemaTables`, not a `.where()`-ignoring mock).
+
+**Nuance worth recording:** deleting `AND workspace_id = ?` does *not* redden the
+cross-workspace test, because `isSessionResumable()` also enforces
+`snapshot.workspaceId !== workspaceId` in memory. That is intentional defence-in-depth
+(rule 28), and `session_snapshots.chat_session_id` is uniquely indexed so only one row can
+match the session in the first place. Both layers are exercised; the in-memory guard is what
+the cross-workspace assertion discriminates on.
 
 ---
 
