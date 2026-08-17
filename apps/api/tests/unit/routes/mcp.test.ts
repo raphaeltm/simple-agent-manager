@@ -563,7 +563,8 @@ describe('MCP Routes', () => {
       expect(toolNames).toContain('list_deployment_routes');
       expect(toolNames).toContain('list_deployment_environment_config');
       expect(toolNames).toContain('set_deployment_environment_config');
-      expect(body.result.tools).toHaveLength(100);
+      expect(toolNames).toContain('wait_for_subtasks');
+      expect(body.result.tools).toHaveLength(101);
     });
 
     it('should include MUST call directive in get_instructions description', async () => {

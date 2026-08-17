@@ -186,6 +186,12 @@ type GatewayConfig struct {
 	// ActivityRereportInterval refreshes prompt activity while a prompt is active.
 	// Zero disables the periodic re-report loop.
 	ActivityRereportInterval time.Duration
+
+	// Bounds on a single Claude harness lifecycle notification. Zero falls back
+	// to the package defaults so existing constructions stay safe.
+	ClaudeHarnessLifecycleMaxBytes   int
+	ClaudeHarnessLifecycleMaxTasks   int
+	ClaudeHarnessLifecycleMaxIDBytes int
 	// TerminalActivityReportAttempts is the retry budget for terminal/error
 	// activity reports. Zero uses the legacy cheap retry policy.
 	TerminalActivityReportAttempts int

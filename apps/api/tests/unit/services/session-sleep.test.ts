@@ -295,6 +295,101 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.deferSessionSnapshotSleepBeforeClaim).toHaveBeenCalledTimes(1);
   });
 
+  // Regression: the sliding lease is refreshed by the VM agent's periodic
+  // re-report, so it alone can be renewed forever. An adapter faithfully
+  // re-reporting a STALE task set — the canonical case being an abandoned
+  // `run_in_background` dev server still listed in Claude's
+  // `background_tasks_changed` — would otherwise pin compute awake
+  // indefinitely, contradicting the canonical definition of idleness.
+  //
+  // DISCRIMINATING: this test fails without the progress-anchored absolute
+  // ceiling, because `runtimeWorkUpdatedAt` is deliberately kept fresh here.
+  it('allows sleep once the absolute ceiling elapses even while heartbeats stay fresh', async () => {
+    const now = new Date('2026-08-14T05:00:00.000Z');
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'idle',
+      activityAt: now.getTime() - 16 * 60 * 1000,
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'claude_sdk',
+      // Heartbeat is 5s old — the sliding lease is WIDE open.
+      runtimeWorkUpdatedAt: now.getTime() - 5_000,
+      // But no real lifecycle progress for 31 minutes: the work is abandoned.
+      runtimeWorkProgressAt: now.getTime() - 31 * 60 * 1000,
+    });
+    const { checkAutomaticSessionSleepEligibility } =
+      await import('../../../src/services/session-sleep');
+
+    await expect(
+      checkAutomaticSessionSleepEligibility(
+        buildEnv({
+          HARNESS_BACKGROUND_WORK_LEASE_MS: '120000',
+          HARNESS_BACKGROUND_WORK_MAX_DURATION_MS: '1800000',
+        }),
+        { workspaceId: 'workspace-1', userId: 'user-1' },
+        now
+      )
+    ).resolves.toEqual({ eligible: true });
+  });
+
+  // Control: work that is genuinely still progressing must NOT be reaped by the
+  // ceiling. Without this, an over-eager ceiling would silently kill live work.
+  it('keeps deferring while lifecycle progress is still advancing', async () => {
+    const now = new Date('2026-08-14T05:00:00.000Z');
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'idle',
+      activityAt: now.getTime() - 16 * 60 * 1000,
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 2,
+      runtimeWorkSource: 'claude_sdk',
+      runtimeWorkUpdatedAt: now.getTime() - 5_000,
+      // Real progress 1 minute ago — well inside the 30-minute ceiling.
+      runtimeWorkProgressAt: now.getTime() - 60_000,
+    });
+    const { checkAutomaticSessionSleepEligibility } =
+      await import('../../../src/services/session-sleep');
+
+    const result = await checkAutomaticSessionSleepEligibility(
+      buildEnv({
+        HARNESS_BACKGROUND_WORK_LEASE_MS: '120000',
+        HARNESS_BACKGROUND_WORK_MAX_DURATION_MS: '1800000',
+      }),
+      { workspaceId: 'workspace-1', userId: 'user-1' },
+      now
+    );
+
+    expect(result.eligible).toBe(false);
+    expect(result.reason).toBe('Harness-owned background work is active');
+  });
+
+  // The ceiling must never EXTEND the sliding lease — it can only shorten it.
+  it('never extends the sliding lease past its own expiry', async () => {
+    const now = new Date('2026-08-14T05:00:00.000Z');
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'idle',
+      activityAt: now.getTime() - 16 * 60 * 1000,
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'claude_sdk',
+      // Heartbeat is stale (lease expired) even though progress is recent.
+      runtimeWorkUpdatedAt: now.getTime() - 121_000,
+      runtimeWorkProgressAt: now.getTime() - 1_000,
+    });
+    const { checkAutomaticSessionSleepEligibility } =
+      await import('../../../src/services/session-sleep');
+
+    await expect(
+      checkAutomaticSessionSleepEligibility(
+        buildEnv({
+          HARNESS_BACKGROUND_WORK_LEASE_MS: '120000',
+          HARNESS_BACKGROUND_WORK_MAX_DURATION_MS: '1800000',
+        }),
+        { workspaceId: 'workspace-1', userId: 'user-1' },
+        now
+      )
+    ).resolves.toEqual({ eligible: true });
+  });
+
   it('allows sleep after a stale harness-work lease expires', async () => {
     const now = new Date('2026-08-14T05:00:00.000Z');
     mocks.getSessionState.mockResolvedValue({

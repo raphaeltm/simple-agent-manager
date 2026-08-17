@@ -10,7 +10,7 @@ describe('task recovery source migration', () => {
     try {
       sqlite.exec('CREATE TABLE tasks (id TEXT PRIMARY KEY, chat_session_id TEXT)');
       sqlite.exec(
-        readFileSync(join(process.cwd(), 'src/db/migrations/0112_task_recovery_source.sql'), 'utf8')
+        readFileSync(join(process.cwd(), 'src/db/migrations/0115_task_recovery_source.sql'), 'utf8')
       );
 
       const columns = sqlite.prepare(`PRAGMA table_info('tasks')`).all() as Array<{

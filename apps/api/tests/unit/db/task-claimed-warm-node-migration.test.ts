@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 describe('task claimed warm node migration', () => {
   it('adds a nullable node reference for crash-safe claim recovery', () => {
     const sql = readFileSync(
-      join(process.cwd(), 'src/db/migrations/0113_task_claimed_warm_node.sql'),
+      join(process.cwd(), 'src/db/migrations/0116_task_claimed_warm_node.sql'),
       'utf8'
     );
     expect(sql).toContain('ALTER TABLE tasks ADD COLUMN claimed_warm_node_id TEXT');

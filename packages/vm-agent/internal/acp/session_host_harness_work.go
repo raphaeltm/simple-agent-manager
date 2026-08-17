@@ -13,10 +13,33 @@ const (
 	claudeSDKMessageMethod     = "_claude/sdkMessage"
 	claudeHarnessWorkSource    = "claude_sdk"
 	claudeBackgroundTasksLevel = "background_tasks_changed"
-	maxClaudeLifecycleBytes    = 64 * 1024
-	maxClaudeLifecycleTasks    = 256
-	maxClaudeLifecycleIDBytes  = 256
+
+	// Fallback bounds used when SessionHostConfig leaves them unset (zero).
+	// Operators override via CLAUDE_HARNESS_LIFECYCLE_MAX_BYTES /
+	// _MAX_TASKS / _MAX_ID_BYTES; see internal/config.
+	maxClaudeLifecycleBytes   = 64 * 1024
+	maxClaudeLifecycleTasks   = 256
+	maxClaudeLifecycleIDBytes = 256
 )
+
+// harnessLifecycleLimits resolves the configured bounds, falling back to the
+// package defaults so a zero-valued config cannot disable bounding.
+func (h *SessionHost) harnessLifecycleLimits() (maxBytes int, maxTasks int, maxIDBytes int) {
+	maxBytes, maxTasks, maxIDBytes = maxClaudeLifecycleBytes, maxClaudeLifecycleTasks, maxClaudeLifecycleIDBytes
+	if h == nil {
+		return
+	}
+	if h.config.ClaudeHarnessLifecycleMaxBytes > 0 {
+		maxBytes = h.config.ClaudeHarnessLifecycleMaxBytes
+	}
+	if h.config.ClaudeHarnessLifecycleMaxTasks > 0 {
+		maxTasks = h.config.ClaudeHarnessLifecycleMaxTasks
+	}
+	if h.config.ClaudeHarnessLifecycleMaxIDBytes > 0 {
+		maxIDBytes = h.config.ClaudeHarnessLifecycleMaxIDBytes
+	}
+	return
+}
 
 type harnessWorkState string
 
@@ -85,15 +108,16 @@ func (c *sessionHostClient) HandleExtensionMethod(_ context.Context, method stri
 	if method != claudeSDKMessageMethod {
 		return nil, acpsdk.NewMethodNotFound(method)
 	}
-	if len(params) > maxClaudeLifecycleBytes {
-		return nil, fmt.Errorf("Claude SDK lifecycle notification exceeds %d bytes", maxClaudeLifecycleBytes)
+	maxBytes, maxTasks, maxIDBytes := c.host.harnessLifecycleLimits()
+	if len(params) > maxBytes {
+		return nil, fmt.Errorf("Claude SDK lifecycle notification exceeds %d bytes", maxBytes)
 	}
 
 	var notification claudeSDKMessageNotification
 	if err := json.Unmarshal(params, &notification); err != nil {
 		return nil, fmt.Errorf("decode Claude SDK lifecycle notification: %w", err)
 	}
-	if !validClaudeLifecycleShape(notification) {
+	if !validClaudeLifecycleShape(notification, maxTasks, maxIDBytes) {
 		return nil, fmt.Errorf("Claude SDK lifecycle notification exceeds bounded identifier/task limits")
 	}
 	if !c.host.matchesHarnessSession(notification.SessionID, notification.Message.SessionID) {
@@ -105,15 +129,15 @@ func (c *sessionHostClient) HandleExtensionMethod(_ context.Context, method stri
 	return nil, nil
 }
 
-func validClaudeLifecycleShape(notification claudeSDKMessageNotification) bool {
-	if len(notification.SessionID) > maxClaudeLifecycleIDBytes ||
-		len(notification.Message.SessionID) > maxClaudeLifecycleIDBytes ||
-		len(notification.Message.TaskID) > maxClaudeLifecycleIDBytes ||
-		len(notification.Message.Tasks) > maxClaudeLifecycleTasks {
+func validClaudeLifecycleShape(notification claudeSDKMessageNotification, maxTasks int, maxIDBytes int) bool {
+	if len(notification.SessionID) > maxIDBytes ||
+		len(notification.Message.SessionID) > maxIDBytes ||
+		len(notification.Message.TaskID) > maxIDBytes ||
+		len(notification.Message.Tasks) > maxTasks {
 		return false
 	}
 	for _, task := range notification.Message.Tasks {
-		if len(task.TaskID) > maxClaudeLifecycleIDBytes {
+		if len(task.TaskID) > maxIDBytes {
 			return false
 		}
 	}
@@ -247,7 +271,8 @@ func (h *SessionHost) addClaudeHarnessTaskLocked(taskID string) bool {
 	if _, exists := h.harnessTaskIDs[taskID]; exists {
 		return true
 	}
-	if len(h.harnessTaskIDs) >= maxClaudeLifecycleTasks {
+	_, maxTasks, _ := h.harnessLifecycleLimits()
+	if len(h.harnessTaskIDs) >= maxTasks {
 		return false
 	}
 	h.harnessTaskIDs[taskID] = struct{}{}
