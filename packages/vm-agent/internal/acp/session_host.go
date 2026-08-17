@@ -231,6 +231,12 @@ type SessionHost struct {
 	//
 	// Writers keep these in step with the mu-guarded fields via
 	// setSessionIDLocked/setStatusLocked. See .claude/rules/46.
+	//
+	// This constraint is transitive: NOTHING reachable from
+	// HandleExtensionMethod may call a helper that takes mu, however far down the
+	// call chain. reportActivity is the trap — it looks like a fire-and-forget
+	// reporter but takes mu.RLock to snapshot agentType/restartCount/statusErr.
+	// Use nudgeHarnessActivityReport from that goroutine instead.
 	mirrorSessionID atomic.Value // string
 	mirrorStatus    atomic.Value // SessionHostStatus
 	configOptions   []acpsdk.SessionConfigOption
@@ -303,6 +309,14 @@ type SessionHost struct {
 	harnessWork           harnessWorkStatus
 	harnessTaskIDs        map[string]struct{}
 	harnessActivityCancel context.CancelFunc
+	// harnessReportPending single-flights the activity report triggered by a
+	// harness lifecycle notification. The ACP notification goroutine must never
+	// call reportActivity inline: reportActivity takes mu.RLock for its
+	// agentType/restartCount/statusErr snapshot, which is exactly the block the
+	// lock-free mirrors above exist to avoid. Handing the report to a short-lived
+	// goroutine keeps the notification worker unblocked, and coalescing stops a
+	// chatty harness from spawning one retried HTTP POST per message.
+	harnessReportPending atomic.Bool
 	// activePromptID identifies the in-flight prompt associated with promptCancel.
 	// Protected by promptCancelMu.
 	activePromptID uint64

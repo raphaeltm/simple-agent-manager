@@ -124,7 +124,7 @@ func (c *sessionHostClient) HandleExtensionMethod(_ context.Context, method stri
 		return nil, nil
 	}
 	if c.host.applyClaudeHarnessLifecycle(notification.Message) {
-		c.host.reportActivity(c.host.activityForHarnessWork())
+		c.host.nudgeHarnessActivityReport()
 	}
 	return nil, nil
 }
@@ -332,6 +332,37 @@ func (h *SessionHost) stopHarnessWorkRereportLocked() {
 		h.harnessActivityCancel()
 		h.harnessActivityCancel = nil
 	}
+}
+
+// nudgeHarnessActivityReport queues one activity report for the harness
+// lifecycle change that just landed.
+//
+// It MUST be used instead of calling reportActivity inline from
+// HandleExtensionMethod. reportActivity takes h.mu.RLock to snapshot
+// agentType/restartCount/statusErr, and the ACP notification goroutine must
+// never block on h.mu: the handshake (startSelectedAgent -> applySessionSettings
+// -> SetSessionMode/SetSessionConfigOption) holds h.mu for write while its RPC
+// blocks in the SDK's waitNotificationsUpTo, which is waiting for this very
+// notification worker. Because setSessionIDLocked populates the session mirror
+// *before* applySessionSettings runs, a harness re-announcement arriving in that
+// window passes matchesHarnessSession and would deadlock until the settings
+// timeout fires — stalling the handshake and every later notification
+// (including session/update, i.e. the live stream) behind it.
+//
+// The atomic single-flight also coalesces bursts: applyClaudeHarnessLifecycle
+// returns true for any recognized message, including repeat task_progress that
+// mutates nothing, and each report otherwise spawns its own retried HTTP POST.
+// Clearing the flag before reporting is deliberate — a nudge that races the
+// in-flight report queues a trailing one, so the control plane always converges
+// on the latest state.
+func (h *SessionHost) nudgeHarnessActivityReport() {
+	if !h.harnessReportPending.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		h.harnessReportPending.Store(false)
+		h.reportActivity(h.activityForHarnessWork())
+	}()
 }
 
 // activityForHarnessWork is reachable from the ACP notification goroutine, so it
