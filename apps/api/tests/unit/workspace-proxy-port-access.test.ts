@@ -16,7 +16,24 @@ const mockGetSession = vi.fn();
 const mockVerifyTerminalToken = vi.fn();
 const mockSignTerminalToken = vi.fn();
 const mockVerifyPortAccessToken = vi.fn();
-let workspaceResult: { nodeId: string; status: string; userId?: string; portsPublicEnabled?: boolean } | null = null;
+let workspaceResult: {
+  nodeId: string;
+  status: string;
+  userId?: string;
+  portsPublicEnabled?: boolean;
+} | null = null;
+let terminalSessionResult: {
+  sessionId: string;
+  userId: string;
+  expiresAt: Date;
+  userRole: string;
+  userStatus: string;
+} | null = null;
+let platformSettingResult: {
+  value: string;
+  updatedAt: string | null;
+  updatedBy: string | null;
+} | null = null;
 
 vi.mock('../../src/auth', () => ({
   createAuth: vi.fn(() => ({
@@ -32,9 +49,13 @@ vi.mock('../../src/services/jwt', () => ({
   verifyPortAccessToken: mockVerifyPortAccessToken,
 }));
 
-vi.mock('cloudflare:workers', () => ({
-  DurableObject: class {},
-}), { virtual: true });
+vi.mock(
+  'cloudflare:workers',
+  () => ({
+    DurableObject: class {},
+  }),
+  { virtual: true }
+);
 
 vi.mock('@cloudflare/sandbox', () => ({
   Sandbox: class {},
@@ -47,13 +68,20 @@ vi.mock('@cloudflare/containers', () => ({
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn(() => ({
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          get: vi.fn(async () => workspaceResult),
-        })),
-      })),
-    })),
+    select: vi.fn((selection?: Record<string, unknown>) => {
+      const getResult = async () => {
+        if (selection && 'sessionId' in selection) return terminalSessionResult;
+        if (selection && 'value' in selection) return platformSettingResult;
+        return workspaceResult;
+      };
+      const chain = {
+        from: vi.fn(() => chain),
+        innerJoin: vi.fn(() => chain),
+        where: vi.fn(() => chain),
+        get: vi.fn(getResult),
+      };
+      return chain;
+    }),
   })),
 }));
 
@@ -73,7 +101,20 @@ const env = {
 describe('workspace proxy port-access auth', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    workspaceResult = { nodeId: 'node-1', status: 'running', userId: 'user-1', portsPublicEnabled: false };
+    workspaceResult = {
+      nodeId: 'node-1',
+      status: 'running',
+      userId: 'user-1',
+      portsPublicEnabled: false,
+    };
+    terminalSessionResult = {
+      sessionId: 'session-1',
+      userId: 'user-1',
+      expiresAt: new Date(Date.now() + 60_000),
+      userRole: 'user',
+      userStatus: 'active',
+    };
+    platformSettingResult = null;
     mockGetSession.mockResolvedValue(null); // No session cookie on port subdomains
     mockVerifyTerminalToken.mockRejectedValue(new Error('Invalid token'));
     mockSignTerminalToken.mockResolvedValue({
@@ -82,7 +123,7 @@ describe('workspace proxy port-access auth', () => {
     });
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () => new Response('proxied', { status: 200 })),
+      vi.fn(async () => new Response('proxied', { status: 200 }))
     );
   });
 
@@ -94,10 +135,8 @@ describe('workspace proxy port-access auth', () => {
     });
 
     const response = await worker.default.fetch(
-      new Request(
-        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/?port_token=valid-jwt`,
-      ),
-      env,
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/?port_token=valid-jwt`),
+      env
     );
 
     expect(response.status).toBe(302);
@@ -122,7 +161,7 @@ describe('workspace proxy port-access auth', () => {
       new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`, {
         headers: { cookie: 'sam_port_access=valid-jwt' },
       }),
-      env,
+      env
     );
 
     // Should proxy through (not 302, not 401)
@@ -141,7 +180,7 @@ describe('workspace proxy port-access auth', () => {
       new Request(`https://ws-${WORKSPACE_ID}--8080.workspaces.example.com/`, {
         headers: { cookie: 'sam_port_access=wrong-port-cookie-jwt' },
       }),
-      env,
+      env
     );
 
     // Cookie port (3000) !== subdomain port (8080) → HTML 401
@@ -160,9 +199,9 @@ describe('workspace proxy port-access auth', () => {
 
     const response = await worker.default.fetch(
       new Request(
-        `https://ws-${WORKSPACE_ID}--8080.workspaces.example.com/?port_token=wrong-port-jwt`,
+        `https://ws-${WORKSPACE_ID}--8080.workspaces.example.com/?port_token=wrong-port-jwt`
       ),
-      env,
+      env
     );
 
     // Port mismatch: token.port (3000) !== targetPort (8080) → HTML 401
@@ -182,9 +221,9 @@ describe('workspace proxy port-access auth', () => {
 
     const response = await worker.default.fetch(
       new Request(
-        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/?port_token=wrong-ws-jwt`,
+        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/?port_token=wrong-ws-jwt`
       ),
-      env,
+      env
     );
 
     // Workspace mismatch → HTML 401
@@ -198,9 +237,9 @@ describe('workspace proxy port-access auth', () => {
 
     const response = await worker.default.fetch(
       new Request(
-        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/?port_token=expired-jwt`,
+        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/?port_token=expired-jwt`
       ),
-      env,
+      env
     );
 
     expect(response.status).toBe(401);
@@ -214,10 +253,8 @@ describe('workspace proxy port-access auth', () => {
 
   it('returns HTML error for port request with no auth at all', async () => {
     const response = await worker.default.fetch(
-      new Request(
-        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`,
-      ),
-      env,
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`),
+      env
     );
 
     expect(response.status).toBe(401);
@@ -227,13 +264,16 @@ describe('workspace proxy port-access auth', () => {
   });
 
   it('proxies a port request without browser auth when workspace ports are public', async () => {
-    workspaceResult = { nodeId: 'node-1', status: 'running', userId: 'user-1', portsPublicEnabled: true };
+    workspaceResult = {
+      nodeId: 'node-1',
+      status: 'running',
+      userId: 'user-1',
+      portsPublicEnabled: true,
+    };
 
     const response = await worker.default.fetch(
-      new Request(
-        `https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`,
-      ),
-      env,
+      new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`),
+      env
     );
 
     expect(response.status).toBe(200);
@@ -252,22 +292,23 @@ describe('workspace proxy port-access auth', () => {
     // Simulate container response with a Set-Cookie header
     vi.stubGlobal(
       'fetch',
-      vi.fn(async () =>
-        new Response('container page', {
-          status: 200,
-          headers: {
-            'set-cookie': 'malicious_cookie=evil; Path=/',
-            'content-type': 'text/html',
-          },
-        }),
-      ),
+      vi.fn(
+        async () =>
+          new Response('container page', {
+            status: 200,
+            headers: {
+              'set-cookie': 'malicious_cookie=evil; Path=/',
+              'content-type': 'text/html',
+            },
+          })
+      )
     );
 
     const response = await worker.default.fetch(
       new Request(`https://ws-${WORKSPACE_ID}--3000.workspaces.example.com/`, {
         headers: { cookie: 'sam_port_access=valid-jwt' },
       }),
-      env,
+      env
     );
 
     expect(response.status).toBe(200);
@@ -281,13 +322,12 @@ describe('workspace proxy port-access auth', () => {
     mockVerifyTerminalToken.mockResolvedValue({
       workspace: WORKSPACE_ID,
       subject: 'user-1',
+      sessionToken: 'token-session-1',
     });
 
     const response = await worker.default.fetch(
-      new Request(
-        `https://ws-${WORKSPACE_ID}.workspaces.example.com/terminal?token=terminal-jwt`,
-      ),
-      env,
+      new Request(`https://ws-${WORKSPACE_ID}.workspaces.example.com/terminal?token=terminal-jwt`),
+      env
     );
 
     // Non-port workspace request should still work with terminal token

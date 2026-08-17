@@ -2773,6 +2773,8 @@ export const deploymentReleases = sqliteTable(
     manifest: text('manifest').notNull(),
     version: integer('version').notNull(),
     status: text('status').notNull().default('created'),
+    /** Updated whenever the control plane changes release.status. Added in migration 0112. */
+    statusUpdatedAt: text('status_updated_at'),
     // Discriminator for how the release was produced (migration 0073).
     // NULL / 'build-on-node' = manifest is a DeploymentManifest.
     // 'compose-publish' = manifest is a captured `docker compose publish`
@@ -2792,6 +2794,10 @@ export const deploymentReleases = sqliteTable(
       table.version
     ),
     sourceIdx: index('idx_deployment_releases_source').on(table.source),
+    statusUpdatedAtIdx: index('idx_deployment_releases_status_updated_at').on(
+      table.status,
+      table.statusUpdatedAt
+    ),
   })
 );
 

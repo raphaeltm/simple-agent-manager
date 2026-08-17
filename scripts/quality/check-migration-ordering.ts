@@ -51,6 +51,19 @@ const LEGACY_ALLOWED_DUPLICATE_FILES = new Map<string, Map<string, Set<string>>>
         new Set(['0105_bootstrap_token_consumes.sql', '0105_debug_diagnosis_canonical_status.sql']),
       ],
       ['0106', new Set(['0106_diagnostic_incidents.sql', '0106_node_agent_version.sql'])],
+      // Same situation: 0112_deployment_release_status_updated_at.sql was applied to
+      // staging on 2026-08-16 (d1_migrations id 134) from PR #1837's branch, before
+      // 0112_session_snapshot_direct_upload_authorization.sql landed on main under the
+      // same prefix. Staging's ledger records the exact applied filename, so renumbering
+      // it would replay ALTER TABLE deployment_releases ADD COLUMN status_updated_at
+      // against a table that already has the column and abort the migration step.
+      [
+        '0112',
+        new Set([
+          '0112_session_snapshot_direct_upload_authorization.sql',
+          '0112_deployment_release_status_updated_at.sql',
+        ]),
+      ],
     ]),
   ],
 ]);

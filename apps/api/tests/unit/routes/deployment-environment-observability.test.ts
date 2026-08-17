@@ -467,7 +467,10 @@ describe('deployment environment observability routes', () => {
     );
     expect(updateCalls).toContainEqual({
       table: expect.objectContaining({ id: 'deploymentReleases.id' }),
-      values: { status: 'created' },
+      values: expect.objectContaining({
+        status: 'created',
+        statusUpdatedAt: expect.any(String),
+      }),
     });
     expect(body.lifecycle).toMatchObject({
       started: true,
@@ -785,7 +788,10 @@ describe('deployment environment observability routes', () => {
       expect.arrayContaining([
         {
           table: expect.objectContaining({ id: 'deploymentReleases.id' }),
-          values: { status: 'created' },
+          values: expect.objectContaining({
+            status: 'created',
+            statusUpdatedAt: expect.any(String),
+          }),
         },
         {
           table: expect.objectContaining({ id: 'deploymentEnvironments.id' }),
@@ -896,7 +902,10 @@ describe('deployment environment observability routes', () => {
         },
         {
           table: expect.objectContaining({ id: 'deploymentReleases.id' }),
-          values: { status: 'failed' },
+          values: expect.objectContaining({
+            status: 'failed',
+            statusUpdatedAt: expect.any(String),
+          }),
         },
       ])
     );

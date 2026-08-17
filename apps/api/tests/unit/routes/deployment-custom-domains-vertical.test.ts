@@ -141,6 +141,9 @@ const mockVerifyCallbackToken = vi.fn();
 const mockMintProjectRegistryCredential = vi.fn();
 const mockLoadResolvedSecrets = vi.fn();
 const mockLoadDeploymentInterpolationEnv = vi.fn();
+const mockD1Run = vi.fn();
+const mockD1Bind = vi.fn(() => ({ run: mockD1Run }));
+const mockD1Prepare = vi.fn(() => ({ bind: mockD1Bind }));
 
 let envRows: EnvironmentRow[] = [];
 let projectRows: ProjectRow[] = [];
@@ -430,7 +433,7 @@ function createApp() {
 
 function env(): Env {
   return {
-    DATABASE: {} as D1Database,
+    DATABASE: { prepare: mockD1Prepare } as unknown as D1Database,
     BASE_DOMAIN: 'sammy.party',
     CF_API_TOKEN: 'cf-token',
     CF_ZONE_ID: 'zone-1',
@@ -488,6 +491,10 @@ describe('deployment custom domain attach verify apply flow', () => {
     });
     mockLoadResolvedSecrets.mockResolvedValue({});
     mockLoadDeploymentInterpolationEnv.mockResolvedValue({ values: {} });
+    mockD1Prepare.mockClear();
+    mockD1Bind.mockClear();
+    mockD1Run.mockReset();
+    mockD1Run.mockResolvedValue({ meta: { changes: 1 } });
     projectRows = [{ id: 'proj-1', userId: 'user-1' }];
     nodeRows = [{ id: 'node-deploy-1', userId: 'user-1', ipAddress: '203.0.113.10' }];
     envRows = [

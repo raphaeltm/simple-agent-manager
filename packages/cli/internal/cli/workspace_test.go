@@ -3,12 +3,15 @@ package cli
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 )
@@ -754,6 +757,144 @@ func TestAcceptConnectionsProxiesWithToken(t *testing.T) {
 	}
 
 	assertTokenForwardedRequest(t, receiveRemoteRequest(t, remoteRequests))
+}
+
+func TestAcceptConnectionsFailsClosedWhenTokenAcquisitionFails(t *testing.T) {
+	const secret = "secret-forward-token-value"
+	var tokenCalls atomic.Int32
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		tokenCalls.Add(1)
+		return nil, fmt.Errorf("token service unavailable: %s", secret)
+	})
+
+	var upstreamCalls atomic.Int32
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		w.WriteHeader(http.StatusTeapot)
+	}))
+	defer remote.Close()
+	client := NewAPIClient(CLIConfig{APIURL: remote.URL, SessionCookie: "test"}, doer)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var stderr strings.Builder
+	go acceptConnections(ctx, Runtime{Stderr: &stderr}, client, acceptConnectionsConfig{
+		workspaceID: "ws-test",
+		remotePort:  3000,
+		localHost:   "127.0.0.1",
+		localPort:   port,
+		listener:    ln,
+		remoteURL:   remote.URL + "/api/workspaces/ws-test/local-forward/3000",
+	})
+	time.Sleep(50 * time.Millisecond)
+
+	req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/test-path", port), nil)
+	if err != nil {
+		t.Fatalf("failed to build request: %v", err)
+	}
+	req.Header.Set("X-SAM-Forward-Token", "spoofed-browser-token")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("failed to connect to proxy: %v", err)
+	}
+	body, err := io.ReadAll(resp.Body)
+	resp.Body.Close()
+	if err != nil {
+		t.Fatalf("failed to read response body: %v", err)
+	}
+
+	if resp.StatusCode != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d; body=%q", resp.StatusCode, http.StatusBadGateway, string(body))
+	}
+	if !strings.Contains(string(body), "local forward token unavailable") {
+		t.Fatalf("response body should explain local token failure generically, got %q", string(body))
+	}
+	if strings.Contains(string(body), secret) || strings.Contains(string(body), "spoofed-browser-token") {
+		t.Fatalf("response body leaked secret material: %q", string(body))
+	}
+	if strings.Contains(stderr.String(), secret) || strings.Contains(stderr.String(), "spoofed-browser-token") {
+		t.Fatalf("stderr leaked secret material: %q", stderr.String())
+	}
+	if upstreamCalls.Load() != 0 {
+		t.Fatalf("upstream was contacted %d time(s) despite token acquisition failure", upstreamCalls.Load())
+	}
+	if tokenCalls.Load() != 1 {
+		t.Fatalf("token endpoint calls = %d, want 1", tokenCalls.Load())
+	}
+}
+
+func TestAcceptConnectionsConcurrentTokenFailuresNeverContactUpstream(t *testing.T) {
+	var tokenCalls atomic.Int32
+	doer := roundTripFunc(func(req *http.Request) (*http.Response, error) {
+		tokenCalls.Add(1)
+		return nil, errors.New("token service unavailable")
+	})
+
+	var upstreamCalls atomic.Int32
+	remote := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer remote.Close()
+	client := NewAPIClient(CLIConfig{APIURL: remote.URL, SessionCookie: "test"}, doer)
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	port := ln.Addr().(*net.TCPAddr).Port
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go acceptConnections(ctx, Runtime{Stderr: io.Discard}, client, acceptConnectionsConfig{
+		workspaceID: "ws-test",
+		remotePort:  3000,
+		localHost:   "127.0.0.1",
+		localPort:   port,
+		listener:    ln,
+		remoteURL:   remote.URL + "/api/workspaces/ws-test/local-forward/3000",
+	})
+	time.Sleep(50 * time.Millisecond)
+
+	const requests = 12
+	var wg sync.WaitGroup
+	errs := make(chan error, requests)
+	for i := 0; i < requests; i++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/concurrent", port))
+			if err != nil {
+				errs <- err
+				return
+			}
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+			if resp.StatusCode != http.StatusBadGateway {
+				errs <- fmt.Errorf("status = %d, want %d", resp.StatusCode, http.StatusBadGateway)
+			}
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	for err := range errs {
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if upstreamCalls.Load() != 0 {
+		t.Fatalf("upstream was contacted %d time(s) despite token acquisition failures", upstreamCalls.Load())
+	}
+	if tokenCalls.Load() != requests {
+		t.Fatalf("token endpoint calls = %d, want %d", tokenCalls.Load(), requests)
+	}
 }
 
 func TestAcceptConnectionsPreservesEscapedPathSegments(t *testing.T) {

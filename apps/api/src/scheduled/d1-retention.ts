@@ -4,12 +4,16 @@ import { parsePositiveInt } from '../lib/route-helpers';
 import * as projectDataService from '../services/project-data';
 import { DEFAULT_SESSION_SLEEP_CLAIM_LEASE_MS } from '../services/session-snapshots';
 import { destroyVmAgentContainer } from '../services/vm-agent-container';
+import { COMPOSE_IMAGE_ARTIFACT_PREFIX } from './compose-image-artifact-cleanup';
 
 export const DEFAULT_DEPLOYMENT_RELEASE_RETENTION_COUNT = 3;
 export const DEFAULT_DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE = 250;
 export const DEFAULT_DEPLOYMENT_RELEASE_RETENTION_INTERVAL_HOURS = 24;
 export const DEFAULT_DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY =
   'cleanup:deployment-releases:last-run';
+export const DEFAULT_DEPLOYMENT_RELEASE_RECONCILIATION_BATCH_SIZE = 50;
+export const DEFAULT_DEPLOYMENT_RELEASE_RECONCILIATION_STALE_HOURS = 168;
+export const DEFAULT_DEPLOYMENT_RELEASE_RECONCILIATION_ACTIVITY_GRACE_HOURS = 6;
 
 export const DEFAULT_SESSION_SNAPSHOT_PURGE_BATCH_SIZE = 250;
 
@@ -35,6 +39,11 @@ interface IntervalGateOptions<T extends ScheduledSweepResult> {
 export interface DeploymentReleaseRetentionStats extends ScheduledSweepResult {
   retentionCount: number;
   batchSize: number;
+  reconciliationEnabled: boolean;
+  reconciliationBatchSize: number;
+  reconciliationStaleHours: number;
+  reconciliationActivityGraceHours: number;
+  reconciledStaleReleases: number;
   deletedReleases: number;
 }
 
@@ -96,6 +105,31 @@ function deploymentReleaseRetentionIntervalHours(env: Env): number {
   );
 }
 
+function deploymentReleaseReconciliationEnabled(env: Env): boolean {
+  return isEnabled(env.DEPLOYMENT_RELEASE_RECONCILIATION_ENABLED);
+}
+
+function deploymentReleaseReconciliationBatchSize(env: Env): number {
+  return parsePositiveInt(
+    env.DEPLOYMENT_RELEASE_RECONCILIATION_BATCH_SIZE,
+    DEFAULT_DEPLOYMENT_RELEASE_RECONCILIATION_BATCH_SIZE
+  );
+}
+
+function deploymentReleaseReconciliationStaleHours(env: Env): number {
+  return parsePositiveInt(
+    env.DEPLOYMENT_RELEASE_RECONCILIATION_STALE_HOURS,
+    DEFAULT_DEPLOYMENT_RELEASE_RECONCILIATION_STALE_HOURS
+  );
+}
+
+function deploymentReleaseReconciliationActivityGraceHours(env: Env): number {
+  return parsePositiveInt(
+    env.DEPLOYMENT_RELEASE_RECONCILIATION_ACTIVITY_GRACE_HOURS,
+    DEFAULT_DEPLOYMENT_RELEASE_RECONCILIATION_ACTIVITY_GRACE_HOURS
+  );
+}
+
 function emptyDeploymentReleaseRetentionStats(
   env: Env,
   overrides: Partial<DeploymentReleaseRetentionStats> = {}
@@ -106,8 +140,126 @@ function emptyDeploymentReleaseRetentionStats(
     skipReason: null,
     retentionCount: deploymentReleaseRetentionCount(env),
     batchSize: deploymentReleaseRetentionBatchSize(env),
+    reconciliationEnabled: deploymentReleaseReconciliationEnabled(env),
+    reconciliationBatchSize: deploymentReleaseReconciliationBatchSize(env),
+    reconciliationStaleHours: deploymentReleaseReconciliationStaleHours(env),
+    reconciliationActivityGraceHours: deploymentReleaseReconciliationActivityGraceHours(env),
+    reconciledStaleReleases: 0,
     deletedReleases: 0,
     ...overrides,
+  };
+}
+
+export interface StaleDeploymentReleaseReconciliationStats {
+  enabled: boolean;
+  batchSize: number;
+  staleHours: number;
+  activityGraceHours: number;
+  reconciledReleases: number;
+}
+
+function emptyStaleDeploymentReleaseReconciliationStats(
+  env: Env,
+  overrides: Partial<StaleDeploymentReleaseReconciliationStats> = {}
+): StaleDeploymentReleaseReconciliationStats {
+  return {
+    enabled: deploymentReleaseReconciliationEnabled(env),
+    batchSize: deploymentReleaseReconciliationBatchSize(env),
+    staleHours: deploymentReleaseReconciliationStaleHours(env),
+    activityGraceHours: deploymentReleaseReconciliationActivityGraceHours(env),
+    reconciledReleases: 0,
+    ...overrides,
+  };
+}
+
+function hoursBefore(now: Date, hours: number): string {
+  return new Date(now.getTime() - hours * 60 * 60 * 1000).toISOString();
+}
+
+/**
+ * Terminalize stale nonterminal compose releases whose R2 image artifacts are
+ * otherwise retained forever by manifest references.
+ *
+ * Race-safety depends on D1-only evidence:
+ * - the release came from the compose-publish path;
+ * - status activity is older than the stale threshold;
+ * - the authenticated deployment node has observed a stable non-applying state
+ *   after this release was created;
+ * - the release is not the environment's observed applied seq;
+ * - no recent release fetch/apply event exists inside the activity lease;
+ * - the manifest is valid JSON and actually references compose image artifacts.
+ *
+ * Unknown statuses, malformed/future timestamps, malformed manifests, and
+ * missing/ambiguous observed state fail closed by not matching the update.
+ */
+export async function runStaleDeploymentReleaseReconciliation(
+  env: Env,
+  now: Date = new Date()
+): Promise<StaleDeploymentReleaseReconciliationStats> {
+  const stats = emptyStaleDeploymentReleaseReconciliationStats(env);
+  if (!stats.enabled) {
+    return stats;
+  }
+
+  const staleBefore = hoursBefore(now, stats.staleHours);
+  const activeAfter = hoursBefore(now, stats.activityGraceHours);
+  const nowIso = now.toISOString();
+
+  const result = (await env.DATABASE.prepare(
+    `UPDATE deployment_releases
+     SET status = 'failed',
+         status_updated_at = ?
+     WHERE id IN (
+       SELECT release.id
+       FROM deployment_releases AS release
+       INNER JOIN deployment_environments AS environment
+         ON environment.id = release.environment_id
+       WHERE release.status IN ('created', 'applying')
+         AND release.source = 'compose-publish'
+         AND release.manifest LIKE ?
+         AND json_valid(release.manifest) = 1
+         AND datetime(coalesce(release.status_updated_at, release.created_at)) IS NOT NULL
+         AND datetime(coalesce(release.status_updated_at, release.created_at)) <= datetime(?)
+         AND datetime(release.created_at) IS NOT NULL
+         AND datetime(environment.observed_at) IS NOT NULL
+         AND datetime(environment.observed_at) >= datetime(release.created_at)
+         AND datetime(environment.observed_at) <= datetime(?)
+         AND environment.observed_status IN ('applied', 'failed', 'failed-initial', 'reverted')
+         AND (
+           environment.observed_applied_seq IS NULL
+           OR release.version <> environment.observed_applied_seq
+         )
+         AND NOT EXISTS (
+           SELECT 1
+           FROM deployment_release_events AS event
+           WHERE (
+               event.release_id = release.id
+               OR (
+                 event.release_id IS NULL
+                 AND event.environment_id = release.environment_id
+                 AND event.release_version = release.version
+               )
+             )
+             AND datetime(event.created_at) IS NOT NULL
+             AND datetime(event.created_at) > datetime(?)
+         )
+       ORDER BY release.environment_id ASC, release.version ASC, release.id ASC
+       LIMIT ?
+     )`
+  )
+    .bind(
+      nowIso,
+      `%${COMPOSE_IMAGE_ARTIFACT_PREFIX}%`,
+      staleBefore,
+      nowIso,
+      activeAfter,
+      stats.batchSize
+    )
+    .run()) as D1MutationResult;
+
+  return {
+    ...stats,
+    reconciledReleases: mutationChanges(result),
   };
 }
 
@@ -120,7 +272,8 @@ function emptyDeploymentReleaseRetentionStats(
  * closed. Successful candidates leave the set permanently (rule 47).
  */
 export async function runDeploymentReleaseRetention(
-  env: Env
+  env: Env,
+  now: Date = new Date()
 ): Promise<DeploymentReleaseRetentionStats> {
   if (!isEnabled(env.DEPLOYMENT_RELEASE_RETENTION_ENABLED)) {
     return emptyDeploymentReleaseRetentionStats(env, {
@@ -132,6 +285,7 @@ export async function runDeploymentReleaseRetention(
 
   const retentionCount = deploymentReleaseRetentionCount(env);
   const batchSize = deploymentReleaseRetentionBatchSize(env);
+  const reconciliation = await runStaleDeploymentReleaseReconciliation(env, now);
   const result = (await env.DATABASE.prepare(
     `DELETE FROM deployment_releases
      WHERE id IN (
@@ -160,6 +314,11 @@ export async function runDeploymentReleaseRetention(
   return emptyDeploymentReleaseRetentionStats(env, {
     retentionCount,
     batchSize,
+    reconciliationEnabled: reconciliation.enabled,
+    reconciliationBatchSize: reconciliation.batchSize,
+    reconciliationStaleHours: reconciliation.staleHours,
+    reconciliationActivityGraceHours: reconciliation.activityGraceHours,
+    reconciledStaleReleases: reconciliation.reconciledReleases,
     deletedReleases: mutationChanges(result),
   });
 }
@@ -185,7 +344,7 @@ export async function runScheduledDeploymentReleaseRetention(
       DEFAULT_DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY
     ),
     emptyResult: (overrides) => emptyDeploymentReleaseRetentionStats(env, overrides),
-    run: () => runDeploymentReleaseRetention(env),
+    run: () => runDeploymentReleaseRetention(env, now),
   });
 }
 

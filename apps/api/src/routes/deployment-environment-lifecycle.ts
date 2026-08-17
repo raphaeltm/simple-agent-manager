@@ -151,9 +151,10 @@ async function markEnvironmentStartFailed(
     .set(updates)
     .where(eq(schema.deploymentEnvironments.id, envId));
   if (opts.latestReleaseId) {
+    const statusUpdatedAt = new Date().toISOString();
     await db
       .update(schema.deploymentReleases)
-      .set({ status: 'failed' })
+      .set({ status: 'failed', statusUpdatedAt })
       .where(eq(schema.deploymentReleases.id, opts.latestReleaseId));
   }
 }
@@ -535,7 +536,7 @@ async function markEnvironmentStarting(
     .where(eq(schema.deploymentEnvironments.id, envId));
   await db
     .update(schema.deploymentReleases)
-    .set({ status: 'created' })
+    .set({ status: 'created', statusUpdatedAt: new Date().toISOString() })
     .where(eq(schema.deploymentReleases.id, latestReleaseId));
 }
 

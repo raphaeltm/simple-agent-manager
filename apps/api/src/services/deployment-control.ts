@@ -208,6 +208,7 @@ export async function reconcileDeploymentReleaseStatuses(
   environmentId: string,
   deployment: DeploymentHeartbeatState
 ): Promise<void> {
+  const statusUpdatedAt = new Date().toISOString();
   const appliedSeq = normalizeAppliedSeq(deployment.appliedSeq) ?? 0;
   const status = normalizeStatus(deployment.status);
   if (!status) return;
@@ -228,7 +229,7 @@ export async function reconcileDeploymentReleaseStatuses(
   if (appliedSeq > 0 && APPLY_SUCCESS_STATUSES.has(status)) {
     await db
       .update(schema.deploymentReleases)
-      .set({ status: 'applied' })
+      .set({ status: 'applied', statusUpdatedAt })
       .where(
         and(
           eq(schema.deploymentReleases.environmentId, environmentId),
@@ -242,7 +243,7 @@ export async function reconcileDeploymentReleaseStatuses(
   if (status === 'applying' && latest.version > appliedSeq) {
     await db
       .update(schema.deploymentReleases)
-      .set({ status: 'applying' })
+      .set({ status: 'applying', statusUpdatedAt })
       .where(eq(schema.deploymentReleases.id, latest.id));
     return;
   }
@@ -250,7 +251,7 @@ export async function reconcileDeploymentReleaseStatuses(
   if (status === 'applied' && latest.version === appliedSeq && latest.status !== 'applied') {
     await db
       .update(schema.deploymentReleases)
-      .set({ status: 'applied' })
+      .set({ status: 'applied', statusUpdatedAt })
       .where(eq(schema.deploymentReleases.id, latest.id));
     return;
   }
@@ -275,7 +276,7 @@ export async function reconcileDeploymentReleaseStatuses(
 
     await db
       .update(schema.deploymentReleases)
-      .set({ status: 'failed' })
+      .set({ status: 'failed', statusUpdatedAt })
       .where(eq(schema.deploymentReleases.id, failedRelease.id));
   }
 }

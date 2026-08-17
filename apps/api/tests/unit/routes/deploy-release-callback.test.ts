@@ -19,6 +19,9 @@ const mockBuildVolumeMountDescriptors = vi.fn().mockResolvedValue([]);
 const mockOrderBy = vi.fn().mockResolvedValue([]);
 const mockUpdateSet = vi.fn();
 const mockUpdateWhere = vi.fn();
+const mockD1Run = vi.fn();
+const mockD1Bind = vi.fn(() => ({ run: mockD1Run }));
+const mockD1Prepare = vi.fn(() => ({ bind: mockD1Bind }));
 let customDomainRows: Array<{
   hostname: string;
   service: string;
@@ -179,7 +182,7 @@ function manifestWithSecret() {
 
 function env(): Env {
   return {
-    DATABASE: {} as D1Database,
+    DATABASE: { prepare: mockD1Prepare } as unknown as D1Database,
     BASE_DOMAIN: 'sammy.party',
     CF_API_TOKEN: 'cf-token',
     CF_ZONE_ID: 'zone-1',
@@ -284,6 +287,10 @@ describe('deploy release callback route', () => {
     mockUpdateSet.mockReset();
     mockUpdateWhere.mockReset();
     mockUpdateWhere.mockResolvedValue(undefined);
+    mockD1Prepare.mockClear();
+    mockD1Bind.mockClear();
+    mockD1Run.mockReset();
+    mockD1Run.mockResolvedValue({ meta: { changes: 1 } });
     mockVerifyCallbackToken.mockClear();
     mockSignDeployPayload.mockClear();
     mockSignRouteConfigPayload.mockClear();
@@ -327,8 +334,11 @@ describe('deploy release callback route', () => {
     expect(mockVerifyCallbackToken).toHaveBeenCalledWith('callback-token', expect.anything(), {
       expectedScope: 'node',
     });
-    expect(mockUpdateSet).toHaveBeenCalledWith({ status: 'applying' });
-    expect(mockUpdateWhere).toHaveBeenCalledTimes(1);
+    expect(mockD1Prepare).toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE deployment_releases')
+    );
+    expect(mockD1Bind).toHaveBeenCalledWith(expect.any(String), 'rel-1');
+    expect(mockD1Run).toHaveBeenCalledTimes(1);
 
     // Port base includes per-environment offset to prevent cross-env collisions
     const envOffset = environmentPortOffset('env-1', 10, 36_000);
@@ -386,6 +396,23 @@ describe('deploy release callback route', () => {
       content: '203.0.113.10',
       proxied: false,
     });
+  });
+
+  it('returns conflict when the release was terminalized before the node claimed apply', async () => {
+    stubHappyPathDb();
+    mockD1Run.mockResolvedValueOnce({ meta: { changes: 0 } });
+    const fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+
+    const response = await requestDeployRelease();
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      message: 'Deployment release is no longer pending apply',
+    });
+    expect(mockD1Bind).toHaveBeenCalledWith(expect.any(String), 'rel-1');
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(mockSignDeployPayload).not.toHaveBeenCalled();
   });
 
   it('includes attached volume descriptors in the signed apply payload', async () => {
@@ -640,7 +667,7 @@ describe('deploy release callback route', () => {
     });
     // The release lookup, status flip to 'applying', DNS, volume descriptors,
     // and signing must NOT run for a rejected request.
-    expect(mockUpdateSet).not.toHaveBeenCalled();
+    expect(mockD1Prepare).not.toHaveBeenCalled();
     expect(mockBuildVolumeMountDescriptors).not.toHaveBeenCalled();
     expect(fetchMock).not.toHaveBeenCalled();
     expect(mockSignDeployPayload).not.toHaveBeenCalled();

@@ -142,6 +142,7 @@ import { scheduled } from './scheduled/handler';
 import { signTerminalToken, verifyPortAccessToken, verifyTerminalToken } from './services/jwt';
 import { assertUserNotSuspended } from './services/signup-approval';
 import { recordNodeRoutingMetric } from './services/telemetry';
+import { assertTerminalTokenSessionLive } from './services/terminal-token-liveness';
 import { fetchVmAgentContainer, getVmAgentContainerConfig } from './services/vm-agent-container';
 
 const app = new Hono<{ Bindings: Env }>();
@@ -345,6 +346,7 @@ h1{font-size:1.4rem}code{background:#f0f0f0;padding:2px 6px;border-radius:3px;fo
       if (payload.workspace !== workspaceId || payload.subject === 'port-proxy') {
         return c.json({ error: 'UNAUTHORIZED', message: 'Invalid workspace token' }, 401);
       }
+      await assertTerminalTokenSessionLive(c.env, payload);
       userId = payload.subject;
     } catch (err) {
       log.warn('ws_proxy_terminal_token_rejected', {

@@ -4,11 +4,16 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as schema from '../../../src/db/schema';
 import type { Env } from '../../../src/env';
 import {
+  COMPOSE_IMAGE_ARTIFACT_PREFIX,
+  runComposeImageArtifactCleanup,
+} from '../../../src/scheduled/compose-image-artifact-cleanup';
+import {
   DEFAULT_DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY,
   runDeploymentReleaseRetention,
   runScheduledDeploymentReleaseRetention,
   runScheduledSessionSnapshotPurge,
   runSessionSnapshotPurge,
+  runStaleDeploymentReleaseReconciliation,
 } from '../../../src/scheduled/d1-retention';
 import { createMemoryKv, createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
@@ -21,6 +26,7 @@ describe('D1 retention sweeps', () => {
     createSchemaTables(sqlite, [
       schema.deploymentEnvironments,
       schema.deploymentReleases,
+      schema.deploymentReleaseEvents,
       schema.sessionSnapshots,
     ]);
     env = {
@@ -33,19 +39,55 @@ describe('D1 retention sweeps', () => {
     sqlite.close();
   });
 
-  function addEnvironment(id: string, observedAppliedSeq: number | null = null): void {
-    sqlite
-      .prepare('INSERT INTO deployment_environments (id, observed_applied_seq) VALUES (?, ?)')
-      .run(id, observedAppliedSeq);
-  }
-
-  function addRelease(environmentId: string, version: number, status: string): void {
+  function addEnvironment(
+    id: string,
+    observedAppliedSeq: number | null = null,
+    options: { observedStatus?: string | null; observedAt?: string | null } = {}
+  ): void {
     sqlite
       .prepare(
-        `INSERT INTO deployment_releases (id, environment_id, version, status)
+        `INSERT INTO deployment_environments
+           (id, observed_applied_seq, observed_status, observed_at)
          VALUES (?, ?, ?, ?)`
       )
-      .run(`${environmentId}-v${version}`, environmentId, version, status);
+      .run(id, observedAppliedSeq, options.observedStatus ?? null, options.observedAt ?? null);
+  }
+
+  function artifactKey(name: string): string {
+    return `${COMPOSE_IMAGE_ARTIFACT_PREFIX}project/env/workspace/upload/${name}.docker-save.tar`;
+  }
+
+  function composeArtifactManifest(name: string): string {
+    return JSON.stringify({ services: [{ serviceName: name, r2Key: artifactKey(name) }] });
+  }
+
+  function addRelease(
+    environmentId: string,
+    version: number,
+    status: string,
+    options: {
+      manifest?: string | null;
+      createdAt?: string;
+      statusUpdatedAt?: string | null;
+      source?: string | null;
+    } = {}
+  ): void {
+    sqlite
+      .prepare(
+        `INSERT INTO deployment_releases
+           (id, environment_id, version, status, manifest, created_at, status_updated_at, source)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        `${environmentId}-v${version}`,
+        environmentId,
+        version,
+        status,
+        options.manifest ?? null,
+        options.createdAt ?? null,
+        options.statusUpdatedAt ?? null,
+        options.source ?? null
+      );
   }
 
   function releaseIds(environmentId: string): string[] {
@@ -57,6 +99,54 @@ describe('D1 retention sweeps', () => {
       )
       .all(environmentId)
       .map((row) => (row as { id: string }).id);
+  }
+
+  function releaseStatuses(environmentId: string): Record<string, string> {
+    return Object.fromEntries(
+      sqlite
+        .prepare(
+          `SELECT id, status FROM deployment_releases
+           WHERE environment_id = ?
+           ORDER BY version ASC`
+        )
+        .all(environmentId)
+        .map((row) => {
+          const typed = row as { id: string; status: string };
+          return [typed.id, typed.status];
+        })
+    );
+  }
+
+  function addReleaseEvent(
+    environmentId: string,
+    version: number,
+    createdAt: string,
+    releaseId: string | null = `${environmentId}-v${version}`
+  ): void {
+    sqlite
+      .prepare(
+        `INSERT INTO deployment_release_events
+           (id, project_id, environment_id, release_id, release_version, node_id, seq, event_type, message, created_at)
+         VALUES (?, 'project-1', ?, ?, ?, 'node-1', 1, 'deployment.apply.fetch_started', 'fetching', ?)`
+      )
+      .run(
+        `${environmentId}-v${version}-event-${createdAt}`,
+        environmentId,
+        releaseId,
+        version,
+        createdAt
+      );
+  }
+
+  function makeR2(objects: Array<{ key: string; size: number; uploaded: Date }>) {
+    const deleted: string[] = [];
+    return {
+      list: async () => ({ objects, truncated: false }),
+      delete: async (key: string) => {
+        deleted.push(key);
+      },
+      deleted,
+    };
   }
 
   function addSnapshot(id: string, expiresAt: string, sleeping = true): void {
@@ -165,6 +255,284 @@ describe('D1 retention sweeps', () => {
     expect(survivors).toEqual(['env-zombie-v4', 'env-zombie-v5']);
     expect(second.deletedReleases).toBe(0);
     expect(releaseIds('env-zombie')).toEqual(survivors);
+  });
+
+  it('protects fresh and actively observed applying compose releases', async () => {
+    addEnvironment('env-fresh', 1, {
+      observedStatus: 'applied',
+      observedAt: '2026-08-16T12:00:00.000Z',
+    });
+    addRelease('env-fresh', 1, 'applied', {
+      createdAt: '2026-08-01T00:00:00.000Z',
+      manifest: composeArtifactManifest('fresh-current'),
+    });
+    addRelease('env-fresh', 2, 'applying', {
+      createdAt: '2026-08-16T11:30:00.000Z',
+      statusUpdatedAt: '2026-08-16T11:30:00.000Z',
+      manifest: composeArtifactManifest('fresh-applying'),
+      source: 'compose-publish',
+    });
+    addRelease('env-fresh', 3, 'created', {
+      createdAt: '2026-08-16T11:45:00.000Z',
+      statusUpdatedAt: '2026-08-16T11:45:00.000Z',
+      manifest: composeArtifactManifest('fresh-created'),
+      source: 'compose-publish',
+    });
+
+    addEnvironment('env-active', 4, {
+      observedStatus: 'applying',
+      observedAt: '2026-08-16T12:00:00.000Z',
+    });
+    addRelease('env-active', 5, 'applying', {
+      createdAt: '2026-06-01T00:00:00.000Z',
+      statusUpdatedAt: '2026-06-01T00:00:00.000Z',
+      manifest: composeArtifactManifest('actively-applying'),
+      source: 'compose-publish',
+    });
+
+    const result = await runStaleDeploymentReleaseReconciliation(
+      env,
+      new Date('2026-08-16T12:00:00.000Z')
+    );
+
+    expect(result.reconciledReleases).toBe(0);
+    expect(releaseStatuses('env-fresh')['env-fresh-v2']).toBe('applying');
+    expect(releaseStatuses('env-fresh')['env-fresh-v3']).toBe('created');
+    expect(releaseStatuses('env-active')['env-active-v5']).toBe('applying');
+  });
+
+  it('marks provably stale nonterminal compose releases failed', async () => {
+    addEnvironment('env-stale', 3, {
+      observedStatus: 'applied',
+      observedAt: '2026-08-16T12:00:00.000Z',
+    });
+    addRelease('env-stale', 4, 'applying', {
+      createdAt: '2026-06-26T00:00:00.000Z',
+      statusUpdatedAt: '2026-06-26T00:00:00.000Z',
+      manifest: composeArtifactManifest('stale-archive'),
+      source: 'compose-publish',
+    });
+    addRelease('env-stale', 5, 'created', {
+      createdAt: '2026-06-27T00:00:00.000Z',
+      statusUpdatedAt: '2026-06-27T00:00:00.000Z',
+      manifest: composeArtifactManifest('stale-created-archive'),
+      source: 'compose-publish',
+    });
+
+    const result = await runStaleDeploymentReleaseReconciliation(
+      env,
+      new Date('2026-08-16T12:00:00.000Z')
+    );
+
+    expect(result).toMatchObject({
+      enabled: true,
+      batchSize: 50,
+      staleHours: 168,
+      activityGraceHours: 6,
+      reconciledReleases: 2,
+    });
+    expect(releaseStatuses('env-stale')).toEqual({
+      'env-stale-v4': 'failed',
+      'env-stale-v5': 'failed',
+    });
+  });
+
+  it('protects the observed-applied release even when its row is nonterminal and old', async () => {
+    addEnvironment('env-observed', 4, {
+      observedStatus: 'applied',
+      observedAt: '2026-08-16T12:00:00.000Z',
+    });
+    addRelease('env-observed', 4, 'applying', {
+      createdAt: '2026-06-26T00:00:00.000Z',
+      statusUpdatedAt: '2026-06-26T00:00:00.000Z',
+      manifest: composeArtifactManifest('observed-applied'),
+      source: 'compose-publish',
+    });
+
+    const result = await runStaleDeploymentReleaseReconciliation(
+      env,
+      new Date('2026-08-16T12:00:00.000Z')
+    );
+
+    expect(result.reconciledReleases).toBe(0);
+    expect(releaseStatuses('env-observed')).toEqual({ 'env-observed-v4': 'applying' });
+  });
+
+  it('runs stale reconciliation before terminal retention so R2 cleanup can reclaim unreferenced archives', async () => {
+    const staleKey = artifactKey('stale-old');
+    addEnvironment('env-order', 4, {
+      observedStatus: 'applied',
+      observedAt: '2026-08-16T12:00:00.000Z',
+    });
+    addRelease('env-order', 1, 'applying', {
+      createdAt: '2026-06-26T00:00:00.000Z',
+      statusUpdatedAt: '2026-06-26T00:00:00.000Z',
+      manifest: composeArtifactManifest('stale-old'),
+      source: 'compose-publish',
+    });
+    for (let version = 2; version <= 4; version += 1) {
+      addRelease('env-order', version, 'applied', {
+        createdAt: `2026-08-0${version}T00:00:00.000Z`,
+        manifest: composeArtifactManifest(`applied-${version}`),
+      });
+    }
+    env.DEPLOYMENT_RELEASE_RETENTION_COUNT = '3';
+    env.DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE = '10';
+    env.R2 = makeR2([
+      { key: staleKey, size: 123, uploaded: new Date('2026-06-27T00:00:00.000Z') },
+    ]) as unknown as R2Bucket;
+
+    const retention = await runDeploymentReleaseRetention(
+      env,
+      new Date('2026-08-16T12:00:00.000Z')
+    );
+    const cleanup = await runComposeImageArtifactCleanup(env, new Date('2026-08-16T12:00:00.000Z'));
+
+    expect(retention).toMatchObject({
+      reconciledStaleReleases: 1,
+      deletedReleases: 1,
+    });
+    expect(releaseIds('env-order')).toEqual(['env-order-v2', 'env-order-v3', 'env-order-v4']);
+    expect((env.R2 as unknown as { deleted: string[] }).deleted).toEqual([staleKey]);
+    expect(cleanup.deletedObjects).toBe(1);
+  });
+
+  it('bounds reconciliation batches and is idempotent across repeated sweeps', async () => {
+    addEnvironment('env-batch', 0, {
+      observedStatus: 'applied',
+      observedAt: '2026-08-16T12:00:00.000Z',
+    });
+    for (let version = 1; version <= 3; version += 1) {
+      addRelease('env-batch', version, 'applying', {
+        createdAt: '2026-06-26T00:00:00.000Z',
+        statusUpdatedAt: '2026-06-26T00:00:00.000Z',
+        manifest: composeArtifactManifest(`batch-${version}`),
+        source: 'compose-publish',
+      });
+    }
+    env.DEPLOYMENT_RELEASE_RECONCILIATION_BATCH_SIZE = '2';
+
+    const now = new Date('2026-08-16T12:00:00.000Z');
+    const first = await runStaleDeploymentReleaseReconciliation(env, now);
+    const second = await runStaleDeploymentReleaseReconciliation(env, now);
+    const third = await runStaleDeploymentReleaseReconciliation(env, now);
+
+    expect(first.reconciledReleases).toBe(2);
+    expect(second.reconciledReleases).toBe(1);
+    expect(third.reconciledReleases).toBe(0);
+    expect(releaseStatuses('env-batch')).toEqual({
+      'env-batch-v1': 'failed',
+      'env-batch-v2': 'failed',
+      'env-batch-v3': 'failed',
+    });
+  });
+
+  it('protects stale-looking releases with recent apply activity events', async () => {
+    addEnvironment('env-lease', 0, {
+      observedStatus: 'applied',
+      observedAt: '2026-08-16T12:00:00.000Z',
+    });
+    addRelease('env-lease', 1, 'applying', {
+      createdAt: '2026-06-26T00:00:00.000Z',
+      statusUpdatedAt: '2026-06-26T00:00:00.000Z',
+      manifest: composeArtifactManifest('recent-event'),
+      source: 'compose-publish',
+    });
+    addReleaseEvent('env-lease', 1, '2026-08-16T09:00:00.000Z');
+
+    const result = await runStaleDeploymentReleaseReconciliation(
+      env,
+      new Date('2026-08-16T12:00:00.000Z')
+    );
+
+    expect(result.reconciledReleases).toBe(0);
+    expect(releaseStatuses('env-lease')).toEqual({ 'env-lease-v1': 'applying' });
+  });
+
+  it('honors reconciliation kill switch and stale-age configuration', async () => {
+    addEnvironment('env-config', 0, {
+      observedStatus: 'applied',
+      observedAt: '2026-08-16T12:00:00.000Z',
+    });
+    addRelease('env-config', 1, 'applying', {
+      createdAt: '2026-08-10T00:00:00.000Z',
+      statusUpdatedAt: '2026-08-10T00:00:00.000Z',
+      manifest: composeArtifactManifest('configured-age'),
+      source: 'compose-publish',
+    });
+    env.DEPLOYMENT_RELEASE_RECONCILIATION_STALE_HOURS = '240';
+
+    const configuredProtected = await runStaleDeploymentReleaseReconciliation(
+      env,
+      new Date('2026-08-16T12:00:00.000Z')
+    );
+    env.DEPLOYMENT_RELEASE_RECONCILIATION_STALE_HOURS = '24';
+    env.DEPLOYMENT_RELEASE_RECONCILIATION_ENABLED = 'false';
+    const disabled = await runStaleDeploymentReleaseReconciliation(
+      env,
+      new Date('2026-08-16T12:00:00.000Z')
+    );
+
+    expect(configuredProtected).toMatchObject({ staleHours: 240, reconciledReleases: 0 });
+    expect(disabled).toMatchObject({ enabled: false, reconciledReleases: 0 });
+    expect(releaseStatuses('env-config')).toEqual({ 'env-config-v1': 'applying' });
+  });
+
+  it('fails closed for malformed manifests, future status activity, future observations, and unknown statuses', async () => {
+    addEnvironment('env-ambiguous', 0, {
+      observedStatus: 'applied',
+      observedAt: '2026-08-16T12:00:00.000Z',
+    });
+    addRelease('env-ambiguous', 1, 'applying', {
+      createdAt: '2026-06-26T00:00:00.000Z',
+      statusUpdatedAt: '2026-06-26T00:00:00.000Z',
+      manifest: `{"services":[{"r2Key":"${artifactKey('malformed')}"}`,
+      source: 'compose-publish',
+    });
+    addRelease('env-ambiguous', 2, 'queued-future-status', {
+      createdAt: '2026-06-26T00:00:00.000Z',
+      statusUpdatedAt: '2026-06-26T00:00:00.000Z',
+      manifest: composeArtifactManifest('future-status'),
+      source: 'compose-publish',
+    });
+    addRelease('env-ambiguous', 3, 'applying', {
+      createdAt: '2026-06-26T00:00:00.000Z',
+      statusUpdatedAt: '2026-08-17T00:00:00.000Z',
+      manifest: composeArtifactManifest('future-status-update'),
+      source: 'compose-publish',
+    });
+    addRelease('env-ambiguous', 4, 'applying', {
+      createdAt: '2026-06-26T00:00:00.000Z',
+      statusUpdatedAt: '2026-06-26T00:00:00.000Z',
+      manifest: composeArtifactManifest('build-on-node-same-prefix'),
+      source: 'build-on-node',
+    });
+    addEnvironment('env-future-observed', 0, {
+      observedStatus: 'applied',
+      observedAt: '2026-08-17T00:00:00.000Z',
+    });
+    addRelease('env-future-observed', 1, 'applying', {
+      createdAt: '2026-06-26T00:00:00.000Z',
+      statusUpdatedAt: '2026-06-26T00:00:00.000Z',
+      manifest: composeArtifactManifest('future-observed'),
+      source: 'compose-publish',
+    });
+
+    const result = await runStaleDeploymentReleaseReconciliation(
+      env,
+      new Date('2026-08-16T12:00:00.000Z')
+    );
+
+    expect(result.reconciledReleases).toBe(0);
+    expect(releaseStatuses('env-ambiguous')).toEqual({
+      'env-ambiguous-v1': 'applying',
+      'env-ambiguous-v2': 'queued-future-status',
+      'env-ambiguous-v3': 'applying',
+      'env-ambiguous-v4': 'applying',
+    });
+    expect(releaseStatuses('env-future-observed')).toEqual({
+      'env-future-observed-v1': 'applying',
+    });
   });
 
   it('interval-gates scheduled release retention with its own KV marker', async () => {

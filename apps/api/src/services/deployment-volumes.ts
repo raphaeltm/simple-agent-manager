@@ -287,7 +287,7 @@ export async function markDeploymentReleaseVolumeAttachFailed(
 
   await db
     .update(schema.deploymentReleases)
-    .set({ status: 'failed' })
+    .set({ status: 'failed', statusUpdatedAt: now })
     .where(eq(schema.deploymentReleases.id, releaseId));
   await db
     .update(schema.deploymentEnvironments)

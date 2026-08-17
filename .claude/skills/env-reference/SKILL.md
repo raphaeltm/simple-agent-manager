@@ -112,6 +112,10 @@ See `apps/api/.env.example` for the full list. Key variables:
 - `DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE` — Maximum terminal release rows deleted per run (default: `250`)
 - `DEPLOYMENT_RELEASE_RETENTION_INTERVAL_HOURS` — Minimum interval between release retention runs (default: `24`)
 - `DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY` — KV interval marker (default: `cleanup:deployment-releases:last-run`)
+- `DEPLOYMENT_RELEASE_RECONCILIATION_ENABLED` — Kill switch for stale nonterminal compose release reconciliation (default: enabled)
+- `DEPLOYMENT_RELEASE_RECONCILIATION_BATCH_SIZE` — Maximum stale nonterminal releases terminalized before retention pruning in one run (default: `50`)
+- `DEPLOYMENT_RELEASE_RECONCILIATION_STALE_HOURS` — Minimum release status age before reconciliation can mark a nonterminal release failed (default: `168`)
+- `DEPLOYMENT_RELEASE_RECONCILIATION_ACTIVITY_GRACE_HOURS` — Recent release-event protection window for active fetch/apply work (default: `6`)
 - `COMPOSE_IMAGE_ARTIFACT_CLEANUP_BATCH_SIZE` — Maximum abandoned compose archives deleted per daily run (default: `250`)
 
 ### Guided Agent Credential Setup

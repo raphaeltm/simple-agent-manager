@@ -8,14 +8,18 @@ const EXPECTED_OPENCODE_MODELS = [
   'opencode/claude-fable-5',
   'opencode/claude-opus-5',
   'opencode/claude-sonnet-5',
+  'opencode/gemini-3.7-flash',
   'opencode/gemini-3.6-flash',
   'opencode/gpt-5.6-sol',
+  'opencode/grok-4.6',
+  'opencode/hy3-free',
   'opencode/laguna-s-2.1-free',
   'opencode/kimi-k3',
-  'opencode/ling-3.0-tiny-free',
-  'opencode/longcat-2.0-free',
   'opencode/minimax-m3',
+  'opencode/muse-spark-1.2',
+  'opencode/nemotron-3.5-lightning-free',
   'opencode-go/glm-5.2',
+  'opencode-go/glm-5.3',
   'opencode-go/grok-4.5',
   'opencode-go/gpt-5.6-luna',
   'opencode-go/hy3',
@@ -84,8 +88,10 @@ describe('OpenCode model catalog entries', () => {
   it('excludes inactive Models.dev records from the static fallback', () => {
     for (const inactiveModelId of [
       'opencode/claude-opus-4-1',
-      'opencode/hy3-free',
       'opencode/ling-3.0-flash-free',
+      'opencode/ling-3.0-tiny-free',
+      'opencode/longcat-2.0-free',
+      'opencode/north-mini-code-free',
       'opencode/qwen3.7-plus',
     ]) {
       expect(

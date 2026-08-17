@@ -208,10 +208,18 @@ deployReleaseCallbackRoute.get('/:id/deploy-release', async (c) => {
     throw errors.notFound('Deployment release');
   }
 
-  await db
-    .update(schema.deploymentReleases)
-    .set({ status: 'applying' })
-    .where(eq(schema.deploymentReleases.id, release.id));
+  const applyingAt = new Date().toISOString();
+  const applyingClaim = await c.env.DATABASE.prepare(
+    `UPDATE deployment_releases
+     SET status = 'applying', status_updated_at = ?
+     WHERE id = ?
+       AND status IN ('created', 'applying')`
+  )
+    .bind(applyingAt, release.id)
+    .run();
+  if ((applyingClaim.meta?.changes ?? 0) === 0) {
+    throw errors.conflict('Deployment release is no longer pending apply');
+  }
 
   // Two release shapes share this apply path, discriminated by `release.source`:
   //

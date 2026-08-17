@@ -25,7 +25,8 @@ export interface AuthContext {
     status: UserStatus;
   };
   session: {
-    id: string;
+    id: string | null;
+    token: string | null;
     expiresAt: Date;
   };
 }
@@ -68,6 +69,7 @@ type AuthSession = NonNullable<
  */
 function buildAuthContext(session: AuthSession): AuthContext {
   const sessionUser = expectJsonRecord(session.user, 'auth.session.user');
+  const sessionRecord = expectJsonRecord(session.session, 'auth.session.session');
   return {
     user: {
       id: session.user.id,
@@ -78,7 +80,14 @@ function buildAuthContext(session: AuthSession): AuthContext {
       status: resolveSessionStatus(sessionUser.status, session.user.id),
     },
     session: {
-      id: session.session.id,
+      id:
+        typeof sessionRecord.id === 'string' && sessionRecord.id.length > 0
+          ? sessionRecord.id
+          : null,
+      token:
+        typeof sessionRecord.token === 'string' && sessionRecord.token.length > 0
+          ? sessionRecord.token
+          : null,
       expiresAt: session.session.expiresAt,
     },
   };

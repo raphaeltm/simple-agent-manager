@@ -272,6 +272,9 @@ export const DEFAULT_CALLBACK_TOKEN_EXPIRY_MS = 24 * 60 * 60 * 1000;
 /** Default node management token expiry in milliseconds (1 hour) */
 export const DEFAULT_NODE_MANAGEMENT_TOKEN_EXPIRY_MS = 60 * 60 * 1000;
 
+/** Default browser/workspace terminal token expiry in milliseconds (1 hour) */
+export const DEFAULT_TERMINAL_TOKEN_EXPIRY_MS = 60 * 60 * 1000;
+
 /** JWT algorithm used for all tokens */
 export const JWT_ALGORITHM = 'RS256' as const;
 

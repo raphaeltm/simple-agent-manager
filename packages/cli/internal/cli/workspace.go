@@ -289,17 +289,13 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, c
 
 	proxy := &httputil.ReverseProxy{
 		Director: func(req *http.Request) {
+			token, _ := req.Context().Value(localForwardTokenContextKey{}).(string)
 			req.URL.Scheme = target.Scheme
 			req.URL.Host = target.Host
 			setEscapedURLPath(req.URL, singleJoiningSlash(target.EscapedPath(), req.URL.EscapedPath()))
 			req.Host = target.Host
 
 			stripProxyRequestHeaders(req.Header)
-			token, tokenErr := tc.getToken(req.Context())
-			if tokenErr != nil {
-				fmt.Fprintf(runtime.Stderr, "  [%s] token error: %v\n", time.Now().Format("15:04:05"), tokenErr)
-				return
-			}
 			req.Header.Set("X-SAM-Forward-Token", token)
 			req.Header.Set("X-SAM-Local-Authority", tc.localAuthority)
 		},
@@ -322,7 +318,14 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, c
 			}
 			fmt.Fprintf(runtime.Stderr, "  [%s] %s %s -> localhost:%d\n",
 				time.Now().Format("15:04:05"), r.Method, r.URL.Path, cfg.remotePort)
-			proxy.ServeHTTP(w, r)
+			token, tokenErr := tc.getToken(r.Context())
+			if tokenErr != nil {
+				fmt.Fprintf(runtime.Stderr, "  [%s] token unavailable for %s %s\n",
+					time.Now().Format("15:04:05"), r.Method, r.URL.Path)
+				http.Error(w, "local forward token unavailable", http.StatusBadGateway)
+				return
+			}
+			proxy.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), localForwardTokenContextKey{}, token)))
 		}),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 120 * time.Second,
@@ -338,6 +341,8 @@ func acceptConnections(ctx context.Context, runtime Runtime, client APIClient, c
 
 	_ = server.Serve(cfg.listener)
 }
+
+type localForwardTokenContextKey struct{}
 
 // tokenCache manages port access token refresh.
 type tokenCache struct {

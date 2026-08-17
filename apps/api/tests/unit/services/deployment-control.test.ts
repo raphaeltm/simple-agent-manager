@@ -248,7 +248,9 @@ describe('reconcileDeploymentReleaseStatuses', () => {
       status: 'applying',
     });
 
-    expect(db.updates.map((update) => update.values)).toEqual([{ status: 'applying' }]);
+    expect(db.updates.map((update) => update.values)).toEqual([
+      expect.objectContaining({ status: 'applying', statusUpdatedAt: expect.any(String) }),
+    ]);
   });
 
   it('marks applied release applied and newer failed release failed after revert', async () => {
@@ -260,8 +262,8 @@ describe('reconcileDeploymentReleaseStatuses', () => {
     });
 
     expect(db.updates.map((update) => update.values)).toEqual([
-      { status: 'applied' },
-      { status: 'failed' },
+      expect.objectContaining({ status: 'applied', statusUpdatedAt: expect.any(String) }),
+      expect.objectContaining({ status: 'failed', statusUpdatedAt: expect.any(String) }),
     ]);
   });
 
@@ -276,6 +278,8 @@ describe('reconcileDeploymentReleaseStatuses', () => {
       status: 'failed-initial',
     });
 
-    expect(db.updates.map((update) => update.values)).toEqual([{ status: 'failed' }]);
+    expect(db.updates.map((update) => update.values)).toEqual([
+      expect.objectContaining({ status: 'failed', statusUpdatedAt: expect.any(String) }),
+    ]);
   });
 });

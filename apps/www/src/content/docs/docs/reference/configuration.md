@@ -176,21 +176,31 @@ Sleeping and reclaimed Instant and VM sessions are restored from a snapshot of t
 
 ### Deployment release and compose artifact retention
 
-The scheduled Worker prunes only terminal deployment releases outside the protected
-window (`apps/api/src/scheduled/d1-retention.ts:runDeploymentReleaseRetention()`). It
-always retains the newest releases per environment, the version reported in
-`deployment_environments.observed_applied_seq`, and every non-terminal release. The
-compose artifact cleanup then re-derives references from the remaining manifests
+The scheduled Worker first reconciles provably stale non-terminal compose releases, then
+prunes terminal deployment releases outside the protected window
+(`apps/api/src/scheduled/d1-retention.ts:runDeploymentReleaseRetention()`). Terminal
+retention always retains the newest releases per environment and the version reported in
+`deployment_environments.observed_applied_seq`. The stale reconciler only marks a
+`created`/`applying` compose-artifact release `failed` when D1 shows old release status
+activity, stable authenticated deployment-node observed state, no recent release
+fetch/apply events, a valid manifest, and a release version that is not the observed
+applied version. Unknown statuses, malformed manifests, missing observed state, active
+`applying` observations, and recent release events fail closed. Compose artifact cleanup
+then re-derives references from the remaining manifests
 (`apps/api/src/scheduled/compose-image-artifact-cleanup.ts:runComposeImageArtifactCleanup()`).
 
-| Variable                                       | Default                                | Description                                                                                           |
-| ---------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `DEPLOYMENT_RELEASE_RETENTION_ENABLED`         | `true`                                 | Enables bounded terminal release pruning.                                                             |
-| `DEPLOYMENT_RELEASE_RETENTION_COUNT`           | `3`                                    | Newest releases protected per environment, in addition to observed-applied and non-terminal releases. |
-| `DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE`      | `250`                                  | Maximum release rows deleted per run.                                                                 |
-| `DEPLOYMENT_RELEASE_RETENTION_INTERVAL_HOURS`  | `24`                                   | Minimum interval between release retention runs.                                                      |
-| `DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY` | `cleanup:deployment-releases:last-run` | KV interval marker.                                                                                   |
-| `COMPOSE_IMAGE_ARTIFACT_CLEANUP_BATCH_SIZE`    | `250`                                  | Maximum abandoned compose archives deleted per daily run.                                             |
+| Variable                                                 | Default                                | Description                                                                                           |
+| -------------------------------------------------------- | -------------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `DEPLOYMENT_RELEASE_RETENTION_ENABLED`                   | `true`                                 | Enables bounded terminal release pruning.                                                             |
+| `DEPLOYMENT_RELEASE_RETENTION_COUNT`                     | `3`                                    | Newest releases protected per environment, in addition to observed-applied and non-terminal releases. |
+| `DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE`                | `250`                                  | Maximum release rows deleted per run.                                                                 |
+| `DEPLOYMENT_RELEASE_RETENTION_INTERVAL_HOURS`            | `24`                                   | Minimum interval between release retention runs.                                                      |
+| `DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY`           | `cleanup:deployment-releases:last-run` | KV interval marker.                                                                                   |
+| `DEPLOYMENT_RELEASE_RECONCILIATION_ENABLED`              | `true`                                 | Enables stale non-terminal compose release reconciliation before terminal retention.                  |
+| `DEPLOYMENT_RELEASE_RECONCILIATION_BATCH_SIZE`           | `50`                                   | Maximum stale non-terminal releases marked failed per retention run.                                  |
+| `DEPLOYMENT_RELEASE_RECONCILIATION_STALE_HOURS`          | `168`                                  | Minimum release status age before reconciliation can terminalize a stale non-terminal release.        |
+| `DEPLOYMENT_RELEASE_RECONCILIATION_ACTIVITY_GRACE_HOURS` | `6`                                    | Recent release-event window that protects active fetch/apply work from reconciliation.                |
+| `COMPOSE_IMAGE_ARTIFACT_CLEANUP_BATCH_SIZE`              | `250`                                  | Maximum abandoned compose archives deleted per daily run.                                             |
 
 ### R2 object lifecycle retention
 

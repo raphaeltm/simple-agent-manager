@@ -208,6 +208,10 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   DEPLOYMENT_RELEASE_RETENTION_BATCH_SIZE?: string; // Max terminal releases deleted per run (default: 250)
   DEPLOYMENT_RELEASE_RETENTION_INTERVAL_HOURS?: string; // Minimum hours between release retention runs (default: 24)
   DEPLOYMENT_RELEASE_RETENTION_LAST_RUN_KV_KEY?: string; // KV key for release retention interval gating
+  DEPLOYMENT_RELEASE_RECONCILIATION_ENABLED?: string; // Kill switch: "false" disables stale nonterminal release reconciliation (default: enabled)
+  DEPLOYMENT_RELEASE_RECONCILIATION_BATCH_SIZE?: string; // Max stale nonterminal releases terminalized per retention run (default: 50)
+  DEPLOYMENT_RELEASE_RECONCILIATION_STALE_HOURS?: string; // Minimum status age before stale release reconciliation (default: 168)
+  DEPLOYMENT_RELEASE_RECONCILIATION_ACTIVITY_GRACE_HOURS?: string; // Recent release-event protection window (default: 6)
   SESSION_SNAPSHOT_TTL_DAYS?: string; // Runtime hibernate snapshot retention (default: 7)
   SESSION_SNAPSHOT_R2_PREFIX?: string; // R2 key prefix for runtime hibernate snapshots
   SESSION_SNAPSHOT_TOTAL_BUDGET_BYTES?: string; // Max combined home/WIP snapshot size (default: 268435456)

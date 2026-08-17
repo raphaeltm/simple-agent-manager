@@ -161,17 +161,31 @@ Summary data flows back from DOs to D1 via debounced sync (e.g., `last_activity_
 
 ### Other Bindings
 
-| Service        | Binding | Purpose                                                                             |
-| -------------- | ------- | ----------------------------------------------------------------------------------- |
-| **KV**         | `KV`    | Auth sessions, bootstrap tokens, boot logs, MCP tokens                              |
-| **R2**         | `R2`    | VM Agent binaries, private diagnostic artifacts, session snapshots, TTS audio cache |
-| **Workers AI** | `AI`    | Idea title generation, transcription, TTS, context summarization                    |
+| Service        | Binding | Purpose                                                                                                      |
+| -------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| **KV**         | `KV`    | Auth sessions, bootstrap tokens, boot logs, MCP tokens                                                       |
+| **R2**         | `R2`    | VM Agent binaries, private diagnostic artifacts, session snapshots, compose image artifacts, TTS audio cache |
+| **Workers AI** | `AI`    | Idea title generation, transcription, TTS, context summarization                                             |
 
 ### VM diagnostic incident flow
 
 VM Agent errors and their automatic evidence remain inside one SAM installation. The agent first persists a stable incident ID and error in its local SQLite outbox, then posts the error batch using the node callback JWT. The Worker creates primary-D1 incident metadata before strictly acknowledging the observability-D1 error row. The VM registers a bounded redacted manifest/preview, claims a time-bounded D1 upload lease, streams the gzip archive into a deterministic private R2 key, and retries safely after restarts. The same lease prevents scheduled reconciliation or a failed-evidence report from racing a live upload. A scheduled reconciler repairs partial D1/R2 state, fails stale unleased uploads, expires metadata, and deletes retained objects in bounded batches.
 
 Superadmin error queries batch-join incident summaries without exposing object keys. The UI downloads bytes only through an authenticated Worker proxy, while the diagnosis agent can read only the redacted D1 preview. There is no cross-installation intake or transport in this flow.
+
+### Compose image artifact retention
+
+Compose-publish releases may store docker-save archives in R2 under
+`compose-image-artifacts/`. Those objects are durable while any surviving
+`deployment_releases.manifest` references them. The scheduled release-retention path
+(`apps/api/src/scheduled/d1-retention.ts:runDeploymentReleaseRetention()`) reconciles
+only provably stale `created`/`applying` compose releases to terminal `failed` using
+D1-observed deployment-node state and recent release-event activity as the lease. It
+does not call the deployment node or inspect R2. Terminal release retention then prunes
+old releases outside the observed-applied/newest rollback window, and
+`apps/api/src/scheduled/compose-image-artifact-cleanup.ts:runComposeImageArtifactCleanup()`
+deletes only old compose artifacts that are no longer referenced by any remaining valid
+release manifest.
 
 ## Agent Configuration Layers
 

@@ -4,6 +4,18 @@ const mockGetSession = vi.fn();
 const mockVerifyTerminalToken = vi.fn();
 const mockSignTerminalToken = vi.fn();
 let workspaceResult: { nodeId: string; status: string } | null = null;
+let terminalSessionResult: {
+  sessionId: string;
+  userId: string;
+  expiresAt: Date;
+  userRole: string;
+  userStatus: string;
+} | null = null;
+let platformSettingResult: {
+  value: string;
+  updatedAt: string | null;
+  updatedBy: string | null;
+} | null = null;
 
 vi.mock('../../src/auth', () => ({
   createAuth: vi.fn(() => ({
@@ -37,13 +49,20 @@ vi.mock('@cloudflare/containers', () => ({
 
 vi.mock('drizzle-orm/d1', () => ({
   drizzle: vi.fn(() => ({
-    select: vi.fn(() => ({
-      from: vi.fn(() => ({
-        where: vi.fn(() => ({
-          get: vi.fn(async () => workspaceResult),
-        })),
-      })),
-    })),
+    select: vi.fn((selection?: Record<string, unknown>) => {
+      const getResult = async () => {
+        if (selection && 'sessionId' in selection) return terminalSessionResult;
+        if (selection && 'value' in selection) return platformSettingResult;
+        return workspaceResult;
+      };
+      const chain = {
+        from: vi.fn(() => chain),
+        innerJoin: vi.fn(() => chain),
+        where: vi.fn(() => chain),
+        get: vi.fn(getResult),
+      };
+      return chain;
+    }),
   })),
 }));
 
@@ -63,13 +82,22 @@ describe('workspace subdomain proxy ownership', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     workspaceResult = { nodeId: 'node-owner', status: 'running' };
+    terminalSessionResult = {
+      sessionId: 'session-owner',
+      userId: 'user-owner',
+      expiresAt: new Date(Date.now() + 60_000),
+      userRole: 'user',
+      userStatus: 'active',
+    };
+    platformSettingResult = null;
     mockGetSession.mockResolvedValue({
       user: { id: 'user-owner' },
-      session: { id: 'session-owner', expiresAt: new Date() },
+      session: { id: 'session-owner', token: 'token-owner', expiresAt: new Date() },
     });
     mockVerifyTerminalToken.mockResolvedValue({
       workspace: OWNER_WORKSPACE_ID,
       subject: 'user-owner',
+      sessionToken: 'token-owner',
     });
     mockSignTerminalToken.mockResolvedValue({
       token: 'backend-port-token',
@@ -96,7 +124,7 @@ describe('workspace subdomain proxy ownership', () => {
   it('rejects suspended browser-session workspace subdomain requests before proxying', async () => {
     mockGetSession.mockResolvedValue({
       user: { id: 'user-owner', status: 'suspended', role: 'admin' },
-      session: { id: 'session-owner', expiresAt: new Date() },
+      session: { id: 'session-owner', token: 'token-owner', expiresAt: new Date() },
     });
 
     const response = await worker.default.fetch(
@@ -131,6 +159,60 @@ describe('workspace subdomain proxy ownership', () => {
     expect(proxiedUrl.searchParams.get('token')).toBe('valid-terminal-token');
   });
 
+  it('rejects a captured terminal token after the minting session row is gone', async () => {
+    mockGetSession.mockResolvedValue(null);
+    terminalSessionResult = null;
+
+    const response = await worker.default.fetch(
+      new Request(
+        `https://ws-${OWNER_WORKSPACE_ID.toLowerCase()}.workspaces.example.com/terminal/ws/multi?token=logout-revoked-token`
+      ),
+      env
+    );
+
+    expect(response.status).toBe(401);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a terminal token without a minting session claim', async () => {
+    mockGetSession.mockResolvedValue(null);
+    mockVerifyTerminalToken.mockResolvedValue({
+      workspace: OWNER_WORKSPACE_ID,
+      subject: 'user-owner',
+    });
+
+    const response = await worker.default.fetch(
+      new Request(
+        `https://ws-${OWNER_WORKSPACE_ID.toLowerCase()}.workspaces.example.com/terminal/ws/multi?token=legacy-token`
+      ),
+      env
+    );
+
+    expect(response.status).toBe(401);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects a terminal token for a suspended user even when its session row exists', async () => {
+    mockGetSession.mockResolvedValue(null);
+    terminalSessionResult = {
+      sessionId: 'session-owner',
+      userId: 'user-owner',
+      expiresAt: new Date(Date.now() + 60_000),
+      userRole: 'user',
+      userStatus: 'suspended',
+    };
+
+    const response = await worker.default.fetch(
+      new Request(
+        `https://ws-${OWNER_WORKSPACE_ID.toLowerCase()}.workspaces.example.com/terminal/ws/multi?token=suspended-token`
+      ),
+      env
+    );
+
+    expect(response.status).toBe(401);
+    expect(globalThis.fetch).not.toHaveBeenCalled();
+  });
+
   it('rejects terminal tokens for a different workspace', async () => {
     mockGetSession.mockResolvedValue(null);
     mockVerifyTerminalToken.mockResolvedValue({
@@ -154,7 +236,15 @@ describe('workspace subdomain proxy ownership', () => {
     mockVerifyTerminalToken.mockResolvedValue({
       workspace: OTHER_WORKSPACE_ID,
       subject: 'user-other',
+      sessionToken: 'token-other',
     });
+    terminalSessionResult = {
+      sessionId: 'session-other',
+      userId: 'user-other',
+      expiresAt: new Date(Date.now() + 60_000),
+      userRole: 'user',
+      userStatus: 'active',
+    };
     workspaceResult = null;
 
     const response = await worker.default.fetch(

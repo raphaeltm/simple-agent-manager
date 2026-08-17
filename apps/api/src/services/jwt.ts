@@ -1,4 +1,7 @@
-import { DEFAULT_GCP_IDENTITY_TOKEN_EXPIRY_SECONDS } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_GCP_IDENTITY_TOKEN_EXPIRY_SECONDS,
+  DEFAULT_TERMINAL_TOKEN_EXPIRY_MS,
+} from '@simple-agent-manager/shared';
 import { decodeJwt, exportJWK, importPKCS8, importSPKI, jwtVerify, SignJWT } from 'jose';
 
 import type { Env } from '../env';
@@ -24,11 +27,11 @@ function getIssuer(env: Env): string {
 
 /**
  * Get terminal token expiry in milliseconds.
- * Default: 1 hour (3600000ms)
+ * Default: 1 hour.
  */
 function getTerminalTokenExpiry(env: Env): number {
   const envValue = env.TERMINAL_TOKEN_EXPIRY_MS;
-  return envValue ? parseInt(envValue, 10) : 60 * 60 * 1000;
+  return envValue ? parseInt(envValue, 10) : DEFAULT_TERMINAL_TOKEN_EXPIRY_MS;
 }
 
 /**
@@ -47,7 +50,8 @@ function getCallbackTokenExpiry(env: Env): number {
 export async function signTerminalToken(
   userId: string,
   workspaceId: string,
-  env: Env
+  env: Env,
+  options: { sessionToken?: string | null } = {}
 ): Promise<{ token: string; expiresAt: string }> {
   const privateKey = await importPKCS8(env.JWT_PRIVATE_KEY, 'RS256');
   const expiry = getTerminalTokenExpiry(env);
@@ -56,6 +60,7 @@ export async function signTerminalToken(
 
   const token = await new SignJWT({
     workspace: workspaceId,
+    ...(options.sessionToken ? { sessionToken: options.sessionToken } : {}),
   })
     .setProtectedHeader({ alg: 'RS256', kid: KEY_ID })
     .setIssuer(issuer)
@@ -180,6 +185,7 @@ export interface CallbackTokenPayload {
 export interface TerminalTokenPayload {
   workspace: string;
   subject: string;
+  sessionToken?: string;
 }
 
 export interface PortAccessTokenPayload {
@@ -276,6 +282,10 @@ export async function verifyTerminalToken(token: string, env: Env): Promise<Term
   return {
     workspace: payload.workspace,
     subject: payload.sub,
+    sessionToken:
+      typeof payload.sessionToken === 'string' && payload.sessionToken.length > 0
+        ? payload.sessionToken
+        : undefined,
   };
 }
 

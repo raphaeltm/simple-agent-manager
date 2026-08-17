@@ -324,6 +324,7 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
   const nextVersion = (latestRows[0]?.version ?? 0) + 1;
 
   const releaseId = ulid();
+  const releaseCreatedAt = new Date().toISOString();
 
   try {
     await db.insert(schema.deploymentReleases).values({
@@ -334,8 +335,10 @@ composePublishReleaseCallbackRoute.post('/:id/compose-publish-release', async (c
       manifest: JSON.stringify(manifestSubmission),
       version: nextVersion,
       status: 'created',
+      statusUpdatedAt: releaseCreatedAt,
       source: 'compose-publish',
       createdBy: userId,
+      createdAt: releaseCreatedAt,
     });
     await db
       .update(schema.deploymentEnvironments)

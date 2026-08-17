@@ -147,6 +147,7 @@ async function insertDeploymentRelease(params: {
       manifest: JSON.stringify(params.manifest),
       version: params.version,
       status: 'created',
+      statusUpdatedAt: params.now,
       createdBy: params.userId,
       createdAt: params.now,
     });
@@ -196,7 +197,7 @@ async function markDeploymentReleasePlacementFailed(
   const now = new Date().toISOString();
   await db
     .update(schema.deploymentReleases)
-    .set({ status: 'failed' })
+    .set({ status: 'failed', statusUpdatedAt: now })
     .where(eq(schema.deploymentReleases.id, releaseId));
   await db
     .update(schema.deploymentEnvironments)

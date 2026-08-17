@@ -585,8 +585,12 @@ export async function handleAttachmentTransfer(
   const protocol = rc.env.VM_AGENT_PROTOCOL || 'https';
   const port = rc.env.VM_AGENT_PORT || '8443';
   const workspaceId = state.stepResults.workspaceId;
+  const nodeId = state.stepResults.nodeId;
   const baseDomain = rc.env.BASE_DOMAIN || '';
-  const vmUrl = `${protocol}://ws-${workspaceId}.${baseDomain}:${port}`;
+  // Use the two-level node backend hostname for internal Worker → VM-agent calls.
+  // The single-level ws-* hostname is the browser workspace proxy and now enforces
+  // browser-session-bound terminal tokens.
+  const vmUrl = `${protocol}://${nodeId.toLowerCase()}.vm.${baseDomain}:${port}`;
   // Token passed as query param — VM agent's requireWorkspaceRequestAuth() checks
   // r.URL.Query().Get("token"), not Authorization header.
   const uploadBaseUrl = `${vmUrl}/workspaces/${workspaceId}/files/upload`;
