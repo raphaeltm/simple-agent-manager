@@ -1,0 +1,208 @@
+# Fix: a slept (resumable) session is classified as conclusive runtime death
+
+**SAM task**: `01M074T96YJWVYCJWX6Z0T2E0E`
+**Branch**: `sam/fix-production-workspace-reaping-0t2e0e`
+**Status**: active
+
+## Problem
+
+Production task-mode sessions are being terminalized as `failed` with
+`"Task runtime is conclusively gone after reconciliation grace (workspace_deleted)."`
+while their session snapshot is intact, unexpired, and fully resumable.
+
+Two reported kills on 2026-08-16 (21:21Z and 21:36Z), but the audit found this is
+**not** a two-off: **31 tasks** have been terminalized with a `workspace_deleted`
+reason since 2026-08-06, and it is still occurring (1 on 2026-08-17).
+
+## Audit trail (production D1, evidence-backed — no inference)
+
+Account `e2eb9a8d5b560cce006fdd03ad6f2e49`, DB `sam-prod` / `sam-observability-prod`.
+
+| Session | Task | in_progress | ACP prompt ended | slept at | ws → `deleted` | task → `failed` |
+| --- | --- | --- | --- | --- | --- | --- |
+| `da90b7c4` | `01M064S8K7C13GRHCJJ13EJ6E7` | 20:48:02Z | 20:52:47Z (`end_turn`, 4m28s) | 21:11:57.499Z | 21:17:14.512Z | 21:21:05.825Z |
+| `8bd22a42` | `01M064TAJ7B0AX8G115CY85RXM` | 20:43:32Z | 21:09:57Z (`end_turn`, 26m11s) | 21:26:51.529Z | ~21:31:51Z | 21:36:06.166Z |
+
+`session_snapshots` state **at the moment each task was declared "conclusively gone"**:
+
+| Session | `status` | `degradation` | `sleep_status` | `sleeping_at` | `expires_at` | home R2 key |
+| --- | --- | --- | --- | --- | --- | --- |
+| `8bd22a42` | `available` | `none` | `sleeping` | 21:26:51.529Z | **2026-08-23** | present |
+| `da90b7c4` | `degraded` | `entries-skipped` | `sleeping` | 21:11:57.499Z | **2026-08-23** | present |
+
+Both sessions were resumable for another **7 days** when SAM wrote `failed`.
+
+### Proven causal chain
+
+1. The agent's ACP prompt completes with `end_turn`
+   (`vm-agent` → `recordTurnEnd` → `session_state.activity='idle'`). The task stays
+   `in_progress` / `execution_step='awaiting_followup'` because the agent has not
+   called `complete_task()` yet.
+2. The **session-sleep cron** (`runSessionSleepSweep`, `apps/api/src/scheduled/session-sleep.ts:221`)
+   finds the session eligible: `isActivitySafeForSleep`
+   (`apps/api/src/services/session-sleep.ts:195`) returns `true` on `activity === 'idle'`,
+   and `SESSION_SLEEP_AFTER_MS` (default 15 min) has elapsed. **This is intended,
+   policy-sanctioned behaviour** ("aggressively sleep idle sessions").
+3. `sleepWorkspaceSession` captures the snapshot, sets `workspaces.status='sleeping'`,
+   writes `session_snapshots.sleep_status='sleeping'` + `sleeping_at` + `expires_at`,
+   then arms `NodeLifecycle.scheduleWorkspaceDeletion` (`session-sleep.ts:610-621`).
+4. **5 minutes later** (`WORKSPACE_STOPPED_TTL_MS`,
+   `packages/shared/src/constants/node-pooling.ts:100`), the NodeLifecycle alarm runs
+   `UPDATE workspaces SET status='deleted' ... WHERE status IN ('stopped','sleeping')`
+   (`apps/api/src/durable-objects/node-lifecycle.ts:570-573`).
+   **This rewrites the inconclusive `sleeping` marker into the conclusive `deleted` marker.**
+   (Timing confirms: `sleeping_at` + 5 min == the workspace row's `updated_at`.)
+5. The stuck-task cron classifies the runtime.
+   `classifyTaskRuntimeLiveness` (`apps/api/src/services/task-runtime-liveness.ts:102-109`)
+   sees `status !== 'running'` and `'deleted'` is not in `INCONCLUSIVE_WORKSPACE_STATUSES`
+   (`:53`), so it returns `{ live:false, conclusive:true, reason:'workspace_deleted' }`.
+6. `apps/api/src/scheduled/stuck-tasks.ts:988` sees `conclusive && !live` → writes `failed`.
+
+### The core defect
+
+**The classifier and the resumer disagree about what "gone" means.**
+
+`loadRecoveryContext` (`apps/api/src/services/session-recovery.ts:85`) — the code that
+actually wakes a slept session — accepts a session as resumable when:
+
+```ts
+snapshot.workspaceId && snapshot.projectId === projectId && snapshot.sleepingAt
+```
+
+It **never reads `workspaces.status`**. A workspace row with `status='deleted'` is still
+fully wakeable. Meanwhile the classifier's only workspace signal *is* `workspaces.status`,
+and it never reads `session_snapshots`. So the classifier declares conclusive death for
+sessions the recovery path would happily restore.
+
+This is precisely the contract in `.claude/rules/02-quality-gates.md`:
+> "sleep, wake, restore, replacement, probe failure, and unknown state are inconclusive"
+
+and the class of bug in `.claude/rules/53`: a *turn-level* signal (`activity='idle'`,
+meaning "the ACP prompt ended") and a *status* signal (`workspaces.status`) being used as
+proxies for a question they cannot answer ("is this session's work unrecoverable?").
+
+### Why the original brief's framing needed correcting
+
+The brief attributed the kill to `idle-cleanup.ts` treating chat-silence as idleness, and
+proposed making that sweep consult `session_state.activity`. The evidence does not support
+that as the proximate cause:
+
+- Both agents had **finished** their ACP turn (`end_turn`) 17–19 min before the sleep. They
+  were not "chat-quiet but working" at kill time; they were genuinely between turns.
+- Both DO idle sweeps (`processExpiredCleanups` `idle-cleanup.ts:320`,
+  `checkWorkspaceIdleTimeouts` `idle-cleanup.ts:548`) route through
+  `terminalizeIdleTaskInD1` → `getLocalTaskRuntimeLiveness`, which **preserves** unless the
+  shared classifier says conclusively dead. They did not kill these sessions.
+- The sleep cron is already activity-aware and will not sleep a `prompting` session.
+
+Every terminalization path — the stuck-task cron *and* both DO idle sweeps — funnels through
+the single shared `classifyTaskRuntimeLiveness`. Fixing it there fixes all three at once
+(DRY), instead of bolting separate guards into each sweep.
+
+## Fix
+
+Teach the shared classifier the one thing it is missing: **whether the session is currently
+asleep and restorable.**
+
+Add a session-resumability signal to `TaskRuntimeLivenessSignals`. When the workspace row
+exists but is not `running`, and the session has a live sleep record, classify as
+**inconclusive** (`workspace_<status>_snapshot_resumable`) instead of conclusive death.
+
+Resumability predicate (mirrors the resumer, plus a bound the resumer lacks):
+
+- a `session_snapshots` row exists for this workspace's `chat_session_id`, scoped to the
+  same `project_id` **and** `workspace_id` (rule 11: project-scoped reads)
+- `sleeping_at IS NOT NULL` — the session was genuinely slept. User deletes destroy the
+  snapshot row entirely (`session-snapshot-persistence.ts:42`), so this discriminates
+  idle-sleep from user deletion **without needing a new `deleted_reason` column**
+- `sleep_status = 'sleeping'` — asleep *now*, not a stale marker from a session that
+  already woke
+- `expires_at` parses and is in the future — **the bounded escape** (rule 47). Once the
+  snapshot expires the session is genuinely unrecoverable and the task fails normally.
+  An absent/unparseable expiry counts as NOT resumable, so no task can become immortal.
+
+`workspace_missing` (row absent) stays **conclusive**: `loadRecoveryContext` requires the
+workspace row to exist (`session-recovery.ts:91-94`), so a hard-deleted workspace really is
+unrecoverable. This boundary is chosen to match the resumer exactly.
+
+Probe-outcome handling: `'not_run'` preserves today's behaviour (no evidence → unchanged);
+`'error'` yields inconclusive for the non-running branch only, because the alternative is
+destroying a possibly-recoverable session.
+
+## Research findings → checklist mapping
+
+Every finding below has a checklist item or an explicit deferral.
+
+| Finding | Disposition |
+| --- | --- |
+| Classifier reads only `workspaces.status`; never `session_snapshots` | Item 1, 2 |
+| `node-lifecycle.ts:571` predicate rewrites `sleeping` → `deleted` | Covered by items 1–2 (classifier no longer trusts status alone) |
+| `workspaces` has no deletion-cause column | Not needed — snapshot presence is the discriminator (documented above) |
+| Two adapters feed the classifier; both must supply the signal | Item 3 (rule 44 enumeration) |
+| `expires_at` is `NOT NULL` in schema and is the natural escape bound | Item 1 |
+| `loadRecoveryContext` ignores `expires_at` — an expired snapshot would still be "restored" | **Deferred** → SAM Idea (separate bug, out of scope) |
+| `cancelStalledPrompt` bypasses `recordTurnEnd`/`publishTurnEnd` | Already tracked in `tasks/backlog/2026-08-17-migrate-cancel-stalled-prompt-to-record-turn-end.md` |
+| Snapshot for `da90b7c4` was `degraded` (`entries-skipped`) | Not gated on — matches resumer; noted in tests |
+
+## Implementation checklist
+
+- [ ] 1. `apps/api/src/services/task-runtime-liveness.ts`: add
+      `SessionResumabilitySnapshot`, `resumabilityProbeOutcome` +
+      `sessionResumability` to `TaskRuntimeLivenessSignals`, and an
+      `isSessionResumable()` helper enforcing the four-part predicate above.
+- [ ] 2. Insert the resumability branch into `classifyTaskRuntimeLiveness` between the
+      `INCONCLUSIVE_WORKSPACE_STATUSES` check and the `status !== 'running'` conclusive
+      branch. Keep `workspace_missing` conclusive.
+- [ ] 3. Add `loadSessionResumabilitySnapshot()` next to `loadRuntimeWorkspaceSnapshot()`
+      and wire **every** adapter (rule 44 — enumerate all callers of
+      `classifyTaskRuntimeLiveness`):
+      `apps/api/src/scheduled/stuck-tasks.ts` (`getTaskRuntimeLiveness`) and
+      `apps/api/src/durable-objects/project-data/task-runtime-liveness.ts`
+      (`getLocalTaskRuntimeLiveness`).
+- [ ] 4. Regression tests (see below).
+- [ ] 5. Post-mortem + process fix (rule 02 mandates both).
+- [ ] 6. File the deferred `loadRecoveryContext` expiry gap as a SAM Idea.
+
+## Required tests (rule 02 — must be discriminating)
+
+- [ ] **Reproduces the incident**: workspace `status='deleted'` + snapshot
+      `sleep_status='sleeping'`, `sleeping_at` set, `expires_at` 7 days out
+      → `conclusive === false`. Must FAIL on pre-fix code.
+- [ ] **Degraded snapshot still resumable** (the real `da90b7c4` shape:
+      `status='degraded'`, `degradation='entries-skipped'`) → inconclusive.
+- [ ] **Discriminating control — user delete**: workspace `deleted`, **no** snapshot row
+      → still `conclusive: true, reason:'workspace_deleted'`. Proves the fix does not
+      blanket-disable terminalization.
+- [ ] **Bounded escape (rule 47)**: `expires_at` in the past → conclusive dead.
+      Plus unparseable/absent expiry → conclusive dead (no immortal tasks).
+- [ ] **Already woke**: `sleeping_at` set but `sleep_status != 'sleeping'` → conclusive.
+- [ ] **`workspace_missing` unchanged**: row absent + snapshot present → conclusive
+      (matches `loadRecoveryContext`'s workspace-row requirement).
+- [ ] **Probe failure preserves**: `resumabilityProbeOutcome='error'` on a non-running
+      workspace → inconclusive.
+- [ ] **`not_run` back-compat**: existing signals shape → unchanged verdicts.
+- [ ] **Both adapters wired**: a vertical-slice test per adapter (rule 35) with realistic
+      D1 rows proving the snapshot is actually queried and reaches the classifier.
+- [ ] **Existing pins updated**: `apps/api/tests/workers/scheduled-stuck-tasks.test.ts:160,198`
+      and `apps/api/tests/unit/stuck-tasks.test.ts:1163,1207,1248` assert
+      `workspace_deleted` failures — confirm they use no-snapshot fixtures (correct) or
+      update them.
+
+## Acceptance criteria
+
+- [ ] A slept, unexpired session is never terminalized as conclusive runtime death by any
+      of the three paths (stuck-task cron, `processExpiredCleanups`, `checkWorkspaceIdleTimeouts`).
+- [ ] A user-deleted workspace still terminalizes exactly as before.
+- [ ] An expired snapshot terminalizes (bounded escape proven by test).
+- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green.
+- [ ] Staging deploy green + verified.
+- [ ] Post-mortem + process fix included in the PR.
+
+## References
+
+- `.claude/rules/02-quality-gates.md` — "sleep… is inconclusive"; regression + process fix
+- `.claude/rules/53-scheduled-handler-isolation-and-liveness-signals.md` — liveness ≠ idleness
+- `.claude/rules/57-write-only-cross-boundary-state.md` — reconcile, don't just report
+- `.claude/rules/47-control-loop-io-budget.md` — bounded escape path
+- `.claude/rules/44-dual-write-migration-enumerate-writers.md` — enumerate every adapter
+- `tasks/active/2026-08-16-session-activity-state-machine.md` — PR #1840 (ancestor)
