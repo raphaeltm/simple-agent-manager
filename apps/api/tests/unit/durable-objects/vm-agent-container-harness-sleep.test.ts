@@ -141,7 +141,7 @@ describe('onActivityExpired harness work lease integration', () => {
     expect(fake.markRuntimeSleeping).toHaveBeenCalledOnce();
   });
 
-  it('proceeds to sleep when ProjectData lookup fails (fail-open)', async () => {
+  it('fails closed when ProjectData lookup fails — renews timeout instead of sleeping', async () => {
     mockGetSessionState.mockRejectedValue(new Error('DO unavailable'));
 
     const fake = makeFake({
@@ -151,8 +151,10 @@ describe('onActivityExpired harness work lease integration', () => {
 
     await callOnActivityExpired.call(fake);
 
-    expect(fake.storagePut).toHaveBeenCalledWith('lifecycleStatus', 'sleep-preparing');
-    expect(fake.markRuntimeSleeping).toHaveBeenCalledOnce();
+    expect(fake.renewActivityTimeout).toHaveBeenCalledOnce();
+    expect(fake.storagePut).not.toHaveBeenCalledWith('lifecycleStatus', expect.anything());
+    expect(fake.markRuntimeSleeping).not.toHaveBeenCalled();
+    expect(fake.stop).not.toHaveBeenCalled();
   });
 
   it('skips harness check when activeWork has no agentSessionId', async () => {
@@ -177,6 +179,58 @@ describe('onActivityExpired harness work lease integration', () => {
 
     expect(mockGetSessionState).not.toHaveBeenCalled();
     expect(fake.storagePut).toHaveBeenCalledWith('lifecycleStatus', 'sleep-preparing');
+  });
+
+  it('skips harness check when activeWork was never set (no prompt processed)', async () => {
+    const fake = makeFake({
+      activeWork: undefined,
+      launchConfig,
+    });
+
+    await callOnActivityExpired.call(fake);
+
+    expect(mockGetSessionState).not.toHaveBeenCalled();
+    expect(fake.storagePut).toHaveBeenCalledWith('lifecycleStatus', 'sleep-preparing');
+  });
+
+  it('proceeds to sleep when getSessionState returns null (session not found)', async () => {
+    mockGetSessionState.mockResolvedValue(null);
+    mockIsHarnessWorkLeaseActive.mockReturnValue(false);
+
+    const fake = makeFake({
+      activeWork: makeActiveWork(),
+      launchConfig,
+    });
+
+    await callOnActivityExpired.call(fake);
+
+    expect(mockGetSessionState).toHaveBeenCalledWith(fake.env, 'proj-1', 'sess-1');
+    expect(mockIsHarnessWorkLeaseActive).not.toHaveBeenCalled();
+    expect(fake.storagePut).toHaveBeenCalledWith('lifecycleStatus', 'sleep-preparing');
+  });
+
+  it('passes correct arguments to harness helpers', async () => {
+    const sessionState = {
+      runtimeWorkState: 'active',
+      runtimeWorkUpdatedAt: Date.now(),
+      runtimeWorkProgressAt: Date.now(),
+    };
+    mockGetSessionState.mockResolvedValue(sessionState);
+    mockIsHarnessWorkLeaseActive.mockReturnValue(true);
+
+    const fake = makeFake({
+      activeWork: makeActiveWork(),
+      launchConfig,
+    });
+
+    await callOnActivityExpired.call(fake);
+
+    expect(mockParseHarnessWorkConfig).toHaveBeenCalledWith(fake.env);
+    expect(mockIsHarnessWorkLeaseActive).toHaveBeenCalledWith(
+      sessionState,
+      expect.any(Date),
+      { leaseMs: 120_000, maxDurationMs: 1_800_000 }
+    );
   });
 
   it('renews keepalive when active work deadline has not passed', async () => {

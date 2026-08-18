@@ -1053,6 +1053,58 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.failSessionSnapshotSleepBeforeTeardown).toHaveBeenCalledTimes(1);
   });
 
+  // Gate 2 (stateAfter): harness work starts between stateBefore and
+  // stateAfter. stateBefore is idle, stateAfter has active harness work.
+  it('aborts after snapshot when harness work begins during verification', async () => {
+    const now = Date.now();
+    let callCount = 0;
+    mocks.getSessionState.mockImplementation(async () => {
+      callCount++;
+      if (callCount <= 1) {
+        // stateBefore: idle, no harness work
+        return {
+          activity: 'idle',
+          activityAt: 100,
+          runtimeWorkState: null,
+          runtimeWorkUpdatedAt: null,
+          runtimeWorkProgressAt: null,
+        };
+      }
+      // stateAfter: harness work has started
+      return {
+        activity: 'idle',
+        activityAt: 100,
+        runtimeWorkState: 'active',
+        runtimeWorkCount: 1,
+        runtimeWorkSource: 'claude_sdk',
+        runtimeWorkUpdatedAt: now - 1_000,
+        runtimeWorkProgressAt: now - 1_000,
+      };
+    });
+    mocks.getRestorableSessionSnapshot
+      .mockReset()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        status: 'available',
+        degradation: 'none',
+        expiresAt: '2026-08-19T00:00:00.000Z',
+      });
+    const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
+
+    await expect(
+      sleepWorkspaceSession(buildEnv(), {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'test',
+      })
+    ).rejects.toThrow('Workspace activity changed while the final snapshot was captured');
+
+    expect(mocks.beginSessionSnapshotStopping).not.toHaveBeenCalled();
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(mocks.sleepSession).not.toHaveBeenCalled();
+    expect(mocks.failSessionSnapshotSleepBeforeTeardown).toHaveBeenCalledTimes(1);
+  });
+
   // The ceiling must also block sleep at the point-of-no-return. This test
   // uses the same scenario but with an expired ceiling so sleep proceeds,
   // proving the ceiling is checked at every gate.

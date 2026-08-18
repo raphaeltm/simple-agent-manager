@@ -3,6 +3,7 @@ import { Container, switchPort } from '@cloudflare/containers';
 
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { parsePositiveInt } from '../lib/route-helpers';
 import { maybeJsonRecord } from '../lib/runtime-validation';
 import { signCallbackToken, signNodeCallbackToken, signNodeManagementToken } from '../services/jwt';
 import {
@@ -57,6 +58,7 @@ export const DEFAULT_CF_CONTAINER_PORT_READY_TIMEOUT_MS = 30_000;
 export const DEFAULT_CF_CONTAINER_ACTIVE_WORK_MAX_MS = 2 * 60 * 60 * 1000;
 export const DEFAULT_CF_CONTAINER_KEEPALIVE_RENEW_INTERVAL_MS = 5 * 60 * 1000;
 export const DEFAULT_CF_CONTAINER_RECOVERY_MAX_ATTEMPTS = 2;
+export const DEFAULT_CF_CONTAINER_HARNESS_LEASE_CHECK_TIMEOUT_MS = 5_000;
 export interface VmAgentContainerLaunchConfig {
   nodeId: string;
   workspaceId: string;
@@ -473,11 +475,20 @@ export class VmAgentContainer extends Container<Env> {
             '../services/session-sleep'
           );
           const projectDataService = await import('../services/project-data');
-          const state = await projectDataService.getSessionState(
-            this.env,
-            config.projectId,
-            activeWork.agentSessionId
+          const timeoutMs = parsePositiveInt(
+            this.env.CF_CONTAINER_HARNESS_LEASE_CHECK_TIMEOUT_MS,
+            DEFAULT_CF_CONTAINER_HARNESS_LEASE_CHECK_TIMEOUT_MS
           );
+          const state = await Promise.race([
+            projectDataService.getSessionState(
+              this.env,
+              config.projectId,
+              activeWork.agentSessionId
+            ),
+            new Promise<never>((_, reject) =>
+              setTimeout(() => reject(new Error('harness lease check timed out')), timeoutMs)
+            ),
+          ]);
           if (state && isHarnessWorkLeaseActive(state, new Date(), parseHarnessWorkConfig(this.env))) {
             log.info('vm_agent_container_sleep_deferred_harness_work', {
               nodeId: config.nodeId,
@@ -488,13 +499,18 @@ export class VmAgentContainer extends Container<Env> {
             return;
           }
         } catch (error) {
-          // Fail open: proceed with sleep. The sleep transaction's snapshot
-          // verification and the VM-neutral sleep sweep both watch this state
-          // independently; a transient ProjectData failure here does not justify
-          // blocking the container from sleeping.
+          // Fail closed: unknown harness state must not authorize a destructive
+          // action (rule 58). Renew the timeout and retry on the next cycle;
+          // bounded by DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS once
+          // ProjectData recovers, and by the 24h node-lifetime sweep.
           log.warn('vm_agent_container_harness_lease_check_failed', {
+            nodeId: config.nodeId,
+            workspaceId: config.workspaceId,
+            agentSessionId: activeWork.agentSessionId,
             error: error instanceof Error ? error.message : String(error),
           });
+          await this.renewActivityTimeout();
+          return;
         }
       }
     }
