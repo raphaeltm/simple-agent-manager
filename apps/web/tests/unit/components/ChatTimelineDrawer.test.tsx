@@ -1,6 +1,13 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
+// The drawer's entry list is virtualized; JSDOM cannot measure it, so swap in the
+// shared faithful double (which renders every row and forwards `context`).
+vi.mock('react-virtuoso', async () => {
+  const { createVirtuosoModuleMock } = await import('../../helpers/virtuoso-mock');
+  return createVirtuosoModuleMock();
+});
+
 import { ChatTimelineDrawer } from '../../../src/components/chat/ChatTimelineDrawer';
 import type { TimelineEntry } from '../../../src/components/project-message-view/timeline-types';
 

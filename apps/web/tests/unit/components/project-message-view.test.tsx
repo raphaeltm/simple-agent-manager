@@ -113,21 +113,29 @@ const virtuosoMock = vi.hoisted(() => {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         itemContent?: (index: number, item: any) => React.ReactNode;
         style?: React.CSSProperties;
-        components?: { Header?: React.ComponentType };
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        components?: { Header?: React.ComponentType<any>; List?: React.ComponentType<any> };
+        // Real Virtuoso threads `context` into every `components.*` slot. The chat
+        // list depends on that to keep its Header a STABLE component type instead
+        // of an inline closure, so the mock must forward it — a context-less
+        // Header renders nothing and silently loses "Load earlier messages".
+        context?: unknown;
       },
       ref: React.Ref<unknown>,
     ) {
-      const { data, itemContent, style, components } = props;
+      const { data, itemContent, style, components, context } = props;
       React.useImperativeHandle(ref, () => ({
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         scrollToIndex: (arg: any) => { scrollToIndexCalls.push(arg); },
       }), []);
       const HeaderComponent = components?.Header;
+      const ListComponent = components?.List;
+      const rows = data?.map((item, index) =>
+        React.createElement('div', { key: index }, itemContent?.(index, item))
+      );
       return React.createElement('div', { 'data-testid': 'virtuoso-scroller', style },
-        HeaderComponent ? React.createElement(HeaderComponent) : null,
-        data?.map((item, index) =>
-          React.createElement('div', { key: index }, itemContent?.(index, item))
-        )
+        HeaderComponent ? React.createElement(HeaderComponent, { context }) : null,
+        ListComponent ? React.createElement(ListComponent, { context }, rows) : rows
       );
     }),
   };
@@ -1305,6 +1313,39 @@ describe('ProjectMessageView — virtual scroll', () => {
 
     // The Virtuoso mock renders components.Header which contains the load-more button
     expect(screen.getByText('Load earlier messages')).toBeTruthy();
+  });
+
+  // Regression: `components={{ Header: () => (...) }}` written inline creates a new
+  // component TYPE on every parent render. React unmounts and remounts a subtree
+  // whose type changed, so the spacer and the "Load earlier messages" button were
+  // being destroyed and rebuilt on every render — during streaming, once per token.
+  //
+  // DOM node identity is the discriminating signal: a re-render that only updates
+  // props keeps the same element instance, while a remount produces a new one.
+  // Asserting the button is merely "still present" passes either way.
+  it('does not remount the list header subtree when the parent re-renders', async () => {
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession('session-1'),
+      messages: [makeMessage('msg-1', 'session-1', 'Recent message')],
+      hasMore: true,
+    });
+
+    const { rerender } = render(
+      <ProjectMessageView projectId="proj-1" sessionId="session-1" />,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('Recent message')).toBeTruthy();
+    });
+
+    const buttonBefore = screen.getByText('Load earlier messages');
+
+    // Force parent re-renders without changing anything the header reads.
+    rerender(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+    rerender(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
+
+    const buttonAfter = screen.getByText('Load earlier messages');
+    expect(buttonAfter).toBe(buttonBefore);
   });
 
   it('does not render "Load earlier messages" button when hasMore is false', async () => {

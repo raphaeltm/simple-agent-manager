@@ -17,6 +17,22 @@ export interface TimelineProps {
   children?: ReactNode;
 }
 
+/**
+ * The vertical stem line on its own, so a virtualized timeline can draw the same
+ * line around a windowed item list instead of re-implementing it. Absolutely
+ * positioned — the caller owns the `relative` container.
+ */
+export function TimelineStem({ stemColor = DEFAULT_STEM_COLOR }: { stemColor?: string }) {
+  return (
+    <div
+      className="absolute left-[9px] top-0 bottom-0 w-[2px] rounded-full pointer-events-none"
+      style={{
+        background: `linear-gradient(to bottom, transparent 0%, ${stemColor} 6%, ${stemColor} 94%, transparent 100%)`,
+      }}
+    />
+  );
+}
+
 export function Timeline({
   stemColor = DEFAULT_STEM_COLOR,
   className = '',
@@ -33,13 +49,7 @@ export function Timeline({
 
   return (
     <div className={`relative ${className}`}>
-      {/* Vertical stem line */}
-      <div
-        className="absolute left-[9px] top-0 bottom-0 w-[2px] rounded-full pointer-events-none"
-        style={{
-          background: `linear-gradient(to bottom, transparent 0%, ${stemColor} 6%, ${stemColor} 94%, transparent 100%)`,
-        }}
-      />
+      <TimelineStem stemColor={stemColor} />
       <div className="flex flex-col">{children}</div>
     </div>
   );

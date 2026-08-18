@@ -8,7 +8,7 @@ import {
   ToolCallCard as AcpToolCallCard,
   UserMessageFade,
 } from '@simple-agent-manager/acp-client';
-import { useCallback } from 'react';
+import { memo, useCallback } from 'react';
 
 import { useGlobalAudio } from '../../contexts/GlobalAudioContext';
 import { getTtsApiUrl } from '../../lib/api';
@@ -85,17 +85,7 @@ export function CollapsedInjectedMessage({ text }: { text: string }) {
   );
 }
 
-/** Renders a single ACP ConversationItem using the shared acp-client components.
- *  When `animateText` is true for agent_message items, MessageBubble renders with
- *  per-character fade-in animation via TypewriterText. */
-export function AcpConversationItemView({
-  item,
-  onFileClick,
-  onLoadToolContent,
-  animateText,
-  animateUserMessage,
-  projectId,
-}: {
+interface AcpConversationItemViewProps {
   item: ConversationItem;
   onFileClick?: (path: string, line?: number | null) => void;
   onLoadToolContent?: (messageId: string) => Promise<ToolCallContentItem[]>;
@@ -105,7 +95,19 @@ export function AcpConversationItemView({
   animateUserMessage?: boolean;
   /** Project context — enables typed tool-call cards (e.g. DocumentCard previews). */
   projectId?: string;
-}) {
+}
+
+/** Renders a single ACP ConversationItem using the shared acp-client components.
+ *  When `animateText` is true for agent_message items, MessageBubble renders with
+ *  per-character fade-in animation via TypewriterText. */
+function AcpConversationItemViewImpl({
+  item,
+  onFileClick,
+  onLoadToolContent,
+  animateText,
+  animateUserMessage,
+  projectId,
+}: AcpConversationItemViewProps) {
   // Depend on `startPlayback` (a stable useCallback) rather than the whole
   // GlobalAudio context value — that value is memoized but re-created as
   // playback state ticks, which would re-break MessageBubble's React.memo for
@@ -207,3 +209,20 @@ export function AcpConversationItemView({
       return null;
   }
 }
+
+/**
+ * Memoized so a re-render of the virtualized list does not re-run this wrapper
+ * (and its `switch`, and `useGlobalAudio`) for every row currently inside the
+ * scroll window.
+ *
+ * The memo boundary previously started one level lower, at `MessageBubble`. That
+ * left this wrapper re-rendering for every windowed row on every parent render;
+ * `MessageBubble` then bailed out, but only after this component had already
+ * re-subscribed to the audio context and re-walked the item union. Hoisting the
+ * boundary here means a settled row does no work at all.
+ *
+ * Default shallow prop comparison is correct: `item` objects are rebuilt by
+ * `chatMessagesToConversationItems` only when `lc.messages` actually changes, and
+ * the two callbacks plus `projectId` are stable at the call site.
+ */
+export const AcpConversationItemView = memo(AcpConversationItemViewImpl);

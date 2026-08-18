@@ -56,6 +56,54 @@ function nearestItemId(items: ConversationItem[], timestamp: number): string | u
 export { chatMessagesToConversationItems, groupMessages } from './types';
 
 /**
+ * Data the virtualized list's Header needs, threaded through Virtuoso's `context`
+ * prop rather than captured in a closure.
+ *
+ * This exists so `ChatListHeader` can be a module-scope component with a STABLE
+ * identity. `components={{ Header: () => ... }}` written inline creates a brand
+ * new component *type* on every parent render, and React unmounts + remounts a
+ * subtree whose type changed — so the spacer and the "Load earlier messages"
+ * button were being torn down and rebuilt on every render, which during
+ * streaming means every single token. Passing the varying values through
+ * `context` keeps the type constant and turns those remounts into plain prop
+ * updates.
+ */
+interface ChatListContext {
+  headerSpacerHeight: number;
+  hasMore: boolean;
+  loadingMore: boolean;
+  onLoadMore: () => void;
+}
+
+function ChatListHeader({ context }: { context?: ChatListContext }) {
+  if (!context) return null;
+  return (
+    <>
+      {/* Spacer for absolutely-positioned FloatingHeader so messages aren't hidden
+          behind it — tracks the measured header height (title wrap, badges, error
+          banner, and summary all change it). The extra 8px keeps the first message
+          clear of the glass edge. */}
+      <div style={{ height: context.headerSpacerHeight }} />
+      {context.hasMore && (
+        <div className="text-center py-3">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={context.onLoadMore}
+            loading={context.loadingMore}
+          >
+            Load earlier messages
+          </Button>
+        </div>
+      )}
+    </>
+  );
+}
+
+/** Stable `components` object — see `ChatListHeader` for why this must not be inline. */
+const CHAT_LIST_COMPONENTS = { Header: ChatListHeader };
+
+/**
  * Measures the floating header's rendered height so the message list can pad
  * itself by the real value. The header stack (title wrapping to two lines,
  * status badges, error banner, output summary) varies from ~56px to several
@@ -403,6 +451,67 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
     return -1;
   }, [conversationItems]);
 
+  // Only pass a file-click handler through when the session can actually serve
+  // files; hoisted so `renderConversationItem` has a stable dependency instead of
+  // rebuilding the ternary (and therefore the callback) on every render.
+  const fileClickHandler =
+    lc.session?.workspaceId && lc.sessionState === 'active' ? lc.handleFileClick : undefined;
+
+  /**
+   * Row renderer for the virtualized conversation.
+   *
+   * Memoized so the identity only changes when something a row actually reads
+   * changes. An inline arrow here gives Virtuoso a new `itemContent` on every
+   * parent render, which re-renders every row currently inside the scroll window
+   * — the exact cost `React.memo` on `AcpConversationItemView` exists to avoid.
+   *
+   * `index` is Virtuoso's `firstItemIndex`-OFFSET coordinate, which is why the
+   * animation comparison subtracts `lc.firstItemIndex` to get back to the
+   * zero-based data index. Do not "simplify" that away — see the coordinate-space
+   * note on `itemIndexById` above.
+   */
+  const renderConversationItem = useCallback(
+    (index: number, item: ConversationItem) => (
+      <div
+        className={`sam-message-entry px-4 pb-3${highlightedItemId === item.id ? ' sam-message-highlight' : ''}`}
+      >
+        <AcpConversationItemView
+          item={item}
+          projectId={projectId}
+          onFileClick={fileClickHandler}
+          onLoadToolContent={handleLoadToolContent}
+          animateText={
+            item.kind === 'agent_message' &&
+            index - lc.firstItemIndex === animationTargetIdx &&
+            lc.agentActivity === 'responding'
+          }
+          animateUserMessage={item.kind === 'user_message' && animatedUserMsgIds.has(item.id)}
+        />
+      </div>
+    ),
+    [
+      highlightedItemId,
+      projectId,
+      fileClickHandler,
+      handleLoadToolContent,
+      lc.firstItemIndex,
+      lc.agentActivity,
+      animationTargetIdx,
+      animatedUserMsgIds,
+    ]
+  );
+
+  /** Values the stable `ChatListHeader` reads, passed via Virtuoso's `context`. */
+  const chatListContext = useMemo<ChatListContext>(
+    () => ({
+      headerSpacerHeight: floatingHeaderHeight + 8,
+      hasMore: lc.hasMore,
+      loadingMore: lc.loadingMore,
+      onLoadMore: lc.loadMore,
+    }),
+    [floatingHeaderHeight, lc.hasMore, lc.loadingMore, lc.loadMore]
+  );
+
   const planItem = useMemo(
     () =>
       lc.currentPlan && lc.currentPlan.length > 0 ? currentPlanToPlanItem(lc.currentPlan) : null,
@@ -563,53 +672,9 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
               atBottomThreshold={50}
               atBottomStateChange={(atBottom) => lc.setShowScrollButton(!atBottom)}
               overscan={200}
-              itemContent={(index, item) => (
-                <div
-                  className={`sam-message-entry px-4 pb-3${highlightedItemId === item.id ? ' sam-message-highlight' : ''}`}
-                >
-                  <AcpConversationItemView
-                    item={item}
-                    projectId={projectId}
-                    onFileClick={
-                      lc.session?.workspaceId && lc.sessionState === 'active'
-                        ? lc.handleFileClick
-                        : undefined
-                    }
-                    onLoadToolContent={handleLoadToolContent}
-                    animateText={
-                      item.kind === 'agent_message' &&
-                      index - lc.firstItemIndex === animationTargetIdx &&
-                      lc.agentActivity === 'responding'
-                    }
-                    animateUserMessage={
-                      item.kind === 'user_message' && animatedUserMsgIds.has(item.id)
-                    }
-                  />
-                </div>
-              )}
-              components={{
-                Header: () => (
-                  <>
-                    {/* Spacer for absolutely-positioned FloatingHeader so messages aren't hidden
-                        behind it — tracks the measured header height (title wrap, badges, error
-                        banner, and summary all change it). The extra 8px keeps the first message
-                        clear of the glass edge. */}
-                    <div style={{ height: floatingHeaderHeight + 8 }} />
-                    {lc.hasMore && (
-                      <div className="text-center py-3">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={lc.loadMore}
-                          loading={lc.loadingMore}
-                        >
-                          Load earlier messages
-                        </Button>
-                      </div>
-                    )}
-                  </>
-                ),
-              }}
+              itemContent={renderConversationItem}
+              context={chatListContext}
+              components={CHAT_LIST_COMPONENTS}
             />
           </div>
 

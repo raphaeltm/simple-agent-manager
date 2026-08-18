@@ -90,6 +90,19 @@ export const DEFAULT_CHAT_SESSION_MESSAGE_MAX = 50000;
 export const DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES = 400;
 
 /**
+ * Safety bound on how many pages the timeline drawer fetches when it opens.
+ *
+ * The drawer paginates user messages and progress notifications to exhaustion to
+ * build a complete jump index. Both loops were previously unbounded `for(;;)`
+ * loops with no page cap, so a server that keeps reporting `hasMore` (or a
+ * cursor that fails to advance) would spin forever. This is the same class of
+ * guard as DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES, applied per loop.
+ *
+ * Override at build time via VITE_CHAT_TIMELINE_MAX_PAGES.
+ */
+export const DEFAULT_CHAT_TIMELINE_MAX_PAGES = 200;
+
+/**
  * Whether chat session message loads strip tool_metadata.content by default.
  * When true, tool call content is lazy-loaded on demand when users expand
  * individual tool calls, dramatically reducing RPC payload size.

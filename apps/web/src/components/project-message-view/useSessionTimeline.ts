@@ -1,4 +1,4 @@
-import type { NotificationResponse } from '@simple-agent-manager/shared';
+import { DEFAULT_CHAT_TIMELINE_MAX_PAGES, type NotificationResponse } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import { listNotifications } from '../../lib/api/notifications';
@@ -29,11 +29,21 @@ export function useSessionTimeline(
 
   const fetchTimeline = useCallback(async () => {
     setLoading(true);
+    // Safety bound on both pagination loops below. They were previously `for(;;)`
+    // with no page cap, so a server that keeps reporting `hasMore`/`nextCursor`
+    // — or a cursor that stops advancing — would spin forever, holding the
+    // drawer in its loading state and issuing unbounded requests. Same guard as
+    // `loadUntil`'s in useSessionLifecycle.
+    const maxPages =
+      Number.parseInt(import.meta.env.VITE_CHAT_TIMELINE_MAX_PAGES || '', 10) ||
+      DEFAULT_CHAT_TIMELINE_MAX_PAGES;
+
     try {
       const messagePages: ChatMessageResponse[][] = [];
       let before: number | undefined;
+      let pages = 0;
 
-      for (;;) {
+      while (pages++ < maxPages) {
         const result = await listChatMessages(projectId, sessionId, {
           before,
           roles: ['user'],
@@ -45,7 +55,10 @@ export function useSessionTimeline(
         }
 
         messagePages.unshift(result.messages);
-        before = result.messages[0]?.createdAt;
+        const nextBefore = result.messages[0]?.createdAt;
+        // A cursor that fails to advance would re-request the same page forever.
+        if (nextBefore === undefined || nextBefore === before) break;
+        before = nextBefore;
 
         if (!result.hasMore) break;
       }
@@ -58,8 +71,9 @@ export function useSessionTimeline(
     try {
       const notificationPages: NotificationResponse[][] = [];
       let cursor: string | undefined;
+      let pages = 0;
 
-      for (;;) {
+      while (pages++ < maxPages) {
         const notificationsResult = await listNotifications({
           projectId,
           sessionId,
@@ -71,6 +85,8 @@ export function useSessionTimeline(
         if (!notificationsResult.nextCursor || notificationsResult.notifications.length === 0) {
           break;
         }
+        // Same non-advancing-cursor guard as the message loop above.
+        if (notificationsResult.nextCursor === cursor) break;
         cursor = notificationsResult.nextCursor;
       }
 

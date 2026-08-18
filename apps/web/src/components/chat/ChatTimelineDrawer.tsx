@@ -1,7 +1,14 @@
-import { Button, Spinner, Timeline, TimelineItem, TimelineSeparator } from '@simple-agent-manager/ui';
+import {
+  Button,
+  Spinner,
+  TimelineItem,
+  TimelineSeparator,
+  TimelineStem,
+} from '@simple-agent-manager/ui';
 import { AlignLeft, Clock, X } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { forwardRef, useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
+import { Virtuoso } from 'react-virtuoso';
 
 import type { TimelineEntry, TimelineJumpTarget } from '../project-message-view/timeline-types';
 
@@ -52,6 +59,17 @@ export function ChatTimelineDrawer({
     panelRef.current?.focus();
   }, []);
 
+  const renderEntry = useCallback(
+    (index: number, entry: TimelineEntry) => (
+      <TimelineEntryRow
+        entry={entry}
+        previousEntry={index > 0 ? entries[index - 1] : undefined}
+        onJump={onJump}
+      />
+    ),
+    [entries, onJump]
+  );
+
   return createPortal(
     <>
       {/* Backdrop — visible only on desktop */}
@@ -100,7 +118,7 @@ export function ChatTimelineDrawer({
         </header>
 
         {/* Body */}
-        <div className="flex-1 overflow-y-auto px-3 py-3 min-h-0">
+        <div className="flex-1 min-h-0">
           {loading && entries.length === 0 ? (
             <div className="flex items-center justify-center py-8">
               <Spinner size="sm" />
@@ -110,89 +128,127 @@ export function ChatTimelineDrawer({
               No timeline entries yet
             </div>
           ) : (
-            <Timeline>
-              {entries.map((entry, i) => {
-                // Insert date separator when the day changes
-                const prevEntry = i > 0 ? entries[i - 1] : null;
-                const showDateSep =
-                  prevEntry &&
-                  new Date(prevEntry.timestamp).toDateString() !==
-                    new Date(entry.timestamp).toDateString();
-
-                return (
-                  <div key={entry.id}>
-                    {showDateSep && (
-                      <TimelineSeparator
-                        label={new Date(entry.timestamp).toLocaleDateString([], {
-                          month: 'short',
-                          day: 'numeric',
-                        })}
-                      />
-                    )}
-                    {entry.kind === 'user_message' ? (
-                      <TimelineItem dot={{ color: DOT_COLOR_USER }}>
-                        <button
-                          type="button"
-                          className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-                          onClick={() => onJump({ messageId: entry.messageId, timestamp: entry.timestamp })}
-                        >
-                          <div className="text-xs text-fg-muted mb-0.5">
-                            {formatTime(entry.timestamp)}
-                          </div>
-                          <div className="text-sm text-fg-primary leading-snug line-clamp-2 group-hover:text-fg-accent transition-colors">
-                            {entry.text}
-                          </div>
-                        </button>
-                      </TimelineItem>
-                    ) : entry.kind === 'progress_notification' ? (
-                      <TimelineItem dot={{ color: DOT_COLOR_PROGRESS, muted: true }}>
-                        <button
-                          type="button"
-                          aria-label={`Jump to conversation near status update: ${entry.title}`}
-                          className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-                          onClick={() => onJump({ timestamp: entry.timestamp })}
-                        >
-                          <div className="text-xs text-fg-muted mb-0.5">
-                            {formatTime(entry.timestamp)}
-                          </div>
-                          <div className="text-[11px] uppercase text-fg-muted mb-1">
-                            Status update
-                          </div>
-                          <div className="text-sm text-fg-primary leading-snug line-clamp-3 group-hover:text-fg-accent transition-colors">
-                            {entry.text}
-                          </div>
-                        </button>
-                      </TimelineItem>
-                    ) : (
-                      <TimelineItem
-                        dot={{
-                          color: SEVERITY_COLORS[entry.severity] ?? SEVERITY_COLORS.info,
-                          muted: entry.severity === 'info',
-                        }}
-                      >
-                        <button
-                          type="button"
-                          aria-label={`Jump to conversation near activity: ${entry.title}`}
-                          className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
-                          onClick={() => onJump({ timestamp: entry.timestamp })}
-                        >
-                          <div className="text-xs text-fg-muted mb-0.5">
-                            {formatTime(entry.timestamp)}
-                          </div>
-                          <div className="text-xs text-fg-muted leading-snug group-hover:text-fg-accent transition-colors">
-                            {entry.title}
-                          </div>
-                        </button>
-                      </TimelineItem>
-                    )}
-                  </div>
-                );
-              })}
-            </Timeline>
+            <Virtuoso
+              data={entries}
+              style={{ height: '100%' }}
+              overscan={TIMELINE_OVERSCAN_PX}
+              components={TIMELINE_LIST_COMPONENTS}
+              itemContent={renderEntry}
+            />
           )}
         </div>
       </div>
     </>,
     document.body
+  );
+}
+
+/**
+ * Overscan (px) for the virtualized timeline. Matches the message list's budget
+ * so both scrollers keep a comparable off-screen buffer.
+ */
+const TIMELINE_OVERSCAN_PX = 200;
+
+/**
+ * Virtuoso's List slot, so the timeline stem spans the full virtual content
+ * height rather than only the visible window.
+ *
+ * Virtuoso offsets the windowed rows by writing `paddingTop`/`paddingBottom` into
+ * `style` on this element, so its box already covers the entire scroll extent —
+ * which is exactly what `TimelineStem`'s `top-0 bottom-0` needs. The rows go in an
+ * inner flex column so the padding stays on the positioned parent.
+ */
+const TimelineList = forwardRef<
+  HTMLDivElement,
+  { style?: React.CSSProperties; children?: React.ReactNode }
+>(function TimelineList({ style, children }, ref) {
+  return (
+    <div ref={ref} style={style} className="relative px-3">
+      <TimelineStem />
+      <div className="flex flex-col">{children}</div>
+    </div>
+  );
+});
+
+/** Stable `components` object — an inline literal remounts the list every render. */
+const TIMELINE_LIST_COMPONENTS = { List: TimelineList };
+
+/** One virtualized timeline row, including its date separator when the day changes. */
+function TimelineEntryRow({
+  entry,
+  previousEntry,
+  onJump,
+}: {
+  entry: TimelineEntry;
+  previousEntry: TimelineEntry | undefined;
+  onJump: (target: TimelineJumpTarget) => void;
+}) {
+  // Insert date separator when the day changes. The separator belongs to the row
+  // that starts the new day, so it stays correct under virtualization (a row is
+  // rendered without its predecessors being mounted).
+  const showDateSep =
+    previousEntry !== undefined &&
+    new Date(previousEntry.timestamp).toDateString() !==
+      new Date(entry.timestamp).toDateString();
+
+  return (
+    <div>
+      {showDateSep && (
+        <TimelineSeparator
+          label={new Date(entry.timestamp).toLocaleDateString([], {
+            month: 'short',
+            day: 'numeric',
+          })}
+        />
+      )}
+      {entry.kind === 'user_message' ? (
+        <TimelineItem dot={{ color: DOT_COLOR_USER }}>
+          <button
+            type="button"
+            className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+            onClick={() => onJump({ messageId: entry.messageId, timestamp: entry.timestamp })}
+          >
+            <div className="text-xs text-fg-muted mb-0.5">{formatTime(entry.timestamp)}</div>
+            <div className="text-sm text-fg-primary leading-snug line-clamp-2 group-hover:text-fg-accent transition-colors">
+              {entry.text}
+            </div>
+          </button>
+        </TimelineItem>
+      ) : entry.kind === 'progress_notification' ? (
+        <TimelineItem dot={{ color: DOT_COLOR_PROGRESS, muted: true }}>
+          <button
+            type="button"
+            aria-label={`Jump to conversation near status update: ${entry.title}`}
+            className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+            onClick={() => onJump({ timestamp: entry.timestamp })}
+          >
+            <div className="text-xs text-fg-muted mb-0.5">{formatTime(entry.timestamp)}</div>
+            <div className="text-[11px] uppercase text-fg-muted mb-1">Status update</div>
+            <div className="text-sm text-fg-primary leading-snug line-clamp-3 group-hover:text-fg-accent transition-colors">
+              {entry.text}
+            </div>
+          </button>
+        </TimelineItem>
+      ) : (
+        <TimelineItem
+          dot={{
+            color: SEVERITY_COLORS[entry.severity] ?? SEVERITY_COLORS.info,
+            muted: entry.severity === 'info',
+          }}
+        >
+          <button
+            type="button"
+            aria-label={`Jump to conversation near activity: ${entry.title}`}
+            className="w-full text-left py-1.5 px-1 rounded hover:bg-bg-hover transition-colors group cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring"
+            onClick={() => onJump({ timestamp: entry.timestamp })}
+          >
+            <div className="text-xs text-fg-muted mb-0.5">{formatTime(entry.timestamp)}</div>
+            <div className="text-xs text-fg-muted leading-snug group-hover:text-fg-accent transition-colors">
+              {entry.title}
+            </div>
+          </button>
+        </TimelineItem>
+      )}
+    </div>
   );
 }
