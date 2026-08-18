@@ -1,130 +1,32 @@
-import {
-  DEFAULT_QUERY_PERSIST_MAX_AGE_MS,
-  DEFAULT_QUERY_PERSIST_RESTORE_TIMEOUT_MS,
-  DEFAULT_QUERY_PERSIST_THROTTLE_MS,
-} from '@simple-agent-manager/shared';
 import type { PersistedClient, Persister } from '@tanstack/query-persist-client-core';
-import type { Query } from '@tanstack/react-query';
 import { del, delMany, get, keys, set, type UseStore } from 'idb-keyval';
 
-/**
- * Persistence for an allowlisted slice of the TanStack Query cache.
- *
- * Why IndexedDB and not localStorage: `lib/library-cache.ts` already competes for
- * the ~5 MB localStorage budget hard enough to need its own LRU eviction
- * (`findOldestLibraryKey`). Putting the query cache in a separate IDB store means
- * it can never evict library index entries, and gives headroom as the allowlist
- * grows.
- *
- * ## Security model
- *
- * Two independent layers, either of which alone prevents cross-user leakage:
- *
- * 1. **Storage key namespacing** — the IDB key embeds the authenticated user
- *    namespace (`buildLibraryCacheNamespace`), so two accounts never share a
- *    record. `AuthProvider` additionally deletes the previous namespace's record
- *    on every identity transition.
- * 2. **Dehydration allowlist** — {@link shouldDehydratePersistedQuery} only ever
- *    persists keys shaped `['auth', <the current user's scope>, <allowed domain>]`.
- *    A key belonging to another scope cannot be written even if it is somehow
- *    resident in the cache.
- *
- * The allowlist is deliberately narrow. `tasks/backlog/2026-08-07-expand-frontend-
- * query-cache-and-persistence.md` bans persisting chat messages/agent output,
- * credentials/tokens, admin errors and diagnoses, node/workspace runtime details,
- * file contents/signed URLs, and mutation state without a separate security
- * review. Because every one of those surfaces uses an *unscoped* query key
- * (`['nodes',…]`, `['workspaces',…]`, `['admin-diagnosis',…]`,
- * `['notification-preferences']`), requiring the `['auth', scope, …]` shape
- * excludes them structurally rather than by a hand-maintained denylist.
- */
-
-/** Query-key domains (`key[2]`) approved for persistence.
- *
- * Adding a domain here persists that data to disk on the user's device — it
- * requires the security review described above. `github` (installation lists) is
- * deliberately NOT included: installation identifiers are connection
- * configuration, which the backlog task lists as review-gated. */
-const PERSISTED_QUERY_DOMAINS: ReadonlySet<string> = new Set(['projects']);
-
-/** Prefix for every persisted query-cache record. */
-const QUERY_PERSIST_KEY_PREFIX = 'sam-query-cache';
+import {
+  buildQueryPersistStorageKey,
+  QUERY_PERSIST_KEY_PREFIX,
+  QUERY_PERSIST_RESTORE_TIMEOUT_MS,
+  QUERY_PERSIST_THROTTLE_MS,
+} from './query-persist-config';
 
 /**
- * Generation marker for the persisted payload. Bump whenever the dehydrated shape
- * or the allowlist changes so previously written records are discarded instead of
- * hydrated into a cache that no longer understands them.
+ * The IndexedDB half of query-cache persistence.
  *
- * Hand-maintained on purpose, following the `sam-shell-v3` precedent in
- * `src/sw.ts`: no build hash or version string reaches the web bundle today
- * (`vite.config.ts` has no `define` block and CI injects no SHA), so a derived
- * buster would have to be invented rather than read.
+ * Split from `query-persist-config.ts` so that `idb-keyval` and this module's
+ * machinery stay OUT of the eager bundle: only `useQueryCachePersistence` loads
+ * this, and only once a signed-in namespace exists. See that hook's doc comment.
+ *
+ * Re-exports the pure policy surface so existing importers (and tests) can keep
+ * treating `query-persistence` as the single entry point.
  */
-export const QUERY_PERSIST_SCHEMA_VERSION = 'v1';
-
-function readPositiveIntEnv(raw: string | undefined, fallback: number): number {
-  const parsed = raw ? Number(raw) : Number.NaN;
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-/** How long a persisted record may be restored after it was written. */
-export const QUERY_PERSIST_MAX_AGE_MS = readPositiveIntEnv(
-  import.meta.env?.VITE_QUERY_PERSIST_MAX_AGE_MS,
-  DEFAULT_QUERY_PERSIST_MAX_AGE_MS
-);
-
-/** Minimum gap between IndexedDB writes. */
-export const QUERY_PERSIST_THROTTLE_MS = readPositiveIntEnv(
-  import.meta.env?.VITE_QUERY_PERSIST_THROTTLE_MS,
-  DEFAULT_QUERY_PERSIST_THROTTLE_MS
-);
-
-/** Upper bound on the initial restore before we fail open to an empty cache. */
-export const QUERY_PERSIST_RESTORE_TIMEOUT_MS = readPositiveIntEnv(
-  import.meta.env?.VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS,
-  DEFAULT_QUERY_PERSIST_RESTORE_TIMEOUT_MS
-);
-
-/**
- * IndexedDB key for a user namespace. Returns `null` for an absent namespace, so
- * an unauthenticated session persists nothing at all.
- *
- * @param namespace the value from `buildLibraryCacheNamespace(userId)`
- */
-export function buildQueryPersistStorageKey(
-  namespace: string | null | undefined
-): string | null {
-  if (!namespace) return null;
-  return `${QUERY_PERSIST_KEY_PREFIX}:${QUERY_PERSIST_SCHEMA_VERSION}:${namespace}`;
-}
-
-/**
- * The dehydration allowlist.
- *
- * A query is persisted only when ALL hold:
- *  - it succeeded and actually has data (never persist errors or in-flight state);
- *  - its key is `['auth', scope, domain, …]`;
- *  - `scope` is the *currently authenticated* scope, not merely some scope;
- *  - `domain` is in {@link PERSISTED_QUERY_DOMAINS}.
- *
- * @param scope the active `queryScope` (`user.id`) — an empty scope persists nothing
- */
-export function shouldDehydratePersistedQuery(query: Query, scope: string): boolean {
-  if (!scope) return false;
-  if (query.state.status !== 'success' || query.state.data === undefined) return false;
-
-  const key = query.queryKey;
-  if (!Array.isArray(key) || key.length < 3) return false;
-
-  const [prefix, keyScope, domain] = key;
-  return (
-    prefix === 'auth' &&
-    typeof keyScope === 'string' &&
-    keyScope === scope &&
-    typeof domain === 'string' &&
-    PERSISTED_QUERY_DOMAINS.has(domain)
-  );
-}
+export {
+  buildQueryPersistStorageKey,
+  PERSISTED_QUERY_OPERATIONS,
+  QUERY_PERSIST_MAX_AGE_MS,
+  QUERY_PERSIST_RESTORE_TIMEOUT_MS,
+  QUERY_PERSIST_SCHEMA_VERSION,
+  QUERY_PERSIST_THROTTLE_MS,
+  shouldDehydratePersistedQuery,
+} from './query-persist-config';
 
 /**
  * A `Persister` backed by IndexedDB.
@@ -159,19 +61,40 @@ export function createIdbQueryPersister(
   let pendingClient: PersistedClient | null = null;
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
   let lastWriteAt = 0;
+  let lastWrittenPayload: string | null = null;
 
   const flush = async (): Promise<void> => {
     flushTimer = null;
     const client = pendingClient;
     pendingClient = null;
     if (!client || disabled) return;
+
+    // Skip a write that would not change anything on disk.
+    //
+    // `persistQueryClientSubscribe` subscribes to the WHOLE query cache and
+    // re-dehydrates on every event anywhere in the app — a screen polling two
+    // unrelated queries every 10s therefore enqueues a write every throttle
+    // window even though nothing in the persisted allowlist changed. Comparing
+    // the serialized payload skips the expensive part (structured clone + IDB
+    // transaction) for those no-op churn events.
+    let payload: string;
+    try {
+      payload = JSON.stringify(client);
+    } catch {
+      // Non-serializable snapshot: let idb-keyval's structured clone decide.
+      payload = '';
+    }
+    if (payload !== '' && payload === lastWrittenPayload) return;
+
     lastWriteAt = Date.now();
     try {
       await set(storageKey, client, store);
+      lastWrittenPayload = payload === '' ? null : payload;
     } catch {
       // Quota exceeded, private mode, or a closed connection. Stop writing —
       // retrying on every cache event would only burn cycles.
       disabled = true;
+      lastWrittenPayload = null;
     }
   };
 
@@ -270,10 +193,7 @@ export async function removeAllPersistedQueryCaches(
   };
 
   try {
-    await Promise.race([
-      sweep(),
-      new Promise<void>((resolve) => setTimeout(resolve, timeoutMs)),
-    ]);
+    await Promise.race([sweep(), new Promise<void>((resolve) => setTimeout(resolve, timeoutMs))]);
   } catch {
     // IndexedDB unavailable or rejected — see the doc comment; failing open is safe.
   }

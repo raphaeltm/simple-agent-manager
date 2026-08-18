@@ -185,11 +185,17 @@ export const DEFAULT_QUERY_PERSIST_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
  * write per cache event. Override via VITE_QUERY_PERSIST_THROTTLE_MS. */
 export const DEFAULT_QUERY_PERSIST_THROTTLE_MS = 1_000;
 
-/** Upper bound on the initial cache restore. Rendering is gated on restore, so a
- * hung or pathologically slow IndexedDB must not hang the app — past this budget
- * we fail open and start with an empty in-memory cache.
+/** Upper bound on the initial cache restore for a signed-in user.
+ *
+ * Rendering is gated on this restore, and that gate can only ever ADD latency to
+ * first paint: it runs after the session round trip (it needs the identity to
+ * pick the right record), and it suppresses the spinner `ProtectedRoute` would
+ * otherwise show, because that spinner lives inside the gated subtree. So the
+ * budget is deliberately tight — a healthy IndexedDB read is single-digit
+ * milliseconds, and past this point failing open to an empty in-memory cache
+ * beats holding a blank screen.
  * Override via VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS. */
-export const DEFAULT_QUERY_PERSIST_RESTORE_TIMEOUT_MS = 1_500;
+export const DEFAULT_QUERY_PERSIST_RESTORE_TIMEOUT_MS = 250;
 
 // =============================================================================
 // HTTP Response Cache-Control (apps/api)
@@ -207,8 +213,12 @@ export const DEFAULT_PUBLIC_CONFIG_CACHE_MAX_AGE_SECONDS = 60;
  * Override via PUBLIC_CONFIG_CACHE_SWR_SECONDS. */
 export const DEFAULT_PUBLIC_CONFIG_CACHE_SWR_SECONDS = 300;
 
-/** `max-age` for the authenticated but globally identical model catalog. Kept at
- * or below the KV catalog TTL so a refreshed catalog is not masked for long.
+/** `max-age` for the authenticated but globally identical model catalog.
+ *
+ * Deliberately far below the KV catalog TTL (`MODEL_CATALOG_CACHE_TTL_SECONDS`,
+ * default 3600) so a refreshed catalog is not masked for long. The two are
+ * independent env vars and nothing enforces the ordering — raising this above the
+ * KV TTL is a staleness footgun, not a caught error.
  * Override via MODEL_CATALOG_CACHE_MAX_AGE_SECONDS. */
 export const DEFAULT_MODEL_CATALOG_RESPONSE_CACHE_MAX_AGE_SECONDS = 60;
 

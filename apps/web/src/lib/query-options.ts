@@ -1,18 +1,23 @@
 import { queryOptions } from '@tanstack/react-query';
 
 import { getProject, listGitHubInstallations, listProjects } from './api';
-import { QUERY_PERSIST_MAX_AGE_MS } from './query-persistence';
+import { QUERY_PERSIST_MAX_AGE_MS } from './query-persist-config';
 
 /**
- * `gcTime` for the queries the persister is allowed to write (the `projects`
- * domain — see `query-persistence.ts`).
+ * `gcTime` for the ONE query the persister is allowed to write (`projects/list` —
+ * see `query-persist-config.ts`).
  *
- * Applied per-query rather than as a QueryClient default on purpose: a global
- * `gcTime` this long would also pin node, workspace, and admin-diagnosis data in
- * memory, which is both a memory regression and data the security review says to
- * keep short-lived.
+ * Applied to that query alone, never as a QueryClient default: a global `gcTime`
+ * this long would pin node, workspace and admin-diagnosis data in memory too,
+ * which is both a memory regression and data the security review says to keep
+ * short-lived.
  *
- * Matching the persist `maxAge` keeps the two eviction clocks aligned — a query
+ * Deliberately NOT applied to `projectDetail`. That query is not persisted, and
+ * `useProjectIntentPrefetch` populates it after a 120 ms hover — so a 24 h
+ * `gcTime` there would pin one full detail payload per project a user merely
+ * scrolled past, with no eviction bound. It keeps the default 5 min instead.
+ *
+ * Matching the persist `maxAge` keeps the two eviction clocks aligned: a query
  * garbage-collected out of memory would be dropped from the next dehydrate, and a
  * restored entry evicted sooner than `maxAge` would make persistence pointless.
  */
@@ -46,7 +51,6 @@ export function projectDetailQueryOptions(queryScope: string, projectId: string)
   return queryOptions({
     queryKey: projectQueryKeys.detail(queryScope, projectId),
     queryFn: () => getProject(projectId),
-    gcTime: PERSISTED_QUERY_GC_TIME_MS,
   });
 }
 

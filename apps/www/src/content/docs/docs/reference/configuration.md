@@ -893,7 +893,7 @@ Applied via cloud-init on each node:
 | `VITE_ROUTE_FALLBACK_REVEAL_DELAY_MS`   | `180`              | Delay before the route loading spinner fades in, avoiding a flash        |
 | `VITE_QUERY_PERSIST_MAX_AGE_MS`         | `86400000` (24 h)  | How long a persisted query-cache record may be restored after writing    |
 | `VITE_QUERY_PERSIST_THROTTLE_MS`        | `1000`             | Minimum gap between IndexedDB writes of the query cache                  |
-| `VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS` | `1500`             | Budget for the initial cache restore before failing open to no cache     |
+| `VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS` | `250` | Budget for the initial cache restore before failing open to no cache     |
 
 ### Query cache persistence
 

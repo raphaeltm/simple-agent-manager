@@ -1,4 +1,5 @@
 import type { UserRole, UserStatus } from '@simple-agent-manager/shared';
+import { Spinner } from '@simple-agent-manager/ui';
 import {
   createContext,
   type ReactNode,
@@ -115,9 +116,10 @@ export function AuthProvider({ children }: AuthProviderProps) {
       : !canResolveCacheNamespace || activeCacheNamespace !== nextCacheNamespace;
 
   // Rehydrate the persisted query cache for the RESOLVED namespace (never the
-  // in-flight one). Gating children on this is what makes a reload paint from
-  // cache instead of from a spinner — the restore is a single IndexedDB read and
-  // is bounded by a timeout that fails open, so it cannot stall the app.
+  // in-flight one). Holding the spinner over this is what makes a reload paint
+  // from cache rather than from an empty state — the restore is a single
+  // IndexedDB read, bounded by a timeout that fails open, and a signed-out
+  // session never waits at all.
   const isRestoringPersistedQueryCache = useQueryCachePersistence(
     activeCacheNamespace,
     enrichedUser?.id ?? ''
@@ -205,7 +207,22 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   return (
     <AuthContext.Provider value={value}>
-      {isCacheNamespaceTransitioning || isRestoringPersistedQueryCache ? null : children}
+      {isCacheNamespaceTransitioning ? null : isRestoringPersistedQueryCache ? (
+        // Keep the SAME affordance ProtectedRoute was already showing while the
+        // session resolved, so restoring the persisted cache continues one
+        // uninterrupted spinner instead of unmounting it into a silent blank
+        // screen. Without this the sequence is spinner -> void -> content, and a
+        // screen reader hears "Verifying your session" and then nothing at all.
+        <div
+          className="min-h-[var(--sam-app-height)] flex items-center justify-center bg-canvas"
+          role="status"
+          aria-label="Verifying your session"
+        >
+          <Spinner size="lg" />
+        </div>
+      ) : (
+        children
+      )}
       {githubReauthMessage && (
         <div
           className="fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-lg border border-border bg-surface-elevated p-4 shadow-lg"

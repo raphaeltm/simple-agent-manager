@@ -501,6 +501,7 @@ describe('AuthProvider', () => {
 
   describe('persisted query cache', () => {
     beforeEach(async () => {
+      vi.restoreAllMocks();
       await idbClear();
     });
 
@@ -665,6 +666,34 @@ describe('AuthProvider', () => {
       });
       renderWithAuth();
       expect(await screen.findByTestId('authenticated')).toHaveTextContent('true');
+    });
+
+    it('survives a rapid A -> B -> C identity switch without leaking either predecessor', async () => {
+      const { rerender } = renderWithAuth(<ScopedProjectCacheConsumer />);
+
+      for (const id of ['u1', 'u2', 'u3']) {
+        mockUseSession.mockReturnValue({
+          data: { ...validSession, user: { ...validSession.user, id, name: `User ${id}` } },
+          isPending: false,
+          error: null,
+          isRefetching: false,
+        });
+        rerender(
+          <QueryClientProvider client={queryClient}>
+            <AuthProvider>
+              <ScopedProjectCacheConsumer />
+            </AuthProvider>
+          </QueryClientProvider>
+        );
+      }
+
+      await waitFor(() => expect(screen.getByTestId('cache-user')).toHaveTextContent('u3'));
+      // Every rendered frame belongs to the identity that owns it: no frame ever
+      // paired a later scope with an earlier identity's project data.
+      expect(cacheRenderLog).not.toContain(`u2:${PRIVATE_PROJECT.name}`);
+      expect(cacheRenderLog).not.toContain(`u3:${PRIVATE_PROJECT.name}`);
+      expect(mockClearLibraryCache).toHaveBeenCalledWith('user:u1');
+      expect(mockClearLibraryCache).toHaveBeenCalledWith('user:u2');
     });
 
     it('persists nothing and renders synchronously for a signed-out session', async () => {

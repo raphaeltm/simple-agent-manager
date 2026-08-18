@@ -11,24 +11,46 @@ import type { Context } from 'hono';
 /**
  * Conservative `Cache-Control` for stable / semi-stable API GETs.
  *
- * ## Why `public` is not a free choice here
+ * ## Where these headers actually take effect (read this first)
  *
- * `apps/api/src/index.ts` runs global CORS with `credentials: true`, and before
- * this module the API emitted **no** `Vary` header anywhere. Marking an
- * authenticated response `public` would let any shared cache in the path (the
- * Cloudflare edge, a corporate proxy) hand one user's body to another user.
+ * **Only in the requesting browser's own cache.** They do nothing at the
+ * Cloudflare edge today: this Worker builds every response itself (`c.json(...)`)
+ * with no origin `fetch()` subrequest and no Cache API write, and Cloudflare's CDN
+ * cache is only consulted for responses that came from a subrequest. JSON is not
+ * a default-cacheable type either, `apps/api/wrangler.toml` has no `[cache]`
+ * block, and `infra/` defines no Cache Rules. So do not read this module as
+ * reducing Worker invocations, D1 load, or origin traffic — it reduces repeat
+ * *browser* fetches on reload and back-navigation, nothing more.
  *
- * So the policy space is deliberately split, and the split is enforced by the
- * type — not by reviewer discipline:
+ * The `private` discipline below is nonetheless written to stay correct if
+ * Workers Cache (`[cache] enabled = true`) or a Cache Rule is turned on later, at
+ * which point these responses WOULD become edge-cacheable.
  *
- *  - **`public`** is only reachable through {@link PUBLIC_CACHE_POLICIES}, whose
- *    members are unauthenticated endpoints whose body is byte-identical for
- *    every caller.
- *  - **`private`** covers everything authenticated, and *always* emits
- *    `Vary: Cookie`. `private` alone is not enough: the browser HTTP cache is
- *    keyed per browser profile, not per login, so without `Vary` user B could be
- *    served user A's entry for the same URL after an account switch in the same
- *    browser. Varying on the session cookie gives each login its own entry.
+ * ## Two different threats, two different mechanisms
+ *
+ * These are easy to conflate; they are not interchangeable, so do not drop one
+ * believing the other covers it:
+ *
+ *  - **A shared cache serving user A's body to user B** is prevented by
+ *    **`private`**, on its own and unconditionally — Cloudflare documents that it
+ *    will not cache a response marked `private`/`no-store`/`no-cache`/`max-age=0`,
+ *    and that is true regardless of `Vary`. (Cloudflare's classic cache ignores
+ *    `Vary` for anything but `Accept-Encoding` unless a Cache Rules Vary setting
+ *    is configured, so `Vary: Cookie` must NOT be relied on for this threat.)
+ *  - **A second login in the SAME browser profile reading the first login's
+ *    entry** is prevented by **`Vary: Cookie`**. The browser's private cache is
+ *    keyed per profile, not per session, so without it user B could be served
+ *    user A's entry for the same URL after an account switch. Varying on the
+ *    session cookie gives each login its own entry.
+ *
+ * The split is enforced by the type rather than by reviewer discipline: `public`
+ * is only reachable through {@link PUBLIC_CACHE_POLICIES}, whose members are
+ * unauthenticated endpoints whose body is byte-identical for every caller.
+ *
+ * Note that `Vary: Origin` is already present on every response — Hono's `cors()`
+ * appends it whenever `origin` is a function, which `index.ts` configures. Our
+ * `Vary: Cookie` composes with it (`Cookie, Origin`) rather than replacing it;
+ * `cache-headers.test.ts` pins that.
  *
  * Endpoints returning real-time data (chat messages, task status, session state,
  * workspace status) are intentionally absent. This module is opt-in per handler

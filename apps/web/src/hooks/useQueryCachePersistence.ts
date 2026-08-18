@@ -1,16 +1,9 @@
-import { persistQueryClient } from '@tanstack/query-persist-client-core';
 import { useEffect, useState } from 'react';
 
 import { queryClient } from '../lib/query-client';
-import {
-  buildQueryPersistStorageKey,
-  createIdbQueryPersister,
-  QUERY_PERSIST_MAX_AGE_MS,
-  QUERY_PERSIST_RESTORE_TIMEOUT_MS,
-  QUERY_PERSIST_SCHEMA_VERSION,
-  removePersistedQueryCache,
-  shouldDehydratePersistedQuery,
-} from '../lib/query-persistence';
+// Pure policy/config only — deliberately NOT `./query-persistence`, which pulls in
+// idb-keyval. See the doc comment below.
+import { QUERY_PERSIST_RESTORE_TIMEOUT_MS } from '../lib/query-persist-config';
 
 /**
  * Drives query-cache persistence for the currently authenticated identity.
@@ -26,6 +19,30 @@ import {
  *  - it passes the *resolved* namespace (`activeCacheNamespace`), never the
  *    in-flight one, so we never write a record under a half-resolved identity.
  *
+ * ## This module imports nothing from `lib/query-persistence` at module scope
+ *
+ * That is deliberate and load-bearing. `AuthProvider` is statically imported by
+ * `App.tsx` and wraps the whole router, so anything reachable from here at module
+ * scope lands in the eager, always-preloaded bundle — measured at +9.8 kB gzip
+ * when `@tanstack/query-persist-client-core` and `idb-keyval` were static
+ * imports. Anonymous visitors on `/`, `/try` and `/device` can never benefit from
+ * persistence (there is no identity to key a record by), so they must not pay for
+ * it. Everything IndexedDB-touching is therefore behind a dynamic `import()` that
+ * only runs once a non-null namespace exists.
+ *
+ * The one thing this hook would otherwise need synchronously is the storage key,
+ * and it does not: `buildQueryPersistStorageKey(ns)` returns `null` exactly when
+ * `!ns`, so `!namespace` is an equivalent, dependency-free test. The restore
+ * budget comes from `query-persist-config`, which is pure.
+ *
+ * ## Why signed-out sessions are never gated
+ *
+ * The returned flag gates rendering, and this gate can only ADD latency to first
+ * paint: it starts after the session round trip (it needs the identity), and while
+ * it is open `ProtectedRoute`'s spinner cannot show, because that spinner lives
+ * inside the gated subtree. With no identity there is nothing to restore, so a
+ * signed-out session resolves on the very first render and never blanks.
+ *
  * @param namespace resolved identity namespace, or `null` when signed out.
  *   `undefined` means "not resolved yet" — do nothing.
  * @param scope the active `queryScope` (`user.id`), used by the allowlist
@@ -36,7 +53,12 @@ export function useQueryCachePersistence(
   namespace: string | null | undefined,
   scope: string
 ): boolean {
-  const [restoredFor, setRestoredFor] = useState<string | null | undefined>(undefined);
+  // Seeded from the namespace so a signed-out session is never reported as
+  // restoring — no state update, no extra paint, no blank frame for a visitor who
+  // has nothing to restore.
+  const [restoredFor, setRestoredFor] = useState<string | null | undefined>(() =>
+    namespace ? undefined : namespace
+  );
 
   // `namespace` and `scope` both derive from `user.id`, so they always change
   // together — listing both keeps exhaustive-deps happy without causing an extra
@@ -47,8 +69,15 @@ export function useQueryCachePersistence(
     // Identity not resolved yet — AuthProvider is still gating on its own state.
     if (namespace === undefined) return;
 
+    // Signed out: nothing to restore and nothing may be written.
+    if (!namespace) {
+      setRestoredFor(namespace);
+      return;
+    }
+
     let cancelled = false;
     let settleTimer: ReturnType<typeof setTimeout> | null = null;
+    let teardown: (() => void) | null = null;
 
     const settle = () => {
       if (cancelled) return;
@@ -59,44 +88,68 @@ export function useQueryCachePersistence(
       setRestoredFor(namespace);
     };
 
-    const storageKey = buildQueryPersistStorageKey(namespace);
-
-    // Signed out: nothing to restore and nothing may be written.
-    if (!storageKey) {
-      settle();
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    const persister = createIdbQueryPersister(storageKey);
-
-    const [unsubscribe, restored] = persistQueryClient({
-      queryClient,
-      persister,
-      maxAge: QUERY_PERSIST_MAX_AGE_MS,
-      buster: QUERY_PERSIST_SCHEMA_VERSION,
-      dehydrateOptions: {
-        shouldDehydrateQuery: (query) => shouldDehydratePersistedQuery(query, scope),
-        // Mutation state is on the "never persist" list.
-        shouldDehydrateMutation: () => false,
-      },
-    });
-
     // Rendering is gated on the restore, so a hung or pathologically slow
-    // IndexedDB must not hang the app: fail open to an empty in-memory cache.
+    // IndexedDB must not hang the app. Armed BEFORE awaiting the dynamic import so
+    // a stalled chunk fetch cannot hold the gate open either.
     settleTimer = setTimeout(settle, QUERY_PERSIST_RESTORE_TIMEOUT_MS);
-    void restored.then(settle, settle);
+
+    void (async () => {
+      try {
+        const [{ persistQueryClient }, persistence] = await Promise.all([
+          import('@tanstack/query-persist-client-core'),
+          import('../lib/query-persistence'),
+        ]);
+        if (cancelled) return;
+
+        const storageKey = persistence.buildQueryPersistStorageKey(namespace);
+        if (!storageKey) {
+          settle();
+          return;
+        }
+
+        const persister = persistence.createIdbQueryPersister(storageKey);
+        const [unsubscribe, restored] = persistQueryClient({
+          queryClient,
+          persister,
+          maxAge: persistence.QUERY_PERSIST_MAX_AGE_MS,
+          buster: persistence.QUERY_PERSIST_SCHEMA_VERSION,
+          dehydrateOptions: {
+            shouldDehydrateQuery: (query) =>
+              persistence.shouldDehydratePersistedQuery(query, scope),
+            // Mutation state is on the "never persist" list.
+            shouldDehydrateMutation: () => false,
+          },
+        });
+
+        teardown = () => {
+          unsubscribe();
+          // AuthProvider's transition layout effect already ran
+          // `queryClient.clear()` while this subscription was still attached, so a
+          // write of the resulting empty snapshot may be queued against the
+          // OUTGOING identity's record. Drop it rather than let it blank a cache
+          // we may still want.
+          persister.cancelPendingWrites();
+        };
+
+        // Torn down while the import was in flight.
+        if (cancelled) {
+          teardown();
+          teardown = null;
+          return;
+        }
+
+        void restored.then(settle, settle);
+      } catch {
+        // Chunk fetch failed (offline, or a redeploy moved the hash). Persistence
+        // is an optimisation — fail open to the normal in-memory cache.
+        settle();
+      }
+    })();
 
     return () => {
       cancelled = true;
       if (settleTimer !== null) clearTimeout(settleTimer);
-      unsubscribe();
-      // AuthProvider's transition layout effect already ran `queryClient.clear()`
-      // while this subscription was still attached, so a write of the resulting
-      // empty snapshot may be queued against the OUTGOING identity's record.
-      // Drop it rather than let it blank a cache we may still want.
-      persister.cancelPendingWrites();
+      teardown?.();
     };
   }, [namespace, scope]);
 
@@ -107,8 +160,16 @@ export function useQueryCachePersistence(
  * Delete the persisted record for an identity that is no longer active.
  *
  * Called by `AuthProvider` on an account switch / sign-out transition, alongside
- * the existing `clearLibraryCache(previousNamespace)`.
+ * the existing `clearLibraryCache(previousNamespace)`. Fire-and-forget, and
+ * dynamically imported for the same bundle reason as above: the record is already
+ * unreadable to the next user (namespaced key + scope-checked allowlist), so this
+ * is hygiene rather than the isolation boundary.
  */
 export function discardPersistedQueryCache(namespace: string | null | undefined): void {
-  void removePersistedQueryCache(namespace);
+  if (!namespace) return;
+  void import('../lib/query-persistence')
+    .then((m) => m.removePersistedQueryCache(namespace))
+    .catch(() => {
+      // Nothing to do — see the doc comment: this is hygiene, not the boundary.
+    });
 }
