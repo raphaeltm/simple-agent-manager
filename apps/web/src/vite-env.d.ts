@@ -10,6 +10,9 @@ interface ImportMetaEnv {
   readonly VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS?: string;
   readonly VITE_PROJECT_PREFETCH_DELAY_MS?: string;
   readonly VITE_BACKGROUND_FETCH_DELAY_MS?: string;
+  readonly VITE_CHUNK_LOAD_RETRY_DELAY_MS?: string;
+  readonly VITE_CHUNK_RELOAD_COOLDOWN_MS?: string;
+  readonly VITE_ROUTE_FALLBACK_REVEAL_DELAY_MS?: string;
   readonly DEV: boolean;
   readonly PROD: boolean;
   readonly MODE: string;

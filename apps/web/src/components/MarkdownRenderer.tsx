@@ -1,6 +1,4 @@
 import { MERMAID_SVG_SANITIZE_CONFIG as SVG_SANITIZE_CONFIG } from '@simple-agent-manager/acp-client/mermaid';
-import DOMPurify from 'dompurify';
-import mermaid from 'mermaid';
 import { Highlight, themes } from 'prism-react-renderer';
 import {
   type CSSProperties,
@@ -40,10 +38,46 @@ export { MERMAID_SVG_SANITIZE_CONFIG as SVG_SANITIZE_CONFIG } from '@simple-agen
 
 // ---------- Mermaid Initialization ----------
 
-let mermaidInitialized = false;
+/**
+ * Mermaid (~1 MB parsed, plus DOMPurify) is loaded on demand.
+ *
+ * It used to be a static import at module scope, which put the whole diagram engine in
+ * the initial bundle for every user on the chat path even though diagrams are rare. It
+ * is now pulled in only when a ```mermaid fence is actually rendered.
+ *
+ * The promise is memoised so concurrent diagrams share one fetch and `initialize()`
+ * runs exactly once, and is cleared on failure so a transient network error can retry.
+ */
+type MermaidApi = (typeof import('mermaid'))['default'];
+type DomPurifyApi = (typeof import('dompurify'))['default'];
 
-function ensureMermaidInit() {
-  if (mermaidInitialized) return;
+interface MermaidBundle {
+  mermaid: MermaidApi;
+  domPurify: DomPurifyApi;
+}
+
+let mermaidBundlePromise: Promise<MermaidBundle> | null = null;
+
+function loadMermaid(): Promise<MermaidBundle> {
+  mermaidBundlePromise ??= Promise.all([import('mermaid'), import('dompurify')])
+    .then(([mermaidModule, domPurifyModule]) => {
+      const mermaid = mermaidModule.default;
+      initializeMermaid(mermaid);
+      return { mermaid, domPurify: domPurifyModule.default };
+    })
+    .catch((error: unknown) => {
+      mermaidBundlePromise = null;
+      throw error;
+    });
+  return mermaidBundlePromise;
+}
+
+/** Exported for tests: forget the memoised module so a fresh load can be observed. */
+export function resetMermaidLoaderForTests() {
+  mermaidBundlePromise = null;
+}
+
+function initializeMermaid(mermaid: MermaidApi) {
   mermaid.initialize({
     startOnLoad: false,
     theme: 'dark',
@@ -69,7 +103,6 @@ function ensureMermaidInit() {
     securityLevel: 'strict',
     logLevel: 5,
   });
-  mermaidInitialized = true;
 }
 
 // ---------- Mermaid Diagram Component ----------
@@ -86,11 +119,12 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
     const diagramId = idRef.current;
 
     async function render() {
-      ensureMermaidInit();
       try {
+        const { mermaid, domPurify } = await loadMermaid();
+        if (cancelled) return;
         const { svg } = await mermaid.render(diagramId, code);
         if (!cancelled && containerRef.current) {
-          const sanitizedSvg = DOMPurify.sanitize(svg, SVG_SANITIZE_CONFIG) as string;
+          const sanitizedSvg = domPurify.sanitize(svg, SVG_SANITIZE_CONFIG) as string;
           containerRef.current.innerHTML = sanitizedSvg;
         }
       } catch (err) {
