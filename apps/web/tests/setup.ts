@@ -1,4 +1,8 @@
 import '@testing-library/jest-dom/vitest';
+// jsdom does not implement IndexedDB. The query-cache persister
+// (src/lib/query-persistence.ts) is IDB-backed, and AuthProvider drives it on
+// every identity transition, so any test that mounts AuthProvider touches it.
+import 'fake-indexeddb/auto';
 
 import { vi } from 'vitest';
 

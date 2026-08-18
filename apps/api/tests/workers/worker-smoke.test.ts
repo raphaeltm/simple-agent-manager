@@ -169,6 +169,61 @@ describe('Worker smoke tests (workerd runtime)', () => {
     });
   });
 
+  describe('response cache headers', () => {
+    // These endpoints are unauthenticated and byte-identical for every caller,
+    // which is the only condition under which `public` is safe (the API runs CORS
+    // with credentials: true — see src/lib/cache-headers.ts).
+    const PUBLIC_CONFIG_PATHS = [
+      '/api/config/artifacts-enabled',
+      '/api/config/vapid-public-key',
+      '/api/config/login-providers',
+    ];
+
+    it.each(PUBLIC_CONFIG_PATHS)('serves %s with a public SWR policy', async (path) => {
+      const response = await SELF.fetch(`https://api.test.example.com${path}`);
+      expect(response.status).toBe(200);
+      expect(response.headers.get('cache-control')).toBe(
+        'public, max-age=60, stale-while-revalidate=300'
+      );
+      // The global CORS middleware contributes `Vary: Origin`. What matters is
+      // that we do NOT add `Cookie`: fragmenting a shared cache per session for a
+      // body that does not depend on the caller would defeat the point.
+      const vary = response.headers.get('vary') ?? '';
+      expect(vary.split(',').map((v) => v.trim())).not.toContain('Cookie');
+    });
+
+    // Discriminating controls: caching is opt-in per handler, so nothing else may
+    // pick it up. If someone converts this to blanket middleware, these fail.
+    it.each([
+      ['a real-time authenticated list', '/api/projects'],
+      ['workspace runtime state', '/api/workspaces'],
+      ['node runtime state', '/api/nodes'],
+    ])('does not cache %s', async (_label, path) => {
+      const response = await SELF.fetch(`https://api.test.example.com${path}`);
+      expect(response.status).toBe(401);
+      expect(response.headers.get('cache-control')).toBeNull();
+    });
+
+    it('does not cache the health endpoint', async () => {
+      const response = await SELF.fetch('https://api.test.example.com/health');
+      expect(response.headers.get('cache-control')).toBeNull();
+    });
+
+    it('never marks an authenticated response public', async () => {
+      // The invariant that matters most: a `public` directive on a credentialed
+      // response would let a shared cache serve one user's body to another.
+      for (const path of [
+        '/api/projects',
+        '/api/workspaces',
+        '/api/nodes',
+        '/api/model-catalog/opencode',
+      ]) {
+        const response = await SELF.fetch(`https://api.test.example.com${path}`);
+        expect(response.headers.get('cache-control') ?? '').not.toContain('public');
+      }
+    });
+  });
+
   describe('Anthropic proxy route', () => {
     it('returns 401 for /ai/anthropic/v1/messages without x-api-key', async () => {
       const response = await SELF.fetch('https://api.test.example.com/ai/anthropic/v1/messages', {

@@ -33,6 +33,31 @@ describe('model catalog routes', () => {
     });
   });
 
+  it('marks the response private and varies on Cookie', async () => {
+    // The body is identical for every caller, but the request is credentialed
+    // (requireAuth) — so a shared cache must never hold it, and a second login in
+    // the same browser must not hit the first login's entry.
+    const res = await app.request('/api/model-catalog/opencode', { method: 'GET' }, {
+      KV: {},
+    } as Env);
+
+    expect(res.headers.get('cache-control')).toBe(
+      'private, max-age=60, stale-while-revalidate=300'
+    );
+    expect(res.headers.get('vary')).toBe('Cookie');
+    expect(res.headers.get('cache-control')).not.toContain('public');
+  });
+
+  it('honours the operator TTL override', async () => {
+    const res = await app.request('/api/model-catalog/opencode', { method: 'GET' }, {
+      KV: {},
+      MODEL_CATALOG_CACHE_MAX_AGE_SECONDS: '5',
+      MODEL_CATALOG_CACHE_SWR_SECONDS: '10',
+    } as Env);
+
+    expect(res.headers.get('cache-control')).toBe('private, max-age=5, stale-while-revalidate=10');
+  });
+
   it('returns the model catalog for the requested agent type', async () => {
     const env = { KV: {} } as Env;
 

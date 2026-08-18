@@ -5,7 +5,7 @@ import {
 } from '@simple-agent-manager/shared';
 import type { PersistedClient, Persister } from '@tanstack/query-persist-client-core';
 import type { Query } from '@tanstack/react-query';
-import { del, delMany, get, keys, set } from 'idb-keyval';
+import { del, delMany, get, keys, set, type UseStore } from 'idb-keyval';
 
 /**
  * Persistence for an allowlisted slice of the TanStack Query cache.
@@ -150,9 +150,10 @@ export interface CancellablePersister extends Persister {
 
 export function createIdbQueryPersister(
   storageKey: string,
-  options: { throttleMs?: number } = {}
+  options: { throttleMs?: number; store?: UseStore } = {}
 ): CancellablePersister {
   const throttleMs = options.throttleMs ?? QUERY_PERSIST_THROTTLE_MS;
+  const store = options.store;
 
   let disabled = false;
   let pendingClient: PersistedClient | null = null;
@@ -166,7 +167,7 @@ export function createIdbQueryPersister(
     if (!client || disabled) return;
     lastWriteAt = Date.now();
     try {
-      await set(storageKey, client);
+      await set(storageKey, client, store);
     } catch {
       // Quota exceeded, private mode, or a closed connection. Stop writing —
       // retrying on every cache event would only burn cycles.
@@ -193,7 +194,7 @@ export function createIdbQueryPersister(
     async restoreClient(): Promise<PersistedClient | undefined> {
       if (disabled) return undefined;
       try {
-        return await get<PersistedClient>(storageKey);
+        return await get<PersistedClient>(storageKey, store);
       } catch {
         disabled = true;
         return undefined;
@@ -207,7 +208,7 @@ export function createIdbQueryPersister(
         flushTimer = null;
       }
       try {
-        await del(storageKey);
+        await del(storageKey, store);
       } catch {
         // Nothing recoverable — the record either never existed or IDB is gone.
       }
@@ -256,15 +257,16 @@ export async function removePersistedQueryCache(
  * re-checks the active scope on write), so failing open here is safe.
  */
 export async function removeAllPersistedQueryCaches(
-  timeoutMs: number = QUERY_PERSIST_RESTORE_TIMEOUT_MS
+  timeoutMs: number = QUERY_PERSIST_RESTORE_TIMEOUT_MS,
+  store?: UseStore
 ): Promise<void> {
   const sweep = async (): Promise<void> => {
-    const allKeys = await keys();
+    const allKeys = await keys(store);
     const ours = allKeys.filter(
       (key): key is string =>
         typeof key === 'string' && key.startsWith(`${QUERY_PERSIST_KEY_PREFIX}:`)
     );
-    if (ours.length > 0) await delMany(ours);
+    if (ours.length > 0) await delMany(ours, store);
   };
 
   try {
