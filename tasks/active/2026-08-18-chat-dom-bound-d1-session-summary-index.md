@@ -1,0 +1,186 @@
+# Chat message DOM bound + D1 session summary index (UI Perf items #9 + #12)
+
+- **Program**: SAM UI Performance Plan — idea `01M09SKVNJGJNJY2WGCZ6D89XZ`, Workstream G.
+- **Item #12 prior art**: idea `01KRQTNPZPFQ8JJ2JZ5C53FAKR`.
+- **Base branch**: `sam/read-idea-01m09skvnjgjnjy2wgcz6d89xz-using-bmbgfz` (Wave 1: #1849/#1850/#1851).
+- **Constraints**: do NOT merge (coordinator merges); do NOT deploy/mutate staging (verification is
+  consolidated at the primary integration PR — policy 71).
+
+---
+
+## Problem
+
+Two claims in the brief were checked against the code before any work started (rule 05 / rule 39).
+**One was false and one was stale.** The scope below follows the evidence, not the prose.
+
+### Item #9 — "the project chat renders ALL messages into the DOM": FALSE
+
+`apps/web/src/components/project-message-view/index.tsx:555-613` already renders the conversation
+through `<Virtuoso>` with `overscan={200}` (px). Rendered rows are already bounded to
+≈ viewport + 200 px, not O(messages). The plan idea's own "What's already good" section says the
+same thing. Brief options A (virtualize), B (last-N + Load earlier) and C (DOM recycling) all target
+a problem that does not exist, and **option B would re-open a closed incident** — see below.
+
+The genuine defects on this surface are:
+
+| # | Defect | Evidence |
+|---|--------|----------|
+| 9a | `components={{ Header: () => (…) }}` creates a **new component type on every render**, so React unmounts and remounts the whole header subtree (spacer + "Load earlier" button) on every parent render — during streaming that is every token | `index.tsx:590-612` |
+| 9b | `itemContent` is an inline arrow → new identity every render → every windowed row re-renders | `index.tsx:566` |
+| 9c | `AcpConversationItemView` is not `React.memo`-wrapped; the memo boundary sits one level lower (`MessageBubble`), so the wrapper and its `switch` re-run for every windowed row on every render | `AcpConversationItemView.tsx:91` |
+| 9d | **`ChatTimelineDrawer` renders EVERY entry unvirtualized** (`entries.map(...)`), and `useSessionTimeline` fills it with two **uncapped** `for(;;)` paging loops that page to exhaustion | `ChatTimelineDrawer.tsx:114`, `useSessionTimeline.ts:36-51,62-75` |
+
+**9d is the real O(N) DOM sink** for long conversations and is where the DOM-count win lives.
+
+#### Rejected: lowering `DEFAULT_CHAT_SESSION_MESSAGE_MAX`
+
+`packages/shared/src/constants/defaults.ts:64-82` documents that the 50 000 full-conversation initial
+load exists *specifically* so the timeline jump index map is complete — it is the fix for the
+"dead click" jump bug (CLAUDE.md changelog `chat-full-load-timeline-jump`; rule 17's 2026-07-03
+virtualized-list incident). Lowering it, or switching to "render only the last N", would regress a
+previously fixed bug. Rejected on evidence; the full load stays.
+
+### Item #12 — "denormalize session summaries to D1": the cross-project half is ALREADY SHIPPED
+
+- `0049_session_summaries.sql` already created `session_summaries` + both indexes.
+- `durable-objects/project-data/session-summary-sync.ts` already write-through syncs it, driven by
+  `scheduleSummarySync()` (5 s debounce, `DO_SUMMARY_SYNC_DEBOUNCE_MS`) from 12 DO mutation sites.
+- `routes/chats.ts` already serves `GET /api/chats` and `/api/chats/recent` from D1, and
+  `useRecentChats` / `useAllChatSessions` already have no fan-out.
+
+The remaining gap — and what the brief actually describes — is the **per-project chat sidebar list**,
+which the prior-art idea explicitly left on the DO ("What This Does NOT Change"). It still calls
+`listSessions` on the ProjectData DO on every project load and every poll:
+
+- Route: `apps/api/src/routes/chat.ts:138-163` (`GET /api/projects/:projectId/sessions`)
+- DO: `durable-objects/project-data/sessions.ts:179-243` — one COUNT + one page query, **plus an
+  N+1 attention-marker lookup per row** (`sessions.ts:359-366` → `attention.ts:346-371`)
+- Client: `useProjectChatState.ts:367-370`, driven from mount, WS reconnect, and two
+  visibility-aware poll timers (`:437`, `:441`) plus six event-driven refetches
+
+The existing index cannot serve that read today. Blocking gaps found:
+
+1. **`created_by_user_id` is not synced at all** — the sidebar needs it for `scope=my`, `isMine` and
+   the creator chip (`SessionItem.tsx:17-19`).
+2. **Attention markers are not synced** — `getAttentionState` (`chat-session-utils.ts:129-131`) gives
+   `attention.kind === 'needs_input'` the highest precedence. Markers also **expire by wall clock**,
+   so a denormalized copy must carry `expires_at` and be re-evaluated at read time (rule 53: never
+   treat a time-sensitive value as still true just because nothing wrote to it).
+3. **Coverage is partial by construction** — the sync only takes sessions with
+   `updated_at > now-24h` and `LIMIT 200` (`session-summary-sync.ts:26-36`), so D1 is not a complete
+   per-project mirror and cannot produce a correct `total`.
+4. **Three writers never trigger a sync** (rule 44 gap): `markAgentCompleted` (`index.ts:520-523`),
+   `linkSessionToWorkspace` (`index.ts:381-390`), and the reconciliation `failSession`
+   (`reconciliation-dead-target.ts:48`, whose hooks object carries no sync callback).
+
+## Out of scope (filed as a SAM idea instead — policy 72)
+
+`session-summary-sync.ts:20-23` sets `session_summaries.user_id` to the **project owner**, not the
+session creator, while `routes/chats.ts` filters `WHERE user_id = ?`. In a shared/multiplayer project
+a member's own sessions never appear in their recent-chats and the owner sees other members' sessions
+as their own. This is pre-existing, and fixing the filter changes product-visible behaviour
+(policy 5 escalation class (a)), so it is filed as an idea rather than silently changed here. This
+task adds the `created_by_user_id` column the fix will need.
+
+---
+
+## Design
+
+### Item #9
+
+- Hoist the Virtuoso `components` object and `itemContent` behind `useMemo`/`useCallback` so the
+  header subtree stops remounting and windowed rows stop re-rendering on unrelated parent renders.
+- Wrap `AcpConversationItemView` in `React.memo`.
+- Virtualize `ChatTimelineDrawer` with `Virtuoso` (same library, same patterns as the message list),
+  keeping the date separators, the jump callbacks and the empty/loading states intact.
+- Bound the two `useSessionTimeline` paging loops with a configurable max-pages constant
+  (`DEFAULT_CHAT_TIMELINE_MAX_PAGES`, build-time override `VITE_CHAT_TIMELINE_MAX_PAGES`), mirroring
+  the existing `DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES` precedent.
+
+### Item #12
+
+**Additive migration `0117`** (rule 31 — `ALTER TABLE ADD COLUMN` + `CREATE TABLE` only, never
+`DROP TABLE`; `session_summaries` is a CASCADE child of `projects`/`users`, so recreation is
+forbidden anyway):
+
+- `session_summaries`: add `created_by_user_id TEXT`, `attention_kind TEXT`,
+  `attention_expires_at INTEGER`, `synced_at INTEGER`.
+- New `session_index_coverage(project_id PK, synced_at, session_count, complete)` — the per-project
+  freshness + completeness record that gates the fast path. A dedicated table rather than more
+  columns on `projects` keeps the concern separable.
+
+**Sync** (`session-summary-sync.ts`): index the whole project (bounded by a configurable
+`DEFAULT_SESSION_INDEX_MAX_ROWS`) instead of the 24 h / 200 window, carry creator + unresolved
+attention marker (kind + expiry), and write the coverage row with `complete = count < max`.
+
+**Read** (`services/session-summary-index.ts`, new): a D1 list read that returns rows in the exact
+`listSessions` shape, with **per-row isolation** (rule 50 — one malformed row is skipped and warn-
+logged, never fatal). Attention is re-evaluated against `Date.now()` at read time.
+
+**Route** (`chat.ts`): D1 fast path **only when the coverage row proves it can answer exactly** —
+fresh within a configurable TTL, and either complete or holding enough rows for the requested
+window. Otherwise fall through to the DO, unchanged. The gate fails closed.
+
+Field-mapping detail that must not be got wrong: the DO list shape sets `lastMessageAt = updated_at`
+(`row-schemas/sessions.ts:27-50`), **not** the `last_message_at` column that `session_summaries` also
+carries. The D1 mapper must use `updated_at` for `lastMessageAt` or the two paths diverge.
+
+---
+
+## Implementation checklist
+
+### Item #9 — chat DOM bound
+
+- [ ] Stabilise Virtuoso `components` identity (kill the per-render header remount)
+- [ ] `useCallback` the `itemContent` renderer
+- [ ] `React.memo` on `AcpConversationItemView`
+- [ ] Virtualize `ChatTimelineDrawer` entry list with Virtuoso, preserving date separators + jumps
+- [ ] Add `DEFAULT_CHAT_TIMELINE_MAX_PAGES` and bound both `useSessionTimeline` paging loops
+- [ ] Behavioral test: timeline drawer with 300+ entries renders a bounded number of rows
+- [ ] Behavioral test: header subtree is not remounted across parent re-renders
+- [ ] Behavioral test: jump-to-message still calls `scrollToIndex` with the exact 0-based
+      `conversationItems` index (rule 17), proven discriminating
+- [ ] Playwright audit: project chat + timeline drawer, long conversation, 375 px and 1280 px,
+      `assertNoOverflow`, DOM counts captured before/after
+
+### Item #12 — D1 session summary index
+
+- [ ] Migration `0117` (additive only) + drizzle schema update
+- [ ] `pnpm quality:migration-safety` passes
+- [ ] Extend the DO sync: full-project coverage, creator, attention (+expiry), coverage row
+- [ ] Wire `scheduleSummarySync()` into `markAgentCompleted`, `linkSessionToWorkspace`, the
+      reconciliation `failSession` path, and the attention RPCs (rule 44 enumeration)
+- [ ] New D1 read service with per-row isolation + attention expiry re-evaluation
+- [ ] `chat.ts` D1 fast path behind the coverage gate, DO fallback otherwise
+- [ ] All new limits/TTLs are env-configurable with `DEFAULT_*` constants (Principle XI)
+- [ ] File the `user_id` attribution SAM idea
+
+### Tests
+
+- [ ] **Equivalence**: same fixture through the DO path and the D1 path yields identical rows
+- [ ] **Gate**: stale coverage, missing coverage, incomplete coverage and out-of-window offsets all
+      fall back to the DO
+- [ ] **Per-row isolation**: good/bad/good rows → good rows returned, warn logged, no throw; all-bad
+      → empty, no throw. Proven to fail on an unisolated `rows.map(parse)` implementation
+- [ ] **Project scoping against a real SQL engine** (rule 28): cross-project attack fixture asserts
+      no leak, paired with a same-project owner control; verified discriminating by deleting the
+      predicate
+- [ ] **Attention expiry**: an expired marker in D1 does not surface as `needs_input`
+- [ ] **Writer coverage**: each newly wired writer schedules a sync
+
+## Acceptance criteria
+
+1. Long conversations render a bounded number of DOM rows in both the message list and the timeline
+   drawer; the bound is asserted by a test, and before/after counts are reported in the PR.
+2. Scroll-to-bottom during streaming, jump-to-message from the timeline, and "Load earlier" all still
+   work, each covered by a behavioral test.
+3. The per-project sidebar session list is served from D1 when the coverage gate proves equivalence,
+   and from the DO otherwise; both paths return the same shape.
+4. The new D1 read tolerates a malformed row and cannot leak another project's sessions.
+5. The migration is additive, passes the migration-safety gate, and drops nothing.
+6. `pnpm lint && pnpm typecheck && pnpm test && pnpm build` are green.
+
+## References
+
+- Rules: 02, 05, 17 (virtualized-list), 26, 28, 31, 39, 42, 44, 47, 50, 53, 56, 59, 60
+- `.claude/rules/60-request-io-and-bundle-budgets.md` — the I/O budget this work is measured against
