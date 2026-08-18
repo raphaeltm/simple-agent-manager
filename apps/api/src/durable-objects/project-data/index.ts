@@ -79,6 +79,29 @@ export class ProjectData extends DurableObject<Env> {
     return this.cachedProjectId;
   }
 
+  /**
+   * Persist this DO's projectId so it can identify itself with no inbound RPC.
+   *
+   * DO NOT REMOVE THIS, and do not try to replace it with a constructor-time
+   * assertion. This DO is addressed by `idFromName(projectId)`, which is a
+   * one-way digest: `DurableObjectId.toString()` yields a hex id and there is no
+   * inverse of `idFromName`. The constructor sees only `DurableObjectState` and
+   * `Env` — there is no name to recover. `do_meta.projectId` is the sole source
+   * of this DO's identity.
+   *
+   * Consumers that read it with no RPC in flight (so the value cannot be threaded
+   * in as an argument), all of which degrade to a no-op when it is absent:
+   *   - `syncSummaryToD1()`             — debounced D1 write-back of project summary
+   *   - `alarm()` → `idleCleanup.checkWorkspaceIdleTimeouts` / `processExpiredCleanups`
+   *   - `alarm()` → `reconciliation.processReconciliationCandidates`
+   *   - `alarm()` → `sessionActivityReconciliation.probeStaleSessionActivity`
+   *   - `processTaskWaits` via the `getProjectId` hook
+   *   - `durabilityHooks().getProjectId` — durable-execution metrics, prompt delivery
+   *
+   * The write is `INSERT OR IGNORE` into durable DO SQLite and is never deleted,
+   * so callers only need to invoke this once per DO — see
+   * `services/project-data-ensure-memo.ts`.
+   */
   ensureProjectId(projectId: string): void {
     if (this.cachedProjectId === projectId) return;
     const existing = this.getProjectId();
