@@ -5,14 +5,17 @@
  * WHY THIS EXISTS
  * ---------------
  * A ProjectData DO is addressed with `idFromName(projectId)`, which is a one-way
- * digest: `DurableObjectId.toString()` returns a hex id, and there is no inverse
- * of `idFromName`. The DO constructor receives only `DurableObjectState` and
- * `Env`, so a DO genuinely **cannot** recover its own projectId. The
- * `do_meta.projectId` row written by `ProjectData.ensureProjectId` is the sole
- * source of that identity, and it is required by every consumer that runs with
- * no inbound RPC to thread the value from — the `alarm()` sweeps (idle cleanup,
- * reconciliation, stale-activity probe, task waits) and the debounced
- * `syncSummaryToD1` D1 write-back.
+ * digest: `DurableObjectId.toString()` returns a hex id with no inverse. The
+ * `do_meta.projectId` row written by `ProjectData.ensureProjectId` is the
+ * authoritative record of that identity, and it is required by every consumer
+ * that runs with no inbound RPC to thread the value from — the `alarm()` sweeps
+ * (idle cleanup, reconciliation, stale-activity probe, task waits) and the
+ * debounced `syncSummaryToD1` D1 write-back.
+ *
+ * (`DurableObjectId.name` also carries the addressing string in workerd, and
+ * `getProjectId()` uses it as a self-healing fallback — but it is typed optional
+ * and conditional on the id being `idFromName`-derived, so it does not replace
+ * the durable row on a path that performs D1 writes.)
  *
  * So the ensure call cannot be deleted. What it does not need to be is *repeated*:
  * `do_meta` is durable DO SQLite storage and is never dropped or deleted anywhere
@@ -40,8 +43,9 @@ export interface ProjectDataEnsureMemoEnv {
 }
 
 /**
- * Insertion-ordered set of DO ids known to have a persisted projectId. `Map`
- * iteration order is insertion order, which gives FIFO eviction for free.
+ * Recency-ordered set of DO ids known to have a persisted projectId. `Map`
+ * iteration order is insertion order, so a delete+set on hit gives LRU eviction
+ * for free — a hot project is not evicted by cold-project churn.
  */
 const ensured = new Map<string, true>();
 
@@ -66,7 +70,13 @@ export async function ensureOncePerIsolate(
   doId: string,
   ensure: () => Promise<void>
 ): Promise<void> {
-  if (ensured.has(doId)) return;
+  if (ensured.has(doId)) {
+    // Refresh recency so a hot project is not evicted by cold-project churn.
+    // `Map` iteration order is insertion order, so delete+set is an LRU touch.
+    ensured.delete(doId);
+    ensured.set(doId, true);
+    return;
+  }
 
   const pending = inFlight.get(doId);
   if (pending) return pending;
@@ -95,9 +105,12 @@ function remember(env: ProjectDataEnsureMemoEnv, doId: string): void {
 /**
  * Drop the memoized fact for a DO id.
  *
- * Called when a DO RPC fails, so a Durable Object that was reset (code update,
- * eviction mid-flight) re-runs `ensureProjectId` on the next attempt rather than
- * relying on this isolate's belief about durable state it can no longer observe.
+ * Called after **any** failed DO RPC, not just a classified-transient one: the
+ * point is to stop trusting this isolate's belief about durable state it could
+ * not just observe. Re-ensuring is an idempotent `INSERT OR IGNORE`, so the only
+ * cost of evicting too eagerly is one extra RPC on the next call for that
+ * project. Correctness does not depend on this — `do_meta` is durable and is
+ * never deleted — it is defence in depth.
  */
 export function forgetEnsuredProjectData(doId: string): void {
   ensured.delete(doId);

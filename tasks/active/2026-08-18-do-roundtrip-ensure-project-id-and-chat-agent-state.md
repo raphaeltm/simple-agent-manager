@@ -32,17 +32,36 @@ With the item-#5 doubling that is **up to 8 sequential DO roundtrips**. It runs 
 
 ## Research Findings
 
-### R1 — the plan's suggested fix for #5 is UNSAFE (critical)
+### R1 — the plan's suggested fix for #5 must not be implemented unverified
 
 Idea `01M09SKVNJGJNJY2WGCZ6D89XZ` item #5 says `ensureProjectId` "is a legacy safety check that can
 be replaced by a constructor-time assertion or removed entirely since the DO ID already encodes the
 project binding."
 
-**This is wrong and must not be implemented.** A Durable Object keyed by `idFromName(projectId)`
-**cannot recover its projectId from its own ID**: `DurableObjectId.toString()` returns a hex digest
-and `idFromName` has no inverse. The DO constructor receives `DurableObjectState` and `Env` only —
-there is no name to assert against. `do_meta.projectId`, written by `ensureProjectId`
-(`durable-objects/project-data/index.ts:82-95`), is the **only** way the DO learns its own identity.
+The stated *rationale* is wrong: `DurableObjectId.toString()` returns a one-way hex digest and
+`idFromName` has no inverse, so the DO ID as such does not encode a recoverable project binding.
+
+**However — corrected after review — the conclusion is not settled.**
+`@cloudflare/workers-types@5.20260707.1` declares `DurableObjectId.name?: string`, and an empirical
+probe in the vitest workers pool showed workerd DOES populate it inside the DO, both on an
+RPC-driven call and inside an `alarm()`-triggered instantiation:
+
+```
+viaRpc:   { name: "probe-91bb…", hasNameProp: true, idString: "34b82045…" }
+viaAlarm: { name: "probe-91bb…", hasNameProp: true }
+```
+
+So `ensureProjectId` is **not** provably the only mechanism. It is retained here because:
+
+1. `name` is typed optional and documented as present only for `idFromName`-derived ids;
+2. this identity drives **D1 writes** (project summary write-back, workspace deletion), so an absent
+   or unexpected value has real blast radius;
+3. this workstream is explicitly barred from deploying to staging, so production behavior could not
+   be confirmed — and workerd is not production.
+
+Removing it therefore requires production verification, tracked in
+`tasks/backlog/2026-08-18-project-data-id-name-identity-source.md`. Until then `do_meta.projectId`
+stays authoritative and this PR only stops *repeating* the ensure, without weakening the guarantee.
 
 ### R2 — exact consumers of the persisted projectId
 
@@ -69,17 +88,23 @@ split by whether an inbound RPC could thread the value instead:
 **Conclusion**: the guarantee is real and must be preserved. Threading `projectId` through all 88
 RPC signatures would not help the alarm/timer consumers at all.
 
-### R3 — every consumer already fails closed on `null`
+### R3 — no consumer performs a wrong-project write on `null`
 
-Verified, so an absent projectId degrades to "skip the work + log", never a wrong-project write:
+Verified. Six of the seven skip the work outright; the seventh relaxes a
+secondary guard but has no path across a project boundary:
 
-- `task-wait-supervisor.ts:146-147` — `const projectId = hooks.getProjectId(); if (!projectId) return result;`
-- `index.ts:1511-1515` — logs `summary_sync_skipped_no_project_id` and returns
-- `idle-cleanup.ts:289`, `:516` — `if (!projectId || …) continue`
-- `session-activity-reconciliation.ts:402` — `if (!projectId || row.project_id !== projectId)` (also a cross-project guard)
-- `reconciliation.ts:267` — `hooks.projectId ?? null`
-- `durability-foundation.ts:134,176,241` — nullable telemetry field
-- `index.ts:671` — trial bridge is inside `if (projectId)`
+- `task-wait-supervisor.ts:146-147` — `if (!projectId) return result;` (skips)
+- `index.ts:1511-1515` — logs `summary_sync_skipped_no_project_id` and returns (skips)
+- `idle-cleanup.ts:289`, `:516` — `if (!projectId || …) continue` (skips)
+- `session-activity-reconciliation.ts:402` — `if (!projectId || row.project_id !== projectId)` (skips; also a cross-project guard)
+- `durability-foundation.ts:134,176,241` — nullable telemetry field (degrades)
+- `index.ts:671` — trial bridge is inside `if (projectId)` (skips)
+- `reconciliation.ts:267` → `resolveWorkspaceDeliveryTarget` (`reconciliation.ts:561`) —
+  **does NOT skip.** Its guard is
+  `if (projectId && wsRow.project_id && wsRow.project_id !== projectId)`, so a null
+  projectId means the cross-project check is not applied and the function proceeds.
+  Pre-existing behavior, unchanged by this PR, and contained: candidates are already
+  selected from this DO's own rows, so there is no path to another project's data.
 
 ### R4 — `do_meta` is durable and is never deleted
 
@@ -171,32 +196,32 @@ original would not have issued.
 
 ## Implementation Checklist
 
-- [ ] Create `apps/api/src/services/project-data-ensure-memo.ts` (bounded memo + in-flight dedup + `forget`)
-- [ ] Add `PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES` to the API `Env` interface and `.env.example`
-- [ ] Rewrite `getStub()` in `apps/api/src/services/project-data.ts` to consult the memo
-- [ ] Evict the memo entry on DO call failure inside `callProjectDataWithRetry`
-- [ ] Document on `ensureProjectId` (`project-data/index.ts`) why it cannot be removed (R1/R2)
-- [ ] Refactor `resolveChatAgentState` to the two-hop shape, preserving the R5 condition and R6 nullability
-- [ ] Convert `apps/api/tests/unit/chat-agent-state.test.ts` to argument-keyed mocks (R7)
-- [ ] Add roundtrip-count tests for `getStub` memo (discriminating: must fail pre-fix)
-- [ ] Add fail-closed test: DO with no persisted projectId skips D1 write-back
-- [ ] Add response-equivalence tests for `resolveChatAgentState` across all branches
-- [ ] Add roundtrip-count test for `resolveChatAgentState` (discriminating)
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build`
+- [x] Create `apps/api/src/services/project-data-ensure-memo.ts` (bounded memo + in-flight dedup + `forget`)
+- [x] Add `PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES` to the API `Env` interface and `.env.example`
+- [x] Rewrite `getStub()` in `apps/api/src/services/project-data.ts` to consult the memo
+- [x] Evict the memo entry on DO call failure inside `callProjectDataWithRetry`
+- [x] Document on `ensureProjectId` (`project-data/index.ts`) why it cannot be removed (R1/R2)
+- [x] Refactor `resolveChatAgentState` to the two-hop shape, preserving the R5 condition and R6 nullability
+- [x] Convert `apps/api/tests/unit/chat-agent-state.test.ts` to argument-keyed mocks (R7)
+- [x] Add roundtrip-count tests for `getStub` memo (discriminating: must fail pre-fix)
+- [x] Add fail-closed test: DO with no persisted projectId skips D1 write-back
+- [x] Add response-equivalence tests for `resolveChatAgentState` across all branches
+- [x] Add roundtrip-count test for `resolveChatAgentState` (discriminating)
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build`
 
 ## Acceptance Criteria
 
-- [ ] A logical `projectDataService` operation costs **1** DO roundtrip on a warm isolate (was 2)
-- [ ] The first operation per (isolate, project) still ensures `do_meta.projectId` before doing work
-- [ ] All alarm/timer consumers listed in R2 continue to see a non-null projectId
-- [ ] Absent projectId still fails closed (no wrong-project D1 write)
-- [ ] `resolveChatAgentState` costs **2** sequential DO hops (was 4 logical / up to 8 roundtrips)
-- [ ] `resolveChatAgentState` returns byte-identical results to the pre-fix implementation for:
+- [x] A logical `projectDataService` operation costs **1** DO roundtrip on a warm isolate (was 2)
+- [x] The first operation per (isolate, project) still ensures `do_meta.projectId` before doing work
+- [x] All alarm/timer consumers listed in R2 continue to see a non-null projectId
+- [x] Absent projectId still fails closed (no wrong-project D1 write)
+- [x] `resolveChatAgentState` costs **2** sequential DO hops (was 4 logical / up to 8 roundtrips)
+- [x] `resolveChatAgentState` returns byte-identical results to the pre-fix implementation for:
       no ACP session; ACP session with state; ACP session without state; `agentSessionId === sessionId`;
       persisted plan present; persisted plan absent with `chatSessionState.currentPlan`; each of the
       four calls failing independently
-- [ ] Optional `activitySource` / `activityReason` are preserved in exactly the cases they were before
-- [ ] Discriminating tests verified to fail against the pre-fix implementation
+- [x] Optional `activitySource` / `activityReason` are preserved in exactly the cases they were before
+- [x] Discriminating tests verified to fail against the pre-fix implementation
 
 ## References
 

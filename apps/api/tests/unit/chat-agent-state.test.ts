@@ -38,15 +38,17 @@ interface HopTracker {
   /** Total DO calls issued. */
   calls: number;
   callNames: string[];
+  /**
+   * Highest number of calls simultaneously in flight. `hops` alone cannot see a
+   * *partial* re-serialization inside a wave (a call chained off another's
+   * result still reads as the same hop while a third call keeps the wave open),
+   * so tests assert peak concurrency too.
+   */
+  peakConcurrency: number;
 }
 
-/**
- * Track sequential hops: a call that starts while another is still in flight
- * belongs to the same hop; a call that starts after everything settled opens a
- * new hop.
- */
 function makeHopTracker(): HopTracker {
-  return { hops: 0, calls: 0, callNames: [] };
+  return { hops: 0, calls: 0, callNames: [], peakConcurrency: 0 };
 }
 
 let tracker: HopTracker;
@@ -57,6 +59,7 @@ function tracked<T>(name: string, produce: () => T | Promise<T>): Promise<T> {
   tracker.callNames.push(name);
   if (inFlight === 0) tracker.hops += 1;
   inFlight += 1;
+  if (inFlight > tracker.peakConcurrency) tracker.peakConcurrency = inFlight;
   // Resolve on a macrotask so concurrent calls genuinely overlap.
   return new Promise<T>((resolve, reject) => {
     setTimeout(() => {
@@ -157,6 +160,9 @@ describe('resolveChatAgentState — DO roundtrip budget', () => {
     // Pre-fix `hops` was 4 (fully sequential) — the discriminating assertion.
     expect(tracker.hops).toBe(2);
     expect(tracker.calls).toBe(4);
+    // All three hop-2 reads must be in flight together. This is what catches a
+    // partial re-serialization inside hop 2, which `hops` alone cannot see.
+    expect(tracker.peakConcurrency).toBe(3);
   });
 
   it('issues the ACP-session lookup alone in hop 1', async () => {
@@ -175,13 +181,19 @@ describe('resolveChatAgentState — DO roundtrip budget', () => {
   });
 
   it('skips the ACP state read when there is no ACP session', async () => {
-    setupDo({ acpSessions: [], states: { [CHAT_SESSION_ID]: snapshot() } });
+    const chatState = snapshot({ activity: 'idle', activityAt: 7 });
+    setupDo({ acpSessions: [], states: { [CHAT_SESSION_ID]: chatState } });
 
-    await resolve();
+    const result = await resolve();
 
     expect(tracker.hops).toBe(2);
     expect(tracker.callNames).not.toContain(`getSessionState:${ACP_SESSION_ID}`);
     expect(tracker.callNames).toContain(`getSessionState:${CHAT_SESSION_ID}`);
+    // The returned value for this branch must match the sequential version too,
+    // not just the call pattern.
+    expect(result.agentSessionId).toBeNull();
+    expect(result.agentType).toBeNull();
+    expect(result.state).toEqual(chatState);
   });
 
   it('does not read the same session state twice when the ids coincide', async () => {
@@ -290,6 +302,25 @@ describe('resolveChatAgentState — response equivalence', () => {
     expect(result.state).toHaveProperty('activityReason', 'end_turn');
   });
 
+  it('returns null state when the ids coincide and the single state read fails', async () => {
+    // The documented deviation: the sequential version would have re-issued the
+    // identical read here (a retry-of-last-resort). The new version does not.
+    // Pin the resulting value so the choice is asserted, not just described.
+    setupDo({
+      acpSessions: [{ id: CHAT_SESSION_ID, agentType: 'claude-code' }],
+      stateFailures: { [CHAT_SESSION_ID]: new Error('state boom') },
+      plan: null,
+    });
+
+    const result = await resolve();
+
+    expect(result.agentSessionId).toBe(CHAT_SESSION_ID);
+    expect(result.agentType).toBe('claude-code');
+    expect(result.state).toBeNull();
+    const stateReads = tracker.callNames.filter((n) => n.startsWith('getSessionState:'));
+    expect(stateReads).toHaveLength(1);
+  });
+
   it('does not populate the chat-session plan fallback when the ids coincide', async () => {
     // Matches the pre-fix behaviour: with agentSessionId === sessionId the
     // sequential implementation left chatSessionState null, so a mirrored plan
@@ -380,6 +411,26 @@ describe('resolveChatAgentState — independent failure handling', () => {
         getLatestPersistedPlan: new Error('c'),
       },
       stateFailures: { [CHAT_SESSION_ID]: new Error('b') },
+    });
+
+    const result = await resolve();
+
+    expect(result).toEqual({ agentSessionId: null, agentType: null, state: null });
+  });
+
+  it('degrades when a service function throws synchronously, not just rejects', async () => {
+    // The sequential implementation wrapped the *call* in try/catch, so a
+    // service function that throws before returning a promise degraded rather
+    // than failing the request. `safeRead` preserves that; a bare `.catch()`
+    // would not. Regression for commit 881091eec.
+    mocks.listAcpSessions.mockImplementation(() =>
+      tracked('listAcpSessions', () => ({ sessions: [] }))
+    );
+    mocks.getSessionState.mockImplementation(() => {
+      throw new Error('sync boom');
+    });
+    mocks.getLatestPersistedPlan.mockImplementation(() => {
+      throw new Error('sync plan boom');
     });
 
     const result = await resolve();

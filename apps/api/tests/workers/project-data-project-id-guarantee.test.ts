@@ -100,7 +100,7 @@ describe('ProjectData projectId guarantee', () => {
     expect(await stub.readPersistedProjectId()).toBe(projectId);
   });
 
-  it('keeps projectId persisted across many operations with only one ensure', async () => {
+  it('keeps projectId persisted across many operations', async () => {
     const projectId = `proj-guarantee-many-${crypto.randomUUID()}`;
     const stub = doubleFor(projectId);
 

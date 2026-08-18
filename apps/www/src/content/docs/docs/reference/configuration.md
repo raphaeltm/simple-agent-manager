@@ -742,6 +742,7 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 | `DO_RETRY_MAX_ATTEMPTS`  | `8`     | Max attempts for transient Durable Object RPC reset/overload errors        |
 | `DO_RETRY_BASE_DELAY_MS` | `100`   | Base retry delay in milliseconds for transient Durable Object RPC failures |
 | `DO_RETRY_MAX_DELAY_MS`  | `250`   | Max per-attempt retry delay for transient Durable Object RPC failures      |
+| `PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES` | `2000` | Max ProjectData Durable Objects one Worker isolate remembers as already having a persisted `projectId`, so `ensureProjectId` costs one RPC per isolate instead of one before every DO call |
 
 ## Runtime Config Limits
 

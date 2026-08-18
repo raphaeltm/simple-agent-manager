@@ -79,8 +79,9 @@ async function callProjectDataWithRetry<T>(
       return await call(stub);
     } catch (err) {
       lastError = err;
-      // A reset/overloaded DO may have been re-created; drop this isolate's
-      // belief that its projectId is persisted so the next attempt re-ensures.
+      // Any DO failure means this isolate could not observe the DO's state, so
+      // drop its belief that projectId is persisted and let the next attempt
+      // re-ensure. Idempotent, and defence in depth only — see the memo module.
       forgetEnsuredProject(env, projectId);
 
       if (attempt >= retryConfig.maxAttempts || !isTransientDurableObjectError(err)) {

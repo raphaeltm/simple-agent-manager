@@ -195,7 +195,7 @@ describe('ProjectData ensure memo — DO roundtrip budget', () => {
   });
 
   it('bounds memo growth with an env-configurable cap', async () => {
-    const { env } = makeEnv();
+    const { env, totals } = makeEnv();
     (
       env as unknown as { PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES?: string }
     ).PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES = '3';
@@ -205,6 +205,31 @@ describe('ProjectData ensure memo — DO roundtrip budget', () => {
     }
 
     expect(projectDataEnsureMemoSize()).toBe(3);
+
+    // Behavioral check that does not read the global size counter: a still-cached
+    // project must not re-ensure, an evicted one must.
+    const ensuresAfterFill = totals.ensure;
+    await svc.getSummary(env, 'proj-9'); // most recent — still cached
+    expect(totals.ensure).toBe(ensuresAfterFill);
+    await svc.getSummary(env, 'proj-0'); // long evicted — must re-ensure
+    expect(totals.ensure).toBe(ensuresAfterFill + 1);
+  });
+
+  it('keeps a hot project cached under cold-project churn (LRU, not FIFO)', async () => {
+    const { env, totals } = makeEnv();
+    (
+      env as unknown as { PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES?: string }
+    ).PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES = '3';
+
+    await svc.getSummary(env, 'hot');
+    // Churn cold projects, touching `hot` in between so it stays most-recent.
+    for (let i = 0; i < 6; i++) {
+      await svc.getSummary(env, `cold-${i}`);
+      await svc.getSummary(env, 'hot');
+    }
+
+    // Under plain FIFO the hot project would have been evicted and re-ensured.
+    expect(totals.ensuredWith.filter((p) => p === 'hot')).toHaveLength(1);
   });
 });
 
