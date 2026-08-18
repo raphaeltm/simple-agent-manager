@@ -57,6 +57,7 @@ Set as `[vars]` in `wrangler.toml` or as environment variables:
 | `SETUP_FORCE`                     | _(unset)_             | Set to `true` to reopen `/setup` for lockout recovery                                                                      |
 | `SETUP_RATE_LIMIT_MAX_ATTEMPTS`   | `10`                  | Max setup-token attempts per identifier/window                                                                             |
 | `SETUP_RATE_LIMIT_WINDOW_SECONDS` | `900`                 | Setup-token attempt window in seconds                                                                                      |
+| `PLATFORM_CONFIG_CACHE_MS`        | `60000`               | Per-isolate cache TTL for the resolved platform integration config (the `GITHUB_*`/`GITLAB_*`/`GOOGLE_LOGIN_*` fallbacks above and their runtime admin overrides). Resolving costs 13 D1 queries and runs on the auth preamble of every authenticated request. After a config change, isolates that already hold a cached copy converge within this window. Set to `0` to disable caching and always re-read D1. |
 
 ## GitHub Environment Variables
 

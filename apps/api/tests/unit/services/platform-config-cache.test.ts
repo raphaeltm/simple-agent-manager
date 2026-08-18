@@ -52,6 +52,12 @@ interface QueryCounter {
   /** Executions that read the platform config tables — the metric under budget. */
   platformConfigReads(): string[];
   reset(): void;
+  /**
+   * Stall every subsequent statement execution. `disarm()` lets later executions through while
+   * keeping already-waiting ones blocked; `release()` unblocks those. Used to interleave a slow
+   * in-flight read with a config write.
+   */
+  stall(): { disarm: () => void; release: () => void };
 }
 
 type AnyStatement = Record<string, unknown>;
@@ -64,6 +70,7 @@ type AnyStatement = Record<string, unknown>;
 function createCountingD1(sqlite: Database.Database): { db: D1Database; counter: QueryCounter } {
   const inner = createSqliteD1(sqlite) as unknown as AnyStatement;
   const executed: string[] = [];
+  let stallGate: Promise<void> | null = null;
 
   function wrapStatement(sql: string, statement: AnyStatement): AnyStatement {
     const wrapped: AnyStatement = { ...statement };
@@ -71,10 +78,24 @@ function createCountingD1(sqlite: Database.Database): { db: D1Database; counter:
     for (const method of ['run', 'runSync', 'all', 'first', 'raw'] as const) {
       const original = statement[method];
       if (typeof original !== 'function') continue;
-      wrapped[method] = (...args: unknown[]) => {
+      const invoke = (...args: unknown[]) => {
         executed.push(sql);
         return (original as (...a: unknown[]) => unknown).apply(statement, args);
       };
+      // `runSync` must stay synchronous (batch() calls it inside a SQLite transaction).
+      wrapped[method] =
+        method === 'runSync'
+          ? invoke
+          : async (...args: unknown[]) => {
+              // Capture the gate synchronously at call time so every statement of a single
+              // `Promise.all` burst is governed by the same one, then read the CURRENT data and
+              // stall only the RETURN. That is what makes the caller's snapshot genuinely stale:
+              // it read pre-write values but completes after the write landed.
+              const gate = stallGate;
+              const result = await invoke(...args);
+              if (gate) await gate;
+              return result;
+            };
     }
 
     const originalBind = statement.bind;
@@ -105,6 +126,20 @@ function createCountingD1(sqlite: Database.Database): { db: D1Database; counter:
       ),
     reset: () => {
       executed.length = 0;
+    },
+    stall: () => {
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      stallGate = gate;
+      return {
+        // Stop stalling NEW executions while leaving already-waiting ones blocked.
+        disarm: () => {
+          if (stallGate === gate) stallGate = null;
+        },
+        release,
+      };
     },
   };
 
@@ -320,6 +355,47 @@ describe('platform config cache invalidation', () => {
     expect(Object.keys(after.options.socialProviders ?? {})).toContain('gitlab');
   });
 
+  it('a slow in-flight read cannot clobber the fresher entry a concurrent write published', async () => {
+    // Regression (found by review, empirically reproduced): `resolvePlatformConfig` is a
+    // check-then-act across an await. A read that starts BEFORE a config write can finish AFTER
+    // it and overwrite the writer's fresh cache entry with its own pre-write snapshot — silently
+    // reinstating a just-rotated secret for a full TTL. Guarded by a generation compare-and-set.
+    const { env, counter } = createEnv();
+
+    // Seed the pre-write value so the stale reader has something distinct to read.
+    await savePlatformIntegrationConfig(env, { github: { clientId: 'old-secret' } }, 'admin-user');
+    __resetPlatformConfigCacheForTest();
+
+    const gate = counter.stall();
+    const staleRead = resolvePlatformConfig(env); // starts, blocks mid-read on the gate
+    await Promise.resolve(); // let all 13 statements reach their await
+    gate.disarm(); // the write below runs at full speed
+
+    await savePlatformIntegrationConfig(env, { github: { clientId: 'new-secret' } }, 'admin-user');
+
+    gate.release();
+    // The stale reader still gets what IT read — that part is correct and unchanged.
+    expect((await staleRead).github.clientId.value).toBe('old-secret');
+
+    // ...but it must NOT have become the shared cached value.
+    expect((await resolvePlatformConfig(env)).github.clientId.value).toBe('new-secret');
+  });
+
+  it('collapses concurrent cold-isolate misses into a single read', async () => {
+    const { env, counter } = createEnv();
+
+    const [a, b, c] = await Promise.all([
+      resolvePlatformConfig(env),
+      resolvePlatformConfig(env),
+      resolvePlatformConfig(env),
+    ]);
+
+    // Without single-flight this would be 3 x 13 = 39.
+    expect(counter.platformConfigReads()).toHaveLength(QUERIES_PER_RESOLVE);
+    expect(a).toBe(b);
+    expect(b).toBe(c);
+  });
+
   it('drops the cache even when a non-batch save fails part-way through', async () => {
     const sqlite = createSchema();
     const { db, counter } = createCountingD1(sqlite);
@@ -349,6 +425,13 @@ describe('platform config cache invalidation', () => {
   });
 });
 
+/**
+ * The full account-denial matrix (active/pending/suspended x approval-on/off x
+ * user/admin/superadmin) lives in `tests/unit/middleware/require-approved.test.ts` and is
+ * unchanged by this work — `middleware/auth.ts` and `services/signup-approval.ts`'s assertion
+ * helpers have no diff. What is asserted here is only the property this cache could plausibly
+ * break: that the gate's own input is never served stale.
+ */
 describe('account-denial gates are not affected by the platform config cache', () => {
   it('re-reads the signup-approval gate from D1 on every call, even with platform config cached', async () => {
     const { env, counter } = createEnv();

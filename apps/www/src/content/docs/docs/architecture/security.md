@@ -50,6 +50,20 @@ Admin-managed integration secrets stored encrypted in D1:
 | GitLab OAuth client secret       | GitLab sign-in and repository access                       | Runtime D1 → Worker env (`GITLAB_CLIENT_SECRET`) → unset       |
 | Google infra OAuth client secret | Keyless GCP/WIF authorization (separate client from login) | Runtime D1 → Worker env (`GOOGLE_CLIENT_SECRET`) → unset       |
 
+#### Propagation delay after a change
+
+Resolving the table above costs 13 D1 queries and runs on the authentication preamble of every
+authenticated request, so the result is cached in memory per Worker isolate for
+`PLATFORM_CONFIG_CACHE_MS` (default 60 seconds — see the
+[configuration reference](/docs/reference/configuration/)).
+
+The isolate that performs a change drops its own cache immediately, so an admin always sees their
+own write. **Other warm isolates continue serving the previous values for up to the configured
+TTL.** When rotating a credential in response to a suspected compromise, treat the old value as
+still live for that window; revoke it at the provider (GitHub, Google, GitLab) rather than relying
+on the SAM-side change alone. Setting `PLATFORM_CONFIG_CACHE_MS=0` disables the cache entirely at
+the cost of 13 extra D1 queries per authenticated request.
+
 ### User Credentials
 
 User-provided secrets stored encrypted in D1:

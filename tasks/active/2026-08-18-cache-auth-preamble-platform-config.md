@@ -95,51 +95,68 @@ and it is exactly the "three agents each added a `resolvePlatformConfig()` call"
 
 ### Step A — resolve once
 
-- [ ] **A1**: Extract pure selectors in `platform-config.ts` that project a
+- [x] **A1**: Extract pure selectors in `platform-config.ts` that project a
       `ResolvedPlatformConfig` into each consumer shape: `selectGitHubOAuthConfig`,
       `selectGitLabOAuthConfig`, `selectGoogleLoginOAuthConfig`, `selectGoogleInfraOAuthConfig`,
       `selectGitHubAppConfig`, `selectGitHubWebhookSecret`.
-- [ ] **A2**: Re-express the existing `get*` async helpers as
+- [x] **A2**: Re-express the existing `get*` async helpers as
       `select*(await resolvePlatformConfig(env))` so the ~15 other call sites are unchanged.
-- [ ] **A3**: `createAuth` resolves the config **once** and calls the three selectors. 39 → 13.
+- [x] **A3**: `createAuth` resolves the config **once** and calls the three selectors. 39 → 13.
 
 ### Step B — per-isolate TTL cache
 
-- [ ] **B1**: Add `DEFAULT_PLATFORM_CONFIG_CACHE_MS = 60_000` + `PLATFORM_CONFIG_CACHE_MS` env
+- [x] **B1**: Add `DEFAULT_PLATFORM_CONFIG_CACHE_MS = 60_000` + `PLATFORM_CONFIG_CACHE_MS` env
       override (`apps/api/src/env.ts`), mirroring `kill-switch.ts`.
-- [ ] **B2**: Module-scope single-slot cache guarded on `env.DATABASE` identity + `expiresAt`.
+- [x] **B2**: Module-scope single-slot cache guarded on `env.DATABASE` identity + `expiresAt`.
       A different binding or an expired entry re-resolves. `__resetPlatformConfigCacheForTest()`
-      exported.
-- [ ] **B3**: Invalidate after `savePlatformIntegrationConfig` and `completeSetupWithConfig`
+      exported. **Amended during implementation**: an env with no usable D1 binding must not be
+      cached at all — keying on `env.DATABASE` alone made two database-less envs match via
+      `undefined === undefined` and share an entry (caught by the pre-existing
+      `login-providers-config.test.ts`). Guarded by `isCacheableBinding()`.
+- [x] **B3**: Invalidate after `savePlatformIntegrationConfig` and `completeSetupWithConfig`
       write, before the fresh re-resolve they return.
-- [ ] **B4**: Setting `PLATFORM_CONFIG_CACHE_MS=0` disables caching (always re-resolve).
+- [x] **B4**: Setting `PLATFORM_CONFIG_CACHE_MS=0` disables caching (always re-resolve).
+- [x] **B5** (added in review): generation compare-and-set so a slow read that started before a
+      write cannot publish its pre-write snapshot over the writer's fresh entry. Raised
+      independently as HIGH by `security-auditor` (empirically reproduced) and MEDIUM by
+      `cloudflare-specialist`.
+- [x] **B6** (added in review): single-flight — concurrent misses on a cold/just-expired isolate
+      join one read instead of each issuing 13 queries. Raised by `performance-reviewer` (MEDIUM)
+      and `security-auditor` (LOW).
 
 ### Step C — cookie-cache decision
 
-- [ ] **C1**: **Keep `disableCookieCache: true` on all session-reading paths.** Do not re-enable
+- [x] **C1**: **Keep `disableCookieCache: true` on all session-reading paths.** Do not re-enable
       the 5-minute BetterAuth cookie cache.
-- [ ] **C2**: Document the decision + rationale in the PR description and in a code comment at
+- [x] **C2**: Document the decision + rationale in the PR description and in a code comment at
       `auth.ts`'s `session.cookieCache` block.
-- [ ] **C3**: Document that `isSignupApprovalRequired` is intentionally left uncached.
+- [x] **C3**: Document that `isSignupApprovalRequired` is intentionally left uncached.
 
 ### Tests
 
-- [ ] **T1**: D1 round-trip counter proving `createAuth` issues 13 platform-config queries on a
+- [x] **T1**: D1 round-trip counter proving `createAuth` issues 13 platform-config queries on a
       cold isolate (fails on pre-fix code, which issues 39).
-- [ ] **T2**: Second `createAuth` on a warm isolate issues **0** platform-config queries.
-- [ ] **T3**: TTL expiry re-resolves; `PLATFORM_CONFIG_CACHE_MS=0` never caches.
-- [ ] **T4**: Write-path invalidation — a config save is observed by the next read immediately.
-- [ ] **T5**: Cache isolation — a different `D1Database` binding is never served a cached value.
-- [ ] **T6**: Selector parity — `select*` output equals the corresponding `get*` output.
-- [ ] **T7**: Account-gate regressions unaffected by caching: active passes, pending blocked when
+- [x] **T2**: Second `createAuth` on a warm isolate issues **0** platform-config queries.
+- [x] **T3**: TTL expiry re-resolves; `PLATFORM_CONFIG_CACHE_MS=0` never caches.
+- [x] **T4**: Write-path invalidation — a config save is observed by the next read immediately.
+- [x] **T5**: Cache isolation — a different `D1Database` binding is never served a cached value.
+- [x] **T6**: Selector parity — `select*` output equals the corresponding `get*` output.
+- [x] **T7**: Account-gate regressions unaffected by caching: active passes, pending blocked when
       approval required, suspended blocked in **all** configurations (approval on and off, and as
       admin/superadmin), admin bypasses pending-approval only.
-- [ ] **T8**: Reset the cache in the existing `platform-config.test.ts` `beforeEach`.
+- [x] **T8**: Reset the cache in the existing `platform-config.test.ts` `beforeEach`.
+- [x] **T9** (added in review): discriminating race regression — a read stalled mid-flight across
+      a config write must not clobber the fresh entry. Verified it fails with the CAS removed.
+- [x] **T10** (added in review): three concurrent cold misses issue 13 queries total, not 39.
+      Verified it fails with the join removed.
 
 ### Docs
 
-- [ ] **D1**: `PLATFORM_CONFIG_CACHE_MS` documented in `apps/api/.env.example` and the
-      configuration reference if platform tunables are listed there.
+- [x] **D2** (added in review): document the cross-isolate propagation delay for credential
+      rotation in `apps/www/src/content/docs/docs/architecture/security.md`.
+- [x] **D1**: `PLATFORM_CONFIG_CACHE_MS` documented in `apps/api/.env.example` **and**
+      `apps/www/src/content/docs/docs/reference/configuration.md` (Worker Variables table —
+      it does list comparable tunables, e.g. `CONTROL_LOOP_KILL_SWITCH_CACHE_MS`).
 
 ## Acceptance criteria
 
@@ -161,3 +178,31 @@ and it is exactly the "three agents each added a `resolvePlatformConfig()` call"
 - `.claude/rules/44-dual-write-migration-enumerate-writers.md` — enumerate every writer
 - `.claude/rules/24-no-duplicate-ui-controls.md` — one implementation per operation
 - Existing pattern: `apps/api/src/services/trial/kill-switch.ts`
+
+## Review findings and disposition
+
+| Reviewer | Severity | Finding | Disposition |
+|---|---|---|---|
+| security-auditor | HIGH | Slow in-flight read clobbers a fresh post-write cache entry, reinstating a just-rotated secret for a TTL | **Fixed** — generation CAS + discriminating test T9 |
+| cloudflare-specialist | MEDIUM | Same race, independently found | **Fixed** — same |
+| task-completion-validator | HIGH | `configuration.md` not updated though it lists comparable tunables | **Fixed** — D1 |
+| performance-reviewer | MEDIUM | No single-flight; N concurrent misses each pay 13 queries | **Fixed** — B6 + test T10 |
+| performance-reviewer | MEDIUM | Diverges from `kill-switch.ts`, which caches its fail-closed default on read error | **Won't fix, documented** — there is no safe default here; caching "no OAuth configured" would disable all social login for a TTL. Rationale in the `resolvePlatformConfig` doc comment. |
+| security-auditor | MEDIUM | No cross-isolate invalidation; rotation converges only within the TTL | **Accepted + documented** — inherent to a per-isolate cache; `security.md` now tells operators to revoke at the provider |
+| security-auditor | LOW | `security.md` credential table omits the cache | **Fixed** — D2 |
+| security-auditor | LOW | Cached entry holds decrypted secrets in isolate memory for the TTL | **Accepted** — same trust boundary as the Worker env vars; documented |
+| task-completion-validator | LOW | `invalidatePlatformConfigCache` exported without external consumers | **Fixed** — made module-private |
+| task-completion-validator | LOW | New test file does not cross-reference the account-gate matrix | **Fixed** — comment added |
+| performance-reviewer | LOW | 60s TTL is conservative; longer would cut D1 further | **Won't change** — 60s bounds credential-rotation staleness; the extra reduction is not worth a longer exposure window |
+| cloudflare-specialist | INFO | No `wrangler.toml` / sync-script entry needed | Confirmed — matches the `SETUP_RATE_LIMIT_*` precedent |
+| security-auditor | out of scope | `PUT /api/setup/config` echoes plaintext secrets (pre-existing) | **Filed** — `tasks/backlog/2026-08-18-setup-config-echoes-plaintext-secrets.md` |
+
+### Binding-identity question (resolved)
+
+`cloudflare-specialist` confirmed against official Cloudflare docs that `env` and its bindings are
+constructed once per isolate and are stable across requests. It also confirmed the design is safe
+even if that were not true: `database` is recomputed from `env.DATABASE` on every call and a hit
+requires `cached.database === database`, so non-stable identity degrades to "cache never hits"
+(losing Step B's win, keeping Step A's) and can never serve a foreign config. The Vitest pool
+reuses module caches across test files, which is what makes `__resetPlatformConfigCacheForTest()`
+load-bearing rather than defensive.

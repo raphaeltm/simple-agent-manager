@@ -100,7 +100,11 @@ async function readSetting(env: Env, key: string): Promise<ResolvedPlatformValue
     return unset();
   }
 
-  const row = await statement.first<{ value: string; updatedAt: string; updatedBy: string | null }>();
+  const row = await statement.first<{
+    value: string;
+    updatedAt: string;
+    updatedBy: string | null;
+  }>();
 
   if (!row || typeof row.value !== 'string' || !row.value.trim()) {
     return unset();
@@ -113,13 +117,20 @@ async function readSetting(env: Env, key: string): Promise<ResolvedPlatformValue
   };
 }
 
-async function writeSetting(env: Env, key: string, value: string, updatedBy: string): Promise<void> {
+async function writeSetting(
+  env: Env,
+  key: string,
+  value: string,
+  updatedBy: string
+): Promise<void> {
   const now = new Date().toISOString();
   await env.DATABASE.prepare(
     `INSERT INTO platform_settings (key, value, updated_at, updated_by)
      VALUES (?, ?, ?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`
-  ).bind(key, value, now, updatedBy).run();
+  )
+    .bind(key, value, now, updatedBy)
+    .run();
 }
 
 async function resolveSetting(
@@ -133,7 +144,9 @@ async function resolveSetting(
   }
 
   const fallback = envValue(env, environmentKey);
-  return fallback ? { value: fallback, source: 'environment', updatedAt: null, updatedBy: null } : unset();
+  return fallback
+    ? { value: fallback, source: 'environment', updatedAt: null, updatedBy: null }
+    : unset();
 }
 
 async function resolveSecret(
@@ -148,19 +161,21 @@ async function resolveSecret(
      WHERE credential_type = ? AND provider = ? AND credential_kind = ? AND is_enabled = 1
      ORDER BY updated_at DESC, created_at DESC`
   );
-  const statement = prepared && typeof prepared.bind === 'function'
-    ? prepared.bind(INTEGRATION_CREDENTIAL_TYPE, provider, kind)
-    : null;
+  const statement =
+    prepared && typeof prepared.bind === 'function'
+      ? prepared.bind(INTEGRATION_CREDENTIAL_TYPE, provider, kind)
+      : null;
 
-  const rows = typeof statement?.all === 'function'
-    ? await statement.all<{
-        id: string;
-        encryptedToken: string;
-        iv: string;
-        updatedAt: string;
-        updatedBy: string | null;
-      }>()
-    : { results: [] };
+  const rows =
+    typeof statement?.all === 'function'
+      ? await statement.all<{
+          id: string;
+          encryptedToken: string;
+          iv: string;
+          updatedAt: string;
+          updatedBy: string | null;
+        }>()
+      : { results: [] };
   const runtimeRows = rows.results ?? [];
   const encryptionKey = runtimeRows.length > 0 ? getCredentialEncryptionKey(env) : null;
   for (const row of runtimeRows) {
@@ -188,7 +203,9 @@ async function resolveSecret(
   }
 
   const fallback = envValue(env, environmentKey);
-  return fallback ? { value: fallback, source: 'environment', updatedAt: null, updatedBy: null } : unset();
+  return fallback
+    ? { value: fallback, source: 'environment', updatedAt: null, updatedBy: null }
+    : unset();
 }
 
 function creatorId(env: Env, updatedBy?: string): string {
@@ -211,7 +228,7 @@ export async function savePlatformIntegrationConfig(
     env,
     input,
     by,
-    new Date().toISOString(),
+    new Date().toISOString()
   );
   if (statements.length === 0) return resolvePlatformConfig(env);
   try {
@@ -231,8 +248,13 @@ export async function savePlatformIntegrationConfig(
   return resolvePlatformConfig(env);
 }
 
-
-function settingStatement(env: Env, key: string, value: string, updatedBy: string, now: string): D1PreparedStatement {
+function settingStatement(
+  env: Env,
+  key: string,
+  value: string,
+  updatedBy: string,
+  now: string
+): D1PreparedStatement {
   return env.DATABASE.prepare(
     `INSERT INTO platform_settings (key, value, updated_at, updated_by)
      VALUES (?, ?, ?, ?)
@@ -255,7 +277,9 @@ async function secretUpsertStatement(
      WHERE credential_type = ? AND provider = ? AND credential_kind = ?
      ORDER BY updated_at DESC, created_at DESC
      LIMIT 1`
-  ).bind(INTEGRATION_CREDENTIAL_TYPE, provider, kind).first<{ id: string }>();
+  )
+    .bind(INTEGRATION_CREDENTIAL_TYPE, provider, kind)
+    .first<{ id: string }>();
 
   if (existing) {
     return env.DATABASE.prepare(
@@ -297,97 +321,162 @@ async function buildPlatformIntegrationStatements(
   const gitlab = input.gitlab ?? {};
 
   const githubClientId = trimOptional(github.clientId);
-  if (githubClientId) statements.push(settingStatement(env, SETTING_KEYS.githubClientId, githubClientId, updatedBy, now));
+  if (githubClientId)
+    statements.push(
+      settingStatement(env, SETTING_KEYS.githubClientId, githubClientId, updatedBy, now)
+    );
 
   const githubAppId = trimOptional(github.appId);
-  if (githubAppId) statements.push(settingStatement(env, SETTING_KEYS.githubAppId, githubAppId, updatedBy, now));
+  if (githubAppId)
+    statements.push(settingStatement(env, SETTING_KEYS.githubAppId, githubAppId, updatedBy, now));
 
   const githubAppSlug = trimOptional(github.appSlug);
-  if (githubAppSlug) statements.push(settingStatement(env, SETTING_KEYS.githubAppSlug, githubAppSlug, updatedBy, now));
+  if (githubAppSlug)
+    statements.push(
+      settingStatement(env, SETTING_KEYS.githubAppSlug, githubAppSlug, updatedBy, now)
+    );
 
   const googleClientId = trimOptional(google.clientId);
-  if (googleClientId) statements.push(settingStatement(env, SETTING_KEYS.googleClientId, googleClientId, updatedBy, now));
+  if (googleClientId)
+    statements.push(
+      settingStatement(env, SETTING_KEYS.googleClientId, googleClientId, updatedBy, now)
+    );
 
   if (googleInfrastructure.remove) {
     statements.push(
-      env.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?')
-        .bind(SETTING_KEYS.googleInfrastructureClientId),
+      env.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?').bind(
+        SETTING_KEYS.googleInfrastructureClientId
+      ),
       env.DATABASE.prepare(
-        'DELETE FROM platform_credentials WHERE credential_type = ? AND provider = ? AND credential_kind = ?',
+        'DELETE FROM platform_credentials WHERE credential_type = ? AND provider = ? AND credential_kind = ?'
       ).bind(
         INTEGRATION_CREDENTIAL_TYPE,
         'google-infrastructure',
-        SECRET_KINDS.googleInfrastructureClientSecret,
-      ),
+        SECRET_KINDS.googleInfrastructureClientSecret
+      )
     );
   } else {
     const clientId = trimOptional(googleInfrastructure.clientId);
     if (clientId) {
-      statements.push(settingStatement(
-        env,
-        SETTING_KEYS.googleInfrastructureClientId,
-        clientId,
-        updatedBy,
-        now,
-      ));
+      statements.push(
+        settingStatement(env, SETTING_KEYS.googleInfrastructureClientId, clientId, updatedBy, now)
+      );
     }
   }
 
   const gitlabHost = trimOptional(gitlab.host);
-  if (gitlabHost) statements.push(settingStatement(env, SETTING_KEYS.gitlabHost, gitlabHost, updatedBy, now));
+  if (gitlabHost)
+    statements.push(settingStatement(env, SETTING_KEYS.gitlabHost, gitlabHost, updatedBy, now));
 
   const gitlabClientId = trimOptional(gitlab.clientId);
-  if (gitlabClientId) statements.push(settingStatement(env, SETTING_KEYS.gitlabClientId, gitlabClientId, updatedBy, now));
+  if (gitlabClientId)
+    statements.push(
+      settingStatement(env, SETTING_KEYS.gitlabClientId, gitlabClientId, updatedBy, now)
+    );
 
   const githubClientSecret = trimOptional(github.clientSecret);
   if (githubClientSecret) {
-    statements.push(await secretUpsertStatement(env, 'github', SECRET_KINDS.githubClientSecret, 'GitHub OAuth client secret', githubClientSecret, updatedBy, now));
+    statements.push(
+      await secretUpsertStatement(
+        env,
+        'github',
+        SECRET_KINDS.githubClientSecret,
+        'GitHub OAuth client secret',
+        githubClientSecret,
+        updatedBy,
+        now
+      )
+    );
   }
 
   const githubAppPrivateKey = trimOptional(github.appPrivateKey);
   if (githubAppPrivateKey) {
-    statements.push(await secretUpsertStatement(env, 'github', SECRET_KINDS.githubAppPrivateKey, 'GitHub App private key', githubAppPrivateKey, updatedBy, now));
+    statements.push(
+      await secretUpsertStatement(
+        env,
+        'github',
+        SECRET_KINDS.githubAppPrivateKey,
+        'GitHub App private key',
+        githubAppPrivateKey,
+        updatedBy,
+        now
+      )
+    );
   }
 
   const githubWebhookSecret = trimOptional(github.webhookSecret);
   if (githubWebhookSecret) {
-    statements.push(await secretUpsertStatement(env, 'github', SECRET_KINDS.githubWebhookSecret, 'GitHub webhook secret', githubWebhookSecret, updatedBy, now));
+    statements.push(
+      await secretUpsertStatement(
+        env,
+        'github',
+        SECRET_KINDS.githubWebhookSecret,
+        'GitHub webhook secret',
+        githubWebhookSecret,
+        updatedBy,
+        now
+      )
+    );
   }
 
   const googleClientSecret = trimOptional(google.clientSecret);
   if (googleClientSecret) {
-    statements.push(await secretUpsertStatement(env, 'google', SECRET_KINDS.googleClientSecret, 'Google OAuth client secret', googleClientSecret, updatedBy, now));
+    statements.push(
+      await secretUpsertStatement(
+        env,
+        'google',
+        SECRET_KINDS.googleClientSecret,
+        'Google OAuth client secret',
+        googleClientSecret,
+        updatedBy,
+        now
+      )
+    );
   }
 
   if (!googleInfrastructure.remove) {
     const clientSecret = trimOptional(googleInfrastructure.clientSecret);
     if (clientSecret) {
-      statements.push(await secretUpsertStatement(
-        env,
-        'google-infrastructure',
-        SECRET_KINDS.googleInfrastructureClientSecret,
-        'Google infrastructure OAuth client secret',
-        clientSecret,
-        updatedBy,
-        now,
-      ));
+      statements.push(
+        await secretUpsertStatement(
+          env,
+          'google-infrastructure',
+          SECRET_KINDS.googleInfrastructureClientSecret,
+          'Google infrastructure OAuth client secret',
+          clientSecret,
+          updatedBy,
+          now
+        )
+      );
     }
   }
 
   const gitlabClientSecret = trimOptional(gitlab.clientSecret);
   if (gitlabClientSecret) {
-    statements.push(await secretUpsertStatement(env, 'gitlab', SECRET_KINDS.gitlabClientSecret, 'GitLab client secret', gitlabClientSecret, updatedBy, now));
+    statements.push(
+      await secretUpsertStatement(
+        env,
+        'gitlab',
+        SECRET_KINDS.gitlabClientSecret,
+        'GitLab client secret',
+        gitlabClientSecret,
+        updatedBy,
+        now
+      )
+    );
   }
 
   return statements;
 }
 
-
 function runtimePreview(value: string): ResolvedPlatformValue {
   return { value, source: 'runtime', updatedAt: null, updatedBy: null };
 }
 
-function overlayPreview(target: ResolvedPlatformValue, value: string | undefined): ResolvedPlatformValue {
+function overlayPreview(
+  target: ResolvedPlatformValue,
+  value: string | undefined
+): ResolvedPlatformValue {
   const trimmed = trimOptional(value);
   return trimmed ? runtimePreview(trimmed) : target;
 }
@@ -418,11 +507,11 @@ export async function previewPlatformIntegrationConfig(
     googleInfrastructure: {
       clientId: overlayPreview(
         current.googleInfrastructure.clientId,
-        googleInfrastructure.clientId,
+        googleInfrastructure.clientId
       ),
       clientSecret: overlayPreview(
         current.googleInfrastructure.clientSecret,
-        googleInfrastructure.clientSecret,
+        googleInfrastructure.clientSecret
       ),
     },
     gitlab: {
@@ -478,17 +567,48 @@ interface PlatformConfigCacheEntry {
  */
 let platformConfigCache: PlatformConfigCacheEntry | null = null;
 
+/**
+ * Bumped by every invalidation. A resolve captures this before its (slow, 13-round-trip) read
+ * and may only publish its result if the value is unchanged when the read completes — otherwise
+ * a write landed mid-read and this result is already stale. Without the compare-and-set, a slow
+ * reader that started BEFORE a config write can finish AFTER it and overwrite the fresh entry
+ * with the pre-write snapshot, which would silently reinstate a just-rotated secret for a full
+ * TTL. See `.claude/rules/45-durable-object-concurrency-mutex.md` — the same check-then-act
+ * across an `await` hazard, here in module scope rather than a Durable Object.
+ */
+let platformConfigCacheGeneration = 0;
+
+/**
+ * The read currently in flight for a given binding, so N concurrent misses on a cold or
+ * just-expired isolate collapse into ONE 13-query read instead of N.
+ */
+let platformConfigInFlight: {
+  database: D1Database;
+  generation: number;
+  promise: Promise<ResolvedPlatformConfig>;
+} | null = null;
+
 /** Exported for tests only. */
 export function __resetPlatformConfigCacheForTest(): void {
   platformConfigCache = null;
+  platformConfigInFlight = null;
+  platformConfigCacheGeneration += 1;
 }
 
 /**
  * Drops the per-isolate cache. Called after every write that can change a resolved value so the
  * writing isolate observes its own write immediately. Other isolates converge within the TTL.
+ *
+ * Module-private: every writer of the data behind `ResolvedPlatformConfig` lives in this file
+ * (`savePlatformIntegrationConfig`, `completeSetupWithConfig`). If a writer is ever added
+ * elsewhere it must export this and call it — see `.claude/rules/44-dual-write-migration-enumerate-writers.md`.
  */
-export function invalidatePlatformConfigCache(): void {
+function invalidatePlatformConfigCache(): void {
   platformConfigCache = null;
+  // Any read already in flight started before this write, so its result is stale: revoke its
+  // right to publish, and make the next caller start a fresh read rather than join it.
+  platformConfigInFlight = null;
+  platformConfigCacheGeneration += 1;
 }
 
 /** Cache TTL in ms. `0` disables caching entirely (every call re-reads D1). */
@@ -505,6 +625,12 @@ export function resolvePlatformConfigCacheMs(env: Env): number {
  * Costs 13 D1 round-trips on a miss; 0 on a hit. Callers that need several projections of the
  * config (`createAuth` needs three) should resolve once and use the `select*` helpers below
  * rather than calling the `get*` wrappers repeatedly.
+ *
+ * Unlike `services/trial/kill-switch.ts`, a failed read is deliberately NOT cached. That cache
+ * stores its fail-closed default on error to throttle retries, which is safe because "trials
+ * disabled" is a valid conservative answer. Here the equivalent would be caching "no OAuth
+ * configured", which would disable every social login for a full TTL — strictly worse than
+ * re-reading. A rejected read therefore propagates and populates nothing.
  */
 export async function resolvePlatformConfig(
   env: Env,
@@ -521,15 +647,45 @@ export async function resolvePlatformConfig(
     return cached.config;
   }
 
-  const config = await readPlatformConfigFromStore(env);
   const ttl = resolvePlatformConfigCacheMs(env);
-  if (database && ttl > 0) {
-    platformConfigCache = { database, config, expiresAt: now + ttl };
-  } else if (cached && cached.database === database) {
-    // Caching is off for this binding — do not let a previous entry linger.
-    platformConfigCache = null;
+  if (!database || ttl <= 0) {
+    const config = await readPlatformConfigFromStore(env);
+    if (cached && cached.database === database) {
+      // Caching is off for this binding — do not let a previous entry linger.
+      platformConfigCache = null;
+    }
+    return config;
   }
-  return config;
+
+  // Join a read already in flight for this same binding and generation rather than issuing a
+  // second identical 13-query burst.
+  const joinable = platformConfigInFlight;
+  if (
+    joinable &&
+    joinable.database === database &&
+    joinable.generation === platformConfigCacheGeneration
+  ) {
+    return joinable.promise;
+  }
+
+  const generation = platformConfigCacheGeneration;
+  const promise = readPlatformConfigFromStore(env);
+  platformConfigInFlight = { database, generation, promise };
+
+  try {
+    const config = await promise;
+    if (platformConfigCacheGeneration === generation) {
+      // No write landed while we were reading, so this result is still current: publish it.
+      platformConfigCache = { database, config, expiresAt: now + ttl };
+    }
+    // If a write DID land, the caller still gets the config it read — it just does not become
+    // the shared cached value, so the writer's fresher entry survives.
+    return config;
+  } finally {
+    if (platformConfigInFlight?.promise === promise) {
+      platformConfigInFlight = null;
+    }
+  }
 }
 
 function isCacheableBinding(database: D1Database | undefined): database is D1Database {
@@ -563,13 +719,13 @@ async function readPlatformConfigFromStore(env: Env): Promise<ResolvedPlatformCo
     resolveSetting(
       env,
       SETTING_KEYS.googleInfrastructureClientId,
-      ENV_KEYS.googleInfrastructureClientId,
+      ENV_KEYS.googleInfrastructureClientId
     ),
     resolveSecret(
       env,
       'google-infrastructure',
       SECRET_KINDS.googleInfrastructureClientSecret,
-      ENV_KEYS.googleInfrastructureClientSecret,
+      ENV_KEYS.googleInfrastructureClientSecret
     ),
     resolveSetting(env, SETTING_KEYS.gitlabHost, ENV_KEYS.gitlabHost),
     resolveSetting(env, SETTING_KEYS.gitlabClientId, ENV_KEYS.gitlabClientId),
@@ -615,7 +771,9 @@ export function selectGitHubOAuthConfig(
   return { clientId: config.github.clientId.value, clientSecret: config.github.clientSecret.value };
 }
 
-export async function getGitHubOAuthConfig(env: Env): Promise<{ clientId: string; clientSecret: string } | null> {
+export async function getGitHubOAuthConfig(
+  env: Env
+): Promise<{ clientId: string; clientSecret: string } | null> {
   return selectGitHubOAuthConfig(await resolvePlatformConfig(env));
 }
 
@@ -634,7 +792,12 @@ export function selectGitLabOAuthConfig(config: ResolvedPlatformConfig): {
   clientId: string;
   clientSecret: string;
 } | null {
-  if (!config.gitlab.host.value || !config.gitlab.clientId.value || !config.gitlab.clientSecret.value) return null;
+  if (
+    !config.gitlab.host.value ||
+    !config.gitlab.clientId.value ||
+    !config.gitlab.clientSecret.value
+  )
+    return null;
   const host = normalizeBaseUrl(config.gitlab.host.value);
   return {
     host,
@@ -671,7 +834,9 @@ export function selectGoogleLoginOAuthConfig(
   return { clientId: config.google.clientId.value, clientSecret: config.google.clientSecret.value };
 }
 
-export async function getGoogleLoginOAuthConfig(env: Env): Promise<{ clientId: string; clientSecret: string } | null> {
+export async function getGoogleLoginOAuthConfig(
+  env: Env
+): Promise<{ clientId: string; clientSecret: string } | null> {
   return selectGoogleLoginOAuthConfig(await resolvePlatformConfig(env));
 }
 
@@ -686,7 +851,10 @@ export async function getGoogleLoginOAuthConfig(env: Env): Promise<{ clientId: s
 export function selectGoogleInfraOAuthConfig(
   config: ResolvedPlatformConfig
 ): { clientId: string; clientSecret: string } | null {
-  if (!config.googleInfrastructure.clientId.value || !config.googleInfrastructure.clientSecret.value) {
+  if (
+    !config.googleInfrastructure.clientId.value ||
+    !config.googleInfrastructure.clientSecret.value
+  ) {
     return null;
   }
   return {
@@ -695,7 +863,9 @@ export function selectGoogleInfraOAuthConfig(
   };
 }
 
-export async function getGoogleInfraOAuthConfig(env: Env): Promise<{ clientId: string; clientSecret: string } | null> {
+export async function getGoogleInfraOAuthConfig(
+  env: Env
+): Promise<{ clientId: string; clientSecret: string } | null> {
   return selectGoogleInfraOAuthConfig(await resolvePlatformConfig(env));
 }
 
@@ -755,7 +925,9 @@ function sourceLabel(source: PlatformConfigSource): string {
   return 'not configured';
 }
 
-function fieldStatus(value: ResolvedPlatformValue): Omit<ResolvedPlatformValue, 'value'> & { configured: boolean } {
+function fieldStatus(
+  value: ResolvedPlatformValue
+): Omit<ResolvedPlatformValue, 'value'> & { configured: boolean } {
   return {
     configured: Boolean(value.value),
     source: value.source,
@@ -779,7 +951,9 @@ function integrationStatus(
     configured,
     source,
     label: sourceLabel(source),
-    fields: Object.fromEntries(Object.entries(fields).map(([key, value]) => [key, fieldStatus(value)])),
+    fields: Object.fromEntries(
+      Object.entries(fields).map(([key, value]) => [key, fieldStatus(value)])
+    ),
   };
 }
 
@@ -794,13 +968,16 @@ export async function getPlatformConfigStatus(env: Env): Promise<PlatformConfigS
         ['clientId', 'clientSecret']
       ),
       githubApp: integrationStatus(
-        { appId: config.github.appId, appPrivateKey: config.github.appPrivateKey, appSlug: config.github.appSlug },
+        {
+          appId: config.github.appId,
+          appPrivateKey: config.github.appPrivateKey,
+          appSlug: config.github.appSlug,
+        },
         ['appId', 'appPrivateKey']
       ),
-      githubWebhook: integrationStatus(
-        { webhookSecret: config.github.webhookSecret },
-        ['webhookSecret']
-      ),
+      githubWebhook: integrationStatus({ webhookSecret: config.github.webhookSecret }, [
+        'webhookSecret',
+      ]),
       googleOAuth: integrationStatus(
         { clientId: config.google.clientId, clientSecret: config.google.clientSecret },
         ['clientId', 'clientSecret']
@@ -813,7 +990,11 @@ export async function getPlatformConfigStatus(env: Env): Promise<PlatformConfigS
         ['clientId', 'clientSecret']
       ),
       gitlabOAuth: integrationStatus(
-        { host: config.gitlab.host, clientId: config.gitlab.clientId, clientSecret: config.gitlab.clientSecret },
+        {
+          host: config.gitlab.host,
+          clientId: config.gitlab.clientId,
+          clientSecret: config.gitlab.clientSecret,
+        },
         ['host', 'clientId', 'clientSecret']
       ),
     },
@@ -855,14 +1036,20 @@ export async function verifySetupToken(
     'SETUP_RATE_LIMIT_WINDOW_SECONDS',
     DEFAULT_SETUP_RATE_LIMIT_WINDOW_SECONDS
   );
-  const maxAttempts = positiveIntegerEnv(env, 'SETUP_RATE_LIMIT_MAX_ATTEMPTS', DEFAULT_SETUP_RATE_LIMIT_MAX_ATTEMPTS);
+  const maxAttempts = positiveIntegerEnv(
+    env,
+    'SETUP_RATE_LIMIT_MAX_ATTEMPTS',
+    DEFAULT_SETUP_RATE_LIMIT_MAX_ATTEMPTS
+  );
   const windowStart = now - windowSeconds;
   const key = `setup.rateLimit.${await stableHash(identifier || 'unknown')}`;
 
   await env.DATABASE.prepare(
     `INSERT OR IGNORE INTO platform_settings (key, value, updated_at, updated_by)
      VALUES (?, json_object('windowStart', ?, 'count', 0), CURRENT_TIMESTAMP, ?)`
-  ).bind(key, now, creatorId(env)).run();
+  )
+    .bind(key, now, creatorId(env))
+    .run();
 
   const result = await env.DATABASE.prepare(
     `UPDATE platform_settings
@@ -877,7 +1064,9 @@ export async function verifySetupToken(
          CAST(json_extract(value, '$.windowStart') AS INTEGER) < ?
          OR CAST(json_extract(value, '$.count') AS INTEGER) < ?
        )`
-  ).bind(windowStart, now, key, windowStart, maxAttempts).run();
+  )
+    .bind(windowStart, now, key, windowStart, maxAttempts)
+    .run();
 
   if (!result.meta.changes || result.meta.changes === 0) {
     return { ok: false, status: 429, message: 'Too many setup token attempts. Try again later.' };
