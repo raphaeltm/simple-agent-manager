@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ACTIVE_WORK_KEY, type ActiveWorkState } from '../../../src/durable-objects/vm-agent-container-active-work';
 import type { VmAgentContainerLaunchConfig } from '../../../src/durable-objects/vm-agent-container';
 import { VmAgentContainer } from '../../../src/durable-objects/vm-agent-container';
+import { ACTIVE_WORK_KEY, type ActiveWorkState } from '../../../src/durable-objects/vm-agent-container-active-work';
 
 const { mockIsHarnessWorkLeaseActive, mockParseHarnessWorkConfig, mockGetSessionState } =
   vi.hoisted(() => ({
