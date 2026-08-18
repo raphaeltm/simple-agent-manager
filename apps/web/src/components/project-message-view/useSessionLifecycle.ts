@@ -406,14 +406,20 @@ export function useSessionLifecycle(
   // sessions rely on WebSocket events and reconnect catch-up instead of polling
   // the full session detail endpoint.
   const documentVisible = useDocumentVisible();
+  // Tracks the hidden→visible edge so the effect below can tell a visibility
+  // return (which must catch up immediately) apart from its other re-run causes.
+  // Updated inside the effect, never during render.
+  const wasVisibleRef = useRef(documentVisible);
+
   useEffect(() => {
+    const becameVisible = documentVisible && !wasVisibleRef.current;
+    wasVisibleRef.current = documentVisible;
+
     if (!session || !['active', 'sleeping'].includes(session.status)) return;
     if (session.status === 'active' && connectionState === 'connected') return;
     // Same reasoning as the WebSocket gate above, applied to the tab: nobody is
     // reading this session while it is hidden, and this poll fetches the full
-    // session detail (heavier than the session list). Re-running this effect on
-    // the visibility transition refreshes once immediately on return, so the
-    // view is never stale at the moment it is actually looked at.
+    // session detail (heavier than the session list).
     if (!documentVisible) return;
 
     const abortController = new AbortController();
@@ -469,6 +475,13 @@ export function useSessionLifecycle(
         pollInFlight = false;
       }
     };
+    // Catch up immediately when the tab regains visibility — the poll was
+    // suspended while hidden, so waiting a full interval would show a stale
+    // conversation at exactly the moment the user looks at it. Scoped to the
+    // visibility edge: this effect's other re-run causes (session status,
+    // connection state) keep their pre-existing interval-only behaviour.
+    if (becameVisible) void pollActiveSession();
+
     const pollInterval = setInterval(() => {
       void pollActiveSession();
     }, CHAT_FALLBACK_POLL_MS);

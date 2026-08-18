@@ -154,6 +154,57 @@ describe('useSessionLifecycle loading semantics', () => {
     });
   });
 
+  describe('fallback poll visibility gating', () => {
+    const setVisibility = (state: DocumentVisibilityState) => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => state,
+      });
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    };
+
+    afterEach(() => setVisibility('visible'));
+
+    it('stops the degraded fallback poll while the tab is hidden', async () => {
+      // This poll fetches the FULL session detail every CHAT_FALLBACK_POLL_MS
+      // while the WebSocket is down. Nobody is reading it in a hidden tab.
+      mocks.connectionState = 'disconnected';
+      mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false, 'active'));
+
+      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false));
+      await waitFor(() => expect(result.current.session?.status).toBe('active'));
+      await waitFor(() => expect(mocks.getChatSession.mock.calls.length).toBeGreaterThan(1));
+
+      setVisibility('hidden');
+      const callsWhenHidden = mocks.getChatSession.mock.calls.length;
+
+      // CHAT_FALLBACK_POLL_MS is mocked to 1ms, so many ticks would land here.
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      expect(mocks.getChatSession.mock.calls.length).toBe(callsWhenHidden);
+    });
+
+    it('catches up immediately when the tab becomes visible again', async () => {
+      mocks.connectionState = 'disconnected';
+      mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false, 'active'));
+
+      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false));
+      await waitFor(() => expect(result.current.session?.status).toBe('active'));
+
+      setVisibility('hidden');
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const callsWhenHidden = mocks.getChatSession.mock.calls.length;
+
+      setVisibility('visible');
+      // Immediate, not "within one interval" — the conversation must be current
+      // at the moment the user looks at it.
+      await waitFor(() =>
+        expect(mocks.getChatSession.mock.calls.length).toBeGreaterThan(callsWhenHidden)
+      );
+    });
+  });
+
   it('rehydrates a plan-only state change between fallback polls', async () => {
     mocks.connectionState = 'disconnected';
     const messages = [msg('a', 1000)];

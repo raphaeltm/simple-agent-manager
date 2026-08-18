@@ -197,6 +197,13 @@ describe('ProjectChat session-list sync gating', () => {
     expect(mocks.listProjectTasks).not.toHaveBeenCalled();
   });
 
+  // NOTE: the 2s provisioning poll in this same hook is also visibility-gated,
+  // but reaching a non-null `provisioning` state requires driving the full
+  // submit flow (agent profile selection + submitTask), and with `provisioning`
+  // null the poll is inert — so a test written here would pass identically with
+  // the gate deleted. Deliberately not asserted rather than asserted vacuously;
+  // recorded under "Untested Gaps" in the PR.
+
   it('catches up immediately when a hidden tab becomes visible again', async () => {
     mocks.connectionState = 'disconnected';
     await renderAndSettle();
