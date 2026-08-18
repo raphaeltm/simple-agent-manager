@@ -1530,7 +1530,12 @@ export class ProjectData extends DurableObject<Env> {
     }, debounceMs);
   }
 
-  private async syncSummaryToD1(): Promise<void> {
+  /**
+   * `protected`, not `private`, so the workers-pool test double can drive it
+   * directly instead of racing the `scheduleSummarySync` debounce timer.
+   * Cloudflare RPC only exposes public members, so this stays off the RPC surface.
+   */
+  protected async syncSummaryToD1(): Promise<void> {
     const projectId = this.getProjectId();
     if (!projectId) {
       log.warn('summary_sync_skipped_no_project_id');

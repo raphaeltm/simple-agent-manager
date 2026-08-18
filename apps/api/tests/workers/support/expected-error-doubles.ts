@@ -29,6 +29,22 @@ function capture(error: unknown): CapturedExpectedError {
  * behavior while returning a serializable assertion value to Vitest.
  */
 export class ProjectDataTestDouble extends ProjectData {
+  /**
+   * Read `do_meta.projectId` straight out of DO SQLite, so a test can tell
+   * "this DO has been ensured" apart from "this isolate believes it has".
+   */
+  readPersistedProjectId(): string | null {
+    const row = this.ctx.storage.sql
+      .exec('SELECT value FROM do_meta WHERE key = ?', 'projectId')
+      .toArray()[0] as { value?: unknown } | undefined;
+    return typeof row?.value === 'string' ? row.value : null;
+  }
+
+  /** Drive the D1 summary write-back without waiting on the debounce timer. */
+  async runSummarySyncForTest(): Promise<void> {
+    await this.syncSummaryToD1();
+  }
+
   async alarmWithDurablePromptDelivery(): Promise<void> {
     const previous = this.env.DURABLE_PROMPT_DELIVERY_ENABLED;
     this.env.DURABLE_PROMPT_DELIVERY_ENABLED = 'true';
