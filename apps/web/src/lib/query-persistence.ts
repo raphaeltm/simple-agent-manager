@@ -121,8 +121,7 @@ export function shouldDehydratePersistedQuery(query: Query, scope: string): bool
     prefix === 'auth' &&
     typeof keyScope === 'string' &&
     keyScope === scope &&
-    typeof domain === 'string' &&
-    PERSISTED_QUERY_DOMAINS.has(domain)
+    typeof domain === 'string'
   );
 }
 
