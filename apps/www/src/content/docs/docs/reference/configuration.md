@@ -161,7 +161,7 @@ Sleeping and reclaimed Instant and VM sessions are restored from a snapshot of t
 | `SESSION_SLEEP_MAX_ATTEMPTS`                | `9`                       | Automatic sleep attempts before SAM preserves compute and records an operator-visible failure. Raising the configured budget re-arms previously exhausted rows that are still below the new limit.                                                                                                                                                                                              |
 | `SESSION_SLEEP_CLAIM_LEASE_MS`              | `600000` (10 min)         | Time after which an interrupted automatic-sleep claim can be safely reclaimed.                                                                                                                                                                                                                                                                                                                  |
 | `HARNESS_BACKGROUND_WORK_LEASE_MS`          | `300000` (5 min)          | Finite sleep-protection lease renewed by normalized harness background-work lifecycle signals. Expiry fails open to ordinary idle-sleep eligibility so a missing terminal signal cannot pin compute forever.                                                                                                                                                                                    |
-| `HARNESS_BACKGROUND_WORK_MAX_DURATION_MS`   | `1800000` (30 min)        | Absolute ceiling, measured from the last harness lifecycle **progress** edge rather than the last heartbeat, on how long background work may defer sleep. The sliding lease above is refreshed by periodic re-reports, so an adapter faithfully re-reporting a stale task set (for example an abandoned `run_in_background` dev server) would otherwise pin compute awake indefinitely.            |
+| `HARNESS_BACKGROUND_WORK_MAX_DURATION_MS`   | `1800000` (30 min)        | Absolute ceiling, measured from the last harness lifecycle **progress** edge rather than the last heartbeat, on how long background work may defer sleep. The sliding lease above is refreshed by periodic re-reports, so an adapter faithfully re-reporting a stale task set (for example an abandoned `run_in_background` dev server) would otherwise pin compute awake indefinitely.         |
 | `SESSION_SNAPSHOT_RECOVERY_CLAIM_LEASE_MS`  | `600000` (10 min)         | Time after which an interrupted replacement-runtime wake claim can be reconciled or reclaimed.                                                                                                                                                                                                                                                                                                  |
 | `SESSION_LIFECYCLE_ERROR_MAX_LENGTH`        | `2048`                    | Maximum sleep/recovery diagnostic detail stored in lifecycle records.                                                                                                                                                                                                                                                                                                                           |
 | `SESSION_SNAPSHOT_PURGE_ENABLED`            | `true`                    | Enables bounded expiry cleanup: terminalizes the sleeping chat, deletes its R2 objects, then removes D1 metadata.                                                                                                                                                                                                                                                                               |
@@ -377,14 +377,14 @@ cache nor a second account in the same browser can be served another user's body
 unauthenticated `/api/config/*` endpoints are marked `public`. Endpoints returning real-time data
 (chat messages, task status, session and workspace state) are deliberately excluded.
 
-| Variable                                 | Default | Description                                                                  |
-| ---------------------------------------- | ------- | ---------------------------------------------------------------------------- |
-| `PUBLIC_CONFIG_CACHE_MAX_AGE_SECONDS`    | `60`    | `max-age` for the unauthenticated `/api/config/*` endpoints                  |
-| `PUBLIC_CONFIG_CACHE_SWR_SECONDS`        | `300`   | `stale-while-revalidate` for `/api/config/*`                                 |
-| `MODEL_CATALOG_CACHE_MAX_AGE_SECONDS`    | `60`    | `max-age` for `GET /api/model-catalog/:agentType`                            |
-| `MODEL_CATALOG_CACHE_SWR_SECONDS`        | `300`   | `stale-while-revalidate` for the model catalog response                      |
-| `PROJECT_REFERENCE_CACHE_MAX_AGE_SECONDS`| `0`     | `max-age` for project agent-profile and skill lists (0 = always revalidate)  |
-| `PROJECT_REFERENCE_CACHE_SWR_SECONDS`    | `30`    | `stale-while-revalidate` for project agent-profile and skill lists           |
+| Variable                                  | Default | Description                                                                 |
+| ----------------------------------------- | ------- | --------------------------------------------------------------------------- |
+| `PUBLIC_CONFIG_CACHE_MAX_AGE_SECONDS`     | `60`    | `max-age` for the unauthenticated `/api/config/*` endpoints                 |
+| `PUBLIC_CONFIG_CACHE_SWR_SECONDS`         | `300`   | `stale-while-revalidate` for `/api/config/*`                                |
+| `MODEL_CATALOG_CACHE_MAX_AGE_SECONDS`     | `60`    | `max-age` for `GET /api/model-catalog/:agentType`                           |
+| `MODEL_CATALOG_CACHE_SWR_SECONDS`         | `300`   | `stale-while-revalidate` for the model catalog response                     |
+| `PROJECT_REFERENCE_CACHE_MAX_AGE_SECONDS` | `0`     | `max-age` for project agent-profile and skill lists (0 = always revalidate) |
+| `PROJECT_REFERENCE_CACHE_SWR_SECONDS`     | `30`    | `stale-while-revalidate` for project agent-profile and skill lists          |
 
 ## Warm Node Pooling
 
@@ -743,28 +743,28 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 
 ## Durable Object Limits
 
-| Variable                              | Default          | Description                                                            |
-| ------------------------------------- | ---------------- | ---------------------------------------------------------------------- |
-| `MAX_SESSIONS_PER_PROJECT`            | `10000`          | Max chat sessions per project                                          |
-| `MAX_MESSAGES_PER_SESSION`            | `100000`         | Max messages per chat session                                          |
-| `DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES`  | `16384`          | Max compact metadata bytes preserved for library document cards        |
-| `MESSAGE_SIZE_THRESHOLD`              | `102400`         | Max message size in bytes                                              |
-| `ACTIVITY_RETENTION_DAYS`             | `90`             | Days to retain activity events                                         |
-| `SESSION_IDLE_TIMEOUT_MINUTES`        | `60`             | Idle session timeout                                                   |
-| `SESSION_ACTIVITY_STALE_THRESHOLD_MS` | `300000` (5 min) | Evidence threshold before stale working activity can be healed to idle |
-| `SESSION_ACTIVITY_PROBE_TIMEOUT_MS` | `5000` (5 s) | Timeout for the vm-agent session-activity probe. Background control-loop budget — deliberately far below the interactive node-agent timeout |
-| `SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS` | `3` | Consecutive unreachable probes after which a stale working state is terminalized as dead |
-| `SESSION_ACTIVITY_PROBE_MAX_CANDIDATES` | `10` | Stale-activity candidates probed per ProjectData alarm pass |
-| `DO_SUMMARY_SYNC_DEBOUNCE_MS`         | `5000`           | Debounce for DO-to-D1 summary sync                                     |
+| Variable                                | Default          | Description                                                                                                                                 |
+| --------------------------------------- | ---------------- | ------------------------------------------------------------------------------------------------------------------------------------------- |
+| `MAX_SESSIONS_PER_PROJECT`              | `10000`          | Max chat sessions per project                                                                                                               |
+| `MAX_MESSAGES_PER_SESSION`              | `100000`         | Max messages per chat session                                                                                                               |
+| `DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES`    | `16384`          | Max compact metadata bytes preserved for library document cards                                                                             |
+| `MESSAGE_SIZE_THRESHOLD`                | `102400`         | Max message size in bytes                                                                                                                   |
+| `ACTIVITY_RETENTION_DAYS`               | `90`             | Days to retain activity events                                                                                                              |
+| `SESSION_IDLE_TIMEOUT_MINUTES`          | `60`             | Idle session timeout                                                                                                                        |
+| `SESSION_ACTIVITY_STALE_THRESHOLD_MS`   | `300000` (5 min) | Evidence threshold before stale working activity can be healed to idle                                                                      |
+| `SESSION_ACTIVITY_PROBE_TIMEOUT_MS`     | `5000` (5 s)     | Timeout for the vm-agent session-activity probe. Background control-loop budget — deliberately far below the interactive node-agent timeout |
+| `SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS`   | `3`              | Consecutive unreachable probes after which a stale working state is terminalized as dead                                                    |
+| `SESSION_ACTIVITY_PROBE_MAX_CANDIDATES` | `10`             | Stale-activity candidates probed per ProjectData alarm pass                                                                                 |
+| `DO_SUMMARY_SYNC_DEBOUNCE_MS`           | `5000`           | Debounce for DO-to-D1 summary sync                                                                                                          |
 
 ## Durable Object Retry
 
-| Variable                 | Default | Description                                                                |
-| ------------------------ | ------- | -------------------------------------------------------------------------- |
-| `DO_RETRY_MAX_ATTEMPTS`  | `8`     | Max attempts for transient Durable Object RPC reset/overload errors        |
-| `DO_RETRY_BASE_DELAY_MS` | `100`   | Base retry delay in milliseconds for transient Durable Object RPC failures |
-| `DO_RETRY_MAX_DELAY_MS`  | `250`   | Max per-attempt retry delay for transient Durable Object RPC failures      |
-| `PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES` | `2000` | Max ProjectData Durable Objects one Worker isolate remembers as already having a persisted `projectId`, so `ensureProjectId` costs one RPC per isolate instead of one before every DO call |
+| Variable                               | Default | Description                                                                                                                                                                                |
+| -------------------------------------- | ------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `DO_RETRY_MAX_ATTEMPTS`                | `8`     | Max attempts for transient Durable Object RPC reset/overload errors                                                                                                                        |
+| `DO_RETRY_BASE_DELAY_MS`               | `100`   | Base retry delay in milliseconds for transient Durable Object RPC failures                                                                                                                 |
+| `DO_RETRY_MAX_DELAY_MS`                | `250`   | Max per-attempt retry delay for transient Durable Object RPC failures                                                                                                                      |
+| `PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES` | `2000`  | Max ProjectData Durable Objects one Worker isolate remembers as already having a persisted `projectId`, so `ensureProjectId` costs one RPC per isolate instead of one before every DO call |
 
 ## Runtime Config Limits
 
@@ -875,22 +875,37 @@ Applied via cloud-init on each node:
 
 ## Web UI (Build-Time)
 
-| Variable                                | Default            | Description                                                           |
-| --------------------------------------- | ------------------ | --------------------------------------------------------------------- |
-| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES`    | `10485760` (10 MB) | Images below this size render inline automatically                    |
-| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`      | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link  |
-| `VITE_ANALYTICS_MAX_QUEUE_SIZE`         | `100`              | Max client-side analytics events retained before oldest events drop   |
-| `VITE_ANALYTICS_FLUSH_THRESHOLD`        | `10`               | Client event count that triggers an immediate analytics flush         |
-| `VITE_ANALYTICS_FLUSH_INTERVAL_MS`      | `5000`             | Client analytics background flush interval in milliseconds            |
-| `VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES`  | `100`              | Max paginated diagnosis-event pages loaded per browser request        |
-| `VITE_PROJECT_LIST_LIMIT`               | `50`               | Projects loaded into each shared list-cache entry                     |
-| `VITE_PROJECT_POLL_INTERVAL_MS`         | `30000`            | Project-list page refresh cadence in milliseconds; `0` disables       |
-| `VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS` | `60000`            | App-shell project-list refresh cadence in milliseconds; `0` disables  |
-| `VITE_PROJECT_PREFETCH_DELAY_MS`        | `120`              | Mouse dwell before project-detail prefetch; focus/touch are immediate |
-| `VITE_BACKGROUND_FETCH_DELAY_MS`        | `150`              | Delay before background query activity is shown and announced         |
-| `VITE_CHUNK_LOAD_RETRY_DELAY_MS`        | `350`              | Wait before retrying a failed lazy route-chunk import                 |
+| Variable                                | Default            | Description                                                              |
+| --------------------------------------- | ------------------ | ------------------------------------------------------------------------ |
+| `VITE_FILE_PREVIEW_INLINE_MAX_BYTES`    | `10485760` (10 MB) | Images below this size render inline automatically                       |
+| `VITE_FILE_PREVIEW_LOAD_MAX_BYTES`      | `52428800` (50 MB) | Images below this size show click-to-load; above shows download link     |
+| `VITE_ANALYTICS_MAX_QUEUE_SIZE`         | `100`              | Max client-side analytics events retained before oldest events drop      |
+| `VITE_ANALYTICS_FLUSH_THRESHOLD`        | `10`               | Client event count that triggers an immediate analytics flush            |
+| `VITE_ANALYTICS_FLUSH_INTERVAL_MS`      | `5000`             | Client analytics background flush interval in milliseconds               |
+| `VITE_DEBUG_DIAGNOSIS_EVENT_MAX_PAGES`  | `100`              | Max paginated diagnosis-event pages loaded per browser request           |
+| `VITE_PROJECT_LIST_LIMIT`               | `50`               | Projects loaded into each shared list-cache entry                        |
+| `VITE_PROJECT_POLL_INTERVAL_MS`         | `30000`            | Project-list page refresh cadence in milliseconds; `0` disables          |
+| `VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS` | `60000`            | App-shell project-list refresh cadence in milliseconds; `0` disables     |
+| `VITE_PROJECT_PREFETCH_DELAY_MS`        | `120`              | Mouse dwell before project-detail prefetch; focus/touch are immediate    |
+| `VITE_BACKGROUND_FETCH_DELAY_MS`        | `150`              | Delay before background query activity is shown and announced            |
+| `VITE_CHUNK_LOAD_RETRY_DELAY_MS`        | `350`              | Wait before retrying a failed lazy route-chunk import                    |
 | `VITE_CHUNK_RELOAD_COOLDOWN_MS`         | `15000`            | Minimum gap between chunk-recovery reloads; guards against a reload loop |
-| `VITE_ROUTE_FALLBACK_REVEAL_DELAY_MS`   | `180`              | Delay before the route loading spinner fades in, avoiding a flash     |
+| `VITE_ROUTE_FALLBACK_REVEAL_DELAY_MS`   | `180`              | Delay before the route loading spinner fades in, avoiding a flash        |
+| `VITE_QUERY_PERSIST_MAX_AGE_MS`         | `86400000` (24 h)  | How long a persisted query-cache record may be restored after writing    |
+| `VITE_QUERY_PERSIST_THROTTLE_MS`        | `1000`             | Minimum gap between IndexedDB writes of the query cache                  |
+| `VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS` | `1500`             | Budget for the initial cache restore before failing open to no cache     |
+
+### Query cache persistence
+
+The control-plane UI writes an allowlisted slice of its query cache to IndexedDB so a full page
+reload paints from cache instead of refetching. Only bounded project reference data is persisted;
+chat messages, agent output, credentials, admin diagnostics, node and workspace runtime details, and
+file contents are never written to disk.
+
+Records are namespaced by authenticated user and by a schema version, and are deleted on sign-out
+and on account switch, so one account can never be shown another account's cached data. If
+IndexedDB is unavailable — private browsing, a storage quota failure, or a disabled store — the app
+degrades silently to its normal in-memory cache.
 
 ## Analytics
 
