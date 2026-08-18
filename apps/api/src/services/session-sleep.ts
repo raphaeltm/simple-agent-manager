@@ -225,7 +225,31 @@ function isActivitySafeForSleep(
   );
 }
 
-function getFreshHarnessWorkLeaseExpiry(
+export interface HarnessWorkConfig {
+  leaseMs: number;
+  maxDurationMs: number;
+}
+
+export function parseHarnessWorkConfig(env: { HARNESS_BACKGROUND_WORK_LEASE_MS?: string; HARNESS_BACKGROUND_WORK_MAX_DURATION_MS?: string }): HarnessWorkConfig {
+  return {
+    leaseMs: parsePositiveInt(env.HARNESS_BACKGROUND_WORK_LEASE_MS, DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS),
+    maxDurationMs: parsePositiveInt(env.HARNESS_BACKGROUND_WORK_MAX_DURATION_MS, DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS),
+  };
+}
+
+export function isHarnessWorkLeaseActive(
+  state: {
+    runtimeWorkState?: string | null;
+    runtimeWorkUpdatedAt?: number | null;
+    runtimeWorkProgressAt?: number | null;
+  } | null,
+  now: Date,
+  config: HarnessWorkConfig
+): boolean {
+  return getFreshHarnessWorkLeaseExpiry(state, now, config.leaseMs, config.maxDurationMs) !== null;
+}
+
+export function getFreshHarnessWorkLeaseExpiry(
   state: {
     runtimeWorkState?: string | null;
     runtimeWorkUpdatedAt?: number | null;
@@ -317,17 +341,10 @@ export async function checkAutomaticSessionSleepEligibility(
         .catch(() => null)
     : null;
   const idleAfterMs = parsePositiveInt(env.SESSION_SLEEP_AFTER_MS, DEFAULT_SESSION_SLEEP_AFTER_MS);
-  const harnessWorkLeaseMs = parsePositiveInt(
-    env.HARNESS_BACKGROUND_WORK_LEASE_MS,
-    DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS
-  );
-  const harnessWorkMaxDurationMs = parsePositiveInt(
-    env.HARNESS_BACKGROUND_WORK_MAX_DURATION_MS,
-    DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS
-  );
+  const harnessConfig = parseHarnessWorkConfig(env);
   let reason: string;
   let retryAt: Date | undefined;
-  const harnessWorkLeaseExpiry = getFreshHarnessWorkLeaseExpiry(state, now, harnessWorkLeaseMs, harnessWorkMaxDurationMs);
+  const harnessWorkLeaseExpiry = getFreshHarnessWorkLeaseExpiry(state, now, harnessConfig.leaseMs, harnessConfig.maxDurationMs);
   // A terminal task can retain a stale `prompting` transition forever. Treat it
   // as safe only after the normal idle interval has elapsed, preserving a live
   // final response while preventing old terminal sessions from stranding compute.
@@ -505,17 +522,10 @@ export async function sleepWorkspaceSession(
         env.SESSION_SLEEP_AFTER_MS,
         DEFAULT_SESSION_SLEEP_AFTER_MS
       );
-      const harnessWorkLeaseMs = parsePositiveInt(
-        env.HARNESS_BACKGROUND_WORK_LEASE_MS,
-        DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS
-      );
-      const harnessWorkMaxDurationMs = parsePositiveInt(
-        env.HARNESS_BACKGROUND_WORK_MAX_DURATION_MS,
-        DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS
-      );
+      const harnessConfig = parseHarnessWorkConfig(env);
       if (
         !stateBefore ||
-        getFreshHarnessWorkLeaseExpiry(stateBefore, new Date(), harnessWorkLeaseMs, harnessWorkMaxDurationMs) !== null ||
+        isHarnessWorkLeaseActive(stateBefore, new Date(), harnessConfig) ||
         !isActivitySafeForSleep(workspace.taskStatus, stateBefore, new Date(), idleAfterMs)
       ) {
         throw new Error(`Workspace agent is not idle (${stateBefore?.activity ?? 'unknown'})`);
@@ -546,7 +556,7 @@ export async function sleepWorkspaceSession(
       );
       if (
         !stateAfter ||
-        getFreshHarnessWorkLeaseExpiry(stateAfter, new Date(), harnessWorkLeaseMs, harnessWorkMaxDurationMs) !== null ||
+        isHarnessWorkLeaseActive(stateAfter, new Date(), harnessConfig) ||
         !isActivitySafeForSleep(workspace.taskStatus, stateAfter, new Date(), idleAfterMs) ||
         stateAfter.activity !== stateBefore.activity ||
         stateAfter.activityAt !== stateBefore.activityAt ||
@@ -569,7 +579,7 @@ export async function sleepWorkspaceSession(
       );
       if (
         !stateAtStop ||
-        getFreshHarnessWorkLeaseExpiry(stateAtStop, new Date(), harnessWorkLeaseMs, harnessWorkMaxDurationMs) !== null ||
+        isHarnessWorkLeaseActive(stateAtStop, new Date(), harnessConfig) ||
         !isActivitySafeForSleep(workspace.taskStatus, stateAtStop, new Date(), idleAfterMs) ||
         stateAtStop.activity !== stateAfter.activity ||
         stateAtStop.activityAt !== stateAfter.activityAt ||

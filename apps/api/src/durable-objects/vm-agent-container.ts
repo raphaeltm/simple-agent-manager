@@ -461,6 +461,43 @@ export class VmAgentContainer extends Container<Env> {
       await this.renewActiveWorkKeepalive();
       return;
     }
+    // Check ProjectData harness work lease before committing to sleep.
+    // The container's own ActiveWorkState tracks prompt-level keepalive,
+    // but Claude SDK background tasks report separately to ProjectData
+    // via the vm-agent's ACP extension handler (nudgeHarnessActivityReport).
+    if (activeWork?.agentSessionId) {
+      const config = await this.ctx.storage.get<VmAgentContainerLaunchConfig>('launchConfig');
+      if (config) {
+        try {
+          const { isHarnessWorkLeaseActive, parseHarnessWorkConfig } = await import(
+            '../services/session-sleep'
+          );
+          const projectDataService = await import('../services/project-data');
+          const state = await projectDataService.getSessionState(
+            this.env,
+            config.projectId,
+            activeWork.agentSessionId
+          );
+          if (state && isHarnessWorkLeaseActive(state, new Date(), parseHarnessWorkConfig(this.env))) {
+            log.info('vm_agent_container_sleep_deferred_harness_work', {
+              nodeId: config.nodeId,
+              workspaceId: config.workspaceId,
+              agentSessionId: activeWork.agentSessionId,
+            });
+            await this.renewActivityTimeout();
+            return;
+          }
+        } catch (error) {
+          // Fail open: proceed with sleep. The sleep transaction's snapshot
+          // verification and the VM-neutral sleep sweep both watch this state
+          // independently; a transient ProjectData failure here does not justify
+          // blocking the container from sleeping.
+          log.warn('vm_agent_container_harness_lease_check_failed', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+    }
     // Close the request gate before crossing D1/ProjectData boundaries. A
     // follow-up accepted after this point remains in durable delivery instead
     // of racing the final snapshot and being cut off by stop().

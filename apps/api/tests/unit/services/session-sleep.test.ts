@@ -148,6 +148,65 @@ function buildEnv(overrides: Partial<Env> = {}): Env {
   } as unknown as Env;
 }
 
+describe('parseHarnessWorkConfig', () => {
+  it('uses defaults when env vars are unset', async () => {
+    const { parseHarnessWorkConfig, DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS, DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS } =
+      await import('../../../src/services/session-sleep');
+
+    const config = parseHarnessWorkConfig({});
+    expect(config.leaseMs).toBe(DEFAULT_HARNESS_BACKGROUND_WORK_LEASE_MS);
+    expect(config.maxDurationMs).toBe(DEFAULT_HARNESS_BACKGROUND_WORK_MAX_DURATION_MS);
+  });
+
+  it('reads configured env var values', async () => {
+    const { parseHarnessWorkConfig } = await import('../../../src/services/session-sleep');
+
+    const config = parseHarnessWorkConfig({
+      HARNESS_BACKGROUND_WORK_LEASE_MS: '120000',
+      HARNESS_BACKGROUND_WORK_MAX_DURATION_MS: '600000',
+    });
+    expect(config.leaseMs).toBe(120000);
+    expect(config.maxDurationMs).toBe(600000);
+  });
+});
+
+describe('isHarnessWorkLeaseActive', () => {
+  it('returns false for null state', async () => {
+    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-sleep');
+    expect(isHarnessWorkLeaseActive(null, new Date(), { leaseMs: 300000, maxDurationMs: 1800000 })).toBe(false);
+  });
+
+  it('returns true for active work within lease', async () => {
+    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-sleep');
+    const now = new Date();
+    expect(isHarnessWorkLeaseActive(
+      { runtimeWorkState: 'active', runtimeWorkUpdatedAt: now.getTime() - 10_000, runtimeWorkProgressAt: now.getTime() - 10_000 },
+      now,
+      { leaseMs: 300000, maxDurationMs: 1800000 }
+    )).toBe(true);
+  });
+
+  it('returns false for expired lease', async () => {
+    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-sleep');
+    const now = new Date();
+    expect(isHarnessWorkLeaseActive(
+      { runtimeWorkState: 'active', runtimeWorkUpdatedAt: now.getTime() - 400_000, runtimeWorkProgressAt: now.getTime() - 400_000 },
+      now,
+      { leaseMs: 300000, maxDurationMs: 1800000 }
+    )).toBe(false);
+  });
+
+  it('returns false for inactive work state', async () => {
+    const { isHarnessWorkLeaseActive } = await import('../../../src/services/session-sleep');
+    const now = new Date();
+    expect(isHarnessWorkLeaseActive(
+      { runtimeWorkState: 'inactive', runtimeWorkUpdatedAt: now.getTime() - 10_000, runtimeWorkProgressAt: now.getTime() - 10_000 },
+      now,
+      { leaseMs: 300000, maxDurationMs: 1800000 }
+    )).toBe(false);
+  });
+});
+
 describe('sleepWorkspaceSession', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -953,6 +1012,89 @@ describe('sleepWorkspaceSession', () => {
     expect(mocks.beginSessionSnapshotStopping).not.toHaveBeenCalled();
     expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
     expect(mocks.failSessionSnapshotSleepBeforeTeardown).toHaveBeenCalledTimes(1);
+  });
+
+  // DISCRIMINATING: this test MUST fail when the isHarnessWorkLeaseActive
+  // check in the stateBefore gate (session-sleep.ts, sleepWorkspaceSession)
+  // is removed. It covers the scenario where harness work is active from
+  // the start (not just appearing mid-verification), proving the check at
+  // the very first gate prevents the destructive path.
+  it('aborts before stopping when harness work is active from the start', async () => {
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'idle',
+      activityAt: 100,
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 2,
+      runtimeWorkSource: 'claude_sdk',
+      runtimeWorkUpdatedAt: Date.now() - 10_000,
+      runtimeWorkProgressAt: Date.now() - 10_000,
+    });
+    mocks.getRestorableSessionSnapshot
+      .mockReset()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        status: 'available',
+        degradation: 'none',
+        expiresAt: '2026-08-19T00:00:00.000Z',
+      });
+    const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
+
+    await expect(
+      sleepWorkspaceSession(buildEnv(), {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'test',
+      })
+    ).rejects.toThrow('Workspace agent is not idle');
+
+    expect(mocks.beginSessionSnapshotStopping).not.toHaveBeenCalled();
+    expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
+    expect(mocks.sleepSession).not.toHaveBeenCalled();
+    expect(mocks.failSessionSnapshotSleepBeforeTeardown).toHaveBeenCalledTimes(1);
+  });
+
+  // The ceiling must also block sleep at the point-of-no-return. This test
+  // uses the same scenario but with an expired ceiling so sleep proceeds,
+  // proving the ceiling is checked at every gate.
+  it('allows sleep when harness work lease has expired', async () => {
+    const now = Date.now();
+    mocks.getSessionState.mockResolvedValue({
+      activity: 'idle',
+      activityAt: 100,
+      runtimeWorkState: 'active',
+      runtimeWorkCount: 1,
+      runtimeWorkSource: 'claude_sdk',
+      runtimeWorkUpdatedAt: now - 121_000,
+      runtimeWorkProgressAt: now - 121_000,
+    });
+    mocks.getRestorableSessionSnapshot
+      .mockReset()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        status: 'available',
+        degradation: 'none',
+        expiresAt: '2026-08-19T00:00:00.000Z',
+      })
+      .mockResolvedValueOnce({
+        status: 'available',
+        degradation: 'none',
+        sleepingAt: '2026-08-12T00:00:00.000Z',
+        sleepStatus: 'sleeping',
+        expiresAt: '2026-08-19T00:00:00.000Z',
+      });
+    const { sleepWorkspaceSession } = await import('../../../src/services/session-sleep');
+
+    await sleepWorkspaceSession(
+      buildEnv({ HARNESS_BACKGROUND_WORK_LEASE_MS: '120000' }),
+      {
+        workspaceId: 'workspace-1',
+        userId: 'user-1',
+        reason: 'test',
+      }
+    );
+
+    expect(mocks.stopWorkspaceOnNode).toHaveBeenCalledTimes(1);
+    expect(mocks.finalizeSessionSnapshotSleeping).toHaveBeenCalledTimes(1);
   });
 
   it('rolls a reclaimed stopping claim forward without recapturing', async () => {
