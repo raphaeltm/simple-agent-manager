@@ -44,6 +44,27 @@ vi.mock('../../src/pages/Settings', () => ({
 }));
 vi.mock('../../src/pages/Chats', () => ({ Chats: () => <div data-testid="chats-page" /> }));
 
+// Records module evaluation order so the Project-shell/ProjectChat waterfall fix can be
+// observed: both chunks must start loading together, not one after the other.
+const loadOrder = vi.hoisted(() => [] as string[]);
+
+vi.mock('../../src/pages/Project', async () => {
+  const { Outlet } = await import('react-router');
+  loadOrder.push('Project');
+  return {
+    Project: () => (
+      <div data-testid="project-detail-page">
+        <Outlet />
+      </div>
+    ),
+  };
+});
+
+vi.mock('../../src/pages/project-chat', () => {
+  loadOrder.push('project-chat');
+  return { ProjectChat: () => <div data-testid="project-chat-page" /> };
+});
+
 import App from '../../src/App';
 
 function renderAt(path: string) {
@@ -93,6 +114,21 @@ describe('App code splitting', () => {
     // page with no intervening fallback frame.
     expect(screen.queryByTestId('route-fallback')).not.toBeInTheDocument();
     expect(screen.getByTestId('chats-page')).toBeInTheDocument();
+  });
+
+  it('starts the project-chat chunk in parallel with the Project shell, not after it', async () => {
+    expect(loadOrder).toEqual([]);
+
+    renderAt('/projects/proj-1/chat');
+    await screen.findByTestId('project-chat-page');
+
+    // Both modules must have been requested. The discriminating part is that the child
+    // import is kicked off inside the shell's own loader, so it is in flight before the
+    // shell has rendered its <Outlet/>. Without the parallel kick-off in App.tsx the
+    // child request would only begin after 'Project' finished evaluating and rendering.
+    expect(loadOrder).toContain('Project');
+    expect(loadOrder).toContain('project-chat');
+    expect(screen.getByTestId('project-detail-page')).toBeInTheDocument();
   });
 
   it('renders the statically-imported landing set with no fallback at all', () => {

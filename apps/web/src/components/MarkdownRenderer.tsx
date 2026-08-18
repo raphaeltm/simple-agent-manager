@@ -1,4 +1,5 @@
 import { MERMAID_SVG_SANITIZE_CONFIG as SVG_SANITIZE_CONFIG } from '@simple-agent-manager/acp-client/mermaid';
+import { Spinner } from '@simple-agent-manager/ui';
 import { Highlight, themes } from 'prism-react-renderer';
 import {
   type CSSProperties,
@@ -11,6 +12,8 @@ import {
 } from 'react';
 import ReactMarkdown, { type ExtraProps } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+
+import { importWithRetry } from '../lib/lazy-with-retry';
 
 const SAFE_MARKDOWN_URL_PROTOCOLS = new Set(['http:', 'https:']);
 
@@ -59,7 +62,14 @@ interface MermaidBundle {
 let mermaidBundlePromise: Promise<MermaidBundle> | null = null;
 
 function loadMermaid(): Promise<MermaidBundle> {
-  mermaidBundlePromise ??= Promise.all([import('mermaid'), import('dompurify')])
+  // Routed through `importWithRetry` for the same reason route chunks are: these are
+  // content-hashed chunks fetched long after the page loaded, so a redeploy mid-session
+  // makes them 404. Without it a stale session would render the raw browser fetch-error
+  // string inline in the chat transcript instead of recovering.
+  mermaidBundlePromise ??= Promise.all([
+    importWithRetry(() => import('mermaid')),
+    importWithRetry(() => import('dompurify')),
+  ])
     .then(([mermaidModule, domPurifyModule]) => {
       const mermaid = mermaidModule.default;
       initializeMermaid(mermaid);
@@ -113,13 +123,17 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const idRef = useRef(`mermaid-${Date.now()}-${++mermaidCounter}`);
   const [error, setError] = useState<string | null>(null);
+  const [isRendering, setIsRendering] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
     const diagramId = idRef.current;
+    setIsRendering(true);
 
     async function render() {
       try {
+        // First diagram on the page pays for fetching the mermaid engine here, so this
+        // await can be seconds on a slow connection — hence the placeholder below.
         const { mermaid, domPurify } = await loadMermaid();
         if (cancelled) return;
         const { svg } = await mermaid.render(diagramId, code);
@@ -131,6 +145,8 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : 'Failed to render diagram');
         }
+      } finally {
+        if (!cancelled) setIsRendering(false);
       }
     }
 
@@ -156,7 +172,25 @@ const MermaidDiagram: FC<{ code: string }> = ({ code }) => {
     );
   }
 
-  return <div ref={containerRef} data-testid="mermaid-diagram" className="mb-3 overflow-auto" />;
+  return (
+    <div className="mb-3">
+      {/* Reserves space and announces progress while the engine chunk downloads and the
+          diagram renders — otherwise this is an invisible gap mid-message. */}
+      {isRendering && (
+        <div
+          className="flex items-center gap-2 px-4 py-3 min-h-16 text-fg-muted"
+          role="status"
+          aria-label="Rendering diagram"
+          data-testid="mermaid-loading"
+          style={{ fontSize: '0.8125rem' }}
+        >
+          <Spinner size="sm" />
+          <span>Rendering diagram…</span>
+        </div>
+      )}
+      <div ref={containerRef} data-testid="mermaid-diagram" className="overflow-auto" />
+    </div>
+  );
 };
 
 // ---------- Syntax Highlighted Code ----------

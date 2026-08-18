@@ -53,6 +53,12 @@ function buildServiceWorker(): Plugin {
  * | terminal + markdown + react          | 965 kB / 286 kB       | `vendor-markdown` became preloaded instead  |
  * | terminal + react (this config)       | **719 kB / 211 kB**   | no heavy library in the eager set           |
  *
+ * The same trap applies to *route* groups. Co-locating the `Project` shell with
+ * `project-chat` to collapse their load waterfall — which is what this task originally
+ * planned — produced one eager 1,199 kB / 343 kB gzip `route-project-chat` chunk, i.e.
+ * the entire chat page downloaded on the login screen. That waterfall is instead
+ * collapsed by starting both dynamic imports in parallel; see `src/App.tsx`.
+ *
  * So `mermaid`, `recharts`, `@xyflow/react`, `react-markdown`, `remark-gfm` and
  * `prism-react-renderer` are deliberately NOT grouped — the bundler already isolates
  * them behind their routes, and grouping measurably regressed the initial load.

@@ -53,7 +53,27 @@ const IdeaDetailPage = lazyNamed(() => import('./pages/IdeaDetailPage'), 'IdeaDe
 const IdeasPage = lazyNamed(() => import('./pages/IdeasPage'), 'IdeasPage');
 const Node = lazyNamed(() => import('./pages/Node'), 'Node');
 const Nodes = lazyNamed(() => import('./pages/Nodes'), 'Nodes');
-const Project = lazyNamed(() => import('./pages/Project'), 'Project');
+/**
+ * `/projects/:id` renders the `Project` shell, whose `<Outlet/>` then renders a child
+ * route — so the child's chunk would only START loading once the shell has rendered.
+ * That sequential waterfall lands on the app's hottest path (rule 26: project chat is
+ * the primary UX surface), and the shell chunk is tiny (~1 kB gzip), so the second
+ * request is almost pure round-trip latency.
+ *
+ * Merging the two into one `advancedChunks` group was measured to be far worse — it made
+ * the combined 343 kB gzip chunk eager on every page load (see `vite.config.ts`). Kicking
+ * the child import off in parallel with the shell import gets the same overlap with none
+ * of the initial-load cost.
+ *
+ * `chat` is the correct chunk to warm: `/projects/:id` index-redirects to it.
+ */
+const Project = lazyNamed(() => {
+  const shell = import('./pages/Project');
+  // Fire-and-forget: failures are surfaced by the route's own lazy import, and an
+  // unhandled rejection here would be reported as a page-level error.
+  void import('./pages/project-chat').catch(() => undefined);
+  return shell;
+}, 'Project');
 const ProjectChat = lazyNamed(() => import('./pages/project-chat'), 'ProjectChat');
 const ProjectActivity = lazyNamed(() => import('./pages/ProjectActivity'), 'ProjectActivity');
 const ProjectAgentChat = lazyNamed(() => import('./pages/ProjectAgentChat'), 'ProjectAgentChat');

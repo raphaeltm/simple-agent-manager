@@ -1,4 +1,4 @@
-@import "tailwindcss";
+@import 'tailwindcss';
 @source "../../../packages/ui/src";
 
 /* ══════════════════════════════════════════════════════════════
@@ -125,13 +125,21 @@
 
 /* GlobalAudioPlayer — slide-up from bottom on appear, slide-down on dismiss */
 @keyframes sam-player-slide-in {
-  from { transform: translateY(100%); }
-  to { transform: translateY(0); }
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   @keyframes sam-player-slide-in {
-    from { transform: translateY(0); }
-    to   { transform: translateY(0); }
+    from {
+      transform: translateY(0);
+    }
+    to {
+      transform: translateY(0);
+    }
   }
 }
 
@@ -141,11 +149,22 @@
   animation: sam-char-fade-in ease-out forwards;
 }
 @keyframes sam-char-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .char-fade {
+    animation: none;
+    opacity: 1;
+  }
+  /* Route-chunk Suspense fallback. The design-system blanket rule only neutralises
+     animation-duration, so without this the reveal *delay* would still apply and a
+     reduced-motion user would see nothing at all while the chunk loads. */
+  .sam-route-fallback {
     animation: none;
     opacity: 1;
   }
@@ -162,8 +181,13 @@
   animation: sam-cursor-blink 1s step-end infinite;
 }
 @keyframes sam-cursor-blink {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0; }
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .streaming-cursor {

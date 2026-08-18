@@ -56,14 +56,26 @@ async function settle<T>(promise: Promise<T>): Promise<T> {
 
 describe('isChunkLoadError', () => {
   it.each([
-    ['Chromium', 'Failed to fetch dynamically imported module: https://app/assets/x-abc.js'],
-    ['Firefox', 'error loading dynamically imported module: https://app/assets/x-abc.js'],
-    ['WebKit', 'Importing a module script failed.'],
+    // VERIFIED against a real Chromium run: build the app, delete a route chunk from
+    // dist/ so the SPA fallback serves index.html, then navigate. The *thrown* error is
+    // exactly this. The remaining patterns are defensive.
     [
-      'Chromium wrong MIME (SPA 404 served index.html)',
+      'Chromium (verified thrown form)',
+      'Failed to fetch dynamically imported module: https://app/assets/x-abc.js',
+    ],
+    [
+      'Firefox (documented wording, not reproduced here)',
+      'error loading dynamically imported module: https://app/assets/x-abc.js',
+    ],
+    ['WebKit (documented wording, not reproduced here)', 'Importing a module script failed.'],
+    [
+      // Chromium ALSO logs this to the console for the same SPA-fallback 404, but as a
+      // diagnostic rather than the catchable rejection. Matched defensively in case an
+      // engine surfaces the MIME complaint as the thrown error.
+      'wrong-MIME diagnostic wording (defensive; not confirmed catchable)',
       'Failed to load module script: Expected a JavaScript-or-Wasm module script but the server responded with a MIME type of "text/html".',
     ],
-  ])('recognises the %s wording', (_engine, message) => {
+  ])('recognises the %s', (_engine, message) => {
     expect(isChunkLoadError(chunkError(message))).toBe(true);
   });
 
@@ -180,6 +192,44 @@ describe('importWithRetry', () => {
     await expect(settle(importWithRetry(loader))).rejects.toThrow(/ReferenceError in page module/);
 
     expect(reload).not.toHaveBeenCalled();
+  });
+
+  it('MALFORMED CONFIG: a non-numeric cooldown falls back to the default instead of NaN', async () => {
+    // `x < NaN` is always false, so an unguarded parse would silently disable the
+    // cooldown and reintroduce the reload loop the guard exists to prevent.
+    vi.stubEnv('VITE_CHUNK_RELOAD_COOLDOWN_MS', 'not-a-number');
+    vi.stubEnv('VITE_CHUNK_LOAD_RETRY_DELAY_MS', '');
+    vi.resetModules();
+
+    const reloaded = await import('../../src/lib/lazy-with-retry');
+    expect(Number.isFinite(reloaded.CHUNK_RELOAD_COOLDOWN_MS)).toBe(true);
+    expect(reloaded.CHUNK_RELOAD_COOLDOWN_MS).toBeGreaterThan(0);
+    expect(Number.isFinite(reloaded.CHUNK_LOAD_RETRY_DELAY_MS)).toBe(true);
+
+    // And the guard still actually guards with that fallback in place.
+    window.sessionStorage.setItem(reloaded.CHUNK_RELOAD_MARKER_KEY, String(Date.now()));
+    const loader = vi
+      .fn()
+      .mockRejectedValue(chunkError('Failed to fetch dynamically imported module'));
+
+    await expect(settle(reloaded.importWithRetry(loader))).rejects.toThrow(
+      /Failed to fetch dynamically imported module/
+    );
+    expect(reload).not.toHaveBeenCalled();
+
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('honours a valid numeric cooldown override', async () => {
+    vi.stubEnv('VITE_CHUNK_RELOAD_COOLDOWN_MS', '777');
+    vi.resetModules();
+
+    const reloaded = await import('../../src/lib/lazy-with-retry');
+    expect(reloaded.CHUNK_RELOAD_COOLDOWN_MS).toBe(777);
+
+    vi.unstubAllEnvs();
+    vi.resetModules();
   });
 
   it('never reloads when sessionStorage is unavailable (private mode) — fails closed', async () => {

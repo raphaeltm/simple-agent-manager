@@ -36,6 +36,9 @@ from `App.tsx` or router config are banned for pages not in the initial landing 
 | `@xterm/*` reachable only from the workspace terminal | `packages/terminal/src/{Terminal,MultiTerminal}.tsx`, `types/multi-terminal.ts` | 2.1 |
 | `prism-react-renderer` cannot be dynamically imported from MarkdownRenderer | `CODE_THEME_BG` (`MarkdownRenderer.tsx:127`) is a **synchronous** module-scope export consumed by other components — it must stay statically imported and be split by chunk group instead | 2.1 (chunk group, not dynamic import) |
 | Bundler is **Rolldown**, not Rollup | vite `8.1.3`; `dist/assets/rolldown-runtime-*.js` present; `rolldown@1.1.4` exposes `output.advancedChunks.groups` **and** legacy `output.manualChunks` (`define-config-BBz954-q.d.mts:791,834`) | 2.1 — use `advancedChunks` (the non-deprecated API for this bundler) |
+| **SUPERSEDES the original 7-group plan**: a manual chunk group makes a lazy library EAGER | A group collapses matching modules across dynamic-import boundaries, so the chunk attaches to the entry's static graph and lands in `index.html`'s `modulepreload` set. Measured eager JS: 6 groups → 908 kB gz; 3 groups → 286 kB gz; 2 groups → **211 kB gz**. Grouping mermaid also collapsed its own per-diagram lazy chunks into one 2.7 MB chunk. | 2.1 (rewritten), 2.2 |
+| **SUPERSEDES the waterfall plan**: a `project-chat` route group is worse than the waterfall | The group produced one **eager** 1,199 kB / 343 kB gz `route-project-chat` chunk — the whole chat page downloaded on the login screen. | 2.3 (parallel import instead) |
+| A same-specifier retry cannot refetch a 404'd chunk | Chromium's ES module map caches a failed specifier for the document's lifetime; verified in `lazy-route-chunks-audit.spec.ts`. The reload rung is what recovers. | 4.2 (documented), 5.6 |
 | Service worker serves scripts stale-while-revalidate and does **not** rescue a 404 | `apps/web/src/sw.ts:60-62,231-256` — a missing chunk returns the origin 404/HTML, so the dynamic import rejects | 4.x |
 | Assets are content-hashed with long TTL ("cache-bust on deploy") | idea `01M09SKVNJGJNJY2WGCZ6D89XZ`, "What's already good" | 4.x |
 | `app-routes.test.tsx` asserts routes **synchronously** | `apps/web/tests/unit/app-routes.test.tsx:206-273` uses `screen.getByTestId` | 5.2 |
@@ -72,67 +75,127 @@ Browser error strings differ, so detection must match all of them:
 Prior art keeps `ProjectChat` and `Project` eager; rule 60 (newer, and cited by this
 workstream's brief) supersedes that and limits the static set to the landing/dashboard
 pair. Rule 60 wins. The `Project` shell → `ProjectChat` child waterfall this creates is
-neutralised by co-locating both in one `advancedChunks` group so the second lazy import
-resolves from an already-fetched chunk.
+neutralised by starting the child `import()` inside the shell's own lazy loader so both
+chunks fetch in parallel. (The originally-planned "co-locate both in one `advancedChunks`
+group" was implemented and measured during this task: it made a 1,199 kB / 343 kB gzip
+chunk **eager on every page load**, so it was replaced by the parallel-import approach.
+See checklist item 2.3 and the measurement table in `vite.config.ts`.)
 
 ## Implementation Checklist
 
 ### 1. React.lazy + Suspense route wiring
 
-- [ ] 1.1 Add `lazyNamed()` helper so named page exports work with `React.lazy`
-- [ ] 1.2 Convert every page import in `App.tsx` to `lazyNamed`, keeping ONLY `Landing`
+- [x] 1.1 Add `lazyNamed()` helper so named page exports work with `React.lazy`
+- [x] 1.2 Convert every page import in `App.tsx` to `lazyNamed`, keeping ONLY `Landing`
       (login/landing) and `Dashboard` static per rule 60
-- [ ] 1.3 Add `RouteFallback` — centered `Spinner`, `role="status"`, fade-in delayed so a
-      fast chunk load never flashes a spinner
-- [ ] 1.4 Wrap each lazy route element in its own `<Suspense>` (per-route boundary, so a
+- [x] 1.3 Add `RouteFallback` — centered `Spinner`, fade-in delayed so a fast chunk load
+      never flashes a spinner. (Ships WITHOUT a wrapper `role="status"`: `Spinner`
+      already declares one, and this now mounts on ~90 routes, so a nested second status
+      region would double-announce on every navigation.)
+- [x] 1.4 Wrap each lazy route element in its own `<Suspense>` (per-route boundary, so a
       fallback can never unmount the `AppShell` chrome or a parent layout — rule 48)
+- [x] 1.5 `.sam-route-fallback` reduced-motion override in `app.css` cancelling the
+      animation AND the reveal delay (the design-system blanket rule only zeroes
+      `animation-duration`, not `animation-delay`)
 
 ### 2. Vite chunking
 
-- [ ] 2.1 Add `build.rollupOptions.output.advancedChunks.groups` splitting
-      `vendor-mermaid`, `vendor-charts`, `vendor-flow`, `vendor-terminal`,
-      `vendor-markdown`, `vendor-react`, and a `project-chat` route group
-- [ ] 2.2 Verify from the build output that no heavy vendor group is reachable from the
-      entry (check `dist/index.html` modulepreload list)
+- [x] 2.1 **REPLAN — the original 7-group plan was measured to be a regression.**
+      `advancedChunks.groups` ships with `vendor-terminal` + `vendor-react` ONLY.
+      `mermaid`/`recharts`/`@xyflow/react`/`react-markdown`/`remark-gfm`/
+      `prism-react-renderer` are deliberately NOT grouped — grouping them attaches the
+      chunk to the entry's static graph and makes them eager (908 kB gz vs 211 kB gz).
+      Rationale + measurement table recorded in `vite.config.ts`.
+- [x] 2.2 Verify from the build output that no heavy vendor group is reachable from the
+      entry (`dist/index.html` modulepreload list — verified, and now guarded by
+      `lazy-route-chunks-audit.spec.ts`)
+- [x] 2.3 **REPLAN** — the `project-chat` route group in the original plan produced an
+      eager 343 kB gz chunk. The `Project` → `ProjectChat` waterfall is instead collapsed
+      by starting the child `import()` inside the shell's own loader (`App.tsx`).
 
 ### 3. Lazy mermaid
 
-- [ ] 3.1 Replace the static `import mermaid from 'mermaid'` with a memoised
+- [x] 3.1 Replace the static `import mermaid from 'mermaid'` with a memoised
       `loadMermaid()` dynamic import that also runs `initialize()` exactly once
-- [ ] 3.2 Move `DOMPurify` into the same dynamic path (only used for mermaid SVG output)
-- [ ] 3.3 Reset the memo on failure so a transient network error can be retried
+- [x] 3.2 Move `DOMPurify` into the same dynamic path (only used for mermaid SVG output)
+- [x] 3.3 Reset the memo on failure so a transient network error can be retried
+- [x] 3.4 Route both dynamic imports through `importWithRetry` — mermaid's chunk is
+      subject to the same stale-deploy 404 as any route chunk
+- [x] 3.5 Loading affordance while the engine downloads (`min-h-16` +
+      `role="status"` placeholder) instead of an invisible gap mid-message
 
 ### 4. Stale-chunk resilience
 
-- [ ] 4.1 `isChunkLoadError()` matching all four browser/bundler error shapes
-- [ ] 4.2 `importWithRetry()` — retry once after a configurable delay
-- [ ] 4.3 One-shot reload recovery guarded by a `sessionStorage` marker + cooldown so a
+- [x] 4.1 `isChunkLoadError()` matching all four browser/bundler error shapes
+- [x] 4.2 `importWithRetry()` — retry once after a configurable delay. **Measured
+      caveat**: Chromium's module map caches a failed specifier, so the retry does not
+      refetch on that engine; kept as cross-engine insurance, documented in the source.
+      The reload rung is what recovers.
+- [x] 4.3 One-shot reload recovery guarded by a `sessionStorage` marker + cooldown so a
       genuinely-missing chunk cannot cause a reload loop
-- [ ] 4.4 Non-chunk errors rethrow immediately (never trigger a reload)
-- [ ] 4.5 All timings env-configurable with `DEFAULT_*` constants (Principle XI)
+- [x] 4.4 Non-chunk errors rethrow immediately (never trigger a reload)
+- [x] 4.5 All timings env-configurable with `DEFAULT_*` constants (Principle XI), parsed
+      through a `NaN`/non-positive guard so a malformed override cannot silently disable
+      the cooldown; documented in `apps/web/.env.example` + `configuration.md`
 
 ### 5. Tests
 
-- [ ] 5.1 Unit tests for `lazy-with-retry` (success, retry-then-success, reload-once,
-      loop-guard rethrow, non-chunk passthrough, cross-browser error strings)
-- [ ] 5.2 Update `app-routes.test.tsx` to await lazy routes (`findByTestId`)
-- [ ] 5.3 Unit test proving non-diagram markdown never evaluates the `mermaid` module and
+- [x] 5.1 Unit tests for `lazy-with-retry` (success, retry-then-success, reload-once,
+      loop-guard rethrow, non-chunk passthrough, cross-browser error strings,
+      malformed-env fallback, valid-env override)
+- [x] 5.2 Update `app-routes.test.tsx` to await lazy routes (`findByTestId`)
+- [x] 5.3 Unit test proving non-diagram markdown never evaluates the `mermaid` module and
       a diagram does
-- [ ] 5.4 Playwright audit at 375px + 1280px across dashboard, project chat, settings,
-      admin analytics, account map, workspace — `assertNoOverflow`, no blank flash
-- [ ] 5.5 `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green
+- [x] 5.4 Playwright audit at 375px + 1280px across dashboard, projects, project chat,
+      settings, admin analytics, account map, nodes, workspace — `assertNoOverflow`,
+      no crash screen, per-route heavy-chunk allowance
+- [x] 5.5 `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green
+- [x] 5.6 Real-browser stale-chunk recovery test (404 a route chunk, assert the reload
+      rung fires once and the loop guard holds)
+- [x] 5.7 `lazyNamed` direct tests (happy path, missing export, loader not called until
+      render)
+- [x] 5.8 Name-independent first-paint byte budget, so a future chunk group cannot evade
+      the substring markers
 
 ## Acceptance Criteria
 
-- [ ] Initial entry chunk gzip size drops materially vs. the 854.00 kB baseline
-- [ ] `mermaid`, `recharts`, `@xyflow/react`, `@xterm/*` are absent from the entry chunk
-      and from `dist/index.html`'s modulepreload set
-- [ ] Rendering markdown without a diagram evaluates zero mermaid code (test-proven)
-- [ ] A failed chunk import retries once, then reloads once, then surfaces an error —
-      never loops (test-proven)
-- [ ] Route transitions never unmount the `AppShell` chrome (rule 48)
-- [ ] No horizontal overflow at 375px or 1280px on the audited routes
-- [ ] Only `Landing` and `Dashboard` remain statically imported in `App.tsx`
+- [x] Initial entry chunk gzip size drops materially vs. the 854.00 kB baseline —
+      **76.63 kB gz (−91.0%)**; full eager set 976.2 kB → 211.4 kB gz (−78.3%)
+- [x] `mermaid`, `recharts`, `@xyflow/react`, `@xterm/*` are absent from the entry chunk
+      and from `dist/index.html`'s modulepreload set (guarded by the Playwright audit)
+- [x] Rendering markdown without a diagram evaluates zero mermaid code (test-proven,
+      verified discriminating by restoring the static import)
+- [x] A failed chunk import recovers via a single reload and never loops (test-proven in
+      unit tests AND in a real browser against the production build)
+- [x] Route transitions never unmount the `AppShell` chrome (rule 48)
+- [x] No horizontal overflow at 375px or 1280px on the audited routes
+- [x] Only `Landing` and `Dashboard` remain statically imported in `App.tsx`
+
+## Measured Results (durable record — `.do-state.md` is gitignored)
+
+| metric | before (`1f64efc2f`) | after |
+| --- | --- | --- |
+| entry chunk | 3,121.19 kB raw / 854.00 kB gz | 271.32 kB / 76.63 kB gz |
+| eager JS set (entry + modulepreload) | 3,624.9 kB / 976.2 kB gz (16 files) | 718.8 kB / 211.4 kB gz (14 files) |
+| total emitted JS | 5,956.4 kB / 75 files | 6,444.3 kB / 230 files |
+
+Total emitted JS grows because chunk boundaries add per-chunk overhead; 82 of the 230
+files are mermaid's own per-diagram chunks, which existed in the baseline too — they were
+simply downloaded eagerly before.
+
+## Known Gaps / Accepted Tradeoffs
+
+- **`AppShell` stays statically imported.** An anonymous visitor to `/` therefore still
+  downloads authenticated chrome. Making it lazy would add a chunk waterfall to *every*
+  authenticated page load; with the entry already at 76.63 kB gz the trade is not worth
+  it. Revisit if the entry grows.
+- **Non-chat `/projects/:id/*` children still cascade** (shell chunk → child chunk). Only
+  `chat` is warmed in parallel because the index route redirects to it. The other
+  children are lower-traffic; warming all of them would defeat the split.
+- **`resetMermaidLoaderForTests()` is a production export used only by tests.** The
+  alternative (`vi.resetModules()` + dynamic re-import, as in `auth-terminal-cleanup.test.ts`)
+  would also re-run the `vi.mock` factory and destroy the module-evaluation counter these
+  tests depend on.
 
 ## References
 

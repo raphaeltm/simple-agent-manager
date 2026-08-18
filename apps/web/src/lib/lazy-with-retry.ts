@@ -13,25 +13,46 @@ import { type ComponentType, lazy, type LazyExoticComponent } from 'react';
  * caches `status === 200`, so a missing chunk is returned as the origin's 404 verbatim.
  *
  * Recovery ladder:
- *   1. retry the import once (covers a transient network blip)
+ *   1. retry the import once (cross-engine insurance — see the caveat below)
  *   2. reload the page once (fetches a fresh `index.html` with current hashes)
  *   3. rethrow so the global ErrorBoundary shows its recovery UI
  *
  * Step 2 is guarded by a `sessionStorage` marker so a chunk that is genuinely gone can
  * never produce a reload loop.
+ *
+ * Caveat on step 1, measured in Chromium via
+ * `tests/playwright/lazy-route-chunks-audit.spec.ts`: the ES module map caches a failed
+ * specifier for the lifetime of the document, so re-importing the SAME specifier returns
+ * the cached rejection without issuing a second network request. The retry therefore
+ * costs one delay and does not refetch on that engine; it is kept because the caching
+ * behaviour is not uniform across engines and the cost is bounded to a single
+ * `CHUNK_LOAD_RETRY_DELAY_MS` wait on an already-broken path. Step 2 is what actually
+ * recovers the session — that is the rung the tests assert.
  */
 
 const DEFAULT_CHUNK_LOAD_RETRY_DELAY_MS = 350;
 const DEFAULT_CHUNK_RELOAD_COOLDOWN_MS = 15_000;
 
-export const CHUNK_LOAD_RETRY_DELAY_MS = Number.parseInt(
-  import.meta.env.VITE_CHUNK_LOAD_RETRY_DELAY_MS || String(DEFAULT_CHUNK_LOAD_RETRY_DELAY_MS),
-  10
+/**
+ * Falls back to `fallback` when the env value is absent, non-numeric, or non-positive.
+ *
+ * The `NaN` case matters here specifically: the cooldown below is a safety guard, and
+ * `x < NaN` is always false — so a malformed `VITE_CHUNK_RELOAD_COOLDOWN_MS` would
+ * silently disable the reload-loop protection this module promises.
+ */
+function positiveIntFromEnv(raw: string | undefined, fallback: number): number {
+  const parsed = Number.parseInt(raw ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export const CHUNK_LOAD_RETRY_DELAY_MS = positiveIntFromEnv(
+  import.meta.env.VITE_CHUNK_LOAD_RETRY_DELAY_MS,
+  DEFAULT_CHUNK_LOAD_RETRY_DELAY_MS
 );
 
-export const CHUNK_RELOAD_COOLDOWN_MS = Number.parseInt(
-  import.meta.env.VITE_CHUNK_RELOAD_COOLDOWN_MS || String(DEFAULT_CHUNK_RELOAD_COOLDOWN_MS),
-  10
+export const CHUNK_RELOAD_COOLDOWN_MS = positiveIntFromEnv(
+  import.meta.env.VITE_CHUNK_RELOAD_COOLDOWN_MS,
+  DEFAULT_CHUNK_RELOAD_COOLDOWN_MS
 );
 
 /** sessionStorage key holding the epoch-ms timestamp of the last chunk-recovery reload. */
@@ -145,6 +166,10 @@ export async function importWithRetry<T>(loader: () => Promise<T>): Promise<T> {
  * props. Pinning the props type here keeps the wrapper compatible with `React.lazy`'s
  * `ComponentType<any>` constraint without introducing `any`, and makes a page that
  * grows required props fail at the call site rather than silently at runtime.
+ *
+ * If you hit a constraint error here because a page now needs data: thread it through
+ * `useParams()` / router context / a provider rather than loosening this type. Route
+ * elements have no caller that could supply props.
  */
 type RouteComponent = ComponentType<Record<string, never>>;
 

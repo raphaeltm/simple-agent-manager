@@ -865,6 +865,9 @@ Applied via cloud-init on each node:
 | `VITE_SIDEBAR_PROJECT_POLL_INTERVAL_MS` | `60000`            | App-shell project-list refresh cadence in milliseconds; `0` disables  |
 | `VITE_PROJECT_PREFETCH_DELAY_MS`        | `120`              | Mouse dwell before project-detail prefetch; focus/touch are immediate |
 | `VITE_BACKGROUND_FETCH_DELAY_MS`        | `150`              | Delay before background query activity is shown and announced         |
+| `VITE_CHUNK_LOAD_RETRY_DELAY_MS`        | `350`              | Wait before retrying a failed lazy route-chunk import                 |
+| `VITE_CHUNK_RELOAD_COOLDOWN_MS`         | `15000`            | Minimum gap between chunk-recovery reloads; guards against a reload loop |
+| `VITE_ROUTE_FALLBACK_REVEAL_DELAY_MS`   | `180`              | Delay before the route loading spinner fades in, avoiding a flash     |
 
 ## Analytics
 
