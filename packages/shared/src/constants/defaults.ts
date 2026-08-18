@@ -167,3 +167,61 @@ export const DEFAULT_REPORT_ISSUE_DESCRIPTION_MAX_LENGTH = 5_000;
 
 /** Max length for stored report content (description + technical references). Override via REPORT_ISSUE_CONTENT_MAX_LENGTH env var. */
 export const DEFAULT_REPORT_ISSUE_CONTENT_MAX_LENGTH = 65_536;
+
+// =============================================================================
+// Client Query Cache Persistence (apps/web)
+// =============================================================================
+// The web app persists an allowlisted slice of its TanStack Query cache to
+// IndexedDB so a full page reload paints from cache instead of refetching the
+// world. See apps/web/src/lib/query-persistence.ts.
+
+/** How long a persisted query cache entry may be restored after it was written.
+ * `persistQueryClientRestore` discards (and deletes) anything older. Matches
+ * TanStack's own documented default. Override via VITE_QUERY_PERSIST_MAX_AGE_MS. */
+export const DEFAULT_QUERY_PERSIST_MAX_AGE_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/** Minimum gap between IndexedDB writes. TanStack v5 removed `throttleTime` from
+ * persistQueryClient, so the persister throttles its own writes to avoid an IDB
+ * write per cache event. Override via VITE_QUERY_PERSIST_THROTTLE_MS. */
+export const DEFAULT_QUERY_PERSIST_THROTTLE_MS = 1_000;
+
+/** Upper bound on the initial cache restore. Rendering is gated on restore, so a
+ * hung or pathologically slow IndexedDB must not hang the app — past this budget
+ * we fail open and start with an empty in-memory cache.
+ * Override via VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS. */
+export const DEFAULT_QUERY_PERSIST_RESTORE_TIMEOUT_MS = 1_500;
+
+// =============================================================================
+// HTTP Response Cache-Control (apps/api)
+// =============================================================================
+// Conservative stale-while-revalidate budgets for stable/semi-stable GETs. See
+// apps/api/src/lib/cache-headers.ts. Authenticated responses are ALWAYS `private`
+// and carry `Vary: Cookie`; `public` is reserved for unauthenticated, globally
+// identical responses.
+
+/** `max-age` for unauthenticated deploy-scoped config GETs (/api/config/*).
+ * Override via PUBLIC_CONFIG_CACHE_MAX_AGE_SECONDS. */
+export const DEFAULT_PUBLIC_CONFIG_CACHE_MAX_AGE_SECONDS = 60;
+
+/** `stale-while-revalidate` for unauthenticated deploy-scoped config GETs.
+ * Override via PUBLIC_CONFIG_CACHE_SWR_SECONDS. */
+export const DEFAULT_PUBLIC_CONFIG_CACHE_SWR_SECONDS = 300;
+
+/** `max-age` for the authenticated but globally identical model catalog. Kept at
+ * or below the KV catalog TTL so a refreshed catalog is not masked for long.
+ * Override via MODEL_CATALOG_CACHE_MAX_AGE_SECONDS. */
+export const DEFAULT_MODEL_CATALOG_RESPONSE_CACHE_MAX_AGE_SECONDS = 60;
+
+/** `stale-while-revalidate` for the model catalog response.
+ * Override via MODEL_CATALOG_CACHE_SWR_SECONDS. */
+export const DEFAULT_MODEL_CATALOG_RESPONSE_CACHE_SWR_SECONDS = 300;
+
+/** `max-age` for per-user project-scoped reference GETs (agent profiles, skills).
+ * Deliberately 0: the response is served stale-then-revalidated rather than held
+ * fresh, so a user's own edit is never masked by more than one request.
+ * Override via PROJECT_REFERENCE_CACHE_MAX_AGE_SECONDS. */
+export const DEFAULT_PROJECT_REFERENCE_CACHE_MAX_AGE_SECONDS = 0;
+
+/** `stale-while-revalidate` for per-user project-scoped reference GETs.
+ * Override via PROJECT_REFERENCE_CACHE_SWR_SECONDS. */
+export const DEFAULT_PROJECT_REFERENCE_CACHE_SWR_SECONDS = 30;

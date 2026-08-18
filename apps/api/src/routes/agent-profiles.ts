@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { applyCacheHeaders } from '../lib/cache-headers';
 import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
@@ -23,6 +24,11 @@ agentProfileRoutes.get('/', async (c) => {
   await requireProjectAccess(db, projectId, userId);
 
   const profiles = await agentProfileService.listProfiles(db, projectId, userId, c.env);
+  // Per-user body (project profiles OR this caller's global profiles), so this is
+  // strictly `private` + `Vary: Cookie`. max-age is 0 by default: the response is
+  // served stale-then-revalidated, so a user's own edit is masked for at most one
+  // request rather than held fresh.
+  applyCacheHeaders(c, 'project-reference');
   return c.json({ items: profiles });
 });
 

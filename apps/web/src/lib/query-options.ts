@@ -1,6 +1,22 @@
 import { queryOptions } from '@tanstack/react-query';
 
 import { getProject, listGitHubInstallations, listProjects } from './api';
+import { QUERY_PERSIST_MAX_AGE_MS } from './query-persistence';
+
+/**
+ * `gcTime` for the queries the persister is allowed to write (the `projects`
+ * domain — see `query-persistence.ts`).
+ *
+ * Applied per-query rather than as a QueryClient default on purpose: a global
+ * `gcTime` this long would also pin node, workspace, and admin-diagnosis data in
+ * memory, which is both a memory regression and data the security review says to
+ * keep short-lived.
+ *
+ * Matching the persist `maxAge` keeps the two eviction clocks aligned — a query
+ * garbage-collected out of memory would be dropped from the next dehydrate, and a
+ * restored entry evicted sooner than `maxAge` would make persistence pointless.
+ */
+const PERSISTED_QUERY_GC_TIME_MS = QUERY_PERSIST_MAX_AGE_MS;
 
 export const projectQueryKeys = {
   all: (queryScope: string) => ['auth', queryScope, 'projects'] as const,
@@ -22,6 +38,7 @@ export function projectListQueryOptions(queryScope: string, limit?: number) {
   return queryOptions({
     queryKey: projectQueryKeys.list(queryScope, limit),
     queryFn: async () => (await listProjects(limit)).projects,
+    gcTime: PERSISTED_QUERY_GC_TIME_MS,
   });
 }
 
@@ -29,6 +46,7 @@ export function projectDetailQueryOptions(queryScope: string, projectId: string)
   return queryOptions({
     queryKey: projectQueryKeys.detail(queryScope, projectId),
     queryFn: () => getProject(projectId),
+    gcTime: PERSISTED_QUERY_GC_TIME_MS,
   });
 }
 

@@ -365,6 +365,27 @@ SAM loads OpenCode Zen and OpenCode Go model choices through the authenticated m
 | `MODEL_CATALOG_CACHE_TTL_SECONDS` | `3600`                        | KV cache TTL for normalized dynamic model catalog payloads    |
 | `MODEL_CATALOG_FETCH_TIMEOUT_MS`  | `5000`                        | Timeout for the upstream catalog fetch before static fallback |
 
+## HTTP Response Caching
+
+Conservative `Cache-Control` budgets for stable and semi-stable API `GET`s, letting the browser
+serve a cached body instantly while it revalidates in the background. All values are **seconds** and
+are clamped to `[0, 86400]`; an unparseable or negative value falls back to the default rather than
+caching for longer.
+
+Authenticated responses are always emitted as `private` with `Vary: Cookie`, so neither a shared
+cache nor a second account in the same browser can be served another user's body. Only the
+unauthenticated `/api/config/*` endpoints are marked `public`. Endpoints returning real-time data
+(chat messages, task status, session and workspace state) are deliberately excluded.
+
+| Variable                                 | Default | Description                                                                  |
+| ---------------------------------------- | ------- | ---------------------------------------------------------------------------- |
+| `PUBLIC_CONFIG_CACHE_MAX_AGE_SECONDS`    | `60`    | `max-age` for the unauthenticated `/api/config/*` endpoints                  |
+| `PUBLIC_CONFIG_CACHE_SWR_SECONDS`        | `300`   | `stale-while-revalidate` for `/api/config/*`                                 |
+| `MODEL_CATALOG_CACHE_MAX_AGE_SECONDS`    | `60`    | `max-age` for `GET /api/model-catalog/:agentType`                            |
+| `MODEL_CATALOG_CACHE_SWR_SECONDS`        | `300`   | `stale-while-revalidate` for the model catalog response                      |
+| `PROJECT_REFERENCE_CACHE_MAX_AGE_SECONDS`| `0`     | `max-age` for project agent-profile and skill lists (0 = always revalidate)  |
+| `PROJECT_REFERENCE_CACHE_SWR_SECONDS`    | `30`    | `stale-while-revalidate` for project agent-profile and skill lists           |
+
 ## Warm Node Pooling
 
 | Variable                               | Default            | Description                                                                                                                      |

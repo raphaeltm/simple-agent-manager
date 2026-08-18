@@ -10,6 +10,10 @@ import {
   useState,
 } from 'react';
 
+import {
+  discardPersistedQueryCache,
+  useQueryCachePersistence,
+} from '../hooks/useQueryCachePersistence';
 import { setUserId } from '../lib/analytics';
 import { GITHUB_REAUTH_REQUIRED_EVENT } from '../lib/api/client';
 import { signOut, useSession } from '../lib/auth';
@@ -110,6 +114,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
       ? canResolveCacheNamespace
       : !canResolveCacheNamespace || activeCacheNamespace !== nextCacheNamespace;
 
+  // Rehydrate the persisted query cache for the RESOLVED namespace (never the
+  // in-flight one). Gating children on this is what makes a reload paint from
+  // cache instead of from a spinner — the restore is a single IndexedDB read and
+  // is bounded by a timeout that fails open, so it cannot stall the app.
+  const isRestoringPersistedQueryCache = useQueryCachePersistence(
+    activeCacheNamespace,
+    enrichedUser?.id ?? ''
+  );
+
   useLayoutEffect(() => {
     if (!canResolveCacheNamespace || activeCacheNamespace === nextCacheNamespace) return;
 
@@ -120,6 +133,11 @@ export function AuthProvider({ children }: AuthProviderProps) {
       cleanupTerminalSecrets();
       broadcastAuthRevocation();
       if (previousNamespace) clearLibraryCache(previousNamespace);
+      // The persisted query cache is namespaced by identity, so the next user
+      // cannot read this record — but leaving it on disk after the account it
+      // belongs to is gone serves no purpose. Drop it for the same reason
+      // clearLibraryCache runs here.
+      discardPersistedQueryCache(previousNamespace);
     }
 
     queryClient.clear();
@@ -187,7 +205,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
 
   return (
     <AuthContext.Provider value={value}>
-      {isCacheNamespaceTransitioning ? null : children}
+      {isCacheNamespaceTransitioning || isRestoringPersistedQueryCache ? null : children}
       {githubReauthMessage && (
         <div
           className="fixed inset-x-4 bottom-4 z-50 mx-auto max-w-md rounded-lg border border-border bg-surface-elevated p-4 shadow-lg"

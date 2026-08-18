@@ -891,6 +891,16 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   MODEL_CATALOG_SOURCE_URL?: string; // OpenCode model catalog source URL (default: https://models.dev/api.json)
   MODEL_CATALOG_CACHE_TTL_SECONDS?: string; // KV cache TTL for dynamic model catalogs (default: 3600)
   MODEL_CATALOG_FETCH_TIMEOUT_MS?: string; // Upstream model catalog fetch timeout (default: 5000)
+
+  // HTTP response Cache-Control budgets for stable/semi-stable GETs.
+  // See apps/api/src/lib/cache-headers.ts. Values are seconds, clamped to [0, 86400].
+  PUBLIC_CONFIG_CACHE_MAX_AGE_SECONDS?: string; // /api/config/* max-age (default: 60)
+  PUBLIC_CONFIG_CACHE_SWR_SECONDS?: string; // /api/config/* stale-while-revalidate (default: 300)
+  MODEL_CATALOG_CACHE_MAX_AGE_SECONDS?: string; // Model catalog response max-age (default: 60)
+  MODEL_CATALOG_CACHE_SWR_SECONDS?: string; // Model catalog response stale-while-revalidate (default: 300)
+  PROJECT_REFERENCE_CACHE_MAX_AGE_SECONDS?: string; // Agent profiles/skills max-age (default: 0)
+  PROJECT_REFERENCE_CACHE_SWR_SECONDS?: string; // Agent profiles/skills stale-while-revalidate (default: 30)
+
   AI_PROXY_DAILY_INPUT_TOKEN_LIMIT?: string; // Per-user daily input token cap (default: 500000)
   AI_PROXY_DAILY_OUTPUT_TOKEN_LIMIT?: string; // Per-user daily output token cap (default: 200000)
   AI_PROXY_MAX_INPUT_TOKENS_PER_REQUEST?: string; // Max input tokens per request (default: 32000)

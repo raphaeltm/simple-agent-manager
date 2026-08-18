@@ -30,6 +30,7 @@ import { cors } from 'hono/cors';
 import { createAuth } from './auth';
 import * as schema from './db/schema';
 import type { Env } from './env';
+import { applyCacheHeaders } from './lib/cache-headers';
 import { resolveCredentialedCorsOrigin } from './lib/cors-origin';
 import { log, serializeError } from './lib/logger';
 import { resolvePagesProxyTarget } from './lib/pages-proxy';
@@ -623,12 +624,14 @@ app.get('/health', (c) => {
 
 // Public config — exposes feature flags the UI needs before auth
 app.get('/api/config/artifacts-enabled', (c) => {
+  applyCacheHeaders(c, 'public-config');
   return c.json({ enabled: c.env.ARTIFACTS_ENABLED === 'true' && !!c.env.ARTIFACTS });
 });
 
 // The VAPID public key is runtime configuration: deploy-generated keys do not
 // exist when the web bundle is built. Never expose the corresponding private key.
 app.get('/api/config/vapid-public-key', (c) => {
+  applyCacheHeaders(c, 'public-config');
   const publicKey = c.env.VAPID_PUBLIC_KEY?.trim() || null;
   return c.json({ publicKey });
 });
@@ -644,6 +647,7 @@ app.get('/api/config/login-providers', async (c) => {
     getGoogleLoginOAuthConfig(c.env),
     getGitLabOAuthConfig(c.env),
   ]);
+  applyCacheHeaders(c, 'public-config');
   return c.json({ github: github !== null, google: google !== null, gitlab: gitlab !== null });
 });
 

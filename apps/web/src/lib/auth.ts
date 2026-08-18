@@ -2,6 +2,7 @@ import { createAuthClient } from 'better-auth/react';
 
 import { unsubscribeWebPush } from './api/notifications';
 import { clearLegacyLibraryCache, clearLibraryCache } from './library-cache';
+import { removeAllPersistedQueryCaches } from './query-persistence';
 import { broadcastAuthRevocation, cleanupTerminalSecrets, resetAuthRevoked } from './terminal-cleanup';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8787';
@@ -62,6 +63,10 @@ export async function signOut() {
   }
   clearLibraryCache();
   clearLegacyLibraryCache();
+  // Awaited (bounded internally) so the persisted query cache is gone before the
+  // redirect, matching the library-cache guarantee. Runs even when signOut later
+  // fails, which is the case the archived cross-user cache incident cared about.
+  await removeAllPersistedQueryCaches();
   try {
     await authClient.signOut({
       fetchOptions: {

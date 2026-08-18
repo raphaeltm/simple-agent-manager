@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
 import type { Env } from '../env';
+import { applyCacheHeaders } from '../lib/cache-headers';
 import { requireRouteParam } from '../lib/route-helpers';
 import { getUserId, requireApproved, requireAuth } from '../middleware/auth';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
@@ -19,6 +20,9 @@ skillRoutes.get('/', async (c) => {
   const db = drizzle(c.env.DATABASE, { schema });
   await requireProjectAccess(db, projectId, userId);
   const skills = await skillService.listSkills(db, projectId, userId);
+  // Per-user body (project skills OR this caller's global skills) — see the
+  // agent-profiles list handler for the same reasoning.
+  applyCacheHeaders(c, 'project-reference');
   return c.json({ items: skills });
 });
 

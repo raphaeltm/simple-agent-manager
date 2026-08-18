@@ -13,6 +13,9 @@ interface ImportMetaEnv {
   readonly VITE_CHUNK_LOAD_RETRY_DELAY_MS?: string;
   readonly VITE_CHUNK_RELOAD_COOLDOWN_MS?: string;
   readonly VITE_ROUTE_FALLBACK_REVEAL_DELAY_MS?: string;
+  readonly VITE_QUERY_PERSIST_MAX_AGE_MS?: string;
+  readonly VITE_QUERY_PERSIST_THROTTLE_MS?: string;
+  readonly VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS?: string;
   readonly DEV: boolean;
   readonly PROD: boolean;
   readonly MODE: string;
