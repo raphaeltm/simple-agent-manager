@@ -156,10 +156,66 @@ Three independent client-side waste sources in the SAM web app:
 - [x] File the follow-up backlog task for migrating `useRecentChats` / `usePushSubscription`.
 - [x] `pnpm lint`, `pnpm typecheck`, targeted `pnpm test`, `pnpm build` for `apps/web`.
 
+## Review-driven additions (specialist review, 2026-08-18)
+
+Five local reviewers ran against the branch. Three HIGH findings were real and are fixed
+in-branch; the rest were addressed or explicitly deferred with rationale.
+
+- [x] **HIGH (performance-reviewer + task-completion-validator, independently reproduced)** —
+      every item-#11 call site double-fetched when its precondition became true more than one
+      interval after mount (the normal VM-boot case): the caller's own precondition effect
+      fired AND the hook's elapsed-gated catch-up fired. Fixed by restarting the freshness
+      clock inside `useVisibilityAwarePoll` when `enabled` flips true (the caller owns that
+      fetch); `paused`/visibility deliberately keep counting so the hidden-tab and
+      WS-disconnect catch-ups survive. Regression test at the `useNodeSystemInfo` call site,
+      proven discriminating (1 vs 2 fetches).
+- [x] **HIGH (ui-ux-specialist)** — pausing the session poll whenever
+      `connectionState === 'connected'` deleted its documented self-heal role.
+      `connectionState` tracks socket open/close only; `useProjectWebSocket` discards
+      malformed frames silently and there is no sequence number or gap detector, so a dropped
+      delta would have left the sidebar wrong for the whole connection lifetime. Fixed by
+      adding a slow reconciliation cadence (`SESSION_RECONCILE_INTERVAL_MS`, default 10min)
+      active only while connected — self-heal preserved at ~1/20th the request rate.
+- [x] **HIGH (performance-reviewer)** — the 2s provisioning poll (same file, item #8) and the
+      chat-detail fallback poll in `components/project-message-view/useSessionLifecycle.ts`
+      were still ungated on visibility. Both now gate via the shared `useDocumentVisible`.
+      Scope note: `useSessionLifecycle.ts` is outside the brief's named file list; taken
+      because it is the direct twin of item #8 in the same feature and is not owned by any
+      sibling workstream.
+- [x] **MEDIUM (task-completion-validator)** — `useWorkspaceCore.ts` has a *second* 5s
+      workspace-state poll that the original research under-enumerated. Now gated (preserving
+      the ref indirection that fixed React error #185).
+- [x] **LOW** — `useNodeSystemInfo` lacked the stale-response generation guard its sibling
+      `useWorkspacePorts` received; `useWorkspacePorts` flipped `loading` on every poll
+      (rule 48); `Node.tsx`'s detail poll now passes `enabled` like every other call site;
+      documented the `playbackRate` caveat in `startPlayback`'s dependency chain.
+- [x] **Test coverage (test-engineer HIGH ×2)** — the item-#11 call sites had zero behavioral
+      coverage and the `generationRef` swap in `useWorkspacePorts` had none. Added
+      `tests/unit/hooks/useNodeSystemInfo.test.ts` (new file — the hook had never had one) and
+      extended `useWorkspacePorts.test.ts` with stale-response and hidden-tab cases. Added
+      `intervalMs`-change, compound-transition, unmount-mid-flight, and realistic-`onFileClick`
+      cases.
+- [~] **MEDIUM (architecture-reviewer) — DEFERRED**: migrate `useRecentChats` onto the shared
+      hook. Declined in-branch under the explicit program instruction to stay inside the
+      workstream's named files; tracked in
+      `tasks/backlog/2026-08-18-consolidate-hand-rolled-visibility-polls.md`, which now also
+      names `useWorkspaceNavigation`'s git-status poll and the per-call-site
+      `visibilitychange` listener count.
+- [~] **MEDIUM (architecture-reviewer) — DECLINED**: absorb the callers' "fire on enable"
+      effects into the hook via an `immediate` option. Technically incorrect: those effects
+      also re-fire on fetch-callback identity change (e.g. `Node.tsx` when `id` changes while
+      `enabled` stays true). An active-transition-only `immediate` would silently drop the
+      reload when navigating between nodes. Rationale recorded here and in the PR.
+
 ## Acceptance criteria
 
-- [x] With the ProjectData WebSocket `connected` and the tab visible, no periodic
-      `listChatSessions` / `listProjectTasks` request is issued. (test)
+- [x] With the ProjectData WebSocket `connected` and the tab visible, no request is issued at
+      the 30s fallback cadence; only the 10min reconciliation runs. (test)
+- [x] Exactly one of the two session cadences is ever active. (test)
+- [x] A poll whose precondition becomes true long after mount fetches exactly once, not
+      twice. (test, discriminating)
+- [x] A response for a superseded target (node id / workspace id / stopped workspace) never
+      overwrites current data. (test)
 - [x] With the WebSocket `disconnected` and the tab visible, the 30s poll still fires. (test)
 - [x] With the tab hidden, neither the session poll nor any of the four item-#11 polls fire. (test)
 - [x] Returning to a visible tab after ≥ one interval triggers exactly one immediate
