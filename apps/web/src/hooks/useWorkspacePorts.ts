@@ -1,9 +1,9 @@
 import type { DetectedPort } from '@simple-agent-manager/shared';
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { listWorkspacePorts } from '../lib/api';
-
-const POLL_INTERVAL_MS = 10_000;
+import { WORKSPACE_PORTS_POLL_MS } from '../lib/poll-intervals';
+import { useVisibilityAwarePoll } from './useVisibilityAwarePoll';
 
 /**
  * Maximum consecutive fetch failures before clearing the ports list.
@@ -30,59 +30,65 @@ export function useWorkspacePorts(
     };
   }, []);
 
+  // Monotonic generation, bumped whenever the target workspace/token changes.
+  // Replaces the previous effect-scoped `cancelled` flag: a response from a
+  // superseded parameter set must never write into state.
+  const generationRef = useRef(0);
+
+  const enabled = Boolean(workspaceUrl && workspaceId && token && isRunning);
+
+  const fetchPorts = useCallback(async () => {
+    // Stable non-null bindings — TypeScript does not consistently re-narrow the
+    // outer optional params inside the async body below.
+    const activeWorkspaceUrl = workspaceUrl;
+    const activeWorkspaceId = workspaceId;
+    const activeToken = token;
+    if (!activeWorkspaceUrl || !activeWorkspaceId || !activeToken) return;
+
+    const generation = generationRef.current;
+    const isCurrent = () => generation === generationRef.current && mountedRef.current;
+
+    try {
+      setLoading(true);
+      const result = await listWorkspacePorts(activeWorkspaceUrl, activeWorkspaceId, activeToken);
+      if (isCurrent()) {
+        consecutiveFailuresRef.current = 0;
+        setPorts(result);
+      }
+    } catch (err) {
+      // Preserve stale ports on transient failures — only clear after
+      // MAX_CONSECUTIVE_FAILURES so the UI doesn't flicker on brief hiccups.
+      if (isCurrent()) {
+        consecutiveFailuresRef.current += 1;
+        console.warn('useWorkspacePorts: fetch failed', {
+          workspaceId: activeWorkspaceId,
+          consecutiveFailures: consecutiveFailuresRef.current,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        if (consecutiveFailuresRef.current >= MAX_CONSECUTIVE_FAILURES) {
+          setPorts([]);
+        }
+      }
+    } finally {
+      if (mountedRef.current) {
+        setLoading(false);
+      }
+    }
+  }, [workspaceUrl, workspaceId, token]);
+
   useEffect(() => {
-    if (!workspaceUrl || !workspaceId || !token || !isRunning) {
+    // Invalidate any in-flight request issued for the previous parameter set.
+    generationRef.current += 1;
+    if (!enabled) {
       setPorts([]);
       consecutiveFailuresRef.current = 0;
       return;
     }
+    void fetchPorts();
+  }, [enabled, fetchPorts]);
 
-    // Stable non-null bindings for use inside the fetchPorts closure below,
-    // where TypeScript does not consistently re-narrow all of the outer
-    // `workspaceUrl`/`workspaceId`/`token` locals captured from this compound guard.
-    const activeWorkspaceUrl = workspaceUrl;
-    const activeWorkspaceId = workspaceId;
-    const activeToken = token;
-
-    let cancelled = false;
-
-    async function fetchPorts() {
-      try {
-        setLoading(true);
-        const result = await listWorkspacePorts(activeWorkspaceUrl, activeWorkspaceId, activeToken);
-        if (!cancelled && mountedRef.current) {
-          consecutiveFailuresRef.current = 0;
-          setPorts(result);
-        }
-      } catch (err) {
-        // Preserve stale ports on transient failures — only clear after
-        // MAX_CONSECUTIVE_FAILURES so the UI doesn't flicker on brief hiccups.
-        if (!cancelled && mountedRef.current) {
-          consecutiveFailuresRef.current += 1;
-          console.warn('useWorkspacePorts: fetch failed', {
-            workspaceId: activeWorkspaceId,
-            consecutiveFailures: consecutiveFailuresRef.current,
-            error: err instanceof Error ? err.message : String(err),
-          });
-          if (consecutiveFailuresRef.current >= MAX_CONSECUTIVE_FAILURES) {
-            setPorts([]);
-          }
-        }
-      } finally {
-        if (mountedRef.current) {
-          setLoading(false);
-        }
-      }
-    }
-
-    fetchPorts();
-    const interval = setInterval(fetchPorts, POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [workspaceUrl, workspaceId, token, isRunning]);
+  // Paused on hidden tabs; refreshes immediately on return if stale.
+  useVisibilityAwarePoll(fetchPorts, WORKSPACE_PORTS_POLL_MS, { enabled });
 
   return { ports, loading };
 }

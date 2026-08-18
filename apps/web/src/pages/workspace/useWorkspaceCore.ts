@@ -8,6 +8,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { useBootLogStream } from '../../hooks/useBootLogStream';
 import { useTokenRefresh } from '../../hooks/useTokenRefresh';
+import { useVisibilityAwarePoll } from '../../hooks/useVisibilityAwarePoll';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import {
   getTerminalToken,
@@ -20,6 +21,7 @@ import {
   stopWorkspace,
   updateWorkspace,
 } from '../../lib/api';
+import { WORKSPACE_EVENTS_POLL_MS } from '../../lib/poll-intervals';
 import { getAuthEpoch, isAuthRevoked, registerTerminalCleanup } from '../../lib/terminal-cleanup';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 
@@ -282,23 +284,28 @@ export function useWorkspaceCore(
   // Depends on terminalToken directly (safe — this effect only reads state, it does
   // not set any state that feeds back into terminalToken, so no feedback loop).
   // The terminalToken dep ensures events are fetched once the token arrives.
+  const workspaceUrl = workspace?.url;
+  const eventsEnabled = Boolean(id && workspaceUrl && terminalToken && isRunning);
+
+  const fetchWorkspaceEvents = useCallback(async () => {
+    if (!id || !workspaceUrl || !terminalToken) return;
+    try {
+      const data = await listWorkspaceEvents(workspaceUrl, id, terminalToken, 50);
+      setWorkspaceEvents(data.events || []);
+    } catch {
+      // Events are secondary — polling retries
+    }
+  }, [id, workspaceUrl, terminalToken]);
+
   useEffect(() => {
-    if (!id || !workspace?.url || !terminalToken || !isRunning) return;
-    const workspaceUrl = workspace.url;
+    if (!eventsEnabled) return;
+    void fetchWorkspaceEvents();
+  }, [eventsEnabled, fetchWorkspaceEvents]);
 
-    const fetchEvents = async () => {
-      try {
-        const data = await listWorkspaceEvents(workspaceUrl, id, terminalToken, 50);
-        setWorkspaceEvents(data.events || []);
-      } catch {
-        // Events are secondary — polling retries
-      }
-    };
-
-    void fetchEvents();
-    const interval = setInterval(() => void fetchEvents(), 10000);
-    return () => clearInterval(interval);
-  }, [id, workspace?.url, isRunning, terminalToken]);
+  // Paused on hidden tabs; refreshes immediately on return if stale.
+  useVisibilityAwarePoll(fetchWorkspaceEvents, WORKSPACE_EVENTS_POLL_MS, {
+    enabled: eventsEnabled,
+  });
 
   // Workspace actions
   const handleStop = async () => {

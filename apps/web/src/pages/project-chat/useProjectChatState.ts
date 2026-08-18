@@ -22,6 +22,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
 import { useBootLogStream } from '../../hooks/useBootLogStream';
 import { type RawSessionEvent, useProjectWebSocket } from '../../hooks/useProjectWebSocket';
+import { useVisibilityAwarePoll } from '../../hooks/useVisibilityAwarePoll';
 import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
 import {
   closeConversationTask,
@@ -416,13 +417,17 @@ export function useProjectChatState() {
     void loadSessions().finally(() => setLoading(false));
   }, [loadSessions]);
 
-  // Periodic background sync — self-heals if a WebSocket delta was silently dropped.
-  // Depends on `loading` to defer until the first load completes.
-  useEffect(() => {
-    if (loading) return;
-    const interval = setInterval(() => void loadSessions(), SESSION_SYNC_INTERVAL_MS);
-    return () => clearInterval(interval);
-  }, [loading, loadSessions]);
+  // Degraded fallback sync — self-heals if a WebSocket delta was silently dropped.
+  // While the ProjectData WebSocket is `connected` it already applies deltas in
+  // real time, so this poll (a 100-session list + a 200-task list every tick)
+  // would be pure duplicate I/O; it is suppressed until the socket degrades.
+  // Deferred until the first load completes, and paused entirely on hidden tabs.
+  // Catch-up on reconnect is handled by `onReconnected` above; catch-up on
+  // disconnect and on tab return is handled by the hook's elapsed-gated refresh.
+  useVisibilityAwarePoll(loadSessions, SESSION_SYNC_INTERVAL_MS, {
+    enabled: !loading,
+    paused: connectionState === 'connected',
+  });
 
   // Poll task status during provisioning
   useEffect(() => {

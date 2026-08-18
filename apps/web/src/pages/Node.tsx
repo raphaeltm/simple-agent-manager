@@ -16,6 +16,7 @@ import { SystemResourcesSection } from '../components/node/SystemResourcesSectio
 import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
 import { useProviderCatalog } from '../hooks/useProviderCatalog';
 import { useToast } from '../hooks/useToast';
+import { useVisibilityAwarePoll } from '../hooks/useVisibilityAwarePoll';
 import {
   deleteNode,
   deleteWorkspace,
@@ -26,6 +27,7 @@ import {
   stopNode,
   stopWorkspace,
 } from '../lib/api';
+import { NODE_DETAIL_POLL_MS, NODE_EVENTS_POLL_MS } from '../lib/poll-intervals';
 
 export function Node() {
   const navigate = useNavigate();
@@ -66,28 +68,32 @@ export function Node() {
 
   useEffect(() => {
     void loadNode();
-    const interval = window.setInterval(() => void loadNode(), 10000);
-    return () => window.clearInterval(interval);
   }, [loadNode]);
 
+  // Paused on hidden tabs; refreshes immediately on return if stale.
+  useVisibilityAwarePoll(loadNode, NODE_DETAIL_POLL_MS);
+
   // Fetch node events via control plane proxy (vm-* DNS records lack SSL termination)
+  const nodeIsRunning = node?.status === 'running';
+  const fetchEvents = useCallback(async () => {
+    if (!id) return;
+    try {
+      const data = await listNodeEvents(id, 50);
+      setEvents(data.events || []);
+      setEventsError(null);
+    } catch (err) {
+      setEventsError(err instanceof Error ? err.message : 'Failed to load events');
+    }
+  }, [id]);
+
   useEffect(() => {
-    if (!id || !node || node.status !== 'running') return;
-
-    const fetchEvents = async () => {
-      try {
-        const data = await listNodeEvents(id, 50);
-        setEvents(data.events || []);
-        setEventsError(null);
-      } catch (err) {
-        setEventsError(err instanceof Error ? err.message : 'Failed to load events');
-      }
-    };
-
+    if (!id || !nodeIsRunning) return;
     void fetchEvents();
-    const interval = window.setInterval(() => void fetchEvents(), 10000);
-    return () => window.clearInterval(interval);
-  }, [id, node?.status]);
+  }, [id, nodeIsRunning, fetchEvents]);
+
+  useVisibilityAwarePoll(fetchEvents, NODE_EVENTS_POLL_MS, {
+    enabled: Boolean(id) && nodeIsRunning,
+  });
 
   const handleStop = async () => {
     if (!id || !node) return;
