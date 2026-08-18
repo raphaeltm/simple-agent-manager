@@ -493,6 +493,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS?: string;
   SESSION_ACTIVITY_PROBE_MAX_CANDIDATES?: string;
   DO_SUMMARY_SYNC_DEBOUNCE_MS?: string;
+  // D1 per-project session index (session_summaries + session_index_coverage)
+  /** Cap on sessions mirrored into the index per project, per sync. */
+  SESSION_INDEX_MAX_ROWS?: string;
+  /** How stale coverage may be before the session list falls back to the DO. */
+  SESSION_INDEX_MAX_STALENESS_MS?: string;
   // ACP Session Lifecycle (spec 027)
   ACP_SESSION_DETECTION_WINDOW_MS?: string;
   ACP_SESSION_MAX_FORK_DEPTH?: string;

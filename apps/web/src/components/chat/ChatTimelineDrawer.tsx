@@ -6,7 +6,7 @@ import {
   TimelineStem,
 } from '@simple-agent-manager/ui';
 import { AlignLeft, Clock, X } from 'lucide-react';
-import { forwardRef, useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { Virtuoso } from 'react-virtuoso';
 
@@ -118,7 +118,7 @@ export function ChatTimelineDrawer({
         </header>
 
         {/* Body */}
-        <div className="flex-1 min-h-0">
+        <div className="flex-1 min-h-0 px-3">
           {loading && entries.length === 0 ? (
             <div className="flex items-center justify-center py-8">
               <Spinner size="sm" />
@@ -128,13 +128,22 @@ export function ChatTimelineDrawer({
               No timeline entries yet
             </div>
           ) : (
-            <Virtuoso
-              data={entries}
-              style={{ height: '100%' }}
-              overscan={TIMELINE_OVERSCAN_PX}
-              components={TIMELINE_LIST_COMPONENTS}
-              itemContent={renderEntry}
-            />
+            // The stem sits on a wrapper AROUND the scroller rather than on
+            // Virtuoso's own List slot. Wrapping the rows in an extra element
+            // inside `components.List` breaks Virtuoso's height measurement —
+            // it then renders a single row into a full-height panel — so the
+            // stem spans the visible scroll viewport instead of the full virtual
+            // content height. Visually identical for a soft gradient line, and
+            // it keeps Virtuoso in control of its own DOM.
+            <div className="relative h-full">
+              <TimelineStem />
+              <Virtuoso
+                data={entries}
+                style={{ height: '100%' }}
+                overscan={TIMELINE_OVERSCAN_PX}
+                itemContent={renderEntry}
+              />
+            </div>
           )}
         </div>
       </div>
@@ -148,30 +157,6 @@ export function ChatTimelineDrawer({
  * so both scrollers keep a comparable off-screen buffer.
  */
 const TIMELINE_OVERSCAN_PX = 200;
-
-/**
- * Virtuoso's List slot, so the timeline stem spans the full virtual content
- * height rather than only the visible window.
- *
- * Virtuoso offsets the windowed rows by writing `paddingTop`/`paddingBottom` into
- * `style` on this element, so its box already covers the entire scroll extent —
- * which is exactly what `TimelineStem`'s `top-0 bottom-0` needs. The rows go in an
- * inner flex column so the padding stays on the positioned parent.
- */
-const TimelineList = forwardRef<
-  HTMLDivElement,
-  { style?: React.CSSProperties; children?: React.ReactNode }
->(function TimelineList({ style, children }, ref) {
-  return (
-    <div ref={ref} style={style} className="relative px-3">
-      <TimelineStem />
-      <div className="flex flex-col">{children}</div>
-    </div>
-  );
-});
-
-/** Stable `components` object — an inline literal remounts the list every render. */
-const TIMELINE_LIST_COMPONENTS = { List: TimelineList };
 
 /** One virtualized timeline row, including its date separator when the day changes. */
 function TimelineEntryRow({

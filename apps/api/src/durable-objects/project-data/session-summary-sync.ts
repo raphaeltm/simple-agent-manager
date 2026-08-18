@@ -1,15 +1,45 @@
 /**
- * Sync session metadata from DO SQLite to D1 session_summaries table.
- * Enables single-query cross-project session listing (recent chats, /chats page, command palette).
+ * Sync session metadata from DO SQLite to the D1 `session_summaries` index.
+ *
+ * Feeds two read surfaces:
+ *  - cross-project listings (`/api/chats`, `/api/chats/recent`, command palette)
+ *  - the per-project chat sidebar, which otherwise costs a ProjectData DO
+ *    round-trip on every project load and every poll
+ *
+ * The DO stays authoritative; D1 is an eventually-consistent index. Because the
+ * sidebar read must return exactly what the DO's `listSessions` would, this sync
+ * also mirrors the session creator, `created_at`, and the newest unresolved
+ * attention marker — the three things the sidebar renders that the original
+ * cross-project index did not carry.
+ *
+ * Every sync writes a `session_index_coverage` row recording how many sessions
+ * the project has and whether all of them were indexed. The read path refuses to
+ * answer from D1 without it: an index that might be missing rows cannot produce a
+ * correct `total`, and a truncated index would silently drop sessions from the
+ * sidebar.
  */
+import { DEFAULT_SESSION_INDEX_MAX_ROWS } from '@simple-agent-manager/shared';
+
 import { createModuleLogger } from '../../lib/logger';
+import { getAttentionSummary } from './attention';
 import type { Env } from './types';
 
 const log = createModuleLogger('session_summary_sync');
 
+/** Chunk size for D1 batches — the platform caps a batch at 100 statements. */
+const D1_BATCH_SIZE = 100;
+
+function resolveMaxRows(env: Env): number {
+  const parsed = Number.parseInt(env.SESSION_INDEX_MAX_ROWS ?? '', 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SESSION_INDEX_MAX_ROWS;
+}
+
 /**
- * Batch-sync all session metadata from DO SQLite to D1 session_summaries table.
- * Only syncs sessions updated in the last 24 hours to limit batch size on active projects.
+ * Mirror this project's sessions into D1 and record coverage.
+ *
+ * Indexes the whole project (up to the configured cap) rather than a trailing
+ * time window: a partial mirror cannot answer "list this project's sessions"
+ * without silently omitting rows, and cannot produce a correct `total`.
  */
 export async function syncSessionSummariesToD1(
   sql: SqlStorage,
@@ -18,32 +48,57 @@ export async function syncSessionSummariesToD1(
 ): Promise<void> {
   // Look up the project owner from D1
   const projectRow = await env.DATABASE.prepare('SELECT user_id FROM projects WHERE id = ?')
-    .bind(projectId).first<{ user_id: string }>();
+    .bind(projectId)
+    .first<{ user_id: string }>();
   if (!projectRow) return;
   const userId = projectRow.user_id;
 
-  // Fetch recently-updated sessions from DO SQLite (last 24h)
-  const cutoff = Date.now() - 24 * 60 * 60 * 1000;
-  const rows = sql.exec(
-    `SELECT id, workspace_id, task_id, topic, status, message_count,
-            started_at, ended_at, updated_at, agent_completed_at,
-            (SELECT MAX(created_at) FROM chat_messages WHERE session_id = chat_sessions.id) as last_message_at
-     FROM chat_sessions
-     WHERE updated_at > ?
-     ORDER BY updated_at DESC
-     LIMIT 200`,
-    cutoff
-  ).toArray();
+  const maxRows = resolveMaxRows(env);
 
-  if (rows.length === 0) return;
+  // Total first, so coverage can record whether the page below saw everything.
+  const countRow = sql.exec('SELECT COUNT(*) as cnt FROM chat_sessions').toArray()[0];
+  const sessionCount = typeof countRow?.cnt === 'number' ? countRow.cnt : 0;
 
-  // Batch upsert using D1 batch API
-  const stmts = rows.map((row) =>
-    env.DATABASE.prepare(
+  const rows = sql
+    .exec(
+      `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
+              started_at, ended_at, created_at, updated_at, agent_completed_at,
+              (SELECT MAX(created_at) FROM chat_messages WHERE session_id = chat_sessions.id) as last_message_at
+       FROM chat_sessions
+       ORDER BY updated_at DESC
+       LIMIT ?`,
+      maxRows
+    )
+    .toArray();
+
+  const complete = sessionCount <= maxRows && rows.length >= sessionCount;
+  const syncedAt = Date.now();
+
+  const statements = rows.map((row) => {
+    // Resolved-marker semantics must match getAttentionSummary() exactly — it
+    // returns the newest UNRESOLVED marker regardless of expiry, because expiry
+    // is processed separately by the DO alarm. Re-deriving that here (e.g.
+    // filtering on expires_at) would make the D1 path disagree with the DO path.
+    let attentionJson: string | null = null;
+    try {
+      const attention = getAttentionSummary(sql, row.id as string);
+      attentionJson = attention ? JSON.stringify(attention) : null;
+    } catch (err) {
+      // A malformed marker must not cost us the whole session row — the session
+      // still belongs in the index, just without its attention badge.
+      log.warn('session_summary_attention_skipped', {
+        projectId,
+        sessionId: row.id,
+        error: String(err),
+      });
+    }
+
+    return env.DATABASE.prepare(
       `INSERT INTO session_summaries
          (id, project_id, user_id, status, topic, task_id, workspace_id,
-          message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          message_count, started_at, last_message_at, agent_completed_at, ended_at, updated_at,
+          created_by_user_id, created_at, attention_json, synced_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(id) DO UPDATE SET
          status = excluded.status,
          topic = excluded.topic,
@@ -53,7 +108,11 @@ export async function syncSessionSummariesToD1(
          last_message_at = excluded.last_message_at,
          agent_completed_at = excluded.agent_completed_at,
          ended_at = excluded.ended_at,
-         updated_at = excluded.updated_at`
+         updated_at = excluded.updated_at,
+         created_by_user_id = excluded.created_by_user_id,
+         created_at = excluded.created_at,
+         attention_json = excluded.attention_json,
+         synced_at = excluded.synced_at`
     ).bind(
       row.id as string,
       projectId,
@@ -67,15 +126,37 @@ export async function syncSessionSummariesToD1(
       (row.last_message_at as number | null) ?? null,
       row.agent_completed_at as number | null,
       row.ended_at as number | null,
-      row.updated_at as number
-    )
-  );
+      row.updated_at as number,
+      (row.created_by_user_id as string | null) ?? null,
+      (row.created_at as number | null) ?? null,
+      attentionJson,
+      syncedAt
+    );
+  });
 
-  // D1 batch limit is 100 statements; chunk if needed
-  const BATCH_SIZE = 100;
-  for (let i = 0; i < stmts.length; i += BATCH_SIZE) {
-    await env.DATABASE.batch(stmts.slice(i, i + BATCH_SIZE));
+  for (let i = 0; i < statements.length; i += D1_BATCH_SIZE) {
+    await env.DATABASE.batch(statements.slice(i, i + D1_BATCH_SIZE));
   }
 
-  log.info('session_summaries_synced', { projectId, count: rows.length });
+  // Coverage is written LAST and only after every row landed, so a batch that
+  // throws part-way leaves the previous (older but self-consistent) coverage in
+  // place. The read path then keeps using the older row until it ages out, or
+  // falls back to the DO — it never reads a half-written index as complete.
+  await env.DATABASE.prepare(
+    `INSERT INTO session_index_coverage (project_id, synced_at, session_count, complete)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(project_id) DO UPDATE SET
+       synced_at = excluded.synced_at,
+       session_count = excluded.session_count,
+       complete = excluded.complete`
+  )
+    .bind(projectId, syncedAt, sessionCount, complete ? 1 : 0)
+    .run();
+
+  log.info('session_summaries_synced', {
+    projectId,
+    count: rows.length,
+    sessionCount,
+    complete,
+  });
 }

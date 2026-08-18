@@ -45,6 +45,28 @@ export class ProjectDataTestDouble extends ProjectData {
     await this.syncSummaryToD1();
   }
 
+  /**
+   * Same, with env overrides applied for the duration of the sync — so a test can
+   * exercise a row cap it would otherwise need thousands of sessions to hit.
+   * Restored afterwards so the override cannot leak into a later assertion.
+   */
+  async runSummarySyncWithEnvForTest(overrides: Record<string, string>): Promise<void> {
+    const mutableEnv = this.env as unknown as Record<string, string | undefined>;
+    const previous = new Map<string, string | undefined>();
+    for (const [key, value] of Object.entries(overrides)) {
+      previous.set(key, mutableEnv[key]);
+      mutableEnv[key] = value;
+    }
+    try {
+      await this.syncSummaryToD1();
+    } finally {
+      for (const [key, value] of previous) {
+        if (value === undefined) delete mutableEnv[key];
+        else mutableEnv[key] = value;
+      }
+    }
+  }
+
   async alarmWithDurablePromptDelivery(): Promise<void> {
     const previous = this.env.DURABLE_PROMPT_DELIVERY_ENABLED;
     this.env.DURABLE_PROMPT_DELIVERY_ENABLED = 'true';

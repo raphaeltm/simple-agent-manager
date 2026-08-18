@@ -2346,6 +2346,17 @@ export const sessionSummaries = sqliteTable(
     agentCompletedAt: integer('agent_completed_at'),
     endedAt: integer('ended_at'),
     updatedAt: integer('updated_at').notNull(),
+    /**
+     * Session creator. `userId` above is the PROJECT OWNER, not the creator, so
+     * it cannot answer `scope=my` / `isMine` on a shared project.
+     */
+    createdByUserId: text('created_by_user_id'),
+    /** Mirrors `chat_sessions.created_at`; distinct from `startedAt`. */
+    createdAt: integer('created_at'),
+    /** Serialized `getAttentionSummary()` result for the newest unresolved marker. */
+    attentionJson: text('attention_json'),
+    /** When the DO last wrote this row — the freshness signal, not session activity. */
+    syncedAt: integer('synced_at'),
   },
   (table) => ({
     userRecentIdx: index('idx_session_summaries_user_recent').on(
@@ -2354,11 +2365,38 @@ export const sessionSummaries = sqliteTable(
       table.updatedAt
     ),
     projectIdx: index('idx_session_summaries_project').on(table.projectId, table.updatedAt),
+    projectCreatorIdx: index('idx_session_summaries_project_creator').on(
+      table.projectId,
+      table.createdByUserId,
+      table.updatedAt
+    ),
   })
 );
 
 export type SessionSummaryRow = typeof sessionSummaries.$inferSelect;
 export type NewSessionSummaryRow = typeof sessionSummaries.$inferInsert;
+
+/**
+ * Per-project coverage record for `session_summaries` — the gate that decides
+ * whether a per-project session list may be answered from D1 instead of the
+ * ProjectData DO.
+ *
+ * D1 is an eventually-consistent index, so it may only serve a read it can
+ * prove is equivalent: `complete` records whether the sync captured every
+ * session (it is capped), `sessionCount` is how many the DO held at sync time,
+ * and `syncedAt` bounds staleness. Anything missing or stale means fall back to
+ * the DO rather than guess.
+ */
+export const sessionIndexCoverage = sqliteTable('session_index_coverage', {
+  projectId: text('project_id')
+    .primaryKey()
+    .references(() => projects.id, { onDelete: 'cascade' }),
+  syncedAt: integer('synced_at').notNull(),
+  sessionCount: integer('session_count').notNull().default(0),
+  complete: integer('complete').notNull().default(0),
+});
+
+export type SessionIndexCoverageRow = typeof sessionIndexCoverage.$inferSelect;
 
 export const diagnosticIncidents = sqliteTable(
   'diagnostic_incidents',

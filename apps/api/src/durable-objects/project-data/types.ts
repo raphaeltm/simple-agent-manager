@@ -15,6 +15,8 @@ export type Env = {
   IDLE_CLEANUP_MAX_CANDIDATES_PER_SWEEP?: string;
   BASE_DOMAIN?: string;
   DO_SUMMARY_SYNC_DEBOUNCE_MS?: string;
+  /** Cap on sessions mirrored into the D1 session index per project, per sync. */
+  SESSION_INDEX_MAX_ROWS?: string;
   MAX_SESSIONS_PER_PROJECT?: string;
   MAX_MESSAGES_PER_SESSION?: string;
   DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES?: string;

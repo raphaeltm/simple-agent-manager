@@ -386,6 +386,9 @@ export class ProjectData extends DurableObject<Env> {
         ...serializeError(err),
       })
     );
+    // `workspace_id` is part of the D1 session index; without this the column
+    // drifted until some unrelated write happened to resync the project.
+    this.scheduleSummarySync();
     this.broadcastEvent('session.updated', { sessionId, workspaceId }, sessionId);
   }
 
@@ -397,6 +400,12 @@ export class ProjectData extends DurableObject<Env> {
     createdByUserId: string | null = null
   ): Promise<{ sessions: Record<string, unknown>[]; total: number; hasMore: boolean }> {
     const result = sessions.listSessions(this.sql, status, limit, offset, taskId, createdByUserId);
+    // Self-heal the D1 session index. Reaching this RPC at all means the index
+    // could not answer — it was stale, incomplete, or absent — so re-prime it
+    // and the next read takes the fast path. Debounced, so a burst of DO reads
+    // still costs one resync, and it makes a silently-broken sync recover on its
+    // own instead of pinning every project on the DO forever.
+    this.scheduleSummarySync();
     return {
       sessions: result.sessions.map((s) => this.addBaseDomain(s)),
       total: result.total,
@@ -519,6 +528,10 @@ export class ProjectData extends DurableObject<Env> {
 
   async markAgentCompleted(sessionId: string): Promise<void> {
     const now = sessions.markAgentCompleted(this.sql, sessionId);
+    // `agent_completed_at` drives the derived `isIdle` flag the session list
+    // renders, so the D1 index has to see it. Without this the sidebar's idle
+    // badge stayed stale until an unrelated write resynced the project.
+    this.scheduleSummarySync();
     this.broadcastEvent('session.agent_completed', { sessionId, agentCompletedAt: now }, sessionId);
   }
 
@@ -918,7 +931,11 @@ export class ProjectData extends DurableObject<Env> {
         this.sql,
         this.env,
         (type, payload, sid) => this.broadcastEvent(type, payload, sid),
-        { waitUntil: (promise) => this.ctx.waitUntil(promise), projectId: this.getProjectId() }
+        {
+          waitUntil: (promise) => this.ctx.waitUntil(promise),
+          projectId: this.getProjectId(),
+          scheduleSummarySync: () => this.scheduleSummarySync(),
+        }
       );
     } catch (err) {
       log.error('alarm.reconciliation_failed', {

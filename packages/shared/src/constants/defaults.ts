@@ -90,6 +90,34 @@ export const DEFAULT_CHAT_SESSION_MESSAGE_MAX = 50000;
 export const DEFAULT_CHAT_LOAD_UNTIL_MAX_PAGES = 400;
 
 /**
+ * Cap on how many sessions the ProjectData DO mirrors into the D1
+ * `session_summaries` index per project, per sync.
+ *
+ * A project whose session count exceeds this is marked incomplete in
+ * `session_index_coverage`, and its per-project list falls back to the DO — the
+ * index may only answer a read it can prove is equivalent. Sized well above the
+ * sidebar's 100-row page so the fast path applies to effectively every real
+ * project. Override via SESSION_INDEX_MAX_ROWS env var.
+ */
+export const DEFAULT_SESSION_INDEX_MAX_ROWS = 1000;
+
+/**
+ * How stale a `session_index_coverage` row may be before the per-project session
+ * list stops trusting D1 and falls back to the ProjectData DO.
+ *
+ * The DO schedules a sync within DO_SUMMARY_SYNC_DEBOUNCE_MS of every session
+ * mutation, so under normal operation the index is seconds behind. This bound is
+ * not there for normal operation — it is the fail-closed backstop for the case
+ * where the sync itself breaks (its D1 writes are deliberately swallowed so a
+ * sync failure cannot fail the mutation, which means a broken sync is silent).
+ *
+ * The fallback is self-healing: the DO's listSessions RPC schedules a sync, so
+ * one stale read re-primes the index for the next one. Override via
+ * SESSION_INDEX_MAX_STALENESS_MS env var.
+ */
+export const DEFAULT_SESSION_INDEX_MAX_STALENESS_MS = 15 * 60 * 1000;
+
+/**
  * Safety bound on how many pages the timeline drawer fetches when it opens.
  *
  * The drawer paginates user messages and progress notifications to exhaustion to

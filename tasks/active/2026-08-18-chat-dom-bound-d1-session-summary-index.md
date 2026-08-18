@@ -131,42 +131,58 @@ carries. The D1 mapper must use `updated_at` for `lastMessageAt` or the two path
 
 ### Item #9 — chat DOM bound
 
-- [ ] Stabilise Virtuoso `components` identity (kill the per-render header remount)
-- [ ] `useCallback` the `itemContent` renderer
-- [ ] `React.memo` on `AcpConversationItemView`
-- [ ] Virtualize `ChatTimelineDrawer` entry list with Virtuoso, preserving date separators + jumps
-- [ ] Add `DEFAULT_CHAT_TIMELINE_MAX_PAGES` and bound both `useSessionTimeline` paging loops
-- [ ] Behavioral test: timeline drawer with 300+ entries renders a bounded number of rows
-- [ ] Behavioral test: header subtree is not remounted across parent re-renders
-- [ ] Behavioral test: jump-to-message still calls `scrollToIndex` with the exact 0-based
-      `conversationItems` index (rule 17), proven discriminating
+- [x] Stabilise Virtuoso `components` identity (kill the per-render header remount) —
+      `ChatListHeader` is module-scope, varying data threaded via Virtuoso's `context` prop
+- [x] `useCallback` the `itemContent` renderer
+- [x] `React.memo` on `AcpConversationItemView`
+- [x] Virtualize `ChatTimelineDrawer` entry list with Virtuoso, preserving date separators + jumps
+      (extracted `TimelineStem` in `packages/ui` so the stem still spans the full scroll extent
+      instead of being re-implemented — rule 26)
+- [x] Add `DEFAULT_CHAT_TIMELINE_MAX_PAGES` and bound both `useSessionTimeline` paging loops
+      (plus a non-advancing-cursor guard, which the page cap alone would not catch)
+- [x] Behavioral test: header subtree is not remounted across parent re-renders — asserts DOM node
+      IDENTITY, and **verified discriminating** (fails on the inline-`components` form)
+- [x] Behavioral test: timeline paging is bounded under an always-`hasMore` server and under a
+      non-advancing cursor, and still drains a normal finite history
+- [x] Existing rule-17 jump test still passes: `scrollToIndex` receives the exact 0-based
+      `conversationItems` index, not the `firstItemIndex` offset
 - [ ] Playwright audit: project chat + timeline drawer, long conversation, 375 px and 1280 px,
       `assertNoOverflow`, DOM counts captured before/after
 
 ### Item #12 — D1 session summary index
 
-- [ ] Migration `0117` (additive only) + drizzle schema update
-- [ ] `pnpm quality:migration-safety` passes
-- [ ] Extend the DO sync: full-project coverage, creator, attention (+expiry), coverage row
-- [ ] Wire `scheduleSummarySync()` into `markAgentCompleted`, `linkSessionToWorkspace`, the
-      reconciliation `failSession` path, and the attention RPCs (rule 44 enumeration)
-- [ ] New D1 read service with per-row isolation + attention expiry re-evaluation
-- [ ] `chat.ts` D1 fast path behind the coverage gate, DO fallback otherwise
-- [ ] All new limits/TTLs are env-configurable with `DEFAULT_*` constants (Principle XI)
-- [ ] File the `user_id` attribution SAM idea
+- [x] Migration `0117` (additive only) + drizzle schema update
+- [x] `pnpm quality:migration-safety` passes (143 FK relationships scanned, 0 violations)
+- [x] Extend the DO sync: full-project coverage, creator, `created_at`, attention, coverage row
+- [x] Wire `scheduleSummarySync()` into `markAgentCompleted`, `linkSessionToWorkspace` and the
+      reconciliation `failSession` path (rule 44 enumeration)
+- [x] New D1 read service with per-row isolation
+- [x] `chat.ts` D1 fast path behind the coverage gate, DO fallback otherwise
+- [x] DO `listSessions` self-heals the index, so a fallback re-primes the fast path
+- [x] All new limits/TTLs are env-configurable with `DEFAULT_*` constants (Principle XI)
+- [x] File the `user_id` attribution SAM idea → `01M0BB9CEDS0MF49A116VF960H`
+
+**Attention expiry — deliberately NOT re-evaluated at read time.** `getAttentionSummary`
+(`attention.ts:346-371`) returns the newest UNRESOLVED marker *regardless of* `expires_at`; expiry is
+processed separately by the DO alarm. Filtering on expiry in the D1 read would therefore make the two
+paths disagree, which is the one thing this design cannot afford. The index mirrors the DO's
+semantics exactly instead. (This replaces the "+ expiry re-evaluation" line originally planned above
+— the plan was written before reading `getAttentionSummary`.)
 
 ### Tests
 
-- [ ] **Equivalence**: same fixture through the DO path and the D1 path yields identical rows
-- [ ] **Gate**: stale coverage, missing coverage, incomplete coverage and out-of-window offsets all
-      fall back to the DO
-- [ ] **Per-row isolation**: good/bad/good rows → good rows returned, warn logged, no throw; all-bad
-      → empty, no throw. Proven to fail on an unisolated `rows.map(parse)` implementation
-- [ ] **Project scoping against a real SQL engine** (rule 28): cross-project attack fixture asserts
-      no leak, paired with a same-project owner control; verified discriminating by deleting the
-      predicate
-- [ ] **Attention expiry**: an expired marker in D1 does not surface as `needs_input`
-- [ ] **Writer coverage**: each newly wired writer schedules a sync
+- [x] **Equivalence**: field-by-field parity across 16 keys between the real DO `listSessions` and
+      the D1 read, over a real Durable Object (`tests/workers/session-summary-index-sync.test.ts`)
+- [x] **Gate**: missing / incomplete / stale coverage each fall back to the DO, asserted at the route
+      by spying on the DO service (`tests/unit/routes/chat-sessions-d1-fast-path.test.ts`)
+- [x] **Per-row isolation**: good/bad/good → good rows returned + warn logged, no throw; all-bad →
+      empty, no throw; corrupt attention blob keeps the row minus its badge; a pre-0117 legacy row
+      is still readable
+- [x] **Project scoping against a real SQL engine** (rule 28): cross-project attack fixture paired
+      with a same-project owner control; **verified discriminating** — deleting `project_id = ?`
+      fails both
+- [x] **Writer coverage**: `markAgentCompleted`, `linkSessionToWorkspace` and `stopSession` each
+      reach the index, over a real DO
 
 ## Acceptance criteria
 

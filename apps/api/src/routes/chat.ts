@@ -36,6 +36,7 @@ import {
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as chatPersistence from '../services/chat-persistence';
 import * as projectDataService from '../services/project-data';
+import { listSessionsFromIndex } from '../services/session-summary-index';
 import { isTaskStatus } from '../services/task-status';
 import { resolveChatAgentState } from './chat-agent-state';
 import { registerChatCancelRoute } from './chat-cancel';
@@ -148,15 +149,32 @@ chatRoutes.get('/', async (c) => {
   const scope = getSessionListScope(c.req.query('scope'));
   const createdByUserId = scope === 'my' ? userId : null;
 
-  const result = await projectDataService.listSessions(
-    c.env,
+  // Fast path: serve from the D1 session index when it can prove it holds the
+  // same answer the DO would give. This list is refetched on mount, on every WS
+  // reconnect, on two poll timers and on six event-driven refreshes, and each DO
+  // call also pays an N+1 attention lookup inside the DO — so it is worth not
+  // making. `listSessionsFromIndex` fails closed: anything absent, incomplete or
+  // stale falls through to the DO below, and the DO read re-primes the index.
+  const indexRead = await listSessionsFromIndex(c.env, {
     projectId,
     status,
     limit,
     offset,
-    null,
-    createdByUserId
-  );
+    createdByUserId,
+  });
+
+  const result =
+    'result' in indexRead
+      ? indexRead.result
+      : await projectDataService.listSessions(
+          c.env,
+          projectId,
+          status,
+          limit,
+          offset,
+          null,
+          createdByUserId
+        );
 
   return c.json({
     ...result,
