@@ -67,6 +67,16 @@ const ENV_KEYS = {
 const DEFAULT_SETUP_RATE_LIMIT_WINDOW_SECONDS = 15 * 60;
 const DEFAULT_SETUP_RATE_LIMIT_MAX_ATTEMPTS = 10;
 
+/**
+ * Per-isolate cache TTL for the resolved platform config, in milliseconds.
+ *
+ * `resolvePlatformConfig` costs 13 D1 round-trips and sits on the auth preamble of every
+ * authenticated request (`createAuth`), so it is exactly the "stable config" case the
+ * per-isolate cache in `.claude/rules/60-request-io-and-bundle-budgets.md` exists for.
+ * Platform OAuth config changes at most a handful of times in a deployment's lifetime.
+ */
+const DEFAULT_PLATFORM_CONFIG_CACHE_MS = 60_000;
+
 function envValue(env: Env, key: keyof Env): string | null {
   const value = env[key];
   return typeof value === 'string' && value.trim() ? value : null;
@@ -204,13 +214,19 @@ export async function savePlatformIntegrationConfig(
     new Date().toISOString(),
   );
   if (statements.length === 0) return resolvePlatformConfig(env);
-  if (typeof env.DATABASE.batch !== 'function') {
-    if (input.googleInfrastructure) {
-      throw new Error('Atomic infrastructure OAuth configuration is unavailable');
+  try {
+    if (typeof env.DATABASE.batch !== 'function') {
+      if (input.googleInfrastructure) {
+        throw new Error('Atomic infrastructure OAuth configuration is unavailable');
+      }
+      for (const statement of statements) await statement.run();
+    } else {
+      await env.DATABASE.batch(statements);
     }
-    for (const statement of statements) await statement.run();
-  } else {
-    await env.DATABASE.batch(statements);
+  } finally {
+    // `finally`, not the success path: the non-batch loop above can apply some statements and
+    // then throw, so a failed save may still have changed the store.
+    invalidatePlatformConfigCache();
   }
   return resolvePlatformConfig(env);
 }
@@ -428,7 +444,11 @@ export async function completeSetupWithConfig(
   statements.push(settingStatement(env, SETUP_COMPLETED_SETTING_KEY, 'true', by, now));
 
   if (typeof env.DATABASE.batch === 'function') {
-    await env.DATABASE.batch(statements);
+    try {
+      await env.DATABASE.batch(statements);
+    } finally {
+      invalidatePlatformConfigCache();
+    }
     return resolvePlatformConfig(env);
   }
 
@@ -438,7 +458,85 @@ export async function completeSetupWithConfig(
   return resolved;
 }
 
-export async function resolvePlatformConfig(env: Env): Promise<ResolvedPlatformConfig> {
+interface PlatformConfigCacheEntry {
+  /**
+   * The binding this entry was resolved from. A cached value is only ever served back to the
+   * same `D1Database` object, so a config resolved from one datastore can never be handed to a
+   * caller holding a different one (production isolates have exactly one binding; test suites
+   * build a fresh in-memory D1 per case).
+   */
+  database: D1Database;
+  config: ResolvedPlatformConfig;
+  /** epoch ms when this entry becomes stale */
+  expiresAt: number;
+}
+
+/**
+ * Module-scoped cache — Workers re-use the isolate across requests within an instance, so this
+ * gives the intended "last value for up to TTL" behaviour. Mirrors the established pattern in
+ * `services/trial/kill-switch.ts`.
+ */
+let platformConfigCache: PlatformConfigCacheEntry | null = null;
+
+/** Exported for tests only. */
+export function __resetPlatformConfigCacheForTest(): void {
+  platformConfigCache = null;
+}
+
+/**
+ * Drops the per-isolate cache. Called after every write that can change a resolved value so the
+ * writing isolate observes its own write immediately. Other isolates converge within the TTL.
+ */
+export function invalidatePlatformConfigCache(): void {
+  platformConfigCache = null;
+}
+
+/** Cache TTL in ms. `0` disables caching entirely (every call re-reads D1). */
+export function resolvePlatformConfigCacheMs(env: Env): number {
+  const configured = Number(env.PLATFORM_CONFIG_CACHE_MS ?? DEFAULT_PLATFORM_CONFIG_CACHE_MS);
+  return Number.isFinite(configured) && configured >= 0
+    ? configured
+    : DEFAULT_PLATFORM_CONFIG_CACHE_MS;
+}
+
+/**
+ * Resolves the platform integration config, serving a per-isolate cached copy when one is live.
+ *
+ * Costs 13 D1 round-trips on a miss; 0 on a hit. Callers that need several projections of the
+ * config (`createAuth` needs three) should resolve once and use the `select*` helpers below
+ * rather than calling the `get*` wrappers repeatedly.
+ */
+export async function resolvePlatformConfig(
+  env: Env,
+  now: number = Date.now()
+): Promise<ResolvedPlatformConfig> {
+  // A missing binding is NOT a usable cache key: `undefined === undefined` would make every
+  // database-less env share one entry. Such an env also resolves purely from `env` values
+  // (`readSetting` / `resolveSecret` short-circuit when there is no `prepare`), so there is
+  // nothing to save by caching it.
+  const database = isCacheableBinding(env.DATABASE) ? env.DATABASE : null;
+
+  const cached = platformConfigCache;
+  if (database && cached && cached.database === database && now < cached.expiresAt) {
+    return cached.config;
+  }
+
+  const config = await readPlatformConfigFromStore(env);
+  const ttl = resolvePlatformConfigCacheMs(env);
+  if (database && ttl > 0) {
+    platformConfigCache = { database, config, expiresAt: now + ttl };
+  } else if (cached && cached.database === database) {
+    // Caching is off for this binding — do not let a previous entry linger.
+    platformConfigCache = null;
+  }
+  return config;
+}
+
+function isCacheableBinding(database: D1Database | undefined): database is D1Database {
+  return typeof database?.prepare === 'function';
+}
+
+async function readPlatformConfigFromStore(env: Env): Promise<ResolvedPlatformConfig> {
   const [
     githubClientId,
     githubClientSecret,
@@ -503,10 +601,22 @@ export async function resolvePlatformConfig(env: Env): Promise<ResolvedPlatformC
   };
 }
 
-export async function getGitHubOAuthConfig(env: Env): Promise<{ clientId: string; clientSecret: string } | null> {
-  const config = await resolvePlatformConfig(env);
+/*
+ * Selectors below are pure projections of an already-resolved config. Callers that need more
+ * than one projection (notably `createAuth`) resolve once and select many, instead of paying
+ * `resolvePlatformConfig`'s 13 D1 round-trips per projection. The `get*` wrappers keep the
+ * single-projection call sites unchanged.
+ */
+
+export function selectGitHubOAuthConfig(
+  config: ResolvedPlatformConfig
+): { clientId: string; clientSecret: string } | null {
   if (!config.github.clientId.value || !config.github.clientSecret.value) return null;
   return { clientId: config.github.clientId.value, clientSecret: config.github.clientSecret.value };
+}
+
+export async function getGitHubOAuthConfig(env: Env): Promise<{ clientId: string; clientSecret: string } | null> {
+  return selectGitHubOAuthConfig(await resolvePlatformConfig(env));
 }
 
 function normalizeBaseUrl(value: string): string {
@@ -518,13 +628,12 @@ function normalizeBaseUrl(value: string): string {
   }
 }
 
-export async function getGitLabOAuthConfig(env: Env): Promise<{
+export function selectGitLabOAuthConfig(config: ResolvedPlatformConfig): {
   host: string;
   apiBaseUrl: string;
   clientId: string;
   clientSecret: string;
-} | null> {
-  const config = await resolvePlatformConfig(env);
+} | null {
   if (!config.gitlab.host.value || !config.gitlab.clientId.value || !config.gitlab.clientSecret.value) return null;
   const host = normalizeBaseUrl(config.gitlab.host.value);
   return {
@@ -533,6 +642,15 @@ export async function getGitLabOAuthConfig(env: Env): Promise<{
     clientId: config.gitlab.clientId.value,
     clientSecret: config.gitlab.clientSecret.value,
   };
+}
+
+export async function getGitLabOAuthConfig(env: Env): Promise<{
+  host: string;
+  apiBaseUrl: string;
+  clientId: string;
+  clientSecret: string;
+} | null> {
+  return selectGitLabOAuthConfig(await resolvePlatformConfig(env));
 }
 
 /**
@@ -546,10 +664,15 @@ export async function getGitLabOAuthConfig(env: Env): Promise<{
  * infrastructure access — they are different OAuth apps with different redirect
  * URIs and scopes.
  */
-export async function getGoogleLoginOAuthConfig(env: Env): Promise<{ clientId: string; clientSecret: string } | null> {
-  const config = await resolvePlatformConfig(env);
+export function selectGoogleLoginOAuthConfig(
+  config: ResolvedPlatformConfig
+): { clientId: string; clientSecret: string } | null {
   if (!config.google.clientId.value || !config.google.clientSecret.value) return null;
   return { clientId: config.google.clientId.value, clientSecret: config.google.clientSecret.value };
+}
+
+export async function getGoogleLoginOAuthConfig(env: Env): Promise<{ clientId: string; clientSecret: string } | null> {
+  return selectGoogleLoginOAuthConfig(await resolvePlatformConfig(env));
 }
 
 /**
@@ -560,8 +683,9 @@ export async function getGoogleLoginOAuthConfig(env: Env): Promise<{ clientId: s
  * GOOGLE_CLIENT_ID/GOOGLE_CLIENT_SECRET environment fallback. It never reads
  * or writes the Google login client family.
  */
-export async function getGoogleInfraOAuthConfig(env: Env): Promise<{ clientId: string; clientSecret: string } | null> {
-  const config = await resolvePlatformConfig(env);
+export function selectGoogleInfraOAuthConfig(
+  config: ResolvedPlatformConfig
+): { clientId: string; clientSecret: string } | null {
   if (!config.googleInfrastructure.clientId.value || !config.googleInfrastructure.clientSecret.value) {
     return null;
   }
@@ -571,12 +695,15 @@ export async function getGoogleInfraOAuthConfig(env: Env): Promise<{ clientId: s
   };
 }
 
-export async function getGitHubAppConfig(env: Env): Promise<{
+export async function getGoogleInfraOAuthConfig(env: Env): Promise<{ clientId: string; clientSecret: string } | null> {
+  return selectGoogleInfraOAuthConfig(await resolvePlatformConfig(env));
+}
+
+export function selectGitHubAppConfig(config: ResolvedPlatformConfig): {
   appId: string;
   privateKey: string;
   slug: string | null;
-} | null> {
-  const config = await resolvePlatformConfig(env);
+} | null {
   if (!config.github.appId.value || !config.github.appPrivateKey.value) return null;
   return {
     appId: config.github.appId.value,
@@ -585,9 +712,20 @@ export async function getGitHubAppConfig(env: Env): Promise<{
   };
 }
 
-export async function getGitHubWebhookSecret(env: Env): Promise<string | null> {
-  const config = await resolvePlatformConfig(env);
+export async function getGitHubAppConfig(env: Env): Promise<{
+  appId: string;
+  privateKey: string;
+  slug: string | null;
+} | null> {
+  return selectGitHubAppConfig(await resolvePlatformConfig(env));
+}
+
+export function selectGitHubWebhookSecret(config: ResolvedPlatformConfig): string | null {
   return config.github.webhookSecret.value;
+}
+
+export async function getGitHubWebhookSecret(env: Env): Promise<string | null> {
+  return selectGitHubWebhookSecret(await resolvePlatformConfig(env));
 }
 
 export async function areGitHubTriggersConfigured(env: Env): Promise<boolean> {

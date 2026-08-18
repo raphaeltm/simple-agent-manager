@@ -99,6 +99,14 @@ export async function setSignupApprovalConfig(
   };
 }
 
+/**
+ * Deliberately NOT cached per-isolate, unlike the platform integration config.
+ *
+ * This is the account-denial gate behind `assertUserAllowedBySignupApproval`. Caching it would
+ * let already-signed-in pending accounts keep access for the cache TTL after an admin turns
+ * approval on, which `.claude/rules/02-quality-gates.md` ("Unconditional Account-Denial Gates")
+ * forbids. One D1 read per request is the correct price.
+ */
 export async function isSignupApprovalRequired(env: Env): Promise<boolean> {
   const config = await getSignupApprovalConfig(env);
   return config.requireApproval;

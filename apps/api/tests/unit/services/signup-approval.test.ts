@@ -36,17 +36,16 @@ vi.mock('drizzle-orm/d1', () => ({
   drizzle: () => mockDb,
 }));
 
-vi.mock('../../../src/services/platform-config', () => ({
-  getGitHubOAuthConfig: async (env: {
-    GITHUB_CLIENT_ID?: string;
-    GITHUB_CLIENT_SECRET?: string;
-  }) =>
-    env.GITHUB_CLIENT_ID && env.GITHUB_CLIENT_SECRET
-      ? { clientId: env.GITHUB_CLIENT_ID, clientSecret: env.GITHUB_CLIENT_SECRET }
-      : null,
-  getGoogleLoginOAuthConfig: async () => null,
-  getGitLabOAuthConfig: async () => null,
-}));
+vi.mock('../../../src/services/platform-config', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../../src/services/platform-config')>();
+  const { buildResolvedPlatformConfig } = await import('../../helpers/platform-config-fixture');
+  return {
+    ...actual,
+    // Mock only the D1 boundary; the real select* projections still run.
+    resolvePlatformConfig: async (env: Parameters<typeof buildResolvedPlatformConfig>[0]) =>
+      buildResolvedPlatformConfig(env),
+  };
+});
 
 import { createAuth } from '../../../src/auth';
 import {

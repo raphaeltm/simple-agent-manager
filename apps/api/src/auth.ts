@@ -12,8 +12,10 @@ import { readResponseJson } from './lib/runtime-validation';
 import { getBetterAuthSecret } from './lib/secrets';
 import {
   getGitHubOAuthConfig,
-  getGitLabOAuthConfig,
-  getGoogleLoginOAuthConfig,
+  resolvePlatformConfig,
+  selectGitHubOAuthConfig,
+  selectGitLabOAuthConfig,
+  selectGoogleLoginOAuthConfig,
 } from './services/platform-config';
 import { isSignupApprovalRequired } from './services/signup-approval';
 
@@ -204,9 +206,17 @@ export async function createAuth(env: Env) {
   const db = drizzle(env.DATABASE, { schema });
   // Sentinel id is env-overridable; fall back to the shared constant.
   const sentinelId = env.TRIAL_ANONYMOUS_USER_ID ?? TRIAL_ANONYMOUS_USER_ID;
-  const githubOAuth = await getGitHubOAuthConfig(env);
-  const googleOAuth = await getGoogleLoginOAuthConfig(env);
-  const gitlabOAuth = await getGitLabOAuthConfig(env);
+  // Resolve the platform config ONCE. Each `get*OAuthConfig` helper independently issues
+  // `resolvePlatformConfig`'s 13 D1 queries, so awaiting three of them cost 39 D1 round-trips in
+  // 3 sequential waves on the preamble of every authenticated request. `createAuth` is reached
+  // from 9 call sites and more than one can run per request (e.g. `requireAuth` then
+  // `routes/auth.ts`), so that was up to 78 queries for a single `GET /api/auth/me`.
+  // `resolvePlatformConfig` additionally serves a per-isolate cached copy, so a warm isolate
+  // pays 0. See `.claude/rules/60-request-io-and-bundle-budgets.md`.
+  const platformConfig = await resolvePlatformConfig(env);
+  const githubOAuth = selectGitHubOAuthConfig(platformConfig);
+  const googleOAuth = selectGoogleLoginOAuthConfig(platformConfig);
+  const gitlabOAuth = selectGitLabOAuthConfig(platformConfig);
   const socialProviders: Record<string, unknown> = {};
   const trustedProviders: string[] = [];
 
@@ -336,6 +346,20 @@ export async function createAuth(env: Env) {
         : []),
     ],
     session: {
+      // The signed session-cookie cache stays configured, but every SAM call site reads sessions
+      // with `query: { disableCookieCache: true }` (`middleware/auth.ts`, `index.ts`,
+      // `routes/auth.ts`, `services/session-factory.ts`) and that is DELIBERATE — do not remove
+      // those flags to save the ~2 session/user D1 queries.
+      //
+      // `requireAuth` calls `assertUserNotSuspended(authContext.user)` and `requireApproved`
+      // calls `assertUserAllowedBySignupApproval(..., auth.user)`; both read `status`/`role`
+      // straight out of this session payload. Serving it from the cookie would let a suspended
+      // or de-approved account keep full access for up to `maxAge`, and no write path re-checks
+      // account status independently. `.claude/rules/02-quality-gates.md` ("Unconditional
+      // Account-Denial Gates") requires `suspended` to be enforced before any bypass.
+      //
+      // Re-enabling the cache is only safe once account status is re-verified against D1 on
+      // denial-sensitive paths (e.g. a `user.updatedAt` revalidation shorter than this maxAge).
       cookieCache: {
         enabled: true,
         maxAge: 5 * 60, // 5 minutes

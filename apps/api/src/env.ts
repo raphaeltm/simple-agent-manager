@@ -135,6 +135,7 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   SETUP_FORCE?: string; // "true" reopens /setup for lockout recovery
   SETUP_RATE_LIMIT_MAX_ATTEMPTS?: string; // Max setup-token attempts per identifier/window (default: 10)
   SETUP_RATE_LIMIT_WINDOW_SECONDS?: string; // Setup-token attempt window in seconds (default: 900)
+  PLATFORM_CONFIG_CACHE_MS?: string; // Per-isolate resolved-platform-config cache TTL in ms; 0 disables (default: 60000)
   // Guided agent credential setup via Cloudflare Sandbox
   MAX_CONCURRENT_SETUP_SESSIONS?: string; // Concurrency sub-cap below the Sandbox container max_instances (default: 2)
   SETUP_SESSION_TTL_MS?: string; // Setup session lifetime in ms before auto-teardown (default: 900000 = 15 min)

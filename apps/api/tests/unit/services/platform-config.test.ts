@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Env } from '../../../src/env';
 import { generateEncryptionKey } from '../../../src/services/encryption';
 import {
+  __resetPlatformConfigCacheForTest,
   getGitLabOAuthConfig,
   getGoogleInfraOAuthConfig,
   getGoogleLoginOAuthConfig,
@@ -110,6 +111,10 @@ function createEnv(overrides: Partial<Env> = {}): Env {
 describe('platform config resolver', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    // `resolvePlatformConfig` keeps a per-isolate cache keyed on the D1 binding. Each case here
+    // builds a fresh in-memory D1 so the guard already isolates them, but resetting keeps the
+    // suite deterministic regardless of ordering or future shared-env cases.
+    __resetPlatformConfigCacheForTest();
   });
 
   it('falls back to environment values when runtime config is absent', async () => {
