@@ -98,12 +98,12 @@ responses, matching the existing JWKS precedent at `index.ts:655`.
 
 ### Item #3 — query cache persistence (apps/web)
 
-- [ ] Add deps: `@tanstack/query-persist-client-core@5.101.2` (exact match to `react-query@5.101.2`),
+- [x] Add deps: `@tanstack/query-persist-client-core@5.101.2` (exact match to `react-query@5.101.2`),
       `idb-keyval`, dev `fake-indexeddb`.
-- [ ] Shared defaults in `packages/shared/src/constants/defaults.ts`:
+- [x] Shared defaults in `packages/shared/src/constants/defaults.ts`:
       `DEFAULT_QUERY_PERSIST_MAX_AGE_MS`, `DEFAULT_QUERY_PERSIST_THROTTLE_MS`,
       `DEFAULT_QUERY_PERSIST_RESTORE_TIMEOUT_MS`.
-- [ ] `apps/web/src/lib/query-persistence.ts`:
+- [x] `apps/web/src/lib/query-persistence.ts`:
       - `buildQueryPersistStorageKey(namespace)` → per-identity IDB key.
       - `createIdbPersister(key)` implementing `Persister` with throttled writes and
         **fail-open** try/catch on every method (private mode / disabled IDB ⇒ cache miss, never throw).
@@ -111,42 +111,42 @@ responses, matching the existing JWKS precedent at `index.ts:655`.
         `key[0] === 'auth' && key[1] === scope && ALLOWED_DOMAINS.has(key[2])` **and** a successful
         query state.
       - `QUERY_PERSIST_SCHEMA_VERSION` buster; `VITE_*` env overrides for all three timings.
-- [ ] `apps/web/src/hooks/useQueryCachePersistence.ts` — drives
+- [x] `apps/web/src/hooks/useQueryCachePersistence.ts` — drives
       `persistQueryClient()` per active namespace; unsubscribes + removes the previous namespace's
       store on transition; bounded restore with timeout; returns `isRestoring`.
-- [ ] Wire into `AuthProvider` — extend the existing gate so children do not render until restore
+- [x] Wire into `AuthProvider` — extend the existing gate so children do not render until restore
       settles; must not regress the existing `queryClient.clear()` transition semantics.
-- [ ] Clear the persisted store on sign-out in `apps/web/src/lib/auth.ts` (alongside
+- [x] Clear the persisted store on sign-out in `apps/web/src/lib/auth.ts` (alongside
       `clearLibraryCache()`), deterministically, before navigation.
-- [ ] Set `gcTime` on the persisted query options only (not globally — global `gcTime` would retain
+- [x] Set `gcTime` on the persisted query options only (not globally — global `gcTime` would retain
       admin-diagnosis / node / workspace data in memory).
-- [ ] Document the new `VITE_*` vars in `apps/web/.env.example` + `vite-env.d.ts`.
+- [x] Document the new `VITE_*` vars in `apps/web/.env.example` + `vite-env.d.ts`.
 
 ### Item #7 — HTTP cache headers (apps/api)
 
-- [ ] Shared defaults: `DEFAULT_CACHE_TTL_*` / SWR constants in `packages/shared`.
-- [ ] `apps/api/src/lib/cache-headers.ts` — named policies + `applyCacheHeaders(c, policy)`.
+- [x] Shared defaults: `DEFAULT_CACHE_TTL_*` / SWR constants in `packages/shared`.
+- [x] `apps/api/src/lib/cache-headers.ts` — named policies + `applyCacheHeaders(c, policy)`.
       `private` policies always emit `Vary: Cookie`. `public` is structurally unavailable to
       authenticated policies.
-- [ ] Apply to: `/api/config/artifacts-enabled`, `/api/config/vapid-public-key`,
+- [x] Apply to: `/api/config/artifacts-enabled`, `/api/config/vapid-public-key`,
       `/api/config/login-providers` (public); `/api/model-catalog/:agentType` (private, global);
       `/api/projects/:projectId/agent-profiles`, `/api/projects/:projectId/skills` (private, per-user).
-- [ ] Env vars in `apps/api/src/env.ts` + `.env.example` + public config reference docs.
+- [x] Env vars in `apps/api/src/env.ts` + `.env.example` + public config reference docs.
 
 ### Tests
 
-- [ ] Persist/restore across a simulated page load (fresh `QueryClient`, same store key).
-- [ ] Identity isolation: user A's store key ≠ user B's; restoring under B yields nothing.
-- [ ] Allowlist: `nodes`/`workspaces`/`admin-diagnosis`/`notification-preferences` and a
+- [x] Persist/restore across a simulated page load (fresh `QueryClient`, same store key).
+- [x] Identity isolation: user A's store key ≠ user B's; restoring under B yields nothing.
+- [x] Allowlist: `nodes`/`workspaces`/`admin-diagnosis`/`notification-preferences` and a
       foreign-scope `['auth','other-user','projects']` key are never dehydrated.
-- [ ] `maxAge` expiry and `buster` mismatch both evict.
-- [ ] IDB failure (throwing store) degrades to in-memory, app still renders.
-- [ ] AuthProvider account switch removes the previous namespace's persisted store and never renders
+- [x] `maxAge` expiry and `buster` mismatch both evict.
+- [x] IDB failure (throwing store) degrades to in-memory, app still renders.
+- [x] AuthProvider account switch removes the previous namespace's persisted store and never renders
       A's data as B.
-- [ ] Sign-out removes the persisted store.
-- [ ] API: each targeted endpoint emits the expected `Cache-Control` (+ `Vary: Cookie` where private).
-- [ ] API: env override changes the emitted TTL.
-- [ ] **Discriminating guard**: real-time endpoints (chat messages, task status, session/workspace
+- [x] Sign-out removes the persisted store.
+- [x] API: each targeted endpoint emits the expected `Cache-Control` (+ `Vary: Cookie` where private).
+- [x] API: env override changes the emitted TTL.
+- [x] **Discriminating guard**: real-time endpoints (chat messages, task status, session/workspace
       state) emit no `Cache-Control`, and **no authenticated endpoint emits `public`**.
 
 ## Acceptance criteria
