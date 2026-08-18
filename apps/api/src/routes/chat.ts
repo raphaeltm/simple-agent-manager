@@ -42,10 +42,7 @@ import { resolveChatAgentState } from './chat-agent-state';
 import { registerChatCancelRoute } from './chat-cancel';
 import { chatForkRoutes } from './chat-fork';
 import { recordChatSessionLoadFailure } from './chat-load-diagnostics';
-import {
-  preparePromptForLiveAgent,
-  sendPreparedPromptToLiveAgent,
-} from './chat-prompt-forward';
+import { preparePromptForLiveAgent, sendPreparedPromptToLiveAgent } from './chat-prompt-forward';
 import { registerChatPromptRoute } from './chat-prompt-route';
 import { getChatSessionRouteContext } from './chat-route-context';
 import {
@@ -151,10 +148,14 @@ chatRoutes.get('/', async (c) => {
 
   // Fast path: serve from the D1 session index when it can prove it holds the
   // same answer the DO would give. This list is refetched on mount, on every WS
-  // reconnect, on two poll timers and on six event-driven refreshes, and each DO
-  // call also pays an N+1 attention lookup inside the DO — so it is worth not
-  // making. `listSessionsFromIndex` fails closed: anything absent, incomplete or
-  // stale falls through to the DO below, and the DO read re-primes the index.
+  // reconnect, on two poll timers and on six event-driven refreshes — and each
+  // DO call wakes the object and runs an N+1 attention lookup per row inside it,
+  // against a single-threaded instance. D1 reads scale out instead. (Note this
+  // is not a round-trip *reduction*: the DO's count/page are in-process SQLite,
+  // so the win is avoiding the DO wake, the N+1, and the contention — not hops.)
+  //
+  // `listSessionsFromIndex` fails closed: anything absent, incomplete or stale
+  // falls through to the DO below.
   const indexRead = await listSessionsFromIndex(c.env, {
     projectId,
     status,
@@ -163,18 +164,34 @@ chatRoutes.get('/', async (c) => {
     createdByUserId,
   });
 
-  const result =
-    'result' in indexRead
-      ? indexRead.result
-      : await projectDataService.listSessions(
-          c.env,
-          projectId,
-          status,
-          limit,
-          offset,
-          null,
-          createdByUserId
-        );
+  let result;
+  if ('result' in indexRead) {
+    result = indexRead.result;
+  } else {
+    result = await projectDataService.listSessions(
+      c.env,
+      projectId,
+      status,
+      limit,
+      offset,
+      null,
+      createdByUserId
+    );
+    // Re-prime off the response path, and ONLY here — this is the one caller
+    // that actually observed the index fail. A permanently over-cap project is
+    // excluded because its sync short-circuits, so this cannot become a
+    // per-request resync loop for large projects.
+    if (indexRead.missReason !== 'incomplete_coverage') {
+      c.executionCtx.waitUntil(
+        projectDataService.primeSessionIndex(c.env, projectId).catch((err) => {
+          log.warn('session_index_prime_failed', {
+            projectId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        })
+      );
+    }
+  }
 
   return c.json({
     ...result,

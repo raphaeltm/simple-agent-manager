@@ -254,6 +254,19 @@ export async function listSessions(
   return stub.listSessions(status, limit, offset, taskId, createdByUserId);
 }
 
+/**
+ * Ask the ProjectData DO to refresh the D1 session index (debounced inside the DO).
+ *
+ * Only for callers that observed the index fail to answer. Do NOT fold this into
+ * `listSessions` — most of its callers never touch the index, and syncing from
+ * there turns ordinary reads (the account-map fan-out over every project, the
+ * admin backfill over every project in the deployment) into re-index storms.
+ */
+export async function primeSessionIndex(env: Env, projectId: string): Promise<void> {
+  const stub = await getStub(env, projectId);
+  await stub.primeSessionIndex();
+}
+
 export async function getSessionsByTaskIds(
   env: Env,
   projectId: string,

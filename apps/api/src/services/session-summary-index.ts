@@ -4,15 +4,21 @@
  *
  * The chat sidebar reloads this list on mount, on every WebSocket reconnect, on
  * two poll timers and on six event-driven refetches — so it was one of the
- * hottest DO callers in the product, and each call also paid an N+1
- * attention-marker lookup inside the DO.
+ * hottest DO callers in the product.
+ *
+ * What this actually saves is NOT round trips. The DO's count and page queries
+ * are in-process SQLite, so the DO path is one network hop where this path is
+ * two (coverage, then count+page in parallel). The win is that it avoids waking
+ * a single-threaded Durable Object on every poll, avoids the N+1
+ * attention-marker lookup the DO runs per row, and lets a hot project's sidebar
+ * reads scale across D1 instead of queueing behind one object.
  *
  * The DO remains authoritative. This index may only answer a read it can PROVE
- * is equivalent, which is what `session_index_coverage` is for: it records how
- * many sessions the project had at sync time, whether every one of them was
- * indexed, and when. Anything missing, incomplete or stale returns `null` here
- * and the caller falls back to the DO. Fail closed — a wrong sidebar is worse
- * than a slow one.
+ * is equivalent, which is what `session_index_coverage` is for: it records
+ * whether every session was indexed, and when. Anything missing, incomplete or
+ * stale reports a miss and the caller falls back to the DO. Fail closed on
+ * correctness — a wrong sidebar is worse than a slow one — but fail OPEN on
+ * availability (see `listSessionsFromIndex`).
  */
 import { DEFAULT_SESSION_INDEX_MAX_STALENESS_MS } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
@@ -208,24 +214,27 @@ async function readIndex(
 
   const whereClause = conditions.join(' AND ');
 
-  const countRow = await db
-    .prepare(`SELECT COUNT(*) as cnt FROM session_summaries WHERE ${whereClause}`)
-    .bind(...params)
-    .first<{ cnt: number }>();
+  // Independent once coverage has been validated, so they go out together rather
+  // than paying two sequential D1 hops.
+  const [countRow, page] = await Promise.all([
+    db
+      .prepare(`SELECT COUNT(*) as cnt FROM session_summaries WHERE ${whereClause}`)
+      .bind(...params)
+      .first<{ cnt: number }>(),
+    db
+      .prepare(
+        `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
+                started_at, ended_at, created_at, updated_at, agent_completed_at, attention_json
+         FROM session_summaries
+         WHERE ${whereClause}
+         ORDER BY updated_at DESC
+         LIMIT ? OFFSET ?`
+      )
+      .bind(...params, query.limit, query.offset)
+      .all<Record<string, unknown>>(),
+  ]);
+
   const total = countRow?.cnt ?? 0;
-
-  const page = await db
-    .prepare(
-      `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
-              started_at, ended_at, created_at, updated_at, agent_completed_at, attention_json
-       FROM session_summaries
-       WHERE ${whereClause}
-       ORDER BY updated_at DESC
-       LIMIT ? OFFSET ?`
-    )
-    .bind(...params, query.limit, query.offset)
-    .all<Record<string, unknown>>();
-
   const rows = page.results ?? [];
 
   // Per-row isolation (.claude/rules/50): one row that fails the schema — a

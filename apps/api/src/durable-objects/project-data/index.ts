@@ -60,6 +60,8 @@ export type { Env } from './types';
 export class ProjectData extends DurableObject<Env> {
   private sql: SqlStorage;
   private summarySyncTimer: ReturnType<typeof setTimeout> | null = null;
+  /** Serializes summary syncs — see `runSummarySyncLocked` (rule 45). */
+  private summarySyncLock: Promise<unknown> = Promise.resolve();
   private cachedProjectId: string | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -400,12 +402,6 @@ export class ProjectData extends DurableObject<Env> {
     createdByUserId: string | null = null
   ): Promise<{ sessions: Record<string, unknown>[]; total: number; hasMore: boolean }> {
     const result = sessions.listSessions(this.sql, status, limit, offset, taskId, createdByUserId);
-    // Self-heal the D1 session index. Reaching this RPC at all means the index
-    // could not answer — it was stale, incomplete, or absent — so re-prime it
-    // and the next read takes the fast path. Debounced, so a burst of DO reads
-    // still costs one resync, and it makes a silently-broken sync recover on its
-    // own instead of pinning every project on the DO forever.
-    this.scheduleSummarySync();
     return {
       sessions: result.sessions.map((s) => this.addBaseDomain(s)),
       total: result.total,
@@ -1546,11 +1542,55 @@ export class ProjectData extends DurableObject<Env> {
     this.summarySyncTimer = setTimeout(async () => {
       this.summarySyncTimer = null;
       try {
-        await this.syncSummaryToD1();
+        await this.runSummarySyncLocked();
       } catch (err) {
         log.error('summary_sync_to_d1_failed', serializeError(err));
       }
     }, debounceMs);
+  }
+
+  /**
+   * Serializes the summary sync's read → D1-write critical section.
+   *
+   * The debounce timer only stops two PENDING timers from coexisting — it does
+   * nothing once a callback has started, because `summarySyncTimer` is nulled at
+   * the top of the callback and a fresh timer can be armed immediately. So two
+   * syncs could overlap across their `await`s, and a Durable Object does NOT
+   * serialize across `await` (rule 45). Both would read the DO's session rows at
+   * different instants, and whichever finished last would win the coverage
+   * write — so an older snapshot could land after a newer one and silently
+   * revert row content (status, agent_completed_at, attention) while leaving a
+   * `complete=1` row with a fresh `synced_at` that readers trust.
+   *
+   * Reading happens inside the lock, so a queued second sync re-reads the
+   * post-write state rather than acting on a stale snapshot. The chain is kept
+   * alive through rejection so a thrown sync cannot wedge every later one.
+   *
+   * `protected` only so the workers-pool test double can drive the LOCKED path
+   * directly instead of racing the debounce timer — a concurrency test that
+   * called the unlocked sync would prove nothing.
+   */
+  protected async runSummarySyncLocked(): Promise<void> {
+    const run = this.summarySyncLock.then(() => this.syncSummaryToD1());
+    this.summarySyncLock = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  /**
+   * Prime the D1 session index after the read path could not use it.
+   *
+   * Deliberately its OWN RPC rather than a side effect of `listSessions`: seven
+   * of that method's eight callers (account-map's fan-out over every project,
+   * the admin backfill's fan-out over every project in the deployment, MCP
+   * tools, a cron sweep, the project-detail preview) never consult the index, so
+   * syncing from there turned ordinary reads into full-project re-index storms.
+   * Only the caller that actually observed a miss should pay to fix it.
+   */
+  async primeSessionIndex(): Promise<void> {
+    this.scheduleSummarySync();
   }
 
   /**

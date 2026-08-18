@@ -756,6 +756,8 @@ ProjectData stores a single prompt-delivery queue and checkpoint episodes keyed 
 | `SESSION_ACTIVITY_PROBE_MAX_ATTEMPTS`   | `3`              | Consecutive unreachable probes after which a stale working state is terminalized as dead                                                    |
 | `SESSION_ACTIVITY_PROBE_MAX_CANDIDATES` | `10`             | Stale-activity candidates probed per ProjectData alarm pass                                                                                 |
 | `DO_SUMMARY_SYNC_DEBOUNCE_MS`           | `5000`           | Debounce for DO-to-D1 summary sync                                                                                                          |
+| `SESSION_INDEX_MAX_ROWS`                 | `1000`           | Sessions mirrored into the D1 `session_summaries` index per project. A project holding more is recorded as incomplete and its chat sidebar reads fall back to the Durable Object |
+| `SESSION_INDEX_MAX_STALENESS_MS`          | `900000` (15 min) | How stale the session index may be before the per-project sidebar list stops trusting it and falls back to the Durable Object                                                    |
 
 ## Durable Object Retry
 

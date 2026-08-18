@@ -17,6 +17,13 @@ import { expect, type Page, type Route, test } from '@playwright/test';
 
 import { assertNoOverflow, makeMockUser, screenshot } from './audit-helpers';
 
+// These specs deliberately mount the heaviest fixture in the suite (400 chat
+// messages with markdown + code blocks, plus a 400-entry timeline), then take a
+// full-page screenshot and walk the DOM for clipped overflow. That is well past
+// the default 30s per-test budget on a loaded machine — the measurements
+// themselves are fast, the fixture is what is slow.
+test.describe.configure({ timeout: 120_000 });
+
 const PROJECT_ID = 'proj-bound-1';
 const SESSION_ID = 'cs-bound-1';
 const NOW = Date.now();

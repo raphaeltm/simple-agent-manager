@@ -13,8 +13,8 @@
 import { env } from 'cloudflare:test';
 import { beforeEach, describe, expect, it } from 'vitest';
 
-import { listSessionsFromIndex } from '../../src/services/session-summary-index';
 import type { Env as WorkerEnv } from '../../src/env';
+import { listSessionsFromIndex } from '../../src/services/session-summary-index';
 import { seedInstallation, seedProject, seedUser } from './helpers/seed-d1';
 import { type ProjectDataTestDouble } from './support/expected-error-doubles';
 
@@ -92,6 +92,108 @@ describe('D1 session index sync', () => {
       createdByUserId: null,
     });
     expect(out).toEqual({ missReason: 'incomplete_coverage' });
+  });
+
+  it('stops mirroring rows once the project is provably over the cap', async () => {
+    // Circuit breaker. Session counts only grow, so an over-cap project can never
+    // reach complete=1 and the read path will fall back forever — mirroring rows
+    // into an index nothing reads is pure write cost. Without the breaker, every
+    // mutation on a large project re-wrote up to SESSION_INDEX_MAX_ROWS rows.
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    await stub.createSession('workspace-1', 'One');
+    await stub.createSession('workspace-2', 'Two');
+    await stub.createSession('workspace-3', 'Three');
+
+    await stub.runSummarySyncWithEnvForTest({ SESSION_INDEX_MAX_ROWS: '2' });
+
+    const rows = await env.DATABASE.prepare(
+      'SELECT COUNT(*) AS cnt FROM session_summaries WHERE project_id = ?'
+    )
+      .bind(projectId)
+      .first<{ cnt: number }>();
+
+    // Coverage still recorded (so the gate knows to fall back), but no rows written.
+    expect(rows?.cnt).toBe(0);
+    const coverage = await readCoverage(projectId);
+    expect(coverage?.complete).toBe(0);
+    expect(coverage?.session_count).toBe(3);
+  });
+
+  it('mirrors only rows changed since the last sync instead of the whole project', async () => {
+    // The original implementation re-wrote every session on every debounce fire,
+    // so one message in one session cost as many D1 row-writes as the project had
+    // sessions. This asserts the sync is delta-shaped after the first full pass.
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const untouched = await stub.createSession('workspace-1', 'Untouched');
+    const changed = await stub.createSession('workspace-2', 'Will change');
+
+    await stub.runSummarySyncForTest();
+
+    // Corrupt the already-synced rows directly in D1. A delta sync must rewrite
+    // ONLY the session that changed; a full mirror would repair both.
+    await env.DATABASE.prepare('UPDATE session_summaries SET topic = ? WHERE project_id = ?')
+      .bind('SENTINEL', projectId)
+      .run();
+
+    await stub.updateSessionTopic(changed, 'Changed topic');
+    await stub.runSummarySyncForTest();
+
+    const changedRow = await env.DATABASE.prepare(
+      'SELECT topic FROM session_summaries WHERE id = ?'
+    )
+      .bind(changed)
+      .first<{ topic: string }>();
+    const untouchedRow = await env.DATABASE.prepare(
+      'SELECT topic FROM session_summaries WHERE id = ?'
+    )
+      .bind(untouched)
+      .first<{ topic: string }>();
+
+    expect(changedRow?.topic).toBe('Changed topic');
+    // Still the sentinel => the untouched row was NOT rewritten.
+    expect(untouchedRow?.topic).toBe('SENTINEL');
+  });
+
+  it('serializes overlapping syncs so an older snapshot cannot overwrite a newer one', async () => {
+    // Rule 45: a Durable Object does not serialize across `await`. The debounce
+    // only stops two PENDING timers coexisting — once a callback starts, a fresh
+    // timer can be armed immediately, so two syncs could interleave across their
+    // D1 awaits and the slower (older) one could land last, reverting row content
+    // under a coverage row readers trust.
+    await seed(projectId);
+    const stub = getStub(projectId);
+    await stub.ensureProjectId(projectId);
+    const sessionId = await stub.createSession('workspace-1', 'Initial');
+
+    await stub.runSummarySyncForTest();
+    await stub.updateSessionTopic(sessionId, 'Final topic');
+
+    // Fire overlapping syncs; the lock must make them run one after another.
+    await Promise.all([
+      stub.runSummarySyncForTest(),
+      stub.runSummarySyncForTest(),
+      stub.runSummarySyncForTest(),
+    ]);
+
+    const row = await env.DATABASE.prepare('SELECT topic FROM session_summaries WHERE id = ?')
+      .bind(sessionId)
+      .first<{ topic: string }>();
+    expect(row?.topic).toBe('Final topic');
+
+    // And the index still answers, i.e. coverage was not left inconsistent.
+    const out = await listSessionsFromIndex(env as unknown as WorkerEnv, {
+      projectId,
+      status: null,
+      limit: 20,
+      offset: 0,
+      createdByUserId: null,
+    });
+    if (!('result' in out)) throw new Error(`expected a result, got ${out.missReason}`);
+    expect(out.result.sessions[0]?.topic).toBe('Final topic');
   });
 
   it('produces the same rows the Durable Object listSessions returns', async () => {

@@ -212,17 +212,27 @@ function AcpConversationItemViewImpl({
 
 /**
  * Memoized so a re-render of the virtualized list does not re-run this wrapper
- * (and its `switch`, and `useGlobalAudio`) for every row currently inside the
- * scroll window.
+ * (and its `switch`, and `useGlobalAudio`) for every row inside the scroll
+ * window. The boundary previously started one level lower, at `MessageBubble`,
+ * so this wrapper re-ran for every windowed row and `MessageBubble` bailed out
+ * only after the audio-context subscription and item-union walk had happened.
  *
- * The memo boundary previously started one level lower, at `MessageBubble`. That
- * left this wrapper re-rendering for every windowed row on every parent render;
- * `MessageBubble` then bailed out, but only after this component had already
- * re-subscribed to the audio context and re-walked the item union. Hoisting the
- * boundary here means a settled row does no work at all.
+ * SCOPE OF THE WIN — this helps re-renders NOT driven by message data:
+ * `floatingHeaderHeight` changes, opening the plan modal or timeline drawer,
+ * highlight state. There `conversationItems` is unchanged, `item` keeps its
+ * identity, and rows bail out correctly.
  *
- * Default shallow prop comparison is correct: `item` objects are rebuilt by
- * `chatMessagesToConversationItems` only when `lc.messages` actually changes, and
- * the two callbacks plus `projectId` are stable at the call site.
+ * It does NOT hold during streaming. `chatMessagesToConversationItems`
+ * (`types.ts`) rebuilds every item object on every call, and `lc.messages` gets
+ * a new array on each incoming token, so every visible row's `item` prop changes
+ * identity per token and the comparison fails for all of them. Making the
+ * conversion identity-preserving for untouched items would fix that; it is a
+ * larger change than this one and is tracked separately. The per-token remount
+ * problem on this surface is addressed by the stable `components`/`itemContent`
+ * in `index.tsx`, not by this memo.
+ *
+ * The other props are stable at the call site: `projectId` is a string,
+ * `onFileClick`/`onLoadToolContent` are `useCallback`s, and the two animate
+ * flags are booleans.
  */
 export const AcpConversationItemView = memo(AcpConversationItemViewImpl);

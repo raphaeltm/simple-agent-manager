@@ -31,11 +31,15 @@ ALTER TABLE session_summaries ADD COLUMN synced_at INTEGER;
 -- Per-project coverage record — the gate that decides whether D1 may answer.
 --
 -- Reading D1 is only safe when the index provably holds the SAME answer the DO
--- would give. `session_count` is how many sessions the DO held at sync time and
--- `complete` records whether every one of them was indexed (the sync is capped),
--- so the route can verify both the requested window and the reported `total`
--- before trusting the index. Missing or stale coverage means fall back to the
--- DO, never guess.
+-- would give. `complete` records whether every session was indexed (the sync is
+-- capped) and `synced_at` bounds staleness; together they are what the read path
+-- checks before trusting the index. Missing, incomplete or stale coverage means
+-- fall back to the DO, never guess.
+--
+-- `session_count` is diagnostic and drives the sync's own circuit breaker (once
+-- a project is over the cap, `complete` can never return to 1 because sessions
+-- are terminalized rather than deleted, so the sync stops mirroring). The read
+-- path does NOT check it — `total` is always counted live from the rows.
 CREATE TABLE session_index_coverage (
   project_id    TEXT PRIMARY KEY REFERENCES projects(id) ON DELETE CASCADE,
   synced_at     INTEGER NOT NULL,

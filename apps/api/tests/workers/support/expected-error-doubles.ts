@@ -40,9 +40,15 @@ export class ProjectDataTestDouble extends ProjectData {
     return typeof row?.value === 'string' ? row.value : null;
   }
 
-  /** Drive the D1 summary write-back without waiting on the debounce timer. */
+  /**
+   * Drive the D1 summary write-back without waiting on the debounce timer.
+   *
+   * Goes through the LOCKED path, exactly as the production timer callback does,
+   * so an overlapping-sync test actually exercises the mutex rather than a
+   * bypass that could never observe the race.
+   */
   async runSummarySyncForTest(): Promise<void> {
-    await this.syncSummaryToD1();
+    await this.runSummarySyncLocked();
   }
 
   /**
@@ -58,7 +64,7 @@ export class ProjectDataTestDouble extends ProjectData {
       mutableEnv[key] = value;
     }
     try {
-      await this.syncSummaryToD1();
+      await this.runSummarySyncLocked();
     } finally {
       for (const [key, value] of previous) {
         if (value === undefined) delete mutableEnv[key];

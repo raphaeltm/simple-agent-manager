@@ -55,24 +55,63 @@ export async function syncSessionSummariesToD1(
 
   const maxRows = resolveMaxRows(env);
 
-  // Total first, so coverage can record whether the page below saw everything.
+  // Watermark captured BEFORE the read. Rows written while this sync runs have
+  // `updated_at >= syncedAt`, so recording this (not `Date.now()` afterwards) as
+  // the next delta floor means a concurrent write is picked up by the next sync
+  // rather than silently skipped. Every mutation schedules a sync, so there is
+  // always a next one.
+  const syncedAt = Date.now();
+
   const countRow = sql.exec('SELECT COUNT(*) as cnt FROM chat_sessions').toArray()[0];
   const sessionCount = typeof countRow?.cnt === 'number' ? countRow.cnt : 0;
 
-  const rows = sql
-    .exec(
-      `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
-              started_at, ended_at, created_at, updated_at, agent_completed_at,
-              (SELECT MAX(created_at) FROM chat_messages WHERE session_id = chat_sessions.id) as last_message_at
-       FROM chat_sessions
-       ORDER BY updated_at DESC
-       LIMIT ?`,
-      maxRows
-    )
-    .toArray();
+  const coverage = await env.DATABASE.prepare(
+    'SELECT synced_at, complete FROM session_index_coverage WHERE project_id = ?'
+  )
+    .bind(projectId)
+    .first<{ synced_at: number; complete: number }>();
 
-  const complete = sessionCount <= maxRows && rows.length >= sessionCount;
-  const syncedAt = Date.now();
+  // Circuit breaker. Session counts only ever grow (sessions are terminalized,
+  // never deleted), so once a project passes the cap `complete` can never return
+  // to 1 and the read path will fall back to the DO forever. Mirroring rows into
+  // an index nothing will read is pure cost — record the coverage and stop.
+  if (sessionCount > maxRows) {
+    await writeCoverage(env, projectId, syncedAt, sessionCount, false);
+    log.info('session_summaries_sync_skipped_over_cap', { projectId, sessionCount, maxRows });
+    return;
+  }
+
+  // Delta by default. A full mirror is only needed the first time, or after a
+  // period where coverage was not complete. Re-mirroring every session on every
+  // debounce fire would make one message write cost as many row-writes as the
+  // project has sessions.
+  const isDelta = coverage?.complete === 1;
+
+  const rows = isDelta
+    ? sql
+        .exec(
+          `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
+                  started_at, ended_at, created_at, updated_at, agent_completed_at,
+                  (SELECT MAX(created_at) FROM chat_messages WHERE session_id = chat_sessions.id) as last_message_at
+           FROM chat_sessions
+           WHERE updated_at >= ?
+           ORDER BY updated_at DESC
+           LIMIT ?`,
+          coverage.synced_at,
+          maxRows
+        )
+        .toArray()
+    : sql
+        .exec(
+          `SELECT id, workspace_id, task_id, created_by_user_id, topic, status, message_count,
+                  started_at, ended_at, created_at, updated_at, agent_completed_at,
+                  (SELECT MAX(created_at) FROM chat_messages WHERE session_id = chat_sessions.id) as last_message_at
+           FROM chat_sessions
+           ORDER BY updated_at DESC
+           LIMIT ?`,
+          maxRows
+        )
+        .toArray();
 
   const statements = rows.map((row) => {
     // Resolved-marker semantics must match getAttentionSummary() exactly — it
@@ -134,14 +173,36 @@ export async function syncSessionSummariesToD1(
     );
   });
 
+  // Chunks touch disjoint row ids and each batch is independently idempotent
+  // (ON CONFLICT DO UPDATE), so they can go out together. Finishing sooner also
+  // narrows the window in which a concurrent sync could interleave.
+  const chunks: Promise<unknown>[] = [];
   for (let i = 0; i < statements.length; i += D1_BATCH_SIZE) {
-    await env.DATABASE.batch(statements.slice(i, i + D1_BATCH_SIZE));
+    chunks.push(env.DATABASE.batch(statements.slice(i, i + D1_BATCH_SIZE)));
   }
+  await Promise.all(chunks);
 
   // Coverage is written LAST and only after every row landed, so a batch that
   // throws part-way leaves the previous (older but self-consistent) coverage in
   // place. The read path then keeps using the older row until it ages out, or
   // falls back to the DO — it never reads a half-written index as complete.
+  await writeCoverage(env, projectId, syncedAt, sessionCount, true);
+
+  log.info('session_summaries_synced', {
+    projectId,
+    count: rows.length,
+    sessionCount,
+    mode: isDelta ? 'delta' : 'full',
+  });
+}
+
+async function writeCoverage(
+  env: Env,
+  projectId: string,
+  syncedAt: number,
+  sessionCount: number,
+  complete: boolean
+): Promise<void> {
   await env.DATABASE.prepare(
     `INSERT INTO session_index_coverage (project_id, synced_at, session_count, complete)
      VALUES (?, ?, ?, ?)
@@ -152,11 +213,4 @@ export async function syncSessionSummariesToD1(
   )
     .bind(projectId, syncedAt, sessionCount, complete ? 1 : 0)
     .run();
-
-  log.info('session_summaries_synced', {
-    projectId,
-    count: rows.length,
-    sessionCount,
-    complete,
-  });
 }

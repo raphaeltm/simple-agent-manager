@@ -8,7 +8,10 @@
  * Fix: Added AbortController to the polling useEffect so in-flight requests
  * are cancelled when the session changes.
  */
-import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT, DEFAULT_CHAT_SESSION_MESSAGE_MAX } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+  DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+} from '@simple-agent-manager/shared';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -50,11 +53,17 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 // Captured WebSocket onMessage callback — tests can call this to inject messages
 let capturedWsOnMessage: ((msg: ReturnType<typeof makeMessage>) => void) | null = null;
 // Captured onCatchUp callback — tests can call this to simulate catch-up after reconnect
-let capturedWsOnCatchUp: ((msgs: ReturnType<typeof makeMessage>[], session: ReturnType<typeof makeSession>) => void) | null = null;
-let mockWsConnectionState: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' = 'connected';
+let capturedWsOnCatchUp:
+  | ((msgs: ReturnType<typeof makeMessage>[], session: ReturnType<typeof makeSession>) => void)
+  | null = null;
+let mockWsConnectionState: 'connecting' | 'connected' | 'reconnecting' | 'disconnected' =
+  'connected';
 
 vi.mock('../../../src/hooks/useChatWebSocket', () => ({
-  useChatWebSocket: (opts: { onMessage?: (msg: unknown) => void; onCatchUp?: (msgs: unknown[], session: unknown) => void }) => {
+  useChatWebSocket: (opts: {
+    onMessage?: (msg: unknown) => void;
+    onCatchUp?: (msgs: unknown[], session: unknown) => void;
+  }) => {
     capturedWsOnMessage = (opts.onMessage ?? null) as typeof capturedWsOnMessage;
     capturedWsOnCatchUp = (opts.onCatchUp ?? null) as typeof capturedWsOnCatchUp;
     return {
@@ -83,9 +92,7 @@ vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
     ToolCallCard: ({ toolCall }: { toolCall: { title: string } }) => (
       <div data-testid="acp-tool-call">{toolCall.title}</div>
     ),
-    ThinkingBlock: ({ text }: { text: string }) => (
-      <div data-testid="acp-thinking">{text}</div>
-    ),
+    ThinkingBlock: ({ text }: { text: string }) => <div data-testid="acp-thinking">{text}</div>,
     TypewriterText: ({ text }: { text: string }) => <span>{text}</span>,
   };
 });
@@ -101,46 +108,16 @@ vi.mock('@simple-agent-manager/acp-client', async (importOriginal) => {
 // nothing — a dead click on virtualized sessions. The mock renders every row, so
 // a highlight-presence assertion alone would NOT catch that; the scrollToIndex
 // argument assertion does.
-const virtuosoMock = vi.hoisted(() => {
-  // eslint-disable-next-line @typescript-eslint/no-var-requires, @typescript-eslint/no-explicit-any
-  const React = require('react') as typeof import('react');
-  const scrollToIndexCalls: Array<{ index?: number | string } | number> = [];
-  return {
-    scrollToIndexCalls,
-    Virtuoso: React.forwardRef(function MockVirtuoso(
-      props: {
-        data?: unknown[];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        itemContent?: (index: number, item: any) => React.ReactNode;
-        style?: React.CSSProperties;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        components?: { Header?: React.ComponentType<any>; List?: React.ComponentType<any> };
-        // Real Virtuoso threads `context` into every `components.*` slot. The chat
-        // list depends on that to keep its Header a STABLE component type instead
-        // of an inline closure, so the mock must forward it — a context-less
-        // Header renders nothing and silently loses "Load earlier messages".
-        context?: unknown;
-      },
-      ref: React.Ref<unknown>,
-    ) {
-      const { data, itemContent, style, components, context } = props;
-      React.useImperativeHandle(ref, () => ({
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        scrollToIndex: (arg: any) => { scrollToIndexCalls.push(arg); },
-      }), []);
-      const HeaderComponent = components?.Header;
-      const ListComponent = components?.List;
-      const rows = data?.map((item, index) =>
-        React.createElement('div', { key: index }, itemContent?.(index, item))
-      );
-      return React.createElement('div', { 'data-testid': 'virtuoso-scroller', style },
-        HeaderComponent ? React.createElement(HeaderComponent, { context }) : null,
-        ListComponent ? React.createElement(ListComponent, { context }, rows) : rows
-      );
-    }),
-  };
+vi.mock('react-virtuoso', async () => {
+  const { createVirtuosoModuleMock } = await import('../../helpers/virtuoso-mock');
+  return createVirtuosoModuleMock();
 });
-vi.mock('react-virtuoso', () => ({ Virtuoso: virtuosoMock.Virtuoso }));
+
+// Recorded `scrollToIndex` arguments from the shared mock, so the jump tests can
+// assert the exact coordinate the component asked for.
+const virtuosoMock = {
+  scrollToIndexCalls: (await import('../../helpers/virtuoso-mock')).scrollToIndexCalls,
+};
 
 // Timeline data sources — useSessionTimeline fetches these when the drawer opens.
 vi.mock('../../../src/lib/api/sessions', async (importOriginal) => ({
@@ -161,7 +138,10 @@ mocks.listChatMessages.mockResolvedValue({ messages: [], hasMore: false });
 mocks.listActivityEvents.mockResolvedValue({ events: [] });
 mocks.listNotifications.mockResolvedValue({ notifications: [], nextCursor: null });
 
-import { chatMessagesToConversationItems, ProjectMessageView } from '../../../src/components/project-message-view';
+import {
+  chatMessagesToConversationItems,
+  ProjectMessageView,
+} from '../../../src/components/project-message-view';
 
 beforeEach(() => {
   mockWsConnectionState = 'connected';
@@ -239,8 +219,19 @@ describe('ProjectMessageView — session isolation', () => {
     vi.clearAllMocks();
     mockWsConnectionState = 'connected';
     // Default workspace/node mocks — return pending promises to avoid side effects
-    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
-    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
   });
 
   afterEach(() => {
@@ -251,10 +242,12 @@ describe('ProjectMessageView — session isolation', () => {
     // The fallback poll only runs while the WebSocket is not connected.
     mockWsConnectionState = 'reconnecting';
     const limits: Array<number | undefined> = [];
-    mocks.getChatSession.mockImplementation(async (_p: string, _s: string, params?: { limit?: number }) => {
-      limits.push(params?.limit);
-      return makeSessionResponse('session-A', [makeMessage('m1', 'session-A', 'Hi')]);
-    });
+    mocks.getChatSession.mockImplementation(
+      async (_p: string, _s: string, params?: { limit?: number }) => {
+        limits.push(params?.limit);
+        return makeSessionResponse('session-A', [makeMessage('m1', 'session-A', 'Hi')]);
+      }
+    );
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
 
@@ -265,7 +258,9 @@ describe('ProjectMessageView — session isolation', () => {
     // Under full coverage load, React may commit the polling effect after the
     // first timer advance, so advance multiple intervals until it fires.
     for (let attempts = 0; attempts < 3 && limits.length < 2; attempts += 1) {
-      await act(async () => { await vi.advanceTimersByTimeAsync(10_500); });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10_500);
+      });
     }
     await waitFor(() => expect(limits.length).toBeGreaterThanOrEqual(2));
     expect(limits.slice(1)).toContain(DEFAULT_CHAT_SESSION_MESSAGE_LIMIT);
@@ -286,17 +281,13 @@ describe('ProjectMessageView — session isolation', () => {
       throw new Error(`Unexpected session: ${sessionId}`);
     });
 
-    const { rerender } = render(
-      <ProjectMessageView projectId="proj-1" sessionId="session-A" />
-    );
+    const { rerender } = render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
 
     await waitFor(() => {
       expect(screen.getByText('Hello from A')).toBeTruthy();
     });
 
-    rerender(
-      <ProjectMessageView projectId="proj-1" sessionId="session-B" />
-    );
+    rerender(<ProjectMessageView projectId="proj-1" sessionId="session-B" />);
 
     await waitFor(() => {
       expect(screen.getByText('Hello from B')).toBeTruthy();
@@ -316,23 +307,19 @@ describe('ProjectMessageView — session isolation', () => {
     // Initial load — no signal capture (initial load effect is separate)
     mocks.getChatSession.mockResolvedValue(sessionAResponse);
 
-    const { rerender } = render(
-      <ProjectMessageView projectId="proj-1" sessionId="session-A" />
-    );
+    const { rerender } = render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
 
     await waitFor(() => {
       expect(screen.getByText('Data from A')).toBeTruthy();
     });
 
     // Now capture the signal from the degraded fallback polling interval.
-    mocks.getChatSession.mockImplementation(async (
-      _projectId: string,
-      _sessionId: string,
-      params?: { signal?: AbortSignal }
-    ) => {
-      pollSignal = params?.signal;
-      return sessionAResponse;
-    });
+    mocks.getChatSession.mockImplementation(
+      async (_projectId: string, _sessionId: string, params?: { signal?: AbortSignal }) => {
+        pollSignal = params?.signal;
+        return sessionAResponse;
+      }
+    );
 
     // Advance past the fallback poll interval. Use advanceTimersByTimeAsync to
     // properly process microtasks (the fallback effect starts asynchronously
@@ -354,9 +341,7 @@ describe('ProjectMessageView — session isolation', () => {
     mocks.getChatSession.mockResolvedValue(sessionBResponse);
 
     // Switch sessions — cleanup should abort the poll signal
-    rerender(
-      <ProjectMessageView projectId="proj-1" sessionId="session-B" />
-    );
+    rerender(<ProjectMessageView projectId="proj-1" sessionId="session-B" />);
 
     await waitFor(() => {
       expect(pollSignal!.aborted).toBe(true);
@@ -379,33 +364,33 @@ describe('ProjectMessageView — session isolation', () => {
     // Track call count to distinguish initial load from poll
     let callIndex = 0;
 
-    mocks.getChatSession.mockImplementation((_projectId: string, sessionId: string, params?: { signal?: AbortSignal }) => {
-      callIndex++;
-      if (sessionId === 'session-A') {
-        if (callIndex <= 1) {
-          // First call: initial load — resolve immediately
-          return Promise.resolve(sessionAResponse);
+    mocks.getChatSession.mockImplementation(
+      (_projectId: string, sessionId: string, params?: { signal?: AbortSignal }) => {
+        callIndex++;
+        if (sessionId === 'session-A') {
+          if (callIndex <= 1) {
+            // First call: initial load — resolve immediately
+            return Promise.resolve(sessionAResponse);
+          }
+          // Second call (poll): simulate real fetch behavior — return a
+          // promise that rejects with AbortError when the signal fires.
+          const signal = params?.signal;
+          if (signal?.aborted) {
+            return Promise.reject(new DOMException('Aborted', 'AbortError'));
+          }
+          return new Promise((resolve, reject) => {
+            const onAbort = () => {
+              reject(new DOMException('Aborted', 'AbortError'));
+            };
+            signal?.addEventListener('abort', onAbort, { once: true });
+          });
         }
-        // Second call (poll): simulate real fetch behavior — return a
-        // promise that rejects with AbortError when the signal fires.
-        const signal = params?.signal;
-        if (signal?.aborted) {
-          return Promise.reject(new DOMException('Aborted', 'AbortError'));
-        }
-        return new Promise((resolve, reject) => {
-          const onAbort = () => {
-            reject(new DOMException('Aborted', 'AbortError'));
-          };
-          signal?.addEventListener('abort', onAbort, { once: true });
-        });
+        if (sessionId === 'session-B') return Promise.resolve(sessionBResponse);
+        return Promise.reject(new Error(`Unexpected session: ${sessionId}`));
       }
-      if (sessionId === 'session-B') return Promise.resolve(sessionBResponse);
-      return Promise.reject(new Error(`Unexpected session: ${sessionId}`));
-    });
-
-    const { rerender } = render(
-      <ProjectMessageView projectId="proj-1" sessionId="session-A" />
     );
+
+    const { rerender } = render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
 
     // Wait for initial session A load
     await waitFor(() => {
@@ -423,9 +408,7 @@ describe('ProjectMessageView — session isolation', () => {
     mocks.getChatSession.mockImplementation(async () => sessionBResponse);
 
     await act(async () => {
-      rerender(
-        <ProjectMessageView projectId="proj-1" sessionId="session-B" />
-      );
+      rerender(<ProjectMessageView projectId="proj-1" sessionId="session-B" />);
     });
 
     // Wait for session B to load
@@ -442,8 +425,19 @@ describe('ProjectMessageView — message rendering', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
-    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
-    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
   });
 
   afterEach(() => {
@@ -451,18 +445,21 @@ describe('ProjectMessageView — message rendering', () => {
   });
 
   it('renders system messages as preformatted text (not markdown)', async () => {
-    const errorLog = '# Step 1/23 : FROM node:18\n* Installing dependencies...\nhttps://example.com';
+    const errorLog =
+      '# Step 1/23 : FROM node:18\n* Installing dependencies...\nhttps://example.com';
     mocks.getChatSession.mockResolvedValue({
       session: makeSession('session-1', 'stopped'),
-      messages: [{
-        id: 'sys-1',
-        sessionId: 'session-1',
-        role: 'system',
-        content: errorLog,
-        toolMetadata: null,
-        createdAt: Date.now(),
-        sequence: null,
-      }],
+      messages: [
+        {
+          id: 'sys-1',
+          sessionId: 'session-1',
+          role: 'system',
+          content: errorLog,
+          toolMetadata: null,
+          createdAt: Date.now(),
+          sequence: null,
+        },
+      ],
       hasMore: false,
     });
 
@@ -486,9 +483,7 @@ describe('ProjectMessageView — message rendering', () => {
 
   it('renders DO messages using ACP components', async () => {
     mocks.getChatSession.mockResolvedValue(
-      makeSessionResponse('session-1', [
-        makeMessage('msg-1', 'session-1', 'Agent response'),
-      ]),
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Agent response')])
     );
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
@@ -501,12 +496,17 @@ describe('ProjectMessageView — message rendering', () => {
   });
 });
 
-
 describe('chatMessagesToConversationItems', () => {
-
   it('converts user messages', () => {
     const items = chatMessagesToConversationItems([
-      { id: 'u1', sessionId: 's1', role: 'user', content: 'Hello', toolMetadata: null, createdAt: 1000 },
+      {
+        id: 'u1',
+        sessionId: 's1',
+        role: 'user',
+        content: 'Hello',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
     ]);
     expect(items).toHaveLength(1);
     expect(items[0].kind).toBe('user_message');
@@ -515,8 +515,22 @@ describe('chatMessagesToConversationItems', () => {
 
   it('merges consecutive assistant messages', () => {
     const items = chatMessagesToConversationItems([
-      { id: 'a1', sessionId: 's1', role: 'assistant', content: 'Part 1', toolMetadata: null, createdAt: 1000 },
-      { id: 'a2', sessionId: 's1', role: 'assistant', content: ' Part 2', toolMetadata: null, createdAt: 1001 },
+      {
+        id: 'a1',
+        sessionId: 's1',
+        role: 'assistant',
+        content: 'Part 1',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
+      {
+        id: 'a2',
+        sessionId: 's1',
+        role: 'assistant',
+        content: ' Part 2',
+        toolMetadata: null,
+        createdAt: 1001,
+      },
     ]);
     expect(items).toHaveLength(1);
     expect(items[0].kind).toBe('agent_message');
@@ -526,7 +540,10 @@ describe('chatMessagesToConversationItems', () => {
   it('converts tool messages with metadata', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: 'file contents',
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: 'file contents',
         toolMetadata: { kind: 'read', locations: [{ path: '/src/index.ts' }] },
         createdAt: 1000,
       },
@@ -540,7 +557,14 @@ describe('chatMessagesToConversationItems', () => {
 
   it('skips placeholder content in tool messages', () => {
     const items = chatMessagesToConversationItems([
-      { id: 't1', sessionId: 's1', role: 'tool', content: '(tool call)', toolMetadata: null, createdAt: 1000 },
+      {
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: '(tool call)',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
     ]);
     expect(items).toHaveLength(1);
     const tool = items[0] as { content: Array<unknown> };
@@ -549,7 +573,14 @@ describe('chatMessagesToConversationItems', () => {
 
   it('converts system messages as system_message kind', () => {
     const items = chatMessagesToConversationItems([
-      { id: 's1', sessionId: 's1', role: 'system', content: 'Session started', toolMetadata: null, createdAt: 1000 },
+      {
+        id: 's1',
+        sessionId: 's1',
+        role: 'system',
+        content: 'Session started',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
     ]);
     expect(items).toHaveLength(1);
     expect(items[0].kind).toBe('system_message');
@@ -559,7 +590,14 @@ describe('chatMessagesToConversationItems', () => {
   it('preserves raw content in system messages without markdown prefix', () => {
     const errorLog = '# Step 1/23 : FROM node:18\n* Installing dependencies...';
     const items = chatMessagesToConversationItems([
-      { id: 's1', sessionId: 's1', role: 'system', content: errorLog, toolMetadata: null, createdAt: 1000 },
+      {
+        id: 's1',
+        sessionId: 's1',
+        role: 'system',
+        content: errorLog,
+        toolMetadata: null,
+        createdAt: 1000,
+      },
     ]);
     expect(items).toHaveLength(1);
     expect(items[0].kind).toBe('system_message');
@@ -569,7 +607,14 @@ describe('chatMessagesToConversationItems', () => {
 
   it('converts empty system message', () => {
     const items = chatMessagesToConversationItems([
-      { id: 's1', sessionId: 's1', role: 'system', content: '', toolMetadata: null, createdAt: 1000 },
+      {
+        id: 's1',
+        sessionId: 's1',
+        role: 'system',
+        content: '',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
     ]);
     expect(items).toHaveLength(1);
     expect(items[0].kind).toBe('system_message');
@@ -578,8 +623,22 @@ describe('chatMessagesToConversationItems', () => {
 
   it('does not merge consecutive system messages', () => {
     const items = chatMessagesToConversationItems([
-      { id: 's1', sessionId: 's1', role: 'system', content: 'Task started', toolMetadata: null, createdAt: 1000 },
-      { id: 's2', sessionId: 's1', role: 'system', content: 'Task failed', toolMetadata: null, createdAt: 2000 },
+      {
+        id: 's1',
+        sessionId: 's1',
+        role: 'system',
+        content: 'Task started',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
+      {
+        id: 's2',
+        sessionId: 's1',
+        role: 'system',
+        content: 'Task failed',
+        toolMetadata: null,
+        createdAt: 2000,
+      },
     ]);
     expect(items).toHaveLength(2);
     expect(items[0].kind).toBe('system_message');
@@ -590,10 +649,38 @@ describe('chatMessagesToConversationItems', () => {
 
   it('handles system message in mixed-role sequence', () => {
     const items = chatMessagesToConversationItems([
-      { id: 'u1', sessionId: 's1', role: 'user', content: 'Run this task', toolMetadata: null, createdAt: 1000 },
-      { id: 'a1', sessionId: 's1', role: 'assistant', content: 'Working on it', toolMetadata: null, createdAt: 2000 },
-      { id: 's1', sessionId: 's1', role: 'system', content: 'Build failed: exit code 1', toolMetadata: null, createdAt: 3000 },
-      { id: 'a2', sessionId: 's1', role: 'assistant', content: 'The build failed', toolMetadata: null, createdAt: 4000 },
+      {
+        id: 'u1',
+        sessionId: 's1',
+        role: 'user',
+        content: 'Run this task',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
+      {
+        id: 'a1',
+        sessionId: 's1',
+        role: 'assistant',
+        content: 'Working on it',
+        toolMetadata: null,
+        createdAt: 2000,
+      },
+      {
+        id: 's1',
+        sessionId: 's1',
+        role: 'system',
+        content: 'Build failed: exit code 1',
+        toolMetadata: null,
+        createdAt: 3000,
+      },
+      {
+        id: 'a2',
+        sessionId: 's1',
+        role: 'assistant',
+        content: 'The build failed',
+        toolMetadata: null,
+        createdAt: 4000,
+      },
     ]);
     expect(items).toHaveLength(4);
     expect(items[0].kind).toBe('user_message');
@@ -606,8 +693,15 @@ describe('chatMessagesToConversationItems', () => {
   it('uses title from toolMetadata when available', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: 'file contents',
-        toolMetadata: { title: 'Read file /src/index.ts', kind: 'read', locations: [{ path: '/src/index.ts' }] },
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: 'file contents',
+        toolMetadata: {
+          title: 'Read file /src/index.ts',
+          kind: 'read',
+          locations: [{ path: '/src/index.ts' }],
+        },
         createdAt: 1000,
       },
     ]);
@@ -620,7 +714,10 @@ describe('chatMessagesToConversationItems', () => {
   it('falls back to kind when title is not in metadata', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: '(tool call)',
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: '(tool call)',
         toolMetadata: { kind: 'bash' },
         createdAt: 1000,
       },
@@ -634,13 +731,14 @@ describe('chatMessagesToConversationItems', () => {
   it('uses lazy-load metadata for structured tool content', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: 'diff: /src/main.go',
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: 'diff: /src/main.go',
         toolMetadata: {
           title: 'Edit file /src/main.go',
           kind: 'edit',
-          content: [
-            { type: 'diff', text: '/src/main.go' },
-          ],
+          content: [{ type: 'diff', text: '/src/main.go' }],
         },
         createdAt: 1000,
       },
@@ -657,7 +755,10 @@ describe('chatMessagesToConversationItems', () => {
   it('uses status from metadata when available', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: '(tool update)',
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: '(tool update)',
         toolMetadata: { kind: 'bash', status: 'failed' },
         createdAt: 1000,
       },
@@ -670,7 +771,10 @@ describe('chatMessagesToConversationItems', () => {
   it('uses lazy-load metadata for raw tool content when metadata has no structured content', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: 'some output',
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: 'some output',
         toolMetadata: { kind: 'bash' },
         createdAt: 1000,
       },
@@ -687,7 +791,10 @@ describe('chatMessagesToConversationItems', () => {
   it('preserves in_progress status from metadata', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: '(tool update)',
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: '(tool update)',
         toolMetadata: { kind: 'bash', status: 'in_progress' },
         createdAt: 1000,
       },
@@ -700,13 +807,22 @@ describe('chatMessagesToConversationItems', () => {
   it('handles null toolMetadata with real content', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: 'stdout: build succeeded',
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: 'stdout: build succeeded',
         toolMetadata: null,
         createdAt: 1000,
       },
     ]);
     expect(items).toHaveLength(1);
-    const tool = items[0] as { title: string; content: Array<unknown>; contentLoaded?: boolean; messageId?: string; contentSize?: number };
+    const tool = items[0] as {
+      title: string;
+      content: Array<unknown>;
+      contentLoaded?: boolean;
+      messageId?: string;
+      contentSize?: number;
+    };
     expect(tool.title).toBe('Tool Call');
     expect(tool.content).toHaveLength(0);
     expect(tool.contentLoaded).toBe(false);
@@ -716,7 +832,14 @@ describe('chatMessagesToConversationItems', () => {
 
   it('skips placeholder content for tool-update string', () => {
     const items = chatMessagesToConversationItems([
-      { id: 't1', sessionId: 's1', role: 'tool', content: '(tool update)', toolMetadata: null, createdAt: 1000 },
+      {
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: '(tool update)',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
     ]);
     expect(items).toHaveLength(1);
     const tool = items[0] as { content: Array<unknown> };
@@ -726,7 +849,10 @@ describe('chatMessagesToConversationItems', () => {
   it('uses lazy-load metadata for terminal content from metadata', () => {
     const items = chatMessagesToConversationItems([
       {
-        id: 't1', sessionId: 's1', role: 'tool', content: '(tool call)',
+        id: 't1',
+        sessionId: 's1',
+        role: 'tool',
+        content: '(tool call)',
         toolMetadata: { kind: 'bash', content: [{ type: 'terminal', text: 'term-1' }] },
         createdAt: 1000,
       },
@@ -742,9 +868,30 @@ describe('chatMessagesToConversationItems', () => {
 
   it('does not merge assistant followed by user followed by assistant', () => {
     const items = chatMessagesToConversationItems([
-      { id: 'a1', sessionId: 's1', role: 'assistant', content: 'Hello', toolMetadata: null, createdAt: 1000 },
-      { id: 'u1', sessionId: 's1', role: 'user', content: 'Hi', toolMetadata: null, createdAt: 1001 },
-      { id: 'a2', sessionId: 's1', role: 'assistant', content: 'World', toolMetadata: null, createdAt: 1002 },
+      {
+        id: 'a1',
+        sessionId: 's1',
+        role: 'assistant',
+        content: 'Hello',
+        toolMetadata: null,
+        createdAt: 1000,
+      },
+      {
+        id: 'u1',
+        sessionId: 's1',
+        role: 'user',
+        content: 'Hi',
+        toolMetadata: null,
+        createdAt: 1001,
+      },
+      {
+        id: 'a2',
+        sessionId: 's1',
+        role: 'assistant',
+        content: 'World',
+        toolMetadata: null,
+        createdAt: 1002,
+      },
     ]);
     expect(items).toHaveLength(3);
     expect(items[0].kind).toBe('agent_message');
@@ -763,8 +910,19 @@ describe('ProjectMessageView — collapsible session header', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
-    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
-    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
   });
 
   afterEach(() => {
@@ -1250,8 +1408,19 @@ describe('ProjectMessageView — session context dropdown', () => {
 describe('ProjectMessageView — virtual scroll', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
-    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
   });
 
   it('renders messages via Virtuoso mock', async () => {
@@ -1259,7 +1428,7 @@ describe('ProjectMessageView — virtual scroll', () => {
       makeSessionResponse('session-1', [
         makeMessage('msg-1', 'session-1', 'First message'),
         makeMessage('msg-2', 'session-1', 'Second message'),
-      ]),
+      ])
     );
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
@@ -1277,9 +1446,7 @@ describe('ProjectMessageView — virtual scroll', () => {
 
   it('renders new WebSocket messages inside Virtuoso', async () => {
     mocks.getChatSession.mockResolvedValue(
-      makeSessionResponse('session-1', [
-        makeMessage('msg-1', 'session-1', 'First message'),
-      ]),
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'First message')])
     );
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
@@ -1330,9 +1497,7 @@ describe('ProjectMessageView — virtual scroll', () => {
       hasMore: true,
     });
 
-    const { rerender } = render(
-      <ProjectMessageView projectId="proj-1" sessionId="session-1" />,
-    );
+    const { rerender } = render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
 
     await waitFor(() => {
       expect(screen.getByText('Recent message')).toBeTruthy();
@@ -1350,9 +1515,7 @@ describe('ProjectMessageView — virtual scroll', () => {
 
   it('does not render "Load earlier messages" button when hasMore is false', async () => {
     mocks.getChatSession.mockResolvedValue(
-      makeSessionResponse('session-1', [
-        makeMessage('msg-1', 'session-1', 'Only message'),
-      ]),
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Only message')])
     );
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
@@ -1399,9 +1562,7 @@ describe('ProjectMessageView — virtual scroll', () => {
 
   it('renders messages from new session after session switch', async () => {
     mocks.getChatSession.mockResolvedValue(
-      makeSessionResponse('session-A', [
-        makeMessage('msg-a1', 'session-A', 'Session A message'),
-      ]),
+      makeSessionResponse('session-A', [makeMessage('msg-a1', 'session-A', 'Session A message')])
     );
 
     const { rerender } = render(<ProjectMessageView projectId="proj-1" sessionId="session-A" />);
@@ -1412,9 +1573,7 @@ describe('ProjectMessageView — virtual scroll', () => {
 
     // Switch to a new session
     mocks.getChatSession.mockResolvedValue(
-      makeSessionResponse('session-B', [
-        makeMessage('msg-b1', 'session-B', 'Session B message'),
-      ]),
+      makeSessionResponse('session-B', [makeMessage('msg-b1', 'session-B', 'Session B message')])
     );
     rerender(<ProjectMessageView projectId="proj-1" sessionId="session-B" />);
 
@@ -1434,8 +1593,19 @@ describe('ProjectMessageView — catch-up race regression', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
-    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
-    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
   });
 
   afterEach(() => {
@@ -1473,10 +1643,7 @@ describe('ProjectMessageView — catch-up race regression', () => {
     // data survive the 'replace' merge strategy
     expect(capturedWsOnCatchUp).not.toBeNull();
     act(() => {
-      capturedWsOnCatchUp!(
-        fullMessages,
-        makeSession('session-1'),
-      );
+      capturedWsOnCatchUp!(fullMessages, makeSession('session-1'));
     });
 
     // Messages must still be visible after catch-up with same data
@@ -1489,9 +1656,7 @@ describe('ProjectMessageView — catch-up race regression', () => {
     // After the fix for the load-more regression, the replace strategy
     // preserves messages older than the incoming window. When incoming
     // is empty (oldest = Infinity), all existing messages are preserved.
-    const fullMessages = [
-      makeMessage('msg-1', 'session-1', 'Important conversation'),
-    ];
+    const fullMessages = [makeMessage('msg-1', 'session-1', 'Important conversation')];
 
     mocks.getChatSession.mockResolvedValue({
       session: makeSession('session-1'),
@@ -1508,10 +1673,7 @@ describe('ProjectMessageView — catch-up race regression', () => {
     // Simulate onCatchUp with EMPTY messages
     expect(capturedWsOnCatchUp).not.toBeNull();
     act(() => {
-      capturedWsOnCatchUp!(
-        [],
-        makeSession('session-1'),
-      );
+      capturedWsOnCatchUp!([], makeSession('session-1'));
     });
 
     // Messages are preserved — empty incoming does not wipe earlier messages
@@ -1527,9 +1689,23 @@ describe('ProjectMessageView — cancel button', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
-    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
-    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
-    mocks.cancelAgentPrompt.mockResolvedValue({ status: 'cancelled', message: 'Prompt cancel signal sent' });
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
+    mocks.cancelAgentPrompt.mockResolvedValue({
+      status: 'cancelled',
+      message: 'Prompt cancel signal sent',
+    });
   });
 
   afterEach(() => {
@@ -1538,9 +1714,7 @@ describe('ProjectMessageView — cancel button', () => {
 
   it('shows cancel button when agent is working and calls cancelAgentPrompt on click', async () => {
     mocks.getChatSession.mockResolvedValue(
-      makeSessionResponse('session-1', [
-        makeMessage('msg-1', 'session-1', 'Working on it'),
-      ]),
+      makeSessionResponse('session-1', [makeMessage('msg-1', 'session-1', 'Working on it')])
     );
 
     render(<ProjectMessageView projectId="proj-1" sessionId="session-1" />);
@@ -1584,8 +1758,19 @@ describe('ProjectMessageView — inline idle indicator', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true });
     vi.clearAllMocks();
-    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
-    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
   });
 
   afterEach(() => {
@@ -1616,11 +1801,7 @@ describe('ProjectMessageView — inline idle indicator', () => {
 
     const onClose = vi.fn();
     render(
-      <ProjectMessageView
-        projectId="proj-1"
-        sessionId="sess-idle"
-        onCloseConversation={onClose}
-      />,
+      <ProjectMessageView projectId="proj-1" sessionId="sess-idle" onCloseConversation={onClose} />
     );
 
     // Idle conversation-mode dock morphs to the grey Archive control
@@ -1637,7 +1818,6 @@ describe('ProjectMessageView — inline idle indicator', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Archive Conversation' }));
     expect(onClose).toHaveBeenCalledTimes(1);
   });
-
 
   it('keeps non-destructive completion behind confirmation and surfaces completion errors', async () => {
     const session = {
@@ -1667,7 +1847,7 @@ describe('ProjectMessageView — inline idle indicator', () => {
         projectId="proj-1"
         sessionId="sess-complete-error"
         onSessionMutated={onSessionMutated}
-      />,
+      />
     );
 
     await waitFor(() => {
@@ -1685,8 +1865,8 @@ describe('ProjectMessageView — inline idle indicator', () => {
 
     expect(
       screen.getByText(
-        'SAM will preserve this session so you can continue it later. Use archive or delete only when you want to remove the saved workspace state.',
-      ),
+        'SAM will preserve this session so you can continue it later. Use archive or delete only when you want to remove the saved workspace state.'
+      )
     ).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Mark Complete' }));
 
@@ -1724,11 +1904,7 @@ describe('ProjectMessageView — inline idle indicator', () => {
     });
 
     render(
-      <ProjectMessageView
-        projectId="proj-1"
-        sessionId="sess-task"
-        onCloseConversation={vi.fn()}
-      />,
+      <ProjectMessageView projectId="proj-1" sessionId="sess-task" onCloseConversation={vi.fn()} />
     );
 
     // Wait for session to load
@@ -1768,7 +1944,7 @@ describe('ProjectMessageView — inline idle indicator', () => {
         projectId="proj-1"
         sessionId="sess-active"
         onCloseConversation={vi.fn()}
-      />,
+      />
     );
 
     await waitFor(() => {
@@ -1803,9 +1979,7 @@ describe('ProjectMessageView — inline idle indicator', () => {
     };
     mocks.getChatSession.mockResolvedValue(response);
 
-    const { container } = render(
-      <ProjectMessageView projectId="proj-1" sessionId="sess-err" />,
-    );
+    const { container } = render(<ProjectMessageView projectId="proj-1" sessionId="sess-err" />);
 
     // The failure card classifies "Node provisioning failed" and renders the
     // classification summary in the floating header.
@@ -1832,17 +2006,44 @@ describe('ProjectMessageView — inline idle indicator', () => {
 
 describe('ProjectMessageView — timeline jump-to-message', () => {
   function makeUserMessage(id: string, sessionId: string, content: string, createdAt: number) {
-    return { id, sessionId, role: 'user' as const, content, toolMetadata: null, createdAt, sequence: null };
+    return {
+      id,
+      sessionId,
+      role: 'user' as const,
+      content,
+      toolMetadata: null,
+      createdAt,
+      sequence: null,
+    };
   }
   function makeAgentMessage(id: string, sessionId: string, content: string, createdAt: number) {
-    return { id, sessionId, role: 'assistant' as const, content, toolMetadata: null, createdAt, sequence: null };
+    return {
+      id,
+      sessionId,
+      role: 'assistant' as const,
+      content,
+      toolMetadata: null,
+      createdAt,
+      sequence: null,
+    };
   }
 
   beforeEach(() => {
     vi.clearAllMocks();
     virtuosoMock.scrollToIndexCalls.length = 0;
-    mocks.getWorkspace.mockResolvedValue({ id: 'ws-test', name: 'test', status: 'running', vmSize: 'medium', vmLocation: 'fsn1' });
-    mocks.getNode.mockResolvedValue({ id: 'node-test', name: 'node-test', status: 'active', healthStatus: 'healthy' });
+    mocks.getWorkspace.mockResolvedValue({
+      id: 'ws-test',
+      name: 'test',
+      status: 'running',
+      vmSize: 'medium',
+      vmLocation: 'fsn1',
+    });
+    mocks.getNode.mockResolvedValue({
+      id: 'node-test',
+      name: 'node-test',
+      status: 'active',
+      healthStatus: 'healthy',
+    });
     mocks.listActivityEvents.mockResolvedValue({ events: [] });
     mocks.listNotifications.mockResolvedValue({ notifications: [], nextCursor: null });
   });
@@ -1865,7 +2066,11 @@ describe('ProjectMessageView — timeline jump-to-message', () => {
       makeUserMessage('user-jump-1', sid, 'JUMPME', 2000),
       makeAgentMessage('a2', sid, 'agent reply', 3000),
     ];
-    mocks.getChatSession.mockResolvedValue({ session: makeSession(sid, 'active'), messages, hasMore: false });
+    mocks.getChatSession.mockResolvedValue({
+      session: makeSession(sid, 'active'),
+      messages,
+      hasMore: false,
+    });
     // Timeline fetches user messages independently (roles=['user']).
     mocks.listChatMessages.mockResolvedValue({
       messages: [makeUserMessage('user-jump-1', sid, 'JUMPME', 2000)],
@@ -1887,7 +2092,9 @@ describe('ProjectMessageView — timeline jump-to-message', () => {
 
     // The user-message timeline entry.
     const entry = await waitFor(() => {
-      const btn = within(drawer).getAllByRole('button').find((b) => /JUMPME/.test(b.textContent ?? ''));
+      const btn = within(drawer)
+        .getAllByRole('button')
+        .find((b) => /JUMPME/.test(b.textContent ?? ''));
       expect(btn).toBeTruthy();
       return btn!;
     });
@@ -1900,7 +2107,7 @@ describe('ProjectMessageView — timeline jump-to-message', () => {
       expect(virtuosoMock.scrollToIndexCalls.length).toBeGreaterThan(0);
     });
     const indices = virtuosoMock.scrollToIndexCalls.map((c) =>
-      typeof c === 'number' ? c : c.index,
+      typeof c === 'number' ? c : c.index
     );
     expect(indices).toContain(1);
     // Guard against the regression: no call may use the absolute VIRTUAL_START coordinate.

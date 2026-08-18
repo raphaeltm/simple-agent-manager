@@ -669,6 +669,51 @@ describe('Task Reconciliation Module', () => {
       );
     });
 
+    // Rule 44 (enumerate every writer of the migrated data): this path calls
+    // `sessions.failSession`, so it mutates `chat_sessions` exactly like the
+    // other terminal writers — but its hooks object carried no sync callback, so
+    // the D1 `session_summaries` index went on reporting the session as active
+    // until some unrelated write happened to resync the whole project. It was
+    // the only chat_sessions writer with no sync hook.
+    it('schedules a D1 session-index resync when it terminally fails a dead target', async () => {
+      setupTaskSession();
+      const env = envWithRows(
+        { 'task-1': { task_mode: 'task', status: 'in_progress' } },
+        { 'ws-1': { node_id: null, user_id: 'user-1' } }
+      );
+      const scheduleSummarySync = vi.fn();
+
+      const processed = await processReconciliationCandidates(sql, env, vi.fn(), {
+        projectId: 'project-1',
+        scheduleSummarySync,
+      });
+
+      expect(processed).toBe(1);
+      // The session really was terminalized — otherwise the sync assertion below
+      // would pass for a path that did nothing.
+      expect(
+        db.prepare(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).get()
+      ).toMatchObject({ status: 'failed' });
+      expect(scheduleSummarySync).toHaveBeenCalled();
+    });
+
+    it('does not require a sync hook to terminally fail a dead target', async () => {
+      // The hook is optional so existing callers (and tests) keep working; a
+      // missing hook must not throw and take the reconciliation down with it.
+      setupTaskSession();
+      const env = envWithRows(
+        { 'task-1': { task_mode: 'task', status: 'in_progress' } },
+        { 'ws-1': { node_id: null, user_id: 'user-1' } }
+      );
+
+      await expect(
+        processReconciliationCandidates(sql, env, vi.fn(), { projectId: 'project-1' })
+      ).resolves.toBe(1);
+      expect(
+        db.prepare(`SELECT status FROM chat_sessions WHERE id = 'session-1'`).get()
+      ).toMatchObject({ status: 'failed' });
+    });
+
     it('gives no-node workspaces a terminal disposition so they are not selected again', async () => {
       const { sendPromptToAgentOnNode } = await import('../../../src/services/node-agent');
       setupTaskSession();

@@ -124,18 +124,19 @@ export function ChatTimelineDrawer({
               <Spinner size="sm" />
             </div>
           ) : entries.length === 0 ? (
-            <div className="text-center py-8 text-fg-muted text-sm">
-              No timeline entries yet
-            </div>
+            <div className="text-center py-8 text-fg-muted text-sm">No timeline entries yet</div>
           ) : (
             // The stem sits on a wrapper AROUND the scroller rather than on
             // Virtuoso's own List slot. Wrapping the rows in an extra element
             // inside `components.List` breaks Virtuoso's height measurement —
-            // it then renders a single row into a full-height panel — so the
-            // stem spans the visible scroll viewport instead of the full virtual
-            // content height. Visually identical for a soft gradient line, and
-            // it keeps Virtuoso in control of its own DOM.
-            <div className="relative h-full">
+            // it then renders a single row into a full-height panel.
+            //
+            // Consequence worth knowing: the stem's gradient fade is now
+            // anchored to the visible panel rather than to the ends of the full
+            // scrollable list. The base colour is very low-alpha, so the
+            // difference is subtle, but it is a real semantic change and not
+            // merely a refactor.
+            <div className="relative h-full py-3">
               <TimelineStem />
               <Virtuoso
                 data={entries}
@@ -173,8 +174,7 @@ function TimelineEntryRow({
   // rendered without its predecessors being mounted).
   const showDateSep =
     previousEntry !== undefined &&
-    new Date(previousEntry.timestamp).toDateString() !==
-      new Date(entry.timestamp).toDateString();
+    new Date(previousEntry.timestamp).toDateString() !== new Date(entry.timestamp).toDateString();
 
   return (
     <div>
