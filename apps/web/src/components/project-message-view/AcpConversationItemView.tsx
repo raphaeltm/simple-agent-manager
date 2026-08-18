@@ -110,6 +110,11 @@ export function AcpConversationItemView({
   // GlobalAudio context value — that value is memoized but re-created as
   // playback state ticks, which would re-break MessageBubble's React.memo for
   // every bubble whenever audio is playing.
+  //
+  // Known caveat: `startPlayback` transitively depends on `playbackRate`
+  // (GlobalAudioContext `createAudioElement`), so changing the playback rate
+  // invalidates this callback for every mounted bubble once. That is a rare,
+  // explicitly user-initiated action and is not on the streaming hot path.
   const { startPlayback } = useGlobalAudio();
 
   const isAgentMessage = item.kind === 'agent_message';

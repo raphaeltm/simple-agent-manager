@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
 import { useTokenRefresh } from '../../hooks/useTokenRefresh';
+import { useDocumentVisible } from '../../hooks/useVisibilityAwarePoll';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
 import type {
   ChatMessageResponse,
@@ -404,9 +405,16 @@ export function useSessionLifecycle(
   // Degraded fallback while the DO WebSocket is unavailable. Connected active
   // sessions rely on WebSocket events and reconnect catch-up instead of polling
   // the full session detail endpoint.
+  const documentVisible = useDocumentVisible();
   useEffect(() => {
     if (!session || !['active', 'sleeping'].includes(session.status)) return;
     if (session.status === 'active' && connectionState === 'connected') return;
+    // Same reasoning as the WebSocket gate above, applied to the tab: nobody is
+    // reading this session while it is hidden, and this poll fetches the full
+    // session detail (heavier than the session list). Re-running this effect on
+    // the visibility transition refreshes once immediately on return, so the
+    // view is never stale at the moment it is actually looked at.
+    if (!documentVisible) return;
 
     const abortController = new AbortController();
     let lastPollFingerprint = '';
@@ -469,7 +477,7 @@ export function useSessionLifecycle(
       clearInterval(pollInterval);
       abortController.abort();
     };
-  }, [session?.status, projectId, sessionId, hydrateState, connectionState]);
+  }, [session?.status, projectId, sessionId, hydrateState, connectionState, documentVisible]);
 
   // ── Send follow-up via REST API ──
   const handleSendFollowUp = async () => {

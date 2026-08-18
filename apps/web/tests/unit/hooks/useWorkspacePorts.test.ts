@@ -313,4 +313,118 @@ describe('useWorkspacePorts', () => {
 
     warnSpy.mockRestore();
   });
+
+  describe('stale-response rejection across a target change', () => {
+    // The effect-scoped `cancelled` flag was replaced by a `generationRef`
+    // counter when the fetch was hoisted out of the effect for
+    // `useVisibilityAwarePoll`. These tests are the regression net for that
+    // swap: a response belonging to a superseded target must never win.
+
+    it('discards an in-flight response after workspaceId changes', async () => {
+      let resolveFirst!: (value: typeof PORT_A[]) => void;
+      mockListWorkspacePorts.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve as (value: typeof PORT_A[]) => void;
+          })
+      );
+
+      const { result, rerender } = renderHook(
+        ({ workspaceId }: { workspaceId: string }) =>
+          useWorkspacePorts('https://ws.example.com', workspaceId, 'tok-1', true),
+        { initialProps: { workspaceId: 'ws-1' } }
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      // ws-2 supersedes ws-1 while ws-1's request is still in flight.
+      mockListWorkspacePorts.mockResolvedValueOnce([PORT_B]);
+      rerender({ workspaceId: 'ws-2' });
+      await act(async () => {
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(result.current.ports).toEqual([PORT_B]);
+
+      // ws-1's late response must not clobber ws-2's data.
+      await act(async () => {
+        resolveFirst([PORT_A]);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(result.current.ports).toEqual([PORT_B]);
+    });
+
+    it('discards an in-flight response after the workspace stops and restarts', async () => {
+      // `generationRef` also bumps on `enabled` transitions, independent of
+      // workspaceId — a request issued before a stop must not land after it.
+      let resolveFirst!: (value: typeof PORT_A[]) => void;
+      mockListWorkspacePorts.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirst = resolve as (value: typeof PORT_A[]) => void;
+          })
+      );
+
+      const { result, rerender } = renderHook(
+        ({ isRunning }: { isRunning: boolean }) =>
+          useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', isRunning),
+        { initialProps: { isRunning: true } }
+      );
+      await act(async () => {
+        await Promise.resolve();
+      });
+
+      rerender({ isRunning: false });
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(result.current.ports).toEqual([]);
+
+      await act(async () => {
+        resolveFirst([PORT_A]);
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      // The stopped workspace must still show no ports.
+      expect(result.current.ports).toEqual([]);
+    });
+  });
+
+  describe('hidden-tab pausing', () => {
+    const setVisibility = (state: DocumentVisibilityState) => {
+      Object.defineProperty(document, 'visibilityState', {
+        configurable: true,
+        get: () => state,
+      });
+      act(() => {
+        document.dispatchEvent(new Event('visibilitychange'));
+      });
+    };
+
+    afterEach(() => setVisibility('visible'));
+
+    it('stops polling while hidden and catches up on return', async () => {
+      mockListWorkspacePorts.mockResolvedValue([PORT_A]);
+      renderHook(() => useWorkspacePorts('https://ws.example.com', 'ws-1', 'tok-1', true));
+      await act(async () => {
+        await Promise.resolve();
+      });
+      mockListWorkspacePorts.mockClear();
+
+      setVisibility('hidden');
+      await act(async () => {
+        vi.advanceTimersByTime(10_000 * 3);
+        await Promise.resolve();
+      });
+      expect(mockListWorkspacePorts).not.toHaveBeenCalled();
+
+      setVisibility('visible');
+      await act(async () => {
+        await Promise.resolve();
+      });
+      expect(mockListWorkspacePorts).toHaveBeenCalledTimes(1);
+    });
+  });
 });

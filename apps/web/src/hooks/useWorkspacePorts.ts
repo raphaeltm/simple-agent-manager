@@ -34,6 +34,7 @@ export function useWorkspacePorts(
   // Replaces the previous effect-scoped `cancelled` flag: a response from a
   // superseded parameter set must never write into state.
   const generationRef = useRef(0);
+  const hasLoadedRef = useRef(false);
 
   const enabled = Boolean(workspaceUrl && workspaceId && token && isRunning);
 
@@ -49,7 +50,11 @@ export function useWorkspacePorts(
     const isCurrent = () => generation === generationRef.current && mountedRef.current;
 
     try {
-      setLoading(true);
+      // Only the very first load may gate rendering — background polls must not
+      // flip a consumer back into a loading state and hide already-rendered
+      // ports (`.claude/rules/48-stale-while-revalidate-ui.md`). Mirrors the
+      // `hasLoadedRef` handling in useNodeSystemInfo.
+      if (!hasLoadedRef.current) setLoading(true);
       const result = await listWorkspacePorts(activeWorkspaceUrl, activeWorkspaceId, activeToken);
       if (isCurrent()) {
         consecutiveFailuresRef.current = 0;
@@ -71,6 +76,7 @@ export function useWorkspacePorts(
       }
     } finally {
       if (mountedRef.current) {
+        hasLoadedRef.current = true;
         setLoading(false);
       }
     }
@@ -82,8 +88,12 @@ export function useWorkspacePorts(
     if (!enabled) {
       setPorts([]);
       consecutiveFailuresRef.current = 0;
+      hasLoadedRef.current = false;
       return;
     }
+    // A different workspace/token is a different dataset — the next load gates
+    // rendering again rather than showing the previous workspace's ports.
+    hasLoadedRef.current = false;
     void fetchPorts();
   }, [enabled, fetchPorts]);
 

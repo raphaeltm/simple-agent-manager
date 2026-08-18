@@ -71,7 +71,7 @@ export function Node() {
   }, [loadNode]);
 
   // Paused on hidden tabs; refreshes immediately on return if stale.
-  useVisibilityAwarePoll(loadNode, NODE_DETAIL_POLL_MS);
+  useVisibilityAwarePoll(loadNode, NODE_DETAIL_POLL_MS, { enabled: Boolean(id) });
 
   // Fetch node events via control plane proxy (vm-* DNS records lack SSL termination)
   const nodeIsRunning = node?.status === 'running';

@@ -22,7 +22,7 @@ import { useNavigate, useParams, useSearchParams } from 'react-router';
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
 import { useBootLogStream } from '../../hooks/useBootLogStream';
 import { type RawSessionEvent, useProjectWebSocket } from '../../hooks/useProjectWebSocket';
-import { useVisibilityAwarePoll } from '../../hooks/useVisibilityAwarePoll';
+import { useDocumentVisible, useVisibilityAwarePoll } from '../../hooks/useVisibilityAwarePoll';
 import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
 import {
   closeConversationTask,
@@ -68,6 +68,7 @@ import {
   CHAT_TASK_LIST_LIMIT,
   EXECUTE_IDEA_PROMPT_TEMPLATE,
   isTerminal,
+  SESSION_RECONCILE_INTERVAL_MS,
   SESSION_SYNC_INTERVAL_MS,
   TASK_STATUS_POLL_MS,
 } from './types';
@@ -417,21 +418,40 @@ export function useProjectChatState() {
     void loadSessions().finally(() => setLoading(false));
   }, [loadSessions]);
 
-  // Degraded fallback sync — self-heals if a WebSocket delta was silently dropped.
-  // While the ProjectData WebSocket is `connected` it already applies deltas in
-  // real time, so this poll (a 100-session list + a 200-task list every tick)
-  // would be pure duplicate I/O; it is suppressed until the socket degrades.
-  // Deferred until the first load completes, and paused entirely on hidden tabs.
-  // Catch-up on reconnect is handled by `onReconnected` above; catch-up on
-  // disconnect and on tab return is handled by the hook's elapsed-gated refresh.
+  // Session-list freshness has two modes, and exactly one is active at a time.
+  //
+  // 1. Degraded fallback (30s) while the ProjectData WebSocket is NOT connected.
+  //    Each tick is a 100-session list + a 200-task list, so running it while
+  //    the socket is delivering deltas in real time is pure duplicate I/O.
+  // 2. Slow reconciliation (10min) while it IS connected. `connectionState`
+  //    only tracks socket open/close — `useProjectWebSocket` silently drops
+  //    malformed frames and there is no sequence/gap detector, so suppressing
+  //    the poll entirely would let a dropped delta leave the sidebar stale for
+  //    the whole connection lifetime. This preserves the original poll's
+  //    self-healing role at ~1/20th the request rate.
+  //
+  // Both are deferred until the first load completes and both pause on hidden
+  // tabs. Reconnect catch-up is handled by `onReconnected` above; disconnect and
+  // tab-return catch-up come from the hook's elapsed-gated refresh.
+  const wsConnected = connectionState === 'connected';
   useVisibilityAwarePoll(loadSessions, SESSION_SYNC_INTERVAL_MS, {
     enabled: !loading,
-    paused: connectionState === 'connected',
+    paused: wsConnected,
+  });
+  useVisibilityAwarePoll(loadSessions, SESSION_RECONCILE_INTERVAL_MS, {
+    enabled: !loading,
+    paused: !wsConnected,
   });
 
   // Poll task status during provisioning
+  const provisioningVisible = useDocumentVisible();
   useEffect(() => {
     if (!provisioning || isTerminal(provisioning.status)) return;
+    // Provisioning polls every 2s and can run for minutes — by far the hottest
+    // poll on this page. Suspend it in a hidden tab; re-running this effect on
+    // the visibility transition refreshes once immediately on return, which is
+    // what a 2s progress poll wants.
+    if (!provisioningVisible) return;
     const poll = async () => {
       try {
         const task = await getProjectTask(projectId, provisioning.taskId);
@@ -483,6 +503,7 @@ export function useProjectChatState() {
     navigate,
     loadSessions,
     provisioning?.sessionId,
+    provisioningVisible,
   ]);
 
   // Restore provisioning state when navigating to a session with an active task

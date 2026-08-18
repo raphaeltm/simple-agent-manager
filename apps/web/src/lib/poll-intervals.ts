@@ -36,6 +36,13 @@ export const NODE_SYSTEM_INFO_POLL_MS = resolveIntervalMs(
   DEFAULT_NODE_SYSTEM_INFO_POLL_MS
 );
 
+/** Workspace status/state refresh while a workspace is in a transitional state. */
+const DEFAULT_WORKSPACE_STATE_POLL_MS = 5_000;
+export const WORKSPACE_STATE_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_WORKSPACE_STATE_POLL_MS,
+  DEFAULT_WORKSPACE_STATE_POLL_MS
+);
+
 /** Workspace event-log refresh, read directly from the VM agent. */
 const DEFAULT_WORKSPACE_EVENTS_POLL_MS = 10_000;
 export const WORKSPACE_EVENTS_POLL_MS = resolveIntervalMs(

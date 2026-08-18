@@ -20,6 +20,18 @@ and `.claude/rules/59-understand-before-adding.md` exist to prevent:
 They were deliberately left alone in the workstream-D PR because they fall outside that
 workstream's named file set and sibling agents were editing `apps/web` concurrently.
 
+## Also unconverted (found by the workstream-D performance review)
+
+- `apps/web/src/pages/workspace/useWorkspaceNavigation.ts` (~115-117) — git-status poll on
+  `GIT_STATUS_POLL_INTERVAL_MS` (30s, `pages/workspace/types.ts:33`) with no hidden-tab gate.
+  Sits in the same `pages/workspace/` module as two hooks the workstream-D PR converted;
+  left alone only because it was outside that PR's named file set.
+- A `useDocumentVisible()` subscription is currently instantiated per call site, so a page
+  with several polls (e.g. `pages/Node.tsx`: two direct polls plus `useNodeSystemInfo`)
+  mounts several `visibilitychange` listeners. React batches the resulting state updates so
+  the render cost is ~1 extra render per tab switch, not N — but a ref-counted module-scope
+  singleton inside `useDocumentVisible` would be tidier if more call sites accumulate.
+
 ## Out of scope / already handled elsewhere
 
 - `apps/web/src/hooks/useActiveTasks.ts` — a later program wave migrates it to TanStack

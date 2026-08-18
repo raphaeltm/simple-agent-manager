@@ -15,6 +15,7 @@ export function useNodeSystemInfo(
   const [error, setError] = useState<string | null>(null);
   const mountedRef = useRef(true);
   const hasLoadedRef = useRef(false);
+  const generationRef = useRef(0);
 
   useEffect(() => {
     mountedRef.current = true;
@@ -30,6 +31,12 @@ export function useNodeSystemInfo(
   // screen per `.claude/rules/48-stale-while-revalidate-ui.md`.
   const fetchInfo = useCallback(async () => {
     if (!nodeId) return;
+    // Matches the generation guard in useWorkspacePorts: switching from node A
+    // to node B must not let A's slower in-flight response land under B's
+    // identity.
+    const generation = generationRef.current;
+    const isCurrent = () => generation === generationRef.current && mountedRef.current;
+
     if (hasLoadedRef.current) {
       setIsRefreshing(true);
     } else {
@@ -37,12 +44,12 @@ export function useNodeSystemInfo(
     }
     try {
       const data = await getNodeSystemInfo(nodeId);
-      if (mountedRef.current) {
+      if (isCurrent()) {
         setSystemInfo(data);
         setError(null);
       }
     } catch (err) {
-      if (mountedRef.current) {
+      if (isCurrent()) {
         setError(err instanceof Error ? err.message : 'Failed to load system info');
       }
     } finally {
@@ -55,6 +62,8 @@ export function useNodeSystemInfo(
   }, [nodeId]);
 
   useEffect(() => {
+    // Invalidate any response still in flight for the previous node.
+    generationRef.current += 1;
     if (!isPollable) {
       setSystemInfo(null);
       setError(null);

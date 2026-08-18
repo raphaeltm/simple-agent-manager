@@ -101,17 +101,107 @@ describe('useVisibilityAwarePoll', () => {
     expect(poll).toHaveBeenCalledTimes(1);
   });
 
-  it('does not fire while disabled, and catches up when enabled', () => {
+  it('does not fire while disabled', () => {
+    const poll = vi.fn();
+    renderHook(() => useVisibilityAwarePoll(poll, INTERVAL, { enabled: false }));
+
+    advance(INTERVAL * 5);
+    expect(poll).not.toHaveBeenCalled();
+  });
+
+  it('does NOT catch up when enabled flips true — the caller owns that fetch', () => {
+    // Callers pair a precondition becoming true with their own fetch (new id,
+    // workspace just started, token just arrived). Preconditions routinely take
+    // longer than one interval, so a naive elapsed-based catch-up would fire a
+    // duplicate request on top of the caller's on every single activation.
     const poll = vi.fn();
     const { rerender } = renderHook(
       ({ enabled }: { enabled: boolean }) => useVisibilityAwarePoll(poll, INTERVAL, { enabled }),
       { initialProps: { enabled: false } }
     );
 
-    advance(INTERVAL * 3);
+    advance(INTERVAL * 6);
+    act(() => rerender({ enabled: true }));
     expect(poll).not.toHaveBeenCalled();
 
-    act(() => rerender({ enabled: true }));
+    // ...but normal polling starts from that moment.
+    advance(INTERVAL);
+    expect(poll).toHaveBeenCalledTimes(1);
+  });
+
+  it('still catches up on tab return while continuously enabled', () => {
+    // The enable-reset above must not swallow the hidden-tab catch-up: nothing
+    // else fetches while the tab is hidden, so that elapsed time still counts.
+    const poll = vi.fn();
+    renderHook(() => useVisibilityAwarePoll(poll, INTERVAL, { enabled: true }));
+
+    setVisibility('hidden');
+    advance(INTERVAL * 3);
+    setVisibility('visible');
+
+    expect(poll).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not double-fire when enabled and visibility flip in the same commit', () => {
+    const poll = vi.fn();
+    const { rerender } = renderHook(
+      ({ enabled, paused }: { enabled: boolean; paused: boolean }) =>
+        useVisibilityAwarePoll(poll, INTERVAL, { enabled, paused }),
+      { initialProps: { enabled: false, paused: true } }
+    );
+
+    setVisibility('hidden');
+    advance(INTERVAL * 4);
+
+    act(() => {
+      rerender({ enabled: true, paused: false });
+    });
+    setVisibility('visible');
+
+    // `enabled` became true in this window, so the caller owns the fetch.
+    expect(poll).not.toHaveBeenCalled();
+  });
+
+  it('re-evaluates the catch-up when intervalMs shrinks below the elapsed time', () => {
+    const poll = vi.fn();
+    const { rerender } = renderHook(
+      ({ intervalMs }: { intervalMs: number }) => useVisibilityAwarePoll(poll, intervalMs),
+      { initialProps: { intervalMs: INTERVAL } }
+    );
+
+    advance(INTERVAL / 2);
+    expect(poll).not.toHaveBeenCalled();
+
+    // Half an interval has passed; a shorter interval means that window is now
+    // overdue, so the poll must fire rather than wait out the old cadence.
+    act(() => rerender({ intervalMs: INTERVAL / 4 }));
+    expect(poll).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not fire when intervalMs grows', () => {
+    const poll = vi.fn();
+    const { rerender } = renderHook(
+      ({ intervalMs }: { intervalMs: number }) => useVisibilityAwarePoll(poll, intervalMs),
+      { initialProps: { intervalMs: INTERVAL } }
+    );
+
+    advance(INTERVAL / 2);
+    act(() => rerender({ intervalMs: INTERVAL * 4 }));
+
+    expect(poll).not.toHaveBeenCalled();
+  });
+
+  it('makes no further calls after unmount mid-flight', async () => {
+    let settle!: () => void;
+    const poll = vi.fn(() => new Promise<void>((resolve) => (settle = resolve)));
+    const { unmount } = renderHook(() => useVisibilityAwarePoll(poll, INTERVAL));
+
+    advance(INTERVAL);
+    expect(poll).toHaveBeenCalledTimes(1);
+
+    unmount();
+    settle();
+    advance(INTERVAL * 5);
     expect(poll).toHaveBeenCalledTimes(1);
   });
 

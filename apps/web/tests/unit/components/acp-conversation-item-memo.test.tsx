@@ -46,12 +46,29 @@ function agentItem(id: string, text: string, streaming = false): ConversationIte
   } as ConversationItem;
 }
 
-/** Mirrors the real conversation list: settled bubbles above, one streaming at the tail. */
-function Conversation({ items }: { items: ConversationItem[] }) {
+/**
+ * Mirrors the real conversation list: settled bubbles above, one streaming at
+ * the tail. `onFileClick` mirrors the production wiring in
+ * `project-message-view/index.tsx` — for an active session it passes
+ * `lc.handleFileClick`, which is `useCallback(fn, [])` in `useSessionLifecycle`
+ * and therefore stable. Passing a stable function here (rather than leaving it
+ * undefined) keeps the test honest about the real prop set: if that callback
+ * ever stops being stable, MessageBubble's memo AND its internal
+ * `agentComponents` useMemo both break, and these counts would move.
+ */
+const STABLE_FILE_CLICK = () => {};
+
+function Conversation({
+  items,
+  onFileClick,
+}: {
+  items: ConversationItem[];
+  onFileClick?: (path: string, line?: number | null) => void;
+}) {
   return (
     <>
       {items.map((item) => (
-        <AcpConversationItemView key={item.id} item={item} />
+        <AcpConversationItemView key={item.id} item={item} onFileClick={onFileClick} />
       ))}
     </>
   );
@@ -100,6 +117,24 @@ describe('AcpConversationItemView — MessageBubble memoization during streaming
     // Exactly one parse per token — the streaming bubble only. Pre-fix this was
     // tokens.length * (settled.length + 1) = 45.
     expect(markdownRenders).toHaveBeenCalledTimes(tokens.length);
+  });
+
+  it('stays memoized with the active-session onFileClick wiring', () => {
+    // The production active-session path passes a real `onFileClick`, which also
+    // feeds MessageBubble's `agentComponents` useMemo. Same expectation.
+    const settled = [agentItem('a', 'first settled'), agentItem('b', 'second settled')];
+    const stream = (text: string) => (
+      <Conversation
+        items={[...settled, agentItem('live', text, true)]}
+        onFileClick={STABLE_FILE_CLICK}
+      />
+    );
+
+    const { rerender } = render(stream('A'));
+    markdownRenders.mockClear();
+
+    rerender(stream('AB'));
+    expect(markdownRenders).toHaveBeenCalledTimes(1);
   });
 
   it('still plays the correct audio for a settled bubble after memoization', () => {

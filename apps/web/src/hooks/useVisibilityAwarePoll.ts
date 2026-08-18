@@ -74,10 +74,24 @@ export function useVisibilityAwarePoll(
   // Seeded at mount: callers own their initial load, so a freshly mounted poll
   // must not immediately fire a duplicate request.
   const lastPollAtRef = useRef<number>(Date.now());
+  const wasEnabledRef = useRef<boolean>(enabled);
 
   const active = enabled && !paused && visible;
 
   useEffect(() => {
+    // `enabled` flipping true means the caller's precondition was just
+    // satisfied, and callers pair that transition with their own fetch (a new
+    // id, a workspace that just started, a token that just arrived). Restart the
+    // freshness clock so the catch-up below cannot fire a duplicate request on
+    // top of it — preconditions routinely take longer than one interval to
+    // become true, which would otherwise guarantee a double fetch every time.
+    //
+    // `paused` and visibility are deliberately NOT treated this way: nobody else
+    // is fetching during those, so their elapsed time must still count toward
+    // the catch-up.
+    if (enabled && !wasEnabledRef.current) lastPollAtRef.current = Date.now();
+    wasEnabledRef.current = enabled;
+
     if (!active) return;
 
     const run = () => {
@@ -89,5 +103,5 @@ export function useVisibilityAwarePoll(
 
     const timer = setInterval(run, intervalMs);
     return () => clearInterval(timer);
-  }, [active, intervalMs]);
+  }, [active, enabled, intervalMs]);
 }

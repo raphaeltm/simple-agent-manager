@@ -21,7 +21,7 @@ import {
   stopWorkspace,
   updateWorkspace,
 } from '../../lib/api';
-import { WORKSPACE_EVENTS_POLL_MS } from '../../lib/poll-intervals';
+import { WORKSPACE_EVENTS_POLL_MS, WORKSPACE_STATE_POLL_MS } from '../../lib/poll-intervals';
 import { getAuthEpoch, isAuthRevoked, registerTerminalCleanup } from '../../lib/terminal-cleanup';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 
@@ -190,10 +190,15 @@ export function useWorkspaceCore(
   // breaking the feedback loop that caused React error #185.
   useEffect(() => {
     if (!id) return;
-
     void loadWorkspaceStateRef.current();
+  }, [id]);
 
-    const interval = setInterval(() => {
+  // Paused on hidden tabs. The callback is a fresh closure each render, which is
+  // safe: useVisibilityAwarePoll holds it in a ref and never treats it as an
+  // effect dependency, so the ref-based indirection that broke the React #185
+  // feedback loop here is preserved.
+  useVisibilityAwarePoll(
+    () => {
       const status = workspaceStatusRef.current;
       if (
         status === 'creating' ||
@@ -203,10 +208,10 @@ export function useWorkspaceCore(
       ) {
         void loadWorkspaceStateRef.current();
       }
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [id]);
+    },
+    WORKSPACE_STATE_POLL_MS,
+    { enabled: Boolean(id) }
+  );
 
   // Build terminal WebSocket URL
   const buildTerminalWsUrl = useCallback(

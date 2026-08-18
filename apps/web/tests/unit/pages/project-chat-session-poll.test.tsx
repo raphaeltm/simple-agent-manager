@@ -2,7 +2,10 @@ import { act, render, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes } from 'react-router';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { SESSION_SYNC_INTERVAL_MS } from '../../../src/pages/project-chat/types';
+import {
+  SESSION_RECONCILE_INTERVAL_MS,
+  SESSION_SYNC_INTERVAL_MS,
+} from '../../../src/pages/project-chat/types';
 
 /**
  * Item #8 — the 30s session-list sync must not duplicate work the ProjectData
@@ -129,7 +132,7 @@ describe('ProjectChat session-list sync gating', () => {
     vi.useRealTimers();
   });
 
-  it('does not poll while the ProjectData WebSocket is connected', async () => {
+  it('does not poll at the fallback cadence while the WebSocket is connected', async () => {
     await renderAndSettle();
 
     await advance(SESSION_SYNC_INTERVAL_MS * 4);
@@ -137,6 +140,29 @@ describe('ProjectChat session-list sync gating', () => {
     // Live deltas already keep the sidebar current — polling here is pure waste.
     expect(mocks.listChatSessions).not.toHaveBeenCalled();
     expect(mocks.listProjectTasks).not.toHaveBeenCalled();
+  });
+
+  it('still reconciles on the slow cadence while the WebSocket is connected', async () => {
+    // `connected` means the socket is open, not that every delta arrived —
+    // malformed frames are dropped silently and nothing detects the gap. The
+    // slow reconciliation is what keeps a dropped delta from leaving the sidebar
+    // stale for the entire connection lifetime.
+    await renderAndSettle();
+
+    await advance(SESSION_RECONCILE_INTERVAL_MS);
+    expect(mocks.listChatSessions).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not reconcile while the WebSocket is disconnected', async () => {
+    // Exactly one of the two cadences is ever active.
+    mocks.connectionState = 'disconnected';
+    await renderAndSettle();
+
+    await advance(SESSION_RECONCILE_INTERVAL_MS);
+
+    // Only the 30s fallback ran — one tick per interval, not fallback + reconcile.
+    const fallbackTicks = Math.floor(SESSION_RECONCILE_INTERVAL_MS / SESSION_SYNC_INTERVAL_MS);
+    expect(mocks.listChatSessions).toHaveBeenCalledTimes(fallbackTicks);
   });
 
   it('polls while the WebSocket is disconnected and the tab is visible', async () => {
