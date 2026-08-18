@@ -165,11 +165,13 @@ describe('resolveChatAgentState — DO roundtrip budget', () => {
     await resolve();
 
     expect(tracker.callNames[0]).toBe('listAcpSessions');
-    expect(tracker.callNames.slice(1).sort()).toEqual([
-      `getSessionState:${ACP_SESSION_ID}`,
-      `getSessionState:${CHAT_SESSION_ID}`,
-      'getLatestPersistedPlan',
-    ].sort());
+    expect(tracker.callNames.slice(1).sort()).toEqual(
+      [
+        `getSessionState:${ACP_SESSION_ID}`,
+        `getSessionState:${CHAT_SESSION_ID}`,
+        'getLatestPersistedPlan',
+      ].sort()
+    );
   });
 
   it('skips the ACP state read when there is no ACP session', async () => {

@@ -14,13 +14,13 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import * as svc from '../../../src/services/project-data';
 import {
   DEFAULT_PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES,
   getProjectDataEnsureMemoMaxEntries,
   projectDataEnsureMemoSize,
   resetProjectDataEnsureMemo,
 } from '../../../src/services/project-data-ensure-memo';
-import * as svc from '../../../src/services/project-data';
 
 interface StubCounters {
   ensure: number;
@@ -196,8 +196,9 @@ describe('ProjectData ensure memo — DO roundtrip budget', () => {
 
   it('bounds memo growth with an env-configurable cap', async () => {
     const { env } = makeEnv();
-    (env as unknown as { PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES?: string }).PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES =
-      '3';
+    (
+      env as unknown as { PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES?: string }
+    ).PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES = '3';
 
     for (let i = 0; i < 10; i++) {
       await svc.getSummary(env, `proj-${i}`);
@@ -212,9 +213,9 @@ describe('getProjectDataEnsureMemoMaxEntries', () => {
     expect(getProjectDataEnsureMemoMaxEntries({})).toBe(
       DEFAULT_PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES
     );
-    expect(getProjectDataEnsureMemoMaxEntries({ PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES: 'nope' })).toBe(
-      DEFAULT_PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES
-    );
+    expect(
+      getProjectDataEnsureMemoMaxEntries({ PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES: 'nope' })
+    ).toBe(DEFAULT_PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES);
   });
 
   it('honours a valid override', () => {

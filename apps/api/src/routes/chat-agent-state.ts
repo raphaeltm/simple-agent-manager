@@ -4,6 +4,8 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import * as projectDataService from '../services/project-data';
 
+type PersistedPlan = Awaited<ReturnType<typeof projectDataService.getLatestPersistedPlan>>;
+
 interface ResolveChatAgentStateInput {
   projectId: string;
   sessionId: string;
@@ -68,6 +70,25 @@ async function resolveChatAgentState(
     });
   };
 
+  /**
+   * Invoke a DO read and degrade to `fallback` on failure. The invocation itself
+   * sits inside the try because the sequential implementation wrapped the *call*,
+   * not just its promise — a service function that throws synchronously must
+   * degrade too, rather than rejecting the whole concurrent batch.
+   */
+  const safeRead = async <T>(
+    call: () => Promise<T>,
+    fallback: T,
+    onError: (err: unknown) => void
+  ): Promise<T> => {
+    try {
+      return await call();
+    } catch (err) {
+      onError(err);
+      return fallback;
+    }
+  };
+
   // Hop 1 — the ACP session lookup decides which of the hop-2 reads are needed.
   let agentSessionId: string | null = null;
   let agentType: string | null = null;
@@ -93,28 +114,31 @@ async function resolveChatAgentState(
 
   const [agentSessionState, chatSessionState, persistedPlan] = await Promise.all([
     agentSessionId
-      ? projectDataService
-          .getSessionState(env, input.projectId, agentSessionId)
-          .catch((err: unknown) => {
-            logStateFailure(err, { agentSessionId });
-            return null;
-          })
+      ? safeRead<SessionStateSnapshot | null>(
+          () => projectDataService.getSessionState(env, input.projectId, agentSessionId),
+          null,
+          (err) => logStateFailure(err, { agentSessionId })
+        )
       : Promise.resolve(null),
     needsChatSessionState
-      ? projectDataService
-          .getSessionState(env, input.projectId, input.sessionId)
-          .catch((err: unknown) => {
-            logStateFailure(err);
-            return null;
-          })
+      ? safeRead<SessionStateSnapshot | null>(
+          () => projectDataService.getSessionState(env, input.projectId, input.sessionId),
+          null,
+          (err) => logStateFailure(err)
+        )
       : Promise.resolve(null),
-    projectDataService
-      .getLatestPersistedPlan(env, input.projectId, input.sessionId)
-      .then((plan) => ({ ok: true as const, plan }))
-      .catch((err: unknown) => {
-        logStateFailure(err);
-        return { ok: false as const, plan: null };
+    safeRead<{ ok: boolean; plan: PersistedPlan }>(
+      async () => ({
+        ok: true,
+        plan: await projectDataService.getLatestPersistedPlan(
+          env,
+          input.projectId,
+          input.sessionId
+        ),
       }),
+      { ok: false, plan: null },
+      (err) => logStateFailure(err)
+    ),
   ]);
 
   let state: SessionStateSnapshot | null = agentSessionState ?? chatSessionState;
