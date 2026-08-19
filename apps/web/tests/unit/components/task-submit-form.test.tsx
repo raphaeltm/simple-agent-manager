@@ -46,7 +46,7 @@ vi.mock('../../../src/components/AuthProvider', () => ({
 }));
 
 import { TaskSubmitForm } from '../../../src/components/task/TaskSubmitForm';
-import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 function renderForm(overrides: Partial<React.ComponentProps<typeof TaskSubmitForm>> = {}) {
   const props = {

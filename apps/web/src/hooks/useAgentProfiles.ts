@@ -50,12 +50,43 @@ export function useAgentProfiles(
     });
   }, [projectId, queryClient, queryScope]);
 
+  /**
+   * Write the server's response straight into the shared cache, then revalidate.
+   *
+   * Invalidating alone is not enough. Callers act on the returned profile
+   * immediately — `useProjectChatState` selects a newly created profile — while the
+   * cached list is still the pre-mutation one. Any consumer that reconciles its
+   * selection against that list (`selectProfileId` keeps the current id only if it
+   * appears in `profiles`, else falls back to the first entry) would drop the brand
+   * new selection in the window before the refetch lands.
+   *
+   * Seeding the confirmed row closes that window for every consumer at once, which
+   * is strictly more than the pre-migration code did — it spliced the new profile
+   * into one component's local array, so sibling surfaces never saw it at all.
+   */
+  const writeProfileToCache = useCallback(
+    (profile: AgentProfile) => {
+      if (!projectId) return;
+      queryClient.setQueryData<AgentProfile[]>(
+        agentQueryKeys.profileList(queryScope, projectId),
+        (previous) => {
+          const rest = (previous ?? []).filter((candidate) => candidate.id !== profile.id);
+          return [...rest, profile];
+        }
+      );
+    },
+    [projectId, queryClient, queryScope]
+  );
+
   const createMutation = useMutation({
     mutationFn: (data: CreateAgentProfileRequest) => {
       if (!projectId) throw new Error('No project ID');
       return createAgentProfile(projectId, data);
     },
-    onSuccess: invalidate,
+    onSuccess: (profile) => {
+      writeProfileToCache(profile);
+      void invalidate();
+    },
   });
 
   const updateMutation = useMutation({
@@ -63,7 +94,10 @@ export function useAgentProfiles(
       if (!projectId) throw new Error('No project ID');
       return updateAgentProfile(projectId, profileId, data);
     },
-    onSuccess: invalidate,
+    onSuccess: (profile) => {
+      writeProfileToCache(profile);
+      void invalidate();
+    },
   });
 
   const deleteMutation = useMutation({
@@ -71,7 +105,15 @@ export function useAgentProfiles(
       if (!projectId) throw new Error('No project ID');
       return deleteAgentProfile(projectId, profileId);
     },
-    onSuccess: invalidate,
+    onSuccess: (_result, profileId) => {
+      if (projectId) {
+        queryClient.setQueryData<AgentProfile[]>(
+          agentQueryKeys.profileList(queryScope, projectId),
+          (previous) => (previous ?? []).filter((candidate) => candidate.id !== profileId)
+        );
+      }
+      void invalidate();
+    },
   });
 
   return {

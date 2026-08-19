@@ -125,6 +125,44 @@ describe('useAgentProfiles', () => {
     expect(result.current.profilesPage.profiles.map((p) => p.id)).toContain('profile-2');
   });
 
+  /**
+   * Regression: the create path must make the new profile readable from the shared
+   * cache the moment `createProfile` resolves — before any refetch lands.
+   *
+   * `useProjectChatState` selects the returned profile id immediately, and then
+   * reconciles that selection against the cached list (`selectProfileId` keeps the
+   * current id only if the list contains it, else falls back to the first entry).
+   * With invalidate-only, the list is still the pre-mutation one during the
+   * read-after-write window, so the brand new selection was discarded. Seeding the
+   * server-confirmed row closes that window.
+   */
+  it('exposes the created profile from the cache before the refetch resolves', async () => {
+    const { client, Wrapper } = createWrapper();
+    const created = { ...PROFILE, id: 'profile-2', name: 'Fixer' };
+    mocks.createAgentProfile.mockResolvedValue(created);
+
+    const { result } = renderHook(() => useAgentProfiles('project-1', 'user-1'), {
+      wrapper: Wrapper,
+    });
+    await waitFor(() => expect(result.current.profiles).toEqual([PROFILE]));
+
+    // The refetch triggered by the invalidate never settles during this assertion.
+    mocks.listAgentProfiles.mockImplementation(() => new Promise(() => {}));
+
+    await act(async () => {
+      await result.current.createProfile({ name: 'Fixer' } as never);
+    });
+
+    const cached = client.getQueryData<typeof created[]>([
+      'auth',
+      'user-1',
+      'agents',
+      'profiles',
+      'project-1',
+    ]);
+    expect(cached?.map((p) => p.id)).toContain('profile-2');
+  });
+
   it('propagates an update to every consumer', async () => {
     const { Wrapper } = createWrapper();
     mocks.updateAgentProfile.mockResolvedValue({ ...PROFILE, name: 'Edited' });

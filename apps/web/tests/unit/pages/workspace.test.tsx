@@ -156,7 +156,7 @@ vi.mock('../../../src/config/features', () => ({
 }));
 
 import { Workspace } from '../../../src/pages/workspace';
-import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 function LocationProbe() {
   const location = useLocation();

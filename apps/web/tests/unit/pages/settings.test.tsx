@@ -61,7 +61,7 @@ import { SettingsAgents } from '../../../src/pages/SettingsAgents';
 import { SettingsCloudProvider } from '../../../src/pages/SettingsCloudProvider';
 import { SettingsConnections } from '../../../src/pages/SettingsConnections';
 import { SettingsGitHub } from '../../../src/pages/SettingsGitHub';
-import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 function renderSettings(path = '/settings/cloud-provider') {
   return render(

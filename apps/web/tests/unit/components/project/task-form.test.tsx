@@ -3,7 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
 import { TaskForm } from '../../../../src/components/project/TaskForm';
-import { QueryTestWrapper } from '../../../../test-utils/query-test-utils';
+import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
 
 // Mock the API module so listAgentProfiles doesn't make real requests
 vi.mock('../../../../src/lib/api', async (importOriginal) => ({
@@ -72,7 +72,7 @@ describe('TaskForm', () => {
         projectId="proj-1"
         tasks={[taskA]}
         onSubmit={onSubmit}
-      />,
+      />
     , { wrapper: QueryTestWrapper });
 
     fireEvent.change(screen.getByPlaceholderText('Task title'), { target: { value: 'Write tests' } });
@@ -106,7 +106,7 @@ describe('TaskForm', () => {
         projectId="proj-1"
         tasks={[]}
         onSubmit={vi.fn()}
-      />,
+      />
     , { wrapper: QueryTestWrapper });
 
     const titleInput = screen.getByPlaceholderText('Task title') as HTMLInputElement;
@@ -133,7 +133,7 @@ describe('TaskForm', () => {
         projectId="proj-1"
         tasks={[]}
         onSubmit={onSubmit}
-      />,
+      />
     , { wrapper: QueryTestWrapper });
 
     fireEvent.change(screen.getByPlaceholderText('Task title'), { target: { value: 'Simple task' } });

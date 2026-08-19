@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TriggerForm } from '../../../src/components/triggers/TriggerForm';
 import { ToastProvider } from '../../../src/hooks/useToast';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
-import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 vi.mock('../../../src/lib/api', () => ({
   createTrigger: vi.fn().mockResolvedValue({}),

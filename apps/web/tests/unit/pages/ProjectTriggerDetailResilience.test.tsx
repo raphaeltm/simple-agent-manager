@@ -25,7 +25,7 @@ vi.mock('../../../src/lib/api/triggers', () => mocks);
 import { ToastProvider } from '../../../src/hooks/useToast';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
 import { ProjectTriggerDetail } from '../../../src/pages/ProjectTriggerDetail';
-import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 const TRIGGER = {
   id: 'trig-1',

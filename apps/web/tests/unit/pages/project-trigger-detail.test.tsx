@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../../../src/hooks/useToast';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
 import { ProjectTriggerDetail } from '../../../src/pages/ProjectTriggerDetail';
-import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 const mocks = vi.hoisted(() => ({
   getTrigger: vi.fn(),
@@ -96,7 +96,7 @@ function renderDetail() {
           </Routes>
         </ToastProvider>
       </ProjectContext.Provider>
-    </MemoryRouter>,
+    </MemoryRouter>
   , { wrapper: QueryTestWrapper });
 }
 

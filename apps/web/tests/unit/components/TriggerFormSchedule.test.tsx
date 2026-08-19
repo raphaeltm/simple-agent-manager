@@ -22,7 +22,7 @@ vi.mock('../../../src/components/AuthProvider', () => ({
 }));
 
 import { updateTrigger } from '../../../src/lib/api';
-import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 function makeTrigger(overrides: Partial<TriggerResponse> = {}): TriggerResponse {
   return {

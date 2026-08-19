@@ -7,7 +7,7 @@ import { ToastProvider } from '../../../src/hooks/useToast';
 import { createTrigger, listAgentProfiles } from '../../../src/lib/api';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
 import { ProjectTriggers } from '../../../src/pages/ProjectTriggers';
-import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 // ---------------------------------------------------------------------------
 // Mocks — inline data to avoid hoisting issues with vi.mock

@@ -81,7 +81,7 @@ vi.mock('../../../src/components/UserMenu', () => ({
 
 import { ToastProvider } from '../../../src/hooks/useToast';
 import { Node } from '../../../src/pages/Node';
-import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 function renderNode(path: string) {
   return render(

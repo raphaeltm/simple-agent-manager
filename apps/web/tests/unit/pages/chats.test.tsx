@@ -27,7 +27,7 @@ vi.mock('../../../src/components/UserMenu', () => ({
 }));
 
 import { Chats } from '../../../src/pages/Chats';
-import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 function renderChats() {
   return render(

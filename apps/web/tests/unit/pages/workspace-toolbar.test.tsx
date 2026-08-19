@@ -64,7 +64,7 @@ vi.mock('@simple-agent-manager/terminal', () => ({
 }));
 
 import { Workspace } from '../../../src/pages/workspace';
-import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 describe('Workspace toolbar declutter', () => {
   beforeEach(() => {

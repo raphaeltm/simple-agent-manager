@@ -70,7 +70,7 @@ vi.mock('../../../src/components/project-message-view', () => ({
 
 import { ProjectChat } from '../../../src/pages/project-chat';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
-import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
 
 const PROJECT_ID = 'proj-1';
 
