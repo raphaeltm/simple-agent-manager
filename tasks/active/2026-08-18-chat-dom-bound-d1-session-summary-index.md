@@ -226,6 +226,22 @@ The task-completion-validator also flagged the Playwright audit as failing; that
 output captured **before** the `components.List` measurement fix. Re-verified after every subsequent
 change: 12/12 green at both viewports.
 
+## CI
+
+`ci.yml` is scoped to `pull_request: branches: [main]`, so a PR targeting the program integration
+branch gets **no automatic CI** — only `Run benchmarks` fires. CI was therefore dispatched manually
+against the head branch. Consequence: `Preflight Evidence` and `Specialist Review Evidence` are
+SKIPPED on a `workflow_dispatch` run because they read the `pull_request` event payload. Both were
+validated locally against a synthesized event and pass; they will evaluate for real when this content
+reaches a PR targeting `main`.
+
+Run [32200201517](https://github.com/raphaeltm/simple-agent-manager/actions/runs/32200201517) failed
+**one** job — the file-size gate, with `apps/api/src/routes/chat.ts` at 801 lines against rule 18's
+800-line ceiling. Fixed by splitting the session-list handler into
+`apps/api/src/routes/chat-session-list.ts` (chat.ts 801 → 702, new file 118) rather than shaving a
+line: the D1-index fast path and its DO fallback are a self-contained concern with their own failure
+semantics, so that is the seam rule 18 asks for. No behaviour change; API suite still 7708/7708.
+
 ## References
 
 - Rules: 02, 05, 17 (virtualized-list), 26, 28, 31, 39, 42, 44, 45, 47, 50, 53, 56, 59, 60
