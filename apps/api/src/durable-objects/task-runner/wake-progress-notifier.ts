@@ -86,13 +86,51 @@ export interface NotifyWakeProgressArgs {
  */
 export async function notifyWakeProgress(args: NotifyWakeProgressArgs): Promise<boolean> {
   const { env, projectId, chatSessionId, step } = args;
-  if (!chatSessionId) return false;
-
-  const input: SessionWakeProgressInput = {
-    chatSessionId,
+  return emitWakeProgress(env, projectId, chatSessionId, {
     recoveryStatus: recoveryStatusForStep(step),
     wakePhase: step,
-  };
+  });
+}
+
+export interface NotifyWakeSettledArgs {
+  env: Env;
+  projectId: string;
+  /** Null for a normal task run — the discriminator that keeps this a no-op. */
+  chatSessionId: string | null | undefined;
+  status: 'restored' | 'failed';
+}
+
+/**
+ * Broadcast that a wake has finished, so the banner clears immediately.
+ *
+ * This exists as a separate entry point because the terminal transition does NOT
+ * flow through `updateD1ExecutionStep`: `transitionToInProgress` writes
+ * `execution_step = 'running'` with its own guarded raw `UPDATE` (it needs the
+ * optimistic-lock predicate in the same statement), and the alarm dispatcher
+ * treats `running`/`awaiting_followup` as terminal no-op steps. So the step
+ * choke-point that carries every intermediate phase never sees the last one.
+ *
+ * Without this call the banner would linger until the client's next fallback
+ * poll — the exact lag this feature exists to remove.
+ */
+export async function notifyWakeSettled(args: NotifyWakeSettledArgs): Promise<boolean> {
+  const { env, projectId, chatSessionId, status } = args;
+  return emitWakeProgress(env, projectId, chatSessionId, {
+    recoveryStatus: status,
+    // The wake is over; a phase here would render as stale progress.
+    wakePhase: null,
+  });
+}
+
+async function emitWakeProgress(
+  env: Env,
+  projectId: string,
+  chatSessionId: string | null | undefined,
+  payload: Pick<SessionWakeProgressInput, 'recoveryStatus' | 'wakePhase'>
+): Promise<boolean> {
+  if (!chatSessionId) return false;
+
+  const input: SessionWakeProgressInput = { chatSessionId, ...payload };
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
@@ -112,12 +150,13 @@ export async function notifyWakeProgress(args: NotifyWakeProgressArgs): Promise<
     await Promise.race([stub.publishSessionWakeProgress(input), timeout]);
     return true;
   } catch (err) {
-    // Never rethrow: the step transition is already durable in D1 and the client
-    // recovers this phase on its next hydrate.
+    // Never rethrow: the transition is already durable in D1 and the client
+    // recovers this state on its next hydrate.
     log.warn('task_runner_do.wake_progress_broadcast_failed', {
       projectId,
       chatSessionId,
-      step,
+      recoveryStatus: payload.recoveryStatus,
+      wakePhase: payload.wakePhase,
       error: err instanceof Error ? err.message : String(err),
     });
     return false;

@@ -279,11 +279,20 @@ function createContext(
 ) {
   const storageWrites: TaskRunnerState[] = [];
   const database = createD1Database(dbState, options);
+  // Captures the wake-progress broadcast so tests can assert that a wake driven
+  // through the REAL transition emits a terminal `restored`/`failed`. The
+  // terminal step bypasses `updateD1ExecutionStep`, so this is the only place
+  // that emit can be observed.
+  const publishSessionWakeProgress = vi.fn(async () => undefined);
   const rc = {
     env: {
       DATABASE: database,
       OBSERVABILITY_DATABASE: database,
       KV: {},
+      PROJECT_DATA: {
+        idFromName: vi.fn((id: string) => ({ toString: () => id })),
+        get: vi.fn(() => ({ publishSessionWakeProgress })),
+      },
       NODE_LIFECYCLE: {
         idFromName: vi.fn((id: string) => id),
         get: vi.fn(() => ({
@@ -302,7 +311,7 @@ function createContext(
     assertRecoveryAuthority: vi.fn(async () => undefined),
   } as unknown as TaskRunnerContext;
 
-  return { dbState, rc, storageWrites };
+  return { dbState, rc, storageWrites, publishSessionWakeProgress };
 }
 
 function seedTask(dbState: ReturnType<typeof createD1State>, overrides: Partial<TaskRow> = {}) {
@@ -347,6 +356,72 @@ describe('transitionToInProgress', () => {
     expect(state.currentStep).toBe('running');
     expect(state.completed).toBe(true);
     expect(storageWrites.at(-1)).toMatchObject({ currentStep: 'running', completed: true });
+  });
+
+  it('broadcasts the terminal wake state when a recovery task goes in_progress', async () => {
+    // The regression this guards: `transitionToInProgress` writes
+    // execution_step='running' with its own guarded raw UPDATE, bypassing the
+    // `updateD1ExecutionStep` choke point that carries every INTERMEDIATE phase.
+    // The alarm dispatcher then treats `running` as a terminal no-op step. So
+    // without an explicit emit here the banner never learns the wake finished and
+    // lingers until the client's next fallback poll.
+    const { dbState, rc, publishSessionWakeProgress } = createContext();
+    seedTask(dbState);
+    const state = makeState({
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'chat-session-1',
+      },
+    });
+
+    await transitionToInProgress(state, rc);
+
+    expect(dbState.tasks.get('task-1')).toMatchObject({ status: 'in_progress' });
+    expect(publishSessionWakeProgress).toHaveBeenCalledTimes(1);
+    expect(publishSessionWakeProgress).toHaveBeenCalledWith({
+      chatSessionId: 'chat-session-1',
+      recoveryStatus: 'restored',
+      // No phase on a settled wake — a step here would render as stale progress.
+      wakePhase: null,
+    });
+  });
+
+  it('does NOT broadcast wake progress for a normal (non-recovery) task', async () => {
+    // Discriminating control. `resumeSnapshotChatSessionId` is null for every
+    // ordinary task run; without that guard the entire task fleet would emit wake
+    // broadcasts into project sockets on each completion.
+    const { dbState, rc, publishSessionWakeProgress } = createContext();
+    seedTask(dbState);
+    const state = makeState();
+
+    await transitionToInProgress(state, rc);
+
+    expect(dbState.tasks.get('task-1')).toMatchObject({ status: 'in_progress' });
+    expect(publishSessionWakeProgress).not.toHaveBeenCalled();
+    expect(rc.env.PROJECT_DATA.get).not.toHaveBeenCalled();
+  });
+
+  it('still completes the transition when the wake broadcast fails', async () => {
+    // Cosmetic telemetry must never fail a lifecycle transition already durable
+    // in D1.
+    const { dbState, rc, publishSessionWakeProgress } = createContext();
+    publishSessionWakeProgress.mockRejectedValueOnce(new Error('DO unavailable'));
+    seedTask(dbState);
+    const state = makeState({
+      config: {
+        ...makeState().config,
+        resumeSnapshotChatSessionId: 'chat-session-1',
+      },
+    });
+
+    await expect(transitionToInProgress(state, rc)).resolves.toBeUndefined();
+
+    expect(dbState.tasks.get('task-1')).toMatchObject({
+      status: 'in_progress',
+      execution_step: 'running',
+    });
+    expect(state.currentStep).toBe('running');
+    expect(state.completed).toBe(true);
   });
 
   it('does not overwrite non-delegated task status', async () => {

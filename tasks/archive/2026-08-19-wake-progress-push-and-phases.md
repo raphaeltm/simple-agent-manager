@@ -105,7 +105,10 @@ edits to oversized files are thin delegations only:
 
 ### Web
 - [x] `SessionStateSnapshot` client type gains `wakePhase` (`lib/api/sessions.ts`).
-- [x] `useSessionReducer.ts`: handle `session.wake_progress`.
+- [x] Handle `session.wake_progress` on the client socket. **Corrected during review:** wired in
+      `apps/web/src/hooks/useChatWebSocket.ts`, NOT `useSessionReducer.ts`. The plan named the wrong
+      file — `useSessionReducer` feeds the project-wide multiplexed socket, while the banner is
+      driven by the per-session socket `ProjectMessageView` actually holds.
 - [x] New `useWakeProgress.ts`: owns wake phase state; hydrates from server snapshot,
       updates from WS; clears on wake completion.
 - [x] New `WakeProgressBanner.tsx`: spinner + phase label + elapsed time.
@@ -202,3 +205,49 @@ In each case only the intended test failed; the rest of the suite stayed green.
 `main` is branch-protected in this repository, so the Phase 1 "push the task file directly
 to main" step was rejected (`Required status check "Durable Object Workers" is expected`).
 The task file rides on the feature branch instead.
+
+### Review findings and fixes (Phase 5)
+
+`task-completion-validator` returned **FAIL** on the first pass, with one HIGH finding that
+was correct and merge-blocking. All findings were fixed in-branch; none were deferred.
+
+**HIGH — the terminal "wake complete" broadcast was unreachable dead code.**
+
+The design assumed `updateD1ExecutionStep` was the single choke point for *every* step
+transition. It is the choke point for every *intermediate* step, but not the last one:
+`transitionToInProgress` writes `execution_step = 'running'` through its own guarded raw
+`UPDATE` (the optimistic-lock predicate has to be in the same statement), and the alarm
+dispatcher then treats `running`/`awaiting_followup` as terminal no-op steps. So
+`recoveryStatusForStep('running') === 'restored'` could never be reached in production.
+
+The damning part is that three green tests appeared to cover it — a server unit test, a
+client hook test, and a Playwright case — and every one of them hand-fed the terminal value
+rather than driving the real trigger. The banner would in fact have cleared only via the
+~10s fallback poll: precisely the lag this task exists to remove.
+
+Fixed by adding `notifyWakeSettled` and calling it from the actual completion points in
+`state-machine.ts` (both the committed-handoff path and the already-in-progress path), plus
+a `failed` emit on the revoked-authority path so a doomed wake does not leave a spinner
+running. Three new tests in `task-runner-state-machine.test.ts` drive the **real**
+`transitionToInProgress` with a `PROJECT_DATA` mock; the terminal-emit test was verified to
+fail when the new call is removed, and the non-recovery control asserts zero broadcasts.
+
+**MEDIUM — checklist named the wrong integration file.** The plan said `useSessionReducer.ts`;
+the correct home was `useChatWebSocket.ts`. Checklist corrected above rather than left to
+mislead a future reader.
+
+**MEDIUM — the WS parsing branch itself was untested.** The layer that parses untrusted
+socket JSON and enforces cross-session isolation had no coverage. Added five cases to
+`useChatWebSocket.behavioral.test.ts` mirroring the existing `session.activity` pattern:
+valid phase, both terminal states, unknown-phase normalization, unknown-status rejection,
+and cross-session isolation.
+
+**LOW — no Miniflare test for the DO RPC delegate.** Accepted as-is; consistent with how
+sibling `ProjectData` RPC delegates are covered in this codebase.
+
+**Lesson.** Two of the three defects found across this task were *test instruments that could
+not observe the thing they claimed to verify* (the onboarding-modal screenshots, the
+hand-fed terminal broadcast). The research claim "updateD1ExecutionStep is the single choke
+point" was true enough to pass a reading of the code and false exactly where it mattered —
+`.claude/rules/05` assumption-verification applies to a choke point just as much as to a
+"this already works" claim.
