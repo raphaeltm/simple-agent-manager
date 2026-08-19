@@ -44,6 +44,9 @@ The adjacent `sleepAttempts` field IS reset on success (both success paths set `
 - [x] Write regression test: 4 claim→complete cycles on same snapshot, assert 4th claim succeeds. Verified test FAILS on pre-fix code (cycle 1 assertion fails: recovery_attempts=1 instead of 0).
 - [x] Write regression test for `markSessionSnapshotAwakeInPlace`: verifies recovery_attempts resets to 0 from initial value of 2
 - [x] Add process rule about per-cycle vs lifetime budget counters (`.claude/rules/61-per-cycle-budget-counters.md`)
+- [x] Add `recoveryAttempts: 0` to `markSessionSnapshotSleepingWithConfig` (~line 388) — re-sleep path resets counter for fresh cycle
+- [x] Write exhaustion test: 3 consecutive failed wakes exhaust the budget, 4th claim rejected
+- [x] Write re-sleep reset test: entering a new sleep cycle zeroes recovery_attempts
 
 ## Acceptance Criteria
 
