@@ -34,6 +34,7 @@ vi.mock('../../../src/hooks/useIsStandalone', () => ({
 }));
 
 import { Workspaces } from '../../../src/pages/Workspaces';
+import { workspaceQueryKeys } from '../../../src/lib/query-options';
 
 const runningWorkspace = {
   id: 'ws-1',
@@ -60,6 +61,10 @@ const stoppedWorkspace = {
   status: 'stopped' as const,
   createdAt: '2026-02-28T00:00:00.000Z',
 };
+
+/** Must match the id returned by the mocked `useAuth` above — the query keys are
+ * scoped by it, so an invalidate with a different scope would match nothing. */
+const SCOPE = 'user-1';
 
 describe('Workspaces page', () => {
   beforeEach(() => {
@@ -188,7 +193,7 @@ describe('Workspaces page', () => {
 
     // Next fetch (background refetch) fails.
     mocks.listWorkspaces.mockRejectedValueOnce(new Error('Refetch boom'));
-    void queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+    void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all(SCOPE) });
 
     await waitFor(() => {
       // The stale content stays mounted and the error is NOT surfaced,
@@ -275,7 +280,7 @@ describe('Workspaces page', () => {
     mocks.listWorkspaces.mockReturnValueOnce(refetchPromise);
 
     // Trigger a refetch via query invalidation (same key, same filter)
-    void queryClient.invalidateQueries({ queryKey: ['workspaces'] });
+    void queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.all(SCOPE) });
 
     // Content must stay visible while refetch is in-flight
     expect(screen.getByText('My Workspace')).toBeInTheDocument();

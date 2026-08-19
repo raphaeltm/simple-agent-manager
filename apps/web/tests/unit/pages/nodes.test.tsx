@@ -30,6 +30,11 @@ vi.mock('../../../src/components/UserMenu', () => ({
 }));
 
 import { Nodes } from '../../../src/pages/Nodes';
+import { nodeQueryKeys } from '../../../src/lib/query-options';
+
+/** Must match the id returned by the mocked `useAuth` above — the query keys are
+ * scoped by it, so an invalidate with a different scope would match nothing. */
+const SCOPE = 'user-1';
 
 describe('Nodes page', () => {
   beforeEach(() => {
@@ -173,7 +178,7 @@ describe('Nodes page', () => {
     expect(await screen.findByText('Persisted Node')).toBeInTheDocument();
 
     mocks.listNodes.mockRejectedValueOnce(new Error('Nodes refetch boom'));
-    void queryClient.invalidateQueries({ queryKey: ['nodes'] });
+    void queryClient.invalidateQueries({ queryKey: nodeQueryKeys.all(SCOPE) });
 
     await waitFor(() => {
       expect(screen.getByText('Persisted Node')).toBeInTheDocument();
@@ -218,7 +223,7 @@ describe('Nodes page', () => {
     mocks.listNodes.mockReturnValueOnce(refetchPromise);
 
     // Trigger a refetch
-    void queryClient.invalidateQueries({ queryKey: ['nodes'] });
+    void queryClient.invalidateQueries({ queryKey: nodeQueryKeys.all(SCOPE) });
 
     // Content must stay visible while refetch is in-flight
     expect(screen.getByText('Stale Node')).toBeInTheDocument();
