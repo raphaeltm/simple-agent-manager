@@ -16,7 +16,6 @@ import {
 } from '@simple-agent-manager/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
-import type { Context } from 'hono';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
@@ -37,7 +36,6 @@ import {
 import { resolveTaskAgentProfileHint } from '../services/agent-profile-display';
 import * as chatPersistence from '../services/chat-persistence';
 import * as projectDataService from '../services/project-data';
-import { listSessionsFromIndex } from '../services/session-summary-index';
 import { isTaskStatus } from '../services/task-status';
 import { resolveChatAgentState } from './chat-agent-state';
 import { registerChatCancelRoute } from './chat-cancel';
@@ -46,11 +44,8 @@ import { recordChatSessionLoadFailure } from './chat-load-diagnostics';
 import { preparePromptForLiveAgent, sendPreparedPromptToLiveAgent } from './chat-prompt-forward';
 import { registerChatPromptRoute } from './chat-prompt-route';
 import { getChatSessionRouteContext } from './chat-route-context';
-import {
-  enrichSessionsWithCreators,
-  getSessionListScope,
-  requireSessionCreator,
-} from './chat-session-ownership';
+import { registerChatSessionListRoute } from './chat-session-list';
+import { enrichSessionsWithCreators, requireSessionCreator } from './chat-session-ownership';
 import { chatStateRoutes } from './chat-state';
 import { registerChatStopRoute } from './chat-stop';
 
@@ -130,100 +125,7 @@ function getMessageOrder(rawOrder?: string): 'asc' | 'desc' {
   throw errors.badRequest('order must be asc or desc');
 }
 
-/**
- * Kick off a D1 session-index refresh without blocking the response.
- *
- * Entirely best-effort: the caller already has an authoritative answer from the
- * Durable Object, and this only makes the NEXT read faster. So every failure
- * mode here is swallowed — including the absence of an `ExecutionContext`, which
- * Hono throws on rather than returning undefined. A stale index must never be
- * able to turn a working session list into a 500.
- */
-function schedulePrimeSessionIndex(c: Context<{ Bindings: Env }>, projectId: string): void {
-  try {
-    const prime = projectDataService.primeSessionIndex(c.env, projectId).catch((err) => {
-      log.warn('session_index_prime_failed', {
-        projectId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-
-    // `c.executionCtx` THROWS when no ExecutionContext is present rather than
-    // returning undefined, so it needs the same guard as everything else here.
-    c.executionCtx.waitUntil(prime);
-  } catch (err) {
-    // Covers a missing ExecutionContext and any synchronous throw from
-    // resolving the stub. The promise, if one was created, is already
-    // self-catching; it simply is not kept alive past the response.
-    log.warn('session_index_prime_skipped', {
-      projectId,
-      error: err instanceof Error ? err.message : String(err),
-    });
-  }
-}
-
-/**
- * GET /api/projects/:projectId/sessions
- * List chat sessions for a project.
- */
-chatRoutes.get('/', async (c) => {
-  const userId = getUserId(c);
-  const projectId = requireRouteParam(c, 'projectId');
-  const db = drizzle(c.env.DATABASE, { schema });
-
-  await requireProjectAccess(db, projectId, userId);
-
-  const status = c.req.query('status') || null;
-  const limit = Math.min(parseInt(c.req.query('limit') || '20', 10), 100);
-  const offset = parseInt(c.req.query('offset') || '0', 10);
-  const scope = getSessionListScope(c.req.query('scope'));
-  const createdByUserId = scope === 'my' ? userId : null;
-
-  // Fast path: serve from the D1 session index when it can prove it holds the
-  // same answer the DO would give. This list is refetched on mount, on every WS
-  // reconnect, on two poll timers and on six event-driven refreshes — and each
-  // DO call wakes the object and runs an N+1 attention lookup per row inside it,
-  // against a single-threaded instance. D1 reads scale out instead. (Note this
-  // is not a round-trip *reduction*: the DO's count/page are in-process SQLite,
-  // so the win is avoiding the DO wake, the N+1, and the contention — not hops.)
-  //
-  // `listSessionsFromIndex` fails closed: anything absent, incomplete or stale
-  // falls through to the DO below.
-  const indexRead = await listSessionsFromIndex(c.env, {
-    projectId,
-    status,
-    limit,
-    offset,
-    createdByUserId,
-  });
-
-  let result;
-  if ('result' in indexRead) {
-    result = indexRead.result;
-  } else {
-    result = await projectDataService.listSessions(
-      c.env,
-      projectId,
-      status,
-      limit,
-      offset,
-      null,
-      createdByUserId
-    );
-    // Re-prime off the response path, and ONLY here — this is the one caller
-    // that actually observed the index fail. A permanently over-cap project is
-    // excluded because its sync short-circuits, so this cannot become a
-    // per-request resync loop for large projects.
-    if (indexRead.missReason !== 'incomplete_coverage') {
-      schedulePrimeSessionIndex(c, projectId);
-    }
-  }
-
-  return c.json({
-    ...result,
-    sessions: await enrichSessionsWithCreators(db, result.sessions, userId),
-  });
-});
+registerChatSessionListRoute(chatRoutes);
 
 /**
  * POST /api/projects/:projectId/sessions
