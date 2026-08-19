@@ -97,6 +97,17 @@ describe('query-persistence', () => {
       ).toBe(true);
     });
 
+    it('persists approved chat session messages for the active scope', () => {
+      const client = makeClient();
+      const key = ['auth', USER_A, 'sessions', 'messages', 'proj-1', 'sess-1'] as const;
+      seed(client, key, {
+        session: { id: 'sess-1' },
+        messages: [{ id: 'msg-1', content: CHAT_CONTENT_CANARY }],
+      });
+
+      expect(shouldDehydratePersistedQuery(queryFor(client, key), USER_A)).toBe(true);
+    });
+
     it('refuses a query belonging to a DIFFERENT scope', () => {
       // The load-bearing cross-user assertion: even if user B's cache somehow
       // holds a user-A-scoped entry, it must never reach disk.

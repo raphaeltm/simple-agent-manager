@@ -55,6 +55,7 @@ describe('project-data Durable Object retry', () => {
       'chat-1',
       100,
       null,
+      null,
       undefined,
       true
     );
@@ -62,7 +63,7 @@ describe('project-data Durable Object retry', () => {
     expect(result).toEqual(messages);
     expect(stub.ensureProjectId).toHaveBeenCalledTimes(2);
     expect(stub.getMessages).toHaveBeenCalledTimes(2);
-    expect(stub.getMessages).toHaveBeenLastCalledWith('chat-1', 100, null, undefined, true, 'desc');
+    expect(stub.getMessages).toHaveBeenLastCalledWith('chat-1', 100, null, null, undefined, true, 'desc');
   });
 
   // Regression for the missing-propagation bug where the service layer re-mapped

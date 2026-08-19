@@ -87,6 +87,7 @@ export async function getSessionMessages(
     input.sessionId.trim(),
     limit,
     null,
+    null,
     roles,
   );
 

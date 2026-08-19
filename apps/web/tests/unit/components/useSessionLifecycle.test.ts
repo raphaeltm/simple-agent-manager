@@ -7,7 +7,10 @@
  *   the target is already loaded or there is no more history.
  */
 import { DEFAULT_CHAT_SESSION_MESSAGE_MAX } from '@simple-agent-manager/shared';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, renderHook, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
+import { createElement } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const mocks = vi.hoisted(() => ({
@@ -45,6 +48,9 @@ vi.mock('../../../src/hooks/useChatWebSocket', () => ({
     retry: vi.fn(),
   }),
 }));
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1' } }),
+}));
 vi.mock('../../../src/hooks/useTokenRefresh', () => ({
   useTokenRefresh: () => ({ token: null }),
 }));
@@ -74,6 +80,7 @@ vi.mock('../../../src/components/project-message-view/types', async (importOrigi
 }));
 
 import { useSessionLifecycle } from '../../../src/components/project-message-view/useSessionLifecycle';
+import { chatQueryKeys } from '../../../src/lib/query-options';
 
 type Msg = {
   id: string;
@@ -132,10 +139,16 @@ function detail(
 }
 
 describe('useSessionLifecycle loading semantics', () => {
+  let queryClient: QueryClient;
+  function wrapper({ children }: { children: ReactNode }) {
+    return createElement(QueryClientProvider, { client: queryClient }, children);
+  }
+
   beforeEach(() => {
     vi.useRealTimers();
     vi.clearAllMocks();
     mocks.connectionState = 'connected';
+    queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   });
   afterEach(() => {
     vi.clearAllTimers();
@@ -145,12 +158,29 @@ describe('useSessionLifecycle loading semantics', () => {
   it('requests the FULL conversation (max ceiling) on initial load', async () => {
     mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false));
 
-    renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false));
+    renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), { wrapper });
 
     await waitFor(() => {
       expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
+        signal: expect.any(AbortSignal),
         limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
       });
+    });
+  });
+
+  it('delta-fetches after the newest cached message and merges cached plus new rows', async () => {
+    const queryKey = chatQueryKeys.sessionMessages('user-1', 'proj-1', 'sess-1');
+    queryClient.setQueryData(queryKey, detail([msg('cached', 1000)], false));
+    mocks.getChatSession.mockResolvedValue(detail([msg('new', 2000)], false));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['cached', 'new']));
+    expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
+      signal: expect.any(AbortSignal),
+      after: 1000,
     });
   });
 
@@ -173,7 +203,9 @@ describe('useSessionLifecycle loading semantics', () => {
       mocks.connectionState = 'disconnected';
       mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false, 'active'));
 
-      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false));
+      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+        wrapper,
+      });
       await waitFor(() => expect(result.current.session?.status).toBe('active'));
       await waitFor(() => expect(mocks.getChatSession.mock.calls.length).toBeGreaterThan(1));
 
@@ -189,7 +221,9 @@ describe('useSessionLifecycle loading semantics', () => {
       mocks.connectionState = 'disconnected';
       mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false, 'active'));
 
-      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false));
+      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+        wrapper,
+      });
       await waitFor(() => expect(result.current.session?.status).toBe('active'));
 
       setVisibility('hidden');
@@ -213,7 +247,9 @@ describe('useSessionLifecycle loading semantics', () => {
       .mockResolvedValueOnce(detail(messages, false, 'active', null, null))
       .mockResolvedValue(detail(messages, false, 'active', plan, 2000));
 
-    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false));
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
 
     await waitFor(() => expect(result.current.session?.status).toBe('active'));
 
@@ -224,7 +260,9 @@ describe('useSessionLifecycle loading semantics', () => {
     const sleeping = detail([msg('a', 1000)], false, 'sleeping');
     mocks.getChatSession.mockResolvedValue(sleeping);
     mocks.sendFollowUpPrompt.mockResolvedValue({ accepted: true, status: 'queued' });
-    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false));
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
 
     await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
     act(() => result.current.setFollowUp('Wake and continue'));
@@ -252,7 +290,9 @@ describe('useSessionLifecycle loading semantics', () => {
     let recoveryFailed = false;
     mocks.getChatSession.mockImplementation(async () => (recoveryFailed ? failedWake : sleeping));
     mocks.sendFollowUpPrompt.mockResolvedValue({ accepted: true, status: 'queued' });
-    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false));
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
 
     await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
     act(() => result.current.setFollowUp('Wake and continue'));
@@ -269,7 +309,9 @@ describe('useSessionLifecycle loading semantics', () => {
   describe('loadUntil', () => {
     it('short-circuits (no fetch) when the target timestamp is already loaded', async () => {
       mocks.getChatSession.mockResolvedValue(detail([msg('a', 500), msg('b', 1000)], false));
-      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false));
+      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+        wrapper,
+      });
       await waitFor(() => expect(result.current.messages.length).toBe(2));
       mocks.getChatSession.mockClear();
 
@@ -283,7 +325,9 @@ describe('useSessionLifecycle loading semantics', () => {
 
     it('short-circuits when there is no more history (hasMore=false)', async () => {
       mocks.getChatSession.mockResolvedValue(detail([msg('b', 1000)], false));
-      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false));
+      const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+        wrapper,
+      });
       await waitFor(() => expect(result.current.messages.length).toBe(1));
       mocks.getChatSession.mockClear();
 

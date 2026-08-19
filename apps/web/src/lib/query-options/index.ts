@@ -38,6 +38,7 @@ export {
 export {
   allChatsQueryOptions,
   chatQueryKeys,
+  chatSessionMessagesQueryOptions,
   type ChatSessionSummary,
   recentChatsQueryOptions,
 } from './chats';

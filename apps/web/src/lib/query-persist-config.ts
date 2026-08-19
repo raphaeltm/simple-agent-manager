@@ -39,7 +39,8 @@ import type { Query } from '@tanstack/react-query';
  * query-cache-and-persistence.md` bans persisting chat messages/agent output,
  * credentials/tokens, admin errors and diagnoses, node/workspace runtime details,
  * file contents/signed URLs, and mutation state without a separate security
- * review.
+ * review. Chat messages/agent output have since been approved for local
+ * persistence by the project owner for the project-chat session message cache.
  *
  * ## The allowlist matches on CONTENT, not just key shape
  *
@@ -72,8 +73,14 @@ import type { Query } from '@tanstack/react-query';
  *    configuration, which the backlog task lists as review-gated.
  *
  * `projects/list` is included because `ProjectSummary` is names, counts and
- * timestamps only — no free-text user or agent content. */
-export const PERSISTED_QUERY_OPERATIONS: ReadonlySet<string> = new Set(['projects/list']);
+ * timestamps only — no free-text user or agent content.
+ *
+ * TODO: Future — encrypt cached messages locally with auth-gated key — see idea 01M0CVZ13RBY20J58CXZ8S13ES
+ */
+export const PERSISTED_QUERY_OPERATIONS: ReadonlySet<string> = new Set([
+  'projects/list',
+  'sessions/messages',
+]);
 
 /** Prefix for every persisted query-cache record. */
 export const QUERY_PERSIST_KEY_PREFIX = 'sam-query-cache';

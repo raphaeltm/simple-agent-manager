@@ -161,6 +161,7 @@ export async function detectTaskCompactionLoop(
     sessionId,
     config.recentMessageLimit,
     null,
+    null,
     ['assistant', 'system', 'tool'],
     false,
     'desc'

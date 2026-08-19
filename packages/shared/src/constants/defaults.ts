@@ -82,6 +82,18 @@ export const DEFAULT_CHAT_SESSION_MESSAGE_LIMIT = 500;
 export const DEFAULT_CHAT_SESSION_MESSAGE_MAX = 50000;
 
 /**
+ * Default page size for forward-cursor chat delta fetches.
+ *
+ * Browser-side cached conversations only need rows newer than the newest cached
+ * message during background revalidation. Keep this configurable separately from
+ * full initial loads so operators can tune the catch-up payload without reducing
+ * the full-conversation cache seed.
+ *
+ * Override via CHAT_SESSION_DELTA_MESSAGE_LIMIT env var.
+ */
+export const DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT = 5000;
+
+/**
  * Safety bound on how many older pages the chat client will fetch while chasing a
  * timeline jump target that predates the loaded window (the rare oversized-session
  * fallback). Bounds the load-until loop so a server misreporting `hasMore` can

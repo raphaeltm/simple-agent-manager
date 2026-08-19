@@ -1,6 +1,7 @@
+import { DEFAULT_CHAT_SESSION_MESSAGE_MAX } from '@simple-agent-manager/shared';
 import { queryOptions } from '@tanstack/react-query';
 
-import { getAllChats, getRecentChats, type SessionSummaryItem } from '../api';
+import { getAllChats, getChatSession, getRecentChats, type SessionSummaryItem } from '../api';
 
 /**
  * Cross-project chat session summaries, served by a single D1 query each.
@@ -20,6 +21,8 @@ export const chatQueryKeys = {
     [...chatQueryKeys.all(queryScope), 'recent', { limit, staleThreshold }] as const,
   list: (queryScope: string, limit: number) =>
     [...chatQueryKeys.all(queryScope), 'list', { limit }] as const,
+  sessionMessages: (queryScope: string, projectId: string, sessionId: string) =>
+    ['auth', queryScope, 'sessions', 'messages', projectId, sessionId] as const,
 };
 
 /** Compat shape: consumers of `ChatSessionListItem` expect `createdAt`. */
@@ -58,5 +61,20 @@ export function allChatsQueryOptions(queryScope: string, limit: number) {
         total: response.total,
       };
     },
+  });
+}
+
+export function chatSessionMessagesQueryOptions(
+  queryScope: string,
+  projectId: string,
+  sessionId: string
+) {
+  return queryOptions({
+    queryKey: chatQueryKeys.sessionMessages(queryScope, projectId, sessionId),
+    queryFn: ({ signal }) =>
+      getChatSession(projectId, sessionId, {
+        signal,
+        limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+      }),
   });
 }

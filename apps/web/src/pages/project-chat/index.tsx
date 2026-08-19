@@ -482,7 +482,6 @@ export function ProjectChat() {
                 />
               )}
             <ProjectMessageView
-              key={state.sessionId}
               projectId={state.projectId}
               sessionId={activeSessionId}
               isProvisioning={

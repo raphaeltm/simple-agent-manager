@@ -79,6 +79,7 @@ export async function getRecentAssistantMessagesForTaskDetail(
       sessionId,
       TASK_DETAIL_RECENT_ASSISTANT_MESSAGE_LIMIT,
       null,
+      null,
       ['assistant'],
       false,
       'desc'

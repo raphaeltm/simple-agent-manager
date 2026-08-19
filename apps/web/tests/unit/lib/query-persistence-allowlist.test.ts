@@ -39,14 +39,23 @@ function queryFor(queryKey: readonly unknown[]) {
 }
 
 describe('persisted query allowlist', () => {
-  it('still allows exactly one operation', () => {
-    expect([...PERSISTED_QUERY_OPERATIONS]).toEqual(['projects/list']);
+  it('allows only explicitly reviewed operations', () => {
+    expect([...PERSISTED_QUERY_OPERATIONS]).toEqual(['projects/list', 'sessions/messages']);
   });
 
   it('persists the project list, which carries no user or agent free text', () => {
     expect(shouldDehydratePersistedQuery(queryFor(projectQueryKeys.list(SCOPE, 50)), SCOPE)).toBe(
       true
     );
+  });
+
+  it('persists approved project chat session messages under the authenticated scope', () => {
+    expect(
+      shouldDehydratePersistedQuery(
+        queryFor(chatQueryKeys.sessionMessages(SCOPE, 'project-1', 'session-1')),
+        SCOPE
+      )
+    ).toBe(true);
   });
 
   it.each([
@@ -91,6 +100,7 @@ describe('query key shape invariant', () => {
     ['active tasks', taskQueryKeys.active(SCOPE)],
     ['recent chats', chatQueryKeys.recent(SCOPE, 8, 1_000)],
     ['all chats', chatQueryKeys.list(SCOPE, 100)],
+    ['chat session messages', chatQueryKeys.sessionMessages(SCOPE, 'project-1', 'session-1')],
     ['node list', nodeQueryKeys.list(SCOPE)],
     ['provider catalog', nodeQueryKeys.catalog(SCOPE)],
     ['workspace list', workspaceQueryKeys.list(SCOPE)],

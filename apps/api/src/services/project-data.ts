@@ -303,12 +303,13 @@ export async function getMessages(
   sessionId: string,
   limit: number = 100,
   before: number | null = null,
+  after: number | null = null,
   roles?: string[],
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc'
 ): Promise<{ messages: Record<string, unknown>[]; hasMore: boolean }> {
   return callProjectDataWithRetry(env, projectId, 'getMessages', (stub) =>
-    stub.getMessages(sessionId, limit, before, roles, compact, order)
+    stub.getMessages(sessionId, limit, before, after, roles, compact, order)
   );
 }
 

@@ -4,10 +4,12 @@ import {
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
   DEFAULT_CHAT_SESSION_MESSAGE_MAX,
 } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import type { ChatConnectionState } from '../../hooks/useChatWebSocket';
 import { useChatWebSocket } from '../../hooks/useChatWebSocket';
+import { useQueryScope } from '../../hooks/useQueryScope';
 import { useTokenRefresh } from '../../hooks/useTokenRefresh';
 import { useDocumentVisible } from '../../hooks/useVisibilityAwarePoll';
 import { useWorkspacePorts } from '../../hooks/useWorkspacePorts';
@@ -29,6 +31,7 @@ import {
   uploadSessionFiles,
 } from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
+import { chatQueryKeys, chatSessionMessagesQueryOptions } from '../../lib/query-options';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 import type { SessionState } from './types';
 import type { AgentActivityState } from './types';
@@ -72,6 +75,18 @@ function getPlanFingerprint(state: SessionStateSnapshot | null | undefined): str
   return state.planUpdatedAt
     ? `updated:${state.planUpdatedAt}`
     : `content:${hashPlanContent(state.currentPlan)}`;
+}
+
+function mergeSessionDetailMessages(
+  detail: ChatSessionDetailResponse | undefined,
+  incoming: ChatMessageResponse[],
+  strategy: 'replace' | 'append' | 'prepend'
+): ChatSessionDetailResponse | undefined {
+  if (!detail) return detail;
+  return {
+    ...detail,
+    messages: mergeMessages(detail.messages, incoming, strategy),
+  };
 }
 
 export interface UseSessionLifecycleResult {
@@ -127,6 +142,12 @@ export function useSessionLifecycle(
   isProvisioning: boolean,
   _onSessionMutated?: () => void
 ): UseSessionLifecycleResult {
+  const queryScope = useQueryScope();
+  const queryClient = useQueryClient();
+  const sessionMessagesQueryKey = useMemo(
+    () => chatQueryKeys.sessionMessages(queryScope, projectId, sessionId),
+    [projectId, queryScope, sessionId]
+  );
   const [session, setSession] = useState<ChatSessionResponse | null>(null);
   const [taskEmbed, setTaskEmbed] = useState<ChatSessionResponse['task'] | null>(null);
   const [messages, setMessages] = useState<ChatMessageResponse[]>([]);
@@ -134,6 +155,31 @@ export function useSessionLifecycle(
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const sessionQuery = useQuery({
+    ...chatSessionMessagesQueryOptions(queryScope, projectId, sessionId),
+    enabled: Boolean(queryScope && projectId && sessionId),
+    queryFn: async ({ signal }) => {
+      const cached = queryClient.getQueryData<ChatSessionDetailResponse>(sessionMessagesQueryKey);
+      const latestCachedAt = cached?.messages.at(-1)?.createdAt;
+      if (cached && typeof latestCachedAt === 'number') {
+        const delta = await getChatSession(projectId, sessionId, {
+          signal,
+          after: latestCachedAt,
+        });
+        return {
+          ...delta,
+          messages: mergeMessages(cached.messages, delta.messages, 'append'),
+          hasMore: cached.hasMore || delta.hasMore,
+        };
+      }
+
+      return getChatSession(projectId, sessionId, {
+        signal,
+        limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
+      });
+    },
+  });
 
   // Refs mirror the latest messages/hasMore so imperative loaders (loadUntil)
   // can read current state without stale closures.
@@ -145,6 +191,17 @@ export function useSessionLifecycle(
   useEffect(() => {
     hasMoreRef.current = hasMore;
   }, [hasMore]);
+
+  const updateCachedMessages = useCallback(
+    (incoming: ChatMessageResponse[], strategy: 'replace' | 'append' | 'prepend') => {
+      if (!queryScope) return;
+      // TODO: Add size-based cache eviction — no cap for now, optimize later
+      queryClient.setQueryData<ChatSessionDetailResponse | undefined>(sessionMessagesQueryKey, (old) =>
+        mergeSessionDetailMessages(old, incoming, strategy)
+      );
+    },
+    [queryClient, queryScope, sessionMessagesQueryKey]
+  );
 
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [node, setNode] = useState<NodeResponse | null>(null);
@@ -224,6 +281,7 @@ export function useSessionLifecycle(
     onMessage: useCallback(
       (msg: ChatMessageResponse) => {
         setMessages((prev) => mergeMessages(prev, [msg], 'append'));
+        updateCachedMessages([msg], 'append');
 
         if (msg.role === 'plan' && msg.content) {
           const parsed = parsePlanContent(msg.content);
@@ -239,7 +297,7 @@ export function useSessionLifecycle(
           startVerifyDecayTimer();
         }
       },
-      [startVerifyDecayTimer]
+      [startVerifyDecayTimer, updateCachedMessages]
     ),
     onSessionStopped: useCallback(() => {
       setSession((prev) => (prev ? { ...prev, status: 'stopped' } : prev));
@@ -256,9 +314,21 @@ export function useSessionLifecycle(
       ) => {
         setSession(catchUpSession);
         setMessages((prev) => mergeMessages(prev, catchUpMessages, 'replace'));
+        queryClient.setQueryData<ChatSessionDetailResponse | undefined>(
+          sessionMessagesQueryKey,
+          (old) =>
+            old
+              ? {
+                  ...old,
+                  session: catchUpSession,
+                  messages: mergeMessages(old.messages, catchUpMessages, 'replace'),
+                  state: state ?? old.state,
+                }
+              : old
+        );
         hydrateState(state);
       },
-      [hydrateState]
+      [hydrateState, queryClient, sessionMessagesQueryKey]
     ),
     onAgentCompleted: useCallback(
       (agentCompletedAt: number) => {
@@ -319,33 +389,44 @@ export function useSessionLifecycle(
     setShowScrollButton(false);
   }, [sessionId, stopVerifyDecayTimer]);
 
-  // Load session
-  const loadSession = useCallback(async () => {
-    try {
-      setError(null);
-      setLoading(true);
-      // Load the FULL conversation up front (server clamps to CHAT_SESSION_MESSAGE_MAX
-      // and the 30 MiB RPC size guard). This keeps the timeline jump index map
-      // complete and removes windowed loading for typical sessions. Oversized /
-      // guard-trimmed sessions keep hasMore=true and fall back to "Load earlier".
-      const data: ChatSessionDetailResponse = await getChatSession(projectId, sessionId, {
-        limit: DEFAULT_CHAT_SESSION_MESSAGE_MAX,
-      });
-      setSession(data.session);
-      setMessages(data.messages);
-      setHasMore(data.hasMore);
-      if (data.session.task) setTaskEmbed(data.session.task);
-      hydrateState(data.state);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load session');
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, sessionId, hydrateState]);
-
   useEffect(() => {
-    void loadSession();
-  }, [loadSession]);
+    setLoading(sessionQuery.isPending && sessionQuery.data === undefined);
+    if (sessionQuery.error && sessionQuery.data === undefined) {
+      setError(
+        sessionQuery.error instanceof Error
+          ? sessionQuery.error.message
+          : 'Failed to load session'
+      );
+    }
+    if (!sessionQuery.data) return;
+
+    setError(null);
+    setSession(sessionQuery.data.session);
+    setMessages(sessionQuery.data.messages);
+    setHasMore(sessionQuery.data.hasMore);
+    setTaskEmbed(sessionQuery.data.session.task ?? null);
+    const serverStillHasStaleSleepingState =
+      sleepingWakePendingRef.current &&
+      sessionQuery.data.session.status === 'sleeping' &&
+      !isWorkingActivity(sessionQuery.data.state?.activity);
+    if (serverStillHasStaleSleepingState) {
+      hydratePlan(sessionQuery.data.state);
+    } else {
+      if (
+        sessionQuery.data.session.status !== 'sleeping' ||
+        isWorkingActivity(sessionQuery.data.state?.activity)
+      ) {
+        sleepingWakePendingRef.current = false;
+      }
+      hydrateState(sessionQuery.data.state);
+    }
+  }, [
+    sessionQuery.data,
+    sessionQuery.error,
+    sessionQuery.isPending,
+    hydrateState,
+    hydratePlan,
+  ]);
 
   // Fetch workspace and node details
   useEffect(() => {
@@ -445,6 +526,16 @@ export function useSessionLifecycle(
           lastPollFingerprint = fingerprint;
           setSession(data.session);
           setMessages((prev) => mergeMessages(prev, data.messages, 'replace'));
+          queryClient.setQueryData<ChatSessionDetailResponse | undefined>(
+            sessionMessagesQueryKey,
+            (old) =>
+              old
+                ? {
+                    ...data,
+                    messages: mergeMessages(old.messages, data.messages, 'replace'),
+                  }
+                : data
+          );
           if (data.session.task) setTaskEmbed(data.session.task);
         }
         const wakeAttemptFailed =
@@ -490,7 +581,16 @@ export function useSessionLifecycle(
       clearInterval(pollInterval);
       abortController.abort();
     };
-  }, [session?.status, projectId, sessionId, hydrateState, connectionState, documentVisible]);
+  }, [
+    session?.status,
+    projectId,
+    sessionId,
+    hydrateState,
+    connectionState,
+    documentVisible,
+    queryClient,
+    sessionMessagesQueryKey,
+  ]);
 
   // ── Send follow-up via REST API ──
   const handleSendFollowUp = async () => {
@@ -523,17 +623,16 @@ export function useSessionLifecycle(
 
       // Optimistic user message
       const optimisticId = `optimistic-${crypto.randomUUID()}`;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: optimisticId,
-          sessionId,
-          role: 'user',
-          content: trimmed,
-          toolMetadata: null,
-          createdAt: Date.now(),
-        },
-      ]);
+      const optimisticMessage: ChatMessageResponse = {
+        id: optimisticId,
+        sessionId,
+        role: 'user',
+        content: trimmed,
+        toolMetadata: null,
+        createdAt: Date.now(),
+      };
+      setMessages((prev) => [...prev, optimisticMessage]);
+      updateCachedMessages([optimisticMessage], 'append');
 
       // Persist via DO WebSocket
       if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
@@ -590,24 +689,23 @@ export function useSessionLifecycle(
       try {
         const result = await uploadSessionFiles(projectId, sessionId, fileArray);
         const names = result.files.map((f) => f.name).join(', ');
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: `optimistic-upload-${crypto.randomUUID()}`,
-            sessionId,
-            role: 'user' as const,
-            content: `Uploaded ${result.files.length} file${result.files.length > 1 ? 's' : ''}: ${names}`,
-            toolMetadata: null,
-            createdAt: Date.now(),
-          },
-        ]);
+        const optimisticUploadMessage: ChatMessageResponse = {
+          id: `optimistic-upload-${crypto.randomUUID()}`,
+          sessionId,
+          role: 'user' as const,
+          content: `Uploaded ${result.files.length} file${result.files.length > 1 ? 's' : ''}: ${names}`,
+          toolMetadata: null,
+          createdAt: Date.now(),
+        };
+        setMessages((prev) => [...prev, optimisticUploadMessage]);
+        updateCachedMessages([optimisticUploadMessage], 'append');
       } catch (err) {
         console.error('File upload failed:', err);
       } finally {
         setUploading(false);
       }
     },
-    [projectId, sessionId]
+    [projectId, sessionId, updateCachedMessages]
   );
 
   // Cancel the current in-flight prompt via REST API
@@ -644,6 +742,7 @@ export function useSessionLifecycle(
         setFirstItemIndex((fi) => fi - actualAdded);
         return merged;
       });
+      updateCachedMessages(data.messages, 'prepend');
       setHasMore(data.hasMore);
     } finally {
       setLoadingMore(false);
@@ -692,13 +791,14 @@ export function useSessionLifecycle(
             setFirstItemIndex((fi) => fi - actualAdded);
             return merged;
           });
+          updateCachedMessages(accumulated, 'prepend');
         }
         setHasMore(more);
       } finally {
         setLoadingMore(false);
       }
     },
-    [projectId, sessionId]
+    [projectId, sessionId, updateCachedMessages]
   );
 
   return {

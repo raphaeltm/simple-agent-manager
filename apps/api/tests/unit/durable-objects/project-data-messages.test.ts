@@ -77,7 +77,7 @@ describe('ProjectData messages getMessages', () => {
     const bad = makeRow({ id: 'bad-compact', content: null });
     const sql = makeSql([good, bad]);
 
-    const result = getMessages(sql, 'session-1', 2, null, undefined, true);
+    const result = getMessages(sql, 'session-1', 2, null, null, undefined, true);
 
     expect(result.messages.map((message) => message.id)).toEqual(['good']);
     expect(warn).toHaveBeenCalledWith(
@@ -112,12 +112,23 @@ describe('ProjectData messages getMessages', () => {
     const followUp = makeRow({ id: 'follow-up', content: 'Follow-up prompt', created_at: 3000, sequence: 3 });
     const sql = makeSql([initialPrompt, followUp]);
 
-    const result = getMessages(sql, 'session-1', 1, null, ['user'], true, 'asc');
+    const result = getMessages(sql, 'session-1', 1, null, null, ['user'], true, 'asc');
 
     expect(sql.exec.mock.calls[0]?.[0]).toContain('ORDER BY created_at ASC, sequence ASC');
     expect(sql.exec.mock.calls[0]?.slice(1)).toEqual(['session-1', 'user', 2]);
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0]?.content).toBe('Initial prompt');
     expect(result.hasMore).toBe(true);
+  });
+
+  it('supports forward-cursor delta lookups after a cached message timestamp', () => {
+    const newMessage = makeRow({ id: 'new', content: 'New', created_at: 4000, sequence: 4 });
+    const sql = makeSql([newMessage]);
+
+    const result = getMessages(sql, 'session-1', 10, null, 3000, undefined, false, 'asc');
+
+    expect(sql.exec.mock.calls[0]?.[0]).toContain('AND created_at > ?');
+    expect(sql.exec.mock.calls[0]?.slice(1)).toEqual(['session-1', 3000, 11]);
+    expect(result.messages.map((message) => message.id)).toEqual(['new']);
   });
 });

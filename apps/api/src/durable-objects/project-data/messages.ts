@@ -351,6 +351,7 @@ export function getMessages(
   sessionId: string,
   limit: number = 1000,
   before: number | null = null,
+  after: number | null = null,
   roles?: string[],
   compact: boolean = false,
   order: 'asc' | 'desc' = 'desc',
@@ -363,6 +364,11 @@ export function getMessages(
   if (before !== null) {
     query += ' AND created_at < ?';
     params.push(before);
+  }
+
+  if (after !== null) {
+    query += ' AND created_at > ?';
+    params.push(after);
   }
 
   if (roles && roles.length > 0) {

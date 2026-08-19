@@ -422,6 +422,7 @@ export class ProjectData extends DurableObject<Env> {
     sessionId: string,
     limit: number = 1000,
     before: number | null = null,
+    after: number | null = null,
     roles?: string[],
     compact: boolean = false,
     order: 'asc' | 'desc' = 'desc'
@@ -432,6 +433,7 @@ export class ProjectData extends DurableObject<Env> {
       sessionId,
       limit,
       before,
+      after,
       roles,
       compact,
       order,

@@ -1167,6 +1167,7 @@ describe('MCP Routes', () => {
         'chat-session-99',
         5,
         null,
+        null,
         ['assistant'],
         false,
         'desc'
@@ -1581,6 +1582,7 @@ describe('MCP Routes', () => {
       expect(mockDoStub.getMessages).toHaveBeenCalledWith(
         'sess-1',
         expect.any(Number),
+        null,
         null,
         ['user', 'assistant'],
         false,
@@ -3273,6 +3275,7 @@ describe('MCP Routes', () => {
         'sess-1',
         expect.any(Number),
         null,
+        null,
         ['user', 'assistant'],
         false,
         'desc'
@@ -3294,6 +3297,7 @@ describe('MCP Routes', () => {
       expect(mockDoStub.getMessages).toHaveBeenCalledWith(
         'sess-1',
         expect.any(Number),
+        null,
         null,
         ['user', 'assistant'],
         false,
@@ -3317,6 +3321,7 @@ describe('MCP Routes', () => {
       expect(mockDoStub.getMessages).toHaveBeenCalledWith(
         'sess-1',
         expect.any(Number),
+        null,
         null,
         ['user', 'assistant'],
         false,
@@ -3700,6 +3705,7 @@ describe('MCP Routes', () => {
         task.chat_session_id,
         1,
         null,
+        null,
         ['assistant'],
         false,
         'desc'
@@ -3707,6 +3713,7 @@ describe('MCP Routes', () => {
       expect(mockDoStub.getMessages).toHaveBeenCalledWith(
         task.chat_session_id,
         5,
+        null,
         null,
         ['assistant'],
         false,

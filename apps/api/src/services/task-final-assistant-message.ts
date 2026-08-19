@@ -20,6 +20,7 @@ export async function getLatestAssistantMessageForTask(
       sessionId,
       1,
       null,
+      null,
       ['assistant'],
       false,
       'desc'

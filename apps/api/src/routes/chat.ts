@@ -9,6 +9,7 @@
 import type { ChatSessionTaskEmbed } from '@simple-agent-manager/shared';
 import {
   DEFAULT_CHAT_COMPACT_MODE,
+  DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT,
   DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
   DEFAULT_CHAT_SESSION_MESSAGE_MAX,
   isTaskExecutionStep,
@@ -232,6 +233,14 @@ chatRoutes.get('/:sessionId', async (c) => {
   const limit = getSessionMessageLimit(c.env, c.req.query('limit'));
   const beforeParam = c.req.query('before');
   const before = beforeParam ? Number.parseInt(beforeParam, 10) : null;
+  const afterParam = c.req.query('after');
+  const after = afterParam ? Number.parseInt(afterParam, 10) : null;
+  const configuredDeltaLimit = Number.parseInt(c.env.CHAT_SESSION_DELTA_MESSAGE_LIMIT || '', 10);
+  const deltaLimit =
+    Number.isFinite(configuredDeltaLimit) && configuredDeltaLimit > 0
+      ? configuredDeltaLimit
+      : DEFAULT_CHAT_SESSION_DELTA_MESSAGE_LIMIT;
+  const effectiveLimit = after !== null && c.req.query('limit') === undefined ? deltaLimit : limit;
 
   const compactDefault = (c.env.CHAT_COMPACT_MODE_DEFAULT ?? '').toLowerCase();
   const compact = compactDefault === 'false' ? false : DEFAULT_CHAT_COMPACT_MODE;
@@ -242,8 +251,9 @@ chatRoutes.get('/:sessionId', async (c) => {
       c.env,
       projectId,
       sessionId,
-      limit,
+      effectiveLimit,
       before,
+      after,
       undefined,
       compact
     );
@@ -347,6 +357,7 @@ chatRoutes.get('/:sessionId/messages', async (c) => {
 
   const limit = getSessionMessageLimit(c.env, c.req.query('limit'));
   const before = getBeforeCursor(c.req.query('before'));
+  const after = getBeforeCursor(c.req.query('after'));
   const roles = getRequestedRoles(c.req.query('roles') ?? c.req.query('role'));
   const order = getMessageOrder(c.req.query('order'));
 
@@ -360,6 +371,7 @@ chatRoutes.get('/:sessionId/messages', async (c) => {
     sessionId,
     limit,
     before,
+    after,
     roles,
     compact,
     order
@@ -533,6 +545,7 @@ chatRoutes.post('/:sessionId/summarize', async (c) => {
     projectId,
     sessionId,
     1000,
+    null,
     null,
     undefined,
     false
