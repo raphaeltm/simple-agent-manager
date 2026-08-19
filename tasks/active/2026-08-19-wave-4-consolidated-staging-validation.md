@@ -162,6 +162,29 @@ new build), so this is **not** attributable to the performance branch and is
 **not** reported as a regression. It is worth a follow-up investigation against
 rule 60's round-trip budgets.
 
+### Chat-page 404s — checked, expected behavior
+
+Two console 404s appear on the project chat page. Ruled out the serious
+possibility first (a failed lazy chunk would be an item B regression):
+
+- All 30 route-visits in the regression sweep recorded **zero** `requestFailed`
+  and **zero** `failedApi`.
+- Every asset referenced by the deployed `index.html` returns 200.
+
+Root cause, established from D1 without needing a browser session:
+
+- Chat session `e955988f-...` belongs to task `01KVT1HAB4WQ017TXJPA6T3S89`,
+  status `completed`, `workspace_id = 01KVT1HEWADVMV730TG1FK4PAJ`.
+- That workspace row is `status='deleted'`.
+- `workspaces` holds **196 rows, 0 alive** — every staging workspace has been
+  reaped, which is exactly the "staging runs zero VMs at rest" capacity policy.
+- The endpoint itself exists: an unauthenticated probe of
+  `/api/workspaces/01KVT1HEWADVMV730TG1FK4PAJ` returns **401, not 404**, so this
+  is not a missing or renamed route.
+
+A completed session whose workspace has been cleaned up is the expected steady
+state. Not a regression.
+
 ### Onboarding overlay — checked, not a regression
 
 `/dashboard` renders the cloud-onboarding wizard overlay for the smoke user at
