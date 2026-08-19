@@ -26,6 +26,13 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
   updateNotificationPreference: mocks.updateNotificationPreference,
 }));
 
+
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
+}));
+
 import { SettingsNotifications } from '../../../src/pages/SettingsNotifications';
 
 function renderSettingsNotifications() {

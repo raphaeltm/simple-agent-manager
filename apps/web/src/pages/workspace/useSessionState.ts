@@ -5,6 +5,8 @@ import type { NavigateFunction } from 'react-router';
 
 import type { ChatSessionHandle } from '../../components/ChatSession';
 import type { SessionTokenUsage } from '../../components/WorkspaceSidebar';
+import { useAgentCatalog } from '../../hooks/useAgentCatalog';
+import { useQueryScope } from '../../hooks/useQueryScope';
 import {
   createAgentSession,
   listAgentSessions,
@@ -13,8 +15,6 @@ import {
 } from '../../lib/api';
 import { isOrphanedSession, isSessionActive } from '../../lib/session-utils';
 import type { ViewMode } from './types';
-import { useAgentCatalog } from '../../hooks/useAgentCatalog';
-import { useQueryScope } from '../../hooks/useQueryScope';
 
 export interface UseSessionStateResult {
   sessionsLoading: boolean;

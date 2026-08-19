@@ -16,10 +16,10 @@ import {
 import { Button } from '@simple-agent-manager/ui';
 import { useCallback, useEffect, useId, useMemo, useState } from 'react';
 
-import { useToast } from '../hooks/useToast';
-import { updateProject } from '../lib/api';
 import { useCredentials } from '../hooks/useCredentials';
 import { useQueryScope } from '../hooks/useQueryScope';
+import { useToast } from '../hooks/useToast';
+import { updateProject } from '../lib/api';
 
 /** Format milliseconds as a human-readable duration. */
 function formatMs(ms: number): string {

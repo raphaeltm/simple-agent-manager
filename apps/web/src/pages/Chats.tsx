@@ -2,8 +2,8 @@ import { Alert, EmptyState, PageLayout, SkeletonList } from '@simple-agent-manag
 import { MessageSquare } from 'lucide-react';
 import { useNavigate } from 'react-router';
 
-import { useQueryScope } from '../hooks/useQueryScope';
 import { useAllChatSessions } from '../hooks/useAllChatSessions';
+import { useQueryScope } from '../hooks/useQueryScope';
 import {
   formatRelativeTime,
   getLastActivity,

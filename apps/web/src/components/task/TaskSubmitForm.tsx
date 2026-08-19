@@ -9,7 +9,9 @@ import { ATTACHMENT_DEFAULTS, SAFE_FILENAME_REGEX } from '@simple-agent-manager/
 import { Paperclip, Settings, X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useId, useRef, useState } from 'react';
 
+import { useAgentProfiles } from '../../hooks/useAgentProfiles';
 import { useProviderCatalog } from '../../hooks/useProviderCatalog';
+import { useQueryScope } from '../../hooks/useQueryScope';
 import type { TaskAttachmentRef } from '../../lib/api';
 import {
   getProject,
@@ -22,8 +24,6 @@ import { ProfileFormDialog } from '../agent-profiles/ProfileFormDialog';
 import { ProfileSelector } from '../agent-profiles/ProfileSelector';
 import { SkillSelector } from '../skills/SkillSelector';
 import { SplitButton } from '../ui/SplitButton';
-import { useAgentProfiles } from '../../hooks/useAgentProfiles';
-import { useQueryScope } from '../../hooks/useQueryScope';
 import {
   formatProviderCatalogContext,
   formatVmSizeOption,

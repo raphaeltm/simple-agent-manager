@@ -15,6 +15,8 @@ import { X } from 'lucide-react';
 import { type FC, useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
+import { useAgentProfiles } from '../../hooks/useAgentProfiles';
+import { useQueryScope } from '../../hooks/useQueryScope';
 import { useToast } from '../../hooks/useToast';
 import { createTrigger, updateTrigger } from '../../lib/api';
 import { useProjectContext } from '../../pages/ProjectContext';
@@ -36,8 +38,6 @@ import { TriggerProfileSelect } from './TriggerProfileSelect';
 import { TriggerPromptTemplate } from './TriggerPromptTemplate';
 import { TriggerSourceSelector } from './TriggerSourceSelector';
 import { WebhookTriggerFields } from './WebhookTriggerFields';
-import { useAgentProfiles } from '../../hooks/useAgentProfiles';
-import { useQueryScope } from '../../hooks/useQueryScope';
 
 // ---------------------------------------------------------------------------
 // Props

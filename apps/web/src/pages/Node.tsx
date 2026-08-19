@@ -15,6 +15,7 @@ import { SoftwareSection } from '../components/node/SoftwareSection';
 import { SystemResourcesSection } from '../components/node/SystemResourcesSection';
 import { useNodeSystemInfo } from '../hooks/useNodeSystemInfo';
 import { useProviderCatalog } from '../hooks/useProviderCatalog';
+import { useQueryScope } from '../hooks/useQueryScope';
 import { useToast } from '../hooks/useToast';
 import { useVisibilityAwarePoll } from '../hooks/useVisibilityAwarePoll';
 import {
@@ -28,7 +29,6 @@ import {
   stopWorkspace,
 } from '../lib/api';
 import { NODE_DETAIL_POLL_MS, NODE_EVENTS_POLL_MS } from '../lib/poll-intervals';
-import { useQueryScope } from '../hooks/useQueryScope';
 
 export function Node() {
   const navigate = useNavigate();

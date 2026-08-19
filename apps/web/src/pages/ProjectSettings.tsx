@@ -22,10 +22,10 @@ import {
 } from '../components/vm/format-vm-size';
 import { VmSizeCard } from '../components/vm/VmSizeCard';
 import { useProviderCatalog } from '../hooks/useProviderCatalog';
+import { useQueryScope } from '../hooks/useQueryScope';
 import { useToast } from '../hooks/useToast';
 import { deleteProject, updateProject } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
-import { useQueryScope } from '../hooks/useQueryScope';
 
 const PROJECT_SETTINGS_TABS = [
   { id: 'general', label: 'General', path: 'general' },

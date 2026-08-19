@@ -2,9 +2,9 @@ import type { Task } from '@simple-agent-manager/shared';
 import { Button, Input } from '@simple-agent-manager/ui';
 import { type FormEvent, useState } from 'react';
 
-import { ProfileSelector } from '../agent-profiles/ProfileSelector';
 import { useAgentProfiles } from '../../hooks/useAgentProfiles';
 import { useQueryScope } from '../../hooks/useQueryScope';
+import { ProfileSelector } from '../agent-profiles/ProfileSelector';
 
 export interface TaskFormValues {
   title: string;

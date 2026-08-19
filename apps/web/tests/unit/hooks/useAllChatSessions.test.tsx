@@ -44,6 +44,30 @@ describe('useAllChatSessions', () => {
     mocks.getAllChats.mockResolvedValue({ sessions: [SESSION], total: 1 });
   });
 
+  it('shows first-load loading before any data resolves', () => {
+    const { Wrapper } = createWrapper();
+    mocks.getAllChats.mockImplementation(() => new Promise(() => {}));
+
+    const { result } = renderHook(() => useAllChatSessions('user-1'), { wrapper: Wrapper });
+
+    expect(result.current.loading).toBe(true);
+    expect(result.current.sessions).toEqual([]);
+    expect(result.current.error).toBeNull();
+  });
+
+  it('loads an empty successful response as an explicit empty state', async () => {
+    const { Wrapper } = createWrapper();
+    mocks.getAllChats.mockResolvedValue({ sessions: [], total: 0 });
+
+    const { result } = renderHook(() => useAllChatSessions('user-1'), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.sessions).toEqual([]);
+    // An empty list is a real answer, not a failure — the page must be free to show
+    // its empty state rather than an error.
+    expect(result.current.error).toBeNull();
+  });
+
   it('maps startedAt onto the createdAt compat field consumers expect', async () => {
     const { Wrapper } = createWrapper();
     const { result } = renderHook(() => useAllChatSessions('user-1'), { wrapper: Wrapper });

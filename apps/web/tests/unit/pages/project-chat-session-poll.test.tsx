@@ -28,6 +28,12 @@ const mocks = vi.hoisted(() => ({
   connectionState: 'connected' as 'connected' | 'connecting' | 'disconnected',
 }));
 
+// `useQueryScope()` reads the authenticated identity, and every migrated query
+// is keyed by it. Without a provider `useAuth` throws, so supply a stable identity.
+vi.mock('../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
+}));
+
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../src/lib/api')>()),
   listChatSessions: mocks.listChatSessions,
@@ -64,6 +70,7 @@ vi.mock('../../../src/components/project-message-view', () => ({
 
 import { ProjectChat } from '../../../src/pages/project-chat';
 import { ProjectContext, type ProjectContextValue } from '../../../src/pages/ProjectContext';
+import { QueryTestWrapper } from '../../../test-utils/query-test-utils';
 
 const PROJECT_ID = 'proj-1';
 
@@ -92,7 +99,7 @@ function renderProjectChat() {
         </Routes>
       </ProjectContext.Provider>
     </MemoryRouter>
-  );
+  , { wrapper: QueryTestWrapper });
 }
 
 /** Waits for the initial `loadSessions` to settle, then zeroes the counters. */
