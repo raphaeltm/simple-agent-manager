@@ -102,22 +102,22 @@ discriminating control test).
 
 ## Implementation Checklist
 
-- [ ] Extract the provider-aware ensure logic into a shared service
+- [x] Extract the provider-aware ensure logic into a shared service
       `apps/api/src/services/workspace-branch.ts`, returning a structured result
       (`exists` / `created` / `skipped` / `unavailable` + reason) instead of a bare boolean
-- [ ] Re-point `durable-objects/task-runner/workspace-branch.ts` at the shared service; keep the
+- [x] Re-point `durable-objects/task-runner/workspace-branch.ts` at the shared service; keep the
       DO-only concerns (recovery-authority assertion, `task_runner_do.ensure_branch.*` logs,
       best-effort swallow) in the wrapper. No behaviour change for VMs.
-- [ ] Call the shared helper from `acceptInstantSession()` (`services/instant-session.ts`) **before**
+- [x] Call the shared helper from `acceptInstantSession()` (`services/instant-session.ts`) **before**
       `createNodeRecord()`, i.e. before any container is allocated
-- [ ] Short-circuit when the resolved branch equals the project default branch, so the browser
+- [x] Short-circuit when the resolved branch equals the project default branch, so the browser
       Instant chat path adds zero latency and zero GitHub API calls
-- [ ] Throw a clear, actionable error (naming the branch and the reason) when the branch cannot be
+- [x] Throw a clear, actionable error (naming the branch and the reason) when the branch cannot be
       ensured, so `dispatch_task` returns it synchronously instead of a later opaque 500
-- [ ] All timeouts/limits configurable — no hardcoded values (Principle XI)
-- [ ] Tests (see Acceptance Criteria)
-- [ ] Post-mortem + process fix in `.claude/rules/` targeting the *class* of bug
-- [ ] File a SAM idea for the deferred agent-side `baseBranch` fallback in `cloneStandaloneRepository`
+- [x] All timeouts/limits configurable — no hardcoded values (Principle XI)
+- [x] Tests (see Acceptance Criteria)
+- [x] Post-mortem + process fix in `.claude/rules/` targeting the *class* of bug
+- [x] File a SAM idea for the deferred agent-side `baseBranch` fallback in `cloneStandaloneRepository` — idea `01M0D1JSX5W76CEFZSD2J43S7W` (plus `01M0D1K634N0X3PZE8ECZYCTVH` for the shared-installation no-op found en route)
 
 ## Acceptance Criteria
 
@@ -145,3 +145,41 @@ discriminating control test).
 - `.claude/rules/35-vertical-slice-testing.md` — realistic cross-boundary state
 - `.claude/rules/54-vm-agent-rollout-compatibility.md` — why the agent-side fallback is deferred
 - `.claude/rules/11-fail-fast-patterns.md` — fail closed at the boundary
+
+
+## Post-Mortem
+
+**What broke.** Every MCP-dispatched Instant (cf-container) task failed with
+`Node Agent request failed: 500 … standalone git clone failed: exit status 128 … fatal: Remote
+branch sam/<slug>-<suffix> not found in upstream origin`, after a container had already been
+allocated. 35 production tasks, 2026-07-29 → 2026-08-19, 30 of them in August, across multiple
+projects.
+
+**Root cause.** `dispatch-tool.ts:362` sets `checkoutBranch = explicitBranch || branchName`, where
+`branchName` is a branch generated moments earlier and never pushed. The VM runtime tolerates that
+because `TaskRunner` pre-creates the ref (`ensureBranchExistsOnRemote`) *and* `bootstrap.go` clones
+`BaseBranch` then `git checkout -b`s the target. The Instant runtime does neither: it forwards only
+`branch`, and `cloneStandaloneRepository` runs a bare `git clone --branch`.
+
+**Timeline.** The identical failure existed on VMs from 2026-03-16 (26 tasks) and was fixed on
+2026-06-02 by `tasks/archive/2026-06-02-ensure-branch-exists-before-clone.md` — zero VM occurrences
+since. The Instant dispatch branch landed ~8 weeks later without the guard, and the same bug
+reappeared on 2026-07-29. It ran for three weeks before being reported.
+
+**Why it wasn't caught.** The guard was written at a runtime-specific altitude (inside the TaskRunner
+DO) even though it expresses a property of the repository, not of that orchestrator — its own doc
+comment generalises ("called before workspace provisioning") while having exactly one caller. Adding
+a runtime therefore opted out of it silently. No test asserted the precondition at the
+operation level, so the Instant path could be added with a fully green suite. The failure was also
+easy to misread as intermittent: `chat-start.ts` passes no branch and so was never affected.
+
+**Class of bug.** A cross-cutting precondition implemented per-orchestrator instead of per-operation,
+so a newly added execution substrate silently skips it. Sibling of `.claude/rules/44`'s
+"enumerate every writer", applied to provisioning paths rather than storage writers.
+
+**Process fix.** New `.claude/rules/61-guards-must-cover-every-runtime.md`: cross-runtime
+preconditions live in `services/` and are called by every substrate; every substrate must be
+enumerated in the PR; per-runtime best-effort must be justified against a *named* fallback;
+"known bad" (`missing`) must be distinguished from "could not check" (`unknown`) and only the former
+may block; and the test matrix must include a discriminating control on the runtime that is
+deliberately best-effort, so a later "make it consistent" refactor cannot break it with a green suite.
