@@ -540,6 +540,12 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   DO_RETRY_MAX_DELAY_MS?: string;
   // Max per-isolate memo entries for ProjectData DOs with a persisted projectId
   PROJECT_DATA_ENSURE_MEMO_MAX_ENTRIES?: string;
+  /**
+   * Bounded budget for the TaskRunner -> ProjectData wake-progress broadcast.
+   * Background control-loop call, so it gets its own short timeout rather than the
+   * interactive node-agent default (rule 47).
+   */
+  WAKE_PROGRESS_BROADCAST_TIMEOUT_MS?: string;
   // TaskRunner DO configuration (TDF-2: alarm-driven orchestration)
   TASK_RUNNER_STEP_MAX_RETRIES?: string;
   TASK_RUNNER_RETRY_BASE_DELAY_MS?: string;

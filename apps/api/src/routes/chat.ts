@@ -39,6 +39,7 @@ import * as chatPersistence from '../services/chat-persistence';
 import * as projectDataService from '../services/project-data';
 import { isTaskStatus } from '../services/task-status';
 import { resolveChatAgentState } from './chat-agent-state';
+import { attachWakeState } from './chat/wake-state';
 import { registerChatCancelRoute } from './chat-cancel';
 import { chatForkRoutes } from './chat-fork';
 import { recordChatSessionLoadFailure } from './chat-load-diagnostics';
@@ -321,28 +322,11 @@ chatRoutes.get('/:sessionId', async (c) => {
     lookupFailureEvent: 'chat.agent_session_id_lookup_failed',
   });
 
-  let stateWithRecovery = state;
-  if (sessionRecord.status === 'sleeping') {
-    try {
-      const [snapshotRow] = await db
-        .select({ recoveryStatus: schema.sessionSnapshots.recoveryStatus })
-        .from(schema.sessionSnapshots)
-        .where(eq(schema.sessionSnapshots.chatSessionId, sessionId))
-        .limit(1);
-      const rs = snapshotRow?.recoveryStatus;
-      if (rs === 'waking' || rs === 'restored' || rs === 'failed') {
-        stateWithRecovery = state
-          ? { ...state, recoveryStatus: rs }
-          : { activity: 'idle' as const, activityAt: 0, statusError: null, currentPlan: null, planUpdatedAt: null, promptStartedAt: null, agentType: null, lastStopReason: null, runtimeWorkState: null, runtimeWorkCount: null, runtimeWorkSource: null, runtimeWorkUpdatedAt: null, runtimeWorkProgressAt: null, recoveryStatus: rs };
-      }
-    } catch (err) {
-      log.warn('chat.recovery_status_lookup_failed', {
-        projectId,
-        sessionId,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
+  const stateWithRecovery = await attachWakeState(db, state, {
+    projectId,
+    sessionId,
+    sessionStatus: sessionRecord.status,
+  });
 
   return c.json({
     session: (

@@ -362,6 +362,13 @@ export interface SessionStateSnapshot {
   runtimeWorkProgressAt: number | null;
   /** D1-sourced recovery status from session_snapshots (sleep/wake lifecycle). */
   recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
+  /**
+   * Execution step of the replacement TaskRunner currently waking this session,
+   * resolved from `session_snapshots.recovery_task_id` -> `tasks.execution_step`.
+   * Drives phase-level wake progress in the UI. Null when no wake is in flight or
+   * the recovery task has not reported a step yet.
+   */
+  wakePhase?: TaskExecutionStep | null;
 }
 
 /** Which end of the system produced the authoritative activity value. */

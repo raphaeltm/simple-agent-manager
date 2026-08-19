@@ -32,6 +32,7 @@ import { ConnectionBanner } from './MessageBanners';
 import { SessionHeader } from './SessionHeader';
 import { StaleActivityNotice } from './StaleActivityNotice';
 import type { TimelineJumpTarget } from './timeline-types';
+import { WakeProgressBanner } from './WakeProgressBanner';
 import { chatMessagesToConversationItems } from './types';
 import { useSessionLifecycle } from './useSessionLifecycle';
 import { useSessionTimeline } from './useSessionTimeline';
@@ -573,15 +574,20 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
         </div>
       )}
 
-      {lc.sessionState === 'sleeping' && lc.agentActivity !== 'idle' && (
-        <div
-          role="status"
-          aria-label="Sleeping session wake status"
-          className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-surface text-xs text-fg-muted"
-        >
-          <Spinner size="sm" />
-          <span>Waking and restoring session...</span>
-        </div>
+      {/*
+        Wake progress. `isWaking` is the server-derived signal (D1 hydrate + socket
+        push). `agentActivity !== 'idle'` is retained as the pre-existing local
+        fallback so a wake still shows a banner when no phase signal is available —
+        e.g. an API that predates `wakePhase`, or a wake claimed before the
+        replacement runner has written its first execution step.
+      */}
+      {lc.sessionState === 'sleeping' && (lc.isWaking || lc.agentActivity !== 'idle') && (
+        <WakeProgressBanner
+          wakePhase={lc.wakePhase}
+          elapsed={
+            lc.promptStartedAt != null ? <ElapsedTime startedAt={lc.promptStartedAt} /> : null
+          }
+        />
       )}
 
       {/* Resume / delivery error banner with retry */}

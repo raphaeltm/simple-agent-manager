@@ -47,6 +47,7 @@ import { checkRuntimeHeartbeatTimeouts } from './runtime-heartbeat-policy';
 import * as sessionActivityReconciliation from './session-activity-reconciliation';
 import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
+import * as sessionWakeProgress from './session-wake-progress';
 import * as sessions from './sessions';
 import { resolveTaskWaitConfig } from './task-wait-config';
 import { processTaskWaits } from './task-wait-supervisor';
@@ -227,6 +228,27 @@ export class ProjectData extends DurableObject<Env> {
       );
     }
     return updated;
+  }
+
+  /**
+   * Broadcast live wake progress for a sleeping conversation.
+   *
+   * Called by the replacement TaskRunner at each execution-step transition so the
+   * wake banner updates without waiting for the client's poll. Emit-only — D1
+   * remains the durable record, so a missed broadcast is recovered by the next
+   * hydrate (`routes/chat/wake-state.ts`). See `session-wake-progress.ts`.
+   */
+  async publishSessionWakeProgress(
+    input: sessionWakeProgress.SessionWakeProgressInput
+  ): Promise<void> {
+    sessionWakeProgress.publishSessionWakeProgress(
+      {
+        broadcastEvent: (type, payload, sessionId) =>
+          this.broadcastEvent(type, payload, sessionId),
+      },
+      input,
+      Date.now()
+    );
   }
 
   async failSession(sessionId: string, errorMessage: string | null = null): Promise<void> {

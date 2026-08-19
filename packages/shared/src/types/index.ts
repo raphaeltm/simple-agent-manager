@@ -233,6 +233,9 @@ export {
   TASK_STATUSES,
   TASK_TERMINAL_STATUSES,
   validateCompletionEvidence,
+  WAKE_PHASE_LABELS,
+  WAKE_PHASE_PENDING_LABEL,
+  wakePhaseLabel,
 } from './task';
 
 // Session (Chat, Agent, ACP)

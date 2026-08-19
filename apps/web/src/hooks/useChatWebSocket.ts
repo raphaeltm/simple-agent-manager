@@ -1,4 +1,8 @@
-import { DEFAULT_CHAT_SESSION_MESSAGE_LIMIT } from '@simple-agent-manager/shared';
+import {
+  DEFAULT_CHAT_SESSION_MESSAGE_LIMIT,
+  isTaskExecutionStep,
+  type TaskExecutionStep,
+} from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { ChatMessageResponse, ChatSessionResponse, SessionStateSnapshot } from '../lib/api';
@@ -30,6 +34,17 @@ interface UseChatWebSocketOptions {
   onAgentActivity?: (activity: 'prompting' | 'idle' | 'recovering' | 'error', promptStartedAt?: number | null) => void;
   /** Called when the session metadata changes server-side. */
   onSessionUpdated?: (updates: Partial<Pick<ChatSessionResponse, 'topic' | 'workspaceId'>>) => void;
+  /**
+   * Called when the replacement TaskRunner waking this sleeping session advances a
+   * phase. Pushed so the wake banner updates without waiting for the fallback poll.
+   */
+  onWakeProgress?: (progress: WakeProgressUpdate) => void;
+}
+
+/** Live wake phase delta broadcast by the ProjectData DO (`session.wake_progress`). */
+export interface WakeProgressUpdate {
+  recoveryStatus: 'waking' | 'restored' | 'failed';
+  wakePhase: TaskExecutionStep | null;
 }
 
 export interface UseChatWebSocketReturn {
@@ -54,6 +69,7 @@ export function useChatWebSocket({
   onAgentCompleted,
   onAgentActivity,
   onSessionUpdated,
+  onWakeProgress,
 }: UseChatWebSocketOptions): UseChatWebSocketReturn {
   const [connectionState, setConnectionState] = useState<ChatConnectionState>('disconnected');
 
@@ -72,12 +88,14 @@ export function useChatWebSocket({
   const onAgentCompletedRef = useRef(onAgentCompleted);
   const onAgentActivityRef = useRef(onAgentActivity);
   const onSessionUpdatedRef = useRef(onSessionUpdated);
+  const onWakeProgressRef = useRef(onWakeProgress);
   onMessageRef.current = onMessage;
   onSessionStoppedRef.current = onSessionStopped;
   onCatchUpRef.current = onCatchUp;
   onAgentCompletedRef.current = onAgentCompleted;
   onAgentActivityRef.current = onAgentActivity;
   onSessionUpdatedRef.current = onSessionUpdated;
+  onWakeProgressRef.current = onWakeProgress;
 
   const getReconnectDelay = useCallback((attempt: number) => {
     return Math.min(BASE_RECONNECT_DELAY * Math.pow(2, attempt), MAX_RECONNECT_DELAY);
@@ -215,6 +233,21 @@ export function useChatWebSocket({
               || p.activity === 'error'
             ) {
               onAgentActivityRef.current?.(p.activity, p.promptStartedAt ?? null);
+            }
+          } else if (data.type === 'session.wake_progress') {
+            const p = payload;
+            if (p.sessionId !== sessionId) return;
+            if (
+              p.recoveryStatus === 'waking'
+              || p.recoveryStatus === 'restored'
+              || p.recoveryStatus === 'failed'
+            ) {
+              onWakeProgressRef.current?.({
+                recoveryStatus: p.recoveryStatus,
+                // An unknown/absent step is normal early in a wake — the runner has
+                // been claimed but has not written its first execution step yet.
+                wakePhase: isTaskExecutionStep(p.wakePhase) ? p.wakePhase : null,
+              });
             }
           }
         } catch {

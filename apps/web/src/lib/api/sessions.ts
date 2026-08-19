@@ -1,4 +1,4 @@
-import type { AgentProfileRuntime } from '@simple-agent-manager/shared';
+import type { AgentProfileRuntime, TaskExecutionStep } from '@simple-agent-manager/shared';
 
 import { request } from './client';
 
@@ -120,6 +120,11 @@ export interface SessionStateSnapshot {
   runtimeWorkUpdatedAt: number | null;
   runtimeWorkProgressAt: number | null;
   recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
+  /**
+   * Execution step of the replacement TaskRunner waking this session. Drives
+   * phase-level wake progress; null when no wake is in flight.
+   */
+  wakePhase?: TaskExecutionStep | null;
 }
 
 export interface ChatSessionDetailResponse {
