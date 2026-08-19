@@ -3,6 +3,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import * as schema from '../db/schema';
 import type { Env } from '../env';
 import { log } from '../lib/logger';
+import { isValidGitRefName } from './branch-name';
 import { getExternalInstallationId } from './github-installation-ids';
 
 /**
@@ -57,6 +58,17 @@ export interface EnsureWorkspaceBranchInput {
  * result as best-effort because `bootstrap.go` can still clone `baseBranch` and
  * `git checkout -b`, while the Instant path (`services/instant-session.ts`)
  * fails closed on `missing`.
+ *
+ * PRECONDITION — this function WRITES to the caller's repository (it creates a
+ * ref) using a GitHub App installation token. It authenticates the installation
+ * but does NOT re-verify that `userId` still has live access to `repository`.
+ * Every caller MUST already have done so on this request:
+ *   - `routes/mcp/dispatch-tool.ts` → `requireRepositoryOwnerAccess()`
+ *   - `routes/chat-start.ts` → `requireRepositoryUserAccess()`
+ *   - `durable-objects/task-runner/*` → the dispatch/submit route that started it
+ * A new caller that skips that check would be able to create refs on a
+ * repository the user no longer has access to. See
+ * `.claude/rules/61-guards-must-cover-every-runtime.md`.
  */
 export async function ensureWorkspaceBranchOnRemote(
   env: Env,
@@ -70,6 +82,16 @@ export async function ensureWorkspaceBranchOnRemote(
   }
   if (branch === baseBranch) {
     return { status: 'skipped', reason: 'checkout branch is the base branch' };
+  }
+
+  // `dispatch_task` accepts an explicit `branch` that is only checked for
+  // non-emptiness, and this guard turns it into a ref CREATE on the caller's
+  // repository. Validate the name server-side before any provider write rather
+  // than relying on the caller to have sanitized it (rule 51). A name git would
+  // reject cannot exist on any remote either, so `missing` is accurate and gives
+  // the caller an actionable error instead of a 422 from the provider.
+  if (!isValidGitRefName(branch)) {
+    return { status: 'missing', reason: 'branch name is not a valid git ref' };
   }
 
   switch (normalizeRepoProvider(input.repoProvider)) {
@@ -88,6 +110,42 @@ function normalizeRepoProvider(value: string | null | undefined): string {
 }
 
 async function ensureGitHubBranch(
+  env: Env,
+  input: EnsureWorkspaceBranchInput,
+  branch: string,
+  baseBranch: string
+): Promise<EnsureWorkspaceBranchResult> {
+  try {
+    return await ensureGitHubBranchUnguarded(env, input, branch, baseBranch);
+  } catch (err) {
+    // A THROW is not evidence the ref is absent — a rejected fetch, a GitHub
+    // App misconfiguration, or a malformed response body all land here. The
+    // Instant path fails closed on `missing`, so letting an exception escape
+    // would turn a transient GitHub blip into a failed task, which is exactly
+    // what the missing/unknown split exists to prevent. Mirrors the GitLab arm.
+    // `beforeRemoteWrite` rejections must still propagate: they mean this
+    // replacement lost its recovery authority and must not keep provisioning.
+    if (err instanceof BeforeRemoteWriteError) throw err.cause;
+    return { status: 'unknown', reason: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+/** Wraps a `beforeRemoteWrite` rejection so the guard's catch can re-throw it. */
+class BeforeRemoteWriteError extends Error {
+  constructor(readonly cause: unknown) {
+    super('beforeRemoteWrite rejected');
+  }
+}
+
+async function runBeforeRemoteWrite(input: EnsureWorkspaceBranchInput): Promise<void> {
+  try {
+    await input.beforeRemoteWrite?.();
+  } catch (err) {
+    throw new BeforeRemoteWriteError(err);
+  }
+}
+
+async function ensureGitHubBranchUnguarded(
   env: Env,
   input: EnsureWorkspaceBranchInput,
   branch: string,
@@ -122,7 +180,7 @@ async function ensureGitHubBranch(
   }
 
   const { ensureBranchExists } = await import('./github-app');
-  await input.beforeRemoteWrite?.();
+  await runBeforeRemoteWrite(input);
   const outcome = await ensureBranchExists(
     getExternalInstallationId(installation),
     owner,
@@ -150,17 +208,22 @@ async function ensureGitLabBranch(
   branch: string,
   baseBranch: string
 ): Promise<EnsureWorkspaceBranchResult> {
-  const { ensureGitLabBranchExists, getProjectGitLabRepository } = await import('./gitlab');
-  const metadata = await getProjectGitLabRepository(
-    drizzle(env.DATABASE, { schema }),
-    input.projectId
-  );
-  if (!metadata) {
-    return { status: 'unknown', reason: 'GitLab repository metadata is missing' };
-  }
-
-  await input.beforeRemoteWrite?.();
   try {
+    const { ensureGitLabBranchExists, getProjectGitLabRepository } = await import('./gitlab');
+    // NOTE: `acceptInstantSession` resolves the same GitLab metadata again via
+    // resolveWorkspaceGitSource. That second read is bounded to GitLab projects
+    // launching on a non-default branch; threading the numeric project id
+    // through WorkspaceGitSource to dedupe it would couple two unrelated
+    // contracts for a rare path (rule 60 tradeoff, taken deliberately).
+    const metadata = await getProjectGitLabRepository(
+      drizzle(env.DATABASE, { schema }),
+      input.projectId
+    );
+    if (!metadata) {
+      return { status: 'unknown', reason: 'GitLab repository metadata is missing' };
+    }
+
+    await runBeforeRemoteWrite(input);
     const created = await ensureGitLabBranchExists({
       env,
       userId: input.userId,
@@ -170,6 +233,7 @@ async function ensureGitLabBranch(
     });
     return { status: 'ready', detail: created ? 'created' : 'exists' };
   } catch (err) {
+    if (err instanceof BeforeRemoteWriteError) throw err.cause;
     // ensureGitLabBranchExists throws for both "lookup failed" and "create
     // failed" without distinguishing them, so we cannot claim positive evidence
     // that the ref is absent. Stay conservative and let the clone decide.

@@ -87,9 +87,17 @@ Making `cloneStandaloneRepository` accept a base branch would also work, but:
 - the fix that already works for VMs is a control-plane pre-condition, and reusing it keeps one
   implementation instead of two (rules 24, 59).
 
-Creating the ref up-front makes the branch durable for the clone, the wake re-clone, and the
-eventual push. The agent-side base-branch fallback is still worth having as defense in depth, but is
-a separate, rollout-coupled change → deferred (see below).
+Creating the ref up-front makes the branch durable for the clone, the wake re-clone
+(`packages/vm-agent/internal/server/session_snapshot.go:411` re-runs
+`prepareStandaloneWorkspaceRuntime` → `cloneStandaloneRepository` on restore), and the eventual push.
+
+**This control-plane fix is not complete on its own.** When a project's `github_installations` row
+is owned by a different member than the dispatching user — a real, shipped multiplayer scenario
+(`schema.ts` `project_members`) — the guard reports `unknown` and does nothing, so that population
+still hits the original clone failure. For them the deferred agent-side `baseBranch` fallback is not
+defense in depth, it is the only remaining fix. Both gaps are tracked
+(`01M0D1K634N0X3PZE8ECZYCTVH`, `01M0D1JSX5W76CEFZSD2J43S7W`); deferring them is a rollout/security
+scoping decision (rules 54, 28), not a claim that the bug is fully closed.
 
 ### Fail fast vs. best-effort
 
@@ -113,27 +121,40 @@ discriminating control test).
 - [x] Short-circuit when the resolved branch equals the project default branch, so the browser
       Instant chat path adds zero latency and zero GitHub API calls
 - [x] Throw a clear, actionable error (naming the branch and the reason) when the branch cannot be
-      ensured, so `dispatch_task` returns it synchronously instead of a later opaque 500
+      ensured, so the task fails fast with an actionable message before any container is allocated,
+      instead of a later opaque node-agent 500 discovered mid-clone. (NB: in production
+      `handleDispatchTask` runs the launch under `execCtx.waitUntil`, so the MCP tool call has
+      already returned; the error surfaces on the task via `markQueuedTaskFailed`, not as a
+      synchronous JSON-RPC error.)
 - [x] All timeouts/limits configurable — no hardcoded values (Principle XI)
 - [x] Tests (see Acceptance Criteria)
 - [x] Post-mortem + process fix in `.claude/rules/` targeting the *class* of bug
-- [x] File a SAM idea for the deferred agent-side `baseBranch` fallback in `cloneStandaloneRepository` — idea `01M0D1JSX5W76CEFZSD2J43S7W` (plus `01M0D1K634N0X3PZE8ECZYCTVH` for the shared-installation no-op found en route)
+- [x] File SAM ideas for everything deferred: `01M0D1JSX5W76CEFZSD2J43S7W` (agent-side `baseBranch`
+      fallback), `01M0D1K634N0X3PZE8ECZYCTVH` (shared-installation no-op),
+      `01M0D2PM547J75PCP7XQ7NPRQJ` (phantom `output_branch` on explicit-branch Instant dispatches)
+- [x] Address review findings: guard the GitHub/GitLab arms so a THROWN check degrades to `unknown`
+      instead of hard-failing the launch; validate the branch name server-side before any ref write;
+      add the provisioning-path enumeration test that makes rule 61 machine-checked
 
 ## Acceptance Criteria
 
-- [ ] Dispatching an Instant task with a freshly generated output branch ensures the ref on the
-      remote before the container is launched, and the clone succeeds
-- [ ] **Discriminating regression test**: an Instant launch whose branch differs from the default
+- [x] Dispatching an Instant task with a freshly generated output branch ensures the ref on the
+      remote before the container is launched — `instant-session-branch-vertical-slice.test.ts`
+      asserts the exact GitHub URLs + create-ref body. "and the clone succeeds" remains staging-only.
+- [x] **Discriminating regression test**: an Instant launch whose branch differs from the default
       branch must call the ensure helper *before* `createNodeRecord`/`createWorkspaceOnNode`. The
       test must fail against the pre-fix code.
-- [ ] When the branch cannot be ensured, no node record / workspace row / container is created and
-      the error names the branch
-- [ ] **Control test**: branch === project default branch → no GitHub API call at all
-- [ ] **Control test**: VM path stays best-effort — a failing ensure does not throw
-      (proves the fail-closed change did not leak into the DO path)
-- [ ] Provider coverage on the shared helper: GitHub exists / GitHub created / GitHub failure /
-      GitLab / `artifacts` skip / unparseable `owner/repo` / missing installation
-- [ ] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green
+- [x] When the branch cannot be ensured, no node record / workspace row / container is created and
+      the error names the branch — `instant-session-branch-guard.test.ts`
+- [x] **Control test**: branch === project default branch → no GitHub API call at all —
+      `workspace-branch.test.ts` + vertical slice (`expect(fetchMock).not.toHaveBeenCalled()`)
+- [x] **Control test**: VM path stays best-effort — a failing ensure does not throw; verified
+      discriminating (making the DO fail-closed turns it red)
+- [x] Provider coverage on the shared helper: GitHub exists / created / missing / unknown / thrown,
+      GitLab created / exists / unknown / thrown, `artifacts` skip, unparseable `owner/repo`,
+      missing installation, cross-tenant installation + owner control, invalid ref names
+- [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green (7777 unit + 671 Miniflare
+      worker tests, 0 collection errors)
 - [ ] Staging: dispatch a real cf-container task on a branch that does not exist upstream and watch
       it clone successfully
 

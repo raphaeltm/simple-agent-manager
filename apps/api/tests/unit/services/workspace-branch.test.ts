@@ -33,7 +33,10 @@ vi.mock('../../../src/services/gitlab', () => ({
 }));
 
 import type { Env } from '../../../src/env';
-import { ensureWorkspaceBranchOnRemote } from '../../../src/services/workspace-branch';
+import {
+  ensureWorkspaceBranchOnRemote,
+  logWorkspaceBranchResult,
+} from '../../../src/services/workspace-branch';
 import { createSqliteD1 } from '../../helpers/sqlite-d1';
 
 const OWNER_USER = 'user-owner';
@@ -118,6 +121,84 @@ describe('ensureWorkspaceBranchOnRemote — short circuits', () => {
     expect(mocks.ensureBranchExists).not.toHaveBeenCalled();
   });
 
+  it('rejects a branch name git would refuse, before any provider write', async () => {
+    seedInstallation(OWNER_USER);
+
+    // dispatch_task only checks that an explicit `branch` is a non-empty string,
+    // and this guard turns it into a ref CREATE on the caller's repository.
+    const invalid = [
+      'feature branch',        // space
+      'feature..branch',       // consecutive dots
+      '-leading-dash',
+      'refs/heads/.hidden',    // component starting with a dot
+      'feature.lock',          // .lock suffix
+      'feature/',              // trailing slash
+      '/leading-slash',
+      'double//slash',
+      'has@{reflog}',
+      'trailing-dot.',
+      'caret^ref',
+      'tilde~ref',
+      'colon:ref',
+      'question?ref',
+      'star*ref',
+      'bracket[ref',
+      'back\\slash',
+      '@',
+      'new\nline',
+    ];
+
+    for (const branch of invalid) {
+      const result = await ensureWorkspaceBranchOnRemote(env, baseInput({ branch }));
+      expect(result, `expected ${JSON.stringify(branch)} to be rejected`).toMatchObject({
+        status: 'missing',
+        reason: 'branch name is not a valid git ref',
+      });
+    }
+    expect(mocks.ensureBranchExists).not.toHaveBeenCalled();
+  });
+
+  it('trims surrounding whitespace rather than rejecting the branch', async () => {
+    seedInstallation(OWNER_USER);
+    mocks.ensureBranchExists.mockResolvedValue({ status: 'exists' });
+
+    await expect(
+      ensureWorkspaceBranchOnRemote(env, baseInput({ branch: '  feature/x  ' }))
+    ).resolves.toEqual({ status: 'ready', detail: 'exists' });
+
+    expect(mocks.ensureBranchExists).toHaveBeenCalledWith(
+      expect.anything(),
+      'acme',
+      'widgets',
+      'feature/x',
+      'main',
+      env
+    );
+  });
+
+  it('accepts unusual-but-legal branch names so a real branch is never refused', async () => {
+    seedInstallation(OWNER_USER);
+    mocks.ensureBranchExists.mockResolvedValue({ status: 'exists' });
+
+    const valid = [
+      'sam/fix-chat-fontmarkdown-regression-6gtq6t',
+      'feature/JIRA-123/nested/deep',
+      'release-1.2.3',
+      'user.name/thing',
+      'UPPER_and_lower-123',
+      'ünïcode-branch',
+      'a',
+    ];
+
+    for (const branch of valid) {
+      const result = await ensureWorkspaceBranchOnRemote(env, baseInput({ branch }));
+      expect(result, `expected ${JSON.stringify(branch)} to be accepted`).toEqual({
+        status: 'ready',
+        detail: 'exists',
+      });
+    }
+  });
+
   it('skips the artifacts provider, which exposes no ref API', async () => {
     const result = await ensureWorkspaceBranchOnRemote(
       env,
@@ -148,6 +229,19 @@ describe('ensureWorkspaceBranchOnRemote — GitHub', () => {
       'main',
       env
     );
+  });
+
+  it('treats a null/undefined repoProvider as github', async () => {
+    seedInstallation(OWNER_USER);
+    mocks.ensureBranchExists.mockResolvedValue({ status: 'exists' });
+
+    for (const repoProvider of [null, undefined, 'something-unknown']) {
+      mocks.ensureBranchExists.mockClear();
+      await expect(
+        ensureWorkspaceBranchOnRemote(env, baseInput({ repoProvider }))
+      ).resolves.toEqual({ status: 'ready', detail: 'exists' });
+      expect(mocks.ensureBranchExists).toHaveBeenCalledTimes(1);
+    }
   });
 
   it('reports ready/exists when the ref is already on the remote', async () => {
@@ -235,6 +329,38 @@ describe('ensureWorkspaceBranchOnRemote — GitHub', () => {
     expect(mocks.ensureBranchExists).toHaveBeenCalledTimes(1);
   });
 
+  it('degrades a THROWN check to unknown instead of escaping (transient GitHub failure)', async () => {
+    seedInstallation(OWNER_USER);
+    // A rejected fetch / GitHub App misconfig / malformed body all surface as a
+    // throw, not an error status. Escaping here would hard-fail the Instant
+    // launch, which is exactly what the missing/unknown split exists to prevent.
+    mocks.ensureBranchExists.mockRejectedValue(new Error('fetch failed'));
+
+    await expect(ensureWorkspaceBranchOnRemote(env, baseInput())).resolves.toEqual({
+      status: 'unknown',
+      reason: 'fetch failed',
+    });
+  });
+
+  it('degrades a thrown D1 installation lookup to unknown', async () => {
+    seedInstallation(OWNER_USER);
+    sqlite.close(); // simulate the D1 read blowing up mid-request
+    sqlite = new Database(':memory:');
+
+    const brokenEnv = {
+      DATABASE: {
+        prepare: () => {
+          throw new Error('D1_ERROR: storage unavailable');
+        },
+      },
+    } as unknown as Env;
+
+    const result = await ensureWorkspaceBranchOnRemote(brokenEnv, baseInput());
+
+    expect(result.status).toBe('unknown');
+    expect(mocks.ensureBranchExists).not.toHaveBeenCalled();
+  });
+
   it('runs beforeRemoteWrite before mutating the repository, and propagates its throw', async () => {
     seedInstallation(OWNER_USER);
     const boom = new Error('recovery authority revoked');
@@ -274,6 +400,38 @@ describe('ensureWorkspaceBranchOnRemote — GitLab', () => {
     ).resolves.toEqual({ status: 'ready', detail: 'exists' });
   });
 
+  it('runs beforeRemoteWrite before the GitLab write and propagates its throw', async () => {
+    mocks.getProjectGitLabRepository.mockResolvedValue({ gitlabProjectId: 4242 });
+    mocks.ensureGitLabBranchExists.mockResolvedValue(true);
+    const boom = new Error('recovery authority revoked');
+    const beforeRemoteWrite = vi.fn().mockRejectedValue(boom);
+
+    // Must NOT be swallowed into `unknown` by the provider catch: losing
+    // recovery authority means this replacement must stop provisioning.
+    await expect(
+      ensureWorkspaceBranchOnRemote(
+        env,
+        baseInput({ repoProvider: 'gitlab', beforeRemoteWrite })
+      )
+    ).rejects.toThrow(boom);
+
+    expect(beforeRemoteWrite).toHaveBeenCalledTimes(1);
+    expect(mocks.ensureGitLabBranchExists).not.toHaveBeenCalled();
+  });
+
+  it('runs beforeRemoteWrite on the GitLab happy path too', async () => {
+    mocks.getProjectGitLabRepository.mockResolvedValue({ gitlabProjectId: 4242 });
+    mocks.ensureGitLabBranchExists.mockResolvedValue(true);
+    const beforeRemoteWrite = vi.fn().mockResolvedValue(undefined);
+
+    await ensureWorkspaceBranchOnRemote(
+      env,
+      baseInput({ repoProvider: 'gitlab', beforeRemoteWrite })
+    );
+
+    expect(beforeRemoteWrite).toHaveBeenCalledTimes(1);
+  });
+
   it('reports unknown when GitLab metadata is missing', async () => {
     mocks.getProjectGitLabRepository.mockResolvedValue(null);
 
@@ -299,5 +457,35 @@ describe('ensureWorkspaceBranchOnRemote — GitLab', () => {
       status: 'unknown',
       reason: 'GitLab branch create failed: 403',
     });
+  });
+});
+
+describe('logWorkspaceBranchResult', () => {
+  const details = { taskId: 'task-1', branch: 'sam/x' };
+
+  it('logs ready at info with the detail', () => {
+    logWorkspaceBranchResult('evt', { status: 'ready', detail: 'created' }, details);
+
+    expect(mocks.log.info).toHaveBeenCalledWith('evt.ok', { ...details, detail: 'created' });
+    expect(mocks.log.warn).not.toHaveBeenCalled();
+    expect(mocks.log.debug).not.toHaveBeenCalled();
+  });
+
+  it('logs skipped at debug — the common no-op must not be warn-level noise', () => {
+    logWorkspaceBranchResult('evt', { status: 'skipped', reason: 'because' }, details);
+
+    expect(mocks.log.debug).toHaveBeenCalledWith('evt.skipped', { ...details, reason: 'because' });
+    expect(mocks.log.warn).not.toHaveBeenCalled();
+    expect(mocks.log.info).not.toHaveBeenCalled();
+  });
+
+  it('logs missing and unknown at warn, under distinct event names', () => {
+    logWorkspaceBranchResult('evt', { status: 'missing', reason: 'gone' }, details);
+    expect(mocks.log.warn).toHaveBeenCalledWith('evt.missing', { ...details, reason: 'gone' });
+
+    logWorkspaceBranchResult('evt', { status: 'unknown', reason: 'dunno' }, details);
+    expect(mocks.log.warn).toHaveBeenCalledWith('evt.unknown', { ...details, reason: 'dunno' });
+
+    expect(mocks.log.info).not.toHaveBeenCalled();
   });
 });

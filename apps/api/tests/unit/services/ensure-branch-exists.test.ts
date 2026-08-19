@@ -162,7 +162,10 @@ describe('ensureBranchExists', () => {
       'inst-123', 'owner', 'repo', 'feature-branch', 'main', mockEnv,
     );
 
-    expect(result).toMatchObject({ status: 'missing' });
+    expect(result).toEqual({
+      status: 'missing',
+      reason: 'base branch "main" could not be resolved (404)',
+    });
     expect(mocks.log.warn).toHaveBeenCalledWith(
       'github.ensure_branch.default_branch_ref_failed',
       expect.objectContaining({ status: 404 }),
@@ -180,7 +183,7 @@ describe('ensureBranchExists', () => {
       'inst-123', 'owner', 'repo', 'feature-branch', 'main', mockEnv,
     );
 
-    expect(result).toMatchObject({ status: 'missing' });
+    expect(result).toEqual({ status: 'missing', reason: 'branch creation failed (403)' });
     expect(mocks.log.warn).toHaveBeenCalledWith(
       'github.ensure_branch.create_failed',
       expect.objectContaining({ status: 403 }),
@@ -196,7 +199,7 @@ describe('ensureBranchExists', () => {
       'inst-123', 'owner', 'repo', 'feature-branch', 'main', mockEnv,
     );
 
-    expect(result).toMatchObject({ status: 'unknown' });
+    expect(result).toEqual({ status: 'unknown', reason: 'branch lookup returned 500' });
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(mocks.log.warn).toHaveBeenCalledWith(
       'github.ensure_branch.check_failed',
@@ -214,7 +217,10 @@ describe('ensureBranchExists', () => {
       'inst-123', 'owner', 'repo', 'feature-branch', 'main', mockEnv,
     );
 
-    expect(result).toMatchObject({ status: 'missing' });
+    expect(result).toEqual({
+      status: 'missing',
+      reason: 'base branch "main" returned no commit SHA',
+    });
     expect(mocks.log.warn).toHaveBeenCalledWith(
       'github.ensure_branch.no_sha',
       expect.objectContaining({ owner: 'owner', repo: 'repo' }),

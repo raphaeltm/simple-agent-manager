@@ -31,6 +31,7 @@ vi.mock('../../../../src/services/github-app', () => ({
 
 import type { TaskRunnerContext, TaskRunnerState } from '../../../../src/durable-objects/task-runner/types';
 import { ensureBranchExistsOnRemote } from '../../../../src/durable-objects/task-runner/workspace-steps';
+import { SessionRecoveryAuthorityRevokedError } from '../../../../src/services/session-recovery-authority';
 
 function makeState(overrides: {
   branch?: string;
@@ -193,14 +194,12 @@ describe('ensureBranchExistsOnRemote', () => {
     expect(mocks.ensureBranchExists).not.toHaveBeenCalled();
     // A missing installation row means the check could NOT run — it is not
     // evidence that the ref is absent, so it must surface as `unknown`.
-    expect(mocks.log.warn).toHaveBeenCalledWith(
-      'task_runner_do.ensure_branch.unknown',
-      expect.objectContaining({
-        taskId: 'task-test-001',
-        branch: 'feature-x',
-        reason: 'GitHub installation not found for this user',
-      }),
-    );
+    expect(mocks.log.warn).toHaveBeenCalledWith('task_runner_do.ensure_branch.unknown', {
+      taskId: 'task-test-001',
+      branch: 'feature-x',
+      defaultBranch: 'main',
+      reason: 'GitHub installation not found for this user',
+    });
   });
 
   it('logs a warning when the branch is confirmed missing — but does NOT throw', async () => {
@@ -226,17 +225,39 @@ describe('ensureBranchExistsOnRemote', () => {
     });
   });
 
-  it('catches errors without throwing (best-effort)', async () => {
+  it('reports a thrown provider call as unknown, without throwing (best-effort)', async () => {
+    // The shared service converts a throw to `unknown` so the Instant path
+    // cannot fail closed on a transient error; the DO still must not throw.
     mocks.ensureBranchExists.mockRejectedValue(new Error('Network timeout'));
     const state = makeState({ branch: 'feature-x' });
     const mockRc = makeContext();
 
-    await ensureBranchExistsOnRemote(state, mockRc);
+    await expect(ensureBranchExistsOnRemote(state, mockRc)).resolves.toBeUndefined();
+
+    expect(mocks.log.warn).toHaveBeenCalledWith('task_runner_do.ensure_branch.unknown', {
+      taskId: 'task-test-001',
+      branch: 'feature-x',
+      defaultBranch: 'main',
+      reason: 'Network timeout',
+    });
+  });
+
+  it('still has an outer catch for errors raised outside the shared service', async () => {
+    // The DO does its own repo_provider D1 read before delegating; that read
+    // throwing must not escape either.
+    mocks.ensureBranchExists.mockResolvedValue({ status: 'created' });
+    const state = makeState({ branch: 'feature-x' });
+    const mockRc = makeContext();
+    (mockRc.env.DATABASE.prepare as ReturnType<typeof vi.fn>).mockImplementationOnce(() => {
+      throw new Error('D1_ERROR: projects read failed');
+    });
+
+    await expect(ensureBranchExistsOnRemote(state, mockRc)).resolves.toBeUndefined();
 
     expect(mocks.log.warn).toHaveBeenCalledWith('task_runner_do.ensure_branch.error', {
       taskId: 'task-test-001',
       branch: 'feature-x',
-      error: 'Network timeout',
+      error: 'D1_ERROR: projects read failed',
     });
   });
 
@@ -247,12 +268,39 @@ describe('ensureBranchExistsOnRemote', () => {
     await ensureBranchExistsOnRemote(state, mockRc);
 
     expect(mocks.ensureBranchExists).not.toHaveBeenCalled();
-    expect(mocks.log.warn).toHaveBeenCalledWith(
-      'task_runner_do.ensure_branch.unknown',
-      expect.objectContaining({
-        reason: 'repository "invalid-repo" is not "owner/repo"',
-      }),
+    expect(mocks.log.warn).toHaveBeenCalledWith('task_runner_do.ensure_branch.unknown', {
+      taskId: 'task-test-001',
+      branch: 'feature-x',
+      defaultBranch: 'main',
+      reason: 'repository "invalid-repo" is not "owner/repo"',
+    });
+  });
+
+  it('re-throws SessionRecoveryAuthorityRevokedError instead of swallowing it', async () => {
+    // Best-effort must NOT apply here: a revoked authority means the source
+    // parent terminalized and this replacement must abort rather than keep
+    // provisioning. Previously untested on both sides of the refactor.
+    mocks.ensureBranchExists.mockResolvedValue({ status: 'created' });
+    const state = makeState({ branch: 'feature-x' });
+    const mockRc = makeContext();
+    const revoked = new SessionRecoveryAuthorityRevokedError('source task terminalized');
+    (mockRc.assertRecoveryAuthority as ReturnType<typeof vi.fn>).mockRejectedValue(revoked);
+
+    await expect(ensureBranchExistsOnRemote(state, mockRc)).rejects.toBe(revoked);
+
+    // And it must abort BEFORE writing anything to the remote.
+    expect(mocks.ensureBranchExists).not.toHaveBeenCalled();
+  });
+
+  it('still swallows an ordinary authority-check failure (best-effort)', async () => {
+    mocks.ensureBranchExists.mockResolvedValue({ status: 'created' });
+    const state = makeState({ branch: 'feature-x' });
+    const mockRc = makeContext();
+    (mockRc.assertRecoveryAuthority as ReturnType<typeof vi.fn>).mockRejectedValue(
+      new Error('transient storage read failure')
     );
+
+    await expect(ensureBranchExistsOnRemote(state, mockRc)).resolves.toBeUndefined();
   });
 
   it('warns and skips on repository with empty owner', async () => {

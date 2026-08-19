@@ -23,9 +23,11 @@ export async function ensureBranchExistsOnRemote(
   const defaultBranch = state.config.defaultBranch || 'main';
   if (state.config.branch === defaultBranch) return;
 
-  const projectRepo = await loadTaskRunnerProjectRepo(state, rc);
-
   try {
+    // Inside the try: this is a best-effort guard, so a transient D1 read
+    // failure on `projects` must not fail the task it is trying to help.
+    const projectRepo = await loadTaskRunnerProjectRepo(state, rc);
+
     const result = await ensureWorkspaceBranchOnRemote(rc.env, {
       projectId: state.projectId,
       repository: state.config.repository,

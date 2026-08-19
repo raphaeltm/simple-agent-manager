@@ -295,6 +295,23 @@ describe('acceptInstantSession — real branch guard against the GitHub boundary
     expect(mocks.nodes.createNodeRecord).toHaveBeenCalledTimes(1);
   });
 
+  it('proceeds when the GitHub call THROWS, not just when it errors', async () => {
+    // A rejected fetch is a different code path from a 500 response and was the
+    // real gap review caught: an unguarded await here escaped acceptInstantSession
+    // and hard-failed the task, contradicting "unknown never blocks".
+    fetchMock.mockRejectedValue(new TypeError('fetch failed'));
+
+    const { db } = makeDb();
+    const accepted = await acceptInstantSession(
+      db as never,
+      env,
+      launchInput(GENERATED_OUTPUT_BRANCH)
+    );
+
+    expect(accepted.branch).toBe(GENERATED_OUTPUT_BRANCH);
+    expect(mocks.nodes.createNodeRecord).toHaveBeenCalledTimes(1);
+  });
+
   it('treats an already-existing branch as ready without creating a ref', async () => {
     fetchMock
       .mockResolvedValueOnce(

@@ -94,6 +94,18 @@ tells:
   deliberately best-effort still does NOT throw. Verify it goes red if the
   fail-closed behaviour is copy-pasted across. Without this, a later "make it
   consistent" refactor breaks VMs with a green suite.
+- **Thrown-check test**: make the guard's own dependency *throw* (rejected fetch,
+  failed token mint, failed DB read), not merely return an error status, and
+  assert it degrades to `unknown`. An unguarded `await` here silently converts
+  requirement 4 into a lie — this is exactly what review caught in the first cut
+  of this fix.
+- **Machine-checked enumeration**: requirement 2 must not rely on reviewer
+  diligence. Add a test that scans the source tree for the provisioning call and
+  asserts every file either runs the guard or sits on an explicit allowlist with
+  a written reason — see
+  `apps/api/tests/unit/services/workspace-branch-guard-coverage.test.ts`. Assert
+  a non-trivial minimum file count so a broken scan cannot pass as "all clear"
+  (rule 02), and verify it goes red when an unguarded caller is added.
 
 ## Quick Compliance Check
 
@@ -101,12 +113,14 @@ tells:
 - [ ] Every substrate that performs this operation is enumerated in the PR
 - [ ] Per-runtime best-effort vs fail-closed is justified against a named fallback
 - [ ] `missing` and `unknown` are distinct; only `missing` blocks
-- [ ] Ordering, fail-closed, no-regression, and other-runtime control tests exist
+- [ ] Ordering, fail-closed, no-regression, thrown-check, and other-runtime control tests exist
+- [ ] An enumeration test makes requirement 2 machine-checked, and was verified to go red
 - [ ] The fail-closed test was verified to fail on pre-fix code
 
 ## References
 
-- Task: `tasks/archive/2026-08-19-ensure-branch-exists-before-instant-workspace.md`
+- Task: `tasks/active/2026-08-19-ensure-branch-exists-before-instant-workspace.md`
+  (moves to `tasks/archive/` on completion)
 - Prior art (the VM-only fix this rule exists to have generalised):
   `tasks/archive/2026-06-02-ensure-branch-exists-before-clone.md`
 - Implementation: `apps/api/src/services/workspace-branch.ts`

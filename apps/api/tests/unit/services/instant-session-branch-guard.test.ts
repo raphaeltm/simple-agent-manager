@@ -128,6 +128,14 @@ beforeEach(() => {
   mocks.projectData.createSession.mockResolvedValue('chat-session-1');
   mocks.projectData.persistMessage.mockResolvedValue(undefined);
   mocks.container.requireVmAgentContainer.mockReturnValue(undefined);
+  mocks.container.launchVmAgentContainer.mockImplementation(() => {
+    callOrder.push('launchContainer');
+    return Promise.resolve();
+  });
+  mocks.container.runContainerPhase.mockImplementation((_phase, _detail, fn) => {
+    callOrder.push('containerPhase');
+    return fn();
+  });
   mocks.gitSource.resolveWorkspaceGitSource.mockResolvedValue({
     repoProvider: 'github',
     cloneUrl: null,
@@ -165,6 +173,9 @@ describe('acceptInstantSession — checkout branch guard', () => {
     expect(callOrder.indexOf('ensureBranch')).toBeLessThan(
       callOrder.indexOf('insertWorkspaceRow')
     );
+    // acceptInstantSession must not have reached container allocation at all.
+    expect(callOrder).not.toContain('launchContainer');
+    expect(callOrder).not.toContain('containerPhase');
   });
 
   it('fails closed on `missing` without allocating a node, workspace, or container', async () => {

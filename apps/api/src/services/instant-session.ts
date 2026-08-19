@@ -199,8 +199,11 @@ export class InstantBranchUnavailableError extends Error {
     readonly reason: string
   ) {
     super(
-      `Branch "${branch}" does not exist on the remote and could not be created: ${reason}. ` +
-        `Push the branch, or dispatch without an explicit branch to work on a new one.`
+      // JSON-quote the branch: it can be a caller-supplied string, and this
+      // message reaches logs and MCP responses, so control characters must not
+      // pass through raw.
+      `Branch ${JSON.stringify(branch)} does not exist on the remote and could not be created: ` +
+        `${reason}. Push the branch, or dispatch without an explicit branch to work on a new one.`
     );
     this.name = 'InstantBranchUnavailableError';
   }
