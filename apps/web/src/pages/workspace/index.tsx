@@ -1,4 +1,3 @@
-import '../../styles/acp-chat.css';
 import '../../styles/workspace-chrome.css';
 
 import type {
