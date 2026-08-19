@@ -40,7 +40,7 @@ The adjacent `sleepAttempts` field IS reset on success (both success paths set `
 
 - [x] Add `recoveryAttempts: 0` to `completeSessionSnapshotRecovery` update set (~line 329)
 - [x] Add `recoveryAttempts: 0` to `markSessionSnapshotAwakeInPlace` update set (~line 366)
-- [x] Add migration `0118_reset_bricked_recovery_attempts.sql` — UPDATE session_snapshots SET recovery_attempts = 0 WHERE recovery_attempts >= 3 AND restore_status = 'restored'
+- [x] Add migration `0118_reset_bricked_recovery_attempts.sql` — UPDATE session_snapshots SET recovery_attempts = 0 WHERE recovery_attempts >= 3 (no restore_status filter — safe for both bug-bricked and genuinely-failed rows)
 - [x] Write regression test: 4 claim→complete cycles on same snapshot, assert 4th claim succeeds. Verified test FAILS on pre-fix code (cycle 1 assertion fails: recovery_attempts=1 instead of 0).
 - [x] Write regression test for `markSessionSnapshotAwakeInPlace`: verifies recovery_attempts resets to 0 from initial value of 2
 - [x] Add process rule about per-cycle vs lifetime budget counters (`.claude/rules/61-per-cycle-budget-counters.md`)
