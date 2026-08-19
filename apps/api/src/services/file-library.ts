@@ -40,6 +40,7 @@ import {
   getMaxDirectoriesPerProject,
   getMaxFilesPerProject,
   getMaxTagsPerFile,
+  getMaxTotalBytesPerProject,
   getTagQueryBatchSize,
   getUploadMaxBytes,
   validateDirectory,
@@ -210,15 +211,24 @@ export async function uploadFile(
     throw errors.badRequest(`File exceeds maximum size of ${maxBytes} bytes`);
   }
 
-  // Check project file count limit
+  // Check project file count and total size limits
   const maxFiles = getMaxFilesPerProject(env);
-  const countResult = await db
-    .select({ count: sql<number>`count(*)` })
+  const maxTotalBytes = getMaxTotalBytesPerProject(env);
+  const usageResult = await db
+    .select({ count: sql<number>`count(*)`, totalBytes: sql<number>`coalesce(sum(size_bytes), 0)` })
     .from(schema.projectFiles)
     .where(eq(schema.projectFiles.projectId, projectId));
-  const currentCount = countResult[0]?.count ?? 0;
+  const currentCount = usageResult[0]?.count ?? 0;
+  const currentTotalBytes = usageResult[0]?.totalBytes ?? 0;
   if (currentCount >= maxFiles) {
     throw errors.badRequest(`Project has reached the maximum of ${maxFiles} files`);
+  }
+  const maxTotalMB = Math.round(maxTotalBytes / (1024 * 1024));
+  if (currentTotalBytes + data.byteLength > maxTotalBytes) {
+    const usedMB = Math.round(currentTotalBytes / (1024 * 1024));
+    throw errors.badRequest(
+      `Project library would exceed the ${maxTotalMB} MB storage limit (currently using ${usedMB} MB)`
+    );
   }
 
   // Check directory count limit (only when uploading to a new directory)

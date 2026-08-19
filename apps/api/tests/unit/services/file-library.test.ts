@@ -105,7 +105,8 @@ describe('file-library contracts', () => {
   describe('LIBRARY_DEFAULTS', () => {
     it('has expected default values', () => {
       expect(LIBRARY_DEFAULTS.UPLOAD_MAX_BYTES).toBe(50 * 1024 * 1024); // 50MB
-      expect(LIBRARY_DEFAULTS.MAX_FILES_PER_PROJECT).toBe(500);
+      expect(LIBRARY_DEFAULTS.MAX_FILES_PER_PROJECT).toBe(10_000);
+      expect(LIBRARY_DEFAULTS.MAX_TOTAL_BYTES_PER_PROJECT).toBe(2 * 1024 * 1024 * 1024);
       expect(LIBRARY_DEFAULTS.MAX_TAGS_PER_FILE).toBe(20);
       expect(LIBRARY_DEFAULTS.MAX_TAG_LENGTH).toBe(50);
       expect(LIBRARY_DEFAULTS.DOWNLOAD_TIMEOUT_MS).toBe(60_000);
