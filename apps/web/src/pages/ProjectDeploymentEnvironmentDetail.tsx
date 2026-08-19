@@ -31,6 +31,7 @@ import {
 } from '../components/deployments/DeploymentMetricsPanel';
 import { DeploymentVolumesPanel } from '../components/deployments/DeploymentVolumesPanel';
 import { useAgentProfiles } from '../hooks/useAgentProfiles';
+import { useQueryScope } from '../hooks/useQueryScope';
 import { useToast } from '../hooks/useToast';
 import {
   deleteDeploymentEnvironment,
@@ -103,7 +104,8 @@ export function ProjectDeploymentEnvironmentDetail() {
   const { envId } = useParams<{ envId: string }>();
   const navigate = useNavigate();
   const toast = useToast();
-  const { profiles } = useAgentProfiles(projectId);
+  const queryScope = useQueryScope();
+  const { profiles } = useAgentProfiles(projectId, queryScope);
   const [searchParams, setSearchParams] = useSearchParams();
 
   const tabParam = searchParams.get('tab');

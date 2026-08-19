@@ -25,6 +25,7 @@ import { ProfileFormDialog } from '../agent-profiles/ProfileFormDialog';
 import { ProfileSelector } from '../agent-profiles/ProfileSelector';
 import { SkillSelector } from '../skills/SkillSelector';
 import { SplitButton } from '../ui/SplitButton';
+import { useQueryScope } from '../../hooks/useQueryScope';
 import {
   formatProviderCatalogContext,
   formatVmSizeOption,
@@ -64,7 +65,8 @@ export const TaskSubmitForm: FC<TaskSubmitFormProps> = ({
   onRunNow,
   onSaveToBacklog,
 }) => {
-  const { catalogs } = useProviderCatalog();
+  const queryScope = useQueryScope();
+  const { catalogs } = useProviderCatalog(queryScope);
   const [title, setTitle] = useState('');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [description, setDescription] = useState('');

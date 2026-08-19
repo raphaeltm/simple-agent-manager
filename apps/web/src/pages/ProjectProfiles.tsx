@@ -1,9 +1,11 @@
 import { ProfileList } from '../components/agent-profiles/ProfileList';
 import { useAgentProfiles } from '../hooks/useAgentProfiles';
+import { useQueryScope } from '../hooks/useQueryScope';
 import { useProjectContext } from './ProjectContext';
 
 export function ProjectProfiles() {
   const { projectId } = useProjectContext();
+  const queryScope = useQueryScope();
   const {
     profiles,
     loading,
@@ -11,7 +13,7 @@ export function ProjectProfiles() {
     createProfile,
     updateProfile,
     deleteProfile,
-  } = useAgentProfiles(projectId);
+  } = useAgentProfiles(projectId, queryScope);
 
   return (
     <div className="w-full min-w-0 max-w-3xl mx-auto px-4 py-6">

@@ -6,9 +6,20 @@
  * ("Polling intervals MUST be env-configurable with a `DEFAULT_*` constant") and
  * constitution Principle XI.
  *
- * Every consumer below drives its interval through `useVisibilityAwarePoll`, so
- * these cadences only apply while the tab is visible.
+ * Consumers drive these through one of two mechanisms, both of which stop polling
+ * on a hidden tab:
+ *
+ *  - `useVisibilityAwarePoll` — for hand-rolled loaders that have not migrated.
+ *  - TanStack Query's `refetchInterval` — for migrated queries. The timer still
+ *    ticks, but `QueryObserver` only issues a fetch when
+ *    `options.refetchIntervalInBackground || focusManager.isFocused()`
+ *    (`query-core/build/modern/queryObserver.js`, `#updateRefetchInterval`), and
+ *    `focusManager.isFocused()` returns `document.visibilityState !== 'hidden'`.
+ *    `refetchIntervalInBackground` defaults to `false` and must not be enabled for
+ *    any cadence below, or the hidden-tab guarantee is lost.
  */
+
+import { DEFAULT_DASHBOARD_POLL_INTERVAL_MS } from '@simple-agent-manager/shared';
 
 function resolveIntervalMs(raw: string | undefined, fallback: number): number {
   const parsed = parseInt(raw ?? '', 10);
@@ -56,3 +67,34 @@ export const WORKSPACE_PORTS_POLL_MS = resolveIntervalMs(
   import.meta.env.VITE_WORKSPACE_PORTS_POLL_MS,
   DEFAULT_WORKSPACE_PORTS_POLL_MS
 );
+
+/** Node list refresh on the `/nodes` page. */
+const DEFAULT_NODE_LIST_POLL_MS = 10_000;
+export const NODE_LIST_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_NODE_LIST_POLL_MS,
+  DEFAULT_NODE_LIST_POLL_MS
+);
+
+/** Workspace list refresh on the `/workspaces` and `/nodes` pages. */
+const DEFAULT_WORKSPACE_LIST_POLL_MS = 10_000;
+export const WORKSPACE_LIST_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_WORKSPACE_LIST_POLL_MS,
+  DEFAULT_WORKSPACE_LIST_POLL_MS
+);
+
+/**
+ * Dashboard active-task refresh.
+ *
+ * Falls back to the shared `DEFAULT_DASHBOARD_POLL_INTERVAL_MS` so the cadence stays
+ * aligned with the rest of the dashboard rather than forking a second default.
+ */
+export const ACTIVE_TASKS_POLL_MS = resolveIntervalMs(
+  import.meta.env.VITE_ACTIVE_TASKS_POLL_MS,
+  DEFAULT_DASHBOARD_POLL_INTERVAL_MS
+);
+
+/**
+ * Chat-summary cadences and limits live in `lib/chat-query-config.ts`, mirroring the
+ * `lib/project-query-config.ts` convention of keeping a domain's cadence and its
+ * result limit together.
+ */

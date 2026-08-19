@@ -25,6 +25,7 @@ import { useProviderCatalog } from '../hooks/useProviderCatalog';
 import { useToast } from '../hooks/useToast';
 import { deleteProject, updateProject } from '../lib/api';
 import { useProjectContext } from './ProjectContext';
+import { useQueryScope } from '../hooks/useQueryScope';
 
 const PROJECT_SETTINGS_TABS = [
   { id: 'general', label: 'General', path: 'general' },
@@ -314,7 +315,8 @@ export function ProjectSettingsInfrastructure() {
   );
   const [savingWorkspaceTimeout, setSavingWorkspaceTimeout] = useState(false);
 
-  const { catalogs, loading: catalogLoading } = useProviderCatalog();
+  const queryScope = useQueryScope();
+  const { catalogs, loading: catalogLoading } = useProviderCatalog(queryScope);
   const activeCatalog = selectProviderCatalog(catalogs, project?.defaultProvider);
   const catalogContext = formatProviderCatalogContext(activeCatalog, project?.defaultLocation);
 

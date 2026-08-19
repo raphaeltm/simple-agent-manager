@@ -28,13 +28,15 @@ import {
   stopWorkspace,
 } from '../lib/api';
 import { NODE_DETAIL_POLL_MS, NODE_EVENTS_POLL_MS } from '../lib/poll-intervals';
+import { useQueryScope } from '../hooks/useQueryScope';
 
 export function Node() {
   const navigate = useNavigate();
   const { id } = useParams<{ id: string }>();
   const toast = useToast();
 
-  const { catalogs } = useProviderCatalog();
+  const queryScope = useQueryScope();
+  const { catalogs } = useProviderCatalog(queryScope);
   const [node, setNode] = useState<NodeResponse | null>(null);
   const [workspaces, setWorkspaces] = useState<WorkspaceResponse[]>([]);
   const [events, setEvents] = useState<Event[]>([]);

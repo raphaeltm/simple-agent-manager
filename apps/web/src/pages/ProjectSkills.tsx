@@ -1,11 +1,13 @@
 import { SkillList } from '../components/skills/SkillList';
 import { useAgentProfiles } from '../hooks/useAgentProfiles';
+import { useQueryScope } from '../hooks/useQueryScope';
 import { useSkills } from '../hooks/useSkills';
 import { useProjectContext } from './ProjectContext';
 
 export function ProjectSkills() {
   const { projectId } = useProjectContext();
-  const { profiles } = useAgentProfiles(projectId);
+  const queryScope = useQueryScope();
+  const { profiles } = useAgentProfiles(projectId, queryScope);
   const { skills, loading, error, refresh, createSkill, updateSkill, deleteSkill } = useSkills(projectId);
 
   return (

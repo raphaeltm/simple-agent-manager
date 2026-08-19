@@ -12,9 +12,10 @@ export function Dashboard() {
   const { user } = useAuth();
   const navigate = useNavigate();
 
-  const { tasks, loading: tasksLoading, isRefreshing: tasksRefreshing, error: tasksError, refresh: refreshTasks } = useActiveTasks();
+  const queryScope = user?.id ?? '';
+  const { tasks, loading: tasksLoading, isRefreshing: tasksRefreshing, error: tasksError, refresh: refreshTasks } = useActiveTasks({ queryScope });
   const { projects, loading: projectsLoading, error: projectsError, refresh: refreshProjects } = useProjectList({
-    queryScope: user?.id ?? '',
+    queryScope,
     limit: PROJECT_LIST_LIMIT,
   });
 

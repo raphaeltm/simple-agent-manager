@@ -1,11 +1,18 @@
-import type { AgentProfile, CreateAgentProfileRequest, UpdateAgentProfileRequest } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useRef,useState } from 'react';
+import type {
+  AgentProfile,
+  CreateAgentProfileRequest,
+  UpdateAgentProfileRequest,
+} from '@simple-agent-manager/shared';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useCallback } from 'react';
 
-import * as api from '../lib/api';
+import { createAgentProfile, deleteAgentProfile, updateAgentProfile } from '../lib/api';
+import { agentProfilesQueryOptions, agentQueryKeys } from '../lib/query-options';
 
 interface UseAgentProfilesResult {
   profiles: AgentProfile[];
   loading: boolean;
+  isRefreshing: boolean;
   error: string | null;
   refresh: () => void;
   createProfile: (data: CreateAgentProfileRequest) => Promise<AgentProfile>;
@@ -13,66 +20,75 @@ interface UseAgentProfilesResult {
   deleteProfile: (profileId: string) => Promise<void>;
 }
 
-export function useAgentProfiles(projectId: string | undefined): UseAgentProfilesResult {
-  const [profiles, setProfiles] = useState<AgentProfile[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const hasLoadedRef = useRef(false);
+/**
+ * Agent profiles for a project.
+ *
+ * Read by five surfaces (the profiles page, both task forms, the trigger form, and
+ * project chat), which previously each ran their own loader.
+ *
+ * Mutations invalidate the shared cache entry rather than chaining
+ * `await fetchProfiles()` on the mutating component only — so creating a profile in
+ * the profiles page also refreshes the selector in an open chat composer, which the
+ * old implementation could not do (`.claude/rules/16-no-page-reload-on-mutation.md`).
+ */
+export function useAgentProfiles(
+  projectId: string | undefined,
+  queryScope: string
+): UseAgentProfilesResult {
+  const queryClient = useQueryClient();
+  const enabled = Boolean(projectId && queryScope);
 
-  const fetchProfiles = useCallback(async () => {
+  const query = useQuery({
+    ...agentProfilesQueryOptions(queryScope, projectId ?? ''),
+    enabled,
+  });
+
+  const invalidate = useCallback(async () => {
     if (!projectId) return;
-    try {
-      const result = await api.listAgentProfiles(projectId);
-      setProfiles(result);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load agent profiles');
-    } finally {
-      hasLoadedRef.current = true;
-      setLoading(false);
-    }
-  }, [projectId]);
+    await queryClient.invalidateQueries({
+      queryKey: agentQueryKeys.profileList(queryScope, projectId),
+    });
+  }, [projectId, queryClient, queryScope]);
 
-  useEffect(() => {
-    if (!projectId) {
-      setLoading(false);
-      return;
-    }
-    void fetchProfiles();
-  }, [fetchProfiles, projectId]);
-
-  const refresh = useCallback(() => {
-    void fetchProfiles();
-  }, [fetchProfiles]);
-
-  const createProfile = useCallback(
-    async (data: CreateAgentProfileRequest): Promise<AgentProfile> => {
+  const createMutation = useMutation({
+    mutationFn: (data: CreateAgentProfileRequest) => {
       if (!projectId) throw new Error('No project ID');
-      const profile = await api.createAgentProfile(projectId, data);
-      await fetchProfiles();
-      return profile;
+      return createAgentProfile(projectId, data);
     },
-    [projectId, fetchProfiles],
-  );
+    onSuccess: invalidate,
+  });
 
-  const updateProfile = useCallback(
-    async (profileId: string, data: UpdateAgentProfileRequest): Promise<AgentProfile> => {
+  const updateMutation = useMutation({
+    mutationFn: ({ profileId, data }: { profileId: string; data: UpdateAgentProfileRequest }) => {
       if (!projectId) throw new Error('No project ID');
-      const profile = await api.updateAgentProfile(projectId, profileId, data);
-      await fetchProfiles();
-      return profile;
+      return updateAgentProfile(projectId, profileId, data);
     },
-    [projectId, fetchProfiles],
-  );
+    onSuccess: invalidate,
+  });
 
-  const deleteProfile = useCallback(
-    async (profileId: string): Promise<void> => {
+  const deleteMutation = useMutation({
+    mutationFn: (profileId: string) => {
       if (!projectId) throw new Error('No project ID');
-      await api.deleteAgentProfile(projectId, profileId);
-      await fetchProfiles();
+      return deleteAgentProfile(projectId, profileId);
     },
-    [projectId, fetchProfiles],
-  );
+    onSuccess: invalidate,
+  });
 
-  return { profiles, loading, error, refresh, createProfile, updateProfile, deleteProfile };
+  return {
+    profiles: query.data ?? [],
+    loading: enabled && query.isPending && query.data === undefined,
+    isRefreshing: query.isFetching && query.data !== undefined,
+    error:
+      query.data === undefined && query.error
+        ? query.error instanceof Error
+          ? query.error.message
+          : 'Failed to load agent profiles'
+        : null,
+    refresh: () => {
+      void query.refetch();
+    },
+    createProfile: (data) => createMutation.mutateAsync(data),
+    updateProfile: (profileId, data) => updateMutation.mutateAsync({ profileId, data }),
+    deleteProfile: (profileId) => deleteMutation.mutateAsync(profileId),
+  };
 }
