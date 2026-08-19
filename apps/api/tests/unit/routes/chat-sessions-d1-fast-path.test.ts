@@ -140,6 +140,23 @@ describe('GET /api/projects/:projectId/sessions — D1 fast path', () => {
     expect(mocks.listSessions).toHaveBeenCalledTimes(1);
   });
 
+  it('still returns the session list when the index prime itself fails', async () => {
+    // The prime is best-effort — the caller already has an authoritative answer
+    // from the DO and this only speeds up the NEXT read. It must not be able to
+    // turn a working session list into a 500, whether it rejects, throws
+    // synchronously while resolving the stub, or finds no ExecutionContext to
+    // hang the work on (Hono THROWS on `c.executionCtx` rather than returning
+    // undefined — which is exactly how this was first caught).
+    addIndexedSession('from-d1');
+    // No coverage → miss → DO fallback → prime attempted. This env has no
+    // PROJECT_DATA binding at all, so resolving the stub blows up.
+
+    const { status, body } = await listSessions();
+
+    expect(status).toBe(200);
+    expect((body as { sessions: { id: string }[] }).sessions.map((s) => s.id)).toEqual(['from-do']);
+  });
+
   it('falls back to the Durable Object when coverage is incomplete', async () => {
     addIndexedSession('from-d1');
     setCoverage({ complete: false });

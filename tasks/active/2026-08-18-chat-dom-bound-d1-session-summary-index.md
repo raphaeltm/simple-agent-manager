@@ -146,8 +146,13 @@ carries. The D1 mapper must use `updated_at` for `lastMessageAt` or the two path
       non-advancing cursor, and still drains a normal finite history
 - [x] Existing rule-17 jump test still passes: `scrollToIndex` receives the exact 0-based
       `conversationItems` index, not the `firstItemIndex` offset
-- [ ] Playwright audit: project chat + timeline drawer, long conversation, 375 px and 1280 px,
-      `assertNoOverflow`, DOM counts captured before/after
+- [x] Playwright audit: project chat + timeline drawer, long conversation, 375 px and 1280 px,
+      `assertNoOverflow`, DOM counts captured. 12/12 green at both viewports.
+      **Measured (400-message conversation, ~300-entry timeline):** conversation rows 3–7 of 400
+      (already virtualized, unchanged); timeline drawer **12–13 rows, previously all ~300**. Row
+      count stays flat after scrolling, so the bound is the steady state and not just first paint.
+      The audit needed a 120 s per-test budget — it mounts the heaviest fixture in the suite and then
+      full-page-screenshots it.
 
 ### Item #12 — D1 session summary index
 
@@ -196,7 +201,32 @@ semantics exactly instead. (This replaces the "+ expiry re-evaluation" line orig
 5. The migration is additive, passes the migration-safety gate, and drops nothing.
 6. `pnpm lint && pnpm typecheck && pnpm test && pnpm build` are green.
 
+## Specialist review outcomes (Phase 5)
+
+Four local reviewers ran. Two independently reached the same conclusion about item #12: the read path
+got faster and the write path got substantially more expensive, and the write path was the bigger
+number. That was correct, and it is the most useful thing this review produced.
+
+| Finding | Severity | Resolution |
+|---|---|---|
+| Self-heal placed inside the shared `listSessions` RPC — false for 7 of its 8 callers; account-map fans out over 200 projects, admin backfill over every project in the deployment | CRITICAL ×2 reviewers | Dedicated `primeSessionIndex` RPC, called only from the one caller that observed a miss, skipped for over-cap projects |
+| Whole-project mirror on every debounce fire (the old 24 h window was accidentally delta-shaped) | CRITICAL ×2 | Delta sync since the last successful watermark; full mirror only on first sync / after incomplete coverage. Regression test proven discriminating |
+| Over-cap projects can never regain `complete`, so they pay full write cost forever for zero read benefit | CRITICAL | Circuit breaker — record coverage, stop mirroring |
+| No mutex around the sync's read→write critical section (rule 45) | HIGH | Promise-chain lock with the read inside it; the test double drives the LOCKED path so a concurrency test cannot pass via a bypass |
+| "Fast path" is not fewer round trips — the DO's count/page are in-process SQLite (1 DO hop vs 2 D1 hops) | HIGH ×2 | Claim corrected in code; count+page parallelized. The real win is avoiding a single-threaded DO wake + its N+1 attention lookup |
+| Reconciliation dead-target writer had wiring but no test (rule 44) | HIGH | Test added at the real `processReconciliationCandidates`, proven discriminating, plus a no-hook control |
+| Timeline drawer lost its vertical padding (measured flush at y=54 px in a real browser) | MEDIUM | Restored |
+| `React.memo` on `AcpConversationItemView` does NOT hold during streaming — item identity is rebuilt per token | MEDIUM | Comment corrected to state the real scope rather than claim the streaming case |
+| New env vars undocumented (rule 01) | MEDIUM | Added to `apps/api/.env.example`, `apps/web/.env.example`, `configuration.md` |
+| Stem gradient is now viewport-anchored, not content-anchored; comment said "visually identical" | LOW | Comment corrected |
+| Duplicate Virtuoso mock | LOW | `project-message-view.test.tsx` consolidated onto the shared helper |
+| Keyboard Tab cannot reach off-window rows in any virtualized list | MEDIUM | Filed as idea `01M0BJYZXG4BKE1T6ZCESTBGTZ` — pre-existing for the conversation list, newly inherited by the drawer, and a cross-surface accessibility decision rather than a tweak to one component |
+
+The task-completion-validator also flagged the Playwright audit as failing; that reading came from
+output captured **before** the `components.List` measurement fix. Re-verified after every subsequent
+change: 12/12 green at both viewports.
+
 ## References
 
-- Rules: 02, 05, 17 (virtualized-list), 26, 28, 31, 39, 42, 44, 47, 50, 53, 56, 59, 60
+- Rules: 02, 05, 17 (virtualized-list), 26, 28, 31, 39, 42, 44, 45, 47, 50, 53, 56, 59, 60
 - `.claude/rules/60-request-io-and-bundle-budgets.md` — the I/O budget this work is measured against

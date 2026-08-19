@@ -16,6 +16,7 @@ import {
 } from '@simple-agent-manager/shared';
 import { and, eq, inArray } from 'drizzle-orm';
 import { drizzle } from 'drizzle-orm/d1';
+import type { Context } from 'hono';
 import { Hono } from 'hono';
 
 import * as schema from '../db/schema';
@@ -130,6 +131,38 @@ function getMessageOrder(rawOrder?: string): 'asc' | 'desc' {
 }
 
 /**
+ * Kick off a D1 session-index refresh without blocking the response.
+ *
+ * Entirely best-effort: the caller already has an authoritative answer from the
+ * Durable Object, and this only makes the NEXT read faster. So every failure
+ * mode here is swallowed — including the absence of an `ExecutionContext`, which
+ * Hono throws on rather than returning undefined. A stale index must never be
+ * able to turn a working session list into a 500.
+ */
+function schedulePrimeSessionIndex(c: Context<{ Bindings: Env }>, projectId: string): void {
+  try {
+    const prime = projectDataService.primeSessionIndex(c.env, projectId).catch((err) => {
+      log.warn('session_index_prime_failed', {
+        projectId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    });
+
+    // `c.executionCtx` THROWS when no ExecutionContext is present rather than
+    // returning undefined, so it needs the same guard as everything else here.
+    c.executionCtx.waitUntil(prime);
+  } catch (err) {
+    // Covers a missing ExecutionContext and any synchronous throw from
+    // resolving the stub. The promise, if one was created, is already
+    // self-catching; it simply is not kept alive past the response.
+    log.warn('session_index_prime_skipped', {
+      projectId,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/**
  * GET /api/projects/:projectId/sessions
  * List chat sessions for a project.
  */
@@ -182,14 +215,7 @@ chatRoutes.get('/', async (c) => {
     // excluded because its sync short-circuits, so this cannot become a
     // per-request resync loop for large projects.
     if (indexRead.missReason !== 'incomplete_coverage') {
-      c.executionCtx.waitUntil(
-        projectDataService.primeSessionIndex(c.env, projectId).catch((err) => {
-          log.warn('session_index_prime_failed', {
-            projectId,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        })
-      );
+      schedulePrimeSessionIndex(c, projectId);
     }
   }
 
