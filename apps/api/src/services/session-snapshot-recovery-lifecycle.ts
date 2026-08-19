@@ -329,6 +329,7 @@ export async function completeSessionSnapshotRecovery(
       sleepAttempts: 0,
       sleepError: null,
       sleepingAt: null,
+      recoveryAttempts: 0,
       restoredAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })
@@ -365,6 +366,7 @@ export async function markSessionSnapshotAwakeInPlace(
       sleepAfter: null,
       sleepAttempts: 0,
       sleepError: null,
+      recoveryAttempts: 0,
       restoredAt: now,
       updatedAt: now,
     })

@@ -859,4 +859,134 @@ describe('session snapshot recovery lifecycle', () => {
       sqlite.close();
     }
   });
+
+  it('resets recovery_attempts on successful wake so the 4th cycle still succeeds', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      sqlite
+        .prepare(
+          `INSERT INTO session_snapshots
+             (id, workspace_id, node_id, project_id, user_id, chat_session_id,
+              agent_session_id, runtime, status, degradation, manifest_r2_key,
+              manifest_json, snapshot_generation, expires_at, sleep_status,
+              sleeping_at, recovery_attempts, updated_at)
+           VALUES ('snapshot-cycle', 'workspace-1', 'node-1', 'project-1', 'user-1',
+              'chat-cycle', 'agent-1', 'vm', 'available', 'none',
+              'snapshots/chat-cycle/manifest.json', '{"status":"available"}',
+              'generation-final', '2026-09-01T00:00:00.000Z', 'sleeping',
+              '2026-08-15T00:00:00.000Z', 0, '2026-08-15T00:00:00.000Z')`
+        )
+        .run();
+      const testEnv = env({ DATABASE: createSqliteD1(sqlite) });
+      const db = drizzle(testEnv.DATABASE, { schema });
+
+      for (let cycle = 1; cycle <= 4; cycle++) {
+        const claimResult = await claimSessionSnapshotRecovery(db, testEnv, {
+          chatSessionId: 'chat-cycle',
+          userId: 'user-1',
+          taskId: `wake-${cycle}`,
+          now: new Date(`2026-08-15T0${cycle}:00:00.000Z`),
+        });
+        expect(claimResult, `cycle ${cycle} claim`).toEqual({
+          status: 'claimed',
+          taskId: `wake-${cycle}`,
+        });
+
+        const afterClaim = sqlite
+          .prepare(
+            `SELECT recovery_attempts FROM session_snapshots WHERE id = 'snapshot-cycle'`
+          )
+          .get() as { recovery_attempts: number };
+        expect(afterClaim.recovery_attempts, `cycle ${cycle} attempts after claim`).toBe(1);
+
+        await completeSessionSnapshotRecovery(
+          db,
+          'chat-cycle',
+          `wake-${cycle}`,
+          `workspace-new-${cycle}`
+        );
+
+        const afterComplete = sqlite
+          .prepare(
+            `SELECT recovery_attempts, recovery_status, sleep_status, sleeping_at
+               FROM session_snapshots WHERE id = 'snapshot-cycle'`
+          )
+          .get() as {
+          recovery_attempts: number;
+          recovery_status: string;
+          sleep_status: string | null;
+          sleeping_at: string | null;
+        };
+        expect(afterComplete.recovery_attempts, `cycle ${cycle} attempts after complete`).toBe(0);
+        expect(afterComplete.recovery_status).toBe('restored');
+        expect(afterComplete.sleep_status).toBeNull();
+        expect(afterComplete.sleeping_at).toBeNull();
+
+        if (cycle < 4) {
+          sqlite
+            .prepare(
+              `UPDATE session_snapshots SET
+                 sleep_status = 'sleeping',
+                 sleeping_at = '2026-08-15T0${cycle}:30:00.000Z',
+                 recovery_status = NULL,
+                 recovery_task_id = NULL,
+                 recovery_workspace_id = NULL,
+                 recovery_claimed_at = NULL
+               WHERE id = 'snapshot-cycle'`
+            )
+            .run();
+        }
+      }
+    } finally {
+      sqlite.close();
+    }
+  });
+
+  it('resets recovery_attempts on in-place wake (markSessionSnapshotAwakeInPlace)', async () => {
+    const sqlite = new Database(':memory:');
+    try {
+      createSchemaTables(sqlite, [schema.sessionSnapshots]);
+      sqlite
+        .prepare(
+          `INSERT INTO session_snapshots
+             (id, workspace_id, node_id, project_id, user_id, chat_session_id,
+              agent_session_id, runtime, status, degradation, manifest_r2_key,
+              manifest_json, snapshot_generation, expires_at, sleep_status,
+              sleeping_at, recovery_attempts, updated_at)
+           VALUES ('snapshot-inplace', 'workspace-1', 'node-1', 'project-1', 'user-1',
+              'chat-inplace', 'agent-1', 'cf-container', 'available', 'none',
+              'snapshots/chat-inplace/manifest.json', '{"status":"available"}',
+              'generation-final', '2026-09-01T00:00:00.000Z', 'sleeping',
+              '2026-08-15T00:00:00.000Z', 2, '2026-08-15T00:00:00.000Z')`
+        )
+        .run();
+      const testEnv = env({ DATABASE: createSqliteD1(sqlite) });
+
+      const { markSessionSnapshotAwakeInPlace } = await import(
+        '../../src/services/session-snapshots'
+      );
+      await markSessionSnapshotAwakeInPlace(testEnv, 'chat-inplace', 'wake-task-ip', 'ws-new');
+
+      const row = sqlite
+        .prepare(
+          `SELECT recovery_attempts, recovery_status, sleep_status, sleeping_at, sleep_attempts
+             FROM session_snapshots WHERE id = 'snapshot-inplace'`
+        )
+        .get() as {
+        recovery_attempts: number;
+        recovery_status: string;
+        sleep_status: string | null;
+        sleeping_at: string | null;
+        sleep_attempts: number;
+      };
+      expect(row.recovery_attempts).toBe(0);
+      expect(row.recovery_status).toBe('restored');
+      expect(row.sleep_status).toBeNull();
+      expect(row.sleeping_at).toBeNull();
+      expect(row.sleep_attempts).toBe(0);
+    } finally {
+      sqlite.close();
+    }
+  });
 });

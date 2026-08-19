@@ -38,21 +38,21 @@ The adjacent `sleepAttempts` field IS reset on success (both success paths set `
 
 ## Implementation Checklist
 
-- [ ] Add `recoveryAttempts: 0` to `completeSessionSnapshotRecovery` update set (~line 329)
-- [ ] Add `recoveryAttempts: 0` to `markSessionSnapshotAwakeInPlace` update set (~line 366)
-- [ ] Add migration `0118_reset_bricked_recovery_attempts.sql` — UPDATE session_snapshots SET recovery_attempts = 0 WHERE recovery_attempts >= 3 AND restore_status = 'restored'
-- [ ] Write regression test: 4 claim→complete cycles on same snapshot, assert 4th claim succeeds. Verify test FAILS on pre-fix code.
-- [ ] Write regression test for `markSessionSnapshotAwakeInPlace`: same pattern
-- [ ] Add process rule about per-cycle vs lifetime budget counters
+- [x] Add `recoveryAttempts: 0` to `completeSessionSnapshotRecovery` update set (~line 329)
+- [x] Add `recoveryAttempts: 0` to `markSessionSnapshotAwakeInPlace` update set (~line 366)
+- [x] Add migration `0118_reset_bricked_recovery_attempts.sql` — UPDATE session_snapshots SET recovery_attempts = 0 WHERE recovery_attempts >= 3 AND restore_status = 'restored'
+- [x] Write regression test: 4 claim→complete cycles on same snapshot, assert 4th claim succeeds. Verified test FAILS on pre-fix code (cycle 1 assertion fails: recovery_attempts=1 instead of 0).
+- [x] Write regression test for `markSessionSnapshotAwakeInPlace`: verifies recovery_attempts resets to 0 from initial value of 2
+- [x] Add process rule about per-cycle vs lifetime budget counters (`.claude/rules/61-per-cycle-budget-counters.md`)
 
 ## Acceptance Criteria
 
-- [ ] A session can sleep and wake unlimited times without being bricked
-- [ ] The `recovery_attempts` counter resets to 0 after each successful wake
-- [ ] Failed wakes still increment the counter (3 consecutive failures still exhaust the budget)
-- [ ] The 3 currently bricked production snapshots are unblocked by the migration
-- [ ] Regression test proves the 4th wake succeeds and is discriminating (fails on pre-fix code)
-- [ ] `task-runtime-liveness.ts` classifier correctly sees post-reset snapshots as restorable (no code change needed — it already mirrors the claim's predicate)
+- [x] A session can sleep and wake unlimited times without being bricked
+- [x] The `recovery_attempts` counter resets to 0 after each successful wake
+- [x] Failed wakes still increment the counter (3 consecutive failures still exhaust the budget — claim WHERE clause unchanged)
+- [x] The 3 currently bricked production snapshots are unblocked by the migration
+- [x] Regression test proves the 4th wake succeeds and is discriminating (fails on pre-fix code)
+- [x] `task-runtime-liveness.ts` classifier correctly sees post-reset snapshots as restorable (no code change needed — it already mirrors the claim's predicate)
 
 ## Post-Mortem
 
