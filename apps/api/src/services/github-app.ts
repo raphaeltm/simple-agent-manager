@@ -1074,13 +1074,27 @@ export async function getRepositoryBranches(
 }
 
 /**
+ * Outcome of an ensure-branch attempt.
+ *
+ * `missing` and `unknown` both mean "the branch is not known to be on the
+ * remote", but callers must treat them differently: `missing` is positive
+ * evidence that a `git clone --branch` will fail (the ref was confirmed absent
+ * and could not be created), while `unknown` means the check itself could not
+ * run. Only `missing` justifies refusing to provision — see
+ * `services/workspace-branch.ts`.
+ */
+export type EnsureBranchOutcome =
+  | { status: 'exists' }
+  | { status: 'created' }
+  | { status: 'missing'; reason: string }
+  | { status: 'unknown'; reason: string };
+
+/**
  * Ensure a branch exists in a repository. If the branch does not exist,
  * create it from the default branch.
  *
  * This is called before workspace provisioning to prevent git clone failures
  * when a task specifies a branch that hasn't been created yet.
- *
- * @returns true if the branch exists (or was created), false if creation failed
  */
 export async function ensureBranchExists(
   installationId: string,
@@ -1089,7 +1103,7 @@ export async function ensureBranchExists(
   branchName: string,
   defaultBranch: string,
   env: Env
-): Promise<boolean> {
+): Promise<EnsureBranchOutcome> {
   const { token } = await getInstallationToken(installationId, env);
   const headers: HeadersInit = {
     Authorization: `Bearer ${token}`,
@@ -1105,18 +1119,18 @@ export async function ensureBranchExists(
   );
 
   if (checkResp.ok) {
-    return true; // Branch already exists
+    return { status: 'exists' };
   }
 
   if (checkResp.status !== 404) {
-    // Unexpected error — log and return false
+    // The lookup itself failed, so we learned nothing about the ref.
     log.warn('github.ensure_branch.check_failed', {
       owner,
       repo,
       branchName,
       status: checkResp.status,
     });
-    return false;
+    return { status: 'unknown', reason: `branch lookup returned ${checkResp.status}` };
   }
 
   // Branch doesn't exist — get the SHA of the default branch
@@ -1132,14 +1146,21 @@ export async function ensureBranchExists(
       defaultBranch,
       status: refResp.status,
     });
-    return false;
+    // The branch is confirmed absent (404 above); we simply could not build it.
+    return {
+      status: 'missing',
+      reason: `base branch "${defaultBranch}" could not be resolved (${refResp.status})`,
+    };
   }
 
   const refData = (await refResp.json()) as { object?: { sha?: string } };
   const sha = refData.object?.sha;
   if (!sha) {
     log.warn('github.ensure_branch.no_sha', { owner, repo, defaultBranch });
-    return false;
+    return {
+      status: 'missing',
+      reason: `base branch "${defaultBranch}" returned no commit SHA`,
+    };
   }
 
   // Create the new branch
@@ -1163,13 +1184,13 @@ export async function ensureBranchExists(
       fromBranch: defaultBranch,
       sha,
     });
-    return true;
+    return { status: 'created' };
   }
 
   if (createResp.status === 422) {
     // Race condition — another caller created the branch between our check and create
     log.info('github.ensure_branch.race_already_exists', { owner, repo, branchName });
-    return true;
+    return { status: 'exists' };
   }
 
   const errorText = await createResp.text().catch(() => '');
@@ -1180,7 +1201,10 @@ export async function ensureBranchExists(
     status: createResp.status,
     message: errorText.slice(0, 200),
   });
-  return false;
+  return {
+    status: 'missing',
+    reason: `branch creation failed (${createResp.status})`,
+  };
 }
 
 /**

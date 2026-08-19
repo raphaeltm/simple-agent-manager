@@ -126,7 +126,7 @@ describe('ensureBranchExistsOnRemote', () => {
   });
 
   it('calls ensureBranchExists with correct args for non-default branch', async () => {
-    mocks.ensureBranchExists.mockResolvedValue(true);
+    mocks.ensureBranchExists.mockResolvedValue({ status: 'created' });
     const state = makeState({
       branch: 'feature/my-branch',
       defaultBranch: 'main',
@@ -151,11 +151,13 @@ describe('ensureBranchExistsOnRemote', () => {
     expect(mocks.log.info).toHaveBeenCalledWith('task_runner_do.ensure_branch.ok', {
       taskId: 'task-test-001',
       branch: 'feature/my-branch',
+      defaultBranch: 'main',
+      detail: 'created',
     });
   });
 
   it('falls back to installation_id when external_installation_id is absent', async () => {
-    mocks.ensureBranchExists.mockResolvedValue(true);
+    mocks.ensureBranchExists.mockResolvedValue({ status: 'created' });
     const state = makeState({
       branch: 'feature/my-branch',
       defaultBranch: 'main',
@@ -189,26 +191,38 @@ describe('ensureBranchExistsOnRemote', () => {
     await ensureBranchExistsOnRemote(state, mockRc);
 
     expect(mocks.ensureBranchExists).not.toHaveBeenCalled();
+    // A missing installation row means the check could NOT run — it is not
+    // evidence that the ref is absent, so it must surface as `unknown`.
     expect(mocks.log.warn).toHaveBeenCalledWith(
-      'task_runner_do.ensure_branch.installation_not_found',
-      {
+      'task_runner_do.ensure_branch.unknown',
+      expect.objectContaining({
         taskId: 'task-test-001',
-        installationId: '01KTMISSINGINSTALLATIONROW',
-      },
+        branch: 'feature-x',
+        reason: 'GitHub installation not found for this user',
+      }),
     );
   });
 
-  it('logs warning when ensureBranchExists returns false', async () => {
-    mocks.ensureBranchExists.mockResolvedValue(false);
+  it('logs a warning when the branch is confirmed missing — but does NOT throw', async () => {
+    mocks.ensureBranchExists.mockResolvedValue({
+      status: 'missing',
+      reason: 'branch creation failed (403)',
+    });
     const state = makeState({ branch: 'feature-x', defaultBranch: 'develop' });
     const mockRc = makeContext();
 
-    await ensureBranchExistsOnRemote(state, mockRc);
+    // Best-effort is correct for the VM runtime specifically: bootstrap.go
+    // clones baseBranch and `git checkout -b`s the target, so a missing ref
+    // still yields a working workspace. This is the discriminating control for
+    // the Instant path's fail-closed behaviour — if the fail-fast ever leaks
+    // into the DO, this test goes red.
+    await expect(ensureBranchExistsOnRemote(state, mockRc)).resolves.toBeUndefined();
 
-    expect(mocks.log.warn).toHaveBeenCalledWith('task_runner_do.ensure_branch.failed', {
+    expect(mocks.log.warn).toHaveBeenCalledWith('task_runner_do.ensure_branch.missing', {
       taskId: 'task-test-001',
       branch: 'feature-x',
       defaultBranch: 'develop',
+      reason: 'branch creation failed (403)',
     });
   });
 
@@ -234,8 +248,10 @@ describe('ensureBranchExistsOnRemote', () => {
 
     expect(mocks.ensureBranchExists).not.toHaveBeenCalled();
     expect(mocks.log.warn).toHaveBeenCalledWith(
-      'task_runner_do.ensure_branch.invalid_repository',
-      expect.objectContaining({ repository: 'invalid-repo' }),
+      'task_runner_do.ensure_branch.unknown',
+      expect.objectContaining({
+        reason: 'repository "invalid-repo" is not "owner/repo"',
+      }),
     );
   });
 
