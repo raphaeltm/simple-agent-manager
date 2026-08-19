@@ -1,7 +1,5 @@
 // FILE SIZE EXCEPTION: Pre-existing project chat state hook exceeds the 800-line gate on main; split as follow-up outside shared runtime fix scope.
 import type {
-  AgentInfo,
-  AgentProfile,
   AgentProfileRuntime,
   CreateAgentProfileRequest,
   ProviderCatalog,
@@ -19,31 +17,30 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams, useSearchParams } from 'react-router';
 
+import { useAgentCatalog } from '../../hooks/useAgentCatalog';
+import { useAgentProfiles } from '../../hooks/useAgentProfiles';
 import { useAvailableCommands } from '../../hooks/useAvailableCommands';
 import { useBootLogStream } from '../../hooks/useBootLogStream';
+import { useCredentials } from '../../hooks/useCredentials';
 import { type RawSessionEvent, useProjectWebSocket } from '../../hooks/useProjectWebSocket';
+import { useProviderCatalog } from '../../hooks/useProviderCatalog';
+import { useQueryScope } from '../../hooks/useQueryScope';
+import { useTrialStatus } from '../../hooks/useTrialStatus';
 import { useDocumentVisible, useVisibilityAwarePoll } from '../../hooks/useVisibilityAwarePoll';
 import type { ChatSessionListItem, ChatSessionResponse } from '../../lib/api';
 import {
   closeConversationTask,
-  createAgentProfile,
   getProjectTask,
-  getProviderCatalog,
   getTranscribeApiUrl,
-  getTrialStatus,
   getWorkspace,
   linkSessionIdea,
-  listAgentProfiles,
-  listAgents,
   listChatSessions,
-  listCredentials,
   listProjectTasks,
   prepareForkSession,
   startInstantChatSession,
   stopChatSession,
   submitTask,
   summarizeSession,
-  updateAgentProfile,
 } from '../../lib/api';
 import { getSessionState, isStaleSession } from '../../lib/chat-session-utils';
 import { stripMarkdown } from '../../lib/text-utils';
@@ -105,11 +102,14 @@ export interface ProfileWizardState {
   error: string | null;
 }
 
+const EMPTY_PROVIDER_CATALOGS: ProviderCatalog[] = [];
+
 export function useProjectChatState() {
   const navigate = useNavigate();
   const { sessionId } = useParams<{ sessionId: string }>();
   const [searchParams, setSearchParams] = useSearchParams();
   const { projectId, project } = useProjectContext();
+  const queryScope = useQueryScope();
 
   // Execute-idea flow: pre-fill message and track ideaId for auto-linking
   const executeIdeaId = searchParams.get('executeIdea');
@@ -119,8 +119,14 @@ export function useProjectChatState() {
   const [loading, setLoading] = useState(true);
   const [isRefreshing, setIsRefreshing] = useState(false);
   const hasLoadedRef = useRef(false);
-  const [hasCloudCredentials, setHasCloudCredentials] = useState(false);
-  const [hasUserCloudCredentials, setHasUserCloudCredentials] = useState(false);
+  // Credentials, trial status, provider catalog, agent catalog and agent profiles all
+  // come from shared TanStack queries. Before this migration each was fetched by a
+  // mount effect local to this hook, duplicating requests that the settings pages,
+  // onboarding wizards, task forms and workspace creation were already making.
+  const { credentials } = useCredentials(queryScope);
+  const { available: trialAvailable } = useTrialStatus(queryScope);
+  const hasUserCloudCredentials = hasByocComputeCredential(credentials);
+  const hasCloudCredentials = hasUserCloudCredentials || trialAvailable;
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Sidebar filtering
@@ -138,14 +144,41 @@ export function useProjectChatState() {
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   // Agent type selection
-  const [configuredAgents, setConfiguredAgents] = useState<AgentInfo[]>([]);
+  const { agents: agentCatalog } = useAgentCatalog(queryScope);
+  const configuredAgents = useMemo(
+    () => agentCatalog.filter((agent) => agent.configured && agent.supportsAcp),
+    [agentCatalog]
+  );
   const [selectedAgentType, setSelectedAgentType] = useState<string | null>(null);
 
   // Agent profile selection
-  const [agentProfiles, setAgentProfiles] = useState<AgentProfile[]>([]);
+  const {
+    profiles: agentProfiles,
+    createProfile: createProfileMutation,
+    updateProfile,
+  } = useAgentProfiles(projectId, queryScope);
   const [selectedProfileId, setSelectedProfileId] = useState<string | null>(null);
+
+  // Auto-selection that previously lived inside the two removed mount effects. Both
+  // are strictly "fill in a default once something is available" — neither may
+  // override a choice the user has already made, so each is guarded on the current
+  // selection (`.claude/rules/06-technical-patterns.md`, interaction-effect analysis).
+  useEffect(() => {
+    const firstAgent = configuredAgents[0];
+    if (!firstAgent) return;
+    setSelectedAgentType((current) => current ?? firstAgent.id);
+  }, [configuredAgents]);
+
+  useEffect(() => {
+    setSelectedProfileId((current) => selectProfileId(current, agentProfiles));
+  }, [agentProfiles]);
   const { skills, selectedSkillId, setSelectedSkillId } = useProjectSkills(projectId);
-  const [providerCatalogs, setProviderCatalogs] = useState<ProviderCatalog[]>([]);
+  // The catalog is only meaningful once the user can actually provision, matching the
+  // previous behaviour where it was fetched inside the `hasCloud` branch.
+  const { catalogs: allProviderCatalogs } = useProviderCatalog(
+    hasCloudCredentials ? queryScope : ''
+  );
+  const providerCatalogs = hasCloudCredentials ? allProviderCatalogs : EMPTY_PROVIDER_CATALOGS;
   const [profileWizard, setProfileWizard] = useState<ProfileWizardState>({
     open: false,
     step: 'agent',
@@ -283,66 +316,13 @@ export function useProjectChatState() {
     }
   }, [multiplayerActive]);
 
-  useEffect(() => {
-    void Promise.all([listCredentials().catch(() => []), getTrialStatus().catch(() => null)]).then(
-      ([creds, trial]) => {
-        const hasUserCreds = hasByocComputeCredential(creds);
-        const trialAvailable = trial?.available ?? false;
-        const hasCloud = hasUserCreds || trialAvailable;
-        setHasUserCloudCredentials(hasUserCreds);
-        setHasCloudCredentials(hasCloud);
-        if (hasCloud) {
-          void getProviderCatalog()
-            .then((response) => setProviderCatalogs(response.catalogs ?? []))
-            .catch(() => setProviderCatalogs([]));
-        } else {
-          setProviderCatalogs([]);
-        }
-      }
-    );
-  }, []);
 
-  useEffect(() => {
-    let cancelled = false;
-    void listAgents()
-      .then((data) => {
-        if (cancelled) return;
-        const acpAgents = (data.agents || []).filter((a) => a.configured && a.supportsAcp);
-        setConfiguredAgents(acpAgents);
-        const firstAgent = acpAgents[0];
-        if (!selectedAgentType && firstAgent) {
-          setSelectedAgentType(firstAgent.id);
-        }
-      })
-      .catch((err: unknown) => {
-        console.error('Failed to load agents', err);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const loadProfiles = useCallback(() => {
-    void listAgentProfiles(projectId)
-      .then((data) => {
-        setAgentProfiles(data);
-        setSelectedProfileId((current) => selectProfileId(current, data));
-      })
-      .catch((err: unknown) => {
-        console.error('Failed to load agent profiles', err);
-      });
-  }, [projectId]);
-
-  useEffect(() => {
-    loadProfiles();
-  }, [loadProfiles]);
 
   const handleUpdateProfile = useCallback(
     async (profileId: string, data: UpdateAgentProfileRequest) => {
-      await updateAgentProfile(projectId, profileId, data);
-      loadProfiles();
+      await updateProfile(profileId, data);
     },
-    [projectId, loadProfiles]
+    [updateProfile]
   );
 
   useEffect(() => {
@@ -580,15 +560,14 @@ export function useProjectChatState() {
 
   const createProfile = useCallback(
     async (data: CreateAgentProfileRequest) => {
-      const profile = await createAgentProfile(projectId, data);
-      setAgentProfiles((current) => {
-        const withoutDuplicate = current.filter((candidate) => candidate.id !== profile.id);
-        return [...withoutDuplicate, profile];
-      });
+      // The mutation invalidates the shared `agentProfiles` entry, so the new profile
+      // reaches every consumer (profiles page, task forms, trigger form) rather than
+      // only this hook's local copy, which is what the previous manual splice did.
+      const profile = await createProfileMutation(data);
       setSelectedProfileId(profile.id);
       return profile;
     },
-    [projectId]
+    [createProfileMutation]
   );
 
   const createProfileFromWizard = useCallback(async () => {
