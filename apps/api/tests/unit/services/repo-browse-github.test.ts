@@ -14,6 +14,13 @@ function makeBrowser(env: Partial<Env> = {}): GitHubRepoBrowser {
   return new GitHubRepoBrowser('octo', 'repo', 'main', 'inst-1', env as Env);
 }
 
+function makeKv(cached?: unknown) {
+  return {
+    get: vi.fn().mockResolvedValue(cached ?? null),
+    put: vi.fn().mockResolvedValue(undefined),
+  };
+}
+
 beforeEach(() => {
   vi.restoreAllMocks();
   vi.clearAllMocks();
@@ -41,16 +48,18 @@ describe('GitHubRepoBrowser.listTree', () => {
   it('maps blobs/trees, skips submodules, and surfaces truncation', async () => {
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockResolvedValue(
-        Response.json({
-          tree: [
-            { path: 'src', type: 'tree' },
-            { path: 'src/a.ts', type: 'blob', size: 10 },
-            { path: 'vendor', type: 'commit' }, // submodule — must be skipped
-          ],
-          truncated: true,
-        })
-      )
+      vi.fn()
+        .mockResolvedValueOnce(Response.json({ object: { sha: 'sha-main' } }))
+        .mockResolvedValueOnce(
+          Response.json({
+            tree: [
+              { path: 'src', type: 'tree' },
+              { path: 'src/a.ts', type: 'blob', size: 10 },
+              { path: 'vendor', type: 'commit' }, // submodule — must be skipped
+            ],
+            truncated: true,
+          })
+        )
     );
     const res = await makeBrowser().listTree('main');
     expect(res.truncated).toBe(true);
@@ -58,6 +67,57 @@ describe('GitHubRepoBrowser.listTree', () => {
       { path: 'src', name: 'src', type: 'tree', size: null },
       { path: 'src/a.ts', name: 'a.ts', type: 'blob', size: 10 },
     ]);
+  });
+
+  it('returns cached trees by resolved commit SHA and preserves the requested ref', async () => {
+    const kv = makeKv({
+      ref: 'old-ref',
+      path: '',
+      entries: [{ path: 'README.md', name: 'README.md', type: 'blob', size: 5 }],
+      truncated: false,
+    });
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json({ object: { sha: 'sha-main' } })));
+
+    const res = await makeBrowser({ KV: kv as never }).listTree('main');
+
+    expect(res.ref).toBe('main');
+    expect(res.entries).toHaveLength(1);
+    expect(kv.get).toHaveBeenCalledWith('github-tree:v1:octo/repo:sha-main', 'json');
+    expect(kv.put).not.toHaveBeenCalled();
+    expect(fetch).toHaveBeenCalledTimes(1);
+  });
+
+  it('writes tree cache entries with the configured TTL after a miss', async () => {
+    const kv = makeKv();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn()
+        .mockResolvedValueOnce(new Response(null, { status: 404 }))
+        .mockResolvedValueOnce(Response.json({ sha: 'sha-commit' }))
+        .mockResolvedValueOnce(Response.json({ tree: [], truncated: false }))
+    );
+
+    await makeBrowser({ KV: kv as never, GITHUB_TREE_CACHE_TTL_SECONDS: '123' }).listTree('abc123');
+
+    expect(kv.put).toHaveBeenCalledWith(
+      'github-tree:v1:octo/repo:sha-commit',
+      JSON.stringify({ ref: 'abc123', path: '', entries: [], truncated: false }),
+      { expirationTtl: 123 }
+    );
+  });
+
+  it('does not write tree cache entries when the configured cache TTL is zero', async () => {
+    const kv = makeKv();
+    vi.stubGlobal(
+      'fetch',
+      vi.fn()
+        .mockResolvedValueOnce(Response.json({ object: { sha: 'sha-main' } }))
+        .mockResolvedValueOnce(Response.json({ tree: [], truncated: false }))
+    );
+
+    await makeBrowser({ KV: kv as never, GITHUB_TREE_CACHE_TTL_SECONDS: '0' }).listTree('main');
+
+    expect(kv.put).not.toHaveBeenCalled();
   });
 });
 

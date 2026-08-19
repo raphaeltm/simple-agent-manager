@@ -9,7 +9,7 @@ import { requireProjectAccess } from '../../middleware/project-auth';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import type { RepoBrowser } from '../../services/repo-browse';
 import { resolveRepoBrowser } from '../../services/repo-browse';
-import { requireProjectInstallation, requireRepositoryUserAccess } from './_helpers';
+import { requireRepositoryUserAccess } from './_helpers';
 
 const repoBrowseRoutes = new Hono<{ Bindings: Env }>();
 
@@ -60,11 +60,10 @@ async function resolveBrowser(
   const project = await requireProjectAccess(db, projectId, userId);
 
   // Security gate: user∩app GitHub access (no-op for Artifacts).
-  await requireRepositoryUserAccess(c, db, project, userId);
+  const installation = await requireRepositoryUserAccess(c, db, project, userId);
 
   let externalInstallationId: string | undefined;
-  if ((project.repoProvider ?? 'github') === 'github') {
-    const installation = await requireProjectInstallation(db, project.installationId);
+  if ((project.repoProvider ?? 'github') === 'github' && installation) {
     externalInstallationId = getExternalInstallationId(installation);
   }
 

@@ -94,6 +94,11 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   GITHUB_APP_ID?: string;
   GITHUB_APP_PRIVATE_KEY?: string;
   GITHUB_APP_SLUG?: string; // GitHub App slug for install URL
+  GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS?: string; // KV cache TTL for App installation tokens (default: 3000)
+  GITHUB_REPO_ACCESS_CACHE_TTL_SECONDS?: string; // KV cache TTL for user∩installation repo access checks (default: 300)
+  GITHUB_TREE_CACHE_TTL_SECONDS?: string; // KV cache TTL for immutable commit-SHA git trees (default: 86400)
+  PROJECT_MULTIPLAYER_CACHE_TTL_MS?: string; // Per-isolate cache TTL for project multiplayer state (default: 10000)
+  CREDENTIAL_ATTRIBUTION_CACHE_TTL_MS?: string; // Per-isolate cache TTL for project credential attribution health (default: 10000)
   GITLAB_HOST?: string; // Optional GitLab OAuth host fallback, e.g. https://gitlab.com
   GITLAB_CLIENT_ID?: string;
   GITLAB_CLIENT_SECRET?: string;

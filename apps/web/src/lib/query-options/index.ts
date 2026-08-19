@@ -58,3 +58,4 @@ export {
 } from './projects';
 export { activeTasksQueryOptions, taskQueryKeys } from './tasks';
 export { trialQueryKeys, trialStatusQueryOptions } from './trial';
+export { triggerQueryKeys, triggersQueryOptions } from './triggers';

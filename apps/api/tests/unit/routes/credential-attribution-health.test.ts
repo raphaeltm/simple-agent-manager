@@ -94,6 +94,7 @@ describe('credential attribution health route', () => {
       project,
       defaultAgentType: 'codex',
       multiplayerActive: true,
+      env,
     });
     expect(await res.json()).toEqual({
       projectId: 'proj-1',

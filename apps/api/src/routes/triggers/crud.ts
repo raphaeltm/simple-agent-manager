@@ -25,10 +25,16 @@ import { ulid } from '../../lib/ulid';
 import { getAuth } from '../../middleware/auth';
 import { errors } from '../../middleware/error';
 import { CreateTriggerSchema, jsonValidator, UpdateTriggerSchema } from '../../schemas';
-import { buildCredentialAttributionForTriggers } from '../../services/credential-attribution-health';
+import {
+  buildCredentialAttributionForTriggers,
+  clearCredentialAttributionHealthCache,
+} from '../../services/credential-attribution-health';
 import { cronToNextFire, validateCronExpression } from '../../services/cron-utils';
 import { parseGitHubTriggerFiltersJson } from '../../services/github-trigger-filter';
-import { getProjectMultiplayerState } from '../../services/project-multiplayer';
+import {
+  clearProjectMultiplayerStateCache,
+  getProjectMultiplayerState,
+} from '../../services/project-multiplayer';
 import { listTriggerRows, toTriggerResponse } from '../../services/trigger-read';
 import {
   getWebhookTriggerLimits,
@@ -54,7 +60,7 @@ async function attribution(
   triggers: schema.TriggerRow[]
 ) {
   const [multiplayer, checks] = await Promise.all([
-    getProjectMultiplayerState(db, project.id),
+    getProjectMultiplayerState(db, project.id, new Date(), env),
     buildCredentialAttributionForTriggers({
       db,
       project,
@@ -75,6 +81,11 @@ async function attribution(
       ] as const;
     })
   );
+}
+
+function clearTriggerPageCaches(projectId: string): void {
+  clearCredentialAttributionHealthCache(projectId);
+  clearProjectMultiplayerStateCache(projectId);
 }
 
 async function enrichTrigger(
@@ -280,6 +291,7 @@ crudRoutes.post('/', jsonValidator(CreateTriggerSchema), async (c) => {
 
   const created = await db.select().from(schema.triggers).where(eq(schema.triggers.id, id)).get();
   if (!created) throw errors.internal('Created trigger not found');
+  clearTriggerPageCaches(projectId);
   const attributionById = await attribution(db, c.env, project, [created]);
   const response: CreateTriggerResponse = {
     ...(await enrichTrigger(db, created, attributionById.get(id))),
@@ -478,6 +490,7 @@ crudRoutes.patch('/:triggerId', jsonValidator(UpdateTriggerSchema), async (c) =>
     .where(eq(schema.triggers.id, triggerId))
     .get();
   if (!updated) throw errors.notFound('Trigger');
+  clearTriggerPageCaches(projectId);
   const attributionById = await attribution(db, c.env, project, [updated]);
   log.info('trigger.updated', { triggerId, projectId, fields: Object.keys(body) });
   return c.json(await enrichTrigger(db, updated, attributionById.get(triggerId)));
@@ -492,6 +505,7 @@ crudRoutes.delete('/:triggerId', async (c) => {
     .delete(schema.triggers)
     .where(and(eq(schema.triggers.id, triggerId), eq(schema.triggers.projectId, projectId)));
   if (!(result as { meta?: { changes?: number } }).meta?.changes) throw errors.notFound('Trigger');
+  clearTriggerPageCaches(projectId);
   log.info('trigger.deleted', { triggerId, projectId });
   return c.json({ success: true });
 });

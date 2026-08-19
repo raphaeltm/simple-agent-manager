@@ -9,12 +9,14 @@ import type {
 } from '@simple-agent-manager/shared';
 
 import type { Env } from '../../env';
+import { parseCacheTtlSeconds } from '../cache-config';
 import { getInstallationToken, getRepositoryBranches } from '../github-app';
 import type { RepoBrowser } from './types';
 import { basename, isBinaryBytes, maxInlineBytes } from './util';
 
 /** GitHub's compare API caps the changed-file list; treat >= this as truncated. */
 const GITHUB_COMPARE_FILE_CAP = 300;
+export const DEFAULT_GITHUB_TREE_CACHE_TTL_SECONDS = 24 * 60 * 60;
 
 /** Encode a repo-relative path for a GitHub URL, preserving '/' separators. */
 function encodePath(path: string): string {
@@ -82,6 +84,26 @@ export class GitHubRepoBrowser implements RepoBrowser {
     return `/repos/${encodeURIComponent(this.owner)}/${encodeURIComponent(this.repo)}`;
   }
 
+  private treeCacheKey(sha: string): string {
+    return `github-tree:v1:${this.owner.toLowerCase()}/${this.repo.toLowerCase()}:${sha}`;
+  }
+
+  private async resolveTreeSha(ref: string): Promise<string> {
+    const encodedRef = encodeURIComponent(ref);
+    const refRes = await this.gh(`${this.repoPath()}/git/ref/heads/${encodedRef}`);
+    if (refRes.ok) {
+      const data = (await refRes.json()) as { object?: { sha?: string } };
+      if (data.object?.sha) return data.object.sha;
+    }
+    const commitRes = await this.gh(`${this.repoPath()}/commits/${encodedRef}`);
+    if (!commitRes.ok) {
+      throw new Error(`GitHub ref resolution failed: ${commitRes.status}`);
+    }
+    const data = (await commitRes.json()) as { sha?: string };
+    if (!data.sha) throw new Error('GitHub ref resolution returned no SHA');
+    return data.sha;
+  }
+
   async listBranches(): Promise<RepoBranchesResponse> {
     const branches = await getRepositoryBranches(
       this.externalInstallationId,
@@ -98,9 +120,12 @@ export class GitHubRepoBrowser implements RepoBrowser {
   }
 
   async listTree(ref: string): Promise<RepoTreeResponse> {
-    const res = await this.gh(
-      `${this.repoPath()}/git/trees/${encodeURIComponent(ref)}?recursive=1`
-    );
+    const sha = await this.resolveTreeSha(ref);
+    const cacheKey = this.treeCacheKey(sha);
+    const cached = await this.env.KV?.get<RepoTreeResponse>(cacheKey, 'json');
+    if (cached) return { ...cached, ref };
+
+    const res = await this.gh(`${this.repoPath()}/git/trees/${encodeURIComponent(sha)}?recursive=1`);
     if (!res.ok) {
       throw new Error(`GitHub tree fetch failed: ${res.status}`);
     }
@@ -118,7 +143,17 @@ export class GitHubRepoBrowser implements RepoBrowser {
         size: t.type === 'blob' ? (t.size ?? null) : null,
       });
     }
-    return { ref, path: '', entries, truncated: Boolean(data.truncated) };
+    const response = { ref, path: '', entries, truncated: Boolean(data.truncated) };
+    const cacheTtl = parseCacheTtlSeconds(
+      this.env.GITHUB_TREE_CACHE_TTL_SECONDS,
+      DEFAULT_GITHUB_TREE_CACHE_TTL_SECONDS
+    );
+    if (cacheTtl > 0) {
+      await this.env.KV?.put(cacheKey, JSON.stringify(response), {
+        expirationTtl: cacheTtl,
+      });
+    }
+    return response;
   }
 
   async getFile(ref: string, path: string): Promise<RepoFileContent> {

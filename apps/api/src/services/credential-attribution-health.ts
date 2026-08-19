@@ -8,6 +8,7 @@ import { and, eq, inArray, isNull, or } from 'drizzle-orm';
 
 import * as schema from '../db/schema';
 import type { AppDb } from '../middleware/project-auth';
+import { parseCacheTtlMs } from './cache-config';
 import { getProjectMultiplayerState } from './project-multiplayer';
 
 type ProjectRow = Pick<
@@ -21,6 +22,35 @@ type TriggerWithProfile = schema.TriggerRow & {
 };
 
 const INHERITED_COMPUTE_TARGET = 'inherited-provider';
+export const DEFAULT_CREDENTIAL_ATTRIBUTION_CACHE_TTL_MS = 10_000;
+
+interface CredentialAttributionCacheEntry {
+  expiresAt: number;
+  summary: ProjectCredentialAttributionHealthSummary;
+}
+
+const credentialAttributionCache = new Map<string, CredentialAttributionCacheEntry>();
+
+export function clearCredentialAttributionHealthCache(projectId?: string): void {
+  if (projectId) {
+    for (const key of credentialAttributionCache.keys()) {
+      if (key === projectId || key.startsWith(`${projectId}:`)) {
+        credentialAttributionCache.delete(key);
+      }
+    }
+    return;
+  }
+  credentialAttributionCache.clear();
+}
+
+export function getCredentialAttributionCacheTtlMs(env?: {
+  CREDENTIAL_ATTRIBUTION_CACHE_TTL_MS?: string;
+}): number {
+  return parseCacheTtlMs(
+    env?.CREDENTIAL_ATTRIBUTION_CACHE_TTL_MS,
+    DEFAULT_CREDENTIAL_ATTRIBUTION_CACHE_TTL_MS
+  );
+}
 
 interface ProjectAttachmentCoverage {
   configurationId: string;
@@ -269,10 +299,20 @@ export async function getProjectCredentialAttributionHealth(input: {
   project: ProjectRow;
   defaultAgentType: string;
   multiplayerActive?: boolean;
+  env?: { CREDENTIAL_ATTRIBUTION_CACHE_TTL_MS?: string; PROJECT_MULTIPLAYER_CACHE_TTL_MS?: string };
 }): Promise<ProjectCredentialAttributionHealthSummary> {
   const { db, project, defaultAgentType } = input;
+  const ttlMs = getCredentialAttributionCacheTtlMs(input.env);
+  const nowMs = Date.now();
+  const cacheKey = `${project.id}:${defaultAgentType}:${input.multiplayerActive ?? 'auto'}`;
+  const cached = credentialAttributionCache.get(cacheKey);
+  if (ttlMs > 0 && cached && cached.expiresAt > nowMs) {
+    return cached.summary;
+  }
+
   const multiplayerActive = input.multiplayerActive
-    ?? (await getProjectMultiplayerState(db, project.id)).multiplayerActive;
+    ?? (await getProjectMultiplayerState(db, project.id, new Date(nowMs), input.env))
+      .multiplayerActive;
   const triggerRows = await db
     .select()
     .from(schema.triggers)
@@ -301,7 +341,7 @@ export async function getProjectCredentialAttributionHealth(input: {
     };
   });
 
-  return {
+  const summary = {
     projectId: project.id,
     multiplayerActive,
     counts: {
@@ -325,4 +365,8 @@ export async function getProjectCredentialAttributionHealth(input: {
     },
     resources,
   };
+  if (ttlMs > 0) {
+    credentialAttributionCache.set(cacheKey, { expiresAt: nowMs + ttlMs, summary });
+  }
+  return summary;
 }

@@ -1,4 +1,5 @@
 import type { TriggerResponse } from '@simple-agent-manager/shared';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
@@ -39,6 +40,10 @@ vi.mock('react-router', async () => {
 
 vi.mock('../../../src/hooks/useToast', () => ({
   useToast: () => mocks.toast,
+}));
+
+vi.mock('../../../src/hooks/useQueryScope', () => ({
+  useQueryScope: () => 'user-1',
 }));
 
 vi.mock('../../../src/pages/ProjectContext', () => ({
@@ -86,10 +91,15 @@ const TRIGGERS = [
 ];
 
 function renderPage() {
+  const queryClient = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return render(
-    <MemoryRouter>
-      <ProjectTriggers />
-    </MemoryRouter>,
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter>
+        <ProjectTriggers />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 

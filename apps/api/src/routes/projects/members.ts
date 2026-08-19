@@ -27,6 +27,7 @@ import {
   DecideProjectAccessRequestSchema,
   jsonValidator,
 } from '../../schemas';
+import { clearCredentialAttributionHealthCache } from '../../services/credential-attribution-health';
 import { getUserInstallationRepositories } from '../../services/github-app';
 import { getExternalInstallationId } from '../../services/github-installation-ids';
 import {
@@ -38,6 +39,7 @@ import {
   resolveConcurrentAccessRequest,
   resolveConcurrentRequestInsert,
 } from '../../services/project-access-request-reentry';
+import { clearProjectMultiplayerStateCache } from '../../services/project-multiplayer';
 import { applyProjectMemberOffboarding } from '../../services/project-offboarding-apply';
 import { createProjectMemberOffboardingPreview } from '../../services/project-offboarding-preview';
 import { projectOwnershipTransferRoutes } from './ownership-transfer';
@@ -49,6 +51,11 @@ const DEFAULT_INVITE_MAX_EXPIRY_DAYS = 30;
 
 const projectMembersRoutes = new Hono<{ Bindings: Env }>();
 projectMembersRoutes.route('/', projectOwnershipTransferRoutes);
+
+function clearProjectMemberDerivedCaches(projectId: string): void {
+  clearProjectMultiplayerStateCache(projectId);
+  clearCredentialAttributionHealthCache(projectId);
+}
 
 function parsePositiveEnvInt(value: string | undefined, fallback: number): number {
   const parsed = parseInt(value ?? '', 10);
@@ -484,6 +491,7 @@ projectMembersRoutes.post(
       useCount: 0,
     } satisfies schema.ProjectInviteLink;
     await db.insert(schema.projectInviteLinks).values(link);
+    clearProjectMemberDerivedCaches(projectId);
 
     const response: CreatedProjectInviteLinkResponse = {
       ...toInviteLinkResponse(link),
@@ -515,6 +523,7 @@ projectMembersRoutes.post('/:id/invite-links/:linkId/revoke', async (c) => {
   if (!link) {
     throw errors.notFound('Invite link');
   }
+  clearProjectMemberDerivedCaches(projectId);
   return c.json(toInviteLinkResponse(link));
 });
 
@@ -681,6 +690,7 @@ projectMembersRoutes.post('/invite-links/:token/request', async (c) => {
       updatedAt: now,
     })
     .where(eq(schema.projectInviteLinks.id, link.id));
+  clearProjectMemberDerivedCaches(project.id);
 
   return c.json(await loadAccessRequestWithUser(db, project.id, requestId), existing ? 200 : 201);
 });
@@ -755,6 +765,7 @@ projectMembersRoutes.post(
         updatedAt: now,
       })
       .where(eq(schema.projectAccessRequests.id, request.id));
+    clearProjectMemberDerivedCaches(project.id);
 
     return c.json(await loadAccessRequestWithUser(db, project.id, request.id));
   }
@@ -792,6 +803,7 @@ projectMembersRoutes.post(
     if (!rows[0]) {
       throw errors.notFound('Pending access request');
     }
+    clearProjectMemberDerivedCaches(project.id);
     return c.json(await loadAccessRequestWithUser(db, project.id, requestId));
   }
 );

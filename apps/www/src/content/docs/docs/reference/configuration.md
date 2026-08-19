@@ -58,6 +58,11 @@ Set as `[vars]` in `wrangler.toml` or as environment variables:
 | `SETUP_RATE_LIMIT_MAX_ATTEMPTS`   | `10`                  | Max setup-token attempts per identifier/window                                                                             |
 | `SETUP_RATE_LIMIT_WINDOW_SECONDS` | `900`                 | Setup-token attempt window in seconds                                                                                      |
 | `PLATFORM_CONFIG_CACHE_MS`        | `60000`               | Per-isolate cache TTL for the resolved platform integration config (the `GITHUB_*`/`GITLAB_*`/`GOOGLE_LOGIN_*` fallbacks above and their runtime admin overrides). Resolving costs 13 D1 queries and runs on the auth preamble of every authenticated request. After a config change, isolates that already hold a cached copy converge within this window. Set to `0` to disable caching and always re-read D1. |
+| `GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS` | `3000` | KV cache TTL for GitHub App installation tokens. The default is shorter than GitHub's one-hour token lifetime. Set to `0` to disable writes for new cache entries. |
+| `GITHUB_REPO_ACCESS_CACHE_TTL_SECONDS` | `300` | KV cache TTL for per-user, per-installation, per-repository GitHub access checks used by the Files page. Set to `0` to disable writes for new cache entries. |
+| `GITHUB_TREE_CACHE_TTL_SECONDS` | `86400` | KV cache TTL for immutable Git tree responses keyed by commit SHA. Branch refs are resolved to a commit SHA before lookup. Set to `0` to disable writes for new cache entries. |
+| `PROJECT_MULTIPLAYER_CACHE_TTL_MS` | `10000` | Per-isolate cache TTL for project multiplayer state counts used by trigger-bearing pages. Set to `0` to disable the cache. |
+| `CREDENTIAL_ATTRIBUTION_CACHE_TTL_MS` | `10000` | Per-isolate cache TTL for project credential attribution health used by trigger-bearing pages. Set to `0` to disable the cache. |
 
 ## GitHub Environment Variables
 

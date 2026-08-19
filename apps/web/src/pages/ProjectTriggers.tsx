@@ -4,15 +4,18 @@ import type {
   WebhookCredential,
 } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Clock, Plus } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router';
 
 import { TriggerCard } from '../components/triggers/TriggerCard';
 import { TriggerForm } from '../components/triggers/TriggerForm';
 import { WebhookCredentialDialog } from '../components/triggers/WebhookCredentialDialog';
+import { useQueryScope } from '../hooks/useQueryScope';
 import { useToast } from '../hooks/useToast';
-import { deleteTrigger, listTriggers, runTrigger, updateTrigger } from '../lib/api';
+import { deleteTrigger, runTrigger, updateTrigger } from '../lib/api';
+import { triggerQueryKeys, triggersQueryOptions } from '../lib/query-options';
 import { useProjectContext } from './ProjectContext';
 
 // ---------------------------------------------------------------------------
@@ -21,6 +24,7 @@ import { useProjectContext } from './ProjectContext';
 
 const FOCUS_RING =
   'focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus-ring';
+const EMPTY_TRIGGERS: TriggerResponse[] = [];
 
 // ---------------------------------------------------------------------------
 // Page
@@ -28,18 +32,30 @@ const FOCUS_RING =
 
 export function ProjectTriggers() {
   const { projectId } = useProjectContext();
+  const queryScope = useQueryScope();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const toast = useToast();
   const [searchParams, setSearchParams] = useSearchParams();
 
-  const [triggers, setTriggers] = useState<TriggerResponse[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [confirmDeleteTarget, setConfirmDeleteTarget] = useState<TriggerResponse | null>(null);
   const [webhookCredential, setWebhookCredential] = useState<{
     credential: WebhookCredential;
     returnFocusTarget: HTMLElement | null;
   } | null>(null);
+
+  const triggersQuery = useQuery({
+    ...triggersQueryOptions(queryScope, projectId),
+    enabled: Boolean(queryScope && projectId),
+  });
+  const triggers = triggersQuery.data ?? EMPTY_TRIGGERS;
+  const loading = Boolean(queryScope) && triggersQuery.isPending && triggersQuery.data === undefined;
+  const error =
+    triggersQuery.error instanceof Error
+      ? triggersQuery.error.message
+      : triggersQuery.error
+        ? 'Failed to load triggers'
+        : null;
 
   // URL-driven edit modal — `?edit=triggerId` or `?edit=new`
   const editParam = searchParams.get('edit');
@@ -75,48 +91,66 @@ export function ProjectTriggers() {
     );
   }, [setSearchParams]);
 
-  const loadTriggers = useCallback(async () => {
-    try {
-      const resp = await listTriggers(projectId);
-      setTriggers(resp.triggers);
-      setError(null);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load triggers');
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId]);
+  const invalidateTriggers = useCallback(async () => {
+    await queryClient.invalidateQueries({
+      queryKey: triggerQueryKeys.list(queryScope, projectId),
+    });
+  }, [projectId, queryClient, queryScope]);
 
-  useEffect(() => {
-    void loadTriggers();
-  }, [loadTriggers]);
+  const runMutation = useMutation({
+    mutationFn: (trigger: TriggerResponse) => runTrigger(projectId, trigger.id),
+    onSuccess: async () => {
+      await invalidateTriggers();
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ trigger, data }: { trigger: TriggerResponse; data: UpdateTriggerRequest }) =>
+      updateTrigger(projectId, trigger.id, data),
+    onSuccess: async (updated) => {
+      queryClient.setQueryData<TriggerResponse[]>(
+        triggerQueryKeys.list(queryScope, projectId),
+        (previous) =>
+          (previous ?? []).map((candidate) => (candidate.id === updated.id ? updated : candidate))
+      );
+      await invalidateTriggers();
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (trigger: TriggerResponse) => deleteTrigger(projectId, trigger.id),
+    onSuccess: async (_result, trigger) => {
+      queryClient.setQueryData<TriggerResponse[]>(
+        triggerQueryKeys.list(queryScope, projectId),
+        (previous) => (previous ?? []).filter((candidate) => candidate.id !== trigger.id)
+      );
+      await invalidateTriggers();
+    },
+  });
 
   const handleRunNow = useCallback(
     async (trigger: TriggerResponse) => {
       try {
-        await runTrigger(projectId, trigger.id);
+        await runMutation.mutateAsync(trigger);
         toast.success(`"${trigger.name}" triggered`);
-        void loadTriggers();
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Failed to run trigger');
       }
     },
-    [projectId, toast, loadTriggers]
+    [runMutation, toast]
   );
 
   const handleTogglePause = useCallback(
     async (trigger: TriggerResponse) => {
       const newStatus = trigger.status === 'paused' ? 'active' : 'paused';
       try {
-        const data: UpdateTriggerRequest = { status: newStatus };
-        await updateTrigger(projectId, trigger.id, data);
+        await updateMutation.mutateAsync({ trigger, data: { status: newStatus } });
         toast.success(`"${trigger.name}" ${newStatus === 'active' ? 'resumed' : 'paused'}`);
-        void loadTriggers();
       } catch (err) {
         toast.error(err instanceof Error ? err.message : 'Failed to update trigger');
       }
     },
-    [projectId, toast, loadTriggers]
+    [toast, updateMutation]
   );
 
   const handleEdit = useCallback(
@@ -145,9 +179,9 @@ export function ProjectTriggers() {
     (credential?: WebhookCredential, returnFocusTarget?: HTMLElement | null) => {
       if (credential)
         setWebhookCredential({ credential, returnFocusTarget: returnFocusTarget ?? null });
-      void loadTriggers();
+      void invalidateTriggers();
     },
-    [loadTriggers]
+    [invalidateTriggers]
   );
 
   const handleConfirmDelete = useCallback(async () => {
@@ -155,17 +189,15 @@ export function ProjectTriggers() {
     const name = confirmDeleteTarget.name;
     setConfirmDeleteTarget(null);
     try {
-      await deleteTrigger(projectId, confirmDeleteTarget.id);
+      await deleteMutation.mutateAsync(confirmDeleteTarget);
       toast.success(`"${name}" deleted`);
-      void loadTriggers();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to delete trigger');
     }
-  }, [confirmDeleteTarget, projectId, toast, loadTriggers]);
+  }, [confirmDeleteTarget, deleteMutation, toast]);
 
   const retry = () => {
-    setLoading(true);
-    void loadTriggers();
+    void triggersQuery.refetch();
   };
 
   // First load only. A refetch must never replace already-rendered content.

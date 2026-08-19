@@ -6,6 +6,7 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { readResponseJson } from '../lib/runtime-validation';
 import { AppError } from '../middleware/error';
+import { parseCacheTtlSeconds } from './cache-config';
 import { getGitHubAppConfig } from './platform-config';
 
 const githubErrorSchema = v.object({
@@ -38,6 +39,20 @@ const userInstallationSchema = v.object({
     type: v.string(),
   }),
 });
+
+export const DEFAULT_GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS = 50 * 60;
+
+async function installationTokenCacheKey(
+  installationId: string,
+  body: string | undefined
+): Promise<string> {
+  if (!body) return `github-installation-token:v1:${installationId}:default`;
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(body));
+  const hash = Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join(
+    ''
+  );
+  return `github-installation-token:v1:${installationId}:${hash}`;
+}
 
 const userInstallationsSchema = v.object({
   installations: v.array(userInstallationSchema),
@@ -308,8 +323,6 @@ export async function getInstallationToken(
         repositories?: string[];
       }
 ): Promise<{ token: string; expiresAt: string }> {
-  const jwt = await generateAppJWT(env);
-
   const body = options
     ? JSON.stringify(
         'permissions' in options || 'repositoryIds' in options || 'repositories' in options
@@ -321,6 +334,13 @@ export async function getInstallationToken(
           : { permissions: options }
       )
     : undefined;
+  const cacheKey = await installationTokenCacheKey(installationId, body);
+  const cached = await env.KV?.get<{ token: string; expiresAt: string }>(cacheKey, 'json');
+  if (cached?.token && cached.expiresAt) {
+    return cached;
+  }
+
+  const jwt = await generateAppJWT(env);
 
   const response = await fetch(
     `https://api.github.com/app/installations/${installationId}/access_tokens`,
@@ -348,10 +368,20 @@ export async function getInstallationToken(
     installationTokenSchema,
     'github.installation_token'
   );
-  return {
+  const token = {
     token: data.token,
     expiresAt: data.expires_at,
   };
+  const cacheTtl = parseCacheTtlSeconds(
+    env.GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS,
+    DEFAULT_GITHUB_INSTALLATION_TOKEN_CACHE_TTL_SECONDS
+  );
+  if (cacheTtl > 0) {
+    await env.KV?.put(cacheKey, JSON.stringify(token), {
+      expirationTtl: cacheTtl,
+    });
+  }
+  return token;
 }
 
 /** Canonical GitHub account identity for an installation (resolved via the App API). */

@@ -9,6 +9,7 @@ import { getUserId, requireApproved,requireAuth } from '../middleware/auth';
 import { requireProjectAccess, requireProjectCapability } from '../middleware/project-auth';
 import { CreateAgentProfileSchema, jsonValidator, SetProjectDefaultProfileSchema,UpdateAgentProfileSchema } from '../schemas';
 import * as agentProfileService from '../services/agent-profiles';
+import { clearCredentialAttributionHealthCache } from '../services/credential-attribution-health';
 
 const agentProfileRoutes = new Hono<{ Bindings: Env }>();
 
@@ -42,6 +43,7 @@ agentProfileRoutes.post('/', jsonValidator(CreateAgentProfileSchema), async (c) 
 
   const body = c.req.valid('json');
   const profile = await agentProfileService.createProfile(db, projectId, userId, body, c.env);
+  clearCredentialAttributionHealthCache(projectId);
   return c.json(profile, 201);
 });
 
@@ -69,6 +71,7 @@ agentProfileRoutes.put('/:profileId', jsonValidator(UpdateAgentProfileSchema), a
 
   const body = c.req.valid('json');
   const profile = await agentProfileService.updateProfile(db, projectId, profileId, userId, body);
+  clearCredentialAttributionHealthCache(projectId);
   return c.json(profile);
 });
 
@@ -82,6 +85,7 @@ agentProfileRoutes.delete('/:profileId', async (c) => {
   await requireProjectCapability(db, projectId, userId, 'project:update');
 
   await agentProfileService.deleteProfile(db, projectId, profileId, userId);
+  clearCredentialAttributionHealthCache(projectId);
   return c.json({ success: true });
 });
 

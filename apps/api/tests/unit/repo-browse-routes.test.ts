@@ -61,7 +61,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.getUserId.mockReturnValue('user-1');
   mocks.requireProjectAccess.mockResolvedValue(project);
-  mocks.requireRepositoryUserAccess.mockResolvedValue(undefined);
+  mocks.requireRepositoryUserAccess.mockResolvedValue({ id: 'inst' });
 });
 
 describe('repo-browse routes', () => {
@@ -73,6 +73,19 @@ describe('repo-browse routes', () => {
       expect.anything(),
       project,
       'user-1'
+    );
+  });
+
+  it('reuses the installation returned by the access gate instead of re-fetching it', async () => {
+    mocks.resolveRepoBrowser.mockResolvedValue(
+      browserStub({ listTree: vi.fn().mockResolvedValue({ ref: 'main', path: '', entries: [], truncated: false }) })
+    );
+    await makeApp().request('/p1/repo/tree?ref=main', {}, env);
+
+    expect(mocks.requireProjectInstallation).not.toHaveBeenCalled();
+    expect(mocks.getExternalInstallationId).toHaveBeenCalledWith({ id: 'inst' });
+    expect(mocks.resolveRepoBrowser).toHaveBeenCalledWith(
+      expect.objectContaining({ externalInstallationId: 'ext-inst' })
     );
   });
 
