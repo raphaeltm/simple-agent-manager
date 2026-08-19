@@ -266,6 +266,41 @@ describe('useSessionLifecycle loading semantics', () => {
     expect(result.current.sessionState).toBe('sleeping');
   });
 
+  it('hydrates recoveryStatus=waking into agentActivity=recovering so wake banner persists across navigation', async () => {
+    const wakingDetail = {
+      session: sessionResponse('sleeping'),
+      messages: [msg('a', 1000)],
+      hasMore: false,
+      state: {
+        activity: 'idle' as const,
+        activityAt: Date.now(),
+        statusError: null,
+        currentPlan: null,
+        planUpdatedAt: null,
+        promptStartedAt: null,
+        agentType: null,
+        lastStopReason: null,
+        recoveryStatus: 'waking' as const,
+      },
+    };
+    mocks.getChatSession.mockResolvedValue(wakingDetail);
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false));
+
+    await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
+    expect(result.current.agentActivity).toBe('recovering');
+  });
+
+  it('does NOT set agentActivity=recovering when recoveryStatus is null (normal sleeping)', async () => {
+    const normalSleeping = detail([msg('a', 1000)], false, 'sleeping');
+    mocks.getChatSession.mockResolvedValue(normalSleeping);
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false));
+
+    await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
+    expect(result.current.agentActivity).toBe('idle');
+  });
+
   describe('loadUntil', () => {
     it('short-circuits (no fetch) when the target timestamp is already loaded', async () => {
       mocks.getChatSession.mockResolvedValue(detail([msg('a', 500), msg('b', 1000)], false));

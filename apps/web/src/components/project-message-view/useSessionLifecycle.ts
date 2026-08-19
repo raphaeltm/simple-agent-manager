@@ -186,6 +186,9 @@ export function useSessionLifecycle(
         setAgentActivity(s.activity);
         setPromptStartedAt(s.promptStartedAt ?? null);
         startVerifyDecayTimer();
+      } else if (s.recoveryStatus === 'waking') {
+        setAgentActivity('recovering');
+        sleepingWakePendingRef.current = true;
       } else {
         clearActivity();
         stopVerifyDecayTimer();
