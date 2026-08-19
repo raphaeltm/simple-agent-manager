@@ -44,7 +44,7 @@ describe('useAgentProfiles', () => {
     mocks.listAgentProfiles.mockResolvedValue([PROFILE]);
   });
 
-  it('deduplicates the five surfaces that read the same project profile list', async () => {
+  it('collapses the surfaces that read the same project profile list into one request', async () => {
     const { Wrapper } = createWrapper();
     const { result } = renderHook(
       () => ({

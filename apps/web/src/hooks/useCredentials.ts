@@ -15,10 +15,11 @@ interface UseCredentialsResult {
 /**
  * The user's cloud-provider credentials.
  *
- * One shared cache entry for what were seven independent loaders. Any surface that
- * needs the credential list mounts this; concurrent consumers are deduplicated into
- * a single request, and a consumer mounting inside the `staleTime` window reads the
- * cache without a network hop at all.
+ * Concurrent consumers are deduplicated into a single request, and a consumer
+ * mounting inside the `staleTime` window reads the cache without a network hop.
+ *
+ * Five of the seven surfaces that read `GET /api/credentials` use this hook; see
+ * `lib/query-options/credentials.ts` for which two do not yet.
  */
 export function useCredentials(queryScope: string): UseCredentialsResult {
   const query = useQuery({

@@ -1,12 +1,7 @@
 import type { AgentCredentialInfo, AgentInfo } from '@simple-agent-manager/shared';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
-import {
-  agentCatalogQueryOptions,
-  agentCredentialsQueryOptions,
-  agentQueryKeys,
-} from '../lib/query-options';
+import { agentCatalogQueryOptions, agentCredentialsQueryOptions } from '../lib/query-options';
 
 interface UseAgentCatalogResult {
   agents: AgentInfo[];
@@ -19,9 +14,10 @@ interface UseAgentCatalogResult {
 /**
  * The platform's agent catalog (`GET /api/agents`).
  *
- * Five surfaces read this, including `useProjectChatState` on the primary chat
- * surface. It only changes when the platform is redeployed, so it carries a longer
+ * Used by `useProjectChatState` (the primary chat surface) and the workspace session
+ * state. It only changes when the platform is redeployed, so it carries a longer
  * `staleTime` (`lib/query-stale-times.ts`) — in practice a session fetches it once.
+ * Three further call sites are not migrated yet; see `lib/query-options/agents.ts`.
  */
 export function useAgentCatalog(queryScope: string): UseAgentCatalogResult {
   const query = useQuery({
@@ -74,12 +70,4 @@ export function useAgentCredentials(queryScope: string): UseAgentCredentialsResu
       void query.refetch();
     },
   };
-}
-
-/** Invalidator for every agent-derived query (catalog, credentials, profiles). */
-export function useInvalidateAgents(queryScope: string): () => Promise<void> {
-  const queryClient = useQueryClient();
-  return useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: agentQueryKeys.all(queryScope) });
-  }, [queryClient, queryScope]);
 }

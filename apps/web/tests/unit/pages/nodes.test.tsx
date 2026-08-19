@@ -29,8 +29,8 @@ vi.mock('../../../src/components/UserMenu', () => ({
   UserMenu: () => <div data-testid="user-menu" />,
 }));
 
-import { Nodes } from '../../../src/pages/Nodes';
 import { nodeQueryKeys } from '../../../src/lib/query-options';
+import { Nodes } from '../../../src/pages/Nodes';
 
 /** Must match the id returned by the mocked `useAuth` above — the query keys are
  * scoped by it, so an invalidate with a different scope would match nothing. */

@@ -7,10 +7,13 @@ import { AGENT_CATALOG_STALE_TIME_MS } from '../query-stale-times';
  * Agent catalog, agent credentials, and per-project agent profiles.
  *
  * `agentCatalog` is the platform's list of installable agent types
- * (`GET /api/agents`). It changes only on deploy, but it was being fetched by five
- * independent loaders — including `useProjectChatState`, which runs on the app's
- * primary surface. It gets a longer `staleTime` than the app default for that
- * reason.
+ * (`GET /api/agents`). It changes only on deploy, so it gets a longer `staleTime`
+ * than the app default.
+ *
+ * Five surfaces read it; two route through this key so far (`useProjectChatState`,
+ * which runs on the app's primary surface, and the workspace session state).
+ * `AgentsSection`, `ProjectAgentsSection` and `ProjectOnboardingWizard` still fetch
+ * it directly — see the follow-up note in the PR.
  *
  * `agentProfiles` is project-scoped, so its key carries `projectId`. Note the key
  * still leads with `['auth', queryScope, …]`: a profile list belongs to a project,

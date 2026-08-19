@@ -38,7 +38,11 @@ export function useRecentChats(enabled: boolean, queryScope: string): UseRecentC
     loading: enabled && Boolean(queryScope) && query.isPending && query.data === undefined,
     isRefreshing: query.isFetching && query.data !== undefined,
     error:
-      query.data === undefined && query.error ? 'Failed to load chats' : null,
+      query.data === undefined && query.error
+        ? query.error instanceof Error
+          ? query.error.message
+          : 'Failed to load chats'
+        : null,
     refresh: () => {
       void query.refetch();
     },

@@ -44,20 +44,22 @@ describe('useAgentCatalog', () => {
     mocks.listAgents.mockResolvedValue({ agents: [AGENT] });
   });
 
-  it('deduplicates the five surfaces that read the agent catalog', async () => {
+  // Hook-level dedup. Consumers are named generically on purpose: not every real
+  // call site routes through this hook yet (see `lib/query-options/agents.ts`).
+  it('collapses any number of concurrent consumers into one request', async () => {
     const { Wrapper } = createWrapper();
     const { result } = renderHook(
       () => ({
-        projectChat: useAgentCatalog('user-1'),
-        settings: useAgentCatalog('user-1'),
-        onboarding: useAgentCatalog('user-1'),
-        workspace: useAgentCatalog('user-1'),
+        first: useAgentCatalog('user-1'),
+        second: useAgentCatalog('user-1'),
+        third: useAgentCatalog('user-1'),
+        fourth: useAgentCatalog('user-1'),
       }),
       { wrapper: Wrapper }
     );
 
-    await waitFor(() => expect(result.current.projectChat.agents).toEqual([AGENT]));
-    expect(result.current.workspace.agents).toEqual([AGENT]);
+    await waitFor(() => expect(result.current.first.agents).toEqual([AGENT]));
+    expect(result.current.fourth.agents).toEqual([AGENT]);
     expect(mocks.listAgents).toHaveBeenCalledTimes(1);
   });
 
@@ -107,6 +109,51 @@ describe('useAgentCatalog', () => {
     });
     expect(mocks.listAgents).not.toHaveBeenCalled();
   });
+
+  it('isolates the catalog by authenticated query scope', async () => {
+    const { client, Wrapper } = createWrapper();
+    mocks.listAgents
+      .mockResolvedValueOnce({ agents: [{ ...AGENT, name: 'User one agent' }] })
+      .mockResolvedValueOnce({ agents: [{ ...AGENT, name: 'User two agent' }] });
+
+    const { result } = renderHook(
+      () => ({ userOne: useAgentCatalog('user-1'), userTwo: useAgentCatalog('user-2') }),
+      { wrapper: Wrapper }
+    );
+
+    await waitFor(() => {
+      expect(result.current.userOne.agents[0]?.name).toBe('User one agent');
+      expect(result.current.userTwo.agents[0]?.name).toBe('User two agent');
+    });
+    expect(client.getQueryData(['auth', 'user-1', 'agents', 'catalog'])).toBeDefined();
+    expect(client.getQueryData(['auth', 'user-2', 'agents', 'catalog'])).toBeDefined();
+  });
+
+  it('surfaces the error when the first load fails with nothing cached', async () => {
+    const { Wrapper } = createWrapper();
+    mocks.listAgents.mockRejectedValue(new Error('agents unavailable'));
+
+    const { result } = renderHook(() => useAgentCatalog('user-1'), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.error).toBe('agents unavailable'));
+    expect(result.current.agents).toEqual([]);
+    expect(result.current.loading).toBe(false);
+  });
+
+  it('keeps the cached catalog and suppresses the error when a refresh fails', async () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useAgentCatalog('user-1'), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.agents).toEqual([AGENT]));
+
+    mocks.listAgents.mockRejectedValueOnce(new Error('transient'));
+    act(() => {
+      result.current.refresh();
+    });
+
+    await waitFor(() => expect(result.current.isRefreshing).toBe(false));
+    expect(result.current.agents).toEqual([AGENT]);
+    expect(result.current.error).toBeNull();
+  });
 });
 
 describe('useProviderCatalog', () => {
@@ -143,6 +190,7 @@ describe('useProviderCatalog', () => {
     expect(result.current.catalogs).toEqual([]);
     expect(result.current.catalog).toBeNull();
   });
+
 });
 
 describe('useTrialStatus', () => {
@@ -164,6 +212,18 @@ describe('useTrialStatus', () => {
 
     await waitFor(() => expect(result.current.checklist.available).toBe(true));
     expect(result.current.projectChat.available).toBe(true);
+    expect(mocks.getTrialStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('serves a remounting consumer from cache', async () => {
+    const { Wrapper } = createWrapper();
+    const first = renderHook(() => useTrialStatus('user-1'), { wrapper: Wrapper });
+    await waitFor(() => expect(first.result.current.available).toBe(true));
+    first.unmount();
+
+    const second = renderHook(() => useTrialStatus('user-1'), { wrapper: Wrapper });
+    expect(second.result.current.available).toBe(true);
+    expect(second.result.current.loading).toBe(false);
     expect(mocks.getTrialStatus).toHaveBeenCalledTimes(1);
   });
 

@@ -2,8 +2,8 @@ import { Alert, Breadcrumb, PageLayout, Tabs } from '@simple-agent-manager/ui';
 import { useCallback, useMemo, useState } from 'react';
 import { Outlet } from 'react-router';
 
-import { useAuth } from '../components/AuthProvider';
 import { useCredentials, useInvalidateCredentials } from '../hooks/useCredentials';
+import { useQueryScope } from '../hooks/useQueryScope';
 import { SettingsContext } from './SettingsContext';
 
 const BASE_TABS = [
@@ -22,8 +22,7 @@ const API_TOKENS_TAB = { id: 'api-tokens', label: 'API Tokens', path: 'api-token
  * Settings shell — Tabs + Outlet for sub-route pages.
  */
 export function Settings() {
-  const { user } = useAuth();
-  const queryScope = user?.id ?? '';
+  const queryScope = useQueryScope();
   const { credentials, loading, isRefreshing, error } = useCredentials(queryScope);
   const invalidateCredentials = useInvalidateCredentials(queryScope);
   const [dismissedError, setDismissedError] = useState<string | null>(null);

@@ -4,11 +4,11 @@
  * Renders as a fixed overlay with a green-glow vignette background.
  * The standard app UI is hidden behind it. Users dismiss via X button.
  */
-import { hasByocComputeCredential } from '@simple-agent-manager/shared';
 import { ArrowLeft, X } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
-import { listAgentCredentials, listCredentials, listGitHubInstallations } from '../../../lib/api';
+import { useQueryScope } from '../../../hooks/useQueryScope';
+import { useSetupStatus } from '../../../hooks/useSetupStatus';
 import { useOnboarding } from '../OnboardingContext';
 import { CompletionScreen } from './CompletionScreen';
 import { type GeneratedStep, generatePath } from './path-generator';
@@ -96,45 +96,27 @@ export function ChoosePathWizard() {
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [showOverlay, handleKeyDown]);
 
-  // Pre-populate tags from existing setup state
+  // Pre-populate tags from existing setup state.
+  //
+  // Reads the shared setup-status queries rather than issuing its own three
+  // requests: `AppShell` mounts this component next to `OnboardingProvider` on every
+  // authenticated page, and both derive the same answer from the same endpoints.
+  //
+  // Pre-mark a step as already-done only when the user has configured their OWN
+  // credential. Platform availability (SAM-managed AI / infra) is a choice the user
+  // still makes inside the flow — it must not skip the question.
+  const queryScope = useQueryScope();
+  const { hasCloud, hasGitHub, hasAgent, loading: setupLoading } = useSetupStatus(queryScope);
+
   useEffect(() => {
-    const controller = new AbortController();
-    async function checkExisting() {
-      try {
-        const [credResult, installResult, agentResult] = await Promise.allSettled([
-          listCredentials(),
-          listGitHubInstallations(),
-          listAgentCredentials(),
-        ]);
-        if (controller.signal.aborted) return;
-
-        const credentials = credResult.status === 'fulfilled' ? credResult.value : [];
-        const installations = installResult.status === 'fulfilled' ? installResult.value : [];
-        const agentCreds =
-          agentResult.status === 'fulfilled' ? agentResult.value : { credentials: [] };
-
-        const hasCloud = hasByocComputeCredential(credentials);
-        const hasGitHub = installations.length > 0;
-        const hasAgent = agentCreds.credentials.some((c) => c.isActive);
-
-        // Pre-mark a step as already-done only when the user has configured their
-        // OWN credential. Platform availability (SAM-managed AI / infra) is a choice
-        // the user still makes inside the flow — it must not skip the question.
-        const existingTags: string[] = [];
-        if (hasAgent) existingTags.push('existing-agent');
-        if (hasCloud) existingTags.push('existing-cloud');
-        if (hasGitHub) existingTags.push('existing-github');
-
-        if (existingTags.length > 0) {
-          setTags((prev) => [...new Set([...prev, ...existingTags])]);
-        }
-      } catch {
-        // Non-critical
-      }
-    }
-    checkExisting();
-    return () => controller.abort();
-  }, []);
+    if (setupLoading) return;
+    const existingTags: string[] = [];
+    if (hasAgent) existingTags.push('existing-agent');
+    if (hasCloud) existingTags.push('existing-cloud');
+    if (hasGitHub) existingTags.push('existing-github');
+    if (existingTags.length === 0) return;
+    setTags((prev) => [...new Set([...prev, ...existingTags])]);
+  }, [setupLoading, hasAgent, hasCloud, hasGitHub]);
 
   const handleAnswer = useCallback(
     (option: PathOption) => {

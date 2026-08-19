@@ -39,27 +39,41 @@ describe('useCredentials', () => {
   });
 
   /**
-   * The headline dedup win: `listCredentials` had seven independent call sites
-   * (settings shell, workspace creation, project chat, scaling settings, and three
-   * onboarding components). Mounting several at once must issue one request.
+   * The headline dedup win. This is a hook-level test: it proves N mounted consumers
+   * of THIS hook collapse to one request. It deliberately does not name the real
+   * components, because not all of them route through the hook yet — see
+   * `lib/query-options/credentials.ts` for the current split. Whole-app dedup is a
+   * property of the call sites, not of this hook, and is asserted separately in
+   * `query-dedup-request-counts.test.tsx`.
    */
-  it('deduplicates the seven surfaces that read the credential list', async () => {
+  it('collapses any number of concurrent consumers into one request', async () => {
     const { Wrapper } = createWrapper();
     const { result } = renderHook(
       () => ({
-        settings: useCredentials('user-1'),
-        createWorkspace: useCredentials('user-1'),
-        projectChat: useCredentials('user-1'),
-        onboarding: useCredentials('user-1'),
-        scaling: useCredentials('user-1'),
+        first: useCredentials('user-1'),
+        second: useCredentials('user-1'),
+        third: useCredentials('user-1'),
+        fourth: useCredentials('user-1'),
+        fifth: useCredentials('user-1'),
       }),
       { wrapper: Wrapper }
     );
 
-    await waitFor(() => expect(result.current.settings.credentials).toEqual([CREDENTIAL]));
-    expect(result.current.projectChat.credentials).toEqual([CREDENTIAL]);
-    expect(result.current.scaling.credentials).toEqual([CREDENTIAL]);
+    await waitFor(() => expect(result.current.first.credentials).toEqual([CREDENTIAL]));
+    expect(result.current.third.credentials).toEqual([CREDENTIAL]);
+    expect(result.current.fifth.credentials).toEqual([CREDENTIAL]);
     expect(mocks.listCredentials).toHaveBeenCalledTimes(1);
+  });
+
+  it('surfaces the error when the first load fails with nothing cached', async () => {
+    const { Wrapper } = createWrapper();
+    mocks.listCredentials.mockRejectedValue(new Error('credentials unavailable'));
+
+    const { result } = renderHook(() => useCredentials('user-1'), { wrapper: Wrapper });
+
+    await waitFor(() => expect(result.current.error).toBe('credentials unavailable'));
+    expect(result.current.credentials).toEqual([]);
+    expect(result.current.loading).toBe(false);
   });
 
   it('serves a remounting consumer from cache without a network hop', async () => {

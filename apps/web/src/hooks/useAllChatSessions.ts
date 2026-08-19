@@ -37,7 +37,12 @@ export function useAllChatSessions(queryScope: string): UseAllChatSessionsResult
     sessions: query.data?.chats ?? [],
     loading: Boolean(queryScope) && query.isPending && query.data === undefined,
     isRefreshing: query.isFetching && query.data !== undefined,
-    error: query.data === undefined && query.error ? 'Failed to load chat sessions' : null,
+    error:
+      query.data === undefined && query.error
+        ? query.error instanceof Error
+          ? query.error.message
+          : 'Failed to load chat sessions'
+        : null,
     refresh: () => {
       void query.refetch();
     },

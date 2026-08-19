@@ -6,10 +6,10 @@ import { TRIAL_STATUS_STALE_TIME_MS } from '../query-stale-times';
 /**
  * Platform-funded trial availability (`GET /api/trial-status`).
  *
- * Three surfaces read this to decide whether a user without their own cloud
- * credential can still provision — the onboarding checklist, workspace creation, and
- * project chat. Two of them fetched it in the same `Promise.all` as
- * `listCredentials`, so both requests duplicated across those surfaces.
+ * Read to decide whether a user without their own cloud credential can still
+ * provision. Project chat routes through this key; `CreateWorkspace.tsx` and the
+ * (currently unreferenced) `OnboardingChecklist.tsx` still fetch it directly, so the
+ * consolidation here is partial — see the follow-up note in the PR.
  */
 export const trialQueryKeys = {
   all: (queryScope: string) => ['auth', queryScope, 'trial'] as const,

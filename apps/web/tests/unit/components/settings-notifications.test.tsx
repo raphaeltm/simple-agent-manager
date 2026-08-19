@@ -33,8 +33,8 @@ vi.mock('../../../src/components/AuthProvider', () => ({
   useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
 }));
 
-import { SettingsNotifications } from '../../../src/pages/SettingsNotifications';
 import { notificationQueryKeys } from '../../../src/lib/query-options';
+import { SettingsNotifications } from '../../../src/pages/SettingsNotifications';
 
 function renderSettingsNotifications() {
   const queryClient = new QueryClient({

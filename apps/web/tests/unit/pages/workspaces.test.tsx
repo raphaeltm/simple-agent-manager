@@ -33,8 +33,8 @@ vi.mock('../../../src/hooks/useIsStandalone', () => ({
   useIsStandalone: () => false,
 }));
 
-import { Workspaces } from '../../../src/pages/Workspaces';
 import { workspaceQueryKeys } from '../../../src/lib/query-options';
+import { Workspaces } from '../../../src/pages/Workspaces';
 
 const runningWorkspace = {
   id: 'ws-1',

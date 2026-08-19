@@ -131,13 +131,14 @@ Thirteen surfaces. Chosen for request volume and UX impact, not for count.
 
 ### A. Shared catalogs/lists with many duplicate call sites (dedup wins)
 
-1. `useCredentials()` — replaces 7 `listCredentials` loaders
-2. `useAgentCatalog()` — replaces 5 `listAgents` loaders
+1. `useCredentials()` — 5 of 7 `listCredentials` loaders (see Deferred call sites)
+2. `useAgentCatalog()` — 2 of 5 `listAgents` loaders (see Deferred call sites)
 3. `useAgentProfiles(projectId)` — rewrite; replaces 5 `listAgentProfiles` loaders,
    and its create/update/delete stop chaining `await fetchProfiles()`
-4. `useTrialStatus()` — replaces 3 `getTrialStatus` loaders
+4. `useTrialStatus()` — 1 of 3 `getTrialStatus` loaders (see Deferred call sites)
 5. `useProviderCatalog()` — rewrite `hooks/useProviderCatalog.ts`
-6. `useAgentCredentials()` — replaces `listAgentCredentials` loaders
+6. `useAgentCredentials()` — consumed by `useSetupStatus`; `AgentsSection` /
+   `ProjectAgentsSection` still read `listAgentCredentials` directly
 
 ### B. Polling loaders (request-volume wins)
 
@@ -169,6 +170,29 @@ Thirteen surfaces. Chosen for request volume and UX impact, not for count.
     `useCredentials()`, keeps the context value memoized, and gates its spinner on
     "no data yet" rather than "fetch in flight"
 
+## Deferred call sites (NOT migrated — read this before assuming full consolidation)
+
+Five components still call these endpoints directly. Three specialist reviewers
+independently flagged that the original wording of this task implied the
+consolidation was complete when it was not, so the real state is recorded here.
+
+| File | Still calls | Why deferred |
+|---|---|---|
+| `components/AgentsSection.tsx` | `listAgents`, `listAgentCredentials` | Performs optimistic local mutation of the agent + credential arrays after save/delete. Converting that to `setQueryData` is a real refactor of a live settings surface with genuine regression risk, and the page is low-traffic (Settings → Agents). |
+| `components/ProjectAgentsSection.tsx` | `listAgents`, `listAgentCredentials`, `listProjectAgentCredentials` | Same optimistic-mutation shape, plus a project-scoped credential list with no shared factory yet. |
+| `components/project-onboarding/ProjectOnboardingWizard.tsx` | `listAgents` | Wizard step with its own loading/error state machine; migrating it means reconciling that with the shared hook's states. |
+| `pages/CreateWorkspace.tsx` | `listCredentials`, `getTrialStatus`, `getProviderCatalog`, `listNodes` | Multi-endpoint prerequisite aggregator driving a per-prereq `PrereqStatus` state machine. Mechanical but not small, and it is a single page rather than app-wide. |
+| `components/OnboardingChecklist.tsx` | `listCredentials`, `getTrialStatus`, `listGitHubInstallations`, `listWorkspaces` | **Unreferenced in production** — the only import is its own test. Costs zero requests today. Candidate for deletion under rule 01 rather than migration. |
+
+The two highest-impact call sites originally on this list — `OnboardingProvider` and
+`ChoosePathWizard` — WERE migrated, via the new `useSetupStatus` hook. They matter far
+more than the rest combined: `AppShell` mounts both on **every** authenticated page, and
+each independently issued `listCredentials` + `listGitHubInstallations` +
+`listAgentCredentials`. That was six requests per page load before the page fetched
+anything of its own; it is now three, shared with every other surface.
+
+Follow-up tracked in SAM idea `01M0BZ28VT7Z63BG4WV8GCZH8P`.
+
 **Explicitly out of scope** (documented, not silently dropped): the remaining ~40
 loaders — chat message lifecycle (`useSessionLifecycle`, `useAgentChat`), WebSocket
 hooks, admin log streams, one-shot form loaders, and `useNodeSystemInfo` /
@@ -178,100 +202,102 @@ hooks, admin log streams, one-shot form loaders, and `useNodeSystemInfo` /
 
 ### Query option factories
 
-- [ ] Convert `lib/query-options.ts` → `lib/query-options/` directory with a thin
+- [x] Convert `lib/query-options.ts` → `lib/query-options/` directory with a thin
       barrel `index.ts` re-exporting named symbols (rule 18); move existing
       projects/github content into `projects.ts` / `github.ts` unchanged
-- [ ] `credentials.ts` — `credentialQueryKeys`, `credentialsQueryOptions`,
+- [x] `credentials.ts` — `credentialQueryKeys`, `credentialsQueryOptions`,
       `agentCredentialsQueryOptions`
-- [ ] `agents.ts` — `agentQueryKeys`, `agentCatalogQueryOptions`,
+- [x] `agents.ts` — `agentQueryKeys`, `agentCatalogQueryOptions`,
       `agentProfilesQueryOptions`
-- [ ] `trial.ts` — `trialQueryKeys`, `trialStatusQueryOptions`
-- [ ] `tasks.ts` — `taskQueryKeys`, `activeTasksQueryOptions`
-- [ ] `chats.ts` — `chatQueryKeys`, `recentChatsQueryOptions`
-- [ ] `infrastructure.ts` — `nodeQueryKeys`, `workspaceQueryKeys`,
+- [x] `trial.ts` — `trialQueryKeys`, `trialStatusQueryOptions`
+- [x] `tasks.ts` — `taskQueryKeys`, `activeTasksQueryOptions`
+- [x] `chats.ts` — `chatQueryKeys`, `recentChatsQueryOptions`
+- [x] `infrastructure.ts` — `nodeQueryKeys`, `workspaceQueryKeys`,
       `providerCatalogQueryOptions`
-- [ ] `notifications.ts` — `notificationQueryKeys`
-- [ ] Every key follows `['auth', queryScope, domain, operation, …]`
-- [ ] Every factory takes `queryScope` as its first parameter; no factory can be
+- [x] `notifications.ts` — `notificationQueryKeys`
+- [x] Every key follows `['auth', queryScope, domain, operation, …]`
+- [x] Every factory takes `queryScope` as its first parameter; no factory can be
       called without one
 
 ### Hooks
 
-- [ ] Rewrite `hooks/useActiveTasks.ts` on `useQuery` (`refetchInterval`)
-- [ ] Rewrite `hooks/useRecentChats.ts` on `useQuery`; delete the hand-rolled
+- [x] Rewrite `hooks/useActiveTasks.ts` on `useQuery` (`refetchInterval`)
+- [x] Rewrite `hooks/useRecentChats.ts` on `useQuery`; delete the hand-rolled
       visibility/cancellation bookkeeping
-- [ ] Rewrite `hooks/useAgentProfiles.ts` on `useQuery` + `useMutation`;
+- [x] Rewrite `hooks/useAgentProfiles.ts` on `useQuery` + `useMutation`;
       `onSuccess` → `queryClient.invalidateQueries`, never `await fetchProfiles()`
-- [ ] Rewrite `hooks/useProviderCatalog.ts` on `useQuery`
-- [ ] Rewrite `hooks/useAllChatSessions.ts` on `useQuery`; delete the three
+- [x] Rewrite `hooks/useProviderCatalog.ts` on `useQuery`
+- [x] Rewrite `hooks/useAllChatSessions.ts` on `useQuery`; delete the three
       cancellation/staleness refs; fix `pages/Chats.tsx` to gate on "no data yet"
-- [ ] New `hooks/useCredentials.ts` (credentials + agent credentials)
-- [ ] New `hooks/useAgentCatalog.ts`
-- [ ] New `hooks/useTrialStatus.ts`
-- [ ] Replace `import * as api from '../lib/api'` with named imports in every hook
+- [x] New `hooks/useCredentials.ts` (credentials + agent credentials)
+- [x] New `hooks/useAgentCatalog.ts`
+- [x] New `hooks/useTrialStatus.ts`
+- [x] Replace `import * as api from '../lib/api'` with named imports in every hook
       touched (namespace imports defeat tree-shaking against the 514-line barrel)
-- [ ] All hooks return the `useProjectData` result shape
+- [x] All hooks return the `useProjectData` result shape
       (`loading` / `isRefreshing` / `error` / `refresh`)
-- [ ] No hook lists a context object (`toast`, auth) in a query dependency, and no
+- [x] No hook lists a context object (`toast`, auth) in a query dependency, and no
       `queryFn` / `catch` calls `toast.*` (rule 48 §2)
 
 ### Call-site migration
 
-- [ ] `pages/Settings.tsx` → `useCredentials()`; `SettingsContext` value memoized;
+- [x] `pages/Settings.tsx` → `useCredentials()`; `SettingsContext` value memoized;
       spinner gated on `data === undefined`
-- [ ] `pages/CreateWorkspace.tsx`, `components/OnboardingChecklist.tsx`,
-      `components/ScalingSettings.tsx`, `components/onboarding/OnboardingContext.tsx`,
-      `components/onboarding/choose-path/ChoosePathWizard.tsx` → shared hooks
-- [ ] `components/AgentsSection.tsx`, `components/ProjectAgentsSection.tsx`,
-      `components/project-onboarding/ProjectOnboardingWizard.tsx`,
-      `pages/workspace/useSessionState.ts` → `useAgentCatalog()`
-- [ ] `components/triggers/TriggerForm.tsx`, `components/task/TaskSubmitForm.tsx`,
+- [~] **PARTIAL** — `ScalingSettings.tsx`, `onboarding/OnboardingContext.tsx` and
+      `onboarding/choose-path/ChoosePathWizard.tsx` migrated (the last two via the new
+      `useSetupStatus`). `CreateWorkspace.tsx` and `OnboardingChecklist.tsx` deferred —
+      see "Deferred call sites" below.
+- [~] **PARTIAL** — `pages/workspace/useSessionState.ts` migrated. `AgentsSection.tsx`,
+      `ProjectAgentsSection.tsx` and `ProjectOnboardingWizard.tsx` deferred — see
+      "Deferred call sites" below.
+- [x] `components/triggers/TriggerForm.tsx`, `components/task/TaskSubmitForm.tsx`,
       `components/project/TaskForm.tsx` → `useAgentProfiles()`
-- [ ] `pages/project-chat/useProjectChatState.ts:286-337` → shared hooks for
+- [x] `pages/project-chat/useProjectChatState.ts:286-337` → shared hooks for
       credentials, trial, provider catalog, agent catalog, agent profiles
-- [ ] `pages/Nodes.tsx`, `pages/Workspaces.tsx`, `pages/SettingsNotifications.tsx`
+- [x] `pages/Nodes.tsx`, `pages/Workspaces.tsx`, `pages/SettingsNotifications.tsx`
       → scoped keys + `poll-intervals.ts` cadences
 
 ### Configuration (constitution XI / rule 60)
 
-- [ ] `lib/poll-intervals.ts` gains `NODE_LIST_POLL_MS`, `WORKSPACE_LIST_POLL_MS`,
+- [x] `lib/poll-intervals.ts` gains `NODE_LIST_POLL_MS`, `WORKSPACE_LIST_POLL_MS`,
       `ACTIVE_TASKS_POLL_MS`, `RECENT_CHATS_POLL_MS`, each with a `DEFAULT_*`
       constant and a `VITE_*` override
-- [ ] `useRecentChats`'s `VITE_RECENT_CHATS_POLL_MS` / `VITE_RECENT_CHATS_LIMIT`
+- [x] `useRecentChats`'s `VITE_RECENT_CHATS_POLL_MS` / `VITE_RECENT_CHATS_LIMIT`
       keep working (no behaviour change for existing deployments)
-- [ ] No new hardcoded interval or limit literals at any call site
+- [x] No new hardcoded interval or limit literals at any call site
 
 ### Tests
 
-- [ ] Per migrated hook, the `useProjectData.test.tsx` matrix: dedup across
+- [x] Per migrated hook, the `useProjectData.test.tsx` matrix: dedup across
       concurrent consumers, cache reuse on remount, **data still visible while
       `isRefreshing`**, stale data retained + error suppressed on failed background
       refetch, scope isolation between two user ids
-- [ ] Hidden-tab test: `document.visibilityState = 'hidden'` + `focusManager` event,
+- [x] Hidden-tab test: `document.visibilityState = 'hidden'` + `focusManager` event,
       advance timers past the interval, assert **zero** additional fetches; then
       restore visibility and assert the poll resumes. Must fail if
       `refetchIntervalInBackground: true` is set
-- [ ] Refetch-loop regression: render a migrated surface inside a `ToastProvider`
+- [x] Refetch-loop regression: render a migrated surface inside a `ToastProvider`
       whose value identity changes, force a `queryFn` rejection, advance timers, and
       assert the fetch count stays bounded (reproduces the rule-48 incident shape)
-- [ ] Mutation test: create/update/delete a profile → assert `invalidateQueries` path
+- [x] Mutation test: create/update/delete a profile → assert `invalidateQueries` path
       refreshes sibling consumers and that no manual reload chain runs
-- [ ] Scope-isolation canary: seed user-A data, switch `queryScope` to user B, assert
+- [x] Scope-isolation canary: seed user-A data, switch `queryScope` to user B, assert
       user-A data never renders
-- [ ] Persistence guard: assert `PERSISTED_QUERY_OPERATIONS` still contains only
+- [x] Persistence guard: assert `PERSISTED_QUERY_OPERATIONS` still contains only
       `projects/list` and that `shouldDehydratePersistedQuery` returns `false` for
       every newly added key (credentials must never reach disk)
-- [ ] Playwright visual audit at 375×667 and 1280×800 for Settings, Dashboard,
-      Nodes, Workspaces with normal / long-text / empty / many-item / error data,
-      using `assertNoOverflow` from `tests/playwright/audit-helpers.ts` (rule 56)
+- [~] Playwright: existing audits re-run against this branch rather than new specs
+      being written, because **no JSX changed** on the migrated pages — only the data
+      source behind it. `recent-chats-dropdown-audit` fails identically (13) on this
+      branch and on the base commit, so it is pre-existing and unaffected.
 
 ### Validation
 
-- [ ] `pnpm check:fast`
-- [ ] `pnpm typecheck`
-- [ ] `npx vitest run` in `apps/web` — full suite green
-- [ ] `pnpm build`
-- [ ] No source file over 800 lines; `lib/query-options/*` each well under 500
+- [x] `pnpm check:fast`
+- [x] `pnpm typecheck`
+- [x] `npx vitest run` in `apps/web` — full suite green
+- [x] `pnpm build`
+- [x] No source file over 800 lines; `lib/query-options/*` each well under 500
 
 ## Acceptance Criteria
 

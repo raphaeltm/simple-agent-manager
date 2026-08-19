@@ -98,7 +98,11 @@ export function Workspaces() {
         </div>
       )}
 
-      {isLoading ? (
+      {/* Keep the previously rendered list up while a filter change loads its own
+          query key — switching the status filter is a different key, so `isLoading`
+          is true even though there is perfectly good content on screen. Matches the
+          guard `Nodes.tsx` already uses. */}
+      {isLoading && sortedWorkspaces.length === 0 ? (
         <div role="status" aria-label="Loading workspaces" aria-busy="true" className="grid grid-cols-1 gap-3">
           {Array.from({ length: 3 }, (_, i) => (
             <SkeletonCard key={i} lines={2} />

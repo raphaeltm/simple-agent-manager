@@ -1,12 +1,11 @@
-import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
 
 // NOTE: deliberately the client-side `TrialStatusResponse` from `lib/api`, NOT the
 // same-named interface in `@simple-agent-manager/shared`. They are different shapes
 // (`{available, agentType, hasInfraCredential, …}` vs `{enabled, remaining, resetsAt}`)
 // and only this one describes what `GET /api/trial-status` returns to the browser.
 import type { TrialStatusResponse } from '../lib/api';
-import { trialQueryKeys, trialStatusQueryOptions } from '../lib/query-options';
+import { trialStatusQueryOptions } from '../lib/query-options';
 
 interface UseTrialStatusResult {
   trial: TrialStatusResponse | null;
@@ -46,12 +45,4 @@ export function useTrialStatus(queryScope: string): UseTrialStatusResult {
       void query.refetch();
     },
   };
-}
-
-/** Invalidator, for use after a trial is claimed. */
-export function useInvalidateTrialStatus(queryScope: string): () => Promise<void> {
-  const queryClient = useQueryClient();
-  return useCallback(async () => {
-    await queryClient.invalidateQueries({ queryKey: trialQueryKeys.all(queryScope) });
-  }, [queryClient, queryScope]);
 }
