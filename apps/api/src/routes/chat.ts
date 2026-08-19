@@ -325,8 +325,12 @@ chatRoutes.get('/:sessionId', async (c) => {
           ? { ...state, recoveryStatus: rs }
           : { activity: 'idle' as const, activityAt: 0, statusError: null, currentPlan: null, planUpdatedAt: null, promptStartedAt: null, agentType: null, lastStopReason: null, runtimeWorkState: null, runtimeWorkCount: null, runtimeWorkSource: null, runtimeWorkUpdatedAt: null, runtimeWorkProgressAt: null, recoveryStatus: rs };
       }
-    } catch {
-      // D1 snapshot lookup failure is non-fatal
+    } catch (err) {
+      log.warn('chat.recovery_status_lookup_failed', {
+        projectId,
+        sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 

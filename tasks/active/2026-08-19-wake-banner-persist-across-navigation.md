@@ -27,20 +27,20 @@ The server already tracks `recoveryStatus: 'waking'` in D1's `session_snapshots`
 
 ## Implementation Checklist
 
-- [ ] Add `recoveryStatus?: 'waking' | 'restored' | 'failed' | null` to shared `SessionStateSnapshot` type
-- [ ] In chat session detail route, query D1 `session_snapshots.recovery_status` for sleeping sessions and attach to response state
-- [ ] Add `recoveryStatus` to client-side `SessionStateSnapshot` interface in `sessions.ts`
-- [ ] In `hydrateState()`, when `recoveryStatus === 'waking'` and session is sleeping, set `agentActivity` to `'recovering'` so banner renders on mount
-- [ ] Update the DO's `getSessionState()` return to include the new field (as null — it's D1-sourced, not DO-sourced)
-- [ ] Add unit test verifying `hydrateState` sets activity correctly when `recoveryStatus === 'waking'`
+- [x] Add `recoveryStatus?: 'waking' | 'restored' | 'failed' | null` to shared `SessionStateSnapshot` type
+- [x] In chat session detail route, query D1 `session_snapshots.recovery_status` for sleeping sessions and attach to response state
+- [x] Add `recoveryStatus` to client-side `SessionStateSnapshot` interface in `sessions.ts`
+- [x] In `hydrateState()`, when `recoveryStatus === 'waking'` and session is sleeping, set `agentActivity` to `'recovering'` so banner renders on mount
+- [x] DO's `getSessionState()` — no change needed; field is optional on the type so undefined is correct for DO-sourced state
+- [x] Add unit tests: positive (waking → recovering) and negative (null → idle)
 
 ## Acceptance Criteria
 
-- [ ] Navigating away from a waking session and returning shows the wake banner
-- [ ] Banner disappears once wake completes (recoveryStatus transitions to 'restored' or activity changes)
-- [ ] No new D1 queries for non-sleeping sessions (only query when sessionState is 'sleeping')
-- [ ] Existing wake flow (staying on page) still works correctly
-- [ ] TypeScript compiles cleanly across all packages
+- [x] Navigating away from a waking session and returning shows the wake banner — hydrated from server recoveryStatus
+- [x] Banner disappears once wake completes (recoveryStatus transitions to 'restored' or activity changes) — existing poll-based state update handles this
+- [x] No new D1 queries for non-sleeping sessions (only query when sessionRecord.status is 'sleeping')
+- [x] Existing wake flow (staying on page) still works correctly — hydrateState only adds a new branch, doesn't change existing ones
+- [x] TypeScript compiles cleanly across all packages
 
 ## References
 

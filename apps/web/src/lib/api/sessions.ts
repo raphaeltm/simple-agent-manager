@@ -119,6 +119,7 @@ export interface SessionStateSnapshot {
   runtimeWorkSource: string | null;
   runtimeWorkUpdatedAt: number | null;
   runtimeWorkProgressAt: number | null;
+  recoveryStatus?: 'waking' | 'restored' | 'failed' | null;
 }
 
 export interface ChatSessionDetailResponse {
