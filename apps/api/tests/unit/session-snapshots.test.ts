@@ -20,6 +20,7 @@ import {
   failSessionSnapshotRecovery,
   getSessionSnapshotConfig,
   isSessionSnapshotSleepReleasable,
+  markSessionSnapshotAwakeInPlace,
   prepareSessionSnapshot,
   recordSessionSnapshotArtifactAuthorization,
   recordSessionSnapshotCaptureFailure,
@@ -963,9 +964,6 @@ describe('session snapshot recovery lifecycle', () => {
         .run();
       const testEnv = env({ DATABASE: createSqliteD1(sqlite) });
 
-      const { markSessionSnapshotAwakeInPlace } = await import(
-        '../../src/services/session-snapshots'
-      );
       await markSessionSnapshotAwakeInPlace(testEnv, 'chat-inplace', 'wake-task-ip', 'ws-new');
 
       const row = sqlite
