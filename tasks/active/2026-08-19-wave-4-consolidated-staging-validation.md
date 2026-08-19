@@ -147,7 +147,45 @@ The settings tab strip is a correctly working horizontal scroller
 | F (dedup) | **PASS** | Dashboard load issues **9 API requests with ZERO duplicated endpoints**; `/api/credentials` and `/api/credentials/agent` are 1× each. |
 | F (SWR) | **PASS** | On client-side return navigation the **first** frame on `/projects` already carries the cached content (len 2438, identical to the settled view); **0 of 42** frames on `/projects` lacked it. |
 | G (D1 index) | **PASS** | `session_index_coverage` went from **0 rows** → after ONE `/sessions` call + 6s a row appears with `complete=1, session_count=129`. Across 6 further calls `synced_at` did **not** advance ⇒ no re-prime was scheduled ⇒ the route is **hitting** the D1 fast path. `scope=my` returns 200. |
-| G (chat DOM) | **PASS** | A **968-message** session holds at most **16** `.sam-message-entry` rows (equal to the virtuoso `[data-item-index]` count), total DOM 662 nodes. The bound holds after scroll-to-top and scroll-to-mid, so it is steady-state, not first-paint. |
+| G (chat DOM — conversation list) | **PASS** | A **968-message** session holds at most **16** `.sam-message-entry` rows (equal to the virtuoso `[data-item-index]` count), total DOM 662 nodes. The bound holds after scroll-to-top and scroll-to-mid, so it is steady-state, not first-paint. Screenshot confirms the conversation genuinely renders (tool calls, thoughts, messages, "This session has ended"), so the low row count is bounding and not a failed load. Caveat: this list was **already** virtualized before `f5f33559b`. |
+| G (chat DOM — timeline drawer) | **PARTIAL — see below** | This is the half that is actually NEW in `f5f33559b` (`Virtuoso` + `TIMELINE_OVERSCAN_PX=200` were added to `ChatTimelineDrawer.tsx`). Virtualization is structurally present and the known breakage is ruled out, but the bound could not be exercised on staging data. |
+
+### Timeline drawer — what was and was not proven
+
+The drawer opens correctly (`role="dialog" aria-label="Session timeline"`), it
+renders real content, and it **is** virtualized:
+`[data-testid="virtuoso-scroller"]` is present and rows carry `data-item-index`
+— the react-virtuoso structure this commit introduced.
+
+**The specific known failure mode is ruled out.** The code comment in
+`ChatTimelineDrawer.tsx` warns that wrapping rows in an extra element inside
+`components.List` breaks Virtuoso's height measurement, and the repo's audit
+pins `MIN_VISIBLE_TIMELINE_ROWS = 4` precisely because a broken wrapper rendered
+exactly **1** row while a naive `> 0` assertion still passed. Across six
+sessions the rendered row count tracked the entry count exactly — 2→2, 3→3,
+5→5, with DOM nodes scaling 38/47/65 — never pinned at 1. So that regression is
+absent.
+
+**The bound itself was NOT exercised.** No session on staging has a timeline
+long enough. The timeline aggregates user turns and status updates, not raw
+messages, so even a 397-message session yields only 3 entries. Every candidate
+returned `scrollHeight === clientHeight` (721 === 721), proving the content fits
+without scrolling:
+
+| Session | Messages | Timeline rows | Scrollable |
+|---|---|---|---|
+| hono `e16220c8` | 397 | 3 | no |
+| Potato `0b5f6757` | 304 | 5 | no |
+| Potato `3434b9be` | 299 | 2 | no |
+| Test Project 2 `45d486ea` | 244 | 2 | no |
+| hono `9997ac4b` | 170 | 2 | no |
+| Potato `fca73a09` | 120 | 5 | no |
+
+This is a limitation of available staging data, not a defect. The repo's own
+audit covers this case with a ~300-entry mock fixture in
+`apps/web/tests/playwright/chat-dom-bound-audit.spec.ts`, which is the correct
+place for it — a staging environment cannot be relied on to contain a
+long-timeline session.
 
 ### F2 — Observation, NOT attributed to this branch
 
