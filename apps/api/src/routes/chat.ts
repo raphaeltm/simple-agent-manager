@@ -311,6 +311,25 @@ chatRoutes.get('/:sessionId', async (c) => {
     lookupFailureEvent: 'chat.agent_session_id_lookup_failed',
   });
 
+  let stateWithRecovery = state;
+  if (sessionRecord.status === 'sleeping') {
+    try {
+      const [snapshotRow] = await db
+        .select({ recoveryStatus: schema.sessionSnapshots.recoveryStatus })
+        .from(schema.sessionSnapshots)
+        .where(eq(schema.sessionSnapshots.chatSessionId, sessionId))
+        .limit(1);
+      const rs = snapshotRow?.recoveryStatus;
+      if (rs === 'waking' || rs === 'restored' || rs === 'failed') {
+        stateWithRecovery = state
+          ? { ...state, recoveryStatus: rs }
+          : { activity: 'idle' as const, activityAt: 0, statusError: null, currentPlan: null, planUpdatedAt: null, promptStartedAt: null, agentType: null, lastStopReason: null, runtimeWorkState: null, runtimeWorkCount: null, runtimeWorkSource: null, runtimeWorkUpdatedAt: null, runtimeWorkProgressAt: null, recoveryStatus: rs };
+      }
+    } catch {
+      // D1 snapshot lookup failure is non-fatal
+    }
+  }
+
   return c.json({
     session: (
       await enrichSessionsWithCreators(
@@ -321,7 +340,7 @@ chatRoutes.get('/:sessionId', async (c) => {
     )[0],
     messages: messagesResult.messages,
     hasMore: messagesResult.hasMore,
-    state,
+    state: stateWithRecovery,
   });
 });
 
