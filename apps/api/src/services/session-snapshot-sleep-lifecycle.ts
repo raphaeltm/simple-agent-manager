@@ -386,6 +386,7 @@ async function markSessionSnapshotSleepingWithConfig(
       expiresAt: snapshotExpiry(now, ttlDays),
       recoveryStatus: null,
       recoveryError: null,
+      recoveryAttempts: 0,
       sleepStatus: 'sleeping',
       sleepAfter: null,
       sleepError: warning,
