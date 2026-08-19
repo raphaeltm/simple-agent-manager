@@ -155,8 +155,24 @@ discriminating control test).
       missing installation, cross-tenant installation + owner control, invalid ref names
 - [x] `pnpm lint && pnpm typecheck && pnpm test && pnpm build` green (7777 unit + 671 Miniflare
       worker tests, 0 collection errors)
-- [ ] Staging: dispatch a real cf-container task on a branch that does not exist upstream and watch
-      it clone successfully
+- [~] Staging: **PARTIALLY VERIFIED — blocked on staging configuration.**
+      - VERIFIED: the deployed shared guard creates a real ref on a real remote. Task
+        `01M0D4KEMNYHZXW9TGDPCMBG71` on project `hono` (`serverspresentation2025/hono`) generated
+        `sam/verify-branch-guard-print-cmbg71`; that branch appeared on the remote at the
+        `workspace_ready` step (branch count 23 → 24) and the task completed successfully. This
+        exercises `services/workspace-branch.ts`, the `github_installations` lookup, real GitHub App
+        installation-token minting, and a real `POST git/refs` — the whole shared path both runtimes
+        now use. Node + workspace deleted afterwards.
+      - NOT VERIFIED: the Instant/cf-container leg. Staging has `CF_CONTAINER_ENABLED = false`
+        (read from the deployed Worker settings), so `resolveWorkspaceRuntime`
+        (`services/workspace-runtime.ts:61`) short-circuits every profile to VM. Confirmed
+        empirically: `POST /api/projects/:id/sessions/start` with a `runtime='cf-container'` profile
+        returns `409 "Selected profile resolves to VM runtime; use task submission instead."`
+        The value comes from the staging GitHub Environment variable `vars.CF_CONTAINER_ENABLED`
+        (`.github/workflows/deploy-reusable.yml:522`); the deploy script's own default is `'true'`
+        (`scripts/deploy/sync-wrangler-config.ts:444`), so staging is an explicit operator opt-out —
+        which also contradicts the project policy "Enable Cloudflare container instant runtime by
+        default". A human must flip it before this leg can be verified.
 
 ## References
 
