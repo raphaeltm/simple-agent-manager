@@ -51,9 +51,9 @@ import { handleAgentSession } from './agent-session-step';
 import { computeBackoffMs, isTransientError, parseEnvInt } from './helpers';
 import { handleNodeAgentReady, handleNodeProvisioning, handleNodeSelection } from './node-steps';
 import { failTask } from './state-machine';
-import { notifyWakeProgress } from './wake-progress-notifier';
 import { redactTaskRunnerStatus } from './status';
 import type { StartTaskInput, TaskRunnerContext, TaskRunnerState } from './types';
+import { notifyWakeProgress } from './wake-progress-notifier';
 import {
   handleAttachmentTransfer,
   handleWorkspaceCreation,

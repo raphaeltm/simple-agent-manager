@@ -32,10 +32,10 @@ import { ConnectionBanner } from './MessageBanners';
 import { SessionHeader } from './SessionHeader';
 import { StaleActivityNotice } from './StaleActivityNotice';
 import type { TimelineJumpTarget } from './timeline-types';
-import { WakeProgressBanner } from './WakeProgressBanner';
 import { chatMessagesToConversationItems } from './types';
 import { useSessionLifecycle } from './useSessionLifecycle';
 import { useSessionTimeline } from './useSessionTimeline';
+import { WakeProgressBanner } from './WakeProgressBanner';
 
 /**
  * Resolve the id of the loaded conversation item nearest to (at or just before)

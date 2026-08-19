@@ -12,11 +12,32 @@
  *
  * Naming the current phase turns "is this broken?" into "it's on step 3 of 4".
  *
+ * ## Relationship to ProvisioningIndicator (rule 24)
+ *
+ * `pages/project-chat/ProvisioningIndicator.tsx` renders a similar, richer
+ * 4-stage progress block from the same `TaskExecutionStep` vocabulary. The two do
+ * not overlap, because they are driven by *different tasks*:
+ *
+ *  - ProvisioningIndicator is fed by `useProjectChatState`, which polls
+ *    `getProjectTask(session.taskId)` — the session's OWN task — and only
+ *    populates state for a task that is neither terminal nor `in_progress`. During
+ *    a wake the session's own task is `in_progress`, so it stays hidden.
+ *  - This banner is fed by the *recovery* task, a different row reached through
+ *    `session_snapshots.recovery_task_id`, which ProvisioningIndicator has no
+ *    reference to.
+ *
+ * So a wake previously showed no phase progress at all. The `wake-progress-audit`
+ * spec asserts the two never render together; if that assertion ever fires, they
+ * have started to overlap and should be consolidated rather than both kept.
+ *
+ * A thin strip rather than the full provisioning block is deliberate: a wake
+ * restores an existing conversation, so the transcript stays on screen underneath.
+ *
  * Extracted as its own component to keep `project-message-view/index.tsx` under the
  * file-size ceiling (rule 18).
  */
 
-import { wakePhaseLabel, type TaskExecutionStep } from '@simple-agent-manager/shared';
+import { type TaskExecutionStep,wakePhaseLabel } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import type { FC, ReactNode } from 'react';
 

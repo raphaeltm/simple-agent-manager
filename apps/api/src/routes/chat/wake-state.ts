@@ -20,9 +20,9 @@
  * broadcast that race cannot disagree about what phase means.
  */
 
+import { isTaskExecutionStep, type SessionStateSnapshot } from '@simple-agent-manager/shared';
 import { eq } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
-import { isTaskExecutionStep, type SessionStateSnapshot } from '@simple-agent-manager/shared';
 
 import * as schema from '../../db/schema';
 import { log } from '../../lib/logger';

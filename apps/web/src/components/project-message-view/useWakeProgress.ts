@@ -29,8 +29,8 @@
 import { EXECUTION_STEP_ORDER, type TaskExecutionStep } from '@simple-agent-manager/shared';
 import { useCallback, useEffect, useState } from 'react';
 
-import type { SessionStateSnapshot } from '../../lib/api';
 import type { WakeProgressUpdate } from '../../hooks/useChatWebSocket';
+import type { SessionStateSnapshot } from '../../lib/api';
 
 export type WakeRecoveryStatus = 'waking' | 'restored' | 'failed';
 
