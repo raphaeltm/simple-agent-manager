@@ -155,6 +155,37 @@ Before finalizing tests, ask:
 
 For exported helpers that return canonical domain types, include at least one direct malformed-domain test when the codebase separates structural validation from semantic validation. A resolver, converter, or parser success result must prove the canonical validation helper ran, not just the lower-level schema parser.
 
+### A Green Test Count Is Not A Green Suite
+
+A test file that fails to **load** contributes zero assertions. Any check that counts
+only assertion-level failures therefore reports a collection error — a bad import path, a
+syntax error, a missing mock module — as success. The absence of failures and the absence
+of tests are indistinguishable if you only look at the failure count.
+
+This is the `.claude/rules/53` "silence is not success" failure mode applied to test
+reporting, and it is easy to hit: on 2026-08-19 a full `apps/web` run reported
+`0 failed` while **15 test files were failing to import**. It was caught only by
+reconciling the total against a known baseline (3176 vs 3246) and asking where 70 tests
+had gone.
+
+When you report a test result — in a PR, a task file, or to a human — you MUST:
+
+1. **Reconcile the total against a known expected count.** A baseline run on the merge
+   base, or the previous run on the same branch. A total that went DOWN while you added
+   tests is a red flag, not a rounding error. State the numbers.
+2. **Check per-file collection status, not just assertion status.** With
+   `--reporter=json`, a file that failed to load appears with `status: "failed"` and an
+   empty `assertionResults` array. Assert that no such file exists.
+3. **Never take an exit code through a pipe.** `vitest … | tail` yields `tail`'s status,
+   which is essentially always 0. Redirect to a file and read `$?` from the unpiped
+   command, or use the JSON reporter's own `success` field.
+4. **Never trust a truncated run as a baseline.** If a run terminates early its totals
+   are meaningless; compare file counts before comparing failure counts.
+
+The same applies to any other tool whose "pass" is expressed as an absence: linters
+invoked on a path that matched no files, coverage gates over an empty file set, and
+schema checks that skip when the input is unparseable.
+
 ### Unconditional Account-Denial Gates
 
 Account states that represent denial or revocation, including `suspended`, MUST be enforced before feature-flag, signup-approval, or role-based bypass logic. Regression tests for account-access changes MUST include active, pending, suspended, and admin/superadmin cases with each relevant gate enabled and disabled, plus at least one session-creation path that proves centralized checks are reused.
