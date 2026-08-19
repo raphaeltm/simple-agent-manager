@@ -138,7 +138,8 @@ describe('useAllChatSessions', () => {
 
     const { result } = renderHook(() => useAllChatSessions('user-1'), { wrapper: Wrapper });
 
-    await waitFor(() => expect(result.current.error).toBe('Failed to load chat sessions'));
+    // The hook now propagates the real error message, like its five siblings.
+    await waitFor(() => expect(result.current.error).toBe('network'));
     expect(result.current.sessions).toEqual([]);
     expect(result.current.loading).toBe(false);
   });

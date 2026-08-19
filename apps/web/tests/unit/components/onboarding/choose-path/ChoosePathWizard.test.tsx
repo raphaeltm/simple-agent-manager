@@ -6,6 +6,12 @@ const mocks = vi.hoisted(() => ({
   useOnboarding: vi.fn(),
 }));
 
+// `useQueryScope()` reads the authenticated identity; `useSetupStatus` keys its
+// three queries by it. Without a provider `useAuth` throws.
+vi.mock('../../../../../src/components/AuthProvider', () => ({
+  useAuth: () => ({ user: { id: 'user-1', email: 'user@example.com', name: 'Test User' } }),
+}));
+
 vi.mock('../../../../../src/components/onboarding/OnboardingContext', () => ({
   useOnboarding: mocks.useOnboarding,
 }));
@@ -17,6 +23,7 @@ vi.mock('../../../../../src/lib/api', () => ({
 }));
 
 import { ChoosePathWizard } from '../../../../../src/components/onboarding/choose-path/ChoosePathWizard';
+import { QueryTestWrapper } from '../../../../test-utils/query-test-utils';
 
 describe('ChoosePathWizard', () => {
   beforeEach(() => {
@@ -28,7 +35,7 @@ describe('ChoosePathWizard', () => {
   });
 
   it('renders the dialog when showOverlay is true', () => {
-    render(<ChoosePathWizard />);
+    render(<ChoosePathWizard />, { wrapper: QueryTestWrapper });
     expect(screen.getByTestId('onboarding-wizard')).toBeInTheDocument();
     expect(screen.getByRole('dialog', { name: 'Account setup' })).toBeInTheDocument();
   });
@@ -38,7 +45,7 @@ describe('ChoosePathWizard', () => {
       showOverlay: false,
       dismissOnboarding: mocks.dismissOnboarding,
     });
-    render(<ChoosePathWizard />);
+    render(<ChoosePathWizard />, { wrapper: QueryTestWrapper });
     expect(screen.queryByTestId('onboarding-wizard')).not.toBeInTheDocument();
   });
 
@@ -50,7 +57,7 @@ describe('ChoosePathWizard', () => {
   // relocation preserved the actual behavior: a keydown anywhere in the
   // document (not just on the dialog element itself) still dismisses it.
   it('calls dismissOnboarding when Escape is pressed anywhere in the document', () => {
-    render(<ChoosePathWizard />);
+    render(<ChoosePathWizard />, { wrapper: QueryTestWrapper });
 
     fireEvent.keyDown(document, { key: 'Escape' });
 
@@ -58,7 +65,7 @@ describe('ChoosePathWizard', () => {
   });
 
   it('does not call dismissOnboarding for a non-Escape key', () => {
-    render(<ChoosePathWizard />);
+    render(<ChoosePathWizard />, { wrapper: QueryTestWrapper });
 
     fireEvent.keyDown(document, { key: 'a' });
 
@@ -66,7 +73,7 @@ describe('ChoosePathWizard', () => {
   });
 
   it('does not listen for Escape once unmounted (no dangling document listener)', () => {
-    const { unmount } = render(<ChoosePathWizard />);
+    const { unmount } = render(<ChoosePathWizard />, { wrapper: QueryTestWrapper });
     unmount();
 
     fireEvent.keyDown(document, { key: 'Escape' });
