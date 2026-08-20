@@ -28,7 +28,6 @@ import {
   getWorkspace,
   resetIdleTimer,
   sendFollowUpPrompt,
-  uploadSessionFiles,
 } from '../../lib/api';
 import { mergeMessages } from '../../lib/merge-messages';
 import { chatQueryKeys, chatSessionMessagesQueryOptions } from '../../lib/query-options';
@@ -49,6 +48,7 @@ import {
 } from './types';
 import { useActivityVerifyTimer } from './useActivityVerifyTimer';
 import { useConnectionRecovery } from './useConnectionRecovery';
+import { useSessionFileUpload } from './useSessionFileUpload';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
 import { useWakeProgress } from './useWakeProgress';
 
@@ -120,11 +120,23 @@ export function useSessionLifecycle(
     [queryClient, queryScope, sessionMessagesQueryKey]
   );
 
+  const appendOptimisticMessage = useCallback(
+    (message: ChatMessageResponse) => {
+      setMessages((prev) => [...prev, message]);
+      updateCachedMessages([message], 'append');
+    },
+    [updateCachedMessages]
+  );
+  const { uploading, handleUploadFiles } = useSessionFileUpload({
+    projectId,
+    sessionId,
+    onOptimisticMessage: appendOptimisticMessage,
+  });
+
   const [workspace, setWorkspace] = useState<WorkspaceResponse | null>(null);
   const [node, setNode] = useState<NodeResponse | null>(null);
   const [followUp, setFollowUp] = useState('');
   const [sendingFollowUp, setSendingFollowUp] = useState(false);
-  const [uploading, setUploading] = useState(false);
   const [agentActivity, setAgentActivity] = useState<AgentActivityState>('idle');
   const sleepingWakePendingRef = useRef(false);
   const [currentPlan, setCurrentPlan] = useState<SessionStateSnapshot['currentPlan']>(null);
@@ -631,33 +643,6 @@ export function useSessionLifecycle(
   };
 
   // Upload files
-  const handleUploadFiles = useCallback(
-    async (files: FileList | File[]) => {
-      const fileArray = Array.from(files);
-      if (fileArray.length === 0) return;
-      setUploading(true);
-      try {
-        const result = await uploadSessionFiles(projectId, sessionId, fileArray);
-        const names = result.files.map((f) => f.name).join(', ');
-        const optimisticUploadMessage: ChatMessageResponse = {
-          id: `optimistic-upload-${crypto.randomUUID()}`,
-          sessionId,
-          role: 'user' as const,
-          content: `Uploaded ${result.files.length} file${result.files.length > 1 ? 's' : ''}: ${names}`,
-          toolMetadata: null,
-          createdAt: Date.now(),
-        };
-        setMessages((prev) => [...prev, optimisticUploadMessage]);
-        updateCachedMessages([optimisticUploadMessage], 'append');
-      } catch (err) {
-        console.error('File upload failed:', err);
-      } finally {
-        setUploading(false);
-      }
-    },
-    [projectId, sessionId, updateCachedMessages]
-  );
-
   // Cancel the current in-flight prompt via REST API
   const cancellingRef = useRef(false);
   const handleCancelPrompt = useCallback(() => {
