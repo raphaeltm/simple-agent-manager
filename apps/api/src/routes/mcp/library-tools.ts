@@ -62,15 +62,72 @@ function getTransferTimeout(env: Env): number {
   return parsePositiveInt(env.LIBRARY_MCP_TRANSFER_TIMEOUT_MS, DEFAULT_LIBRARY_MCP_TRANSFER_TIMEOUT_MS);
 }
 
-/** Max caption length for display_from_library cards. Override via LIBRARY_MCP_CAPTION_MAX_LENGTH. */
-const DEFAULT_LIBRARY_MCP_CAPTION_MAX = 500;
-/** Floor to keep a misconfigured (tiny) cap from silently breaking captions. */
-const MIN_LIBRARY_MCP_CAPTION_MAX = 20;
-function getCaptionMax(env: Env): number {
+/** Max question length for display_from_library cards. Override via LIBRARY_MCP_QUESTION_MAX_LENGTH. */
+const DEFAULT_LIBRARY_MCP_QUESTION_MAX = 500;
+/** Floor to keep a misconfigured (tiny) cap from silently breaking question context. */
+const MIN_LIBRARY_MCP_QUESTION_MAX = 20;
+function getQuestionMax(env: Env): number {
   return Math.max(
-    parsePositiveInt(env.LIBRARY_MCP_CAPTION_MAX_LENGTH, DEFAULT_LIBRARY_MCP_CAPTION_MAX),
-    MIN_LIBRARY_MCP_CAPTION_MAX,
+    parsePositiveInt(env.LIBRARY_MCP_QUESTION_MAX_LENGTH, DEFAULT_LIBRARY_MCP_QUESTION_MAX),
+    MIN_LIBRARY_MCP_QUESTION_MAX,
   );
+}
+
+/** Default surrounding lines rendered around each agent-specified range. */
+const DISPLAY_FROM_LIBRARY_CONTEXT_LINES = 3;
+const DEFAULT_DISPLAY_FROM_LIBRARY_MAX_LINE_GROUPS = 20;
+const DEFAULT_DISPLAY_FROM_LIBRARY_LABEL_MAX = 120;
+
+interface DisplayFromLibraryLineGroup {
+  startLine: number;
+  endLine: number;
+  label?: string;
+}
+
+function parseDisplayLineGroups(params: Record<string, unknown>, env: Env): DisplayFromLibraryLineGroup[] | undefined {
+  const raw = params.lineGroups;
+  if (raw === undefined) return undefined;
+  if (!Array.isArray(raw)) {
+    throw new Error('lineGroups must be an array');
+  }
+
+  const maxGroups = parsePositiveInt(
+    env.LIBRARY_MCP_DISPLAY_MAX_LINE_GROUPS,
+    DEFAULT_DISPLAY_FROM_LIBRARY_MAX_LINE_GROUPS,
+  );
+  if (raw.length > maxGroups) {
+    throw new Error(`lineGroups must contain at most ${maxGroups} groups`);
+  }
+
+  const labelMax = parsePositiveInt(
+    env.LIBRARY_MCP_DISPLAY_LINE_GROUP_LABEL_MAX_LENGTH,
+    DEFAULT_DISPLAY_FROM_LIBRARY_LABEL_MAX,
+  );
+  const groups = raw.map((entry, index) => {
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+      throw new Error(`lineGroups[${index}] must be an object`);
+    }
+    const group = entry as Record<string, unknown>;
+    const startLine = group.startLine;
+    const endLine = group.endLine;
+    if (
+      typeof startLine !== 'number' ||
+      typeof endLine !== 'number' ||
+      !Number.isInteger(startLine) ||
+      !Number.isInteger(endLine) ||
+      startLine < 1 ||
+      endLine < startLine
+    ) {
+      throw new Error(`lineGroups[${index}] must include positive integer startLine/endLine with endLine >= startLine`);
+    }
+
+    const label = typeof group.label === 'string' && group.label.trim()
+      ? group.label.trim().slice(0, labelMax)
+      : undefined;
+    return { startLine, endLine, ...(label ? { label } : {}) };
+  });
+
+  return groups.length > 0 ? groups : undefined;
 }
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
@@ -613,9 +670,10 @@ export async function handleReplaceLibraryFile(
  * display_from_library — surface an existing library file as a document card in
  * the chat. Worker-side only (no workspace required): validates the fileId
  * belongs to the caller's project and returns the metadata the DocumentCard
- * needs to render (fileId, filename, mimeType, sizeBytes) plus an optional
- * caption. The card and its durability come from the persisted tool message —
- * this handler's value is the UI side effect, not the returned payload.
+ * needs to render (fileId, filename, mimeType, sizeBytes), the user question it
+ * answers, and optional focused line groups. The card and its durability come
+ * from the persisted tool message — this handler's value is the UI side effect,
+ * not the returned payload.
  */
 export async function handleDisplayFromLibrary(
   requestId: string | number | null,
@@ -628,12 +686,20 @@ export async function handleDisplayFromLibrary(
     return jsonRpcError(requestId, INVALID_PARAMS, 'fileId is required and must be a non-empty string');
   }
 
-  // Optional caption — bound length to keep tool metadata lean and avoid an
-  // unbounded string rendering in the card.
-  const captionMax = getCaptionMax(env);
-  const caption = typeof params.caption === 'string' && params.caption.trim()
-    ? params.caption.trim().slice(0, captionMax)
+  const questionMax = getQuestionMax(env);
+  const question = typeof params.question === 'string' && params.question.trim()
+    ? params.question.trim().slice(0, questionMax)
     : undefined;
+  if (!question) {
+    return jsonRpcError(requestId, INVALID_PARAMS, 'question is required and must be a non-empty string');
+  }
+
+  let lineGroups: DisplayFromLibraryLineGroup[] | undefined;
+  try {
+    lineGroups = parseDisplayLineGroups(params, env);
+  } catch (err) {
+    return jsonRpcError(requestId, INVALID_PARAMS, err instanceof Error ? err.message : 'Invalid lineGroups');
+  }
 
   try {
     const db = drizzle(env.DATABASE, { schema });
@@ -656,7 +722,9 @@ export async function handleDisplayFromLibrary(
         filename: existing.file.filename,
         mimeType: existing.file.mimeType,
         sizeBytes: existing.file.sizeBytes,
-        ...(caption ? { caption } : {}),
+        question,
+        contextLines: DISPLAY_FROM_LIBRARY_CONTEXT_LINES,
+        ...(lineGroups ? { lineGroups } : {}),
       }, null, 2) }],
     });
   } catch (err) {

@@ -94,7 +94,9 @@ describe('stripToolMetadataContent', () => {
       filename: 'sam-architecture-comprehensive.html',
       mimeType: 'text/html; charset=utf-8',
       sizeBytes: 51849,
-      caption: 'Newest comprehensive SAM architecture webpage.',
+      question: 'Where is the current SAM architecture explained?',
+      contextLines: 3,
+      lineGroups: [{ startLine: 10, endLine: 15, label: 'Overview' }],
     };
     const meta = {
       toolCallId: 'tc-display',

@@ -50,7 +50,7 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
   const [mdText, setMdText] = useState<string | null>(null);
   const [mdDeleted, setMdDeleted] = useState(false);
 
-  const { state, fileId, fileName, mimeType, sizeBytes, caption, tool } = data;
+  const { state, fileId, fileName, mimeType, sizeBytes, question, contextLines, lineGroups, tool } = data;
   const label = TOOL_LABELS[tool] ?? 'Document';
 
   const canPreview = Boolean(projectId && fileId);
@@ -193,7 +193,23 @@ export const DocumentCard: FC<DocumentCardProps> = ({ item, projectId }) => {
         </div>
       )}
 
-      {caption && <div className="text-xs text-fg-secondary break-words">{caption}</div>}
+      {question && <div className="text-xs text-fg-secondary break-words">{question}</div>}
+
+      {lineGroups && lineGroups.length > 0 && (
+        <div className="text-xs text-fg-muted flex flex-wrap gap-1.5">
+          {lineGroups.map((group, index) => (
+            <span
+              key={`${group.startLine}-${group.endLine}-${index}`}
+              className="rounded-full border border-border-default bg-surface px-2 py-0.5"
+              title={`Shows ${contextLines ?? 3} context lines by default; open the document to expand to the full file.`}
+            >
+              {group.label ? `${group.label}: ` : ''}
+              L{group.startLine}
+              {group.endLine !== group.startLine ? `–L${group.endLine}` : ''}
+            </span>
+          ))}
+        </div>
+      )}
 
       {isHtml && <div className="text-xs text-fg-muted">Interactive · tap to open</div>}
     </div>

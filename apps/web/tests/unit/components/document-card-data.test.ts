@@ -89,11 +89,15 @@ describe('extractDocumentCardData', () => {
     });
   });
 
-  it('extracts display_from_library: fileId from args, metadata from result, caption from args', () => {
+  it('extracts display_from_library: fileId from args, metadata from result, question and line groups from args', () => {
     const data = extractDocumentCardData(
       toolItem({
         toolName: 'mcp__sam-mcp__display_from_library',
-        rawInput: { fileId: 'f-2', caption: 'Section 3 answers this' },
+        rawInput: {
+          fileId: 'f-2',
+          question: 'Which section answers this?',
+          lineGroups: [{ startLine: 30, endLine: 35, label: 'Section 3' }],
+        },
         rawOutput: rawOutput({
           fileId: 'f-2',
           filename: 'diagram.png',
@@ -109,7 +113,8 @@ describe('extractDocumentCardData', () => {
       fileId: 'f-2',
       fileName: 'diagram.png',
       mimeType: 'image/png',
-      caption: 'Section 3 answers this',
+      question: 'Which section answers this?',
+      lineGroups: [{ startLine: 30, endLine: 35, label: 'Section 3' }],
     });
   });
 

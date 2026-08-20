@@ -53,7 +53,15 @@ export interface DocumentCardData {
   fileName?: string;
   mimeType?: string;
   sizeBytes?: number;
-  caption?: string;
+  question?: string;
+  contextLines?: number;
+  lineGroups?: DocumentLineGroup[];
+}
+
+export interface DocumentLineGroup {
+  startLine: number;
+  endLine: number;
+  label?: string;
 }
 
 /**
@@ -103,6 +111,28 @@ function num(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+function lineGroups(value: unknown): DocumentLineGroup[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const groups = value.flatMap((entry): DocumentLineGroup[] => {
+    if (!isJsonRecord(entry)) return [];
+    const startLine = entry.startLine;
+    const endLine = entry.endLine;
+    if (
+      typeof startLine !== 'number' ||
+      typeof endLine !== 'number' ||
+      !Number.isInteger(startLine) ||
+      !Number.isInteger(endLine) ||
+      startLine < 1 ||
+      endLine < startLine
+    ) {
+      return [];
+    }
+    const label = str(entry.label);
+    return [{ startLine, endLine, ...(label ? { label } : {}) }];
+  });
+  return groups.length > 0 ? groups : undefined;
+}
+
 function basename(path: string | undefined): string | undefined {
   if (!path) return undefined;
   const parts = path.split('/');
@@ -118,7 +148,8 @@ function basename(path: string | undefined): string | undefined {
  *   the result payload (rawOutput). A FILE_EXISTS error carries `existingFile`,
  *   which we surface as the document.
  * - `display_from_library`: fileId comes from the args (rawInput) and metadata
- *   from the result; caption comes from the args.
+ *   from the result; question and line groups come from either raw input or
+ *   the result payload so compact-mode preserved results still render.
  * - FILE_NOT_FOUND → tombstone. No fileId yet + still running → pending.
  */
 export function extractDocumentCardData(item: ToolCallItem): DocumentCardData {
@@ -137,7 +168,9 @@ export function extractDocumentCardData(item: ToolCallItem): DocumentCardData {
   const fileName = str(source.filename) ?? basename(str(input.filePath));
   const mimeType = str(source.mimeType);
   const sizeBytes = num(source.sizeBytes);
-  const caption = str(input.caption) ?? (result ? str(result.caption) : undefined);
+  const question = str(input.question) ?? (result ? str(result.question) : undefined);
+  const contextLines = num(input.contextLines) ?? (result ? num(result.contextLines) : undefined);
+  const groups = lineGroups(input.lineGroups) ?? (result ? lineGroups(result.lineGroups) : undefined);
 
   let state: DocumentCardState;
   if (error === 'FILE_NOT_FOUND') {
@@ -150,5 +183,5 @@ export function extractDocumentCardData(item: ToolCallItem): DocumentCardData {
     state = 'unavailable';
   }
 
-  return { tool, state, fileId, fileName, mimeType, sizeBytes, caption };
+  return { tool, state, fileId, fileName, mimeType, sizeBytes, question, contextLines, lineGroups: groups };
 }

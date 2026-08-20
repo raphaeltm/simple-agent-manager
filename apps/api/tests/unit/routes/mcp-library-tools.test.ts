@@ -810,7 +810,12 @@ describe('MCP Library Tools', () => {
       });
 
       // Note: tokenDataNoWorkspace — display_from_library must work without a workspace.
-      const result = await handleDisplayFromLibrary(1, { fileId: 'file-001' }, tokenDataNoWorkspace, mockEnv as Env);
+      const result = await handleDisplayFromLibrary(
+        1,
+        { fileId: 'file-001', question: 'How does auth work?' },
+        tokenDataNoWorkspace,
+        mockEnv as Env,
+      );
 
       expect(result.error).toBeUndefined();
       const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
@@ -818,7 +823,9 @@ describe('MCP Library Tools', () => {
       expect(content.filename).toBe('auth-explainer.md');
       expect(content.mimeType).toBe('text/markdown');
       expect(content.sizeBytes).toBe(4096);
-      expect(content.caption).toBeUndefined();
+      expect(content.question).toBe('How does auth work?');
+      expect(content.contextLines).toBe(3);
+      expect(content.title).toBeUndefined();
 
       // getFile is the project-scoped ownership check.
       expect(mockGetFile).toHaveBeenCalledWith(expect.anything(), 'proj-001', 'file-001');
@@ -829,7 +836,10 @@ describe('MCP Library Tools', () => {
       // project — the trust boundary that prevents cross-project disclosure.
       mockGetFile.mockRejectedValueOnce(new Error('Not Found'));
 
-      const result = await handleDisplayFromLibrary(1, { fileId: 'other-project-file' }, tokenData, mockEnv as Env);
+      const result = await handleDisplayFromLibrary(1, {
+        fileId: 'other-project-file',
+        question: 'Where is the source?',
+      }, tokenData, mockEnv as Env);
 
       expect(result.error).toBeUndefined();
       const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
@@ -840,7 +850,13 @@ describe('MCP Library Tools', () => {
       expect(mockGetFile).toHaveBeenCalledWith(expect.anything(), 'proj-001', 'other-project-file');
     });
 
-    it('floors an absurdly small configured caption cap', async () => {
+    it('rejects missing question', async () => {
+      const result = await handleDisplayFromLibrary(1, { fileId: 'file-001' }, tokenData, mockEnv as Env);
+
+      expect(result.error?.message).toContain('question is required');
+    });
+
+    it('floors an absurdly small configured question cap', async () => {
       mockGetFile.mockResolvedValueOnce({
         file: { id: 'file-floor', filename: 'notes.md', mimeType: 'text/markdown', sizeBytes: 100 },
         tags: [],
@@ -848,17 +864,17 @@ describe('MCP Library Tools', () => {
 
       const result = await handleDisplayFromLibrary(
         1,
-        { fileId: 'file-floor', caption: 'x'.repeat(100) },
+        { fileId: 'file-floor', question: 'x'.repeat(100) },
         tokenData,
-        { ...mockEnv, LIBRARY_MCP_CAPTION_MAX_LENGTH: '1' } as Env,
+        { ...mockEnv, LIBRARY_MCP_QUESTION_MAX_LENGTH: '1' } as Env,
       );
 
       const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
       // 1 is below the floor (20), so the caption keeps at least 20 chars.
-      expect(content.caption.length).toBeGreaterThanOrEqual(20);
+      expect(content.question.length).toBeGreaterThanOrEqual(20);
     });
 
-    it('passes through the optional caption', async () => {
+    it('passes through question and line groups', async () => {
       mockGetFile.mockResolvedValueOnce({
         file: { id: 'file-002', filename: 'diagram.png', mimeType: 'image/png', sizeBytes: 20480 },
         tags: [],
@@ -866,29 +882,48 @@ describe('MCP Library Tools', () => {
 
       const result = await handleDisplayFromLibrary(1, {
         fileId: 'file-002',
-        caption: 'Section 3 covers your question about token refresh',
+        question: 'Which section covers token refresh?',
+        lineGroups: [
+          { startLine: 10, endLine: 12, label: 'Refresh flow' },
+          { startLine: 40, endLine: 40 },
+        ],
       }, tokenData, mockEnv as Env);
 
       const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
-      expect(content.caption).toBe('Section 3 covers your question about token refresh');
+      expect(content.question).toBe('Which section covers token refresh?');
+      expect(content.contextLines).toBe(3);
+      expect(content.lineGroups).toEqual([
+        { startLine: 10, endLine: 12, label: 'Refresh flow' },
+        { startLine: 40, endLine: 40 },
+      ]);
     });
 
-    it('truncates an over-long caption to the configured cap', async () => {
+    it('rejects invalid line groups', async () => {
+      const result = await handleDisplayFromLibrary(1, {
+        fileId: 'file-002',
+        question: 'Which line?',
+        lineGroups: [{ startLine: 9, endLine: 3 }],
+      }, tokenData, mockEnv as Env);
+
+      expect(result.error?.message).toContain('lineGroups[0]');
+    });
+
+    it('truncates an over-long question to the configured cap', async () => {
       mockGetFile.mockResolvedValueOnce({
         file: { id: 'file-003', filename: 'notes.md', mimeType: 'text/markdown', sizeBytes: 100 },
         tags: [],
       });
 
-      const longCaption = 'x'.repeat(1000);
+      const longQuestion = 'x'.repeat(1000);
       const result = await handleDisplayFromLibrary(
         1,
-        { fileId: 'file-003', caption: longCaption },
+        { fileId: 'file-003', question: longQuestion },
         tokenData,
-        { ...mockEnv, LIBRARY_MCP_CAPTION_MAX_LENGTH: '50' } as Env,
+        { ...mockEnv, LIBRARY_MCP_QUESTION_MAX_LENGTH: '50' } as Env,
       );
 
       const content = JSON.parse((result.result as { content: { text: string }[] }).content[0].text);
-      expect(content.caption).toHaveLength(50);
+      expect(content.question).toHaveLength(50);
     });
   });
 });

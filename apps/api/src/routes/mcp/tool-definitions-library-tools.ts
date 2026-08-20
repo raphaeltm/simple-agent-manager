@@ -102,8 +102,9 @@ export const LIBRARY_TOOLS = [
     name: 'display_from_library',
     description:
       'Surface an existing library file to the user as a rich document card in the chat. Use this to show the user a document ' +
-      'that already exists in the library — for example, re-answering a question that a previously written explanation already covers. ' +
+      'that already exists in the library while answering a specific user question. ' +
       'The card renders an inline preview (image thumbnail or clamped markdown) and opens full-screen on click. ' +
+      'If lineGroups are provided, the UI initially shows 3 lines of context above and below each specified range and lets the user expand to more context or the full file. ' +
       'Does not require a workspace. Use list_library_files first to find the file ID.',
     inputSchema: {
       type: 'object' as const,
@@ -112,12 +113,36 @@ export const LIBRARY_TOOLS = [
           type: 'string',
           description: 'The file ID to display (from list_library_files)',
         },
-        caption: {
+        question: {
           type: 'string',
-          description: 'Optional short context shown with the card (e.g. "Section 3 covers your question about token refresh")',
+          description: 'The user question this document answers. No separate title field is accepted.',
+        },
+        lineGroups: {
+          type: 'array',
+          description:
+            'Optional source line ranges to focus. The UI defaults to 3 surrounding context lines and supports expanding beyond these ranges.',
+          items: {
+            type: 'object',
+            properties: {
+              startLine: {
+                type: 'number',
+                description: '1-based inclusive starting line number',
+              },
+              endLine: {
+                type: 'number',
+                description: '1-based inclusive ending line number',
+              },
+              label: {
+                type: 'string',
+                description: 'Optional short label for this line group',
+              },
+            },
+            required: ['startLine', 'endLine'],
+            additionalProperties: false,
+          },
         },
       },
-      required: ['fileId'],
+      required: ['fileId', 'question'],
       additionalProperties: false,
     },
   },
