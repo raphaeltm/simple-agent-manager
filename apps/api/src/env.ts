@@ -489,6 +489,13 @@ export interface Env extends WebhookTriggerEnv, TaskRecoveryEnv {
   CACHED_COMMANDS_MAX_DESC_LENGTH?: string;
   MAX_SESSIONS_PER_PROJECT?: string;
   MAX_MESSAGES_PER_SESSION?: string;
+  DO_SHARD_MIGRATION_THRESHOLD_BYTES?: string; // ProjectData shard migration starts above this primary DO SQLite estimate (default: 7GiB)
+  DO_SHARD_AGGRESSIVE_THRESHOLD_BYTES?: string; // Switch to target-size draining above this estimate (default: 8.5GiB)
+  DO_SHARD_HARD_BRAKE_THRESHOLD_BYTES?: string; // Process full migration batches above this estimate (default: 9GiB)
+  DO_SHARD_TARGET_SIZE_BYTES?: string; // Target primary DO SQLite estimate during aggressive migration (default: 5GiB)
+  DO_SHARD_MAX_SIZE_BYTES?: string; // Estimated payload ceiling for each same-class ProjectData shard DO (default: 2GiB)
+  DO_SHARD_MIGRATION_BATCH_SIZE?: string; // Max stopped sessions migrated per ProjectData alarm turn (default: 10)
+  DO_SHARD_CHECK_INTERVAL_MS?: string; // Retry interval while ProjectData sharding work remains (default: 3600000)
   DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES?: string; // Max document-card rawOutput bytes preserved in compact message metadata (default: 16384)
   MESSAGE_SIZE_THRESHOLD?: string;
   ACTIVITY_RETENTION_DAYS?: string;

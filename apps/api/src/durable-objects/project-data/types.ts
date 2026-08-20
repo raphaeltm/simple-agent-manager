@@ -6,6 +6,7 @@ import type { VmAgentContainer } from '../vm-agent-container';
 
 export type Env = {
   DATABASE: D1Database;
+  PROJECT_DATA: DurableObjectNamespace;
   NOTIFICATION?: DurableObjectNamespace;
   KV: KVNamespace;
   VM_AGENT_CONTAINER?: DurableObjectNamespace<VmAgentContainer>;
@@ -19,6 +20,13 @@ export type Env = {
   SESSION_INDEX_MAX_ROWS?: string;
   MAX_SESSIONS_PER_PROJECT?: string;
   MAX_MESSAGES_PER_SESSION?: string;
+  DO_SHARD_MIGRATION_THRESHOLD_BYTES?: string;
+  DO_SHARD_AGGRESSIVE_THRESHOLD_BYTES?: string;
+  DO_SHARD_HARD_BRAKE_THRESHOLD_BYTES?: string;
+  DO_SHARD_TARGET_SIZE_BYTES?: string;
+  DO_SHARD_MAX_SIZE_BYTES?: string;
+  DO_SHARD_MIGRATION_BATCH_SIZE?: string;
+  DO_SHARD_CHECK_INTERVAL_MS?: string;
   DOCUMENT_CARD_RAW_OUTPUT_MAX_BYTES?: string;
   ACTIVITY_RETENTION_DAYS?: string;
   SESSION_IDLE_TIMEOUT_MINUTES?: string;

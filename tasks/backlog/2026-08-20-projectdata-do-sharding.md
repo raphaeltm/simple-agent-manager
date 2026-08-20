@@ -33,35 +33,44 @@ Implement Phase 1 core sharding infrastructure from SAM idea `01M0F88EEQPGR32E08
 
 ## Implementation checklist
 
-- [ ] Append DO SQLite migration `032-project-data-sharding` creating `session_shards` and `shard_registry` tables plus indexes for session lookup, shard lookup, dates, and registry ordering.
-- [ ] Add sharding config helpers with `DEFAULT_DO_SHARD_MIGRATION_THRESHOLD_BYTES` (7GB), `DEFAULT_DO_SHARD_AGGRESSIVE_THRESHOLD_BYTES` (8.5GB), `DEFAULT_DO_SHARD_HARD_BRAKE_THRESHOLD_BYTES` (9GB), `DEFAULT_DO_SHARD_TARGET_SIZE_BYTES` (5GB), `DEFAULT_DO_SHARD_MAX_SIZE_BYTES` (2GB), `DEFAULT_DO_SHARD_MIGRATION_BATCH_SIZE` (10), and `DEFAULT_DO_SHARD_CHECK_INTERVAL_MS`.
-- [ ] Add Env interface entries and documentation for every new sharding variable.
-- [ ] Add internal storage-size estimation using `PRAGMA page_count` and `PRAGMA page_size`; expose it through a ProjectData internal/testable RPC method.
-- [ ] Add shard lookup and same-class stub helpers that keep API/MCP/UI callers unchanged.
-- [ ] Route `getMessages(sessionId)` and `getSession(sessionId)` through `session_shards` before local reads.
-- [ ] Implement search fan-out across registered shards and primary with deterministic result merge/truncation.
-- [ ] Implement bounded alarm-based migration with an explicit mutex, oldest stopped-session selection, shard capacity selection/creation, per-session extract/copy/verify/delete/registry update, and re-arm behavior when storage remains above target.
-- [ ] Preserve or explicitly guard dependent session-owned tables so migration cannot cascade-delete ACP fork/lineage, idea links, or attention state accidentally.
-- [ ] Trigger a shard migration check after session stop/materialization and from the ProjectData alarm loop.
-- [ ] Add worker integration tests in `apps/api/tests/workers/` for migration correctness, read routing, fan-out search, storage estimation, alarm trigger, active/sleeping non-migration, and cascade-safety.
-- [ ] Add focused unit tests for sharding config parsing and storage/migration helpers where they can run without workerd.
-- [ ] Update docs and task notes with control-loop I/O budget: batch size, worst-case per-candidate cost, and candidate escape path.
-- [ ] Run targeted tests, full `pnpm lint && pnpm typecheck && pnpm test && pnpm build`, migration-safety checks, and file-size check.
-- [ ] Run required local specialist reviews: task-completion-validator, cloudflare-specialist, env-validator, constitution-validator, and test-engineer.
+- [x] Append DO SQLite migration `032-project-data-sharding` creating `session_shards` and `shard_registry` tables plus indexes for session lookup, shard lookup, dates, and registry ordering.
+- [x] Add sharding config helpers with `DEFAULT_DO_SHARD_MIGRATION_THRESHOLD_BYTES` (7GB), `DEFAULT_DO_SHARD_AGGRESSIVE_THRESHOLD_BYTES` (8.5GB), `DEFAULT_DO_SHARD_HARD_BRAKE_THRESHOLD_BYTES` (9GB), `DEFAULT_DO_SHARD_TARGET_SIZE_BYTES` (5GB), `DEFAULT_DO_SHARD_MAX_SIZE_BYTES` (2GB), `DEFAULT_DO_SHARD_MIGRATION_BATCH_SIZE` (10), and `DEFAULT_DO_SHARD_CHECK_INTERVAL_MS`.
+- [x] Add Env interface entries and documentation for every new sharding variable.
+- [x] Add internal storage-size estimation using `PRAGMA page_count` and `PRAGMA page_size`; expose it through a ProjectData internal/testable RPC method.
+- [x] Add shard lookup and same-class stub helpers that keep API/MCP/UI callers unchanged.
+- [x] Route `getMessages(sessionId)` and `getSession(sessionId)` through `session_shards` before local reads.
+- [x] Implement search fan-out across registered shards and primary with deterministic result merge/truncation.
+- [x] Implement bounded alarm-based migration with an explicit mutex, oldest stopped-session selection, shard capacity selection/creation, per-session extract/copy/verify/delete/registry update, and re-arm behavior when storage remains above target.
+- [x] Preserve or explicitly guard dependent session-owned tables so migration cannot cascade-delete ACP fork/lineage, idea links, or attention state accidentally.
+- [x] Trigger a shard migration check after session stop/materialization and from the ProjectData alarm loop.
+- [x] Add worker integration tests in `apps/api/tests/workers/` for migration correctness, read routing, fan-out search, storage estimation, alarm trigger, active/sleeping non-migration, and cascade-safety.
+- [x] Add focused unit tests for sharding config parsing and storage/migration helpers where they can run without workerd.
+- [x] Update docs and task notes with control-loop I/O budget: batch size, worst-case per-candidate cost, and candidate escape path.
+- [x] Run targeted tests, full `pnpm lint`, `pnpm typecheck`, `pnpm test`, `pnpm build`, migration-safety checks, and file-size check.
+- [x] Run required local specialist reviews: task-completion-validator, cloudflare-specialist, env-validator, constitution-validator, and test-engineer.
 - [ ] Archive this task only after validator passes, then create a draft PR titled with `DO NOT MERGE`.
 
 ## Acceptance criteria
 
-- [ ] Existing API routes, MCP tools, and UI call the same ProjectData service methods with no signature changes required.
-- [ ] `session_shards` and `shard_registry` exist in DO SQLite after migrations and are safe on clean bootstrap and upgrade.
-- [ ] A migrated stopped session is absent from primary message storage, present in a shard, and readable through primary `getSession()` / `getMessages()`.
-- [ ] Active and sleeping sessions are never selected for migration.
-- [ ] Search returns merged results from primary and shard data without duplicate rows and honors the requested limit.
-- [ ] Storage estimation uses actual SQLite PRAGMAs and can be asserted in worker tests.
-- [ ] Alarm-driven migration processes a bounded batch and re-arms only when more sharding work remains.
-- [ ] Migration does not accidentally delete session-owned data needed by current fork/lineage or linked-idea flows.
-- [ ] All new thresholds and limits are configurable through env vars with documented defaults.
-- [ ] Local quality suite and GitHub CI are green; staging is intentionally skipped by explicit user instruction.
+- [x] Existing API routes, MCP tools, and UI call the same ProjectData service methods with no signature changes required.
+- [x] `session_shards` and `shard_registry` exist in DO SQLite after migrations and are safe on clean bootstrap and upgrade.
+- [x] A migrated stopped session is absent from primary message storage, present in a shard, and readable through primary `getSession()` / `getMessages()`.
+- [x] Active and sleeping sessions are never selected for migration.
+- [x] Search returns merged results from primary and shard data without duplicate rows and honors the requested limit.
+- [x] Storage estimation uses actual SQLite PRAGMAs and can be asserted in worker tests.
+- [x] Alarm-driven migration processes a bounded batch and re-arms only when more sharding work remains.
+- [x] Migration does not accidentally delete session-owned data needed by current fork/lineage or linked-idea flows.
+- [x] All new thresholds and limits are configurable through env vars with documented defaults.
+- [x] Local quality suite is green; staging is intentionally skipped by explicit user instruction.
+- [ ] GitHub CI is green for the draft PR.
+
+## Control-loop I/O budget
+
+- Shard migration runs only from ProjectData alarms. `stopSession()` may arm an immediate alarm after materialization when storage is already above `DO_SHARD_MIGRATION_THRESHOLD_BYTES`; it does not migrate inline on the request path.
+- Each alarm turn processes at most `DO_SHARD_MIGRATION_BATCH_SIZE` stopped sessions, capped in code at 100 even if an unsafe larger env override is supplied.
+- Each candidate does one primary extraction, one same-class shard RPC, one shard verification, and one primary finalize transaction. Candidates are ordered oldest-first and active/sleeping/failed sessions are excluded.
+- Primary finalize deletes only `chat_messages` and `chat_messages_grouped` rows after shard verification. The primary `chat_sessions` row is retained in Phase 1 to avoid cascade-deleting ACP lineage, linked ideas, or attention state.
+- When eligible candidates remain after a bounded batch, the alarm re-arms after `DO_SHARD_CHECK_INTERVAL_MS` (default 1 hour). If no candidates remain, sharding does not keep the ProjectData alarm alive.
 
 ## References
 

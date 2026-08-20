@@ -17,10 +17,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { log } from '../../src/lib/logger';
 import { AppError } from '../../src/middleware/error';
+import { projectsRoutes } from '../../src/routes/projects/index';
+import { nodeAcpHeartbeatRoute } from '../../src/routes/projects/node-acp-heartbeat';
+import { taskCallbackRoute, tasksRoutes } from '../../src/routes/tasks/index';
 import { verifyCallbackToken } from '../../src/services/jwt';
 import * as projectDataService from '../../src/services/project-data';
 
-// Mock better-auth before any route imports
+// Vitest hoists these mocks before route imports.
 vi.mock('../../src/auth', () => ({
   createAuth: () => ({
     api: {
@@ -182,11 +185,7 @@ vi.mock('../../src/services/task-runner-do', () => ({
  * (which has the leaking middleware) and the extracted taskCallbackRoute.
  * The bug only manifests when mounted together.
  */
-async function createTestApp(): Promise<Hono> {
-  const { projectsRoutes } = await import('../../src/routes/projects/index');
-  const { taskCallbackRoute, tasksRoutes } = await import('../../src/routes/tasks/index');
-  const { nodeAcpHeartbeatRoute } = await import('../../src/routes/projects/node-acp-heartbeat');
-
+function createTestApp(): Hono {
   const app = new Hono();
 
   // Mirror the real mounting order from apps/api/src/index.ts
@@ -209,9 +208,9 @@ async function createTestApp(): Promise<Hono> {
 describe('task callback auth routing (regression)', () => {
   let app: Hono;
 
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
-    app = await createTestApp();
+    app = createTestApp();
   });
 
   // =========================================================================
