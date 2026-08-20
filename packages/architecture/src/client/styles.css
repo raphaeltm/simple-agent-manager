@@ -1203,6 +1203,19 @@ textarea {
   text-align: left;
 }
 
+.source-anchor-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+.compact-action {
+  margin: 0.35rem 0;
+  padding-inline: 0.65rem;
+  white-space: nowrap;
+}
+
 .source-link,
 .text-row {
   border: 1px solid var(--aw-border-subtle);

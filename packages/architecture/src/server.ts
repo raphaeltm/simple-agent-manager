@@ -144,6 +144,9 @@ async function routeRequest(
     if (url.pathname.startsWith('/api/threads/') && url.pathname.endsWith('/replies')) {
       return await handleReply(request, response, state, url, options);
     }
+    if (url.pathname.startsWith('/api/threads/') && url.pathname.endsWith('/accepted')) {
+      return await handleAccepted(request, response, state, events, url, options);
+    }
     if (url.pathname === '/api/events') return handleEvents(request, response, events);
     if (request.method === 'GET' || request.method === 'HEAD') {
       const served = await serveViewerAsset(url.pathname, response);
@@ -205,7 +208,8 @@ function handleSummary(
 function isMutationRoute(pathname: string): boolean {
   return (
     pathname === '/api/threads' ||
-    (pathname.startsWith('/api/threads/') && pathname.endsWith('/replies'))
+    (pathname.startsWith('/api/threads/') && pathname.endsWith('/replies')) ||
+    (pathname.startsWith('/api/threads/') && pathname.endsWith('/accepted'))
   );
 }
 
@@ -251,8 +255,15 @@ async function handleSource(
       'source-path-invalid'
     );
   }
-  const preview = await readSourceReference(state.current().workspace, sourceRef, {
+  if (body.lineGroups?.some((group) => group.endLine < group.startLine)) {
+    throw new HttpError(400, 'Source line group ends before it starts.', 'source-range-invalid');
+  }
+  const requestedSourceRef = body.lineGroups
+    ? { ...sourceRef, lineGroups: body.lineGroups }
+    : sourceRef;
+  const preview = await readSourceReference(state.current().workspace, requestedSourceRef, {
     contextLines: options.sourceContextLines ?? DEFAULT_SOURCE_CONTEXT_LINES,
+    fullFile: body.fullFile,
     maxBytes: options.maxSourceBytes ?? DEFAULT_SERVER_SOURCE_BYTES,
   });
   sendJson(response, 200, { preview });
@@ -323,6 +334,44 @@ async function handleReply(
   sendJson(response, 201, { message, artifactPath: await threadArtifactPath(state, threadId) });
 }
 
+async function handleAccepted(
+  request: IncomingMessage,
+  response: ServerResponse,
+  state: WorkspaceState,
+  events: EventHub,
+  url: URL,
+  options: ArchitectureServerOptions = {}
+): Promise<void> {
+  requireMethod(request.method, 'POST');
+  const threadId = decodeURIComponent(
+    url.pathname.slice('/api/threads/'.length, -'/accepted'.length)
+  );
+  const body = await readJsonBody(
+    request,
+    requestSchemas(options).acceptThread,
+    options.maxBodyBytes ?? DEFAULT_SERVER_BODY_BYTES,
+    options.validationIssueLimit ?? DEFAULT_VALIDATION_ISSUE_LIMIT
+  );
+  const thread = state.current().workspace.indexes.threadsById.get(threadId)?.value;
+  if (!thread) throw new HttpError(404, `Thread not found: ${threadId}`, 'thread-not-found');
+  const messageId = body.messageId ?? thread.messages[0]?.id;
+  if (!messageId || !thread.messages.some((message) => message.id === messageId)) {
+    throw new HttpError(
+      404,
+      `Thread message not found: ${messageId ?? ''}`,
+      'thread-message-not-found'
+    );
+  }
+  const accepted = {
+    threadId,
+    messageId,
+    author: body.author ?? 'agent',
+    acceptedAt: new Date().toISOString(),
+  };
+  events.publish('architecture:thread-accepted', accepted);
+  sendJson(response, 202, { accepted });
+}
+
 function requireAppliedMutation<T>(result: WorkspaceMutationResult<T>): T {
   if (result.status === 'invalid') {
     throw new HttpError(
@@ -367,7 +416,6 @@ function requestSchemas(options: ArchitectureServerOptions) {
   return makeRequestSchemas({
     threadAuthorChars: threadLimits.authorChars,
     threadBodyChars: threadLimits.bodyChars,
-    threadTitleChars: threadLimits.titleChars,
     sourcePathChars: options.maxSourcePathChars ?? DEFAULT_SOURCE_PATH_LIMIT,
   });
 }

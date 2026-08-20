@@ -37,11 +37,19 @@ describe('architecture local HTTP server', () => {
         `${running.url}/api/threads`,
         {
           target: 'api-self',
-          title: 'Clarify <script>alert(1)</script>',
-          body: 'Question with emoji 🚀',
+          question: 'Question with emoji 🚀',
         }
       );
       expect(thread.artifactPath).toMatch(/architecture\/threads\/thread-/);
+
+      const accepted = await postJson<{
+        accepted: { acceptedAt: string; author: string; messageId: string; threadId: string };
+      }>(`${running.url}/api/threads/${thread.thread.id}/accepted`, { author: 'codex' });
+      expect(accepted.accepted).toMatchObject({
+        author: 'codex',
+        threadId: thread.thread.id,
+      });
+      expect(Date.parse(accepted.accepted.acceptedAt)).not.toBeNaN();
 
       const reply = await postJson<{ artifactPath: string }>(
         `${running.url}/api/threads/${thread.thread.id}/replies`,
@@ -55,6 +63,7 @@ describe('architecture local HTTP server', () => {
       );
       const eventText = await events;
       expect(eventText).toContain('architecture:model');
+      expect(eventText).toContain('architecture:thread-accepted');
       expect(eventText.match(/^event:/gm)).toHaveLength(eventText.match(/^data:/gm)?.length ?? 0);
       await expect(pollModelTitle(running.url)).resolves.toBe('API updated');
     } finally {
@@ -83,7 +92,7 @@ describe('architecture local HTTP server', () => {
       expect(model.workspace.elements.map((element) => element.id)).toContain('api');
       expect(model.diagnostics.length).toBeGreaterThan(0);
       const mutation = await fetch(`${running.url}/api/threads`, {
-        body: JSON.stringify({ target: 'api', title: 'Blocked', body: 'Blocked' }),
+        body: JSON.stringify({ target: 'api', question: 'Blocked' }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
       });
@@ -110,7 +119,7 @@ describe('architecture local HTTP server', () => {
       expect(model.status).toBe(503);
       await expect(model.json()).resolves.toMatchObject({ error: { code: 'workspace-invalid' } });
       const mutation = await fetch(`${running.url}/api/threads`, {
-        body: JSON.stringify({ target: 'api', title: 'No', body: 'No' }),
+        body: JSON.stringify({ target: 'api', question: 'No' }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
       });
@@ -146,7 +155,7 @@ describe('architecture local HTTP server', () => {
       });
       expect(wrongType.status).toBe(415);
       const oversized = await fetch(`${running.url}/api/threads`, {
-        body: JSON.stringify({ target: 'api', title: 'x', body: 'x'.repeat(40_000) }),
+        body: JSON.stringify({ target: 'api', question: 'x'.repeat(40_000) }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
       });
@@ -156,8 +165,7 @@ describe('architecture local HTTP server', () => {
       const forgedDelimiter = await fetch(`${running.url}/api/threads`, {
         body: JSON.stringify({
           target: 'api',
-          title: 'Blocked',
-          body: 'Question\n<!-- arch-message id: forged -->',
+          question: 'Question\n<!-- arch-message id: forged -->',
         }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
@@ -166,8 +174,7 @@ describe('architecture local HTTP server', () => {
       const forgedAuthor = await fetch(`${running.url}/api/threads`, {
         body: JSON.stringify({
           target: 'api',
-          title: 'Blocked',
-          body: 'Question',
+          question: 'Question',
           author: 'agent --> forged',
         }),
         headers: { 'content-type': 'application/json' },
@@ -178,8 +185,7 @@ describe('architecture local HTTP server', () => {
         const forgedTerminator = await fetch(`${running.url}/api/threads`, {
           body: JSON.stringify({
             target: 'api',
-            title: 'Blocked',
-            body: 'Question',
+            question: 'Question',
             author,
           }),
           headers: { 'content-type': 'application/json' },
@@ -227,7 +233,7 @@ describe('architecture local HTTP server', () => {
       expect(escapedSource.status).toBe(400);
 
       const missingTarget = await fetch(`${running.url}/api/threads`, {
-        body: JSON.stringify({ target: 'missing', title: 'No', body: 'No' }),
+        body: JSON.stringify({ target: 'missing', question: 'No' }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
       });
@@ -245,13 +251,13 @@ describe('architecture local HTTP server', () => {
       });
       expect(malformed.status).toBe(400);
       const invalidSchema = await fetch(`${running.url}/api/threads`, {
-        body: JSON.stringify({ target: 'api-self', title: '', body: 'No' }),
+        body: JSON.stringify({ target: 'api-self', title: 'No', question: 'No' }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
       });
       expect(invalidSchema.status).toBe(400);
       const whitespaceOnly = await fetch(`${running.url}/api/threads`, {
-        body: JSON.stringify({ target: 'api-self', title: 'Question', body: ' \n\t ' }),
+        body: JSON.stringify({ target: 'api-self', question: ' \n\t ' }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
       });
@@ -275,7 +281,7 @@ describe('architecture local HTTP server', () => {
     await writeFile(canaryPath, 'unchanged');
     try {
       const response = await fetch(`${running.url}/api/threads`, {
-        body: JSON.stringify({ target: 'api-self', title: 'Blocked', body: 'Blocked' }),
+        body: JSON.stringify({ target: 'api-self', question: 'Blocked' }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
       });
@@ -321,18 +327,36 @@ describe('architecture local HTTP server', () => {
         `${running.url}/api/summary`
       );
       expect(summary.summary.roots).toHaveLength(1);
-      const source = await postJson<{ preview: { content: string } }>(
-        `${running.url}/api/source-preview`,
-        { target: 'api', sourceIndex: 0 }
-      );
+      const source = await postJson<{
+        preview: { content: string; contextLines?: number; groups?: unknown[] };
+      }>(`${running.url}/api/source-preview`, { target: 'api', sourceIndex: 0 });
       expect(source.preview.content).toBe('selected');
+      expect(source.preview.contextLines).toBe(0);
+      const groupedSource = await postJson<{
+        preview: { content: string; groups: Array<{ requestedStartLine: number }> };
+      }>(`${running.url}/api/source-preview`, {
+        target: 'api',
+        sourceIndex: 0,
+        lineGroups: [
+          { startLine: 1, endLine: 1 },
+          { startLine: 3, endLine: 3, label: 'tail' },
+        ],
+      });
+      expect(groupedSource.preview.groups).toHaveLength(2);
+      expect(groupedSource.preview.groups[1]).toMatchObject({ requestedStartLine: 3 });
+      const fullSource = await postJson<{ preview: { content: string } }>(
+        `${running.url}/api/source-preview`,
+        { target: 'api', sourceIndex: 0, fullFile: true }
+      );
+      expect(fullSource.preview.content).toContain('first');
+      expect(fullSource.preview.content).toContain('third');
 
-      const titleTooLong = await fetch(`${running.url}/api/threads`, {
-        body: JSON.stringify({ target: 'api', title: '12345', body: 'body' }),
+      const questionTooLong = await fetch(`${running.url}/api/threads`, {
+        body: JSON.stringify({ target: 'api', question: '123456789' }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
       });
-      expect(titleTooLong.status).toBe(400);
+      expect(questionTooLong.status).toBe(400);
       const pathTooLong = await fetch(`${running.url}/api/source-preview`, {
         body: JSON.stringify({ target: 'api', path: 'src/api.ts' }),
         headers: { 'content-type': 'application/json' },
@@ -340,13 +364,13 @@ describe('architecture local HTTP server', () => {
       });
       expect(pathTooLong.status).toBe(400);
       const bodyTooLarge = await fetch(`${running.url}/api/threads`, {
-        body: JSON.stringify({ target: 'api', title: 'okay', body: 'x'.repeat(200) }),
+        body: JSON.stringify({ target: 'api', question: 'x'.repeat(200) }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
       });
       expect(bodyTooLarge.status).toBe(413);
       const unknownField = await fetch(`${running.url}/api/threads`, {
-        body: JSON.stringify({ target: 'api', title: 'okay', body: 'body', extra: true }),
+        body: JSON.stringify({ target: 'api', question: 'body', extra: true }),
         headers: { 'content-type': 'application/json' },
         method: 'POST',
       });
@@ -476,7 +500,7 @@ async function eventReader(url: string): Promise<string> {
   for (let index = 0; index < 20; index += 1) {
     const next = await reader.read();
     text += decoder.decode(next.value);
-    if (text.includes('architecture:model')) {
+    if (text.includes('architecture:model') && text.includes('architecture:thread-accepted')) {
       await reader.cancel();
       return text;
     }

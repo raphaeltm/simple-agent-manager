@@ -57,12 +57,25 @@ export interface LoadWorkspaceOptions {
 export interface SourceReadOptions {
   contextLines?: number;
   maxBytes?: number;
+  fullFile?: boolean;
 }
 
 export interface SourceReadResult {
   path: string;
   startLine: number;
   endLine: number;
+  content: string;
+  truncated: boolean;
+  contextLines?: number;
+  groups?: SourceReadGroup[];
+}
+
+export interface SourceReadGroup {
+  startLine: number;
+  endLine: number;
+  requestedStartLine: number;
+  requestedEndLine: number;
+  label?: string;
   content: string;
   truncated: boolean;
 }

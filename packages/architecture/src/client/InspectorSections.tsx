@@ -76,18 +76,23 @@ export function SourceAnchors({
   onLoad,
 }: {
   sources: SourceRef[];
-  onLoad: (source: SourceRef, index: number) => void;
+  onLoad: (source: SourceRef, index: number, fullFile?: boolean) => void;
 }) {
   if (sources.length === 0) return <p className="muted">No source anchors.</p>;
   return sources.map((source, index) => (
-    <button
-      key={`${source.path}:${index}`}
-      type="button"
-      className="source-link"
-      onClick={() => onLoad(source, index)}
-    >
-      {source.label ?? source.path}:{source.startLine ?? 1}
-    </button>
+    <div className="source-anchor-row" key={`${source.path}:${index}`}>
+      <button type="button" className="source-link" onClick={() => onLoad(source, index)}>
+        {source.label ?? source.path}:
+        {source.lineGroups ? lineGroupSummary(source) : (source.startLine ?? 1)}
+      </button>
+      <button
+        type="button"
+        className="ghost-action compact-action"
+        onClick={() => onLoad(source, index, true)}
+      >
+        Full file
+      </button>
+    </div>
   ));
 }
 
@@ -114,10 +119,32 @@ export function SourcePreview({ preview }: { preview: PreviewState }) {
         </span>
       </div>
       <pre className="source-preview" aria-label="Source preview">
-        <code>{preview.preview.content}</code>
+        <code>
+          {preview.preview.groups
+            ? groupedContent(preview.preview.groups)
+            : preview.preview.content}
+        </code>
       </pre>
     </div>
   );
+}
+
+function lineGroupSummary(source: SourceRef): string {
+  return (source.lineGroups ?? [])
+    .map(
+      (group) =>
+        `L${group.startLine}${group.endLine === group.startLine ? '' : `–${group.endLine}`}`
+    )
+    .join(', ');
+}
+
+function groupedContent(groups: NonNullable<PreviewState['preview']>['groups']): string {
+  return (groups ?? [])
+    .map((group) => {
+      const label = group.label ? `${group.label} ` : '';
+      return `${label}L${group.startLine}–${group.endLine}\n${group.content}`;
+    })
+    .join('\n\n');
 }
 
 export function ThreadList({

@@ -42,22 +42,45 @@ export interface MutationState {
 export interface ApiClient {
   loadModel: () => Promise<ViewerModel>;
   loadElement: (id: string) => Promise<ElementDetails>;
-  loadSource: (target: string, source: SourceRef, sourceIndex: number) => Promise<SourceReadResult>;
+  loadSource: (
+    target: string,
+    source: SourceRef,
+    sourceIndex: number,
+    options?: SourcePreviewOptions
+  ) => Promise<SourceReadResult>;
   createThread: (input: ThreadInput) => Promise<ThreadMutationResult>;
   replyToThread: (threadId: string, input: ReplyInput) => Promise<ThreadMutationResult>;
+  acceptThread: (threadId: string, input?: ThreadAcceptInput) => Promise<ThreadAcceptResult>;
 }
 
 export interface ThreadInput {
   target: string;
-  title: string;
-  body: string;
+  question: string;
   author?: string;
+}
+
+export interface SourcePreviewOptions {
+  fullFile?: boolean;
 }
 
 export interface ReplyInput {
   body: string;
   author?: string;
   replyTo?: string;
+}
+
+export interface ThreadAcceptInput {
+  messageId?: string;
+  author?: string;
+}
+
+export interface ThreadAcceptResult {
+  accepted: {
+    threadId: string;
+    messageId: string;
+    author: string;
+    acceptedAt: string;
+  };
 }
 
 export interface ThreadMutationResult {

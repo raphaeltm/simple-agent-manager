@@ -79,7 +79,6 @@ describe('architecture viewer', () => {
     fireEvent.click(screen.getByRole('button', { name: /src\/api.ts:1/ }));
     expect(await screen.findByLabelText('Source preview')).toHaveTextContent('export const hello');
 
-    fireEvent.change(screen.getByLabelText('Question title'), { target: { value: 'Question' } });
     fireEvent.change(screen.getByLabelText('Question'), { target: { value: 'Body' } });
     const submit = screen.getByRole('button', { name: 'Create question' });
     fireEvent.click(submit);
@@ -94,7 +93,6 @@ describe('architecture viewer', () => {
     mockFetch(makeModel({ failThreadCreate: true }));
     render(<App />);
     fireEvent.click((await screen.findByText('API component')).closest('button')!);
-    fireEvent.change(screen.getByLabelText('Question title'), { target: { value: 'Question' } });
     fireEvent.change(screen.getByLabelText('Question'), { target: { value: 'Draft survives' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create question' }));
     expect(await screen.findByText('Thread failed')).toBeVisible();
@@ -145,7 +143,6 @@ describe('architecture viewer', () => {
     vi.stubGlobal('fetch', fetchMock);
     render(<App />);
     fireEvent.click((await screen.findByText('API component')).closest('button')!);
-    fireEvent.change(screen.getByLabelText('Question title'), { target: { value: 'Race' } });
     fireEvent.change(screen.getByLabelText('Question'), {
       target: { value: 'Cleared once saved' },
     });
@@ -164,7 +161,6 @@ describe('architecture viewer', () => {
       await createResponse;
     });
     fireEvent.click((await screen.findByText('API component')).closest('button')!);
-    expect(screen.getByLabelText('Question title')).toHaveValue('');
     expect(screen.getByLabelText('Question')).toHaveValue('');
     expect(
       fetchMock.mock.calls.filter((call) => String(call[0]).endsWith('/api/threads'))
@@ -268,7 +264,6 @@ describe('architecture viewer', () => {
     mockFetch(makeModel(), sourceResponse);
     render(<App />);
     fireEvent.click((await screen.findByText('API component')).closest('button')!);
-    fireEvent.change(screen.getByLabelText('Question title'), { target: { value: 'Stale title' } });
     fireEvent.change(screen.getByLabelText('Question'), { target: { value: 'Stale body' } });
     fireEvent.click(screen.getByRole('button', { name: /src\/api.ts:1/ }));
     fireEvent.click(screen.getByRole('button', { name: 'Root system' }));
@@ -285,10 +280,8 @@ describe('architecture viewer', () => {
     );
     await Promise.resolve();
     expect(screen.queryByText('stale preview')).toBeNull();
-    expect(screen.getByLabelText('Question title')).toHaveValue('');
     expect(screen.getByLabelText('Question')).toHaveValue('');
     fireEvent.click(screen.getByText('API component').closest('button')!);
-    expect(screen.getByLabelText('Question title')).toHaveValue('Stale title');
     expect(screen.getByLabelText('Question')).toHaveValue('Stale body');
   });
 
@@ -340,7 +333,6 @@ describe('architecture viewer', () => {
     mockFetch(makeModel({ failReloadAfterThread: true }));
     render(<App />);
     fireEvent.click((await screen.findByText('API component')).closest('button')!);
-    fireEvent.change(screen.getByLabelText('Question title'), { target: { value: 'Question' } });
     fireEvent.change(screen.getByLabelText('Question'), { target: { value: 'Saved body' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create question' }));
     expect(await screen.findByText(/Saved to architecture\/threads/)).toBeVisible();
@@ -555,9 +547,6 @@ describe('architecture viewer', () => {
     fireEvent.click(within(portals).getByRole('button', { name: 'Root calls API' }));
     expect(screen.getByRole('heading', { name: 'Root calls API' })).toBeVisible();
     expect(screen.getByText('root → api')).toBeVisible();
-    fireEvent.change(screen.getByLabelText('Question title'), {
-      target: { value: 'Relationship question' },
-    });
     fireEvent.change(screen.getByLabelText('Question'), {
       target: { value: 'Does this edge retry?' },
     });

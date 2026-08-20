@@ -39,8 +39,7 @@ const RESERVED_MESSAGE_DELIMITER = '<!-- arch-message';
 export interface ThreadWriteOptions {
   workspaceRoot: string;
   target: string;
-  title: string;
-  body: string;
+  question: string;
   author?: string;
   now?: Date;
   id?: string;
@@ -121,7 +120,7 @@ export async function createThread(options: ThreadWriteOptions): Promise<Archite
   const threadId = options.id ?? `thread-${randomUUID()}`;
   assertSafeIdentifier(threadId, 'thread id');
   const message = makeMessage({
-    body: options.body,
+    body: options.question,
     author: options.author,
     now,
     seed: `${threadId}-initial`,
@@ -130,7 +129,7 @@ export async function createThread(options: ThreadWriteOptions): Promise<Archite
     version: ARCHITECTURE_SCHEMA_VERSION,
     id: threadId,
     target: options.target,
-    title: options.title,
+    title: titleFromQuestion(options.question),
     status: 'unresolved',
     createdAt: now,
     updatedAt: now,
@@ -319,12 +318,18 @@ function assertSafeIdentifier(value: string, label: string): void {
 
 function validateThreadContent(options: ThreadWriteOptions): void {
   const limits = { ...DEFAULT_THREAD_CONTENT_LIMITS, ...options.limits };
-  assertContentLength(options.title, limits.titleChars, 'thread title');
-  assertContentLength(options.body, limits.bodyChars, 'thread body');
-  assertNoReservedMessageDelimiter(options.body, 'thread body');
+  assertContentLength(options.question, limits.bodyChars, 'thread question');
+  assertNoReservedMessageDelimiter(options.question, 'thread question');
   const author = options.author ?? DEFAULT_THREAD_AUTHOR;
   assertContentLength(author, limits.authorChars, 'thread author');
   assertNoReservedMessageSyntax(author, 'thread author');
+}
+
+function titleFromQuestion(question: string): string {
+  const compact = question.trim().replace(/\s+/g, ' ');
+  return compact.length <= DEFAULT_THREAD_TITLE_LIMIT
+    ? compact
+    : `${compact.slice(0, Math.max(0, DEFAULT_THREAD_TITLE_LIMIT - 1)).trimEnd()}…`;
 }
 
 function validateReplyContent(options: ReplyWriteOptions): void {

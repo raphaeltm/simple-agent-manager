@@ -101,6 +101,17 @@ function validateSourceRanges(
           message: `${label} source range ends before it starts: ${ref.path}.`,
         });
       }
+      for (const group of ref.lineGroups ?? []) {
+        if (group.endLine < group.startLine) {
+          diagnostics.push({
+            severity: 'error',
+            code: 'source-range-invalid',
+            file: location.file,
+            path: location.documentPath,
+            message: `${label} source line group ends before it starts: ${ref.path}.`,
+          });
+        }
+      }
     }
   }
 }

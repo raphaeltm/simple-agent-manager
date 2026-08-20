@@ -16,7 +16,6 @@ interface CliOptions {
   json: boolean;
   body?: string;
   target?: string;
-  title?: string;
   thread?: string;
   author?: string;
   host?: string;
@@ -37,9 +36,6 @@ const VALUE_OPTION_HANDLERS: Readonly<Record<string, ValueOptionHandler>> = {
   },
   '--target': (options, value) => {
     options.target = value;
-  },
-  '--title': (options, value) => {
-    options.title = value;
   },
   '--thread': (options, value) => {
     options.thread = value;
@@ -142,8 +138,7 @@ async function replyCommand(options: CliOptions): Promise<number> {
     workspaceRoot: options.workspaceRoot ?? 'architecture',
     threadsDir,
     target: options.target,
-    title: options.title ?? `Question for ${options.target}`,
-    body: options.body,
+    question: options.body,
     author: options.author,
   });
   printResult({ thread, artifactPath: threadArtifactPath(loaded.workspace, thread.id) });

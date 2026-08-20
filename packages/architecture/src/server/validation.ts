@@ -4,7 +4,6 @@ import {
   DEFAULT_SOURCE_PATH_LIMIT,
   DEFAULT_THREAD_AUTHOR_LIMIT,
   DEFAULT_THREAD_BODY_LIMIT,
-  DEFAULT_THREAD_TITLE_LIMIT,
 } from '../constants';
 
 const idSchema = v.pipe(v.string(), v.minLength(1), v.regex(/^[a-zA-Z0-9][a-zA-Z0-9_.:-]*$/));
@@ -12,14 +11,12 @@ const idSchema = v.pipe(v.string(), v.minLength(1), v.regex(/^[a-zA-Z0-9][a-zA-Z
 export interface ArchitectureRequestLimits {
   threadAuthorChars: number;
   threadBodyChars: number;
-  threadTitleChars: number;
   sourcePathChars: number;
 }
 
 export const DEFAULT_REQUEST_LIMITS: ArchitectureRequestLimits = {
   threadAuthorChars: DEFAULT_THREAD_AUTHOR_LIMIT,
   threadBodyChars: DEFAULT_THREAD_BODY_LIMIT,
-  threadTitleChars: DEFAULT_THREAD_TITLE_LIMIT,
   sourcePathChars: DEFAULT_SOURCE_PATH_LIMIT,
 };
 
@@ -33,28 +30,32 @@ export function makeRequestSchemas(limits: ArchitectureRequestLimits = DEFAULT_R
     v.minLength(1),
     v.maxLength(limits.threadBodyChars)
   );
-  const titleSchema = v.pipe(
-    v.string(),
-    v.trim(),
-    v.minLength(1),
-    v.maxLength(limits.threadTitleChars)
-  );
+  const lineGroupSchema = v.strictObject({
+    startLine: v.pipe(v.number(), v.integer(), v.minValue(1)),
+    endLine: v.pipe(v.number(), v.integer(), v.minValue(1)),
+    label: v.optional(v.pipe(v.string(), v.trim(), v.minLength(1), v.maxLength(120))),
+  });
   return {
     sourcePreview: v.strictObject({
       target: idSchema,
       sourceIndex: v.optional(v.pipe(v.number(), v.integer(), v.minValue(0)), 0),
       path: v.optional(v.pipe(v.string(), v.minLength(1), v.maxLength(limits.sourcePathChars))),
+      lineGroups: v.optional(v.array(lineGroupSchema)),
+      fullFile: v.optional(v.boolean(), false),
     }),
     createThread: v.strictObject({
       target: idSchema,
-      title: titleSchema,
-      body: bodySchema,
+      question: bodySchema,
       author: optionalAuthorSchema,
     }),
     reply: v.strictObject({
       body: bodySchema,
       author: optionalAuthorSchema,
       replyTo: v.optional(idSchema),
+    }),
+    acceptThread: v.strictObject({
+      messageId: v.optional(idSchema),
+      author: optionalAuthorSchema,
     }),
   };
 }

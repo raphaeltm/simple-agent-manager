@@ -4,7 +4,12 @@ import { createInterface } from 'node:readline/promises';
 import { DEFAULT_MAX_SOURCE_BYTES, DEFAULT_SOURCE_CONTEXT_LINES } from './constants';
 import { resolveContainedPath } from './path-safety';
 import type { SourceRef } from './schemas';
-import type { CompiledWorkspace, SourceReadOptions, SourceReadResult } from './types';
+import type {
+  CompiledWorkspace,
+  SourceReadGroup,
+  SourceReadOptions,
+  SourceReadResult,
+} from './types';
 
 export async function readSourceReference(
   workspace: CompiledWorkspace,
@@ -18,6 +23,62 @@ export async function readSourceReference(
   });
   const maxBytes = options.maxBytes ?? DEFAULT_MAX_SOURCE_BYTES;
   const context = options.contextLines ?? DEFAULT_SOURCE_CONTEXT_LINES;
+  if (options.fullFile) {
+    const snippet = await readLineWindow(absolutePath, 1, Number.MAX_SAFE_INTEGER, maxBytes);
+    return {
+      path: sourceRef.path,
+      startLine: 1,
+      endLine: snippet.endLine,
+      content: snippet.content,
+      truncated: snippet.truncated,
+      contextLines: context,
+    };
+  }
+  if (sourceRef.lineGroups && sourceRef.lineGroups.length > 0) {
+    const groups: SourceReadGroup[] = [];
+    let usedBytes = 0;
+    for (const group of sourceRef.lineGroups) {
+      const startLine = Math.max(1, group.startLine - context);
+      const requestedEnd = group.endLine + context;
+      const remainingBytes = maxBytes - usedBytes;
+      if (remainingBytes <= 0) {
+        groups.push({
+          startLine,
+          endLine: startLine - 1,
+          requestedStartLine: group.startLine,
+          requestedEndLine: group.endLine,
+          ...(group.label ? { label: group.label } : {}),
+          content: '',
+          truncated: true,
+        });
+        continue;
+      }
+      const snippet = await readLineWindow(absolutePath, startLine, requestedEnd, remainingBytes);
+      usedBytes += Buffer.byteLength(snippet.content, 'utf8');
+      groups.push({
+        startLine,
+        endLine: snippet.endLine,
+        requestedStartLine: group.startLine,
+        requestedEndLine: group.endLine,
+        ...(group.label ? { label: group.label } : {}),
+        content: snippet.content,
+        truncated: snippet.truncated,
+      });
+    }
+    const first = groups[0];
+    const last = groups.at(-1);
+    return {
+      path: sourceRef.path,
+      startLine: first?.startLine ?? 1,
+      endLine: last?.endLine ?? 1,
+      content: groups
+        .map((group) => `L${group.startLine}–${group.endLine}\n${group.content}`)
+        .join('\n\n'),
+      truncated: groups.some((group) => group.truncated),
+      contextLines: context,
+      groups,
+    };
+  }
   const requestedStart = sourceRef.startLine ?? 1;
   const requestedEnd = sourceRef.endLine ?? requestedStart;
   const startLine = Math.max(1, requestedStart - context);
@@ -29,6 +90,7 @@ export async function readSourceReference(
     endLine: snippet.endLine,
     content: snippet.content,
     truncated: snippet.truncated,
+    contextLines: context,
   };
 }
 

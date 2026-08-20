@@ -79,8 +79,11 @@ views:
 Stable IDs are required for elements, relationships, flows, flow steps, state
 machines, states, views, threads, and messages. A transition is identified by
 its owning machine plus its `from`, `to`, and optional `event`. `sourceRefs`
-always use repository-relative paths and optional one-based inclusive line
-ranges. `metadata` is the explicit extension point; arbitrary unknown fields
+always use repository-relative paths and optional one-based inclusive
+`startLine`/`endLine` ranges or `lineGroups` with multiple one-based inclusive
+ranges. Source previews include three context lines before and after each
+requested range by default, and the viewer can request the full file for
+expansion. `metadata` is the explicit extension point; arbitrary unknown fields
 are not silently retained.
 
 Canvas coordinates and generated AST/import data are not canonical. Extractors
@@ -117,8 +120,10 @@ The API owns retry policy.
 ```
 
 Message markers, metadata, duplicate message IDs, and `replyTo` targets are
-validated. Library and HTTP writes enforce configurable title, author, and body
-limits. `createThread` returns the created `ArchitectureThread` and
+validated. Library and HTTP thread creation accepts a single `question` string;
+stored thread titles are derived from that question for compatibility with the
+existing thread file schema. Writes enforce configurable question, author, and
+reply body limits. `createThread` returns the created `ArchitectureThread` and
 `appendThreadReply` returns the appended `ThreadMessage`; CLI and HTTP mutation
 responses additionally include the repository-relative `artifactPath`.
 
@@ -132,7 +137,7 @@ pnpm --silent cli summary --workspace ../../architecture --repo ../.. --json
 pnpm --silent cli show sam.api --workspace ../../architecture --repo ../.. --json
 pnpm --silent cli inbox --workspace ../../architecture --repo ../.. --json
 pnpm --silent cli impact apps/api/src/routes/device-flow.ts --workspace ../../architecture --repo ../.. --json
-pnpm --silent cli reply --workspace ../../architecture --repo ../.. --target sam.api --title "Question" --body "Who owns retries?" --json
+pnpm --silent cli reply --workspace ../../architecture --repo ../.. --target sam.api --body "Who owns retries?" --json
 pnpm --silent cli reply --workspace ../../architecture --repo ../.. --thread <thread-id> --body "The API owns them." --json
 pnpm --silent cli serve --workspace ../../architecture --repo ../..
 ```
@@ -310,21 +315,39 @@ those built artifacts rather than relying only on TypeScript source execution.
 `startArchitectureServer` binds to `127.0.0.1` by default and returns
 `{ url, server, close }`.
 
-| Method | Path                       | Request → success response                                                                                        |
-| ------ | -------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| `GET`  | `/health`                  | — → `{ ok, diagnostics }`; `503` when no valid initial model or the latest edit is invalid                        |
-| `GET`  | `/api/model`               | — → `{ summary, diagnostics, limits, interaction, workspace }` full last-valid viewer model                       |
-| `GET`  | `/api/summary`             | — → `{ summary, diagnostics }` with configured query bounds                                                       |
-| `GET`  | `/api/elements/:id`        | — → `{ details }`; decoded `:id` selects one element                                                              |
-| `POST` | `/api/source-preview`      | `{ target, sourceIndex?: 0, path?: string }` → `{ preview }`; `path`, if supplied, must equal the selected anchor |
-| `POST` | `/api/threads`             | `{ target, title, body, author? }` → `201 { thread, artifactPath }`                                               |
-| `POST` | `/api/threads/:id/replies` | `{ body, author?, replyTo? }` → `201 { message, artifactPath }`                                                   |
-| `GET`  | `/api/events`              | — → `text/event-stream` events `architecture:model`, `architecture:threads`, and `architecture:invalid`           |
+| Method | Path                        | Request → success response                                                                                                                                                           |
+| ------ | --------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `GET`  | `/health`                   | — → `{ ok, diagnostics }`; `503` when no valid initial model or the latest edit is invalid                                                                                           |
+| `GET`  | `/api/model`                | — → `{ summary, diagnostics, limits, interaction, workspace }` full last-valid viewer model                                                                                          |
+| `GET`  | `/api/summary`              | — → `{ summary, diagnostics }` with configured query bounds                                                                                                                          |
+| `GET`  | `/api/elements/:id`         | — → `{ details }`; decoded `:id` selects one element                                                                                                                                 |
+| `POST` | `/api/source-preview`       | `{ target, sourceIndex?: 0, path?: string, lineGroups?: [{ startLine, endLine, label? }], fullFile?: boolean }` → `{ preview }`; `path`, if supplied, must equal the selected anchor |
+| `POST` | `/api/threads`              | `{ target, question, author? }` → `201 { thread, artifactPath }`                                                                                                                     |
+| `POST` | `/api/threads/:id/replies`  | `{ body, author?, replyTo? }` → `201 { message, artifactPath }`                                                                                                                      |
+| `POST` | `/api/threads/:id/accepted` | `{ messageId?, author? }` → `202 { accepted: { threadId, messageId, author, acceptedAt } }`; emits `architecture:thread-accepted` using the server timestamp                         |
+| `GET`  | `/api/events`               | — → `text/event-stream` events `architecture:connected`, `architecture:model`, `architecture:threads`, `architecture:thread-accepted`, and `architecture:invalid`                    |
 
 Errors use `{ "error": { "code": string, "message": string } }`. Common
 statuses are `400` malformed/unsafe input, `403` Host/Origin rejection, `404`
 unknown target, `405` wrong method, `413` oversized body, `415` non-JSON body,
 and `503` invalid initial workspace or exhausted SSE capacity.
+
+Agents should subscribe to `/api/events` with the browser `EventSource` API or
+any SSE client that preserves named events:
+
+```ts
+const events = new EventSource('/api/events');
+events.addEventListener('architecture:model', () => reloadModel());
+events.addEventListener('architecture:threads', () => reloadThreads());
+events.addEventListener('architecture:thread-accepted', (event) => {
+  const payload = JSON.parse((event as MessageEvent).data) as {
+    data: { threadId: string; messageId: string; author: string; acceptedAt: string };
+  };
+  showWorkingAt(payload.data.threadId, payload.data.acceptedAt);
+});
+events.addEventListener('architecture:invalid', () => showInvalidWorkspaceBanner());
+events.onerror = () => markLiveUpdatesReconnecting();
+```
 
 The URL-addressable viewer lenses are `structure`, `topology`, `flow`, and
 `state`. The client bounds Structure children/relationships, Topology elements

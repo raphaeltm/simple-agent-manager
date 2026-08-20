@@ -33,6 +33,15 @@ export const sourceRefSchema = v.strictObject({
   label: v.optional(nonEmptyStringSchema),
   startLine: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
   endLine: v.optional(v.pipe(v.number(), v.integer(), v.minValue(1))),
+  lineGroups: v.optional(
+    v.array(
+      v.strictObject({
+        startLine: v.pipe(v.number(), v.integer(), v.minValue(1)),
+        endLine: v.pipe(v.number(), v.integer(), v.minValue(1)),
+        label: v.optional(nonEmptyStringSchema),
+      })
+    )
+  ),
 });
 
 const sourceRefsSchema = v.optional(v.array(sourceRefSchema));

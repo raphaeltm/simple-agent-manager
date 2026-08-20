@@ -59,6 +59,10 @@ elements:
       - path: src/a.ts
         startLine: 9
         endLine: 2
+      - path: src/a.ts
+        lineGroups:
+          - startLine: 7
+            endLine: 3
   - id: b
     parent: a
     kind: component
@@ -90,6 +94,6 @@ stateMachines:
     const codes = loaded.diagnostics.map((item) => item.code);
     expect(codes.filter((code) => code === 'duplicate-id')).toHaveLength(2);
     expect(codes).toContain('parent-cycle');
-    expect(codes).toContain('source-range-invalid');
+    expect(codes.filter((code) => code === 'source-range-invalid')).toHaveLength(2);
   });
 });

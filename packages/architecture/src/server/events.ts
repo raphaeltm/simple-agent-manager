@@ -6,6 +6,7 @@ export type ArchitectureEventName =
   | 'architecture:connected'
   | 'architecture:model'
   | 'architecture:threads'
+  | 'architecture:thread-accepted'
   | 'architecture:invalid';
 
 interface Client {

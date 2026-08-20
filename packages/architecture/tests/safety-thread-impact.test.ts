@@ -138,8 +138,7 @@ elements:
     const thread = await createThread({
       workspaceRoot: fixture.workspaceRoot,
       target: 'api',
-      title: 'Clarify API',
-      body: 'Initial question',
+      question: 'Initial question',
       author: 'tester',
       now: new Date('2026-08-13T00:00:00.000Z'),
       id: 'thread-api',
@@ -179,8 +178,7 @@ elements:
     const thread = await createThread({
       workspaceRoot: fixture.workspaceRoot,
       target: 'api',
-      title: 'Concurrent review',
-      body: 'Initial question',
+      question: 'Initial question',
       id: 'thread-concurrent',
     });
     const now = new Date('2026-08-13T00:01:00.000Z');
@@ -214,15 +212,13 @@ elements:
       createThread({
         workspaceRoot: fixture.workspaceRoot,
         target: 'api',
-        title: 'Whitespace',
-        body: '   ',
+        question: '   ',
       })
-    ).rejects.toThrow('thread body');
+    ).rejects.toThrow('thread question');
     const thread = await createThread({
       workspaceRoot: fixture.workspaceRoot,
       target: 'api',
-      title: 'Valid',
-      body: 'Question',
+      question: 'Question',
       id: 'thread-whitespace',
     });
     await expect(
@@ -240,8 +236,7 @@ elements:
     const thread = await createThread({
       workspaceRoot: fixture.workspaceRoot,
       target: 'api',
-      title: 'Lock safety',
-      body: 'Question',
+      question: 'Question',
       id: 'thread-lock-safety',
     });
     const canary = path.join(outside.root, 'lock-canary');
@@ -267,8 +262,7 @@ elements:
     const thread = await createThread({
       workspaceRoot: fixture.workspaceRoot,
       target: 'api',
-      title: 'Clarify API',
-      body: 'Initial question',
+      question: 'Initial question',
       id: 'thread-api',
     });
 
@@ -288,15 +282,13 @@ elements:
       createThread({
         workspaceRoot: fixture.workspaceRoot,
         target: 'api',
-        title: 'Blocked delimiter',
-        body: 'Question\n<!-- arch-message id: forged -->',
+        question: 'Question\n<!-- arch-message id: forged -->',
       })
     ).rejects.toThrow('reserved architecture message delimiter');
     const thread = await createThread({
       workspaceRoot: fixture.workspaceRoot,
       target: 'api',
-      title: 'Safe',
-      body: 'Question',
+      question: 'Question',
       id: 'safe-thread',
     });
     await expect(
@@ -310,8 +302,7 @@ elements:
       createThread({
         workspaceRoot: fixture.workspaceRoot,
         target: 'api',
-        title: 'Blocked author',
-        body: 'Question',
+        question: 'Question',
         author: 'agent --> forged',
       })
     ).rejects.toThrow('reserved architecture message syntax');
@@ -320,8 +311,7 @@ elements:
         createThread({
           workspaceRoot: fixture.workspaceRoot,
           target: 'api',
-          title: 'Blocked author terminator',
-          body: 'Question',
+          question: 'Question',
           author,
         })
       ).rejects.toThrow('reserved architecture message syntax');
@@ -355,8 +345,7 @@ elements:
       workspaceRoot: fixture.workspaceRoot,
       threadsDir: 'discussions',
       target: 'api',
-      title: 'Short',
-      body: 'Body',
+      question: 'Body',
       id: 'custom-thread',
       limits: { titleChars: 5, bodyChars: 4, authorChars: 5 },
       author: 'agent',
@@ -378,11 +367,10 @@ elements:
       createThread({
         workspaceRoot: fixture.workspaceRoot,
         target: 'api',
-        title: 'Too long',
-        body: 'Body',
-        limits: { titleChars: 3 },
+        question: 'Too long',
+        limits: { bodyChars: 3 },
       })
-    ).rejects.toThrow('thread title');
+    ).rejects.toThrow('thread question');
     await expect(
       appendThreadReply({
         workspaceRoot: fixture.workspaceRoot,
@@ -447,8 +435,7 @@ updatedAt: '2026-08-13T00:00:00.000Z'
       createThread({
         workspaceRoot: fixture.workspaceRoot,
         target: 'api',
-        title: 'Bad',
-        body: 'Bad',
+        question: 'Bad',
         id: '../outside',
       })
     ).rejects.toThrow();

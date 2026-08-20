@@ -83,13 +83,13 @@ interface InspectorController {
   createQuestion: (event: FormEvent) => Promise<void>;
   discussionHeadingRef: RefObject<HTMLHeadingElement | null>;
   inspectorRef: RefObject<HTMLElement | null>;
-  loadSource: (source: SourceRef, sourceIndex: number) => Promise<void>;
+  loadSource: (source: SourceRef, sourceIndex: number, fullFile?: boolean) => Promise<void>;
   mutation: MutationState;
   preview: PreviewState;
-  question: { title: string; body: string };
+  question: string;
   reply: (thread: ArchitectureThread) => Promise<void>;
   replyDrafts: Record<string, string>;
-  setQuestion: Dispatch<SetStateAction<{ title: string; body: string }>>;
+  setQuestion: Dispatch<SetStateAction<string>>;
   setReplyDrafts: Dispatch<SetStateAction<Record<string, string>>>;
   target?: TargetDescription;
   targetId?: string;
@@ -124,7 +124,7 @@ function useInspectorController({
 function useInspectorState(targetId: string | undefined) {
   const [preview, setPreview] = useState<PreviewState>({ loading: false });
   const [draftsByTarget, setDraftsByTarget] = useState<
-    Record<string, { question: { title: string; body: string }; replies: Record<string, string> }>
+    Record<string, { question: string; replies: Record<string, string> }>
   >({});
   const [mutation, setMutation] = useState<MutationState>({ saving: false });
   const discussionHeadingRef = useRef<HTMLHeadingElement | null>(null);
@@ -136,7 +136,7 @@ function useInspectorState(targetId: string | undefined) {
   const draft = targetId ? draftsByTarget[targetId] : undefined;
   const question = draft?.question ?? EMPTY_QUESTION;
   const replyDrafts = draft?.replies ?? {};
-  const setQuestion = useCallback<Dispatch<SetStateAction<typeof EMPTY_QUESTION>>>(
+  const setQuestion = useCallback<Dispatch<SetStateAction<string>>>(
     (action) => {
       if (!targetId) return;
       setDraftsByTarget((current) => {
@@ -295,13 +295,13 @@ function useSourceLoader(
   sourceRevisionRef: MutableRefObject<number>,
   setPreview: Dispatch<SetStateAction<PreviewState>>
 ) {
-  return async (source: SourceRef, sourceIndex: number) => {
+  return async (source: SourceRef, sourceIndex: number, fullFile = false) => {
     if (!targetId) return;
     const targetRevision = targetRevisionRef.current;
     const sourceRevision = ++sourceRevisionRef.current;
     setPreview({ loading: true });
     try {
-      const loaded = await api.loadSource(targetId, source, sourceIndex);
+      const loaded = await api.loadSource(targetId, source, sourceIndex, { fullFile });
       if (
         targetId === latestTargetRef.current &&
         targetRevision === targetRevisionRef.current &&
@@ -321,15 +321,15 @@ function useSourceLoader(
   };
 }
 
-const EMPTY_QUESTION = { title: '', body: '' };
+const EMPTY_QUESTION = '';
 
 function useQuestionCreator(
   api: ApiClient,
   targetId: string | undefined,
   revisionRef: MutableRefObject<number>,
-  question: { title: string; body: string },
+  question: string,
   saving: boolean,
-  setQuestion: Dispatch<SetStateAction<{ title: string; body: string }>>,
+  setQuestion: Dispatch<SetStateAction<string>>,
   setMutation: Dispatch<SetStateAction<MutationState>>,
   onReload: () => Promise<void>
 ) {
@@ -341,11 +341,10 @@ function useQuestionCreator(
     try {
       const result = await api.createThread({
         target: targetId,
-        title: question.title,
-        body: question.body,
+        question,
         author: 'user',
       });
-      setQuestion({ title: '', body: '' });
+      setQuestion('');
       try {
         await onReload();
         if (revision === revisionRef.current) {
@@ -514,22 +513,10 @@ function ThreadSection({ controller }: { controller: InspectorController }) {
       <form className="stack question-form" onSubmit={controller.createQuestion}>
         <h4>Ask about this item</h4>
         <label>
-          Question title
-          <input
-            value={controller.question.title}
-            onChange={(event) =>
-              controller.setQuestion({ ...controller.question, title: event.target.value })
-            }
-            required
-          />
-        </label>
-        <label>
           Question
           <textarea
-            value={controller.question.body}
-            onChange={(event) =>
-              controller.setQuestion({ ...controller.question, body: event.target.value })
-            }
+            value={controller.question}
+            onChange={(event) => controller.setQuestion(event.target.value)}
             required
           />
         </label>

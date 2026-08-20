@@ -151,8 +151,7 @@ test('keyboard drill, lenses, source preview, threads, and SSE reload', async ({
   expect(await page.evaluate(() => window.scrollY)).toBe(windowScrollBeforeAsk);
   await assertNoOverflow(page);
 
-  await page.getByLabel('Question title').fill('Browser question');
-  await page.getByLabel('Question', { exact: true }).fill('Question body');
+  await page.getByLabel('Question', { exact: true }).fill('Browser question');
   await page.getByRole('button', { name: 'Create question' }).click();
   await expect(page.getByText(/Saved to architecture\/threads/)).toBeVisible();
   await page.getByLabel(/Reply to Browser question/).fill('Browser reply');
