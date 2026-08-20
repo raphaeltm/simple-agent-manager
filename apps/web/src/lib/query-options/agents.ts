@@ -1,6 +1,6 @@
 import { queryOptions } from '@tanstack/react-query';
 
-import { listAgentCredentials, listAgentProfiles, listAgents } from '../api';
+import { listAgentCredentials, listAgentProfiles, listAgents, listSkills } from '../api';
 import { AGENT_CATALOG_STALE_TIME_MS } from '../query-stale-times';
 
 /**
@@ -30,6 +30,9 @@ export const agentQueryKeys = {
   profiles: (queryScope: string) => [...agentQueryKeys.all(queryScope), 'profiles'] as const,
   profileList: (queryScope: string, projectId: string) =>
     [...agentQueryKeys.profiles(queryScope), projectId] as const,
+  skills: (queryScope: string) => [...agentQueryKeys.all(queryScope), 'skills'] as const,
+  skillList: (queryScope: string, projectId: string) =>
+    [...agentQueryKeys.skills(queryScope), projectId] as const,
 };
 
 export function agentCatalogQueryOptions(queryScope: string) {
@@ -51,5 +54,12 @@ export function agentProfilesQueryOptions(queryScope: string, projectId: string)
   return queryOptions({
     queryKey: agentQueryKeys.profileList(queryScope, projectId),
     queryFn: () => listAgentProfiles(projectId),
+  });
+}
+
+export function projectSkillsQueryOptions(queryScope: string, projectId: string) {
+  return queryOptions({
+    queryKey: agentQueryKeys.skillList(queryScope, projectId),
+    queryFn: () => listSkills(projectId),
   });
 }

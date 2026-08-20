@@ -1,7 +1,13 @@
 import { queryOptions } from '@tanstack/react-query';
 
-import { getProject, listProjects } from '../api';
+import {
+  getArtifactsEnabled,
+  getProject,
+  getProjectCredentialAttributionHealth,
+  listProjects,
+} from '../api';
 import { QUERY_PERSIST_MAX_AGE_MS } from '../query-persist-config';
+import { PROJECT_CREATE_CONFIG_STALE_TIME_MS } from '../query-stale-times';
 
 /**
  * `gcTime` for the ONE query the persister is allowed to write (`projects/list` —
@@ -31,6 +37,10 @@ export const projectQueryKeys = {
   details: (queryScope: string) => [...projectQueryKeys.all(queryScope), 'detail'] as const,
   detail: (queryScope: string, projectId: string) =>
     [...projectQueryKeys.details(queryScope), projectId] as const,
+  artifactsEnabled: (queryScope: string) =>
+    [...projectQueryKeys.all(queryScope), 'artifacts-enabled'] as const,
+  credentialHealth: (queryScope: string, projectId: string) =>
+    [...projectQueryKeys.all(queryScope), 'credential-health', projectId] as const,
 };
 
 export function projectListQueryOptions(queryScope: string, limit?: number) {
@@ -45,5 +55,20 @@ export function projectDetailQueryOptions(queryScope: string, projectId: string)
   return queryOptions({
     queryKey: projectQueryKeys.detail(queryScope, projectId),
     queryFn: () => getProject(projectId),
+  });
+}
+
+export function projectArtifactsEnabledQueryOptions(queryScope: string) {
+  return queryOptions({
+    queryKey: projectQueryKeys.artifactsEnabled(queryScope),
+    queryFn: getArtifactsEnabled,
+    staleTime: PROJECT_CREATE_CONFIG_STALE_TIME_MS,
+  });
+}
+
+export function projectCredentialHealthQueryOptions(queryScope: string, projectId: string) {
+  return queryOptions({
+    queryKey: projectQueryKeys.credentialHealth(queryScope, projectId),
+    queryFn: () => getProjectCredentialAttributionHealth(projectId),
   });
 }

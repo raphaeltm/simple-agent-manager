@@ -47,3 +47,25 @@ export const TRIAL_STATUS_STALE_TIME_MS = resolveDurationMs(
   import.meta.env.VITE_TRIAL_STATUS_STALE_TIME_MS,
   DEFAULT_TRIAL_STATUS_STALE_TIME_MS
 );
+
+/**
+ * Cached slash-command registry (`GET /api/projects/:id/cached-commands`).
+ * Commands change when an agent reports/persists a new set, and callers explicitly
+ * refetch on session changes. Between those events this can stay fresh longer than
+ * the app default.
+ */
+const DEFAULT_CACHED_COMMANDS_STALE_TIME_MS = 300_000;
+export const CACHED_COMMANDS_STALE_TIME_MS = resolveDurationMs(
+  import.meta.env.VITE_CACHED_COMMANDS_STALE_TIME_MS,
+  DEFAULT_CACHED_COMMANDS_STALE_TIME_MS
+);
+
+/**
+ * Project creation feature flags such as Cloudflare Artifacts availability. These
+ * are deployment/config-level values, not per-keystroke user data.
+ */
+const DEFAULT_PROJECT_CREATE_CONFIG_STALE_TIME_MS = 300_000;
+export const PROJECT_CREATE_CONFIG_STALE_TIME_MS = resolveDurationMs(
+  import.meta.env.VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS,
+  DEFAULT_PROJECT_CREATE_CONFIG_STALE_TIME_MS
+);

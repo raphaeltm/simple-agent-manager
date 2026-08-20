@@ -1,8 +1,10 @@
 import type { TriggerResponse } from '@simple-agent-manager/shared';
-import { render, screen, waitFor } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { renderWithQuery } from '../../test-utils/query-test-utils';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -21,6 +23,10 @@ vi.mock('react-router', async () => {
   const actual = await vi.importActual('react-router');
   return { ...actual, useNavigate: () => mocks.navigate };
 });
+
+vi.mock('../../../src/hooks/useQueryScope', () => ({
+  useQueryScope: () => 'user-1',
+}));
 
 import { TriggerDropdown } from '../../../src/components/triggers/TriggerDropdown';
 
@@ -57,7 +63,7 @@ function renderDropdown(props: { open?: boolean; onToggle?: () => void } = {}) {
   const onToggle = props.onToggle ?? vi.fn();
   return {
     onToggle,
-    ...render(
+    ...renderWithQuery(
       <MemoryRouter>
         <TriggerDropdown
           projectId="proj-1"
@@ -168,7 +174,7 @@ describe('TriggerDropdown', () => {
   });
 
   it('sets aria-expanded based on open prop', () => {
-    const { rerender } = render(
+    const { rerender } = renderWithQuery(
       <MemoryRouter>
         <TriggerDropdown projectId="proj-1" open={false} onToggle={vi.fn()} />
       </MemoryRouter>,
@@ -199,7 +205,7 @@ describe('TriggerDropdown', () => {
   it('closes on outside click', async () => {
     const user = userEvent.setup();
     const onToggle = vi.fn();
-    render(
+    renderWithQuery(
       <MemoryRouter>
         <button type="button">Outside</button>
         <TriggerDropdown projectId="proj-1" open={true} onToggle={onToggle} />

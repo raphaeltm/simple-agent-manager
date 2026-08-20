@@ -75,9 +75,15 @@ import type { Query } from '@tanstack/react-query';
  * `projects/list` is included because `ProjectSummary` is names, counts and
  * timestamps only — no free-text user or agent content.
  *
+ * `library/index` is included only for the stripped client-side project-library
+ * global index. Its query factory removes `extractedTextPreview` before data enters
+ * the query cache, and this replaces the existing user-namespaced localStorage
+ * global-index cache rather than introducing a new persisted data class.
+ *
  * TODO: Future — encrypt cached messages locally with auth-gated key — see idea 01M0CVZ13RBY20J58CXZ8S13ES
  */
 export const PERSISTED_QUERY_OPERATIONS: ReadonlySet<string> = new Set([
+  'library/index',
   'projects/list',
   'sessions/messages',
 ]);

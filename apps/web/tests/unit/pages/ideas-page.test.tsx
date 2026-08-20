@@ -1,8 +1,10 @@
 import type { Task, TaskStatus } from '@simple-agent-manager/shared';
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+import { renderWithQuery } from '../../test-utils/query-test-utils';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -37,6 +39,10 @@ vi.mock('../../../src/pages/ProjectContext', () => ({
 
 vi.mock('../../../src/hooks/useIsMobile', () => ({
   useIsMobile: () => false,
+}));
+
+vi.mock('../../../src/hooks/useQueryScope', () => ({
+  useQueryScope: () => 'user-1',
 }));
 
 import { IdeasPage } from '../../../src/pages/IdeasPage';
@@ -76,7 +82,7 @@ function makeTask(overrides: Partial<Task> & { id: string; title: string }): Tas
 }
 
 function renderIdeasPage() {
-  return render(
+  return renderWithQuery(
     <MemoryRouter>
       <IdeasPage />
     </MemoryRouter>

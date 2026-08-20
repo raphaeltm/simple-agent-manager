@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach,describe, expect, it, vi } from 'vitest';
 
 import { GlobalCommandPalette } from '../../src/components/GlobalCommandPalette';
+import { renderWithQuery } from '../test-utils/query-test-utils';
 
 // ── Location mock — allows changing pathname per test ──
 
@@ -36,6 +37,10 @@ vi.mock('../../src/contexts/ThemeContext', () => ({
     isDark: mockIsDark,
     setTheme: mockSetTheme,
   }),
+}));
+
+vi.mock('../../src/hooks/useQueryScope', () => ({
+  useQueryScope: () => 'user-1',
 }));
 
 vi.mock('../../src/lib/auth', () => ({
@@ -109,7 +114,7 @@ vi.mock('../../src/lib/api', async (importOriginal) => ({
 function renderPalette(onClose = vi.fn()) {
   return {
     onClose,
-    ...render(
+    ...renderWithQuery(
       <MemoryRouter>
         <GlobalCommandPalette onClose={onClose} />
       </MemoryRouter>,
@@ -231,7 +236,8 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('Context')).toBeInTheDocument();
+      const labels = screen.getAllByRole('option').map((o) => o.textContent);
+      expect(labels.some((l) => l?.includes('Go to Workspace'))).toBe(true);
     });
 
     const options = screen.getAllByRole('option');
@@ -244,7 +250,8 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('Context')).toBeInTheDocument();
+      const labels = screen.getAllByRole('option').map((o) => o.textContent);
+      expect(labels.some((l) => l?.includes('View Task'))).toBe(true);
     });
 
     const options = screen.getAllByRole('option');
@@ -257,7 +264,8 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('Context')).toBeInTheDocument();
+      const labels = screen.getAllByRole('option').map((o) => o.textContent);
+      expect(labels.some((l) => l?.includes('View Task'))).toBe(true);
     });
 
     const options = screen.getAllByRole('option');
@@ -271,7 +279,8 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('Context')).toBeInTheDocument();
+      const labels = screen.getAllByRole('option').map((o) => o.textContent);
+      expect(labels.some((l) => l?.includes('Code review'))).toBe(true);
     });
 
     const options = screen.getAllByRole('option');
@@ -288,7 +297,8 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('Context')).toBeInTheDocument();
+      const labels = screen.getAllByRole('option').map((o) => o.textContent);
+      expect(labels.some((l) => l?.includes('Go to Linked Chat'))).toBe(true);
     });
 
     const options = screen.getAllByRole('option');
@@ -303,7 +313,9 @@ describe('GlobalCommandPalette — Context Awareness', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('Chats')).toBeInTheDocument();
+      expect(screen.getByText('Fix auth bug')).toBeInTheDocument();
+      expect(screen.getByText('Code review')).toBeInTheDocument();
+      expect(screen.getByText('Refactor layout')).toBeInTheDocument();
     });
 
     const options = screen.getAllByRole('option');

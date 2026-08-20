@@ -19,11 +19,11 @@
  *
  * ## Adding a key does NOT make it persisted
  *
- * Persistence is opt-in through `PERSISTED_QUERY_OPERATIONS`, which is currently
- * `{'projects/list'}` and is deliberately not extended by these modules. Everything
- * defined here beyond the project list is on the never-persist-without-security-
- * review list in `tasks/backlog/2026-08-07-expand-frontend-query-cache-and-persistence.md`:
- * credentials and tokens, node/workspace runtime detail, and chat-derived free text
+ * Persistence is opt-in through `PERSISTED_QUERY_OPERATIONS`; adding a query key
+ * here is not enough to persist it. Most modules here remain on the
+ * never-persist-without-security-review list in `tasks/backlog/2026-08-07-expand-
+ * frontend-query-cache-and-persistence.md`: credentials and tokens, node/workspace
+ * runtime detail, notifications, task/debug data, and chat-derived free text
  * (recent-chat topics, task titles). Read the endpoint's real response body before
  * proposing an allowlist entry — the response *type* can hide free-text fields, as
  * the `projects/detail` case documented in `query-persist-config.ts` shows.
@@ -34,14 +34,19 @@ export {
   agentCredentialsQueryOptions,
   agentProfilesQueryOptions,
   agentQueryKeys,
+  projectSkillsQueryOptions,
 } from './agents';
 export {
   allChatsQueryOptions,
   chatQueryKeys,
   chatSessionMessagesQueryOptions,
   type ChatSessionSummary,
+  projectChatSessionsQueryOptions,
   recentChatsQueryOptions,
+  timelineActivityEventsQueryOptions,
+  timelineUserMessagesQueryOptions,
 } from './chats';
+export { cachedCommandsQueryOptions, commandQueryKeys } from './commands';
 export { credentialQueryKeys, credentialsQueryOptions } from './credentials';
 export { githubInstallationsQueryOptions, githubQueryKeys } from './github';
 export {
@@ -49,14 +54,32 @@ export {
   nodeQueryKeys,
   providerCatalogQueryOptions,
   workspaceListQueryOptions,
+  workspacePortsQueryOptions,
   workspaceQueryKeys,
 } from './infrastructure';
-export { notificationPreferencesQueryOptions, notificationQueryKeys } from './notifications';
+export { type LibraryIndexQueryData,libraryIndexQueryOptions, libraryQueryKeys } from './library';
 export {
+  notificationPreferencesQueryOptions,
+  notificationQueryKeys,
+  type NotificationsListQueryData,
+  notificationsListQueryOptions,
+  notificationUnreadCountQueryOptions,
+  timelineProgressNotificationsQueryOptions,
+} from './notifications';
+export {
+  projectArtifactsEnabledQueryOptions,
+  projectCredentialHealthQueryOptions,
   projectDetailQueryOptions,
   projectListQueryOptions,
   projectQueryKeys,
 } from './projects';
-export { activeTasksQueryOptions, taskQueryKeys } from './tasks';
+export {
+  activeTasksQueryOptions,
+  draftIdeasQueryOptions,
+  taskDetailQueryOptions,
+  taskEventsQueryOptions,
+  taskQueryKeys,
+  taskSessionsQueryOptions,
+} from './tasks';
 export { trialQueryKeys, trialStatusQueryOptions } from './trial';
 export { triggerQueryKeys, triggersQueryOptions } from './triggers';

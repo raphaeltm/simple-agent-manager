@@ -1,5 +1,6 @@
 import type { TaskDetailResponse, TaskStatus } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
+import { useQuery } from '@tanstack/react-query';
 import {
   Archive,
   ArrowLeft,
@@ -18,8 +19,9 @@ import { useNavigate, useParams } from 'react-router';
 
 import { RenderedMarkdown } from '../components/MarkdownRenderer';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useQueryScope } from '../hooks/useQueryScope';
 import type { TaskSessionLink } from '../lib/api';
-import { getProjectTask, getTaskSessions } from '../lib/api';
+import { taskDetailQueryOptions, taskSessionsQueryOptions } from '../lib/query-options';
 import { useProjectContext } from './ProjectContext';
 
 // ---------------------------------------------------------------------------
@@ -286,36 +288,33 @@ export function IdeaDetailPage() {
   const { taskId } = useParams<{ taskId: string }>();
   const { projectId } = useProjectContext();
   const isMobile = useIsMobile();
+  const queryScope = useQueryScope();
 
-  const [idea, setIdea] = useState<TaskDetailResponse | null>(null);
-  const [sessions, setSessions] = useState<TaskSessionLink[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [showMobileConversations, setShowMobileConversations] = useState(false);
 
-  const loadData = useCallback(async () => {
-    if (!taskId) return;
-    try {
-      setLoading(true);
-      setError(null);
-      const [taskResult, sessionsResult] = await Promise.all([
-        getProjectTask(projectId, taskId),
-        getTaskSessions(projectId, taskId),
-      ]);
-      setIdea(taskResult);
-      setSessions(sessionsResult.sessions);
-    } catch (err) {
-      console.error('Failed to load idea details:', err);
-      setError('Failed to load idea details. Please try again.');
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, taskId]);
-
-  useEffect(() => {
-    loadData();
-  }, [loadData]);
+  const ideaQuery = useQuery({
+    ...taskDetailQueryOptions(queryScope, projectId, taskId ?? ''),
+    enabled: Boolean(projectId && taskId && queryScope),
+  });
+  const sessionsQuery = useQuery({
+    ...taskSessionsQueryOptions(queryScope, projectId, taskId ?? ''),
+    enabled: Boolean(projectId && taskId && queryScope),
+  });
+  const idea: TaskDetailResponse | null = ideaQuery.data ?? null;
+  const sessions: TaskSessionLink[] = sessionsQuery.data ?? [];
+  const loading =
+    Boolean(projectId && taskId && queryScope) &&
+    [ideaQuery, sessionsQuery].some((query) => query.isPending && query.data === undefined);
+  const error =
+    (ideaQuery.data === undefined && ideaQuery.error) ||
+    (sessionsQuery.data === undefined && sessionsQuery.error)
+      ? 'Failed to load idea details. Please try again.'
+      : null;
+  const loadData = useCallback(() => {
+    void ideaQuery.refetch();
+    void sessionsQuery.refetch();
+  }, [ideaQuery, sessionsQuery]);
 
   const handleBack = useCallback(() => {
     navigate(`/projects/${projectId}/ideas`);

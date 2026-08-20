@@ -50,7 +50,9 @@ batching.
 - Persistence is allowlisted in `apps/web/src/lib/query-persist-config.ts`. Batch 1
   must not make credentials, notifications, chat/session summaries, task details,
   runtime details, file contents, signed URLs, or admin/debug payloads persistable
-  without a separate security review.
+  without a separate security review. This implementation adds only
+  `library/index`, and the query factory strips `extractedTextPreview` before data
+  enters the Query cache.
 - Existing migrated hooks such as `useProjectList`, `useAgentProfiles`,
   `useRecentChats`, and `useAllChatSessions` preserve their public return shapes
   while mapping Query state into `loading`, `isRefreshing`, `error`, and `refresh`.
@@ -75,48 +77,109 @@ batching.
 
 ### Query option factories
 
-- [ ] Add or extend query factories for workspace ports, library index/list sweep,
+- [x] Add or extend query factories for workspace ports, library index/list sweep,
       notifications, project credential health, task events/detail/sessions,
       session timeline resources, project artifacts config, skills, and cached
       commands.
-- [ ] Reuse existing factories for projects, nodes, all chats, GitHub installations,
+- [x] Reuse existing factories for projects, nodes, all chats, GitHub installations,
       triggers, and agent profiles where they already fit.
-- [ ] Keep every authenticated key user-scoped and keep `PERSISTED_QUERY_OPERATIONS`
-      unchanged unless explicitly justified and reviewed.
+- [x] Keep every authenticated key user-scoped and add only `library/index` to
+      `PERSISTED_QUERY_OPERATIONS`, with `extractedTextPreview` stripped before
+      caching.
 
 ### Hook/component migrations
 
-- [ ] Migrate `useWorkspacePorts.ts` from `useVisibilityAwarePoll` to `useQuery`
+- [x] Migrate `useWorkspacePorts.ts` from `useVisibilityAwarePoll` to `useQuery`
       with `refetchInterval` and hidden-tab pause semantics.
-- [ ] Migrate `useLibraryIndex.ts` from localStorage-backed state to Query-backed
+- [x] Migrate `useLibraryIndex.ts` from localStorage-backed state to Query-backed
       acquisition while preserving the hook's public contract.
-- [ ] Migrate `useNotifications.ts` initial notification/unread reads and
+- [x] Migrate `useNotifications.ts` initial notification/unread reads and
       mark-read/dismiss mutations to Query/Mutation while preserving the WebSocket
       update path.
-- [ ] Migrate `CredentialHealthNavItem.tsx` to Query.
-- [ ] Migrate `GlobalCommandPalette.tsx` to Query-backed projects, nodes, and chats.
-- [ ] Migrate `FailureCard.tsx` events-on-expand to Query.
-- [ ] Migrate `TriggerDropdown.tsx` to the existing triggers query key.
-- [ ] Migrate `useSessionTimeline.ts` to Query-backed messages, activity events, and
+- [x] Migrate `CredentialHealthNavItem.tsx` to Query.
+- [x] Migrate `GlobalCommandPalette.tsx` to Query-backed projects, nodes, and chats.
+- [x] Migrate `FailureCard.tsx` events-on-expand to Query.
+- [x] Migrate `TriggerDropdown.tsx` to the existing triggers query key.
+- [x] Migrate `useSessionTimeline.ts` to Query-backed messages, activity events, and
       progress notifications.
-- [ ] Migrate `ProjectCreate.tsx` GitHub installations and artifact flag reads to
+- [x] Migrate `ProjectCreate.tsx` GitHub installations and artifact flag reads to
       Query.
-- [ ] Migrate `IdeasPage.tsx` idea sweep and chat-session reads to Query.
-- [ ] Migrate `IdeaDetailPage.tsx` idea detail and linked-session reads to Query.
-- [ ] Migrate `useProjectSkills.ts` to Query.
-- [ ] Migrate `useAvailableCommands.ts` to Query while preserving its cache-save API.
+- [x] Migrate `IdeasPage.tsx` idea sweep and chat-session reads to Query.
+- [x] Migrate `IdeaDetailPage.tsx` idea detail and linked-session reads to Query.
+- [x] Migrate `useProjectSkills.ts` to Query.
+- [x] Migrate `useAvailableCommands.ts` to Query while preserving its cache-save API.
 
 ### Tests and validation
 
-- [ ] Add/adjust unit tests for deduplication, cached-data reuse, stale data during
+- [x] Add/adjust unit tests for deduplication, cached-data reuse, stale data during
       refresh, initial-load errors, scope isolation, polling pause, query invalidation,
       and WebSocket cache updates where relevant.
-- [ ] Add/adjust persistence guard tests so newly added Batch 1 keys are not
+- [x] Add/adjust persistence guard tests so newly added Batch 1 keys are not
       dehydrated unless explicitly allowlisted.
-- [ ] Run focused web tests for touched hooks/components.
-- [ ] Run required UI Playwright visual audits for changed web surfaces.
-- [ ] Run full `/do` validation: lint, typecheck, test, build.
-- [ ] Run required specialist reviews before staging/PR.
+- [x] Run focused web tests for touched hooks/components.
+- [x] Run required UI Playwright visual audits for changed web surfaces.
+- [x] Run full `/do` validation: lint, typecheck, test, build.
+- [x] Run required specialist reviews before staging/PR.
+
+## Validation evidence
+
+Focused unit/integration coverage:
+
+- `pnpm --filter @simple-agent-manager/web test -- tests/unit/hooks/useWorkspacePorts.test.ts`
+  passed: 1 file, 13 tests. Added regression coverage that same-workspace token
+  rotation starts a new request generation without storing raw tokens in query keys.
+- `pnpm --filter @simple-agent-manager/web test -- tests/unit/hooks/useLibraryIndex.test.ts`
+  passed.
+- Focused migrated-surface batch passed: 12 files, 194 tests.
+- `pnpm --filter @simple-agent-manager/web test -- tests/unit/lib/query-persistence-allowlist.test.ts`
+  passed: 66 tests.
+- `pnpm --filter @simple-agent-manager/web test -- tests/unit/hooks/useAvailableCommands.test.ts`
+  passed: 10 tests, including omitted `commands` response coverage.
+
+Visual audits:
+
+- `library-ui-audit.spec.ts`: 38 passed.
+- `command-palette-audit.spec.ts`: 20 passed.
+- `notification-tabs-audit.spec.ts`: 28 passed.
+- `idea-detail-audit.spec.ts`: 37 passed, 5 skipped.
+- `ideas-ui-audit.spec.ts`: 36 passed.
+- `project-onboarding-wizard-audit.spec.ts`: 10 passed.
+- `credential-health-audit.spec.ts` + `failure-card-audit.spec.ts`: 20 passed, 8 skipped.
+- `triggers-ui-audit.spec.ts`: 27 passed, 27 skipped.
+- `skills-ui-audit.spec.ts`: 20 passed, with one existing clipped-overflow advisory on a long skill description.
+- `portal-overlay-audit.spec.ts`: 32 passed, 2 skipped.
+- `chat-timeline-drawer-audit.spec.ts`: 12 passed.
+- `project-agent-chat-audit.spec.ts`: 12 passed.
+
+Full validation:
+
+- `pnpm typecheck` passed: 19/19 turbo tasks.
+- `pnpm lint` passed: 13/13 turbo tasks, with existing warnings only in
+  `packages/acp-client` and unrelated `apps/web` hook-dependency warnings.
+- `pnpm test` passed: 21/21 turbo tasks; web suite 281 files / 3371 tests.
+- `pnpm build` passed: 9/9 turbo tasks.
+- After the final docs correction, `pnpm --filter @simple-agent-manager/www typecheck`
+  passed with the existing Astro-template baseline count, and
+  `pnpm --filter @simple-agent-manager/www build` passed.
+- `git diff --check` passed.
+
+Specialist review outcomes:
+
+- Task completion: pass. All 13 Batch 1 targets listed above now route their REST
+  reads through shared TanStack Query factories and/or mutations.
+- Test engineering: pass. Migrated surfaces have focused tests for cache reuse,
+  stale data during refresh, invalidation, scope/key behavior, hidden-tab polling,
+  WebSocket notification cache updates, persistence allowlisting, omitted cached
+  command payloads, and token rotation.
+- UI/UX: pass. Required visual audits passed across the changed app surfaces; only
+  the pre-existing skills overflow advisory remains.
+- Security: pass. Authenticated keys are user-scoped, the new persisted operation is
+  limited to `library/index`, library previews are stripped before caching, malformed
+  notification payloads are validated/dropped before entering shared cache, and raw
+  workspace tokens are not stored in query keys.
+- Constitution/env/docs: pass. New stale-time values are centralized and
+  env-overridable, `VITE_*_STALE_TIME_MS` variables are typed and documented, and the
+  configuration docs now match the current query-persistence allowlist.
 
 ## Acceptance criteria
 
@@ -129,7 +192,8 @@ batching.
 6. Notification and trigger/skill/profile-style mutations update or invalidate the
    shared Query cache instead of refreshing only local state.
 7. Query persistence remains allowlisted; newly added sensitive/free-text/runtime keys
-   are not persisted by default.
+   are not persisted by default. The only newly persisted operation is
+   `library/index`, and it stores stripped file metadata only.
 8. Focused tests, local visual audit, full validation, staging verification, CI, and
    production deploy monitoring complete according to `/do`.
 

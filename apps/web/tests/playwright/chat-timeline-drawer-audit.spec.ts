@@ -123,6 +123,10 @@ function makeNotifications() {
 // ---------------------------------------------------------------------------
 
 async function setupMocks(page: Page) {
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
+
   await page.route('**/api/**', async (route: Route) => {
     const url = route.request().url();
     const { pathname } = new URL(url);

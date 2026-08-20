@@ -404,6 +404,10 @@ async function setupApiMocks(
     webhookDeliveries = WEBHOOK_DELIVERIES,
   } = options;
 
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
+
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -454,10 +458,13 @@ async function setupApiMocks(
 
     // Agents
     if (path === '/api/agents') {
-      return respond(200, []);
+      return respond(200, { agents: [] });
     }
 
     // Credentials
+    if (path === '/api/credentials') {
+      return respond(200, []);
+    }
     if (path.startsWith('/api/credentials')) {
       return respond(200, { credentials: [] });
     }

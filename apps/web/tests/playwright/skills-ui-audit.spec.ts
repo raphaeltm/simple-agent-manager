@@ -129,6 +129,10 @@ async function setupApiMocks(
 ) {
   const { skills = NORMAL_SKILLS, skillsError = false } = options;
 
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
+
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -140,6 +144,8 @@ async function setupApiMocks(
     if (path === '/api/dashboard/active-tasks') return respond(200, { tasks: [] });
     if (path === '/api/github/installations') return respond(200, []);
     if (path.startsWith('/api/notifications')) return respond(200, { notifications: [], unreadCount: 0 });
+    if (path === '/api/credentials') return respond(200, []);
+    if (path === '/api/credentials/agent') return respond(200, { credentials: [] });
     if (path === '/api/agents') return respond(200, { agents: [] });
 
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);

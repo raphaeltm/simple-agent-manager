@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { GlobalCommandPalette } from '../../src/components/GlobalCommandPalette';
+import { renderWithQuery } from '../test-utils/query-test-utils';
 
 // Track navigation calls
 const mockNavigate = vi.fn();
@@ -22,6 +23,10 @@ vi.mock('../../src/components/AuthProvider', () => ({
 
 vi.mock('../../src/contexts/ThemeContext', () => ({
   useTheme: () => ({ theme: 'dark', resolvedTheme: 'dark', isDark: true, setTheme: vi.fn() }),
+}));
+
+vi.mock('../../src/hooks/useQueryScope', () => ({
+  useQueryScope: () => 'user-1',
 }));
 
 vi.mock('../../src/lib/api', async (importOriginal) => ({
@@ -95,7 +100,7 @@ vi.mock('../../src/lib/api', async (importOriginal) => ({
 function renderPalette(onClose = vi.fn()) {
   return {
     onClose,
-    ...render(
+    ...renderWithQuery(
       <MemoryRouter>
         <GlobalCommandPalette onClose={onClose} />
       </MemoryRouter>
@@ -720,7 +725,8 @@ describe('GlobalCommandPalette', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('Chats')).toBeInTheDocument();
+      expect(document.getElementById('gcp-category-Chats')).toBeInTheDocument();
+      expect(screen.getByText('Fix auth bug')).toBeInTheDocument();
     });
 
     expect(screen.getByText('Fix auth bug')).toBeInTheDocument();
@@ -731,7 +737,7 @@ describe('GlobalCommandPalette', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('Chats')).toBeInTheDocument();
+      expect(screen.getByText('Untitled Chat')).toBeInTheDocument();
     });
 
     expect(screen.getByText('Untitled Chat')).toBeInTheDocument();
@@ -760,7 +766,9 @@ describe('GlobalCommandPalette', () => {
     renderPalette();
 
     await waitFor(() => {
-      expect(screen.getByText('Chats')).toBeInTheDocument();
+      expect(screen.getByText('Refactor dashboard layout')).toBeInTheDocument();
+      expect(screen.getByText('Fix auth bug')).toBeInTheDocument();
+      expect(screen.getByText('Untitled Chat')).toBeInTheDocument();
     });
 
     const options = screen.getAllByRole('option');

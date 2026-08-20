@@ -14,6 +14,8 @@ import { DEFAULT_CHAT_TIMELINE_MAX_PAGES } from '@simple-agent-manager/shared';
 import { renderHook, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { QueryTestWrapper } from '../../test-utils/query-test-utils';
+
 const mocks = vi.hoisted(() => ({
   listChatMessages: vi.fn(),
   listActivityEvents: vi.fn(),
@@ -30,6 +32,10 @@ vi.mock('../../../src/lib/api/notifications', () => ({
   listNotifications: mocks.listNotifications,
 }));
 
+vi.mock('../../../src/hooks/useQueryScope', () => ({
+  useQueryScope: () => 'user-1',
+}));
+
 const { useSessionTimeline } =
   await import('../../../src/components/project-message-view/useSessionTimeline');
 
@@ -42,6 +48,24 @@ function makeMessage(id: string, createdAt: number) {
     toolMetadata: null,
     createdAt,
     sequence: null,
+  };
+}
+
+function makeProgressNotification(id: string, createdAt: number) {
+  return {
+    id,
+    projectId: 'proj-1',
+    taskId: 'task-1',
+    sessionId: 'session-1',
+    type: 'progress' as const,
+    urgency: 'low' as const,
+    title: 'Progress',
+    body: `notification ${id}`,
+    actionUrl: null,
+    metadata: null,
+    readAt: null,
+    dismissedAt: null,
+    createdAt: new Date(createdAt).toISOString(),
   };
 }
 
@@ -60,7 +84,9 @@ describe('useSessionTimeline — pagination bounds', () => {
       return Promise.resolve({ messages: [makeMessage(`m-${seq}`, seq)], hasMore: true });
     });
 
-    const { result } = renderHook(() => useSessionTimeline('proj-1', 'session-1', [], true));
+    const { result } = renderHook(() => useSessionTimeline('proj-1', 'session-1', [], true), {
+      wrapper: QueryTestWrapper,
+    });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -79,7 +105,9 @@ describe('useSessionTimeline — pagination bounds', () => {
       hasMore: true,
     });
 
-    const { result } = renderHook(() => useSessionTimeline('proj-1', 'session-1', [], true));
+    const { result } = renderHook(() => useSessionTimeline('proj-1', 'session-1', [], true), {
+      wrapper: QueryTestWrapper,
+    });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -96,12 +124,14 @@ describe('useSessionTimeline — pagination bounds', () => {
     mocks.listNotifications.mockImplementation(() => {
       cursor += 1;
       return Promise.resolve({
-        notifications: [{ id: `n-${cursor}`, title: 'Progress', createdAt: cursor }],
+        notifications: [makeProgressNotification(`n-${cursor}`, cursor)],
         nextCursor: `cursor-${cursor}`,
       });
     });
 
-    const { result } = renderHook(() => useSessionTimeline('proj-1', 'session-1', [], true));
+    const { result } = renderHook(() => useSessionTimeline('proj-1', 'session-1', [], true), {
+      wrapper: QueryTestWrapper,
+    });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -113,11 +143,13 @@ describe('useSessionTimeline — pagination bounds', () => {
   it('stops paging notifications when nextCursor stops advancing', async () => {
     mocks.listChatMessages.mockResolvedValue({ messages: [], hasMore: false });
     mocks.listNotifications.mockResolvedValue({
-      notifications: [{ id: 'n-stuck', title: 'Progress', createdAt: 1 }],
+      notifications: [makeProgressNotification('n-stuck', 1)],
       nextCursor: 'cursor-stuck',
     });
 
-    const { result } = renderHook(() => useSessionTimeline('proj-1', 'session-1', [], true));
+    const { result } = renderHook(() => useSessionTimeline('proj-1', 'session-1', [], true), {
+      wrapper: QueryTestWrapper,
+    });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);
@@ -134,7 +166,9 @@ describe('useSessionTimeline — pagination bounds', () => {
       .mockResolvedValueOnce({ messages: [makeMessage('m-2', 2000)], hasMore: true })
       .mockResolvedValueOnce({ messages: [makeMessage('m-1', 1000)], hasMore: false });
 
-    const { result } = renderHook(() => useSessionTimeline('proj-1', 'session-1', [], true));
+    const { result } = renderHook(() => useSessionTimeline('proj-1', 'session-1', [], true), {
+      wrapper: QueryTestWrapper,
+    });
 
     await waitFor(() => {
       expect(result.current.loading).toBe(false);

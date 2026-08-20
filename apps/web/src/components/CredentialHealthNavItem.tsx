@@ -1,10 +1,12 @@
 import type { ProjectCredentialAttributionHealthSummary } from '@simple-agent-manager/shared';
+import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, CheckCircle2, KeyRound, X } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router';
 
-import { getProjectCredentialAttributionHealth } from '../lib/api';
+import { useQueryScope } from '../hooks/useQueryScope';
+import { projectCredentialHealthQueryOptions } from '../lib/query-options';
 
 interface CredentialHealthNavItemProps {
   projectId: string | undefined;
@@ -223,26 +225,14 @@ function CredentialHealthModal({
 }
 
 export function CredentialHealthNavItem({ projectId, compact = false }: CredentialHealthNavItemProps) {
-  const [summary, setSummary] = useState<ProjectCredentialAttributionHealthSummary | null>(null);
+  const queryScope = useQueryScope();
   const [open, setOpen] = useState(false);
 
-  useEffect(() => {
-    let cancelled = false;
-    if (!projectId) {
-      setSummary(null);
-      return;
-    }
-    getProjectCredentialAttributionHealth(projectId)
-      .then((next) => {
-        if (!cancelled) setSummary(next);
-      })
-      .catch(() => {
-        if (!cancelled) setSummary(null);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [projectId]);
+  const healthQuery = useQuery({
+    ...projectCredentialHealthQueryOptions(queryScope, projectId ?? ''),
+    enabled: Boolean(projectId && queryScope),
+  });
+  const summary: ProjectCredentialAttributionHealthSummary | null = healthQuery.data ?? null;
 
   if (!projectId || !summary || !summary.multiplayerActive || summary.counts.resources === 0) return null;
 

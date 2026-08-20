@@ -1,3 +1,4 @@
+import { useQuery } from '@tanstack/react-query';
 import { ArrowRight, FolderKanban, MessageSquare, Search, Server } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
@@ -5,9 +6,9 @@ import { useLocation, useNavigate } from 'react-router';
 
 import { useTheme } from '../contexts/ThemeContext';
 import { useCommandPaletteContext } from '../hooks/useCommandPaletteContext';
-import type { SessionSummaryItem } from '../lib/api';
-import { getAllChats, listNodes, listProjects } from '../lib/api';
+import { useQueryScope } from '../hooks/useQueryScope';
 import { isMacPlatform } from '../lib/keyboard-shortcuts';
+import { allChatsQueryOptions, nodeListQueryOptions, projectListQueryOptions } from '../lib/query-options';
 import { useAuth } from './AuthProvider';
 import { buildActionItems } from './global-command-palette-action-items';
 import { buildResultGroups } from './global-command-palette-groups';
@@ -42,67 +43,49 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
   const location = useLocation();
   const { isSuperadmin } = useAuth();
   const { isDark, setTheme } = useTheme();
+  const queryScope = useQueryScope();
   const [query, setQuery] = useState('');
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const selectedRef = useRef<HTMLDivElement>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
 
-  // Dynamic data
-  const [projects, setProjects] = useState<Array<{ id: string; name: string }>>([]);
-  const [nodes, setNodes] = useState<Array<{ id: string; name: string }>>([]);
-  const [chatSessions, setChatSessions] = useState<
-    Array<SessionSummaryItem & { createdAt: number }>
-  >([]);
-  const [loading, setLoading] = useState(true);
+  const projectsQuery = useQuery({
+    ...projectListQueryOptions(queryScope, PROJECT_FETCH_LIMIT),
+    enabled: Boolean(queryScope),
+  });
+  const nodesQuery = useQuery({
+    ...nodeListQueryOptions(queryScope),
+    enabled: Boolean(queryScope),
+  });
+  const chatSessionsQuery = useQuery({
+    ...allChatsQueryOptions(queryScope, 100),
+    enabled: Boolean(queryScope),
+  });
+
+  const projects = useMemo(
+    () => (projectsQuery.data ?? []).map((project) => ({ id: project.id, name: project.name })),
+    [projectsQuery.data]
+  );
+  const nodes = useMemo(
+    () => (nodesQuery.data ?? []).map((node) => ({ id: node.id, name: node.name })),
+    [nodesQuery.data]
+  );
+  const chatSessions = useMemo(
+    () => chatSessionsQuery.data?.chats ?? [],
+    [chatSessionsQuery.data]
+  );
+  const loading =
+    Boolean(queryScope) &&
+    [projectsQuery, nodesQuery, chatSessionsQuery].some(
+      (queryResult) => queryResult.isPending && queryResult.data === undefined
+    );
 
   // Context-aware actions based on current URL
   const { context, contextActions } = useCommandPaletteContext({
     chatSessions,
     projects,
   });
-
-  // Fetch projects, nodes, and chat sessions on mount
-  useEffect(() => {
-    let cancelled = false;
-    async function fetchData() {
-      try {
-        const [projectsRes, nodesRes] = await Promise.all([
-          listProjects(PROJECT_FETCH_LIMIT).catch(() => ({
-            projects: [] as Array<{ id: string; name: string }>,
-          })),
-          listNodes().catch(() => [] as Array<{ id: string; name: string }>),
-        ]);
-        if (cancelled) return;
-
-        const projectList = 'projects' in projectsRes ? projectsRes.projects : [];
-        const mappedProjects = projectList.map((p: { id: string; name: string }) => ({
-          id: p.id,
-          name: p.name,
-        }));
-        setProjects(mappedProjects);
-
-        const nodeList = Array.isArray(nodesRes) ? nodesRes : [];
-        setNodes(nodeList.map((n: { id: string; name: string }) => ({ id: n.id, name: n.name })));
-
-        // Fetch chat sessions via single D1 query (no DO fan-out)
-        const chatsRes = await getAllChats({ limit: 100 }).catch(() => ({
-          sessions: [],
-          total: 0,
-        }));
-        if (!cancelled) {
-          setChatSessions(chatsRes.sessions.map((s) => ({ ...s, createdAt: s.startedAt })));
-          setLoading(false);
-        }
-      } catch {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    fetchData();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
 
   // Build navigation items
   const navigationItems = useMemo(() => buildNavigationItems(isSuperadmin), [isSuperadmin]);
@@ -123,10 +106,10 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
         nodes,
         chatSessions,
         actionItems,
-        contextActions,
-        currentProjectId: context.projectId,
-        navigate,
-        maxResultsPerCategory: MAX_RESULTS_PER_CATEGORY,
+      contextActions,
+      currentProjectId: context.projectId,
+      navigate,
+      maxResultsPerCategory: MAX_RESULTS_PER_CATEGORY,
       }),
     [
       query,
@@ -137,6 +120,7 @@ export function GlobalCommandPalette({ onClose }: GlobalCommandPaletteProps) {
       actionItems,
       contextActions,
       context.projectId,
+      navigate,
     ]
   );
 

@@ -4,12 +4,15 @@ import { describe, expect, it } from 'vitest';
 import {
   agentQueryKeys,
   chatQueryKeys,
+  commandQueryKeys,
   credentialQueryKeys,
+  libraryQueryKeys,
   nodeQueryKeys,
   notificationQueryKeys,
   projectQueryKeys,
   taskQueryKeys,
   trialQueryKeys,
+  triggerQueryKeys,
   workspaceQueryKeys,
 } from '../../../src/lib/query-options';
 import {
@@ -40,7 +43,26 @@ function queryFor(queryKey: readonly unknown[]) {
 
 describe('persisted query allowlist', () => {
   it('allows only explicitly reviewed operations', () => {
-    expect([...PERSISTED_QUERY_OPERATIONS]).toEqual(['projects/list', 'sessions/messages']);
+    expect([...PERSISTED_QUERY_OPERATIONS]).toEqual([
+      'library/index',
+      'projects/list',
+      'sessions/messages',
+    ]);
+  });
+
+  it('persists the stripped project-library index under the authenticated scope', () => {
+    expect(
+      shouldDehydratePersistedQuery(
+        queryFor(
+          libraryQueryKeys.index(SCOPE, 'project-1', {
+            cap: 300,
+            maxSweepPages: 10,
+            namespace: 'user:user-1',
+          })
+        ),
+        SCOPE
+      )
+    ).toBe(true);
   });
 
   it('persists the project list, which carries no user or agent free text', () => {
@@ -63,15 +85,34 @@ describe('persisted query allowlist', () => {
     ['agent catalog', agentQueryKeys.catalog(SCOPE)],
     ['agent credentials', agentQueryKeys.credentials(SCOPE)],
     ['agent profiles', agentQueryKeys.profileList(SCOPE, 'project-1')],
+    ['agent skills', agentQueryKeys.skillList(SCOPE, 'project-1')],
+    ['cached commands', commandQueryKeys.cached(SCOPE, 'project-1', 'session-1')],
     ['trial status', trialQueryKeys.status(SCOPE)],
     ['active tasks', taskQueryKeys.active(SCOPE)],
+    ['draft ideas', taskQueryKeys.draftIdeas(SCOPE, 'project-1', 50, 10)],
+    ['task detail', taskQueryKeys.detail(SCOPE, 'project-1', 'task-1')],
+    ['task sessions', taskQueryKeys.sessions(SCOPE, 'project-1', 'task-1')],
+    ['task events', taskQueryKeys.events(SCOPE, 'project-1', 'task-1', 50)],
     ['recent chats', chatQueryKeys.recent(SCOPE, 8, 1_000)],
     ['all chats', chatQueryKeys.list(SCOPE, 100)],
+    ['project chat sessions', chatQueryKeys.projectSessions(SCOPE, 'project-1', 100)],
+    ['timeline messages', chatQueryKeys.timelineMessages(SCOPE, 'project-1', 'session-1', 10)],
+    ['timeline activity', chatQueryKeys.timelineActivity(SCOPE, 'project-1', 'session-1', 100)],
     ['node list', nodeQueryKeys.list(SCOPE)],
     ['provider catalog', nodeQueryKeys.catalog(SCOPE)],
     ['workspace list', workspaceQueryKeys.list(SCOPE)],
+    ['workspace ports', workspaceQueryKeys.portList(SCOPE, 'workspace-1', 'https://ws.example')],
+    ['notifications list', notificationQueryKeys.list(SCOPE, { projectId: 'project-1' })],
+    ['notification unread count', notificationQueryKeys.unreadCount(SCOPE)],
+    [
+      'timeline progress notifications',
+      notificationQueryKeys.timelineProgress(SCOPE, 'project-1', 'session-1', 10),
+    ],
     ['notification preferences', notificationQueryKeys.preferences(SCOPE)],
+    ['triggers', triggerQueryKeys.list(SCOPE, 'project-1')],
     ['project detail', projectQueryKeys.detail(SCOPE, 'project-1')],
+    ['project artifacts config', projectQueryKeys.artifactsEnabled(SCOPE)],
+    ['project credential health', projectQueryKeys.credentialHealth(SCOPE, 'project-1')],
   ])('never writes %s to disk', (_label, key) => {
     expect(shouldDehydratePersistedQuery(queryFor(key), SCOPE)).toBe(false);
   });
@@ -96,16 +137,36 @@ describe('query key shape invariant', () => {
     ['credentials', credentialQueryKeys.list(SCOPE)],
     ['agent catalog', agentQueryKeys.catalog(SCOPE)],
     ['agent profiles', agentQueryKeys.profileList(SCOPE, 'project-1')],
+    ['agent skills', agentQueryKeys.skillList(SCOPE, 'project-1')],
+    ['cached commands', commandQueryKeys.cached(SCOPE, 'project-1', 'session-1')],
+    ['library index', libraryQueryKeys.index(SCOPE, 'project-1', { cap: 300, maxSweepPages: 10 })],
     ['trial status', trialQueryKeys.status(SCOPE)],
     ['active tasks', taskQueryKeys.active(SCOPE)],
+    ['draft ideas', taskQueryKeys.draftIdeas(SCOPE, 'project-1', 50, 10)],
+    ['task detail', taskQueryKeys.detail(SCOPE, 'project-1', 'task-1')],
+    ['task sessions', taskQueryKeys.sessions(SCOPE, 'project-1', 'task-1')],
+    ['task events', taskQueryKeys.events(SCOPE, 'project-1', 'task-1', 50)],
     ['recent chats', chatQueryKeys.recent(SCOPE, 8, 1_000)],
     ['all chats', chatQueryKeys.list(SCOPE, 100)],
     ['chat session messages', chatQueryKeys.sessionMessages(SCOPE, 'project-1', 'session-1')],
+    ['project chat sessions', chatQueryKeys.projectSessions(SCOPE, 'project-1', 100)],
+    ['timeline messages', chatQueryKeys.timelineMessages(SCOPE, 'project-1', 'session-1', 10)],
+    ['timeline activity', chatQueryKeys.timelineActivity(SCOPE, 'project-1', 'session-1', 100)],
     ['node list', nodeQueryKeys.list(SCOPE)],
     ['provider catalog', nodeQueryKeys.catalog(SCOPE)],
     ['workspace list', workspaceQueryKeys.list(SCOPE)],
+    ['workspace ports', workspaceQueryKeys.portList(SCOPE, 'workspace-1', 'https://ws.example')],
+    ['notifications list', notificationQueryKeys.list(SCOPE, { projectId: 'project-1' })],
+    ['notification unread count', notificationQueryKeys.unreadCount(SCOPE)],
+    [
+      'timeline progress notifications',
+      notificationQueryKeys.timelineProgress(SCOPE, 'project-1', 'session-1', 10),
+    ],
     ['notification preferences', notificationQueryKeys.preferences(SCOPE)],
+    ['triggers', triggerQueryKeys.list(SCOPE, 'project-1')],
     ['project list', projectQueryKeys.list(SCOPE, 50)],
+    ['project artifacts config', projectQueryKeys.artifactsEnabled(SCOPE)],
+    ['project credential health', projectQueryKeys.credentialHealth(SCOPE, 'project-1')],
   ])('%s is identity-scoped', (_label, key) => {
     expect(key[0]).toBe('auth');
     expect(key[1]).toBe(SCOPE);

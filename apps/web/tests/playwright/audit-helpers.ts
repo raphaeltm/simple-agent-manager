@@ -347,6 +347,10 @@ export async function setupProjectChatMocks(page: Page, options: ProjectChatMock
     user = { id: 'test-user', name: 'Test User', email: 'test@example.com' },
   } = options;
 
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, user.id);
+
   await page.route('**/api/auth/get-session', (route: Route) =>
     route.fulfill({ status: 200, json: { user } }),
   );

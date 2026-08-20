@@ -1,7 +1,29 @@
 import { queryOptions } from '@tanstack/react-query';
 
-import { getProviderCatalog, listNodes, listWorkspaces } from '../api';
+import { getProviderCatalog, listNodes, listWorkspacePorts, listWorkspaces } from '../api';
 import { PROVIDER_CATALOG_STALE_TIME_MS } from '../query-stale-times';
+
+const FNV_1A_OFFSET_BASIS = 0x811c9dc5;
+const FNV_1A_PRIME = 0x01000193;
+
+function fnv1aBase36(value: string, seed: number): string {
+  let hash = seed >>> 0;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, FNV_1A_PRIME) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+function workspacePortTokenCacheMarker(token: string): string {
+  // The VM-agent token participates in request identity, but the raw token must
+  // not be placed in TanStack Query keys where devtools/logging can expose it.
+  // Ports are not persisted; this non-raw marker only forces a new cache entry
+  // when a same-workspace token rotates.
+  const forwardHash = fnv1aBase36(token, FNV_1A_OFFSET_BASIS);
+  const reverseHash = fnv1aBase36([...token].reverse().join(''), FNV_1A_OFFSET_BASIS);
+  return `${token.length}:${forwardHash}:${reverseHash}`;
+}
 
 /**
  * Node, workspace and provider-catalog reads.
@@ -38,6 +60,13 @@ export const workspaceQueryKeys = {
   lists: (queryScope: string) => [...workspaceQueryKeys.all(queryScope), 'list'] as const,
   list: (queryScope: string, status?: string) =>
     [...workspaceQueryKeys.lists(queryScope), { status: status ?? null }] as const,
+  ports: (queryScope: string) => [...workspaceQueryKeys.all(queryScope), 'ports'] as const,
+  portList: (
+    queryScope: string,
+    workspaceId: string,
+    workspaceUrl: string,
+    tokenCacheMarker: string
+  ) => [...workspaceQueryKeys.ports(queryScope), workspaceId, { workspaceUrl, tokenCacheMarker }] as const,
 };
 
 export function nodeListQueryOptions(queryScope: string) {
@@ -59,5 +88,22 @@ export function providerCatalogQueryOptions(queryScope: string) {
     queryKey: nodeQueryKeys.catalog(queryScope),
     queryFn: async () => (await getProviderCatalog()).catalogs ?? [],
     staleTime: PROVIDER_CATALOG_STALE_TIME_MS,
+  });
+}
+
+export function workspacePortsQueryOptions(
+  queryScope: string,
+  workspaceUrl: string,
+  workspaceId: string,
+  token: string
+) {
+  return queryOptions({
+    queryKey: workspaceQueryKeys.portList(
+      queryScope,
+      workspaceId,
+      workspaceUrl,
+      workspacePortTokenCacheMarker(token)
+    ),
+    queryFn: ({ signal }) => listWorkspacePorts(workspaceUrl, workspaceId, token, signal),
   });
 }

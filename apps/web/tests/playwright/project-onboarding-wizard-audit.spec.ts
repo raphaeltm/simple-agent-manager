@@ -71,6 +71,10 @@ async function setupMocks(
   opts: { installations?: unknown[]; artifactsEnabled?: boolean; gitlabEnabled?: boolean } = {}
 ) {
   const { installations = INSTALLATIONS, artifactsEnabled = true, gitlabEnabled = false } = opts;
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
+
   await setupAuditRoutes(page, (path, respond) => {
     if (path.endsWith('/api/config/login-providers')) {
       return respond(200, { github: true, google: false, gitlab: gitlabEnabled });

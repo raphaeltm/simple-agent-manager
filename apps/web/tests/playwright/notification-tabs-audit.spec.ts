@@ -120,6 +120,10 @@ async function setupApiMocks(
   const notifs = options.notifications ?? [];
   const unreadCount = options.unreadCount ?? notifs.filter((n) => !n.readAt).length;
 
+  await page.addInitScript((userId) => {
+    window.localStorage.setItem(`sam-onboarding-wizard-dismissed-${userId}`, 'true');
+  }, MOCK_USER.user.id);
+
   await page.route('**/api/**', async (route: Route) => {
     const url = route.request().url();
     const path = new URL(url).pathname;

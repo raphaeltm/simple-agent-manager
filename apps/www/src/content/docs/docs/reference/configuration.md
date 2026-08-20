@@ -900,14 +900,20 @@ Applied via cloud-init on each node:
 | `VITE_ROUTE_FALLBACK_REVEAL_DELAY_MS`   | `180`              | Delay before the route loading spinner fades in, avoiding a flash        |
 | `VITE_QUERY_PERSIST_MAX_AGE_MS`         | `86400000` (24 h)  | How long a persisted query-cache record may be restored after writing    |
 | `VITE_QUERY_PERSIST_THROTTLE_MS`        | `1000`             | Minimum gap between IndexedDB writes of the query cache                  |
-| `VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS` | `250` | Budget for the initial cache restore before failing open to no cache     |
+| `VITE_QUERY_PERSIST_RESTORE_TIMEOUT_MS`    | `250`              | Budget for the initial cache restore before failing open to no cache     |
+| `VITE_AGENT_CATALOG_STALE_TIME_MS`         | `300000`           | Freshness window for the installable agent catalog query                 |
+| `VITE_PROVIDER_CATALOG_STALE_TIME_MS`      | `300000`           | Freshness window for provider catalog size/location/price metadata       |
+| `VITE_TRIAL_STATUS_STALE_TIME_MS`          | `60000`            | Freshness window for trial availability status                           |
+| `VITE_CACHED_COMMANDS_STALE_TIME_MS`       | `300000`           | Freshness window for cached slash-command registries                     |
+| `VITE_PROJECT_CREATE_CONFIG_STALE_TIME_MS` | `300000`           | Freshness window for project-creation config flags                       |
 
 ### Query cache persistence
 
 The control-plane UI writes an allowlisted slice of its query cache to IndexedDB so a full page
-reload paints from cache instead of refetching. Only bounded project reference data is persisted;
-chat messages, agent output, credentials, admin diagnostics, node and workspace runtime details, and
-file contents are never written to disk.
+reload paints from cache instead of refetching. Persisted slices are limited to allowlisted
+project summaries, stripped library indexes, and project-chat session messages. Credentials,
+admin diagnostics, node and workspace runtime details, file contents, signed URLs, and mutation state
+are never written to disk.
 
 Records are namespaced by authenticated user and by a schema version, and are deleted on sign-out
 and on account switch, so one account can never be shown another account's cached data. If
