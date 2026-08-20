@@ -307,6 +307,11 @@ function createContext(
           storageWrites.push(structuredClone(state));
         }),
       },
+      // Mirrors the real DO: the promise is started immediately and runs to
+      // completion outside the caller's await chain.
+      waitUntil: vi.fn((promise: Promise<unknown>) => {
+        void Promise.resolve(promise).catch(() => undefined);
+      }),
     },
     assertRecoveryAuthority: vi.fn(async () => undefined),
   } as unknown as TaskRunnerContext;

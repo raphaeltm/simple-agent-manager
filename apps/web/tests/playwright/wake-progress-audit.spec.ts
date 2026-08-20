@@ -45,6 +45,7 @@ const PHASES = [
   { phase: 'node_provisioning', label: 'Provisioning a server...', name: 'provisioning' },
   { phase: 'workspace_creation', label: 'Recreating your workspace...', name: 'workspace' },
   { phase: 'workspace_ready', label: 'Restoring your session...', name: 'restoring' },
+  { phase: 'attachment_transfer', label: 'Restoring your files...', name: 'files' },
   { phase: 'agent_session', label: 'Starting the agent...', name: 'agent' },
 ] as const;
 
@@ -53,9 +54,11 @@ function makeSleepingSession(overrides: Record<string, unknown> = {}) {
     id: 'session-1',
     projectId: 'proj-test-1',
     taskId: 'task-session-1',
-    // Long title: a nowrap descendant here is exactly what drags a fit-content
-    // page root past a 375px viewport (rule 56).
-    title:
+    // Long topic: a nowrap descendant here is exactly what drags a fit-content
+    // page root past a 375px viewport (rule 56). SessionHeader renders `topic`,
+    // NOT `title` — an earlier fixture used `title` and silently rendered the
+    // short "Chat <id>" fallback, so the overflow stress case never ran.
+    topic:
       'Investigate the extremely long running production incident with a title that will not fit',
     status: 'sleeping',
     workspaceId: 'ws-test-1',
@@ -222,6 +225,10 @@ for (const viewport of [
         // The load-bearing assertion: the user can read WHICH phase the wake is
         // in. A spinner alone would satisfy a screenshot but not this.
         await expect(page.getByTestId('wake-progress-label')).toHaveText(label);
+
+        // The composer must not contradict the banner by advertising a wake that
+        // is already in flight (the duplicate-wake trap this feature exists for).
+        await expect(page.getByPlaceholder('Send a message to wake the agent...')).toHaveCount(0);
 
         // No duplicate progress UI (rule 24). `ProvisioningIndicator` covers the
         // task-launch path and is fed by the session's own task; the wake banner

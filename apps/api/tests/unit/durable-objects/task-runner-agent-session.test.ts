@@ -233,6 +233,12 @@ function makeContext(
           storageWrites.push(structuredClone(state));
         }),
       },
+      // Real `rc.ctx` is a DurableObjectState, which always has waitUntil; the
+      // mock previously omitted it, so any code offloading background work here
+      // would throw rather than be exercised.
+      waitUntil: vi.fn((promise: Promise<unknown>) => {
+        void Promise.resolve(promise).catch(() => undefined);
+      }),
     },
     assertRecoveryAuthority: vi.fn(async () => undefined),
     updateD1ExecutionStep: vi.fn(async () => undefined),

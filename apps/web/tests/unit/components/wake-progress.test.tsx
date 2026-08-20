@@ -125,6 +125,46 @@ describe('useWakeProgress', () => {
     expect(result.current.wakePhase).toBeNull();
   });
 
+  it('does not let a stale waking snapshot re-open a settled wake', () => {
+    // A poll assembled before the wake finished can land after the push that
+    // already reported restored. Without the settled latch the banner reappears
+    // on a session that has finished waking.
+    const { result } = renderHook(() => useWakeProgress('s1'));
+
+    act(() => {
+      result.current.applyWakeProgress({ recoveryStatus: 'waking', wakePhase: 'agent_session' });
+    });
+    act(() => {
+      result.current.applyWakeProgress({ recoveryStatus: 'restored', wakePhase: null });
+    });
+    act(() => {
+      result.current.hydrateWakeProgress(
+        snapshot({ recoveryStatus: 'waking', wakePhase: 'workspace_ready' })
+      );
+    });
+
+    expect(result.current.isWaking).toBe(false);
+    expect(result.current.wakePhase).toBeNull();
+  });
+
+  it('allows a new wake after switching away and back', () => {
+    // The settled latch is per-session; it must not permanently suppress the
+    // banner for a session that legitimately sleeps and wakes again.
+    const { result, rerender } = renderHook(({ id }) => useWakeProgress(id), {
+      initialProps: { id: 's1' },
+    });
+
+    act(() => {
+      result.current.applyWakeProgress({ recoveryStatus: 'restored', wakePhase: null });
+    });
+    rerender({ id: 's2' });
+    act(() => {
+      result.current.applyWakeProgress({ recoveryStatus: 'waking', wakePhase: 'node_selection' });
+    });
+
+    expect(result.current.isWaking).toBe(true);
+  });
+
   it('does not carry a wake across a session switch', () => {
     // Discriminating: without the sessionId reset effect, switching conversations
     // paints the previous one's banner over the new one.
@@ -174,13 +214,32 @@ describe('WakeProgressBanner', () => {
     expect(screen.getByText(WAKE_PHASE_PENDING_LABEL)).toBeInTheDocument();
   });
 
-  it('exposes the progress to assistive tech as a live region', () => {
-    // Scoped by testid: the nested Spinner also carries role="status".
+  it('announces only the phase label, not the ticking timer', () => {
+    // role="status" implies aria-atomic, so any mutation inside the live region
+    // re-announces the whole region. The elapsed readout ticks every second for a
+    // multi-minute wake, so it must stay OUTSIDE — otherwise a screen-reader user
+    // hears the banner repeated ~60x per minute.
+    render(<WakeProgressBanner wakePhase="workspace_ready" elapsed={<span>4m 10s</span>} />);
+
+    const live = screen.getByTestId('wake-progress-label');
+    expect(live).toHaveAttribute('role', 'status');
+    expect(live).toHaveAttribute('aria-live', 'polite');
+    expect(live).toHaveAccessibleName('Session wake progress');
+    expect(live).toHaveTextContent('Restoring your session...');
+    // The timer renders, but not inside the announced region.
+    expect(screen.getByText('4m 10s')).toBeInTheDocument();
+    expect(live).not.toHaveTextContent('4m 10s');
+  });
+
+  it('does not nest a second status region for the decorative spinner', () => {
+    // Spinner hardcodes role="status" aria-label="Loading"; hiding it keeps the
+    // banner to a single, meaningfully-named live region.
     render(<WakeProgressBanner wakePhase="workspace_ready" />);
-    const status = screen.getByTestId('wake-progress-banner');
-    expect(status).toHaveAttribute('role', 'status');
-    expect(status).toHaveAttribute('aria-live', 'polite');
-    expect(status).toHaveAccessibleName('Session wake progress');
+    // getByRole honours aria-hidden (queryByLabelText does not), so this asserts
+    // the spinner is genuinely out of the accessibility tree.
+    const statuses = screen.queryAllByRole('status');
+    expect(statuses).toHaveLength(1);
+    expect(statuses[0]).toHaveAttribute('data-testid', 'wake-progress-label');
   });
 
   it('renders the elapsed slot only when provided', () => {

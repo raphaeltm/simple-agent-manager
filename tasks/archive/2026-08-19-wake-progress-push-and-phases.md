@@ -251,3 +251,69 @@ hand-fed terminal broadcast). The research claim "updateD1ExecutionStep is the s
 point" was true enough to pass a reading of the code and false exactly where it mattered —
 `.claude/rules/05` assumption-verification applies to a choke point just as much as to a
 "this already works" claim.
+
+### Review round 2 — two more CRITICALs, same class
+
+`cloudflare-specialist` and `test-engineer` each found a separate reason the push half
+still did not work. Both were the same failure mode as everything before it: the tests
+could not observe the thing they claimed to verify.
+
+**CRITICAL (cloudflare-specialist) — the socket was closed for the entire wake.**
+`useChatWebSocket` was gated `enabled: session?.status === 'active'`. A waking session is
+`sleeping` server-side for the whole wake (`wakeSession()` flips it to `active` only at the
+very end, after the agent is live), so the client held NO connection during exactly the
+window the broadcasts were sent. Every phase delta was dropped on the floor and the feature
+degraded silently to the pre-existing poll. The hook tests missed it because they pass
+`enabled` directly; the Playwright audit missed it because it only exercises the pull path.
+Fixed by opening the socket while `isWaking` — a bounded window, and only then, so an
+ordinary sleeping session still connects nothing. Regression test asserts the gate opens for
+a waking session and stays shut for an ordinary sleeping one; verified discriminating.
+
+**CRITICAL (test-engineer, empirically reproduced) — the stale-sleeping guard swallowed
+wake progress on the most common trigger.** `handleSendFollowUp` arms
+`sleepingWakePendingRef`, and the guard condition (`ref && sleeping && !working`) then holds
+for nearly the entire wake. That branch called only `hydratePlan`, and `hydrateWakeProgress`
+is reached only through `hydrateState` — so for a user-triggered wake (type into a sleeping
+session, the normal path) every phase update was discarded, `isWaking` never flipped, and
+the socket gate above could never open. Chicken-and-egg: no poll could set the flag, and no
+socket could open to push it. Fixed by calling `hydrateWakeProgress` in the guard branch too
+— the guard exists to protect `agentActivity`, not to drop wake state.
+
+That regression test needed two attempts to become discriminating: `isWaking` is sticky, so
+the first version let a wake-bearing response land before the guard was armed and passed
+against the broken code. The final version gates the fixture on an explicit flag flipped
+only after the send completes, and was verified to fail without the fix.
+
+**Also fixed from review round 2:**
+- **A11y (ui-ux CRITICAL):** the ticking elapsed timer sat inside a `role="status"` region.
+  `role="status"` implies `aria-atomic`, so a screen reader would re-announce the whole
+  banner roughly once a second for a multi-minute wake. The live region now wraps only the
+  phase label; the timer and the (now `aria-hidden`) spinner are siblings.
+- **Composer contradiction (ui-ux HIGH):** the input still read "Send a message to wake the
+  agent..." while the banner said "Provisioning a server..." — an invitation to trigger the
+  duplicate wake this whole feature exists to prevent. Now wake-aware, asserted in the audit.
+- **Duplicate label (ui-ux MEDIUM):** `workspace_ready` and `attachment_transfer` rendered
+  identical copy, so a real phase advance looked like a stall. `attachment_transfer` is now
+  "Restoring your files..." and the audit covers that phase.
+- **Dead audit fixture (ui-ux MEDIUM):** the spec set `title`, but `SessionHeader` renders
+  `topic` — every screenshot showed the short `Chat <id>` fallback, so the long-text overflow
+  stress case never actually ran. Fixed; the long topic now renders and wraps.
+- **Status regression (test-engineer MEDIUM):** a late `waking` poll could re-open a settled
+  banner. Added a per-session settled latch, with a test proving a later wake still works.
+- **`waitUntil` asymmetry (both reviewers MEDIUM):** the terminal emit blocked the alarm
+  while the intermediate emit did not. Both now use `ctx.waitUntil`. This surfaced an
+  incomplete `ctx` mock in `task-runner-agent-session.test.ts` (real `rc.ctx` is a
+  `DurableObjectState` and always has `waitUntil`) — fixed there too.
+
+### Deferred, with reasons
+
+- **No test drives the real `updateD1ExecutionStep` closure** (test-engineer HIGH). The
+  intermediate-step emit is only covered at the function level; deleting the wiring in
+  `task-runner/index.ts` would not fail the suite. Not known-broken (unlike the terminal
+  path, which was), but the same coverage shape. Needs a Miniflare-level DO test.
+- **Terminology drift** (ui-ux MEDIUM): three different phrasings for "provisioning a VM"
+  now exist across `EXECUTION_STEP_LABELS`, `ProvisioningIndicator`, and `WAKE_PHASE_LABELS`.
+  Consolidating is a separate copy pass.
+- **`state-machine.ts` is 717 lines** (architecture-reviewer MEDIUM), over the 500-line
+  soft ceiling before this change and not split here.
+- **No light-theme screenshots** (ui-ux LOW).

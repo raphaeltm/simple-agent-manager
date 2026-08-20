@@ -27,7 +27,7 @@
  */
 
 import { EXECUTION_STEP_ORDER, type TaskExecutionStep } from '@simple-agent-manager/shared';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import type { WakeProgressUpdate } from '../../hooks/useChatWebSocket';
 import type { SessionStateSnapshot } from '../../lib/api';
@@ -63,11 +63,23 @@ export function useWakeProgress(sessionId: string | undefined): UseWakeProgressR
   const [isWaking, setIsWaking] = useState(false);
   const [wakePhase, setWakePhase] = useState<TaskExecutionStep | null>(null);
 
+  /**
+   * Latches once this wake reaches a terminal status.
+   *
+   * A poll response is assembled server-side before the client reads it, so a
+   * poll that started before the wake finished can land *after* the push that
+   * already reported `restored`. Without this latch that stale snapshot re-opens
+   * the banner on a session that has finished waking — the status-level twin of
+   * the phase-ordering guard.
+   */
+  const settledRef = useRef(false);
+
   // A wake belongs to exactly one conversation. Switching sessions must not carry
   // the previous conversation's banner across.
   useEffect(() => {
     setIsWaking(false);
     setWakePhase(null);
+    settledRef.current = false;
   }, [sessionId]);
 
   const clearWakeProgress = useCallback(() => {
@@ -80,10 +92,13 @@ export function useWakeProgress(sessionId: string | undefined): UseWakeProgressR
       if (status !== 'waking') {
         // 'restored' and 'failed' are both terminal for the banner. A failure
         // surfaces through the existing resume-error path, not this indicator.
+        if (status === 'restored' || status === 'failed') settledRef.current = true;
         setIsWaking(false);
         setWakePhase(null);
         return;
       }
+      // A late 'waking' snapshot cannot un-finish a wake that already settled.
+      if (settledRef.current) return;
       setIsWaking(true);
       setWakePhase((current) => (isForwardProgress(phase, current) ? phase : current));
     },

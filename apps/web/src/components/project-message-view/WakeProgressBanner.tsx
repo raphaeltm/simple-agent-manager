@@ -37,7 +37,7 @@
  * file-size ceiling (rule 18).
  */
 
-import { type TaskExecutionStep,wakePhaseLabel } from '@simple-agent-manager/shared';
+import { type TaskExecutionStep, wakePhaseLabel } from '@simple-agent-manager/shared';
 import { Spinner } from '@simple-agent-manager/ui';
 import type { FC, ReactNode } from 'react';
 
@@ -49,13 +49,14 @@ export interface WakeProgressBannerProps {
 
 export const WakeProgressBanner: FC<WakeProgressBannerProps> = ({ wakePhase, elapsed }) => (
   <div
-    role="status"
-    aria-live="polite"
-    aria-label="Session wake progress"
     data-testid="wake-progress-banner"
     className="flex items-center gap-2 px-4 py-1.5 border-b border-border-default bg-surface text-xs text-fg-muted"
   >
-    <span className="shrink-0">
+    {/*
+      Spinner is decorative here — it carries its own role="status"/"Loading",
+      which would otherwise nest a second status region inside this one.
+    */}
+    <span className="shrink-0" aria-hidden="true">
       <Spinner size="sm" />
     </span>
     {/*
@@ -63,7 +64,20 @@ export const WakeProgressBanner: FC<WakeProgressBannerProps> = ({ wakePhase, ela
       the project Outlet wrapper where a fit-content page root can be dragged past
       the viewport by any nowrap descendant (rule 56).
     */}
-    <span className="min-w-0 flex-1 break-words" data-testid="wake-progress-label">
+    {/*
+      The live region wraps ONLY the phase label. `role="status"` implies
+      aria-atomic, so a ticking elapsed-time node inside it would re-announce the
+      whole banner about once a second for the entire multi-minute wake. Keeping
+      the timer a sibling means assistive tech announces one message per phase
+      change, which is the actual signal.
+    */}
+    <span
+      role="status"
+      aria-live="polite"
+      aria-label="Session wake progress"
+      className="min-w-0 flex-1 break-words"
+      data-testid="wake-progress-label"
+    >
       {wakePhaseLabel(wakePhase)}
     </span>
     {elapsed != null && <span className="shrink-0">{elapsed}</span>}

@@ -26,6 +26,7 @@ const mocks = vi.hoisted(() => ({
   startVerifyDecayTimer: vi.fn(),
   stopVerifyDecayTimer: vi.fn(),
   connectionState: 'connected' as 'connected' | 'disconnected',
+  wsOptions: [] as Array<{ enabled: boolean }>,
 }));
 
 vi.mock('../../../src/lib/api', async (importOriginal) => ({
@@ -42,11 +43,17 @@ vi.mock('../../../src/lib/api', async (importOriginal) => ({
 }));
 
 vi.mock('../../../src/hooks/useChatWebSocket', () => ({
-  useChatWebSocket: () => ({
-    connectionState: mocks.connectionState,
-    wsRef: { current: null },
-    retry: vi.fn(),
-  }),
+  useChatWebSocket: (options: { enabled: boolean }) => {
+    // Capture the options so tests can assert on `enabled`. The socket gate is
+    // production behavior worth pinning: it decides whether wake-progress
+    // broadcasts can reach the client at all.
+    mocks.wsOptions.push(options);
+    return {
+      connectionState: mocks.connectionState,
+      wsRef: { current: null },
+      retry: vi.fn(),
+    };
+  },
 }));
 vi.mock('../../../src/components/AuthProvider', () => ({
   useAuth: () => ({ user: { id: 'user-1' } }),
@@ -151,11 +158,46 @@ describe('useSessionLifecycle loading semantics', () => {
     vi.useRealTimers();
     vi.clearAllMocks();
     mocks.connectionState = 'connected';
+    mocks.wsOptions.length = 0;
     queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   });
   afterEach(() => {
     vi.clearAllTimers();
     vi.useRealTimers();
+  });
+
+  it('opens the socket while a sleeping session is waking', async () => {
+    // Discriminating. A waking session is `sleeping` server-side for the WHOLE
+    // wake — wakeSession() only flips it to `active` at the very end. Gating the
+    // socket on `active` alone means the client holds no connection during
+    // exactly the window the wake-progress broadcasts are sent, so every phase
+    // delta is dropped and the push half of the feature is inert.
+    const waking = detail([msg('a', 1000)], false, 'sleeping');
+    waking.state = { ...waking.state, recoveryStatus: 'waking', wakePhase: 'node_provisioning' };
+    mocks.getChatSession.mockResolvedValue(waking);
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.isWaking).toBe(true));
+    await waitFor(() => expect(mocks.wsOptions.at(-1)?.enabled).toBe(true));
+    expect(result.current.wakePhase).toBe('node_provisioning');
+  });
+
+  it('does NOT open the socket for an ordinary sleeping session', async () => {
+    // Control for the case above: without this, "enabled: true" could simply mean
+    // the gate was removed, which would connect a socket for every sleeping
+    // session the user browses past.
+    mocks.getChatSession.mockResolvedValue(detail([msg('a', 1000)], false, 'sleeping'));
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.session?.status).toBe('sleeping'));
+    expect(result.current.isWaking).toBe(false);
+    expect(mocks.wsOptions.every((o) => o.enabled === false)).toBe(true);
   });
 
   it('requests the FULL conversation (max ceiling) on initial load', async () => {
@@ -180,7 +222,9 @@ describe('useSessionLifecycle loading semantics', () => {
       wrapper,
     });
 
-    await waitFor(() => expect(result.current.messages.map((m) => m.id)).toEqual(['cached', 'new']));
+    await waitFor(() =>
+      expect(result.current.messages.map((m) => m.id)).toEqual(['cached', 'new'])
+    );
     expect(mocks.getChatSession).toHaveBeenCalledWith('proj-1', 'sess-1', {
       signal: expect.any(AbortSignal),
       after: 1000,
@@ -276,6 +320,51 @@ describe('useSessionLifecycle loading semantics', () => {
     await waitFor(() => expect(mocks.sendFollowUpPrompt).toHaveBeenCalled());
     await waitFor(() => expect(mocks.getChatSession.mock.calls.length).toBeGreaterThan(2));
     expect(result.current.agentActivity).toBe('prompting');
+  });
+
+  it('surfaces wake phase for a USER-TRIGGERED wake, through the stale-sleeping guard', async () => {
+    // The most common trigger: type into a sleeping session. `handleSendFollowUp`
+    // arms `sleepingWakePendingRef`, and for nearly the whole wake the guard
+    // condition holds (status stays `sleeping`, activity stays `idle`). That
+    // branch calls only `hydratePlan`, so without an explicit `hydrateWakeProgress`
+    // there it silently discards every `wakePhase`/`recoveryStatus` the poll
+    // carries — `isWaking` never flips, the socket gate never opens, and the push
+    // half of the feature is dead on the path users actually take.
+    //
+    // Ordering is load-bearing: `isWaking` is sticky, so if any wake-bearing
+    // response lands BEFORE the guard is armed the hook latches on through the
+    // normal path and this test stops discriminating. The flag below guarantees
+    // every pre-send response is wake-free.
+    const sleeping = detail([msg('a', 1000)], false, 'sleeping');
+    const waking = {
+      ...sleeping,
+      state: { ...sleeping.state, recoveryStatus: 'waking', wakePhase: 'node_provisioning' },
+    };
+    let wakeInFlight = false;
+    mocks.getChatSession.mockImplementation(async () => (wakeInFlight ? waking : sleeping));
+    mocks.sendFollowUpPrompt.mockResolvedValue({ accepted: true, status: 'queued' });
+
+    const { result } = renderHook(() => useSessionLifecycle('proj-1', 'sess-1', false), {
+      wrapper,
+    });
+
+    await waitFor(() => expect(result.current.sessionState).toBe('sleeping'));
+    expect(result.current.isWaking).toBe(false);
+
+    act(() => result.current.setFollowUp('Wake and continue'));
+    await act(async () => {
+      await result.current.handleSendFollowUp();
+    });
+    await waitFor(() => expect(mocks.sendFollowUpPrompt).toHaveBeenCalled());
+
+    // Only now does the server start reporting the wake — after the guard is armed.
+    wakeInFlight = true;
+
+    await waitFor(() => expect(result.current.isWaking).toBe(true));
+    await waitFor(() => expect(result.current.wakePhase).toBe('node_provisioning'));
+    await waitFor(() => expect(mocks.wsOptions.at(-1)?.enabled).toBe(true));
+    // The pre-existing guard must still do its job: activity is not reset to idle.
+    expect(result.current.agentActivity).not.toBe('idle');
   });
 
   it('returns a failed wake attempt to a retryable sleeping state', async () => {

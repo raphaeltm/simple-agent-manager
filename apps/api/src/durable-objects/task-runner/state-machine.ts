@@ -219,12 +219,14 @@ export async function transitionToInProgress(
     if (authoritative?.status === 'in_progress') {
       // Another runner already committed the handoff. The wake is still over from
       // the watcher's point of view, so clear the banner here too.
-      await notifyWakeSettled({
-        env: rc.env,
-        projectId: state.projectId,
-        chatSessionId: recoveryChatSessionId,
-        status: 'restored',
-      });
+      rc.ctx.waitUntil(
+        notifyWakeSettled({
+          env: rc.env,
+          projectId: state.projectId,
+          chatSessionId: recoveryChatSessionId,
+          status: 'restored',
+        })
+      );
       state.currentStep = 'running';
       state.completed = true;
       await rc.ctx.storage.put('state', state);
@@ -238,12 +240,14 @@ export async function transitionToInProgress(
           rc
         );
         // A wake that will never finish must not leave a spinner running.
-        await notifyWakeSettled({
-          env: rc.env,
-          projectId: state.projectId,
-          chatSessionId: recoveryChatSessionId,
-          status: 'failed',
-        });
+        rc.ctx.waitUntil(
+          notifyWakeSettled({
+            env: rc.env,
+            projectId: state.projectId,
+            chatSessionId: recoveryChatSessionId,
+            status: 'failed',
+          })
+        );
       }
       state.completed = true;
       await rc.ctx.storage.put('state', state);
@@ -301,12 +305,14 @@ export async function transitionToInProgress(
   // emit on the happy path: the raw guarded UPDATE above bypasses
   // `updateD1ExecutionStep`, and the alarm dispatcher treats `running` as a
   // terminal no-op step, so the intermediate-phase choke point never fires here.
-  await notifyWakeSettled({
-    env: rc.env,
-    projectId: state.projectId,
-    chatSessionId: recoveryChatSessionId,
-    status: 'restored',
-  });
+  rc.ctx.waitUntil(
+    notifyWakeSettled({
+      env: rc.env,
+      projectId: state.projectId,
+      chatSessionId: recoveryChatSessionId,
+      status: 'restored',
+    })
+  );
 
   state.currentStep = 'running';
   state.completed = true;

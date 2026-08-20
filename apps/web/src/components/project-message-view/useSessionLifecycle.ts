@@ -34,7 +34,11 @@ import { mergeMessages } from '../../lib/merge-messages';
 import { chatQueryKeys, chatSessionMessagesQueryOptions } from '../../lib/query-options';
 import { isWorkspaceOperational } from '../../lib/workspace-status-utils';
 import type { FilePanelState } from './session-lifecycle-helpers';
-import { getPlanFingerprint, mergeSessionDetailMessages, parsePlanContent } from './session-lifecycle-helpers';
+import {
+  getPlanFingerprint,
+  mergeSessionDetailMessages,
+  parsePlanContent,
+} from './session-lifecycle-helpers';
 import type { AgentActivityState } from './types';
 import {
   CHAT_FALLBACK_POLL_MS,
@@ -47,7 +51,6 @@ import { useActivityVerifyTimer } from './useActivityVerifyTimer';
 import { useConnectionRecovery } from './useConnectionRecovery';
 import type { UseSessionLifecycleResult } from './useSessionLifecycle.types';
 import { useWakeProgress } from './useWakeProgress';
-
 
 export function useSessionLifecycle(
   projectId: string,
@@ -98,15 +101,20 @@ export function useSessionLifecycle(
   // can read current state without stale closures.
   const messagesRef = useRef<ChatMessageResponse[]>([]);
   const hasMoreRef = useRef(false);
-  useEffect(() => { messagesRef.current = messages; }, [messages]);
-  useEffect(() => { hasMoreRef.current = hasMore; }, [hasMore]);
+  useEffect(() => {
+    messagesRef.current = messages;
+  }, [messages]);
+  useEffect(() => {
+    hasMoreRef.current = hasMore;
+  }, [hasMore]);
 
   const updateCachedMessages = useCallback(
     (incoming: ChatMessageResponse[], strategy: 'replace' | 'append' | 'prepend') => {
       if (!queryScope) return;
       // TODO: Add size-based cache eviction — no cap for now, optimize later
-      queryClient.setQueryData<ChatSessionDetailResponse | undefined>(sessionMessagesQueryKey, (old) =>
-        mergeSessionDetailMessages(old, incoming, strategy)
+      queryClient.setQueryData<ChatSessionDetailResponse | undefined>(
+        sessionMessagesQueryKey,
+        (old) => mergeSessionDetailMessages(old, incoming, strategy)
       );
     },
     [queryClient, queryScope, sessionMessagesQueryKey]
@@ -186,7 +194,17 @@ export function useSessionLifecycle(
   } = useChatWebSocket({
     projectId,
     sessionId,
-    enabled: session?.status === 'active',
+    // A waking session is still `sleeping` server-side for the whole wake —
+    // `wakeSession()` only flips it to `active` at the very end, after the agent
+    // session is live. Gating the socket on `active` alone therefore means the
+    // client holds NO connection during the exact window the wake-progress
+    // broadcasts are being sent, and every phase delta is dropped.
+    //
+    // `isWaking` comes from the D1 hydrate, so it is known on mount and on every
+    // poll. Opening the socket for that bounded window (and only then — an
+    // ordinary sleeping session still connects nothing) is what makes the push
+    // half of wake progress actually reach the user.
+    enabled: session?.status === 'active' || wake.isWaking,
     onMessage: useCallback(
       (msg: ChatMessageResponse) => {
         setMessages((prev) => mergeMessages(prev, [msg], 'append'));
@@ -316,9 +334,7 @@ export function useSessionLifecycle(
     setLoading(sessionQuery.isPending && sessionQuery.data === undefined);
     if (sessionQuery.error && sessionQuery.data === undefined) {
       setError(
-        sessionQuery.error instanceof Error
-          ? sessionQuery.error.message
-          : 'Failed to load session'
+        sessionQuery.error instanceof Error ? sessionQuery.error.message : 'Failed to load session'
       );
     }
     if (!sessionQuery.data) return;
@@ -334,6 +350,12 @@ export function useSessionLifecycle(
       !isWorkingActivity(sessionQuery.data.state?.activity);
     if (serverStillHasStaleSleepingState) {
       hydratePlan(sessionQuery.data.state);
+      // The guard exists to stop a stale `idle` activity from erasing the user's
+      // wake feedback — NOT to discard wake progress. Its condition holds for most
+      // of a wake (status stays `sleeping`, activity stays `idle` until the agent
+      // actually starts), so routing around `hydrateState` without this would drop
+      // every phase update and leave `isWaking` false for the entire wake.
+      hydrateWakeProgress(sessionQuery.data.state);
     } else {
       if (
         sessionQuery.data.session.status !== 'sleeping' ||
@@ -349,6 +371,7 @@ export function useSessionLifecycle(
     sessionQuery.isPending,
     hydrateState,
     hydratePlan,
+    hydrateWakeProgress,
   ]);
 
   // Fetch workspace and node details
@@ -477,6 +500,10 @@ export function useSessionLifecycle(
           // During that window the sleeping session's last persisted activity is
           // still idle; do not let fallback polling erase the user's wake feedback.
           hydratePlan(data.state);
+          // Wake progress must survive this branch — see the matching comment on
+          // the mount-hydrate path. This is the poll that carries phase updates
+          // for a user-triggered wake, which is the common trigger.
+          hydrateWakeProgress(data.state);
         } else {
           if (data.session.status !== 'sleeping' || isWorkingActivity(data.state?.activity)) {
             sleepingWakePendingRef.current = false;

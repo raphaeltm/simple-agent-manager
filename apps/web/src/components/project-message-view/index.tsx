@@ -13,7 +13,7 @@ import type {
   ToolCallContentItem,
 } from '@simple-agent-manager/acp-client';
 import { mapToolCallContent, PlanModal } from '@simple-agent-manager/acp-client';
-import { type AgentProfile,classifyFailure } from '@simple-agent-manager/shared';
+import { type AgentProfile, classifyFailure } from '@simple-agent-manager/shared';
 import { Button, Spinner } from '@simple-agent-manager/ui';
 import { ChevronDown } from 'lucide-react';
 import { type FC, useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -742,13 +742,18 @@ export const ProjectMessageView: FC<ProjectMessageViewProps> = ({
           sending={lc.sendingFollowUp}
           uploading={lc.uploading}
           placeholder={
-            lc.agentActivity === 'prompting' || lc.agentActivity === 'responding'
-              ? 'Agent is working...'
-              : lc.sessionState === 'idle'
-                ? 'Send a message to resume the agent...'
-                : lc.sessionState === 'sleeping'
-                  ? 'Send a message to wake the agent...'
-                  : 'Send a message...'
+            // A wake already in flight must not be advertised as "send a message
+            // to wake" — that contradicts the banner directly above and is what
+            // invites the duplicate wake this feature exists to prevent.
+            lc.isWaking
+              ? 'Waking the agent — your message will be delivered...'
+              : lc.agentActivity === 'prompting' || lc.agentActivity === 'responding'
+                ? 'Agent is working...'
+                : lc.sessionState === 'idle'
+                  ? 'Send a message to resume the agent...'
+                  : lc.sessionState === 'sleeping'
+                    ? 'Send a message to wake the agent...'
+                    : 'Send a message...'
           }
           transcribeApiUrl={lc.transcribeApiUrl}
           agentProfiles={agentProfiles}

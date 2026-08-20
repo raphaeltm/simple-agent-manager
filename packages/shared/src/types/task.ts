@@ -109,7 +109,7 @@ export const WAKE_PHASE_LABELS: Record<TaskExecutionStep, string> = {
   workspace_creation: 'Recreating your workspace...',
   workspace_dispatch: 'Starting your workspace...',
   workspace_ready: 'Restoring your session...',
-  attachment_transfer: 'Restoring your session...',
+  attachment_transfer: 'Restoring your files...',
   agent_session: 'Starting the agent...',
   running: 'Session restored.',
   awaiting_followup: 'Session restored.',
