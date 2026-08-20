@@ -150,7 +150,9 @@ function extractSessionBundle(sql: SqlStorage, sessionId: string): SessionMigrat
   if (getSessionShardName(sql, sessionId)) return null;
   const sessionRow = sql
     .exec(
-      `SELECT ${SESSION_COLUMNS.join(', ')}
+      `SELECT id, workspace_id, topic, status, message_count, started_at, ended_at,
+              created_at, updated_at, task_id, agent_completed_at, materialized_at,
+              created_by_user_id
        FROM chat_sessions
        WHERE id = ? AND status = 'stopped' AND message_count > 0`,
       sessionId
@@ -162,7 +164,7 @@ function extractSessionBundle(sql: SqlStorage, sessionId: string): SessionMigrat
 
   const messageRows = sql
     .exec(
-      `SELECT ${MESSAGE_COLUMNS.join(', ')}
+      `SELECT id, session_id, role, content, tool_metadata, created_at, sequence, origin
        FROM chat_messages
        WHERE session_id = ?
        ORDER BY created_at ASC, sequence ASC`,
@@ -173,7 +175,7 @@ function extractSessionBundle(sql: SqlStorage, sessionId: string): SessionMigrat
 
   const groupedRows = sql
     .exec(
-      `SELECT ${GROUPED_MESSAGE_COLUMNS.join(', ')}
+      `SELECT id, session_id, role, content, created_at
        FROM chat_messages_grouped
        WHERE session_id = ?
        ORDER BY created_at ASC`,
@@ -190,18 +192,32 @@ function extractSessionBundle(sql: SqlStorage, sessionId: string): SessionMigrat
   return { sessionId, session, messages, groupedMessages, estimatedSizeBytes };
 }
 
-function insertRow<T extends readonly string[]>(
-  sql: SqlStorage,
-  table: string,
-  columns: T,
-  row: Record<string, SqlValue>,
-  insertMode: 'insert' | 'replace' = 'insert'
-): void {
-  const placeholders = columns.map(() => '?').join(', ');
-  const verb = insertMode === 'replace' ? 'INSERT OR REPLACE' : 'INSERT';
+function insertSessionRow(sql: SqlStorage, row: Record<string, SqlValue>): void {
   sql.exec(
-    `${verb} INTO ${table} (${columns.join(', ')}) VALUES (${placeholders})`,
-    ...rowValues(row, columns)
+    `INSERT OR REPLACE INTO chat_sessions (
+       id, workspace_id, topic, status, message_count, started_at, ended_at,
+       created_at, updated_at, task_id, agent_completed_at, materialized_at,
+       created_by_user_id
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ...rowValues(row, SESSION_COLUMNS)
+  );
+}
+
+function insertMessageRow(sql: SqlStorage, row: Record<string, SqlValue>): void {
+  sql.exec(
+    `INSERT INTO chat_messages (
+       id, session_id, role, content, tool_metadata, created_at, sequence, origin
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+    ...rowValues(row, MESSAGE_COLUMNS)
+  );
+}
+
+function insertGroupedMessageRow(sql: SqlStorage, row: Record<string, SqlValue>): void {
+  sql.exec(
+    `INSERT INTO chat_messages_grouped (
+       id, session_id, role, content, created_at
+     ) VALUES (?, ?, ?, ?, ?)`,
+    ...rowValues(row, GROUPED_MESSAGE_COLUMNS)
   );
 }
 
@@ -244,14 +260,14 @@ export function receiveMigratedSessionBundle(
   sql: SqlStorage,
   bundle: SessionMigrationBundle
 ): ShardReceiveResult {
-  insertRow(sql, 'chat_sessions', SESSION_COLUMNS, bundle.session, 'replace');
+  insertSessionRow(sql, bundle.session);
   deleteGroupedFtsRows(sql, bundle.sessionId);
   sql.exec('DELETE FROM chat_messages WHERE session_id = ?', bundle.sessionId);
   sql.exec('DELETE FROM chat_messages_grouped WHERE session_id = ?', bundle.sessionId);
 
-  for (const message of bundle.messages) insertRow(sql, 'chat_messages', MESSAGE_COLUMNS, message);
+  for (const message of bundle.messages) insertMessageRow(sql, message);
   for (const grouped of bundle.groupedMessages) {
-    insertRow(sql, 'chat_messages_grouped', GROUPED_MESSAGE_COLUMNS, grouped);
+    insertGroupedMessageRow(sql, grouped);
   }
   insertGroupedFtsRows(sql, bundle.sessionId);
 
