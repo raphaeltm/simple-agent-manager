@@ -158,6 +158,10 @@ Explicit constraints:
 - Targeted unit/component tests:
   `pnpm --filter @simple-agent-manager/web test -- tests/unit/api/comments.test.ts tests/unit/components/message-comments.test.tsx tests/unit/components/project-message-view.test.tsx tests/unit/components/chat/project-message-view-resume.test.tsx`
   — 94 tests passed.
+- UI primitive tests:
+  `pnpm --filter @simple-agent-manager/ui test` — 12 test files and 104 tests
+  passed, including direct coverage for new Avatar, Textarea, and Popover
+  primitives.
 - Targeted browser audit:
   `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/message-comments-audit.spec.ts --project='Desktop (1280x800)'`
   — 3 tests passed, covering desktop 1280x800 and mobile 375x667 via per-test viewport overrides.
@@ -171,7 +175,7 @@ Explicit constraints:
   `pnpm --filter @simple-agent-manager/web lint` passed with three pre-existing warnings;
   `pnpm --filter @simple-agent-manager/ui typecheck && pnpm --filter @simple-agent-manager/ui lint` passed.
 - Root gates:
-  `pnpm test` passed on rerun — 21/21 turbo tasks, web 284 test files and
+  `pnpm test` passed on final rerun — 21/21 turbo tasks, web 284 test files and
   3410 tests passed, API 583 test files and 7880 tests passed;
   `pnpm build` passed — 9/9 turbo tasks;
   `pnpm lint` passed — 13/13 turbo tasks, with only pre-existing warnings in
