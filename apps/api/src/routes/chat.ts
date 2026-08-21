@@ -41,6 +41,7 @@ import { isTaskStatus } from '../services/task-status';
 import { attachWakeState } from './chat/wake-state';
 import { resolveChatAgentState } from './chat-agent-state';
 import { registerChatCancelRoute } from './chat-cancel';
+import { registerChatCommentDirectiveRoute } from './chat-comment-directives';
 import { chatForkRoutes } from './chat-fork';
 import { recordChatSessionLoadFailure } from './chat-load-diagnostics';
 import { preparePromptForLiveAgent, sendPreparedPromptToLiveAgent } from './chat-prompt-forward';
@@ -460,6 +461,7 @@ chatRoutes.get('/:sessionId/durability', async (c) => {
 });
 
 registerChatPromptRoute(chatRoutes);
+registerChatCommentDirectiveRoute(chatRoutes);
 
 /**
  * POST /api/projects/:projectId/sessions/:sessionId/attention/:markerId/resolve

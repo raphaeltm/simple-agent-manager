@@ -460,6 +460,26 @@ export {
   WEBHOOK_FILTER_OPERATORS,
 } from './trigger';
 
+// Message comments
+export type {
+  CreateMessageCommentThreadRequest,
+  MessageCommentActorProvenance,
+  MessageCommentAnchor,
+  MessageCommentAuthor,
+  MessageCommentAuthorKind,
+  MessageCommentDirectiveState,
+  MessageCommentListRequest,
+  MessageCommentListResponse,
+  MessageCommentReply,
+  MessageCommentSourceMessageContext,
+  MessageCommentThread,
+  MessageCommentThreadStatus,
+  MessageCommentThreadSummary,
+  ReplyToMessageCommentThreadRequest,
+  UpdateMessageCommentThreadStatusRequest,
+} from './comments';
+export { MESSAGE_COMMENT_AUTHOR_KINDS, MESSAGE_COMMENT_THREAD_STATUSES } from './comments';
+
 // Compute Usage
 export type {
   ActiveComputeSession,
@@ -546,10 +566,7 @@ export type {
   CheckpointProgressEnvelope,
   CreateCheckpointEpisodeInput,
 } from './checkpoint';
-export {
-  CHECKPOINT_EPISODE_STATES,
-  CHECKPOINT_EPISODE_TRANSITIONS,
-} from './checkpoint';
+export { CHECKPOINT_EPISODE_STATES, CHECKPOINT_EPISODE_TRANSITIONS } from './checkpoint';
 
 // Mission (Phase 2: Orchestration Primitives)
 export type {

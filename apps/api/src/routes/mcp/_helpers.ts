@@ -287,23 +287,7 @@ export function getMcpLimits(env: Env) {
   };
 }
 
-// Intentional: the character class deliberately targets raw C0/C1
-// control-code ranges (\x00-\x08 etc.) to strip null bytes and control
-// characters from user/agent-supplied text, per sanitizeUserInput's doc
-// comment below. This is the sanitizer itself, not an accidental control
-// character left in a regex literal. Declared as its own named constant
-// (rather than inline in the .replace() call) with an `eslint-disable-line`
-// trailing comment so Prettier's line-wrapping of a long `.replace(...)`
-// call cannot separate the disable directive from the regex it targets \u2014
-// see the discriminating incident this pattern replaced during the 2026-08-11
-// ai-slop debt burn-down (tasks/archive/2026-08-10-ai-slop-debt-burndown.md).
-const CONTROL_CHAR_PATTERN =
-  /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F-\x9F\u200B-\u200F\u202A-\u202E\u2066-\u2069]/g; // eslint-disable-line no-control-regex -- see comment above
-
-/** Strip null bytes, Unicode bidi overrides, and C0/C1 control chars (except \n, \t) from user/agent input. */
-export function sanitizeUserInput(str: string): string {
-  return str.replace(CONTROL_CHAR_PATTERN, '');
-}
+export { sanitizeUserInput } from '../../lib/sanitize-user-input';
 
 // MCP protocol constants
 export const MCP_PROTOCOL_VERSION = '2025-03-26';
