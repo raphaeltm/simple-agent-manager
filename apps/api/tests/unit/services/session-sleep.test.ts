@@ -1140,7 +1140,7 @@ describe('sleepWorkspaceSession', () => {
         userId: 'user-1',
         reason: 'test',
       })
-    ).rejects.toThrow('Workspace agent is not idle');
+    ).rejects.toThrow('Harness-owned background work is active');
 
     expect(mocks.beginSessionSnapshotStopping).not.toHaveBeenCalled();
     expect(mocks.stopWorkspaceOnNode).not.toHaveBeenCalled();
