@@ -12,7 +12,7 @@
  * would lift that map out and pass anchors through it instead.
  */
 
-import { useMemo } from 'react';
+import { memo, useMemo } from 'react';
 
 import { RenderedMarkdown } from '../../components/MarkdownRenderer';
 import type { Comment } from './comment-types';
@@ -77,7 +77,7 @@ export interface CommentableMarkdownProps {
   renderComposer: (anchorId: string) => React.ReactNode;
 }
 
-export function CommentableMarkdown({
+export const CommentableMarkdown = memo(function CommentableMarkdown({
   path,
   source,
   comments,
@@ -195,4 +195,4 @@ export function CommentableMarkdown({
       </div>
     </div>
   );
-}
+});
