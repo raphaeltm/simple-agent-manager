@@ -65,6 +65,13 @@ Sleeping sessions must retain the composer and continue to wake when the user se
 - [x] The existing backend sleep gate remains the authority for idleness and harness-work safety; the frontend does not invent a weaker idle predicate.
 - [x] Mobile and desktop Playwright screenshots show no clipping, overlap, or horizontal overflow for Sleep, Archive, and working states.
 
+## Validation Evidence
+
+- Focused lifecycle/API unit coverage: `pnpm --filter @simple-agent-manager/web test -- tests/unit/lib/workspaces-api.test.ts tests/unit/components/CompletionDock.test.tsx tests/unit/components/project-message-view.test.tsx tests/unit/pages/project-chat.test.tsx tests/unit/components/chat/project-message-view-resume.test.tsx` — 5 files / 133 tests passed before Phase 5 review; expanded after review to cover Sleep loading/failure and ProjectChat missing-workspace/rejected-sleep paths.
+- Local UI visual audit: `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/completion-dock-audit.spec.ts --project="iPhone SE (375x667)" --project="Desktop (1280x800)"` — mobile and desktop screenshots captured under `.codex/tmp/playwright-screenshots/` for Sleep, Archive confirmation, and working states.
+- Full local quality suite: `pnpm lint && pnpm typecheck && pnpm test && pnpm build` — exit 0 after the direct sleep client coverage was added. Remaining output was known baseline lint/template/sourcemap warnings.
+- Phase 5 review follow-ups added durable vertical-slice evidence: Playwright now clicks the real `Sleep session` button in the real project chat UI and asserts `POST /api/workspaces/ws-1/sleep`; API route coverage verifies `POST /api/workspaces/:id/sleep` auth middleware, same-user ownership gate, and `sleepWorkspaceSession()` delegation payload.
+
 ## References
 
 - `apps/web/src/components/project-message-view/CompletionDock.tsx`

@@ -94,6 +94,8 @@ const MOCK_GITHUB_INSTALLATIONS = [
 
 const NOW = Date.now();
 
+type CompletionDockMode = 'working' | 'idle' | 'sleeping';
+
 function makeSession(status: 'active' | 'sleeping' = 'active') {
   return {
     id: 'session-1',
@@ -114,6 +116,32 @@ function makeSession(status: 'active' | 'sleeping' = 'active') {
     agentSessionId: 'agent-sess-1',
     agentType: 'claude-code',
     task: null,
+  };
+}
+
+function makeWorkspace(status: 'running' | 'sleeping' = 'running') {
+  return {
+    id: 'ws-1',
+    nodeId: 'node-1',
+    projectId: MOCK_PROJECT.id,
+    name: 'test-workspace',
+    displayName: 'Test workspace',
+    repository: MOCK_PROJECT.repository,
+    branch: 'main',
+    status,
+    vmSize: 'cx22',
+    vmLocation: 'fsn1',
+    workspaceProfile: 'full',
+    devcontainerConfigName: null,
+    vmIp: '203.0.113.10',
+    lastActivityAt: new Date(NOW - 30000).toISOString(),
+    portsPublicEnabled: false,
+    errorMessage: null,
+    createdAt: '2026-01-01T00:00:00Z',
+    updatedAt: new Date(NOW).toISOString(),
+    url: null,
+    bootLogs: [],
+    chatSessionId: 'session-1',
   };
 }
 
@@ -172,7 +200,12 @@ const IDLE_STATE = {
   lastStopReason: null,
 };
 
-async function setupApiMocks(page: Page, opts: { mode: 'working' | 'idle' | 'sleeping' }) {
+async function setupApiMocks(page: Page, opts: { mode: CompletionDockMode }) {
+  const state: { mode: CompletionDockMode; sleepRequests: string[] } = {
+    mode: opts.mode,
+    sleepRequests: [],
+  };
+
   await page.route('**/api/**', async (route: Route) => {
     const url = new URL(route.request().url());
     const path = url.pathname;
@@ -189,8 +222,15 @@ async function setupApiMocks(page: Page, opts: { mode: 'working' | 'idle' | 'sle
     if (path === '/api/trial/status') return respond(200, { available: false });
     if (path === '/api/agents') return respond(200, { agents: [] });
     if (path === '/api/github/installations') return respond(200, MOCK_GITHUB_INSTALLATIONS);
-    if (path === '/api/workspaces') return respond(200, []);
+    if (path === '/api/workspaces') {
+      return respond(200, [makeWorkspace(state.mode === 'sleeping' ? 'sleeping' : 'running')]);
+    }
     if (path === '/api/workspaces/ws-1/sleep') {
+      if (route.request().method() !== 'POST') {
+        return respond(405, { error: 'METHOD_NOT_ALLOWED' });
+      }
+      state.sleepRequests.push(`${route.request().method()} ${path}`);
+      state.mode = 'sleeping';
       return respond(200, {
         status: 'sleeping',
         workspaceId: 'ws-1',
@@ -202,7 +242,7 @@ async function setupApiMocks(page: Page, opts: { mode: 'working' | 'idle' | 'sle
     const projectMatch = path.match(/^\/api\/projects\/([^/]+)(\/.*)?$/);
     if (projectMatch) {
       const subPath = projectMatch[2] || '';
-      const session = makeSession(opts.mode === 'sleeping' ? 'sleeping' : 'active');
+      const session = makeSession(state.mode === 'sleeping' ? 'sleeping' : 'active');
 
       if (subPath === '/sessions') {
         return respond(200, { sessions: [session], total: 1, hasMore: false });
@@ -214,7 +254,7 @@ async function setupApiMocks(page: Page, opts: { mode: 'working' | 'idle' | 'sle
           session,
           messages: MESSAGES,
           hasMore: false,
-          state: opts.mode === 'working' ? WORKING_STATE : IDLE_STATE,
+          state: state.mode === 'working' ? WORKING_STATE : IDLE_STATE,
         });
       }
 
@@ -232,8 +272,10 @@ async function setupApiMocks(page: Page, opts: { mode: 'working' | 'idle' | 'sle
     if (path === '/api/projects')
       return respond(200, { projects: [MOCK_PROJECT], nextCursor: null });
 
-    return respond(200, {});
+    return respond(404, { error: 'UNMOCKED_API_ROUTE', path });
   });
+
+  return state;
 }
 
 async function screenshot(page: Page, name: string) {
@@ -276,6 +318,25 @@ for (const theme of ['dark', 'light'] as const) {
       await screenshot(page, `completion-dock-sleep-${theme}-desktop`);
       await assertNoOverflow(page);
     });
+
+    if (theme === 'dark') {
+      test('awake idle: clicking Sleep posts to workspace sleep and refreshes to Archive', async ({
+        page,
+      }) => {
+        await seedTheme(page, theme);
+        const apiState = await setupApiMocks(page, { mode: 'idle' });
+        await gotoChat(page);
+
+        await page.getByRole('button', { name: 'Sleep session' }).click();
+
+        await expect
+          .poll(() => apiState.sleepRequests)
+          .toEqual(['POST /api/workspaces/ws-1/sleep']);
+        await expect(page.getByRole('button', { name: 'Archive conversation' })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Sleep session' })).toHaveCount(0);
+        await assertNoOverflow(page);
+      });
+    }
 
     test('sleeping: grey Archive control + confirmation', async ({ page }) => {
       await seedTheme(page, theme);

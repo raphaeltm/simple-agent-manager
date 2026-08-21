@@ -207,6 +207,13 @@ describe('CompletionDock', () => {
     expect(btn).toBeDisabled();
   });
 
+  it('disables the Sleep button while sleep is in flight', () => {
+    renderDock({ working: false, centerAction: 'sleep', sleeping: true });
+    const btn = screen.getByRole('button', { name: 'Sleep session' });
+    expect(btn).toBeDisabled();
+    expect(btn).toHaveAttribute('title', 'Sleeping…');
+  });
+
   it('does not disable the Interrupt button while archiving is in flight', () => {
     // archiving only gates the idle Archive control, never the working Interrupt.
     renderDock({ working: true, archiving: true });
@@ -222,6 +229,16 @@ describe('CompletionDock', () => {
     });
     const alert = screen.getByRole('alert');
     expect(alert).toHaveTextContent('Could not end the conversation');
+  });
+
+  it('renders the sleep error message with an alert role', () => {
+    renderDock({
+      working: false,
+      centerAction: 'sleep',
+      sleepError: 'Snapshot is not ready yet',
+    });
+    const alert = screen.getByRole('alert');
+    expect(alert).toHaveTextContent('Snapshot is not ready yet');
   });
 
   it('renders the elapsed slot while working and hides it while idle', () => {

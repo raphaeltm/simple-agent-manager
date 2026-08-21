@@ -1289,6 +1289,56 @@ describe('ProjectChat close conversation button', () => {
     expect(mocks.stopChatSession).not.toHaveBeenCalled();
   });
 
+  it('passes sleep failures to ProjectMessageView without archiving', async () => {
+    mocks.sleepWorkspace.mockRejectedValueOnce(new Error('Snapshot is not ready yet'));
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [IDLE_SESSION_WITH_TASK],
+      total: 1,
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${IDLE_SESSION_WITH_TASK.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-view')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      (capturedMessageViewProps.current?.onSleepConversation as () => void)();
+    });
+
+    await waitFor(() => {
+      expect(capturedMessageViewProps.current?.sleepError).toBe('Snapshot is not ready yet');
+    });
+    expect(mocks.closeConversationTask).not.toHaveBeenCalled();
+    expect(mocks.stopChatSession).not.toHaveBeenCalled();
+  });
+
+  it('reports a missing workspace instead of sleeping or archiving', async () => {
+    mocks.listChatSessions.mockResolvedValue({
+      sessions: [{ ...IDLE_SESSION_WITH_TASK, workspaceId: null }],
+      total: 1,
+    });
+
+    renderProjectChat(`/projects/${PROJECT_ID}/chat/${IDLE_SESSION_WITH_TASK.id}`);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('message-view')).toBeInTheDocument();
+    });
+
+    await act(async () => {
+      (capturedMessageViewProps.current?.onSleepConversation as () => void)();
+    });
+
+    await waitFor(() => {
+      expect(capturedMessageViewProps.current?.sleepError).toBe(
+        'This session has no workspace to sleep.'
+      );
+    });
+    expect(mocks.sleepWorkspace).not.toHaveBeenCalled();
+    expect(mocks.closeConversationTask).not.toHaveBeenCalled();
+    expect(mocks.stopChatSession).not.toHaveBeenCalled();
+  });
+
   it('passes onCloseConversation to ProjectMessageView for sleeping-session archive with task', async () => {
     mocks.listChatSessions.mockResolvedValue({
       sessions: [{ ...IDLE_SESSION_WITH_TASK, status: 'sleeping' as const }],

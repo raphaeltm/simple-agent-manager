@@ -76,7 +76,7 @@ See [Where the work lands](/docs/guides/idea-execution/#where-the-work-lands) fo
 
 ## Sleep and wake
 
-After an agent turn becomes idle, you can put the session to sleep from the chat lifecycle control. Sleep writes a checkpoint, releases compute, and keeps the chat resumable. It is the reversible step before Archive: an awake idle session shows **Sleep**, and an already sleeping session shows **Archive**.
+After an agent turn becomes idle, you can put a conversation-mode chat session with an attached workspace to sleep from the chat lifecycle control. Sleep writes a checkpoint, releases compute, and keeps the chat resumable. It is the reversible step before Archive: an awake idle conversation session shows **Sleep**, and an already sleeping session shows **Archive**. Task-mode sessions keep their task completion lifecycle; completed tasks sleep automatically.
 
 SAM can also sleep sessions automatically. VM sessions write and verify a final checkpoint after 15 minutes of inactivity by default; Instant uses its separately configured one-hour `CF_CONTAINER_SLEEP_AFTER` window. Completed tasks queue sleep immediately and release compute on the first scheduled sweep after their final prompt reaches idle. The idle clock only counts genuine ProjectData work activity—not runtime heartbeats—so an active turn is not intentionally cut off.
 

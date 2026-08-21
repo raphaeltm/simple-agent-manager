@@ -157,18 +157,13 @@ Agent responses can be played back as audio using Deepgram Aura 2 (via Workers A
 
 ### Session Lifecycle
 
-Each agent session follows this state machine:
+SAM tracks related lifecycle state at three levels:
 
-```
-pending → assigned → running → completed/failed/interrupted
-```
+- **Chat session**: `active`, `completed`, `failed`, or `sleeping`. A sleeping conversation keeps the composer visible so a same-chat follow-up can wake and resume it.
+- **Task record**: `draft`, `ready`, `queued`, `delegated`, `in_progress`, `completed`, `failed`, or `cancelled`. Task-mode work keeps its task completion lifecycle instead of showing the manual Sleep action while idle.
+- **Runtime agent session**: `running`, `recovery`, `sleeping`, `suspended`, `stopped`, or `error`. Recovery means SAM is rebuilding runtime compute and restoring the saved harness/session state.
 
-- **Pending**: Session created, waiting for workspace assignment
-- **Assigned**: Workspace ready, agent starting up
-- **Running**: Agent actively executing
-- **Completed**: Agent finished successfully
-- **Failed**: Agent encountered an error
-- **Interrupted**: Connection to the agent was lost
+Conversation-mode sessions with an attached workspace can be manually slept when awake and idle. Archive remains destructive and appears after the reversible sleep boundary.
 
 SAM now backs chat sessions with task records across more runtime paths. In practice, that means forking, archive/complete controls, lineage, and status reporting behave consistently whether the work started as an idea execution, a full task, or an instant chat.
 
