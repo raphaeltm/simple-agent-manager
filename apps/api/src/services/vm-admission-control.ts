@@ -1,302 +1,53 @@
-import { ProviderError } from '@simple-agent-manager/providers';
 import type {
-  CredentialProvider,
-  CredentialSource,
-  VMLocation,
-  VMSize,
-  VmAdmissionControlMode,
-} from '@simple-agent-manager/shared';
-import {
-  DEFAULT_VM_ADMISSION_CONTROL_MODE,
-  DEFAULT_VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH,
-  DEFAULT_VM_ADMISSION_LEASE_TTL_MS,
-  DEFAULT_VM_ADMISSION_PROVIDER_COOLDOWN_MS,
-  DEFAULT_VM_ADMISSION_RETRY_MAX_MS,
-  DEFAULT_VM_ADMISSION_RETRY_MIN_MS,
-  DEFAULT_VM_ADMISSION_WAIT_TIMEOUT_MS,
-  DEFAULT_VM_ADMISSION_WAKE_BATCH_SIZE,
-  VM_ADMISSION_CONTROL_MODES,
-} from '@simple-agent-manager/shared';
-import { drizzle } from 'drizzle-orm/d1';
+  VmAdmissionReason,
+  VmAdmissionState,
+  VmAdmissionWait,
+  VmAdmissionConfig,
+  VmAdmissionExpired,
+  VmProviderCapacityInfo,
+  VmProvisioningLeaseResult,
+  VmProvisioningLeaseRow,
+  VmTaskAdmissionIdentity,
+  VmTaskAdmissionRow,
+} from './vm-admission-control-types';
 
-import * as schema from '../db/schema';
 import type { Env } from '../env';
-import { log } from '../lib/logger';
-import { resolveCredentialSource } from './provider-credentials';
+import {
+  changes,
+  first,
+  getVmAdmissionConfig,
+  parseIsoMs,
+  toIso,
+  truncateDiagnosticMessage,
+} from './vm-admission-control-types';
+import { wakeVmAdmissionWaiters } from './vm-admission-wakeup';
+import { activeProviderCapacityCooldown } from './vm-admission-provider-capacity';
 
-export type VmAdmissionState =
-  | 'queued'
-  | 'waiting'
-  | 'provisioning_granted'
-  | 'provisioning'
-  | 'node_ready'
-  | 'placed'
-  | 'cancelled'
-  | 'failed'
-  | 'expired';
-
-export type VmAdmissionReason =
-  | 'admission_created'
-  | 'admission_shadow'
-  | 'compatible_node_provisioning'
-  | 'provider_account_capacity'
-  | 'provider_transient_capacity'
-  | 'user_node_limit'
-  | 'lease_expired_recovered'
-  | 'provisioning_lease_held'
-  | 'provisioning_started'
-  | 'node_ready'
-  | 'placed'
-  | 'cancelled'
-  | 'task_failed'
-  | 'wait_deadline_expired';
-
-export interface VmAdmissionConfig {
-  mode: VmAdmissionControlMode;
-  leaseTtlMs: number;
-  retryMinMs: number;
-  retryMaxMs: number;
-  waitTimeoutMs: number;
-  providerCooldownMs: number;
-  wakeBatchSize: number;
-  diagnosticMessageMaxLength: number;
-}
-
-export interface VmAdmissionScope {
-  provider: CredentialProvider;
-  credentialSource: CredentialSource;
-  credentialDomainKey: string;
-  providerDomainKey: string;
-  scopeKey: string;
-}
-
-export interface VmTaskAdmissionIdentity extends VmAdmissionScope {
-  taskId: string;
-  projectId: string;
-  userId: string;
-  requestedVmSize: VMSize;
-  requestedVmLocation: VMLocation;
-  preferredNodeId?: string | null;
-}
-
-export interface VmProvisioningGrant {
-  kind: 'granted';
-  scopeKey: string;
-  fencingToken: number;
-}
-
-export interface VmAdmissionWait {
-  kind: 'waiting';
-  reason: VmAdmissionReason;
-  nextRetryAt: string;
-  waitDeadlineAt: string;
-}
-
-export interface VmAdmissionExpired {
-  kind: 'expired';
-  reason: 'wait_deadline_expired';
-  waitDeadlineAt: string;
-}
-
-export type VmProvisioningLeaseResult = VmProvisioningGrant | VmAdmissionWait | VmAdmissionExpired;
-
-export interface VmProviderCapacityInfo {
-  provider: string;
-  providerCategory: string | null;
-  providerCode: string | null;
-  providerStatusCode: number | null;
-  providerMessage: string | null;
-}
-
-interface VmTaskAdmissionRow {
-  task_id: string;
-  project_id: string;
-  user_id: string;
-  provider: string;
-  credential_domain_key: string;
-  provider_domain_key: string;
-  scope_key: string;
-  requested_vm_size: string;
-  requested_vm_location: string;
-  state: VmAdmissionState;
-  reason: VmAdmissionReason | null;
-  inflight_node_id: string | null;
-  fencing_token: number | null;
-  attempt_count: number;
-  next_retry_at: string | null;
-  wait_deadline_at: string | null;
-}
-
-interface VmProvisioningLeaseRow {
-  scope_key: string;
-  owner_task_id: string;
-  fencing_token: number;
-  provider: string;
-  credential_domain_key: string;
-  provider_domain_key: string;
-  requested_vm_size: string;
-  inflight_node_id: string | null;
-  expires_at: string;
-}
-
-interface VmProviderCapacityRow {
-  provider_domain_key: string;
-  provider: string;
-  credential_domain_key: string;
-  state: 'ok' | 'cooldown';
-  reason: VmAdmissionReason | null;
-  provider_category: string | null;
-  provider_code: string | null;
-  provider_status_code: number | null;
-  provider_message: string | null;
-  retry_at: string | null;
-}
-
-const ACTIVE_ADMISSION_STATES = new Set<VmAdmissionState>([
-  'queued',
-  'waiting',
-  'provisioning_granted',
-  'provisioning',
-  'node_ready',
-]);
-
-function parsePositiveInt(value: string | undefined, fallback: number): number {
-  if (!value) return fallback;
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
-}
-
-function parseAdmissionMode(value: string | undefined): VmAdmissionControlMode {
-  const candidate = value?.trim();
-  if (candidate && (VM_ADMISSION_CONTROL_MODES as readonly string[]).includes(candidate)) {
-    return candidate as VmAdmissionControlMode;
-  }
-  return DEFAULT_VM_ADMISSION_CONTROL_MODE;
-}
-
-export function getVmAdmissionConfig(env: Env): VmAdmissionConfig {
-  const retryMinMs = parsePositiveInt(
-    env.VM_ADMISSION_RETRY_MIN_MS,
-    DEFAULT_VM_ADMISSION_RETRY_MIN_MS
-  );
-  const retryMaxMs = Math.max(
-    retryMinMs,
-    parsePositiveInt(env.VM_ADMISSION_RETRY_MAX_MS, DEFAULT_VM_ADMISSION_RETRY_MAX_MS)
-  );
-  return {
-    mode: parseAdmissionMode(env.VM_ADMISSION_CONTROL_MODE),
-    leaseTtlMs: parsePositiveInt(
-      env.VM_ADMISSION_LEASE_TTL_MS,
-      DEFAULT_VM_ADMISSION_LEASE_TTL_MS
-    ),
-    retryMinMs,
-    retryMaxMs,
-    waitTimeoutMs: parsePositiveInt(
-      env.VM_ADMISSION_WAIT_TIMEOUT_MS,
-      DEFAULT_VM_ADMISSION_WAIT_TIMEOUT_MS
-    ),
-    providerCooldownMs: parsePositiveInt(
-      env.VM_ADMISSION_PROVIDER_COOLDOWN_MS,
-      DEFAULT_VM_ADMISSION_PROVIDER_COOLDOWN_MS
-    ),
-    wakeBatchSize: parsePositiveInt(
-      env.VM_ADMISSION_WAKE_BATCH_SIZE,
-      DEFAULT_VM_ADMISSION_WAKE_BATCH_SIZE
-    ),
-    diagnosticMessageMaxLength: parsePositiveInt(
-      env.VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH,
-      DEFAULT_VM_ADMISSION_DIAGNOSTIC_MESSAGE_MAX_LENGTH
-    ),
-  };
-}
-
-function toIso(ms: number): string {
-  return new Date(ms).toISOString();
-}
-
-function parseIsoMs(value: string | null | undefined): number | null {
-  if (!value) return null;
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function truncateDiagnosticMessage(message: string | null, maxLength: number): string | null {
-  if (!message) return null;
-  return message.length > maxLength ? `${message.slice(0, Math.max(0, maxLength - 1))}…` : message;
-}
-
-function changes(result: unknown): number {
-  return (
-    (result as { meta?: { changes?: number; rows_written?: number } }).meta?.changes ??
-    (result as { meta?: { changes?: number; rows_written?: number } }).meta?.rows_written ??
-    0
-  );
-}
-
-async function first<T>(database: D1Database, query: string, binds: unknown[] = []): Promise<T | null> {
-  const row = await database.prepare(query).bind(...binds).first<T>();
-  return row ?? null;
-}
-
-function buildCredentialDomainKey(input: {
-  credentialSource: CredentialSource;
-  provider: CredentialProvider;
-  attributionUserId: string;
-  attributionProjectId: string | null;
-  projectId: string;
-}): string {
-  switch (input.credentialSource) {
-    case 'platform':
-      return `platform:${input.provider}`;
-    case 'project':
-      return `project:${input.attributionProjectId ?? input.projectId}:${input.attributionUserId}:${input.provider}`;
-    case 'user':
-    default:
-      return `user:${input.attributionUserId}:${input.provider}`;
-  }
-}
-
-export async function resolveVmAdmissionScope(
-  env: Env,
-  input: {
-    userId: string;
-    projectId: string;
-    targetProvider?: CredentialProvider | null;
-    credentialAttributionUserId?: string | null;
-    credentialAttributionProjectId?: string | null;
-    credentialAttributionSource?: CredentialSource | null;
-  }
-): Promise<VmAdmissionScope | null> {
-  const db = drizzle(env.DATABASE, { schema });
-  const attributionUserId = input.credentialAttributionUserId ?? input.userId;
-  const attributionProjectId =
-    input.credentialAttributionSource === 'project'
-      ? (input.credentialAttributionProjectId ?? input.projectId)
-      : null;
-  const resolved = await resolveCredentialSource(
-    db,
-    attributionUserId,
-    input.targetProvider ?? undefined,
-    attributionProjectId
-  );
-  if (!resolved) return null;
-
-  const credentialDomainKey = buildCredentialDomainKey({
-    credentialSource: resolved.credentialSource,
-    provider: resolved.providerName,
-    attributionUserId,
-    attributionProjectId,
-    projectId: input.projectId,
-  });
-  const providerDomainKey = `${resolved.providerName}:${credentialDomainKey}`;
-  return {
-    provider: resolved.providerName,
-    credentialSource: resolved.credentialSource,
-    credentialDomainKey,
-    providerDomainKey,
-    scopeKey: `user:${input.userId}:workspace-vm:${providerDomainKey}`,
-  };
-}
+export {
+  getVmAdmissionDiagnostics,
+  isActiveVmAdmissionState,
+  wakeVmAdmissionWaiters,
+} from './vm-admission-wakeup';
+export {
+  classifyVmProviderCapacityError,
+  isProviderAccountCapacityError,
+  recordVmProviderCapacityFailure,
+  recordVmProviderCapacitySuccess,
+} from './vm-admission-provider-capacity';
+export {
+  getVmAdmissionConfig,
+  resolveVmAdmissionScope,
+  type VmAdmissionConfig,
+  type VmAdmissionExpired,
+  type VmAdmissionReason,
+  type VmAdmissionScope,
+  type VmAdmissionState,
+  type VmAdmissionWait,
+  type VmProviderCapacityInfo,
+  type VmProvisioningGrant,
+  type VmProvisioningLeaseResult,
+  type VmTaskAdmissionIdentity,
+} from './vm-admission-control-types';
 
 export async function ensureVmTaskAdmission(
   env: Env,
@@ -519,26 +270,6 @@ async function markProvisioningGranted(
     .bind(reason, fencingToken, now, now, now, input.taskId)
     .run();
   await setTaskAdmissionMirror(env, input.taskId, 'provisioning_granted', reason, null);
-}
-
-async function activeProviderCapacityCooldown(
-  env: Env,
-  providerDomainKey: string
-): Promise<VmProviderCapacityRow | null> {
-  const row = await first<VmProviderCapacityRow>(
-    env.DATABASE,
-    `
-      SELECT provider_domain_key, provider, credential_domain_key, state, reason,
-        provider_category, provider_code, provider_status_code, provider_message, retry_at
-      FROM vm_provider_capacity_state
-      WHERE provider_domain_key = ?
-      LIMIT 1
-    `,
-    [providerDomainKey]
-  );
-  if (!row || row.state !== 'cooldown') return null;
-  const retryMs = parseIsoMs(row.retry_at);
-  return retryMs && retryMs > Date.now() ? row : null;
 }
 
 async function isLiveInflightNode(env: Env, nodeId: string | null): Promise<boolean> {
@@ -938,202 +669,4 @@ export async function cancelVmTaskAdmission(
   if (admission?.scope_key) {
     await wakeVmAdmissionWaiters(env, { scopeKey: admission.scope_key, reason: 'admission_cancelled' });
   }
-}
-
-export function classifyVmProviderCapacityError(err: unknown): VmProviderCapacityInfo | null {
-  if (!(err instanceof ProviderError)) return null;
-  if (
-    err.providerName === 'hetzner' &&
-    err.statusCode === 403 &&
-    (err.providerCode === 'server_limit_exceeded' ||
-      err.message.toLowerCase().includes('server_limit_exceeded') ||
-      err.message.toLowerCase().includes('server limit'))
-  ) {
-    return {
-      provider: err.providerName,
-      providerCategory: err.category,
-      providerCode: err.providerCode ?? 'server_limit_exceeded',
-      providerStatusCode: err.statusCode,
-      providerMessage: err.message,
-    };
-  }
-  return null;
-}
-
-export function isProviderAccountCapacityError(err: unknown): boolean {
-  return classifyVmProviderCapacityError(err) !== null;
-}
-
-export async function recordVmProviderCapacityFailure(
-  env: Env,
-  input: {
-    scope: VmAdmissionScope;
-    error: unknown;
-  }
-): Promise<VmProviderCapacityInfo | null> {
-  const info = classifyVmProviderCapacityError(input.error);
-  if (!info) return null;
-  const config = getVmAdmissionConfig(env);
-  const nowMs = Date.now();
-  const now = toIso(nowMs);
-  const retryAt = toIso(nowMs + config.providerCooldownMs);
-  const providerMessage = truncateDiagnosticMessage(
-    info.providerMessage,
-    config.diagnosticMessageMaxLength
-  );
-  await env.DATABASE.prepare(
-    `
-      INSERT INTO vm_provider_capacity_state (
-        provider_domain_key, provider, credential_domain_key, state, reason,
-        provider_category, provider_code, provider_status_code, provider_message,
-        failure_count, retry_at, last_failure_at, updated_at
-      )
-      VALUES (?, ?, ?, 'cooldown', 'provider_account_capacity', ?, ?, ?, ?, 1, ?, ?, ?)
-      ON CONFLICT(provider_domain_key) DO UPDATE SET
-        state = 'cooldown',
-        reason = 'provider_account_capacity',
-        provider_category = excluded.provider_category,
-        provider_code = excluded.provider_code,
-        provider_status_code = excluded.provider_status_code,
-        provider_message = excluded.provider_message,
-        failure_count = failure_count + 1,
-        retry_at = excluded.retry_at,
-        last_failure_at = excluded.last_failure_at,
-        updated_at = excluded.updated_at
-    `
-  )
-    .bind(
-      input.scope.providerDomainKey,
-      input.scope.provider,
-      input.scope.credentialDomainKey,
-      info.providerCategory,
-      info.providerCode,
-      info.providerStatusCode,
-      providerMessage,
-      retryAt,
-      now,
-      now
-    )
-    .run();
-  return { ...info, providerMessage };
-}
-
-export async function recordVmProviderCapacitySuccess(
-  env: Env,
-  scope: VmAdmissionScope
-): Promise<void> {
-  const now = new Date().toISOString();
-  await env.DATABASE.prepare(
-    `
-      INSERT INTO vm_provider_capacity_state (
-        provider_domain_key, provider, credential_domain_key, state,
-        failure_count, last_success_at, updated_at
-      )
-      VALUES (?, ?, ?, 'ok', 0, ?, ?)
-      ON CONFLICT(provider_domain_key) DO UPDATE SET
-        state = 'ok',
-        reason = NULL,
-        retry_at = NULL,
-        provider_category = NULL,
-        provider_code = NULL,
-        provider_status_code = NULL,
-        provider_message = NULL,
-        last_success_at = excluded.last_success_at,
-        updated_at = excluded.updated_at
-    `
-  )
-    .bind(scope.providerDomainKey, scope.provider, scope.credentialDomainKey, now, now)
-    .run();
-}
-
-async function nudgeTaskRunner(env: Env, taskId: string, reason: string): Promise<boolean> {
-  const id = env.TASK_RUNNER.idFromName(taskId);
-  const stub = env.TASK_RUNNER.get(id) as unknown as {
-    nudge(reason?: string): Promise<boolean>;
-  };
-  return stub.nudge(reason);
-}
-
-export async function wakeVmAdmissionWaiters(
-  env: Env,
-  input: {
-    scopeKey?: string | null;
-    providerDomainKey?: string | null;
-    userId?: string | null;
-    reason: string;
-  }
-): Promise<number> {
-  const config = getVmAdmissionConfig(env);
-  const binds: unknown[] = [];
-  const filters = [`state IN ('queued', 'waiting')`];
-  if (input.scopeKey) {
-    filters.push('scope_key = ?');
-    binds.push(input.scopeKey);
-  } else if (input.providerDomainKey) {
-    filters.push('provider_domain_key = ?');
-    binds.push(input.providerDomainKey);
-  } else if (input.userId) {
-    filters.push('user_id = ?');
-    binds.push(input.userId);
-  }
-  binds.push(config.wakeBatchSize);
-  const rows = await env.DATABASE.prepare(
-    `
-      SELECT task_id
-      FROM vm_task_admissions
-      WHERE ${filters.join(' AND ')}
-      ORDER BY enqueued_at ASC
-      LIMIT ?
-    `
-  )
-    .bind(...binds)
-    .all<{ task_id: string }>();
-
-  let nudged = 0;
-  for (const row of rows.results ?? []) {
-    try {
-      if (await nudgeTaskRunner(env, row.task_id, input.reason)) nudged++;
-    } catch (err) {
-      log.warn('vm_admission.wake_waiter_failed', {
-        taskId: row.task_id,
-        reason: input.reason,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-  return nudged;
-}
-
-export async function getVmAdmissionDiagnostics(
-  env: Env,
-  taskId: string
-): Promise<{
-  admission: Record<string, unknown> | null;
-  lease: Record<string, unknown> | null;
-  providerCapacity: Record<string, unknown> | null;
-}> {
-  const admission = await first<Record<string, unknown>>(
-    env.DATABASE,
-    `SELECT * FROM vm_task_admissions WHERE task_id = ? LIMIT 1`,
-    [taskId]
-  );
-  const lease = admission?.scope_key
-    ? await first<Record<string, unknown>>(
-        env.DATABASE,
-        `SELECT * FROM vm_provisioning_leases WHERE scope_key = ? LIMIT 1`,
-        [admission.scope_key]
-      )
-    : null;
-  const providerCapacity = admission?.provider_domain_key
-    ? await first<Record<string, unknown>>(
-        env.DATABASE,
-        `SELECT * FROM vm_provider_capacity_state WHERE provider_domain_key = ? LIMIT 1`,
-        [admission.provider_domain_key]
-      )
-    : null;
-  return { admission, lease, providerCapacity };
-}
-
-export function isActiveVmAdmissionState(state: string | null | undefined): boolean {
-  return !!state && ACTIVE_ADMISSION_STATES.has(state as VmAdmissionState);
 }
