@@ -405,16 +405,66 @@ export async function measureAndPersistProjectDataStorage(
   return telemetry;
 }
 
-function countOldestRows(sql: SqlStorage, table: 'activity_events' | 'acp_session_events', limit: number): number {
+function normalizeCount(row: { count?: unknown } | undefined): number {
+  const count = row?.count;
+  return typeof count === 'number' && Number.isFinite(count) ? count : 0;
+}
+
+function countOldestActivityEventRows(sql: SqlStorage, limit: number): number {
   const row = sql
     .exec(
       `SELECT COUNT(*) AS count
-       FROM (SELECT id FROM ${table} ORDER BY created_at ASC LIMIT ?)`,
+       FROM (SELECT id FROM activity_events ORDER BY created_at ASC LIMIT ?)`,
       limit
     )
     .toArray()[0] as { count?: unknown } | undefined;
-  const count = row?.count;
-  return typeof count === 'number' && Number.isFinite(count) ? count : 0;
+  return normalizeCount(row);
+}
+
+function countOldestAcpSessionEventRows(sql: SqlStorage, limit: number): number {
+  const row = sql
+    .exec(
+      `SELECT COUNT(*) AS count
+       FROM (SELECT id FROM acp_session_events ORDER BY created_at ASC LIMIT ?)`,
+      limit
+    )
+    .toArray()[0] as { count?: unknown } | undefined;
+  return normalizeCount(row);
+}
+
+function countOldestRows(
+  sql: SqlStorage,
+  table: 'activity_events' | 'acp_session_events',
+  limit: number
+): number {
+  if (table === 'activity_events') {
+    return countOldestActivityEventRows(sql, limit);
+  }
+  return countOldestAcpSessionEventRows(sql, limit);
+}
+
+function deleteOldestActivityEventRows(sql: SqlStorage, limit: number): void {
+  sql.exec(
+    `DELETE FROM activity_events
+     WHERE id IN (
+       SELECT id FROM activity_events
+       ORDER BY created_at ASC
+       LIMIT ?
+     )`,
+    limit
+  );
+}
+
+function deleteOldestAcpSessionEventRows(sql: SqlStorage, limit: number): void {
+  sql.exec(
+    `DELETE FROM acp_session_events
+     WHERE id IN (
+       SELECT id FROM acp_session_events
+       ORDER BY created_at ASC
+       LIMIT ?
+     )`,
+    limit
+  );
 }
 
 function deleteOldestRows(
@@ -424,15 +474,13 @@ function deleteOldestRows(
 ): number {
   const candidateCount = countOldestRows(sql, table, limit);
   if (candidateCount <= 0) return 0;
-  sql.exec(
-    `DELETE FROM ${table}
-     WHERE id IN (
-       SELECT id FROM ${table}
-       ORDER BY created_at ASC
-       LIMIT ?
-     )`,
-    limit
-  );
+
+  if (table === 'activity_events') {
+    deleteOldestActivityEventRows(sql, limit);
+  } else {
+    deleteOldestAcpSessionEventRows(sql, limit);
+  }
+
   return candidateCount;
 }
 

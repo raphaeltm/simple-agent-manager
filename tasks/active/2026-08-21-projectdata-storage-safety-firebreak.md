@@ -47,7 +47,7 @@ The goal is a narrow production-safe firebreak, not full sharding:
 - [x] Add focused unit/workers tests for classifier, telemetry upsert, alarm execution, emergency purge, and metadata trimming.
 - [x] Update documentation/config references.
 - [x] Run local specialist reviews: cloudflare-specialist, constitution-validator, test-engineer, doc-sync-validator, security-auditor, task-completion-validator.
-- [ ] Open a draft PR and let CI run. Stop before staging/deploy/merge.
+- [x] Open a draft PR and let CI run. Stop before staging/deploy/merge.
 
 ## Acceptance criteria
 
@@ -84,7 +84,16 @@ The goal is a narrow production-safe firebreak, not full sharding:
 - `pnpm --filter @simple-agent-manager/api test -- tests/unit/durable-objects/project-data-messages.test.ts tests/unit/services/durable-object-retry.test.ts` — PASS (2 files, 20 tests)
 - `pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-storage-safety.test.ts --reporter verbose` — PASS (1 file, 5 tests)
 - `pnpm vitest run --config vitest.workers.config.ts tests/workers/project-data-service.test.ts` — PASS (1 file, 55 tests)
+- `pnpm tsx scripts/quality/ast-checks.ts --file apps/api/src/durable-objects/project-data/storage-safety.ts --rule sql-injection` — PASS
+- `pnpm quality:ast-checks` — PASS (0 errors, existing warnings only)
+- `GITHUB_EVENT_NAME=pull_request GITHUB_EVENT_PATH=<(env -u GH_TOKEN -u GITHUB_TOKEN gh pr view 1875 --json body,url --jq '{pull_request:{body:.body,html_url:.url}}') pnpm quality:preflight` — PASS
 - `git diff --check main...HEAD` — PASS
+
+## PR / CI evidence
+
+- Draft PR: https://github.com/raphaeltm/simple-agent-manager/pull/1875
+- Initial CI exposed two branch issues before later jobs completed: missing PR preflight evidence block, and AST SQL-injection rule rejection of the purge helper's dynamic table-name template literal.
+- Remediation: PR body now includes the required `AGENT_PREFLIGHT` evidence block; purge helper now uses fixed SQL statements for `activity_events` and `acp_session_events` instead of a dynamic table-name interpolation.
 
 ## Task completion validation report
 
