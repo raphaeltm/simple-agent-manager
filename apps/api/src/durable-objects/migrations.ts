@@ -964,6 +964,48 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    // Same-class ProjectData DO sharding metadata. The primary object remains
+    // the facade and records where immutable stopped-session history moved.
+    name: '032-project-data-sharding',
+    run: (sql) => {
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS session_shards (
+          session_id TEXT PRIMARY KEY,
+          shard_name TEXT NOT NULL,
+          migrated_at INTEGER NOT NULL,
+          session_started_at INTEGER,
+          session_ended_at INTEGER
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_session_shards_shard
+        ON session_shards(shard_name)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_session_shards_dates
+        ON session_shards(session_started_at, session_ended_at)
+      `);
+      sql.exec(`
+        CREATE TABLE IF NOT EXISTS shard_registry (
+          shard_name TEXT PRIMARY KEY,
+          created_at INTEGER NOT NULL,
+          session_count INTEGER NOT NULL DEFAULT 0,
+          estimated_size_bytes INTEGER NOT NULL DEFAULT 0,
+          date_range_start INTEGER,
+          date_range_end INTEGER
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_shard_registry_created
+        ON shard_registry(created_at)
+      `);
+      sql.exec(`
+        CREATE INDEX IF NOT EXISTS idx_shard_registry_date_range
+        ON shard_registry(date_range_start, date_range_end)
+      `);
+    },
+  },
 ];
 
 /**

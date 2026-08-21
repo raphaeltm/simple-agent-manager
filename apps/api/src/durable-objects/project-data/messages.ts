@@ -462,7 +462,7 @@ export function getMessageCount(sql: SqlStorage, sessionId: string, roles?: stri
   return row ? parseCount(row, 'messages.count') : 0;
 }
 
-type SearchResult = {
+export type SearchResult = {
   id: string;
   sessionId: string;
   role: string;

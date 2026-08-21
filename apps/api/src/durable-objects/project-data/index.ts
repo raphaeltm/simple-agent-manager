@@ -49,6 +49,8 @@ import * as sessionState from './session-state';
 import * as sessionSummarySync from './session-summary-sync';
 import * as sessionWakeProgress from './session-wake-progress';
 import * as sessions from './sessions';
+import * as shardMigration from './shard-migration';
+import * as sharding from './sharding';
 import { resolveTaskWaitConfig } from './task-wait-config';
 import { processTaskWaits } from './task-wait-supervisor';
 import * as taskWaits from './task-waits';
@@ -63,6 +65,8 @@ export class ProjectData extends DurableObject<Env> {
   private summarySyncTimer: ReturnType<typeof setTimeout> | null = null;
   /** Serializes summary syncs — see `runSummarySyncLocked` (rule 45). */
   private summarySyncLock: Promise<unknown> = Promise.resolve();
+  /** Serializes extract → shard RPC → primary finalize migration batches. */
+  private shardMigrationLock: Promise<void> = Promise.resolve();
   private cachedProjectId: string | null = null;
 
   constructor(ctx: DurableObjectState, env: Env) {
@@ -206,6 +210,11 @@ export class ProjectData extends DurableObject<Env> {
     }
     this.scheduleSummarySync();
     this.broadcastEvent('session.stopped', { sessionId }, sessionId);
+    try {
+      await this.scheduleShardMigrationCheck(0);
+    } catch (e) {
+      log.warn('schedule_shard_migration_after_stop_failed', { sessionId, error: String(e) });
+    }
   }
 
   async sleepSession(sessionId: string): Promise<boolean> {
@@ -243,8 +252,7 @@ export class ProjectData extends DurableObject<Env> {
   ): Promise<void> {
     sessionWakeProgress.publishSessionWakeProgress(
       {
-        broadcastEvent: (type, payload, sessionId) =>
-          this.broadcastEvent(type, payload, sessionId),
+        broadcastEvent: (type, payload, sessionId) => this.broadcastEvent(type, payload, sessionId),
       },
       input,
       Date.now()
@@ -436,6 +444,13 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async getSession(sessionId: string): Promise<Record<string, unknown> | null> {
+    const shard = this.getSessionShard(sessionId);
+    if (shard) {
+      const result = await shard.getSession(sessionId);
+      return result
+        ? { ...result, attention: attention.getAttentionSummary(this.sql, sessionId) }
+        : null;
+    }
     const result = sessions.getSession(this.sql, sessionId);
     return result ? this.addBaseDomain(result) : null;
   }
@@ -449,6 +464,8 @@ export class ProjectData extends DurableObject<Env> {
     compact: boolean = false,
     order: 'asc' | 'desc' = 'desc'
   ) {
+    const shard = this.getSessionShard(sessionId);
+    if (shard) return shard.getMessages(sessionId, limit, before, after, roles, compact, order);
     const compactOptions = compact ? messages.resolveCompactMessageOptions(this.env) : undefined;
     return messages.getMessages(
       this.sql,
@@ -464,20 +481,40 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   async getMessageToolContent(sessionId: string, messageId: string): Promise<unknown[] | null> {
+    const shard = this.getSessionShard(sessionId);
+    if (shard) return shard.getMessageToolContent(sessionId, messageId);
     return messages.getMessageToolContent(this.sql, sessionId, messageId);
   }
 
-  getMessageCount(sessionId: string, roles?: string[]): number {
+  async getMessageCount(sessionId: string, roles?: string[]): Promise<number> {
+    const shard = this.getSessionShard(sessionId);
+    if (shard) return shard.getMessageCount(sessionId, roles);
     return messages.getMessageCount(this.sql, sessionId, roles);
   }
 
-  searchMessages(
+  async searchMessages(
     query: string,
     sessionId: string | null = null,
     roles: string[] | null = null,
     limit: number = 10
   ) {
-    return messages.searchMessages(this.sql, query, sessionId, roles, limit);
+    if (sessionId) {
+      const shard = this.getSessionShard(sessionId);
+      if (shard) return shard.searchMessages(query, sessionId, roles, limit);
+      return messages.searchMessages(this.sql, query, sessionId, roles, limit);
+    }
+
+    const resultSets = [messages.searchMessages(this.sql, query, null, roles, limit)];
+    for (const shardName of sharding.listShardNames(this.sql)) {
+      const shardResults = await this.getShardStub(shardName).searchMessages(
+        query,
+        null,
+        roles,
+        limit
+      );
+      resultSets.push(shardResults);
+    }
+    return sharding.mergeSearchResults(resultSets, limit);
   }
 
   materializeSession(sessionId: string): void {
@@ -485,6 +522,16 @@ export class ProjectData extends DurableObject<Env> {
   }
   materializeAllStopped(limit: number = 50) {
     return materialization.materializeAllStopped(this.sql, limit);
+  }
+  getStorageSizeBytes(): number {
+    return sharding.estimateStorageSizeBytes(this.sql);
+  }
+  receiveMigratedSessionBundle(
+    bundle: shardMigration.SessionMigrationBundle
+  ): shardMigration.ShardReceiveResult {
+    return this.ctx.storage.transactionSync(() =>
+      shardMigration.receiveMigratedSessionBundle(this.sql, bundle)
+    );
   }
 
   async linkSessionIdea(sessionId: string, taskId: string, context: string | null): Promise<void> {
@@ -1022,7 +1069,19 @@ export class ProjectData extends DurableObject<Env> {
     // Claims persist before bounded adapter I/O continues through waitUntil.
     durability.processPromptDeliveryAlarm(this.sql, this.env, this.durabilityHooks());
 
+    let shardResult: shardMigration.ShardMigrationResult | null = null;
+    try {
+      shardResult = await this.runShardMigrationLocked();
+    } catch (err) {
+      log.error('alarm.shard_migration_failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     await this.recalculateAlarm();
+    if (shardResult?.shouldRearm) {
+      await this.scheduleShardMigrationCheck(shardResult.nextDelayMs);
+    }
   }
 
   // --- Hibernatable WebSocket Support ---
@@ -1507,6 +1566,62 @@ export class ProjectData extends DurableObject<Env> {
 
   // --- Internal Helpers ---
 
+  private getShardStub(shardName: string): sharding.ProjectDataShardRpc & {
+    receiveMigratedSessionBundle(
+      bundle: shardMigration.SessionMigrationBundle
+    ): Promise<shardMigration.ShardReceiveResult>;
+  } {
+    const id = this.env.PROJECT_DATA.idFromName(shardName);
+    return this.env.PROJECT_DATA.get(id) as unknown as sharding.ProjectDataShardRpc & {
+      receiveMigratedSessionBundle(
+        bundle: shardMigration.SessionMigrationBundle
+      ): Promise<shardMigration.ShardReceiveResult>;
+    };
+  }
+
+  private getSessionShard(sessionId: string): sharding.ProjectDataShardRpc | null {
+    const shardName = sharding.getSessionShardName(this.sql, sessionId);
+    return shardName ? this.getShardStub(shardName) : null;
+  }
+
+  private async withShardMigrationLock<T>(callback: () => Promise<T>): Promise<T> {
+    const previous = this.shardMigrationLock;
+    let release!: () => void;
+    this.shardMigrationLock = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await previous.catch(() => undefined);
+    try {
+      return await callback();
+    } finally {
+      release();
+    }
+  }
+
+  private async runShardMigrationLocked(): Promise<shardMigration.ShardMigrationResult> {
+    return this.withShardMigrationLock(() =>
+      shardMigration.processShardMigration(this.sql, this.env, {
+        getProjectId: () => this.getProjectId(),
+        transactionSync: (callback) => this.ctx.storage.transactionSync(callback),
+        getShardStorageSizeBytes: (shardName) => this.getShardStub(shardName).getStorageSizeBytes(),
+        receiveMigratedSessionBundle: (shardName, bundle) =>
+          this.getShardStub(shardName).receiveMigratedSessionBundle(bundle),
+      })
+    );
+  }
+
+  private async scheduleShardMigrationCheck(delayMs: number): Promise<void> {
+    const projectId = this.getProjectId();
+    if (!projectId) return;
+    const config = sharding.resolveProjectDataShardConfig(this.env);
+    if (sharding.estimateStorageSizeBytes(this.sql) < config.migrationThresholdBytes) return;
+    if (!sharding.hasShardMigrationCandidate(this.sql)) return;
+    const nextAlarm = Date.now() + Math.max(0, delayMs);
+    const currentAlarm = await this.ctx.storage.getAlarm();
+    if (currentAlarm === null || currentAlarm > nextAlarm)
+      await this.ctx.storage.setAlarm(nextAlarm);
+  }
+
   private addBaseDomain(row: Record<string, unknown>): Record<string, unknown> {
     const workspaceId = typeof row.workspaceId === 'string' ? row.workspaceId : null;
     const baseDomain = this.env.BASE_DOMAIN;
@@ -1517,7 +1632,14 @@ export class ProjectData extends DurableObject<Env> {
   }
 
   private async recalculateAlarm(): Promise<void> {
-    const alarmTime = computeProjectDataAlarmTime(this.sql, this.env);
+    const lifecycleTime = computeProjectDataAlarmTime(this.sql, this.env);
+    const shardTime = sharding.computeShardMigrationAlarmTime(
+      this.sql,
+      this.env,
+      this.getProjectId()
+    );
+    const candidates = [lifecycleTime, shardTime].filter((time): time is number => time !== null);
+    const alarmTime = candidates.length > 0 ? Math.min(...candidates) : null;
     if (alarmTime !== null) await this.ctx.storage.setAlarm(alarmTime);
     else await this.ctx.storage.deleteAlarm();
   }
