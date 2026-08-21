@@ -117,7 +117,7 @@ Explicit constraints:
       reopen, send-to-agent, mobile layout, desktop rail, offscreen/virtualized
       anchors, focus behavior, loading/error/empty states, and screenshots in
       `.codex/tmp/playwright-screenshots/`.
-- [ ] Run local quality gates: relevant targeted tests during development, then
+- [x] Run local quality gates: relevant targeted tests during development, then
       `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
 - [ ] Run required local specialist reviews: `ui-ux-specialist`,
       `test-engineer`, accessibility review, `constitution-validator`,
@@ -170,6 +170,17 @@ Explicit constraints:
   `pnpm --filter @simple-agent-manager/web typecheck` passed;
   `pnpm --filter @simple-agent-manager/web lint` passed with three pre-existing warnings;
   `pnpm --filter @simple-agent-manager/ui typecheck && pnpm --filter @simple-agent-manager/ui lint` passed.
+- Root gates:
+  `pnpm test` passed on rerun — 21/21 turbo tasks, web 284 test files and
+  3410 tests passed, API 583 test files and 7880 tests passed;
+  `pnpm build` passed — 9/9 turbo tasks;
+  `pnpm lint` passed — 13/13 turbo tasks, with only pre-existing warnings in
+  `packages/acp-client` and unrelated web files;
+  `pnpm typecheck` passed — 19/19 turbo tasks, with the existing Astro template
+  baseline report for `apps/www`.
+- Stabilized existing `useSessionTimeline` unit test race found by the first
+  root `pnpm test` run by waiting for the derived timeline entry before
+  asserting; isolated and root reruns passed.
 
 ## References
 
