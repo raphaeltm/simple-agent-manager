@@ -964,6 +964,97 @@ export const MIGRATIONS: Migration[] = [
       `);
     },
   },
+  {
+    name: '032-message-comment-threads',
+    run: (sql) => {
+      sql.exec(`
+        CREATE TABLE comment_threads (
+          id TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          anchor_kind TEXT NOT NULL DEFAULT 'message' CHECK (anchor_kind = 'message'),
+          message_id TEXT NOT NULL REFERENCES chat_messages(id) ON DELETE CASCADE,
+          quote TEXT,
+          body TEXT NOT NULL,
+          author_type TEXT NOT NULL CHECK (author_type IN ('human', 'agent')),
+          author_id TEXT NOT NULL,
+          author_name TEXT,
+          status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open', 'sent', 'resolved')),
+          created_at INTEGER NOT NULL,
+          updated_at INTEGER NOT NULL,
+          sequence INTEGER NOT NULL,
+          version INTEGER NOT NULL DEFAULT 1,
+          client_mutation_id TEXT,
+          client_mutation_fingerprint TEXT,
+          sent_at INTEGER,
+          sent_by_type TEXT CHECK (sent_by_type IS NULL OR sent_by_type IN ('human', 'agent')),
+          sent_by_id TEXT,
+          sent_by_name TEXT,
+          resolved_at INTEGER,
+          resolved_by_type TEXT CHECK (resolved_by_type IS NULL OR resolved_by_type IN ('human', 'agent')),
+          resolved_by_id TEXT,
+          resolved_by_name TEXT,
+          reopened_at INTEGER,
+          reopened_by_type TEXT CHECK (reopened_by_type IS NULL OR reopened_by_type IN ('human', 'agent')),
+          reopened_by_id TEXT,
+          reopened_by_name TEXT,
+          UNIQUE(session_id, client_mutation_id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_threads_session_sequence
+        ON comment_threads(session_id, sequence)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_threads_message
+        ON comment_threads(session_id, message_id, sequence)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_threads_status
+        ON comment_threads(session_id, status, sequence)
+      `);
+
+      sql.exec(`
+        CREATE TABLE comment_replies (
+          id TEXT PRIMARY KEY,
+          thread_id TEXT NOT NULL REFERENCES comment_threads(id) ON DELETE CASCADE,
+          session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          body TEXT NOT NULL,
+          author_type TEXT NOT NULL CHECK (author_type IN ('human', 'agent')),
+          author_id TEXT NOT NULL,
+          author_name TEXT,
+          created_at INTEGER NOT NULL,
+          sequence INTEGER NOT NULL,
+          client_mutation_id TEXT,
+          client_mutation_fingerprint TEXT,
+          UNIQUE(thread_id, client_mutation_id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_replies_thread_sequence
+        ON comment_replies(thread_id, sequence)
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_replies_session
+        ON comment_replies(session_id, thread_id)
+      `);
+
+      sql.exec(`
+        CREATE TABLE comment_status_mutations (
+          thread_id TEXT NOT NULL REFERENCES comment_threads(id) ON DELETE CASCADE,
+          session_id TEXT NOT NULL REFERENCES chat_sessions(id) ON DELETE CASCADE,
+          client_mutation_id TEXT NOT NULL,
+          target_status TEXT NOT NULL CHECK (target_status IN ('open', 'sent', 'resolved')),
+          thread_version INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          PRIMARY KEY (thread_id, client_mutation_id)
+        )
+      `);
+      sql.exec(`
+        CREATE INDEX idx_comment_status_mutations_session
+        ON comment_status_mutations(session_id, created_at)
+      `);
+    },
+  },
 ];
 
 /**

@@ -43,10 +43,18 @@ user-invocable: false
 - `GET /api/projects/:projectId/sessions/:sessionId/state` — Get lightweight ACP activity state for a chat session
 - `GET /api/projects/:projectId/sessions/:sessionId/messages` — List persisted session messages (supports `roles`, `before`, `limit`, `compact`, `order=asc|desc`)
 - `GET /api/projects/:projectId/sessions/:sessionId/messages/:messageId/tool-content` — Lazy-load stored tool content for compact messages
+- `GET /api/projects/:projectId/sessions/:sessionId/comments` — List message-anchored comment threads (supports `messageId`, `status=open|sent|resolved`, `afterSequence`, `limit`)
+- `POST /api/projects/:projectId/sessions/:sessionId/comments` — Create a message-anchored comment thread (`{ messageId, body, quote?, clientMutationId? }`)
+- `POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/replies` — Append a comment reply (`{ body, clientMutationId? }`)
+- `POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/send` — Mark a thread `sent` (`{ clientMutationId? }`)
+- `POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/resolve` — Mark a thread `resolved` (`{ clientMutationId? }`)
+- `POST /api/projects/:projectId/sessions/:sessionId/comments/:threadId/reopen` — Reopen a thread to `open` (`{ clientMutationId? }`)
 - `POST /api/projects/:projectId/sessions/:sessionId/prompt` — Send a follow-up prompt to the active agent session
 - `POST /api/projects/:projectId/sessions/:sessionId/attention/:markerId/resolve` — Validate, forward, and record one structured human-input answer (`{ answer }`)
 - `POST /api/projects/:projectId/sessions/:sessionId/summarize` — Generate a session summary for conversation forking
 - `POST /api/projects/:projectId/sessions/:sessionId/stop` — Stop a chat session
+
+Comment threads are scoped to the ProjectData Durable Object addressed by `projectId`; route authorization requires project `task:read` for list and `task:write` for mutations, and the DO rejects missing sessions, missing messages, and cross-session message anchors. Mutations return `{ thread, idempotent }` or `{ thread, reply, idempotent }`; successful first writes use HTTP 201 for create/reply and 200 for status transitions. Project session WebSocket listeners receive `{ type: "comment.thread.changed", payload: { sessionId, thread, reason } }` with `reason` in `thread_created | reply_created | marked_sent | resolved | reopened`.
 
 ## Task Management (Project Scoped)
 

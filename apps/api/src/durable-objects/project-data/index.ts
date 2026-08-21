@@ -14,6 +14,8 @@ import {
   type CheckpointEpisodeTransitionInput,
   type CreateCheckpointEpisodeInput,
   MAILBOX_DEFAULTS,
+  type MessageCommentThread,
+  type MessageCommentThreadEventReason,
   type SessionActivityTerminalReason,
 } from '@simple-agent-manager/shared';
 import { DurableObject } from 'cloudflare:workers';
@@ -28,6 +30,7 @@ import { computeProjectDataAlarmTime } from './alarm-schedule';
 import * as attention from './attention';
 import * as attentionExpiry from './attention-expiry';
 import * as commands from './commands';
+import * as comments from './comments';
 import { stopTimedOutConversationWorkspaces } from './conversation-timeout';
 import * as durability from './durability-foundation';
 import * as ideas from './ideas';
@@ -244,8 +247,7 @@ export class ProjectData extends DurableObject<Env> {
   ): Promise<void> {
     sessionWakeProgress.publishSessionWakeProgress(
       {
-        broadcastEvent: (type, payload, sessionId) =>
-          this.broadcastEvent(type, payload, sessionId),
+        broadcastEvent: (type, payload, sessionId) => this.broadcastEvent(type, payload, sessionId),
       },
       input,
       Date.now()
@@ -479,6 +481,40 @@ export class ProjectData extends DurableObject<Env> {
     limit: number = 10
   ) {
     return messages.searchMessages(this.sql, query, sessionId, roles, limit);
+  }
+
+  listCommentThreads(input: comments.ListCommentThreadsInput): comments.ListCommentThreadsResult {
+    return comments.listCommentThreads(this.sql, this.env, input);
+  }
+
+  createCommentThread(input: comments.CreateCommentThreadInput) {
+    const result = this.ctx.storage.transactionSync(() =>
+      comments.createCommentThread(this.sql, this.env, input)
+    );
+    if (result.changed) this.broadcastCommentThread(result.thread, 'thread_created');
+    return { thread: result.thread, idempotent: result.idempotent };
+  }
+
+  createCommentReply(input: comments.CreateCommentReplyInput) {
+    const result = this.ctx.storage.transactionSync(() =>
+      comments.createCommentReply(this.sql, this.env, input)
+    );
+    if (result.changed) this.broadcastCommentThread(result.thread, 'reply_created');
+    return {
+      thread: result.thread,
+      reply: result.reply,
+      idempotent: result.idempotent,
+    };
+  }
+
+  updateCommentThreadStatus(input: comments.UpdateCommentStatusInput) {
+    const result = this.ctx.storage.transactionSync(() =>
+      comments.updateCommentThreadStatus(this.sql, this.env, input)
+    );
+    if (result.changed) {
+      this.broadcastCommentThread(result.thread, this.commentStatusEventReason(input.status));
+    }
+    return { thread: result.thread, idempotent: result.idempotent };
   }
 
   materializeSession(sessionId: string): void {
@@ -1596,6 +1632,29 @@ export class ProjectData extends DurableObject<Env> {
         }
       }
     }
+  }
+
+  private broadcastCommentThread(
+    thread: MessageCommentThread,
+    reason: MessageCommentThreadEventReason
+  ): void {
+    this.broadcastEvent(
+      'comment.thread.changed',
+      {
+        sessionId: thread.sessionId,
+        thread,
+        reason,
+      },
+      thread.sessionId
+    );
+  }
+
+  private commentStatusEventReason(
+    status: comments.UpdateCommentStatusInput['status']
+  ): MessageCommentThreadEventReason {
+    if (status === 'sent') return 'marked_sent';
+    if (status === 'resolved') return 'resolved';
+    return 'reopened';
   }
 
   private scheduleSummarySync(): void {

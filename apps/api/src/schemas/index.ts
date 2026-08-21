@@ -114,6 +114,13 @@ export {
   CreateAcpSessionSchema,
 } from './acp-sessions';
 
+// Message-anchored comment schemas
+export {
+  CommentStatusMutationSchema,
+  CreateCommentReplySchema,
+  CreateCommentThreadSchema,
+} from './comments';
+
 // Admin schemas
 export {
   AdminUserActionSchema,
