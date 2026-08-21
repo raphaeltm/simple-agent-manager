@@ -259,6 +259,30 @@ describe('message comment directive service', () => {
     expect(storage.recordDirectiveDelivery).toHaveBeenCalledTimes(2);
   });
 
+  it('fails closed when durable prompt delivery is disabled', async () => {
+    const storage = makeStorage({ 'thread-1': makeThread() });
+
+    await expect(
+      sendMessageCommentDirective({
+        env: makeEnv({ DURABLE_PROMPT_DELIVERY_ENABLED: 'false' }),
+        storage,
+        projectId: 'project-1',
+        sessionId: 'session-1',
+        threadId: 'thread-1',
+        humanUserId: 'human-1',
+      })
+    ).rejects.toMatchObject(
+      new MessageCommentServiceError(
+        'conflict',
+        'Durable prompt delivery is disabled for comment directives'
+      )
+    );
+
+    expect(projectDataMocks.acceptPromptDelivery).not.toHaveBeenCalled();
+    expect(storage.getThread).not.toHaveBeenCalled();
+    expect(storage.recordDirectiveDelivery).not.toHaveBeenCalled();
+  });
+
   it('preserves FIFO intent for concurrent distinct comment sends', async () => {
     const storage = makeStorage({
       'thread-1': makeThread({

@@ -4,6 +4,7 @@ import { Hono } from 'hono';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { Env } from '../../../src/env';
+import { AppError } from '../../../src/middleware/error';
 import { registerChatCommentDirectiveRoute } from '../../../src/routes/chat-comment-directives';
 
 vi.mock('drizzle-orm/d1', () => ({
@@ -31,6 +32,12 @@ function makeApp(): Hono<{ Bindings: Env }> {
   const routes = new Hono<{ Bindings: Env }>();
   registerChatCommentDirectiveRoute(routes);
   root.route('/api/projects/:projectId/sessions', routes);
+  root.onError((err, c) => {
+    if (err instanceof AppError) {
+      return c.json(err.toJSON(), err.statusCode as never);
+    }
+    throw err;
+  });
   return root;
 }
 
@@ -111,20 +118,29 @@ function makeMailboxMessage(id: string, duplicate: boolean): AgentMailboxMessage
   };
 }
 
-function makeEnv(options: { duplicate?: boolean } = {}): Env & {
+function makeEnv(
+  options: {
+    duplicate?: boolean;
+    session?: { id: string; taskId: string; projectId: string } | null;
+    thread?: MessageCommentThread | null;
+    durablePromptDeliveryEnabled?: string;
+  } = {}
+): Env & {
   _projectDataStub: ProjectDataCommentTestStub;
 } {
   const duplicate = options.duplicate ?? false;
-  const thread = makeThread();
+  const session =
+    options.session === undefined
+      ? { id: 'session-1', taskId: 'task-1', projectId: 'project-1' }
+      : options.session;
+  const thread = options.thread === undefined ? makeThread() : options.thread;
   const deliveryId = 'comment-directive-thread-1';
   const projectDataStub: ProjectDataCommentTestStub = {
     ensureProjectId: vi.fn().mockResolvedValue(undefined),
-    getSession: vi
-      .fn()
-      .mockResolvedValue({ id: 'session-1', taskId: 'task-1', projectId: 'project-1' }),
+    getSession: vi.fn().mockResolvedValue(session),
     getMessageCommentThread: vi.fn().mockResolvedValue(thread),
     recordMessageCommentDirectiveDelivery: vi.fn(async ({ delivery }) => ({
-      ...thread,
+      ...(thread ?? makeThread()),
       status: 'sent',
       directive: delivery,
     })),
@@ -152,6 +168,7 @@ function makeEnv(options: { duplicate?: boolean } = {}): Env & {
     PROMPT_DELIVERY_MAX_ATTEMPTS: '5',
     PROMPT_DELIVERY_BACKGROUND_TIMEOUT_MS: '5000',
     PROMPT_DELIVERY_MIN_ALARM_DELAY_MS: '1000',
+    DURABLE_PROMPT_DELIVERY_ENABLED: options.durablePromptDeliveryEnabled,
     MCP_COMMENT_BODY_MAX_LENGTH: '4000',
     MCP_COMMENT_QUOTE_MAX_LENGTH: '1000',
     COMMENT_DIRECTIVE_CONTEXT_MAX_LENGTH: '6000',
@@ -244,5 +261,79 @@ describe('chat comment directive route', () => {
       duplicate: true,
       deliveryId: 'comment-directive-thread-1',
     });
+  });
+
+  it('maps a missing chat session to 404 before touching comment storage', async () => {
+    const env = makeEnv({ session: null });
+
+    const response = await makeApp().request(
+      '/api/projects/project-1/sessions/session-1/comments/thread-1/send-to-agent',
+      { method: 'POST' },
+      env
+    );
+
+    expect(response.status).toBe(404);
+    await expect(response.json()).resolves.toEqual({
+      error: 'NOT_FOUND',
+      message: 'Chat session not found',
+    });
+    expect(env._projectDataStub.getSession).toHaveBeenCalledWith('session-1');
+    expect(env._projectDataStub.getMessageCommentThread).not.toHaveBeenCalled();
+    expect(env._projectDataStub.acceptPromptDelivery).not.toHaveBeenCalled();
+  });
+
+  it('maps wrong-session comment threads to 403 without queuing delivery', async () => {
+    const env = makeEnv({ thread: makeThread({ sessionId: 'session-2' }) });
+
+    const response = await makeApp().request(
+      '/api/projects/project-1/sessions/session-1/comments/thread-1/send-to-agent',
+      { method: 'POST' },
+      env
+    );
+
+    expect(response.status).toBe(403);
+    await expect(response.json()).resolves.toEqual({
+      error: 'FORBIDDEN',
+      message: 'Comment thread belongs to a different session',
+    });
+    expect(env._projectDataStub.acceptPromptDelivery).not.toHaveBeenCalled();
+    expect(env._projectDataStub.recordMessageCommentDirectiveDelivery).not.toHaveBeenCalled();
+  });
+
+  it('maps resolved comment threads to 409 without queuing delivery', async () => {
+    const env = makeEnv({ thread: makeThread({ status: 'resolved', resolvedAt: 1500 }) });
+
+    const response = await makeApp().request(
+      '/api/projects/project-1/sessions/session-1/comments/thread-1/send-to-agent',
+      { method: 'POST' },
+      env
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: 'CONFLICT',
+      message: 'Resolved comment threads cannot be sent',
+    });
+    expect(env._projectDataStub.acceptPromptDelivery).not.toHaveBeenCalled();
+    expect(env._projectDataStub.recordMessageCommentDirectiveDelivery).not.toHaveBeenCalled();
+  });
+
+  it('maps disabled durable delivery to 409 without false queued success', async () => {
+    const env = makeEnv({ durablePromptDeliveryEnabled: 'false' });
+
+    const response = await makeApp().request(
+      '/api/projects/project-1/sessions/session-1/comments/thread-1/send-to-agent',
+      { method: 'POST' },
+      env
+    );
+
+    expect(response.status).toBe(409);
+    await expect(response.json()).resolves.toEqual({
+      error: 'CONFLICT',
+      message: 'Durable prompt delivery is disabled for comment directives',
+    });
+    expect(env._projectDataStub.getMessageCommentThread).not.toHaveBeenCalled();
+    expect(env._projectDataStub.acceptPromptDelivery).not.toHaveBeenCalled();
+    expect(env._projectDataStub.recordMessageCommentDirectiveDelivery).not.toHaveBeenCalled();
   });
 });

@@ -95,9 +95,16 @@ The shared TypeScript shapes live in
 - `recordMessageCommentDirectiveDelivery` must be idempotent for the same
   `delivery.deliveryId` and thread. Retries from the browser route use the
   stable delivery ID `comment-directive-${threadId}`.
+- Durable comment directive delivery must fail closed when
+  `DURABLE_PROMPT_DELIVERY_ENABLED=false`; callers must not report a queued
+  directive unless the ProjectData prompt-delivery engine is enabled.
 - Delivery acknowledgement/read state is the existing ProjectData mailbox
   lifecycle: `deliveryState`, `promptMessageId`, `acceptedAt`, and `ackedAt`.
   Do not create a second inbox for comment directives.
+- Prompt delivery and pending mailbox reads must order same-priority,
+  same-`created_at` rows by SQLite insertion order (`rowid ASC`) so
+  same-session comment directives have a deterministic FIFO tie-breaker at the
+  storage/claim boundary.
 - Returned thread summaries must be ordered deterministically, cursor-paginated,
   and bounded. The MCP layer applies an additional cap/redaction pass, but the
   storage layer should not rely on callers to avoid unbounded scans.

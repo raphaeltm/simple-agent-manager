@@ -412,6 +412,14 @@ export interface SendMessageCommentDirectiveResult {
 export async function sendMessageCommentDirective(
   input: SendMessageCommentDirectiveInput
 ): Promise<SendMessageCommentDirectiveResult> {
+  const durableConfig = resolveDurableExecutionConfig(input.env);
+  if (!durableConfig.deliveryEnabled) {
+    throw new MessageCommentServiceError(
+      'conflict',
+      'Durable prompt delivery is disabled for comment directives'
+    );
+  }
+
   const thread = await input.storage.getThread({
     projectId: input.projectId,
     sessionId: input.sessionId,
@@ -433,7 +441,6 @@ export async function sendMessageCommentDirective(
   const config = getMessageCommentConfig(input.env);
   const deliveryId = buildCommentDirectiveDeliveryId(thread.id);
   const content = buildDirectivePrompt(thread, config);
-  const durableConfig = resolveDurableExecutionConfig(input.env);
   const accepted = await projectDataService.acceptPromptDelivery(input.env, input.projectId, {
     deliveryId,
     targetSessionId: input.sessionId,
