@@ -6,6 +6,8 @@
  * - D1 telemetry and throttled observability alerts;
  * - a bounded, explicit emergency purge of low-value event logs.
  */
+import { isJsonRecord } from '@simple-agent-manager/shared';
+
 import { createModuleLogger, serializeError } from '../../lib/logger';
 import { persistError } from '../../services/observability';
 import type { Env } from './types';
@@ -179,10 +181,9 @@ export function classifyStorageUsage(
 }
 
 function readMeta(sql: SqlStorage, key: string): string | null {
-  const row = sql.exec('SELECT value FROM do_meta WHERE key = ?', key).toArray()[0] as
-    | { value?: unknown }
-    | undefined;
-  return typeof row?.value === 'string' ? row.value : null;
+  const row = sql.exec('SELECT value FROM do_meta WHERE key = ?', key).toArray()[0];
+  if (!isJsonRecord(row)) return null;
+  return typeof row.value === 'string' ? row.value : null;
 }
 
 function readMetaNumber(sql: SqlStorage, key: string): number | null {
@@ -405,8 +406,9 @@ export async function measureAndPersistProjectDataStorage(
   return telemetry;
 }
 
-function normalizeCount(row: { count?: unknown } | undefined): number {
-  const count = row?.count;
+function normalizeCount(row: unknown): number {
+  if (!isJsonRecord(row)) return 0;
+  const count = row.count;
   return typeof count === 'number' && Number.isFinite(count) ? count : 0;
 }
 
@@ -417,7 +419,7 @@ function countOldestActivityEventRows(sql: SqlStorage, limit: number): number {
        FROM (SELECT id FROM activity_events ORDER BY created_at ASC LIMIT ?)`,
       limit
     )
-    .toArray()[0] as { count?: unknown } | undefined;
+    .toArray()[0];
   return normalizeCount(row);
 }
 
@@ -428,7 +430,7 @@ function countOldestAcpSessionEventRows(sql: SqlStorage, limit: number): number 
        FROM (SELECT id FROM acp_session_events ORDER BY created_at ASC LIMIT ?)`,
       limit
     )
-    .toArray()[0] as { count?: unknown } | undefined;
+    .toArray()[0];
   return normalizeCount(row);
 }
 
