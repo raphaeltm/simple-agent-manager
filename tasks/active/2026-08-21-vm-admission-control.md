@@ -66,7 +66,7 @@ The architecture research is complete. Do not re-run it or revive stale PR #1808
 - [x] Run focused local tests and typecheck.
 - [x] Run specialist reviews: constitution-validator, test-engineer, cloudflare-specialist, security-auditor, doc-sync-validator, env-validator; go-specialist only if Go changes.
 - [x] Commit and push incremental progress before long tests.
-- [ ] Open a draft PR and let CI run.
+- [x] Open draft PR #1876 and let CI run.
 
 ## Acceptance criteria
 
