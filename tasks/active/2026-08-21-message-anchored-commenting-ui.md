@@ -119,7 +119,7 @@ Explicit constraints:
       `.codex/tmp/playwright-screenshots/`.
 - [x] Run local quality gates: relevant targeted tests during development, then
       `pnpm lint`, `pnpm typecheck`, `pnpm test`, and `pnpm build`.
-- [ ] Run required local specialist reviews: `ui-ux-specialist`,
+- [x] Run required local specialist reviews: `ui-ux-specialist`,
       `test-engineer`, accessibility review, `constitution-validator`,
       `doc-sync-validator`, and `task-completion-validator`.
 - [ ] Open the constituent PR to `main`, preserve "do not merge" and
@@ -127,31 +127,62 @@ Explicit constraints:
 
 ## Acceptance criteria
 
-- [ ] A user can select text in a visible agent or user message and create a
+- [x] A user can select text in a visible agent or user message and create a
       quoted comment without losing native selection behavior.
-- [ ] Desktop pointer selection shows an anchored affordance; mobile/coarse
+- [x] Desktop pointer selection shows an anchored affordance; mobile/coarse
       pointer selection shows a bottom action bar and preserves OS selection
       handle behavior.
-- [ ] A user can create a note-only comment or explicitly send a comment to the
+- [x] A user can create a note-only comment or explicitly send a comment to the
       agent; the UI reflects `open` vs `sent`.
-- [ ] A user can reply to a thread, resolve it, reopen it, and see resolved
+- [x] A user can reply to a thread, resolve it, reopen it, and see resolved
       threads represented without hiding their existence.
-- [ ] Commented messages show count/accent state, including unresolved vs
+- [x] Commented messages show count/accent state, including unresolved vs
       resolved distinction, without cluttering mobile gutters.
-- [ ] Desktop `>=1024px` shows a comment rail backed by comment data, including
+- [x] Desktop `>=1024px` shows a comment rail backed by comment data, including
       comments for offscreen messages.
-- [ ] Mobile uses inline thread expansion and remains usable at 375x667 with no
+- [x] Mobile uses inline thread expansion and remains usable at 375x667 with no
       clipped horizontal overflow.
-- [ ] Loading, error, and empty states are visible and accessible.
-- [ ] Keyboard and screen-reader users can start, submit, cancel, navigate, and
+- [x] Loading, error, and empty states are visible and accessible.
+- [x] Keyboard and screen-reader users can start, submit, cancel, navigate, and
       manage comments with visible focus and clear labels.
-- [ ] Optimistic create/reply/status actions reconcile with documented server
+- [x] Optimistic create/reply/status actions reconcile with documented server
       responses and realtime events.
-- [ ] Existing project chat behavior, scrolling, composer, streaming, file links,
+- [x] Existing project chat behavior, scrolling, composer, streaming, file links,
       timeline drawer, and virtualization continue to work.
-- [ ] The exact assumed backend contract is documented in the PR and in-repo.
-- [ ] Unit/component and Playwright tests cover the critical flows and viewports.
-- [ ] Staging deployment is intentionally skipped by explicit user instruction.
+- [x] The exact assumed backend contract is documented in the PR and in-repo.
+- [x] Unit/component and Playwright tests cover the critical flows and viewports.
+- [x] Staging deployment is intentionally skipped by explicit user instruction.
+
+## Specialist review findings
+
+- `ui-ux-specialist`: PASS. Screenshot-backed desktop 1280x800 and mobile
+  375x667 audits verify the data-backed rail, mobile inline threads, visible
+  loading/error/empty states, touch-sized controls, and no horizontal overflow.
+- `test-engineer`: PASS. Coverage includes typed API transforms, optimistic
+  cache reconciliation, actual DOM/browser selection, create/reply/send/resolve/
+  reopen flows, realtime upsert, offscreen/virtualized message comments, and UI
+  primitive tests.
+- Accessibility review: PASS with one documented MVP caveat. The floating
+  desktop selection chip is a transient pointer affordance, not a trapped modal;
+  keyboard users have an always-focusable row Comment path, composer autofocus,
+  labelled textareas/radios/buttons, Escape cancel, `Ctrl/Cmd+Enter`, alerts,
+  visible focus, and screen-reader labels.
+- `constitution-validator`: PASS. Server write-boundary limits are documented as
+  backend-configurable; UI constants are display/interaction caps only. No
+  production file comments, fuzzy re-anchoring, mentions, reactions, inboxes, or
+  staging/deploy changes were introduced.
+- File-size review: PASS/WARN. The modified chat entrypoint was reduced from
+  966 lines to 786 lines, below the mandatory 800-line ceiling, by extracting
+  comment row/rail wiring and session helper utilities. Remaining 500+ line
+  files in the diff are legacy candidate-size files or test files.
+- `doc-sync-validator`: PASS. The assumed server contract is documented in
+  `specs/035-message-comments/contracts/message-comment-api.md`; API/query
+  exports and WebSocket event names match that contract.
+- `task-completion-validator`: PASS/WARN. The task file research/checklist,
+  acceptance criteria, diff, and tests align. The only vertical-slice caveat is
+  intentional: backend persistence is owned by sibling task
+  `01M0K4EP5SND5CPK2N6GYS4449`, so this PR uses a documented UI contract and
+  stateful API-boundary Playwright mocks.
 
 ## Evidence log
 
@@ -175,13 +206,13 @@ Explicit constraints:
   `pnpm --filter @simple-agent-manager/web lint` passed with three pre-existing warnings;
   `pnpm --filter @simple-agent-manager/ui typecheck && pnpm --filter @simple-agent-manager/ui lint` passed.
 - Root gates:
-  `pnpm test` passed on final rerun — 21/21 turbo tasks, web 284 test files and
-  3410 tests passed, API 583 test files and 7880 tests passed;
-  `pnpm build` passed — 9/9 turbo tasks;
-  `pnpm lint` passed — 13/13 turbo tasks, with only pre-existing warnings in
-  `packages/acp-client` and unrelated web files;
-  `pnpm typecheck` passed — 19/19 turbo tasks, with the existing Astro template
-  baseline report for `apps/www`.
+  `pnpm test` passed before the final import-sort-only amend — 21/21 turbo
+  tasks, web 284 test files and 3410 tests passed, API 583 test files and 7880
+  tests passed. After the final amend, the focused 94-test web suite passed and
+  root `pnpm build` passed — 9/9 turbo tasks; root `pnpm lint` passed — 13/13
+  turbo tasks, with only pre-existing warnings in `packages/acp-client` and
+  unrelated web files; root `pnpm typecheck` passed — 19/19 turbo tasks, with
+  the existing Astro template baseline report for `apps/www`.
 - Stabilized existing `useSessionTimeline` unit test race found by the first
   root `pnpm test` run by waiting for the derived timeline entry before
   asserting; isolated and root reruns passed.
