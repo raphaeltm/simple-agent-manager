@@ -13,20 +13,18 @@ import type { Env } from '../env';
 import { log } from '../lib/logger';
 import { errors } from '../middleware/error';
 import { sanitizeUserInput } from '../routes/mcp/_helpers';
-import { upsertUserReportIncident } from './platform-feedback-incidents';
+import {
+  configuredFeedbackProjectId,
+  upsertUserReportIncident,
+} from './platform-feedback-incidents';
 import { redactSecretPatterns } from './secret-redaction';
 
 type FeedbackProject = { id: string; userId: string };
 
 const SAFE_TECHNICAL_REF_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,199}$/;
 
-function getConfiguredFeedbackProjectId(env: Env): string | undefined {
-  const projectId = env.PLATFORM_FEEDBACK_PROJECT_ID?.trim();
-  return projectId || undefined;
-}
-
 export async function getConfiguredFeedbackProject(env: Env): Promise<FeedbackProject | undefined> {
-  const feedbackProjectId = getConfiguredFeedbackProjectId(env);
+  const feedbackProjectId = await configuredFeedbackProjectId(env);
   if (!feedbackProjectId) return undefined;
 
   const db = drizzle(env.DATABASE, { schema });
@@ -169,7 +167,7 @@ export async function submitReport(
   consentToAttachRefs: boolean,
   refs?: ReportIssueRefs
 ): Promise<ReportIssueResponse> {
-  const feedbackProjectId = getConfiguredFeedbackProjectId(env);
+  const feedbackProjectId = await configuredFeedbackProjectId(env);
   if (!feedbackProjectId) {
     throw errors.notFound('Report issue feature is not configured');
   }

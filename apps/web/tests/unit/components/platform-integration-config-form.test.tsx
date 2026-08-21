@@ -2,7 +2,11 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { describe, expect, it, vi } from 'vitest';
 
 import { PlatformIntegrationConfigForm } from '../../../src/components/PlatformIntegrationConfigForm';
-import type { PlatformConfigStatus, PlatformIntegrationStatus } from '../../../src/lib/api';
+import type {
+  FeedbackProjectStatus,
+  PlatformConfigStatus,
+  PlatformIntegrationStatus,
+} from '../../../src/lib/api';
 
 function integration(
   fields: string[],
@@ -23,7 +27,19 @@ function integration(
 }
 
 function makeStatus(
-  infrastructure: PlatformIntegrationStatus = integration(['clientId', 'clientSecret'])
+  infrastructure: PlatformIntegrationStatus = integration(['clientId', 'clientSecret']),
+  feedbackProject: FeedbackProjectStatus = {
+    configured: false,
+    source: 'unset',
+    label: 'not configured',
+    state: 'unset',
+    projectId: null,
+    project: null,
+    message: 'No feedback project is configured.',
+    fields: {
+      projectId: { configured: false, source: 'unset', updatedAt: null, updatedBy: null },
+    },
+  }
 ): PlatformConfigStatus {
   return {
     setupCompleted: true,
@@ -36,13 +52,15 @@ function makeStatus(
       googleInfrastructureOAuth: infrastructure,
       gitlabOAuth: integration(['host', 'clientId', 'clientSecret']),
     },
+    feedbackProject,
   };
 }
 
 function renderForm(
   status: PlatformConfigStatus,
   mode: 'setup' | 'admin',
-  onPrimary = vi.fn().mockResolvedValue(undefined)
+  onPrimary = vi.fn().mockResolvedValue(undefined),
+  feedbackProjects: Array<{ id: string; name: string; status?: string | null }> = []
 ) {
   render(
     <PlatformIntegrationConfigForm
@@ -50,6 +68,7 @@ function renderForm(
       mode={mode}
       primaryLabel="Save integrations"
       onPrimary={onPrimary}
+      feedbackProjects={feedbackProjects}
     />
   );
   return { onPrimary };
@@ -61,6 +80,9 @@ describe('PlatformIntegrationConfigForm Google infrastructure OAuth', () => {
 
     expect(
       screen.queryByRole('heading', { name: 'Google infrastructure OAuth' })
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole('heading', { name: 'Private feedback project' })
     ).not.toBeInTheDocument();
     expect(screen.getByRole('heading', { name: 'Google sign-in (OAuth)' })).toBeInTheDocument();
   });
@@ -160,6 +182,47 @@ describe('PlatformIntegrationConfigForm Google infrastructure OAuth', () => {
     await waitFor(() => {
       expect(onPrimary).toHaveBeenCalledWith({
         googleInfrastructure: { remove: true },
+      });
+    });
+  });
+
+  it('submits feedback project selection and explicit runtime removal', async () => {
+    const feedbackProject: FeedbackProjectStatus = {
+      configured: true,
+      source: 'environment',
+      label: 'set via environment fallback',
+      state: 'ready',
+      projectId: 'feedback-project-1',
+      project: { id: 'feedback-project-1', name: 'Platform Feedback', status: 'active' },
+      message: 'Report Issue uses this project for new feedback.',
+      fields: {
+        projectId: { configured: true, source: 'environment', updatedAt: null, updatedBy: null },
+      },
+    };
+    const { onPrimary } = renderForm(makeStatus(undefined, feedbackProject), 'admin', undefined, [
+      { id: 'feedback-project-1', name: 'Platform Feedback', status: 'active' },
+      { id: 'feedback-project-2', name: 'Operator Feedback', status: 'active' },
+    ]);
+
+    fireEvent.change(screen.getByLabelText('Feedback project'), {
+      target: { value: 'feedback-project-2' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save integrations' }));
+
+    await waitFor(() => {
+      expect(onPrimary).toHaveBeenLastCalledWith({
+        feedback: { projectId: 'feedback-project-2' },
+      });
+    });
+
+    fireEvent.change(screen.getByLabelText('Feedback project'), {
+      target: { value: '' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Save integrations' }));
+
+    await waitFor(() => {
+      expect(onPrimary).toHaveBeenLastCalledWith({
+        feedback: { remove: true },
       });
     });
   });

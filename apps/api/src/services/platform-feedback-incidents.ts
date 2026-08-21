@@ -13,6 +13,7 @@ import {
 import type { Env } from '../env';
 import { ulid } from '../lib/ulid';
 import { redactSensitiveData } from './observability';
+import { ENV_KEYS, resolveSetting, SETTING_KEYS } from './platform-config-store';
 import { redactSecretPatterns } from './secret-redaction';
 import { formatUntrustedIdeaContent } from './untrusted-idea-content';
 
@@ -27,11 +28,7 @@ export const INCIDENT_QUEUE_STATES = [
 export type IncidentQueueState = (typeof INCIDENT_QUEUE_STATES)[number];
 
 const ACTIVE_INCIDENT_STATES = new Set<IncidentQueueState>(['pending', 'dispatched', 'claimed']);
-const TERMINAL_INCIDENT_STATES = new Set<IncidentQueueState>([
-  'resolved',
-  'rejected',
-  'expired',
-]);
+const TERMINAL_INCIDENT_STATES = new Set<IncidentQueueState>(['resolved', 'rejected', 'expired']);
 const REPORT_SOURCE = 'user-report';
 
 export interface IncidentConfig {
@@ -173,8 +170,13 @@ export function getIncidentConfig(env: Env): IncidentConfig {
   };
 }
 
-export function configuredFeedbackProjectId(env: Env): string | undefined {
-  const projectId = env.PLATFORM_FEEDBACK_PROJECT_ID?.trim();
+export async function configuredFeedbackProjectId(env: Env): Promise<string | undefined> {
+  const setting = await resolveSetting(
+    env,
+    SETTING_KEYS.feedbackProjectId,
+    ENV_KEYS.feedbackProjectId
+  );
+  const projectId = setting.value?.trim();
   return projectId || undefined;
 }
 
@@ -220,10 +222,20 @@ function parseEvidenceRefs(raw: string | null | undefined): unknown[] {
   }
 }
 
-function boundedEvidenceRefs(existing: unknown[], incoming: unknown[], config: IncidentConfig): string {
-  const redacted = redactSensitiveData([...existing, ...incoming]).slice(0, config.evidenceRefLimit);
+function boundedEvidenceRefs(
+  existing: unknown[],
+  incoming: unknown[],
+  config: IncidentConfig
+): string {
+  const redacted = redactSensitiveData([...existing, ...incoming]).slice(
+    0,
+    config.evidenceRefLimit
+  );
   let candidate = JSON.stringify(redacted);
-  while (new TextEncoder().encode(candidate).byteLength > config.evidenceMaxBytes && redacted.length) {
+  while (
+    new TextEncoder().encode(candidate).byteLength > config.evidenceMaxBytes &&
+    redacted.length
+  ) {
     redacted.pop();
     candidate = JSON.stringify([...redacted, { truncated: true }]);
   }
@@ -317,7 +329,10 @@ export async function upsertUserReportIncident(
   const nowIso = new Date(now).toISOString();
   const sanitizedTitle = sanitizeText(input.title, 200) || 'User-submitted feedback report';
   const sanitizedDescription = sanitizeText(input.description, 5_000);
-  const signature = await incidentSignature(REPORT_SOURCE, `${sanitizedTitle}\n${sanitizedDescription}`);
+  const signature = await incidentSignature(
+    REPORT_SOURCE,
+    `${sanitizedTitle}\n${sanitizedDescription}`
+  );
   const evidence = {
     kind: REPORT_SOURCE,
     reportId: ulid(),
@@ -374,7 +389,10 @@ export async function upsertUserReportIncident(
   const row = await readIncidentRow(env, signature);
   if (!row) throw new Error('Report incident upsert did not persist a row');
 
-  const ideaContent = buildReportIdeaContent(row, input.authorizedKeys).slice(0, input.contentMaxLength);
+  const ideaContent = buildReportIdeaContent(row, input.authorizedKeys).slice(
+    0,
+    input.contentMaxLength
+  );
   if (!row.idea_id) {
     const ideaId = ulid();
     await env.DATABASE.prepare(
@@ -488,7 +506,12 @@ export async function reclaimExpiredIncidentDispatches(
        AND dispatch_lease_expires_at < ?
        AND dispatch_attempts >= ?`
   )
-    .bind(now, 'incident dispatch attempts exhausted after lease expiry', now, config.maxDispatchAttempts)
+    .bind(
+      now,
+      'incident dispatch attempts exhausted after lease expiry',
+      now,
+      config.maxDispatchAttempts
+    )
     .run();
 
   const requeue = await env.DATABASE.prepare(
@@ -631,10 +654,7 @@ export async function completeIncidentDispatchLink(
   return result.meta.changes ?? 0;
 }
 
-export async function releaseIncidentDispatch(
-  env: Env,
-  executionId: string
-): Promise<number> {
+export async function releaseIncidentDispatch(env: Env, executionId: string): Promise<number> {
   const result = await env.DATABASE.prepare(
     `UPDATE platform_feedback_triages SET queue_state = 'pending',
       dispatch_lease_token = NULL, dispatch_lease_expires_at = NULL,

@@ -3,8 +3,8 @@
  *
  * These tools are intentionally scoped to the configured private feedback
  * project. Callers cannot provide a project id; the MCP token's project must
- * match PLATFORM_FEEDBACK_PROJECT_ID before any incident state is read or
- * mutated.
+ * match the effective feedback project setting before any incident state is
+ * read or mutated.
  */
 import type { Env } from '../../env';
 import {
@@ -29,12 +29,12 @@ import {
 const VALID_QUEUE_STATES = new Set<string>(INCIDENT_QUEUE_STATES);
 const VALID_RESOLUTION_OUTCOMES = new Set(['resolved', 'rejected']);
 
-function requireFeedbackProjectScope(
+async function requireFeedbackProjectScope(
   requestId: string | number | null,
   tokenData: McpTokenData,
   env: Env
-): JsonRpcResponse | null {
-  const feedbackProjectId = configuredFeedbackProjectId(env);
+): Promise<JsonRpcResponse | null> {
+  const feedbackProjectId = await configuredFeedbackProjectId(env);
   if (!feedbackProjectId || tokenData.projectId !== feedbackProjectId) {
     return jsonRpcError(
       requestId,
@@ -93,7 +93,7 @@ export async function handleListIncidentQueue(
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
-  const scopeError = requireFeedbackProjectScope(requestId, tokenData, env);
+  const scopeError = await requireFeedbackProjectScope(requestId, tokenData, env);
   if (scopeError) return scopeError;
 
   const states = parseStates(params);
@@ -133,7 +133,7 @@ export async function handleGetIncident(
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
-  const scopeError = requireFeedbackProjectScope(requestId, tokenData, env);
+  const scopeError = await requireFeedbackProjectScope(requestId, tokenData, env);
   if (scopeError) return scopeError;
 
   const incidentId = parseIncidentId(params);
@@ -171,7 +171,7 @@ export async function handleClaimIncident(
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
-  const scopeError = requireFeedbackProjectScope(requestId, tokenData, env);
+  const scopeError = await requireFeedbackProjectScope(requestId, tokenData, env);
   if (scopeError) return scopeError;
   const taskScopeError = requireTaskScope(requestId, tokenData);
   if (taskScopeError) return taskScopeError;
@@ -216,7 +216,7 @@ export async function handleResolveIncident(
   tokenData: McpTokenData,
   env: Env
 ): Promise<JsonRpcResponse> {
-  const scopeError = requireFeedbackProjectScope(requestId, tokenData, env);
+  const scopeError = await requireFeedbackProjectScope(requestId, tokenData, env);
   if (scopeError) return scopeError;
   const taskScopeError = requireTaskScope(requestId, tokenData);
   if (taskScopeError) return taskScopeError;

@@ -5,7 +5,7 @@ import type { ResolvedPlatformConfig } from './platform-config-types';
 /*
  * Selectors below are pure projections of an already-resolved config. Callers that need more
  * than one projection (notably `createAuth`) resolve once and select many, instead of paying
- * `resolvePlatformConfig`'s 13 D1 round-trips per projection. The `get*` wrappers keep the
+ * `resolvePlatformConfig`'s 14 D1 round-trips per projection. The `get*` wrappers keep the
  * single-projection call sites unchanged.
  */
 

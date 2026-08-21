@@ -95,6 +95,24 @@ const PLATFORM_STATUS = {
       },
     },
   },
+  feedbackProject: {
+    configured: true,
+    source: 'environment',
+    label: 'set via environment fallback',
+    state: 'ready',
+    projectId: 'feedback-project-1',
+    project: { id: 'feedback-project-1', name: 'Platform Feedback', status: 'active' },
+    message:
+      'Report Issue, automated platform triage, incident trigger sweeps, and private incident MCP tools use this project for new feedback.',
+    fields: {
+      projectId: {
+        configured: true,
+        source: 'environment',
+        updatedAt: null,
+        updatedBy: null,
+      },
+    },
+  },
 };
 
 async function respondJson(route: Route, status: number, body: unknown) {
@@ -125,7 +143,46 @@ async function setupMocks(
     }
     if (path === '/api/dashboard/active-tasks') return respondJson(route, 200, { tasks: [] });
     if (path === '/api/trial-status') return respondJson(route, 200, { isTrial: false });
-    if (path === '/api/projects') return respondJson(route, 200, { projects: [], total: 0 });
+    if (path === '/api/credentials') return respondJson(route, 200, []);
+    if (path === '/api/credentials/agent') return respondJson(route, 200, { credentials: [] });
+    if (path === '/api/github/installations') return respondJson(route, 200, []);
+    if (path === '/api/projects') {
+      return respondJson(route, 200, {
+        projects: [
+          {
+            id: 'feedback-project-1',
+            name: 'Platform Feedback',
+            repository: 'raphaeltm/simple-agent-manager',
+            githubRepoId: 123,
+            defaultBranch: 'main',
+            repoProvider: 'github',
+            status: 'active',
+            activeWorkspaceCount: 0,
+            activeSessionCount: 0,
+            lastActivityAt: null,
+            createdAt: '2026-08-21T00:00:00.000Z',
+            taskCountsByStatus: {},
+            linkedWorkspaces: 0,
+          },
+          {
+            id: 'feedback-project-2',
+            name: 'Long Private Feedback Project With Operators Watching Every Incident',
+            repository: 'raphaeltm/simple-agent-manager',
+            githubRepoId: 124,
+            defaultBranch: 'main',
+            repoProvider: 'github',
+            status: 'active',
+            activeWorkspaceCount: 0,
+            activeSessionCount: 0,
+            lastActivityAt: null,
+            createdAt: '2026-08-21T00:00:00.000Z',
+            taskCountsByStatus: {},
+            linkedWorkspaces: 0,
+          },
+        ],
+        nextCursor: null,
+      });
+    }
     if (path === '/api/notifications/unread-count') return respondJson(route, 200, { count: 0 });
     if (path === '/api/notifications') {
       return respondJson(route, 200, { notifications: [], unreadCount: 0, nextCursor: null });
@@ -183,11 +240,39 @@ test.describe('Platform config first-run and admin UI', () => {
     await expect(page.getByTestId('google-infrastructure-audit')).toContainText(
       'admin-platform-config'
     );
+    await expect(page.getByRole('heading', { name: 'Private feedback project' })).toBeVisible();
+    await expect(page.getByLabel('Feedback project')).toHaveValue('feedback-project-1');
+    await expect(page.getByTestId('feedback-project-status')).toContainText(
+      'Report Issue, automated platform triage'
+    );
     await expect(
       page.getByRole('button', { name: 'Remove runtime infrastructure client' })
     ).toBeVisible();
     await assertNoOverflow(page);
     await screenshot(page, 'platform-config-admin');
+    await page.getByRole('heading', { name: 'Private feedback project' }).scrollIntoViewIfNeeded();
+    await assertNoOverflow(page);
+    await screenshot(page, 'platform-config-admin-feedback');
+  });
+
+  test('admin feedback project selector sends the selected project to the platform config API', async ({
+    page,
+  }) => {
+    await setupMocks(page);
+    await page.goto('/admin/integrations');
+    await page.getByLabel('Feedback project').selectOption('feedback-project-2');
+    const saveRequest = page.waitForRequest(
+      (request) =>
+        new URL(request.url()).pathname === '/api/admin/platform-config' &&
+        request.method() === 'PUT'
+    );
+    await page.getByRole('button', { name: 'Save integrations' }).click();
+
+    const body = JSON.parse((await saveRequest).postData() ?? '{}') as {
+      config?: { feedback?: { projectId?: string; remove?: boolean } };
+    };
+    expect(body.config?.feedback).toEqual({ projectId: 'feedback-project-2' });
+    await assertNoOverflow(page);
   });
 
   test('login surfaces include Google sign-in', async ({ page }) => {

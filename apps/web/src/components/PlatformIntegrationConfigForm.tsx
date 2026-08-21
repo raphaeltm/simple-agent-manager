@@ -3,6 +3,7 @@ import type { FormEvent, ReactNode } from 'react';
 import { useMemo, useState } from 'react';
 
 import type {
+  FeedbackProjectStatus,
   PlatformConfigFieldStatus,
   PlatformConfigStatus,
   PlatformIntegrationConfigInput,
@@ -11,6 +12,7 @@ import type {
 import { ConfirmDialog } from './ConfirmDialog';
 
 type FormValues = Record<string, string>;
+type FeedbackProjectOption = { id: string; name: string; status?: string | null };
 
 interface PlatformIntegrationConfigFormProps {
   status: PlatformConfigStatus;
@@ -21,6 +23,7 @@ interface PlatformIntegrationConfigFormProps {
   secondarySubmitting?: boolean;
   onPrimary: (config: PlatformIntegrationConfigInput) => Promise<void> | void;
   onSecondary?: (config: PlatformIntegrationConfigInput) => Promise<void> | void;
+  feedbackProjects?: FeedbackProjectOption[];
 }
 
 const FIELD_LABELS = {
@@ -42,6 +45,7 @@ export function PlatformIntegrationConfigForm({
   secondarySubmitting = false,
   onPrimary,
   onSecondary,
+  feedbackProjects = [],
 }: PlatformIntegrationConfigFormProps) {
   const [values, setValues] = useState<FormValues>({});
   const [showRemoveInfrastructureConfirm, setShowRemoveInfrastructureConfirm] = useState(false);
@@ -141,10 +145,12 @@ export function PlatformIntegrationConfigForm({
               onChange={updateValue}
             />
             <p className="text-xs text-fg-muted">
-              Enter both values to configure or rotate the client. Secrets are encrypted and never returned.
+              Enter both values to configure or rotate the client. Secrets are encrypted and never
+              returned.
             </p>
             <FieldAudit
               field={status.integrations.googleInfrastructureOAuth.fields.clientSecret}
+              testId="google-infrastructure-audit"
             />
             {status.integrations.googleInfrastructureOAuth.source === 'runtime' && (
               <button
@@ -188,6 +194,15 @@ export function PlatformIntegrationConfigForm({
           />
         </IntegrationSection>
       </div>
+
+      {mode === 'admin' && (
+        <FeedbackProjectSection
+          status={status.feedbackProject}
+          projects={feedbackProjects}
+          value={values['feedback.projectId'] ?? status.feedbackProject.projectId ?? ''}
+          onChange={(value) => updateValue('feedback.projectId', value)}
+        />
+      )}
 
       <IntegrationSection
         title="GitHub App"
@@ -315,6 +330,78 @@ function IntegrationSection({
   );
 }
 
+function FeedbackProjectSection({
+  status,
+  projects,
+  value,
+  onChange,
+}: {
+  status: FeedbackProjectStatus;
+  projects: FeedbackProjectOption[];
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const projectOptions = [...projects];
+  if (status.projectId && !projectOptions.some((project) => project.id === status.projectId)) {
+    projectOptions.unshift({
+      id: status.projectId,
+      name:
+        status.project?.name ??
+        (status.state === 'missing' ? 'Missing configured project' : 'Configured project'),
+      status: status.state,
+    });
+  }
+
+  return (
+    <IntegrationSection
+      title="Private feedback project"
+      description="Select the project that receives Report Issue draft Ideas, automated platform triage, incident trigger agents, and private incident MCP tools."
+      status={status}
+    >
+      <label className="block space-y-1.5">
+        <FieldLabel label="Feedback project" field={status.fields.projectId} />
+        <select
+          aria-label="Feedback project"
+          value={value}
+          onChange={(event) => onChange(event.target.value)}
+          className="w-full min-h-11 rounded-sm border border-border-default bg-inset px-3 py-2 text-sm text-fg-primary"
+        >
+          <option value="">Use environment fallback / unset</option>
+          {projectOptions.map((project) => (
+            <option key={project.id} value={project.id}>
+              {project.name} — {project.id}
+              {project.status && project.status !== 'active' ? ` (${project.status})` : ''}
+            </option>
+          ))}
+        </select>
+      </label>
+      <p
+        className={`rounded-md border px-3 py-2 text-sm ${
+          status.state === 'ready'
+            ? 'border-success/30 bg-success-tint text-success-fg'
+            : 'border-warning/30 bg-warning-tint text-warning-fg'
+        }`}
+        data-testid="feedback-project-status"
+      >
+        {status.message}
+      </p>
+      {status.projectId && (
+        <p className="text-xs text-fg-muted">
+          Effective project: <span className="font-mono">{status.projectId}</span>
+          {status.project?.name ? ` (${status.project.name})` : ''}
+        </p>
+      )}
+      <p className="text-xs text-fg-muted">
+        Runtime selection is stored in platform settings and overrides the
+        PLATFORM_FEEDBACK_PROJECT_ID environment fallback. Clearing the runtime selection reveals
+        that fallback, or hides Report Issue if no fallback is set. Existing incidents are not
+        migrated.
+      </p>
+      <FieldAudit field={status.fields.projectId} testId="feedback-project-audit" />
+    </IntegrationSection>
+  );
+}
+
 function TextField({
   name,
   label,
@@ -338,7 +425,9 @@ function TextField({
         aria-label={label}
         value={value}
         onChange={(event) => onChange(name, event.target.value)}
-        placeholder={field?.configured ? 'Leave blank to keep current value' : `Enter ${label.toLowerCase()}`}
+        placeholder={
+          field?.configured ? 'Leave blank to keep current value' : `Enter ${label.toLowerCase()}`
+        }
         className="w-full min-h-11 rounded-sm border border-border-default bg-inset px-3 py-2 text-sm text-fg-primary placeholder:text-fg-muted"
         autoComplete="off"
         spellCheck={false}
@@ -367,7 +456,9 @@ function TextAreaField({
         aria-label={label}
         value={value}
         onChange={(event) => onChange(name, event.target.value)}
-        placeholder={field?.configured ? 'Leave blank to keep current key' : 'Paste PEM private key'}
+        placeholder={
+          field?.configured ? 'Leave blank to keep current key' : 'Paste PEM private key'
+        }
         className="min-h-36 w-full resize-y rounded-sm border border-border-default bg-inset px-3 py-2 font-mono text-xs text-fg-primary placeholder:text-fg-muted"
         autoComplete="off"
         spellCheck={false}
@@ -376,10 +467,10 @@ function TextAreaField({
   );
 }
 
-function FieldAudit({ field }: { field?: PlatformConfigFieldStatus }) {
+function FieldAudit({ field, testId }: { field?: PlatformConfigFieldStatus; testId?: string }) {
   if (!field?.updatedAt) return null;
   return (
-    <p className="text-xs text-fg-muted" data-testid="google-infrastructure-audit">
+    <p className="text-xs text-fg-muted" data-testid={testId}>
       Last rotated {new Date(field.updatedAt).toLocaleString()}
       {field.updatedBy ? ` by ${field.updatedBy}` : ''}
     </p>
@@ -408,7 +499,9 @@ function SourceBadge({
     ? 'border-success/30 bg-success-tint text-success-fg'
     : 'border-border-default bg-surface-secondary text-fg-muted';
   return (
-    <span className={`inline-flex items-center rounded-full border px-2 ${compact ? 'py-0 text-[11px]' : 'py-0.5 text-xs'} ${className}`}>
+    <span
+      className={`inline-flex items-center rounded-full border px-2 ${compact ? 'py-0 text-[11px]' : 'py-0.5 text-xs'} ${className}`}
+    >
       {label}
     </span>
   );
@@ -424,25 +517,37 @@ function buildConfig(values: FormValues): PlatformIntegrationConfigInput {
   const config: PlatformIntegrationConfigInput = {};
   for (const [key, value] of Object.entries(values)) {
     const trimmed = value.trim();
+    if (key === 'feedback.projectId') {
+      config.feedback = trimmed ? { projectId: trimmed } : { remove: true };
+      continue;
+    }
     if (!trimmed) continue;
 
     if (key.startsWith('github.')) {
-      const field = key.slice('github.'.length) as keyof NonNullable<PlatformIntegrationConfigInput['github']>;
+      const field = key.slice('github.'.length) as keyof NonNullable<
+        PlatformIntegrationConfigInput['github']
+      >;
       config.github = { ...config.github, [field]: trimmed };
     }
 
     if (key.startsWith('google.')) {
-      const field = key.slice('google.'.length) as keyof NonNullable<PlatformIntegrationConfigInput['google']>;
+      const field = key.slice('google.'.length) as keyof NonNullable<
+        PlatformIntegrationConfigInput['google']
+      >;
       config.google = { ...config.google, [field]: trimmed };
     }
 
     if (key.startsWith('googleInfrastructure.')) {
-      const field = key.slice('googleInfrastructure.'.length) as keyof NonNullable<PlatformIntegrationConfigInput['googleInfrastructure']>;
+      const field = key.slice('googleInfrastructure.'.length) as keyof NonNullable<
+        PlatformIntegrationConfigInput['googleInfrastructure']
+      >;
       config.googleInfrastructure = { ...config.googleInfrastructure, [field]: trimmed };
     }
 
     if (key.startsWith('gitlab.')) {
-      const field = key.slice('gitlab.'.length) as keyof NonNullable<PlatformIntegrationConfigInput['gitlab']>;
+      const field = key.slice('gitlab.'.length) as keyof NonNullable<
+        PlatformIntegrationConfigInput['gitlab']
+      >;
       config.gitlab = { ...config.gitlab, [field]: trimmed };
     }
   }

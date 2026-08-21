@@ -35,7 +35,7 @@ import type {
 /**
  * Per-isolate cache TTL for the resolved platform config, in milliseconds.
  *
- * `resolvePlatformConfig` costs 13 D1 round-trips and sits on the auth preamble of every
+ * `resolvePlatformConfig` costs 14 D1 round-trips and sits on the auth preamble of every
  * authenticated request (`createAuth`), so it is exactly the "stable config" case the
  * per-isolate cache in `.claude/rules/60-request-io-and-bundle-budgets.md` exists for.
  * Platform OAuth config changes at most a handful of times in a deployment's lifetime.
@@ -84,6 +84,10 @@ function settingStatement(
      VALUES (?, ?, ?, ?)
      ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, updated_by = excluded.updated_by`
   ).bind(key, value, now, updatedBy);
+}
+
+function deleteSettingStatement(env: Env, key: string): D1PreparedStatement {
+  return env.DATABASE.prepare('DELETE FROM platform_settings WHERE key = ?').bind(key);
 }
 
 async function secretUpsertStatement(
@@ -143,6 +147,7 @@ async function buildPlatformIntegrationStatements(
   const google = input.google ?? {};
   const googleInfrastructure = input.googleInfrastructure ?? {};
   const gitlab = input.gitlab ?? {};
+  const feedback = input.feedback ?? {};
 
   const githubClientId = trimOptional(github.clientId);
   if (githubClientId)
@@ -197,6 +202,17 @@ async function buildPlatformIntegrationStatements(
     statements.push(
       settingStatement(env, SETTING_KEYS.gitlabClientId, gitlabClientId, updatedBy, now)
     );
+
+  if (feedback.remove) {
+    statements.push(deleteSettingStatement(env, SETTING_KEYS.feedbackProjectId));
+  } else {
+    const feedbackProjectId = trimOptional(feedback.projectId);
+    if (feedbackProjectId) {
+      statements.push(
+        settingStatement(env, SETTING_KEYS.feedbackProjectId, feedbackProjectId, updatedBy, now)
+      );
+    }
+  }
 
   const githubClientSecret = trimOptional(github.clientSecret);
   if (githubClientSecret) {
@@ -314,6 +330,7 @@ export async function previewPlatformIntegrationConfig(
   const google = input.google ?? {};
   const googleInfrastructure = input.googleInfrastructure ?? {};
   const gitlab = input.gitlab ?? {};
+  const feedback = input.feedback ?? {};
 
   return {
     github: {
@@ -342,6 +359,11 @@ export async function previewPlatformIntegrationConfig(
       host: overlayPreview(current.gitlab.host, gitlab.host),
       clientId: overlayPreview(current.gitlab.clientId, gitlab.clientId),
       clientSecret: overlayPreview(current.gitlab.clientSecret, gitlab.clientSecret),
+    },
+    feedback: {
+      projectId: feedback.remove
+        ? { value: null, source: 'unset', updatedAt: null, updatedBy: null }
+        : overlayPreview(current.feedback.projectId, feedback.projectId),
     },
   };
 }
@@ -392,7 +414,7 @@ interface PlatformConfigCacheEntry {
 let platformConfigCache: PlatformConfigCacheEntry | null = null;
 
 /**
- * Bumped by every invalidation. A resolve captures this before its (slow, 13-round-trip) read
+ * Bumped by every invalidation. A resolve captures this before its (slow, 14-round-trip) read
  * and may only publish its result if the value is unchanged when the read completes — otherwise
  * a write landed mid-read and this result is already stale. Without the compare-and-set, a slow
  * reader that started BEFORE a config write can finish AFTER it and overwrite the fresh entry
@@ -404,7 +426,7 @@ let platformConfigCacheGeneration = 0;
 
 /**
  * The read currently in flight for a given binding, so N concurrent misses on a cold or
- * just-expired isolate collapse into ONE 13-query read instead of N.
+ * just-expired isolate collapse into ONE 14-query read instead of N.
  */
 let platformConfigInFlight: {
   database: D1Database;
@@ -446,7 +468,7 @@ export function resolvePlatformConfigCacheMs(env: Env): number {
 /**
  * Resolves the platform integration config, serving a per-isolate cached copy when one is live.
  *
- * Costs 13 D1 round-trips on a miss; 0 on a hit. Callers that need several projections of the
+ * Costs 14 D1 round-trips on a miss; 0 on a hit. Callers that need several projections of the
  * config (`createAuth` needs three) should resolve once and use the `select*` helpers below
  * rather than calling the `get*` wrappers repeatedly.
  *
@@ -482,7 +504,7 @@ export async function resolvePlatformConfig(
   }
 
   // Join a read already in flight for this same binding and generation rather than issuing a
-  // second identical 13-query burst.
+  // second identical 14-query burst.
   const joinable = platformConfigInFlight;
   if (
     joinable &&
@@ -531,6 +553,7 @@ async function readPlatformConfigFromStore(env: Env): Promise<ResolvedPlatformCo
     gitlabHost,
     gitlabClientId,
     gitlabClientSecret,
+    feedbackProjectId,
   ] = await Promise.all([
     resolveSetting(env, SETTING_KEYS.githubClientId, ENV_KEYS.githubClientId),
     resolveSecret(env, 'github', SECRET_KINDS.githubClientSecret, ENV_KEYS.githubClientSecret),
@@ -554,6 +577,7 @@ async function readPlatformConfigFromStore(env: Env): Promise<ResolvedPlatformCo
     resolveSetting(env, SETTING_KEYS.gitlabHost, ENV_KEYS.gitlabHost),
     resolveSetting(env, SETTING_KEYS.gitlabClientId, ENV_KEYS.gitlabClientId),
     resolveSecret(env, 'gitlab', SECRET_KINDS.gitlabClientSecret, ENV_KEYS.gitlabClientSecret),
+    resolveSetting(env, SETTING_KEYS.feedbackProjectId, ENV_KEYS.feedbackProjectId),
   ]);
 
   return {
@@ -577,6 +601,9 @@ async function readPlatformConfigFromStore(env: Env): Promise<ResolvedPlatformCo
       host: gitlabHost,
       clientId: gitlabClientId,
       clientSecret: gitlabClientSecret,
+    },
+    feedback: {
+      projectId: feedbackProjectId,
     },
   };
 }

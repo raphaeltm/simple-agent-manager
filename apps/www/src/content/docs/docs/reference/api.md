@@ -13,7 +13,7 @@ This reference covers the most commonly used endpoints. For the complete list of
 
 Task agents can call `wait_for_subtasks` with a stable workflow-step `waitKey`, unique direct-child task IDs, an optional `condition` of `all` (the default) or `any`, and an optional bounded `wakeAfterSeconds`. The agent must persist the workflow state and key before calling, reuse the key after a lost response, and end its turn after registration. ProjectData then reconciles child terminal state and durably wakes the same canonical parent session exactly once, including after session sleep and runtime replacement. Automatic wake prompts carry only trusted task IDs and statuses; agents fetch child-authored output explicitly as untrusted data. Servers without durable prompt delivery reject registration so clients can use bounded foreground polling as a compatibility fallback.
 
-Private feedback-project agents can also call `list_incident_queue`, `get_incident`, `claim_incident`, and `resolve_incident`. These tools are scoped server-side to `PLATFORM_FEEDBACK_PROJECT_ID`; callers cannot provide a project id. `claim_incident` and `resolve_incident` require a task-scoped MCP token, use bounded leases/CAS tokens, and return only private redacted incident evidence labelled as untrusted.
+Private feedback-project agents can also call `list_incident_queue`, `get_incident`, `claim_incident`, and `resolve_incident`. These tools are scoped server-side to the effective private feedback project setting (Admin → Integrations runtime value first, then `PLATFORM_FEEDBACK_PROJECT_ID` fallback); callers cannot provide a project id. `claim_incident` and `resolve_incident` require a task-scoped MCP token, use bounded leases/CAS tokens, and return only private redacted incident evidence labelled as untrusted.
 
 ## Authentication
 
@@ -281,7 +281,7 @@ See [Reporting Issues](/docs/guides/reporting-issues/) for the user-facing flow 
 
 ### `GET /api/report-issue/config`
 
-Report whether in-app issue reporting is available on this deployment. Returns `{ "enabled": false }` when `PLATFORM_FEEDBACK_PROJECT_ID` is unset or does not name an existing project — the UI hides both entry points in that case.
+Report whether in-app issue reporting is available on this deployment. Returns `{ "enabled": false }` when no effective private feedback project is configured, or when the effective setting does not name an existing project — the UI hides both entry points in that case.
 
 ### `POST /api/report-issue`
 
@@ -293,7 +293,7 @@ Rate-limited to 20 submissions per clock hour per user (`RATE_LIMIT_REPORT_ISSUE
 
 ### `POST /api/admin/observability/feedback-triage`
 
-Superadmin only. Runs a platform-error triage sweep immediately instead of waiting for the hourly cron. There is no UI for this yet, so it is the only way to verify a freshly configured `PLATFORM_FEEDBACK_PROJECT_ID` without waiting up to an hour.
+Superadmin only. Runs a platform-error triage sweep immediately instead of waiting for the hourly cron. The feedback project itself is configured from **Admin → Integrations** or the environment fallback; this endpoint remains the manual way to verify automated triage without waiting up to an hour.
 
 ## Admin Runtime Controls
 

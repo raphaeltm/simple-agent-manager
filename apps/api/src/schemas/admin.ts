@@ -72,5 +72,11 @@ export const UpdatePlatformIntegrationConfigSchema = v.object({
         clientSecret: v.optional(v.string()),
       })
     ),
+    feedback: v.optional(
+      v.object({
+        projectId: v.optional(v.pipe(v.string(), v.maxLength(200))),
+        remove: v.optional(v.boolean()),
+      })
+    ),
   }),
 });

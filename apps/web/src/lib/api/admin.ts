@@ -630,6 +630,23 @@ export interface PlatformIntegrationStatus {
   fields: Record<string, PlatformConfigFieldStatus>;
 }
 
+export type FeedbackProjectState = 'unset' | 'ready' | 'missing' | 'inaccessible';
+
+export interface FeedbackProjectStatus {
+  configured: boolean;
+  source: PlatformConfigSource;
+  label: string;
+  state: FeedbackProjectState;
+  projectId: string | null;
+  project: {
+    id: string;
+    name: string;
+    status: string | null;
+  } | null;
+  message: string;
+  fields: Record<string, PlatformConfigFieldStatus>;
+}
+
 export interface PlatformConfigStatus {
   setupCompleted: boolean;
   setupForced: boolean;
@@ -641,6 +658,7 @@ export interface PlatformConfigStatus {
     googleInfrastructureOAuth: PlatformIntegrationStatus;
     gitlabOAuth: PlatformIntegrationStatus;
   };
+  feedbackProject: FeedbackProjectStatus;
 }
 
 export interface PlatformIntegrationConfigInput {
@@ -665,6 +683,10 @@ export interface PlatformIntegrationConfigInput {
     host?: string;
     clientId?: string;
     clientSecret?: string;
+  };
+  feedback?: {
+    projectId?: string;
+    remove?: boolean;
   };
 }
 

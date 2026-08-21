@@ -6,8 +6,8 @@
  * arguments, so they fail if either half of the fix regresses:
  *
  *  - if `createAuth` goes back to awaiting three independent `get*OAuthConfig` helpers, the cold
- *    isolate count returns to 39 (3 x 13);
- *  - if the per-isolate cache is removed, the warm isolate count returns to 13.
+ *    isolate count returns to 42 (3 x 14);
+ *  - if the per-isolate cache is removed, the warm isolate count returns to 14.
  */
 import Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -41,10 +41,10 @@ import {
 import { createSchemaTables, createSqliteD1 } from '../../helpers/sqlite-d1';
 
 /**
- * The exact number of D1 round-trips one `resolvePlatformConfig` costs: 7 `platform_settings`
+ * The exact number of D1 round-trips one `resolvePlatformConfig` costs: 8 `platform_settings`
  * reads + 6 `platform_credentials` reads.
  */
-const QUERIES_PER_RESOLVE = 13;
+const QUERIES_PER_RESOLVE = 14;
 
 interface QueryCounter {
   /** Every executed statement's SQL, in execution order. */
@@ -390,7 +390,7 @@ describe('platform config cache invalidation', () => {
       resolvePlatformConfig(env),
     ]);
 
-    // Without single-flight this would be 3 x 13 = 39.
+    // Without single-flight this would be 3 x 14 = 42.
     expect(counter.platformConfigReads()).toHaveLength(QUERIES_PER_RESOLVE);
     expect(a).toBe(b);
     expect(b).toBe(c);

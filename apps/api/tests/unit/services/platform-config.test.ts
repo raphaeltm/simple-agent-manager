@@ -120,10 +120,59 @@ describe('platform config resolver', () => {
   it('falls back to environment values when runtime config is absent', async () => {
     const config = await resolvePlatformConfig(createEnv());
     expect(config.github.clientId).toMatchObject({ value: 'env-gh-client', source: 'environment' });
-    expect(config.github.clientSecret).toMatchObject({ value: 'env-gh-secret', source: 'environment' });
-    expect(config.google.clientId).toMatchObject({ value: 'env-google-login-client', source: 'environment' });
-    expect(config.gitlab.host).toMatchObject({ value: 'https://gitlab.example.com/', source: 'environment' });
-    expect(config.gitlab.clientId).toMatchObject({ value: 'env-gitlab-client', source: 'environment' });
+    expect(config.github.clientSecret).toMatchObject({
+      value: 'env-gh-secret',
+      source: 'environment',
+    });
+    expect(config.google.clientId).toMatchObject({
+      value: 'env-google-login-client',
+      source: 'environment',
+    });
+    expect(config.gitlab.host).toMatchObject({
+      value: 'https://gitlab.example.com/',
+      source: 'environment',
+    });
+    expect(config.gitlab.clientId).toMatchObject({
+      value: 'env-gitlab-client',
+      source: 'environment',
+    });
+  });
+
+  it('resolves the feedback project from runtime settings before the environment fallback', async () => {
+    const env = createEnv({ PLATFORM_FEEDBACK_PROJECT_ID: 'env-feedback-project' });
+
+    await expect(resolvePlatformConfig(env)).resolves.toMatchObject({
+      feedback: {
+        projectId: { value: 'env-feedback-project', source: 'environment' },
+      },
+    });
+
+    await savePlatformIntegrationConfig(
+      env,
+      {
+        feedback: {
+          projectId: 'runtime-feedback-project',
+        },
+      },
+      'admin-1'
+    );
+
+    await expect(resolvePlatformConfig(env)).resolves.toMatchObject({
+      feedback: {
+        projectId: {
+          value: 'runtime-feedback-project',
+          source: 'runtime',
+          updatedBy: 'admin-1',
+        },
+      },
+    });
+
+    await savePlatformIntegrationConfig(env, { feedback: { remove: true } }, 'admin-2');
+    await expect(resolvePlatformConfig(env)).resolves.toMatchObject({
+      feedback: {
+        projectId: { value: 'env-feedback-project', source: 'environment' },
+      },
+    });
   });
 
   it('resolves login Google and infra Google from independent env vars', async () => {
@@ -131,11 +180,17 @@ describe('platform config resolver', () => {
 
     // Login Google resolves from GOOGLE_LOGIN_* (and the setup-wizard store).
     const login = await getGoogleLoginOAuthConfig(env);
-    expect(login).toEqual({ clientId: 'env-google-login-client', clientSecret: 'env-google-login-secret' });
+    expect(login).toEqual({
+      clientId: 'env-google-login-client',
+      clientSecret: 'env-google-login-secret',
+    });
 
     // Infra/GCP Google resolves from GOOGLE_* directly.
     const infra = await getGoogleInfraOAuthConfig(env);
-    expect(infra).toEqual({ clientId: 'env-google-infra-client', clientSecret: 'env-google-infra-secret' });
+    expect(infra).toEqual({
+      clientId: 'env-google-infra-client',
+      clientSecret: 'env-google-infra-secret',
+    });
 
     // Saving a login Google client via the setup wizard must NOT change infra.
     await savePlatformIntegrationConfig(
@@ -156,12 +211,16 @@ describe('platform config resolver', () => {
 
   it('resolves runtime infrastructure OAuth before env without changing Google login', async () => {
     const env = createEnv();
-    await savePlatformIntegrationConfig(env, {
-      googleInfrastructure: {
-        clientId: 'runtime-infra-client',
-        clientSecret: 'runtime-infra-secret',
+    await savePlatformIntegrationConfig(
+      env,
+      {
+        googleInfrastructure: {
+          clientId: 'runtime-infra-client',
+          clientSecret: 'runtime-infra-secret',
+        },
       },
-    }, 'admin-1');
+      'admin-1'
+    );
 
     await expect(getGoogleInfraOAuthConfig(env)).resolves.toEqual({
       clientId: 'runtime-infra-client',
@@ -187,28 +246,28 @@ describe('platform config resolver', () => {
 
   it('atomically removes runtime infrastructure OAuth and reveals env fallback', async () => {
     const env = createEnv();
-    await savePlatformIntegrationConfig(env, {
-      googleInfrastructure: {
-        clientId: 'runtime-infra-client',
-        clientSecret: 'runtime-infra-secret',
-      },
-    }, 'admin-1');
-
     await savePlatformIntegrationConfig(
       env,
-      { googleInfrastructure: { remove: true } },
-      'admin-2',
+      {
+        googleInfrastructure: {
+          clientId: 'runtime-infra-client',
+          clientSecret: 'runtime-infra-secret',
+        },
+      },
+      'admin-1'
     );
+
+    await savePlatformIntegrationConfig(env, { googleInfrastructure: { remove: true } }, 'admin-2');
 
     await expect(getGoogleInfraOAuthConfig(env)).resolves.toEqual({
       clientId: 'env-google-infra-client',
       clientSecret: 'env-google-infra-secret',
     });
     const runtimeSetting = await env.DATABASE.prepare(
-      "SELECT value FROM platform_settings WHERE key = 'integration.googleInfrastructure.clientId'",
+      "SELECT value FROM platform_settings WHERE key = 'integration.googleInfrastructure.clientId'"
     ).first();
     const runtimeSecret = await env.DATABASE.prepare(
-      "SELECT id FROM platform_credentials WHERE provider = 'google-infrastructure'",
+      "SELECT id FROM platform_credentials WHERE provider = 'google-infrastructure'"
     ).first();
     expect(runtimeSetting).toBeFalsy();
     expect(runtimeSecret).toBeFalsy();
@@ -216,27 +275,37 @@ describe('platform config resolver', () => {
 
   it('leaves the previous infrastructure pair usable when the atomic batch fails', async () => {
     const env = createEnv();
-    await savePlatformIntegrationConfig(env, {
-      googleInfrastructure: {
-        clientId: 'stable-infra-client',
-        clientSecret: 'stable-infra-secret',
+    await savePlatformIntegrationConfig(
+      env,
+      {
+        googleInfrastructure: {
+          clientId: 'stable-infra-client',
+          clientSecret: 'stable-infra-secret',
+        },
       },
-    }, 'admin-1');
+      'admin-1'
+    );
     await env.DATABASE.prepare(
       `CREATE TRIGGER reject_infrastructure_rotation
        BEFORE UPDATE ON platform_credentials
        WHEN OLD.provider = 'google-infrastructure'
        BEGIN
          SELECT RAISE(ABORT, 'injected batch failure');
-       END`,
+       END`
     ).run();
 
-    await expect(savePlatformIntegrationConfig(env, {
-      googleInfrastructure: {
-        clientId: 'replacement-client',
-        clientSecret: 'replacement-secret',
-      },
-    }, 'admin-2')).rejects.toThrow('injected batch failure');
+    await expect(
+      savePlatformIntegrationConfig(
+        env,
+        {
+          googleInfrastructure: {
+            clientId: 'replacement-client',
+            clientSecret: 'replacement-secret',
+          },
+        },
+        'admin-2'
+      )
+    ).rejects.toThrow('injected batch failure');
 
     await expect(getGoogleInfraOAuthConfig(env)).resolves.toEqual({
       clientId: 'stable-infra-client',
@@ -245,7 +314,10 @@ describe('platform config resolver', () => {
   });
 
   it('returns null for login Google when only infra Google env is set', async () => {
-    const env = createEnv({ GOOGLE_LOGIN_CLIENT_ID: undefined, GOOGLE_LOGIN_CLIENT_SECRET: undefined });
+    const env = createEnv({
+      GOOGLE_LOGIN_CLIENT_ID: undefined,
+      GOOGLE_LOGIN_CLIENT_SECRET: undefined,
+    });
     // Infra creds present, but login must not borrow them.
     expect(await getGoogleInfraOAuthConfig(env)).not.toBeNull();
     expect(await getGoogleLoginOAuthConfig(env)).toBeNull();
@@ -253,33 +325,49 @@ describe('platform config resolver', () => {
 
   it('uses runtime settings and encrypted secrets before environment fallback', async () => {
     const env = createEnv();
-    await savePlatformIntegrationConfig(env, {
-      github: {
-        clientId: 'runtime-gh-client',
-        clientSecret: 'runtime-gh-secret',
-        appId: '98765',
-        appPrivateKey: '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',
-        appSlug: 'runtime-app',
-        webhookSecret: 'runtime-webhook-secret',
+    await savePlatformIntegrationConfig(
+      env,
+      {
+        github: {
+          clientId: 'runtime-gh-client',
+          clientSecret: 'runtime-gh-secret',
+          appId: '98765',
+          appPrivateKey: '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----',
+          appSlug: 'runtime-app',
+          webhookSecret: 'runtime-webhook-secret',
+        },
+        google: {
+          clientId: 'runtime-google-client',
+          clientSecret: 'runtime-google-secret',
+        },
+        gitlab: {
+          host: 'https://gitlab.runtime.example.com/',
+          clientId: 'runtime-gitlab-client',
+          clientSecret: 'runtime-gitlab-secret',
+        },
       },
-      google: {
-        clientId: 'runtime-google-client',
-        clientSecret: 'runtime-google-secret',
-      },
-      gitlab: {
-        host: 'https://gitlab.runtime.example.com/',
-        clientId: 'runtime-gitlab-client',
-        clientSecret: 'runtime-gitlab-secret',
-      },
-    }, 'admin-1');
+      'admin-1'
+    );
 
     const config = await resolvePlatformConfig(env);
     expect(config.github.clientId).toMatchObject({ value: 'runtime-gh-client', source: 'runtime' });
-    expect(config.github.clientSecret).toMatchObject({ value: 'runtime-gh-secret', source: 'runtime' });
+    expect(config.github.clientSecret).toMatchObject({
+      value: 'runtime-gh-secret',
+      source: 'runtime',
+    });
     expect(config.github.appId).toMatchObject({ value: '98765', source: 'runtime' });
-    expect(config.google.clientSecret).toMatchObject({ value: 'runtime-google-secret', source: 'runtime' });
-    expect(config.gitlab.host).toMatchObject({ value: 'https://gitlab.runtime.example.com/', source: 'runtime' });
-    expect(config.gitlab.clientSecret).toMatchObject({ value: 'runtime-gitlab-secret', source: 'runtime' });
+    expect(config.google.clientSecret).toMatchObject({
+      value: 'runtime-google-secret',
+      source: 'runtime',
+    });
+    expect(config.gitlab.host).toMatchObject({
+      value: 'https://gitlab.runtime.example.com/',
+      source: 'runtime',
+    });
+    expect(config.gitlab.clientSecret).toMatchObject({
+      value: 'runtime-gitlab-secret',
+      source: 'runtime',
+    });
 
     const secretRow = await env.DATABASE.prepare(
       `SELECT provider, credential_kind AS credentialKind, encrypted_token AS encryptedToken, is_enabled AS isEnabled
@@ -345,27 +433,44 @@ describe('platform config resolver', () => {
 
   it('reports effective source labels for admin UI', async () => {
     const env = createEnv({ GITHUB_CLIENT_ID: undefined, GITHUB_CLIENT_SECRET: undefined });
-    await savePlatformIntegrationConfig(env, {
-      google: { clientId: 'runtime-google-client', clientSecret: 'runtime-google-secret' },
-    }, 'admin-1');
+    await savePlatformIntegrationConfig(
+      env,
+      {
+        google: { clientId: 'runtime-google-client', clientSecret: 'runtime-google-secret' },
+      },
+      'admin-1'
+    );
 
     const status = await getPlatformConfigStatus(env);
-    expect(status.integrations.githubOAuth).toMatchObject({ configured: false, label: 'not configured' });
-    expect(status.integrations.githubApp).toMatchObject({ configured: true, label: 'set via environment fallback' });
+    expect(status.integrations.githubOAuth).toMatchObject({
+      configured: false,
+      label: 'not configured',
+    });
+    expect(status.integrations.githubApp).toMatchObject({
+      configured: true,
+      label: 'set via environment fallback',
+    });
     expect(status.integrations.googleOAuth).toMatchObject({ configured: true, label: 'set here' });
-    expect(status.integrations.gitlabOAuth).toMatchObject({ configured: true, label: 'set via environment fallback' });
+    expect(status.integrations.gitlabOAuth).toMatchObject({
+      configured: true,
+      label: 'set via environment fallback',
+    });
   });
 
   it('rate-limits setup token attempts atomically via D1 rows', async () => {
     const env = createEnv();
     for (let i = 0; i < 10; i += 1) {
-      await expect(verifySetupToken(env, 'wrong', '198.51.100.1')).resolves.toMatchObject({ status: 401 });
+      await expect(verifySetupToken(env, 'wrong', '198.51.100.1')).resolves.toMatchObject({
+        status: 401,
+      });
     }
     await expect(verifySetupToken(env, 'setup-token', '198.51.100.1')).resolves.toMatchObject({
       ok: false,
       status: 429,
     });
-    await expect(verifySetupToken(env, 'setup-token', '198.51.100.2')).resolves.toEqual({ ok: true });
+    await expect(verifySetupToken(env, 'setup-token', '198.51.100.2')).resolves.toEqual({
+      ok: true,
+    });
   });
 
   it('uses configured setup token rate limit values', async () => {
@@ -374,7 +479,9 @@ describe('platform config resolver', () => {
       SETUP_RATE_LIMIT_WINDOW_SECONDS: '60',
     });
 
-    await expect(verifySetupToken(env, 'wrong', '203.0.113.7')).resolves.toMatchObject({ status: 401 });
+    await expect(verifySetupToken(env, 'wrong', '203.0.113.7')).resolves.toMatchObject({
+      status: 401,
+    });
     await expect(verifySetupToken(env, 'setup-token', '203.0.113.7')).resolves.toMatchObject({
       ok: false,
       status: 429,

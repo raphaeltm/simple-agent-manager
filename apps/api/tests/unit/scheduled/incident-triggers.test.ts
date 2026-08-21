@@ -8,6 +8,7 @@ import { createSqliteD1 } from '../../helpers/sqlite-d1';
 function setup() {
   const sqlite = new Database(':memory:');
   sqlite.exec(`
+    CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT, updated_by TEXT);
     CREATE TABLE projects (id TEXT PRIMARY KEY, user_id TEXT NOT NULL, name TEXT NOT NULL);
     CREATE TABLE triggers (
       id TEXT PRIMARY KEY, project_id TEXT NOT NULL, user_id TEXT NOT NULL,
@@ -75,7 +76,12 @@ function seedIncident(
          queue_state, queued_at)
        VALUES (?, 'api', 'Recurring api platform error', 1000, 2000, ?, ?, ?, 1000)`
     )
-    .run(signature, occurrenceCount, JSON.stringify([{ errorId: signature, timestamp: 1000 }]), state);
+    .run(
+      signature,
+      occurrenceCount,
+      JSON.stringify([{ errorId: signature, timestamp: 1000 }]),
+      state
+    );
 }
 
 describe('incident trigger sweep', () => {
@@ -95,7 +101,9 @@ describe('incident trigger sweep', () => {
     expect(submitter).toHaveBeenCalledTimes(1);
     const submission = submitter.mock.calls[0]?.[1] as Record<string, unknown>;
     expect(submission.triggeredBy).toBe('incident');
-    expect(String(submission.renderedPrompt)).toContain('Pending grouped incidents in this dispatch window: 2');
+    expect(String(submission.renderedPrompt)).toContain(
+      'Pending grouped incidents in this dispatch window: 2'
+    );
     expect(String(submission.renderedPrompt)).toContain('Total grouped occurrences represented: 7');
     expect(String(submission.renderedPrompt)).toContain('incident-a');
     expect(String(submission.renderedPrompt)).toContain('incident-b');
@@ -136,7 +144,9 @@ describe('incident trigger sweep', () => {
         .get()
     ).toEqual({ queue_state: 'pending', dispatched_execution_id: null });
     expect(
-      sqlite.prepare("SELECT COUNT(*) AS count FROM trigger_executions WHERE status = 'skipped'").get()
+      sqlite
+        .prepare("SELECT COUNT(*) AS count FROM trigger_executions WHERE status = 'skipped'")
+        .get()
     ).toEqual({ count: 1 });
   });
 
@@ -152,9 +162,15 @@ describe('incident trigger sweep', () => {
     expect(result).toMatchObject({ fired: 0, failed: 1 });
     expect(
       sqlite
-        .prepare('SELECT queue_state, dispatched_execution_id, dispatch_lease_expires_at FROM platform_feedback_triages')
+        .prepare(
+          'SELECT queue_state, dispatched_execution_id, dispatch_lease_expires_at FROM platform_feedback_triages'
+        )
         .get()
-    ).toEqual({ queue_state: 'pending', dispatched_execution_id: null, dispatch_lease_expires_at: null });
+    ).toEqual({
+      queue_state: 'pending',
+      dispatched_execution_id: null,
+      dispatch_lease_expires_at: null,
+    });
     expect(sqlite.prepare('SELECT status, error_message FROM trigger_executions').get()).toEqual({
       status: 'failed',
       error_message: 'canary submission failure',

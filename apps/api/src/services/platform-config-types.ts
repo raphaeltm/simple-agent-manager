@@ -29,6 +29,26 @@ export interface ResolvedPlatformConfig {
     clientId: ResolvedPlatformValue;
     clientSecret: ResolvedPlatformValue;
   };
+  feedback: {
+    projectId: ResolvedPlatformValue;
+  };
+}
+
+export type FeedbackProjectState = 'unset' | 'ready' | 'missing' | 'inaccessible';
+
+export interface FeedbackProjectStatus {
+  configured: boolean;
+  source: PlatformConfigSource;
+  label: string;
+  state: FeedbackProjectState;
+  projectId: string | null;
+  project: {
+    id: string;
+    name: string;
+    status: string | null;
+  } | null;
+  message: string;
+  fields: Record<string, Omit<ResolvedPlatformValue, 'value'> & { configured: boolean }>;
 }
 
 export interface PlatformConfigStatus {
@@ -42,6 +62,7 @@ export interface PlatformConfigStatus {
     googleInfrastructureOAuth: IntegrationStatus;
     gitlabOAuth: IntegrationStatus;
   };
+  feedbackProject: FeedbackProjectStatus;
 }
 
 export interface IntegrationStatus {
@@ -73,5 +94,9 @@ export interface PlatformIntegrationInput {
     host?: string;
     clientId?: string;
     clientSecret?: string;
+  };
+  feedback?: {
+    projectId?: string;
+    remove?: boolean;
   };
 }

@@ -24,6 +24,7 @@ export const SETTING_KEYS = {
   googleInfrastructureClientId: 'integration.googleInfrastructure.clientId',
   gitlabHost: 'integration.gitlab.host',
   gitlabClientId: 'integration.gitlab.clientId',
+  feedbackProjectId: 'feedback.projectId',
 } as const;
 
 export const SECRET_KINDS = {
@@ -52,6 +53,7 @@ export const ENV_KEYS = {
   gitlabHost: 'GITLAB_HOST',
   gitlabClientId: 'GITLAB_CLIENT_ID',
   gitlabClientSecret: 'GITLAB_CLIENT_SECRET',
+  feedbackProjectId: 'PLATFORM_FEEDBACK_PROJECT_ID',
 } as const;
 
 function envValue(env: Env, key: keyof Env): string | null {

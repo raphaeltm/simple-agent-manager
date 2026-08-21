@@ -18,6 +18,7 @@ export interface PlatformConfigEnvFixture {
   GITLAB_HOST?: string;
   GITLAB_CLIENT_ID?: string;
   GITLAB_CLIENT_SECRET?: string;
+  PLATFORM_FEEDBACK_PROJECT_ID?: string;
 }
 
 function value(raw: string | undefined): ResolvedPlatformValue {
@@ -56,6 +57,9 @@ export function buildResolvedPlatformConfig(env: PlatformConfigEnvFixture): Reso
       host: value(env.GITLAB_HOST),
       clientId: value(env.GITLAB_CLIENT_ID),
       clientSecret: value(env.GITLAB_CLIENT_SECRET),
+    },
+    feedback: {
+      projectId: value(env.PLATFORM_FEEDBACK_PROJECT_ID),
     },
   };
 }

@@ -13,7 +13,7 @@ import { log } from '../lib/logger';
 import { ulid } from '../lib/ulid';
 import { runDebugDiagnosis, SCHEDULED_TRIAGE_DEBUG_FEATURE_KEY } from './debug-agent';
 import { redactSensitiveData } from './observability';
-import { markIncidentPending } from './platform-feedback-incidents';
+import { configuredFeedbackProjectId, markIncidentPending } from './platform-feedback-incidents';
 import { formatUntrustedIdeaContent } from './untrusted-idea-content';
 
 export type FeedbackTriageTrigger = 'cron' | 'manual';
@@ -194,7 +194,7 @@ export async function runPlatformFeedbackTriage(
   trigger: FeedbackTriageTrigger,
   deps: TriageDeps = {}
 ): Promise<FeedbackTriageResult> {
-  const projectId = env.PLATFORM_FEEDBACK_PROJECT_ID?.trim();
+  const projectId = await configuredFeedbackProjectId(env);
   const base: FeedbackTriageResult = {
     enabled: Boolean(projectId),
     trigger,
@@ -210,7 +210,7 @@ export async function runPlatformFeedbackTriage(
     .bind(projectId)
     .first<{ id: string; user_id: string }>();
   if (!project)
-    throw new Error('PLATFORM_FEEDBACK_PROJECT_ID does not reference an existing project');
+    throw new Error('Configured feedback project does not reference an existing project');
   const now = deps.now?.() ?? Date.now();
   const windowMinutes = positive(
     env.PLATFORM_FEEDBACK_TRIAGE_WINDOW_MINUTES,
@@ -245,7 +245,11 @@ export async function runPlatformFeedbackTriage(
   )
     .bind('error', now - windowMinutes * 60_000, now, errorLimit)
     .all<ErrorRow>();
-  const candidateRows = await excludeFeedbackProjectTaskErrors(env, query.results ?? [], project.id);
+  const candidateRows = await excludeFeedbackProjectTaskErrors(
+    env,
+    query.results ?? [],
+    project.id
+  );
   const groups = (await groupPlatformErrors(candidateRows, evidenceLimit))
     .sort((a, b) => b.count - a.count || b.lastSeenAt - a.lastSeenAt)
     .slice(0, groupLimit);

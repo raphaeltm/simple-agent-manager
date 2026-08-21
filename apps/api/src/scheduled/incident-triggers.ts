@@ -112,7 +112,7 @@ export async function runIncidentTriggerSweep(
   env: Env,
   deps: IncidentTriggerSweepDeps = {}
 ): Promise<IncidentTriggerSweepStats> {
-  const projectId = configuredFeedbackProjectId(env);
+  const projectId = await configuredFeedbackProjectId(env);
   const base: IncidentTriggerSweepStats = {
     enabled: Boolean(projectId),
     checked: 0,
@@ -129,7 +129,8 @@ export async function runIncidentTriggerSweep(
   const project = await env.DATABASE.prepare('SELECT id, name FROM projects WHERE id = ?')
     .bind(projectId)
     .first<ProjectRow>();
-  if (!project) throw new Error('PLATFORM_FEEDBACK_PROJECT_ID does not reference an existing project');
+  if (!project)
+    throw new Error('Configured feedback project does not reference an existing project');
 
   const now = deps.now?.() ?? Date.now();
   const config = getIncidentConfig(env);
@@ -165,8 +166,10 @@ export async function runIncidentTriggerSweep(
             sequenceNumber,
             summary,
           });
-          return renderTemplate(trigger.promptTemplate, expectJsonRecord(context, 'incident.trigger_context'))
-            .rendered;
+          return renderTemplate(
+            trigger.promptTemplate,
+            expectJsonRecord(context, 'incident.trigger_context')
+          ).rendered;
         },
         beforeSubmit: async (executionId) => {
           const reserved = await reserveIncidentDispatch(

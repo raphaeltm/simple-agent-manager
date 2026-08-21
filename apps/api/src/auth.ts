@@ -207,7 +207,7 @@ export async function createAuth(env: Env) {
   // Sentinel id is env-overridable; fall back to the shared constant.
   const sentinelId = env.TRIAL_ANONYMOUS_USER_ID ?? TRIAL_ANONYMOUS_USER_ID;
   // Resolve the platform config ONCE. Each `get*OAuthConfig` helper independently issues
-  // `resolvePlatformConfig`'s 13 D1 queries, so awaiting three of them cost 39 D1 round-trips in
+  // `resolvePlatformConfig`'s 14 D1 queries, so awaiting three of them cost 42 D1 round-trips in
   // 3 sequential waves on the preamble of every authenticated request. `createAuth` is reached
   // from 9 call sites and more than one can run per request (e.g. `requireAuth` then
   // `routes/auth.ts`), so that was up to 78 queries for a single `GET /api/auth/me`.

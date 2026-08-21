@@ -6,6 +6,7 @@ export type {
   BillingMode,
   CostByModel,
   CostSummaryResponse,
+  FeedbackProjectStatus,
   PlatformConfigFieldStatus,
   PlatformConfigSource,
   PlatformConfigStatus,

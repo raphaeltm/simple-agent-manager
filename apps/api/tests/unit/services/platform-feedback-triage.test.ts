@@ -15,6 +15,7 @@ import { createSqliteD1 } from '../../helpers/sqlite-d1';
 function setup() {
   const main = new Database(':memory:');
   main.exec(`
+    CREATE TABLE platform_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT, updated_by TEXT);
     CREATE TABLE projects (id TEXT PRIMARY KEY, user_id TEXT NOT NULL);
     CREATE TABLE tasks (id TEXT PRIMARY KEY, project_id TEXT NOT NULL, user_id TEXT NOT NULL,
       title TEXT NOT NULL, description TEXT, status TEXT NOT NULL, priority INTEGER NOT NULL,
@@ -52,7 +53,8 @@ describe('platform feedback triage', () => {
       'cron'
     );
     expect(result).toMatchObject({ enabled: false, trigger: 'cron', ideasCreated: 0 });
-    expect(prepare).not.toHaveBeenCalled();
+    expect(prepare).toHaveBeenCalledTimes(1);
+    expect(prepare).toHaveBeenCalledWith(expect.stringContaining('FROM platform_settings'));
   });
 
   it('groups deterministically after redacting identifiers and secrets', async () => {
@@ -100,7 +102,9 @@ describe('platform feedback triage', () => {
     const at = Date.parse('2026-07-29T12:00:00Z');
     const canary = 'https://example.invalid/triage-idea-canary';
     observability
-      .prepare('INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)')
+      .prepare(
+        'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+      )
       .run(
         '123e4567-e89b-42d3-a456-426614174000',
         'api',
@@ -173,7 +177,9 @@ describe('platform feedback triage', () => {
     const { main, observability } = setup();
     const at = Date.parse('2026-07-29T12:00:00Z');
     observability
-      .prepare('INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)')
+      .prepare(
+        'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+      )
       .run(
         '123e4567-e89b-42d3-a456-426614174000',
         'api',
@@ -228,7 +234,9 @@ describe('platform feedback triage', () => {
     const { main, observability } = setup();
     const at = Date.parse('2026-07-29T12:00:00Z');
     observability
-      .prepare('INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)')
+      .prepare(
+        'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+      )
       .run(
         '123e4567-e89b-42d3-a456-426614174000',
         'api',
@@ -269,7 +277,9 @@ describe('platform feedback triage', () => {
     const { main, observability } = setup();
     const at = Date.parse('2026-07-29T12:00:00Z');
     observability
-      .prepare('INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)')
+      .prepare(
+        'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+      )
       .run('123e4567-e89b-42d3-a456-426614174000', 'api', 'error', 'failure 12345', at);
     const diagnose = vi.fn(async () => {
       main.prepare("UPDATE platform_feedback_triages SET claim_token = 'new-owner'").run();
@@ -293,7 +303,9 @@ describe('platform feedback triage', () => {
   it('records one group failure and continues processing later groups', async () => {
     const { main, observability } = setup();
     const at = Date.parse('2026-07-29T12:00:00Z');
-    const insert = observability.prepare('INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)');
+    const insert = observability.prepare(
+      'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+    );
     insert.run('123e4567-e89b-42d3-a456-426614174000', 'api', 'error', 'failure alpha 11111', at);
     insert.run(
       '123e4567-e89b-42d3-a456-426614174001',
@@ -356,7 +368,9 @@ describe('platform feedback triage', () => {
       timestamp: at,
     };
     observability
-      .prepare('INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)')
+      .prepare(
+        'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+      )
       .run(error.id, error.source, 'error', error.message, error.timestamp);
     const [group] = await groupPlatformErrors([error], 10);
     expect(group).toBeDefined();
@@ -411,7 +425,9 @@ describe('platform feedback triage', () => {
     const { main, observability } = setup();
     const at = Date.parse('2026-07-29T12:00:00Z');
     observability
-      .prepare('INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)')
+      .prepare(
+        'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+      )
       .run(
         '123e4567-e89b-42d3-a456-426614174000',
         'api',
@@ -516,9 +532,10 @@ describe('platform feedback triage', () => {
 
     expect(result).toMatchObject({ groupsFound: 1, ideasCreated: 1 });
     expect(diagnose).toHaveBeenCalledTimes(1);
-    const row = main
-      .prepare('SELECT evidence_refs FROM platform_feedback_triages')
-      .get() as Record<string, string>;
+    const row = main.prepare('SELECT evidence_refs FROM platform_feedback_triages').get() as Record<
+      string,
+      string
+    >;
     expect(row.evidence_refs).toContain('223e4567-e89b-42d3-a456-426614174000');
     expect(row.evidence_refs).not.toContain('123e4567-e89b-42d3-a456-426614174000');
   });
@@ -526,7 +543,9 @@ describe('platform feedback triage', () => {
   it('records a bounded triage annotation when a linked Idea is no longer draft', async () => {
     const { main, observability } = setup();
     const at = Date.parse('2026-07-29T12:00:00Z');
-    const insert = observability.prepare('INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)');
+    const insert = observability.prepare(
+      'INSERT INTO platform_errors (id, source, level, message, timestamp) VALUES (?, ?, ?, ?, ?)'
+    );
     insert.run('123e4567-e89b-42d3-a456-426614174000', 'api', 'error', 'failure 12345', at);
     const diagnose = vi.fn(async () => ({
       id: 'diagnosis-1',
