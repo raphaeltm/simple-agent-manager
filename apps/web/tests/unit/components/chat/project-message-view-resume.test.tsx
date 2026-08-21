@@ -34,6 +34,9 @@ const mockSendFollowUpPrompt = vi.fn();
 const mockCancelAgentPrompt = vi.fn();
 const mockGetTranscribeApiUrl = vi.fn().mockReturnValue('https://api.example.com/transcribe');
 const mockGetTtsApiUrl = vi.fn().mockReturnValue('https://api.example.com/tts');
+const commentApiMocks = vi.hoisted(() => ({
+  listMessageComments: vi.fn().mockResolvedValue({ comments: [] }),
+}));
 
 vi.mock('../../../../src/lib/api', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../../../../src/lib/api')>()),
@@ -50,6 +53,16 @@ vi.mock('../../../../src/lib/api', async (importOriginal) => ({
   updateProjectTaskStatus: vi.fn(),
   deleteWorkspace: vi.fn(),
   saveCachedCommands: vi.fn().mockResolvedValue({ cached: 0 }),
+}));
+
+vi.mock('../../../../src/lib/api/comments', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../../../src/lib/api/comments')>()),
+  listMessageComments: commentApiMocks.listMessageComments,
+  createMessageCommentThread: vi.fn(),
+  createMessageCommentReply: vi.fn(),
+  resolveMessageCommentThread: vi.fn(),
+  reopenMessageCommentThread: vi.fn(),
+  sendMessageCommentThreadToAgent: vi.fn(),
 }));
 
 vi.mock('../../../../src/components/AuthProvider', async (importOriginal) => ({
@@ -162,6 +175,7 @@ async function waitForAutoResumeDelay() {
 describe('ProjectMessageView — auto-resume', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    commentApiMocks.listMessageComments.mockResolvedValue({ comments: [] });
 
     // Default: session is idle with workspace and agent session
     mockGetChatSession.mockResolvedValue({

@@ -109,10 +109,10 @@ Explicit constraints:
       overflow safety.
 - [x] Add realtime reconciliation hooks for documented comment WebSocket events,
       keeping the query cache and optimistic rows server-authoritative.
-- [ ] Add unit/component tests for selection, query/client transformations,
+- [x] Add unit/component tests for selection, query/client transformations,
       create/reply/resolve/reopen/send flows, accessibility/focus, and
       virtualization/offscreen behavior.
-- [ ] Add Playwright tests on the real project chat route with mocked API data at
+- [x] Add Playwright tests on the real project chat route with mocked API data at
       375x667 and 1280x800, including actual selection, create, reply, resolve,
       reopen, send-to-agent, mobile layout, desktop rail, offscreen/virtualized
       anchors, focus behavior, loading/error/empty states, and screenshots in
@@ -152,6 +152,24 @@ Explicit constraints:
 - [ ] The exact assumed backend contract is documented in the PR and in-repo.
 - [ ] Unit/component and Playwright tests cover the critical flows and viewports.
 - [ ] Staging deployment is intentionally skipped by explicit user instruction.
+
+## Evidence log
+
+- Targeted unit/component tests:
+  `pnpm --filter @simple-agent-manager/web test -- tests/unit/api/comments.test.ts tests/unit/components/message-comments.test.tsx tests/unit/components/project-message-view.test.tsx tests/unit/components/chat/project-message-view-resume.test.tsx`
+  — 94 tests passed.
+- Targeted browser audit:
+  `pnpm --filter @simple-agent-manager/web exec playwright test tests/playwright/message-comments-audit.spec.ts --project='Desktop (1280x800)'`
+  — 3 tests passed, covering desktop 1280x800 and mobile 375x667 via per-test viewport overrides.
+- Screenshot evidence:
+  `.codex/tmp/playwright-screenshots/message-comments-desktop-thread-flow-1280x800.png`,
+  `.codex/tmp/playwright-screenshots/message-comments-desktop-error-state-1280x800.png`,
+  `.codex/tmp/playwright-screenshots/message-comments-desktop-empty-state-1280x800.png`,
+  `.codex/tmp/playwright-screenshots/message-comments-mobile-inline-send-375x667.png`.
+- Targeted gates:
+  `pnpm --filter @simple-agent-manager/web typecheck` passed;
+  `pnpm --filter @simple-agent-manager/web lint` passed with three pre-existing warnings;
+  `pnpm --filter @simple-agent-manager/ui typecheck && pnpm --filter @simple-agent-manager/ui lint` passed.
 
 ## References
 
