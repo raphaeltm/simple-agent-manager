@@ -34,11 +34,11 @@ catalog:
   wrangler: 4.118.0
 
   # === React Ecosystem ===
-  react: 19.2.7
+  react: 19.2.8
   react-dom: 19.2.7
   eslint-plugin-react: 7.37.5
   eslint-plugin-react-hooks: 7.1.1
-  '@types/react': 19.2.17
+  '@types/react': 19.2.18
   '@types/react-dom': 19.2.3
   react-router: 7.14.2
   lucide-react: 0.460.0
