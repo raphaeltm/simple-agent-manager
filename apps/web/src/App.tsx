@@ -232,6 +232,23 @@ export function devOnlyRoutesEnabled() {
 export default function App() {
   const showDevOnlyRoutes = devOnlyRoutesEnabled();
 
+  // Prototype routes render without AuthProvider so they work when accessed
+  // via external port proxy (where auth fetch to localhost fails).
+  if (showDevOnlyRoutes && window.location.pathname.startsWith('/prototype/')) {
+    return (
+      <ErrorBoundary>
+        <ThemeProvider>
+          <BrowserRouter>
+            <Routes>
+              <Route path="/prototype/comments" element={page(<CommentsPrototype />)} />
+              <Route path="*" element={<Navigate to="/" replace />} />
+            </Routes>
+          </BrowserRouter>
+        </ThemeProvider>
+      </ErrorBoundary>
+    );
+  }
+
   return (
     <ErrorBoundary>
       <ThemeProvider>
