@@ -1048,9 +1048,9 @@ export async function recordVmProviderCapacitySuccess(
 
 async function nudgeTaskRunner(env: Env, taskId: string, reason: string): Promise<boolean> {
   const id = env.TASK_RUNNER.idFromName(taskId);
-  const stub = env.TASK_RUNNER.get(id) as DurableObjectStub<{
+  const stub = env.TASK_RUNNER.get(id) as unknown as {
     nudge(reason?: string): Promise<boolean>;
-  }>;
+  };
   return stub.nudge(reason);
 }
 

@@ -85,6 +85,9 @@ function createDbMock(opts: DbMockOptions) {
           }
           return Promise.resolve(null);
         },
+        all() {
+          return Promise.resolve({ results: [] });
+        },
         run() {
           runCalls.push({ sql, args: bound });
           return Promise.resolve({ success: true });

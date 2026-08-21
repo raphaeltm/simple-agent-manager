@@ -37,35 +37,35 @@ The architecture research is complete. Do not re-run it or revive stale PR #1808
 
 ## Implementation checklist
 
-- [ ] Add additive D1 migration and Drizzle schema for VM admission records, provisioning leases, provider capacity state, and task admission mirror fields.
-- [ ] Add shared task execution step `waiting_for_node_capacity` and task response fields for admission state/reason/next retry.
-- [ ] Add configurable admission control env vars with defaults and docs.
-- [ ] Implement VM admission service:
-  - [ ] durable admission upsert and task mirror updates
-  - [ ] per-scope fenced provisioning lease acquire/renew/release/assert
-  - [ ] requeue/wait state with bounded retry and deadline
-  - [ ] provider/account capacity state and Hetzner server-limit classification
-  - [ ] bounded wakeup of waiting TaskRunner DOs
-  - [ ] cancellation/terminal cleanup helpers
-- [ ] Wire TaskRunner:
-  - [ ] wait/retry before provisioning when another compatible claim is active
-  - [ ] re-select existing node after acquiring claim
-  - [ ] fence provider mutations before and during provisioning
-  - [ ] hold/renew lease until the provisioned node is reusable or placement completes
-  - [ ] release/cancel admission on success, failure, cancellation, and cleanup
-- [ ] Wire node-ready and task cleanup paths to wake or cancel admissions.
-- [ ] Update mission dispatch scheduling so queued admission waiters are not re-dispatched or ignored by active-count gates.
-- [ ] Update stuck-task reconciliation/diagnostics so legitimate admission waits are preserved until deadline and expired waits fail visibly.
-- [ ] Add bounded admin diagnostics/listing for admission state and placement reasons.
-- [ ] Add deterministic concurrency/race tests proving:
-  - [ ] simultaneous cold starts produce one active provisioning claim and waiters, not a stampede
-  - [ ] lease expiry/recovery is fenced and stale tokens cannot mutate/release new ownership
-  - [ ] Hetzner server-limit errors record provider/account capacity and queue retry
-  - [ ] existing-node packing remains correct, including same-user isolation and VM-size compatibility
-  - [ ] mission dispatch does not duplicate queued admission waiters
-- [ ] Run focused local tests and typecheck.
-- [ ] Run specialist reviews: constitution-validator, test-engineer, cloudflare-specialist, security-auditor, doc-sync-validator, env-validator; go-specialist only if Go changes.
-- [ ] Commit and push incremental progress before long tests.
+- [x] Add additive D1 migration and Drizzle schema for VM admission records, provisioning leases, provider capacity state, and task admission mirror fields.
+- [x] Add shared task execution step `waiting_for_node_capacity` and task response fields for admission state/reason/next retry.
+- [x] Add configurable admission control env vars with defaults and docs.
+- [x] Implement VM admission service:
+  - [x] durable admission upsert and task mirror updates
+  - [x] per-scope fenced provisioning lease acquire/renew/release/assert
+  - [x] requeue/wait state with bounded retry and deadline
+  - [x] provider/account capacity state and Hetzner server-limit classification
+  - [x] bounded wakeup of waiting TaskRunner DOs
+  - [x] cancellation/terminal cleanup helpers
+- [x] Wire TaskRunner:
+  - [x] wait/retry before provisioning when another compatible claim is active
+  - [x] re-select existing node after acquiring claim
+  - [x] fence provider mutations before and during provisioning
+  - [x] hold/renew lease until the provisioned node is reusable or placement completes
+  - [x] release/cancel admission on success, failure, cancellation, and cleanup
+- [x] Wire node-ready and task cleanup paths to wake or cancel admissions.
+- [x] Update mission dispatch scheduling so queued admission waiters are not re-dispatched or ignored by active-count gates.
+- [x] Update stuck-task reconciliation/diagnostics so legitimate admission waits are preserved until deadline and expired waits fail visibly.
+- [x] Add bounded admin diagnostics/listing for admission state and placement reasons.
+- [x] Add deterministic concurrency/race tests proving:
+  - [x] simultaneous cold starts produce one active provisioning claim and waiters, not a stampede
+  - [x] lease expiry/recovery is fenced and stale tokens cannot mutate/release new ownership
+  - [x] Hetzner server-limit errors record provider/account capacity and queue retry
+  - [x] existing-node packing remains correct, including same-user isolation and VM-size compatibility
+  - [x] mission dispatch does not duplicate queued admission waiters
+- [x] Run focused local tests and typecheck.
+- [x] Run specialist reviews: constitution-validator, test-engineer, cloudflare-specialist, security-auditor, doc-sync-validator, env-validator; go-specialist only if Go changes.
+- [x] Commit and push incremental progress before long tests.
 - [ ] Open a draft PR and let CI run.
 
 ## Acceptance criteria

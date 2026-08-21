@@ -423,12 +423,12 @@ describe('Scheduling Cycle — Auto-Dispatch', () => {
       ],
     });
 
-    // 5 running tasks = at concurrency limit (default maxActiveTasksPerMission = 5)
+    // 5 active tasks = at concurrency limit (default maxActiveTasksPerMission = 5)
     const tasks = [
       ...Array.from({ length: 5 }, (_, i) =>
         makeTask({
-          id: `running-${i}`,
-          status: 'running',
+          id: `active-${i}`,
+          status: 'in_progress',
           scheduler_state: 'running',
         })
       ),
