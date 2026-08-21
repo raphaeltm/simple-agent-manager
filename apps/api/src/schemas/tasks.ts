@@ -1,6 +1,7 @@
 import {
   DEVCONTAINER_CONFIG_NAME_MAX_LENGTH,
   DEVCONTAINER_CONFIG_NAME_REGEX,
+  TASK_EXECUTION_STEPS,
 } from '@simple-agent-manager/shared';
 import * as v from 'valibot';
 
@@ -27,18 +28,7 @@ const TaskStatusSchema = v.picklist([
   'failed',
   'cancelled',
 ]);
-const TaskExecutionStepSchema = v.picklist([
-  'node_selection',
-  'node_provisioning',
-  'node_agent_ready',
-  'workspace_creation',
-  'workspace_dispatch',
-  'workspace_ready',
-  'attachment_transfer',
-  'agent_session',
-  'running',
-  'awaiting_followup',
-]);
+const TaskExecutionStepSchema = v.picklist(TASK_EXECUTION_STEPS);
 
 const GitPushResultSchema = v.object({
   pushed: v.boolean(),

@@ -30,6 +30,7 @@ export function formatExecutionStep(step: string | null | undefined): string | n
   if (!step) return null;
   const labels: Record<string, string> = {
     node_selection: 'Selecting node',
+    waiting_for_node_capacity: 'Waiting for node capacity',
     node_provisioning: 'Provisioning node',
     workspace_creation: 'Creating workspace',
     workspace_ready: 'Workspace ready',

@@ -1,4 +1,4 @@
-import type { TaskExecutionStep,TaskStatus } from '@simple-agent-manager/shared';
+import type { TaskExecutionStep, TaskStatus } from '@simple-agent-manager/shared';
 import { TASK_EXECUTION_STEPS } from '@simple-agent-manager/shared';
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
@@ -224,14 +224,16 @@ describe('getExecutionStepIndex', () => {
     expect(getExecutionStepIndex('awaiting_followup')).toBe(TASK_EXECUTION_STEPS.length - 1);
   });
 
-  it('steps are ordered: node_selection < node_provisioning < node_agent_ready < workspace_creation < workspace_dispatch < workspace_ready < agent_session < running < awaiting_followup', () => {
+  it('steps are ordered from node admission through follow-up', () => {
     const ordered: TaskExecutionStep[] = [
       'node_selection',
+      'waiting_for_node_capacity',
       'node_provisioning',
       'node_agent_ready',
       'workspace_creation',
       'workspace_dispatch',
       'workspace_ready',
+      'attachment_transfer',
       'agent_session',
       'running',
       'awaiting_followup',
@@ -501,8 +503,20 @@ describe('edge cases', () => {
     expect(TASK_STATUSES).toHaveLength(8);
   });
 
-  it('TASK_EXECUTION_STEPS has exactly 10 steps', () => {
-    expect(TASK_EXECUTION_STEPS).toHaveLength(10);
+  it('TASK_EXECUTION_STEPS has the expected ordered steps', () => {
+    expect(TASK_EXECUTION_STEPS).toEqual([
+      'node_selection',
+      'waiting_for_node_capacity',
+      'node_provisioning',
+      'node_agent_ready',
+      'workspace_creation',
+      'workspace_dispatch',
+      'workspace_ready',
+      'attachment_transfer',
+      'agent_session',
+      'running',
+      'awaiting_followup',
+    ]);
   });
 
   it('execution steps include awaiting_followup', () => {
