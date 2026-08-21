@@ -126,9 +126,24 @@ const TRIAL_STATUS = {
 // Resolve a project-scoped sub-path to its mock payload. Returns undefined to
 // fall through to the bare-project response.
 function resolveProjectSubPath(subPath: string, taskDetail: Record<string, unknown>): unknown {
-  if (subPath === '/sessions') return { sessions: [MOCK_SESSION], total: 1 };
+  const taskExecutionStep =
+    typeof taskDetail.executionStep === 'string'
+      ? taskDetail.executionStep
+      : MOCK_SESSION.task.executionStep;
+  const taskStatus =
+    typeof taskDetail.status === 'string' ? taskDetail.status : MOCK_SESSION.task.status;
+  const session = {
+    ...MOCK_SESSION,
+    task: {
+      ...MOCK_SESSION.task,
+      executionStep: taskExecutionStep,
+      status: taskStatus,
+    },
+  };
+
+  if (subPath === '/sessions') return { sessions: [session], total: 1 };
   if (subPath.match(/\/sessions\/[^/]+$/) && !subPath.includes('/messages')) {
-    return { session: MOCK_SESSION, messages: [], hasMore: false };
+    return { session, messages: [], hasMore: false };
   }
   if (subPath.match(/\/sessions\/[^/]+\/messages/)) return { messages: [], hasMore: false };
   if (subPath === '/tasks') return { tasks: [taskDetail], nextCursor: null };
@@ -161,6 +176,10 @@ function resolveApiResponse(path: string, taskDetail: Record<string, unknown>): 
 }
 
 async function setupApiMocks(page: Page, taskDetail: Record<string, unknown>) {
+  await page.addInitScript(() => {
+    window.localStorage.setItem('sam-onboarding-wizard-dismissed-user-1', 'true');
+  });
+
   await page.route('**/api/**', async (route: Route) => {
     const path = new URL(route.request().url()).pathname;
     return respondJson(route, resolveApiResponse(path, taskDetail));
@@ -191,6 +210,7 @@ async function auditDowngrade(
   await setupApiMocks(page, makeTaskDetail(opts.overrides));
   await page.goto(`/projects/${PROJECT_ID}/chat/${SESSION_ID}`);
   await expect(page.getByText(opts.expectedText)).toBeVisible({ timeout: 10000 });
+  await expect(page.locator('body')).not.toContainText('Do you have a cloud hosting account?');
   await screenshot(page, opts.screenshotName);
   await assertNoOverflow(page);
 }
@@ -203,6 +223,10 @@ const UNKNOWN_SIZE = {
   overrides: { requestedVmSize: null, provisionedVmSize: 'medium' },
   expectedText: 'Provisioned a medium node (a larger size was unavailable).',
 };
+const WAITING_CAPACITY = {
+  overrides: { executionStep: 'waiting_for_node_capacity', provisionedVmSize: null },
+  expectedText: 'Waiting for server capacity...',
+};
 
 test.describe('ProvisioningIndicator size-fallback downgrade — Mobile', () => {
   test('surfaces known-size downgrade annotation', async ({ page }) => {
@@ -212,6 +236,13 @@ test.describe('ProvisioningIndicator size-fallback downgrade — Mobile', () => 
   test('surfaces unknown-requested-size downgrade annotation', async ({ page }) => {
     await auditDowngrade(page, { ...UNKNOWN_SIZE, screenshotName: 'provisioning-downgrade-unknown-size-mobile' });
   });
+
+  test('surfaces waiting-for-capacity detail', async ({ page }) => {
+    await auditDowngrade(page, {
+      ...WAITING_CAPACITY,
+      screenshotName: 'provisioning-waiting-capacity-mobile',
+    });
+  });
 });
 
 test.describe('ProvisioningIndicator size-fallback downgrade — Desktop', () => {
@@ -219,5 +250,12 @@ test.describe('ProvisioningIndicator size-fallback downgrade — Desktop', () =>
 
   test('surfaces known-size downgrade annotation', async ({ page }) => {
     await auditDowngrade(page, { ...KNOWN_SIZE, screenshotName: 'provisioning-downgrade-known-size-desktop' });
+  });
+
+  test('surfaces waiting-for-capacity detail', async ({ page }) => {
+    await auditDowngrade(page, {
+      ...WAITING_CAPACITY,
+      screenshotName: 'provisioning-waiting-capacity-desktop',
+    });
   });
 });
